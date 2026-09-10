@@ -38,9 +38,18 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 	var schemaPrompt string
 
 	includeSchema := req.IncludeSchema == nil || *req.IncludeSchema
-	if req.ConnectionID != "" && includeSchema {
-		if sess, err := s.sessionMgr.GetSession(req.ConnectionID); err == nil {
+	if includeSchema {
+		sess, err := s.sessionMgr.GetActiveOrSingleSession(req.ConnectionID)
+		if err == nil && sess != nil {
 			dialect = sess.DriverName
+			// ponytail: lazy schema inspection ensures prompt has column metadata even if initial connection inspection was incomplete
+			if (sess.CachedSchema == nil || len(sess.CachedSchema.Tables) == 0) && sess.Session != nil {
+				ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+				if schema, err := sess.Session.InspectSchema(ctx, ""); err == nil {
+					sess.CachedSchema = schema
+				}
+				cancel()
+			}
 			firewall := ai.NewFirewall(req.MaskIdentifiers)
 			schemaPrompt = firewall.BuildSchemaPrompt(sess.CachedSchema, req.Query+" "+req.Prompt+" "+req.ErrorMessage)
 		}

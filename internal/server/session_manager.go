@@ -115,6 +115,27 @@ func (sm *SessionManager) GetSession(connectionID string) (*ActiveSession, error
 	return sess, nil
 }
 
+// GetActiveOrSingleSession finds the session by ID, or if ID is empty and exactly one session is active, returns it.
+func (sm *SessionManager) GetActiveOrSingleSession(connectionID string) (*ActiveSession, error) {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if connectionID != "" {
+		if sess, ok := sm.sessions[connectionID]; ok {
+			return sess, nil
+		}
+	}
+	if len(sm.sessions) == 1 {
+		for _, sess := range sm.sessions {
+			return sess, nil
+		}
+	}
+	if connectionID != "" {
+		return nil, fmt.Errorf("session not found for connection %s; please connect first", connectionID)
+	}
+	return nil, fmt.Errorf("no active database session found")
+}
+
 func (sm *SessionManager) CloseSession(connectionID string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()

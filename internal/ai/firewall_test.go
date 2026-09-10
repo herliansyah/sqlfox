@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -89,3 +90,97 @@ func TestAIClient_EndpointNormalization(t *testing.T) {
 		}
 	}
 }
+
+func TestFirewall_BuildSchemaPrompt_UnrelatedQueryInEditor(t *testing.T) {
+	schema := &driver.SchemaMetadata{
+		DatabaseName: "shop",
+		Tables: []driver.TableMetadata{
+			{
+				Name: "users",
+				Columns: []driver.ColumnMetadata{
+					{Name: "id", Type: "INT", IsPrimaryKey: true},
+					{Name: "email", Type: "VARCHAR(255)"},
+				},
+			},
+			{
+				Name: "orders",
+				Columns: []driver.ColumnMetadata{
+					{Name: "id", Type: "INT", IsPrimaryKey: true},
+					{Name: "total_amount", Type: "DECIMAL(10,2)"},
+				},
+			},
+			{
+				Name: "products",
+				Columns: []driver.ColumnMetadata{
+					{Name: "id", Type: "INT", IsPrimaryKey: true},
+					{Name: "sku", Type: "VARCHAR(50)"},
+					{Name: "price", Type: "DECIMAL(10,2)"},
+				},
+			},
+			{Name: "categories", Columns: []driver.ColumnMetadata{{Name: "id", Type: "INT"}}},
+			{Name: "audit_logs", Columns: []driver.ColumnMetadata{{Name: "id", Type: "INT"}}},
+			{Name: "settings", Columns: []driver.ColumnMetadata{{Name: "id", Type: "INT"}}},
+		},
+	}
+
+	fw := NewFirewall(false)
+
+	// User has an existing query in the editor (audit_logs), but asks AI a natural language question about products
+	referencedInput := "SELECT * FROM audit_logs LIMIT 50; buatkan query menampilkan produk dan harganya"
+	prompt := fw.BuildSchemaPrompt(schema, referencedInput)
+
+	if !strings.Contains(prompt, "Table `products`") {
+		t.Fatal("expected `products` table in prompt even when editor has unrelated query")
+	}
+	if !strings.Contains(prompt, "`sku`") || !strings.Contains(prompt, "`price`") {
+		t.Fatal("expected `sku` and `price` columns in prompt")
+	}
+}
+
+func TestFirewall_BuildSchemaPrompt_StemMatching(t *testing.T) {
+	// Table is plural "users", prompt mentions singular "user"
+	schema := &driver.SchemaMetadata{
+		DatabaseName: "testdb",
+		Tables: []driver.TableMetadata{
+			{
+				Name: "users",
+				Columns: []driver.ColumnMetadata{
+					{Name: "username", Type: "VARCHAR(50)"},
+					{Name: "email", Type: "VARCHAR(100)"},
+				},
+			},
+		},
+	}
+	fw := NewFirewall(false)
+	prompt := fw.BuildSchemaPrompt(schema, "tampilkan data user aktif")
+	if !strings.Contains(prompt, "`username`") || !strings.Contains(prompt, "`email`") {
+		t.Fatal("expected users columns to be included via stem matching")
+	}
+}
+
+func TestFirewall_BuildSchemaPrompt_LargeSchema(t *testing.T) {
+	var tables []driver.TableMetadata
+	for i := 1; i <= 40; i++ {
+		tables = append(tables, driver.TableMetadata{
+			Name: fmt.Sprintf("table_%02d", i),
+			Columns: []driver.ColumnMetadata{
+				{Name: "id", Type: "INT"},
+				{Name: "val", Type: "VARCHAR(50)"},
+			},
+		})
+	}
+	schema := &driver.SchemaMetadata{Tables: tables}
+	fw := NewFirewall(false)
+	prompt := fw.BuildSchemaPrompt(schema, "SELECT * FROM table_35")
+
+	// table_35 should be active and include columns
+	if !strings.Contains(prompt, "Table `table_35`") {
+		t.Fatal("expected table_35 to be active")
+	}
+	// Other tables should be listed in summary
+	if !strings.Contains(prompt, "Other Tables in Database") {
+		t.Fatal("expected summary list of other tables")
+	}
+}
+
+

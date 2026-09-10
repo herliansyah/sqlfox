@@ -274,7 +274,8 @@ func (s *MySQLSession) InspectSchema(ctx context.Context, dbName string) (*drive
 	defer rows.Close()
 
 	var tables []driver.TableMetadata
-	tableMap := make(map[string]*driver.TableMetadata)
+	// ponytail: slice index mapping avoids pointer invalidation when tables slice dynamically reallocates
+	tableIndexMap := make(map[string]int)
 
 	for rows.Next() {
 		var name, tableType string
@@ -289,7 +290,7 @@ func (s *MySQLSession) InspectSchema(ctx context.Context, dbName string) (*drive
 			RowCount: rowCount,
 		}
 		tables = append(tables, tbl)
-		tableMap[name] = &tables[len(tables)-1]
+		tableIndexMap[name] = len(tables) - 1
 	}
 
 	// 2. Fetch Columns
@@ -304,8 +305,8 @@ func (s *MySQLSession) InspectSchema(ctx context.Context, dbName string) (*drive
 		for colRows.Next() {
 			var tblName, colName, colType, isNullable, colKey, colDefault, extra string
 			if err := colRows.Scan(&tblName, &colName, &colType, &isNullable, &colKey, &colDefault, &extra); err == nil {
-				if tbl, ok := tableMap[tblName]; ok {
-					tbl.Columns = append(tbl.Columns, driver.ColumnMetadata{
+				if idx, ok := tableIndexMap[tblName]; ok {
+					tables[idx].Columns = append(tables[idx].Columns, driver.ColumnMetadata{
 						Name:         colName,
 						Type:         colType,
 						IsNullable:   isNullable == "YES",
@@ -349,8 +350,8 @@ func (s *MySQLSession) InspectSchema(ctx context.Context, dbName string) (*drive
 						Type:     idxType,
 					}
 					indexAgg[k] = im
-					if tbl, ok := tableMap[tblName]; ok {
-						tbl.Indexes = append(tbl.Indexes, *im)
+					if idx, ok := tableIndexMap[tblName]; ok {
+						tables[idx].Indexes = append(tables[idx].Indexes, *im)
 					}
 				}
 			}

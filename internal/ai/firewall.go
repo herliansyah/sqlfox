@@ -17,31 +17,65 @@ func NewFirewall(maskIdentifiers bool) *Firewall {
 	return &Firewall{MaskIdentifiers: maskIdentifiers}
 }
 
-// BuildSchemaPrompt constructs a compact DDL context strictly for tables referenced in query or prompt.
+func tableMatchesQuery(tblName, queryUpper string) bool {
+	tblUpper := strings.ToUpper(tblName)
+	if strings.Contains(queryUpper, tblUpper) {
+		return true
+	}
+	// Also check singular stem if table name is plural: "USERS" -> "USER"
+	if strings.HasSuffix(tblUpper, "S") && len(tblUpper) > 3 {
+		stem := strings.TrimSuffix(tblUpper, "S")
+		if strings.Contains(queryUpper, stem) {
+			return true
+		}
+	}
+	return false
+}
+
+// BuildSchemaPrompt constructs a comprehensive DDL context for tables in the schema.
+// For standard-sized schemas (<= 30 tables), it includes all tables so AI has complete context
+// regardless of query wording, Indonesian terms, or join relationships.
 func (f *Firewall) BuildSchemaPrompt(schema *driver.SchemaMetadata, referencedQuery string) string {
 	if schema == nil || len(schema.Tables) == 0 {
 		return "No database schema metadata available."
 	}
 
-	// Extract table names mentioned in query or prompt
 	queryUpper := strings.ToUpper(referencedQuery)
 	var activeTables []driver.TableMetadata
+	var otherTableNames []string
 
-	for _, tbl := range schema.Tables {
-		tblUpper := strings.ToUpper(tbl.Name)
-		// Check if table name appears in query, or if active tables is empty and total tables < 10 include all
-		if strings.Contains(queryUpper, tblUpper) || len(schema.Tables) <= 5 {
-			activeTables = append(activeTables, tbl)
+	// If the schema is reasonably sized (<= 30 tables), include all tables with full columns.
+	// This ensures AI has full relationship and join context without missing columns due to prompt wording.
+	if len(schema.Tables) <= 30 {
+		activeTables = schema.Tables
+	} else {
+		matchedMap := make(map[string]bool)
+		for _, tbl := range schema.Tables {
+			if tableMatchesQuery(tbl.Name, queryUpper) {
+				activeTables = append(activeTables, tbl)
+				matchedMap[tbl.Name] = true
+			}
 		}
-	}
 
-	if len(activeTables) == 0 {
-		// Fallback to top 10 tables
-		limit := len(schema.Tables)
-		if limit > 10 {
-			limit = 10
+		// Ensure at least 15 tables are presented for rich context
+		if len(activeTables) < 15 {
+			for _, tbl := range schema.Tables {
+				if !matchedMap[tbl.Name] {
+					activeTables = append(activeTables, tbl)
+					matchedMap[tbl.Name] = true
+					if len(activeTables) >= 15 {
+						break
+					}
+				}
+			}
 		}
-		activeTables = schema.Tables[:limit]
+
+		// List remaining tables concisely so AI knows of their existence
+		for _, tbl := range schema.Tables {
+			if !matchedMap[tbl.Name] {
+				otherTableNames = append(otherTableNames, tbl.Name)
+			}
+		}
 	}
 
 	var sb strings.Builder
@@ -72,6 +106,10 @@ func (f *Firewall) BuildSchemaPrompt(schema *driver.SchemaMetadata, referencedQu
 			}
 		}
 		sb.WriteString("\n")
+	}
+
+	if len(otherTableNames) > 0 {
+		sb.WriteString(fmt.Sprintf("Other Tables in Database (columns omitted for brevity):\n%s\n\n", strings.Join(otherTableNames, ", ")))
 	}
 
 	result := sb.String()

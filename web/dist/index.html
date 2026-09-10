@@ -689,7 +689,7 @@
     let lastKeysetKey = null;
 
     // AI Settings State (stored in localStorage)
-    let aiConfig = JSON.parse(localStorage.getItem('sqlfox_ai_config') || '{"provider":"openai","model":"gpt-4o-mini","apiKey":"","endpoint":"","language":"id","responseStyle":"concise","customPrompt":"","includeSchema":true}');
+    let aiConfig = JSON.parse(localStorage.getItem('sqlfox_ai_config') || '{"provider":"openai","model":"gpt-4o-mini","apiKey":"","endpoint":"","language":"id","responseStyle":"concise","customPrompt":"","includeSchema":true,"maskIdentifiers":false}');
     let currentChatSessionId = null;
     let chatSessions = JSON.parse(localStorage.getItem('sqlfox_ai_sessions') || '[]');
 
@@ -790,6 +790,14 @@
         const res = await apiFetch('/api/connections');
         connections = await res.json();
         renderConnectionsTree();
+
+        // Auto-restore last active connection or single connection
+        const lastConnId = localStorage.getItem('sqlfox_last_conn_id');
+        if (lastConnId && connections.some(c => c.id === lastConnId)) {
+          await selectConnection(lastConnId);
+        } else if (connections.length === 1) {
+          await selectConnection(connections[0].id);
+        }
       } catch (err) {
         console.error('Failed to load connections:', err);
       }
@@ -838,6 +846,7 @@
       const conn = connections.find(c => c.id === connId);
       if (!conn) return;
       activeConnection = conn;
+      localStorage.setItem('sqlfox_last_conn_id', conn.id);
       renderConnectionsTree();
 
       // Update badge to indicate connecting status
@@ -1681,6 +1690,10 @@
       appendAIMessage('system', 'Thinking...');
       try {
         const includeSchema = document.getElementById('ai-include-schema') ? document.getElementById('ai-include-schema').checked : true;
+        let connId = activeConnection ? activeConnection.id : '';
+        if (!connId && connections && connections.length === 1) {
+          connId = connections[0].id;
+        }
         const res = await apiFetch('/api/ai/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1690,12 +1703,12 @@
             query: query || getEditorSQL().trim(),
             error_message: extra.error_message || '',
             plan: extra.plan || '',
-            connection_id: activeConnection ? activeConnection.id : '',
+            connection_id: connId,
             provider: aiConfig.provider,
             api_key: aiConfig.apiKey,
             model: aiConfig.model,
             endpoint: aiConfig.endpoint,
-            mask_identifiers: aiConfig.maskIdentifiers,
+            mask_identifiers: Boolean(aiConfig.maskIdentifiers),
             language: aiConfig.language || 'id',
             response_style: aiConfig.responseStyle || 'concise',
             custom_prompt: aiConfig.customPrompt || '',
