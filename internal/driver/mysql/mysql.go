@@ -210,11 +210,54 @@ func (s *MySQLSession) Exec(ctx context.Context, querySQL string) (*driver.ExecR
 }
 
 func (s *MySQLSession) InspectSchema(ctx context.Context, dbName string) (*driver.SchemaMetadata, error) {
+	// 0. Discover databases on MySQL server
+	var databases []string
+	dbRows, err := s.db.QueryContext(ctx, `
+		SELECT SCHEMA_NAME 
+		FROM information_schema.SCHEMATA 
+		ORDER BY 
+			CASE WHEN SCHEMA_NAME IN ('information_schema', 'mysql', 'performance_schema', 'sys') THEN 1 ELSE 0 END,
+			SCHEMA_NAME ASC;
+	`)
+	if err == nil {
+		for dbRows.Next() {
+			var dName string
+			if err := dbRows.Scan(&dName); err == nil {
+				databases = append(databases, dName)
+			}
+		}
+		dbRows.Close()
+	} else {
+		// Fallback to SHOW DATABASES
+		if fallbackRows, fErr := s.db.QueryContext(ctx, "SHOW DATABASES"); fErr == nil {
+			for fallbackRows.Next() {
+				var dName string
+				if err := fallbackRows.Scan(&dName); err == nil {
+					databases = append(databases, dName)
+				}
+			}
+			fallbackRows.Close()
+		}
+	}
+
 	if dbName == "" {
 		dbName = s.cfg.DatabaseName
 	}
 	if dbName == "" {
 		_ = s.db.QueryRowContext(ctx, "SELECT DATABASE()").Scan(&dbName)
+	}
+	// If still empty and databases were discovered, pick the first user database
+	if dbName == "" && len(databases) > 0 {
+		for _, d := range databases {
+			if d != "information_schema" && d != "mysql" && d != "performance_schema" && d != "sys" {
+				dbName = d
+				break
+			}
+		}
+		if dbName == "" {
+			dbName = databases[0]
+		}
+		_ = s.SelectDatabase(ctx, dbName)
 	}
 
 	// 1. Fetch tables & views
@@ -317,8 +360,25 @@ func (s *MySQLSession) InspectSchema(ctx context.Context, dbName string) (*drive
 
 	return &driver.SchemaMetadata{
 		DatabaseName: dbName,
+		Databases:    databases,
 		Tables:       tables,
 	}, nil
+}
+
+func (s *MySQLSession) SelectDatabase(ctx context.Context, dbName string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if dbName == "" {
+		return nil
+	}
+
+	escaped := strings.ReplaceAll(dbName, "`", "``")
+	if _, err := s.db.ExecContext(ctx, fmt.Sprintf("USE `%s`", escaped)); err != nil {
+		return fmt.Errorf("failed to select database %s: %w", dbName, err)
+	}
+	s.cfg.DatabaseName = dbName
+	return nil
 }
 
 func (s *MySQLSession) GetTableDDL(ctx context.Context, tableName string) (string, error) {

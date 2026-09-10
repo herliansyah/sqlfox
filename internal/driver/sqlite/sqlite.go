@@ -196,8 +196,13 @@ func (s *SQLiteSession) InspectSchema(ctx context.Context, dbName string) (*driv
 
 	return &driver.SchemaMetadata{
 		DatabaseName: "main",
+		Databases:    []string{"main"},
 		Tables:       tables,
 	}, nil
+}
+
+func (s *SQLiteSession) SelectDatabase(ctx context.Context, dbName string) error {
+	return nil
 }
 
 func (s *SQLiteSession) GetTableDDL(ctx context.Context, tableName string) (string, error) {

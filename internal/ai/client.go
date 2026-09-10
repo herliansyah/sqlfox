@@ -45,6 +45,18 @@ func NewAIClient(cfg ClientConfig) *AIClient {
 		case ProviderOllama:
 			cfg.Endpoint = "http://localhost:11434/v1/chat/completions"
 		}
+	} else {
+		// ponytail: normalize custom proxy endpoints (9router, LiteLLM, vLLM, etc.)
+		ep := strings.TrimRight(strings.TrimSpace(cfg.Endpoint), "/")
+		if (cfg.Provider == ProviderOpenAI || cfg.Provider == ProviderOllama || cfg.Provider == "") &&
+			!strings.HasSuffix(ep, "/chat/completions") && !strings.HasSuffix(ep, "/messages") {
+			if strings.HasSuffix(ep, "/v1") {
+				ep += "/chat/completions"
+			} else {
+				ep += "/v1/chat/completions"
+			}
+		}
+		cfg.Endpoint = ep
 	}
 
 	if cfg.Model == "" {

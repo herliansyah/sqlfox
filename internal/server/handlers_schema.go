@@ -39,7 +39,18 @@ func (s *Server) handleGetSchema(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if sess.CachedSchema == nil {
+	targetDB := r.URL.Query().Get("db")
+	if targetDB != "" {
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+		_ = sess.Session.SelectDatabase(ctx, targetDB)
+		schema, err := sess.Session.InspectSchema(ctx, targetDB)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to inspect schema: "+err.Error())
+			return
+		}
+		sess.CachedSchema = schema
+	} else if sess.CachedSchema == nil {
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
 		schema, err := sess.Session.InspectSchema(ctx, "")
@@ -51,6 +62,40 @@ func (s *Server) handleGetSchema(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, sess.CachedSchema)
+}
+
+func (s *Server) handleSelectDatabase(w http.ResponseWriter, r *http.Request) {
+	connID := chi.URLParam(r, "id")
+	sess, err := s.sessionMgr.GetSession(connID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	var req struct {
+		Database string `json:"database"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Database == "" {
+		writeError(w, http.StatusBadRequest, "database name is required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	if err := sess.Session.SelectDatabase(ctx, req.Database); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	schema, err := sess.Session.InspectSchema(ctx, req.Database)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to inspect schema: "+err.Error())
+		return
+	}
+	sess.CachedSchema = schema
+
+	writeJSON(w, http.StatusOK, schema)
 }
 
 func (s *Server) handleRefreshSchema(w http.ResponseWriter, r *http.Request) {

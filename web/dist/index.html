@@ -114,6 +114,16 @@
         </button>
       </div>
 
+      <!-- Database Selector (for multi-database servers like MySQL/MariaDB) -->
+      <div id="database-selector-container" class="p-2 border-b border-app-border bg-slate-950/60 hidden text-xs">
+        <div class="flex items-center justify-between text-[10px] text-slate-400 mb-1">
+          <span class="font-semibold uppercase tracking-wider">Database / Schema</span>
+          <span id="db-active-label" class="text-app-accent font-mono truncate max-w-[120px]"></span>
+        </div>
+        <select id="database-selector" onchange="onDatabaseSelectChange(this.value)" class="w-full bg-slate-900 border border-slate-700 text-white text-xs p-1.5 rounded outline-none font-mono">
+        </select>
+      </div>
+
       <!-- Tables & Columns Tree -->
       <div id="schema-tree" class="flex-1 overflow-y-auto p-2 space-y-1 text-xs font-mono">
         <div class="text-slate-500 text-center py-8">Select a connection to view schema</div>
@@ -454,6 +464,73 @@
     </div>
   </div>
 
+  <!-- 7. AI Copilot / BYOK Settings Modal -->
+  <div id="ai-settings-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-slate-900 border border-app-border w-full max-w-lg rounded-lg shadow-2xl p-6 space-y-4">
+      <div class="flex items-center justify-between border-b border-app-border pb-3">
+        <div class="flex items-center space-x-2">
+          <span>⚙️</span>
+          <h3 class="text-base font-bold text-white">AI Copilot Settings (BYOK & Proxy)</h3>
+        </div>
+        <button onclick="closeAISettingsModal()" class="text-slate-400 hover:text-white">✕</button>
+      </div>
+
+      <form onsubmit="saveAISettings(event)" class="space-y-4 text-xs">
+        <div>
+          <label class="block text-slate-400 mb-1 font-semibold">AI Provider</label>
+          <select id="ai-provider" onchange="onAIProviderChange()" class="w-full bg-slate-950 border border-slate-700 p-2 text-white rounded outline-none">
+            <option value="openai">OpenAI / Compatible Proxy (9router, LiteLLM, vLLM, Ollama v1)</option>
+            <option value="ollama">Ollama (Native Local Daemon)</option>
+            <option value="anthropic">Anthropic Claude (Cloud)</option>
+            <option value="gemini">Google Gemini (Cloud)</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-slate-400 mb-1 font-semibold">
+            Base URL / Proxy Endpoint
+            <span class="text-slate-500 text-[10px] font-normal">(e.g. http://192.168.1.100:8000/v1)</span>
+          </label>
+          <input type="text" id="ai-endpoint" placeholder="http://192.168.x.x:8000/v1 or https://api.openai.com/v1" class="w-full bg-slate-950 border border-slate-700 p-2 text-white rounded outline-none font-mono">
+          <p class="text-[11px] text-slate-500 mt-1">
+            💡 Untuk <b>9router</b> atau proxy LAN, masukkan IP & Port proxy Anda (contoh: <code class="text-sky-300">http://192.168.1.50:8000/v1</code>).
+          </p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-slate-400 mb-1 font-semibold">Model Name</label>
+            <input type="text" id="ai-model" placeholder="e.g. gpt-4o-mini, deepseek-chat, qwen2.5" class="w-full bg-slate-950 border border-slate-700 p-2 text-white rounded outline-none font-mono">
+          </div>
+          <div>
+            <label class="block text-slate-400 mb-1 font-semibold">API Key / Token</label>
+            <input type="password" id="ai-key" placeholder="Optional for 9router / local proxy" class="w-full bg-slate-950 border border-slate-700 p-2 text-white rounded outline-none font-mono">
+          </div>
+        </div>
+
+        <div class="p-3 bg-slate-950/80 rounded border border-slate-800 space-y-2">
+          <label class="flex items-center space-x-2 text-slate-300 cursor-pointer">
+            <input type="checkbox" id="ai-mask-identifiers" class="rounded bg-slate-900 border-slate-700 text-app-accent focus:ring-0">
+            <span class="font-semibold text-white">Privacy Firewall: Mask Schema Identifiers</span>
+          </label>
+          <p class="text-[11px] text-slate-500">
+            Zero-Row Guarantee: Data baris Anda tidak pernah dikirim ke AI. Hanya metadata skema yang diproses, dan nama tabel/kolom disamarkan jika opsi ini aktif.
+          </p>
+        </div>
+
+        <div class="flex justify-between items-center pt-3 border-t border-app-border">
+          <button type="button" onclick="testAISettings()" class="text-xs text-sky-400 hover:text-sky-300 font-semibold flex items-center space-x-1">
+            <span>⚡ Test AI Proxy</span>
+          </button>
+          <div class="space-x-2">
+            <button type="button" onclick="closeAISettingsModal()" class="px-3 py-1.5 bg-slate-800 text-slate-300 rounded">Cancel</button>
+            <button type="submit" class="px-4 py-1.5 bg-app-accent text-slate-950 font-bold rounded">Save AI Settings</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <script>
     // --- Application State ---
     let connections = [];
@@ -656,11 +733,14 @@
       }
     }
 
-    async function loadSchemaTree(connId) {
+    async function loadSchemaTree(connId, targetDB = '') {
       const treeEl = document.getElementById('schema-tree');
       treeEl.innerHTML = '<div class="text-slate-500 text-center py-4">Inspecting schema...</div>';
       try {
-        const res = await apiFetch(`/api/session/${connId}/schema`);
+        const url = targetDB 
+          ? `/api/session/${connId}/schema?db=${encodeURIComponent(targetDB)}` 
+          : `/api/session/${connId}/schema`;
+        const res = await apiFetch(url);
         const schema = await res.json();
         renderSchemaTree(schema);
       } catch (err) {
@@ -670,8 +750,28 @@
 
     function renderSchemaTree(schema) {
       const treeEl = document.getElementById('schema-tree');
+      const dbContainer = document.getElementById('database-selector-container');
+      const dbSelect = document.getElementById('database-selector');
+      const dbLabel = document.getElementById('db-active-label');
+
+      // Populate database selector dropdown
+      if (schema && schema.databases && schema.databases.length > 0) {
+        if (dbContainer) dbContainer.classList.remove('hidden');
+        if (dbSelect) {
+          dbSelect.innerHTML = schema.databases.map(d => `
+            <option value="${escapeHtml(d)}" ${d === schema.database_name ? 'selected' : ''}>${escapeHtml(d)}</option>
+          `).join('');
+        }
+        if (dbLabel) {
+          dbLabel.textContent = schema.database_name || 'None';
+        }
+      } else {
+        if (dbContainer) dbContainer.classList.add('hidden');
+      }
+
       if (!schema || !schema.tables || schema.tables.length === 0) {
-        treeEl.innerHTML = '<div class="text-slate-500 text-center py-4">No tables found.</div>';
+        const dbNameText = schema && schema.database_name ? ` in database "${escapeHtml(schema.database_name)}"` : '';
+        treeEl.innerHTML = `<div class="text-slate-500 text-center py-4">No tables found${dbNameText}.</div>`;
         document.getElementById('table-count-badge').textContent = '0';
         return;
       }
@@ -695,6 +795,11 @@
         `;
       });
       treeEl.innerHTML = html;
+    }
+
+    async function onDatabaseSelectChange(dbName) {
+      if (!activeConnection) return;
+      await loadSchemaTree(activeConnection.id, dbName);
     }
 
     async function refreshSchema() {
@@ -1110,6 +1215,98 @@
       runActiveQuery();
     }
 
+    // --- AI Settings (BYOK & Proxy) ---
+    function toggleAISettings() {
+      const modal = document.getElementById('ai-settings-modal');
+      document.getElementById('ai-provider').value = aiConfig.provider || 'openai';
+      document.getElementById('ai-endpoint').value = aiConfig.endpoint || '';
+      document.getElementById('ai-model').value = aiConfig.model || '';
+      document.getElementById('ai-key').value = aiConfig.apiKey || '';
+      document.getElementById('ai-mask-identifiers').checked = aiConfig.maskIdentifiers !== false;
+      onAIProviderChange();
+      modal.classList.remove('hidden');
+    }
+
+    function closeAISettingsModal() {
+      document.getElementById('ai-settings-modal').classList.add('hidden');
+    }
+
+    function onAIProviderChange() {
+      const prov = document.getElementById('ai-provider').value;
+      const endpointEl = document.getElementById('ai-endpoint');
+      const modelEl = document.getElementById('ai-model');
+      const keyEl = document.getElementById('ai-key');
+
+      if (prov === 'openai') {
+        endpointEl.placeholder = 'http://192.168.x.x:8000/v1 (or https://api.openai.com/v1)';
+        if (!modelEl.value) modelEl.placeholder = 'e.g. gpt-4o-mini, deepseek-chat, qwen2.5';
+        keyEl.placeholder = 'Optional for 9router / local proxy, sk-... for cloud';
+      } else if (prov === 'ollama') {
+        endpointEl.placeholder = 'http://localhost:11434';
+        if (!modelEl.value) modelEl.placeholder = 'e.g. llama3, qwen2.5-coder, mistral';
+        keyEl.placeholder = 'Not required for Ollama';
+      } else if (prov === 'anthropic') {
+        endpointEl.placeholder = 'https://api.anthropic.com/v1/messages';
+        if (!modelEl.value) modelEl.placeholder = 'claude-3-5-sonnet-20241022';
+        keyEl.placeholder = 'sk-ant-...';
+      } else if (prov === 'gemini') {
+        endpointEl.placeholder = 'https://generativelanguage.googleapis.com/v1beta';
+        if (!modelEl.value) modelEl.placeholder = 'gemini-1.5-flash';
+        keyEl.placeholder = 'AIzaSy...';
+      }
+    }
+
+    function saveAISettings(e) {
+      if (e) e.preventDefault();
+      aiConfig = {
+        provider: document.getElementById('ai-provider').value,
+        endpoint: document.getElementById('ai-endpoint').value.trim(),
+        model: document.getElementById('ai-model').value.trim(),
+        apiKey: document.getElementById('ai-key').value.trim(),
+        maskIdentifiers: document.getElementById('ai-mask-identifiers').checked
+      };
+      localStorage.setItem('sqlfox_ai_config', JSON.stringify(aiConfig));
+      closeAISettingsModal();
+      alert('✅ AI Copilot settings saved! Using ' + aiConfig.provider + (aiConfig.endpoint ? ' (' + aiConfig.endpoint + ')' : ''));
+    }
+
+    async function testAISettings() {
+      const prov = document.getElementById('ai-provider').value;
+      const ep = document.getElementById('ai-endpoint').value.trim();
+      const model = document.getElementById('ai-model').value.trim();
+      const key = document.getElementById('ai-key').value.trim();
+
+      const btn = document.querySelector('#ai-settings-modal button[onclick="testAISettings()"]');
+      const origText = btn ? btn.textContent : '';
+      if (btn) btn.textContent = '⏳ Testing...';
+
+      try {
+        const res = await apiFetch('/api/ai/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'chat',
+            prompt: 'Say "hello from proxy" in 3 words.',
+            provider: prov,
+            endpoint: ep,
+            model: model,
+            api_key: key,
+            mask_identifiers: false
+          })
+        });
+        const data = await res.json();
+        if (res.ok && !data.error) {
+          alert('✅ AI Proxy connected successfully!\nResponse: ' + data.content);
+        } else {
+          alert('❌ AI Proxy test failed: ' + (data.error || res.statusText));
+        }
+      } catch (err) {
+        alert('❌ AI Proxy test error: ' + err.message);
+      } finally {
+        if (btn) btn.textContent = origText;
+      }
+    }
+
     // --- Modals & Connection Management ---
     function openNewConnModal() {
       document.getElementById('modal-conn-id').value = '';
@@ -1392,6 +1589,7 @@
           closeDDLModal();
           closeVaultModal();
           closeCommandPalette();
+          closeAISettingsModal();
         }
       });
     }

@@ -66,3 +66,26 @@ func TestFirewall_BuildSchemaPrompt(t *testing.T) {
 		t.Fatal("expected masked_ token prefix")
 	}
 }
+
+func TestAIClient_EndpointNormalization(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"http://192.168.1.50:8000", "http://192.168.1.50:8000/v1/chat/completions"},
+		{"http://192.168.1.50:8000/v1", "http://192.168.1.50:8000/v1/chat/completions"},
+		{"http://192.168.1.50:8000/v1/", "http://192.168.1.50:8000/v1/chat/completions"},
+		{"http://192.168.1.50:8000/v1/chat/completions", "http://192.168.1.50:8000/v1/chat/completions"},
+		{"https://api.openai.com/v1", "https://api.openai.com/v1/chat/completions"},
+	}
+
+	for _, tt := range tests {
+		client := NewAIClient(ClientConfig{
+			Provider: ProviderOpenAI,
+			Endpoint: tt.input,
+		})
+		if client.cfg.Endpoint != tt.expected {
+			t.Errorf("for input %q, expected endpoint %q, got %q", tt.input, tt.expected, client.cfg.Endpoint)
+		}
+	}
+}

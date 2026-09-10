@@ -51,6 +51,9 @@ type Session interface {
 	// InspectSchema returns database metadata (tables, columns, indexes).
 	InspectSchema(ctx context.Context, dbName string) (*SchemaMetadata, error)
 
+	// SelectDatabase switches the active database context for subsequent operations.
+	SelectDatabase(ctx context.Context, dbName string) error
+
 	// GetTableDDL returns the raw CREATE TABLE statement.
 	GetTableDDL(ctx context.Context, tableName string) (string, error)
 
@@ -132,6 +135,7 @@ type ServerInfo struct {
 // Schema metadata structures
 type SchemaMetadata struct {
 	DatabaseName string          `json:"database_name"`
+	Databases    []string        `json:"databases,omitempty"`
 	Tables       []TableMetadata `json:"tables"`
 }
 

@@ -194,7 +194,24 @@ func TestServer_API_Lifecycle(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	// 11. Delete Connection
+	// 11. Test Select Database endpoint
+	selectDBPayload := map[string]string{"database": "main"}
+	sdbBody, _ := json.Marshal(selectDBPayload)
+	resp, err = client.Post(fmt.Sprintf("%s/api/session/%s/select-db", ts.URL, savedConn.ID), "application/json", bytes.NewReader(sdbBody))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /api/session/select-db failed: %v, status: %d", err, resp.StatusCode)
+	}
+	var schemaAfterSelect struct {
+		DatabaseName string   `json:"database_name"`
+		Databases    []string `json:"databases"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&schemaAfterSelect)
+	resp.Body.Close()
+	if schemaAfterSelect.DatabaseName != "main" || len(schemaAfterSelect.Databases) == 0 {
+		t.Fatalf("unexpected schema after select-db: %+v", schemaAfterSelect)
+	}
+
+	// 12. Delete Connection
 	reqDelete, _ := http.NewRequest("DELETE", fmt.Sprintf("%s/api/connections/%s", ts.URL, savedConn.ID), nil)
 	resp, err = client.Do(reqDelete)
 	if err != nil || resp.StatusCode != http.StatusOK {

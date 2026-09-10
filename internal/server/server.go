@@ -80,6 +80,7 @@ func (s *Server) routes() {
 		// Session and database exploration
 		api.Post("/session/connect/{id}", s.handleConnectSession)
 		api.Get("/session/{id}/schema", s.handleGetSchema)
+		api.Post("/session/{id}/select-db", s.handleSelectDatabase)
 		api.Post("/session/{id}/refresh-schema", s.handleRefreshSchema)
 		api.Get("/session/{id}/ddl/{table}", s.handleGetTableDDL)
 		api.Get("/session/{id}/table/{table}/rows", s.handleGetTableRows)
