@@ -173,7 +173,7 @@
 
         <!-- SQL Code Textarea -->
         <div class="flex-1 relative font-mono text-sm">
-          <textarea id="sql-editor-textarea" spellcheck="false" class="w-full h-full bg-transparent p-3 text-sky-100 placeholder-slate-600 resize-none outline-none font-mono leading-relaxed" placeholder="-- Type SQL query or press Ctrl+Enter to run&#10;SELECT * FROM users LIMIT 50;"></textarea>
+          <textarea id="sql-editor-textarea" spellcheck="false" class="w-full h-full bg-transparent p-3 text-sky-100 placeholder-slate-600 resize-none outline-none font-mono leading-relaxed" placeholder="-- Type SQL query here (Ctrl+Enter to run, Ctrl+Shift+Enter to explain)"></textarea>
         </div>
       </div>
 
@@ -537,7 +537,7 @@
     let activeConnection = null;
     let activeSession = null;
     let tabs = [
-      { id: 'tab-1', title: 'Query 1.sql', sql: 'SELECT * FROM users LIMIT 50;', isTableViewer: false }
+      { id: 'tab-1', title: 'Query 1.sql', sql: '', isTableViewer: false }
     ];
     let activeTabId = 'tab-1';
     let currentResults = [];
@@ -837,7 +837,7 @@
 
     function addNewQueryTab() {
       const newId = 'tab-' + Date.now();
-      tabs.push({ id: newId, title: `Query ${tabs.length + 1}.sql`, sql: 'SELECT * FROM users LIMIT 50;', isTableViewer: false });
+      tabs.push({ id: newId, title: `Query ${tabs.length + 1}.sql`, sql: '', isTableViewer: false });
       switchTab(newId);
     }
 
