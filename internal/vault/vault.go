@@ -184,6 +184,24 @@ func (v *Vault) Close() error {
 	return v.db.Close()
 }
 
+// ValidateMasterPassword verifies if a candidate master password is correct.
+func (v *Vault) ValidateMasterPassword(password string) bool {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	salt, checkCipher, err := getMeta(v.db)
+	if err != nil || salt == nil || checkCipher == "" {
+		return false
+	}
+
+	testKey := DeriveKey(password, salt)
+	decrypted, err := Decrypt(checkCipher, testKey)
+	if err != nil {
+		return false
+	}
+	return string(decrypted) == validationToken
+}
+
 // SaveConnection inserts or updates a connection record.
 func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 	v.mu.Lock()

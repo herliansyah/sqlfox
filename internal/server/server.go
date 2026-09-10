@@ -20,6 +20,7 @@ type Server struct {
 	guard      *safety.SafetyGuard
 	backupMgr  *safety.BackupManager
 	sessionMgr *SessionManager
+	authMgr    *AuthManager
 	assets     fs.FS
 }
 
@@ -28,6 +29,7 @@ func NewServer(v *vault.Vault, assets fs.FS, backupDir string) *Server {
 	guard := safety.NewSafetyGuard()
 	backupMgr := safety.NewBackupManager(backupDir)
 	sessionMgr := NewSessionManager(v, guard, backupMgr)
+	authMgr := NewAuthManager()
 
 	s := &Server{
 		router:     chi.NewRouter(),
@@ -35,6 +37,7 @@ func NewServer(v *vault.Vault, assets fs.FS, backupDir string) *Server {
 		guard:      guard,
 		backupMgr:  backupMgr,
 		sessionMgr: sessionMgr,
+		authMgr:    authMgr,
 		assets:     assets,
 	}
 
@@ -53,9 +56,13 @@ func (s *Server) routes() {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.Use(s.RemoteAccessGuardMiddleware)
 
 	// API Namespace
 	r.Route("/api", func(api chi.Router) {
+		// Remote access authentication
+		api.Get("/auth/status", s.handleAuthStatus)
+		api.Post("/auth/unlock", s.handleAuthUnlock)
 		// Connection vault endpoints
 		api.Get("/connections", s.handleListConnections)
 		api.Post("/connections", s.handleSaveConnection)

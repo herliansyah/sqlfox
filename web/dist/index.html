@@ -273,6 +273,19 @@
 
   <!-- MODALS -->
 
+  <!-- 0. Remote Access Guard Lock Screen -->
+  <div id="remote-lock-modal" class="fixed inset-0 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 z-[100] hidden">
+    <div class="bg-slate-900 border-2 border-app-accent w-full max-w-sm rounded-xl shadow-2xl p-6 space-y-4 text-center">
+      <div class="text-4xl">🦊🔒</div>
+      <h2 class="text-base font-bold text-white tracking-wide">SqlFox Remote Access Guard</h2>
+      <p class="text-xs text-slate-400 leading-relaxed">You are accessing SqlFox from a network device. Please enter your Master Password to unlock this vault.</p>
+      <form onsubmit="unlockRemoteVault(event)" class="space-y-3 pt-2">
+        <input type="password" id="remote-unlock-password" required placeholder="Enter Master Password" class="w-full bg-slate-950 border border-slate-700 p-2.5 rounded text-white text-center text-sm outline-none focus:border-app-accent font-mono">
+        <button type="submit" class="w-full bg-app-accent hover:bg-sky-400 text-slate-950 font-bold py-2 rounded text-sm transition">Unlock Vault</button>
+      </form>
+    </div>
+  </div>
+
   <!-- 1. Safety Guard Challenge Modal -->
   <div id="safety-challenge-modal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
     <div class="bg-slate-900 border-2 border-app-danger w-full max-w-lg rounded-lg shadow-2xl p-6 space-y-4">
@@ -453,9 +466,67 @@
     // AI Settings State (stored in localStorage)
     let aiConfig = JSON.parse(localStorage.getItem('sqlfox_ai_config') || '{"provider":"ollama","model":"llama3","apiKey":"","endpoint":""}');
 
+    // --- Remote Access Guard & API Fetch Helper ---
+    async function apiFetch(url, options = {}) {
+      options.headers = options.headers || {};
+      const token = sessionStorage.getItem('sqlfox_remote_token');
+      if (token && !options.headers['Authorization']) {
+        options.headers['Authorization'] = `Bearer ${token}`;
+      }
+      const res = await fetch(url, options);
+      if (res.status === 401) {
+        showRemoteLockScreen();
+      }
+      return res;
+    }
+
+    async function checkAuthStatus() {
+      try {
+        const res = await fetch('/api/auth/status');
+        const data = await res.json();
+        if (data.is_remote && !data.unlocked) {
+          showRemoteLockScreen();
+          return false;
+        }
+      } catch (err) {
+        console.warn('Auth status check skipped:', err);
+      }
+      return true;
+    }
+
+    function showRemoteLockScreen() {
+      document.getElementById('remote-lock-modal').classList.remove('hidden');
+      setTimeout(() => document.getElementById('remote-unlock-password').focus(), 100);
+    }
+
+    async function unlockRemoteVault(e) {
+      e.preventDefault();
+      const pass = document.getElementById('remote-unlock-password').value;
+      try {
+        const res = await fetch('/api/auth/unlock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pass })
+        });
+        const data = await res.json();
+        if (res.ok && data.token) {
+          sessionStorage.setItem('sqlfox_remote_token', data.token);
+          document.getElementById('remote-lock-modal').classList.add('hidden');
+          await loadConnections();
+        } else {
+          alert('Incorrect master password!');
+        }
+      } catch (err) {
+        alert('Unlock failed: ' + err.message);
+      }
+    }
+
     // --- Lifecycle Initialization ---
     window.addEventListener('DOMContentLoaded', async () => {
-      await loadConnections();
+      const authorized = await checkAuthStatus();
+      if (authorized) {
+        await loadConnections();
+      }
       renderTabs();
       setupKeyboardShortcuts();
       updateFooterStats();
@@ -464,7 +535,7 @@
     // --- Connections & Session Management ---
     async function loadConnections() {
       try {
-        const res = await fetch('/api/connections');
+        const res = await apiFetch('/api/connections');
         connections = await res.json();
         renderConnectionsTree();
       } catch (err) {
@@ -520,7 +591,7 @@
 
       // Connect session
       try {
-        const res = await fetch(`/api/session/connect/${conn.id}`, { method: 'POST' });
+        const res = await apiFetch(`/api/session/connect/${conn.id}`, { method: 'POST' });
         activeSession = await res.json();
         updateReadOnlyUI(activeSession.read_only);
         await loadSchemaTree(conn.id);
@@ -534,7 +605,7 @@
       const treeEl = document.getElementById('schema-tree');
       treeEl.innerHTML = '<div class="text-slate-500 text-center py-4">Inspecting schema...</div>';
       try {
-        const res = await fetch(`/api/session/${connId}/schema`);
+        const res = await apiFetch(`/api/session/${connId}/schema`);
         const schema = await res.json();
         renderSchemaTree(schema);
       } catch (err) {
@@ -573,7 +644,7 @@
 
     async function refreshSchema() {
       if (!activeConnection) return;
-      await fetch(`/api/session/${activeConnection.id}/refresh-schema`, { method: 'POST' });
+      await apiFetch(`/api/session/${activeConnection.id}/refresh-schema`, { method: 'POST' });
       await loadSchemaTree(activeConnection.id);
     }
 
@@ -648,7 +719,7 @@
       setQueryRunning(true);
 
       try {
-        const res = await fetch(`/api/session/${activeConnection.id}/execute`, {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/execute`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -691,7 +762,7 @@
     async function inspectActiveQuery() {
       if (!activeConnection) return;
       const sql = document.getElementById('sql-editor-textarea').value.trim();
-      const res = await fetch(`/api/session/${activeConnection.id}/inspect`, {
+      const res = await apiFetch(`/api/session/${activeConnection.id}/inspect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sql })
@@ -703,7 +774,7 @@
     async function explainActiveQuery() {
       if (!activeConnection) return;
       const sql = document.getElementById('sql-editor-textarea').value.trim();
-      const res = await fetch(`/api/session/${activeConnection.id}/explain`, {
+      const res = await apiFetch(`/api/session/${activeConnection.id}/explain`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sql })
@@ -726,7 +797,7 @@
 
     async function cancelRunningQuery() {
       if (!activeConnection) return;
-      await fetch(`/api/session/${activeConnection.id}/cancel`, {
+      await apiFetch(`/api/session/${activeConnection.id}/cancel`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query_id: 'active' })
@@ -776,7 +847,7 @@
     async function loadTableRows(tableName) {
       if (!activeConnection) return;
       try {
-        const res = await fetch(`/api/session/${activeConnection.id}/table/${tableName}/rows?limit=50`);
+        const res = await apiFetch(`/api/session/${activeConnection.id}/table/${tableName}/rows?limit=50`);
         const data = await res.json();
         renderGridResults(data.columns, data.rows, data.pk_col, tableName);
       } catch (err) {
@@ -848,7 +919,7 @@
           if (pkCol && tableName) {
             const pkIdx = currentColumns.findIndex(c => c.name === pkCol);
             const pkVal = currentResults[rIdx][pkIdx];
-            await fetch(`/api/session/${activeConnection.id}/cell-edit`, {
+            await apiFetch(`/api/session/${activeConnection.id}/cell-edit`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -869,7 +940,7 @@
     // --- ReadOnly Mode ---
     async function toggleReadOnly() {
       if (!activeConnection) return;
-      const res = await fetch(`/api/session/${activeConnection.id}/toggle-readonly`, { method: 'POST' });
+      const res = await apiFetch(`/api/session/${activeConnection.id}/toggle-readonly`, { method: 'POST' });
       const data = await res.json();
       activeSession.read_only = data.read_only;
       updateReadOnlyUI(data.read_only);
@@ -914,7 +985,7 @@
     async function callAI(action, prompt = '', query = '') {
       appendAIMessage('system', 'Thinking...');
       try {
-        const res = await fetch('/api/ai/chat', {
+        const res = await apiFetch('/api/ai/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1017,7 +1088,7 @@
         password: document.getElementById('modal-conn-pass').value
       };
 
-      const res = await fetch('/api/connections', {
+      const res = await apiFetch('/api/connections', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(conn)
@@ -1032,7 +1103,7 @@
 
     async function viewTableDDL(tableName) {
       if (!activeConnection) return;
-      const res = await fetch(`/api/session/${activeConnection.id}/ddl/${tableName}`);
+      const res = await apiFetch(`/api/session/${activeConnection.id}/ddl/${tableName}`);
       const data = await res.json();
       document.getElementById('ddl-modal-title').textContent = `CREATE TABLE ${tableName}`;
       document.getElementById('ddl-modal-content').textContent = data.ddl;
@@ -1063,7 +1134,7 @@
     async function doExportVault() {
       const pass = document.getElementById('export-passphrase').value;
       if (!pass) return alert('Passphrase is required');
-      const res = await fetch('/api/vault/export', {
+      const res = await apiFetch('/api/vault/export', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ export_passphrase: pass })
@@ -1082,7 +1153,7 @@
       if (!fileInput.files[0] || !pass) return alert('File and passphrase required');
 
       const text = await fileInput.files[0].text();
-      const res = await fetch('/api/vault/import', {
+      const res = await apiFetch('/api/vault/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ export_passphrase: pass, archive: JSON.parse(text) })

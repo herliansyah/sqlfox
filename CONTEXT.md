@@ -20,6 +20,18 @@ _Avoid_: Credential manager, config file
 An encrypted, portable export file (`.sqlfox-vault`) protected by an export passphrase for cross-machine migration.
 _Avoid_: Backup zip, cred dump
 
+**Remote Access Guard**:
+A security gate intercepting HTTP and WebSocket requests from non-loopback IP addresses, requiring Master Password authentication before granting access to the vault and sessions.
+_Avoid_: Firewall, IP filter
+
+**Port Hunting**:
+An automated sequential port probing mechanism that resolves `EADDRINUSE` port collision errors by scanning subsequent free ports.
+_Avoid_: Port hopping, auto-port
+
+**Network Endpoint**:
+The non-loopback IPv4 network address of the host machine accessible from other devices on the local area network.
+_Avoid_: Public URL, remote host
+
 ## Drivers & Sessions
 
 **Driver**:
