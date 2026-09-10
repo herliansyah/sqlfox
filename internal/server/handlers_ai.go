@@ -10,16 +10,21 @@ import (
 )
 
 type AIChatRequest struct {
-	Action          string      `json:"action"` // explain_query, explain_plan, optimize, nl_to_sql, chat
+	Action          string      `json:"action"` // explain_query, explain_plan, optimize, nl_to_sql, chat, fix_query
 	Query           string      `json:"query"`
 	Plan            string      `json:"plan"`
 	Prompt          string      `json:"prompt"`
+	ErrorMessage    string      `json:"error_message,omitempty"`
 	ConnectionID    string      `json:"connection_id"`
 	Provider        ai.Provider `json:"provider"`
 	APIKey          string      `json:"api_key"`
 	Model           string      `json:"model"`
 	Endpoint        string      `json:"endpoint"`
 	MaskIdentifiers bool        `json:"mask_identifiers"`
+	Language        string      `json:"language,omitempty"`       // "id", "en", "auto"
+	ResponseStyle   string      `json:"response_style,omitempty"` // "concise", "detailed", "normal"
+	CustomPrompt    string      `json:"custom_prompt,omitempty"`  // custom persona / system instructions
+	IncludeSchema   *bool       `json:"include_schema,omitempty"` // default true
 }
 
 func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
@@ -32,15 +37,36 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 	dialect := "SQL"
 	var schemaPrompt string
 
-	if req.ConnectionID != "" {
+	includeSchema := req.IncludeSchema == nil || *req.IncludeSchema
+	if req.ConnectionID != "" && includeSchema {
 		if sess, err := s.sessionMgr.GetSession(req.ConnectionID); err == nil {
 			dialect = sess.DriverName
 			firewall := ai.NewFirewall(req.MaskIdentifiers)
-			schemaPrompt = firewall.BuildSchemaPrompt(sess.CachedSchema, req.Query+" "+req.Prompt)
+			schemaPrompt = firewall.BuildSchemaPrompt(sess.CachedSchema, req.Query+" "+req.Prompt+" "+req.ErrorMessage)
 		}
 	}
 
 	systemPrompt := ai.BaseSystemPrompt(dialect, schemaPrompt)
+
+	// Append language preferences
+	if req.Language == "id" {
+		systemPrompt += "\nLanguage Instruction:\nIMPORTANT: You MUST answer strictly in Bahasa Indonesia (Indonesian language) throughout your explanation, comments, and answers.\n"
+	} else if req.Language == "en" {
+		systemPrompt += "\nLanguage Instruction:\nIMPORTANT: You MUST answer in English.\n"
+	}
+
+	// Append response style preferences
+	if req.ResponseStyle == "concise" {
+		systemPrompt += "\nStyle Instruction:\nBe extremely concise. Directly give the SQL query and a brief 1-2 sentence explanation without any verbose introductions or conclusions.\n"
+	} else if req.ResponseStyle == "detailed" {
+		systemPrompt += "\nStyle Instruction:\nProvide an in-depth technical explanation, discussing query execution semantics, indexing implications, and performance optimizations.\n"
+	}
+
+	// Append user custom persona / system instructions
+	if req.CustomPrompt != "" {
+		systemPrompt += "\nCustom System Instructions:\n" + req.CustomPrompt + "\n"
+	}
+
 	var userPrompt string
 
 	switch req.Action {
@@ -52,6 +78,8 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 		userPrompt = ai.BuildOptimizeQueryPrompt(req.Query, req.Plan)
 	case "nl_to_sql":
 		userPrompt = ai.BuildNLToSQLPrompt(req.Prompt)
+	case "fix_query":
+		userPrompt = ai.BuildDebugErrorPrompt(req.Query, req.ErrorMessage)
 	default:
 		userPrompt = req.Prompt
 	}

@@ -90,6 +90,22 @@ _Avoid_: API proxy, SaaS key
 The curated, just-in-time subset of database DDL metadata supplied to AI prompts based on active queries or explicit user references.
 _Avoid_: Full schema dump, DB prompt
 
+**AI Persona & System Instruction**:
+User-defined behavioral guidelines and response language (e.g. Bahasa Indonesia, concise SQL) injected into Copilot's prompt context.
+_Avoid_: Prompt tweak, bot style
+
+**Chat Session**:
+A discrete conversational thread with Copilot, uniquely identified and persisted locally with title and message history.
+_Avoid_: Message log, chat thread
+
+**Internal Notes**:
+A persistent in-memory/in-tab Markdown scratchpad (`Notes.md`) allowing developers to accumulate query explanations, execution findings, and AI insights.
+_Avoid_: Text file, memo pad, clipboard buffer
+
+**Error Healer**:
+An automated diagnostic loop intercepting failed SQL executions and dispatching root-cause analysis and query fixes to Copilot.
+_Avoid_: Error fixer, bug helper
+
 ## Editor & Autocomplete
 
 **Query Editor**:
