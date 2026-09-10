@@ -1,0 +1,123 @@
+# SqlFox UX Design Specification
+
+User experience architecture, ASCII wireframes, design tokens, and interaction models for SqlFox.
+
+## 1. Design Philosophy
+
+- **Speed & Minimalist Flow**: Sub-second UI response, instant keyboard navigation, clean TablePlus-like interface.
+- **Safety by Contrast**: Safe operations are whisper-quiet; destructive operations demand unmistakable focus with bold visual contrast.
+- **Density Without Clutter**: High data density in the grid, zero redundant chrome or nested toolbars.
+
+---
+
+## 2. Main Interface Wireframe (3-Column Layout)
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ [SqlFox]  Prod-MySQL-Cluster [PRODUCTION 🔴]        [Ctrl+K Command Palette]      [⚙️ Settings] [−][□][×]│
+├──────────────┬─────────────────────────────────────────────────────────┬───────────────────────────────┤
+│ CONNECTIONS  │ [Tab 1: users.sql ●] [Tab 2: orders] [+]                │ AI ASSISTANT (BYOK / Ollama)  │
+│ ▼ Production │─────────────────────────────────────────────────────────│───────────────────────────────┤
+│   ● analytics│ 1 | SELECT id, email, created_at, status                │ 🤖 Claude 3.5 Sonnet          │
+│   🔴 main_db │ 2 | FROM users                                          │                               │
+│     ▼ Tables │ 3 | WHERE created_at >= '2026-01-01'                    │ User:                         │
+│       users  │ 4 | ORDER BY id DESC;                                   │ "Optimize this query"         │
+│       orders │                                                         │                               │
+│       items  │ [▶ Run (Ctrl+Enter)] [⚡ Explain] [🛡️ Impact Preview]    │ AI Copilot:                   │
+│ ▶ Staging    ├─────────────────────────────────────────────────────────│ "Query does a range scan on   │
+│ ▶ Dev        │ Result: 1,000 rows (24ms)                [Filter...]    │ `created_at`. Consider adding:│
+│              │┌──────┬──────────────────────┬────────────┬────────────┐│                               │
+│              ││ id   │ email                │ created_at │ status     ││ CREATE INDEX idx_users_status │
+│              │├──────┼──────────────────────┼────────────┼────────────┤│   ON users(created_at, status)│
+│              ││ 1042 │ alice@example.com    │ 2026-09-10 │ active     ││                               │
+│              ││ 1041 │ bob@example.com      │ 2026-09-09 │ pending    ││ [Apply to Editor] [Copy SQL] │
+│              ││ 1040 │ charlie@example.com  │ 2026-09-09 │ active     ││                               │
+│              │└──────┴──────────────────────┴────────────┴────────────┘│ [Ask anything about schema...]│
+├──────────────┴─────────────────────────────────────────────────────────┴───────────────────────────────┤
+│ 🔴 PRODUCTION | MySQL 8.0.35 | Ping: 12ms | Memory: 42MB | SSL Enabled | UTF-8                     │
+└────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 3. Safety Guard Modal Wireframes
+
+### Challenge Modal: Destructive DDL / DML (`DROP TABLE` / `DELETE without WHERE`)
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  ⚠️ SAFETY GUARD: DESTRUCTIVE QUERY INTERCEPTED                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  Target Connection:  main_db [PRODUCTION]                               │
+│  Target Table:       `customers` (Approx. 4,250,000 rows)               │
+│                                                                         │
+│  Statement:                                                             │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │ DROP TABLE `customers`;                                           │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  🔴 RISK: This operation is IRREVERSIBLE and drops all customer data.    │
+│  📁 DDL schema snapshot saved to: .scratch/backups/20260910-cust.sql   │
+│                                                                         │
+│  To execute this statement, type the exact table name below:            │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │ customers                                                         │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│                           [Cancel (Esc)]  [Confirm & Execute (Danger)]  │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Impact Preview Drawer (`EXPLAIN` Analysis)
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  🛡️ QUERY IMPACT PREVIEW                                         [×]   │
+├─────────────────────────────────────────────────────────────────────────┤
+│  Query: UPDATE orders SET status = 'archived' WHERE total < 50;         │
+│                                                                         │
+│  Scan Type:      ALL (Full Table Scan) ⚠️                                │
+│  Estimated Rows: 840,210 of 1,200,000 (70% of table)                    │
+│  Key Used:       NULL (No index match on `total`)                       │
+│  Estimated Lock: Exclusive Row Locks                                    │
+│                                                                         │
+│  💡 Suggestion: Index missing on `total`. Add index or narrow WHERE.   │
+│                                                                         │
+│  [Simulate Transaction (2s timeout)]              [Execute Anyway]      │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 4. Keyboard Shortcuts
+
+| Shortcut (macOS / Linux-Win) | Action | Scope |
+| :--- | :--- | :--- |
+| `Cmd+Enter` / `Ctrl+Enter` | Run Selected or Current Query | Query Editor |
+| `Cmd+Shift+Enter` / `Ctrl+Shift+Enter` | Run Query with Impact Preview (`EXPLAIN`) | Query Editor |
+| `Esc` or `Cmd+.` / `Ctrl+.` | Cancel Currently Running Query (Out-of-band) | Global |
+| `Cmd+T` / `Ctrl+T` | Open New Query Tab | Tabs |
+| `Cmd+W` / `Ctrl+W` | Close Active Tab | Tabs |
+| `Cmd+K` / `Ctrl+K` | Open Command Palette | Global |
+| `Cmd+L` / `Ctrl+L` | Toggle AI Assistant Sidebar | Global |
+| `Cmd+B` / `Ctrl+B` | Toggle Connections & Schema Sidebar | Global |
+| `Cmd+Shift+F` / `Ctrl+Shift+F` | Format SQL Statement | Query Editor |
+| `Cmd+S` / `Ctrl+S` | Save Active Query as Snippet | Query Editor |
+
+---
+
+## 5. Design Tokens & Visual Hierarchy
+
+### Color Palette (Tailwind-compatible)
+- **Background Deep**: `#090d16` (Slate 950) — main application shell.
+- **Background Surface**: `#0f172a` (Slate 900) — editor and panel cards.
+- **Border Subtle**: `#1e293b` (Slate 800) — clean dividing borders.
+- **Accent Primary**: `#38bdf8` (Sky 400) — focus states, active tab markers, links.
+- **Production Warning**: `#ef4444` (Red 500) — production badges, blocked destructive actions.
+- **Staging Indicator**: `#f59e0b` (Amber 500) — staging banners and warning toasts.
+- **Development Safe**: `#10b981` (Emerald 500) — dev badge, successful query execution.
+
+### Typography
+- **UI Font**: `Inter, system-ui, sans-serif` (13px baseline for compact navigation).
+- **Code & Grid Font**: `JetBrains Mono, Fira Code, monospace` (13px, ligatures supported).

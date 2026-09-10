@@ -1,0 +1,1220 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SqlFox - Database Manager</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            app: {
+              bg: '#090d16',
+              surface: '#0f172a',
+              card: '#1e293b',
+              border: '#334155',
+              accent: '#38bdf8',
+              danger: '#ef4444',
+              warning: '#f59e0b',
+              safe: '#10b981'
+            }
+          },
+          fontFamily: {
+            mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+            sans: ['Inter', 'system-ui', 'sans-serif']
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #090d16; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #475569; }
+    .grid-cell:hover .edit-hint { opacity: 1; }
+  </style>
+</head>
+<body class="bg-app-bg text-slate-100 font-sans h-screen flex flex-col overflow-hidden select-none">
+
+  <!-- Top Navbar -->
+  <header class="h-12 bg-app-surface border-b border-app-border flex items-center justify-between px-4 z-20 flex-shrink-0">
+    <div class="flex items-center space-x-3">
+      <div class="flex items-center space-x-2">
+        <span class="text-xl">🦊</span>
+        <span class="font-bold tracking-wide text-white text-base">Sql<span class="text-app-accent">Fox</span></span>
+      </div>
+
+      <div class="h-4 w-px bg-app-border mx-1"></div>
+
+      <!-- Active Connection & Environment Badge -->
+      <div id="active-conn-badge" class="flex items-center space-x-2 text-xs">
+        <span class="text-slate-400">No active connection</span>
+      </div>
+    </div>
+
+    <!-- Center Search / Command Palette Shortcut -->
+    <button onclick="toggleCommandPalette()" class="bg-app-card hover:bg-slate-700 text-slate-400 hover:text-slate-200 px-3 py-1.5 rounded text-xs flex items-center space-x-2 border border-app-border transition">
+      <span>🔍 Search actions or tables...</span>
+      <kbd class="bg-slate-800 px-1.5 py-0.5 rounded text-[10px] text-slate-400 border border-slate-700">Ctrl+K</kbd>
+    </button>
+
+    <!-- Top Right Controls -->
+    <div class="flex items-center space-x-2 text-xs">
+      <button id="readonly-toggle-btn" onclick="toggleReadOnly()" class="hidden px-2.5 py-1 rounded font-medium transition border flex items-center space-x-1.5">
+        <span id="readonly-icon">🔒</span>
+        <span id="readonly-text">Read-Only</span>
+      </button>
+
+      <button onclick="openExportImportModal()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition">
+        📦 Vault
+      </button>
+
+      <button onclick="toggleAISidebar()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition flex items-center space-x-1">
+        <span>🤖 Copilot</span>
+        <kbd class="bg-slate-800 px-1 rounded text-[10px] text-slate-400">Ctrl+L</kbd>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main 3-Column Work Area -->
+  <div class="flex-1 flex overflow-hidden">
+
+    <!-- Left Sidebar: Connections & Schema Explorer -->
+    <aside id="left-sidebar" class="w-64 bg-app-surface border-r border-app-border flex flex-col flex-shrink-0 transition-all duration-200 z-10">
+      <!-- Sidebar Header -->
+      <div class="p-3 border-b border-app-border flex items-center justify-between">
+        <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Connections</span>
+        <button onclick="openNewConnModal()" class="bg-app-accent hover:bg-sky-500 text-slate-950 font-bold px-2 py-0.5 rounded text-xs transition">
+          + Add
+        </button>
+      </div>
+
+      <!-- Connections Tree -->
+      <div id="connections-tree" class="p-2 overflow-y-auto max-h-48 border-b border-app-border space-y-1 text-xs">
+        <div class="text-slate-500 text-center py-4">Loading connections...</div>
+      </div>
+
+      <!-- Schema Explorer Header -->
+      <div class="p-3 border-b border-app-border flex items-center justify-between bg-slate-900/50">
+        <div class="flex items-center space-x-1">
+          <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Tables</span>
+          <span id="table-count-badge" class="bg-slate-800 text-slate-400 px-1.5 py-0.2 rounded text-[10px]">0</span>
+        </div>
+        <button onclick="refreshSchema()" title="Refresh Schema" class="text-slate-400 hover:text-white text-xs">
+          🔄
+        </button>
+      </div>
+
+      <!-- Tables & Columns Tree -->
+      <div id="schema-tree" class="flex-1 overflow-y-auto p-2 space-y-1 text-xs font-mono">
+        <div class="text-slate-500 text-center py-8">Select a connection to view schema</div>
+      </div>
+    </aside>
+
+    <!-- Center Column: Multi-tab Workspace (Editor + Results Grid) -->
+    <main class="flex-1 flex flex-col overflow-hidden bg-app-bg">
+      
+      <!-- Tabs Bar -->
+      <div class="h-9 bg-app-surface border-b border-app-border flex items-center px-2 space-x-1 overflow-x-auto flex-shrink-0">
+        <div id="tabs-container" class="flex items-center space-x-1">
+          <!-- Dynamic tabs injected here -->
+        </div>
+        <button onclick="addNewQueryTab()" class="text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-800 text-xs transition" title="New Query Tab (Ctrl+T)">
+          +
+        </button>
+      </div>
+
+      <!-- Upper Split: Query Editor Area -->
+      <div id="editor-container" class="h-1/2 flex flex-col border-b border-app-border bg-[#0b1120]">
+        <!-- Editor Toolbar -->
+        <div class="h-8 bg-app-surface/60 border-b border-app-border/60 px-3 flex items-center justify-between text-xs">
+          <div class="flex items-center space-x-2">
+            <button onclick="runActiveQuery()" class="bg-app-safe hover:bg-emerald-600 text-slate-950 font-bold px-3 py-1 rounded flex items-center space-x-1 transition shadow-sm">
+              <span>▶ Run</span>
+              <kbd class="text-[10px] opacity-75 font-normal">Ctrl+Enter</kbd>
+            </button>
+            <button onclick="explainActiveQuery()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition">
+              ⚡ Explain
+            </button>
+            <button onclick="inspectActiveQuery()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition">
+              🛡️ Safety Check
+            </button>
+            <button onclick="formatActiveQuery()" class="text-slate-400 hover:text-slate-200 px-2 py-1 rounded hover:bg-slate-800 transition">
+              Format SQL
+            </button>
+          </div>
+
+          <div class="flex items-center space-x-3 text-slate-400">
+            <span id="query-status-text">Ready</span>
+            <button id="cancel-query-btn" onclick="cancelRunningQuery()" class="hidden bg-app-danger/20 text-app-danger hover:bg-app-danger/30 px-2 py-0.5 rounded transition">
+              Cancel Query (Esc)
+            </button>
+          </div>
+        </div>
+
+        <!-- SQL Code Textarea -->
+        <div class="flex-1 relative font-mono text-sm">
+          <textarea id="sql-editor-textarea" spellcheck="false" class="w-full h-full bg-transparent p-3 text-sky-100 placeholder-slate-600 resize-none outline-none font-mono leading-relaxed" placeholder="-- Type SQL query or press Ctrl+Enter to run&#10;SELECT * FROM users LIMIT 50;"></textarea>
+        </div>
+      </div>
+
+      <!-- Lower Split: Data Grid / Results Area -->
+      <div id="grid-container" class="flex-1 flex flex-col bg-app-bg overflow-hidden">
+        <!-- Grid Toolbar -->
+        <div class="h-8 bg-app-surface/40 border-b border-app-border px-3 flex items-center justify-between text-xs text-slate-400">
+          <div class="flex items-center space-x-3">
+            <span id="grid-result-stats">0 rows</span>
+            <span id="grid-limit-badge" class="bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded text-[10px]">Safe Limit: 1,000</span>
+          </div>
+
+          <!-- Export & Keyset Pagination Controls -->
+          <div class="flex items-center space-x-2">
+            <div id="keyset-pagination" class="hidden flex items-center space-x-1">
+              <button onclick="loadPreviousPage()" class="hover:bg-slate-800 px-2 py-0.5 rounded border border-slate-700">◀ Prev</button>
+              <button onclick="loadNextPage()" class="hover:bg-slate-800 px-2 py-0.5 rounded border border-slate-700">Next ▶</button>
+            </div>
+            <button onclick="exportCSV()" class="hover:bg-slate-800 px-2 py-0.5 rounded border border-slate-700 transition">
+              Export CSV
+            </button>
+            <button onclick="exportJSON()" class="hover:bg-slate-800 px-2 py-0.5 rounded border border-slate-700 transition">
+              Export JSON
+            </button>
+          </div>
+        </div>
+
+        <!-- Virtual Data Grid Table -->
+        <div id="virtual-grid-wrapper" class="flex-1 overflow-auto">
+          <table id="results-table" class="w-full border-collapse text-left font-mono text-xs">
+            <thead id="grid-thead" class="sticky top-0 bg-slate-900 border-b border-app-border text-slate-400 z-10">
+              <tr><th class="p-2 pl-4">No data</th></tr>
+            </thead>
+            <tbody id="grid-tbody" class="divide-y divide-slate-800/60 text-slate-200">
+              <tr><td class="p-8 text-center text-slate-500">Run a query or double click a table in the sidebar to view records</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- Right Sidebar: AI Assistant & Privacy Firewall -->
+    <aside id="ai-sidebar" class="w-80 bg-app-surface border-l border-app-border flex flex-col flex-shrink-0 transition-all duration-200 z-10">
+      <!-- AI Header -->
+      <div class="p-3 border-b border-app-border flex items-center justify-between">
+        <div class="flex items-center space-x-2">
+          <span>🤖</span>
+          <span class="text-xs font-semibold text-slate-300 uppercase tracking-wider">AI Copilot</span>
+        </div>
+        <button onclick="toggleAISettings()" class="text-slate-400 hover:text-white text-xs" title="Configure AI Provider">
+          ⚙️ BYOK
+        </button>
+      </div>
+
+      <!-- Privacy Firewall Banner -->
+      <div class="bg-slate-900/80 border-b border-app-border px-3 py-1.5 flex items-center justify-between text-[11px] text-emerald-400">
+        <span class="flex items-center space-x-1">
+          <span>🔒</span>
+          <span>Zero-Row Guarantee (Schema only)</span>
+        </span>
+      </div>
+
+      <!-- Quick Action Pills -->
+      <div class="p-2 border-b border-app-border flex flex-wrap gap-1 bg-slate-900/30">
+        <button onclick="aiQuickAction('explain_query')" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2 py-1 rounded text-[11px] transition">
+          💡 Explain Query
+        </button>
+        <button onclick="aiQuickAction('optimize')" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2 py-1 rounded text-[11px] transition">
+          ⚡ Optimize Query
+        </button>
+        <button onclick="aiQuickAction('explain_plan')" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2 py-1 rounded text-[11px] transition">
+          🔍 Explain Plan
+        </button>
+      </div>
+
+      <!-- Chat History -->
+      <div id="ai-messages" class="flex-1 overflow-y-auto p-3 space-y-3 text-xs leading-relaxed">
+        <div class="bg-app-card/60 p-2.5 rounded border border-app-border text-slate-300">
+          👋 Hi! I am your <b>SqlFox Copilot</b>. Ask me to generate SQL from natural language, optimize your slow queries, or explain execution plans.
+        </div>
+      </div>
+
+      <!-- AI Prompt Input -->
+      <div class="p-3 border-t border-app-border bg-slate-900">
+        <form onsubmit="submitAIChat(event)" class="flex flex-col space-y-2">
+          <textarea id="ai-prompt-input" rows="2" class="w-full bg-app-surface p-2 text-xs text-white border border-app-border rounded outline-none resize-none focus:border-app-accent" placeholder="Ask AI (e.g. 'Show 10 users with highest orders')..."></textarea>
+          <div class="flex items-center justify-between">
+            <span id="ai-provider-badge" class="text-[10px] text-slate-500 font-mono">Ollama (local)</span>
+            <button type="submit" class="bg-app-accent hover:bg-sky-500 text-slate-950 font-bold px-3 py-1 rounded text-xs transition">
+              Send
+            </button>
+          </div>
+        </form>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- Bottom Status Bar -->
+  <footer class="h-6 bg-app-surface border-t border-app-border px-4 flex items-center justify-between text-[11px] text-slate-400 flex-shrink-0 z-20">
+    <div class="flex items-center space-x-4">
+      <span id="footer-env-badge" class="font-bold">● Ready</span>
+      <span id="footer-db-info">MySQL / SQLite</span>
+      <span id="footer-latency">Latency: --</span>
+    </div>
+    <div class="flex items-center space-x-4">
+      <span id="footer-memory">Memory: < 50MB</span>
+      <span>SqlFox v1.0</span>
+    </div>
+  </footer>
+
+  <!-- MODALS -->
+
+  <!-- 1. Safety Guard Challenge Modal -->
+  <div id="safety-challenge-modal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-slate-900 border-2 border-app-danger w-full max-w-lg rounded-lg shadow-2xl p-6 space-y-4">
+      <div class="flex items-center space-x-3 text-app-danger">
+        <span class="text-2xl">⚠️</span>
+        <h3 class="text-lg font-bold">SAFETY GUARD: DESTRUCTIVE QUERY INTERCEPTED</h3>
+      </div>
+      <p id="challenge-reason" class="text-xs text-slate-300 leading-relaxed"></p>
+      <div class="bg-slate-950 p-3 rounded font-mono text-xs text-red-300 overflow-x-auto border border-red-950" id="challenge-sql-preview"></div>
+      <div class="space-y-1">
+        <label class="text-xs font-semibold text-slate-300">
+          To proceed, type the target table name (<span id="challenge-target-name" class="text-app-danger font-mono font-bold"></span>) below:
+        </label>
+        <input type="text" id="challenge-input" class="w-full bg-slate-950 border border-slate-700 p-2 text-sm text-white font-mono rounded outline-none focus:border-app-danger" placeholder="Type table name...">
+      </div>
+      <div class="flex justify-end space-x-3 pt-2">
+        <button onclick="closeSafetyModal()" class="px-4 py-1.5 text-xs text-slate-300 hover:bg-slate-800 rounded transition">Cancel (Esc)</button>
+        <button onclick="confirmSafetyChallenge()" class="bg-app-danger hover:bg-red-600 text-white font-bold px-4 py-1.5 text-xs rounded transition shadow">Confirm & Execute (Danger)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. Impact Preview Drawer / Modal -->
+  <div id="impact-preview-modal" class="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-slate-900 border border-app-border w-full max-w-2xl rounded-lg shadow-2xl p-6 space-y-4">
+      <div class="flex items-center justify-between border-b border-app-border pb-3">
+        <div class="flex items-center space-x-2">
+          <span class="text-xl">🛡️</span>
+          <h3 class="text-base font-bold text-white">Query Impact Preview (EXPLAIN)</h3>
+        </div>
+        <button onclick="closeImpactModal()" class="text-slate-400 hover:text-white">✕</button>
+      </div>
+      <div id="impact-plan-details" class="space-y-3 text-xs">
+        <div class="bg-slate-950 p-3 rounded font-mono text-slate-300 overflow-x-auto max-h-60" id="impact-raw-plan"></div>
+      </div>
+      <div class="flex justify-end space-x-2 pt-2">
+        <button onclick="closeImpactModal()" class="px-4 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 rounded">Close</button>
+        <button onclick="closeImpactModal(); runActiveQuery(true);" class="px-4 py-1.5 text-xs bg-app-safe hover:bg-emerald-600 text-slate-950 font-bold rounded">Execute Anyway</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. New / Edit Connection Modal -->
+  <div id="connection-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-slate-900 border border-app-border w-full max-w-lg rounded-lg shadow-2xl p-6 space-y-4">
+      <h3 class="text-base font-bold text-white border-b border-app-border pb-3">Add Database Connection</h3>
+      <form onsubmit="saveConnection(event)" class="space-y-3 text-xs">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-slate-400 mb-1">Connection Name</label>
+            <input type="text" id="modal-conn-name" required placeholder="e.g. Production MySQL" class="w-full bg-slate-950 border border-slate-700 p-2 text-white rounded outline-none">
+          </div>
+          <div>
+            <label class="block text-slate-400 mb-1">Environment</label>
+            <select id="modal-conn-env" class="w-full bg-slate-950 border border-slate-700 p-2 text-white rounded outline-none">
+              <option value="Development">Development (Loose)</option>
+              <option value="Staging">Staging (Moderate)</option>
+              <option value="Production">Production (Strict & Read-Only)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-3">
+          <div>
+            <label class="block text-slate-400 mb-1">Driver</label>
+            <select id="modal-conn-driver" onchange="onDriverChange()" class="w-full bg-slate-950 border border-slate-700 p-2 text-white rounded outline-none">
+              <option value="mysql">MySQL / MariaDB</option>
+              <option value="sqlite">SQLite</option>
+            </select>
+          </div>
+          <div class="col-span-2">
+            <label id="modal-host-label" class="block text-slate-400 mb-1">Host / Path</label>
+            <input type="text" id="modal-conn-host" required placeholder="127.0.0.1 or /path/to.db" class="w-full bg-slate-950 border border-slate-700 p-2 text-white rounded outline-none font-mono">
+          </div>
+        </div>
+
+        <div id="mysql-specific-fields" class="space-y-3">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-slate-400 mb-1">Port</label>
+              <input type="number" id="modal-conn-port" value="3306" class="w-full bg-slate-950 border border-slate-700 p-2 text-white rounded outline-none font-mono">
+            </div>
+            <div>
+              <label class="block text-slate-400 mb-1">Database Name</label>
+              <input type="text" id="modal-conn-db" placeholder="app_db" class="w-full bg-slate-950 border border-slate-700 p-2 text-white rounded outline-none font-mono">
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-slate-400 mb-1">User</label>
+              <input type="text" id="modal-conn-user" placeholder="root" class="w-full bg-slate-950 border border-slate-700 p-2 text-white rounded outline-none font-mono">
+            </div>
+            <div>
+              <label class="block text-slate-400 mb-1">Password</label>
+              <input type="password" id="modal-conn-pass" placeholder="••••••••" class="w-full bg-slate-950 border border-slate-700 p-2 text-white rounded outline-none font-mono">
+            </div>
+          </div>
+        </div>
+
+        <div class="flex justify-between items-center pt-3 border-t border-app-border">
+          <button type="button" onclick="testConnectionFromModal()" class="text-xs text-sky-400 hover:text-sky-300">⚡ Test Connection</button>
+          <div class="space-x-2">
+            <button type="button" onclick="closeConnModal()" class="px-3 py-1.5 bg-slate-800 text-slate-300 rounded">Cancel</button>
+            <button type="submit" class="px-4 py-1.5 bg-app-accent text-slate-950 font-bold rounded">Save Connection</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 4. DDL Viewer Modal -->
+  <div id="ddl-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-slate-900 border border-app-border w-full max-w-3xl rounded-lg shadow-2xl p-6 space-y-4">
+      <div class="flex items-center justify-between border-b border-app-border pb-3">
+        <h3 id="ddl-modal-title" class="text-base font-bold text-white font-mono">CREATE TABLE</h3>
+        <button onclick="closeDDLModal()" class="text-slate-400 hover:text-white">✕</button>
+      </div>
+      <pre id="ddl-modal-content" class="bg-slate-950 p-4 rounded text-xs font-mono text-sky-200 overflow-x-auto max-h-96 border border-slate-800"></pre>
+      <div class="flex justify-end space-x-2">
+        <button onclick="copyDDLToClipboard()" class="px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 rounded">Copy to Clipboard</button>
+        <button onclick="insertDDLToEditor()" class="px-3 py-1.5 text-xs bg-app-accent text-slate-950 font-bold rounded">Insert to Editor</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. Vault Export/Import Modal -->
+  <div id="vault-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-slate-900 border border-app-border w-full max-w-md rounded-lg shadow-2xl p-6 space-y-4">
+      <div class="flex items-center justify-between border-b border-app-border pb-3">
+        <h3 class="text-base font-bold text-white">Connection Vault Migration</h3>
+        <button onclick="closeVaultModal()" class="text-slate-400 hover:text-white">✕</button>
+      </div>
+      <div class="space-y-4 text-xs">
+        <div class="p-3 bg-slate-950 rounded border border-slate-800 space-y-2">
+          <h4 class="font-bold text-slate-200">Export Encrypted Vault (.sqlfox-vault)</h4>
+          <input type="password" id="export-passphrase" placeholder="Choose an export passphrase" class="w-full bg-slate-900 border border-slate-700 p-2 text-white rounded outline-none">
+          <button onclick="doExportVault()" class="w-full bg-app-accent text-slate-950 font-bold py-1.5 rounded">Download Vault File</button>
+        </div>
+        <div class="p-3 bg-slate-950 rounded border border-slate-800 space-y-2">
+          <h4 class="font-bold text-slate-200">Import Vault Archive</h4>
+          <input type="file" id="import-file" accept=".sqlfox-vault,.json" class="w-full text-slate-400 text-xs">
+          <input type="password" id="import-passphrase" placeholder="Enter the export passphrase" class="w-full bg-slate-900 border border-slate-700 p-2 text-white rounded outline-none">
+          <button onclick="doImportVault()" class="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 py-1.5 rounded">Import Connections</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6. Command Palette Modal (Ctrl+K) -->
+  <div id="command-palette-modal" class="fixed inset-0 bg-black/70 flex items-start justify-center pt-24 p-4 z-50 hidden">
+    <div class="bg-slate-900 border border-app-border w-full max-w-xl rounded-lg shadow-2xl overflow-hidden">
+      <div class="p-3 border-b border-app-border flex items-center space-x-2">
+        <span>🔍</span>
+        <input type="text" id="palette-input" onkeyup="filterPaletteActions(event)" placeholder="Type a command or table name..." class="w-full bg-transparent text-white outline-none text-sm">
+        <kbd class="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400">Esc</kbd>
+      </div>
+      <div id="palette-actions-list" class="max-h-72 overflow-y-auto p-2 text-xs divide-y divide-slate-800/50">
+        <!-- Palette items injected by JS -->
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- Application State ---
+    let connections = [];
+    let activeConnection = null;
+    let activeSession = null;
+    let tabs = [
+      { id: 'tab-1', title: 'Query 1.sql', sql: 'SELECT * FROM users LIMIT 50;', isTableViewer: false }
+    ];
+    let activeTabId = 'tab-1';
+    let currentResults = [];
+    let currentColumns = [];
+    let pendingDestructiveSQL = null;
+    let pendingDestructiveResult = null;
+    let lastKeysetKey = null;
+
+    // AI Settings State (stored in localStorage)
+    let aiConfig = JSON.parse(localStorage.getItem('sqlfox_ai_config') || '{"provider":"ollama","model":"llama3","apiKey":"","endpoint":""}');
+
+    // --- Lifecycle Initialization ---
+    window.addEventListener('DOMContentLoaded', async () => {
+      await loadConnections();
+      renderTabs();
+      setupKeyboardShortcuts();
+      updateFooterStats();
+    });
+
+    // --- Connections & Session Management ---
+    async function loadConnections() {
+      try {
+        const res = await fetch('/api/connections');
+        connections = await res.json();
+        renderConnectionsTree();
+      } catch (err) {
+        console.error('Failed to load connections:', err);
+      }
+    }
+
+    function renderConnectionsTree() {
+      const el = document.getElementById('connections-tree');
+      if (!connections || connections.length === 0) {
+        el.innerHTML = `<div class="text-slate-500 text-center py-4">No saved connections.<br><button onclick="openNewConnModal()" class="text-app-accent hover:underline mt-1">+ Create one</button></div>`;
+        return;
+      }
+
+      const groups = { Production: [], Staging: [], Development: [] };
+      connections.forEach(c => {
+        const env = c.environment || 'Development';
+        if (!groups[env]) groups[env] = [];
+        groups[env].push(c);
+      });
+
+      let html = '';
+      for (const [env, list] of Object.entries(groups)) {
+        if (list.length === 0) continue;
+        const envColor = env === 'Production' ? 'text-app-danger' : (env === 'Staging' ? 'text-app-warning' : 'text-app-safe');
+        html += `<div class="font-bold ${envColor} uppercase text-[10px] mt-2 mb-1">● ${env}</div>`;
+        list.forEach(c => {
+          const isAct = activeConnection && activeConnection.id === c.id;
+          html += `
+            <div onclick="selectConnection('${c.id}')" class="flex items-center justify-between px-2 py-1 rounded cursor-pointer ${isAct ? 'bg-sky-950/60 text-app-accent font-semibold border border-sky-800' : 'hover:bg-slate-800 text-slate-300'}">
+              <span class="truncate">🗄️ ${escapeHtml(c.name)}</span>
+              <span class="text-[10px] text-slate-500 font-mono">${c.driver}</span>
+            </div>
+          `;
+        });
+      }
+      el.innerHTML = html;
+    }
+
+    async function selectConnection(connId) {
+      const conn = connections.find(c => c.id === connId);
+      if (!conn) return;
+      activeConnection = conn;
+      renderConnectionsTree();
+
+      // Update badge
+      const envClass = conn.environment === 'Production' ? 'bg-red-950 text-red-400 border-red-800' :
+                       (conn.environment === 'Staging' ? 'bg-amber-950 text-amber-400 border-amber-800' : 'bg-emerald-950 text-emerald-400 border-emerald-800');
+      document.getElementById('active-conn-badge').innerHTML = `
+        <span class="px-2 py-0.5 rounded font-bold border ${envClass}">${conn.environment.toUpperCase()}</span>
+        <span class="font-semibold text-white">${escapeHtml(conn.name)}</span>
+      `;
+
+      // Connect session
+      try {
+        const res = await fetch(`/api/session/connect/${conn.id}`, { method: 'POST' });
+        activeSession = await res.json();
+        updateReadOnlyUI(activeSession.read_only);
+        await loadSchemaTree(conn.id);
+        updateFooterStats();
+      } catch (err) {
+        alert('Failed to connect: ' + err.message);
+      }
+    }
+
+    async function loadSchemaTree(connId) {
+      const treeEl = document.getElementById('schema-tree');
+      treeEl.innerHTML = '<div class="text-slate-500 text-center py-4">Inspecting schema...</div>';
+      try {
+        const res = await fetch(`/api/session/${connId}/schema`);
+        const schema = await res.json();
+        renderSchemaTree(schema);
+      } catch (err) {
+        treeEl.innerHTML = `<div class="text-app-danger p-2">Error: ${err.message}</div>`;
+      }
+    }
+
+    function renderSchemaTree(schema) {
+      const treeEl = document.getElementById('schema-tree');
+      if (!schema || !schema.tables || schema.tables.length === 0) {
+        treeEl.innerHTML = '<div class="text-slate-500 text-center py-4">No tables found.</div>';
+        document.getElementById('table-count-badge').textContent = '0';
+        return;
+      }
+
+      document.getElementById('table-count-badge').textContent = schema.tables.length;
+      let html = '';
+      schema.tables.forEach(t => {
+        html += `
+          <div class="rounded hover:bg-slate-800/60 p-1 group">
+            <div class="flex items-center justify-between cursor-pointer" onclick="openTableViewer('${escapeHtml(t.name)}')">
+              <span class="flex items-center space-x-1.5 truncate text-slate-200 group-hover:text-white">
+                <span>📋</span>
+                <span>${escapeHtml(t.name)}</span>
+              </span>
+              <div class="flex items-center space-x-1">
+                <span class="text-[10px] text-slate-500 font-mono">${t.row_count > 0 ? t.row_count + 'r' : ''}</span>
+                <button onclick="event.stopPropagation(); viewTableDDL('${escapeHtml(t.name)}')" class="opacity-0 group-hover:opacity-100 hover:text-app-accent px-1" title="View DDL">📄</button>
+              </div>
+            </div>
+          </div>
+        `;
+      });
+      treeEl.innerHTML = html;
+    }
+
+    async function refreshSchema() {
+      if (!activeConnection) return;
+      await fetch(`/api/session/${activeConnection.id}/refresh-schema`, { method: 'POST' });
+      await loadSchemaTree(activeConnection.id);
+    }
+
+    // --- Tabs & Editor ---
+    function renderTabs() {
+      const container = document.getElementById('tabs-container');
+      container.innerHTML = tabs.map(t => `
+        <div onclick="switchTab('${t.id}')" class="flex items-center space-x-1 px-3 py-1 rounded cursor-pointer text-xs transition ${t.id === activeTabId ? 'bg-app-bg text-app-accent font-semibold border-t-2 border-app-accent' : 'hover:bg-slate-800 text-slate-400'}">
+          <span>${t.isTableViewer ? '📊' : '📝'}</span>
+          <span class="truncate max-w-[120px]">${escapeHtml(t.title)}</span>
+          <button onclick="event.stopPropagation(); closeTab('${t.id}')" class="hover:text-red-400 pl-1">✕</button>
+        </div>
+      `).join('');
+
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (activeTab && !activeTab.isTableViewer) {
+        document.getElementById('sql-editor-textarea').value = activeTab.sql || '';
+      }
+    }
+
+    function switchTab(tabId) {
+      // Save current SQL
+      const curr = tabs.find(t => t.id === activeTabId);
+      if (curr && !curr.isTableViewer) {
+        curr.sql = document.getElementById('sql-editor-textarea').value;
+      }
+      activeTabId = tabId;
+      renderTabs();
+    }
+
+    function addNewQueryTab() {
+      const newId = 'tab-' + Date.now();
+      tabs.push({ id: newId, title: `Query ${tabs.length + 1}.sql`, sql: 'SELECT * FROM users LIMIT 50;', isTableViewer: false });
+      switchTab(newId);
+    }
+
+    function closeTab(tabId) {
+      if (tabs.length === 1) return;
+      tabs = tabs.filter(t => t.id !== tabId);
+      if (activeTabId === tabId) {
+        activeTabId = tabs[0].id;
+      }
+      renderTabs();
+    }
+
+    function openTableViewer(tableName) {
+      let tab = tabs.find(t => t.tableName === tableName);
+      if (!tab) {
+        tab = {
+          id: 'tab-tbl-' + tableName,
+          title: tableName,
+          isTableViewer: true,
+          tableName: tableName,
+          sql: `SELECT * FROM \`${tableName}\` LIMIT 50;`
+        };
+        tabs.push(tab);
+      }
+      switchTab(tab.id);
+      loadTableRows(tableName);
+    }
+
+    // --- Query Execution & Safety Guard ---
+    async function runActiveQuery(confirmed = false, challengeInput = '') {
+      if (!activeConnection) {
+        alert('Please select or create a connection first.');
+        return;
+      }
+
+      const sql = document.getElementById('sql-editor-textarea').value.trim();
+      if (!sql) return;
+
+      setQueryRunning(true);
+
+      try {
+        const res = await fetch(`/api/session/${activeConnection.id}/execute`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sql: sql,
+            confirmed: confirmed,
+            challenge_input: challengeInput
+          })
+        });
+
+        const data = await res.json();
+        setQueryRunning(false);
+
+        if (res.status === 422 && data.blocked) {
+          // Safety Guard Triggered!
+          openSafetyModal(sql, data.inspection);
+          return;
+        }
+
+        if (!res.ok) {
+          alert('Error: ' + (data.error || 'Execution failed'));
+          return;
+        }
+
+        if (data.type === 'query') {
+          renderGridResults(data.columns, data.rows);
+          document.getElementById('grid-result-stats').textContent = `${data.row_count} rows (${data.execution_ms}ms)`;
+        } else {
+          document.getElementById('grid-result-stats').textContent = `${data.message} (${data.execution_ms}ms)`;
+          if (data.backup_file) {
+            alert(`Query succeeded!\nAutomated Backup Snapshot created at:\n${data.backup_file}`);
+          }
+          await refreshSchema();
+        }
+      } catch (err) {
+        setQueryRunning(false);
+        alert('Network or execution error: ' + err.message);
+      }
+    }
+
+    async function inspectActiveQuery() {
+      if (!activeConnection) return;
+      const sql = document.getElementById('sql-editor-textarea').value.trim();
+      const res = await fetch(`/api/session/${activeConnection.id}/inspect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql })
+      });
+      const data = await res.json();
+      alert(`Safety Inspection:\nRisk: ${data.risk_level}\nDestructive: ${data.is_destructive}\nRequires Challenge: ${data.requires_challenge}\nReason: ${data.reason || 'Safe to execute'}`);
+    }
+
+    async function explainActiveQuery() {
+      if (!activeConnection) return;
+      const sql = document.getElementById('sql-editor-textarea').value.trim();
+      const res = await fetch(`/api/session/${activeConnection.id}/explain`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql })
+      });
+      const data = await res.json();
+      openImpactModal(data);
+    }
+
+    function setQueryRunning(isRunning) {
+      const btn = document.getElementById('cancel-query-btn');
+      const status = document.getElementById('query-status-text');
+      if (isRunning) {
+        status.textContent = 'Executing...';
+        btn.classList.remove('hidden');
+      } else {
+        status.textContent = 'Ready';
+        btn.classList.add('hidden');
+      }
+    }
+
+    async function cancelRunningQuery() {
+      if (!activeConnection) return;
+      await fetch(`/api/session/${activeConnection.id}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query_id: 'active' })
+      });
+      setQueryRunning(false);
+    }
+
+    // --- Safety Challenge Modal ---
+    function openSafetyModal(sql, inspection) {
+      pendingDestructiveSQL = sql;
+      pendingDestructiveResult = inspection;
+      document.getElementById('challenge-reason').textContent = inspection.reason;
+      document.getElementById('challenge-sql-preview').textContent = sql;
+      document.getElementById('challenge-target-name').textContent = inspection.target_table;
+      document.getElementById('challenge-input').value = '';
+      document.getElementById('safety-challenge-modal').classList.remove('hidden');
+      setTimeout(() => document.getElementById('challenge-input').focus(), 100);
+    }
+
+    function closeSafetyModal() {
+      document.getElementById('safety-challenge-modal').classList.add('hidden');
+      pendingDestructiveSQL = null;
+      pendingDestructiveResult = null;
+    }
+
+    function confirmSafetyChallenge() {
+      const typed = document.getElementById('challenge-input').value.trim();
+      if (typed !== pendingDestructiveResult.target_table) {
+        alert(`Verification failed! You typed '${typed}', but expected '${pendingDestructiveResult.target_table}'.`);
+        return;
+      }
+      closeSafetyModal();
+      runActiveQuery(true, typed);
+    }
+
+    // --- Impact Preview Modal ---
+    function openImpactModal(planData) {
+      document.getElementById('impact-raw-plan').textContent = JSON.stringify(planData, null, 2);
+      document.getElementById('impact-preview-modal').classList.remove('hidden');
+    }
+
+    function closeImpactModal() {
+      document.getElementById('impact-preview-modal').classList.add('hidden');
+    }
+
+    // --- Data Grid Rendering & Inline Edit ---
+    async function loadTableRows(tableName) {
+      if (!activeConnection) return;
+      try {
+        const res = await fetch(`/api/session/${activeConnection.id}/table/${tableName}/rows?limit=50`);
+        const data = await res.json();
+        renderGridResults(data.columns, data.rows, data.pk_col, tableName);
+      } catch (err) {
+        console.error('Failed to load rows:', err);
+      }
+    }
+
+    function renderGridResults(cols, rows, pkCol = null, tableName = null) {
+      currentColumns = cols || [];
+      currentResults = rows || [];
+
+      const thead = document.getElementById('grid-thead');
+      const tbody = document.getElementById('grid-tbody');
+
+      if (!cols || cols.length === 0) {
+        thead.innerHTML = '<tr><th class="p-2 pl-4">No columns</th></tr>';
+        tbody.innerHTML = '<tr><td class="p-4 text-center text-slate-500">Zero records returned.</td></tr>';
+        return;
+      }
+
+      // Render Headers
+      thead.innerHTML = '<tr>' + cols.map((c, i) => `
+        <th class="p-2 px-3 font-semibold text-xs border-r border-slate-800 cursor-pointer hover:text-white" onclick="sortColumn(${i})">
+          <div class="flex items-center justify-between space-x-1">
+            <span>${escapeHtml(c.name)}</span>
+            <span class="text-[10px] text-slate-500 font-mono">${c.type}</span>
+          </div>
+        </th>
+      `).join('') + '</tr>';
+
+      // Render Rows
+      if (!rows || rows.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="${cols.length}" class="p-4 text-center text-slate-500">Zero rows returned.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = rows.map((row, rIdx) => `
+        <tr class="hover:bg-slate-800/40 transition">
+          ${row.map((val, cIdx) => `
+            <td class="p-1.5 px-3 border-r border-slate-800/40 truncate max-w-xs grid-cell group" ondblclick="startInlineEdit(this, ${rIdx}, ${cIdx}, '${pkCol || ''}', '${tableName || ''}')">
+              <span class="cell-val">${val === null ? '<span class="text-slate-500 italic">NULL</span>' : escapeHtml(String(val))}</span>
+            </td>
+          `).join('')}
+        </tr>
+      `).join('');
+    }
+
+    function startInlineEdit(td, rIdx, cIdx, pkCol, tableName) {
+      if (activeSession && activeSession.read_only) {
+        alert('Session is in READ-ONLY mode. Unlock first.');
+        return;
+      }
+
+      const currentVal = currentResults[rIdx][cIdx];
+      const col = currentColumns[cIdx];
+      td.innerHTML = `
+        <input type="text" value="${currentVal === null ? '' : escapeHtml(String(currentVal))}" class="w-full bg-slate-950 text-sky-200 border border-app-accent p-0.5 rounded outline-none font-mono text-xs">
+      `;
+      const input = td.querySelector('input');
+      input.focus();
+
+      input.addEventListener('keydown', async (e) => {
+        if (e.key === 'Enter') {
+          const newVal = input.value;
+          td.innerHTML = escapeHtml(newVal);
+          currentResults[rIdx][cIdx] = newVal;
+
+          // Save to backend if pkCol known
+          if (pkCol && tableName) {
+            const pkIdx = currentColumns.findIndex(c => c.name === pkCol);
+            const pkVal = currentResults[rIdx][pkIdx];
+            await fetch(`/api/session/${activeConnection.id}/cell-edit`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                table: tableName,
+                column: col.name,
+                value: newVal,
+                pk_column: pkCol,
+                pk_value: pkVal
+              })
+            });
+          }
+        } else if (e.key === 'Escape') {
+          td.innerHTML = escapeHtml(String(currentVal));
+        }
+      });
+    }
+
+    // --- ReadOnly Mode ---
+    async function toggleReadOnly() {
+      if (!activeConnection) return;
+      const res = await fetch(`/api/session/${activeConnection.id}/toggle-readonly`, { method: 'POST' });
+      const data = await res.json();
+      activeSession.read_only = data.read_only;
+      updateReadOnlyUI(data.read_only);
+    }
+
+    function updateReadOnlyUI(isReadOnly) {
+      const btn = document.getElementById('readonly-toggle-btn');
+      const icon = document.getElementById('readonly-icon');
+      const text = document.getElementById('readonly-text');
+      btn.classList.remove('hidden');
+
+      if (isReadOnly) {
+        btn.className = 'px-2.5 py-1 rounded font-medium transition border flex items-center space-x-1.5 bg-red-950/60 border-red-700 text-red-300 hover:bg-red-900/60';
+        icon.textContent = '🔒';
+        text.textContent = 'Read-Only (Locked)';
+      } else {
+        btn.className = 'px-2.5 py-1 rounded font-medium transition border flex items-center space-x-1.5 bg-emerald-950/60 border-emerald-700 text-emerald-300 hover:bg-emerald-900/60';
+        icon.textContent = '🔓';
+        text.textContent = 'Write Allowed';
+      }
+    }
+
+    // --- AI Assistant ---
+    async function submitAIChat(e) {
+      e.preventDefault();
+      const input = document.getElementById('ai-prompt-input');
+      const prompt = input.value.trim();
+      if (!prompt) return;
+
+      appendAIMessage('user', prompt);
+      input.value = '';
+
+      await callAI('chat', prompt);
+    }
+
+    async function aiQuickAction(action) {
+      const sql = document.getElementById('sql-editor-textarea').value.trim();
+      appendAIMessage('user', `Run ${action} on: \`${sql}\``);
+      await callAI(action, '', sql);
+    }
+
+    async function callAI(action, prompt = '', query = '') {
+      appendAIMessage('system', 'Thinking...');
+      try {
+        const res = await fetch('/api/ai/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: action,
+            prompt: prompt,
+            query: query || document.getElementById('sql-editor-textarea').value.trim(),
+            connection_id: activeConnection ? activeConnection.id : '',
+            provider: aiConfig.provider,
+            api_key: aiConfig.apiKey,
+            model: aiConfig.model,
+            endpoint: aiConfig.endpoint
+          })
+        });
+        const data = await res.json();
+        removeLastAIMessage();
+        if (data.error) {
+          appendAIMessage('error', data.error);
+        } else {
+          appendAIMessage('assistant', data.content);
+        }
+      } catch (err) {
+        removeLastAIMessage();
+        appendAIMessage('error', 'AI request failed: ' + err.message);
+      }
+    }
+
+    function appendAIMessage(role, text) {
+      const container = document.getElementById('ai-messages');
+      const div = document.createElement('div');
+      if (role === 'user') {
+        div.className = 'bg-sky-950/60 p-2.5 rounded border border-sky-800 text-sky-100';
+        div.innerHTML = `<b>You:</b> ${escapeHtml(text)}`;
+      } else if (role === 'assistant') {
+        div.className = 'bg-app-card p-2.5 rounded border border-app-border text-slate-200';
+        // Extract code blocks if any
+        let formatted = escapeHtml(text);
+        if (text.includes('```sql')) {
+          const match = text.match(/```sql([\s\S]*?)```/);
+          if (match) {
+            const sqlCode = match[1].trim();
+            formatted = formatted.replace(/```sql[\s\S]*?```/, `
+              <div class="bg-slate-950 p-2 my-2 rounded font-mono text-sky-300 text-xs border border-slate-800">
+                ${escapeHtml(sqlCode)}
+              </div>
+              <button onclick="insertSQLToEditor('${escapeHtml(sqlCode.replace(/'/g, "\\'"))}')" class="bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold px-2 py-0.5 rounded text-[10px]">
+                Insert to Editor
+              </button>
+            `);
+          }
+        }
+        div.innerHTML = `<b>Copilot:</b> ${formatted}`;
+      } else {
+        div.className = 'text-slate-500 italic text-[11px]';
+        div.textContent = text;
+      }
+      container.appendChild(div);
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function removeLastAIMessage() {
+      const container = document.getElementById('ai-messages');
+      if (container.lastChild) container.removeChild(container.lastChild);
+    }
+
+    function insertSQLToEditor(sql) {
+      document.getElementById('sql-editor-textarea').value = sql;
+      runActiveQuery();
+    }
+
+    // --- Modals & Utilities ---
+    function openNewConnModal() {
+      document.getElementById('connection-modal').classList.remove('hidden');
+    }
+    function closeConnModal() {
+      document.getElementById('connection-modal').classList.add('hidden');
+    }
+    function onDriverChange() {
+      const d = document.getElementById('modal-conn-driver').value;
+      const mysqlFields = document.getElementById('mysql-specific-fields');
+      const hostLabel = document.getElementById('modal-host-label');
+      if (d === 'sqlite') {
+        mysqlFields.classList.add('hidden');
+        hostLabel.textContent = 'SQLite File Path';
+      } else {
+        mysqlFields.classList.remove('hidden');
+        hostLabel.textContent = 'Host';
+      }
+    }
+
+    async function saveConnection(e) {
+      e.preventDefault();
+      const conn = {
+        name: document.getElementById('modal-conn-name').value,
+        environment: document.getElementById('modal-conn-env').value,
+        driver: document.getElementById('modal-conn-driver').value,
+        host: document.getElementById('modal-conn-host').value,
+        port: parseInt(document.getElementById('modal-conn-port').value) || 3306,
+        database_name: document.getElementById('modal-conn-db').value,
+        user: document.getElementById('modal-conn-user').value,
+        password: document.getElementById('modal-conn-pass').value
+      };
+
+      const res = await fetch('/api/connections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(conn)
+      });
+      if (res.ok) {
+        closeConnModal();
+        await loadConnections();
+      } else {
+        alert('Failed to save connection');
+      }
+    }
+
+    async function viewTableDDL(tableName) {
+      if (!activeConnection) return;
+      const res = await fetch(`/api/session/${activeConnection.id}/ddl/${tableName}`);
+      const data = await res.json();
+      document.getElementById('ddl-modal-title').textContent = `CREATE TABLE ${tableName}`;
+      document.getElementById('ddl-modal-content').textContent = data.ddl;
+      document.getElementById('ddl-modal').classList.remove('hidden');
+    }
+    function closeDDLModal() {
+      document.getElementById('ddl-modal').classList.add('hidden');
+    }
+    function copyDDLToClipboard() {
+      const text = document.getElementById('ddl-modal-content').textContent;
+      navigator.clipboard.writeText(text);
+      alert('Copied to clipboard!');
+    }
+    function insertDDLToEditor() {
+      const text = document.getElementById('ddl-modal-content').textContent;
+      document.getElementById('sql-editor-textarea').value = text;
+      closeDDLModal();
+    }
+
+    // --- Export / Import Vault ---
+    function openExportImportModal() {
+      document.getElementById('vault-modal').classList.remove('hidden');
+    }
+    function closeVaultModal() {
+      document.getElementById('vault-modal').classList.add('hidden');
+    }
+
+    async function doExportVault() {
+      const pass = document.getElementById('export-passphrase').value;
+      if (!pass) return alert('Passphrase is required');
+      const res = await fetch('/api/vault/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ export_passphrase: pass })
+      });
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'sqlfox-connections.sqlfox-vault';
+      a.click();
+      closeVaultModal();
+    }
+
+    async function doImportVault() {
+      const fileInput = document.getElementById('import-file');
+      const pass = document.getElementById('import-passphrase').value;
+      if (!fileInput.files[0] || !pass) return alert('File and passphrase required');
+
+      const text = await fileInput.files[0].text();
+      const res = await fetch('/api/vault/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ export_passphrase: pass, archive: JSON.parse(text) })
+      });
+      const data = await res.json();
+      alert(data.message || 'Imported ' + data.imported_count + ' connections');
+      closeVaultModal();
+      await loadConnections();
+    }
+
+    // --- Export Grid Results ---
+    function exportCSV() {
+      if (currentResults.length === 0) return alert('No results to export');
+      const header = currentColumns.map(c => `"${c.name}"`).join(',');
+      const rows = currentResults.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
+      const csv = [header, ...rows].join('\n');
+      downloadFile(csv, 'query-results.csv', 'text/csv');
+    }
+
+    function exportJSON() {
+      if (currentResults.length === 0) return alert('No results to export');
+      const json = JSON.stringify(currentResults, null, 2);
+      downloadFile(json, 'query-results.json', 'application/json');
+    }
+
+    function downloadFile(content, name, type) {
+      const blob = new Blob([content], { type });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      a.click();
+    }
+
+    // --- Keyboard Shortcuts ---
+    function setupKeyboardShortcuts() {
+      window.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+          e.preventDefault();
+          if (e.shiftKey) explainActiveQuery();
+          else runActiveQuery();
+        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+          e.preventDefault();
+          toggleCommandPalette();
+        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'l') {
+          e.preventDefault();
+          toggleAISidebar();
+        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+          e.preventDefault();
+          toggleLeftSidebar();
+        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 't') {
+          e.preventDefault();
+          addNewQueryTab();
+        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'w') {
+          e.preventDefault();
+          closeTab(activeTabId);
+        } else if (e.key === 'Escape') {
+          closeSafetyModal();
+          closeImpactModal();
+          closeConnModal();
+          closeDDLModal();
+          closeVaultModal();
+          closeCommandPalette();
+        }
+      });
+    }
+
+    function toggleAISidebar() {
+      document.getElementById('ai-sidebar').classList.toggle('hidden');
+    }
+    function toggleLeftSidebar() {
+      document.getElementById('left-sidebar').classList.toggle('hidden');
+    }
+    function toggleCommandPalette() {
+      const modal = document.getElementById('command-palette-modal');
+      modal.classList.toggle('hidden');
+      if (!modal.classList.contains('hidden')) {
+        document.getElementById('palette-input').value = '';
+        renderPaletteActions('');
+        document.getElementById('palette-input').focus();
+      }
+    }
+    function closeCommandPalette() {
+      document.getElementById('command-palette-modal').classList.add('hidden');
+    }
+
+    function renderPaletteActions(filter) {
+      const actions = [
+        { name: 'Run Query', shortcut: 'Ctrl+Enter', run: () => runActiveQuery() },
+        { name: 'Explain Query Plan', shortcut: 'Ctrl+Shift+Enter', run: () => explainActiveQuery() },
+        { name: 'New Query Tab', shortcut: 'Ctrl+T', run: () => addNewQueryTab() },
+        { name: 'New Connection', shortcut: '', run: () => openNewConnModal() },
+        { name: 'Toggle Read-Only Mode', shortcut: '', run: () => toggleReadOnly() },
+        { name: 'Export Vault (.sqlfox-vault)', shortcut: '', run: () => openExportImportModal() },
+        { name: 'Toggle AI Copilot', shortcut: 'Ctrl+L', run: () => toggleAISidebar() }
+      ];
+
+      const list = document.getElementById('palette-actions-list');
+      const filtered = actions.filter(a => a.name.toLowerCase().includes(filter.toLowerCase()));
+      list.innerHTML = filtered.map(a => `
+        <div onclick="executePaletteAction('${a.name}')" class="p-2 flex items-center justify-between hover:bg-slate-800 rounded cursor-pointer">
+          <span class="text-slate-200">${a.name}</span>
+          <kbd class="text-[10px] text-slate-500 font-mono">${a.shortcut}</kbd>
+        </div>
+      `).join('');
+    }
+
+    function filterPaletteActions(e) {
+      renderPaletteActions(e.target.value);
+    }
+
+    function executePaletteAction(name) {
+      closeCommandPalette();
+      if (name === 'Run Query') runActiveQuery();
+      else if (name === 'Explain Query Plan') explainActiveQuery();
+      else if (name === 'New Query Tab') addNewQueryTab();
+      else if (name === 'New Connection') openNewConnModal();
+      else if (name === 'Toggle Read-Only Mode') toggleReadOnly();
+      else if (name === 'Export Vault (.sqlfox-vault)') openExportImportModal();
+      else if (name === 'Toggle AI Copilot') toggleAISidebar();
+    }
+
+    function updateFooterStats() {
+      if (activeConnection) {
+        document.getElementById('footer-env-badge').textContent = `● ${activeConnection.environment}`;
+        document.getElementById('footer-env-badge').className = activeConnection.environment === 'Production' ? 'font-bold text-app-danger' : 'font-bold text-app-safe';
+        document.getElementById('footer-db-info').textContent = `${activeConnection.driver.toUpperCase()} (${activeConnection.host || activeConnection.database_name})`;
+      }
+    }
+
+    function escapeHtml(str) {
+      return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+  </script>
+</body>
+</html>

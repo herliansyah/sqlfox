@@ -1,0 +1,23 @@
+# Binaries
+sqlfox
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Node / Frontend
+node_modules/
+web/node_modules/
+
+# Local databases & logs
+*.db
+*.db-journal
+*.db-wal
+*.sqlite
+*.log
+.scratch/backups/
+
+# System
+.DS_Store
+Thumbs.db
