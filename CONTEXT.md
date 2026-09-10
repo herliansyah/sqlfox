@@ -89,3 +89,22 @@ _Avoid_: API proxy, SaaS key
 **Schema Context Window**:
 The curated, just-in-time subset of database DDL metadata supplied to AI prompts based on active queries or explicit user references.
 _Avoid_: Full schema dump, DB prompt
+
+## Editor & Autocomplete
+
+**Query Editor**:
+An integrated code editor supporting SQL syntax highlighting, line numbers, and keyboard shortcuts.
+_Avoid_: Text box, input area, raw textarea
+
+**Schema Catalog Cache**:
+An in-memory client-side cache of active database tables, columns, data types, and indexes fetched via session schema introspection.
+_Avoid_: DB dump, schema buffer, table registry
+
+**Context-Aware Completion Provider**:
+An AST-lite SQL tokenizer and suggestion engine that dynamically filters completion candidates based on caret position (e.g. table names after `FROM`/`JOIN`, columns after `SELECT`/`WHERE`, and alias resolution `alias.column`).
+_Avoid_: Word predictor, auto-suggester, flat matcher
+
+**Completion Item**:
+A ranked suggestion candidate with display label, kind badge (`[KW]`, `[TBL]`, `[COL]`, `[FN]`), and replacement text.
+_Avoid_: Autocomplete option, hint token
+

@@ -30,12 +30,93 @@
       }
     }
   </script>
+  <link rel="stylesheet" href="/vendor/codemirror/codemirror.min.css">
+  <link rel="stylesheet" href="/vendor/codemirror/addon/hint/show-hint.min.css">
+  <script src="/vendor/codemirror/codemirror.min.js"></script>
+  <script src="/vendor/codemirror/mode/sql/sql.min.js"></script>
+  <script src="/vendor/codemirror/addon/hint/show-hint.min.js"></script>
   <style>
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: #090d16; }
     ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
     ::-webkit-scrollbar-thumb:hover { background: #475569; }
     .grid-cell:hover .edit-hint { opacity: 1; }
+
+    /* CodeMirror Dark Custom Theme for SqlFox */
+    .CodeMirror {
+      height: 100% !important;
+      font-family: 'JetBrains Mono', 'Fira Code', monospace !important;
+      font-size: 13px !important;
+      line-height: 1.6 !important;
+      background: transparent !important;
+      color: #e0f2fe !important;
+    }
+    .CodeMirror-gutters {
+      background: #090d16 !important;
+      border-right: 1px solid #1e293b !important;
+    }
+    .CodeMirror-linenumber {
+      color: #475569 !important;
+      padding: 0 8px 0 4px !important;
+    }
+    .CodeMirror-cursor {
+      border-left: 2px solid #38bdf8 !important;
+    }
+    .CodeMirror-selected {
+      background: rgba(56, 189, 248, 0.2) !important;
+    }
+    .CodeMirror-focused .CodeMirror-selected {
+      background: rgba(56, 189, 248, 0.25) !important;
+    }
+    .cm-keyword { color: #f472b6 !important; font-weight: 600 !important; }
+    .cm-string { color: #34d399 !important; }
+    .cm-number { color: #fbbf24 !important; }
+    .cm-comment { color: #64748b !important; font-style: italic !important; }
+    .cm-variable { color: #e2e8f0 !important; }
+    .cm-builtin { color: #38bdf8 !important; }
+    .cm-operator { color: #94a3b8 !important; }
+
+    /* Autocomplete Popover */
+    .CodeMirror-hints {
+      position: absolute;
+      z-index: 50;
+      overflow: hidden;
+      overflow-y: auto;
+      max-height: 240px;
+      padding: 4px;
+      background: #0f172a !important;
+      border: 1px solid #334155 !important;
+      border-radius: 6px !important;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.7), 0 8px 10px -6px rgba(0, 0, 0, 0.7) !important;
+      font-family: 'JetBrains Mono', 'Fira Code', monospace !important;
+      font-size: 12px !important;
+    }
+    .CodeMirror-hint {
+      display: flex;
+      align-items: center;
+      padding: 4px 8px;
+      border-radius: 4px;
+      color: #cbd5e1 !important;
+      cursor: pointer;
+    }
+    li.CodeMirror-hint-active {
+      background: #1e293b !important;
+      color: #38bdf8 !important;
+    }
+    .cm-hint-badge {
+      font-size: 9px;
+      padding: 1px 4px;
+      border-radius: 3px;
+      margin-right: 6px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .cm-badge-kw { background: #334155; color: #94a3b8; }
+    .cm-badge-tbl { background: rgba(16, 185, 129, 0.2); color: #34d399; }
+    .cm-badge-col { background: rgba(56, 189, 248, 0.2); color: #38bdf8; }
+    .cm-badge-fn { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
+    .cm-hint-label { flex: 1; }
+    .cm-hint-type { margin-left: 8px; font-size: 10px; color: #64748b; }
   </style>
 </head>
 <body class="bg-app-bg text-slate-100 font-sans h-screen flex flex-col overflow-hidden select-none">
@@ -171,9 +252,9 @@
           </div>
         </div>
 
-        <!-- SQL Code Textarea -->
-        <div class="flex-1 relative font-mono text-sm">
-          <textarea id="sql-editor-textarea" spellcheck="false" class="w-full h-full bg-transparent p-3 text-sky-100 placeholder-slate-600 resize-none outline-none font-mono leading-relaxed" placeholder="-- Type SQL query here (Ctrl+Enter to run, Ctrl+Shift+Enter to explain)"></textarea>
+        <!-- SQL Code Editor Container -->
+        <div id="sql-editor-container" class="flex-1 relative font-mono text-sm overflow-hidden bg-app-bg/50">
+          <textarea id="sql-editor-textarea" class="hidden" placeholder="-- Type SQL query here (Ctrl+Enter to run, Ctrl+Shift+Enter to explain)"></textarea>
         </div>
       </div>
 
@@ -536,6 +617,8 @@
     let connections = [];
     let activeConnection = null;
     let activeSession = null;
+    let cmEditor = null;
+    let schemaCatalogCache = null;
     let tabs = [
       { id: 'tab-1', title: 'Query 1.sql', sql: '', isTableViewer: false }
     ];
@@ -627,6 +710,7 @@
 
     // --- Lifecycle Initialization ---
     window.addEventListener('DOMContentLoaded', async () => {
+      initCodeMirror();
       const authorized = await checkAuthStatus();
       if (authorized) {
         await loadConnections();
@@ -742,6 +826,7 @@
           : `/api/session/${connId}/schema`;
         const res = await apiFetch(url);
         const schema = await res.json();
+        schemaCatalogCache = schema;
         renderSchemaTree(schema);
       } catch (err) {
         treeEl.innerHTML = `<div class="text-app-danger p-2">Error: ${err.message}</div>`;
@@ -808,6 +893,326 @@
       await loadSchemaTree(activeConnection.id);
     }
 
+    // --- SQL Autocomplete & CodeMirror Engine ---
+    const SQL_KEYWORDS = [
+      'SELECT', 'FROM', 'WHERE', 'INSERT INTO', 'UPDATE', 'DELETE FROM',
+      'JOIN', 'INNER JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'CROSS JOIN',
+      'ON', 'GROUP BY', 'ORDER BY', 'HAVING', 'LIMIT', 'OFFSET',
+      'UNION ALL', 'UNION', 'DISTINCT', 'AS', 'AND', 'OR', 'NOT',
+      'IN', 'BETWEEN', 'LIKE', 'IS NULL', 'IS NOT NULL', 'EXISTS',
+      'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'CREATE TABLE',
+      'ALTER TABLE', 'DROP TABLE', 'TRUNCATE TABLE', 'INDEX',
+      'PRIMARY KEY', 'FOREIGN KEY', 'SET', 'VALUES', 'ASC', 'DESC',
+      'DEFAULT', 'AUTO_INCREMENT', 'DATABASE', 'SCHEMA', 'SHOW TABLES'
+    ];
+
+    const SQL_FUNCTIONS = [
+      'COUNT()', 'SUM()', 'AVG()', 'MIN()', 'MAX()', 'COALESCE()',
+      'CONCAT()', 'NOW()', 'DATE()', 'IFNULL()', 'LOWER()', 'UPPER()',
+      'SUBSTRING()', 'TRIM()', 'ROUND()', 'LENGTH()', 'CURRENT_TIMESTAMP()'
+    ];
+
+    function computeSQLCompletions(fullText, cursorIndex, schema) {
+      // Statement-bounded scoping: find statement surrounding cursor between semicolons
+      const lastSemi = fullText.lastIndexOf(';', cursorIndex > 0 ? cursorIndex - 1 : 0);
+      const nextSemi = fullText.indexOf(';', cursorIndex);
+      const stmtStart = lastSemi >= 0 ? lastSemi + 1 : 0;
+      const stmtEnd = nextSemi >= 0 ? nextSemi : fullText.length;
+      const stmt = fullText.slice(stmtStart, stmtEnd);
+      const textBeforeCursor = fullText.slice(0, cursorIndex);
+      const textBeforeInStmt = fullText.slice(stmtStart, cursorIndex);
+
+      // Extract table aliases in active statement: e.g. FROM users u, JOIN orders AS o
+      const aliases = {};
+      const aliasRegex = /\b(?:FROM|JOIN)\s+([`"]?[a-zA-Z0-9_]+[`"]?)(?:\s+(?:AS\s+)?([`"]?[a-zA-Z0-9_]+[`"]?))?/gi;
+      let match;
+      while ((match = aliasRegex.exec(stmt)) !== null) {
+        const rawTable = match[1].replace(/[`"]/g, '');
+        const rawAlias = match[2] ? match[2].replace(/[`"]/g, '') : null;
+        if (rawAlias && !/^(WHERE|ON|JOIN|LEFT|RIGHT|INNER|GROUP|ORDER|LIMIT|SET)$/i.test(rawAlias)) {
+          aliases[rawAlias.toLowerCase()] = rawTable;
+        }
+      }
+
+      // Detect dot-dereferencing or partial word
+      const lineUpToCursor = textBeforeCursor.slice(textBeforeCursor.lastIndexOf('\n') + 1);
+      const dotMatch = lineUpToCursor.match(/([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]*)$/);
+      const wordMatch = lineUpToCursor.match(/([a-zA-Z0-9_]+)$/);
+
+      let qualifier = null;
+      let partial = '';
+
+      if (dotMatch) {
+        qualifier = dotMatch[1];
+        partial = dotMatch[2] || '';
+      } else if (wordMatch) {
+        partial = wordMatch[1] || '';
+      }
+
+      const lowerPartial = partial.toLowerCase();
+      let candidates = [];
+
+      // 1. If qualifier present (alias. or table.) -> only suggest columns of that table
+      if (qualifier) {
+        const targetTableName = aliases[qualifier.toLowerCase()] || qualifier;
+        let matchedTable = null;
+        if (schema && schema.tables) {
+          matchedTable = schema.tables.find(t => t.name.toLowerCase() === targetTableName.toLowerCase());
+        }
+
+        if (matchedTable && matchedTable.columns) {
+          matchedTable.columns.forEach(col => {
+            const lowerCol = col.name.toLowerCase();
+            if (!lowerPartial || lowerCol.includes(lowerPartial)) {
+              let score = 50;
+              if (lowerCol === lowerPartial) score += 100;
+              else if (lowerCol.startsWith(lowerPartial)) score += 50;
+              candidates.push({
+                text: col.name,
+                displayText: col.name,
+                kind: 'COL',
+                badgeClass: 'cm-badge-col',
+                type: col.type || '',
+                score: score
+              });
+            }
+          });
+        }
+        candidates.sort((a, b) => b.score - a.score || a.text.localeCompare(b.text));
+        return {
+          list: candidates,
+          partial: partial,
+          hasDot: true
+        };
+      }
+
+      // 2. No qualifier: Context detection based on preceding clause in statement before cursor
+      const cleanBefore = textBeforeInStmt.replace(/--.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+      const keywords = [...cleanBefore.matchAll(/\b(SELECT|FROM|JOIN|LEFT\s+JOIN|RIGHT\s+JOIN|INNER\s+JOIN|WHERE|ON|GROUP\s+BY|ORDER\s+BY|SET|INTO|UPDATE)\b/gi)];
+      const clause = keywords.length > 0 ? keywords[keywords.length - 1][1].toUpperCase().replace(/\s+/g, ' ') : '';
+
+      const isTableClause = /^(FROM|JOIN|LEFT JOIN|RIGHT JOIN|INNER JOIN|INTO|UPDATE)$/.test(clause);
+      const isColumnClause = /^(SELECT|WHERE|ON|GROUP BY|ORDER BY|SET|HAVING)$/.test(clause);
+
+      // Collect all tables
+      if (schema && schema.tables) {
+        schema.tables.forEach(tbl => {
+          const lowerTbl = tbl.name.toLowerCase();
+          if (!lowerPartial || lowerTbl.includes(lowerPartial)) {
+            let score = 30;
+            if (lowerTbl === lowerPartial) score += 100;
+            else if (lowerTbl.startsWith(lowerPartial)) score += 50;
+            if (isTableClause) score += 120; // Massive boost in FROM/JOIN
+            candidates.push({
+              text: tbl.name,
+              displayText: tbl.name,
+              kind: 'TBL',
+              badgeClass: 'cm-badge-tbl',
+              type: tbl.type || 'TABLE',
+              score: score
+            });
+          }
+
+          // Collect columns if in column clause or as secondary candidates
+          if (tbl.columns) {
+            const isMentionedTable = stmt.toLowerCase().includes(tbl.name.toLowerCase());
+            tbl.columns.forEach(col => {
+              const lowerCol = col.name.toLowerCase();
+              if (!lowerPartial || lowerCol.includes(lowerPartial)) {
+                let score = 20;
+                if (lowerCol === lowerPartial) score += 100;
+                else if (lowerCol.startsWith(lowerPartial)) score += 50;
+                if (isColumnClause) score += 60;
+                if (isMentionedTable) score += 30; // Mentioned table columns prioritized!
+                candidates.push({
+                  text: col.name,
+                  displayText: `${col.name}`,
+                  kind: 'COL',
+                  badgeClass: 'cm-badge-col',
+                  type: col.type ? `${tbl.name}.${col.type}` : tbl.name,
+                  score: score
+                });
+              }
+            });
+          }
+        });
+      }
+
+      // Collect SQL Functions
+      SQL_FUNCTIONS.forEach(fn => {
+        const baseName = fn.replace('()', '');
+        const lowerFn = baseName.toLowerCase();
+        if (!lowerPartial || lowerFn.includes(lowerPartial)) {
+          let score = 25;
+          if (lowerFn === lowerPartial) score += 100;
+          else if (lowerFn.startsWith(lowerPartial)) score += 40;
+          if (isColumnClause) score += 30;
+          if (isTableClause) score -= 40;
+          candidates.push({
+            text: fn,
+            displayText: fn,
+            kind: 'FN',
+            badgeClass: 'cm-badge-fn',
+            type: 'FUNCTION',
+            score: score
+          });
+        }
+      });
+
+      // Collect SQL Keywords (UPPERCASE)
+      SQL_KEYWORDS.forEach(kw => {
+        const lowerKw = kw.toLowerCase();
+        if (!lowerPartial || lowerKw.includes(lowerPartial)) {
+          let score = 10;
+          if (lowerKw === lowerPartial) score += 100;
+          else if (lowerKw.startsWith(lowerPartial)) score += 45;
+          if (!isTableClause && !isColumnClause) score += 30;
+          candidates.push({
+            text: kw,
+            displayText: kw,
+            kind: 'KW',
+            badgeClass: 'cm-badge-kw',
+            type: 'KEYWORD',
+            score: score
+          });
+        }
+      });
+
+      // Remove duplicates, sort by score descending
+      const seen = new Set();
+      candidates = candidates.filter(item => {
+        const key = `${item.kind}:${item.text}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      candidates.sort((a, b) => b.score - a.score || a.text.localeCompare(b.text));
+
+      return {
+        list: candidates.slice(0, 50),
+        partial: partial,
+        hasDot: false
+      };
+    }
+
+    function sqlContextHint(cm) {
+      const cur = cm.getCursor();
+      const fullText = cm.getValue();
+      const cursorIndex = cm.indexFromPos(cur);
+
+      const res = computeSQLCompletions(fullText, cursorIndex, schemaCatalogCache);
+      if (!res.list || res.list.length === 0) return null;
+
+      const fromCh = cur.ch - (res.partial ? res.partial.length : 0);
+
+      return {
+        from: CodeMirror.Pos(cur.line, fromCh),
+        to: CodeMirror.Pos(cur.line, cur.ch),
+        list: res.list.map(item => ({
+          text: item.text,
+          displayText: item.displayText,
+          render: function(element, self, data) {
+            const badge = document.createElement('span');
+            badge.className = 'cm-hint-badge ' + item.badgeClass;
+            badge.textContent = item.kind;
+            element.appendChild(badge);
+
+            const label = document.createElement('span');
+            label.className = 'cm-hint-label';
+            label.textContent = item.displayText || item.text;
+            element.appendChild(label);
+
+            if (item.type) {
+              const typeSpan = document.createElement('span');
+              typeSpan.className = 'cm-hint-type';
+              typeSpan.textContent = item.type;
+              element.appendChild(typeSpan);
+            }
+          }
+        }))
+      };
+    }
+
+    function initCodeMirror() {
+      const container = document.getElementById('sql-editor-container');
+      if (!container || cmEditor || typeof CodeMirror === 'undefined') return;
+
+      cmEditor = CodeMirror(container, {
+        value: (tabs.find(t => t.id === activeTabId) || {}).sql || '',
+        mode: 'text/x-mysql',
+        lineNumbers: true,
+        matchBrackets: true,
+        autoCloseBrackets: true,
+        lineWrapping: true,
+        extraKeys: {
+          'Ctrl-Space': function(cm) {
+            cm.showHint({ hint: sqlContextHint, completeSingle: false });
+          },
+          'Ctrl-Enter': function() {
+            runActiveQuery();
+          },
+          'Cmd-Enter': function() {
+            runActiveQuery();
+          },
+          'Ctrl-Shift-Enter': function() {
+            explainActiveQuery();
+          },
+          'Cmd-Shift-Enter': function() {
+            explainActiveQuery();
+          }
+        }
+      });
+
+      cmEditor.on('inputRead', function(cm, change) {
+        if (change.origin === '+input') {
+          const ch = change.text[0];
+          if (/[a-zA-Z0-9_.]/.test(ch)) {
+            if (!cm.state.completionActive) {
+              cm.showHint({ hint: sqlContextHint, completeSingle: false });
+            }
+          }
+        }
+      });
+
+      cmEditor.on('change', function(cm) {
+        const val = cm.getValue();
+        const curr = tabs.find(t => t.id === activeTabId);
+        if (curr && !curr.isTableViewer) {
+          curr.sql = val;
+        }
+        const ta = document.getElementById('sql-editor-textarea');
+        if (ta) ta.value = val;
+      });
+    }
+
+    function getEditorSQL() {
+      if (cmEditor) return cmEditor.getValue();
+      const el = document.getElementById('sql-editor-textarea');
+      return el ? el.value : '';
+    }
+
+    function setEditorSQL(val) {
+      val = val || '';
+      if (cmEditor) {
+        if (cmEditor.getValue() !== val) {
+          cmEditor.setValue(val);
+        }
+      }
+      const el = document.getElementById('sql-editor-textarea');
+      if (el) el.value = val;
+    }
+
+    function formatActiveQuery() {
+      let sql = getEditorSQL();
+      if (!sql) return;
+      SQL_KEYWORDS.forEach(kw => {
+        const regex = new RegExp(`\\b${kw}\\b`, 'gi');
+        sql = sql.replace(regex, kw);
+      });
+      setEditorSQL(sql);
+    }
+
     // --- Tabs & Editor ---
     function renderTabs() {
       const container = document.getElementById('tabs-container');
@@ -821,15 +1226,18 @@
 
       const activeTab = tabs.find(t => t.id === activeTabId);
       if (activeTab && !activeTab.isTableViewer) {
-        document.getElementById('sql-editor-textarea').value = activeTab.sql || '';
+        setEditorSQL(activeTab.sql || '');
       }
+      setTimeout(() => {
+        if (cmEditor) cmEditor.refresh();
+      }, 10);
     }
 
     function switchTab(tabId) {
       // Save current SQL
       const curr = tabs.find(t => t.id === activeTabId);
       if (curr && !curr.isTableViewer) {
-        curr.sql = document.getElementById('sql-editor-textarea').value;
+        curr.sql = getEditorSQL();
       }
       activeTabId = tabId;
       renderTabs();
@@ -873,7 +1281,7 @@
         return;
       }
 
-      const sql = document.getElementById('sql-editor-textarea').value.trim();
+      const sql = getEditorSQL().trim();
       if (!sql) return;
 
       setQueryRunning(true);
@@ -906,6 +1314,9 @@
         if (data.type === 'query') {
           renderGridResults(data.columns, data.rows);
           document.getElementById('grid-result-stats').textContent = `${data.row_count} rows (${data.execution_ms}ms)`;
+          if (/^\s*(CREATE|ALTER|DROP|RENAME)\b/i.test(sql) && activeConnection) {
+            await refreshSchema();
+          }
         } else {
           document.getElementById('grid-result-stats').textContent = `${data.message} (${data.execution_ms}ms)`;
           if (data.backup_file) {
@@ -921,7 +1332,7 @@
 
     async function inspectActiveQuery() {
       if (!activeConnection) return;
-      const sql = document.getElementById('sql-editor-textarea').value.trim();
+      const sql = getEditorSQL().trim();
       const res = await apiFetch(`/api/session/${activeConnection.id}/inspect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -933,7 +1344,7 @@
 
     async function explainActiveQuery() {
       if (!activeConnection) return;
-      const sql = document.getElementById('sql-editor-textarea').value.trim();
+      const sql = getEditorSQL().trim();
       const res = await apiFetch(`/api/session/${activeConnection.id}/explain`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1137,7 +1548,7 @@
     }
 
     async function aiQuickAction(action) {
-      const sql = document.getElementById('sql-editor-textarea').value.trim();
+      const sql = getEditorSQL().trim();
       appendAIMessage('user', `Run ${action} on: \`${sql}\``);
       await callAI(action, '', sql);
     }
@@ -1151,7 +1562,7 @@
           body: JSON.stringify({
             action: action,
             prompt: prompt,
-            query: query || document.getElementById('sql-editor-textarea').value.trim(),
+            query: query || getEditorSQL().trim(),
             connection_id: activeConnection ? activeConnection.id : '',
             provider: aiConfig.provider,
             api_key: aiConfig.apiKey,
@@ -1211,7 +1622,7 @@
     }
 
     function insertSQLToEditor(sql) {
-      document.getElementById('sql-editor-textarea').value = sql;
+      setEditorSQL(sql);
       runActiveQuery();
     }
 
@@ -1492,7 +1903,7 @@
     }
     function insertDDLToEditor() {
       const text = document.getElementById('ddl-modal-content').textContent;
-      document.getElementById('sql-editor-textarea').value = text;
+      setEditorSQL(text);
       closeDDLModal();
     }
 
