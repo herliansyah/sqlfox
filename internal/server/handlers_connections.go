@@ -84,6 +84,11 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid connection payload: "+err.Error())
 			return
 		}
+		if conn.Password == "" && conn.ID != "" {
+			if existing, err := s.vault.GetConnection(conn.ID); err == nil {
+				conn.Password = existing.Password
+			}
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)

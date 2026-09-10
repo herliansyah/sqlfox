@@ -223,6 +223,12 @@ func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 		}
 	} else {
 		encPass = conn.EncryptedPassword
+		if encPass == "" && conn.ID != "" {
+			var existingPass string
+			if err := v.db.QueryRow(`SELECT encrypted_password FROM connections WHERE id = ?`, conn.ID).Scan(&existingPass); err == nil {
+				encPass = existingPass
+			}
+		}
 	}
 
 	if conn.SSHPassword != "" {
@@ -232,6 +238,12 @@ func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 		}
 	} else {
 		encSSHPass = conn.EncryptedSSHPassword
+		if encSSHPass == "" && conn.ID != "" {
+			var existingSSHPass string
+			if err := v.db.QueryRow(`SELECT encrypted_ssh_password FROM connections WHERE id = ?`, conn.ID).Scan(&existingSSHPass); err == nil {
+				encSSHPass = existingSSHPass
+			}
+		}
 	}
 
 	if conn.SSHKey != "" {
@@ -241,6 +253,12 @@ func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 		}
 	} else {
 		encSSHKey = conn.EncryptedSSHKey
+		if encSSHKey == "" && conn.ID != "" {
+			var existingSSHKey string
+			if err := v.db.QueryRow(`SELECT encrypted_ssh_key FROM connections WHERE id = ?`, conn.ID).Scan(&existingSSHKey); err == nil {
+				encSSHKey = existingSSHKey
+			}
+		}
 	}
 
 	useSSLInt := 0

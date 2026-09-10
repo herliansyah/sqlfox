@@ -336,8 +336,9 @@
   <!-- 3. New / Edit Connection Modal -->
   <div id="connection-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 hidden">
     <div class="bg-slate-900 border border-app-border w-full max-w-lg rounded-lg shadow-2xl p-6 space-y-4">
-      <h3 class="text-base font-bold text-white border-b border-app-border pb-3">Add Database Connection</h3>
+      <h3 id="modal-conn-title" class="text-base font-bold text-white border-b border-app-border pb-3">Add Database Connection</h3>
       <form onsubmit="saveConnection(event)" class="space-y-3 text-xs">
+        <input type="hidden" id="modal-conn-id" value="">
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="block text-slate-400 mb-1">Connection Name</label>
@@ -592,9 +593,16 @@
         list.forEach(c => {
           const isAct = activeConnection && activeConnection.id === c.id;
           html += `
-            <div onclick="selectConnection('${c.id}')" class="flex items-center justify-between px-2 py-1 rounded cursor-pointer ${isAct ? 'bg-sky-950/60 text-app-accent font-semibold border border-sky-800' : 'hover:bg-slate-800 text-slate-300'}">
-              <span class="truncate">🗄️ ${escapeHtml(c.name)}</span>
-              <span class="text-[10px] text-slate-500 font-mono">${c.driver}</span>
+            <div onclick="selectConnection('${c.id}')" class="group flex items-center justify-between px-2 py-1.5 rounded cursor-pointer ${isAct ? 'bg-sky-950/60 text-app-accent font-semibold border border-sky-800' : 'hover:bg-slate-800 text-slate-300'}">
+              <div class="flex items-center space-x-1.5 truncate">
+                <span>🗄️</span>
+                <span class="truncate">${escapeHtml(c.name)}</span>
+              </div>
+              <div class="flex items-center space-x-1">
+                <span class="text-[10px] text-slate-500 font-mono group-hover:hidden">${escapeHtml(c.driver)}</span>
+                <button onclick="event.stopPropagation(); openEditConnModal('${c.id}')" class="hidden group-hover:inline-block hover:text-white px-1 text-xs" title="Edit Connection">✏️</button>
+                <button onclick="event.stopPropagation(); deleteConnection('${c.id}')" class="hidden group-hover:inline-block hover:text-app-danger px-1 text-xs" title="Delete Connection">🗑️</button>
+              </div>
             </div>
           `;
         });
@@ -608,22 +616,42 @@
       activeConnection = conn;
       renderConnectionsTree();
 
-      // Update badge
+      // Update badge to indicate connecting status
       const envClass = conn.environment === 'Production' ? 'bg-red-950 text-red-400 border-red-800' :
                        (conn.environment === 'Staging' ? 'bg-amber-950 text-amber-400 border-amber-800' : 'bg-emerald-950 text-emerald-400 border-emerald-800');
       document.getElementById('active-conn-badge').innerHTML = `
         <span class="px-2 py-0.5 rounded font-bold border ${envClass}">${conn.environment.toUpperCase()}</span>
-        <span class="font-semibold text-white">${escapeHtml(conn.name)}</span>
+        <span class="font-semibold text-white">${escapeHtml(conn.name)} (Connecting...)</span>
       `;
+      document.getElementById('schema-tree').innerHTML = '<div class="text-slate-500 text-center py-4">Connecting to database...</div>';
 
       // Connect session
       try {
         const res = await apiFetch(`/api/session/connect/${conn.id}`, { method: 'POST' });
-        activeSession = await res.json();
+        const data = await res.json();
+        if (!res.ok) {
+          document.getElementById('active-conn-badge').innerHTML = `
+            <span class="px-2 py-0.5 rounded font-bold border bg-red-950 text-red-400 border-red-800">ERROR</span>
+            <span class="font-semibold text-white">${escapeHtml(conn.name)} (Disconnected)</span>
+          `;
+          document.getElementById('schema-tree').innerHTML = `<div class="text-app-danger p-2 text-xs">Connection Error:<br><span class="font-mono text-[11px]">${escapeHtml(data.error || 'Connection failed')}</span></div>`;
+          alert('Failed to connect: ' + (data.error || res.statusText));
+          return;
+        }
+        activeSession = data;
+        document.getElementById('active-conn-badge').innerHTML = `
+          <span class="px-2 py-0.5 rounded font-bold border ${envClass}">${conn.environment.toUpperCase()}</span>
+          <span class="font-semibold text-white">${escapeHtml(conn.name)}</span>
+        `;
         updateReadOnlyUI(activeSession.read_only);
         await loadSchemaTree(conn.id);
         updateFooterStats();
       } catch (err) {
+        document.getElementById('active-conn-badge').innerHTML = `
+          <span class="px-2 py-0.5 rounded font-bold border bg-red-950 text-red-400 border-red-800">ERROR</span>
+          <span class="font-semibold text-white">${escapeHtml(conn.name)}</span>
+        `;
+        document.getElementById('schema-tree').innerHTML = `<div class="text-app-danger p-2 text-xs">Connection Error: ${escapeHtml(err.message)}</div>`;
         alert('Failed to connect: ' + err.message);
       }
     }
@@ -1082,13 +1110,120 @@
       runActiveQuery();
     }
 
-    // --- Modals & Utilities ---
+    // --- Modals & Connection Management ---
     function openNewConnModal() {
+      document.getElementById('modal-conn-id').value = '';
+      document.getElementById('modal-conn-title').textContent = 'Add Database Connection';
+      document.getElementById('modal-conn-name').value = '';
+      document.getElementById('modal-conn-env').value = 'Development';
+      document.getElementById('modal-conn-driver').value = 'mysql';
+      document.getElementById('modal-conn-host').value = '';
+      document.getElementById('modal-conn-port').value = 3306;
+      document.getElementById('modal-conn-db').value = '';
+      document.getElementById('modal-conn-user').value = '';
+      const passEl = document.getElementById('modal-conn-pass');
+      passEl.value = '';
+      passEl.placeholder = '••••••••';
+      onDriverChange();
       document.getElementById('connection-modal').classList.remove('hidden');
     }
+
+    function openEditConnModal(connId) {
+      const conn = connections.find(c => c.id === connId);
+      if (!conn) return;
+
+      document.getElementById('modal-conn-id').value = conn.id;
+      document.getElementById('modal-conn-title').textContent = 'Edit Connection: ' + conn.name;
+      document.getElementById('modal-conn-name').value = conn.name || '';
+      document.getElementById('modal-conn-env').value = conn.environment || 'Development';
+      document.getElementById('modal-conn-driver').value = conn.driver || 'mysql';
+      document.getElementById('modal-conn-host').value = conn.host || '';
+      document.getElementById('modal-conn-port').value = conn.port || 3306;
+      document.getElementById('modal-conn-db').value = conn.database_name || '';
+      document.getElementById('modal-conn-user').value = conn.user || '';
+      const passEl = document.getElementById('modal-conn-pass');
+      passEl.value = '';
+      passEl.placeholder = '•••••••• (leave blank to keep current)';
+      onDriverChange();
+      document.getElementById('connection-modal').classList.remove('hidden');
+    }
+
     function closeConnModal() {
       document.getElementById('connection-modal').classList.add('hidden');
     }
+
+    async function deleteConnection(connId, e) {
+      if (e) e.stopPropagation();
+      const conn = connections.find(c => c.id === connId);
+      const name = conn ? conn.name : connId;
+      if (!confirm(`Are you sure you want to delete connection "${name}"?`)) {
+        return;
+      }
+      try {
+        const res = await apiFetch(`/api/connections/${connId}`, { method: 'DELETE' });
+        if (res.ok) {
+          if (activeConnection && activeConnection.id === connId) {
+            activeConnection = null;
+            activeSession = null;
+            document.getElementById('active-conn-badge').innerHTML = '<span class="text-slate-500 italic">No connection</span>';
+            document.getElementById('schema-tree').innerHTML = '<div class="text-slate-500 text-center py-4">Select a connection to view schema</div>';
+            document.getElementById('table-count-badge').textContent = '0';
+          }
+          await loadConnections();
+        } else {
+          const data = await res.json();
+          alert('Failed to delete connection: ' + (data.error || res.statusText));
+        }
+      } catch (err) {
+        alert('Failed to delete connection: ' + err.message);
+      }
+    }
+
+    async function testConnectionFromModal() {
+      const driver = document.getElementById('modal-conn-driver').value;
+      const host = document.getElementById('modal-conn-host').value.trim();
+      if (!host) {
+        alert('Host / SQLite File Path is required to test connection');
+        return;
+      }
+      let dbName = document.getElementById('modal-conn-db').value.trim();
+      if (driver === 'sqlite' && !dbName) {
+        dbName = host;
+      }
+      const connId = document.getElementById('modal-conn-id').value;
+      const payload = {
+        id: connId || undefined,
+        driver: driver,
+        host: host,
+        port: parseInt(document.getElementById('modal-conn-port').value) || 3306,
+        database_name: dbName,
+        user: document.getElementById('modal-conn-user').value.trim(),
+        password: document.getElementById('modal-conn-pass').value
+      };
+
+      const btn = document.querySelector('#connection-modal button[onclick*="testConnectionFromModal"]');
+      const origText = btn ? btn.textContent : '';
+      if (btn) btn.textContent = '⏳ Testing...';
+
+      try {
+        const res = await apiFetch('/api/connections/test-transient/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          alert(`✅ Connection successful! Latency: ${data.latency_ms}ms`);
+        } else {
+          alert(`❌ Connection failed: ${data.error || res.statusText || 'Unable to connect'}`);
+        }
+      } catch (err) {
+        alert(`❌ Connection failed: ${err.message}`);
+      } finally {
+        if (btn) btn.textContent = origText;
+      }
+    }
+
     function onDriverChange() {
       const d = document.getElementById('modal-conn-driver').value;
       const mysqlFields = document.getElementById('mysql-specific-fields');
@@ -1104,27 +1239,41 @@
 
     async function saveConnection(e) {
       e.preventDefault();
+      const connId = document.getElementById('modal-conn-id').value;
+      const driver = document.getElementById('modal-conn-driver').value;
+      const host = document.getElementById('modal-conn-host').value.trim();
+      let dbName = document.getElementById('modal-conn-db').value.trim();
+      if (driver === 'sqlite' && !dbName) {
+        dbName = host;
+      }
+
       const conn = {
-        name: document.getElementById('modal-conn-name').value,
+        id: connId || undefined,
+        name: document.getElementById('modal-conn-name').value.trim(),
         environment: document.getElementById('modal-conn-env').value,
-        driver: document.getElementById('modal-conn-driver').value,
-        host: document.getElementById('modal-conn-host').value,
+        driver: driver,
+        host: host,
         port: parseInt(document.getElementById('modal-conn-port').value) || 3306,
-        database_name: document.getElementById('modal-conn-db').value,
-        user: document.getElementById('modal-conn-user').value,
+        database_name: dbName,
+        user: document.getElementById('modal-conn-user').value.trim(),
         password: document.getElementById('modal-conn-pass').value
       };
 
-      const res = await apiFetch('/api/connections', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(conn)
-      });
-      if (res.ok) {
-        closeConnModal();
-        await loadConnections();
-      } else {
-        alert('Failed to save connection');
+      try {
+        const res = await apiFetch('/api/connections', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(conn)
+        });
+        if (res.ok) {
+          closeConnModal();
+          await loadConnections();
+        } else {
+          const data = await res.json();
+          alert('Failed to save connection: ' + (data.error || res.statusText));
+        }
+      } catch (err) {
+        alert('Failed to save connection: ' + err.message);
       }
     }
 

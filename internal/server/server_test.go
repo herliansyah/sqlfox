@@ -146,4 +146,40 @@ func TestServer_API_Lifecycle(t *testing.T) {
 		t.Fatalf("Toggle read-only failed: %v", err)
 	}
 	resp.Body.Close()
+
+	// 9. Test Transient Connection Test endpoint
+	testTransientPayload := vault.ConnectionRecord{
+		Driver:       "sqlite",
+		DatabaseName: targetDB,
+	}
+	testBody, _ := json.Marshal(testTransientPayload)
+	resp, err = client.Post(ts.URL+"/api/connections/test-transient/test", "application/json", bytes.NewReader(testBody))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /api/connections/test-transient/test failed: %v, status: %d", err, resp.StatusCode)
+	}
+	var testResult struct {
+		Success bool `json:"success"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&testResult)
+	resp.Body.Close()
+	if !testResult.Success {
+		t.Fatalf("expected transient connection test to succeed")
+	}
+
+	// 10. Update Connection (editing connection name)
+	savedConn.Name = "Updated SQLite Database"
+	updateBody, _ := json.Marshal(savedConn)
+	resp, err = client.Post(ts.URL+"/api/connections", "application/json", bytes.NewReader(updateBody))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST update connection failed: %v, status: %d", err, resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// 11. Delete Connection
+	reqDelete, _ := http.NewRequest("DELETE", fmt.Sprintf("%s/api/connections/%s", ts.URL, savedConn.ID), nil)
+	resp, err = client.Do(reqDelete)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("DELETE connection failed: %v, status: %d", err, resp.StatusCode)
+	}
+	resp.Body.Close()
 }
