@@ -1,0 +1,51 @@
+package main
+
+import (
+	"fmt"
+	"net"
+	"testing"
+
+	"sqlfox/internal/driver"
+)
+
+func TestPortHunting(t *testing.T) {
+	// 1. Pre-occupy a port
+	l1, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l1.Close()
+
+	busyPort := l1.Addr().(*net.TCPAddr).Port
+
+	// 2. Call listenWithPortHunting starting at busyPort
+	l2, pickedPort, err := listenWithPortHunting("127.0.0.1", busyPort, 10)
+	if err != nil {
+		t.Fatalf("listenWithPortHunting failed: %v", err)
+	}
+	defer l2.Close()
+
+	if pickedPort == busyPort {
+		t.Fatalf("expected port hunting to skip busy port %d, but got %d", busyPort, pickedPort)
+	}
+
+	if pickedPort != busyPort+1 {
+		t.Logf("picked subsequent free port: %d (busy: %d)", pickedPort, busyPort)
+	}
+}
+
+func TestGetLocalNetworkIP(t *testing.T) {
+	ip := getLocalNetworkIP()
+	fmt.Printf("Detected LAN IP: %s\n", ip)
+}
+
+func TestDriversRegisteredInMain(t *testing.T) {
+	for _, driverName := range []string{"mysql", "mariadb", "sqlite"} {
+		t.Run(driverName, func(t *testing.T) {
+			_, err := driver.GetDriver(driverName)
+			if err != nil {
+				t.Fatalf("❌ Connection failed: %v", err)
+			}
+		})
+	}
+}

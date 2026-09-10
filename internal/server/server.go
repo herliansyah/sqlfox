@@ -9,6 +9,9 @@ import (
 	"sqlfox/internal/safety"
 	"sqlfox/internal/vault"
 
+	_ "sqlfox/internal/driver/mysql"
+	_ "sqlfox/internal/driver/sqlite"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )

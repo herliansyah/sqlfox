@@ -21,6 +21,7 @@ import (
 
 func init() {
 	driver.Register("mysql", &MySQLDriver{})
+	driver.Register("mariadb", &MySQLDriver{})
 }
 
 type MySQLDriver struct{}

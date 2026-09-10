@@ -8,10 +8,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"sqlfox/internal/vault"
-	_ "sqlfox/internal/driver/sqlite"
 )
 
 func TestServer_API_Lifecycle(t *testing.T) {
@@ -147,7 +147,7 @@ func TestServer_API_Lifecycle(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	// 9. Test Transient Connection Test endpoint
+	// 9. Test Transient Connection Test endpoint (SQLite)
 	testTransientPayload := vault.ConnectionRecord{
 		Driver:       "sqlite",
 		DatabaseName: targetDB,
@@ -158,12 +158,31 @@ func TestServer_API_Lifecycle(t *testing.T) {
 		t.Fatalf("POST /api/connections/test-transient/test failed: %v, status: %d", err, resp.StatusCode)
 	}
 	var testResult struct {
-		Success bool `json:"success"`
+		Success bool   `json:"success"`
+		Error   string `json:"error"`
 	}
 	_ = json.NewDecoder(resp.Body).Decode(&testResult)
 	resp.Body.Close()
 	if !testResult.Success {
 		t.Fatalf("expected transient connection test to succeed")
+	}
+
+	// 9b. Test Transient Connection Test endpoint (MySQL driver recognized)
+	testMySQLPayload := vault.ConnectionRecord{
+		Driver: "mysql",
+		Host:   "127.0.0.1",
+		Port:   59999, // Unused port to test driver lookup without real db
+	}
+	mySQLBody, _ := json.Marshal(testMySQLPayload)
+	resp, err = client.Post(ts.URL+"/api/connections/test-transient/test", "application/json", bytes.NewReader(mySQLBody))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST transient mysql test failed: %v", err)
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&testResult)
+	resp.Body.Close()
+	// Driver should be recognized (i.e. error must NOT be "unsupported database driver")
+	if strings.Contains(testResult.Error, "unsupported database driver") {
+		t.Fatalf("unexpected unsupported driver error for mysql: %s", testResult.Error)
 	}
 
 	// 10. Update Connection (editing connection name)
