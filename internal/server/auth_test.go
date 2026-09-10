@@ -28,7 +28,7 @@ func TestRemoteAccessGuard(t *testing.T) {
 	}
 	defer v.Close()
 
-	srv := NewServer(v, nil, filepath.Join(tempDir, "backups"))
+	srv := NewServer(v, nil, filepath.Join(tempDir, "backups"), masterPass)
 	handler := srv.Router()
 
 	// 1. Loopback request from 127.0.0.1 -> Allowed immediately
@@ -88,5 +88,26 @@ func TestRemoteAccessGuard(t *testing.T) {
 
 	if recAuthed.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK with valid bearer token, got: %d", recAuthed.Code)
+	}
+
+	// 6. Localhost requests master password -> 200 OK
+	reqKeyLocal := httptest.NewRequest("GET", "/api/auth/master-key", nil)
+	reqKeyLocal.RemoteAddr = "127.0.0.1:54321"
+	recKeyLocal := httptest.NewRecorder()
+	handler.ServeHTTP(recKeyLocal, reqKeyLocal)
+
+	if recKeyLocal.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for localhost master-key, got: %d", recKeyLocal.Code)
+	}
+
+	// 7. Remote IP requests master password -> 403 Forbidden
+	reqKeyRemote := httptest.NewRequest("GET", "/api/auth/master-key", nil)
+	reqKeyRemote.RemoteAddr = "192.168.1.100:54321"
+	reqKeyRemote.Header.Set("Authorization", "Bearer "+authResp.Token)
+	recKeyRemote := httptest.NewRecorder()
+	handler.ServeHTTP(recKeyRemote, reqKeyRemote)
+
+	if recKeyRemote.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for remote master-key, got: %d", recKeyRemote.Code)
 	}
 }

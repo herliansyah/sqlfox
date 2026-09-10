@@ -64,6 +64,11 @@
 
     <!-- Top Right Controls -->
     <div class="flex items-center space-x-2 text-xs">
+      <button id="master-pin-badge" onclick="copyMasterPIN()" class="hidden bg-slate-800 hover:bg-slate-700 text-sky-400 px-2.5 py-1 rounded border border-sky-900 font-mono transition flex items-center space-x-1" title="Click to copy Master PIN for tablet / remote login">
+        <span>🔑 PIN:</span>
+        <span id="master-pin-text" class="font-bold text-white">...</span>
+      </button>
+
       <button id="readonly-toggle-btn" onclick="toggleReadOnly()" class="hidden px-2.5 py-1 rounded font-medium transition border flex items-center space-x-1.5">
         <span id="readonly-icon">🔒</span>
         <span id="readonly-text">Read-Only</span>
@@ -521,11 +526,33 @@
       }
     }
 
+    async function loadMasterPIN() {
+      try {
+        const res = await apiFetch('/api/auth/master-key');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.master_password) {
+            document.getElementById('master-pin-text').textContent = data.master_password;
+            document.getElementById('master-pin-badge').classList.remove('hidden');
+          }
+        }
+      } catch (err) {
+        // Restricted if remote, ignore silently
+      }
+    }
+
+    function copyMasterPIN() {
+      const pin = document.getElementById('master-pin-text').textContent;
+      navigator.clipboard.writeText(pin);
+      alert(`Master PIN '${pin}' copied to clipboard!\nUse this PIN to unlock SqlFox when accessing from your tablet/phone.`);
+    }
+
     // --- Lifecycle Initialization ---
     window.addEventListener('DOMContentLoaded', async () => {
       const authorized = await checkAuthStatus();
       if (authorized) {
         await loadConnections();
+        await loadMasterPIN();
       }
       renderTabs();
       setupKeyboardShortcuts();

@@ -30,7 +30,7 @@ func TestServer_API_Lifecycle(t *testing.T) {
 	}
 	defer v.Close()
 
-	srv := NewServer(v, nil, filepath.Join(tempDir, "backups"))
+	srv := NewServer(v, nil, filepath.Join(tempDir, "backups"), "test-master")
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 

@@ -15,30 +15,32 @@ import (
 
 // Server coordinates HTTP API routing and embedded web frontend delivery.
 type Server struct {
-	router     *chi.Mux
-	vault      *vault.Vault
-	guard      *safety.SafetyGuard
-	backupMgr  *safety.BackupManager
-	sessionMgr *SessionManager
-	authMgr    *AuthManager
-	assets     fs.FS
+	router         *chi.Mux
+	vault          *vault.Vault
+	guard          *safety.SafetyGuard
+	backupMgr      *safety.BackupManager
+	sessionMgr     *SessionManager
+	authMgr        *AuthManager
+	masterPassword string
+	assets         fs.FS
 }
 
 // NewServer initializes HTTP routes and application state.
-func NewServer(v *vault.Vault, assets fs.FS, backupDir string) *Server {
+func NewServer(v *vault.Vault, assets fs.FS, backupDir string, masterPassword string) *Server {
 	guard := safety.NewSafetyGuard()
 	backupMgr := safety.NewBackupManager(backupDir)
 	sessionMgr := NewSessionManager(v, guard, backupMgr)
 	authMgr := NewAuthManager()
 
 	s := &Server{
-		router:     chi.NewRouter(),
-		vault:      v,
-		guard:      guard,
-		backupMgr:  backupMgr,
-		sessionMgr: sessionMgr,
-		authMgr:    authMgr,
-		assets:     assets,
+		router:         chi.NewRouter(),
+		vault:          v,
+		guard:          guard,
+		backupMgr:      backupMgr,
+		sessionMgr:     sessionMgr,
+		authMgr:        authMgr,
+		masterPassword: masterPassword,
+		assets:         assets,
 	}
 
 	s.routes()
@@ -63,6 +65,7 @@ func (s *Server) routes() {
 		// Remote access authentication
 		api.Get("/auth/status", s.handleAuthStatus)
 		api.Post("/auth/unlock", s.handleAuthUnlock)
+		api.Get("/auth/master-key", s.handleGetMasterPassword)
 		// Connection vault endpoints
 		api.Get("/connections", s.handleListConnections)
 		api.Post("/connections", s.handleSaveConnection)

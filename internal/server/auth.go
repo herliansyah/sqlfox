@@ -155,3 +155,14 @@ func (s *Server) handleAuthUnlock(w http.ResponseWriter, r *http.Request) {
 		"message": "Vault unlocked successfully.",
 	})
 }
+
+func (s *Server) handleGetMasterPassword(w http.ResponseWriter, r *http.Request) {
+	if !isLoopback(r.RemoteAddr) {
+		writeError(w, http.StatusForbidden, "Master password inspection is only allowed from localhost.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"master_password": s.masterPassword,
+	})
+}
