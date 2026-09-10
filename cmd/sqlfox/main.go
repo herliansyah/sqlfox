@@ -24,6 +24,9 @@ import (
 	_ "sqlfox/internal/driver/sqlite"
 )
 
+// Version is populated at build time via -ldflags "-X main.Version=..."
+var Version = "v0.1.0"
+
 func main() {
 	portFlag := flag.Int("port", 8080, "Port to listen on (default 8080, with automatic scanning if busy)")
 	hostFlag := flag.String("host", "0.0.0.0", "Host interface to bind (0.0.0.0 for LAN/Tablet access, 127.0.0.1 for local only)")
@@ -31,7 +34,13 @@ func main() {
 	passFlag := flag.String("pass", "", "Master password for vault encryption (leave blank to auto-generate or reuse ~/.sqlfox/master.key)")
 	noBrowserFlag := flag.Bool("no-browser", false, "Do not automatically launch web browser")
 	strictPortFlag := flag.Bool("strict-port", false, "Fail immediately if specified port is in use")
+	versionFlag := flag.Bool("version", false, "Print SqlFox version and exit")
 	flag.Parse()
+
+	if *versionFlag {
+		fmt.Printf("SqlFox %s\n", Version)
+		return
+	}
 
 	// Resolve config path
 	dbPath := *dbFlag
@@ -93,7 +102,7 @@ func main() {
 		}
 	}()
 
-	fmt.Printf("\n🦊 SqlFox Database Manager is running!\n")
+	fmt.Printf("\n🦊 SqlFox %s Database Manager is running!\n", Version)
 	fmt.Printf("   ➜  Local:       %s\n", localURL)
 	if lanIP != "" {
 		fmt.Printf("   ➜  Network:     http://%s:%d (Buka dari Tablet/LAN)\n", lanIP, actualPort)

@@ -1,0 +1,127 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g. v0.1.0)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-and-release:
+    name: Build & Release All OS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set Release Version
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            TAG="${{ inputs.version }}"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="v0.1.0"
+          fi
+          echo "TAG=$TAG" >> "$GITHUB_OUTPUT"
+          # Clean version without 'v' prefix for npm (e.g., 0.1.0)
+          NPM_VER="${TAG#v}"
+          echo "NPM_VER=$NPM_VER" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Compile Binaries for All Platforms
+        run: |
+          mkdir -p dist/archives
+          VERSION="${{ steps.version.outputs.TAG }}"
+          LDFLAGS="-s -w -X main.Version=${VERSION}"
+
+          TARGETS=(
+            "linux amd64"
+            "linux arm64"
+            "darwin amd64"
+            "darwin arm64"
+            "windows amd64"
+            "windows arm64"
+          )
+
+          for TARGET in "${TARGETS[@]}"; do
+            read -r GOOS GOARCH <<< "$TARGET"
+            echo "🔨 Building SqlFox for ${GOOS}/${GOARCH}..."
+
+            BUILD_DIR="dist/build-${GOOS}-${GOARCH}"
+            mkdir -p "$BUILD_DIR"
+            cp LICENSE "$BUILD_DIR/"
+
+            BINARY_NAME="sqlfox"
+            if [ "$GOOS" = "windows" ]; then
+              BINARY_NAME="sqlfox.exe"
+            fi
+
+            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build \
+              -ldflags="$LDFLAGS" \
+              -o "$BUILD_DIR/$BINARY_NAME" \
+              ./cmd/sqlfox
+
+            cd "$BUILD_DIR"
+            if [ "$GOOS" = "windows" ]; then
+              ARCHIVE_NAME="sqlfox-${VERSION}-${GOOS}-${GOARCH}.zip"
+              zip -9 "../../dist/archives/${ARCHIVE_NAME}" "$BINARY_NAME" LICENSE
+            else
+              ARCHIVE_NAME="sqlfox-${VERSION}-${GOOS}-${GOARCH}.tar.gz"
+              tar -czvf "../../dist/archives/${ARCHIVE_NAME}" "$BINARY_NAME" LICENSE
+            fi
+            cd - > /dev/null
+          done
+
+      - name: Generate Checksums
+        run: |
+          cd dist/archives
+          sha256sum * > checksums.txt
+          cat checksums.txt
+          cd - > /dev/null
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.TAG }}
+          name: SqlFox ${{ steps.version.outputs.TAG }}
+          files: |
+            dist/archives/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to NPM
+        if: ${{ secrets.NPM_TOKEN != '' }}
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.NPM_VER }}"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          npm publish --access public
