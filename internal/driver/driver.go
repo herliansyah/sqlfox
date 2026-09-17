@@ -2,8 +2,11 @@ package driver
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"io"
+	"strings"
 	"time"
 )
 
@@ -123,6 +126,146 @@ type ExplainRow struct {
 	Rows         int64  `json:"rows"`
 	Filtered     float64 `json:"filtered"`
 	Extra        string `json:"extra"`
+}
+
+// ScanExplainRows scans rows from an EXPLAIN query dynamically mapping column names.
+// This supports varying column counts across MySQL 5.5, 5.6, 5.7, 8.0+, MariaDB 10.x/11.x, and SQLite.
+func ScanExplainRows(rows *sql.Rows) ([]ExplainRow, error) {
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+
+	colMap := make(map[string]int, len(cols))
+	for i, c := range cols {
+		colMap[strings.ToLower(strings.TrimSpace(c))] = i
+	}
+
+	var planRows []ExplainRow
+	for rows.Next() {
+		rawVals := make([]any, len(cols))
+		scanArgs := make([]any, len(cols))
+		for i := range rawVals {
+			scanArgs[i] = &rawVals[i]
+		}
+
+		if err := rows.Scan(scanArgs...); err != nil {
+			return nil, err
+		}
+
+		getString := func(names ...string) string {
+			for _, name := range names {
+				if idx, ok := colMap[name]; ok && rawVals[idx] != nil {
+					switch v := rawVals[idx].(type) {
+					case []byte:
+						return string(v)
+					case string:
+						return v
+					default:
+						return fmt.Sprintf("%v", v)
+					}
+				}
+			}
+			return ""
+		}
+
+		getInt := func(names ...string) int {
+			for _, name := range names {
+				if idx, ok := colMap[name]; ok && rawVals[idx] != nil {
+					switch v := rawVals[idx].(type) {
+					case int:
+						return v
+					case int64:
+						return int(v)
+					case int32:
+						return int(v)
+					default:
+						var val int
+						_, _ = fmt.Sscanf(fmt.Sprintf("%v", v), "%d", &val)
+						return val
+					}
+				}
+			}
+			return 0
+		}
+
+		getInt64 := func(names ...string) int64 {
+			for _, name := range names {
+				if idx, ok := colMap[name]; ok && rawVals[idx] != nil {
+					switch v := rawVals[idx].(type) {
+					case int64:
+						return v
+					case int:
+						return int64(v)
+					case int32:
+						return int64(v)
+					default:
+						var val int64
+						_, _ = fmt.Sscanf(fmt.Sprintf("%v", v), "%d", &val)
+						return val
+					}
+				}
+			}
+			return 0
+		}
+
+		getFloat := func(names ...string) float64 {
+			for _, name := range names {
+				if idx, ok := colMap[name]; ok && rawVals[idx] != nil {
+					switch v := rawVals[idx].(type) {
+					case float64:
+						return v
+					case float32:
+						return float64(v)
+					default:
+						var val float64
+						_, _ = fmt.Sscanf(fmt.Sprintf("%v", v), "%f", &val)
+						return val
+					}
+				}
+			}
+			return 0
+		}
+
+		// Support MySQL / MariaDB and SQLite column names / aliases
+		id := getInt("id", "selectid", "addr")
+		selectType := getString("select_type", "opcode")
+		table := getString("table", "tbl", "p1")
+		partitions := getString("partitions")
+		typeStr := getString("type", "access_type", "p2")
+		possibleKeys := getString("possible_keys", "keys")
+		key := getString("key")
+		keyLen := getString("key_len")
+		ref := getString("ref")
+		rowsCount := getInt64("rows", "count", "p4")
+		filtered := getFloat("filtered")
+		extra := getString("extra", "detail", "comment")
+
+		if typeStr == "" && extra != "" {
+			typeStr = "SCAN/SEARCH"
+		}
+
+		planRows = append(planRows, ExplainRow{
+			ID:           id,
+			SelectType:   selectType,
+			Table:        table,
+			Partitions:   partitions,
+			Type:         typeStr,
+			PossibleKeys: possibleKeys,
+			Key:          key,
+			KeyLen:       keyLen,
+			Ref:          ref,
+			Rows:         rowsCount,
+			Filtered:     filtered,
+			Extra:        extra,
+		})
+	}
+
+	if planRows == nil {
+		planRows = []ExplainRow{}
+	}
+
+	return planRows, rows.Err()
 }
 
 // ServerInfo reports database runtime statistics.

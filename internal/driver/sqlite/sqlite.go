@@ -266,23 +266,27 @@ func (s *SQLiteSession) GetTableEstimate(ctx context.Context, tableName string) 
 }
 
 func (s *SQLiteSession) Explain(ctx context.Context, querySQL string) (*driver.ExplainPlan, error) {
-	rows, err := s.db.QueryContext(ctx, "EXPLAIN QUERY PLAN "+querySQL)
+	cleanedSQL := strings.TrimSpace(querySQL)
+	cleanedSQL = strings.TrimRight(cleanedSQL, "; \t\r\n")
+	upper := strings.ToUpper(cleanedSQL)
+	if strings.HasPrefix(upper, "EXPLAIN QUERY PLAN ") {
+		cleanedSQL = strings.TrimSpace(cleanedSQL[19:])
+	} else if strings.HasPrefix(upper, "EXPLAIN ") {
+		cleanedSQL = strings.TrimSpace(cleanedSQL[8:])
+	}
+	if cleanedSQL == "" {
+		return &driver.ExplainPlan{Rows: []driver.ExplainRow{}}, nil
+	}
+
+	rows, err := s.db.QueryContext(ctx, "EXPLAIN QUERY PLAN "+cleanedSQL)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var planRows []driver.ExplainRow
-	for rows.Next() {
-		var id, parent, notused int
-		var detail string
-		if err := rows.Scan(&id, &parent, &notused, &detail); err == nil {
-			planRows = append(planRows, driver.ExplainRow{
-				ID:    id,
-				Type:  "SCAN/SEARCH",
-				Extra: detail,
-			})
-		}
+	planRows, err := driver.ScanExplainRows(rows)
+	if err != nil {
+		return nil, err
 	}
 
 	return &driver.ExplainPlan{

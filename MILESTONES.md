@@ -124,10 +124,10 @@ v1.0 (MVP Core Trinity)
       │
       ▼
 v1.1 (Productivity & Collaboration)
-├── Snippets with Dynamic Variables ({{tenant_id}})
-├── Table Notes & Query Analysis Knowledge Base
-├── Cross-Database Schema Search ("Where is column customer_id?")
-└── Excel (.xlsx) Import/Export with column mapping
+├── [x] Cross-Database Schema Search ("Where is column customer_id?") (Ctrl+P)
+├── [ ] Snippets with Dynamic Variables ({{tenant_id}})
+├── [ ] Table Notes & Query Analysis Knowledge Base
+└── [ ] Excel (.xlsx) Import/Export with column mapping
       │
       ▼
 v2.0 (Enterprise & Multi-Engine)
