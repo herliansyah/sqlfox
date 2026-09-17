@@ -134,9 +134,18 @@ type ServerInfo struct {
 
 // Schema metadata structures
 type SchemaMetadata struct {
-	DatabaseName string          `json:"database_name"`
-	Databases    []string        `json:"databases,omitempty"`
-	Tables       []TableMetadata `json:"tables"`
+	DatabaseName string            `json:"database_name"`
+	Databases    []string          `json:"databases,omitempty"`
+	Tables       []TableMetadata   `json:"tables"`
+	Triggers     []TriggerMetadata `json:"triggers,omitempty"`
+}
+
+type TriggerMetadata struct {
+	Name      string `json:"name"`
+	Table     string `json:"table"`
+	Timing    string `json:"timing"`    // BEFORE, AFTER, INSTEAD OF
+	Event     string `json:"event"`     // INSERT, UPDATE, DELETE
+	Statement string `json:"statement"` // SQL body
 }
 
 type TableMetadata struct {

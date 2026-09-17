@@ -44,10 +44,14 @@ flowchart LR
 - **Goal**: Provide the embedded HTTP server and web application shell to browse databases, tables, columns, indexes, and foreign keys.
 - **Deliverables**:
   - `internal/server/`: Chi HTTP router serving REST endpoints and embedded static assets (`//go:embed`).
-  - Web UI: Left sidebar connection manager (grouped by Environment: Production, Staging, Dev).
-  - Schema tree viewer: Tables, Columns, Indexes, Views.
-  - DDL modal: `SHOW CREATE TABLE` formatted display with "Copy to Editor".
-- **Runnable Verification**: Launch binary -> automatically opens browser at `127.0.0.1:<port>` -> shows connected databases and lets user browse tables.
+  - Web UI: HeidiSQL-style compact Session Switcher header with quick search filter, environment badges, and quick session actions, freeing 100% of sidebar height for schema trees.
+  - Schema tree viewer: Tables, Columns, Indexes, Views, and Triggers.
+  - Table Designer: HeidiSQL-style sub-tabs (`[Data]`, `[Structure & PK]`, `[Indexes]`, `[Foreign Keys]`, `[CREATE Code]`) with staged draft modifications.
+  - Type Guard Palette: Categorized native dropdown and auto-disabled Length on lengthless types (`INT`, `BIGINT`, `TEXT`, `DATETIME`, `JSON`, `BOOLEAN`) to eliminate invalid syntax errors like `int(200)`.
+  - Default Value Presets: Structured preset selector (`None`, `NULL`, `CURRENT_TIMESTAMP`, `0`, `''`, `Custom...`) with type-aware auto-quoting and PK nullability protection.
+  - View & Trigger Designers: Specialized GUI forms and SQL editors to create/drop views and triggers.
+  - DDL modal: `SHOW CREATE TABLE` formatted display with "Copy to Editor" and pre-execution review.
+- **Runnable Verification**: Launch binary -> automatically opens browser at `127.0.0.1:<port>` -> browse tables, alter table structure visually with Type Guard presets, and create/drop views & triggers with DDL review.
 
 ---
 
@@ -55,10 +59,11 @@ flowchart LR
 - **Goal**: Multi-tab SQL query editing with autocompletion, real-time chunked row streaming, and graceful cancellation.
 - **Deliverables**:
   - CodeMirror 6 integration with SQL dialect syntax highlighting.
-  - Schema-aware autocompleter (tables, columns from cached schema metadata).
+  - Cross-Database Autocompletion: Lazy multi-database catalog indexing supporting `FROM `/`JOIN ` database suggestions (`[DB]`), `dbname.` table suggestions (`[TBL]`), `dbname.tablename.` column suggestions (`[COL]`), and cross-database alias resolution.
+  - Client-side zero-dependency SQL Formatter with `Ctrl+Shift+F` / `Cmd+Shift+F` shortcut.
   - WebSocket streaming pipeline (`RowStream`) pushing chunks of 100 records per frame.
   - Out-of-band cancellation (`KILL QUERY <thread_id>` / `sqlite3_interrupt`).
-- **Runnable Verification**: Execute a 50,000-row `SELECT` query -> stream results into the browser smoothly with memory <50MB -> hit "Cancel" to verify query terminates immediately on MySQL.
+- **Runnable Verification**: Execute a 50,000-row `SELECT` query -> stream results into the browser smoothly with memory <50MB -> hit "Cancel" to verify query terminates immediately on MySQL -> format messy query with `Ctrl+Shift+F` -> type `finance.` and verify cross-db suggestions pop up.
 
 ---
 
@@ -78,6 +83,7 @@ flowchart LR
 - **Deliverables**:
   - `internal/safety/`: TiDB SQL AST parser integration checking for unqualified `DELETE`/`UPDATE`, `DROP`, `TRUNCATE`, and `ALTER DROP`.
   - Non-intrusive Impact Preview (`EXPLAIN` row estimate and scan type badge).
+  - Native HTML5 `<dialog>` Safety Inspection modal with risk level badge, destructive indicator, and audit reason.
   - UI Challenge Modal requiring exact table name input for irreversible actions.
   - Smart Tiered Backup: Auto-snapshot DDL to `.scratch/backups/`, and table data if <50MB.
 - **Runnable Verification**: Submit `DELETE FROM users;` -> Safety Guard intercepts and halts execution -> verify Challenge Modal pops up -> submit `DROP TABLE logs;` and verify `.sql` backup file is written to disk.
@@ -98,6 +104,7 @@ flowchart LR
 ### Milestone 8: Production Polish, Vault Portability & Single-Binary Release
 - **Goal**: Finalize UX polish, environment locks, vault export/import, and cross-platform binary builds.
 - **Deliverables**:
+  - Native HTML5 `<dialog>` architecture completely replacing browser `window.alert()` and `window.confirm()`.
   - Production mode locks (read-only session default, red warning chrome).
   - Encrypted Vault Archive export/import (`.sqlfox-vault` with Argon2id passphrase).
   - Command Palette (`Ctrl+K` / `Cmd+K`) for keyboard-driven navigation.
