@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"sqlfox/internal/driver"
 	"sqlfox/internal/vault"
 )
 
@@ -140,6 +141,25 @@ func TestServer_API_Lifecycle(t *testing.T) {
 		t.Fatalf("expected 2 rows in products table, got %d", len(rowsRes.Rows))
 	}
 
+	// 7b. Test Explain query with Database parameter
+	explainSQL := map[string]any{
+		"sql":      "SELECT * FROM products WHERE price > 20;",
+		"database": targetDB,
+	}
+	expBody, _ := json.Marshal(explainSQL)
+	resp, err = client.Post(fmt.Sprintf("%s/api/session/%s/explain", ts.URL, savedConn.ID), "application/json", bytes.NewReader(expBody))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("Explain query failed: %v", err)
+	}
+	resp.Body.Close()
+
+	// 7c. Test Stateless schema introspection with ?db=
+	resp, err = client.Get(fmt.Sprintf("%s/api/session/%s/schema?db=%s", ts.URL, savedConn.ID, targetDB))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET schema with db parameter failed: %v", err)
+	}
+	resp.Body.Close()
+
 	// 8. Toggle ReadOnly
 	resp, err = client.Post(fmt.Sprintf("%s/api/session/%s/toggle-readonly", ts.URL, savedConn.ID), "application/json", nil)
 	if err != nil || resp.StatusCode != http.StatusOK {
@@ -211,7 +231,32 @@ func TestServer_API_Lifecycle(t *testing.T) {
 		t.Fatalf("unexpected schema after select-db: %+v", schemaAfterSelect)
 	}
 
-	// 12. Delete Connection
+	// 12. Test Explain Query Plan endpoint
+	explainPayload := map[string]string{
+		"sql":      "SELECT * FROM products WHERE id = 1;",
+		"database": targetDB,
+	}
+	expBody, _ = json.Marshal(explainPayload)
+	resp, err = client.Post(fmt.Sprintf("%s/api/session/%s/explain", ts.URL, savedConn.ID), "application/json", bytes.NewReader(expBody))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /api/session/explain failed: %v, status: %d", err, resp.StatusCode)
+	}
+	var explainResult struct {
+		RawJSON string               `json:"raw_json"`
+		Rows    []driver.ExplainRow `json:"rows"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&explainResult); err != nil {
+		t.Fatalf("failed to decode explain response: %v", err)
+	}
+	resp.Body.Close()
+	if explainResult.Rows == nil {
+		t.Fatalf("expected non-nil Rows in explainResult, got nil")
+	}
+	if len(explainResult.Rows) == 0 {
+		t.Fatalf("expected at least 1 plan row, got 0")
+	}
+
+	// 13. Delete Connection
 	reqDelete, _ := http.NewRequest("DELETE", fmt.Sprintf("%s/api/connections/%s", ts.URL, savedConn.ID), nil)
 	resp, err = client.Do(reqDelete)
 	if err != nil || resp.StatusCode != http.StatusOK {

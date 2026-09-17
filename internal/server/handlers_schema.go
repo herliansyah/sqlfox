@@ -43,13 +43,13 @@ func (s *Server) handleGetSchema(w http.ResponseWriter, r *http.Request) {
 	if targetDB != "" {
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
-		_ = sess.Session.SelectDatabase(ctx, targetDB)
 		schema, err := sess.Session.InspectSchema(ctx, targetDB)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to inspect schema: "+err.Error())
 			return
 		}
-		sess.CachedSchema = schema
+		writeJSON(w, http.StatusOK, schema)
+		return
 	} else if sess.CachedSchema == nil {
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()

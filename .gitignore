@@ -6,7 +6,8 @@ bin/*
 *.dll
 *.so
 *.dylib
-dist/
+/dist/
+!web/dist/
 
 # Node / Frontend
 node_modules/

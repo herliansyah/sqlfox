@@ -166,3 +166,25 @@ _Avoid_: Single-db autocomplete, schema silo
 A compact HeidiSQL-style header picker for switching, filtering, and managing saved database connection sessions, reserving the sidebar tree exclusively for schema objects.
 _Avoid_: Permanent sidebar connection tree accordion
 
+**Schema Search**:
+An instant cross-database catalog finder locating tables, views, and columns across all accessible schemas in the active connection.
+_Avoid_: Global grep, object finder, quick navigator
+
+**Database Creator**:
+A structured modal dialog for provisioning a new database schema on the active target server with dialect-aware character set and collation defaults.
+_Avoid_: Raw create prompt, DB wizard
+
+**Execution Plan Grid**:
+An interactive, HeidiSQL-inspired tabular display of database engine execution plans (`EXPLAIN`), highlighting access types (Full Table Scan warnings), estimated row counts, and used indexes with a toggleable raw JSON payload view.
+_Avoid_: Raw plan dump, text explain drawer
+
+**Database Switcher**:
+A searchable popover dropdown in the sidebar for filtering and switching the active database schema in multi-database server connections, matching the Session Switcher interaction pattern.
+_Avoid_: Raw select dropdown, static DB selector
+
+**Schema Object Filter**:
+A real-time, sticky client-side search input in the sidebar explorer for instantaneously filtering tables, views, and triggers by name with quick keyboard access (`/`).
+_Avoid_: Tree grep, manual scroll search
+
+
+

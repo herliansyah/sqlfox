@@ -100,6 +100,7 @@ User experience architecture, ASCII wireframes, design tokens, and interaction m
 | `Cmd+T` / `Ctrl+T` | Open New Query Tab | Tabs |
 | `Cmd+W` / `Ctrl+W` | Close Active Tab | Tabs |
 | `Cmd+K` / `Ctrl+K` | Open Command Palette | Global |
+| `Cmd+P` / `Ctrl+P` | Open Schema Search (Quick Open Table/Column) | Global |
 | `Cmd+L` / `Ctrl+L` | Toggle AI Assistant Sidebar | Global |
 | `Cmd+B` / `Ctrl+B` | Toggle Connections & Schema Sidebar | Global |
 | `Cmd+Shift+F` / `Ctrl+Shift+F` | Format SQL Statement | Query Editor |
@@ -183,4 +184,17 @@ For microservices and multi-database architectures:
 - **Compact Header Button**: Replaces permanent sidebar connection accordions with a compact session bar displaying the active database icon, name, and environment tag (`[PROD]`, `[STAGE]`, `[DEV]`).
 - **Instant Search & Grouping**: Expanding the switcher reveals an inline search filter, environment-grouped connections, and quick-action buttons (`➕ New`, `✏️ Edit`, `🗑️ Delete`).
 - **Full-Height Schema Tree**: Reserves 100% of the sidebar's vertical space for exploring schema objects (Tables, Views, Triggers).
+
+---
+
+## 11. Cross-Database Schema Search (`Ctrl+P` / `Cmd+P`)
+
+- **Instant Modal Dialog**: A floating spotlight-style search window accessible via `Ctrl+P` / `Cmd+P`, the header search icon `🔍`, or Command Palette.
+- **Unified Object Indexing**: Instant sub-millisecond querying across all connected databases, indexing:
+  - Tables with `[TBL]` green badge.
+  - Views with `[VIEW]` purple badge.
+  - Columns with `[COL]` sky blue badge alongside their data types.
+- **Dual Action Keyboard Workflow**:
+  - `Enter` / Primary Click: Switches active schema context if needed and immediately opens the Table Viewer.
+  - `Shift+Enter` / `[Insert]` Button: Pastes the fully qualified identifier (`db.table` or `db.table.column`) at the editor's cursor position.
 

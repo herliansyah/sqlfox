@@ -225,5 +225,40 @@ assert(html.includes('function toggleSessionDropdown'), 'toggleSessionDropdown m
 assert(html.includes('function filterSessionList'), 'filterSessionList must be defined');
 console.log('✓ HeidiSQL Session Switcher elements and handlers verified.');
 
-console.log('\n✅ ALL SCHEMA CRUD, FORMATTER, DIALOGS, TYPE GUARD, AUTOCOMPLETE, AND SESSION SWITCHER TESTS PASSED!');
+// 10. Verify Cross-Database Schema Search (Ctrl+P)
+assert(html.includes('<dialog id="schema-search-modal"'), 'schema-search-modal must be a native <dialog>');
+assert(html.includes('id="schema-search-input"'), 'schema-search-input element must exist');
+assert(html.includes('id="schema-search-results"'), 'schema-search-results container must exist');
+assert(html.includes('id="schema-search-count"'), 'schema-search-count element must exist');
+assert(html.includes('function toggleSchemaSearch'), 'toggleSchemaSearch function must be defined');
+assert(html.includes('function buildSchemaSearchIndex'), 'buildSchemaSearchIndex function must be defined');
+assert(html.includes('function renderSchemaSearchResults'), 'renderSchemaSearchResults function must be defined');
+assert(html.includes('function selectSchemaSearchResult'), 'selectSchemaSearchResult function must be defined');
+assert(html.includes("e.key.toLowerCase() === 'p'"), 'Ctrl+P shortcut must be registered in keydown listener');
+assert(html.includes('closeSchemaSearch()'), 'Escape must close schema search');
+assert(html.includes('Schema Search (Quick Open Table/Column)'), 'Command Palette must include Schema Search');
+console.log('✓ Cross-Database Schema Search (Ctrl+P) modal, functions, and keybindings verified.');
+
+// 11. Verify Zero Raw alert() in Application Code (ADR 0008 Enforcement)
+// Only window.alert fallback in showNativeAlert is allowed
+const rawAlertMatches = html.match(/(?<!window\.)alert\s*\(/g) || [];
+assert.strictEqual(rawAlertMatches.length, 0, `Found ${rawAlertMatches.length} raw alert() calls in index.html! All alerts must use showNativeAlert().`);
+console.log('✓ Zero raw alert() calls verified across index.html (100% native <dialog> compliant).');
+
+// 12. Verify Database Creator Dialog (GUI Tambah Database)
+assert(html.includes('<dialog id="database-creator-dialog"'), 'database-creator-dialog must be a native <dialog>');
+assert(html.includes('id="new-db-name"'), 'new-db-name input must exist');
+assert(html.includes('id="new-db-charset"'), 'new-db-charset select must exist');
+assert(html.includes('id="new-db-collation"'), 'new-db-collation select must exist');
+assert(html.includes('function openCreateDatabaseModal'), 'openCreateDatabaseModal function must be defined');
+assert(html.includes('function submitCreateDatabase'), 'submitCreateDatabase function must be defined');
+assert(html.includes('openCreateDatabaseModal()'), '+ New database button must call openCreateDatabaseModal');
+assert(html.includes("{ name: 'Create Database', shortcut: '', run: () => openCreateDatabaseModal() }"), 'Command Palette must include Create Database action');
+console.log('✓ Database Creator dialog, inputs, and Command Palette integration verified.');
+
+// 13. Verify Query & Explain Database Context Isolation
+assert(html.includes('database: currentDb'), 'explainActiveQuery and runActiveQuery must pass active database context to prevent cross-database drift');
+console.log('✓ Active database isolation verified in query and explain dispatches.');
+
+console.log('\n✅ ALL SCHEMA CRUD, FORMATTER, DIALOGS, AUTOCOMPLETE, SCHEMA SEARCH, AND DATABASE CREATOR TESTS PASSED!');
 

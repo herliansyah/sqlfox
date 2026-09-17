@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"sqlfox/internal/driver"
+
 	"github.com/go-chi/chi/v5"
 )
 
@@ -16,6 +18,7 @@ type ExecuteRequest struct {
 	Confirmed      bool   `json:"confirmed"`
 	ChallengeInput string `json:"challenge_input"`
 	QueryID        string `json:"query_id"`
+	Database       string `json:"database"`
 }
 
 func (s *Server) handleInspectQuery(w http.ResponseWriter, r *http.Request) {
@@ -47,7 +50,8 @@ func (s *Server) handleExplainQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		SQL string `json:"sql"`
+		SQL      string `json:"sql"`
+		Database string `json:"database"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.SQL == "" {
 		writeError(w, http.StatusBadRequest, "sql is required")
@@ -57,10 +61,19 @@ func (s *Server) handleExplainQuery(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
+	if req.Database != "" {
+		_ = sess.Session.SelectDatabase(ctx, req.Database)
+	}
+
 	plan, err := sess.Session.Explain(ctx, req.SQL)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "explain failed: "+err.Error())
 		return
+	}
+	if plan == nil {
+		plan = &driver.ExplainPlan{Rows: []driver.ExplainRow{}}
+	} else if plan.Rows == nil {
+		plan.Rows = []driver.ExplainRow{}
 	}
 
 	writeJSON(w, http.StatusOK, plan)
@@ -113,6 +126,10 @@ func (s *Server) handleExecuteQuery(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
+
+	if req.Database != "" {
+		_ = sess.Session.SelectDatabase(ctx, req.Database)
+	}
 
 	// 4. Pre-DDL Automated Backup
 	var backupFile string
