@@ -194,10 +194,48 @@ func (s *SQLiteSession) InspectSchema(ctx context.Context, dbName string) (*driv
 		tables = append(tables, tbl)
 	}
 
+	// Inspect Triggers via sqlite_master
+	var triggers []driver.TriggerMetadata
+	trigRows, err := s.db.QueryContext(ctx, `
+		SELECT name, tbl_name, IFNULL(sql, '') 
+		FROM sqlite_master 
+		WHERE type = 'trigger' AND name NOT LIKE 'sqlite_%'
+		ORDER BY name ASC;
+	`)
+	if err == nil {
+		defer trigRows.Close()
+		for trigRows.Next() {
+			var tName, tblName, tSQL string
+			if err := trigRows.Scan(&tName, &tblName, &tSQL); err == nil {
+				timing := "AFTER"
+				event := "INSERT"
+				upperSQL := strings.ToUpper(tSQL)
+				if strings.Contains(upperSQL, "BEFORE") {
+					timing = "BEFORE"
+				} else if strings.Contains(upperSQL, "INSTEAD OF") {
+					timing = "INSTEAD OF"
+				}
+				if strings.Contains(upperSQL, "DELETE") {
+					event = "DELETE"
+				} else if strings.Contains(upperSQL, "UPDATE") {
+					event = "UPDATE"
+				}
+				triggers = append(triggers, driver.TriggerMetadata{
+					Name:      tName,
+					Table:     tblName,
+					Timing:    timing,
+					Event:     event,
+					Statement: tSQL,
+				})
+			}
+		}
+	}
+
 	return &driver.SchemaMetadata{
 		DatabaseName: "main",
 		Databases:    []string{"main"},
 		Tables:       tables,
+		Triggers:     triggers,
 	}, nil
 }
 

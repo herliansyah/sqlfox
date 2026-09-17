@@ -359,10 +359,36 @@ func (s *MySQLSession) InspectSchema(ctx context.Context, dbName string) (*drive
 		idxRows.Close()
 	}
 
+	// 4. Fetch Triggers
+	var triggers []driver.TriggerMetadata
+	trigQuery := `
+	SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE, ACTION_TIMING, EVENT_MANIPULATION, ACTION_STATEMENT
+	FROM information_schema.TRIGGERS
+	WHERE TRIGGER_SCHEMA = ?
+	ORDER BY TRIGGER_NAME ASC;
+	`
+	trigRows, err := s.db.QueryContext(ctx, trigQuery, dbName)
+	if err == nil {
+		for trigRows.Next() {
+			var name, tbl, timing, event, stmt string
+			if err := trigRows.Scan(&name, &tbl, &timing, &event, &stmt); err == nil {
+				triggers = append(triggers, driver.TriggerMetadata{
+					Name:      name,
+					Table:     tbl,
+					Timing:    timing,
+					Event:     event,
+					Statement: stmt,
+				})
+			}
+		}
+		trigRows.Close()
+	}
+
 	return &driver.SchemaMetadata{
 		DatabaseName: dbName,
 		Databases:    databases,
 		Tables:       tables,
+		Triggers:     triggers,
 	}, nil
 }
 

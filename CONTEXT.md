@@ -124,3 +124,45 @@ _Avoid_: Word predictor, auto-suggester, flat matcher
 A ranked suggestion candidate with display label, kind badge (`[KW]`, `[TBL]`, `[COL]`, `[FN]`), and replacement text.
 _Avoid_: Autocomplete option, hint token
 
+## Schema Management & Native Dialogs
+
+**SQL Formatter**:
+A client-side query beautifier that splits SQL clauses (`SELECT`, `FROM`, `WHERE`, `JOIN`, `GROUP BY`, `ORDER BY`) into indented lines and capitalizes keywords without remote roundtrips.
+_Avoid_: Online formatter, backend beautifier
+
+**Native Modal Dialog**:
+A non-blocking HTML5 `<dialog>` element providing consistent styling, focus trapping, and Esc key dismissal across the entire application, replacing primitive browser popup functions.
+_Avoid_: Alert box, confirm prompt, window.alert, window.confirm
+
+**Table Designer**:
+An interactive HeidiSQL-inspired workspace for inspecting and altering table definitions (columns, data types, primary keys, indexes, and foreign keys) with staged change accumulation.
+_Avoid_: Schema wizard, raw alter window
+
+**View Designer**:
+A specialized schema editor for creating and modifying database views with query syntax verification.
+_Avoid_: View wizard
+
+**Trigger Designer**:
+A structured GUI form for configuring database triggers specifying timing (`BEFORE`/`AFTER`), event (`INSERT`/`UPDATE`/`DELETE`), target table, and trigger body statements.
+_Avoid_: Trigger wizard
+
+**DDL Review Modal**:
+A pre-flight verification step displaying staged DDL statements for user approval before dispatching through the Safety Guard and Smart Tiered Backup.
+_Avoid_: Direct execute, silent DDL
+
+**Type Guard Palette**:
+A curated database-dialect-aware dropdown and length restriction system that prevents invalid data type specifications (e.g. disallowing length on INT/TEXT/DATETIME).
+_Avoid_: Freeform type input, unvalidated type string
+
+**Default Value Preset**:
+A structured selector offering valid default states (`None`, `NULL`, `CURRENT_TIMESTAMP`, `0`, `Empty String`, `Custom`) to prevent literal quoting mistakes and invalid nullability combinations.
+_Avoid_: Raw default input, unquoted string default
+
+**Cross-Database Catalog**:
+A cached multi-database schema index enabling contextual autocompletion across schemas (e.g. `dbname.tablename.colname`) without manual switching.
+_Avoid_: Single-db autocomplete, schema silo
+
+**Session Switcher**:
+A compact HeidiSQL-style header picker for switching, filtering, and managing saved database connection sessions, reserving the sidebar tree exclusively for schema objects.
+_Avoid_: Permanent sidebar connection tree accordion
+
