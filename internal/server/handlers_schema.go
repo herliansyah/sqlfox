@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"sqlfox/internal/vault"
+
 	"github.com/go-chi/chi/v5"
 )
 
@@ -308,3 +310,63 @@ func (s *Server) handleToggleReadOnly(w http.ResponseWriter, r *http.Request) {
 		"read_only":     sess.ReadOnly,
 	})
 }
+
+func (s *Server) handleGetTableNote(w http.ResponseWriter, r *http.Request) {
+	connID := chi.URLParam(r, "id")
+	tableName := chi.URLParam(r, "table")
+	dbName := r.URL.Query().Get("db")
+
+	if connID == "" || tableName == "" {
+		writeError(w, http.StatusBadRequest, "connection id and table name are required")
+		return
+	}
+
+	note, err := s.vault.GetTableNote(connID, dbName, tableName)
+	if err != nil {
+		if err == vault.ErrTableNoteNotFound {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"content":    "",
+				"updated_at": nil,
+			})
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, note)
+}
+
+func (s *Server) handleSaveTableNote(w http.ResponseWriter, r *http.Request) {
+	connID := chi.URLParam(r, "id")
+	tableName := chi.URLParam(r, "table")
+	dbName := r.URL.Query().Get("db")
+
+	if connID == "" || tableName == "" {
+		writeError(w, http.StatusBadRequest, "connection id and table name are required")
+		return
+	}
+
+	var req struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+
+	note := &vault.TableNote{
+		ConnectionID: connID,
+		DatabaseName: dbName,
+		TableName:    tableName,
+		Content:      req.Content,
+	}
+
+	if err := s.vault.SaveTableNote(note); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save table note: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, note)
+}
+

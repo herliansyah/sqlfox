@@ -111,9 +111,9 @@ func (s *SQLiteSession) QueryStream(ctx context.Context, querySQL string, limit 
 	}, nil
 }
 
-func (s *SQLiteSession) Exec(ctx context.Context, querySQL string) (*driver.ExecResult, error) {
+func (s *SQLiteSession) Exec(ctx context.Context, querySQL string, args ...any) (*driver.ExecResult, error) {
 	start := time.Now()
-	res, err := s.db.ExecContext(ctx, querySQL)
+	res, err := s.db.ExecContext(ctx, querySQL, args...)
 	if err != nil {
 		return nil, err
 	}

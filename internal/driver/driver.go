@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -49,7 +50,7 @@ type Session interface {
 	QueryStream(ctx context.Context, sql string, limit int) (RowStream, error)
 
 	// Exec executes a mutation (INSERT, UPDATE, DELETE, DDL).
-	Exec(ctx context.Context, sql string) (*ExecResult, error)
+	Exec(ctx context.Context, sql string, args ...any) (*ExecResult, error)
 
 	// InspectSchema returns database metadata (tables, columns, indexes).
 	InspectSchema(ctx context.Context, dbName string) (*SchemaMetadata, error)
@@ -129,7 +130,7 @@ type ExplainRow struct {
 }
 
 // ScanExplainRows scans rows from an EXPLAIN query dynamically mapping column names.
-// This supports varying column counts across MySQL 5.5, 5.6, 5.7, 8.0+, MariaDB 10.x/11.x, and SQLite.
+// ponytail: Flattened column mapper handles MySQL 5.5-8.0, MariaDB, and SQLite column name variances without closure allocations.
 func ScanExplainRows(rows *sql.Rows) ([]ExplainRow, error) {
 	cols, err := rows.Columns()
 	if err != nil {
@@ -141,19 +142,19 @@ func ScanExplainRows(rows *sql.Rows) ([]ExplainRow, error) {
 		colMap[strings.ToLower(strings.TrimSpace(c))] = i
 	}
 
+	rawVals := make([]any, len(cols))
+	scanArgs := make([]any, len(cols))
+	for i := range rawVals {
+		scanArgs[i] = &rawVals[i]
+	}
+
 	var planRows []ExplainRow
 	for rows.Next() {
-		rawVals := make([]any, len(cols))
-		scanArgs := make([]any, len(cols))
-		for i := range rawVals {
-			scanArgs[i] = &rawVals[i]
-		}
-
 		if err := rows.Scan(scanArgs...); err != nil {
 			return nil, err
 		}
 
-		getString := func(names ...string) string {
+		get := func(names ...string) string {
 			for _, name := range names {
 				if idx, ok := colMap[name]; ok && rawVals[idx] != nil {
 					switch v := rawVals[idx].(type) {
@@ -169,92 +170,25 @@ func ScanExplainRows(rows *sql.Rows) ([]ExplainRow, error) {
 			return ""
 		}
 
-		getInt := func(names ...string) int {
-			for _, name := range names {
-				if idx, ok := colMap[name]; ok && rawVals[idx] != nil {
-					switch v := rawVals[idx].(type) {
-					case int:
-						return v
-					case int64:
-						return int(v)
-					case int32:
-						return int(v)
-					default:
-						var val int
-						_, _ = fmt.Sscanf(fmt.Sprintf("%v", v), "%d", &val)
-						return val
-					}
-				}
-			}
-			return 0
-		}
-
-		getInt64 := func(names ...string) int64 {
-			for _, name := range names {
-				if idx, ok := colMap[name]; ok && rawVals[idx] != nil {
-					switch v := rawVals[idx].(type) {
-					case int64:
-						return v
-					case int:
-						return int64(v)
-					case int32:
-						return int64(v)
-					default:
-						var val int64
-						_, _ = fmt.Sscanf(fmt.Sprintf("%v", v), "%d", &val)
-						return val
-					}
-				}
-			}
-			return 0
-		}
-
-		getFloat := func(names ...string) float64 {
-			for _, name := range names {
-				if idx, ok := colMap[name]; ok && rawVals[idx] != nil {
-					switch v := rawVals[idx].(type) {
-					case float64:
-						return v
-					case float32:
-						return float64(v)
-					default:
-						var val float64
-						_, _ = fmt.Sscanf(fmt.Sprintf("%v", v), "%f", &val)
-						return val
-					}
-				}
-			}
-			return 0
-		}
-
-		// Support MySQL / MariaDB and SQLite column names / aliases
-		id := getInt("id", "selectid", "addr")
-		selectType := getString("select_type", "opcode")
-		table := getString("table", "tbl", "p1")
-		partitions := getString("partitions")
-		typeStr := getString("type", "access_type", "p2")
-		possibleKeys := getString("possible_keys", "keys")
-		key := getString("key")
-		keyLen := getString("key_len")
-		ref := getString("ref")
-		rowsCount := getInt64("rows", "count", "p4")
-		filtered := getFloat("filtered")
-		extra := getString("extra", "detail", "comment")
-
+		id, _ := strconv.Atoi(get("id", "selectid", "addr"))
+		rowsCount, _ := strconv.ParseInt(get("rows", "count", "p4"), 10, 64)
+		filtered, _ := strconv.ParseFloat(get("filtered"), 64)
+		typeStr := get("type", "access_type", "p2")
+		extra := get("extra", "detail", "comment")
 		if typeStr == "" && extra != "" {
 			typeStr = "SCAN/SEARCH"
 		}
 
 		planRows = append(planRows, ExplainRow{
 			ID:           id,
-			SelectType:   selectType,
-			Table:        table,
-			Partitions:   partitions,
+			SelectType:   get("select_type", "opcode"),
+			Table:        get("table", "tbl", "p1"),
+			Partitions:   get("partitions"),
 			Type:         typeStr,
-			PossibleKeys: possibleKeys,
-			Key:          key,
-			KeyLen:       keyLen,
-			Ref:          ref,
+			PossibleKeys: get("possible_keys", "keys"),
+			Key:          get("key"),
+			KeyLen:       get("key_len"),
+			Ref:          get("ref"),
 			Rows:         rowsCount,
 			Filtered:     filtered,
 			Extra:        extra,
@@ -264,7 +198,6 @@ func ScanExplainRows(rows *sql.Rows) ([]ExplainRow, error) {
 	if planRows == nil {
 		planRows = []ExplainRow{}
 	}
-
 	return planRows, rows.Err()
 }
 

@@ -77,6 +77,12 @@ func (s *Server) routes() {
 		api.Post("/vault/export", s.handleExportVault)
 		api.Post("/vault/import", s.handleImportVault)
 
+		// Query snippets endpoints
+		api.Get("/snippets", s.handleListSnippets)
+		api.Post("/snippets", s.handleSaveSnippet)
+		api.Delete("/snippets/{id}", s.handleDeleteSnippet)
+
+
 		// Session and database exploration
 		api.Post("/session/connect/{id}", s.handleConnectSession)
 		api.Get("/session/{id}/schema", s.handleGetSchema)
@@ -86,6 +92,10 @@ func (s *Server) routes() {
 		api.Get("/session/{id}/table/{table}/rows", s.handleGetTableRows)
 		api.Post("/session/{id}/cell-edit", s.handleCellEdit)
 		api.Post("/session/{id}/toggle-readonly", s.handleToggleReadOnly)
+		api.Get("/session/{id}/notes/{table}", s.handleGetTableNote)
+		api.Post("/session/{id}/notes/{table}", s.handleSaveTableNote)
+		api.Post("/session/{id}/table/{table}/import-csv", s.handleImportCSV)
+
 
 		// Query execution, safety, and streaming
 		api.Post("/session/{id}/inspect", s.handleInspectQuery)

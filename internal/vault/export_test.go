@@ -82,4 +82,14 @@ func TestVault_ExportImport(t *testing.T) {
 	if importedConn.Password != "staging-pass-secret" {
 		t.Fatalf("unexpected decrypted password: %s", importedConn.Password)
 	}
+
+	// Verify imported snippets in vault 2
+	importedSnippets, err := v2.ListSnippets()
+	if err != nil {
+		t.Fatalf("failed to list snippets in vault2: %v", err)
+	}
+	if len(importedSnippets) == 0 {
+		t.Fatal("expected imported snippets in vault2, got 0")
+	}
 }
+

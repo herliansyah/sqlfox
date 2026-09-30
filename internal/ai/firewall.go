@@ -17,19 +17,10 @@ func NewFirewall(maskIdentifiers bool) *Firewall {
 	return &Firewall{MaskIdentifiers: maskIdentifiers}
 }
 
+// ponytail: Heuristic table match: direct substring or singular stem match.
 func tableMatchesQuery(tblName, queryUpper string) bool {
-	tblUpper := strings.ToUpper(tblName)
-	if strings.Contains(queryUpper, tblUpper) {
-		return true
-	}
-	// Also check singular stem if table name is plural: "USERS" -> "USER"
-	if strings.HasSuffix(tblUpper, "S") && len(tblUpper) > 3 {
-		stem := strings.TrimSuffix(tblUpper, "S")
-		if strings.Contains(queryUpper, stem) {
-			return true
-		}
-	}
-	return false
+	u := strings.ToUpper(tblName)
+	return strings.Contains(queryUpper, u) || (strings.HasSuffix(u, "S") && len(u) > 3 && strings.Contains(queryUpper, strings.TrimSuffix(u, "S")))
 }
 
 // BuildSchemaPrompt constructs a comprehensive DDL context for tables in the schema.
