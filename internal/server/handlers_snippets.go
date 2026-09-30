@@ -5,8 +5,6 @@ import (
 	"net/http"
 
 	"sqlfox/internal/vault"
-
-	"github.com/go-chi/chi/v5"
 )
 
 func (s *Server) handleListSnippets(w http.ResponseWriter, r *http.Request) {
@@ -46,7 +44,7 @@ func (s *Server) handleSaveSnippet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteSnippet(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := r.PathValue("id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "snippet id is required")
 		return

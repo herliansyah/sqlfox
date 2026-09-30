@@ -80,6 +80,10 @@ _Avoid_: Dry run, query check
 An automated pre-DDL backup policy that captures DDL always and table data conditionally based on a 50MB size threshold.
 _Avoid_: Auto-dump, full backup
 
+**Safe Execution Pipeline**:
+The unified execution seam within an active Session that evaluates queries against the Safety Guard, verifies Environment trust tiers and Challenge Modals, triggers pre-DDL Smart Tiered Backups, and enforces the Implicit Safe Limit across all client transports (HTTP and WebSocket).
+_Avoid_: Query runner, execution handler, direct driver call
+
 ## Artificial Intelligence
 
 **BYOK (Bring Your Own Key)**:
@@ -105,6 +109,10 @@ _Avoid_: Text file, memo pad, clipboard buffer
 **Error Healer**:
 An automated diagnostic loop intercepting failed SQL executions and dispatching root-cause analysis and query fixes to Copilot.
 _Avoid_: Error fixer, bug helper
+
+**Copilot Assistant**:
+The unified AI reasoning coordinator in `internal/ai` that curates the Schema Context Window, injects relevant Table Knowledge Notes, enforces Firewall identifier masking, and compiles localized AI Personas across all AI actions (explain, optimize, debug, NL-to-SQL).
+_Avoid_: AI handler, prompt builder, bot service
 
 ## Editor & Autocomplete
 
@@ -217,3 +225,7 @@ _Avoid_: Column chooser, field selector
 **Excel-Safe CSV Export**:
 A CSV generation format that prepends a UTF-8 BOM and wraps leading-zero string identifiers in spreadsheet formulas (`="0812..."`) to prevent loss of leading digits or scientific notation coercion.
 _Avoid_: Excel patch, quote hack
+
+**CSV Ingestion Engine**:
+A streaming data import module that combines automated Delimiter Sniffing, Column Mapping Matrix resolution, parameter ceiling batching, and row-by-row fallback retries to populate target database tables from arbitrary CSV feeds.
+_Avoid_: CSV loader, import script, raw insert loop

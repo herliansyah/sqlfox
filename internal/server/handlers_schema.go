@@ -10,12 +10,10 @@ import (
 	"time"
 
 	"sqlfox/internal/vault"
-
-	"github.com/go-chi/chi/v5"
 )
 
 func (s *Server) handleConnectSession(w http.ResponseWriter, r *http.Request) {
-	connID := chi.URLParam(r, "id")
+	connID := r.PathValue("id")
 	if connID == "" {
 		writeError(w, http.StatusBadRequest, "connection id required")
 		return
@@ -34,7 +32,7 @@ func (s *Server) handleConnectSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetSchema(w http.ResponseWriter, r *http.Request) {
-	connID := chi.URLParam(r, "id")
+	connID := r.PathValue("id")
 	sess, err := s.sessionMgr.GetSession(connID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -67,7 +65,7 @@ func (s *Server) handleGetSchema(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSelectDatabase(w http.ResponseWriter, r *http.Request) {
-	connID := chi.URLParam(r, "id")
+	connID := r.PathValue("id")
 	sess, err := s.sessionMgr.GetSession(connID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -101,7 +99,7 @@ func (s *Server) handleSelectDatabase(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRefreshSchema(w http.ResponseWriter, r *http.Request) {
-	connID := chi.URLParam(r, "id")
+	connID := r.PathValue("id")
 	sess, err := s.sessionMgr.GetSession(connID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -122,8 +120,8 @@ func (s *Server) handleRefreshSchema(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetTableDDL(w http.ResponseWriter, r *http.Request) {
-	connID := chi.URLParam(r, "id")
-	tableName := chi.URLParam(r, "table")
+	connID := r.PathValue("id")
+	tableName := r.PathValue("table")
 
 	sess, err := s.sessionMgr.GetSession(connID)
 	if err != nil {
@@ -147,8 +145,8 @@ func (s *Server) handleGetTableDDL(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
-	connID := chi.URLParam(r, "id")
-	tableName := chi.URLParam(r, "table")
+	connID := r.PathValue("id")
+	tableName := r.PathValue("table")
 
 	sess, err := s.sessionMgr.GetSession(connID)
 	if err != nil {
@@ -242,7 +240,7 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
-	connID := chi.URLParam(r, "id")
+	connID := r.PathValue("id")
 	sess, err := s.sessionMgr.GetSession(connID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -297,7 +295,7 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleToggleReadOnly(w http.ResponseWriter, r *http.Request) {
-	connID := chi.URLParam(r, "id")
+	connID := r.PathValue("id")
 	sess, err := s.sessionMgr.GetSession(connID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -312,8 +310,8 @@ func (s *Server) handleToggleReadOnly(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetTableNote(w http.ResponseWriter, r *http.Request) {
-	connID := chi.URLParam(r, "id")
-	tableName := chi.URLParam(r, "table")
+	connID := r.PathValue("id")
+	tableName := r.PathValue("table")
 	dbName := r.URL.Query().Get("db")
 
 	if connID == "" || tableName == "" {
@@ -338,8 +336,8 @@ func (s *Server) handleGetTableNote(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSaveTableNote(w http.ResponseWriter, r *http.Request) {
-	connID := chi.URLParam(r, "id")
-	tableName := chi.URLParam(r, "table")
+	connID := r.PathValue("id")
+	tableName := r.PathValue("table")
 	dbName := r.URL.Query().Get("db")
 
 	if connID == "" || tableName == "" {

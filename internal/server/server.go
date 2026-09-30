@@ -11,14 +11,11 @@ import (
 
 	_ "sqlfox/internal/driver/mysql"
 	_ "sqlfox/internal/driver/sqlite"
-
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 )
 
 // Server coordinates HTTP API routing and embedded web frontend delivery.
 type Server struct {
-	router         *chi.Mux
+	handler        http.Handler
 	vault          *vault.Vault
 	guard          *safety.SafetyGuard
 	backupMgr      *safety.BackupManager
@@ -36,7 +33,6 @@ func NewServer(v *vault.Vault, assets fs.FS, backupDir string, masterPassword st
 	authMgr := NewAuthManager()
 
 	s := &Server{
-		router:         chi.NewRouter(),
 		vault:          v,
 		guard:          guard,
 		backupMgr:      backupMgr,
@@ -51,68 +47,71 @@ func NewServer(v *vault.Vault, assets fs.FS, backupDir string, masterPassword st
 }
 
 func (s *Server) Router() http.Handler {
-	return s.router
+	return s.handler
 }
 
 func (s *Server) routes() {
-	r := s.router
+	mux := http.NewServeMux()
 
-	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.Use(s.RemoteAccessGuardMiddleware)
+	// Remote access authentication
+	mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
+	mux.HandleFunc("POST /api/auth/unlock", s.handleAuthUnlock)
+	mux.HandleFunc("GET /api/auth/master-key", s.handleGetMasterPassword)
 
-	// API Namespace
-	r.Route("/api", func(api chi.Router) {
-		// Remote access authentication
-		api.Get("/auth/status", s.handleAuthStatus)
-		api.Post("/auth/unlock", s.handleAuthUnlock)
-		api.Get("/auth/master-key", s.handleGetMasterPassword)
-		// Connection vault endpoints
-		api.Get("/connections", s.handleListConnections)
-		api.Post("/connections", s.handleSaveConnection)
-		api.Delete("/connections/{id}", s.handleDeleteConnection)
-		api.Post("/connections/{id}/test", s.handleTestConnection)
-		api.Post("/vault/export", s.handleExportVault)
-		api.Post("/vault/import", s.handleImportVault)
+	// Connection vault endpoints
+	mux.HandleFunc("GET /api/connections", s.handleListConnections)
+	mux.HandleFunc("POST /api/connections", s.handleSaveConnection)
+	mux.HandleFunc("DELETE /api/connections/{id}", s.handleDeleteConnection)
+	mux.HandleFunc("POST /api/connections/{id}/test", s.handleTestConnection)
+	mux.HandleFunc("POST /api/vault/export", s.handleExportVault)
+	mux.HandleFunc("POST /api/vault/import", s.handleImportVault)
 
-		// Query snippets endpoints
-		api.Get("/snippets", s.handleListSnippets)
-		api.Post("/snippets", s.handleSaveSnippet)
-		api.Delete("/snippets/{id}", s.handleDeleteSnippet)
+	// Query snippets endpoints
+	mux.HandleFunc("GET /api/snippets", s.handleListSnippets)
+	mux.HandleFunc("POST /api/snippets", s.handleSaveSnippet)
+	mux.HandleFunc("DELETE /api/snippets/{id}", s.handleDeleteSnippet)
 
+	// Session exploration and actions
+	mux.HandleFunc("POST /api/session/connect/{id}", s.handleConnectSession)
+	mux.HandleFunc("GET /api/session/{id}/schema", s.handleGetSchema)
+	mux.HandleFunc("GET /api/session/{id}/ddl/{table}", s.handleGetTableDDL)
+	mux.HandleFunc("GET /api/session/{id}/table/{table}/rows", s.handleGetTableRows)
+	mux.HandleFunc("GET /api/session/{id}/notes/{table}", s.handleGetTableNote)
+	mux.HandleFunc("POST /api/session/{id}/notes/{table}", s.handleSaveTableNote)
+	mux.HandleFunc("POST /api/session/{id}/table/{table}/import-csv", s.handleImportCSV)
 
-		// Session and database exploration
-		api.Post("/session/connect/{id}", s.handleConnectSession)
-		api.Get("/session/{id}/schema", s.handleGetSchema)
-		api.Post("/session/{id}/select-db", s.handleSelectDatabase)
-		api.Post("/session/{id}/refresh-schema", s.handleRefreshSchema)
-		api.Get("/session/{id}/ddl/{table}", s.handleGetTableDDL)
-		api.Get("/session/{id}/table/{table}/rows", s.handleGetTableRows)
-		api.Post("/session/{id}/cell-edit", s.handleCellEdit)
-		api.Post("/session/{id}/toggle-readonly", s.handleToggleReadOnly)
-		api.Get("/session/{id}/notes/{table}", s.handleGetTableNote)
-		api.Post("/session/{id}/notes/{table}", s.handleSaveTableNote)
-		api.Post("/session/{id}/table/{table}/import-csv", s.handleImportCSV)
-
-
-		// Query execution, safety, and streaming
-		api.Post("/session/{id}/inspect", s.handleInspectQuery)
-		api.Post("/session/{id}/explain", s.handleExplainQuery)
-		api.Post("/session/{id}/execute", s.handleExecuteQuery)
-		api.Post("/session/{id}/cancel", s.handleCancelQuery)
-		api.HandleFunc("/session/{id}/stream", s.handleStreamWebSocket)
-
-		// AI Assistant endpoints
-		api.Post("/ai/chat", s.handleAIChat)
-		api.Get("/ai/ollama-check", s.handleAIOllamaCheck)
+	// Session commands dispatcher
+	mux.HandleFunc("POST /api/session/{id}/{action}", func(w http.ResponseWriter, r *http.Request) {
+		switch r.PathValue("action") {
+		case "select-db":
+			s.handleSelectDatabase(w, r)
+		case "refresh-schema":
+			s.handleRefreshSchema(w, r)
+		case "cell-edit":
+			s.handleCellEdit(w, r)
+		case "toggle-readonly":
+			s.handleToggleReadOnly(w, r)
+		case "inspect":
+			s.handleInspectQuery(w, r)
+		case "explain":
+			s.handleExplainQuery(w, r)
+		case "execute":
+			s.handleExecuteQuery(w, r)
+		case "cancel":
+			s.handleCancelQuery(w, r)
+		default:
+			http.NotFound(w, r)
+		}
 	})
+
+	// AI Assistant endpoints
+	mux.HandleFunc("POST /api/ai/chat", s.handleAIChat)
+	mux.HandleFunc("GET /api/ai/ollama-check", s.handleAIOllamaCheck)
 
 	// Embedded Static Frontend
 	if s.assets != nil {
 		fileServer := http.FileServer(http.FS(s.assets))
-		r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
+		mux.HandleFunc("GET /", func(w http.ResponseWriter, req *http.Request) {
 			path := strings.TrimPrefix(req.URL.Path, "/")
 			if path == "" {
 				path = "index.html"
@@ -127,6 +126,20 @@ func (s *Server) routes() {
 			fileServer.ServeHTTP(w, req)
 		})
 	}
+
+	// ponytail: stdlib panic recoverer and remote access guard replace chi router & middleware
+	s.handler = recoverer(s.RemoteAccessGuardMiddleware(mux))
+}
+
+func recoverer(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rvr := recover(); rvr != nil && rvr != http.ErrAbortHandler {
+				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {
