@@ -359,10 +359,36 @@ func (s *MySQLSession) InspectSchema(ctx context.Context, dbName string) (*drive
 		idxRows.Close()
 	}
 
+	// 4. Fetch Triggers
+	var triggers []driver.TriggerMetadata
+	trigQuery := `
+	SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE, ACTION_TIMING, EVENT_MANIPULATION, ACTION_STATEMENT
+	FROM information_schema.TRIGGERS
+	WHERE TRIGGER_SCHEMA = ?
+	ORDER BY TRIGGER_NAME ASC;
+	`
+	trigRows, err := s.db.QueryContext(ctx, trigQuery, dbName)
+	if err == nil {
+		for trigRows.Next() {
+			var name, tbl, timing, event, stmt string
+			if err := trigRows.Scan(&name, &tbl, &timing, &event, &stmt); err == nil {
+				triggers = append(triggers, driver.TriggerMetadata{
+					Name:      name,
+					Table:     tbl,
+					Timing:    timing,
+					Event:     event,
+					Statement: stmt,
+				})
+			}
+		}
+		trigRows.Close()
+	}
+
 	return &driver.SchemaMetadata{
 		DatabaseName: dbName,
 		Databases:    databases,
 		Tables:       tables,
+		Triggers:     triggers,
 	}, nil
 }
 
@@ -409,40 +435,24 @@ func (s *MySQLSession) GetTableEstimate(ctx context.Context, tableName string) (
 }
 
 func (s *MySQLSession) Explain(ctx context.Context, querySQL string) (*driver.ExplainPlan, error) {
-	rows, err := s.db.QueryContext(ctx, "EXPLAIN "+querySQL)
+	cleanedSQL := strings.TrimSpace(querySQL)
+	cleanedSQL = strings.TrimRight(cleanedSQL, "; \t\r\n")
+	if strings.HasPrefix(strings.ToUpper(cleanedSQL), "EXPLAIN ") {
+		cleanedSQL = strings.TrimSpace(cleanedSQL[8:])
+	}
+	if cleanedSQL == "" {
+		return &driver.ExplainPlan{Rows: []driver.ExplainRow{}}, nil
+	}
+
+	rows, err := s.db.QueryContext(ctx, "EXPLAIN "+cleanedSQL)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var planRows []driver.ExplainRow
-	for rows.Next() {
-		var id int
-		var selectType, table, typeStr, extra string
-		var partitions, possibleKeys, key, keyLen, ref sql.NullString
-		var rowsCount sql.NullInt64
-		var filtered sql.NullFloat64
-
-		// Standard MySQL EXPLAIN column order
-		err := rows.Scan(
-			&id, &selectType, &table, &partitions, &typeStr,
-			&possibleKeys, &key, &keyLen, &ref, &rowsCount, &filtered, &extra,
-		)
-		if err == nil {
-			planRows = append(planRows, driver.ExplainRow{
-				ID:           id,
-				SelectType:   selectType,
-				Table:        table,
-				Type:         typeStr,
-				PossibleKeys: possibleKeys.String,
-				Key:          key.String,
-				KeyLen:       keyLen.String,
-				Ref:          ref.String,
-				Rows:         rowsCount.Int64,
-				Filtered:     filtered.Float64,
-				Extra:        extra,
-			})
-		}
+	planRows, err := driver.ScanExplainRows(rows)
+	if err != nil {
+		return nil, err
 	}
 
 	return &driver.ExplainPlan{

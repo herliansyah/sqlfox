@@ -194,10 +194,48 @@ func (s *SQLiteSession) InspectSchema(ctx context.Context, dbName string) (*driv
 		tables = append(tables, tbl)
 	}
 
+	// Inspect Triggers via sqlite_master
+	var triggers []driver.TriggerMetadata
+	trigRows, err := s.db.QueryContext(ctx, `
+		SELECT name, tbl_name, IFNULL(sql, '') 
+		FROM sqlite_master 
+		WHERE type = 'trigger' AND name NOT LIKE 'sqlite_%'
+		ORDER BY name ASC;
+	`)
+	if err == nil {
+		defer trigRows.Close()
+		for trigRows.Next() {
+			var tName, tblName, tSQL string
+			if err := trigRows.Scan(&tName, &tblName, &tSQL); err == nil {
+				timing := "AFTER"
+				event := "INSERT"
+				upperSQL := strings.ToUpper(tSQL)
+				if strings.Contains(upperSQL, "BEFORE") {
+					timing = "BEFORE"
+				} else if strings.Contains(upperSQL, "INSTEAD OF") {
+					timing = "INSTEAD OF"
+				}
+				if strings.Contains(upperSQL, "DELETE") {
+					event = "DELETE"
+				} else if strings.Contains(upperSQL, "UPDATE") {
+					event = "UPDATE"
+				}
+				triggers = append(triggers, driver.TriggerMetadata{
+					Name:      tName,
+					Table:     tblName,
+					Timing:    timing,
+					Event:     event,
+					Statement: tSQL,
+				})
+			}
+		}
+	}
+
 	return &driver.SchemaMetadata{
 		DatabaseName: "main",
 		Databases:    []string{"main"},
 		Tables:       tables,
+		Triggers:     triggers,
 	}, nil
 }
 
@@ -228,23 +266,27 @@ func (s *SQLiteSession) GetTableEstimate(ctx context.Context, tableName string) 
 }
 
 func (s *SQLiteSession) Explain(ctx context.Context, querySQL string) (*driver.ExplainPlan, error) {
-	rows, err := s.db.QueryContext(ctx, "EXPLAIN QUERY PLAN "+querySQL)
+	cleanedSQL := strings.TrimSpace(querySQL)
+	cleanedSQL = strings.TrimRight(cleanedSQL, "; \t\r\n")
+	upper := strings.ToUpper(cleanedSQL)
+	if strings.HasPrefix(upper, "EXPLAIN QUERY PLAN ") {
+		cleanedSQL = strings.TrimSpace(cleanedSQL[19:])
+	} else if strings.HasPrefix(upper, "EXPLAIN ") {
+		cleanedSQL = strings.TrimSpace(cleanedSQL[8:])
+	}
+	if cleanedSQL == "" {
+		return &driver.ExplainPlan{Rows: []driver.ExplainRow{}}, nil
+	}
+
+	rows, err := s.db.QueryContext(ctx, "EXPLAIN QUERY PLAN "+cleanedSQL)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var planRows []driver.ExplainRow
-	for rows.Next() {
-		var id, parent, notused int
-		var detail string
-		if err := rows.Scan(&id, &parent, &notused, &detail); err == nil {
-			planRows = append(planRows, driver.ExplainRow{
-				ID:    id,
-				Type:  "SCAN/SEARCH",
-				Extra: detail,
-			})
-		}
+	planRows, err := driver.ScanExplainRows(rows)
+	if err != nil {
+		return nil, err
 	}
 
 	return &driver.ExplainPlan{

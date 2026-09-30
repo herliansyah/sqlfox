@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SqlFox - Database Manager</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/vendor/tailwind/tailwind.min.js"></script>
   <script>
     tailwind.config = {
       darkMode: 'class',
@@ -36,6 +36,10 @@
   <script src="/vendor/codemirror/mode/sql/sql.min.js"></script>
   <script src="/vendor/codemirror/addon/hint/show-hint.min.js"></script>
   <style>
+    /* Critical fallback styles to prevent FOUC and modal bleeding */
+    [hidden], .hidden { display: none !important; }
+    dialog:not([open]) { display: none !important; }
+
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: #090d16; }
     ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
@@ -115,6 +119,7 @@
     .cm-badge-tbl { background: rgba(16, 185, 129, 0.2); color: #34d399; }
     .cm-badge-col { background: rgba(56, 189, 248, 0.2); color: #38bdf8; }
     .cm-badge-fn { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
+    .cm-badge-db { background: rgba(168, 85, 247, 0.2); color: #c084fc; }
     .cm-hint-label { flex: 1; }
     .cm-hint-type { margin-left: 8px; font-size: 10px; color: #64748b; }
   </style>
@@ -137,11 +142,17 @@
       </div>
     </div>
 
-    <!-- Center Search / Command Palette Shortcut -->
-    <button onclick="toggleCommandPalette()" class="bg-app-card hover:bg-slate-700 text-slate-400 hover:text-slate-200 px-3 py-1.5 rounded text-xs flex items-center space-x-2 border border-app-border transition">
-      <span>🔍 Search actions or tables...</span>
-      <kbd class="bg-slate-800 px-1.5 py-0.5 rounded text-[10px] text-slate-400 border border-slate-700">Ctrl+K</kbd>
-    </button>
+    <!-- Center Search & Command Palette Shortcuts -->
+    <div class="flex items-center space-x-2">
+      <button onclick="toggleCommandPalette()" class="bg-app-card hover:bg-slate-700 text-slate-400 hover:text-slate-200 px-3 py-1.5 rounded text-xs flex items-center space-x-2 border border-app-border transition" title="Open Command Palette (Ctrl+K)">
+        <span>⚡ Command Palette</span>
+        <kbd class="bg-slate-800 px-1.5 py-0.5 rounded text-[10px] text-slate-400 border border-slate-700">Ctrl+K</kbd>
+      </button>
+      <button onclick="toggleSchemaSearch()" class="bg-app-card hover:bg-slate-700 text-slate-400 hover:text-slate-200 px-3 py-1.5 rounded text-xs flex items-center space-x-2 border border-app-border transition" title="Quick Open Table or Column (Ctrl+P)">
+        <span>🔍 Schema Search</span>
+        <kbd class="bg-slate-800 px-1.5 py-0.5 rounded text-[10px] text-slate-400 border border-slate-700">Ctrl+P</kbd>
+      </button>
+    </div>
 
     <!-- Top Right Controls -->
     <div class="flex items-center space-x-2 text-xs">
@@ -169,40 +180,91 @@
   <!-- Main 3-Column Work Area -->
   <div class="flex-1 flex overflow-hidden">
 
-    <!-- Left Sidebar: Connections & Schema Explorer -->
+    <!-- Left Sidebar: HeidiSQL Session Switcher & Schema Explorer -->
     <aside id="left-sidebar" class="w-64 bg-app-surface border-r border-app-border flex flex-col flex-shrink-0 transition-all duration-200 z-10">
-      <!-- Sidebar Header -->
-      <div class="p-3 border-b border-app-border flex items-center justify-between">
-        <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Connections</span>
-        <button onclick="openNewConnModal()" class="bg-app-accent hover:bg-sky-500 text-slate-950 font-bold px-2 py-0.5 rounded text-xs transition">
-          + Add
-        </button>
-      </div>
-
-      <!-- Connections Tree -->
-      <div id="connections-tree" class="p-2 overflow-y-auto max-h-48 border-b border-app-border space-y-1 text-xs">
-        <div class="text-slate-500 text-center py-4">Loading connections...</div>
-      </div>
-
-      <!-- Schema Explorer Header -->
-      <div class="p-3 border-b border-app-border flex items-center justify-between bg-slate-900/50">
-        <div class="flex items-center space-x-1">
-          <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Tables</span>
-          <span id="table-count-badge" class="bg-slate-800 text-slate-400 px-1.5 py-0.2 rounded text-[10px]">0</span>
+      <!-- HeidiSQL-Style Session Switcher Header -->
+      <div class="p-2.5 border-b border-app-border bg-slate-900/60 relative">
+        <div class="flex items-center justify-between text-[10px] text-slate-400 mb-1.5">
+          <span class="font-semibold uppercase tracking-wider flex items-center space-x-1">
+            <span>⚡</span>
+            <span>Session</span>
+          </span>
+          <div class="flex items-center space-x-1.5">
+            <button onclick="openNewConnModal()" class="text-app-accent hover:underline text-[11px] font-semibold" title="New Connection Session">+ New</button>
+            <button onclick="toggleSessionDropdown()" class="text-slate-400 hover:text-white text-xs px-1" title="Manage / Switch Sessions">▼</button>
+          </div>
         </div>
-        <button onclick="refreshSchema()" title="Refresh Schema" class="text-slate-400 hover:text-white text-xs">
-          🔄
+
+        <!-- Compact Active Session Bar Button -->
+        <button id="session-switcher-btn" onclick="toggleSessionDropdown()" class="w-full bg-slate-950 border border-slate-700 hover:border-slate-500 px-2 py-1.5 rounded flex items-center justify-between text-xs transition group">
+          <div class="flex items-center space-x-2 truncate">
+            <span id="session-switcher-icon">🗄️</span>
+            <span id="session-switcher-name" class="font-medium text-white truncate">Select Connection</span>
+            <span id="session-switcher-env-badge" class="hidden text-[9px] px-1 py-0.2 rounded border font-mono uppercase"></span>
+          </div>
+          <span class="text-slate-500 group-hover:text-slate-300 text-[10px] ml-1">▼</span>
         </button>
+
+        <!-- HeidiSQL Session Dropdown / Popover -->
+        <div id="session-dropdown-menu" class="hidden absolute top-full left-2 right-2 mt-1 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl z-50 p-2 space-y-1.5">
+          <div class="flex items-center space-x-1 pb-1 border-b border-slate-800">
+            <input type="text" id="session-search-input" oninput="filterSessionList(this.value)" placeholder="Filter sessions..." class="w-full bg-slate-950 border border-slate-800 focus:border-app-accent text-white text-xs px-2 py-1 rounded outline-none font-mono">
+            <button onclick="openNewConnModal(); toggleSessionDropdown(false);" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-2 py-1 rounded text-xs transition" title="Add Session">➕</button>
+          </div>
+          <!-- Filtered Connection List -->
+          <div id="connections-tree" class="overflow-y-auto max-h-56 space-y-1 text-xs">
+            <div class="text-slate-500 text-center py-3">Loading connections...</div>
+          </div>
+        </div>
       </div>
 
-      <!-- Database Selector (for multi-database servers like MySQL/MariaDB) -->
-      <div id="database-selector-container" class="p-2 border-b border-app-border bg-slate-950/60 hidden text-xs">
+      <!-- Database / Schema Switcher (for multi-database servers like MySQL/MariaDB) -->
+      <div id="database-selector-container" class="relative p-2 border-b border-app-border bg-slate-950/60 hidden text-xs flex-shrink-0">
         <div class="flex items-center justify-between text-[10px] text-slate-400 mb-1">
           <span class="font-semibold uppercase tracking-wider">Database / Schema</span>
-          <span id="db-active-label" class="text-app-accent font-mono truncate max-w-[120px]"></span>
+          <button onclick="openCreateDatabaseModal()" class="text-app-accent hover:underline text-[11px] font-bold" title="Create New Database">+ New</button>
         </div>
-        <select id="database-selector" onchange="onDatabaseSelectChange(this.value)" class="w-full bg-slate-900 border border-slate-700 text-white text-xs p-1.5 rounded outline-none font-mono">
-        </select>
+        
+        <!-- Dropdown trigger button -->
+        <button id="database-switcher-btn" onclick="toggleDatabaseDropdown()" class="w-full flex items-center justify-between bg-slate-900 border border-slate-700 hover:border-slate-500 text-white text-xs px-2 py-1.5 rounded outline-none font-mono transition text-left group">
+          <div class="flex items-center space-x-1.5 truncate">
+            <span>🗄️</span>
+            <span id="database-switcher-active-name" class="font-semibold text-app-accent truncate">default</span>
+          </div>
+          <span class="text-slate-500 group-hover:text-slate-300 text-[10px] ml-1">▼</span>
+        </button>
+
+        <!-- Hidden select for compatibility with tests -->
+        <select id="database-selector" onchange="onDatabaseSelectChange(this.value)" class="hidden"></select>
+
+        <!-- Searchable Database Popover Menu -->
+        <div id="database-dropdown-menu" class="hidden absolute top-full left-2 right-2 mt-1 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl z-50 p-2 space-y-1.5">
+          <div class="flex items-center space-x-1 pb-1 border-b border-slate-800">
+            <input type="text" id="database-search-input" oninput="filterDatabaseList(this.value)" placeholder="Filter databases..." class="w-full bg-slate-950 border border-slate-800 focus:border-app-accent text-white text-xs px-2 py-1 rounded outline-none font-mono">
+            <button onclick="openCreateDatabaseModal(); toggleDatabaseDropdown(false);" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-2 py-1 rounded text-xs transition" title="Create New Database">➕</button>
+          </div>
+          <div id="database-list-tree" class="overflow-y-auto max-h-52 space-y-0.5 text-xs font-mono">
+          </div>
+        </div>
+      </div>
+
+      <!-- Schema Explorer Header & Filter Bar (Sticky) -->
+      <div class="p-2 border-b border-app-border bg-slate-900/50 flex-shrink-0 space-y-1.5">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center space-x-1.5">
+            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Objects</span>
+            <span id="table-count-badge" class="bg-slate-800 text-slate-400 px-1.5 py-0.2 rounded text-[10px] font-mono font-bold">0</span>
+          </div>
+          <button onclick="refreshSchema()" title="Refresh Schema" class="text-slate-400 hover:text-white text-xs p-1 hover:bg-slate-800 rounded transition">
+            🔄
+          </button>
+        </div>
+
+        <div id="schema-filter-container" class="relative flex items-center">
+          <span class="absolute left-2 text-slate-500 text-xs">🔍</span>
+          <input type="text" id="schema-filter-input" oninput="filterSchemaTree(this.value)" placeholder="Filter tables, views, triggers... (/)" class="w-full bg-slate-950 border border-slate-800 focus:border-app-accent text-white text-xs pl-6 pr-6 py-1 rounded outline-none font-mono">
+          <button id="schema-filter-clear-btn" onclick="clearSchemaFilter()" class="hidden absolute right-2 text-slate-500 hover:text-slate-200 text-xs" title="Clear filter">✕</button>
+        </div>
       </div>
 
       <!-- Tables & Columns Tree -->
@@ -239,8 +301,8 @@
             <button onclick="inspectActiveQuery()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition">
               🛡️ Safety Check
             </button>
-            <button onclick="formatActiveQuery()" class="text-slate-400 hover:text-slate-200 px-2 py-1 rounded hover:bg-slate-800 transition">
-              Format SQL
+            <button onclick="formatActiveQuery()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition" title="Format SQL (Ctrl+Shift+F)">
+              ✨ Format SQL
             </button>
             <button id="export-notes-btn" onclick="exportCurrentNotes()" class="hidden text-slate-300 hover:text-white px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 transition flex items-center space-x-1" title="Download Notes as Markdown">
               <span>💾</span>
@@ -264,8 +326,27 @@
 
       <!-- Lower Split: Data Grid / Results Area -->
       <div id="grid-container" class="flex-1 flex flex-col bg-app-bg overflow-hidden">
-        <!-- Grid Toolbar -->
-        <div class="h-8 bg-app-surface/40 border-b border-app-border px-3 flex items-center justify-between text-xs text-slate-400">
+        <!-- Table Sub-Tabs (HeidiSQL-Style) -->
+        <div id="table-mode-tabs" class="hidden h-8 bg-slate-950 border-b border-app-border px-3 flex items-center space-x-1 text-xs">
+          <button id="btn-mode-data" onclick="setTableMode('data')" class="px-3 py-1 rounded text-xs font-semibold bg-app-surface text-app-accent border-b-2 border-app-accent flex items-center space-x-1">
+            <span>📊</span><span>Data</span>
+          </button>
+          <button id="btn-mode-structure" onclick="setTableMode('structure')" class="px-3 py-1 rounded text-xs text-slate-400 hover:text-white hover:bg-slate-800 flex items-center space-x-1">
+            <span>🏗️</span><span>Structure &amp; PK</span>
+          </button>
+          <button id="btn-mode-indexes" onclick="setTableMode('indexes')" class="px-3 py-1 rounded text-xs text-slate-400 hover:text-white hover:bg-slate-800 flex items-center space-x-1">
+            <span>🔑</span><span>Indexes</span>
+          </button>
+          <button id="btn-mode-foreign-keys" onclick="setTableMode('foreign-keys')" class="px-3 py-1 rounded text-xs text-slate-400 hover:text-white hover:bg-slate-800 flex items-center space-x-1">
+            <span>🔗</span><span>Foreign Keys</span>
+          </button>
+          <button id="btn-mode-ddl" onclick="setTableMode('ddl')" class="px-3 py-1 rounded text-xs text-slate-400 hover:text-white hover:bg-slate-800 flex items-center space-x-1">
+            <span>📜</span><span>CREATE Code</span>
+          </button>
+        </div>
+
+        <!-- Grid Toolbar (Data Mode) -->
+        <div id="grid-toolbar" class="h-8 bg-app-surface/40 border-b border-app-border px-3 flex items-center justify-between text-xs text-slate-400">
           <div class="flex items-center space-x-3">
             <span id="grid-result-stats">0 rows</span>
             <span id="grid-limit-badge" class="bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded text-[10px]">Safe Limit: 1,000</span>
@@ -286,7 +367,7 @@
           </div>
         </div>
 
-        <!-- Virtual Data Grid Table -->
+        <!-- Virtual Data Grid Table (Data Mode) -->
         <div id="virtual-grid-wrapper" class="flex-1 overflow-auto">
           <table id="results-table" class="w-full border-collapse text-left font-mono text-xs">
             <thead id="grid-thead" class="sticky top-0 bg-slate-900 border-b border-app-border text-slate-400 z-10">
@@ -296,6 +377,192 @@
               <tr><td class="p-8 text-center text-slate-500">Run a query or double click a table in the sidebar to view records</td></tr>
             </tbody>
           </table>
+        </div>
+
+        <!-- Structure Designer View (Structure Mode) -->
+        <div id="table-structure-view" class="hidden flex-1 flex flex-col overflow-hidden bg-app-bg">
+          <div class="h-9 bg-app-surface/60 border-b border-app-border px-3 flex items-center justify-between text-xs">
+            <div class="flex items-center space-x-2">
+              <button onclick="addStructureColumn()" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-2.5 py-1 rounded transition flex items-center space-x-1">
+                <span>➕</span><span>Add Column</span>
+              </button>
+              <button id="btn-save-structure" onclick="saveStructureChanges()" disabled class="bg-slate-800 text-slate-500 font-bold px-3 py-1 rounded transition cursor-not-allowed flex items-center space-x-1">
+                <span>💾</span><span>Save Structure</span>
+                <span id="structure-diff-badge" class="hidden bg-emerald-950 text-emerald-300 border border-emerald-600 px-1 rounded text-[10px]">0</span>
+              </button>
+              <button id="btn-discard-structure" onclick="discardStructureChanges()" class="hidden text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-800 transition">
+                Discard
+              </button>
+            </div>
+            <div class="text-[11px] text-slate-400">
+              <span id="structure-table-name" class="font-mono text-app-accent font-semibold"></span>
+              <span class="text-slate-500 ml-2">Click 🔑 to set Primary Key</span>
+            </div>
+          </div>
+          <datalist id="sql-type-list">
+            <option value="INT"></option>
+            <option value="BIGINT"></option>
+            <option value="TINYINT"></option>
+            <option value="VARCHAR(255)"></option>
+            <option value="VARCHAR(100)"></option>
+            <option value="VARCHAR(50)"></option>
+            <option value="TEXT"></option>
+            <option value="MEDIUMTEXT"></option>
+            <option value="LONGTEXT"></option>
+            <option value="DATETIME"></option>
+            <option value="TIMESTAMP"></option>
+            <option value="BOOLEAN"></option>
+            <option value="DECIMAL(10,2)"></option>
+            <option value="FLOAT"></option>
+            <option value="DOUBLE"></option>
+            <option value="JSON"></option>
+            <option value="BLOB"></option>
+          </datalist>
+          <div class="flex-1 overflow-auto">
+            <table class="w-full border-collapse text-left font-mono text-xs">
+              <thead class="sticky top-0 bg-slate-900 border-b border-app-border text-slate-400 z-10">
+                <tr>
+                  <th class="p-2 w-10 text-center">PK</th>
+                  <th class="p-2">Column Name</th>
+                  <th class="p-2">Data Type</th>
+                  <th class="p-2 w-20 text-center">Null</th>
+                  <th class="p-2">Default Value</th>
+                  <th class="p-2 w-24 text-center">Auto Inc</th>
+                  <th class="p-2 w-16 text-center">Action</th>
+                </tr>
+              </thead>
+              <tbody id="structure-tbody" class="divide-y divide-slate-800/60 text-slate-200">
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Indexes View (Indexes Mode) -->
+        <div id="table-indexes-view" class="hidden flex-1 flex flex-col overflow-hidden bg-app-bg">
+          <div class="h-9 bg-app-surface/60 border-b border-app-border px-3 flex items-center justify-between text-xs">
+            <button onclick="openAddIndexForm()" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-2.5 py-1 rounded transition flex items-center space-x-1">
+              <span>➕</span><span>Add Index</span>
+            </button>
+            <span class="text-slate-400 text-[11px]">Table Indexes (BTREE / UNIQUE)</span>
+          </div>
+          <div id="add-index-inline-form" class="hidden p-3 bg-slate-950 border-b border-app-border space-y-2 text-xs">
+            <div class="grid grid-cols-3 gap-3">
+              <div>
+                <label class="block text-slate-400 mb-1">Index Name</label>
+                <input type="text" id="new-index-name" placeholder="idx_column" class="w-full bg-slate-900 border border-slate-700 p-1.5 rounded text-white font-mono text-xs outline-none focus:border-app-accent">
+              </div>
+              <div>
+                <label class="block text-slate-400 mb-1">Columns (comma separated)</label>
+                <input type="text" id="new-index-cols" placeholder="col1, col2" class="w-full bg-slate-900 border border-slate-700 p-1.5 rounded text-white font-mono text-xs outline-none focus:border-app-accent">
+              </div>
+              <div class="flex items-center space-x-4 pt-5">
+                <label class="flex items-center space-x-1 text-slate-300 cursor-pointer">
+                  <input type="checkbox" id="new-index-unique" class="rounded bg-slate-900 border-slate-700 text-app-accent">
+                  <span>Unique Index</span>
+                </label>
+                <button onclick="submitNewIndex()" class="bg-app-safe hover:bg-emerald-600 text-slate-950 font-bold px-3 py-1 rounded transition text-xs">Save</button>
+                <button onclick="document.getElementById('add-index-inline-form').classList.add('hidden')" class="text-slate-400 hover:text-white px-2 py-1 text-xs">Cancel</button>
+              </div>
+            </div>
+          </div>
+          <div class="flex-1 overflow-auto">
+            <table class="w-full border-collapse text-left font-mono text-xs">
+              <thead class="sticky top-0 bg-slate-900 border-b border-app-border text-slate-400 z-10">
+                <tr>
+                  <th class="p-2">Index Name</th>
+                  <th class="p-2">Indexed Columns</th>
+                  <th class="p-2 w-24 text-center">Unique</th>
+                  <th class="p-2 w-24">Type</th>
+                  <th class="p-2 w-20 text-center">Action</th>
+                </tr>
+              </thead>
+              <tbody id="indexes-tbody" class="divide-y divide-slate-800/60 text-slate-200">
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Foreign Keys View (Foreign Keys Mode) -->
+        <div id="table-fk-view" class="hidden flex-1 flex flex-col overflow-hidden bg-app-bg">
+          <div class="h-9 bg-app-surface/60 border-b border-app-border px-3 flex items-center justify-between text-xs">
+            <button onclick="openAddFKForm()" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-2.5 py-1 rounded transition flex items-center space-x-1">
+              <span>➕</span><span>Add Foreign Key</span>
+            </button>
+            <span class="text-slate-400 text-[11px]">Foreign Key Relationships</span>
+          </div>
+          <div id="add-fk-inline-form" class="hidden p-3 bg-slate-950 border-b border-app-border space-y-2 text-xs">
+            <div class="grid grid-cols-3 gap-2">
+              <div>
+                <label class="block text-slate-400 mb-1">Constraint Name</label>
+                <input type="text" id="new-fk-name" placeholder="fk_table_col" class="w-full bg-slate-900 border border-slate-700 p-1.5 rounded text-white font-mono text-xs outline-none focus:border-app-accent">
+              </div>
+              <div>
+                <label class="block text-slate-400 mb-1">Source Column</label>
+                <select id="new-fk-col" class="w-full bg-slate-900 border border-slate-700 p-1.5 rounded text-white font-mono text-xs outline-none">
+                </select>
+              </div>
+              <div>
+                <label class="block text-slate-400 mb-1">Referenced Table</label>
+                <select id="new-fk-ref-table" onchange="onFKRefTableChange(this.value)" class="w-full bg-slate-900 border border-slate-700 p-1.5 rounded text-white font-mono text-xs outline-none">
+                </select>
+              </div>
+              <div>
+                <label class="block text-slate-400 mb-1">Referenced Column</label>
+                <input type="text" id="new-fk-ref-col" placeholder="id" class="w-full bg-slate-900 border border-slate-700 p-1.5 rounded text-white font-mono text-xs outline-none focus:border-app-accent">
+              </div>
+              <div>
+                <label class="block text-slate-400 mb-1">On Delete</label>
+                <select id="new-fk-on-delete" class="w-full bg-slate-900 border border-slate-700 p-1.5 rounded text-white font-mono text-xs outline-none">
+                  <option value="CASCADE">CASCADE</option>
+                  <option value="SET NULL">SET NULL</option>
+                  <option value="RESTRICT">RESTRICT</option>
+                  <option value="NO ACTION">NO ACTION</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-slate-400 mb-1">On Update</label>
+                <select id="new-fk-on-update" class="w-full bg-slate-900 border border-slate-700 p-1.5 rounded text-white font-mono text-xs outline-none">
+                  <option value="CASCADE">CASCADE</option>
+                  <option value="SET NULL">SET NULL</option>
+                  <option value="RESTRICT">RESTRICT</option>
+                  <option value="NO ACTION">NO ACTION</option>
+                </select>
+              </div>
+            </div>
+            <div class="flex justify-end space-x-2 pt-2">
+              <button onclick="document.getElementById('add-fk-inline-form').classList.add('hidden')" class="text-slate-400 hover:text-white px-2.5 py-1 text-xs">Cancel</button>
+              <button onclick="submitNewFK()" class="bg-app-safe hover:bg-emerald-600 text-slate-950 font-bold px-3 py-1 rounded transition text-xs">Create Foreign Key</button>
+            </div>
+          </div>
+          <div class="flex-1 overflow-auto">
+            <table class="w-full border-collapse text-left font-mono text-xs">
+              <thead class="sticky top-0 bg-slate-900 border-b border-app-border text-slate-400 z-10">
+                <tr>
+                  <th class="p-2">Name</th>
+                  <th class="p-2">Column</th>
+                  <th class="p-2">References</th>
+                  <th class="p-2 w-28">On Delete</th>
+                  <th class="p-2 w-28">On Update</th>
+                  <th class="p-2 w-20 text-center">Action</th>
+                </tr>
+              </thead>
+              <tbody id="foreign-keys-tbody" class="divide-y divide-slate-800/60 text-slate-200">
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- DDL / Create Code View (DDL Mode) -->
+        <div id="table-ddl-view" class="hidden flex-1 flex flex-col overflow-hidden bg-app-bg">
+          <div class="h-9 bg-app-surface/60 border-b border-app-border px-3 flex items-center justify-between text-xs">
+            <span class="text-slate-400 text-[11px]">CREATE Statement</span>
+            <button onclick="copyCurrentTableDDL()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded text-xs transition">
+              📋 Copy SQL
+            </button>
+          </div>
+          <div class="flex-1 p-4 overflow-auto">
+            <pre id="table-raw-ddl" class="p-4 bg-slate-950 border border-slate-800 rounded font-mono text-xs text-sky-300 whitespace-pre overflow-x-auto"></pre>
+          </div>
         </div>
       </div>
 
@@ -436,21 +703,60 @@
   </div>
 
   <!-- 2. Impact Preview Drawer / Modal -->
-  <div id="impact-preview-modal" class="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 hidden">
-    <div class="bg-slate-900 border border-app-border w-full max-w-2xl rounded-lg shadow-2xl p-6 space-y-4">
-      <div class="flex items-center justify-between border-b border-app-border pb-3">
+  <!-- 2. Impact Preview Drawer / Modal -->
+  <div id="impact-preview-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-slate-900 border border-app-border w-full max-w-4xl rounded-lg shadow-2xl p-5 space-y-3 flex flex-col max-h-[85vh]">
+      <div class="flex items-center justify-between border-b border-app-border pb-3 flex-shrink-0">
         <div class="flex items-center space-x-2">
-          <span class="text-xl">🛡️</span>
-          <h3 class="text-base font-bold text-white">Query Impact Preview (EXPLAIN)</h3>
+          <span class="text-xl">⚡</span>
+          <div>
+            <h3 class="text-base font-bold text-white">Execution Plan (EXPLAIN)</h3>
+            <p id="impact-query-snippet" class="text-[11px] font-mono text-slate-400 truncate max-w-xl"></p>
+          </div>
         </div>
-        <button onclick="closeImpactModal()" class="text-slate-400 hover:text-white">✕</button>
+        <div class="flex items-center space-x-2">
+          <div class="flex bg-slate-950 rounded p-0.5 border border-slate-700 text-xs">
+            <button id="impact-tab-table-btn" onclick="switchImpactTab('table')" class="px-2.5 py-0.5 rounded font-semibold bg-sky-950 text-sky-400">Plan Grid</button>
+            <button id="impact-tab-raw-btn" onclick="switchImpactTab('raw')" class="px-2.5 py-0.5 rounded text-slate-400 hover:text-white">Raw JSON</button>
+          </div>
+          <button onclick="closeImpactModal()" class="text-slate-400 hover:text-white text-base px-1">✕</button>
+        </div>
       </div>
-      <div id="impact-plan-details" class="space-y-3 text-xs">
-        <div class="bg-slate-950 p-3 rounded font-mono text-slate-300 overflow-x-auto max-h-60" id="impact-raw-plan"></div>
+
+      <!-- Plan Table View -->
+      <div id="impact-table-view" class="flex-1 overflow-auto border border-slate-800 rounded bg-slate-950 min-h-[160px]">
+        <table class="w-full text-left text-xs border-collapse">
+          <thead class="bg-slate-800/80 text-slate-300 font-semibold sticky top-0 border-b border-slate-700">
+            <tr>
+              <th class="p-2 w-12 text-center">#</th>
+              <th class="p-2">Type</th>
+              <th class="p-2">Table</th>
+              <th class="p-2">Access</th>
+              <th class="p-2">Key Used</th>
+              <th class="p-2 text-right">Rows</th>
+              <th class="p-2 text-right">Filtered</th>
+              <th class="p-2">Extra</th>
+            </tr>
+          </thead>
+          <tbody id="impact-plan-tbody" class="divide-y divide-slate-800 font-mono text-[11px]">
+          </tbody>
+        </table>
+        <div id="impact-empty-state" class="hidden p-8 text-center text-slate-500 italic text-xs">
+          No execution plan steps returned by the database engine.
+        </div>
       </div>
-      <div class="flex justify-end space-x-2 pt-2">
-        <button onclick="closeImpactModal()" class="px-4 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 rounded">Close</button>
-        <button onclick="closeImpactModal(); runActiveQuery(true);" class="px-4 py-1.5 text-xs bg-app-safe hover:bg-emerald-600 text-slate-950 font-bold rounded">Execute Anyway</button>
+
+      <!-- Raw JSON View -->
+      <div id="impact-raw-view" class="hidden flex-1 overflow-auto border border-slate-800 rounded bg-slate-950 p-3 min-h-[160px]">
+        <pre class="font-mono text-slate-300 text-xs whitespace-pre overflow-x-auto" id="impact-raw-plan"></pre>
+      </div>
+
+      <div class="flex items-center justify-between pt-2 border-t border-app-border flex-shrink-0">
+        <div id="impact-summary-badge" class="text-xs text-slate-400"></div>
+        <div class="flex space-x-2">
+          <button onclick="closeImpactModal()" class="px-4 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 rounded">Close</button>
+          <button onclick="closeImpactModal(); runActiveQuery(true);" class="px-4 py-1.5 text-xs bg-app-safe hover:bg-emerald-600 text-slate-950 font-bold rounded">Execute Query</button>
+        </div>
       </div>
     </div>
   </div>
@@ -671,6 +977,276 @@
     </div>
   </div>
 
+  <!-- 7. Native Alert & Confirm Dialog (HTML5 <dialog>) -->
+  <dialog id="app-native-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-md w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm">
+    <div class="space-y-4">
+      <div class="flex items-center space-x-2 border-b border-slate-800 pb-2">
+        <span id="app-native-dialog-icon" class="text-xl">🦊</span>
+        <h3 id="app-native-dialog-title" class="text-sm font-bold text-white">Notification</h3>
+      </div>
+      <p id="app-native-dialog-body" class="text-xs text-slate-300 whitespace-pre-wrap leading-relaxed max-h-80 overflow-y-auto"></p>
+      <div class="flex justify-end space-x-2 pt-2 border-t border-slate-800">
+        <button id="app-native-dialog-cancel" class="px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 rounded transition hidden">Cancel</button>
+        <button id="app-native-dialog-confirm" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-4 py-1.5 rounded text-xs transition">OK</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 8. Safety Guard Inspection Dialog (HTML5 <dialog>) -->
+  <dialog id="safety-inspection-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-lg w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm">
+    <div class="space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+        <div class="flex items-center space-x-2">
+          <span class="text-xl">🛡️</span>
+          <h3 class="text-sm font-bold text-white">Safety Guard Inspection</h3>
+        </div>
+        <button onclick="document.getElementById('safety-inspection-dialog').close()" class="text-slate-400 hover:text-white text-xs">✕</button>
+      </div>
+      <div class="space-y-3 text-xs">
+        <div class="flex items-center justify-between bg-slate-950 p-2.5 rounded border border-slate-800">
+          <span class="text-slate-400">Risk Assessment:</span>
+          <span id="inspect-risk-badge" class="px-2.5 py-0.5 rounded font-mono font-bold text-xs"></span>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div class="bg-slate-950 p-2 rounded border border-slate-800">
+            <span class="text-[10px] text-slate-500 uppercase tracking-wider block">Destructive Query</span>
+            <span id="inspect-destructive-text" class="font-semibold"></span>
+          </div>
+          <div class="bg-slate-950 p-2 rounded border border-slate-800">
+            <span class="text-[10px] text-slate-500 uppercase tracking-wider block">Challenge Modal</span>
+            <span id="inspect-challenge-text" class="font-semibold"></span>
+          </div>
+        </div>
+        <div>
+          <span class="text-[10px] text-slate-500 uppercase tracking-wider block mb-1">Audit Policy / Reason</span>
+          <div id="inspect-reason-box" class="bg-slate-950 p-2.5 rounded text-slate-300 font-mono text-[11px] border border-slate-800 leading-relaxed"></div>
+        </div>
+        <div>
+          <span class="text-[10px] text-slate-500 uppercase tracking-wider block mb-1">Inspected Query</span>
+          <div id="inspect-sql-preview" class="bg-slate-950 p-2.5 rounded text-app-accent font-mono text-[11px] border border-slate-800 max-h-32 overflow-y-auto whitespace-pre"></div>
+        </div>
+      </div>
+      <div class="flex justify-end pt-2 border-t border-slate-800">
+        <button onclick="document.getElementById('safety-inspection-dialog').close()" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-4 py-1.5 rounded text-xs transition">Dismiss</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 9. DDL Review Modal (HTML5 <dialog>) -->
+  <dialog id="ddl-review-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-2xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm">
+    <div class="space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+        <div class="flex items-center space-x-2">
+          <span class="text-xl">📜</span>
+          <h3 class="text-sm font-bold text-white">Review Generated DDL Statements</h3>
+        </div>
+        <button onclick="document.getElementById('ddl-review-dialog').close()" class="text-slate-400 hover:text-white text-xs">✕</button>
+      </div>
+      <p class="text-xs text-slate-400 leading-relaxed">The following statement(s) will be executed against your database. Safety Guard and automated backup will protect this operation.</p>
+      <div class="bg-slate-950 p-3 rounded font-mono text-xs text-app-accent border border-slate-800 max-h-60 overflow-y-auto whitespace-pre" id="ddl-review-sql"></div>
+      <div class="flex justify-end space-x-2 pt-2 border-t border-slate-800">
+        <button onclick="document.getElementById('ddl-review-dialog').close()" class="px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 rounded transition">Cancel</button>
+        <button id="ddl-review-confirm-btn" class="bg-app-safe hover:bg-emerald-600 text-slate-950 font-bold px-4 py-1.5 rounded text-xs transition shadow">Execute DDL</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 10. Create Table Designer Dialog (HTML5 <dialog>) -->
+  <dialog id="table-creator-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-4xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm">
+    <div class="space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+        <div class="flex items-center space-x-2">
+          <span class="text-xl">🏗️</span>
+          <h3 class="text-sm font-bold text-white">Create New Table</h3>
+        </div>
+        <button onclick="document.getElementById('table-creator-dialog').close()" class="text-slate-400 hover:text-white text-xs">✕</button>
+      </div>
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block text-slate-400 mb-1 font-semibold">Table Name</label>
+          <input type="text" id="new-table-name" placeholder="e.g. orders" class="w-full bg-slate-950 border border-slate-700 p-2 text-white font-mono rounded outline-none focus:border-app-accent">
+        </div>
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-slate-400 font-semibold">Columns</span>
+            <button onclick="addCreatorColumn()" class="text-app-accent hover:underline text-[11px] font-semibold">+ Add Column</button>
+          </div>
+          <div class="max-h-72 overflow-y-auto border border-slate-800 rounded bg-slate-950">
+            <table class="w-full text-left font-mono text-xs">
+              <thead class="bg-slate-900 text-slate-400 sticky top-0">
+                <tr>
+                  <th class="p-1.5 w-10 text-center">PK</th>
+                  <th class="p-1.5 w-36">Column</th>
+                  <th class="p-1.5">Type &amp; Length</th>
+                  <th class="p-1.5 w-14 text-center">Null</th>
+                  <th class="p-1.5">Default Value</th>
+                  <th class="p-1.5 w-16 text-center">Auto Inc</th>
+                  <th class="p-1.5 w-10 text-center">✕</th>
+                </tr>
+              </thead>
+              <tbody id="creator-columns-tbody" class="divide-y divide-slate-800 text-slate-200">
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="flex justify-end space-x-2 pt-2 border-t border-slate-800">
+        <button onclick="document.getElementById('table-creator-dialog').close()" class="px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 rounded">Cancel</button>
+        <button onclick="submitCreateTable()" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-4 py-1.5 rounded text-xs transition">Create Table</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 11. View Designer Dialog (HTML5 <dialog>) -->
+  <dialog id="view-designer-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm">
+    <div class="space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+        <div class="flex items-center space-x-2">
+          <span class="text-xl">👁️</span>
+          <h3 id="view-designer-title" class="text-sm font-bold text-white">Create Database View</h3>
+        </div>
+        <button onclick="document.getElementById('view-designer-dialog').close()" class="text-slate-400 hover:text-white text-xs">✕</button>
+      </div>
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block text-slate-400 mb-1 font-semibold">View Name</label>
+          <input type="text" id="view-designer-name" placeholder="v_active_users" class="w-full bg-slate-950 border border-slate-700 p-2 text-white font-mono rounded outline-none focus:border-app-accent">
+        </div>
+        <div>
+          <label class="block text-slate-400 mb-1 font-semibold">View Query (SELECT statement)</label>
+          <textarea id="view-designer-query" rows="6" placeholder="SELECT id, name, email FROM users WHERE active = 1" class="w-full bg-slate-950 border border-slate-700 p-2 text-white font-mono rounded outline-none resize-none focus:border-app-accent"></textarea>
+        </div>
+      </div>
+      <div class="flex justify-end space-x-2 pt-2 border-t border-slate-800">
+        <button onclick="document.getElementById('view-designer-dialog').close()" class="px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 rounded">Cancel</button>
+        <button onclick="submitCreateView()" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-4 py-1.5 rounded text-xs transition">Save View</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 12. Trigger Designer Dialog (HTML5 <dialog>) -->
+  <dialog id="trigger-designer-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm">
+    <div class="space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+        <div class="flex items-center space-x-2">
+          <span class="text-xl">⚡</span>
+          <h3 id="trigger-designer-title" class="text-sm font-bold text-white">Create Database Trigger</h3>
+        </div>
+        <button onclick="document.getElementById('trigger-designer-dialog').close()" class="text-slate-400 hover:text-white text-xs">✕</button>
+      </div>
+      <div class="space-y-3 text-xs">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-slate-400 mb-1 font-semibold">Trigger Name</label>
+            <input type="text" id="trigger-designer-name" placeholder="trg_audit_users" class="w-full bg-slate-950 border border-slate-700 p-2 text-white font-mono rounded outline-none focus:border-app-accent">
+          </div>
+          <div>
+            <label class="block text-slate-400 mb-1 font-semibold">Target Table</label>
+            <select id="trigger-designer-table" class="w-full bg-slate-950 border border-slate-700 p-2 text-white font-mono rounded outline-none">
+            </select>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-slate-400 mb-1 font-semibold">Timing</label>
+            <select id="trigger-designer-timing" class="w-full bg-slate-950 border border-slate-700 p-2 text-white font-mono rounded outline-none">
+              <option value="BEFORE">BEFORE</option>
+              <option value="AFTER" selected>AFTER</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-slate-400 mb-1 font-semibold">Event</label>
+            <select id="trigger-designer-event" class="w-full bg-slate-950 border border-slate-700 p-2 text-white font-mono rounded outline-none">
+              <option value="INSERT" selected>INSERT</option>
+              <option value="UPDATE">UPDATE</option>
+              <option value="DELETE">DELETE</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="block text-slate-400 mb-1 font-semibold">Trigger Body (Statements)</label>
+          <textarea id="trigger-designer-body" rows="6" placeholder="BEGIN&#10;  -- Statements&#10;END" class="w-full bg-slate-950 border border-slate-700 p-2 text-white font-mono rounded outline-none resize-none focus:border-app-accent"></textarea>
+        </div>
+      </div>
+      <div class="flex justify-end space-x-2 pt-2 border-t border-slate-800">
+        <button onclick="document.getElementById('trigger-designer-dialog').close()" class="px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 rounded">Cancel</button>
+        <button onclick="submitCreateTrigger()" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-4 py-1.5 rounded text-xs transition">Save Trigger</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 13. Cross-Database Schema Search Dialog (HTML5 <dialog>) -->
+  <dialog id="schema-search-modal" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-0 outline-none max-w-2xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm overflow-hidden">
+    <div class="flex flex-col max-h-[80vh]">
+      <!-- Search Input Header -->
+      <div class="flex items-center px-4 py-3 bg-slate-950 border-b border-slate-800 space-x-3">
+        <span class="text-slate-400 text-sm">🔍</span>
+        <input type="text" id="schema-search-input" placeholder="Search tables, views, or columns across databases... (e.g. users, email, finance.)" class="flex-1 bg-transparent text-white font-mono text-xs outline-none placeholder-slate-500">
+        <kbd class="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded border border-slate-700 font-mono">ESC</kbd>
+        <button onclick="closeSchemaSearch()" class="text-slate-400 hover:text-white text-xs pl-1">✕</button>
+      </div>
+
+      <!-- Results Container -->
+      <div id="schema-search-results" class="overflow-y-auto divide-y divide-slate-800/40 max-h-96 text-xs p-1">
+        <div class="p-6 text-center text-slate-500">Type at least 1 character to search across all catalog databases...</div>
+      </div>
+
+      <!-- Footer Help Hints -->
+      <div class="flex items-center justify-between px-4 py-2 bg-slate-950/80 border-t border-slate-800 text-[11px] text-slate-500 font-mono">
+        <div class="flex items-center space-x-3">
+          <span><kbd class="bg-slate-800 px-1 py-0.5 rounded text-slate-300">↑↓</kbd> Navigate</span>
+          <span><kbd class="bg-slate-800 px-1 py-0.5 rounded text-slate-300">Enter</kbd> Open Table</span>
+          <span><kbd class="bg-slate-800 px-1 py-0.5 rounded text-slate-300">Shift+Enter</kbd> Insert Identifier</span>
+        </div>
+        <span id="schema-search-count">0 items</span>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 14. Create Database Dialog (HTML5 <dialog>) -->
+  <dialog id="database-creator-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-md w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm">
+    <div class="space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+        <div class="flex items-center space-x-2">
+          <span class="text-xl">🗄️</span>
+          <h3 class="text-sm font-bold text-white">Create New Database</h3>
+        </div>
+        <button onclick="document.getElementById('database-creator-dialog').close()" class="text-slate-400 hover:text-white text-xs">✕</button>
+      </div>
+
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block text-slate-400 mb-1 font-semibold">Database Name</label>
+          <input type="text" id="new-db-name" placeholder="my_new_database" class="w-full bg-slate-950 border border-slate-700 p-2 text-white font-mono rounded outline-none focus:border-app-accent">
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-slate-400 mb-1 font-semibold">Character Set</label>
+            <select id="new-db-charset" onchange="onDBCharsetChange()" class="w-full bg-slate-950 border border-slate-700 p-2 text-white font-mono rounded outline-none focus:border-app-accent text-xs">
+              <option value="DEFAULT">(Server Default)</option>
+              <option value="utf8mb4" selected>utf8mb4 (Recommended)</option>
+              <option value="latin1">latin1 (West European / Swedish)</option>
+              <option value="utf8">utf8 (utf8mb3)</option>
+              <option value="binary">binary</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-slate-400 mb-1 font-semibold">Collation</label>
+            <select id="new-db-collation" class="w-full bg-slate-950 border border-slate-700 p-2 text-white font-mono rounded outline-none focus:border-app-accent text-xs">
+              <option value="utf8mb4_unicode_ci" selected>utf8mb4_unicode_ci (Default)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-end space-x-2 pt-2 border-t border-slate-800">
+        <button onclick="document.getElementById('database-creator-dialog').close()" class="px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 rounded">Cancel</button>
+        <button onclick="submitCreateDatabase()" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-4 py-1.5 rounded text-xs transition">Create Database</button>
+      </div>
+    </div>
+  </dialog>
+
   <script>
     // --- Application State ---
     let connections = [];
@@ -687,6 +1263,145 @@
     let pendingDestructiveSQL = null;
     let pendingDestructiveResult = null;
     let lastKeysetKey = null;
+
+    // Table Designer & Modal State
+    let currentTableMetadata = null;
+    let stagedStructure = null;
+    let activeTableMode = 'data';
+    let newTableColumns = [];
+
+    // --- Native Dialog Helper Functions (HTML5 <dialog>) ---
+    function showNativeAlert(message, title = 'SqlFox Notification') {
+      return new Promise((resolve) => {
+        const dlg = document.getElementById('app-native-dialog');
+        if (!dlg) {
+          window.alert(message);
+          return resolve(true);
+        }
+        document.getElementById('app-native-dialog-title').textContent = title;
+        document.getElementById('app-native-dialog-body').textContent = message;
+        const cancelBtn = document.getElementById('app-native-dialog-cancel');
+        const confirmBtn = document.getElementById('app-native-dialog-confirm');
+        cancelBtn.classList.add('hidden');
+        confirmBtn.textContent = 'OK';
+        confirmBtn.className = 'bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-4 py-1.5 rounded text-xs transition';
+
+        const onConfirm = () => {
+          confirmBtn.removeEventListener('click', onConfirm);
+          dlg.close();
+          resolve(true);
+        };
+        confirmBtn.addEventListener('click', onConfirm, { once: true });
+        dlg.onclose = () => resolve(true);
+        if (typeof dlg.showModal === 'function') dlg.showModal();
+        else dlg.setAttribute('open', '');
+      });
+    }
+
+    function showNativeConfirm(message, title = 'Confirm Action') {
+      return new Promise((resolve) => {
+        const dlg = document.getElementById('app-native-dialog');
+        if (!dlg) {
+          return resolve(window.confirm(message));
+        }
+        document.getElementById('app-native-dialog-title').textContent = title;
+        document.getElementById('app-native-dialog-body').textContent = message;
+        const cancelBtn = document.getElementById('app-native-dialog-cancel');
+        const confirmBtn = document.getElementById('app-native-dialog-confirm');
+        cancelBtn.classList.remove('hidden');
+        confirmBtn.textContent = 'Confirm';
+        confirmBtn.className = 'bg-app-danger hover:bg-red-600 text-white font-bold px-4 py-1.5 rounded text-xs transition';
+
+        let resolved = false;
+        const cleanup = () => {
+          confirmBtn.removeEventListener('click', onConfirm);
+          cancelBtn.removeEventListener('click', onCancel);
+        };
+        const onConfirm = () => {
+          if (resolved) return;
+          resolved = true;
+          cleanup();
+          dlg.close();
+          resolve(true);
+        };
+        const onCancel = () => {
+          if (resolved) return;
+          resolved = true;
+          cleanup();
+          dlg.close();
+          resolve(false);
+        };
+        confirmBtn.addEventListener('click', onConfirm);
+        cancelBtn.addEventListener('click', onCancel);
+        dlg.onclose = () => {
+          if (!resolved) {
+            resolved = true;
+            cleanup();
+            resolve(false);
+          }
+        };
+        if (typeof dlg.showModal === 'function') dlg.showModal();
+        else dlg.setAttribute('open', '');
+      });
+    }
+
+    // Override browser window.alert to automatically use native <dialog>
+    const _origAlert = window.alert;
+    window.alert = function(msg) {
+      showNativeAlert(String(msg));
+    };
+
+    function openDDLReviewModal(sql, onConfirm) {
+      const dlg = document.getElementById('ddl-review-dialog');
+      if (!dlg) return;
+      document.getElementById('ddl-review-sql').textContent = sql;
+      const confirmBtn = document.getElementById('ddl-review-confirm-btn');
+      
+      const newBtn = confirmBtn.cloneNode(true);
+      confirmBtn.parentNode.replaceChild(newBtn, confirmBtn);
+      
+      newBtn.onclick = async () => {
+        dlg.close();
+        if (typeof onConfirm === 'function') {
+          await onConfirm();
+        }
+      };
+      if (typeof dlg.showModal === 'function') dlg.showModal();
+      else dlg.setAttribute('open', '');
+    }
+
+    async function executeDDLStatements(ddlSQL, successMessage = 'DDL executed successfully.') {
+      if (!activeConnection) {
+        showNativeAlert('No active database connection.', 'Execution Error');
+        return false;
+      }
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/execute`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sql: ddlSQL,
+            confirmed: true,
+            challenge_input: ''
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          if (res.status === 422 && data.blocked) {
+            openSafetyModal(ddlSQL, data.inspection);
+            return false;
+          }
+          showNativeAlert('DDL execution failed:\n' + (data.error || res.statusText), 'Execution Error');
+          return false;
+        }
+        showNativeAlert(successMessage + (data.backup_file ? `\n\nBackup snapshot created:\n${data.backup_file}` : ''), 'Success');
+        await refreshSchema();
+        return true;
+      } catch (err) {
+        showNativeAlert('Error executing DDL: ' + err.message, 'Execution Error');
+        return false;
+      }
+    }
 
     // AI Settings State (stored in localStorage)
     let aiConfig = JSON.parse(localStorage.getItem('sqlfox_ai_config') || '{"provider":"openai","model":"gpt-4o-mini","apiKey":"","endpoint":"","language":"id","responseStyle":"concise","customPrompt":"","includeSchema":true,"maskIdentifiers":false}');
@@ -741,10 +1456,10 @@
           document.getElementById('remote-lock-modal').classList.add('hidden');
           await loadConnections();
         } else {
-          alert('Incorrect master password!');
+          showNativeAlert('Incorrect master password!', 'Authentication');
         }
       } catch (err) {
-        alert('Unlock failed: ' + err.message);
+        showNativeAlert('Unlock failed: ' + err.message, 'Authentication');
       }
     }
 
@@ -766,7 +1481,7 @@
     function copyMasterPIN() {
       const pin = document.getElementById('master-pin-text').textContent;
       navigator.clipboard.writeText(pin);
-      alert(`Master PIN '${pin}' copied to clipboard!\nUse this PIN to unlock SqlFox when accessing from your tablet/phone.`);
+      showNativeAlert(`Master PIN '${pin}' copied to clipboard!\nUse this PIN to unlock SqlFox when accessing from your tablet/phone.`, 'Remote Access');
     }
 
     // --- Lifecycle Initialization ---
@@ -785,6 +1500,9 @@
     });
 
     // --- Connections & Session Management ---
+    let sessionFilterQuery = '';
+    let multiDBCatalogCache = {};
+
     async function loadConnections() {
       try {
         const res = await apiFetch('/api/connections');
@@ -803,15 +1521,83 @@
       }
     }
 
+    function toggleSessionDropdown(forceState) {
+      const menu = document.getElementById('session-dropdown-menu');
+      if (!menu) return;
+      const shouldOpen = typeof forceState === 'boolean' ? forceState : menu.classList.contains('hidden');
+      if (shouldOpen) {
+        menu.classList.remove('hidden');
+        const input = document.getElementById('session-search-input');
+        if (input) {
+          input.value = '';
+          sessionFilterQuery = '';
+          input.focus();
+        }
+        renderConnectionsTree();
+      } else {
+        menu.classList.add('hidden');
+      }
+    }
+
+    function filterSessionList(query) {
+      sessionFilterQuery = (query || '').toLowerCase().trim();
+      renderConnectionsTree();
+    }
+
+    // Dismiss session dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+      const switcherBtn = document.getElementById('session-switcher-btn');
+      const menu = document.getElementById('session-dropdown-menu');
+      if (menu && !menu.classList.contains('hidden')) {
+        if (switcherBtn && !switcherBtn.contains(e.target) && !menu.contains(e.target)) {
+          menu.classList.add('hidden');
+        }
+      }
+    });
+
     function renderConnectionsTree() {
       const el = document.getElementById('connections-tree');
+      const switcherName = document.getElementById('session-switcher-name');
+      const switcherEnvBadge = document.getElementById('session-switcher-env-badge');
+
+      if (activeConnection) {
+        if (switcherName) switcherName.textContent = activeConnection.name;
+        if (switcherEnvBadge) {
+          switcherEnvBadge.classList.remove('hidden');
+          const env = activeConnection.environment || 'Development';
+          switcherEnvBadge.textContent = env.slice(0, 4);
+          const envClass = env === 'Production' ? 'bg-red-950/80 text-red-400 border-red-800' :
+                           (env === 'Staging' ? 'bg-amber-950/80 text-amber-400 border-amber-800' : 'bg-emerald-950/80 text-emerald-400 border-emerald-800');
+          switcherEnvBadge.className = `text-[9px] px-1 py-0.2 rounded border font-mono uppercase font-bold ${envClass}`;
+        }
+      } else {
+        if (switcherName) switcherName.textContent = 'Select Connection';
+        if (switcherEnvBadge) switcherEnvBadge.classList.add('hidden');
+      }
+
+      if (!el) return;
+
       if (!connections || connections.length === 0) {
-        el.innerHTML = `<div class="text-slate-500 text-center py-4">No saved connections.<br><button onclick="openNewConnModal()" class="text-app-accent hover:underline mt-1">+ Create one</button></div>`;
+        el.innerHTML = `<div class="text-slate-500 text-center py-4">No saved connections.<br><button onclick="openNewConnModal(); toggleSessionDropdown(false);" class="text-app-accent hover:underline mt-1">+ Create one</button></div>`;
+        return;
+      }
+
+      let filteredConns = connections;
+      if (sessionFilterQuery) {
+        filteredConns = connections.filter(c => 
+          c.name.toLowerCase().includes(sessionFilterQuery) ||
+          (c.driver || '').toLowerCase().includes(sessionFilterQuery) ||
+          (c.environment || '').toLowerCase().includes(sessionFilterQuery)
+        );
+      }
+
+      if (filteredConns.length === 0) {
+        el.innerHTML = `<div class="text-slate-500 text-center py-3 text-xs italic">No matching connections</div>`;
         return;
       }
 
       const groups = { Production: [], Staging: [], Development: [] };
-      connections.forEach(c => {
+      filteredConns.forEach(c => {
         const env = c.environment || 'Development';
         if (!groups[env]) groups[env] = [];
         groups[env].push(c);
@@ -821,18 +1607,18 @@
       for (const [env, list] of Object.entries(groups)) {
         if (list.length === 0) continue;
         const envColor = env === 'Production' ? 'text-app-danger' : (env === 'Staging' ? 'text-app-warning' : 'text-app-safe');
-        html += `<div class="font-bold ${envColor} uppercase text-[10px] mt-2 mb-1">● ${env}</div>`;
+        html += `<div class="font-bold ${envColor} uppercase text-[10px] mt-2 mb-1 px-1">● ${env}</div>`;
         list.forEach(c => {
           const isAct = activeConnection && activeConnection.id === c.id;
           html += `
-            <div onclick="selectConnection('${c.id}')" class="group flex items-center justify-between px-2 py-1.5 rounded cursor-pointer ${isAct ? 'bg-sky-950/60 text-app-accent font-semibold border border-sky-800' : 'hover:bg-slate-800 text-slate-300'}">
+            <div onclick="selectConnection('${c.id}'); toggleSessionDropdown(false);" class="group flex items-center justify-between px-2 py-1.5 rounded cursor-pointer ${isAct ? 'bg-sky-950/60 text-app-accent font-semibold border border-sky-800' : 'hover:bg-slate-800 text-slate-300'}">
               <div class="flex items-center space-x-1.5 truncate">
                 <span>🗄️</span>
                 <span class="truncate">${escapeHtml(c.name)}</span>
               </div>
               <div class="flex items-center space-x-1">
                 <span class="text-[10px] text-slate-500 font-mono group-hover:hidden">${escapeHtml(c.driver)}</span>
-                <button onclick="event.stopPropagation(); openEditConnModal('${c.id}')" class="hidden group-hover:inline-block hover:text-white px-1 text-xs" title="Edit Connection">✏️</button>
+                <button onclick="event.stopPropagation(); openEditConnModal('${c.id}'); toggleSessionDropdown(false);" class="hidden group-hover:inline-block hover:text-white px-1 text-xs" title="Edit Connection">✏️</button>
                 <button onclick="event.stopPropagation(); deleteConnection('${c.id}')" class="hidden group-hover:inline-block hover:text-app-danger px-1 text-xs" title="Delete Connection">🗑️</button>
               </div>
             </div>
@@ -846,6 +1632,7 @@
       const conn = connections.find(c => c.id === connId);
       if (!conn) return;
       activeConnection = conn;
+      multiDBCatalogCache = {};
       localStorage.setItem('sqlfox_last_conn_id', conn.id);
       renderConnectionsTree();
 
@@ -868,7 +1655,7 @@
             <span class="font-semibold text-white">${escapeHtml(conn.name)} (Disconnected)</span>
           `;
           document.getElementById('schema-tree').innerHTML = `<div class="text-app-danger p-2 text-xs">Connection Error:<br><span class="font-mono text-[11px]">${escapeHtml(data.error || 'Connection failed')}</span></div>`;
-          alert('Failed to connect: ' + (data.error || res.statusText));
+          showNativeAlert('Failed to connect: ' + (data.error || res.statusText), 'Connection Error');
           return;
         }
         activeSession = data;
@@ -885,7 +1672,7 @@
           <span class="font-semibold text-white">${escapeHtml(conn.name)}</span>
         `;
         document.getElementById('schema-tree').innerHTML = `<div class="text-app-danger p-2 text-xs">Connection Error: ${escapeHtml(err.message)}</div>`;
-        alert('Failed to connect: ' + err.message);
+        showNativeAlert('Failed to connect: ' + err.message, 'Connection Error');
       }
     }
 
@@ -899,64 +1686,526 @@
         const res = await apiFetch(url);
         const schema = await res.json();
         schemaCatalogCache = schema;
+
+        // Index into multi-database catalog cache
+        const activeDb = (schema.database_name || targetDB || 'default').toLowerCase();
+        multiDBCatalogCache[activeDb] = schema;
+
+        // Lazily prefetch schemas of other databases in background
+        if (schema.databases && Array.isArray(schema.databases)) {
+          schema.databases.forEach(db => {
+            const lower = db.toLowerCase();
+            if (lower !== activeDb && !multiDBCatalogCache[lower]) {
+              apiFetch(`/api/session/${connId}/schema?db=${encodeURIComponent(db)}`)
+                .then(r => r.ok ? r.json() : null)
+                .then(otherSchema => {
+                  if (otherSchema) multiDBCatalogCache[lower] = otherSchema;
+                })
+                .catch(() => {});
+            }
+          });
+        }
+
         renderSchemaTree(schema);
       } catch (err) {
         treeEl.innerHTML = `<div class="text-app-danger p-2">Error: ${err.message}</div>`;
       }
     }
 
+    // --- Schema Tree Filtering & Database Switcher ---
+    let schemaFilterQuery = '';
+    let databaseFilterQuery = '';
+
+    function filterSchemaTree(query) {
+      schemaFilterQuery = (query || '').toLowerCase().trim();
+      const clearBtn = document.getElementById('schema-filter-clear-btn');
+      if (clearBtn) {
+        if (schemaFilterQuery) clearBtn.classList.remove('hidden');
+        else clearBtn.classList.add('hidden');
+      }
+      if (schemaCatalogCache) {
+        renderSchemaTree(schemaCatalogCache);
+      }
+    }
+
+    function clearSchemaFilter() {
+      const input = document.getElementById('schema-filter-input');
+      if (input) {
+        input.value = '';
+        input.focus();
+      }
+      filterSchemaTree('');
+    }
+
+    function toggleDatabaseDropdown(forceState) {
+      const menu = document.getElementById('database-dropdown-menu');
+      if (!menu) return;
+      const shouldOpen = typeof forceState === 'boolean' ? forceState : menu.classList.contains('hidden');
+      if (shouldOpen) {
+        menu.classList.remove('hidden');
+        const input = document.getElementById('database-search-input');
+        if (input) {
+          input.value = '';
+          databaseFilterQuery = '';
+          input.focus();
+        }
+        renderDatabaseDropdownList();
+      } else {
+        menu.classList.add('hidden');
+      }
+    }
+
+    function filterDatabaseList(query) {
+      databaseFilterQuery = (query || '').toLowerCase().trim();
+      renderDatabaseDropdownList();
+    }
+
+    function renderDatabaseDropdownList() {
+      const listEl = document.getElementById('database-list-tree');
+      if (!listEl) return;
+      if (!schemaCatalogCache || !schemaCatalogCache.databases || schemaCatalogCache.databases.length === 0) {
+        listEl.innerHTML = '<div class="text-slate-500 text-center py-2 text-xs italic">No databases found</div>';
+        return;
+      }
+
+      let dbs = schemaCatalogCache.databases;
+      if (databaseFilterQuery) {
+        dbs = dbs.filter(d => d.toLowerCase().includes(databaseFilterQuery));
+      }
+
+      if (dbs.length === 0) {
+        listEl.innerHTML = `<div class="text-slate-500 text-center py-2 text-xs italic">No databases matching "${escapeHtml(databaseFilterQuery)}"</div>`;
+        return;
+      }
+
+      const activeDb = schemaCatalogCache.database_name || '';
+      listEl.innerHTML = dbs.map(d => {
+        const isAct = d.toLowerCase() === activeDb.toLowerCase();
+        return `
+          <div onclick="selectDatabase('${escapeHtml(d)}'); toggleDatabaseDropdown(false);" class="group flex items-center justify-between px-2 py-1.5 rounded cursor-pointer ${isAct ? 'bg-sky-950/60 text-app-accent font-bold border border-sky-800' : 'hover:bg-slate-800 text-slate-300'}">
+            <span class="truncate flex items-center space-x-1.5">
+              <span>🗄️</span>
+              <span class="truncate">${escapeHtml(d)}</span>
+            </span>
+            ${isAct ? '<span class="text-[9px] text-sky-400 uppercase font-mono">active</span>' : ''}
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function selectDatabase(dbName) {
+      if (!activeConnection) return;
+      try {
+        await apiFetch(`/api/session/${activeConnection.id}/select-db`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ database: dbName })
+        });
+      } catch (e) {
+        console.warn('select-db error:', e);
+      }
+      await loadSchemaTree(activeConnection.id, dbName);
+    }
+
+    async function onDatabaseSelectChange(dbName) {
+      await selectDatabase(dbName);
+    }
+
+    // Dismiss database dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+      const switcherBtn = document.getElementById('database-switcher-btn');
+      const menu = document.getElementById('database-dropdown-menu');
+      if (menu && !menu.classList.contains('hidden')) {
+        if (switcherBtn && !switcherBtn.contains(e.target) && !menu.contains(e.target)) {
+          menu.classList.add('hidden');
+        }
+      }
+    });
+
     function renderSchemaTree(schema) {
       const treeEl = document.getElementById('schema-tree');
       const dbContainer = document.getElementById('database-selector-container');
+      const dbActiveName = document.getElementById('database-switcher-active-name');
       const dbSelect = document.getElementById('database-selector');
-      const dbLabel = document.getElementById('db-active-label');
 
-      // Populate database selector dropdown
+      // Populate database switcher
       if (schema && schema.databases && schema.databases.length > 0) {
         if (dbContainer) dbContainer.classList.remove('hidden');
+        if (dbActiveName) dbActiveName.textContent = schema.database_name || schema.databases[0] || 'default';
         if (dbSelect) {
           dbSelect.innerHTML = schema.databases.map(d => `
             <option value="${escapeHtml(d)}" ${d === schema.database_name ? 'selected' : ''}>${escapeHtml(d)}</option>
           `).join('');
         }
-        if (dbLabel) {
-          dbLabel.textContent = schema.database_name || 'None';
-        }
+        renderDatabaseDropdownList();
       } else {
         if (dbContainer) dbContainer.classList.add('hidden');
       }
 
-      if (!schema || !schema.tables || schema.tables.length === 0) {
-        const dbNameText = schema && schema.database_name ? ` in database "${escapeHtml(schema.database_name)}"` : '';
-        treeEl.innerHTML = `<div class="text-slate-500 text-center py-4">No tables found${dbNameText}.</div>`;
-        document.getElementById('table-count-badge').textContent = '0';
+      const allTables = (schema.tables || []).filter(t => t.type !== 'VIEW');
+      const allViews = (schema.tables || []).filter(t => t.type === 'VIEW');
+      const allTriggers = schema.triggers || [];
+
+      const q = schemaFilterQuery;
+      const tablesList = q ? allTables.filter(t => t.name.toLowerCase().includes(q)) : allTables;
+      const viewsList = q ? allViews.filter(v => v.name.toLowerCase().includes(q)) : allViews;
+      const triggersList = q ? allTriggers.filter(tr => tr.name.toLowerCase().includes(q) || (tr.table || '').toLowerCase().includes(q)) : allTriggers;
+
+      const badgeEl = document.getElementById('table-count-badge');
+      if (badgeEl) {
+        badgeEl.textContent = q ? `${tablesList.length}/${allTables.length}` : allTables.length;
+      }
+
+      if (!schema) {
+        treeEl.innerHTML = `<div class="text-slate-500 text-center py-6 text-xs">No schema loaded.</div>`;
         return;
       }
 
-      document.getElementById('table-count-badge').textContent = schema.tables.length;
-      let html = '';
-      schema.tables.forEach(t => {
-        html += `
-          <div class="rounded hover:bg-slate-800/60 p-1 group">
-            <div class="flex items-center justify-between cursor-pointer" onclick="openTableViewer('${escapeHtml(t.name)}')">
-              <span class="flex items-center space-x-1.5 truncate text-slate-200 group-hover:text-white">
-                <span>📋</span>
-                <span>${escapeHtml(t.name)}</span>
-              </span>
-              <div class="flex items-center space-x-1">
-                <span class="text-[10px] text-slate-500 font-mono">${t.row_count > 0 ? t.row_count + 'r' : ''}</span>
-                <button onclick="event.stopPropagation(); viewTableDDL('${escapeHtml(t.name)}')" class="opacity-0 group-hover:opacity-100 hover:text-app-accent px-1" title="View DDL">📄</button>
-              </div>
-            </div>
+      if (q && tablesList.length === 0 && viewsList.length === 0 && triggersList.length === 0) {
+        treeEl.innerHTML = `
+          <div class="text-slate-500 text-center py-6 text-xs italic">
+            No objects matching "${escapeHtml(q)}"<br>
+            <button onclick="clearSchemaFilter()" class="text-app-accent hover:underline mt-1">Clear filter</button>
           </div>
         `;
-      });
+        return;
+      }
+
+      let html = '';
+
+      // 1. Tables Section
+      if (!q || tablesList.length > 0) {
+        html += `
+          <div class="mb-3">
+            <div class="flex items-center justify-between text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-1 py-0.5 border-b border-slate-800 mb-1">
+              <span class="flex items-center space-x-1">
+                <span>📊</span><span>Tables (${tablesList.length}${q ? '/' + allTables.length : ''})</span>
+              </span>
+              <button onclick="openCreateTableModal()" class="text-app-accent hover:text-white text-xs px-1" title="Create New Table">➕</button>
+            </div>
+            <div class="space-y-0.5">
+        `;
+        if (tablesList.length === 0) {
+          html += `<div class="text-slate-600 text-[11px] px-2 py-1 italic">No tables. Click ➕ to create.</div>`;
+        } else {
+          tablesList.forEach(t => {
+            html += `
+              <div class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" onclick="openTableViewer('${escapeHtml(t.name)}')">
+                <span class="flex items-center space-x-1.5 truncate text-slate-200 group-hover:text-white">
+                  <span class="text-xs">📋</span>
+                  <span class="truncate max-w-[125px]">${escapeHtml(t.name)}</span>
+                </span>
+                <div class="flex items-center space-x-1">
+                  <span class="text-[10px] text-slate-500 font-mono">${t.row_count > 0 ? t.row_count + 'r' : ''}</span>
+                  <button onclick="event.stopPropagation(); viewTableDDL('${escapeHtml(t.name)}')" class="opacity-0 group-hover:opacity-100 hover:text-app-accent px-1" title="View DDL">📄</button>
+                  <button onclick="event.stopPropagation(); dropTable('${escapeHtml(t.name)}')" class="opacity-0 group-hover:opacity-100 hover:text-red-400 px-0.5" title="Drop Table">🗑️</button>
+                </div>
+              </div>
+            `;
+          });
+        }
+        html += `</div></div>`;
+      }
+
+      // 2. Views Section
+      if (!q || viewsList.length > 0) {
+        html += `
+          <div class="mb-3">
+            <div class="flex items-center justify-between text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-1 py-0.5 border-b border-slate-800 mb-1">
+              <span class="flex items-center space-x-1">
+                <span>👁️</span><span>Views (${viewsList.length}${q ? '/' + allViews.length : ''})</span>
+              </span>
+              <button onclick="openCreateViewModal()" class="text-app-accent hover:text-white text-xs px-1" title="Create New View">➕</button>
+            </div>
+            <div class="space-y-0.5">
+        `;
+        if (viewsList.length === 0) {
+          html += `<div class="text-slate-600 text-[11px] px-2 py-1 italic">No views. Click ➕ to create.</div>`;
+        } else {
+          viewsList.forEach(v => {
+            html += `
+              <div class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" onclick="openTableViewer('${escapeHtml(v.name)}')">
+                <span class="flex items-center space-x-1.5 truncate text-purple-300 group-hover:text-white">
+                  <span class="text-xs">👁️</span>
+                  <span class="truncate max-w-[125px]">${escapeHtml(v.name)}</span>
+                </span>
+                <div class="flex items-center space-x-1">
+                  <button onclick="event.stopPropagation(); openCreateViewModal('${escapeHtml(v.name)}')" class="opacity-0 group-hover:opacity-100 hover:text-app-accent px-1" title="Edit View">✏️</button>
+                  <button onclick="event.stopPropagation(); dropView('${escapeHtml(v.name)}')" class="opacity-0 group-hover:opacity-100 hover:text-red-400 px-0.5" title="Drop View">🗑️</button>
+                </div>
+              </div>
+            `;
+          });
+        }
+        html += `</div></div>`;
+      }
+
+      // 3. Triggers Section
+      if (!q || triggersList.length > 0) {
+        html += `
+          <div class="mb-3">
+            <div class="flex items-center justify-between text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-1 py-0.5 border-b border-slate-800 mb-1">
+              <span class="flex items-center space-x-1">
+                <span>⚡</span><span>Triggers (${triggersList.length}${q ? '/' + allTriggers.length : ''})</span>
+              </span>
+              <button onclick="openCreateTriggerModal()" class="text-app-accent hover:text-white text-xs px-1" title="Create New Trigger">➕</button>
+            </div>
+            <div class="space-y-0.5">
+        `;
+        if (triggersList.length === 0) {
+          html += `<div class="text-slate-600 text-[11px] px-2 py-1 italic">No triggers. Click ➕ to create.</div>`;
+        } else {
+          triggersList.forEach(trg => {
+            html += `
+              <div class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" onclick="openCreateTriggerModal('${escapeHtml(trg.name)}', ${escapeHtml(JSON.stringify(trg))})">
+                <span class="flex items-center space-x-1.5 truncate text-amber-300 group-hover:text-white">
+                  <span class="text-xs">⚡</span>
+                  <span class="truncate max-w-[120px]">${escapeHtml(trg.name)}</span>
+                </span>
+                <div class="flex items-center space-x-1">
+                  <span class="text-[10px] text-slate-500 font-mono">${escapeHtml(trg.table || '')}</span>
+                  <button onclick="event.stopPropagation(); dropTrigger('${escapeHtml(trg.name)}')" class="opacity-0 group-hover:opacity-100 hover:text-red-400 px-0.5" title="Drop Trigger">🗑️</button>
+                </div>
+              </div>
+            `;
+          });
+        }
+        html += `</div></div>`;
+      }
+
       treeEl.innerHTML = html;
     }
 
-    async function onDatabaseSelectChange(dbName) {
-      if (!activeConnection) return;
-      await loadSchemaTree(activeConnection.id, dbName);
+    // --- MySQL / MariaDB Character Sets & Collations Catalog ---
+    const MYSQL_CHARSET_COLLATIONS = {
+      'DEFAULT': { label: '(Server Default)', default: '', collations: [] },
+      'utf8mb4': {
+        label: 'utf8mb4 (Unicode 4-byte, recommended)',
+        default: 'utf8mb4_unicode_ci',
+        collations: [
+          'utf8mb4_unicode_ci',
+          'utf8mb4_general_ci',
+          'utf8mb4_0900_ai_ci',
+          'utf8mb4_bin',
+          'utf8mb4_unicode_520_ci',
+          'utf8mb4_spanish_ci',
+          'utf8mb4_indonesian_ci',
+          'utf8mb4_vietnamese_ci'
+        ]
+      },
+      'latin1': {
+        label: 'latin1 (cp1252 West European / Swedish / Legacy)',
+        default: 'latin1_swedish_ci',
+        collations: [
+          'latin1_swedish_ci',
+          'latin1_general_ci',
+          'latin1_general_cs',
+          'latin1_bin',
+          'latin1_german1_ci',
+          'latin1_german2_ci',
+          'latin1_danish_ci',
+          'latin1_spanish_ci'
+        ]
+      },
+      'utf8': {
+        label: 'utf8 (utf8mb3 3-byte Unicode)',
+        default: 'utf8_general_ci',
+        collations: [
+          'utf8_general_ci',
+          'utf8_unicode_ci',
+          'utf8_bin',
+          'utf8_turkish_ci',
+          'utf8_persian_ci',
+          'utf8_spanish_ci'
+        ]
+      },
+      'ascii': {
+        label: 'ascii (US ASCII 7-bit)',
+        default: 'ascii_general_ci',
+        collations: ['ascii_general_ci', 'ascii_bin']
+      },
+      'binary': {
+        label: 'binary (Binary byte array)',
+        default: 'binary',
+        collations: ['binary']
+      },
+      'cp1250': {
+        label: 'cp1250 (Windows Central European)',
+        default: 'cp1250_general_ci',
+        collations: ['cp1250_general_ci', 'cp1250_czech_cs', 'cp1250_polish_ci', 'cp1250_bin']
+      },
+      'cp1251': {
+        label: 'cp1251 (Windows Cyrillic)',
+        default: 'cp1251_general_ci',
+        collations: ['cp1251_general_ci', 'cp1251_ukrainian_ci', 'cp1251_bin']
+      },
+      'cp1256': {
+        label: 'cp1256 (Windows Arabic)',
+        default: 'cp1256_general_ci',
+        collations: ['cp1256_general_ci', 'cp1256_bin']
+      },
+      'cp1257': {
+        label: 'cp1257 (Windows Baltic)',
+        default: 'cp1257_general_ci',
+        collations: ['cp1257_general_ci', 'cp1257_lithuanian_ci', 'cp1257_bin']
+      },
+      'big5': {
+        label: 'big5 (Traditional Chinese)',
+        default: 'big5_chinese_ci',
+        collations: ['big5_chinese_ci', 'big5_bin']
+      },
+      'gbk': {
+        label: 'gbk (Simplified Chinese GBK)',
+        default: 'gbk_chinese_ci',
+        collations: ['gbk_chinese_ci', 'gbk_bin']
+      },
+      'gb2312': {
+        label: 'gb2312 (Simplified Chinese GB2312)',
+        default: 'gb2312_chinese_ci',
+        collations: ['gb2312_chinese_ci', 'gb2312_bin']
+      },
+      'sjis': {
+        label: 'sjis (Shift-JIS Japanese)',
+        default: 'sjis_japanese_ci',
+        collations: ['sjis_japanese_ci', 'sjis_bin']
+      },
+      'ujis': {
+        label: 'ujis (EUC-JP Japanese)',
+        default: 'ujis_japanese_ci',
+        collations: ['ujis_japanese_ci', 'ujis_bin']
+      },
+      'euckr': {
+        label: 'euckr (EUC-KR Korean)',
+        default: 'euckr_korean_ci',
+        collations: ['euckr_korean_ci', 'euckr_bin']
+      },
+      'greek': {
+        label: 'greek (ISO 8859-7 Greek)',
+        default: 'greek_general_ci',
+        collations: ['greek_general_ci', 'greek_bin']
+      },
+      'hebrew': {
+        label: 'hebrew (ISO 8859-8 Hebrew)',
+        default: 'hebrew_general_ci',
+        collations: ['hebrew_general_ci', 'hebrew_bin']
+      },
+      'tis620': {
+        label: 'tis620 (TIS620 Thai)',
+        default: 'tis620_thai_ci',
+        collations: ['tis620_thai_ci', 'tis620_bin']
+      },
+      'utf16': {
+        label: 'utf16 (UTF-16 Unicode)',
+        default: 'utf16_unicode_ci',
+        collations: ['utf16_unicode_ci', 'utf16_general_ci', 'utf16_bin']
+      },
+      'utf32': {
+        label: 'utf32 (UTF-32 Unicode)',
+        default: 'utf32_unicode_ci',
+        collations: ['utf32_unicode_ci', 'utf32_general_ci', 'utf32_bin']
+      }
+    };
+
+    function initDBCharsetOptions() {
+      const charsetSelect = document.getElementById('new-db-charset');
+      if (!charsetSelect) return;
+
+      const currentVal = charsetSelect.value || 'utf8mb4';
+      charsetSelect.innerHTML = '';
+
+      for (const [key, item] of Object.entries(MYSQL_CHARSET_COLLATIONS)) {
+        const opt = document.createElement('option');
+        opt.value = key;
+        opt.textContent = item.label;
+        if (key === currentVal) opt.selected = true;
+        charsetSelect.appendChild(opt);
+      }
+
+      onDBCharsetChange();
+    }
+
+    function onDBCharsetChange() {
+      const charsetSelect = document.getElementById('new-db-charset');
+      const collationSelect = document.getElementById('new-db-collation');
+      if (!charsetSelect || !collationSelect) return;
+
+      const chosenCharset = charsetSelect.value;
+      const data = MYSQL_CHARSET_COLLATIONS[chosenCharset];
+
+      collationSelect.innerHTML = '';
+
+      if (!data || chosenCharset === 'DEFAULT' || !data.collations || data.collations.length === 0) {
+        collationSelect.disabled = true;
+        collationSelect.innerHTML = '<option value="">(Server Default)</option>';
+        return;
+      }
+
+      collationSelect.disabled = false;
+      data.collations.forEach(col => {
+        const opt = document.createElement('option');
+        opt.value = col;
+        opt.textContent = col + (col === data.default ? ' (Default)' : '');
+        if (col === data.default) opt.selected = true;
+        collationSelect.appendChild(opt);
+      });
+    }
+
+    function openCreateDatabaseModal() {
+      if (!activeConnection) {
+        showNativeAlert('Please select or create a connection first.', 'No Connection');
+        return;
+      }
+      document.getElementById('new-db-name').value = '';
+      initDBCharsetOptions();
+      const dlg = document.getElementById('database-creator-dialog');
+      if (typeof dlg.showModal === 'function') dlg.showModal();
+      else dlg.setAttribute('open', '');
+      setTimeout(() => document.getElementById('new-db-name').focus(), 100);
+    }
+
+    async function submitCreateDatabase() {
+      const dbName = document.getElementById('new-db-name').value.trim();
+      const charset = document.getElementById('new-db-charset').value;
+      const collation = document.getElementById('new-db-collation').value;
+
+      if (!dbName) {
+        showNativeAlert('Database name is required.', 'Create Database');
+        return;
+      }
+
+      const isSQLite = activeConnection && (activeConnection.driver === 'sqlite' || activeConnection.driver === 'sqlite3');
+      if (isSQLite) {
+        showNativeAlert('SQLite operates on single-file databases. Use "+ New" in the session switcher to configure another SQLite file.', 'SQLite Notice');
+        return;
+      }
+
+      let sql = `CREATE DATABASE \`${dbName.replace(/`/g, '``')}\``;
+      if (charset && charset !== 'DEFAULT') {
+        sql += ` CHARACTER SET ${charset}`;
+        if (collation) {
+          sql += ` COLLATE ${collation}`;
+        }
+      }
+      sql += ';';
+
+      document.getElementById('database-creator-dialog').close();
+
+      openDDLReviewModal(sql, async () => {
+        const ok = await executeDDLStatements(sql, `Database "${dbName}" created successfully.`);
+        if (ok) {
+          try {
+            await apiFetch(`/api/session/${activeConnection.id}/select-db`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ database: dbName })
+            });
+            await loadSchemaTree(activeConnection.id, dbName);
+          } catch (e) {
+            console.warn('Auto select db failed:', e);
+            await refreshSchema();
+          }
+        }
+      });
     }
 
     async function refreshSchema() {
@@ -994,9 +2243,19 @@
       const textBeforeCursor = fullText.slice(0, cursorIndex);
       const textBeforeInStmt = fullText.slice(stmtStart, cursorIndex);
 
-      // Extract table aliases in active statement: e.g. FROM users u, JOIN orders AS o
+      // Multi-database schema index
+      const activeDBName = (schema && schema.database_name) ? schema.database_name.toLowerCase() : '';
+      const availableDatabases = new Set();
+      if (schema && schema.databases) {
+        schema.databases.forEach(db => availableDatabases.add(db.toLowerCase()));
+      }
+      if (typeof multiDBCatalogCache === 'object') {
+        Object.keys(multiDBCatalogCache).forEach(db => availableDatabases.add(db.toLowerCase()));
+      }
+
+      // Extract table aliases in active statement: e.g. FROM users u, JOIN orders AS o, FROM finance.invoices inv
       const aliases = {};
-      const aliasRegex = /\b(?:FROM|JOIN)\s+([`"]?[a-zA-Z0-9_]+[`"]?)(?:\s+(?:AS\s+)?([`"]?[a-zA-Z0-9_]+[`"]?))?/gi;
+      const aliasRegex = /\b(?:FROM|JOIN)\s+([`"]?[a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)?[`"]?)(?:\s+(?:AS\s+)?([`"]?[a-zA-Z0-9_]+[`"]?))?/gi;
       let match;
       while ((match = aliasRegex.exec(stmt)) !== null) {
         const rawTable = match[1].replace(/[`"]/g, '');
@@ -1006,30 +2265,104 @@
         }
       }
 
-      // Detect dot-dereferencing or partial word
+      // Detect dot-dereferencing:
+      // Case A: two dots -> db.table.col_partial (e.g. finance.invoices.am)
+      // Case B: one dot -> qualifier.partial (e.g. finance. or users. or alias.)
       const lineUpToCursor = textBeforeCursor.slice(textBeforeCursor.lastIndexOf('\n') + 1);
-      const dotMatch = lineUpToCursor.match(/([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]*)$/);
+      const twoDotMatch = lineUpToCursor.match(/([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]*)$/);
+      const oneDotMatch = lineUpToCursor.match(/([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]*)$/);
       const wordMatch = lineUpToCursor.match(/([a-zA-Z0-9_]+)$/);
 
-      let qualifier = null;
-      let partial = '';
-
-      if (dotMatch) {
-        qualifier = dotMatch[1];
-        partial = dotMatch[2] || '';
-      } else if (wordMatch) {
-        partial = wordMatch[1] || '';
-      }
-
-      const lowerPartial = partial.toLowerCase();
       let candidates = [];
 
-      // 1. If qualifier present (alias. or table.) -> only suggest columns of that table
-      if (qualifier) {
-        const targetTableName = aliases[qualifier.toLowerCase()] || qualifier;
+      // 1. Double dot dereferencing: db.table.column (e.g. finance.invoices.id)
+      if (twoDotMatch) {
+        const dbPart = twoDotMatch[1].toLowerCase();
+        const tblPart = twoDotMatch[2].toLowerCase();
+        const colPartial = (twoDotMatch[3] || '').toLowerCase();
+
+        const targetCatalog = (typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[dbPart]) || (dbPart === activeDBName ? schema : null);
         let matchedTable = null;
-        if (schema && schema.tables) {
-          matchedTable = schema.tables.find(t => t.name.toLowerCase() === targetTableName.toLowerCase());
+        if (targetCatalog && targetCatalog.tables) {
+          matchedTable = targetCatalog.tables.find(t => t.name.toLowerCase() === tblPart);
+        }
+
+        if (matchedTable && matchedTable.columns) {
+          matchedTable.columns.forEach(col => {
+            const lowerCol = col.name.toLowerCase();
+            if (!colPartial || lowerCol.includes(colPartial)) {
+              let score = 60;
+              if (lowerCol === colPartial) score += 100;
+              else if (lowerCol.startsWith(colPartial)) score += 50;
+              candidates.push({
+                text: col.name,
+                displayText: col.name,
+                kind: 'COL',
+                badgeClass: 'cm-badge-col',
+                type: col.type || '',
+                score: score
+              });
+            }
+          });
+        }
+        candidates.sort((a, b) => b.score - a.score || a.text.localeCompare(b.text));
+        return {
+          list: candidates,
+          partial: twoDotMatch[3] || '',
+          hasDot: true
+        };
+      }
+
+      // 2. Single dot dereferencing: db.table OR table.col OR alias.col
+      if (oneDotMatch) {
+        const qualifier = oneDotMatch[1];
+        const partial = oneDotMatch[2] || '';
+        const lowerQualifier = qualifier.toLowerCase();
+        const lowerPartial = partial.toLowerCase();
+
+        // 2a. If qualifier matches a known Database name -> suggest tables in that database!
+        if (availableDatabases.has(lowerQualifier)) {
+          const dbCatalog = (typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[lowerQualifier]) || (lowerQualifier === activeDBName ? schema : null);
+          if (dbCatalog && dbCatalog.tables) {
+            dbCatalog.tables.forEach(tbl => {
+              const lowerTbl = tbl.name.toLowerCase();
+              if (!lowerPartial || lowerTbl.includes(lowerPartial)) {
+                let score = 60;
+                if (lowerTbl === lowerPartial) score += 100;
+                else if (lowerTbl.startsWith(lowerPartial)) score += 50;
+                candidates.push({
+                  text: tbl.name,
+                  displayText: tbl.name,
+                  kind: 'TBL',
+                  badgeClass: 'cm-badge-tbl',
+                  type: tbl.type || 'TABLE',
+                  score: score
+                });
+              }
+            });
+          }
+          candidates.sort((a, b) => b.score - a.score || a.text.localeCompare(b.text));
+          return {
+            list: candidates,
+            partial: partial,
+            hasDot: true
+          };
+        }
+
+        // 2b. Otherwise, qualifier is a table name or alias (either local or cross-db alias)
+        let resolved = aliases[lowerQualifier] || qualifier;
+        let targetDB = activeDBName;
+        let targetTable = resolved;
+        if (resolved.includes('.')) {
+          const parts = resolved.split('.');
+          targetDB = parts[0].toLowerCase();
+          targetTable = parts[1];
+        }
+
+        const catalog = (typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[targetDB]) || schema;
+        let matchedTable = null;
+        if (catalog && catalog.tables) {
+          matchedTable = catalog.tables.find(t => t.name.toLowerCase() === targetTable.toLowerCase());
         }
 
         if (matchedTable && matchedTable.columns) {
@@ -1058,7 +2391,13 @@
         };
       }
 
-      // 2. No qualifier: Context detection based on preceding clause in statement before cursor
+      // 3. No qualifier: Context detection based on preceding clause in statement before cursor
+      let partial = '';
+      if (wordMatch) {
+        partial = wordMatch[1] || '';
+      }
+      const lowerPartial = partial.toLowerCase();
+
       const cleanBefore = textBeforeInStmt.replace(/--.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
       const keywords = [...cleanBefore.matchAll(/\b(SELECT|FROM|JOIN|LEFT\s+JOIN|RIGHT\s+JOIN|INNER\s+JOIN|WHERE|ON|GROUP\s+BY|ORDER\s+BY|SET|INTO|UPDATE)\b/gi)];
       const clause = keywords.length > 0 ? keywords[keywords.length - 1][1].toUpperCase().replace(/\s+/g, ' ') : '';
@@ -1066,7 +2405,26 @@
       const isTableClause = /^(FROM|JOIN|LEFT JOIN|RIGHT JOIN|INNER JOIN|INTO|UPDATE)$/.test(clause);
       const isColumnClause = /^(SELECT|WHERE|ON|GROUP BY|ORDER BY|SET|HAVING)$/.test(clause);
 
-      // Collect all tables
+      // In table clauses (FROM/JOIN): Suggest Databases as well for cross-database querying
+      if (isTableClause && availableDatabases.size > 0) {
+        availableDatabases.forEach(dbName => {
+          if (!lowerPartial || dbName.includes(lowerPartial)) {
+            let score = 115;
+            if (dbName === lowerPartial) score += 80;
+            else if (dbName.startsWith(lowerPartial)) score += 40;
+            candidates.push({
+              text: dbName,
+              displayText: dbName,
+              kind: 'DB',
+              badgeClass: 'cm-badge-db',
+              type: 'DATABASE',
+              score: score
+            });
+          }
+        });
+      }
+
+      // Collect all tables in current schema
       if (schema && schema.tables) {
         schema.tables.forEach(tbl => {
           const lowerTbl = tbl.name.toLowerCase();
@@ -1232,6 +2590,12 @@
           },
           'Cmd-Shift-Enter': function() {
             explainActiveQuery();
+          },
+          'Ctrl-Shift-F': function() {
+            formatActiveQuery();
+          },
+          'Cmd-Shift-F': function() {
+            formatActiveQuery();
           }
         }
       });
@@ -1259,7 +2623,11 @@
     }
 
     function getEditorSQL() {
-      if (cmEditor) return cmEditor.getValue();
+      if (cmEditor) {
+        const sel = cmEditor.getSelection();
+        if (sel && sel.trim()) return sel.trim();
+        return cmEditor.getValue();
+      }
       const el = document.getElementById('sql-editor-textarea');
       return el ? el.value : '';
     }
@@ -1275,15 +2643,127 @@
       if (el) el.value = val;
     }
 
-    function formatActiveQuery() {
-      let sql = getEditorSQL();
-      if (!sql) return;
-      SQL_KEYWORDS.forEach(kw => {
-        const regex = new RegExp(`\\b${kw}\\b`, 'gi');
-        sql = sql.replace(regex, kw);
-      });
-      setEditorSQL(sql);
+    // --- Pure Client-Side SQL Formatter ---
+    function formatSQL(sql) {
+      if (!sql || typeof sql !== 'string') return '';
+      const trimmed = sql.trim();
+      if (!trimmed) return '';
+
+      // ponytail: zero-dependency SQL formatter breaking clauses, indenting subqueries, and capitalizing keywords
+      const majorClauses = [
+        'SELECT', 'FROM', 'WHERE', 'HAVING', 'GROUP BY', 'ORDER BY',
+        'LIMIT', 'OFFSET', 'UNION ALL', 'UNION',
+        'INSERT INTO', 'VALUES', 'UPDATE', 'SET', 'DELETE FROM',
+        'LEFT JOIN', 'RIGHT JOIN', 'INNER JOIN', 'CROSS JOIN', 'FULL JOIN', 'JOIN', 'ON',
+        'CREATE TABLE', 'ALTER TABLE', 'DROP TABLE',
+        'CREATE VIEW', 'ALTER VIEW', 'DROP VIEW',
+        'CREATE TRIGGER', 'DROP TRIGGER'
+      ];
+
+      const tokens = [];
+      let current = '';
+      let inString = false;
+      let stringChar = '';
+
+      for (let i = 0; i < trimmed.length; i++) {
+        const char = trimmed[i];
+        if (inString) {
+          current += char;
+          if (char === stringChar && trimmed[i - 1] !== '\\') {
+            inString = false;
+            tokens.push({ type: 'string', value: current });
+            current = '';
+          }
+        } else if (char === "'" || char === '"' || char === '`') {
+          if (current.trim()) tokens.push({ type: 'word', value: current.trim() });
+          current = char;
+          inString = true;
+          stringChar = char;
+        } else if (char === '(' || char === ')' || char === ',' || char === ';') {
+          if (current.trim()) tokens.push({ type: 'word', value: current.trim() });
+          tokens.push({ type: 'symbol', value: char });
+          current = '';
+        } else if (/\s/.test(char)) {
+          if (current.trim()) {
+            tokens.push({ type: 'word', value: current.trim() });
+            current = '';
+          }
+        } else {
+          current += char;
+        }
+      }
+      if (current.trim()) tokens.push({ type: inString ? 'string' : 'word', value: current.trim() });
+
+      let result = '';
+      let indentLevel = 0;
+      const getIndent = () => '  '.repeat(indentLevel);
+
+      for (let i = 0; i < tokens.length; i++) {
+        const t = tokens[i];
+        if (t.type === 'string') {
+          result += t.value + ' ';
+          continue;
+        }
+
+        const upper = t.value.toUpperCase();
+        let matchedClause = '';
+
+        if (i + 1 < tokens.length && tokens[i + 1].type === 'word') {
+          const pair = upper + ' ' + tokens[i + 1].value.toUpperCase();
+          if (majorClauses.includes(pair)) {
+            matchedClause = pair;
+            i++;
+          }
+        }
+        if (!matchedClause && majorClauses.includes(upper)) {
+          matchedClause = upper;
+        }
+
+        if (matchedClause) {
+          if (matchedClause === 'ON') {
+            result += 'ON ';
+          } else {
+            if (result.trim() && !result.endsWith('\n')) result += '\n';
+            result += getIndent() + matchedClause + ' ';
+          }
+        } else if (upper === 'AND' || upper === 'OR') {
+          result += '\n' + getIndent() + '  ' + upper + ' ';
+        } else if (t.value === '(') {
+          result += ' (';
+          indentLevel++;
+        } else if (t.value === ')') {
+          if (indentLevel > 0) indentLevel--;
+          result = result.trimEnd() + ') ';
+        } else if (t.value === ',') {
+          result = result.trimEnd() + ',\n' + getIndent() + '  ';
+        } else if (t.value === ';') {
+          result = result.trimEnd() + ';\n\n';
+          indentLevel = 0;
+        } else {
+          if (SQL_KEYWORDS.includes(upper)) {
+            result += upper + ' ';
+          } else {
+            result += t.value + ' ';
+          }
+        }
+      }
+
+      return result.trim();
     }
+
+    function formatActiveQuery() {
+      const sql = getEditorSQL();
+      if (!sql || !sql.trim()) return;
+      setEditorSQL(formatSQL(sql));
+    }
+
+    // --- Global Format Shortcut (Ctrl+Shift+F / Cmd+Shift+F) ---
+    window.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'F' || e.key === 'f')) {
+        e.preventDefault();
+        formatActiveQuery();
+      }
+    });
 
     // --- Tabs & Editor ---
     function renderTabs() {
@@ -1297,8 +2777,16 @@
       `).join('');
 
       const activeTab = tabs.find(t => t.id === activeTabId);
-      if (activeTab && !activeTab.isTableViewer) {
-        setEditorSQL(activeTab.sql || '');
+      const modeTabs = document.getElementById('table-mode-tabs');
+      if (activeTab && activeTab.isTableViewer) {
+        if (modeTabs) modeTabs.classList.remove('hidden');
+        setTableMode(activeTab.tableMode || 'data', false);
+      } else {
+        if (modeTabs) modeTabs.classList.add('hidden');
+        setTableMode('data', false);
+        if (activeTab) {
+          setEditorSQL(activeTab.sql || '');
+        }
       }
 
       const exportNotesBtn = document.getElementById('export-notes-btn');
@@ -1318,7 +2806,7 @@
     function exportCurrentNotes() {
       const activeTab = tabs.find(t => t.id === activeTabId);
       const text = activeTab && activeTab.isNote ? getEditorSQL() : '';
-      if (!text) { alert('No note content to export.'); return; }
+      if (!text) { showNativeAlert('No note content to export.', 'Export Notes'); return; }
       const blob = new Blob([text], { type: 'text/markdown' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
@@ -1327,7 +2815,6 @@
     }
 
     function switchTab(tabId) {
-      // Save current SQL
       const curr = tabs.find(t => t.id === activeTabId);
       if (curr && !curr.isTableViewer) {
         curr.sql = getEditorSQL();
@@ -1359,18 +2846,1161 @@
           title: tableName,
           isTableViewer: true,
           tableName: tableName,
+          tableMode: 'data',
           sql: `SELECT * FROM \`${tableName}\` LIMIT 50;`
         };
         tabs.push(tab);
       }
       switchTab(tab.id);
-      loadTableRows(tableName);
+      setTableMode('data');
+    }
+
+    // --- Table Sub-Tabs & HeidiSQL-Style Table Designer ---
+    function setTableMode(mode, refresh = true) {
+      activeTableMode = mode;
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (activeTab) activeTab.tableMode = mode;
+
+      const btnData = document.getElementById('btn-mode-data');
+      const btnStruct = document.getElementById('btn-mode-structure');
+      const btnIdx = document.getElementById('btn-mode-indexes');
+      const btnFK = document.getElementById('btn-mode-foreign-keys');
+      const btnDDL = document.getElementById('btn-mode-ddl');
+
+      const inactiveClass = 'px-3 py-1 rounded text-xs text-slate-400 hover:text-white hover:bg-slate-800 flex items-center space-x-1';
+      const activeClass = 'px-3 py-1 rounded text-xs font-semibold bg-app-surface text-app-accent border-b-2 border-app-accent flex items-center space-x-1';
+
+      if (btnData) btnData.className = mode === 'data' ? activeClass : inactiveClass;
+      if (btnStruct) btnStruct.className = mode === 'structure' ? activeClass : inactiveClass;
+      if (btnIdx) btnIdx.className = mode === 'indexes' ? activeClass : inactiveClass;
+      if (btnFK) btnFK.className = mode === 'foreign-keys' ? activeClass : inactiveClass;
+      if (btnDDL) btnDDL.className = mode === 'ddl' ? activeClass : inactiveClass;
+
+      const gridToolbar = document.getElementById('grid-toolbar');
+      const gridTable = document.getElementById('virtual-grid-wrapper');
+      const structView = document.getElementById('table-structure-view');
+      const idxView = document.getElementById('table-indexes-view');
+      const fkView = document.getElementById('table-fk-view');
+      const ddlView = document.getElementById('table-ddl-view');
+
+      if (gridToolbar) gridToolbar.classList.toggle('hidden', mode !== 'data');
+      if (gridTable) gridTable.classList.toggle('hidden', mode !== 'data');
+      if (structView) structView.classList.toggle('hidden', mode !== 'structure');
+      if (idxView) idxView.classList.toggle('hidden', mode !== 'indexes');
+      if (fkView) fkView.classList.toggle('hidden', mode !== 'foreign-keys');
+      if (ddlView) ddlView.classList.toggle('hidden', mode !== 'ddl');
+
+      if (refresh && activeTab && activeTab.isTableViewer) {
+        if (mode === 'data') {
+          loadTableRows(activeTab.tableName);
+        } else if (mode === 'structure') {
+          renderTableStructure(activeTab.tableName);
+        } else if (mode === 'indexes') {
+          renderTableIndexes(activeTab.tableName);
+        } else if (mode === 'foreign-keys') {
+          renderTableFKs(activeTab.tableName);
+        } else if (mode === 'ddl') {
+          renderTableDDL(activeTab.tableName);
+        }
+      }
+    }
+
+    function renderTableStructure(tableName) {
+      const tableMeta = (schemaCatalogCache?.tables || []).find(t => t.name === tableName);
+      const nameEl = document.getElementById('structure-table-name');
+      if (nameEl) nameEl.textContent = tableName;
+      if (!tableMeta) {
+        document.getElementById('structure-tbody').innerHTML = '<tr><td colspan="7" class="p-4 text-center text-slate-500">Table metadata not found in cache. Refresh schema.</td></tr>';
+        return;
+      }
+
+      currentTableMetadata = JSON.parse(JSON.stringify(tableMeta));
+      if (!stagedStructure || stagedStructure.name !== tableName) {
+        stagedStructure = JSON.parse(JSON.stringify(tableMeta));
+      }
+
+      renderStructureRows();
+    }
+
+    // --- Type Guard & Default Value Presets ---
+    // ponytail: Curated standard types prevents syntax errors (e.g. invalid lengths on INT/TEXT)
+    const STANDARD_DATA_TYPES = [
+      { group: 'Numeric', types: ['INT', 'BIGINT', 'TINYINT', 'SMALLINT', 'DECIMAL', 'FLOAT', 'DOUBLE'] },
+      { group: 'Text & String', types: ['VARCHAR', 'CHAR', 'TEXT', 'LONGTEXT', 'MEDIUMTEXT'] },
+      { group: 'Date & Time', types: ['DATETIME', 'TIMESTAMP', 'DATE', 'TIME'] },
+      { group: 'Other / Binary', types: ['JSON', 'BOOLEAN', 'BLOB', 'LONGBLOB'] }
+    ];
+
+    function parseColumnType(fullType) {
+      if (!fullType) return { base: 'VARCHAR', length: '255' };
+      const match = String(fullType).match(/^([a-zA-Z0-9_]+)(?:\(([^)]+)\))?/i);
+      if (!match) return { base: fullType.toUpperCase(), length: '' };
+      return { base: match[1].toUpperCase(), length: match[2] ? match[2].trim() : '' };
+    }
+
+    function isLengthlessType(base) {
+      const u = (base || '').toUpperCase();
+      return ['INT', 'BIGINT', 'TINYINT', 'SMALLINT', 'MEDIUMINT', 'TEXT', 'LONGTEXT', 'MEDIUMTEXT', 'TINYTEXT', 'DATETIME', 'DATE', 'TIMESTAMP', 'TIME', 'JSON', 'BOOLEAN', 'BLOB', 'LONGBLOB'].includes(u);
+    }
+
+    function isIntegerType(base) {
+      const u = (base || '').toUpperCase();
+      return ['INT', 'BIGINT', 'TINYINT', 'SMALLINT', 'MEDIUMINT'].includes(u);
+    }
+
+    function formatColumnType(base, length) {
+      base = (base || 'VARCHAR').toUpperCase();
+      if (isLengthlessType(base) || !length) {
+        return base;
+      }
+      return `${base}(${length})`;
+    }
+
+    function detectDefaultPreset(val) {
+      if (val === null || val === undefined || val === '') return 'none';
+      const u = String(val).trim().toUpperCase();
+      if (u === 'NULL') return 'NULL';
+      if (u === 'CURRENT_TIMESTAMP' || u === 'NOW()') return 'CURRENT_TIMESTAMP';
+      if (u === '0') return '0';
+      if (val === "''" || val === '""') return 'empty_string';
+      return 'custom';
+    }
+
+    function formatDefaultClause(val, baseType) {
+      if (val === null || val === undefined || val === '' || val === 'none') return '';
+      const u = String(val).trim();
+      if (u.toUpperCase() === 'NULL') return 'DEFAULT NULL';
+      if (u.toUpperCase() === 'CURRENT_TIMESTAMP' || u.toUpperCase() === 'NOW()') return 'DEFAULT CURRENT_TIMESTAMP';
+      if (u === "''" || u === '""') return "DEFAULT ''";
+      const upperBase = (baseType || '').toUpperCase();
+      if (isIntegerType(upperBase) || ['DECIMAL', 'FLOAT', 'DOUBLE'].includes(upperBase)) {
+        if (!isNaN(Number(u))) return `DEFAULT ${u}`;
+      }
+      if ((u.startsWith("'") && u.endsWith("'")) || (u.startsWith('"') && u.endsWith('"')) || u.includes('(')) {
+        return `DEFAULT ${u}`;
+      }
+      return `DEFAULT '${u.replace(/'/g, "''")}'`;
+    }
+
+    function renderTypeSelectOptions(currentBase) {
+      const upper = (currentBase || 'VARCHAR').toUpperCase();
+      let hasCurrent = false;
+      let html = '';
+      STANDARD_DATA_TYPES.forEach(group => {
+        html += `<optgroup label="${group.group}">`;
+        group.types.forEach(t => {
+          if (t === upper) hasCurrent = true;
+          html += `<option value="${t}" ${t === upper ? 'selected' : ''}>${t}</option>`;
+        });
+        html += `</optgroup>`;
+      });
+      if (!hasCurrent && upper) {
+        html = `<option value="${escapeHtml(upper)}" selected>${escapeHtml(upper)}</option>` + html;
+      }
+      return html;
+    }
+
+    function renderStructureRows() {
+      const tbody = document.getElementById('structure-tbody');
+      if (!stagedStructure || !stagedStructure.columns) return;
+
+      tbody.innerHTML = stagedStructure.columns.map((c, i) => {
+        if (c._deleted) {
+          return `
+            <tr class="bg-red-950/20 text-slate-500 line-through opacity-60">
+              <td class="p-2 text-center">${c.is_primary_key ? '🔑' : ''}</td>
+              <td class="p-2 font-semibold">${escapeHtml(c.name)}</td>
+              <td class="p-2">${escapeHtml(c.type)}</td>
+              <td class="p-2 text-center">${c.is_nullable ? 'YES' : 'NO'}</td>
+              <td class="p-2">${escapeHtml(c.default_value || '')}</td>
+              <td class="p-2 text-center">${c.extra || ''}</td>
+              <td class="p-2 text-center">
+                <button onclick="restoreStructureCol(${i})" class="text-xs text-sky-400 hover:underline">Restore</button>
+              </td>
+            </tr>
+          `;
+        }
+
+        const isNew = c._isNew;
+        const rowBg = isNew ? 'bg-emerald-950/30' : (c._modified ? 'bg-amber-950/30' : 'hover:bg-slate-800/40');
+        const { base, length } = parseColumnType(c.type);
+        const isLenDisabled = isLengthlessType(base);
+        const isInt = isIntegerType(base);
+        const preset = detectDefaultPreset(c.default_value);
+        const isCustomPreset = preset === 'custom';
+
+        return `
+          <tr class="${rowBg} transition border-b border-slate-800/40">
+            <td class="p-2 text-center">
+              <button onclick="toggleColPK(${i})" class="p-1 rounded hover:bg-slate-700 ${c.is_primary_key ? 'text-amber-400 font-bold' : 'text-slate-600'}" title="Toggle Primary Key">
+                🔑
+              </button>
+            </td>
+            <td class="p-2">
+              <input type="text" value="${escapeHtml(c.name)}" oninput="updateStagedCol(${i}, 'name', this.value)" class="w-full bg-slate-950 border border-slate-700 focus:border-app-accent px-1.5 py-1 rounded text-white font-mono text-xs outline-none">
+            </td>
+            <td class="p-2">
+              <div class="flex items-center space-x-1">
+                <select onchange="updateStagedColType(${i}, this.value, null)" class="bg-slate-950 border border-slate-700 text-sky-200 text-xs py-1 px-1 rounded outline-none font-mono focus:border-app-accent">
+                  ${renderTypeSelectOptions(base)}
+                </select>
+                <input type="text" value="${escapeHtml(length)}" ${isLenDisabled ? 'disabled placeholder="N/A"' : 'placeholder="Len"'} oninput="updateStagedColType(${i}, null, this.value)" class="w-16 bg-slate-950 border border-slate-700 text-white text-xs py-1 px-1 rounded outline-none font-mono ${isLenDisabled ? 'opacity-30 cursor-not-allowed bg-slate-900' : 'focus:border-app-accent'}">
+              </div>
+            </td>
+            <td class="p-2 text-center">
+              <input type="checkbox" ${c.is_nullable ? 'checked' : ''} ${c.is_primary_key ? 'disabled title="Primary Key cannot be nullable"' : ''} onchange="updateStagedCol(${i}, 'is_nullable', this.checked)" class="rounded bg-slate-900 border-slate-700 text-app-accent ${c.is_primary_key ? 'opacity-30 cursor-not-allowed' : ''}">
+            </td>
+            <td class="p-2">
+              <div class="flex items-center space-x-1">
+                <select onchange="updateStagedColDefaultPreset(${i}, this.value)" class="bg-slate-950 border border-slate-700 text-slate-300 text-xs py-1 px-1 rounded outline-none font-mono focus:border-app-accent">
+                  <option value="none" ${preset === 'none' ? 'selected' : ''}>None</option>
+                  <option value="NULL" ${preset === 'NULL' ? 'selected' : ''} ${c.is_primary_key ? 'disabled' : ''}>NULL</option>
+                  <option value="CURRENT_TIMESTAMP" ${preset === 'CURRENT_TIMESTAMP' ? 'selected' : ''}>CURRENT_TIMESTAMP</option>
+                  <option value="0" ${preset === '0' ? 'selected' : ''}>0</option>
+                  <option value="empty_string" ${preset === 'empty_string' ? 'selected' : ''}>'' (Empty)</option>
+                  <option value="custom" ${isCustomPreset ? 'selected' : ''}>Custom...</option>
+                </select>
+                <input type="text" value="${isCustomPreset ? escapeHtml(c.default_value || '') : ''}" placeholder="Expr/Val" oninput="updateStagedCol(${i}, 'default_value', this.value)" class="${isCustomPreset ? '' : 'hidden'} w-24 bg-slate-950 border border-slate-700 focus:border-app-accent px-1.5 py-1 rounded text-slate-200 font-mono text-xs outline-none">
+              </div>
+            </td>
+            <td class="p-2 text-center">
+              <input type="checkbox" ${(c.extra || '').toLowerCase().includes('auto_increment') ? 'checked' : ''} ${!isInt ? 'disabled title="Auto increment only supported on integer types"' : ''} onchange="updateStagedCol(${i}, 'auto_increment', this.checked)" class="rounded bg-slate-900 border-slate-700 text-app-accent ${!isInt ? 'opacity-30 cursor-not-allowed' : ''}">
+            </td>
+            <td class="p-2 text-center">
+              <button onclick="removeStructureCol(${i})" class="text-slate-500 hover:text-red-400 p-1" title="Delete Column">🗑️</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      updateStructureSaveState();
+    }
+
+    function addStructureColumn() {
+      if (!stagedStructure) return;
+      stagedStructure.columns.push({
+        name: 'new_col_' + (stagedStructure.columns.length + 1),
+        type: 'VARCHAR(255)',
+        is_nullable: true,
+        is_primary_key: false,
+        default_value: '',
+        extra: '',
+        _isNew: true
+      });
+      renderStructureRows();
+    }
+
+    function updateStagedColType(idx, newBase, newLength) {
+      if (!stagedStructure || !stagedStructure.columns[idx]) return;
+      const col = stagedStructure.columns[idx];
+      const parsed = parseColumnType(col.type);
+      let base = (newBase !== null && newBase !== undefined) ? newBase.toUpperCase() : parsed.base;
+      let length = (newLength !== null && newLength !== undefined) ? newLength : parsed.length;
+
+      if (newBase !== null && newBase !== undefined) {
+        if (isLengthlessType(base)) {
+          length = '';
+        } else if (!length) {
+          if (base === 'VARCHAR') length = '255';
+          else if (base === 'DECIMAL') length = '10,2';
+          else if (base === 'CHAR') length = '1';
+        }
+        if (!isIntegerType(base) && (col.extra || '').toLowerCase().includes('auto_increment')) {
+          col.extra = '';
+        }
+      }
+
+      col.type = formatColumnType(base, length);
+      if (!col._isNew) col._modified = true;
+      renderStructureRows();
+    }
+
+    function updateStagedColDefaultPreset(idx, preset) {
+      if (!stagedStructure || !stagedStructure.columns[idx]) return;
+      const col = stagedStructure.columns[idx];
+      if (preset === 'none') {
+        col.default_value = '';
+      } else if (preset === 'NULL') {
+        col.default_value = 'NULL';
+        if (!col.is_primary_key) col.is_nullable = true;
+      } else if (preset === 'CURRENT_TIMESTAMP') {
+        col.default_value = 'CURRENT_TIMESTAMP';
+      } else if (preset === '0') {
+        col.default_value = '0';
+      } else if (preset === 'empty_string') {
+        col.default_value = "''";
+      } else if (preset === 'custom') {
+        if (!col.default_value || ['NULL', 'CURRENT_TIMESTAMP', '0', "''"].includes(col.default_value)) {
+          col.default_value = '';
+        }
+      }
+      if (!col._isNew) col._modified = true;
+      renderStructureRows();
+    }
+
+    function updateStagedCol(idx, field, val) {
+      if (!stagedStructure || !stagedStructure.columns[idx]) return;
+      const col = stagedStructure.columns[idx];
+      if (field === 'auto_increment') {
+        const { base } = parseColumnType(col.type);
+        if (isIntegerType(base)) {
+          col.extra = val ? 'auto_increment' : '';
+        } else {
+          col.extra = '';
+        }
+      } else if (field === 'is_nullable') {
+        if (!col.is_primary_key) {
+          col.is_nullable = val;
+          if (!val && col.default_value === 'NULL') {
+            col.default_value = '';
+          }
+        }
+      } else {
+        col[field] = val;
+      }
+      if (!col._isNew) col._modified = true;
+      updateStructureSaveState();
+    }
+
+    function toggleColPK(idx) {
+      if (!stagedStructure || !stagedStructure.columns[idx]) return;
+      const col = stagedStructure.columns[idx];
+      col.is_primary_key = !col.is_primary_key;
+      if (col.is_primary_key) {
+        col.is_nullable = false;
+        if (col.default_value === 'NULL') col.default_value = '';
+      }
+      if (!col._isNew) col._modified = true;
+      renderStructureRows();
+    }
+
+    function removeStructureCol(idx) {
+      if (!stagedStructure || !stagedStructure.columns[idx]) return;
+      const col = stagedStructure.columns[idx];
+      if (col._isNew) {
+        stagedStructure.columns.splice(idx, 1);
+      } else {
+        col._deleted = true;
+      }
+      renderStructureRows();
+    }
+
+    function restoreStructureCol(idx) {
+      if (!stagedStructure || !stagedStructure.columns[idx]) return;
+      stagedStructure.columns[idx]._deleted = false;
+      renderStructureRows();
+    }
+
+    function discardStructureChanges() {
+      if (!currentTableMetadata) return;
+      stagedStructure = JSON.parse(JSON.stringify(currentTableMetadata));
+      renderStructureRows();
+    }
+
+    function getStructureDiffCount() {
+      if (!stagedStructure || !currentTableMetadata) return 0;
+      let diffCount = 0;
+      stagedStructure.columns.forEach(c => {
+        if (c._isNew || c._modified || c._deleted) diffCount++;
+      });
+      return diffCount;
+    }
+
+    function updateStructureSaveState() {
+      const diffCount = getStructureDiffCount();
+      const saveBtn = document.getElementById('btn-save-structure');
+      const discardBtn = document.getElementById('btn-discard-structure');
+      const diffBadge = document.getElementById('structure-diff-badge');
+
+      if (diffCount > 0) {
+        saveBtn.disabled = false;
+        saveBtn.className = 'bg-app-safe hover:bg-emerald-600 text-slate-950 font-bold px-3 py-1 rounded transition cursor-pointer flex items-center space-x-1 shadow-sm';
+        discardBtn.classList.remove('hidden');
+        diffBadge.classList.remove('hidden');
+        diffBadge.textContent = diffCount;
+      } else {
+        saveBtn.disabled = true;
+        saveBtn.className = 'bg-slate-800 text-slate-500 font-bold px-3 py-1 rounded transition cursor-not-allowed flex items-center space-x-1';
+        discardBtn.classList.add('hidden');
+        diffBadge.classList.add('hidden');
+      }
+    }
+
+    function saveStructureChanges() {
+      if (!stagedStructure || !currentTableMetadata) return;
+      const tableName = stagedStructure.name;
+      const originalCols = currentTableMetadata.columns || [];
+      const ddlStatements = [];
+      const isSQLite = activeConnection && (activeConnection.driver === 'sqlite' || activeConnection.driver === 'sqlite3');
+
+      // 1. Column drops
+      stagedStructure.columns.filter(c => c._deleted).forEach(c => {
+        if (isSQLite) {
+          ddlStatements.push(`ALTER TABLE "${tableName}" DROP COLUMN "${c.name}";`);
+        } else {
+          ddlStatements.push(`ALTER TABLE \`${tableName}\` DROP COLUMN \`${c.name}\`;`);
+        }
+      });
+
+      // 2. New columns
+      stagedStructure.columns.filter(c => c._isNew && !c._deleted).forEach(c => {
+        const { base } = parseColumnType(c.type);
+        const nullClause = c.is_nullable ? 'NULL' : 'NOT NULL';
+        const dfltClause = formatDefaultClause(c.default_value, base);
+        const extraClause = c.extra || '';
+        if (isSQLite) {
+          ddlStatements.push(`ALTER TABLE "${tableName}" ADD COLUMN "${c.name}" ${c.type} ${nullClause} ${dfltClause} ${extraClause};`.replace(/\s+/g, ' ').trim());
+        } else {
+          ddlStatements.push(`ALTER TABLE \`${tableName}\` ADD COLUMN \`${c.name}\` ${c.type} ${nullClause} ${dfltClause} ${extraClause};`.replace(/\s+/g, ' ').trim());
+        }
+      });
+
+      // 3. Modified columns (MySQL natively supported)
+      stagedStructure.columns.filter(c => c._modified && !c._isNew && !c._deleted).forEach(c => {
+        const { base } = parseColumnType(c.type);
+        const nullClause = c.is_nullable ? 'NULL' : 'NOT NULL';
+        const dfltClause = formatDefaultClause(c.default_value, base);
+        const extraClause = c.extra || '';
+        if (isSQLite) {
+          ddlStatements.push(`-- SQLite: Column modified "${c.name}" (${c.type})`);
+        } else {
+          ddlStatements.push(`ALTER TABLE \`${tableName}\` MODIFY COLUMN \`${c.name}\` ${c.type} ${nullClause} ${dfltClause} ${extraClause};`.replace(/\s+/g, ' ').trim());
+        }
+      });
+
+      // 4. Primary Key modifications
+      const origPKs = originalCols.filter(c => c.is_primary_key).map(c => c.name).sort().join(',');
+      const currentPKCols = stagedStructure.columns.filter(c => c.is_primary_key && !c._deleted).map(c => c.name);
+      const newPKs = currentPKCols.slice().sort().join(',');
+      if (origPKs !== newPKs && !isSQLite) {
+        if (origPKs) {
+          ddlStatements.push(`ALTER TABLE \`${tableName}\` DROP PRIMARY KEY;`);
+        }
+        if (currentPKCols.length > 0) {
+          ddlStatements.push(`ALTER TABLE \`${tableName}\` ADD PRIMARY KEY (\`${currentPKCols.join('`, `')}\`);`);
+        }
+      }
+
+      if (ddlStatements.length === 0) {
+        showNativeAlert('No structural modifications detected to save.', 'Structure Designer');
+        return;
+      }
+
+      const fullDDL = ddlStatements.join('\n');
+      openDDLReviewModal(fullDDL, async () => {
+        const ok = await executeDDLStatements(fullDDL, `Table "${tableName}" structure updated successfully.`);
+        if (ok) {
+          stagedStructure = null;
+          await loadSchemaTree(activeConnection.id);
+          renderTableStructure(tableName);
+        }
+      });
+    }
+
+    // --- Indexes & Foreign Keys View Handlers ---
+    function renderTableIndexes(tableName) {
+      const tableMeta = (schemaCatalogCache?.tables || []).find(t => t.name === tableName);
+      const tbody = document.getElementById('indexes-tbody');
+      if (!tableMeta || !tableMeta.indexes || tableMeta.indexes.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-slate-500">No custom indexes on this table.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = tableMeta.indexes.map(idx => `
+        <tr class="hover:bg-slate-800/40 border-b border-slate-800/40">
+          <td class="p-2 font-mono font-semibold text-sky-200">${escapeHtml(idx.name)}</td>
+          <td class="p-2 font-mono text-slate-300">${escapeHtml((idx.columns || []).join(', '))}</td>
+          <td class="p-2 text-center">${idx.is_unique ? '<span class="text-emerald-400">UNIQUE</span>' : '<span class="text-slate-500">INDEX</span>'}</td>
+          <td class="p-2 font-mono text-slate-400">${escapeHtml(idx.type || 'BTREE')}</td>
+          <td class="p-2 text-center">
+            ${idx.name === 'PRIMARY' ? '<span class="text-slate-600 text-xs">PK</span>' : `<button onclick="dropTableIndex('${escapeHtml(idx.name)}')" class="text-slate-500 hover:text-red-400 p-1" title="Drop Index">🗑️</button>`}
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function openAddIndexForm() {
+      document.getElementById('add-index-inline-form').classList.remove('hidden');
+      document.getElementById('new-index-name').value = '';
+      document.getElementById('new-index-cols').value = '';
+      document.getElementById('new-index-unique').checked = false;
+    }
+
+    async function submitNewIndex() {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab || !activeTab.tableName) return;
+      const tableName = activeTab.tableName;
+      const name = document.getElementById('new-index-name').value.trim();
+      const colsStr = document.getElementById('new-index-cols').value.trim();
+      const isUnique = document.getElementById('new-index-unique').checked;
+      if (!name || !colsStr) {
+        showNativeAlert('Index name and columns are required.', 'Add Index');
+        return;
+      }
+      const isSQLite = activeConnection && (activeConnection.driver === 'sqlite' || activeConnection.driver === 'sqlite3');
+      const cols = colsStr.split(',').map(s => s.trim()).filter(Boolean);
+      const formattedCols = isSQLite ? cols.map(c => `"${c}"`).join(', ') : cols.map(c => `\`${c}\``).join(', ');
+      const sql = isSQLite
+        ? `CREATE ${isUnique ? 'UNIQUE ' : ''}INDEX "${name}" ON "${tableName}" (${formattedCols});`
+        : `CREATE ${isUnique ? 'UNIQUE ' : ''}INDEX \`${name}\` ON \`${tableName}\` (${formattedCols});`;
+
+      document.getElementById('add-index-inline-form').classList.add('hidden');
+      openDDLReviewModal(sql, async () => {
+        const ok = await executeDDLStatements(sql, `Index "${name}" created successfully.`);
+        if (ok) {
+          await loadSchemaTree(activeConnection.id);
+          renderTableIndexes(tableName);
+        }
+      });
+    }
+
+    async function dropTableIndex(idxName) {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab || !activeTab.tableName) return;
+      const tableName = activeTab.tableName;
+      const isSQLite = activeConnection && (activeConnection.driver === 'sqlite' || activeConnection.driver === 'sqlite3');
+      const sql = isSQLite
+        ? `DROP INDEX "${idxName}";`
+        : `ALTER TABLE \`${tableName}\` DROP INDEX \`${idxName}\`;`;
+
+      openDDLReviewModal(sql, async () => {
+        const ok = await executeDDLStatements(sql, `Index "${idxName}" dropped successfully.`);
+        if (ok) {
+          await loadSchemaTree(activeConnection.id);
+          renderTableIndexes(tableName);
+        }
+      });
+    }
+
+    function renderTableFKs(tableName) {
+      const tableMeta = (schemaCatalogCache?.tables || []).find(t => t.name === tableName);
+      const tbody = document.getElementById('foreign-keys-tbody');
+      if (!tableMeta || !tableMeta.foreign_keys || tableMeta.foreign_keys.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="p-4 text-center text-slate-500">No foreign keys configured on this table.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = tableMeta.foreign_keys.map(fk => `
+        <tr class="hover:bg-slate-800/40 border-b border-slate-800/40">
+          <td class="p-2 font-mono font-semibold text-sky-200">${escapeHtml(fk.name)}</td>
+          <td class="p-2 font-mono text-slate-300">${escapeHtml(fk.column)}</td>
+          <td class="p-2 font-mono text-emerald-300">${escapeHtml(fk.referenced_table)} (${escapeHtml(fk.referenced_column)})</td>
+          <td class="p-2 font-mono text-xs text-slate-400">${escapeHtml(fk.on_delete || 'NO ACTION')}</td>
+          <td class="p-2 font-mono text-xs text-slate-400">${escapeHtml(fk.on_update || 'NO ACTION')}</td>
+          <td class="p-2 text-center">
+            <button onclick="dropTableFK('${escapeHtml(fk.name)}')" class="text-slate-500 hover:text-red-400 p-1" title="Drop Foreign Key">🗑️</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function openAddFKForm() {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab || !activeTab.tableName) return;
+      const tableName = activeTab.tableName;
+      const tableMeta = (schemaCatalogCache?.tables || []).find(t => t.name === tableName);
+      
+      const colSelect = document.getElementById('new-fk-col');
+      const refTableSelect = document.getElementById('new-fk-ref-table');
+      if (colSelect && tableMeta) {
+        colSelect.innerHTML = (tableMeta.columns || []).map(c => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
+      }
+      if (refTableSelect && schemaCatalogCache) {
+        refTableSelect.innerHTML = (schemaCatalogCache.tables || []).map(t => `<option value="${escapeHtml(t.name)}">${escapeHtml(t.name)}</option>`).join('');
+      }
+      document.getElementById('new-fk-name').value = `fk_${tableName}_col`;
+      document.getElementById('new-fk-ref-col').value = 'id';
+      document.getElementById('add-fk-inline-form').classList.remove('hidden');
+    }
+
+    function onFKRefTableChange(refTableName) {
+      const refTableMeta = (schemaCatalogCache?.tables || []).find(t => t.name === refTableName);
+      const refColInput = document.getElementById('new-fk-ref-col');
+      if (refTableMeta && refColInput) {
+        const pk = refTableMeta.columns?.find(c => c.is_primary_key);
+        if (pk) refColInput.value = pk.name;
+      }
+    }
+
+    async function submitNewFK() {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab || !activeTab.tableName) return;
+      const tableName = activeTab.tableName;
+      const name = document.getElementById('new-fk-name').value.trim();
+      const col = document.getElementById('new-fk-col').value;
+      const refTable = document.getElementById('new-fk-ref-table').value;
+      const refCol = document.getElementById('new-fk-ref-col').value.trim();
+      const onDelete = document.getElementById('new-fk-on-delete').value;
+      const onUpdate = document.getElementById('new-fk-on-update').value;
+
+      if (!name || !col || !refTable || !refCol) {
+        showNativeAlert('All foreign key fields are required.', 'Add Foreign Key');
+        return;
+      }
+
+      const sql = `ALTER TABLE \`${tableName}\` ADD CONSTRAINT \`${name}\` FOREIGN KEY (\`${col}\`) REFERENCES \`${refTable}\` (\`${refCol}\`) ON DELETE ${onDelete} ON UPDATE ${onUpdate};`;
+      document.getElementById('add-fk-inline-form').classList.add('hidden');
+      openDDLReviewModal(sql, async () => {
+        const ok = await executeDDLStatements(sql, `Foreign key "${name}" created successfully.`);
+        if (ok) {
+          await loadSchemaTree(activeConnection.id);
+          renderTableFKs(tableName);
+        }
+      });
+    }
+
+    async function dropTableFK(fkName) {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab || !activeTab.tableName) return;
+      const tableName = activeTab.tableName;
+      const sql = `ALTER TABLE \`${tableName}\` DROP FOREIGN KEY \`${fkName}\`;`;
+      openDDLReviewModal(sql, async () => {
+        const ok = await executeDDLStatements(sql, `Foreign key "${fkName}" dropped successfully.`);
+        if (ok) {
+          await loadSchemaTree(activeConnection.id);
+          renderTableFKs(tableName);
+        }
+      });
+    }
+
+    async function renderTableDDL(tableName) {
+      const pre = document.getElementById('table-raw-ddl');
+      pre.textContent = 'Loading DDL...';
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/ddl/${tableName}`);
+        const data = await res.json();
+        pre.textContent = data.ddl || '-- No DDL available';
+      } catch (err) {
+        pre.textContent = 'Failed to load DDL: ' + err.message;
+      }
+    }
+
+    function copyCurrentTableDDL() {
+      const text = document.getElementById('table-raw-ddl').textContent;
+      navigator.clipboard.writeText(text);
+      showNativeAlert('Table CREATE SQL copied to clipboard!', 'Copy SQL');
+    }
+
+    // --- Create Table Designer Modal Handlers ---
+    function openCreateTableModal() {
+      newTableColumns = [
+        { name: 'id', type: 'INT', is_primary_key: true, is_nullable: false, default_value: '', extra: 'auto_increment' },
+        { name: 'created_at', type: 'TIMESTAMP', is_primary_key: false, is_nullable: false, default_value: 'CURRENT_TIMESTAMP', extra: '' }
+      ];
+      document.getElementById('new-table-name').value = '';
+      renderCreatorColumns();
+      const dlg = document.getElementById('table-creator-dialog');
+      if (typeof dlg.showModal === 'function') dlg.showModal();
+      else dlg.setAttribute('open', '');
+    }
+
+    function renderCreatorColumns() {
+      const tbody = document.getElementById('creator-columns-tbody');
+      tbody.innerHTML = newTableColumns.map((c, i) => {
+        const { base, length } = parseColumnType(c.type);
+        const isLenDisabled = isLengthlessType(base);
+        const isInt = isIntegerType(base);
+        const preset = detectDefaultPreset(c.default_value);
+        const isCustom = preset === 'custom';
+
+        return `
+          <tr>
+            <td class="p-1.5 text-center">
+              <button type="button" onclick="toggleCreatorColPK(${i})" class="p-1 rounded hover:bg-slate-800 ${c.is_primary_key ? 'text-amber-400 font-bold' : 'text-slate-600'}" title="Toggle Primary Key">🔑</button>
+            </td>
+            <td class="p-1.5">
+              <input type="text" value="${escapeHtml(c.name)}" oninput="newTableColumns[${i}].name = this.value" class="w-full bg-slate-900 border border-slate-700 px-1.5 py-1 rounded text-white font-mono text-xs outline-none focus:border-app-accent">
+            </td>
+            <td class="p-1.5">
+              <div class="flex items-center space-x-1">
+                <select onchange="updateCreatorColType(${i}, this.value, null)" class="bg-slate-900 border border-slate-700 text-sky-200 text-xs py-1 px-1 rounded outline-none font-mono focus:border-app-accent">
+                  ${renderTypeSelectOptions(base)}
+                </select>
+                <input type="text" value="${escapeHtml(length)}" ${isLenDisabled ? 'disabled placeholder="N/A"' : 'placeholder="Len"'} oninput="updateCreatorColType(${i}, null, this.value)" class="w-16 bg-slate-900 border border-slate-700 text-white text-xs py-1 px-1 rounded outline-none font-mono ${isLenDisabled ? 'opacity-30 cursor-not-allowed bg-slate-950' : 'focus:border-app-accent'}">
+              </div>
+            </td>
+            <td class="p-1.5 text-center">
+              <input type="checkbox" ${c.is_nullable ? 'checked' : ''} ${c.is_primary_key ? 'disabled title="Primary Key cannot be nullable"' : ''} onchange="newTableColumns[${i}].is_nullable = this.checked; if (!this.checked && newTableColumns[${i}].default_value === 'NULL') newTableColumns[${i}].default_value = ''; renderCreatorColumns();" class="rounded bg-slate-900 text-app-accent ${c.is_primary_key ? 'opacity-30 cursor-not-allowed' : ''}">
+            </td>
+            <td class="p-1.5">
+              <div class="flex items-center space-x-1">
+                <select onchange="updateCreatorColDefaultPreset(${i}, this.value)" class="bg-slate-900 border border-slate-700 text-slate-300 text-xs py-1 px-1 rounded outline-none font-mono focus:border-app-accent">
+                  <option value="none" ${preset === 'none' ? 'selected' : ''}>None</option>
+                  <option value="NULL" ${preset === 'NULL' ? 'selected' : ''} ${c.is_primary_key ? 'disabled' : ''}>NULL</option>
+                  <option value="CURRENT_TIMESTAMP" ${preset === 'CURRENT_TIMESTAMP' ? 'selected' : ''}>CURRENT_TIMESTAMP</option>
+                  <option value="0" ${preset === '0' ? 'selected' : ''}>0</option>
+                  <option value="empty_string" ${preset === 'empty_string' ? 'selected' : ''}>'' (Empty)</option>
+                  <option value="custom" ${isCustom ? 'selected' : ''}>Custom...</option>
+                </select>
+                <input type="text" value="${isCustom ? escapeHtml(c.default_value || '') : ''}" placeholder="Val" oninput="newTableColumns[${i}].default_value = this.value" class="${isCustom ? '' : 'hidden'} w-24 bg-slate-900 border border-slate-700 focus:border-app-accent px-1.5 py-1 rounded text-slate-200 font-mono text-xs outline-none">
+              </div>
+            </td>
+            <td class="p-1.5 text-center">
+              <input type="checkbox" ${(c.extra || '').toLowerCase().includes('auto_increment') ? 'checked' : ''} ${!isInt ? 'disabled title="Only integer types can auto-increment"' : ''} onchange="newTableColumns[${i}].extra = this.checked ? 'auto_increment' : ''" class="rounded bg-slate-900 text-app-accent ${!isInt ? 'opacity-30 cursor-not-allowed' : ''}">
+            </td>
+            <td class="p-1.5 text-center">
+              <button onclick="newTableColumns.splice(${i}, 1); renderCreatorColumns();" class="text-slate-500 hover:text-red-400">✕</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function updateCreatorColType(idx, newBase, newLength) {
+      if (!newTableColumns[idx]) return;
+      const col = newTableColumns[idx];
+      const parsed = parseColumnType(col.type);
+      let base = (newBase !== null && newBase !== undefined) ? newBase.toUpperCase() : parsed.base;
+      let length = (newLength !== null && newLength !== undefined) ? newLength : parsed.length;
+
+      if (newBase !== null && newBase !== undefined) {
+        if (isLengthlessType(base)) {
+          length = '';
+        } else if (!length) {
+          if (base === 'VARCHAR') length = '255';
+          else if (base === 'DECIMAL') length = '10,2';
+          else if (base === 'CHAR') length = '1';
+        }
+        if (!isIntegerType(base) && (col.extra || '').toLowerCase().includes('auto_increment')) {
+          col.extra = '';
+        }
+      }
+
+      col.type = formatColumnType(base, length);
+      renderCreatorColumns();
+    }
+
+    function updateCreatorColDefaultPreset(idx, preset) {
+      if (!newTableColumns[idx]) return;
+      const col = newTableColumns[idx];
+      if (preset === 'none') {
+        col.default_value = '';
+      } else if (preset === 'NULL') {
+        col.default_value = 'NULL';
+        if (!col.is_primary_key) col.is_nullable = true;
+      } else if (preset === 'CURRENT_TIMESTAMP') {
+        col.default_value = 'CURRENT_TIMESTAMP';
+      } else if (preset === '0') {
+        col.default_value = '0';
+      } else if (preset === 'empty_string') {
+        col.default_value = "''";
+      } else if (preset === 'custom') {
+        if (!col.default_value || ['NULL', 'CURRENT_TIMESTAMP', '0', "''"].includes(col.default_value)) {
+          col.default_value = '';
+        }
+      }
+      renderCreatorColumns();
+    }
+
+    function toggleCreatorColPK(idx) {
+      if (!newTableColumns[idx]) return;
+      const col = newTableColumns[idx];
+      col.is_primary_key = !col.is_primary_key;
+      if (col.is_primary_key) {
+        col.is_nullable = false;
+        if (col.default_value === 'NULL') col.default_value = '';
+      }
+      renderCreatorColumns();
+    }
+
+    function addCreatorColumn() {
+      newTableColumns.push({
+        name: 'col_' + (newTableColumns.length + 1),
+        type: 'VARCHAR(255)',
+        is_primary_key: false,
+        is_nullable: true,
+        default_value: '',
+        extra: ''
+      });
+      renderCreatorColumns();
+    }
+
+    async function submitCreateTable() {
+      const name = document.getElementById('new-table-name').value.trim();
+      if (!name) {
+        showNativeAlert('Table name is required.', 'Create Table');
+        return;
+      }
+      if (newTableColumns.length === 0) {
+        showNativeAlert('At least one column is required.', 'Create Table');
+        return;
+      }
+
+      const isSQLite = activeConnection && (activeConnection.driver === 'sqlite' || activeConnection.driver === 'sqlite3');
+      const colDefs = newTableColumns.map(c => {
+        const { base } = parseColumnType(c.type);
+        const nullClause = c.is_nullable ? '' : 'NOT NULL';
+        const dfltClause = formatDefaultClause(c.default_value, base);
+        const quote = isSQLite ? '"' : '`';
+        return `  ${quote}${c.name}${quote} ${c.type} ${nullClause} ${dfltClause} ${c.extra || ''}`.replace(/\s+/g, ' ').trim();
+      });
+
+      const pkCols = newTableColumns.filter(c => c.is_primary_key).map(c => (isSQLite ? `"${c.name}"` : `\`${c.name}\``));
+      if (pkCols.length > 0) {
+        colDefs.push(`  PRIMARY KEY (${pkCols.join(', ')})`);
+      }
+
+      const quote = isSQLite ? '"' : '`';
+      const sql = `CREATE TABLE ${quote}${name}${quote} (\n${colDefs.join(',\n')}\n);`;
+      document.getElementById('table-creator-dialog').close();
+
+      openDDLReviewModal(sql, async () => {
+        const ok = await executeDDLStatements(sql, `Table "${name}" created successfully.`);
+        if (ok) {
+          await loadSchemaTree(activeConnection.id);
+          openTableViewer(name);
+        }
+      });
+    }
+
+    async function dropTable(tableName) {
+      if (!await showNativeConfirm(`Are you sure you want to DROP TABLE "${tableName}"?\nAll table data will be removed.`, 'Drop Table')) {
+        return;
+      }
+      const isSQLite = activeConnection && (activeConnection.driver === 'sqlite' || activeConnection.driver === 'sqlite3');
+      const quote = isSQLite ? '"' : '`';
+      const sql = `DROP TABLE ${quote}${tableName}${quote};`;
+      openDDLReviewModal(sql, async () => {
+        const ok = await executeDDLStatements(sql, `Table "${tableName}" dropped successfully.`);
+        if (ok) {
+          await loadSchemaTree(activeConnection.id);
+        }
+      });
+    }
+
+    // --- View Designer Handlers ---
+    function openCreateViewModal(viewName = '', existingSQL = '') {
+      document.getElementById('view-designer-title').textContent = viewName ? 'Alter View ' + viewName : 'Create Database View';
+      document.getElementById('view-designer-name').value = viewName;
+      document.getElementById('view-designer-query').value = existingSQL || 'SELECT * FROM ...';
+      const dlg = document.getElementById('view-designer-dialog');
+      if (typeof dlg.showModal === 'function') dlg.showModal();
+      else dlg.setAttribute('open', '');
+    }
+
+    async function submitCreateView() {
+      const name = document.getElementById('view-designer-name').value.trim();
+      const query = document.getElementById('view-designer-query').value.trim();
+      if (!name || !query) {
+        showNativeAlert('View name and SELECT query are required.', 'View Designer');
+        return;
+      }
+      const isSQLite = activeConnection && (activeConnection.driver === 'sqlite' || activeConnection.driver === 'sqlite3');
+      const quote = isSQLite ? '"' : '`';
+      const sql = isSQLite
+        ? `CREATE VIEW IF NOT EXISTS ${quote}${name}${quote} AS\n${query};`
+        : `CREATE OR REPLACE VIEW ${quote}${name}${quote} AS\n${query};`;
+
+      document.getElementById('view-designer-dialog').close();
+      openDDLReviewModal(sql, async () => {
+        const ok = await executeDDLStatements(sql, `View "${name}" created successfully.`);
+        if (ok) {
+          await loadSchemaTree(activeConnection.id);
+        }
+      });
+    }
+
+    async function dropView(viewName) {
+      if (!await showNativeConfirm(`Are you sure you want to DROP VIEW "${viewName}"?`, 'Drop View')) {
+        return;
+      }
+      const isSQLite = activeConnection && (activeConnection.driver === 'sqlite' || activeConnection.driver === 'sqlite3');
+      const quote = isSQLite ? '"' : '`';
+      const sql = `DROP VIEW ${quote}${viewName}${quote};`;
+      openDDLReviewModal(sql, async () => {
+        const ok = await executeDDLStatements(sql, `View "${viewName}" dropped successfully.`);
+        if (ok) {
+          await loadSchemaTree(activeConnection.id);
+        }
+      });
+    }
+
+    // --- Trigger Designer Handlers ---
+    function openCreateTriggerModal(triggerName = '', existingData = null) {
+      document.getElementById('trigger-designer-title').textContent = triggerName ? 'Edit Trigger ' + triggerName : 'Create Database Trigger';
+      document.getElementById('trigger-designer-name').value = triggerName;
+      
+      const tblSelect = document.getElementById('trigger-designer-table');
+      if (tblSelect && schemaCatalogCache) {
+        const baseTables = (schemaCatalogCache.tables || []).filter(t => t.type !== 'VIEW');
+        tblSelect.innerHTML = baseTables.map(t => `<option value="${escapeHtml(t.name)}">${escapeHtml(t.name)}</option>`).join('');
+      }
+
+      if (existingData) {
+        if (existingData.table) tblSelect.value = existingData.table;
+        if (existingData.timing) document.getElementById('trigger-designer-timing').value = existingData.timing;
+        if (existingData.event) document.getElementById('trigger-designer-event').value = existingData.event;
+        if (existingData.statement) document.getElementById('trigger-designer-body').value = existingData.statement;
+      } else {
+        document.getElementById('trigger-designer-body').value = 'BEGIN\n  -- Trigger logic here\nEND;';
+      }
+
+      const dlg = document.getElementById('trigger-designer-dialog');
+      if (typeof dlg.showModal === 'function') dlg.showModal();
+      else dlg.setAttribute('open', '');
+    }
+
+    async function submitCreateTrigger() {
+      const name = document.getElementById('trigger-designer-name').value.trim();
+      const table = document.getElementById('trigger-designer-table').value;
+      const timing = document.getElementById('trigger-designer-timing').value;
+      const event = document.getElementById('trigger-designer-event').value;
+      const body = document.getElementById('trigger-designer-body').value.trim();
+
+      if (!name || !table || !body) {
+        showNativeAlert('Trigger name, target table, and body statements are required.', 'Trigger Designer');
+        return;
+      }
+
+      const isSQLite = activeConnection && (activeConnection.driver === 'sqlite' || activeConnection.driver === 'sqlite3');
+      const quote = isSQLite ? '"' : '`';
+      const sql = isSQLite
+        ? `CREATE TRIGGER ${quote}${name}${quote} ${timing} ${event} ON ${quote}${table}${quote}\n${body};`
+        : `CREATE TRIGGER ${quote}${name}${quote} ${timing} ${event} ON ${quote}${table}${quote} FOR EACH ROW\n${body};`;
+
+      document.getElementById('trigger-designer-dialog').close();
+      openDDLReviewModal(sql, async () => {
+        const ok = await executeDDLStatements(sql, `Trigger "${name}" created successfully.`);
+        if (ok) {
+          await loadSchemaTree(activeConnection.id);
+        }
+      });
+    }
+
+    async function dropTrigger(triggerName) {
+      if (!await showNativeConfirm(`Are you sure you want to DROP TRIGGER "${triggerName}"?`, 'Drop Trigger')) {
+        return;
+      }
+      const isSQLite = activeConnection && (activeConnection.driver === 'sqlite' || activeConnection.driver === 'sqlite3');
+      const quote = isSQLite ? '"' : '`';
+      const sql = `DROP TRIGGER ${quote}${triggerName}${quote};`;
+      openDDLReviewModal(sql, async () => {
+        const ok = await executeDDLStatements(sql, `Trigger "${triggerName}" dropped successfully.`);
+        if (ok) {
+          await loadSchemaTree(activeConnection.id);
+        }
+      });
+    }
+
+    // --- Cross-Database Schema Search (Ctrl+P / Quick Open) ---
+    let schemaSearchIndex = [];
+    let schemaSearchResults = [];
+    let schemaSearchSelectedIndex = 0;
+
+    function buildSchemaSearchIndex() {
+      const items = [];
+      const dbs = new Set();
+      if (activeConnection && activeConnection.database_name) {
+        dbs.add(activeConnection.database_name);
+      }
+      if (schemaCatalogCache && schemaCatalogCache.database_name) {
+        dbs.add(schemaCatalogCache.database_name);
+      }
+      if (typeof multiDBCatalogCache === 'object') {
+        Object.keys(multiDBCatalogCache).forEach(db => dbs.add(db));
+      }
+
+      dbs.forEach(dbName => {
+        const lowerDb = dbName.toLowerCase();
+        const catalog = (typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[lowerDb]) ||
+          (schemaCatalogCache && schemaCatalogCache.database_name && schemaCatalogCache.database_name.toLowerCase() === lowerDb ? schemaCatalogCache : null) ||
+          schemaCatalogCache;
+
+        if (catalog) {
+          // Tables
+          (catalog.tables || []).forEach(tbl => {
+            const isView = tbl.type === 'VIEW';
+            items.push({
+              kind: isView ? 'VIEW' : 'TBL',
+              database: dbName,
+              table: tbl.name,
+              column: null,
+              type: isView ? 'VIEW' : 'TABLE',
+              fullName: `${dbName}.${tbl.name}`
+            });
+
+            // Columns
+            (tbl.columns || []).forEach(col => {
+              items.push({
+                kind: 'COL',
+                database: dbName,
+                table: tbl.name,
+                column: col.name,
+                type: col.type || '',
+                fullName: `${dbName}.${tbl.name}.${col.name}`
+              });
+            });
+          });
+
+          // Standalone Views if any
+          (catalog.views || []).forEach(v => {
+            if (!items.some(it => it.kind === 'VIEW' && it.database === dbName && it.table === v.name)) {
+              items.push({
+                kind: 'VIEW',
+                database: dbName,
+                table: v.name,
+                column: null,
+                type: 'VIEW',
+                fullName: `${dbName}.${v.name}`
+              });
+            }
+          });
+        }
+      });
+
+      schemaSearchIndex = items;
+    }
+
+    function toggleSchemaSearch() {
+      const dlg = document.getElementById('schema-search-modal');
+      if (!dlg) return;
+      if (dlg.hasAttribute('open') || (typeof dlg.open === 'boolean' && dlg.open)) {
+        closeSchemaSearch();
+      } else {
+        openSchemaSearch();
+      }
+    }
+
+    function openSchemaSearch() {
+      buildSchemaSearchIndex();
+      const dlg = document.getElementById('schema-search-modal');
+      const input = document.getElementById('schema-search-input');
+      if (typeof dlg.showModal === 'function') {
+        dlg.showModal();
+      } else {
+        dlg.setAttribute('open', '');
+      }
+      input.value = '';
+      schemaSearchSelectedIndex = 0;
+      renderSchemaSearchResults('');
+      input.focus();
+    }
+
+    function closeSchemaSearch() {
+      const dlg = document.getElementById('schema-search-modal');
+      if (dlg) {
+        if (typeof dlg.close === 'function') dlg.close();
+        else dlg.removeAttribute('open');
+      }
+    }
+
+    function renderSchemaSearchResults(query) {
+      query = (query || '').trim().toLowerCase();
+      const resultsContainer = document.getElementById('schema-search-results');
+      const countEl = document.getElementById('schema-search-count');
+
+      if (!query) {
+        // Show top tables by default
+        schemaSearchResults = schemaSearchIndex.filter(it => it.kind === 'TBL' || it.kind === 'VIEW').slice(0, 30);
+      } else {
+        schemaSearchResults = schemaSearchIndex.filter(it => {
+          if (it.fullName.toLowerCase().includes(query)) return true;
+          if (it.table && it.table.toLowerCase().includes(query)) return true;
+          if (it.column && it.column.toLowerCase().includes(query)) return true;
+          return false;
+        }).slice(0, 50);
+      }
+
+      countEl.textContent = `${schemaSearchResults.length} items`;
+      if (schemaSearchResults.length === 0) {
+        resultsContainer.innerHTML = `<div class="p-6 text-center text-slate-500">No tables, views, or columns found matching "<span class="text-slate-300">${escapeHtml(query)}</span>"</div>`;
+        return;
+      }
+
+      if (schemaSearchSelectedIndex >= schemaSearchResults.length) {
+        schemaSearchSelectedIndex = 0;
+      }
+
+      resultsContainer.innerHTML = schemaSearchResults.map((it, idx) => {
+        const isSelected = idx === schemaSearchSelectedIndex;
+        const kindBadge = it.kind === 'TBL'
+          ? '<span class="bg-emerald-950 text-emerald-400 border border-emerald-800 px-1.5 py-0.5 rounded text-[10px] font-semibold">[TBL]</span>'
+          : it.kind === 'VIEW'
+          ? '<span class="bg-purple-950 text-purple-400 border border-purple-800 px-1.5 py-0.5 rounded text-[10px] font-semibold">[VIEW]</span>'
+          : '<span class="bg-sky-950 text-sky-400 border border-sky-800 px-1.5 py-0.5 rounded text-[10px] font-semibold">[COL]</span>';
+
+        const title = it.kind === 'COL'
+          ? `<span class="font-mono font-bold text-white">${escapeHtml(it.column)}</span> <span class="text-slate-400 font-mono text-[11px]">${escapeHtml(it.type)}</span>`
+          : `<span class="font-mono font-bold text-white">${escapeHtml(it.table)}</span>`;
+
+        const location = `<span class="text-slate-400 font-mono text-[11px]">${escapeHtml(it.database)}${it.kind === 'COL' ? '.' + escapeHtml(it.table) : ''}</span>`;
+
+        return `
+          <div id="schema-item-${idx}" onclick="selectSchemaSearchResult(${idx}, false)" class="px-3 py-2 flex items-center justify-between hover:bg-slate-800/80 rounded cursor-pointer transition ${isSelected ? 'bg-slate-800 border-l-2 border-app-accent' : ''}">
+            <div class="flex items-center space-x-2.5">
+              ${kindBadge}
+              <div>
+                <div class="flex items-center space-x-1.5">${title}</div>
+                <div class="text-[10px] text-slate-500">${location}</div>
+              </div>
+            </div>
+            <div class="flex items-center space-x-2">
+              <button onclick="event.stopPropagation(); selectSchemaSearchResult(${idx}, true)" class="text-slate-400 hover:text-sky-300 hover:bg-slate-700 px-2 py-1 rounded text-[11px] border border-slate-700 transition" title="Insert identifier into query editor">
+                Insert ↵
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      const activeEl = document.getElementById(`schema-item-${schemaSearchSelectedIndex}`);
+      if (activeEl) {
+        activeEl.scrollIntoView({ block: 'nearest' });
+      }
+    }
+
+    async function selectSchemaSearchResult(index, isInsert = false) {
+      if (index < 0 || index >= schemaSearchResults.length) return;
+      const item = schemaSearchResults[index];
+      closeSchemaSearch();
+
+      if (isInsert) {
+        // Insert identifier into active editor
+        let identifier = '';
+        if (item.kind === 'COL') {
+          identifier = `${item.database}.${item.table}.${item.column}`;
+        } else {
+          identifier = `${item.database}.${item.table}`;
+        }
+
+        if (cmEditor) {
+          cmEditor.replaceSelection(identifier);
+          cmEditor.focus();
+        } else {
+          const ta = document.getElementById('sql-editor-textarea');
+          if (ta) {
+            ta.value += identifier;
+          }
+        }
+        return;
+      }
+
+      // Open Table Viewer
+      if (!activeConnection) {
+        showNativeAlert('Please select or create a connection first.', 'No Connection');
+        return;
+      }
+
+      // If item is in another database, switch database first
+      const currentActiveDb = schemaCatalogCache?.database_name || activeConnection.database_name;
+      if (item.database && currentActiveDb && item.database.toLowerCase() !== currentActiveDb.toLowerCase()) {
+        try {
+          await apiFetch(`/api/session/${activeConnection.id}/select-db`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ database: item.database })
+          });
+          await loadSchemaTree(activeConnection.id, item.database);
+        } catch (e) {
+          console.warn('Auto switch db failed:', e);
+        }
+      }
+
+      openTableViewer(item.table);
     }
 
     // --- Query Execution & Safety Guard ---
     async function runActiveQuery(confirmed = false, challengeInput = '') {
       if (!activeConnection) {
-        alert('Please select or create a connection first.');
+        showNativeAlert('Please select or create a connection first.', 'No Connection');
         return;
       }
 
@@ -1379,6 +4009,7 @@
 
       setQueryRunning(true);
 
+      const currentDb = schemaCatalogCache?.database_name || activeConnection.database_name || '';
       try {
         const res = await apiFetch(`/api/session/${activeConnection.id}/execute`, {
           method: 'POST',
@@ -1386,7 +4017,8 @@
           body: JSON.stringify({
             sql: sql,
             confirmed: confirmed,
-            challenge_input: challengeInput
+            challenge_input: challengeInput,
+            database: currentDb
           })
         });
 
@@ -1414,7 +4046,7 @@
         } else {
           document.getElementById('grid-result-stats').textContent = `${data.message} (${data.execution_ms}ms)`;
           if (data.backup_file) {
-            alert(`Query succeeded!\nAutomated Backup Snapshot created at:\n${data.backup_file}`);
+            showNativeAlert(`Query succeeded!\nAutomated Backup Snapshot created at:\n${data.backup_file}`, 'Safety Guard Backup');
           }
           await refreshSchema();
         }
@@ -1464,27 +4096,93 @@
     }
 
     async function inspectActiveQuery() {
-      if (!activeConnection) return;
+      if (!activeConnection) {
+        showNativeAlert('Please select or connect to a database first.', 'Safety Check');
+        return;
+      }
       const sql = getEditorSQL().trim();
-      const res = await apiFetch(`/api/session/${activeConnection.id}/inspect`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sql })
-      });
-      const data = await res.json();
-      alert(`Safety Inspection:\nRisk: ${data.risk_level}\nDestructive: ${data.is_destructive}\nRequires Challenge: ${data.requires_challenge}\nReason: ${data.reason || 'Safe to execute'}`);
+      if (!sql) {
+        showNativeAlert('Query editor is empty. Enter SQL to inspect.', 'Safety Check');
+        return;
+      }
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/inspect`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sql })
+        });
+        const data = await res.json();
+        openSafetyInspectionModal(data, sql);
+      } catch (err) {
+        showNativeAlert('Safety inspection failed: ' + err.message, 'Safety Check Error');
+      }
+    }
+
+    function openSafetyInspectionModal(data, sql) {
+      const dlg = document.getElementById('safety-inspection-dialog');
+      if (!dlg) return;
+
+      const riskBadge = document.getElementById('inspect-risk-badge');
+      const risk = (data.risk_level || 'LOW').toUpperCase();
+      riskBadge.textContent = risk;
+      if (risk === 'HIGH') {
+        riskBadge.className = 'px-2.5 py-0.5 rounded font-mono font-bold text-xs bg-red-900/60 text-red-300 border border-red-700';
+      } else if (risk === 'MEDIUM') {
+        riskBadge.className = 'px-2.5 py-0.5 rounded font-mono font-bold text-xs bg-amber-900/60 text-amber-300 border border-amber-700';
+      } else {
+        riskBadge.className = 'px-2.5 py-0.5 rounded font-mono font-bold text-xs bg-emerald-900/60 text-emerald-300 border border-emerald-700';
+      }
+
+      const destrEl = document.getElementById('inspect-destructive-text');
+      if (data.is_destructive) {
+        destrEl.innerHTML = '<span class="text-red-400 font-semibold">⚠️ Yes (Alters schema or mass rows)</span>';
+      } else {
+        destrEl.innerHTML = '<span class="text-emerald-400 font-semibold">✅ No (Safe read-only operation)</span>';
+      }
+
+      const challEl = document.getElementById('inspect-challenge-text');
+      if (data.requires_challenge) {
+        challEl.innerHTML = `<span class="text-amber-400 font-semibold">⚠️ Required (${escapeHtml(data.target_table || 'N/A')})</span>`;
+      } else {
+        challEl.innerHTML = '<span class="text-slate-400">Not required</span>';
+      }
+
+      const reasonBox = document.getElementById('inspect-reason-box');
+      reasonBox.textContent = data.reason || (data.is_destructive ? 'Destructive query intercepted by Safety Guard.' : 'Deterministic AST evaluation: Statement is safe to execute.');
+
+      const sqlBox = document.getElementById('inspect-sql-preview');
+      if (sqlBox) sqlBox.textContent = sql;
+
+      if (typeof dlg.showModal === 'function') dlg.showModal();
+      else dlg.setAttribute('open', '');
     }
 
     async function explainActiveQuery() {
-      if (!activeConnection) return;
+      if (!activeConnection) {
+        showNativeAlert('Please select or create a connection first.', 'No Connection');
+        return;
+      }
       const sql = getEditorSQL().trim();
-      const res = await apiFetch(`/api/session/${activeConnection.id}/explain`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sql })
-      });
-      const data = await res.json();
-      openImpactModal(data);
+      if (!sql) {
+        showNativeAlert('Please enter or select a SQL query in the editor to explain.', 'Empty Query');
+        return;
+      }
+      const currentDb = schemaCatalogCache?.database_name || activeConnection.database_name || '';
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/explain`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sql, database: currentDb })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          showNativeAlert(data.error || 'Failed to explain query plan', 'Explain Error');
+          return;
+        }
+        openImpactModal(data, sql);
+      } catch (err) {
+        showNativeAlert('Explain request failed: ' + err.message, 'Network Error');
+      }
     }
 
     function setQueryRunning(isRunning) {
@@ -1530,7 +4228,7 @@
     function confirmSafetyChallenge() {
       const typed = document.getElementById('challenge-input').value.trim();
       if (typed !== pendingDestructiveResult.target_table) {
-        alert(`Verification failed! You typed '${typed}', but expected '${pendingDestructiveResult.target_table}'.`);
+        showNativeAlert(`Verification failed! You typed '${typed}', but expected '${pendingDestructiveResult.target_table}'.`, 'Safety Challenge');
         return;
       }
       closeSafetyModal();
@@ -1538,8 +4236,92 @@
     }
 
     // --- Impact Preview Modal ---
-    function openImpactModal(planData) {
-      document.getElementById('impact-raw-plan').textContent = JSON.stringify(planData, null, 2);
+    function switchImpactTab(tab) {
+      const tableBtn = document.getElementById('impact-tab-table-btn');
+      const rawBtn = document.getElementById('impact-tab-raw-btn');
+      const tableView = document.getElementById('impact-table-view');
+      const rawView = document.getElementById('impact-raw-view');
+      if (!tableBtn || !rawBtn || !tableView || !rawView) return;
+
+      if (tab === 'table') {
+        tableBtn.className = 'px-2.5 py-0.5 rounded font-semibold bg-sky-950 text-sky-400';
+        rawBtn.className = 'px-2.5 py-0.5 rounded text-slate-400 hover:text-white';
+        tableView.classList.remove('hidden');
+        rawView.classList.add('hidden');
+      } else {
+        rawBtn.className = 'px-2.5 py-0.5 rounded font-semibold bg-sky-950 text-sky-400';
+        tableBtn.className = 'px-2.5 py-0.5 rounded text-slate-400 hover:text-white';
+        rawView.classList.remove('hidden');
+        tableView.classList.add('hidden');
+      }
+    }
+
+    function openImpactModal(planData, sql) {
+      const snippetEl = document.getElementById('impact-query-snippet');
+      if (snippetEl) snippetEl.textContent = sql || '';
+
+      const rawPlanEl = document.getElementById('impact-raw-plan');
+      if (rawPlanEl) rawPlanEl.textContent = JSON.stringify(planData, null, 2);
+
+      const tbody = document.getElementById('impact-plan-tbody');
+      const emptyState = document.getElementById('impact-empty-state');
+      const summaryBadge = document.getElementById('impact-summary-badge');
+      if (tbody) tbody.innerHTML = '';
+
+      const rows = planData && Array.isArray(planData.rows) ? planData.rows : [];
+      if (rows.length === 0) {
+        if (emptyState) emptyState.classList.remove('hidden');
+        if (summaryBadge) summaryBadge.textContent = '0 execution steps returned';
+      } else {
+        if (emptyState) emptyState.classList.add('hidden');
+        let hasFullTableScan = false;
+        let totalRows = 0;
+
+        rows.forEach((r, idx) => {
+          totalRows += (r.rows || 0);
+          const tr = document.createElement('tr');
+          tr.className = 'hover:bg-slate-800/50 transition border-b border-slate-800/60';
+
+          // Access Type badge styling
+          let typeBadge = `<span class="text-slate-400">${escapeHtml(r.type || '-')}</span>`;
+          const upperType = (r.type || '').toUpperCase();
+          if (upperType === 'ALL') {
+            hasFullTableScan = true;
+            typeBadge = `<span class="bg-red-950 text-red-400 border border-red-800 px-1.5 py-0.5 rounded text-[10px] font-bold">ALL (Full Scan)</span>`;
+          } else if (upperType === 'INDEX') {
+            typeBadge = `<span class="bg-amber-950 text-amber-400 border border-amber-800 px-1.5 py-0.5 rounded text-[10px] font-semibold">index</span>`;
+          } else if (['RANGE', 'REF', 'EQ_REF', 'CONST', 'SYSTEM'].includes(upperType)) {
+            typeBadge = `<span class="bg-emerald-950 text-emerald-400 border border-emerald-800 px-1.5 py-0.5 rounded text-[10px] font-semibold">${escapeHtml(r.type)}</span>`;
+          } else if (upperType.includes('SCAN') || upperType.includes('SEARCH')) {
+            typeBadge = `<span class="bg-sky-950 text-sky-400 border border-sky-800 px-1.5 py-0.5 rounded text-[10px]">${escapeHtml(r.type)}</span>`;
+          }
+
+          const filteredText = typeof r.filtered === 'number' && r.filtered > 0 ? `${r.filtered.toFixed(1)}%` : '-';
+          const keyText = r.key ? `<span class="text-sky-300 font-semibold">${escapeHtml(r.key)}</span>` : '<span class="text-slate-600">NULL</span>';
+
+          tr.innerHTML = `
+            <td class="p-2 text-center text-slate-500">${r.id || (idx + 1)}</td>
+            <td class="p-2 text-slate-300">${escapeHtml(r.select_type || '-')}</td>
+            <td class="p-2 font-bold text-white">${escapeHtml(r.table || '-')}</td>
+            <td class="p-2">${typeBadge}</td>
+            <td class="p-2">${keyText}</td>
+            <td class="p-2 text-right text-slate-200">${(r.rows || 0).toLocaleString()}</td>
+            <td class="p-2 text-right text-slate-400">${filteredText}</td>
+            <td class="p-2 text-slate-400 truncate max-w-xs" title="${escapeHtml(r.extra || '')}">${escapeHtml(r.extra || '-')}</td>
+          `;
+          if (tbody) tbody.appendChild(tr);
+        });
+
+        if (summaryBadge) {
+          if (hasFullTableScan) {
+            summaryBadge.innerHTML = `<span class="text-app-danger font-semibold">⚠️ Full table scan detected!</span> Consider adding an index to avoid scanning full table.`;
+          } else {
+            summaryBadge.innerHTML = `<span class="text-app-safe font-semibold">✓ ${rows.length} execution step${rows.length > 1 ? 's' : ''} planned</span> (~${totalRows.toLocaleString()} rows estimated)`;
+          }
+        }
+      }
+
+      switchImpactTab('table');
       document.getElementById('impact-preview-modal').classList.remove('hidden');
     }
 
@@ -1601,7 +4383,7 @@
 
     function startInlineEdit(td, rIdx, cIdx, pkCol, tableName) {
       if (activeSession && activeSession.read_only) {
-        alert('Session is in READ-ONLY mode. Unlock first.');
+        showNativeAlert('Session is in READ-ONLY mode. Unlock first.', 'Read-Only Mode');
         return;
       }
 
@@ -1802,7 +4584,7 @@
 
     function copySQLToClipboard(sql) {
       navigator.clipboard.writeText(sql);
-      alert('📋 SQL copied to clipboard!');
+      showNativeAlert('📋 SQL copied to clipboard!', 'Clipboard');
     }
 
     function saveToInternalNotes(title, content) {
@@ -1828,7 +4610,7 @@
       }
 
       switchTab(notesTab.id);
-      alert('📝 Note saved to Notes.md!');
+      showNativeAlert('📝 Note saved to Notes.md!', 'Notes');
     }
 
     // --- Chat Session & History Management ---
@@ -1952,8 +4734,8 @@
       updateChatHistoryCount();
     }
 
-    function clearAllAIHistory() {
-      if (!confirm('Clear all AI chat history?')) return;
+    async function clearAllAIHistory() {
+      if (!await showNativeConfirm('Clear all AI chat history?', 'Clear Chat History')) return;
       chatSessions = [];
       localStorage.removeItem('sqlfox_ai_sessions');
       startNewAIChat();
@@ -2051,7 +4833,7 @@
       localStorage.setItem('sqlfox_ai_config', JSON.stringify(aiConfig));
       updateAIProviderBadge();
       closeAISettingsModal();
-      alert('✅ AI Copilot settings saved! Using ' + aiConfig.provider + (aiConfig.endpoint ? ' (' + aiConfig.endpoint + ')' : ''));
+      showNativeAlert('✅ AI Copilot settings saved! Using ' + aiConfig.provider + (aiConfig.endpoint ? ' (' + aiConfig.endpoint + ')' : ''), 'AI Settings');
     }
 
     async function testAISettings() {
@@ -2080,12 +4862,12 @@
         });
         const data = await res.json();
         if (res.ok && !data.error) {
-          alert('✅ AI Proxy connected successfully!\nResponse: ' + data.content);
+          showNativeAlert('✅ AI Proxy connected successfully!\nResponse: ' + data.content, 'AI Proxy Test');
         } else {
-          alert('❌ AI Proxy test failed: ' + (data.error || res.statusText));
+          showNativeAlert('❌ AI Proxy test failed: ' + (data.error || res.statusText), 'AI Proxy Test');
         }
       } catch (err) {
-        alert('❌ AI Proxy test error: ' + err.message);
+        showNativeAlert('❌ AI Proxy test error: ' + err.message, 'AI Proxy Test');
       } finally {
         if (btn) btn.textContent = origText;
       }
@@ -2137,7 +4919,7 @@
       if (e) e.stopPropagation();
       const conn = connections.find(c => c.id === connId);
       const name = conn ? conn.name : connId;
-      if (!confirm(`Are you sure you want to delete connection "${name}"?`)) {
+      if (!await showNativeConfirm(`Are you sure you want to delete connection "${name}"?`, 'Delete Connection')) {
         return;
       }
       try {
@@ -2153,10 +4935,10 @@
           await loadConnections();
         } else {
           const data = await res.json();
-          alert('Failed to delete connection: ' + (data.error || res.statusText));
+          showNativeAlert('Failed to delete connection: ' + (data.error || res.statusText), 'Delete Connection');
         }
       } catch (err) {
-        alert('Failed to delete connection: ' + err.message);
+        showNativeAlert('Failed to delete connection: ' + err.message, 'Delete Connection');
       }
     }
 
@@ -2164,7 +4946,7 @@
       const driver = document.getElementById('modal-conn-driver').value;
       const host = document.getElementById('modal-conn-host').value.trim();
       if (!host) {
-        alert('Host / SQLite File Path is required to test connection');
+        showNativeAlert('Host / SQLite File Path is required to test connection', 'Test Connection');
         return;
       }
       let dbName = document.getElementById('modal-conn-db').value.trim();
@@ -2194,12 +4976,12 @@
         });
         const data = await res.json();
         if (res.ok && data.success) {
-          alert(`✅ Connection successful! Latency: ${data.latency_ms}ms`);
+          showNativeAlert(`✅ Connection successful! Latency: ${data.latency_ms}ms`, 'Connection Test');
         } else {
-          alert(`❌ Connection failed: ${data.error || res.statusText || 'Unable to connect'}`);
+          showNativeAlert(`❌ Connection failed: ${data.error || res.statusText || 'Unable to connect'}`, 'Connection Test');
         }
       } catch (err) {
-        alert(`❌ Connection failed: ${err.message}`);
+        showNativeAlert(`❌ Connection failed: ${err.message}`, 'Connection Test');
       } finally {
         if (btn) btn.textContent = origText;
       }
@@ -2218,18 +5000,17 @@
       }
     }
 
-    async function saveConnection(e) {
+    async function saveConnectionFromModal(e) {
       e.preventDefault();
-      const connId = document.getElementById('modal-conn-id').value;
+      const id = document.getElementById('modal-conn-id').value;
       const driver = document.getElementById('modal-conn-driver').value;
-      const host = document.getElementById('modal-conn-host').value.trim();
+      let host = document.getElementById('modal-conn-host').value.trim();
       let dbName = document.getElementById('modal-conn-db').value.trim();
       if (driver === 'sqlite' && !dbName) {
         dbName = host;
       }
-
       const conn = {
-        id: connId || undefined,
+        id: id || undefined,
         name: document.getElementById('modal-conn-name').value.trim(),
         environment: document.getElementById('modal-conn-env').value,
         driver: driver,
@@ -2251,10 +5032,10 @@
           await loadConnections();
         } else {
           const data = await res.json();
-          alert('Failed to save connection: ' + (data.error || res.statusText));
+          showNativeAlert('Failed to save connection: ' + (data.error || res.statusText), 'Save Connection');
         }
       } catch (err) {
-        alert('Failed to save connection: ' + err.message);
+        showNativeAlert('Failed to save connection: ' + err.message, 'Save Connection');
       }
     }
 
@@ -2272,7 +5053,7 @@
     function copyDDLToClipboard() {
       const text = document.getElementById('ddl-modal-content').textContent;
       navigator.clipboard.writeText(text);
-      alert('Copied to clipboard!');
+      showNativeAlert('Copied to clipboard!', 'Clipboard');
     }
     function insertDDLToEditor() {
       const text = document.getElementById('ddl-modal-content').textContent;
@@ -2290,7 +5071,7 @@
 
     async function doExportVault() {
       const pass = document.getElementById('export-passphrase').value;
-      if (!pass) return alert('Passphrase is required');
+      if (!pass) return showNativeAlert('Passphrase is required', 'Vault Export');
       const res = await apiFetch('/api/vault/export', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2307,7 +5088,7 @@
     async function doImportVault() {
       const fileInput = document.getElementById('import-file');
       const pass = document.getElementById('import-passphrase').value;
-      if (!fileInput.files[0] || !pass) return alert('File and passphrase required');
+      if (!fileInput.files[0] || !pass) return showNativeAlert('File and passphrase required', 'Vault Import');
 
       const text = await fileInput.files[0].text();
       const res = await apiFetch('/api/vault/import', {
@@ -2316,14 +5097,14 @@
         body: JSON.stringify({ export_passphrase: pass, archive: JSON.parse(text) })
       });
       const data = await res.json();
-      alert(data.message || 'Imported ' + data.imported_count + ' connections');
+      showNativeAlert(data.message || 'Imported ' + data.imported_count + ' connections', 'Vault Import');
       closeVaultModal();
       await loadConnections();
     }
 
     // --- Export Grid Results ---
     function exportCSV() {
-      if (currentResults.length === 0) return alert('No results to export');
+      if (currentResults.length === 0) return showNativeAlert('No results to export', 'Export CSV');
       const header = currentColumns.map(c => `"${c.name}"`).join(',');
       const rows = currentResults.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
       const csv = [header, ...rows].join('\n');
@@ -2331,7 +5112,7 @@
     }
 
     function exportJSON() {
-      if (currentResults.length === 0) return alert('No results to export');
+      if (currentResults.length === 0) return showNativeAlert('No results to export', 'Export JSON');
       const json = JSON.stringify(currentResults, null, 2);
       downloadFile(json, 'query-results.json', 'application/json');
     }
@@ -2346,11 +5127,55 @@
 
     // --- Keyboard Shortcuts ---
     function setupKeyboardShortcuts() {
+      const searchInput = document.getElementById('schema-search-input');
+      if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+          schemaSearchSelectedIndex = 0;
+          renderSchemaSearchResults(e.target.value);
+        });
+
+        searchInput.addEventListener('keydown', (e) => {
+          if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (schemaSearchResults.length > 0) {
+              schemaSearchSelectedIndex = (schemaSearchSelectedIndex + 1) % schemaSearchResults.length;
+              renderSchemaSearchResults(searchInput.value);
+            }
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (schemaSearchResults.length > 0) {
+              schemaSearchSelectedIndex = (schemaSearchSelectedIndex - 1 + schemaSearchResults.length) % schemaSearchResults.length;
+              renderSchemaSearchResults(searchInput.value);
+            }
+          } else if (e.key === 'Enter') {
+            e.preventDefault();
+            selectSchemaSearchResult(schemaSearchSelectedIndex, e.shiftKey);
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            closeSchemaSearch();
+          }
+        });
+      }
+
+      const schemaFilterEl = document.getElementById('schema-filter-input');
+      if (schemaFilterEl) {
+        schemaFilterEl.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') {
+            e.stopPropagation();
+            clearSchemaFilter();
+            schemaFilterEl.blur();
+          }
+        });
+      }
+
       window.addEventListener('keydown', (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
           e.preventDefault();
           if (e.shiftKey) explainActiveQuery();
           else runActiveQuery();
+        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
+          e.preventDefault();
+          toggleSchemaSearch();
         } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
           e.preventDefault();
           toggleCommandPalette();
@@ -2366,6 +5191,13 @@
         } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'w') {
           e.preventDefault();
           closeTab(activeTabId);
+        } else if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName) && !document.activeElement?.closest('.CodeMirror')) {
+          e.preventDefault();
+          const sFilter = document.getElementById('schema-filter-input');
+          if (sFilter) {
+            sFilter.focus();
+            sFilter.select();
+          }
         } else if (e.key === 'Escape') {
           closeSafetyModal();
           closeImpactModal();
@@ -2373,6 +5205,7 @@
           closeDDLModal();
           closeVaultModal();
           closeCommandPalette();
+          closeSchemaSearch();
           closeAISettingsModal();
         }
       });
@@ -2399,6 +5232,8 @@
 
     function renderPaletteActions(filter) {
       const actions = [
+        { name: 'Schema Search (Quick Open Table/Column)', shortcut: 'Ctrl+P', run: () => toggleSchemaSearch() },
+        { name: 'Create Database', shortcut: '', run: () => openCreateDatabaseModal() },
         { name: 'Run Query', shortcut: 'Ctrl+Enter', run: () => runActiveQuery() },
         { name: 'Explain Query Plan', shortcut: 'Ctrl+Shift+Enter', run: () => explainActiveQuery() },
         { name: 'New Query Tab', shortcut: 'Ctrl+T', run: () => addNewQueryTab() },
@@ -2424,7 +5259,9 @@
 
     function executePaletteAction(name) {
       closeCommandPalette();
-      if (name === 'Run Query') runActiveQuery();
+      if (name.startsWith('Schema Search')) toggleSchemaSearch();
+      else if (name === 'Create Database') openCreateDatabaseModal();
+      else if (name === 'Run Query') runActiveQuery();
       else if (name === 'Explain Query Plan') explainActiveQuery();
       else if (name === 'New Query Tab') addNewQueryTab();
       else if (name === 'New Connection') openNewConnModal();

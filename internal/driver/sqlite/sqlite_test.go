@@ -49,6 +49,8 @@ func TestSQLiteDriver_Lifecycle(t *testing.T) {
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);
 	CREATE INDEX idx_users_name ON users(name);
+	CREATE VIEW v_active_users AS SELECT id, email FROM users;
+	CREATE TRIGGER trg_user_insert AFTER INSERT ON users BEGIN SELECT 1; END;
 	`
 	_, err = sess.Exec(ctx, createSQL)
 	if err != nil {
@@ -61,8 +63,25 @@ func TestSQLiteDriver_Lifecycle(t *testing.T) {
 		t.Fatalf("InspectSchema failed: %v", err)
 	}
 
-	if len(schema.Tables) != 1 {
-		t.Fatalf("expected 1 table, got %d", len(schema.Tables))
+	if len(schema.Tables) < 2 {
+		t.Fatalf("expected at least 2 tables/views, got %d", len(schema.Tables))
+	}
+
+	var foundView bool
+	for _, tEntry := range schema.Tables {
+		if tEntry.Name == "v_active_users" && tEntry.Type == "VIEW" {
+			foundView = true
+		}
+	}
+	if !foundView {
+		t.Fatal("expected view v_active_users to be found in schema tables")
+	}
+
+	if len(schema.Triggers) == 0 {
+		t.Fatal("expected trg_user_insert trigger to be inspected")
+	}
+	if schema.Triggers[0].Name != "trg_user_insert" || schema.Triggers[0].Table != "users" {
+		t.Fatalf("unexpected trigger metadata: %+v", schema.Triggers[0])
 	}
 
 	tbl := schema.Tables[0]
