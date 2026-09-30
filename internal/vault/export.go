@@ -14,7 +14,14 @@ type VaultArchive struct {
 	Data    string `json:"data"` // Base64 encrypted JSON
 }
 
-// ExportVault packages all stored connections into an encrypted archive using the provided export passphrase.
+// ExportPayload encapsulates all vault artifacts exported into an archive.
+type ExportPayload struct {
+	Connections []*ConnectionRecord `json:"connections"`
+	Snippets    []*Snippet          `json:"snippets,omitempty"`
+	TableNotes  []*TableNote        `json:"table_notes,omitempty"`
+}
+
+// ExportVault packages all stored connections, snippets, and table notes into an encrypted archive using the provided export passphrase.
 func ExportVault(v *Vault, exportPassphrase string) ([]byte, error) {
 	if exportPassphrase == "" {
 		return nil, errors.New("export passphrase cannot be empty")
@@ -35,19 +42,37 @@ func ExportVault(v *Vault, exportPassphrase string) ([]byte, error) {
 		fullConnections = append(fullConnections, full)
 	}
 
-	plainJSON, err := json.Marshal(fullConnections)
+	// 2. Fetch all snippets
+	snippets, err := v.ListSnippets()
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal connections: %w", err)
+		return nil, err
 	}
 
-	// 2. Derive ephemeral export key
+	// 3. Fetch all table notes
+	tableNotes, err := v.ListAllTableNotes()
+	if err != nil {
+		return nil, err
+	}
+
+	payload := ExportPayload{
+		Connections: fullConnections,
+		Snippets:    snippets,
+		TableNotes:  tableNotes,
+	}
+
+	plainJSON, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal export payload: %w", err)
+	}
+
+	// 4. Derive ephemeral export key
 	salt, err := GenerateSalt()
 	if err != nil {
 		return nil, err
 	}
 	exportKey := DeriveKey(exportPassphrase, salt)
 
-	// 3. Encrypt payload
+	// 5. Encrypt payload
 	encryptedData, err := Encrypt(plainJSON, exportKey)
 	if err != nil {
 		return nil, err
@@ -62,7 +87,7 @@ func ExportVault(v *Vault, exportPassphrase string) ([]byte, error) {
 	return json.MarshalIndent(archive, "", "  ")
 }
 
-// ImportVault imports connections from an encrypted archive into the target vault.
+// ImportVault imports connections, snippets, and table notes from an encrypted archive into the target vault.
 func ImportVault(v *Vault, archiveJSON []byte, exportPassphrase string) (int, error) {
 	if exportPassphrase == "" {
 		return 0, errors.New("export passphrase cannot be empty")
@@ -84,6 +109,31 @@ func ImportVault(v *Vault, archiveJSON []byte, exportPassphrase string) (int, er
 		return 0, fmt.Errorf("archive decryption failed: %w", err)
 	}
 
+	var payload ExportPayload
+	if err := json.Unmarshal(plainJSON, &payload); err == nil && (len(payload.Connections) > 0 || len(payload.Snippets) > 0 || len(payload.TableNotes) > 0) {
+		// New structured envelope
+		count := 0
+		for _, conn := range payload.Connections {
+			if err := v.SaveConnection(conn); err != nil {
+				return count, fmt.Errorf("failed to import connection '%s': %w", conn.Name, err)
+			}
+			count++
+		}
+		for _, snip := range payload.Snippets {
+			if err := v.SaveSnippet(snip); err != nil {
+				return count, fmt.Errorf("failed to import snippet '%s': %w", snip.Title, err)
+			}
+		}
+		for _, note := range payload.TableNotes {
+			if err := v.SaveTableNote(note); err != nil {
+				return count, fmt.Errorf("failed to import table note for '%s': %w", note.TableName, err)
+			}
+		}
+		return count, nil
+	}
+
+
+	// Fallback to legacy raw connections list
 	var connections []*ConnectionRecord
 	if err := json.Unmarshal(plainJSON, &connections); err != nil {
 		return 0, fmt.Errorf("corrupted archive payload: %w", err)
@@ -99,3 +149,4 @@ func ImportVault(v *Vault, archiveJSON []byte, exportPassphrase string) (int, er
 
 	return count, nil
 }
+

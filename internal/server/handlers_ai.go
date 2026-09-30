@@ -3,7 +3,9 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"sqlfox/internal/ai"
@@ -52,6 +54,21 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 			}
 			firewall := ai.NewFirewall(req.MaskIdentifiers)
 			schemaPrompt = firewall.BuildSchemaPrompt(sess.CachedSchema, req.Query+" "+req.Prompt+" "+req.ErrorMessage)
+
+			// Table Notes Injection: check if any referenced tables in connection have table notes
+			notes, _ := s.vault.ListTableNotesForConnection(sess.ConnectionID)
+			if len(notes) > 0 {
+				queryAndPrompt := strings.ToLower(req.Query + " " + req.Prompt + " " + req.ErrorMessage)
+				var relevantNotes []string
+				for _, n := range notes {
+					if n.Content != "" && (queryAndPrompt == "  " || strings.Contains(queryAndPrompt, strings.ToLower(n.TableName))) {
+						relevantNotes = append(relevantNotes, fmt.Sprintf("Table `%s` Notes & Business Rules:\n%s", n.TableName, n.Content))
+					}
+				}
+				if len(relevantNotes) > 0 {
+					schemaPrompt += "\n\n=== RELEVANT TABLE NOTES & BUSINESS RULES ===\n" + strings.Join(relevantNotes, "\n\n")
+				}
+			}
 		}
 	}
 

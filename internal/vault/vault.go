@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
 	"errors"
@@ -10,16 +11,48 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
+
+// ponytail: RFC 4122 v4 UUID generator using stdlib crypto/rand; eliminates external uuid module.
+func newUUID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+}
 
 var (
 	ErrIncorrectMasterPassword = errors.New("incorrect master password")
 	ErrConnectionNotFound      = errors.New("connection not found")
+	ErrSnippetNotFound         = errors.New("snippet not found")
+	ErrTableNoteNotFound       = errors.New("table note not found")
 )
 
 const validationToken = "sqlfox_master_valid_token"
+
+// TableNote represents a local Markdown documentation record bound to a specific table.
+type TableNote struct {
+	ID           string    `json:"id"`
+	ConnectionID string    `json:"connection_id"`
+	DatabaseName string    `json:"database_name"`
+	TableName    string    `json:"table_name"`
+	Content      string    `json:"content"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// Snippet represents a reusable parameterized SQL template.
+type Snippet struct {
+	ID         string    `json:"id"`
+	Title      string    `json:"title"`
+	SQLContent string    `json:"sql_content"`
+	Tags       string    `json:"tags"` // e.g. "mysql", "sqlite", "general"
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+
 
 // ConnectionRecord represents a stored database connection configuration.
 type ConnectionRecord struct {
@@ -143,10 +176,89 @@ func initSchema(db *sql.DB) error {
 		created_at TIMESTAMP,
 		updated_at TIMESTAMP
 	);
+
+	CREATE TABLE IF NOT EXISTS snippets (
+		id TEXT PRIMARY KEY,
+		title TEXT NOT NULL,
+		sql_content TEXT NOT NULL,
+		tags TEXT DEFAULT '',
+		created_at TIMESTAMP,
+		updated_at TIMESTAMP
+	);
+
+	CREATE TABLE IF NOT EXISTS table_notes (
+		id TEXT PRIMARY KEY,
+		connection_id TEXT NOT NULL,
+		database_name TEXT NOT NULL,
+		table_name TEXT NOT NULL,
+		content TEXT NOT NULL,
+		updated_at TIMESTAMP,
+		UNIQUE(connection_id, database_name, table_name)
+	);
 	`
-	_, err := db.Exec(query)
-	return err
+	if _, err := db.Exec(query); err != nil {
+		return err
+	}
+	return seedDefaultSnippets(db)
 }
+
+func seedDefaultSnippets(db *sql.DB) error {
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM snippets").Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+
+	now := time.Now()
+	seeds := []Snippet{
+		{
+			ID:         newUUID(),
+			Title:      "Find Duplicate Rows",
+			SQLContent: "SELECT {{column_name:email}}, COUNT(*) AS duplicate_count\nFROM {{table_name:users}}\nGROUP BY {{column_name:email}}\nHAVING COUNT(*) > 1\nORDER BY duplicate_count DESC\nLIMIT {{limit:50}};",
+			Tags:       "general",
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		},
+		{
+			ID:         newUUID(),
+			Title:      "Table Row Counts & Sizes (MySQL)",
+			SQLContent: "SELECT table_name, table_rows, ROUND(data_length / 1024 / 1024, 2) AS data_mb, ROUND(index_length / 1024 / 1024, 2) AS index_mb\nFROM information_schema.tables\nWHERE table_schema = {{database_name:DATABASE()}}\nORDER BY data_length DESC\nLIMIT {{limit:20}};",
+			Tags:       "mysql",
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		},
+		{
+			ID:         newUUID(),
+			Title:      "Active Running Queries (MySQL)",
+			SQLContent: "SELECT id, user, host, db, command, time, state, info\nFROM information_schema.processlist\nWHERE command != 'Sleep'\nORDER BY time DESC;",
+			Tags:       "mysql",
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		},
+		{
+			ID:         newUUID(),
+			Title:      "Table Columns & Info (SQLite)",
+			SQLContent: "PRAGMA table_info({{table_name:users}});",
+			Tags:       "sqlite",
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		},
+	}
+
+	for _, s := range seeds {
+		_, err := db.Exec(`
+			INSERT INTO snippets (id, title, sql_content, tags, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`, s.ID, s.Title, s.SQLContent, s.Tags, s.CreatedAt, s.UpdatedAt)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 
 func getMeta(db *sql.DB) ([]byte, string, error) {
 	var saltB64, checkCipher string
@@ -208,7 +320,7 @@ func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 	defer v.mu.Unlock()
 
 	if conn.ID == "" {
-		conn.ID = uuid.NewString()
+		conn.ID = newUUID()
 		conn.CreatedAt = time.Now()
 	}
 	conn.UpdatedAt = time.Now()
@@ -443,3 +555,178 @@ func (v *Vault) decryptConnection(c *ConnectionRecord) error {
 	}
 	return nil
 }
+
+// ListSnippets returns all saved query snippets ordered by title.
+func (v *Vault) ListSnippets() ([]*Snippet, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	rows, err := v.db.Query(`
+		SELECT id, title, sql_content, tags, created_at, updated_at
+		FROM snippets
+		ORDER BY title ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query snippets: %w", err)
+	}
+	defer rows.Close()
+
+	var result []*Snippet
+	for rows.Next() {
+		var s Snippet
+		var tags sql.NullString
+		if err := rows.Scan(&s.ID, &s.Title, &s.SQLContent, &tags, &s.CreatedAt, &s.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan snippet: %w", err)
+		}
+		s.Tags = tags.String
+		result = append(result, &s)
+	}
+	return result, rows.Err()
+}
+
+// SaveSnippet inserts or updates a query snippet.
+func (v *Vault) SaveSnippet(s *Snippet) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	now := time.Now()
+	if s.ID == "" {
+		s.ID = newUUID()
+		s.CreatedAt = now
+	}
+	s.UpdatedAt = now
+
+	query := `
+	INSERT INTO snippets (id, title, sql_content, tags, created_at, updated_at)
+	VALUES (?, ?, ?, ?, ?, ?)
+	ON CONFLICT(id) DO UPDATE SET
+		title = excluded.title,
+		sql_content = excluded.sql_content,
+		tags = excluded.tags,
+		updated_at = excluded.updated_at
+	`
+	_, err := v.db.Exec(query, s.ID, s.Title, s.SQLContent, s.Tags, s.CreatedAt, s.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("failed to save snippet: %w", err)
+	}
+	return nil
+}
+
+// DeleteSnippet removes a snippet by ID.
+func (v *Vault) DeleteSnippet(id string) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	res, err := v.db.Exec("DELETE FROM snippets WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("failed to delete snippet: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrSnippetNotFound
+	}
+	return nil
+}
+
+// GetTableNote retrieves documentation notes for a specific table in a connection database.
+func (v *Vault) GetTableNote(connectionID, databaseName, tableName string) (*TableNote, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	row := v.db.QueryRow(`
+		SELECT id, connection_id, database_name, table_name, content, updated_at
+		FROM table_notes
+		WHERE connection_id = ? AND database_name = ? AND table_name = ?
+	`, connectionID, databaseName, tableName)
+
+	var note TableNote
+	if err := row.Scan(&note.ID, &note.ConnectionID, &note.DatabaseName, &note.TableName, &note.Content, &note.UpdatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrTableNoteNotFound
+		}
+		return nil, fmt.Errorf("failed to scan table note: %w", err)
+	}
+	return &note, nil
+}
+
+// SaveTableNote creates or updates a table's documentation notes.
+func (v *Vault) SaveTableNote(n *TableNote) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if n.ID == "" {
+		n.ID = newUUID()
+	}
+	n.UpdatedAt = time.Now()
+
+	query := `
+	INSERT INTO table_notes (id, connection_id, database_name, table_name, content, updated_at)
+	VALUES (?, ?, ?, ?, ?, ?)
+	ON CONFLICT(connection_id, database_name, table_name) DO UPDATE SET
+		content = excluded.content,
+		updated_at = excluded.updated_at
+	`
+	_, err := v.db.Exec(query, n.ID, n.ConnectionID, n.DatabaseName, n.TableName, n.Content, n.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("failed to save table note: %w", err)
+	}
+	return nil
+}
+
+// ListTableNotesForConnection returns all notes saved for a specific connection.
+func (v *Vault) ListTableNotesForConnection(connectionID string) ([]*TableNote, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	rows, err := v.db.Query(`
+		SELECT id, connection_id, database_name, table_name, content, updated_at
+		FROM table_notes
+		WHERE connection_id = ?
+		ORDER BY database_name, table_name
+	`, connectionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query table notes: %w", err)
+	}
+	defer rows.Close()
+
+	var result []*TableNote
+	for rows.Next() {
+		var n TableNote
+		if err := rows.Scan(&n.ID, &n.ConnectionID, &n.DatabaseName, &n.TableName, &n.Content, &n.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan table note: %w", err)
+		}
+		result = append(result, &n)
+	}
+	return result, rows.Err()
+}
+
+// ListAllTableNotes returns all table notes in the vault across all connections.
+func (v *Vault) ListAllTableNotes() ([]*TableNote, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	rows, err := v.db.Query(`
+		SELECT id, connection_id, database_name, table_name, content, updated_at
+		FROM table_notes
+		ORDER BY connection_id, database_name, table_name
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query all table notes: %w", err)
+	}
+	defer rows.Close()
+
+	var result []*TableNote
+	for rows.Next() {
+		var n TableNote
+		if err := rows.Scan(&n.ID, &n.ConnectionID, &n.DatabaseName, &n.TableName, &n.Content, &n.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan table note: %w", err)
+		}
+		result = append(result, &n)
+	}
+	return result, rows.Err()
+}
+
+

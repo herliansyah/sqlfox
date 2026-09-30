@@ -183,8 +183,37 @@ A searchable popover dropdown in the sidebar for filtering and switching the act
 _Avoid_: Raw select dropdown, static DB selector
 
 **Schema Object Filter**:
-A real-time, sticky client-side search input in the sidebar explorer for instantaneously filtering tables, views, and triggers by name with quick keyboard access (`/`).
+An real-time, sticky client-side search input in the sidebar explorer for instantaneously filtering tables, views, and triggers by name with quick keyboard access (`/`).
 _Avoid_: Tree grep, manual scroll search
 
+## Productivity & Knowledge Base
 
+**Query Snippet**:
+A reusable parameterized SQL template stored in the local Connection Vault, supporting dynamic substitution tokens and optional connection or engine scoping tags.
+_Avoid_: Saved query, SQL macro, code block
 
+**Dynamic Variable**:
+A substitution placeholder (e.g. `{{tenant_id}}`) within a Query Snippet resolved prior to editor injection via a parameter modal.
+_Avoid_: Query argument, template param, input token
+
+**Snippet Parameter Modal**:
+A native modal dialog prompting the user for Dynamic Variable values when invoking a Query Snippet, performing live substitution into the Query Editor.
+_Avoid_: Variable popup, param window, prompt box
+
+**Table Knowledge Note**:
+A local Markdown documentation record bound to a specific database table stored in the local Connection Vault without modifying the remote schema.
+_Avoid_: Server table comment, schema note, table wiki
+
+## Data Interchange & Portability
+
+**CSV Delimiter Sniffing**:
+An automated frequency-analysis check on initial CSV records to detect whether the file uses commas, semicolons, tabs, or pipe separators.
+_Avoid_: Auto-split, delimiter guesser
+
+**Column Mapping Matrix**:
+A visual pre-flight configuration interface mapping each CSV source column to an existing database table column with auto-matching and skip capabilities.
+_Avoid_: Column chooser, field selector
+
+**Excel-Safe CSV Export**:
+A CSV generation format that prepends a UTF-8 BOM and wraps leading-zero string identifiers in spreadsheet formulas (`="0812..."`) to prevent loss of leading digits or scientific notation coercion.
+_Avoid_: Excel patch, quote hack

@@ -16,7 +16,6 @@ import (
 	"sqlfox/internal/driver"
 
 	gomysql "github.com/go-sql-driver/mysql"
-	"github.com/google/uuid"
 )
 
 func init() {
@@ -46,7 +45,7 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 			return nil, fmt.Errorf("failed to establish SSH tunnel: %w", err)
 		}
 
-		networkName := "ssh-" + uuid.NewString()
+		networkName := fmt.Sprintf("ssh-%d", time.Now().UnixNano())
 		gomysql.RegisterDialContext(networkName, func(ctx context.Context, addr string) (net.Conn, error) {
 			return tunnel.DialContext(ctx, addr)
 		})
@@ -80,7 +79,7 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 			}
 		}
 
-		tlsName := "custom-tls-" + uuid.NewString()
+		tlsName := fmt.Sprintf("custom-tls-%d", time.Now().UnixNano())
 		if err := gomysql.RegisterTLSConfig(tlsName, tlsConfig); err == nil {
 			tlsParam = tlsName
 		} else {
@@ -191,9 +190,9 @@ func (s *MySQLSession) QueryStream(ctx context.Context, querySQL string, limit i
 	}, nil
 }
 
-func (s *MySQLSession) Exec(ctx context.Context, querySQL string) (*driver.ExecResult, error) {
+func (s *MySQLSession) Exec(ctx context.Context, querySQL string, args ...any) (*driver.ExecResult, error) {
 	start := time.Now()
-	res, err := s.db.ExecContext(ctx, querySQL)
+	res, err := s.db.ExecContext(ctx, querySQL, args...)
 	if err != nil {
 		return nil, err
 	}
