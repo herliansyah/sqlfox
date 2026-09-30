@@ -28,15 +28,19 @@ type InspectionResult struct {
 	Suggestion        string    `json:"suggestion,omitempty"`
 }
 
-// SafetyGuard inspects SQL statements deterministically before execution.
+// ponytail: Inspect is a pure deterministic package function; SafetyGuard struct is kept as lightweight alias.
 type SafetyGuard struct{}
 
 func NewSafetyGuard() *SafetyGuard {
 	return &SafetyGuard{}
 }
 
-// Inspect analyzes a query string against the target environment (Production, Staging, Development).
 func (g *SafetyGuard) Inspect(query string, environment string) *InspectionResult {
+	return Inspect(query, environment)
+}
+
+// Inspect analyzes a query string against the target environment (Production, Staging, Development).
+func Inspect(query string, environment string) *InspectionResult {
 	trimmed := strings.TrimSpace(query)
 	if trimmed == "" {
 		return &InspectionResult{RiskLevel: RiskNone}
@@ -45,14 +49,14 @@ func (g *SafetyGuard) Inspect(query string, environment string) *InspectionResul
 	// Try AST parsing first (Vitess parser)
 	stmt, err := sqlparser.Parse(trimmed)
 	if err == nil {
-		return g.inspectAST(stmt, environment)
+		return inspectAST(stmt, environment)
 	}
 
 	// ponytail: Lexical fallback for statements Vitess parser doesn't cover (e.g. multi-statements or SQLite specific syntax); upgrade path: dedicated SQLite lexer
-	return g.inspectLexicalFallback(trimmed, environment)
+	return inspectLexicalFallback(trimmed, environment)
 }
 
-func (g *SafetyGuard) inspectAST(stmt sqlparser.Statement, environment string) *InspectionResult {
+func inspectAST(stmt sqlparser.Statement, environment string) *InspectionResult {
 	isProd := strings.EqualFold(environment, "Production")
 
 	switch node := stmt.(type) {
@@ -150,7 +154,7 @@ var (
 	reWhere    = regexp.MustCompile(`(?i)\bWHERE\b`)
 )
 
-func (g *SafetyGuard) inspectLexicalFallback(query string, environment string) *InspectionResult {
+func inspectLexicalFallback(query string, environment string) *InspectionResult {
 	isProd := strings.EqualFold(environment, "Production")
 
 	if match := reDrop.FindStringSubmatch(query); len(match) > 3 {

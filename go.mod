@@ -3,9 +3,7 @@ module sqlfox
 go 1.26.0
 
 require (
-	github.com/go-chi/chi/v5 v5.3.2
 	github.com/go-sql-driver/mysql v1.10.1
-	github.com/gorilla/websocket v1.5.3
 	github.com/xwb1989/sqlparser v0.0.0-20180606152119-120387863bf2
 	golang.org/x/crypto v0.57.0
 	modernc.org/sqlite v1.58.0

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"io"
 	"strings"
 	"sync"
 	"time"
@@ -105,10 +104,7 @@ func (s *SQLiteSession) QueryStream(ctx context.Context, querySQL string, limit 
 		}
 	}
 
-	return &sqliteRowStream{
-		rows: rows,
-		cols: cols,
-	}, nil
+	return driver.NewSQLRowStream(rows, cols), nil
 }
 
 func (s *SQLiteSession) Exec(ctx context.Context, querySQL string, args ...any) (*driver.ExecResult, error) {
@@ -308,56 +304,6 @@ func (s *SQLiteSession) CancelQuery(ctx context.Context, queryID string) error {
 
 func (s *SQLiteSession) Close() error {
 	return s.db.Close()
-}
-
-type sqliteRowStream struct {
-	rows *sql.Rows
-	cols []driver.ColumnDefinition
-}
-
-func (r *sqliteRowStream) Columns() []driver.ColumnDefinition {
-	return r.cols
-}
-
-func (r *sqliteRowStream) NextChunk(batchSize int) ([][]any, error) {
-	var chunk [][]any
-	count := len(r.cols)
-
-	for len(chunk) < batchSize {
-		if !r.rows.Next() {
-			if len(chunk) > 0 {
-				return chunk, nil
-			}
-			return nil, io.EOF
-		}
-
-		rawValues := make([]any, count)
-		valuePtrs := make([]any, count)
-		for i := range rawValues {
-			valuePtrs[i] = &rawValues[i]
-		}
-
-		if err := r.rows.Scan(valuePtrs...); err != nil {
-			return nil, err
-		}
-
-		// Convert raw values for JSON safety (e.g. []byte to string)
-		row := make([]any, count)
-		for i, val := range rawValues {
-			if b, ok := val.([]byte); ok {
-				row[i] = string(b)
-			} else {
-				row[i] = val
-			}
-		}
-		chunk = append(chunk, row)
-	}
-
-	return chunk, nil
-}
-
-func (r *sqliteRowStream) Close() error {
-	return r.rows.Close()
 }
 
 func quoteIdentifier(id string) string {

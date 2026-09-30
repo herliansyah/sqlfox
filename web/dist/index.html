@@ -2789,7 +2789,7 @@
       });
 
       // Collect Snippets matching partial word
-      if (loadedSnippets && loadedSnippets.length > 0 && lowerPartial && lowerPartial.length >= 2) {
+      if (typeof loadedSnippets !== 'undefined' && loadedSnippets && loadedSnippets.length > 0 && lowerPartial && lowerPartial.length >= 2) {
         loadedSnippets.forEach(s => {
           const lowerTitle = (s.title || '').toLowerCase();
           const lowerTags = (s.tags || '').toLowerCase();
@@ -4504,7 +4504,8 @@
             sql: sql,
             confirmed: confirmed,
             challenge_input: challengeInput,
-            database: currentDb
+            database: currentDb,
+            query_id: 'active'
           })
         });
 
