@@ -229,3 +229,67 @@ _Avoid_: Excel patch, quote hack
 **CSV Ingestion Engine**:
 A streaming data import module that combines automated Delimiter Sniffing, Column Mapping Matrix resolution, parameter ceiling batching, and row-by-row fallback retries to populate target database tables from arbitrary CSV feeds.
 _Avoid_: CSV loader, import script, raw insert loop
+
+## Data Synchronization & Table Operations
+
+**Data Transfer**:
+A streaming bulk migration process that reads schema and rows directly from a source session and writes them to a target session across connections without temporary disk staging.
+_Avoid_: DB copier, dump-and-load pipe, table clone
+
+**Data Sync**:
+A row-level reconciliation mechanism that performs keyset comparisons between source and target tables, computes delta changes (`INSERT`, `UPDATE`, `DELETE`), and executes selective atomic updates.
+_Avoid_: Row matcher, table synchronizer, data merge
+
+**Structure Sync**:
+An AST-based DDL comparison engine that identifies structural discrepancies (missing tables, altered columns, missing indexes, foreign key drift) between two schemas and generates idempotent migration scripts.
+_Avoid_: Schema diff tool, DDL merger, table reconciler
+
+**Table CRUD Operator**:
+A direct spreadsheet-like interaction model within the Virtual Data Grid allowing users to stage new row insertions, delete selected rows under Safety Guard validation, and apply quick visual column filters without raw SQL.
+_Avoid_: Edit grid, table viewer, row manager
+
+**SQL Dump Runner**:
+A memory-bounded streaming executor and generator for `.sql` files that breaks multi-statement scripts into transactional chunks without loading entire multi-gigabyte files into memory.
+_Avoid_: SQL runner, dump importer, script player
+
+## DBA Operations & Diagnostics Suite
+
+**Processlist Manager**:
+An interactive real-time database thread and connection monitor featuring slow-query threshold alerts and one-click out-of-band query or session termination (`KILL QUERY` / `KILL CONNECTION`).
+_Avoid_: Process monitor, task list, thread viewer
+
+**Table Diagnostics**:
+A physical storage inspection module providing exact data length, index length, and fragmentation overhead statistics alongside one-click table maintenance actions (`OPTIMIZE TABLE`, `ANALYZE TABLE`, `CHECK TABLE`).
+_Avoid_: Table health, storage checker, disk tool
+
+**Privilege Matrix**:
+A visual user management and access control interface allowing DBAs to provision accounts, restrict host origins, and configure granular permissions across global, database, and table scopes via an interactive grid.
+_Avoid_: User editor, permission manager, grant wizard
+
+**Foreign Key Hyperlink**:
+A navigational link embedded within data grid cells referencing foreign keys, enabling inline relational data peeking and direct traversal to parent table records without manual SQL queries.
+_Avoid_: FK jump, relational link, key preview
+
+**Execution Profiler**:
+A fine-grained query execution analysis tool visualizing sequential engine lifecycle stages (`System lock`, `optimizing`, `statistics`, `Sorting result`, `Copying to tmp table`) and stage durations via `SHOW PROFILE` or `performance_schema`.
+_Avoid_: Query timer, stage tracer, performance graph
+
+**Redundant Index Detector**:
+A static schema analysis check identifying duplicate, shadowed, or redundant prefix indexes that consume disk and memory bandwidth while degrading write throughput.
+_Avoid_: Index linter, key cleaner, duplicate checker
+
+**Session Audit Log**:
+A persistent session-level ledger tracking all executed SQL statements with timestamps, execution durations in milliseconds, affected/returned row counts, and error states.
+_Avoid_: History tab, query log, command list
+
+**Lock Dependency Tree**:
+An interactive hierarchical diagnostic view that maps blocked database sessions to their blocking transactions (utilizing `sys.innodb_lock_waits` / `performance_schema.data_lock_waits`), explicitly isolating the root blocker session, locked resource, lock mode, and root cause.
+_Avoid_: Lock viewer, block list, wait graph
+
+**Referential Slice Exporter**:
+A zero-configuration, schema-wide database dumper that exports complete DDL structure alongside bounded row samples (e.g., 20 rows per table) without requiring manual table tagging; automatically scans the entire Foreign Key dependency graph and recursively fetches all upstream referenced parent rows (transitive closure), writing inserts in topological order to guarantee referentially integral, zero-error SQL restore files.
+_Avoid_: Partial dump, table sampler, mini export
+
+
+
+
