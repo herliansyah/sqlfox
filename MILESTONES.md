@@ -139,6 +139,7 @@ v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
 │   ├── [ ] 2. Comprehensive Import & Export Tooling
 │   │   ├── Streaming SQL Dump Export (DDL + chunked multi-insert statements)
 │   │   ├── Large SQL Script Runner with progress tracking and transaction boundary control
+│   │   ├── FK-Aware Smart Seed Dump (Referential Slice Exporter with recursive master table closure)
 │   │   └── Clipboard TSV / Markdown table export for quick team sharing
 │   ├── [ ] 3. Structure Sync (Schema Diff & Migration Generator)
 │   │   ├── Side-by-side DDL comparison across two databases or connections
@@ -156,6 +157,7 @@ v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
 │   ├── [ ] 6. Interactive Processlist & Slow Query Killer
 │   │   ├── Real-time thread monitor with auto-refresh (1s/3s) and status highlighting
 │   │   ├── Slow query filter threshold (> N seconds)
+│   │   ├── Lock Dependency Tree (Root Blocker analysis from sys/performance_schema lock waits)
 │   │   └── Out-of-band "Kill Query" and "Kill Connection" buttons
 │   ├── [ ] 7. Table Diagnostics & Storage Overhead (Physical Size & Optimization)
 │   │   ├── Real-time disk usage breakdown (Data Length, Index Length, Overhead/Fragmentation)
@@ -186,28 +188,29 @@ v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
 ## 3. Detailed v2.0 Incremental Milestone Specifications
 
 ### Milestone 9: Simple CRUD Table Suite & SQL Dump Tooling
-- **Goal**: Transform the Virtual Data Grid into an effortless spreadsheet-like data editor and provide robust streaming SQL dump export/import.
+- **Goal**: Transform the Virtual Data Grid into an effortless spreadsheet-like data editor and provide robust streaming SQL dump export/import alongside referential slice seeding.
 - **Deliverables**:
   - **Inline Add Row**: Toolbar `+ Add Row` button displaying an editable draft row at the top/bottom of the grid; commits via generated `INSERT` with Type Guard validation.
   - **Multi-Row Deletion**: Row checkboxes with multi-selection and `Delete Selected` action routed through the Safety Guard challenge.
   - **Column Filter Toolbar**: Quick filter input below every column header in the grid for rapid instant filtering without writing SQL.
   - **Streaming SQL Dump Export**: Backend pipeline generating standard `.sql` dumps containing `CREATE TABLE` and chunked `INSERT INTO` statements.
+  - **Referential Slice Exporter (FK-Aware Smart Seed Dump)**: Export complete database structure + bounded transaction rows (e.g. 20 rows per table), while recursively discovering and exporting all referenced master rows across Foreign Key relationships (transitive closure) to ensure the `.sql` file restores without FK violation errors.
   - **Large SQL Script Runner**: Streaming executor parsing and dispatching multi-megabyte `.sql` scripts with progress tracking without memory exhaustion.
   - **Clipboard Formats**: Context menu options to `Copy as TSV` (Excel-ready) and `Copy as Markdown Table`.
-- **Runnable Verification**: Open table in grid -> add a new row inline -> edit a cell -> filter by status -> select rows and delete -> export full table to `.sql` file -> run verification import script.
+- **Runnable Verification**: Open table in grid -> add a new row inline -> edit a cell -> filter by status -> select rows and delete -> export FK-aware seed dump (20 rows) for orders table -> restore to a clean database and verify all parent customer/product records are present without FK errors.
 
 ---
 
 ### Milestone 10: DBA Operations & Real-Time Processlist Manager
-- **Goal**: Equip DBAs with instant visibility into running server threads, slow queries, and single-click termination tools.
+- **Goal**: Equip DBAs with instant visibility into running server threads, slow queries, lock dependency trees, and single-click termination tools.
 - **Deliverables**:
   - **Processlist Manager UI**: Dedicated dashboard displaying active threads (`Id`, `User`, `Host`, `db`, `Command`, `Time`, `State`, `Info`).
   - **Auto-Refresh & Slow Threshold Filter**: Configurable refresh interval (1s/3s) and duration filter to spotlight long-running transactions.
+  - **Lock Dependency Tree & Root Blocker Analyzer**: Interactive tree identifying locked and blocking sessions using `sys.innodb_lock_waits` / `performance_schema.data_lock_waits`; visually flags the root culprit transaction holding locks and causing wait cascades.
   - **Out-of-Band Kill**: Dedicated control connection dispatching `KILL QUERY <id>` or `KILL <id>` without freezing the main UI.
   - **Session Audit Log**: Bottom panel recording every executed statement with duration in milliseconds, affected rows, and error states.
-- **Runnable Verification**: Start an artificial slow query (`SELECT SLEEP(10)`) -> open Processlist Manager -> observe query highlighted -> click "Kill Query" -> verify thread terminates immediately and is logged in Session Audit Log.
+- **Runnable Verification**: In session 1, execute `START TRANSACTION; UPDATE accounts SET balance = 100 WHERE id = 1;` without committing -> in session 2, execute `UPDATE accounts SET balance = 200 WHERE id = 1;` -> open Processlist Manager -> observe Lock Dependency Tree pointing to Session 1 as the Root Blocker -> click "Kill Connection" on Session 1 -> verify Session 2 immediately unblocks.
 
----
 
 ### Milestone 11: Schema & Data Synchronization Engine
 - **Goal**: Enable cross-connection schema comparison (Structure Sync) and direct streaming migration (Data Transfer & Data Sync).

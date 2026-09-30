@@ -282,4 +282,13 @@ _Avoid_: Index linter, key cleaner, duplicate checker
 A persistent session-level ledger tracking all executed SQL statements with timestamps, execution durations in milliseconds, affected/returned row counts, and error states.
 _Avoid_: History tab, query log, command list
 
+**Lock Dependency Tree**:
+An interactive hierarchical diagnostic view that maps blocked database sessions to their blocking transactions (utilizing `sys.innodb_lock_waits` / `performance_schema.data_lock_waits`), explicitly isolating the root blocker session, locked resource, lock mode, and root cause.
+_Avoid_: Lock viewer, block list, wait graph
+
+**Referential Slice Exporter**:
+A smart database dumper that exports complete schema DDL alongside bounded row samples (e.g., 20 transaction records) while recursively fetching upstream Foreign Key dependencies across master tables (transitive closure) to ensure referentially integral, zero-error SQL restore files.
+_Avoid_: Partial dump, table sampler, mini export
+
+
 
