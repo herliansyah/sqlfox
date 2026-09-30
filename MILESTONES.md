@@ -130,10 +130,102 @@ v1.1 (Productivity & Collaboration)
 └── [x] Robust CSV Import with Column Mapping & Excel-Safe Export (Zero-Dependency)
       │
       ▼
-v2.0 (Enterprise & Multi-Engine)
-├── PostgreSQL, ClickHouse & MongoDB Driver Extensions
-├── Visual ERD Interactive Canvas (Drag-and-drop layout)
-├── Cross-Database Schema Diff & Migration Generator
-├── Server Performance Dashboard (QPS, Buffer Pool, Replication Lag)
-└── Headless CLI Suite (`sqlfox query --format=json`) for CI/CD
+v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
+├── [A] Navicat Power Suite (Synchronization, Transfer & CRUD)
+│   ├── [ ] 1. Simple CRUD Table Suite (Spreadsheet Data Manipulation)
+│   │   ├── Inline "+ Add Row" draft insertion with type-aware validation
+│   │   ├── Multi-row deletion with Safety Guard challenge verification
+│   │   └── Instant visual column sorting and quick-filter toolbar without raw SQL
+│   ├── [ ] 2. Comprehensive Import & Export Tooling
+│   │   ├── Streaming SQL Dump Export (DDL + chunked multi-insert statements)
+│   │   ├── Large SQL Script Runner with progress tracking and transaction boundary control
+│   │   └── Clipboard TSV / Markdown table export for quick team sharing
+│   ├── [ ] 3. Structure Sync (Schema Diff & Migration Generator)
+│   │   ├── Side-by-side DDL comparison across two databases or connections
+│   │   ├── Color-coded diff breakdown (missing tables, column alterations, index drift)
+│   │   └── Safe DDL migration generator with rollback preview and DDL review modal
+│   ├── [ ] 4. Cross-Connection Data Transfer
+│   │   ├── Direct streaming transfer between source and target connections (e.g. Remote -> Local)
+│   │   ├── Table mapping matrix and schema recreation option (DROP/CREATE + INSERT)
+│   │   └── Memory-bounded chunked pipe (<50MB buffer) with live transfer progress
+│   └── [ ] 5. Data Sync (Row-Level Delta Synchronization)
+│       ├── Keyset / Primary Key comparison across source and target tables
+│       ├── Visual delta matrix (Identical, Insertions, Updates, Deletions)
+│       └── Selective delta script generator and atomic execution runner
+├── [B] SQLyog DBA Operations & Diagnostics Suite
+│   ├── [ ] 6. Interactive Processlist & Slow Query Killer
+│   │   ├── Real-time thread monitor with auto-refresh (1s/3s) and status highlighting
+│   │   ├── Slow query filter threshold (> N seconds)
+│   │   └── Out-of-band "Kill Query" and "Kill Connection" buttons
+│   ├── [ ] 7. Table Diagnostics & Storage Overhead (Physical Size & Optimization)
+│   │   ├── Real-time disk usage breakdown (Data Length, Index Length, Overhead/Fragmentation)
+│   │   └── One-click maintenance operations (OPTIMIZE TABLE, ANALYZE TABLE, CHECK TABLE)
+│   ├── [ ] 8. Visual User & Privilege Manager (Permission Matrix)
+│   │   ├── Account provisioning (User, Host %, Password, Resource Limits)
+│   │   └── Visual checkbox privilege matrix (Global, Database, and Table scopes)
+│   ├── [ ] 9. Foreign Key Hyperlink & Data Peeking
+│   │   ├── Clickable FK cells in Virtual Data Grid
+│   │   └── Hover/click popover previewing parent table record with 1-click jump
+│   ├── [ ] 10. Query Execution Profiler (SHOW PROFILE Stages)
+│   │   ├── Visual breakdown of execution phases (optimizing, lock, sorting, tmp table on disk)
+│   │   └── Microsecond stage timing chart
+│   ├── [ ] 11. Redundant / Duplicate Index Detector
+│   │   ├── Static schema analysis detecting shadowed or overlapping prefix indexes
+│   │   └── Safe cleanup recommendations
+│   └── [ ] 12. Full Execution History & Session Audit Log
+│       ├── Append-only chronological ledger of all queries executed in session
+│       └── Execution metrics (timestamp, duration in ms, rows affected, error status)
+└── [C] Enterprise Foundations & Multi-Engine Extensions
+    ├── [ ] 13. PostgreSQL & ClickHouse Driver Extensions
+    ├── [ ] 14. Visual ERD Interactive Canvas (Drag-and-drop relationship visualizer)
+    └── [ ] 15. Headless CLI Suite (`sqlfox query --format=json`, `sqlfox transfer`) for CI/CD
 ```
+
+---
+
+## 3. Detailed v2.0 Incremental Milestone Specifications
+
+### Milestone 9: Simple CRUD Table Suite & SQL Dump Tooling
+- **Goal**: Transform the Virtual Data Grid into an effortless spreadsheet-like data editor and provide robust streaming SQL dump export/import.
+- **Deliverables**:
+  - **Inline Add Row**: Toolbar `+ Add Row` button displaying an editable draft row at the top/bottom of the grid; commits via generated `INSERT` with Type Guard validation.
+  - **Multi-Row Deletion**: Row checkboxes with multi-selection and `Delete Selected` action routed through the Safety Guard challenge.
+  - **Column Filter Toolbar**: Quick filter input below every column header in the grid for rapid instant filtering without writing SQL.
+  - **Streaming SQL Dump Export**: Backend pipeline generating standard `.sql` dumps containing `CREATE TABLE` and chunked `INSERT INTO` statements.
+  - **Large SQL Script Runner**: Streaming executor parsing and dispatching multi-megabyte `.sql` scripts with progress tracking without memory exhaustion.
+  - **Clipboard Formats**: Context menu options to `Copy as TSV` (Excel-ready) and `Copy as Markdown Table`.
+- **Runnable Verification**: Open table in grid -> add a new row inline -> edit a cell -> filter by status -> select rows and delete -> export full table to `.sql` file -> run verification import script.
+
+---
+
+### Milestone 10: DBA Operations & Real-Time Processlist Manager
+- **Goal**: Equip DBAs with instant visibility into running server threads, slow queries, and single-click termination tools.
+- **Deliverables**:
+  - **Processlist Manager UI**: Dedicated dashboard displaying active threads (`Id`, `User`, `Host`, `db`, `Command`, `Time`, `State`, `Info`).
+  - **Auto-Refresh & Slow Threshold Filter**: Configurable refresh interval (1s/3s) and duration filter to spotlight long-running transactions.
+  - **Out-of-Band Kill**: Dedicated control connection dispatching `KILL QUERY <id>` or `KILL <id>` without freezing the main UI.
+  - **Session Audit Log**: Bottom panel recording every executed statement with duration in milliseconds, affected rows, and error states.
+- **Runnable Verification**: Start an artificial slow query (`SELECT SLEEP(10)`) -> open Processlist Manager -> observe query highlighted -> click "Kill Query" -> verify thread terminates immediately and is logged in Session Audit Log.
+
+---
+
+### Milestone 11: Schema & Data Synchronization Engine
+- **Goal**: Enable cross-connection schema comparison (Structure Sync) and direct streaming migration (Data Transfer & Data Sync).
+- **Deliverables**:
+  - **Structure Sync**: AST-based DDL comparison between source and target databases; side-by-side visual diff showing missing tables, column discrepancies, and index drift; auto-generated DDL migration script with DDL Review Modal.
+  - **Cross-Connection Data Transfer**: Direct memory-bounded pipe between two connection sessions (`SourceSession` -> `TargetSession`) transferring tables and data without temporary disk files.
+  - **Data Sync**: Row-level reconciliation using primary key scans; computes delta (`INSERT`, `UPDATE`, `DELETE`) with visual confirmation before atomic execution.
+- **Runnable Verification**: Compare two local databases with diverging schemas -> verify generated `ALTER TABLE` matches delta -> execute Data Transfer of 10,000 rows between connections -> verify target table row count matches source.
+
+---
+
+### Milestone 12: Advanced Diagnostics & Privilege Matrix
+- **Goal**: Provide in-depth storage inspection, query execution phase profiling, redundant index detection, and visual user permission management.
+- **Deliverables**:
+  - **Table Diagnostics**: Physical storage breakdown displaying exact Data Length, Index Length, and Overhead/Fragmentation; 1-click `OPTIMIZE TABLE`, `ANALYZE TABLE`, and `CHECK TABLE`.
+  - **Foreign Key Hyperlink & Data Peeking**: Automatic detection of foreign key columns in Virtual Data Grid; clickable cell with popover previewing parent table row and direct jump.
+  - **Execution Profiler**: Stage-by-stage timing breakdown (`SHOW PROFILE` / `performance_schema`) showing microsecond allocation across query execution phases.
+  - **Redundant Index Detector**: Static analysis of table index definitions flagging duplicate or shadowed prefix indexes with safe cleanup recommendations.
+  - **Visual Privilege Matrix**: User account provisioning with host pattern restrictions and an interactive checkbox permission matrix (Global, Database, and Table levels).
+- **Runnable Verification**: Inspect fragmented table -> click "Optimize Table" -> view reclaimed overhead; click FK cell in grid and verify parent row popover appears; view execution profile breakdown of a complex query.
+
