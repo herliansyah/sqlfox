@@ -287,8 +287,9 @@ An interactive hierarchical diagnostic view that maps blocked database sessions 
 _Avoid_: Lock viewer, block list, wait graph
 
 **Referential Slice Exporter**:
-A smart database dumper that exports complete schema DDL alongside bounded row samples (e.g., 20 transaction records) while recursively fetching upstream Foreign Key dependencies across master tables (transitive closure) to ensure referentially integral, zero-error SQL restore files.
+A zero-configuration, schema-wide database dumper that exports complete DDL structure alongside bounded row samples (e.g., 20 rows per table) without requiring manual table tagging; automatically scans the entire Foreign Key dependency graph and recursively fetches all upstream referenced parent rows (transitive closure), writing inserts in topological order to guarantee referentially integral, zero-error SQL restore files.
 _Avoid_: Partial dump, table sampler, mini export
+
 
 
 

@@ -194,10 +194,11 @@ v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
   - **Multi-Row Deletion**: Row checkboxes with multi-selection and `Delete Selected` action routed through the Safety Guard challenge.
   - **Column Filter Toolbar**: Quick filter input below every column header in the grid for rapid instant filtering without writing SQL.
   - **Streaming SQL Dump Export**: Backend pipeline generating standard `.sql` dumps containing `CREATE TABLE` and chunked `INSERT INTO` statements.
-  - **Referential Slice Exporter (FK-Aware Smart Seed Dump)**: Export complete database structure + bounded transaction rows (e.g. 20 rows per table), while recursively discovering and exporting all referenced master rows across Foreign Key relationships (transitive closure) to ensure the `.sql` file restores without FK violation errors.
+  - **Referential Slice Exporter (Zero-Config FK-Aware Smart Seed Dump)**: Automatic schema-wide dependency crawler without requiring manual table selection; exports complete DDL + bounded row sample (e.g. 20 rows per table), while recursively resolving and including all upstream referenced parent rows across the entire database's Foreign Key graph (transitive closure) in topological order, guaranteeing clean, error-free restores.
   - **Large SQL Script Runner**: Streaming executor parsing and dispatching multi-megabyte `.sql` scripts with progress tracking without memory exhaustion.
   - **Clipboard Formats**: Context menu options to `Copy as TSV` (Excel-ready) and `Copy as Markdown Table`.
-- **Runnable Verification**: Open table in grid -> add a new row inline -> edit a cell -> filter by status -> select rows and delete -> export FK-aware seed dump (20 rows) for orders table -> restore to a clean database and verify all parent customer/product records are present without FK errors.
+- **Runnable Verification**: Open table in grid -> add a new row inline -> edit a cell -> filter by status -> select rows and delete -> click 1-click "Export Smart Seed Dump (20 rows)" for the entire database -> restore `.sql` to a clean database instance and verify 100% success with zero FK constraint violations.
+
 
 ---
 
