@@ -40,6 +40,7 @@ Operates with a strict memory ceiling (**< 100MB RAM**), sub-second launch time 
 - 🤖 **BYOK AI Copilot & Error Healer**: Bring Your Own Key (OpenAI, Claude, Gemini, DeepSeek, or local Ollama). Explains schemas, generates optimized queries, and automatically analyzes and heals SQL execution errors.
 - 🏎️ **Keyset Pagination & Out-of-Band Cancellation**: High-speed row streaming without memory spikes and instantaneous query termination (`KILL QUERY`) through dedicated control sessions.
 - 💾 **Smart Pre-DDL Backups**: Automatic schema and table dumps before dangerous alter/drop operations.
+- 🌐 **Cluster & Replication Inspector**: Real-time diagnostic suite for Percona XtraDB Cluster (PXC 5.7/8.0), Galera, and MySQL replication. Auto-detects Flow Control pauses, auto-probes peer nodes to pinpoint the slowest bottleneck node, and evaluates a Tri-Metric Matrix (EVS network latency, InnoDB disk stalls, apply worker capacity).
 - 🔌 **Multi-Engine Support**: MySQL 5.7 / 8.x, MariaDB, and local pure-Go SQLite (direct connection or over SSH tunnel).
 
 ---
@@ -178,6 +179,7 @@ Berjalan dengan konsumsi memori sangat hemat (**< 100MB RAM**), waktu start kila
 - 🤖 **AI Copilot & Error Healer (BYOK)**: Gunakan API Key Anda sendiri (OpenAI, Claude, Gemini, DeepSeek, atau Ollama lokal). Mampu membuat query dari bahasa manusia, optimasi indeks, serta menganalisis dan memperbaiki query yang error secara otomatis (*Error Healer*).
 - 🏎️ **Keyset Pagination & Out-of-Band Cancel**: Tampilan data super responsif tanpa lonjakan RAM, serta fitur pembatalan query instan (*KILL QUERY*) lewat secondary connection tanpa memutus koneksi utama.
 - 💾 **Smart Pre-DDL Backup**: Backup otomatis skema dan data tabel sebelum eksekusi DDL penting dijalankan.
+- 🌐 **Cluster & Replication Inspector**: Diagnostik real-time untuk Percona XtraDB Cluster (PXC 5.7/8.0), Galera, dan replikasi MySQL. Mendeteksi pembekuan Flow Control, auto-probe node rekan untuk mengisolasi node terlelet yang membebani cluster, serta Tri-Metric Detective (latensi jaringan EVS, stall harddisk/InnoDB, dan kejenuhan worker).
 - 🔌 **Dukungan Multi Database**: MySQL 5.7 / 8.x, MariaDB, dan SQLite (koneksi langsung maupun melalui SSH Tunneling).
 
 ---

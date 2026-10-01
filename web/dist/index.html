@@ -205,6 +205,11 @@
         <span id="processlist-slow-badge" class="hidden bg-amber-500/20 text-amber-300 text-[10px] px-1 rounded-full font-bold"></span>
       </button>
 
+      <button id="btn-open-cluster" onclick="openClusterTab()" class="hidden h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center space-x-1.5" title="Cluster & Replication Inspector">
+        <span>🌐 Cluster</span>
+        <span id="cluster-status-badge" class="hidden bg-emerald-500/20 text-emerald-300 text-[10px] px-1 rounded-full font-bold"></span>
+      </button>
+
       <button id="btn-open-audit-log" onclick="toggleAuditDrawer()" class="h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center space-x-1" title="Session Audit Log">
         <span>📜 Audit Log</span>
       </button>
@@ -994,6 +999,149 @@
               </tr>
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <!-- Cluster & Replication Inspector View (Dedicated Tab) -->
+      <div id="cluster-view-container" class="hidden flex-1 flex flex-col overflow-hidden bg-app-bg">
+        <!-- Cluster Toolbar -->
+        <div class="h-10 bg-app-surface border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0 gap-3">
+          <div class="flex items-center space-x-2.5 flex-1 min-w-0">
+            <div class="shrink-0 flex items-center space-x-1 bg-slate-900 border border-slate-700 rounded p-0.5">
+              <span class="text-slate-400 text-[11px] px-1.5 font-medium">Refresh:</span>
+              <button id="cl-refresh-pause" onclick="setClusterInterval('pause')" class="px-2 py-0.5 rounded text-[11px] bg-slate-800 text-white font-medium">Pause</button>
+              <button id="cl-refresh-1s" onclick="setClusterInterval(1000)" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">1s</button>
+              <button id="cl-refresh-3s" onclick="setClusterInterval(3000)" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">3s</button>
+              <button id="cl-refresh-5s" onclick="setClusterInterval(5000)" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">5s</button>
+            </div>
+
+            <button onclick="fetchClusterHealth()" class="shrink-0 bg-app-card hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded border border-app-border transition flex items-center space-x-1" title="Fetch cluster telemetry immediately">
+              <span>🔄 Refresh Now</span>
+            </button>
+
+            <span id="cl-last-updated" class="text-slate-500 text-[11px] font-mono"></span>
+          </div>
+
+          <div class="shrink-0 flex items-center space-x-2">
+            <button onclick="askCopilotClusterTuning()" class="bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 px-2.5 py-1 rounded text-xs transition flex items-center space-x-1">
+              <span>🤖 Ask Copilot Advice</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Scrollable Cluster Content Area -->
+        <div class="flex-1 overflow-y-auto p-4 space-y-4">
+          <!-- Diagnosis Alert Banner -->
+          <div id="cl-diagnosis-card" class="p-3.5 rounded-lg border flex items-start justify-between space-x-3 transition bg-slate-900 border-slate-700 text-slate-300">
+            <div class="flex items-start space-x-3">
+              <span id="cl-diagnosis-icon" class="text-xl">🔍</span>
+              <div>
+                <div class="font-bold text-white text-xs flex items-center space-x-2">
+                  <span>Diagnostic Summary</span>
+                  <span id="cl-diagnosis-severity" class="px-1.5 py-0.2 rounded text-[10px] uppercase font-mono bg-slate-800 text-slate-400">CHECKING</span>
+                </div>
+                <div id="cl-diagnosis-text" class="text-xs text-slate-300 mt-0.5">Fetching cluster telemetry...</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Summary Metric Cards (4 Cards) -->
+          <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <!-- Topology & Quorum -->
+            <div class="bg-app-card border border-app-border rounded-lg p-3">
+              <div class="text-[11px] text-slate-400 font-medium">Topology &amp; Quorum</div>
+              <div id="cl-card-topology" class="text-base font-bold text-white mt-1">Detecting...</div>
+              <div id="cl-card-quorum" class="text-xs text-slate-400 mt-0.5">-</div>
+            </div>
+
+            <!-- Flow Control Pressure -->
+            <div class="bg-app-card border border-app-border rounded-lg p-3">
+              <div class="text-[11px] text-slate-400 font-medium">Flow Control Paused</div>
+              <div id="cl-card-fc" class="text-base font-bold text-emerald-400 mt-1">0.00%</div>
+              <div id="cl-card-fc-detail" class="text-xs text-slate-400 mt-0.5">Sent: 0 | Recv: 0</div>
+            </div>
+
+            <!-- Slowest / Culprit Node -->
+            <div class="bg-app-card border border-app-border rounded-lg p-3">
+              <div class="text-[11px] text-slate-400 font-medium">Bottleneck Node</div>
+              <div id="cl-card-culprit" class="text-base font-bold text-slate-200 mt-1">None (Balanced)</div>
+              <div id="cl-card-culprit-detail" class="text-xs text-slate-400 mt-0.5">No node throttling cluster</div>
+            </div>
+
+            <!-- Cluster Size & State -->
+            <div class="bg-app-card border border-app-border rounded-lg p-3">
+              <div class="text-[11px] text-slate-400 font-medium">Cluster Nodes</div>
+              <div id="cl-card-nodes-count" class="text-base font-bold text-white mt-1">-</div>
+              <div id="cl-card-local-state" class="text-xs text-slate-400 mt-0.5">Local: -</div>
+            </div>
+          </div>
+
+          <!-- Tri-Metric Hardware & Network Matrix -->
+          <div class="bg-app-surface border border-app-border rounded-lg p-4 space-y-3">
+            <div class="flex items-center justify-between border-b border-app-border pb-2">
+              <div class="text-xs font-semibold text-slate-200 flex items-center space-x-1.5">
+                <span>📊</span>
+                <span>Tri-Metric Bottleneck Detective (Network vs Storage vs Concurrency)</span>
+              </div>
+              <span class="text-[10px] text-slate-400 font-mono">EVS Replication &amp; InnoDB Wait Telemetry</span>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+              <!-- Network Replication Latency -->
+              <div class="bg-slate-900/70 border border-slate-800 rounded p-3 space-y-1">
+                <div class="flex items-center justify-between text-xs">
+                  <span class="font-medium text-slate-300">🌐 EVS Network Latency</span>
+                  <span id="cl-tri-net-badge" class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800">Healthy</span>
+                </div>
+                <div class="flex items-baseline space-x-1.5">
+                  <span id="cl-tri-net-avg" class="text-lg font-bold font-mono text-white">0.00</span>
+                  <span class="text-xs text-slate-400">ms avg</span>
+                </div>
+                <div class="text-[11px] text-slate-400 font-mono" id="cl-tri-net-range">Min: 0.00ms | Peak: 0.00ms</div>
+              </div>
+
+              <!-- Storage / Disk I/O Wait -->
+              <div class="bg-slate-900/70 border border-slate-800 rounded p-3 space-y-1">
+                <div class="flex items-center justify-between text-xs">
+                  <span class="font-medium text-slate-300">💽 Disk / Storage I/O</span>
+                  <span id="cl-tri-disk-badge" class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800">No Stalls</span>
+                </div>
+                <div class="flex items-baseline space-x-1.5">
+                  <span id="cl-tri-disk-wait" class="text-lg font-bold font-mono text-white">0</span>
+                  <span class="text-xs text-slate-400">buffer wait events</span>
+                </div>
+                <div class="text-[11px] text-slate-400 font-mono" id="cl-tri-disk-detail">Redo Log Waits: 0 | Fsyncs: 0</div>
+              </div>
+
+              <!-- Concurrency & Apply Workers -->
+              <div class="bg-slate-900/70 border border-slate-800 rounded p-3 space-y-1">
+                <div class="flex items-center justify-between text-xs">
+                  <span class="font-medium text-slate-300">⚙️ Apply Workers &amp; Conflict</span>
+                  <span id="cl-tri-worker-badge" class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800">Normal</span>
+                </div>
+                <div class="flex items-baseline space-x-1.5">
+                  <span id="cl-tri-threads" class="text-lg font-bold font-mono text-white">1</span>
+                  <span class="text-xs text-slate-400">wsrep_slave_threads</span>
+                </div>
+                <div class="text-[11px] text-slate-400 font-mono" id="cl-tri-conflict-detail">Cert Failures: 0 | BF Aborts: 0</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Peer Node Roster & Auto-Discovery Grid -->
+          <div class="bg-app-surface border border-app-border rounded-lg p-4 space-y-3">
+            <div class="flex items-center justify-between border-b border-app-border pb-2">
+              <div class="text-xs font-semibold text-slate-200 flex items-center space-x-1.5">
+                <span>🖥️</span>
+                <span>Cluster Members &amp; Peer Node Telemetry</span>
+              </div>
+              <span class="text-[10px] text-slate-400 font-mono">Auto-Probed via wsrep_incoming_addresses</span>
+            </div>
+
+            <div id="cl-nodes-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
+              <!-- Dynamically populated node cards -->
+            </div>
+          </div>
         </div>
       </div>
 
@@ -2828,15 +2976,20 @@
         `;
         const btnPL = document.getElementById('btn-open-processlist');
         const btnPriv = document.getElementById('btn-open-privileges');
+        const btnCluster = document.getElementById('btn-open-cluster');
         if (btnPL) {
           if (conn.driver === 'mysql' || conn.driver === 'mariadb') {
             btnPL.classList.remove('hidden');
             if (btnPriv) btnPriv.classList.remove('hidden');
+            if (btnCluster) btnCluster.classList.remove('hidden');
           } else {
             btnPL.classList.add('hidden');
             if (btnPriv) btnPriv.classList.add('hidden');
+            if (btnCluster) btnCluster.classList.add('hidden');
             const plTab = tabs.find(t => t.isProcesslist);
             if (plTab) closeTab(plTab.id);
+            const clTab = tabs.find(t => t.isCluster);
+            if (clTab) closeTab(clTab.id);
           }
         }
         updateReadOnlyUI(activeSession.read_only);
@@ -4134,7 +4287,7 @@
       const container = document.getElementById('tabs-container');
       container.innerHTML = tabs.map(t => `
         <div onclick="switchTab('${t.id}')" class="flex items-center space-x-1 px-3 py-1 rounded cursor-pointer text-xs transition ${t.id === activeTabId ? 'bg-app-bg text-app-accent font-semibold border-t-2 border-app-accent' : 'hover:bg-slate-800 text-slate-400'}">
-          <span>${t.isProcesslist ? '⚡' : (t.isTableViewer ? '📊' : (t.isNote ? '📝' : '⚡'))}</span>
+          <span>${t.isCluster ? '🌐' : (t.isProcesslist ? '⚡' : (t.isTableViewer ? '📊' : (t.isNote ? '📝' : '⚡')))}</span>
           <span class="truncate max-w-[120px]">${escapeHtml(t.title)}</span>
           <button onclick="event.stopPropagation(); closeTab('${t.id}')" class="hover:text-red-400 pl-1">✕</button>
         </div>
@@ -4145,15 +4298,25 @@
       const editorContainer = document.getElementById('editor-container');
       const gridContainer = document.getElementById('grid-container');
       const plContainer = document.getElementById('processlist-view-container');
+      const clContainer = document.getElementById('cluster-view-container');
 
-      if (activeTab && activeTab.isProcesslist) {
+      if (activeTab && activeTab.isCluster) {
         if (modeTabs) modeTabs.classList.add('hidden');
         if (editorContainer) editorContainer.classList.add('hidden');
         if (gridContainer) gridContainer.classList.add('hidden');
+        if (plContainer) plContainer.classList.add('hidden');
+        if (clContainer) clContainer.classList.remove('hidden');
+        fetchClusterHealth(true);
+      } else if (activeTab && activeTab.isProcesslist) {
+        if (modeTabs) modeTabs.classList.add('hidden');
+        if (editorContainer) editorContainer.classList.add('hidden');
+        if (gridContainer) gridContainer.classList.add('hidden');
+        if (clContainer) clContainer.classList.add('hidden');
         if (plContainer) plContainer.classList.remove('hidden');
         fetchProcesslist(true);
       } else {
         if (plContainer) plContainer.classList.add('hidden');
+        if (clContainer) clContainer.classList.add('hidden');
         if (gridContainer) gridContainer.classList.remove('hidden');
         if (activeTab && activeTab.isTableViewer) {
           if (modeTabs) modeTabs.classList.remove('hidden');
@@ -4196,7 +4359,7 @@
 
     function switchTab(tabId) {
       const curr = tabs.find(t => t.id === activeTabId);
-      if (curr && !curr.isTableViewer && !curr.isProcesslist) {
+      if (curr && !curr.isTableViewer && !curr.isProcesslist && !curr.isCluster) {
         curr.sql = getEditorSQL();
       }
       activeTabId = tabId;
@@ -4944,6 +5107,343 @@
       if (!sql) return;
       const title = 'Query Analisis (Processlist' + (dbName ? ` - ${dbName}` : '') + ')';
       saveToInternalNotes(title, '```sql\n' + sql + '\n```');
+    }
+
+    // --- Cluster & Replication Inspector ---
+    let clusterData = null;
+    let clusterTimer = null;
+    let clusterRefreshInterval = 'pause';
+
+    function openClusterTab() {
+      if (!activeConnection) {
+        showNativeAlert('Please select and connect to a database session first.', 'Cluster Inspector');
+        return;
+      }
+      let tab = tabs.find(t => t.isCluster);
+      if (!tab) {
+        tab = {
+          id: 'tab-cluster',
+          title: 'Cluster Health',
+          isCluster: true,
+        };
+        tabs.push(tab);
+      }
+      switchTab(tab.id);
+      fetchClusterHealth(false);
+    }
+
+    function setClusterInterval(interval) {
+      clusterRefreshInterval = interval;
+      ['pause', '1s', '3s', '5s'].forEach(opt => {
+        const btn = document.getElementById(`cl-refresh-${opt}`);
+        if (!btn) return;
+        const isCur = (opt === 'pause' && interval === 'pause') ||
+                      (opt === '1s' && interval === 1000) ||
+                      (opt === '3s' && interval === 3000) ||
+                      (opt === '5s' && interval === 5000);
+        btn.className = isCur 
+          ? 'px-2 py-0.5 rounded text-[11px] bg-slate-800 text-white font-medium'
+          : 'px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white';
+      });
+
+      if (clusterTimer) {
+        clearInterval(clusterTimer);
+        clusterTimer = null;
+      }
+      if (interval !== 'pause') {
+        clusterTimer = setInterval(() => {
+          const activeTab = tabs.find(t => t.id === activeTabId);
+          if (activeTab && activeTab.isCluster && !document.hidden) {
+            fetchClusterHealth(true);
+          }
+        }, interval);
+      }
+    }
+
+    async function fetchClusterHealth(silent = false) {
+      if (!activeConnection) return;
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/diagnostics/cluster`);
+        if (!res.ok) {
+          if (!silent) {
+            const err = await res.json().catch(() => ({}));
+            showNativeAlert('Failed to load cluster diagnostics: ' + (err.error || res.statusText), 'Cluster Error');
+          }
+          return;
+        }
+        const data = await res.json();
+        clusterData = data;
+        renderClusterUI();
+        const updatedEl = document.getElementById('cl-last-updated');
+        if (updatedEl) {
+          updatedEl.textContent = 'Updated: ' + new Date().toLocaleTimeString();
+        }
+      } catch (err) {
+        if (!silent) {
+          showNativeAlert('Failed to load cluster diagnostics: ' + err.message, 'Cluster Error');
+        }
+      }
+    }
+
+    function renderClusterUI() {
+      if (!clusterData) return;
+      const d = clusterData;
+
+      // 1. Diagnosis Card & Icon
+      const diagCard = document.getElementById('cl-diagnosis-card');
+      const diagIcon = document.getElementById('cl-diagnosis-icon');
+      const diagSev = document.getElementById('cl-diagnosis-severity');
+      const diagText = document.getElementById('cl-diagnosis-text');
+      const statusBadge = document.getElementById('cluster-status-badge');
+
+      const isCritical = d.bottleneck_severity === 'critical';
+      const isWarning = d.bottleneck_severity === 'warning';
+
+      if (diagCard) {
+        if (isCritical) {
+          diagCard.className = 'p-3.5 rounded-lg border flex items-start justify-between space-x-3 transition bg-red-950/40 border-red-800 text-red-200';
+          if (diagIcon) diagIcon.textContent = '🚨';
+          if (diagSev) {
+            diagSev.textContent = 'CRITICAL BOTTLENECK';
+            diagSev.className = 'px-1.5 py-0.2 rounded text-[10px] uppercase font-mono bg-red-900 text-red-100 border border-red-700';
+          }
+        } else if (isWarning) {
+          diagCard.className = 'p-3.5 rounded-lg border flex items-start justify-between space-x-3 transition bg-amber-950/40 border-amber-800 text-amber-200';
+          if (diagIcon) diagIcon.textContent = '⚠️';
+          if (diagSev) {
+            diagSev.textContent = 'PERFORMANCE WARNING';
+            diagSev.className = 'px-1.5 py-0.2 rounded text-[10px] uppercase font-mono bg-amber-900 text-amber-100 border border-amber-700';
+          }
+        } else {
+          diagCard.className = 'p-3.5 rounded-lg border flex items-start justify-between space-x-3 transition bg-emerald-950/30 border-emerald-800 text-emerald-200';
+          if (diagIcon) diagIcon.textContent = '✅';
+          if (diagSev) {
+            diagSev.textContent = 'HEALTHY';
+            diagSev.className = 'px-1.5 py-0.2 rounded text-[10px] uppercase font-mono bg-emerald-900 text-emerald-100 border border-emerald-700';
+          }
+        }
+        if (diagText) {
+          diagText.textContent = d.bottleneck_diagnosis || 'Cluster operates normally.';
+        }
+      }
+
+      if (statusBadge) {
+        if (isCritical) {
+          statusBadge.classList.remove('hidden');
+          statusBadge.textContent = 'CRITICAL';
+          statusBadge.className = 'bg-red-500/20 text-red-300 text-[10px] px-1 rounded-full font-bold';
+        } else if (isWarning) {
+          statusBadge.classList.remove('hidden');
+          statusBadge.textContent = 'WARN';
+          statusBadge.className = 'bg-amber-500/20 text-amber-300 text-[10px] px-1 rounded-full font-bold';
+        } else {
+          statusBadge.classList.remove('hidden');
+          statusBadge.textContent = d.topology_type === 'galera' ? 'PXC' : (d.topology_type === 'replication' ? 'REPL' : 'OK');
+          statusBadge.className = 'bg-emerald-500/20 text-emerald-300 text-[10px] px-1 rounded-full font-bold';
+        }
+      }
+
+      // 2. Summary Cards
+      const cardTopo = document.getElementById('cl-card-topology');
+      const cardQuorum = document.getElementById('cl-card-quorum');
+      if (cardTopo) cardTopo.textContent = d.topology_type ? d.topology_type.toUpperCase() : 'UNKNOWN';
+      if (cardQuorum) cardQuorum.textContent = `Status: ${d.cluster_status || 'Primary'} ${d.cluster_name ? `(${d.cluster_name})` : ''}`;
+
+      const cardFC = document.getElementById('cl-card-fc');
+      const cardFCDetail = document.getElementById('cl-card-fc-detail');
+      const fcPct = (d.flow_control_paused * 100).toFixed(2);
+      if (cardFC) {
+        cardFC.textContent = `${fcPct}%`;
+        if (d.flow_control_paused > 0.05) cardFC.className = 'text-base font-bold text-red-400 mt-1';
+        else if (d.flow_control_paused > 0.005) cardFC.className = 'text-base font-bold text-amber-400 mt-1';
+        else cardFC.className = 'text-base font-bold text-emerald-400 mt-1';
+      }
+      if (cardFCDetail) cardFCDetail.textContent = `Sent: ${d.flow_control_sent || 0} | Recv: ${d.flow_control_recv || 0}`;
+
+      const cardCulprit = document.getElementById('cl-card-culprit');
+      const cardCulpritDetail = document.getElementById('cl-card-culprit-detail');
+      if (cardCulprit) {
+        if (d.slowest_node) {
+          cardCulprit.textContent = d.slowest_node;
+          cardCulprit.className = 'text-base font-bold text-red-400 mt-1 truncate';
+          if (cardCulpritDetail) cardCulpritDetail.textContent = 'Triggered Flow Control / High Queue';
+        } else {
+          cardCulprit.textContent = 'None (Balanced)';
+          cardCulprit.className = 'text-base font-bold text-emerald-400 mt-1';
+          if (cardCulpritDetail) cardCulpritDetail.textContent = 'No node throttling cluster';
+        }
+      }
+
+      const cardNodes = document.getElementById('cl-card-nodes-count');
+      const cardLocalState = document.getElementById('cl-card-local-state');
+      if (cardNodes) cardNodes.textContent = `${d.cluster_size || (d.nodes ? d.nodes.length : 1)} Member(s)`;
+      if (cardLocalState) cardLocalState.textContent = `Local: ${d.local_node_state || 'Active'} (${d.local_node_name || 'Node'})`;
+
+      // 3. Tri-Metric Diagnostics
+      const tri = d.tri_metric || {};
+      const netAvgEl = document.getElementById('cl-tri-net-avg');
+      const netRangeEl = document.getElementById('cl-tri-net-range');
+      const netBadgeEl = document.getElementById('cl-tri-net-badge');
+      if (netAvgEl) netAvgEl.textContent = (tri.network_latency_avg_ms || 0).toFixed(2);
+      if (netRangeEl) netRangeEl.textContent = `Min: ${(tri.network_latency_min_ms || 0).toFixed(2)}ms | Peak: ${(tri.network_latency_max_ms || 0).toFixed(2)}ms`;
+      if (netBadgeEl) {
+        if ((tri.network_latency_avg_ms || 0) > 5.0 || (tri.network_latency_max_ms || 0) > 50.0) {
+          netBadgeEl.textContent = 'High Latency';
+          netBadgeEl.className = 'px-1.5 py-0.2 rounded text-[10px] font-mono bg-amber-950 text-amber-300 border border-amber-800';
+        } else {
+          netBadgeEl.textContent = 'Healthy';
+          netBadgeEl.className = 'px-1.5 py-0.2 rounded text-[10px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800';
+        }
+      }
+
+      const diskWaitEl = document.getElementById('cl-tri-disk-wait');
+      const diskDetailEl = document.getElementById('cl-tri-disk-detail');
+      const diskBadgeEl = document.getElementById('cl-tri-disk-badge');
+      if (diskWaitEl) diskWaitEl.textContent = tri.buffer_pool_wait_free || 0;
+      if (diskDetailEl) diskDetailEl.textContent = `Redo Log Waits: ${tri.log_waits || 0} | Fsyncs: ${tri.os_log_fsyncs || 0}`;
+      if (diskBadgeEl) {
+        if ((tri.buffer_pool_wait_free || 0) > 0 || (tri.log_waits || 0) > 0) {
+          diskBadgeEl.textContent = 'Disk I/O Stall';
+          diskBadgeEl.className = 'px-1.5 py-0.2 rounded text-[10px] font-mono bg-red-950 text-red-300 border border-red-800';
+        } else {
+          diskBadgeEl.textContent = 'No Stalls';
+          diskBadgeEl.className = 'px-1.5 py-0.2 rounded text-[10px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800';
+        }
+      }
+
+      const threadsEl = document.getElementById('cl-tri-threads');
+      const conflictDetailEl = document.getElementById('cl-tri-conflict-detail');
+      const workerBadgeEl = document.getElementById('cl-tri-worker-badge');
+      if (threadsEl) threadsEl.textContent = tri.slave_threads || 1;
+      if (conflictDetailEl) conflictDetailEl.textContent = `Cert Failures: ${tri.cert_failures || 0} | BF Aborts: ${tri.bf_aborts || 0}`;
+      if (workerBadgeEl) {
+        if ((tri.cert_failures || 0) > 50 || (tri.bf_aborts || 0) > 50) {
+          workerBadgeEl.textContent = 'Lock Contention';
+          workerBadgeEl.className = 'px-1.5 py-0.2 rounded text-[10px] font-mono bg-amber-950 text-amber-300 border border-amber-800';
+        } else {
+          workerBadgeEl.textContent = 'Normal';
+          workerBadgeEl.className = 'px-1.5 py-0.2 rounded text-[10px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800';
+        }
+      }
+
+      // 4. Peer Node Cards Grid
+      const grid = document.getElementById('cl-nodes-grid');
+      if (!grid) return;
+      const nodes = d.nodes || [];
+
+      if (nodes.length === 0) {
+        grid.innerHTML = '<div class="col-span-3 text-center text-slate-500 py-6 italic text-xs">No cluster members detected.</div>';
+        return;
+      }
+
+      grid.innerHTML = nodes.map(n => {
+        const isCulprit = n.is_culprit;
+        const isUnreachable = n.status === 'unreachable';
+        const isSynced = (n.state || '').toLowerCase() === 'synced';
+
+        let borderClass = 'border-slate-800 bg-slate-900/60';
+        if (isCulprit) borderClass = 'border-red-600/80 bg-red-950/30 ring-1 ring-red-500/50';
+        else if (isUnreachable) borderClass = 'border-slate-800/60 bg-slate-900/30 opacity-75';
+
+        return `
+          <div class="border rounded-lg p-3.5 space-y-2.5 transition ${borderClass}">
+            <div class="flex items-start justify-between">
+              <div>
+                <div class="font-bold text-white text-xs flex items-center space-x-1.5">
+                  <span class="truncate max-w-[160px]">${escapeHtml(n.name || n.address)}</span>
+                  ${n.is_local ? '<span class="px-1 py-0.2 rounded bg-sky-950 text-sky-300 text-[9px] border border-sky-800">Local Session</span>' : ''}
+                  ${isCulprit ? '<span class="px-1.5 py-0.2 rounded bg-red-900 text-red-100 text-[9px] font-bold uppercase animate-pulse">🚨 Slow Node</span>' : ''}
+                </div>
+                <div class="text-[11px] font-mono text-slate-400 mt-0.5">${escapeHtml(n.address)}</div>
+              </div>
+              <div>
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-mono uppercase font-bold ${isUnreachable ? 'bg-slate-800 text-slate-400' : (isSynced ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-amber-950 text-amber-300 border border-amber-800')}">
+                  ${escapeHtml(n.state || (isUnreachable ? 'Restricted' : 'Active'))}
+                </span>
+              </div>
+            </div>
+
+            ${isUnreachable ? `
+              <div class="p-2 rounded bg-slate-950/60 text-[11px] text-slate-400 font-mono flex items-center space-x-1.5">
+                <span>🔒</span>
+                <span>Unreachable directly (VPC / Firewall restricted)</span>
+              </div>
+            ` : `
+              <div class="grid grid-cols-2 gap-2 text-[11px] font-mono bg-slate-950/50 p-2 rounded">
+                <div>
+                  <span class="text-slate-400">Recv Queue:</span>
+                  <span class="font-bold ml-1 ${n.receive_queue > 20 ? 'text-amber-400' : 'text-slate-200'}">${n.receive_queue || 0}</span>
+                </div>
+                <div>
+                  <span class="text-slate-400">FC Sent:</span>
+                  <span class="font-bold ml-1 ${n.flow_control_sent > 0 ? 'text-red-400' : 'text-slate-200'}">${n.flow_control_sent || 0}</span>
+                </div>
+              </div>
+            `}
+
+            <div class="flex items-center justify-end space-x-1.5 pt-1 border-t border-slate-800/80">
+              ${n.is_local ? `
+                <button onclick="openProcesslistTab()" class="px-2 py-1 rounded bg-sky-950 hover:bg-sky-900 text-sky-300 text-[10px] font-medium border border-sky-800 transition flex items-center space-x-1">
+                  <span>⚡ Inspect Processlist</span>
+                </button>
+              ` : `
+                <button onclick="switchSessionToNode('${escapeHtml(n.address)}')" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-medium border border-slate-700 transition flex items-center space-x-1" title="Switch active session connection to this node">
+                  <span>🔗 Switch Session</span>
+                </button>
+              `}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function askCopilotClusterTuning() {
+      if (!clusterData) {
+        showNativeAlert('No cluster data available yet. Please refresh first.', 'Copilot Tuning');
+        return;
+      }
+      const d = clusterData;
+      const tri = d.tri_metric || {};
+      toggleAISidebar(true);
+      const promptInput = document.getElementById('ai-prompt-input');
+      if (!promptInput) return;
+
+      const promptTemplate = `Tolong analisis kondisi cluster database ini dan berikan rekomendasi tuning performa serta solusi bottleneck:
+
+- **Topology**: ${d.topology_type} (${d.cluster_name || 'unnamed'})
+- **Quorum / Status**: ${d.cluster_status} (Size: ${d.cluster_size} nodes)
+- **Local State**: ${d.local_node_state} (${d.local_node_name})
+- **Diagnosis Utama**: ${d.bottleneck_diagnosis || 'Normal'} (Severity: ${d.bottleneck_severity})
+- **Slowest / Culprit Node**: ${d.slowest_node || 'None (Balanced)'}
+- **Flow Control Paused**: ${(d.flow_control_paused * 100).toFixed(2)}% (Sent: ${d.flow_control_sent}, Recv: ${d.flow_control_recv})
+- **Network EVS Latency**: avg ${tri.network_latency_avg_ms?.toFixed(2) || 0}ms, max ${tri.network_latency_max_ms?.toFixed(2) || 0}ms
+- **InnoDB Disk Stalls**: ${tri.buffer_pool_wait_free || 0} buffer pool wait free, ${tri.log_waits || 0} log flush waits
+- **Concurrency**: ${tri.slave_threads || 1} wsrep_slave_threads, ${tri.cert_failures || 0} cert failures, ${tri.bf_aborts || 0} bf aborts
+
+Apa langkah konkret untuk menyelesaikan bottleneck ini? Apakah perlu tuning my.cnf (seperti wsrep_slave_threads, innodb_buffer_pool_size), optimasi query write, atau pemeriksaan hardware/network?`;
+
+      promptInput.value = promptTemplate;
+      promptInput.focus();
+      promptInput.setSelectionRange(promptInput.value.length, promptInput.value.length);
+      showNativeAlert('Ringkasan diagnosa cluster telah dimasukkan ke kotak Copilot. Silakan klik Send untuk rekomendasi tuning.', 'Copilot Siap');
+    }
+
+    function switchSessionToNode(addr) {
+      if (!addr) return;
+      const parts = addr.split(':');
+      const host = parts[0];
+      const port = parts[1] ? parseInt(parts[1], 10) : 3306;
+
+      openNewConnModal();
+      setTimeout(() => {
+        const hostInput = document.getElementById('conn-host');
+        const portInput = document.getElementById('conn-port');
+        const nameInput = document.getElementById('conn-name');
+        if (hostInput) hostInput.value = host;
+        if (portInput) portInput.value = port;
+        if (nameInput) nameInput.value = `${activeConnection ? activeConnection.name : 'Cluster'} (${host})`;
+        showNativeAlert(`Modal koneksi telah diisi otomatis dengan host node ${host}:${port}. Masukkan kata sandi jika diperlukan lalu klik Connect.`, 'Ganti Sesi Node');
+      }, 100);
     }
 
     // --- Session Audit Log Drawer ---

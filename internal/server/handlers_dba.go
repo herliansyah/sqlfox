@@ -30,6 +30,26 @@ func (s *Server) handleGetProcesslist(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (s *Server) handleGetClusterHealth(w http.ResponseWriter, r *http.Request) {
+	connID := r.PathValue("id")
+	sess, err := s.sessionMgr.GetSession(connID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
+	defer cancel()
+
+	report, err := sess.InspectClusterHealth(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to inspect cluster health: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, report)
+}
+
 func (s *Server) handleKillProcess(w http.ResponseWriter, r *http.Request) {
 	connID := r.PathValue("id")
 	sess, err := s.sessionMgr.GetSession(connID)

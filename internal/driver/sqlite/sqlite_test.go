@@ -131,4 +131,19 @@ func TestSQLiteDriver_Lifecycle(t *testing.T) {
 	if err != nil || len(plan.Rows) == 0 {
 		t.Fatalf("Explain failed: %v", err)
 	}
+
+	// 7. InspectClusterHealth (Graceful standalone degradation)
+	report, err := sess.InspectClusterHealth(ctx)
+	if err != nil {
+		t.Fatalf("InspectClusterHealth failed: %v", err)
+	}
+	if report.TopologyType != "standalone" {
+		t.Errorf("expected topology standalone, got %s", report.TopologyType)
+	}
+	if report.ClusterSize != 1 {
+		t.Errorf("expected cluster size 1, got %d", report.ClusterSize)
+	}
+	if report.BottleneckSeverity != "ok" {
+		t.Errorf("expected severity ok, got %s", report.BottleneckSeverity)
+	}
 }

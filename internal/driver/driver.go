@@ -107,6 +107,9 @@ type Session interface {
 	// ExecSafeDDL executes a DDL statement on a dedicated connection with a strict session lock timeout.
 	ExecSafeDDL(ctx context.Context, sql string, lockTimeoutSec int) (*ExecResult, error)
 
+	// InspectClusterHealth returns cluster topology, synchronization health, and bottleneck diagnostics.
+	InspectClusterHealth(ctx context.Context) (*ClusterHealthReport, error)
+
 	io.Closer
 }
 
@@ -507,4 +510,62 @@ func GenerateOSCCommand(tool, host string, port int, user, database, table, alte
 		host, port, user, database, table, cleanAlter,
 	)
 }
+
+// ClusterHealthReport describes database cluster synchronization, topology, and performance diagnostics.
+type ClusterHealthReport struct {
+	TopologyType        string            `json:"topology_type"` // "galera", "replication", "standalone"
+	ClusterName         string            `json:"cluster_name,omitempty"`
+	ClusterStatus       string            `json:"cluster_status,omitempty"` // "Primary", "Non-Primary", etc.
+	ClusterSize         int               `json:"cluster_size,omitempty"`
+	LocalNodeName       string            `json:"local_node_name,omitempty"`
+	LocalNodeAddress    string            `json:"local_node_address,omitempty"`
+	LocalNodeState      string            `json:"local_node_state,omitempty"` // "Synced", "Donor", "Joiner", etc.
+	FlowControlPaused   float64           `json:"flow_control_paused"`        // fraction paused (0.0 to 1.0)
+	FlowControlSent     int64             `json:"flow_control_sent"`
+	FlowControlRecv     int64             `json:"flow_control_recv"`
+	BottleneckDiagnosis string            `json:"bottleneck_diagnosis,omitempty"`
+	BottleneckSeverity  string            `json:"bottleneck_severity,omitempty"` // "ok", "warning", "critical"
+	SlowestNode         string            `json:"slowest_node,omitempty"`
+	Nodes               []ClusterNodeInfo `json:"nodes,omitempty"`
+	Replication         *ReplicationInfo  `json:"replication,omitempty"`
+	TriMetric           TriMetricStats    `json:"tri_metric"`
+}
+
+// ClusterNodeInfo represents status and queue telemetry for an individual cluster member.
+type ClusterNodeInfo struct {
+	Name            string `json:"name"`
+	Address         string `json:"address"`
+	State           string `json:"state"`
+	ReceiveQueue    int64  `json:"receive_queue"`
+	SendQueue       int64  `json:"send_queue"`
+	FlowControlSent int64  `json:"flow_control_sent"`
+	IsLocal         bool   `json:"is_local"`
+	IsCulprit       bool   `json:"is_culprit"`
+	Status          string `json:"status"` // "online", "unreachable"
+	Message         string `json:"message,omitempty"`
+}
+
+// ReplicationInfo holds replication metrics for MySQL source/replica setups.
+type ReplicationInfo struct {
+	Role                string `json:"role"` // "Source", "Replica"
+	SecondsBehindMaster *int64 `json:"seconds_behind_master,omitempty"`
+	IORunning           bool   `json:"io_running"`
+	SQLRunning          bool   `json:"sql_running"`
+	MasterHost          string `json:"master_host,omitempty"`
+	LastError           string `json:"last_error,omitempty"`
+}
+
+// TriMetricStats details network latency, disk write contention, and worker capacity.
+type TriMetricStats struct {
+	NetworkLatencyMinMs float64 `json:"network_latency_min_ms"`
+	NetworkLatencyAvgMs float64 `json:"network_latency_avg_ms"`
+	NetworkLatencyMaxMs float64 `json:"network_latency_max_ms"`
+	BufferPoolWaitFree  int64   `json:"buffer_pool_wait_free"`
+	LogWaits            int64   `json:"log_waits"`
+	OSLogFsyncs         int64   `json:"os_log_fsyncs"`
+	SlaveThreads        int     `json:"slave_threads"`
+	CertFailures        int64   `json:"cert_failures"`
+	BFAborts            int64   `json:"bf_aborts"`
+}
+
 

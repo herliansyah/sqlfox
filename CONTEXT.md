@@ -350,6 +350,26 @@ _Avoid_: In-memory filter, client search, local filter
 A one-click action transferring the currently active table, column filters, and sort order from the Table Viewer directly into a new Query Editor tab as a complete editable SQL script.
 _Avoid_: Export to SQL, copy query, open in editor
 
+**Cluster & Replication Inspector**:
+A dynamic topology and diagnostic monitor within the DBA Operations Suite that automatically detects Galera/PXC clustering, standard MySQL replication, or standalone instances to visualize node synchronization, quorum health, and replication queues.
+_Avoid_: Cluster monitor, Galera viewer, replication dashboard
+
+**Flow Control Pressure Indicator**:
+A real-time metric evaluator measuring `wsrep_flow_control_paused` to detect cluster-wide write throttling, isolating whether local write set applying or a remote peer node is exerting backpressure.
+_Avoid_: Lag meter, pause checker, throttling alert
+
+**Cluster Bottleneck Detective**:
+A heuristic diagnostic engine correlating inter-node network replication latency (`wsrep_evs_repl_latency`), disk IO wait states (`wait/io/file/innodb/*`), and thread queues to identify the slowest node or hardware resource causing cluster stalls.
+_Avoid_: Slow finder, cluster analyzer, node debugger
+
+**Peer Node Auto-Discovery**:
+An out-of-band probing mechanism that extracts active cluster IP addresses from `wsrep_incoming_addresses` and dispatches lightweight status queries across all cluster members in parallel using the active session credentials to compare receive queues and pinpoint the culprit node.
+_Avoid_: Node scanner, cluster pinger, server crawler
+
+**Tri-Metric Bottleneck Matrix**:
+A unified diagnostic heuristic comparing inter-node network round-trip latency (`wsrep_evs_repl_latency`), physical storage write stalls (`Innodb_buffer_pool_wait_free`, fsync wait events), and worker saturation (`wsrep_slave_threads`) to isolate whether storage, network, or concurrency is the bottleneck.
+_Avoid_: Hardware checker, slow alert, performance dashboard
+
 ## Codebase Architecture & Maintenance (Ponytail)
 
 **Native Platform Tunneling**:
@@ -378,3 +398,5 @@ _Avoid_: In-process tunnel, custom bastion client
 - **0019**: Inline Table Filter Bar, Server-Side Pushdown, and Grid Query Handoff (`docs/adr/0019-inline-table-filter-bar-and-server-side-pushdown.md`)
 - **0020**: Ponytail Audit, Codebase Pruning, and Native Platform Tunneling (`docs/adr/0020-ponytail-audit-codebase-pruning-and-native-ssh.md`)
 - **0021**: Workspace Ergonomics, Shortcuts Discovery, and Search Standardization (`docs/adr/0021-workspace-ergonomics-and-search-standardization.md`)
+- **0022**: Safe DDL Guardrails and Lock Contention Prevention (`docs/adr/0022-safe-ddl-guardrails-and-lock-contention-prevention.md`)
+- **0023**: Dynamic Cluster & Replication Inspector with Peer Node Auto-Discovery and Tri-Metric Bottleneck Detective (`docs/adr/0023-cluster-and-replication-inspector.md`)
