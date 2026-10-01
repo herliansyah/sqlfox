@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"sqlfox/internal/driver"
+	"sqlfox/internal/safety"
 )
 
 func (s *Server) handleInspectQuery(w http.ResponseWriter, r *http.Request) {
@@ -27,7 +28,7 @@ func (s *Server) handleInspectQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res := s.guard.Inspect(req.SQL, sess.Environment)
+	res := safety.Inspect(req.SQL, sess.Environment)
 	writeJSON(w, http.StatusOK, res)
 }
 

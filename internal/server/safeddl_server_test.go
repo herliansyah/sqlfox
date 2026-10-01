@@ -44,7 +44,6 @@ func TestPreflightDDLAndSafeExecution(t *testing.T) {
 		t.Fatalf("CREATE orders failed: %v", err)
 	}
 
-	guard := safety.NewSafetyGuard()
 	backupMgr := safety.NewBackupManager(backupDir)
 
 	activeSess := &ActiveSession{
@@ -54,12 +53,10 @@ func TestPreflightDDLAndSafeExecution(t *testing.T) {
 		DriverName:  "sqlite",
 		ReadOnly:    false,
 		Session:     dbSession,
-		guard:       guard,
 		backupMgr:   backupMgr,
 	}
 
 	sm := &SessionManager{
-		guard:     guard,
 		backupMgr: backupMgr,
 		sessions:  make(map[string]*ActiveSession),
 	}
@@ -67,7 +64,6 @@ func TestPreflightDDLAndSafeExecution(t *testing.T) {
 
 	srv := &Server{
 		sessionMgr: sm,
-		guard:      guard,
 		backupMgr:  backupMgr,
 	}
 

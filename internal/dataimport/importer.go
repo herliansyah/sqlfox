@@ -30,13 +30,6 @@ type ImportResult struct {
 	Errors       []string `json:"errors"`
 }
 
-// CSVImporter coordinates CSV sniffing, column mapping, batching, and fallback retries.
-type CSVImporter struct{}
-
-func NewCSVImporter() *CSVImporter {
-	return &CSVImporter{}
-}
-
 // SniffDelimiter detects the delimiter among standard CSV separators.
 // ponytail: Heuristic frequency scan across initial 5 lines. Upgrade path: dialect/grammar parser if exotic files encountered.
 func SniffDelimiter(sample []byte) rune {
@@ -66,7 +59,7 @@ func SniffDelimiter(sample []byte) rune {
 }
 
 // Import reads CSV records from r and inserts them into tableName on the given driver session.
-func (im *CSVImporter) Import(ctx context.Context, sess driver.Session, tableName string, r io.Reader, opts ImportOptions) (*ImportResult, error) {
+func Import(ctx context.Context, sess driver.Session, tableName string, r io.Reader, opts ImportOptions) (*ImportResult, error) {
 	if tableName == "" {
 		return nil, fmt.Errorf("table name is required")
 	}

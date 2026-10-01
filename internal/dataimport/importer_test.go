@@ -64,8 +64,6 @@ func TestCSVImporter_Import(t *testing.T) {
 		t.Fatalf("CREATE TABLE failed: %v", err)
 	}
 
-	importer := NewCSVImporter()
-
 	// 2. CSV content with semicolon delimiter, UTF-8 BOM, leading zeros in phone, empty notes
 	csvData := "\xef\xbb\xbfNama Lengkap;Nomor Telepon;Catatan Tambahan;IgnoreMe\n" +
 		"Ahmad;08123456789;;ignore1\n" +
@@ -85,7 +83,7 @@ func TestCSVImporter_Import(t *testing.T) {
 		Mapping:     mapping,
 	}
 
-	res, err := importer.Import(ctx, sess, "contacts", strings.NewReader(csvData), opts)
+	res, err := Import(ctx, sess, "contacts", strings.NewReader(csvData), opts)
 	if err != nil {
 		t.Fatalf("Import failed: %v", err)
 	}

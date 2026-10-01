@@ -17,7 +17,6 @@ import (
 type Server struct {
 	handler        http.Handler
 	vault          *vault.Vault
-	guard          *safety.SafetyGuard
 	backupMgr      *safety.BackupManager
 	sessionMgr     *SessionManager
 	authMgr        *AuthManager
@@ -27,14 +26,12 @@ type Server struct {
 
 // NewServer initializes HTTP routes and application state.
 func NewServer(v *vault.Vault, assets fs.FS, backupDir string, masterPassword string) *Server {
-	guard := safety.NewSafetyGuard()
 	backupMgr := safety.NewBackupManager(backupDir)
-	sessionMgr := NewSessionManager(v, guard, backupMgr)
+	sessionMgr := NewSessionManager(v, backupMgr)
 	authMgr := NewAuthManager()
 
 	s := &Server{
 		vault:          v,
-		guard:          guard,
 		backupMgr:      backupMgr,
 		sessionMgr:     sessionMgr,
 		authMgr:        authMgr,

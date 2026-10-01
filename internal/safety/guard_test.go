@@ -11,7 +11,6 @@ import (
 )
 
 func TestSafetyGuard_Inspect(t *testing.T) {
-	guard := NewSafetyGuard()
 
 	tests := []struct {
 		name              string
@@ -79,7 +78,7 @@ func TestSafetyGuard_Inspect(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			res := guard.Inspect(tc.query, tc.env)
+			res := Inspect(tc.query, tc.env)
 			if res.RiskLevel != tc.expectedRisk {
 				t.Fatalf("expected risk %s, got %s (reason: %s)", tc.expectedRisk, res.RiskLevel, res.Reason)
 			}
