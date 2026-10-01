@@ -152,6 +152,9 @@ type Session interface {
     InspectTableLocks(ctx context.Context, database, table string) ([]TableLockInfo, error)
     ExecSafeDDL(ctx context.Context, sql string, lockTimeoutSec int) (*ExecResult, error)
     
+    // Cluster & Replication diagnostics
+    InspectClusterHealth(ctx context.Context) (*ClusterHealthReport, error)
+
     // Query plan & optimization
     Explain(ctx context.Context, sql string) (*ExplainPlan, error)
     
@@ -250,7 +253,50 @@ sequenceDiagram
 
 ---
 
-## 7. Directory & Package Structure
+## 7. Cluster & Replication Inspector Pipeline
+
+The Cluster & Replication Inspector provides zero-daemon, dynamic clustering and replication telemetry for Percona XtraDB Cluster (PXC 5.7/8.0), Galera Cluster, MariaDB, and MySQL Source-Replica setups.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor DBA as Database Administrator
+    participant UI as Dedicated Tab (🌐 Cluster)
+    participant Server as Go API (/diagnostics/cluster)
+    participant Driver as MySQL / SQLite Driver
+    participant LocalDB as Local Database Node
+    participant Peers as Remote Peer Nodes (Auto-Probed)
+
+    DBA->>UI: Open "🌐 Cluster" tab (or 1s/3s/5s ticker)
+    UI->>Server: GET /api/session/{id}/diagnostics/cluster
+    Server->>Driver: InspectClusterHealth(ctx)
+    Driver->>LocalDB: SHOW GLOBAL STATUS (wsrep_ready, wsrep_cluster_*, etc.)
+    
+    alt Galera / PXC Active (wsrep_ready = ON)
+        Driver->>LocalDB: Read wsrep_incoming_addresses
+        par Parallel Peer Probing (1.5s timeout)
+            Driver->>LocalDB: Read local wsrep_local_recv_queue, FC sent
+        and
+            Driver->>Peers: Probe peer node 2 (Queue, FC sent)
+        and
+            Driver->>Peers: Probe peer node 3 (Queue, FC sent)
+        end
+        Driver->>Driver: Tri-Metric Correlation (EVS Latency + InnoDB waits + Slave Threads)
+        Driver->>Driver: Identify Slowest/Culprit Node triggering Flow Control
+    else Standard Replication (SHOW SLAVE STATUS)
+        Driver->>LocalDB: Read Seconds_Behind_Master & IO/SQL thread states
+    else Standalone Instance
+        Driver->>LocalDB: Read InnoDB storage wait telemetry (Buffer pool & fsyncs)
+    end
+
+    Driver-->>Server: Return ClusterHealthReport
+    Server-->>UI: 200 OK (JSON)
+    UI-->>DBA: Render Diagnostic Summary Badge + Tri-Metric Cards + Node Roster
+```
+
+---
+
+## 8. Directory & Package Structure
 
 ```
 sqlfox/
@@ -266,10 +312,12 @@ sqlfox/
 │   │   ├── notes.go                # Table documentation notes
 │   │   └── export.go               # .sqlfox-vault portable archive export/import
 │   ├── driver/                     # Database driver abstraction
-│   │   ├── driver.go               # Core interfaces (Driver, Session, RowStream, SafeDDL, OSC)
+│   │   ├── driver.go               # Core interfaces (Driver, Session, RowStream, SafeDDL, OSC, Cluster)
 │   │   ├── rowstream.go            # Canonical chunked row streaming
 │   │   ├── redundant_index.go      # Shadowed / duplicate index detection
-│   │   ├── mysql/                  # MySQL 5.7/8.x & MariaDB with fail-fast lock timeout & lock inspection
+│   │   ├── mysql/                  # MySQL 5.7/8.x, PXC, MariaDB with Galera cluster inspection & fail-fast DDL
+│   │   │   ├── mysql.go
+│   │   │   └── cluster_test.go     # Tri-metric cluster bottleneck heuristics test
 │   │   └── sqlite/                 # modernc.org/sqlite CGo-free pure-Go driver with FK inspection
 │   ├── safety/                     # Safety Guard engine
 │   │   ├── guard.go                # AST inspection & destructive operation detection with DDL guards
@@ -287,7 +335,7 @@ sqlfox/
 │       ├── handlers_connections.go # Connection CRUD & live testing
 │       ├── handlers_query.go       # SQL execution & cancellation
 │       ├── handlers_schema.go      # Schema tree, DDL, preflight DDL, pushdown filtering
-│       ├── handlers_dba.go         # Processlist, kill query, diagnostics, privilege matrix
+│       ├── handlers_dba.go         # Processlist, cluster health, diagnostics, privilege matrix
 │       ├── handlers_snippets.go    # Snippet management
 │       ├── handlers_import.go      # CSV upload & import endpoints
 │       └── handlers_ai.go          # AI chat & assistance streaming
@@ -297,7 +345,7 @@ sqlfox/
 │   │   └── index.html
 │   └── embed.go                    # //go:embed dist/*
 ├── docs/
-│   ├── adr/                        # Architectural Decision Records (0001 - 0022)
+│   ├── adr/                        # Architectural Decision Records (0001 - 0023)
 │   ├── playbooks/                  # Production operational playbooks (large-scale database management)
 │   └── agents/                     # Agent workflow documentation
 ├── CONTEXT.md                      # Ubiquitous domain language

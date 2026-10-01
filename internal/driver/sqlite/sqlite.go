@@ -565,6 +565,28 @@ func (s *SQLiteSession) ExecSafeDDL(ctx context.Context, ddl string, lockTimeout
 	}, nil
 }
 
+func (s *SQLiteSession) InspectClusterHealth(ctx context.Context) (*driver.ClusterHealthReport, error) {
+	return &driver.ClusterHealthReport{
+		TopologyType:        "standalone",
+		ClusterName:         "standalone-sqlite",
+		ClusterStatus:       "Standalone File Engine",
+		ClusterSize:         1,
+		LocalNodeName:       "local",
+		LocalNodeState:      "Active",
+		BottleneckDiagnosis: "SQLite embedded standalone engine (clustering not applicable)",
+		BottleneckSeverity:  "ok",
+		Nodes: []driver.ClusterNodeInfo{
+			{
+				Name:    "local",
+				Address: s.dsn,
+				State:   "Active",
+				IsLocal: true,
+				Status:  "online",
+			},
+		},
+	}, nil
+}
+
 func (s *SQLiteSession) Close() error {
 	return s.db.Close()
 }
@@ -572,3 +594,4 @@ func (s *SQLiteSession) Close() error {
 func quoteIdentifier(id string) string {
 	return `"` + strings.ReplaceAll(id, `"`, `""`) + `"`
 }
+

@@ -174,13 +174,16 @@ v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
 │   ├── [x] 11. Redundant / Duplicate Index Detector
 │   │   ├── Static schema analysis detecting shadowed or overlapping prefix indexes
 │   │   └── Safe cleanup recommendations
-│   └── [x] 12. Full Execution History & Session Audit Log
-│       ├── Append-only chronological ledger of all queries executed in session
-│       └── Execution metrics (timestamp, duration in ms, rows affected, error status)
+│   ├── [x] 12. Full Execution History & Session Audit Log
+│   │   ├── Append-only chronological ledger of all queries executed in session
+│   │   └── Execution metrics (timestamp, duration in ms, rows affected, error status)
+│   └── [x] 13. Dynamic Cluster & Replication Inspector (Galera, PXC 5.7/8.0, Source-Replica)
+│       ├── Auto-detection of Flow Control pauses, EVS network latency & InnoDB disk stalls
+│       └── Peer Node Auto-Discovery isolating the slowest bottleneck culprit node
 └── [C] Enterprise Foundations & Multi-Engine Extensions
-    ├── [ ] 13. PostgreSQL & ClickHouse Driver Extensions
-    ├── [ ] 14. Visual ERD Interactive Canvas (Drag-and-drop relationship visualizer)
-    └── [ ] 15. Headless CLI Suite (`sqlfox query --format=json`, `sqlfox transfer`) for CI/CD
+    ├── [ ] 14. PostgreSQL & ClickHouse Driver Extensions
+    ├── [ ] 15. Visual ERD Interactive Canvas (Drag-and-drop relationship visualizer)
+    └── [ ] 16. Headless CLI Suite (`sqlfox query --format=json`, `sqlfox transfer`) for CI/CD
 ```
 
 ---
@@ -291,5 +294,22 @@ v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
   - **Architecture Decision Record**: Formally recorded in `docs/adr/0022-safe-ddl-guardrails-and-lock-contention-prevention.md`.
   - **Operational Playbook**: Formally documented in `docs/playbooks/large-scale-database-management.md`.
 - **Runnable Verification**: Run `go test -v -run TestInspectTableRelationships ./internal/driver/...` and `go test -v -run TestPreflightDDLAndSafeExecution ./internal/server/...` -> verify inbound FK relationship warning is attached to Challenge Modal -> verify DDL executes via `ExecSafeDDL` with fail-fast timeout.
+
+---
+
+### Milestone 17: Dynamic Cluster & Replication Inspector with Peer Node Auto-Discovery & Tri-Metric Bottleneck Detective
+- **Goal**: Provide real-time, zero-daemon clustering and replication telemetry for Percona XtraDB Cluster (PXC 5.7/8.0), Galera Cluster, MariaDB, and MySQL Source-Replica architectures, answering *"why is the cluster slow"* and identifying the bottleneck culprit node.
+- **Deliverables**:
+  - **Unified Driver Seam**: Added `InspectClusterHealth(ctx context.Context) (*ClusterHealthReport, error)` across `Session` interface implementations.
+  - **Dynamic Engine & Topology Detection**: Automatically identifies Galera/PXC clustering (`wsrep_ready = ON`), standard MySQL Source-Replica replication (`SHOW SLAVE STATUS`), and standalone fallback instances without vendor lock-in.
+  - **Peer Node Auto-Discovery**: Extracts active node IPs from `wsrep_incoming_addresses` and dispatches lightweight, bounded parallel health probes (1.5s timeout) to compare receive queues and flow control pause events across all cluster members.
+  - **Culprit Node Attribution**: Automatically identifies and visually highlights the slowest node (`🚨 Slow Node`) causing cluster-wide backpressure.
+  - **Graceful Firewall Fallback**: Handles closed/firewalled VPC peer ports safely without blocking or errors (`🔒 Unreachable directly from client`).
+  - **Tri-Metric Bottleneck Detective**: Rule-based heuristic matrix correlating inter-node network latency (`wsrep_evs_repl_latency`), physical disk storage wait states (`Innodb_buffer_pool_wait_free`, log waits, fsyncs), and worker thread saturation (`wsrep_slave_threads`).
+  - **Dedicated UI Tab & Active Ticker**: Main workspace tab (`🌐 Cluster`) with 4 summary cards, Tri-Metric telemetry gauges, peer node cards, live auto-refresh ticker (1s/3s/5s) with background tab pause.
+  - **Actionable Remediation Shortcuts**: One-click actions to inspect processlists on the culprit node, switch active session connection to a peer node, and prefill AI Copilot with complete cluster telemetry for tuning guidance.
+  - **Documentation & Tests**: ADR-0023, glossary in `CONTEXT.md`, architecture specification in `ARCHITECTURE.md`, unit tests in `internal/driver/mysql/cluster_test.go` and `internal/server/dba_test.go`.
+- **Runnable Verification**: Run `go test -v ./internal/driver/mysql -run TestDiagnoseClusterBottleneck` and `go test -v ./internal/server -run TestAdvancedDiagnosticsAndProfiling` -> verify 100% pass across cluster diagnostics.
+
 
 

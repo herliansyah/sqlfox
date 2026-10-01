@@ -464,6 +464,17 @@ func (s *ActiveSession) GetProcesslist(ctx context.Context) (*driver.Processlist
 	return s.Session.GetProcesslist(ctx)
 }
 
+// InspectClusterHealth retrieves cluster topology, node synchronization, and bottleneck diagnostics.
+func (s *ActiveSession) InspectClusterHealth(ctx context.Context) (*driver.ClusterHealthReport, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.Session == nil {
+		return nil, driver.ErrSessionClosed
+	}
+	return s.Session.InspectClusterHealth(ctx)
+}
+
 // KillProcess terminates an active query or client connection out-of-band.
 func (s *ActiveSession) KillProcess(ctx context.Context, threadID int64, killConnection bool) error {
 	s.mu.RLock()

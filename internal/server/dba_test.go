@@ -265,5 +265,21 @@ func TestAdvancedDiagnosticsAndProfiling(t *testing.T) {
 		t.Fatalf("expected SQLite to fail user management, but got 200 OK")
 	}
 	userResp.Body.Close()
+
+	// 7. Cluster Health Inspection
+	clusterResp, err := client.Get(ts.URL + "/api/session/" + connRec.ID + "/diagnostics/cluster")
+	if err != nil || clusterResp.StatusCode != http.StatusOK {
+		t.Fatalf("cluster health request failed: %v", err)
+	}
+	var clusterData map[string]any
+	_ = json.NewDecoder(clusterResp.Body).Decode(&clusterData)
+	clusterResp.Body.Close()
+
+	if clusterData["topology_type"] != "standalone" {
+		t.Fatalf("expected topology_type standalone, got %v", clusterData["topology_type"])
+	}
+	if clusterData["bottleneck_severity"] != "ok" {
+		t.Fatalf("expected bottleneck_severity ok, got %v", clusterData["bottleneck_severity"])
+	}
 }
 
