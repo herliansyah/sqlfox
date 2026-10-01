@@ -859,6 +859,108 @@ func (s *MySQLSession) ApplyUserGrants(ctx context.Context, req driver.UserGrant
 	return nil
 }
 
+func (s *MySQLSession) InspectTableLocks(ctx context.Context, database, table string) ([]driver.TableLockInfo, error) {
+	if database == "" {
+		database = s.cfg.DatabaseName
+	}
+	var locks []driver.TableLockInfo
+
+	// 1. Try performance_schema.metadata_locks if available (MySQL 5.7+ / 8.0)
+	queryPfs := `
+		SELECT 
+			p.ID, 
+			IFNULL(p.USER, ''), 
+			IFNULL(p.HOST, ''), 
+			IFNULL(p.DB, ''), 
+			IFNULL(p.INFO, ''), 
+			IFNULL(p.TIME, 0), 
+			IFNULL(p.STATE, ''), 
+			IFNULL(m.LOCK_TYPE, '')
+		FROM performance_schema.metadata_locks m
+		JOIN information_schema.processlist p ON m.OWNER_THREAD_ID = p.ID
+		WHERE m.OBJECT_SCHEMA = ? AND m.OBJECT_NAME = ?
+	`
+	if rows, err := s.db.QueryContext(ctx, queryPfs, database, table); err == nil {
+		for rows.Next() {
+			var l driver.TableLockInfo
+			if err := rows.Scan(&l.ThreadID, &l.User, &l.Host, &l.Database, &l.Query, &l.DurationSec, &l.State, &l.LockMode); err == nil {
+				locks = append(locks, l)
+			}
+		}
+		rows.Close()
+	}
+
+	// 2. Query information_schema.innodb_trx joined with processlist
+	queryTrx := `
+		SELECT 
+			t.trx_mysql_thread_id, 
+			IFNULL(p.user, ''), 
+			IFNULL(p.host, ''), 
+			IFNULL(p.db, ''), 
+			IFNULL(COALESCE(p.info, t.trx_query), ''), 
+			IFNULL(TIMESTAMPDIFF(SECOND, t.trx_started, NOW()), 0), 
+			IFNULL(t.trx_state, ''), 
+			IFNULL(t.trx_operation_state, '')
+		FROM information_schema.innodb_trx t
+		LEFT JOIN information_schema.processlist p ON t.trx_mysql_thread_id = p.id
+		WHERE (p.info LIKE ? OR t.trx_query LIKE ? OR ? = '')
+	`
+	tblPattern := "%" + table + "%"
+	if rows, err := s.db.QueryContext(ctx, queryTrx, tblPattern, tblPattern, table); err == nil {
+		seen := make(map[int64]bool)
+		for _, l := range locks {
+			seen[l.ThreadID] = true
+		}
+		for rows.Next() {
+			var l driver.TableLockInfo
+			if err := rows.Scan(&l.ThreadID, &l.User, &l.Host, &l.Database, &l.Query, &l.DurationSec, &l.State, &l.LockMode); err == nil {
+				if !seen[l.ThreadID] {
+					locks = append(locks, l)
+					seen[l.ThreadID] = true
+				}
+			}
+		}
+		rows.Close()
+	}
+
+	if locks == nil {
+		locks = []driver.TableLockInfo{}
+	}
+	return locks, nil
+}
+
+func (s *MySQLSession) ExecSafeDDL(ctx context.Context, ddl string, lockTimeoutSec int) (*driver.ExecResult, error) {
+	if lockTimeoutSec <= 0 {
+		lockTimeoutSec = 3
+	}
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to obtain dedicated connection: %w", err)
+	}
+	defer conn.Close()
+
+	// Enforce fail-fast session lock timeout on dedicated connection
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf("SET SESSION lock_wait_timeout = %d", lockTimeoutSec)); err != nil {
+		return nil, fmt.Errorf("failed to set fail-fast lock_wait_timeout: %w", err)
+	}
+
+	start := time.Now()
+	res, err := conn.ExecContext(ctx, ddl)
+	duration := time.Since(start).Milliseconds()
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAff, _ := res.RowsAffected()
+	lastID, _ := res.LastInsertId()
+	return &driver.ExecResult{
+		RowsAffected: rowsAff,
+		LastInsertID: lastID,
+		ExecutionMs:  duration,
+		Message:      "Safe DDL executed successfully with fail-fast timeout",
+	}, nil
+}
+
 func (s *MySQLSession) Close() error {
 	return s.db.Close()
 }

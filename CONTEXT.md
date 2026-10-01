@@ -84,6 +84,22 @@ _Avoid_: Auto-dump, full backup
 The unified execution seam within an active Session that evaluates queries against the Safety Guard, verifies Environment trust tiers and Challenge Modals, triggers pre-DDL Smart Tiered Backups, and enforces the Implicit Safe Limit across all client transports (HTTP and WebSocket).
 _Avoid_: Query runner, execution handler, direct driver call
 
+**Pre-Flight Lock Inspection**:
+An automated diagnostic check intercepting DDL and large-scale mutations to detect open transactions, active metadata lock waiters, and blocking queries touching the target table prior to statement submission.
+_Avoid_: Lock scanner, trx sniffer
+
+**Fail-Fast DDL Timeout**:
+An isolated session lock timeout policy applied on a dedicated connection (`lock_wait_timeout` or `busy_timeout`) that immediately aborts blocked DDL operations within seconds to prevent cascading connection pool exhaustion.
+_Avoid_: Quick timeout, lock drop
+
+**Schema Relationship Introspection**:
+An automated dependency analysis scanning inbound and outbound foreign keys to identify high-risk schema alterations on master/lookup tables referenced by massive transaction tables.
+_Avoid_: FK tracker, relation map
+
+**OSC Generator**:
+An automated utility formulating production-ready Online Schema Change commands (`gh-ost`, `pt-online-schema-change`) with load throttles and binlog streaming for non-instant schema migrations.
+_Avoid_: DDL scripter, ghost wrapper
+
 ## Artificial Intelligence
 
 **BYOK (Bring Your Own Key)**:

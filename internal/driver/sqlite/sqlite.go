@@ -188,6 +188,26 @@ func (s *SQLiteSession) InspectSchema(ctx context.Context, dbName string) (*driv
 			idxRows.Close()
 		}
 
+		// Inspect foreign keys
+		fkRows, err := s.db.QueryContext(ctx, fmt.Sprintf("PRAGMA foreign_key_list(%s)", quoteIdentifier(name)))
+		if err == nil {
+			for fkRows.Next() {
+				var id, seq int
+				var refTable, fromCol, toCol, onUpdate, onDelete, match string
+				if err := fkRows.Scan(&id, &seq, &refTable, &fromCol, &toCol, &onUpdate, &onDelete, &match); err == nil {
+					tbl.ForeignKeys = append(tbl.ForeignKeys, driver.ForeignKeyMetadata{
+						Name:             fmt.Sprintf("fk_%s_%s", name, fromCol),
+						Column:           fromCol,
+						ReferencedTable:  refTable,
+						ReferencedColumn: toCol,
+						OnDelete:         onDelete,
+						OnUpdate:         onUpdate,
+					})
+				}
+			}
+			fkRows.Close()
+		}
+
 		tables = append(tables, tbl)
 	}
 
@@ -509,6 +529,40 @@ func (s *SQLiteSession) DropUser(ctx context.Context, user, host string) error {
 
 func (s *SQLiteSession) ApplyUserGrants(ctx context.Context, req driver.UserGrantRequest) error {
 	return errors.New("user privilege management is not supported on SQLite")
+}
+
+func (s *SQLiteSession) InspectTableLocks(ctx context.Context, database, table string) ([]driver.TableLockInfo, error) {
+	// In-process SQLite does not maintain an external metadata lock wait table.
+	return []driver.TableLockInfo{}, nil
+}
+
+func (s *SQLiteSession) ExecSafeDDL(ctx context.Context, ddl string, lockTimeoutSec int) (*driver.ExecResult, error) {
+	if lockTimeoutSec <= 0 {
+		lockTimeoutSec = 3
+	}
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to obtain dedicated sqlite connection: %w", err)
+	}
+	defer conn.Close()
+
+	_, _ = conn.ExecContext(ctx, fmt.Sprintf("PRAGMA busy_timeout = %d", lockTimeoutSec*1000))
+
+	start := time.Now()
+	res, err := conn.ExecContext(ctx, ddl)
+	duration := time.Since(start).Milliseconds()
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAff, _ := res.RowsAffected()
+	lastID, _ := res.LastInsertId()
+	return &driver.ExecResult{
+		RowsAffected: rowsAff,
+		LastInsertID: lastID,
+		ExecutionMs:  duration,
+		Message:      "Safe DDL executed successfully on SQLite",
+	}, nil
 }
 
 func (s *SQLiteSession) Close() error {

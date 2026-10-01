@@ -101,6 +101,12 @@ type Session interface {
 	// ApplyUserGrants grants privileges to a user.
 	ApplyUserGrants(ctx context.Context, req UserGrantRequest) error
 
+	// InspectTableLocks returns active transactions and lock holders touching a specific table.
+	InspectTableLocks(ctx context.Context, database, table string) ([]TableLockInfo, error)
+
+	// ExecSafeDDL executes a DDL statement on a dedicated connection with a strict session lock timeout.
+	ExecSafeDDL(ctx context.Context, sql string, lockTimeoutSec int) (*ExecResult, error)
+
 	io.Closer
 }
 
@@ -259,6 +265,18 @@ type LockWait struct {
 	IsRootBlocker    bool   `json:"is_root_blocker"`
 }
 
+// TableLockInfo describes an active transaction or metadata lock touching a table.
+type TableLockInfo struct {
+	ThreadID    int64  `json:"thread_id"`
+	User        string `json:"user"`
+	Host        string `json:"host"`
+	Database    string `json:"database"`
+	Query       string `json:"query"`
+	DurationSec int64  `json:"duration_sec"`
+	State       string `json:"state"`
+	LockMode    string `json:"lock_mode,omitempty"`
+}
+
 // ProcesslistResult holds active threads and lock analysis.
 type ProcesslistResult struct {
 	CurrentThreadID int64         `json:"current_thread_id"`
@@ -411,5 +429,82 @@ func Connect(ctx context.Context, cfg Config) (Session, error) {
 		return nil, err
 	}
 	return d.Connect(ctx, cfg)
+}
+
+// TableRelationshipInfo describes an inbound or outbound foreign key coupling.
+type TableRelationshipInfo struct {
+	Direction        string `json:"direction"` // "PARENT" (referenced by other table) or "CHILD" (references other table)
+	RelatedTable     string `json:"related_table"`
+	ForeignKey       string `json:"foreign_key"`
+	Column           string `json:"column"`
+	ReferencedColumn string `json:"referenced_column"`
+}
+
+// InspectTableRelationships scans schema metadata to detect inbound and outbound foreign key dependencies.
+func InspectTableRelationships(schema *SchemaMetadata, table string) []TableRelationshipInfo {
+	if schema == nil || table == "" {
+		return []TableRelationshipInfo{}
+	}
+	var rels []TableRelationshipInfo
+	for _, t := range schema.Tables {
+		if strings.EqualFold(t.Name, table) {
+			for _, fk := range t.ForeignKeys {
+				rels = append(rels, TableRelationshipInfo{
+					Direction:        "CHILD",
+					RelatedTable:     fk.ReferencedTable,
+					ForeignKey:       fk.Name,
+					Column:           fk.Column,
+					ReferencedColumn: fk.ReferencedColumn,
+				})
+			}
+		} else {
+			for _, fk := range t.ForeignKeys {
+				if strings.EqualFold(fk.ReferencedTable, table) {
+					rels = append(rels, TableRelationshipInfo{
+						Direction:        "PARENT",
+						RelatedTable:     t.Name,
+						ForeignKey:       fk.Name,
+						Column:           fk.Column,
+						ReferencedColumn: fk.ReferencedColumn,
+					})
+				}
+			}
+		}
+	}
+	if rels == nil {
+		rels = []TableRelationshipInfo{}
+	}
+	return rels
+}
+
+// GenerateOSCCommand formats a production-ready Online Schema Change command.
+func GenerateOSCCommand(tool, host string, port int, user, database, table, alterClause string) string {
+	if port <= 0 {
+		port = 3306
+	}
+	if user == "" {
+		user = "root"
+	}
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	cleanAlter := strings.TrimSpace(alterClause)
+	if strings.HasPrefix(strings.ToUpper(cleanAlter), "ALTER TABLE ") {
+		idx := strings.Index(cleanAlter, table)
+		if idx != -1 {
+			cleanAlter = strings.TrimSpace(cleanAlter[idx+len(table):])
+		}
+	}
+
+	if strings.EqualFold(tool, "pt-osc") || strings.EqualFold(tool, "pt-online-schema-change") {
+		return fmt.Sprintf("pt-online-schema-change \\\n  --host=%q \\\n  --port=%d \\\n  --user=%q \\\n  --ask-pass \\\n  --alter=%q \\\n  D=%q,t=%q \\\n  --chunk-size=1000 \\\n  --max-load=\"Threads_running=30\" \\\n  --critical-load=\"Threads_running=60\" \\\n  --execute",
+			host, port, user, cleanAlter, database, table,
+		)
+	}
+
+	// Default: gh-ost
+	return fmt.Sprintf("gh-ost \\\n  --host=%q \\\n  --port=%d \\\n  --user=%q \\\n  --ask-pass \\\n  --database=%q \\\n  --table=%q \\\n  --alter=%q \\\n  --chunk-size=1000 \\\n  --max-load=\"Threads_running=30\" \\\n  --critical-load=\"Threads_running=60\" \\\n  --allow-on-master \\\n  --execute",
+		host, port, user, database, table, cleanAlter,
+	)
 }
 

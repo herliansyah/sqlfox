@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 
+	"sqlfox/internal/driver"
+
 	"github.com/xwb1989/sqlparser"
 )
 
@@ -19,13 +21,15 @@ const (
 
 // InspectionResult details the safety evaluation of a SQL query.
 type InspectionResult struct {
-	RiskLevel         RiskLevel `json:"risk_level"`
-	IsDestructive     bool      `json:"is_destructive"`
-	RequiresChallenge bool      `json:"requires_challenge"`
-	TargetTable       string    `json:"target_table,omitempty"`
-	Operation         string    `json:"operation,omitempty"`
-	Reason            string    `json:"reason,omitempty"`
-	Suggestion        string    `json:"suggestion,omitempty"`
+	RiskLevel         RiskLevel                      `json:"risk_level"`
+	IsDestructive     bool                           `json:"is_destructive"`
+	RequiresChallenge bool                           `json:"requires_challenge"`
+	TargetTable       string                         `json:"target_table,omitempty"`
+	Operation         string                         `json:"operation,omitempty"`
+	Reason            string                         `json:"reason,omitempty"`
+	Suggestion        string                         `json:"suggestion,omitempty"`
+	TableLocks        []driver.TableLockInfo         `json:"table_locks,omitempty"`
+	Relationships     []driver.TableRelationshipInfo `json:"relationships,omitempty"`
 }
 
 // ponytail: Inspect is a pure deterministic package function; SafetyGuard struct is kept as lightweight alias.
@@ -151,6 +155,7 @@ var (
 	reTruncate = regexp.MustCompile(`(?i)^\s*TRUNCATE\s+(TABLE\s+)?([` + "`" + `"'\w\.]+)`)
 	reDelete   = regexp.MustCompile(`(?i)^\s*DELETE\s+FROM\s+([` + "`" + `"'\w\.]+)`)
 	reUpdate   = regexp.MustCompile(`(?i)^\s*UPDATE\s+([` + "`" + `"'\w\.]+)`)
+	reAlter    = regexp.MustCompile(`(?i)^\s*ALTER\s+TABLE\s+([` + "`" + `"'\w\.]+)`)
 	reWhere    = regexp.MustCompile(`(?i)\bWHERE\b`)
 )
 
@@ -224,6 +229,18 @@ func inspectLexicalFallback(query string, environment string) *InspectionResult 
 				Operation:     "UPDATE",
 				Reason:        fmt.Sprintf("UPDATE on PRODUCTION environment targeting '%s'.", target),
 			}
+		}
+	}
+
+	if match := reAlter.FindStringSubmatch(query); len(match) > 1 {
+		target := cleanTableName(match[1])
+		return &InspectionResult{
+			RiskLevel:         RiskDangerous,
+			IsDestructive:     true,
+			RequiresChallenge: isProd,
+			TargetTable:       target,
+			Operation:         "ALTER",
+			Reason:            fmt.Sprintf("ALTER TABLE modifies schema structure on '%s'.", target),
 		}
 	}
 
