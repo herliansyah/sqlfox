@@ -4091,7 +4091,7 @@
                     Kill C
                   </button>
                 `}
-                <button onclick="showProcessContextMenu(event, ${t.id})" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs border border-slate-700 transition" title="More thread actions">
+                <button data-pl-menu-btn onclick="event.stopPropagation(); showProcessContextMenu(event, this, ${t.id})" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs border border-slate-700 transition" title="More thread actions">
                   ⋮
                 </button>
               </div>
@@ -4216,22 +4216,41 @@
       if (btnKillQ) btnKillQ.disabled = !hasQuery || isSystem;
       if (btnKillC) btnKillC.disabled = isSelf || isSystem;
 
-      showNativeModal(modal);
+      if (typeof modal.showModal === 'function') {
+        modal.showModal();
+      } else {
+        modal.setAttribute('open', '');
+      }
     }
 
     function closeProcessDetailModal() {
       const modal = document.getElementById('pl-detail-modal');
-      if (modal) closeNativeModal(modal);
+      if (modal) {
+        if (typeof modal.close === 'function') {
+          modal.close();
+        } else {
+          modal.removeAttribute('open');
+        }
+      }
     }
 
-    function showProcessContextMenu(event, threadId) {
-      if (event) event.stopPropagation();
+    function showProcessContextMenu(event, btnEl, threadId) {
+      if (event) {
+        event.stopPropagation();
+        event.preventDefault();
+      }
+      const menu = document.getElementById('pl-context-menu');
+      if (!menu) return;
+
+      // If already open for this thread, toggle close
+      if (!menu.classList.contains('hidden') && selectedProcessThread && selectedProcessThread.id === threadId) {
+        closeProcessContextMenu();
+        return;
+      }
+
       const thread = (processlistData.threads || []).find(t => t.id === threadId);
       if (!thread) return;
       selectedProcessThread = thread;
-
-      const menu = document.getElementById('pl-context-menu');
-      if (!menu) return;
 
       const isSelf = thread.id === (processlistData.current_thread_id || 0);
       const isSystem = (thread.user === 'system user' || thread.user === 'event_scheduler' || thread.command === 'Binlog Dump');
@@ -4259,15 +4278,21 @@
         btnKillC.disabled = isSelf || isSystem;
       }
 
-      const rect = event.currentTarget.getBoundingClientRect();
-      let top = rect.bottom + 4;
-      let left = rect.left - 130;
-      if (left < 10) left = 10;
-      if (top + 280 > window.innerHeight) {
-        top = Math.max(10, rect.top - 280);
+      const anchor = btnEl || (event && event.currentTarget) || (event && event.target);
+      if (anchor && anchor.getBoundingClientRect) {
+        const rect = anchor.getBoundingClientRect();
+        let top = rect.bottom + 4;
+        let left = rect.left - 130;
+        if (left < 10) left = 10;
+        if (top + 280 > window.innerHeight) {
+          top = Math.max(10, rect.top - 280);
+        }
+        menu.style.top = `${top}px`;
+        menu.style.left = `${left}px`;
+      } else if (event) {
+        menu.style.top = `${event.clientY + 4}px`;
+        menu.style.left = `${Math.max(10, event.clientX - 130)}px`;
       }
-      menu.style.top = `${top}px`;
-      menu.style.left = `${left}px`;
       menu.classList.remove('hidden');
     }
 
@@ -8788,8 +8813,10 @@
         closeFKPeekPopover();
       }
       const plMenu = document.getElementById('pl-context-menu');
-      if (plMenu && !plMenu.classList.contains('hidden') && !plMenu.contains(e.target)) {
-        closeProcessContextMenu();
+      if (plMenu && !plMenu.classList.contains('hidden')) {
+        if (!plMenu.contains(e.target) && !e.target.closest('[data-pl-menu-btn]')) {
+          closeProcessContextMenu();
+        }
       }
     });
 
