@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"strings"
 	"sync"
@@ -34,25 +33,7 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 		cfg.Port = 3306
 	}
 
-	var tunnel *sshTunnel
-	network := "tcp"
-
-	// 1. Configure SSH Tunnel if enabled
-	if cfg.UseSSH && cfg.SSHHost != "" {
-		var err error
-		tunnel, err = createSSHTunnel(ctx, cfg.SSHHost, cfg.SSHPort, cfg.SSHUser, cfg.SSHPassword, cfg.SSHKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to establish SSH tunnel: %w", err)
-		}
-
-		networkName := fmt.Sprintf("ssh-%d", time.Now().UnixNano())
-		gomysql.RegisterDialContext(networkName, func(ctx context.Context, addr string) (net.Conn, error) {
-			return tunnel.DialContext(ctx, addr)
-		})
-		network = networkName
-	}
-
-	// 2. Configure TLS / SSL if enabled
+	// 1. Configure TLS / SSL if enabled
 	tlsParam := "false"
 	if cfg.UseSSL {
 		tlsConfig := &tls.Config{
@@ -87,17 +68,14 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 		}
 	}
 
-	// 3. Assemble DSN
+	// 2. Assemble DSN
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
-	dsn := fmt.Sprintf("%s:%s@%s(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&tls=%s&timeout=10s",
-		cfg.User, cfg.Password, network, addr, cfg.DatabaseName, tlsParam,
+	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&tls=%s&timeout=10s",
+		cfg.User, cfg.Password, addr, cfg.DatabaseName, tlsParam,
 	)
 
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
-		if tunnel != nil {
-			tunnel.Close()
-		}
 		return nil, fmt.Errorf("failed to open mysql connection: %w", err)
 	}
 
@@ -109,16 +87,12 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 	// Test connection
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
-		if tunnel != nil {
-			tunnel.Close()
-		}
 		return nil, fmt.Errorf("failed to connect to MySQL server (%s:%d): %w", cfg.Host, cfg.Port, err)
 	}
 
 	return &MySQLSession{
 		db:           db,
 		cfg:          cfg,
-		tunnel:       tunnel,
 		queryThreads: make(map[string]int64),
 	}, nil
 }
@@ -126,7 +100,6 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 type MySQLSession struct {
 	db           *sql.DB
 	cfg          driver.Config
-	tunnel       *sshTunnel
 	mu           sync.Mutex
 	queryThreads map[string]int64
 }
@@ -887,13 +860,5 @@ func (s *MySQLSession) ApplyUserGrants(ctx context.Context, req driver.UserGrant
 }
 
 func (s *MySQLSession) Close() error {
-	dbErr := s.db.Close()
-	var tunnelErr error
-	if s.tunnel != nil {
-		tunnelErr = s.tunnel.Close()
-	}
-	if dbErr != nil {
-		return dbErr
-	}
-	return tunnelErr
+	return s.db.Close()
 }

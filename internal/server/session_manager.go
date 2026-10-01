@@ -110,12 +110,6 @@ func (sm *SessionManager) ConnectSession(ctx context.Context, connectionID strin
 		SSLCA:        conn.SSLCA,
 		SSLCert:      conn.SSLCert,
 		SSLKey:       conn.SSLKey,
-		UseSSH:       conn.UseSSH,
-		SSHHost:      conn.SSHHost,
-		SSHPort:      conn.SSHPort,
-		SSHUser:      conn.SSHUser,
-		SSHPassword:  conn.SSHPassword,
-		SSHKey:       conn.SSHKey,
 	}
 
 	dbSession, err := driver.Connect(ctx, cfg)

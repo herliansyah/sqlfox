@@ -168,59 +168,91 @@ type RowStream interface {
 
 ---
 
-## 5. Directory & Package Structure
+## 5. Table Viewer Inline Filtering & Pushdown Flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant Grid as Virtual Data Grid & Filter Bar
+    participant Server as Go API Server
+    participant Validator as Filter Guard (Token & Verb Check)
+    participant Driver as DB Driver (MySQL/SQLite)
+    participant Target as Target Database
+
+    User->>Grid: Type filter (e.g. `status = 'active'`) & press Enter
+    Grid->>Server: GET /api/session/{id}/table/{name}/rows?limit=50&offset=0&filter=status+%3D+%27active%27
+    Server->>Validator: validateTableFilter(filter)
+    alt Semicolon or Destructive Keyword Detected
+        Validator-->>Server: Error (invalid filter expression)
+        Server-->>Grid: 400 Bad Request
+        Grid->>User: Display error message in table body
+    else Safe Filter Expression
+        Validator-->>Server: OK
+        Server->>Driver: QueryStream(ctx, "SELECT * FROM `table` WHERE (status = 'active') LIMIT 50")
+        Driver->>Target: Execute indexed SELECT with WHERE
+        Target-->>Driver: Result rows
+        Driver-->>Server: Row stream
+        Server-->>Grid: JSON { columns, rows, pk_col, filter }
+        Grid->>Grid: Render filtered rows & update "Filtered" indicator
+    end
+```
+
+---
+
+## 6. Directory & Package Structure
 
 ```
 sqlfox/
 ├── cmd/
 │   └── sqlfox/
-│       └── main.go                 # Entry point: flags, localhost listener, browser launcher
+│       ├── main.go                 # Entry point: flags, localhost listener, port hunting, browser launcher
+│       └── main_test.go
 ├── internal/
-│   ├── app/                        # Application container & dependency wiring
 │   ├── vault/                      # SQLite config storage & AES-256-GCM credential encryption
-│   │   ├── vault.go
-│   │   ├── crypto.go               # Argon2id key derivation & AES-GCM
+│   │   ├── vault.go                # Connections, master password, audit log
+│   │   ├── crypto.go               # Argon2id key derivation & AES-256-GCM
+│   │   ├── snippets.go             # Parameterized SQL snippets
+│   │   ├── notes.go                # Table documentation notes
 │   │   └── export.go               # .sqlfox-vault portable archive export/import
 │   ├── driver/                     # Database driver abstraction
 │   │   ├── driver.go               # Core interfaces (Driver, Session, RowStream)
-│   │   ├── mysql/                  # go-sql-driver/mysql implementation + SSH tunnel dialer
-│   │   └── sqlite/                 # modernc.org/sqlite pure-Go implementation
+│   │   ├── rowstream.go            # Canonical chunked row streaming
+│   │   ├── redundant_index.go      # Shadowed / duplicate index detection
+│   │   ├── mysql/                  # go-sql-driver/mysql pure-Go driver
+│   │   └── sqlite/                 # modernc.org/sqlite CGo-free pure-Go driver
 │   ├── safety/                     # Safety Guard engine
-│   │   ├── guard.go                # Safety policy orchestrator
-│   │   ├── parser.go               # TiDB SQL AST parser integration
-│   │   ├── rules.go                # Destructive pattern evaluators
-│   │   └── backup.go               # Smart tiered pre-DDL backup manager
+│   │   ├── guard.go                # AST inspection & destructive operation detection
+│   │   └── backup.go               # Smart tiered pre-destruction table snapshot manager
 │   ├── ai/                         # AI Assistant integration
-│   │   ├── client.go               # Generic client (OpenAI, Claude, Gemini, Ollama)
-│   │   ├── firewall.go             # Schema filter, data masking & prompt builder
-│   │   └── prompts.go              # Structured prompts for explain, plan, optimize
-│   └── server/                     # HTTP and WebSocket transport
-│       ├── server.go               # Chi router setup & static file embedding
-│       ├── handlers_connection.go  # Connection CRUD & test
-│       ├── handlers_query.go       # Query execution & WS streaming
-│       ├── handlers_schema.go      # Schema tree & DDL retrieval
-│       ├── handlers_ai.go          # AI chat & explanation endpoints
-│       └── ws.go                   # WebSocket streaming hub
-├── web/                            # Frontend source (Svelte / Vue 3 + Tailwind)
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── editor/             # CodeMirror 6 SQL editor & autocompleter
-│   │   │   ├── grid/               # Virtualized data grid with inline edit
-│   │   │   ├── schema/             # Database tree viewer
-│   │   │   ├── modal/              # Challenge modals & impact previews
-│   │   │   └── ai/                 # AI chat sidebar
-│   │   ├── stores/                 # State management (tabs, active connection)
-│   │   └── App.vue / App.svelte
-│   ├── dist/                       # Compiled assets embedded via //go:embed
-│   ├── embed.go                    # //go:embed dist/*
-│   └── package.json
+│   │   ├── client.go               # Pure stdlib client (OpenAI, Claude, Gemini, Ollama)
+│   │   ├── firewall.go             # Zero-leakage schema pruner & data masking
+│   │   └── prompts.go              # Structured prompts for explain, optimize, NL-to-SQL
+│   ├── dataimport/                 # CSV Ingestion Engine
+│   │   └── importer.go             # Delimiter sniffing, column mapping, batched streaming
+│   └── server/                     # HTTP transport & handlers
+│       ├── server.go               # HTTP routing & SPA static file serving
+│       ├── auth.go                 # Remote Access Guard & LAN tablet token auth
+│       ├── session_manager.go      # Active database connection pool & session state
+│       ├── handlers_connections.go # Connection CRUD & live testing
+│       ├── handlers_query.go       # SQL execution & cancellation
+│       ├── handlers_schema.go      # Schema tree, DDL, table rows, pushdown filtering
+│       ├── handlers_dba.go         # Processlist, kill query, diagnostics, privilege matrix
+│       ├── handlers_snippets.go    # Snippet management
+│       ├── handlers_import.go      # CSV upload & import endpoints
+│       └── handlers_ai.go          # AI chat & assistance streaming
+├── web/                            # Single-file zero-build SPA embedded into binary
+│   ├── dist/                       # index.html + vendor assets (CodeMirror, Tailwind)
+│   │   ├── vendor/
+│   │   └── index.html
+│   └── embed.go                    # //go:embed dist/*
 ├── docs/
-│   ├── adr/                        # Architectural Decision Records
+│   ├── adr/                        # Architectural Decision Records (0001 - 0020)
 │   └── agents/                     # Agent workflow documentation
 ├── CONTEXT.md                      # Ubiquitous domain language
 ├── ARCHITECTURE.md                 # System architecture (this document)
 ├── SECURITY.md                     # Security & privacy specification
 ├── UX_DESIGN.md                    # Interface wireframes & design tokens
-├── MILESTONES.md                   # Delivery roadmap & MVPs
+├── MILESTONES.md                   # Delivery roadmap & milestones (1 - 14)
 └── go.mod
 ```

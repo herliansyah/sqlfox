@@ -12,10 +12,8 @@ import (
 )
 
 var (
-	ErrUnsupportedDriver   = errors.New("unsupported database driver")
-	ErrQueryCancelled      = errors.New("query execution was cancelled")
-	ErrSessionClosed       = errors.New("database session is closed")
-	ErrConnectionFailed    = errors.New("failed to connect to database")
+	ErrUnsupportedDriver = errors.New("unsupported database driver")
+	ErrSessionClosed     = errors.New("database session is closed")
 )
 
 // Driver manages database connection dialing.
@@ -36,12 +34,6 @@ type Config struct {
 	SSLCA        string
 	SSLCert      string
 	SSLKey       string
-	UseSSH       bool
-	SSHHost      string
-	SSHPort      int
-	SSHUser      string
-	SSHPassword  string
-	SSHKey       string
 }
 
 // Session represents an active connection to a target database.
