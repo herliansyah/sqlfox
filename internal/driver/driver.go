@@ -82,6 +82,33 @@ type Session interface {
 	// KillProcess interrupts a query or connection out-of-band.
 	KillProcess(ctx context.Context, threadID int64, killConnection bool) error
 
+	// GetTableDiagnostics returns physical storage and fragmentation overhead.
+	GetTableDiagnostics(ctx context.Context, database, table string) ([]TableDiagnostics, error)
+
+	// ExecuteMaintenance executes table maintenance operations.
+	ExecuteMaintenance(ctx context.Context, database string, tables []string, action string) ([]MaintenanceResult, error)
+
+	// GetRedundantIndexes identifies shadowed or duplicate indexes.
+	GetRedundantIndexes(ctx context.Context, database, table string) ([]RedundantIndex, error)
+
+	// PeekForeignKeyRow queries parent table for a single row matching a foreign key value.
+	PeekForeignKeyRow(ctx context.Context, database, table, column string, value any) (*PeekResult, error)
+
+	// GetUserList lists server user accounts.
+	GetUserList(ctx context.Context) ([]DatabaseUser, error)
+
+	// GetUserGrants returns active grants for a user account.
+	GetUserGrants(ctx context.Context, user, host string) ([]string, error)
+
+	// SaveUser creates or updates a user account with optional password change.
+	SaveUser(ctx context.Context, user, host, password string, isNew bool) error
+
+	// DropUser removes a user account.
+	DropUser(ctx context.Context, user, host string) error
+
+	// ApplyUserGrants grants privileges to a user.
+	ApplyUserGrants(ctx context.Context, req UserGrantRequest) error
+
 	io.Closer
 }
 
@@ -245,6 +272,77 @@ type ProcesslistResult struct {
 	CurrentThreadID int64         `json:"current_thread_id"`
 	Threads         []ProcessItem `json:"threads"`
 	Locks           []LockWait    `json:"locks"`
+}
+
+// TableDiagnostics contains physical storage and fragmentation metrics.
+type TableDiagnostics struct {
+	Name         string `json:"name"`
+	Engine       string `json:"engine"`
+	Rows         int64  `json:"rows"`
+	DataSize     int64  `json:"data_size"`
+	IndexSize    int64  `json:"index_size"`
+	OverheadSize int64  `json:"overhead_size"`
+	RowFormat    string `json:"row_format"`
+	Collation    string `json:"collation"`
+	CreatedAt    string `json:"created_at,omitempty"`
+	UpdatedAt    string `json:"updated_at,omitempty"`
+}
+
+// MaintenanceResult holds the output of OPTIMIZE/ANALYZE/CHECK/VACUUM operations.
+type MaintenanceResult struct {
+	Table   string `json:"table"`
+	Op      string `json:"op"`
+	Status  string `json:"status"`
+	Message string `json:"message"`
+}
+
+// RedundantIndex describes an index that is duplicated, shadowed, or redundant with a primary key.
+type RedundantIndex struct {
+	Table          string   `json:"table"`
+	RedundantIndex string   `json:"redundant_index"`
+	RedundantCols  []string `json:"redundant_cols"`
+	ShadowedBy     string   `json:"shadowed_by"`
+	ShadowedCols   []string `json:"shadowed_cols"`
+	Reason         string   `json:"reason"`
+	DropSQL        string   `json:"drop_sql"`
+}
+
+// PeekResult contains the referenced parent row for foreign key data peeking.
+type PeekResult struct {
+	Table   string         `json:"table"`
+	KeyCol  string         `json:"key_col"`
+	KeyVal  any            `json:"key_val"`
+	Row     map[string]any `json:"row"`
+	Columns []string       `json:"columns"`
+}
+
+// ProfileStage represents a single phase in query execution.
+type ProfileStage struct {
+	Stage      string  `json:"stage"`
+	DurationUs int64   `json:"duration_us"`
+	Percentage float64 `json:"percentage"`
+}
+
+// QueryProfile summarizes total execution duration and breakdown by stage.
+type QueryProfile struct {
+	DurationMs float64        `json:"duration_ms"`
+	Stages     []ProfileStage `json:"stages"`
+}
+
+// DatabaseUser represents a server user account.
+type DatabaseUser struct {
+	User string `json:"user"`
+	Host string `json:"host"`
+}
+
+// UserGrantRequest specifies privilege mutation parameters for a user account.
+type UserGrantRequest struct {
+	User       string   `json:"user"`
+	Host       string   `json:"host"`
+	Scope      string   `json:"scope"` // GLOBAL or DATABASE
+	Database   string   `json:"database,omitempty"`
+	Privileges []string `json:"privileges"`
+	WithGrant  bool     `json:"with_grant"`
 }
 
 // Schema metadata structures

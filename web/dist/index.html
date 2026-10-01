@@ -176,6 +176,14 @@
         <span>📜 Audit Log</span>
       </button>
 
+      <button id="btn-open-diagnostics" onclick="openDatabaseDiagnosticsModal()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition flex items-center space-x-1" title="Table Storage Diagnostics & Optimization">
+        <span>📊 Diagnostics</span>
+      </button>
+
+      <button id="btn-open-privileges" onclick="openPrivilegeMatrixModal()" class="hidden bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition flex items-center space-x-1" title="User Accounts & Privilege Matrix (MySQL)">
+        <span>👥 Users</span>
+      </button>
+
       <button onclick="openExportImportModal()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition">
         📦 Vault
       </button>
@@ -318,6 +326,10 @@
               <span>📑</span>
               <span>Snippets</span>
             </button>
+            <button id="btn-toggle-profile" onclick="toggleQueryProfiler()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition flex items-center space-x-1" title="Toggle Query Execution Profiling (SHOW PROFILE)">
+              <span>⏱️</span>
+              <span id="profile-toggle-text">Profile: OFF</span>
+            </button>
 
             <button id="export-notes-btn" onclick="exportCurrentNotes()" class="hidden text-slate-300 hover:text-white px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 transition flex items-center space-x-1" title="Download Notes as Markdown">
               <span>💾</span>
@@ -361,6 +373,9 @@
           <button id="btn-mode-notes" onclick="setTableMode('notes')" class="px-3 py-1 rounded text-xs text-slate-400 hover:text-white hover:bg-slate-800 flex items-center space-x-1">
             <span>📝</span><span>Notes &amp; Runbook</span>
           </button>
+          <button id="btn-mode-diagnostics" onclick="setTableMode('diagnostics')" class="px-3 py-1 rounded text-xs text-slate-400 hover:text-white hover:bg-slate-800 flex items-center space-x-1">
+            <span>⚡</span><span>Diagnostics</span>
+          </button>
         </div>
 
 
@@ -368,6 +383,9 @@
         <div id="grid-toolbar" class="h-8 bg-app-surface/40 border-b border-app-border px-3 flex items-center justify-between text-xs text-slate-400">
           <div class="flex items-center space-x-2.5">
             <span id="grid-result-stats">0 rows</span>
+            <button id="btn-view-profile" onclick="toggleProfileView()" class="hidden px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-400 border border-sky-800 text-[11px] font-semibold flex items-center space-x-1 transition" title="Inspect query execution stages and timings">
+              <span>⏱️ Profiler</span>
+            </button>
             <span id="grid-limit-badge" class="bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded text-[10px]">Safe Limit: 1,000</span>
 
             <!-- Staged Apply/Discard Buttons -->
@@ -644,6 +662,101 @@
             <textarea id="table-notes-textarea" oninput="onTableNoteInput()" placeholder="# Table Runbook &amp; Business Logic&#10;&#10;Document institutional business rules, required filters, and query gotchas for this table.&#10;These notes are saved in your local Vault and automatically supplied to AI Copilot prompts." class="flex-1 p-4 bg-app-bg text-slate-100 font-mono text-xs leading-relaxed outline-none resize-none"></textarea>
             <!-- Preview Mode HTML -->
             <div id="table-notes-preview" class="hidden flex-1 p-5 bg-app-bg text-slate-200 text-xs overflow-y-auto leading-relaxed max-w-none"></div>
+          </div>
+        </div>
+
+        <!-- Table Diagnostics View (Diagnostics Mode) -->
+        <div id="table-diagnostics-view" class="hidden flex-1 flex flex-col overflow-y-auto bg-app-bg p-4 space-y-4">
+          <!-- Metric Cards -->
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div class="bg-slate-900 border border-slate-800 rounded p-3">
+              <span class="text-[11px] text-slate-400 block font-medium">Data Size</span>
+              <span id="td-data-size" class="text-lg font-bold text-sky-400">-</span>
+            </div>
+            <div class="bg-slate-900 border border-slate-800 rounded p-3">
+              <span class="text-[11px] text-slate-400 block font-medium">Index Size</span>
+              <span id="td-index-size" class="text-lg font-bold text-indigo-400">-</span>
+            </div>
+            <div class="bg-slate-900 border border-slate-800 rounded p-3">
+              <span class="text-[11px] text-slate-400 block font-medium">Overhead / Fragmentation</span>
+              <span id="td-overhead-size" class="text-lg font-bold text-amber-400">-</span>
+            </div>
+            <div class="bg-slate-900 border border-slate-800 rounded p-3">
+              <span class="text-[11px] text-slate-400 block font-medium">Estimated Rows</span>
+              <span id="td-rows-count" class="text-lg font-bold text-emerald-400">-</span>
+            </div>
+          </div>
+
+          <!-- Metadata info -->
+          <div class="bg-slate-900/60 border border-slate-800 rounded p-3 text-xs flex flex-wrap gap-4 text-slate-300">
+            <div><span class="text-slate-500">Engine:</span> <span id="td-engine" class="font-semibold text-white">-</span></div>
+            <div><span class="text-slate-500">Collation:</span> <span id="td-collation" class="font-semibold text-white">-</span></div>
+            <div><span class="text-slate-500">Row Format:</span> <span id="td-row-format" class="font-semibold text-white">-</span></div>
+            <div><span class="text-slate-500">Created:</span> <span id="td-created" class="font-mono text-slate-400">-</span></div>
+            <div><span class="text-slate-500">Updated:</span> <span id="td-updated" class="font-mono text-slate-400">-</span></div>
+          </div>
+
+          <!-- Maintenance Actions Bar -->
+          <div class="bg-slate-900 border border-slate-800 rounded p-3 space-y-2">
+            <h4 class="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center space-x-1.5">
+              <span>🛠️</span><span>Table Maintenance Actions</span>
+            </h4>
+            <div class="flex items-center space-x-2 text-xs">
+              <button onclick="runTableMaintenance('OPTIMIZE')" class="bg-sky-600 hover:bg-sky-500 text-white font-semibold px-3 py-1.5 rounded transition flex items-center space-x-1">
+                <span>⚡ Optimize Table</span>
+              </button>
+              <button onclick="runTableMaintenance('ANALYZE')" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded transition flex items-center space-x-1">
+                <span>📊 Analyze Table</span>
+              </button>
+              <button onclick="runTableMaintenance('CHECK')" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded transition flex items-center space-x-1">
+                <span>🔍 Check Integrity</span>
+              </button>
+            </div>
+            <div id="td-maintenance-output" class="hidden mt-2 p-2.5 bg-slate-950 border border-slate-800 rounded font-mono text-xs text-slate-300"></div>
+          </div>
+
+          <!-- Redundant Indexes Box -->
+          <div class="bg-slate-900 border border-slate-800 rounded p-3 space-y-2">
+            <div class="flex items-center justify-between">
+              <h4 class="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center space-x-1.5">
+                <span>🔍</span><span>Redundant &amp; Shadowed Indexes</span>
+              </h4>
+              <button onclick="checkTableRedundantIndexes()" class="text-xs text-sky-400 hover:underline">Re-scan</button>
+            </div>
+            <div id="td-redundant-indexes-container" class="space-y-2 text-xs">
+              <div class="text-slate-500 italic py-1">Scanning indexes...</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Query Profiler View Panel -->
+        <div id="query-profiler-panel" class="hidden flex-1 flex flex-col overflow-y-auto bg-app-bg p-4 space-y-3 font-mono text-xs">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-2.5">
+            <div class="flex items-center space-x-2">
+              <span class="text-base">⏱️</span>
+              <span class="font-bold text-white text-sm">Query Execution Lifecycle Profile</span>
+              <span id="profiler-total-badge" class="bg-sky-950 text-sky-400 border border-sky-800 px-2 py-0.5 rounded text-[11px] font-semibold"></span>
+            </div>
+            <button onclick="closeProfileView()" class="text-slate-400 hover:text-white px-2 py-0.5 rounded bg-slate-800 text-xs">✕ Close</button>
+          </div>
+          <div id="profiler-sqlite-notice" class="hidden p-3 bg-amber-950/30 border border-amber-800/80 rounded text-amber-200 text-xs font-sans">
+            ℹ️ Detailed lifecycle stage profiling is a MySQL/MariaDB engine feature (<code>SHOW PROFILE</code> / <code>performance_schema</code>). For SQLite, use <strong>⚡ Explain</strong> in the toolbar to inspect opcode bytecode.
+          </div>
+          <div id="profiler-stages-table-wrapper" class="overflow-x-auto">
+            <table class="w-full text-left border-collapse border border-slate-800">
+              <thead class="bg-slate-900 text-slate-400 text-[11px]">
+                <tr>
+                  <th class="p-2 border-b border-slate-800 w-12 text-center">#</th>
+                  <th class="p-2 border-b border-slate-800">Stage / Engine Event</th>
+                  <th class="p-2 border-b border-slate-800 w-32 text-right">Duration</th>
+                  <th class="p-2 border-b border-slate-800 w-64">Timeline Breakdown</th>
+                  <th class="p-2 border-b border-slate-800 w-16 text-right">%</th>
+                </tr>
+              </thead>
+              <tbody id="profiler-stages-tbody">
+                <!-- Populated dynamically -->
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -1658,6 +1771,236 @@
     </div>
   </dialog>
 
+  <!-- 18. Database Diagnostics & Storage Overhead Dialog (HTML5 <dialog>) -->
+  <dialog id="db-diagnostics-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-0 outline-none max-w-4xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm overflow-hidden">
+    <div class="flex flex-col max-h-[88vh]">
+      <!-- Header -->
+      <div class="flex items-center justify-between px-5 py-3.5 bg-slate-950 border-b border-slate-800">
+        <div class="flex items-center space-x-2">
+          <span class="text-xl">📊</span>
+          <div>
+            <h3 class="text-sm font-bold text-white">Database Storage &amp; Diagnostics</h3>
+            <p class="text-[11px] text-slate-400">Physical disk consumption, index overhead, and maintenance operations</p>
+          </div>
+        </div>
+        <button onclick="closeDatabaseDiagnosticsModal()" class="text-slate-400 hover:text-white text-xs">✕</button>
+      </div>
+
+      <!-- Stat Summary Cards -->
+      <div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-3 bg-slate-950/40 border-b border-slate-800 text-xs">
+        <div class="bg-slate-900 border border-slate-800 rounded p-2.5">
+          <span class="text-[10px] text-slate-500 uppercase font-semibold">Total Tables</span>
+          <span id="dbdiag-total-tables" class="text-base font-bold text-white block">-</span>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded p-2.5">
+          <span class="text-[10px] text-slate-500 uppercase font-semibold">Total Data Size</span>
+          <span id="dbdiag-total-data" class="text-base font-bold text-sky-400 block">-</span>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded p-2.5">
+          <span class="text-[10px] text-slate-500 uppercase font-semibold">Total Index Size</span>
+          <span id="dbdiag-total-index" class="text-base font-bold text-indigo-400 block">-</span>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded p-2.5">
+          <span class="text-[10px] text-slate-500 uppercase font-semibold">Fragmentation Overhead</span>
+          <span id="dbdiag-total-overhead" class="text-base font-bold text-amber-400 block">-</span>
+        </div>
+      </div>
+
+      <!-- Tab Navigation & Toolbar -->
+      <div class="px-4 py-2 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between text-xs">
+        <div class="flex items-center space-x-1">
+          <button id="dbdiag-tab-tables-btn" onclick="switchDbDiagTab('tables')" class="px-3 py-1 rounded text-xs font-semibold bg-app-surface text-sky-400 border border-sky-800/60">Tables Storage</button>
+          <button id="dbdiag-tab-indexes-btn" onclick="switchDbDiagTab('indexes')" class="px-3 py-1 rounded text-xs text-slate-400 hover:text-white">Redundant Indexes Scanner</button>
+        </div>
+        <div id="dbdiag-tables-toolbar" class="flex items-center space-x-2">
+          <input type="text" id="dbdiag-search-input" oninput="filterDbDiagTables(this.value)" placeholder="Filter tables..." class="bg-slate-950 border border-slate-700 px-2 py-0.5 rounded text-xs text-slate-200 outline-none w-36">
+          <button onclick="runDbMaintenanceBatch('OPTIMIZE')" class="bg-sky-600 hover:bg-sky-500 text-white font-medium px-2.5 py-1 rounded text-xs transition">Optimize Selected</button>
+          <button onclick="runDbMaintenanceBatch('ANALYZE')" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded text-xs transition">Analyze</button>
+          <button onclick="runDbMaintenanceBatch('CHECK')" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded text-xs transition">Check</button>
+        </div>
+      </div>
+
+      <!-- Tab Content Area -->
+      <div class="p-4 flex-1 overflow-y-auto max-h-[50vh]">
+        <!-- 1. Tables Storage List -->
+        <div id="dbdiag-view-tables" class="overflow-x-auto">
+          <table class="w-full text-left text-xs border-collapse">
+            <thead class="bg-slate-950 text-slate-400 border-b border-slate-800 text-[11px]">
+              <tr>
+                <th class="p-2 w-8"><input type="checkbox" id="dbdiag-select-all" onchange="toggleSelectAllDbDiagTables(this.checked)" class="accent-sky-500"></th>
+                <th class="p-2 font-semibold">Table</th>
+                <th class="p-2 font-semibold">Engine</th>
+                <th class="p-2 font-semibold text-right">Rows</th>
+                <th class="p-2 font-semibold text-right">Data Size</th>
+                <th class="p-2 font-semibold text-right">Index Size</th>
+                <th class="p-2 font-semibold text-right">Overhead</th>
+                <th class="p-2 font-semibold text-center">Action</th>
+              </tr>
+            </thead>
+            <tbody id="dbdiag-tables-tbody" class="divide-y divide-slate-800/60 font-mono">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 2. Redundant Indexes Scanner -->
+        <div id="dbdiag-view-indexes" class="hidden space-y-3">
+          <div class="flex items-center justify-between text-xs">
+            <span class="text-slate-400">Static schema check for duplicate, shadowed left-prefix, and redundant PK indexes.</span>
+            <button onclick="scanDatabaseRedundantIndexes()" class="bg-sky-600 hover:bg-sky-500 text-white font-semibold px-3 py-1 rounded text-xs transition">Scan Database</button>
+          </div>
+          <div id="dbdiag-indexes-container" class="space-y-2 font-mono text-xs">
+            <div class="text-slate-500 italic p-4 text-center">Click 'Scan Database' to analyze index hierarchies.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Footer -->
+      <div class="flex justify-between items-center px-5 py-3 bg-slate-950 border-t border-slate-800 text-xs">
+        <span id="dbdiag-status-msg" class="text-slate-400 text-[11px]"></span>
+        <button onclick="closeDatabaseDiagnosticsModal()" class="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded">Close</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 19. Visual Privilege Matrix Dialog (HTML5 <dialog>) -->
+  <dialog id="privilege-matrix-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-0 outline-none max-w-4xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm overflow-hidden">
+    <div class="flex flex-col max-h-[90vh]">
+      <!-- Header -->
+      <div class="flex items-center justify-between px-5 py-3.5 bg-slate-950 border-b border-slate-800">
+        <div class="flex items-center space-x-2">
+          <span class="text-xl">👥</span>
+          <div>
+            <h3 class="text-sm font-bold text-white">User Accounts &amp; Privilege Matrix</h3>
+            <p class="text-[11px] text-slate-400">HeidiSQL-style MySQL user access control, host origins, and granular grants</p>
+          </div>
+        </div>
+        <button onclick="closePrivilegeMatrixModal()" class="text-slate-400 hover:text-white text-xs">✕</button>
+      </div>
+
+      <!-- 2-Column Body -->
+      <div class="flex flex-1 overflow-hidden" style="min-height: 420px;">
+        <!-- Left Column: User Accounts List -->
+        <div class="w-64 bg-slate-950 border-r border-slate-800 flex flex-col p-3 space-y-2">
+          <div class="flex items-center justify-between text-xs text-slate-400">
+            <span class="font-semibold uppercase text-[10px] tracking-wider">User Accounts</span>
+            <button onclick="startCreateNewUser()" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-2 py-0.5 rounded text-[11px] flex items-center space-x-0.5" title="Add User">
+              <span>+ Add</span>
+            </button>
+          </div>
+          <div id="priv-user-list" class="flex-1 overflow-y-auto space-y-1 text-xs">
+            <!-- Dynamically populated -->
+          </div>
+          <button id="btn-priv-drop-user" onclick="deletePrivilegeUser()" class="w-full bg-slate-900 hover:bg-rose-950 text-slate-400 hover:text-rose-300 border border-slate-800 rounded py-1 text-xs transition">
+            🗑️ Drop User
+          </button>
+        </div>
+
+        <!-- Right Column: Account Details & Privileges Tabs -->
+        <div class="flex-1 flex flex-col overflow-hidden bg-slate-900/40">
+          <!-- Sub-Tabs -->
+          <div class="h-9 bg-slate-950 border-b border-slate-800 px-4 flex items-center space-x-2 text-xs">
+            <button id="priv-tab-account-btn" onclick="switchPrivTab('account')" class="px-3 py-1 rounded font-semibold bg-app-surface text-sky-400 border border-sky-800/60">Account Details</button>
+            <button id="priv-tab-grants-btn" onclick="switchPrivTab('grants')" class="px-3 py-1 rounded text-slate-400 hover:text-white">Privileges Matrix</button>
+          </div>
+
+          <!-- Tab 1: Account Details Form -->
+          <div id="priv-view-account" class="p-5 space-y-4 overflow-y-auto text-xs flex-1">
+            <div class="space-y-1">
+              <label class="block text-slate-400 font-semibold">User Name:</label>
+              <input type="text" id="priv-input-user" class="w-full bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-white font-mono text-xs outline-none focus:border-sky-500">
+            </div>
+            <div class="space-y-1">
+              <label class="block text-slate-400 font-semibold">Allowed Host:</label>
+              <div class="flex space-x-2">
+                <input type="text" id="priv-input-host" value="%" class="flex-1 bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-white font-mono text-xs outline-none focus:border-sky-500">
+                <button type="button" onclick="document.getElementById('priv-input-host').value='%'" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded text-[11px]">% (Any)</button>
+                <button type="button" onclick="document.getElementById('priv-input-host').value='localhost'" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded text-[11px]">localhost</button>
+              </div>
+            </div>
+            <div class="space-y-1">
+              <label class="block text-slate-400 font-semibold">Password <span class="text-slate-500 font-normal">(leave blank to keep unchanged)</span>:</label>
+              <input type="password" id="priv-input-password" class="w-full bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-white font-mono text-xs outline-none focus:border-sky-500" placeholder="••••••••">
+            </div>
+            <div>
+              <button onclick="savePrivilegeAccount()" class="bg-sky-600 hover:bg-sky-500 text-white font-semibold px-4 py-1.5 rounded transition">
+                💾 Save Account
+              </button>
+            </div>
+          </div>
+
+          <!-- Tab 2: Privileges Matrix -->
+          <div id="priv-view-grants" class="hidden p-5 space-y-4 overflow-y-auto text-xs flex-1">
+            <!-- Scope and Presets Bar -->
+            <div class="flex items-center justify-between bg-slate-950 p-2.5 rounded border border-slate-800">
+              <div class="flex items-center space-x-2">
+                <label class="text-slate-400 font-semibold text-[11px]">Scope:</label>
+                <select id="priv-scope-select" onchange="onPrivScopeChanged()" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200 outline-none text-xs">
+                  <option value="GLOBAL">Global (*.*)</option>
+                  <option value="DATABASE">Active Database</option>
+                </select>
+                <label class="flex items-center space-x-1 text-[11px] text-slate-300 ml-2">
+                  <input type="checkbox" id="priv-with-grant" class="accent-sky-500">
+                  <span>Grant Option</span>
+                </label>
+              </div>
+              <div class="flex items-center space-x-1 text-[10px]">
+                <button onclick="applyPrivilegePreset('readonly')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-0.5 rounded">Read Only</button>
+                <button onclick="applyPrivilegePreset('readwrite')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-0.5 rounded">Read/Write</button>
+                <button onclick="applyPrivilegePreset('all')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-0.5 rounded">All</button>
+                <button onclick="applyPrivilegePreset('none')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-0.5 rounded">Clear</button>
+              </div>
+            </div>
+
+            <!-- Privilege Categories -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <!-- Data Privileges -->
+              <div class="bg-slate-950 p-3 rounded border border-slate-800 space-y-2">
+                <span class="text-[10px] font-bold uppercase tracking-wider text-sky-400 block border-b border-slate-800 pb-1">Data Privileges</span>
+                <div class="space-y-1.5" id="priv-group-data"></div>
+              </div>
+
+              <!-- Structure Privileges -->
+              <div class="bg-slate-950 p-3 rounded border border-slate-800 space-y-2">
+                <span class="text-[10px] font-bold uppercase tracking-wider text-indigo-400 block border-b border-slate-800 pb-1">Structure Privileges</span>
+                <div class="space-y-1.5" id="priv-group-structure"></div>
+              </div>
+
+              <!-- Admin Privileges -->
+              <div class="bg-slate-950 p-3 rounded border border-slate-800 space-y-2">
+                <span class="text-[10px] font-bold uppercase tracking-wider text-amber-400 block border-b border-slate-800 pb-1">Administration</span>
+                <div class="space-y-1.5" id="priv-group-admin"></div>
+              </div>
+            </div>
+
+            <div class="pt-2">
+              <button onclick="applyUserGrantsFromMatrix()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-1.5 rounded transition">
+                ✓ Apply Privileges
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Floating Foreign Key Peek Popover -->
+  <div id="fk-peek-popover" class="hidden fixed z-50 bg-slate-900 border border-sky-600/80 rounded-lg shadow-2xl p-3 text-xs text-slate-200 max-w-md w-full ring-2 ring-black/50">
+    <div class="flex items-center justify-between border-b border-slate-800 pb-2 mb-2">
+      <div class="flex items-center space-x-1.5 text-sky-400 font-semibold">
+        <span>🔗</span>
+        <span id="fk-peek-title">Referenced Record</span>
+      </div>
+      <button onclick="closeFKPeekPopover()" class="text-slate-400 hover:text-white text-xs">✕</button>
+    </div>
+    <div id="fk-peek-content" class="max-h-60 overflow-y-auto font-mono space-y-1"></div>
+    <div class="mt-2 pt-2 border-t border-slate-800 flex justify-end">
+      <button id="fk-peek-btn-jump" class="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-[11px] font-semibold flex items-center space-x-1 transition">
+        <span>↗ Buka di Tab Baru</span>
+      </button>
+    </div>
+  </div>
+
   <script>
 
     // --- Application State ---
@@ -1681,6 +2024,22 @@
     let stagedStructure = null;
     let activeTableMode = 'data';
     let newTableColumns = [];
+
+    // Advanced Diagnostics, Profiling & Privilege Matrix State
+    let enableQueryProfiling = false;
+    let lastQueryProfile = null;
+    let activePrivUser = null;
+    let allPrivUsers = [];
+    let dbDiagTables = [];
+    let dbDiagSelected = new Set();
+
+    function formatBytes(bytes) {
+      if (!bytes || isNaN(bytes) || bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
 
     // --- Native Dialog Helper Functions (HTML5 <dialog>) ---
     function showNativeAlert(message, title = 'SqlFox Notification') {
@@ -2077,11 +2436,14 @@
           <span class="font-semibold text-white">${escapeHtml(conn.name)}</span>
         `;
         const btnPL = document.getElementById('btn-open-processlist');
+        const btnPriv = document.getElementById('btn-open-privileges');
         if (btnPL) {
           if (conn.driver === 'mysql' || conn.driver === 'mariadb') {
             btnPL.classList.remove('hidden');
+            if (btnPriv) btnPriv.classList.remove('hidden');
           } else {
             btnPL.classList.add('hidden');
+            if (btnPriv) btnPriv.classList.add('hidden');
             const plTab = tabs.find(t => t.isProcesslist);
             if (plTab) closeTab(plTab.id);
           }
@@ -3865,6 +4227,7 @@
       const btnFK = document.getElementById('btn-mode-foreign-keys');
       const btnDDL = document.getElementById('btn-mode-ddl');
       const btnNotes = document.getElementById('btn-mode-notes');
+      const btnDiag = document.getElementById('btn-mode-diagnostics');
 
       const inactiveClass = 'px-3 py-1 rounded text-xs text-slate-400 hover:text-white hover:bg-slate-800 flex items-center space-x-1';
       const activeClass = 'px-3 py-1 rounded text-xs font-semibold bg-app-surface text-app-accent border-b-2 border-app-accent flex items-center space-x-1';
@@ -3875,6 +4238,7 @@
       if (btnFK) btnFK.className = mode === 'foreign-keys' ? activeClass : inactiveClass;
       if (btnDDL) btnDDL.className = mode === 'ddl' ? activeClass : inactiveClass;
       if (btnNotes) btnNotes.className = mode === 'notes' ? activeClass : inactiveClass;
+      if (btnDiag) btnDiag.className = mode === 'diagnostics' ? activeClass : inactiveClass;
 
       const gridToolbar = document.getElementById('grid-toolbar');
       const gridTable = document.getElementById('virtual-grid-wrapper');
@@ -3883,6 +4247,7 @@
       const fkView = document.getElementById('table-fk-view');
       const ddlView = document.getElementById('table-ddl-view');
       const notesView = document.getElementById('table-notes-view');
+      const diagView = document.getElementById('table-diagnostics-view');
 
       if (gridToolbar) gridToolbar.classList.toggle('hidden', mode !== 'data');
       if (gridTable) gridTable.classList.toggle('hidden', mode !== 'data');
@@ -3891,6 +4256,7 @@
       if (fkView) fkView.classList.toggle('hidden', mode !== 'foreign-keys');
       if (ddlView) ddlView.classList.toggle('hidden', mode !== 'ddl');
       if (notesView) notesView.classList.toggle('hidden', mode !== 'notes');
+      if (diagView) diagView.classList.toggle('hidden', mode !== 'diagnostics');
 
       if (refresh && activeTab && activeTab.isTableViewer) {
         if (mode === 'data') {
@@ -3905,6 +4271,8 @@
           renderTableDDL(activeTab.tableName);
         } else if (mode === 'notes') {
           loadAndRenderTableNote(activeTab.tableName);
+        } else if (mode === 'diagnostics') {
+          renderTableDiagnostics(activeTab.tableName);
         }
       }
     }
@@ -5207,7 +5575,8 @@
             confirmed: confirmed,
             challenge_input: challengeInput,
             database: currentDb,
-            query_id: 'active'
+            query_id: 'active',
+            profile: enableQueryProfiling
           })
         });
 
@@ -5224,6 +5593,17 @@
           const errMsg = data.error || 'Execution failed';
           renderQueryErrorBanner(sql, errMsg);
           return;
+        }
+
+        if (data.profile) {
+          lastQueryProfile = data.profile;
+          const btnViewProf = document.getElementById('btn-view-profile');
+          if (btnViewProf) btnViewProf.classList.remove('hidden');
+          renderQueryProfile(data.profile);
+        } else {
+          lastQueryProfile = null;
+          const btnViewProf = document.getElementById('btn-view-profile');
+          if (btnViewProf) btnViewProf.classList.add('hidden');
         }
 
         if (data.type === 'query') {
@@ -5647,6 +6027,18 @@
         </th>
       `).join('') + '</tr>';
 
+      // Resolve foreign keys for table
+      const targetCatalog = (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
+      const tableMeta = (targetCatalog?.tables || []).find(t => t.name === tableName);
+      const fkMap = new Map();
+      if (tableMeta && Array.isArray(tableMeta.foreign_keys)) {
+        tableMeta.foreign_keys.forEach(fk => {
+          if (fk.column && fk.referenced_table && fk.referenced_column) {
+            fkMap.set(fk.column, fk);
+          }
+        });
+      }
+
       // Render Rows
       if (!rows || rows.length === 0) {
         tbody.innerHTML = `<tr><td colspan="${cols.length}" class="p-4 text-center text-slate-500">Zero rows returned.</td></tr>`;
@@ -5660,6 +6052,12 @@
             const staged = stagedEdits.get(stagedKey);
             const displayVal = staged ? staged.newVal : val;
             const isDirty = Boolean(staged);
+            const colName = cols[cIdx]?.name;
+            const fkInfo = fkMap.get(colName);
+            let fkBadge = '';
+            if (fkInfo && displayVal !== null && displayVal !== '') {
+              fkBadge = `<button type="button" onclick="event.stopPropagation(); peekForeignKey(event, '${escapeHtml(tableName || '')}', '${escapeHtml(colName)}', '${escapeHtml(fkInfo.referenced_table)}', '${escapeHtml(fkInfo.referenced_column)}', '${escapeHtml(String(displayVal))}')" class="ml-1 opacity-0 group-hover:opacity-100 hover:text-sky-300 text-sky-400 font-bold transition text-xs" title="Peek referenced record (${escapeHtml(fkInfo.referenced_table)}.${escapeHtml(fkInfo.referenced_column)})">🔗</button>`;
+            }
             const cellClass = isDirty
               ? 'p-1.5 px-3 border border-amber-600/60 bg-amber-950/40 text-amber-200 truncate max-w-xs grid-cell group select-text cursor-default transition'
               : 'p-1.5 px-3 border-r border-slate-800/40 text-slate-200 truncate max-w-xs grid-cell group select-text cursor-default transition';
@@ -5669,6 +6067,7 @@
                   onclick="selectGridCell(this, ${rIdx}, ${cIdx})"
                   ondblclick="startInlineEdit(this, ${rIdx}, ${cIdx}, '${pkCol || ''}', '${tableName || ''}')">
                 <span class="cell-val">${displayVal === null ? '<span class="text-slate-500 italic">NULL</span>' : escapeHtml(String(displayVal))}</span>
+                ${fkBadge}
                 ${isDirty ? '<span class="ml-1 text-[9px] text-amber-400 font-bold" title="Unapplied staged change">●</span>' : ''}
               </td>
             `;
@@ -7406,11 +7805,15 @@
           closeAISettingsModal();
           closeSnippetsManager();
           closeSnippetParamModal();
+          closeDatabaseDiagnosticsModal();
+          closePrivilegeMatrixModal();
+          closeFKPeekPopover();
+          closeProfileView();
         }
       });
 
       // Close native dialogs when clicking on backdrop
-      ['snippets-manager-dialog', 'snippet-param-dialog', 'database-creator-dialog', 'csv-import-dialog', 'schema-search-modal'].forEach(id => {
+      ['snippets-manager-dialog', 'snippet-param-dialog', 'database-creator-dialog', 'csv-import-dialog', 'schema-search-modal', 'db-diagnostics-dialog', 'privilege-matrix-dialog'].forEach(id => {
         const dlg = document.getElementById(id);
         if (dlg) {
           dlg.addEventListener('click', (e) => {
@@ -7445,6 +7848,8 @@
       const actions = [
         { name: 'Schema Search (Quick Open Table/Column)', shortcut: 'Ctrl+P', run: () => toggleSchemaSearch() },
         { name: 'Query Snippets Manager', shortcut: 'Ctrl+Shift+S', run: () => openSnippetsManager() },
+        { name: 'Table Storage Diagnostics', shortcut: '', run: () => openDatabaseDiagnosticsModal() },
+        { name: 'User Accounts & Privilege Matrix', shortcut: '', run: () => openPrivilegeMatrixModal() },
         { name: 'Create Database', shortcut: '', run: () => openCreateDatabaseModal() },
         { name: 'Run Query', shortcut: 'Ctrl+Enter', run: () => runActiveQuery() },
         { name: 'Explain Query Plan', shortcut: 'Ctrl+Shift+Enter', run: () => explainActiveQuery() },
@@ -7473,6 +7878,8 @@
       closeCommandPalette();
       if (name.startsWith('Schema Search')) toggleSchemaSearch();
       else if (name === 'Query Snippets Manager') openSnippetsManager();
+      else if (name === 'Table Storage Diagnostics') openDatabaseDiagnosticsModal();
+      else if (name === 'User Accounts & Privilege Matrix') openPrivilegeMatrixModal();
       else if (name === 'Create Database') openCreateDatabaseModal();
       else if (name === 'Run Query') runActiveQuery();
       else if (name === 'Explain Query Plan') explainActiveQuery();
@@ -7481,6 +7888,730 @@
       else if (name === 'Toggle Read-Only Mode') toggleReadOnly();
       else if (name === 'Export Vault (.sqlfox-vault)') openExportImportModal();
       else if (name === 'Toggle AI Copilot') toggleAISidebar();
+    }
+
+    // --- Table Diagnostics Handlers ---
+    async function renderTableDiagnostics(tableName) {
+      if (!activeConnection || !tableName) return;
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const currentDb = (activeTab && activeTab.database) || (schemaCatalogCache && schemaCatalogCache.database_name) || '';
+
+      document.getElementById('td-data-size').textContent = 'Loading...';
+      document.getElementById('td-index-size').textContent = '...';
+      document.getElementById('td-overhead-size').textContent = '...';
+      document.getElementById('td-rows-count').textContent = '...';
+      document.getElementById('td-maintenance-output').classList.add('hidden');
+
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/diagnostics/tables?database=${encodeURIComponent(currentDb)}&table=${encodeURIComponent(tableName)}`);
+        const data = await res.json();
+        if (!res.ok || !Array.isArray(data) || data.length === 0) {
+          document.getElementById('td-data-size').textContent = '-';
+          return;
+        }
+        const t = data[0];
+        document.getElementById('td-data-size').textContent = formatBytes(t.data_size);
+        document.getElementById('td-index-size').textContent = formatBytes(t.index_size);
+        document.getElementById('td-overhead-size').textContent = formatBytes(t.overhead_size);
+        document.getElementById('td-rows-count').textContent = Number(t.rows).toLocaleString();
+        document.getElementById('td-engine').textContent = t.engine || 'Standard';
+        document.getElementById('td-collation').textContent = t.collation || '-';
+        document.getElementById('td-row-format').textContent = t.row_format || '-';
+        document.getElementById('td-created').textContent = t.created_at || '-';
+        document.getElementById('td-updated').textContent = t.updated_at || '-';
+
+        checkTableRedundantIndexes(tableName);
+      } catch (err) {
+        console.error('Failed to load table diagnostics:', err);
+      }
+    }
+
+    async function runTableMaintenance(action) {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeConnection || !activeTab || !activeTab.tableName) return;
+      const currentDb = activeTab.database || (schemaCatalogCache && schemaCatalogCache.database_name) || '';
+      const outBox = document.getElementById('td-maintenance-output');
+      outBox.classList.remove('hidden');
+      outBox.innerHTML = `<span class="text-sky-400">Executing ${action} TABLE on ${escapeHtml(activeTab.tableName)}...</span>`;
+
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/maintenance`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            database: currentDb,
+            tables: [activeTab.tableName],
+            action: action
+          })
+        });
+        const results = await res.json();
+        if (!res.ok) {
+          outBox.innerHTML = `<span class="text-red-400">Error: ${escapeHtml(results.error || 'Maintenance action failed')}</span>`;
+          return;
+        }
+        outBox.innerHTML = results.map(r => `
+          <div><strong>${escapeHtml(r.op)}:</strong> <span class="${r.status === 'OK' || r.status === 'status' ? 'text-emerald-400' : 'text-amber-400'}">${escapeHtml(r.status)}</span> - ${escapeHtml(r.message || '')}</div>
+        `).join('');
+        setTimeout(() => renderTableDiagnostics(activeTab.tableName), 500);
+      } catch (err) {
+        outBox.innerHTML = `<span class="text-red-400">Request error: ${escapeHtml(err.message)}</span>`;
+      }
+    }
+
+    async function checkTableRedundantIndexes(tableName) {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const currentDb = (activeTab && activeTab.database) || (schemaCatalogCache && schemaCatalogCache.database_name) || '';
+      const container = document.getElementById('td-redundant-indexes-container');
+      if (!container) return;
+
+      container.innerHTML = '<div class="text-slate-500 italic py-1">Analyzing index prefixes and uniqueness...</div>';
+
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/diagnostics/redundant-indexes?database=${encodeURIComponent(currentDb)}&table=${encodeURIComponent(tableName)}`);
+        const list = await res.json();
+        if (!res.ok || !Array.isArray(list) || list.length === 0) {
+          container.innerHTML = '<div class="text-emerald-400 flex items-center space-x-1.5 py-1"><span>✓</span><span>No redundant or duplicate indexes detected on this table.</span></div>';
+          return;
+        }
+
+        container.innerHTML = list.map(item => `
+          <div class="p-2.5 bg-amber-950/20 border border-amber-800/60 rounded flex items-center justify-between">
+            <div class="space-y-0.5">
+              <div class="flex items-center space-x-2">
+                <span class="font-bold text-amber-300">${escapeHtml(item.redundant_index)}</span>
+                <span class="text-[10px] bg-amber-900/60 text-amber-200 px-1.5 py-0.2 rounded font-mono">${escapeHtml((item.redundant_cols || []).join(', '))}</span>
+                <span class="text-slate-400 text-xs">shadowed by</span>
+                <span class="font-bold text-sky-300">${escapeHtml(item.shadowed_by)}</span>
+              </div>
+              <div class="text-[11px] text-slate-400">${escapeHtml(item.reason)}</div>
+            </div>
+            <button onclick="promptDropRedundantIndex(${JSON.stringify(item.drop_sql).replace(/"/g, '&quot;')}, '${escapeHtml(tableName)}')" class="bg-rose-900 hover:bg-rose-800 text-rose-200 px-2.5 py-1 rounded text-xs transition">
+              Drop Index
+            </button>
+          </div>
+        `).join('');
+      } catch (err) {
+        container.innerHTML = `<div class="text-red-400 text-xs">Failed to scan indexes: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    function promptDropRedundantIndex(dropSql, tableName) {
+      if (!dropSql) return;
+      openDDLReviewModal(dropSql, async () => {
+        try {
+          const res = await apiFetch(`/api/session/${activeConnection.id}/execute`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sql: dropSql,
+              confirmed: true,
+              challenge_input: tableName,
+              query_id: 'drop_idx_' + Date.now()
+            })
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            showNativeAlert(data.error || 'Failed to drop index', 'DDL Execution Error');
+            return;
+          }
+          showNativeAlert('Redundant index dropped successfully.', 'Index Cleaned');
+          await refreshSchema();
+          checkTableRedundantIndexes(tableName);
+        } catch (err) {
+          showNativeAlert('Drop index failed: ' + err.message, 'Network Error');
+        }
+      });
+    }
+
+    // --- Database-Wide Diagnostics Modal Handlers ---
+    function openDatabaseDiagnosticsModal() {
+      if (!activeConnection) {
+        showNativeAlert('Please connect to a database first.', 'No Active Session');
+        return;
+      }
+      const dlg = document.getElementById('db-diagnostics-dialog');
+      if (!dlg) return;
+      switchDbDiagTab('tables');
+      loadDatabaseDiagnostics();
+      if (typeof dlg.showModal === 'function') dlg.showModal();
+      else dlg.setAttribute('open', '');
+    }
+
+    function closeDatabaseDiagnosticsModal() {
+      const dlg = document.getElementById('db-diagnostics-dialog');
+      if (dlg) {
+        if (typeof dlg.close === 'function') dlg.close();
+        else dlg.removeAttribute('open');
+      }
+    }
+
+    function switchDbDiagTab(tab) {
+      const btnTables = document.getElementById('dbdiag-tab-tables-btn');
+      const btnIndexes = document.getElementById('dbdiag-tab-indexes-btn');
+      const viewTables = document.getElementById('dbdiag-view-tables');
+      const viewIndexes = document.getElementById('dbdiag-view-indexes');
+      const toolbar = document.getElementById('dbdiag-tables-toolbar');
+
+      if (tab === 'tables') {
+        btnTables.className = 'px-3 py-1 rounded text-xs font-semibold bg-app-surface text-sky-400 border border-sky-800/60';
+        btnIndexes.className = 'px-3 py-1 rounded text-xs text-slate-400 hover:text-white';
+        viewTables.classList.remove('hidden');
+        viewIndexes.classList.add('hidden');
+        if (toolbar) toolbar.classList.remove('hidden');
+      } else {
+        btnIndexes.className = 'px-3 py-1 rounded text-xs font-semibold bg-app-surface text-sky-400 border border-sky-800/60';
+        btnTables.className = 'px-3 py-1 rounded text-xs text-slate-400 hover:text-white';
+        viewIndexes.classList.remove('hidden');
+        viewTables.classList.add('hidden');
+        if (toolbar) toolbar.classList.add('hidden');
+      }
+    }
+
+    async function loadDatabaseDiagnostics() {
+      if (!activeConnection) return;
+      const currentDb = schemaCatalogCache?.database_name || activeConnection.database_name || '';
+      const tbody = document.getElementById('dbdiag-tables-tbody');
+      tbody.innerHTML = '<tr><td colspan="8" class="p-4 text-center text-slate-500">Inspecting physical table storage...</td></tr>';
+      dbDiagSelected.clear();
+
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/diagnostics/tables?database=${encodeURIComponent(currentDb)}`);
+        const tables = await res.json();
+        if (!res.ok || !Array.isArray(tables)) {
+          tbody.innerHTML = `<tr><td colspan="8" class="p-4 text-center text-red-400">Failed to load diagnostics</td></tr>`;
+          return;
+        }
+
+        dbDiagTables = tables;
+        let totalData = 0;
+        let totalIndex = 0;
+        let totalOverhead = 0;
+
+        tables.forEach(t => {
+          totalData += (t.data_size || 0);
+          totalIndex += (t.index_size || 0);
+          totalOverhead += (t.overhead_size || 0);
+        });
+
+        document.getElementById('dbdiag-total-tables').textContent = tables.length.toString();
+        document.getElementById('dbdiag-total-data').textContent = formatBytes(totalData);
+        document.getElementById('dbdiag-total-index').textContent = formatBytes(totalIndex);
+        document.getElementById('dbdiag-total-overhead').textContent = formatBytes(totalOverhead);
+
+        renderDbDiagTableRows(tables);
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="8" class="p-4 text-center text-red-400">Error: ${escapeHtml(err.message)}</td></tr>`;
+      }
+    }
+
+    function renderDbDiagTableRows(tables) {
+      const tbody = document.getElementById('dbdiag-tables-tbody');
+      if (!tables || tables.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="p-4 text-center text-slate-500">No tables match filter.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = tables.map(t => {
+        const isChecked = dbDiagSelected.has(t.name);
+        return `
+          <tr class="hover:bg-slate-800/40 transition">
+            <td class="p-2"><input type="checkbox" onchange="toggleSelectDbDiagTable('${escapeHtml(t.name)}', this.checked)" ${isChecked ? 'checked' : ''} class="accent-sky-500"></td>
+            <td class="p-2 font-bold text-white">${escapeHtml(t.name)}</td>
+            <td class="p-2 text-slate-400">${escapeHtml(t.engine || '-')}</td>
+            <td class="p-2 text-right text-slate-300 font-mono">${Number(t.rows).toLocaleString()}</td>
+            <td class="p-2 text-right text-sky-400 font-mono">${formatBytes(t.data_size)}</td>
+            <td class="p-2 text-right text-indigo-400 font-mono">${formatBytes(t.index_size)}</td>
+            <td class="p-2 text-right font-mono ${t.overhead_size > 0 ? 'text-amber-400 font-bold' : 'text-slate-500'}">${formatBytes(t.overhead_size)}</td>
+            <td class="p-2 text-center">
+              <button onclick="runDbMaintenanceBatch('OPTIMIZE', ['${escapeHtml(t.name)}'])" class="bg-slate-800 hover:bg-sky-600 hover:text-white text-slate-300 px-2 py-0.5 rounded text-[11px] transition">
+                Optimize
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function filterDbDiagTables(query) {
+      const q = (query || '').toLowerCase().trim();
+      const filtered = dbDiagTables.filter(t => t.name.toLowerCase().includes(q));
+      renderDbDiagTableRows(filtered);
+    }
+
+    function toggleSelectAllDbDiagTables(checked) {
+      if (checked) {
+        dbDiagTables.forEach(t => dbDiagSelected.add(t.name));
+      } else {
+        dbDiagSelected.clear();
+      }
+      renderDbDiagTableRows(dbDiagTables);
+    }
+
+    function toggleSelectDbDiagTable(name, checked) {
+      if (checked) dbDiagSelected.add(name);
+      else dbDiagSelected.delete(name);
+    }
+
+    async function runDbMaintenanceBatch(action, specificTables = null) {
+      if (!activeConnection) return;
+      const tables = specificTables || Array.from(dbDiagSelected);
+      if (!tables || tables.length === 0) {
+        showNativeAlert('Please select at least one table to perform maintenance.', 'Select Table');
+        return;
+      }
+      const currentDb = schemaCatalogCache?.database_name || activeConnection.database_name || '';
+      const statusEl = document.getElementById('dbdiag-status-msg');
+      if (statusEl) statusEl.textContent = `Running ${action} on ${tables.length} table(s)...`;
+
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/maintenance`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ database: currentDb, tables, action })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          showNativeAlert(data.error || 'Maintenance action failed', 'Error');
+          return;
+        }
+        if (statusEl) statusEl.textContent = `✓ ${action} completed successfully on ${tables.length} table(s).`;
+        setTimeout(loadDatabaseDiagnostics, 800);
+      } catch (err) {
+        showNativeAlert('Maintenance failed: ' + err.message, 'Network Error');
+      }
+    }
+
+    async function scanDatabaseRedundantIndexes() {
+      if (!activeConnection) return;
+      const currentDb = schemaCatalogCache?.database_name || activeConnection.database_name || '';
+      const container = document.getElementById('dbdiag-indexes-container');
+      container.innerHTML = '<div class="text-slate-500 italic p-4 text-center">Scanning database index definitions...</div>';
+
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/diagnostics/redundant-indexes?database=${encodeURIComponent(currentDb)}`);
+        const list = await res.json();
+        if (!res.ok || !Array.isArray(list) || list.length === 0) {
+          container.innerHTML = '<div class="p-6 text-center text-emerald-400 font-semibold">✓ No redundant or duplicate indexes found across the entire database!</div>';
+          return;
+        }
+
+        container.innerHTML = list.map(item => `
+          <div class="p-3 bg-slate-950 border border-slate-800 rounded flex items-center justify-between">
+            <div class="space-y-1">
+              <div class="flex items-center space-x-2">
+                <span class="font-bold text-white text-xs">${escapeHtml(item.table)}</span>
+                <span class="text-slate-500">::</span>
+                <span class="font-bold text-amber-300">${escapeHtml(item.redundant_index)}</span>
+                <span class="text-[10px] bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded">${escapeHtml((item.redundant_cols || []).join(', '))}</span>
+                <span class="text-slate-400 text-xs">shadowed by</span>
+                <span class="font-bold text-sky-400">${escapeHtml(item.shadowed_by)}</span>
+              </div>
+              <div class="text-[11px] text-slate-400">${escapeHtml(item.reason)}</div>
+            </div>
+            <button onclick="promptDropRedundantIndex(${JSON.stringify(item.drop_sql).replace(/"/g, '&quot;')}, '${escapeHtml(item.table)}')" class="bg-rose-900 hover:bg-rose-800 text-white px-3 py-1 rounded text-xs transition">
+              Drop Index
+            </button>
+          </div>
+        `).join('');
+      } catch (err) {
+        container.innerHTML = `<div class="p-4 text-center text-red-400">Failed to scan: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    // --- Query Profiler Handlers ---
+    function toggleQueryProfiler() {
+      enableQueryProfiling = !enableQueryProfiling;
+      const textEl = document.getElementById('profile-toggle-text');
+      const btnEl = document.getElementById('btn-toggle-profile');
+      if (textEl && btnEl) {
+        if (enableQueryProfiling) {
+          textEl.textContent = 'Profile: ON';
+          btnEl.className = 'bg-amber-950/80 hover:bg-amber-900 text-amber-300 font-semibold px-2.5 py-1 rounded border border-amber-600 transition flex items-center space-x-1';
+        } else {
+          textEl.textContent = 'Profile: OFF';
+          btnEl.className = 'bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition flex items-center space-x-1';
+        }
+      }
+    }
+
+    function toggleProfileView() {
+      const panel = document.getElementById('query-profiler-panel');
+      const gridTable = document.getElementById('virtual-grid-wrapper');
+      if (!panel) return;
+      const isHidden = panel.classList.contains('hidden');
+      if (isHidden) {
+        panel.classList.remove('hidden');
+        if (gridTable) gridTable.classList.add('hidden');
+        if (lastQueryProfile) renderQueryProfile(lastQueryProfile);
+      } else {
+        closeProfileView();
+      }
+    }
+
+    function closeProfileView() {
+      const panel = document.getElementById('query-profiler-panel');
+      const gridTable = document.getElementById('virtual-grid-wrapper');
+      if (panel) panel.classList.add('hidden');
+      if (gridTable) gridTable.classList.remove('hidden');
+    }
+
+    function renderQueryProfile(profile) {
+      const totalBadge = document.getElementById('profiler-total-badge');
+      const notice = document.getElementById('profiler-sqlite-notice');
+      const tbody = document.getElementById('profiler-stages-tbody');
+      if (!profile || !tbody) return;
+
+      const isSQLite = activeConnection && activeConnection.driver === 'sqlite';
+      if (notice) notice.classList.toggle('hidden', !isSQLite);
+
+      if (totalBadge) totalBadge.textContent = `${(profile.duration_ms || 0).toFixed(2)} ms total`;
+
+      const stages = Array.isArray(profile.stages) ? profile.stages : [];
+      if (stages.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-slate-500">No profile stage data available.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = stages.map((s, idx) => {
+        const pct = Math.max(0, Math.min(100, s.percentage || 0));
+        let barColor = 'bg-sky-500';
+        if (pct > 50) barColor = 'bg-red-500';
+        else if (pct > 20) barColor = 'bg-amber-500';
+
+        let durStr = `${s.duration_us} µs`;
+        if (s.duration_us >= 1000) {
+          durStr = `${(s.duration_us / 1000).toFixed(2)} ms`;
+        }
+
+        return `
+          <tr class="hover:bg-slate-800/40 transition border-b border-slate-800/40">
+            <td class="p-2 text-center text-slate-500 font-mono">${idx + 1}</td>
+            <td class="p-2 font-semibold text-white">${escapeHtml(s.stage)}</td>
+            <td class="p-2 text-right text-slate-300 font-mono">${durStr}</td>
+            <td class="p-2">
+              <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+                <div class="${barColor} h-2 rounded-full transition-all duration-300" style="width: ${pct}%"></div>
+              </div>
+            </td>
+            <td class="p-2 text-right text-slate-400 font-mono text-[11px]">${pct.toFixed(1)}%</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    // --- Foreign Key Hyperlink & Data Peeking Handlers ---
+    async function peekForeignKey(event, table, col, refTable, refCol, val) {
+      if (!activeConnection || !refTable || !refCol) return;
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const currentDb = (activeTab && activeTab.database) || (schemaCatalogCache && schemaCatalogCache.database_name) || '';
+
+      const popover = document.getElementById('fk-peek-popover');
+      const title = document.getElementById('fk-peek-title');
+      const content = document.getElementById('fk-peek-content');
+      const btnJump = document.getElementById('fk-peek-btn-jump');
+      if (!popover || !content) return;
+
+      title.textContent = `${refTable} (${refCol} = ${val})`;
+      content.innerHTML = '<div class="text-slate-400 p-2">Fetching referenced record...</div>';
+
+      const posX = Math.min(window.innerWidth - 420, Math.max(10, event.clientX - 100));
+      const posY = Math.min(window.innerHeight - 300, Math.max(10, event.clientY + 15));
+      popover.style.left = posX + 'px';
+      popover.style.top = posY + 'px';
+      popover.classList.remove('hidden');
+
+      if (btnJump) {
+        btnJump.onclick = () => {
+          closeFKPeekPopover();
+          openTableViewer(refTable);
+        };
+      }
+
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/peek?database=${encodeURIComponent(currentDb)}&table=${encodeURIComponent(refTable)}&column=${encodeURIComponent(refCol)}&value=${encodeURIComponent(val)}`);
+        const data = await res.json();
+        if (!res.ok || !data.row) {
+          content.innerHTML = '<div class="text-amber-400 p-2">No matching record found in parent table.</div>';
+          return;
+        }
+
+        const cols = data.columns || Object.keys(data.row);
+        content.innerHTML = `
+          <table class="w-full text-left border-collapse text-[11px]">
+            <tbody class="divide-y divide-slate-800">
+              ${cols.map(c => `
+                <tr class="hover:bg-slate-800/40">
+                  <td class="p-1 text-slate-400 font-semibold w-1/3">${escapeHtml(c)}</td>
+                  <td class="p-1 text-white select-text truncate max-w-xs font-mono">${data.row[c] === null ? '<span class="text-slate-600 italic">NULL</span>' : escapeHtml(String(data.row[c]))}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      } catch (err) {
+        content.innerHTML = `<div class="text-red-400 p-2">Error: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    function closeFKPeekPopover() {
+      const popover = document.getElementById('fk-peek-popover');
+      if (popover) popover.classList.add('hidden');
+    }
+
+    document.addEventListener('click', (e) => {
+      const popover = document.getElementById('fk-peek-popover');
+      if (popover && !popover.classList.contains('hidden') && !popover.contains(e.target)) {
+        closeFKPeekPopover();
+      }
+    });
+
+    // --- Visual Privilege Matrix Handlers ---
+    const PRIVILEGE_DEFINITIONS = {
+      data: ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'FILE'],
+      structure: ['CREATE', 'ALTER', 'INDEX', 'DROP', 'CREATE VIEW', 'SHOW VIEW', 'CREATE ROUTINE', 'ALTER ROUTINE', 'EXECUTE', 'EVENT', 'TRIGGER'],
+      admin: ['GRANT OPTION', 'SUPER', 'PROCESS', 'RELOAD', 'SHUTDOWN', 'SHOW DATABASES', 'LOCK TABLES', 'REPLICATION CLIENT', 'REPLICATION SLAVE']
+    };
+
+    function initPrivilegeCheckboxes() {
+      ['data', 'structure', 'admin'].forEach(grp => {
+        const container = document.getElementById(`priv-group-${grp}`);
+        if (!container) return;
+        container.innerHTML = PRIVILEGE_DEFINITIONS[grp].map(p => `
+          <label class="flex items-center space-x-2 text-xs text-slate-300 hover:text-white cursor-pointer select-none">
+            <input type="checkbox" data-priv="${p}" class="accent-sky-500 priv-checkbox">
+            <span>${p}</span>
+          </label>
+        `).join('');
+      });
+    }
+
+    function openPrivilegeMatrixModal() {
+      if (!activeConnection || (activeConnection.driver !== 'mysql' && activeConnection.driver !== 'mariadb')) {
+        showNativeAlert('User management is exclusively supported for MySQL/MariaDB database connections.', 'Privilege Matrix');
+        return;
+      }
+      initPrivilegeCheckboxes();
+      switchPrivTab('account');
+      loadPrivilegeUsers();
+      const dlg = document.getElementById('privilege-matrix-dialog');
+      if (typeof dlg.showModal === 'function') dlg.showModal();
+      else dlg.setAttribute('open', '');
+    }
+
+    function closePrivilegeMatrixModal() {
+      const dlg = document.getElementById('privilege-matrix-dialog');
+      if (dlg) {
+        if (typeof dlg.close === 'function') dlg.close();
+        else dlg.removeAttribute('open');
+      }
+    }
+
+    function switchPrivTab(tab) {
+      const btnAcc = document.getElementById('priv-tab-account-btn');
+      const btnGrants = document.getElementById('priv-tab-grants-btn');
+      const viewAcc = document.getElementById('priv-view-account');
+      const viewGrants = document.getElementById('priv-view-grants');
+
+      if (tab === 'account') {
+        btnAcc.className = 'px-3 py-1 rounded font-semibold bg-app-surface text-sky-400 border border-sky-800/60';
+        btnGrants.className = 'px-3 py-1 rounded text-slate-400 hover:text-white';
+        viewAcc.classList.remove('hidden');
+        viewGrants.classList.add('hidden');
+      } else {
+        btnGrants.className = 'px-3 py-1 rounded font-semibold bg-app-surface text-sky-400 border border-sky-800/60';
+        btnAcc.className = 'px-3 py-1 rounded text-slate-400 hover:text-white';
+        viewGrants.classList.remove('hidden');
+        viewAcc.classList.add('hidden');
+      }
+    }
+
+    async function loadPrivilegeUsers() {
+      const listEl = document.getElementById('priv-user-list');
+      listEl.innerHTML = '<div class="text-slate-500 italic p-2">Loading users...</div>';
+
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/users`);
+        const users = await res.json();
+        if (!res.ok || !Array.isArray(users)) {
+          listEl.innerHTML = '<div class="text-red-400 p-2">Failed to load users</div>';
+          return;
+        }
+
+        allPrivUsers = users;
+        if (users.length === 0) {
+          listEl.innerHTML = '<div class="text-slate-500 p-2">No user accounts found.</div>';
+          return;
+        }
+
+        listEl.innerHTML = users.map(u => `
+          <div onclick="selectPrivilegeUser('${escapeHtml(u.user)}', '${escapeHtml(u.host)}')" class="p-2 rounded bg-slate-900/60 hover:bg-slate-800 cursor-pointer flex items-center justify-between border border-transparent priv-user-item ${activePrivUser && activePrivUser.user === u.user && activePrivUser.host === u.host ? 'border-sky-500 bg-slate-800 text-white' : 'text-slate-300'}">
+            <div class="flex items-center space-x-1.5 truncate">
+              <span class="text-xs">👤</span>
+              <span class="font-bold truncate">${escapeHtml(u.user)}</span>
+            </div>
+            <span class="text-[10px] bg-slate-950 text-slate-400 px-1 py-0.2 rounded font-mono">${escapeHtml(u.host)}</span>
+          </div>
+        `).join('');
+
+        if (users.length > 0 && !activePrivUser) {
+          selectPrivilegeUser(users[0].user, users[0].host);
+        }
+      } catch (err) {
+        listEl.innerHTML = `<div class="text-red-400 p-2">Error: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    async function selectPrivilegeUser(user, host) {
+      activePrivUser = { user, host, isNew: false };
+      document.querySelectorAll('.priv-user-item').forEach(el => {
+        el.classList.remove('border-sky-500', 'bg-slate-800', 'text-white');
+      });
+      document.getElementById('priv-input-user').value = user;
+      document.getElementById('priv-input-host').value = host;
+      document.getElementById('priv-input-password').value = '';
+
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/users/grants?user=${encodeURIComponent(user)}&host=${encodeURIComponent(host)}`);
+        const grants = await res.json();
+        parseAndApplyGrantsToCheckboxes(grants || []);
+      } catch (err) {
+        console.error('Failed to load user grants:', err);
+      }
+    }
+
+    function startCreateNewUser() {
+      activePrivUser = { user: '', host: '%', isNew: true };
+      document.getElementById('priv-input-user').value = '';
+      document.getElementById('priv-input-host').value = '%';
+      document.getElementById('priv-input-password').value = '';
+      switchPrivTab('account');
+      applyPrivilegePreset('none');
+      setTimeout(() => document.getElementById('priv-input-user').focus(), 100);
+    }
+
+    function parseAndApplyGrantsToCheckboxes(grantLines) {
+      applyPrivilegePreset('none');
+      const allText = grantLines.join(' ').toUpperCase();
+      const hasAll = allText.includes('ALL PRIVILEGES');
+      const hasGrantOption = allText.includes('WITH GRANT OPTION');
+
+      document.getElementById('priv-with-grant').checked = hasGrantOption;
+
+      document.querySelectorAll('.priv-checkbox').forEach(cb => {
+        const priv = cb.getAttribute('data-priv').toUpperCase();
+        if (hasAll || allText.includes(priv)) {
+          cb.checked = true;
+        }
+      });
+    }
+
+    function applyPrivilegePreset(preset) {
+      const checkboxes = document.querySelectorAll('.priv-checkbox');
+      checkboxes.forEach(cb => cb.checked = false);
+
+      if (preset === 'all') {
+        checkboxes.forEach(cb => cb.checked = true);
+        document.getElementById('priv-with-grant').checked = true;
+      } else if (preset === 'readonly') {
+        document.querySelectorAll('input[data-priv="SELECT"], input[data-priv="SHOW VIEW"]').forEach(cb => cb.checked = true);
+      } else if (preset === 'readwrite') {
+        document.querySelectorAll('input[data-priv="SELECT"], input[data-priv="INSERT"], input[data-priv="UPDATE"], input[data-priv="DELETE"], input[data-priv="SHOW VIEW"]').forEach(cb => cb.checked = true);
+      }
+    }
+
+    async function savePrivilegeAccount() {
+      const user = document.getElementById('priv-input-user').value.trim();
+      const host = document.getElementById('priv-input-host').value.trim();
+      const password = document.getElementById('priv-input-password').value;
+      if (!user || !host) {
+        showNativeAlert('User name and host origin are required.', 'Validation Error');
+        return;
+      }
+
+      const isNew = activePrivUser?.isNew || false;
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/save-user`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user, host, password, is_new: isNew })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          showNativeAlert(data.error || 'Failed to save account', 'Account Error');
+          return;
+        }
+        showNativeAlert(`Account '${user}'@'${host}' saved successfully.`, 'Account Saved');
+        activePrivUser = { user, host, isNew: false };
+        loadPrivilegeUsers();
+      } catch (err) {
+        showNativeAlert('Save user failed: ' + err.message, 'Network Error');
+      }
+    }
+
+    async function deletePrivilegeUser() {
+      if (!activePrivUser || !activePrivUser.user) {
+        showNativeAlert('Please select a user to delete.', 'Select User');
+        return;
+      }
+      const ok = await showNativeConfirm(`Are you sure you want to permanently drop user account '${activePrivUser.user}'@'${activePrivUser.host}'?`, 'Drop User Confirmation');
+      if (!ok) return;
+
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/delete-user`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user: activePrivUser.user, host: activePrivUser.host })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          showNativeAlert(data.error || 'Failed to drop user', 'Drop User Error');
+          return;
+        }
+        showNativeAlert(`User '${activePrivUser.user}'@'${activePrivUser.host}' dropped.`, 'User Removed');
+        activePrivUser = null;
+        loadPrivilegeUsers();
+      } catch (err) {
+        showNativeAlert('Drop user failed: ' + err.message, 'Network Error');
+      }
+    }
+
+    async function applyUserGrantsFromMatrix() {
+      if (!activePrivUser || !activePrivUser.user) {
+        showNativeAlert('Please select or save a user first.', 'Select User');
+        return;
+      }
+
+      const selectedPrivs = [];
+      document.querySelectorAll('.priv-checkbox:checked').forEach(cb => {
+        selectedPrivs.push(cb.getAttribute('data-priv'));
+      });
+
+      const scope = document.getElementById('priv-scope-select').value;
+      const withGrant = document.getElementById('priv-with-grant').checked;
+      const currentDb = schemaCatalogCache?.database_name || activeConnection.database_name || '';
+
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/apply-grants`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user: activePrivUser.user,
+            host: activePrivUser.host,
+            scope: scope,
+            database: scope === 'DATABASE' ? currentDb : '',
+            privileges: selectedPrivs,
+            with_grant: withGrant
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          showNativeAlert(data.error || 'Failed to apply grants', 'Grant Error');
+          return;
+        }
+        showNativeAlert(`Privileges granted to '${activePrivUser.user}'@'${activePrivUser.host}'.`, 'Grants Applied');
+      } catch (err) {
+        showNativeAlert('Apply grants failed: ' + err.message, 'Network Error');
+      }
     }
 
 

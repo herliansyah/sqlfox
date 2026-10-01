@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -325,6 +326,189 @@ func (s *SQLiteSession) GetProcesslist(ctx context.Context) (*driver.Processlist
 func (s *SQLiteSession) KillProcess(ctx context.Context, threadID int64, killConnection bool) error {
 	// ponytail: No-op for SQLite embedded database
 	return nil
+}
+
+func (s *SQLiteSession) GetTableDiagnostics(ctx context.Context, database, table string) ([]driver.TableDiagnostics, error) {
+	var pageSize, pageCount, freelistCount int64
+	_ = s.db.QueryRowContext(ctx, "PRAGMA page_size").Scan(&pageSize)
+	_ = s.db.QueryRowContext(ctx, "PRAGMA page_count").Scan(&pageCount)
+	_ = s.db.QueryRowContext(ctx, "PRAGMA freelist_count").Scan(&freelistCount)
+
+	totalSize := pageCount * pageSize
+	freeSize := freelistCount * pageSize
+
+	schema, err := s.InspectSchema(ctx, "main")
+	if err != nil {
+		return nil, err
+	}
+
+	var results []driver.TableDiagnostics
+	for _, tbl := range schema.Tables {
+		if table != "" && !strings.EqualFold(tbl.Name, table) {
+			continue
+		}
+		var rowCount int64
+		_ = s.db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM %s", quoteIdentifier(tbl.Name))).Scan(&rowCount)
+
+		results = append(results, driver.TableDiagnostics{
+			Name:         tbl.Name,
+			Engine:       "SQLite",
+			Rows:         rowCount,
+			DataSize:     totalSize,
+			IndexSize:    0,
+			OverheadSize: freeSize,
+			RowFormat:    "Dynamic",
+			Collation:    "BINARY",
+		})
+	}
+	if results == nil {
+		results = []driver.TableDiagnostics{}
+	}
+	return results, nil
+}
+
+func (s *SQLiteSession) ExecuteMaintenance(ctx context.Context, database string, tables []string, action string) ([]driver.MaintenanceResult, error) {
+	upperAction := strings.ToUpper(strings.TrimSpace(action))
+	var results []driver.MaintenanceResult
+
+	switch upperAction {
+	case "OPTIMIZE", "VACUUM":
+		_, err := s.db.ExecContext(ctx, "VACUUM")
+		status := "OK"
+		msg := "Database vacuumed successfully"
+		if err != nil {
+			status = "Error"
+			msg = err.Error()
+		}
+		results = append(results, driver.MaintenanceResult{
+			Table:   "database",
+			Op:      "VACUUM",
+			Status:  status,
+			Message: msg,
+		})
+	case "ANALYZE":
+		_, err := s.db.ExecContext(ctx, "ANALYZE")
+		status := "OK"
+		msg := "Statistics gathered successfully"
+		if err != nil {
+			status = "Error"
+			msg = err.Error()
+		}
+		results = append(results, driver.MaintenanceResult{
+			Table:   "database",
+			Op:      "ANALYZE",
+			Status:  status,
+			Message: msg,
+		})
+	case "CHECK", "INTEGRITY_CHECK":
+		var checkRes string
+		err := s.db.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&checkRes)
+		status := "OK"
+		if err != nil {
+			status = "Error"
+			checkRes = err.Error()
+		}
+		results = append(results, driver.MaintenanceResult{
+			Table:   "database",
+			Op:      "INTEGRITY_CHECK",
+			Status:  status,
+			Message: checkRes,
+		})
+	default:
+		return nil, fmt.Errorf("unsupported SQLite maintenance action: %s", action)
+	}
+
+	return results, nil
+}
+
+func (s *SQLiteSession) GetRedundantIndexes(ctx context.Context, database, table string) ([]driver.RedundantIndex, error) {
+	schema, err := s.InspectSchema(ctx, "main")
+	if err != nil {
+		return nil, err
+	}
+	var tables []driver.TableMetadata
+	if table != "" {
+		for _, tbl := range schema.Tables {
+			if strings.EqualFold(tbl.Name, table) {
+				tables = append(tables, tbl)
+			}
+		}
+	} else {
+		tables = schema.Tables
+	}
+	return driver.DetectRedundantIndexes("sqlite", "main", tables), nil
+}
+
+func (s *SQLiteSession) PeekForeignKeyRow(ctx context.Context, database, table, column string, value any) (*driver.PeekResult, error) {
+	sqlCmd := fmt.Sprintf("SELECT * FROM %s WHERE %s = ? LIMIT 1", quoteIdentifier(table), quoteIdentifier(column))
+	rows, err := s.db.QueryContext(ctx, sqlCmd, value)
+	if err != nil {
+		return nil, fmt.Errorf("failed to peek foreign key row: %w", err)
+	}
+	defer rows.Close()
+
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+
+	if !rows.Next() {
+		return &driver.PeekResult{
+			Table:   table,
+			KeyCol:  column,
+			KeyVal:  value,
+			Row:     nil,
+			Columns: cols,
+		}, nil
+	}
+
+	rawVals := make([]any, len(cols))
+	scanArgs := make([]any, len(cols))
+	for i := range rawVals {
+		scanArgs[i] = &rawVals[i]
+	}
+
+	if err := rows.Scan(scanArgs...); err != nil {
+		return nil, err
+	}
+
+	rowMap := make(map[string]any, len(cols))
+	for i, col := range cols {
+		val := rawVals[i]
+		if b, ok := val.([]byte); ok {
+			rowMap[col] = string(b)
+		} else {
+			rowMap[col] = val
+		}
+	}
+
+	return &driver.PeekResult{
+		Table:   table,
+		KeyCol:  column,
+		KeyVal:  value,
+		Row:     rowMap,
+		Columns: cols,
+	}, nil
+}
+
+func (s *SQLiteSession) GetUserList(ctx context.Context) ([]driver.DatabaseUser, error) {
+	return []driver.DatabaseUser{}, errors.New("user privilege management is not supported on SQLite")
+}
+
+func (s *SQLiteSession) GetUserGrants(ctx context.Context, user, host string) ([]string, error) {
+	return nil, errors.New("user privilege management is not supported on SQLite")
+}
+
+func (s *SQLiteSession) SaveUser(ctx context.Context, user, host, password string, isNew bool) error {
+	return errors.New("user privilege management is not supported on SQLite")
+}
+
+func (s *SQLiteSession) DropUser(ctx context.Context, user, host string) error {
+	return errors.New("user privilege management is not supported on SQLite")
+}
+
+func (s *SQLiteSession) ApplyUserGrants(ctx context.Context, req driver.UserGrantRequest) error {
+	return errors.New("user privilege management is not supported on SQLite")
 }
 
 func (s *SQLiteSession) Close() error {

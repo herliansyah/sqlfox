@@ -159,19 +159,19 @@ v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
 │   │   ├── Slow query filter threshold (> N seconds)
 │   │   ├── Lock Dependency Tree (Root Blocker analysis from sys/performance_schema lock waits)
 │   │   └── Out-of-band "Kill Query" and "Kill Connection" buttons
-│   ├── [ ] 7. Table Diagnostics & Storage Overhead (Physical Size & Optimization)
+│   ├── [x] 7. Table Diagnostics & Storage Overhead (Physical Size & Optimization)
 │   │   ├── Real-time disk usage breakdown (Data Length, Index Length, Overhead/Fragmentation)
 │   │   └── One-click maintenance operations (OPTIMIZE TABLE, ANALYZE TABLE, CHECK TABLE)
-│   ├── [ ] 8. Visual User & Privilege Manager (Permission Matrix)
+│   ├── [x] 8. Visual User & Privilege Manager (Permission Matrix)
 │   │   ├── Account provisioning (User, Host %, Password, Resource Limits)
 │   │   └── Visual checkbox privilege matrix (Global, Database, and Table scopes)
-│   ├── [ ] 9. Foreign Key Hyperlink & Data Peeking
+│   ├── [x] 9. Foreign Key Hyperlink & Data Peeking
 │   │   ├── Clickable FK cells in Virtual Data Grid
 │   │   └── Hover/click popover previewing parent table record with 1-click jump
-│   ├── [ ] 10. Query Execution Profiler (SHOW PROFILE Stages)
+│   ├── [x] 10. Query Execution Profiler (SHOW PROFILE Stages)
 │   │   ├── Visual breakdown of execution phases (optimizing, lock, sorting, tmp table on disk)
 │   │   └── Microsecond stage timing chart
-│   ├── [ ] 11. Redundant / Duplicate Index Detector
+│   ├── [x] 11. Redundant / Duplicate Index Detector
 │   │   ├── Static schema analysis detecting shadowed or overlapping prefix indexes
 │   │   └── Safe cleanup recommendations
 │   └── [x] 12. Full Execution History & Session Audit Log

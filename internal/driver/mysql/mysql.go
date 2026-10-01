@@ -615,6 +615,277 @@ func (s *MySQLSession) KillProcess(ctx context.Context, threadID int64, killConn
 	return err
 }
 
+func (s *MySQLSession) GetTableDiagnostics(ctx context.Context, database, table string) ([]driver.TableDiagnostics, error) {
+	if database == "" {
+		database = s.cfg.DatabaseName
+	}
+	query := `
+		SELECT 
+			TABLE_NAME, 
+			IFNULL(ENGINE, ''), 
+			IFNULL(TABLE_ROWS, 0), 
+			IFNULL(DATA_LENGTH, 0), 
+			IFNULL(INDEX_LENGTH, 0), 
+			IFNULL(DATA_FREE, 0), 
+			IFNULL(ROW_FORMAT, ''), 
+			IFNULL(TABLE_COLLATION, ''), 
+			IFNULL(DATE_FORMAT(CREATE_TIME, '%Y-%m-%d %H:%i:%s'), ''), 
+			IFNULL(DATE_FORMAT(UPDATE_TIME, '%Y-%m-%d %H:%i:%s'), '')
+		FROM information_schema.TABLES
+		WHERE TABLE_SCHEMA = ?
+	`
+	var args []any
+	args = append(args, database)
+	if table != "" {
+		query += " AND TABLE_NAME = ?"
+		args = append(args, table)
+	}
+	query += " ORDER BY (DATA_LENGTH + INDEX_LENGTH) DESC"
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query table diagnostics: %w", err)
+	}
+	defer rows.Close()
+
+	var result []driver.TableDiagnostics
+	for rows.Next() {
+		var td driver.TableDiagnostics
+		if err := rows.Scan(
+			&td.Name,
+			&td.Engine,
+			&td.Rows,
+			&td.DataSize,
+			&td.IndexSize,
+			&td.OverheadSize,
+			&td.RowFormat,
+			&td.Collation,
+			&td.CreatedAt,
+			&td.UpdatedAt,
+		); err == nil {
+			result = append(result, td)
+		}
+	}
+	if result == nil {
+		result = []driver.TableDiagnostics{}
+	}
+	return result, nil
+}
+
+func (s *MySQLSession) ExecuteMaintenance(ctx context.Context, database string, tables []string, action string) ([]driver.MaintenanceResult, error) {
+	if database == "" {
+		database = s.cfg.DatabaseName
+	}
+	upperAction := strings.ToUpper(strings.TrimSpace(action))
+	if upperAction != "OPTIMIZE" && upperAction != "ANALYZE" && upperAction != "CHECK" {
+		return nil, fmt.Errorf("unsupported maintenance action: %s", action)
+	}
+
+	var results []driver.MaintenanceResult
+	for _, tbl := range tables {
+		sqlCmd := fmt.Sprintf("%s TABLE `%s`.`%s`", upperAction, database, tbl)
+		rows, err := s.db.QueryContext(ctx, sqlCmd)
+		if err != nil {
+			results = append(results, driver.MaintenanceResult{
+				Table:   tbl,
+				Op:      upperAction,
+				Status:  "Error",
+				Message: err.Error(),
+			})
+			continue
+		}
+		for rows.Next() {
+			var tblName, op, msgType, msgText string
+			if err := rows.Scan(&tblName, &op, &msgType, &msgText); err == nil {
+				results = append(results, driver.MaintenanceResult{
+					Table:   tbl,
+					Op:      op,
+					Status:  msgType,
+					Message: msgText,
+				})
+			}
+		}
+		rows.Close()
+	}
+	if results == nil {
+		results = []driver.MaintenanceResult{}
+	}
+	return results, nil
+}
+
+func (s *MySQLSession) GetRedundantIndexes(ctx context.Context, database, table string) ([]driver.RedundantIndex, error) {
+	if database == "" {
+		database = s.cfg.DatabaseName
+	}
+	schema, err := s.InspectSchema(ctx, database)
+	if err != nil {
+		return nil, err
+	}
+	var tables []driver.TableMetadata
+	if table != "" {
+		for _, tbl := range schema.Tables {
+			if strings.EqualFold(tbl.Name, table) {
+				tables = append(tables, tbl)
+			}
+		}
+	} else {
+		tables = schema.Tables
+	}
+	return driver.DetectRedundantIndexes("mysql", database, tables), nil
+}
+
+func (s *MySQLSession) PeekForeignKeyRow(ctx context.Context, database, table, column string, value any) (*driver.PeekResult, error) {
+	if database == "" {
+		database = s.cfg.DatabaseName
+	}
+	sqlCmd := fmt.Sprintf("SELECT * FROM `%s`.`%s` WHERE `%s` = ? LIMIT 1", database, table, column)
+	rows, err := s.db.QueryContext(ctx, sqlCmd, value)
+	if err != nil {
+		return nil, fmt.Errorf("failed to peek foreign key row: %w", err)
+	}
+	defer rows.Close()
+
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+
+	if !rows.Next() {
+		return &driver.PeekResult{
+			Table:   table,
+			KeyCol:  column,
+			KeyVal:  value,
+			Row:     nil,
+			Columns: cols,
+		}, nil
+	}
+
+	rawVals := make([]any, len(cols))
+	scanArgs := make([]any, len(cols))
+	for i := range rawVals {
+		scanArgs[i] = &rawVals[i]
+	}
+
+	if err := rows.Scan(scanArgs...); err != nil {
+		return nil, err
+	}
+
+	rowMap := make(map[string]any, len(cols))
+	for i, col := range cols {
+		val := rawVals[i]
+		if b, ok := val.([]byte); ok {
+			rowMap[col] = string(b)
+		} else {
+			rowMap[col] = val
+		}
+	}
+
+	return &driver.PeekResult{
+		Table:   table,
+		KeyCol:  column,
+		KeyVal:  value,
+		Row:     rowMap,
+		Columns: cols,
+	}, nil
+}
+
+func (s *MySQLSession) GetUserList(ctx context.Context) ([]driver.DatabaseUser, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT user, host FROM mysql.user ORDER BY user ASC, host ASC")
+	if err != nil {
+		return nil, fmt.Errorf("failed to list database users: %w", err)
+	}
+	defer rows.Close()
+
+	var users []driver.DatabaseUser
+	for rows.Next() {
+		var u driver.DatabaseUser
+		if err := rows.Scan(&u.User, &u.Host); err == nil {
+			users = append(users, u)
+		}
+	}
+	if users == nil {
+		users = []driver.DatabaseUser{}
+	}
+	return users, nil
+}
+
+func (s *MySQLSession) GetUserGrants(ctx context.Context, user, host string) ([]string, error) {
+	sqlCmd := fmt.Sprintf("SHOW GRANTS FOR '%s'@'%s'", strings.ReplaceAll(user, "'", "''"), strings.ReplaceAll(host, "'", "''"))
+	rows, err := s.db.QueryContext(ctx, sqlCmd)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch user grants: %w", err)
+	}
+	defer rows.Close()
+
+	var grants []string
+	for rows.Next() {
+		var g string
+		if err := rows.Scan(&g); err == nil {
+			grants = append(grants, g)
+		}
+	}
+	if grants == nil {
+		grants = []string{}
+	}
+	return grants, nil
+}
+
+func (s *MySQLSession) SaveUser(ctx context.Context, user, host, password string, isNew bool) error {
+	uEsc := strings.ReplaceAll(user, "'", "''")
+	hEsc := strings.ReplaceAll(host, "'", "''")
+	pEsc := strings.ReplaceAll(password, "'", "''")
+
+	if isNew {
+		cmd := fmt.Sprintf("CREATE USER '%s'@'%s' IDENTIFIED BY '%s'", uEsc, hEsc, pEsc)
+		if _, err := s.db.ExecContext(ctx, cmd); err != nil {
+			return fmt.Errorf("failed to create user: %w", err)
+		}
+	} else if password != "" {
+		cmd := fmt.Sprintf("ALTER USER '%s'@'%s' IDENTIFIED BY '%s'", uEsc, hEsc, pEsc)
+		if _, err := s.db.ExecContext(ctx, cmd); err != nil {
+			return fmt.Errorf("failed to update user password: %w", err)
+		}
+	}
+	_, _ = s.db.ExecContext(ctx, "FLUSH PRIVILEGES")
+	return nil
+}
+
+func (s *MySQLSession) DropUser(ctx context.Context, user, host string) error {
+	uEsc := strings.ReplaceAll(user, "'", "''")
+	hEsc := strings.ReplaceAll(host, "'", "''")
+	cmd := fmt.Sprintf("DROP USER '%s'@'%s'", uEsc, hEsc)
+	if _, err := s.db.ExecContext(ctx, cmd); err != nil {
+		return fmt.Errorf("failed to drop user: %w", err)
+	}
+	_, _ = s.db.ExecContext(ctx, "FLUSH PRIVILEGES")
+	return nil
+}
+
+func (s *MySQLSession) ApplyUserGrants(ctx context.Context, req driver.UserGrantRequest) error {
+	uEsc := strings.ReplaceAll(req.User, "'", "''")
+	hEsc := strings.ReplaceAll(req.Host, "'", "''")
+	privs := strings.Join(req.Privileges, ", ")
+	if privs == "" {
+		privs = "USAGE"
+	}
+
+	target := "*.*"
+	if req.Scope == "DATABASE" && req.Database != "" {
+		target = fmt.Sprintf("`%s`.*", req.Database)
+	}
+
+	cmd := fmt.Sprintf("GRANT %s ON %s TO '%s'@'%s'", privs, target, uEsc, hEsc)
+	if req.WithGrant {
+		cmd += " WITH GRANT OPTION"
+	}
+
+	if _, err := s.db.ExecContext(ctx, cmd); err != nil {
+		return fmt.Errorf("failed to apply user grants: %w", err)
+	}
+	_, _ = s.db.ExecContext(ctx, "FLUSH PRIVILEGES")
+	return nil
+}
+
 func (s *MySQLSession) Close() error {
 	dbErr := s.db.Close()
 	var tunnelErr error

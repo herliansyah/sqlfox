@@ -82,6 +82,13 @@ func (s *Server) routes() {
 
 	// Processlist & DBA operations
 	mux.HandleFunc("GET /api/session/{id}/processlist", s.handleGetProcesslist)
+	mux.HandleFunc("GET /api/session/{id}/diagnostics/tables", s.handleGetTableDiagnostics)
+	mux.HandleFunc("GET /api/session/{id}/diagnostics/redundant-indexes", s.handleGetRedundantIndexes)
+	mux.HandleFunc("GET /api/session/{id}/peek", s.handlePeekForeignKey)
+
+	// User & Privilege Management
+	mux.HandleFunc("GET /api/session/{id}/users", s.handleListUsers)
+	mux.HandleFunc("GET /api/session/{id}/users/grants", s.handleGetUserGrants)
 
 	// Session Audit Log endpoints
 	mux.HandleFunc("GET /api/session/{id}/audit-logs", s.handleGetAuditLogs)
@@ -108,6 +115,14 @@ func (s *Server) routes() {
 			s.handleCancelQuery(w, r)
 		case "kill":
 			s.handleKillProcess(w, r)
+		case "maintenance":
+			s.handleExecuteMaintenance(w, r)
+		case "save-user":
+			s.handleSaveUser(w, r)
+		case "delete-user":
+			s.handleDeleteUser(w, r)
+		case "apply-grants":
+			s.handleApplyUserGrants(w, r)
 		default:
 			http.NotFound(w, r)
 		}
