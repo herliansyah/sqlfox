@@ -211,3 +211,63 @@ For microservices and multi-database architectures:
   - `Enter` / Primary Click: Switches active schema context if needed and immediately opens the Table Viewer.
   - `Shift+Enter` / `[Insert]` Button: Pastes the fully qualified identifier (`db.table` or `db.table.column`) at the editor's cursor position.
 
+---
+
+## 12. Performance Flight Recorder & Correlated Query Drill-Down
+
+The Performance Flight Recorder enables developers and DBAs to isolate transient latency spikes and root-cause queries without running heavy 24/7 APM daemons.
+
+### Interface Wireframe
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ [SqlFox]  Prod-DB [PROD 🔴]    [⚡ Processlist] [🌐 Cluster] [📈 Recorder ● REC 00:03:12]   [🤖 Copilot]│
+├────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ [Tab 1: users.sql] [Tab 2: 📈 Flight Recorder] [+]                                                     │
+├────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ [⏹ Stop Recording]  [Interval: 1s ▼]  [● REC 03:12 (Auto-stop in: 06:48)]    [Sesi: Live ▼] [📥 Export]│
+├────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ ┌──────────────────────┬──────────────────────┬──────────────────────┬───────────────────────────────┐ │
+│ │ THROUGHPUT           │ THREADS RUNNING      │ ROW LOCK WAITS       │ BUFFER POOL WAITS             │ │
+│ │ 🟢 1,420 qps         │ 🔴 18 / 64 conn      │ 🟡 3 waits           │ 🟣 0 stalls                   │ │
+│ └──────────────────────┴──────────────────────┴──────────────────────┴───────────────────────────────┘ │
+│                                                                                                        │
+│ ┌────────────────────────────────────────────────────────────────────────────────────────────────────┐ │
+│ │ Telemetry Timeline: Hover or click any spike to isolate active queries                            │ │
+│ │ 1600│                                              /\   <- [Spike at 22:15:42]                     │ │
+│ │ 1200│                                             /  \      QPS: 1,420 | Threads: 18 | Locks: 3    │ │
+│ │  800│     /\                                     /    \                                            │ │
+│ │  400│____/  \___________________________________/      \__________________________________________ │ │
+│ │    0└─────────────────────────────────────────────│────────────────────────────────────────────────┘ │
+│ │     22:14:00             22:14:30             22:15:00             22:15:30             22:16:00     │
+│ └────────────────────────────────────────────────────────────────────────────────────────────────────┘ │
+│                                                                                                        │
+│ Correlated Non-Idle Queries [At 22:15:42 - 2 active queries]                                           │
+│ ┌────────────────────────────────────────────────────────────────────────────────────────────────────┐ │
+│ │ Thread #40812  ⏱ 4s  root@192.168.1.50  📁 analytics  (executing)   [⚡ Explain][📝 To Tab][🤖 AI]│ │
+│ │ SELECT o.id, SUM(i.price) FROM orders o JOIN order_items i ON o.id=i.order_id GROUP BY o.id;      │ │
+│ ├────────────────────────────────────────────────────────────────────────────────────────────────────┤ │
+│ │ Thread #40890  ⏱ 2s  app@192.168.1.12   📁 analytics  (Updating)    [⚡ Explain][📝 To Tab][🤖 AI]│ │
+│ │ UPDATE user_balances SET balance = balance - 150.00 WHERE user_id = 9812;                          │ │
+│ └────────────────────────────────────────────────────────────────────────────────────────────────────┘ │
+└────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Interaction Models
+
+1. **Global Recording Pulsing Badge**:
+   - Starting a flight recording shows a high-contrast pulsing red badge in the top navbar (`● REC 00:03:12`) visible across all tabs.
+   - Built-in 10-minute auto-stop safety timer prevents forgotten recording runs from polling production databases indefinitely.
+2. **Interactive Scrubber & Inspection**:
+   - Scrubbing the Canvas timeline dynamically moves a vertical dashed cursor and reveals instant hover tooltips with exact numeric vectors.
+   - Clicking a spike pins the timeline and updates the Correlated Queries drawer below.
+3. **Seamless Query Handoff**:
+   - Every captured slow or blocking statement provides 1-click actions:
+     - `⚡ Explain`: Visual execution plan breakdown.
+     - `📝 To Tab`: Pre-populates the query in an editor tab for isolated debugging.
+     - `🤖 Ask Copilot`: Formulates an AI prompt with the query, duration, system QPS, and running thread count for instant tuning advice.
+     - `📋 Copy`: Copies raw SQL to clipboard.
+4. **Vault Persistence & JSON Export**:
+   - Finished sessions are stored in the local SQLite vault, selectable via dropdown for post-incident retrospective reviews, and exportable to portable JSON files.
+
+

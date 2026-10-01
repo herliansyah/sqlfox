@@ -594,3 +594,13 @@ func (s *ActiveSession) ApplyUserGrants(ctx context.Context, req driver.UserGran
 	return s.Session.ApplyUserGrants(ctx, req)
 }
 
+// SampleFlightMetrics captures performance telemetry and correlated queries from the driver session.
+func (s *ActiveSession) SampleFlightMetrics(ctx context.Context) (*driver.FlightMetricSample, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.Session == nil {
+		return nil, driver.ErrSessionClosed
+	}
+	return s.Session.SampleFlightMetrics(ctx)
+}
+

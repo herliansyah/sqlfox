@@ -15,13 +15,14 @@ import (
 
 // Server coordinates HTTP API routing and embedded web frontend delivery.
 type Server struct {
-	handler        http.Handler
-	vault          *vault.Vault
-	backupMgr      *safety.BackupManager
-	sessionMgr     *SessionManager
-	authMgr        *AuthManager
-	masterPassword string
-	assets         fs.FS
+	handler           http.Handler
+	vault             *vault.Vault
+	backupMgr         *safety.BackupManager
+	sessionMgr        *SessionManager
+	authMgr           *AuthManager
+	flightRecorderMgr *FlightRecorderManager
+	masterPassword    string
+	assets            fs.FS
 }
 
 // NewServer initializes HTTP routes and application state.
@@ -29,14 +30,16 @@ func NewServer(v *vault.Vault, assets fs.FS, backupDir string, masterPassword st
 	backupMgr := safety.NewBackupManager(backupDir)
 	sessionMgr := NewSessionManager(v, backupMgr)
 	authMgr := NewAuthManager()
+	flightRecorderMgr := NewFlightRecorderManager(v, sessionMgr)
 
 	s := &Server{
-		vault:          v,
-		backupMgr:      backupMgr,
-		sessionMgr:     sessionMgr,
-		authMgr:        authMgr,
-		masterPassword: masterPassword,
-		assets:         assets,
+		vault:             v,
+		backupMgr:         backupMgr,
+		sessionMgr:        sessionMgr,
+		authMgr:           authMgr,
+		flightRecorderMgr: flightRecorderMgr,
+		masterPassword:    masterPassword,
+		assets:            assets,
 	}
 
 	s.routes()
@@ -92,6 +95,14 @@ func (s *Server) routes() {
 	// Session Audit Log endpoints
 	mux.HandleFunc("GET /api/session/{id}/audit-logs", s.handleGetAuditLogs)
 	mux.HandleFunc("DELETE /api/session/{id}/audit-logs", s.handleClearAuditLogs)
+
+	// Performance Flight Recorder endpoints
+	mux.HandleFunc("POST /api/session/{id}/flight-recorder/start", s.handleFlightRecorderStart)
+	mux.HandleFunc("POST /api/session/{id}/flight-recorder/stop", s.handleFlightRecorderStop)
+	mux.HandleFunc("GET /api/session/{id}/flight-recorder/status", s.handleFlightRecorderStatus)
+	mux.HandleFunc("GET /api/session/{id}/flight-recorder/sessions", s.handleFlightRecorderListSessions)
+	mux.HandleFunc("GET /api/session/{id}/flight-recorder/sessions/{recId}", s.handleFlightRecorderGetSession)
+	mux.HandleFunc("DELETE /api/session/{id}/flight-recorder/sessions/{recId}", s.handleFlightRecorderDeleteSession)
 
 	// Session commands dispatcher
 	mux.HandleFunc("POST /api/session/{id}/{action}", func(w http.ResponseWriter, r *http.Request) {
