@@ -261,4 +261,19 @@ v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
   - **Net Reduction**: Removed over 1,400 lines of dead and speculative code while maintaining 100% test coverage and zero runtime regressions.
 - **Runnable Verification**: Run `go test -v ./...` -> verify 100% pass across all packages with zero build errors; launch `sqlfox` -> verify clean startup and instant UI load.
 
+---
+
+### Milestone 15: Workspace Ergonomics, Shortcuts Discovery & Search Standardization
+- **Goal**: Polish desktop workspace ergonomics, centralize keyboard shortcut discovery, organize database objects into persistent collapsible trees, and unify search/filter textbox interactions across all toolbars and modals.
+- **Deliverables**:
+  - **Top Navbar Uniformity**: Standardized all navbar buttons to fixed `h-7` (28px) height, eliminating vertical height discrepancies between controls.
+  - **Uncluttered Button Labels & Tooltips**: Stripped inline `<kbd>` shortcut badges from navbar buttons to prevent visual clutter; cleanly exposed keyboard shortcuts via native `title="..."` tooltips.
+  - **Centralized Keyboard Shortcuts Cheatsheet**: Accessible via `?`, `F1`, statusbar `⌨️ Shortcuts` button, and Command Palette (`Ctrl+K`); cleanly categorizes all hotkeys (Query Execution, Navigation, Tabs, Tools).
+  - **Collapsible Schema Tree Sections**: `Tables`, `Views`, and `Triggers` grouped into independent collapsible sections with item count badges, section icons, and `localStorage` state persistence.
+  - **Sidebar Table Item Row Cleanup**: Removed floating hover icons (`📄 View DDL`, `🗑️ Drop Table`) from sidebar rows; row counts right-aligned with `tabular-nums` formatting.
+  - **Safe Table Deletion**: Relocated `Drop Table` to Table Viewer sub-tab toolbar and right-click context menu, protected by the AST Safety Guard Challenge.
+  - **Sidebar Visibility Persistence**: Left Sidebar (`#left-sidebar`) and AI Copilot (`#ai-sidebar`) visibility states persist across browser reloads via `localStorage`.
+  - **Maximized Search & Filter Textbox Standards**: Unified input behavior featuring dynamic horizontal expansion (`flex-1 min-w-[200px]`), leading `🔍` icon, dynamic `✕` clear button, and `Escape` reset handling across Processlist, Session Audit Log, Table Data Grid, Storage Diagnostics, Session Switcher, Database Switcher, and Snippets Manager.
+- **Runnable Verification**: Open web UI -> verify top navbar buttons have identical `h-7` height without inline kbd badges -> press `?` to open Shortcuts Cheatsheet modal -> collapse Tables section in sidebar and refresh page, confirming collapsed state persists -> open Processlist tab and type into search box, confirming dynamic clear `✕` appears and pressing `Escape` clears the filter.
+
 

@@ -23,8 +23,29 @@
             }
           },
           fontFamily: {
-            mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
-            sans: ['Inter', 'system-ui', 'sans-serif']
+            mono: [
+              'JetBrains Mono',
+              'Fira Code',
+              'ui-monospace',
+              'SFMono-Regular',
+              'Menlo',
+              'Monaco',
+              'Consolas',
+              'Liberation Mono',
+              'Courier New',
+              'monospace'
+            ],
+            sans: [
+              'Inter',
+              'system-ui',
+              '-apple-system',
+              'BlinkMacSystemFont',
+              'Segoe UI',
+              'Roboto',
+              'Helvetica Neue',
+              'Arial',
+              'sans-serif'
+            ]
           }
         }
       }
@@ -40,18 +61,26 @@
     [hidden], .hidden { display: none !important; }
     dialog:not([open]) { display: none !important; }
 
+    body {
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+    }
+
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: #090d16; }
     ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
     ::-webkit-scrollbar-thumb:hover { background: #475569; }
+    .grid-cell { font-variant-numeric: tabular-nums; }
     .grid-cell:hover .edit-hint { opacity: 1; }
 
     /* CodeMirror Dark Custom Theme for SqlFox */
     .CodeMirror {
       height: 100% !important;
-      font-family: 'JetBrains Mono', 'Fira Code', monospace !important;
-      font-size: 13px !important;
-      line-height: 1.6 !important;
+      font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace !important;
+      font-size: 14px !important;
+      line-height: 1.65 !important;
+      letter-spacing: 0.01em !important;
       background: transparent !important;
       color: #e0f2fe !important;
     }
@@ -74,7 +103,7 @@
     }
     .cm-keyword { color: #f472b6 !important; font-weight: 600 !important; }
     .cm-string { color: #34d399 !important; }
-    .cm-number { color: #fbbf24 !important; }
+    .cm-number { color: #fbbf24 !important; font-variant-numeric: tabular-nums; }
     .cm-comment { color: #64748b !important; font-style: italic !important; }
     .cm-variable { color: #e2e8f0 !important; }
     .cm-builtin { color: #38bdf8 !important; }
@@ -92,8 +121,8 @@
       border: 1px solid #334155 !important;
       border-radius: 6px !important;
       box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.7), 0 8px 10px -6px rgba(0, 0, 0, 0.7) !important;
-      font-family: 'JetBrains Mono', 'Fira Code', monospace !important;
-      font-size: 12px !important;
+      font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace !important;
+      font-size: 13px !important;
     }
     .CodeMirror-hint {
       display: flex;
@@ -130,6 +159,10 @@
   <!-- Top Navbar -->
   <header class="h-12 bg-app-surface border-b border-app-border flex items-center justify-between px-4 z-20 flex-shrink-0">
     <div class="flex items-center space-x-3">
+      <button onclick="toggleLeftSidebar()" class="h-7 w-7 flex items-center justify-center rounded bg-app-card hover:bg-slate-700 text-slate-400 hover:text-white border border-app-border transition text-xs cursor-pointer" title="Toggle Sidebar (Ctrl+B)">
+        <span>◨</span>
+      </button>
+
       <div class="flex items-center space-x-2">
         <span class="text-xl">🦊</span>
         <span class="font-bold tracking-wide text-white text-base">Sql<span class="text-app-accent">Fox</span></span>
@@ -145,52 +178,51 @@
 
     <!-- Center Search & Command Palette Shortcuts -->
     <div class="flex items-center space-x-2">
-      <button onclick="toggleCommandPalette()" class="bg-app-card hover:bg-slate-700 text-slate-400 hover:text-slate-200 px-3 py-1.5 rounded text-xs flex items-center space-x-2 border border-app-border transition" title="Open Command Palette (Ctrl+K)">
-        <span>⚡ Command Palette</span>
-        <kbd class="bg-slate-800 px-1.5 py-0.5 rounded text-[10px] text-slate-400 border border-slate-700">Ctrl+K</kbd>
+      <button onclick="toggleCommandPalette()" class="h-7 bg-app-card hover:bg-slate-700 text-slate-400 hover:text-slate-200 px-2.5 rounded text-xs flex items-center space-x-1.5 border border-app-border transition" title="Open Command Palette (Ctrl+K)">
+        <span>⚡</span>
+        <span>Command Palette</span>
       </button>
-      <button onclick="toggleSchemaSearch()" class="bg-app-card hover:bg-slate-700 text-slate-400 hover:text-slate-200 px-3 py-1.5 rounded text-xs flex items-center space-x-2 border border-app-border transition" title="Quick Open Table or Column (Ctrl+P)">
-        <span>🔍 Schema Search</span>
-        <kbd class="bg-slate-800 px-1.5 py-0.5 rounded text-[10px] text-slate-400 border border-slate-700">Ctrl+P</kbd>
+      <button onclick="toggleSchemaSearch()" class="h-7 bg-app-card hover:bg-slate-700 text-slate-400 hover:text-slate-200 px-2.5 rounded text-xs flex items-center space-x-1.5 border border-app-border transition" title="Quick Open Table or Column (Ctrl+P)">
+        <span>🔍</span>
+        <span>Schema Search</span>
       </button>
     </div>
 
     <!-- Top Right Controls -->
     <div class="flex items-center space-x-2 text-xs">
-      <button id="master-pin-badge" onclick="copyMasterPIN()" class="hidden bg-slate-800 hover:bg-slate-700 text-sky-400 px-2.5 py-1 rounded border border-sky-900 font-mono transition flex items-center space-x-1" title="Click to copy Master PIN for tablet / remote login">
+      <button id="master-pin-badge" onclick="copyMasterPIN()" class="hidden h-7 bg-slate-800 hover:bg-slate-700 text-sky-400 px-2.5 rounded border border-sky-900 font-mono transition flex items-center space-x-1" title="Click to copy Master PIN for tablet / remote login">
         <span>🔑 PIN:</span>
         <span id="master-pin-text" class="font-bold text-white">...</span>
       </button>
 
-      <button id="readonly-toggle-btn" onclick="toggleReadOnly()" class="hidden px-2.5 py-1 rounded font-medium transition border flex items-center space-x-1.5">
+      <button id="readonly-toggle-btn" onclick="toggleReadOnly()" class="hidden h-7 px-2.5 rounded font-medium transition border flex items-center space-x-1.5">
         <span id="readonly-icon">🔒</span>
         <span id="readonly-text">Read-Only</span>
       </button>
 
-      <button id="btn-open-processlist" onclick="openProcesslistTab()" class="hidden bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition flex items-center space-x-1.5" title="Processlist & Thread Monitor">
+      <button id="btn-open-processlist" onclick="openProcesslistTab()" class="hidden h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center space-x-1.5" title="Processlist & Thread Monitor">
         <span>⚡ Processlist</span>
         <span id="processlist-slow-badge" class="hidden bg-amber-500/20 text-amber-300 text-[10px] px-1 rounded-full font-bold"></span>
       </button>
 
-      <button id="btn-open-audit-log" onclick="toggleAuditDrawer()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition flex items-center space-x-1" title="Session Audit Log">
+      <button id="btn-open-audit-log" onclick="toggleAuditDrawer()" class="h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center space-x-1" title="Session Audit Log">
         <span>📜 Audit Log</span>
       </button>
 
-      <button id="btn-open-diagnostics" onclick="openDatabaseDiagnosticsModal()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition flex items-center space-x-1" title="Table Storage Diagnostics & Optimization">
+      <button id="btn-open-diagnostics" onclick="openDatabaseDiagnosticsModal()" class="h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center space-x-1" title="Table Storage Diagnostics & Optimization">
         <span>📊 Diagnostics</span>
       </button>
 
-      <button id="btn-open-privileges" onclick="openPrivilegeMatrixModal()" class="hidden bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition flex items-center space-x-1" title="User Accounts & Privilege Matrix (MySQL)">
+      <button id="btn-open-privileges" onclick="openPrivilegeMatrixModal()" class="hidden h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center space-x-1" title="User Accounts & Privilege Matrix (MySQL)">
         <span>👥 Users</span>
       </button>
 
-      <button onclick="openExportImportModal()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition">
+      <button onclick="openExportImportModal()" class="h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center">
         📦 Vault
       </button>
 
-      <button onclick="toggleAISidebar()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition flex items-center space-x-1">
+      <button onclick="toggleAISidebar()" class="h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center space-x-1" title="AI Copilot & Error Healer (Ctrl+L)">
         <span>🤖 Copilot</span>
-        <kbd class="bg-slate-800 px-1 rounded text-[10px] text-slate-400">Ctrl+L</kbd>
       </button>
     </div>
   </header>
@@ -207,10 +239,7 @@
             <span>⚡</span>
             <span>Session</span>
           </span>
-          <div class="flex items-center space-x-1.5">
-            <button onclick="openNewConnModal()" class="text-app-accent hover:underline text-[11px] font-semibold" title="New Connection Session">+ New</button>
-            <button onclick="toggleSessionDropdown()" class="text-slate-400 hover:text-white text-xs px-1" title="Manage / Switch Sessions">▼</button>
-          </div>
+          <button onclick="openNewConnModal()" class="text-app-accent hover:underline text-[11px] font-semibold" title="New Connection Session">+ New</button>
         </div>
 
         <!-- Compact Active Session Bar Button -->
@@ -225,9 +254,13 @@
 
         <!-- HeidiSQL Session Dropdown / Popover -->
         <div id="session-dropdown-menu" class="hidden absolute top-full left-2 right-2 mt-1 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl z-50 p-2 space-y-1.5">
-          <div class="flex items-center space-x-1 pb-1 border-b border-slate-800">
-            <input type="text" id="session-search-input" oninput="filterSessionList(this.value)" placeholder="Filter sessions..." class="w-full bg-slate-950 border border-slate-800 focus:border-app-accent text-white text-xs px-2 py-1 rounded outline-none font-mono">
-            <button onclick="openNewConnModal(); toggleSessionDropdown(false);" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-2 py-1 rounded text-xs transition" title="Add Session">➕</button>
+          <div class="flex items-center space-x-1.5 pb-1 border-b border-slate-800">
+            <div class="relative flex-1 flex items-center">
+              <span class="absolute left-2 text-slate-500 pointer-events-none text-xs">🔍</span>
+              <input type="text" id="session-search-input" oninput="onSessionSearchInput(this.value)" onkeydown="if(event.key==='Escape'){clearSessionSearch(); this.blur();}" placeholder="Filter sessions..." class="w-full bg-slate-950 border border-slate-800 focus:border-app-accent text-white text-xs pl-7 pr-6 py-1 rounded outline-none font-mono transition">
+              <button type="button" id="session-search-clear-btn" onclick="clearSessionSearch()" class="hidden absolute right-2 text-slate-500 hover:text-slate-200 text-xs px-1 rounded transition cursor-pointer" title="Clear filter (Esc)">✕</button>
+            </div>
+            <button onclick="openNewConnModal(); toggleSessionDropdown(false);" class="shrink-0 bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-2 py-1 rounded text-xs transition" title="Add Session">➕</button>
           </div>
           <!-- Filtered Connection List -->
           <div id="connections-tree" class="overflow-y-auto max-h-56 space-y-1 text-xs">
@@ -257,9 +290,13 @@
 
         <!-- Searchable Database Popover Menu -->
         <div id="database-dropdown-menu" class="hidden absolute top-full left-2 right-2 mt-1 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl z-50 p-2 space-y-1.5">
-          <div class="flex items-center space-x-1 pb-1 border-b border-slate-800">
-            <input type="text" id="database-search-input" oninput="filterDatabaseList(this.value)" placeholder="Filter databases..." class="w-full bg-slate-950 border border-slate-800 focus:border-app-accent text-white text-xs px-2 py-1 rounded outline-none font-mono">
-            <button onclick="openCreateDatabaseModal(); toggleDatabaseDropdown(false);" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-2 py-1 rounded text-xs transition" title="Create New Database">➕</button>
+          <div class="flex items-center space-x-1.5 pb-1 border-b border-slate-800">
+            <div class="relative flex-1 flex items-center">
+              <span class="absolute left-2 text-slate-500 pointer-events-none text-xs">🔍</span>
+              <input type="text" id="database-search-input" oninput="onDatabaseSearchInput(this.value)" onkeydown="if(event.key==='Escape'){clearDatabaseSearch(); this.blur();}" placeholder="Filter databases..." class="w-full bg-slate-950 border border-slate-800 focus:border-app-accent text-white text-xs pl-7 pr-6 py-1 rounded outline-none font-mono transition">
+              <button type="button" id="database-search-clear-btn" onclick="clearDatabaseSearch()" class="hidden absolute right-2 text-slate-500 hover:text-slate-200 text-xs px-1 rounded transition cursor-pointer" title="Clear filter (Esc)">✕</button>
+            </div>
+            <button onclick="openCreateDatabaseModal(); toggleDatabaseDropdown(false);" class="shrink-0 bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-2 py-1 rounded text-xs transition" title="Create New Database">➕</button>
           </div>
           <div id="database-list-tree" class="overflow-y-auto max-h-52 space-y-0.5 text-xs font-mono">
           </div>
@@ -354,27 +391,32 @@
       <!-- Lower Split: Data Grid / Results Area -->
       <div id="grid-container" class="flex-1 flex flex-col bg-app-bg overflow-hidden">
         <!-- Table Sub-Tabs (HeidiSQL-Style) -->
-        <div id="table-mode-tabs" class="hidden h-8 bg-slate-950 border-b border-app-border px-3 flex items-center space-x-1 text-xs">
-          <button id="btn-mode-data" onclick="setTableMode('data')" class="px-3 py-1 rounded text-xs font-semibold bg-app-surface text-app-accent border-b-2 border-app-accent flex items-center space-x-1">
-            <span>📊</span><span>Data</span>
-          </button>
-          <button id="btn-mode-structure" onclick="setTableMode('structure')" class="px-3 py-1 rounded text-xs text-slate-400 hover:text-white hover:bg-slate-800 flex items-center space-x-1">
-            <span>🏗️</span><span>Structure &amp; PK</span>
-          </button>
-          <button id="btn-mode-indexes" onclick="setTableMode('indexes')" class="px-3 py-1 rounded text-xs text-slate-400 hover:text-white hover:bg-slate-800 flex items-center space-x-1">
-            <span>🔑</span><span>Indexes</span>
-          </button>
-          <button id="btn-mode-foreign-keys" onclick="setTableMode('foreign-keys')" class="px-3 py-1 rounded text-xs text-slate-400 hover:text-white hover:bg-slate-800 flex items-center space-x-1">
-            <span>🔗</span><span>Foreign Keys</span>
-          </button>
-          <button id="btn-mode-ddl" onclick="setTableMode('ddl')" class="px-3 py-1 rounded text-xs text-slate-400 hover:text-white hover:bg-slate-800 flex items-center space-x-1">
-            <span>📜</span><span>CREATE Code</span>
-          </button>
-          <button id="btn-mode-notes" onclick="setTableMode('notes')" class="px-3 py-1 rounded text-xs text-slate-400 hover:text-white hover:bg-slate-800 flex items-center space-x-1">
-            <span>📝</span><span>Notes &amp; Runbook</span>
-          </button>
-          <button id="btn-mode-diagnostics" onclick="setTableMode('diagnostics')" class="px-3 py-1 rounded text-xs text-slate-400 hover:text-white hover:bg-slate-800 flex items-center space-x-1">
-            <span>⚡</span><span>Diagnostics</span>
+        <div id="table-mode-tabs" class="hidden h-8 bg-slate-950 border-b border-app-border px-3 flex items-center justify-between text-xs">
+          <div class="flex items-center space-x-1">
+            <button id="btn-mode-data" onclick="setTableMode('data')" class="px-3 py-1 rounded text-xs font-semibold bg-app-surface text-app-accent border-b-2 border-app-accent flex items-center space-x-1">
+              <span>📊</span><span>Data</span>
+            </button>
+            <button id="btn-mode-structure" onclick="setTableMode('structure')" class="px-3 py-1 rounded text-xs text-slate-400 hover:text-white hover:bg-slate-800 flex items-center space-x-1">
+              <span>🏗️</span><span>Structure &amp; PK</span>
+            </button>
+            <button id="btn-mode-indexes" onclick="setTableMode('indexes')" class="px-3 py-1 rounded text-xs text-slate-400 hover:text-white hover:bg-slate-800 flex items-center space-x-1">
+              <span>🔑</span><span>Indexes</span>
+            </button>
+            <button id="btn-mode-foreign-keys" onclick="setTableMode('foreign-keys')" class="px-3 py-1 rounded text-xs text-slate-400 hover:text-white hover:bg-slate-800 flex items-center space-x-1">
+              <span>🔗</span><span>Foreign Keys</span>
+            </button>
+            <button id="btn-mode-ddl" onclick="setTableMode('ddl')" class="px-3 py-1 rounded text-xs text-slate-400 hover:text-white hover:bg-slate-800 flex items-center space-x-1">
+              <span>📜</span><span>CREATE Code</span>
+            </button>
+            <button id="btn-mode-notes" onclick="setTableMode('notes')" class="px-3 py-1 rounded text-xs text-slate-400 hover:text-white hover:bg-slate-800 flex items-center space-x-1">
+              <span>📝</span><span>Notes &amp; Runbook</span>
+            </button>
+            <button id="btn-mode-diagnostics" onclick="setTableMode('diagnostics')" class="px-3 py-1 rounded text-xs text-slate-400 hover:text-white hover:bg-slate-800 flex items-center space-x-1">
+              <span>⚡</span><span>Diagnostics</span>
+            </button>
+          </div>
+          <button id="btn-drop-active-table" onclick="dropCurrentActiveTable()" class="text-rose-400 hover:text-rose-200 hover:bg-rose-950/60 px-2.5 py-0.5 rounded text-[11px] border border-rose-900/60 transition flex items-center space-x-1" title="Drop this Table (Safety Guard Challenge)">
+            <span>🗑️</span><span>Drop Table</span>
           </button>
         </div>
 
@@ -462,11 +504,15 @@
             </button>
 
             <!-- Raw WHERE Input Container -->
-            <div id="filter-raw-container" class="hidden flex-1 flex items-center space-x-1.5 min-w-[260px] max-w-2xl">
+            <div id="filter-raw-container" class="hidden flex-1 flex items-center space-x-1.5 min-w-[260px]">
               <span class="px-1.5 py-0.5 bg-sky-950 text-sky-400 border border-sky-800 rounded font-mono text-[10px] font-bold tracking-wider select-none shrink-0">WHERE</span>
-              <input type="text" id="filter-raw-input" placeholder="e.g. status = 'active' AND (views > 100 OR is_featured = 1)"
-                     onkeydown="if(event.key === 'Enter') applyTableFilter()"
-                     class="w-full bg-slate-950 text-slate-100 placeholder-slate-500 border border-slate-700 focus:border-sky-400 px-2.5 py-1 rounded outline-none font-mono text-xs ring-1 ring-transparent focus:ring-sky-500/30 transition">
+              <div class="relative flex-1 flex items-center">
+                <input type="text" id="filter-raw-input" placeholder="e.g. status = 'active' AND (views > 100 OR is_featured = 1)"
+                       oninput="onFilterRawInput(this.value)"
+                       onkeydown="if(event.key === 'Enter') applyTableFilter(); if(event.key === 'Escape'){ clearFilterRawInput(); this.blur(); }"
+                       class="w-full bg-slate-950 text-slate-100 placeholder-slate-500 border border-slate-700 focus:border-sky-400 pl-2.5 pr-7 py-1 rounded outline-none font-mono text-xs ring-1 ring-transparent focus:ring-sky-500/30 transition">
+                <button type="button" id="filter-raw-clear-btn" onclick="clearFilterRawInput()" class="hidden absolute right-2 text-slate-500 hover:text-slate-200 text-xs px-1 rounded transition cursor-pointer" title="Clear input (Esc)">✕</button>
+              </div>
             </div>
 
             <!-- Active Filter Badge -->
@@ -815,9 +861,9 @@
       <!-- Processlist & Thread Monitor View (Dedicated Tab) -->
       <div id="processlist-view-container" class="hidden flex-1 flex flex-col overflow-hidden bg-app-bg">
         <!-- Processlist Toolbar -->
-        <div class="h-10 bg-app-surface border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0">
-          <div class="flex items-center space-x-3">
-            <div class="flex items-center space-x-1 bg-slate-900 border border-slate-700 rounded p-0.5">
+        <div class="h-10 bg-app-surface border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0 gap-3">
+          <div class="flex items-center space-x-2.5 flex-1 min-w-0">
+            <div class="shrink-0 flex items-center space-x-1 bg-slate-900 border border-slate-700 rounded p-0.5">
               <span class="text-slate-400 text-[11px] px-1.5 font-medium">Refresh:</span>
               <button id="pl-refresh-pause" onclick="setProcesslistInterval('pause')" class="px-2 py-0.5 rounded text-[11px] bg-slate-800 text-white font-medium">Pause</button>
               <button id="pl-refresh-1s" onclick="setProcesslistInterval(1000)" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">1s</button>
@@ -825,33 +871,35 @@
               <button id="pl-refresh-5s" onclick="setProcesslistInterval(5000)" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">5s</button>
             </div>
 
-            <button onclick="fetchProcesslist()" class="bg-app-card hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded border border-app-border transition flex items-center space-x-1" title="Fetch active threads immediately">
+            <button onclick="fetchProcesslist()" class="shrink-0 bg-app-card hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded border border-app-border transition flex items-center space-x-1" title="Fetch active threads immediately">
               <span>🔄 Refresh Now</span>
             </button>
 
-            <div class="flex items-center space-x-1.5 text-slate-400 text-xs">
+            <div class="shrink-0 flex items-center space-x-1.5 text-slate-400 text-xs">
               <span>Slow &gt;</span>
               <input type="number" id="pl-slow-threshold" value="0" min="0" oninput="renderProcesslistUI()" class="w-14 bg-slate-900 border border-slate-700 px-1.5 py-0.5 rounded text-white text-xs font-mono text-center outline-none focus:border-app-accent" title="Filter threads running longer than N seconds (0 = all)">
               <span>sec</span>
             </div>
 
-            <div class="relative">
-              <input type="text" id="pl-search-input" oninput="renderProcesslistUI()" placeholder="Search user, db, query..." class="w-44 bg-slate-900 border border-slate-700 px-2 py-0.5 rounded text-white text-xs outline-none focus:border-app-accent font-mono">
+            <div class="relative flex-1 min-w-[200px] flex items-center">
+              <span class="absolute left-2.5 text-slate-500 pointer-events-none text-xs">🔍</span>
+              <input type="text" id="pl-search-input" oninput="onProcesslistSearchInput(this.value)" onkeydown="if(event.key==='Escape'){clearProcesslistSearch(); this.blur();}" placeholder="Search user, host, db, state, or SQL query statement..." class="w-full bg-slate-900 border border-slate-700 pl-8 pr-7 py-1 rounded text-white text-xs outline-none focus:border-app-accent font-mono transition">
+              <button type="button" id="pl-search-clear-btn" onclick="clearProcesslistSearch()" class="hidden absolute right-2 text-slate-500 hover:text-slate-200 text-xs px-1 rounded transition cursor-pointer" title="Clear filter (Esc)">✕</button>
             </div>
 
             <!-- Best Practice Filter Toggles -->
-            <label class="flex items-center space-x-1.5 text-slate-300 hover:text-white cursor-pointer select-none text-[11px]" title="Hide idle client connections currently in Sleep state">
+            <label class="shrink-0 flex items-center space-x-1.5 text-slate-300 hover:text-white cursor-pointer select-none text-[11px]" title="Hide idle client connections currently in Sleep state">
               <input type="checkbox" id="pl-hide-sleep" onchange="onProcesslistFilterChange()" class="rounded bg-slate-900 border-slate-700 text-app-accent">
               <span>Hide Sleep</span>
             </label>
 
-            <label class="flex items-center space-x-1.5 text-slate-300 hover:text-white cursor-pointer select-none text-[11px]" title="Hide internal system threads (event_scheduler, binlog dump, etc.)">
+            <label class="shrink-0 flex items-center space-x-1.5 text-slate-300 hover:text-white cursor-pointer select-none text-[11px]" title="Hide internal system threads (event_scheduler, binlog dump, etc.)">
               <input type="checkbox" id="pl-hide-system" onchange="onProcesslistFilterChange()" class="rounded bg-slate-900 border-slate-700 text-app-accent">
               <span>Hide System</span>
             </label>
           </div>
 
-          <div class="flex items-center space-x-3 text-slate-400 text-xs">
+          <div class="shrink-0 flex items-center space-x-3 text-slate-400 text-xs">
             <span id="pl-summary-text">Threads: 0</span>
             <span id="pl-lock-summary" class="hidden text-red-400 font-semibold flex items-center space-x-1">
               <span>🚨</span><span id="pl-lock-count">0 Locks</span>
@@ -901,18 +949,22 @@
       <!-- Session Audit Log Drawer (Bottom Panel) -->
       <div id="audit-drawer" class="hidden h-72 bg-slate-950 border-t border-app-border flex flex-col z-20 shadow-2xl flex-shrink-0">
         <!-- Drawer Header -->
-        <div class="h-9 bg-app-surface border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0">
-          <div class="flex items-center space-x-3">
-            <span class="font-bold text-white flex items-center space-x-1.5">
+        <div class="h-9 bg-app-surface border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0 gap-3">
+          <div class="flex items-center space-x-3 flex-1 min-w-0 mr-3">
+            <span class="shrink-0 font-bold text-white flex items-center space-x-1.5">
               <span>📜</span>
               <span>Session Audit Log</span>
             </span>
-            <span id="audit-total-count" class="text-slate-400 text-[11px]">(0 entries)</span>
+            <span id="audit-total-count" class="shrink-0 text-slate-400 text-[11px]">(0 entries)</span>
 
-            <input type="text" id="audit-search-input" oninput="loadAuditLogs()" placeholder="Search executed SQL..." class="w-56 bg-slate-900 border border-slate-700 px-2 py-0.5 rounded text-white text-xs font-mono outline-none focus:border-app-accent">
+            <div class="relative flex-1 min-w-[200px] flex items-center">
+              <span class="absolute left-2.5 text-slate-500 pointer-events-none text-xs">🔍</span>
+              <input type="text" id="audit-search-input" oninput="onAuditSearchInput(this.value)" onkeydown="if(event.key==='Escape'){clearAuditSearch(); this.blur();}" placeholder="Search executed SQL statement..." class="w-full bg-slate-900 border border-slate-700 pl-8 pr-7 py-0.5 rounded text-white text-xs font-mono outline-none focus:border-app-accent transition">
+              <button type="button" id="audit-search-clear-btn" onclick="clearAuditSearch()" class="hidden absolute right-2 text-slate-500 hover:text-slate-200 text-xs px-1 rounded transition cursor-pointer" title="Clear filter (Esc)">✕</button>
+            </div>
           </div>
 
-          <div class="flex items-center space-x-2">
+          <div class="flex items-center space-x-2 shrink-0">
             <button onclick="exportAuditLogsCSV()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition text-[11px] flex items-center space-x-1">
               <span>📥 Export CSV</span>
             </button>
@@ -1040,11 +1092,131 @@
     </div>
     <div class="flex items-center space-x-4">
       <span id="footer-memory">Memory: < 50MB</span>
+      <button onclick="openShortcutsModal()" class="hover:text-white flex items-center space-x-1 text-slate-400 hover:bg-slate-800 px-1.5 py-0.5 rounded transition cursor-pointer" title="View Keyboard Shortcuts (? / F1)">
+        <span>⌨️</span>
+        <span class="underline decoration-slate-600 underline-offset-2">Shortcuts</span>
+      </button>
       <span>SqlFox v1.0</span>
     </div>
   </footer>
 
   <!-- MODALS -->
+
+  <!-- Keyboard Shortcuts Cheat Sheet Modal -->
+  <div id="shortcuts-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 hidden" onclick="if(event.target === this) closeShortcutsModal()">
+    <div class="bg-slate-900 border border-app-border w-full max-w-xl rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+      <div class="px-5 py-3 border-b border-app-border flex items-center justify-between bg-slate-950/80">
+        <div class="flex items-center space-x-2">
+          <span class="text-base">⌨️</span>
+          <h3 class="text-sm font-bold text-white">Keyboard Shortcuts & Command Cheatsheet</h3>
+        </div>
+        <button onclick="closeShortcutsModal()" class="text-slate-400 hover:text-white text-xs px-1.5 py-0.5 rounded hover:bg-slate-800 transition" title="Close (Esc)">✕</button>
+      </div>
+
+      <div class="p-5 max-h-[75vh] overflow-y-auto space-y-4 text-xs">
+        <!-- Section: Query & Execution -->
+        <div>
+          <h4 class="text-[11px] font-bold text-sky-400 uppercase tracking-wider mb-2 flex items-center space-x-1.5">
+            <span>⚡</span>
+            <span>Query & Execution</span>
+          </h4>
+          <div class="bg-slate-950/70 border border-slate-800 rounded-lg p-2.5 space-y-2">
+            <div class="flex items-center justify-between py-1 border-b border-slate-900">
+              <span class="text-slate-300">Run Active Query (Safety Guard Protected)</span>
+              <kbd class="bg-slate-800 px-2 py-0.5 rounded text-[11px] text-slate-300 border border-slate-700 font-mono">Ctrl + Enter</kbd>
+            </div>
+            <div class="flex items-center justify-between py-1 border-b border-slate-900">
+              <span class="text-slate-300">Explain Active Query (Execution Plan Grid)</span>
+              <kbd class="bg-slate-800 px-2 py-0.5 rounded text-[11px] text-slate-300 border border-slate-700 font-mono">Ctrl + Shift + Enter</kbd>
+            </div>
+            <div class="flex items-center justify-between py-1">
+              <span class="text-slate-300">Focus Table Filter (Virtual Data Grid)</span>
+              <kbd class="bg-slate-800 px-2 py-0.5 rounded text-[11px] text-slate-300 border border-slate-700 font-mono">Ctrl + F</kbd>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section: Navigation & Search -->
+        <div>
+          <h4 class="text-[11px] font-bold text-purple-400 uppercase tracking-wider mb-2 flex items-center space-x-1.5">
+            <span>🔍</span>
+            <span>Navigation & Search</span>
+          </h4>
+          <div class="bg-slate-950/70 border border-slate-800 rounded-lg p-2.5 space-y-2">
+            <div class="flex items-center justify-between py-1 border-b border-slate-900">
+              <span class="text-slate-300">Schema Search (Cross-Database Finder)</span>
+              <kbd class="bg-slate-800 px-2 py-0.5 rounded text-[11px] text-slate-300 border border-slate-700 font-mono">Ctrl + P</kbd>
+            </div>
+            <div class="flex items-center justify-between py-1 border-b border-slate-900">
+              <span class="text-slate-300">Command Palette (Omnibox Actions)</span>
+              <kbd class="bg-slate-800 px-2 py-0.5 rounded text-[11px] text-slate-300 border border-slate-700 font-mono">Ctrl + K</kbd>
+            </div>
+            <div class="flex items-center justify-between py-1 border-b border-slate-900">
+              <span class="text-slate-300">Quick Filter Schema Objects</span>
+              <kbd class="bg-slate-800 px-2 py-0.5 rounded text-[11px] text-slate-300 border border-slate-700 font-mono">/</kbd>
+            </div>
+            <div class="flex items-center justify-between py-1">
+              <span class="text-slate-300">Toggle Left Sidebar</span>
+              <kbd class="bg-slate-800 px-2 py-0.5 rounded text-[11px] text-slate-300 border border-slate-700 font-mono">Ctrl + B</kbd>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section: Tabs & Tools -->
+        <div>
+          <h4 class="text-[11px] font-bold text-emerald-400 uppercase tracking-wider mb-2 flex items-center space-x-1.5">
+            <span>🛠️</span>
+            <span>Tabs & Workspaces</span>
+          </h4>
+          <div class="bg-slate-950/70 border border-slate-800 rounded-lg p-2.5 space-y-2">
+            <div class="flex items-center justify-between py-1 border-b border-slate-900">
+              <span class="text-slate-300">New Query Tab</span>
+              <kbd class="bg-slate-800 px-2 py-0.5 rounded text-[11px] text-slate-300 border border-slate-700 font-mono">Ctrl + T</kbd>
+            </div>
+            <div class="flex items-center justify-between py-1 border-b border-slate-900">
+              <span class="text-slate-300">Close Active Tab</span>
+              <kbd class="bg-slate-800 px-2 py-0.5 rounded text-[11px] text-slate-300 border border-slate-700 font-mono">Ctrl + W</kbd>
+            </div>
+            <div class="flex items-center justify-between py-1 border-b border-slate-900">
+              <span class="text-slate-300">AI Copilot Sidebar</span>
+              <kbd class="bg-slate-800 px-2 py-0.5 rounded text-[11px] text-slate-300 border border-slate-700 font-mono">Ctrl + L</kbd>
+            </div>
+            <div class="flex items-center justify-between py-1 border-b border-slate-900">
+              <span class="text-slate-300">Query Snippets Manager</span>
+              <kbd class="bg-slate-800 px-2 py-0.5 rounded text-[11px] text-slate-300 border border-slate-700 font-mono">Ctrl + Shift + S</kbd>
+            </div>
+            <div class="flex items-center justify-between py-1 border-b border-slate-900">
+              <span class="text-slate-300">Keyboard Shortcuts Help</span>
+              <kbd class="bg-slate-800 px-2 py-0.5 rounded text-[11px] text-slate-300 border border-slate-700 font-mono">? / F1</kbd>
+            </div>
+            <div class="flex items-center justify-between py-1">
+              <span class="text-slate-300">Close Active Dialog / Popover</span>
+              <kbd class="bg-slate-800 px-2 py-0.5 rounded text-[11px] text-slate-300 border border-slate-700 font-mono">Esc</kbd>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="px-5 py-2.5 bg-slate-950 border-t border-slate-800 flex justify-between items-center text-xs">
+        <span class="text-slate-500 text-[11px]">Pro-tip: Press <kbd class="bg-slate-800 px-1 py-0.5 rounded text-slate-400">Esc</kbd> to dismiss any dialog</span>
+        <button onclick="closeShortcutsModal()" class="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded transition">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Table Item Context Menu -->
+  <div id="table-context-menu" class="hidden fixed bg-slate-900 border border-slate-700 rounded-lg shadow-2xl z-50 text-xs py-1 min-w-[160px]" onclick="event.stopPropagation()">
+    <button onclick="tableContextMenuAction('open')" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 text-slate-200 flex items-center space-x-2 transition cursor-pointer">
+      <span>📋</span><span>Open Table</span>
+    </button>
+    <button onclick="tableContextMenuAction('ddl')" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 text-slate-200 flex items-center space-x-2 transition cursor-pointer">
+      <span>📜</span><span>View DDL</span>
+    </button>
+    <div class="border-t border-slate-800 my-1"></div>
+    <button onclick="tableContextMenuAction('drop')" class="w-full text-left px-3 py-1.5 hover:bg-rose-950/60 text-rose-400 hover:text-rose-300 flex items-center space-x-2 transition cursor-pointer">
+      <span>🗑️</span><span>Drop Table...</span>
+    </button>
+  </div>
 
   <!-- 0. Remote Access Guard Lock Screen -->
   <div id="remote-lock-modal" class="fixed inset-0 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 z-[100] hidden">
@@ -1649,9 +1821,10 @@
 
       <!-- Search Bar -->
       <div class="flex items-center px-4 py-2 bg-slate-900 border-b border-slate-800 space-x-2">
-        <span class="text-slate-400 text-xs">🔍</span>
-        <input type="text" id="snippets-filter-input" oninput="renderSnippetsList()" placeholder="Filter snippets by title or tags... (or type snip: in editor)" class="flex-1 bg-transparent text-white font-mono text-xs outline-none placeholder-slate-500">
-        <span id="snippets-count-badge" class="text-[10px] text-slate-500 font-mono">0 snippets</span>
+        <span class="text-slate-400 text-xs pointer-events-none">🔍</span>
+        <input type="text" id="snippets-filter-input" oninput="onSnippetsFilterInput(this.value)" onkeydown="if(event.key==='Escape'){clearSnippetsFilter(); this.blur();}" placeholder="Filter snippets by title or tags... (or type snip: in editor)" class="flex-1 bg-transparent text-white font-mono text-xs outline-none placeholder-slate-500">
+        <button type="button" id="snippets-filter-clear-btn" onclick="clearSnippetsFilter()" class="hidden text-slate-500 hover:text-slate-200 text-xs px-1 rounded transition cursor-pointer" title="Clear filter (Esc)">✕</button>
+        <span id="snippets-count-badge" class="text-[10px] text-slate-500 font-mono shrink-0">0 snippets</span>
       </div>
 
       <!-- Editor Form (hidden by default) -->
@@ -1862,11 +2035,15 @@
           <button id="dbdiag-tab-tables-btn" onclick="switchDbDiagTab('tables')" class="px-3 py-1 rounded text-xs font-semibold bg-app-surface text-sky-400 border border-sky-800/60">Tables Storage</button>
           <button id="dbdiag-tab-indexes-btn" onclick="switchDbDiagTab('indexes')" class="px-3 py-1 rounded text-xs text-slate-400 hover:text-white">Redundant Indexes Scanner</button>
         </div>
-        <div id="dbdiag-tables-toolbar" class="flex items-center space-x-2">
-          <input type="text" id="dbdiag-search-input" oninput="filterDbDiagTables(this.value)" placeholder="Filter tables..." class="bg-slate-950 border border-slate-700 px-2 py-0.5 rounded text-xs text-slate-200 outline-none w-36">
-          <button onclick="runDbMaintenanceBatch('OPTIMIZE')" class="bg-sky-600 hover:bg-sky-500 text-white font-medium px-2.5 py-1 rounded text-xs transition">Optimize Selected</button>
-          <button onclick="runDbMaintenanceBatch('ANALYZE')" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded text-xs transition">Analyze</button>
-          <button onclick="runDbMaintenanceBatch('CHECK')" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded text-xs transition">Check</button>
+        <div id="dbdiag-tables-toolbar" class="flex items-center space-x-2 flex-1 justify-end ml-3">
+          <div class="relative flex-1 max-w-xs flex items-center">
+            <span class="absolute left-2.5 text-slate-500 pointer-events-none text-xs">🔍</span>
+            <input type="text" id="dbdiag-search-input" oninput="onDbDiagSearchInput(this.value)" onkeydown="if(event.key==='Escape'){clearDbDiagSearch(); this.blur();}" placeholder="Filter tables by name..." class="w-full bg-slate-900 border border-slate-700 pl-8 pr-7 py-1 rounded text-xs text-slate-200 outline-none focus:border-app-accent font-mono transition">
+            <button type="button" id="dbdiag-search-clear-btn" onclick="clearDbDiagSearch()" class="hidden absolute right-2 text-slate-500 hover:text-slate-200 text-xs px-1 rounded transition cursor-pointer" title="Clear filter (Esc)">✕</button>
+          </div>
+          <button onclick="runDbMaintenanceBatch('OPTIMIZE')" class="shrink-0 bg-sky-600 hover:bg-sky-500 text-white font-medium px-2.5 py-1 rounded text-xs transition">Optimize Selected</button>
+          <button onclick="runDbMaintenanceBatch('ANALYZE')" class="shrink-0 bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded text-xs transition">Analyze</button>
+          <button onclick="runDbMaintenanceBatch('CHECK')" class="shrink-0 bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded text-xs transition">Check</button>
         </div>
       </div>
 
@@ -2446,6 +2623,7 @@
 
     // --- Lifecycle Initialization ---
     window.addEventListener('DOMContentLoaded', async () => {
+      initSidebarVisibility();
       initCodeMirror();
       initAIChatSession();
       updateAIProviderBadge();
@@ -2489,6 +2667,8 @@
       if (shouldOpen) {
         menu.classList.remove('hidden');
         const input = document.getElementById('session-search-input');
+        const clearBtn = document.getElementById('session-search-clear-btn');
+        if (clearBtn) clearBtn.classList.add('hidden');
         if (input) {
           input.value = '';
           sessionFilterQuery = '';
@@ -2498,6 +2678,28 @@
       } else {
         menu.classList.add('hidden');
       }
+    }
+
+    function onSessionSearchInput(val) {
+      const clearBtn = document.getElementById('session-search-clear-btn');
+      if (clearBtn) {
+        if (val && val.length > 0) clearBtn.classList.remove('hidden');
+        else clearBtn.classList.add('hidden');
+      }
+      filterSessionList(val);
+    }
+
+    function clearSessionSearch() {
+      const input = document.getElementById('session-search-input');
+      const clearBtn = document.getElementById('session-search-clear-btn');
+      if (input) {
+        input.value = '';
+        input.focus();
+      }
+      if (clearBtn) {
+        clearBtn.classList.add('hidden');
+      }
+      filterSessionList('');
     }
 
     function filterSessionList(query) {
@@ -2721,6 +2923,8 @@
       if (shouldOpen) {
         menu.classList.remove('hidden');
         const input = document.getElementById('database-search-input');
+        const clearBtn = document.getElementById('database-search-clear-btn');
+        if (clearBtn) clearBtn.classList.add('hidden');
         if (input) {
           input.value = '';
           databaseFilterQuery = '';
@@ -2730,6 +2934,28 @@
       } else {
         menu.classList.add('hidden');
       }
+    }
+
+    function onDatabaseSearchInput(val) {
+      const clearBtn = document.getElementById('database-search-clear-btn');
+      if (clearBtn) {
+        if (val && val.length > 0) clearBtn.classList.remove('hidden');
+        else clearBtn.classList.add('hidden');
+      }
+      filterDatabaseList(val);
+    }
+
+    function clearDatabaseSearch() {
+      const input = document.getElementById('database-search-input');
+      const clearBtn = document.getElementById('database-search-clear-btn');
+      if (input) {
+        input.value = '';
+        input.focus();
+      }
+      if (clearBtn) {
+        clearBtn.classList.add('hidden');
+      }
+      filterDatabaseList('');
     }
 
     function filterDatabaseList(query) {
@@ -2788,7 +3014,7 @@
       await selectDatabase(dbName);
     }
 
-    // Dismiss database dropdown when clicking outside
+    // Dismiss database dropdown and table context menu when clicking outside
     document.addEventListener('click', (e) => {
       const switcherBtn = document.getElementById('database-switcher-btn');
       const menu = document.getElementById('database-dropdown-menu');
@@ -2797,7 +3023,99 @@
           menu.classList.add('hidden');
         }
       }
+      const tblMenu = document.getElementById('table-context-menu');
+      if (tblMenu && !tblMenu.classList.contains('hidden')) {
+        if (!tblMenu.contains(e.target)) {
+          closeTableContextMenu();
+        }
+      }
     });
+
+    // --- Table Context Menu & Actions ---
+    let selectedContextMenuTable = null;
+
+    function showTableContextMenu(e, tableName) {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      selectedContextMenuTable = tableName;
+      const menu = document.getElementById('table-context-menu');
+      if (!menu) return;
+
+      const x = Math.min(e.clientX, window.innerWidth - 170);
+      const y = Math.min(e.clientY, window.innerHeight - 130);
+      menu.style.left = `${x}px`;
+      menu.style.top = `${y}px`;
+      menu.classList.remove('hidden');
+    }
+
+    function closeTableContextMenu() {
+      const menu = document.getElementById('table-context-menu');
+      if (menu) menu.classList.add('hidden');
+      selectedContextMenuTable = null;
+    }
+
+    function tableContextMenuAction(action) {
+      const tbl = selectedContextMenuTable;
+      closeTableContextMenu();
+      if (!tbl) return;
+      if (action === 'open') {
+        openTableViewer(tbl);
+      } else if (action === 'ddl') {
+        viewTableDDL(tbl);
+      } else if (action === 'drop') {
+        dropTable(tbl);
+      }
+    }
+
+    function dropCurrentActiveTable() {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (activeTab && activeTab.isTableViewer && activeTab.tableName) {
+        dropTable(activeTab.tableName);
+      }
+    }
+
+    // --- Schema Explorer Section Collapsible State ---
+    let schemaSectionCollapsed = {
+      tables: false,
+      views: false,
+      triggers: false
+    };
+
+    try {
+      const savedCollapse = localStorage.getItem('sqlfox_schema_collapse');
+      if (savedCollapse) schemaSectionCollapsed = Object.assign(schemaSectionCollapsed, JSON.parse(savedCollapse));
+    } catch (_) {}
+
+    function toggleSchemaSection(section) {
+      if (schemaSectionCollapsed[section] !== undefined) {
+        schemaSectionCollapsed[section] = !schemaSectionCollapsed[section];
+        try {
+          localStorage.setItem('sqlfox_schema_collapse', JSON.stringify(schemaSectionCollapsed));
+        } catch (_) {}
+        if (schemaCatalogCache) {
+          renderSchemaTree(schemaCatalogCache);
+        }
+      }
+    }
+
+    // --- Shortcuts Modal Handlers ---
+    function openShortcutsModal() {
+      const modal = document.getElementById('shortcuts-modal');
+      if (modal) modal.classList.remove('hidden');
+    }
+    function closeShortcutsModal() {
+      const modal = document.getElementById('shortcuts-modal');
+      if (modal) modal.classList.add('hidden');
+    }
+    function toggleShortcutsModal() {
+      const modal = document.getElementById('shortcuts-modal');
+      if (modal) {
+        if (modal.classList.contains('hidden')) openShortcutsModal();
+        else closeShortcutsModal();
+      }
+    }
 
     function renderSchemaTree(schema) {
       const treeEl = document.getElementById('schema-tree');
@@ -2851,103 +3169,108 @@
       let html = '';
 
       // 1. Tables Section
+      const isTablesCollapsed = schemaSectionCollapsed.tables && !q;
       if (!q || tablesList.length > 0) {
         html += `
-          <div class="mb-3">
-            <div class="flex items-center justify-between text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-1 py-0.5 border-b border-slate-800 mb-1">
-              <span class="flex items-center space-x-1">
-                <span>📊</span><span>Tables (${tablesList.length}${q ? '/' + allTables.length : ''})</span>
-              </span>
+          <div class="mb-2.5">
+            <div class="flex items-center justify-between text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-1 py-1 border-b border-slate-800/80 mb-1 hover:bg-slate-800/40 rounded transition select-none">
+              <button onclick="toggleSchemaSection('tables')" class="flex items-center space-x-1.5 flex-1 text-left group cursor-pointer" title="${isTablesCollapsed ? 'Expand Tables' : 'Collapse Tables'}">
+                <span class="text-[9px] text-slate-500 group-hover:text-slate-300 font-mono w-3">${isTablesCollapsed ? '▶' : '▼'}</span>
+                <span>📊</span>
+                <span class="group-hover:text-white transition">Tables</span>
+                <span class="text-[10px] text-slate-500 font-mono font-normal">(${tablesList.length}${q ? '/' + allTables.length : ''})</span>
+              </button>
               <button onclick="openCreateTableModal()" class="text-app-accent hover:text-white text-xs px-1" title="Create New Table">➕</button>
             </div>
+            ${isTablesCollapsed ? '' : `
             <div class="space-y-0.5">
+              ${tablesList.length === 0 ? `<div class="text-slate-600 text-[11px] px-2 py-1 italic">No tables. Click ➕ to create.</div>` :
+                tablesList.map(t => `
+                  <div class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" onclick="openTableViewer('${escapeHtml(t.name)}')" oncontextmenu="showTableContextMenu(event, '${escapeHtml(t.name)}')">
+                    <span class="flex items-center space-x-1.5 truncate text-slate-200 group-hover:text-white flex-1 min-w-0 mr-2">
+                      <span class="text-xs flex-shrink-0">📋</span>
+                      <span class="truncate">${escapeHtml(t.name)}</span>
+                    </span>
+                    <span class="text-[10px] text-slate-500 font-mono ml-auto flex-shrink-0 text-right">${t.row_count > 0 ? t.row_count.toLocaleString() + ' r' : ''}</span>
+                  </div>
+                `).join('')
+              }
+            </div>
+            `}
+          </div>
         `;
-        if (tablesList.length === 0) {
-          html += `<div class="text-slate-600 text-[11px] px-2 py-1 italic">No tables. Click ➕ to create.</div>`;
-        } else {
-          tablesList.forEach(t => {
-            html += `
-              <div class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" onclick="openTableViewer('${escapeHtml(t.name)}')">
-                <span class="flex items-center space-x-1.5 truncate text-slate-200 group-hover:text-white">
-                  <span class="text-xs">📋</span>
-                  <span class="truncate max-w-[125px]">${escapeHtml(t.name)}</span>
-                </span>
-                <div class="flex items-center space-x-1">
-                  <span class="text-[10px] text-slate-500 font-mono">${t.row_count > 0 ? t.row_count + 'r' : ''}</span>
-                  <button onclick="event.stopPropagation(); viewTableDDL('${escapeHtml(t.name)}')" class="opacity-0 group-hover:opacity-100 hover:text-app-accent px-1" title="View DDL">📄</button>
-                  <button onclick="event.stopPropagation(); dropTable('${escapeHtml(t.name)}')" class="opacity-0 group-hover:opacity-100 hover:text-red-400 px-0.5" title="Drop Table">🗑️</button>
-                </div>
-              </div>
-            `;
-          });
-        }
-        html += `</div></div>`;
       }
 
       // 2. Views Section
+      const isViewsCollapsed = schemaSectionCollapsed.views && !q;
       if (!q || viewsList.length > 0) {
         html += `
-          <div class="mb-3">
-            <div class="flex items-center justify-between text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-1 py-0.5 border-b border-slate-800 mb-1">
-              <span class="flex items-center space-x-1">
-                <span>👁️</span><span>Views (${viewsList.length}${q ? '/' + allViews.length : ''})</span>
-              </span>
+          <div class="mb-2.5">
+            <div class="flex items-center justify-between text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-1 py-1 border-b border-slate-800/80 mb-1 hover:bg-slate-800/40 rounded transition select-none">
+              <button onclick="toggleSchemaSection('views')" class="flex items-center space-x-1.5 flex-1 text-left group cursor-pointer" title="${isViewsCollapsed ? 'Expand Views' : 'Collapse Views'}">
+                <span class="text-[9px] text-slate-500 group-hover:text-slate-300 font-mono w-3">${isViewsCollapsed ? '▶' : '▼'}</span>
+                <span>👁️</span>
+                <span class="group-hover:text-white transition">Views</span>
+                <span class="text-[10px] text-slate-500 font-mono font-normal">(${viewsList.length}${q ? '/' + allViews.length : ''})</span>
+              </button>
               <button onclick="openCreateViewModal()" class="text-app-accent hover:text-white text-xs px-1" title="Create New View">➕</button>
             </div>
+            ${isViewsCollapsed ? '' : `
             <div class="space-y-0.5">
+              ${viewsList.length === 0 ? `<div class="text-slate-600 text-[11px] px-2 py-1 italic">No views. Click ➕ to create.</div>` :
+                viewsList.map(v => `
+                  <div class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" onclick="openTableViewer('${escapeHtml(v.name)}')">
+                    <span class="flex items-center space-x-1.5 truncate text-purple-300 group-hover:text-white">
+                      <span class="text-xs">👁️</span>
+                      <span class="truncate max-w-[125px]">${escapeHtml(v.name)}</span>
+                    </span>
+                    <div class="flex items-center space-x-1">
+                      <button onclick="event.stopPropagation(); openCreateViewModal('${escapeHtml(v.name)}')" class="opacity-0 group-hover:opacity-100 hover:text-app-accent px-1" title="Edit View">✏️</button>
+                      <button onclick="event.stopPropagation(); dropView('${escapeHtml(v.name)}')" class="opacity-0 group-hover:opacity-100 hover:text-red-400 px-0.5" title="Drop View">🗑️</button>
+                    </div>
+                  </div>
+                `).join('')
+              }
+            </div>
+            `}
+          </div>
         `;
-        if (viewsList.length === 0) {
-          html += `<div class="text-slate-600 text-[11px] px-2 py-1 italic">No views. Click ➕ to create.</div>`;
-        } else {
-          viewsList.forEach(v => {
-            html += `
-              <div class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" onclick="openTableViewer('${escapeHtml(v.name)}')">
-                <span class="flex items-center space-x-1.5 truncate text-purple-300 group-hover:text-white">
-                  <span class="text-xs">👁️</span>
-                  <span class="truncate max-w-[125px]">${escapeHtml(v.name)}</span>
-                </span>
-                <div class="flex items-center space-x-1">
-                  <button onclick="event.stopPropagation(); openCreateViewModal('${escapeHtml(v.name)}')" class="opacity-0 group-hover:opacity-100 hover:text-app-accent px-1" title="Edit View">✏️</button>
-                  <button onclick="event.stopPropagation(); dropView('${escapeHtml(v.name)}')" class="opacity-0 group-hover:opacity-100 hover:text-red-400 px-0.5" title="Drop View">🗑️</button>
-                </div>
-              </div>
-            `;
-          });
-        }
-        html += `</div></div>`;
       }
 
       // 3. Triggers Section
+      const isTriggersCollapsed = schemaSectionCollapsed.triggers && !q;
       if (!q || triggersList.length > 0) {
         html += `
-          <div class="mb-3">
-            <div class="flex items-center justify-between text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-1 py-0.5 border-b border-slate-800 mb-1">
-              <span class="flex items-center space-x-1">
-                <span>⚡</span><span>Triggers (${triggersList.length}${q ? '/' + allTriggers.length : ''})</span>
-              </span>
+          <div class="mb-2.5">
+            <div class="flex items-center justify-between text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-1 py-1 border-b border-slate-800/80 mb-1 hover:bg-slate-800/40 rounded transition select-none">
+              <button onclick="toggleSchemaSection('triggers')" class="flex items-center space-x-1.5 flex-1 text-left group cursor-pointer" title="${isTriggersCollapsed ? 'Expand Triggers' : 'Collapse Triggers'}">
+                <span class="text-[9px] text-slate-500 group-hover:text-slate-300 font-mono w-3">${isTriggersCollapsed ? '▶' : '▼'}</span>
+                <span>⚡</span>
+                <span class="group-hover:text-white transition">Triggers</span>
+                <span class="text-[10px] text-slate-500 font-mono font-normal">(${triggersList.length}${q ? '/' + allTriggers.length : ''})</span>
+              </button>
               <button onclick="openCreateTriggerModal()" class="text-app-accent hover:text-white text-xs px-1" title="Create New Trigger">➕</button>
             </div>
+            ${isTriggersCollapsed ? '' : `
             <div class="space-y-0.5">
+              ${triggersList.length === 0 ? `<div class="text-slate-600 text-[11px] px-2 py-1 italic">No triggers. Click ➕ to create.</div>` :
+                triggersList.map(trg => `
+                  <div class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" onclick="openCreateTriggerModal('${escapeHtml(trg.name)}', ${escapeHtml(JSON.stringify(trg))})">
+                    <span class="flex items-center space-x-1.5 truncate text-amber-300 group-hover:text-white">
+                      <span class="text-xs">⚡</span>
+                      <span class="truncate max-w-[120px]">${escapeHtml(trg.name)}</span>
+                    </span>
+                    <div class="flex items-center space-x-1">
+                      <span class="text-[10px] text-slate-500 font-mono">${escapeHtml(trg.table || '')}</span>
+                      <button onclick="event.stopPropagation(); dropTrigger('${escapeHtml(trg.name)}')" class="opacity-0 group-hover:opacity-100 hover:text-red-400 px-0.5" title="Drop Trigger">🗑️</button>
+                    </div>
+                  </div>
+                `).join('')
+              }
+            </div>
+            `}
+          </div>
         `;
-        if (triggersList.length === 0) {
-          html += `<div class="text-slate-600 text-[11px] px-2 py-1 italic">No triggers. Click ➕ to create.</div>`;
-        } else {
-          triggersList.forEach(trg => {
-            html += `
-              <div class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" onclick="openCreateTriggerModal('${escapeHtml(trg.name)}', ${escapeHtml(JSON.stringify(trg))})">
-                <span class="flex items-center space-x-1.5 truncate text-amber-300 group-hover:text-white">
-                  <span class="text-xs">⚡</span>
-                  <span class="truncate max-w-[120px]">${escapeHtml(trg.name)}</span>
-                </span>
-                <div class="flex items-center space-x-1">
-                  <span class="text-[10px] text-slate-500 font-mono">${escapeHtml(trg.table || '')}</span>
-                  <button onclick="event.stopPropagation(); dropTrigger('${escapeHtml(trg.name)}')" class="opacity-0 group-hover:opacity-100 hover:text-red-400 px-0.5" title="Drop Trigger">🗑️</button>
-                </div>
-              </div>
-            `;
-          });
-        }
-        html += `</div></div>`;
       }
 
       treeEl.innerHTML = html;
@@ -3923,6 +4246,31 @@
       renderProcesslistUI();
     }
 
+    function onProcesslistSearchInput(val) {
+      const clearBtn = document.getElementById('pl-search-clear-btn');
+      if (clearBtn) {
+        if (val && val.length > 0) {
+          clearBtn.classList.remove('hidden');
+        } else {
+          clearBtn.classList.add('hidden');
+        }
+      }
+      renderProcesslistUI();
+    }
+
+    function clearProcesslistSearch() {
+      const input = document.getElementById('pl-search-input');
+      const clearBtn = document.getElementById('pl-search-clear-btn');
+      if (input) {
+        input.value = '';
+        input.focus();
+      }
+      if (clearBtn) {
+        clearBtn.classList.add('hidden');
+      }
+      renderProcesslistUI();
+    }
+
     function openProcesslistTab() {
       if (!activeConnection) {
         showNativeAlert('Please select and connect to a database session first.', 'Processlist');
@@ -4000,6 +4348,14 @@
       const minSeconds = thresholdEl ? (parseInt(thresholdEl.value, 10) || 0) : 0;
       const searchEl = document.getElementById('pl-search-input');
       const search = searchEl ? searchEl.value.trim().toLowerCase() : '';
+      const clearBtn = document.getElementById('pl-search-clear-btn');
+      if (clearBtn && searchEl) {
+        if (searchEl.value.length > 0) {
+          clearBtn.classList.remove('hidden');
+        } else {
+          clearBtn.classList.add('hidden');
+        }
+      }
 
       // Count slow threads (> 5 sec)
       const slowCount = threads.filter(t => t.time >= 5).length;
@@ -4099,11 +4455,13 @@
         if (minSeconds > 0 && t.time < minSeconds) return false;
         if (search) {
           const matchUser = (t.user || '').toLowerCase().includes(search);
+          const matchHost = (t.host || '').toLowerCase().includes(search);
           const matchDb = (t.db || '').toLowerCase().includes(search);
           const matchInfo = (t.info || '').toLowerCase().includes(search);
           const matchState = (t.state || '').toLowerCase().includes(search);
+          const matchCmd = (t.command || '').toLowerCase().includes(search);
           const matchId = String(t.id).includes(search);
-          if (!matchUser && !matchDb && !matchInfo && !matchState && !matchId) return false;
+          if (!matchUser && !matchHost && !matchDb && !matchInfo && !matchState && !matchCmd && !matchId) return false;
         }
         return true;
       });
@@ -4604,10 +4962,37 @@
       }
     }
 
+    function onAuditSearchInput(val) {
+      const clearBtn = document.getElementById('audit-search-clear-btn');
+      if (clearBtn) {
+        if (val && val.length > 0) clearBtn.classList.remove('hidden');
+        else clearBtn.classList.add('hidden');
+      }
+      loadAuditLogs();
+    }
+
+    function clearAuditSearch() {
+      const input = document.getElementById('audit-search-input');
+      const clearBtn = document.getElementById('audit-search-clear-btn');
+      if (input) {
+        input.value = '';
+        input.focus();
+      }
+      if (clearBtn) {
+        clearBtn.classList.add('hidden');
+      }
+      loadAuditLogs();
+    }
+
     async function loadAuditLogs() {
       if (!activeConnection) return;
       const searchEl = document.getElementById('audit-search-input');
       const search = searchEl ? searchEl.value.trim() : '';
+      const clearBtn = document.getElementById('audit-search-clear-btn');
+      if (clearBtn && searchEl) {
+        if (searchEl.value.length > 0) clearBtn.classList.remove('hidden');
+        else clearBtn.classList.add('hidden');
+      }
       try {
         const url = `/api/session/${activeConnection.id}/audit-logs?limit=200${search ? '&search=' + encodeURIComponent(search) : ''}`;
         const res = await apiFetch(url);
@@ -6530,6 +6915,11 @@
         if (rawContainer) rawContainer.classList.remove('hidden');
         if (rawInput) {
           rawInput.value = activeTab.filterRaw !== undefined ? activeTab.filterRaw : (activeTab.appliedFilter || '');
+          const clearBtn = document.getElementById('filter-raw-clear-btn');
+          if (clearBtn) {
+            if (rawInput.value.length > 0) clearBtn.classList.remove('hidden');
+            else clearBtn.classList.add('hidden');
+          }
         }
       }
 
@@ -6686,6 +7076,30 @@
       loadTableRows(activeTab.tableName);
     }
 
+    function onFilterRawInput(val) {
+      const clearBtn = document.getElementById('filter-raw-clear-btn');
+      if (clearBtn) {
+        if (val && val.length > 0) clearBtn.classList.remove('hidden');
+        else clearBtn.classList.add('hidden');
+      }
+    }
+
+    function clearFilterRawInput() {
+      const input = document.getElementById('filter-raw-input');
+      const clearBtn = document.getElementById('filter-raw-clear-btn');
+      if (input) {
+        input.value = '';
+        input.focus();
+      }
+      if (clearBtn) {
+        clearBtn.classList.add('hidden');
+      }
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (activeTab && activeTab.isTableViewer) {
+        activeTab.filterRaw = '';
+      }
+    }
+
     function clearTableFilter() {
       const activeTab = tabs.find(t => t.id === activeTabId);
       if (!activeTab || !activeTab.isTableViewer) return;
@@ -6695,6 +7109,8 @@
       activeTab.offset = 0;
       const rawInput = document.getElementById('filter-raw-input');
       if (rawInput) rawInput.value = '';
+      const clearBtn = document.getElementById('filter-raw-clear-btn');
+      if (clearBtn) clearBtn.classList.add('hidden');
       syncFilterBarUI(activeTab);
       loadTableRows(activeTab.tableName);
     }
@@ -7228,11 +7644,11 @@
       btn.classList.remove('hidden');
 
       if (isReadOnly) {
-        btn.className = 'px-2.5 py-1 rounded font-medium transition border flex items-center space-x-1.5 bg-red-950/60 border-red-700 text-red-300 hover:bg-red-900/60';
+        btn.className = 'h-7 px-2.5 rounded font-medium transition border flex items-center space-x-1.5 bg-red-950/60 border-red-700 text-red-300 hover:bg-red-900/60';
         icon.textContent = '🔒';
-        text.textContent = 'Read-Only (Locked)';
+        text.textContent = 'Read-Only';
       } else {
-        btn.className = 'px-2.5 py-1 rounded font-medium transition border flex items-center space-x-1.5 bg-emerald-950/60 border-emerald-700 text-emerald-300 hover:bg-emerald-900/60';
+        btn.className = 'h-7 px-2.5 rounded font-medium transition border flex items-center space-x-1.5 bg-emerald-950/60 border-emerald-700 text-emerald-300 hover:bg-emerald-900/60';
         icon.textContent = '🔓';
         text.textContent = 'Write Allowed';
       }
@@ -7898,6 +8314,28 @@
       if (dlg && dlg.open) dlg.close();
     }
 
+    function onSnippetsFilterInput(val) {
+      const clearBtn = document.getElementById('snippets-filter-clear-btn');
+      if (clearBtn) {
+        if (val && val.length > 0) clearBtn.classList.remove('hidden');
+        else clearBtn.classList.add('hidden');
+      }
+      renderSnippetsList();
+    }
+
+    function clearSnippetsFilter() {
+      const input = document.getElementById('snippets-filter-input');
+      const clearBtn = document.getElementById('snippets-filter-clear-btn');
+      if (input) {
+        input.value = '';
+        input.focus();
+      }
+      if (clearBtn) {
+        clearBtn.classList.add('hidden');
+      }
+      renderSnippetsList();
+    }
+
     function renderSnippetsList() {
       const container = document.getElementById('snippets-cards-container');
       const countBadge = document.getElementById('snippets-count-badge');
@@ -7905,6 +8343,11 @@
 
       const filterEl = document.getElementById('snippets-filter-input');
       const query = (filterEl ? filterEl.value : '').toLowerCase().trim();
+      const clearBtn = document.getElementById('snippets-filter-clear-btn');
+      if (clearBtn && filterEl) {
+        if (filterEl.value.length > 0) clearBtn.classList.remove('hidden');
+        else clearBtn.classList.add('hidden');
+      }
 
       const filtered = (loadedSnippets || []).filter(s => {
         if (!query) return true;
@@ -8660,10 +9103,15 @@
             sFilter.focus();
             sFilter.select();
           }
+        } else if ((e.key === '?' || e.key === 'F1') && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName) && !document.activeElement?.closest('.CodeMirror')) {
+          e.preventDefault();
+          toggleShortcutsModal();
         } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's') {
           e.preventDefault();
           openSnippetsManager();
         } else if (e.key === 'Escape') {
+          closeTableContextMenu();
+          closeShortcutsModal();
           closeSafetyModal();
           closeImpactModal();
           closeConnModal();
@@ -8696,11 +9144,53 @@
       });
     }
 
-    function toggleAISidebar() {
-      document.getElementById('ai-sidebar').classList.toggle('hidden');
+    // --- Sidebar Visibility & LocalStorage Persistence ---
+    function initSidebarVisibility() {
+      try {
+        const leftSaved = localStorage.getItem('sqlfox_left_sidebar_visible');
+        if (leftSaved !== null) {
+          const isLeftVisible = leftSaved === 'true';
+          const leftEl = document.getElementById('left-sidebar');
+          if (leftEl) {
+            if (isLeftVisible) leftEl.classList.remove('hidden');
+            else leftEl.classList.add('hidden');
+          }
+        }
+
+        const aiSaved = localStorage.getItem('sqlfox_copilot_visible');
+        if (aiSaved !== null) {
+          const isAIVisible = aiSaved === 'true';
+          const aiEl = document.getElementById('ai-sidebar');
+          if (aiEl) {
+            if (isAIVisible) aiEl.classList.remove('hidden');
+            else aiEl.classList.add('hidden');
+          }
+        }
+      } catch (_) {}
     }
-    function toggleLeftSidebar() {
-      document.getElementById('left-sidebar').classList.toggle('hidden');
+
+    function toggleAISidebar(forceState) {
+      const el = document.getElementById('ai-sidebar');
+      if (!el) return;
+      const willBeHidden = typeof forceState === 'boolean' ? !forceState : !el.classList.contains('hidden');
+      if (willBeHidden) el.classList.add('hidden');
+      else el.classList.remove('hidden');
+
+      try {
+        localStorage.setItem('sqlfox_copilot_visible', (!willBeHidden).toString());
+      } catch (_) {}
+    }
+
+    function toggleLeftSidebar(forceState) {
+      const el = document.getElementById('left-sidebar');
+      if (!el) return;
+      const willBeHidden = typeof forceState === 'boolean' ? !forceState : !el.classList.contains('hidden');
+      if (willBeHidden) el.classList.add('hidden');
+      else el.classList.remove('hidden');
+
+      try {
+        localStorage.setItem('sqlfox_left_sidebar_visible', (!willBeHidden).toString());
+      } catch (_) {}
     }
     function toggleCommandPalette() {
       const modal = document.getElementById('command-palette-modal');
@@ -8718,6 +9208,7 @@
     function renderPaletteActions(filter) {
       const actions = [
         { name: 'Schema Search (Quick Open Table/Column)', shortcut: 'Ctrl+P', run: () => toggleSchemaSearch() },
+        { name: 'Keyboard Shortcuts Cheat Sheet', shortcut: '?', run: () => openShortcutsModal() },
         { name: 'Query Snippets Manager', shortcut: 'Ctrl+Shift+S', run: () => openSnippetsManager() },
         { name: 'Table Storage Diagnostics', shortcut: '', run: () => openDatabaseDiagnosticsModal() },
         { name: 'User Accounts & Privilege Matrix', shortcut: '', run: () => openPrivilegeMatrixModal() },
@@ -8748,6 +9239,7 @@
     function executePaletteAction(name) {
       closeCommandPalette();
       if (name.startsWith('Schema Search')) toggleSchemaSearch();
+      else if (name === 'Keyboard Shortcuts Cheat Sheet') openShortcutsModal();
       else if (name === 'Query Snippets Manager') openSnippetsManager();
       else if (name === 'Table Storage Diagnostics') openDatabaseDiagnosticsModal();
       else if (name === 'User Accounts & Privilege Matrix') openPrivilegeMatrixModal();
@@ -9001,6 +9493,28 @@
           </tr>
         `;
       }).join('');
+    }
+
+    function onDbDiagSearchInput(val) {
+      const clearBtn = document.getElementById('dbdiag-search-clear-btn');
+      if (clearBtn) {
+        if (val && val.length > 0) clearBtn.classList.remove('hidden');
+        else clearBtn.classList.add('hidden');
+      }
+      filterDbDiagTables(val);
+    }
+
+    function clearDbDiagSearch() {
+      const input = document.getElementById('dbdiag-search-input');
+      const clearBtn = document.getElementById('dbdiag-search-clear-btn');
+      if (input) {
+        input.value = '';
+        input.focus();
+      }
+      if (clearBtn) {
+        clearBtn.classList.add('hidden');
+      }
+      filterDbDiagTables('');
     }
 
     function filterDbDiagTables(query) {

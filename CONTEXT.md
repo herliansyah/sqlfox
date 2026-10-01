@@ -194,6 +194,18 @@ _Avoid_: Raw select dropdown, static DB selector
 An real-time, sticky client-side search input in the sidebar explorer for instantaneously filtering tables, views, and triggers by name with quick keyboard access (`/`).
 _Avoid_: Tree grep, manual scroll search
 
+**Collapsible Schema Tree**:
+An interactive sidebar grouping mechanism organizing schema items into independent collapsible sections (`Tables`, `Views`, `Triggers`) with counts and persistent state across reloads.
+_Avoid_: Flat tree, uncollapsible object list
+
+**Keyboard Shortcuts Cheatsheet**:
+A centralized native modal dialog displaying organized hotkeys grouped by functional domain (Query Execution, Navigation, Tabs, Tools), discoverable via `?`, `F1`, status bar, or Command Palette.
+_Avoid_: Hardcoded button shortcut badges, fragmented hotkey hints
+
+**Maximized Search & Filter Control**:
+A standardized toolbar input design pattern featuring dynamic horizontal expansion, leading search icon (`🔍`), dynamic clear button (`✕`), and native `Escape` reset handling across all application toolbars and dialogs.
+_Avoid_: Cramped fixed-width input, static un-clearable textbox
+
 ## Productivity & Knowledge Base
 
 **Query Snippet**:
@@ -349,3 +361,4 @@ _Avoid_: In-process tunnel, custom bastion client
 - **0018**: Advanced Diagnostics and Privilege Matrix (`docs/adr/0018-advanced-diagnostics-and-privilege-matrix.md`)
 - **0019**: Inline Table Filter Bar, Server-Side Pushdown, and Grid Query Handoff (`docs/adr/0019-inline-table-filter-bar-and-server-side-pushdown.md`)
 - **0020**: Ponytail Audit, Codebase Pruning, and Native Platform Tunneling (`docs/adr/0020-ponytail-audit-codebase-pruning-and-native-ssh.md`)
+- **0021**: Workspace Ergonomics, Shortcuts Discovery, and Search Standardization (`docs/adr/0021-workspace-ergonomics-and-search-standardization.md`)
