@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"sqlfox/internal/driver"
 	"sqlfox/internal/vault"
 )
 
@@ -148,6 +149,71 @@ func (s *Server) handleGetTableDDL(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"table": tableName,
 		"ddl":   ddl,
+	})
+}
+
+func (s *Server) handlePreflightDDL(w http.ResponseWriter, r *http.Request) {
+	connID := r.PathValue("id")
+	tableName := r.PathValue("table")
+
+	sess, err := s.sessionMgr.GetSession(connID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	targetDB := r.URL.Query().Get("db")
+	if targetDB != "" {
+		_ = sess.Session.SelectDatabase(ctx, targetDB)
+	}
+
+	locks, err := sess.Session.InspectTableLocks(ctx, targetDB, tableName)
+	if err != nil {
+		locks = []driver.TableLockInfo{}
+	}
+
+	var rels []driver.TableRelationshipInfo
+	if schema, err := sess.Session.InspectSchema(ctx, targetDB); err == nil {
+		rels = driver.InspectTableRelationships(schema, tableName)
+	} else {
+		rels = []driver.TableRelationshipInfo{}
+	}
+
+	alterClause := r.URL.Query().Get("alter")
+	if alterClause == "" {
+		alterClause = "/* your ALTER TABLE statement */"
+	}
+
+	host := "127.0.0.1"
+	port := 3306
+	user := "root"
+	if s.vault != nil && sess.ConnectionID != "" {
+		if c, err := s.vault.GetConnection(sess.ConnectionID); err == nil && c != nil {
+			if c.Host != "" {
+				host = c.Host
+			}
+			if c.Port > 0 {
+				port = c.Port
+			}
+			if c.User != "" {
+				user = c.User
+			}
+		}
+	}
+
+	ghostCmd := driver.GenerateOSCCommand("gh-ost", host, port, user, targetDB, tableName, alterClause)
+	ptCmd := driver.GenerateOSCCommand("pt-osc", host, port, user, targetDB, tableName, alterClause)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"table":         tableName,
+		"database":      targetDB,
+		"active_locks":  locks,
+		"relationships": rels,
+		"osc_ghost":     ghostCmd,
+		"osc_pt":        ptCmd,
 	})
 }
 

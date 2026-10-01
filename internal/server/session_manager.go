@@ -26,6 +26,7 @@ type ExecuteRequest struct {
 	QueryID        string `json:"query_id"`
 	Database       string `json:"database"`
 	Profile        bool   `json:"profile"`
+	LockTimeoutSec int    `json:"lock_timeout_sec,omitempty"` // Fail-fast session lock timeout (default 3s for DDL)
 }
 
 // ExecuteResponse provides the unified outcome of a mutation or buffered query.
@@ -229,6 +230,14 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 
 	// 3. Challenge Enforcement
 	if inspection.RequiresChallenge && !req.Confirmed {
+		if inspection.TargetTable != "" && s.Session != nil {
+			if locks, err := s.Session.InspectTableLocks(ctx, req.Database, inspection.TargetTable); err == nil {
+				inspection.TableLocks = locks
+			}
+			if schema, err := s.Session.InspectSchema(ctx, req.Database); err == nil {
+				inspection.Relationships = driver.InspectTableRelationships(schema, inspection.TargetTable)
+			}
+		}
 		return &ExecuteResponse{
 			Blocked:    true,
 			Inspection: inspection,
@@ -368,7 +377,17 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 
 	if !isSelect {
 		// Mutation execution
-		execRes, err := s.Session.Exec(execCtx, trimmedSQL)
+		var execRes *driver.ExecResult
+		var err error
+		if inspection.Operation == "ALTER" {
+			lockTimeout := req.LockTimeoutSec
+			if lockTimeout <= 0 {
+				lockTimeout = 3 // default fail-fast timeout (3s)
+			}
+			execRes, err = s.Session.ExecSafeDDL(execCtx, trimmedSQL, lockTimeout)
+		} else {
+			execRes, err = s.Session.Exec(execCtx, trimmedSQL)
+		}
 		if err != nil {
 			execErr = err
 			return nil, err

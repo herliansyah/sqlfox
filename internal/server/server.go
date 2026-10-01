@@ -75,6 +75,7 @@ func (s *Server) routes() {
 	mux.HandleFunc("POST /api/session/connect/{id}", s.handleConnectSession)
 	mux.HandleFunc("GET /api/session/{id}/schema", s.handleGetSchema)
 	mux.HandleFunc("GET /api/session/{id}/ddl/{table}", s.handleGetTableDDL)
+	mux.HandleFunc("GET /api/session/{id}/preflight-ddl/{table}", s.handlePreflightDDL)
 	mux.HandleFunc("GET /api/session/{id}/table/{table}/rows", s.handleGetTableRows)
 	mux.HandleFunc("GET /api/session/{id}/notes/{table}", s.handleGetTableNote)
 	mux.HandleFunc("POST /api/session/{id}/notes/{table}", s.handleSaveTableNote)

@@ -148,6 +148,10 @@ type Session interface {
     GetTableDDL(ctx context.Context, tableName string) (string, error)
     GetTableEstimate(ctx context.Context, tableName string) (TableEstimate, error)
     
+    // Lock inspection & Safe DDL execution
+    InspectTableLocks(ctx context.Context, database, table string) ([]TableLockInfo, error)
+    ExecSafeDDL(ctx context.Context, sql string, lockTimeoutSec int) (*ExecResult, error)
+    
     // Query plan & optimization
     Explain(ctx context.Context, sql string) (*ExplainPlan, error)
     
@@ -200,7 +204,53 @@ sequenceDiagram
 
 ---
 
-## 6. Directory & Package Structure
+## 6. Safe DDL & Lock Contention Prevention Pipeline
+
+To eliminate Metadata Lock (MDL) queues, application pool exhaustion, and deadlock cascades on massive datasets (e.g. 500GB tables and small master tables referenced by high-traffic transactional child tables):
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant Editor as DDL Designer / SQL Tab
+    participant Server as Safe Execution Pipeline
+    participant Guard as Safety Guard & Lock Inspector
+    participant DB as Target Database (MySQL/SQLite)
+
+    User->>Editor: Execute ALTER TABLE master_status ADD COLUMN code TEXT
+    Editor->>Server: POST /api/session/{id}/execute {sql}
+    Server->>Guard: Inspect(sql, environment="Production")
+    
+    par Pre-Flight Inspections
+        Guard->>DB: InspectTableLocks("master_status") (innodb_trx / metadata_locks)
+        DB-->>Guard: Active blocking transactions (if any)
+        Guard->>DB: InspectSchema & InspectTableRelationships("master_status")
+        DB-->>Guard: Inbound FK from `orders` (150GB) detected!
+    end
+
+    Guard-->>Server: Requires Challenge (Attach locks, FK relationships)
+    Server-->>Editor: 422 Blocked {requires_challenge: true, relationships, table_locks}
+    Editor->>User: Display Challenge Modal with Active Lock and FK Relationship Warning
+    User->>Editor: Type "master_status" & Confirm
+    Editor->>Server: POST /api/session/{id}/execute {sql, confirmed: true, lock_timeout_sec: 3}
+    
+    Server->>DB: Dedicated *sql.Conn -> SET SESSION lock_wait_timeout = 3
+    Server->>DB: Dedicated *sql.Conn -> ALTER TABLE master_status ...
+    
+    alt Lock Acquired within 3s
+        DB-->>Server: DDL Succeeded
+        Server->>DB: Close Dedicated Connection (Clean Pool)
+        Server-->>Editor: 200 OK (Schema Updated)
+    else Lock Wait Timeout Exceeded (>3s)
+        DB-->>Server: Error 1205: Lock wait timeout exceeded
+        Server->>DB: Close Dedicated Connection (Zero Pool Pollution)
+        Server-->>Editor: Fail-Fast Aborted (Server remained 100% responsive)
+    end
+```
+
+---
+
+## 7. Directory & Package Structure
 
 ```
 sqlfox/
@@ -216,13 +266,13 @@ sqlfox/
 │   │   ├── notes.go                # Table documentation notes
 │   │   └── export.go               # .sqlfox-vault portable archive export/import
 │   ├── driver/                     # Database driver abstraction
-│   │   ├── driver.go               # Core interfaces (Driver, Session, RowStream)
+│   │   ├── driver.go               # Core interfaces (Driver, Session, RowStream, SafeDDL, OSC)
 │   │   ├── rowstream.go            # Canonical chunked row streaming
 │   │   ├── redundant_index.go      # Shadowed / duplicate index detection
-│   │   ├── mysql/                  # go-sql-driver/mysql pure-Go driver
-│   │   └── sqlite/                 # modernc.org/sqlite CGo-free pure-Go driver
+│   │   ├── mysql/                  # MySQL 5.7/8.x & MariaDB with fail-fast lock timeout & lock inspection
+│   │   └── sqlite/                 # modernc.org/sqlite CGo-free pure-Go driver with FK inspection
 │   ├── safety/                     # Safety Guard engine
-│   │   ├── guard.go                # AST inspection & destructive operation detection
+│   │   ├── guard.go                # AST inspection & destructive operation detection with DDL guards
 │   │   └── backup.go               # Smart tiered pre-destruction table snapshot manager
 │   ├── ai/                         # AI Assistant integration
 │   │   ├── client.go               # Pure stdlib client (OpenAI, Claude, Gemini, Ollama)
@@ -233,10 +283,10 @@ sqlfox/
 │   └── server/                     # HTTP transport & handlers
 │       ├── server.go               # HTTP routing & SPA static file serving
 │       ├── auth.go                 # Remote Access Guard & LAN tablet token auth
-│       ├── session_manager.go      # Active database connection pool & session state
+│       ├── session_manager.go      # Active database connection pool & session state with Safe DDL execution
 │       ├── handlers_connections.go # Connection CRUD & live testing
 │       ├── handlers_query.go       # SQL execution & cancellation
-│       ├── handlers_schema.go      # Schema tree, DDL, table rows, pushdown filtering
+│       ├── handlers_schema.go      # Schema tree, DDL, preflight DDL, pushdown filtering
 │       ├── handlers_dba.go         # Processlist, kill query, diagnostics, privilege matrix
 │       ├── handlers_snippets.go    # Snippet management
 │       ├── handlers_import.go      # CSV upload & import endpoints
@@ -247,12 +297,13 @@ sqlfox/
 │   │   └── index.html
 │   └── embed.go                    # //go:embed dist/*
 ├── docs/
-│   ├── adr/                        # Architectural Decision Records (0001 - 0020)
+│   ├── adr/                        # Architectural Decision Records (0001 - 0022)
+│   ├── playbooks/                  # Production operational playbooks (large-scale database management)
 │   └── agents/                     # Agent workflow documentation
 ├── CONTEXT.md                      # Ubiquitous domain language
 ├── ARCHITECTURE.md                 # System architecture (this document)
 ├── SECURITY.md                     # Security & privacy specification
 ├── UX_DESIGN.md                    # Interface wireframes & design tokens
-├── MILESTONES.md                   # Delivery roadmap & milestones (1 - 14)
+├── MILESTONES.md                   # Delivery roadmap & milestones (1 - 16)
 └── go.mod
 ```

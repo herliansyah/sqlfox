@@ -276,4 +276,20 @@ v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
   - **Maximized Search & Filter Textbox Standards**: Unified input behavior featuring dynamic horizontal expansion (`flex-1 min-w-[200px]`), leading `🔍` icon, dynamic `✕` clear button, and `Escape` reset handling across Processlist, Session Audit Log, Table Data Grid, Storage Diagnostics, Session Switcher, Database Switcher, and Snippets Manager.
 - **Runnable Verification**: Open web UI -> verify top navbar buttons have identical `h-7` height without inline kbd badges -> press `?` to open Shortcuts Cheatsheet modal -> collapse Tables section in sidebar and refresh page, confirming collapsed state persists -> open Processlist tab and type into search box, confirming dynamic clear `✕` appears and pressing `Escape` clears the filter.
 
+---
+
+### Milestone 16: Safe DDL Guardrails, Pre-Flight Lock Inspection & Large-Scale Database Management (500GB+ Table Protection)
+- **Goal**: Protect high-volume production databases (500GB+ datasets and small master tables referenced by massive transactional tables) from Metadata Lock (MDL) queues, application connection pool exhaustion, and deadlock cascades during DDL execution.
+- **Deliverables**:
+  - **Extensible Multi-Engine Driver Seam**: Defined uniform driver methods (`InspectTableLocks` and `ExecSafeDDL`) implemented for MySQL 8.x, MySQL 5.7, MariaDB, and SQLite, with architectural readiness for PostgreSQL and Oracle.
+  - **Pre-Flight Lock Inspection**: Backend diagnostic hook interrogating `performance_schema.metadata_locks` and `information_schema.innodb_trx` + `processlist` to identify active uncommitted transactions and lock holders before statement execution.
+  - **Schema Relationship Introspection**: Automated dependency analysis mapping inbound (`PARENT`) and outbound (`CHILD`) foreign keys, preventing blind-spot lock contention when altering small lookup tables coupled to gigabyte-scale child tables.
+  - **Fail-Fast Dedicated Connection Execution**: DDL execution isolated to a dedicated single connection (`*sql.Conn`) with strict session timeout (`SET SESSION lock_wait_timeout = 3` on MySQL/MariaDB, `PRAGMA busy_timeout = 3000` on SQLite), closing immediately to ensure zero pool pollution and immediate abort if lock contention is encountered.
+  - **Dual-Preset Online Schema Change (OSC) Generator**: Automated script generator producing production-ready commands for `gh-ost` (default, triggerless binlog streaming) and `pt-online-schema-change` with concurrency load throttles.
+  - **Pre-Flight DDL REST Endpoint**: `GET /api/session/{id}/preflight-ddl/{table}` delivering live blocking transaction diagnostics, relationship graph warnings, and OSC scripts.
+  - **Safety Guard Integration**: `Challenge Modal` in `Production` environment automatically populates active blocking queries and related table warnings on all `ALTER TABLE` statements before user confirmation.
+  - **Architecture Decision Record**: Formally recorded in `docs/adr/0022-safe-ddl-guardrails-and-lock-contention-prevention.md`.
+  - **Operational Playbook**: Formally documented in `docs/playbooks/large-scale-database-management.md`.
+- **Runnable Verification**: Run `go test -v -run TestInspectTableRelationships ./internal/driver/...` and `go test -v -run TestPreflightDDLAndSafeExecution ./internal/server/...` -> verify inbound FK relationship warning is attached to Challenge Modal -> verify DDL executes via `ExecSafeDDL` with fail-fast timeout.
+
 
