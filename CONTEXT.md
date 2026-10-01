@@ -5,7 +5,7 @@ Core ubiquitous language for the SqlFox database management tool.
 ## Connections & Environment
 
 **Connection**:
-A configured target database endpoint containing host, network, protocol (direct or SSH tunnel), and authentication credentials.
+A configured target database endpoint containing host, network, protocol, and authentication credentials.
 _Avoid_: Profile, host config, server alias
 
 **Environment**:
@@ -266,6 +266,10 @@ _Avoid_: SQL runner, dump importer, script player
 An interactive real-time database thread and connection monitor featuring slow-query threshold alerts and one-click out-of-band query or session termination (`KILL QUERY` / `KILL CONNECTION`).
 _Avoid_: Process monitor, task list, thread viewer
 
+**Process Inspector Modal**:
+A dedicated diagnostic dialog displaying complete thread execution metadata, formatted full SQL statement text without truncation, 1-click clipboard actions, and integrated operational shortcuts (`EXPLAIN`, editor transfer, AI review, and termination).
+_Avoid_: Process details popup, thread viewer window, query popover
+
 **Table Diagnostics**:
 A physical storage inspection module providing exact data length, index length, and fragmentation overhead statistics alongside one-click table maintenance actions (`OPTIMIZE TABLE`, `ANALYZE TABLE`, `CHECK TABLE`).
 _Avoid_: Table health, storage checker, disk tool
@@ -298,6 +302,50 @@ _Avoid_: Lock viewer, block list, wait graph
 A zero-configuration, schema-wide database dumper that exports complete DDL structure alongside bounded row samples (e.g., 20 rows per table) without requiring manual table tagging; automatically scans the entire Foreign Key dependency graph and recursively fetches all upstream referenced parent rows (transitive closure), writing inserts in topological order to guarantee referentially integral, zero-error SQL restore files.
 _Avoid_: Partial dump, table sampler, mini export
 
+**Inline Table Filter Bar**:
+A dedicated querying control docked above the Virtual Data Grid that allows users to filter remote records using either structured clause pills or raw SQL expressions without navigating away from the table view.
+_Avoid_: Search box, table filter, grid search
 
+**Quick Clause Pill**:
+A modular visual filter condition element (`[Column] [Operator] [Value]`) composed inside the Inline Table Filter Bar that compiles to a sanitized SQL WHERE clause.
+_Avoid_: Filter tag, query chip, search token
 
+**Raw WHERE Expression**:
+A freeform SQL Boolean expression typed directly into the Inline Table Filter Bar executed via Server-Side Filter Pushdown with Safety Guard injection validation.
+_Avoid_: Custom query, manual filter, SQL string
 
+**Server-Side Filter Pushdown**:
+An execution strategy that forwards active filter expressions to the database engine as an indexed `WHERE` clause rather than filtering pre-fetched rows in client memory.
+_Avoid_: In-memory filter, client search, local filter
+
+**Grid Query Handoff**:
+A one-click action transferring the currently active table, column filters, and sort order from the Table Viewer directly into a new Query Editor tab as a complete editable SQL script.
+_Avoid_: Export to SQL, copy query, open in editor
+
+## Codebase Architecture & Maintenance (Ponytail)
+
+**Native Platform Tunneling**:
+Relying on standard OS facilities (`ssh -N -L 3306:remote-db:3306 user@bastion` or platform VPN) for remote private network database connectivity, avoiding custom in-process SSH dialer complexity and unexposed vault database columns.
+_Avoid_: In-process tunnel, custom bastion client
+
+## Architectural Decision Records (ADR)
+- **0001**: CGo-Free Pure Go Drivers (`docs/adr/0001-cgo-free-pure-go-drivers.md`)
+- **0002**: Deterministic AST Safety Guard (`docs/adr/0002-deterministic-ast-safety-guard.md`)
+- **0003**: Desktop Localhost Runtime Model (`docs/adr/0003-desktop-localhost-runtime-model.md`)
+- **0004**: CodeMirror and Embedded SPA (`docs/adr/0004-codemirror-and-embedded-spa.md`)
+- **0005**: Out-of-Band Query Cancellation (`docs/adr/0005-out-of-band-query-cancellation.md`)
+- **0006**: Smart Tiered DDL Backup (`docs/adr/0006-smart-tiered-ddl-backup.md`)
+- **0007**: Multi-IP Access and Port Hunting (`docs/adr/0007-multi-ip-access-and-port-hunting.md`)
+- **0008**: Native Dialogs and Staged DDL Designer (`docs/adr/0008-native-dialogs-and-staged-ddl-designer.md`)
+- **0009**: Cross-Database Schema Search (`docs/adr/0009-cross-database-schema-search.md`)
+- **0010**: Stateless Schema Introspection and Database Isolation (`docs/adr/0010-stateless-schema-introspection-and-database-isolation.md`)
+- **0011**: Dynamic EXPLAIN Plan Introspection and Visual Grid (`docs/adr/0011-dynamic-explain-plan-introspection-and-visual-grid.md`)
+- **0012**: Sidebar Schema Filtering and Searchable Database Switcher (`docs/adr/0012-sidebar-schema-filtering-and-searchable-database-switcher.md`)
+- **0013**: Parameterized Query Snippets and Vault Persistence (`docs/adr/0013-parameterized-query-snippets-and-vault-persistence.md`)
+- **0014**: Table Knowledge Notes and AI Context Injection (`docs/adr/0014-table-knowledge-notes-and-ai-context-injection.md`)
+- **0015**: Zero-Dependency CSV Import with Column Mapping (`docs/adr/0015-zero-dependency-csv-import-with-column-mapping.md`)
+- **0016**: Grid Inline Edit Lifecycle and Staged Apply (`docs/adr/0016-grid-inline-edit-lifecycle-and-staged-apply.md`)
+- **0017**: Real-Time Processlist Manager and Session Audit Log (`docs/adr/0017-real-time-processlist-manager-and-session-audit-log.md`)
+- **0018**: Advanced Diagnostics and Privilege Matrix (`docs/adr/0018-advanced-diagnostics-and-privilege-matrix.md`)
+- **0019**: Inline Table Filter Bar, Server-Side Pushdown, and Grid Query Handoff (`docs/adr/0019-inline-table-filter-bar-and-server-side-pushdown.md`)
+- **0020**: Ponytail Audit, Codebase Pruning, and Native Platform Tunneling (`docs/adr/0020-ponytail-audit-codebase-pruning-and-native-ssh.md`)

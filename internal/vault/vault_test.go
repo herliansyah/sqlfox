@@ -33,11 +33,6 @@ func TestVault_Lifecycle(t *testing.T) {
 		User:         "admin",
 		Password:     "super_secret_db_password",
 		UseSSL:       true,
-		UseSSH:       true,
-		SSHHost:      "bastion.example.com",
-		SSHPort:      22,
-		SSHUser:      "ubuntu",
-		SSHPassword:  "ssh_secret",
 	}
 
 	if err := v.SaveConnection(conn); err != nil {
@@ -57,10 +52,7 @@ func TestVault_Lifecycle(t *testing.T) {
 	if retrieved.Password != "super_secret_db_password" {
 		t.Fatalf("expected decrypted password, got: %s", retrieved.Password)
 	}
-	if retrieved.SSHPassword != "ssh_secret" {
-		t.Fatalf("expected decrypted ssh password, got: %s", retrieved.SSHPassword)
-	}
-	if !retrieved.UseSSL || !retrieved.UseSSH {
+	if !retrieved.UseSSL {
 		t.Fatal("expected boolean flags preserved")
 	}
 

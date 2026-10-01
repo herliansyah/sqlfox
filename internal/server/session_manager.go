@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +25,7 @@ type ExecuteRequest struct {
 	ChallengeInput string `json:"challenge_input"`
 	QueryID        string `json:"query_id"`
 	Database       string `json:"database"`
+	Profile        bool   `json:"profile"`
 }
 
 // ExecuteResponse provides the unified outcome of a mutation or buffered query.
@@ -40,6 +42,7 @@ type ExecuteResponse struct {
 	Rows               [][]any                   `json:"rows,omitempty"`
 	RowCount           int                       `json:"row_count,omitempty"`
 	ExecutionMs        int64                     `json:"execution_ms"`
+	Profile            *driver.QueryProfile      `json:"profile,omitempty"`
 }
 
 // ActiveSession holds an active database connection session and its cached metadata.
@@ -107,12 +110,6 @@ func (sm *SessionManager) ConnectSession(ctx context.Context, connectionID strin
 		SSLCA:        conn.SSLCA,
 		SSLCert:      conn.SSLCert,
 		SSLKey:       conn.SSLKey,
-		UseSSH:       conn.UseSSH,
-		SSHHost:      conn.SSHHost,
-		SSHPort:      conn.SSHPort,
-		SSHUser:      conn.SSHUser,
-		SSHPassword:  conn.SSHPassword,
-		SSHKey:       conn.SSHKey,
 	}
 
 	dbSession, err := driver.Connect(ctx, cfg)
@@ -305,6 +302,67 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		}
 	}()
 
+	// Enable profiling if requested
+	if req.Profile && s.Session != nil && s.DriverName == "mysql" {
+		_, _ = s.Session.Exec(execCtx, "SET profiling = 1")
+	}
+
+	collectProfile := func() *driver.QueryProfile {
+		if !req.Profile || s.Session == nil {
+			return nil
+		}
+		if s.DriverName == "mysql" {
+			defer func() { _, _ = s.Session.Exec(execCtx, "SET profiling = 0") }()
+			pStream, pErr := s.Session.QueryStream(execCtx, "SHOW PROFILE", 100)
+			if pErr != nil {
+				return nil
+			}
+			defer pStream.Close()
+			var stages []driver.ProfileStage
+			var totalDuration float64
+			for {
+				chunk, err := pStream.NextChunk(100)
+				for _, row := range chunk {
+					if len(row) >= 2 {
+						stg := fmt.Sprintf("%v", row[0])
+						durSec, _ := strconv.ParseFloat(fmt.Sprintf("%v", row[1]), 64)
+						durUs := int64(durSec * 1e6)
+						totalDuration += durSec
+						stages = append(stages, driver.ProfileStage{
+							Stage:      stg,
+							DurationUs: durUs,
+						})
+					}
+				}
+				if err != nil || len(chunk) == 0 {
+					break
+				}
+			}
+			if totalDuration > 0 {
+				for i := range stages {
+					stages[i].Percentage = (float64(stages[i].DurationUs) / (totalDuration * 1e6)) * 100.0
+				}
+			}
+			return &driver.QueryProfile{
+				DurationMs: totalDuration * 1000.0,
+				Stages:     stages,
+			}
+		}
+
+		// SQLite profile fallback
+		durUs := time.Since(start).Microseconds()
+		return &driver.QueryProfile{
+			DurationMs: float64(durUs) / 1000.0,
+			Stages: []driver.ProfileStage{
+				{
+					Stage:      "Query Execution (SQLite embedded engine)",
+					DurationUs: durUs,
+					Percentage: 100.0,
+				},
+			},
+		}
+	}
+
 	// 5. Route to Exec vs QueryStream
 	isSelect := strings.HasPrefix(upperSQL, "SELECT") || strings.HasPrefix(upperSQL, "SHOW") || strings.HasPrefix(upperSQL, "DESC") || strings.HasPrefix(upperSQL, "EXPLAIN")
 
@@ -324,6 +382,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 			Message:            execRes.Message,
 			BackupFile:         backupFile,
 			BackupDataIncluded: backupDataIncluded,
+			Profile:            collectProfile(),
 		}, nil
 	}
 
@@ -355,6 +414,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		Rows:        allRows,
 		RowCount:    len(allRows),
 		ExecutionMs: time.Since(start).Milliseconds(),
+		Profile:     collectProfile(),
 	}, nil
 }
 
@@ -424,3 +484,94 @@ func (s *ActiveSession) Stream(ctx context.Context, sql string, maxRows int) (dr
 
 	return s.Session.QueryStream(ctx, trimmedSQL, maxRows)
 }
+
+// GetTableDiagnostics returns physical storage and overhead metrics.
+func (s *ActiveSession) GetTableDiagnostics(ctx context.Context, database, table string) ([]driver.TableDiagnostics, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.Session == nil {
+		return nil, driver.ErrSessionClosed
+	}
+	return s.Session.GetTableDiagnostics(ctx, database, table)
+}
+
+// ExecuteMaintenance runs maintenance actions (OPTIMIZE, ANALYZE, CHECK, VACUUM).
+func (s *ActiveSession) ExecuteMaintenance(ctx context.Context, database string, tables []string, action string) ([]driver.MaintenanceResult, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.Session == nil {
+		return nil, driver.ErrSessionClosed
+	}
+	return s.Session.ExecuteMaintenance(ctx, database, tables, action)
+}
+
+// GetRedundantIndexes detects duplicate, shadowed, and redundant primary key indexes.
+func (s *ActiveSession) GetRedundantIndexes(ctx context.Context, database, table string) ([]driver.RedundantIndex, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.Session == nil {
+		return nil, driver.ErrSessionClosed
+	}
+	return s.Session.GetRedundantIndexes(ctx, database, table)
+}
+
+// PeekForeignKeyRow queries parent table for a single row matching a foreign key value.
+func (s *ActiveSession) PeekForeignKeyRow(ctx context.Context, database, table, column string, value any) (*driver.PeekResult, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.Session == nil {
+		return nil, driver.ErrSessionClosed
+	}
+	return s.Session.PeekForeignKeyRow(ctx, database, table, column, value)
+}
+
+// GetUserList lists database users.
+func (s *ActiveSession) GetUserList(ctx context.Context) ([]driver.DatabaseUser, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.Session == nil {
+		return nil, driver.ErrSessionClosed
+	}
+	return s.Session.GetUserList(ctx)
+}
+
+// GetUserGrants returns active grants for a user account.
+func (s *ActiveSession) GetUserGrants(ctx context.Context, user, host string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.Session == nil {
+		return nil, driver.ErrSessionClosed
+	}
+	return s.Session.GetUserGrants(ctx, user, host)
+}
+
+// SaveUser creates or updates a user account.
+func (s *ActiveSession) SaveUser(ctx context.Context, user, host, password string, isNew bool) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.Session == nil {
+		return driver.ErrSessionClosed
+	}
+	return s.Session.SaveUser(ctx, user, host, password, isNew)
+}
+
+// DropUser removes a user account.
+func (s *ActiveSession) DropUser(ctx context.Context, user, host string) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.Session == nil {
+		return driver.ErrSessionClosed
+	}
+	return s.Session.DropUser(ctx, user, host)
+}
+
+// ApplyUserGrants grants privileges to a user.
+func (s *ActiveSession) ApplyUserGrants(ctx context.Context, req driver.UserGrantRequest) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.Session == nil {
+		return driver.ErrSessionClosed
+	}
+	return s.Session.ApplyUserGrants(ctx, req)
+}
+

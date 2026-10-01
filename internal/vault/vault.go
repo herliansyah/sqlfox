@@ -42,20 +42,12 @@ type ConnectionRecord struct {
 	User                 string    `json:"user"`
 	Password             string    `json:"password,omitempty"` // Plaintext when in-memory
 	EncryptedPassword    string    `json:"-"`
-	UseSSL               bool      `json:"use_ssl"`
-	SSLCA                string    `json:"ssl_ca,omitempty"`
-	SSLCert              string    `json:"ssl_cert,omitempty"`
-	SSLKey               string    `json:"ssl_key,omitempty"`
-	UseSSH               bool      `json:"use_ssh"`
-	SSHHost              string    `json:"ssh_host,omitempty"`
-	SSHPort              int       `json:"ssh_port,omitempty"`
-	SSHUser              string    `json:"ssh_user,omitempty"`
-	SSHPassword          string    `json:"ssh_password,omitempty"`
-	EncryptedSSHPassword string    `json:"-"`
-	SSHKey               string    `json:"ssh_key,omitempty"`
-	EncryptedSSHKey      string    `json:"-"`
-	CreatedAt            time.Time `json:"created_at"`
-	UpdatedAt            time.Time `json:"updated_at"`
+	UseSSL            bool      `json:"use_ssl"`
+	SSLCA             string    `json:"ssl_ca,omitempty"`
+	SSLCert           string    `json:"ssl_cert,omitempty"`
+	SSLKey            string    `json:"ssl_key,omitempty"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // Vault manages encrypted credential and profile storage.
@@ -143,12 +135,6 @@ func initSchema(db *sql.DB) error {
 		ssl_ca TEXT,
 		ssl_cert TEXT,
 		ssl_key TEXT,
-		use_ssh INTEGER DEFAULT 0,
-		ssh_host TEXT,
-		ssh_port INTEGER,
-		ssh_user TEXT,
-		encrypted_ssh_password TEXT,
-		encrypted_ssh_key TEXT,
 		created_at TIMESTAMP,
 		updated_at TIMESTAMP
 	);
@@ -314,7 +300,7 @@ func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 	}
 	conn.UpdatedAt = time.Now()
 
-	var encPass, encSSHPass, encSSHKey string
+	var encPass string
 	var err error
 
 	if conn.Password != "" {
@@ -332,52 +318,17 @@ func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 		}
 	}
 
-	if conn.SSHPassword != "" {
-		encSSHPass, err = Encrypt([]byte(conn.SSHPassword), v.key)
-		if err != nil {
-			return fmt.Errorf("failed to encrypt ssh password: %w", err)
-		}
-	} else {
-		encSSHPass = conn.EncryptedSSHPassword
-		if encSSHPass == "" && conn.ID != "" {
-			var existingSSHPass string
-			if err := v.db.QueryRow(`SELECT encrypted_ssh_password FROM connections WHERE id = ?`, conn.ID).Scan(&existingSSHPass); err == nil {
-				encSSHPass = existingSSHPass
-			}
-		}
-	}
-
-	if conn.SSHKey != "" {
-		encSSHKey, err = Encrypt([]byte(conn.SSHKey), v.key)
-		if err != nil {
-			return fmt.Errorf("failed to encrypt ssh key: %w", err)
-		}
-	} else {
-		encSSHKey = conn.EncryptedSSHKey
-		if encSSHKey == "" && conn.ID != "" {
-			var existingSSHKey string
-			if err := v.db.QueryRow(`SELECT encrypted_ssh_key FROM connections WHERE id = ?`, conn.ID).Scan(&existingSSHKey); err == nil {
-				encSSHKey = existingSSHKey
-			}
-		}
-	}
-
 	useSSLInt := 0
 	if conn.UseSSL {
 		useSSLInt = 1
-	}
-	useSSHInt := 0
-	if conn.UseSSH {
-		useSSHInt = 1
 	}
 
 	query := `
 	INSERT INTO connections (
 		id, name, environment, driver, host, port, database_name, user,
 		encrypted_password, use_ssl, ssl_ca, ssl_cert, ssl_key,
-		use_ssh, ssh_host, ssh_port, ssh_user, encrypted_ssh_password, encrypted_ssh_key,
 		created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO UPDATE SET
 		name = excluded.name,
 		environment = excluded.environment,
@@ -391,19 +342,12 @@ func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 		ssl_ca = excluded.ssl_ca,
 		ssl_cert = excluded.ssl_cert,
 		ssl_key = excluded.ssl_key,
-		use_ssh = excluded.use_ssh,
-		ssh_host = excluded.ssh_host,
-		ssh_port = excluded.ssh_port,
-		ssh_user = excluded.ssh_user,
-		encrypted_ssh_password = excluded.encrypted_ssh_password,
-		encrypted_ssh_key = excluded.encrypted_ssh_key,
 		updated_at = excluded.updated_at;
 	`
 
 	_, err = v.db.Exec(query,
 		conn.ID, conn.Name, conn.Environment, conn.Driver, conn.Host, conn.Port, conn.DatabaseName, conn.User,
 		encPass, useSSLInt, conn.SSLCA, conn.SSLCert, conn.SSLKey,
-		useSSHInt, conn.SSHHost, conn.SSHPort, conn.SSHUser, encSSHPass, encSSHKey,
 		conn.CreatedAt, conn.UpdatedAt,
 	)
 	return err
@@ -417,7 +361,6 @@ func (v *Vault) GetConnection(id string) (*ConnectionRecord, error) {
 	row := v.db.QueryRow(`SELECT 
 		id, name, environment, driver, host, port, database_name, user,
 		encrypted_password, use_ssl, ssl_ca, ssl_cert, ssl_key,
-		use_ssh, ssh_host, ssh_port, ssh_user, encrypted_ssh_password, encrypted_ssh_key,
 		created_at, updated_at
 	FROM connections WHERE id = ?`, id)
 
@@ -443,7 +386,6 @@ func (v *Vault) ListConnections() ([]*ConnectionRecord, error) {
 	rows, err := v.db.Query(`SELECT 
 		id, name, environment, driver, host, port, database_name, user,
 		encrypted_password, use_ssl, ssl_ca, ssl_cert, ssl_key,
-		use_ssh, ssh_host, ssh_port, ssh_user, encrypted_ssh_password, encrypted_ssh_key,
 		created_at, updated_at
 	FROM connections ORDER BY name ASC`)
 	if err != nil {
@@ -486,15 +428,14 @@ type scannable interface {
 
 func scanConnection(s scannable) (*ConnectionRecord, error) {
 	var c ConnectionRecord
-	var useSSL, useSSH int
-	var encPass, sslCA, sslCert, sslKey, encSSHPass, encSSHKey sql.NullString
-	var host, dbName, user, sshHost, sshUser sql.NullString
-	var port, sshPort sql.NullInt64
+	var useSSL int
+	var encPass, sslCA, sslCert, sslKey sql.NullString
+	var host, dbName, user sql.NullString
+	var port sql.NullInt64
 
 	err := s.Scan(
 		&c.ID, &c.Name, &c.Environment, &c.Driver, &host, &port, &dbName, &user,
 		&encPass, &useSSL, &sslCA, &sslCert, &sslKey,
-		&useSSH, &sshHost, &sshPort, &sshUser, &encSSHPass, &encSSHKey,
 		&c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
@@ -510,12 +451,6 @@ func scanConnection(s scannable) (*ConnectionRecord, error) {
 	c.SSLCA = sslCA.String
 	c.SSLCert = sslCert.String
 	c.SSLKey = sslKey.String
-	c.UseSSH = useSSH == 1
-	c.SSHHost = sshHost.String
-	c.SSHPort = int(sshPort.Int64)
-	c.SSHUser = sshUser.String
-	c.EncryptedSSHPassword = encSSHPass.String
-	c.EncryptedSSHKey = encSSHKey.String
 
 	return &c, nil
 }
@@ -527,20 +462,6 @@ func (v *Vault) decryptConnection(c *ConnectionRecord) error {
 			return fmt.Errorf("failed to decrypt password: %w", err)
 		}
 		c.Password = string(dec)
-	}
-	if c.EncryptedSSHPassword != "" {
-		dec, err := Decrypt(c.EncryptedSSHPassword, v.key)
-		if err != nil {
-			return fmt.Errorf("failed to decrypt ssh password: %w", err)
-		}
-		c.SSHPassword = string(dec)
-	}
-	if c.EncryptedSSHKey != "" {
-		dec, err := Decrypt(c.EncryptedSSHKey, v.key)
-		if err != nil {
-			return fmt.Errorf("failed to decrypt ssh key: %w", err)
-		}
-		c.SSHKey = string(dec)
 	}
 	return nil
 }

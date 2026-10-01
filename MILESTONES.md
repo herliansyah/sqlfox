@@ -159,19 +159,19 @@ v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
 │   │   ├── Slow query filter threshold (> N seconds)
 │   │   ├── Lock Dependency Tree (Root Blocker analysis from sys/performance_schema lock waits)
 │   │   └── Out-of-band "Kill Query" and "Kill Connection" buttons
-│   ├── [ ] 7. Table Diagnostics & Storage Overhead (Physical Size & Optimization)
+│   ├── [x] 7. Table Diagnostics & Storage Overhead (Physical Size & Optimization)
 │   │   ├── Real-time disk usage breakdown (Data Length, Index Length, Overhead/Fragmentation)
 │   │   └── One-click maintenance operations (OPTIMIZE TABLE, ANALYZE TABLE, CHECK TABLE)
-│   ├── [ ] 8. Visual User & Privilege Manager (Permission Matrix)
+│   ├── [x] 8. Visual User & Privilege Manager (Permission Matrix)
 │   │   ├── Account provisioning (User, Host %, Password, Resource Limits)
 │   │   └── Visual checkbox privilege matrix (Global, Database, and Table scopes)
-│   ├── [ ] 9. Foreign Key Hyperlink & Data Peeking
+│   ├── [x] 9. Foreign Key Hyperlink & Data Peeking
 │   │   ├── Clickable FK cells in Virtual Data Grid
 │   │   └── Hover/click popover previewing parent table record with 1-click jump
-│   ├── [ ] 10. Query Execution Profiler (SHOW PROFILE Stages)
+│   ├── [x] 10. Query Execution Profiler (SHOW PROFILE Stages)
 │   │   ├── Visual breakdown of execution phases (optimizing, lock, sorting, tmp table on disk)
 │   │   └── Microsecond stage timing chart
-│   ├── [ ] 11. Redundant / Duplicate Index Detector
+│   ├── [x] 11. Redundant / Duplicate Index Detector
 │   │   ├── Static schema analysis detecting shadowed or overlapping prefix indexes
 │   │   └── Safe cleanup recommendations
 │   └── [x] 12. Full Execution History & Session Audit Log
@@ -234,4 +234,31 @@ v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
   - **Redundant Index Detector**: Static analysis of table index definitions flagging duplicate or shadowed prefix indexes with safe cleanup recommendations.
   - **Visual Privilege Matrix**: User account provisioning with host pattern restrictions and an interactive checkbox permission matrix (Global, Database, and Table levels).
 - **Runnable Verification**: Inspect fragmented table -> click "Optimize Table" -> view reclaimed overhead; click FK cell in grid and verify parent row popover appears; view execution profile breakdown of a complex query.
+
+---
+
+### Milestone 13: TablePlus-Style Inline Filter Bar & Server-Side Pushdown
+- **Goal**: Enable instantaneous, visual, and freeform SQL filtering directly within the Table Viewer data grid, pushing WHERE conditions down to the remote database engine with strict injection safety.
+- **Deliverables**:
+  - **Hybrid Inline Filter Bar**: Docked above the Data Grid table in Table Viewer `Data` mode; toggles between *Quick Clause Pills* and freeform *Raw WHERE Expression*.
+  - **Quick Clause Pills**: Modular visual conditions (`[Column] [Operator] [Value]`) with `=`, `!=`, `LIKE`, `NOT LIKE`, `>`, `<`, `>=`, `<=`, `IN`, `IS NULL`, `IS NOT NULL`, supporting `+ AND` chaining.
+  - **Raw WHERE Expression Mode**: Freeform text input prefilled with `WHERE ` badge for arbitrary boolean logic, nested parentheses, and SQL scalar functions.
+  - **Server-Side Pushdown**: Full filter pushdown (`SELECT * FROM table WHERE (<filter>)`) using database indexes across arbitrarily large datasets.
+  - **Backend Safety Boundary**: Strict token guard disallowing statement terminators (`;`), destructive verbs (`DROP`, `DELETE`, `UPDATE`, `INSERT`, `ALTER`, `TRUNCATE`, `GRANT`, `REVOKE`, `SHUTDOWN`), and redirection clauses (`UNION`, `INTO OUTFILE`).
+  - **Integrated Sorting & Pagination**: Column header click sorting (`ASC`/`DESC`) and keyset/offset pagination integrate seamlessly while preserving active WHERE clauses.
+  - **Grid Query Handoff ("📝 Open in SQL Tab")**: 1-click generation of the complete `SELECT * FROM table WHERE ... ORDER BY ... LIMIT 50;` statement into a new Query Editor tab.
+  - **Keyboard Shortcut**: `Ctrl+F` / `Cmd+F` focuses the active filter bar in Table Viewer.
+- **Runnable Verification**: Open Table Viewer -> add pill `status = 'active'` -> click Run -> verify rows filtered on server; switch to `WHERE` mode and type `id > 10` -> verify pushdown; click "📝 Open in SQL Tab" -> verify query editor opens with exact query populated.
+
+---
+
+### Milestone 14: Ponytail Codebase Pruning & Zero-Bloat Hardening
+- **Goal**: Audit and eliminate speculative abstractions, dead test scripts, and redundant code to preserve minimal footprint and zero external bloat.
+- **Deliverables**:
+  - **Removal of Speculative In-Process SSH Tunneling**: Deleted `internal/driver/mysql/ssh_dialer.go`, removed SSH columns/encryption from `internal/vault/vault.go`, and normalized drivers to direct TCP; delegated bastion connectivity to standard OS native port forwarding (`ssh -N -L`).
+  - **Pruning Ad-Hoc Scripts**: Removed 15 dead test scripts in `scripts/` (-1,033 lines), reaffirming standard `go test ./...` as single source of automated testing truth.
+  - **Sentinel & Manifest Cleanup**: Removed unreferenced error sentinels (`ErrConnectionFailed`, `ErrQueryCancelled`) and empty `package-lock.json`.
+  - **Net Reduction**: Removed over 1,400 lines of dead and speculative code while maintaining 100% test coverage and zero runtime regressions.
+- **Runnable Verification**: Run `go test -v ./...` -> verify 100% pass across all packages with zero build errors; launch `sqlfox` -> verify clean startup and instant UI load.
+
 

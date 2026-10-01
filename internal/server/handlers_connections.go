@@ -103,12 +103,6 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 		SSLCA:        conn.SSLCA,
 		SSLCert:      conn.SSLCert,
 		SSLKey:       conn.SSLKey,
-		UseSSH:       conn.UseSSH,
-		SSHHost:      conn.SSHHost,
-		SSHPort:      conn.SSHPort,
-		SSHUser:      conn.SSHUser,
-		SSHPassword:  conn.SSHPassword,
-		SSHKey:       conn.SSHKey,
 	}
 
 	sess, err := driver.Connect(ctx, cfg)
