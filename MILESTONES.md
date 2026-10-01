@@ -154,7 +154,7 @@ v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
 │       ├── Visual delta matrix (Identical, Insertions, Updates, Deletions)
 │       └── Selective delta script generator and atomic execution runner
 ├── [B] SQLyog DBA Operations & Diagnostics Suite
-│   ├── [ ] 6. Interactive Processlist & Slow Query Killer
+│   ├── [x] 6. Interactive Processlist & Slow Query Killer
 │   │   ├── Real-time thread monitor with auto-refresh (1s/3s) and status highlighting
 │   │   ├── Slow query filter threshold (> N seconds)
 │   │   ├── Lock Dependency Tree (Root Blocker analysis from sys/performance_schema lock waits)
@@ -174,7 +174,7 @@ v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
 │   ├── [ ] 11. Redundant / Duplicate Index Detector
 │   │   ├── Static schema analysis detecting shadowed or overlapping prefix indexes
 │   │   └── Safe cleanup recommendations
-│   └── [ ] 12. Full Execution History & Session Audit Log
+│   └── [x] 12. Full Execution History & Session Audit Log
 │       ├── Append-only chronological ledger of all queries executed in session
 │       └── Execution metrics (timestamp, duration in ms, rows affected, error status)
 └── [C] Enterprise Foundations & Multi-Engine Extensions
@@ -209,8 +209,10 @@ v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
   - **Auto-Refresh & Slow Threshold Filter**: Configurable refresh interval (1s/3s) and duration filter to spotlight long-running transactions.
   - **Lock Dependency Tree & Root Blocker Analyzer**: Interactive tree identifying locked and blocking sessions using `sys.innodb_lock_waits` / `performance_schema.data_lock_waits`; visually flags the root culprit transaction holding locks and causing wait cascades.
   - **Out-of-Band Kill**: Dedicated control connection dispatching `KILL QUERY <id>` or `KILL <id>` without freezing the main UI.
-  - **Session Audit Log**: Bottom panel recording every executed statement with duration in milliseconds, affected rows, and error states.
-- **Runnable Verification**: In session 1, execute `START TRANSACTION; UPDATE accounts SET balance = 100 WHERE id = 1;` without committing -> in session 2, execute `UPDATE accounts SET balance = 200 WHERE id = 1;` -> open Processlist Manager -> observe Lock Dependency Tree pointing to Session 1 as the Root Blocker -> click "Kill Connection" on Session 1 -> verify Session 2 immediately unblocks.
+  - **Best Practice Filter Toggles**: `Hide Sleep` (connection pool idle threads) and `Hide System` (event scheduler, binlog dump) filters with `localStorage` state persistence.
+  - **Deep Query Diagnostic Actions**: Per-thread inline actions (`⚡ Explain` plan preview, `📝 To Tab` editor transfer, `🤖 AI Copilot Draft` prompt populating with overwrite guard, `📑 Catatan` internal notes append to `Notes.md`, `📋 Copy`).
+  - **Session Audit Log**: Expandable bottom panel recording every executed statement with duration in milliseconds, affected rows, error states, instant search, CSV export, and clear action.
+- **Runnable Verification**: In session 1, execute `START TRANSACTION; UPDATE accounts SET balance = 100 WHERE id = 1;` without committing -> in session 2, execute `UPDATE accounts SET balance = 200 WHERE id = 1;` -> open Processlist Manager -> observe Lock Dependency Tree pointing to Session 1 as the Root Blocker -> click "Kill Connection" on Session 1 -> verify Session 2 immediately unblocks; toggle "Hide Sleep" -> click "Catatan" on active query and verify entry appears in `Notes.md`; click "Audit Log" -> verify execution history with CSV export.
 
 
 ### Milestone 11: Schema & Data Synchronization Engine

@@ -302,6 +302,31 @@ func (s *SQLiteSession) CancelQuery(ctx context.Context, queryID string) error {
 	return nil
 }
 
+func (s *SQLiteSession) GetProcesslist(ctx context.Context) (*driver.ProcesslistResult, error) {
+	// ponytail: SQLite is an embedded single-process engine without multi-client thread visibility.
+	return &driver.ProcesslistResult{
+		CurrentThreadID: 1,
+		Threads: []driver.ProcessItem{
+			{
+				ID:      1,
+				User:    "local",
+				Host:    "localhost",
+				DB:      "main",
+				Command: "Embedded",
+				Time:    0,
+				State:   "idle",
+				Info:    "SQLite embedded connection",
+			},
+		},
+		Locks: []driver.LockWait{},
+	}, nil
+}
+
+func (s *SQLiteSession) KillProcess(ctx context.Context, threadID int64, killConnection bool) error {
+	// ponytail: No-op for SQLite embedded database
+	return nil
+}
+
 func (s *SQLiteSession) Close() error {
 	return s.db.Close()
 }

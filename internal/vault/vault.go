@@ -171,6 +171,19 @@ func initSchema(db *sql.DB) error {
 		updated_at TIMESTAMP,
 		UNIQUE(connection_id, database_name, table_name)
 	);
+
+	CREATE TABLE IF NOT EXISTS audit_logs (
+		id TEXT PRIMARY KEY,
+		session_id TEXT NOT NULL,
+		connection_id TEXT NOT NULL,
+		query_sql TEXT NOT NULL,
+		duration_ms INTEGER NOT NULL,
+		rows_affected INTEGER NOT NULL,
+		error TEXT DEFAULT '',
+		executed_at TIMESTAMP NOT NULL
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_audit_logs_session ON audit_logs(session_id, executed_at DESC);
 	`
 	if _, err := db.Exec(query); err != nil {
 		return err

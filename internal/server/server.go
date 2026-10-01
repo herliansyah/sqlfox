@@ -80,6 +80,13 @@ func (s *Server) routes() {
 	mux.HandleFunc("POST /api/session/{id}/notes/{table}", s.handleSaveTableNote)
 	mux.HandleFunc("POST /api/session/{id}/table/{table}/import-csv", s.handleImportCSV)
 
+	// Processlist & DBA operations
+	mux.HandleFunc("GET /api/session/{id}/processlist", s.handleGetProcesslist)
+
+	// Session Audit Log endpoints
+	mux.HandleFunc("GET /api/session/{id}/audit-logs", s.handleGetAuditLogs)
+	mux.HandleFunc("DELETE /api/session/{id}/audit-logs", s.handleClearAuditLogs)
+
 	// Session commands dispatcher
 	mux.HandleFunc("POST /api/session/{id}/{action}", func(w http.ResponseWriter, r *http.Request) {
 		switch r.PathValue("action") {
@@ -99,6 +106,8 @@ func (s *Server) routes() {
 			s.handleExecuteQuery(w, r)
 		case "cancel":
 			s.handleCancelQuery(w, r)
+		case "kill":
+			s.handleKillProcess(w, r)
 		default:
 			http.NotFound(w, r)
 		}

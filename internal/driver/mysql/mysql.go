@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -473,6 +474,144 @@ func (s *MySQLSession) CancelQuery(ctx context.Context, queryID string) error {
 
 	// Execute out-of-band KILL QUERY on independent connection
 	_, err := s.db.ExecContext(ctx, fmt.Sprintf("KILL QUERY %d", threadID))
+	return err
+}
+
+func (s *MySQLSession) GetProcesslist(ctx context.Context) (*driver.ProcesslistResult, error) {
+	// 1. Get current connection thread ID
+	var currentThreadID int64
+	_ = s.db.QueryRowContext(ctx, "SELECT CONNECTION_ID()").Scan(&currentThreadID)
+
+	// 2. Fetch processes from information_schema.PROCESSLIST or SHOW FULL PROCESSLIST
+	var threads []driver.ProcessItem
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT ID, USER, HOST, IFNULL(DB, ''), COMMAND, TIME, IFNULL(STATE, ''), IFNULL(INFO, '')
+		FROM information_schema.PROCESSLIST
+		ORDER BY TIME DESC
+	`)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var p driver.ProcessItem
+			if err := rows.Scan(&p.ID, &p.User, &p.Host, &p.DB, &p.Command, &p.Time, &p.State, &p.Info); err == nil {
+				threads = append(threads, p)
+			}
+		}
+	} else {
+		// Fallback to SHOW FULL PROCESSLIST
+		fallbackRows, fErr := s.db.QueryContext(ctx, "SHOW FULL PROCESSLIST")
+		if fErr != nil {
+			return nil, fmt.Errorf("failed to fetch processlist: %w", fErr)
+		}
+		defer fallbackRows.Close()
+		for fallbackRows.Next() {
+			var id int64
+			var user, host, command string
+			var db, state, info sql.NullString
+			var timeVal int64
+			if err := fallbackRows.Scan(&id, &user, &host, &db, &command, &timeVal, &state, &info); err == nil {
+				threads = append(threads, driver.ProcessItem{
+					ID:      id,
+					User:    user,
+					Host:    host,
+					DB:      db.String,
+					Command: command,
+					Time:    timeVal,
+					State:   state.String,
+					Info:    info.String,
+				})
+			}
+		}
+	}
+
+	if threads == nil {
+		threads = []driver.ProcessItem{}
+	}
+
+	// 3. Inspect Lock Waits (Tier 1: sys.innodb_lock_waits)
+	var locks []driver.LockWait
+	lockRows, lErr := s.db.QueryContext(ctx, `
+		SELECT
+			IFNULL(waiting_pid, 0),
+			IFNULL(waiting_query, ''),
+			IFNULL(waiting_account, ''),
+			IFNULL(wait_age_secs, 0),
+			IFNULL(blocking_pid, 0),
+			IFNULL(blocking_query, ''),
+			IFNULL(blocking_account, ''),
+			IFNULL(locked_table, ''),
+			IFNULL(waiting_lock_mode, '')
+		FROM sys.innodb_lock_waits
+	`)
+	if lErr == nil {
+		defer lockRows.Close()
+		waitingPIDs := make(map[int64]bool)
+		for lockRows.Next() {
+			var lw driver.LockWait
+			if err := lockRows.Scan(
+				&lw.WaitingThreadID,
+				&lw.WaitingQuery,
+				&lw.WaitingUser,
+				&lw.WaitingSeconds,
+				&lw.BlockingThreadID,
+				&lw.BlockingQuery,
+				&lw.BlockingUser,
+				&lw.LockedResource,
+				&lw.LockMode,
+			); err == nil {
+				waitingPIDs[lw.WaitingThreadID] = true
+				locks = append(locks, lw)
+			}
+		}
+
+		// Identify root blockers: a blocking PID that is NOT currently waiting on any lock
+		for i := range locks {
+			if !waitingPIDs[locks[i].BlockingThreadID] {
+				locks[i].IsRootBlocker = true
+			}
+		}
+	} else {
+		// Tier 2 Fallback: heuristic scan of threads with lock states
+		for _, t := range threads {
+			st := strings.ToLower(t.State)
+			if strings.Contains(st, "lock") || strings.Contains(st, "waiting for table") {
+				locks = append(locks, driver.LockWait{
+					WaitingThreadID: t.ID,
+					WaitingQuery:    t.Info,
+					WaitingUser:     t.User,
+					WaitingSeconds:  t.Time,
+					LockedResource:  t.DB,
+					LockMode:        t.State,
+					IsRootBlocker:   false,
+				})
+			}
+		}
+	}
+
+	if locks == nil {
+		locks = []driver.LockWait{}
+	}
+
+	return &driver.ProcesslistResult{
+		CurrentThreadID: currentThreadID,
+		Threads:         threads,
+		Locks:           locks,
+	}, nil
+}
+
+func (s *MySQLSession) KillProcess(ctx context.Context, threadID int64, killConnection bool) error {
+	if threadID <= 0 {
+		return errors.New("invalid thread id")
+	}
+
+	var cmd string
+	if killConnection {
+		cmd = fmt.Sprintf("KILL %d", threadID)
+	} else {
+		cmd = fmt.Sprintf("KILL QUERY %d", threadID)
+	}
+
+	_, err := s.db.ExecContext(ctx, cmd)
 	return err
 }
 
