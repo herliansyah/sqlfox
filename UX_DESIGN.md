@@ -120,8 +120,19 @@ User experience architecture, ASCII wireframes, design tokens, and interaction m
 - **Development Safe**: `#10b981` (Emerald 500) — dev badge, successful query execution.
 
 ### Typography
-- **UI Font**: `Inter, system-ui, sans-serif` (13px baseline for compact navigation).
-- **Code & Grid Font**: `JetBrains Mono, Fira Code, monospace` (13px, ligatures supported).
+- **UI Font**: `Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif` (13px baseline for compact navigation, `-webkit-font-smoothing: antialiased`).
+- **Code & Grid Font**: `JetBrains Mono, Fira Code, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace` (Query Editor: 14px, line-height 1.65, letter-spacing 0.01em; Virtual Data Grid: 12.5px-13px, `font-variant-numeric: tabular-nums`).
+
+### Header & Toolbar Controls
+- **Navbar Container**: `h-12` (48px baseline).
+- **Navbar Control Buttons**: `h-7` (28px fixed height, `flex items-center px-2.5 rounded text-xs`) across left sidebar toggle (`◨`), center shortcuts (Command Palette, Schema Search) and right-side action triggers (Processlist, Audit Log, Diagnostics, Privileges, Vault, Copilot, `🔒 Read-Only` toggle, PIN badge). All inline `<kbd>` badges are omitted from button text to prevent visual clutter, with keyboard shortcuts cleanly exposed via native `title="..."` tooltips.
+- **Sidebar Visibility & Persistence**: Both Left Sidebar (Schema Explorer) and Right Sidebar (AI Copilot) persist their show/hide states to browser `localStorage` (`sqlfox_left_sidebar_visible` and `sqlfox_copilot_visible`, defaulting to `true`), with clickable header toggle buttons for mouse navigation.
+- **Status Bar & Centralized Shortcuts Cheatsheet**: `h-6` (24px) footer containing live environment status, database engine, latency, memory gauge, and a dedicated `⌨️ Shortcuts` trigger. Clicking it (or pressing `?` / `F1`) opens a modal cheatsheet grouping all shortcuts (Query Execution, Navigation, Tabs, Tools).
+- **Maximized Search & Filter Textbox Standards**: All search and filter input boxes across toolbars, drawers, and popovers (Processlist `#pl-search-input`, Session Audit Log `#audit-search-input`, Table Data Grid Raw WHERE filter `#filter-raw-input`, Storage Diagnostics `#dbdiag-search-input`, Session Switcher `#session-search-input`, Database Switcher `#database-search-input`, and Snippets Manager `#snippets-filter-input`) follow a unified UX pattern:
+  - Dynamically fill/maximize available space (`flex-1 min-w-[200px]` or relative flex wrapper) without hardcoded cramped widths.
+  - Leading search icon `🔍` on the left with consistent font-mono and padding.
+  - Inline clear button `✕` on the right that appears dynamically when text is typed and vanishes when cleared.
+  - Native `Escape` key shortcut inside the input to instantly clear the filter and reset focus.
 
 ---
 
@@ -134,6 +145,7 @@ When viewing an active table, developers switch between dedicated modes above th
 3. **`[🔑 Indexes]`**: List and create custom/unique indexes (`BTREE`, `UNIQUE`) or drop existing indexes.
 4. **`[🔗 Foreign Keys]`**: Manage referential integrity constraints, source columns, referenced table/column, and cascade actions (`ON DELETE` / `ON UPDATE`).
 5. **`[📜 CREATE Code]`**: Clean syntax-highlighted DDL generator with one-click clipboard copy.
+6. **`[🗑️ Drop Table]`**: Dedicated high-visibility safety button placed at the right of the sub-tabs bar (and via right-click context menu in the sidebar schema tree), protected by the AST Safety Guard Challenge. Table list rows in the sidebar remain clean with right-aligned row counts and zero floating hover icons.
 
 ### View & Trigger Designers
 Dedicated schema dialogs accessible directly from the sidebar tree:
@@ -184,6 +196,7 @@ For microservices and multi-database architectures:
 - **Compact Header Button**: Replaces permanent sidebar connection accordions with a compact session bar displaying the active database icon, name, and environment tag (`[PROD]`, `[STAGE]`, `[DEV]`).
 - **Instant Search & Grouping**: Expanding the switcher reveals an inline search filter, environment-grouped connections, and quick-action buttons (`➕ New`, `✏️ Edit`, `🗑️ Delete`).
 - **Full-Height Schema Tree**: Reserves 100% of the sidebar's vertical space for exploring schema objects (Tables, Views, Triggers).
+- **Collapsible Schema Object Sections**: Dedicated toggleable headers for `📊 Tables`, `👁️ Views`, and `⚡ Triggers` with interactive chevron indicators (`▼` / `▶`), object count badges, and persistent state saved to browser `localStorage`. Active filter queries automatically expand sections to ensure search visibility.
 
 ---
 
