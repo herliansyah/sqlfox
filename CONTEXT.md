@@ -248,6 +248,14 @@ _Avoid_: Schema diff tool, DDL merger, table reconciler
 A direct spreadsheet-like interaction model within the Virtual Data Grid allowing users to stage new row insertions, delete selected rows under Safety Guard validation, and apply quick visual column filters without raw SQL.
 _Avoid_: Edit grid, table viewer, row manager
 
+**Staged Grid Changes**:
+An in-memory ledger accumulating uncommitted cell modifications across rows and columns in the Virtual Data Grid, highlighting modified cells with visual dirty badges (`●`) and providing atomic "Apply" and "Discard" actions.
+_Avoid_: Unsaved buffer, dirty queue, batch edit cache
+
+**Immediate Persist Mode**:
+A data grid editing mode where cell modifications automatically persist to the remote database upon input blur or Enter key submission, bypassing manual staging.
+_Avoid_: Direct save, auto-flush, instant write
+
 **SQL Dump Runner**:
 A memory-bounded streaming executor and generator for `.sql` files that breaks multi-statement scripts into transactional chunks without loading entire multi-gigabyte files into memory.
 _Avoid_: SQL runner, dump importer, script player
