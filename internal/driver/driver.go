@@ -76,6 +76,12 @@ type Session interface {
 	// ServerInfo returns database version and active threads.
 	ServerInfo(ctx context.Context) (*ServerInfo, error)
 
+	// GetProcesslist retrieves active threads and lock wait relationships.
+	GetProcesslist(ctx context.Context) (*ProcesslistResult, error)
+
+	// KillProcess interrupts a query or connection out-of-band.
+	KillProcess(ctx context.Context, threadID int64, killConnection bool) error
+
 	io.Closer
 }
 
@@ -206,6 +212,39 @@ type ServerInfo struct {
 	Version     string `json:"version"`
 	UptimeSec   int64  `json:"uptime_sec"`
 	ActiveConns int    `json:"active_conns"`
+}
+
+// ProcessItem represents an active thread / query on the database server.
+type ProcessItem struct {
+	ID      int64  `json:"id"`
+	User    string `json:"user"`
+	Host    string `json:"host"`
+	DB      string `json:"db"`
+	Command string `json:"command"`
+	Time    int64  `json:"time"`
+	State   string `json:"state"`
+	Info    string `json:"info"`
+}
+
+// LockWait represents lock contention between two transactions or threads.
+type LockWait struct {
+	WaitingThreadID  int64  `json:"waiting_thread_id"`
+	WaitingQuery     string `json:"waiting_query"`
+	WaitingUser      string `json:"waiting_user"`
+	WaitingSeconds   int64  `json:"waiting_seconds"`
+	BlockingThreadID int64  `json:"blocking_thread_id"`
+	BlockingQuery    string `json:"blocking_query"`
+	BlockingUser     string `json:"blocking_user"`
+	LockedResource   string `json:"locked_resource"`
+	LockMode         string `json:"lock_mode"`
+	IsRootBlocker    bool   `json:"is_root_blocker"`
+}
+
+// ProcesslistResult holds active threads and lock analysis.
+type ProcesslistResult struct {
+	CurrentThreadID int64         `json:"current_thread_id"`
+	Threads         []ProcessItem `json:"threads"`
+	Locks           []LockWait    `json:"locks"`
 }
 
 // Schema metadata structures

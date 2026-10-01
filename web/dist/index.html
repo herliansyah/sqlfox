@@ -167,6 +167,15 @@
         <span id="readonly-text">Read-Only</span>
       </button>
 
+      <button id="btn-open-processlist" onclick="openProcesslistTab()" class="hidden bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition flex items-center space-x-1.5" title="Processlist & Thread Monitor">
+        <span>⚡ Processlist</span>
+        <span id="processlist-slow-badge" class="hidden bg-amber-500/20 text-amber-300 text-[10px] px-1 rounded-full font-bold"></span>
+      </button>
+
+      <button id="btn-open-audit-log" onclick="toggleAuditDrawer()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition flex items-center space-x-1" title="Session Audit Log">
+        <span>📜 Audit Log</span>
+      </button>
+
       <button onclick="openExportImportModal()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition">
         📦 Vault
       </button>
@@ -639,6 +648,139 @@
         </div>
       </div>
 
+
+      <!-- Processlist & Thread Monitor View (Dedicated Tab) -->
+      <div id="processlist-view-container" class="hidden flex-1 flex flex-col overflow-hidden bg-app-bg">
+        <!-- Processlist Toolbar -->
+        <div class="h-10 bg-app-surface border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0">
+          <div class="flex items-center space-x-3">
+            <div class="flex items-center space-x-1 bg-slate-900 border border-slate-700 rounded p-0.5">
+              <span class="text-slate-400 text-[11px] px-1.5 font-medium">Refresh:</span>
+              <button id="pl-refresh-pause" onclick="setProcesslistInterval('pause')" class="px-2 py-0.5 rounded text-[11px] bg-slate-800 text-white font-medium">Pause</button>
+              <button id="pl-refresh-1s" onclick="setProcesslistInterval(1000)" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">1s</button>
+              <button id="pl-refresh-3s" onclick="setProcesslistInterval(3000)" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">3s</button>
+              <button id="pl-refresh-5s" onclick="setProcesslistInterval(5000)" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">5s</button>
+            </div>
+
+            <button onclick="fetchProcesslist()" class="bg-app-card hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded border border-app-border transition flex items-center space-x-1" title="Fetch active threads immediately">
+              <span>🔄 Refresh Now</span>
+            </button>
+
+            <div class="flex items-center space-x-1.5 text-slate-400 text-xs">
+              <span>Slow &gt;</span>
+              <input type="number" id="pl-slow-threshold" value="0" min="0" oninput="renderProcesslistUI()" class="w-14 bg-slate-900 border border-slate-700 px-1.5 py-0.5 rounded text-white text-xs font-mono text-center outline-none focus:border-app-accent" title="Filter threads running longer than N seconds (0 = all)">
+              <span>sec</span>
+            </div>
+
+            <div class="relative">
+              <input type="text" id="pl-search-input" oninput="renderProcesslistUI()" placeholder="Search user, db, query..." class="w-44 bg-slate-900 border border-slate-700 px-2 py-0.5 rounded text-white text-xs outline-none focus:border-app-accent font-mono">
+            </div>
+
+            <!-- Best Practice Filter Toggles -->
+            <label class="flex items-center space-x-1.5 text-slate-300 hover:text-white cursor-pointer select-none text-[11px]" title="Hide idle client connections currently in Sleep state">
+              <input type="checkbox" id="pl-hide-sleep" onchange="onProcesslistFilterChange()" class="rounded bg-slate-900 border-slate-700 text-app-accent">
+              <span>Hide Sleep</span>
+            </label>
+
+            <label class="flex items-center space-x-1.5 text-slate-300 hover:text-white cursor-pointer select-none text-[11px]" title="Hide internal system threads (event_scheduler, binlog dump, etc.)">
+              <input type="checkbox" id="pl-hide-system" onchange="onProcesslistFilterChange()" class="rounded bg-slate-900 border-slate-700 text-app-accent">
+              <span>Hide System</span>
+            </label>
+          </div>
+
+          <div class="flex items-center space-x-3 text-slate-400 text-xs">
+            <span id="pl-summary-text">Threads: 0</span>
+            <span id="pl-lock-summary" class="hidden text-red-400 font-semibold flex items-center space-x-1">
+              <span>🚨</span><span id="pl-lock-count">0 Locks</span>
+            </span>
+          </div>
+        </div>
+
+        <!-- Lock Dependency Tree / Root Blocker Banner (Shown when locks exist) -->
+        <div id="pl-lock-banner" class="hidden bg-red-950/40 border-b border-red-900/60 p-3 space-y-2 flex-shrink-0">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-2 text-xs font-bold text-red-300">
+              <span class="text-base">🚨</span>
+              <span>Lock Contention &amp; Root Blocker Analysis</span>
+            </div>
+            <span class="text-[11px] text-red-400 font-mono" id="pl-lock-banner-detail"></span>
+          </div>
+          <div id="pl-lock-tree-list" class="space-y-1.5 max-h-40 overflow-y-auto font-mono text-xs">
+            <!-- Root blockers and waiting threads rendered dynamically -->
+          </div>
+        </div>
+
+        <!-- Main Processlist Grid Table -->
+        <div class="flex-1 overflow-auto bg-[#0b1120]">
+          <table class="w-full text-left text-xs border-collapse">
+            <thead class="bg-slate-900 border-b border-app-border text-slate-400 sticky top-0 z-10 font-mono text-[11px]">
+              <tr>
+                <th class="p-2 w-28 text-center">Action</th>
+                <th class="p-2 w-20">ID</th>
+                <th class="p-2 w-24">User</th>
+                <th class="p-2 w-32">Host</th>
+                <th class="p-2 w-24">Database</th>
+                <th class="p-2 w-24">Command</th>
+                <th class="p-2 w-20 text-right">Time (s)</th>
+                <th class="p-2 w-36">State</th>
+                <th class="p-2">SQL / Query Info</th>
+              </tr>
+            </thead>
+            <tbody id="pl-tbody" class="divide-y divide-slate-800/60 font-mono text-xs text-slate-200">
+              <tr>
+                <td colspan="9" class="p-8 text-center text-slate-500 italic">No active processes loaded.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Session Audit Log Drawer (Bottom Panel) -->
+      <div id="audit-drawer" class="hidden h-72 bg-slate-950 border-t border-app-border flex flex-col z-20 shadow-2xl flex-shrink-0">
+        <!-- Drawer Header -->
+        <div class="h-9 bg-app-surface border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0">
+          <div class="flex items-center space-x-3">
+            <span class="font-bold text-white flex items-center space-x-1.5">
+              <span>📜</span>
+              <span>Session Audit Log</span>
+            </span>
+            <span id="audit-total-count" class="text-slate-400 text-[11px]">(0 entries)</span>
+
+            <input type="text" id="audit-search-input" oninput="loadAuditLogs()" placeholder="Search executed SQL..." class="w-56 bg-slate-900 border border-slate-700 px-2 py-0.5 rounded text-white text-xs font-mono outline-none focus:border-app-accent">
+          </div>
+
+          <div class="flex items-center space-x-2">
+            <button onclick="exportAuditLogsCSV()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition text-[11px] flex items-center space-x-1">
+              <span>📥 Export CSV</span>
+            </button>
+            <button onclick="clearAuditLogs()" class="bg-red-950/40 hover:bg-red-900/60 text-red-300 px-2.5 py-1 rounded border border-red-900/50 transition text-[11px] flex items-center space-x-1">
+              <span>🗑️ Clear History</span>
+            </button>
+            <button onclick="toggleAuditDrawer(false)" class="text-slate-400 hover:text-white px-2 py-1 text-xs" title="Close Drawer">✕</button>
+          </div>
+        </div>
+
+        <!-- Drawer Content Table -->
+        <div class="flex-1 overflow-auto font-mono text-xs">
+          <table class="w-full text-left border-collapse">
+            <thead class="sticky top-0 bg-slate-900 border-b border-slate-800 text-slate-400 text-[11px]">
+              <tr>
+                <th class="p-2 w-36">Time</th>
+                <th class="p-2 w-20 text-right">Duration</th>
+                <th class="p-2 w-20 text-right">Rows</th>
+                <th class="p-2 w-20 text-center">Status</th>
+                <th class="p-2">Executed Statement</th>
+                <th class="p-2 w-28 text-center">Action</th>
+              </tr>
+            </thead>
+            <tbody id="audit-tbody" class="divide-y divide-slate-800/70 text-slate-300 text-[11px]">
+              <tr>
+                <td colspan="6" class="p-8 text-center text-slate-500 italic">No query history yet.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
 
     </main>
 
@@ -1934,6 +2076,16 @@
           <span class="px-2 py-0.5 rounded font-bold border ${envClass}">${conn.environment.toUpperCase()}</span>
           <span class="font-semibold text-white">${escapeHtml(conn.name)}</span>
         `;
+        const btnPL = document.getElementById('btn-open-processlist');
+        if (btnPL) {
+          if (conn.driver === 'mysql' || conn.driver === 'mariadb') {
+            btnPL.classList.remove('hidden');
+          } else {
+            btnPL.classList.add('hidden');
+            const plTab = tabs.find(t => t.isProcesslist);
+            if (plTab) closeTab(plTab.id);
+          }
+        }
         updateReadOnlyUI(activeSession.read_only);
         await loadSchemaTree(conn.id);
         updateFooterStats();
@@ -3108,7 +3260,7 @@
       const container = document.getElementById('tabs-container');
       container.innerHTML = tabs.map(t => `
         <div onclick="switchTab('${t.id}')" class="flex items-center space-x-1 px-3 py-1 rounded cursor-pointer text-xs transition ${t.id === activeTabId ? 'bg-app-bg text-app-accent font-semibold border-t-2 border-app-accent' : 'hover:bg-slate-800 text-slate-400'}">
-          <span>${t.isTableViewer ? '📊' : (t.isNote ? '📝' : '⚡')}</span>
+          <span>${t.isProcesslist ? '⚡' : (t.isTableViewer ? '📊' : (t.isNote ? '📝' : '⚡'))}</span>
           <span class="truncate max-w-[120px]">${escapeHtml(t.title)}</span>
           <button onclick="event.stopPropagation(); closeTab('${t.id}')" class="hover:text-red-400 pl-1">✕</button>
         </div>
@@ -3117,16 +3269,29 @@
       const activeTab = tabs.find(t => t.id === activeTabId);
       const modeTabs = document.getElementById('table-mode-tabs');
       const editorContainer = document.getElementById('editor-container');
-      if (activeTab && activeTab.isTableViewer) {
-        if (modeTabs) modeTabs.classList.remove('hidden');
-        if (editorContainer) editorContainer.classList.add('hidden');
-        setTableMode(activeTab.tableMode || 'data', false);
-      } else {
+      const gridContainer = document.getElementById('grid-container');
+      const plContainer = document.getElementById('processlist-view-container');
+
+      if (activeTab && activeTab.isProcesslist) {
         if (modeTabs) modeTabs.classList.add('hidden');
-        if (editorContainer) editorContainer.classList.remove('hidden');
-        setTableMode('data', false);
-        if (activeTab) {
-          setEditorSQL(activeTab.sql || '');
+        if (editorContainer) editorContainer.classList.add('hidden');
+        if (gridContainer) gridContainer.classList.add('hidden');
+        if (plContainer) plContainer.classList.remove('hidden');
+        fetchProcesslist(true);
+      } else {
+        if (plContainer) plContainer.classList.add('hidden');
+        if (gridContainer) gridContainer.classList.remove('hidden');
+        if (activeTab && activeTab.isTableViewer) {
+          if (modeTabs) modeTabs.classList.remove('hidden');
+          if (editorContainer) editorContainer.classList.add('hidden');
+          setTableMode(activeTab.tableMode || 'data', false);
+        } else {
+          if (modeTabs) modeTabs.classList.add('hidden');
+          if (editorContainer) editorContainer.classList.remove('hidden');
+          setTableMode('data', false);
+          if (activeTab) {
+            setEditorSQL(activeTab.sql || '');
+          }
         }
       }
 
@@ -3157,7 +3322,7 @@
 
     function switchTab(tabId) {
       const curr = tabs.find(t => t.id === activeTabId);
-      if (curr && !curr.isTableViewer) {
+      if (curr && !curr.isTableViewer && !curr.isProcesslist) {
         curr.sql = getEditorSQL();
       }
       activeTabId = tabId;
@@ -3177,6 +3342,496 @@
         activeTabId = tabs[0].id;
       }
       renderTabs();
+    }
+
+    // --- Processlist Manager & Lock Dependency Tree ---
+    let processlistData = { current_thread_id: 0, threads: [], locks: [] };
+    let processlistRefreshInterval = 'pause';
+    let processlistTimer = null;
+    let _plFiltersInitialized = false;
+
+    function initProcesslistFilters() {
+      const sleepEl = document.getElementById('pl-hide-sleep');
+      const sysEl = document.getElementById('pl-hide-system');
+      if (sleepEl) {
+        const stored = localStorage.getItem('sqlfox_pl_hide_sleep');
+        sleepEl.checked = stored !== null ? stored === 'true' : true;
+      }
+      if (sysEl) {
+        const stored = localStorage.getItem('sqlfox_pl_hide_system');
+        sysEl.checked = stored !== null ? stored === 'true' : true;
+      }
+      _plFiltersInitialized = true;
+    }
+
+    function onProcesslistFilterChange() {
+      const sleepEl = document.getElementById('pl-hide-sleep');
+      const sysEl = document.getElementById('pl-hide-system');
+      if (sleepEl) localStorage.setItem('sqlfox_pl_hide_sleep', sleepEl.checked);
+      if (sysEl) localStorage.setItem('sqlfox_pl_hide_system', sysEl.checked);
+      renderProcesslistUI();
+    }
+
+    function openProcesslistTab() {
+      if (!activeConnection) {
+        showNativeAlert('Please select and connect to a database session first.', 'Processlist');
+        return;
+      }
+      initProcesslistFilters();
+      let tab = tabs.find(t => t.isProcesslist);
+      if (!tab) {
+        tab = {
+          id: 'tab-processlist',
+          title: 'Processlist',
+          isProcesslist: true,
+        };
+        tabs.push(tab);
+      }
+      switchTab(tab.id);
+      fetchProcesslist(false);
+    }
+
+    function setProcesslistInterval(interval) {
+      processlistRefreshInterval = interval;
+      ['pause', '1s', '3s', '5s'].forEach(opt => {
+        const btn = document.getElementById(`pl-refresh-${opt}`);
+        if (!btn) return;
+        const isCur = (opt === 'pause' && interval === 'pause') ||
+                      (opt === '1s' && interval === 1000) ||
+                      (opt === '3s' && interval === 3000) ||
+                      (opt === '5s' && interval === 5000);
+        btn.className = isCur 
+          ? 'px-2 py-0.5 rounded text-[11px] bg-slate-800 text-white font-medium'
+          : 'px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white';
+      });
+
+      if (processlistTimer) {
+        clearInterval(processlistTimer);
+        processlistTimer = null;
+      }
+      if (interval !== 'pause') {
+        processlistTimer = setInterval(() => {
+          const activeTab = tabs.find(t => t.id === activeTabId);
+          if (activeTab && activeTab.isProcesslist && !document.hidden) {
+            fetchProcesslist(true);
+          }
+        }, interval);
+      }
+    }
+
+    async function fetchProcesslist(silent = false) {
+      if (!activeConnection) return;
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/processlist`);
+        if (!res.ok) {
+          if (!silent) {
+            const err = await res.json();
+            showNativeAlert('Failed to load processlist: ' + (err.error || res.statusText), 'Processlist Error');
+          }
+          return;
+        }
+        const data = await res.json();
+        processlistData = data || { current_thread_id: 0, threads: [], locks: [] };
+        renderProcesslistUI();
+      } catch (err) {
+        if (!silent) {
+          showNativeAlert('Failed to load processlist: ' + err.message, 'Processlist Error');
+        }
+      }
+    }
+
+    function renderProcesslistUI() {
+      const threads = processlistData.threads || [];
+      const locks = processlistData.locks || [];
+      const currentThreadId = processlistData.current_thread_id || 0;
+
+      const thresholdEl = document.getElementById('pl-slow-threshold');
+      const minSeconds = thresholdEl ? (parseInt(thresholdEl.value, 10) || 0) : 0;
+      const searchEl = document.getElementById('pl-search-input');
+      const search = searchEl ? searchEl.value.trim().toLowerCase() : '';
+
+      // Count slow threads (> 5 sec)
+      const slowCount = threads.filter(t => t.time >= 5).length;
+      const badgeHeader = document.getElementById('processlist-slow-badge');
+      if (badgeHeader) {
+        if (slowCount > 0) {
+          badgeHeader.textContent = slowCount;
+          badgeHeader.classList.remove('hidden');
+        } else {
+          badgeHeader.classList.add('hidden');
+        }
+      }
+
+      // Update tab title if processlist tab is present
+      const plTab = tabs.find(t => t.isProcesslist);
+      if (plTab) {
+        plTab.title = slowCount > 0 ? `Processlist (${slowCount})` : 'Processlist';
+        const plTabEl = document.querySelector(`[onclick*="switchTab('${plTab.id}')"] .truncate`);
+        if (plTabEl) plTabEl.textContent = plTab.title;
+      }
+
+      // Summary text
+      const summaryEl = document.getElementById('pl-summary-text');
+      if (summaryEl) {
+        summaryEl.textContent = `Threads: ${threads.length}${slowCount > 0 ? ` (${slowCount} slow)` : ''}`;
+      }
+
+      // Lock Dependency Tree banner
+      const lockBanner = document.getElementById('pl-lock-banner');
+      const lockSummary = document.getElementById('pl-lock-summary');
+      const lockCountEl = document.getElementById('pl-lock-count');
+      const lockList = document.getElementById('pl-lock-tree-list');
+
+      if (locks.length > 0) {
+        if (lockBanner) lockBanner.classList.remove('hidden');
+        if (lockSummary) lockSummary.classList.remove('hidden');
+        if (lockCountEl) lockCountEl.textContent = `${locks.length} Lock Waits`;
+        const bannerDetail = document.getElementById('pl-lock-banner-detail');
+        if (bannerDetail) {
+          bannerDetail.textContent = `${locks.filter(l => l.is_root_blocker).length} root blocker(s) detected`;
+        }
+
+        if (lockList) {
+          lockList.innerHTML = locks.map(l => {
+            if (l.is_root_blocker) {
+              return `
+                <div class="p-2 bg-red-900/30 border border-red-800 rounded flex flex-col space-y-1">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-2">
+                      <span class="bg-red-600 text-white font-bold text-[10px] px-1.5 py-0.5 rounded">🚨 ROOT BLOCKER</span>
+                      <span class="font-bold text-white">Thread #${l.blocking_thread_id}</span>
+                      <span class="text-slate-400">(${escapeHtml(l.blocking_user || 'unknown')})</span>
+                      <span class="text-amber-400">holding ${escapeHtml(l.lock_mode || 'LOCK')}</span>
+                      ${l.locked_resource ? `<span class="text-sky-300">on ${escapeHtml(l.locked_resource)}</span>` : ''}
+                    </div>
+                    <div class="flex items-center space-x-2">
+                      <button onclick="confirmKillProcess(${l.blocking_thread_id}, 'query')" class="px-2 py-0.5 rounded bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold text-[10px]">Kill Query</button>
+                      <button onclick="confirmKillProcess(${l.blocking_thread_id}, 'connection')" class="px-2 py-0.5 rounded bg-red-600 hover:bg-red-500 text-white font-bold text-[10px]">Kill Blocker</button>
+                    </div>
+                  </div>
+                  ${l.blocking_query ? `<div class="text-[11px] text-slate-300 truncate" title="${escapeHtml(l.blocking_query)}">SQL: ${escapeHtml(l.blocking_query)}</div>` : ''}
+                  <div class="pl-4 border-l border-red-800/80 text-[11px] text-red-200">
+                    ↳ Blocked: Thread #${l.waiting_thread_id} (${escapeHtml(l.waiting_user || 'unknown')}) waiting ${l.waiting_seconds}s for ${escapeHtml(l.lock_mode || 'lock')}:
+                    <span class="text-slate-400 truncate">${escapeHtml(l.waiting_query || 'active query')}</span>
+                  </div>
+                </div>
+              `;
+            } else {
+              return `
+                <div class="p-1.5 bg-slate-900/60 border border-slate-800 rounded flex items-center justify-between text-[11px]">
+                  <div class="truncate">
+                    <span class="text-amber-400">Thread #${l.waiting_thread_id}</span> waiting on <span class="text-red-400">#${l.blocking_thread_id}</span> (${l.waiting_seconds}s)
+                    ${l.locked_resource ? `- resource: <span class="text-sky-300">${escapeHtml(l.locked_resource)}</span>` : ''}
+                  </div>
+                  <button onclick="confirmKillProcess(${l.blocking_thread_id}, 'connection')" class="px-1.5 py-0.5 rounded bg-red-950 hover:bg-red-800 text-red-300 text-[10px] border border-red-800">Kill Target #${l.blocking_thread_id}</button>
+                </div>
+              `;
+            }
+          }).join('');
+        }
+      } else {
+        if (lockBanner) lockBanner.classList.add('hidden');
+        if (lockSummary) lockSummary.classList.add('hidden');
+      }
+
+      if (!_plFiltersInitialized) {
+        initProcesslistFilters();
+      }
+
+      const hideSleep = document.getElementById('pl-hide-sleep')?.checked ?? false;
+      const hideSystem = document.getElementById('pl-hide-system')?.checked ?? false;
+
+      // Filter threads
+      const filtered = threads.filter(t => {
+        if (hideSleep && (t.command === 'Sleep' || t.state === 'Sleep')) return false;
+        if (hideSystem && (t.user === 'system user' || t.user === 'event_scheduler' || t.command === 'Binlog Dump')) return false;
+        if (minSeconds > 0 && t.time < minSeconds) return false;
+        if (search) {
+          const matchUser = (t.user || '').toLowerCase().includes(search);
+          const matchDb = (t.db || '').toLowerCase().includes(search);
+          const matchInfo = (t.info || '').toLowerCase().includes(search);
+          const matchState = (t.state || '').toLowerCase().includes(search);
+          const matchId = String(t.id).includes(search);
+          if (!matchUser && !matchDb && !matchInfo && !matchState && !matchId) return false;
+        }
+        return true;
+      });
+
+      const tbody = document.getElementById('pl-tbody');
+      if (!tbody) return;
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="9" class="p-8 text-center text-slate-500 italic">No threads matched the current filter.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = filtered.map(t => {
+        const isSelf = t.id === currentThreadId;
+        const isSystem = (t.user === 'system user' || t.user === 'event_scheduler' || t.command === 'Binlog Dump');
+        const isCritical = t.time >= 30;
+        const isWarning = t.time >= 5 && !isCritical;
+        const hasQuery = t.info && t.command !== 'Sleep' && t.info.trim() !== '';
+
+        let rowClass = 'hover:bg-slate-800/40 transition';
+        if (isCritical) {
+          rowClass += ' bg-red-950/20 text-red-200 border-l-2 border-red-500';
+        } else if (isWarning) {
+          rowClass += ' bg-amber-950/20 text-amber-200 border-l-2 border-amber-500';
+        }
+
+        const safeSQL = hasQuery ? JSON.stringify(t.info).replace(/"/g, '&quot;') : '""';
+        const safeDB = escapeHtml(t.db || '');
+
+        return `
+          <tr class="${rowClass}">
+            <td class="p-2 text-center whitespace-nowrap">
+              <div class="inline-flex space-x-1">
+                <button onclick="confirmKillProcess(${t.id}, 'query')" ${isSystem ? 'disabled' : ''} class="px-1.5 py-0.5 rounded bg-amber-950 hover:bg-amber-800 text-amber-300 text-[10px] border border-amber-800 disabled:opacity-30 disabled:cursor-not-allowed" title="Kill currently executing query only (KILL QUERY)">
+                  Kill Q
+                </button>
+                <button onclick="confirmKillProcess(${t.id}, 'connection')" ${isSelf || isSystem ? 'disabled' : ''} class="px-1.5 py-0.5 rounded bg-red-950 hover:bg-red-800 text-red-300 text-[10px] border border-red-800 disabled:opacity-30 disabled:cursor-not-allowed" title="${isSelf ? 'Cannot kill own active session connection' : 'Terminate client connection (KILL)'}">
+                  Kill C
+                </button>
+              </div>
+            </td>
+            <td class="p-2 font-bold whitespace-nowrap">
+              <span>${t.id}</span>
+              ${isSelf ? '<span class="ml-1 px-1 py-0.2 rounded bg-sky-950 text-sky-400 text-[9px] border border-sky-800">You</span>' : ''}
+              ${isSystem ? '<span class="ml-1 px-1 py-0.2 rounded bg-slate-800 text-slate-400 text-[9px]">Sys</span>' : ''}
+            </td>
+            <td class="p-2 truncate max-w-[100px]" title="${escapeHtml(t.user)}">${escapeHtml(t.user)}</td>
+            <td class="p-2 text-slate-400 truncate max-w-[130px]" title="${escapeHtml(t.host)}">${escapeHtml(t.host)}</td>
+            <td class="p-2 text-sky-300 truncate max-w-[100px]" title="${escapeHtml(t.db)}">${escapeHtml(t.db || '-')}</td>
+            <td class="p-2 text-slate-300 whitespace-nowrap">${escapeHtml(t.command)}</td>
+            <td class="p-2 text-right font-bold whitespace-nowrap ${isCritical ? 'text-red-400' : (isWarning ? 'text-amber-400' : 'text-slate-300')}">${t.time}s</td>
+            <td class="p-2 text-slate-400 text-[11px] truncate max-w-[150px]" title="${escapeHtml(t.state)}">${escapeHtml(t.state || '-')}</td>
+            <td class="p-2 font-mono text-[11px] text-slate-300">
+              ${hasQuery ? `
+                <div class="flex items-start justify-between space-x-2">
+                  <div class="truncate max-w-[260px] select-all cursor-text text-slate-200" title="${escapeHtml(t.info)}">${escapeHtml(t.info)}</div>
+                  <div class="inline-flex space-x-1 flex-shrink-0">
+                    <button onclick="explainSpecificQuery(${safeSQL}, '${safeDB}')" class="px-1.5 py-0.5 rounded bg-sky-950/80 hover:bg-sky-800 text-sky-300 text-[10px] border border-sky-800 transition" title="Explain query execution plan">⚡ Explain</button>
+                    <button onclick="sendProcessQueryToEditor(${safeSQL})" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] border border-slate-700 transition" title="Open SQL in new query editor tab">📝 To Tab</button>
+                    <button onclick="sendProcessQueryToAI(${safeSQL}, '${safeDB}')" class="px-1.5 py-0.5 rounded bg-purple-950/80 hover:bg-purple-800 text-purple-300 text-[10px] border border-purple-800 transition" title="Ask AI Copilot to analyze and optimize query">🤖 AI</button>
+                    <button onclick="saveProcessQueryToNotes(${safeSQL}, '${safeDB}')" class="px-1.5 py-0.5 rounded bg-amber-950/80 hover:bg-amber-800 text-amber-300 text-[10px] border border-amber-800 transition" title="Save query to table knowledge runbook">📑 Catatan</button>
+                    <button onclick="copyAuditSQL(${safeSQL})" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white text-[10px] border border-slate-700 transition" title="Copy SQL statement">📋</button>
+                  </div>
+                </div>
+              ` : `<span class="text-slate-500 italic">${escapeHtml(t.info || (t.command === 'Sleep' ? 'Idle connection (Sleep)' : '-'))}</span>`}
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    async function confirmKillProcess(threadId, mode) {
+      const modeLabel = mode === 'connection' ? 'KILL CONNECTION' : 'KILL QUERY';
+      const ok = await showNativeConfirm(`Are you sure you want to execute ${modeLabel} for thread #${threadId}?`, `Confirm ${modeLabel}`);
+      if (!ok) return;
+      await doKillProcess(threadId, mode);
+    }
+
+    async function doKillProcess(threadId, mode) {
+      if (!activeConnection) return;
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/kill`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ thread_id: threadId, mode: mode })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          showNativeAlert('Kill action failed: ' + (data.error || res.statusText), 'Kill Error');
+          return;
+        }
+        await fetchProcesslist(true);
+      } catch (err) {
+        showNativeAlert('Kill action failed: ' + err.message, 'Kill Error');
+      }
+    }
+
+    async function explainSpecificQuery(sql, dbName) {
+      if (!activeConnection || !sql) return;
+      const currentDb = dbName || schemaCatalogCache?.database_name || activeConnection.database_name || '';
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/explain`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sql, database: currentDb })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          showNativeAlert(data.error || 'Failed to explain query plan', 'Explain Error');
+          return;
+        }
+        openImpactModal(data, sql);
+      } catch (err) {
+        showNativeAlert('Explain request failed: ' + err.message, 'Network Error');
+      }
+    }
+
+    function sendProcessQueryToEditor(sql) {
+      if (!sql) return;
+      addNewQueryTab();
+      setEditorSQL(sql);
+      showNativeAlert('Query loaded into a new Query Editor tab.', 'Opened in Editor');
+    }
+
+    async function sendProcessQueryToAI(sql, dbName) {
+      if (!sql) return;
+      const aiSidebar = document.getElementById('ai-sidebar');
+      if (aiSidebar && aiSidebar.classList.contains('hidden')) {
+        toggleAISidebar();
+      }
+      const promptInput = document.getElementById('ai-prompt-input');
+      if (!promptInput) return;
+
+      const promptTemplate = `Tolong analisis query dari Processlist ini dan berikan saran optimasi serta indeks:\n\n\`\`\`sql\n${sql}\n\`\`\``;
+
+      // Jika kotak input AI sedang berisi teks, jangan langsung overwrite; konfirmasi terlebih dahulu
+      if (promptInput.value && promptInput.value.trim().length > 0) {
+        const confirmReplace = await showNativeConfirm(
+          'Kotak input AI Copilot saat ini sedang berisi draf teks Anda.\n\nApakah Anda ingin menimpa (replace) teks tersebut dengan analisis query Processlist ini?\n\n(Pilih OK untuk Timpa, atau Cancel untuk membatalkan dan mempertahankan draf Anda)',
+          'Konfirmasi Input AI'
+        );
+        if (!confirmReplace) return;
+      }
+
+      promptInput.value = promptTemplate;
+      promptInput.focus();
+      promptInput.setSelectionRange(promptInput.value.length, promptInput.value.length);
+      showNativeAlert('Query berhasil dimasukkan ke kotak input AI Copilot. Silakan tinjau dan klik Send.', 'Draf AI Siap');
+    }
+
+    function saveProcessQueryToNotes(sql, dbName) {
+      if (!sql) return;
+      const title = 'Query Analisis (Processlist' + (dbName ? ` - ${dbName}` : '') + ')';
+      saveToInternalNotes(title, '```sql\n' + sql + '\n```');
+    }
+
+    // --- Session Audit Log Drawer ---
+    let auditLogsCache = [];
+
+    function toggleAuditDrawer(force) {
+      const drawer = document.getElementById('audit-drawer');
+      if (!drawer) return;
+      const isHidden = drawer.classList.contains('hidden');
+      const shouldOpen = force !== undefined ? force : isHidden;
+      if (shouldOpen) {
+        drawer.classList.remove('hidden');
+        loadAuditLogs();
+      } else {
+        drawer.classList.add('hidden');
+      }
+    }
+
+    async function loadAuditLogs() {
+      if (!activeConnection) return;
+      const searchEl = document.getElementById('audit-search-input');
+      const search = searchEl ? searchEl.value.trim() : '';
+      try {
+        const url = `/api/session/${activeConnection.id}/audit-logs?limit=200${search ? '&search=' + encodeURIComponent(search) : ''}`;
+        const res = await apiFetch(url);
+        if (!res.ok) return;
+        const data = await res.json();
+        auditLogsCache = data.logs || [];
+        const countEl = document.getElementById('audit-total-count');
+        if (countEl) countEl.textContent = `(${data.total || 0} entries)`;
+        renderAuditLogsUI();
+      } catch (err) {
+        console.error('Failed to load audit logs:', err);
+      }
+    }
+
+    function renderAuditLogsUI() {
+      const tbody = document.getElementById('audit-tbody');
+      if (!tbody) return;
+
+      if (!auditLogsCache || auditLogsCache.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="p-8 text-center text-slate-500 italic">No query history records found.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = auditLogsCache.map(l => {
+        const dt = new Date(l.executed_at);
+        const timeStr = isNaN(dt.getTime()) ? l.executed_at : dt.toLocaleTimeString();
+        const isErr = !!l.error;
+
+        return `
+          <tr class="hover:bg-slate-800/40 transition">
+            <td class="p-2 text-slate-400 whitespace-nowrap text-[10px]">${escapeHtml(timeStr)}</td>
+            <td class="p-2 text-right text-slate-300 font-mono text-[11px] whitespace-nowrap">${l.duration_ms} ms</td>
+            <td class="p-2 text-right text-slate-400 font-mono text-[11px] whitespace-nowrap">${l.rows_affected}</td>
+            <td class="p-2 text-center whitespace-nowrap">
+              ${isErr 
+                ? `<span class="px-1.5 py-0.5 rounded bg-red-950 text-red-400 border border-red-800 text-[10px]" title="${escapeHtml(l.error)}">ERR</span>`
+                : `<span class="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px]">OK</span>`}
+            </td>
+            <td class="p-2 font-mono text-[11px] text-slate-200 truncate max-w-xl" title="${escapeHtml(l.query_sql)}">
+              ${escapeHtml(l.query_sql)}
+            </td>
+            <td class="p-2 text-center whitespace-nowrap">
+              <div class="inline-flex space-x-1">
+                <button onclick="copyAuditSQL(${JSON.stringify(l.query_sql).replace(/"/g, '&quot;')})" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] border border-slate-700" title="Copy SQL statement">Copy</button>
+                <button onclick="insertAuditSQLToEditor(${JSON.stringify(l.query_sql).replace(/"/g, '&quot;')})" class="px-2 py-0.5 rounded bg-app-accent hover:bg-sky-400 text-slate-950 font-bold text-[10px]" title="Insert into Query Editor">To Editor</button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function copyAuditSQL(sql) {
+      navigator.clipboard.writeText(sql).then(() => {
+        showNativeAlert('SQL statement copied to clipboard.', 'Copied');
+      });
+    }
+
+    function insertAuditSQLToEditor(sql) {
+      setEditorSQL(sql);
+      toggleAuditDrawer(false);
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (activeTab && (activeTab.isTableViewer || activeTab.isProcesslist)) {
+        const queryTab = tabs.find(t => !t.isTableViewer && !t.isProcesslist);
+        if (queryTab) switchTab(queryTab.id);
+        else addNewQueryTab();
+      }
+    }
+
+    async function clearAuditLogs() {
+      if (!activeConnection) return;
+      const ok = await showNativeConfirm('Are you sure you want to permanently clear all query execution logs for this session?', 'Clear Audit History');
+      if (!ok) return;
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/audit-logs`, { method: 'DELETE' });
+        if (res.ok) {
+          loadAuditLogs();
+        }
+      } catch (err) {
+        showNativeAlert('Failed to clear audit logs: ' + err.message, 'Clear Error');
+      }
+    }
+
+    function exportAuditLogsCSV() {
+      if (!auditLogsCache || auditLogsCache.length === 0) {
+        showNativeAlert('No audit logs available to export.', 'Export CSV');
+        return;
+      }
+      const headers = ['Executed At', 'Duration (ms)', 'Rows Affected', 'Status', 'Error', 'SQL'];
+      const rows = auditLogsCache.map(l => [
+        `"${String(l.executed_at).replace(/"/g, '""')}"`,
+        l.duration_ms,
+        l.rows_affected,
+        l.error ? 'ERROR' : 'OK',
+        `"${String(l.error || '').replace(/"/g, '""')}"`,
+        `"${String(l.query_sql || '').replace(/"/g, '""')}"`
+      ]);
+      const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `session-audit-logs-${Date.now()}.csv`;
+      a.click();
     }
 
     function openTableViewer(tableName) {
@@ -4584,9 +5239,17 @@
           }
           await refreshSchema();
         }
+        const drawer = document.getElementById('audit-drawer');
+        if (drawer && !drawer.classList.contains('hidden')) {
+          setTimeout(loadAuditLogs, 150);
+        }
       } catch (err) {
         setQueryRunning(false);
         renderQueryErrorBanner(sql, err.message);
+        const drawer = document.getElementById('audit-drawer');
+        if (drawer && !drawer.classList.contains('hidden')) {
+          setTimeout(loadAuditLogs, 150);
+        }
       }
     }
 
@@ -5474,7 +6137,8 @@
       }
 
       switchTab(notesTab.id);
-      showNativeAlert('📝 Note saved to Notes.md!', 'Notes');
+      setEditorSQL(notesTab.sql);
+      showNativeAlert('📝 Catatan berhasil disimpan ke Notes.md!', 'Internal Notes');
     }
 
     // --- Chat Session & History Management ---
@@ -5864,8 +6528,8 @@
       }
     }
 
-    async function saveConnectionFromModal(e) {
-      e.preventDefault();
+    async function saveConnection(e) {
+      if (e) e.preventDefault();
       const id = document.getElementById('modal-conn-id').value;
       const driver = document.getElementById('modal-conn-driver').value;
       let host = document.getElementById('modal-conn-host').value.trim();
@@ -5892,8 +6556,13 @@
           body: JSON.stringify(conn)
         });
         if (res.ok) {
+          const saved = await res.json();
           closeConnModal();
           await loadConnections();
+          if (saved && saved.id) {
+            await selectConnection(saved.id);
+          }
+          showNativeAlert(`Connection "${conn.name}" saved and activated successfully.`, 'Connection Saved');
         } else {
           const data = await res.json();
           showNativeAlert('Failed to save connection: ' + (data.error || res.statusText), 'Save Connection');
@@ -5902,6 +6571,7 @@
         showNativeAlert('Failed to save connection: ' + err.message, 'Save Connection');
       }
     }
+    const saveConnectionFromModal = saveConnection;
 
     async function viewTableDDL(tableName) {
       if (!activeConnection) return;

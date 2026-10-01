@@ -57,6 +57,7 @@ type ActiveSession struct {
 	LastActive     time.Time              `json:"last_active"`
 	guard          *safety.SafetyGuard
 	backupMgr      *safety.BackupManager
+	vault          *vault.Vault
 	runningQueries map[string]context.CancelFunc
 	mu             sync.RWMutex
 }
@@ -135,6 +136,7 @@ func (sm *SessionManager) ConnectSession(ctx context.Context, connectionID strin
 		LastActive:     time.Now(),
 		guard:          sm.guard,
 		backupMgr:      sm.backupMgr,
+		vault:          sm.vault,
 		runningQueries: make(map[string]context.CancelFunc),
 	}
 
@@ -280,6 +282,29 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		s.mu.Unlock()
 	}()
 
+	var execErr error
+	var rowsAffected int64
+	defer func() {
+		if s.vault != nil && (inspection == nil || !inspection.RequiresChallenge || req.Confirmed) {
+			dur := time.Since(start).Milliseconds()
+			errStr := ""
+			if execErr != nil {
+				errStr = execErr.Error()
+			}
+			go func() {
+				_ = s.vault.RecordAuditLog(&vault.AuditLogRecord{
+					SessionID:    s.ID,
+					ConnectionID: s.ConnectionID,
+					QuerySQL:     trimmedSQL,
+					DurationMs:   dur,
+					RowsAffected: rowsAffected,
+					Error:        errStr,
+					ExecutedAt:   start,
+				})
+			}()
+		}
+	}()
+
 	// 5. Route to Exec vs QueryStream
 	isSelect := strings.HasPrefix(upperSQL, "SELECT") || strings.HasPrefix(upperSQL, "SHOW") || strings.HasPrefix(upperSQL, "DESC") || strings.HasPrefix(upperSQL, "EXPLAIN")
 
@@ -287,8 +312,10 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		// Mutation execution
 		execRes, err := s.Session.Exec(execCtx, trimmedSQL)
 		if err != nil {
+			execErr = err
 			return nil, err
 		}
+		rowsAffected = execRes.RowsAffected
 		return &ExecuteResponse{
 			Type:               "exec",
 			RowsAffected:       execRes.RowsAffected,
@@ -303,6 +330,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	// Select stream execution with implicit safe limit (1,000 rows)
 	stream, err := s.Session.QueryStream(execCtx, trimmedSQL, 1000)
 	if err != nil {
+		execErr = err
 		return nil, err
 	}
 	defer stream.Close()
@@ -320,6 +348,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		}
 	}
 
+	rowsAffected = int64(len(allRows))
 	return &ExecuteResponse{
 		Type:        "query",
 		Columns:     cols,
@@ -343,6 +372,28 @@ func (s *ActiveSession) CancelQuery(ctx context.Context, queryID string) error {
 		return s.Session.CancelQuery(ctx, queryID)
 	}
 	return nil
+}
+
+// GetProcesslist retrieves active threads and lock wait graph from the active driver.
+func (s *ActiveSession) GetProcesslist(ctx context.Context) (*driver.ProcesslistResult, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.Session == nil {
+		return nil, driver.ErrSessionClosed
+	}
+	return s.Session.GetProcesslist(ctx)
+}
+
+// KillProcess terminates an active query or client connection out-of-band.
+func (s *ActiveSession) KillProcess(ctx context.Context, threadID int64, killConnection bool) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.Session == nil {
+		return driver.ErrSessionClosed
+	}
+	return s.Session.KillProcess(ctx, threadID, killConnection)
 }
 
 // Stream executes a non-destructive query, returning a chunked RowStream.
