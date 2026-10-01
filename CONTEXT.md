@@ -266,6 +266,10 @@ _Avoid_: SQL runner, dump importer, script player
 An interactive real-time database thread and connection monitor featuring slow-query threshold alerts and one-click out-of-band query or session termination (`KILL QUERY` / `KILL CONNECTION`).
 _Avoid_: Process monitor, task list, thread viewer
 
+**Process Inspector Modal**:
+A dedicated diagnostic dialog displaying complete thread execution metadata, formatted full SQL statement text without truncation, 1-click clipboard actions, and integrated operational shortcuts (`EXPLAIN`, editor transfer, AI review, and termination).
+_Avoid_: Process details popup, thread viewer window, query popover
+
 **Table Diagnostics**:
 A physical storage inspection module providing exact data length, index length, and fragmentation overhead statistics alongside one-click table maintenance actions (`OPTIMIZE TABLE`, `ANALYZE TABLE`, `CHECK TABLE`).
 _Avoid_: Table health, storage checker, disk tool
