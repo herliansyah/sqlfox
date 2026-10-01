@@ -357,13 +357,32 @@
 
         <!-- Grid Toolbar (Data Mode) -->
         <div id="grid-toolbar" class="h-8 bg-app-surface/40 border-b border-app-border px-3 flex items-center justify-between text-xs text-slate-400">
-          <div class="flex items-center space-x-3">
+          <div class="flex items-center space-x-2.5">
             <span id="grid-result-stats">0 rows</span>
             <span id="grid-limit-badge" class="bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded text-[10px]">Safe Limit: 1,000</span>
+
+            <!-- Staged Apply/Discard Buttons -->
+            <button id="btn-grid-apply" onclick="applyGridChanges()" class="hidden px-2.5 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center space-x-1 shadow transition">
+              <span>✓ Apply (<span id="grid-staged-count">0</span>)</span>
+            </button>
+            <button id="btn-grid-discard" onclick="discardGridChanges()" class="hidden px-2 py-0.5 rounded bg-slate-800 hover:bg-rose-900/60 text-slate-300 hover:text-rose-200 border border-slate-700 text-xs flex items-center space-x-1 transition">
+              <span>✕ Discard</span>
+            </button>
           </div>
 
-          <!-- Export & Keyset Pagination Controls -->
+          <!-- Edit Mode Toggle & Keyset / Export Controls -->
           <div class="flex items-center space-x-2">
+            <!-- Edit Mode Selector -->
+            <div class="flex items-center space-x-1 bg-slate-900 border border-slate-800 px-2 py-0.5 rounded text-[11px]" id="grid-edit-mode-container">
+              <span class="text-slate-400 text-[10px]">Edit:</span>
+              <button id="btn-grid-mode-staged" onclick="setGridEditMode('staged')" class="px-1.5 py-0.5 rounded text-[10px] font-medium transition" title="Manual Apply: Staged changes until you click Apply">📝 Staged</button>
+              <button id="btn-grid-mode-auto" onclick="setGridEditMode('auto')" class="px-1.5 py-0.5 rounded text-[10px] font-medium transition" title="Auto-commit: Persist directly on blur/Enter">⚡ Auto</button>
+              <label class="flex items-center space-x-1 pl-1.5 border-l border-slate-700 cursor-pointer ml-0.5" title="Ask confirmation before saving">
+                <input type="checkbox" id="grid-confirm-checkbox" onchange="toggleGridConfirmSave(this.checked)" class="accent-sky-500 w-3 h-3 cursor-pointer">
+                <span class="text-[10px] text-slate-400 select-none">Confirm</span>
+              </label>
+            </div>
+
             <div id="keyset-pagination" class="hidden flex items-center space-x-1">
               <button onclick="loadPreviousPage()" class="hover:bg-slate-800 px-2 py-0.5 rounded border border-slate-700">◀ Prev</button>
               <button onclick="loadNextPage()" class="hover:bg-slate-800 px-2 py-0.5 rounded border border-slate-700">Next ▶</button>
@@ -924,12 +943,13 @@
   </div>
 
   <!-- 6. Command Palette Modal (Ctrl+K) -->
-  <div id="command-palette-modal" class="fixed inset-0 bg-black/70 flex items-start justify-center pt-24 p-4 z-50 hidden">
+  <div id="command-palette-modal" class="fixed inset-0 bg-black/70 flex items-start justify-center pt-24 p-4 z-50 hidden" onclick="if(event.target === this) closeCommandPalette()">
     <div class="bg-slate-900 border border-app-border w-full max-w-xl rounded-lg shadow-2xl overflow-hidden">
       <div class="p-3 border-b border-app-border flex items-center space-x-2">
         <span>🔍</span>
         <input type="text" id="palette-input" onkeyup="filterPaletteActions(event)" placeholder="Type a command or table name..." class="w-full bg-transparent text-white outline-none text-sm">
         <kbd class="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400">Esc</kbd>
+        <button onclick="closeCommandPalette()" class="text-slate-400 hover:text-white text-xs pl-1" title="Close">✕</button>
       </div>
       <div id="palette-actions-list" class="max-h-72 overflow-y-auto p-2 text-xs divide-y divide-slate-800/50">
         <!-- Palette items injected by JS -->
@@ -1300,6 +1320,8 @@
         <button onclick="submitCreateDatabase()" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-4 py-1.5 rounded text-xs transition">Create Database</button>
       </div>
     </div>
+  </dialog>
+
   <!-- 15. Query Snippets Manager Dialog (HTML5 <dialog>) -->
   <dialog id="snippets-manager-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-0 outline-none max-w-3xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm overflow-hidden">
     <div class="flex flex-col max-h-[85vh]">
@@ -1940,19 +1962,22 @@
         const activeDb = (schema.database_name || targetDB || 'default').toLowerCase();
         multiDBCatalogCache[activeDb] = schema;
 
-        // Lazily prefetch schemas of other databases in background
+        // Lazily prefetch schemas of other databases in background sequentially
         if (schema.databases && Array.isArray(schema.databases)) {
-          schema.databases.forEach(db => {
-            const lower = db.toLowerCase();
-            if (lower !== activeDb && !multiDBCatalogCache[lower]) {
-              apiFetch(`/api/session/${connId}/schema?db=${encodeURIComponent(db)}`)
-                .then(r => r.ok ? r.json() : null)
-                .then(otherSchema => {
+          const queue = schema.databases.filter(d => d.toLowerCase() !== activeDb && !multiDBCatalogCache[d.toLowerCase()]);
+          (async () => {
+            for (const db of queue) {
+              const lower = db.toLowerCase();
+              if (multiDBCatalogCache[lower]) continue;
+              try {
+                const r = await apiFetch(`/api/session/${connId}/schema?db=${encodeURIComponent(db)}`);
+                if (r.ok) {
+                  const otherSchema = await r.json();
                   if (otherSchema) multiDBCatalogCache[lower] = otherSchema;
-                })
-                .catch(() => {});
+                }
+              } catch (_) {}
             }
-          });
+          })();
         }
 
         renderSchemaTree(schema);
@@ -3091,11 +3116,14 @@
 
       const activeTab = tabs.find(t => t.id === activeTabId);
       const modeTabs = document.getElementById('table-mode-tabs');
+      const editorContainer = document.getElementById('editor-container');
       if (activeTab && activeTab.isTableViewer) {
         if (modeTabs) modeTabs.classList.remove('hidden');
+        if (editorContainer) editorContainer.classList.add('hidden');
         setTableMode(activeTab.tableMode || 'data', false);
       } else {
         if (modeTabs) modeTabs.classList.add('hidden');
+        if (editorContainer) editorContainer.classList.remove('hidden');
         setTableMode('data', false);
         if (activeTab) {
           setEditorSQL(activeTab.sql || '');
@@ -3152,13 +3180,15 @@
     }
 
     function openTableViewer(tableName) {
-      let tab = tabs.find(t => t.tableName === tableName);
+      const activeDb = (schemaCatalogCache && schemaCatalogCache.database_name) || '';
+      let tab = tabs.find(t => t.tableName === tableName && (!t.database || t.database === activeDb));
       if (!tab) {
         tab = {
-          id: 'tab-tbl-' + tableName,
+          id: 'tab-tbl-' + (activeDb ? activeDb + '-' : '') + tableName,
           title: tableName,
           isTableViewer: true,
           tableName: tableName,
+          database: activeDb,
           tableMode: 'data',
           sql: `SELECT * FROM \`${tableName}\` LIMIT 50;`
         };
@@ -3226,7 +3256,9 @@
 
 
     function renderTableStructure(tableName) {
-      const tableMeta = (schemaCatalogCache?.tables || []).find(t => t.name === tableName);
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const targetCatalog = (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
+      const tableMeta = (targetCatalog?.tables || []).find(t => t.name === tableName);
       const nameEl = document.getElementById('structure-table-name');
       if (nameEl) nameEl.textContent = tableName;
       if (!tableMeta) {
@@ -3619,7 +3651,9 @@
 
     // --- Indexes & Foreign Keys View Handlers ---
     function renderTableIndexes(tableName) {
-      const tableMeta = (schemaCatalogCache?.tables || []).find(t => t.name === tableName);
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const targetCatalog = (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
+      const tableMeta = (targetCatalog?.tables || []).find(t => t.name === tableName);
       const tbody = document.getElementById('indexes-tbody');
       if (!tableMeta || !tableMeta.indexes || tableMeta.indexes.length === 0) {
         tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-slate-500">No custom indexes on this table.</td></tr>';
@@ -3692,7 +3726,9 @@
     }
 
     function renderTableFKs(tableName) {
-      const tableMeta = (schemaCatalogCache?.tables || []).find(t => t.name === tableName);
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const targetCatalog = (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
+      const tableMeta = (targetCatalog?.tables || []).find(t => t.name === tableName);
       const tbody = document.getElementById('foreign-keys-tbody');
       if (!tableMeta || !tableMeta.foreign_keys || tableMeta.foreign_keys.length === 0) {
         tbody.innerHTML = '<tr><td colspan="6" class="p-4 text-center text-slate-500">No foreign keys configured on this table.</td></tr>';
@@ -3785,7 +3821,17 @@
       const pre = document.getElementById('table-raw-ddl');
       pre.textContent = 'Loading DDL...';
       try {
-        const res = await apiFetch(`/api/session/${activeConnection.id}/ddl/${tableName}`);
+        const activeTab = tabs.find(t => t.id === activeTabId);
+        const dbName = (activeTab && activeTab.database) || (schemaCatalogCache && schemaCatalogCache.database_name) || '';
+        const url = dbName
+          ? `/api/session/${activeConnection.id}/ddl/${encodeURIComponent(tableName)}?db=${encodeURIComponent(dbName)}`
+          : `/api/session/${activeConnection.id}/ddl/${encodeURIComponent(tableName)}`;
+        const res = await apiFetch(url);
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          pre.textContent = 'Failed to load DDL: ' + (errData.error || res.statusText);
+          return;
+        }
         const data = await res.json();
         pre.textContent = data.ddl || '-- No DDL available';
       } catch (err) {
@@ -3805,7 +3851,8 @@
 
     async function loadAndRenderTableNote(tableName) {
       if (!activeConnection) return;
-      const dbName = currentDatabase || activeConnection.database_name || '';
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const dbName = (activeTab && activeTab.database) || (schemaCatalogCache && schemaCatalogCache.database_name) || (activeConnection && activeConnection.database_name) || '';
       const textarea = document.getElementById('table-notes-textarea');
       const updatedEl = document.getElementById('table-note-updated');
       const statusEl = document.getElementById('table-note-status');
@@ -4817,10 +4864,88 @@
     }
 
     // --- Data Grid Rendering & Inline Edit ---
+    let activeEditCell = null; // { td, rIdx, cIdx, pkCol, tableName, originalVal, input, isCommitting }
+    let stagedEdits = new Map(); // key: `${tableName}:${rIdx}:${cIdx}`, val: { rIdx, cIdx, db, table, colName, pkCol, pkVal, oldVal, newVal }
+    let gridEditMode = localStorage.getItem('sqlfox_grid_edit_mode') || 'staged'; // 'staged' | 'auto'
+    let gridConfirmSave = localStorage.getItem('sqlfox_grid_confirm_save') !== 'false';
+    let activeGridTable = null;
+    let activeGridDB = null;
+    let activeGridPKCol = null;
+
+    function setGridEditMode(mode) {
+      gridEditMode = mode;
+      localStorage.setItem('sqlfox_grid_edit_mode', mode);
+      updateGridEditModeUI();
+      updateStagedEditsUI();
+    }
+
+    function toggleGridConfirmSave(checked) {
+      gridConfirmSave = checked;
+      localStorage.setItem('sqlfox_grid_confirm_save', String(checked));
+    }
+
+    function updateGridEditModeUI() {
+      const btnStaged = document.getElementById('btn-grid-mode-staged');
+      const btnAuto = document.getElementById('btn-grid-mode-auto');
+      const chkConfirm = document.getElementById('grid-confirm-checkbox');
+
+      if (chkConfirm) chkConfirm.checked = gridConfirmSave;
+
+      if (btnStaged && btnAuto) {
+        if (gridEditMode === 'auto') {
+          btnAuto.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500 text-slate-950 transition shadow';
+          btnStaged.className = 'px-1.5 py-0.5 rounded text-[10px] font-medium text-slate-400 hover:text-white transition';
+        } else {
+          btnStaged.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-500 text-slate-950 transition shadow';
+          btnAuto.className = 'px-1.5 py-0.5 rounded text-[10px] font-medium text-slate-400 hover:text-white transition';
+        }
+      }
+    }
+
+    function updateStagedEditsUI() {
+      const applyBtn = document.getElementById('btn-grid-apply');
+      const discardBtn = document.getElementById('btn-grid-discard');
+      const countSpan = document.getElementById('grid-staged-count');
+
+      const count = stagedEdits.size;
+      if (countSpan) countSpan.textContent = count;
+
+      if (applyBtn && discardBtn) {
+        if (count > 0 && gridEditMode === 'staged') {
+          applyBtn.classList.remove('hidden');
+          discardBtn.classList.remove('hidden');
+        } else {
+          applyBtn.classList.add('hidden');
+          discardBtn.classList.add('hidden');
+        }
+      }
+    }
+
     async function loadTableRows(tableName) {
       if (!activeConnection) return;
       try {
-        const res = await apiFetch(`/api/session/${activeConnection.id}/table/${tableName}/rows?limit=50`);
+        const activeTab = tabs.find(t => t.id === activeTabId);
+        const dbName = (activeTab && activeTab.database) || (schemaCatalogCache && schemaCatalogCache.database_name) || '';
+        activeGridTable = tableName;
+        activeGridDB = dbName;
+        stagedEdits.clear();
+        updateStagedEditsUI();
+        activeEditCell = null;
+
+        const url = dbName
+          ? `/api/session/${activeConnection.id}/table/${encodeURIComponent(tableName)}/rows?limit=50&db=${encodeURIComponent(dbName)}`
+          : `/api/session/${activeConnection.id}/table/${encodeURIComponent(tableName)}/rows?limit=50`;
+        const res = await apiFetch(url);
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          console.error('Failed to load rows:', errData);
+          renderGridResults([], [], null, tableName);
+          const tbody = document.getElementById('grid-tbody');
+          if (tbody) {
+            tbody.innerHTML = `<tr><td class="p-8 text-center text-app-danger font-mono text-xs">Failed to load data: ${escapeHtml(errData.error || res.statusText)}</td></tr>`;
+          }
+          return;
+        }
         const data = await res.json();
         renderGridResults(data.columns, data.rows, data.pk_col, tableName);
       } catch (err) {
@@ -4831,9 +4956,17 @@
     function renderGridResults(cols, rows, pkCol = null, tableName = null) {
       currentColumns = cols || [];
       currentResults = rows || [];
+      activeGridPKCol = pkCol;
+      activeGridTable = tableName;
+      activeEditCell = null;
+
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      activeGridDB = (activeTab && activeTab.database) || (schemaCatalogCache && schemaCatalogCache.database_name) || '';
 
       const thead = document.getElementById('grid-thead');
       const tbody = document.getElementById('grid-tbody');
+      updateGridEditModeUI();
+      updateStagedEditsUI();
 
       if (!cols || cols.length === 0) {
         thead.innerHTML = '<tr><th class="p-2 pl-4">No columns</th></tr>';
@@ -4859,13 +4992,37 @@
 
       tbody.innerHTML = rows.map((row, rIdx) => `
         <tr class="hover:bg-slate-800/40 transition">
-          ${row.map((val, cIdx) => `
-            <td class="p-1.5 px-3 border-r border-slate-800/40 truncate max-w-xs grid-cell group" ondblclick="startInlineEdit(this, ${rIdx}, ${cIdx}, '${pkCol || ''}', '${tableName || ''}')">
-              <span class="cell-val">${val === null ? '<span class="text-slate-500 italic">NULL</span>' : escapeHtml(String(val))}</span>
-            </td>
-          `).join('')}
+          ${row.map((val, cIdx) => {
+            const stagedKey = `${tableName || ''}:${rIdx}:${cIdx}`;
+            const staged = stagedEdits.get(stagedKey);
+            const displayVal = staged ? staged.newVal : val;
+            const isDirty = Boolean(staged);
+            const cellClass = isDirty
+              ? 'p-1.5 px-3 border border-amber-600/60 bg-amber-950/40 text-amber-200 truncate max-w-xs grid-cell group select-text cursor-default transition'
+              : 'p-1.5 px-3 border-r border-slate-800/40 text-slate-200 truncate max-w-xs grid-cell group select-text cursor-default transition';
+            return `
+              <td class="${cellClass}"
+                  data-row="${rIdx}" data-col="${cIdx}"
+                  onclick="selectGridCell(this, ${rIdx}, ${cIdx})"
+                  ondblclick="startInlineEdit(this, ${rIdx}, ${cIdx}, '${pkCol || ''}', '${tableName || ''}')">
+                <span class="cell-val">${displayVal === null ? '<span class="text-slate-500 italic">NULL</span>' : escapeHtml(String(displayVal))}</span>
+                ${isDirty ? '<span class="ml-1 text-[9px] text-amber-400 font-bold" title="Unapplied staged change">●</span>' : ''}
+              </td>
+            `;
+          }).join('')}
         </tr>
       `).join('');
+    }
+
+    function selectGridCell(td, rIdx, cIdx) {
+      if (activeEditCell) {
+        if (activeEditCell.td === td) return;
+        commitInlineEdit(activeEditCell, true);
+      }
+      document.querySelectorAll('#grid-tbody td.cell-selected').forEach(el => {
+        el.classList.remove('cell-selected', 'ring-1', 'ring-sky-400', 'bg-sky-950/20');
+      });
+      td.classList.add('cell-selected', 'ring-1', 'ring-sky-400', 'bg-sky-950/20');
     }
 
     function startInlineEdit(td, rIdx, cIdx, pkCol, tableName) {
@@ -4873,41 +5030,261 @@
         showNativeAlert('Session is in READ-ONLY mode. Unlock first.', 'Read-Only Mode');
         return;
       }
+      if (!pkCol || !tableName) {
+        showNativeAlert('Inline editing requires a primary key column on the table.', 'Edit Cell');
+        return;
+      }
 
-      const currentVal = currentResults[rIdx][cIdx];
-      const col = currentColumns[cIdx];
+      if (activeEditCell) {
+        if (activeEditCell.td === td) {
+          if (activeEditCell.input) activeEditCell.input.focus();
+          return;
+        }
+        commitInlineEdit(activeEditCell, true);
+      }
+
+      const stagedKey = `${tableName}:${rIdx}:${cIdx}`;
+      const staged = stagedEdits.get(stagedKey);
+      const originalVal = currentResults[rIdx][cIdx];
+      const currentVal = staged ? staged.newVal : originalVal;
+
       td.innerHTML = `
-        <input type="text" value="${currentVal === null ? '' : escapeHtml(String(currentVal))}" class="w-full bg-slate-950 text-sky-200 border border-app-accent p-0.5 rounded outline-none font-mono text-xs">
+        <input type="text" value="${currentVal === null ? '' : escapeHtml(String(currentVal))}"
+               class="w-full bg-slate-950 text-sky-200 border border-sky-400 px-1 py-0.5 rounded outline-none font-mono text-xs ring-2 ring-sky-500/40 shadow-inner">
       `;
       const input = td.querySelector('input');
+      const editInfo = {
+        td,
+        rIdx,
+        cIdx,
+        pkCol,
+        tableName,
+        originalVal,
+        input,
+        isCommitting: false
+      };
+      activeEditCell = editInfo;
+
       input.focus();
+      input.select();
 
       input.addEventListener('keydown', async (e) => {
         if (e.key === 'Enter') {
-          const newVal = input.value;
-          td.innerHTML = escapeHtml(newVal);
-          currentResults[rIdx][cIdx] = newVal;
-
-          // Save to backend if pkCol known
-          if (pkCol && tableName) {
-            const pkIdx = currentColumns.findIndex(c => c.name === pkCol);
-            const pkVal = currentResults[rIdx][pkIdx];
-            await apiFetch(`/api/session/${activeConnection.id}/cell-edit`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                table: tableName,
-                column: col.name,
-                value: newVal,
-                pk_column: pkCol,
-                pk_value: pkVal
-              })
-            });
-          }
+          e.preventDefault();
+          commitInlineEdit(editInfo, false);
         } else if (e.key === 'Escape') {
-          td.innerHTML = escapeHtml(String(currentVal));
+          e.preventDefault();
+          cancelInlineEdit(editInfo);
+        } else if (e.key === 'Tab') {
+          e.preventDefault();
+          const nextCIdx = e.shiftKey ? cIdx - 1 : cIdx + 1;
+          commitInlineEdit(editInfo, true);
+          if (nextCIdx >= 0 && nextCIdx < currentColumns.length) {
+            const rowEl = td.parentElement;
+            const nextTd = rowEl ? rowEl.children[nextCIdx] : null;
+            if (nextTd) startInlineEdit(nextTd, rIdx, nextCIdx, pkCol, tableName);
+          }
         }
       });
+
+      input.addEventListener('blur', () => {
+        setTimeout(() => {
+          if (activeEditCell && activeEditCell.input === input && !activeEditCell.isCommitting) {
+            commitInlineEdit(activeEditCell, false);
+          }
+        }, 150);
+      });
+    }
+
+    async function commitInlineEdit(editInfo, isSwitchingCells) {
+      if (!editInfo || editInfo.isCommitting) return;
+      editInfo.isCommitting = true;
+
+      const input = editInfo.input;
+      const td = editInfo.td;
+      const rIdx = editInfo.rIdx;
+      const cIdx = editInfo.cIdx;
+      const pkCol = editInfo.pkCol;
+      const tableName = editInfo.tableName;
+      const originalVal = editInfo.originalVal;
+      const col = currentColumns[cIdx];
+
+      const newVal = input ? input.value : '';
+      const isNull = newVal === '' && (originalVal === null || (col && col.type && col.type.toLowerCase().includes('null')));
+      const effectiveVal = isNull ? null : newVal;
+      const isChanged = (originalVal === null && effectiveVal !== null) ||
+                        (originalVal !== null && String(originalVal) !== String(effectiveVal));
+
+      if (!isChanged) {
+        renderCellContent(td, rIdx, cIdx, pkCol, tableName);
+        if (activeEditCell === editInfo) activeEditCell = null;
+        return;
+      }
+
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const dbName = (activeTab && activeTab.database) || activeGridDB || '';
+
+      if (gridEditMode === 'auto') {
+        if (gridConfirmSave) {
+          const colName = col ? col.name : `Column #${cIdx}`;
+          const ok = await showNativeConfirm(`Save changes to ${tableName}.${colName} = "${newVal}"?`, 'Confirm Save');
+          if (!ok) {
+            renderCellContent(td, rIdx, cIdx, pkCol, tableName);
+            if (activeEditCell === editInfo) activeEditCell = null;
+            return;
+          }
+        }
+
+        const pkIdx = currentColumns.findIndex(c => c.name === pkCol);
+        const pkVal = currentResults[rIdx][pkIdx];
+
+        try {
+          const res = await apiFetch(`/api/session/${activeConnection.id}/cell-edit`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              database: dbName,
+              table: tableName,
+              column: col.name,
+              value: effectiveVal,
+              pk_column: pkCol,
+              pk_value: pkVal
+            })
+          });
+          if (res.ok) {
+            currentResults[rIdx][cIdx] = effectiveVal;
+            renderCellContent(td, rIdx, cIdx, pkCol, tableName);
+            td.classList.add('bg-emerald-950/40', 'border-emerald-600/60');
+            setTimeout(() => td.classList.remove('bg-emerald-950/40', 'border-emerald-600/60'), 1500);
+          } else {
+            const err = await res.json().catch(() => ({}));
+            showNativeAlert('Failed to save cell: ' + (err.error || res.statusText), 'Save Error');
+            renderCellContent(td, rIdx, cIdx, pkCol, tableName);
+          }
+        } catch (err) {
+          showNativeAlert('Network error saving cell: ' + err.message, 'Save Error');
+          renderCellContent(td, rIdx, cIdx, pkCol, tableName);
+        }
+      } else {
+        const pkIdx = currentColumns.findIndex(c => c.name === pkCol);
+        const pkVal = currentResults[rIdx][pkIdx];
+        const stagedKey = `${tableName}:${rIdx}:${cIdx}`;
+
+        stagedEdits.set(stagedKey, {
+          rIdx,
+          cIdx,
+          db: dbName,
+          table: tableName,
+          colName: col.name,
+          pkCol,
+          pkVal,
+          oldVal: originalVal,
+          newVal: effectiveVal
+        });
+
+        currentResults[rIdx][cIdx] = effectiveVal;
+        renderCellContent(td, rIdx, cIdx, pkCol, tableName);
+        updateStagedEditsUI();
+      }
+
+      if (activeEditCell === editInfo) activeEditCell = null;
+    }
+
+    function cancelInlineEdit(editInfo) {
+      if (!editInfo) return;
+      renderCellContent(editInfo.td, editInfo.rIdx, editInfo.cIdx, editInfo.pkCol, editInfo.tableName);
+      activeEditCell = null;
+    }
+
+    function renderCellContent(td, rIdx, cIdx, pkCol, tableName) {
+      const stagedKey = `${tableName}:${rIdx}:${cIdx}`;
+      const staged = stagedEdits.get(stagedKey);
+      const val = staged ? staged.newVal : currentResults[rIdx][cIdx];
+      const isDirty = Boolean(staged);
+
+      td.innerHTML = `
+        <span class="cell-val">${val === null ? '<span class="text-slate-500 italic">NULL</span>' : escapeHtml(String(val))}</span>
+        ${isDirty ? '<span class="ml-1 text-[9px] text-amber-400 font-bold" title="Unapplied staged change">●</span>' : ''}
+      `;
+
+      if (isDirty) {
+        td.className = "p-1.5 px-3 truncate max-w-xs grid-cell group select-text cursor-default transition bg-amber-950/40 border border-amber-600/60 text-amber-200";
+      } else {
+        td.className = "p-1.5 px-3 truncate max-w-xs grid-cell group select-text cursor-default transition border-r border-slate-800/40 text-slate-200";
+      }
+    }
+
+    async function applyGridChanges() {
+      if (stagedEdits.size === 0) return;
+      if (!activeConnection) return;
+
+      if (activeEditCell) {
+        await commitInlineEdit(activeEditCell, false);
+      }
+
+      const count = stagedEdits.size;
+      if (count === 0) return;
+
+      if (gridConfirmSave) {
+        const ok = await showNativeConfirm(`Apply ${count} pending change(s) to table "${activeGridTable}"?`, 'Apply Changes');
+        if (!ok) return;
+      }
+
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const dbName = (activeTab && activeTab.database) || activeGridDB || '';
+
+      const edits = Array.from(stagedEdits.values()).map(item => ({
+        database: item.db || dbName,
+        table: item.table,
+        column: item.colName,
+        value: item.newVal,
+        pk_column: item.pkCol,
+        pk_value: item.pkVal
+      }));
+
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/cell-edit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ database: dbName, edits })
+        });
+        if (res.ok) {
+          stagedEdits.clear();
+          updateStagedEditsUI();
+          showNativeAlert(`✅ Successfully applied ${edits.length} change(s)!`, 'Changes Applied');
+          if (activeGridTable) {
+            await loadTableRows(activeGridTable);
+          }
+        } else {
+          const err = await res.json().catch(() => ({}));
+          showNativeAlert('Failed to apply changes: ' + (err.error || res.statusText), 'Apply Error');
+        }
+      } catch (err) {
+        showNativeAlert('Network error applying changes: ' + err.message, 'Apply Error');
+      }
+    }
+
+    async function discardGridChanges() {
+      if (stagedEdits.size === 0) return;
+
+      if (activeEditCell) {
+        cancelInlineEdit(activeEditCell);
+      }
+
+      if (gridConfirmSave) {
+        const ok = await showNativeConfirm(`Discard all ${stagedEdits.size} unapplied change(s)?`, 'Discard Changes');
+        if (!ok) return;
+      }
+
+      for (const item of stagedEdits.values()) {
+        currentResults[item.rIdx][item.cIdx] = item.oldVal;
+      }
+      stagedEdits.clear();
+      updateStagedEditsUI();
+
+      if (activeGridTable) {
+        renderGridResults(currentColumns, currentResults, activeGridPKCol, activeGridTable);
+      }
     }
 
     // --- ReadOnly Mode ---
@@ -5572,7 +5949,15 @@
       const filterInput = document.getElementById('snippets-filter-input');
       if (filterInput) filterInput.value = '';
       renderSnippetsList();
-      dlg.showModal();
+      try {
+        if (typeof dlg.showModal === 'function') {
+          dlg.showModal();
+        } else {
+          dlg.setAttribute('open', '');
+        }
+      } catch (err) {
+        console.error('Error opening snippets manager:', err);
+      }
       if (filterInput) filterInput.focus();
     }
 
@@ -5748,8 +6133,8 @@
     function invokeSnippet(snippet) {
       if (!snippet || !snippet.sql_content) return;
       const vars = parseSnippetVariables(snippet.sql_content);
+      closeSnippetsManager();
       if (vars.length === 0) {
-        closeSnippetsManager();
         insertSnippetSQL(snippet.sql_content);
       } else {
         openSnippetParamModal(snippet, vars);
@@ -5785,7 +6170,15 @@
       });
 
       updateSnippetParamLivePreview();
-      dlg.showModal();
+      try {
+        if (typeof dlg.showModal === 'function') {
+          dlg.showModal();
+        } else {
+          dlg.setAttribute('open', '');
+        }
+      } catch (err) {
+        console.error('Error opening snippet param dialog:', err);
+      }
 
       const firstInp = container.querySelector('.snippet-param-input');
       if (firstInp) {
@@ -6343,6 +6736,18 @@
           closeAISettingsModal();
           closeSnippetsManager();
           closeSnippetParamModal();
+        }
+      });
+
+      // Close native dialogs when clicking on backdrop
+      ['snippets-manager-dialog', 'snippet-param-dialog', 'database-creator-dialog', 'csv-import-dialog', 'schema-search-modal'].forEach(id => {
+        const dlg = document.getElementById(id);
+        if (dlg) {
+          dlg.addEventListener('click', (e) => {
+            if (e.target === dlg && typeof dlg.close === 'function') {
+              dlg.close();
+            }
+          });
         }
       });
     }

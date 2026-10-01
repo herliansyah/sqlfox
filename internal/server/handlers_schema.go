@@ -132,6 +132,11 @@ func (s *Server) handleGetTableDDL(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
+	targetDB := r.URL.Query().Get("db")
+	if targetDB != "" {
+		_ = sess.Session.SelectDatabase(ctx, targetDB)
+	}
+
 	ddl, err := sess.Session.GetTableDDL(ctx, tableName)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to fetch DDL: "+err.Error())
@@ -180,6 +185,11 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
+	targetDB := r.URL.Query().Get("db")
+	if targetDB != "" {
+		_ = sess.Session.SelectDatabase(ctx, targetDB)
+	}
+
 	// Find primary key if exists
 	var pkCol string
 	if sess.CachedSchema != nil {
@@ -196,9 +206,27 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	var targetTable string
+	if targetDB != "" && sess.DriverName != "sqlite" {
+		targetTable = fmt.Sprintf("`%s`.`%s`", strings.ReplaceAll(targetDB, "`", "``"), strings.ReplaceAll(tableName, "`", "``"))
+	} else if sess.DriverName == "sqlite" {
+		targetTable = fmt.Sprintf(`"%s"`, strings.ReplaceAll(tableName, `"`, `""`))
+	} else {
+		targetTable = fmt.Sprintf("`%s`", strings.ReplaceAll(tableName, "`", "``"))
+	}
+
 	var querySQL string
 	if sortCol == "" && pkCol != "" {
 		sortCol = pkCol
+	}
+
+	var escSortCol string
+	if sortCol != "" {
+		if sess.DriverName == "sqlite" {
+			escSortCol = fmt.Sprintf(`"%s"`, strings.ReplaceAll(sortCol, `"`, `""`))
+		} else {
+			escSortCol = fmt.Sprintf("`%s`", strings.ReplaceAll(sortCol, "`", "``"))
+		}
 	}
 
 	if lastKey != "" && pkCol != "" && sortCol == pkCol {
@@ -207,14 +235,14 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 		if sortDir == "DESC" {
 			op = "<"
 		}
-		querySQL = fmt.Sprintf("SELECT * FROM %s WHERE %s %s %s ORDER BY %s %s LIMIT %d",
-			tableName, pkCol, op, lastKey, pkCol, sortDir, limit)
+		querySQL = fmt.Sprintf("SELECT * FROM %s WHERE %s %s '%s' ORDER BY %s %s LIMIT %d",
+			targetTable, escSortCol, op, strings.ReplaceAll(lastKey, "'", "''"), escSortCol, sortDir, limit)
 	} else if sortCol != "" {
 		// Bounded offset
 		querySQL = fmt.Sprintf("SELECT * FROM %s ORDER BY %s %s LIMIT %d OFFSET %d",
-			tableName, sortCol, sortDir, limit, offset)
+			targetTable, escSortCol, sortDir, limit, offset)
 	} else {
-		querySQL = fmt.Sprintf("SELECT * FROM %s LIMIT %d OFFSET %d", tableName, limit, offset)
+		querySQL = fmt.Sprintf("SELECT * FROM %s LIMIT %d OFFSET %d", targetTable, limit, offset)
 	}
 
 	stream, err := sess.Session.QueryStream(ctx, querySQL, limit)
@@ -252,7 +280,8 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
+	type CellEditItem struct {
+		Database string `json:"database"`
 		Table    string `json:"table"`
 		Column   string `json:"column"`
 		Value    any    `json:"value"`
@@ -260,38 +289,83 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 		PKValue  any    `json:"pk_value"`
 	}
 
+	var req struct {
+		Database string         `json:"database"`
+		Table    string         `json:"table"`
+		Column   string         `json:"column"`
+		Value    any            `json:"value"`
+		PKColumn string         `json:"pk_column"`
+		PKValue  any            `json:"pk_value"`
+		Edits    []CellEditItem `json:"edits"`
+	}
+
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid cell edit payload: "+err.Error())
 		return
 	}
 
-	if req.Table == "" || req.Column == "" || req.PKColumn == "" || req.PKValue == nil {
-		writeError(w, http.StatusBadRequest, "table, column, pk_column, and pk_value are required")
+	var items []CellEditItem
+	if len(req.Edits) > 0 {
+		items = req.Edits
+	} else if req.Table != "" && req.Column != "" && req.PKColumn != "" && req.PKValue != nil {
+		items = append(items, CellEditItem{
+			Database: req.Database,
+			Table:    req.Table,
+			Column:   req.Column,
+			Value:    req.Value,
+			PKColumn: req.PKColumn,
+			PKValue:  req.PKValue,
+		})
+	} else {
+		writeError(w, http.StatusBadRequest, "table, column, pk_column, and pk_value (or edits array) are required")
 		return
 	}
 
-	// Format safe single-cell update statement
-	var valStr string
-	if req.Value == nil {
-		valStr = "NULL"
-	} else {
-		valStr = fmt.Sprintf("'%s'", strings.ReplaceAll(fmt.Sprintf("%v", req.Value), "'", "''"))
+	quoteIdent := func(name string) string {
+		name = strings.Trim(name, "`")
+		return "`" + strings.ReplaceAll(name, "`", "``") + "`"
 	}
-	pkStr := fmt.Sprintf("'%s'", strings.ReplaceAll(fmt.Sprintf("%v", req.PKValue), "'", "''"))
 
-	updateSQL := fmt.Sprintf("UPDATE %s SET %s = %s WHERE %s = %s",
-		req.Table, req.Column, valStr, req.PKColumn, pkStr)
-
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	result, err := sess.Session.Exec(ctx, updateSQL)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update cell: "+err.Error())
-		return
+	var totalAffected int64
+	for _, item := range items {
+		var valStr string
+		if item.Value == nil {
+			valStr = "NULL"
+		} else {
+			valStr = fmt.Sprintf("'%s'", strings.ReplaceAll(fmt.Sprintf("%v", item.Value), "'", "''"))
+		}
+		pkStr := fmt.Sprintf("'%s'", strings.ReplaceAll(fmt.Sprintf("%v", item.PKValue), "'", "''"))
+
+		tableRef := quoteIdent(item.Table)
+		db := item.Database
+		if db == "" {
+			db = req.Database
+		}
+		if db != "" {
+			tableRef = fmt.Sprintf("%s.%s", quoteIdent(db), quoteIdent(item.Table))
+		}
+
+		updateSQL := fmt.Sprintf("UPDATE %s SET %s = %s WHERE %s = %s",
+			tableRef, quoteIdent(item.Column), valStr, quoteIdent(item.PKColumn), pkStr)
+
+		res, err := sess.Session.Exec(ctx, updateSQL)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update cell: "+err.Error())
+			return
+		}
+		if res != nil {
+			totalAffected += res.RowsAffected
+		}
 	}
 
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success":       true,
+		"rows_affected": totalAffected,
+		"applied_count": len(items),
+	})
 }
 
 func (s *Server) handleToggleReadOnly(w http.ResponseWriter, r *http.Request) {

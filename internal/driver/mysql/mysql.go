@@ -405,7 +405,14 @@ func (s *MySQLSession) SelectDatabase(ctx context.Context, dbName string) error 
 
 func (s *MySQLSession) GetTableDDL(ctx context.Context, tableName string) (string, error) {
 	var tbl, ddl string
-	query := fmt.Sprintf("SHOW CREATE TABLE `%s`", strings.ReplaceAll(tableName, "`", "``"))
+	escapedTbl := strings.ReplaceAll(tableName, "`", "``")
+	var query string
+	if s.cfg.DatabaseName != "" {
+		escapedDB := strings.ReplaceAll(s.cfg.DatabaseName, "`", "``")
+		query = fmt.Sprintf("SHOW CREATE TABLE `%s`.`%s`", escapedDB, escapedTbl)
+	} else {
+		query = fmt.Sprintf("SHOW CREATE TABLE `%s`", escapedTbl)
+	}
 	if err := s.db.QueryRowContext(ctx, query).Scan(&tbl, &ddl); err != nil {
 		return "", err
 	}
