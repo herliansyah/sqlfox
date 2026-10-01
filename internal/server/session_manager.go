@@ -59,7 +59,6 @@ type ActiveSession struct {
 	CachedSchema *driver.SchemaMetadata `json:"schema,omitempty"`
 	ServerInfo     *driver.ServerInfo     `json:"server_info,omitempty"`
 	LastActive     time.Time              `json:"last_active"`
-	guard          *safety.SafetyGuard
 	backupMgr      *safety.BackupManager
 	vault          *vault.Vault
 	runningQueries map[string]context.CancelFunc
@@ -68,17 +67,15 @@ type ActiveSession struct {
 
 // SessionManager manages connected database sessions.
 type SessionManager struct {
-	vault       *vault.Vault
-	guard       *safety.SafetyGuard
-	backupMgr   *safety.BackupManager
-	sessions    map[string]*ActiveSession
-	mu          sync.RWMutex
+	vault     *vault.Vault
+	backupMgr *safety.BackupManager
+	sessions  map[string]*ActiveSession
+	mu        sync.RWMutex
 }
 
-func NewSessionManager(v *vault.Vault, guard *safety.SafetyGuard, backupMgr *safety.BackupManager) *SessionManager {
+func NewSessionManager(v *vault.Vault, backupMgr *safety.BackupManager) *SessionManager {
 	return &SessionManager{
 		vault:     v,
-		guard:     guard,
 		backupMgr: backupMgr,
 		sessions:  make(map[string]*ActiveSession),
 	}
@@ -132,7 +129,6 @@ func (sm *SessionManager) ConnectSession(ctx context.Context, connectionID strin
 		CachedSchema: schema,
 		ServerInfo:   info,
 		LastActive:     time.Now(),
-		guard:          sm.guard,
 		backupMgr:      sm.backupMgr,
 		vault:          sm.vault,
 		runningQueries: make(map[string]context.CancelFunc),
@@ -216,12 +212,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	}
 
 	// 1. Safety Guard Inspection
-	var inspection *safety.InspectionResult
-	if s.guard != nil {
-		inspection = s.guard.Inspect(trimmedSQL, s.Environment)
-	} else {
-		inspection = &safety.InspectionResult{RiskLevel: safety.RiskNone}
-	}
+	inspection := safety.Inspect(trimmedSQL, s.Environment)
 
 	// 2. Read-Only Enforcement
 	if s.ReadOnly && inspection.IsDestructive {
@@ -498,14 +489,12 @@ func (s *ActiveSession) Stream(ctx context.Context, sql string, maxRows int) (dr
 		return nil, errors.New("sql query is required")
 	}
 
-	if s.guard != nil {
-		inspection := s.guard.Inspect(trimmedSQL, s.Environment)
-		if s.ReadOnly && inspection.IsDestructive {
-			return nil, ErrReadOnlySession
-		}
-		if inspection.IsDestructive || inspection.RequiresChallenge {
-			return nil, fmt.Errorf("destructive query cannot be streamed: %s; use query editor with confirmation", inspection.Reason)
-		}
+	inspection := safety.Inspect(trimmedSQL, s.Environment)
+	if s.ReadOnly && inspection.IsDestructive {
+		return nil, ErrReadOnlySession
+	}
+	if inspection.IsDestructive || inspection.RequiresChallenge {
+		return nil, fmt.Errorf("destructive query cannot be streamed: %s; use query editor with confirmation", inspection.Reason)
 	}
 
 	if maxRows <= 0 {

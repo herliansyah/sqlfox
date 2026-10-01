@@ -99,8 +99,7 @@ func (s *Server) handleImportCSV(w http.ResponseWriter, r *http.Request) {
 		_ = sess.Session.SelectDatabase(ctx, dbName)
 	}
 
-	importer := dataimport.NewCSVImporter()
-	res, err := importer.Import(ctx, sess.Session, tableName, fileReader, dataimport.ImportOptions{
+	res, err := dataimport.Import(ctx, sess.Session, tableName, fileReader, dataimport.ImportOptions{
 		Delimiter:   delimiter,
 		EmptyAsNull: emptyAsNullParam,
 		SkipErrors:  skipErrorsParam,

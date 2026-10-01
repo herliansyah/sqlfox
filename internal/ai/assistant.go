@@ -35,20 +35,6 @@ type AssistRequest struct {
 	IncludeSchema   bool                   `json:"include_schema"`
 }
 
-// ponytail: Direct package functions eliminate unnecessary stateful struct wrapper; Assistant struct kept as alias.
-type Assistant struct{}
-
-func NewAssistant() *Assistant {
-	return &Assistant{}
-}
-
-func (a *Assistant) AssemblePrompts(req AssistRequest) (string, string) {
-	return AssemblePrompts(req)
-}
-
-func (a *Assistant) Assist(ctx context.Context, req AssistRequest) (*CompletionResponse, error) {
-	return Assist(ctx, req)
-}
 
 // AssemblePrompts compiles the system prompt (incorporating Schema Context Window,
 // Table Knowledge Notes, AI Persona, and Firewall masking) and user prompt.

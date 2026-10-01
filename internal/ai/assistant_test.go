@@ -8,7 +8,6 @@ import (
 )
 
 func TestAssistant_AssemblePrompts(t *testing.T) {
-	assistant := NewAssistant()
 
 	schema := &driver.SchemaMetadata{
 		Tables: []driver.TableMetadata{
@@ -52,7 +51,7 @@ func TestAssistant_AssemblePrompts(t *testing.T) {
 		CustomPrompt:  "Always check indexes.",
 	}
 
-	systemPrompt, userPrompt := assistant.AssemblePrompts(req)
+	systemPrompt, userPrompt := AssemblePrompts(req)
 
 	// 1. Verify Dialect & Schema injection
 	if !strings.Contains(systemPrompt, "sqlite") {
@@ -92,8 +91,6 @@ func TestAssistant_AssemblePrompts(t *testing.T) {
 }
 
 func TestAssistant_ActionRouting(t *testing.T) {
-	assistant := NewAssistant()
-
 	tests := []struct {
 		action   string
 		req      AssistRequest
@@ -123,7 +120,7 @@ func TestAssistant_ActionRouting(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.action, func(t *testing.T) {
-			_, userPrompt := assistant.AssemblePrompts(tc.req)
+			_, userPrompt := AssemblePrompts(tc.req)
 			if !strings.Contains(userPrompt, tc.expected) {
 				t.Fatalf("expected user prompt to contain %q, got: %s", tc.expected, userPrompt)
 			}

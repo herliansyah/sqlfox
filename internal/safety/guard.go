@@ -32,16 +32,6 @@ type InspectionResult struct {
 	Relationships     []driver.TableRelationshipInfo `json:"relationships,omitempty"`
 }
 
-// ponytail: Inspect is a pure deterministic package function; SafetyGuard struct is kept as lightweight alias.
-type SafetyGuard struct{}
-
-func NewSafetyGuard() *SafetyGuard {
-	return &SafetyGuard{}
-}
-
-func (g *SafetyGuard) Inspect(query string, environment string) *InspectionResult {
-	return Inspect(query, environment)
-}
 
 // Inspect analyzes a query string against the target environment (Production, Staging, Development).
 func Inspect(query string, environment string) *InspectionResult {

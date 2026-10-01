@@ -31,7 +31,6 @@ func TestActiveSession_SafeExecutionPipeline(t *testing.T) {
 	}
 	defer dbSession.Close()
 
-	guard := safety.NewSafetyGuard()
 	backupMgr := safety.NewBackupManager(backupDir)
 
 	sess := &ActiveSession{
@@ -40,7 +39,6 @@ func TestActiveSession_SafeExecutionPipeline(t *testing.T) {
 		DriverName:  "sqlite",
 		ReadOnly:    false,
 		Session:     dbSession,
-		guard:       guard,
 		backupMgr:   backupMgr,
 	}
 
@@ -184,9 +182,8 @@ func TestSessionManager_ConnectPassesGuardAndBackup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	guard := safety.NewSafetyGuard()
 	backupMgr := safety.NewBackupManager(filepath.Join(tempDir, "backups"))
-	sm := NewSessionManager(v, guard, backupMgr)
+	sm := NewSessionManager(v, backupMgr)
 	defer sm.CloseAll()
 
 	sess, err := sm.ConnectSession(context.Background(), conn.ID)
@@ -194,9 +191,6 @@ func TestSessionManager_ConnectPassesGuardAndBackup(t *testing.T) {
 		t.Fatalf("ConnectSession failed: %v", err)
 	}
 
-	if sess.guard != guard {
-		t.Fatal("expected session to receive guard from SessionManager")
-	}
 	if sess.backupMgr != backupMgr {
 		t.Fatal("expected session to receive backupMgr from SessionManager")
 	}

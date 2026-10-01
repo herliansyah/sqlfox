@@ -400,3 +400,4 @@ _Avoid_: In-process tunnel, custom bastion client
 - **0021**: Workspace Ergonomics, Shortcuts Discovery, and Search Standardization (`docs/adr/0021-workspace-ergonomics-and-search-standardization.md`)
 - **0022**: Safe DDL Guardrails and Lock Contention Prevention (`docs/adr/0022-safe-ddl-guardrails-and-lock-contention-prevention.md`)
 - **0023**: Dynamic Cluster & Replication Inspector with Peer Node Auto-Discovery and Tri-Metric Bottleneck Detective (`docs/adr/0023-cluster-and-replication-inspector.md`)
+- **0024**: Ponytail Pruning, Stateless Service Simplification, and Unified AI Streaming Parser (`docs/adr/0024-ponytail-pruning-and-stateless-service-simplification.md`)
