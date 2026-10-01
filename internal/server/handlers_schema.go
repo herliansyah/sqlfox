@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -215,6 +217,17 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 		targetTable = fmt.Sprintf("`%s`", strings.ReplaceAll(tableName, "`", "``"))
 	}
 
+	filter := strings.TrimSpace(r.URL.Query().Get("filter"))
+	if err := validateTableFilter(filter); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid filter: "+err.Error())
+		return
+	}
+
+	whereClause := ""
+	if filter != "" {
+		whereClause = fmt.Sprintf("WHERE (%s)", filter)
+	}
+
 	var querySQL string
 	if sortCol == "" && pkCol != "" {
 		sortCol = pkCol
@@ -235,19 +248,33 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 		if sortDir == "DESC" {
 			op = "<"
 		}
-		querySQL = fmt.Sprintf("SELECT * FROM %s WHERE %s %s '%s' ORDER BY %s %s LIMIT %d",
-			targetTable, escSortCol, op, strings.ReplaceAll(lastKey, "'", "''"), escSortCol, sortDir, limit)
+		if whereClause != "" {
+			querySQL = fmt.Sprintf("SELECT * FROM %s %s AND %s %s '%s' ORDER BY %s %s LIMIT %d",
+				targetTable, whereClause, escSortCol, op, strings.ReplaceAll(lastKey, "'", "''"), escSortCol, sortDir, limit)
+		} else {
+			querySQL = fmt.Sprintf("SELECT * FROM %s WHERE %s %s '%s' ORDER BY %s %s LIMIT %d",
+				targetTable, escSortCol, op, strings.ReplaceAll(lastKey, "'", "''"), escSortCol, sortDir, limit)
+		}
 	} else if sortCol != "" {
 		// Bounded offset
-		querySQL = fmt.Sprintf("SELECT * FROM %s ORDER BY %s %s LIMIT %d OFFSET %d",
-			targetTable, escSortCol, sortDir, limit, offset)
+		if whereClause != "" {
+			querySQL = fmt.Sprintf("SELECT * FROM %s %s ORDER BY %s %s LIMIT %d OFFSET %d",
+				targetTable, whereClause, escSortCol, sortDir, limit, offset)
+		} else {
+			querySQL = fmt.Sprintf("SELECT * FROM %s ORDER BY %s %s LIMIT %d OFFSET %d",
+				targetTable, escSortCol, sortDir, limit, offset)
+		}
 	} else {
-		querySQL = fmt.Sprintf("SELECT * FROM %s LIMIT %d OFFSET %d", targetTable, limit, offset)
+		if whereClause != "" {
+			querySQL = fmt.Sprintf("SELECT * FROM %s %s LIMIT %d OFFSET %d", targetTable, whereClause, limit, offset)
+		} else {
+			querySQL = fmt.Sprintf("SELECT * FROM %s LIMIT %d OFFSET %d", targetTable, limit, offset)
+		}
 	}
 
 	stream, err := sess.Session.QueryStream(ctx, querySQL, limit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "query failed: "+err.Error())
+		writeError(w, http.StatusBadRequest, "query failed: "+err.Error())
 		return
 	}
 	defer stream.Close()
@@ -264,7 +291,26 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 		"limit":   limit,
 		"offset":  offset,
 		"pk_col":  pkCol,
+		"filter":  filter,
 	})
+}
+
+// forbiddenFilterRegex detects statement terminators and top-level destructive SQL verbs.
+// ponytail: regex token guard protects server-side filter pushdown at the trust boundary.
+var forbiddenFilterRegex = regexp.MustCompile(`(?i)\b(UNION|INTO\s+(OUTFILE|DUMPFILE)|DROP|DELETE|UPDATE|INSERT|ALTER|TRUNCATE|GRANT|REVOKE|SHUTDOWN)\b`)
+
+func validateTableFilter(filter string) error {
+	trimmed := strings.TrimSpace(filter)
+	if trimmed == "" {
+		return nil
+	}
+	if strings.Contains(trimmed, ";") {
+		return errors.New("semicolons are not permitted in filter expressions")
+	}
+	if forbiddenFilterRegex.MatchString(trimmed) {
+		return errors.New("filter expression contains forbidden statements or clauses")
+	}
+	return nil
 }
 
 func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {

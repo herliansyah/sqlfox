@@ -439,6 +439,56 @@
           </div>
         </div>
 
+        <!-- TablePlus-style Filter Bar (Table Viewer Data Mode) -->
+        <div id="table-filter-bar" class="hidden min-h-[38px] bg-slate-900/90 border-b border-app-border px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <!-- Left side: Mode toggle + Filter controls -->
+          <div class="flex flex-wrap items-center gap-2 flex-1 min-w-0">
+            <!-- Mode Toggle: Pills vs Raw WHERE -->
+            <div class="inline-flex rounded border border-slate-700 bg-slate-950 p-0.5 select-none" role="group">
+              <button type="button" id="btn-filter-mode-pills" onclick="setFilterBarMode('pills')" class="px-2 py-0.5 text-[11px] font-semibold rounded bg-app-accent text-slate-950 transition" title="Filter by Column Pills">
+                Pills
+              </button>
+              <button type="button" id="btn-filter-mode-raw" onclick="setFilterBarMode('raw')" class="px-2 py-0.5 text-[11px] font-semibold rounded text-slate-400 hover:text-white transition" title="Freeform SQL WHERE Expression">
+                WHERE
+              </button>
+            </div>
+
+            <!-- Quick Clause Pills Container -->
+            <div id="filter-pills-container" class="flex flex-wrap items-center gap-1.5">
+              <!-- Dynamic pills rendered here -->
+            </div>
+            <button type="button" id="btn-add-filter-pill" onclick="addFilterPill()" class="text-xs text-slate-400 hover:text-sky-300 hover:bg-slate-800 px-2 py-0.5 rounded border border-dashed border-slate-700 transition flex items-center space-x-1" title="Add condition (+ AND)">
+              <span>➕</span><span>AND</span>
+            </button>
+
+            <!-- Raw WHERE Input Container -->
+            <div id="filter-raw-container" class="hidden flex-1 flex items-center space-x-1.5 min-w-[260px] max-w-2xl">
+              <span class="px-1.5 py-0.5 bg-sky-950 text-sky-400 border border-sky-800 rounded font-mono text-[10px] font-bold tracking-wider select-none shrink-0">WHERE</span>
+              <input type="text" id="filter-raw-input" placeholder="e.g. status = 'active' AND (views > 100 OR is_featured = 1)"
+                     onkeydown="if(event.key === 'Enter') applyTableFilter()"
+                     class="w-full bg-slate-950 text-slate-100 placeholder-slate-500 border border-slate-700 focus:border-sky-400 px-2.5 py-1 rounded outline-none font-mono text-xs ring-1 ring-transparent focus:ring-sky-500/30 transition">
+            </div>
+
+            <!-- Active Filter Badge -->
+            <span id="filter-active-indicator" class="hidden px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-950 text-emerald-300 border border-emerald-700 flex items-center space-x-1" title="Active Filter applied">
+              <span>●</span><span>Filtered</span>
+            </span>
+          </div>
+
+          <!-- Right side: Actions -->
+          <div class="flex items-center space-x-1.5 shrink-0">
+            <button type="button" id="btn-run-filter" onclick="applyTableFilter()" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-2.5 py-1 rounded text-xs transition flex items-center space-x-1 shadow-sm" title="Apply filter (Enter)">
+              <span>🔍</span><span>Filter</span>
+            </button>
+            <button type="button" id="btn-clear-filter" onclick="clearTableFilter()" class="text-slate-400 hover:text-white hover:bg-slate-800 px-2 py-1 rounded border border-slate-700 text-xs transition flex items-center space-x-1" title="Clear filter">
+              <span>✕</span><span>Clear</span>
+            </button>
+            <button type="button" id="btn-open-sql-tab" onclick="handoffTableQueryToEditor()" class="text-sky-400 hover:text-sky-300 hover:bg-sky-950/60 px-2 py-1 rounded border border-sky-800/80 text-xs transition flex items-center space-x-1" title="Open complete SELECT query in a new SQL Tab">
+              <span>📝</span><span>Open in SQL Tab</span>
+            </button>
+          </div>
+        </div>
+
         <!-- Virtual Data Grid Table (Data Mode) -->
         <div id="virtual-grid-wrapper" class="flex-1 overflow-auto">
           <table id="results-table" class="w-full border-collapse text-left font-mono text-xs">
@@ -1999,6 +2049,8 @@
         <span>↗ Buka di Tab Baru</span>
       </button>
     </div>
+  </div>
+
   <!-- 20. Process Detail Inspector Modal (HTML5 <dialog>) -->
   <dialog id="pl-detail-modal" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-0 outline-none max-w-3xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm overflow-hidden">
     <div class="flex flex-col max-h-[90vh]">
@@ -4070,6 +4122,8 @@
         const isCritical = t.time >= 30;
         const isWarning = t.time >= 5 && !isCritical;
         const hasQuery = t.info && t.command !== 'Sleep' && t.info.trim() !== '';
+        const rawSql = t.info || (t.command === 'Sleep' ? 'Idle connection (Sleep)' : '-');
+        const sqlSnippet = rawSql.length > 100 ? rawSql.slice(0, 100) + '...' : rawSql;
 
         let rowClass = 'hover:bg-slate-800/40 transition cursor-pointer select-none';
         if (isCritical) {
@@ -4082,16 +4136,19 @@
           <tr class="${rowClass}" onclick="openProcessDetailModal(${t.id})">
             <td class="p-2 text-center whitespace-nowrap" onclick="event.stopPropagation()">
               <div class="inline-flex items-center space-x-1">
+                <button type="button" onclick="openProcessDetailModal(${t.id})" class="px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-800 text-sky-300 text-[10px] font-semibold border border-sky-800 transition flex items-center space-x-1 cursor-pointer" title="Inspect full thread details &amp; SQL">
+                  <span>👁️</span><span>View</span>
+                </button>
                 ${hasQuery ? `
-                  <button onclick="confirmKillProcess(${t.id}, 'query')" ${isSystem ? 'disabled' : ''} class="px-1.5 py-0.5 rounded bg-amber-950 hover:bg-amber-800 text-amber-300 text-[10px] font-semibold border border-amber-800 disabled:opacity-30 disabled:cursor-not-allowed transition" title="Kill currently executing query only (KILL QUERY)">
+                  <button type="button" onclick="confirmKillProcess(${t.id}, 'query')" ${isSystem ? 'disabled' : ''} class="px-1.5 py-0.5 rounded bg-amber-950 hover:bg-amber-800 text-amber-300 text-[10px] font-semibold border border-amber-800 disabled:opacity-30 disabled:cursor-not-allowed transition" title="Kill currently executing query only (KILL QUERY)">
                     Kill Q
                   </button>
                 ` : `
-                  <button onclick="confirmKillProcess(${t.id}, 'connection')" ${isSelf || isSystem ? 'disabled' : ''} class="px-1.5 py-0.5 rounded bg-red-950 hover:bg-red-800 text-red-300 text-[10px] font-semibold border border-red-800 disabled:opacity-30 disabled:cursor-not-allowed transition" title="${isSelf ? 'Cannot kill own active session connection' : 'Terminate client connection (KILL)'}">
+                  <button type="button" onclick="confirmKillProcess(${t.id}, 'connection')" ${isSelf || isSystem ? 'disabled' : ''} class="px-1.5 py-0.5 rounded bg-red-950 hover:bg-red-800 text-red-300 text-[10px] font-semibold border border-red-800 disabled:opacity-30 disabled:cursor-not-allowed transition" title="${isSelf ? 'Cannot kill own active session connection' : 'Terminate client connection (KILL)'}">
                     Kill C
                   </button>
                 `}
-                <button data-pl-menu-btn onclick="event.stopPropagation(); showProcessContextMenu(event, this, ${t.id})" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs border border-slate-700 transition" title="More thread actions">
+                <button type="button" data-pl-menu-btn onclick="showProcessContextMenu(event, this, ${t.id})" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs border border-slate-700 transition cursor-pointer" title="More thread actions">
                   ⋮
                 </button>
               </div>
@@ -4107,13 +4164,8 @@
             <td class="p-2 text-slate-300 whitespace-nowrap">${escapeHtml(t.command)}</td>
             <td class="p-2 text-right font-bold whitespace-nowrap ${isCritical ? 'text-red-400' : (isWarning ? 'text-amber-400' : 'text-slate-300')}">${t.time}s</td>
             <td class="p-2 text-slate-400 text-[11px] truncate max-w-[140px] whitespace-nowrap" title="${escapeHtml(t.state || '-')}">${escapeHtml(t.state || '-')}</td>
-            <td class="p-2 font-mono text-[11px] text-slate-300">
-              ${hasQuery ? `
-                <div class="flex items-center justify-between group">
-                  <div class="truncate select-text cursor-text text-slate-200" title="${escapeHtml(t.info)}">${escapeHtml(t.info)}</div>
-                  <span class="ml-2 text-[10px] text-slate-500 group-hover:text-sky-400 font-sans whitespace-nowrap flex-shrink-0 transition">🔍 View detail</span>
-                </div>
-              ` : `<span class="text-slate-500 italic">${escapeHtml(t.info || (t.command === 'Sleep' ? 'Idle connection (Sleep)' : '-'))}</span>`}
+            <td class="p-2 font-mono text-[11px] truncate max-w-xl whitespace-nowrap select-text cursor-text ${hasQuery ? 'text-slate-200' : 'text-slate-500 italic'}" title="${escapeHtml(rawSql)}">
+              ${escapeHtml(sqlSnippet)}
             </td>
           </tr>
         `;
@@ -4123,103 +4175,112 @@
     let selectedProcessThread = null;
 
     function openProcessDetailModal(threadId) {
-      closeProcessContextMenu();
-      const thread = (processlistData.threads || []).find(t => t.id === threadId);
-      if (!thread) return;
-      selectedProcessThread = thread;
-
-      const isSelf = thread.id === (processlistData.current_thread_id || 0);
-      const isSystem = (thread.user === 'system user' || thread.user === 'event_scheduler' || thread.command === 'Binlog Dump');
-      const hasQuery = thread.info && thread.command !== 'Sleep' && thread.info.trim() !== '';
-
-      const modal = document.getElementById('pl-detail-modal');
-      if (!modal) return;
-
-      const titleEl = document.getElementById('pl-modal-thread-id');
-      if (titleEl) {
-        titleEl.textContent = '#' + thread.id + (isSelf ? ' (You)' : (isSystem ? ' (Sys)' : ''));
-      }
-      const userEl = document.getElementById('pl-modal-user');
-      if (userEl) userEl.textContent = thread.user || '-';
-      const hostEl = document.getElementById('pl-modal-host');
-      if (hostEl) hostEl.textContent = thread.host || '-';
-      const dbEl = document.getElementById('pl-modal-db');
-      if (dbEl) dbEl.textContent = thread.db || '-';
-      const cmdEl = document.getElementById('pl-modal-command');
-      if (cmdEl) cmdEl.textContent = thread.command || '-';
-      const stateEl = document.getElementById('pl-modal-state');
-      if (stateEl) stateEl.textContent = thread.state || '-';
-
-      const timeEl = document.getElementById('pl-modal-time');
-      if (timeEl) {
-        timeEl.textContent = `${thread.time}s`;
-        if (thread.time >= 30) {
-          timeEl.className = 'font-mono font-bold block text-red-400';
-        } else if (thread.time >= 5) {
-          timeEl.className = 'font-mono font-bold block text-amber-400';
-        } else {
-          timeEl.className = 'font-mono font-bold block text-slate-200';
+      try {
+        closeProcessContextMenu();
+        const thread = (processlistData.threads || []).find(t => String(t.id) === String(threadId));
+        if (!thread) {
+          console.warn('[SqlFox] Process thread not found:', threadId);
+          return;
         }
-      }
+        selectedProcessThread = thread;
 
-      // Check lock involvement
-      const locks = processlistData.locks || [];
-      const rootBlockerLock = locks.find(l => l.is_root_blocker && l.blocking_thread_id === thread.id);
-      const waitingLock = locks.find(l => l.waiting_thread_id === thread.id);
-      const lockInfoEl = document.getElementById('pl-modal-lock-info');
-      if (lockInfoEl) {
-        if (rootBlockerLock) {
-          lockInfoEl.classList.remove('hidden');
-          lockInfoEl.innerHTML = `
-            <div class="font-bold flex items-center space-x-1.5 text-red-300">
-              <span>🚨 ROOT BLOCKER</span>
-              <span>This thread is holding locks blocking other transactions!</span>
-            </div>
-            <div class="text-[11px] text-red-200">
-              Holding ${escapeHtml(rootBlockerLock.lock_mode || 'LOCK')} on ${escapeHtml(rootBlockerLock.locked_resource || 'resource')}.
-            </div>
-          `;
-        } else if (waitingLock) {
-          lockInfoEl.classList.remove('hidden');
-          lockInfoEl.innerHTML = `
-            <div class="font-bold flex items-center space-x-1.5 text-amber-300">
-              <span>⏳ BLOCKED WAITING</span>
-              <span>Waiting for Thread #${waitingLock.blocking_thread_id} (${waitingLock.waiting_seconds}s)</span>
-            </div>
-            <div class="text-[11px] text-amber-200">
-              Waiting for lock mode: ${escapeHtml(waitingLock.lock_mode || 'lock')}
-            </div>
-          `;
-        } else {
-          lockInfoEl.classList.add('hidden');
+        const isSelf = thread.id === (processlistData.current_thread_id || 0);
+        const isSystem = (thread.user === 'system user' || thread.user === 'event_scheduler' || thread.command === 'Binlog Dump');
+        const hasQuery = thread.info && thread.command !== 'Sleep' && thread.info.trim() !== '';
+
+        const modal = document.getElementById('pl-detail-modal');
+        if (!modal) return;
+
+        const titleEl = document.getElementById('pl-modal-thread-id');
+        if (titleEl) {
+          titleEl.textContent = '#' + thread.id + (isSelf ? ' (You)' : (isSystem ? ' (Sys)' : ''));
         }
-      }
+        const userEl = document.getElementById('pl-modal-user');
+        if (userEl) userEl.textContent = thread.user || '-';
+        const hostEl = document.getElementById('pl-modal-host');
+        if (hostEl) hostEl.textContent = thread.host || '-';
+        const dbEl = document.getElementById('pl-modal-db');
+        if (dbEl) dbEl.textContent = thread.db || '-';
+        const cmdEl = document.getElementById('pl-modal-command');
+        if (cmdEl) cmdEl.textContent = thread.command || '-';
+        const stateEl = document.getElementById('pl-modal-state');
+        if (stateEl) stateEl.textContent = thread.state || '-';
 
-      // Full SQL Code display
-      const sqlCodeEl = document.getElementById('pl-modal-sql-code');
-      if (sqlCodeEl) {
-        sqlCodeEl.textContent = thread.info || (thread.command === 'Sleep' ? '-- Connection is idle (Sleep)\n-- No query currently executing' : '-- No query details provided');
-      }
+        const timeEl = document.getElementById('pl-modal-time');
+        if (timeEl) {
+          timeEl.textContent = `${thread.time}s`;
+          if (thread.time >= 30) {
+            timeEl.className = 'font-mono font-bold block text-red-400';
+          } else if (thread.time >= 5) {
+            timeEl.className = 'font-mono font-bold block text-amber-400';
+          } else {
+            timeEl.className = 'font-mono font-bold block text-slate-200';
+          }
+        }
 
-      // Footer buttons state
-      const btnExplain = document.getElementById('pl-modal-btn-explain');
-      const btnEditor = document.getElementById('pl-modal-btn-editor');
-      const btnAI = document.getElementById('pl-modal-btn-ai');
-      const btnNotes = document.getElementById('pl-modal-btn-notes');
-      const btnKillQ = document.getElementById('pl-modal-btn-kill-q');
-      const btnKillC = document.getElementById('pl-modal-btn-kill-c');
+        // Check lock involvement
+        const locks = processlistData.locks || [];
+        const rootBlockerLock = locks.find(l => l.is_root_blocker && l.blocking_thread_id === thread.id);
+        const waitingLock = locks.find(l => l.waiting_thread_id === thread.id);
+        const lockInfoEl = document.getElementById('pl-modal-lock-info');
+        if (lockInfoEl) {
+          if (rootBlockerLock) {
+            lockInfoEl.classList.remove('hidden');
+            lockInfoEl.innerHTML = `
+              <div class="font-bold flex items-center space-x-1.5 text-red-300">
+                <span>🚨 ROOT BLOCKER</span>
+                <span>This thread is holding locks blocking other transactions!</span>
+              </div>
+              <div class="text-[11px] text-red-200">
+                Holding ${escapeHtml(rootBlockerLock.lock_mode || 'LOCK')} on ${escapeHtml(rootBlockerLock.locked_resource || 'resource')}.
+              </div>
+            `;
+          } else if (waitingLock) {
+            lockInfoEl.classList.remove('hidden');
+            lockInfoEl.innerHTML = `
+              <div class="font-bold flex items-center space-x-1.5 text-amber-300">
+                <span>⏳ BLOCKED WAITING</span>
+                <span>Waiting for Thread #${waitingLock.blocking_thread_id} (${waitingLock.waiting_seconds}s)</span>
+              </div>
+              <div class="text-[11px] text-amber-200">
+                Waiting for lock mode: ${escapeHtml(waitingLock.lock_mode || 'lock')}
+              </div>
+            `;
+          } else {
+            lockInfoEl.classList.add('hidden');
+          }
+        }
 
-      if (btnExplain) btnExplain.disabled = !hasQuery;
-      if (btnEditor) btnEditor.disabled = !hasQuery;
-      if (btnAI) btnAI.disabled = !hasQuery;
-      if (btnNotes) btnNotes.disabled = !hasQuery;
-      if (btnKillQ) btnKillQ.disabled = !hasQuery || isSystem;
-      if (btnKillC) btnKillC.disabled = isSelf || isSystem;
+        // Full SQL Code display
+        const sqlCodeEl = document.getElementById('pl-modal-sql-code');
+        if (sqlCodeEl) {
+          sqlCodeEl.textContent = thread.info || (thread.command === 'Sleep' ? '-- Connection is idle (Sleep)\n-- No query currently executing' : '-- No query details provided');
+        }
 
-      if (typeof modal.showModal === 'function') {
-        modal.showModal();
-      } else {
-        modal.setAttribute('open', '');
+        // Footer buttons state
+        const btnExplain = document.getElementById('pl-modal-btn-explain');
+        const btnEditor = document.getElementById('pl-modal-btn-editor');
+        const btnAI = document.getElementById('pl-modal-btn-ai');
+        const btnNotes = document.getElementById('pl-modal-btn-notes');
+        const btnKillQ = document.getElementById('pl-modal-btn-kill-q');
+        const btnKillC = document.getElementById('pl-modal-btn-kill-c');
+
+        if (btnExplain) btnExplain.disabled = !hasQuery;
+        if (btnEditor) btnEditor.disabled = !hasQuery;
+        if (btnAI) btnAI.disabled = !hasQuery;
+        if (btnNotes) btnNotes.disabled = !hasQuery;
+        if (btnKillQ) btnKillQ.disabled = !hasQuery || isSystem;
+        if (btnKillC) btnKillC.disabled = isSelf || isSystem;
+
+        if (typeof modal.showModal === 'function') {
+          if (!modal.open) {
+            modal.showModal();
+          }
+        } else {
+          modal.setAttribute('open', '');
+        }
+      } catch (err) {
+        console.error('[SqlFox] openProcessDetailModal error:', err);
       }
     }
 
@@ -4243,13 +4304,16 @@
       if (!menu) return;
 
       // If already open for this thread, toggle close
-      if (!menu.classList.contains('hidden') && selectedProcessThread && selectedProcessThread.id === threadId) {
+      if (!menu.classList.contains('hidden') && selectedProcessThread && String(selectedProcessThread.id) === String(threadId)) {
         closeProcessContextMenu();
         return;
       }
 
-      const thread = (processlistData.threads || []).find(t => t.id === threadId);
-      if (!thread) return;
+      const thread = (processlistData.threads || []).find(t => String(t.id) === String(threadId));
+      if (!thread) {
+        console.warn('[SqlFox] Process thread not found for menu:', threadId);
+        return;
+      }
       selectedProcessThread = thread;
 
       const isSelf = thread.id === (processlistData.current_thread_id || 0);
@@ -4282,8 +4346,7 @@
       if (anchor && anchor.getBoundingClientRect) {
         const rect = anchor.getBoundingClientRect();
         let top = rect.bottom + 4;
-        let left = rect.left - 130;
-        if (left < 10) left = 10;
+        let left = Math.max(10, Math.min(window.innerWidth - 220, rect.left));
         if (top + 280 > window.innerHeight) {
           top = Math.max(10, rect.top - 280);
         }
@@ -4291,14 +4354,19 @@
         menu.style.left = `${left}px`;
       } else if (event) {
         menu.style.top = `${event.clientY + 4}px`;
-        menu.style.left = `${Math.max(10, event.clientX - 130)}px`;
+        menu.style.left = `${Math.max(10, Math.min(window.innerWidth - 220, event.clientX))}px`;
       }
+      menu.style.display = 'block';
+      menu.style.zIndex = '9999';
       menu.classList.remove('hidden');
     }
 
     function closeProcessContextMenu() {
       const menu = document.getElementById('pl-context-menu');
-      if (menu) menu.classList.add('hidden');
+      if (menu) {
+        menu.classList.add('hidden');
+        menu.style.display = 'none';
+      }
     }
 
     function inspectProcessFromMenu() {
@@ -4656,6 +4724,13 @@
           tableName: tableName,
           database: activeDb,
           tableMode: 'data',
+          filterMode: 'pills',
+          filterPills: [],
+          filterRaw: '',
+          appliedFilter: '',
+          sortCol: '',
+          sortDir: '',
+          offset: 0,
           sql: `SELECT * FROM \`${tableName}\` LIMIT 50;`
         };
         tabs.push(tab);
@@ -4690,6 +4765,7 @@
       if (btnDiag) btnDiag.className = mode === 'diagnostics' ? activeClass : inactiveClass;
 
       const gridToolbar = document.getElementById('grid-toolbar');
+      const filterBar = document.getElementById('table-filter-bar');
       const gridTable = document.getElementById('virtual-grid-wrapper');
       const structView = document.getElementById('table-structure-view');
       const idxView = document.getElementById('table-indexes-view');
@@ -4698,7 +4774,12 @@
       const notesView = document.getElementById('table-notes-view');
       const diagView = document.getElementById('table-diagnostics-view');
 
+      const isDataViewer = mode === 'data' && activeTab && activeTab.isTableViewer;
       if (gridToolbar) gridToolbar.classList.toggle('hidden', mode !== 'data');
+      if (filterBar) {
+        filterBar.classList.toggle('hidden', !isDataViewer);
+        if (isDataViewer) syncFilterBarUI(activeTab);
+      }
       if (gridTable) gridTable.classList.toggle('hidden', mode !== 'data');
       if (structView) structView.classList.toggle('hidden', mode !== 'structure');
       if (idxView) idxView.classList.toggle('hidden', mode !== 'indexes');
@@ -6413,6 +6494,294 @@
       }
     }
 
+    // --- TablePlus-Style Inline Filter Bar & Pushdown ---
+    function setFilterBarMode(mode) {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab || !activeTab.isTableViewer) return;
+      activeTab.filterMode = mode;
+      syncFilterBarUI(activeTab);
+    }
+
+    function syncFilterBarUI(activeTab) {
+      if (!activeTab || !activeTab.isTableViewer) return;
+      const mode = activeTab.filterMode || 'pills';
+      const btnPills = document.getElementById('btn-filter-mode-pills');
+      const btnRaw = document.getElementById('btn-filter-mode-raw');
+      const pillsContainer = document.getElementById('filter-pills-container');
+      const addPillBtn = document.getElementById('btn-add-filter-pill');
+      const rawContainer = document.getElementById('filter-raw-container');
+      const rawInput = document.getElementById('filter-raw-input');
+      const activeIndicator = document.getElementById('filter-active-indicator');
+
+      const activeBtnClass = 'px-2 py-0.5 text-[11px] font-semibold rounded bg-app-accent text-slate-950 transition';
+      const inactiveBtnClass = 'px-2 py-0.5 text-[11px] font-semibold rounded text-slate-400 hover:text-white transition';
+
+      if (btnPills) btnPills.className = mode === 'pills' ? activeBtnClass : inactiveBtnClass;
+      if (btnRaw) btnRaw.className = mode === 'raw' ? activeBtnClass : inactiveBtnClass;
+
+      if (mode === 'pills') {
+        if (pillsContainer) pillsContainer.classList.remove('hidden');
+        if (addPillBtn) addPillBtn.classList.remove('hidden');
+        if (rawContainer) rawContainer.classList.add('hidden');
+        renderFilterPills(activeTab);
+      } else {
+        if (pillsContainer) pillsContainer.classList.add('hidden');
+        if (addPillBtn) addPillBtn.classList.add('hidden');
+        if (rawContainer) rawContainer.classList.remove('hidden');
+        if (rawInput) {
+          rawInput.value = activeTab.filterRaw !== undefined ? activeTab.filterRaw : (activeTab.appliedFilter || '');
+        }
+      }
+
+      if (activeIndicator) {
+        const isFiltered = Boolean(activeTab.appliedFilter);
+        activeIndicator.classList.toggle('hidden', !isFiltered);
+      }
+    }
+
+    function renderFilterPills(activeTab) {
+      if (!activeTab) activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab || !activeTab.isTableViewer) return;
+      if (!Array.isArray(activeTab.filterPills)) {
+        activeTab.filterPills = [];
+      }
+      const container = document.getElementById('filter-pills-container');
+      if (!container) return;
+
+      if (activeTab.filterPills.length === 0) {
+        container.innerHTML = '<span class="text-[11px] text-slate-500 italic select-none">No filter rules</span>';
+        return;
+      }
+
+      const cols = currentColumns || [];
+
+      container.innerHTML = activeTab.filterPills.map((pill, i) => {
+        const isUnary = pill.op === 'IS NULL' || pill.op === 'IS NOT NULL';
+        return `
+          <div class="filter-pill flex items-center space-x-1 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-xs text-slate-200 shadow-sm" data-idx="${i}">
+            <select class="pill-col bg-transparent text-sky-300 font-mono text-xs outline-none cursor-pointer border-r border-slate-800 pr-1 py-0.5" onchange="onPillColChange(${i}, this.value)">
+              ${cols.length > 0 ? cols.map(c => `<option value="${escapeHtml(c.name)}" ${pill.col === c.name ? 'selected' : ''} class="bg-slate-900 text-slate-200">${escapeHtml(c.name)}</option>`).join('') : `<option value="${escapeHtml(pill.col || '')}">${escapeHtml(pill.col || 'column')}</option>`}
+            </select>
+            <select class="pill-op bg-transparent text-amber-300 font-mono text-xs outline-none cursor-pointer border-r border-slate-800 pr-1 py-0.5" onchange="onPillOpChange(${i}, this.value)">
+              <option value="=" ${pill.op === '=' ? 'selected' : ''} class="bg-slate-900 text-slate-200">=</option>
+              <option value="!=" ${pill.op === '!=' ? 'selected' : ''} class="bg-slate-900 text-slate-200">!=</option>
+              <option value="LIKE" ${pill.op === 'LIKE' ? 'selected' : ''} class="bg-slate-900 text-slate-200">LIKE</option>
+              <option value="NOT LIKE" ${pill.op === 'NOT LIKE' ? 'selected' : ''} class="bg-slate-900 text-slate-200">NOT LIKE</option>
+              <option value=">" ${pill.op === '>' ? 'selected' : ''} class="bg-slate-900 text-slate-200">&gt;</option>
+              <option value="<" ${pill.op === '<' ? 'selected' : ''} class="bg-slate-900 text-slate-200">&lt;</option>
+              <option value=">=" ${pill.op === '>=' ? 'selected' : ''} class="bg-slate-900 text-slate-200">&gt;=</option>
+              <option value="<=" ${pill.op === '<=' ? 'selected' : ''} class="bg-slate-900 text-slate-200">&lt;=</option>
+              <option value="IN" ${pill.op === 'IN' ? 'selected' : ''} class="bg-slate-900 text-slate-200">IN</option>
+              <option value="IS NULL" ${pill.op === 'IS NULL' ? 'selected' : ''} class="bg-slate-900 text-slate-200">IS NULL</option>
+              <option value="IS NOT NULL" ${pill.op === 'IS NOT NULL' ? 'selected' : ''} class="bg-slate-900 text-slate-200">IS NOT NULL</option>
+            </select>
+            <input type="text" class="pill-val bg-transparent text-slate-100 font-mono text-xs outline-none px-1 py-0.5 w-24 focus:w-36 transition-all ${isUnary ? 'hidden' : ''}"
+                   value="${escapeHtml(pill.val || '')}"
+                   placeholder="${pill.op === 'LIKE' || pill.op === 'NOT LIKE' ? '%val%' : (pill.op === 'IN' ? '1, 2, 3' : 'val')}"
+                   onkeydown="if(event.key === 'Enter') applyTableFilter()"
+                   oninput="onPillValueInput(${i}, this.value)">
+            <button type="button" onclick="removeFilterPill(${i})" class="text-slate-500 hover:text-rose-400 px-0.5 py-0.5 transition" title="Remove condition">
+              ✕
+            </button>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function addFilterPill() {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab || !activeTab.isTableViewer) return;
+      if (!Array.isArray(activeTab.filterPills)) activeTab.filterPills = [];
+      const defaultCol = (currentColumns && currentColumns.length > 0) ? currentColumns[0].name : '';
+      activeTab.filterPills.push({ col: defaultCol, op: '=', val: '' });
+      renderFilterPills(activeTab);
+      setTimeout(() => {
+        const container = document.getElementById('filter-pills-container');
+        if (container) {
+          const inputs = container.querySelectorAll('.pill-val');
+          if (inputs.length > 0) inputs[inputs.length - 1].focus();
+        }
+      }, 20);
+    }
+
+    function removeFilterPill(index) {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab || !activeTab.isTableViewer) return;
+      if (!Array.isArray(activeTab.filterPills)) return;
+      activeTab.filterPills.splice(index, 1);
+      renderFilterPills(activeTab);
+    }
+
+    function onPillColChange(index, col) {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (activeTab && activeTab.filterPills && activeTab.filterPills[index]) {
+        activeTab.filterPills[index].col = col;
+      }
+    }
+
+    function onPillOpChange(index, op) {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (activeTab && activeTab.filterPills && activeTab.filterPills[index]) {
+        activeTab.filterPills[index].op = op;
+        renderFilterPills(activeTab);
+      }
+    }
+
+    function onPillValueInput(index, val) {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (activeTab && activeTab.filterPills && activeTab.filterPills[index]) {
+        activeTab.filterPills[index].val = val;
+      }
+    }
+
+    function compileFilterPills(pills) {
+      if (!Array.isArray(pills) || pills.length === 0) return '';
+      const clauses = [];
+      for (const p of pills) {
+        if (!p || !p.col) continue;
+        const colEscaped = '`' + p.col.replace(/`/g, '``') + '`';
+        const op = (p.op || '=').toUpperCase();
+        if (op === 'IS NULL' || op === 'IS NOT NULL') {
+          clauses.push(`${colEscaped} ${op}`);
+          continue;
+        }
+        const val = (p.val || '').trim();
+        if (val === '') continue;
+        if (op === 'IN') {
+          if (val.startsWith('(') && val.endsWith(')')) {
+            clauses.push(`${colEscaped} IN ${val}`);
+          } else {
+            const items = val.split(',').map(s => s.trim()).filter(Boolean);
+            const formatted = items.map(item => {
+              if (!isNaN(item) && item !== '') return item;
+              return `'${item.replace(/'/g, "''")}'`;
+            }).join(', ');
+            clauses.push(`${colEscaped} IN (${formatted})`);
+          }
+        } else {
+          if (!isNaN(val) && val !== '' && !val.includes(' ') && op !== 'LIKE' && op !== 'NOT LIKE') {
+            clauses.push(`${colEscaped} ${op} ${val}`);
+          } else {
+            clauses.push(`${colEscaped} ${op} '${val.replace(/'/g, "''")}'`);
+          }
+        }
+      }
+      return clauses.join(' AND ');
+    }
+
+    function applyTableFilter() {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab || !activeTab.isTableViewer) return;
+      activeTab.offset = 0;
+      if (activeTab.filterMode === 'raw') {
+        const rawInput = document.getElementById('filter-raw-input');
+        let rawVal = rawInput ? rawInput.value.trim() : '';
+        rawVal = rawVal.replace(/^where\s+/i, '').trim();
+        activeTab.filterRaw = rawVal;
+        activeTab.appliedFilter = rawVal;
+      } else {
+        activeTab.appliedFilter = compileFilterPills(activeTab.filterPills || []);
+      }
+      syncFilterBarUI(activeTab);
+      loadTableRows(activeTab.tableName);
+    }
+
+    function clearTableFilter() {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab || !activeTab.isTableViewer) return;
+      activeTab.appliedFilter = '';
+      activeTab.filterRaw = '';
+      activeTab.filterPills = [];
+      activeTab.offset = 0;
+      const rawInput = document.getElementById('filter-raw-input');
+      if (rawInput) rawInput.value = '';
+      syncFilterBarUI(activeTab);
+      loadTableRows(activeTab.tableName);
+    }
+
+    function focusTableFilter() {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab || !activeTab.isTableViewer) return;
+      if (activeTab.filterMode === 'raw') {
+        const rawInput = document.getElementById('filter-raw-input');
+        if (rawInput) {
+          rawInput.focus();
+          rawInput.select();
+        }
+      } else {
+        if (!activeTab.filterPills || activeTab.filterPills.length === 0) {
+          addFilterPill();
+        } else {
+          const container = document.getElementById('filter-pills-container');
+          const firstInput = container ? container.querySelector('.pill-val') : null;
+          if (firstInput) {
+            firstInput.focus();
+            firstInput.select();
+          }
+        }
+      }
+    }
+
+    function handoffTableQueryToEditor() {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab || !activeTab.isTableViewer) return;
+      const tableName = activeTab.tableName;
+      const targetTable = '`' + tableName.replace(/`/g, '``') + '`';
+      let sql = `SELECT * FROM ${targetTable}`;
+      const filter = (activeTab.appliedFilter || '').trim();
+      if (filter) {
+        sql += `\nWHERE ${filter}`;
+      }
+      if (activeTab.sortCol) {
+        const escSortCol = '`' + activeTab.sortCol.replace(/`/g, '``') + '`';
+        sql += `\nORDER BY ${escSortCol} ${activeTab.sortDir || 'ASC'}`;
+      }
+      sql += `\nLIMIT 50;`;
+
+      const newId = 'tab-' + Date.now();
+      tabs.push({
+        id: newId,
+        title: `${tableName}-query.sql`,
+        sql: sql,
+        database: activeTab.database,
+        isTableViewer: false
+      });
+      switchTab(newId);
+    }
+
+    function sortColumn(colIndex) {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab || !activeTab.isTableViewer || !currentColumns[colIndex]) return;
+      const colName = currentColumns[colIndex].name;
+      if (activeTab.sortCol === colName) {
+        if (activeTab.sortDir === 'ASC') {
+          activeTab.sortDir = 'DESC';
+        } else {
+          activeTab.sortCol = '';
+          activeTab.sortDir = '';
+        }
+      } else {
+        activeTab.sortCol = colName;
+        activeTab.sortDir = 'ASC';
+      }
+      activeTab.offset = 0;
+      loadTableRows(activeTab.tableName);
+    }
+
+    function loadNextPage() {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab || !activeTab.isTableViewer) return;
+      activeTab.offset = (activeTab.offset || 0) + 50;
+      loadTableRows(activeTab.tableName);
+    }
+
+    function loadPreviousPage() {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab || !activeTab.isTableViewer) return;
+      activeTab.offset = Math.max(0, (activeTab.offset || 0) - 50);
+      loadTableRows(activeTab.tableName);
+    }
+
     async function loadTableRows(tableName) {
       if (!activeConnection) return;
       try {
@@ -6424,9 +6793,16 @@
         updateStagedEditsUI();
         activeEditCell = null;
 
-        const url = dbName
-          ? `/api/session/${activeConnection.id}/table/${encodeURIComponent(tableName)}/rows?limit=50&db=${encodeURIComponent(dbName)}`
-          : `/api/session/${activeConnection.id}/table/${encodeURIComponent(tableName)}/rows?limit=50`;
+        const filter = (activeTab && activeTab.appliedFilter) || '';
+        const sortCol = (activeTab && activeTab.sortCol) || '';
+        const sortDir = (activeTab && activeTab.sortDir) || '';
+        const offset = (activeTab && activeTab.offset) || 0;
+
+        let url = `/api/session/${activeConnection.id}/table/${encodeURIComponent(tableName)}/rows?limit=50&offset=${offset}`;
+        if (dbName) url += `&db=${encodeURIComponent(dbName)}`;
+        if (filter) url += `&filter=${encodeURIComponent(filter)}`;
+        if (sortCol) url += `&sort=${encodeURIComponent(sortCol)}&dir=${encodeURIComponent(sortDir || 'ASC')}`;
+
         const res = await apiFetch(url);
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
@@ -6467,14 +6843,19 @@
       }
 
       // Render Headers
-      thead.innerHTML = '<tr>' + cols.map((c, i) => `
-        <th class="p-2 px-3 font-semibold text-xs border-r border-slate-800 cursor-pointer hover:text-white" onclick="sortColumn(${i})">
+      thead.innerHTML = '<tr>' + cols.map((c, i) => {
+        let sortIcon = '';
+        if (activeTab && activeTab.isTableViewer && activeTab.sortCol === c.name) {
+          sortIcon = activeTab.sortDir === 'DESC' ? ' <span class="text-sky-400 font-bold">▼</span>' : ' <span class="text-sky-400 font-bold">▲</span>';
+        }
+        return `
+        <th class="p-2 px-3 font-semibold text-xs border-r border-slate-800 cursor-pointer hover:text-white select-none transition" onclick="sortColumn(${i})" title="Click to sort by ${escapeHtml(c.name)}">
           <div class="flex items-center justify-between space-x-1">
-            <span>${escapeHtml(c.name)}</span>
+            <span>${escapeHtml(c.name)}${sortIcon}</span>
             <span class="text-[10px] text-slate-500 font-mono">${c.type}</span>
           </div>
         </th>
-      `).join('') + '</tr>';
+      `;}).join('') + '</tr>';
 
       // Resolve foreign keys for table
       const targetCatalog = (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
@@ -6486,6 +6867,39 @@
             fkMap.set(fk.column, fk);
           }
         });
+      }
+
+      // Update grid result stats and pagination
+      const gridResultStats = document.getElementById('grid-result-stats');
+      if (gridResultStats) {
+        if (activeTab && activeTab.isTableViewer) {
+          const off = activeTab.offset || 0;
+          if (!rows || rows.length === 0) {
+            gridResultStats.textContent = `0 rows${activeTab.appliedFilter ? ' (filtered)' : ''}`;
+          } else {
+            gridResultStats.textContent = `${off + 1} - ${off + rows.length} rows${activeTab.appliedFilter ? ' (filtered)' : ''}`;
+          }
+        } else {
+          gridResultStats.textContent = `${rows ? rows.length : 0} rows`;
+        }
+      }
+
+      const keysetPagination = document.getElementById('keyset-pagination');
+      if (keysetPagination) {
+        if (activeTab && activeTab.isTableViewer) {
+          keysetPagination.classList.remove('hidden');
+          const off = activeTab.offset || 0;
+          const prevBtn = keysetPagination.querySelector('button:first-child');
+          const nextBtn = keysetPagination.querySelector('button:last-child');
+          if (prevBtn) prevBtn.disabled = off <= 0;
+          if (nextBtn) nextBtn.disabled = !rows || rows.length < 50;
+        } else {
+          keysetPagination.classList.add('hidden');
+        }
+      }
+
+      if (activeTab && activeTab.isTableViewer) {
+        syncFilterBarUI(activeTab);
       }
 
       // Render Rows
@@ -8233,6 +8647,12 @@
         } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'w') {
           e.preventDefault();
           closeTab(activeTabId);
+        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && !e.shiftKey) {
+          const activeTab = tabs.find(t => t.id === activeTabId);
+          if (activeTab && activeTab.isTableViewer && (activeTab.tableMode === 'data' || !activeTab.tableMode)) {
+            e.preventDefault();
+            focusTableFilter();
+          }
         } else if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName) && !document.activeElement?.closest('.CodeMirror')) {
           e.preventDefault();
           const sFilter = document.getElementById('schema-filter-input');
@@ -8257,12 +8677,14 @@
           closeDatabaseDiagnosticsModal();
           closePrivilegeMatrixModal();
           closeFKPeekPopover();
+          closeProcessDetailModal();
+          closeProcessContextMenu();
           closeProfileView();
         }
       });
 
       // Close native dialogs when clicking on backdrop
-      ['snippets-manager-dialog', 'snippet-param-dialog', 'database-creator-dialog', 'csv-import-dialog', 'schema-search-modal', 'db-diagnostics-dialog', 'privilege-matrix-dialog'].forEach(id => {
+      ['snippets-manager-dialog', 'snippet-param-dialog', 'database-creator-dialog', 'csv-import-dialog', 'schema-search-modal', 'db-diagnostics-dialog', 'privilege-matrix-dialog', 'pl-detail-modal'].forEach(id => {
         const dlg = document.getElementById(id);
         if (dlg) {
           dlg.addEventListener('click', (e) => {

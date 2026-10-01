@@ -144,8 +144,12 @@ func (s *Server) routes() {
 			if err != nil {
 				// Fallback to index.html for SPA routing
 				req.URL.Path = "/"
+				path = "index.html"
 			} else {
 				_ = f.Close()
+			}
+			if path == "index.html" {
+				w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 			}
 			fileServer.ServeHTTP(w, req)
 		})
