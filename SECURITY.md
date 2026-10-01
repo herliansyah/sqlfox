@@ -26,6 +26,7 @@ Security architecture, cryptographic protocols, environment isolation, and AI pr
 1. **Localhost Binding**: The backend web daemon strictly binds to `127.0.0.1` on a dynamic port or Unix socket. It never binds to `0.0.0.0`, preventing LAN unauthorized access.
 2. **Zero Ingress from Outside**: No public inbound open ports.
 3. **Third-Party Egress Control**: Outbound traffic is restricted strictly to configured target database endpoints and chosen AI provider endpoints.
+4. **Flight Recorder Telemetry Safety**: The on-demand Performance Flight Recorder samples only global engine counters (`SHOW GLOBAL STATUS`) and running statement text from `PROCESSLIST`. Zero table row data is recorded. All metrics remain strictly within the local SQLite vault with an automated 24-hour retention purge and a 10-minute auto-stop polling ceiling.
 
 ---
 

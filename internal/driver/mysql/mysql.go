@@ -1463,6 +1463,69 @@ func (s *MySQLSession) inspectStandardReplicationOrStandalone(ctx context.Contex
 	}, nil
 }
 
+// SampleFlightMetrics captures an on-demand performance telemetry slice with correlated active queries.
+func (s *MySQLSession) SampleFlightMetrics(ctx context.Context) (*driver.FlightMetricSample, error) {
+	sample := &driver.FlightMetricSample{
+		SampledAt:     time.Now(),
+		ActiveQueries: []driver.FlightQueryInfo{},
+	}
+
+	// 1. Fetch Global Status variables
+	rows, err := s.db.QueryContext(ctx, `
+		SHOW GLOBAL STATUS WHERE Variable_name IN (
+			'Questions',
+			'Threads_running',
+			'Threads_connected',
+			'Innodb_row_lock_waits',
+			'Innodb_row_lock_current_waits',
+			'Innodb_buffer_pool_wait_free'
+		)
+	`)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var name, val string
+			if err := rows.Scan(&name, &val); err == nil {
+				intVal, _ := strconv.ParseInt(val, 10, 64)
+				switch name {
+				case "Questions":
+					sample.Questions = intVal
+				case "Threads_running":
+					sample.ThreadsRunning = intVal
+				case "Threads_connected":
+					sample.ThreadsConnected = intVal
+				case "Innodb_row_lock_waits", "Innodb_row_lock_current_waits":
+					if intVal > sample.RowLockWaits {
+						sample.RowLockWaits = intVal
+					}
+				case "Innodb_buffer_pool_wait_free":
+					sample.BufferPoolWaitFree = intVal
+				}
+			}
+		}
+	}
+
+	// 2. Adaptive Correlated Queries: fetch active non-idle threads (Top 5)
+	qRows, qErr := s.db.QueryContext(ctx, `
+		SELECT ID, USER, HOST, IFNULL(DB, ''), COMMAND, TIME, IFNULL(STATE, ''), IFNULL(INFO, '')
+		FROM information_schema.PROCESSLIST
+		WHERE COMMAND != 'Sleep' AND (TIME >= 1 OR (INFO IS NOT NULL AND INFO != ''))
+		ORDER BY TIME DESC
+		LIMIT 5
+	`)
+	if qErr == nil {
+		defer qRows.Close()
+		for qRows.Next() {
+			var q driver.FlightQueryInfo
+			if err := qRows.Scan(&q.ThreadID, &q.User, &q.Host, &q.DB, &q.Command, &q.Time, &q.State, &q.Info); err == nil {
+				sample.ActiveQueries = append(sample.ActiveQueries, q)
+			}
+		}
+	}
+
+	return sample, nil
+}
+
 func (s *MySQLSession) Close() error {
 	return s.db.Close()
 }

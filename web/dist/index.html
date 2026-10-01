@@ -210,6 +210,12 @@
         <span id="cluster-status-badge" class="hidden bg-emerald-500/20 text-emerald-300 text-[10px] px-1 rounded-full font-bold"></span>
       </button>
 
+      <button id="btn-open-flight-recorder" onclick="openFlightRecorderTab()" class="hidden h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center space-x-1.5" title="Performance Flight Recorder (On-Demand Telemetry)">
+        <span id="flight-recorder-rec-dot" class="inline-block w-2 h-2 rounded-full bg-slate-500"></span>
+        <span id="flight-recorder-btn-label">📈 Recorder</span>
+        <span id="flight-recorder-timer-badge" class="hidden bg-rose-500/20 text-rose-300 text-[10px] px-1.5 py-0.5 rounded-full font-mono font-bold animate-pulse">REC 00:00</span>
+      </button>
+
       <button id="btn-open-audit-log" onclick="toggleAuditDrawer()" class="h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center space-x-1" title="Session Audit Log">
         <span>📜 Audit Log</span>
       </button>
@@ -1140,6 +1146,122 @@
 
             <div id="cl-nodes-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
               <!-- Dynamically populated node cards -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Performance Flight Recorder View (Dedicated Tab) -->
+      <div id="flight-recorder-view-container" class="hidden flex-1 flex flex-col overflow-hidden bg-app-bg">
+        <!-- Flight Recorder Toolbar -->
+        <div class="h-10 bg-app-surface border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0 gap-3">
+          <div class="flex items-center space-x-2.5 flex-1 min-w-0">
+            <!-- Start/Stop Button -->
+            <button id="fr-btn-toggle" onclick="toggleFlightRecorder()" class="h-7 px-3 bg-rose-600 hover:bg-rose-500 text-white rounded font-medium flex items-center space-x-1.5 transition shadow-sm">
+              <span id="fr-btn-icon" class="text-xs">●</span>
+              <span id="fr-btn-text">Start Recording</span>
+            </button>
+
+            <!-- Interval Selector -->
+            <div class="flex items-center space-x-1 bg-slate-900 border border-slate-700 rounded px-1.5 h-7">
+              <span class="text-slate-400 text-[11px] font-medium">Interval:</span>
+              <select id="fr-interval-select" class="bg-transparent text-slate-200 text-xs focus:outline-none">
+                <option value="1000">1s</option>
+                <option value="2000">2s</option>
+                <option value="5000">5s</option>
+              </select>
+            </div>
+
+            <!-- Auto-stop safety badge & state indicator -->
+            <div id="fr-status-pill" class="flex items-center space-x-2 text-[11px] text-slate-400 font-mono bg-slate-900 border border-slate-700 px-2 h-7 rounded">
+              <span class="inline-block w-2 h-2 rounded-full bg-slate-500" id="fr-pill-dot"></span>
+              <span id="fr-pill-text">IDLE</span>
+            </div>
+          </div>
+
+          <!-- Past Session Selector & Exports -->
+          <div class="shrink-0 flex items-center space-x-2">
+            <select id="fr-session-dropdown" onchange="onSelectFlightRecorderSession(this.value)" class="h-7 bg-slate-900 border border-slate-700 text-slate-300 rounded px-2 text-xs max-w-[220px] truncate focus:outline-none">
+              <option value="">-- Active Live View --</option>
+            </select>
+
+            <button onclick="exportFlightRecorderJSON()" class="h-7 bg-app-card hover:bg-slate-700 text-slate-200 px-2.5 rounded border border-app-border transition text-xs flex items-center space-x-1" title="Export session metrics and query snapshots to JSON">
+              <span>📥 Export JSON</span>
+            </button>
+
+            <button id="fr-btn-delete" onclick="deleteCurrentFlightSession()" class="hidden h-7 bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 px-2.5 rounded border border-rose-800/60 transition text-xs flex items-center space-x-1" title="Delete this recording run">
+              <span>🗑️ Delete</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Scrollable Flight Content Area -->
+        <div class="flex-1 overflow-y-auto p-4 space-y-4">
+          <!-- Metric Legend Cards -->
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div class="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800 flex items-center space-x-3">
+              <div class="w-3 h-3 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/50"></div>
+              <div>
+                <div class="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Throughput (QPS)</div>
+                <div id="fr-metric-qps" class="text-sm font-bold text-emerald-400 font-mono">0 qps</div>
+              </div>
+            </div>
+
+            <div class="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800 flex items-center space-x-3">
+              <div class="w-3 h-3 rounded-full bg-rose-500 shadow-sm shadow-rose-500/50"></div>
+              <div>
+                <div class="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Threads Running</div>
+                <div id="fr-metric-threads" class="text-sm font-bold text-rose-400 font-mono">0 / 0 conn</div>
+              </div>
+            </div>
+
+            <div class="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800 flex items-center space-x-3">
+              <div class="w-3 h-3 rounded-full bg-amber-500 shadow-sm shadow-amber-500/50"></div>
+              <div>
+                <div class="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Row Lock Waits</div>
+                <div id="fr-metric-locks" class="text-sm font-bold text-amber-400 font-mono">0 waits</div>
+              </div>
+            </div>
+
+            <div class="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800 flex items-center space-x-3">
+              <div class="w-3 h-3 rounded-full bg-purple-500 shadow-sm shadow-purple-500/50"></div>
+              <div>
+                <div class="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Buffer Pool Waits</div>
+                <div id="fr-metric-buffer" class="text-sm font-bold text-purple-400 font-mono">0 stalls</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Canvas Interactive Chart -->
+          <div class="relative bg-slate-950 rounded-lg border border-slate-800 p-3 shadow-inner">
+            <div class="flex items-center justify-between text-[11px] text-slate-400 pb-2 border-b border-slate-800/80 mb-2">
+              <span class="flex items-center space-x-1.5 font-medium text-slate-300">
+                <span>📊</span>
+                <span>Telemetry Timeline</span>
+              </span>
+              <span class="text-[10px] text-slate-500">Hover or click any spike to isolate active queries</span>
+            </div>
+            <div class="relative w-full h-56">
+              <canvas id="fr-canvas" class="w-full h-full block cursor-crosshair"></canvas>
+              <div id="fr-canvas-tooltip" class="hidden absolute pointer-events-none bg-slate-900/95 border border-slate-700 rounded shadow-xl px-2.5 py-1.5 text-[11px] text-slate-200 font-mono z-30 space-y-1"></div>
+            </div>
+          </div>
+
+          <!-- Correlated Query Drill-Down Drawer / Panel -->
+          <div class="bg-app-surface rounded-lg border border-app-border overflow-hidden">
+            <div class="p-2.5 bg-slate-900/90 border-b border-app-border flex items-center justify-between">
+              <div class="flex items-center space-x-2 text-xs">
+                <span>⚡</span>
+                <span class="font-bold text-white">Correlated Non-Idle Queries</span>
+                <span id="fr-queries-timestamp-badge" class="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300 font-mono">At Selected Tick</span>
+              </div>
+              <span id="fr-queries-count" class="text-[11px] text-slate-400">0 active queries</span>
+            </div>
+
+            <div id="fr-queries-list" class="p-3 space-y-2.5 max-h-72 overflow-y-auto">
+              <div class="text-slate-500 text-center py-6 text-xs italic">
+                Select a point on the chart timeline to inspect active queries running at that second.
+              </div>
             </div>
           </div>
         </div>
@@ -2977,6 +3099,10 @@
         const btnPL = document.getElementById('btn-open-processlist');
         const btnPriv = document.getElementById('btn-open-privileges');
         const btnCluster = document.getElementById('btn-open-cluster');
+        const btnFR = document.getElementById('btn-open-flight-recorder');
+        if (btnFR) btnFR.classList.remove('hidden');
+        checkFlightRecorderStatus();
+
         if (btnPL) {
           if (conn.driver === 'mysql' || conn.driver === 'mariadb') {
             btnPL.classList.remove('hidden');
@@ -4287,7 +4413,7 @@
       const container = document.getElementById('tabs-container');
       container.innerHTML = tabs.map(t => `
         <div onclick="switchTab('${t.id}')" class="flex items-center space-x-1 px-3 py-1 rounded cursor-pointer text-xs transition ${t.id === activeTabId ? 'bg-app-bg text-app-accent font-semibold border-t-2 border-app-accent' : 'hover:bg-slate-800 text-slate-400'}">
-          <span>${t.isCluster ? '🌐' : (t.isProcesslist ? '⚡' : (t.isTableViewer ? '📊' : (t.isNote ? '📝' : '⚡')))}</span>
+          <span>${t.isFlightRecorder ? '📈' : (t.isCluster ? '🌐' : (t.isProcesslist ? '⚡' : (t.isTableViewer ? '📊' : (t.isNote ? '📝' : '⚡'))))}</span>
           <span class="truncate max-w-[120px]">${escapeHtml(t.title)}</span>
           <button onclick="event.stopPropagation(); closeTab('${t.id}')" class="hover:text-red-400 pl-1">✕</button>
         </div>
@@ -4299,12 +4425,22 @@
       const gridContainer = document.getElementById('grid-container');
       const plContainer = document.getElementById('processlist-view-container');
       const clContainer = document.getElementById('cluster-view-container');
+      const frContainer = document.getElementById('flight-recorder-view-container');
 
-      if (activeTab && activeTab.isCluster) {
+      if (activeTab && activeTab.isFlightRecorder) {
         if (modeTabs) modeTabs.classList.add('hidden');
         if (editorContainer) editorContainer.classList.add('hidden');
         if (gridContainer) gridContainer.classList.add('hidden');
         if (plContainer) plContainer.classList.add('hidden');
+        if (clContainer) clContainer.classList.add('hidden');
+        if (frContainer) frContainer.classList.remove('hidden');
+        refreshFlightRecorderUI();
+      } else if (activeTab && activeTab.isCluster) {
+        if (modeTabs) modeTabs.classList.add('hidden');
+        if (editorContainer) editorContainer.classList.add('hidden');
+        if (gridContainer) gridContainer.classList.add('hidden');
+        if (plContainer) plContainer.classList.add('hidden');
+        if (frContainer) frContainer.classList.add('hidden');
         if (clContainer) clContainer.classList.remove('hidden');
         fetchClusterHealth(true);
       } else if (activeTab && activeTab.isProcesslist) {
@@ -4312,11 +4448,13 @@
         if (editorContainer) editorContainer.classList.add('hidden');
         if (gridContainer) gridContainer.classList.add('hidden');
         if (clContainer) clContainer.classList.add('hidden');
+        if (frContainer) frContainer.classList.add('hidden');
         if (plContainer) plContainer.classList.remove('hidden');
         fetchProcesslist(true);
       } else {
         if (plContainer) plContainer.classList.add('hidden');
         if (clContainer) clContainer.classList.add('hidden');
+        if (frContainer) frContainer.classList.add('hidden');
         if (gridContainer) gridContainer.classList.remove('hidden');
         if (activeTab && activeTab.isTableViewer) {
           if (modeTabs) modeTabs.classList.remove('hidden');
@@ -4359,7 +4497,7 @@
 
     function switchTab(tabId) {
       const curr = tabs.find(t => t.id === activeTabId);
-      if (curr && !curr.isTableViewer && !curr.isProcesslist && !curr.isCluster) {
+      if (curr && !curr.isTableViewer && !curr.isProcesslist && !curr.isCluster && !curr.isFlightRecorder) {
         curr.sql = getEditorSQL();
       }
       activeTabId = tabId;
@@ -5444,6 +5582,748 @@ Apa langkah konkret untuk menyelesaikan bottleneck ini? Apakah perlu tuning my.c
         if (nameInput) nameInput.value = `${activeConnection ? activeConnection.name : 'Cluster'} (${host})`;
         showNativeAlert(`Modal koneksi telah diisi otomatis dengan host node ${host}:${port}. Masukkan kata sandi jika diperlukan lalu klik Connect.`, 'Ganti Sesi Node');
       }, 100);
+    }
+
+    // --- Performance Flight Recorder ---
+    let flightState = {
+      isRecording: false,
+      recordingId: null,
+      name: '',
+      startedAt: null,
+      durationSeconds: 0,
+      sampleCount: 0,
+      intervalMs: 1000,
+      ticks: [],
+      selectedTickIndex: null,
+      sessions: [],
+      selectedSessionId: null,
+    };
+    let currentFlightQueries = [];
+    let flightPollTimer = null;
+    let flightCountdownTimer = null;
+
+    function openFlightRecorderTab() {
+      if (!activeConnection) {
+        showNativeAlert('Please select and connect to a database session first.', 'Flight Recorder');
+        return;
+      }
+      let tab = tabs.find(t => t.isFlightRecorder);
+      if (!tab) {
+        tab = {
+          id: 'tab-flight-recorder',
+          title: 'Flight Recorder',
+          isFlightRecorder: true,
+        };
+        tabs.push(tab);
+      }
+      switchTab(tab.id);
+      loadFlightSessions();
+      checkFlightRecorderStatus();
+      refreshFlightRecorderUI();
+    }
+
+    async function checkFlightRecorderStatus() {
+      if (!activeConnection) return;
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/flight-recorder/status`);
+        if (!res.ok) return;
+        const data = await res.json();
+        
+        flightState.isRecording = !!data.is_recording;
+        if (data.is_recording) {
+          flightState.recordingId = data.recording_id;
+          flightState.name = data.name;
+          flightState.startedAt = new Date(data.started_at);
+          flightState.durationSeconds = data.duration_seconds || 0;
+          flightState.sampleCount = data.sample_count || 0;
+          flightState.intervalMs = data.interval_ms || 1000;
+          if (data.recent_ticks && data.recent_ticks.length > 0 && !flightState.selectedSessionId) {
+            flightState.ticks = data.recent_ticks;
+          }
+          startFlightPollLoop();
+        } else {
+          stopFlightPollLoop();
+        }
+        updateFlightNavbarBadge();
+        refreshFlightRecorderUI();
+      } catch (err) {
+        console.error('Failed to check flight recorder status:', err);
+      }
+    }
+
+    function updateFlightNavbarBadge() {
+      const dot = document.getElementById('flight-recorder-rec-dot');
+      const badge = document.getElementById('flight-recorder-timer-badge');
+      if (!dot || !badge) return;
+
+      if (flightState.isRecording) {
+        dot.className = 'inline-block w-2 h-2 rounded-full bg-rose-500 animate-ping';
+        badge.classList.remove('hidden');
+        const mins = Math.floor(flightState.durationSeconds / 60);
+        const secs = flightState.durationSeconds % 60;
+        badge.textContent = `REC ${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+      } else {
+        dot.className = 'inline-block w-2 h-2 rounded-full bg-slate-500';
+        badge.classList.add('hidden');
+      }
+    }
+
+    async function toggleFlightRecorder() {
+      if (!activeConnection) return;
+      if (!flightState.isRecording) {
+        // Start recording
+        const intervalEl = document.getElementById('fr-interval-select');
+        const intervalMs = intervalEl ? parseInt(intervalEl.value, 10) : 1000;
+        try {
+          const res = await apiFetch(`/api/session/${activeConnection.id}/flight-recorder/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ interval_ms: intervalMs })
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            showNativeAlert('Failed to start recording: ' + (err.error || res.statusText), 'Flight Recorder');
+            return;
+          }
+          const data = await res.json();
+          flightState.isRecording = true;
+          flightState.recordingId = data.recording_id;
+          flightState.startedAt = new Date(data.started_at);
+          flightState.durationSeconds = 0;
+          flightState.sampleCount = 0;
+          flightState.intervalMs = intervalMs;
+          flightState.ticks = [];
+          flightState.selectedTickIndex = null;
+          flightState.selectedSessionId = null;
+
+          startFlightPollLoop();
+          updateFlightNavbarBadge();
+          refreshFlightRecorderUI();
+          loadFlightSessions();
+        } catch (err) {
+          showNativeAlert('Failed to start recording: ' + err.message, 'Flight Recorder');
+        }
+      } else {
+        // Stop recording
+        try {
+          const res = await apiFetch(`/api/session/${activeConnection.id}/flight-recorder/stop`, {
+            method: 'POST'
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            showNativeAlert('Failed to stop recording: ' + (err.error || res.statusText), 'Flight Recorder');
+            return;
+          }
+          const finishedSession = await res.json();
+          flightState.isRecording = false;
+          stopFlightPollLoop();
+          updateFlightNavbarBadge();
+          await loadFlightSessions();
+          if (finishedSession && finishedSession.id) {
+            loadFlightRecorderSession(finishedSession.id);
+          } else {
+            refreshFlightRecorderUI();
+          }
+          showNativeAlert('Flight recording completed and saved to vault.', 'Recording Saved');
+        } catch (err) {
+          showNativeAlert('Failed to stop recording: ' + err.message, 'Flight Recorder');
+        }
+      }
+    }
+
+    function startFlightPollLoop() {
+      if (flightPollTimer) clearInterval(flightPollTimer);
+      if (flightCountdownTimer) clearInterval(flightCountdownTimer);
+
+      flightCountdownTimer = setInterval(() => {
+        if (flightState.isRecording) {
+          flightState.durationSeconds++;
+          updateFlightNavbarBadge();
+          const pill = document.getElementById('fr-pill-text');
+          if (pill) {
+            const mins = Math.floor(flightState.durationSeconds / 60);
+            const secs = flightState.durationSeconds % 60;
+            const remaining = Math.max(0, 600 - flightState.durationSeconds);
+            const rMin = Math.floor(remaining / 60);
+            const rSec = remaining % 60;
+            pill.textContent = `REC ${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')} (Auto-stop in: ${String(rMin).padStart(2, '0')}:${String(rSec).padStart(2, '0')})`;
+          }
+        }
+      }, 1000);
+
+      flightPollTimer = setInterval(async () => {
+        if (!activeConnection || !flightState.isRecording) return;
+        try {
+          const res = await apiFetch(`/api/session/${activeConnection.id}/flight-recorder/status`);
+          if (res.ok) {
+            const data = await res.json();
+            if (!data.is_recording) {
+              // Auto-stopped by server 10m safety guard
+              flightState.isRecording = false;
+              stopFlightPollLoop();
+              updateFlightNavbarBadge();
+              loadFlightSessions();
+              refreshFlightRecorderUI();
+              return;
+            }
+            if (data.recent_ticks && !flightState.selectedSessionId) {
+              flightState.ticks = data.recent_ticks;
+              const activeTab = tabs.find(t => t.id === activeTabId);
+              if (activeTab && activeTab.isFlightRecorder) {
+                renderFlightMetricsCards();
+                drawFlightRecorderChart();
+                if (flightState.selectedTickIndex == null && flightState.ticks.length > 0) {
+                  renderCorrelatedQueries(flightState.ticks[flightState.ticks.length - 1]);
+                }
+              }
+            }
+          }
+        } catch (e) {}
+      }, flightState.intervalMs || 1000);
+    }
+
+    function stopFlightPollLoop() {
+      if (flightPollTimer) {
+        clearInterval(flightPollTimer);
+        flightPollTimer = null;
+      }
+      if (flightCountdownTimer) {
+        clearInterval(flightCountdownTimer);
+        flightCountdownTimer = null;
+      }
+    }
+
+    async function loadFlightSessions() {
+      if (!activeConnection) return;
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/flight-recorder/sessions`);
+        if (!res.ok) return;
+        const sessions = await res.json();
+        flightState.sessions = sessions || [];
+
+        const dropdown = document.getElementById('fr-session-dropdown');
+        if (dropdown) {
+          const prevVal = dropdown.value;
+          dropdown.innerHTML = `<option value="">-- Active Live View --</option>` +
+            flightState.sessions.map(s => {
+              const dt = new Date(s.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+              const m = Math.floor(s.duration_seconds / 60);
+              const sec = s.duration_seconds % 60;
+              return `<option value="${s.id}">${escapeHtml(s.name)} (${dt} - ${m}m ${sec}s, ${s.sample_count} pts)</option>`;
+            }).join('');
+          dropdown.value = prevVal || '';
+        }
+      } catch (err) {
+        console.error('Failed to load flight sessions:', err);
+      }
+    }
+
+    async function onSelectFlightRecorderSession(recId) {
+      if (!recId) {
+        flightState.selectedSessionId = null;
+        const delBtn = document.getElementById('fr-btn-delete');
+        if (delBtn) delBtn.classList.add('hidden');
+        checkFlightRecorderStatus();
+        return;
+      }
+      await loadFlightRecorderSession(recId);
+    }
+
+    async function loadFlightRecorderSession(recId) {
+      if (!activeConnection || !recId) return;
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/flight-recorder/sessions/${recId}`);
+        if (!res.ok) {
+          showNativeAlert('Failed to load recording session.', 'Flight Recorder');
+          return;
+        }
+        const detail = await res.json();
+        flightState.selectedSessionId = recId;
+        flightState.ticks = detail.ticks || [];
+        flightState.selectedTickIndex = flightState.ticks.length > 0 ? flightState.ticks.length - 1 : null;
+
+        const dropdown = document.getElementById('fr-session-dropdown');
+        if (dropdown) dropdown.value = recId;
+
+        const delBtn = document.getElementById('fr-btn-delete');
+        if (delBtn) delBtn.classList.remove('hidden');
+
+        refreshFlightRecorderUI();
+      } catch (err) {
+        showNativeAlert('Error loading session: ' + err.message, 'Flight Recorder');
+      }
+    }
+
+    async function deleteCurrentFlightSession() {
+      if (!activeConnection || !flightState.selectedSessionId) return;
+      const ok = await showNativeConfirm('Delete this flight recording and all its sampled metrics permanently?', 'Delete Recording');
+      if (!ok) return;
+
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/flight-recorder/sessions/${flightState.selectedSessionId}`, {
+          method: 'DELETE'
+        });
+        if (!res.ok) {
+          showNativeAlert('Failed to delete recording.', 'Delete Error');
+          return;
+        }
+        flightState.selectedSessionId = null;
+        flightState.ticks = [];
+        flightState.selectedTickIndex = null;
+        const delBtn = document.getElementById('fr-btn-delete');
+        if (delBtn) delBtn.classList.add('hidden');
+
+        await loadFlightSessions();
+        checkFlightRecorderStatus();
+      } catch (err) {
+        showNativeAlert('Failed to delete recording: ' + err.message, 'Delete Error');
+      }
+    }
+
+    function exportFlightRecorderJSON() {
+      if (!flightState.ticks || flightState.ticks.length === 0) {
+        showNativeAlert('No recorded metrics available to export.', 'Export Flight Recorder');
+        return;
+      }
+      const exportData = {
+        exported_at: new Date().toISOString(),
+        connection: activeConnection ? activeConnection.name : 'unknown',
+        recording_id: flightState.selectedSessionId || flightState.recordingId,
+        ticks: flightState.ticks
+      };
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `flight-recorder-${Date.now()}.json`;
+      a.click();
+    }
+
+    function refreshFlightRecorderUI() {
+      // Toggle button
+      const btnToggle = document.getElementById('fr-btn-toggle');
+      const btnIcon = document.getElementById('fr-btn-icon');
+      const btnText = document.getElementById('fr-btn-text');
+      const pillDot = document.getElementById('fr-pill-dot');
+      const pillText = document.getElementById('fr-pill-text');
+
+      if (btnToggle && btnIcon && btnText) {
+        if (flightState.isRecording) {
+          btnToggle.className = 'h-7 px-3 bg-slate-800 hover:bg-slate-700 text-rose-300 border border-rose-600 rounded font-medium flex items-center space-x-1.5 transition shadow-sm';
+          btnIcon.textContent = '⏹';
+          btnText.textContent = 'Stop Recording';
+        } else {
+          btnToggle.className = 'h-7 px-3 bg-rose-600 hover:bg-rose-500 text-white rounded font-medium flex items-center space-x-1.5 transition shadow-sm';
+          btnIcon.textContent = '●';
+          btnText.textContent = 'Start Recording';
+        }
+      }
+
+      if (pillDot && pillText) {
+        if (flightState.isRecording) {
+          pillDot.className = 'inline-block w-2 h-2 rounded-full bg-rose-500 animate-pulse';
+          const mins = Math.floor(flightState.durationSeconds / 60);
+          const secs = flightState.durationSeconds % 60;
+          pillText.textContent = `REC ${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+        } else if (flightState.selectedSessionId) {
+          pillDot.className = 'inline-block w-2 h-2 rounded-full bg-emerald-500';
+          pillText.textContent = `REVIEWING (${flightState.ticks.length} pts)`;
+        } else {
+          pillDot.className = 'inline-block w-2 h-2 rounded-full bg-slate-500';
+          pillText.textContent = 'IDLE';
+        }
+      }
+
+      setupFlightCanvasInteraction();
+      renderFlightMetricsCards();
+      drawFlightRecorderChart();
+
+      if (flightState.selectedTickIndex != null && flightState.ticks[flightState.selectedTickIndex]) {
+        renderCorrelatedQueries(flightState.ticks[flightState.selectedTickIndex]);
+      } else if (flightState.ticks.length > 0) {
+        renderCorrelatedQueries(flightState.ticks[flightState.ticks.length - 1]);
+      } else {
+        const qList = document.getElementById('fr-queries-list');
+        if (qList) {
+          qList.innerHTML = `<div class="text-slate-500 text-center py-6 text-xs italic">Select a point on the chart timeline to inspect active queries running at that second.</div>`;
+        }
+      }
+    }
+
+    function renderFlightMetricsCards() {
+      const qpsEl = document.getElementById('fr-metric-qps');
+      const thEl = document.getElementById('fr-metric-threads');
+      const lkEl = document.getElementById('fr-metric-locks');
+      const bfEl = document.getElementById('fr-metric-buffer');
+
+      const tick = (flightState.selectedTickIndex != null && flightState.ticks[flightState.selectedTickIndex])
+        ? flightState.ticks[flightState.selectedTickIndex]
+        : (flightState.ticks.length > 0 ? flightState.ticks[flightState.ticks.length - 1] : null);
+
+      if (!tick) {
+        if (qpsEl) qpsEl.textContent = '0 qps';
+        if (thEl) thEl.textContent = '0 / 0 conn';
+        if (lkEl) lkEl.textContent = '0 waits';
+        if (bfEl) bfEl.textContent = '0 stalls';
+        return;
+      }
+
+      if (qpsEl) qpsEl.textContent = `${tick.qps.toLocaleString()} qps`;
+      if (thEl) thEl.textContent = `${tick.threads_running} / ${tick.threads_connected} conn`;
+      if (lkEl) lkEl.textContent = `${tick.row_lock_waits.toLocaleString()} waits`;
+      if (bfEl) bfEl.textContent = `${tick.buffer_pool_wait_free.toLocaleString()} stalls`;
+    }
+
+    function setupFlightCanvasInteraction() {
+      const canvas = document.getElementById('fr-canvas');
+      if (!canvas || canvas.dataset.initialized) return;
+      canvas.dataset.initialized = 'true';
+
+      const tooltip = document.getElementById('fr-canvas-tooltip');
+
+      canvas.addEventListener('mousemove', (e) => {
+        if (!flightState.ticks || flightState.ticks.length === 0) return;
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const paddingLeft = 45;
+        const paddingRight = 15;
+        const chartWidth = rect.width - paddingLeft - paddingRight;
+
+        if (x < paddingLeft || x > rect.width - paddingRight) {
+          if (tooltip) tooltip.classList.add('hidden');
+          return;
+        }
+
+        const ratio = (x - paddingLeft) / chartWidth;
+        const index = Math.round(ratio * (flightState.ticks.length - 1));
+        const clampedIdx = Math.max(0, Math.min(flightState.ticks.length - 1, index));
+        const tick = flightState.ticks[clampedIdx];
+
+        if (tooltip) {
+          const dt = new Date(tick.sampled_at).toLocaleTimeString();
+          tooltip.innerHTML = `
+            <div class="font-bold text-white border-b border-slate-700 pb-1 mb-1 flex items-center justify-between gap-3">
+              <span>⏱ ${dt}</span>
+              <span class="text-slate-400 font-normal">#${clampedIdx + 1}</span>
+            </div>
+            <div class="text-emerald-400 font-medium">QPS: <span class="font-bold">${tick.qps}</span></div>
+            <div class="text-rose-400 font-medium">Threads: <span class="font-bold">${tick.threads_running}</span> / ${tick.threads_connected}</div>
+            <div class="text-amber-400 font-medium">Lock Waits: <span class="font-bold">${tick.row_lock_waits}</span></div>
+            <div class="text-purple-400 font-medium">Buffer Waits: <span class="font-bold">${tick.buffer_pool_wait_free}</span></div>
+          `;
+          tooltip.classList.remove('hidden');
+          let tipX = x + 15;
+          if (tipX + 160 > rect.width) tipX = x - 170;
+          tooltip.style.left = `${tipX}px`;
+          tooltip.style.top = `20px`;
+        }
+      });
+
+      canvas.addEventListener('mouseleave', () => {
+        if (tooltip) tooltip.classList.add('hidden');
+      });
+
+      canvas.addEventListener('click', (e) => {
+        if (!flightState.ticks || flightState.ticks.length === 0) return;
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const paddingLeft = 45;
+        const paddingRight = 15;
+        const chartWidth = rect.width - paddingLeft - paddingRight;
+        if (x < paddingLeft || x > rect.width - paddingRight) return;
+
+        const ratio = (x - paddingLeft) / chartWidth;
+        const index = Math.round(ratio * (flightState.ticks.length - 1));
+        const clampedIdx = Math.max(0, Math.min(flightState.ticks.length - 1, index));
+
+        flightState.selectedTickIndex = clampedIdx;
+        drawFlightRecorderChart();
+        renderFlightMetricsCards();
+        renderCorrelatedQueries(flightState.ticks[clampedIdx]);
+      });
+
+      window.addEventListener('resize', () => {
+        const activeTab = tabs.find(t => t.id === activeTabId);
+        if (activeTab && activeTab.isFlightRecorder) {
+          drawFlightRecorderChart();
+        }
+      });
+    }
+
+    function drawFlightRecorderChart() {
+      const canvas = document.getElementById('fr-canvas');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      ctx.scale(dpr, dpr);
+
+      const w = rect.width;
+      const h = rect.height;
+      const padLeft = 45;
+      const padRight = 15;
+      const padTop = 15;
+      const padBottom = 25;
+      const chartW = w - padLeft - padRight;
+      const chartH = h - padTop - padBottom;
+
+      ctx.clearRect(0, 0, w, h);
+
+      const ticks = flightState.ticks;
+      if (!ticks || ticks.length === 0) {
+        ctx.fillStyle = '#64748B';
+        ctx.font = '12px ui-monospace, SFMono-Regular, monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('No telemetry ticks recorded yet. Click "● Start Recording" to capture performance.', w / 2, h / 2);
+        return;
+      }
+
+      // Find max values for dual scale (QPS scale on left, Threads/Locks scale on right)
+      let maxQps = 10;
+      let maxConcurrency = 5;
+
+      ticks.forEach(t => {
+        if (t.qps > maxQps) maxQps = t.qps;
+        if (t.threads_running > maxConcurrency) maxConcurrency = t.threads_running;
+        if (t.threads_connected > maxConcurrency) maxConcurrency = t.threads_connected;
+        if (t.row_lock_waits > maxConcurrency) maxConcurrency = t.row_lock_waits;
+        if (t.buffer_pool_wait_free > maxConcurrency) maxConcurrency = t.buffer_pool_wait_free;
+      });
+
+      maxQps = Math.ceil(maxQps * 1.15);
+      maxConcurrency = Math.ceil(maxConcurrency * 1.2);
+
+      // Draw subtle grid lines
+      ctx.strokeStyle = 'rgba(51, 65, 85, 0.4)';
+      ctx.lineWidth = 1;
+      ctx.fillStyle = '#64748B';
+      ctx.font = '10px ui-monospace, monospace';
+      ctx.textAlign = 'right';
+
+      const gridSteps = 4;
+      for (let i = 0; i <= gridSteps; i++) {
+        const y = padTop + (chartH / gridSteps) * i;
+        ctx.beginPath();
+        ctx.moveTo(padLeft, y);
+        ctx.lineTo(w - padRight, y);
+        ctx.stroke();
+
+        const qVal = Math.round(maxQps - (maxQps / gridSteps) * i);
+        ctx.fillText(qVal.toString(), padLeft - 6, y + 3);
+      }
+
+      // X-Axis Time Markers
+      ctx.textAlign = 'center';
+      const timeStep = Math.max(1, Math.floor(ticks.length / 5));
+      for (let i = 0; i < ticks.length; i += timeStep) {
+        const x = padLeft + (i / Math.max(1, ticks.length - 1)) * chartW;
+        const dt = new Date(ticks[i].sampled_at);
+        const timeStr = dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        ctx.fillText(timeStr, x, h - 8);
+      }
+
+      // Helper function to draw series line
+      function drawSeries(getDataVal, maxVal, strokeColor, fillColor) {
+        if (ticks.length === 1) {
+          const x = padLeft + chartW / 2;
+          const y = padTop + chartH - (getDataVal(ticks[0]) / maxVal) * chartH;
+          ctx.fillStyle = strokeColor;
+          ctx.beginPath();
+          ctx.arc(x, y, 4, 0, Math.PI * 2);
+          ctx.fill();
+          return;
+        }
+
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i = 0; i < ticks.length; i++) {
+          const val = getDataVal(ticks[i]);
+          const x = padLeft + (i / (ticks.length - 1)) * chartW;
+          const y = padTop + chartH - (val / maxVal) * chartH;
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        if (fillColor) {
+          ctx.lineTo(padLeft + chartW, padTop + chartH);
+          ctx.lineTo(padLeft, padTop + chartH);
+          ctx.closePath();
+          ctx.fillStyle = fillColor;
+          ctx.fill();
+        }
+      }
+
+      // 1. Draw QPS (Green Area + Line)
+      drawSeries(t => t.qps, maxQps, '#10B981', 'rgba(16, 185, 129, 0.08)');
+
+      // 2. Draw Threads Connected (Blue)
+      drawSeries(t => t.threads_connected, maxConcurrency, '#3B82F6', null);
+
+      // 3. Draw Threads Running (Rose)
+      drawSeries(t => t.threads_running, maxConcurrency, '#F43F5E', 'rgba(244, 63, 94, 0.08)');
+
+      // 4. Draw Row Lock Waits (Amber)
+      drawSeries(t => t.row_lock_waits, maxConcurrency, '#F59E0B', null);
+
+      // 5. Draw Selected Highlight Scrubber
+      if (flightState.selectedTickIndex != null && ticks[flightState.selectedTickIndex]) {
+        const selIdx = flightState.selectedTickIndex;
+        const selX = padLeft + (selIdx / Math.max(1, ticks.length - 1)) * chartW;
+
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(selX, padTop);
+        ctx.lineTo(selX, padTop + chartH);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Draw dot on selected QPS
+        const qY = padTop + chartH - (ticks[selIdx].qps / maxQps) * chartH;
+        ctx.fillStyle = '#10B981';
+        ctx.beginPath();
+        ctx.arc(selX, qY, 5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Draw dot on selected Threads Running
+        const thY = padTop + chartH - (ticks[selIdx].threads_running / maxConcurrency) * chartH;
+        ctx.fillStyle = '#F43F5E';
+        ctx.beginPath();
+        ctx.arc(selX, thY, 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    function renderCorrelatedQueries(tick) {
+      const qList = document.getElementById('fr-queries-list');
+      const timeBadge = document.getElementById('fr-queries-timestamp-badge');
+      const countEl = document.getElementById('fr-queries-count');
+      if (!qList) return;
+
+      const dt = new Date(tick.sampled_at).toLocaleTimeString();
+      if (timeBadge) timeBadge.textContent = `At ${dt}`;
+
+      let queries = [];
+      try {
+        queries = JSON.parse(tick.top_queries_json || '[]');
+      } catch (e) {
+        queries = [];
+      }
+
+      currentFlightQueries = queries;
+
+      if (countEl) countEl.textContent = `${queries.length} active queries`;
+
+      if (!queries || queries.length === 0) {
+        qList.innerHTML = `
+          <div class="p-6 text-center text-slate-500 bg-slate-900/50 rounded border border-slate-800/80">
+            <span class="text-emerald-400 font-medium">✓ No slow or blocking queries captured at this second.</span>
+            <div class="text-[11px] text-slate-500 mt-1">Database threads were either sleeping in connection pools or running instantaneous sub-millisecond lookups.</div>
+          </div>
+        `;
+        return;
+      }
+
+      qList.innerHTML = queries.map((q, idx) => {
+        const sqlEscaped = escapeHtml(q.info || '/* empty statement */');
+        const timeSec = q.time || 0;
+        const timeBadgeColor = timeSec > 2 ? 'bg-rose-900 text-rose-200 border-rose-700' : (timeSec > 0 ? 'bg-amber-900 text-amber-200 border-amber-700' : 'bg-slate-800 text-slate-300 border-slate-700');
+
+        return `
+          <div class="p-3 bg-slate-900/90 border border-slate-800 rounded-lg space-y-2">
+            <div class="flex items-center justify-between text-xs">
+              <div class="flex items-center space-x-2">
+                <span class="font-bold text-white font-mono">Thread #${q.thread_id}</span>
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-mono border ${timeBadgeColor}">⏱ ${timeSec}s</span>
+                <span class="text-slate-400 text-[11px]">${escapeHtml(q.user || 'app')}@${escapeHtml(q.host || 'localhost')}</span>
+                ${q.db ? `<span class="px-1.5 py-0.2 rounded text-[10px] bg-slate-800 text-slate-300 font-mono">📁 ${escapeHtml(q.db)}</span>` : ''}
+                ${q.state ? `<span class="text-[11px] text-slate-400 italic">(${escapeHtml(q.state)})</span>` : ''}
+              </div>
+
+              <!-- Action buttons -->
+              <div class="flex items-center space-x-1.5 text-xs">
+                <button onclick="explainFlightQuery(${idx})" class="px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800 transition flex items-center space-x-1" title="Explain Execution Plan">
+                  <span>⚡ Explain</span>
+                </button>
+                <button onclick="sendFlightQueryToEditor(${idx})" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition flex items-center space-x-1" title="Load Query into Editor Tab">
+                  <span>📝 To Tab</span>
+                </button>
+                <button onclick="askCopilotFlightQuery(${idx})" class="px-2 py-0.5 rounded bg-purple-950 hover:bg-purple-900 text-purple-300 border border-purple-800 transition flex items-center space-x-1" title="Ask AI Copilot for tuning advice">
+                  <span>🤖 Ask Copilot</span>
+                </button>
+                <button onclick="copyFlightQuery(this, ${idx})" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition flex items-center space-x-1" title="Copy SQL">
+                  <span>📋 Copy</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- SQL Text Box -->
+            <pre class="bg-slate-950 p-2.5 rounded border border-slate-800 text-xs font-mono text-emerald-300 overflow-x-auto whitespace-pre-wrap max-h-32 select-all leading-relaxed">${sqlEscaped}</pre>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function explainFlightQuery(idx) {
+      const q = currentFlightQueries[idx];
+      if (!q || !q.info) return;
+      explainSpecificQuery(q.info, q.db);
+    }
+
+    function sendFlightQueryToEditor(idx) {
+      const q = currentFlightQueries[idx];
+      if (!q || !q.info) return;
+      sendProcessQueryToEditor(q.info);
+    }
+
+    function askCopilotFlightQuery(idx) {
+      const q = currentFlightQueries[idx];
+      if (!q || !q.info) return;
+      const tick = flightState.selectedTickIndex != null && flightState.ticks[flightState.selectedTickIndex]
+        ? flightState.ticks[flightState.selectedTickIndex]
+        : { qps: 0, threads_running: 0 };
+
+      const aiSidebar = document.getElementById('ai-sidebar');
+      if (aiSidebar && aiSidebar.classList.contains('hidden')) {
+        toggleAISidebar();
+      }
+      const promptInput = document.getElementById('ai-prompt-input');
+      if (!promptInput) return;
+
+      const template = `Query ini tertangkap saat lonjakan performa di Performance Flight Recorder (Durasi Query: ${q.time || 0}s, QPS Sistem: ${tick.qps}, Threads Running: ${tick.threads_running}):
+
+\`\`\`sql
+${q.info}
+\`\`\`
+
+Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau index yang diperlukan.`;
+
+      promptInput.value = template;
+      promptInput.focus();
+      showNativeAlert('Query dan metrik lonjakan telah dimasukkan ke Copilot. Klik Send untuk analisis optimasi.', 'Copilot Siap');
+    }
+
+    async function copyFlightQuery(btn, idx) {
+      const q = currentFlightQueries[idx];
+      if (!q || !q.info) return;
+      try {
+        await navigator.clipboard.writeText(q.info);
+        const orig = btn.innerHTML;
+        btn.innerHTML = '<span>✓ Copied!</span>';
+        btn.classList.add('bg-emerald-800', 'text-white');
+        setTimeout(() => {
+          btn.innerHTML = orig;
+          btn.classList.remove('bg-emerald-800', 'text-white');
+        }, 1500);
+      } catch (err) {
+        showNativeAlert('Copy failed: ' + err.message, 'Copy Error');
+      }
     }
 
     // --- Session Audit Log Drawer ---

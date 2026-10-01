@@ -177,13 +177,17 @@ v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
 │   ├── [x] 12. Full Execution History & Session Audit Log
 │   │   ├── Append-only chronological ledger of all queries executed in session
 │   │   └── Execution metrics (timestamp, duration in ms, rows affected, error status)
-│   └── [x] 13. Dynamic Cluster & Replication Inspector (Galera, PXC 5.7/8.0, Source-Replica)
-│       ├── Auto-detection of Flow Control pauses, EVS network latency & InnoDB disk stalls
-│       └── Peer Node Auto-Discovery isolating the slowest bottleneck culprit node
+│   ├── [x] 13. Dynamic Cluster & Replication Inspector (Galera, PXC 5.7/8.0, Source-Replica)
+│   │   ├── Auto-detection of Flow Control pauses, EVS network latency & InnoDB disk stalls
+│   │   └── Peer Node Auto-Discovery isolating the slowest bottleneck culprit node
+│   └── [x] 14. Performance Flight Recorder (On-Demand Telemetry & Correlated Query Snapshots)
+│       ├── Quad-Metric sampling (Throughput QPS, Threads Running, Row Lock Waits, Buffer Pool Waits)
+│       ├── Adaptive Top-5 Non-Idle process snapshots with 10m auto-stop safety guard
+│       └── Zero-dependency native HTML5 Canvas chart with interactive spike inspection
 └── [C] Enterprise Foundations & Multi-Engine Extensions
-    ├── [ ] 14. PostgreSQL & ClickHouse Driver Extensions
-    ├── [ ] 15. Visual ERD Interactive Canvas (Drag-and-drop relationship visualizer)
-    └── [ ] 16. Headless CLI Suite (`sqlfox query --format=json`, `sqlfox transfer`) for CI/CD
+    ├── [ ] 15. PostgreSQL & ClickHouse Driver Extensions
+    ├── [ ] 16. Visual ERD Interactive Canvas (Drag-and-drop relationship visualizer)
+    └── [ ] 17. Headless CLI Suite (`sqlfox query --format=json`, `sqlfox transfer`) for CI/CD
 ```
 
 ---
@@ -310,6 +314,22 @@ v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
   - **Actionable Remediation Shortcuts**: One-click actions to inspect processlists on the culprit node, switch active session connection to a peer node, and prefill AI Copilot with complete cluster telemetry for tuning guidance.
   - **Documentation & Tests**: ADR-0023, glossary in `CONTEXT.md`, architecture specification in `ARCHITECTURE.md`, unit tests in `internal/driver/mysql/cluster_test.go` and `internal/server/dba_test.go`.
 - **Runnable Verification**: Run `go test -v ./internal/driver/mysql -run TestDiagnoseClusterBottleneck` and `go test -v ./internal/server -run TestAdvancedDiagnosticsAndProfiling` -> verify 100% pass across cluster diagnostics.
+
+---
+
+### Milestone 18: Performance Flight Recorder (On-Demand Telemetry & Correlated Query Snapshots)
+- **Goal**: Enable developers and DBAs to isolate transient latency spikes and performance regressions on demand, linking time-series performance metrics with exact active queries running at that second without running 24/7 background daemons.
+- **Deliverables**:
+  - **Driver Seam & Telemetry Sampler**: Added `SampleFlightMetrics(ctx context.Context) (*FlightMetricSample, error)` across `Session` implementations, capturing Quad-Metric status (differential QPS, `Threads_running` vs `Threads_connected`, Row Lock Waits, and Buffer Pool Wait Free).
+  - **Adaptive Correlated Process Snapshots**: Captures non-idle active threads (`Command != 'Sleep'` with `Time >= 1s` or `Threads_running > 1`, bounded to Top-5 queries per second) directly correlated to timeline points.
+  - **Vault Storage & Auto-Purge**: SQLite tables in vault (`flight_recorder_sessions`, `flight_recorder_ticks`) with 24-hour auto-purge on startup.
+  - **Auto-Stop Safety Guard**: 10-minute auto-stop ceiling preventing indefinite database polling if developer forgets to stop recording.
+  - **Global Navbar Indicator**: Visible pulsing badge (`● REC 00:03:12`) across all tabs with live elapsed timer.
+  - **Dedicated Tab & Zero-Dependency Canvas Chart**: High-DPI HTML5 Canvas multi-series timeline with dual-axis scaling, crosshair hover tooltip, and click-to-pin scrubber.
+  - **Correlated Query Action Drawer**: Instant query cards with execution plan (`⚡ Explain`), query editor handoff (`📝 To Tab`), AI Copilot tuning inquiry (`🤖 Ask Copilot`), and clipboard copy (`📋 Copy`).
+  - **Session History & JSON Export**: Ability to review past runs within 24h, export to JSON, or delete recording sessions.
+  - **Documentation & Verification**: ADR-0025, domain terminology in `CONTEXT.md`, and integration test in `internal/server/flight_recorder_server_test.go` and `internal/vault/flight_recorder_test.go`.
+- **Runnable Verification**: Run `go test -v ./internal/vault -run TestFlightRecorderVault` and `go test -v ./internal/server -run TestFlightRecorderAPIE2E` -> verify 100% pass across flight recorder operations.
 
 
 

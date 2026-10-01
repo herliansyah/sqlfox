@@ -170,6 +170,34 @@ func initSchema(db *sql.DB) error {
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_audit_logs_session ON audit_logs(session_id, executed_at DESC);
+
+	CREATE TABLE IF NOT EXISTS flight_recorder_sessions (
+		id TEXT PRIMARY KEY,
+		session_id TEXT NOT NULL,
+		connection_id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		duration_seconds INTEGER DEFAULT 0,
+		sample_count INTEGER DEFAULT 0,
+		started_at TIMESTAMP NOT NULL,
+		stopped_at TIMESTAMP
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_flight_recorder_sessions ON flight_recorder_sessions(session_id, started_at DESC);
+
+	CREATE TABLE IF NOT EXISTS flight_recorder_ticks (
+		id TEXT PRIMARY KEY,
+		recording_id TEXT NOT NULL,
+		tick_index INTEGER NOT NULL,
+		sampled_at TIMESTAMP NOT NULL,
+		qps INTEGER DEFAULT 0,
+		threads_running INTEGER DEFAULT 0,
+		threads_connected INTEGER DEFAULT 0,
+		row_lock_waits INTEGER DEFAULT 0,
+		buffer_pool_wait_free INTEGER DEFAULT 0,
+		top_queries_json TEXT DEFAULT '[]'
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_flight_recorder_ticks ON flight_recorder_ticks(recording_id, tick_index ASC);
 	`
 	if _, err := db.Exec(query); err != nil {
 		return err

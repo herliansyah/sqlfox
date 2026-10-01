@@ -296,7 +296,51 @@ sequenceDiagram
 
 ---
 
-## 8. Directory & Package Structure
+## 8. Performance Flight Recorder & Correlated Query Pipeline
+
+The Performance Flight Recorder provides on-demand, time-bounded telemetry and thread snapshotting to isolate transient latency spikes and root-cause queries without running heavy 24/7 APM daemons.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor DBA as Developer / DBA
+    participant UI as Web UI (📈 Flight Recorder & Navbar)
+    participant Server as Go API (/flight-recorder)
+    participant Mgr as FlightRecorderManager
+    participant Driver as MySQL / SQLite Driver
+    participant Vault as SQLite Vault (flight_recorder_*)
+
+    DBA->>UI: Click "● Start Recording" (1s interval)
+    UI->>Server: POST /api/session/{id}/flight-recorder/start
+    Server->>Mgr: StartRecording(sessionId, connId, interval)
+    Mgr->>Vault: CreateFlightRecordingSession(...)
+    Mgr->>Mgr: Launch background loop with 10m auto-stop timer
+    Server-->>UI: 200 OK (recording_id)
+    UI->>UI: Navbar displays pulsing badge (● REC 00:00)
+
+    loop Every 1s Ticker (until user stops or 10m ceiling)
+        Mgr->>Driver: SampleFlightMetrics(ctx)
+        Driver->>Driver: SHOW GLOBAL STATUS (Questions, Threads, Locks, Buffer)
+        Driver->>Driver: Query non-idle threads from PROCESSLIST (Top 5)
+        Driver-->>Mgr: Return FlightMetricSample
+        Mgr->>Mgr: Compute differential QPS
+        Mgr->>Vault: AppendFlightRecordingTick(...)
+        UI->>Server: GET /api/session/{id}/flight-recorder/status
+        Server-->>UI: Return recent ticks (last 120s)
+        UI->>UI: Update Canvas chart & telemetry cards
+    end
+
+    DBA->>UI: Click "⏹ Stop Recording"
+    UI->>Server: POST /api/session/{id}/flight-recorder/stop
+    Server->>Mgr: StopRecording(sessionId)
+    Mgr->>Vault: FinishFlightRecordingSession(...)
+    Server-->>UI: Return completed session metadata
+    DBA->>UI: Click on graph spike point -> Drawer reveals correlated Top-5 SQL queries with Explain & AI actions
+```
+
+---
+
+## 9. Directory & Package Structure
 
 ```
 sqlfox/
@@ -306,13 +350,14 @@ sqlfox/
 │       └── main_test.go
 ├── internal/
 │   ├── vault/                      # SQLite config storage & AES-256-GCM credential encryption
-│   │   ├── vault.go                # Connections, master password, audit log
+│   │   ├── vault.go                # Connections, master password, audit log, flight recorder schema
 │   │   ├── crypto.go               # Argon2id key derivation & AES-256-GCM
 │   │   ├── snippets.go             # Parameterized SQL snippets
 │   │   ├── notes.go                # Table documentation notes
-│   │   └── export.go               # .sqlfox-vault portable archive export/import
+│   │   ├── export.go               # .sqlfox-vault portable archive export/import
+│   │   └── flight_recorder.go      # Performance flight recorder sessions & tick persistence with 24h purge
 │   ├── driver/                     # Database driver abstraction
-│   │   ├── driver.go               # Core interfaces (Driver, Session, RowStream, SafeDDL, OSC, Cluster)
+│   │   ├── driver.go               # Core interfaces (Driver, Session, RowStream, SafeDDL, OSC, Cluster, FlightRecorder)
 │   │   ├── rowstream.go            # Canonical chunked row streaming
 │   │   ├── redundant_index.go      # Shadowed / duplicate index detection
 │   │   ├── mysql/                  # MySQL 5.7/8.x, PXC, MariaDB with Galera cluster inspection & fail-fast DDL
@@ -332,6 +377,8 @@ sqlfox/
 │       ├── server.go               # HTTP routing & SPA static file serving
 │       ├── auth.go                 # Remote Access Guard & LAN tablet token auth
 │       ├── session_manager.go      # Active database connection pool & session state with Safe DDL execution
+│       ├── flight_recorder.go      # Flight recorder background controller & auto-stop lifecycle
+│       ├── handlers_flight_recorder.go # Flight recorder REST API endpoints
 │       ├── handlers_connections.go # Connection CRUD & live testing
 │       ├── handlers_query.go       # SQL execution & cancellation
 │       ├── handlers_schema.go      # Schema tree, DDL, preflight DDL, pushdown filtering
@@ -345,13 +392,13 @@ sqlfox/
 │   │   └── index.html
 │   └── embed.go                    # //go:embed dist/*
 ├── docs/
-│   ├── adr/                        # Architectural Decision Records (0001 - 0023)
+│   ├── adr/                        # Architectural Decision Records (0001 - 0025)
 │   ├── playbooks/                  # Production operational playbooks (large-scale database management)
 │   └── agents/                     # Agent workflow documentation
 ├── CONTEXT.md                      # Ubiquitous domain language
 ├── ARCHITECTURE.md                 # System architecture (this document)
 ├── SECURITY.md                     # Security & privacy specification
 ├── UX_DESIGN.md                    # Interface wireframes & design tokens
-├── MILESTONES.md                   # Delivery roadmap & milestones (1 - 16)
+├── MILESTONES.md                   # Delivery roadmap & milestones (1 - 18)
 └── go.mod
 ```

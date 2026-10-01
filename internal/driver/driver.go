@@ -110,7 +110,33 @@ type Session interface {
 	// InspectClusterHealth returns cluster topology, synchronization health, and bottleneck diagnostics.
 	InspectClusterHealth(ctx context.Context) (*ClusterHealthReport, error)
 
+	// SampleFlightMetrics captures an on-demand performance telemetry slice with correlated active queries.
+	SampleFlightMetrics(ctx context.Context) (*FlightMetricSample, error)
+
 	io.Closer
+}
+
+// FlightMetricSample represents an instant performance telemetry slice.
+type FlightMetricSample struct {
+	SampledAt          time.Time         `json:"sampled_at"`
+	Questions          int64             `json:"questions"`
+	ThreadsRunning     int64             `json:"threads_running"`
+	ThreadsConnected   int64             `json:"threads_connected"`
+	RowLockWaits       int64             `json:"row_lock_waits"`
+	BufferPoolWaitFree int64             `json:"buffer_pool_wait_free"`
+	ActiveQueries      []FlightQueryInfo `json:"active_queries"`
+}
+
+// FlightQueryInfo represents a non-idle running thread correlated to a metric tick.
+type FlightQueryInfo struct {
+	ThreadID int64  `json:"thread_id"`
+	User     string `json:"user"`
+	Host     string `json:"host"`
+	DB       string `json:"db"`
+	Command  string `json:"command"`
+	Time     int64  `json:"time"`
+	State    string `json:"state"`
+	Info     string `json:"info"`
 }
 
 // ColumnDefinition describes a column in a query resultset.

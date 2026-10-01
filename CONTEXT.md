@@ -370,6 +370,22 @@ _Avoid_: Node scanner, cluster pinger, server crawler
 A unified diagnostic heuristic comparing inter-node network round-trip latency (`wsrep_evs_repl_latency`), physical storage write stalls (`Innodb_buffer_pool_wait_free`, fsync wait events), and worker saturation (`wsrep_slave_threads`) to isolate whether storage, network, or concurrency is the bottleneck.
 _Avoid_: Hardware checker, slow alert, performance dashboard
 
+**Performance Flight Recorder**:
+An on-demand, time-bounded telemetry recorder capturing differential database server status metrics and active processlist snapshots during an operational investigation window.
+_Avoid_: APM agent, background daemon, metrics monitor
+
+**Recording Session**:
+A stateful capture lifecycle (`IDLE`, `RECORDING`, `STOPPED`) initiated and terminated explicitly by the user, governed by an automatic safety timeout and surfaced via a persistent global recording badge.
+_Avoid_: Profiling job, trace task, run batch
+
+**Quad-Metric Telemetry**:
+A 4-dimensional differential performance vector sampled per tick: Throughput (QPS), Concurrency (`Threads_running`), Contention (Row Lock Waits), and Storage Latency (InnoDB Buffer Pool Waits).
+_Avoid_: Server stats, raw status, generic metrics
+
+**Correlated Process Snapshot**:
+A lightweight, filtered snapshot of non-idle running threads tied to a specific metric timestamp, captured automatically when concurrency or query duration crosses threshold limits.
+_Avoid_: Full thread dump, process backup
+
 ## Codebase Architecture & Maintenance (Ponytail)
 
 **Native Platform Tunneling**:
@@ -401,3 +417,4 @@ _Avoid_: In-process tunnel, custom bastion client
 - **0022**: Safe DDL Guardrails and Lock Contention Prevention (`docs/adr/0022-safe-ddl-guardrails-and-lock-contention-prevention.md`)
 - **0023**: Dynamic Cluster & Replication Inspector with Peer Node Auto-Discovery and Tri-Metric Bottleneck Detective (`docs/adr/0023-cluster-and-replication-inspector.md`)
 - **0024**: Ponytail Pruning, Stateless Service Simplification, and Unified AI Streaming Parser (`docs/adr/0024-ponytail-pruning-and-stateless-service-simplification.md`)
+- **0025**: On-Demand Performance Flight Recorder and Correlated Process Snapshots (`docs/adr/0025-on-demand-performance-flight-recorder-and-correlated-process-snapshots.md`)

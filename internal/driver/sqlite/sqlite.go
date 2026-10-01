@@ -587,6 +587,18 @@ func (s *SQLiteSession) InspectClusterHealth(ctx context.Context) (*driver.Clust
 	}, nil
 }
 
+func (s *SQLiteSession) SampleFlightMetrics(ctx context.Context) (*driver.FlightMetricSample, error) {
+	return &driver.FlightMetricSample{
+		SampledAt:          time.Now(),
+		Questions:          1,
+		ThreadsRunning:     1,
+		ThreadsConnected:   1,
+		RowLockWaits:       0,
+		BufferPoolWaitFree: 0,
+		ActiveQueries:      []driver.FlightQueryInfo{},
+	}, nil
+}
+
 func (s *SQLiteSession) Close() error {
 	return s.db.Close()
 }
