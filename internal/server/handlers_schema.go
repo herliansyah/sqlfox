@@ -433,23 +433,15 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	quoteIdent := func(name string) string {
-		name = strings.Trim(name, "`")
-		return "`" + strings.ReplaceAll(name, "`", "``") + "`"
-	}
+	quoteIdent := func(name string) string { return quoteIdent(name, sess.DriverName) }
 
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
 	var totalAffected int64
 	for _, item := range items {
-		var valStr string
-		if item.Value == nil {
-			valStr = "NULL"
-		} else {
-			valStr = fmt.Sprintf("'%s'", strings.ReplaceAll(fmt.Sprintf("%v", item.Value), "'", "''"))
-		}
-		pkStr := fmt.Sprintf("'%s'", strings.ReplaceAll(fmt.Sprintf("%v", item.PKValue), "'", "''"))
+		valStr := driver.FormatSQLValue(item.Value)
+		pkStr := driver.FormatSQLValue(item.PKValue)
 
 		tableRef := quoteIdent(item.Table)
 		db := item.Database

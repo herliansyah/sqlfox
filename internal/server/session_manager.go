@@ -65,6 +65,15 @@ type ActiveSession struct {
 	mu             sync.RWMutex
 }
 
+// UseDatabase selects the active database context if a non-empty name is provided.
+// ponytail: Inlined check eliminates repeated if db != "" { sess.Session.SelectDatabase(...) } boilerplate.
+func (s *ActiveSession) UseDatabase(ctx context.Context, dbName string) error {
+	if dbName != "" && s.Session != nil {
+		return s.Session.SelectDatabase(ctx, dbName)
+	}
+	return nil
+}
+
 // SessionManager manages connected database sessions.
 type SessionManager struct {
 	vault     *vault.Vault

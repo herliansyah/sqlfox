@@ -68,11 +68,7 @@ func BackupTable(ctx context.Context, sess driver.Session, backupDir, tableName 
 					for _, row := range chunk {
 						vals := make([]string, len(row))
 						for i, v := range row {
-							if v == nil {
-								vals[i] = "NULL"
-							} else {
-								vals[i] = fmt.Sprintf("'%s'", strings.ReplaceAll(fmt.Sprintf("%v", v), "'", "''"))
-							}
+							vals[i] = driver.FormatSQLValue(v)
 						}
 						insertSQL := fmt.Sprintf("INSERT INTO `%s` (%s) VALUES (%s);\n", tableName, colsStr, strings.Join(vals, ", "))
 						f.WriteString(insertSQL)

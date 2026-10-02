@@ -132,24 +132,24 @@ v1.1 (Productivity & Collaboration)
       ▼
 v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
 ├── [A] Navicat Power Suite (Synchronization, Transfer & CRUD)
-│   ├── [ ] 1. Simple CRUD Table Suite (Spreadsheet Data Manipulation)
+│   ├── [x] 1. Simple CRUD Table Suite (Spreadsheet Data Manipulation)
 │   │   ├── Inline "+ Add Row" draft insertion with type-aware validation
 │   │   ├── Multi-row deletion with Safety Guard challenge verification
 │   │   └── Instant visual column sorting and quick-filter toolbar without raw SQL
-│   ├── [ ] 2. Comprehensive Import & Export Tooling
+│   ├── [x] 2. Comprehensive Import & Export Tooling
 │   │   ├── Streaming SQL Dump Export (DDL + chunked multi-insert statements)
 │   │   ├── Large SQL Script Runner with progress tracking and transaction boundary control
 │   │   ├── FK-Aware Smart Seed Dump (Referential Slice Exporter with recursive master table closure)
 │   │   └── Clipboard TSV / Markdown table export for quick team sharing
-│   ├── [ ] 3. Structure Sync (Schema Diff & Migration Generator)
+│   ├── [x] 3. Structure Sync (Schema Diff & Migration Generator)
 │   │   ├── Side-by-side DDL comparison across two databases or connections
 │   │   ├── Color-coded diff breakdown (missing tables, column alterations, index drift)
 │   │   └── Safe DDL migration generator with rollback preview and DDL review modal
-│   ├── [ ] 4. Cross-Connection Data Transfer
+│   ├── [x] 4. Cross-Connection Data Transfer
 │   │   ├── Direct streaming transfer between source and target connections (e.g. Remote -> Local)
 │   │   ├── Table mapping matrix and schema recreation option (DROP/CREATE + INSERT)
 │   │   └── Memory-bounded chunked pipe (<50MB buffer) with live transfer progress
-│   └── [ ] 5. Data Sync (Row-Level Delta Synchronization)
+│   └── [x] 5. Data Sync (Row-Level Delta Synchronization)
 │       ├── Keyset / Primary Key comparison across source and target tables
 │       ├── Visual delta matrix (Identical, Insertions, Updates, Deletions)
 │       └── Selective delta script generator and atomic execution runner
@@ -186,7 +186,7 @@ v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
 │       └── Zero-dependency native HTML5 Canvas chart with interactive spike inspection
 └── [C] Enterprise Foundations & Multi-Engine Extensions
     ├── [ ] 15. PostgreSQL & ClickHouse Driver Extensions
-    ├── [ ] 16. Visual ERD Interactive Canvas (Drag-and-drop relationship visualizer)
+    ├── [x] 16. Visual ERD Interactive Canvas (Drag-and-drop relationship visualizer)
     └── [ ] 17. Headless CLI Suite (`sqlfox query --format=json`, `sqlfox transfer`) for CI/CD
 ```
 
@@ -225,36 +225,40 @@ v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
 ### Milestone 11: Schema & Data Synchronization Engine
 - **Goal**: Enable cross-connection schema comparison (Structure Sync) and direct streaming migration (Data Transfer & Data Sync).
 - **Deliverables**:
-  - **Structure Sync**: AST-based DDL comparison between source and target databases; side-by-side visual diff showing missing tables, column discrepancies, and index drift; auto-generated DDL migration script with DDL Review Modal.
-  - **Cross-Connection Data Transfer**: Direct memory-bounded pipe between two connection sessions (`SourceSession` -> `TargetSession`) transferring tables and data without temporary disk files.
-  - **Data Sync**: Row-level reconciliation using primary key scans; computes delta (`INSERT`, `UPDATE`, `DELETE`) with visual confirmation before atomic execution.
-- **Runnable Verification**: Compare two local databases with diverging schemas -> verify generated `ALTER TABLE` matches delta -> execute Data Transfer of 10,000 rows between connections -> verify target table row count matches source.
+  - [x] **Structure Sync**: AST-based DDL comparison between source and target databases; side-by-side visual diff showing missing tables, column discrepancies, and index drift; auto-generated DDL migration script with DDL Review Modal (`POST /api/sync/structure/compare` & `POST /api/sync/structure/apply`).
+  - [x] **Cross-Connection Data Transfer**: Direct memory-bounded pipe between two connection sessions (`SourceSession` -> `TargetSession`) transferring tables and data without temporary disk files with chunked NDJSON streaming progress (`POST /api/sync/data/transfer`).
+  - [x] **Data Sync**: Row-level reconciliation using primary key scans; computes delta (`INSERT`, `UPDATE`, `DELETE`) with visual confirmation before atomic execution (`POST /api/sync/data/compare` & `POST /api/sync/data/apply`).
+  - [x] **Ergonomics & Safety**: Top Navbar `📦 DB Tools ▾` menu links and Dialogs 23, 24, 25 (`#structure-sync-dialog`, `#data-transfer-dialog`, `#data-sync-dialog`) with Production Safety Guard challenge gating.
+  - [x] **Documentation & Verification**: Formally recorded in `docs/adr/0028-schema-structure-sync-cross-connection-data-transfer-and-row-data-sync.md` with unit tests passing 100% in `internal/server/sync_test.go`.
+- **Runnable Verification**: Run `go test -v ./internal/server -run TestSync` -> verify 100% pass across structure sync, cross-connection data transfer, and row-level data sync.
+
 
 ---
 
 ### Milestone 12: Advanced Diagnostics & Privilege Matrix
 - **Goal**: Provide in-depth storage inspection, query execution phase profiling, redundant index detection, and visual user permission management.
 - **Deliverables**:
-  - **Table Diagnostics**: Physical storage breakdown displaying exact Data Length, Index Length, and Overhead/Fragmentation; 1-click `OPTIMIZE TABLE`, `ANALYZE TABLE`, and `CHECK TABLE`.
-  - **Foreign Key Hyperlink & Data Peeking**: Automatic detection of foreign key columns in Virtual Data Grid; clickable cell with popover previewing parent table row and direct jump.
-  - **Execution Profiler**: Stage-by-stage timing breakdown (`SHOW PROFILE` / `performance_schema`) showing microsecond allocation across query execution phases.
-  - **Redundant Index Detector**: Static analysis of table index definitions flagging duplicate or shadowed prefix indexes with safe cleanup recommendations.
-  - **Visual Privilege Matrix**: User account provisioning with host pattern restrictions and an interactive checkbox permission matrix (Global, Database, and Table levels).
+  - [x] **Table Diagnostics**: Physical storage breakdown displaying exact Data Length, Index Length, and Overhead/Fragmentation; 1-click `OPTIMIZE TABLE`, `ANALYZE TABLE`, and `CHECK TABLE`.
+  - [x] **Foreign Key Hyperlink & Data Peeking**: Automatic detection of foreign key columns in Virtual Data Grid; clickable cell with popover previewing parent table row and direct jump.
+  - [x] **Execution Profiler**: Stage-by-stage timing breakdown (`SHOW PROFILE` / `performance_schema`) showing microsecond allocation across query execution phases.
+  - [x] **Redundant Index Detector**: Static analysis of table index definitions flagging duplicate or shadowed prefix indexes with safe cleanup recommendations.
+  - [x] **Visual Privilege Matrix**: User account provisioning with host pattern restrictions and an interactive checkbox permission matrix (Global, Database, and Table levels).
 - **Runnable Verification**: Inspect fragmented table -> click "Optimize Table" -> view reclaimed overhead; click FK cell in grid and verify parent row popover appears; view execution profile breakdown of a complex query.
+
 
 ---
 
 ### Milestone 13: TablePlus-Style Inline Filter Bar & Server-Side Pushdown
 - **Goal**: Enable instantaneous, visual, and freeform SQL filtering directly within the Table Viewer data grid, pushing WHERE conditions down to the remote database engine with strict injection safety.
 - **Deliverables**:
-  - **Hybrid Inline Filter Bar**: Docked above the Data Grid table in Table Viewer `Data` mode; toggles between *Quick Clause Pills* and freeform *Raw WHERE Expression*.
-  - **Quick Clause Pills**: Modular visual conditions (`[Column] [Operator] [Value]`) with `=`, `!=`, `LIKE`, `NOT LIKE`, `>`, `<`, `>=`, `<=`, `IN`, `IS NULL`, `IS NOT NULL`, supporting `+ AND` chaining.
-  - **Raw WHERE Expression Mode**: Freeform text input prefilled with `WHERE ` badge for arbitrary boolean logic, nested parentheses, and SQL scalar functions.
-  - **Server-Side Pushdown**: Full filter pushdown (`SELECT * FROM table WHERE (<filter>)`) using database indexes across arbitrarily large datasets.
-  - **Backend Safety Boundary**: Strict token guard disallowing statement terminators (`;`), destructive verbs (`DROP`, `DELETE`, `UPDATE`, `INSERT`, `ALTER`, `TRUNCATE`, `GRANT`, `REVOKE`, `SHUTDOWN`), and redirection clauses (`UNION`, `INTO OUTFILE`).
-  - **Integrated Sorting & Pagination**: Column header click sorting (`ASC`/`DESC`) and keyset/offset pagination integrate seamlessly while preserving active WHERE clauses.
-  - **Grid Query Handoff ("📝 Open in SQL Tab")**: 1-click generation of the complete `SELECT * FROM table WHERE ... ORDER BY ... LIMIT 50;` statement into a new Query Editor tab.
-  - **Keyboard Shortcut**: `Ctrl+F` / `Cmd+F` focuses the active filter bar in Table Viewer.
+  - [x] **Hybrid Inline Filter Bar**: Docked above the Data Grid table in Table Viewer `Data` mode; toggles between *Quick Clause Pills* and freeform *Raw WHERE Expression*.
+  - [x] **Quick Clause Pills**: Modular visual conditions (`[Column] [Operator] [Value]`) with `=`, `!=`, `LIKE`, `NOT LIKE`, `>`, `<`, `>=`, `<=`, `IN`, `IS NULL`, `IS NOT NULL`, supporting `+ AND` chaining.
+  - [x] **Raw WHERE Expression Mode**: Freeform text input prefilled with `WHERE ` badge for arbitrary boolean logic, nested parentheses, and SQL scalar functions.
+  - [x] **Server-Side Pushdown**: Full filter pushdown (`SELECT * FROM table WHERE (<filter>)`) using database indexes across arbitrarily large datasets.
+  - [x] **Backend Safety Boundary**: Strict token guard disallowing statement terminators (`;`), destructive verbs (`DROP`, `DELETE`, `UPDATE`, `INSERT`, `ALTER`, `TRUNCATE`, `GRANT`, `REVOKE`, `SHUTDOWN`), and redirection clauses (`UNION`, `INTO OUTFILE`).
+  - [x] **Integrated Sorting & Pagination**: Column header click sorting (`ASC`/`DESC`) and keyset/offset pagination integrate seamlessly while preserving active WHERE clauses.
+  - [x] **Grid Query Handoff ("📝 Open in SQL Tab")**: 1-click generation of the complete `SELECT * FROM table WHERE ... ORDER BY ... LIMIT 50;` statement into a new Query Editor tab.
+  - [x] **Keyboard Shortcut**: `Ctrl+F` / `Cmd+F` focuses the active filter bar in Table Viewer.
 - **Runnable Verification**: Open Table Viewer -> add pill `status = 'active'` -> click Run -> verify rows filtered on server; switch to `WHERE` mode and type `id > 10` -> verify pushdown; click "📝 Open in SQL Tab" -> verify query editor opens with exact query populated.
 
 ---

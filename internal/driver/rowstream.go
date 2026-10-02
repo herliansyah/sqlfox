@@ -35,23 +35,20 @@ func (r *SQLRowStream) NextChunk(batchSize int) ([][]any, error) {
 			return nil, io.EOF
 		}
 
-		rawValues := make([]any, count)
+		row := make([]any, count)
 		valuePtrs := make([]any, count)
-		for i := range rawValues {
-			valuePtrs[i] = &rawValues[i]
+		for i := range row {
+			valuePtrs[i] = &row[i]
 		}
 
 		if err := r.rows.Scan(valuePtrs...); err != nil {
 			return nil, err
 		}
 
-		// Convert raw values for JSON safety (e.g. []byte to string)
-		row := make([]any, count)
-		for i, val := range rawValues {
+		// Convert raw []byte to string in-place for JSON safety
+		for i, val := range row {
 			if b, ok := val.([]byte); ok {
 				row[i] = string(b)
-			} else {
-				row[i] = val
 			}
 		}
 		chunk = append(chunk, row)

@@ -604,6 +604,6 @@ func (s *SQLiteSession) Close() error {
 }
 
 func quoteIdentifier(id string) string {
-	return `"` + strings.ReplaceAll(id, `"`, `""`) + `"`
+	return driver.QuoteIdentifier(id, "sqlite")
 }
 
