@@ -102,6 +102,10 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /api/session/{id}/flight-recorder/sessions/{recId}", s.handleFlightRecorderGetSession)
 	mux.HandleFunc("DELETE /api/session/{id}/flight-recorder/sessions/{recId}", s.handleFlightRecorderDeleteSession)
 
+	// Navicat Power Suite: Dump endpoints
+	mux.HandleFunc("GET /api/session/{id}/export-dump", s.handleExportDump)
+	mux.HandleFunc("GET /api/session/{id}/export-smart-seed", s.handleExportSmartSeed)
+
 	// Session commands dispatcher
 	mux.HandleFunc("POST /api/session/{id}/{action}", func(w http.ResponseWriter, r *http.Request) {
 		switch r.PathValue("action") {
@@ -111,6 +115,12 @@ func (s *Server) routes() {
 			s.handleRefreshSchema(w, r)
 		case "cell-edit":
 			s.handleCellEdit(w, r)
+		case "insert-row":
+			s.handleInsertRow(w, r)
+		case "delete-rows":
+			s.handleDeleteRows(w, r)
+		case "run-sql-script":
+			s.handleRunSQLScript(w, r)
 		case "toggle-readonly":
 			s.handleToggleReadOnly(w, r)
 		case "inspect":

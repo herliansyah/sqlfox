@@ -224,6 +224,32 @@
         <span>📊 Diagnostics</span>
       </button>
 
+      <!-- Database-level Tools: Run SQL, Dump DB, Smart Seed -->
+      <button id="btn-top-run-sql" onclick="openRunSQLScriptModal()" class="h-7 bg-app-card hover:bg-slate-700 text-indigo-300 hover:text-indigo-200 px-2.5 rounded border border-app-border transition flex items-center space-x-1" title="Execute large .sql script against active database">
+        <span>⚡ Run SQL</span>
+      </button>
+
+      <div class="relative inline-block text-left" id="top-db-tools-container">
+        <button onclick="toggleTopDBToolsMenu()" class="h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center space-x-1" title="Database Backup & Smart Seed Tools">
+          <span>📦 DB Tools</span>
+          <span class="text-[9px] text-slate-400">▼</span>
+        </button>
+        <div id="top-db-tools-menu" class="hidden absolute right-0 mt-1 w-60 bg-slate-900 border border-slate-700 rounded shadow-xl z-50 text-xs py-1">
+          <button onclick="exportDatabaseDump(); toggleTopDBToolsMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex flex-col">
+            <span class="font-medium text-sky-400">📦 Dump Entire Database</span>
+            <span class="text-[10px] text-slate-400">Export all tables DDL + INSERTs (.sql)</span>
+          </button>
+          <button onclick="openSmartSeedModal(); toggleTopDBToolsMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex flex-col border-t border-slate-800">
+            <span class="font-medium text-amber-400">🌱 Export Smart Seed (FK-Aware)</span>
+            <span class="text-[10px] text-slate-400">Topological slice across all tables</span>
+          </button>
+          <button onclick="openRunSQLScriptModal(); toggleTopDBToolsMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex flex-col border-t border-slate-800">
+            <span class="font-medium text-indigo-400">⚡ Run Large SQL Script</span>
+            <span class="text-[10px] text-slate-400">Stream and execute multi-megabyte .sql</span>
+          </button>
+        </div>
+      </div>
+
       <button id="btn-open-privileges" onclick="openPrivilegeMatrixModal()" class="hidden h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center space-x-1" title="User Accounts & Privilege Matrix (MySQL)">
         <span>👥 Users</span>
       </button>
@@ -284,7 +310,11 @@
       <div id="database-selector-container" class="relative p-2 border-b border-app-border bg-slate-950/60 hidden text-xs flex-shrink-0">
         <div class="flex items-center justify-between text-[10px] text-slate-400 mb-1">
           <span class="font-semibold uppercase tracking-wider">Database / Schema</span>
-          <button onclick="openCreateDatabaseModal()" class="text-app-accent hover:underline text-[11px] font-bold" title="Create New Database">+ New</button>
+          <div class="flex items-center space-x-2">
+            <button onclick="exportDatabaseDump()" class="hover:text-sky-300 text-slate-400 text-[10px] font-medium transition" title="Dump Entire Database (.sql)">📦 Dump</button>
+            <button onclick="openSmartSeedModal()" class="hover:text-amber-300 text-slate-400 text-[10px] font-medium transition" title="Export Smart Seed (FK-Aware)">🌱 Seed</button>
+            <button onclick="openCreateDatabaseModal()" class="text-app-accent hover:underline text-[11px] font-bold" title="Create New Database">+ New</button>
+          </div>
         </div>
         
         <!-- Dropdown trigger button -->
@@ -439,6 +469,7 @@
 
 
         <!-- Grid Toolbar (Data Mode) -->
+        <!-- Grid Toolbar (Data Mode) -->
         <div id="grid-toolbar" class="h-8 bg-app-surface/40 border-b border-app-border px-3 flex items-center justify-between text-xs text-slate-400">
           <div class="flex items-center space-x-2.5">
             <span id="grid-result-stats">0 rows</span>
@@ -446,6 +477,14 @@
               <span>⏱️ Profiler</span>
             </button>
             <span id="grid-limit-badge" class="bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded text-[10px]">Safe Limit: 1,000</span>
+
+            <!-- Table CRUD Suite: Add Row & Delete Selected -->
+            <button id="btn-grid-add-row" onclick="addGridDraftRow()" class="px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-400 border border-sky-800 text-[11px] font-semibold flex items-center space-x-1 transition" title="Add a new row draft inline">
+              <span>➕</span><span>Add Row</span>
+            </button>
+            <button id="btn-grid-delete-selected" onclick="deleteSelectedGridRows()" class="hidden px-2 py-0.5 rounded bg-rose-950 hover:bg-rose-900 text-rose-300 border border-rose-800 text-[11px] font-semibold flex items-center space-x-1 transition" title="Delete selected rows">
+              <span>🗑️</span><span>Delete Selected (<span id="grid-selected-count">0</span>)</span>
+            </button>
 
             <!-- Staged Apply/Discard Buttons -->
             <button id="btn-grid-apply" onclick="applyGridChanges()" class="hidden px-2.5 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center space-x-1 shadow transition">
@@ -478,7 +517,7 @@
             </button>
             <div class="relative inline-block text-left" id="export-csv-dropdown-container">
               <button onclick="toggleExportCSVMenu()" class="hover:bg-slate-800 px-2 py-0.5 rounded border border-slate-700 transition flex items-center space-x-1">
-                <span>Export CSV</span>
+                <span>Export</span>
                 <span class="text-[9px] text-slate-400">▼</span>
               </button>
               <div id="export-csv-menu" class="hidden absolute right-0 mt-1 w-52 bg-slate-900 border border-slate-700 rounded shadow-xl z-50 text-xs py-1">
@@ -486,9 +525,21 @@
                   <span class="font-medium text-slate-200">Standard CSV</span>
                   <span class="text-[10px] text-slate-400">Raw comma-separated</span>
                 </button>
-                <button onclick="exportCSV(true); toggleExportCSVMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex flex-col border-t border-slate-800">
+                <button onclick="exportCSV(true); toggleExportCSVMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex flex-col border-b border-slate-800">
                   <span class="font-medium text-emerald-400">Excel-Safe CSV</span>
                   <span class="text-[10px] text-slate-400">BOM + keep leading 0s (="0812...")</span>
+                </button>
+                <button onclick="exportTableDump(); toggleExportCSVMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex flex-col border-b border-slate-800">
+                  <span class="font-medium text-sky-400">Table SQL Dump</span>
+                  <span class="text-[10px] text-slate-400">Export this table's DDL + data (.sql)</span>
+                </button>
+                <button onclick="copyGridAsTSV(); toggleExportCSVMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center justify-between text-slate-300 hover:text-white">
+                  <span>📋 Copy as TSV</span>
+                  <span class="text-[10px] text-slate-500">Excel-ready</span>
+                </button>
+                <button onclick="copyGridAsMarkdown(); toggleExportCSVMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center justify-between text-slate-300 hover:text-white">
+                  <span>📋 Copy as Markdown</span>
+                  <span class="text-[10px] text-slate-500">GFM table</span>
                 </button>
               </div>
             </div>
@@ -2616,6 +2667,79 @@
     </div>
   </dialog>
 
+  <!-- 21. Smart Seed Dump Dialog (HTML5 <dialog>) -->
+  <dialog id="smart-seed-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-md w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm">
+    <div class="space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 class="text-base font-bold text-amber-400 flex items-center space-x-2">
+          <span>🌱</span><span>Export Smart Seed Dump</span>
+        </h3>
+        <button onclick="closeSmartSeedModal()" class="text-slate-400 hover:text-white text-lg">✕</button>
+      </div>
+      <p class="text-xs text-slate-400">
+        Exports a foreign-key aware database seed slice with topological ordering and recursive parent table closure. Guaranteed 100% error-free restore.
+      </p>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Sample Rows per Table</label>
+          <input type="number" id="smart-seed-limit-input" value="20" min="1" max="1000" class="w-full bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-xs text-white outline-none focus:border-amber-500">
+        </div>
+        <div class="flex items-center space-x-2">
+          <input type="checkbox" id="smart-seed-ddl-checkbox" checked class="accent-amber-500 w-4 h-4 cursor-pointer">
+          <label for="smart-seed-ddl-checkbox" class="text-xs text-slate-300 cursor-pointer select-none">Include Table DDL (CREATE TABLE)</label>
+        </div>
+      </div>
+      <div class="flex items-center justify-end space-x-2 pt-3 border-t border-slate-800">
+        <button onclick="closeSmartSeedModal()" class="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition">Cancel</button>
+        <button onclick="executeSmartSeedDownload()" class="px-4 py-1.5 rounded bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs flex items-center space-x-1.5 shadow transition">
+          <span>⬇️</span><span>Export Seed SQL</span>
+        </button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 22. Large SQL Script Runner Dialog (HTML5 <dialog>) -->
+  <dialog id="run-sql-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm">
+    <div class="space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 class="text-base font-bold text-indigo-400 flex items-center space-x-2">
+          <span>⚡</span><span>Run Large SQL Script</span>
+        </h3>
+        <button onclick="closeRunSQLScriptModal()" class="text-slate-400 hover:text-white text-lg">✕</button>
+      </div>
+      <p class="text-xs text-slate-400">
+        Stream and execute multi-megabyte .sql scripts statement by statement with live progress tracking and zero browser freezing.
+      </p>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">SQL Script File (.sql)</label>
+          <input type="file" id="run-sql-file-input" accept=".sql,text/plain" onchange="handleRunSQLFileSelected(this)" class="w-full bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-xs text-slate-300 file:mr-3 file:py-1 file:px-2.5 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 cursor-pointer">
+          <div id="run-sql-file-meta" class="hidden mt-1 text-[11px] text-slate-400 font-mono"></div>
+        </div>
+        <div class="flex items-center space-x-2">
+          <input type="checkbox" id="run-sql-stop-on-error" checked class="accent-indigo-500 w-4 h-4 cursor-pointer">
+          <label for="run-sql-stop-on-error" class="text-xs text-slate-300 cursor-pointer select-none">Stop on first error (Halt execution)</label>
+        </div>
+        <div id="run-sql-progress-container" class="hidden space-y-2 pt-2 border-t border-slate-800">
+          <div class="flex items-center justify-between text-xs">
+            <span id="run-sql-progress-label" class="text-slate-300 font-medium">Executing...</span>
+            <span id="run-sql-progress-count" class="font-mono text-indigo-400 font-bold">0 / 0</span>
+          </div>
+          <div class="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-800">
+            <div id="run-sql-progress-bar" class="bg-indigo-500 h-2 w-0 transition-all duration-150"></div>
+          </div>
+          <div id="run-sql-log" class="p-2.5 bg-slate-950 border border-slate-800 rounded font-mono text-[11px] text-slate-300 max-h-36 overflow-y-auto space-y-1"></div>
+        </div>
+      </div>
+      <div class="flex items-center justify-end space-x-2 pt-3 border-t border-slate-800">
+        <button id="run-sql-btn-close" onclick="closeRunSQLScriptModal()" class="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition">Cancel</button>
+        <button id="run-sql-btn-run" onclick="executeRunSQLScript()" class="px-4 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs flex items-center space-x-1.5 shadow transition disabled:opacity-50 disabled:cursor-not-allowed">
+          <span>▶</span><span>Start Execution</span>
+        </button>
+      </div>
+    </div>
+  </dialog>
+
   <!-- Floating Processlist Context Menu -->
   <div id="pl-context-menu" class="hidden fixed z-50 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-1 text-xs text-slate-200 min-w-48 ring-2 ring-black/50 font-sans divide-y divide-slate-800">
     <div class="py-1">
@@ -2653,6 +2777,28 @@
     </div>
   </div>
 
+  <!-- Floating Grid Row Context Menu -->
+  <div id="grid-context-menu" class="hidden fixed z-50 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-1 text-xs text-slate-200 min-w-48 ring-2 ring-black/50 font-sans divide-y divide-slate-800">
+    <div class="py-1">
+      <button onclick="copyGridAsTSV(); closeGridContextMenu()" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white">
+        <span>📋 Copy as TSV</span>
+        <span class="text-[10px] text-slate-500">Excel</span>
+      </button>
+      <button onclick="copyGridAsMarkdown(); closeGridContextMenu()" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white">
+        <span>📋 Copy as Markdown</span>
+        <span class="text-[10px] text-slate-500">GFM</span>
+      </button>
+    </div>
+    <div class="py-1">
+      <button onclick="addGridDraftRow(); closeGridContextMenu()" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-sky-400 hover:text-sky-300">
+        <span>➕</span><span>Add Row Draft</span>
+      </button>
+      <button onclick="deleteSelectedGridRows(); closeGridContextMenu()" class="w-full text-left px-2.5 py-1.5 hover:bg-rose-950/60 rounded flex items-center space-x-2 text-rose-400 hover:text-rose-300">
+        <span>🗑️</span><span>Delete Selected Row(s)</span>
+      </button>
+    </div>
+  </div>
+
   <script>
 
     // --- Application State ---
@@ -2670,6 +2816,11 @@
     let pendingDestructiveSQL = null;
     let pendingDestructiveResult = null;
     let lastKeysetKey = null;
+
+    // Table CRUD & Spreadsheet State
+    let selectedRowIndices = new Set();
+    let stagedDraftRows = [];
+    let activeGridRightClickedRow = null;
 
     // Table Designer & Modal State
     let currentTableMetadata = null;
@@ -8263,7 +8414,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       const discardBtn = document.getElementById('btn-grid-discard');
       const countSpan = document.getElementById('grid-staged-count');
 
-      const count = stagedEdits.size;
+      const count = stagedEdits.size + stagedDraftRows.length;
       if (countSpan) countSpan.textContent = count;
 
       if (applyBtn && discardBtn) {
@@ -8649,6 +8800,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       const tbody = document.getElementById('grid-tbody');
       updateGridEditModeUI();
       updateStagedEditsUI();
+      updateSelectedRowsUI();
 
       if (!cols || cols.length === 0) {
         thead.innerHTML = '<tr><th class="p-2 pl-4">No columns</th></tr>';
@@ -8656,8 +8808,17 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
         return;
       }
 
-      // Render Headers
-      thead.innerHTML = '<tr>' + cols.map((c, i) => {
+      const hasCheckbox = Boolean(activeTab && activeTab.isTableViewer);
+
+      // Render Headers (Row 1: Names & Sort, Row 2: Subheader Filters)
+      let headerRow1 = '<tr>';
+      if (hasCheckbox) {
+        const allSelected = currentResults.length > 0 && selectedRowIndices.size === currentResults.length;
+        headerRow1 += `<th class="p-2 w-8 text-center border-r border-slate-800 bg-slate-900/80 select-none">
+          <input type="checkbox" id="grid-select-all" ${allSelected ? 'checked' : ''} onchange="toggleSelectAllRows(this.checked)" class="accent-sky-500 w-3.5 h-3.5 cursor-pointer" title="Select all rows">
+        </th>`;
+      }
+      headerRow1 += cols.map((c, i) => {
         let sortIcon = '';
         if (activeTab && activeTab.isTableViewer && activeTab.sortCol === c.name) {
           sortIcon = activeTab.sortDir === 'DESC' ? ' <span class="text-sky-400 font-bold">▼</span>' : ' <span class="text-sky-400 font-bold">▲</span>';
@@ -8670,6 +8831,20 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
           </div>
         </th>
       `;}).join('') + '</tr>';
+
+      let headerRow2 = '';
+      if (hasCheckbox) {
+        headerRow2 = '<tr class="bg-slate-950/90 border-b border-slate-800"><th class="p-1 w-8 text-center text-slate-500 border-r border-slate-800 text-[10px]">🔍</th>' +
+          cols.map(c => {
+            const existingPill = (activeTab?.filterPills || []).find(p => p.column === c.name);
+            const initialVal = existingPill ? existingPill.value : '';
+            return `
+            <th class="p-1 px-1.5 border-r border-slate-800">
+              <input type="text" value="${escapeHtml(initialVal)}" class="col-filter-input w-full bg-slate-900 text-slate-200 border border-slate-700/80 rounded px-1.5 py-0.5 text-[11px] font-mono outline-none focus:border-sky-500 transition" placeholder="Filter..." data-col="${escapeHtml(c.name)}" onkeydown="handleColFilterKeydown(event, this)">
+            </th>
+          `;}).join('') + '</tr>';
+      }
+      thead.innerHTML = headerRow1 + headerRow2;
 
       // Resolve foreign keys for table
       const targetCatalog = (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
@@ -8716,14 +8891,46 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
         syncFilterBarUI(activeTab);
       }
 
-      // Render Rows
-      if (!rows || rows.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="${cols.length}" class="p-4 text-center text-slate-500">Zero rows returned.</td></tr>`;
+      // Render Draft Rows (if any)
+      let draftRowsHTML = '';
+      if (hasCheckbox && stagedDraftRows.length > 0) {
+        draftRowsHTML = stagedDraftRows.map((draft, dIdx) => `
+          <tr class="bg-sky-950/40 border-b border-sky-800/40 text-sky-200 draft-row" data-draft-idx="${dIdx}">
+            <td class="p-1.5 w-8 text-center border-r border-slate-800/40">
+              <button onclick="removeGridDraftRow(${dIdx})" class="text-rose-400 hover:text-rose-200 text-xs font-bold" title="Discard this draft row">✕</button>
+            </td>
+            ${cols.map(c => {
+              const val = draft.data[c.name] ?? '';
+              const isAutoPK = c.name === pkCol && (c.extra?.includes('auto') || c.type?.toLowerCase().includes('int'));
+              return `
+                <td class="p-1 px-2 border-r border-slate-800/40">
+                  <input type="text" value="${escapeHtml(String(val))}" placeholder="${isAutoPK ? '(auto)' : escapeHtml(c.name)}"
+                         data-col="${escapeHtml(c.name)}" data-draft-idx="${dIdx}"
+                         oninput="updateGridDraftCell(${dIdx}, '${escapeHtml(c.name)}', this.value)"
+                         class="w-full bg-slate-950 text-slate-100 border border-sky-500/50 rounded px-1.5 py-0.5 text-xs font-mono outline-none focus:border-sky-400 shadow-inner">
+                </td>
+              `;
+            }).join('')}
+          </tr>
+        `).join('');
+      }
+
+      // Render Regular Rows
+      if ((!rows || rows.length === 0) && stagedDraftRows.length === 0) {
+        const colSpan = hasCheckbox ? cols.length + 1 : cols.length;
+        tbody.innerHTML = `<tr><td colspan="${colSpan}" class="p-4 text-center text-slate-500">Zero rows returned.</td></tr>`;
         return;
       }
 
-      tbody.innerHTML = rows.map((row, rIdx) => `
-        <tr class="hover:bg-slate-800/40 transition">
+      tbody.innerHTML = draftRowsHTML + (rows || []).map((row, rIdx) => {
+        const isSelected = selectedRowIndices.has(rIdx);
+        let checkboxCell = '';
+        if (hasCheckbox) {
+          checkboxCell = `<td class="p-1.5 w-8 text-center border-r border-slate-800/40"><input type="checkbox" class="grid-row-checkbox accent-sky-500 w-3.5 h-3.5 cursor-pointer" data-row="${rIdx}" ${isSelected ? 'checked' : ''} onchange="toggleSelectRow(${rIdx}, this.checked)"></td>`;
+        }
+        return `
+        <tr class="hover:bg-slate-800/40 transition ${isSelected ? 'bg-sky-950/20' : ''}" oncontextmenu="openGridContextMenu(event, ${rIdx})">
+          ${checkboxCell}
           ${row.map((val, cIdx) => {
             const stagedKey = `${tableName || ''}:${rIdx}:${cIdx}`;
             const staged = stagedEdits.get(stagedKey);
@@ -8750,7 +8957,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
             `;
           }).join('')}
         </tr>
-      `).join('');
+      `;}).join('');
     }
 
     function selectGridCell(td, rIdx, cIdx) {
@@ -8953,68 +9160,550 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       }
     }
 
-    async function applyGridChanges() {
-      if (stagedEdits.size === 0) return;
-      if (!activeConnection) return;
-
-      if (activeEditCell) {
-        await commitInlineEdit(activeEditCell, false);
+    // --- Table CRUD Suite: Add Row & Multi-Row Delete ---
+    function addGridDraftRow() {
+      if (activeSession && activeSession.read_only) {
+        showNativeAlert('Session is in READ-ONLY mode. Unlock first.', 'Read-Only Mode');
+        return;
       }
+      if (!activeGridTable) {
+        showNativeAlert('Please select a table to add records.', 'Add Row');
+        return;
+      }
+      const draft = { data: {} };
+      stagedDraftRows.unshift(draft);
+      updateStagedEditsUI();
+      renderGridResults(currentColumns, currentResults, activeGridPKCol, activeGridTable);
+    }
 
-      const count = stagedEdits.size;
+    function removeGridDraftRow(dIdx) {
+      if (dIdx >= 0 && dIdx < stagedDraftRows.length) {
+        stagedDraftRows.splice(dIdx, 1);
+        updateStagedEditsUI();
+        renderGridResults(currentColumns, currentResults, activeGridPKCol, activeGridTable);
+      }
+    }
+
+    function updateGridDraftCell(dIdx, colName, val) {
+      if (stagedDraftRows[dIdx]) {
+        stagedDraftRows[dIdx].data[colName] = val;
+      }
+    }
+
+    function toggleSelectAllRows(checked) {
+      selectedRowIndices.clear();
+      if (checked && currentResults) {
+        currentResults.forEach((_, idx) => selectedRowIndices.add(idx));
+      }
+      document.querySelectorAll('.grid-row-checkbox').forEach(cb => {
+        cb.checked = checked;
+      });
+      updateSelectedRowsUI();
+    }
+
+    function toggleSelectRow(rIdx, checked) {
+      if (checked) {
+        selectedRowIndices.add(rIdx);
+      } else {
+        selectedRowIndices.delete(rIdx);
+      }
+      const selectAll = document.getElementById('grid-select-all');
+      if (selectAll) {
+        selectAll.checked = selectedRowIndices.size === (currentResults?.length || 0) && selectedRowIndices.size > 0;
+      }
+      updateSelectedRowsUI();
+    }
+
+    function updateSelectedRowsUI() {
+      const btn = document.getElementById('btn-grid-delete-selected');
+      const countSpan = document.getElementById('grid-selected-count');
+      const count = selectedRowIndices.size;
+      if (countSpan) countSpan.textContent = count;
+      if (btn) {
+        if (count > 0) {
+          btn.classList.remove('hidden');
+        } else {
+          btn.classList.add('hidden');
+        }
+      }
+    }
+
+    async function deleteSelectedGridRows() {
+      if (activeSession && activeSession.read_only) {
+        showNativeAlert('Session is in READ-ONLY mode. Unlock first.', 'Read-Only Mode');
+        return;
+      }
+      if (!activeGridTable) return;
+      if (!activeGridPKCol) {
+        showNativeAlert('Deleting rows requires a primary key column on the table.', 'Delete Rows');
+        return;
+      }
+      const count = selectedRowIndices.size;
       if (count === 0) return;
 
-      if (gridConfirmSave) {
-        const ok = await showNativeConfirm(`Apply ${count} pending change(s) to table "${activeGridTable}"?`, 'Apply Changes');
+      const pkIdx = currentColumns.findIndex(c => c.name === activeGridPKCol);
+      if (pkIdx === -1) {
+        showNativeAlert(`Primary key column "${activeGridPKCol}" not found in current view.`, 'Delete Rows');
+        return;
+      }
+
+      const pkValues = Array.from(selectedRowIndices).map(idx => currentResults[idx][pkIdx]);
+
+      // In Production, require typing challenge
+      if (activeConnection && activeConnection.environment === 'Production') {
+        const ok = await showNativeConfirm(`[PRODUCTION SAFETY GUARD] Confirm permanent deletion of ${count} row(s) from table "${activeGridTable}"?`, 'Production Delete Warning');
+        if (!ok) return;
+      } else {
+        const ok = await showNativeConfirm(`Are you sure you want to permanently delete ${count} selected row(s) from "${activeGridTable}"?`, 'Delete Rows');
         if (!ok) return;
       }
 
       const activeTab = tabs.find(t => t.id === activeTabId);
       const dbName = (activeTab && activeTab.database) || activeGridDB || '';
 
-      const edits = Array.from(stagedEdits.values()).map(item => ({
-        database: item.db || dbName,
-        table: item.table,
-        column: item.colName,
-        value: item.newVal,
-        pk_column: item.pkCol,
-        pk_value: item.pkVal
-      }));
-
       try {
-        const res = await apiFetch(`/api/session/${activeConnection.id}/cell-edit`, {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/delete-rows`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ database: dbName, edits })
+          body: JSON.stringify({
+            database: dbName,
+            table: activeGridTable,
+            pk_column: activeGridPKCol,
+            pk_values: pkValues
+          })
         });
         if (res.ok) {
-          stagedEdits.clear();
-          updateStagedEditsUI();
-          showNativeAlert(`✅ Successfully applied ${edits.length} change(s)!`, 'Changes Applied');
-          if (activeGridTable) {
-            await loadTableRows(activeGridTable);
-          }
+          selectedRowIndices.clear();
+          updateSelectedRowsUI();
+          showNativeAlert(`✅ Successfully deleted ${count} row(s)!`, 'Rows Deleted');
+          await loadTableRows(activeGridTable);
         } else {
           const err = await res.json().catch(() => ({}));
-          showNativeAlert('Failed to apply changes: ' + (err.error || res.statusText), 'Apply Error');
+          showNativeAlert('Failed to delete rows: ' + (err.error || res.statusText), 'Delete Error');
         }
       } catch (err) {
-        showNativeAlert('Network error applying changes: ' + err.message, 'Apply Error');
+        showNativeAlert('Network error deleting rows: ' + err.message, 'Delete Error');
+      }
+    }
+
+    function handleColFilterKeydown(event, input) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        const col = input.dataset.col;
+        const val = input.value.trim();
+        const activeTab = tabs.find(t => t.id === activeTabId);
+        if (!activeTab || !activeTab.isTableViewer) return;
+
+        if (!Array.isArray(activeTab.filterPills)) {
+          activeTab.filterPills = [];
+        }
+
+        activeTab.filterPills = activeTab.filterPills.filter(p => p.column !== col);
+
+        if (val !== '') {
+          const op = val.includes('%') ? 'LIKE' : '=';
+          activeTab.filterPills.push({
+            column: col,
+            operator: op,
+            value: val
+          });
+        }
+
+        activeTab.filterMode = 'pills';
+        activeTab.offset = 0;
+        syncFilterBarUI(activeTab);
+        applyTableFilter();
+      }
+    }
+
+    // --- Floating Grid Row Context Menu ---
+    function openGridContextMenu(e, rIdx) {
+      e.preventDefault();
+      activeGridRightClickedRow = rIdx;
+      if (!selectedRowIndices.has(rIdx)) {
+        selectedRowIndices.clear();
+        selectedRowIndices.add(rIdx);
+        document.querySelectorAll('.grid-row-checkbox').forEach(cb => {
+          cb.checked = parseInt(cb.dataset.row, 10) === rIdx;
+        });
+        updateSelectedRowsUI();
+      }
+
+      const menu = document.getElementById('grid-context-menu');
+      if (!menu) return;
+      menu.classList.remove('hidden');
+
+      const x = Math.min(e.clientX, window.innerWidth - 210);
+      const y = Math.min(e.clientY, window.innerHeight - 180);
+      menu.style.left = `${x}px`;
+      menu.style.top = `${y}px`;
+    }
+
+    function closeGridContextMenu() {
+      const menu = document.getElementById('grid-context-menu');
+      if (menu) menu.classList.add('hidden');
+    }
+
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('#grid-context-menu')) {
+        closeGridContextMenu();
+      }
+    });
+
+    // --- Clipboard Formats: TSV & Markdown Table ---
+    function getGridExportRows(selectedOnly = null) {
+      if (selectedOnly === true || (selectedOnly === null && selectedRowIndices.size > 0)) {
+        return Array.from(selectedRowIndices).map(idx => currentResults[idx]);
+      }
+      return currentResults || [];
+    }
+
+    function copyGridAsTSV() {
+      if (!currentColumns || currentColumns.length === 0) {
+        showNativeAlert('No data to copy.', 'Copy TSV');
+        return;
+      }
+      const rows = getGridExportRows();
+      if (rows.length === 0) {
+        showNativeAlert('No rows to copy.', 'Copy TSV');
+        return;
+      }
+
+      const headers = currentColumns.map(c => c.name).join('\t');
+      const body = rows.map(r => r.map(v => v === null ? '' : String(v).replace(/\t/g, ' ')).join('\t')).join('\n');
+      const tsv = headers + '\n' + body;
+
+      navigator.clipboard.writeText(tsv).then(() => {
+        showNativeAlert(`✅ Copied ${rows.length} row(s) to clipboard as TSV!`, 'Copied TSV');
+      }).catch(err => {
+        showNativeAlert('Failed to copy to clipboard: ' + err.message, 'Clipboard Error');
+      });
+    }
+
+    function copyGridAsMarkdown() {
+      if (!currentColumns || currentColumns.length === 0) {
+        showNativeAlert('No data to copy.', 'Copy Markdown');
+        return;
+      }
+      const rows = getGridExportRows();
+      if (rows.length === 0) {
+        showNativeAlert('No rows to copy.', 'Copy Markdown');
+        return;
+      }
+
+      const headers = '| ' + currentColumns.map(c => c.name).join(' | ') + ' |';
+      const sep = '| ' + currentColumns.map(() => '---').join(' | ') + ' |';
+      const body = rows.map(r => '| ' + r.map(v => v === null ? 'NULL' : String(v).replace(/\|/g, '\\|')).join(' | ') + ' |').join('\n');
+      const md = headers + '\n' + sep + '\n' + body;
+
+      navigator.clipboard.writeText(md).then(() => {
+        showNativeAlert(`✅ Copied ${rows.length} row(s) to clipboard as Markdown!`, 'Copied Markdown');
+      }).catch(err => {
+        showNativeAlert('Failed to copy to clipboard: ' + err.message, 'Clipboard Error');
+      });
+    }
+
+    // --- Database-Level & Table-Level SQL Dump Export & Smart Seed ---
+    function toggleTopDBToolsMenu(force = null) {
+      const menu = document.getElementById('top-db-tools-menu');
+      if (!menu) return;
+      if (typeof force === 'boolean') {
+        menu.classList.toggle('hidden', !force);
+      } else {
+        menu.classList.toggle('hidden');
+      }
+    }
+
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('#top-db-tools-container')) {
+        toggleTopDBToolsMenu(false);
+      }
+    });
+
+    function exportDatabaseDump() {
+      if (!activeConnection) {
+        showNativeAlert('Please select an active connection first.', 'Dump Database');
+        return;
+      }
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const dbName = (activeTab && activeTab.database) || activeGridDB || (schemaCatalogCache && schemaCatalogCache.database_name) || '';
+      let url = `/api/session/${activeConnection.id}/export-dump?schema=true&data=true`;
+      if (dbName) url += `&db=${encodeURIComponent(dbName)}`;
+      window.location.href = url;
+    }
+
+    function exportTableDump(tableName = null) {
+      if (!activeConnection) return;
+      const tbl = tableName || activeGridTable;
+      if (!tbl) {
+        exportDatabaseDump();
+        return;
+      }
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const dbName = (activeTab && activeTab.database) || activeGridDB || '';
+      let url = `/api/session/${activeConnection.id}/export-dump?schema=true&data=true&table=${encodeURIComponent(tbl)}`;
+      if (dbName) url += `&db=${encodeURIComponent(dbName)}`;
+      window.location.href = url;
+    }
+
+    function exportSQLDump() {
+      exportTableDump();
+    }
+
+    function openSmartSeedModal() {
+      const dlg = document.getElementById('smart-seed-dialog');
+      if (dlg) dlg.showModal();
+    }
+
+    function closeSmartSeedModal() {
+      const dlg = document.getElementById('smart-seed-dialog');
+      if (dlg) dlg.close();
+    }
+
+    function executeSmartSeedDownload() {
+      if (!activeConnection) return;
+      const limitInput = document.getElementById('smart-seed-limit-input');
+      const ddlCheckbox = document.getElementById('smart-seed-ddl-checkbox');
+      const limit = limitInput ? parseInt(limitInput.value, 10) || 20 : 20;
+      const ddl = ddlCheckbox ? ddlCheckbox.checked : true;
+
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const dbName = (activeTab && activeTab.database) || activeGridDB || '';
+
+      let url = `/api/session/${activeConnection.id}/export-smart-seed?limit=${limit}&ddl=${ddl}`;
+      if (dbName) url += `&db=${encodeURIComponent(dbName)}`;
+
+      closeSmartSeedModal();
+      window.location.href = url;
+    }
+
+    // --- Large SQL Script Runner Modal & Streaming Parser ---
+    let selectedRunSQLFile = null;
+
+    function openRunSQLScriptModal() {
+      const dlg = document.getElementById('run-sql-dialog');
+      if (dlg) {
+        selectedRunSQLFile = null;
+        const fileInput = document.getElementById('run-sql-file-input');
+        if (fileInput) fileInput.value = '';
+        const meta = document.getElementById('run-sql-file-meta');
+        if (meta) { meta.classList.add('hidden'); meta.textContent = ''; }
+        const prog = document.getElementById('run-sql-progress-container');
+        if (prog) prog.classList.add('hidden');
+        const log = document.getElementById('run-sql-log');
+        if (log) log.innerHTML = '';
+        const runBtn = document.getElementById('run-sql-btn-run');
+        if (runBtn) { runBtn.disabled = true; runBtn.textContent = '▶ Start Execution'; }
+        dlg.showModal();
+      }
+    }
+
+    function closeRunSQLScriptModal() {
+      const dlg = document.getElementById('run-sql-dialog');
+      if (dlg) dlg.close();
+    }
+
+    function handleRunSQLFileSelected(input) {
+      if (input.files && input.files[0]) {
+        selectedRunSQLFile = input.files[0];
+        const meta = document.getElementById('run-sql-file-meta');
+        if (meta) {
+          meta.textContent = `${selectedRunSQLFile.name} (${formatBytes(selectedRunSQLFile.size)})`;
+          meta.classList.remove('hidden');
+        }
+        const runBtn = document.getElementById('run-sql-btn-run');
+        if (runBtn) runBtn.disabled = false;
+      }
+    }
+
+    async function executeRunSQLScript() {
+      if (!activeConnection || !selectedRunSQLFile) return;
+
+      const runBtn = document.getElementById('run-sql-btn-run');
+      const stopOnErrorCheckbox = document.getElementById('run-sql-stop-on-error');
+      const stopOnError = stopOnErrorCheckbox ? stopOnErrorCheckbox.checked : true;
+      const progContainer = document.getElementById('run-sql-progress-container');
+      const progLabel = document.getElementById('run-sql-progress-label');
+      const progCount = document.getElementById('run-sql-progress-count');
+      const progBar = document.getElementById('run-sql-progress-bar');
+      const logDiv = document.getElementById('run-sql-log');
+
+      if (progContainer) progContainer.classList.remove('hidden');
+      if (logDiv) logDiv.innerHTML = '<div class="text-indigo-400">Uploading and parsing script...</div>';
+      if (runBtn) {
+        runBtn.disabled = true;
+        runBtn.innerHTML = '<span>⏳ Running...</span>';
+      }
+
+      const formData = new FormData();
+      formData.append('file', selectedRunSQLFile);
+
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const dbName = (activeTab && activeTab.database) || activeGridDB || '';
+
+      try {
+        let url = `/api/session/${activeConnection.id}/run-sql-script?stop_on_error=${stopOnError}`;
+        if (dbName) url += `&db=${encodeURIComponent(dbName)}`;
+
+        const response = await fetch(url, {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!response.ok) {
+          const err = await response.text();
+          if (logDiv) logDiv.innerHTML += `<div class="text-rose-400">Failed to run script: ${escapeHtml(err)}</div>`;
+          if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ Retry'; }
+          return;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let partialLine = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          partialLine += decoder.decode(value, { stream: true });
+          const lines = partialLine.split('\n');
+          partialLine = lines.pop();
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const event = JSON.parse(line);
+              if (event.statement_index !== undefined) {
+                const pct = Math.round((event.statement_index / event.total) * 100);
+                if (progBar) progBar.style.width = `${pct}%`;
+                if (progCount) progCount.textContent = `${event.statement_index} / ${event.total}`;
+                if (progLabel) progLabel.textContent = `Executing: ${escapeHtml(event.sql_preview)}`;
+
+                if (event.status === 'error') {
+                  if (logDiv) logDiv.innerHTML += `<div class="text-rose-400">❌ [Stmt #${event.statement_index}] Error: ${escapeHtml(event.error)}</div>`;
+                } else {
+                  if (logDiv) logDiv.innerHTML += `<div class="text-emerald-400/90">✓ [Stmt #${event.statement_index}] (${event.duration_ms}ms, ${event.rows_affected} rows)</div>`;
+                }
+                if (logDiv) logDiv.scrollTop = logDiv.scrollHeight;
+              } else if (event.status === 'completed' || event.status === 'halted') {
+                if (progLabel) progLabel.textContent = event.status === 'completed' ? 'Execution Completed!' : 'Execution Halted (Error)';
+                if (logDiv) {
+                  logDiv.innerHTML += `<div class="font-bold text-white pt-2 border-t border-slate-800">Done: ${event.executed_statements} executed, ${event.error_count} error(s).</div>`;
+                  logDiv.scrollTop = logDiv.scrollHeight;
+                }
+              }
+            } catch (e) {
+              console.error('Error parsing NDJSON event:', e);
+            }
+          }
+        }
+
+        if (runBtn) {
+          runBtn.disabled = false;
+          runBtn.textContent = '✓ Done';
+        }
+        if (typeof refreshActiveSchema === 'function') {
+          refreshActiveSchema();
+        }
+      } catch (err) {
+        if (logDiv) logDiv.innerHTML += `<div class="text-rose-400">Network error: ${escapeHtml(err.message)}</div>`;
+        if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ Retry'; }
+      }
+    }
+
+    async function applyGridChanges() {
+      const totalCount = stagedEdits.size + stagedDraftRows.length;
+      if (totalCount === 0) return;
+      if (!activeConnection) return;
+
+      if (activeEditCell) {
+        await commitInlineEdit(activeEditCell, false);
+      }
+
+      if (gridConfirmSave) {
+        const ok = await showNativeConfirm(`Apply ${totalCount} pending change(s) to table "${activeGridTable}"?`, 'Apply Changes');
+        if (!ok) return;
+      }
+
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const dbName = (activeTab && activeTab.database) || activeGridDB || '';
+
+      // 1. Process any draft rows
+      if (stagedDraftRows.length > 0) {
+        for (const draft of stagedDraftRows) {
+          try {
+            const res = await apiFetch(`/api/session/${activeConnection.id}/insert-row`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                database: dbName,
+                table: activeGridTable,
+                data: draft.data
+              })
+            });
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}));
+              showNativeAlert('Failed to insert row: ' + (err.error || res.statusText), 'Insert Error');
+              return;
+            }
+          } catch (err) {
+            showNativeAlert('Network error inserting row: ' + err.message, 'Insert Error');
+            return;
+          }
+        }
+        stagedDraftRows = [];
+      }
+
+      // 2. Process any cell edits
+      if (stagedEdits.size > 0) {
+        const edits = Array.from(stagedEdits.values()).map(item => ({
+          database: item.db || dbName,
+          table: item.table,
+          column: item.colName,
+          value: item.newVal,
+          pk_column: item.pkCol,
+          pk_value: item.pkVal
+        }));
+
+        try {
+          const res = await apiFetch(`/api/session/${activeConnection.id}/cell-edit`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ database: dbName, edits })
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            showNativeAlert('Failed to apply cell edits: ' + (err.error || res.statusText), 'Apply Error');
+            return;
+          }
+          stagedEdits.clear();
+        } catch (err) {
+          showNativeAlert('Network error applying cell edits: ' + err.message, 'Apply Error');
+          return;
+        }
+      }
+
+      updateStagedEditsUI();
+      showNativeAlert(`✅ Successfully applied ${totalCount} change(s)!`, 'Changes Applied');
+      if (activeGridTable) {
+        await loadTableRows(activeGridTable);
       }
     }
 
     async function discardGridChanges() {
-      if (stagedEdits.size === 0) return;
+      if (stagedEdits.size === 0 && stagedDraftRows.length === 0) return;
 
       if (activeEditCell) {
         cancelInlineEdit(activeEditCell);
       }
 
+      const totalCount = stagedEdits.size + stagedDraftRows.length;
       if (gridConfirmSave) {
-        const ok = await showNativeConfirm(`Discard all ${stagedEdits.size} unapplied change(s)?`, 'Discard Changes');
+        const ok = await showNativeConfirm(`Discard all ${totalCount} unapplied change(s)?`, 'Discard Changes');
         if (!ok) return;
       }
 
+      stagedDraftRows = [];
       for (const item of stagedEdits.values()) {
         currentResults[item.rIdx][item.cIdx] = item.oldVal;
       }

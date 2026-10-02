@@ -132,11 +132,11 @@ v1.1 (Productivity & Collaboration)
       ▼
 v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
 ├── [A] Navicat Power Suite (Synchronization, Transfer & CRUD)
-│   ├── [ ] 1. Simple CRUD Table Suite (Spreadsheet Data Manipulation)
+│   ├── [x] 1. Simple CRUD Table Suite (Spreadsheet Data Manipulation)
 │   │   ├── Inline "+ Add Row" draft insertion with type-aware validation
 │   │   ├── Multi-row deletion with Safety Guard challenge verification
 │   │   └── Instant visual column sorting and quick-filter toolbar without raw SQL
-│   ├── [ ] 2. Comprehensive Import & Export Tooling
+│   ├── [x] 2. Comprehensive Import & Export Tooling
 │   │   ├── Streaming SQL Dump Export (DDL + chunked multi-insert statements)
 │   │   ├── Large SQL Script Runner with progress tracking and transaction boundary control
 │   │   ├── FK-Aware Smart Seed Dump (Referential Slice Exporter with recursive master table closure)

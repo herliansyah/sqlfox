@@ -1,0 +1,164 @@
+package server
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"sqlfox/internal/vault"
+)
+
+func TestServer_DumpAndSmartSeedAndScriptRunner(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "sqlfox-dump-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	vaultDB := filepath.Join(tempDir, "config.db")
+	targetDB := filepath.Join(tempDir, "target.db")
+
+	v, err := vault.OpenVault(vaultDB, "test-master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	srv := NewServer(v, nil, filepath.Join(tempDir, "backups"), "test-master")
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	client := ts.Client()
+
+	// 1. Create SQLite connection
+	createPayload := vault.ConnectionRecord{
+		Name:         "Dump SQLite Test",
+		Environment:  "Development",
+		Driver:       "sqlite",
+		DatabaseName: targetDB,
+	}
+	body, _ := json.Marshal(createPayload)
+	resp, err := client.Post(ts.URL+"/api/connections", "application/json", bytes.NewReader(body))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("create connection failed: %v", err)
+	}
+	var conn vault.ConnectionRecord
+	_ = json.NewDecoder(resp.Body).Decode(&conn)
+	resp.Body.Close()
+
+	// 2. Connect session
+	resp, err = client.Post(fmt.Sprintf("%s/api/session/connect/%s", ts.URL, conn.ID), "application/json", nil)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("connect session failed: %v", err)
+	}
+	resp.Body.Close()
+
+	// 3. Create parent table and child table with FK
+	setupSQL := `
+CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT);
+CREATE TABLE books (id INTEGER PRIMARY KEY, author_id INTEGER, title TEXT, FOREIGN KEY(author_id) REFERENCES authors(id));
+INSERT INTO authors (id, name) VALUES (1, 'Tolkien'), (2, 'Asimov');
+INSERT INTO books (id, author_id, title) VALUES (10, 1, 'The Hobbit'), (20, 2, 'Foundation');
+`
+	for _, stmt := range strings.Split(setupSQL, ";") {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
+		sqlBody, _ := json.Marshal(map[string]any{"sql": stmt})
+		resp, err = client.Post(fmt.Sprintf("%s/api/session/%s/execute", ts.URL, conn.ID), "application/json", bytes.NewReader(sqlBody))
+		if err != nil || resp.StatusCode != http.StatusOK {
+			t.Fatalf("execute setup failed: %s: %v", stmt, err)
+		}
+		resp.Body.Close()
+	}
+
+	// 4. Test GET /api/session/{id}/export-dump
+	resp, err = client.Get(fmt.Sprintf("%s/api/session/%s/export-dump?schema=true&data=true", ts.URL, conn.ID))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("export-dump failed: status=%d, err=%v", resp.StatusCode, err)
+	}
+	dumpBytes, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatalf("read dump body failed: %v", err)
+	}
+	dumpContent := string(dumpBytes)
+	if !strings.Contains(dumpContent, "CREATE TABLE") || !strings.Contains(dumpContent, "INSERT INTO") {
+		t.Fatalf("expected CREATE TABLE and INSERT INTO in dump, got:\n%s", dumpContent)
+	}
+	if !strings.Contains(dumpContent, "Tolkien") || !strings.Contains(dumpContent, "The Hobbit") {
+		t.Fatalf("expected data in dump, got:\n%s", dumpContent)
+	}
+
+	// 5. Test GET /api/session/{id}/export-smart-seed?limit=2&ddl=true
+	resp, err = client.Get(fmt.Sprintf("%s/api/session/%s/export-smart-seed?limit=2&ddl=true", ts.URL, conn.ID))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("export-smart-seed failed: status=%d, err=%v", resp.StatusCode, err)
+	}
+	seedBytes, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatalf("read smart seed body failed: %v", err)
+	}
+	seedContent := string(seedBytes)
+	// Authors (parent) must appear before Books (child) in DDL and INSERT
+	authorsIdx := strings.Index(seedContent, "authors")
+	booksIdx := strings.Index(seedContent, "books")
+	if authorsIdx == -1 || booksIdx == -1 || authorsIdx > booksIdx {
+		t.Fatalf("expected parent 'authors' to precede child 'books' in smart seed, got:\n%s", seedContent)
+	}
+	if !strings.Contains(seedContent, "Tolkien") {
+		t.Fatalf("expected authors data in smart seed, got:\n%s", seedContent)
+	}
+
+	// 6. Test POST /api/session/{id}/run-sql-script
+	scriptContent := `
+CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT);
+INSERT INTO tags (id, name) VALUES (1, 'Fantasy');
+INSERT INTO tags (id, name) VALUES (2, 'Sci-Fi');
+`
+	var b bytes.Buffer
+	w := multipart.NewWriter(&b)
+	part, err := w.CreateFormFile("file", "script.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = part.Write([]byte(scriptContent))
+	_ = w.Close()
+
+	req, _ := http.NewRequest("POST", fmt.Sprintf("%s/api/session/%s/run-sql-script?stop_on_error=true", ts.URL, conn.ID), &b)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("run-sql-script failed: status=%d, err=%v", resp.StatusCode, err)
+	}
+	respBody, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	if !strings.Contains(string(respBody), `"status":"ok"`) && !strings.Contains(string(respBody), `"status":"completed"`) {
+		t.Fatalf("expected completed status in run-sql-script output, got: %s", string(respBody))
+	}
+
+	// Verify tags table created and populated
+	resp, err = client.Get(fmt.Sprintf("%s/api/session/%s/table/tags/rows?limit=10", ts.URL, conn.ID))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("get tags rows failed: %v", err)
+	}
+	var tagRows struct {
+		Rows [][]any `json:"rows"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&tagRows)
+	resp.Body.Close()
+	if len(tagRows.Rows) != 2 {
+		t.Fatalf("expected 2 tags, got %d", len(tagRows.Rows))
+	}
+}
