@@ -192,9 +192,9 @@ v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
       ▼
 v2.1 (Multi-Engine & Developer Operations Suite)
 ├── [x] 18. PostgreSQL Native Driver Engine (pgx/v5 pure-Go, schema introspection & out-of-band cancellation)
-├── [ ] 19. Visual Query Plan & Cost Analyzer (Interactive visual EXPLAIN tree & bottleneck detection)
-├── [ ] 20. FK-Aware Smart Mock Data Generator (Synthetic test data with relational closure)
-├── [ ] 21. Scheduled Headless Automation & Task Runner (Declarative CLI jobs for dumps & sync)
+├── [x] 19. Visual Query Plan & Cost Analyzer (Interactive visual EXPLAIN tree & bottleneck detection)
+├── [x] 20. FK-Aware Smart Mock Data Generator (Synthetic test data with relational closure)
+├── [x] 21. Scheduled Headless Automation & Task Runner (Declarative CLI jobs for dumps & sync)
 └── [ ] 22. Large-Scale Hardening & Memory Ceiling Benchmark (1,000+ tables, 500GB+ stress testing)
 ```
 
@@ -432,12 +432,12 @@ v2.1 (Multi-Engine & Developer Operations Suite)
 ### Milestone 25: Scheduled Headless Automation & Task Runner (Declarative CLI Jobs for Dumps & Sync)
 - **Goal**: Provide automated, zero-daemon scheduled database maintenance (routine backups, SQL dumps, cross-connection transfers, and health checks) executed directly via headless CLI cron jobs.
 - **Deliverables**:
-  - [ ] **Declarative Job Spec**: Clean YAML/JSON job definitions (`sqlfox-job.yaml`) specifying tasks (`dump`, `transfer`, `query`, `health-check`), target connections, and filters.
-  - [ ] **CLI Job Runner Subcommand**: `sqlfox job run --file <config.yaml>` executing scheduled tasks non-interactively with structured logging, stdout/stderr isolation, and exit codes for CI/CD and cron.
-  - [ ] **Automated Dump Rotation**: Built-in file retention policies (`keep_last: 7` or `max_age: 14d`) to prune expired backup artifacts automatically and prevent disk exhaustion.
-  - [ ] **Dry-Run & Validation Mode**: `sqlfox job check --file <config.yaml>` verifying vault credentials, target connectivity, and write permissions before execution.
-  - [ ] **Zero-Daemon OS Integration Guide**: Documented templates for standard Linux cron, systemd timers, macOS launchd, and Windows Task Scheduler.
-- **Runnable Verification**: Create test `job.yaml` specifying a smart-seed dump -> run `sqlfox job run --file job.yaml` -> verify dump file created and expired dumps rotated -> run `go test -v ./internal/cli -run TestJobRunner`.
+  - [x] **Declarative Job Spec**: Clean JSON job definitions (`sqlfox-job.json`) specifying tasks (`dump`, `transfer`, `query`, `health-check`), target connections, and environment variable interpolation (`os.ExpandEnv`).
+  - [x] **CLI Job Runner Subcommand**: `sqlfox job run --file <config.json>` executing scheduled tasks non-interactively with structured logging, stdout/stderr isolation, and exit codes for CI/CD and cron.
+  - [x] **Automated Dump Rotation**: Built-in file retention policies (`keep_last: 7` or `max_age: 14d`) to prune expired backup artifacts automatically and prevent disk exhaustion.
+  - [x] **Dry-Run & Validation Mode**: `sqlfox job check --file <config.json>` verifying vault credentials, target connectivity, and write permissions before execution.
+  - [x] **Zero-Daemon OS Integration Guide**: Documented templates for standard Linux cron, systemd timers, macOS launchd, and Windows Task Scheduler (`docs/playbooks/zero-daemon-scheduled-automation.md`).
+- **Runnable Verification**: Run `go test -v ./internal/cli -run "TestJob|TestApplyDumpRotation"` -> verify 100% pass across job parsing, execution, pre-flight check, and retention rotation.
 
 ---
 

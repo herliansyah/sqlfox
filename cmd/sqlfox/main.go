@@ -32,7 +32,7 @@ var Version = "v0.1.0"
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
-		case "query", "transfer", "help":
+		case "query", "transfer", "job", "help":
 			os.Exit(cli.Run(os.Args[1:], os.Stdout, os.Stderr, os.Stdin))
 		}
 	}

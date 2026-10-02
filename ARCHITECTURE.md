@@ -429,10 +429,12 @@ sqlfox/
 │       ├── main.go                 # Entry point: flags, localhost listener, port hunting, browser launcher
 │       └── main_test.go
 ├── internal/
-│   ├── cli/                        # Headless CLI suite for CI/CD automation
+│   ├── cli/                        # Headless CLI suite for CI/CD automation & scheduled jobs
 │   │   ├── runner.go               # Subcommand dispatcher, DSN parser, delimiter splitting
 │   │   ├── query.go                # sqlfox query: table, json, ndjson, csv streaming & fail-closed safety
 │   │   ├── transfer.go             # sqlfox transfer: cross-connection streaming with per-table atomicity
+│   │   ├── job.go                  # sqlfox job: declarative task runner, dump generator & retention rotation
+│   │   ├── job_test.go             # End-to-end task runner & rotation tests
 │   │   └── cli_test.go             # End-to-end CLI integration tests
 │   ├── vault/                      # SQLite config storage & AES-256-GCM credential encryption
 │   │   ├── vault.go                # Connections, master password, audit log, flight recorder schema
@@ -497,9 +499,12 @@ sqlfox/
 
 The headless CLI suite (`cmd/sqlfox/main.go` -> `internal/cli`) provides scriptable database access without the embedded HTTP server:
 
-1. **Subcommand Dispatch**: Inspects `os.Args[1]`. If `query` or `transfer`, execution delegates directly to `cli.RunQuery()` or `cli.RunTransfer()`. If empty or containing server flags (`-port`, `-host`), the desktop HTTP daemon launches normally.
-2. **Dual Target Resolution**: Resolves connection profiles either from the encrypted SQLite vault (`--conn`) or directly from URI/DSN connection strings (`--dsn`), auto-detecting drivers (MySQL/SQLite) for zero-config CI/CD runners.
+1. **Subcommand Dispatch**: Inspects `os.Args[1]`. If `query`, `transfer`, or `job`, execution delegates directly to `cli.RunQuery()`, `cli.RunTransfer()`, or `cli.RunJob()`. If empty or containing server flags (`-port`, `-host`), the desktop HTTP daemon launches normally.
+2. **Dual Target Resolution**: Resolves connection profiles either from the encrypted SQLite vault (`--conn`) or directly from URI/DSN connection strings (`--dsn`), auto-detecting drivers (MySQL/SQLite/PostgreSQL) for zero-config CI/CD runners.
 3. **Stream Pipeline & Output Formats**: Emits structured data exclusively to `stdout` (`table`, `json`, `ndjson`, `csv`), with diagnostics and transfer progress routed to `stderr`. `ndjson` streams row-by-row with $O(1)$ memory consumption (<20MB RAM).
 4. **Fail-Closed Safety Policy**: High-risk destructive statements (`DROP`, `TRUNCATE`, unqualified `DELETE`/`UPDATE`) trigger an immediate halt with exit code `2` unless explicitly bypassed with `--force`.
 5. **Per-Table Atomicity**: `sqlfox transfer` partitions transactions per table on the target database, preventing lock contention cascades and transaction rollback deadlocks.
+6. **Declarative Task Runner (`sqlfox job run`)**: Executes structured JSON automation pipelines (`sqlfox-job.json`) sequentially across `health-check`, `dump`, `transfer`, and `query` tasks with fail-fast error handling and environment variable expansion (`$VAR`/`${VAR}`).
+7. **Automated Dump Rotation & Retention**: The `dump` task automatically prunes expired backup files based on `keep_last` count and `max_age` duration using prefix pattern matching, preventing disk exhaustion without running a daemon.
+8. **Pre-Flight Job Check (`sqlfox job check`)**: Non-destructive dry-run inspection validating job syntax, target connectivity, script file existence, and output directory writability before cron deployment.
 
