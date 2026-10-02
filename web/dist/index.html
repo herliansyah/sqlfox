@@ -2561,27 +2561,29 @@
   </dialog>
 
   <!-- Dialog 26: Visual ERD Canvas -->
-  <dialog id="erd-dialog" class="m-auto bg-slate-950 border border-slate-700 text-white rounded-xl shadow-2xl p-0 outline-none w-[96vw] max-w-[1400px] h-[90vh] backdrop:bg-black/75 backdrop:backdrop-blur-sm overflow-hidden flex flex-col">
-    <div class="flex items-center justify-between px-4 py-2.5 border-b border-slate-700 bg-slate-900 flex-shrink-0">
-      <div class="flex items-center space-x-3">
-        <span class="font-semibold text-sm text-white">🗺️ Entity Relationship Diagram</span>
-        <span id="erd-table-count" class="text-xs text-slate-400"></span>
+  <dialog id="erd-dialog" class="m-auto bg-slate-950 border border-slate-700 text-white rounded-xl shadow-2xl p-0 outline-none w-[96vw] max-w-[1400px] h-[90vh] backdrop:bg-black/75 backdrop:backdrop-blur-sm overflow-hidden">
+    <div style="display:flex;flex-direction:column;height:100%;width:100%;">
+      <div class="flex items-center justify-between px-4 py-2.5 border-b border-slate-700 bg-slate-900 flex-shrink-0">
+        <div class="flex items-center space-x-3">
+          <span class="font-semibold text-sm text-white">🗺️ Entity Relationship Diagram</span>
+          <span id="erd-table-count" class="text-xs text-slate-400"></span>
+        </div>
+        <div class="flex items-center space-x-2">
+          <button onclick="erdAutoLayout(true)" class="h-7 bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-slate-600 text-xs transition" title="Auto-arrange all tables">⚡ Auto Layout</button>
+          <button onclick="erdFitAll()" class="h-7 bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-slate-600 text-xs transition" title="Fit all tables in view">⊡ Fit All</button>
+          <button onclick="document.getElementById('erd-dialog').close()" class="h-7 w-7 bg-slate-800 hover:bg-rose-900 text-slate-400 hover:text-rose-300 rounded border border-slate-600 text-sm transition flex items-center justify-center" title="Close (Escape)">✕</button>
+        </div>
       </div>
-      <div class="flex items-center space-x-2">
-        <button onclick="erdAutoLayout(true)" class="h-7 bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-slate-600 text-xs transition" title="Auto-arrange all tables">⚡ Auto Layout</button>
-        <button onclick="erdFitAll()" class="h-7 bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-slate-600 text-xs transition" title="Fit all tables in view">⊡ Fit All</button>
-        <button onclick="document.getElementById('erd-dialog').close()" class="h-7 w-7 bg-slate-800 hover:bg-rose-900 text-slate-400 hover:text-rose-300 rounded border border-slate-600 text-sm transition flex items-center justify-center" title="Close (Escape)">✕</button>
+      <div id="erd-canvas-wrapper" class="relative overflow-hidden cursor-grab select-none" style="flex:1;background-color:#020617;background-image:radial-gradient(circle,#1e293b 1px,transparent 1px);background-size:24px 24px;">
+        <div id="erd-viewport" style="position:absolute;top:0;left:0;transform-origin:0 0;will-change:transform;">
+          <svg id="erd-svg" style="position:absolute;top:0;left:0;overflow:visible;pointer-events:none;"></svg>
+          <div id="erd-cards" style="position:absolute;top:0;left:0;"></div>
+        </div>
       </div>
-    </div>
-    <div id="erd-canvas-wrapper" class="relative flex-1 overflow-hidden cursor-grab select-none" style="background-color:#020617;background-image:radial-gradient(circle,#1e293b 1px,transparent 1px);background-size:24px 24px;">
-      <div id="erd-viewport" style="position:absolute;top:0;left:0;transform-origin:0 0;will-change:transform;">
-        <svg id="erd-svg" style="position:absolute;top:0;left:0;overflow:visible;pointer-events:none;"></svg>
-        <div id="erd-cards" style="position:absolute;top:0;left:0;"></div>
+      <div class="px-3 py-1.5 border-t border-slate-800 bg-slate-900 flex items-center justify-between text-[11px] text-slate-500 flex-shrink-0">
+        <span>Drag tables · Scroll to zoom · Drag canvas to pan · 🔑 PK · 🔗 FK</span>
+        <span id="erd-zoom-label" class="font-mono">100%</span>
       </div>
-    </div>
-    <div class="px-3 py-1.5 border-t border-slate-800 bg-slate-900 flex items-center justify-between text-[11px] text-slate-500 flex-shrink-0">
-      <span>Drag tables · Scroll to zoom · Drag canvas to pan · 🔑 PK · 🔗 FK</span>
-      <span id="erd-zoom-label" class="font-mono">100%</span>
     </div>
   </dialog>
 
@@ -13337,7 +13339,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       dialog.showModal();
       document.getElementById('erd-table-count').textContent = 'Loading…';
       try {
-        const url = `/api/session/${activeConnection.id}/schema${db ? '?database=' + encodeURIComponent(db) : ''}`;
+        const url = `/api/session/${activeConnection.id}/schema${db ? '?db=' + encodeURIComponent(db) : ''}`;
         const res = await apiFetch(url);
         const data = await res.json();
         erdState.tables = data.tables || [];
