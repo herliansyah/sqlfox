@@ -1478,7 +1478,7 @@
               <kbd class="bg-slate-800 px-2 py-0.5 rounded text-[11px] text-slate-300 border border-slate-700 font-mono">Ctrl + Enter</kbd>
             </div>
             <div class="flex items-center justify-between py-1 border-b border-slate-900">
-              <span class="text-slate-300">Explain Active Query (Execution Plan Grid)</span>
+              <span class="text-slate-300">Explain Active Query (Visual Tree + Execution Plan)</span>
               <kbd class="bg-slate-800 px-2 py-0.5 rounded text-[11px] text-slate-300 border border-slate-700 font-mono">Ctrl + Shift + Enter</kbd>
             </div>
             <div class="flex items-center justify-between py-1">
@@ -1620,6 +1620,7 @@
         <div class="flex items-center space-x-2">
           <div class="flex bg-slate-950 rounded p-0.5 border border-slate-700 text-xs">
             <button id="impact-tab-table-btn" onclick="switchImpactTab('table')" class="px-2.5 py-0.5 rounded font-semibold bg-sky-950 text-sky-400">Plan Grid</button>
+            <button id="impact-tab-tree-btn" onclick="switchImpactTab('tree')" class="px-2.5 py-0.5 rounded text-slate-400 hover:text-white">Visual Tree</button>
             <button id="impact-tab-raw-btn" onclick="switchImpactTab('raw')" class="px-2.5 py-0.5 rounded text-slate-400 hover:text-white">Raw JSON</button>
           </div>
           <button onclick="closeImpactModal()" class="text-slate-400 hover:text-white text-base px-1">✕</button>
@@ -1652,6 +1653,12 @@
       <!-- Raw JSON View -->
       <div id="impact-raw-view" class="hidden flex-1 overflow-auto border border-slate-800 rounded bg-slate-950 p-3 min-h-[160px]">
         <pre class="font-mono text-slate-300 text-xs whitespace-pre overflow-x-auto" id="impact-raw-plan"></pre>
+      </div>
+
+      <!-- Visual Tree View -->
+      <div id="impact-tree-view" class="hidden flex-1 overflow-auto border border-slate-800 rounded bg-slate-950 p-3 min-h-[160px]">
+        <div id="impact-tree-canvas" class="font-mono text-xs select-text"></div>
+        <div id="impact-tree-empty" class="hidden p-8 text-center text-slate-500 italic text-xs">No JSON plan available. Run on MySQL 5.6+, MariaDB 10.2+, or PostgreSQL to get a visual tree.</div>
       </div>
 
       <div class="flex items-center justify-between pt-2 border-t border-app-border flex-shrink-0">
@@ -8605,21 +8612,32 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
     // --- Impact Preview Modal ---
     function switchImpactTab(tab) {
       const tableBtn = document.getElementById('impact-tab-table-btn');
-      const rawBtn = document.getElementById('impact-tab-raw-btn');
+      const treeBtn  = document.getElementById('impact-tab-tree-btn');
+      const rawBtn   = document.getElementById('impact-tab-raw-btn');
       const tableView = document.getElementById('impact-table-view');
-      const rawView = document.getElementById('impact-raw-view');
+      const treeView  = document.getElementById('impact-tree-view');
+      const rawView   = document.getElementById('impact-raw-view');
       if (!tableBtn || !rawBtn || !tableView || !rawView) return;
 
+      const active   = 'px-2.5 py-0.5 rounded font-semibold bg-sky-950 text-sky-400';
+      const inactive = 'px-2.5 py-0.5 rounded text-slate-400 hover:text-white';
+
+      tableBtn.className = inactive;
+      if (treeBtn) treeBtn.className = inactive;
+      rawBtn.className   = inactive;
+      tableView.classList.add('hidden');
+      if (treeView) treeView.classList.add('hidden');
+      rawView.classList.add('hidden');
+
       if (tab === 'table') {
-        tableBtn.className = 'px-2.5 py-0.5 rounded font-semibold bg-sky-950 text-sky-400';
-        rawBtn.className = 'px-2.5 py-0.5 rounded text-slate-400 hover:text-white';
+        tableBtn.className = active;
         tableView.classList.remove('hidden');
-        rawView.classList.add('hidden');
+      } else if (tab === 'tree') {
+        if (treeBtn) treeBtn.className = active;
+        if (treeView) treeView.classList.remove('hidden');
       } else {
-        rawBtn.className = 'px-2.5 py-0.5 rounded font-semibold bg-sky-950 text-sky-400';
-        tableBtn.className = 'px-2.5 py-0.5 rounded text-slate-400 hover:text-white';
+        rawBtn.className = active;
         rawView.classList.remove('hidden');
-        tableView.classList.add('hidden');
       }
     }
 
@@ -8690,10 +8708,158 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
 
       switchImpactTab('table');
       document.getElementById('impact-preview-modal').classList.remove('hidden');
+
+      // Build visual tree (async-ish via setTimeout to let modal paint first)
+      const rawJSON = planData && planData.raw_json;
+      renderPlanTree(rawJSON || '');
+      // Auto-switch to tree tab if a JSON plan is available
+      if (rawJSON) switchImpactTab('tree');
     }
 
     function closeImpactModal() {
       document.getElementById('impact-preview-modal').classList.add('hidden');
+    }
+
+    // --- Visual Query Plan Tree Renderer ---
+    // ponytail: zero-dependency recursive renderer; handles MySQL FORMAT=JSON and PostgreSQL FORMAT=JSON.
+    // Ceiling: deeply nested plans (>50 levels) may produce tall scroll; upgrade path = collapse/expand toggles.
+    function renderPlanTree(rawJSON) {
+      const canvas = document.getElementById('impact-tree-canvas');
+      const empty  = document.getElementById('impact-tree-empty');
+      if (!canvas) return;
+      canvas.innerHTML = '';
+
+      if (!rawJSON) {
+        if (empty) empty.classList.remove('hidden');
+        return;
+      }
+      if (empty) empty.classList.add('hidden');
+
+      let plan;
+      try { plan = JSON.parse(rawJSON); } catch { if (empty) empty.classList.remove('hidden'); return; }
+
+      // Detect engine: PG wraps in [{Plan:{...},...}], MySQL wraps in {query_block:{...}}
+      const isPG = Array.isArray(plan) && plan[0] && plan[0]['Plan'];
+      const isMySQL = plan && plan['query_block'];
+
+      function badge(cls, text) {
+        return `<span class="inline-block ${cls} text-[10px] font-bold px-1.5 py-0.5 rounded ml-1">${escapeHtml(text)}</span>`;
+      }
+
+      // ---- PostgreSQL renderer ----
+      function pgNodeBadges(node) {
+        const type = (node['Node Type'] || '').toLowerCase();
+        let out = '';
+        if (type === 'seq scan') out += badge('bg-red-950 text-red-400 border border-red-800', '⚠ Seq Scan');
+        else if (type.includes('index scan')) out += badge('bg-emerald-950 text-emerald-400 border border-emerald-800', '✓ Index Scan');
+        else if (type.includes('index only scan')) out += badge('bg-emerald-950 text-emerald-400 border border-emerald-800', '✓ Index Only');
+        else if (type.includes('bitmap')) out += badge('bg-sky-950 text-sky-400 border border-sky-800', 'Bitmap');
+        else if (type.includes('hash join')) out += badge('bg-indigo-950 text-indigo-400 border border-indigo-800', 'Hash Join');
+        else if (type.includes('nested loop')) out += badge('bg-amber-950 text-amber-400 border border-amber-800', 'Nested Loop');
+        else if (type.includes('merge join')) out += badge('bg-purple-950 text-purple-400 border border-purple-800', 'Merge Join');
+        else if (type.includes('sort')) out += badge('bg-slate-800 text-slate-300 border border-slate-600', 'Sort');
+        else if (type.includes('aggregate')) out += badge('bg-slate-800 text-slate-300 border border-slate-600', 'Aggregate');
+
+        if (node['Temp Written Blocks'] > 0) out += badge('bg-red-950 text-red-400 border border-red-800', '⚠ Disk Spill');
+
+        const totalCost = node['Total Cost'] || 0;
+        const actualRows = node['Actual Rows'];
+        const planRows   = node['Plan Rows'];
+        const rowsLabel = actualRows != null ? `actual ${actualRows.toLocaleString()} rows` : `est ${(planRows||0).toLocaleString()} rows`;
+        out += `<span class="text-slate-500 ml-1 text-[10px]">[cost=${totalCost.toFixed(2)} · ${rowsLabel}]</span>`;
+        if (node['Actual Total Time'] != null)
+          out += `<span class="text-slate-400 ml-1 text-[10px]">${node['Actual Total Time'].toFixed(2)}ms</span>`;
+        return out;
+      }
+
+      function pgNode(node, depth, isLast) {
+        const indent = depth === 0 ? '' : '│  '.repeat(depth - 1) + (isLast ? '└─ ' : '├─ ');
+        const type   = node['Node Type'] || '?';
+        const rel    = node['Relation Name'] ? ` on <span class="text-white font-bold">${escapeHtml(node['Relation Name'])}</span>` : '';
+        const alias  = node['Alias'] && node['Alias'] !== node['Relation Name'] ? ` <span class="text-slate-500">(${escapeHtml(node['Alias'])})</span>` : '';
+        const filter = node['Filter'] || node['Join Filter'] || node['Recheck Cond'] || '';
+
+        let html = `<div class="leading-relaxed py-0.5"><span class="text-slate-600 select-none whitespace-pre">${escapeHtml(indent)}</span>`;
+        html += `<span class="text-sky-300 font-semibold">${escapeHtml(type)}</span>${rel}${alias}`;
+        html += pgNodeBadges(node);
+        if (filter) html += `<div class="ml-${(depth+1)*4} text-slate-500 text-[10px]">filter: ${escapeHtml(filter)}</div>`;
+        html += '</div>';
+
+        const children = node['Plans'] || [];
+        children.forEach((c, i) => { html += pgNode(c, depth + 1, i === children.length - 1); });
+        return html;
+      }
+
+      // ---- MySQL renderer ----
+      function mysqlNodeBadges(node) {
+        let out = '';
+        const at = (node['access_type'] || '').toLowerCase();
+        if (at === 'all') out += badge('bg-red-950 text-red-400 border border-red-800', '⚠ Full Scan');
+        else if (at === 'index') out += badge('bg-amber-950 text-amber-400 border border-amber-800', 'Index Full');
+        else if (['range','ref','eq_ref','const','system'].includes(at)) out += badge('bg-emerald-950 text-emerald-400 border border-emerald-800', `✓ ${at}`);
+
+        if (node['using_temporary_table']) out += badge('bg-red-950 text-red-400 border border-red-800', '⚠ Tmp Table');
+        if (node['using_filesort']) out += badge('bg-amber-950 text-amber-400 border border-amber-800', 'Filesort');
+        if (node['key']) out += `<span class="text-sky-300 ml-1 text-[10px]">key: ${escapeHtml(node['key'])}</span>`;
+
+        const rows = node['rows_examined_per_scan'] || node['rows'] || 0;
+        out += `<span class="text-slate-500 ml-1 text-[10px]">[~${rows.toLocaleString()} rows]</span>`;
+        return out;
+      }
+
+      function mysqlNode(node, depth, isLast, label) {
+        const indent = depth === 0 ? '' : '│  '.repeat(depth - 1) + (isLast ? '└─ ' : '├─ ');
+        const tbl    = node['table_name'] || label || '(subquery)';
+
+        let html = `<div class="leading-relaxed py-0.5"><span class="text-slate-600 select-none whitespace-pre">${escapeHtml(indent)}</span>`;
+        html += `<span class="text-white font-bold">${escapeHtml(tbl)}</span>`;
+        html += mysqlNodeBadges(node);
+        html += '</div>';
+
+        // Nested loop / attached subqueries
+        const nested = node['nested_loop'] || [];
+        nested.forEach((n, i) => {
+          const child = n['table'] || n;
+          html += mysqlNode(child, depth + 1, i === nested.length - 1, null);
+        });
+        const attached = node['attached_subqueries'] || [];
+        attached.forEach((sq, i) => {
+          const qb = sq['query_block'];
+          if (qb) html += mysqlQueryBlock(qb, depth + 1, i === attached.length - 1);
+        });
+        return html;
+      }
+
+      function mysqlQueryBlock(qb, depth, isLast) {
+        const indent = depth === 0 ? '' : '│  '.repeat(depth - 1) + (isLast ? '└─ ' : '├─ ');
+        let html = `<div class="leading-relaxed py-0.5"><span class="text-slate-600 select-none whitespace-pre">${escapeHtml(indent)}</span>`;
+        html += `<span class="text-indigo-400 font-semibold">query_block</span>`;
+        if (qb['select_id']) html += `<span class="text-slate-500 ml-1 text-[10px]">#${qb['select_id']}</span>`;
+        html += '</div>';
+        const tbl = qb['table'];
+        const nl  = qb['nested_loop'];
+        if (tbl) html += mysqlNode(tbl, depth + 1, true, null);
+        else if (nl) nl.forEach((n, i) => {
+          html += mysqlNode(n['table'] || n, depth + 1, i === nl.length - 1, null);
+        });
+        return html;
+      }
+
+      let out = '';
+      if (isPG) {
+        plan.forEach((stmt, si) => {
+          if (si > 0) out += '<hr class="border-slate-800 my-2">';
+          out += pgNode(stmt['Plan'], 0, true);
+          if (stmt['Execution Time'] != null)
+            out += `<div class="text-slate-400 text-[10px] mt-1 pl-1">Total execution: <span class="text-white font-bold">${stmt['Execution Time'].toFixed(2)}ms</span></div>`;
+        });
+      } else if (isMySQL) {
+        out = mysqlQueryBlock(plan['query_block'], 0, true);
+      } else {
+        // Generic fallback: just pretty-print
+        out = `<pre class="text-slate-400 text-[10px] whitespace-pre">${escapeHtml(JSON.stringify(plan, null, 2))}</pre>`;
+      }
+      canvas.innerHTML = out;
     }
 
     // --- Data Grid Rendering & Inline Edit ---

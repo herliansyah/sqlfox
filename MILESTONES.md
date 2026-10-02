@@ -408,12 +408,12 @@ v2.1 (Multi-Engine & Developer Operations Suite)
 ### Milestone 23: Visual Query Plan & Cost Analyzer (Interactive Visual EXPLAIN Tree & Bottleneck Detection)
 - **Goal**: Empower developers and DBAs to diagnose and optimize complex slow queries intuitively by parsing raw database execution plans into a zero-dependency interactive visual node tree with bottleneck highlights.
 - **Deliverables**:
-  - [ ] **Engine Plan Parsers**: JSON execution plan parser supporting MySQL 8.x/MariaDB (`EXPLAIN FORMAT=JSON`) and PostgreSQL (`EXPLAIN (ANALYZE, COSTS, VERBOSE, BUFFERS, FORMAT JSON)`).
-  - [ ] **Visual Node Tree Canvas**: Zero-dependency interactive SVG/HTML hierarchical canvas rendering query plan nodes (Index Scan, Seq Scan, Nested Loop, Hash Join, Sort, Aggregate) with intuitive data flow arrows.
-  - [ ] **Bottleneck Red Flag Heuristics**: Automatic warning badges pinpointing critical performance sinks: Full Table Scans (`ALL` / `Seq Scan`), disk-spill temp tables, high relative cost percentage nodes, and unindexed filter predicates.
-  - [ ] **Cost & Row Metric Badges**: Detailed card popovers displaying execution time, cost estimates vs actual row counts, and buffer cache hits/misses.
-  - [ ] **UI Integration**: `⚡ Visual EXPLAIN` action added directly to the Query Editor toolbar and Processlist thread diagnostic drawer.
-- **Runnable Verification**: Execute `EXPLAIN FORMAT=JSON SELECT ...` on a multi-table JOIN -> click `⚡ Visual EXPLAIN` -> verify hierarchical visual tree renders -> verify full table scan nodes highlight with red warning badges and hover tooltips reveal stage costs.
+  - [x] **Engine Plan Parsers**: JSON execution plan parser supporting MySQL 8.x/MariaDB (`EXPLAIN FORMAT=JSON`) and PostgreSQL (`EXPLAIN (ANALYZE, COSTS, VERBOSE, BUFFERS, FORMAT JSON)`).
+  - [x] **Visual Node Tree Canvas**: Zero-dependency recursive HTML tree canvas rendering query plan nodes (Index Scan, Seq Scan, Nested Loop, Hash Join, Sort, Aggregate) with ASCII branch connectors (├─ / └─) and type-coloured node labels.
+  - [x] **Bottleneck Red Flag Heuristics**: Automatic warning badges pinpointing critical performance sinks: Full Table Scans (`ALL` / `Seq Scan`), disk-spill temp tables, filesort, high relative cost percentage nodes, and `using_temporary_table` flags.
+  - [x] **Cost & Row Metric Badges**: Inline cost estimates, actual vs. planned row counts, buffer stats, and per-node execution time (PostgreSQL ANALYZE).
+  - [x] **UI Integration**: `Visual Tree` tab added to the Execution Plan (EXPLAIN) modal; auto-activates when JSON plan is available. Accessible from Query Editor toolbar (⚡ Explain / Ctrl+Shift+Enter) and Processlist thread Explain action.
+- **Runnable Verification**: Execute `SELECT * FROM …` on a multi-table JOIN → click `⚡ Explain` → verify `Visual Tree` tab auto-opens → verify Seq Scan nodes show red `⚠ Seq Scan` badge and Index Scan nodes show green `✓ Index Scan` badge.
 
 ---
 

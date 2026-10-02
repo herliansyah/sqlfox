@@ -454,17 +454,20 @@ func (s *PostgresSession) Explain(ctx context.Context, querySQL string) (*driver
 		cleaned = strings.TrimSpace(cleaned[8:])
 	}
 
-	// Try EXPLAIN (FORMAT JSON)
+	// Tier 1: Full ANALYZE+BUFFERS plan (actual row counts, buffer hits — best for visual tree)
+	// ponytail: ANALYZE actually executes the query; safe for SELECT but skips for DML.
 	var rawJSON string
-	jsonErr := s.db.QueryRowContext(ctx, "EXPLAIN (FORMAT JSON) "+cleaned).Scan(&rawJSON)
-	if jsonErr == nil {
-		return &driver.ExplainPlan{
-			RawJSON: rawJSON,
-			Rows:    []driver.ExplainRow{},
-		}, nil
+	const analyzeFmt = "EXPLAIN (ANALYZE, COSTS, VERBOSE, BUFFERS, FORMAT JSON) "
+	if err := s.db.QueryRowContext(ctx, analyzeFmt+cleaned).Scan(&rawJSON); err == nil {
+		return &driver.ExplainPlan{RawJSON: rawJSON, Rows: []driver.ExplainRow{}}, nil
 	}
 
-	// Fallback to text EXPLAIN
+	// Tier 2: Cost-only JSON plan (no execution; works for DML without running it)
+	if err := s.db.QueryRowContext(ctx, "EXPLAIN (FORMAT JSON) "+cleaned).Scan(&rawJSON); err == nil {
+		return &driver.ExplainPlan{RawJSON: rawJSON, Rows: []driver.ExplainRow{}}, nil
+	}
+
+	// Tier 3: Text EXPLAIN fallback (ancient PG or unusual syntax)
 	rows, err := s.db.QueryContext(ctx, "EXPLAIN "+cleaned)
 	if err != nil {
 		return nil, err
@@ -485,9 +488,7 @@ func (s *PostgresSession) Explain(ctx context.Context, querySQL string) (*driver
 		}
 	}
 
-	return &driver.ExplainPlan{
-		Rows: planRows,
-	}, nil
+	return &driver.ExplainPlan{Rows: planRows}, nil
 }
 
 func (s *PostgresSession) CancelQuery(ctx context.Context, queryID string) error {

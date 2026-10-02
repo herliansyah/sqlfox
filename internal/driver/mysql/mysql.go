@@ -421,19 +421,25 @@ func (s *MySQLSession) Explain(ctx context.Context, querySQL string) (*driver.Ex
 		return &driver.ExplainPlan{Rows: []driver.ExplainRow{}}, nil
 	}
 
+	// Classic tabular EXPLAIN (always supported)
 	rows, err := s.db.QueryContext(ctx, "EXPLAIN "+cleanedSQL)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
 	planRows, err := driver.ScanExplainRows(rows)
 	if err != nil {
 		return nil, err
 	}
 
+	// Best-effort JSON plan for visual tree (MySQL 5.6+, ignored on older/MariaDB)
+	// ponytail: single-row scan; FORMAT=JSON not supported everywhere, so we silently drop errors.
+	var rawJSON string
+	_ = s.db.QueryRowContext(ctx, "EXPLAIN FORMAT=JSON "+cleanedSQL).Scan(&rawJSON)
+
 	return &driver.ExplainPlan{
-		Rows: planRows,
+		RawJSON: rawJSON,
+		Rows:    planRows,
 	}, nil
 }
 
