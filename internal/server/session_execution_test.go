@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"sqlfox/internal/driver"
-	"sqlfox/internal/safety"
 	"sqlfox/internal/vault"
 )
 
@@ -31,15 +30,13 @@ func TestActiveSession_SafeExecutionPipeline(t *testing.T) {
 	}
 	defer dbSession.Close()
 
-	backupMgr := safety.NewBackupManager(backupDir)
-
 	sess := &ActiveSession{
 		ID:          "conn-1",
 		Environment: "Development",
 		DriverName:  "sqlite",
 		ReadOnly:    false,
 		Session:     dbSession,
-		backupMgr:   backupMgr,
+		backupDir:   backupDir,
 	}
 
 	ctx := context.Background()
@@ -182,8 +179,8 @@ func TestSessionManager_ConnectPassesGuardAndBackup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	backupMgr := safety.NewBackupManager(filepath.Join(tempDir, "backups"))
-	sm := NewSessionManager(v, backupMgr)
+	backupDir := filepath.Join(tempDir, "backups")
+	sm := NewSessionManager(v, backupDir)
 	defer sm.CloseAll()
 
 	sess, err := sm.ConnectSession(context.Background(), conn.ID)
@@ -191,8 +188,8 @@ func TestSessionManager_ConnectPassesGuardAndBackup(t *testing.T) {
 		t.Fatalf("ConnectSession failed: %v", err)
 	}
 
-	if sess.backupMgr != backupMgr {
-		t.Fatal("expected session to receive backupMgr from SessionManager")
+	if sess.backupDir != backupDir {
+		t.Fatal("expected session to receive backupDir from SessionManager")
 	}
 	if !sess.ReadOnly {
 		t.Fatal("expected Production session to default to ReadOnly")

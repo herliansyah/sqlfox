@@ -340,7 +340,7 @@
     </aside>
 
     <!-- Center Column: Multi-tab Workspace (Editor + Results Grid) -->
-    <main class="flex-1 flex flex-col overflow-hidden bg-app-bg">
+    <main class="flex-1 flex flex-col overflow-hidden bg-app-bg min-w-0">
       
       <!-- Tabs Bar -->
       <div class="h-9 bg-app-surface border-b border-app-border flex items-center px-2 space-x-1 overflow-x-auto flex-shrink-0">
@@ -379,6 +379,11 @@
               <span id="profile-toggle-text">Profile: OFF</span>
             </button>
 
+            <div id="notes-tab-mode-toggle" class="hidden items-center space-x-1 bg-slate-900 p-0.5 rounded border border-slate-700 text-xs">
+              <button id="btn-notes-mode-edit" onclick="setNotesTabMode('edit')" class="px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-800 text-white">Edit</button>
+              <button id="btn-notes-mode-preview" onclick="setNotesTabMode('preview')" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">Preview</button>
+            </div>
+
             <button id="export-notes-btn" onclick="exportCurrentNotes()" class="hidden text-slate-300 hover:text-white px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 transition flex items-center space-x-1" title="Download Notes as Markdown">
               <span>💾</span>
               <span>Export Notes (.md)</span>
@@ -396,6 +401,7 @@
         <!-- SQL Code Editor Container -->
         <div id="sql-editor-container" class="flex-1 relative font-mono text-sm overflow-hidden bg-app-bg/50">
           <textarea id="sql-editor-textarea" class="hidden" placeholder="-- Type SQL query here (Ctrl+Enter to run, Ctrl+Shift+Enter to explain)"></textarea>
+          <div id="notes-tab-preview" class="hidden absolute inset-0 p-6 bg-app-bg text-slate-200 text-xs overflow-y-auto leading-relaxed z-10 font-sans"></div>
         </div>
       </div>
 
@@ -775,7 +781,7 @@
         <!-- Table Diagnostics View (Diagnostics Mode) -->
         <div id="table-diagnostics-view" class="hidden flex-1 flex flex-col overflow-y-auto bg-app-bg p-4 space-y-4">
           <!-- Metric Cards -->
-          <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div class="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
             <div class="bg-slate-900 border border-slate-800 rounded p-3">
               <span class="text-[11px] text-slate-400 block font-medium">Data Size</span>
               <span id="td-data-size" class="text-lg font-bold text-sky-400">-</span>
@@ -872,7 +878,7 @@
       <!-- Processlist & Thread Monitor View (Dedicated Tab) -->
       <div id="processlist-view-container" class="hidden flex-1 flex flex-col overflow-hidden bg-app-bg">
         <!-- Processlist Toolbar -->
-        <div class="h-10 bg-app-surface border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0 gap-3">
+        <div class="h-10 bg-app-surface border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0 gap-3 overflow-x-auto">
           <div class="flex items-center space-x-2.5 flex-1 min-w-0">
             <div class="shrink-0 flex items-center space-x-1 bg-slate-900 border border-slate-700 rounded p-0.5">
               <span class="text-slate-400 text-[11px] px-1.5 font-medium">Refresh:</span>
@@ -1011,7 +1017,7 @@
       <!-- Cluster & Replication Inspector View (Dedicated Tab) -->
       <div id="cluster-view-container" class="hidden flex-1 flex flex-col overflow-hidden bg-app-bg">
         <!-- Cluster Toolbar -->
-        <div class="h-10 bg-app-surface border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0 gap-3">
+        <div class="h-10 bg-app-surface border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0 gap-3 overflow-x-auto">
           <div class="flex items-center space-x-2.5 flex-1 min-w-0">
             <div class="shrink-0 flex items-center space-x-1 bg-slate-900 border border-slate-700 rounded p-0.5">
               <span class="text-slate-400 text-[11px] px-1.5 font-medium">Refresh:</span>
@@ -1052,7 +1058,7 @@
           </div>
 
           <!-- Summary Metric Cards (4 Cards) -->
-          <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div class="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-3">
             <!-- Topology & Quorum -->
             <div class="bg-app-card border border-app-border rounded-lg p-3">
               <div class="text-[11px] text-slate-400 font-medium">Topology &amp; Quorum</div>
@@ -1092,7 +1098,7 @@
               <span class="text-[10px] text-slate-400 font-mono">EVS Replication &amp; InnoDB Wait Telemetry</span>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+            <div class="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3 pt-1">
               <!-- Network Replication Latency -->
               <div class="bg-slate-900/70 border border-slate-800 rounded p-3 space-y-1">
                 <div class="flex items-center justify-between text-xs">
@@ -1144,7 +1150,7 @@
               <span class="text-[10px] text-slate-400 font-mono">Auto-Probed via wsrep_incoming_addresses</span>
             </div>
 
-            <div id="cl-nodes-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
+            <div id="cl-nodes-grid" class="grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-3 pt-1">
               <!-- Dynamically populated node cards -->
             </div>
           </div>
@@ -1154,7 +1160,7 @@
       <!-- Performance Flight Recorder View (Dedicated Tab) -->
       <div id="flight-recorder-view-container" class="hidden flex-1 flex flex-col overflow-hidden bg-app-bg">
         <!-- Flight Recorder Toolbar -->
-        <div class="h-10 bg-app-surface border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0 gap-3">
+        <div class="h-10 bg-app-surface border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0 gap-3 overflow-x-auto">
           <div class="flex items-center space-x-2.5 flex-1 min-w-0">
             <!-- Start/Stop Button -->
             <button id="fr-btn-toggle" onclick="toggleFlightRecorder()" class="h-7 px-3 bg-rose-600 hover:bg-rose-500 text-white rounded font-medium flex items-center space-x-1.5 transition shadow-sm">
@@ -1198,7 +1204,7 @@
         <!-- Scrollable Flight Content Area -->
         <div class="flex-1 overflow-y-auto p-4 space-y-4">
           <!-- Metric Legend Cards -->
-          <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div class="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
             <div class="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800 flex items-center space-x-3">
               <div class="w-3 h-3 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/50"></div>
               <div>
@@ -1270,7 +1276,10 @@
     </main>
 
     <!-- Right Sidebar: AI Assistant & Privacy Firewall -->
-    <aside id="ai-sidebar" class="w-80 bg-app-surface border-l border-app-border flex flex-col flex-shrink-0 transition-all duration-200 z-10 relative">
+    <aside id="ai-sidebar" class="w-80 bg-app-surface border-l border-app-border flex flex-col flex-shrink-0 transition-all duration-200 z-10 relative select-text" style="min-width: 280px; max-width: calc(100vw - 360px);">
+      <!-- Drag Resizer Seam on Left Edge -->
+      <div id="ai-sidebar-resizer" class="absolute top-0 bottom-0 -left-1.5 w-3 cursor-col-resize hover:bg-sky-500/50 active:bg-sky-500 z-20 transition-colors" title="Drag to resize Copilot sidebar"></div>
+
       <!-- AI Header -->
       <div class="p-2.5 border-b border-app-border flex items-center justify-between">
         <div class="flex items-center space-x-1.5">
@@ -1278,6 +1287,9 @@
           <span class="text-xs font-bold text-white tracking-wide">Copilot</span>
         </div>
         <div class="flex items-center space-x-1 text-xs">
+          <button onclick="toggleAIMaximize()" id="ai-maximize-btn" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded text-[11px] transition flex items-center space-x-1" title="Maximize / Restore Sidebar (Toggle 50% width)">
+            <span id="ai-maximize-icon">⛶</span>
+          </button>
           <button onclick="startNewAIChat()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded text-[11px] transition flex items-center space-x-1" title="Start a fresh chat conversation">
             <span>➕</span>
             <span>New</span>
@@ -1341,11 +1353,15 @@
             </label>
             <span id="ai-provider-badge" onclick="toggleAISettings()" class="text-[10px] text-slate-400 hover:text-app-accent font-mono cursor-pointer transition truncate max-w-[170px]" title="Click to configure AI Settings">BYOK</span>
           </div>
-          <textarea id="ai-prompt-input" rows="2" class="w-full bg-app-surface p-2 text-xs text-white border border-app-border rounded outline-none resize-none focus:border-app-accent" placeholder="Ask AI (e.g. 'Show top 10 users with highest sales')..."></textarea>
-          <div class="flex items-center justify-end">
-            <button type="submit" class="bg-app-accent hover:bg-sky-500 text-slate-950 font-bold px-3 py-1 rounded text-xs transition">
-              Send
-            </button>
+          <div class="relative flex flex-col">
+            <textarea id="ai-prompt-input" rows="2" class="w-full bg-app-surface p-2.5 text-xs text-white border border-app-border rounded outline-none resize-y focus:border-app-accent leading-relaxed min-h-[52px] max-h-[220px]" placeholder="Ask Copilot (e.g. 'Optimalkan query ini', 'Buat schema migration')... (Enter = Kirim, Shift+Enter = Baris baru)" oninput="autoResizeAIPrompt(this)" onkeydown="handleAIPromptKeydown(event)"></textarea>
+            <div class="flex items-center justify-between mt-1.5 pt-1 text-[11px] text-slate-400">
+              <span class="text-[10px] text-slate-500">↵ Kirim &nbsp;•&nbsp; ⇧↵ Baris baru</span>
+              <button type="submit" class="bg-app-accent hover:bg-sky-500 text-slate-950 font-bold px-3 py-1 rounded text-xs transition flex items-center space-x-1">
+                <span>Kirim</span>
+                <span>▶</span>
+              </button>
+            </div>
           </div>
         </form>
       </div>
@@ -4471,17 +4487,48 @@
       }
 
       const exportNotesBtn = document.getElementById('export-notes-btn');
-      if (exportNotesBtn) {
-        if (activeTab && activeTab.isNote) {
-          exportNotesBtn.classList.remove('hidden');
-        } else {
-          exportNotesBtn.classList.add('hidden');
-        }
+      const notesModeToggle = document.getElementById('notes-tab-mode-toggle');
+      if (activeTab && activeTab.isNote) {
+        if (exportNotesBtn) exportNotesBtn.classList.remove('hidden');
+        if (notesModeToggle) notesModeToggle.classList.remove('hidden');
+        setNotesTabMode(currentNotesTabMode || 'edit');
+      } else {
+        if (exportNotesBtn) exportNotesBtn.classList.add('hidden');
+        if (notesModeToggle) notesModeToggle.classList.add('hidden');
+        const previewEl = document.getElementById('notes-tab-preview');
+        if (previewEl) previewEl.classList.add('hidden');
+        const cmWrapper = cmEditor ? cmEditor.getWrapperElement() : null;
+        if (cmWrapper) cmWrapper.classList.remove('hidden');
       }
 
       setTimeout(() => {
         if (cmEditor) cmEditor.refresh();
       }, 10);
+    }
+
+    let currentNotesTabMode = 'edit';
+    function setNotesTabMode(mode) {
+      currentNotesTabMode = mode;
+      const btnEdit = document.getElementById('btn-notes-mode-edit');
+      const btnPreview = document.getElementById('btn-notes-mode-preview');
+      const previewEl = document.getElementById('notes-tab-preview');
+      const cmWrapper = cmEditor ? cmEditor.getWrapperElement() : null;
+
+      if (mode === 'preview') {
+        if (btnEdit) btnEdit.className = 'px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white';
+        if (btnPreview) btnPreview.className = 'px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-800 text-white';
+        if (previewEl) {
+          previewEl.innerHTML = renderCopilotMarkdown(getEditorSQL());
+          previewEl.classList.remove('hidden');
+        }
+        if (cmWrapper) cmWrapper.classList.add('hidden');
+      } else {
+        if (btnEdit) btnEdit.className = 'px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-800 text-white';
+        if (btnPreview) btnPreview.className = 'px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white';
+        if (previewEl) previewEl.classList.add('hidden');
+        if (cmWrapper) cmWrapper.classList.remove('hidden');
+        if (cmEditor) cmEditor.refresh();
+      }
     }
 
     function exportCurrentNotes() {
@@ -5470,7 +5517,7 @@
       const nodes = d.nodes || [];
 
       if (nodes.length === 0) {
-        grid.innerHTML = '<div class="col-span-3 text-center text-slate-500 py-6 italic text-xs">No cluster members detected.</div>';
+        grid.innerHTML = '<div class="col-span-full text-center text-slate-500 py-6 italic text-xs">No cluster members detected.</div>';
         return;
       }
 
@@ -7297,36 +7344,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
 
     function renderSimpleMarkdown(md) {
       if (!md) return '<p class="text-slate-500 italic">No notes documented yet. Write markdown rules, query gotchas, or business constraints.</p>';
-      let safe = escapeHtml(md);
-
-      // Code blocks
-      safe = safe.replace(/```([a-zA-Z0-9_]*)\n([\s\S]*?)```/g, (match, lang, code) => {
-        return `<pre class="my-2 p-3 bg-slate-950 border border-slate-800 rounded font-mono text-xs text-sky-300 overflow-x-auto leading-relaxed"><code>${code}</code></pre>`;
-      });
-
-      // Inline code
-      safe = safe.replace(/`([^`]+)`/g, '<code class="bg-slate-800 text-sky-300 px-1 py-0.5 rounded text-[11px] font-mono">$1</code>');
-
-      // Headings
-      safe = safe.replace(/^### (.*$)/gim, '<h3 class="text-sm font-bold text-slate-100 mt-3 mb-1 border-b border-slate-800/80 pb-1">$1</h3>');
-      safe = safe.replace(/^## (.*$)/gim, '<h2 class="text-base font-bold text-white mt-4 mb-1.5 border-b border-slate-800 pb-1">$1</h2>');
-      safe = safe.replace(/^# (.*$)/gim, '<h1 class="text-lg font-extrabold text-white mt-4 mb-2 pb-1 border-b border-slate-700">$1</h1>');
-
-      // Bold and italics
-      safe = safe.replace(/\\*\\*([^\\*]+)\\*\\*/g, '<strong class="font-bold text-slate-100">$1</strong>');
-      safe = safe.replace(/\\*([^\\*]+)\\*/g, '<em class="italic text-slate-300">$1</em>');
-
-      // Bullet lists
-      safe = safe.replace(/^\\s*-\\s+(.*$)/gim, '<li class="ml-4 list-disc text-slate-300 my-0.5">$1</li>');
-
-      // Paragraphs / line breaks
-      const paragraphs = safe.split('\\n\\n');
-      return paragraphs.map(p => {
-        p = p.trim();
-        if (!p) return '';
-        if (p.startsWith('<h') || p.startsWith('<pre') || p.startsWith('<li')) return p;
-        return `<p class="my-1.5 text-slate-300 leading-relaxed">${p.replace(/\\n/g, '<br/>')}</p>`;
-      }).join('');
+      return renderCopilotMarkdown(md);
     }
 
 
@@ -9035,14 +9053,32 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
     }
 
     // --- AI Assistant ---
+    let isAIMaximized = false;
+    let savedAIWidthBeforeMaximize = null;
+
+    function autoResizeAIPrompt(el) {
+      if (!el) return;
+      el.style.height = 'auto';
+      const newHeight = Math.min(Math.max(el.scrollHeight, 52), 220);
+      el.style.height = newHeight + 'px';
+    }
+
+    function handleAIPromptKeydown(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        submitAIChat(e);
+      }
+    }
+
     async function submitAIChat(e) {
-      e.preventDefault();
+      if (e && typeof e.preventDefault === 'function') e.preventDefault();
       const input = document.getElementById('ai-prompt-input');
       const prompt = input.value.trim();
       if (!prompt) return;
 
       appendAIMessage('user', prompt);
       input.value = '';
+      autoResizeAIPrompt(input);
 
       await callAI('chat', prompt);
     }
@@ -9095,6 +9131,131 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       }
     }
 
+    function renderCopilotMarkdown(rawText) {
+      if (!rawText) return '';
+
+      // 1. Normalize line endings (CRLF -> LF)
+      let text = String(rawText).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+      // 2. Extract code blocks safely
+      const blocks = [];
+      text = text.replace(/```([a-zA-Z0-9_\-]*)[ \t]*\n([\s\S]*?)```/g, (match, lang, code) => {
+        const id = `__SQLFOX_BLOCK_${blocks.length}__`;
+        const trimmedCode = code.trim();
+        const lowerLang = (lang || '').toLowerCase().trim();
+
+        if (lowerLang === 'sql' || (!lowerLang && (trimmedCode.toUpperCase().startsWith('SELECT') || trimmedCode.toUpperCase().startsWith('INSERT') || trimmedCode.toUpperCase().startsWith('UPDATE') || trimmedCode.toUpperCase().startsWith('DELETE') || trimmedCode.toUpperCase().startsWith('CREATE') || trimmedCode.toUpperCase().startsWith('ALTER') || trimmedCode.toUpperCase().startsWith('DROP') || trimmedCode.toUpperCase().startsWith('EXPLAIN')))) {
+          blocks.push(`
+            <div class="my-2.5 bg-slate-950 p-2.5 rounded border border-slate-700 font-mono text-[11px] text-sky-300 overflow-x-auto">
+              <div class="flex justify-between items-center mb-1.5 text-[10px] text-slate-400 border-b border-slate-800 pb-1.5 flex-wrap gap-1">
+                <span class="font-bold text-slate-300 flex items-center space-x-1"><span>⚡</span><span>Generated SQL</span></span>
+                <div class="flex items-center space-x-1.5">
+                  <button type="button" onclick="insertSQLFromBlock(this)" class="hover:text-app-accent px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-sky-300 transition" title="Insert & Execute">Insert & Run ▶</button>
+                  <button type="button" onclick="replaceSQLFromBlock(this)" class="hover:text-app-accent px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition" title="Replace Editor Content">Replace</button>
+                  <button type="button" onclick="copySQLFromBlock(this)" class="hover:text-app-accent px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition" title="Copy SQL">📋 Copy SQL</button>
+                </div>
+              </div>
+              <code class="block whitespace-pre overflow-x-auto font-mono text-sky-200">${escapeHtml(trimmedCode)}</code>
+            </div>
+          `);
+        } else {
+          blocks.push(`
+            <pre class="my-2 p-2.5 bg-slate-950 border border-slate-800 rounded font-mono text-xs text-sky-300 overflow-x-auto leading-relaxed"><code>${escapeHtml(trimmedCode)}</code></pre>
+          `);
+        }
+        return `\n\n${id}\n\n`;
+      });
+
+      // 3. Extract tables
+      const tableRegex = /((?:^|\n)\|[^\n]+\|\n\|[\s\-:|]+\|\n(?:\|[^\n]+\|\n?)+)/g;
+      text = text.replace(tableRegex, (match) => {
+        const id = `__SQLFOX_BLOCK_${blocks.length}__`;
+        const lines = match.trim().split('\n').filter(l => l.trim().startsWith('|'));
+        if (lines.length < 2) return match;
+        const parseRow = (line) => line.split('|').slice(1, -1).map(c => c.trim());
+        const headers = parseRow(lines[0]);
+        const rows = lines.slice(2).map(parseRow);
+        const ths = headers.map(h => `<th class="p-1.5 border border-slate-700 bg-slate-900 text-slate-200 font-semibold">${escapeHtml(h)}</th>`).join('');
+        const trs = rows.map(r => {
+          const tds = r.map(c => `<td class="p-1.5 border border-slate-800 text-slate-300">${escapeHtml(c)}</td>`).join('');
+          return `<tr class="hover:bg-slate-800/40">${tds}</tr>`;
+        }).join('');
+        blocks.push(`<div class="overflow-x-auto my-2.5 rounded border border-slate-700"><table class="w-full text-[11px] text-left border-collapse"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table></div>`);
+        return `\n\n${id}\n\n`;
+      });
+
+      // 4. Escape remaining HTML
+      let safe = escapeHtml(text);
+
+      // Horizontal rules
+      safe = safe.replace(/^\s*---+\s*$/gim, '\n<hr class="my-4 border-slate-800"/>\n');
+
+      // 5. Inline code
+      safe = safe.replace(/`([^`]+)`/g, '<code class="bg-slate-800 text-sky-300 px-1 py-0.5 rounded text-[11px] font-mono">$1</code>');
+
+      // 6. Headings (H1 to H6)
+      safe = safe.replace(/^\s*###### (.*$)/gim, '\n<h6 class="text-[11px] font-bold text-slate-300 mt-2 mb-0.5">$1</h6>\n');
+      safe = safe.replace(/^\s*##### (.*$)/gim, '\n<h5 class="text-[11px] font-bold text-slate-200 mt-2 mb-0.5">$1</h5>\n');
+      safe = safe.replace(/^\s*#### (.*$)/gim, '\n<h4 class="text-xs font-bold text-slate-200 mt-2.5 mb-1 pb-0.5">$1</h4>\n');
+      safe = safe.replace(/^\s*### (.*$)/gim, '\n<h3 class="text-xs font-bold text-slate-100 mt-2.5 mb-1 border-b border-slate-800/80 pb-0.5">$1</h3>\n');
+      safe = safe.replace(/^\s*## (.*$)/gim, '\n<h2 class="text-sm font-bold text-white mt-3 mb-1 pb-0.5 border-b border-slate-700">$1</h2>\n');
+      safe = safe.replace(/^\s*# (.*$)/gim, '\n<h1 class="text-base font-bold text-white mt-3.5 mb-1.5 pb-0.5 border-b border-slate-600">$1</h1>\n');
+
+      // 7. Lists BEFORE bold/italics
+      safe = safe.replace(/^\s*[-*]\s+(.*$)/gim, '<li class="ml-4 list-disc text-slate-300 my-0.5">$1</li>');
+      safe = safe.replace(/^\s*(?:\d+)\.\s+(.*$)/gim, '<li class="ml-4 list-decimal text-slate-300 my-0.5">$1</li>');
+
+      // Wrap consecutive list items in <ul>
+      safe = safe.replace(/((?:<li[^>]*>[\s\S]*?<\/li>\n?)+)/g, '\n<ul class="my-1.5 space-y-0.5">$1</ul>\n');
+
+      // 8. Bold & Italics
+      safe = safe.replace(/\*\*([^*]+)\*\*/g, '<strong class="font-bold text-slate-100">$1</strong>');
+      safe = safe.replace(/\*([^*]+)\*/g, '<em class="italic text-slate-300">$1</em>');
+
+      // 9. Blockquotes
+      safe = safe.replace(/^&gt;\s+(.*$)/gim, '\n<blockquote class="border-l-2 border-app-accent pl-2.5 my-1.5 text-slate-400 italic text-[11px]">$1</blockquote>\n');
+
+      // 10. Paragraphs
+      const paragraphs = safe.split(/\n{2,}/);
+      safe = paragraphs.map(p => {
+        p = p.trim();
+        if (!p) return '';
+        if (p.startsWith('__SQLFOX_BLOCK_') || p.startsWith('<h') || p.startsWith('<ul') || p.startsWith('<ol') || p.startsWith('<pre') || p.startsWith('<div') || p.startsWith('<blockquote') || p.startsWith('<hr')) {
+          return p;
+        }
+        return `<p class="my-1.5 text-slate-200 leading-relaxed">${p.replace(/\n/g, '<br/>')}</p>`;
+      }).join('');
+
+      // 11. Restore blocks
+      blocks.forEach((blockHtml, i) => {
+        safe = safe.replace(new RegExp(`__SQLFOX_BLOCK_${i}__`, 'g'), blockHtml);
+      });
+
+      return safe;
+    }
+
+    function insertSQLFromBlock(btn) {
+      const codeEl = btn.closest('.font-mono').querySelector('code');
+      if (codeEl) {
+        setEditorSQL(codeEl.textContent.trim());
+        runActiveQuery();
+      }
+    }
+
+    function replaceSQLFromBlock(btn) {
+      const codeEl = btn.closest('.font-mono').querySelector('code');
+      if (codeEl) {
+        setEditorSQL(codeEl.textContent.trim());
+      }
+    }
+
+    function copySQLFromBlock(btn) {
+      const codeEl = btn.closest('.font-mono').querySelector('code');
+      if (codeEl) {
+        copySQLToClipboard(codeEl.textContent.trim());
+      }
+    }
+
     function appendAIMessage(role, text, save = true) {
       const container = document.getElementById('ai-messages');
       const div = document.createElement('div');
@@ -9103,43 +9264,34 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       div.dataset.rawText = text;
 
       if (role === 'user') {
-        div.className += 'bg-sky-950/60 p-2.5 rounded border border-sky-800 text-sky-100';
-        div.innerHTML = `<b>You:</b> ${escapeHtml(text)}`;
+        div.className += 'bg-sky-950/60 p-2.5 rounded-lg border border-sky-800 text-sky-100 shadow-sm';
+        const formatted = renderCopilotMarkdown(text);
+        div.innerHTML = `<div class="text-[10px] text-sky-400 font-bold mb-1">You</div><div class="user-content leading-relaxed text-sky-100">${formatted}</div>`;
       } else if (role === 'assistant') {
-        div.className += 'bg-app-card p-2.5 rounded border border-app-border text-slate-200';
-        let formatted = escapeHtml(text);
-        if (text.includes('```sql')) {
-          const match = text.match(/```sql([\s\S]*?)```/);
-          if (match) {
-            const firstSql = match[1].trim();
-            const escapedSql = escapeHtml(firstSql).replace(/"/g, '&quot;');
-            formatted = formatted.replace(/```sql[\s\S]*?```/, `
-              <div class="mt-2 bg-slate-950 p-2 rounded border border-slate-700 font-mono text-[11px] text-sky-300 overflow-x-auto">
-                <div class="flex justify-between items-center mb-1 text-[10px] text-slate-400 border-b border-slate-800 pb-1 flex-wrap gap-1">
-                  <span class="font-bold text-slate-300">Generated SQL</span>
-                  <div class="flex items-center space-x-1.5">
-                    <button onclick="insertSQLToEditor(\`${escapedSql}\`)" class="hover:text-app-accent px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700" title="Insert & Execute">Insert & Run ▶</button>
-                    <button onclick="replaceEditorWithSQL(\`${escapedSql}\`)" class="hover:text-app-accent px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700" title="Replace Editor Content">Replace</button>
-                    <button onclick="copySQLToClipboard(\`${escapedSql}\`)" class="hover:text-app-accent px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700" title="Copy SQL">📋</button>
-                  </div>
-                </div>
-                <code>${escapeHtml(firstSql)}</code>
-              </div>
-            `);
-          }
-        }
-        const notePayload = escapeHtml(text).replace(/"/g, '&quot;');
+        div.className += 'bg-app-card p-3 rounded-lg border border-app-border text-slate-200 shadow-sm';
+        const formatted = renderCopilotMarkdown(text);
         div.innerHTML = `
-          <div><b>Copilot:</b> ${formatted}</div>
-          <div class="flex justify-end pt-1.5 mt-1 border-t border-slate-800/60">
-            <button onclick="saveToInternalNotes('Copilot Explanation', \`${notePayload}\`)" class="text-[10px] text-slate-400 hover:text-app-accent flex items-center space-x-1">
-              <span>📝</span>
-              <span>Save to Notes</span>
-            </button>
+          <div class="copilot-content">${formatted}</div>
+          <div class="flex items-center justify-between pt-2 mt-2 border-t border-slate-800/80 text-[11px] text-slate-400 flex-wrap gap-1">
+            <span class="text-[10px] text-slate-500 font-mono">Copilot</span>
+            <div class="flex items-center space-x-1 sm:space-x-2">
+              <button onclick="copyAIMessageBubble(this)" class="hover:text-app-accent px-1.5 py-0.5 rounded hover:bg-slate-800 transition flex items-center space-x-1" title="Copy response to clipboard">
+                <span>📋</span>
+                <span>Copy</span>
+              </button>
+              <button onclick="saveAIMessageToNotes(this)" class="hover:text-app-accent px-1.5 py-0.5 rounded hover:bg-slate-800 transition flex items-center space-x-1" title="Save response to Notes.md">
+                <span>📝</span>
+                <span>Save to Notes</span>
+              </button>
+              <button onclick="forkAIChatSessionFromMsg(this)" class="hover:text-emerald-400 px-1.5 py-0.5 rounded hover:bg-slate-800 transition flex items-center space-x-1 text-slate-300" title="Fork conversation into a new chat session from this point">
+                <span>🔀</span>
+                <span>Fork</span>
+              </button>
+            </div>
           </div>
         `;
       } else if (role === 'error') {
-        div.className += 'bg-red-950/40 p-2.5 rounded text-xs text-red-300 border border-red-800/60';
+        div.className += 'bg-red-950/40 p-2.5 rounded-lg text-xs text-red-300 border border-red-800/60';
         div.innerHTML = `<b>Error:</b> ${escapeHtml(text)}`;
       } else {
         div.className += 'text-slate-500 italic text-[11px]';
@@ -9158,18 +9310,79 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       if (container.lastChild) container.removeChild(container.lastChild);
     }
 
-    function insertSQLToEditor(sql) {
-      setEditorSQL(sql);
-      runActiveQuery();
-    }
-
-    function replaceEditorWithSQL(sql) {
-      setEditorSQL(sql);
-    }
-
     function copySQLToClipboard(sql) {
       navigator.clipboard.writeText(sql);
       showNativeAlert('📋 SQL copied to clipboard!', 'Clipboard');
+    }
+
+    function copyAIMessageBubble(btn) {
+      const bubble = btn.closest('.ai-chat-bubble');
+      if (!bubble) return;
+      const rawText = bubble.dataset.rawText || '';
+      navigator.clipboard.writeText(rawText);
+      const origHtml = btn.innerHTML;
+      btn.innerHTML = '<span class="text-emerald-400 font-bold">✓ Copied!</span>';
+      setTimeout(() => {
+        btn.innerHTML = origHtml;
+      }, 1600);
+    }
+
+    function saveAIMessageToNotes(btn) {
+      const bubble = btn.closest('.ai-chat-bubble');
+      if (!bubble) return;
+      const rawText = bubble.dataset.rawText || '';
+      saveToInternalNotes('Copilot Explanation', rawText);
+    }
+
+    function forkAIChatSessionFromMsg(btn) {
+      const bubble = btn.closest('.ai-chat-bubble');
+      if (!bubble) return;
+
+      const container = document.getElementById('ai-messages');
+      const allBubbles = Array.from(container.querySelectorAll('.ai-chat-bubble'));
+      const targetIdx = allBubbles.indexOf(bubble);
+      if (targetIdx === -1) return;
+
+      const messagesToFork = [];
+      for (let i = 0; i <= targetIdx; i++) {
+        const b = allBubbles[i];
+        const role = b.dataset.role;
+        const text = b.dataset.rawText;
+        if ((role === 'user' || role === 'assistant') && text) {
+          messagesToFork.push({ role, text });
+        }
+      }
+
+      if (messagesToFork.length === 0) return;
+
+      saveCurrentChatSession();
+
+      const currentSession = chatSessions.find(s => s.id === currentChatSessionId);
+      const baseTitle = currentSession ? currentSession.title : 'Chat';
+      const cleanTitle = baseTitle.replace(/^\[Fork\]\s*/, '');
+      const forkedTitle = `[Fork] ${cleanTitle}`;
+
+      const newSessionId = 'chat-fork-' + Date.now();
+      const newSession = {
+        id: newSessionId,
+        title: forkedTitle,
+        updatedAt: new Date().toISOString(),
+        messages: messagesToFork
+      };
+
+      chatSessions.unshift(newSession);
+      if (chatSessions.length > 30) chatSessions = chatSessions.slice(0, 30);
+      localStorage.setItem('sqlfox_ai_sessions', JSON.stringify(chatSessions));
+
+      currentChatSessionId = newSessionId;
+      container.innerHTML = '';
+      messagesToFork.forEach(m => {
+        appendAIMessage(m.role, m.text, false);
+      });
+
+      updateChatHistoryCount();
+      closeAIChatHistory();
+      showNativeAlert(`🔀 Percakapan berhasil di-fork ke sesi baru: "${forkedTitle}"`, 'Chat Forked');
     }
 
     function saveToInternalNotes(title, content) {
@@ -9196,7 +9409,83 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
 
       switchTab(notesTab.id);
       setEditorSQL(notesTab.sql);
+      setNotesTabMode('preview');
       showNativeAlert('📝 Catatan berhasil disimpan ke Notes.md!', 'Internal Notes');
+    }
+
+    function toggleAIMaximize() {
+      const sidebar = document.getElementById('ai-sidebar');
+      const icon = document.getElementById('ai-maximize-icon');
+      if (!sidebar) return;
+
+      isAIMaximized = !isAIMaximized;
+      sidebar.classList.add('transition-all', 'duration-200');
+
+      if (isAIMaximized) {
+        savedAIWidthBeforeMaximize = sidebar.style.width || (localStorage.getItem('sqlfox_copilot_width') || '380px');
+        const leftSidebar = document.getElementById('left-sidebar');
+        const leftWidth = (leftSidebar && !leftSidebar.classList.contains('hidden') && leftSidebar.offsetWidth > 0) ? leftSidebar.offsetWidth : 0;
+        const maxAllowed = Math.max(320, window.innerWidth - leftWidth - 460);
+        const targetWidth = Math.min(maxAllowed, Math.max(480, Math.floor(window.innerWidth * 0.45)));
+        sidebar.style.width = targetWidth + 'px';
+        if (icon) icon.textContent = '🗗';
+      } else {
+        const restoreWidth = savedAIWidthBeforeMaximize || localStorage.getItem('sqlfox_copilot_width') || '380px';
+        sidebar.style.width = restoreWidth;
+        if (icon) icon.textContent = '⛶';
+      }
+    }
+
+    function initAISidebarResizer() {
+      const resizer = document.getElementById('ai-sidebar-resizer');
+      const sidebar = document.getElementById('ai-sidebar');
+      if (!resizer || !sidebar) return;
+
+      try {
+        const savedWidth = localStorage.getItem('sqlfox_copilot_width');
+        if (savedWidth) {
+          sidebar.style.width = savedWidth;
+        }
+      } catch (_) {}
+
+      let isDragging = false;
+      let startX = 0;
+      let startWidth = 0;
+
+      resizer.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        startX = e.clientX;
+        startWidth = sidebar.offsetWidth;
+        sidebar.classList.remove('transition-all', 'duration-200');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        const delta = startX - e.clientX;
+        const leftSidebar = document.getElementById('left-sidebar');
+        const leftWidth = (leftSidebar && !leftSidebar.classList.contains('hidden') && leftSidebar.offsetWidth > 0) ? leftSidebar.offsetWidth : 0;
+        const minMainWidth = Math.min(460, Math.max(280, window.innerWidth - leftWidth - 300));
+        const maxAllowed = Math.max(300, window.innerWidth - leftWidth - minMainWidth);
+        const newWidth = Math.max(300, Math.min(maxAllowed, startWidth + delta));
+        sidebar.style.width = newWidth + 'px';
+        isAIMaximized = false;
+        const icon = document.getElementById('ai-maximize-icon');
+        if (icon) icon.textContent = '⛶';
+      });
+
+      window.addEventListener('mouseup', () => {
+        if (!isDragging) return;
+        isDragging = false;
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        sidebar.classList.add('transition-all', 'duration-200');
+        try {
+          localStorage.setItem('sqlfox_copilot_width', sidebar.style.width);
+        } catch (_) {}
+      });
     }
 
     // --- Chat Session & History Management ---
@@ -9204,6 +9493,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       if (!currentChatSessionId) {
         currentChatSessionId = 'chat-' + Date.now();
       }
+      initAISidebarResizer();
       updateChatHistoryCount();
     }
 

@@ -593,5 +593,3 @@ type TriMetricStats struct {
 	CertFailures        int64   `json:"cert_failures"`
 	BFAborts            int64   `json:"bf_aborts"`
 }
-
-

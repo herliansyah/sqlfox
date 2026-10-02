@@ -118,6 +118,11 @@ _Avoid_: Prompt tweak, bot style
 A discrete conversational thread with Copilot, uniquely identified and persisted locally with title and message history.
 _Avoid_: Message log, chat thread
 
+**Chat Session Forking**:
+The process of branching a new, isolated Chat Session containing conversation history up to a selected Copilot response, enabling parallel exploration threads without corrupting the originating session.
+_Avoid_: Duplicate chat, copy thread
+
+
 **Internal Notes**:
 A persistent in-memory/in-tab Markdown scratchpad (`Notes.md`) allowing developers to accumulate query explanations, execution findings, and AI insights.
 _Avoid_: Text file, memo pad, clipboard buffer

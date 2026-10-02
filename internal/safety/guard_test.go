@@ -120,8 +120,7 @@ func TestBackupManager_BackupTable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	backupMgr := NewBackupManager(filepath.Join(tempDir, "backups"))
-	backupPath, dataIncluded, err := backupMgr.BackupTable(ctx, sess, "items")
+	backupPath, dataIncluded, err := BackupTable(ctx, sess, filepath.Join(tempDir, "backups"), "items")
 	if err != nil {
 		t.Fatalf("BackupTable failed: %v", err)
 	}

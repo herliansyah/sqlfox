@@ -46,8 +46,7 @@ func AssemblePrompts(req AssistRequest) (systemPrompt string, userPrompt string)
 
 	var schemaPrompt string
 	if req.IncludeSchema && req.Schema != nil {
-		firewall := NewFirewall(req.MaskIdentifiers)
-		schemaPrompt = firewall.BuildSchemaPrompt(req.Schema, req.Query+" "+req.Prompt+" "+req.ErrorMessage)
+		schemaPrompt = BuildSchemaPrompt(req.Schema, req.Query+" "+req.Prompt+" "+req.ErrorMessage, req.MaskIdentifiers)
 
 		// Table Notes Injection: check if any referenced tables have table notes
 		if len(req.TableNotes) > 0 {

@@ -59,7 +59,7 @@ type ActiveSession struct {
 	CachedSchema *driver.SchemaMetadata `json:"schema,omitempty"`
 	ServerInfo     *driver.ServerInfo     `json:"server_info,omitempty"`
 	LastActive     time.Time              `json:"last_active"`
-	backupMgr      *safety.BackupManager
+	backupDir      string
 	vault          *vault.Vault
 	runningQueries map[string]context.CancelFunc
 	mu             sync.RWMutex
@@ -68,15 +68,15 @@ type ActiveSession struct {
 // SessionManager manages connected database sessions.
 type SessionManager struct {
 	vault     *vault.Vault
-	backupMgr *safety.BackupManager
+	backupDir string
 	sessions  map[string]*ActiveSession
 	mu        sync.RWMutex
 }
 
-func NewSessionManager(v *vault.Vault, backupMgr *safety.BackupManager) *SessionManager {
+func NewSessionManager(v *vault.Vault, backupDir string) *SessionManager {
 	return &SessionManager{
 		vault:     v,
-		backupMgr: backupMgr,
+		backupDir: backupDir,
 		sessions:  make(map[string]*ActiveSession),
 	}
 }
@@ -129,7 +129,7 @@ func (sm *SessionManager) ConnectSession(ctx context.Context, connectionID strin
 		CachedSchema: schema,
 		ServerInfo:   info,
 		LastActive:     time.Now(),
-		backupMgr:      sm.backupMgr,
+		backupDir:      sm.backupDir,
 		vault:          sm.vault,
 		runningQueries: make(map[string]context.CancelFunc),
 	}
@@ -246,9 +246,9 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	var backupFile string
 	var backupDataIncluded bool
 	if inspection.Operation == "DROP" || inspection.Operation == "TRUNCATE" {
-		if inspection.TargetTable != "" && s.backupMgr != nil && s.Session != nil {
+		if inspection.TargetTable != "" && s.backupDir != "" && s.Session != nil {
 			var err error
-			backupFile, backupDataIncluded, err = s.backupMgr.BackupTable(ctx, s.Session, inspection.TargetTable)
+			backupFile, backupDataIncluded, err = safety.BackupTable(ctx, s.Session, s.backupDir, inspection.TargetTable)
 			if err != nil {
 				// Log backup warning, proceed with explicit challenge confirmation
 			}

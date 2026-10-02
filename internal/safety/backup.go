@@ -13,27 +13,20 @@ import (
 
 const maxDataBackupBytes = 50 * 1024 * 1024 // 50 MB threshold
 
-// BackupManager handles automated pre-destruction snapshots.
-type BackupManager struct {
-	backupDir string
-}
-
-func NewBackupManager(backupDir string) *BackupManager {
+// BackupTable performs a smart tiered backup: DDL always, and data if under 50MB.
+// ponytail: Pure stateless function replacing single-method BackupManager wrapper.
+func BackupTable(ctx context.Context, sess driver.Session, backupDir, tableName string) (string, bool, error) {
 	if backupDir == "" {
 		backupDir = filepath.Join(".scratch", "backups")
 	}
-	return &BackupManager{backupDir: backupDir}
-}
 
-// BackupTable performs a smart tiered backup: DDL always, and data if under 50MB.
-func (b *BackupManager) BackupTable(ctx context.Context, sess driver.Session, tableName string) (string, bool, error) {
-	if err := os.MkdirAll(b.backupDir, 0755); err != nil {
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
 		return "", false, fmt.Errorf("failed to create backup dir: %w", err)
 	}
 
 	timestamp := time.Now().Format("20060102-150405")
 	filename := fmt.Sprintf("%s-%s.sql", timestamp, tableName)
-	filePath := filepath.Join(b.backupDir, filename)
+	filePath := filepath.Join(backupDir, filename)
 
 	f, err := os.Create(filePath)
 	if err != nil {
