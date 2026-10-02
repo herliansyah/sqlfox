@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"sqlfox/internal/cli"
 	"sqlfox/internal/server"
 	"sqlfox/internal/vault"
 	"sqlfox/web"
@@ -28,6 +29,13 @@ import (
 var Version = "v0.1.0"
 
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "query", "transfer", "help":
+			os.Exit(cli.Run(os.Args[1:], os.Stdout, os.Stderr, os.Stdin))
+		}
+	}
+
 	portFlag := flag.Int("port", 8080, "Port to listen on (default 8080, with automatic scanning if busy)")
 	hostFlag := flag.String("host", "0.0.0.0", "Host interface to bind (0.0.0.0 for LAN/Tablet access, 127.0.0.1 for local only)")
 	dbFlag := flag.String("db", "", "Path to config vault database (default: ~/.sqlfox/config.db)")

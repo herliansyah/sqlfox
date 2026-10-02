@@ -406,6 +406,32 @@ func (v *Vault) GetConnection(id string) (*ConnectionRecord, error) {
 	return conn, nil
 }
 
+// GetConnectionByName retrieves and decrypts a connection by name (case-insensitive) or ID.
+func (v *Vault) GetConnectionByName(nameOrID string) (*ConnectionRecord, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	row := v.db.QueryRow(`SELECT 
+		id, name, environment, driver, host, port, database_name, user,
+		encrypted_password, use_ssl, ssl_ca, ssl_cert, ssl_key,
+		created_at, updated_at
+	FROM connections WHERE id = ? OR LOWER(name) = LOWER(?) LIMIT 1`, nameOrID, nameOrID)
+
+	conn, err := scanConnection(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrConnectionNotFound
+		}
+		return nil, err
+	}
+
+	if err := v.decryptConnection(conn); err != nil {
+		return nil, err
+	}
+	return conn, nil
+}
+
+
 // ListConnections returns all connections without plaintext secrets.
 func (v *Vault) ListConnections() ([]*ConnectionRecord, error) {
 	v.mu.RLock()

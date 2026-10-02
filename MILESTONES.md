@@ -185,9 +185,9 @@ v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
 │       ├── Adaptive Top-5 Non-Idle process snapshots with 10m auto-stop safety guard
 │       └── Zero-dependency native HTML5 Canvas chart with interactive spike inspection
 └── [C] Enterprise Foundations & Multi-Engine Extensions
-    ├── [ ] 15. PostgreSQL & ClickHouse Driver Extensions
+    ├── [⏸️] 15. PostgreSQL & ClickHouse Driver Extensions (Paused)
     ├── [x] 16. Visual ERD Interactive Canvas (Drag-and-drop relationship visualizer)
-    └── [ ] 17. Headless CLI Suite (`sqlfox query --format=json`, `sqlfox transfer`) for CI/CD
+    └── [x] 17. Headless CLI Suite (`sqlfox query --format=json`, `sqlfox transfer`) for CI/CD
 ```
 
 ---
@@ -364,6 +364,22 @@ v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
   - [x] **Session State Persistence**: Storing card coordinates in `sessionStorage` (`erd-pos-{sessionId}-{db}`) across dialog toggles within an active session.
   - [x] **Documentation & Verification**: Formally recorded in `docs/adr/0029-visual-erd-canvas.md` and implementation plan `docs/superpowers/plans/2026-10-02-visual-erd-canvas.md`.
 - **Runnable Verification**: Open database session -> open `📦 DB Tools ▾` -> click `🗺️ Visual ERD Canvas` -> verify all tables render as cards with columns and PK/FK markers -> drag a table card and verify connected FK lines update smoothly -> click "⚡ Auto Layout" and "⊡ Fit All" -> close and reopen dialog, confirming table coordinates persist.
+
+---
+
+### Milestone 21: Headless CLI Suite (`sqlfox query`, `sqlfox transfer`) for CI/CD
+- **Goal**: Enable non-interactive database query automation and cross-connection data transfer directly from the command line for CI/CD runners, migration scripts, and terminal power users without launching the web daemon.
+- **Deliverables**:
+  - [x] **Subcommand Router**: Dispatcher in `cmd/sqlfox/main.go` directing `query` and `transfer` to `internal/cli` while preserving 100% backward compatibility for desktop web execution.
+  - [x] **Dual Target Resolution**: `--conn` (resolving encrypted profile from `~/.sqlfox/config.db`) and `--dsn` (zero-config direct connection strings with auto-detected MySQL/SQLite drivers).
+  - [x] **Multi-Channel Query Input**: Accepting queries via positional argument, `--file`, or STDIN stream pipe (`cat script.sql | sqlfox query`).
+  - [x] **Stream Output Formatting**: Formats `table` (ASCII grid, default limit 100), `json` (array of objects), `ndjson` (streaming line-delimited JSON, default limit 0), and `csv` (RFC 4180 with header), keeping `stdout` pure for piping and diagnostics on `stderr`.
+  - [x] **Fail-Closed Safety Policy**: AST Safety Guard blocking destructive operations with exit code `2` unless explicitly confirmed via `--force`.
+  - [x] **Multi-Statement Delimiter Parsing & Transaction**: Executing multi-statement scripts cleanly with optional `--tx` transaction wrapper.
+  - [x] **Cross-Connection Transfer**: `sqlfox transfer --from <src> --to <dest> --tables <list|all>` with per-table atomicity and live progress streaming.
+  - [x] **Documentation & Verification**: Formally recorded in `docs/adr/0030-headless-cli-suite-and-fail-closed-automation-policy.md` with unit tests passing 100% in `internal/cli/cli_test.go`.
+- **Runnable Verification**: Run `go test -v ./internal/cli/...` -> verify 100% pass across query execution, formats, transfer, stdin piping, and safety guard aborts.
+
 
 
 
