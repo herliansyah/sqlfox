@@ -122,10 +122,17 @@ _Avoid_: Message log, chat thread
 The process of branching a new, isolated Chat Session containing conversation history up to a selected Copilot response, enabling parallel exploration threads without corrupting the originating session.
 _Avoid_: Duplicate chat, copy thread
 
+**SQL Code Block Actions**:
+Interactive action controls attached to rendered SQL code blocks within Copilot chat messages (`Copy`, `Insert & Run`, and `Replace`) enabling direct query execution and editor manipulation.
+_Avoid_: Code buttons, snippet toolbar
 
 **Internal Notes**:
 A persistent in-memory/in-tab Markdown scratchpad (`Notes.md`) allowing developers to accumulate query explanations, execution findings, and AI insights.
 _Avoid_: Text file, memo pad, clipboard buffer
+
+**Notes Markdown Live Preview**:
+A segmented mode toggle (`Edit` / `Preview`) within the Internal Notes tab that compiles and renders Markdown formatted text, tables, and code blocks in real time.
+_Avoid_: Notes viewer, markdown tab
 
 **Error Healer**:
 An automated diagnostic loop intercepting failed SQL executions and dispatching root-cause analysis and query fixes to Copilot.

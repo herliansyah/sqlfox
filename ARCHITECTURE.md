@@ -366,10 +366,10 @@ sqlfox/
 │   │   └── sqlite/                 # modernc.org/sqlite CGo-free pure-Go driver with FK inspection
 │   ├── safety/                     # Safety Guard engine
 │   │   ├── guard.go                # AST inspection & destructive operation detection with DDL guards
-│   │   └── backup.go               # Smart tiered pre-destruction table snapshot manager
+│   │   └── backup.go               # Smart tiered pre-destruction table snapshotting (pure function)
 │   ├── ai/                         # AI Assistant integration
 │   │   ├── client.go               # Pure stdlib client (OpenAI, Claude, Gemini, Ollama)
-│   │   ├── firewall.go             # Zero-leakage schema pruner & data masking
+│   │   ├── firewall.go             # Zero-leakage schema pruner & data masking (pure function)
 │   │   └── prompts.go              # Structured prompts for explain, optimize, NL-to-SQL
 │   ├── dataimport/                 # CSV Ingestion Engine
 │   │   └── importer.go             # Delimiter sniffing, column mapping, batched streaming
@@ -392,13 +392,13 @@ sqlfox/
 │   │   └── index.html
 │   └── embed.go                    # //go:embed dist/*
 ├── docs/
-│   ├── adr/                        # Architectural Decision Records (0001 - 0025)
+│   ├── adr/                        # Architectural Decision Records (0001 - 0026)
 │   ├── playbooks/                  # Production operational playbooks (large-scale database management)
 │   └── agents/                     # Agent workflow documentation
 ├── CONTEXT.md                      # Ubiquitous domain language
 ├── ARCHITECTURE.md                 # System architecture (this document)
 ├── SECURITY.md                     # Security & privacy specification
 ├── UX_DESIGN.md                    # Interface wireframes & design tokens
-├── MILESTONES.md                   # Delivery roadmap & milestones (1 - 18)
+├── MILESTONES.md                   # Delivery roadmap & milestones (1 - 19)
 └── go.mod
 ```

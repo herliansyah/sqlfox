@@ -331,5 +331,21 @@ v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
   - **Documentation & Verification**: ADR-0025, domain terminology in `CONTEXT.md`, and integration test in `internal/server/flight_recorder_server_test.go` and `internal/vault/flight_recorder_test.go`.
 - **Runnable Verification**: Run `go test -v ./internal/vault -run TestFlightRecorderVault` and `go test -v ./internal/server -run TestFlightRecorderAPIE2E` -> verify 100% pass across flight recorder operations.
 
+---
+
+### Milestone 19: AI Copilot Session Forking, Rich Markdown Blocks & Fluid Workspace Ergonomics
+- **Goal**: Elevate AI Copilot from a passive text chatbot into an interactive execution companion with conversation branching, structured code block actions, live Notes preview, and robust responsive layout behavior.
+- **Deliverables**:
+  - **Rich Markdown Formatting**: Zero-dependency client-side parser rendering headers, formatted tables, ordered/unordered lists, blockquotes, inline formatting, and fenced code blocks.
+  - **Interactive SQL Block Toolbars**: Action buttons affixed to rendered SQL snippets with `📋 Copy`, `▶ Insert & Run` (injects query into active tab and executes immediately), and `🔄 Replace` (replaces editor contents).
+  - **Chat Session Forking**: Branching action on AI responses (`🔀 Branch`) creating an isolated session containing conversation history up to the selected message, enabling parallel hypothesis exploration.
+  - **Internal Notes Live Preview**: `✏️ Edit` / `👁️ Preview` toggle in the `Notes.md` tab for real-time rendered Markdown reading.
+  - **Fluid Workspace Constraints**: 400px minimum width floor on the center editor/grid during horizontal sidebar drag-resize to prevent UI collapse.
+  - **Responsive Telemetry & Dashboard Grids**: CSS Grid auto-fit (`repeat(auto-fit, minmax(...))`) for Cluster Inspector, Flight Recorder, and Storage Diagnostics cards across variable viewport dimensions.
+  - **Ponytail Pruning**: Refactored `safety.BackupManager` and `ai.Firewall` to pure functions (`safety.BackupTable`, `ai.BuildSchemaPrompt`).
+  - **Documentation & Verification**: ADR-0026, domain terminology in `CONTEXT.md`, updated `ARCHITECTURE.md`, `UX_DESIGN.md`, and unit tests in `internal/ai/firewall_test.go` and `internal/safety/guard_test.go`.
+- **Runnable Verification**: Run `go test -v ./internal/ai -run TestFirewall_BuildSchemaPrompt` and `go test -v ./internal/safety -run TestBackupManager_BackupTable` -> verify 100% pass across AI prompt builder and safety backup functions.
+
+
 
 
