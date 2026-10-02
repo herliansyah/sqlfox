@@ -1690,6 +1690,7 @@
             <label class="block text-slate-400 mb-1">Driver</label>
             <select id="modal-conn-driver" onchange="onDriverChange()" class="w-full bg-slate-950 border border-slate-700 p-2 text-white rounded outline-none">
               <option value="mysql">MySQL / MariaDB</option>
+              <option value="postgres">PostgreSQL</option>
               <option value="sqlite">SQLite</option>
             </select>
           </div>
@@ -11500,7 +11501,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
         id: connId || undefined,
         driver: driver,
         host: host,
-        port: parseInt(document.getElementById('modal-conn-port').value) || 3306,
+        port: parseInt(document.getElementById('modal-conn-port').value) || (driver === 'postgres' ? 5432 : 3306),
         database_name: dbName,
         user: document.getElementById('modal-conn-user').value.trim(),
         password: document.getElementById('modal-conn-pass').value
@@ -11533,12 +11534,22 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       const d = document.getElementById('modal-conn-driver').value;
       const mysqlFields = document.getElementById('mysql-specific-fields');
       const hostLabel = document.getElementById('modal-host-label');
+      const portInput = document.getElementById('modal-conn-port');
       if (d === 'sqlite') {
         mysqlFields.classList.add('hidden');
         hostLabel.textContent = 'SQLite File Path';
       } else {
         mysqlFields.classList.remove('hidden');
         hostLabel.textContent = 'Host';
+        if (d === 'postgres') {
+          if (!portInput.value || portInput.value === '3306') {
+            portInput.value = '5432';
+          }
+        } else if (d === 'mysql') {
+          if (!portInput.value || portInput.value === '5432') {
+            portInput.value = '3306';
+          }
+        }
       }
     }
 
@@ -11557,7 +11568,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
         environment: document.getElementById('modal-conn-env').value,
         driver: driver,
         host: host,
-        port: parseInt(document.getElementById('modal-conn-port').value) || 3306,
+        port: parseInt(document.getElementById('modal-conn-port').value) || (driver === 'postgres' ? 5432 : 3306),
         database_name: dbName,
         user: document.getElementById('modal-conn-user').value.trim(),
         password: document.getElementById('modal-conn-pass').value

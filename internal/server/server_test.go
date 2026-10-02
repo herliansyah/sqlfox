@@ -221,6 +221,23 @@ func TestServer_API_Lifecycle(t *testing.T) {
 		t.Fatalf("unexpected unsupported driver error for mysql: %s", testResult.Error)
 	}
 
+	// 9c. Test Transient Connection Test endpoint (PostgreSQL driver recognized)
+	testPostgresPayload := vault.ConnectionRecord{
+		Driver: "postgres",
+		Host:   "127.0.0.1",
+		Port:   59998,
+	}
+	pgBody, _ := json.Marshal(testPostgresPayload)
+	resp, err = client.Post(ts.URL+"/api/connections/test-transient/test", "application/json", bytes.NewReader(pgBody))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST transient postgres test failed: %v", err)
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&testResult)
+	resp.Body.Close()
+	if strings.Contains(testResult.Error, "unsupported database driver") {
+		t.Fatalf("unexpected unsupported driver error for postgres: %s", testResult.Error)
+	}
+
 	// 10. Update Connection (editing connection name)
 	savedConn.Name = "Updated SQLite Database"
 	updateBody, _ := json.Marshal(savedConn)

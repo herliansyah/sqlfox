@@ -39,19 +39,27 @@ _Avoid_: Public URL, remote host
 ## Drivers & Sessions
 
 **Driver**:
-A protocol-specific database connector (e.g. MySQL, SQLite) implementing lifecycle and session creation.
+A protocol-specific database connector (e.g. MySQL, SQLite, PostgreSQL) implementing lifecycle and session creation.
 _Avoid_: Adapter, DB client
 
 **Session**:
 An active client interaction context bound to a Connection, managing open tabs, temporary schema cache, and transaction state.
 _Avoid_: Workspace, window, console
 
+**Search Path**:
+The active PostgreSQL schema namespace configured for a session (`SET search_path = <schema>`), governing unqualified table resolution and UI schema browsing.
+_Avoid_: Active catalog, schema switch, default db
+
+**Backend Process ID (PID)**:
+The unique server-side process identifier of a PostgreSQL backend worker, utilized for out-of-band cancellation (`pg_cancel_backend`) and lock tree visualization (`pg_blocking_pids`).
+_Avoid_: Thread ID, connection ID, worker ID
+
 **RowStream**:
 A memory-bounded record sequence streamed from database drivers to the frontend via WebSocket/SSE chunks.
 _Avoid_: Result buffer, fetch array
 
 **Out-of-Band Cancellation**:
-A query interruption mechanism dispatched via a secondary control connection issuing protocol termination (`KILL QUERY`) without destroying the primary connection.
+A query interruption mechanism dispatched via a secondary control connection issuing protocol termination (`KILL QUERY` on MySQL, `pg_cancel_backend(pid)` on PostgreSQL) without destroying the primary connection.
 _Avoid_: Context cancel, socket kill
 
 ## Safety & Governance

@@ -597,7 +597,7 @@ type TriMetricStats struct {
 // QuoteIdentifier formats an identifier safely with driver-aware quotes.
 func QuoteIdentifier(name, driverName string) string {
 	name = strings.Trim(name, "`\"")
-	if strings.EqualFold(driverName, "sqlite") {
+	if strings.EqualFold(driverName, "sqlite") || strings.EqualFold(driverName, "postgres") || strings.EqualFold(driverName, "postgresql") || strings.EqualFold(driverName, "pg") {
 		return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 	}
 	return "`" + strings.ReplaceAll(name, "`", "``") + "`"

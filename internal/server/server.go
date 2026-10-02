@@ -10,6 +10,7 @@ import (
 	"sqlfox/internal/vault"
 
 	_ "sqlfox/internal/driver/mysql"
+	_ "sqlfox/internal/driver/postgres"
 	_ "sqlfox/internal/driver/sqlite"
 )
 

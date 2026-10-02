@@ -6,6 +6,7 @@ import (
 
 	"sqlfox/internal/driver"
 	_ "sqlfox/internal/driver/mysql"
+	_ "sqlfox/internal/driver/postgres"
 	_ "sqlfox/internal/driver/sqlite"
 
 	_ "modernc.org/sqlite"
@@ -110,6 +111,14 @@ func TestRegistry(t *testing.T) {
 	}
 	if dMySQL.Name() != "mysql" {
 		t.Fatalf("expected mysql name, got: %s", dMySQL.Name())
+	}
+
+	dPG, err := driver.GetDriver("postgres")
+	if err != nil {
+		t.Fatalf("expected postgres driver to be registered, got: %v", err)
+	}
+	if dPG.Name() != "postgres" {
+		t.Fatalf("expected postgres name, got: %s", dPG.Name())
 	}
 
 	_, err = driver.GetDriver("unregistered-db")

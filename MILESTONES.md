@@ -185,9 +185,17 @@ v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
 │       ├── Adaptive Top-5 Non-Idle process snapshots with 10m auto-stop safety guard
 │       └── Zero-dependency native HTML5 Canvas chart with interactive spike inspection
 └── [C] Enterprise Foundations & Multi-Engine Extensions
-    ├── [⏸️] 15. PostgreSQL & ClickHouse Driver Extensions (Paused)
+    ├── [⏸️] 15. ClickHouse & Analytical Engine Extensions (Paused)
     ├── [x] 16. Visual ERD Interactive Canvas (Drag-and-drop relationship visualizer)
     └── [x] 17. Headless CLI Suite (`sqlfox query --format=json`, `sqlfox transfer`) for CI/CD
+      │
+      ▼
+v2.1 (Multi-Engine & Developer Operations Suite)
+├── [x] 18. PostgreSQL Native Driver Engine (pgx/v5 pure-Go, schema introspection & out-of-band cancellation)
+├── [ ] 19. Visual Query Plan & Cost Analyzer (Interactive visual EXPLAIN tree & bottleneck detection)
+├── [ ] 20. FK-Aware Smart Mock Data Generator (Synthetic test data with relational closure)
+├── [ ] 21. Scheduled Headless Automation & Task Runner (Declarative CLI jobs for dumps & sync)
+└── [ ] 22. Large-Scale Hardening & Memory Ceiling Benchmark (1,000+ tables, 500GB+ stress testing)
 ```
 
 ---
@@ -380,7 +388,65 @@ v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
   - [x] **Documentation & Verification**: Formally recorded in `docs/adr/0030-headless-cli-suite-and-fail-closed-automation-policy.md` with unit tests passing 100% in `internal/cli/cli_test.go`.
 - **Runnable Verification**: Run `go test -v ./internal/cli/...` -> verify 100% pass across query execution, formats, transfer, stdin piping, and safety guard aborts.
 
+---
 
+## 4. Detailed v2.1 Multi-Engine & Developer Operations Specifications
 
+### Milestone 22: PostgreSQL Native Driver Engine (pgx/v5 Pure-Go, Schema Introspection & Keyset Streaming)
+- **Goal**: Expand SqlFox beyond MySQL/SQLite by adding first-class native support for PostgreSQL (9.6 - 16+) using the pure-Go `pgx/v5` driver, implementing the unified `driver.Driver` and `driver.Session` interfaces with zero CGO dependencies.
+- **Deliverables**:
+  - [x] **Native Driver Implementation**: `internal/driver/postgres/` implementing `Driver`, `Session`, and `RowStream` backed by `github.com/jackc/pgx/v5/stdlib`.
+  - [x] **PostgreSQL Schema Introspection**: Catalog queries targeting `information_schema` and `pg_catalog` extracting schemas (search paths), tables, views, columns, native types (`JSONB`, `UUID`, arrays, enums), primary keys, and foreign keys.
+  - [x] **Out-of-Band Cancellation**: Dedicated control session executing `SELECT pg_cancel_backend(pid)` to cancel long-running queries instantly without tearing down TCP sockets.
+  - [x] **Keyset Traversal & Filter Pushdown**: Dialect-aware SQL generation respecting PostgreSQL double-quoted identifiers (`"table"`) and positional parameter markers (`$1`, `$2`).
+  - [x] **Connection Vault & UI Profile**: Connection modal updated with PostgreSQL engine selector, default port `5432`, SSL mode controls (`disable`, `require`, `verify-ca`, `verify-full`), and default search path / schema picker.
+  - [x] **Documentation & Verification**: Formally recorded in `docs/adr/0031-postgresql-native-driver-engine-and-catalog-introspection.md` with unit tests passing 100% in `internal/driver/postgres/postgres_test.go`.
+- **Runnable Verification**: Run `go test -v ./internal/driver/postgres/...` -> verify 100% pass across registration, DDL generation, column extraction, and graceful failure.
 
+---
 
+### Milestone 23: Visual Query Plan & Cost Analyzer (Interactive Visual EXPLAIN Tree & Bottleneck Detection)
+- **Goal**: Empower developers and DBAs to diagnose and optimize complex slow queries intuitively by parsing raw database execution plans into a zero-dependency interactive visual node tree with bottleneck highlights.
+- **Deliverables**:
+  - [ ] **Engine Plan Parsers**: JSON execution plan parser supporting MySQL 8.x/MariaDB (`EXPLAIN FORMAT=JSON`) and PostgreSQL (`EXPLAIN (ANALYZE, COSTS, VERBOSE, BUFFERS, FORMAT JSON)`).
+  - [ ] **Visual Node Tree Canvas**: Zero-dependency interactive SVG/HTML hierarchical canvas rendering query plan nodes (Index Scan, Seq Scan, Nested Loop, Hash Join, Sort, Aggregate) with intuitive data flow arrows.
+  - [ ] **Bottleneck Red Flag Heuristics**: Automatic warning badges pinpointing critical performance sinks: Full Table Scans (`ALL` / `Seq Scan`), disk-spill temp tables, high relative cost percentage nodes, and unindexed filter predicates.
+  - [ ] **Cost & Row Metric Badges**: Detailed card popovers displaying execution time, cost estimates vs actual row counts, and buffer cache hits/misses.
+  - [ ] **UI Integration**: `⚡ Visual EXPLAIN` action added directly to the Query Editor toolbar and Processlist thread diagnostic drawer.
+- **Runnable Verification**: Execute `EXPLAIN FORMAT=JSON SELECT ...` on a multi-table JOIN -> click `⚡ Visual EXPLAIN` -> verify hierarchical visual tree renders -> verify full table scan nodes highlight with red warning badges and hover tooltips reveal stage costs.
+
+---
+
+### Milestone 24: FK-Aware Smart Mock Data Generator (Synthetic Test Data with Relational Closure)
+- **Goal**: Enable developers to quickly populate local and staging databases with high volumes of realistic synthetic data without pulling sensitive production data, while maintaining strict foreign key referential integrity.
+- **Deliverables**:
+  - [ ] **Data Generation Engine**: Zero-dependency synthesizer in `internal/mock/` generating type-aware realistic values (integers, floats, dates, timestamps, UUIDs, booleans, names, emails, addresses, lorem ipsum, and JSON payloads).
+  - [ ] **Topological Dependency Graph**: Traversal algorithm sorting table foreign key relationships to populate parent reference tables before dependent child tables.
+  - [ ] **FK Pool Sampling**: Referential closure engine sampling existing or freshly generated primary keys from parent tables to guarantee zero foreign key constraint violations (`Error 1452`).
+  - [ ] **Transactional Chunked Streamer**: Streaming multi-row `INSERT` batches (100-500 rows per chunk) wrapped in database transactions for maximum throughput.
+  - [ ] **Table Viewer Modal**: Toolbar action `🎲 Generate Mock Data` with configurable row counts, generation strategies per column, and unique constraint guarantees.
+- **Runnable Verification**: Open Table Viewer on an empty schema containing parent-child FK relationships -> open `🎲 Generate Mock Data` -> generate 500 rows -> verify all rows insert cleanly with 100% valid foreign keys and zero constraint errors.
+
+---
+
+### Milestone 25: Scheduled Headless Automation & Task Runner (Declarative CLI Jobs for Dumps & Sync)
+- **Goal**: Provide automated, zero-daemon scheduled database maintenance (routine backups, SQL dumps, cross-connection transfers, and health checks) executed directly via headless CLI cron jobs.
+- **Deliverables**:
+  - [ ] **Declarative Job Spec**: Clean YAML/JSON job definitions (`sqlfox-job.yaml`) specifying tasks (`dump`, `transfer`, `query`, `health-check`), target connections, and filters.
+  - [ ] **CLI Job Runner Subcommand**: `sqlfox job run --file <config.yaml>` executing scheduled tasks non-interactively with structured logging, stdout/stderr isolation, and exit codes for CI/CD and cron.
+  - [ ] **Automated Dump Rotation**: Built-in file retention policies (`keep_last: 7` or `max_age: 14d`) to prune expired backup artifacts automatically and prevent disk exhaustion.
+  - [ ] **Dry-Run & Validation Mode**: `sqlfox job check --file <config.yaml>` verifying vault credentials, target connectivity, and write permissions before execution.
+  - [ ] **Zero-Daemon OS Integration Guide**: Documented templates for standard Linux cron, systemd timers, macOS launchd, and Windows Task Scheduler.
+- **Runnable Verification**: Create test `job.yaml` specifying a smart-seed dump -> run `sqlfox job run --file job.yaml` -> verify dump file created and expired dumps rotated -> run `go test -v ./internal/cli -run TestJobRunner`.
+
+---
+
+### Milestone 26: Large-Scale Hardening, Multi-Tenant Stress Testing & Memory Ceiling Benchmark
+- **Goal**: Validate and harden SqlFox performance on enterprise-scale schemas (1,000+ tables, millions of rows, 500GB+ datasets) under strict resource constraints, enforcing the `< 100MB RAM` ceiling and zero-leak reliability.
+- **Deliverables**:
+  - [ ] **Large Schema Benchmark Suite**: Automated synthetic schema generator creating 1,000 tables, 50,000 columns, and complex FK cycles to benchmark sidebar rendering, search filtering, and memory usage.
+  - [ ] **Memory Leak & Allocation Profiling**: `pprof` benchmarks on streaming pipelines (`RowStream`, `sqlfox transfer`, `export-dump`) ensuring memory usage remains bounded regardless of row volume.
+  - [ ] **Connection Pool Exhaustion Guard**: Stress-testing concurrent query cancellation and out-of-band control connections under simulated latency and connection pool saturation.
+  - [ ] **Error Boundary Hardening**: Web UI audit for graceful degradation during network disconnects, server restarts, and malformed database responses without white-screen crashes.
+  - [ ] **Ponytail Zero-Regression Audit**: Systematic review and removal of any speculative code introduced during v2.0 expansions, ensuring the single binary remains compact (<25MB) and snappy (<1s startup).
+- **Runnable Verification**: Run `go test -v -bench=. ./internal/...` -> launch SqlFox against a 1,000-table database -> verify web UI sidebar loads in <200ms and resident set size (RSS) RAM remains <100MB.
