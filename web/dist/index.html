@@ -322,11 +322,7 @@
       <div id="database-selector-container" class="relative p-2 border-b border-app-border bg-slate-950/60 hidden text-xs flex-shrink-0">
         <div class="flex items-center justify-between text-[10px] text-slate-400 mb-1">
           <span class="font-semibold uppercase tracking-wider">Database / Schema</span>
-          <div class="flex items-center space-x-2">
-            <button onclick="exportDatabaseDump()" class="hover:text-sky-300 text-slate-400 text-[10px] font-medium transition" title="Dump Entire Database (.sql)">📦 Dump</button>
-            <button onclick="openSmartSeedModal()" class="hover:text-amber-300 text-slate-400 text-[10px] font-medium transition" title="Export Smart Seed (FK-Aware)">🌱 Seed</button>
-            <button onclick="openCreateDatabaseModal()" class="text-app-accent hover:underline text-[11px] font-bold" title="Create New Database">+ New</button>
-          </div>
+          <button onclick="openCreateDatabaseModal()" class="text-app-accent hover:underline text-[11px] font-bold" title="Create New Database">+ New</button>
         </div>
         
         <!-- Dropdown trigger button -->
