@@ -13334,7 +13334,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
 
     async function openERDCanvas() {
       if (!activeConnection) { showNativeAlert('Connect to a session first.', 'ERD'); return; }
-      const db = currentDb || '';
+      const db = (schemaCatalogCache && schemaCatalogCache.database_name) || activeConnection.database_name || '';
       const dialog = document.getElementById('erd-dialog');
       dialog.showModal();
       document.getElementById('erd-table-count').textContent = 'Loading…';
@@ -13390,7 +13390,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
 
     function erdSavePositions() {
       if (!activeConnection) return;
-      const db = currentDb || '';
+      const db = (schemaCatalogCache && schemaCatalogCache.database_name) || activeConnection.database_name || '';
       sessionStorage.setItem(`erd-pos-${activeConnection.id}-${db}`, JSON.stringify(erdState.positions));
     }
 
