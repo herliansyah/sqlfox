@@ -318,5 +318,111 @@ The AI Copilot interface integrates execution controls directly into generated m
    - Center workspace (`#center-workspace`) enforces a hard `min-w-[400px]` floor during horizontal sidebar dragging.
    - Cluster Inspector, Flight Recorder, and Table Diagnostics metric grids use CSS Grid `repeat(auto-fit, minmax(...))` to fluidly re-wrap cards on any display size without horizontal clipping.
 
+---
+
+## 14. Navicat Power Suite & Data Synchronization Modals
+
+The database tools dropdown (`📦 DB Tools ▾`) provides specialized native modals for schema comparison, live cross-connection streaming migration, and row-level reconciliation.
+
+### Structure Sync (Schema Diff) Modal Wireframe (`#structure-sync-dialog`)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 🔄 Structure Sync (Schema Diff)                                       [×]   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Source: [ local_dev / store_db ▾ ]     Target: [ prod_replica / store_db ▾ ]│
+│                                                        [ 🔍 Compare Schemas ]│
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Structural Differences (3 items detected):                                  │
+│ ┌──┬─────────┬──────────────────────┬─────────────────────────────────────┐ │
+│ │☑ │ Type    │ Object               │ Proposed DDL Statement              │ │
+│ ├──┼─────────┼──────────────────────┼─────────────────────────────────────┤ │
+│ │☑ │ + TABLE │ `audit_events`       │ CREATE TABLE `audit_events` (...)   │ │
+│ │☑ │ + COL   │ `users`.`deleted_at` │ ALTER TABLE `users` ADD COLUMN ...  │ │
+│ │☑ │ ~ COL   │ `orders`.`amount`    │ ALTER TABLE `orders` MODIFY ...     │ │
+│ └──┴─────────┴──────────────────────┴─────────────────────────────────────┘ │
+│                                                                             │
+│ Generated Migration Script Preview:                                         │
+│ ┌─────────────────────────────────────────────────────────────────────────┐ │
+│ │ -- SqlFox Structure Sync Migration                                      │ │
+│ │ ALTER TABLE `users` ADD COLUMN `deleted_at` DATETIME NULL;               │ │
+│ └─────────────────────────────────────────────────────────────────────────┘ │
+│                                   [Copy DDL]  [Apply to Target Database 🚀] │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Cross-Connection Data Transfer Modal Wireframe (`#data-transfer-dialog`)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 🚚 Cross-Connection Data Transfer                                     [×]   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Source Session: [ remote-prod ▾ ]       Target Session: [ local-dev ▾ ]     │
+│ Database:       [ main_db     ▾ ]       Database:       [ dev_db    ▾ ]     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Tables to Transfer:                                                         │
+│ [☑ Select All]  [☐ Clear]                                                  │
+│  ☑ `customers` (4,200 rows)      ☑ `orders` (18,500 rows)                   │
+│  ☑ `order_items` (42,000 rows)   ☐ `logs` (580,000 rows)                    │
+│                                                                             │
+│ Options:                                                                    │
+│  ☑ Create missing tables on target     ☑ Truncate target tables before copy │
+│  Batch Size: [ 500 ▾ ]                                                      │
+│                                                                             │
+│ Progress: [████████████████████████████░░░░░░░░░] 74% (38,400 / 64,700 rows)│
+│ Transferring `order_items`... 1,200 rows/sec                                │
+│                                                [Cancel]  [Start Transfer 🚀]│
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 15. Visual ERD Interactive Canvas (`#erd-dialog`)
+
+The Entity-Relationship Diagram canvas allows developers to explore table relationships, drag and position tables, and trace foreign key dependencies across complex schemas.
+
+### Canvas Wireframe
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 🗺️ Entity Relationship Diagram — store_db (12 tables)      [⚡ Auto Layout] │
+│                                              [⊡ Fit All] [ 100% ▾ ] [× Close]│
+├─────────────────────────────────────────────────────────────────────────────┤
+│ ┌───────────────────────────┐                                               │
+│ │ 📋 customers              │                                               │
+│ ├───────────────────────────┤                                               │
+│ │ 🔑 id          INT(11)    │────────┐                                      │
+│ │    email       VARCHAR    │        │                                      │
+│ │    created_at  DATETIME   │        │                                      │
+│ └───────────────────────────┘        │ SVG Bézier Curve                     │
+│                                      │ (amber path with arrowhead)          │
+│                                      ▼                                      │
+│                                ┌───────────────────────────┐                │
+│                                │ 📋 orders                 │                │
+│                                ├───────────────────────────┤                │
+│                                │ 🔑 id          INT(11)    │                │
+│                                │ 🔗 customer_id INT(11)    │                │
+│                                │    total       DECIMAL    │                │
+│                                └───────────────────────────┘                │
+│                                                                             │
+│ [Drag table cards to rearrange] • [Scroll wheel to zoom] • [Pan canvas]     │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Interaction Models
+
+1. **Top Navbar Access**:
+   - Accessible under `📦 DB Tools ▾` -> `🗺️ Visual ERD Canvas` from anywhere in the application.
+2. **Dynamic SVG Connections**:
+   - Foreign key relationship lines are rendered as cubic Bézier curves connecting child table FK pins to parent table PK pins with directional arrowheads.
+   - Dynamic edge detection selects the nearest card edge (left or right) based on relative horizontal card positions.
+3. **Smooth Dragging & Event Delegation**:
+   - Tables are rendered as lightweight HTML cards; dragging table headers updates card translation and recalculates connecting SVG curves in real time.
+4. **Auto-Layout & Fit All**:
+   - `⚡ Auto Layout` computes a square-root grid placement for all tables, avoiding overlapping cards.
+   - `⊡ Fit All` calculates the bounding box of all table cards and scales/pans the viewport with padding to fit the modal screen.
+5. **Session-Level Coordinate Cache**:
+   - Table card positions are saved to `sessionStorage` (`erd-pos-{sessionId}-{db}`), so custom layouts remain intact during the active browsing session.
+
 
 

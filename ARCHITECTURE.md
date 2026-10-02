@@ -340,7 +340,87 @@ sequenceDiagram
 
 ---
 
-## 9. Directory & Package Structure
+## 9. Data Synchronization & Transfer Pipeline
+
+SqlFox provides direct database-to-database schema and data synchronization without intermediary disk files, bounded to <50MB RAM:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as Developer / DBA
+    participant UI as Sync Dialogs (Structure / Transfer / Row Sync)
+    participant Server as Go API (/api/sync/*)
+    participant Src as Source Database Session
+    participant Tgt as Target Database Session
+
+    alt Structure Sync (Schema Comparison)
+        User->>UI: Select Source & Target -> Compare
+        UI->>Server: POST /api/sync/structure/compare
+        Server->>Src: Fetch schema & DDL
+        Server->>Tgt: Fetch schema & DDL
+        Server->>Server: AST Diff (tables, columns, indexes)
+        Server-->>UI: Return categorized diff & migration SQL
+        User->>UI: Select items & click "Apply Migration"
+        UI->>Server: POST /api/sync/structure/apply {statements}
+        Server->>Tgt: Execute safe DDL migrations
+    else Cross-Connection Data Transfer
+        User->>UI: Select tables & options -> Start Transfer
+        UI->>Server: POST /api/sync/data/transfer
+        loop For each table (chunked 500 rows)
+            Server->>Src: QueryStream("SELECT * FROM ...")
+            Src-->>Server: Row chunks
+            Server->>Tgt: Exec(multi-row parameterized INSERT)
+            Server-->>UI: NDJSON stream progress event
+        end
+    else Row-Level Data Sync
+        User->>UI: Compare Table Rows
+        UI->>Server: POST /api/sync/data/compare {table}
+        Server->>Src: Fetch rows with PK
+        Server->>Tgt: Fetch rows with PK
+        Server->>Server: Keyset delta reconciliation (Insert/Update/Delete)
+        Server-->>UI: Return delta preview
+        User->>UI: Apply Changes
+        UI->>Server: POST /api/sync/data/apply {operations}
+        Server->>Tgt: Atomic transaction execution
+    end
+```
+
+---
+
+## 10. Visual ERD Interactive Canvas Architecture
+
+The Visual ERD Canvas delivers zero-dependency, pure-frontend database schema visualization:
+
+```mermaid
+flowchart TD
+    subgraph Frontend ["Embedded Web UI (web/dist/index.html)"]
+        Dialog["#erd-dialog (Native HTML5 Dialog)"]
+        Wrapper["#erd-canvas-wrapper (Dot-grid background)"]
+        Viewport["#erd-viewport (CSS transform: translate + scale)"]
+        SVG["#erd-svg (Cubic Bézier FK Lines & Markers)"]
+        Cards["#erd-cards (Draggable Table Cards & Column Badges)"]
+        SessionStore[("sessionStorage (erd-pos-{sessionId}-{db})")]
+    end
+
+    subgraph Backend ["Go Server API"]
+        SchemaAPI["GET /api/session/{id}/schema?db={db}"]
+    end
+
+    Dialog --> Wrapper
+    Wrapper --> Viewport
+    Viewport --> SVG
+    Viewport --> Cards
+    Cards -.->|Store / Restore Coordinates| SessionStore
+    Dialog -->|Fetch Schema & FK Relations| SchemaAPI
+```
+
+1. **SVG & DOM Layer Separation**: Relationship connectors are rendered as SVG `<path>` elements using cubic Bézier curves (`M x1,y1 C cx1,y1 cx2,y2 x2,y2`) behind draggable HTML table cards.
+2. **Auto-Layout & Viewport Transform**: Simple square-root grid positioning algorithm eliminates card overlaps; `erdFitAll()` calculates card bounding boxes and scales/pans `#erd-viewport` to fit all tables within the viewport.
+3. **Session Cache**: Coordinates are preserved in `sessionStorage` per session and database, surviving modal toggles while discarding stale coordinates upon browser close.
+
+---
+
+## 11. Directory & Package Structure
 
 ```
 sqlfox/
@@ -382,6 +462,9 @@ sqlfox/
 │       ├── handlers_connections.go # Connection CRUD & live testing
 │       ├── handlers_query.go       # SQL execution & cancellation
 │       ├── handlers_schema.go      # Schema tree, DDL, preflight DDL, pushdown filtering
+│       ├── handlers_crud.go        # Table spreadsheet CRUD (insert draft, batch delete)
+│       ├── handlers_dump.go        # Streaming SQL dump export, smart seed exporter, large script runner
+│       ├── handlers_sync.go        # Structure sync, cross-connection data transfer, row data sync
 │       ├── handlers_dba.go         # Processlist, cluster health, diagnostics, privilege matrix
 │       ├── handlers_snippets.go    # Snippet management
 │       ├── handlers_import.go      # CSV upload & import endpoints
@@ -392,13 +475,13 @@ sqlfox/
 │   │   └── index.html
 │   └── embed.go                    # //go:embed dist/*
 ├── docs/
-│   ├── adr/                        # Architectural Decision Records (0001 - 0026)
+│   ├── adr/                        # Architectural Decision Records (0001 - 0029)
 │   ├── playbooks/                  # Production operational playbooks (large-scale database management)
 │   └── agents/                     # Agent workflow documentation
 ├── CONTEXT.md                      # Ubiquitous domain language
 ├── ARCHITECTURE.md                 # System architecture (this document)
 ├── SECURITY.md                     # Security & privacy specification
 ├── UX_DESIGN.md                    # Interface wireframes & design tokens
-├── MILESTONES.md                   # Delivery roadmap & milestones (1 - 19)
+├── MILESTONES.md                   # Delivery roadmap & milestones (1 - 20)
 └── go.mod
 ```

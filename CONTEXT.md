@@ -430,3 +430,25 @@ _Avoid_: In-process tunnel, custom bastion client
 - **0023**: Dynamic Cluster & Replication Inspector with Peer Node Auto-Discovery and Tri-Metric Bottleneck Detective (`docs/adr/0023-cluster-and-replication-inspector.md`)
 - **0024**: Ponytail Pruning, Stateless Service Simplification, and Unified AI Streaming Parser (`docs/adr/0024-ponytail-pruning-and-stateless-service-simplification.md`)
 - **0025**: On-Demand Performance Flight Recorder and Correlated Process Snapshots (`docs/adr/0025-on-demand-performance-flight-recorder-and-correlated-process-snapshots.md`)
+- **0026**: Copilot Session Forking, Rich Markdown Blocks, and Fluid Workspace Ergonomics (`docs/adr/0026-copilot-session-forking-rich-markdown-and-fluid-workspace.md`)
+- **0027**: Streaming SQL Dump, Referential Slice Seeding, and Grid Spreadsheet CRUD Architecture (`docs/adr/0027-streaming-sql-dump-referential-slice-seeding-and-grid-crud.md`)
+- **0028**: Schema Structure Sync, Cross-Connection Data Transfer, and Row-Level Data Sync Engine (`docs/adr/0028-schema-structure-sync-cross-connection-data-transfer-and-row-data-sync.md`)
+- **0029**: Visual ERD Interactive Canvas (`docs/adr/0029-visual-erd-canvas.md`)
+
+## Visual Schema & ERD Canvas
+
+**Visual ERD Canvas**:
+An interactive, zero-dependency schema visualization tool within a native modal dialog that renders database tables as draggable cards and foreign key constraints as dynamic SVG cubic Bézier curves.
+_Avoid_: Schema graph, DB diagram, table map
+
+**Auto Layout**:
+A square-root grid placement algorithm that automatically organizes database table cards on the Visual ERD Canvas to prevent overlap without manual positioning.
+_Avoid_: Auto position, magic layout, table aligner
+
+**Fit All Viewport**:
+A bounding-box calculation and CSS scaling/translation transformation that smoothly pans and zooms the Visual ERD Canvas to display all table cards within the visible modal viewport.
+_Avoid_: Zoom to fit, reset zoom, center diagram
+
+**ERD Session Position Cache**:
+A session-level storage (`sessionStorage`) mechanism preserving dragged table card coordinates on the Visual ERD Canvas per database session across modal toggles without modifying remote schemas.
+_Avoid_: Diagram layout file, saved canvas, position state

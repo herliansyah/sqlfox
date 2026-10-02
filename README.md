@@ -5,8 +5,6 @@
 ### High-Performance Modern Database Manager & Viewer with AI Copilot & Safety Guard
 
 [![GitHub Release](https://img.shields.io/github/v/release/herliansyah/sqlfox?style=flat-square&color=FF6B35&logo=github)](https://github.com/herliansyah/sqlfox/releases)
-[![npm version](https://img.shields.io/npm/v/sqlfox?style=flat-square&color=CB3837&logo=npm)](https://www.npmjs.com/package/sqlfox)
-[![npm downloads](https://img.shields.io/npm/dm/sqlfox?style=flat-square&color=2E7D32&logo=npm)](https://www.npmjs.com/package/sqlfox)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/herliansyah/sqlfox?style=flat-square&color=00ADD8&logo=go)](https://golang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-F59E0B?style=flat-square)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-4B5563?style=flat-square&logo=linux)](https://github.com/herliansyah/sqlfox/releases)
@@ -33,7 +31,10 @@ Operates with a strict memory ceiling (**< 100MB RAM**), sub-second launch time 
 
 ### 🌟 Key Highlights
 
-- ⚡ **Zero-Install Instant Run**: Launch via `npx sqlfox` or run a single standalone binary. No electron, no heavy JVM, no installation wizard required.
+- ⚡ **Zero-Install Single Binary**: Run a single standalone executable. No electron, no heavy JVM, no complex installation wizard required.
+- 🗺️ **Visual ERD Interactive Canvas**: Drag-and-drop table relationship visualizer with smooth cubic Bézier SVG lines, auto-layout, fit-all viewport, and per-session positioning cache.
+- 🔄 **Schema & Data Synchronization Suite**: AST-based Structure Sync (side-by-side DDL comparison & safe migration generation), direct memory-bounded Cross-Connection Data Transfer (<50MB buffer), and Row-Level Data Sync (keyset delta reconciliation).
+- 📊 **Spreadsheet CRUD & Smart Seeding**: Inline "+ Add Row" drafting, multi-row deletion with Safety Guard challenge, instant column filtering, streaming SQL dumps (<10MB buffer), and FK-Aware Smart Seed Dumps (referential topological closure).
 - 🛡️ **Deterministic Safety Guard**: Intercepts accidental destructive queries (`DROP TABLE`, `TRUNCATE`, unqualified `UPDATE`/`DELETE` without `WHERE`) via AST evaluation with a mandatory Challenge Modal.
 - 🔐 **Encrypted Connection Vault**: Database credentials and SSH keys encrypted at rest with **AES-256-GCM** and **Argon2id**. Protected by a Master PIN / Password.
 - 📱 **Remote & LAN Access Guard**: Access your database workspace from your tablet, phone, or team members on the same network with PIN verification.
@@ -48,21 +49,7 @@ Operates with a strict memory ceiling (**< 100MB RAM**), sub-second launch time 
 
 ### 🚀 Quick Start
 
-#### Method 1: Using `npx` (No Installation Needed)
-If you have Node.js (16+) installed, run SqlFox immediately:
-```bash
-npx sqlfox
-```
-
-#### Method 2: Global Install via `npm`
-```bash
-npm install -g sqlfox
-
-# Then start anywhere:
-sqlfox
-```
-
-#### Method 3: Download Prebuilt Standalone Binary
+#### Method 1: Download Prebuilt Standalone Binary
 Grab the pre-compiled binary for your OS and architecture from [GitHub Releases](https://github.com/herliansyah/sqlfox/releases):
 
 | Operating System | Architecture | Package Format |
@@ -82,13 +69,13 @@ curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v
 ./sqlfox
 ```
 
-#### Method 4: Install with Go
+#### Method 2: Install with Go
 ```bash
 go install github.com/herliansyah/sqlfox/cmd/sqlfox@latest
 sqlfox
 ```
 
-#### Method 5: Build from Source
+#### Method 3: Build from Source
 ```bash
 git clone https://github.com/herliansyah/sqlfox.git
 cd sqlfox
@@ -173,7 +160,10 @@ Berjalan dengan konsumsi memori sangat hemat (**< 100MB RAM**), waktu start kila
 
 ### 🌟 Fitur Utama
 
-- ⚡ **Jalankan Tanpa Install**: Jalankan langsung lewat `npx sqlfox` atau download file binary tunggal. Tanpa Electron, tanpa JVM yang membebani laptop.
+- ⚡ **Jalankan Tanpa Install (Single Binary)**: Cukup download dan jalankan berkas binary tunggal mandiri. Tanpa Electron, tanpa JVM yang membebani laptop.
+- 🗺️ **Visual ERD Canvas Interaktif**: Visualisasi relasi antar-tabel dengan drag-and-drop, garis koneksi Bézier SVG mulus, penataan otomatis (*Auto Layout*), penyesuaian layar (*Fit All*), dan penyimpanan posisi per sesi.
+- 🔄 **Sinkronisasi Skema & Data (Navicat Power Suite)**: Perbandingan struktur DDL berdampingan (*Structure Sync*) beserta migrasi aman, transfer streaming antar-koneksi langsung (*Data Transfer* dengan batas buffer <50MB), dan rekonsiliasi data per baris berbasis primary key (*Row-Level Data Sync*).
+- 📊 **Spreadsheet Grid CRUD & Smart Seed**: Penambahan baris draf instan ("+ Add Row"), penghapusan banyak baris dengan proteksi Safety Guard, filter kolom instan, streaming SQL dump langsung (<10MB buffer), dan *FK-Aware Smart Seed Dump* dengan resolusi graf relasi rekursif (*topological closure*).
 - 🛡️ **Safety Guard Terintegrasi**: Menganalisis sintaks SQL (*AST parser*) secara deterministik untuk mencegat query destruktif berbahaya (`DROP TABLE`, `TRUNCATE`, `DELETE`/`UPDATE` massal tanpa `WHERE`) dengan dialog konfirmasi aman (*Challenge Modal*).
 - 🔐 **Connection Vault Terenkripsi**: Menyimpan kredensial database dan SSH key dengan standar kriptografi **AES-256-GCM** dan **Argon2id**. Dilengkapi PIN / Master Password otomatis yang praktis.
 - 📱 **Akses Multi-Device (Remote LAN Guard)**: Buka SqlFox dari tablet, iPad, atau HP melalui koneksi WiFi lokal dengan otentikasi PIN keamanan.
@@ -188,21 +178,7 @@ Berjalan dengan konsumsi memori sangat hemat (**< 100MB RAM**), waktu start kila
 
 ### 🚀 Panduan Instalasi & Penggunaan Cepat
 
-#### Cara 1: Menggunakan `npx` (Langsung Jalankan tanpa Install)
-Bagi pengguna Node.js (v16+):
-```bash
-npx sqlfox
-```
-
-#### Cara 2: Install Global via `npm`
-```bash
-npm install -g sqlfox
-
-# Jalankan kapan saja dengan perintah:
-sqlfox
-```
-
-#### Cara 3: Unduh File Binary Siap Pakai
+#### Cara 1: Unduh File Binary Siap Pakai
 Unduh paket binary sesuai sistem operasi dan arsitektur Anda di halaman [GitHub Releases](https://github.com/herliansyah/sqlfox/releases):
 
 | Sistem Operasi | Arsitektur CPU | Format Berkas |
@@ -222,13 +198,13 @@ curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v
 ./sqlfox
 ```
 
-#### Cara 4: Install Menggunakan Go
+#### Cara 2: Install Menggunakan Go
 ```bash
 go install github.com/herliansyah/sqlfox/cmd/sqlfox@latest
 sqlfox
 ```
 
-#### Cara 5: Kompilasi Manual dari Source Code
+#### Cara 3: Kompilasi Manual dari Source Code
 ```bash
 git clone https://github.com/herliansyah/sqlfox.git
 cd sqlfox

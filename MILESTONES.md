@@ -197,14 +197,15 @@ v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
 ### Milestone 9: Simple CRUD Table Suite & SQL Dump Tooling
 - **Goal**: Transform the Virtual Data Grid into an effortless spreadsheet-like data editor and provide robust streaming SQL dump export/import alongside referential slice seeding.
 - **Deliverables**:
-  - **Inline Add Row**: Toolbar `+ Add Row` button displaying an editable draft row at the top/bottom of the grid; commits via generated `INSERT` with Type Guard validation.
-  - **Multi-Row Deletion**: Row checkboxes with multi-selection and `Delete Selected` action routed through the Safety Guard challenge.
-  - **Column Filter Toolbar**: Quick filter input below every column header in the grid for rapid instant filtering without writing SQL.
-  - **Streaming SQL Dump Export**: Backend pipeline generating standard `.sql` dumps containing `CREATE TABLE` and chunked `INSERT INTO` statements.
-  - **Referential Slice Exporter (Zero-Config FK-Aware Smart Seed Dump)**: Automatic schema-wide dependency crawler without requiring manual table selection; exports complete DDL + bounded row sample (e.g. 20 rows per table), while recursively resolving and including all upstream referenced parent rows across the entire database's Foreign Key graph (transitive closure) in topological order, guaranteeing clean, error-free restores.
-  - **Large SQL Script Runner**: Streaming executor parsing and dispatching multi-megabyte `.sql` scripts with progress tracking without memory exhaustion.
-  - **Clipboard Formats**: Context menu options to `Copy as TSV` (Excel-ready) and `Copy as Markdown Table`.
-- **Runnable Verification**: Open table in grid -> add a new row inline -> edit a cell -> filter by status -> select rows and delete -> click 1-click "Export Smart Seed Dump (20 rows)" for the entire database -> restore `.sql` to a clean database instance and verify 100% success with zero FK constraint violations.
+  - [x] **Inline Add Row**: Toolbar `+ Add Row` button displaying an editable draft row at the top/bottom of the grid; commits via generated `INSERT` with Type Guard validation (`POST /api/session/{id}/table/{table}/insert-row`).
+  - [x] **Multi-Row Deletion**: Row checkboxes with multi-selection and `Delete Selected` action routed through the Safety Guard challenge (`POST /api/session/{id}/table/{table}/delete-rows`).
+  - [x] **Column Filter Toolbar**: Quick filter input below every column header in the grid for rapid instant filtering without writing SQL.
+  - [x] **Streaming SQL Dump Export**: Backend pipeline generating standard `.sql` dumps containing `CREATE TABLE` and chunked `INSERT INTO` statements (`GET /api/session/{id}/export-dump`).
+  - [x] **Referential Slice Exporter (Zero-Config FK-Aware Smart Seed Dump)**: Automatic schema-wide dependency crawler without requiring manual table selection; exports complete DDL + bounded row sample (e.g. 20 rows per table), while recursively resolving and including all upstream referenced parent rows across the entire database's Foreign Key graph (transitive closure) in topological order, guaranteeing clean, error-free restores (`GET /api/session/{id}/export-smart-seed`).
+  - [x] **Large SQL Script Runner**: Streaming executor parsing and dispatching multi-megabyte `.sql` scripts with progress tracking without memory exhaustion (`POST /api/session/{id}/run-sql-script`).
+  - [x] **Clipboard Formats**: Context menu options to `Copy as TSV` (Excel-ready) and `Copy as Markdown Table`.
+  - [x] **Documentation & Verification**: Formally recorded in `docs/adr/0027-streaming-sql-dump-referential-slice-seeding-and-grid-crud.md` with unit tests passing 100% in `internal/server/crud_test.go` and `internal/server/dump_test.go`.
+- **Runnable Verification**: Run `go test -v ./internal/server -run "TestCRUD|TestDump"` -> verify 100% pass across CRUD operations and SQL dump pipelines.
 
 
 ---
@@ -349,6 +350,20 @@ v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
   - **Ponytail Pruning**: Refactored `safety.BackupManager` and `ai.Firewall` to pure functions (`safety.BackupTable`, `ai.BuildSchemaPrompt`).
   - **Documentation & Verification**: ADR-0026, domain terminology in `CONTEXT.md`, updated `ARCHITECTURE.md`, `UX_DESIGN.md`, and unit tests in `internal/ai/firewall_test.go` and `internal/safety/guard_test.go`.
 - **Runnable Verification**: Run `go test -v ./internal/ai -run TestFirewall_BuildSchemaPrompt` and `go test -v ./internal/safety -run TestBackupManager_BackupTable` -> verify 100% pass across AI prompt builder and safety backup functions.
+ 
+---
+
+### Milestone 20: Visual ERD Interactive Canvas
+- **Goal**: Add a zero-dependency interactive Entity-Relationship Diagram (ERD) canvas that renders database tables as draggable cards with foreign key relationship lines using existing schema introspection data.
+- **Deliverables**:
+  - [x] **Visual ERD Dialog & Trigger**: `<dialog id="erd-dialog">` accessible from Top Navbar `📦 DB Tools ▾` -> `🗺️ Visual ERD Canvas` with backdrop blur, table count indicator, and responsive canvas wrapper.
+  - [x] **SVG Relationship Layer**: `#erd-svg` layer rendering foreign key relationship lines with cubic Bézier paths (`M x1,y1 C cx1,y1 cx2,y2 x2,y2`), amber marker arrowheads, and dynamic edge selection (left/right edges) based on relative card positions.
+  - [x] **Draggable Table Cards Layer**: `#erd-cards` DOM layer rendering table cards with column schemas; Primary Key columns highlighted with emerald badge/key (`🔑`), Foreign Key columns with amber badge/link (`🔗`).
+  - [x] **Interactive Pan & Scroll-to-Zoom**: Fluid CSS transform (`translate(x,y) scale(s)`) supporting click-and-drag canvas panning, card dragging with event delegation, and pointer-anchored wheel zooming.
+  - [x] **Auto-Layout & Fit All**: Square-root grid arrangement (`erdAutoLayout()`) preventing card overlapping and viewport boundary calculation (`erdFitAll()`) with auto-scaling to fit the entire schema within view.
+  - [x] **Session State Persistence**: Storing card coordinates in `sessionStorage` (`erd-pos-{sessionId}-{db}`) across dialog toggles within an active session.
+  - [x] **Documentation & Verification**: Formally recorded in `docs/adr/0029-visual-erd-canvas.md` and implementation plan `docs/superpowers/plans/2026-10-02-visual-erd-canvas.md`.
+- **Runnable Verification**: Open database session -> open `📦 DB Tools ▾` -> click `🗺️ Visual ERD Canvas` -> verify all tables render as cards with columns and PK/FK markers -> drag a table card and verify connected FK lines update smoothly -> click "⚡ Auto Layout" and "⊡ Fit All" -> close and reopen dialog, confirming table coordinates persist.
 
 
 
