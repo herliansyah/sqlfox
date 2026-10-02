@@ -2574,9 +2574,9 @@
           <button onclick="document.getElementById('erd-dialog').close()" class="h-7 w-7 bg-slate-800 hover:bg-rose-900 text-slate-400 hover:text-rose-300 rounded border border-slate-600 text-sm transition flex items-center justify-center" title="Close (Escape)">✕</button>
         </div>
       </div>
-      <div id="erd-canvas-wrapper" class="relative overflow-hidden cursor-grab select-none" style="flex:1;background-color:#020617;background-image:radial-gradient(circle,#1e293b 1px,transparent 1px);background-size:24px 24px;">
+      <div id="erd-canvas-wrapper" onmousedown="erdOnWrapperMouseDown(event)" onwheel="erdOnWheel(event)" class="relative overflow-hidden cursor-grab select-none" style="flex:1;background-color:#020617;background-image:radial-gradient(circle,#1e293b 1px,transparent 1px);background-size:24px 24px;">
         <div id="erd-viewport" style="position:absolute;top:0;left:0;transform-origin:0 0;will-change:transform;">
-          <svg id="erd-svg" style="position:absolute;top:0;left:0;overflow:visible;pointer-events:none;"></svg>
+          <svg id="erd-svg" style="position:absolute;top:0;left:0;overflow:visible;pointer-events:none;"><defs><marker id="erd-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#f59e0b" opacity="0.85"/></marker></defs><g id="erd-lines"></g></svg>
           <div id="erd-cards" style="position:absolute;top:0;left:0;"></div>
         </div>
       </div>
@@ -13323,20 +13323,17 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
 
     // --- Visual ERD Canvas ---
     const erdState = {
-      tables: [],       // TableMetadata[] from schema API
-      positions: {},    // { [tableName]: { x, y } }
-      scale: 1,
-      panX: 0, panY: 0,
+      tables: [],
+      positions: {},
+      scale: 1, panX: 0, panY: 0,
       draggingCard: null,
       panning: false, panStart: null,
-      listenersAttached: false,
     };
 
     async function openERDCanvas() {
       if (!activeConnection) { showNativeAlert('Connect to a session first.', 'ERD'); return; }
       const db = (schemaCatalogCache && schemaCatalogCache.database_name) || activeConnection.database_name || '';
-      const dialog = document.getElementById('erd-dialog');
-      dialog.showModal();
+      document.getElementById('erd-dialog').showModal();
       document.getElementById('erd-table-count').textContent = 'Loading…';
       try {
         const url = `/api/session/${activeConnection.id}/schema${db ? '?db=' + encodeURIComponent(db) : ''}`;
@@ -13346,26 +13343,13 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
         erdState.scale = 1; erdState.panX = 0; erdState.panY = 0;
         const storeKey = `erd-pos-${activeConnection.id}-${db}`;
         try { erdState.positions = JSON.parse(sessionStorage.getItem(storeKey) || '{}'); } catch { erdState.positions = {}; }
-        erdAutoLayout(false); // layout only tables with no stored position
+        erdAutoLayout(false);
         erdRender();
         erdFitAll();
-        if (!erdState.listenersAttached) {
-          document.addEventListener('mousemove', erdOnMouseMove);
-          document.addEventListener('mouseup', erdOnMouseUp);
-          document.getElementById('erd-dialog').addEventListener('close', () => {
-            document.removeEventListener('mousemove', erdOnMouseMove);
-            document.removeEventListener('mouseup', erdOnMouseUp);
-            erdState.listenersAttached = false;
-          });
-          erdState.listenersAttached = true;
-        }
       } catch (err) {
         document.getElementById('erd-table-count').textContent = 'Failed to load schema';
         console.error('ERD load error', err);
       }
-      const wrapper = document.getElementById('erd-canvas-wrapper');
-      wrapper.onmousedown = erdOnWrapperMouseDown;
-      wrapper.onwheel = erdOnWheel;
     }
 
     function erdAutoLayout(force = true) {
@@ -13413,16 +13397,11 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
     function erdRenderCards() {
       const container = document.getElementById('erd-cards');
       if (!container) return;
-      container.innerHTML = '';
-      erdState.tables.forEach(t => {
+      container.innerHTML = erdState.tables.map(t => {
         const pos = erdState.positions[t.name] || { x: 40, y: 40 };
         const fkCols = new Set((t.foreign_keys || []).map(fk => fk.column));
         const pkCols = new Set((t.columns || []).filter(c => c.key === 'PRI').map(c => c.name));
-        const card = document.createElement('div');
-        card.dataset.table = t.name;
-        card.className = 'erd-card';
-        card.style.cssText = `position:absolute;left:${pos.x}px;top:${pos.y}px;width:220px;cursor:grab;z-index:10;background:#0f172a;border:1px solid #334155;border-radius:8px;box-shadow:0 4px 24px #0008;overflow:hidden;font-size:12px;`;
-        card.innerHTML = `
+        return `<div data-table="${escapeHtml(t.name)}" class="erd-card" style="position:absolute;left:${pos.x}px;top:${pos.y}px;width:220px;cursor:grab;z-index:10;background:#0f172a;border:1px solid #334155;border-radius:8px;box-shadow:0 4px 24px #0008;overflow:hidden;font-size:12px;">
           <div style="background:#1e293b;padding:6px 10px;font-weight:600;color:#7dd3fc;border-bottom:1px solid #1e3a5f;display:flex;align-items:center;justify-content:space-between;cursor:grab;">
             <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:170px;" title="${escapeHtml(t.name)}">📋 ${escapeHtml(t.name)}</span>
             <span style="color:#475569;font-size:10px;font-family:monospace;margin-left:4px;">${(t.columns||[]).length}</span>
@@ -13435,55 +13414,34 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
               <span style="color:#475569;font-size:10px;font-family:monospace;flex-shrink:0;margin-left:4px;">${escapeHtml((c.type||'').split('(')[0].toUpperCase())}</span>
             </div>
           `).join('')}${(t.columns||[]).length>15?`<div style="padding:2px 10px;color:#475569;font-size:10px;">+${(t.columns||[]).length-15} more…</div>`:''}</div>
-        `;
-        card.addEventListener('mousedown', erdOnCardMouseDown);
-        container.appendChild(card);
-      });
+        </div>`;
+      }).join('');
     }
 
     function erdRenderLines() {
-      const svg = document.getElementById('erd-svg');
-      if (!svg) return;
-      svg.innerHTML = '';
-      const defs = document.createElementNS('http://www.w3.org/2000/svg','defs');
-      defs.innerHTML = `<marker id="erd-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#f59e0b" opacity="0.85"/></marker>`;
-      svg.appendChild(defs);
+      const g = document.getElementById('erd-lines');
+      if (!g) return;
       const CARD_W = 220;
+      let html = '';
       erdState.tables.forEach(src => {
-        (src.foreign_keys||[]).forEach(fk => {
+        (src.foreign_keys || []).forEach(fk => {
           const sp = erdState.positions[src.name];
           const dp = erdState.positions[fk.referenced_table];
           if (!sp || !dp) return;
           const dst = erdState.tables.find(t => t.name === fk.referenced_table);
-          const sh = 36 + Math.min(15, (src.columns||[]).length)*20;
-          const dh = 36 + Math.min(15, (dst?.columns||[]).length)*20;
-          // Connect right/left edge depending on relative positions
+          const sh = 36 + Math.min(15, (src.columns || []).length) * 20;
+          const dh = 36 + Math.min(15, (dst?.columns || []).length) * 20;
           const srcRight = sp.x + CARD_W < dp.x;
           const x1 = srcRight ? sp.x + CARD_W : sp.x;
           const y1 = sp.y + sh / 2;
           const x2 = srcRight ? dp.x : dp.x + CARD_W;
           const y2 = dp.y + dh / 2;
           const cx = (x1 + x2) / 2;
-          const path = document.createElementNS('http://www.w3.org/2000/svg','path');
-          path.setAttribute('d', `M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}`);
-          path.setAttribute('stroke','#f59e0b');
-          path.setAttribute('stroke-width','1.5');
-          path.setAttribute('stroke-opacity','0.55');
-          path.setAttribute('fill','none');
-          path.setAttribute('marker-end','url(#erd-arrow)');
-          svg.appendChild(path);
-          // FK label
-          const label = document.createElementNS('http://www.w3.org/2000/svg','text');
-          label.setAttribute('x', cx);
-          label.setAttribute('y', (y1+y2)/2 - 4);
-          label.setAttribute('text-anchor','middle');
-          label.setAttribute('fill','#64748b');
-          label.setAttribute('font-size','9');
-          label.setAttribute('font-family','monospace');
-          label.textContent = `${fk.column}→${fk.referenced_column}`;
-          svg.appendChild(label);
+          html += `<path d="M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}" stroke="#f59e0b" stroke-width="1.5" stroke-opacity="0.55" fill="none" marker-end="url(#erd-arrow)"/>` +
+                  `<text x="${cx}" y="${(y1 + y2) / 2 - 4}" text-anchor="middle" fill="#64748b" font-size="9" font-family="monospace">${fk.column}→${fk.referenced_column}</text>`;
         });
       });
+      g.innerHTML = html;
     }
 
     function erdFitAll() {
@@ -13508,24 +13466,21 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       document.getElementById('erd-zoom-label').textContent = Math.round(scale*100)+'%';
     }
 
-    function erdOnCardMouseDown(e) {
-      if (e.button !== 0) return;
-      e.stopPropagation();
-      const card = e.currentTarget;
-      const name = card.dataset.table;
-      const pos = erdState.positions[name] || {x:0,y:0};
-      erdState.draggingCard = { name, startMouseX:e.clientX, startMouseY:e.clientY, startCardX:pos.x, startCardY:pos.y };
-      card.style.cursor = 'grabbing'; card.style.zIndex = '100';
-      e.preventDefault();
-    }
-
     function erdOnWrapperMouseDown(e) {
-      if (e.button === 1 || (e.button === 0 && !e.target.closest('.erd-card'))) {
-        erdState.panning = true;
-        erdState.panStart = { mouseX:e.clientX, mouseY:e.clientY, panX:erdState.panX, panY:erdState.panY };
-        e.currentTarget.style.cursor = 'grabbing';
+      if (e.button !== 0 && e.button !== 1) return;
+      const card = e.target.closest('.erd-card');
+      if (card && e.button === 0) {
+        const name = card.dataset.table;
+        const pos = erdState.positions[name] || { x: 0, y: 0 };
+        erdState.draggingCard = { name, startMouseX: e.clientX, startMouseY: e.clientY, startCardX: pos.x, startCardY: pos.y };
+        card.style.cursor = 'grabbing'; card.style.zIndex = '100';
         e.preventDefault();
+        return;
       }
+      erdState.panning = true;
+      erdState.panStart = { mouseX: e.clientX, mouseY: e.clientY, panX: erdState.panX, panY: erdState.panY };
+      e.currentTarget.style.cursor = 'grabbing';
+      e.preventDefault();
     }
 
     function erdOnMouseMove(e) {
@@ -13572,6 +13527,8 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       erdApplyTransform();
       document.getElementById('erd-zoom-label').textContent = Math.round(newScale*100)+'%';
     }
+    document.addEventListener('mousemove', erdOnMouseMove);
+    document.addEventListener('mouseup', erdOnMouseUp);
     // --- End Visual ERD Canvas ---
 
     function updateFooterStats() {
