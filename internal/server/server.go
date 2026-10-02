@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strings"
 
-	"sqlfox/internal/safety"
 	"sqlfox/internal/vault"
 
 	_ "sqlfox/internal/driver/mysql"
@@ -17,7 +16,7 @@ import (
 type Server struct {
 	handler           http.Handler
 	vault             *vault.Vault
-	backupMgr         *safety.BackupManager
+	backupDir         string
 	sessionMgr        *SessionManager
 	authMgr           *AuthManager
 	flightRecorderMgr *FlightRecorderManager
@@ -27,14 +26,13 @@ type Server struct {
 
 // NewServer initializes HTTP routes and application state.
 func NewServer(v *vault.Vault, assets fs.FS, backupDir string, masterPassword string) *Server {
-	backupMgr := safety.NewBackupManager(backupDir)
-	sessionMgr := NewSessionManager(v, backupMgr)
+	sessionMgr := NewSessionManager(v, backupDir)
 	authMgr := NewAuthManager()
 	flightRecorderMgr := NewFlightRecorderManager(v, sessionMgr)
 
 	s := &Server{
 		vault:             v,
-		backupMgr:         backupMgr,
+		backupDir:         backupDir,
 		sessionMgr:        sessionMgr,
 		authMgr:           authMgr,
 		flightRecorderMgr: flightRecorderMgr,

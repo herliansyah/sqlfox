@@ -8,15 +8,6 @@ import (
 	"sqlfox/internal/driver"
 )
 
-// Firewall ensures zero data leakage and curates minimal schema context.
-type Firewall struct {
-	MaskIdentifiers bool
-}
-
-func NewFirewall(maskIdentifiers bool) *Firewall {
-	return &Firewall{MaskIdentifiers: maskIdentifiers}
-}
-
 // ponytail: Heuristic table match: direct substring or singular stem match.
 func tableMatchesQuery(tblName, queryUpper string) bool {
 	u := strings.ToUpper(tblName)
@@ -26,7 +17,8 @@ func tableMatchesQuery(tblName, queryUpper string) bool {
 // BuildSchemaPrompt constructs a comprehensive DDL context for tables in the schema.
 // For standard-sized schemas (<= 30 tables), it includes all tables so AI has complete context
 // regardless of query wording, Indonesian terms, or join relationships.
-func (f *Firewall) BuildSchemaPrompt(schema *driver.SchemaMetadata, referencedQuery string) string {
+// ponytail: Pure stateless function replacing single-method Firewall wrapper.
+func BuildSchemaPrompt(schema *driver.SchemaMetadata, referencedQuery string, maskIdentifiers bool) string {
 	if schema == nil || len(schema.Tables) == 0 {
 		return "No database schema metadata available."
 	}
@@ -104,8 +96,8 @@ func (f *Firewall) BuildSchemaPrompt(schema *driver.SchemaMetadata, referencedQu
 	}
 
 	result := sb.String()
-	if f.MaskIdentifiers {
-		result = f.applyMasking(result)
+	if maskIdentifiers {
+		result = applyMasking(result)
 	}
 
 	return result
@@ -113,7 +105,7 @@ func (f *Firewall) BuildSchemaPrompt(schema *driver.SchemaMetadata, referencedQu
 
 var tokenRegex = regexp.MustCompile("`[a-zA-Z0-9_]+`")
 
-func (f *Firewall) applyMasking(ddl string) string {
+func applyMasking(ddl string) string {
 	mapping := make(map[string]string)
 	colCounter := 1
 

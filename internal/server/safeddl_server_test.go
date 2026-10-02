@@ -11,7 +11,6 @@ import (
 
 	"sqlfox/internal/driver"
 	_ "sqlfox/internal/driver/sqlite"
-	"sqlfox/internal/safety"
 )
 
 func TestPreflightDDLAndSafeExecution(t *testing.T) {
@@ -44,8 +43,6 @@ func TestPreflightDDLAndSafeExecution(t *testing.T) {
 		t.Fatalf("CREATE orders failed: %v", err)
 	}
 
-	backupMgr := safety.NewBackupManager(backupDir)
-
 	activeSess := &ActiveSession{
 		ID:          "conn-prod-1",
 		Name:        "Prod Database",
@@ -53,18 +50,18 @@ func TestPreflightDDLAndSafeExecution(t *testing.T) {
 		DriverName:  "sqlite",
 		ReadOnly:    false,
 		Session:     dbSession,
-		backupMgr:   backupMgr,
+		backupDir:   backupDir,
 	}
 
 	sm := &SessionManager{
-		backupMgr: backupMgr,
+		backupDir: backupDir,
 		sessions:  make(map[string]*ActiveSession),
 	}
 	sm.sessions[activeSess.ID] = activeSess
 
 	srv := &Server{
 		sessionMgr: sm,
-		backupMgr:  backupMgr,
+		backupDir:  backupDir,
 	}
 
 	// 1. Test handlePreflightDDL endpoint
