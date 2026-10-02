@@ -1,6 +1,6 @@
 # Visual ERD Interactive Canvas Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Add a zero-dependency interactive ER Diagram canvas that renders database tables as draggable cards with FK relationship lines, using existing `/api/session/{id}/schema` data.
 
@@ -37,7 +37,7 @@
 **Interfaces:**
 - Produces: `openERDCanvas()` global function; `#erd-dialog` element; `#erd-canvas-wrapper` div
 
-- [ ] **Step 1: Add ERD dialog HTML**
+- [x] **Step 1: Add ERD dialog HTML**
 
   After the last `</dialog>` before `</body>` (around line 2560 area, after `#fk-peek-popover`), add:
 
@@ -69,7 +69,7 @@
   </dialog>
   ```
 
-- [ ] **Step 2: Add ERD trigger to DB Tools navbar dropdown**
+- [x] **Step 2: Add ERD trigger to DB Tools navbar dropdown**
 
   In the `📦 DB Tools ▾` dropdown (search for the dropdown items near `🔄 Structure Sync`), add a new item:
 
@@ -79,11 +79,11 @@
   </button>
   ```
 
-- [ ] **Step 3: Verify dialog opens/closes**
+- [x] **Step 3: Verify dialog opens/closes**
 
   Restart server, open browser, click `📦 DB Tools ▾` → `🗺️ Visual ERD` → dialog opens. Press Escape to close. No JS errors in console.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
   ```bash
   git add web/dist/index.html
@@ -102,7 +102,7 @@
 - Consumes: `activeConnection.id`, `currentDb` (existing globals)
 - Produces: `erdState = { tables:[], positions:{}, scale:1, panX:0, panY:0 }`; `openERDCanvas()` global
 
-- [ ] **Step 1: Add ERD state + open function**
+- [x] **Step 1: Add ERD state + open function**
 
   Add this JS block near other modal opener functions:
 
@@ -145,7 +145,7 @@
   }
   ```
 
-- [ ] **Step 2: Verify state loads**
+- [x] **Step 2: Verify state loads**
 
   Open ERD while connected. Check browser console: `erdState.tables.length` should equal number of tables in current DB. No 404 or parse errors.
 
@@ -160,7 +160,7 @@
 - Consumes: `erdState.tables`, `erdState.positions`
 - Produces: fills `erdState.positions` for tables without a position; saves to `sessionStorage`
 
-- [ ] **Step 1: Add auto-layout function**
+- [x] **Step 1: Add auto-layout function**
 
   ```javascript
   function erdAutoLayout(force = true) {
@@ -202,7 +202,7 @@
 - Consumes: `erdState.tables`, `erdState.positions`, `erdState.scale`, `erdState.panX/panY`
 - Produces: DOM in `#erd-cards`; sets `#erd-viewport` transform; calls `erdRenderLines()`
 
-- [ ] **Step 1: Add erdRender + erdRenderCards**
+- [x] **Step 1: Add erdRender + erdRenderCards**
 
   ```javascript
   function erdRender() {
@@ -257,7 +257,7 @@
   }
   ```
 
-- [ ] **Step 2: Verify cards render**
+- [x] **Step 2: Verify cards render**
 
   Open ERD. Should see table cards with column lists. PK columns highlighted green, FK columns amber. No errors.
 
@@ -272,7 +272,7 @@
 - Consumes: `erdState.tables`, `erdState.positions`, `#erd-svg` SVG element
 - Produces: SVG `<line>` elements between FK source card and target card
 
-- [ ] **Step 1: Add erdRenderLines**
+- [x] **Step 1: Add erdRenderLines**
 
   ```javascript
   function erdRenderLines() {
@@ -330,7 +330,7 @@
   }
   ```
 
-- [ ] **Step 2: Verify FK lines**
+- [x] **Step 2: Verify FK lines**
 
   Open ERD on a MySQL DB with FK constraints. Lines with amber arrows should connect related tables. Isolated tables (no FK) render without lines.
 
@@ -345,7 +345,7 @@
 - Consumes: `erdState.draggingCard`, `erdState.scale`, `erdState.positions`
 - Produces: updates `erdState.positions`, triggers `erdRenderLines()` on drag, saves to `sessionStorage`
 
-- [ ] **Step 1: Add drag handlers**
+- [x] **Step 1: Add drag handlers**
 
   ```javascript
   function erdOnCardMouseDown(e) {
@@ -394,7 +394,7 @@
   }
   ```
 
-- [ ] **Step 2: Wire up pan on canvas background**
+- [x] **Step 2: Wire up pan on canvas background**
 
   On `#erd-canvas-wrapper` mousedown (not on a card):
 
@@ -409,7 +409,7 @@
   }
   ```
 
-- [ ] **Step 3: Wire up scroll-to-zoom**
+- [x] **Step 3: Wire up scroll-to-zoom**
 
   ```javascript
   function erdOnWheel(e) {
@@ -430,7 +430,7 @@
   }
   ```
 
-- [ ] **Step 4: Register all listeners when dialog opens**
+- [x] **Step 4: Register all listeners when dialog opens**
 
   In `openERDCanvas()`, after `erdRender()`:
 
@@ -452,13 +452,13 @@
   }, { once: false });
   ```
 
-- [ ] **Step 5: Verify drag + pan + zoom**
+- [x] **Step 5: Verify drag + pan + zoom**
 
   - Drag a table card → it moves, FK lines follow
   - Scroll wheel → zooms toward cursor
   - Click empty canvas and drag → pans
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
   ```bash
   git add web/dist/index.html
@@ -475,7 +475,7 @@
 **Interfaces:**
 - Consumes: `erdState.positions`, all card bounding boxes, `#erd-canvas-wrapper` dimensions
 
-- [ ] **Step 1: Add erdFitAll**
+- [x] **Step 1: Add erdFitAll**
 
   ```javascript
   function erdFitAll() {
@@ -504,15 +504,15 @@
   }
   ```
 
-- [ ] **Step 2: Call erdFitAll automatically on open**
+- [x] **Step 2: Call erdFitAll automatically on open**
 
   At end of `openERDCanvas()` after `erdRender()`, add `erdFitAll()`.
 
-- [ ] **Step 3: Verify fit-all**
+- [x] **Step 3: Verify fit-all**
 
   Open ERD with 10+ tables. Canvas should fit all cards in view. Click `⊡ Fit All` to reset after manually panning.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
   ```bash
   git add web/dist/index.html
@@ -527,7 +527,7 @@
 - Modify: `MILESTONES.md` — mark checklist item 16 `[x]`, add completion note
 - Create: `docs/adr/0029-visual-erd-canvas.md`
 
-- [ ] **Step 1: Write ADR**
+- [x] **Step 1: Write ADR**
 
   ```markdown
   # ADR-0029: Visual ERD Interactive Canvas
@@ -549,11 +549,11 @@
   - Positions reset between page reloads on different sessions (sessionStorage, not localStorage).
   ```
 
-- [ ] **Step 2: Mark checklist done in MILESTONES.md**
+- [x] **Step 2: Mark checklist done in MILESTONES.md**
 
   Change `[ ] 16. Visual ERD Interactive Canvas` → `[x] 16. Visual ERD Interactive Canvas`.
 
-- [ ] **Step 3: Final commit**
+- [x] **Step 3: Final commit**
 
   ```bash
   go test ./... # verify green
