@@ -43,6 +43,7 @@ Operates with a strict memory ceiling (**< 100MB RAM**), sub-second launch time 
 - 💾 **Smart Pre-DDL Backups**: Automatic schema and table dumps before dangerous alter/drop operations.
 - 🌐 **Cluster & Replication Inspector**: Real-time diagnostic suite for Percona XtraDB Cluster (PXC 5.7/8.0), Galera, and MySQL replication. Auto-detects Flow Control pauses, auto-probes peer nodes to pinpoint the slowest bottleneck node, and evaluates a Tri-Metric Matrix (EVS network latency, InnoDB disk stalls, apply worker capacity).
 - 📈 **Performance Flight Recorder**: On-demand diagnostic flight recorder capturing Quad-Metric telemetry (differential QPS, `Threads_running`, Row Lock Waits, Buffer Pool Waits) and correlating active non-idle queries with an interactive timeline scrubber and 10-minute auto-stop safety guard.
+- 💻 **Headless CLI Suite**: Execute queries and scripts non-interactively with streaming output formats (`table`, `json`, `ndjson`, `csv`), pipe SQL via STDIN, direct DSN targeting for CI/CD runners, cross-connection data migrations (`sqlfox transfer`), and fail-closed AST safety guardrails.
 - 🔌 **Multi-Engine Support**: MySQL 5.7 / 8.x, MariaDB, and local pure-Go SQLite (direct connection or over SSH tunnel).
 
 ---
@@ -172,6 +173,7 @@ Berjalan dengan konsumsi memori sangat hemat (**< 100MB RAM**), waktu start kila
 - 💾 **Smart Pre-DDL Backup**: Backup otomatis skema dan data tabel sebelum eksekusi DDL penting dijalankan.
 - 🌐 **Cluster & Replication Inspector**: Diagnostik real-time untuk Percona XtraDB Cluster (PXC 5.7/8.0), Galera, dan replikasi MySQL. Mendeteksi pembekuan Flow Control, auto-probe node rekan untuk mengisolasi node terlelet yang membebani cluster, serta Tri-Metric Detective (latensi jaringan EVS, stall harddisk/InnoDB, dan kejenuhan worker).
 - 📈 **Performance Flight Recorder**: Perekam telemetri performa database on-demand (Quad-Metric: QPS, `Threads_running`, Row Lock Waits, Buffer Pool Waits) yang menghubungkan titik lonjakan (*spike*) grafik langsung dengan query aktif yang sedang berjalan di detik tersebut, dilengkapi pengaman auto-stop 10 menit.
+- 💻 **Headless CLI Suite**: Eksekusi query dan script terminal secara otomatis/non-interaktif dengan format output streaming (`table`, `json`, `ndjson`, `csv`), dukungan piping via STDIN, direct DSN untuk runner CI/CD tanpa vault, transfer data antar-koneksi (`sqlfox transfer`), serta perlindungan fail-closed AST Safety Guard.
 - 🔌 **Dukungan Multi Database**: MySQL 5.7 / 8.x, MariaDB, dan SQLite (koneksi langsung maupun melalui SSH Tunneling).
 
 ---

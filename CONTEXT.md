@@ -434,6 +434,7 @@ _Avoid_: In-process tunnel, custom bastion client
 - **0027**: Streaming SQL Dump, Referential Slice Seeding, and Grid Spreadsheet CRUD Architecture (`docs/adr/0027-streaming-sql-dump-referential-slice-seeding-and-grid-crud.md`)
 - **0028**: Schema Structure Sync, Cross-Connection Data Transfer, and Row-Level Data Sync Engine (`docs/adr/0028-schema-structure-sync-cross-connection-data-transfer-and-row-data-sync.md`)
 - **0029**: Visual ERD Interactive Canvas (`docs/adr/0029-visual-erd-canvas.md`)
+- **0030**: Headless CLI Suite Architecture and Fail-Closed Automation Policy (`docs/adr/0030-headless-cli-suite-and-fail-closed-automation-policy.md`)
 
 ## Visual Schema & ERD Canvas
 
@@ -452,3 +453,31 @@ _Avoid_: Zoom to fit, reset zoom, center diagram
 **ERD Session Position Cache**:
 A session-level storage (`sessionStorage`) mechanism preserving dragged table card coordinates on the Visual ERD Canvas per database session across modal toggles without modifying remote schemas.
 _Avoid_: Diagram layout file, saved canvas, position state
+
+## Headless CLI & Automation
+
+**Headless Mode**:
+Non-interactive, terminal-driven execution of SqlFox subcommands (`query`, `transfer`) without launching the embedded HTTP daemon or browser interface.
+_Avoid_: Silent mode, daemonless mode, batch mode
+
+**Direct DSN Targeting**:
+Specifying database connection coordinates directly via connection string (`--dsn`) for ephemeral execution in CI/CD pipelines, bypassing the local encrypted connection vault.
+_Avoid_: Raw URL, ad-hoc connection, unvaulted connection
+
+**Fail-Closed Safety Guard**:
+The CLI execution policy that unconditionally aborts destructive SQL statements with a non-zero exit code in non-interactive sessions unless an explicit bypass flag (`--force`) is supplied.
+_Avoid_: Panic mode, strict abort, safety error
+
+**Stream Output Format**:
+Output serializations supported by headless query execution (`table`, `json`, `ndjson`, `csv`) routing clean data streams to standard output (`stdout`) and diagnostics/progress to standard error (`stderr`).
+_Avoid_: Print mode, report type
+
+**Per-Table Atomicity**:
+Executing cross-connection data transfers within independent transaction boundaries per target table rather than a single monolithic cross-table transaction, preventing lock contention and undo log exhaustion.
+_Avoid_: Table isolation, chunked commit
+
+**Multi-Statement Delimiter Parsing**:
+Token-aware SQL statement splitting that distinguishes statement terminators (`;`) from semicolons within string literals, quotes, and block comments during headless script execution.
+_Avoid_: Semicolon split, raw splitting
+
+

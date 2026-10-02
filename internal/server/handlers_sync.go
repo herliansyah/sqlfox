@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -1015,15 +1016,7 @@ func columnEquals(a, b driver.ColumnMetadata) bool {
 }
 
 func rowValuesEqual(rowA, rowB []any) bool {
-	if len(rowA) != len(rowB) {
-		return false
-	}
-	for i := range rowA {
-		valA := fmt.Sprintf("%v", rowA[i])
-		valB := fmt.Sprintf("%v", rowB[i])
-		if valA != valB {
-			return false
-		}
-	}
-	return true
+	return slices.EqualFunc(rowA, rowB, func(a, b any) bool {
+		return fmt.Sprint(a) == fmt.Sprint(b)
+	})
 }

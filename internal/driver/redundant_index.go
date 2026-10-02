@@ -2,6 +2,7 @@ package driver
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -99,27 +100,11 @@ func DetectRedundantIndexes(dialect, database string, tables []TableMetadata) []
 }
 
 func isSameColumns(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if !strings.EqualFold(a[i], b[i]) {
-			return false
-		}
-	}
-	return true
+	return slices.EqualFunc(a, b, strings.EqualFold)
 }
 
 func isPrefixColumns(prefix, full []string) bool {
-	if len(prefix) >= len(full) || len(prefix) == 0 {
-		return false
-	}
-	for i := range prefix {
-		if !strings.EqualFold(prefix[i], full[i]) {
-			return false
-		}
-	}
-	return true
+	return len(prefix) > 0 && len(prefix) < len(full) && slices.EqualFunc(prefix, full[:len(prefix)], strings.EqualFold)
 }
 
 func generateDropIndexSQL(dialect, database, table, index string) string {
