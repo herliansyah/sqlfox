@@ -31,6 +31,7 @@ Usage:
 Commands:
   query     Execute SQL query or script with streaming output formats
   transfer  Perform direct cross-connection data transfer between databases
+  job       Execute declarative database automation jobs or dry-run checks
   help      Show help for commands
 
 Server Flags (Default Mode):
@@ -63,6 +64,8 @@ func Run(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 		return RunQuery(subArgs, stdout, stderr, stdin)
 	case "transfer":
 		return RunTransfer(subArgs, stdout, stderr, stdin)
+	case "job":
+		return RunJob(subArgs, stdout, stderr, stdin)
 	default:
 		fmt.Fprintf(stderr, "Unknown command '%s'. Run 'sqlfox help' for usage.\n", cmd)
 		return 1

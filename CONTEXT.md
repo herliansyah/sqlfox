@@ -449,6 +449,7 @@ _Avoid_: In-process tunnel, custom bastion client
 - **0030**: Headless CLI Suite Architecture and Fail-Closed Automation Policy (`docs/adr/0030-headless-cli-suite-and-fail-closed-automation-policy.md`)
 - **0031**: PostgreSQL Native Driver Engine and Catalog Introspection (`docs/adr/0031-postgresql-native-driver-engine-and-catalog-introspection.md`)
 - **0032**: FK-Aware Mock Data Generation and Referential Closure (`docs/adr/0032-fk-aware-mock-data-generation-and-referential-closure.md`)
+- **0033**: Scheduled Headless Automation and Declarative Task Runner (`docs/adr/0033-scheduled-headless-automation-and-declarative-task-runner.md`)
 
 ## Visual Schema & ERD Canvas
 
@@ -471,7 +472,7 @@ _Avoid_: Diagram layout file, saved canvas, position state
 ## Headless CLI & Automation
 
 **Headless Mode**:
-Non-interactive, terminal-driven execution of SqlFox subcommands (`query`, `transfer`) without launching the embedded HTTP daemon or browser interface.
+Non-interactive, terminal-driven execution of SqlFox subcommands (`query`, `transfer`, `job`) without launching the embedded HTTP daemon or browser interface.
 _Avoid_: Silent mode, daemonless mode, batch mode
 
 **Direct DSN Targeting**:
@@ -493,6 +494,22 @@ _Avoid_: Table isolation, chunked commit
 **Multi-Statement Delimiter Parsing**:
 Token-aware SQL statement splitting that distinguishes statement terminators (`;`) from semicolons within string literals, quotes, and block comments during headless script execution.
 _Avoid_: Semicolon split, raw splitting
+
+**Job Specification**:
+A declarative, version-controlled JSON definition (`sqlfox-job.json`) that specifies an ordered sequence of database automation tasks, connection targets, output configurations, and retention policies.
+_Avoid_: Batch script, cron config, pipeline spec
+
+**Task Runner**:
+The headless CLI orchestration engine dispatched via `sqlfox job run` that validates, sequences, and executes scheduled automation tasks with structured logging and fail-fast semantics.
+_Avoid_: Cron daemon, worker process, background agent
+
+**Dump Rotation**:
+An automated artifact pruning mechanism that enforces retention policies (`keep_last` count or `max_age` duration) against matching backup files to prevent disk exhaustion.
+_Avoid_: File garbage collection, cleaner, auto-purge
+
+**Pre-Flight Job Check**:
+A non-destructive validation execution triggered via `sqlfox job check` verifying job specification syntax, vault credentials, network connectivity, and destination filesystem write permissions without performing data mutations.
+_Avoid_: Dry run, linter, config test
 
 ## Mock Data Generation
 
