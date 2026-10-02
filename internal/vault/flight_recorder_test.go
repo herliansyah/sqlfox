@@ -14,6 +14,7 @@ func TestFlightRecorderVault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenVault failed: %v", err)
 	}
+	defer v.Close()
 
 	sessionID := "sess-123"
 	connID := "conn-456"
