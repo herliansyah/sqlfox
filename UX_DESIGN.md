@@ -270,4 +270,53 @@ The Performance Flight Recorder enables developers and DBAs to isolate transient
 4. **Vault Persistence & JSON Export**:
    - Finished sessions are stored in the local SQLite vault, selectable via dropdown for post-incident retrospective reviews, and exportable to portable JSON files.
 
+---
+
+## 13. AI Copilot Rich Markdown Blocks, Session Forking & Fluid Workspace
+
+The AI Copilot interface integrates execution controls directly into generated message blocks, supports conversation branching, and enforces responsive workspace ergonomics.
+
+### Copilot Message & Interactive SQL Block Wireframe
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 🤖 Copilot                                   [🔀 Branch] [📋]│
+├─────────────────────────────────────────────────────────────┤
+│ To optimize customer spend calculation, use an aggregated   │
+│ covering index and limit query scope:                       │
+│                                                             │
+│ ┌─────────────────────────────────────────────────────────┐ │
+│ │ SQL (MySQL)             [📋 Copy] [▶ Insert & Run] [🔄]  │ │
+│ ├─────────────────────────────────────────────────────────┤ │
+│ │ SELECT customer_id, SUM(amount) AS total_spend          │ │
+│ │ FROM transactions                                       │ │
+│ │ WHERE transaction_date >= '2026-01-01'                  │ │
+│ │ GROUP BY customer_id                                    │ │
+│ │ ORDER BY total_spend DESC LIMIT 10;                     │ │
+│ └─────────────────────────────────────────────────────────┘ │
+│                                                             │
+│ **Expected Impact**: Converts table scan to index-only range │
+│ scan with 95% latency reduction.                            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Key Interaction Models
+
+1. **Interactive SQL Block Toolbars**:
+   - Every fenced SQL code block rendered in the Copilot chat drawer features a top toolbar:
+     - `📋 Copy`: Copies the raw SQL code block to clipboard.
+     - `▶ Insert & Run`: Automatically switches to or creates a query editor tab, populates the SQL statement, and immediately dispatches execution to the active database session.
+     - `🔄 Replace`: Replaces the current query editor content with the snippet.
+2. **Chat Session Forking (`🔀 Branch`)**:
+   - Each assistant message includes a `🔀 Branch` button.
+   - Clicking it branches a new Chat Session named `<Title> (Fork)`, copying the prompt and message sequence up to that point.
+   - Allows users to explore alternative tuning ideas or test edge cases without losing the root conversation thread.
+3. **Internal Notes (`Notes.md`) Markdown Live Preview**:
+   - The Notes tab provides an `✏️ Edit` / `👁️ Preview` segmented switch.
+   - In preview mode, raw markdown is rendered with formatted headers, code blocks, lists, and tables.
+4. **Fluid Workspace Layout & Minimum Width Constraints**:
+   - Center workspace (`#center-workspace`) enforces a hard `min-w-[400px]` floor during horizontal sidebar dragging.
+   - Cluster Inspector, Flight Recorder, and Table Diagnostics metric grids use CSS Grid `repeat(auto-fit, minmax(...))` to fluidly re-wrap cards on any display size without horizontal clipping.
+
+
 
