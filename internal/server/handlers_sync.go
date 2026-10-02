@@ -96,14 +96,6 @@ type SyncDataApplyRequest struct {
 	ChallengeInput  string              `json:"challenge_input"`
 }
 
-func quoteIdentForDriver(name, driverName string) string {
-	name = strings.Trim(name, "`\"")
-	if driverName == "sqlite" {
-		return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
-	}
-	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
-}
-
 // ----------------------------------------------------------------------------
 // 1. Structure Sync Handlers
 // ----------------------------------------------------------------------------
@@ -135,12 +127,8 @@ func (s *Server) handleSyncStructureCompare(w http.ResponseWriter, r *http.Reque
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	if req.SourceDB != "" {
-		_ = srcSess.Session.SelectDatabase(ctx, req.SourceDB)
-	}
-	if req.TargetDB != "" {
-		_ = tgtSess.Session.SelectDatabase(ctx, req.TargetDB)
-	}
+	_ = srcSess.UseDatabase(ctx, req.SourceDB)
+	_ = tgtSess.UseDatabase(ctx, req.TargetDB)
 
 	srcSchema, err := srcSess.Session.InspectSchema(ctx, req.SourceDB)
 	if err != nil {
@@ -214,8 +202,8 @@ func (s *Server) handleSyncStructureCompare(w http.ResponseWriter, r *http.Reque
 				// Column missing in target -> ADD COLUMN
 				clause := buildColumnDefinition(srcCol)
 				sql := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s;",
-					quoteIdentForDriver(srcTbl.Name, tgtDriver),
-					quoteIdentForDriver(srcCol.Name, tgtDriver),
+					quoteIdent(srcTbl.Name, tgtDriver),
+					quoteIdent(srcCol.Name, tgtDriver),
 					clause,
 				)
 
@@ -240,8 +228,8 @@ func (s *Server) handleSyncStructureCompare(w http.ResponseWriter, r *http.Reque
 						sql = fmt.Sprintf("-- SQLite: column %s definition differs (%s vs %s)", srcCol.Name, srcCol.Type, tgtCol.Type)
 					} else {
 						sql = fmt.Sprintf("ALTER TABLE %s MODIFY COLUMN %s %s;",
-							quoteIdentForDriver(srcTbl.Name, tgtDriver),
-							quoteIdentForDriver(srcCol.Name, tgtDriver),
+							quoteIdent(srcTbl.Name, tgtDriver),
+							quoteIdent(srcCol.Name, tgtDriver),
 							clause,
 						)
 					}
@@ -267,8 +255,8 @@ func (s *Server) handleSyncStructureCompare(w http.ResponseWriter, r *http.Reque
 			for _, tgtCol := range tgtTbl.Columns {
 				if _, exists := srcColMap[strings.ToLower(tgtCol.Name)]; !exists {
 					sql := fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s;",
-						quoteIdentForDriver(srcTbl.Name, tgtDriver),
-						quoteIdentForDriver(tgtCol.Name, tgtDriver),
+						quoteIdent(srcTbl.Name, tgtDriver),
+						quoteIdent(tgtCol.Name, tgtDriver),
 					)
 					diffs = append(diffs, StructureDiffItem{
 						ID:        fmt.Sprintf("diff-%d", diffIndex),
@@ -304,12 +292,12 @@ func (s *Server) handleSyncStructureCompare(w http.ResponseWriter, r *http.Reque
 				}
 				quotedCols := make([]string, len(srcIdx.Columns))
 				for i, c := range srcIdx.Columns {
-					quotedCols[i] = quoteIdentForDriver(c, tgtDriver)
+					quotedCols[i] = quoteIdent(c, tgtDriver)
 				}
 				sql := fmt.Sprintf("CREATE %sINDEX %s ON %s (%s);",
 					uniqueStr,
-					quoteIdentForDriver(srcIdx.Name, tgtDriver),
-					quoteIdentForDriver(srcTbl.Name, tgtDriver),
+					quoteIdent(srcIdx.Name, tgtDriver),
+					quoteIdent(srcTbl.Name, tgtDriver),
 					strings.Join(quotedCols, ", "),
 				)
 
@@ -333,7 +321,7 @@ func (s *Server) handleSyncStructureCompare(w http.ResponseWriter, r *http.Reque
 	if req.IncludeDrops {
 		for _, tgtTbl := range tgtSchema.Tables {
 			if _, exists := srcTableMap[strings.ToLower(tgtTbl.Name)]; !exists {
-				sql := fmt.Sprintf("DROP TABLE %s;", quoteIdentForDriver(tgtTbl.Name, tgtDriver))
+				sql := fmt.Sprintf("DROP TABLE %s;", quoteIdent(tgtTbl.Name, tgtDriver))
 				diffs = append(diffs, StructureDiffItem{
 					ID:        fmt.Sprintf("diff-%d", diffIndex),
 					Type:      "table_extra",
@@ -406,9 +394,7 @@ func (s *Server) handleSyncStructureApply(w http.ResponseWriter, r *http.Request
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
-	if req.TargetDB != "" {
-		_ = tgtSess.Session.SelectDatabase(ctx, req.TargetDB)
-	}
+	_ = tgtSess.UseDatabase(ctx, req.TargetDB)
 
 	var executedCount int
 	var errors []string
@@ -492,12 +478,8 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 	}
 
 	ctx := r.Context()
-	if req.SourceDB != "" {
-		_ = srcSess.Session.SelectDatabase(ctx, req.SourceDB)
-	}
-	if req.TargetDB != "" {
-		_ = tgtSess.Session.SelectDatabase(ctx, req.TargetDB)
-	}
+	_ = srcSess.UseDatabase(ctx, req.SourceDB)
+	_ = tgtSess.UseDatabase(ctx, req.TargetDB)
 
 	srcDriver := srcSess.DriverName
 	tgtDriver := tgtSess.DriverName
@@ -522,15 +504,15 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 
 		// Truncate table if requested
 		if req.TruncateTarget {
-			truncSQL := fmt.Sprintf("TRUNCATE TABLE %s", quoteIdentForDriver(tbl, tgtDriver))
+			truncSQL := fmt.Sprintf("TRUNCATE TABLE %s", quoteIdent(tbl, tgtDriver))
 			if tgtDriver == "sqlite" {
-				truncSQL = fmt.Sprintf("DELETE FROM %s", quoteIdentForDriver(tbl, tgtDriver))
+				truncSQL = fmt.Sprintf("DELETE FROM %s", quoteIdent(tbl, tgtDriver))
 			}
 			_, _ = tgtSess.Session.Exec(ctx, truncSQL)
 		}
 
 		// Stream rows from source
-		querySQL := fmt.Sprintf("SELECT * FROM %s", quoteIdentForDriver(tbl, srcDriver))
+		querySQL := fmt.Sprintf("SELECT * FROM %s", quoteIdent(tbl, srcDriver))
 		stream, err := srcSess.Session.QueryStream(ctx, querySQL, 0)
 		if err != nil {
 			sendEvent(map[string]any{
@@ -544,7 +526,7 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 		cols := stream.Columns()
 		colNames := make([]string, len(cols))
 		for i, c := range cols {
-			colNames[i] = quoteIdentForDriver(c.Name, tgtDriver)
+			colNames[i] = quoteIdent(c.Name, tgtDriver)
 		}
 		colListStr := strings.Join(colNames, ", ")
 
@@ -575,7 +557,7 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 				}
 
 				insertSQL := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s",
-					quoteIdentForDriver(tbl, tgtDriver),
+					quoteIdent(tbl, tgtDriver),
 					colListStr,
 					strings.Join(rowPlaceholders, ", "),
 				)
@@ -653,12 +635,8 @@ func (s *Server) handleSyncDataCompare(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	if req.SourceDB != "" {
-		_ = srcSess.Session.SelectDatabase(ctx, req.SourceDB)
-	}
-	if req.TargetDB != "" {
-		_ = tgtSess.Session.SelectDatabase(ctx, req.TargetDB)
-	}
+	_ = srcSess.UseDatabase(ctx, req.SourceDB)
+	_ = tgtSess.UseDatabase(ctx, req.TargetDB)
 
 	srcSchema, err := srcSess.Session.InspectSchema(ctx, req.SourceDB)
 	if err != nil {
@@ -702,12 +680,12 @@ func (s *Server) handleSyncDataCompare(w http.ResponseWriter, r *http.Request) {
 	// Order by PK for fast deterministic alignment
 	var pkOrderClauses []string
 	for _, pk := range pkCols {
-		pkOrderClauses = append(pkOrderClauses, quoteIdentForDriver(pk, srcDriver))
+		pkOrderClauses = append(pkOrderClauses, quoteIdent(pk, srcDriver))
 	}
 	orderBySQL := " ORDER BY " + strings.Join(pkOrderClauses, ", ")
 
 	// Fetch all rows from source (capped at 10,000 for safe comparison)
-	srcStream, err := srcSess.Session.QueryStream(ctx, fmt.Sprintf("SELECT * FROM %s%s", quoteIdentForDriver(req.Table, srcDriver), orderBySQL), 10000)
+	srcStream, err := srcSess.Session.QueryStream(ctx, fmt.Sprintf("SELECT * FROM %s%s", quoteIdent(req.Table, srcDriver), orderBySQL), 10000)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to query source rows: "+err.Error())
 		return
@@ -734,7 +712,7 @@ func (s *Server) handleSyncDataCompare(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch all rows from target
-	tgtStream, err := tgtSess.Session.QueryStream(ctx, fmt.Sprintf("SELECT * FROM %s%s", quoteIdentForDriver(req.Table, tgtDriver), orderBySQL), 10000)
+	tgtStream, err := tgtSess.Session.QueryStream(ctx, fmt.Sprintf("SELECT * FROM %s%s", quoteIdent(req.Table, tgtDriver), orderBySQL), 10000)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to query target rows: "+err.Error())
 		return
@@ -870,9 +848,7 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
-	if req.TargetDB != "" {
-		_ = tgtSess.Session.SelectDatabase(ctx, req.TargetDB)
-	}
+	_ = tgtSess.UseDatabase(ctx, req.TargetDB)
 
 	tgtDriver := tgtSess.DriverName
 	tgtSchema, err := tgtSess.Session.InspectSchema(ctx, req.TargetDB)
@@ -908,7 +884,7 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 
 	colNames := make([]string, len(tgtTbl.Columns))
 	for i, c := range tgtTbl.Columns {
-		colNames[i] = quoteIdentForDriver(c.Name, tgtDriver)
+		colNames[i] = quoteIdent(c.Name, tgtDriver)
 	}
 	colListStr := strings.Join(colNames, ", ")
 
@@ -923,7 +899,7 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 				placeholders[i] = "?"
 			}
 			sql := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
-				quoteIdentForDriver(req.Table, tgtDriver),
+				quoteIdent(req.Table, tgtDriver),
 				colListStr,
 				strings.Join(placeholders, ", "),
 			)
@@ -940,7 +916,7 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 				if c.IsPrimaryKey {
 					continue
 				}
-				setClauses = append(setClauses, fmt.Sprintf("%s = ?", quoteIdentForDriver(c.Name, tgtDriver)))
+				setClauses = append(setClauses, fmt.Sprintf("%s = ?", quoteIdent(c.Name, tgtDriver)))
 				if i < len(op.Data) {
 					args = append(args, op.Data[i])
 				} else {
@@ -949,9 +925,9 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 			}
 			args = append(args, op.PK)
 			sql := fmt.Sprintf("UPDATE %s SET %s WHERE %s = ?",
-				quoteIdentForDriver(req.Table, tgtDriver),
+				quoteIdent(req.Table, tgtDriver),
 				strings.Join(setClauses, ", "),
-				quoteIdentForDriver(pkCol, tgtDriver),
+				quoteIdent(pkCol, tgtDriver),
 			)
 			if _, err := tgtSess.Session.Exec(ctx, sql, args...); err != nil {
 				errors = append(errors, fmt.Sprintf("update error (pk %v): %s", op.PK, err.Error()))
@@ -961,8 +937,8 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 
 		case "delete":
 			sql := fmt.Sprintf("DELETE FROM %s WHERE %s = ?",
-				quoteIdentForDriver(req.Table, tgtDriver),
-				quoteIdentForDriver(pkCol, tgtDriver),
+				quoteIdent(req.Table, tgtDriver),
+				quoteIdent(pkCol, tgtDriver),
 			)
 			if _, err := tgtSess.Session.Exec(ctx, sql, op.PK); err != nil {
 				errors = append(errors, fmt.Sprintf("delete error (pk %v): %s", op.PK, err.Error()))
@@ -1008,10 +984,10 @@ func buildCreateTableDDL(tbl driver.TableMetadata, driverName string) string {
 	var pkCols []string
 
 	for _, col := range tbl.Columns {
-		def := fmt.Sprintf("  %s %s", quoteIdentForDriver(col.Name, driverName), buildColumnDefinition(col))
+		def := fmt.Sprintf("  %s %s", quoteIdent(col.Name, driverName), buildColumnDefinition(col))
 		lines = append(lines, def)
 		if col.IsPrimaryKey {
-			pkCols = append(pkCols, quoteIdentForDriver(col.Name, driverName))
+			pkCols = append(pkCols, quoteIdent(col.Name, driverName))
 		}
 	}
 
@@ -1019,7 +995,7 @@ func buildCreateTableDDL(tbl driver.TableMetadata, driverName string) string {
 		lines = append(lines, fmt.Sprintf("  PRIMARY KEY (%s)", strings.Join(pkCols, ", ")))
 	}
 
-	return fmt.Sprintf("CREATE TABLE %s (\n%s\n);", quoteIdentForDriver(tbl.Name, driverName), strings.Join(lines, ",\n"))
+	return fmt.Sprintf("CREATE TABLE %s (\n%s\n);", quoteIdent(tbl.Name, driverName), strings.Join(lines, ",\n"))
 }
 
 func columnEquals(a, b driver.ColumnMetadata) bool {

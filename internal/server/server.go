@@ -204,3 +204,14 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
 }
+
+// quoteIdent formats an identifier safely with driver-aware quotes.
+// ponytail: Unified helper eliminating 6 duplicated local closures across handlers.
+func quoteIdent(name, driverName string) string {
+	name = strings.Trim(name, "`\"")
+	if driverName == "sqlite" {
+		return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+	}
+	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
+}
+

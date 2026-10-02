@@ -99,13 +99,7 @@ func (s *Server) handleExportDump(w http.ResponseWriter, r *http.Request) {
 
 	flusher, _ := w.(http.Flusher)
 
-	quoteIdent := func(name string) string {
-		name = strings.Trim(name, "`\"")
-		if sess.DriverName == "sqlite" {
-			return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
-		}
-		return "`" + strings.ReplaceAll(name, "`", "``") + "`"
-	}
+	quoteIdent := func(name string) string { return quoteIdent(name, sess.DriverName) }
 
 	// Dump header
 	_, _ = fmt.Fprintf(w, "-- SqlFox SQL Dump\n-- Database: %s\n-- Dump Date: %s\n\n", dbName, time.Now().Format(time.RFC3339))
@@ -299,13 +293,7 @@ func (s *Server) handleExportSmartSeed(w http.ResponseWriter, r *http.Request) {
 
 	flusher, _ := w.(http.Flusher)
 
-	quoteIdent := func(name string) string {
-		name = strings.Trim(name, "`\"")
-		if sess.DriverName == "sqlite" {
-			return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
-		}
-		return "`" + strings.ReplaceAll(name, "`", "``") + "`"
-	}
+	quoteIdent := func(name string) string { return quoteIdent(name, sess.DriverName) }
 
 	// Smart seed header
 	_, _ = fmt.Fprintf(w, "-- SqlFox FK-Aware Smart Seed Dump (Transitive Closure)\n-- Database: %s\n-- Sample Limit: %d rows/table\n-- Exported At: %s\n\n",

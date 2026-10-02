@@ -433,10 +433,7 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	quoteIdent := func(name string) string {
-		name = strings.Trim(name, "`")
-		return "`" + strings.ReplaceAll(name, "`", "``") + "`"
-	}
+	quoteIdent := func(name string) string { return quoteIdent(name, sess.DriverName) }
 
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()

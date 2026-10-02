@@ -46,24 +46,16 @@ func (s *Server) handleInsertRow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	quoteIdent := func(name string) string {
-		name = strings.Trim(name, "`\"")
-		if sess.DriverName == "sqlite" {
-			return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
-		}
-		return "`" + strings.ReplaceAll(name, "`", "``") + "`"
-    }
-
-	targetTable := quoteIdent(req.Table)
+	targetTable := quoteIdent(req.Table, sess.DriverName)
 	if req.Database != "" {
-		targetTable = quoteIdent(req.Database) + "." + targetTable
+		targetTable = quoteIdent(req.Database, sess.DriverName) + "." + targetTable
 	}
 
 	var cols []string
 	var placeholders []string
 	var args []any
 	for col, val := range req.Data {
-		cols = append(cols, quoteIdent(col))
+		cols = append(cols, quoteIdent(col, sess.DriverName))
 		placeholders = append(placeholders, "?")
 		args = append(args, val)
 	}
@@ -73,9 +65,7 @@ func (s *Server) handleInsertRow(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	if req.Database != "" {
-		_ = sess.Session.SelectDatabase(ctx, req.Database)
-	}
+	_ = sess.UseDatabase(ctx, req.Database)
 
 	res, err := sess.Session.Exec(ctx, sqlQuery, args...)
 	if err != nil {
@@ -114,19 +104,11 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	quoteIdent := func(name string) string {
-		name = strings.Trim(name, "`\"")
-		if sess.DriverName == "sqlite" {
-			return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
-		}
-		return "`" + strings.ReplaceAll(name, "`", "``") + "`"
-	}
-
-	targetTable := quoteIdent(req.Table)
+	targetTable := quoteIdent(req.Table, sess.DriverName)
 	if req.Database != "" {
-		targetTable = quoteIdent(req.Database) + "." + targetTable
+		targetTable = quoteIdent(req.Database, sess.DriverName) + "." + targetTable
 	}
-	targetPK := quoteIdent(req.PKColumn)
+	targetPK := quoteIdent(req.PKColumn, sess.DriverName)
 
 	placeholders := make([]string, len(req.PKValues))
 	args := make([]any, len(req.PKValues))
@@ -140,9 +122,7 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	if req.Database != "" {
-		_ = sess.Session.SelectDatabase(ctx, req.Database)
-	}
+	_ = sess.UseDatabase(ctx, req.Database)
 
 	res, err := sess.Session.Exec(ctx, sqlQuery, args...)
 	if err != nil {
