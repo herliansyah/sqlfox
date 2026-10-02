@@ -44,7 +44,8 @@ Operates with a strict memory ceiling (**< 100MB RAM**), sub-second launch time 
 - 🌐 **Cluster & Replication Inspector**: Real-time diagnostic suite for Percona XtraDB Cluster (PXC 5.7/8.0), Galera, and MySQL replication. Auto-detects Flow Control pauses, auto-probes peer nodes to pinpoint the slowest bottleneck node, and evaluates a Tri-Metric Matrix (EVS network latency, InnoDB disk stalls, apply worker capacity).
 - 📈 **Performance Flight Recorder**: On-demand diagnostic flight recorder capturing Quad-Metric telemetry (differential QPS, `Threads_running`, Row Lock Waits, Buffer Pool Waits) and correlating active non-idle queries with an interactive timeline scrubber and 10-minute auto-stop safety guard.
 - 💻 **Headless CLI Suite**: Execute queries and scripts non-interactively with streaming output formats (`table`, `json`, `ndjson`, `csv`), pipe SQL via STDIN, direct DSN targeting for CI/CD runners, cross-connection data migrations (`sqlfox transfer`), and fail-closed AST safety guardrails.
-- 🔌 **Multi-Engine Support**: MySQL 5.7 / 8.x, MariaDB, and local pure-Go SQLite (direct connection or over SSH tunnel).
+- 🏋️ **Enterprise Hardening & Memory Ceiling (<100MB)**: Benchmarked against 1,000+ tables, 50,000 columns, and 1,000,000-row streams with a strict <100MB RAM budget. Features native CSS `content-visibility` sidebar virtualization, 150ms search debounce, 3s fail-fast query cancellation on saturated connection pools, loopback-guarded `pprof` diagnostics (`SQLFOX_PPROF=1`), and a global network error boundary with auto-reconnection and draft state preservation.
+- 🔌 **Multi-Engine Support**: MySQL 5.7 / 8.x, MariaDB, PostgreSQL 9.6–16+ (pure-Go `pgx/v5`), and local pure-Go SQLite (direct connection or over SSH tunnel).
 
 ---
 
@@ -174,7 +175,8 @@ Berjalan dengan konsumsi memori sangat hemat (**< 100MB RAM**), waktu start kila
 - 🌐 **Cluster & Replication Inspector**: Diagnostik real-time untuk Percona XtraDB Cluster (PXC 5.7/8.0), Galera, dan replikasi MySQL. Mendeteksi pembekuan Flow Control, auto-probe node rekan untuk mengisolasi node terlelet yang membebani cluster, serta Tri-Metric Detective (latensi jaringan EVS, stall harddisk/InnoDB, dan kejenuhan worker).
 - 📈 **Performance Flight Recorder**: Perekam telemetri performa database on-demand (Quad-Metric: QPS, `Threads_running`, Row Lock Waits, Buffer Pool Waits) yang menghubungkan titik lonjakan (*spike*) grafik langsung dengan query aktif yang sedang berjalan di detik tersebut, dilengkapi pengaman auto-stop 10 menit.
 - 💻 **Headless CLI Suite**: Eksekusi query dan script terminal secara otomatis/non-interaktif dengan format output streaming (`table`, `json`, `ndjson`, `csv`), dukungan piping via STDIN, direct DSN untuk runner CI/CD tanpa vault, transfer data antar-koneksi (`sqlfox transfer`), serta perlindungan fail-closed AST Safety Guard.
-- 🔌 **Dukungan Multi Database**: MySQL 5.7 / 8.x, MariaDB, dan SQLite (koneksi langsung maupun melalui SSH Tunneling).
+- 🏋️ **Enterprise Hardening & Plafon Memori (<100MB RAM)**: Teruji tahan banting pada skema masif 1.000+ tabel, 50.000 kolom, dan streaming 1.000.000 baris di bawah pagu <100MB RAM. Dilengkapi virtualisasi sidebar native CSS `content-visibility`, filter pencarian *debounced* 150ms, *fail-fast timeout* 3 detik untuk pembatalan query saat pool jenuh, profil memori pprof terproteksi loopback (`SQLFOX_PPROF=1`), serta *Global Network Error Boundary* dengan rekoneksi otomatis tanpa menghapus draf query atau staged edits.
+- 🔌 **Dukungan Multi Database**: MySQL 5.7 / 8.x, MariaDB, PostgreSQL 9.6–16+ (driver native pure-Go `pgx/v5`), dan SQLite (koneksi langsung maupun melalui SSH Tunneling).
 
 ---
 

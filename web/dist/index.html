@@ -3334,6 +3334,63 @@
     let currentChatSessionId = null;
     let chatSessions = JSON.parse(localStorage.getItem('sqlfox_ai_sessions') || '[]');
 
+    // --- Global Network Error Boundary & Health Watcher (Milestone 26) ---
+    let isServerReconnecting = false;
+    let reconnectAttempts = 0;
+    let reconnectTimer = null;
+
+    function showReconnectBanner(countdown) {
+      let banner = document.getElementById('global-reconnect-banner');
+      if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'global-reconnect-banner';
+        banner.className = 'fixed top-3 left-1/2 -translate-x-1/2 z-[9999] bg-amber-500/95 text-slate-950 font-semibold px-4 py-2 rounded-lg shadow-2xl backdrop-blur flex items-center space-x-2 text-xs border border-amber-300 transition-all duration-200';
+        document.body.appendChild(banner);
+      }
+      banner.className = 'fixed top-3 left-1/2 -translate-x-1/2 z-[9999] bg-amber-500/95 text-slate-950 font-semibold px-4 py-2 rounded-lg shadow-2xl backdrop-blur flex items-center space-x-2 text-xs border border-amber-300 transition-all duration-200 animate-pulse';
+      banner.innerHTML = `<span>⚠️</span><span>Connection lost. Reconnecting in ${countdown}s...</span>`;
+      banner.classList.remove('hidden');
+    }
+
+    function hideReconnectBanner() {
+      const banner = document.getElementById('global-reconnect-banner');
+      if (banner && !banner.classList.contains('hidden')) {
+        banner.className = 'fixed top-3 left-1/2 -translate-x-1/2 z-[9999] bg-emerald-500/95 text-slate-950 font-semibold px-4 py-2 rounded-lg shadow-2xl backdrop-blur flex items-center space-x-2 text-xs border border-emerald-300 transition-all duration-200';
+        banner.innerHTML = `<span>✓</span><span>Connection restored</span>`;
+        setTimeout(() => {
+          banner.classList.add('hidden');
+        }, 1500);
+      }
+      isServerReconnecting = false;
+      reconnectAttempts = 0;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+    }
+
+    function triggerAutoReconnect() {
+      if (isServerReconnecting) return;
+      isServerReconnecting = true;
+      reconnectAttempts = 0;
+
+      const scheduleNext = () => {
+        reconnectAttempts++;
+        const delaySec = Math.min(Math.pow(2, reconnectAttempts - 1), 8);
+        showReconnectBanner(delaySec);
+
+        reconnectTimer = setTimeout(async () => {
+          try {
+            const probe = await fetch('/api/auth/status', { cache: 'no-store' });
+            if (probe.ok) {
+              hideReconnectBanner();
+              return;
+            }
+          } catch (_) {}
+          scheduleNext();
+        }, delaySec * 1000);
+      };
+
+      scheduleNext();
+    }
+
     // --- Remote Access Guard & API Fetch Helper ---
     async function apiFetch(url, options = {}) {
       options.headers = options.headers || {};
@@ -3341,11 +3398,18 @@
       if (token && !options.headers['Authorization']) {
         options.headers['Authorization'] = `Bearer ${token}`;
       }
-      const res = await fetch(url, options);
-      if (res.status === 401) {
-        showRemoteLockScreen();
+      try {
+        const res = await fetch(url, options);
+        if (res.status === 401) {
+          showRemoteLockScreen();
+        } else if (isServerReconnecting && res.ok) {
+          hideReconnectBanner();
+        }
+        return res;
+      } catch (err) {
+        triggerAutoReconnect();
+        throw err;
       }
-      return res;
     }
 
     async function checkAuthStatus() {
@@ -3710,6 +3774,7 @@
     // --- Schema Tree Filtering & Database Switcher ---
     let schemaFilterQuery = '';
     let databaseFilterQuery = '';
+    let schemaFilterDebounceTimer = null;
 
     function filterSchemaTree(query) {
       schemaFilterQuery = (query || '').toLowerCase().trim();
@@ -3718,18 +3783,27 @@
         if (schemaFilterQuery) clearBtn.classList.remove('hidden');
         else clearBtn.classList.add('hidden');
       }
-      if (schemaCatalogCache) {
-        renderSchemaTree(schemaCatalogCache);
-      }
+      clearTimeout(schemaFilterDebounceTimer);
+      schemaFilterDebounceTimer = setTimeout(() => {
+        if (schemaCatalogCache) {
+          renderSchemaTree(schemaCatalogCache);
+        }
+      }, 150);
     }
 
     function clearSchemaFilter() {
+      clearTimeout(schemaFilterDebounceTimer);
       const input = document.getElementById('schema-filter-input');
       if (input) {
         input.value = '';
         input.focus();
       }
-      filterSchemaTree('');
+      schemaFilterQuery = '';
+      const clearBtn = document.getElementById('schema-filter-clear-btn');
+      if (clearBtn) clearBtn.classList.add('hidden');
+      if (schemaCatalogCache) {
+        renderSchemaTree(schemaCatalogCache);
+      }
     }
 
     function toggleDatabaseDropdown(forceState) {
@@ -4002,7 +4076,7 @@
             <div class="space-y-0.5">
               ${tablesList.length === 0 ? `<div class="text-slate-600 text-[11px] px-2 py-1 italic">No tables. Click ➕ to create.</div>` :
                 tablesList.map(t => `
-                  <div class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" onclick="openTableViewer('${escapeHtml(t.name)}')" oncontextmenu="showTableContextMenu(event, '${escapeHtml(t.name)}')">
+                  <div style="content-visibility: auto; contain-intrinsic-size: 0 28px;" class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" onclick="openTableViewer('${escapeHtml(t.name)}')" oncontextmenu="showTableContextMenu(event, '${escapeHtml(t.name)}')">
                     <span class="flex items-center space-x-1.5 truncate text-slate-200 group-hover:text-white flex-1 min-w-0 mr-2">
                       <span class="text-xs flex-shrink-0">📋</span>
                       <span class="truncate">${escapeHtml(t.name)}</span>
@@ -4035,7 +4109,7 @@
             <div class="space-y-0.5">
               ${viewsList.length === 0 ? `<div class="text-slate-600 text-[11px] px-2 py-1 italic">No views. Click ➕ to create.</div>` :
                 viewsList.map(v => `
-                  <div class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" onclick="openTableViewer('${escapeHtml(v.name)}')">
+                  <div style="content-visibility: auto; contain-intrinsic-size: 0 28px;" class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" onclick="openTableViewer('${escapeHtml(v.name)}')">
                     <span class="flex items-center space-x-1.5 truncate text-purple-300 group-hover:text-white">
                       <span class="text-xs">👁️</span>
                       <span class="truncate max-w-[125px]">${escapeHtml(v.name)}</span>

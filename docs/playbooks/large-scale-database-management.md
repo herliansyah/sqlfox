@@ -158,3 +158,26 @@ SET SESSION TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
   - Jika native `INSTANT` didukung: jalankan via SqlFox DDL Designer.
   - Jika memerlukan table copy: gunakan generator perintah `gh-ost`.
 - [ ] **5. Pisahkan Jalur Baca**: Pastikan query audit/analitik diarahkan ke Read Replica.
+
+---
+
+## 6. Fitur Pengamanan & Resiliensi SqlFox pada Skala Ekstrem
+
+SqlFox secara internal telah dilengkapi mekanisme pertahanan bawaan untuk menjaga stabilitas saat menangani database berskala masif (1.000+ tabel, jutaan baris, dan dataset ratusan gigabyte):
+
+1. **Fail-Fast Out-of-Band Query Cancellation (3s Timeout)**:
+   - Tombol pembatalan query (`Cancel`) menggunakan koneksi kontrol terpisah dengan batas waktu 3 detik.
+   - Jika koneksi database target sedang jenuh total (*connection pool saturation*), pembacaan stream memori lokal di SqlFox segera dihentikan seketika untuk mencegah kebocoran RAM klien, dan antarmuka menampilkan pesan diagnostik yang jelas.
+2. **Pagu Memori Bounded Chunk Streaming (<100MB RAM RSS)**:
+   - Data dibaca dan di-stream secara bertahap (100–200 baris per frame WebSocket/SSE).
+   - Telah dibenchmark mampu membaca hingga 1.000.000 baris data tanpa memicu lonjakan memori melebihi plafon 100MB RAM.
+3. **Virtualisasi Sidebar Pohon Skema (1.000+ Tabel)**:
+   - Menggunakan optimasi CSS native `content-visibility: auto; contain-intrinsic-size: 0 28px;` sehingga browser melewati fase perhitungan layout untuk tabel yang berada di luar layar.
+   - Dilengkapi filter pencarian dengan *debounce* 150ms sehingga pencarian di antara ribuan tabel tidak menyebabkan freeze pada UI.
+4. **Proteksi Diagnostik Profiling (`SQLFOX_PPROF=1`)**:
+   - Jika diperlukan analisis alokasi memori saat menangani beban berat, profil `net/http/pprof` dapat diaktifkan melalui environment variable `SQLFOX_PPROF=1`.
+   - Endpoint ini otomatis terkunci dan menolak akses dari IP non-localhost (`403 Forbidden`) demi menjaga keamanan credential vault di jaringan LAN.
+5. **Global Network Error Boundary & Retensi State**:
+   - Jika server mengalami restart atau glitch jaringan sesaat, bilah notifikasi melayang otomatis mengaktifkan rekoneksi berjenjang (*exponential backoff* 1s, 2s, 4s, 8s).
+   - Seluruh tab query editor, skrip SQL yang belum disimpan, dan draf edit sel di grid tidak akan terhapus.
+

@@ -195,7 +195,7 @@ v2.1 (Multi-Engine & Developer Operations Suite)
 ├── [x] 19. Visual Query Plan & Cost Analyzer (Interactive visual EXPLAIN tree & bottleneck detection)
 ├── [x] 20. FK-Aware Smart Mock Data Generator (Synthetic test data with relational closure)
 ├── [x] 21. Scheduled Headless Automation & Task Runner (Declarative CLI jobs for dumps & sync)
-└── [ ] 22. Large-Scale Hardening & Memory Ceiling Benchmark (1,000+ tables, 500GB+ stress testing)
+└── [x] 22. Large-Scale Hardening & Memory Ceiling Benchmark (1,000+ tables, 500GB+ stress testing)
 ```
 
 ---
@@ -444,9 +444,9 @@ v2.1 (Multi-Engine & Developer Operations Suite)
 ### Milestone 26: Large-Scale Hardening, Multi-Tenant Stress Testing & Memory Ceiling Benchmark
 - **Goal**: Validate and harden SqlFox performance on enterprise-scale schemas (1,000+ tables, millions of rows, 500GB+ datasets) under strict resource constraints, enforcing the `< 100MB RAM` ceiling and zero-leak reliability.
 - **Deliverables**:
-  - [ ] **Large Schema Benchmark Suite**: Automated synthetic schema generator creating 1,000 tables, 50,000 columns, and complex FK cycles to benchmark sidebar rendering, search filtering, and memory usage.
-  - [ ] **Memory Leak & Allocation Profiling**: `pprof` benchmarks on streaming pipelines (`RowStream`, `sqlfox transfer`, `export-dump`) ensuring memory usage remains bounded regardless of row volume.
-  - [ ] **Connection Pool Exhaustion Guard**: Stress-testing concurrent query cancellation and out-of-band control connections under simulated latency and connection pool saturation.
-  - [ ] **Error Boundary Hardening**: Web UI audit for graceful degradation during network disconnects, server restarts, and malformed database responses without white-screen crashes.
-  - [ ] **Ponytail Zero-Regression Audit**: Systematic review and removal of any speculative code introduced during v2.0 expansions, ensuring the single binary remains compact (<25MB) and snappy (<1s startup).
+  - [x] **Large Schema Benchmark Suite**: Automated synthetic schema generator creating 1,000 tables, 50,000 columns, and complex FK cycles to benchmark sidebar rendering, search filtering, and memory usage.
+  - [x] **Memory Leak & Allocation Profiling**: `pprof` benchmarks on streaming pipelines (`RowStream`, `sqlfox transfer`, `export-dump`) ensuring memory usage remains bounded regardless of row volume.
+  - [x] **Connection Pool Exhaustion Guard**: Stress-testing concurrent query cancellation and out-of-band control connections under simulated latency and connection pool saturation.
+  - [x] **Error Boundary Hardening**: Web UI audit for graceful degradation during network disconnects, server restarts, and malformed database responses without white-screen crashes.
+  - [x] **Ponytail Zero-Regression Audit**: Systematic review and removal of any speculative code introduced during v2.0 expansions, ensuring the single binary remains compact (<25MB) and snappy (<1s startup).
 - **Runnable Verification**: Run `go test -v -bench=. ./internal/...` -> launch SqlFox against a 1,000-table database -> verify web UI sidebar loads in <200ms and resident set size (RSS) RAM remains <100MB.

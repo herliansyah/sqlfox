@@ -163,6 +163,9 @@ func (s *Server) routes() {
 	mux.HandleFunc("POST /api/ai/chat", s.handleAIChat)
 	mux.HandleFunc("GET /api/ai/ollama-check", s.handleAIOllamaCheck)
 
+	// Profiling endpoints (conditional on SQLFOX_PPROF=1)
+	s.registerPprof(mux)
+
 	// Embedded Static Frontend
 	if s.assets != nil {
 		fileServer := http.FileServer(http.FS(s.assets))
