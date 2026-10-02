@@ -12,6 +12,10 @@ _Avoid_: Profile, host config, server alias
 The operational trust tier assigned to a Connection (`Production`, `Staging`, `Development`) that dictates the enforcement level of the Safety Guard.
 _Avoid_: Stage, label, group
 
+**Environment Badge**:
+The singular visual status tag in the Session Switcher displaying the connection's Environment tier (`[PROD 🔴]`, `[STAGE 🟡]`, `[DEV 🟢]`), serving as the single source of truth for environment identity without duplicate labels in sidebar or footer.
+_Avoid_: Multi-surface environment tags, sidebar environment headers, footer environment labels
+
 **Connection Vault**:
 The encrypted local SQLite storage holding connection metadata and credentials.
 _Avoid_: Credential manager, config file

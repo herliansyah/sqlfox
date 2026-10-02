@@ -131,6 +131,8 @@ func (s *Server) routes() {
 			s.handleRunSQLScript(w, r)
 		case "toggle-readonly":
 			s.handleToggleReadOnly(w, r)
+		case "ping":
+			s.handlePingSession(w, r)
 		case "inspect":
 			s.handleInspectQuery(w, r)
 		case "explain":

@@ -156,6 +156,9 @@
 </head>
 <body class="bg-app-bg text-slate-100 font-sans h-screen flex flex-col overflow-hidden select-none">
 
+  <!-- Ambient Top Accent Stripe (Active on Production) -->
+  <div id="top-ambient-stripe" class="hidden h-[2px] w-full bg-rose-500 flex-shrink-0 z-50"></div>
+
   <!-- Top Navbar -->
   <header class="h-12 bg-app-surface border-b border-app-border flex items-center justify-between px-4 z-20 flex-shrink-0">
     <div class="flex items-center space-x-3">
@@ -1435,17 +1438,17 @@
   <!-- Bottom Status Bar -->
   <footer class="h-6 bg-app-surface border-t border-app-border px-4 flex items-center justify-between text-[11px] text-slate-400 flex-shrink-0 z-20">
     <div class="flex items-center space-x-4">
-      <span id="footer-env-badge" class="font-bold">● Ready</span>
-      <span id="footer-db-info">MySQL / SQLite</span>
-      <span id="footer-latency">Latency: --</span>
+      <span id="footer-env-badge" class="hidden"></span>
+      <span id="footer-db-info" class="font-mono text-slate-300">No active connection</span>
+      <span id="footer-latency" onclick="pingActiveSession()" class="text-slate-400 font-mono transition" title="Click to test database latency">Latency: --</span>
     </div>
     <div class="flex items-center space-x-4">
-      <span id="footer-memory">Memory: < 50MB</span>
+      <span id="footer-memory" class="text-slate-400 font-mono">Memory: --</span>
       <button onclick="openShortcutsModal()" class="hover:text-white flex items-center space-x-1 text-slate-400 hover:bg-slate-800 px-1.5 py-0.5 rounded transition cursor-pointer" title="View Keyboard Shortcuts (? / F1)">
         <span>⌨️</span>
         <span class="underline decoration-slate-600 underline-offset-2">Shortcuts</span>
       </button>
-      <span>SqlFox v1.0</span>
+      <span>SqlFox v0.1.0</span>
     </div>
   </footer>
 
@@ -3456,6 +3459,35 @@
       }
     });
 
+    function renderHeaderConnectionBadge(conn, status = '') {
+      const badgeEl = document.getElementById('active-conn-badge');
+      const stripe = document.getElementById('top-ambient-stripe');
+      if (!badgeEl) return;
+      if (!conn) {
+        badgeEl.innerHTML = '<span class="text-slate-400">No active connection</span>';
+        if (stripe) stripe.classList.add('hidden');
+        return;
+      }
+      const env = conn.environment || 'Development';
+      const isProd = env === 'Production';
+      const isStage = env === 'Staging';
+      const pillClass = isProd ? 'bg-red-500/20 text-red-400 border border-red-500/40' :
+                        (isStage ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40' :
+                                   'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40');
+      const pillLabel = isProd ? 'PROD 🔴' : (isStage ? 'STAGE 🟡' : 'DEV 🟢');
+
+      if (stripe) {
+        if (isProd) stripe.classList.remove('hidden');
+        else stripe.classList.add('hidden');
+      }
+
+      const statusHtml = status ? ` <span class="text-slate-400 text-xs font-normal">(${escapeHtml(status)})</span>` : '';
+      badgeEl.innerHTML = `
+        <span class="px-2 py-0.5 rounded font-bold font-mono text-[11px] ${pillClass}">${pillLabel}</span>
+        <span class="font-semibold text-white">${escapeHtml(conn.name)}${statusHtml}</span>
+      `;
+    }
+
     function renderConnectionsTree() {
       const el = document.getElementById('connections-tree');
       const switcherName = document.getElementById('session-switcher-name');
@@ -3463,14 +3495,7 @@
 
       if (activeConnection) {
         if (switcherName) switcherName.textContent = activeConnection.name;
-        if (switcherEnvBadge) {
-          switcherEnvBadge.classList.remove('hidden');
-          const env = activeConnection.environment || 'Development';
-          switcherEnvBadge.textContent = env.slice(0, 4);
-          const envClass = env === 'Production' ? 'bg-red-950/80 text-red-400 border-red-800' :
-                           (env === 'Staging' ? 'bg-amber-950/80 text-amber-400 border-amber-800' : 'bg-emerald-950/80 text-emerald-400 border-emerald-800');
-          switcherEnvBadge.className = `text-[9px] px-1 py-0.2 rounded border font-mono uppercase font-bold ${envClass}`;
-        }
+        if (switcherEnvBadge) switcherEnvBadge.classList.add('hidden'); // Free sidebar button from redundant badge
       } else {
         if (switcherName) switcherName.textContent = 'Select Connection';
         if (switcherEnvBadge) switcherEnvBadge.classList.add('hidden');
@@ -3537,13 +3562,8 @@
       localStorage.setItem('sqlfox_last_conn_id', conn.id);
       renderConnectionsTree();
 
-      // Update badge to indicate connecting status
-      const envClass = conn.environment === 'Production' ? 'bg-red-950 text-red-400 border-red-800' :
-                       (conn.environment === 'Staging' ? 'bg-amber-950 text-amber-400 border-amber-800' : 'bg-emerald-950 text-emerald-400 border-emerald-800');
-      document.getElementById('active-conn-badge').innerHTML = `
-        <span class="px-2 py-0.5 rounded font-bold border ${envClass}">${conn.environment.toUpperCase()}</span>
-        <span class="font-semibold text-white">${escapeHtml(conn.name)} (Connecting...)</span>
-      `;
+      // Update badge to indicate connecting status via SSOT helper
+      renderHeaderConnectionBadge(conn, 'Connecting...');
       document.getElementById('schema-tree').innerHTML = '<div class="text-slate-500 text-center py-4">Connecting to database...</div>';
 
       // Connect session
@@ -3551,8 +3571,10 @@
         const res = await apiFetch(`/api/session/connect/${conn.id}`, { method: 'POST' });
         const data = await res.json();
         if (!res.ok) {
+          const stripe = document.getElementById('top-ambient-stripe');
+          if (stripe) stripe.classList.add('hidden');
           document.getElementById('active-conn-badge').innerHTML = `
-            <span class="px-2 py-0.5 rounded font-bold border bg-red-950 text-red-400 border-red-800">ERROR</span>
+            <span class="px-2 py-0.5 rounded font-bold font-mono text-[11px] border bg-red-950 text-red-400 border-red-800">ERROR</span>
             <span class="font-semibold text-white">${escapeHtml(conn.name)} (Disconnected)</span>
           `;
           document.getElementById('schema-tree').innerHTML = `<div class="text-app-danger p-2 text-xs">Connection Error:<br><span class="font-mono text-[11px]">${escapeHtml(data.error || 'Connection failed')}</span></div>`;
@@ -3560,10 +3582,7 @@
           return;
         }
         activeSession = data;
-        document.getElementById('active-conn-badge').innerHTML = `
-          <span class="px-2 py-0.5 rounded font-bold border ${envClass}">${conn.environment.toUpperCase()}</span>
-          <span class="font-semibold text-white">${escapeHtml(conn.name)}</span>
-        `;
+        renderHeaderConnectionBadge(conn);
         const btnPL = document.getElementById('btn-open-processlist');
         const btnPriv = document.getElementById('btn-open-privileges');
         const btnCluster = document.getElementById('btn-open-cluster');
@@ -3588,10 +3607,12 @@
         }
         updateReadOnlyUI(activeSession.read_only);
         await loadSchemaTree(conn.id);
-        updateFooterStats();
+        updateFooterStats(data.latency_ms, data.memory_mb);
       } catch (err) {
+        const stripe = document.getElementById('top-ambient-stripe');
+        if (stripe) stripe.classList.add('hidden');
         document.getElementById('active-conn-badge').innerHTML = `
-          <span class="px-2 py-0.5 rounded font-bold border bg-red-950 text-red-400 border-red-800">ERROR</span>
+          <span class="px-2 py-0.5 rounded font-bold font-mono text-[11px] border bg-red-950 text-red-400 border-red-800">ERROR</span>
           <span class="font-semibold text-white">${escapeHtml(conn.name)}</span>
         `;
         document.getElementById('schema-tree').innerHTML = `<div class="text-app-danger p-2 text-xs">Connection Error: ${escapeHtml(err.message)}</div>`;
@@ -8384,6 +8405,9 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
           }
           await refreshSchema();
         }
+        if (data.execution_ms !== undefined) {
+          updateFooterStats(data.execution_ms);
+        }
         const drawer = document.getElementById('audit-drawer');
         if (drawer && !drawer.classList.contains('hidden')) {
           setTimeout(loadAuditLogs, 150);
@@ -10666,6 +10690,10 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
     // --- ReadOnly Mode ---
     async function toggleReadOnly() {
       if (!activeConnection) return;
+      if (activeConnection.environment === 'Production' && activeSession && activeSession.read_only) {
+        const ok = await showNativeConfirm('Beralih ke mode Read-Write untuk sesi Production ini? Operasi modifikasi data (INSERT/UPDATE/DELETE/DDL) akan diizinkan.', 'Unlock Read-Write (Production)');
+        if (!ok) return;
+      }
       const res = await apiFetch(`/api/session/${activeConnection.id}/toggle-readonly`, { method: 'POST' });
       const data = await res.json();
       activeSession.read_only = data.read_only;
@@ -11441,7 +11469,8 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
           if (activeConnection && activeConnection.id === connId) {
             activeConnection = null;
             activeSession = null;
-            document.getElementById('active-conn-badge').innerHTML = '<span class="text-slate-500 italic">No connection</span>';
+            renderHeaderConnectionBadge(null);
+            updateFooterStats();
             document.getElementById('schema-tree').innerHTML = '<div class="text-slate-500 text-center py-4">Select a connection to view schema</div>';
             document.getElementById('table-count-badge').textContent = '0';
           }
@@ -13531,12 +13560,78 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
     document.addEventListener('mouseup', erdOnMouseUp);
     // --- End Visual ERD Canvas ---
 
-    function updateFooterStats() {
+    async function pingActiveSession() {
+      if (!activeConnection) return;
+      const latencyEl = document.getElementById('footer-latency');
+      if (latencyEl) {
+        latencyEl.textContent = 'Latency: ⏳';
+        latencyEl.className = 'text-sky-400 font-mono transition';
+      }
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/ping`, { method: 'POST' });
+        if (res.ok) {
+          const data = await res.json();
+          if (activeSession) {
+            activeSession.latency_ms = data.latency_ms;
+            activeSession.memory_mb = data.memory_mb;
+          }
+          updateFooterStats(data.latency_ms, data.memory_mb);
+        }
+      } catch (err) {
+        if (latencyEl) {
+          latencyEl.textContent = 'Latency: err';
+          latencyEl.className = 'text-rose-400 font-mono';
+        }
+      }
+    }
 
+    function updateFooterStats(latencyMs, memoryMb) {
+      const footerEnv = document.getElementById('footer-env-badge');
+      if (footerEnv) footerEnv.classList.add('hidden');
       if (activeConnection) {
-        document.getElementById('footer-env-badge').textContent = `● ${activeConnection.environment}`;
-        document.getElementById('footer-env-badge').className = activeConnection.environment === 'Production' ? 'font-bold text-app-danger' : 'font-bold text-app-safe';
-        document.getElementById('footer-db-info').textContent = `${activeConnection.driver.toUpperCase()} (${activeConnection.host || activeConnection.database_name})`;
+        const dbTarget = activeConnection.host ? `${activeConnection.host}:${activeConnection.port || 3306}` : (activeConnection.database_name || 'local');
+        const dbInfoEl = document.getElementById('footer-db-info');
+        if (dbInfoEl) {
+          dbInfoEl.textContent = `${activeConnection.driver.toUpperCase()} (${dbTarget})`;
+        }
+        const lat = latencyMs !== undefined ? latencyMs : (activeSession ? activeSession.latency_ms : null);
+        const mem = memoryMb !== undefined ? memoryMb : (activeSession ? activeSession.memory_mb : null);
+
+        const latencyEl = document.getElementById('footer-latency');
+        if (latencyEl) {
+          if (lat !== null && lat !== undefined) {
+            latencyEl.textContent = `Latency: ${lat}ms`;
+            latencyEl.className = lat < 50 ? 'text-emerald-400 font-mono cursor-pointer hover:underline transition' :
+                                  (lat < 150 ? 'text-amber-400 font-mono cursor-pointer hover:underline transition' :
+                                               'text-rose-400 font-mono cursor-pointer hover:underline transition');
+            latencyEl.title = 'Click to re-ping database';
+          } else {
+            latencyEl.textContent = 'Latency: --';
+            latencyEl.className = 'text-slate-400 font-mono cursor-pointer hover:underline transition';
+            latencyEl.title = 'Click to test database latency';
+          }
+        }
+
+        const memEl = document.getElementById('footer-memory');
+        if (memEl) {
+          if (mem !== null && mem !== undefined) {
+            memEl.textContent = `Memory: ${mem}MB`;
+          } else if (window.performance && performance.memory) {
+            const usedMB = Math.round(performance.memory.usedJSHeapSize / 1024 / 1024);
+            memEl.textContent = `Memory: ${usedMB}MB`;
+          }
+        }
+      } else {
+        const dbInfoEl = document.getElementById('footer-db-info');
+        if (dbInfoEl) dbInfoEl.textContent = 'No active connection';
+        const latencyEl = document.getElementById('footer-latency');
+        if (latencyEl) {
+          latencyEl.textContent = 'Latency: --';
+          latencyEl.className = 'text-slate-400 font-mono';
+          latencyEl.title = '';
+        }
+        const memEl = document.getElementById('footer-memory');
+        if (memEl) memEl.textContent = 'Memory: --';
       }
     }
 

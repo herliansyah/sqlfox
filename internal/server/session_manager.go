@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -57,8 +59,10 @@ type ActiveSession struct {
 	ReadOnly     bool                   `json:"read_only"`
 	Session      driver.Session         `json:"-"`
 	CachedSchema *driver.SchemaMetadata `json:"schema,omitempty"`
-	ServerInfo     *driver.ServerInfo     `json:"server_info,omitempty"`
-	LastActive     time.Time              `json:"last_active"`
+	ServerInfo   *driver.ServerInfo     `json:"server_info,omitempty"`
+	LatencyMs    int64                  `json:"latency_ms"`
+	MemoryMB     float64                `json:"memory_mb,omitempty"`
+	LastActive   time.Time              `json:"last_active"`
 	backupDir      string
 	vault          *vault.Vault
 	runningQueries map[string]context.CancelFunc
@@ -126,17 +130,24 @@ func (sm *SessionManager) ConnectSession(ctx context.Context, connectionID strin
 
 	info, _ := dbSession.ServerInfo(ctx)
 	schema, _ := dbSession.InspectSchema(ctx, conn.DatabaseName)
+	latency, _ := dbSession.Ping(ctx)
+
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	allocMB := math.Round(float64(m.Alloc)/1024/1024*10) / 10
 
 	active := &ActiveSession{
-		ID:           connectionID,
-		ConnectionID: connectionID,
-		Name:         conn.Name,
-		Environment:  conn.Environment,
-		DriverName:   conn.Driver,
-		ReadOnly:     conn.Environment == "Production", // Production defaults to Read-Only
-		Session:      dbSession,
-		CachedSchema: schema,
-		ServerInfo:   info,
+		ID:             connectionID,
+		ConnectionID:   connectionID,
+		Name:           conn.Name,
+		Environment:    conn.Environment,
+		DriverName:     conn.Driver,
+		ReadOnly:       conn.Environment == "Production", // Production defaults to Read-Only
+		Session:        dbSession,
+		CachedSchema:   schema,
+		ServerInfo:     info,
+		LatencyMs:      latency.Milliseconds(),
+		MemoryMB:       allocMB,
 		LastActive:     time.Now(),
 		backupDir:      sm.backupDir,
 		vault:          sm.vault,

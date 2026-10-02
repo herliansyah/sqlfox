@@ -13,19 +13,20 @@ User experience architecture, ASCII wireframes, design tokens, and interaction m
 ## 2. Main Interface Wireframe (3-Column Layout)
 
 ```
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ (2px Red Ambient Line on PROD)
 ┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│ [SqlFox]  Prod-MySQL-Cluster [PRODUCTION 🔴]        [Ctrl+K Command Palette]      [⚙️ Settings] [−][□][×]│
+│ [SqlFox]  Prod-MySQL-Cluster [PROD 🔴]  [🔒 Read-Only]   [Ctrl+K Command Palette]  [⚙️ Settings] [−][□][×]│
 ├──────────────┬─────────────────────────────────────────────────────────┬───────────────────────────────┤
-│ CONNECTIONS  │ [Tab 1: users.sql ●] [Tab 2: orders] [+]                │ AI ASSISTANT (BYOK / Ollama)  │
-│ ▼ Production │─────────────────────────────────────────────────────────│───────────────────────────────┤
-│   ● analytics│ 1 | SELECT id, email, created_at, status                │ 🤖 Claude 3.5 Sonnet          │
-│   🔴 main_db │ 2 | FROM users                                          │                               │
-│     ▼ Tables │ 3 | WHERE created_at >= '2026-01-01'                    │ User:                         │
-│       users  │ 4 | ORDER BY id DESC;                                   │ "Optimize this query"         │
-│       orders │                                                         │                               │
-│       items  │ [▶ Run (Ctrl+Enter)] [⚡ Explain] [🛡️ Impact Preview]    │ AI Copilot:                   │
-│ ▶ Staging    ├─────────────────────────────────────────────────────────│ "Query does a range scan on   │
-│ ▶ Dev        │ Result: 1,000 rows (24ms)                [Filter...]    │ `created_at`. Consider adding:│
+│ SCHEMA       │ [Tab 1: users.sql ●] [Tab 2: orders] [+]                │ AI ASSISTANT (BYOK / Ollama)  │
+│ [Search... /]│─────────────────────────────────────────────────────────│───────────────────────────────┤
+│ ▼ mydb       │ 1 | SELECT id, email, created_at, status                │ 🤖 Claude 3.5 Sonnet          │
+│   ▼ Tables(3)│ 2 | FROM users                                          │                               │
+│     users    │ 3 | WHERE created_at >= '2026-01-01'                    │ User:                         │
+│     orders   │ 4 | ORDER BY id DESC;                                   │ "Optimize this query"         │
+│     items    │                                                         │                               │
+│   ▶ Views(0) │ [▶ Run (Ctrl+Enter)] [⚡ Explain] [🛡️ Impact Preview]    │ AI Copilot:                   │
+│   ▶ Triggers │─────────────────────────────────────────────────────────│ "Query does a range scan on   │
+│              │ Result: 1,000 rows (24ms)                [Filter...]    │ `created_at`. Consider adding:│
 │              │┌──────┬──────────────────────┬────────────┬────────────┐│                               │
 │              ││ id   │ email                │ created_at │ status     ││ CREATE INDEX idx_users_status │
 │              │├──────┼──────────────────────┼────────────┼────────────┤│   ON users(created_at, status)│
@@ -34,7 +35,7 @@ User experience architecture, ASCII wireframes, design tokens, and interaction m
 │              ││ 1040 │ charlie@example.com  │ 2026-09-09 │ active     ││                               │
 │              │└──────┴──────────────────────┴────────────┴────────────┘│ [Ask anything about schema...]│
 ├──────────────┴─────────────────────────────────────────────────────────┴───────────────────────────────┤
-│ 🔴 PRODUCTION | MySQL 8.0.35 | Ping: 12ms | Memory: 42MB | SSL Enabled | UTF-8                     │
+│ MySQL 8.0.35 | Ping: 12ms | Memory: 42MB | SSL Enabled | UTF-8 | ⌨️ Shortcuts                          │
 └────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -127,7 +128,7 @@ User experience architecture, ASCII wireframes, design tokens, and interaction m
 - **Navbar Container**: `h-12` (48px baseline).
 - **Navbar Control Buttons**: `h-7` (28px fixed height, `flex items-center px-2.5 rounded text-xs`) across left sidebar toggle (`◨`), center shortcuts (Command Palette, Schema Search) and right-side action triggers (Processlist, Audit Log, Diagnostics, Privileges, Vault, Copilot, `🔒 Read-Only` toggle, PIN badge). All inline `<kbd>` badges are omitted from button text to prevent visual clutter, with keyboard shortcuts cleanly exposed via native `title="..."` tooltips.
 - **Sidebar Visibility & Persistence**: Both Left Sidebar (Schema Explorer) and Right Sidebar (AI Copilot) persist their show/hide states to browser `localStorage` (`sqlfox_left_sidebar_visible` and `sqlfox_copilot_visible`, defaulting to `true`), with clickable header toggle buttons for mouse navigation.
-- **Status Bar & Centralized Shortcuts Cheatsheet**: `h-6` (24px) footer containing live environment status, database engine, latency, memory gauge, and a dedicated `⌨️ Shortcuts` trigger. Clicking it (or pressing `?` / `F1`) opens a modal cheatsheet grouping all shortcuts (Query Execution, Navigation, Tabs, Tools).
+- **Status Bar & Centralized Shortcuts Cheatsheet**: `h-6` (24px) footer dedicated exclusively to runtime technical telemetry (database engine, latency, memory gauge, SSL, encoding) and a dedicated `⌨️ Shortcuts` trigger. To prevent redundant visual noise and banner blindness, environment tags are strictly excluded from the footer and reserved for the Header Session Switcher. Clicking it (or pressing `?` / `F1`) opens a modal cheatsheet grouping all shortcuts (Query Execution, Navigation, Tabs, Tools).
 - **Maximized Search & Filter Textbox Standards**: All search and filter input boxes across toolbars, drawers, and popovers (Processlist `#pl-search-input`, Session Audit Log `#audit-search-input`, Table Data Grid Raw WHERE filter `#filter-raw-input`, Storage Diagnostics `#dbdiag-search-input`, Session Switcher `#session-search-input`, Database Switcher `#database-search-input`, and Snippets Manager `#snippets-filter-input`) follow a unified UX pattern:
   - Dynamically fill/maximize available space (`flex-1 min-w-[200px]` or relative flex wrapper) without hardcoded cramped widths.
   - Leading search icon `🔍` on the left with consistent font-mono and padding.
@@ -191,9 +192,11 @@ For microservices and multi-database architectures:
 
 ---
 
-## 10. HeidiSQL-Style Session Switcher
+## 10. HeidiSQL-Style Session Switcher & Environment SSOT
 
-- **Compact Header Button**: Replaces permanent sidebar connection accordions with a compact session bar displaying the active database icon, name, and environment tag (`[PROD]`, `[STAGE]`, `[DEV]`).
+- **Compact Header Button & SSOT**: Replaces permanent sidebar connection accordions with a compact session bar displaying the active database icon, name, and environment tag (`[PROD 🔴]`, `[STAGE 🟡]`, `[DEV 🟢]`). This header button is the **Single Source of Truth (SSOT)** for environment identity; sidebar and footer are strictly freed from redundant environment badges to prevent visual clutter and alert fatigue.
+- **Ambient Safety Cue (Top Accent Line)**: Active connections in the `Production` tier display a subtle 2px red ambient accent stripe (`#ef4444`) across the top border of the window/navbar, establishing immediate peripheral awareness without occupying interface height or repeating text.
+- **Production Read-Only Safety Interlock**: Connections marked as `Production` automatically initialize with the navbar toggle locked to `🔒 Read-Only`. Clicking to switch to `🔓 Read-Write` displays a confirmation modal (*"Switch to Read-Write mode on Production?"*), preventing inadvertent data mutations. High-risk statements (`DROP`, `DELETE`/`UPDATE` without WHERE) continue to require the AST Safety Guard Challenge Modal.
 - **Instant Search & Grouping**: Expanding the switcher reveals an inline search filter, environment-grouped connections, and quick-action buttons (`➕ New`, `✏️ Edit`, `🗑️ Delete`).
 - **Full-Height Schema Tree**: Reserves 100% of the sidebar's vertical space for exploring schema objects (Tables, Views, Triggers).
 - **Collapsible Schema Object Sections**: Dedicated toggleable headers for `📊 Tables`, `👁️ Views`, and `⚡ Triggers` with interactive chevron indicators (`▼` / `▶`), object count badges, and persistent state saved to browser `localStorage`. Active filter queries automatically expand sections to ensure search visibility.
