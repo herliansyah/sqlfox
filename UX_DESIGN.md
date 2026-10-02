@@ -427,5 +427,42 @@ The Entity-Relationship Diagram canvas allows developers to explore table relati
 5. **Session-Level Coordinate Cache**:
    - Table card positions are saved to `sessionStorage` (`erd-pos-{sessionId}-{db}`), so custom layouts remain intact during the active browsing session.
 
+---
+
+## 16. Enterprise-Scale UI Ergonomics & Resilience
+
+### Global Reconnection Banner Wireframe
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│       [ ⚠️ Connection lost. Reconnecting in 2s... ] (Floating Banner)       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ [SqlFox]  Prod-DB [PROD 🔴]   [Ctrl+K Command Palette]                      │
+│                                                                             │
+│ [Tab 1: migration.sql ●] [Tab 2: analytics]                                 │
+│ 1 | UPDATE accounts SET balance = balance + 100 WHERE id = 42;              │
+│ 2 | -- Unsaved draft is preserved across transient network disconnects      │
+│                                                                             │
+│ Virtual Data Grid: 10 staged cell updates kept intact in client memory      │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Interaction Models
+
+1. **Native Sidebar Content-Visibility Virtualization**:
+   - Table and view cards in the sidebar tree use `content-visibility: auto; contain-intrinsic-size: 0 28px;`.
+   - The browser automatically skips style recalculation and layout rendering for off-screen items, maintaining 60fps scrolling across 1,000 to 10,000 database objects without external virtual list dependencies.
+2. **Debounced Schema Filtering**:
+   - The schema search input is wrapped in a 150ms debounce timer (`schemaFilterDebounceTimer`).
+   - Typing quickly filters the in-memory schema cache without triggering DOM re-render spikes per keystroke.
+   - Clicking `✕` (clear filter) bypasses the debounce and re-renders immediately.
+3. **Global Reconnection Banner (`#global-reconnect-banner`)**:
+   - If an API or network fetch fails, an ambient floating banner appears (`⚠️ Connection lost. Reconnecting in Xs...`).
+   - Automatically probes `/api/auth/status` with exponential backoff (1s, 2s, 4s, 8s).
+   - Upon reconnection, transitions smoothly to a green toast (`✓ Connection restored`) for 1.5s before fading out.
+4. **State Retention Guarantee**:
+   - Editor tabs, unsaved SQL scripts, active query results, and staged cell modifications (`stagedInserts`, `stagedUpdates`, `stagedDeletions`) remain untouched in client memory during disconnections, preventing accidental data loss.
+
+
 
 

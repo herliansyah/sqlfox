@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -500,8 +501,18 @@ func (s *PostgresSession) CancelQuery(ctx context.Context, queryID string) error
 		return nil
 	}
 
-	_, err := s.db.ExecContext(ctx, "SELECT pg_cancel_backend($1)", pid)
-	return err
+	// Fail-fast timeout for out-of-band control connection (3s max)
+	ctxCancel, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	_, err := s.db.ExecContext(ctxCancel, "SELECT pg_cancel_backend($1)", pid)
+	if err != nil {
+		if errors.Is(ctxCancel.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("control channel timeout (3s): target database connection pool may be saturated: %w", err)
+		}
+		return fmt.Errorf("failed to cancel query via control channel: %w", err)
+	}
+	return nil
 }
 
 func (s *PostgresSession) GetProcesslist(ctx context.Context) (*driver.ProcesslistResult, error) {

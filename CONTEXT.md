@@ -528,3 +528,26 @@ _Avoid_: Parent key cache, reference pool, FK buffer
 **Self-Referential FK**:
 A foreign key column that references the primary key of the same table (e.g. `manager_id → users.id`), resolved in a two-pass strategy: rows are inserted with NULL in the self-referential column, then a follow-up UPDATE assigns randomly sampled PKs from the just-inserted pool.
 _Avoid_: Recursive FK, circular self-reference
+
+## Large-Scale Hardening & Benchmarking
+
+**Memory Ceiling Budget**:
+An architectural constraint strictly enforcing that SqlFox resident set size (RSS) RAM consumption remains under 100MB even when processing enterprise-scale streaming pipelines (`RowStream`, cross-connection transfer, and streaming dumps).
+_Avoid_: Memory limit, RAM cap, buffer threshold
+
+**Synthetic Schema Benchmark**:
+An automated in-memory test harness in `_test.go` simulating 1,000+ tables, 50,000 columns, and cyclical foreign keys to measure schema catalog caching, serialization throughput, and memory allocations without production footprint.
+_Avoid_: Fake schema generator, mock DB, test database
+
+**Content Visibility Virtualization**:
+A zero-dependency browser-native rendering optimization utilizing CSS `content-visibility: auto` and `contain-intrinsic-size` on sidebar schema trees to maintain 60fps scrolling and instant filtering across thousands of database objects without third-party virtual list libraries.
+_Avoid_: Virtual tree, windowing component, lazy DOM
+
+**Fail-Fast Control Channel**:
+A time-bounded (3s) secondary database connection path used for out-of-band cancellation (`KILL QUERY` / `pg_cancel_backend`) that aborts client-side streaming and surfaces pool exhaustion diagnostics when server-side connection slots are saturated.
+_Avoid_: Secondary killer, kill connection, cancel hook
+
+**Global Error Boundary**:
+A resilient application-wide network monitoring banner and fetch interceptor in the web shell that preserves editor tabs, unsaved SQL queries, and staged grid modifications during server restarts and transient disconnections with exponential backoff auto-reconnect.
+_Avoid_: Crash handler, catch-all error, disconnected popup
+

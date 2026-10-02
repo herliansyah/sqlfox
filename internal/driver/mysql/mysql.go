@@ -452,9 +452,19 @@ func (s *MySQLSession) CancelQuery(ctx context.Context, queryID string) error {
 		return nil
 	}
 
+	// Fail-fast timeout for out-of-band control connection (3s max)
+	ctxCancel, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
 	// Execute out-of-band KILL QUERY on independent connection
-	_, err := s.db.ExecContext(ctx, fmt.Sprintf("KILL QUERY %d", threadID))
-	return err
+	_, err := s.db.ExecContext(ctxCancel, fmt.Sprintf("KILL QUERY %d", threadID))
+	if err != nil {
+		if errors.Is(ctxCancel.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("control channel timeout (3s): target database connection pool may be saturated: %w", err)
+		}
+		return fmt.Errorf("failed to cancel query via control channel: %w", err)
+	}
+	return nil
 }
 
 func (s *MySQLSession) GetProcesslist(ctx context.Context) (*driver.ProcesslistResult, error) {

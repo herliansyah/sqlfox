@@ -239,3 +239,30 @@ func TestActiveSession_CancelQuery(t *testing.T) {
 		t.Fatal("expected registered cancel func to be triggered")
 	}
 }
+
+func TestActiveSession_CancelQuery_ClientCancelGuaranteed(t *testing.T) {
+	sess := &ActiveSession{
+		ID:             "conn-sat",
+		Environment:    "Development",
+		DriverName:     "sqlite",
+		Session:        nil, // no driver session
+		runningQueries: make(map[string]context.CancelFunc),
+	}
+
+	cancelled := false
+	sess.mu.Lock()
+	sess.runningQueries["q-sat"] = func() {
+		cancelled = true
+	}
+	sess.mu.Unlock()
+
+	// Calling cancel must trigger client-side cancel immediately even if driver session is nil
+	err := sess.CancelQuery(context.Background(), "q-sat")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cancelled {
+		t.Fatal("expected client cancel to be executed")
+	}
+}
+

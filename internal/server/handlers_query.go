@@ -130,11 +130,15 @@ func (s *Server) handleCancelQuery(w http.ResponseWriter, r *http.Request) {
 		req.QueryID = "active"
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 
 	if err := sess.CancelQuery(ctx, req.QueryID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to cancel query: "+err.Error())
+		status := http.StatusInternalServerError
+		if errors.Is(err, context.DeadlineExceeded) || strings.Contains(strings.ToLower(err.Error()), "timeout") || strings.Contains(strings.ToLower(err.Error()), "saturated") {
+			status = http.StatusGatewayTimeout
+		}
+		writeError(w, status, "failed to cancel query: "+err.Error())
 		return
 	}
 
