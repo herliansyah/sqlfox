@@ -15,28 +15,8 @@ import (
 )
 
 // formatSQLValue formats a Go value into a valid SQL literal for dumps and inserts.
-// ponytail: Lightweight deterministic serializer without external dependencies or heavy AST overhead.
 func formatSQLValue(val any) string {
-	if val == nil {
-		return "NULL"
-	}
-	switch v := val.(type) {
-	case bool:
-		if v {
-			return "1"
-		}
-		return "0"
-	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
-		return fmt.Sprintf("%d", v)
-	case float32, float64:
-		return fmt.Sprintf("%v", v)
-	case []byte:
-		return fmt.Sprintf("'%s'", strings.ReplaceAll(string(v), "'", "''"))
-	case string:
-		return fmt.Sprintf("'%s'", strings.ReplaceAll(v, "'", "''"))
-	default:
-		return fmt.Sprintf("'%s'", strings.ReplaceAll(fmt.Sprintf("%v", v), "'", "''"))
-	}
+	return driver.FormatSQLValue(val)
 }
 
 func (s *Server) handleExportDump(w http.ResponseWriter, r *http.Request) {

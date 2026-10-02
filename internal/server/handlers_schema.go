@@ -440,13 +440,8 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 
 	var totalAffected int64
 	for _, item := range items {
-		var valStr string
-		if item.Value == nil {
-			valStr = "NULL"
-		} else {
-			valStr = fmt.Sprintf("'%s'", strings.ReplaceAll(fmt.Sprintf("%v", item.Value), "'", "''"))
-		}
-		pkStr := fmt.Sprintf("'%s'", strings.ReplaceAll(fmt.Sprintf("%v", item.PKValue), "'", "''"))
+		valStr := driver.FormatSQLValue(item.Value)
+		pkStr := driver.FormatSQLValue(item.PKValue)
 
 		tableRef := quoteIdent(item.Table)
 		db := item.Database

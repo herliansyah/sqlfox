@@ -593,3 +593,36 @@ type TriMetricStats struct {
 	CertFailures        int64   `json:"cert_failures"`
 	BFAborts            int64   `json:"bf_aborts"`
 }
+
+// QuoteIdentifier formats an identifier safely with driver-aware quotes.
+func QuoteIdentifier(name, driverName string) string {
+	name = strings.Trim(name, "`\"")
+	if strings.EqualFold(driverName, "sqlite") {
+		return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+	}
+	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
+}
+
+// FormatSQLValue formats a Go value into a valid SQL literal for dumps, inserts, and filters.
+func FormatSQLValue(val any) string {
+	if val == nil {
+		return "NULL"
+	}
+	switch v := val.(type) {
+	case bool:
+		if v {
+			return "1"
+		}
+		return "0"
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return fmt.Sprintf("%d", v)
+	case float32, float64:
+		return fmt.Sprintf("%v", v)
+	case []byte:
+		return fmt.Sprintf("'%s'", strings.ReplaceAll(string(v), "'", "''"))
+	case string:
+		return fmt.Sprintf("'%s'", strings.ReplaceAll(v, "'", "''"))
+	default:
+		return fmt.Sprintf("'%s'", strings.ReplaceAll(fmt.Sprintf("%v", v), "'", "''"))
+	}
+}

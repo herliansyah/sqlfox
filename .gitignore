@@ -1,7 +1,6 @@
 # Binaries
 /sqlfox
-bin/*
-!bin/sqlfox.js
+bin/
 *.exe
 *.dll
 *.so
