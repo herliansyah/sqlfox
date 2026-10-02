@@ -22,6 +22,7 @@ import (
 	"sqlfox/web"
 
 	_ "sqlfox/internal/driver/mysql"
+	_ "sqlfox/internal/driver/postgres"
 	_ "sqlfox/internal/driver/sqlite"
 )
 

@@ -421,19 +421,25 @@ func (s *MySQLSession) Explain(ctx context.Context, querySQL string) (*driver.Ex
 		return &driver.ExplainPlan{Rows: []driver.ExplainRow{}}, nil
 	}
 
+	// Classic tabular EXPLAIN (always supported)
 	rows, err := s.db.QueryContext(ctx, "EXPLAIN "+cleanedSQL)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
 	planRows, err := driver.ScanExplainRows(rows)
 	if err != nil {
 		return nil, err
 	}
 
+	// Best-effort JSON plan for visual tree (MySQL 5.6+, ignored on older/MariaDB)
+	// ponytail: single-row scan; FORMAT=JSON not supported everywhere, so we silently drop errors.
+	var rawJSON string
+	_ = s.db.QueryRowContext(ctx, "EXPLAIN FORMAT=JSON "+cleanedSQL).Scan(&rawJSON)
+
 	return &driver.ExplainPlan{
-		Rows: planRows,
+		RawJSON: rawJSON,
+		Rows:    planRows,
 	}, nil
 }
 
@@ -1528,4 +1534,35 @@ func (s *MySQLSession) SampleFlightMetrics(ctx context.Context) (*driver.FlightM
 
 func (s *MySQLSession) Close() error {
 	return s.db.Close()
+}
+
+func (s *MySQLSession) ExecRaw(ctx context.Context, sql string, args ...any) (int64, error) {
+	res, err := s.db.ExecContext(ctx, sql, args...)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
+func (s *MySQLSession) QueryRaw(ctx context.Context, sql string, args ...any) ([][]any, error) {
+	rows, err := s.db.QueryContext(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	cols, _ := rows.Columns()
+	var result [][]any
+	for rows.Next() {
+		vals := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, err
+		}
+		result = append(result, vals)
+	}
+	return result, rows.Err()
 }

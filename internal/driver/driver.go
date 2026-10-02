@@ -113,6 +113,12 @@ type Session interface {
 	// SampleFlightMetrics captures an on-demand performance telemetry slice with correlated active queries.
 	SampleFlightMetrics(ctx context.Context) (*FlightMetricSample, error)
 
+	// ExecRaw executes a raw SQL statement bypassing the Safety Guard. For internal server use only.
+	ExecRaw(ctx context.Context, sql string, args ...any) (int64, error)
+
+	// QueryRaw executes a raw SQL query bypassing the Safety Guard and returns all rows. For internal server use only.
+	QueryRaw(ctx context.Context, sql string, args ...any) ([][]any, error)
+
 	io.Closer
 }
 
@@ -597,7 +603,7 @@ type TriMetricStats struct {
 // QuoteIdentifier formats an identifier safely with driver-aware quotes.
 func QuoteIdentifier(name, driverName string) string {
 	name = strings.Trim(name, "`\"")
-	if strings.EqualFold(driverName, "sqlite") {
+	if strings.EqualFold(driverName, "sqlite") || strings.EqualFold(driverName, "postgres") || strings.EqualFold(driverName, "postgresql") || strings.EqualFold(driverName, "pg") {
 		return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 	}
 	return "`" + strings.ReplaceAll(name, "`", "``") + "`"

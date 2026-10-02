@@ -74,6 +74,29 @@ func TestSafetyGuard_Inspect(t *testing.T) {
 			expectedRisk:      RiskNone,
 			expectedChallenge: false,
 		},
+		{
+			name:              "PostgreSQL Unqualified DELETE with RETURNING",
+			query:             `DELETE FROM "public"."orders" RETURNING *;`,
+			env:               "Development",
+			expectedRisk:      RiskCritical,
+			expectedChallenge: true,
+			expectedTable:     "orders",
+		},
+		{
+			name:              "PostgreSQL Qualified DELETE with RETURNING in Dev",
+			query:             `DELETE FROM "public"."orders" WHERE id = $1 RETURNING *;`,
+			env:               "Development",
+			expectedRisk:      RiskNone,
+			expectedChallenge: false,
+		},
+		{
+			name:              "PostgreSQL DROP TABLE with quotes",
+			query:             `DROP TABLE IF EXISTS "analytics"."page_views";`,
+			env:               "Production",
+			expectedRisk:      RiskCritical,
+			expectedChallenge: true,
+			expectedTable:     "page_views",
+		},
 	}
 
 	for _, tc := range tests {

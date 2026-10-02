@@ -10,6 +10,7 @@ import (
 	"sqlfox/internal/vault"
 
 	_ "sqlfox/internal/driver/mysql"
+	_ "sqlfox/internal/driver/postgres"
 	_ "sqlfox/internal/driver/sqlite"
 )
 
@@ -78,7 +79,9 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /api/session/{id}/table/{table}/rows", s.handleGetTableRows)
 	mux.HandleFunc("GET /api/session/{id}/notes/{table}", s.handleGetTableNote)
 	mux.HandleFunc("POST /api/session/{id}/notes/{table}", s.handleSaveTableNote)
+	mux.HandleFunc("POST /api/session/{id}/table/{table}/mock-data", s.handleGenerateMockData)
 	mux.HandleFunc("POST /api/session/{id}/table/{table}/import-csv", s.handleImportCSV)
+
 
 	// Processlist & DBA operations
 	mux.HandleFunc("GET /api/session/{id}/processlist", s.handleGetProcesslist)

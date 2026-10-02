@@ -260,3 +260,41 @@ func TestCLI_Transfer(t *testing.T) {
 		}
 	}
 }
+
+func TestParseDirectDSN_Postgres(t *testing.T) {
+	driverName, cfg, ok := parseDirectDSN("postgres://postgres:secret@localhost:5432/myapp?sslmode=disable", "")
+	if !ok {
+		t.Fatalf("expected DSN to parse successfully")
+	}
+	if driverName != "postgres" || cfg.Driver != "postgres" {
+		t.Errorf("expected driver 'postgres', got %q", driverName)
+	}
+	if cfg.Host != "localhost" || cfg.Port != 5432 || cfg.DatabaseName != "myapp" {
+		t.Errorf("unexpected host/port/db: %s:%d/%s", cfg.Host, cfg.Port, cfg.DatabaseName)
+	}
+	if cfg.User != "postgres" || cfg.Password != "secret" {
+		t.Errorf("unexpected credentials: %s:%s", cfg.User, cfg.Password)
+	}
+	if cfg.UseSSL {
+		t.Errorf("expected UseSSL=false for sslmode=disable")
+	}
+
+	// Test postgresql alias with sslmode=require
+	driverName2, cfg2, ok2 := parseDirectDSN("postgresql://dbuser:mypass@remotehost/analytics?sslmode=require", "")
+	if !ok2 || driverName2 != "postgres" {
+		t.Fatalf("expected postgresql scheme to parse")
+	}
+	if cfg2.Port != 5432 || cfg2.DatabaseName != "analytics" {
+		t.Errorf("unexpected host/port/db: %s:%d/%s", cfg2.Host, cfg2.Port, cfg2.DatabaseName)
+	}
+	if !cfg2.UseSSL {
+		t.Errorf("expected UseSSL=true for sslmode=require")
+	}
+
+	// Test driver override
+	driverName3, cfg3, ok3 := parseDirectDSN("mydb", "postgres")
+	if !ok3 || driverName3 != "postgres" || cfg3.DatabaseName != "mydb" {
+		t.Errorf("expected driver override to return postgres")
+	}
+}
+

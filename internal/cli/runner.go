@@ -16,6 +16,7 @@ import (
 
 	gomysql "github.com/go-sql-driver/mysql"
 	_ "sqlfox/internal/driver/mysql"
+	_ "sqlfox/internal/driver/postgres"
 	_ "sqlfox/internal/driver/sqlite"
 )
 
@@ -245,9 +246,47 @@ func parseDirectDSN(raw string, driverOverride string) (string, driver.Config, b
 		}
 	}
 
-	// Case E: Explicit driver override provided
+	// Case E: PostgreSQL URI (postgres://user:pass@host:port/dbname or postgresql://...)
+	if strings.HasPrefix(trimmed, "postgres://") || strings.HasPrefix(trimmed, "postgresql://") {
+		u, err := url.Parse(trimmed)
+		if err == nil {
+			var user, pass string
+			if u.User != nil {
+				user = u.User.Username()
+				pass, _ = u.User.Password()
+			}
+			host := u.Hostname()
+			port := 5432
+			if pStr := u.Port(); pStr != "" {
+				if p, err := strconv.Atoi(pStr); err == nil {
+					port = p
+				}
+			}
+			dbName := strings.TrimPrefix(u.Path, "/")
+			if dbName == "" {
+				dbName = "postgres"
+			}
+			sslMode := u.Query().Get("sslmode")
+			useSSL := sslMode != "" && sslMode != "disable"
+
+			return "postgres", driver.Config{
+				Driver:       "postgres",
+				Host:         host,
+				Port:         port,
+				DatabaseName: dbName,
+				User:         user,
+				Password:     pass,
+				UseSSL:       useSSL,
+			}, true
+		}
+	}
+
+	// Case F: Explicit driver override provided
 	if driverOverride == "sqlite" {
 		return "sqlite", driver.Config{Driver: "sqlite", DatabaseName: trimmed}, true
+	}
+	if driverOverride == "postgres" || driverOverride == "postgresql" || driverOverride == "pg" {
+		return "postgres", driver.Config{Driver: "postgres", DatabaseName: trimmed}, true
 	}
 
 	return "", driver.Config{}, false

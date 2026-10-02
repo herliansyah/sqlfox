@@ -39,19 +39,27 @@ _Avoid_: Public URL, remote host
 ## Drivers & Sessions
 
 **Driver**:
-A protocol-specific database connector (e.g. MySQL, SQLite) implementing lifecycle and session creation.
+A protocol-specific database connector (e.g. MySQL, SQLite, PostgreSQL) implementing lifecycle and session creation.
 _Avoid_: Adapter, DB client
 
 **Session**:
 An active client interaction context bound to a Connection, managing open tabs, temporary schema cache, and transaction state.
 _Avoid_: Workspace, window, console
 
+**Search Path**:
+The active PostgreSQL schema namespace configured for a session (`SET search_path = <schema>`), governing unqualified table resolution and UI schema browsing.
+_Avoid_: Active catalog, schema switch, default db
+
+**Backend Process ID (PID)**:
+The unique server-side process identifier of a PostgreSQL backend worker, utilized for out-of-band cancellation (`pg_cancel_backend`) and lock tree visualization (`pg_blocking_pids`).
+_Avoid_: Thread ID, connection ID, worker ID
+
 **RowStream**:
 A memory-bounded record sequence streamed from database drivers to the frontend via WebSocket/SSE chunks.
 _Avoid_: Result buffer, fetch array
 
 **Out-of-Band Cancellation**:
-A query interruption mechanism dispatched via a secondary control connection issuing protocol termination (`KILL QUERY`) without destroying the primary connection.
+A query interruption mechanism dispatched via a secondary control connection issuing protocol termination (`KILL QUERY` on MySQL, `pg_cancel_backend(pid)` on PostgreSQL) without destroying the primary connection.
 _Avoid_: Context cancel, socket kill
 
 ## Safety & Governance
@@ -439,6 +447,8 @@ _Avoid_: In-process tunnel, custom bastion client
 - **0028**: Schema Structure Sync, Cross-Connection Data Transfer, and Row-Level Data Sync Engine (`docs/adr/0028-schema-structure-sync-cross-connection-data-transfer-and-row-data-sync.md`)
 - **0029**: Visual ERD Interactive Canvas (`docs/adr/0029-visual-erd-canvas.md`)
 - **0030**: Headless CLI Suite Architecture and Fail-Closed Automation Policy (`docs/adr/0030-headless-cli-suite-and-fail-closed-automation-policy.md`)
+- **0031**: PostgreSQL Native Driver Engine and Catalog Introspection (`docs/adr/0031-postgresql-native-driver-engine-and-catalog-introspection.md`)
+- **0032**: FK-Aware Mock Data Generation and Referential Closure (`docs/adr/0032-fk-aware-mock-data-generation-and-referential-closure.md`)
 
 ## Visual Schema & ERD Canvas
 
@@ -484,4 +494,20 @@ _Avoid_: Table isolation, chunked commit
 Token-aware SQL statement splitting that distinguishes statement terminators (`;`) from semicolons within string literals, quotes, and block comments during headless script execution.
 _Avoid_: Semicolon split, raw splitting
 
+## Mock Data Generation
 
+**Mock Data Generator**:
+A zero-dependency synthetic data synthesizer in `internal/mock/` generating type-aware realistic column values and inserting them into a target table respecting foreign key referential integrity.
+_Avoid_: Test data loader, seed script, fake data tool
+
+**Topological Seed Order**:
+A Kahn's-algorithm-derived insertion sequence that sorts tables by their FK dependency graph so parent reference tables are always populated before their dependent child tables.
+_Avoid_: FK insertion order, dependency queue
+
+**FK Pool**:
+An in-memory collection of up to 1,000 sampled primary key values fetched from a parent reference table after its own seed pass, used to satisfy foreign key column constraints in child table INSERT batches.
+_Avoid_: Parent key cache, reference pool, FK buffer
+
+**Self-Referential FK**:
+A foreign key column that references the primary key of the same table (e.g. `manager_id → users.id`), resolved in a two-pass strategy: rows are inserted with NULL in the self-referential column, then a follow-up UPDATE assigns randomly sampled PKs from the just-inserted pool.
+_Avoid_: Recursive FK, circular self-reference

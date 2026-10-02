@@ -239,7 +239,7 @@ func inspectLexicalFallback(query string, environment string) *InspectionResult 
 
 func cleanTableName(raw string) string {
 	s := strings.TrimSpace(raw)
-	s = strings.Trim(s, "`'\"")
 	parts := strings.Split(s, ".")
-	return parts[len(parts)-1]
+	last := parts[len(parts)-1]
+	return strings.Trim(last, "`'\"")
 }

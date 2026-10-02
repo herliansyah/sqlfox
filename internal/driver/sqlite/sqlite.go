@@ -603,6 +603,37 @@ func (s *SQLiteSession) Close() error {
 	return s.db.Close()
 }
 
+func (s *SQLiteSession) ExecRaw(ctx context.Context, sql string, args ...any) (int64, error) {
+	res, err := s.db.ExecContext(ctx, sql, args...)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
+func (s *SQLiteSession) QueryRaw(ctx context.Context, sql string, args ...any) ([][]any, error) {
+	rows, err := s.db.QueryContext(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	cols, _ := rows.Columns()
+	var result [][]any
+	for rows.Next() {
+		vals := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, err
+		}
+		result = append(result, vals)
+	}
+	return result, rows.Err()
+}
+
 func quoteIdentifier(id string) string {
 	return driver.QuoteIdentifier(id, "sqlite")
 }
