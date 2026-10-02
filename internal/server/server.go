@@ -106,6 +106,13 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /api/session/{id}/export-dump", s.handleExportDump)
 	mux.HandleFunc("GET /api/session/{id}/export-smart-seed", s.handleExportSmartSeed)
 
+	// Schema & Data Synchronization Engine (Milestone 11)
+	mux.HandleFunc("POST /api/sync/structure/compare", s.handleSyncStructureCompare)
+	mux.HandleFunc("POST /api/sync/structure/apply", s.handleSyncStructureApply)
+	mux.HandleFunc("POST /api/sync/data/transfer", s.handleSyncDataTransfer)
+	mux.HandleFunc("POST /api/sync/data/compare", s.handleSyncDataCompare)
+	mux.HandleFunc("POST /api/sync/data/apply", s.handleSyncDataApply)
+
 	// Session commands dispatcher
 	mux.HandleFunc("POST /api/session/{id}/{action}", func(w http.ResponseWriter, r *http.Request) {
 		switch r.PathValue("action") {

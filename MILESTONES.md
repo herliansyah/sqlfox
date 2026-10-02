@@ -225,10 +225,13 @@ v2.0 (Enterprise, Multi-Engine & DBA Power Suite)
 ### Milestone 11: Schema & Data Synchronization Engine
 - **Goal**: Enable cross-connection schema comparison (Structure Sync) and direct streaming migration (Data Transfer & Data Sync).
 - **Deliverables**:
-  - **Structure Sync**: AST-based DDL comparison between source and target databases; side-by-side visual diff showing missing tables, column discrepancies, and index drift; auto-generated DDL migration script with DDL Review Modal.
-  - **Cross-Connection Data Transfer**: Direct memory-bounded pipe between two connection sessions (`SourceSession` -> `TargetSession`) transferring tables and data without temporary disk files.
-  - **Data Sync**: Row-level reconciliation using primary key scans; computes delta (`INSERT`, `UPDATE`, `DELETE`) with visual confirmation before atomic execution.
-- **Runnable Verification**: Compare two local databases with diverging schemas -> verify generated `ALTER TABLE` matches delta -> execute Data Transfer of 10,000 rows between connections -> verify target table row count matches source.
+  - [x] **Structure Sync**: AST-based DDL comparison between source and target databases; side-by-side visual diff showing missing tables, column discrepancies, and index drift; auto-generated DDL migration script with DDL Review Modal (`POST /api/sync/structure/compare` & `POST /api/sync/structure/apply`).
+  - [x] **Cross-Connection Data Transfer**: Direct memory-bounded pipe between two connection sessions (`SourceSession` -> `TargetSession`) transferring tables and data without temporary disk files with chunked NDJSON streaming progress (`POST /api/sync/data/transfer`).
+  - [x] **Data Sync**: Row-level reconciliation using primary key scans; computes delta (`INSERT`, `UPDATE`, `DELETE`) with visual confirmation before atomic execution (`POST /api/sync/data/compare` & `POST /api/sync/data/apply`).
+  - [x] **Ergonomics & Safety**: Top Navbar `📦 DB Tools ▾` menu links and Dialogs 23, 24, 25 (`#structure-sync-dialog`, `#data-transfer-dialog`, `#data-sync-dialog`) with Production Safety Guard challenge gating.
+  - [x] **Documentation & Verification**: Formally recorded in `docs/adr/0028-schema-structure-sync-cross-connection-data-transfer-and-row-data-sync.md` with unit tests passing 100% in `internal/server/sync_test.go`.
+- **Runnable Verification**: Run `go test -v ./internal/server -run TestSync` -> verify 100% pass across structure sync, cross-connection data transfer, and row-level data sync.
+
 
 ---
 

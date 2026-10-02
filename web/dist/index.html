@@ -247,6 +247,18 @@
             <span class="font-medium text-indigo-400">⚡ Run Large SQL Script</span>
             <span class="text-[10px] text-slate-400">Stream and execute multi-megabyte .sql</span>
           </button>
+          <button onclick="openStructureSyncModal(); toggleTopDBToolsMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex flex-col border-t border-slate-800">
+            <span class="font-medium text-emerald-400">🔄 Structure Sync (Schema Diff)</span>
+            <span class="text-[10px] text-slate-400">Compare schemas & generate DDL migration</span>
+          </button>
+          <button onclick="openDataTransferModal(); toggleTopDBToolsMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex flex-col border-t border-slate-800">
+            <span class="font-medium text-cyan-400">🚚 Cross-Connection Data Transfer</span>
+            <span class="text-[10px] text-slate-400">Stream copy tables directly between sessions</span>
+          </button>
+          <button onclick="openDataSyncModal(); toggleTopDBToolsMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex flex-col border-t border-slate-800">
+            <span class="font-medium text-purple-400">⚖️ Row-Level Data Sync</span>
+            <span class="text-[10px] text-slate-400">Keyset delta reconciler (Insert/Update/Delete)</span>
+          </button>
         </div>
       </div>
 
@@ -2735,6 +2747,268 @@
         <button id="run-sql-btn-close" onclick="closeRunSQLScriptModal()" class="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition">Cancel</button>
         <button id="run-sql-btn-run" onclick="executeRunSQLScript()" class="px-4 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs flex items-center space-x-1.5 shadow transition disabled:opacity-50 disabled:cursor-not-allowed">
           <span>▶</span><span>Start Execution</span>
+        </button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 23. Structure Sync Dialog (HTML5 <dialog>) -->
+  <dialog id="structure-sync-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-4xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm">
+    <div class="space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 class="text-base font-bold text-emerald-400 flex items-center space-x-2">
+          <span>🔄</span><span>Structure Synchronization (Schema Diff)</span>
+        </h3>
+        <button onclick="closeStructureSyncModal()" class="text-slate-400 hover:text-white text-lg">✕</button>
+      </div>
+
+      <!-- Connection Pickers -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-950 p-3 rounded-lg border border-slate-800">
+        <!-- Source -->
+        <div class="space-y-2">
+          <label class="block text-xs font-semibold text-sky-400">Source Connection & Database</label>
+          <div class="flex space-x-2">
+            <select id="sync-struct-source-conn" class="flex-1 bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white outline-none focus:border-sky-500"></select>
+            <input type="text" id="sync-struct-source-db" placeholder="Database (optional)" class="w-1/3 bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white outline-none focus:border-sky-500">
+          </div>
+        </div>
+
+        <!-- Target -->
+        <div class="space-y-2">
+          <label class="block text-xs font-semibold text-emerald-400">Target Connection & Database</label>
+          <div class="flex space-x-2">
+            <select id="sync-struct-target-conn" class="flex-1 bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white outline-none focus:border-emerald-500"></select>
+            <input type="text" id="sync-struct-target-db" placeholder="Database (optional)" class="w-1/3 bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white outline-none focus:border-emerald-500">
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between">
+        <label class="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer">
+          <input type="checkbox" id="sync-struct-include-drops" class="accent-emerald-500 w-4 h-4 cursor-pointer">
+          <span>Include DROP statements for extra target objects</span>
+        </label>
+        <button id="sync-struct-btn-compare" onclick="executeStructureCompare()" class="px-4 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center space-x-1.5 shadow transition">
+          <span>🔍</span><span>Compare Schemas</span>
+        </button>
+      </div>
+
+      <!-- Diff Container -->
+      <div id="sync-struct-diff-container" class="hidden space-y-3 pt-2 border-t border-slate-800">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center space-x-2 text-xs">
+            <span id="sync-struct-count-badge" class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">0 differences</span>
+            <button onclick="toggleAllStructureDiffs(true)" class="text-[11px] text-sky-400 hover:underline">Select All</button>
+            <span class="text-slate-600">•</span>
+            <button onclick="toggleAllStructureDiffs(false)" class="text-[11px] text-slate-400 hover:underline">Deselect All</button>
+          </div>
+          <div class="flex items-center space-x-1 text-xs">
+            <button id="sync-struct-tab-diff" onclick="switchStructureSyncView('diff')" class="px-2.5 py-1 rounded bg-slate-800 text-emerald-400 font-medium">Differences</button>
+            <button id="sync-struct-tab-sql" onclick="switchStructureSyncView('sql')" class="px-2.5 py-1 rounded hover:bg-slate-800 text-slate-400">Migration Script (SQL)</button>
+          </div>
+        </div>
+
+        <!-- Diff Table View -->
+        <div id="sync-struct-view-diff" class="max-h-64 overflow-y-auto border border-slate-800 rounded bg-slate-950">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-900 text-slate-400 border-b border-slate-800 sticky top-0">
+              <tr>
+                <th class="p-2 w-8 text-center"><input type="checkbox" id="sync-struct-master-check" onchange="toggleAllStructureDiffs(this.checked)" checked class="accent-emerald-500"></th>
+                <th class="p-2">Object</th>
+                <th class="p-2">Action</th>
+                <th class="p-2">Source Definition</th>
+                <th class="p-2">Target Definition</th>
+              </tr>
+            </thead>
+            <tbody id="sync-struct-diff-rows" class="divide-y divide-slate-800/60 font-mono text-[11px]"></tbody>
+          </table>
+        </div>
+
+        <!-- SQL View -->
+        <div id="sync-struct-view-sql" class="hidden">
+          <textarea id="sync-struct-script-preview" readonly class="w-full h-64 bg-slate-950 border border-slate-800 rounded p-3 font-mono text-xs text-emerald-300 outline-none resize-none"></textarea>
+        </div>
+
+        <!-- Production Challenge Section -->
+        <div id="sync-struct-challenge-container" class="hidden p-3 bg-rose-950/40 border border-rose-800/80 rounded-lg space-y-2">
+          <div class="text-xs font-semibold text-rose-300">⚠️ Production Target Guard</div>
+          <p class="text-[11px] text-slate-300">Type <span id="sync-struct-challenge-target" class="font-mono font-bold text-rose-400">MIGRATE</span> to authorize applying DDL changes on production.</p>
+          <input type="text" id="sync-struct-challenge-input" placeholder="Type MIGRATE or database name" class="w-full bg-slate-900 border border-rose-700 rounded px-2.5 py-1.5 text-xs text-white outline-none focus:border-rose-500">
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end space-x-2 pt-3 border-t border-slate-800">
+        <button onclick="closeStructureSyncModal()" class="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition">Cancel</button>
+        <button id="sync-struct-btn-apply" onclick="executeStructureApply()" disabled class="px-4 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center space-x-1.5 shadow transition disabled:opacity-50 disabled:cursor-not-allowed">
+          <span>⚡</span><span>Execute Migration</span>
+        </button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 24. Cross-Connection Data Transfer Dialog (HTML5 <dialog>) -->
+  <dialog id="data-transfer-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-2xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm">
+    <div class="space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 class="text-base font-bold text-cyan-400 flex items-center space-x-2">
+          <span>🚚</span><span>Cross-Connection Data Transfer</span>
+        </h3>
+        <button onclick="closeDataTransferModal()" class="text-slate-400 hover:text-white text-lg">✕</button>
+      </div>
+
+      <!-- Connection Pickers -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-950 p-3 rounded-lg border border-slate-800">
+        <!-- Source -->
+        <div class="space-y-2">
+          <label class="block text-xs font-semibold text-sky-400">Source Connection & Database</label>
+          <div class="flex space-x-2">
+            <select id="sync-transfer-source-conn" onchange="loadTransferSourceTables()" class="flex-1 bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white outline-none focus:border-sky-500"></select>
+            <input type="text" id="sync-transfer-source-db" onchange="loadTransferSourceTables()" placeholder="DB" class="w-1/3 bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white outline-none focus:border-sky-500">
+          </div>
+        </div>
+
+        <!-- Target -->
+        <div class="space-y-2">
+          <label class="block text-xs font-semibold text-cyan-400">Target Connection & Database</label>
+          <div class="flex space-x-2">
+            <select id="sync-transfer-target-conn" class="flex-1 bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white outline-none focus:border-cyan-500"></select>
+            <input type="text" id="sync-transfer-target-db" placeholder="DB" class="w-1/3 bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white outline-none focus:border-cyan-500">
+          </div>
+        </div>
+      </div>
+
+      <!-- Table Selection -->
+      <div class="space-y-2">
+        <div class="flex items-center justify-between text-xs">
+          <label class="font-medium text-slate-300">Select Tables to Transfer</label>
+          <div class="space-x-2 text-[11px]">
+            <button onclick="toggleAllTransferTables(true)" class="text-cyan-400 hover:underline">Select All</button>
+            <span class="text-slate-600">•</span>
+            <button onclick="toggleAllTransferTables(false)" class="text-slate-400 hover:underline">Deselect All</button>
+          </div>
+        </div>
+        <div id="sync-transfer-table-list" class="max-h-40 overflow-y-auto border border-slate-800 rounded bg-slate-950 p-2 grid grid-cols-2 gap-2 text-xs font-mono">
+          <div class="text-slate-500 col-span-2 text-center py-4 font-sans text-xs">Select a source connection to inspect tables</div>
+        </div>
+      </div>
+
+      <!-- Options -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3 p-3 bg-slate-950 rounded border border-slate-800 text-xs">
+        <label class="flex items-center space-x-2 text-slate-300 cursor-pointer">
+          <input type="checkbox" id="sync-transfer-create-tables" checked class="accent-cyan-500 w-4 h-4 cursor-pointer">
+          <span>Create missing tables</span>
+        </label>
+        <label class="flex items-center space-x-2 text-slate-300 cursor-pointer">
+          <input type="checkbox" id="sync-transfer-truncate" class="accent-cyan-500 w-4 h-4 cursor-pointer">
+          <span>Truncate target tables</span>
+        </label>
+        <div class="flex items-center space-x-2">
+          <span class="text-slate-400 text-xs">Batch:</span>
+          <input type="number" id="sync-transfer-batch-size" value="500" min="50" max="2000" class="w-20 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white outline-none focus:border-cyan-500">
+        </div>
+      </div>
+
+      <!-- Progress Section -->
+      <div id="sync-transfer-progress-container" class="hidden space-y-2 pt-2 border-t border-slate-800">
+        <div class="flex items-center justify-between text-xs">
+          <span id="sync-transfer-progress-label" class="text-slate-300 font-medium">Ready</span>
+          <span id="sync-transfer-progress-count" class="font-mono text-cyan-400 font-bold">0 rows transferred</span>
+        </div>
+        <div class="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-800">
+          <div id="sync-transfer-progress-bar" class="bg-cyan-500 h-2 w-0 transition-all duration-150"></div>
+        </div>
+        <div id="sync-transfer-log" class="p-2.5 bg-slate-950 border border-slate-800 rounded font-mono text-[11px] text-slate-300 max-h-28 overflow-y-auto space-y-1"></div>
+      </div>
+
+      <div class="flex items-center justify-end space-x-2 pt-3 border-t border-slate-800">
+        <button id="sync-transfer-btn-close" onclick="closeDataTransferModal()" class="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition">Cancel</button>
+        <button id="sync-transfer-btn-start" onclick="executeDataTransfer()" class="px-4 py-1.5 rounded bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-xs flex items-center space-x-1.5 shadow transition disabled:opacity-50 disabled:cursor-not-allowed">
+          <span>🚀</span><span>Start Transfer</span>
+        </button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 25. Row-Level Data Sync Dialog (HTML5 <dialog>) -->
+  <dialog id="data-sync-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-4xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm">
+    <div class="space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 class="text-base font-bold text-purple-400 flex items-center space-x-2">
+          <span>⚖️</span><span>Row-Level Data Sync (Delta Reconciler)</span>
+        </h3>
+        <button onclick="closeDataSyncModal()" class="text-slate-400 hover:text-white text-lg">✕</button>
+      </div>
+
+      <!-- Connection Pickers & Table -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-950 p-3 rounded-lg border border-slate-800">
+        <!-- Source -->
+        <div class="space-y-2">
+          <label class="block text-xs font-semibold text-sky-400">Source Connection & Database</label>
+          <div class="flex space-x-2">
+            <select id="sync-data-source-conn" onchange="loadDataSyncTables()" class="flex-1 bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white outline-none focus:border-sky-500"></select>
+            <input type="text" id="sync-data-source-db" onchange="loadDataSyncTables()" placeholder="DB" class="w-1/3 bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white outline-none focus:border-sky-500">
+          </div>
+        </div>
+
+        <!-- Target -->
+        <div class="space-y-2">
+          <label class="block text-xs font-semibold text-purple-400">Target Connection & Database</label>
+          <div class="flex space-x-2">
+            <select id="sync-data-target-conn" class="flex-1 bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white outline-none focus:border-purple-500"></select>
+            <input type="text" id="sync-data-target-db" placeholder="DB" class="w-1/3 bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white outline-none focus:border-purple-500">
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between">
+        <div class="flex items-center space-x-3">
+          <div class="flex items-center space-x-2">
+            <label class="text-xs text-slate-300 font-medium">Table:</label>
+            <select id="sync-data-table-select" class="bg-slate-950 border border-slate-700 rounded px-2.5 py-1 text-xs text-white font-mono outline-none focus:border-purple-500 min-w-36"></select>
+          </div>
+          <label class="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer">
+            <input type="checkbox" id="sync-data-delete-missing" class="accent-purple-500 w-4 h-4 cursor-pointer">
+            <span>Delete target rows missing in source</span>
+          </label>
+        </div>
+        <button id="sync-data-btn-compare" onclick="executeDataCompare()" class="px-4 py-1.5 rounded bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs flex items-center space-x-1.5 shadow transition">
+          <span>🔍</span><span>Compare Rows</span>
+        </button>
+      </div>
+
+      <!-- Diff Summary & Preview -->
+      <div id="sync-data-results-container" class="hidden space-y-3 pt-2 border-t border-slate-800">
+        <div class="flex items-center space-x-3 text-xs font-mono">
+          <span id="sync-data-insert-badge" class="px-2.5 py-1 rounded bg-emerald-950/80 border border-emerald-800 text-emerald-400 font-bold">+ 0 Inserts</span>
+          <span id="sync-data-update-badge" class="px-2.5 py-1 rounded bg-amber-950/80 border border-amber-800 text-amber-400 font-bold">~ 0 Updates</span>
+          <span id="sync-data-delete-badge" class="px-2.5 py-1 rounded bg-rose-950/80 border border-rose-800 text-rose-400 font-bold">- 0 Deletes</span>
+        </div>
+
+        <div class="max-h-64 overflow-y-auto border border-slate-800 rounded bg-slate-950">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-900 text-slate-400 border-b border-slate-800 sticky top-0">
+              <tr>
+                <th class="p-2 w-16">Action</th>
+                <th class="p-2 w-24">Primary Key</th>
+                <th class="p-2">Row Values Preview</th>
+              </tr>
+            </thead>
+            <tbody id="sync-data-diff-rows" class="divide-y divide-slate-800/60 font-mono text-[11px]"></tbody>
+          </table>
+        </div>
+
+        <!-- Production Challenge Section -->
+        <div id="sync-data-challenge-container" class="hidden p-3 bg-rose-950/40 border border-rose-800/80 rounded-lg space-y-2">
+          <div class="text-xs font-semibold text-rose-300">⚠️ Production Target Guard</div>
+          <p class="text-[11px] text-slate-300">Type <span id="sync-data-challenge-target" class="font-mono font-bold text-rose-400">SYNC</span> to authorize applying row modifications to production.</p>
+          <input type="text" id="sync-data-challenge-input" placeholder="Type SYNC or table name" class="w-full bg-slate-900 border border-rose-700 rounded px-2.5 py-1.5 text-xs text-white outline-none focus:border-rose-500">
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end space-x-2 pt-3 border-t border-slate-800">
+        <button onclick="closeDataSyncModal()" class="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition">Cancel</button>
+        <button id="sync-data-btn-apply" onclick="executeDataApply()" disabled class="px-4 py-1.5 rounded bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs flex items-center space-x-1.5 shadow transition disabled:opacity-50 disabled:cursor-not-allowed">
+          <span>✓</span><span>Apply Changes to Target</span>
         </button>
       </div>
     </div>
@@ -9608,6 +9882,653 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       } catch (err) {
         if (logDiv) logDiv.innerHTML += `<div class="text-rose-400">Network error: ${escapeHtml(err.message)}</div>`;
         if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ Retry'; }
+      }
+    }
+
+    // =========================================================================
+    // Milestone 11: Schema & Data Synchronization Engine (Client UI)
+    // =========================================================================
+
+    function populateSyncConnectionSelects(srcSelectId, tgtSelectId) {
+      const src = document.getElementById(srcSelectId);
+      const tgt = document.getElementById(tgtSelectId);
+      if (!src || !tgt) return;
+      src.innerHTML = '';
+      tgt.innerHTML = '';
+      connections.forEach(c => {
+        const isCurrent = activeConnection && activeConnection.id === c.id;
+        const optSrc = document.createElement('option');
+        optSrc.value = c.id;
+        optSrc.textContent = `${c.name} (${c.environment || 'dev'}, ${c.driver})`;
+        if (isCurrent) optSrc.selected = true;
+        src.appendChild(optSrc);
+
+        const optTgt = document.createElement('option');
+        optTgt.value = c.id;
+        optTgt.textContent = `${c.name} (${c.environment || 'dev'}, ${c.driver})`;
+        tgt.appendChild(optTgt);
+      });
+      if (connections.length > 1 && tgt.options.length > 1) {
+        tgt.selectedIndex = 1;
+      }
+    }
+
+    async function ensureSyncSessionConnected(connId) {
+      try {
+        await apiFetch(`/api/session/connect/${connId}`, { method: 'POST' });
+      } catch (e) {
+        console.warn('Session already connected or connect returned:', e);
+      }
+    }
+
+    // --- 1. Structure Sync UI ---
+    let currentStructureDiffs = [];
+
+    function openStructureSyncModal() {
+      populateSyncConnectionSelects('sync-struct-source-conn', 'sync-struct-target-conn');
+      const diffContainer = document.getElementById('sync-struct-diff-container');
+      if (diffContainer) diffContainer.classList.add('hidden');
+      const applyBtn = document.getElementById('sync-struct-btn-apply');
+      if (applyBtn) applyBtn.disabled = true;
+      currentStructureDiffs = [];
+      const dlg = document.getElementById('structure-sync-dialog');
+      if (dlg) dlg.showModal();
+    }
+
+    function closeStructureSyncModal() {
+      const dlg = document.getElementById('structure-sync-dialog');
+      if (dlg) dlg.close();
+    }
+
+    function switchStructureSyncView(view) {
+      const diffTab = document.getElementById('sync-struct-tab-diff');
+      const sqlTab = document.getElementById('sync-struct-tab-sql');
+      const diffView = document.getElementById('sync-struct-view-diff');
+      const sqlView = document.getElementById('sync-struct-view-sql');
+      if (!diffTab || !sqlTab || !diffView || !sqlView) return;
+
+      if (view === 'diff') {
+        diffTab.className = 'px-2.5 py-1 rounded bg-slate-800 text-emerald-400 font-medium';
+        sqlTab.className = 'px-2.5 py-1 rounded hover:bg-slate-800 text-slate-400';
+        diffView.classList.remove('hidden');
+        sqlView.classList.add('hidden');
+      } else {
+        sqlTab.className = 'px-2.5 py-1 rounded bg-slate-800 text-emerald-400 font-medium';
+        diffTab.className = 'px-2.5 py-1 rounded hover:bg-slate-800 text-slate-400';
+        diffView.classList.add('hidden');
+        sqlView.classList.remove('hidden');
+        updateStructureScriptPreview();
+      }
+    }
+
+    function updateStructureScriptPreview() {
+      const preview = document.getElementById('sync-struct-script-preview');
+      if (!preview) return;
+      const selectedSQLs = currentStructureDiffs
+        .filter(d => d.selected && d.sql)
+        .map(d => d.sql);
+      preview.value = selectedSQLs.join('\n\n');
+    }
+
+    function toggleAllStructureDiffs(checked) {
+      currentStructureDiffs.forEach(d => { d.selected = checked; });
+      const checkboxes = document.querySelectorAll('.sync-struct-diff-check');
+      checkboxes.forEach(cb => { cb.checked = checked; });
+      const master = document.getElementById('sync-struct-master-check');
+      if (master) master.checked = checked;
+      updateStructureScriptPreview();
+      const applyBtn = document.getElementById('sync-struct-btn-apply');
+      if (applyBtn) {
+        applyBtn.disabled = !currentStructureDiffs.some(d => d.selected);
+      }
+    }
+
+    function toggleSingleStructureDiff(diffId, checked) {
+      const item = currentStructureDiffs.find(d => d.id === diffId);
+      if (item) item.selected = checked;
+      updateStructureScriptPreview();
+      const applyBtn = document.getElementById('sync-struct-btn-apply');
+      if (applyBtn) {
+        applyBtn.disabled = !currentStructureDiffs.some(d => d.selected);
+      }
+    }
+
+    async function executeStructureCompare() {
+      const srcConnId = document.getElementById('sync-struct-source-conn')?.value;
+      const tgtConnId = document.getElementById('sync-struct-target-conn')?.value;
+      const srcDB = document.getElementById('sync-struct-source-db')?.value?.trim() || '';
+      const tgtDB = document.getElementById('sync-struct-target-db')?.value?.trim() || '';
+      const includeDrops = document.getElementById('sync-struct-include-drops')?.checked || false;
+
+      if (!srcConnId || !tgtConnId) {
+        showToast('Please select source and target connections', 'error');
+        return;
+      }
+      if (srcConnId === tgtConnId && srcDB === tgtDB && !srcDB) {
+        showToast('Source and target cannot be identical without distinct database names', 'warning');
+        return;
+      }
+
+      const cmpBtn = document.getElementById('sync-struct-btn-compare');
+      if (cmpBtn) {
+        cmpBtn.disabled = true;
+        cmpBtn.innerHTML = '<span>⏳ Comparing...</span>';
+      }
+
+      try {
+        await ensureSyncSessionConnected(srcConnId);
+        await ensureSyncSessionConnected(tgtConnId);
+
+        const res = await apiFetch('/api/sync/structure/compare', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            source_session_id: srcConnId,
+            source_db: srcDB,
+            target_session_id: tgtConnId,
+            target_db: tgtDB,
+            include_drops: includeDrops
+          })
+        });
+
+        const data = await res.json();
+        currentStructureDiffs = data.diffs || [];
+
+        const diffContainer = document.getElementById('sync-struct-diff-container');
+        if (diffContainer) diffContainer.classList.remove('hidden');
+
+        const badge = document.getElementById('sync-struct-count-badge');
+        if (badge) badge.textContent = `${currentStructureDiffs.length} discrepancy(ies)`;
+
+        const tbody = document.getElementById('sync-struct-diff-rows');
+        if (tbody) {
+          if (currentStructureDiffs.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="5" class="p-6 text-center text-slate-400 font-sans">Schemas are completely identical! Zero differences found.</td></tr>`;
+          } else {
+            tbody.innerHTML = currentStructureDiffs.map(d => {
+              let actionBadge = '';
+              if (d.action.startsWith('CREATE') || d.action.startsWith('ADD')) {
+                actionBadge = `<span class="px-1.5 py-0.5 rounded bg-emerald-950 border border-emerald-800 text-emerald-400 font-semibold">${d.action}</span>`;
+              } else if (d.action.startsWith('MODIFY')) {
+                actionBadge = `<span class="px-1.5 py-0.5 rounded bg-amber-950 border border-amber-800 text-amber-400 font-semibold">${d.action}</span>`;
+              } else {
+                actionBadge = `<span class="px-1.5 py-0.5 rounded bg-rose-950 border border-rose-800 text-rose-400 font-semibold">${d.action}</span>`;
+              }
+
+              const objName = d.column ? `${d.table}.${d.column}` : (d.index ? `${d.table}.${d.index}` : d.table);
+
+              return `<tr class="hover:bg-slate-900/60">
+                <td class="p-2 text-center"><input type="checkbox" ${d.selected ? 'checked' : ''} onchange="toggleSingleStructureDiff('${d.id}', this.checked)" class="sync-struct-diff-check accent-emerald-500"></td>
+                <td class="p-2 font-bold text-white">${escapeHtml(objName)}</td>
+                <td class="p-2">${actionBadge}</td>
+                <td class="p-2 text-sky-300">${escapeHtml(d.source_def || '')}</td>
+                <td class="p-2 text-slate-400">${escapeHtml(d.target_def || '')}</td>
+              </tr>`;
+            }).join('');
+          }
+        }
+
+        updateStructureScriptPreview();
+
+        // Check if target is Production
+        const tgtConn = connections.find(c => c.id === tgtConnId);
+        const challengeBox = document.getElementById('sync-struct-challenge-container');
+        if (challengeBox) {
+          if (tgtConn && tgtConn.environment && tgtConn.environment.toLowerCase() === 'production') {
+            challengeBox.classList.remove('hidden');
+            const targetSpan = document.getElementById('sync-struct-challenge-target');
+            if (targetSpan) targetSpan.textContent = tgtDB || tgtConn.name || 'MIGRATE';
+          } else {
+            challengeBox.classList.add('hidden');
+          }
+        }
+
+        const applyBtn = document.getElementById('sync-struct-btn-apply');
+        if (applyBtn) {
+          applyBtn.disabled = currentStructureDiffs.length === 0;
+          applyBtn.textContent = `⚡ Execute Migration (${currentStructureDiffs.length})`;
+        }
+      } catch (err) {
+        showToast('Structure compare failed: ' + err.message, 'error');
+      } finally {
+        if (cmpBtn) {
+          cmpBtn.disabled = false;
+          cmpBtn.innerHTML = '<span>🔍</span><span>Compare Schemas</span>';
+        }
+      }
+    }
+
+    async function executeStructureApply() {
+      const tgtConnId = document.getElementById('sync-struct-target-conn')?.value;
+      const tgtDB = document.getElementById('sync-struct-target-db')?.value?.trim() || '';
+      const selectedSQLs = currentStructureDiffs
+        .filter(d => d.selected && d.sql)
+        .map(d => d.sql);
+
+      if (selectedSQLs.length === 0) {
+        showToast('No migration statements selected to apply', 'warning');
+        return;
+      }
+
+      const tgtConn = connections.find(c => c.id === tgtConnId);
+      const isProd = tgtConn && tgtConn.environment && tgtConn.environment.toLowerCase() === 'production';
+      let challengeInput = '';
+
+      if (isProd) {
+        const inp = document.getElementById('sync-struct-challenge-input');
+        challengeInput = inp ? inp.value.trim() : '';
+        const expected = tgtDB || tgtConn.name || 'MIGRATE';
+        if (challengeInput.toUpperCase() !== expected.toUpperCase() && challengeInput.toUpperCase() !== 'MIGRATE') {
+          showToast(`Challenge input required. Type '${expected}' or 'MIGRATE'`, 'error');
+          return;
+        }
+      }
+
+      const applyBtn = document.getElementById('sync-struct-btn-apply');
+      if (applyBtn) {
+        applyBtn.disabled = true;
+        applyBtn.innerHTML = '<span>⏳ Applying...</span>';
+      }
+
+      try {
+        const res = await apiFetch('/api/sync/structure/apply', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            target_session_id: tgtConnId,
+            target_db: tgtDB,
+            statements: selectedSQLs,
+            confirmed: true,
+            challenge_input: challengeInput
+          })
+        });
+
+        const data = await res.json();
+        if (data.success) {
+          showToast(`✓ Migration applied successfully (${data.executed} statements executed)`, 'success');
+          closeStructureSyncModal();
+          if (typeof refreshActiveSchema === 'function') refreshActiveSchema();
+        } else {
+          showToast(`Migration partially failed: ${data.errors?.join('; ')}`, 'error');
+        }
+      } catch (err) {
+        showToast('Apply failed: ' + err.message, 'error');
+      } finally {
+        if (applyBtn) {
+          applyBtn.disabled = false;
+          applyBtn.textContent = '⚡ Execute Migration';
+        }
+      }
+    }
+
+    // --- 2. Cross-Connection Data Transfer UI ---
+    let transferSourceTables = [];
+
+    function openDataTransferModal() {
+      populateSyncConnectionSelects('sync-transfer-source-conn', 'sync-transfer-target-conn');
+      loadTransferSourceTables();
+      const prog = document.getElementById('sync-transfer-progress-container');
+      if (prog) prog.classList.add('hidden');
+      const dlg = document.getElementById('data-transfer-dialog');
+      if (dlg) dlg.showModal();
+    }
+
+    function closeDataTransferModal() {
+      const dlg = document.getElementById('data-transfer-dialog');
+      if (dlg) dlg.close();
+    }
+
+    async function loadTransferSourceTables() {
+      const srcConnId = document.getElementById('sync-transfer-source-conn')?.value;
+      const srcDB = document.getElementById('sync-transfer-source-db')?.value?.trim() || '';
+      const listDiv = document.getElementById('sync-transfer-table-list');
+      if (!srcConnId || !listDiv) return;
+
+      listDiv.innerHTML = '<div class="text-slate-400 col-span-2 text-center py-4 text-xs">Loading tables...</div>';
+
+      try {
+        await ensureSyncSessionConnected(srcConnId);
+        let url = `/api/session/${srcConnId}/schema`;
+        if (srcDB) url += `?db=${encodeURIComponent(srcDB)}`;
+        const res = await apiFetch(url);
+        const data = await res.json();
+        transferSourceTables = (data.tables || []).map(t => t.name);
+
+        if (transferSourceTables.length === 0) {
+          listDiv.innerHTML = '<div class="text-slate-500 col-span-2 text-center py-4 font-sans text-xs">No tables found in source database</div>';
+        } else {
+          listDiv.innerHTML = transferSourceTables.map(tbl => `
+            <label class="flex items-center space-x-2 text-slate-200 cursor-pointer hover:text-white">
+              <input type="checkbox" value="${escapeHtml(tbl)}" checked class="sync-transfer-tbl-check accent-cyan-500 w-4 h-4 cursor-pointer">
+              <span class="truncate">${escapeHtml(tbl)}</span>
+            </label>
+          `).join('');
+        }
+      } catch (err) {
+        listDiv.innerHTML = `<div class="text-rose-400 col-span-2 text-center py-4 font-sans text-xs">Failed to load tables: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    function toggleAllTransferTables(checked) {
+      document.querySelectorAll('.sync-transfer-tbl-check').forEach(cb => { cb.checked = checked; });
+    }
+
+    async function executeDataTransfer() {
+      const srcConnId = document.getElementById('sync-transfer-source-conn')?.value;
+      const tgtConnId = document.getElementById('sync-transfer-target-conn')?.value;
+      const srcDB = document.getElementById('sync-transfer-source-db')?.value?.trim() || '';
+      const tgtDB = document.getElementById('sync-transfer-target-db')?.value?.trim() || '';
+
+      const checkedTables = Array.from(document.querySelectorAll('.sync-transfer-tbl-check:checked')).map(cb => cb.value);
+      if (checkedTables.length === 0) {
+        showToast('Please select at least one table to transfer', 'warning');
+        return;
+      }
+
+      const createTables = document.getElementById('sync-transfer-create-tables')?.checked || false;
+      const truncateTarget = document.getElementById('sync-transfer-truncate')?.checked || false;
+      const batchSize = parseInt(document.getElementById('sync-transfer-batch-size')?.value, 10) || 500;
+
+      const progContainer = document.getElementById('sync-transfer-progress-container');
+      const progLabel = document.getElementById('sync-transfer-progress-label');
+      const progCount = document.getElementById('sync-transfer-progress-count');
+      const progBar = document.getElementById('sync-transfer-progress-bar');
+      const logDiv = document.getElementById('sync-transfer-log');
+      const startBtn = document.getElementById('sync-transfer-btn-start');
+
+      if (progContainer) progContainer.classList.remove('hidden');
+      if (progLabel) progLabel.textContent = 'Connecting and transferring tables...';
+      if (logDiv) logDiv.innerHTML = '<div class="text-cyan-400">Initializing cross-connection data transfer...</div>';
+      if (startBtn) {
+        startBtn.disabled = true;
+        startBtn.innerHTML = '<span>⏳ Transferring...</span>';
+      }
+
+      try {
+        await ensureSyncSessionConnected(srcConnId);
+        await ensureSyncSessionConnected(tgtConnId);
+
+        const response = await fetch('/api/sync/data/transfer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            source_session_id: srcConnId,
+            source_db: srcDB,
+            target_session_id: tgtConnId,
+            target_db: tgtDB,
+            tables: checkedTables,
+            create_tables: createTables,
+            truncate_target: truncateTarget,
+            batch_size: batchSize
+          })
+        });
+
+        if (!response.ok) {
+          const err = await response.text();
+          if (logDiv) logDiv.innerHTML += `<div class="text-rose-400">Transfer failed: ${escapeHtml(err)}</div>`;
+          if (startBtn) { startBtn.disabled = false; startBtn.textContent = '🚀 Start Transfer'; }
+          return;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const event = JSON.parse(line);
+              if (event.event === 'table_start') {
+                if (progLabel) progLabel.textContent = `Transferring table: ${event.table}`;
+                if (logDiv) logDiv.innerHTML += `<div class="text-sky-300">📦 Table: ${escapeHtml(event.table)} started</div>`;
+              } else if (event.event === 'progress') {
+                if (progCount) progCount.textContent = `${event.total_transferred} rows copied`;
+                if (progBar) progBar.style.width = '60%';
+              } else if (event.event === 'table_done') {
+                if (logDiv) logDiv.innerHTML += `<div class="text-emerald-400">✓ Table ${escapeHtml(event.table)}: ${event.rows_copied} rows copied</div>`;
+              } else if (event.event === 'done') {
+                if (progBar) progBar.style.width = '100%';
+                if (progLabel) progLabel.textContent = 'Transfer Completed!';
+                if (progCount) progCount.textContent = `${event.total_rows} total rows transferred`;
+                if (logDiv) logDiv.innerHTML += `<div class="font-bold text-white pt-2 border-t border-slate-800">Done: ${event.total_tables} tables, ${event.total_rows} rows transferred.</div>`;
+              } else if (event.event === 'table_error') {
+                if (logDiv) logDiv.innerHTML += `<div class="text-rose-400">❌ Table ${escapeHtml(event.table)} error: ${escapeHtml(event.error)}</div>`;
+              }
+              if (logDiv) logDiv.scrollTop = logDiv.scrollHeight;
+            } catch (e) {
+              console.error('Error parsing transfer event:', e);
+            }
+          }
+        }
+
+        showToast('✓ Data transfer completed successfully', 'success');
+        if (startBtn) {
+          startBtn.disabled = false;
+          startBtn.textContent = '✓ Done';
+        }
+      } catch (err) {
+        if (logDiv) logDiv.innerHTML += `<div class="text-rose-400">Network error: ${escapeHtml(err.message)}</div>`;
+        if (startBtn) { startBtn.disabled = false; startBtn.textContent = '🚀 Start Transfer'; }
+      }
+    }
+
+    // --- 3. Row-Level Data Sync UI ---
+    let currentDataSyncOperations = [];
+
+    function openDataSyncModal() {
+      populateSyncConnectionSelects('sync-data-source-conn', 'sync-data-target-conn');
+      loadDataSyncTables();
+      const resContainer = document.getElementById('sync-data-results-container');
+      if (resContainer) resContainer.classList.add('hidden');
+      const applyBtn = document.getElementById('sync-data-btn-apply');
+      if (applyBtn) applyBtn.disabled = true;
+      currentDataSyncOperations = [];
+      const dlg = document.getElementById('data-sync-dialog');
+      if (dlg) dlg.showModal();
+    }
+
+    function closeDataSyncModal() {
+      const dlg = document.getElementById('data-sync-dialog');
+      if (dlg) dlg.close();
+    }
+
+    async function loadDataSyncTables() {
+      const srcConnId = document.getElementById('sync-data-source-conn')?.value;
+      const srcDB = document.getElementById('sync-data-source-db')?.value?.trim() || '';
+      const select = document.getElementById('sync-data-table-select');
+      if (!srcConnId || !select) return;
+
+      select.innerHTML = '<option>Loading...</option>';
+
+      try {
+        await ensureSyncSessionConnected(srcConnId);
+        let url = `/api/session/${srcConnId}/schema`;
+        if (srcDB) url += `?db=${encodeURIComponent(srcDB)}`;
+        const res = await apiFetch(url);
+        const data = await res.json();
+        const tables = (data.tables || []).map(t => t.name);
+
+        select.innerHTML = '';
+        tables.forEach(tbl => {
+          const opt = document.createElement('option');
+          opt.value = tbl;
+          opt.textContent = tbl;
+          select.appendChild(opt);
+        });
+      } catch (err) {
+        select.innerHTML = '<option>Error loading tables</option>';
+      }
+    }
+
+    async function executeDataCompare() {
+      const srcConnId = document.getElementById('sync-data-source-conn')?.value;
+      const tgtConnId = document.getElementById('sync-data-target-conn')?.value;
+      const srcDB = document.getElementById('sync-data-source-db')?.value?.trim() || '';
+      const tgtDB = document.getElementById('sync-data-target-db')?.value?.trim() || '';
+      const table = document.getElementById('sync-data-table-select')?.value;
+      const deleteMissing = document.getElementById('sync-data-delete-missing')?.checked || false;
+
+      if (!table) {
+        showToast('Please select a table to compare', 'warning');
+        return;
+      }
+
+      const cmpBtn = document.getElementById('sync-data-btn-compare');
+      if (cmpBtn) {
+        cmpBtn.disabled = true;
+        cmpBtn.innerHTML = '<span>⏳ Comparing...</span>';
+      }
+
+      try {
+        await ensureSyncSessionConnected(srcConnId);
+        await ensureSyncSessionConnected(tgtConnId);
+
+        const res = await apiFetch('/api/sync/data/compare', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            source_session_id: srcConnId,
+            source_db: srcDB,
+            target_session_id: tgtConnId,
+            target_db: tgtDB,
+            table: table,
+            delete_missing: deleteMissing
+          })
+        });
+
+        const data = await res.json();
+        currentDataSyncOperations = data.operations || [];
+
+        const resultsContainer = document.getElementById('sync-data-results-container');
+        if (resultsContainer) resultsContainer.classList.remove('hidden');
+
+        const insertBadge = document.getElementById('sync-data-insert-badge');
+        const updateBadge = document.getElementById('sync-data-update-badge');
+        const deleteBadge = document.getElementById('sync-data-delete-badge');
+        if (insertBadge) insertBadge.textContent = `+ ${data.summary?.insert_count || 0} Inserts`;
+        if (updateBadge) updateBadge.textContent = `~ ${data.summary?.update_count || 0} Updates`;
+        if (deleteBadge) deleteBadge.textContent = `- ${data.summary?.delete_count || 0} Deletes`;
+
+        const tbody = document.getElementById('sync-data-diff-rows');
+        if (tbody) {
+          if (currentDataSyncOperations.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="3" class="p-6 text-center text-slate-400 font-sans">Tables are completely synchronized! Zero row differences found.</td></tr>`;
+          } else {
+            tbody.innerHTML = currentDataSyncOperations.slice(0, 100).map(op => {
+              let badge = '';
+              if (op.type === 'insert') {
+                badge = `<span class="px-1.5 py-0.5 rounded bg-emerald-950 border border-emerald-800 text-emerald-400 font-semibold text-[10px]">INSERT</span>`;
+              } else if (op.type === 'update') {
+                badge = `<span class="px-1.5 py-0.5 rounded bg-amber-950 border border-amber-800 text-amber-400 font-semibold text-[10px]">UPDATE</span>`;
+              } else {
+                badge = `<span class="px-1.5 py-0.5 rounded bg-rose-950 border border-rose-800 text-rose-400 font-semibold text-[10px]">DELETE</span>`;
+              }
+
+              const rowPreview = (op.data || []).map(v => v === null ? '<null>' : v).join(', ');
+
+              return `<tr class="hover:bg-slate-900/60">
+                <td class="p-2">${badge}</td>
+                <td class="p-2 font-bold text-white">${escapeHtml(String(op.pk))}</td>
+                <td class="p-2 text-slate-300 truncate max-w-lg" title="${escapeHtml(rowPreview)}">${escapeHtml(rowPreview)}</td>
+              </tr>`;
+            }).join('');
+          }
+        }
+
+        // Check if target is Production
+        const tgtConn = connections.find(c => c.id === tgtConnId);
+        const challengeBox = document.getElementById('sync-data-challenge-container');
+        if (challengeBox) {
+          if (tgtConn && tgtConn.environment && tgtConn.environment.toLowerCase() === 'production') {
+            challengeBox.classList.remove('hidden');
+            const targetSpan = document.getElementById('sync-data-challenge-target');
+            if (targetSpan) targetSpan.textContent = table || 'SYNC';
+          } else {
+            challengeBox.classList.add('hidden');
+          }
+        }
+
+        const applyBtn = document.getElementById('sync-data-btn-apply');
+        if (applyBtn) {
+          applyBtn.disabled = currentDataSyncOperations.length === 0;
+          applyBtn.textContent = `✓ Apply Sync to Target (${currentDataSyncOperations.length} rows)`;
+        }
+      } catch (err) {
+        showToast('Data compare failed: ' + err.message, 'error');
+      } finally {
+        if (cmpBtn) {
+          cmpBtn.disabled = false;
+          cmpBtn.innerHTML = '<span>🔍</span><span>Compare Rows</span>';
+        }
+      }
+    }
+
+    async function executeDataApply() {
+      const tgtConnId = document.getElementById('sync-data-target-conn')?.value;
+      const tgtDB = document.getElementById('sync-data-target-db')?.value?.trim() || '';
+      const table = document.getElementById('sync-data-table-select')?.value;
+
+      if (!table || currentDataSyncOperations.length === 0) {
+        showToast('No operations to apply', 'warning');
+        return;
+      }
+
+      const tgtConn = connections.find(c => c.id === tgtConnId);
+      const isProd = tgtConn && tgtConn.environment && tgtConn.environment.toLowerCase() === 'production';
+      let challengeInput = '';
+
+      if (isProd) {
+        const inp = document.getElementById('sync-data-challenge-input');
+        challengeInput = inp ? inp.value.trim() : '';
+        const expected = table || 'SYNC';
+        if (challengeInput.toUpperCase() !== expected.toUpperCase() && challengeInput.toUpperCase() !== 'SYNC') {
+          showToast(`Challenge input required. Type '${expected}' or 'SYNC'`, 'error');
+          return;
+        }
+      }
+
+      const applyBtn = document.getElementById('sync-data-btn-apply');
+      if (applyBtn) {
+        applyBtn.disabled = true;
+        applyBtn.innerHTML = '<span>⏳ Applying...</span>';
+      }
+
+      try {
+        const res = await apiFetch('/api/sync/data/apply', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            target_session_id: tgtConnId,
+            target_db: tgtDB,
+            table: table,
+            operations: currentDataSyncOperations,
+            confirmed: true,
+            challenge_input: challengeInput
+          })
+        });
+
+        const data = await res.json();
+        if (data.success) {
+          showToast(`✓ Data sync applied: +${data.inserted} inserted, ~${data.updated} updated, -${data.deleted} deleted`, 'success');
+          closeDataSyncModal();
+        } else {
+          showToast(`Data sync had errors: ${data.errors?.join('; ')}`, 'error');
+        }
+      } catch (err) {
+        showToast('Data sync apply failed: ' + err.message, 'error');
+      } finally {
+        if (applyBtn) {
+          applyBtn.disabled = false;
+          applyBtn.textContent = '✓ Apply Changes to Target';
+        }
       }
     }
 
