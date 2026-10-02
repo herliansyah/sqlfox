@@ -168,6 +168,21 @@ func TestServer_API_Lifecycle(t *testing.T) {
 	}
 	resp.Body.Close()
 
+	// 8b. Ping Session endpoint
+	resp, err = client.Post(fmt.Sprintf("%s/api/session/%s/ping", ts.URL, savedConn.ID), "application/json", nil)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("Ping session failed: %v", err)
+	}
+	var pingData map[string]interface{}
+	_ = json.NewDecoder(resp.Body).Decode(&pingData)
+	resp.Body.Close()
+	if _, ok := pingData["latency_ms"]; !ok {
+		t.Errorf("Expected latency_ms in ping response, got %v", pingData)
+	}
+	if _, ok := pingData["memory_mb"]; !ok {
+		t.Errorf("Expected memory_mb in ping response, got %v", pingData)
+	}
+
 	// 9. Test Transient Connection Test endpoint (SQLite)
 	testTransientPayload := vault.ConnectionRecord{
 		Driver:       "sqlite",

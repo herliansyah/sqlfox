@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -32,6 +34,35 @@ func (s *Server) handleConnectSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, sess)
+}
+
+func (s *Server) handlePingSession(w http.ResponseWriter, r *http.Request) {
+	connID := r.PathValue("id")
+	sess, err := s.sessionMgr.GetSession(connID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	latency, err := sess.Session.Ping(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "ping failed: "+err.Error())
+		return
+	}
+	sess.LatencyMs = latency.Milliseconds()
+
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	allocMB := math.Round(float64(m.Alloc)/1024/1024*10) / 10
+	sess.MemoryMB = allocMB
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"latency_ms": latency.Milliseconds(),
+		"memory_mb":  allocMB,
+	})
 }
 
 func (s *Server) handleGetSchema(w http.ResponseWriter, r *http.Request) {
