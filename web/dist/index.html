@@ -259,6 +259,10 @@
             <span class="font-medium text-purple-400">⚖️ Row-Level Data Sync</span>
             <span class="text-[10px] text-slate-400">Keyset delta reconciler (Insert/Update/Delete)</span>
           </button>
+          <button onclick="openERDCanvas(); toggleTopDBToolsMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex flex-col border-t border-slate-800">
+            <span class="font-medium text-indigo-400">🗺️ Visual ERD Canvas</span>
+            <span class="text-[10px] text-slate-400">Interactive ER diagram with FK relationships</span>
+          </button>
         </div>
       </div>
 
@@ -2553,6 +2557,31 @@
           </div>
         </div>
       </div>
+    </div>
+  </dialog>
+
+  <!-- Dialog 26: Visual ERD Canvas -->
+  <dialog id="erd-dialog" class="m-auto bg-slate-950 border border-slate-700 text-white rounded-xl shadow-2xl p-0 outline-none w-[96vw] max-w-[1400px] h-[90vh] backdrop:bg-black/75 backdrop:backdrop-blur-sm overflow-hidden flex flex-col">
+    <div class="flex items-center justify-between px-4 py-2.5 border-b border-slate-700 bg-slate-900 flex-shrink-0">
+      <div class="flex items-center space-x-3">
+        <span class="font-semibold text-sm text-white">🗺️ Entity Relationship Diagram</span>
+        <span id="erd-table-count" class="text-xs text-slate-400"></span>
+      </div>
+      <div class="flex items-center space-x-2">
+        <button onclick="erdAutoLayout(true)" class="h-7 bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-slate-600 text-xs transition" title="Auto-arrange all tables">⚡ Auto Layout</button>
+        <button onclick="erdFitAll()" class="h-7 bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-slate-600 text-xs transition" title="Fit all tables in view">⊡ Fit All</button>
+        <button onclick="document.getElementById('erd-dialog').close()" class="h-7 w-7 bg-slate-800 hover:bg-rose-900 text-slate-400 hover:text-rose-300 rounded border border-slate-600 text-sm transition flex items-center justify-center" title="Close (Escape)">✕</button>
+      </div>
+    </div>
+    <div id="erd-canvas-wrapper" class="relative flex-1 overflow-hidden cursor-grab select-none" style="background-color:#020617;background-image:radial-gradient(circle,#1e293b 1px,transparent 1px);background-size:24px 24px;">
+      <div id="erd-viewport" style="position:absolute;top:0;left:0;transform-origin:0 0;will-change:transform;">
+        <svg id="erd-svg" style="position:absolute;top:0;left:0;overflow:visible;pointer-events:none;"></svg>
+        <div id="erd-cards" style="position:absolute;top:0;left:0;"></div>
+      </div>
+    </div>
+    <div class="px-3 py-1.5 border-t border-slate-800 bg-slate-900 flex items-center justify-between text-[11px] text-slate-500 flex-shrink-0">
+      <span>Drag tables · Scroll to zoom · Drag canvas to pan · 🔑 PK · 🔗 FK</span>
+      <span id="erd-zoom-label" class="font-mono">100%</span>
     </div>
   </dialog>
 
@@ -13289,7 +13318,262 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
     }
 
 
+
+    // --- Visual ERD Canvas ---
+    const erdState = {
+      tables: [],       // TableMetadata[] from schema API
+      positions: {},    // { [tableName]: { x, y } }
+      scale: 1,
+      panX: 0, panY: 0,
+      draggingCard: null,
+      panning: false, panStart: null,
+      listenersAttached: false,
+    };
+
+    async function openERDCanvas() {
+      if (!activeConnection) { showNativeAlert('Connect to a session first.', 'ERD'); return; }
+      const db = currentDb || '';
+      const dialog = document.getElementById('erd-dialog');
+      dialog.showModal();
+      document.getElementById('erd-table-count').textContent = 'Loading…';
+      try {
+        const url = `/api/session/${activeConnection.id}/schema${db ? '?database=' + encodeURIComponent(db) : ''}`;
+        const res = await apiFetch(url);
+        const data = await res.json();
+        erdState.tables = data.tables || [];
+        erdState.scale = 1; erdState.panX = 0; erdState.panY = 0;
+        const storeKey = `erd-pos-${activeConnection.id}-${db}`;
+        try { erdState.positions = JSON.parse(sessionStorage.getItem(storeKey) || '{}'); } catch { erdState.positions = {}; }
+        erdAutoLayout(false); // layout only tables with no stored position
+        erdRender();
+        erdFitAll();
+        if (!erdState.listenersAttached) {
+          document.addEventListener('mousemove', erdOnMouseMove);
+          document.addEventListener('mouseup', erdOnMouseUp);
+          document.getElementById('erd-dialog').addEventListener('close', () => {
+            document.removeEventListener('mousemove', erdOnMouseMove);
+            document.removeEventListener('mouseup', erdOnMouseUp);
+            erdState.listenersAttached = false;
+          });
+          erdState.listenersAttached = true;
+        }
+      } catch (err) {
+        document.getElementById('erd-table-count').textContent = 'Failed to load schema';
+        console.error('ERD load error', err);
+      }
+      const wrapper = document.getElementById('erd-canvas-wrapper');
+      wrapper.onmousedown = erdOnWrapperMouseDown;
+      wrapper.onwheel = erdOnWheel;
+    }
+
+    function erdAutoLayout(force = true) {
+      // ponytail: grid layout. Ceiling: no FK-aware topological sort.
+      // Upgrade: topological sort by FK depth for cleaner flow diagrams.
+      const CARD_W = 220, ROW_GAP = 40;
+      const COLS = Math.max(1, Math.ceil(Math.sqrt(erdState.tables.length)));
+      let col = 0, row = 0, rowMaxH = 0;
+      erdState.tables.forEach(t => {
+        if (!force && erdState.positions[t.name]) return;
+        const h = 50 + (t.columns || []).length * 20;
+        erdState.positions[t.name] = {
+          x: col * (CARD_W + 60) + 40,
+          y: row * (rowMaxH + ROW_GAP) + 40,
+        };
+        rowMaxH = Math.max(rowMaxH, h);
+        col++;
+        if (col >= COLS) { col = 0; row++; rowMaxH = 0; }
+      });
+      erdSavePositions();
+    }
+
+    function erdSavePositions() {
+      if (!activeConnection) return;
+      const db = currentDb || '';
+      sessionStorage.setItem(`erd-pos-${activeConnection.id}-${db}`, JSON.stringify(erdState.positions));
+    }
+
+    function erdRender() {
+      erdApplyTransform();
+      erdRenderCards();
+      erdRenderLines();
+      const count = erdState.tables.length;
+      const fkCount = erdState.tables.reduce((s, t) => s + (t.foreign_keys || []).length, 0);
+      document.getElementById('erd-table-count').textContent =
+        `${count} table${count !== 1 ? 's' : ''} · ${fkCount} relationship${fkCount !== 1 ? 's' : ''}`;
+      document.getElementById('erd-zoom-label').textContent = Math.round(erdState.scale * 100) + '%';
+    }
+
+    function erdApplyTransform() {
+      const vp = document.getElementById('erd-viewport');
+      if (vp) vp.style.transform = `translate(${erdState.panX}px,${erdState.panY}px) scale(${erdState.scale})`;
+    }
+
+    function erdRenderCards() {
+      const container = document.getElementById('erd-cards');
+      if (!container) return;
+      container.innerHTML = '';
+      erdState.tables.forEach(t => {
+        const pos = erdState.positions[t.name] || { x: 40, y: 40 };
+        const fkCols = new Set((t.foreign_keys || []).map(fk => fk.column));
+        const pkCols = new Set((t.columns || []).filter(c => c.key === 'PRI').map(c => c.name));
+        const card = document.createElement('div');
+        card.dataset.table = t.name;
+        card.className = 'erd-card';
+        card.style.cssText = `position:absolute;left:${pos.x}px;top:${pos.y}px;width:220px;cursor:grab;z-index:10;background:#0f172a;border:1px solid #334155;border-radius:8px;box-shadow:0 4px 24px #0008;overflow:hidden;font-size:12px;`;
+        card.innerHTML = `
+          <div style="background:#1e293b;padding:6px 10px;font-weight:600;color:#7dd3fc;border-bottom:1px solid #1e3a5f;display:flex;align-items:center;justify-content:space-between;cursor:grab;">
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:170px;" title="${escapeHtml(t.name)}">📋 ${escapeHtml(t.name)}</span>
+            <span style="color:#475569;font-size:10px;font-family:monospace;margin-left:4px;">${(t.columns||[]).length}</span>
+          </div>
+          <div>${(t.columns||[]).slice(0,15).map(c=>`
+            <div style="padding:2px 10px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #1e293b;">
+              <span style="font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px;color:${pkCols.has(c.name)?'#34d399':fkCols.has(c.name)?'#fbbf24':'#cbd5e1'};" title="${escapeHtml(c.name)}: ${escapeHtml(c.type||'')}">
+                ${pkCols.has(c.name)?'🔑 ':fkCols.has(c.name)?'🔗 ':''}${escapeHtml(c.name)}
+              </span>
+              <span style="color:#475569;font-size:10px;font-family:monospace;flex-shrink:0;margin-left:4px;">${escapeHtml((c.type||'').split('(')[0].toUpperCase())}</span>
+            </div>
+          `).join('')}${(t.columns||[]).length>15?`<div style="padding:2px 10px;color:#475569;font-size:10px;">+${(t.columns||[]).length-15} more…</div>`:''}</div>
+        `;
+        card.addEventListener('mousedown', erdOnCardMouseDown);
+        container.appendChild(card);
+      });
+    }
+
+    function erdRenderLines() {
+      const svg = document.getElementById('erd-svg');
+      if (!svg) return;
+      svg.innerHTML = '';
+      const defs = document.createElementNS('http://www.w3.org/2000/svg','defs');
+      defs.innerHTML = `<marker id="erd-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#f59e0b" opacity="0.85"/></marker>`;
+      svg.appendChild(defs);
+      const CARD_W = 220;
+      erdState.tables.forEach(src => {
+        (src.foreign_keys||[]).forEach(fk => {
+          const sp = erdState.positions[src.name];
+          const dp = erdState.positions[fk.referenced_table];
+          if (!sp || !dp) return;
+          const dst = erdState.tables.find(t => t.name === fk.referenced_table);
+          const sh = 36 + Math.min(15, (src.columns||[]).length)*20;
+          const dh = 36 + Math.min(15, (dst?.columns||[]).length)*20;
+          // Connect right/left edge depending on relative positions
+          const srcRight = sp.x + CARD_W < dp.x;
+          const x1 = srcRight ? sp.x + CARD_W : sp.x;
+          const y1 = sp.y + sh / 2;
+          const x2 = srcRight ? dp.x : dp.x + CARD_W;
+          const y2 = dp.y + dh / 2;
+          const cx = (x1 + x2) / 2;
+          const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+          path.setAttribute('d', `M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}`);
+          path.setAttribute('stroke','#f59e0b');
+          path.setAttribute('stroke-width','1.5');
+          path.setAttribute('stroke-opacity','0.55');
+          path.setAttribute('fill','none');
+          path.setAttribute('marker-end','url(#erd-arrow)');
+          svg.appendChild(path);
+          // FK label
+          const label = document.createElementNS('http://www.w3.org/2000/svg','text');
+          label.setAttribute('x', cx);
+          label.setAttribute('y', (y1+y2)/2 - 4);
+          label.setAttribute('text-anchor','middle');
+          label.setAttribute('fill','#64748b');
+          label.setAttribute('font-size','9');
+          label.setAttribute('font-family','monospace');
+          label.textContent = `${fk.column}→${fk.referenced_column}`;
+          svg.appendChild(label);
+        });
+      });
+    }
+
+    function erdFitAll() {
+      const tables = erdState.tables;
+      if (tables.length === 0) return;
+      const CARD_W = 220;
+      let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
+      tables.forEach(t => {
+        const p = erdState.positions[t.name] || {x:0,y:0};
+        const h = 36 + Math.min(15,(t.columns||[]).length)*20;
+        minX=Math.min(minX,p.x); minY=Math.min(minY,p.y);
+        maxX=Math.max(maxX,p.x+CARD_W); maxY=Math.max(maxY,p.y+h);
+      });
+      const wrapper = document.getElementById('erd-canvas-wrapper');
+      const ww = wrapper.clientWidth, wh = wrapper.clientHeight;
+      const cw = maxX - minX + 80, ch = maxY - minY + 80;
+      const scale = Math.min(1, ww/cw, wh/ch);
+      erdState.scale = scale;
+      erdState.panX = (ww - cw*scale)/2 - minX*scale + 40*scale;
+      erdState.panY = (wh - ch*scale)/2 - minY*scale + 40*scale;
+      erdApplyTransform();
+      document.getElementById('erd-zoom-label').textContent = Math.round(scale*100)+'%';
+    }
+
+    function erdOnCardMouseDown(e) {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      const card = e.currentTarget;
+      const name = card.dataset.table;
+      const pos = erdState.positions[name] || {x:0,y:0};
+      erdState.draggingCard = { name, startMouseX:e.clientX, startMouseY:e.clientY, startCardX:pos.x, startCardY:pos.y };
+      card.style.cursor = 'grabbing'; card.style.zIndex = '100';
+      e.preventDefault();
+    }
+
+    function erdOnWrapperMouseDown(e) {
+      if (e.button === 1 || (e.button === 0 && !e.target.closest('.erd-card'))) {
+        erdState.panning = true;
+        erdState.panStart = { mouseX:e.clientX, mouseY:e.clientY, panX:erdState.panX, panY:erdState.panY };
+        e.currentTarget.style.cursor = 'grabbing';
+        e.preventDefault();
+      }
+    }
+
+    function erdOnMouseMove(e) {
+      if (erdState.draggingCard) {
+        const dx = (e.clientX - erdState.draggingCard.startMouseX) / erdState.scale;
+        const dy = (e.clientY - erdState.draggingCard.startMouseY) / erdState.scale;
+        const nx = Math.max(0, erdState.draggingCard.startCardX + dx);
+        const ny = Math.max(0, erdState.draggingCard.startCardY + dy);
+        erdState.positions[erdState.draggingCard.name] = {x:nx, y:ny};
+        const card = document.querySelector(`.erd-card[data-table="${CSS.escape(erdState.draggingCard.name)}"]`);
+        if (card) { card.style.left=nx+'px'; card.style.top=ny+'px'; }
+        erdRenderLines();
+      } else if (erdState.panning && erdState.panStart) {
+        erdState.panX = erdState.panStart.panX + (e.clientX - erdState.panStart.mouseX);
+        erdState.panY = erdState.panStart.panY + (e.clientY - erdState.panStart.mouseY);
+        erdApplyTransform();
+      }
+    }
+
+    function erdOnMouseUp() {
+      if (erdState.draggingCard) {
+        const card = document.querySelector(`.erd-card[data-table="${CSS.escape(erdState.draggingCard.name)}"]`);
+        if (card) { card.style.cursor='grab'; card.style.zIndex='10'; }
+        erdState.draggingCard = null;
+        erdSavePositions();
+      }
+      if (erdState.panning) {
+        erdState.panning = false; erdState.panStart = null;
+        const w = document.getElementById('erd-canvas-wrapper');
+        if (w) w.style.cursor = 'grab';
+      }
+    }
+
+    function erdOnWheel(e) {
+      e.preventDefault();
+      const wrapper = document.getElementById('erd-canvas-wrapper');
+      const rect = wrapper.getBoundingClientRect();
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      const delta = e.deltaY > 0 ? 0.9 : 1.1;
+      const newScale = Math.min(3, Math.max(0.15, erdState.scale * delta));
+      erdState.panX = mx - (mx - erdState.panX) * (newScale / erdState.scale);
+      erdState.panY = my - (my - erdState.panY) * (newScale / erdState.scale);
+      erdState.scale = newScale;
+      erdApplyTransform();
+      document.getElementById('erd-zoom-label').textContent = Math.round(newScale*100)+'%';
+    }
+    // --- End Visual ERD Canvas ---
+
     function updateFooterStats() {
+
       if (activeConnection) {
         document.getElementById('footer-env-badge').textContent = `● ${activeConnection.environment}`;
         document.getElementById('footer-env-badge').className = activeConnection.environment === 'Production' ? 'font-bold text-app-danger' : 'font-bold text-app-safe';
