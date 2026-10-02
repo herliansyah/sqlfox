@@ -527,6 +527,9 @@
               <button onclick="loadPreviousPage()" class="hover:bg-slate-800 px-2 py-0.5 rounded border border-slate-700">◀ Prev</button>
               <button onclick="loadNextPage()" class="hover:bg-slate-800 px-2 py-0.5 rounded border border-slate-700">Next ▶</button>
             </div>
+            <button id="btn-mock-data" onclick="openMockDataModal()" class="hover:bg-slate-800 px-2 py-0.5 rounded border border-slate-700 text-purple-400 hover:text-purple-300 transition flex items-center space-x-1">
+              <span>🎲</span><span>Mock Data</span>
+            </button>
             <button id="btn-import-csv" onclick="openCSVImportModal()" class="hover:bg-slate-800 px-2 py-0.5 rounded border border-slate-700 text-emerald-400 hover:text-emerald-300 transition flex items-center space-x-1">
               <span>📥</span><span>Import CSV</span>
             </button>
@@ -2255,6 +2258,43 @@
           <button onclick="closeSnippetParamModal()" class="px-3 py-1.5 text-slate-300 hover:bg-slate-800 rounded">Cancel</button>
           <button id="snippet-param-btn-insert" onclick="confirmSnippetSubstitution()" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-4 py-1.5 rounded transition">Insert into Editor</button>
         </div>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 16b. Mock Data Generator Dialog -->
+  <dialog id="mock-data-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-0 outline-none max-w-md w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm overflow-hidden">
+    <div class="flex flex-col">
+      <!-- Header -->
+      <div class="flex items-center justify-between px-5 py-3.5 bg-slate-950 border-b border-slate-800">
+        <div class="flex items-center space-x-2">
+          <span class="text-xl">🎲</span>
+          <div>
+            <h3 class="text-sm font-bold text-white">Generate Mock Data</h3>
+            <p id="mock-data-table-label" class="text-[11px] text-slate-400 font-mono"></p>
+          </div>
+        </div>
+        <button onclick="closeMockDataModal()" class="text-slate-400 hover:text-white text-xs">✕</button>
+      </div>
+
+      <!-- Body -->
+      <div class="px-5 py-4 space-y-4 text-xs">
+        <div>
+          <label class="block text-slate-300 font-semibold mb-1.5">Number of rows to generate</label>
+          <input id="mock-data-rows" type="number" min="1" max="5000" value="100"
+            class="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-slate-200 outline-none focus:border-purple-500 font-mono text-sm">
+          <p class="text-slate-500 text-[11px] mt-1">Max 5,000 rows. FK constraints are resolved automatically.</p>
+        </div>
+
+        <div id="mock-data-status" class="hidden p-3 rounded text-[11px]"></div>
+      </div>
+
+      <!-- Footer -->
+      <div class="flex items-center justify-end space-x-2 px-5 py-3 bg-slate-950 border-t border-slate-800">
+        <button onclick="closeMockDataModal()" class="px-3 py-1.5 rounded text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 transition">Cancel</button>
+        <button id="mock-data-submit-btn" onclick="submitMockDataGeneration()" class="px-4 py-1.5 rounded text-xs font-bold bg-purple-700 hover:bg-purple-600 text-white transition flex items-center space-x-1.5">
+          <span>🎲</span><span>Generate</span>
+        </button>
       </div>
     </div>
   </dialog>
@@ -12211,6 +12251,70 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       }
       const json = JSON.stringify(currentResults, null, 2);
       downloadFile(json, 'query-results.json', 'application/json');
+    }
+
+    // --- Mock Data Generator ---
+    function openMockDataModal() {
+      if (!activeConnection) { showNativeAlert('Please connect to a database first.', 'No Connection'); return; }
+      if (!activeGridTable) { showNativeAlert('Please open a table in the Table Viewer first.', 'No Table Selected'); return; }
+      const dlg = document.getElementById('mock-data-dialog');
+      if (!dlg) return;
+      document.getElementById('mock-data-table-label').textContent = activeGridTable;
+      document.getElementById('mock-data-rows').value = '100';
+      const status = document.getElementById('mock-data-status');
+      status.classList.add('hidden');
+      status.textContent = '';
+      document.getElementById('mock-data-submit-btn').disabled = false;
+      if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
+    }
+
+    function closeMockDataModal() {
+      const dlg = document.getElementById('mock-data-dialog');
+      if (dlg) { if (typeof dlg.close === 'function') dlg.close(); else dlg.removeAttribute('open'); }
+    }
+
+    async function submitMockDataGeneration() {
+      const rows = parseInt(document.getElementById('mock-data-rows').value, 10);
+      if (!rows || rows < 1 || rows > 5000) {
+        showNativeAlert('Please enter a row count between 1 and 5000.', 'Invalid Input'); return;
+      }
+      const tableName = activeGridTable;
+      const currentDb = schemaCatalogCache?.database_name || activeConnection.database_name || '';
+      const statusEl = document.getElementById('mock-data-status');
+      const btn = document.getElementById('mock-data-submit-btn');
+
+      statusEl.className = 'p-3 rounded text-[11px] bg-slate-800 text-slate-300';
+      statusEl.textContent = `⏳ Generating ${rows.toLocaleString()} rows into ${tableName}…`;
+      statusEl.classList.remove('hidden');
+      btn.disabled = true;
+
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/table/${encodeURIComponent(tableName)}/mock-data`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rows, database: currentDb })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          statusEl.className = 'p-3 rounded text-[11px] bg-red-950 text-red-300 border border-red-800';
+          statusEl.textContent = `❌ ${data.error || 'Generation failed'}`;
+          btn.disabled = false;
+          return;
+        }
+        statusEl.className = 'p-3 rounded text-[11px] bg-emerald-950 text-emerald-300 border border-emerald-800';
+        statusEl.textContent = `✅ Inserted ${data.inserted.toLocaleString()} rows in ${data.duration_ms}ms`;
+        btn.disabled = false;
+        // Reload table view
+        setTimeout(() => {
+          closeMockDataModal();
+          if (typeof loadTableRows === 'function') loadTableRows(tableName, currentDb);
+          else if (typeof refreshGridFromToolbar === 'function') refreshGridFromToolbar();
+        }, 1200);
+      } catch (err) {
+        statusEl.className = 'p-3 rounded text-[11px] bg-red-950 text-red-300 border border-red-800';
+        statusEl.textContent = `❌ Network error: ${err.message}`;
+        btn.disabled = false;
+      }
     }
 
     // --- CSV Import & Visual Column Mapping Logic ---

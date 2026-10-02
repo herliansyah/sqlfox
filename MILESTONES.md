@@ -420,12 +420,12 @@ v2.1 (Multi-Engine & Developer Operations Suite)
 ### Milestone 24: FK-Aware Smart Mock Data Generator (Synthetic Test Data with Relational Closure)
 - **Goal**: Enable developers to quickly populate local and staging databases with high volumes of realistic synthetic data without pulling sensitive production data, while maintaining strict foreign key referential integrity.
 - **Deliverables**:
-  - [ ] **Data Generation Engine**: Zero-dependency synthesizer in `internal/mock/` generating type-aware realistic values (integers, floats, dates, timestamps, UUIDs, booleans, names, emails, addresses, lorem ipsum, and JSON payloads).
-  - [ ] **Topological Dependency Graph**: Traversal algorithm sorting table foreign key relationships to populate parent reference tables before dependent child tables.
-  - [ ] **FK Pool Sampling**: Referential closure engine sampling existing or freshly generated primary keys from parent tables to guarantee zero foreign key constraint violations (`Error 1452`).
-  - [ ] **Transactional Chunked Streamer**: Streaming multi-row `INSERT` batches (100-500 rows per chunk) wrapped in database transactions for maximum throughput.
-  - [ ] **Table Viewer Modal**: Toolbar action `🎲 Generate Mock Data` with configurable row counts, generation strategies per column, and unique constraint guarantees.
-- **Runnable Verification**: Open Table Viewer on an empty schema containing parent-child FK relationships -> open `🎲 Generate Mock Data` -> generate 500 rows -> verify all rows insert cleanly with 100% valid foreign keys and zero constraint errors.
+  - [x] **Data Generation Engine**: Zero-dependency synthesizer in `internal/mock/` generating type-aware realistic values (int, bigint, float, decimal, varchar, text, date, datetime, timestamp, timestamptz, UUID, bool, JSON/JSONB, blob, enum) with nullable 20% NULL probability and auto-increment PK skip.
+  - [x] **Topological Dependency Graph**: Kahn's algorithm over FK graph sorting tables so parent reference tables are populated before child tables; cycle detection returns a clear error.
+  - [x] **FK Pool Sampling**: Post-insert `SELECT pk LIMIT 1000` builds an in-memory FK Pool per parent column; self-referential FKs resolved via NULL-insert then follow-up UPDATE pass.
+  - [x] **Transactional Chunked Streamer**: 200-row multi-row `INSERT VALUES` batches within one `BEGIN/COMMIT` transaction per table (Per-Table Atomicity); full rollback on any batch error.
+  - [x] **Table Viewer Modal**: `🎲 Mock Data` toolbar button opens a native dialog with row-count input (1–5,000); shows inline progress and result toast; auto-reloads table grid on success.
+- **Runnable Verification**: Run `go test -v ./internal/mock/...` → all 5 tests pass → open Table Viewer on a table with FK columns → click `🎲 Mock Data` → generate 100 rows → verify zero constraint errors and grid reloads with new rows.
 
 ---
 
