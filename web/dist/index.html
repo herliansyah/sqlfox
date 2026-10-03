@@ -1624,6 +1624,10 @@
           <div class="flex bg-slate-950 rounded p-0.5 border border-slate-700 text-xs">
             <button id="impact-tab-table-btn" onclick="switchImpactTab('table')" class="px-2.5 py-0.5 rounded font-semibold bg-sky-950 text-sky-400">Plan Grid</button>
             <button id="impact-tab-tree-btn" onclick="switchImpactTab('tree')" class="px-2.5 py-0.5 rounded text-slate-400 hover:text-white">Visual Tree</button>
+            <button id="impact-tab-advisor-btn" onclick="switchImpactTab('advisor')" class="px-2.5 py-0.5 rounded text-slate-400 hover:text-white flex items-center space-x-1">
+              <span>💡</span><span>Advisor</span>
+              <span id="impact-advisor-badge" class="hidden ml-1 px-1.5 py-0.2 bg-amber-950 text-amber-300 text-[10px] rounded-full border border-amber-800 font-bold"></span>
+            </button>
             <button id="impact-tab-raw-btn" onclick="switchImpactTab('raw')" class="px-2.5 py-0.5 rounded text-slate-400 hover:text-white">Raw JSON</button>
           </div>
           <button onclick="closeImpactModal()" class="text-slate-400 hover:text-white text-base px-1">✕</button>
@@ -1662,6 +1666,15 @@
       <div id="impact-tree-view" class="hidden flex-1 overflow-auto border border-slate-800 rounded bg-slate-950 p-3 min-h-[160px]">
         <div id="impact-tree-canvas" class="font-mono text-xs select-text"></div>
         <div id="impact-tree-empty" class="hidden p-8 text-center text-slate-500 italic text-xs">No JSON plan available. Run on MySQL 5.6+, MariaDB 10.2+, or PostgreSQL to get a visual tree.</div>
+      </div>
+
+      <!-- Index Advisor View -->
+      <div id="impact-advisor-view" class="hidden flex-1 overflow-auto border border-slate-800 rounded bg-slate-950 p-4 min-h-[160px] space-y-3">
+        <div id="impact-advisor-bloat-container" class="space-y-2"></div>
+        <div id="impact-advisor-list" class="space-y-3"></div>
+        <div id="impact-advisor-empty" class="hidden p-8 text-center text-slate-500 italic text-xs">
+          ✓ No new index recommendations needed. Query predicates are either covered by existing indexes or not indexable.
+        </div>
       </div>
 
       <div class="flex items-center justify-between pt-2 border-t border-app-border flex-shrink-0">
@@ -8727,9 +8740,11 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
     function switchImpactTab(tab) {
       const tableBtn = document.getElementById('impact-tab-table-btn');
       const treeBtn  = document.getElementById('impact-tab-tree-btn');
+      const advisorBtn = document.getElementById('impact-tab-advisor-btn');
       const rawBtn   = document.getElementById('impact-tab-raw-btn');
       const tableView = document.getElementById('impact-table-view');
       const treeView  = document.getElementById('impact-tree-view');
+      const advisorView = document.getElementById('impact-advisor-view');
       const rawView   = document.getElementById('impact-raw-view');
       if (!tableBtn || !rawBtn || !tableView || !rawView) return;
 
@@ -8738,9 +8753,11 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
 
       tableBtn.className = inactive;
       if (treeBtn) treeBtn.className = inactive;
+      if (advisorBtn) advisorBtn.className = inactive;
       rawBtn.className   = inactive;
       tableView.classList.add('hidden');
       if (treeView) treeView.classList.add('hidden');
+      if (advisorView) advisorView.classList.add('hidden');
       rawView.classList.add('hidden');
 
       if (tab === 'table') {
@@ -8749,6 +8766,9 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       } else if (tab === 'tree') {
         if (treeBtn) treeBtn.className = active;
         if (treeView) treeView.classList.remove('hidden');
+      } else if (tab === 'advisor') {
+        if (advisorBtn) advisorBtn.className = active;
+        if (advisorView) advisorView.classList.remove('hidden');
       } else {
         rawBtn.className = active;
         rawView.classList.remove('hidden');
@@ -8813,12 +8833,15 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
 
         if (summaryBadge) {
           if (hasFullTableScan) {
-            summaryBadge.innerHTML = `<span class="text-app-danger font-semibold">⚠️ Full table scan detected!</span> Consider adding an index to avoid scanning full table.`;
+            summaryBadge.innerHTML = `<span class="text-app-danger font-semibold">⚠️ Full table scan detected!</span> Check the <a href="javascript:void(0)" onclick="switchImpactTab('advisor')" class="text-amber-400 underline font-bold">Index Advisor</a> tab for optimization.`;
           } else {
             summaryBadge.innerHTML = `<span class="text-app-safe font-semibold">✓ ${rows.length} execution step${rows.length > 1 ? 's' : ''} planned</span> (~${totalRows.toLocaleString()} rows estimated)`;
           }
         }
       }
+
+      // Render advisor recommendations
+      renderAdvisorContent(planData && planData.advisor);
 
       switchImpactTab('table');
       document.getElementById('impact-preview-modal').classList.remove('hidden');
@@ -8828,6 +8851,121 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       renderPlanTree(rawJSON || '');
       // Auto-switch to tree tab if a JSON plan is available
       if (rawJSON) switchImpactTab('tree');
+    }
+
+    function renderAdvisorContent(adv) {
+      const badge = document.getElementById('impact-advisor-badge');
+      const bloatContainer = document.getElementById('impact-advisor-bloat-container');
+      const list = document.getElementById('impact-advisor-list');
+      const empty = document.getElementById('impact-advisor-empty');
+      if (!list) return;
+
+      if (bloatContainer) bloatContainer.innerHTML = '';
+      list.innerHTML = '';
+
+      if (!adv || (!adv.recommendations?.length && !adv.bloat_warnings?.length)) {
+        if (badge) badge.classList.add('hidden');
+        if (empty) empty.classList.remove('hidden');
+        return;
+      }
+
+      if (empty) empty.classList.add('hidden');
+
+      const recCount = adv.recommendations ? adv.recommendations.length : 0;
+      if (badge) {
+        if (recCount > 0) {
+          badge.textContent = recCount;
+          badge.classList.remove('hidden');
+        } else {
+          badge.classList.add('hidden');
+        }
+      }
+
+      // 1. Render Bloat Warnings (prominent amber alert banner)
+      if (bloatContainer && adv.bloat_warnings && adv.bloat_warnings.length > 0) {
+        adv.bloat_warnings.forEach(b => {
+          const alert = document.createElement('div');
+          alert.className = 'bg-amber-950/40 border border-amber-800/80 rounded p-3 text-xs text-amber-200 flex items-start space-x-2.5';
+          alert.innerHTML = `
+            <span class="text-base leading-none">⚠️</span>
+            <div class="flex-1">
+              <div class="font-bold text-amber-300">Index Bloat Warning (${escapeHtml(b.table)}):</div>
+              <div class="mt-0.5 text-slate-300">${escapeHtml(b.warning)}</div>
+            </div>
+          `;
+          bloatContainer.appendChild(alert);
+        });
+      }
+
+      // 2. Render Recommendations
+      if (adv.recommendations && adv.recommendations.length > 0) {
+        adv.recommendations.forEach((rec, idx) => {
+          const card = document.createElement('div');
+          card.className = 'border border-slate-800 rounded bg-slate-900/60 p-3 space-y-2.5';
+
+          let esrPills = '';
+          if (rec.equality_columns && rec.equality_columns.length > 0) {
+            esrPills += `<span class="bg-emerald-950 text-emerald-400 border border-emerald-800 px-1.5 py-0.5 rounded text-[10px] font-semibold" title="Equality Condition">Equal: ${rec.equality_columns.map(escapeHtml).join(', ')}</span> `;
+          }
+          if (rec.sort_columns && rec.sort_columns.length > 0) {
+            esrPills += `<span class="bg-amber-950 text-amber-400 border border-amber-800 px-1.5 py-0.5 rounded text-[10px] font-semibold" title="Sort/Group by Condition">Sort: ${rec.sort_columns.map(escapeHtml).join(', ')}</span> `;
+          }
+          if (rec.range_columns && rec.range_columns.length > 0) {
+            esrPills += `<span class="bg-sky-950 text-sky-400 border border-sky-800 px-1.5 py-0.5 rounded text-[10px] font-semibold" title="Range / Inequality Condition">Range: ${rec.range_columns.map(escapeHtml).join(', ')}</span> `;
+          }
+
+          let redundancyNote = '';
+          if (rec.is_redundant) {
+            redundancyNote = `<div class="text-[11px] text-amber-400 bg-amber-950/30 border border-amber-900/50 rounded px-2 py-1">⚠ Redundant: ${escapeHtml(rec.redundant_reason)}</div>`;
+          } else if (rec.replace_suggestion) {
+            redundancyNote = `<div class="text-[11px] text-sky-300 bg-sky-950/30 border border-sky-900/50 rounded px-2 py-1">💡 Consolidation: ${escapeHtml(rec.replace_suggestion)}</div>`;
+          }
+
+          card.innerHTML = `
+            <div class="flex items-center justify-between">
+              <div class="flex items-center space-x-2">
+                <span class="px-1.5 py-0.5 bg-slate-800 text-slate-300 text-[10px] font-bold rounded uppercase">Table: ${escapeHtml(rec.table)}</span>
+                <span class="font-mono text-xs font-semibold text-white">${escapeHtml(rec.suggested_index)}</span>
+              </div>
+              <div class="flex items-center space-x-1">${esrPills}</div>
+            </div>
+            <div class="text-xs text-slate-300">${escapeHtml(rec.reason || '')}</div>
+            ${rec.estimated_benefit ? `<div class="text-[11px] text-emerald-400">⚡ ${escapeHtml(rec.estimated_benefit)}</div>` : ''}
+            ${redundancyNote}
+            <div class="bg-slate-950 border border-slate-800 rounded p-2 flex items-center justify-between">
+              <code class="font-mono text-[11px] text-sky-300 select-all overflow-x-auto whitespace-pre">${escapeHtml(rec.safe_ddl)}</code>
+              <div class="flex items-center space-x-1 ml-2 flex-shrink-0">
+                <button type="button" data-ddl="${escapeHtml(rec.safe_ddl)}" onclick="copyTextToClipboard(this.getAttribute('data-ddl'))" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[11px] transition flex items-center space-x-1">
+                  <span>📋</span><span>Copy</span>
+                </button>
+                <button type="button" data-ddl="${escapeHtml(rec.safe_ddl)}" onclick="applyAdvisorDDLToEditor(this.getAttribute('data-ddl'))" class="px-2 py-1 bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800 rounded text-[11px] transition flex items-center space-x-1">
+                  <span>⚡</span><span>Editor</span>
+                </button>
+              </div>
+            </div>
+          `;
+          list.appendChild(card);
+        });
+      } else if (!adv.bloat_warnings || adv.bloat_warnings.length === 0) {
+        if (empty) empty.classList.remove('hidden');
+      }
+    }
+
+    function applyAdvisorDDLToEditor(ddl) {
+      if (window.editorInstance && ddl) {
+        window.editorInstance.setValue(ddl);
+      }
+      closeImpactModal();
+      showToast('Index DDL inserted into Query Editor');
+    }
+
+    function copyTextToClipboard(text) {
+      if (!text) return;
+      navigator.clipboard.writeText(text).then(() => {
+        showToast('Safe DDL copied to clipboard!');
+      }).catch(() => {
+        showToast('Copied to clipboard');
+      });
     }
 
     function closeImpactModal() {

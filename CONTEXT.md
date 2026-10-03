@@ -450,6 +450,8 @@ _Avoid_: In-process tunnel, custom bastion client
 - **0031**: PostgreSQL Native Driver Engine and Catalog Introspection (`docs/adr/0031-postgresql-native-driver-engine-and-catalog-introspection.md`)
 - **0032**: FK-Aware Mock Data Generation and Referential Closure (`docs/adr/0032-fk-aware-mock-data-generation-and-referential-closure.md`)
 - **0033**: Scheduled Headless Automation and Declarative Task Runner (`docs/adr/0033-scheduled-headless-automation-and-declarative-task-runner.md`)
+- **0034**: Large-Scale Hardening and Memory Ceiling Benchmark (`docs/adr/0034-large-scale-hardening-and-memory-ceiling-benchmark.md`)
+- **0035**: Heuristic Index Advisor & Query Tuner (`docs/adr/0035-heuristic-index-advisor-and-query-tuner.md`)
 
 ## Visual Schema & ERD Canvas
 
@@ -547,7 +549,22 @@ _Avoid_: Virtual tree, windowing component, lazy DOM
 A time-bounded (3s) secondary database connection path used for out-of-band cancellation (`KILL QUERY` / `pg_cancel_backend`) that aborts client-side streaming and surfaces pool exhaustion diagnostics when server-side connection slots are saturated.
 _Avoid_: Secondary killer, kill connection, cancel hook
 
-**Global Error Boundary**:
-A resilient application-wide network monitoring banner and fetch interceptor in the web shell that preserves editor tabs, unsaved SQL queries, and staged grid modifications during server restarts and transient disconnections with exponential backoff auto-reconnect.
-_Avoid_: Crash handler, catch-all error, disconnected popup
+## Query Optimization & Index Tuning
+
+**Heuristic Index Advisor**:
+An automated, deterministic rule-based query tuning engine in `internal/advisor/` that inspects AST predicates (`WHERE`, `JOIN`, `ORDER BY`, `GROUP BY`), existing catalog indexes, and EXPLAIN plans to formulate optimal `CREATE INDEX` recommendations.
+_Avoid_: AI indexer, magic optimizer, auto-indexer
+
+**ESR Rule (Equality, Sort, Range)**:
+An indexing column sequencing heuristic ordering equality conditions first, sort/group columns second, and range predicates last to eliminate filesorts and maximize composite index selectivity.
+_Avoid_: Column sorter, index ordering hack, query alignment
+
+**Index Bloat Warning**:
+A diagnostic notice alerting users when a table exceeds safe index thresholds (e.g. >5 secondary indexes or index-to-data storage overhead) to caution against write degradation while still delivering recommended index definitions.
+_Avoid_: Too-many-indexes error, write penalty alert
+
+**Safe DDL Generation**:
+Dialect-aware index creation DDL leveraging non-blocking execution strategies (`ALGORITHM=INPLACE, LOCK=NONE` for MySQL 5.7 and 8.0, `CONCURRENTLY` for PostgreSQL, and `IF NOT EXISTS` for SQLite).
+_Avoid_: Raw index SQL, blocking alter, instant DDL
+
 

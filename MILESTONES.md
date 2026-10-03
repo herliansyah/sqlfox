@@ -450,3 +450,19 @@ v2.1 (Multi-Engine & Developer Operations Suite)
   - [x] **Error Boundary Hardening**: Web UI audit for graceful degradation during network disconnects, server restarts, and malformed database responses without white-screen crashes.
   - [x] **Ponytail Zero-Regression Audit**: Systematic review and removal of any speculative code introduced during v2.0 expansions, ensuring the single binary remains compact (<25MB) and snappy (<1s startup).
 - **Runnable Verification**: Run `go test -v -bench=. ./internal/...` -> launch SqlFox against a 1,000-table database -> verify web UI sidebar loads in <200ms and resident set size (RSS) RAM remains <100MB.
+
+---
+
+### Milestone 27: Heuristic Index Advisor & Query Tuner (ESR Composite Recommendations, Index Bloat Guard & MySQL 5.7+ Online DDL)
+- **Goal**: Empower developers and DBAs to optimize slow queries instantly with zero-dependency, deterministic index recommendations based on the ESR rule, clear Index Bloat warnings on over-indexed tables (>5 secondary indexes), safe non-blocking DDL across MySQL 5.7/8.0, PostgreSQL, and SQLite, and a headless CLI advisor.
+- **Deliverables**:
+  - [x] **ESR Rule Engine & AST Parser**: Deterministic predicate extractor in `internal/advisor/` categorizing predicates into Equality (`=`, `<=>`, `IS NULL`), Sort/Group (`ORDER BY`, `GROUP BY` to eliminate filesort), and Range (`>`, `<`, `BETWEEN`, `LIKE`), bounded by a 4-column ceiling.
+  - [x] **Prefix Redundancy & Consolidation Guard**: Compares candidate columns against catalog index metadata to suppress redundant indexes and suggest extending existing prefix indexes (`ReplaceSuggestion`).
+  - [x] **Index Bloat Guard**: Flags tables with >5 secondary indexes or `index_size > data_size` with a clear amber warning banner detailing write overhead, while explicitly retaining candidate recommendations.
+  - [x] **Safe Non-Blocking DDL Generator**: Emits dialect-accurate DDL with non-blocking execution options (`ALGORITHM=INPLACE, LOCK=NONE` for MySQL 5.7 and 8.0, `CREATE INDEX CONCURRENTLY` for PostgreSQL, and `CREATE INDEX IF NOT EXISTS` for SQLite).
+  - [x] **Catalog Introspection Bug Fixes**: Fixed MySQL composite index column aggregation in `internal/driver/mysql`, populated SQLite index columns via `PRAGMA index_info`, and fixed PostgreSQL drop syntax in `internal/driver/redundant_index`.
+  - [x] **UI Integration**: Added `💡 Advisor` tab to Visual EXPLAIN modal with dynamic recommendation badge, ESR pill badges, safe DDL code block, 📋 `Copy` and ⚡ `Editor` (1-click paste) actions.
+  - [x] **Headless CLI Command**: `sqlfox advise --dsn ... --sql "..."` (and `--file`, `--format json`) supporting offline and live query tuning in terminal and CI/CD pipelines.
+  - [x] **Documentation & Verification**: Documented in ADR-0035, `CONTEXT.md`, `ARCHITECTURE.md`, `SECURITY.md`, `UX_DESIGN.md`, and `README.md` with unit tests passing 100% in `internal/advisor/` and `internal/cli/`.
+- **Runnable Verification**: Run `go test -v ./internal/advisor/... ./internal/cli -run TestCLI_Advise` -> all tests pass -> execute `sqlfox advise --driver mysql --sql "SELECT * FROM orders WHERE user_id = 1 AND amount > 100 ORDER BY created_at DESC"` -> verify ESR column sequence `(user_id, created_at, amount)` and `ALGORITHM=INPLACE, LOCK=NONE`.
+

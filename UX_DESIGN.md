@@ -463,6 +463,57 @@ The Entity-Relationship Diagram canvas allows developers to explore table relati
 4. **State Retention Guarantee**:
    - Editor tabs, unsaved SQL scripts, active query results, and staged cell modifications (`stagedInserts`, `stagedUpdates`, `stagedDeletions`) remain untouched in client memory during disconnections, preventing accidental data loss.
 
+---
+
+## 17. Heuristic Index Advisor & Tuning Interface
+
+### Execution Plan (EXPLAIN) Modal with Advisor Tab Wireframe
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ ⚡ Execution Plan (EXPLAIN)                                                  │
+│ SELECT * FROM orders WHERE user_id = 1 AND amount > 50 ORDER BY created_at  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ [ Plan Grid ]  [ Visual Tree ]  [ 💡 Advisor (1) ]* [ Raw JSON ]     [✕ Close]
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│ ⚠️ INDEX BLOAT WARNING (orders):                                            │
+│ Table 'orders' currently has 6 indexes (Index Bloat). Adding more indexes   │
+│ increases storage consumption and degrades INSERT/UPDATE throughput.        │
+│                                                                             │
+│ ┌─────────────────────────────────────────────────────────────────────────┐ │
+│ │ [TABLE: orders]   idx_orders_user_id_created_at_amount                  │ │
+│ │                   [Equal: user_id] [Sort: created_at] [Range: amount]   │ │
+│ │                                                                         │ │
+│ │ Equality predicates (user_id) placed first; Sort (created_at) eliminates│ │
+│ │ filesort; Range (amount) placed last.                                   │ │
+│ │ ⚡ Converts Full Table Scan (ALL on ~1,500 rows) into indexed lookup      │ │
+│ │                                                                         │ │
+│ │ ┌─────────────────────────────────────────────────────────┐ ┌─────────┐ │ │
+│ │ │ ALTER TABLE `orders` ADD INDEX `idx_...` (...)          │ │ 📋 Copy │ │ │
+│ │ │ ALGORITHM=INPLACE, LOCK=NONE;                           │ │ ⚡ Editor│ │ │
+│ │ └─────────────────────────────────────────────────────────┘ └─────────┘ │ │
+│ └─────────────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Interaction Models
+
+1. **Integrated Modal Tab**:
+   - Docked directly within `#impact-preview-modal`, eliminating the need to navigate between separate tools.
+   - Dynamic count badge (`💡 Advisor (N)`) alerts the operator when recommendations are available.
+2. **ESR Pill Badges**:
+   - Color-coded badges visually indicate why each column is in the proposed position:
+     - `Equal: col` (Emerald): High selectivity filter.
+     - `Sort: col` (Amber): Eliminates filesort.
+     - `Range: col` (Sky): Trailing inequality bound.
+3. **1-Click Execution & Clipboard**:
+   - `📋 Copy`: Copies dialect-safe non-blocking DDL directly to the clipboard with visual toast feedback.
+   - `⚡ Editor`: Inserts the safe DDL into the active Query Editor and closes the modal for immediate review and execution.
+4. **Unsuppressed Candidate Display Under Bloat Warning**:
+   - Prominent amber banner warns of write degradation when a table exceeds 5 secondary indexes, but the interface explicitly preserves the candidate index cards and consolidation suggestions below the warning.
+
+
 
 
 

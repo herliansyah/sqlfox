@@ -125,3 +125,19 @@ To balance developer observability under massive enterprise workloads with stric
 2. **Explicit Opt-In via Environment Variable**: Endpoints are mounted conditionally strictly when `SQLFOX_PPROF=1` is exported in the host process environment.
 3. **Loopback Client Enforcement**: Even when enabled, every incoming request to `/debug/pprof/*` is verified against `isLoopback(RemoteAddr)`. Non-loopback IP addresses (e.g. tablet clients or LAN peers connecting via Remote Access Guard) are rejected with `403 Forbidden`. This completely prevents heap snapshots, stack traces, or internal memory structures from leaking across the network.
 
+---
+
+## 6. Safe Online DDL & Index Tuning Guardrails
+
+To prevent production database lockups and performance regressions during schema tuning:
+
+1. **Non-Blocking DDL Enforcement**:
+   - Recommendations on MySQL 5.7 and 8.0 explicitly generate `ALGORITHM=INPLACE, LOCK=NONE`, ensuring tables remain fully accessible for concurrent reads and writes throughout index construction.
+   - PostgreSQL recommendations utilize `CREATE INDEX CONCURRENTLY` to avoid taking `ACCESS EXCLUSIVE` table locks.
+   - SQLite DDL enforces a strict `PRAGMA busy_timeout = 3000` to prevent indefinite database file locking.
+2. **Metadata Lock (MDL) Queue Protection**:
+   - Index creation operations executed through SqlFox enforce an isolated connection with `SET SESSION lock_wait_timeout = 3` on MySQL, terminating fast rather than causing cascading metadata lock pileups.
+3. **Index Bloat Write Guard**:
+   - The advisor evaluates write overhead risk before suggesting new indexes. Tables with >5 secondary indexes trigger prominent warnings to alert operators to the write throughput penalty on `INSERT`/`UPDATE` operations.
+
+

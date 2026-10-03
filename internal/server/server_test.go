@@ -277,6 +277,7 @@ func TestServer_API_Lifecycle(t *testing.T) {
 	var explainResult struct {
 		RawJSON string               `json:"raw_json"`
 		Rows    []driver.ExplainRow `json:"rows"`
+		Advisor any                  `json:"advisor"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&explainResult); err != nil {
 		t.Fatalf("failed to decode explain response: %v", err)
@@ -287,6 +288,37 @@ func TestServer_API_Lifecycle(t *testing.T) {
 	}
 	if len(explainResult.Rows) == 0 {
 		t.Fatalf("expected at least 1 plan row, got 0")
+	}
+	if explainResult.Advisor == nil {
+		t.Fatalf("expected non-nil Advisor in explainResult")
+	}
+
+	// 12b. Test Standalone Advise endpoint
+	advisePayload := map[string]string{
+		"sql":      "SELECT * FROM products WHERE price > 50.0 ORDER BY title ASC;",
+		"database": targetDB,
+	}
+	advBody, _ := json.Marshal(advisePayload)
+	advResp, err := client.Post(fmt.Sprintf("%s/api/session/%s/advise", ts.URL, savedConn.ID), "application/json", bytes.NewReader(advBody))
+	if err != nil || advResp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /api/session/advise failed: %v, status: %d", err, advResp.StatusCode)
+	}
+	var adviseResult struct {
+		Recommendations []struct {
+			Table   string   `json:"table"`
+			Columns []string `json:"columns"`
+			SafeDDL string   `json:"safe_ddl"`
+		} `json:"recommendations"`
+	}
+	if err := json.NewDecoder(advResp.Body).Decode(&adviseResult); err != nil {
+		t.Fatalf("failed to decode advise response: %v", err)
+	}
+	advResp.Body.Close()
+	if len(adviseResult.Recommendations) == 0 {
+		t.Fatalf("expected at least 1 recommendation from advise endpoint, got 0")
+	}
+	if adviseResult.Recommendations[0].Table != "products" {
+		t.Errorf("expected table 'products', got %q", adviseResult.Recommendations[0].Table)
 	}
 
 	// 13. Delete Connection

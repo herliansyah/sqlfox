@@ -567,4 +567,51 @@ flowchart TD
    - Single release binary size verified at **18MB** (stripped with `-ldflags="-s -w"`), well below the 25MB ceiling.
    - Startup time benchmarks at **0.008s (8ms)**, fulfilling the sub-second launch promise.
 
+---
+
+## 14. Heuristic Index Advisor & Query Tuning Engine (`internal/advisor/`)
+
+The Index Advisor provides deterministic, zero-dependency index recommendations formulated from SQL query predicates, catalog index metadata, and EXPLAIN plans without invoking external LLMs or third-party query optimizers:
+
+```mermaid
+flowchart TD
+    SQLQuery["SQL Query (Editor or CLI)"] --> ASTParser["AST & Lexical Predicate Parser"]
+    ASTParser --> ESRClassifier["ESR Categorizer: Equality [E] -> Sort [S] -> Range [R]"]
+    
+    Catalog["Catalog Index Metadata"] --> RedundancyCheck{"Prefix Redundancy Check"}
+    ESRClassifier --> RedundancyCheck
+    
+    RedundancyCheck -->|Left-Prefix Covered| Redundant["Mark Redundant (No DDL needed)"]
+    RedundancyCheck -->|Prefix of Proposed| Consolidate["Suggest Consolidation (Replace/Extend)"]
+    RedundancyCheck -->|New Candidate| Propose["Synthesize Safe Non-Blocking DDL"]
+    
+    Catalog --> BloatCheck{"Secondary Indexes > 5 or Index Size > Data Size?"}
+    BloatCheck -->|Yes| BloatWarn["⚠️ Index Bloat Warning Banner"]
+    BloatCheck -->|No| Healthy["Normal Storage Health"]
+    
+    BloatWarn --> Output["Advice Result: DDL + Benefit + Warnings"]
+    Healthy --> Output
+    Propose --> Output
+    Consolidate --> Output
+```
+
+1. **Deterministic ESR Sequencing Engine**:
+   - `internal/advisor/parser.go` maps predicates to tables using Vitess `sqlparser` with lexical fallback.
+   - Equality predicates (`=`, `<=>`, `IS NULL`, and JOIN conditions) are placed first to narrow candidate rows immediately.
+   - Sort and group columns (`ORDER BY`, `GROUP BY`) are placed second to allow the storage engine (InnoDB / Postgres B-Tree) to traverse the index without filesort overhead.
+   - Range predicates (`>`, `<`, `BETWEEN`, `LIKE 'prefix%'`) are placed last, as B-Tree scans cannot utilize index columns following an inequality.
+   - Candidate composite indexes are strictly capped at 4 columns to avoid excessive index write maintenance overhead.
+2. **Index Bloat Guard**:
+   - Inspects existing table index counts and storage sizes from `driver.TableMetadata`.
+   - When a table exceeds 5 secondary indexes, an amber **Index Bloat Warning** is generated explaining the write latency overhead on `INSERT`/`UPDATE` operations, while explicitly retaining candidate recommendations.
+   - Recommends merging existing narrow indexes into the proposed composite index (`ReplaceSuggestion`) to curb index sprawl.
+3. **Safe Non-Blocking DDL Generation**:
+   - **MySQL 5.7 & 8.0**: Generates `ALTER TABLE tbl ADD INDEX idx (...) ALGORITHM=INPLACE, LOCK=NONE;` respecting 5.7 prefix limitations and 3s lock wait timeouts.
+   - **PostgreSQL**: Generates `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx ON tbl (...);`.
+   - **SQLite**: Generates `CREATE INDEX IF NOT EXISTS idx ON tbl (...);`.
+4. **Dual-Surface Delivery**:
+   - **Visual EXPLAIN Modal**: Integrated into `#impact-preview-modal` under the `💡 Advisor` tab with dynamic count badges, ESR tag pills, 1-click clipboard copy, and editor injection.
+   - **Headless CLI Command**: `sqlfox advise --dsn ... --sql "..."` with human-readable colored output and `--format json` streaming.
+
+
 

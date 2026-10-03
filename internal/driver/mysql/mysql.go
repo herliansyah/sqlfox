@@ -304,6 +304,7 @@ func (s *MySQLSession) InspectSchema(ctx context.Context, dbName string) (*drive
 			index string
 		}
 		indexAgg := make(map[idxKey]*driver.IndexMetadata)
+		var indexOrder []idxKey
 
 		for idxRows.Next() {
 			var tblName, idxName, colName, idxType string
@@ -320,13 +321,19 @@ func (s *MySQLSession) InspectSchema(ctx context.Context, dbName string) (*drive
 						Type:     idxType,
 					}
 					indexAgg[k] = im
-					if idx, ok := tableIndexMap[tblName]; ok {
-						tables[idx].Indexes = append(tables[idx].Indexes, *im)
-					}
+					indexOrder = append(indexOrder, k)
 				}
 			}
 		}
 		idxRows.Close()
+
+		for _, k := range indexOrder {
+			if im, ok := indexAgg[k]; ok {
+				if idx, ok := tableIndexMap[k.table]; ok {
+					tables[idx].Indexes = append(tables[idx].Indexes, *im)
+				}
+			}
+		}
 	}
 
 	// 4. Fetch Triggers

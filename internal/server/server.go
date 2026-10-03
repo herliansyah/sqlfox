@@ -140,6 +140,8 @@ func (s *Server) routes() {
 			s.handleInspectQuery(w, r)
 		case "explain":
 			s.handleExplainQuery(w, r)
+		case "advise":
+			s.handleAdviseQuery(w, r)
 		case "execute":
 			s.handleExecuteQuery(w, r)
 		case "cancel":
