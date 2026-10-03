@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"sqlfox/internal/advisor"
 	"sqlfox/internal/driver"
 	"sqlfox/internal/safety"
 )
@@ -67,7 +68,52 @@ func (s *Server) handleExplainQuery(w http.ResponseWriter, r *http.Request) {
 		plan.Rows = []driver.ExplainRow{}
 	}
 
+	// Fetch table metadata to formulate heuristic index recommendations & bloat warnings
+	tblsMap := make(map[string]driver.TableMetadata)
+	if sc, sErr := sess.Session.InspectSchema(ctx, req.Database); sErr == nil && sc != nil {
+		for _, t := range sc.Tables {
+			tblsMap[t.Name] = t
+		}
+	}
+	plan.Advisor = advisor.AdviseWithExplain(req.SQL, sess.DriverName, tblsMap, plan)
+
 	writeJSON(w, http.StatusOK, plan)
+}
+
+func (s *Server) handleAdviseQuery(w http.ResponseWriter, r *http.Request) {
+	connID := r.PathValue("id")
+	sess, err := s.sessionMgr.GetSession(connID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	var req struct {
+		SQL      string `json:"sql"`
+		Database string `json:"database"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.SQL == "" {
+		writeError(w, http.StatusBadRequest, "sql is required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	if req.Database != "" {
+		_ = sess.Session.SelectDatabase(ctx, req.Database)
+	}
+
+	tblsMap := make(map[string]driver.TableMetadata)
+	if sc, sErr := sess.Session.InspectSchema(ctx, req.Database); sErr == nil && sc != nil {
+		for _, t := range sc.Tables {
+			tblsMap[t.Name] = t
+		}
+	}
+
+	plan, _ := sess.Session.Explain(ctx, req.SQL)
+	adv := advisor.AdviseWithExplain(req.SQL, sess.DriverName, tblsMap, plan)
+	writeJSON(w, http.StatusOK, adv)
 }
 
 func (s *Server) handleExecuteQuery(w http.ResponseWriter, r *http.Request) {

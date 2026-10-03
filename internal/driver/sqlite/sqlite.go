@@ -178,11 +178,23 @@ func (s *SQLiteSession) InspectSchema(ctx context.Context, dbName string) (*driv
 				var seq, unique int
 				var idxName, origin, partial string
 				if err := idxRows.Scan(&seq, &idxName, &unique, &origin, &partial); err == nil {
-					tbl.Indexes = append(tbl.Indexes, driver.IndexMetadata{
+					im := driver.IndexMetadata{
 						Name:     idxName,
 						IsUnique: unique == 1,
 						Type:     "BTREE",
-					})
+					}
+					// ponytail: fetch index column list via PRAGMA index_info; bounded by index count per table
+					if cRows, err := s.db.QueryContext(ctx, fmt.Sprintf("PRAGMA index_info(%s)", quoteIdentifier(idxName))); err == nil {
+						for cRows.Next() {
+							var seqno, cid int
+							var cname string
+							if err := cRows.Scan(&seqno, &cid, &cname); err == nil && cname != "" {
+								im.Columns = append(im.Columns, cname)
+							}
+						}
+						cRows.Close()
+					}
+					tbl.Indexes = append(tbl.Indexes, im)
 				}
 			}
 			idxRows.Close()

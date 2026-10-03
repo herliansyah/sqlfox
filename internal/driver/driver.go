@@ -178,6 +178,7 @@ type TableEstimate struct {
 type ExplainPlan struct {
 	RawJSON string         `json:"raw_json"`
 	Rows    []ExplainRow   `json:"rows"`
+	Advisor any            `json:"advisor,omitempty"`
 }
 
 type ExplainRow struct {

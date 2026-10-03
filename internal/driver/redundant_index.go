@@ -111,6 +111,12 @@ func generateDropIndexSQL(dialect, database, table, index string) string {
 	if strings.EqualFold(dialect, "sqlite") {
 		return fmt.Sprintf("DROP INDEX %q;", index)
 	}
+	if strings.EqualFold(dialect, "postgres") || strings.EqualFold(dialect, "postgresql") {
+		if database != "" {
+			return fmt.Sprintf("DROP INDEX CONCURRENTLY IF EXISTS %q.%q;", database, index)
+		}
+		return fmt.Sprintf("DROP INDEX CONCURRENTLY IF EXISTS %q;", index)
+	}
 	if database != "" {
 		return fmt.Sprintf("ALTER TABLE `%s`.`%s` DROP INDEX `%s`;", database, table, index)
 	}
