@@ -578,7 +578,11 @@ A native HTML5 dialog (`#update-dialog`) presenting release metadata, version di
 _Avoid_: Update popup, new version alert, release prompt
 
 **Author Credit**:
-The centralized workspace attribution element residing in the status bar footer, featuring creator credit (`Created by herliansyah`) linked to the author's GitHub profile and the official repository icon.
-_Avoid_: Footer branding, watermark, sponsor badge
+The centralized workspace attribution element residing in the status bar footer, featuring creator credit (`Created by herliansyah`) linked to the author's GitHub profile, the official repository icon, and an unobtrusive sponsorship link (`☕ Traktir Kopi`).
+_Avoid_: Footer branding, watermark, sponsor banner
+
+**Sponsorship Link**:
+A passive, non-intrusive external hyperlink in the status bar footer pointing directly to the author's Saweria funding page (`https://saweria.co/herliansyah26`) for user-supported project appreciation without popups or interstitial modals.
+_Avoid_: Donation popup, paywall, donation nag
 
 
