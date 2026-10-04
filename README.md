@@ -5,8 +5,6 @@
 ### High-Performance Modern Database Manager & Viewer with AI Copilot & Safety Guard
 
 [![GitHub Release](https://img.shields.io/github/v/release/herliansyah/sqlfox?style=flat-square&color=FF6B35&logo=github)](https://github.com/herliansyah/sqlfox/releases)
-[![npm version](https://img.shields.io/npm/v/sqlfox?style=flat-square&color=CB3837&logo=npm)](https://www.npmjs.com/package/sqlfox)
-[![npm downloads](https://img.shields.io/npm/dm/sqlfox?style=flat-square&color=2E7D32&logo=npm)](https://www.npmjs.com/package/sqlfox)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/herliansyah/sqlfox?style=flat-square&color=00ADD8&logo=go)](https://golang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-F59E0B?style=flat-square)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-4B5563?style=flat-square&logo=linux)](https://github.com/herliansyah/sqlfox/releases)
@@ -33,34 +31,29 @@ Operates with a strict memory ceiling (**< 100MB RAM**), sub-second launch time 
 
 ### 🌟 Key Highlights
 
-- ⚡ **Zero-Install Instant Run**: Launch via `npx sqlfox` or run a single standalone binary. No electron, no heavy JVM, no installation wizard required.
+- ⚡ **Zero-Install Single Binary**: Run a single standalone executable. No electron, no heavy JVM, no complex installation wizard required.
+- 🗺️ **Visual ERD Interactive Canvas**: Drag-and-drop table relationship visualizer with smooth cubic Bézier SVG lines, auto-layout, fit-all viewport, and per-session positioning cache.
+- 🔄 **Schema & Data Synchronization Suite**: AST-based Structure Sync (side-by-side DDL comparison & safe migration generation), direct memory-bounded Cross-Connection Data Transfer (<50MB buffer), and Row-Level Data Sync (keyset delta reconciliation).
+- 📊 **Spreadsheet CRUD & Smart Seeding**: Inline "+ Add Row" drafting, multi-row deletion with Safety Guard challenge, instant column filtering, streaming SQL dumps (<10MB buffer), and FK-Aware Smart Seed Dumps (referential topological closure).
 - 🛡️ **Deterministic Safety Guard**: Intercepts accidental destructive queries (`DROP TABLE`, `TRUNCATE`, unqualified `UPDATE`/`DELETE` without `WHERE`) via AST evaluation with a mandatory Challenge Modal.
 - 🔐 **Encrypted Connection Vault**: Database credentials and SSH keys encrypted at rest with **AES-256-GCM** and **Argon2id**. Protected by a Master PIN / Password.
 - 📱 **Remote & LAN Access Guard**: Access your database workspace from your tablet, phone, or team members on the same network with PIN verification.
-- 🤖 **BYOK AI Copilot & Error Healer**: Bring Your Own Key (OpenAI, Claude, Gemini, DeepSeek, or local Ollama). Explains schemas, generates optimized queries, and automatically analyzes and heals SQL execution errors.
+- 🤖 **BYOK AI Copilot & Error Healer**: Bring Your Own Key (OpenAI, Claude, Gemini, DeepSeek, or local Ollama). Explains schemas, generates optimized queries, and automatically analyzes and heals SQL execution errors. Features rich Markdown rendering with 1-click execution blocks (`Insert & Run`, `Replace`) and chat session branching/forking.
 - 🏎️ **Keyset Pagination & Out-of-Band Cancellation**: High-speed row streaming without memory spikes and instantaneous query termination (`KILL QUERY`) through dedicated control sessions.
 - 💾 **Smart Pre-DDL Backups**: Automatic schema and table dumps before dangerous alter/drop operations.
-- 🔌 **Multi-Engine Support**: MySQL 5.7 / 8.x, MariaDB, and local pure-Go SQLite (direct connection or over SSH tunnel).
+- 🌐 **Cluster & Replication Inspector**: Real-time diagnostic suite for Percona XtraDB Cluster (PXC 5.7/8.0), Galera, and MySQL replication. Auto-detects Flow Control pauses, auto-probes peer nodes to pinpoint the slowest bottleneck node, and evaluates a Tri-Metric Matrix (EVS network latency, InnoDB disk stalls, apply worker capacity).
+- 📈 **Performance Flight Recorder**: On-demand diagnostic flight recorder capturing Quad-Metric telemetry (differential QPS, `Threads_running`, Row Lock Waits, Buffer Pool Waits) and correlating active non-idle queries with an interactive timeline scrubber and 10-minute auto-stop safety guard.
+- 💻 **Headless CLI Suite**: Execute queries and scripts non-interactively with streaming output formats (`table`, `json`, `ndjson`, `csv`), pipe SQL via STDIN, direct DSN targeting for CI/CD runners, cross-connection data migrations (`sqlfox transfer`), and fail-closed AST safety guardrails.
+- 🏋️ **Enterprise Hardening & Memory Ceiling (<100MB)**: Benchmarked against 1,000+ tables, 50,000 columns, and 1,000,000-row streams with a strict <100MB RAM budget. Features native CSS `content-visibility` sidebar virtualization, 150ms search debounce, 3s fail-fast query cancellation on saturated connection pools, loopback-guarded `pprof` diagnostics (`SQLFOX_PPROF=1`), and a global network error boundary with auto-reconnection and draft state preservation.
+- 💡 **Heuristic Index Advisor & Query Tuner**: Deterministic rule-based index recommendations using the ESR rule (Equality -> Sort -> Range), Index Bloat detection (>5 secondary indexes) with unsuppressed candidate advice and consolidation paths, safe non-blocking DDL (`ALGORITHM=INPLACE, LOCK=NONE` on MySQL 5.7/8.0, `CONCURRENTLY` on PostgreSQL), and headless CLI query tuning via `sqlfox advise`.
+- 🚀 **In-App Self-Update & Changelog Viewer**: Upgrade your single binary directly from the web UI with 1-click in-place replacement, full Markdown changelog inspection from GitHub Releases, 24-hour rate-limit guarded checks, and graceful auto-restart.
+- 🔌 **Multi-Engine Support**: MySQL 5.7 / 8.x, MariaDB, PostgreSQL 9.6–16+ (pure-Go `pgx/v5`), and local pure-Go SQLite (direct connection or over SSH tunnel).
 
 ---
 
 ### 🚀 Quick Start
 
-#### Method 1: Using `npx` (No Installation Needed)
-If you have Node.js (16+) installed, run SqlFox immediately:
-```bash
-npx sqlfox
-```
-
-#### Method 2: Global Install via `npm`
-```bash
-npm install -g sqlfox
-
-# Then start anywhere:
-sqlfox
-```
-
-#### Method 3: Download Prebuilt Standalone Binary
+#### Method 1: Download Prebuilt Standalone Binary
 Grab the pre-compiled binary for your OS and architecture from [GitHub Releases](https://github.com/herliansyah/sqlfox/releases):
 
 | Operating System | Architecture | Package Format |
@@ -80,13 +73,13 @@ curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v
 ./sqlfox
 ```
 
-#### Method 4: Install with Go
+#### Method 2: Install with Go
 ```bash
 go install github.com/herliansyah/sqlfox/cmd/sqlfox@latest
 sqlfox
 ```
 
-#### Method 5: Build from Source
+#### Method 3: Build from Source
 ```bash
 git clone https://github.com/herliansyah/sqlfox.git
 cd sqlfox
@@ -171,34 +164,29 @@ Berjalan dengan konsumsi memori sangat hemat (**< 100MB RAM**), waktu start kila
 
 ### 🌟 Fitur Utama
 
-- ⚡ **Jalankan Tanpa Install**: Jalankan langsung lewat `npx sqlfox` atau download file binary tunggal. Tanpa Electron, tanpa JVM yang membebani laptop.
+- ⚡ **Jalankan Tanpa Install (Single Binary)**: Cukup download dan jalankan berkas binary tunggal mandiri. Tanpa Electron, tanpa JVM yang membebani laptop.
+- 🗺️ **Visual ERD Canvas Interaktif**: Visualisasi relasi antar-tabel dengan drag-and-drop, garis koneksi Bézier SVG mulus, penataan otomatis (*Auto Layout*), penyesuaian layar (*Fit All*), dan penyimpanan posisi per sesi.
+- 🔄 **Sinkronisasi Skema & Data (Navicat Power Suite)**: Perbandingan struktur DDL berdampingan (*Structure Sync*) beserta migrasi aman, transfer streaming antar-koneksi langsung (*Data Transfer* dengan batas buffer <50MB), dan rekonsiliasi data per baris berbasis primary key (*Row-Level Data Sync*).
+- 📊 **Spreadsheet Grid CRUD & Smart Seed**: Penambahan baris draf instan ("+ Add Row"), penghapusan banyak baris dengan proteksi Safety Guard, filter kolom instan, streaming SQL dump langsung (<10MB buffer), dan *FK-Aware Smart Seed Dump* dengan resolusi graf relasi rekursif (*topological closure*).
 - 🛡️ **Safety Guard Terintegrasi**: Menganalisis sintaks SQL (*AST parser*) secara deterministik untuk mencegat query destruktif berbahaya (`DROP TABLE`, `TRUNCATE`, `DELETE`/`UPDATE` massal tanpa `WHERE`) dengan dialog konfirmasi aman (*Challenge Modal*).
 - 🔐 **Connection Vault Terenkripsi**: Menyimpan kredensial database dan SSH key dengan standar kriptografi **AES-256-GCM** dan **Argon2id**. Dilengkapi PIN / Master Password otomatis yang praktis.
 - 📱 **Akses Multi-Device (Remote LAN Guard)**: Buka SqlFox dari tablet, iPad, atau HP melalui koneksi WiFi lokal dengan otentikasi PIN keamanan.
-- 🤖 **AI Copilot & Error Healer (BYOK)**: Gunakan API Key Anda sendiri (OpenAI, Claude, Gemini, DeepSeek, atau Ollama lokal). Mampu membuat query dari bahasa manusia, optimasi indeks, serta menganalisis dan memperbaiki query yang error secara otomatis (*Error Healer*).
+- 🤖 **AI Copilot & Error Healer (BYOK)**: Gunakan API Key Anda sendiri (OpenAI, Claude, Gemini, DeepSeek, atau Ollama lokal). Mampu membuat query dari bahasa manusia, optimasi indeks, memperbaiki query error secara otomatis (*Error Healer*), formatting Markdown kaya dengan tombol eksekusi SQL instan (*Insert & Run*, *Replace*), serta *Chat Session Forking* untuk eksplorasi prompt independen.
 - 🏎️ **Keyset Pagination & Out-of-Band Cancel**: Tampilan data super responsif tanpa lonjakan RAM, serta fitur pembatalan query instan (*KILL QUERY*) lewat secondary connection tanpa memutus koneksi utama.
 - 💾 **Smart Pre-DDL Backup**: Backup otomatis skema dan data tabel sebelum eksekusi DDL penting dijalankan.
-- 🔌 **Dukungan Multi Database**: MySQL 5.7 / 8.x, MariaDB, dan SQLite (koneksi langsung maupun melalui SSH Tunneling).
+- 🌐 **Cluster & Replication Inspector**: Diagnostik real-time untuk Percona XtraDB Cluster (PXC 5.7/8.0), Galera, dan replikasi MySQL. Mendeteksi pembekuan Flow Control, auto-probe node rekan untuk mengisolasi node terlelet yang membebani cluster, serta Tri-Metric Detective (latensi jaringan EVS, stall harddisk/InnoDB, dan kejenuhan worker).
+- 📈 **Performance Flight Recorder**: Perekam telemetri performa database on-demand (Quad-Metric: QPS, `Threads_running`, Row Lock Waits, Buffer Pool Waits) yang menghubungkan titik lonjakan (*spike*) grafik langsung dengan query aktif yang sedang berjalan di detik tersebut, dilengkapi pengaman auto-stop 10 menit.
+- 💻 **Headless CLI Suite**: Eksekusi query dan script terminal secara otomatis/non-interaktif dengan format output streaming (`table`, `json`, `ndjson`, `csv`), dukungan piping via STDIN, direct DSN untuk runner CI/CD tanpa vault, transfer data antar-koneksi (`sqlfox transfer`), serta perlindungan fail-closed AST Safety Guard.
+- 🏋️ **Enterprise Hardening & Plafon Memori (<100MB RAM)**: Teruji tahan banting pada skema masif 1.000+ tabel, 50.000 kolom, dan streaming 1.000.000 baris di bawah pagu <100MB RAM. Dilengkapi virtualisasi sidebar native CSS `content-visibility`, filter pencarian *debounced* 150ms, *fail-fast timeout* 3 detik untuk pembatalan query saat pool jenuh, profil memori pprof terproteksi loopback (`SQLFOX_PPROF=1`), serta *Global Network Error Boundary* dengan rekoneksi otomatis tanpa menghapus draf query atau staged edits.
+- 💡 **Heuristic Index Advisor & Query Tuner**: Rekomendasi indeks deterministik berbasis aturan ESR (Equality $\to$ Sort $\to$ Range) untuk meniadakan filesort dan full table scan, peringatan proteksi *Index Bloat* (>5 indeks sekunder) tanpa memutus saran indeks, safe non-blocking DDL (`ALGORITHM=INPLACE, LOCK=NONE` pada MySQL 5.7/8.0, `CONCURRENTLY` pada PostgreSQL), serta CLI headless `sqlfox advise`.
+- 🚀 **In-App Self-Update & Changelog Viewer**: Update binary SqlFox langsung dari antarmuka web dengan 1 klik (in-place atomic replacement), inspeksi changelog rilis Markdown dari GitHub Releases, proteksi cache 24 jam untuk rate limit, dan auto-restart mulus.
+- 🔌 **Dukungan Multi Database**: MySQL 5.7 / 8.x, MariaDB, PostgreSQL 9.6–16+ (driver native pure-Go `pgx/v5`), dan SQLite (koneksi langsung maupun melalui SSH Tunneling).
 
 ---
 
 ### 🚀 Panduan Instalasi & Penggunaan Cepat
 
-#### Cara 1: Menggunakan `npx` (Langsung Jalankan tanpa Install)
-Bagi pengguna Node.js (v16+):
-```bash
-npx sqlfox
-```
-
-#### Cara 2: Install Global via `npm`
-```bash
-npm install -g sqlfox
-
-# Jalankan kapan saja dengan perintah:
-sqlfox
-```
-
-#### Cara 3: Unduh File Binary Siap Pakai
+#### Cara 1: Unduh File Binary Siap Pakai
 Unduh paket binary sesuai sistem operasi dan arsitektur Anda di halaman [GitHub Releases](https://github.com/herliansyah/sqlfox/releases):
 
 | Sistem Operasi | Arsitektur CPU | Format Berkas |
@@ -218,13 +206,13 @@ curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v
 ./sqlfox
 ```
 
-#### Cara 4: Install Menggunakan Go
+#### Cara 2: Install Menggunakan Go
 ```bash
 go install github.com/herliansyah/sqlfox/cmd/sqlfox@latest
 sqlfox
 ```
 
-#### Cara 5: Kompilasi Manual dari Source Code
+#### Cara 3: Kompilasi Manual dari Source Code
 ```bash
 git clone https://github.com/herliansyah/sqlfox.git
 cd sqlfox

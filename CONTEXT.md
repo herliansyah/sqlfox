@@ -5,12 +5,16 @@ Core ubiquitous language for the SqlFox database management tool.
 ## Connections & Environment
 
 **Connection**:
-A configured target database endpoint containing host, network, protocol (direct or SSH tunnel), and authentication credentials.
+A configured target database endpoint containing host, network, protocol, and authentication credentials.
 _Avoid_: Profile, host config, server alias
 
 **Environment**:
 The operational trust tier assigned to a Connection (`Production`, `Staging`, `Development`) that dictates the enforcement level of the Safety Guard.
 _Avoid_: Stage, label, group
+
+**Environment Badge**:
+The singular visual status tag in the Session Switcher displaying the connection's Environment tier (`[PROD 🔴]`, `[STAGE 🟡]`, `[DEV 🟢]`), serving as the single source of truth for environment identity without duplicate labels in sidebar or footer.
+_Avoid_: Multi-surface environment tags, sidebar environment headers, footer environment labels
 
 **Connection Vault**:
 The encrypted local SQLite storage holding connection metadata and credentials.
@@ -35,19 +39,27 @@ _Avoid_: Public URL, remote host
 ## Drivers & Sessions
 
 **Driver**:
-A protocol-specific database connector (e.g. MySQL, SQLite) implementing lifecycle and session creation.
+A protocol-specific database connector (e.g. MySQL, SQLite, PostgreSQL) implementing lifecycle and session creation.
 _Avoid_: Adapter, DB client
 
 **Session**:
 An active client interaction context bound to a Connection, managing open tabs, temporary schema cache, and transaction state.
 _Avoid_: Workspace, window, console
 
+**Search Path**:
+The active PostgreSQL schema namespace configured for a session (`SET search_path = <schema>`), governing unqualified table resolution and UI schema browsing.
+_Avoid_: Active catalog, schema switch, default db
+
+**Backend Process ID (PID)**:
+The unique server-side process identifier of a PostgreSQL backend worker, utilized for out-of-band cancellation (`pg_cancel_backend`) and lock tree visualization (`pg_blocking_pids`).
+_Avoid_: Thread ID, connection ID, worker ID
+
 **RowStream**:
 A memory-bounded record sequence streamed from database drivers to the frontend via WebSocket/SSE chunks.
 _Avoid_: Result buffer, fetch array
 
 **Out-of-Band Cancellation**:
-A query interruption mechanism dispatched via a secondary control connection issuing protocol termination (`KILL QUERY`) without destroying the primary connection.
+A query interruption mechanism dispatched via a secondary control connection issuing protocol termination (`KILL QUERY` on MySQL, `pg_cancel_backend(pid)` on PostgreSQL) without destroying the primary connection.
 _Avoid_: Context cancel, socket kill
 
 ## Safety & Governance
@@ -80,6 +92,26 @@ _Avoid_: Dry run, query check
 An automated pre-DDL backup policy that captures DDL always and table data conditionally based on a 50MB size threshold.
 _Avoid_: Auto-dump, full backup
 
+**Safe Execution Pipeline**:
+The unified execution seam within an active Session that evaluates queries against the Safety Guard, verifies Environment trust tiers and Challenge Modals, triggers pre-DDL Smart Tiered Backups, and enforces the Implicit Safe Limit across all client transports (HTTP and WebSocket).
+_Avoid_: Query runner, execution handler, direct driver call
+
+**Pre-Flight Lock Inspection**:
+An automated diagnostic check intercepting DDL and large-scale mutations to detect open transactions, active metadata lock waiters, and blocking queries touching the target table prior to statement submission.
+_Avoid_: Lock scanner, trx sniffer
+
+**Fail-Fast DDL Timeout**:
+An isolated session lock timeout policy applied on a dedicated connection (`lock_wait_timeout` or `busy_timeout`) that immediately aborts blocked DDL operations within seconds to prevent cascading connection pool exhaustion.
+_Avoid_: Quick timeout, lock drop
+
+**Schema Relationship Introspection**:
+An automated dependency analysis scanning inbound and outbound foreign keys to identify high-risk schema alterations on master/lookup tables referenced by massive transaction tables.
+_Avoid_: FK tracker, relation map
+
+**OSC Generator**:
+An automated utility formulating production-ready Online Schema Change commands (`gh-ost`, `pt-online-schema-change`) with load throttles and binlog streaming for non-instant schema migrations.
+_Avoid_: DDL scripter, ghost wrapper
+
 ## Artificial Intelligence
 
 **BYOK (Bring Your Own Key)**:
@@ -98,13 +130,29 @@ _Avoid_: Prompt tweak, bot style
 A discrete conversational thread with Copilot, uniquely identified and persisted locally with title and message history.
 _Avoid_: Message log, chat thread
 
+**Chat Session Forking**:
+The process of branching a new, isolated Chat Session containing conversation history up to a selected Copilot response, enabling parallel exploration threads without corrupting the originating session.
+_Avoid_: Duplicate chat, copy thread
+
+**SQL Code Block Actions**:
+Interactive action controls attached to rendered SQL code blocks within Copilot chat messages (`Copy`, `Insert & Run`, and `Replace`) enabling direct query execution and editor manipulation.
+_Avoid_: Code buttons, snippet toolbar
+
 **Internal Notes**:
 A persistent in-memory/in-tab Markdown scratchpad (`Notes.md`) allowing developers to accumulate query explanations, execution findings, and AI insights.
 _Avoid_: Text file, memo pad, clipboard buffer
 
+**Notes Markdown Live Preview**:
+A segmented mode toggle (`Edit` / `Preview`) within the Internal Notes tab that compiles and renders Markdown formatted text, tables, and code blocks in real time.
+_Avoid_: Notes viewer, markdown tab
+
 **Error Healer**:
 An automated diagnostic loop intercepting failed SQL executions and dispatching root-cause analysis and query fixes to Copilot.
 _Avoid_: Error fixer, bug helper
+
+**Copilot Assistant**:
+The unified AI reasoning coordinator in `internal/ai` that curates the Schema Context Window, injects relevant Table Knowledge Notes, enforces Firewall identifier masking, and compiles localized AI Personas across all AI actions (explain, optimize, debug, NL-to-SQL).
+_Avoid_: AI handler, prompt builder, bot service
 
 ## Editor & Autocomplete
 
@@ -183,8 +231,354 @@ A searchable popover dropdown in the sidebar for filtering and switching the act
 _Avoid_: Raw select dropdown, static DB selector
 
 **Schema Object Filter**:
-A real-time, sticky client-side search input in the sidebar explorer for instantaneously filtering tables, views, and triggers by name with quick keyboard access (`/`).
+An real-time, sticky client-side search input in the sidebar explorer for instantaneously filtering tables, views, and triggers by name with quick keyboard access (`/`).
 _Avoid_: Tree grep, manual scroll search
 
+**Collapsible Schema Tree**:
+An interactive sidebar grouping mechanism organizing schema items into independent collapsible sections (`Tables`, `Views`, `Triggers`) with counts and persistent state across reloads.
+_Avoid_: Flat tree, uncollapsible object list
+
+**Keyboard Shortcuts Cheatsheet**:
+A centralized native modal dialog displaying organized hotkeys grouped by functional domain (Query Execution, Navigation, Tabs, Tools), discoverable via `?`, `F1`, status bar, or Command Palette.
+_Avoid_: Hardcoded button shortcut badges, fragmented hotkey hints
+
+**Maximized Search & Filter Control**:
+A standardized toolbar input design pattern featuring dynamic horizontal expansion, leading search icon (`🔍`), dynamic clear button (`✕`), and native `Escape` reset handling across all application toolbars and dialogs.
+_Avoid_: Cramped fixed-width input, static un-clearable textbox
+
+## Productivity & Knowledge Base
+
+**Query Snippet**:
+A reusable parameterized SQL template stored in the local Connection Vault, supporting dynamic substitution tokens and optional connection or engine scoping tags.
+_Avoid_: Saved query, SQL macro, code block
+
+**Dynamic Variable**:
+A substitution placeholder (e.g. `{{tenant_id}}`) within a Query Snippet resolved prior to editor injection via a parameter modal.
+_Avoid_: Query argument, template param, input token
+
+**Snippet Parameter Modal**:
+A native modal dialog prompting the user for Dynamic Variable values when invoking a Query Snippet, performing live substitution into the Query Editor.
+_Avoid_: Variable popup, param window, prompt box
+
+**Table Knowledge Note**:
+A local Markdown documentation record bound to a specific database table stored in the local Connection Vault without modifying the remote schema.
+_Avoid_: Server table comment, schema note, table wiki
+
+## Data Interchange & Portability
+
+**CSV Delimiter Sniffing**:
+An automated frequency-analysis check on initial CSV records to detect whether the file uses commas, semicolons, tabs, or pipe separators.
+_Avoid_: Auto-split, delimiter guesser
+
+**Column Mapping Matrix**:
+A visual pre-flight configuration interface mapping each CSV source column to an existing database table column with auto-matching and skip capabilities.
+_Avoid_: Column chooser, field selector
+
+**Excel-Safe CSV Export**:
+A CSV generation format that prepends a UTF-8 BOM and wraps leading-zero string identifiers in spreadsheet formulas (`="0812..."`) to prevent loss of leading digits or scientific notation coercion.
+_Avoid_: Excel patch, quote hack
+
+**CSV Ingestion Engine**:
+A streaming data import module that combines automated Delimiter Sniffing, Column Mapping Matrix resolution, parameter ceiling batching, and row-by-row fallback retries to populate target database tables from arbitrary CSV feeds.
+_Avoid_: CSV loader, import script, raw insert loop
+
+## Data Synchronization & Table Operations
+
+**Data Transfer**:
+A streaming bulk migration process that reads schema and rows directly from a source session and writes them to a target session across connections without temporary disk staging.
+_Avoid_: DB copier, dump-and-load pipe, table clone
+
+**Data Sync**:
+A row-level reconciliation mechanism that performs keyset comparisons between source and target tables, computes delta changes (`INSERT`, `UPDATE`, `DELETE`), and executes selective atomic updates.
+_Avoid_: Row matcher, table synchronizer, data merge
+
+**Structure Sync**:
+An AST-based DDL comparison engine that identifies structural discrepancies (missing tables, altered columns, missing indexes, foreign key drift) between two schemas and generates idempotent migration scripts.
+_Avoid_: Schema diff tool, DDL merger, table reconciler
+
+**Table CRUD Operator**:
+A direct spreadsheet-like interaction model within the Virtual Data Grid allowing users to stage new row insertions, delete selected rows under Safety Guard validation, and apply quick visual column filters without raw SQL.
+_Avoid_: Edit grid, table viewer, row manager
+
+**Staged Grid Changes**:
+An in-memory ledger accumulating uncommitted cell modifications across rows and columns in the Virtual Data Grid, highlighting modified cells with visual dirty badges (`●`) and providing atomic "Apply" and "Discard" actions.
+_Avoid_: Unsaved buffer, dirty queue, batch edit cache
+
+**Immediate Persist Mode**:
+A data grid editing mode where cell modifications automatically persist to the remote database upon input blur or Enter key submission, bypassing manual staging.
+_Avoid_: Direct save, auto-flush, instant write
+
+**SQL Dump Runner**:
+A memory-bounded streaming executor and generator for `.sql` files that breaks multi-statement scripts into transactional chunks without loading entire multi-gigabyte files into memory.
+_Avoid_: SQL runner, dump importer, script player
+
+## DBA Operations & Diagnostics Suite
+
+**Processlist Manager**:
+An interactive real-time database thread and connection monitor featuring slow-query threshold alerts and one-click out-of-band query or session termination (`KILL QUERY` / `KILL CONNECTION`).
+_Avoid_: Process monitor, task list, thread viewer
+
+**Process Inspector Modal**:
+A dedicated diagnostic dialog displaying complete thread execution metadata, formatted full SQL statement text without truncation, 1-click clipboard actions, and integrated operational shortcuts (`EXPLAIN`, editor transfer, AI review, and termination).
+_Avoid_: Process details popup, thread viewer window, query popover
+
+**Table Diagnostics**:
+A physical storage inspection module providing exact data length, index length, and fragmentation overhead statistics alongside one-click table maintenance actions (`OPTIMIZE TABLE`, `ANALYZE TABLE`, `CHECK TABLE`).
+_Avoid_: Table health, storage checker, disk tool
+
+**Privilege Matrix**:
+A visual user management and access control interface allowing DBAs to provision accounts, restrict host origins, and configure granular permissions across global, database, and table scopes via an interactive grid.
+_Avoid_: User editor, permission manager, grant wizard
+
+**Foreign Key Hyperlink**:
+A navigational link embedded within data grid cells referencing foreign keys, enabling inline relational data peeking and direct traversal to parent table records without manual SQL queries.
+_Avoid_: FK jump, relational link, key preview
+
+**Execution Profiler**:
+A fine-grained query execution analysis tool visualizing sequential engine lifecycle stages (`System lock`, `optimizing`, `statistics`, `Sorting result`, `Copying to tmp table`) and stage durations via `SHOW PROFILE` or `performance_schema`.
+_Avoid_: Query timer, stage tracer, performance graph
+
+**Redundant Index Detector**:
+A static schema analysis check identifying duplicate, shadowed, or redundant prefix indexes that consume disk and memory bandwidth while degrading write throughput.
+_Avoid_: Index linter, key cleaner, duplicate checker
+
+**Session Audit Log**:
+A persistent session-level ledger tracking all executed SQL statements with timestamps, execution durations in milliseconds, affected/returned row counts, and error states.
+_Avoid_: History tab, query log, command list
+
+**Lock Dependency Tree**:
+An interactive hierarchical diagnostic view that maps blocked database sessions to their blocking transactions (utilizing `sys.innodb_lock_waits` / `performance_schema.data_lock_waits`), explicitly isolating the root blocker session, locked resource, lock mode, and root cause.
+_Avoid_: Lock viewer, block list, wait graph
+
+**Referential Slice Exporter**:
+A zero-configuration, schema-wide database dumper that exports complete DDL structure alongside bounded row samples (e.g., 20 rows per table) without requiring manual table tagging; automatically scans the entire Foreign Key dependency graph and recursively fetches all upstream referenced parent rows (transitive closure), writing inserts in topological order to guarantee referentially integral, zero-error SQL restore files.
+_Avoid_: Partial dump, table sampler, mini export
+
+**Inline Table Filter Bar**:
+A dedicated querying control docked above the Virtual Data Grid that allows users to filter remote records using either structured clause pills or raw SQL expressions without navigating away from the table view.
+_Avoid_: Search box, table filter, grid search
+
+**Quick Clause Pill**:
+A modular visual filter condition element (`[Column] [Operator] [Value]`) composed inside the Inline Table Filter Bar that compiles to a sanitized SQL WHERE clause.
+_Avoid_: Filter tag, query chip, search token
+
+**Raw WHERE Expression**:
+A freeform SQL Boolean expression typed directly into the Inline Table Filter Bar executed via Server-Side Filter Pushdown with Safety Guard injection validation.
+_Avoid_: Custom query, manual filter, SQL string
+
+**Server-Side Filter Pushdown**:
+An execution strategy that forwards active filter expressions to the database engine as an indexed `WHERE` clause rather than filtering pre-fetched rows in client memory.
+_Avoid_: In-memory filter, client search, local filter
+
+**Grid Query Handoff**:
+A one-click action transferring the currently active table, column filters, and sort order from the Table Viewer directly into a new Query Editor tab as a complete editable SQL script.
+_Avoid_: Export to SQL, copy query, open in editor
+
+**Cluster & Replication Inspector**:
+A dynamic topology and diagnostic monitor within the DBA Operations Suite that automatically detects Galera/PXC clustering, standard MySQL replication, or standalone instances to visualize node synchronization, quorum health, and replication queues.
+_Avoid_: Cluster monitor, Galera viewer, replication dashboard
+
+**Flow Control Pressure Indicator**:
+A real-time metric evaluator measuring `wsrep_flow_control_paused` to detect cluster-wide write throttling, isolating whether local write set applying or a remote peer node is exerting backpressure.
+_Avoid_: Lag meter, pause checker, throttling alert
+
+**Cluster Bottleneck Detective**:
+A heuristic diagnostic engine correlating inter-node network replication latency (`wsrep_evs_repl_latency`), disk IO wait states (`wait/io/file/innodb/*`), and thread queues to identify the slowest node or hardware resource causing cluster stalls.
+_Avoid_: Slow finder, cluster analyzer, node debugger
+
+**Peer Node Auto-Discovery**:
+An out-of-band probing mechanism that extracts active cluster IP addresses from `wsrep_incoming_addresses` and dispatches lightweight status queries across all cluster members in parallel using the active session credentials to compare receive queues and pinpoint the culprit node.
+_Avoid_: Node scanner, cluster pinger, server crawler
+
+**Tri-Metric Bottleneck Matrix**:
+A unified diagnostic heuristic comparing inter-node network round-trip latency (`wsrep_evs_repl_latency`), physical storage write stalls (`Innodb_buffer_pool_wait_free`, fsync wait events), and worker saturation (`wsrep_slave_threads`) to isolate whether storage, network, or concurrency is the bottleneck.
+_Avoid_: Hardware checker, slow alert, performance dashboard
+
+**Performance Flight Recorder**:
+An on-demand, time-bounded telemetry recorder capturing differential database server status metrics and active processlist snapshots during an operational investigation window.
+_Avoid_: APM agent, background daemon, metrics monitor
+
+**Recording Session**:
+A stateful capture lifecycle (`IDLE`, `RECORDING`, `STOPPED`) initiated and terminated explicitly by the user, governed by an automatic safety timeout and surfaced via a persistent global recording badge.
+_Avoid_: Profiling job, trace task, run batch
+
+**Quad-Metric Telemetry**:
+A 4-dimensional differential performance vector sampled per tick: Throughput (QPS), Concurrency (`Threads_running`), Contention (Row Lock Waits), and Storage Latency (InnoDB Buffer Pool Waits).
+_Avoid_: Server stats, raw status, generic metrics
+
+**Correlated Process Snapshot**:
+A lightweight, filtered snapshot of non-idle running threads tied to a specific metric timestamp, captured automatically when concurrency or query duration crosses threshold limits.
+_Avoid_: Full thread dump, process backup
+
+## Codebase Architecture & Maintenance (Ponytail)
+
+**Native Platform Tunneling**:
+Relying on standard OS facilities (`ssh -N -L 3306:remote-db:3306 user@bastion` or platform VPN) for remote private network database connectivity, avoiding custom in-process SSH dialer complexity and unexposed vault database columns.
+_Avoid_: In-process tunnel, custom bastion client
+
+## Architectural Decision Records (ADR)
+- **0001**: CGo-Free Pure Go Drivers (`docs/adr/0001-cgo-free-pure-go-drivers.md`)
+- **0002**: Deterministic AST Safety Guard (`docs/adr/0002-deterministic-ast-safety-guard.md`)
+- **0003**: Desktop Localhost Runtime Model (`docs/adr/0003-desktop-localhost-runtime-model.md`)
+- **0004**: CodeMirror and Embedded SPA (`docs/adr/0004-codemirror-and-embedded-spa.md`)
+- **0005**: Out-of-Band Query Cancellation (`docs/adr/0005-out-of-band-query-cancellation.md`)
+- **0006**: Smart Tiered DDL Backup (`docs/adr/0006-smart-tiered-ddl-backup.md`)
+- **0007**: Multi-IP Access and Port Hunting (`docs/adr/0007-multi-ip-access-and-port-hunting.md`)
+- **0008**: Native Dialogs and Staged DDL Designer (`docs/adr/0008-native-dialogs-and-staged-ddl-designer.md`)
+- **0009**: Cross-Database Schema Search (`docs/adr/0009-cross-database-schema-search.md`)
+- **0010**: Stateless Schema Introspection and Database Isolation (`docs/adr/0010-stateless-schema-introspection-and-database-isolation.md`)
+- **0011**: Dynamic EXPLAIN Plan Introspection and Visual Grid (`docs/adr/0011-dynamic-explain-plan-introspection-and-visual-grid.md`)
+- **0012**: Sidebar Schema Filtering and Searchable Database Switcher (`docs/adr/0012-sidebar-schema-filtering-and-searchable-database-switcher.md`)
+- **0013**: Parameterized Query Snippets and Vault Persistence (`docs/adr/0013-parameterized-query-snippets-and-vault-persistence.md`)
+- **0014**: Table Knowledge Notes and AI Context Injection (`docs/adr/0014-table-knowledge-notes-and-ai-context-injection.md`)
+- **0015**: Zero-Dependency CSV Import with Column Mapping (`docs/adr/0015-zero-dependency-csv-import-with-column-mapping.md`)
+- **0016**: Grid Inline Edit Lifecycle and Staged Apply (`docs/adr/0016-grid-inline-edit-lifecycle-and-staged-apply.md`)
+- **0017**: Real-Time Processlist Manager and Session Audit Log (`docs/adr/0017-real-time-processlist-manager-and-session-audit-log.md`)
+- **0018**: Advanced Diagnostics and Privilege Matrix (`docs/adr/0018-advanced-diagnostics-and-privilege-matrix.md`)
+- **0019**: Inline Table Filter Bar, Server-Side Pushdown, and Grid Query Handoff (`docs/adr/0019-inline-table-filter-bar-and-server-side-pushdown.md`)
+- **0020**: Ponytail Audit, Codebase Pruning, and Native Platform Tunneling (`docs/adr/0020-ponytail-audit-codebase-pruning-and-native-ssh.md`)
+- **0021**: Workspace Ergonomics, Shortcuts Discovery, and Search Standardization (`docs/adr/0021-workspace-ergonomics-and-search-standardization.md`)
+- **0022**: Safe DDL Guardrails and Lock Contention Prevention (`docs/adr/0022-safe-ddl-guardrails-and-lock-contention-prevention.md`)
+- **0023**: Dynamic Cluster & Replication Inspector with Peer Node Auto-Discovery and Tri-Metric Bottleneck Detective (`docs/adr/0023-cluster-and-replication-inspector.md`)
+- **0024**: Ponytail Pruning, Stateless Service Simplification, and Unified AI Streaming Parser (`docs/adr/0024-ponytail-pruning-and-stateless-service-simplification.md`)
+- **0025**: On-Demand Performance Flight Recorder and Correlated Process Snapshots (`docs/adr/0025-on-demand-performance-flight-recorder-and-correlated-process-snapshots.md`)
+- **0026**: Copilot Session Forking, Rich Markdown Blocks, and Fluid Workspace Ergonomics (`docs/adr/0026-copilot-session-forking-rich-markdown-and-fluid-workspace.md`)
+- **0027**: Streaming SQL Dump, Referential Slice Seeding, and Grid Spreadsheet CRUD Architecture (`docs/adr/0027-streaming-sql-dump-referential-slice-seeding-and-grid-crud.md`)
+- **0028**: Schema Structure Sync, Cross-Connection Data Transfer, and Row-Level Data Sync Engine (`docs/adr/0028-schema-structure-sync-cross-connection-data-transfer-and-row-data-sync.md`)
+- **0029**: Visual ERD Interactive Canvas (`docs/adr/0029-visual-erd-canvas.md`)
+- **0030**: Headless CLI Suite Architecture and Fail-Closed Automation Policy (`docs/adr/0030-headless-cli-suite-and-fail-closed-automation-policy.md`)
+- **0031**: PostgreSQL Native Driver Engine and Catalog Introspection (`docs/adr/0031-postgresql-native-driver-engine-and-catalog-introspection.md`)
+- **0032**: FK-Aware Mock Data Generation and Referential Closure (`docs/adr/0032-fk-aware-mock-data-generation-and-referential-closure.md`)
+- **0033**: Scheduled Headless Automation and Declarative Task Runner (`docs/adr/0033-scheduled-headless-automation-and-declarative-task-runner.md`)
+- **0034**: Large-Scale Hardening and Memory Ceiling Benchmark (`docs/adr/0034-large-scale-hardening-and-memory-ceiling-benchmark.md`)
+- **0035**: Heuristic Index Advisor & Query Tuner (`docs/adr/0035-heuristic-index-advisor-and-query-tuner.md`)
+
+## Visual Schema & ERD Canvas
+
+**Visual ERD Canvas**:
+An interactive, zero-dependency schema visualization tool within a native modal dialog that renders database tables as draggable cards and foreign key constraints as dynamic SVG cubic Bézier curves.
+_Avoid_: Schema graph, DB diagram, table map
+
+**Auto Layout**:
+A square-root grid placement algorithm that automatically organizes database table cards on the Visual ERD Canvas to prevent overlap without manual positioning.
+_Avoid_: Auto position, magic layout, table aligner
+
+**Fit All Viewport**:
+A bounding-box calculation and CSS scaling/translation transformation that smoothly pans and zooms the Visual ERD Canvas to display all table cards within the visible modal viewport.
+_Avoid_: Zoom to fit, reset zoom, center diagram
+
+**ERD Session Position Cache**:
+A session-level storage (`sessionStorage`) mechanism preserving dragged table card coordinates on the Visual ERD Canvas per database session across modal toggles without modifying remote schemas.
+_Avoid_: Diagram layout file, saved canvas, position state
+
+## Headless CLI & Automation
+
+**Headless Mode**:
+Non-interactive, terminal-driven execution of SqlFox subcommands (`query`, `transfer`, `job`) without launching the embedded HTTP daemon or browser interface.
+_Avoid_: Silent mode, daemonless mode, batch mode
+
+**Direct DSN Targeting**:
+Specifying database connection coordinates directly via connection string (`--dsn`) for ephemeral execution in CI/CD pipelines, bypassing the local encrypted connection vault.
+_Avoid_: Raw URL, ad-hoc connection, unvaulted connection
+
+**Fail-Closed Safety Guard**:
+The CLI execution policy that unconditionally aborts destructive SQL statements with a non-zero exit code in non-interactive sessions unless an explicit bypass flag (`--force`) is supplied.
+_Avoid_: Panic mode, strict abort, safety error
+
+**Stream Output Format**:
+Output serializations supported by headless query execution (`table`, `json`, `ndjson`, `csv`) routing clean data streams to standard output (`stdout`) and diagnostics/progress to standard error (`stderr`).
+_Avoid_: Print mode, report type
+
+**Per-Table Atomicity**:
+Executing cross-connection data transfers within independent transaction boundaries per target table rather than a single monolithic cross-table transaction, preventing lock contention and undo log exhaustion.
+_Avoid_: Table isolation, chunked commit
+
+**Multi-Statement Delimiter Parsing**:
+Token-aware SQL statement splitting that distinguishes statement terminators (`;`) from semicolons within string literals, quotes, and block comments during headless script execution.
+_Avoid_: Semicolon split, raw splitting
+
+**Job Specification**:
+A declarative, version-controlled JSON definition (`sqlfox-job.json`) that specifies an ordered sequence of database automation tasks, connection targets, output configurations, and retention policies.
+_Avoid_: Batch script, cron config, pipeline spec
+
+**Task Runner**:
+The headless CLI orchestration engine dispatched via `sqlfox job run` that validates, sequences, and executes scheduled automation tasks with structured logging and fail-fast semantics.
+_Avoid_: Cron daemon, worker process, background agent
+
+**Dump Rotation**:
+An automated artifact pruning mechanism that enforces retention policies (`keep_last` count or `max_age` duration) against matching backup files to prevent disk exhaustion.
+_Avoid_: File garbage collection, cleaner, auto-purge
+
+**Pre-Flight Job Check**:
+A non-destructive validation execution triggered via `sqlfox job check` verifying job specification syntax, vault credentials, network connectivity, and destination filesystem write permissions without performing data mutations.
+_Avoid_: Dry run, linter, config test
+
+## Mock Data Generation
+
+**Mock Data Generator**:
+A zero-dependency synthetic data synthesizer in `internal/mock/` generating type-aware realistic column values and inserting them into a target table respecting foreign key referential integrity.
+_Avoid_: Test data loader, seed script, fake data tool
+
+**Topological Seed Order**:
+A Kahn's-algorithm-derived insertion sequence that sorts tables by their FK dependency graph so parent reference tables are always populated before their dependent child tables.
+_Avoid_: FK insertion order, dependency queue
+
+**FK Pool**:
+An in-memory collection of up to 1,000 sampled primary key values fetched from a parent reference table after its own seed pass, used to satisfy foreign key column constraints in child table INSERT batches.
+_Avoid_: Parent key cache, reference pool, FK buffer
+
+**Self-Referential FK**:
+A foreign key column that references the primary key of the same table (e.g. `manager_id → users.id`), resolved in a two-pass strategy: rows are inserted with NULL in the self-referential column, then a follow-up UPDATE assigns randomly sampled PKs from the just-inserted pool.
+_Avoid_: Recursive FK, circular self-reference
+
+## Large-Scale Hardening & Benchmarking
+
+**Memory Ceiling Budget**:
+An architectural constraint strictly enforcing that SqlFox resident set size (RSS) RAM consumption remains under 100MB even when processing enterprise-scale streaming pipelines (`RowStream`, cross-connection transfer, and streaming dumps).
+_Avoid_: Memory limit, RAM cap, buffer threshold
+
+**Synthetic Schema Benchmark**:
+An automated in-memory test harness in `_test.go` simulating 1,000+ tables, 50,000 columns, and cyclical foreign keys to measure schema catalog caching, serialization throughput, and memory allocations without production footprint.
+_Avoid_: Fake schema generator, mock DB, test database
+
+**Content Visibility Virtualization**:
+A zero-dependency browser-native rendering optimization utilizing CSS `content-visibility: auto` and `contain-intrinsic-size` on sidebar schema trees to maintain 60fps scrolling and instant filtering across thousands of database objects without third-party virtual list libraries.
+_Avoid_: Virtual tree, windowing component, lazy DOM
+
+**Fail-Fast Control Channel**:
+A time-bounded (3s) secondary database connection path used for out-of-band cancellation (`KILL QUERY` / `pg_cancel_backend`) that aborts client-side streaming and surfaces pool exhaustion diagnostics when server-side connection slots are saturated.
+_Avoid_: Secondary killer, kill connection, cancel hook
+
+## Query Optimization & Index Tuning
+
+**Heuristic Index Advisor**:
+An automated, deterministic rule-based query tuning engine in `internal/advisor/` that inspects AST predicates (`WHERE`, `JOIN`, `ORDER BY`, `GROUP BY`), existing catalog indexes, and EXPLAIN plans to formulate optimal `CREATE INDEX` recommendations.
+_Avoid_: AI indexer, magic optimizer, auto-indexer
+
+**ESR Rule (Equality, Sort, Range)**:
+An indexing column sequencing heuristic ordering equality conditions first, sort/group columns second, and range predicates last to eliminate filesorts and maximize composite index selectivity.
+_Avoid_: Column sorter, index ordering hack, query alignment
+
+**Index Bloat Warning**:
+A diagnostic notice alerting users when a table exceeds safe index thresholds (e.g. >5 secondary indexes or index-to-data storage overhead) to caution against write degradation while still delivering recommended index definitions.
+_Avoid_: Too-many-indexes error, write penalty alert
+
+**Safe DDL Generation**:
+Dialect-aware index creation DDL leveraging non-blocking execution strategies (`ALGORITHM=INPLACE, LOCK=NONE` for MySQL 5.7 and 8.0, `CONCURRENTLY` for PostgreSQL, and `IF NOT EXISTS` for SQLite).
+_Avoid_: Raw index SQL, blocking alter, instant DDL
+
+## Distribution & Workspace Attribution
+
+**Update Engine**:
+The native Go subsystem (`internal/server/update.go`) responsible for polling GitHub Releases, evaluating semver version deltas, streaming platform-specific binary archives (`.tar.gz` / `.zip`), performing atomic binary replacement on disk, and triggering graceful application re-execution without third-party dependencies.
+_Avoid_: Auto-installer, updater daemon, external package manager
+
+**Update Modal**:
+A native HTML5 dialog (`#update-dialog`) presenting release metadata, version diffs (`vCurrent` -> `vLatest`), rendered Markdown changelog release notes, and real-time self-update progress states.
+_Avoid_: Update popup, new version alert, release prompt
+
+**Author Credit**:
+The centralized workspace attribution element residing in the status bar footer, featuring creator credit (`Created by herliansyah`) linked to the author's GitHub profile and the official repository icon.
+_Avoid_: Footer branding, watermark, sponsor badge
 
 

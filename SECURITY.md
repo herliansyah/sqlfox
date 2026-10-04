@@ -26,6 +26,7 @@ Security architecture, cryptographic protocols, environment isolation, and AI pr
 1. **Localhost Binding**: The backend web daemon strictly binds to `127.0.0.1` on a dynamic port or Unix socket. It never binds to `0.0.0.0`, preventing LAN unauthorized access.
 2. **Zero Ingress from Outside**: No public inbound open ports.
 3. **Third-Party Egress Control**: Outbound traffic is restricted strictly to configured target database endpoints and chosen AI provider endpoints.
+4. **Flight Recorder Telemetry Safety**: The on-demand Performance Flight Recorder samples only global engine counters (`SHOW GLOBAL STATUS`) and running statement text from `PROCESSLIST`. Zero table row data is recorded. All metrics remain strictly within the local SQLite vault with an automated 24-hour retention purge and a 10-minute auto-stop polling ceiling.
 
 ---
 
@@ -113,3 +114,30 @@ flowchart TD
 2. **Selective Just-in-Time Schema**: Instead of dumping the whole database, the firewall extracts table names from the current editor via AST and passes only those specific DDL definitions.
 3. **Client-Side Identifier Masking (Optional)**: In high-compliance environments, users can enable *Identifier Masking*. Column names (`salary`, `patient_id`) are mapped to synthetic tokens (`col_1`, `col_2`) before leaving the machine, and mapped back upon receiving the response.
 4. **Local LLM First-Class Support**: Native integration with Ollama (`http://localhost:11434`) allows air-gapped database management with zero external internet traffic.
+
+---
+
+## 5. Diagnostic Profiling Security (`pprof`)
+
+To balance developer observability under massive enterprise workloads with strict multi-IP security:
+
+1. **Disabled by Default**: Runtime profiling endpoints (`/debug/pprof/*`) are completely unmounted by default in desktop and server runtimes.
+2. **Explicit Opt-In via Environment Variable**: Endpoints are mounted conditionally strictly when `SQLFOX_PPROF=1` is exported in the host process environment.
+3. **Loopback Client Enforcement**: Even when enabled, every incoming request to `/debug/pprof/*` is verified against `isLoopback(RemoteAddr)`. Non-loopback IP addresses (e.g. tablet clients or LAN peers connecting via Remote Access Guard) are rejected with `403 Forbidden`. This completely prevents heap snapshots, stack traces, or internal memory structures from leaking across the network.
+
+---
+
+## 6. Safe Online DDL & Index Tuning Guardrails
+
+To prevent production database lockups and performance regressions during schema tuning:
+
+1. **Non-Blocking DDL Enforcement**:
+   - Recommendations on MySQL 5.7 and 8.0 explicitly generate `ALGORITHM=INPLACE, LOCK=NONE`, ensuring tables remain fully accessible for concurrent reads and writes throughout index construction.
+   - PostgreSQL recommendations utilize `CREATE INDEX CONCURRENTLY` to avoid taking `ACCESS EXCLUSIVE` table locks.
+   - SQLite DDL enforces a strict `PRAGMA busy_timeout = 3000` to prevent indefinite database file locking.
+2. **Metadata Lock (MDL) Queue Protection**:
+   - Index creation operations executed through SqlFox enforce an isolated connection with `SET SESSION lock_wait_timeout = 3` on MySQL, terminating fast rather than causing cascading metadata lock pileups.
+3. **Index Bloat Write Guard**:
+   - The advisor evaluates write overhead risk before suggesting new indexes. Tables with >5 secondary indexes trigger prominent warnings to alert operators to the write throughput penalty on `INSERT`/`UPDATE` operations.
+
+

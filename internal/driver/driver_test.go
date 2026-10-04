@@ -5,6 +5,10 @@ import (
 	"testing"
 
 	"sqlfox/internal/driver"
+	_ "sqlfox/internal/driver/mysql"
+	_ "sqlfox/internal/driver/postgres"
+	_ "sqlfox/internal/driver/sqlite"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -91,3 +95,35 @@ func TestScanExplainRows_MySQL12Columns(t *testing.T) {
 		t.Errorf("unexpected row values: %+v", row)
 	}
 }
+
+func TestRegistry(t *testing.T) {
+	d, err := driver.GetDriver("sqlite")
+	if err != nil {
+		t.Fatalf("expected sqlite driver to be registered, got: %v", err)
+	}
+	if d.Name() != "sqlite" {
+		t.Fatalf("expected sqlite name, got: %s", d.Name())
+	}
+
+	dMySQL, err := driver.GetDriver("mysql")
+	if err != nil {
+		t.Fatalf("expected mysql driver to be registered, got: %v", err)
+	}
+	if dMySQL.Name() != "mysql" {
+		t.Fatalf("expected mysql name, got: %s", dMySQL.Name())
+	}
+
+	dPG, err := driver.GetDriver("postgres")
+	if err != nil {
+		t.Fatalf("expected postgres driver to be registered, got: %v", err)
+	}
+	if dPG.Name() != "postgres" {
+		t.Fatalf("expected postgres name, got: %s", dPG.Name())
+	}
+
+	_, err = driver.GetDriver("unregistered-db")
+	if err == nil {
+		t.Fatal("expected error for unregistered driver, got nil")
+	}
+}
+

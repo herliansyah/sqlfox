@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 
+	"sqlfox/internal/driver"
+
 	"github.com/xwb1989/sqlparser"
 )
 
@@ -19,24 +21,20 @@ const (
 
 // InspectionResult details the safety evaluation of a SQL query.
 type InspectionResult struct {
-	RiskLevel         RiskLevel `json:"risk_level"`
-	IsDestructive     bool      `json:"is_destructive"`
-	RequiresChallenge bool      `json:"requires_challenge"`
-	TargetTable       string    `json:"target_table,omitempty"`
-	Operation         string    `json:"operation,omitempty"`
-	Reason            string    `json:"reason,omitempty"`
-	Suggestion        string    `json:"suggestion,omitempty"`
+	RiskLevel         RiskLevel                      `json:"risk_level"`
+	IsDestructive     bool                           `json:"is_destructive"`
+	RequiresChallenge bool                           `json:"requires_challenge"`
+	TargetTable       string                         `json:"target_table,omitempty"`
+	Operation         string                         `json:"operation,omitempty"`
+	Reason            string                         `json:"reason,omitempty"`
+	Suggestion        string                         `json:"suggestion,omitempty"`
+	TableLocks        []driver.TableLockInfo         `json:"table_locks,omitempty"`
+	Relationships     []driver.TableRelationshipInfo `json:"relationships,omitempty"`
 }
 
-// SafetyGuard inspects SQL statements deterministically before execution.
-type SafetyGuard struct{}
-
-func NewSafetyGuard() *SafetyGuard {
-	return &SafetyGuard{}
-}
 
 // Inspect analyzes a query string against the target environment (Production, Staging, Development).
-func (g *SafetyGuard) Inspect(query string, environment string) *InspectionResult {
+func Inspect(query string, environment string) *InspectionResult {
 	trimmed := strings.TrimSpace(query)
 	if trimmed == "" {
 		return &InspectionResult{RiskLevel: RiskNone}
@@ -45,14 +43,14 @@ func (g *SafetyGuard) Inspect(query string, environment string) *InspectionResul
 	// Try AST parsing first (Vitess parser)
 	stmt, err := sqlparser.Parse(trimmed)
 	if err == nil {
-		return g.inspectAST(stmt, environment)
+		return inspectAST(stmt, environment)
 	}
 
 	// ponytail: Lexical fallback for statements Vitess parser doesn't cover (e.g. multi-statements or SQLite specific syntax); upgrade path: dedicated SQLite lexer
-	return g.inspectLexicalFallback(trimmed, environment)
+	return inspectLexicalFallback(trimmed, environment)
 }
 
-func (g *SafetyGuard) inspectAST(stmt sqlparser.Statement, environment string) *InspectionResult {
+func inspectAST(stmt sqlparser.Statement, environment string) *InspectionResult {
 	isProd := strings.EqualFold(environment, "Production")
 
 	switch node := stmt.(type) {
@@ -147,10 +145,11 @@ var (
 	reTruncate = regexp.MustCompile(`(?i)^\s*TRUNCATE\s+(TABLE\s+)?([` + "`" + `"'\w\.]+)`)
 	reDelete   = regexp.MustCompile(`(?i)^\s*DELETE\s+FROM\s+([` + "`" + `"'\w\.]+)`)
 	reUpdate   = regexp.MustCompile(`(?i)^\s*UPDATE\s+([` + "`" + `"'\w\.]+)`)
+	reAlter    = regexp.MustCompile(`(?i)^\s*ALTER\s+TABLE\s+([` + "`" + `"'\w\.]+)`)
 	reWhere    = regexp.MustCompile(`(?i)\bWHERE\b`)
 )
 
-func (g *SafetyGuard) inspectLexicalFallback(query string, environment string) *InspectionResult {
+func inspectLexicalFallback(query string, environment string) *InspectionResult {
 	isProd := strings.EqualFold(environment, "Production")
 
 	if match := reDrop.FindStringSubmatch(query); len(match) > 3 {
@@ -223,12 +222,24 @@ func (g *SafetyGuard) inspectLexicalFallback(query string, environment string) *
 		}
 	}
 
+	if match := reAlter.FindStringSubmatch(query); len(match) > 1 {
+		target := cleanTableName(match[1])
+		return &InspectionResult{
+			RiskLevel:         RiskDangerous,
+			IsDestructive:     true,
+			RequiresChallenge: isProd,
+			TargetTable:       target,
+			Operation:         "ALTER",
+			Reason:            fmt.Sprintf("ALTER TABLE modifies schema structure on '%s'.", target),
+		}
+	}
+
 	return &InspectionResult{RiskLevel: RiskNone}
 }
 
 func cleanTableName(raw string) string {
 	s := strings.TrimSpace(raw)
-	s = strings.Trim(s, "`'\"")
 	parts := strings.Split(s, ".")
-	return parts[len(parts)-1]
+	last := parts[len(parts)-1]
+	return strings.Trim(last, "`'\"")
 }

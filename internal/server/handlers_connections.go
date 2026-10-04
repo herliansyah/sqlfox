@@ -8,8 +8,6 @@ import (
 
 	"sqlfox/internal/driver"
 	"sqlfox/internal/vault"
-
-	"github.com/go-chi/chi/v5"
 )
 
 func (s *Server) handleListConnections(w http.ResponseWriter, r *http.Request) {
@@ -51,7 +49,7 @@ func (s *Server) handleSaveConnection(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteConnection(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := r.PathValue("id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "connection id is required")
 		return
@@ -67,7 +65,7 @@ func (s *Server) handleDeleteConnection(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := r.PathValue("id")
 	var conn *vault.ConnectionRecord
 	var err error
 
@@ -105,12 +103,6 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 		SSLCA:        conn.SSLCA,
 		SSLCert:      conn.SSLCert,
 		SSLKey:       conn.SSLKey,
-		UseSSH:       conn.UseSSH,
-		SSHHost:      conn.SSHHost,
-		SSHPort:      conn.SSHPort,
-		SSHUser:      conn.SSHUser,
-		SSHPassword:  conn.SSHPassword,
-		SSHKey:       conn.SSHKey,
 	}
 
 	sess, err := driver.Connect(ctx, cfg)

@@ -3,8 +3,8 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"sync"
 	"time"
@@ -105,15 +105,12 @@ func (s *SQLiteSession) QueryStream(ctx context.Context, querySQL string, limit 
 		}
 	}
 
-	return &sqliteRowStream{
-		rows: rows,
-		cols: cols,
-	}, nil
+	return driver.NewSQLRowStream(rows, cols), nil
 }
 
-func (s *SQLiteSession) Exec(ctx context.Context, querySQL string) (*driver.ExecResult, error) {
+func (s *SQLiteSession) Exec(ctx context.Context, querySQL string, args ...any) (*driver.ExecResult, error) {
 	start := time.Now()
-	res, err := s.db.ExecContext(ctx, querySQL)
+	res, err := s.db.ExecContext(ctx, querySQL, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -181,14 +178,46 @@ func (s *SQLiteSession) InspectSchema(ctx context.Context, dbName string) (*driv
 				var seq, unique int
 				var idxName, origin, partial string
 				if err := idxRows.Scan(&seq, &idxName, &unique, &origin, &partial); err == nil {
-					tbl.Indexes = append(tbl.Indexes, driver.IndexMetadata{
+					im := driver.IndexMetadata{
 						Name:     idxName,
 						IsUnique: unique == 1,
 						Type:     "BTREE",
-					})
+					}
+					// ponytail: fetch index column list via PRAGMA index_info; bounded by index count per table
+					if cRows, err := s.db.QueryContext(ctx, fmt.Sprintf("PRAGMA index_info(%s)", quoteIdentifier(idxName))); err == nil {
+						for cRows.Next() {
+							var seqno, cid int
+							var cname string
+							if err := cRows.Scan(&seqno, &cid, &cname); err == nil && cname != "" {
+								im.Columns = append(im.Columns, cname)
+							}
+						}
+						cRows.Close()
+					}
+					tbl.Indexes = append(tbl.Indexes, im)
 				}
 			}
 			idxRows.Close()
+		}
+
+		// Inspect foreign keys
+		fkRows, err := s.db.QueryContext(ctx, fmt.Sprintf("PRAGMA foreign_key_list(%s)", quoteIdentifier(name)))
+		if err == nil {
+			for fkRows.Next() {
+				var id, seq int
+				var refTable, fromCol, toCol, onUpdate, onDelete, match string
+				if err := fkRows.Scan(&id, &seq, &refTable, &fromCol, &toCol, &onUpdate, &onDelete, &match); err == nil {
+					tbl.ForeignKeys = append(tbl.ForeignKeys, driver.ForeignKeyMetadata{
+						Name:             fmt.Sprintf("fk_%s_%s", name, fromCol),
+						Column:           fromCol,
+						ReferencedTable:  refTable,
+						ReferencedColumn: toCol,
+						OnDelete:         onDelete,
+						OnUpdate:         onUpdate,
+					})
+				}
+			}
+			fkRows.Close()
 		}
 
 		tables = append(tables, tbl)
@@ -306,60 +335,318 @@ func (s *SQLiteSession) CancelQuery(ctx context.Context, queryID string) error {
 	return nil
 }
 
+func (s *SQLiteSession) GetProcesslist(ctx context.Context) (*driver.ProcesslistResult, error) {
+	// ponytail: SQLite is an embedded single-process engine without multi-client thread visibility.
+	return &driver.ProcesslistResult{
+		CurrentThreadID: 1,
+		Threads: []driver.ProcessItem{
+			{
+				ID:      1,
+				User:    "local",
+				Host:    "localhost",
+				DB:      "main",
+				Command: "Embedded",
+				Time:    0,
+				State:   "idle",
+				Info:    "SQLite embedded connection",
+			},
+		},
+		Locks: []driver.LockWait{},
+	}, nil
+}
+
+func (s *SQLiteSession) KillProcess(ctx context.Context, threadID int64, killConnection bool) error {
+	// ponytail: No-op for SQLite embedded database
+	return nil
+}
+
+func (s *SQLiteSession) GetTableDiagnostics(ctx context.Context, database, table string) ([]driver.TableDiagnostics, error) {
+	var pageSize, pageCount, freelistCount int64
+	_ = s.db.QueryRowContext(ctx, "PRAGMA page_size").Scan(&pageSize)
+	_ = s.db.QueryRowContext(ctx, "PRAGMA page_count").Scan(&pageCount)
+	_ = s.db.QueryRowContext(ctx, "PRAGMA freelist_count").Scan(&freelistCount)
+
+	totalSize := pageCount * pageSize
+	freeSize := freelistCount * pageSize
+
+	schema, err := s.InspectSchema(ctx, "main")
+	if err != nil {
+		return nil, err
+	}
+
+	var results []driver.TableDiagnostics
+	for _, tbl := range schema.Tables {
+		if table != "" && !strings.EqualFold(tbl.Name, table) {
+			continue
+		}
+		var rowCount int64
+		_ = s.db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM %s", quoteIdentifier(tbl.Name))).Scan(&rowCount)
+
+		results = append(results, driver.TableDiagnostics{
+			Name:         tbl.Name,
+			Engine:       "SQLite",
+			Rows:         rowCount,
+			DataSize:     totalSize,
+			IndexSize:    0,
+			OverheadSize: freeSize,
+			RowFormat:    "Dynamic",
+			Collation:    "BINARY",
+		})
+	}
+	if results == nil {
+		results = []driver.TableDiagnostics{}
+	}
+	return results, nil
+}
+
+func (s *SQLiteSession) ExecuteMaintenance(ctx context.Context, database string, tables []string, action string) ([]driver.MaintenanceResult, error) {
+	upperAction := strings.ToUpper(strings.TrimSpace(action))
+	var results []driver.MaintenanceResult
+
+	switch upperAction {
+	case "OPTIMIZE", "VACUUM":
+		_, err := s.db.ExecContext(ctx, "VACUUM")
+		status := "OK"
+		msg := "Database vacuumed successfully"
+		if err != nil {
+			status = "Error"
+			msg = err.Error()
+		}
+		results = append(results, driver.MaintenanceResult{
+			Table:   "database",
+			Op:      "VACUUM",
+			Status:  status,
+			Message: msg,
+		})
+	case "ANALYZE":
+		_, err := s.db.ExecContext(ctx, "ANALYZE")
+		status := "OK"
+		msg := "Statistics gathered successfully"
+		if err != nil {
+			status = "Error"
+			msg = err.Error()
+		}
+		results = append(results, driver.MaintenanceResult{
+			Table:   "database",
+			Op:      "ANALYZE",
+			Status:  status,
+			Message: msg,
+		})
+	case "CHECK", "INTEGRITY_CHECK":
+		var checkRes string
+		err := s.db.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&checkRes)
+		status := "OK"
+		if err != nil {
+			status = "Error"
+			checkRes = err.Error()
+		}
+		results = append(results, driver.MaintenanceResult{
+			Table:   "database",
+			Op:      "INTEGRITY_CHECK",
+			Status:  status,
+			Message: checkRes,
+		})
+	default:
+		return nil, fmt.Errorf("unsupported SQLite maintenance action: %s", action)
+	}
+
+	return results, nil
+}
+
+func (s *SQLiteSession) GetRedundantIndexes(ctx context.Context, database, table string) ([]driver.RedundantIndex, error) {
+	schema, err := s.InspectSchema(ctx, "main")
+	if err != nil {
+		return nil, err
+	}
+	var tables []driver.TableMetadata
+	if table != "" {
+		for _, tbl := range schema.Tables {
+			if strings.EqualFold(tbl.Name, table) {
+				tables = append(tables, tbl)
+			}
+		}
+	} else {
+		tables = schema.Tables
+	}
+	return driver.DetectRedundantIndexes("sqlite", "main", tables), nil
+}
+
+func (s *SQLiteSession) PeekForeignKeyRow(ctx context.Context, database, table, column string, value any) (*driver.PeekResult, error) {
+	sqlCmd := fmt.Sprintf("SELECT * FROM %s WHERE %s = ? LIMIT 1", quoteIdentifier(table), quoteIdentifier(column))
+	rows, err := s.db.QueryContext(ctx, sqlCmd, value)
+	if err != nil {
+		return nil, fmt.Errorf("failed to peek foreign key row: %w", err)
+	}
+	defer rows.Close()
+
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+
+	if !rows.Next() {
+		return &driver.PeekResult{
+			Table:   table,
+			KeyCol:  column,
+			KeyVal:  value,
+			Row:     nil,
+			Columns: cols,
+		}, nil
+	}
+
+	rawVals := make([]any, len(cols))
+	scanArgs := make([]any, len(cols))
+	for i := range rawVals {
+		scanArgs[i] = &rawVals[i]
+	}
+
+	if err := rows.Scan(scanArgs...); err != nil {
+		return nil, err
+	}
+
+	rowMap := make(map[string]any, len(cols))
+	for i, col := range cols {
+		val := rawVals[i]
+		if b, ok := val.([]byte); ok {
+			rowMap[col] = string(b)
+		} else {
+			rowMap[col] = val
+		}
+	}
+
+	return &driver.PeekResult{
+		Table:   table,
+		KeyCol:  column,
+		KeyVal:  value,
+		Row:     rowMap,
+		Columns: cols,
+	}, nil
+}
+
+func (s *SQLiteSession) GetUserList(ctx context.Context) ([]driver.DatabaseUser, error) {
+	return []driver.DatabaseUser{}, errors.New("user privilege management is not supported on SQLite")
+}
+
+func (s *SQLiteSession) GetUserGrants(ctx context.Context, user, host string) ([]string, error) {
+	return nil, errors.New("user privilege management is not supported on SQLite")
+}
+
+func (s *SQLiteSession) SaveUser(ctx context.Context, user, host, password string, isNew bool) error {
+	return errors.New("user privilege management is not supported on SQLite")
+}
+
+func (s *SQLiteSession) DropUser(ctx context.Context, user, host string) error {
+	return errors.New("user privilege management is not supported on SQLite")
+}
+
+func (s *SQLiteSession) ApplyUserGrants(ctx context.Context, req driver.UserGrantRequest) error {
+	return errors.New("user privilege management is not supported on SQLite")
+}
+
+func (s *SQLiteSession) InspectTableLocks(ctx context.Context, database, table string) ([]driver.TableLockInfo, error) {
+	// In-process SQLite does not maintain an external metadata lock wait table.
+	return []driver.TableLockInfo{}, nil
+}
+
+func (s *SQLiteSession) ExecSafeDDL(ctx context.Context, ddl string, lockTimeoutSec int) (*driver.ExecResult, error) {
+	if lockTimeoutSec <= 0 {
+		lockTimeoutSec = 3
+	}
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to obtain dedicated sqlite connection: %w", err)
+	}
+	defer conn.Close()
+
+	_, _ = conn.ExecContext(ctx, fmt.Sprintf("PRAGMA busy_timeout = %d", lockTimeoutSec*1000))
+
+	start := time.Now()
+	res, err := conn.ExecContext(ctx, ddl)
+	duration := time.Since(start).Milliseconds()
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAff, _ := res.RowsAffected()
+	lastID, _ := res.LastInsertId()
+	return &driver.ExecResult{
+		RowsAffected: rowsAff,
+		LastInsertID: lastID,
+		ExecutionMs:  duration,
+		Message:      "Safe DDL executed successfully on SQLite",
+	}, nil
+}
+
+func (s *SQLiteSession) InspectClusterHealth(ctx context.Context) (*driver.ClusterHealthReport, error) {
+	return &driver.ClusterHealthReport{
+		TopologyType:        "standalone",
+		ClusterName:         "standalone-sqlite",
+		ClusterStatus:       "Standalone File Engine",
+		ClusterSize:         1,
+		LocalNodeName:       "local",
+		LocalNodeState:      "Active",
+		BottleneckDiagnosis: "SQLite embedded standalone engine (clustering not applicable)",
+		BottleneckSeverity:  "ok",
+		Nodes: []driver.ClusterNodeInfo{
+			{
+				Name:    "local",
+				Address: s.dsn,
+				State:   "Active",
+				IsLocal: true,
+				Status:  "online",
+			},
+		},
+	}, nil
+}
+
+func (s *SQLiteSession) SampleFlightMetrics(ctx context.Context) (*driver.FlightMetricSample, error) {
+	return &driver.FlightMetricSample{
+		SampledAt:          time.Now(),
+		Questions:          1,
+		ThreadsRunning:     1,
+		ThreadsConnected:   1,
+		RowLockWaits:       0,
+		BufferPoolWaitFree: 0,
+		ActiveQueries:      []driver.FlightQueryInfo{},
+	}, nil
+}
+
 func (s *SQLiteSession) Close() error {
 	return s.db.Close()
 }
 
-type sqliteRowStream struct {
-	rows *sql.Rows
-	cols []driver.ColumnDefinition
+func (s *SQLiteSession) ExecRaw(ctx context.Context, sql string, args ...any) (int64, error) {
+	res, err := s.db.ExecContext(ctx, sql, args...)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
 }
 
-func (r *sqliteRowStream) Columns() []driver.ColumnDefinition {
-	return r.cols
-}
-
-func (r *sqliteRowStream) NextChunk(batchSize int) ([][]any, error) {
-	var chunk [][]any
-	count := len(r.cols)
-
-	for len(chunk) < batchSize {
-		if !r.rows.Next() {
-			if len(chunk) > 0 {
-				return chunk, nil
-			}
-			return nil, io.EOF
+func (s *SQLiteSession) QueryRaw(ctx context.Context, sql string, args ...any) ([][]any, error) {
+	rows, err := s.db.QueryContext(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	cols, _ := rows.Columns()
+	var result [][]any
+	for rows.Next() {
+		vals := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
 		}
-
-		rawValues := make([]any, count)
-		valuePtrs := make([]any, count)
-		for i := range rawValues {
-			valuePtrs[i] = &rawValues[i]
-		}
-
-		if err := r.rows.Scan(valuePtrs...); err != nil {
+		if err := rows.Scan(ptrs...); err != nil {
 			return nil, err
 		}
-
-		// Convert raw values for JSON safety (e.g. []byte to string)
-		row := make([]any, count)
-		for i, val := range rawValues {
-			if b, ok := val.([]byte); ok {
-				row[i] = string(b)
-			} else {
-				row[i] = val
-			}
-		}
-		chunk = append(chunk, row)
+		result = append(result, vals)
 	}
-
-	return chunk, nil
-}
-
-func (r *sqliteRowStream) Close() error {
-	return r.rows.Close()
+	return result, rows.Err()
 }
 
 func quoteIdentifier(id string) string {
-	return `"` + strings.ReplaceAll(id, `"`, `""`) + `"`
+	return driver.QuoteIdentifier(id, "sqlite")
 }
+

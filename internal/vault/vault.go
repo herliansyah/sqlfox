@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
 	"errors"
@@ -10,9 +11,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
+
+// ponytail: RFC 4122 v4 UUID generator using stdlib crypto/rand; eliminates external uuid module.
+func newUUID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+}
 
 var (
 	ErrIncorrectMasterPassword = errors.New("incorrect master password")
@@ -33,20 +42,12 @@ type ConnectionRecord struct {
 	User                 string    `json:"user"`
 	Password             string    `json:"password,omitempty"` // Plaintext when in-memory
 	EncryptedPassword    string    `json:"-"`
-	UseSSL               bool      `json:"use_ssl"`
-	SSLCA                string    `json:"ssl_ca,omitempty"`
-	SSLCert              string    `json:"ssl_cert,omitempty"`
-	SSLKey               string    `json:"ssl_key,omitempty"`
-	UseSSH               bool      `json:"use_ssh"`
-	SSHHost              string    `json:"ssh_host,omitempty"`
-	SSHPort              int       `json:"ssh_port,omitempty"`
-	SSHUser              string    `json:"ssh_user,omitempty"`
-	SSHPassword          string    `json:"ssh_password,omitempty"`
-	EncryptedSSHPassword string    `json:"-"`
-	SSHKey               string    `json:"ssh_key,omitempty"`
-	EncryptedSSHKey      string    `json:"-"`
-	CreatedAt            time.Time `json:"created_at"`
-	UpdatedAt            time.Time `json:"updated_at"`
+	UseSSL            bool      `json:"use_ssl"`
+	SSLCA             string    `json:"ssl_ca,omitempty"`
+	SSLCert           string    `json:"ssl_cert,omitempty"`
+	SSLKey            string    `json:"ssl_key,omitempty"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // Vault manages encrypted credential and profile storage.
@@ -134,19 +135,133 @@ func initSchema(db *sql.DB) error {
 		ssl_ca TEXT,
 		ssl_cert TEXT,
 		ssl_key TEXT,
-		use_ssh INTEGER DEFAULT 0,
-		ssh_host TEXT,
-		ssh_port INTEGER,
-		ssh_user TEXT,
-		encrypted_ssh_password TEXT,
-		encrypted_ssh_key TEXT,
 		created_at TIMESTAMP,
 		updated_at TIMESTAMP
 	);
+
+	CREATE TABLE IF NOT EXISTS snippets (
+		id TEXT PRIMARY KEY,
+		title TEXT NOT NULL,
+		sql_content TEXT NOT NULL,
+		tags TEXT DEFAULT '',
+		created_at TIMESTAMP,
+		updated_at TIMESTAMP
+	);
+
+	CREATE TABLE IF NOT EXISTS table_notes (
+		id TEXT PRIMARY KEY,
+		connection_id TEXT NOT NULL,
+		database_name TEXT NOT NULL,
+		table_name TEXT NOT NULL,
+		content TEXT NOT NULL,
+		updated_at TIMESTAMP,
+		UNIQUE(connection_id, database_name, table_name)
+	);
+
+	CREATE TABLE IF NOT EXISTS audit_logs (
+		id TEXT PRIMARY KEY,
+		session_id TEXT NOT NULL,
+		connection_id TEXT NOT NULL,
+		query_sql TEXT NOT NULL,
+		duration_ms INTEGER NOT NULL,
+		rows_affected INTEGER NOT NULL,
+		error TEXT DEFAULT '',
+		executed_at TIMESTAMP NOT NULL
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_audit_logs_session ON audit_logs(session_id, executed_at DESC);
+
+	CREATE TABLE IF NOT EXISTS flight_recorder_sessions (
+		id TEXT PRIMARY KEY,
+		session_id TEXT NOT NULL,
+		connection_id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		duration_seconds INTEGER DEFAULT 0,
+		sample_count INTEGER DEFAULT 0,
+		started_at TIMESTAMP NOT NULL,
+		stopped_at TIMESTAMP
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_flight_recorder_sessions ON flight_recorder_sessions(session_id, started_at DESC);
+
+	CREATE TABLE IF NOT EXISTS flight_recorder_ticks (
+		id TEXT PRIMARY KEY,
+		recording_id TEXT NOT NULL,
+		tick_index INTEGER NOT NULL,
+		sampled_at TIMESTAMP NOT NULL,
+		qps INTEGER DEFAULT 0,
+		threads_running INTEGER DEFAULT 0,
+		threads_connected INTEGER DEFAULT 0,
+		row_lock_waits INTEGER DEFAULT 0,
+		buffer_pool_wait_free INTEGER DEFAULT 0,
+		top_queries_json TEXT DEFAULT '[]'
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_flight_recorder_ticks ON flight_recorder_ticks(recording_id, tick_index ASC);
 	`
-	_, err := db.Exec(query)
-	return err
+	if _, err := db.Exec(query); err != nil {
+		return err
+	}
+	return seedDefaultSnippets(db)
 }
+
+func seedDefaultSnippets(db *sql.DB) error {
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM snippets").Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+
+	now := time.Now()
+	seeds := []Snippet{
+		{
+			ID:         newUUID(),
+			Title:      "Find Duplicate Rows",
+			SQLContent: "SELECT {{column_name:email}}, COUNT(*) AS duplicate_count\nFROM {{table_name:users}}\nGROUP BY {{column_name:email}}\nHAVING COUNT(*) > 1\nORDER BY duplicate_count DESC\nLIMIT {{limit:50}};",
+			Tags:       "general",
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		},
+		{
+			ID:         newUUID(),
+			Title:      "Table Row Counts & Sizes (MySQL)",
+			SQLContent: "SELECT table_name, table_rows, ROUND(data_length / 1024 / 1024, 2) AS data_mb, ROUND(index_length / 1024 / 1024, 2) AS index_mb\nFROM information_schema.tables\nWHERE table_schema = {{database_name:DATABASE()}}\nORDER BY data_length DESC\nLIMIT {{limit:20}};",
+			Tags:       "mysql",
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		},
+		{
+			ID:         newUUID(),
+			Title:      "Active Running Queries (MySQL)",
+			SQLContent: "SELECT id, user, host, db, command, time, state, info\nFROM information_schema.processlist\nWHERE command != 'Sleep'\nORDER BY time DESC;",
+			Tags:       "mysql",
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		},
+		{
+			ID:         newUUID(),
+			Title:      "Table Columns & Info (SQLite)",
+			SQLContent: "PRAGMA table_info({{table_name:users}});",
+			Tags:       "sqlite",
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		},
+	}
+
+	for _, s := range seeds {
+		_, err := db.Exec(`
+			INSERT INTO snippets (id, title, sql_content, tags, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`, s.ID, s.Title, s.SQLContent, s.Tags, s.CreatedAt, s.UpdatedAt)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 
 func getMeta(db *sql.DB) ([]byte, string, error) {
 	var saltB64, checkCipher string
@@ -208,12 +323,12 @@ func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 	defer v.mu.Unlock()
 
 	if conn.ID == "" {
-		conn.ID = uuid.NewString()
+		conn.ID = newUUID()
 		conn.CreatedAt = time.Now()
 	}
 	conn.UpdatedAt = time.Now()
 
-	var encPass, encSSHPass, encSSHKey string
+	var encPass string
 	var err error
 
 	if conn.Password != "" {
@@ -231,52 +346,17 @@ func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 		}
 	}
 
-	if conn.SSHPassword != "" {
-		encSSHPass, err = Encrypt([]byte(conn.SSHPassword), v.key)
-		if err != nil {
-			return fmt.Errorf("failed to encrypt ssh password: %w", err)
-		}
-	} else {
-		encSSHPass = conn.EncryptedSSHPassword
-		if encSSHPass == "" && conn.ID != "" {
-			var existingSSHPass string
-			if err := v.db.QueryRow(`SELECT encrypted_ssh_password FROM connections WHERE id = ?`, conn.ID).Scan(&existingSSHPass); err == nil {
-				encSSHPass = existingSSHPass
-			}
-		}
-	}
-
-	if conn.SSHKey != "" {
-		encSSHKey, err = Encrypt([]byte(conn.SSHKey), v.key)
-		if err != nil {
-			return fmt.Errorf("failed to encrypt ssh key: %w", err)
-		}
-	} else {
-		encSSHKey = conn.EncryptedSSHKey
-		if encSSHKey == "" && conn.ID != "" {
-			var existingSSHKey string
-			if err := v.db.QueryRow(`SELECT encrypted_ssh_key FROM connections WHERE id = ?`, conn.ID).Scan(&existingSSHKey); err == nil {
-				encSSHKey = existingSSHKey
-			}
-		}
-	}
-
 	useSSLInt := 0
 	if conn.UseSSL {
 		useSSLInt = 1
-	}
-	useSSHInt := 0
-	if conn.UseSSH {
-		useSSHInt = 1
 	}
 
 	query := `
 	INSERT INTO connections (
 		id, name, environment, driver, host, port, database_name, user,
 		encrypted_password, use_ssl, ssl_ca, ssl_cert, ssl_key,
-		use_ssh, ssh_host, ssh_port, ssh_user, encrypted_ssh_password, encrypted_ssh_key,
 		created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO UPDATE SET
 		name = excluded.name,
 		environment = excluded.environment,
@@ -290,19 +370,12 @@ func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 		ssl_ca = excluded.ssl_ca,
 		ssl_cert = excluded.ssl_cert,
 		ssl_key = excluded.ssl_key,
-		use_ssh = excluded.use_ssh,
-		ssh_host = excluded.ssh_host,
-		ssh_port = excluded.ssh_port,
-		ssh_user = excluded.ssh_user,
-		encrypted_ssh_password = excluded.encrypted_ssh_password,
-		encrypted_ssh_key = excluded.encrypted_ssh_key,
 		updated_at = excluded.updated_at;
 	`
 
 	_, err = v.db.Exec(query,
 		conn.ID, conn.Name, conn.Environment, conn.Driver, conn.Host, conn.Port, conn.DatabaseName, conn.User,
 		encPass, useSSLInt, conn.SSLCA, conn.SSLCert, conn.SSLKey,
-		useSSHInt, conn.SSHHost, conn.SSHPort, conn.SSHUser, encSSHPass, encSSHKey,
 		conn.CreatedAt, conn.UpdatedAt,
 	)
 	return err
@@ -316,7 +389,6 @@ func (v *Vault) GetConnection(id string) (*ConnectionRecord, error) {
 	row := v.db.QueryRow(`SELECT 
 		id, name, environment, driver, host, port, database_name, user,
 		encrypted_password, use_ssl, ssl_ca, ssl_cert, ssl_key,
-		use_ssh, ssh_host, ssh_port, ssh_user, encrypted_ssh_password, encrypted_ssh_key,
 		created_at, updated_at
 	FROM connections WHERE id = ?`, id)
 
@@ -334,6 +406,32 @@ func (v *Vault) GetConnection(id string) (*ConnectionRecord, error) {
 	return conn, nil
 }
 
+// GetConnectionByName retrieves and decrypts a connection by name (case-insensitive) or ID.
+func (v *Vault) GetConnectionByName(nameOrID string) (*ConnectionRecord, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	row := v.db.QueryRow(`SELECT 
+		id, name, environment, driver, host, port, database_name, user,
+		encrypted_password, use_ssl, ssl_ca, ssl_cert, ssl_key,
+		created_at, updated_at
+	FROM connections WHERE id = ? OR LOWER(name) = LOWER(?) LIMIT 1`, nameOrID, nameOrID)
+
+	conn, err := scanConnection(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrConnectionNotFound
+		}
+		return nil, err
+	}
+
+	if err := v.decryptConnection(conn); err != nil {
+		return nil, err
+	}
+	return conn, nil
+}
+
+
 // ListConnections returns all connections without plaintext secrets.
 func (v *Vault) ListConnections() ([]*ConnectionRecord, error) {
 	v.mu.RLock()
@@ -342,7 +440,6 @@ func (v *Vault) ListConnections() ([]*ConnectionRecord, error) {
 	rows, err := v.db.Query(`SELECT 
 		id, name, environment, driver, host, port, database_name, user,
 		encrypted_password, use_ssl, ssl_ca, ssl_cert, ssl_key,
-		use_ssh, ssh_host, ssh_port, ssh_user, encrypted_ssh_password, encrypted_ssh_key,
 		created_at, updated_at
 	FROM connections ORDER BY name ASC`)
 	if err != nil {
@@ -385,15 +482,14 @@ type scannable interface {
 
 func scanConnection(s scannable) (*ConnectionRecord, error) {
 	var c ConnectionRecord
-	var useSSL, useSSH int
-	var encPass, sslCA, sslCert, sslKey, encSSHPass, encSSHKey sql.NullString
-	var host, dbName, user, sshHost, sshUser sql.NullString
-	var port, sshPort sql.NullInt64
+	var useSSL int
+	var encPass, sslCA, sslCert, sslKey sql.NullString
+	var host, dbName, user sql.NullString
+	var port sql.NullInt64
 
 	err := s.Scan(
 		&c.ID, &c.Name, &c.Environment, &c.Driver, &host, &port, &dbName, &user,
 		&encPass, &useSSL, &sslCA, &sslCert, &sslKey,
-		&useSSH, &sshHost, &sshPort, &sshUser, &encSSHPass, &encSSHKey,
 		&c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
@@ -409,12 +505,6 @@ func scanConnection(s scannable) (*ConnectionRecord, error) {
 	c.SSLCA = sslCA.String
 	c.SSLCert = sslCert.String
 	c.SSLKey = sslKey.String
-	c.UseSSH = useSSH == 1
-	c.SSHHost = sshHost.String
-	c.SSHPort = int(sshPort.Int64)
-	c.SSHUser = sshUser.String
-	c.EncryptedSSHPassword = encSSHPass.String
-	c.EncryptedSSHKey = encSSHKey.String
 
 	return &c, nil
 }
@@ -427,19 +517,7 @@ func (v *Vault) decryptConnection(c *ConnectionRecord) error {
 		}
 		c.Password = string(dec)
 	}
-	if c.EncryptedSSHPassword != "" {
-		dec, err := Decrypt(c.EncryptedSSHPassword, v.key)
-		if err != nil {
-			return fmt.Errorf("failed to decrypt ssh password: %w", err)
-		}
-		c.SSHPassword = string(dec)
-	}
-	if c.EncryptedSSHKey != "" {
-		dec, err := Decrypt(c.EncryptedSSHKey, v.key)
-		if err != nil {
-			return fmt.Errorf("failed to decrypt ssh key: %w", err)
-		}
-		c.SSHKey = string(dec)
-	}
 	return nil
 }
+
+

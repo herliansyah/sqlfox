@@ -168,128 +168,64 @@ func (c *AIClient) completeOpenAICompatible(ctx context.Context, req CompletionR
 	return parseOpenAIResponse(bodyBytes)
 }
 
-// parseOpenAIResponse handles both standard single JSON objects and streaming chunked SSE responses (e.g. 9router, LiteLLM)
+type openAIChunk struct {
+	Choices []struct {
+		Delta struct {
+			Content string `json:"content"`
+		} `json:"delta"`
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+		Text string `json:"text"`
+	} `json:"choices"`
+	Model string `json:"model"`
+}
+
+func (c *openAIChunk) text() string {
+	if len(c.Choices) == 0 {
+		return ""
+	}
+	if c.Choices[0].Delta.Content != "" {
+		return c.Choices[0].Delta.Content
+	}
+	if c.Choices[0].Message.Content != "" {
+		return c.Choices[0].Message.Content
+	}
+	return c.Choices[0].Text
+}
+
+// parseOpenAIResponse handles standard JSON objects and streaming SSE chunks (e.g. 9router, LiteLLM)
 func parseOpenAIResponse(bodyBytes []byte) (*CompletionResponse, error) {
-	// 1. Try standard single JSON object
-	var standard struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-			Delta struct {
-				Content string `json:"content"`
-			} `json:"delta"`
-		} `json:"choices"`
-		Model string `json:"model"`
+	var single openAIChunk
+	if err := json.Unmarshal(bodyBytes, &single); err == nil && single.text() != "" {
+		return &CompletionResponse{Content: single.text(), Model: single.Model}, nil
 	}
 
-	if err := json.Unmarshal(bodyBytes, &standard); err == nil && len(standard.Choices) > 0 {
-		content := standard.Choices[0].Message.Content
-		if content == "" {
-			content = standard.Choices[0].Delta.Content
-		}
-		if content != "" {
-			return &CompletionResponse{
-				Content: content,
-				Model:   standard.Model,
-			}, nil
-		}
-	}
-
-	// 2. Fallback: Parse streaming chunks (SSE data: lines or newline-delimited JSON)
 	scanner := bufio.NewScanner(bytes.NewReader(bodyBytes))
 	var sb strings.Builder
 	var lastModel string
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if line == "" || line == ":" || strings.HasPrefix(line, ":") {
-			continue // SSE comment or ping
-		}
-		if line == "data: [DONE]" || line == "[DONE]" {
+		if line == "" || strings.HasPrefix(line, ":") || strings.HasSuffix(line, "[DONE]") {
 			continue
 		}
-
-		jsonStr := line
-		if strings.HasPrefix(jsonStr, "data:") {
-			jsonStr = strings.TrimSpace(strings.TrimPrefix(jsonStr, "data:"))
-		}
+		jsonStr := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if !strings.HasPrefix(jsonStr, "{") {
 			continue
 		}
 
-		var chunk struct {
-			Choices []struct {
-				Delta struct {
-					Content string `json:"content"`
-				} `json:"delta"`
-				Message struct {
-					Content string `json:"content"`
-				} `json:"message"`
-				Text string `json:"text"`
-			} `json:"choices"`
-			Model string `json:"model"`
-		}
-
+		var chunk openAIChunk
 		if err := json.Unmarshal([]byte(jsonStr), &chunk); err == nil {
 			if chunk.Model != "" {
 				lastModel = chunk.Model
 			}
-			if len(chunk.Choices) > 0 {
-				c := chunk.Choices[0]
-				if c.Delta.Content != "" {
-					sb.WriteString(c.Delta.Content)
-				} else if c.Message.Content != "" {
-					sb.WriteString(c.Message.Content)
-				} else if c.Text != "" {
-					sb.WriteString(c.Text)
-				}
-			}
+			sb.WriteString(chunk.text())
 		}
 	}
 
 	if sb.Len() > 0 {
-		return &CompletionResponse{
-			Content: sb.String(),
-			Model:   lastModel,
-		}, nil
-	}
-
-	// 3. Fallback: Sequential JSON decoder (for un-prefixed concatenated JSON chunks)
-	dec := json.NewDecoder(bytes.NewReader(bodyBytes))
-	for dec.More() {
-		var chunk struct {
-			Choices []struct {
-				Delta struct {
-					Content string `json:"content"`
-				} `json:"delta"`
-				Message struct {
-					Content string `json:"content"`
-				} `json:"message"`
-			} `json:"choices"`
-			Model string `json:"model"`
-		}
-		if err := dec.Decode(&chunk); err == nil {
-			if chunk.Model != "" {
-				lastModel = chunk.Model
-			}
-			if len(chunk.Choices) > 0 {
-				if chunk.Choices[0].Delta.Content != "" {
-					sb.WriteString(chunk.Choices[0].Delta.Content)
-				} else if chunk.Choices[0].Message.Content != "" {
-					sb.WriteString(chunk.Choices[0].Message.Content)
-				}
-			}
-		} else {
-			break
-		}
-	}
-
-	if sb.Len() > 0 {
-		return &CompletionResponse{
-			Content: sb.String(),
-			Model:   lastModel,
-		}, nil
+		return &CompletionResponse{Content: sb.String(), Model: lastModel}, nil
 	}
 
 	return nil, fmt.Errorf("failed to parse AI response: no valid completion choices found in response (%s)", string(bodyBytes))

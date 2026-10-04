@@ -11,7 +11,6 @@ import (
 )
 
 func TestSafetyGuard_Inspect(t *testing.T) {
-	guard := NewSafetyGuard()
 
 	tests := []struct {
 		name              string
@@ -75,11 +74,34 @@ func TestSafetyGuard_Inspect(t *testing.T) {
 			expectedRisk:      RiskNone,
 			expectedChallenge: false,
 		},
+		{
+			name:              "PostgreSQL Unqualified DELETE with RETURNING",
+			query:             `DELETE FROM "public"."orders" RETURNING *;`,
+			env:               "Development",
+			expectedRisk:      RiskCritical,
+			expectedChallenge: true,
+			expectedTable:     "orders",
+		},
+		{
+			name:              "PostgreSQL Qualified DELETE with RETURNING in Dev",
+			query:             `DELETE FROM "public"."orders" WHERE id = $1 RETURNING *;`,
+			env:               "Development",
+			expectedRisk:      RiskNone,
+			expectedChallenge: false,
+		},
+		{
+			name:              "PostgreSQL DROP TABLE with quotes",
+			query:             `DROP TABLE IF EXISTS "analytics"."page_views";`,
+			env:               "Production",
+			expectedRisk:      RiskCritical,
+			expectedChallenge: true,
+			expectedTable:     "page_views",
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			res := guard.Inspect(tc.query, tc.env)
+			res := Inspect(tc.query, tc.env)
 			if res.RiskLevel != tc.expectedRisk {
 				t.Fatalf("expected risk %s, got %s (reason: %s)", tc.expectedRisk, res.RiskLevel, res.Reason)
 			}
@@ -121,8 +143,7 @@ func TestBackupManager_BackupTable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	backupMgr := NewBackupManager(filepath.Join(tempDir, "backups"))
-	backupPath, dataIncluded, err := backupMgr.BackupTable(ctx, sess, "items")
+	backupPath, dataIncluded, err := BackupTable(ctx, sess, filepath.Join(tempDir, "backups"), "items")
 	if err != nil {
 		t.Fatalf("BackupTable failed: %v", err)
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -167,6 +168,21 @@ func TestServer_API_Lifecycle(t *testing.T) {
 	}
 	resp.Body.Close()
 
+	// 8b. Ping Session endpoint
+	resp, err = client.Post(fmt.Sprintf("%s/api/session/%s/ping", ts.URL, savedConn.ID), "application/json", nil)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("Ping session failed: %v", err)
+	}
+	var pingData map[string]interface{}
+	_ = json.NewDecoder(resp.Body).Decode(&pingData)
+	resp.Body.Close()
+	if _, ok := pingData["latency_ms"]; !ok {
+		t.Errorf("Expected latency_ms in ping response, got %v", pingData)
+	}
+	if _, ok := pingData["memory_mb"]; !ok {
+		t.Errorf("Expected memory_mb in ping response, got %v", pingData)
+	}
+
 	// 9. Test Transient Connection Test endpoint (SQLite)
 	testTransientPayload := vault.ConnectionRecord{
 		Driver:       "sqlite",
@@ -203,6 +219,23 @@ func TestServer_API_Lifecycle(t *testing.T) {
 	// Driver should be recognized (i.e. error must NOT be "unsupported database driver")
 	if strings.Contains(testResult.Error, "unsupported database driver") {
 		t.Fatalf("unexpected unsupported driver error for mysql: %s", testResult.Error)
+	}
+
+	// 9c. Test Transient Connection Test endpoint (PostgreSQL driver recognized)
+	testPostgresPayload := vault.ConnectionRecord{
+		Driver: "postgres",
+		Host:   "127.0.0.1",
+		Port:   59998,
+	}
+	pgBody, _ := json.Marshal(testPostgresPayload)
+	resp, err = client.Post(ts.URL+"/api/connections/test-transient/test", "application/json", bytes.NewReader(pgBody))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST transient postgres test failed: %v", err)
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&testResult)
+	resp.Body.Close()
+	if strings.Contains(testResult.Error, "unsupported database driver") {
+		t.Fatalf("unexpected unsupported driver error for postgres: %s", testResult.Error)
 	}
 
 	// 10. Update Connection (editing connection name)
@@ -244,6 +277,7 @@ func TestServer_API_Lifecycle(t *testing.T) {
 	var explainResult struct {
 		RawJSON string               `json:"raw_json"`
 		Rows    []driver.ExplainRow `json:"rows"`
+		Advisor any                  `json:"advisor"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&explainResult); err != nil {
 		t.Fatalf("failed to decode explain response: %v", err)
@@ -255,6 +289,37 @@ func TestServer_API_Lifecycle(t *testing.T) {
 	if len(explainResult.Rows) == 0 {
 		t.Fatalf("expected at least 1 plan row, got 0")
 	}
+	if explainResult.Advisor == nil {
+		t.Fatalf("expected non-nil Advisor in explainResult")
+	}
+
+	// 12b. Test Standalone Advise endpoint
+	advisePayload := map[string]string{
+		"sql":      "SELECT * FROM products WHERE price > 50.0 ORDER BY title ASC;",
+		"database": targetDB,
+	}
+	advBody, _ := json.Marshal(advisePayload)
+	advResp, err := client.Post(fmt.Sprintf("%s/api/session/%s/advise", ts.URL, savedConn.ID), "application/json", bytes.NewReader(advBody))
+	if err != nil || advResp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /api/session/advise failed: %v, status: %d", err, advResp.StatusCode)
+	}
+	var adviseResult struct {
+		Recommendations []struct {
+			Table   string   `json:"table"`
+			Columns []string `json:"columns"`
+			SafeDDL string   `json:"safe_ddl"`
+		} `json:"recommendations"`
+	}
+	if err := json.NewDecoder(advResp.Body).Decode(&adviseResult); err != nil {
+		t.Fatalf("failed to decode advise response: %v", err)
+	}
+	advResp.Body.Close()
+	if len(adviseResult.Recommendations) == 0 {
+		t.Fatalf("expected at least 1 recommendation from advise endpoint, got 0")
+	}
+	if adviseResult.Recommendations[0].Table != "products" {
+		t.Errorf("expected table 'products', got %q", adviseResult.Recommendations[0].Table)
+	}
 
 	// 13. Delete Connection
 	reqDelete, _ := http.NewRequest("DELETE", fmt.Sprintf("%s/api/connections/%s", ts.URL, savedConn.ID), nil)
@@ -264,3 +329,298 @@ func TestServer_API_Lifecycle(t *testing.T) {
 	}
 	resp.Body.Close()
 }
+
+func TestServer_API_Snippets(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "sqlfox-snip-api-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	vaultDB := filepath.Join(tempDir, "config.db")
+	v, err := vault.OpenVault(vaultDB, "test-master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	srv := NewServer(v, nil, filepath.Join(tempDir, "backups"), "test-master")
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	client := ts.Client()
+
+	// 1. GET /api/snippets -> should have default seeded snippets
+	resp, err := client.Get(ts.URL + "/api/snippets")
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/snippets failed: %v, status: %d", err, resp.StatusCode)
+	}
+	var snippets []vault.Snippet
+	_ = json.NewDecoder(resp.Body).Decode(&snippets)
+	resp.Body.Close()
+
+	if len(snippets) < 3 {
+		t.Fatalf("expected seeded snippets, got %d", len(snippets))
+	}
+
+	// 2. POST /api/snippets -> create new snippet
+	newSnip := vault.Snippet{
+		Title:      "Active Tenant Check",
+		SQLContent: "SELECT * FROM tenants WHERE id = {{tenant_id:1}} AND status = '{{status:active}}';",
+		Tags:       "general,multi-tenant",
+	}
+	snipBody, _ := json.Marshal(newSnip)
+	resp, err = client.Post(ts.URL+"/api/snippets", "application/json", bytes.NewReader(snipBody))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /api/snippets failed: %v, status: %d", err, resp.StatusCode)
+	}
+	var savedSnip vault.Snippet
+	_ = json.NewDecoder(resp.Body).Decode(&savedSnip)
+	resp.Body.Close()
+
+	if savedSnip.ID == "" || savedSnip.Title != "Active Tenant Check" {
+		t.Fatalf("unexpected saved snippet: %+v", savedSnip)
+	}
+
+	// 3. DELETE /api/snippets/{id}
+	reqDel, _ := http.NewRequest("DELETE", fmt.Sprintf("%s/api/snippets/%s", ts.URL, savedSnip.ID), nil)
+	resp, err = client.Do(reqDel)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("DELETE /api/snippets failed: %v, status: %d", err, resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// 4. Verify deletion
+	resp, err = client.Get(ts.URL + "/api/snippets")
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/snippets failed: %v", err)
+	}
+	var remaining []vault.Snippet
+	_ = json.NewDecoder(resp.Body).Decode(&remaining)
+	resp.Body.Close()
+
+	for _, s := range remaining {
+		if s.ID == savedSnip.ID {
+			t.Fatalf("expected snippet %s to be deleted", savedSnip.ID)
+		}
+	}
+}
+
+func TestServer_API_TableNotes(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "sqlfox-notes-api-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	vaultDB := filepath.Join(tempDir, "config.db")
+	v, err := vault.OpenVault(vaultDB, "test-master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	srv := NewServer(v, nil, filepath.Join(tempDir, "backups"), "test-master")
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	client := ts.Client()
+
+	// 1. GET note when none exists -> returns empty content
+	resp, err := client.Get(ts.URL + "/api/session/conn-123/notes/orders?db=sales")
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET table note failed: %v, status: %d", err, resp.StatusCode)
+	}
+	var emptyNote struct {
+		Content string `json:"content"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&emptyNote)
+	resp.Body.Close()
+	if emptyNote.Content != "" {
+		t.Fatalf("expected empty note, got: %s", emptyNote.Content)
+	}
+
+	// 2. POST save note
+	payload := map[string]string{
+		"content": "### Orders Rules\n- Must verify user_id.",
+	}
+	body, _ := json.Marshal(payload)
+	resp, err = client.Post(ts.URL+"/api/session/conn-123/notes/orders?db=sales", "application/json", bytes.NewReader(body))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST table note failed: %v, status: %d", err, resp.StatusCode)
+	}
+	var savedNote vault.TableNote
+	_ = json.NewDecoder(resp.Body).Decode(&savedNote)
+	resp.Body.Close()
+
+	if savedNote.Content != payload["content"] {
+		t.Fatalf("saved note content mismatch: %+v", savedNote)
+	}
+
+	// 3. GET verify saved note
+	resp, err = client.Get(ts.URL + "/api/session/conn-123/notes/orders?db=sales")
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET table note after save failed: %v", err)
+	}
+	var fetchedNote vault.TableNote
+	_ = json.NewDecoder(resp.Body).Decode(&fetchedNote)
+	resp.Body.Close()
+
+	if fetchedNote.Content != payload["content"] {
+		t.Fatalf("fetched note content mismatch: %+v", fetchedNote)
+	}
+}
+
+func TestServer_API_ImportCSV(t *testing.T) {
+	// 1. Verify SniffCSVDelimiter
+	if SniffCSVDelimiter([]byte("a,b,c\n1,2,3")) != ',' {
+		t.Fatal("expected comma delimiter")
+	}
+	if SniffCSVDelimiter([]byte("name;phone;age\nJohn;0812;30")) != ';' {
+		t.Fatal("expected semicolon delimiter")
+	}
+	if SniffCSVDelimiter([]byte("col1\tcol2\nval1\tval2")) != '\t' {
+		t.Fatal("expected tab delimiter")
+	}
+
+	// 2. Integration test with SQLite session
+	tempDir, err := os.MkdirTemp("", "sqlfox-import-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	vaultDB := filepath.Join(tempDir, "config.db")
+	targetDB := filepath.Join(tempDir, "target.db")
+
+	v, err := vault.OpenVault(vaultDB, "test-master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	srv := NewServer(v, nil, filepath.Join(tempDir, "backups"), "test-master")
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	client := ts.Client()
+
+	// Create and connect SQLite connection
+	connPayload := vault.ConnectionRecord{
+		Name:         "Import Test DB",
+		Environment:  "Development",
+		Driver:       "sqlite",
+		DatabaseName: targetDB,
+	}
+	body, _ := json.Marshal(connPayload)
+	resp, err := client.Post(ts.URL+"/api/connections", "application/json", bytes.NewReader(body))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("failed to create connection: %v", err)
+	}
+	var savedConn vault.ConnectionRecord
+	_ = json.NewDecoder(resp.Body).Decode(&savedConn)
+	resp.Body.Close()
+
+	// Connect session
+	resp, err = client.Post(ts.URL+"/api/session/connect/"+savedConn.ID, "application/json", nil)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("failed to connect session: %v", err)
+	}
+	resp.Body.Close()
+
+	// Create test table
+	createTableSQL := `
+	CREATE TABLE customers (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT,
+		phone TEXT,
+		email TEXT
+	);
+	`
+	execBody, _ := json.Marshal(map[string]any{"sql": createTableSQL})
+	resp, err = client.Post(ts.URL+"/api/session/"+savedConn.ID+"/execute", "application/json", bytes.NewReader(execBody))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("failed to create table: %v", err)
+	}
+	resp.Body.Close()
+
+	// Prepare CSV with UTF-8 BOM, semicolon delimiter, and leading zero phone number
+	csvContent := "\xef\xbb\xbfnama_lengkap;nomor_hp;email;unwanted\n" +
+		"Budi Santoso;081234567890;budi@example.com;foo\n" +
+		"Siti Rahma;085678901234;;bar\n"
+
+	// Multipart upload
+	var reqBody bytes.Buffer
+	writer := multipart.NewWriter(&reqBody)
+	part, _ := writer.CreateFormFile("file", "customers.csv")
+	_, _ = part.Write([]byte(csvContent))
+	_ = writer.WriteField("delimiter", "auto")
+	_ = writer.WriteField("empty_as_null", "true")
+	_ = writer.WriteField("skip_errors", "false")
+	mapping := map[string]string{
+		"0": "name",
+		"1": "phone",
+		"2": "email",
+		"3": "SKIP",
+	}
+	mappingBytes, _ := json.Marshal(mapping)
+	_ = writer.WriteField("mapping", string(mappingBytes))
+	_ = writer.Close()
+
+	req, err := http.NewRequest("POST", ts.URL+"/api/session/"+savedConn.ID+"/table/customers/import-csv", &reqBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("CSV import failed: %v, status: %d", err, resp.StatusCode)
+	}
+
+	var importRes struct {
+		Success      bool     `json:"success"`
+		Delimiter    string   `json:"delimiter"`
+		TotalRows    int      `json:"total_rows"`
+		ImportedRows int      `json:"imported_rows"`
+		SkippedRows  int      `json:"skipped_rows"`
+		Errors       []string `json:"errors"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&importRes)
+	resp.Body.Close()
+
+	if !importRes.Success || importRes.ImportedRows != 2 || importRes.Delimiter != ";" {
+		t.Fatalf("unexpected import result: %+v", importRes)
+	}
+
+	// Verify data in table: check leading zero preservation and null email
+	queryBody, _ := json.Marshal(map[string]any{"sql": "SELECT name, phone, email FROM customers ORDER BY id ASC;"})
+	resp, err = client.Post(ts.URL+"/api/session/"+savedConn.ID+"/execute", "application/json", bytes.NewReader(queryBody))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("failed to query imported table: %v", err)
+	}
+	var queryRes struct {
+		Rows [][]any `json:"rows"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&queryRes)
+	resp.Body.Close()
+
+	if len(queryRes.Rows) != 2 {
+		t.Fatalf("expected 2 rows, got %d", len(queryRes.Rows))
+	}
+
+	// Verify Budi's phone has leading zero
+	budiPhone := fmt.Sprintf("%v", queryRes.Rows[0][1])
+	if budiPhone != "081234567890" {
+		t.Fatalf("expected leading zero preserved '081234567890', got '%s'", budiPhone)
+	}
+
+	// Verify Siti's email is nil (NULL)
+	sitiEmail := queryRes.Rows[1][2]
+	if sitiEmail != nil {
+		t.Fatalf("expected NULL email for Siti, got: %v", sitiEmail)
+	}
+}
+
+
+

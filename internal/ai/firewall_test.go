@@ -44,10 +44,8 @@ func TestFirewall_BuildSchemaPrompt(t *testing.T) {
 		},
 	}
 
-	firewall := NewFirewall(false)
-
 	// Case 1: Query references only `users` and `orders`
-	prompt := firewall.BuildSchemaPrompt(schema, "SELECT u.email, o.total FROM users u JOIN orders o ON u.id = o.user_id")
+	prompt := BuildSchemaPrompt(schema, "SELECT u.email, o.total FROM users u JOIN orders o ON u.id = o.user_id", false)
 
 	if !strings.Contains(prompt, "Table `users`") {
 		t.Fatal("expected `users` table in prompt")
@@ -57,8 +55,7 @@ func TestFirewall_BuildSchemaPrompt(t *testing.T) {
 	}
 
 	// Case 2: Masking enabled
-	maskingFirewall := NewFirewall(true)
-	maskedPrompt := maskingFirewall.BuildSchemaPrompt(schema, "SELECT * FROM users")
+	maskedPrompt := BuildSchemaPrompt(schema, "SELECT * FROM users", true)
 
 	if strings.Contains(maskedPrompt, "`email`") {
 		t.Fatal("expected identifiers to be masked, found `email`")
@@ -123,11 +120,9 @@ func TestFirewall_BuildSchemaPrompt_UnrelatedQueryInEditor(t *testing.T) {
 		},
 	}
 
-	fw := NewFirewall(false)
-
 	// User has an existing query in the editor (audit_logs), but asks AI a natural language question about products
 	referencedInput := "SELECT * FROM audit_logs LIMIT 50; buatkan query menampilkan produk dan harganya"
-	prompt := fw.BuildSchemaPrompt(schema, referencedInput)
+	prompt := BuildSchemaPrompt(schema, referencedInput, false)
 
 	if !strings.Contains(prompt, "Table `products`") {
 		t.Fatal("expected `products` table in prompt even when editor has unrelated query")
@@ -151,8 +146,7 @@ func TestFirewall_BuildSchemaPrompt_StemMatching(t *testing.T) {
 			},
 		},
 	}
-	fw := NewFirewall(false)
-	prompt := fw.BuildSchemaPrompt(schema, "tampilkan data user aktif")
+	prompt := BuildSchemaPrompt(schema, "tampilkan data user aktif", false)
 	if !strings.Contains(prompt, "`username`") || !strings.Contains(prompt, "`email`") {
 		t.Fatal("expected users columns to be included via stem matching")
 	}
@@ -170,8 +164,7 @@ func TestFirewall_BuildSchemaPrompt_LargeSchema(t *testing.T) {
 		})
 	}
 	schema := &driver.SchemaMetadata{Tables: tables}
-	fw := NewFirewall(false)
-	prompt := fw.BuildSchemaPrompt(schema, "SELECT * FROM table_35")
+	prompt := BuildSchemaPrompt(schema, "SELECT * FROM table_35", false)
 
 	// table_35 should be active and include columns
 	if !strings.Contains(prompt, "Table `table_35`") {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"sqlfox/internal/ai"
+	"sqlfox/internal/driver"
 )
 
 type AIChatRequest struct {
@@ -21,7 +22,7 @@ type AIChatRequest struct {
 	Model           string      `json:"model"`
 	Endpoint        string      `json:"endpoint"`
 	MaskIdentifiers bool        `json:"mask_identifiers"`
-	Language        string      `json:"language,omitempty"`       // "id", "en", "auto"
+	Language        string      `json:"language,omitempty"`       // "id" (Bahasa Indonesia), "en", "auto"
 	ResponseStyle   string      `json:"response_style,omitempty"` // "concise", "detailed", "normal"
 	CustomPrompt    string      `json:"custom_prompt,omitempty"`  // custom persona / system instructions
 	IncludeSchema   *bool       `json:"include_schema,omitempty"` // default true
@@ -35,7 +36,8 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dialect := "SQL"
-	var schemaPrompt string
+	var schema *driver.SchemaMetadata
+	var tableNotes []ai.TableNoteSummary
 
 	includeSchema := req.IncludeSchema == nil || *req.IncludeSchema
 	if includeSchema {
@@ -45,71 +47,46 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 			// ponytail: lazy schema inspection ensures prompt has column metadata even if initial connection inspection was incomplete
 			if (sess.CachedSchema == nil || len(sess.CachedSchema.Tables) == 0) && sess.Session != nil {
 				ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-				if schema, err := sess.Session.InspectSchema(ctx, ""); err == nil {
-					sess.CachedSchema = schema
+				if sc, err := sess.Session.InspectSchema(ctx, ""); err == nil {
+					sess.CachedSchema = sc
 				}
 				cancel()
 			}
-			firewall := ai.NewFirewall(req.MaskIdentifiers)
-			schemaPrompt = firewall.BuildSchemaPrompt(sess.CachedSchema, req.Query+" "+req.Prompt+" "+req.ErrorMessage)
+			schema = sess.CachedSchema
+
+			// Fetch table notes for the connection
+			if notes, err := s.vault.ListTableNotesForConnection(sess.ConnectionID); err == nil && len(notes) > 0 {
+				for _, n := range notes {
+					tableNotes = append(tableNotes, ai.TableNoteSummary{
+						TableName: n.TableName,
+						Content:   n.Content,
+					})
+				}
+			}
 		}
 	}
-
-	systemPrompt := ai.BaseSystemPrompt(dialect, schemaPrompt)
-
-	// Append language preferences
-	if req.Language == "id" {
-		systemPrompt += "\nLanguage Instruction:\nIMPORTANT: You MUST answer strictly in Bahasa Indonesia (Indonesian language) throughout your explanation, comments, and answers.\n"
-	} else if req.Language == "en" {
-		systemPrompt += "\nLanguage Instruction:\nIMPORTANT: You MUST answer in English.\n"
-	}
-
-	// Append response style preferences
-	if req.ResponseStyle == "concise" {
-		systemPrompt += "\nStyle Instruction:\nBe extremely concise. Directly give the SQL query and a brief 1-2 sentence explanation without any verbose introductions or conclusions.\n"
-	} else if req.ResponseStyle == "detailed" {
-		systemPrompt += "\nStyle Instruction:\nProvide an in-depth technical explanation, discussing query execution semantics, indexing implications, and performance optimizations.\n"
-	}
-
-	// Append user custom persona / system instructions
-	if req.CustomPrompt != "" {
-		systemPrompt += "\nCustom System Instructions:\n" + req.CustomPrompt + "\n"
-	}
-
-	var userPrompt string
-
-	switch req.Action {
-	case "explain_query":
-		userPrompt = ai.BuildExplainQueryPrompt(req.Query)
-	case "explain_plan":
-		userPrompt = ai.BuildExplainPlanPrompt(req.Query, req.Plan)
-	case "optimize":
-		userPrompt = ai.BuildOptimizeQueryPrompt(req.Query, req.Plan)
-	case "nl_to_sql":
-		userPrompt = ai.BuildNLToSQLPrompt(req.Prompt)
-	case "fix_query":
-		userPrompt = ai.BuildDebugErrorPrompt(req.Query, req.ErrorMessage)
-	default:
-		userPrompt = req.Prompt
-	}
-
-	if req.Provider == "" {
-		req.Provider = ai.ProviderOllama
-	}
-
-	client := ai.NewAIClient(ai.ClientConfig{
-		Provider: req.Provider,
-		APIKey:   req.APIKey,
-		Model:    req.Model,
-		Endpoint: req.Endpoint,
-	})
 
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
-	resp, err := client.Complete(ctx, ai.CompletionRequest{
-		SystemPrompt: systemPrompt,
-		UserPrompt:   userPrompt,
+	resp, err := ai.Assist(ctx, ai.AssistRequest{
+		Action:          req.Action,
+		Query:           req.Query,
+		Plan:            req.Plan,
+		Prompt:          req.Prompt,
+		ErrorMessage:    req.ErrorMessage,
+		Dialect:         dialect,
+		Schema:          schema,
+		TableNotes:      tableNotes,
+		Provider:        req.Provider,
+		APIKey:          req.APIKey,
+		Model:           req.Model,
+		Endpoint:        req.Endpoint,
+		MaskIdentifiers: req.MaskIdentifiers,
+		Language:        req.Language,
+		ResponseStyle:   req.ResponseStyle,
+		CustomPrompt:    req.CustomPrompt,
+		IncludeSchema:   includeSchema,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
