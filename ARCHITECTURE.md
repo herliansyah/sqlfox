@@ -613,5 +613,48 @@ flowchart TD
    - **Visual EXPLAIN Modal**: Integrated into `#impact-preview-modal` under the `💡 Advisor` tab with dynamic count badges, ESR tag pills, 1-click clipboard copy, and editor injection.
    - **Headless CLI Command**: `sqlfox advise --dsn ... --sql "..."` with human-readable colored output and `--format json` streaming.
 
+---
+
+## 15. In-App Self-Update Engine & Release Distribution (`internal/server/update.go`)
+
+The In-App Self-Update Engine enables users to check, inspect changelogs, and upgrade their single-binary installation directly within the web workspace without third-party package managers or external daemons:
+
+```mermaid
+flowchart TD
+    UI["Web UI (Header / Footer / Palette)"] -->|GET /api/system/update/check?force=...| Check["Update Checker"]
+    Check --> Cache{"Cached within 24h?"}
+    Cache -->|Yes & not force| ReturnCache["Return Cached Release Info"]
+    Cache -->|No or force=true| GitHubAPI["GitHub Releases API (releases/latest)"]
+    GitHubAPI --> Matcher["Asset Matcher (OS + Arch + Extension)"]
+    Matcher --> ParseSemver["Semver Compare (Latest vs Current)"]
+    ParseSemver --> UpdateModal["Render Update Modal & Changelog"]
+
+    UpdateModal -->|User clicks 'Update Now'| Apply["POST /api/system/update/apply"]
+    Apply --> Download["Stream Platform Archive (.tar.gz / .zip)"]
+    Download --> Extract["Extract Binary to Temp Sibling File"]
+    Extract --> Replace{"OS Platform?"}
+    Replace -->|Linux / macOS| AtomicRename["Atomic os.Rename() + chmod 0755"]
+    Replace -->|Windows| WinRename["Rename running sqlfox.exe -> .old, write new sqlfox.exe"]
+    AtomicRename --> Restart["Trigger Background Re-exec (os.StartProcess)"]
+    WinRename --> Restart
+    Restart --> Reload["Browser 3s Countdown & Auto-Reload"]
+```
+
+1. **GitHub Releases Polling & Rate-Limit Guard**:
+   - `GET /api/system/update/check` fetches metadata from `api.github.com/repos/herliansyah/sqlfox/releases/latest`.
+   - Responses are cached in memory for 24 hours to stay well below GitHub's 60 req/hour unauthenticated IP rate limit.
+   - Explicit user actions (`Check for Updates` or clicking version tag) supply `?force=true` to bypass the cache.
+2. **Platform-Aware Binary Asset Matching**:
+   - Target assets are resolved against `runtime.GOOS` and `runtime.GOARCH` (`sqlfox-{TAG}-{GOOS}-{GOARCH}.(tar.gz|zip)`).
+   - Zero external compression dependencies: extraction uses stdlib `archive/tar`, `compress/gzip`, and `archive/zip` exclusively.
+3. **Atomic Replacement & Windows Locking Workaround**:
+   - The new binary is staged in a sibling temporary file in the same directory (`filepath.Dir(exePath)`) to guarantee same-filesystem atomic moves.
+   - On Linux/macOS, `os.Rename` replaces the running inode atomically.
+   - On Windows, where executing binaries cannot be overwritten in place, the running executable is renamed to `sqlfox.exe.old`, the replacement is moved into place, and cleanup is scheduled.
+4. **Graceful Re-exec Restart**:
+   - Dispatches a background goroutine spawning the updated binary with original command-line arguments via `exec.Command` / `os.StartProcess`.
+   - Frontend initiates a 3-second countdown before auto-refreshing to seamlessly reconnect.
+
+
 
 

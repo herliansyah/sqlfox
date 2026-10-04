@@ -161,6 +161,7 @@ All browser-blocking popup methods (`window.alert`, `window.confirm`, `window.pr
 - **Notification Dialog (`#app-native-dialog`)**: Asynchronous, non-blocking alert with Esc key support and dark theme styling.
 - **Safety Inspection Dialog (`#safety-inspection-dialog`)**: Dedicated security inspection modal displaying risk badges (`LOW`, `MEDIUM`, `HIGH`), destructive flag, challenge requirement, and query reason.
 - **DDL Review Modal (`#ddl-review-dialog`)**: Pre-execution verification modal showing generated DDL statements before dispatching to the database.
+- **In-App Self-Update Dialog (`#update-dialog`)**: Native modal presenting release metadata, version diffs (`vCurrent` ➔ `vLatest`), rendered Markdown changelogs, animated download/extraction progress states, and 1-click update execution.
 
 ---
 
@@ -512,6 +513,55 @@ The Entity-Relationship Diagram canvas allows developers to explore table relati
    - `⚡ Editor`: Inserts the safe DDL into the active Query Editor and closes the modal for immediate review and execution.
 4. **Unsuppressed Candidate Display Under Bloat Warning**:
    - Prominent amber banner warns of write degradation when a table exceeds 5 secondary indexes, but the interface explicitly preserves the candidate index cards and consolidation suggestions below the warning.
+
+---
+
+## 18. In-App Self-Update Modal, Changelog Viewer & Workspace Author Attribution
+
+### Status Bar & Update Modal Wireframe
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ [PROD 🔴] MySQL (localhost:3306)   Latency: 2ms                                                        │
+│                    Created by herliansyah • [GitHub Icon]                                              │
+│                                           Memory: 42MB  [⌨️ Shortcuts]  [🚀 Update v0.2.0]  SqlFox v0.1.0│
+└────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 🚀 SqlFox Update  [v0.2.0]                                          [✕ Close]│
+│ A new release is ready to install                                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ [ Current: v0.1.0  ➔  New: v0.2.0 ]                    Published: Oct 4, 2026│
+├─────────────────────────────────────────────────────────────────────────────┤
+│ 📋 WHAT'S CHANGED IN THIS RELEASE                                           │
+│ ┌─────────────────────────────────────────────────────────────────────────┐ │
+│ │ ## What's Changed                                                       │ │
+│ │ * Added In-App Self-Update Engine with 1-click binary replacement       │ │
+│ │ * Integrated interactive Markdown changelog viewer                      │ │
+│ │ * Added workspace author credit and GitHub attribution                  │ │
+│ └─────────────────────────────────────────────────────────────────────────┘ │
+│                                                                             │
+│ [====================================                    ] 65%              │
+│ Downloading release archive...                                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ [GitHub Icon] View on GitHub                         [ Later ]  [🚀 Update Now]│
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Interaction Models
+
+1. **Balanced Tri-Section Status Bar**:
+   - **Left**: Real-time database connection target, environment safety tier, and interactive latency ping (`footer-latency`).
+   - **Center**: Prominent yet unobtrusive workspace attribution (`Created by herliansyah`) with hyperlinks to author's profile and the official GitHub repository.
+   - **Right**: Memory telemetry, keyboard shortcuts cheatsheet launcher, version tag, and dynamic update action badge (`#footer-update-btn`).
+2. **Transparent Changelog Inspection**:
+   - Renders GitHub release notes using SqlFox's built-in zero-dependency Markdown parser, displaying formatted bullet points, headers, and code snippets before the user commits to updating.
+3. **One-Click In-App Binary Replacement**:
+   - Clicking `[🚀 Update Now]` triggers background archive download, atomic in-place replacement, and automatic application restart.
+   - Displays real-time progress phases (*Downloading archive...*, *Extracting binary...*, *Restarting SqlFox...*).
+4. **Reconnection Countdown**:
+   - Displays a 3-second visual countdown following restart confirmation before automatically reloading the page, ensuring smooth reconnection to the upgraded daemon without manual browser refresh.
+
 
 
 

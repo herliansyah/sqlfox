@@ -466,3 +466,19 @@ v2.1 (Multi-Engine & Developer Operations Suite)
   - [x] **Documentation & Verification**: Documented in ADR-0035, `CONTEXT.md`, `ARCHITECTURE.md`, `SECURITY.md`, `UX_DESIGN.md`, and `README.md` with unit tests passing 100% in `internal/advisor/` and `internal/cli/`.
 - **Runnable Verification**: Run `go test -v ./internal/advisor/... ./internal/cli -run TestCLI_Advise` -> all tests pass -> execute `sqlfox advise --driver mysql --sql "SELECT * FROM orders WHERE user_id = 1 AND amount > 100 ORDER BY created_at DESC"` -> verify ESR column sequence `(user_id, created_at, amount)` and `ALGORITHM=INPLACE, LOCK=NONE`.
 
+---
+
+### Milestone 28: In-App Self-Update Engine, Changelog Viewer & Workspace Author Attribution
+- **Goal**: Enable effortless single-click in-app binary updates directly from the web UI, complete with full Markdown changelog inspection from GitHub Releases, rate-limit guarded polling, atomic multi-platform replacement, graceful re-exec restart, and elegant status bar author attribution.
+- **Deliverables**:
+  - [x] **Zero-Dependency Update Engine**: Pure-Go implementation in `internal/server/update.go` querying GitHub Releases API, parsing semver version transitions, and resolving platform-specific release assets (`sqlfox-${VERSION}-${GOOS}-${GOARCH}.(tar.gz|zip)`).
+  - [x] **24-Hour Rate-Limit Cache**: Throttles automatic update checks to 1 request per 24 hours to prevent GitHub API rate limit exhaustion while preserving an on-demand manual trigger (`?force=true`).
+  - [x] **Atomic Binary In-Place Replacement**: Streams archive into memory/temp file and extracts executable using stdlib `archive/tar`, `compress/gzip`, and `archive/zip`; executes atomic `os.Rename` with permissions validation on Linux/macOS and fallback `.old` renaming for locked Windows executables.
+  - [x] **Graceful Self-Restart**: Background re-execution spawning the new binary with original parameters followed by client-side 3-second countdown reconnection.
+  - [x] **Native Update & Changelog Modal**: `#update-dialog` featuring release name, version diff, published timestamp, full Markdown changelog rendering via SqlFox's built-in parser, and real-time progress indicators.
+  - [x] **Author Attribution & GitHub Link**: Centralized status bar credit (`Created by herliansyah`) linked to author's GitHub profile and the official repository, alongside dynamic `● Update v...` indicator button in the footer.
+  - [x] **Command Palette Integration**: Added "Check for Updates" action to Command Palette (`Ctrl+K` / `Cmd+K`).
+  - [x] **Documentation & Verification**: Recorded in ADR-0036, glossary in `CONTEXT.md`, and unit tests passing 100% in `internal/server/update_test.go`.
+- **Runnable Verification**: Run `go test -v ./internal/server -run "TestUpdate|TestCompareSemver|TestFindMatchingAsset|TestExtractFrom|TestHandleApplyUpdate"` -> 100% pass across semver comparison, asset matching, check endpoint, archive extraction, and atomic binary replacement.
+
+

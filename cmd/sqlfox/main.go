@@ -83,6 +83,7 @@ func main() {
 
 	// Initialize HTTP server with embedded web assets and master password
 	srv := server.NewServer(v, web.Assets(), backupDir, masterPassword)
+	srv.SetVersion(Version)
 
 	maxAttempts := 50
 	if *strictPortFlag {

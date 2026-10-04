@@ -567,4 +567,18 @@ _Avoid_: Too-many-indexes error, write penalty alert
 Dialect-aware index creation DDL leveraging non-blocking execution strategies (`ALGORITHM=INPLACE, LOCK=NONE` for MySQL 5.7 and 8.0, `CONCURRENTLY` for PostgreSQL, and `IF NOT EXISTS` for SQLite).
 _Avoid_: Raw index SQL, blocking alter, instant DDL
 
+## Distribution & Workspace Attribution
+
+**Update Engine**:
+The native Go subsystem (`internal/server/update.go`) responsible for polling GitHub Releases, evaluating semver version deltas, streaming platform-specific binary archives (`.tar.gz` / `.zip`), performing atomic binary replacement on disk, and triggering graceful application re-execution without third-party dependencies.
+_Avoid_: Auto-installer, updater daemon, external package manager
+
+**Update Modal**:
+A native HTML5 dialog (`#update-dialog`) presenting release metadata, version diffs (`vCurrent` -> `vLatest`), rendered Markdown changelog release notes, and real-time self-update progress states.
+_Avoid_: Update popup, new version alert, release prompt
+
+**Author Credit**:
+The centralized workspace attribution element residing in the status bar footer, featuring creator credit (`Created by herliansyah`) linked to the author's GitHub profile and the official repository icon.
+_Avoid_: Footer branding, watermark, sponsor badge
+
 
