@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -99,43 +100,47 @@ func TestJob_RunAndCheckEndToEnd(t *testing.T) {
 	dumpOut := filepath.Join(tempDir, "dumps", "source-backup-{DATETIME}.sql")
 	queryOut := filepath.Join(tempDir, "query_report.csv")
 
-	jobContent := fmt.Sprintf(`{
-		"name": "E2E Pipeline Test",
-		"tasks": [
+	jobSpec := JobSpec{
+		Name: "E2E Pipeline Test",
+		Tasks: []JobTask{
 			{
-				"name": "Health Ping",
-				"type": "health-check",
-				"target": "sqlite://%s"
+				Name:   "Health Ping",
+				Type:   "health-check",
+				Target: "sqlite://" + dbPath,
 			},
 			{
-				"name": "Standard Dump",
-				"type": "dump",
-				"target": "sqlite://%s",
-				"output": "%s",
-				"rotation": {
-					"keep_last": 2
-				}
+				Name:   "Standard Dump",
+				Type:   "dump",
+				Target: "sqlite://" + dbPath,
+				Output: dumpOut,
+				Rotation: &JobRotation{
+					KeepLast: 2,
+				},
 			},
 			{
-				"name": "Export Report Query",
-				"type": "query",
-				"target": "sqlite://%s",
-				"sql": "SELECT id, name, email FROM users ORDER BY id ASC;",
-				"format": "csv",
-				"output": "%s"
+				Name:   "Export Report Query",
+				Type:   "query",
+				Target: "sqlite://" + dbPath,
+				SQL:    "SELECT id, name, email FROM users ORDER BY id ASC;",
+				Format: "csv",
+				Output: queryOut,
 			},
 			{
-				"name": "Transfer Tables",
-				"type": "transfer",
-				"from": "sqlite://%s",
-				"to": "sqlite://%s",
-				"all_tables": true,
-				"create_missing": true
-			}
-		]
-	}`, dbPath, dbPath, dumpOut, dbPath, queryOut, dbPath, destDbPath)
+				Name:          "Transfer Tables",
+				Type:          "transfer",
+				From:          "sqlite://" + dbPath,
+				To:            "sqlite://" + destDbPath,
+				AllTables:     true,
+				CreateMissing: true,
+			},
+		},
+	}
+	jobBytes, err := json.Marshal(jobSpec)
+	if err != nil {
+		t.Fatalf("failed to build job JSON: %v", err)
+	}
 
-	if err := os.WriteFile(jobFile, []byte(jobContent), 0644); err != nil {
+	if err := os.WriteFile(jobFile, jobBytes, 0644); err != nil {
 		t.Fatalf("failed to write job JSON: %v", err)
 	}
 
