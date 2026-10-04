@@ -164,19 +164,46 @@ func LoadJobSpec(filePath string) (*JobSpec, error) {
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	// Expand environment variables (${VAR} or $VAR)
-	expanded := os.ExpandEnv(string(data))
-
 	var spec JobSpec
-	if err := json.Unmarshal([]byte(expanded), &spec); err != nil {
+	if err := json.Unmarshal(data, &spec); err != nil {
 		return nil, fmt.Errorf("JSON parse error: %w", err)
 	}
+	expandJobSpecEnv(&spec)
 
 	if len(spec.Tasks) == 0 {
 		return nil, fmt.Errorf("job contains no tasks")
 	}
 
 	return &spec, nil
+}
+
+func expandJobSpecEnv(spec *JobSpec) {
+	spec.Name = os.ExpandEnv(spec.Name)
+	for i := range spec.Tasks {
+		task := &spec.Tasks[i]
+		task.Name = os.ExpandEnv(task.Name)
+		task.Type = os.ExpandEnv(task.Type)
+		task.Target = os.ExpandEnv(task.Target)
+		task.Driver = os.ExpandEnv(task.Driver)
+		task.Timeout = os.ExpandEnv(task.Timeout)
+		task.DumpType = os.ExpandEnv(task.DumpType)
+		task.Output = os.ExpandEnv(task.Output)
+		task.From = os.ExpandEnv(task.From)
+		task.To = os.ExpandEnv(task.To)
+		task.DriverFrom = os.ExpandEnv(task.DriverFrom)
+		task.DriverTo = os.ExpandEnv(task.DriverTo)
+		for j := range task.Tables {
+			task.Tables[j] = os.ExpandEnv(task.Tables[j])
+		}
+		task.SQL = os.ExpandEnv(task.SQL)
+		task.File = os.ExpandEnv(task.File)
+		task.Format = os.ExpandEnv(task.Format)
+		task.VaultDB = os.ExpandEnv(task.VaultDB)
+		task.Pass = os.ExpandEnv(task.Pass)
+		if task.Rotation != nil {
+			task.Rotation.MaxAge = os.ExpandEnv(task.Rotation.MaxAge)
+		}
+	}
 }
 
 // RunJobCheck performs a non-destructive dry-run validation of the job.

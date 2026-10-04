@@ -230,11 +230,11 @@ func TestHandleApplyUpdate(t *testing.T) {
 	}))
 	defer mockDownload.Close()
 
-	restartCalled := false
+	restartChan := make(chan struct{}, 1)
 	srv := &Server{
 		targetExePath: fakeExe,
 		restartFn: func() error {
-			restartCalled = true
+			restartChan <- struct{}{}
 			return nil
 		},
 	}
@@ -271,9 +271,10 @@ func TestHandleApplyUpdate(t *testing.T) {
 		t.Errorf("expected binary content %q, got %q", string(newPayload), string(updatedContent))
 	}
 
-	// Wait briefly for restartFn goroutine
-	time.Sleep(600 * time.Millisecond)
-	if !restartCalled {
+	// Verify restartFn was triggered without flaking on slow CI runners
+	select {
+	case <-restartChan:
+	case <-time.After(3 * time.Second):
 		t.Errorf("expected restartFn to have been called")
 	}
 }
