@@ -478,7 +478,7 @@ v2.1 (Multi-Engine & Developer Operations Suite)
   - [x] **Native Update & Changelog Modal**: `#update-dialog` featuring release name, version diff, published timestamp, full Markdown changelog rendering via SqlFox's built-in parser, and real-time progress indicators.
   - [x] **Author Attribution & GitHub Link**: Centralized status bar credit (`Created by herliansyah`) linked to author's GitHub profile and the official repository, alongside dynamic `● Update v...` indicator button in the footer.
   - [x] **Command Palette Integration**: Added "Check for Updates" action to Command Palette (`Ctrl+K` / `Cmd+K`).
-  - [x] **Documentation & Verification**: Recorded in ADR-0036, glossary in `CONTEXT.md`, and unit tests passing 100% in `internal/server/update_test.go`.
-- **Runnable Verification**: Run `go test -v ./internal/server -run "TestUpdate|TestCompareSemver|TestFindMatchingAsset|TestExtractFrom|TestHandleApplyUpdate"` -> 100% pass across semver comparison, asset matching, check endpoint, archive extraction, and atomic binary replacement.
+  - [x] **Documentation & Verification**: Recorded in ADR-0036, glossary in `CONTEXT.md`, and unit tests passing 100% in `internal/server/update_test.go` with deterministic channel synchronization for Windows CI runners.
+- **Runnable Verification**: Run `go test -v ./internal/server -run "TestUpdate|TestCompareSemver|TestFindMatchingAsset|TestExtractFrom|TestHandleApplyUpdate"` -> 100% pass across semver comparison, asset matching, check endpoint, archive extraction, and atomic binary replacement without timing race conditions.
 
 

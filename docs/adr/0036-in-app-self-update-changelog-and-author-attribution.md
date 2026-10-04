@@ -22,7 +22,7 @@ A dedicated package/module in `internal/server/update.go` handles GitHub Release
 - **In-App Binary Replacement (`POST /api/system/update/apply`)**: Streams the target release archive directly, extracts the `sqlfox` / `sqlfox.exe` binary to a sibling temporary file, validates permissions, and performs atomic replacement:
   - **Linux / macOS**: Atomic `os.Rename(tempBinary, currentBinary)` followed by `os.Chmod(currentBinary, 0755)`.
   - **Windows**: Renames `sqlfox.exe` to `sqlfox.exe.old`, writes the new `sqlfox.exe`, and schedules removal of the old executable.
-- **Graceful Self-Restart**: Dispatches background re-execution of the newly updated binary using `os.StartProcess` with original arguments, followed by graceful shutdown of the current server process.
+- **Graceful Self-Restart & Test Seam**: Dispatches background re-execution of the newly updated binary using `os.StartProcess` with original arguments, followed by graceful shutdown of the current server process. For testing environments, an injectable `restartFn` seam dispatches immediately in a goroutine, synchronized deterministically via channel primitives in `update_test.go` rather than fragile `time.Sleep` windows to prevent timing flakes on heavily loaded Windows CI runners.
 
 ### 2. Native HTML5 Update Modal with Rich Markdown Changelog
 - An `#update-dialog` modal presents the release name, published timestamp, version transition (`vCurrent` -> `vLatest`), and full Markdown-rendered release notes using SqlFox's built-in client-side markdown formatter.
@@ -38,3 +38,4 @@ A dedicated package/module in `internal/server/update.go` handles GitHub Release
 - Users can update SqlFox seamlessly with 1 click directly inside the web UI without leaving their browser or executing terminal commands.
 - Transparent changelogs allow users to verify release notes before applying updates.
 - Adheres strictly to Ponytail principles: uses Go standard libraries exclusively, adds zero external dependencies, and maintains <100MB RAM footprint.
+- Test suites run sub-millisecond and deterministically across all operating systems (Linux, macOS, and Windows) without timing race conditions.

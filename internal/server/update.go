@@ -339,7 +339,6 @@ func (s *Server) handleApplyUpdate(w http.ResponseWriter, r *http.Request) {
 	// Trigger restart
 	if s.restartFn != nil {
 		go func() {
-			time.Sleep(500 * time.Millisecond)
 			_ = s.restartFn()
 		}()
 	} else {
