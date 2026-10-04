@@ -1440,22 +1440,119 @@
 
   <!-- Bottom Status Bar -->
   <footer class="h-6 bg-app-surface border-t border-app-border px-4 flex items-center justify-between text-[11px] text-slate-400 flex-shrink-0 z-20">
+    <!-- Left: Connection & Latency -->
     <div class="flex items-center space-x-4">
       <span id="footer-env-badge" class="hidden"></span>
       <span id="footer-db-info" class="font-mono text-slate-300">No active connection</span>
       <span id="footer-latency" onclick="pingActiveSession()" class="text-slate-400 font-mono transition" title="Click to test database latency">Latency: --</span>
     </div>
-    <div class="flex items-center space-x-4">
+
+    <!-- Center: Author Attribution & GitHub -->
+    <div class="flex items-center space-x-1.5 text-slate-400">
+      <span>Created by</span>
+      <a href="https://github.com/herliansyah" target="_blank" rel="noopener noreferrer" class="text-slate-300 hover:text-emerald-400 font-medium transition inline-flex items-center space-x-1 group" title="Author Profile on GitHub">
+        <span>herliansyah</span>
+      </a>
+      <span class="text-slate-600">•</span>
+      <a href="https://github.com/herliansyah/sqlfox" target="_blank" rel="noopener noreferrer" class="text-slate-400 hover:text-white transition inline-flex items-center space-x-1 group" title="SqlFox GitHub Repository">
+        <svg class="w-3.5 h-3.5 fill-current opacity-80 group-hover:opacity-100 transition" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        <span class="group-hover:underline underline-offset-2">GitHub</span>
+      </a>
+    </div>
+
+    <!-- Right: Telemetry, Shortcuts & Version / Update -->
+    <div class="flex items-center space-x-3.5">
       <span id="footer-memory" class="text-slate-400 font-mono">Memory: --</span>
       <button onclick="openShortcutsModal()" class="hover:text-white flex items-center space-x-1 text-slate-400 hover:bg-slate-800 px-1.5 py-0.5 rounded transition cursor-pointer" title="View Keyboard Shortcuts (? / F1)">
         <span>⌨️</span>
         <span class="underline decoration-slate-600 underline-offset-2">Shortcuts</span>
       </button>
-      <span>SqlFox v0.1.0</span>
+      <div id="footer-version-wrap" class="flex items-center space-x-1.5 font-mono">
+        <button id="footer-update-btn" onclick="checkOrOpenUpdate(true)" class="hidden items-center space-x-1 text-emerald-400 bg-emerald-950/80 border border-emerald-700/60 hover:bg-emerald-900/80 px-2 py-0.5 rounded text-[10px] font-semibold transition animate-pulse cursor-pointer shadow-sm shadow-emerald-900/30" title="Click to view changelog and update SqlFox">
+          <span>🚀</span>
+          <span id="footer-update-badge-text">Update Available</span>
+        </button>
+        <span id="footer-version-text" onclick="checkOrOpenUpdate(true)" class="text-slate-400 hover:text-slate-200 cursor-pointer transition select-none" title="Click to check for updates">SqlFox v0.1.0</span>
+      </div>
     </div>
   </footer>
 
   <!-- MODALS -->
+
+  <!-- In-App Self-Update & Changelog Modal Dialog -->
+  <dialog id="update-dialog" class="bg-transparent backdrop:bg-black/75 p-0 rounded-2xl max-w-2xl w-full text-slate-200 shadow-2xl border border-app-border overflow-hidden">
+    <div class="bg-slate-900 flex flex-col max-h-[85vh] rounded-2xl">
+      <!-- Header -->
+      <div class="px-6 py-4 bg-slate-950 border-b border-app-border flex items-center justify-between flex-shrink-0">
+        <div class="flex items-center space-x-3">
+          <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500/20 to-sky-500/20 border border-emerald-500/30 flex items-center justify-center text-lg">
+            🚀
+          </div>
+          <div>
+            <div class="flex items-center space-x-2">
+              <h3 class="font-semibold text-white text-base">SqlFox Update</h3>
+              <span id="update-tag-badge" class="px-2 py-0.5 rounded-full text-[11px] font-mono font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">vX.Y.Z</span>
+            </div>
+            <p id="update-subtext" class="text-xs text-slate-400 mt-0.5">A new release is ready to install</p>
+          </div>
+        </div>
+        <button onclick="closeUpdateDialog()" class="text-slate-400 hover:text-white hover:bg-slate-800 p-1.5 rounded-lg transition" title="Close">✕</button>
+      </div>
+
+      <!-- Body / Changelog -->
+      <div class="p-6 overflow-y-auto space-y-4 flex-1 custom-scrollbar">
+        <!-- Version Diff & Release Date Bar -->
+        <div class="flex items-center justify-between bg-slate-950/60 border border-slate-800/80 rounded-xl px-4 py-3 text-xs">
+          <div class="flex items-center space-x-2">
+            <span class="text-slate-400">Current:</span>
+            <span id="update-cur-ver" class="font-mono text-slate-300 font-medium">v0.1.0</span>
+            <span class="text-slate-500">➔</span>
+            <span class="text-slate-400">New:</span>
+            <span id="update-new-ver" class="font-mono text-emerald-400 font-semibold">vX.Y.Z</span>
+          </div>
+          <div id="update-date" class="text-slate-400 font-mono text-[11px]">Published: --</div>
+        </div>
+
+        <!-- Changelog Content -->
+        <div>
+          <h4 class="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2 flex items-center space-x-1.5">
+            <span>📋</span>
+            <span>What's Changed in this Release</span>
+          </h4>
+          <div id="update-changelog-body" class="bg-slate-950/80 border border-slate-800 rounded-xl p-4 text-xs text-slate-300 leading-relaxed max-h-[300px] overflow-y-auto font-sans space-y-2">
+            <!-- Rendered Markdown goes here -->
+          </div>
+        </div>
+
+        <!-- Progress / Feedback Status Container -->
+        <div id="update-status-container" class="hidden space-y-2 pt-2">
+          <div class="flex items-center justify-between text-xs">
+            <span id="update-status-label" class="text-slate-300 font-medium">Preparing update...</span>
+            <span id="update-status-percent" class="font-mono text-emerald-400"></span>
+          </div>
+          <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+            <div id="update-progress-bar" class="h-full bg-gradient-to-r from-emerald-500 to-sky-500 rounded-full transition-all duration-300 w-1/4 animate-pulse"></div>
+          </div>
+          <p id="update-error-msg" class="hidden text-xs text-rose-400 bg-rose-950/40 border border-rose-800/60 p-2.5 rounded-lg mt-2"></p>
+        </div>
+      </div>
+
+      <!-- Footer Actions -->
+      <div class="px-6 py-3.5 bg-slate-950 border-t border-app-border flex items-center justify-between flex-shrink-0">
+        <a id="update-github-link" href="https://github.com/herliansyah/sqlfox/releases" target="_blank" rel="noopener noreferrer" class="text-xs text-slate-400 hover:text-white transition flex items-center space-x-1.5">
+          <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          <span>View on GitHub</span>
+        </a>
+        <div class="flex items-center space-x-2.5">
+          <button id="btn-update-cancel" onclick="closeUpdateDialog()" class="px-3.5 py-1.5 text-xs text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition font-medium">Later</button>
+          <button id="btn-update-apply" onclick="performSystemUpdate()" class="px-4 py-1.5 text-xs text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg transition font-semibold flex items-center space-x-1.5 shadow-md shadow-emerald-900/30">
+            <span>🚀</span>
+            <span>Update Now</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </dialog>
 
   <!-- Keyboard Shortcuts Cheat Sheet Modal -->
   <div id="shortcuts-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 hidden" onclick="if(event.target === this) closeShortcutsModal()">
@@ -12957,11 +13054,12 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
           closeProcessDetailModal();
           closeProcessContextMenu();
           closeProfileView();
+          closeUpdateDialog();
         }
       });
 
       // Close native dialogs when clicking on backdrop
-      ['snippets-manager-dialog', 'snippet-param-dialog', 'database-creator-dialog', 'csv-import-dialog', 'schema-search-modal', 'db-diagnostics-dialog', 'privilege-matrix-dialog', 'pl-detail-modal'].forEach(id => {
+      ['snippets-manager-dialog', 'snippet-param-dialog', 'database-creator-dialog', 'csv-import-dialog', 'schema-search-modal', 'db-diagnostics-dialog', 'privilege-matrix-dialog', 'pl-detail-modal', 'update-dialog'].forEach(id => {
         const dlg = document.getElementById(id);
         if (dlg) {
           dlg.addEventListener('click', (e) => {
@@ -13048,7 +13146,8 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
         { name: 'New Connection', shortcut: '', run: () => openNewConnModal() },
         { name: 'Toggle Read-Only Mode', shortcut: '', run: () => toggleReadOnly() },
         { name: 'Export Vault (.sqlfox-vault)', shortcut: '', run: () => openExportImportModal() },
-        { name: 'Toggle AI Copilot', shortcut: 'Ctrl+L', run: () => toggleAISidebar() }
+        { name: 'Toggle AI Copilot', shortcut: 'Ctrl+L', run: () => toggleAISidebar() },
+        { name: 'Check for Updates', shortcut: '', run: () => checkOrOpenUpdate(true) }
       ];
 
       const list = document.getElementById('palette-actions-list');
@@ -13080,6 +13179,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       else if (name === 'Toggle Read-Only Mode') toggleReadOnly();
       else if (name === 'Export Vault (.sqlfox-vault)') openExportImportModal();
       else if (name === 'Toggle AI Copilot') toggleAISidebar();
+      else if (name === 'Check for Updates') checkOrOpenUpdate(true);
     }
 
     // --- Table Diagnostics Handlers ---
@@ -14131,6 +14231,187 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
     function escapeHtml(str) {
       return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
+
+    // --- Update Engine & Changelog Viewer ---
+    let latestUpdateInfo = null;
+
+    async function checkOrOpenUpdate(userInitiated = false) {
+      const verTextEl = document.getElementById('footer-version-text');
+      const updateBtn = document.getElementById('footer-update-btn');
+
+      if (userInitiated && latestUpdateInfo && latestUpdateInfo.has_update) {
+        openUpdateDialog(latestUpdateInfo);
+        return;
+      }
+
+      if (userInitiated) {
+        showToast('Checking for updates...', 'info');
+      }
+
+      try {
+        const url = userInitiated ? '/api/system/update/check?force=true' : '/api/system/update/check';
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (data.current_version && verTextEl) {
+          verTextEl.textContent = `SqlFox ${data.current_version}`;
+        }
+
+        latestUpdateInfo = data;
+
+        if (data.has_update) {
+          if (updateBtn) {
+            updateBtn.classList.remove('hidden');
+            updateBtn.classList.add('inline-flex');
+            const badgeText = document.getElementById('footer-update-badge-text');
+            if (badgeText) badgeText.textContent = `Update ${data.latest_version}`;
+          }
+          if (userInitiated) {
+            openUpdateDialog(data);
+          }
+        } else {
+          if (updateBtn) updateBtn.classList.add('hidden');
+          if (userInitiated) {
+            showToast(`You are running the latest version (${data.current_version || 'current'})`, 'success');
+          }
+        }
+      } catch (err) {
+        console.error('Update check failed:', err);
+        if (userInitiated) {
+          showToast(`Update check failed: ${err.message}`, 'error');
+        }
+      }
+    }
+
+    function openUpdateDialog(info) {
+      if (!info) return;
+      const dialog = document.getElementById('update-dialog');
+      if (!dialog) return;
+
+      const tagBadge = document.getElementById('update-tag-badge');
+      if (tagBadge) tagBadge.textContent = info.latest_version || 'Latest';
+      const curVer = document.getElementById('update-cur-ver');
+      if (curVer) curVer.textContent = info.current_version || '--';
+      const newVer = document.getElementById('update-new-ver');
+      if (newVer) newVer.textContent = info.latest_version || '--';
+
+      const pubDate = info.published_at ? new Date(info.published_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : 'Recent';
+      const dateEl = document.getElementById('update-date');
+      if (dateEl) dateEl.textContent = `Published: ${pubDate}`;
+
+      const changelogBody = document.getElementById('update-changelog-body');
+      if (changelogBody) {
+        if (info.release_notes) {
+          changelogBody.innerHTML = renderCopilotMarkdown(info.release_notes);
+        } else {
+          changelogBody.innerHTML = '<p class="text-slate-400 italic">No changelog notes provided for this release.</p>';
+        }
+      }
+
+      const ghLink = document.getElementById('update-github-link');
+      if (ghLink && info.latest_version) {
+        ghLink.href = `https://github.com/herliansyah/sqlfox/releases/tag/${encodeURIComponent(info.latest_version)}`;
+      }
+
+      // Reset progress & status
+      const statusContainer = document.getElementById('update-status-container');
+      if (statusContainer) statusContainer.classList.add('hidden');
+      const errorMsg = document.getElementById('update-error-msg');
+      if (errorMsg) errorMsg.classList.add('hidden');
+
+      const applyBtn = document.getElementById('btn-update-apply');
+      if (applyBtn) {
+        applyBtn.disabled = false;
+        applyBtn.innerHTML = '<span>🚀</span><span>Update Now</span>';
+        if (!info.asset_url) {
+          applyBtn.disabled = true;
+          applyBtn.title = 'No compatible binary asset found for your OS/Arch';
+        }
+      }
+
+      if (typeof dialog.showModal === 'function') {
+        dialog.showModal();
+      }
+    }
+
+    function closeUpdateDialog() {
+      const dialog = document.getElementById('update-dialog');
+      if (dialog && typeof dialog.close === 'function') {
+        dialog.close();
+      }
+    }
+
+    async function performSystemUpdate() {
+      if (!latestUpdateInfo || !latestUpdateInfo.asset_url) {
+        showToast('No download asset available for this platform.', 'error');
+        return;
+      }
+
+      const applyBtn = document.getElementById('btn-update-apply');
+      const cancelBtn = document.getElementById('btn-update-cancel');
+      const statusContainer = document.getElementById('update-status-container');
+      const statusLabel = document.getElementById('update-status-label');
+      const progressBar = document.getElementById('update-progress-bar');
+      const errorMsg = document.getElementById('update-error-msg');
+
+      if (applyBtn) applyBtn.disabled = true;
+      if (cancelBtn) cancelBtn.disabled = true;
+      if (statusContainer) statusContainer.classList.remove('hidden');
+      if (errorMsg) errorMsg.classList.add('hidden');
+
+      if (statusLabel) statusLabel.textContent = 'Downloading release archive...';
+      if (progressBar) progressBar.style.width = '35%';
+
+      try {
+        const res = await fetch('/api/system/update/apply', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            asset_url: latestUpdateInfo.asset_url,
+            version: latestUpdateInfo.latest_version
+          })
+        });
+
+        const data = await res.json();
+        if (!res.ok || data.error) {
+          throw new Error(data.error || 'Failed to apply update');
+        }
+
+        if (statusLabel) statusLabel.textContent = 'Binary updated! Restarting SqlFox...';
+        if (progressBar) {
+          progressBar.style.width = '100%';
+          progressBar.classList.remove('from-emerald-500', 'to-sky-500');
+          progressBar.classList.add('bg-emerald-500');
+        }
+
+        // Countdown and reload
+        let countdown = 3;
+        const interval = setInterval(() => {
+          if (statusLabel) statusLabel.textContent = `Restarted! Reconnecting in ${countdown}s...`;
+          countdown--;
+          if (countdown < 0) {
+            clearInterval(interval);
+            window.location.reload();
+          }
+        }, 1000);
+
+      } catch (err) {
+        console.error('Update failed:', err);
+        if (applyBtn) applyBtn.disabled = false;
+        if (cancelBtn) cancelBtn.disabled = false;
+        if (errorMsg) {
+          errorMsg.textContent = `❌ ${err.message}`;
+          errorMsg.classList.remove('hidden');
+        }
+        if (statusLabel) statusLabel.textContent = 'Update halted';
+        if (progressBar) progressBar.classList.add('bg-rose-500');
+      }
+    }
+
+    // Auto-check for updates 2 seconds after page load
+    setTimeout(() => {
+      checkOrOpenUpdate(false);
+    }, 2000);
   </script>
 </body>
 </html>

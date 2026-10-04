@@ -24,6 +24,10 @@ type Server struct {
 	flightRecorderMgr *FlightRecorderManager
 	masterPassword    string
 	assets            fs.FS
+	version           string
+	updateAPIURL      string
+	targetExePath     string
+	restartFn         func() error
 }
 
 // NewServer initializes HTTP routes and application state.
@@ -164,6 +168,10 @@ func (s *Server) routes() {
 	// AI Assistant endpoints
 	mux.HandleFunc("POST /api/ai/chat", s.handleAIChat)
 	mux.HandleFunc("GET /api/ai/ollama-check", s.handleAIOllamaCheck)
+
+	// System / Update Engine endpoints
+	mux.HandleFunc("GET /api/system/update/check", s.handleCheckUpdate)
+	mux.HandleFunc("POST /api/system/update/apply", s.handleApplyUpdate)
 
 	// Profiling endpoints (conditional on SQLFOX_PPROF=1)
 	s.registerPprof(mux)
