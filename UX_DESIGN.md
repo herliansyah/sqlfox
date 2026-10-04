@@ -523,7 +523,7 @@ The Entity-Relationship Diagram canvas allows developers to explore table relati
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │ [PROD 🔴] MySQL (localhost:3306)   Latency: 2ms                                                        │
-│                    Created by herliansyah • [GitHub Icon]                                              │
+│                    Created by herliansyah • [GitHub Icon] • [☕ Traktir Kopi]                          │
 │                                           Memory: 42MB  [⌨️ Shortcuts]  [🚀 Update v0.2.0]  SqlFox v0.1.0│
 └────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 
@@ -552,7 +552,7 @@ The Entity-Relationship Diagram canvas allows developers to explore table relati
 
 1. **Balanced Tri-Section Status Bar**:
    - **Left**: Real-time database connection target, environment safety tier, and interactive latency ping (`footer-latency`).
-   - **Center**: Prominent yet unobtrusive workspace attribution (`Created by herliansyah`) with hyperlinks to author's profile and the official GitHub repository.
+   - **Center**: Prominent yet unobtrusive workspace attribution (`Created by herliansyah`) with hyperlinks to author's profile, the official GitHub repository, and an unobtrusive Saweria support link (`☕ Traktir Kopi`).
    - **Right**: Memory telemetry, keyboard shortcuts cheatsheet launcher, version tag, and dynamic update action badge (`#footer-update-btn`).
 2. **Transparent Changelog Inspection**:
    - Renders GitHub release notes using SqlFox's built-in zero-dependency Markdown parser, displaying formatted bullet points, headers, and code snippets before the user commits to updating.
