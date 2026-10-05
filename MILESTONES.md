@@ -44,9 +44,9 @@ flowchart LR
 - **Goal**: Provide the embedded HTTP server and web application shell to browse databases, tables, columns, indexes, and foreign keys.
 - **Deliverables**:
   - `internal/server/`: Chi HTTP router serving REST endpoints and embedded static assets (`//go:embed`).
-  - Web UI: HeidiSQL-style compact Session Switcher header with quick search filter, environment badges, and quick session actions, freeing 100% of sidebar height for schema trees.
+  - Web UI: Compact Session Switcher header with quick search filter, environment badges, and quick session actions, freeing 100% of sidebar height for schema trees.
   - Schema tree viewer: Tables, Columns, Indexes, Views, and Triggers.
-  - Table Designer: HeidiSQL-style sub-tabs (`[Data]`, `[Structure & PK]`, `[Indexes]`, `[Foreign Keys]`, `[CREATE Code]`) with staged draft modifications.
+  - Table Designer: Visual sub-tabs (`[Data]`, `[Structure & PK]`, `[Indexes]`, `[Foreign Keys]`, `[CREATE Code]`) with staged draft modifications.
   - Type Guard Palette: Categorized native dropdown and auto-disabled Length on lengthless types (`INT`, `BIGINT`, `TEXT`, `DATETIME`, `JSON`, `BOOLEAN`) to eliminate invalid syntax errors like `int(200)`.
   - Default Value Presets: Structured preset selector (`None`, `NULL`, `CURRENT_TIMESTAMP`, `0`, `''`, `Custom...`) with type-aware auto-quoting and PK nullability protection.
   - View & Trigger Designers: Specialized GUI forms and SQL editors to create/drop views and triggers.
@@ -195,7 +195,11 @@ v2.1 (Multi-Engine & Developer Operations Suite)
 ├── [x] 19. Visual Query Plan & Cost Analyzer (Interactive visual EXPLAIN tree & bottleneck detection)
 ├── [x] 20. FK-Aware Smart Mock Data Generator (Synthetic test data with relational closure)
 ├── [x] 21. Scheduled Headless Automation & Task Runner (Declarative CLI jobs for dumps & sync)
-└── [x] 22. Large-Scale Hardening & Memory Ceiling Benchmark (1,000+ tables, 500GB+ stress testing)
+├── [x] 22. Large-Scale Hardening & Memory Ceiling Benchmark (1,000+ tables, 500GB+ stress testing)
+├── [x] 23. Heuristic Index Advisor & Query Tuner (ESR Composite Recommendations & Bloat Guard)
+├── [x] 24. In-App Self-Update Engine, Changelog Viewer & Brand Mark Standardization
+├── [x] 25. Grid Edit Presets, Type Constraints & PK-Less Row Mutations
+└── [x] 26. Universal Mutation Logging & Audit Source Attribution
 ```
 
 ---
@@ -480,5 +484,31 @@ v2.1 (Multi-Engine & Developer Operations Suite)
   - [x] **Command Palette Integration**: Added "Check for Updates" action to Command Palette (`Ctrl+K` / `Cmd+K`).
   - [x] **Documentation & Verification**: Recorded in ADR-0036, glossary in `CONTEXT.md`, and unit tests passing 100% in `internal/server/update_test.go` with deterministic channel synchronization for Windows CI runners.
 - **Runnable Verification**: Run `go test -v ./internal/server -run "TestUpdate|TestCompareSemver|TestFindMatchingAsset|TestExtractFrom|TestHandleApplyUpdate"` -> 100% pass across semver comparison, asset matching, check endpoint, archive extraction, and atomic binary replacement without timing race conditions.
+
+---
+
+### Milestone 29: Grid Edit Presets, Type Constraints & PK-Less Mutations
+- **Goal**: Provide complete CRUD manipulation freedom within the Virtual Data Grid by enabling safe inline editing and row deletions on tables without primary keys via synthesized `row_criteria`, live schema PK fallback introspection, quick value preset toolbars (`NULL`, `Empty`, `NOW`, `Date`, `UUID`), type-aware cell editors (`ENUM`, `BOOLEAN`, `FK`), and resilient RFC4122 v4 UUID generation.
+- **Deliverables**:
+  - [x] **PK-Less Row Criteria**: Synthesizes equality predicate `WHERE col1 = ? AND col2 = ? ... LIMIT 1` from full row values for inline cell edits and deletions on tables without a primary key.
+  - [x] **Dynamic PK Introspection Fallback**: Multi-driver fallback to live schema inspection (`SHOW KEYS`, `pg_index`, `PRAGMA table_info`) when catalog PK is missing.
+  - [x] **Floating Value Presets Toolbar**: Floating pill toolbar and hotkeys (`Alt+N` NULL, `Alt+E` Empty, `Alt+T` NOW, `Alt+D` Date, `Alt+U` UUID) for instant data entry.
+  - [x] **Type-Aware Cell Editors**: Dropdowns for `ENUM`, toggle switches for `BOOLEAN`, and reference pickers for `Foreign Keys`.
+  - [x] **Resilient RFC4122 v4 UUID Fallback**: Reliable UUID generator supporting non-secure HTTP / remote LAN contexts via `crypto.getRandomValues` and math fallbacks.
+  - [x] **Documentation & Verification**: Recorded in ADR-0038, `CONTEXT.md`, `UX_DESIGN.md`, and unit tests passing in `internal/server/pk_detection_test.go`.
+- **Runnable Verification**: Run `go test -v ./internal/server -run TestPKDetection` -> 100% pass across PK detection and row criteria handling.
+
+---
+
+### Milestone 30: Universal Mutation Logging & Audit Source Attribution
+- **Goal**: Guarantee complete forensic accountability by recording every data and schema modification across all platform features into the persistent audit ledger with canonical origin attribution (`source`), visual badging, and source filtering.
+- **Deliverables**:
+  - [x] **Database Schema Migration**: Idempotent SQLite vault migration adding `source TEXT NOT NULL DEFAULT 'editor'` to `audit_logs` table.
+  - [x] **Non-Blocking Dispatch Helper**: `ActiveSession.RecordAudit(...)` helper writing audit logs asynchronously without impacting API performance.
+  - [x] **Comprehensive Mutation Wiring**: Audits mutations from `editor`, `grid_cell_edit`, `grid_insert`, `grid_delete`, `script_runner`, `csv_import`, `mock_data`, `sync_transfer`, and `schema_sync`.
+  - [x] **Drawer UI & CSV Export**: Visual source badges, source context dropdown filter, and source column in CSV export.
+  - [x] **Documentation & Verification**: Recorded in ADR-0039, `CONTEXT.md`, `CHANGELOG.md`, and unit tests passing in `internal/vault/audit_test.go` and `internal/server/dba_test.go`.
+- **Runnable Verification**: Run `go test -v ./internal/vault -run TestAudit` and `go test -v ./internal/server -run TestAuditLogsSourceFiltering` -> 100% pass.
+
 
 

@@ -51,6 +51,9 @@ Operates with a strict memory ceiling (**< 100MB RAM**), sub-second launch time 
 - 💻 **Headless CLI Suite**: Execute queries and scripts non-interactively with streaming output formats (`table`, `json`, `ndjson`, `csv`), pipe SQL via STDIN, direct DSN targeting for CI/CD runners, cross-connection data migrations (`sqlfox transfer`), and fail-closed AST safety guardrails.
 - 🏋️ **Enterprise Hardening & Memory Ceiling (<100MB)**: Benchmarked against 1,000+ tables, 50,000 columns, and 1,000,000-row streams with a strict <100MB RAM budget. Features native CSS `content-visibility` sidebar virtualization, 150ms search debounce, 3s fail-fast query cancellation on saturated connection pools, loopback-guarded `pprof` diagnostics (`SQLFOX_PPROF=1`), and a global network error boundary with auto-reconnection and draft state preservation.
 - 💡 **Heuristic Index Advisor & Query Tuner**: Deterministic rule-based index recommendations using the ESR rule (Equality -> Sort -> Range), Index Bloat detection (>5 secondary indexes) with unsuppressed candidate advice and consolidation paths, safe non-blocking DDL (`ALGORITHM=INPLACE, LOCK=NONE` on MySQL 5.7/8.0, `CONCURRENTLY` on PostgreSQL), and headless CLI query tuning via `sqlfox advise`.
+- 🎨 **Value Presets & PK-Less Editing**: Quick value presets (`NULL`, `Empty`, `NOW`, `Date`, `UUID`) with floating pill and hotkeys (`Alt+N`, `Alt+E`, `Alt+T`, `Alt+D`, `Alt+U`), type-aware cell editors (`ENUM`, `BOOLEAN`, Foreign Key pickers), and full-row criteria matching enabling safe editing and deletion on tables without primary keys.
+- 📜 **Universal Mutation Logging & Audit Source Attribution**: Comprehensive audit ledger persistence for all data and schema mutations across the platform with origin tracking (`source`). Attributions include `editor`, `grid_cell_edit`, `grid_insert`, `grid_delete`, `script_runner`, `csv_import`, `mock_data`, `sync_transfer`, and `schema_sync`, with visual badges and dropdown source filtering.
+- 🩺 **Visual EXPLAIN Tree & Status Bar Telemetry**: Dedicated Target Query card with client-side SQL formatting, segmented navigation tabs (`📊 Plan Grid`, `🌳 Visual Tree`, `💡 Advisor`, `{ } Raw Plan`), and bottom telemetry displaying real-time engine flavor, server uptime, ping latency, and memory consumption.
 - 🚀 **In-App Self-Update & Changelog Viewer**: Upgrade your single binary directly from the web UI with 1-click in-place replacement, full Markdown changelog inspection from GitHub Releases, 24-hour rate-limit guarded checks, and graceful auto-restart.
 - 🔌 **Multi-Engine Support**: MySQL 5.7 / 8.x, MariaDB, PostgreSQL 9.6–16+ (pure-Go `pgx/v5`), and local pure-Go SQLite (direct connection or over SSH tunnel).
 
@@ -70,11 +73,11 @@ Grab the pre-compiled binary for your OS and architecture from [GitHub Releases]
 **Linux / macOS (One-liner download & run):**
 ```bash
 # Linux amd64
-curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.1.0-linux-amd64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.2.0-linux-amd64.tar.gz | tar -xz
 ./sqlfox
 
 # macOS Apple Silicon
-curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.1.0-darwin-arm64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.2.0-darwin-arm64.tar.gz | tar -xz
 ./sqlfox
 ```
 
@@ -94,10 +97,23 @@ go build -o sqlfox ./cmd/sqlfox
 
 ---
 
-### ⚙️ Command Line Options
+### ⚙️ Command Line Options & Headless CLI
+
+SqlFox operates both as an interactive desktop server and as a non-interactive headless CLI automation suite:
 
 ```text
-Usage of sqlfox:
+Usage:
+  sqlfox [command] [flags]
+  sqlfox [server-flags] (launches desktop web UI)
+
+Commands:
+  query     Execute SQL query or script with streaming output formats (table, json, ndjson, csv)
+  transfer  Perform direct cross-connection data transfer between databases
+  job       Execute declarative database automation jobs or dry-run checks
+  advise    Analyze SQL query and generate heuristic index recommendations and bloat warnings
+  help      Show help for commands
+
+Server Flags (Default Mode):
   -port int
         Port to listen on (default 8080, with automatic scanning if busy)
   -host string
@@ -117,14 +133,17 @@ Usage of sqlfox:
 #### Examples
 
 ```bash
-# Run on a custom port without automatically opening a browser:
+# Run desktop web UI on a custom port without automatically opening a browser:
 sqlfox -port 9000 -no-browser
 
 # Bind strictly to localhost only (no LAN access):
 sqlfox -host 127.0.0.1
 
-# Set a custom master password for the vault:
-sqlfox -pass "my-secure-master-password"
+# Headless CLI: execute a query and output as JSON:
+sqlfox query --dsn "root:pass@tcp(127.0.0.1:3306)/mydb" --sql "SELECT id, name FROM users" --format json
+
+# Headless CLI: analyze index recommendations for a query:
+sqlfox advise --dsn "root:pass@tcp(127.0.0.1:3306)/mydb" --sql "SELECT * FROM orders WHERE status = 'pending' ORDER BY created_at"
 ```
 
 ---
@@ -135,19 +154,20 @@ sqlfox -pass "my-secure-master-password"
 ┌─────────────────────────────────────────────────────────┐
 │ User Browser / Tablet / LAN Client                      │
 │        ▲                                                │
-│        │ Local HTTP / WS (Protected by Master PIN)      │
+│        │ Local HTTP REST & SSE (Protected by Master PIN)│
 │        ▼                                                │
 │ Go Backend Process (<100MB RAM, Single Binary)          │
 │   ├── Safety Guard: Deterministic AST Query Analyzer    │
 │   ├── Session Manager & Out-of-Band KILL QUERY Pool     │
 │   ├── AI Firewall: Context-Window Sanitizer (BYOK)      │
 │   └── Connection Vault: Encrypted via AES-256-GCM       │
+│   └── Headless CLI Runner & Declarative Task Engine     │
 └────────┬──────────────────────────────────┬─────────────┘
          │                                  │
          │ Direct TLS or SSH Tunnel         │ HTTPS (DDL Metadata Only)
          ▼                                  ▼
 [ Remote / Local Database ]         [ AI Provider API ]
-(MySQL, MariaDB, SQLite)            (OpenAI, Claude, Gemini, Ollama)
+(MySQL, MariaDB, PostgreSQL, SQLite) (OpenAI, Claude, Gemini, Ollama)
 ```
 
 1. **Safety Guard**: Prevents accidental queries like `UPDATE users SET status = 'inactive';` without a `WHERE` clause. Prompts with the exact row estimate and requires explicit confirmation.
@@ -191,6 +211,9 @@ Berjalan dengan konsumsi memori sangat hemat (**< 100MB RAM**), waktu start kila
 - 💻 **Headless CLI Suite**: Eksekusi query dan script terminal secara otomatis/non-interaktif dengan format output streaming (`table`, `json`, `ndjson`, `csv`), dukungan piping via STDIN, direct DSN untuk runner CI/CD tanpa vault, transfer data antar-koneksi (`sqlfox transfer`), serta perlindungan fail-closed AST Safety Guard.
 - 🏋️ **Enterprise Hardening & Plafon Memori (<100MB RAM)**: Teruji tahan banting pada skema masif 1.000+ tabel, 50.000 kolom, dan streaming 1.000.000 baris di bawah pagu <100MB RAM. Dilengkapi virtualisasi sidebar native CSS `content-visibility`, filter pencarian *debounced* 150ms, *fail-fast timeout* 3 detik untuk pembatalan query saat pool jenuh, profil memori pprof terproteksi loopback (`SQLFOX_PPROF=1`), serta *Global Network Error Boundary* dengan rekoneksi otomatis tanpa menghapus draf query atau staged edits.
 - 💡 **Heuristic Index Advisor & Query Tuner**: Rekomendasi indeks deterministik berbasis aturan ESR (Equality $\to$ Sort $\to$ Range) untuk meniadakan filesort dan full table scan, peringatan proteksi *Index Bloat* (>5 indeks sekunder) tanpa memutus saran indeks, safe non-blocking DDL (`ALGORITHM=INPLACE, LOCK=NONE` pada MySQL 5.7/8.0, `CONCURRENTLY` pada PostgreSQL), serta CLI headless `sqlfox advise`.
+- 🎨 **Value Presets & PK-Less Editing**: Preset nilai cepat (`NULL`, `Empty`, `NOW`, `Date`, `UUID`) dengan floating pill dan shortcut (`Alt+N`, `Alt+E`, `Alt+T`, `Alt+D`, `Alt+U`), editor sel cerdas berbasis tipe (`ENUM` dropdown, toggle `BOOLEAN`, pemilih relasi Foreign Key), serta pencocokan kriteria baris penuh (*full-row criteria*) yang memungkinkan pengeditan dan penghapusan aman pada tabel tanpa primary key.
+- 📜 **Universal Mutation Logging & Audit Source Attribution**: Pencatatan histori audit persisten untuk seluruh mutasi data dan skema di seluruh platform dengan pelacakan asal (`source`: `editor`, `grid_cell_edit`, `grid_insert`, `grid_delete`, `script_runner`, `csv_import`, `mock_data`, `sync_transfer`, `schema_sync`), lengkap dengan badge visual dan filter dropdown.
+- 🩺 **Visual EXPLAIN Tree & Telemetri Status Bar**: Kartu Target Query terdedikasi dengan formatting SQL otomatis, tab navigasi modern (`📊 Plan Grid`, `🌳 Visual Tree`, `💡 Advisor`, `{ } Raw Plan`), serta telemetri status bar bawah yang menampilkan mesin database, waktu uptime server, latensi ping, dan konsumsi memori.
 - 🚀 **In-App Self-Update & Changelog Viewer**: Update binary SqlFox langsung dari antarmuka web dengan 1 klik (in-place atomic replacement), inspeksi changelog rilis Markdown dari GitHub Releases, proteksi cache 24 jam untuk rate limit, dan auto-restart mulus.
 - 🔌 **Dukungan Multi Database**: MySQL 5.7 / 8.x, MariaDB, PostgreSQL 9.6–16+ (driver native pure-Go `pgx/v5`), dan SQLite (koneksi langsung maupun melalui SSH Tunneling).
 
@@ -210,11 +233,11 @@ Unduh paket binary sesuai sistem operasi dan arsitektur Anda di halaman [GitHub 
 **Linux / macOS (Download & ekstrak sekali jalan):**
 ```bash
 # Linux amd64
-curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.1.0-linux-amd64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.2.0-linux-amd64.tar.gz | tar -xz
 ./sqlfox
 
 # macOS Apple Silicon
-curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.1.0-darwin-arm64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.2.0-darwin-arm64.tar.gz | tar -xz
 ./sqlfox
 ```
 
@@ -236,8 +259,21 @@ go build -o sqlfox ./cmd/sqlfox
 
 ### ⚙️ Parameter & Opsi Perintah CLI
 
+SqlFox dapat beroperasi sebagai server web desktop interaktif maupun sebagai suite CLI otomatisasi tanpa tampilan grafis (headless):
+
 ```text
-Penggunaan sqlfox:
+Penggunaan:
+  sqlfox [command] [flags]
+  sqlfox [server-flags] (menjalankan web UI desktop)
+
+Perintah (Commands):
+  query     Eksekusi query atau script SQL dengan streaming format (table, json, ndjson, csv)
+  transfer  Transfer data langsung antar-koneksi database (streaming <50MB RAM)
+  job       Jalankan pipeline otomatisasi database deklaratif (run, check)
+  advise    Analisis query SQL untuk rekomendasi indeks dan peringatan bloat
+  help      Tampilkan bantuan perintah
+
+Opsi Server (Mode Default):
   -port int
         Port server (default 8080, otomatis mencari port berikutnya jika bentrok)
   -host string
@@ -263,8 +299,11 @@ sqlfox -port 9090 -no-browser
 # Hanya izinkan akses dari laptop lokal (tutup akses LAN):
 sqlfox -host 127.0.0.1
 
-# Menggunakan master password sendiri:
-sqlfox -pass "password-rahasia-saya"
+# Headless CLI: jalankan query dan tampilkan output dalam format JSON:
+sqlfox query --dsn "root:pass@tcp(127.0.0.1:3306)/mydb" --sql "SELECT id, name FROM users" --format json
+
+# Headless CLI: dapatkan rekomendasi indeks untuk optimasi query:
+sqlfox advise --dsn "root:pass@tcp(127.0.0.1:3306)/mydb" --sql "SELECT * FROM orders WHERE status = 'pending' ORDER BY created_at"
 ```
 
 ---

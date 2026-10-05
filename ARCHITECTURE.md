@@ -17,7 +17,7 @@ flowchart TD
     end
 
     subgraph GoCore ["Go Core Backend (Go 1.22+)"]
-        API["HTTP / WebSocket API (Chi Router)"]
+        API["HTTP REST & SSE API (Go net/http stdlib)"]
         Vault["Connection Vault (Argon2id + AES-GCM)"]
         Safety["Safety Guard Engine (Deterministic AST)"]
         SessionMgr["Session & Out-of-Band Pool"]
@@ -35,7 +35,7 @@ flowchart TD
         DumpDir["Local Backups (.scratch/backups/)"]
     end
 
-    UI <-->|HTTP REST & WS Stream| API
+    UI <-->|HTTP REST & SSE Stream| API
     API --> Vault
     API --> Safety
     API --> SessionMgr
@@ -492,7 +492,7 @@ sqlfox/
 │   │   └── index.html              # Content visibility virtualization & global network error boundary
 │   └── embed.go                    # //go:embed dist/*
 ├── docs/
-│   ├── adr/                        # Architectural Decision Records (0001 - 0034)
+│   ├── adr/                        # Architectural Decision Records (0001 - 0039)
 │   ├── playbooks/                  # Production operational playbooks (large-scale database management)
 │   └── agents/                     # Agent workflow documentation
 ├── CONTEXT.md                      # Ubiquitous domain language
@@ -509,7 +509,7 @@ sqlfox/
 
 The headless CLI suite (`cmd/sqlfox/main.go` -> `internal/cli`) provides scriptable database access without the embedded HTTP server:
 
-1. **Subcommand Dispatch**: Inspects `os.Args[1]`. If `query`, `transfer`, or `job`, execution delegates directly to `cli.RunQuery()`, `cli.RunTransfer()`, or `cli.RunJob()`. If empty or containing server flags (`-port`, `-host`), the desktop HTTP daemon launches normally.
+1. **Subcommand Dispatch**: Inspects `os.Args[1]`. If `query`, `transfer`, `job`, or `advise`, execution delegates directly to `cli.RunQuery()`, `cli.RunTransfer()`, `cli.RunJob()`, or `cli.RunAdvise()`. If empty or containing server flags (`-port`, `-host`), the desktop HTTP daemon launches normally.
 2. **Dual Target Resolution**: Resolves connection profiles either from the encrypted SQLite vault (`--conn`) or directly from URI/DSN connection strings (`--dsn`), auto-detecting drivers (MySQL/SQLite/PostgreSQL) for zero-config CI/CD runners.
 3. **Stream Pipeline & Output Formats**: Emits structured data exclusively to `stdout` (`table`, `json`, `ndjson`, `csv`), with diagnostics and transfer progress routed to `stderr`. `ndjson` streams row-by-row with $O(1)$ memory consumption (<20MB RAM).
 4. **Fail-Closed Safety Policy**: High-risk destructive statements (`DROP`, `TRUNCATE`, unqualified `DELETE`/`UPDATE`) trigger an immediate halt with exit code `2` unless explicitly bypassed with `--force`.
@@ -654,6 +654,32 @@ flowchart TD
 4. **Graceful Re-exec Restart**:
    - Dispatches a background goroutine spawning the updated binary with original command-line arguments via `exec.Command` / `os.StartProcess`.
    - Frontend initiates a 3-second countdown before auto-refreshing to seamlessly reconnect.
+
+---
+
+## 16. Canonical Brand Mark & Cross-Platform Icon System
+
+SqlFox maintains a unified visual brand across all operating systems, browser surfaces, and desktop environments:
+
+1. **Master Vector Geometry**: The canonical front-facing geometric fox head (`docs/assets/logo.svg` and `web/dist/assets/logo.svg`) defines 100% symmetrical polygon facets centered along `x = 256` within a `512x512` viewBox.
+2. **Deterministic Icon Pipeline**: An offline Python generator (`scripts/generate-icons.py`) uses 4x supersampling anti-aliasing to render multi-resolution PNGs (`apple-touch-icon.png`, `icon-192.png`, `icon-512.png`), vector SVGs (`favicon.svg`), and multi-layer ICOs (`favicon.ico`, `icon.ico`).
+3. **Pre-Compiled PE Embedding**: Windows COFF resource objects (`cmd/sqlfox/rsrc_windows_amd64.syso` and `rsrc_windows_arm64.syso`) embed the Brand Mark directly into `sqlfox.exe` during standard Go compilation with zero external CGO or toolchain dependencies.
+
+---
+
+## 17. Grid Edit Presets & Universal Mutation Audit Architecture
+
+### PK-Less Row Mutations & Criteria Synthesis
+For tables lacking primary keys, the backend accepts `row_criteria: Record<string, any>` representing the complete pre-mutation state of the row:
+- Constructs parameterized equality predicates: `WHERE col1 = ? AND col2 = ? ... LIMIT 1`.
+- Protects against ambiguous matches by asserting that affected row counts equal exactly 1.
+- Provides multi-driver live schema fallback (`SHOW KEYS`, `pg_index`, `PRAGMA table_info`) when primary key metadata is omitted.
+
+### Universal Mutation Audit Pipeline
+Every mutating operation across the application is recorded to the local SQLite vault `audit_logs` table with canonical origin attribution (`source`):
+- **Sources**: `editor`, `grid_cell_edit`, `grid_insert`, `grid_delete`, `script_runner`, `csv_import`, `mock_data`, `sync_transfer`, `schema_sync`.
+- **Non-Blocking Dispatch**: Handled via `ActiveSession.RecordAudit(...)` in non-blocking background goroutines.
+- **Filtering & Compliance**: Query parameter filtering via `GET /api/session/{id}/audit-logs?source=...` and dedicated source badging in the UI with CSV export.
 
 
 
