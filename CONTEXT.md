@@ -448,6 +448,18 @@ _Avoid_: Server stats, raw status, generic metrics
 A lightweight, filtered snapshot of non-idle running threads tied to a specific metric timestamp, captured automatically when concurrency or query duration crosses threshold limits.
 _Avoid_: Full thread dump, process backup
 
+**Server Variable Inspector**:
+An interactive system configuration explorer that introspects and displays all live database engine parameters (`SHOW GLOBAL VARIABLES`), categorized by subsystem (Memory, Concurrency, Durability, Cluster, Optimizer), with real-time search and filter capabilities.
+_Avoid_: Config viewer, variables list, settings browser
+
+**Variable Tuning Advisor**:
+A heuristic knowledge and diagnostic engine that correlates active server variable settings against curated best-practice rules, surfacing operational explanations, trade-off impacts (low vs high risks), baseline recommendations, and 1-click `my.cnf` / `SET GLOBAL` configuration snippets.
+_Avoid_: Tuning wizard, config helper, optimizer assistant
+
+**Cluster Parameter Advisor**:
+A specialized heuristic validator embedded within the Cluster & Replication Inspector that analyzes Galera and replication configuration parameters (`wsrep_slave_threads`, `innodb_autoinc_lock_mode`, `binlog_format`, `wsrep_sync_wait`) and flags suboptimal or destabilizing values with traffic-light health badges.
+_Avoid_: Cluster config checker, replication validator, wsrep reviewer
+
 ## Codebase Architecture & Maintenance (Ponytail)
 
 **Native Platform Tunneling**:
@@ -494,6 +506,7 @@ _Avoid_: In-process tunnel, custom bastion client
 - **0037**: Canonical Brand Mark & Cross-Platform Icon Standardization (`docs/adr/0037-canonical-brand-mark-and-cross-platform-icon-standardization.md`)
 - **0038**: Grid Edit Presets, Type Constraints, and PK-Less Mutations (`docs/adr/0038-grid-edit-presets-type-constraints-and-pk-less-mutations.md`)
 - **0039**: Universal Mutation Logging and Audit Source Attribution (`docs/adr/0039-universal-mutation-logging-and-audit-source-attribution.md`)
+- **0040**: Server Variable Inspector and Cluster Tuning Advisor (`docs/adr/0040-server-variable-inspector-and-cluster-tuning-advisor.md`)
 
 ## Visual Schema & ERD Canvas
 

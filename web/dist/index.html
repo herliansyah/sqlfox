@@ -289,6 +289,12 @@
             </span>
             <span id="cluster-status-badge" class="hidden bg-emerald-500/20 text-emerald-300 text-[10px] px-1.5 rounded-full font-bold"></span>
           </button>
+          <button id="btn-open-variables" onclick="openServerVariablesTab(); toggleTopMonitorMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center justify-between border-t border-slate-800">
+            <span class="flex flex-col">
+              <span class="font-medium text-cyan-400">⚙️ Server Variables</span>
+              <span class="text-[10px] text-slate-400">Tuning advisor & system parameter inspector</span>
+            </span>
+          </button>
           <button id="btn-open-flight-recorder" onclick="openFlightRecorderTab(); toggleTopMonitorMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center justify-between border-t border-slate-800">
             <span class="flex flex-col">
               <span class="font-medium text-rose-400 flex items-center space-x-1">
@@ -1331,6 +1337,20 @@
               <!-- Dynamically populated node cards -->
             </div>
           </div>
+
+          <!-- Cluster Parameter Tuning & Guardrails Card -->
+          <div class="bg-app-surface border border-app-border rounded-lg p-4 space-y-3" id="cl-tuning-guardrails-card">
+            <div class="flex items-center justify-between border-b border-app-border pb-2">
+              <div class="text-xs font-semibold text-slate-200 flex items-center space-x-1.5">
+                <span>🛡️</span>
+                <span>Cluster Parameter Tuning &amp; Guardrails</span>
+              </div>
+              <span class="text-[10px] text-slate-400 font-mono">WSREP &amp; Replication Heuristics</span>
+            </div>
+            <div id="cl-tuning-checks-list" class="space-y-2 pt-1">
+              <!-- Dynamically populated tuning check items -->
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1447,6 +1467,56 @@
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Server Variables & Tuning Advisor View (Dedicated Tab) -->
+      <div id="server-variables-view-container" class="hidden flex-1 flex flex-col overflow-hidden bg-app-bg">
+        <!-- Toolbar -->
+        <div class="h-10 bg-app-surface border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0 gap-3 overflow-x-auto">
+          <div class="flex items-center space-x-2.5 flex-1 min-w-0">
+            <div class="relative flex-1 max-w-xs">
+              <input id="var-search-input" oninput="filterServerVariables()" type="text" placeholder="Search variables (e.g. wsrep, buffer, timeout)..." class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500" />
+            </div>
+
+            <!-- Category Pills -->
+            <div class="flex items-center space-x-1 bg-slate-900 border border-slate-700 rounded p-0.5 overflow-x-auto shrink-0">
+              <button onclick="setVariableCategory('all')" id="var-cat-all" class="px-2 py-0.5 rounded text-[11px] bg-slate-800 text-white font-medium">All</button>
+              <button onclick="setVariableCategory('curated')" id="var-cat-curated" class="px-2 py-0.5 rounded text-[11px] text-amber-400 hover:text-white">⭐ Curated</button>
+              <button onclick="setVariableCategory('cluster')" id="var-cat-cluster" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">🌐 Cluster &amp; WSREP</button>
+              <button onclick="setVariableCategory('memory')" id="var-cat-memory" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">💾 Memory</button>
+              <button onclick="setVariableCategory('concurrency')" id="var-cat-concurrency" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">🔒 Concurrency</button>
+              <button onclick="setVariableCategory('io')" id="var-cat-io" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">⚡ IO &amp; Durability</button>
+              <button onclick="setVariableCategory('optimizer')" id="var-cat-optimizer" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">🎯 Optimizer</button>
+            </div>
+
+            <button onclick="fetchServerVariables()" class="shrink-0 bg-app-card hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded border border-app-border transition flex items-center space-x-1" title="Reload server variables">
+              <span>🔄 Refresh</span>
+            </button>
+          </div>
+
+          <div class="shrink-0 flex items-center space-x-3 text-[11px] text-slate-400">
+            <span id="var-stats-count" class="font-mono">Total: 0</span>
+          </div>
+        </div>
+
+        <!-- Table Container -->
+        <div class="flex-1 overflow-y-auto">
+          <table class="w-full text-left text-xs border-collapse">
+            <thead class="bg-slate-900 sticky top-0 border-b border-app-border z-10 text-[11px] text-slate-400 font-medium">
+              <tr>
+                <th class="py-2 px-3 w-8"></th>
+                <th class="py-2 px-3">Variable Name</th>
+                <th class="py-2 px-3">Current Value</th>
+                <th class="py-2 px-3">Category</th>
+                <th class="py-2 px-3">Status / Recommendation</th>
+                <th class="py-2 px-3 w-44 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="server-variables-tbody" class="divide-y divide-slate-800">
+              <!-- Dynamically populated rows -->
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -4060,9 +4130,11 @@
         renderHeaderConnectionBadge(conn);
         const btnPL = document.getElementById('btn-open-processlist');
         const btnPriv = document.getElementById('btn-open-privileges');
-        const btnCluster = document.getElementById('btn-open-cluster');
         const btnFR = document.getElementById('btn-open-flight-recorder');
         if (btnFR) btnFR.classList.remove('hidden');
+        const btnVars = document.getElementById('btn-open-variables');
+        if (btnVars) btnVars.classList.remove('hidden');
+        const btnCluster = document.getElementById('btn-open-cluster');
         checkFlightRecorderStatus();
 
         if (btnPL) {
@@ -5399,7 +5471,7 @@
       const container = document.getElementById('tabs-container');
       container.innerHTML = tabs.map(t => `
         <div onclick="switchTab('${t.id}')" class="flex items-center space-x-1 px-3 py-1 rounded cursor-pointer text-xs transition ${t.id === activeTabId ? 'bg-app-bg text-app-accent font-semibold border-t-2 border-app-accent' : 'hover:bg-slate-800 text-slate-400'}">
-          <span>${t.isFlightRecorder ? '📈' : (t.isCluster ? '🌐' : (t.isProcesslist ? '⚡' : (t.isTableViewer ? '📊' : (t.isNote ? '📝' : '⚡'))))}</span>
+          <span>${t.isVariables ? '⚙️' : (t.isFlightRecorder ? '📈' : (t.isCluster ? '🌐' : (t.isProcesslist ? '⚡' : (t.isTableViewer ? '📊' : (t.isNote ? '📝' : '⚡')))))}</span>
           <span class="truncate max-w-[120px]">${escapeHtml(t.title)}</span>
           <button onclick="event.stopPropagation(); closeTab('${t.id}')" class="hover:text-red-400 pl-1">✕</button>
         </div>
@@ -5412,13 +5484,24 @@
       const plContainer = document.getElementById('processlist-view-container');
       const clContainer = document.getElementById('cluster-view-container');
       const frContainer = document.getElementById('flight-recorder-view-container');
+      const svContainer = document.getElementById('server-variables-view-container');
 
-      if (activeTab && activeTab.isFlightRecorder) {
+      if (activeTab && activeTab.isVariables) {
         if (modeTabs) modeTabs.classList.add('hidden');
         if (editorContainer) editorContainer.classList.add('hidden');
         if (gridContainer) gridContainer.classList.add('hidden');
         if (plContainer) plContainer.classList.add('hidden');
         if (clContainer) clContainer.classList.add('hidden');
+        if (frContainer) frContainer.classList.add('hidden');
+        if (svContainer) svContainer.classList.remove('hidden');
+        filterServerVariables();
+      } else if (activeTab && activeTab.isFlightRecorder) {
+        if (modeTabs) modeTabs.classList.add('hidden');
+        if (editorContainer) editorContainer.classList.add('hidden');
+        if (gridContainer) gridContainer.classList.add('hidden');
+        if (plContainer) plContainer.classList.add('hidden');
+        if (clContainer) clContainer.classList.add('hidden');
+        if (svContainer) svContainer.classList.add('hidden');
         if (frContainer) frContainer.classList.remove('hidden');
         refreshFlightRecorderUI();
       } else if (activeTab && activeTab.isCluster) {
@@ -5427,6 +5510,7 @@
         if (gridContainer) gridContainer.classList.add('hidden');
         if (plContainer) plContainer.classList.add('hidden');
         if (frContainer) frContainer.classList.add('hidden');
+        if (svContainer) svContainer.classList.add('hidden');
         if (clContainer) clContainer.classList.remove('hidden');
         fetchClusterHealth(true);
       } else if (activeTab && activeTab.isProcesslist) {
@@ -5435,12 +5519,14 @@
         if (gridContainer) gridContainer.classList.add('hidden');
         if (clContainer) clContainer.classList.add('hidden');
         if (frContainer) frContainer.classList.add('hidden');
+        if (svContainer) svContainer.classList.add('hidden');
         if (plContainer) plContainer.classList.remove('hidden');
         fetchProcesslist(true);
       } else {
         if (plContainer) plContainer.classList.add('hidden');
         if (clContainer) clContainer.classList.add('hidden');
         if (frContainer) frContainer.classList.add('hidden');
+        if (svContainer) svContainer.classList.add('hidden');
         if (gridContainer) gridContainer.classList.remove('hidden');
         if (activeTab && activeTab.isTableViewer) {
           if (modeTabs) modeTabs.classList.remove('hidden');
@@ -5608,7 +5694,7 @@
 
     function switchTab(tabId) {
       const curr = tabs.find(t => t.id === activeTabId);
-      if (curr && !curr.isTableViewer && !curr.isProcesslist && !curr.isCluster && !curr.isFlightRecorder) {
+      if (curr && !curr.isTableViewer && !curr.isProcesslist && !curr.isCluster && !curr.isFlightRecorder && !curr.isVariables) {
         curr.sql = cmEditor ? cmEditor.getValue() : (document.getElementById('sql-editor-textarea') || {}).value || '';
       }
       activeTabId = tabId;
@@ -6704,6 +6790,48 @@
           </div>
         `;
       }).join('');
+
+      // 5. Cluster Parameter Tuning Guardrails
+      const tuningListEl = document.getElementById('cl-tuning-checks-list');
+      const tuningCardEl = document.getElementById('cl-tuning-guardrails-card');
+      const checks = d.tuning_checks || [];
+      if (tuningListEl) {
+        if (checks.length === 0) {
+          if (tuningCardEl) tuningCardEl.classList.add('hidden');
+        } else {
+          if (tuningCardEl) tuningCardEl.classList.remove('hidden');
+          tuningListEl.innerHTML = checks.map(c => {
+            const isOpt = c.status === 'optimal';
+            const isCrit = c.status === 'critical';
+            const badgeBg = isCrit ? 'bg-red-950 text-red-200 border-red-800' : (isOpt ? 'bg-emerald-950 text-emerald-200 border-emerald-800' : 'bg-amber-950 text-amber-200 border-amber-800');
+            const icon = isCrit ? '🔴' : (isOpt ? '🟢' : '🟡');
+            return `
+              <div class="border border-slate-800/80 bg-slate-900/60 rounded p-3 text-xs flex flex-col md:flex-row md:items-start justify-between gap-3">
+                <div class="space-y-1 flex-1">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="font-mono font-bold text-white text-[12px]">${escapeHtml(c.variable)}</span>
+                    <span class="px-1.5 py-0.2 rounded text-[10px] font-mono border font-semibold ${badgeBg}">${icon} ${escapeHtml(c.status.toUpperCase())}</span>
+                    <span class="text-slate-400 font-mono text-[11px]">Current: <strong class="text-white">${escapeHtml(c.current_value)}</strong></span>
+                    <span class="text-slate-500 font-mono text-[11px]">Recommended: <strong class="text-emerald-400">${escapeHtml(c.recommended)}</strong></span>
+                  </div>
+                  <div class="text-slate-300 text-[11px]">${escapeHtml(c.summary)}</div>
+                  ${c.trade_off ? `<div class="text-slate-400 text-[10px] italic">⚖️ ${escapeHtml(c.trade_off)}</div>` : ''}
+                </div>
+                <div class="shrink-0 flex items-center space-x-2 pt-1 md:pt-0">
+                  ${c.remediation ? `
+                    <button onclick="copySnippetText('${escapeHtml(c.remediation)}', 'Remediation snippet copied!')" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 text-[11px] font-mono flex items-center space-x-1" title="Copy remediation fix">
+                      <span>📋 Copy Fix</span>
+                    </button>
+                  ` : ''}
+                  <button onclick="askCopilotAboutVariable('${escapeHtml(c.variable)}', '${escapeHtml(c.current_value)}', '${escapeHtml(c.summary)}')" class="px-2 py-1 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 rounded text-[11px] flex items-center space-x-1" title="Ask AI Copilot for advice">
+                    <span>✨ Ask Copilot</span>
+                  </button>
+                </div>
+              </div>
+            `;
+          }).join('');
+        }
+      }
     }
 
     function askCopilotClusterTuning() {
@@ -6753,6 +6881,253 @@ Apa langkah konkret untuk menyelesaikan bottleneck ini? Apakah perlu tuning my.c
         if (nameInput) nameInput.value = `${activeConnection ? activeConnection.name : 'Cluster'} (${host})`;
         showNativeAlert(`Modal koneksi telah diisi otomatis dengan host node ${host}:${port}. Masukkan kata sandi jika diperlukan lalu klik Connect.`, 'Ganti Sesi Node');
       }, 100);
+    }
+
+    // --- Server Variable Inspector & Tuning Advisor ---
+    let serverVariablesData = null;
+    let serverVariablesCategory = 'all';
+    let serverVariablesExpanded = {};
+
+    function openServerVariablesTab() {
+      if (!activeConnection) {
+        showNativeAlert('Please select and connect to a database session first.', 'Server Variables');
+        return;
+      }
+      let tab = tabs.find(t => t.isVariables);
+      if (!tab) {
+        tab = {
+          id: 'tab-server-variables',
+          title: 'Server Variables',
+          isVariables: true,
+        };
+        tabs.push(tab);
+      }
+      switchTab(tab.id);
+      fetchServerVariables();
+    }
+
+    async function fetchServerVariables() {
+      if (!activeConnection) return;
+      try {
+        const tbody = document.getElementById('server-variables-tbody');
+        if (tbody) {
+          tbody.innerHTML = '<tr><td colspan="6" class="p-6 text-center text-slate-400 italic">Introspecting server configuration variables...</td></tr>';
+        }
+        const res = await apiFetch(`/api/session/${activeConnection.id}/diagnostics/variables`);
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          showNativeAlert('Failed to introspect server variables: ' + (err.error || res.statusText), 'Variables Error');
+          return;
+        }
+        const data = await res.json();
+        serverVariablesData = data;
+        filterServerVariables();
+      } catch (err) {
+        showNativeAlert('Failed to load server variables: ' + err.message, 'Variables Error');
+      }
+    }
+
+    function setVariableCategory(cat) {
+      serverVariablesCategory = cat;
+      ['all', 'curated', 'cluster', 'memory', 'concurrency', 'io', 'optimizer'].forEach(c => {
+        const btn = document.getElementById(`var-cat-${c}`);
+        if (!btn) return;
+        if (c === cat) {
+          btn.className = 'px-2 py-0.5 rounded text-[11px] bg-slate-800 text-white font-medium';
+        } else {
+          btn.className = 'px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white';
+        }
+      });
+      filterServerVariables();
+    }
+
+    function toggleVariableExpand(varName) {
+      serverVariablesExpanded[varName] = !serverVariablesExpanded[varName];
+      filterServerVariables();
+    }
+
+    function filterServerVariables() {
+      if (!serverVariablesData) return;
+      const tbody = document.getElementById('server-variables-tbody');
+      const countEl = document.getElementById('var-stats-count');
+      if (!tbody) return;
+
+      const searchInput = document.getElementById('var-search-input');
+      const query = (searchInput ? searchInput.value : '').toLowerCase().trim();
+
+      const all = serverVariablesData.variables || [];
+      const filtered = all.filter(v => {
+        // Category filter
+        if (serverVariablesCategory === 'curated' && !v.is_curated) return false;
+        if (serverVariablesCategory === 'cluster' && !v.category.includes('Cluster') && !v.category.includes('WSREP')) return false;
+        if (serverVariablesCategory === 'memory' && !v.category.includes('Memory') && !v.category.includes('Buffer')) return false;
+        if (serverVariablesCategory === 'concurrency' && !v.category.includes('Concurrency') && !v.category.includes('Lock')) return false;
+        if (serverVariablesCategory === 'io' && !v.category.includes('IO') && !v.category.includes('Durability')) return false;
+        if (serverVariablesCategory === 'optimizer' && !v.category.includes('Optimizer') && !v.category.includes('Performance')) return false;
+
+        // Search query
+        if (query) {
+          const matchName = v.name.toLowerCase().includes(query);
+          const matchVal = (v.value || '').toLowerCase().includes(query);
+          const matchDesc = (v.description || '').toLowerCase().includes(query);
+          if (!matchName && !matchVal && !matchDesc) return false;
+        }
+        return true;
+      });
+
+      if (countEl) {
+        countEl.textContent = `Showing: ${filtered.length} / ${serverVariablesData.total_count} (${serverVariablesData.curated_count} curated)`;
+      }
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="p-6 text-center text-slate-500 italic">No matching server variables found.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = filtered.map(v => {
+        const isExpanded = !!serverVariablesExpanded[v.name];
+        const isOpt = v.severity === 'optimal';
+        const isWarn = v.severity === 'warning';
+        const isCrit = v.severity === 'critical';
+
+        let badgeHtml = '';
+        if (v.is_curated) {
+          if (isCrit) {
+            badgeHtml = '<span class="px-1.5 py-0.5 rounded text-[10px] font-mono border font-semibold bg-red-950 text-red-200 border-red-800">🔴 Critical</span>';
+          } else if (isWarn) {
+            badgeHtml = '<span class="px-1.5 py-0.5 rounded text-[10px] font-mono border font-semibold bg-amber-950 text-amber-200 border-amber-800">🟡 Warning</span>';
+          } else if (isOpt) {
+            badgeHtml = '<span class="px-1.5 py-0.5 rounded text-[10px] font-mono border font-semibold bg-emerald-950 text-emerald-200 border-emerald-800">🟢 Optimal</span>';
+          }
+        }
+
+        return `
+          <tr class="hover:bg-slate-900/60 transition ${v.is_curated ? 'bg-slate-950/40' : ''}">
+            <td class="py-2 px-3 text-center">
+              ${v.is_curated ? `
+                <button onclick="toggleVariableExpand('${escapeHtml(v.name)}')" class="text-slate-400 hover:text-white font-mono font-bold text-xs" title="Expand tuning details">
+                  ${isExpanded ? '▼' : '▶'}
+                </button>
+              ` : '<span class="text-slate-700">•</span>'}
+            </td>
+            <td class="py-2 px-3 font-mono text-white flex items-center space-x-1.5">
+              <span>${escapeHtml(v.name)}</span>
+              ${v.is_curated ? '<span class="text-amber-400 text-[10px]" title="Curated Tuning Rule">⭐</span>' : ''}
+              ${v.is_dynamic ? '<span class="text-[9px] px-1 py-0.2 rounded bg-sky-950 text-sky-400 border border-sky-800" title="Can be modified live via SET GLOBAL">Dynamic</span>' : ''}
+            </td>
+            <td class="py-2 px-3 font-mono font-semibold text-slate-200 max-w-[200px] truncate" title="${escapeHtml(v.value)}">
+              ${escapeHtml(v.value)}
+            </td>
+            <td class="py-2 px-3 text-slate-400 text-[11px]">
+              <span class="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800">${escapeHtml(v.category)}</span>
+            </td>
+            <td class="py-2 px-3 text-slate-300">
+              <div class="flex items-center space-x-2">
+                ${badgeHtml}
+                <span class="text-[11px] truncate max-w-xs text-slate-400" title="${escapeHtml(v.recommendation || v.description)}">
+                  ${escapeHtml(v.recommendation || v.description || '-')}
+                </span>
+              </div>
+            </td>
+            <td class="py-2 px-3 text-right">
+              <div class="flex items-center justify-end space-x-1">
+                ${v.set_global_snippet ? `
+                  <button onclick="copySnippetText('${escapeHtml(v.set_global_snippet)}', 'SET GLOBAL snippet copied!')" class="p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded" title="Copy SET GLOBAL / SQL command">
+                    📋
+                  </button>
+                ` : ''}
+                <button onclick="askCopilotAboutVariable('${escapeHtml(v.name)}', '${escapeHtml(v.value)}', '${escapeHtml(v.description || '')}')" class="px-1.5 py-0.5 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 rounded text-[10px] flex items-center space-x-1" title="Ask AI Copilot for deep analysis">
+                  <span>✨ Ask AI</span>
+                </button>
+              </div>
+            </td>
+          </tr>
+          ${isExpanded ? `
+            <tr class="bg-slate-950/80">
+              <td colspan="6" class="p-4 border-t border-b border-slate-800">
+                <div class="space-y-3 max-w-4xl text-xs">
+                  <div>
+                    <div class="font-bold text-white text-[12px] flex items-center space-x-2">
+                      <span>📖 Maksud Variabel &amp; Fungsi</span>
+                      <span class="text-slate-400 font-normal font-mono text-[11px]">(${escapeHtml(v.scope || 'Global')})</span>
+                    </div>
+                    <div class="text-slate-300 mt-1 leading-relaxed">${escapeHtml(v.description || 'Tidak ada deskripsi tersedia.')}</div>
+                  </div>
+
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                    <div class="p-3 rounded bg-amber-950/20 border border-amber-800/40 text-amber-200 space-y-1">
+                      <div class="font-semibold text-xs flex items-center space-x-1">
+                        <span>🔻</span>
+                        <span>Dampak Jika Terlalu Rendah</span>
+                      </div>
+                      <div class="text-[11px] text-amber-300/90 leading-relaxed">${escapeHtml(v.impact_low || '-')}</div>
+                    </div>
+                    <div class="p-3 rounded bg-rose-950/20 border border-rose-800/40 text-rose-200 space-y-1">
+                      <div class="font-semibold text-xs flex items-center space-x-1">
+                        <span>🔺</span>
+                        <span>Dampak Jika Terlalu Tinggi</span>
+                      </div>
+                      <div class="text-[11px] text-rose-300/90 leading-relaxed">${escapeHtml(v.impact_high || '-')}</div>
+                    </div>
+                  </div>
+
+                  <div class="p-3 rounded bg-emerald-950/20 border border-emerald-800/40 text-emerald-200 space-y-1">
+                    <div class="font-semibold text-xs flex items-center space-x-1">
+                      <span>🎯</span>
+                      <span>Rekomendasi Baseline / Rumus</span>
+                    </div>
+                    <div class="text-[11px] text-emerald-300/90 leading-relaxed">${escapeHtml(v.recommendation || '-')}</div>
+                    ${v.suggested_value ? `<div class="text-[11px] font-mono text-white pt-0.5">Nilai Anjuran: <strong class="text-emerald-400">${escapeHtml(v.suggested_value)}</strong></div>` : ''}
+                  </div>
+
+                  <div class="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800">
+                    <div class="flex items-center space-x-2">
+                      <button onclick="copySnippetText('${escapeHtml(v.set_global_snippet)}', 'SET GLOBAL snippet copied!')" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-mono text-[11px] flex items-center space-x-1">
+                        <span>📋 Copy SET GLOBAL</span>
+                      </button>
+                      <button onclick="copySnippetText('${escapeHtml(v.my_cnf_snippet)}', 'my.cnf directive copied!')" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-mono text-[11px] flex items-center space-x-1">
+                        <span>📋 Copy my.cnf</span>
+                      </button>
+                    </div>
+                    <div>
+                      <button onclick="askCopilotAboutVariable('${escapeHtml(v.name)}', '${escapeHtml(v.value)}', '${escapeHtml(v.description || '')}')" class="px-2.5 py-1 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 rounded text-xs flex items-center space-x-1">
+                        <span>✨ Konsultasikan Variabel Ini ke Copilot</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </td>
+            </tr>
+          ` : ''}
+        `;
+      }).join('');
+    }
+
+    async function copySnippetText(text, title = 'Copied') {
+      try {
+        await navigator.clipboard.writeText(text);
+        showNativeAlert(text, title);
+      } catch (err) {
+        showNativeAlert('Copy failed: ' + err.message, 'Copy Error');
+      }
+    }
+
+    function askCopilotAboutVariable(varName, currVal, desc) {
+      toggleAISidebar(true);
+      const promptInput = document.getElementById('ai-prompt-input');
+      if (!promptInput) return;
+
+      const promptTemplate = `Tolong jelaskan secara mendalam tentang parameter database "${varName}" (nilai aktif saat ini: "${currVal}"):
+
+1. Apa fungsi dan peran utama variabel ini dalam arsitektur database?
+2. Bagaimana dampaknya jika nilai diset terlalu rendah vs terlalu tinggi (trade-off memori, disk I/O, latensi, dan konkurensi)?
+3. Apa rekomendasi nilai atau formula optimal untuk server produksi?
+4. Apakah variabel ini bersifat dynamic (bisa diubah via SET GLOBAL) atau static (harus restart mysqld dan edit my.cnf)?`;
+
+      promptInput.value = promptTemplate;
+      promptInput.focus();
+      promptInput.setSelectionRange(promptInput.value.length, promptInput.value.length);
+      showNativeAlert(`Analisis variabel "${varName}" telah dimasukkan ke kotak Copilot. Silakan klik Send.`, 'Copilot Siap');
     }
 
     // --- Performance Flight Recorder ---

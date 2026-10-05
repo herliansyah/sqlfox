@@ -50,6 +50,26 @@ func (s *Server) handleGetClusterHealth(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, report)
 }
 
+func (s *Server) handleGetServerVariables(w http.ResponseWriter, r *http.Request) {
+	connID := r.PathValue("id")
+	sess, err := s.sessionMgr.GetSession(connID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	report, err := sess.InspectServerVariables(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to inspect server variables: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, report)
+}
+
 func (s *Server) handleKillProcess(w http.ResponseWriter, r *http.Request) {
 	connID := r.PathValue("id")
 	sess, err := s.sessionMgr.GetSession(connID)

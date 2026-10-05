@@ -503,6 +503,17 @@ func (s *ActiveSession) InspectClusterHealth(ctx context.Context) (*driver.Clust
 	return s.Session.InspectClusterHealth(ctx)
 }
 
+// InspectServerVariables retrieves server configuration parameters and tuning heuristics.
+func (s *ActiveSession) InspectServerVariables(ctx context.Context) (*driver.ServerVariablesReport, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.Session == nil {
+		return nil, driver.ErrSessionClosed
+	}
+	return s.Session.InspectServerVariables(ctx)
+}
+
 // KillProcess terminates an active query or client connection out-of-band.
 func (s *ActiveSession) KillProcess(ctx context.Context, threadID int64, killConnection bool) error {
 	s.mu.RLock()

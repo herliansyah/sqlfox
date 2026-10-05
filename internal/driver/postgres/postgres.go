@@ -1065,3 +1065,48 @@ func generatePostgresCreateDDL(schema string, tbl driver.TableMetadata) string {
 
 	return sb.String()
 }
+
+// InspectServerVariables introspects all PostgreSQL settings from pg_settings.
+func (s *PostgresSession) InspectServerVariables(ctx context.Context) (*driver.ServerVariablesReport, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT name, setting, category, short_desc, context FROM pg_settings ORDER BY name ASC")
+	if err != nil {
+		return nil, fmt.Errorf("failed to introspect pg_settings: %w", err)
+	}
+	defer rows.Close()
+
+	var vars []driver.ServerVariable
+	for rows.Next() {
+		var name, setting, category, shortDesc, contextStr string
+		if err := rows.Scan(&name, &setting, &category, &shortDesc, &contextStr); err == nil {
+			isDynamic := (contextStr == "user" || contextStr == "superuser")
+			scope := "Global"
+			if contextStr == "user" {
+				scope = "Both"
+			}
+			vars = append(vars, driver.ServerVariable{
+				Name:             name,
+				Value:            setting,
+				Scope:            scope,
+				IsDynamic:        isDynamic,
+				Category:         category,
+				Description:      shortDesc,
+				Severity:         "info",
+				IsCurated:        false,
+				MyCnfSnippet:     fmt.Sprintf("%s = '%s'", name, setting),
+				SetGlobalSnippet: fmt.Sprintf("ALTER SYSTEM SET %s = '%s';", name, setting),
+			})
+		}
+	}
+
+	var version string
+	_ = s.db.QueryRowContext(ctx, "SELECT version()").Scan(&version)
+
+	return &driver.ServerVariablesReport{
+		Engine:       "postgres",
+		Version:      version,
+		TotalCount:   len(vars),
+		CuratedCount: 0,
+		Variables:    vars,
+	}, nil
+}
+

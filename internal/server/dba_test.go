@@ -320,5 +320,23 @@ func TestAdvancedDiagnosticsAndProfiling(t *testing.T) {
 	if clusterData["bottleneck_severity"] != "ok" {
 		t.Fatalf("expected bottleneck_severity ok, got %v", clusterData["bottleneck_severity"])
 	}
+
+	// 8. Server Variables & Advisor Inspection
+	varsResp, err := client.Get(ts.URL + "/api/session/" + connRec.ID + "/diagnostics/variables")
+	if err != nil || varsResp.StatusCode != http.StatusOK {
+		t.Fatalf("variables request failed: %v", err)
+	}
+	var varsData map[string]any
+	_ = json.NewDecoder(varsResp.Body).Decode(&varsData)
+	varsResp.Body.Close()
+
+	if varsData["engine"] != "sqlite" {
+		t.Fatalf("expected engine sqlite, got %v", varsData["engine"])
+	}
+	varsList, ok := varsData["variables"].([]any)
+	if !ok || len(varsList) == 0 {
+		t.Fatalf("expected non-empty variables list, got %v", varsData["variables"])
+	}
 }
+
 

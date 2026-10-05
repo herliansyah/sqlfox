@@ -646,6 +646,51 @@ func (s *SQLiteSession) QueryRaw(ctx context.Context, sql string, args ...any) (
 	return result, rows.Err()
 }
 
+// InspectServerVariables introspects SQLite configuration pragmas.
+func (s *SQLiteSession) InspectServerVariables(ctx context.Context) (*driver.ServerVariablesReport, error) {
+	pragmas := []struct {
+		name, desc, category string
+	}{
+		{"journal_mode", "Controls write-ahead logging (WAL) vs rollback journal.", "IO & Durability"},
+		{"synchronous", "Controls disk sync durability (FULL, NORMAL, OFF).", "IO & Durability"},
+		{"cache_size", "Number of database disk pages held in memory cache.", "Memory & Buffer"},
+		{"temp_store", "Location of temporary tables and indices (MEMORY vs FILE).", "Memory & Buffer"},
+		{"foreign_keys", "Enforcement of foreign key constraints.", "General"},
+		{"busy_timeout", "Milliseconds to sleep and retry when database is locked.", "Concurrency & Lock"},
+		{"wal_autocheckpoint", "Number of WAL pages before auto-checkpoint to DB.", "IO & Durability"},
+	}
+
+	var vars []driver.ServerVariable
+	for _, p := range pragmas {
+		var val string
+		_ = s.db.QueryRowContext(ctx, fmt.Sprintf("PRAGMA %s", p.name)).Scan(&val)
+		vars = append(vars, driver.ServerVariable{
+			Name:             p.name,
+			Value:            val,
+			Scope:            "Global",
+			IsDynamic:        true,
+			Category:         p.category,
+			Description:      p.desc,
+			Severity:         "info",
+			IsCurated:        false,
+			MyCnfSnippet:     fmt.Sprintf("PRAGMA %s = %s;", p.name, val),
+			SetGlobalSnippet: fmt.Sprintf("PRAGMA %s = %s;", p.name, val),
+		})
+	}
+
+	var version string
+	_ = s.db.QueryRowContext(ctx, "SELECT sqlite_version()").Scan(&version)
+
+	return &driver.ServerVariablesReport{
+		Engine:       "sqlite",
+		Version:      version,
+		TotalCount:   len(vars),
+		CuratedCount: 0,
+		Variables:    vars,
+	}, nil
+}
+
+
 func quoteIdentifier(id string) string {
 	return driver.QuoteIdentifier(id, "sqlite")
 }
