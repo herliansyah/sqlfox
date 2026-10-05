@@ -1,6 +1,6 @@
 # 0011: Dynamic EXPLAIN Plan Introspection and Visual Execution Plan Grid
 
-To ensure query execution plans reliably parse across all database engines and versions (MySQL 5.5–8.4, MariaDB 10.x/11.x, SQLite) and present actionable performance insights rather than raw empty JSON, SqlFox implements dynamic column-mapped EXPLAIN scanning and a HeidiSQL-inspired visual execution plan grid.
+To ensure query execution plans reliably parse across all database engines and versions (MySQL 5.5–8.4, MariaDB 10.x/11.x, SQLite) and present actionable performance insights rather than raw empty JSON, SqlFox implements dynamic column-mapped EXPLAIN scanning and a visual execution plan grid.
 
 ## Problem
 
@@ -19,7 +19,7 @@ When clicking **Explain Query** (`Ctrl+Shift+Enter` or toolbar button), users en
    - Strips trailing semicolons and redundant `EXPLAIN` prefixes before dispatch.
    - `getEditorSQL()` prioritizes highlighted/selected text in CodeMirror (`cmEditor.getSelection()`), allowing users to explain single statements inside multi-statement editor scripts.
 3. **Visual Execution Plan Grid (`#impact-preview-modal`)**:
-   - Replaced raw text dump with a HeidiSQL-inspired interactive data grid showing `#`, `Type`, `Table`, `Access`, `Key Used`, `Rows`, `Filtered`, and `Extra`.
+   - Replaced raw text dump with an interactive data grid showing `#`, `Type`, `Table`, `Access`, `Key Used`, `Rows`, `Filtered`, and `Extra`.
    - Access types are highlighted with visual alert badges (e.g. red `ALL (Full Scan)` warning, amber `index`, green `ref`/`range`).
    - Tab switcher allows toggling between **Plan Grid** and **Raw JSON** inspection.
 

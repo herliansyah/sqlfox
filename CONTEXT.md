@@ -188,7 +188,7 @@ A non-blocking HTML5 `<dialog>` element providing consistent styling, focus trap
 _Avoid_: Alert box, confirm prompt, window.alert, window.confirm
 
 **Table Designer**:
-An interactive HeidiSQL-inspired workspace for inspecting and altering table definitions (columns, data types, primary keys, indexes, and foreign keys) with staged change accumulation.
+An interactive visual workspace for inspecting and altering table definitions (columns, data types, primary keys, indexes, and foreign keys) with staged change accumulation.
 _Avoid_: Schema wizard, raw alter window
 
 **View Designer**:
@@ -216,7 +216,7 @@ A cached multi-database schema index enabling contextual autocompletion across s
 _Avoid_: Single-db autocomplete, schema silo
 
 **Session Switcher**:
-A compact HeidiSQL-style header picker for switching, filtering, and managing saved database connection sessions, reserving the sidebar tree exclusively for schema objects.
+A compact header picker for switching, filtering, and managing saved database connection sessions, reserving the sidebar tree exclusively for schema objects.
 _Avoid_: Permanent sidebar connection tree accordion
 
 **Schema Search**:
@@ -328,6 +328,18 @@ _Avoid_: Colorful cells, syntax grid, rainbow rows.
 **Natural Column Sizing**:
 A responsive column layout policy within the Virtual Data Grid that sizes table columns to fit their header and content within bounded min-width (90px) and max-width (384px / `max-w-md`) constraints without forcing full-viewport width stretching on narrow datasets.
 _Avoid_: Full-width grid, stretched columns, bloated cells.
+
+**Row Criteria**:
+A synthesized parameter map and WHERE predicate (`WHERE col1 = ? AND col2 = ? ... LIMIT 1`) constructed from all non-null column values of an existing row, enabling safe inline updates and deletions on tables lacking a formal primary key or unique index.
+_Avoid_: Synthetic PK, pseudo-key, blind update
+
+**Grid Value Presets**:
+A floating quick-action toolbar and keyboard shortcut suite (`Alt+N` for NULL, `Alt+E` for Empty String, `Alt+T` for NOW(), `Alt+D` for Current Date, `Alt+U` for UUID v4) providing rapid data entry during grid cell editing.
+_Avoid_: Quick inputs, macro keys, cell templates
+
+**Type-Aware Cell Editor**:
+A contextual inline input interface that adapts its UI control and validation rules based on column data type (native `<select>` for `ENUM`, toggle button for `BOOLEAN`, and foreign key search picker for relational columns).
+_Avoid_: Custom editor, input widget, field control
 
 **SQL Dump Runner**:
 A memory-bounded streaming executor and generator for `.sql` files that breaks multi-statement scripts into transactional chunks without loading entire multi-gigabyte files into memory.
@@ -478,6 +490,10 @@ _Avoid_: In-process tunnel, custom bastion client
 - **0033**: Scheduled Headless Automation and Declarative Task Runner (`docs/adr/0033-scheduled-headless-automation-and-declarative-task-runner.md`)
 - **0034**: Large-Scale Hardening and Memory Ceiling Benchmark (`docs/adr/0034-large-scale-hardening-and-memory-ceiling-benchmark.md`)
 - **0035**: Heuristic Index Advisor & Query Tuner (`docs/adr/0035-heuristic-index-advisor-and-query-tuner.md`)
+- **0036**: In-App Self-Update Engine, Changelog Viewer & Author Attribution (`docs/adr/0036-in-app-self-update-changelog-and-author-attribution.md`)
+- **0037**: Canonical Brand Mark & Cross-Platform Icon Standardization (`docs/adr/0037-canonical-brand-mark-and-cross-platform-icon-standardization.md`)
+- **0038**: Grid Edit Presets, Type Constraints, and PK-Less Mutations (`docs/adr/0038-grid-edit-presets-type-constraints-and-pk-less-mutations.md`)
+- **0039**: Universal Mutation Logging and Audit Source Attribution (`docs/adr/0039-universal-mutation-logging-and-audit-source-attribution.md`)
 
 ## Visual Schema & ERD Canvas
 

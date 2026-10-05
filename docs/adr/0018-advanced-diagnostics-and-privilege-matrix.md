@@ -4,7 +4,7 @@ To deliver comprehensive DBA observability and user management without external 
 
 ## Context & Problem
 
-While basic table schema browsing, query execution, and processlist inspection exist, DBAs and developers frequently face operational challenges that previously required switching to external GUI tools (HeidiSQL, Navicat, phpMyAdmin) or writing complex manual administrative queries:
+While basic table schema browsing, query execution, and processlist inspection exist, DBAs and developers frequently face operational challenges that previously required switching to external GUI tools (Navicat, phpMyAdmin) or writing complex manual administrative queries:
 1. **Storage Bloat & Fragmentation**: No physical insight into disk usage per table (`DATA_LENGTH`, `INDEX_LENGTH`, `DATA_FREE`), and no quick access to maintenance operations (`OPTIMIZE TABLE`, `ANALYZE TABLE`, `CHECK TABLE`, or `VACUUM` on SQLite).
 2. **Index Inefficiencies**: Shadowed, duplicate, or prefix-overlapping indexes silently consume disk and memory write bandwidth without query planner benefits.
 3. **Query Bottleneck Isolation**: `EXPLAIN` gives query plans, but cannot reveal microsecond execution lifecycle phase distribution (system lock, sorting result, temporary table creation on disk).
@@ -45,7 +45,7 @@ While basic table schema browsing, query execution, and processlist inspection e
 
 ## Consequences
 
-- Full coverage of SQLyog and HeidiSQL DBA diagnostic capabilities natively within the browser SPA.
+- Full coverage of DBA diagnostic capabilities natively within the browser SPA.
 - Zero external dependencies added to frontend or backend.
 - Safe execution path guaranteed for all administrative mutations.
 - Distinct dialect isolation: MySQL-specific administrative tooling gracefully adapts or hides on SQLite connections.

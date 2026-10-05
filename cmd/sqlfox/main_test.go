@@ -40,7 +40,7 @@ func TestGetLocalNetworkIP(t *testing.T) {
 }
 
 func TestDriversRegisteredInMain(t *testing.T) {
-	for _, driverName := range []string{"mysql", "mariadb", "sqlite"} {
+	for _, driverName := range []string{"mysql", "mariadb", "sqlite", "postgres"} {
 		t.Run(driverName, func(t *testing.T) {
 			_, err := driver.GetDriver(driverName)
 			if err != nil {

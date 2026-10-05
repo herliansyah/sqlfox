@@ -16,7 +16,7 @@ To preserve institutional business logic, query runbooks, and domain constraints
    - Safe and isolated: zero server-side schema modification or permission requirements.
    - Included in portable encrypted Vault Archives (`.sqlfox-vault`) and downloadable as standalone `.md` files.
 
-2. **HeidiSQL-Style Table Designer Sub-Tab (`[📝 Notes & Runbook]`)**:
+2. **Table Designer Sub-Tab (`[📝 Notes & Runbook]`)**:
    - Added as a 6th sub-tab alongside `[Data]`, `[Structure & PK]`, `[Indexes]`, `[Foreign Keys]`, and `[CREATE Code]`.
    - Provides a Markdown editor with live preview toggle (`[Edit]` / `[Preview]`), shortcut save (`Ctrl+S`), and export to `.md`.
 

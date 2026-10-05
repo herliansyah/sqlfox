@@ -305,7 +305,7 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 						return c.Name
 					}
 				}
-				// 2. Single-column unique key fallback (HeidiSQL behavior)
+				// 2. Single-column unique key fallback
 				for _, idx := range t.Indexes {
 					if idx.IsUnique && len(idx.Columns) == 1 {
 						return idx.Columns[0]

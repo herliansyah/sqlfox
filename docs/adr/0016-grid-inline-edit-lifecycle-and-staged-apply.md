@@ -1,6 +1,6 @@
 # 0016: Grid Inline Edit Lifecycle and Staged Apply Workflow
 
-To resolve multi-cell input contention and provide flexible persistence workflows matching professional database management tools (such as HeidiSQL and DBeaver), SqlFox adopts a single-active-cell state machine alongside a configurable Staged Apply / Immediate Persist architecture.
+To resolve multi-cell input contention and provide flexible persistence workflows matching professional database management tools (such as DBeaver and TablePlus), SqlFox adopts a single-active-cell state machine alongside a configurable Staged Apply / Immediate Persist architecture.
 
 ## Context & Problem
 

@@ -9,12 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Universal Mutation Logging & Audit Source Attribution**: Comprehensive audit ledger persistence for all data and schema mutating operations across the platform with origin tracking (`source`). Attributions include `editor` (Query Editor / SQL Tab), `grid_cell_edit` (inline cell updates), `grid_insert` (inline `+ Add Row`), `grid_delete` (grid row deletions), `script_runner` (large SQL script runner), `csv_import` (CSV import wizard), `mock_data` (synthetic data generator), `sync_transfer` (cross-database data sync), and `schema_sync` (DDL structure synchronization). Added source badge visualization and dropdown source filtering to the Session Audit Log drawer and CSV export.
+- **Value Presets & PK-Less Grid Editing**:
+  - Full-row criteria matching (`WHERE col1 = ? AND col2 = ? ... LIMIT 1`) enabling inline cell editing and row deletion on tables lacking primary keys, guarded by strict 1-row mutation limits.
+  - Multi-driver live schema introspection fallback for dynamic primary key and unique constraint detection across MySQL, PostgreSQL, and SQLite.
+  - Quick insert value presets (NULL, Empty string, NOW, Current Date, UUID v4) with floating pill toolbar and hotkeys (`Alt+N`, `Alt+E`, `Alt+T`, `Alt+D`, `Alt+U`).
+  - Type-aware cell editors providing native select dropdowns for `ENUM` types, toggle switches for `BOOLEAN`, and searchable foreign key record pickers.
+  - Resilient RFC4122 v4 UUID generator fallback for non-secure HTTP / remote LAN contexts.
+- **Execution Plan Overhaul, Telemetry Status Bar & Menu Navigation**:
+  - Restructured Execution Plan (EXPLAIN) inspector featuring a dedicated Target Query card with SQL syntax formatting, raw toggle, modern segmented tab switcher (`📊 Plan Grid`, `🌳 Visual Tree`, `💡 Advisor`, `{ } Raw Plan`), and rich visual tree rendering with universal fallback across MySQL, PostgreSQL, and SQLite.
+  - Overhauled bottom telemetry status bar displaying real-time engine flavor badge (`[MYSQL]`, `[POSTGRES]`, `[SQLITE]`), server uptime, ping round-trip latency, memory telemetry, and author attribution with Saweria sponsorship link.
+  - Reorganized top navbar menus into ergonomic grouped dropdowns (`Monitor ▾`, `DB Tools ▾`, `Settings ▾`, `Copilot ▾`).
+  - Formatted SQL view with raw toggle in Process Detail Inspector.
+  - Responsive container height and scrolling fixes for Flight Recorder correlated queries table.
 - **Session Tab State Persistence**: Persistent tab state in `localStorage` scoped per connection (`sqlfox_tabs_<conn_id>`), preserving open Query Editor tabs, active SQL drafts, Table Viewer tabs, and active tab focus across page refreshes, with smart `beforeunload` guard for running queries and staged table edits.
+
+### Fixed
+- Added missing `advise` command routing to top-level CLI dispatch in `cmd/sqlfox/main.go`.
 
 ## [v0.2.0] - 2026-10-05
 
 ### Added
-- **Visual Table Structure Designer**: HeidiSQL-inspired schema designer with native dialogs, indexed column configurators, and cross-database autocomplete.
+- **Visual Table Structure Designer**: Visual schema designer with native dialogs, indexed column configurators, and cross-database autocomplete.
 - **Visual Query Plan Tree & Grid**: Graphical explain plan inspector with bottleneck badges, cost breakdowns, and offline schema introspection tooling.
 - **Pure Go PostgreSQL Native Driver**: High-performance PostgreSQL connector with native catalog introspection without external cgo dependencies.
 - **Spreadsheet CRUD & Inline Editing**: Data grid inline cell editing with staged apply mode, revert capabilities, and transaction safety.

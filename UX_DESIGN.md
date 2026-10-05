@@ -137,7 +137,7 @@ User experience architecture, ASCII wireframes, design tokens, and interaction m
 
 ---
 
-## 6. Table Designer & Structure Management (HeidiSQL-Style)
+## 6. Table Designer & Structure Management
 
 ### Sub-Tab Navigation
 When viewing an active table, developers switch between dedicated modes above the grid:
@@ -193,7 +193,7 @@ For microservices and multi-database architectures:
 
 ---
 
-## 10. HeidiSQL-Style Session Switcher & Environment SSOT
+## 10. Compact Session Switcher & Environment SSOT
 
 - **Compact Header Button & SSOT**: Replaces permanent sidebar connection accordions with a compact session bar displaying the active database icon, name, and environment tag (`[PROD 🔴]`, `[STAGE 🟡]`, `[DEV 🟢]`). This header button is the **Single Source of Truth (SSOT)** for environment identity; sidebar and footer are strictly freed from redundant environment badges to prevent visual clutter and alert fatigue.
 - **Ambient Safety Cue (Top Accent Line)**: Active connections in the `Production` tier display a subtle 2px red ambient accent stripe (`#ef4444`) across the top border of the window/navbar, establishing immediate peripheral awareness without occupying interface height or repeating text.
@@ -556,6 +556,39 @@ The Entity-Relationship Diagram canvas allows developers to explore table relati
    - Displays real-time progress phases (*Downloading archive...*, *Extracting binary...*, *Restarting SqlFox...*).
 4. **Reconnection Countdown**:
    - Displays a 3-second visual countdown following restart confirmation before automatically reloading the page, ensuring smooth reconnection to the upgraded daemon without manual browser refresh.
+
+---
+
+## 19. Grid Edit Presets, Type-Aware Editors & Universal Mutation Audit Drawer
+
+### Edit Presets Pill & Type-Aware Editor Wireframe
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│ [NULL (Alt+N)] [Empty (Alt+E)] [NOW (Alt+T)] [Date (Alt+D)] [UUID (Alt+U)]      │
+│┌───────────────────────────────────────────────────────────────────────────────┐│
+││ 2026-10-05 16:30:00                                                  [✕] [✓]  ││
+│└───────────────────────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Interaction Models
+
+1. **Floating Value Presets Toolbar**:
+   - Docks above or below the active grid cell editor.
+   - Provides 1-click pills for `NULL` (`Alt+N`), `Empty` (`Alt+E`), `NOW` (`Alt+T`), `Date` (`Alt+D`), and `UUID` (`Alt+U`).
+   - Supports keyboard shortcuts to stage sentinel values without reaching for the mouse.
+2. **Type-Aware Input Switching**:
+   - **ENUM**: Dropdown menu containing introspected enum values with keyboard arrows traversal.
+   - **BOOLEAN**: Segmented toggle switch (`TRUE` / `FALSE` / `NULL`).
+   - **Foreign Keys**: Hyperlink with parent table lookup and hover inspection.
+3. **PK-Less Row Targeting Indicator**:
+   - When editing a table without a primary key, a subtle badge indicates that full-row criteria will be matched, guarding against unintended multi-row modifications with an enforced `LIMIT 1`.
+4. **Universal Mutation Audit Badging & Source Filtering**:
+   - The Session Audit Log drawer renders dedicated source badges: `[Editor]`, `[Grid Edit]`, `[Grid Add]`, `[Grid Del]`, `[Script]`, `[CSV Import]`, `[Mock Data]`, `[Sync Transfer]`, `[Schema Sync]`.
+   - A dropdown filter allows users to view audit entries by specific source context.
+   - Audit CSV export includes the `Source` column for forensic tracking.
+
 
 
 
