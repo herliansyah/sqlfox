@@ -57,11 +57,15 @@ func (s *Server) handlePingSession(w http.ResponseWriter, r *http.Request) {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	allocMB := math.Round(float64(m.Alloc)/1024/1024*10) / 10
-	sess.MemoryMB = allocMB
+	info, _ := sess.Session.ServerInfo(ctx)
+	if info != nil {
+		sess.ServerInfo = info
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"latency_ms": latency.Milliseconds(),
-		"memory_mb":  allocMB,
+		"latency_ms":  latency.Milliseconds(),
+		"memory_mb":   allocMB,
+		"server_info": sess.ServerInfo,
 	})
 }
 

@@ -254,51 +254,69 @@
 
     <!-- Top Right Controls -->
     <div class="flex items-center space-x-2 text-xs">
+      <!-- PIN badge: security affordance, one-click copy, stays standalone -->
       <button id="master-pin-badge" onclick="copyMasterPIN()" class="hidden h-7 bg-slate-800 hover:bg-slate-700 text-sky-400 px-2.5 rounded border border-sky-900 font-mono transition flex items-center space-x-1" title="Click to copy Master PIN for tablet / remote login">
         <span>🔑 PIN:</span>
         <span id="master-pin-text" class="font-bold text-white">...</span>
       </button>
 
+      <!-- Read-Only: state indicator, stays standalone -->
       <button id="readonly-toggle-btn" onclick="toggleReadOnly()" class="hidden h-7 px-2.5 rounded font-medium transition border flex items-center space-x-1.5">
         <span id="readonly-icon">🔒</span>
         <span id="readonly-text">Read-Only</span>
       </button>
 
-      <button id="btn-open-processlist" onclick="openProcesslistTab()" class="hidden h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center space-x-1.5" title="Processlist & Thread Monitor">
-        <span>⚡ Processlist</span>
-        <span id="processlist-slow-badge" class="hidden bg-amber-500/20 text-amber-300 text-[10px] px-1 rounded-full font-bold"></span>
-      </button>
+      <!-- Monitor dropdown: Processlist, Cluster, Recorder, Diagnostics, Audit Log -->
+      <div class="relative inline-block text-left" id="top-monitor-container">
+        <button onclick="toggleTopMonitorMenu()" class="h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center space-x-1" title="Database Monitor & Diagnostics">
+          <span>⚡ Monitor</span>
+          <span id="monitor-alert-badge" class="hidden bg-amber-500/20 text-amber-300 text-[10px] px-1 rounded-full font-bold"></span>
+          <span id="monitor-rec-dot" class="hidden inline-block w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse"></span>
+          <span class="text-[9px] text-slate-400">▼</span>
+        </button>
+        <div id="top-monitor-menu" class="hidden absolute right-0 mt-1 w-64 bg-slate-900 border border-slate-700 rounded shadow-xl z-50 text-xs py-1">
+          <button id="btn-open-processlist" onclick="openProcesslistTab(); toggleTopMonitorMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center justify-between">
+            <span class="flex flex-col">
+              <span class="font-medium text-sky-400">⚡ Processlist</span>
+              <span class="text-[10px] text-slate-400">Thread monitor & slow query alerts</span>
+            </span>
+            <span id="processlist-slow-badge" class="hidden bg-amber-500/20 text-amber-300 text-[10px] px-1.5 rounded-full font-bold"></span>
+          </button>
+          <button id="btn-open-cluster" onclick="openClusterTab(); toggleTopMonitorMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center justify-between border-t border-slate-800">
+            <span class="flex flex-col">
+              <span class="font-medium text-emerald-400">🌐 Cluster</span>
+              <span class="text-[10px] text-slate-400">Replication & Galera node inspector</span>
+            </span>
+            <span id="cluster-status-badge" class="hidden bg-emerald-500/20 text-emerald-300 text-[10px] px-1.5 rounded-full font-bold"></span>
+          </button>
+          <button id="btn-open-flight-recorder" onclick="openFlightRecorderTab(); toggleTopMonitorMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center justify-between border-t border-slate-800">
+            <span class="flex flex-col">
+              <span class="font-medium text-rose-400 flex items-center space-x-1">
+                <span id="flight-recorder-btn-label">📈 Recorder</span>
+                <span id="flight-recorder-rec-dot" class="inline-block w-2 h-2 rounded-full bg-slate-500"></span>
+              </span>
+              <span class="text-[10px] text-slate-400">On-demand performance telemetry</span>
+            </span>
+            <span id="flight-recorder-timer-badge" class="hidden bg-rose-500/20 text-rose-300 text-[10px] px-1.5 py-0.5 rounded-full font-mono font-bold animate-pulse">REC 00:00</span>
+          </button>
+          <button id="btn-open-diagnostics" onclick="openDatabaseDiagnosticsModal(); toggleTopMonitorMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex flex-col border-t border-slate-800">
+            <span class="font-medium text-amber-400">📊 Diagnostics</span>
+            <span class="text-[10px] text-slate-400">Table storage stats & optimization</span>
+          </button>
+          <button id="btn-open-audit-log" onclick="toggleAuditDrawer(); toggleTopMonitorMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex flex-col border-t border-slate-800">
+            <span class="font-medium text-purple-400">📜 Audit Log</span>
+            <span class="text-[10px] text-slate-400">Session query history & execution log</span>
+          </button>
+        </div>
+      </div>
 
-      <button id="btn-open-cluster" onclick="openClusterTab()" class="hidden h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center space-x-1.5" title="Cluster & Replication Inspector">
-        <span>🌐 Cluster</span>
-        <span id="cluster-status-badge" class="hidden bg-emerald-500/20 text-emerald-300 text-[10px] px-1 rounded-full font-bold"></span>
-      </button>
-
-      <button id="btn-open-flight-recorder" onclick="openFlightRecorderTab()" class="hidden h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center space-x-1.5" title="Performance Flight Recorder (On-Demand Telemetry)">
-        <span id="flight-recorder-rec-dot" class="inline-block w-2 h-2 rounded-full bg-slate-500"></span>
-        <span id="flight-recorder-btn-label">📈 Recorder</span>
-        <span id="flight-recorder-timer-badge" class="hidden bg-rose-500/20 text-rose-300 text-[10px] px-1.5 py-0.5 rounded-full font-mono font-bold animate-pulse">REC 00:00</span>
-      </button>
-
-      <button id="btn-open-audit-log" onclick="toggleAuditDrawer()" class="h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center space-x-1" title="Session Audit Log">
-        <span>📜 Audit Log</span>
-      </button>
-
-      <button id="btn-open-diagnostics" onclick="openDatabaseDiagnosticsModal()" class="h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center space-x-1" title="Table Storage Diagnostics & Optimization">
-        <span>📊 Diagnostics</span>
-      </button>
-
-      <!-- Database-level Tools: Run SQL, Dump DB, Smart Seed -->
-      <button id="btn-top-run-sql" onclick="openRunSQLScriptModal()" class="h-7 bg-app-card hover:bg-slate-700 text-indigo-300 hover:text-indigo-200 px-2.5 rounded border border-app-border transition flex items-center space-x-1" title="Execute large .sql script against active database">
-        <span>⚡ Run SQL</span>
-      </button>
-
+      <!-- DB Tools dropdown: schema ops + Users (MySQL-only) -->
       <div class="relative inline-block text-left" id="top-db-tools-container">
-        <button onclick="toggleTopDBToolsMenu()" class="h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center space-x-1" title="Database Backup & Smart Seed Tools">
+        <button onclick="toggleTopDBToolsMenu()" class="h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center space-x-1" title="Database Backup, Sync & Tools">
           <span>📦 DB Tools</span>
           <span class="text-[9px] text-slate-400">▼</span>
         </button>
-        <div id="top-db-tools-menu" class="hidden absolute right-0 mt-1 w-60 bg-slate-900 border border-slate-700 rounded shadow-xl z-50 text-xs py-1">
+        <div id="top-db-tools-menu" class="hidden absolute right-0 mt-1 w-64 bg-slate-900 border border-slate-700 rounded shadow-xl z-50 text-xs py-1">
           <button onclick="exportDatabaseDump(); toggleTopDBToolsMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex flex-col">
             <span class="font-medium text-sky-400">📦 Dump Entire Database</span>
             <span class="text-[10px] text-slate-400">Export all tables DDL + INSERTs (.sql)</span>
@@ -327,18 +345,33 @@
             <span class="font-medium text-indigo-400">🗺️ Visual ERD Canvas</span>
             <span class="text-[10px] text-slate-400">Interactive ER diagram with FK relationships</span>
           </button>
+          <!-- MySQL-only: hidden by default, shown by JS when MySQL session active -->
+          <button id="btn-open-privileges" onclick="openPrivilegeMatrixModal(); toggleTopDBToolsMenu(false)" class="hidden w-full text-left px-3 py-1.5 hover:bg-slate-800 flex flex-col border-t border-slate-800">
+            <span class="font-medium text-rose-400">👥 Users & Privileges</span>
+            <span class="text-[10px] text-slate-400">MySQL user accounts & permission matrix</span>
+          </button>
         </div>
       </div>
 
-      <button id="btn-open-privileges" onclick="openPrivilegeMatrixModal()" class="hidden h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center space-x-1" title="User Accounts & Privilege Matrix (MySQL)">
-        <span>👥 Users</span>
-      </button>
+      <!-- Settings dropdown: Connections (vault) + AI Config -->
+      <div class="relative inline-block text-left" id="top-settings-container">
+        <button onclick="toggleTopSettingsMenu()" class="h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center space-x-1" title="App Settings & Configuration">
+          <span>⚙️ Settings</span>
+          <span class="text-[9px] text-slate-400">▼</span>
+        </button>
+        <div id="top-settings-menu" class="hidden absolute right-0 mt-1 w-64 bg-slate-900 border border-slate-700 rounded shadow-xl z-50 text-xs py-1">
+          <button onclick="openExportImportModal(); toggleTopSettingsMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex flex-col">
+            <span class="font-medium text-sky-400">🗄️ Connections</span>
+            <span class="text-[10px] text-slate-400">Manage & export connection vault</span>
+          </button>
+          <button onclick="toggleAISettings(); toggleTopSettingsMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex flex-col border-t border-slate-800">
+            <span class="font-medium text-purple-400">🤖 AI Config</span>
+            <span class="text-[10px] text-slate-400">BYOK provider key & AI persona</span>
+          </button>
+        </div>
+      </div>
 
-      <button onclick="openExportImportModal()" class="h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center">
-        📦 Vault
-      </button>
-
-      <button onclick="toggleAISidebar()" class="h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center space-x-1" title="AI Copilot & Error Healer (Ctrl+L)">
+      <button onclick="toggleAISidebar()" class="h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center space-x-1 whitespace-nowrap" title="AI Copilot & Error Healer (Ctrl+L)">
         <span>🤖 Copilot</span>
       </button>
     </div>
@@ -1332,9 +1365,9 @@
         </div>
 
         <!-- Scrollable Flight Content Area -->
-        <div class="flex-1 overflow-y-auto p-4 space-y-4">
+        <div class="flex-1 min-h-0 flex flex-col overflow-y-auto p-4 space-y-4">
           <!-- Metric Legend Cards -->
-          <div class="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
+          <div class="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3 shrink-0">
             <div class="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800 flex items-center space-x-3">
               <div class="w-3 h-3 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/50"></div>
               <div>
@@ -1369,7 +1402,7 @@
           </div>
 
           <!-- Canvas Interactive Chart -->
-          <div class="relative bg-slate-950 rounded-lg border border-slate-800 p-3 shadow-inner">
+          <div class="relative bg-slate-950 rounded-lg border border-slate-800 p-3 shadow-inner shrink-0">
             <div class="flex items-center justify-between text-[11px] text-slate-400 pb-2 border-b border-slate-800/80 mb-2">
               <span class="flex items-center space-x-1.5 font-medium text-slate-300">
                 <span>📊</span>
@@ -1384,8 +1417,8 @@
           </div>
 
           <!-- Correlated Query Drill-Down Drawer / Panel -->
-          <div class="bg-app-surface rounded-lg border border-app-border overflow-hidden">
-            <div class="p-2.5 bg-slate-900/90 border-b border-app-border flex items-center justify-between">
+          <div class="flex-1 flex flex-col min-h-[260px] bg-app-surface rounded-lg border border-app-border overflow-hidden">
+            <div class="p-2.5 bg-slate-900/90 border-b border-app-border flex items-center justify-between shrink-0">
               <div class="flex items-center space-x-2 text-xs">
                 <span>⚡</span>
                 <span class="font-bold text-white">Correlated Non-Idle Queries</span>
@@ -1394,7 +1427,7 @@
               <span id="fr-queries-count" class="text-[11px] text-slate-400">0 active queries</span>
             </div>
 
-            <div id="fr-queries-list" class="p-3 space-y-2.5 max-h-72 overflow-y-auto">
+            <div id="fr-queries-list" class="flex-1 p-3 space-y-2.5 overflow-y-auto min-h-0">
               <div class="text-slate-500 text-center py-6 text-xs italic">
                 Select a point on the chart timeline to inspect active queries running at that second.
               </div>
@@ -1500,47 +1533,49 @@
   </div>
 
   <!-- Bottom Status Bar -->
-  <footer class="h-6 bg-app-surface border-t border-app-border px-4 flex items-center justify-between text-[11px] text-slate-400 flex-shrink-0 z-20">
-    <!-- Left: Connection & Latency -->
-    <div class="flex items-center space-x-4">
+  <footer class="h-6 bg-app-surface border-t border-app-border px-3 flex items-center justify-between text-[11px] text-slate-400 flex-shrink-0 z-20">
+    <!-- Left: Connection, Engine Version, Uptime & Latency -->
+    <div class="flex items-center space-x-2 min-w-0 truncate">
       <span id="footer-env-badge" class="hidden"></span>
-      <span id="footer-db-info" class="font-mono text-slate-300">No active connection</span>
-      <span id="footer-latency" onclick="pingActiveSession()" class="text-slate-400 font-mono transition" title="Click to test database latency">Latency: --</span>
+      <span id="footer-server-engine" class="hidden font-mono text-sky-400 font-medium truncate" title="Database Engine & Version"></span>
+      <span id="footer-server-dot-1" class="hidden text-slate-600 select-none">•</span>
+      <span id="footer-db-info" class="font-mono text-slate-300 truncate" title="Active Connection Target">No active connection</span>
+      <span id="footer-server-dot-2" class="hidden text-slate-600 select-none">•</span>
+      <span id="footer-server-uptime" class="hidden font-mono text-slate-400 truncate" title="Database Server Uptime"></span>
+      <span id="footer-server-dot-3" class="hidden text-slate-600 select-none">•</span>
+      <span id="footer-latency" onclick="pingActiveSession()" class="text-slate-400 font-mono transition cursor-pointer hover:underline" title="Click to test database latency">Latency: --</span>
     </div>
 
-    <!-- Center: Author Attribution & GitHub -->
-    <div class="flex items-center space-x-1.5 text-slate-400">
-      <span>Created by</span>
-      <a href="https://github.com/herliansyah" target="_blank" rel="noopener noreferrer" class="text-slate-300 hover:text-emerald-400 font-medium transition inline-flex items-center space-x-1 group" title="Author Profile on GitHub">
-        <span>herliansyah</span>
-      </a>
-      <span class="text-slate-600">•</span>
-      <a href="https://github.com/herliansyah/sqlfox" target="_blank" rel="noopener noreferrer" class="text-slate-400 hover:text-white transition inline-flex items-center space-x-1 group" title="SqlFox GitHub Repository">
-        <svg class="w-3.5 h-3.5 fill-current opacity-80 group-hover:opacity-100 transition" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-        <span class="group-hover:underline underline-offset-2">GitHub</span>
-      </a>
-      <span class="text-slate-600">•</span>
-      <a href="https://saweria.co/herliansyah26" target="_blank" rel="noopener noreferrer" class="text-amber-400 hover:text-amber-300 transition inline-flex items-center space-x-1 group" title="Traktir kopi / dukung pengembang SqlFox via Saweria">
-        <span>☕</span>
-        <span class="group-hover:underline underline-offset-2">Traktir Kopi</span>
-      </a>
-    </div>
-
-    <!-- Right: Telemetry, Shortcuts & Version / Update -->
-    <div class="flex items-center space-x-3.5">
-      <span id="footer-memory" class="text-slate-400 font-mono">Memory: --</span>
-      <button onclick="openShortcutsModal()" class="hover:text-white flex items-center space-x-1 text-slate-400 hover:bg-slate-800 px-1.5 py-0.5 rounded transition cursor-pointer" title="View Keyboard Shortcuts (? / F1)">
+    <!-- Right: Telemetry, Shortcuts, Version / Update & Author Attribution -->
+    <div class="flex items-center gap-2 font-mono flex-shrink-0">
+      <span id="footer-memory" class="text-slate-400 px-1.5 py-0.5 rounded hover:bg-slate-800/60 transition cursor-default select-none" title="Server Heap & App Memory">Memory: --</span>
+      <button onclick="openShortcutsModal()" class="text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 px-1.5 py-0.5 rounded transition cursor-pointer flex items-center space-x-1 font-sans" title="View Keyboard Shortcuts (? / F1)">
         <span>⌨️</span>
         <span class="underline decoration-slate-600 underline-offset-2">Shortcuts</span>
       </button>
-      <div id="footer-version-wrap" class="flex items-center space-x-1.5 font-mono">
-        <button id="footer-update-btn" onclick="checkOrOpenUpdate(true)" class="hidden items-center space-x-1 text-emerald-400 bg-emerald-950/80 border border-emerald-700/60 hover:bg-emerald-900/80 px-2 py-0.5 rounded text-[10px] font-semibold transition animate-pulse cursor-pointer shadow-sm shadow-emerald-900/30" title="Click to view release notes and update SqlFox">
-          <span>🚀</span>
-          <span id="footer-update-badge-text">Update Available</span>
-        </button>
-        <button id="footer-version-btn" onclick="openChangelogDialog()" class="text-slate-400 hover:text-slate-200 cursor-pointer transition select-none flex items-center space-x-1 hover:bg-slate-800/60 px-1.5 py-0.5 rounded text-left font-mono" title="Click to view Changelog">
-          <span id="footer-version-text">SqlFox v0.1.0</span>
-        </button>
+      <button id="footer-update-btn" onclick="checkOrOpenUpdate(true)" class="hidden items-center space-x-1 text-emerald-400 bg-emerald-950/80 border border-emerald-700/60 hover:bg-emerald-900/80 px-1.5 py-0.5 rounded text-[10px] font-semibold transition animate-pulse cursor-pointer shadow-sm shadow-emerald-900/30" title="Click to view release notes and update SqlFox">
+        <span>🚀</span>
+        <span id="footer-update-badge-text">Update</span>
+      </button>
+      <button id="footer-version-btn" onclick="openChangelogDialog()" class="text-slate-400 hover:text-slate-200 cursor-pointer transition select-none flex items-center space-x-1 hover:bg-slate-800/60 px-1.5 py-0.5 rounded text-left" title="Click to view Changelog">
+        <span id="footer-version-text">SqlFox v0.2.0</span>
+      </button>
+      <span class="text-slate-600 select-none">•</span>
+      <div class="flex items-center space-x-1.5 text-slate-400 font-sans">
+        <span>Created by</span>
+        <a href="https://github.com/herliansyah" target="_blank" rel="noopener noreferrer" class="text-slate-300 hover:text-emerald-400 font-medium transition inline-flex items-center space-x-1 group" title="Author Profile on GitHub">
+          <span>herliansyah</span>
+        </a>
+        <span class="text-slate-600">•</span>
+        <a href="https://github.com/herliansyah/sqlfox" target="_blank" rel="noopener noreferrer" class="text-slate-400 hover:text-white transition inline-flex items-center space-x-1 group" title="SqlFox GitHub Repository">
+          <svg class="w-3.5 h-3.5 fill-current opacity-80 group-hover:opacity-100 transition" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          <span class="group-hover:underline underline-offset-2">GitHub</span>
+        </a>
+        <span class="text-slate-600">•</span>
+        <a href="https://saweria.co/herliansyah26" target="_blank" rel="noopener noreferrer" class="text-amber-400 hover:text-amber-300 transition inline-flex items-center space-x-1 group" title="Traktir kopi / dukung pengembang SqlFox via Saweria">
+          <span>☕</span>
+          <span class="group-hover:underline underline-offset-2">Traktir Kopi</span>
+        </a>
       </div>
     </div>
   </footer>
@@ -1823,79 +1858,125 @@
   </div>
 
   <!-- 2. Impact Preview Drawer / Modal -->
-  <!-- 2. Impact Preview Drawer / Modal -->
-  <div id="impact-preview-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 hidden">
-    <div class="bg-slate-900 border border-app-border w-full max-w-4xl rounded-lg shadow-2xl p-5 space-y-3 flex flex-col max-h-[85vh]">
-      <div class="flex items-center justify-between border-b border-app-border pb-3 flex-shrink-0">
-        <div class="flex items-center space-x-2">
-          <span class="text-xl">⚡</span>
+  <div id="impact-preview-modal" class="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 z-50 hidden transition-opacity duration-200">
+    <div class="bg-slate-900 border border-slate-700/80 w-full max-w-5xl rounded-xl shadow-2xl p-5 space-y-3.5 flex flex-col max-h-[88vh]">
+      <!-- Header -->
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3 flex-shrink-0">
+        <div class="flex items-center space-x-3">
+          <div class="w-9 h-9 rounded-lg bg-sky-500/10 border border-sky-500/25 flex items-center justify-center text-sky-400 font-bold text-lg shadow-sm">⚡</div>
           <div>
-            <h3 class="text-base font-bold text-white">Execution Plan (EXPLAIN)</h3>
-            <p id="impact-query-snippet" class="text-[11px] font-mono text-slate-400 truncate max-w-xl"></p>
+            <div class="flex items-center space-x-2">
+              <h3 class="text-base font-bold text-white tracking-wide">Execution Plan (EXPLAIN)</h3>
+              <span id="impact-plan-engine-badge" class="px-1.5 py-0.5 rounded text-[10px] font-mono uppercase bg-slate-800 text-slate-300 border border-slate-700">OPTIMIZER</span>
+            </div>
+            <p class="text-xs text-slate-400">Query cost analysis, index utilization & visual execution tree</p>
           </div>
         </div>
-        <div class="flex items-center space-x-2">
-          <div class="flex bg-slate-950 rounded p-0.5 border border-slate-700 text-xs">
-            <button id="impact-tab-table-btn" onclick="switchImpactTab('table')" class="px-2.5 py-0.5 rounded font-semibold bg-sky-950 text-sky-400">Plan Grid</button>
-            <button id="impact-tab-tree-btn" onclick="switchImpactTab('tree')" class="px-2.5 py-0.5 rounded text-slate-400 hover:text-white">Visual Tree</button>
-            <button id="impact-tab-advisor-btn" onclick="switchImpactTab('advisor')" class="px-2.5 py-0.5 rounded text-slate-400 hover:text-white flex items-center space-x-1">
-              <span>💡</span><span>Advisor</span>
-              <span id="impact-advisor-badge" class="hidden ml-1 px-1.5 py-0.2 bg-amber-950 text-amber-300 text-[10px] rounded-full border border-amber-800 font-bold"></span>
+        <div class="flex items-center space-x-3">
+          <!-- Sleek Tab Switcher -->
+          <div class="flex bg-slate-950/80 rounded-lg p-1 border border-slate-800 text-xs shadow-inner">
+            <button id="impact-tab-table-btn" onclick="switchImpactTab('table')" class="px-3 py-1.5 rounded-md font-medium text-slate-400 hover:text-white transition flex items-center space-x-1.5">
+              <span>📊</span><span>Plan Grid</span>
             </button>
-            <button id="impact-tab-raw-btn" onclick="switchImpactTab('raw')" class="px-2.5 py-0.5 rounded text-slate-400 hover:text-white">Raw JSON</button>
+            <button id="impact-tab-tree-btn" onclick="switchImpactTab('tree')" class="px-3 py-1.5 rounded-md font-medium text-slate-400 hover:text-white transition flex items-center space-x-1.5">
+              <span>🌳</span><span>Visual Tree</span>
+              <span id="impact-tree-badge" class="ml-1 px-1.5 py-0.2 bg-sky-950 text-sky-300 text-[10px] rounded-full border border-sky-800 font-mono font-bold">0</span>
+            </button>
+            <button id="impact-tab-advisor-btn" onclick="switchImpactTab('advisor')" class="px-3 py-1.5 rounded-md font-medium text-slate-400 hover:text-white transition flex items-center space-x-1.5">
+              <span>💡</span><span>Advisor</span>
+              <span id="impact-advisor-badge" class="hidden ml-1 px-1.5 py-0.2 bg-amber-950 text-amber-300 text-[10px] rounded-full border border-amber-800 font-bold">0</span>
+            </button>
+            <button id="impact-tab-raw-btn" onclick="switchImpactTab('raw')" class="px-3 py-1.5 rounded-md font-medium text-slate-400 hover:text-white transition flex items-center space-x-1.5">
+              <span>{ }</span><span>Raw Plan</span>
+            </button>
           </div>
-          <button onclick="closeImpactModal()" class="text-slate-400 hover:text-white text-base px-1">✕</button>
+          <button onclick="closeImpactModal()" class="w-8 h-8 rounded-lg bg-slate-800/60 hover:bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition border border-slate-700 text-sm" title="Close Modal">✕</button>
         </div>
       </div>
 
-      <!-- Plan Table View -->
-      <div id="impact-table-view" class="flex-1 overflow-auto border border-slate-800 rounded bg-slate-950 min-h-[160px]">
+      <!-- Target Query Card (clean, separate from title!) -->
+      <div class="bg-slate-950/90 border border-slate-800 rounded-lg p-3 flex-shrink-0 space-y-2">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center space-x-2">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded border border-slate-700/60">Target Query</span>
+            <span id="impact-query-length" class="text-[10px] text-slate-500 font-mono"></span>
+          </div>
+          <div class="flex items-center space-x-1.5">
+            <button id="impact-query-format-btn" onclick="toggleImpactQueryFormat()" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] border border-slate-700 transition flex items-center space-x-1">
+              <span>✨</span><span id="impact-query-format-text">Format</span>
+            </button>
+            <button onclick="copyImpactQuery()" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] border border-slate-700 transition flex items-center space-x-1">
+              <span>📋</span><span>Copy</span>
+            </button>
+            <button onclick="openImpactQueryInEditor()" class="px-2.5 py-1 rounded bg-sky-950 hover:bg-sky-900 text-sky-300 text-[11px] border border-sky-800 transition flex items-center space-x-1">
+              <span>⚡</span><span>Editor</span>
+            </button>
+          </div>
+        </div>
+        <pre id="impact-query-snippet" class="font-mono text-[11px] text-sky-200/90 whitespace-pre-wrap break-all max-h-24 overflow-y-auto bg-slate-900/80 p-2.5 rounded border border-slate-800 select-all"></pre>
+      </div>
+
+      <!-- Tab 1: Plan Grid View -->
+      <div id="impact-table-view" class="flex-1 overflow-auto border border-slate-800 rounded-lg bg-slate-950 min-h-[200px]">
         <table class="w-full text-left text-xs border-collapse">
-          <thead class="bg-slate-800/80 text-slate-300 font-semibold sticky top-0 border-b border-slate-700">
+          <thead class="bg-slate-800/90 text-slate-300 font-semibold sticky top-0 border-b border-slate-700 z-10 backdrop-blur-sm">
             <tr>
-              <th class="p-2 w-12 text-center">#</th>
-              <th class="p-2">Type</th>
-              <th class="p-2">Table</th>
-              <th class="p-2">Access</th>
-              <th class="p-2">Key Used</th>
-              <th class="p-2 text-right">Rows</th>
-              <th class="p-2 text-right">Filtered</th>
-              <th class="p-2">Extra</th>
+              <th class="p-2.5 w-12 text-center">#</th>
+              <th class="p-2.5">Type</th>
+              <th class="p-2.5">Table</th>
+              <th class="p-2.5">Access Type</th>
+              <th class="p-2.5">Key Used</th>
+              <th class="p-2.5 text-right">Rows Est.</th>
+              <th class="p-2.5 text-right">Filtered</th>
+              <th class="p-2.5">Extra / Condition</th>
             </tr>
           </thead>
-          <tbody id="impact-plan-tbody" class="divide-y divide-slate-800 font-mono text-[11px]">
+          <tbody id="impact-plan-tbody" class="divide-y divide-slate-800/70 font-mono text-[11px]">
           </tbody>
         </table>
-        <div id="impact-empty-state" class="hidden p-8 text-center text-slate-500 italic text-xs">
+        <div id="impact-empty-state" class="hidden p-12 text-center text-slate-500 italic text-xs">
           No execution plan steps returned by the database engine.
         </div>
       </div>
 
-      <!-- Raw JSON View -->
-      <div id="impact-raw-view" class="hidden flex-1 overflow-auto border border-slate-800 rounded bg-slate-950 p-3 min-h-[160px]">
-        <pre class="font-mono text-slate-300 text-xs whitespace-pre overflow-x-auto" id="impact-raw-plan"></pre>
+      <!-- Tab 2: Visual Tree View -->
+      <div id="impact-tree-view" class="hidden flex-1 overflow-auto border border-slate-800 rounded-lg bg-slate-950 p-4 min-h-[200px]">
+        <!-- Summary Stats Banner -->
+        <div id="impact-tree-summary-bar" class="mb-4 p-3 bg-slate-900/80 border border-slate-800 rounded-lg flex flex-wrap items-center justify-between gap-2 text-xs">
+        </div>
+        <!-- Graphical Flow / Tree Container -->
+        <div id="impact-tree-canvas" class="p-2 select-text"></div>
+        <div id="impact-tree-empty" class="hidden p-12 text-center text-slate-500 italic text-xs">
+          No execution steps available to render visual tree.
+        </div>
       </div>
 
-      <!-- Visual Tree View -->
-      <div id="impact-tree-view" class="hidden flex-1 overflow-auto border border-slate-800 rounded bg-slate-950 p-3 min-h-[160px]">
-        <div id="impact-tree-canvas" class="font-mono text-xs select-text"></div>
-        <div id="impact-tree-empty" class="hidden p-8 text-center text-slate-500 italic text-xs">No JSON plan available. Run on MySQL 5.6+, MariaDB 10.2+, or PostgreSQL to get a visual tree.</div>
-      </div>
-
-      <!-- Index Advisor View -->
-      <div id="impact-advisor-view" class="hidden flex-1 overflow-auto border border-slate-800 rounded bg-slate-950 p-4 min-h-[160px] space-y-3">
+      <!-- Tab 3: Index Advisor View -->
+      <div id="impact-advisor-view" class="hidden flex-1 overflow-auto border border-slate-800 rounded-lg bg-slate-950 p-4 min-h-[200px] space-y-3.5">
         <div id="impact-advisor-bloat-container" class="space-y-2"></div>
         <div id="impact-advisor-list" class="space-y-3"></div>
-        <div id="impact-advisor-empty" class="hidden p-8 text-center text-slate-500 italic text-xs">
+        <div id="impact-advisor-empty" class="hidden p-12 text-center text-slate-500 italic text-xs">
           ✓ No new index recommendations needed. Query predicates are either covered by existing indexes or not indexable.
         </div>
       </div>
 
-      <div class="flex items-center justify-between pt-2 border-t border-app-border flex-shrink-0">
-        <div id="impact-summary-badge" class="text-xs text-slate-400"></div>
+      <!-- Tab 4: Raw Output View -->
+      <div id="impact-raw-view" class="hidden flex-1 overflow-auto border border-slate-800 rounded-lg bg-slate-950 p-3 min-h-[200px]">
+        <div class="flex items-center justify-between pb-2 mb-2 border-b border-slate-800 text-xs">
+          <span class="text-slate-400 font-mono text-[11px]">Raw Optimizer Output</span>
+          <button onclick="copyImpactRawJSON()" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] border border-slate-700 transition">📋 Copy Raw</button>
+        </div>
+        <pre class="font-mono text-slate-300 text-xs whitespace-pre overflow-x-auto select-all" id="impact-raw-plan"></pre>
+      </div>
+
+      <!-- Footer -->
+      <div class="flex items-center justify-between pt-2.5 border-t border-slate-800 flex-shrink-0">
+        <div id="impact-summary-badge" class="text-xs text-slate-400 flex items-center space-x-2"></div>
         <div class="flex space-x-2">
-          <button onclick="closeImpactModal()" class="px-4 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 rounded">Close</button>
-          <button onclick="closeImpactModal(); runActiveQuery(true);" class="px-4 py-1.5 text-xs bg-app-safe hover:bg-emerald-600 text-slate-950 font-bold rounded">Execute Query</button>
+          <button onclick="closeImpactModal()" class="px-4 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition border border-slate-700">Close</button>
+          <button onclick="closeImpactModal(); runActiveQuery(true);" class="px-4 py-1.5 text-xs bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold rounded-lg shadow-sm transition flex items-center space-x-1.5">
+            <span>▶</span><span>Execute Query</span>
+          </button>
         </div>
       </div>
     </div>
@@ -2940,6 +3021,9 @@
           <div class="flex items-center justify-between">
             <span class="text-xs font-semibold text-slate-300 uppercase tracking-wider text-[11px]">SQL Statement:</span>
             <div class="flex items-center space-x-1.5">
+              <button id="pl-modal-format-sql-btn" onclick="formatModalProcessSQL()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded border border-slate-700 text-[11px] font-medium flex items-center space-x-1 transition disabled:opacity-40 disabled:cursor-not-allowed" title="Format and pretty-print SQL statement">
+                <span>✨ Format SQL</span>
+              </button>
               <button id="pl-modal-copy-sql-btn" onclick="copyModalProcessSQL()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded border border-slate-700 text-[11px] font-medium flex items-center space-x-1 transition">
                 <span>📋 Copy SQL</span>
               </button>
@@ -5532,12 +5616,21 @@
       // Count slow threads (> 5 sec)
       const slowCount = threads.filter(t => t.time >= 5).length;
       const badgeHeader = document.getElementById('processlist-slow-badge');
+      const monitorAlert = document.getElementById('monitor-alert-badge');
       if (badgeHeader) {
         if (slowCount > 0) {
           badgeHeader.textContent = slowCount;
           badgeHeader.classList.remove('hidden');
         } else {
           badgeHeader.classList.add('hidden');
+        }
+      }
+      if (monitorAlert) {
+        if (slowCount > 0) {
+          monitorAlert.textContent = slowCount;
+          monitorAlert.classList.remove('hidden');
+        } else {
+          monitorAlert.classList.add('hidden');
         }
       }
 
@@ -5788,12 +5881,20 @@
         }
 
         // Footer buttons state
+        const btnFormat = document.getElementById('pl-modal-format-sql-btn');
         const btnExplain = document.getElementById('pl-modal-btn-explain');
         const btnEditor = document.getElementById('pl-modal-btn-editor');
         const btnAI = document.getElementById('pl-modal-btn-ai');
         const btnNotes = document.getElementById('pl-modal-btn-notes');
         const btnKillQ = document.getElementById('pl-modal-btn-kill-q');
         const btnKillC = document.getElementById('pl-modal-btn-kill-c');
+
+        if (btnFormat) {
+          btnFormat.disabled = !hasQuery;
+          btnFormat.innerHTML = '<span>✨ Format SQL</span>';
+          btnFormat.classList.remove('bg-indigo-900', 'text-indigo-200', 'border-indigo-700');
+        }
+        isModalSQLFormatted = false;
 
         if (btnExplain) btnExplain.disabled = !hasQuery;
         if (btnEditor) btnEditor.disabled = !hasQuery;
@@ -5956,13 +6057,45 @@
       if (selectedProcessThread) confirmKillProcess(selectedProcessThread.id, 'connection');
     }
 
+    let isModalSQLFormatted = false;
+
+    function formatModalProcessSQL() {
+      if (!selectedProcessThread || !selectedProcessThread.info || !selectedProcessThread.info.trim()) {
+        showNativeAlert('No SQL statement executing on this thread.', 'Format SQL');
+        return;
+      }
+      const sqlCodeEl = document.getElementById('pl-modal-sql-code');
+      const btn = document.getElementById('pl-modal-format-sql-btn');
+      if (!sqlCodeEl) return;
+
+      if (!isModalSQLFormatted) {
+        sqlCodeEl.textContent = formatSQL(selectedProcessThread.info);
+        isModalSQLFormatted = true;
+        if (btn) {
+          btn.innerHTML = '<span>↺ Raw SQL</span>';
+          btn.classList.add('bg-indigo-900', 'text-indigo-200', 'border-indigo-700');
+        }
+      } else {
+        sqlCodeEl.textContent = selectedProcessThread.info;
+        isModalSQLFormatted = false;
+        if (btn) {
+          btn.innerHTML = '<span>✨ Format SQL</span>';
+          btn.classList.remove('bg-indigo-900', 'text-indigo-200', 'border-indigo-700');
+        }
+      }
+    }
+
     async function copyModalProcessSQL() {
-      if (!selectedProcessThread || !selectedProcessThread.info) {
+      const sqlCodeEl = document.getElementById('pl-modal-sql-code');
+      const textToCopy = (sqlCodeEl && sqlCodeEl.textContent && !sqlCodeEl.textContent.startsWith('-- '))
+        ? sqlCodeEl.textContent
+        : (selectedProcessThread ? selectedProcessThread.info : '');
+      if (!textToCopy) {
         showNativeAlert('No SQL statement executing on this thread.', 'Copy SQL');
         return;
       }
       try {
-        await navigator.clipboard.writeText(selectedProcessThread.info);
+        await navigator.clipboard.writeText(textToCopy);
         const btn = document.getElementById('pl-modal-copy-sql-btn');
         if (btn) {
           const orig = btn.innerHTML;
@@ -6525,6 +6658,7 @@ Apa langkah konkret untuk menyelesaikan bottleneck ini? Apakah perlu tuning my.c
     function updateFlightNavbarBadge() {
       const dot = document.getElementById('flight-recorder-rec-dot');
       const badge = document.getElementById('flight-recorder-timer-badge');
+      const monitorDot = document.getElementById('monitor-rec-dot');
       if (!dot || !badge) return;
 
       if (flightState.isRecording) {
@@ -6533,9 +6667,11 @@ Apa langkah konkret untuk menyelesaikan bottleneck ini? Apakah perlu tuning my.c
         const mins = Math.floor(flightState.durationSeconds / 60);
         const secs = flightState.durationSeconds % 60;
         badge.textContent = `REC ${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+        if (monitorDot) monitorDot.classList.remove('hidden');
       } else {
         dot.className = 'inline-block w-2 h-2 rounded-full bg-slate-500';
         badge.classList.add('hidden');
+        if (monitorDot) monitorDot.classList.add('hidden');
       }
     }
 
@@ -8952,7 +9088,49 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       runActiveQuery(true, typed);
     }
 
-    // --- Impact Preview Modal ---
+    // --- Impact Preview Modal & Visual Execution Tree ---
+    let currentImpactRawSQL = '';
+    let isImpactSQLFormatted = false;
+
+    function updateImpactQuerySnippet() {
+      const snippetEl = document.getElementById('impact-query-snippet');
+      const formatText = document.getElementById('impact-query-format-text');
+      const lenEl = document.getElementById('impact-query-length');
+      if (!snippetEl) return;
+
+      const text = isImpactSQLFormatted ? formatSQL(currentImpactRawSQL) : currentImpactRawSQL;
+      snippetEl.textContent = text || '';
+      if (formatText) formatText.textContent = isImpactSQLFormatted ? 'Raw' : 'Format';
+      if (lenEl) lenEl.textContent = currentImpactRawSQL ? `${currentImpactRawSQL.length} chars` : '';
+    }
+
+    function toggleImpactQueryFormat() {
+      isImpactSQLFormatted = !isImpactSQLFormatted;
+      updateImpactQuerySnippet();
+    }
+
+    function copyImpactQuery() {
+      if (!currentImpactRawSQL) return;
+      const text = isImpactSQLFormatted ? formatSQL(currentImpactRawSQL) : currentImpactRawSQL;
+      copyTextToClipboard(text);
+    }
+
+    function openImpactQueryInEditor() {
+      if (!currentImpactRawSQL) return;
+      if (window.editorInstance) {
+        window.editorInstance.setValue(currentImpactRawSQL);
+      }
+      closeImpactModal();
+      showToast('Query loaded into Query Editor');
+    }
+
+    function copyImpactRawJSON() {
+      const rawPlanEl = document.getElementById('impact-raw-plan');
+      if (rawPlanEl && rawPlanEl.textContent) {
+        copyTextToClipboard(rawPlanEl.textContent);
+      }
+    }
+
     function switchImpactTab(tab) {
       const tableBtn = document.getElementById('impact-tab-table-btn');
       const treeBtn  = document.getElementById('impact-tab-tree-btn');
@@ -8964,13 +9142,14 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       const rawView   = document.getElementById('impact-raw-view');
       if (!tableBtn || !rawBtn || !tableView || !rawView) return;
 
-      const active   = 'px-2.5 py-0.5 rounded font-semibold bg-sky-950 text-sky-400';
-      const inactive = 'px-2.5 py-0.5 rounded text-slate-400 hover:text-white';
+      const active = 'px-3 py-1.5 rounded-md font-semibold bg-sky-500/20 text-sky-300 border border-sky-500/40 shadow-sm transition flex items-center space-x-1.5';
+      const inactive = 'px-3 py-1.5 rounded-md font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border border-transparent transition flex items-center space-x-1.5';
 
       tableBtn.className = inactive;
       if (treeBtn) treeBtn.className = inactive;
       if (advisorBtn) advisorBtn.className = inactive;
       rawBtn.className   = inactive;
+
       tableView.classList.add('hidden');
       if (treeView) treeView.classList.add('hidden');
       if (advisorView) advisorView.classList.add('hidden');
@@ -8992,11 +9171,23 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
     }
 
     function openImpactModal(planData, sql) {
-      const snippetEl = document.getElementById('impact-query-snippet');
-      if (snippetEl) snippetEl.textContent = sql || '';
+      currentImpactRawSQL = sql || '';
+      isImpactSQLFormatted = false;
+      updateImpactQuerySnippet();
 
       const rawPlanEl = document.getElementById('impact-raw-plan');
-      if (rawPlanEl) rawPlanEl.textContent = JSON.stringify(planData, null, 2);
+      if (rawPlanEl) {
+        if (planData && planData.raw_json) {
+          try {
+            const parsed = JSON.parse(planData.raw_json);
+            rawPlanEl.textContent = JSON.stringify(parsed, null, 2);
+          } catch {
+            rawPlanEl.textContent = planData.raw_json;
+          }
+        } else {
+          rawPlanEl.textContent = JSON.stringify(planData, null, 2);
+        }
+      }
 
       const tbody = document.getElementById('impact-plan-tbody');
       const emptyState = document.getElementById('impact-empty-state');
@@ -9004,9 +9195,21 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       if (tbody) tbody.innerHTML = '';
 
       const rows = planData && Array.isArray(planData.rows) ? planData.rows : [];
+      const treeBadge = document.getElementById('impact-tree-badge');
+      if (treeBadge) {
+        treeBadge.textContent = rows.length > 0 ? rows.length : (planData && planData.raw_json ? '1+' : '0');
+      }
+
+      // Update engine badge in header
+      const engineBadge = document.getElementById('impact-plan-engine-badge');
+      if (engineBadge) {
+        const driver = (activeConnection && activeConnection.driver) ? activeConnection.driver.toUpperCase() : 'OPTIMIZER';
+        engineBadge.textContent = driver;
+      }
+
       if (rows.length === 0) {
         if (emptyState) emptyState.classList.remove('hidden');
-        if (summaryBadge) summaryBadge.textContent = '0 execution steps returned';
+        if (summaryBadge) summaryBadge.innerHTML = '<span class="text-slate-500 italic">0 execution steps returned</span>';
       } else {
         if (emptyState) emptyState.classList.add('hidden');
         let hasFullTableScan = false;
@@ -9018,40 +9221,54 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
           tr.className = 'hover:bg-slate-800/50 transition border-b border-slate-800/60';
 
           // Access Type badge styling
-          let typeBadge = `<span class="text-slate-400">${escapeHtml(r.type || '-')}</span>`;
+          let typeBadge = `<span class="text-slate-400 font-medium">${escapeHtml(r.type || '-')}</span>`;
           const upperType = (r.type || '').toUpperCase();
           if (upperType === 'ALL') {
             hasFullTableScan = true;
-            typeBadge = `<span class="bg-red-950 text-red-400 border border-red-800 px-1.5 py-0.5 rounded text-[10px] font-bold">ALL (Full Scan)</span>`;
+            typeBadge = `<span class="bg-red-950/80 text-red-300 border border-red-700/80 px-2 py-0.5 rounded text-[10px] font-bold shadow-sm inline-flex items-center gap-1"><span>⚠️</span><span>ALL (Full Scan)</span></span>`;
           } else if (upperType === 'INDEX') {
-            typeBadge = `<span class="bg-amber-950 text-amber-400 border border-amber-800 px-1.5 py-0.5 rounded text-[10px] font-semibold">index</span>`;
+            typeBadge = `<span class="bg-amber-950/80 text-amber-300 border border-amber-700/80 px-2 py-0.5 rounded text-[10px] font-semibold">index (Full)</span>`;
           } else if (['RANGE', 'REF', 'EQ_REF', 'CONST', 'SYSTEM'].includes(upperType)) {
-            typeBadge = `<span class="bg-emerald-950 text-emerald-400 border border-emerald-800 px-1.5 py-0.5 rounded text-[10px] font-semibold">${escapeHtml(r.type)}</span>`;
+            typeBadge = `<span class="bg-emerald-950/80 text-emerald-300 border border-emerald-700/80 px-2 py-0.5 rounded text-[10px] font-semibold inline-flex items-center gap-1"><span>✓</span><span>${escapeHtml(r.type)}</span></span>`;
           } else if (upperType.includes('SCAN') || upperType.includes('SEARCH')) {
-            typeBadge = `<span class="bg-sky-950 text-sky-400 border border-sky-800 px-1.5 py-0.5 rounded text-[10px]">${escapeHtml(r.type)}</span>`;
+            const isSearch = upperType.includes('SEARCH');
+            typeBadge = `<span class="${isSearch ? 'bg-sky-950 text-sky-300 border-sky-800' : 'bg-red-950 text-red-300 border-red-800'} border px-2 py-0.5 rounded text-[10px] font-semibold">${escapeHtml(r.type)}</span>`;
           }
 
           const filteredText = typeof r.filtered === 'number' && r.filtered > 0 ? `${r.filtered.toFixed(1)}%` : '-';
-          const keyText = r.key ? `<span class="text-sky-300 font-semibold">${escapeHtml(r.key)}</span>` : '<span class="text-slate-600">NULL</span>';
+          const keyText = r.key ? `<span class="text-sky-300 font-semibold inline-flex items-center gap-1"><span>🔑</span><span>${escapeHtml(r.key)}</span></span>` : '<span class="text-slate-600">NULL</span>';
+
+          // Parse extra into readable pills
+          let extraHtml = '-';
+          if (r.extra) {
+            const extraParts = r.extra.split(';').map(s => s.trim()).filter(Boolean);
+            extraHtml = extraParts.map(part => {
+              const up = part.toUpperCase();
+              if (up.includes('FILESORT')) return `<span class="bg-amber-950 text-amber-300 border border-amber-800 px-1.5 py-0.2 rounded text-[10px]">⚠ filesort</span>`;
+              if (up.includes('TEMPORARY')) return `<span class="bg-red-950 text-red-300 border border-red-800 px-1.5 py-0.2 rounded text-[10px]">⚠ temporary</span>`;
+              if (up.includes('USING INDEX')) return `<span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-1.5 py-0.2 rounded text-[10px]">✓ using index</span>`;
+              return `<span class="text-slate-400">${escapeHtml(part)}</span>`;
+            }).join(' ');
+          }
 
           tr.innerHTML = `
-            <td class="p-2 text-center text-slate-500">${r.id || (idx + 1)}</td>
-            <td class="p-2 text-slate-300">${escapeHtml(r.select_type || '-')}</td>
-            <td class="p-2 font-bold text-white">${escapeHtml(r.table || '-')}</td>
-            <td class="p-2">${typeBadge}</td>
-            <td class="p-2">${keyText}</td>
-            <td class="p-2 text-right text-slate-200">${(r.rows || 0).toLocaleString()}</td>
-            <td class="p-2 text-right text-slate-400">${filteredText}</td>
-            <td class="p-2 text-slate-400 truncate max-w-xs" title="${escapeHtml(r.extra || '')}">${escapeHtml(r.extra || '-')}</td>
+            <td class="p-2.5 text-center text-slate-500 font-mono">${r.id || (idx + 1)}</td>
+            <td class="p-2.5 text-slate-300">${escapeHtml(r.select_type || '-')}</td>
+            <td class="p-2.5 font-bold text-white"><span class="text-slate-500 font-normal mr-1">🗄️</span>${escapeHtml(r.table || '-')}</td>
+            <td class="p-2.5">${typeBadge}</td>
+            <td class="p-2.5">${keyText}</td>
+            <td class="p-2.5 text-right font-semibold text-slate-200">${(r.rows || 0).toLocaleString()}</td>
+            <td class="p-2.5 text-right text-slate-400">${filteredText}</td>
+            <td class="p-2.5 text-slate-300 max-w-xs">${extraHtml}</td>
           `;
           if (tbody) tbody.appendChild(tr);
         });
 
         if (summaryBadge) {
           if (hasFullTableScan) {
-            summaryBadge.innerHTML = `<span class="text-app-danger font-semibold">⚠️ Full table scan detected!</span> Check the <a href="javascript:void(0)" onclick="switchImpactTab('advisor')" class="text-amber-400 underline font-bold">Index Advisor</a> tab for optimization.`;
+            summaryBadge.innerHTML = `<span class="text-amber-400 font-semibold inline-flex items-center gap-1.5"><span>⚠️</span><span>Full table scan detected!</span></span> <span class="text-slate-400">Review recommendations in</span> <button onclick="switchImpactTab('advisor')" class="text-amber-300 hover:underline font-bold">Index Advisor</button>`;
           } else {
-            summaryBadge.innerHTML = `<span class="text-app-safe font-semibold">✓ ${rows.length} execution step${rows.length > 1 ? 's' : ''} planned</span> (~${totalRows.toLocaleString()} rows estimated)`;
+            summaryBadge.innerHTML = `<span class="text-emerald-400 font-semibold inline-flex items-center gap-1"><span>✓</span><span>${rows.length} execution step${rows.length > 1 ? 's' : ''} planned</span></span> <span class="text-slate-500">(~${totalRows.toLocaleString()} rows examined)</span>`;
           }
         }
       }
@@ -9059,14 +9276,11 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       // Render advisor recommendations
       renderAdvisorContent(planData && planData.advisor);
 
+      // Render rich visual execution tree (seamlessly supports raw_json AND rows fallback!)
+      renderPlanTree(planData);
+
       switchImpactTab('table');
       document.getElementById('impact-preview-modal').classList.remove('hidden');
-
-      // Build visual tree (async-ish via setTimeout to let modal paint first)
-      const rawJSON = planData && planData.raw_json;
-      renderPlanTree(rawJSON || '');
-      // Auto-switch to tree tab if a JSON plan is available
-      if (rawJSON) switchImpactTab('tree');
     }
 
     function renderAdvisorContent(adv) {
@@ -9178,7 +9392,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
     function copyTextToClipboard(text) {
       if (!text) return;
       navigator.clipboard.writeText(text).then(() => {
-        showToast('Safe DDL copied to clipboard!');
+        showToast('Copied to clipboard!');
       }).catch(() => {
         showToast('Copied to clipboard');
       });
@@ -9188,146 +9402,451 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       document.getElementById('impact-preview-modal').classList.add('hidden');
     }
 
-    // --- Visual Query Plan Tree Renderer ---
-    // ponytail: zero-dependency recursive renderer; handles MySQL FORMAT=JSON and PostgreSQL FORMAT=JSON.
-    // Ceiling: deeply nested plans (>50 levels) may produce tall scroll; upgrade path = collapse/expand toggles.
-    function renderPlanTree(rawJSON) {
+    // --- Rich Visual Query Plan Tree Renderer ---
+    // ponytail: zero-dependency visual graph; renders DAG node cards from either JSON plan (PG/MySQL) or Tabular Rows (MySQL/MariaDB/SQLite).
+    function renderPlanTree(planData) {
       const canvas = document.getElementById('impact-tree-canvas');
       const empty  = document.getElementById('impact-tree-empty');
+      const summaryBar = document.getElementById('impact-tree-summary-bar');
       if (!canvas) return;
       canvas.innerHTML = '';
 
-      if (!rawJSON) {
+      if (!planData) {
         if (empty) empty.classList.remove('hidden');
+        if (summaryBar) summaryBar.innerHTML = '';
         return;
       }
-      if (empty) empty.classList.add('hidden');
 
-      let plan;
-      try { plan = JSON.parse(rawJSON); } catch { if (empty) empty.classList.remove('hidden'); return; }
-
-      // Detect engine: PG wraps in [{Plan:{...},...}], MySQL wraps in {query_block:{...}}
-      const isPG = Array.isArray(plan) && plan[0] && plan[0]['Plan'];
-      const isMySQL = plan && plan['query_block'];
-
-      function badge(cls, text) {
-        return `<span class="inline-block ${cls} text-[10px] font-bold px-1.5 py-0.5 rounded ml-1">${escapeHtml(text)}</span>`;
+      const rows = Array.isArray(planData.rows) ? planData.rows : [];
+      let rawJSON = planData.raw_json;
+      let parsedJSON = null;
+      if (rawJSON) {
+        try { parsedJSON = JSON.parse(rawJSON); } catch { parsedJSON = null; }
       }
 
-      // ---- PostgreSQL renderer ----
-      function pgNodeBadges(node) {
-        const type = (node['Node Type'] || '').toLowerCase();
-        let out = '';
-        if (type === 'seq scan') out += badge('bg-red-950 text-red-400 border border-red-800', '⚠ Seq Scan');
-        else if (type.includes('index scan')) out += badge('bg-emerald-950 text-emerald-400 border border-emerald-800', '✓ Index Scan');
-        else if (type.includes('index only scan')) out += badge('bg-emerald-950 text-emerald-400 border border-emerald-800', '✓ Index Only');
-        else if (type.includes('bitmap')) out += badge('bg-sky-950 text-sky-400 border border-sky-800', 'Bitmap');
-        else if (type.includes('hash join')) out += badge('bg-indigo-950 text-indigo-400 border border-indigo-800', 'Hash Join');
-        else if (type.includes('nested loop')) out += badge('bg-amber-950 text-amber-400 border border-amber-800', 'Nested Loop');
-        else if (type.includes('merge join')) out += badge('bg-purple-950 text-purple-400 border border-purple-800', 'Merge Join');
-        else if (type.includes('sort')) out += badge('bg-slate-800 text-slate-300 border border-slate-600', 'Sort');
-        else if (type.includes('aggregate')) out += badge('bg-slate-800 text-slate-300 border border-slate-600', 'Aggregate');
+      const isPG = Array.isArray(parsedJSON) && parsedJSON[0] && parsedJSON[0]['Plan'];
+      const isMySQLJSON = parsedJSON && parsedJSON['query_block'];
 
-        if (node['Temp Written Blocks'] > 0) out += badge('bg-red-950 text-red-400 border border-red-800', '⚠ Disk Spill');
+      // Helper: Node card generator
+      function makeNodeCard(node) {
+        let cardBorder = 'border-slate-800 bg-slate-900/90 shadow-slate-950/40';
+        if (node.isDanger) cardBorder = 'border-red-600/80 bg-gradient-to-br from-red-950/30 to-slate-900 shadow-red-950/20';
+        else if (node.isWarning) cardBorder = 'border-amber-600/80 bg-gradient-to-br from-amber-950/30 to-slate-900 shadow-amber-950/20';
+        else if (node.isOptimal) cardBorder = 'border-emerald-600/70 bg-gradient-to-br from-emerald-950/30 to-slate-900 shadow-emerald-950/20';
+        else if (node.isSpecial) cardBorder = 'border-sky-600/70 bg-gradient-to-br from-sky-950/30 to-slate-900 shadow-sky-950/20';
 
-        const totalCost = node['Total Cost'] || 0;
-        const actualRows = node['Actual Rows'];
-        const planRows   = node['Plan Rows'];
-        const rowsLabel = actualRows != null ? `actual ${actualRows.toLocaleString()} rows` : `est ${(planRows||0).toLocaleString()} rows`;
-        out += `<span class="text-slate-500 ml-1 text-[10px]">[cost=${totalCost.toFixed(2)} · ${rowsLabel}]</span>`;
-        if (node['Actual Total Time'] != null)
-          out += `<span class="text-slate-400 ml-1 text-[10px]">${node['Actual Total Time'].toFixed(2)}ms</span>`;
-        return out;
+        let extraHtml = '';
+        if (node.extraPills && node.extraPills.length > 0) {
+          extraHtml = `<div class="flex flex-wrap gap-1 mt-2.5 pt-2 border-t border-slate-800/80">` +
+            node.extraPills.map(p => `<span class="${p.cls || 'bg-slate-800 text-slate-300 border-slate-700'} border px-1.5 py-0.5 rounded text-[10px] font-medium inline-flex items-center gap-1">${escapeHtml(p.text)}</span>`).join('') +
+            `</div>`;
+        }
+
+        let filterHtml = '';
+        if (node.filterExpr) {
+          filterHtml = `<div class="mt-2 text-[10px] font-mono text-slate-400 bg-slate-950/70 p-1.5 rounded border border-slate-800/80 truncate" title="${escapeHtml(node.filterExpr)}"><span class="text-slate-500">filter: </span>${escapeHtml(node.filterExpr)}</div>`;
+        }
+
+        return `
+          <div class="rounded-xl border ${cardBorder} p-3.5 shadow-lg transition hover:border-slate-500 w-full max-w-xl mx-auto">
+            <div class="flex items-center justify-between gap-2 border-b border-slate-800/80 pb-2 mb-2">
+              <div class="flex items-center space-x-1.5">
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-800 text-slate-300 border border-slate-700">Step ${node.step}</span>
+                <span class="text-xs font-bold text-white tracking-wide">${escapeHtml(node.operationTitle || 'Table Access')}</span>
+              </div>
+              <span class="${node.badgeCls} px-2 py-0.5 rounded text-[10px] font-bold border shadow-sm flex items-center gap-1">
+                ${node.badgeIcon ? `<span>${node.badgeIcon}</span>` : ''}
+                <span>${escapeHtml(node.badgeText)}</span>
+              </span>
+            </div>
+
+            <div class="space-y-2">
+              <div class="flex items-center justify-between text-xs">
+                <div class="flex items-center space-x-1.5">
+                  <span class="text-slate-400 text-sm">🗄️</span>
+                  <span class="font-bold text-white">${escapeHtml(node.table || '(derived/subquery)')}</span>
+                  ${node.alias && node.alias !== node.table ? `<span class="text-slate-500 text-[11px] font-mono">as ${escapeHtml(node.alias)}</span>` : ''}
+                </div>
+                <div class="text-[11px] font-mono text-slate-400">
+                  ${node.keyUsed ? `<span class="text-sky-300 font-semibold flex items-center gap-1"><span>🔑</span><span>${escapeHtml(node.keyUsed)}</span></span>` : (node.isDanger ? `<span class="text-red-400 font-semibold">⚠ No index</span>` : `<span class="text-slate-500">None</span>`)}
+                </div>
+              </div>
+
+              <!-- Metrics Strip -->
+              <div class="grid grid-cols-2 sm:grid-cols-3 gap-1.5 pt-0.5 text-[11px]">
+                <div class="bg-slate-950/70 border border-slate-800/80 rounded px-2 py-1">
+                  <span class="text-slate-500 block text-[9px] uppercase tracking-wider">Examined</span>
+                  <span class="font-mono font-bold text-slate-200">~${(node.rows || 0).toLocaleString()} rows</span>
+                </div>
+                <div class="bg-slate-950/70 border border-slate-800/80 rounded px-2 py-1">
+                  <span class="text-slate-500 block text-[9px] uppercase tracking-wider">Filtered</span>
+                  <span class="font-mono font-bold ${(node.filtered != null && node.filtered < 50) ? 'text-amber-400' : 'text-emerald-400'}">${node.filtered != null ? node.filtered.toFixed(1) + '%' : '-'}</span>
+                </div>
+                <div class="bg-slate-950/70 border border-slate-800/80 rounded px-2 py-1 col-span-2 sm:col-span-1">
+                  <span class="text-slate-500 block text-[9px] uppercase tracking-wider">${node.costLabel || 'Select Type'}</span>
+                  <span class="font-mono font-semibold text-sky-300 truncate block">${node.costVal || escapeHtml(node.selectType || '-')}</span>
+                </div>
+              </div>
+
+              ${filterHtml}
+              ${extraHtml}
+            </div>
+          </div>
+        `;
       }
 
-      function pgNode(node, depth, isLast) {
-        const indent = depth === 0 ? '' : '│  '.repeat(depth - 1) + (isLast ? '└─ ' : '├─ ');
-        const type   = node['Node Type'] || '?';
-        const rel    = node['Relation Name'] ? ` on <span class="text-white font-bold">${escapeHtml(node['Relation Name'])}</span>` : '';
-        const alias  = node['Alias'] && node['Alias'] !== node['Relation Name'] ? ` <span class="text-slate-500">(${escapeHtml(node['Alias'])})</span>` : '';
-        const filter = node['Filter'] || node['Join Filter'] || node['Recheck Cond'] || '';
-
-        let html = `<div class="leading-relaxed py-0.5"><span class="text-slate-600 select-none whitespace-pre">${escapeHtml(indent)}</span>`;
-        html += `<span class="text-sky-300 font-semibold">${escapeHtml(type)}</span>${rel}${alias}`;
-        html += pgNodeBadges(node);
-        if (filter) html += `<div class="ml-${(depth+1)*4} text-slate-500 text-[10px]">filter: ${escapeHtml(filter)}</div>`;
-        html += '</div>';
-
-        const children = node['Plans'] || [];
-        children.forEach((c, i) => { html += pgNode(c, depth + 1, i === children.length - 1); });
-        return html;
+      function makeFlowConnector(yieldRows) {
+        return `
+          <div class="flex flex-col items-center my-1 select-none">
+            <div class="w-0.5 h-3 bg-gradient-to-b from-slate-700 to-sky-500"></div>
+            <div class="flex items-center space-x-1.5 px-3 py-0.5 bg-slate-900 border border-slate-700/80 rounded-full text-[10px] text-slate-300 shadow-sm my-0.5">
+              <span class="text-sky-400 font-bold">↓</span>
+              <span>passes ~${(yieldRows || 0).toLocaleString()} rows</span>
+            </div>
+            <div class="w-0.5 h-3 bg-gradient-to-b from-sky-500 to-slate-700"></div>
+          </div>
+        `;
       }
 
-      // ---- MySQL renderer ----
-      function mysqlNodeBadges(node) {
-        let out = '';
-        const at = (node['access_type'] || '').toLowerCase();
-        if (at === 'all') out += badge('bg-red-950 text-red-400 border border-red-800', '⚠ Full Scan');
-        else if (at === 'index') out += badge('bg-amber-950 text-amber-400 border border-amber-800', 'Index Full');
-        else if (['range','ref','eq_ref','const','system'].includes(at)) out += badge('bg-emerald-950 text-emerald-400 border border-emerald-800', `✓ ${at}`);
-
-        if (node['using_temporary_table']) out += badge('bg-red-950 text-red-400 border border-red-800', '⚠ Tmp Table');
-        if (node['using_filesort']) out += badge('bg-amber-950 text-amber-400 border border-amber-800', 'Filesort');
-        if (node['key']) out += `<span class="text-sky-300 ml-1 text-[10px]">key: ${escapeHtml(node['key'])}</span>`;
-
-        const rows = node['rows_examined_per_scan'] || node['rows'] || 0;
-        out += `<span class="text-slate-500 ml-1 text-[10px]">[~${rows.toLocaleString()} rows]</span>`;
-        return out;
+      function makeTerminalNode(totalRows) {
+        return `
+          <div class="w-full max-w-xl mx-auto mt-2 p-3 rounded-xl bg-emerald-950/20 border border-emerald-800/50 flex items-center justify-between text-xs shadow-md">
+            <div class="flex items-center space-x-2.5">
+              <div class="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-400 text-sm">🏁</div>
+              <div>
+                <div class="font-bold text-emerald-300">Client Result Set</div>
+                <div class="text-[11px] text-slate-400">Query execution pipeline finished</div>
+              </div>
+            </div>
+            <div class="text-right">
+              <span class="font-mono font-bold text-white text-sm">~${(totalRows || 0).toLocaleString()}</span>
+              <span class="text-slate-400 text-[10px] block">output rows</span>
+            </div>
+          </div>
+        `;
       }
 
-      function mysqlNode(node, depth, isLast, label) {
-        const indent = depth === 0 ? '' : '│  '.repeat(depth - 1) + (isLast ? '└─ ' : '├─ ');
-        const tbl    = node['table_name'] || label || '(subquery)';
-
-        let html = `<div class="leading-relaxed py-0.5"><span class="text-slate-600 select-none whitespace-pre">${escapeHtml(indent)}</span>`;
-        html += `<span class="text-white font-bold">${escapeHtml(tbl)}</span>`;
-        html += mysqlNodeBadges(node);
-        html += '</div>';
-
-        // Nested loop / attached subqueries
-        const nested = node['nested_loop'] || [];
-        nested.forEach((n, i) => {
-          const child = n['table'] || n;
-          html += mysqlNode(child, depth + 1, i === nested.length - 1, null);
-        });
-        const attached = node['attached_subqueries'] || [];
-        attached.forEach((sq, i) => {
-          const qb = sq['query_block'];
-          if (qb) html += mysqlQueryBlock(qb, depth + 1, i === attached.length - 1);
-        });
-        return html;
-      }
-
-      function mysqlQueryBlock(qb, depth, isLast) {
-        const indent = depth === 0 ? '' : '│  '.repeat(depth - 1) + (isLast ? '└─ ' : '├─ ');
-        let html = `<div class="leading-relaxed py-0.5"><span class="text-slate-600 select-none whitespace-pre">${escapeHtml(indent)}</span>`;
-        html += `<span class="text-indigo-400 font-semibold">query_block</span>`;
-        if (qb['select_id']) html += `<span class="text-slate-500 ml-1 text-[10px]">#${qb['select_id']}</span>`;
-        html += '</div>';
-        const tbl = qb['table'];
-        const nl  = qb['nested_loop'];
-        if (tbl) html += mysqlNode(tbl, depth + 1, true, null);
-        else if (nl) nl.forEach((n, i) => {
-          html += mysqlNode(n['table'] || n, depth + 1, i === nl.length - 1, null);
-        });
-        return html;
-      }
-
-      let out = '';
+      // Check if we can build from PostgreSQL JSON
       if (isPG) {
-        plan.forEach((stmt, si) => {
-          if (si > 0) out += '<hr class="border-slate-800 my-2">';
-          out += pgNode(stmt['Plan'], 0, true);
-          if (stmt['Execution Time'] != null)
-            out += `<div class="text-slate-400 text-[10px] mt-1 pl-1">Total execution: <span class="text-white font-bold">${stmt['Execution Time'].toFixed(2)}ms</span></div>`;
+        if (empty) empty.classList.add('hidden');
+        let stepCount = 0;
+        let totalRows = 0;
+        let fullScanCount = 0;
+
+        function traversePG(stmtPlan) {
+          const cards = [];
+          function walk(node, depth) {
+            stepCount++;
+            const type = (node['Node Type'] || '').toLowerCase();
+            const isDanger = type === 'seq scan';
+            const isOptimal = type.includes('index scan') || type.includes('index only');
+            const isWarning = type.includes('nested loop') || (node['Temp Written Blocks'] > 0);
+            if (isDanger) fullScanCount++;
+
+            const rowsExamined = node['Actual Rows'] != null ? node['Actual Rows'] : (node['Plan Rows'] || 0);
+            totalRows += rowsExamined;
+
+            let badgeCls = 'bg-slate-800 text-slate-300 border-slate-700';
+            let badgeIcon = '⚙️';
+            let badgeText = node['Node Type'] || 'Node';
+            if (isDanger) {
+              badgeCls = 'bg-red-950/90 text-red-300 border-red-700';
+              badgeIcon = '⚠️';
+              badgeText = 'Seq Scan';
+            } else if (isOptimal) {
+              badgeCls = 'bg-emerald-950/90 text-emerald-300 border-emerald-700';
+              badgeIcon = '✓';
+              badgeText = 'Index Scan';
+            } else if (type.includes('hash join') || type.includes('merge join')) {
+              badgeCls = 'bg-indigo-950/90 text-indigo-300 border-indigo-700';
+              badgeIcon = '⮀';
+            }
+
+            const extraPills = [];
+            if (node['Temp Written Blocks'] > 0) extraPills.push({ text: '⚠ Disk Spill', cls: 'bg-red-950 text-red-300 border-red-800' });
+            if (node['Actual Total Time'] != null) extraPills.push({ text: `⏱ ${node['Actual Total Time'].toFixed(2)}ms`, cls: 'bg-slate-800 text-slate-300 border-slate-700' });
+
+            const cardHtml = makeNodeCard({
+              step: stepCount,
+              operationTitle: node['Node Type'] || 'Scan',
+              badgeCls,
+              badgeIcon,
+              badgeText,
+              table: node['Relation Name'] || '(intermediate)',
+              alias: node['Alias'],
+              keyUsed: node['Index Name'] || null,
+              isDanger,
+              isWarning,
+              isOptimal,
+              rows: rowsExamined,
+              filtered: null,
+              costLabel: 'Cost',
+              costVal: node['Total Cost'] != null ? node['Total Cost'].toFixed(1) : '-',
+              filterExpr: node['Filter'] || node['Join Filter'] || null,
+              extraPills
+            });
+            cards.push(cardHtml);
+
+            const children = node['Plans'] || [];
+            children.forEach(c => walk(c, depth + 1));
+          }
+
+          walk(stmtPlan['Plan'], 0);
+          return cards;
+        }
+
+        let allCards = [];
+        parsedJSON.forEach(stmt => {
+          allCards = allCards.concat(traversePG(stmt));
         });
-      } else if (isMySQL) {
-        out = mysqlQueryBlock(plan['query_block'], 0, true);
-      } else {
-        // Generic fallback: just pretty-print
-        out = `<pre class="text-slate-400 text-[10px] whitespace-pre">${escapeHtml(JSON.stringify(plan, null, 2))}</pre>`;
+
+        let flowHtml = '';
+        allCards.forEach((cHtml, idx) => {
+          flowHtml += cHtml;
+          if (idx < allCards.length - 1) flowHtml += makeFlowConnector(totalRows);
+        });
+        flowHtml += makeTerminalNode(totalRows);
+        canvas.innerHTML = flowHtml;
+
+        if (summaryBar) {
+          summaryBar.innerHTML = `
+            <div class="flex items-center space-x-2.5">
+              <span class="text-slate-400">Total Steps: <strong class="text-white">${stepCount}</strong></span>
+              <span class="text-slate-600">·</span>
+              <span class="text-slate-400">Rows: <strong class="text-white">${totalRows.toLocaleString()}</strong></span>
+            </div>
+            <div class="flex items-center space-x-2">
+              ${fullScanCount > 0 ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-red-950/90 text-red-300 border border-red-700 flex items-center gap-1"><span>⚠️</span><span>${fullScanCount} Sequential Scan${fullScanCount > 1 ? 's' : ''}</span></span>` : `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950/90 text-emerald-300 border border-emerald-700 flex items-center gap-1"><span>✓</span><span>Index-Optimized</span></span>`}
+            </div>
+          `;
+        }
+        return;
       }
-      canvas.innerHTML = out;
+
+      // Check if we can build from MySQL JSON
+      if (isMySQLJSON) {
+        if (empty) empty.classList.add('hidden');
+        const qb = parsedJSON['query_block'];
+        const tableNodes = [];
+
+        function collectMySQLTables(node) {
+          if (!node) return;
+          if (node['table']) tableNodes.push(node['table']);
+          else if (node['table_name']) tableNodes.push(node);
+          if (node['nested_loop']) {
+            node['nested_loop'].forEach(n => collectMySQLTables(n));
+          }
+          if (node['attached_subqueries']) {
+            node['attached_subqueries'].forEach(sq => {
+              if (sq['query_block']) collectMySQLTables(sq['query_block']);
+            });
+          }
+        }
+        collectMySQLTables(qb);
+
+        if (tableNodes.length > 0) {
+          let totalRows = 0;
+          let fullScanCount = 0;
+          let filesortCount = 0;
+          let flowHtml = '';
+
+          tableNodes.forEach((t, idx) => {
+            const at = (t['access_type'] || '').toUpperCase();
+            const isDanger = at === 'ALL';
+            const isWarning = at === 'INDEX' || !!t['using_filesort'];
+            const isOptimal = ['REF', 'EQ_REF', 'CONST', 'SYSTEM', 'RANGE'].includes(at);
+            if (isDanger) fullScanCount++;
+            if (t['using_filesort']) filesortCount++;
+
+            const rowsExamined = t['rows_examined_per_scan'] || t['rows'] || 0;
+            totalRows += rowsExamined;
+
+            let badgeCls = 'bg-slate-800 text-slate-300 border-slate-700';
+            let badgeIcon = '⚙️';
+            let badgeText = at || 'SCAN';
+            if (isDanger) {
+              badgeCls = 'bg-red-950/90 text-red-300 border-red-700';
+              badgeIcon = '⚠️';
+              badgeText = 'ALL (Full Scan)';
+            } else if (isOptimal) {
+              badgeCls = 'bg-emerald-950/90 text-emerald-300 border-emerald-700';
+              badgeIcon = '✓';
+              badgeText = at;
+            }
+
+            const extraPills = [];
+            if (t['using_filesort']) extraPills.push({ text: '⚠ Filesort', cls: 'bg-amber-950 text-amber-300 border-amber-800' });
+            if (t['using_temporary_table']) extraPills.push({ text: '⚠ Temp Table', cls: 'bg-red-950 text-red-300 border-red-800' });
+
+            const card = makeNodeCard({
+              step: idx + 1,
+              operationTitle: 'Table Access',
+              badgeCls,
+              badgeIcon,
+              badgeText,
+              table: t['table_name'] || '(subquery)',
+              alias: null,
+              keyUsed: t['key'] || null,
+              isDanger,
+              isWarning,
+              isOptimal,
+              rows: rowsExamined,
+              filtered: typeof t['filtered'] === 'number' ? t['filtered'] : parseFloat(t['filtered'] || '100'),
+              costLabel: 'Read Cost',
+              costVal: t['cost_info']?.read_cost || '-',
+              filterExpr: t['attached_condition'] || null,
+              extraPills
+            });
+
+            flowHtml += card;
+            if (idx < tableNodes.length - 1) flowHtml += makeFlowConnector(rowsExamined);
+          });
+
+          flowHtml += makeTerminalNode(totalRows);
+          canvas.innerHTML = flowHtml;
+
+          if (summaryBar) {
+            summaryBar.innerHTML = `
+              <div class="flex items-center space-x-2.5">
+                <span class="text-slate-400">Total Steps: <strong class="text-white">${tableNodes.length}</strong></span>
+                <span class="text-slate-600">·</span>
+                <span class="text-slate-400">Est. Rows Examined: <strong class="text-white">${totalRows.toLocaleString()}</strong></span>
+              </div>
+              <div class="flex items-center space-x-2">
+                ${fullScanCount > 0 ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-red-950/90 text-red-300 border border-red-700 flex items-center gap-1"><span>⚠️</span><span>${fullScanCount} Full Scan${fullScanCount > 1 ? 's' : ''}</span></span>` : `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950/90 text-emerald-300 border border-emerald-700 flex items-center gap-1"><span>✓</span><span>No Full Scans</span></span>`}
+                ${filesortCount > 0 ? `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-950/90 text-amber-300 border border-amber-700 flex items-center gap-1"><span>⚠️</span><span>Filesort</span></span>` : ''}
+              </div>
+            `;
+          }
+          return;
+        }
+      }
+
+      // Universal Pipeline Fallback: Build directly from tabular rows!
+      // Guarantees MariaDB, SQLite, MySQL standard explain ALWAYS display a visual graph!
+      if (rows.length > 0) {
+        if (empty) empty.classList.add('hidden');
+        let totalRows = 0;
+        let fullScanCount = 0;
+        let filesortCount = 0;
+        let indexScanCount = 0;
+        let flowHtml = '';
+
+        rows.forEach((r, idx) => {
+          const upperType = (r.type || '').toUpperCase();
+          const extraStr = (r.extra || '').toUpperCase();
+
+          let isDanger = false;
+          let isWarning = false;
+          let isOptimal = false;
+          let operationTitle = 'Table Access';
+          let badgeCls = 'bg-slate-800 text-slate-300 border-slate-700';
+          let badgeIcon = '⚙️';
+          let badgeText = r.type || 'STEP';
+
+          if (upperType === 'ALL') {
+            isDanger = true;
+            fullScanCount++;
+            operationTitle = 'Full Table Scan';
+            badgeCls = 'bg-red-950/90 text-red-300 border-red-700';
+            badgeIcon = '⚠️';
+            badgeText = 'ALL (Full Scan)';
+          } else if (upperType === 'INDEX') {
+            isWarning = true;
+            operationTitle = 'Full Index Scan';
+            badgeCls = 'bg-amber-950/90 text-amber-300 border-amber-700';
+            badgeIcon = '⚡';
+            badgeText = 'index (Full)';
+          } else if (upperType === 'RANGE') {
+            isWarning = true;
+            operationTitle = 'Index Range Scan';
+            badgeCls = 'bg-yellow-950/90 text-yellow-300 border-yellow-700';
+            badgeIcon = '🔍';
+            badgeText = 'RANGE';
+          } else if (['REF', 'EQ_REF', 'CONST', 'SYSTEM'].includes(upperType)) {
+            isOptimal = true;
+            indexScanCount++;
+            operationTitle = 'Index Key Lookup';
+            badgeCls = 'bg-emerald-950/90 text-emerald-300 border-emerald-700';
+            badgeIcon = '✓';
+            badgeText = upperType;
+          } else if (upperType.includes('SCAN') || upperType.includes('SEARCH')) {
+            const isSearch = upperType.includes('SEARCH');
+            if (isSearch) {
+              isOptimal = true;
+              indexScanCount++;
+              operationTitle = 'Index Search';
+              badgeCls = 'bg-sky-950/90 text-sky-300 border-sky-700';
+              badgeIcon = '✓';
+              badgeText = 'SEARCH';
+            } else {
+              isDanger = true;
+              fullScanCount++;
+              operationTitle = 'Table Scan';
+              badgeCls = 'bg-red-950/90 text-red-300 border-red-700';
+              badgeIcon = '⚠️';
+              badgeText = 'SCAN';
+            }
+          }
+
+          if (extraStr.includes('FILESORT')) filesortCount++;
+
+          const extraPills = [];
+          if (extraStr.includes('FILESORT')) extraPills.push({ text: '⚠ Filesort (Sort Buffer/Disk)', cls: 'bg-amber-950 text-amber-300 border-amber-800' });
+          if (extraStr.includes('TEMPORARY')) extraPills.push({ text: '⚠ Temp Table', cls: 'bg-red-950 text-red-300 border-red-800' });
+          if (extraStr.includes('USING INDEX')) extraPills.push({ text: '✓ Covering Index', cls: 'bg-emerald-950 text-emerald-300 border-emerald-800' });
+          if (extraStr.includes('USING WHERE')) extraPills.push({ text: 'Where Filter', cls: 'bg-slate-800 text-slate-300 border-slate-700' });
+
+          const rowExamined = r.rows || 0;
+          totalRows += rowExamined;
+
+          const card = makeNodeCard({
+            step: r.id || (idx + 1),
+            operationTitle,
+            badgeCls,
+            badgeIcon,
+            badgeText,
+            table: r.table || '(derived)',
+            alias: null,
+            keyUsed: r.key || null,
+            isDanger,
+            isWarning,
+            isOptimal,
+            rows: rowExamined,
+            filtered: typeof r.filtered === 'number' && r.filtered > 0 ? r.filtered : null,
+            costLabel: 'Select Type',
+            costVal: r.select_type || '-',
+            filterExpr: r.extra && !extraStr.includes('USING') ? r.extra : null,
+            extraPills
+          });
+
+          flowHtml += card;
+          if (idx < rows.length - 1) flowHtml += makeFlowConnector(rowExamined);
+        });
+
+        flowHtml += makeTerminalNode(totalRows);
+        canvas.innerHTML = flowHtml;
+
+        if (summaryBar) {
+          summaryBar.innerHTML = `
+            <div class="flex items-center space-x-2.5">
+              <span class="text-slate-400">Total Steps: <strong class="text-white">${rows.length}</strong></span>
+              <span class="text-slate-600">·</span>
+              <span class="text-slate-400">Est. Rows Examined: <strong class="text-white">~${totalRows.toLocaleString()}</strong></span>
+            </div>
+            <div class="flex items-center space-x-2">
+              ${fullScanCount > 0 ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-red-950/90 text-red-300 border border-red-700 flex items-center gap-1"><span>⚠️</span><span>${fullScanCount} Full Scan${fullScanCount > 1 ? 's' : ''}</span></span>` : `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950/90 text-emerald-300 border border-emerald-700 flex items-center gap-1"><span>✓</span><span>No Full Scans</span></span>`}
+              ${filesortCount > 0 ? `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-950/90 text-amber-300 border border-amber-700 flex items-center gap-1"><span>⚠️</span><span>Filesort</span></span>` : ''}
+              ${indexScanCount > 0 ? `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-sky-950/90 text-sky-300 border border-sky-700 flex items-center gap-1"><span>🔑</span><span>${indexScanCount} Indexed</span></span>` : ''}
+            </div>
+          `;
+        }
+        return;
+      }
+
+      // No steps available at all
+      if (empty) empty.classList.remove('hidden');
+      if (summaryBar) summaryBar.innerHTML = '';
     }
 
     // --- Data Grid Rendering & Inline Edit ---
@@ -10374,9 +10893,35 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       }
     }
 
+    function toggleTopMonitorMenu(force = null) {
+      const menu = document.getElementById('top-monitor-menu');
+      if (!menu) return;
+      if (typeof force === 'boolean') {
+        menu.classList.toggle('hidden', !force);
+      } else {
+        menu.classList.toggle('hidden');
+      }
+    }
+
+    function toggleTopSettingsMenu(force = null) {
+      const menu = document.getElementById('top-settings-menu');
+      if (!menu) return;
+      if (typeof force === 'boolean') {
+        menu.classList.toggle('hidden', !force);
+      } else {
+        menu.classList.toggle('hidden');
+      }
+    }
+
     document.addEventListener('click', (e) => {
       if (!e.target.closest('#top-db-tools-container')) {
         toggleTopDBToolsMenu(false);
+      }
+      if (!e.target.closest('#top-monitor-container')) {
+        toggleTopMonitorMenu(false);
+      }
+      if (!e.target.closest('#top-settings-container')) {
+        toggleTopSettingsMenu(false);
       }
     });
 
@@ -14275,6 +14820,47 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
     document.addEventListener('mouseup', erdOnMouseUp);
     // --- End Visual ERD Canvas ---
 
+    function formatServerEngine(driverName, rawVersion) {
+      if (!rawVersion) {
+        if (driverName === 'mysql') return { label: 'MySQL', icon: '🐬' };
+        if (driverName === 'postgres') return { label: 'PostgreSQL', icon: '🐘' };
+        if (driverName === 'sqlite') return { label: 'SQLite', icon: '🪶' };
+        return { label: (driverName || 'DB').toUpperCase(), icon: '🗄️' };
+      }
+
+      const lower = rawVersion.toLowerCase();
+      if (lower.includes('mariadb')) {
+        const match = rawVersion.match(/(\d+\.\d+(\.\d+)?)/);
+        const ver = match ? match[1] : '';
+        return { label: ver ? `MariaDB ${ver}` : 'MariaDB', icon: '🦭', raw: rawVersion };
+      }
+      if (driverName === 'postgres' || lower.includes('postgres')) {
+        const match = rawVersion.match(/(\d+(\.\d+)?)/);
+        const ver = match ? match[1] : '';
+        return { label: ver ? `Postgres ${ver}` : 'Postgres', icon: '🐘', raw: rawVersion };
+      }
+      if (driverName === 'sqlite' || lower.includes('sqlite')) {
+        const match = rawVersion.match(/(\d+\.\d+(\.\d+)?)/);
+        const ver = match ? match[1] : '';
+        return { label: ver ? `SQLite ${ver}` : 'SQLite', icon: '🪶', raw: rawVersion };
+      }
+
+      const match = rawVersion.match(/(\d+\.\d+(\.\d+)?)/);
+      const ver = match ? match[1] : '';
+      return { label: ver ? `MySQL ${ver}` : 'MySQL', icon: '🐬', raw: rawVersion };
+    }
+
+    function formatServerUptime(seconds) {
+      if (!seconds || seconds <= 0) return '';
+      const d = Math.floor(seconds / 86400);
+      const h = Math.floor((seconds % 86400) / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+
+      if (d > 0) return `Up ${d}d ${h}h`;
+      if (h > 0) return `Up ${h}h ${m}m`;
+      return `Up ${m}m`;
+    }
+
     async function pingActiveSession() {
       if (!activeConnection) return;
       const latencyEl = document.getElementById('footer-latency');
@@ -14289,6 +14875,9 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
           if (activeSession) {
             activeSession.latency_ms = data.latency_ms;
             activeSession.memory_mb = data.memory_mb;
+            if (data.server_info) {
+              activeSession.server_info = data.server_info;
+            }
           }
           updateFooterStats(data.latency_ms, data.memory_mb);
         }
@@ -14303,16 +14892,55 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
     function updateFooterStats(latencyMs, memoryMb) {
       const footerEnv = document.getElementById('footer-env-badge');
       if (footerEnv) footerEnv.classList.add('hidden');
+
+      const engineEl = document.getElementById('footer-server-engine');
+      const dot1El = document.getElementById('footer-server-dot-1');
+      const dbInfoEl = document.getElementById('footer-db-info');
+      const dot2El = document.getElementById('footer-server-dot-2');
+      const uptimeEl = document.getElementById('footer-server-uptime');
+      const dot3El = document.getElementById('footer-server-dot-3');
+      const latencyEl = document.getElementById('footer-latency');
+      const memEl = document.getElementById('footer-memory');
+
       if (activeConnection) {
         const dbTarget = activeConnection.host ? `${activeConnection.host}:${activeConnection.port || 3306}` : (activeConnection.database_name || 'local');
-        const dbInfoEl = document.getElementById('footer-db-info');
+        const dbName = activeConnection.database_name ? ` / ${activeConnection.database_name}` : '';
         if (dbInfoEl) {
-          dbInfoEl.textContent = `${activeConnection.driver.toUpperCase()} (${dbTarget})`;
+          dbInfoEl.textContent = `${dbTarget}${dbName}`;
+          dbInfoEl.title = `Host: ${dbTarget} | Database: ${activeConnection.database_name || 'default'}`;
         }
+
+        const serverInfo = (activeSession && activeSession.server_info) ? activeSession.server_info : null;
+        const parsed = formatServerEngine(activeConnection.driver, serverInfo ? serverInfo.version : null);
+
+        if (engineEl) {
+          engineEl.textContent = `${parsed.icon} ${parsed.label}`;
+          engineEl.title = serverInfo ? `Server Version: ${serverInfo.version || parsed.label}${serverInfo.active_conns ? ` | Active Conns: ${serverInfo.active_conns}` : ''}` : parsed.label;
+          engineEl.classList.remove('hidden');
+        }
+        if (dot1El) dot1El.classList.remove('hidden');
+
+        if (serverInfo && serverInfo.uptime_sec > 0) {
+          const uptimeStr = formatServerUptime(serverInfo.uptime_sec);
+          if (uptimeStr && uptimeEl) {
+            uptimeEl.textContent = uptimeStr;
+            uptimeEl.title = `Server Uptime: ${uptimeStr} (${serverInfo.uptime_sec.toLocaleString()} seconds)`;
+            uptimeEl.classList.remove('hidden');
+            if (dot2El) dot2El.classList.remove('hidden');
+          } else {
+            if (uptimeEl) uptimeEl.classList.add('hidden');
+            if (dot2El) dot2El.classList.add('hidden');
+          }
+        } else {
+          if (uptimeEl) uptimeEl.classList.add('hidden');
+          if (dot2El) dot2El.classList.add('hidden');
+        }
+
+        if (dot3El) dot3El.classList.remove('hidden');
+
         const lat = latencyMs !== undefined ? latencyMs : (activeSession ? activeSession.latency_ms : null);
         const mem = memoryMb !== undefined ? memoryMb : (activeSession ? activeSession.memory_mb : null);
 
-        const latencyEl = document.getElementById('footer-latency');
         if (latencyEl) {
           if (lat !== null && lat !== undefined) {
             latencyEl.textContent = `Latency: ${lat}ms`;
@@ -14327,7 +14955,6 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
           }
         }
 
-        const memEl = document.getElementById('footer-memory');
         if (memEl) {
           if (mem !== null && mem !== undefined) {
             memEl.textContent = `Memory: ${mem}MB`;
@@ -14337,15 +14964,21 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
           }
         }
       } else {
-        const dbInfoEl = document.getElementById('footer-db-info');
-        if (dbInfoEl) dbInfoEl.textContent = 'No active connection';
-        const latencyEl = document.getElementById('footer-latency');
+        if (dbInfoEl) {
+          dbInfoEl.textContent = 'No active connection';
+          dbInfoEl.title = '';
+        }
+        if (engineEl) engineEl.classList.add('hidden');
+        if (dot1El) dot1El.classList.add('hidden');
+        if (dot2El) dot2El.classList.add('hidden');
+        if (uptimeEl) uptimeEl.classList.add('hidden');
+        if (dot3El) dot3El.classList.add('hidden');
+
         if (latencyEl) {
           latencyEl.textContent = 'Latency: --';
           latencyEl.className = 'text-slate-400 font-mono';
           latencyEl.title = '';
         }
-        const memEl = document.getElementById('footer-memory');
         if (memEl) memEl.textContent = 'Memory: --';
       }
     }
