@@ -4,6 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SqlFox - Database Manager</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="alternate icon" href="/favicon.ico">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#090d16">
   <script src="/vendor/tailwind/tailwind.min.js"></script>
   <script>
     tailwind.config = {
@@ -156,6 +161,62 @@
 </head>
 <body class="bg-app-bg text-slate-100 font-sans h-screen flex flex-col overflow-hidden select-none">
 
+  <!-- SqlFox Canonical Brand Mark Symbol -->
+  <svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="sqlfox-brand-mark" viewBox="0 0 512 512" shape-rendering="geometricPrecision">
+      <polygon points="256,140 200,140 108,48 170,180" fill="#c2410c" />
+      <polygon points="256,140 312,140 404,48 342,180" fill="#c2410c" />
+      <polygon points="108,48 76,210 170,180" fill="#ea580c" />
+      <polygon points="404,48 436,210 342,180" fill="#ea580c" />
+      <polygon points="170,180 116,68 196,150" fill="#1e293b" />
+      <polygon points="342,180 396,68 316,150" fill="#1e293b" />
+      <polygon points="170,180 196,150 216,190" fill="#f97316" />
+      <polygon points="342,180 316,150 296,190" fill="#f97316" />
+      <polygon points="256,140 216,190 256,224" fill="#fb923c" />
+      <polygon points="256,140 296,190 256,224" fill="#f97316" />
+      <polygon points="200,140 170,180 216,190" fill="#ea580c" />
+      <polygon points="312,140 342,180 296,190" fill="#ea580c" />
+      <polygon points="170,180 150,240 216,190" fill="#f97316" />
+      <polygon points="342,180 362,240 296,190" fill="#f97316" />
+      <polygon points="256,224 216,190 216,260 256,290" fill="#f97316" />
+      <polygon points="256,224 296,190 296,260 256,290" fill="#fb923c" />
+      <polygon points="216,190 150,240 216,260" fill="#ea580c" />
+      <polygon points="296,190 362,240 296,260" fill="#ea580c" />
+      <polygon points="76,210 52,280 150,240" fill="#f97316" />
+      <polygon points="436,210 460,280 362,240" fill="#f97316" />
+      <polygon points="52,280 36,330 130,310" fill="#fb923c" />
+      <polygon points="460,280 476,330 382,310" fill="#fb923c" />
+      <polygon points="150,240 52,280 130,310" fill="#ea580c" />
+      <polygon points="362,240 460,280 382,310" fill="#ea580c" />
+      <polygon points="36,330 100,390 130,310" fill="#f1f5f9" />
+      <polygon points="476,330 412,390 382,310" fill="#f1f5f9" />
+      <polygon points="130,310 100,390 190,350" fill="#ffffff" />
+      <polygon points="382,310 412,390 322,350" fill="#ffffff" />
+      <polygon points="150,240 130,310 190,300" fill="#ea580c" />
+      <polygon points="362,240 382,310 322,300" fill="#ea580c" />
+      <polygon points="190,300 130,310 190,350" fill="#cbd5e1" />
+      <polygon points="322,300 382,310 322,350" fill="#cbd5e1" />
+      <polygon points="162,252 212,268 178,280" fill="#38bdf8" />
+      <polygon points="178,280 212,268 206,276" fill="#0284c7" />
+      <polygon points="174,260 194,266 182,274" fill="#7dd3fc" />
+      <polygon points="350,252 300,268 334,280" fill="#38bdf8" />
+      <polygon points="334,280 300,268 306,276" fill="#0284c7" />
+      <polygon points="338,260 318,266 330,274" fill="#7dd3fc" />
+      <polygon points="256,290 216,260 210,350" fill="#fb923c" />
+      <polygon points="256,290 296,260 302,350" fill="#f97316" />
+      <polygon points="256,290 210,350 256,390" fill="#fb923c" />
+      <polygon points="256,290 302,350 256,390" fill="#f97316" />
+      <polygon points="210,350 190,350 220,420 256,420" fill="#ffffff" />
+      <polygon points="302,350 322,350 292,420 256,420" fill="#f1f5f9" />
+      <polygon points="210,350 256,390 256,420" fill="#ffffff" />
+      <polygon points="302,350 256,390 256,420" fill="#f1f5f9" />
+      <polygon points="220,420 256,420 256,464" fill="#f1f5f9" />
+      <polygon points="292,420 256,420 256,464" fill="#cbd5e1" />
+      <polygon points="256,422 242,436 270,436" fill="#090d16" />
+      <polygon points="242,436 270,436 256,448" fill="#090d16" />
+    </symbol>
+  </svg>
+
   <!-- Ambient Top Accent Stripe (Active on Production) -->
   <div id="top-ambient-stripe" class="hidden h-[2px] w-full bg-rose-500 flex-shrink-0 z-50"></div>
 
@@ -167,7 +228,7 @@
       </button>
 
       <div class="flex items-center space-x-2">
-        <span class="text-xl">🦊</span>
+        <svg class="w-6 h-6 flex-shrink-0" aria-label="SqlFox Logo"><use href="#sqlfox-brand-mark"/></svg>
         <span class="font-bold tracking-wide text-white text-base">Sql<span class="text-app-accent">Fox</span></span>
       </div>
 
@@ -1473,11 +1534,13 @@
         <span class="underline decoration-slate-600 underline-offset-2">Shortcuts</span>
       </button>
       <div id="footer-version-wrap" class="flex items-center space-x-1.5 font-mono">
-        <button id="footer-update-btn" onclick="checkOrOpenUpdate(true)" class="hidden items-center space-x-1 text-emerald-400 bg-emerald-950/80 border border-emerald-700/60 hover:bg-emerald-900/80 px-2 py-0.5 rounded text-[10px] font-semibold transition animate-pulse cursor-pointer shadow-sm shadow-emerald-900/30" title="Click to view changelog and update SqlFox">
+        <button id="footer-update-btn" onclick="checkOrOpenUpdate(true)" class="hidden items-center space-x-1 text-emerald-400 bg-emerald-950/80 border border-emerald-700/60 hover:bg-emerald-900/80 px-2 py-0.5 rounded text-[10px] font-semibold transition animate-pulse cursor-pointer shadow-sm shadow-emerald-900/30" title="Click to view release notes and update SqlFox">
           <span>🚀</span>
           <span id="footer-update-badge-text">Update Available</span>
         </button>
-        <span id="footer-version-text" onclick="checkOrOpenUpdate(true)" class="text-slate-400 hover:text-slate-200 cursor-pointer transition select-none" title="Click to check for updates">SqlFox v0.1.0</span>
+        <button id="footer-version-btn" onclick="openChangelogDialog()" class="text-slate-400 hover:text-slate-200 cursor-pointer transition select-none flex items-center space-x-1 hover:bg-slate-800/60 px-1.5 py-0.5 rounded text-left font-mono" title="Click to view Changelog">
+          <span id="footer-version-text">SqlFox v0.1.0</span>
+        </button>
       </div>
     </div>
   </footer>
@@ -1520,10 +1583,16 @@
 
         <!-- Changelog Content -->
         <div>
-          <h4 class="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2 flex items-center space-x-1.5">
-            <span>📋</span>
-            <span>What's Changed in this Release</span>
-          </h4>
+          <div class="flex items-center justify-between mb-2">
+            <h4 class="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center space-x-1.5">
+              <span>📋</span>
+              <span>What's Changed in this Release</span>
+            </h4>
+            <button type="button" onclick="openChangelogDialog()" class="text-[11px] text-sky-400 hover:text-sky-300 hover:underline cursor-pointer flex items-center space-x-1" title="View complete changelog history">
+              <span>📜</span>
+              <span>Full Changelog</span>
+            </button>
+          </div>
           <div id="update-changelog-body" class="bg-slate-950/80 border border-slate-800 rounded-xl p-4 text-xs text-slate-300 leading-relaxed max-h-[300px] overflow-y-auto font-sans space-y-2">
             <!-- Rendered Markdown goes here -->
           </div>
@@ -1555,6 +1624,46 @@
             <span>Update Now</span>
           </button>
         </div>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Changelog Viewer Modal Dialog -->
+  <dialog id="changelog-dialog" class="bg-transparent backdrop:bg-black/75 p-0 rounded-2xl max-w-2xl w-full text-slate-200 shadow-2xl border border-app-border overflow-hidden">
+    <div class="bg-slate-900 flex flex-col max-h-[85vh] rounded-2xl">
+      <!-- Header -->
+      <div class="px-6 py-4 bg-slate-950 border-b border-app-border flex items-center justify-between flex-shrink-0">
+        <div class="flex items-center space-x-3">
+          <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500/20 to-sky-500/20 border border-indigo-500/30 flex items-center justify-center text-lg">
+            📜
+          </div>
+          <div>
+            <div class="flex items-center space-x-2">
+              <h3 class="font-semibold text-white text-base">SqlFox Changelog</h3>
+              <span id="changelog-current-badge" class="px-2 py-0.5 rounded-full text-[11px] font-mono font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/30">v0.1.0</span>
+            </div>
+            <p class="text-xs text-slate-400 mt-0.5">Application release history & notable changes</p>
+          </div>
+        </div>
+        <button onclick="closeChangelogDialog()" class="text-slate-400 hover:text-white hover:bg-slate-800 p-1.5 rounded-lg transition" title="Close (Esc)">✕</button>
+      </div>
+
+      <!-- Body / Changelog Content -->
+      <div class="p-6 overflow-y-auto space-y-4 flex-1 custom-scrollbar">
+        <div id="changelog-modal-body" class="bg-slate-950/80 border border-slate-800 rounded-xl p-5 text-xs text-slate-300 leading-relaxed font-sans space-y-3">
+          <div class="flex items-center justify-center py-8 text-slate-400">
+            <span class="animate-spin mr-2">⏳</span> Loading changelog...
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer Actions -->
+      <div class="px-6 py-3.5 bg-slate-950 border-t border-app-border flex items-center justify-between flex-shrink-0">
+        <a id="changelog-github-link" href="https://github.com/herliansyah/sqlfox/blob/main/CHANGELOG.md" target="_blank" rel="noopener noreferrer" class="text-xs text-slate-400 hover:text-white transition flex items-center space-x-1.5">
+          <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          <span>View on GitHub</span>
+        </a>
+        <button onclick="closeChangelogDialog()" class="px-4 py-1.5 text-xs text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition font-medium">Close</button>
       </div>
     </div>
   </dialog>
@@ -1678,7 +1787,10 @@
   <!-- 0. Remote Access Guard Lock Screen -->
   <div id="remote-lock-modal" class="fixed inset-0 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 z-[100] hidden">
     <div class="bg-slate-900 border-2 border-app-accent w-full max-w-sm rounded-xl shadow-2xl p-6 space-y-4 text-center">
-      <div class="text-4xl">🦊🔒</div>
+      <div class="flex justify-center items-center space-x-2 py-1">
+        <svg class="w-12 h-12 flex-shrink-0" aria-label="SqlFox Logo"><use href="#sqlfox-brand-mark"/></svg>
+        <span class="text-3xl">🔒</span>
+      </div>
       <h2 class="text-base font-bold text-white tracking-wide">SqlFox Remote Access Guard</h2>
       <p class="text-xs text-slate-400 leading-relaxed">You are accessing SqlFox from a network device. Please enter your Master Password to unlock this vault.</p>
       <form onsubmit="unlockRemoteVault(event)" class="space-y-3 pt-2">
@@ -2011,7 +2123,9 @@
   <dialog id="app-native-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-md w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm">
     <div class="space-y-4">
       <div class="flex items-center space-x-2 border-b border-slate-800 pb-2">
-        <span id="app-native-dialog-icon" class="text-xl">🦊</span>
+        <span id="app-native-dialog-icon" class="flex-shrink-0 flex items-center">
+          <svg class="w-5 h-5" aria-label="SqlFox Logo"><use href="#sqlfox-brand-mark"/></svg>
+        </span>
         <h3 id="app-native-dialog-title" class="text-sm font-bold text-white">Notification</h3>
       </div>
       <p id="app-native-dialog-body" class="text-xs text-slate-300 whitespace-pre-wrap leading-relaxed max-h-80 overflow-y-auto"></p>
@@ -13060,11 +13174,12 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
           closeProcessContextMenu();
           closeProfileView();
           closeUpdateDialog();
+          closeChangelogDialog();
         }
       });
 
       // Close native dialogs when clicking on backdrop
-      ['snippets-manager-dialog', 'snippet-param-dialog', 'database-creator-dialog', 'csv-import-dialog', 'schema-search-modal', 'db-diagnostics-dialog', 'privilege-matrix-dialog', 'pl-detail-modal', 'update-dialog'].forEach(id => {
+      ['snippets-manager-dialog', 'snippet-param-dialog', 'database-creator-dialog', 'csv-import-dialog', 'schema-search-modal', 'db-diagnostics-dialog', 'privilege-matrix-dialog', 'pl-detail-modal', 'update-dialog', 'changelog-dialog'].forEach(id => {
         const dlg = document.getElementById(id);
         if (dlg) {
           dlg.addEventListener('click', (e) => {
@@ -13152,7 +13267,8 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
         { name: 'Toggle Read-Only Mode', shortcut: '', run: () => toggleReadOnly() },
         { name: 'Export Vault (.sqlfox-vault)', shortcut: '', run: () => openExportImportModal() },
         { name: 'Toggle AI Copilot', shortcut: 'Ctrl+L', run: () => toggleAISidebar() },
-        { name: 'Check for Updates', shortcut: '', run: () => checkOrOpenUpdate(true) }
+        { name: 'Check for Updates', shortcut: '', run: () => checkOrOpenUpdate(true) },
+        { name: 'View Changelog', shortcut: '', run: () => openChangelogDialog() }
       ];
 
       const list = document.getElementById('palette-actions-list');
@@ -13185,6 +13301,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       else if (name === 'Export Vault (.sqlfox-vault)') openExportImportModal();
       else if (name === 'Toggle AI Copilot') toggleAISidebar();
       else if (name === 'Check for Updates') checkOrOpenUpdate(true);
+      else if (name === 'View Changelog') openChangelogDialog();
     }
 
     // --- Table Diagnostics Handlers ---
@@ -14341,6 +14458,57 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
 
     function closeUpdateDialog() {
       const dialog = document.getElementById('update-dialog');
+      if (dialog && typeof dialog.close === 'function') {
+        dialog.close();
+      }
+    }
+
+    let cachedChangelog = null;
+
+    async function openChangelogDialog() {
+      const dialog = document.getElementById('changelog-dialog');
+      if (!dialog) return;
+
+      const bodyEl = document.getElementById('changelog-modal-body');
+      const badgeEl = document.getElementById('changelog-current-badge');
+      const verTextEl = document.getElementById('footer-version-text');
+
+      if (badgeEl && verTextEl) {
+        badgeEl.textContent = verTextEl.textContent.replace('SqlFox ', '') || 'v0.1.0';
+      }
+
+      if (typeof dialog.showModal === 'function') {
+        dialog.showModal();
+      }
+
+      if (cachedChangelog && bodyEl) {
+        bodyEl.innerHTML = renderCopilotMarkdown(cachedChangelog);
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/system/changelog');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data.changelog && bodyEl) {
+          cachedChangelog = data.changelog;
+          bodyEl.innerHTML = renderCopilotMarkdown(data.changelog);
+          if (data.version && badgeEl) {
+            badgeEl.textContent = data.version;
+          }
+        } else if (bodyEl) {
+          bodyEl.innerHTML = '<p class="text-slate-400 italic">No changelog entries found.</p>';
+        }
+      } catch (err) {
+        console.error('Failed to load changelog:', err);
+        if (bodyEl) {
+          bodyEl.innerHTML = `<p class="text-rose-400">Failed to load changelog: ${escapeHtml(err.message)}</p>`;
+        }
+      }
+    }
+
+    function closeChangelogDialog() {
+      const dialog = document.getElementById('changelog-dialog');
       if (dialog && typeof dialog.close === 'function') {
         dialog.close();
       }

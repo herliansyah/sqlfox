@@ -172,6 +172,7 @@ func (s *Server) routes() {
 	// System / Update Engine endpoints
 	mux.HandleFunc("GET /api/system/update/check", s.handleCheckUpdate)
 	mux.HandleFunc("POST /api/system/update/apply", s.handleApplyUpdate)
+	mux.HandleFunc("GET /api/system/changelog", s.handleGetChangelog)
 
 	// Profiling endpoints (conditional on SQLFOX_PPROF=1)
 	s.registerPprof(mux)

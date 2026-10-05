@@ -1,8 +1,12 @@
 <div align="center">
 
-# 🦊 SqlFox
+  <a href="https://github.com/herliansyah/sqlfox">
+    <img src="docs/assets/logo.svg" alt="SqlFox Logo" width="128" height="128" />
+  </a>
 
-### High-Performance Modern Database Manager & Viewer with AI Copilot & Safety Guard
+  <h1>SqlFox</h1>
+
+  <p><b>High-Performance Modern Database Manager &amp; Viewer with AI Copilot &amp; Safety Guard</b></p>
 
 [![GitHub Release](https://img.shields.io/github/v/release/herliansyah/sqlfox?style=flat-square&color=FF6B35&logo=github)](https://github.com/herliansyah/sqlfox/releases)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/herliansyah/sqlfox?style=flat-square&color=00ADD8&logo=go)](https://golang.org)
