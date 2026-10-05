@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -99,16 +100,24 @@ func (s *Server) handleImportCSV(w http.ResponseWriter, r *http.Request) {
 		_ = sess.Session.SelectDatabase(ctx, dbName)
 	}
 
+	importStart := time.Now()
 	res, err := dataimport.Import(ctx, sess.Session, tableName, fileReader, dataimport.ImportOptions{
 		Delimiter:   delimiter,
 		EmptyAsNull: emptyAsNullParam,
 		SkipErrors:  skipErrorsParam,
 		Mapping:     mapping,
 	})
+	importDur := time.Since(importStart).Milliseconds()
 	if err != nil {
+		sess.RecordAudit(fmt.Sprintf("-- CSV Import failed for table %s", tableName), "csv_import", importDur, 0, err, importStart)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	var importedCount int64
+	if res != nil {
+		importedCount = int64(res.ImportedRows)
+	}
+	sess.RecordAudit(fmt.Sprintf("-- CSV Import into %s (%d rows inserted)", tableName, importedCount), "csv_import", importDur, importedCount, nil, importStart)
 
 	writeJSON(w, http.StatusOK, res)
 }

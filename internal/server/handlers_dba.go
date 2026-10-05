@@ -103,8 +103,9 @@ func (s *Server) handleGetAuditLogs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	search := r.URL.Query().Get("search")
+	source := r.URL.Query().Get("source")
 
-	logs, total, err := s.vault.ListAuditLogs(connID, limit, offset, search)
+	logs, total, err := s.vault.ListAuditLogs(connID, limit, offset, search, source)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list audit logs: "+err.Error())
 		return

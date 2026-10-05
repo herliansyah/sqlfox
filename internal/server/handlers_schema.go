@@ -535,13 +535,18 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		cellStart := time.Now()
 		res, err := sess.Session.Exec(ctx, updateSQL)
+		cellDur := time.Since(cellStart).Milliseconds()
+		var cellAffected int64
+		if res != nil {
+			cellAffected = res.RowsAffected
+			totalAffected += res.RowsAffected
+		}
+		sess.RecordAudit(updateSQL, "grid_cell_edit", cellDur, cellAffected, err, cellStart)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to update cell: "+err.Error())
 			return
-		}
-		if res != nil {
-			totalAffected += res.RowsAffected
 		}
 	}
 

@@ -6,12 +6,13 @@ import (
 	"time"
 )
 
-// AuditLogRecord tracks an executed SQL statement within a session.
+// AuditLogRecord tracks an executed SQL statement or data mutation within a session.
 type AuditLogRecord struct {
 	ID           string    `json:"id"`
 	SessionID    string    `json:"session_id"`
 	ConnectionID string    `json:"connection_id"`
 	QuerySQL     string    `json:"query_sql"`
+	Source       string    `json:"source"`
 	DurationMs   int64     `json:"duration_ms"`
 	RowsAffected int64     `json:"rows_affected"`
 	Error        string    `json:"error"`
@@ -29,16 +30,20 @@ func (v *Vault) RecordAuditLog(log *AuditLogRecord) error {
 	if log.ExecutedAt.IsZero() {
 		log.ExecutedAt = time.Now()
 	}
+	if log.Source == "" {
+		log.Source = "editor"
+	}
 
 	query := `
-	INSERT INTO audit_logs (id, session_id, connection_id, query_sql, duration_ms, rows_affected, error, executed_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO audit_logs (id, session_id, connection_id, query_sql, source, duration_ms, rows_affected, error, executed_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	_, err := v.db.Exec(query,
 		log.ID,
 		log.SessionID,
 		log.ConnectionID,
 		log.QuerySQL,
+		log.Source,
 		log.DurationMs,
 		log.RowsAffected,
 		log.Error,
@@ -50,8 +55,8 @@ func (v *Vault) RecordAuditLog(log *AuditLogRecord) error {
 	return nil
 }
 
-// ListAuditLogs returns paginated audit records for a session, optionally filtered by search text.
-func (v *Vault) ListAuditLogs(sessionID string, limit, offset int, search string) ([]*AuditLogRecord, int, error) {
+// ListAuditLogs returns paginated audit records for a session, optionally filtered by search text and source.
+func (v *Vault) ListAuditLogs(sessionID string, limit, offset int, search, source string) ([]*AuditLogRecord, int, error) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 
@@ -70,13 +75,17 @@ func (v *Vault) ListAuditLogs(sessionID string, limit, offset int, search string
 		countQuery += " AND query_sql LIKE ?"
 		countArgs = append(countArgs, "%"+search+"%")
 	}
+	if source != "" && source != "all" {
+		countQuery += " AND source = ?"
+		countArgs = append(countArgs, source)
+	}
 
 	if err := v.db.QueryRow(countQuery, countArgs...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("failed to count audit logs: %w", err)
 	}
 
 	selectQuery := `
-	SELECT id, session_id, connection_id, query_sql, duration_ms, rows_affected, error, executed_at
+	SELECT id, session_id, connection_id, query_sql, source, duration_ms, rows_affected, error, executed_at
 	FROM audit_logs
 	WHERE (session_id = ? OR connection_id = ?)
 	`
@@ -85,6 +94,10 @@ func (v *Vault) ListAuditLogs(sessionID string, limit, offset int, search string
 	if search != "" {
 		selectQuery += " AND query_sql LIKE ?"
 		selectArgs = append(selectArgs, "%"+search+"%")
+	}
+	if source != "" && source != "all" {
+		selectQuery += " AND source = ?"
+		selectArgs = append(selectArgs, source)
 	}
 
 	selectQuery += " ORDER BY executed_at DESC LIMIT ? OFFSET ?"
@@ -100,11 +113,13 @@ func (v *Vault) ListAuditLogs(sessionID string, limit, offset int, search string
 	for rows.Next() {
 		var l AuditLogRecord
 		var errStr sql.NullString
+		var srcStr sql.NullString
 		if err := rows.Scan(
 			&l.ID,
 			&l.SessionID,
 			&l.ConnectionID,
 			&l.QuerySQL,
+			&srcStr,
 			&l.DurationMs,
 			&l.RowsAffected,
 			&errStr,
@@ -113,6 +128,10 @@ func (v *Vault) ListAuditLogs(sessionID string, limit, offset int, search string
 			return nil, 0, fmt.Errorf("failed to scan audit log: %w", err)
 		}
 		l.Error = errStr.String
+		l.Source = srcStr.String
+		if l.Source == "" {
+			l.Source = "editor"
+		}
 		logs = append(logs, &l)
 	}
 

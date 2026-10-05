@@ -70,7 +70,20 @@ func (s *Server) handleInsertRow(w http.ResponseWriter, r *http.Request) {
 
 	_ = sess.UseDatabase(ctx, req.Database)
 
+	var valStrs []string
+	for _, a := range args {
+		valStrs = append(valStrs, driver.FormatSQLValue(a))
+	}
+	auditSQL := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", targetTable, strings.Join(cols, ", "), strings.Join(valStrs, ", "))
+
+	insertStart := time.Now()
 	res, err := sess.Session.Exec(ctx, sqlQuery, args...)
+	insertDur := time.Since(insertStart).Milliseconds()
+	var affected int64
+	if res != nil {
+		affected = res.RowsAffected
+	}
+	sess.RecordAudit(auditSQL, "grid_insert", insertDur, affected, err, insertStart)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "insert failed: "+err.Error())
 		return
@@ -124,20 +137,27 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 		targetPK := quoteIdent(req.PKColumn, sess.DriverName)
 		placeholders := make([]string, len(req.PKValues))
 		args := make([]any, len(req.PKValues))
+		valStrs := make([]string, len(req.PKValues))
 		for i, v := range req.PKValues {
 			placeholders[i] = "?"
 			args[i] = v
+			valStrs[i] = driver.FormatSQLValue(v)
 		}
 
 		sqlQuery := fmt.Sprintf("DELETE FROM %s WHERE %s IN (%s)", targetTable, targetPK, strings.Join(placeholders, ", "))
+		auditSQL := fmt.Sprintf("DELETE FROM %s WHERE %s IN (%s)", targetTable, targetPK, strings.Join(valStrs, ", "))
+
+		delStart := time.Now()
 		res, err := sess.Session.Exec(ctx, sqlQuery, args...)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "delete failed: "+err.Error())
-			return
-		}
+		delDur := time.Since(delStart).Milliseconds()
 		if res != nil {
 			totalAffected = res.RowsAffected
 			execMs = res.ExecutionMs
+		}
+		sess.RecordAudit(auditSQL, "grid_delete", delDur, totalAffected, err, delStart)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "delete failed: "+err.Error())
+			return
 		}
 	} else if len(req.RowCriterias) > 0 {
 		start := time.Now()
@@ -155,13 +175,18 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			delSQL := fmt.Sprintf("DELETE FROM %s WHERE %s%s", targetTable, strings.Join(whereParts, " AND "), limitClause)
+			rowStart := time.Now()
 			res, err := sess.Session.Exec(ctx, delSQL)
+			rowDur := time.Since(rowStart).Milliseconds()
+			var rowAffected int64
+			if res != nil {
+				rowAffected = res.RowsAffected
+				totalAffected += res.RowsAffected
+			}
+			sess.RecordAudit(delSQL, "grid_delete", rowDur, rowAffected, err, rowStart)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "delete failed: "+err.Error())
 				return
-			}
-			if res != nil {
-				totalAffected += res.RowsAffected
 			}
 		}
 		execMs = time.Since(start).Milliseconds()
