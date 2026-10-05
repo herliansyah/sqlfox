@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Heuristic Index Advisor**: Automated index recommendations, index bloat guards, and safe DDL migration generation.
 - **Headless CLI Suite**: Automated query execution runner, cross-connection data transfer, and declarative cron task runner.
 - **Streaming SQL Dumps & Row Sync**: Fast streaming schema/data export, referential slice seeding, and cross-connection synchronization.
+- **Canonical Brand Mark & App Icon Set**: Standardized cross-platform visual identity featuring geometric low-poly vector Fox Brand Mark (`docs/assets/logo.svg`, `web/dist/assets/logo.svg`), multi-resolution Windows ICO (`favicon.ico`, `icon.ico`), Apple Touch Icon (`apple-touch-icon.png`), and standalone PWA manifest (`manifest.webmanifest`).
+- **Native Windows PE Icon Embedding**: Pre-compiled multi-arch COFF resource objects (`rsrc_windows_amd64.syso`, `rsrc_windows_arm64.syso`) embedding the Brand Mark into `sqlfox.exe` during standard Go compilation.
+- **In-App Titlebar & Modal SVG Branding**: Inline crisp SVG Brand Mark in navbar header, native confirmation dialogs, and remote lock screen, replacing OS-dependent emoji placeholders.
 - **In-App Self-Update Engine**: Native zero-dependency self-update mechanism with platform-specific binary replacement and graceful restart.
 - **Author Attribution & Support**: Integrated creator credits and Saweria sponsorship link in status bar footer.
 
