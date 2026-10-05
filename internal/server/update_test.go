@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -278,4 +279,37 @@ func TestHandleApplyUpdate(t *testing.T) {
 		t.Errorf("expected restartFn to have been called")
 	}
 }
+
+func TestHandleGetChangelog(t *testing.T) {
+	srv := &Server{}
+	srv.SetVersion("v0.1.0")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/system/changelog", nil)
+	rr := httptest.NewRecorder()
+
+	srv.handleGetChangelog(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode JSON response: %v", err)
+	}
+
+	if resp["version"] != "v0.1.0" {
+		t.Errorf("expected version 'v0.1.0', got %v", resp["version"])
+	}
+
+	changelog, ok := resp["changelog"].(string)
+	if !ok || len(changelog) == 0 {
+		t.Fatalf("expected non-empty changelog string, got %v", resp["changelog"])
+	}
+
+	if !strings.Contains(changelog, "Keep a Changelog") {
+		t.Errorf("expected changelog to contain 'Keep a Changelog'")
+	}
+}
+
 

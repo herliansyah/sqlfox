@@ -461,3 +461,37 @@ func extractFromZipStream(r io.Reader, destPath string) error {
 	}
 	return fmt.Errorf("sqlfox binary not found in zip archive")
 }
+
+// handleGetChangelog handles GET /api/system/changelog
+func (s *Server) handleGetChangelog(w http.ResponseWriter, r *http.Request) {
+	// ponytail: read local CHANGELOG.md during dev/tests, fallback to embedded asset
+	var content []byte
+	var err error
+
+	for _, p := range []string{"CHANGELOG.md", "../../CHANGELOG.md"} {
+		if data, readErr := os.ReadFile(p); readErr == nil && len(data) > 0 {
+			content = data
+			err = nil
+			break
+		}
+	}
+
+	if (err != nil || len(content) == 0) && s.assets != nil {
+		if f, openErr := s.assets.Open("CHANGELOG.md"); openErr == nil {
+			defer f.Close()
+			content, err = io.ReadAll(f)
+		}
+	}
+
+	if err != nil || len(content) == 0 {
+		writeError(w, http.StatusNotFound, "Changelog not found")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"version":   s.GetVersion(),
+		"changelog": string(content),
+	})
+}
+

@@ -585,4 +585,17 @@ _Avoid_: Footer branding, watermark, sponsor banner
 A passive, non-intrusive external hyperlink in the status bar footer pointing directly to the author's Saweria funding page (`https://saweria.co/herliansyah26`) for user-supported project appreciation without popups or interstitial modals.
 _Avoid_: Donation popup, paywall, donation nag
 
+**Changelog**:
+The canonical, structured human-readable document (`CHANGELOG.md`) tracking notable application changes across releases, formatted strictly under the Keep a Changelog standard and Semantic Versioning.
+_Avoid_: Release notes file, update log, commit digest
+
+**Release Routine**:
+The deterministic, script-driven protocol (`scripts/release.sh`) for cutting a release: running test pre-flights, advancing `[Unreleased]` changes to a dated semver heading, bumping code version constants, committing, creating annotated git tags, and triggering multi-platform CI release builds.
+_Avoid_: Manual tag, ad-hoc release, unversioned bump
+
+**Changelog Viewer**:
+The native HTML5 modal dialog (`#changelog-dialog`) presenting complete application history and offline-accessible release logs rendered from embedded markdown, accessible directly from the footer version element and Command Palette.
+_Avoid_: Release popup, changelog window, version toast
+
+
 
