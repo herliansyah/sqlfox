@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Handled Windows executable locking during in-app self-update via rename staging.
 - Synchronized update restart hooks to eliminate timing races on Windows CI runners.
 - Fixed Windows path resolution in declarative job specification JSON loading.
+- Fixed invalid secrets context in release workflow npm publish conditional.
 
 ---
 
