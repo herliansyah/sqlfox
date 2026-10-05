@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.2.0] - 2026-10-05
+
 ### Added
 - **Visual Table Structure Designer**: HeidiSQL-inspired schema designer with native dialogs, indexed column configurators, and cross-database autocomplete.
 - **Visual Query Plan Tree & Grid**: Graphical explain plan inspector with bottleneck badges, cost breakdowns, and offline schema introspection tooling.
