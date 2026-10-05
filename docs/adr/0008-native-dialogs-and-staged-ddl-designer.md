@@ -1,6 +1,6 @@
 # 0008: Native HTML5 Dialogs and Staged DDL Table Designer
 
-To replace primitive blocking browser dialogs (`window.alert`, `window.confirm`) and enable full GUI database structure management (similar to HeidiSQL), SqlFox adopts the standard HTML5 `<dialog>` API and a draft-staged DDL modification pipeline.
+To replace primitive blocking browser dialogs (`window.alert`, `window.confirm`) and enable full GUI database structure management, SqlFox adopts the standard HTML5 `<dialog>` API and a draft-staged DDL modification pipeline.
 
 ## Considered Options
 
@@ -13,5 +13,5 @@ To replace primitive blocking browser dialogs (`window.alert`, `window.confirm`)
 ## Consequences
 
 - All notifications, confirmations, and safety inspections use standardized native `<dialog>` modals with consistent dark theme visual hierarchy.
-- Database tables, views, and triggers can be created, altered, and dropped visually through a HeidiSQL-inspired interface.
+- Database tables, views, and triggers can be created, altered, and dropped visually through an intuitive visual interface.
 - DDL modifications remain deterministic, auditable, and safe against accidental schema destruction.

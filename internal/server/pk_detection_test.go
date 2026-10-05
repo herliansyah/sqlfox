@@ -119,7 +119,7 @@ func TestGetTableRows_PrimaryKeyDetection(t *testing.T) {
 		t.Fatalf("expected pk_col to be 'product_id', got %q", resProd.PKCol)
 	}
 
-	// 6. Test table with UNIQUE KEY but NO primary key (HeidiSQL behavior: uses unique key as pk_col)
+	// 6. Test table with UNIQUE KEY but NO primary key (uses unique key as pk_col)
 	_, err = sess.Session.Exec(ctx, "CREATE TABLE unique_items (uuid TEXT UNIQUE, label TEXT)")
 	if err != nil {
 		t.Fatalf("failed to create unique_items table: %v", err)
@@ -139,7 +139,7 @@ func TestGetTableRows_PrimaryKeyDetection(t *testing.T) {
 	}
 }
 
-func TestInlineEditWithoutPrimaryKey_HeidiSQLStyle(t *testing.T) {
+func TestInlineEditWithoutPrimaryKey_RowCriteria(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "sqlfox-nopk-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
@@ -183,7 +183,7 @@ func TestInlineEditWithoutPrimaryKey_HeidiSQLStyle(t *testing.T) {
 		t.Fatalf("failed to insert data: %v", err)
 	}
 
-	// 1. Test cell-edit using row_criteria (HeidiSQL style when table has no PK)
+	// 1. Test cell-edit using row_criteria (when table has no PK)
 	editPayload := map[string]any{
 		"table":  "audit_records",
 		"column": "count",
@@ -212,7 +212,7 @@ func TestInlineEditWithoutPrimaryKey_HeidiSQLStyle(t *testing.T) {
 		t.Fatalf("expected updated count to be 5, got %v", qRows[0][0])
 	}
 
-	// 2. Test delete-rows using row_criterias (HeidiSQL style when table has no PK)
+	// 2. Test delete-rows using row_criterias (when table has no PK)
 	delPayload := map[string]any{
 		"table": "audit_records",
 		"row_criterias": []map[string]any{

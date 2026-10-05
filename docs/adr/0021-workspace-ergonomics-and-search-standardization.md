@@ -1,6 +1,6 @@
 # 0021: Workspace Ergonomics, Shortcuts Discovery, and Search Standardization
 
-To elevate desktop productivity and align with HeidiSQL and TablePlus usability standards, SqlFox unifies top navbar button sizing, centralizes keyboard shortcuts discovery, implements collapsible schema sections, and standardizes search/filter textboxes across all toolbars and dialogs.
+To elevate desktop productivity and align with TablePlus usability standards, SqlFox unifies top navbar button sizing, centralizes keyboard shortcuts discovery, implements collapsible schema sections, and standardizes search/filter textboxes across all toolbars and dialogs.
 
 ## Context & Problem
 
@@ -46,7 +46,7 @@ As SqlFox evolved through multiple DBA diagnostics and management capabilities, 
 
 ## Consequences
 
-- Clean, uncluttered, professional desktop interface consistent with modern tools like TablePlus and HeidiSQL.
+- Clean, uncluttered, professional desktop interface consistent with modern tools like TablePlus.
 - Significantly faster navigation in large databases through collapsible sections.
 - Predictable and unified search/filter behavior across every modal and toolbar in the application.
 - Zero external libraries or frontend build step required; all improvements implemented using native vanilla DOM and Tailwind utility classes.
