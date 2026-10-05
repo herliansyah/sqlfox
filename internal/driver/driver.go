@@ -110,6 +110,9 @@ type Session interface {
 	// InspectClusterHealth returns cluster topology, synchronization health, and bottleneck diagnostics.
 	InspectClusterHealth(ctx context.Context) (*ClusterHealthReport, error)
 
+	// InspectServerVariables introspects server configuration parameters and evaluates tuning heuristics.
+	InspectServerVariables(ctx context.Context) (*ServerVariablesReport, error)
+
 	// SampleFlightMetrics captures an on-demand performance telemetry slice with correlated active queries.
 	SampleFlightMetrics(ctx context.Context) (*FlightMetricSample, error)
 
@@ -560,8 +563,47 @@ type ClusterHealthReport struct {
 	BottleneckSeverity  string            `json:"bottleneck_severity,omitempty"` // "ok", "warning", "critical"
 	SlowestNode         string            `json:"slowest_node,omitempty"`
 	Nodes               []ClusterNodeInfo `json:"nodes,omitempty"`
-	Replication         *ReplicationInfo  `json:"replication,omitempty"`
-	TriMetric           TriMetricStats    `json:"tri_metric"`
+	Replication         *ReplicationInfo     `json:"replication,omitempty"`
+	TriMetric           TriMetricStats       `json:"tri_metric"`
+	TuningChecks        []ClusterTuningCheck `json:"tuning_checks,omitempty"`
+}
+
+// ClusterTuningCheck evaluates a critical cluster configuration knob against operational guardrails.
+type ClusterTuningCheck struct {
+	Variable     string `json:"variable"`
+	CurrentValue string `json:"current_value"`
+	Recommended  string `json:"recommended"`
+	Status       string `json:"status"` // "optimal", "warning", "critical"
+	Summary      string `json:"summary"`
+	TradeOff     string `json:"trade_off,omitempty"`
+	Remediation  string `json:"remediation,omitempty"`
+}
+
+// ServerVariable represents an engine configuration parameter annotated with heuristic tuning advice.
+type ServerVariable struct {
+	Name             string `json:"name"`
+	Value            string `json:"value"`
+	Scope            string `json:"scope,omitempty"`      // "Global", "Session", "Both"
+	IsDynamic        bool   `json:"is_dynamic"`           // can be changed live without restart
+	Category         string `json:"category"`             // "Cluster & WSREP", "Memory & Buffer", "Concurrency & Lock", "IO & Durability", "Optimizer & Performance", "General"
+	Description      string `json:"description,omitempty"`
+	ImpactLow        string `json:"impact_low,omitempty"`        // what happens if too low
+	ImpactHigh       string `json:"impact_high,omitempty"`       // what happens if too high
+	Recommendation   string `json:"recommendation,omitempty"`    // baseline formula or best-practice value
+	SuggestedValue   string `json:"suggested_value,omitempty"`   // concrete recommended value
+	Severity         string `json:"severity"`                    // "optimal", "warning", "critical", "info"
+	IsCurated        bool   `json:"is_curated"`
+	MyCnfSnippet     string `json:"my_cnf_snippet,omitempty"`
+	SetGlobalSnippet string `json:"set_global_snippet,omitempty"`
+}
+
+// ServerVariablesReport contains complete introspected database variables and tuning metrics.
+type ServerVariablesReport struct {
+	Engine       string           `json:"engine"` // "mysql", "postgres", "sqlite"
+	Version      string           `json:"version,omitempty"`
+	TotalCount   int              `json:"total_count"`
+	CuratedCount int              `json:"curated_count"`
+	Variables    []ServerVariable `json:"variables"`
 }
 
 // ClusterNodeInfo represents status and queue telemetry for an individual cluster member.

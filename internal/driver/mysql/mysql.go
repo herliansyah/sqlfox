@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"sqlfox/internal/advisor"
 	"sqlfox/internal/driver"
 
 	gomysql "github.com/go-sql-driver/mysql"
@@ -1020,7 +1021,10 @@ func (s *MySQLSession) inspectGaleraCluster(ctx context.Context) (*driver.Cluste
 	}
 
 	sysVars := make(map[string]string)
-	vRows, err := s.db.QueryContext(ctx, `SHOW VARIABLES WHERE Variable_name IN ('wsrep_slave_threads', 'wsrep_node_address')`)
+	vRows, err := s.db.QueryContext(ctx, `SHOW VARIABLES WHERE Variable_name IN (
+		'wsrep_slave_threads', 'wsrep_node_address', 'innodb_autoinc_lock_mode',
+		'binlog_format', 'wsrep_sync_wait', 'wsrep_retry_autocommit'
+	)`)
 	if err == nil {
 		defer vRows.Close()
 		for vRows.Next() {
@@ -1191,6 +1195,7 @@ func (s *MySQLSession) inspectGaleraCluster(ctx context.Context) (*driver.Cluste
 			CertFailures:        certFailures,
 			BFAborts:            bfAborts,
 		},
+		TuningChecks: advisor.EvaluateClusterTuning(sysVars, statusVars),
 	}, nil
 }
 
@@ -1583,3 +1588,48 @@ func (s *MySQLSession) QueryRaw(ctx context.Context, sql string, args ...any) ([
 	}
 	return result, rows.Err()
 }
+
+// InspectServerVariables introspects all server variables and correlates them with tuning rules.
+func (s *MySQLSession) InspectServerVariables(ctx context.Context) (*driver.ServerVariablesReport, error) {
+	rows, err := s.db.QueryContext(ctx, "SHOW GLOBAL VARIABLES")
+	if err != nil {
+		return nil, fmt.Errorf("failed to introspect global variables: %w", err)
+	}
+	defer rows.Close()
+
+	allVars := make(map[string]string)
+	type kv struct {
+		k, v string
+	}
+	var pairs []kv
+
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err == nil {
+			allVars[k] = v
+			pairs = append(pairs, kv{k: k, v: v})
+		}
+	}
+
+	var version string
+	_ = s.db.QueryRowContext(ctx, "SELECT VERSION()").Scan(&version)
+
+	var vars []driver.ServerVariable
+	curatedCount := 0
+	for _, p := range pairs {
+		sv := advisor.EvaluateMySQLVariable(p.k, p.v, allVars)
+		if sv.IsCurated {
+			curatedCount++
+		}
+		vars = append(vars, sv)
+	}
+
+	return &driver.ServerVariablesReport{
+		Engine:       "mysql",
+		Version:      version,
+		TotalCount:   len(vars),
+		CuratedCount: curatedCount,
+		Variables:    vars,
+	}, nil
+}
+
