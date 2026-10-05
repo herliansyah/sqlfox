@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Native Windows PE Icon Embedding**: Pre-compiled multi-arch COFF resource objects (`rsrc_windows_amd64.syso`, `rsrc_windows_arm64.syso`) embedding the Brand Mark into `sqlfox.exe` during standard Go compilation.
 - **In-App Titlebar & Modal SVG Branding**: Inline crisp SVG Brand Mark in navbar header, native confirmation dialogs, and remote lock screen, replacing OS-dependent emoji placeholders.
 - **In-App Self-Update Engine**: Native zero-dependency self-update mechanism with platform-specific binary replacement and graceful restart.
+- **BYOK AI Copilot Enhancements**: Chat session forking/branching, rich Markdown rendering with 1-click execution blocks (`Insert & Run`, `Replace`), and fluid responsive drawer layout.
 - **Author Attribution & Support**: Integrated creator credits and Saweria sponsorship link in status bar footer.
 
 ### Changed
