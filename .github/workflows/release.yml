@@ -87,11 +87,13 @@ jobs:
 
             cd "$BUILD_DIR"
             if [ "$GOOS" = "windows" ]; then
+              cp ../../assets/icon.ico .
               ARCHIVE_NAME="sqlfox-${VERSION}-${GOOS}-${GOARCH}.zip"
-              zip -9 "../../dist/archives/${ARCHIVE_NAME}" "$BINARY_NAME" LICENSE
+              zip -9 "../../dist/archives/${ARCHIVE_NAME}" "$BINARY_NAME" LICENSE icon.ico
             else
+              cp ../../assets/icon.png .
               ARCHIVE_NAME="sqlfox-${VERSION}-${GOOS}-${GOARCH}.tar.gz"
-              tar -czvf "../../dist/archives/${ARCHIVE_NAME}" "$BINARY_NAME" LICENSE
+              tar -czvf "../../dist/archives/${ARCHIVE_NAME}" "$BINARY_NAME" LICENSE icon.png
             fi
             cd - > /dev/null
           done

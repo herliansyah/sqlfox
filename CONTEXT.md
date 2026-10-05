@@ -597,5 +597,24 @@ _Avoid_: Manual tag, ad-hoc release, unversioned bump
 The native HTML5 modal dialog (`#changelog-dialog`) presenting complete application history and offline-accessible release logs rendered from embedded markdown, accessible directly from the footer version element and Command Palette.
 _Avoid_: Release popup, changelog window, version toast
 
+## Brand Identity & Application Icons
+
+**Brand Mark**:
+The canonical geometric low-poly fox emblem in vector SVG format embodying SqlFox's identity, featuring Amber/Orange facets (`#f97316`), deep orange shadow depth (`#ea580c`), and futuristic cyan accents (`#38bdf8`).
+_Avoid_: Generic fox emoji, temporary logo, mascot image
+
+**App Icon Set**:
+The standardized cross-platform icon bundle generated deterministically from the Brand Mark, encompassing scalable vector assets (`logo.svg`, `favicon.svg`), multi-resolution Windows ICO (`favicon.ico`, `icon.ico`), Apple Touch Icon (`apple-touch-icon.png`), and PWA manifests (`icon-192.png`, `icon-512.png`).
+_Avoid_: Web-only icons, favicon bundle, image assets
+
+**Titlebar Brand**:
+The crisp, inline vector SVG representation of the Brand Mark embedded in the top navbar header and native HTML5 dialogs, providing unified, OS-independent visual fidelity.
+_Avoid_: Header emoji, window title icon, navbar image
+
+**Binary Icon Resource**:
+The pre-compiled COFF resource object (`cmd/sqlfox/rsrc_windows_*.syso`) embedding the Brand Mark directly into the Windows PE binary header (`sqlfox.exe`) during standard Go compilation without external build-time compilers.
+_Avoid_: Resource hacker, external res wrapper, manual icon stamper
+
+
 
 

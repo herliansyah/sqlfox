@@ -14,6 +14,7 @@ import (
 
 	"sqlfox/internal/driver"
 	"sqlfox/internal/vault"
+	"sqlfox/web"
 )
 
 func TestServer_API_Lifecycle(t *testing.T) {
@@ -621,6 +622,51 @@ func TestServer_API_ImportCSV(t *testing.T) {
 		t.Fatalf("expected NULL email for Siti, got: %v", sitiEmail)
 	}
 }
+
+func TestServer_StaticBrandAssets(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "sqlfox-brand-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	v, err := vault.OpenVault(filepath.Join(tempDir, "config.db"), "test-master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	srv := NewServer(v, web.Assets(), filepath.Join(tempDir, "backups"), "test-master")
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	client := ts.Client()
+
+	endpoints := []string{
+		"/favicon.svg",
+		"/favicon.ico",
+		"/apple-touch-icon.png",
+		"/icon-192.png",
+		"/icon-512.png",
+		"/manifest.webmanifest",
+		"/assets/logo.svg",
+	}
+
+	for _, ep := range endpoints {
+		resp, err := client.Get(ts.URL + ep)
+		if err != nil {
+			t.Fatalf("GET %s failed: %v", ep, err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("GET %s returned status %d, want 200", ep, resp.StatusCode)
+		}
+		if resp.ContentLength == 0 {
+			t.Errorf("GET %s returned 0 content length", ep)
+		}
+		resp.Body.Close()
+	}
+}
+
 
 
 
