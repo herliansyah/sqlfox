@@ -86,6 +86,7 @@ func (s *Server) handleGetSchema(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to inspect schema: "+err.Error())
 			return
 		}
+		sess.CachedSchema = schema
 		writeJSON(w, http.StatusOK, schema)
 		return
 	} else if sess.CachedSchema == nil {
@@ -144,10 +145,12 @@ func (s *Server) handleRefreshSchema(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	targetDB := r.URL.Query().Get("db")
+
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	schema, err := sess.Session.InspectSchema(ctx, "")
+	schema, err := sess.Session.InspectSchema(ctx, targetDB)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to refresh schema: "+err.Error())
 		return
@@ -293,19 +296,38 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 		_ = sess.Session.SelectDatabase(ctx, targetDB)
 	}
 
-	// Find primary key if exists
-	var pkCol string
-	if sess.CachedSchema != nil {
-		for _, t := range sess.CachedSchema.Tables {
-			if t.Name == tableName {
+	findKeyCol := func(tables []driver.TableMetadata) string {
+		for _, t := range tables {
+			if strings.EqualFold(t.Name, tableName) {
+				// 1. Primary key
 				for _, c := range t.Columns {
 					if c.IsPrimaryKey {
-						pkCol = c.Name
-						break
+						return c.Name
+					}
+				}
+				// 2. Single-column unique key fallback (HeidiSQL behavior)
+				for _, idx := range t.Indexes {
+					if idx.IsUnique && len(idx.Columns) == 1 {
+						return idx.Columns[0]
 					}
 				}
 				break
 			}
+		}
+		return ""
+	}
+
+	// Find primary key or unique key if exists
+	var pkCol string
+	if sess.CachedSchema != nil {
+		pkCol = findKeyCol(sess.CachedSchema.Tables)
+	}
+
+	// If key not found in cache (e.g. multi-db context, newly created table, or stale cache), inspect on demand
+	if pkCol == "" {
+		if schema, err := sess.Session.InspectSchema(ctx, targetDB); err == nil && schema != nil {
+			sess.CachedSchema = schema
+			pkCol = findKeyCol(schema.Tables)
 		}
 	}
 
@@ -428,22 +450,24 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type CellEditItem struct {
-		Database string `json:"database"`
-		Table    string `json:"table"`
-		Column   string `json:"column"`
-		Value    any    `json:"value"`
-		PKColumn string `json:"pk_column"`
-		PKValue  any    `json:"pk_value"`
+		Database    string         `json:"database"`
+		Table       string         `json:"table"`
+		Column      string         `json:"column"`
+		Value       any            `json:"value"`
+		PKColumn    string         `json:"pk_column"`
+		PKValue     any            `json:"pk_value"`
+		RowCriteria map[string]any `json:"row_criteria,omitempty"`
 	}
 
 	var req struct {
-		Database string         `json:"database"`
-		Table    string         `json:"table"`
-		Column   string         `json:"column"`
-		Value    any            `json:"value"`
-		PKColumn string         `json:"pk_column"`
-		PKValue  any            `json:"pk_value"`
-		Edits    []CellEditItem `json:"edits"`
+		Database    string         `json:"database"`
+		Table       string         `json:"table"`
+		Column      string         `json:"column"`
+		Value       any            `json:"value"`
+		PKColumn    string         `json:"pk_column"`
+		PKValue     any            `json:"pk_value"`
+		RowCriteria map[string]any `json:"row_criteria,omitempty"`
+		Edits       []CellEditItem `json:"edits"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -454,17 +478,18 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 	var items []CellEditItem
 	if len(req.Edits) > 0 {
 		items = req.Edits
-	} else if req.Table != "" && req.Column != "" && req.PKColumn != "" && req.PKValue != nil {
+	} else if req.Table != "" && req.Column != "" && ((req.PKColumn != "" && req.PKValue != nil) || len(req.RowCriteria) > 0) {
 		items = append(items, CellEditItem{
-			Database: req.Database,
-			Table:    req.Table,
-			Column:   req.Column,
-			Value:    req.Value,
-			PKColumn: req.PKColumn,
-			PKValue:  req.PKValue,
+			Database:    req.Database,
+			Table:       req.Table,
+			Column:      req.Column,
+			Value:       req.Value,
+			PKColumn:    req.PKColumn,
+			PKValue:     req.PKValue,
+			RowCriteria: req.RowCriteria,
 		})
 	} else {
-		writeError(w, http.StatusBadRequest, "table, column, pk_column, and pk_value (or edits array) are required")
+		writeError(w, http.StatusBadRequest, "table, column, and either pk_column/pk_value or row_criteria are required")
 		return
 	}
 
@@ -476,7 +501,6 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 	var totalAffected int64
 	for _, item := range items {
 		valStr := driver.FormatSQLValue(item.Value)
-		pkStr := driver.FormatSQLValue(item.PKValue)
 
 		tableRef := quoteIdent(item.Table)
 		db := item.Database
@@ -487,8 +511,29 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 			tableRef = fmt.Sprintf("%s.%s", quoteIdent(db), quoteIdent(item.Table))
 		}
 
-		updateSQL := fmt.Sprintf("UPDATE %s SET %s = %s WHERE %s = %s",
-			tableRef, quoteIdent(item.Column), valStr, quoteIdent(item.PKColumn), pkStr)
+		var updateSQL string
+		if item.PKColumn != "" && item.PKValue != nil {
+			pkStr := driver.FormatSQLValue(item.PKValue)
+			updateSQL = fmt.Sprintf("UPDATE %s SET %s = %s WHERE %s = %s",
+				tableRef, quoteIdent(item.Column), valStr, quoteIdent(item.PKColumn), pkStr)
+		} else if len(item.RowCriteria) > 0 {
+			var whereParts []string
+			for cName, cVal := range item.RowCriteria {
+				if cVal == nil {
+					whereParts = append(whereParts, fmt.Sprintf("%s IS NULL", quoteIdent(cName)))
+				} else {
+					whereParts = append(whereParts, fmt.Sprintf("%s = %s", quoteIdent(cName), driver.FormatSQLValue(cVal)))
+				}
+			}
+			limitClause := ""
+			if sess.DriverName == "mysql" {
+				limitClause = " LIMIT 1"
+			}
+			updateSQL = fmt.Sprintf("UPDATE %s SET %s = %s WHERE %s%s",
+				tableRef, quoteIdent(item.Column), valStr, strings.Join(whereParts, " AND "), limitClause)
+		} else {
+			continue
+		}
 
 		res, err := sess.Session.Exec(ctx, updateSQL)
 		if err != nil {
