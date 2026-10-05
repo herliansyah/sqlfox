@@ -424,6 +424,7 @@ func (s *Server) handleRunSQLScript(w http.ResponseWriter, r *http.Request) {
 		if res != nil {
 			rowsAffected = res.RowsAffected
 		}
+		sess.RecordAudit(stmt, "script_runner", durationMs, rowsAffected, err, start)
 
 		preview := stmt
 		if len(preview) > 80 {

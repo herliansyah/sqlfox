@@ -166,6 +166,7 @@ func initSchema(db *sql.DB) error {
 		duration_ms INTEGER NOT NULL,
 		rows_affected INTEGER NOT NULL,
 		error TEXT DEFAULT '',
+		source TEXT NOT NULL DEFAULT 'editor',
 		executed_at TIMESTAMP NOT NULL
 	);
 
@@ -202,6 +203,9 @@ func initSchema(db *sql.DB) error {
 	if _, err := db.Exec(query); err != nil {
 		return err
 	}
+	// ponytail: Idempotent column addition for existing vault databases
+	_, _ = db.Exec("ALTER TABLE audit_logs ADD COLUMN source TEXT NOT NULL DEFAULT 'editor'")
+	_, _ = db.Exec("CREATE INDEX IF NOT EXISTS idx_audit_logs_source ON audit_logs(session_id, source)")
 	return seedDefaultSnippets(db)
 }
 

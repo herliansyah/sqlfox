@@ -110,6 +110,45 @@ func TestDBAOperationsAndAuditLog(t *testing.T) {
 	if auditData.Total < 1 || len(auditData.Logs) < 1 {
 		t.Fatalf("expected at least 1 audit log, got total=%d len=%d", auditData.Total, len(auditData.Logs))
 	}
+	if auditData.Logs[0]["source"] != "editor" {
+		t.Fatalf("expected source 'editor', got %v", auditData.Logs[0]["source"])
+	}
+
+	// 4b. Test Cell-Edit records with source 'grid_cell_edit'
+	cellEditPayload := bytes.NewBufferString(`{
+		"table": "items",
+		"column": "name",
+		"value": "gadget",
+		"pk_column": "id",
+		"pk_value": 1
+	}`)
+	ceResp, err := client.Post(ts.URL+"/api/session/"+connRec.ID+"/cell-edit", "application/json", cellEditPayload)
+	if err != nil || ceResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(ceResp.Body)
+		t.Fatalf("cell-edit failed with code %d: %s", ceResp.StatusCode, string(body))
+	}
+	ceResp.Body.Close()
+
+	time.Sleep(150 * time.Millisecond)
+
+	// Verify cell-edit source filtering in audit logs
+	ceAuditResp, err := client.Get(ts.URL + "/api/session/" + connRec.ID + "/audit-logs?source=grid_cell_edit")
+	if err != nil || ceAuditResp.StatusCode != http.StatusOK {
+		t.Fatalf("get audit logs with source failed: %v", err)
+	}
+	var ceAuditData struct {
+		Logs  []map[string]any `json:"logs"`
+		Total int              `json:"total"`
+	}
+	_ = json.NewDecoder(ceAuditResp.Body).Decode(&ceAuditData)
+	ceAuditResp.Body.Close()
+
+	if ceAuditData.Total != 1 || len(ceAuditData.Logs) != 1 {
+		t.Fatalf("expected 1 grid_cell_edit log, got total=%d len=%d", ceAuditData.Total, len(ceAuditData.Logs))
+	}
+	if ceAuditData.Logs[0]["source"] != "grid_cell_edit" {
+		t.Fatalf("expected source grid_cell_edit, got %v", ceAuditData.Logs[0]["source"])
+	}
 
 	// 5. Test ClearAuditLogs
 	delReq, _ := http.NewRequest("DELETE", ts.URL+"/api/session/"+connRec.ID+"/audit-logs", nil)

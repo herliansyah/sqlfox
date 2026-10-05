@@ -717,7 +717,7 @@
 
         <!-- Virtual Data Grid Table (Data Mode) -->
         <div id="virtual-grid-wrapper" class="flex-1 overflow-auto">
-          <table id="results-table" class="w-full border-collapse text-left font-mono text-xs">
+          <table id="results-table" class="border-collapse text-left font-mono text-xs w-auto">
             <thead id="grid-thead" class="sticky top-0 bg-slate-900 border-b border-app-border text-slate-400 z-10">
               <tr><th class="p-2 pl-4">No data</th></tr>
             </thead>
@@ -1142,6 +1142,19 @@
               <input type="text" id="audit-search-input" oninput="onAuditSearchInput(this.value)" onkeydown="if(event.key==='Escape'){clearAuditSearch(); this.blur();}" placeholder="Search executed SQL statement..." class="w-full bg-slate-900 border border-slate-700 pl-8 pr-7 py-0.5 rounded text-white text-xs font-mono outline-none focus:border-app-accent transition">
               <button type="button" id="audit-search-clear-btn" onclick="clearAuditSearch()" class="hidden absolute right-2 text-slate-500 hover:text-slate-200 text-xs px-1 rounded transition cursor-pointer" title="Clear filter (Esc)">✕</button>
             </div>
+
+            <select id="audit-source-filter" onchange="onAuditSourceChange(this.value)" class="bg-slate-900 border border-slate-700 py-0.5 px-2 rounded text-slate-300 text-xs font-sans outline-none focus:border-app-accent cursor-pointer shrink-0">
+              <option value="all">All Sources</option>
+              <option value="editor">Editor (Manual)</option>
+              <option value="grid_cell_edit">Inline Edit (Grid)</option>
+              <option value="grid_insert">Insert Row (+ Add Row)</option>
+              <option value="grid_delete">Delete Rows (Grid)</option>
+              <option value="script_runner">Script Runner (.sql)</option>
+              <option value="csv_import">CSV Import</option>
+              <option value="mock_data">Mock Data</option>
+              <option value="sync_transfer">Data Sync</option>
+              <option value="schema_sync">Structure Sync (DDL)</option>
+            </select>
           </div>
 
           <div class="flex items-center space-x-2 shrink-0">
@@ -1160,7 +1173,8 @@
           <table class="w-full text-left border-collapse">
             <thead class="sticky top-0 bg-slate-900 border-b border-slate-800 text-slate-400 text-[11px]">
               <tr>
-                <th class="p-2 w-36">Time</th>
+                <th class="p-2 w-32">Time</th>
+                <th class="p-2 w-28 text-center">Source</th>
                 <th class="p-2 w-20 text-right">Duration</th>
                 <th class="p-2 w-20 text-right">Rows</th>
                 <th class="p-2 w-20 text-center">Status</th>
@@ -1170,7 +1184,7 @@
             </thead>
             <tbody id="audit-tbody" class="divide-y divide-slate-800/70 text-slate-300 text-[11px]">
               <tr>
-                <td colspan="6" class="p-8 text-center text-slate-500 italic">No query history yet.</td>
+                <td colspan="7" class="p-8 text-center text-slate-500 italic">No query history yet.</td>
               </tr>
             </tbody>
           </table>
@@ -3491,6 +3505,7 @@
     let pendingDestructiveSQL = null;
     let pendingDestructiveResult = null;
     let lastKeysetKey = null;
+    let isQueryExecuting = false;
 
     // Table CRUD & Spreadsheet State
     let selectedRowIndices = new Set();
@@ -3805,6 +3820,7 @@
     // --- Lifecycle Initialization ---
     window.addEventListener('DOMContentLoaded', async () => {
       initSidebarVisibility();
+      restoreTabsState();
       initCodeMirror();
       initAIChatSession();
       updateAIProviderBadge();
@@ -3817,6 +3833,22 @@
       renderTabs();
       setupKeyboardShortcuts();
       updateFooterStats();
+    });
+
+    // ponytail: reload safety guard for in-flight queries and uncommitted staged table edits
+    window.addEventListener('beforeunload', (e) => {
+      saveTabsState();
+      const stagedCount = (typeof stagedEdits !== 'undefined' ? stagedEdits.size : 0) + 
+                          (typeof stagedDraftRows !== 'undefined' ? stagedDraftRows.length : 0);
+      if (isQueryExecuting || stagedCount > 0) {
+        e.preventDefault();
+        e.returnValue = '';
+        return '';
+      }
+    });
+
+    window.addEventListener('pagehide', () => {
+      saveTabsState();
     });
 
     // --- Connections & Session Management ---
@@ -3997,6 +4029,9 @@
     async function selectConnection(connId) {
       const conn = connections.find(c => c.id === connId);
       if (!conn) return;
+      if (activeConnection && activeConnection.id !== connId) {
+        saveTabsState();
+      }
       activeConnection = conn;
       multiDBCatalogCache = {};
       localStorage.setItem('sqlfox_last_conn_id', conn.id);
@@ -4047,6 +4082,7 @@
         }
         updateReadOnlyUI(activeSession.read_only);
         await loadSchemaTree(conn.id);
+        restoreTabsState(conn.id);
         updateFooterStats(data.latency_ms, data.memory_mb);
       } catch (err) {
         const stripe = document.getElementById('top-ambient-stripe');
@@ -5201,6 +5237,7 @@
         }
         const ta = document.getElementById('sql-editor-textarea');
         if (ta) ta.value = val;
+        scheduleSaveTabs();
       });
     }
 
@@ -5475,19 +5512,119 @@
       a.click();
     }
 
+    // ponytail: Session Tab State Persistence via localStorage scoped per active connection or fallback
+    function getTabsStorageKey(targetConnId) {
+      if (targetConnId) return `sqlfox_tabs_${targetConnId}`;
+      if (activeConnection && activeConnection.id) return `sqlfox_tabs_${activeConnection.id}`;
+      const lastConnId = localStorage.getItem('sqlfox_last_conn_id');
+      if (lastConnId) return `sqlfox_tabs_${lastConnId}`;
+      return 'sqlfox_tabs_default';
+    }
+
+    let _saveTabsTimeout = null;
+    function scheduleSaveTabs() {
+      if (_saveTabsTimeout) clearTimeout(_saveTabsTimeout);
+      _saveTabsTimeout = setTimeout(() => {
+        saveTabsState();
+      }, 250);
+    }
+
+    function saveTabsState() {
+      const key = getTabsStorageKey();
+      try {
+        const curr = tabs.find(t => t.id === activeTabId);
+        if (curr && !curr.isTableViewer && !curr.isProcesslist && !curr.isCluster && !curr.isFlightRecorder) {
+          if (cmEditor) {
+            curr.sql = cmEditor.getValue();
+          } else {
+            const el = document.getElementById('sql-editor-textarea');
+            if (el) curr.sql = el.value;
+          }
+        }
+        const storableTabs = tabs
+          .filter(t => !t.isProcesslist && !t.isCluster && !t.isFlightRecorder)
+          .map(t => ({
+            id: t.id,
+            title: t.title,
+            sql: t.sql || '',
+            isTableViewer: !!t.isTableViewer,
+            tableName: t.tableName || '',
+            database: t.database || '',
+            tableMode: t.tableMode || 'data',
+            filterMode: t.filterMode || 'pills',
+            filterPills: t.filterPills || [],
+            filterRaw: t.filterRaw || '',
+            appliedFilter: t.appliedFilter || '',
+            sortCol: t.sortCol || '',
+            sortDir: t.sortDir || '',
+            offset: t.offset || 0,
+            isNote: !!t.isNote
+          }));
+
+        if (storableTabs.length === 0) {
+          storableTabs.push({ id: 'tab-1', title: 'Query 1.sql', sql: '', isTableViewer: false });
+        }
+
+        const state = {
+          activeTabId: tabs.some(t => t.id === activeTabId) ? activeTabId : storableTabs[0].id,
+          tabs: storableTabs
+        };
+        localStorage.setItem(key, JSON.stringify(state));
+      } catch (err) {
+        console.warn('Failed to save tabs state:', err);
+      }
+    }
+
+    function restoreTabsState(connId) {
+      const key = getTabsStorageKey(connId);
+      try {
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && Array.isArray(parsed.tabs) && parsed.tabs.length > 0) {
+            tabs = parsed.tabs;
+            activeTabId = (tabs.some(t => t.id === parsed.activeTabId)) ? parsed.activeTabId : tabs[0].id;
+            const activeTab = tabs.find(t => t.id === activeTabId);
+            if (activeTab && !activeTab.isTableViewer) {
+              setEditorSQL(activeTab.sql || '');
+            }
+            renderTabs();
+
+            if (activeTab && activeTab.isTableViewer && activeTab.tableName && activeConnection) {
+              setTableMode(activeTab.tableMode || 'data', true);
+            }
+            return true;
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to restore tabs state:', err);
+      }
+      tabs = [{ id: 'tab-1', title: 'Query 1.sql', sql: '', isTableViewer: false }];
+      activeTabId = 'tab-1';
+      renderTabs();
+      setEditorSQL('');
+      return false;
+    }
+
     function switchTab(tabId) {
       const curr = tabs.find(t => t.id === activeTabId);
       if (curr && !curr.isTableViewer && !curr.isProcesslist && !curr.isCluster && !curr.isFlightRecorder) {
-        curr.sql = getEditorSQL();
+        curr.sql = cmEditor ? cmEditor.getValue() : (document.getElementById('sql-editor-textarea') || {}).value || '';
       }
       activeTabId = tabId;
       renderTabs();
+      const nextTab = tabs.find(t => t.id === tabId);
+      if (nextTab && nextTab.isTableViewer && nextTab.tableName && (activeGridTable !== nextTab.tableName || currentResults.length === 0)) {
+        setTableMode(nextTab.tableMode || 'data', true);
+      }
+      saveTabsState();
     }
 
     function addNewQueryTab() {
       const newId = 'tab-' + Date.now();
       tabs.push({ id: newId, title: `Query ${tabs.length + 1}.sql`, sql: '', isTableViewer: false });
       switchTab(newId);
+      saveTabsState();
     }
 
     function closeTab(tabId) {
@@ -5497,6 +5634,11 @@
         activeTabId = tabs[0].id;
       }
       renderTabs();
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (activeTab && activeTab.isTableViewer && activeTab.tableName && (activeGridTable !== activeTab.tableName || currentResults.length === 0)) {
+        setTableMode(activeTab.tableMode || 'data', true);
+      }
+      saveTabsState();
     }
 
     // --- Processlist Manager & Lock Dependency Tree ---
@@ -7396,6 +7538,37 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       loadAuditLogs();
     }
 
+    let auditSourceFilter = 'all';
+
+    function onAuditSourceChange(val) {
+      auditSourceFilter = val || 'all';
+      loadAuditLogs();
+    }
+
+    function getAuditSourceBadge(src) {
+      switch (src) {
+        case 'grid_cell_edit':
+          return '<span class="px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60 text-[10px] font-medium" title="Inline Cell Edit (Grid)">Cell Edit</span>';
+        case 'grid_insert':
+          return '<span class="px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-800/60 text-[10px] font-medium" title="Insert Row (+ Add Row)">+ Add Row</span>';
+        case 'grid_delete':
+          return '<span class="px-1.5 py-0.5 rounded bg-rose-950/80 text-rose-300 border border-rose-800/60 text-[10px] font-medium" title="Delete Rows (Grid)">Delete</span>';
+        case 'script_runner':
+          return '<span class="px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-800/60 text-[10px] font-medium" title="Script Runner (.sql)">Script</span>';
+        case 'csv_import':
+          return '<span class="px-1.5 py-0.5 rounded bg-indigo-950/80 text-indigo-300 border border-indigo-800/60 text-[10px] font-medium" title="CSV Import">CSV</span>';
+        case 'mock_data':
+          return '<span class="px-1.5 py-0.5 rounded bg-purple-950/80 text-purple-300 border border-purple-800/60 text-[10px] font-medium" title="Synthetic Mock Data">Mock Data</span>';
+        case 'sync_transfer':
+          return '<span class="px-1.5 py-0.5 rounded bg-blue-950/80 text-blue-300 border border-blue-800/60 text-[10px] font-medium" title="Data Transfer Sync">Data Sync</span>';
+        case 'schema_sync':
+          return '<span class="px-1.5 py-0.5 rounded bg-teal-950/80 text-teal-300 border border-teal-800/60 text-[10px] font-medium" title="Schema Structure Sync">DDL Sync</span>';
+        case 'editor':
+        default:
+          return '<span class="px-1.5 py-0.5 rounded bg-sky-950/80 text-sky-300 border border-sky-800/60 text-[10px] font-medium" title="Query Editor / SQL Tab">Editor</span>';
+      }
+    }
+
     async function loadAuditLogs() {
       if (!activeConnection) return;
       const searchEl = document.getElementById('audit-search-input');
@@ -7406,7 +7579,8 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
         else clearBtn.classList.add('hidden');
       }
       try {
-        const url = `/api/session/${activeConnection.id}/audit-logs?limit=200${search ? '&search=' + encodeURIComponent(search) : ''}`;
+        const sourceParam = (auditSourceFilter && auditSourceFilter !== 'all') ? `&source=${encodeURIComponent(auditSourceFilter)}` : '';
+        const url = `/api/session/${activeConnection.id}/audit-logs?limit=200${search ? '&search=' + encodeURIComponent(search) : ''}${sourceParam}`;
         const res = await apiFetch(url);
         if (!res.ok) return;
         const data = await res.json();
@@ -7424,7 +7598,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       if (!tbody) return;
 
       if (!auditLogsCache || auditLogsCache.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="6" class="p-8 text-center text-slate-500 italic">No query history records found.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-slate-500 italic">No query history records found.</td></tr>`;
         return;
       }
 
@@ -7436,6 +7610,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
         return `
           <tr class="hover:bg-slate-800/40 transition">
             <td class="p-2 text-slate-400 whitespace-nowrap text-[10px]">${escapeHtml(timeStr)}</td>
+            <td class="p-2 text-center whitespace-nowrap">${getAuditSourceBadge(l.source)}</td>
             <td class="p-2 text-right text-slate-300 font-mono text-[11px] whitespace-nowrap">${l.duration_ms} ms</td>
             <td class="p-2 text-right text-slate-400 font-mono text-[11px] whitespace-nowrap">${l.rows_affected}</td>
             <td class="p-2 text-center whitespace-nowrap">
@@ -7493,9 +7668,10 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
         showNativeAlert('No audit logs available to export.', 'Export CSV');
         return;
       }
-      const headers = ['Executed At', 'Duration (ms)', 'Rows Affected', 'Status', 'Error', 'SQL'];
+      const headers = ['Executed At', 'Source', 'Duration (ms)', 'Rows Affected', 'Status', 'Error', 'SQL'];
       const rows = auditLogsCache.map(l => [
         `"${String(l.executed_at).replace(/"/g, '""')}"`,
+        `"${String(l.source || 'editor').replace(/"/g, '""')}"`,
         l.duration_ms,
         l.rows_affected,
         l.error ? 'ERROR' : 'OK',
@@ -9067,6 +9243,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
     }
 
     function setQueryRunning(isRunning) {
+      isQueryExecuting = !!isRunning;
       const btn = document.getElementById('cancel-query-btn');
       const status = document.getElementById('query-status-text');
       if (isRunning) {
@@ -10269,6 +10446,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
         const sortCol = (activeTab && activeTab.sortCol) || '';
         const sortDir = (activeTab && activeTab.sortDir) || '';
         const offset = (activeTab && activeTab.offset) || 0;
+        saveTabsState();
 
         let url = `/api/session/${activeConnection.id}/table/${encodeURIComponent(tableName)}/rows?limit=50&offset=${offset}`;
         if (dbName) url += `&db=${encodeURIComponent(dbName)}`;
@@ -10343,10 +10521,10 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
           sortIcon = activeTab.sortDir === 'DESC' ? ' <span class="text-sky-400 font-bold">▼</span>' : ' <span class="text-sky-400 font-bold">▲</span>';
         }
         return `
-        <th class="p-2 px-3 font-semibold text-xs border-r border-slate-800 cursor-pointer hover:text-white select-none transition" onclick="sortColumn(${i})" title="Click to sort by ${escapeHtml(c.name)}">
-          <div class="flex items-center justify-between space-x-1">
-            <span>${escapeHtml(c.name)}${sortIcon}</span>
-            <span class="text-[10px] text-slate-500 font-mono">${c.type}</span>
+        <th class="p-2 px-3 font-semibold text-xs border-r border-slate-800 cursor-pointer hover:text-white select-none transition min-w-[90px] max-w-md whitespace-nowrap" onclick="sortColumn(${i})" title="Click to sort by ${escapeHtml(c.name)}">
+          <div class="flex items-center justify-between space-x-2">
+            <span class="truncate">${escapeHtml(c.name)}${sortIcon}</span>
+            <span class="text-[10px] text-slate-500 font-mono flex-shrink-0 ml-1.5">${c.type}</span>
           </div>
         </th>
       `;}).join('') + '</tr>';
@@ -10358,7 +10536,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
             const existingPill = (activeTab?.filterPills || []).find(p => p.column === c.name);
             const initialVal = existingPill ? existingPill.value : '';
             return `
-            <th class="p-1 px-1.5 border-r border-slate-800">
+            <th class="p-1 px-1.5 border-r border-slate-800 min-w-[90px] max-w-md">
               <input type="text" value="${escapeHtml(initialVal)}" class="col-filter-input w-full bg-slate-900 text-slate-200 border border-slate-700/80 rounded px-1.5 py-0.5 text-[11px] font-mono outline-none focus:border-sky-500 transition" placeholder="Filter..." data-col="${escapeHtml(c.name)}" onkeydown="handleColFilterKeydown(event, this)">
             </th>
           `;}).join('') + '</tr>';
@@ -10419,12 +10597,13 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
             ${cols.map(c => {
               const val = draft.data[c.name] ?? '';
               const isAutoPK = c.name === pkCol && (c.extra?.includes('auto') || c.type?.toLowerCase().includes('int'));
+              const typeStyle = getGridTypeStyle(c.type);
               return `
-                <td class="p-1 px-2 border-r border-slate-800/40">
+                <td class="p-1 px-2 border-r border-slate-800/40 min-w-[90px] max-w-md ${typeStyle.align}">
                   <input type="text" value="${escapeHtml(String(val))}" placeholder="${isAutoPK ? '(auto)' : escapeHtml(c.name)}"
                          data-col="${escapeHtml(c.name)}" data-draft-idx="${dIdx}"
                          oninput="updateGridDraftCell(${dIdx}, '${escapeHtml(c.name)}', this.value)"
-                         class="w-full bg-slate-950 text-slate-100 border border-sky-500/50 rounded px-1.5 py-0.5 text-xs font-mono outline-none focus:border-sky-400 shadow-inner">
+                         class="w-full bg-slate-950 ${typeStyle.inputColor} ${typeStyle.inputAlign} border border-sky-500/50 rounded px-1.5 py-0.5 text-xs font-mono outline-none focus:border-sky-400 shadow-inner">
                 </td>
               `;
             }).join('')}
@@ -10454,14 +10633,16 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
             const displayVal = staged ? staged.newVal : val;
             const isDirty = Boolean(staged);
             const colName = cols[cIdx]?.name;
+            const colType = cols[cIdx]?.type;
+            const typeStyle = getGridTypeStyle(colType);
             const fkInfo = fkMap.get(colName);
             let fkBadge = '';
             if (fkInfo && displayVal !== null && displayVal !== '') {
               fkBadge = `<button type="button" onclick="event.stopPropagation(); peekForeignKey(event, '${escapeHtml(tableName || '')}', '${escapeHtml(colName)}', '${escapeHtml(fkInfo.referenced_table)}', '${escapeHtml(fkInfo.referenced_column)}', '${escapeHtml(String(displayVal))}')" class="ml-1 opacity-0 group-hover:opacity-100 hover:text-sky-300 text-sky-400 font-bold transition text-xs" title="Peek referenced record (${escapeHtml(fkInfo.referenced_table)}.${escapeHtml(fkInfo.referenced_column)})">🔗</button>`;
             }
             const cellClass = isDirty
-              ? 'p-1.5 px-3 border border-amber-600/60 bg-amber-950/40 text-amber-200 truncate max-w-xs grid-cell group select-text cursor-default transition'
-              : 'p-1.5 px-3 border-r border-slate-800/40 text-slate-200 truncate max-w-xs grid-cell group select-text cursor-default transition';
+              ? `p-1.5 px-3 border border-amber-600/60 bg-amber-950/40 text-amber-200 ${typeStyle.align} min-w-[90px] max-w-md truncate whitespace-nowrap grid-cell group select-text cursor-default transition`
+              : `p-1.5 px-3 border-r border-slate-800/40 ${typeStyle.color} ${typeStyle.align} min-w-[90px] max-w-md truncate whitespace-nowrap grid-cell group select-text cursor-default transition`;
             return `
               <td class="${cellClass}"
                   data-row="${rIdx}" data-col="${cIdx}"
@@ -10491,6 +10672,43 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
         el.classList.remove('cell-selected', 'ring-1', 'ring-sky-400', 'bg-sky-950/20');
       });
       td.classList.add('cell-selected', 'ring-1', 'ring-sky-400', 'bg-sky-950/20');
+    }
+
+    // ponytail: heuristic data type categorization for HeidiSQL-style data grid syntax coloring and alignment.
+    // Known ceiling: does not parse nested composite types (e.g. Postgres arrays of timestamps). Upgrade path: dialect-aware token parser.
+    function getGridTypeCategory(typeStr) {
+      if (!typeStr || typeof typeStr !== 'string') return 'text';
+      const t = typeStr.trim().toLowerCase();
+      if (t === 'bool' || t === 'boolean' || t.startsWith('tinyint(1)')) {
+        return 'boolean';
+      }
+      if (/^(date|time|datetime|timestamp|timestamptz|timetz|year|interval)/i.test(t)) {
+        return 'temporal';
+      }
+      if (/^(u?int|u?bigint|u?smallint|u?mediumint|u?tinyint|serial|bigserial|smallserial|float|double|decimal|numeric|real|bit|money|dec|fixed)/i.test(t) ||
+          /\b(int|integer|float|double|decimal|numeric|real)\b/i.test(t)) {
+        return 'numeric';
+      }
+      if (/^(blob|tinyblob|mediumblob|longblob|binary|varbinary|bytea|raw)/i.test(t)) {
+        return 'binary';
+      }
+      return 'text';
+    }
+
+    function getGridTypeStyle(typeStr) {
+      const cat = getGridTypeCategory(typeStr);
+      switch (cat) {
+        case 'numeric':
+          return { color: 'text-emerald-400', align: 'text-right', inputAlign: 'text-right', inputColor: 'text-emerald-400', category: 'numeric' };
+        case 'temporal':
+          return { color: 'text-purple-400', align: 'text-right', inputAlign: 'text-right', inputColor: 'text-purple-400', category: 'temporal' };
+        case 'boolean':
+          return { color: 'text-rose-400', align: 'text-left', inputAlign: 'text-left', inputColor: 'text-rose-400', category: 'boolean' };
+        case 'binary':
+          return { color: 'text-amber-400', align: 'text-left', inputAlign: 'text-left', inputColor: 'text-amber-400', category: 'binary' };
+        default:
+          return { color: 'text-slate-200', align: 'text-left', inputAlign: 'text-left', inputColor: 'text-sky-200', category: 'text' };
+      }
     }
 
     function parseEnumValues(typeStr) {
@@ -10817,6 +11035,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
                  class="w-full bg-slate-950 text-sky-200 border border-sky-400 px-1 py-0.5 rounded outline-none font-mono text-xs ring-2 ring-sky-500/40 shadow-inner">
         `;
       } else {
+        const typeStyle = getGridTypeStyle(colMeta?.type || col?.type);
         editorHtml = `
           <div id="active-cell-preset-bar" class="absolute ${pillPosClass} left-0 z-30 bg-slate-900 border border-slate-700/80 rounded shadow-xl px-1.5 py-0.5 flex items-center space-x-1 text-[10px] select-none whitespace-nowrap ring-1 ring-black/40">
             <span class="text-slate-400 font-semibold mr-0.5">⚡</span>
@@ -10827,7 +11046,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
             <button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit('UUID')" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-purple-400 hover:text-purple-300 rounded border border-slate-700 font-mono transition" title="Generate UUID">UUID</button>
           </div>
           <input type="text" value="${currentVal === null ? '' : escapeHtml(String(currentVal))}"
-                 class="w-full bg-slate-950 text-sky-200 border border-sky-400 px-1 py-0.5 rounded outline-none font-mono text-xs ring-2 ring-sky-500/40 shadow-inner">
+                 class="w-full bg-slate-950 ${typeStyle.inputColor} ${typeStyle.inputAlign} border border-sky-400 px-1 py-0.5 rounded outline-none font-mono text-xs ring-2 ring-sky-500/40 shadow-inner">
         `;
       }
 

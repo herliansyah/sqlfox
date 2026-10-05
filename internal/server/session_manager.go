@@ -78,6 +78,37 @@ func (s *ActiveSession) UseDatabase(ctx context.Context, dbName string) error {
 	return nil
 }
 
+// RecordAudit asynchronously records an executed SQL statement or data mutation into the vault audit log.
+// ponytail: Non-blocking fire-and-forget goroutine ensures zero impact on query execution latency.
+func (s *ActiveSession) RecordAudit(querySQL, source string, durationMs, rowsAffected int64, execErr error, executedAt ...time.Time) {
+	if s == nil || s.vault == nil || strings.TrimSpace(querySQL) == "" {
+		return
+	}
+	if source == "" {
+		source = "editor"
+	}
+	errStr := ""
+	if execErr != nil {
+		errStr = execErr.Error()
+	}
+	t := time.Now()
+	if len(executedAt) > 0 && !executedAt[0].IsZero() {
+		t = executedAt[0]
+	}
+	go func() {
+		_ = s.vault.RecordAuditLog(&vault.AuditLogRecord{
+			SessionID:    s.ID,
+			ConnectionID: s.ConnectionID,
+			QuerySQL:     strings.TrimSpace(querySQL),
+			Source:       source,
+			DurationMs:   durationMs,
+			RowsAffected: rowsAffected,
+			Error:        errStr,
+			ExecutedAt:   t,
+		})
+	}()
+}
+
 // SessionManager manages connected database sessions.
 type SessionManager struct {
 	vault     *vault.Vault
@@ -304,21 +335,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	defer func() {
 		if s.vault != nil && (inspection == nil || !inspection.RequiresChallenge || req.Confirmed) {
 			dur := time.Since(start).Milliseconds()
-			errStr := ""
-			if execErr != nil {
-				errStr = execErr.Error()
-			}
-			go func() {
-				_ = s.vault.RecordAuditLog(&vault.AuditLogRecord{
-					SessionID:    s.ID,
-					ConnectionID: s.ConnectionID,
-					QuerySQL:     trimmedSQL,
-					DurationMs:   dur,
-					RowsAffected: rowsAffected,
-					Error:        errStr,
-					ExecutedAt:   start,
-				})
-			}()
+			s.RecordAudit(trimmedSQL, "editor", dur, rowsAffected, execErr, start)
 		}
 	}()
 

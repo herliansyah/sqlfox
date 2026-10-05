@@ -405,7 +405,15 @@ func (s *Server) handleSyncStructureApply(w http.ResponseWriter, r *http.Request
 		if stmt == "" || strings.HasPrefix(stmt, "--") {
 			continue
 		}
-		if _, err := tgtSess.Session.Exec(ctx, stmt); err != nil {
+		start := time.Now()
+		res, err := tgtSess.Session.Exec(ctx, stmt)
+		dur := time.Since(start).Milliseconds()
+		var rowsAff int64
+		if res != nil {
+			rowsAff = res.RowsAffected
+		}
+		tgtSess.RecordAudit(stmt, "schema_sync", dur, rowsAff, err, start)
+		if err != nil {
 			errors = append(errors, fmt.Sprintf("Error running [%s]: %s", stmt, err.Error()))
 		} else {
 			executedCount++
@@ -595,6 +603,16 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 			"table":       tbl,
 			"rows_copied": tableRowsCopied,
 		})
+
+		if tableRowsCopied > 0 {
+			tgtSess.RecordAudit(
+				fmt.Sprintf("-- Sync Data Transfer on %s: %d rows inserted", tbl, tableRowsCopied),
+				"sync_transfer",
+				0,
+				tableRowsCopied,
+				nil,
+			)
+		}
 	}
 
 	sendEvent(map[string]any{
@@ -850,6 +868,7 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	_ = tgtSess.UseDatabase(ctx, req.TargetDB)
+	syncStart := time.Now()
 
 	tgtDriver := tgtSess.DriverName
 	tgtSchema, err := tgtSess.Session.InspectSchema(ctx, req.TargetDB)
@@ -947,6 +966,17 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 				deleted++
 			}
 		}
+	}
+
+	if inserted > 0 || updated > 0 || deleted > 0 {
+		tgtSess.RecordAudit(
+			fmt.Sprintf("-- Sync Data Apply on %s: %d inserted, %d updated, %d deleted", req.Table, inserted, updated, deleted),
+			"sync_transfer",
+			time.Since(syncStart).Milliseconds(),
+			int64(inserted+updated+deleted),
+			nil,
+			syncStart,
+		)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{

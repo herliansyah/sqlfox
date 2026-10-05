@@ -172,6 +172,11 @@ _Avoid_: Word predictor, auto-suggester, flat matcher
 A ranked suggestion candidate with display label, kind badge (`[KW]`, `[TBL]`, `[COL]`, `[FN]`), and replacement text.
 _Avoid_: Autocomplete option, hint token
 
+**Session Tab State Persistence**:
+A client-side storage mechanism bound per Connection (`sqlfox_tabs_<conn_id>`) that continuously synchronizes open Query Editor tabs, SQL draft buffers, active tab focus, and Table Viewer metadata across page reloads.
+_Avoid_: Tab autosave, tab cache, session restore
+
+
 ## Schema Management & Native Dialogs
 
 **SQL Formatter**:
@@ -316,6 +321,14 @@ _Avoid_: Unsaved buffer, dirty queue, batch edit cache
 A data grid editing mode where cell modifications automatically persist to the remote database upon input blur or Enter key submission, bypassing manual staging.
 _Avoid_: Direct save, auto-flush, instant write
 
+**Type-Colored Grid**:
+A visual typography and layout convention within the Virtual Data Grid that dynamically styles cell text color and alignment based on database column data types (Emerald `text-emerald-400` and right-aligned for Numerics, Purple `text-purple-400` and right-aligned for Temporal, Rose `text-rose-400` for Booleans, Amber `text-amber-400` for Binary, and Slate `text-slate-200` left-aligned for Text), preserving dimmed italic styling for `NULL` values and staged amber indicators for uncommitted cell mutations.
+_Avoid_: Colorful cells, syntax grid, rainbow rows.
+
+**Natural Column Sizing**:
+A responsive column layout policy within the Virtual Data Grid that sizes table columns to fit their header and content within bounded min-width (90px) and max-width (384px / `max-w-md`) constraints without forcing full-viewport width stretching on narrow datasets.
+_Avoid_: Full-width grid, stretched columns, bloated cells.
+
 **SQL Dump Runner**:
 A memory-bounded streaming executor and generator for `.sql` files that breaks multi-statement scripts into transactional chunks without loading entire multi-gigabyte files into memory.
 _Avoid_: SQL runner, dump importer, script player
@@ -351,8 +364,13 @@ A static schema analysis check identifying duplicate, shadowed, or redundant pre
 _Avoid_: Index linter, key cleaner, duplicate checker
 
 **Session Audit Log**:
-A persistent session-level ledger tracking all executed SQL statements with timestamps, execution durations in milliseconds, affected/returned row counts, and error states.
+A persistent session-level ledger tracking all executed SQL statements and data/schema mutations with origin attribution (`source`), timestamps, execution durations in milliseconds, affected row counts, and error states.
 _Avoid_: History tab, query log, command list
+
+**Audit Source Attribution**:
+A canonical origin taxonomy tagging every audit log entry with its triggering feature context: `editor` (interactive Query Editor / SQL tab), `grid_cell_edit` (inline cell edit in data grid), `grid_insert` (inline row addition), `grid_delete` (grid row deletion), `script_runner` (large SQL script runner), `csv_import` (CSV dataset import wizard), `mock_data` (synthetic data generator), `sync_transfer` (cross-database data transfer), or `schema_sync` (DDL structure synchronization).
+_Avoid_: Trigger type, log category, caller tag
+
 
 **Lock Dependency Tree**:
 An interactive hierarchical diagnostic view that maps blocked database sessions to their blocking transactions (utilizing `sys.innodb_lock_waits` / `performance_schema.data_lock_waits`), explicitly isolating the root blocker session, locked resource, lock mode, and root cause.
