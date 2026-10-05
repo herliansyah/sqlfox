@@ -3442,9 +3442,19 @@
     </div>
   </div>
 
-  <!-- Floating Grid Row Context Menu -->
-  <div id="grid-context-menu" class="hidden fixed z-50 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-1 text-xs text-slate-200 min-w-48 ring-2 ring-black/50 font-sans divide-y divide-slate-800">
+  <!-- Floating Grid Row & Cell Context Menu -->
+  <div id="grid-context-menu" class="hidden fixed z-50 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-1 text-xs text-slate-200 min-w-56 ring-2 ring-black/50 font-sans divide-y divide-slate-800">
+    <div id="grid-ctx-insert-section" class="py-1">
+      <div class="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between select-none">
+        <span>⚡ Insert Value</span>
+        <span class="text-sky-400 font-mono text-[10px]" id="grid-ctx-colname"></span>
+      </div>
+      <div id="grid-ctx-insert-options"></div>
+    </div>
     <div class="py-1">
+      <button onclick="editRightClickedCell(); closeGridContextMenu()" id="grid-ctx-btn-edit" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-slate-200 hover:text-white">
+        <span>✏️</span><span>Edit Cell</span>
+      </button>
       <button onclick="copyGridAsTSV(); closeGridContextMenu()" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white">
         <span>📋 Copy as TSV</span>
         <span class="text-[10px] text-slate-500">Excel</span>
@@ -3486,6 +3496,11 @@
     let selectedRowIndices = new Set();
     let stagedDraftRows = [];
     let activeGridRightClickedRow = null;
+    let activeGridRightClickedCol = null;
+    let activeGridRightClickedTd = null;
+    let activeGridSelectedRow = null;
+    let activeGridSelectedCol = null;
+    let activeGridSelectedTd = null;
 
     // Table Designer & Modal State
     let currentTableMetadata = null;
@@ -5208,6 +5223,16 @@
       }
       const el = document.getElementById('sql-editor-textarea');
       if (el) el.value = val;
+    }
+
+    function extractSingleTableFromSQL(sql) {
+      if (!sql || typeof sql !== 'string') return null;
+      const clean = sql.replace(/--.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '').trim();
+      if (!/^\s*SELECT\b/i.test(clean)) return null;
+      if (/\b(?:JOIN|UNION)\b/i.test(clean)) return null;
+      const match = clean.match(/\bFROM\s+(?:[`"\[]?([a-zA-Z0-9_$\u0080-\uffff]+)[`"\]]?\.)?[`"\[]?([a-zA-Z0-9_$\u0080-\uffff]+)[`"\]]?(?:\s+(?:AS\s+)?[`"\[]?[a-zA-Z0-9_$\u0080-\uffff]+[`"\]]?)?(?:\s+(?:WHERE|ORDER|GROUP|HAVING|LIMIT|OFFSET|PROCEDURE|FOR|LOCK|WINDOW|;)|;|\s*$)/i);
+      if (!match) return null;
+      return { database: match[1] || '', table: match[2] };
     }
 
     // --- Pure Client-Side SQL Formatter ---
@@ -8880,7 +8905,10 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
         }
 
         if (data.type === 'query') {
-          renderGridResults(data.columns, data.rows);
+          const parsed = extractSingleTableFromSQL(sql);
+          const detectedTable = parsed ? parsed.table : null;
+          const detectedDB = (parsed && parsed.database) || currentDb;
+          renderGridResults(data.columns, data.rows, null, detectedTable, detectedDB);
           document.getElementById('grid-result-stats').textContent = `${data.row_count} rows (${data.execution_ms}ms)`;
           if (/^\s*(CREATE|ALTER|DROP|RENAME)\b/i.test(sql) && activeConnection) {
             await refreshSchema();
@@ -10265,15 +10293,27 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       }
     }
 
-    function renderGridResults(cols, rows, pkCol = null, tableName = null) {
+    function renderGridResults(cols, rows, pkCol = null, tableName = null, databaseName = null) {
       currentColumns = cols || [];
       currentResults = rows || [];
-      activeGridPKCol = pkCol;
-      activeGridTable = tableName;
-      activeEditCell = null;
-
       const activeTab = tabs.find(t => t.id === activeTabId);
-      activeGridDB = (activeTab && activeTab.database) || (schemaCatalogCache && schemaCatalogCache.database_name) || '';
+
+      if (!tableName && activeTab && activeTab.tableName) {
+        tableName = activeTab.tableName;
+      }
+      activeGridTable = tableName;
+      activeGridDB = databaseName || (activeTab && activeTab.database) || (schemaCatalogCache && schemaCatalogCache.database_name) || '';
+
+      // Fallback: resolve primary key from schema catalog cache if not provided or empty
+      const targetCatalog = (activeGridDB && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeGridDB.toLowerCase()]) || (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
+      const tableMeta = (targetCatalog?.tables || []).find(t => (t.name || '').toLowerCase() === (tableName || '').toLowerCase());
+      if (!pkCol && tableMeta && Array.isArray(tableMeta.columns)) {
+        const pk = tableMeta.columns.find(c => c.is_primary_key);
+        if (pk) pkCol = pk.name;
+      }
+
+      activeGridPKCol = pkCol;
+      activeEditCell = null;
 
       const thead = document.getElementById('grid-thead');
       const tbody = document.getElementById('grid-tbody');
@@ -10326,8 +10366,6 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       thead.innerHTML = headerRow1 + headerRow2;
 
       // Resolve foreign keys for table
-      const targetCatalog = (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
-      const tableMeta = (targetCatalog?.tables || []).find(t => t.name === tableName);
       const fkMap = new Map();
       if (tableMeta && Array.isArray(tableMeta.foreign_keys)) {
         tableMeta.foreign_keys.forEach(fk => {
@@ -10432,6 +10470,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
                 <span class="cell-val">${displayVal === null ? '<span class="text-slate-500 italic">NULL</span>' : escapeHtml(String(displayVal))}</span>
                 ${fkBadge}
                 ${isDirty ? '<span class="ml-1 text-[9px] text-amber-400 font-bold" title="Unapplied staged change">●</span>' : ''}
+                <button type="button" onclick="event.stopPropagation(); openGridCellMenu(event, ${rIdx}, ${cIdx}, this.parentElement)" class="ml-1 opacity-0 group-hover:opacity-70 hover:!opacity-100 text-slate-400 hover:text-sky-300 font-bold transition text-[10px] select-none inline-block" title="Insert Value / Cell Menu (Right-click)">⚡</button>
               </td>
             `;
           }).join('')}
@@ -10444,10 +10483,207 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
         if (activeEditCell.td === td) return;
         commitInlineEdit(activeEditCell, true);
       }
+      activeGridSelectedRow = rIdx;
+      activeGridSelectedCol = cIdx;
+      activeGridSelectedTd = td;
+
       document.querySelectorAll('#grid-tbody td.cell-selected').forEach(el => {
         el.classList.remove('cell-selected', 'ring-1', 'ring-sky-400', 'bg-sky-950/20');
       });
       td.classList.add('cell-selected', 'ring-1', 'ring-sky-400', 'bg-sky-950/20');
+    }
+
+    function parseEnumValues(typeStr) {
+      if (!typeStr || typeof typeStr !== 'string') return null;
+      const match = typeStr.match(/^(?:enum|set)\s*\(([\s\S]+)\)$/i);
+      if (!match) return null;
+      const inner = match[1];
+      const values = [];
+      const regex = /'((?:''|[^'])*)'|"((?:""|[^"])*)"/g;
+      let m;
+      while ((m = regex.exec(inner)) !== null) {
+        values.push((m[1] !== undefined ? m[1].replace(/''/g, "'") : m[2].replace(/""/g, '"')));
+      }
+      return values.length > 0 ? values : null;
+    }
+
+    function formatCurrentTimestamp() {
+      const d = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+
+    function formatCurrentDate() {
+      const d = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    }
+
+    function generateUUID() {
+      if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        try { return crypto.randomUUID(); } catch (_) {}
+      }
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+        const r = (Math.random() * 16) | 0;
+        const v = c === 'x' ? r : (r & 0x3) | 0x8;
+        return v.toString(16);
+      });
+    }
+
+    function openGridCellMenu(e, rIdx, cIdx, td) {
+      e.preventDefault();
+      e.stopPropagation();
+      selectGridCell(td, rIdx, cIdx);
+      openGridContextMenu(e, rIdx);
+    }
+
+    function editRightClickedCell() {
+      const td = activeGridRightClickedTd || activeGridSelectedTd;
+      const rIdx = activeGridRightClickedRow ?? activeGridSelectedRow;
+      const cIdx = activeGridRightClickedCol ?? activeGridSelectedCol;
+      if (td && rIdx !== null && cIdx !== null) {
+        startInlineEdit(td, rIdx, cIdx, activeGridPKCol, activeGridTable);
+      }
+    }
+
+    async function applyPresetToActiveEdit(valType) {
+      if (!activeEditCell) return;
+      let val = null;
+      if (valType === null) val = null;
+      else if (valType === '') val = '';
+      else if (valType === 'NOW') val = formatCurrentTimestamp();
+      else if (valType === 'DATE') val = formatCurrentDate();
+      else if (valType === 'UUID') val = generateUUID();
+      else val = valType;
+
+      activeEditCell.hasExplicitVal = true;
+      activeEditCell.explicitVal = val;
+      if (activeEditCell.input) {
+        activeEditCell.input.value = val === null ? '' : String(val);
+      }
+      await commitInlineEdit(activeEditCell, false);
+    }
+
+    async function insertGridCellValue(valType) {
+      closeGridContextMenu();
+      const rIdx = activeGridRightClickedRow ?? activeGridSelectedRow;
+      const cIdx = activeGridRightClickedCol ?? activeGridSelectedCol;
+      const td = activeGridRightClickedTd ?? activeGridSelectedTd;
+
+      if (rIdx === null || cIdx === null || !td) return;
+      if (activeSession && activeSession.read_only) {
+        showNativeAlert('Session is in READ-ONLY mode. Unlock first.', 'Read-Only Mode');
+        return;
+      }
+
+      let val = null;
+      if (valType === null) val = null;
+      else if (valType === '') val = '';
+      else if (valType === 'NOW') val = formatCurrentTimestamp();
+      else if (valType === 'DATE') val = formatCurrentDate();
+      else if (valType === 'UUID') val = generateUUID();
+      else val = valType;
+
+      if (activeEditCell && activeEditCell.td === td) {
+        await applyPresetToActiveEdit(valType);
+        return;
+      }
+
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      let tableName = activeGridTable || (activeTab && activeTab.tableName) || '';
+      if (!tableName) {
+        const sql = (activeTab && activeTab.sql) || getEditorSQL();
+        const parsed = extractSingleTableFromSQL(sql);
+        if (parsed && parsed.table) {
+          tableName = parsed.table;
+          activeGridTable = tableName;
+          if (parsed.database) activeGridDB = parsed.database;
+        }
+      }
+      if (!tableName) {
+        showNativeAlert('Inline editing is only available for single-table queries. Specify a table to edit.', 'Edit Cell');
+        return;
+      }
+
+      let pkCol = activeGridPKCol;
+      if (!pkCol && tableName) {
+        const targetCatalog = (activeGridDB && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeGridDB.toLowerCase()]) || (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
+        const tableMeta = (targetCatalog?.tables || []).find(t => (t.name || '').toLowerCase() === tableName.toLowerCase());
+        if (tableMeta && Array.isArray(tableMeta.columns)) {
+          const pk = tableMeta.columns.find(c => c.is_primary_key);
+          if (pk) {
+            pkCol = pk.name;
+            activeGridPKCol = pkCol;
+          }
+        }
+      }
+
+      const col = currentColumns[cIdx];
+      const pkIdx = pkCol ? currentColumns.findIndex(c => (c.name || '').toLowerCase() === pkCol.toLowerCase()) : -1;
+      const pkVal = pkIdx !== -1 ? currentResults[rIdx][pkIdx] : null;
+
+      const rowCriteria = {};
+      if (pkIdx === -1) {
+        currentColumns.forEach((c, idx) => {
+          rowCriteria[c.name] = currentResults[rIdx][idx];
+        });
+      }
+
+      const dbName = (activeTab && activeTab.database) || activeGridDB || '';
+
+      if (gridEditMode === 'auto') {
+        if (gridConfirmSave) {
+          const colName = col ? col.name : `Column #${cIdx}`;
+          const displayVal = val === null ? 'NULL' : `"${val}"`;
+          const ok = await showNativeConfirm(`Save changes to ${tableName}.${colName} = ${displayVal}?`, 'Confirm Save');
+          if (!ok) return;
+        }
+
+        try {
+          const res = await apiFetch(`/api/session/${activeConnection.id}/cell-edit`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              database: dbName,
+              table: tableName,
+              column: col.name,
+              value: val,
+              pk_column: pkIdx !== -1 ? pkCol : '',
+              pk_value: pkVal,
+              row_criteria: pkIdx === -1 ? rowCriteria : undefined
+            })
+          });
+          if (res.ok) {
+            currentResults[rIdx][cIdx] = val;
+            renderCellContent(td, rIdx, cIdx, pkCol, tableName);
+            td.classList.add('bg-emerald-950/40', 'border-emerald-600/60');
+            setTimeout(() => td.classList.remove('bg-emerald-950/40', 'border-emerald-600/60'), 1500);
+          } else {
+            const err = await res.json().catch(() => ({}));
+            showNativeAlert('Failed to save cell: ' + (err.error || res.statusText), 'Save Error');
+            renderCellContent(td, rIdx, cIdx, pkCol, tableName);
+          }
+        } catch (err) {
+          showNativeAlert('Network error saving cell: ' + err.message, 'Save Error');
+        }
+      } else {
+        const stagedKey = `${tableName}:${rIdx}:${cIdx}`;
+        stagedEdits.set(stagedKey, {
+          rIdx,
+          cIdx,
+          db: dbName,
+          table: tableName,
+          colName: col.name,
+          pkCol: pkIdx !== -1 ? pkCol : '',
+          pkVal,
+          rowCriteria: pkIdx === -1 ? rowCriteria : undefined,
+          oldVal: currentResults[rIdx][cIdx],
+          newVal: val
+        });
+        currentResults[rIdx][cIdx] = val;
+        renderCellContent(td, rIdx, cIdx, pkCol, tableName);
+        updateStagedEditsUI();
+      }
     }
 
     function startInlineEdit(td, rIdx, cIdx, pkCol, tableName) {
@@ -10455,8 +10691,39 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
         showNativeAlert('Session is in READ-ONLY mode. Unlock first.', 'Read-Only Mode');
         return;
       }
-      if (!pkCol || !tableName) {
-        showNativeAlert('Inline editing requires a primary key column on the table.', 'Edit Cell');
+
+      if (!tableName) {
+        const activeTab = tabs.find(t => t.id === activeTabId);
+        tableName = activeGridTable || (activeTab && activeTab.tableName) || '';
+        if (!tableName) {
+          const sql = (activeTab && activeTab.sql) || getEditorSQL();
+          const parsed = extractSingleTableFromSQL(sql);
+          if (parsed && parsed.table) {
+            tableName = parsed.table;
+            activeGridTable = tableName;
+            if (parsed.database) activeGridDB = parsed.database;
+          }
+        }
+      }
+
+      if (!pkCol) {
+        pkCol = activeGridPKCol;
+        if (!pkCol && tableName) {
+          const activeTab = tabs.find(t => t.id === activeTabId);
+          const targetCatalog = (activeGridDB && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeGridDB.toLowerCase()]) || (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
+          const tableMeta = (targetCatalog?.tables || []).find(t => (t.name || '').toLowerCase() === tableName.toLowerCase());
+          if (tableMeta && Array.isArray(tableMeta.columns)) {
+            const pk = tableMeta.columns.find(c => c.is_primary_key);
+            if (pk) {
+              pkCol = pk.name;
+              activeGridPKCol = pkCol;
+            }
+          }
+        }
+      }
+
+      if (!tableName) {
+        showNativeAlert('Inline editing is only available for single-table queries. Specify a table to edit.', 'Edit Cell');
         return;
       }
 
@@ -10473,11 +10740,99 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       const originalVal = currentResults[rIdx][cIdx];
       const currentVal = staged ? staged.newVal : originalVal;
 
-      td.innerHTML = `
-        <input type="text" value="${currentVal === null ? '' : escapeHtml(String(currentVal))}"
-               class="w-full bg-slate-950 text-sky-200 border border-sky-400 px-1 py-0.5 rounded outline-none font-mono text-xs ring-2 ring-sky-500/40 shadow-inner">
-      `;
-      const input = td.querySelector('input');
+      const col = currentColumns[cIdx];
+      const targetCatalog = (activeGridDB && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeGridDB.toLowerCase()]) || (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
+      const tableMeta = (targetCatalog?.tables || []).find(t => (t.name || '').toLowerCase() === (tableName || '').toLowerCase());
+      const colMeta = (tableMeta?.columns || []).find(c => (c.name || '').toLowerCase() === (col?.name || '').toLowerCase());
+      const rawType = (colMeta?.type || col?.type || '').toLowerCase();
+      const isNullable = colMeta ? colMeta.is_nullable : true;
+      const fkInfo = (tableMeta?.foreign_keys || []).find(fk => (fk.column || '').toLowerCase() === (col?.name || '').toLowerCase());
+      const enumValues = parseEnumValues(colMeta?.type || col?.type);
+
+      td.style.position = 'relative';
+      const isTopRow = rIdx === 0;
+      const pillPosClass = isTopRow ? 'top-full mt-1' : '-top-7';
+
+      let editorHtml = '';
+      if (enumValues && enumValues.length > 0) {
+        editorHtml = `
+          <div id="active-cell-preset-bar" class="absolute ${pillPosClass} left-0 z-30 bg-slate-900 border border-slate-700/80 rounded shadow-xl px-1.5 py-0.5 flex items-center space-x-1 text-[10px] select-none whitespace-nowrap ring-1 ring-black/40">
+            <span class="text-sky-400 font-semibold mr-0.5">ENUM:</span>
+            ${enumValues.slice(0, 5).map(v => `
+              <button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit('${escapeHtml(v)}')" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-sky-200 hover:text-white rounded border border-slate-700 font-mono transition">${escapeHtml(v)}</button>
+            `).join('')}
+            ${isNullable ? `<button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit(null)" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded border border-slate-700 font-mono transition">NULL</button>` : ''}
+          </div>
+          <select class="w-full bg-slate-950 text-sky-200 border border-sky-400 px-1 py-0.5 rounded outline-none font-mono text-xs ring-2 ring-sky-500/40 shadow-inner cursor-pointer">
+            ${isNullable ? `<option value="__SQLFOX_NULL__" ${currentVal === null ? 'selected' : ''} class="italic text-slate-500">NULL</option>` : ''}
+            ${enumValues.map(v => `<option value="${escapeHtml(v)}" ${String(currentVal) === String(v) ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('')}
+          </select>
+        `;
+      } else if (rawType === 'boolean' || rawType === 'bool' || rawType === 'tinyint(1)') {
+        editorHtml = `
+          <div id="active-cell-preset-bar" class="absolute ${pillPosClass} left-0 z-30 bg-slate-900 border border-slate-700/80 rounded shadow-xl px-1.5 py-0.5 flex items-center space-x-1 text-[10px] select-none whitespace-nowrap ring-1 ring-black/40">
+            <span class="text-sky-400 font-semibold mr-0.5">BOOL:</span>
+            <button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit('1')" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 rounded border border-slate-700 font-mono transition">1 (TRUE)</button>
+            <button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit('0')" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-rose-400 hover:text-rose-300 rounded border border-slate-700 font-mono transition">0 (FALSE)</button>
+            ${isNullable ? `<button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit(null)" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded border border-slate-700 font-mono transition">NULL</button>` : ''}
+          </div>
+          <select class="w-full bg-slate-950 text-sky-200 border border-sky-400 px-1 py-0.5 rounded outline-none font-mono text-xs ring-2 ring-sky-500/40 shadow-inner cursor-pointer">
+            ${isNullable ? `<option value="__SQLFOX_NULL__" ${currentVal === null ? 'selected' : ''} class="italic text-slate-500">NULL</option>` : ''}
+            <option value="1" ${String(currentVal) === '1' || currentVal === true || String(currentVal).toLowerCase() === 'true' ? 'selected' : ''}>1 (TRUE)</option>
+            <option value="0" ${String(currentVal) === '0' || currentVal === false || String(currentVal).toLowerCase() === 'false' ? 'selected' : ''}>0 (FALSE)</option>
+          </select>
+        `;
+      } else if (fkInfo && fkInfo.referenced_table && fkInfo.referenced_column) {
+        const datalistId = `fk-datalist-${rIdx}-${cIdx}`;
+        editorHtml = `
+          <div id="active-cell-preset-bar" class="absolute ${pillPosClass} left-0 z-30 bg-slate-900 border border-slate-700/80 rounded shadow-xl px-1.5 py-0.5 flex items-center space-x-1 text-[10px] select-none whitespace-nowrap ring-1 ring-black/40">
+            <span class="text-sky-400 font-semibold mr-0.5">🔗 ${escapeHtml(fkInfo.referenced_table)}.${escapeHtml(fkInfo.referenced_column)}:</span>
+            <button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit(null)" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-sky-300 hover:text-sky-200 rounded border border-slate-700 font-mono transition" title="Set to NULL (Ctrl+Shift+N)">NULL</button>
+            <button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit('')" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded border border-slate-700 font-mono transition" title="Set to Empty String">'' Empty</button>
+          </div>
+          <input type="text" list="${datalistId}" value="${currentVal === null ? '' : escapeHtml(String(currentVal))}"
+                 placeholder="Select or enter ${escapeHtml(fkInfo.referenced_column)}..."
+                 class="w-full bg-slate-950 text-sky-200 border border-sky-400 px-1 py-0.5 rounded outline-none font-mono text-xs ring-2 ring-sky-500/40 shadow-inner">
+          <datalist id="${datalistId}"></datalist>
+        `;
+      } else if (rawType === 'date') {
+        editorHtml = `
+          <div id="active-cell-preset-bar" class="absolute ${pillPosClass} left-0 z-30 bg-slate-900 border border-slate-700/80 rounded shadow-xl px-1.5 py-0.5 flex items-center space-x-1 text-[10px] select-none whitespace-nowrap ring-1 ring-black/40">
+            <span class="text-slate-400 font-semibold mr-0.5">⚡</span>
+            <button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit('DATE')" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-teal-400 hover:text-teal-300 rounded border border-slate-700 font-mono transition" title="Current Date (Ctrl+Shift+D)">Today</button>
+            <button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit(null)" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-sky-300 hover:text-sky-200 rounded border border-slate-700 font-mono transition" title="Set to NULL (Ctrl+Shift+N)">NULL</button>
+            <button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit('')" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded border border-slate-700 font-mono transition" title="Set to Empty String (Ctrl+Shift+E)">'' Empty</button>
+          </div>
+          <input type="date" value="${currentVal === null ? '' : escapeHtml(String(currentVal))}"
+                 class="w-full bg-slate-950 text-sky-200 border border-sky-400 px-1 py-0.5 rounded outline-none font-mono text-xs ring-2 ring-sky-500/40 shadow-inner">
+        `;
+      } else if (rawType === 'time') {
+        editorHtml = `
+          <div id="active-cell-preset-bar" class="absolute ${pillPosClass} left-0 z-30 bg-slate-900 border border-slate-700/80 rounded shadow-xl px-1.5 py-0.5 flex items-center space-x-1 text-[10px] select-none whitespace-nowrap ring-1 ring-black/40">
+            <span class="text-slate-400 font-semibold mr-0.5">⚡</span>
+            <button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit(null)" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-sky-300 hover:text-sky-200 rounded border border-slate-700 font-mono transition" title="Set to NULL (Ctrl+Shift+N)">NULL</button>
+            <button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit('')" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded border border-slate-700 font-mono transition" title="Set to Empty String (Ctrl+Shift+E)">'' Empty</button>
+          </div>
+          <input type="time" step="1" value="${currentVal === null ? '' : escapeHtml(String(currentVal))}"
+                 class="w-full bg-slate-950 text-sky-200 border border-sky-400 px-1 py-0.5 rounded outline-none font-mono text-xs ring-2 ring-sky-500/40 shadow-inner">
+        `;
+      } else {
+        editorHtml = `
+          <div id="active-cell-preset-bar" class="absolute ${pillPosClass} left-0 z-30 bg-slate-900 border border-slate-700/80 rounded shadow-xl px-1.5 py-0.5 flex items-center space-x-1 text-[10px] select-none whitespace-nowrap ring-1 ring-black/40">
+            <span class="text-slate-400 font-semibold mr-0.5">⚡</span>
+            <button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit(null)" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-sky-300 hover:text-sky-200 rounded border border-slate-700 font-mono transition" title="Set to NULL (Ctrl+Shift+N)">NULL</button>
+            <button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit('')" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded border border-slate-700 font-mono transition" title="Set to Empty String (Ctrl+Shift+E)">'' Empty</button>
+            <button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit('NOW')" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 rounded border border-slate-700 font-mono transition" title="Current Timestamp (Ctrl+Shift+T)">NOW</button>
+            <button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit('DATE')" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-teal-400 hover:text-teal-300 rounded border border-slate-700 font-mono transition" title="Current Date (Ctrl+Shift+D)">Date</button>
+            <button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit('UUID')" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-purple-400 hover:text-purple-300 rounded border border-slate-700 font-mono transition" title="Generate UUID">UUID</button>
+          </div>
+          <input type="text" value="${currentVal === null ? '' : escapeHtml(String(currentVal))}"
+                 class="w-full bg-slate-950 text-sky-200 border border-sky-400 px-1 py-0.5 rounded outline-none font-mono text-xs ring-2 ring-sky-500/40 shadow-inner">
+        `;
+      }
+
+      td.innerHTML = editorHtml;
+      const input = td.querySelector('input, select');
       const editInfo = {
         td,
         rIdx,
@@ -10486,12 +10841,47 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
         tableName,
         originalVal,
         input,
-        isCommitting: false
+        isCommitting: false,
+        hasExplicitVal: false,
+        explicitVal: null,
+        rawType,
+        enumValues
       };
       activeEditCell = editInfo;
 
+      // Asynchronously fetch FK parent rows if FK column
+      if (fkInfo && fkInfo.referenced_table && fkInfo.referenced_column) {
+        const datalistId = `fk-datalist-${rIdx}-${cIdx}`;
+        const refTable = fkInfo.referenced_table;
+        const refCol = fkInfo.referenced_column;
+        const targetDb = activeGridDB || (activeTab && activeTab.database) || '';
+        apiFetch(`/api/session/${activeConnection.id}/table-rows?table=${encodeURIComponent(refTable)}&database=${encodeURIComponent(targetDb)}&limit=100`)
+          .then(res => res.json())
+          .then(data => {
+            const dl = document.getElementById(datalistId);
+            if (dl && data && Array.isArray(data.rows) && Array.isArray(data.columns)) {
+              const rColIdx = data.columns.findIndex(c => (c.name || '').toLowerCase() === refCol.toLowerCase());
+              const nameColIdx = data.columns.findIndex(c => /name|title|username|email|label|desc/i.test(c.name || ''));
+              if (rColIdx !== -1) {
+                dl.innerHTML = data.rows.map(r => {
+                  const val = r[rColIdx];
+                  const label = (nameColIdx !== -1 && nameColIdx !== rColIdx && r[nameColIdx] !== null) ? ` (${r[nameColIdx]})` : '';
+                  return `<option value="${escapeHtml(String(val))}">${escapeHtml(String(val))}${escapeHtml(label)}</option>`;
+                }).join('');
+              }
+            }
+          })
+          .catch(() => {});
+      }
+
       input.focus();
-      input.select();
+      if (typeof input.select === 'function') input.select();
+
+      if (input.tagName === 'SELECT') {
+        input.addEventListener('change', () => {
+          commitInlineEdit(editInfo, false);
+        });
+      }
 
       input.addEventListener('keydown', async (e) => {
         if (e.key === 'Enter') {
@@ -10500,13 +10890,25 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
         } else if (e.key === 'Escape') {
           e.preventDefault();
           cancelInlineEdit(editInfo);
+        } else if (e.ctrlKey && e.shiftKey && (e.key === 'N' || e.key === 'n')) {
+          e.preventDefault();
+          applyPresetToActiveEdit(null);
+        } else if (e.ctrlKey && e.shiftKey && (e.key === 'E' || e.key === 'e')) {
+          e.preventDefault();
+          applyPresetToActiveEdit('');
+        } else if (e.ctrlKey && e.shiftKey && (e.key === 'T' || e.key === 't')) {
+          e.preventDefault();
+          applyPresetToActiveEdit('NOW');
+        } else if (e.ctrlKey && e.shiftKey && (e.key === 'D' || e.key === 'd')) {
+          e.preventDefault();
+          applyPresetToActiveEdit('DATE');
         } else if (e.key === 'Tab') {
           e.preventDefault();
           const nextCIdx = e.shiftKey ? cIdx - 1 : cIdx + 1;
           commitInlineEdit(editInfo, true);
           if (nextCIdx >= 0 && nextCIdx < currentColumns.length) {
             const rowEl = td.parentElement;
-            const nextTd = rowEl ? rowEl.children[nextCIdx] : null;
+            const nextTd = rowEl ? rowEl.querySelector(`td[data-col="${nextCIdx}"]`) : null;
             if (nextTd) startInlineEdit(nextTd, rIdx, nextCIdx, pkCol, tableName);
           }
         }
@@ -10524,6 +10926,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
     async function commitInlineEdit(editInfo, isSwitchingCells) {
       if (!editInfo || editInfo.isCommitting) return;
       editInfo.isCommitting = true;
+      if (editInfo.td) editInfo.td.style.position = '';
 
       const input = editInfo.input;
       const td = editInfo.td;
@@ -10535,10 +10938,62 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       const col = currentColumns[cIdx];
 
       const newVal = input ? input.value : '';
-      const isNull = newVal === '' && (originalVal === null || (col && col.type && col.type.toLowerCase().includes('null')));
-      const effectiveVal = isNull ? null : newVal;
+      let effectiveVal;
+      if (editInfo.hasExplicitVal) {
+        effectiveVal = editInfo.explicitVal;
+      } else if (input && input.tagName === 'SELECT') {
+        effectiveVal = input.value === '__SQLFOX_NULL__' ? null : input.value;
+      } else {
+        const isNull = newVal === '' && (originalVal === null || (col && col.type && col.type.toLowerCase().includes('null')));
+        effectiveVal = isNull ? null : newVal;
+      }
+
+      // Input Validation according to data type
+      if (effectiveVal !== null) {
+        const valStr = String(effectiveVal).trim();
+        const enumValues = editInfo.enumValues;
+        const rawType = (editInfo.rawType || '').toLowerCase();
+        if (enumValues && enumValues.length > 0) {
+          if (!enumValues.includes(valStr) && valStr !== '') {
+            showNativeAlert(`Value "${valStr}" is not a valid ENUM option for '${col.name}'.\nAllowed: ${enumValues.join(', ')}`, 'Validation Error');
+            renderCellContent(td, rIdx, cIdx, pkCol, tableName);
+            if (activeEditCell === editInfo) activeEditCell = null;
+            return;
+          }
+        } else if (rawType === 'boolean' || rawType === 'bool') {
+          if (valStr !== '1' && valStr !== '0' && valStr !== 'true' && valStr !== 'false' && valStr !== '') {
+            showNativeAlert(`Value "${valStr}" is not a valid BOOLEAN for '${col.name}'.\nAllowed: 1 (TRUE), 0 (FALSE)`, 'Validation Error');
+            renderCellContent(td, rIdx, cIdx, pkCol, tableName);
+            if (activeEditCell === editInfo) activeEditCell = null;
+            return;
+          }
+        } else if (rawType.includes('int') && !rawType.includes('point')) {
+          if (valStr !== '' && !/^-?\d+$/.test(valStr)) {
+            showNativeAlert(`Value "${valStr}" is not a valid integer for '${col.name}' (${rawType}).`, 'Validation Error');
+            renderCellContent(td, rIdx, cIdx, pkCol, tableName);
+            if (activeEditCell === editInfo) activeEditCell = null;
+            return;
+          }
+        } else if ((rawType.includes('decimal') || rawType.includes('float') || rawType.includes('double') || rawType.includes('numeric')) && !rawType.includes('char')) {
+          if (valStr !== '' && !/^-?\d*(\.\d+)?$/.test(valStr)) {
+            showNativeAlert(`Value "${valStr}" is not a valid number for '${col.name}' (${rawType}).`, 'Validation Error');
+            renderCellContent(td, rIdx, cIdx, pkCol, tableName);
+            if (activeEditCell === editInfo) activeEditCell = null;
+            return;
+          }
+        } else if (rawType === 'date') {
+          if (valStr !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(valStr)) {
+            showNativeAlert(`Value "${valStr}" is not a valid date for '${col.name}'. Expected YYYY-MM-DD.`, 'Validation Error');
+            renderCellContent(td, rIdx, cIdx, pkCol, tableName);
+            if (activeEditCell === editInfo) activeEditCell = null;
+            return;
+          }
+        }
+      }
+
       const isChanged = (originalVal === null && effectiveVal !== null) ||
-                        (originalVal !== null && String(originalVal) !== String(effectiveVal));
+                        (originalVal !== null && effectiveVal === null) ||
+                        (originalVal !== null && effectiveVal !== null && String(originalVal) !== String(effectiveVal));
 
       if (!isChanged) {
         renderCellContent(td, rIdx, cIdx, pkCol, tableName);
@@ -10549,19 +11004,27 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       const activeTab = tabs.find(t => t.id === activeTabId);
       const dbName = (activeTab && activeTab.database) || activeGridDB || '';
 
+      const pkIdx = pkCol ? currentColumns.findIndex(c => (c.name || '').toLowerCase() === pkCol.toLowerCase()) : -1;
+      const pkVal = pkIdx !== -1 ? currentResults[rIdx][pkIdx] : null;
+
+      const rowCriteria = {};
+      if (pkIdx === -1) {
+        currentColumns.forEach((c, idx) => {
+          rowCriteria[c.name] = currentResults[rIdx][idx];
+        });
+      }
+
       if (gridEditMode === 'auto') {
         if (gridConfirmSave) {
           const colName = col ? col.name : `Column #${cIdx}`;
-          const ok = await showNativeConfirm(`Save changes to ${tableName}.${colName} = "${newVal}"?`, 'Confirm Save');
+          const displayVal = effectiveVal === null ? 'NULL' : `"${effectiveVal}"`;
+          const ok = await showNativeConfirm(`Save changes to ${tableName}.${colName} = ${displayVal}?`, 'Confirm Save');
           if (!ok) {
             renderCellContent(td, rIdx, cIdx, pkCol, tableName);
             if (activeEditCell === editInfo) activeEditCell = null;
             return;
           }
         }
-
-        const pkIdx = currentColumns.findIndex(c => c.name === pkCol);
-        const pkVal = currentResults[rIdx][pkIdx];
 
         try {
           const res = await apiFetch(`/api/session/${activeConnection.id}/cell-edit`, {
@@ -10572,8 +11035,9 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
               table: tableName,
               column: col.name,
               value: effectiveVal,
-              pk_column: pkCol,
-              pk_value: pkVal
+              pk_column: pkIdx !== -1 ? pkCol : '',
+              pk_value: pkVal,
+              row_criteria: pkIdx === -1 ? rowCriteria : undefined
             })
           });
           if (res.ok) {
@@ -10591,8 +11055,6 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
           renderCellContent(td, rIdx, cIdx, pkCol, tableName);
         }
       } else {
-        const pkIdx = currentColumns.findIndex(c => c.name === pkCol);
-        const pkVal = currentResults[rIdx][pkIdx];
         const stagedKey = `${tableName}:${rIdx}:${cIdx}`;
 
         stagedEdits.set(stagedKey, {
@@ -10601,8 +11063,9 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
           db: dbName,
           table: tableName,
           colName: col.name,
-          pkCol,
+          pkCol: pkIdx !== -1 ? pkCol : '',
           pkVal,
+          rowCriteria: pkIdx === -1 ? rowCriteria : undefined,
           oldVal: originalVal,
           newVal: effectiveVal
         });
@@ -10617,11 +11080,13 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
 
     function cancelInlineEdit(editInfo) {
       if (!editInfo) return;
+      if (editInfo.td) editInfo.td.style.position = '';
       renderCellContent(editInfo.td, editInfo.rIdx, editInfo.cIdx, editInfo.pkCol, editInfo.tableName);
       activeEditCell = null;
     }
 
     function renderCellContent(td, rIdx, cIdx, pkCol, tableName) {
+      if (td) td.style.position = '';
       const stagedKey = `${tableName}:${rIdx}:${cIdx}`;
       const staged = stagedEdits.get(stagedKey);
       const val = staged ? staged.newVal : currentResults[rIdx][cIdx];
@@ -10630,6 +11095,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       td.innerHTML = `
         <span class="cell-val">${val === null ? '<span class="text-slate-500 italic">NULL</span>' : escapeHtml(String(val))}</span>
         ${isDirty ? '<span class="ml-1 text-[9px] text-amber-400 font-bold" title="Unapplied staged change">●</span>' : ''}
+        <button type="button" onclick="event.stopPropagation(); openGridCellMenu(event, ${rIdx}, ${cIdx}, this.parentElement)" class="ml-1 opacity-0 group-hover:opacity-70 hover:!opacity-100 text-slate-400 hover:text-sky-300 font-bold transition text-[10px] select-none inline-block" title="Insert Value / Cell Menu (Right-click)">⚡</button>
       `;
 
       if (isDirty) {
@@ -10712,21 +11178,34 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
         showNativeAlert('Session is in READ-ONLY mode. Unlock first.', 'Read-Only Mode');
         return;
       }
-      if (!activeGridTable) return;
-      if (!activeGridPKCol) {
-        showNativeAlert('Deleting rows requires a primary key column on the table.', 'Delete Rows');
-        return;
+      if (!activeGridTable) {
+        const activeTab = tabs.find(t => t.id === activeTabId);
+        activeGridTable = (activeTab && activeTab.tableName) || '';
+        if (!activeGridTable) {
+          const sql = (activeTab && activeTab.sql) || getEditorSQL();
+          const parsed = extractSingleTableFromSQL(sql);
+          if (parsed && parsed.table) {
+            activeGridTable = parsed.table;
+            if (parsed.database) activeGridDB = parsed.database;
+          }
+        }
       }
+      if (!activeGridTable) return;
+
+      if (!activeGridPKCol && activeGridTable) {
+        const activeTab = tabs.find(t => t.id === activeTabId);
+        const targetCatalog = (activeGridDB && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeGridDB.toLowerCase()]) || (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
+        const tableMeta = (targetCatalog?.tables || []).find(t => (t.name || '').toLowerCase() === activeGridTable.toLowerCase());
+        if (tableMeta && Array.isArray(tableMeta.columns)) {
+          const pk = tableMeta.columns.find(c => c.is_primary_key);
+          if (pk) activeGridPKCol = pk.name;
+        }
+      }
+
       const count = selectedRowIndices.size;
       if (count === 0) return;
 
-      const pkIdx = currentColumns.findIndex(c => c.name === activeGridPKCol);
-      if (pkIdx === -1) {
-        showNativeAlert(`Primary key column "${activeGridPKCol}" not found in current view.`, 'Delete Rows');
-        return;
-      }
-
-      const pkValues = Array.from(selectedRowIndices).map(idx => currentResults[idx][pkIdx]);
+      const pkIdx = activeGridPKCol ? currentColumns.findIndex(c => (c.name || '').toLowerCase() === activeGridPKCol.toLowerCase()) : -1;
 
       // In Production, require typing challenge
       if (activeConnection && activeConnection.environment === 'Production') {
@@ -10740,22 +11219,39 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       const activeTab = tabs.find(t => t.id === activeTabId);
       const dbName = (activeTab && activeTab.database) || activeGridDB || '';
 
+      const deletePayload = {
+        database: dbName,
+        table: activeGridTable
+      };
+
+      if (pkIdx !== -1) {
+        deletePayload.pk_column = activeGridPKCol;
+        deletePayload.pk_values = Array.from(selectedRowIndices).map(idx => currentResults[idx][pkIdx]);
+      } else {
+        deletePayload.row_criterias = Array.from(selectedRowIndices).map(idx => {
+          const rc = {};
+          currentColumns.forEach((c, cIdx) => {
+            rc[c.name] = currentResults[idx][cIdx];
+          });
+          return rc;
+        });
+      }
+
       try {
         const res = await apiFetch(`/api/session/${activeConnection.id}/delete-rows`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            database: dbName,
-            table: activeGridTable,
-            pk_column: activeGridPKCol,
-            pk_values: pkValues
-          })
+          body: JSON.stringify(deletePayload)
         });
         if (res.ok) {
           selectedRowIndices.clear();
           updateSelectedRowsUI();
           showNativeAlert(`✅ Successfully deleted ${count} row(s)!`, 'Rows Deleted');
-          await loadTableRows(activeGridTable);
+          if (activeTab && activeTab.isTableViewer) {
+            await loadTableRows(activeGridTable);
+          } else {
+            await runActiveQuery();
+          }
         } else {
           const err = await res.json().catch(() => ({}));
           showNativeAlert('Failed to delete rows: ' + (err.error || res.statusText), 'Delete Error');
@@ -10798,8 +11294,16 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
     // --- Floating Grid Row Context Menu ---
     function openGridContextMenu(e, rIdx) {
       e.preventDefault();
+      const td = e.target.closest('td[data-col]');
+      const cIdx = td ? parseInt(td.dataset.col, 10) : -1;
+
       activeGridRightClickedRow = rIdx;
-      if (!selectedRowIndices.has(rIdx)) {
+      activeGridRightClickedCol = cIdx >= 0 ? cIdx : null;
+      activeGridRightClickedTd = td;
+
+      if (td && cIdx >= 0) {
+        selectGridCell(td, rIdx, cIdx);
+      } else if (!selectedRowIndices.has(rIdx)) {
         selectedRowIndices.clear();
         selectedRowIndices.add(rIdx);
         document.querySelectorAll('.grid-row-checkbox').forEach(cb => {
@@ -10810,10 +11314,101 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
 
       const menu = document.getElementById('grid-context-menu');
       if (!menu) return;
+
+      const insertSec = document.getElementById('grid-ctx-insert-section');
+      const colLabel = document.getElementById('grid-ctx-colname');
+      const btnEdit = document.getElementById('grid-ctx-btn-edit');
+
+      if (cIdx >= 0 && currentColumns[cIdx]) {
+        const col = currentColumns[cIdx];
+        const activeTab = tabs.find(t => t.id === activeTabId);
+        const targetCatalog = (activeGridDB && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeGridDB.toLowerCase()]) || (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
+        const tableMeta = (targetCatalog?.tables || []).find(t => (t.name || '').toLowerCase() === (activeGridTable || '').toLowerCase());
+        const colMeta = (tableMeta?.columns || []).find(c => (c.name || '').toLowerCase() === (col?.name || '').toLowerCase());
+        const rawType = (colMeta?.type || col?.type || '').toLowerCase();
+        const enumValues = parseEnumValues(colMeta?.type || col?.type);
+        const fkInfo = (tableMeta?.foreign_keys || []).find(fk => (fk.column || '').toLowerCase() === (col?.name || '').toLowerCase());
+
+        if (insertSec) insertSec.classList.remove('hidden');
+        if (colLabel) colLabel.textContent = `(${col.name})`;
+        if (btnEdit) btnEdit.classList.remove('hidden');
+
+        const optsContainer = document.getElementById('grid-ctx-insert-options');
+        if (optsContainer) {
+          if (enumValues && enumValues.length > 0) {
+            optsContainer.innerHTML = `
+              <button onclick="insertGridCellValue(null)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-sky-300 hover:text-white transition">
+                <span class="font-mono">∅ Set NULL</span>
+                <span class="text-[10px] text-slate-500 font-mono">Ctrl+Shift+N</span>
+              </button>
+              ${enumValues.map(v => `
+                <button onclick="insertGridCellValue('${escapeHtml(v)}')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-slate-200 hover:text-white transition">
+                  <span class="text-sky-400">●</span><span class="font-mono">${escapeHtml(v)}</span>
+                </button>
+              `).join('')}
+            `;
+          } else if (rawType === 'boolean' || rawType === 'bool' || rawType === 'tinyint(1)') {
+            optsContainer.innerHTML = `
+              <button onclick="insertGridCellValue(null)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-sky-300 hover:text-white transition">
+                <span class="font-mono">∅ Set NULL</span>
+                <span class="text-[10px] text-slate-500 font-mono">Ctrl+Shift+N</span>
+              </button>
+              <button onclick="insertGridCellValue('1')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-emerald-400 hover:text-white transition">
+                <span>✓</span><span class="font-mono">1 (TRUE)</span>
+              </button>
+              <button onclick="insertGridCellValue('0')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-rose-400 hover:text-white transition">
+                <span>✕</span><span class="font-mono">0 (FALSE)</span>
+              </button>
+            `;
+          } else if (fkInfo && fkInfo.referenced_table && fkInfo.referenced_column) {
+            optsContainer.innerHTML = `
+              <div class="px-2.5 py-1 text-[10px] text-slate-400 font-mono flex items-center space-x-1 select-none">
+                <span>🔗 References:</span>
+                <span class="text-sky-400 font-semibold">${escapeHtml(fkInfo.referenced_table)}.${escapeHtml(fkInfo.referenced_column)}</span>
+              </div>
+              <button onclick="insertGridCellValue(null)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-sky-300 hover:text-white transition">
+                <span class="font-mono">∅ Set NULL</span>
+                <span class="text-[10px] text-slate-500 font-mono">Ctrl+Shift+N</span>
+              </button>
+              <button onclick="insertGridCellValue('')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-300 hover:text-white transition">
+                <span class="font-mono">"" Set Empty String</span>
+                <span class="text-[10px] text-slate-500 font-mono">Ctrl+Shift+E</span>
+              </button>
+            `;
+          } else {
+            optsContainer.innerHTML = `
+              <button onclick="insertGridCellValue(null)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-sky-300 hover:text-white transition">
+                <span class="font-mono">∅ Set NULL</span>
+                <span class="text-[10px] text-slate-500 font-mono">Ctrl+Shift+N</span>
+              </button>
+              <button onclick="insertGridCellValue('')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-300 hover:text-white transition">
+                <span class="font-mono">"" Set Empty String</span>
+                <span class="text-[10px] text-slate-500 font-mono">Ctrl+Shift+E</span>
+              </button>
+              <button onclick="insertGridCellValue('NOW')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-emerald-400 hover:text-white transition">
+                <span class="font-mono">🕒 Current Timestamp (NOW)</span>
+                <span class="text-[10px] text-slate-500 font-mono">Ctrl+Shift+T</span>
+              </button>
+              <button onclick="insertGridCellValue('DATE')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-teal-400 hover:text-white transition">
+                <span class="font-mono">📅 Current Date</span>
+                <span class="text-[10px] text-slate-500 font-mono">Ctrl+Shift+D</span>
+              </button>
+              <button onclick="insertGridCellValue('UUID')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-purple-400 hover:text-white transition">
+                <span class="font-mono">🔑 UUID()</span>
+                <span class="text-[10px] text-slate-500 font-mono">v4</span>
+              </button>
+            `;
+          }
+        }
+      } else {
+        if (insertSec) insertSec.classList.add('hidden');
+        if (btnEdit) btnEdit.classList.add('hidden');
+      }
+
       menu.classList.remove('hidden');
 
-      const x = Math.min(e.clientX, window.innerWidth - 210);
-      const y = Math.min(e.clientY, window.innerHeight - 180);
+      const x = Math.min(e.clientX, window.innerWidth - 240);
+      const y = Math.min(e.clientY, window.innerHeight - 340);
       menu.style.left = `${x}px`;
       menu.style.top = `${y}px`;
     }
@@ -11814,7 +12409,8 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
           column: item.colName,
           value: item.newVal,
           pk_column: item.pkCol,
-          pk_value: item.pkVal
+          pk_value: item.pkVal,
+          row_criteria: item.rowCriteria
         }));
 
         try {
@@ -14356,6 +14952,29 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       if (e.key === 'Escape') {
         closeProcessContextMenu();
         closeFKPeekPopover();
+        closeGridContextMenu();
+        return;
+      }
+
+      // If active cell is selected (and user is not currently inside an input/textarea)
+      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable)) {
+        return;
+      }
+
+      if (activeGridSelectedTd && activeGridSelectedRow !== null && activeGridSelectedCol !== null) {
+        if (e.ctrlKey && e.shiftKey && (e.key === 'N' || e.key === 'n')) {
+          e.preventDefault();
+          insertGridCellValue(null);
+        } else if (e.ctrlKey && e.shiftKey && (e.key === 'E' || e.key === 'e')) {
+          e.preventDefault();
+          insertGridCellValue('');
+        } else if (e.ctrlKey && e.shiftKey && (e.key === 'T' || e.key === 't')) {
+          e.preventDefault();
+          insertGridCellValue('NOW');
+        } else if (e.ctrlKey && e.shiftKey && (e.key === 'D' || e.key === 'd')) {
+          e.preventDefault();
+          insertGridCellValue('DATE');
+        }
       }
     });
 
