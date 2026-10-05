@@ -468,51 +468,48 @@ The Entity-Relationship Diagram canvas allows developers to explore table relati
 
 ## 17. Heuristic Index Advisor & Tuning Interface
 
-### Execution Plan (EXPLAIN) Modal with Advisor Tab Wireframe
+### Execution Plan (EXPLAIN) Modal with Visual Execution Flow & Advisor Wireframe
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ ⚡ Execution Plan (EXPLAIN)                                                  │
-│ SELECT * FROM orders WHERE user_id = 1 AND amount > 50 ORDER BY created_at  │
+│ ⚡ Execution Plan (EXPLAIN) [MYSQL]       [📊 Plan Grid] [🌳 Visual Tree (2)]│
+│ Query cost analysis, index utilization    [💡 Advisor (1)] [{ } Raw Plan]  [✕]│
 ├─────────────────────────────────────────────────────────────────────────────┤
-│ [ Plan Grid ]  [ Visual Tree ]  [ 💡 Advisor (1) ]* [ Raw JSON ]     [✕ Close]
+│ ┌─ TARGET QUERY (128 chars) ─────────────── [✨ Format] [📋 Copy] [⚡ Editor]─┐ │
+│ │ SELECT * FROM orders WHERE user_id = 1 AND amount > 50 ORDER BY created_at│ │
+│ └───────────────────────────────────────────────────────────────────────────┘ │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│ ⚠️ INDEX BLOAT WARNING (orders):                                            │
-│ Table 'orders' currently has 6 indexes (Index Bloat). Adding more indexes   │
-│ increases storage consumption and degrades INSERT/UPDATE throughput.        │
-│                                                                             │
+│ [Visual Tree View Canvas]                                                   │
 │ ┌─────────────────────────────────────────────────────────────────────────┐ │
-│ │ [TABLE: orders]   idx_orders_user_id_created_at_amount                  │ │
-│ │                   [Equal: user_id] [Sort: created_at] [Range: amount]   │ │
-│ │                                                                         │ │
-│ │ Equality predicates (user_id) placed first; Sort (created_at) eliminates│ │
-│ │ filesort; Range (amount) placed last.                                   │ │
-│ │ ⚡ Converts Full Table Scan (ALL on ~1,500 rows) into indexed lookup      │ │
-│ │                                                                         │ │
-│ │ ┌─────────────────────────────────────────────────────────┐ ┌─────────┐ │ │
-│ │ │ ALTER TABLE `orders` ADD INDEX `idx_...` (...)          │ │ 📋 Copy │ │ │
-│ │ │ ALGORITHM=INPLACE, LOCK=NONE;                           │ │ ⚡ Editor│ │ │
-│ │ └─────────────────────────────────────────────────────────┘ └─────────┘ │ │
+│ │ Total Steps: 2 · Est. Rows Examined: ~1,500 · ⚠️ 1 Full Scan · ⚠️ Filesort│ │
+│ └─────────────────────────────────────────────────────────────────────────┘ │
+│                                                                             │
+│ ┌── Step 1 ────────────────────────────────────────── ⚠️ ALL (Full Scan) ──┐ │
+│ │ 🗄️ orders                                            ⚠ No index          │ │
+│ │ [Examined: ~1,500 rows]  [Filtered: 10.0%]  [Select Type: SIMPLE]       │ │
+│ │ ⚠ Filesort (Sort Buffer/Disk) · Where Filter                             │ │
+│ └─────────────────────────────────────────────────────────────────────────┘ │
+│                                    │                                        │
+│                        ↓ passes ~1,500 rows                                 │
+│                                    │                                        │
+│ ┌── 🏁 Client Result Set ──────────────────────────────────────────────────┐ │
+│ │ Execution pipeline finished                       ~150 output rows       │ │
 │ └─────────────────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Key Interaction Models
 
-1. **Integrated Modal Tab**:
-   - Docked directly within `#impact-preview-modal`, eliminating the need to navigate between separate tools.
-   - Dynamic count badge (`💡 Advisor (N)`) alerts the operator when recommendations are available.
-2. **ESR Pill Badges**:
-   - Color-coded badges visually indicate why each column is in the proposed position:
-     - `Equal: col` (Emerald): High selectivity filter.
-     - `Sort: col` (Amber): Eliminates filesort.
-     - `Range: col` (Sky): Trailing inequality bound.
-3. **1-Click Execution & Clipboard**:
-   - `📋 Copy`: Copies dialect-safe non-blocking DDL directly to the clipboard with visual toast feedback.
-   - `⚡ Editor`: Inserts the safe DDL into the active Query Editor and closes the modal for immediate review and execution.
-4. **Unsuppressed Candidate Display Under Bloat Warning**:
-   - Prominent amber banner warns of write degradation when a table exceeds 5 secondary indexes, but the interface explicitly preserves the candidate index cards and consolidation suggestions below the warning.
+1. **Dedicated Target Query Card**:
+   - Query snippet is decoupled from the header, displayed in a dedicated syntax card with `✨ Format` / `↺ Raw` toggle, `📋 Copy SQL`, and `⚡ Editor` integration.
+2. **Modern Segmented Tab Bar**:
+   - High-contrast, sleek navigation control switching between `📊 Plan Grid`, `🌳 Visual Tree` (with live step counter badge), `💡 Advisor` (with alert badge), and `{ } Raw Plan`.
+3. **Rich Visual Execution Tree**:
+   - Renders graphical node cards with color-coded access badges (`ALL` in red, `INDEX` in amber, `RANGE` in yellow, `REF/EQ_REF` in emerald), table names, keys, metrics strips, and downward pipeline flow arrows (`↓ passes ~N rows`).
+   - Universal Fallback: When `FORMAT=JSON` is unavailable (e.g. SQLite, older engines), renders the pipeline flow directly from tabular rows, ensuring a visual diagram is **never** empty.
+4. **Index Advisor & 1-Click Clipboard**:
+   - Color-coded ESR pill badges (`Equal`, `Sort`, `Range`).
+   - One-click copy for safe DDL and direct editor injection.
 
 ---
 
@@ -522,9 +519,8 @@ The Entity-Relationship Diagram canvas allows developers to explore table relati
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│ [PROD 🔴] MySQL (localhost:3306)   Latency: 2ms                                                        │
-│                    Created by herliansyah • [GitHub Icon] • [☕ Traktir Kopi]                          │
-│                                           Memory: 42MB  [⌨️ Shortcuts]  [🚀 Update v0.2.0]  SqlFox v0.1.0│
+│ 🐬 MySQL 8.0.35 • localhost:3306 / mydb • Up 4d 12h • Latency: 2ms                                    │
+│   Memory: 42MB  [⌨️ Shortcuts]  SqlFox v0.2.0 • Created by herliansyah • [GitHub Icon] • [☕ Traktir Kopi]│
 └────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -550,10 +546,9 @@ The Entity-Relationship Diagram canvas allows developers to explore table relati
 
 ### Key Interaction Models
 
-1. **Balanced Tri-Section Status Bar**:
-   - **Left**: Real-time database connection target, environment safety tier, and interactive latency ping (`footer-latency`).
-   - **Center**: Prominent yet unobtrusive workspace attribution (`Created by herliansyah`) with hyperlinks to author's profile, the official GitHub repository, and an unobtrusive Saweria support link (`☕ Traktir Kopi`).
-   - **Right**: Memory telemetry, keyboard shortcuts cheatsheet launcher, version tag, and dynamic update action badge (`#footer-update-btn`).
+1. **Two-Region Status Bar**:
+   - **Left**: Real-time database connection telemetry: dialect engine flavor & version (`🐬 MySQL 8.0.35` / `🦭 MariaDB 10.11`), connection host/database target, server uptime (`Up 4d 12h`), and interactive latency ping (`footer-latency`).
+   - **Right**: Workspace utility cluster: heap memory telemetry, keyboard shortcuts cheatsheet launcher, dynamic update action badge (`#footer-update-btn`), application version tag, followed by author attribution (`Created by herliansyah • GitHub • ☕ Traktir Kopi`) at the far-right edge.
 2. **Transparent Changelog Inspection**:
    - Renders GitHub release notes using SqlFox's built-in zero-dependency Markdown parser, displaying formatted bullet points, headers, and code snippets before the user commits to updating.
 3. **One-Click In-App Binary Replacement**:

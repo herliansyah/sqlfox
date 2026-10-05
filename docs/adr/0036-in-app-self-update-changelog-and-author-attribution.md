@@ -29,9 +29,9 @@ A dedicated package/module in `internal/server/update.go` handles GitHub Release
 - Displays animated progress states (`Downloading...`, `Extracting...`, `Restarting...`) with error handling for permission issues.
 - The web UI conducts a countdown reload after restart confirmation to automatically reconnect to the upgraded binary.
 
-### 3. Centralized Status Bar Author Attribution & Update Indicator
-- **Footer Center**: Houses the author attribution (`Created by herliansyah`) with an active link to the author's GitHub profile and the official GitHub SVG icon pointing to `https://github.com/herliansyah/sqlfox`.
-- **Footer Right**: Houses a persistent version label (`SqlFox v...`). When a new release is detected, a prominent update notification badge (`● Update v...`) highlights next to the version, launching the Update Modal upon click.
+### 3. Clean Two-Region Status Bar, Author Attribution & Update Indicator
+- **Footer Left**: Houses complete database runtime telemetry (engine flavor & version, connection target, server uptime, and interactive ping latency) with dynamic space allocation and truncation guards.
+- **Footer Right**: Houses the unified utility cluster: heap memory telemetry, keyboard shortcuts cheatsheet launcher, dynamic update action badge (`🚀 Update`), persistent application version label (`SqlFox v...`), and terminates with author attribution (`Created by herliansyah • GitHub • ☕ Traktir Kopi`) at the far-right edge. When a new release is detected, the update badge highlights next to the version, launching the Update Modal upon click.
 - **Command Palette & Shortcuts**: "Check for Updates" is integrated into the Command Palette (`Ctrl+K` / `Cmd+K`) and keyboard shortcuts modal for quick access.
 
 ## Consequences

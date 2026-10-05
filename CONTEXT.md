@@ -222,9 +222,17 @@ _Avoid_: Global grep, object finder, quick navigator
 A structured modal dialog for provisioning a new database schema on the active target server with dialect-aware character set and collation defaults.
 _Avoid_: Raw create prompt, DB wizard
 
+**Execution Plan Inspector**:
+A comprehensive modal interface for inspecting database query execution plans (`EXPLAIN`), featuring a dedicated Target Query card with client-side formatting, a modern segmented tab switcher, the tabular **Execution Plan Grid**, the graphical **Visual Execution Tree**, the heuristic **Index Advisor**, and raw output inspection.
+_Avoid_: Raw plan dump, text explain drawer, query modal
+
+**Visual Execution Tree**:
+A graphical directed pipeline flow component that translates execution plans (from PostgreSQL/MySQL JSON or tabular steps) into connected visual node cards showing operation access types, target tables, key lookups, row volumes, and bottleneck alerts.
+_Avoid_: Text tree, ASCII plan, static explain graph
+
 **Execution Plan Grid**:
-An interactive, HeidiSQL-inspired tabular display of database engine execution plans (`EXPLAIN`), highlighting access types (Full Table Scan warnings), estimated row counts, and used indexes with a toggleable raw JSON payload view.
-_Avoid_: Raw plan dump, text explain drawer
+An interactive tabular display of database engine execution plans (`EXPLAIN`), highlighting access types (Full Table Scan warnings), estimated row counts, and used indexes with a toggleable raw JSON payload view.
+_Avoid_: Flat explain list, console explain
 
 **Database Switcher**:
 A searchable popover dropdown in the sidebar for filtering and switching the active database schema in multi-database server connections, matching the Session Switcher interaction pattern.
@@ -577,12 +585,16 @@ _Avoid_: Auto-installer, updater daemon, external package manager
 A native HTML5 dialog (`#update-dialog`) presenting release metadata, version diffs (`vCurrent` -> `vLatest`), rendered Markdown changelog release notes, and real-time self-update progress states.
 _Avoid_: Update popup, new version alert, release prompt
 
+**Status Bar Footer**:
+The persistent bottom viewport bar (`<footer>`) structured into two distinct regions: real-time database runtime telemetry on the left (dialect engine flavor & version, connection target, server uptime, interactive ping latency), and developer attribution, system heap memory consumption, keyboard shortcuts modal launcher, and application version badge with self-update notifications on the right.
+_Avoid_: Bottom bar, taskbar, dock
+
 **Author Credit**:
-The centralized workspace attribution element residing in the status bar footer, featuring creator credit (`Created by herliansyah`) linked to the author's GitHub profile, the official repository icon, and an unobtrusive sponsorship link (`☕ Traktir Kopi`).
+The workspace attribution element residing at the far-right terminus of the status bar footer (after the application version badge), featuring creator credit (`Created by herliansyah`) linked to the author's GitHub profile, the official repository icon, and an unobtrusive sponsorship link (`☕ Traktir Kopi`).
 _Avoid_: Footer branding, watermark, sponsor banner
 
 **Sponsorship Link**:
-A passive, non-intrusive external hyperlink in the status bar footer pointing directly to the author's Saweria funding page (`https://saweria.co/herliansyah26`) for user-supported project appreciation without popups or interstitial modals.
+A passive, non-intrusive external hyperlink in the right-side footer cluster pointing directly to the author's Saweria funding page (`https://saweria.co/herliansyah26`) for user-supported project appreciation without popups or interstitial modals.
 _Avoid_: Donation popup, paywall, donation nag
 
 **Changelog**:
