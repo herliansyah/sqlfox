@@ -3947,10 +3947,49 @@
       }
     }
 
-    function copyMasterPIN() {
+    // ponytail: unified clipboard copy with execCommand fallback for unsecure HTTP / LAN IP contexts.
+    // Known ceiling: execCommand is deprecated in current W3C specs, but is the only functional clipboard API on unsecure contexts. Upgrade path: local TLS/HTTPS.
+    async function copyTextToClipboard(text) {
+      if (text === null || text === undefined) return false;
+      const str = String(text);
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        try {
+          await navigator.clipboard.writeText(str);
+          return true;
+        } catch (_) {
+          // Fall through to legacy fallback if rejected (e.g. permission denied or insecure context)
+        }
+      }
+
+      try {
+        const textArea = document.createElement('textarea');
+        textArea.value = str;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
+        textArea.style.opacity = '0';
+        textArea.setAttribute('readonly', '');
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        textArea.setSelectionRange(0, textArea.value.length);
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textArea);
+        if (successful) return true;
+      } catch (e) {
+        console.warn('Fallback copy error:', e);
+      }
+      return false;
+    }
+
+    async function copyMasterPIN() {
       const pin = document.getElementById('master-pin-text').textContent;
-      navigator.clipboard.writeText(pin);
-      showNativeAlert(`Master PIN '${pin}' copied to clipboard!\nUse this PIN to unlock SqlFox when accessing from your tablet/phone.`, 'Remote Access');
+      const ok = await copyTextToClipboard(pin);
+      if (ok) {
+        showNativeAlert(`Master PIN '${pin}' copied to clipboard!\nUse this PIN to unlock SqlFox when accessing from your tablet/phone.`, 'Remote Access');
+      } else {
+        showNativeAlert('Failed to copy Master PIN to clipboard.', 'Clipboard Error');
+      }
     }
 
     // --- Lifecycle Initialization ---
@@ -5709,6 +5748,7 @@
             filterPills: t.filterPills || [],
             filterRaw: t.filterRaw || '',
             appliedFilter: t.appliedFilter || '',
+            queryFilters: t.queryFilters || {},
             sortCol: t.sortCol || '',
             sortDir: t.sortDir || '',
             offset: t.offset || 0,
@@ -5770,6 +5810,11 @@
       const nextTab = tabs.find(t => t.id === tabId);
       if (nextTab && nextTab.isTableViewer && nextTab.tableName && (activeGridTable !== nextTab.tableName || currentResults.length === 0)) {
         setTableMode(nextTab.tableMode || 'data', true);
+      } else if (nextTab && !nextTab.isTableViewer && nextTab.rawQueryRows && nextTab.rawQueryCols) {
+        renderGridResults(nextTab.rawQueryCols, nextTab.rawQueryRows, null, null, nextTab.database);
+        if (nextTab.queryFilters && Object.keys(nextTab.queryFilters).length > 0) {
+          applyQueryResultsFilter(nextTab);
+        }
       }
       saveTabsState();
     }
@@ -6349,22 +6394,22 @@
     async function copyProcessSQLFromMenu() {
       closeProcessContextMenu();
       if (!selectedProcessThread?.info) return;
-      try {
-        await navigator.clipboard.writeText(selectedProcessThread.info);
+      const ok = await copyTextToClipboard(selectedProcessThread.info);
+      if (ok) {
         showNativeAlert('SQL statement copied to clipboard.', 'Copied');
-      } catch (e) {
-        showNativeAlert('Copy failed: ' + e.message, 'Copy Error');
+      } else {
+        showNativeAlert('Copy failed in this browser context.', 'Copy Error');
       }
     }
 
     async function copyProcessJSONFromMenu() {
       closeProcessContextMenu();
       if (!selectedProcessThread) return;
-      try {
-        await navigator.clipboard.writeText(JSON.stringify(selectedProcessThread, null, 2));
+      const ok = await copyTextToClipboard(JSON.stringify(selectedProcessThread, null, 2));
+      if (ok) {
         showNativeAlert('Thread details JSON copied to clipboard.', 'Copied');
-      } catch (e) {
-        showNativeAlert('Copy failed: ' + e.message, 'Copy Error');
+      } else {
+        showNativeAlert('Copy failed in this browser context.', 'Copy Error');
       }
     }
 
@@ -6415,8 +6460,8 @@
         showNativeAlert('No SQL statement executing on this thread.', 'Copy SQL');
         return;
       }
-      try {
-        await navigator.clipboard.writeText(textToCopy);
+      const ok = await copyTextToClipboard(textToCopy);
+      if (ok) {
         const btn = document.getElementById('pl-modal-copy-sql-btn');
         if (btn) {
           const orig = btn.innerHTML;
@@ -6427,15 +6472,15 @@
             btn.classList.remove('bg-emerald-800', 'text-white');
           }, 1500);
         }
-      } catch (err) {
-        showNativeAlert('Failed to copy SQL: ' + err.message, 'Copy Error');
+      } else {
+        showNativeAlert('Failed to copy SQL in this browser context.', 'Copy Error');
       }
     }
 
     async function copyModalProcessJSON() {
       if (!selectedProcessThread) return;
-      try {
-        await navigator.clipboard.writeText(JSON.stringify(selectedProcessThread, null, 2));
+      const ok = await copyTextToClipboard(JSON.stringify(selectedProcessThread, null, 2));
+      if (ok) {
         const btn = document.getElementById('pl-modal-copy-json-btn');
         if (btn) {
           const orig = btn.innerHTML;
@@ -6446,8 +6491,8 @@
             btn.classList.remove('bg-emerald-800', 'text-white');
           }, 1500);
         }
-      } catch (err) {
-        showNativeAlert('Failed to copy JSON: ' + err.message, 'Copy Error');
+      } else {
+        showNativeAlert('Failed to copy JSON in this browser context.', 'Copy Error');
       }
     }
 
@@ -7172,11 +7217,11 @@ Apa langkah konkret untuk menyelesaikan bottleneck ini? Apakah perlu tuning my.c
     }
 
     async function copySnippetText(text, title = 'Copied') {
-      try {
-        await navigator.clipboard.writeText(text);
+      const ok = await copyTextToClipboard(text);
+      if (ok) {
         showNativeAlert(text, title);
-      } catch (err) {
-        showNativeAlert('Copy failed: ' + err.message, 'Copy Error');
+      } else {
+        showNativeAlert('Copy failed in this browser context.', 'Copy Error');
       }
     }
 
@@ -7929,8 +7974,8 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
     async function copyFlightQuery(btn, idx) {
       const q = currentFlightQueries[idx];
       if (!q || !q.info) return;
-      try {
-        await navigator.clipboard.writeText(q.info);
+      const ok = await copyTextToClipboard(q.info);
+      if (ok) {
         const orig = btn.innerHTML;
         btn.innerHTML = '<span>✓ Copied!</span>';
         btn.classList.add('bg-emerald-800', 'text-white');
@@ -7938,8 +7983,8 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
           btn.innerHTML = orig;
           btn.classList.remove('bg-emerald-800', 'text-white');
         }, 1500);
-      } catch (err) {
-        showNativeAlert('Copy failed: ' + err.message, 'Copy Error');
+      } else {
+        showNativeAlert('Copy failed in this browser context.', 'Copy Error');
       }
     }
 
@@ -8075,10 +8120,13 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       }).join('');
     }
 
-    function copyAuditSQL(sql) {
-      navigator.clipboard.writeText(sql).then(() => {
+    async function copyAuditSQL(sql) {
+      const ok = await copyTextToClipboard(sql);
+      if (ok) {
         showNativeAlert('SQL statement copied to clipboard.', 'Copied');
-      });
+      } else {
+        showNativeAlert('Copy failed in this browser context.', 'Copy Error');
+      }
     }
 
     function insertAuditSQLToEditor(sql) {
@@ -8808,10 +8856,14 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       }
     }
 
-    function copyCurrentTableDDL() {
+    async function copyCurrentTableDDL() {
       const text = document.getElementById('table-raw-ddl').textContent;
-      navigator.clipboard.writeText(text);
-      showNativeAlert('Table CREATE SQL copied to clipboard!', 'Copy SQL');
+      const ok = await copyTextToClipboard(text);
+      if (ok) {
+        showNativeAlert('Table CREATE SQL copied to clipboard!', 'Copy SQL');
+      } else {
+        showNativeAlert('Failed to copy Table DDL in this browser context.', 'Copy Error');
+      }
     }
 
     // --- Table Knowledge Notes & Runbook Handlers ---
@@ -9527,6 +9579,14 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
           const parsed = extractSingleTableFromSQL(sql);
           const detectedTable = parsed ? parsed.table : null;
           const detectedDB = (parsed && parsed.database) || currentDb;
+          const activeTab = tabs.find(t => t.id === activeTabId);
+          if (activeTab) {
+            activeTab.rawQueryRows = data.rows || [];
+            activeTab.rawQueryCols = data.columns || [];
+            activeTab.queryFilters = {};
+            activeTab.sortCol = '';
+            activeTab.sortDir = '';
+          }
           renderGridResults(data.columns, data.rows, null, detectedTable, detectedDB);
           document.getElementById('grid-result-stats').textContent = `${data.row_count} rows (${data.execution_ms}ms)`;
           if (/^\s*(CREATE|ALTER|DROP|RENAME)\b/i.test(sql) && activeConnection) {
@@ -10035,15 +10095,6 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       }
       closeImpactModal();
       showToast('Index DDL inserted into Query Editor');
-    }
-
-    function copyTextToClipboard(text) {
-      if (!text) return;
-      navigator.clipboard.writeText(text).then(() => {
-        showToast('Copied to clipboard!');
-      }).catch(() => {
-        showToast('Copied to clipboard');
-      });
     }
 
     function closeImpactModal() {
@@ -10622,28 +10673,31 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       const cols = currentColumns || [];
 
       container.innerHTML = activeTab.filterPills.map((pill, i) => {
-        const isUnary = pill.op === 'IS NULL' || pill.op === 'IS NOT NULL';
+        const colName = pill.col || pill.column || '';
+        const op = pill.op || pill.operator || '=';
+        const val = pill.val !== undefined ? pill.val : (pill.value !== undefined ? pill.value : '');
+        const isUnary = op === 'IS NULL' || op === 'IS NOT NULL';
         return `
           <div class="filter-pill flex items-center space-x-1 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-xs text-slate-200 shadow-sm" data-idx="${i}">
             <select class="pill-col bg-transparent text-sky-300 font-mono text-xs outline-none cursor-pointer border-r border-slate-800 pr-1 py-0.5" onchange="onPillColChange(${i}, this.value)">
-              ${cols.length > 0 ? cols.map(c => `<option value="${escapeHtml(c.name)}" ${pill.col === c.name ? 'selected' : ''} class="bg-slate-900 text-slate-200">${escapeHtml(c.name)}</option>`).join('') : `<option value="${escapeHtml(pill.col || '')}">${escapeHtml(pill.col || 'column')}</option>`}
+              ${cols.length > 0 ? cols.map(c => `<option value="${escapeHtml(c.name)}" ${colName === c.name ? 'selected' : ''} class="bg-slate-900 text-slate-200">${escapeHtml(c.name)}</option>`).join('') : `<option value="${escapeHtml(colName)}">${escapeHtml(colName || 'column')}</option>`}
             </select>
             <select class="pill-op bg-transparent text-amber-300 font-mono text-xs outline-none cursor-pointer border-r border-slate-800 pr-1 py-0.5" onchange="onPillOpChange(${i}, this.value)">
-              <option value="=" ${pill.op === '=' ? 'selected' : ''} class="bg-slate-900 text-slate-200">=</option>
-              <option value="!=" ${pill.op === '!=' ? 'selected' : ''} class="bg-slate-900 text-slate-200">!=</option>
-              <option value="LIKE" ${pill.op === 'LIKE' ? 'selected' : ''} class="bg-slate-900 text-slate-200">LIKE</option>
-              <option value="NOT LIKE" ${pill.op === 'NOT LIKE' ? 'selected' : ''} class="bg-slate-900 text-slate-200">NOT LIKE</option>
-              <option value=">" ${pill.op === '>' ? 'selected' : ''} class="bg-slate-900 text-slate-200">&gt;</option>
-              <option value="<" ${pill.op === '<' ? 'selected' : ''} class="bg-slate-900 text-slate-200">&lt;</option>
-              <option value=">=" ${pill.op === '>=' ? 'selected' : ''} class="bg-slate-900 text-slate-200">&gt;=</option>
-              <option value="<=" ${pill.op === '<=' ? 'selected' : ''} class="bg-slate-900 text-slate-200">&lt;=</option>
-              <option value="IN" ${pill.op === 'IN' ? 'selected' : ''} class="bg-slate-900 text-slate-200">IN</option>
-              <option value="IS NULL" ${pill.op === 'IS NULL' ? 'selected' : ''} class="bg-slate-900 text-slate-200">IS NULL</option>
-              <option value="IS NOT NULL" ${pill.op === 'IS NOT NULL' ? 'selected' : ''} class="bg-slate-900 text-slate-200">IS NOT NULL</option>
+              <option value="=" ${op === '=' ? 'selected' : ''} class="bg-slate-900 text-slate-200">=</option>
+              <option value="!=" ${op === '!=' ? 'selected' : ''} class="bg-slate-900 text-slate-200">!=</option>
+              <option value="LIKE" ${op === 'LIKE' ? 'selected' : ''} class="bg-slate-900 text-slate-200">LIKE</option>
+              <option value="NOT LIKE" ${op === 'NOT LIKE' ? 'selected' : ''} class="bg-slate-900 text-slate-200">NOT LIKE</option>
+              <option value=">" ${op === '>' ? 'selected' : ''} class="bg-slate-900 text-slate-200">&gt;</option>
+              <option value="<" ${op === '<' ? 'selected' : ''} class="bg-slate-900 text-slate-200">&lt;</option>
+              <option value=">=" ${op === '>=' ? 'selected' : ''} class="bg-slate-900 text-slate-200">&gt;=</option>
+              <option value="<=" ${op === '<=' ? 'selected' : ''} class="bg-slate-900 text-slate-200">&lt;=</option>
+              <option value="IN" ${op === 'IN' ? 'selected' : ''} class="bg-slate-900 text-slate-200">IN</option>
+              <option value="IS NULL" ${op === 'IS NULL' ? 'selected' : ''} class="bg-slate-900 text-slate-200">IS NULL</option>
+              <option value="IS NOT NULL" ${op === 'IS NOT NULL' ? 'selected' : ''} class="bg-slate-900 text-slate-200">IS NOT NULL</option>
             </select>
             <input type="text" class="pill-val bg-transparent text-slate-100 font-mono text-xs outline-none px-1 py-0.5 w-24 focus:w-36 transition-all ${isUnary ? 'hidden' : ''}"
-                   value="${escapeHtml(pill.val || '')}"
-                   placeholder="${pill.op === 'LIKE' || pill.op === 'NOT LIKE' ? '%val%' : (pill.op === 'IN' ? '1, 2, 3' : 'val')}"
+                   value="${escapeHtml(String(val))}"
+                   placeholder="${op === 'LIKE' || op === 'NOT LIKE' ? '%val%' : (op === 'IN' ? '1, 2, 3' : 'val')}"
                    onkeydown="if(event.key === 'Enter') applyTableFilter()"
                    oninput="onPillValueInput(${i}, this.value)">
             <button type="button" onclick="removeFilterPill(${i})" class="text-slate-500 hover:text-rose-400 px-0.5 py-0.5 transition" title="Remove condition">
@@ -10659,7 +10713,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       if (!activeTab || !activeTab.isTableViewer) return;
       if (!Array.isArray(activeTab.filterPills)) activeTab.filterPills = [];
       const defaultCol = (currentColumns && currentColumns.length > 0) ? currentColumns[0].name : '';
-      activeTab.filterPills.push({ col: defaultCol, op: '=', val: '' });
+      activeTab.filterPills.push({ col: defaultCol, column: defaultCol, op: '=', operator: '=', val: '', value: '' });
       renderFilterPills(activeTab);
       setTimeout(() => {
         const container = document.getElementById('filter-pills-container');
@@ -10682,6 +10736,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       const activeTab = tabs.find(t => t.id === activeTabId);
       if (activeTab && activeTab.filterPills && activeTab.filterPills[index]) {
         activeTab.filterPills[index].col = col;
+        activeTab.filterPills[index].column = col;
       }
     }
 
@@ -10689,6 +10744,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       const activeTab = tabs.find(t => t.id === activeTabId);
       if (activeTab && activeTab.filterPills && activeTab.filterPills[index]) {
         activeTab.filterPills[index].op = op;
+        activeTab.filterPills[index].operator = op;
         renderFilterPills(activeTab);
       }
     }
@@ -10697,6 +10753,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       const activeTab = tabs.find(t => t.id === activeTabId);
       if (activeTab && activeTab.filterPills && activeTab.filterPills[index]) {
         activeTab.filterPills[index].val = val;
+        activeTab.filterPills[index].value = val;
       }
     }
 
@@ -10704,14 +10761,16 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       if (!Array.isArray(pills) || pills.length === 0) return '';
       const clauses = [];
       for (const p of pills) {
-        if (!p || !p.col) continue;
-        const colEscaped = '`' + p.col.replace(/`/g, '``') + '`';
-        const op = (p.op || '=').toUpperCase();
+        if (!p) continue;
+        const colName = p.col || p.column;
+        if (!colName) continue;
+        const colEscaped = '`' + colName.replace(/`/g, '``') + '`';
+        const op = (p.op || p.operator || '=').toUpperCase();
         if (op === 'IS NULL' || op === 'IS NOT NULL') {
           clauses.push(`${colEscaped} ${op}`);
           continue;
         }
-        const val = (p.val || '').trim();
+        const val = String(p.val !== undefined ? p.val : (p.value !== undefined ? p.value : '')).trim();
         if (val === '') continue;
         if (op === 'IN') {
           if (val.startsWith('(') && val.endsWith(')')) {
@@ -10787,6 +10846,9 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       if (rawInput) rawInput.value = '';
       const clearBtn = document.getElementById('filter-raw-clear-btn');
       if (clearBtn) clearBtn.classList.add('hidden');
+      document.querySelectorAll('#grid-thead .col-filter-input').forEach(inp => {
+        inp.value = '';
+      });
       syncFilterBarUI(activeTab);
       loadTableRows(activeTab.tableName);
     }
@@ -10843,7 +10905,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
 
     function sortColumn(colIndex) {
       const activeTab = tabs.find(t => t.id === activeTabId);
-      if (!activeTab || !activeTab.isTableViewer || !currentColumns[colIndex]) return;
+      if (!activeTab || !currentColumns[colIndex]) return;
       const colName = currentColumns[colIndex].name;
       if (activeTab.sortCol === colName) {
         if (activeTab.sortDir === 'ASC') {
@@ -10856,8 +10918,37 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
         activeTab.sortCol = colName;
         activeTab.sortDir = 'ASC';
       }
-      activeTab.offset = 0;
-      loadTableRows(activeTab.tableName);
+
+      if (activeTab.isTableViewer) {
+        activeTab.offset = 0;
+        loadTableRows(activeTab.tableName);
+      } else {
+        const rows = (activeTab.queryFilters && Object.keys(activeTab.queryFilters).length > 0) ? currentResults : (activeTab.rawQueryRows || currentResults || []);
+        if (!activeTab.sortCol) {
+          if (activeTab.queryFilters && Object.keys(activeTab.queryFilters).length > 0) {
+            applyQueryResultsFilter(activeTab);
+          } else {
+            renderGridResults(currentColumns, activeTab.rawQueryRows || rows, activeGridPKCol, activeGridTable, activeGridDB);
+          }
+          return;
+        }
+        const sorted = [...rows].sort((a, b) => {
+          const valA = a[colIndex];
+          const valB = b[colIndex];
+          if (valA === null || valA === undefined) return 1;
+          if (valB === null || valB === undefined) return -1;
+          const numA = Number(valA);
+          const numB = Number(valB);
+          let cmp = 0;
+          if (!isNaN(numA) && !isNaN(numB)) {
+            cmp = numA - numB;
+          } else {
+            cmp = String(valA).localeCompare(String(valB));
+          }
+          return activeTab.sortDir === 'DESC' ? -cmp : cmp;
+        });
+        renderGridResults(currentColumns, sorted, activeGridPKCol, activeGridTable, activeGridDB);
+      }
     }
 
     function loadNextPage() {
@@ -10914,10 +11005,15 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       }
     }
 
-    function renderGridResults(cols, rows, pkCol = null, tableName = null, databaseName = null) {
+    function renderGridResults(cols, rows, pkCol = null, tableName = null, databaseName = null, isFilterPass = false) {
       currentColumns = cols || [];
       currentResults = rows || [];
       const activeTab = tabs.find(t => t.id === activeTabId);
+
+      if (activeTab && !activeTab.isTableViewer && !isFilterPass) {
+        activeTab.rawQueryRows = rows || [];
+        activeTab.rawQueryCols = cols || [];
+      }
 
       if (!tableName && activeTab && activeTab.tableName) {
         tableName = activeTab.tableName;
@@ -10960,7 +11056,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       }
       headerRow1 += cols.map((c, i) => {
         let sortIcon = '';
-        if (activeTab && activeTab.isTableViewer && activeTab.sortCol === c.name) {
+        if (activeTab && activeTab.sortCol === c.name) {
           sortIcon = activeTab.sortDir === 'DESC' ? ' <span class="text-sky-400 font-bold">▼</span>' : ' <span class="text-sky-400 font-bold">▲</span>';
         }
         return `
@@ -10972,18 +11068,35 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
         </th>
       `;}).join('') + '</tr>';
 
-      let headerRow2 = '';
+      let headerRow2 = '<tr class="bg-slate-950/90 border-b border-slate-800">';
       if (hasCheckbox) {
-        headerRow2 = '<tr class="bg-slate-950/90 border-b border-slate-800"><th class="p-1 w-8 text-center text-slate-500 border-r border-slate-800 text-[10px]">🔍</th>' +
-          cols.map(c => {
-            const existingPill = (activeTab?.filterPills || []).find(p => p.column === c.name);
-            const initialVal = existingPill ? existingPill.value : '';
-            return `
-            <th class="p-1 px-1.5 border-r border-slate-800 min-w-[90px] max-w-md">
-              <input type="text" value="${escapeHtml(initialVal)}" class="col-filter-input w-full bg-slate-900 text-slate-200 border border-slate-700/80 rounded px-1.5 py-0.5 text-[11px] font-mono outline-none focus:border-sky-500 transition" placeholder="Filter..." data-col="${escapeHtml(c.name)}" onkeydown="handleColFilterKeydown(event, this)">
-            </th>
-          `;}).join('') + '</tr>';
+        headerRow2 += '<th class="p-1 w-8 text-center text-slate-500 border-r border-slate-800 text-[10px]">🔍</th>';
       }
+      headerRow2 += cols.map(c => {
+        let initialVal = '';
+        if (activeTab?.isTableViewer) {
+          const existingPill = (activeTab?.filterPills || []).find(p => (p.col || p.column) === c.name);
+          if (existingPill) {
+            const pOp = existingPill.op || existingPill.operator || '=';
+            const pVal = existingPill.val !== undefined ? existingPill.val : (existingPill.value !== undefined ? existingPill.value : '');
+            if (pOp === '=' && !String(pVal).includes('%')) {
+              initialVal = String(pVal);
+            } else if (pOp === 'LIKE' && String(pVal).startsWith('%') && String(pVal).endsWith('%') && String(pVal).length >= 2) {
+              initialVal = String(pVal);
+            } else if (pOp === 'IS NULL' || pOp === 'IS NOT NULL') {
+              initialVal = pOp;
+            } else {
+              initialVal = `${pOp} ${pVal}`.trim();
+            }
+          }
+        } else {
+          initialVal = (activeTab?.queryFilters && activeTab.queryFilters[c.name]) || '';
+        }
+        return `
+        <th class="p-1 px-1.5 border-r border-slate-800 min-w-[90px] max-w-md">
+          <input type="text" value="${escapeHtml(initialVal)}" class="col-filter-input w-full bg-slate-900 text-slate-200 border border-slate-700/80 rounded px-1.5 py-0.5 text-[11px] font-mono outline-none focus:border-sky-500 transition" placeholder="Filter..." data-col="${escapeHtml(c.name)}" onkeydown="handleColFilterKeydown(event, this)">
+        </th>
+      `;}).join('') + '</tr>';
       thead.innerHTML = headerRow1 + headerRow2;
 
       // Resolve foreign keys for table
@@ -11924,33 +12037,167 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
     }
 
     function handleColFilterKeydown(event, input) {
+      if (event.key === 'Escape') {
+        input.value = '';
+        handleColFilterKeydown({ key: 'Enter', preventDefault() {} }, input);
+        input.blur();
+        return;
+      }
       if (event.key === 'Enter') {
         event.preventDefault();
         const col = input.dataset.col;
         const val = input.value.trim();
         const activeTab = tabs.find(t => t.id === activeTabId);
-        if (!activeTab || !activeTab.isTableViewer) return;
+        if (!activeTab) return;
 
-        if (!Array.isArray(activeTab.filterPills)) {
-          activeTab.filterPills = [];
+        if (activeTab.isTableViewer) {
+          if (!Array.isArray(activeTab.filterPills)) {
+            activeTab.filterPills = [];
+          }
+
+          activeTab.filterPills = activeTab.filterPills.filter(p => (p.col || p.column) !== col);
+
+          if (val !== '') {
+            let parsedOp = '=';
+            let parsedVal = val;
+            const opMatch = val.match(/^(=|!=|<>|>=|<=|>|<|LIKE|NOT\s+LIKE|IS\s+NULL|IS\s+NOT\s+NULL|IN)\s*(.*)$/i);
+            if (opMatch) {
+              parsedOp = opMatch[1].toUpperCase().replace(/\s+/, ' ');
+              if (parsedOp === '<>') parsedOp = '!=';
+              parsedVal = opMatch[2].trim();
+            } else if (val.includes('%')) {
+              parsedOp = 'LIKE';
+            }
+
+            activeTab.filterPills.push({
+              col: col,
+              column: col,
+              op: parsedOp,
+              operator: parsedOp,
+              val: parsedVal,
+              value: parsedVal
+            });
+          }
+
+          activeTab.filterMode = 'pills';
+          activeTab.offset = 0;
+          syncFilterBarUI(activeTab);
+          applyTableFilter();
+        } else {
+          // Query Results tab: in-memory client-side filter
+          if (!activeTab.queryFilters) activeTab.queryFilters = {};
+          if (val === '') {
+            delete activeTab.queryFilters[col];
+          } else {
+            activeTab.queryFilters[col] = val;
+          }
+          applyQueryResultsFilter(activeTab);
         }
-
-        activeTab.filterPills = activeTab.filterPills.filter(p => p.column !== col);
-
-        if (val !== '') {
-          const op = val.includes('%') ? 'LIKE' : '=';
-          activeTab.filterPills.push({
-            column: col,
-            operator: op,
-            value: val
-          });
-        }
-
-        activeTab.filterMode = 'pills';
-        activeTab.offset = 0;
-        syncFilterBarUI(activeTab);
-        applyTableFilter();
       }
+    }
+
+    // ponytail: in-memory predicate evaluator for query result filtering and spreadsheet lookups.
+    // Known ceiling: doesn't execute complex nested SQL subqueries or joins. Upgrade path: SQL AST evaluator.
+    function matchesFilterCondition(cellVal, expr) {
+      if (!expr || expr.trim() === '') return true;
+      const trimmedExpr = expr.trim();
+      const cellStr = cellVal === null || cellVal === undefined ? '' : String(cellVal);
+
+      if (/^IS\s+NULL$/i.test(trimmedExpr)) {
+        return cellVal === null || cellVal === undefined;
+      }
+      if (/^IS\s+NOT\s+NULL$/i.test(trimmedExpr)) {
+        return cellVal !== null && cellVal !== undefined;
+      }
+
+      if (cellVal === null || cellVal === undefined) return false;
+
+      const inMatch = trimmedExpr.match(/^IN\s*\(([^)]+)\)$/i);
+      if (inMatch) {
+        const items = inMatch[1].split(',').map(s => s.trim().replace(/^['"]|['"]$/g, '').toLowerCase());
+        return items.includes(cellStr.toLowerCase());
+      }
+
+      const opMatch = trimmedExpr.match(/^(!=|<>|>=|<=|>|<|=|LIKE|NOT\s+LIKE)\s*(.*)$/i);
+      let op = '=';
+      let targetVal = trimmedExpr;
+      if (opMatch) {
+        op = opMatch[1].toUpperCase().replace(/\s+/, ' ');
+        if (op === '<>') op = '!=';
+        targetVal = opMatch[2].trim().replace(/^['"]|['"]$/g, '');
+      } else if (trimmedExpr.includes('%')) {
+        op = 'LIKE';
+      } else {
+        return cellStr.toLowerCase().includes(trimmedExpr.toLowerCase());
+      }
+
+      if (op === '=') {
+        if (!isNaN(Number(cellVal)) && !isNaN(Number(targetVal)) && targetVal !== '') {
+          return Number(cellVal) === Number(targetVal);
+        }
+        return cellStr.toLowerCase() === targetVal.toLowerCase();
+      }
+      if (op === '!=') {
+        if (!isNaN(Number(cellVal)) && !isNaN(Number(targetVal)) && targetVal !== '') {
+          return Number(cellVal) !== Number(targetVal);
+        }
+        return cellStr.toLowerCase() !== targetVal.toLowerCase();
+      }
+      if (op === '>' || op === '>=' || op === '<' || op === '<=') {
+        const numCell = Number(cellVal);
+        const numTarget = Number(targetVal);
+        if (!isNaN(numCell) && !isNaN(numTarget) && targetVal !== '') {
+          if (op === '>') return numCell > numTarget;
+          if (op === '>=') return numCell >= numTarget;
+          if (op === '<') return numCell < numTarget;
+          if (op === '<=') return numCell <= numTarget;
+        }
+        if (op === '>') return cellStr > targetVal;
+        if (op === '>=') return cellStr >= targetVal;
+        if (op === '<') return cellStr < targetVal;
+        if (op === '<=') return cellStr <= targetVal;
+      }
+      if (op === 'LIKE' || op === 'NOT LIKE') {
+        const regexStr = '^' + targetVal
+          .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+          .replace(/%/g, '.*')
+          .replace(/_/g, '.') + '$';
+        const regex = new RegExp(regexStr, 'i');
+        const isMatch = regex.test(cellStr);
+        return op === 'LIKE' ? isMatch : !isMatch;
+      }
+
+      return true;
+    }
+
+    function applyQueryResultsFilter(activeTab) {
+      if (!activeTab) activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab || activeTab.isTableViewer) return;
+      const allRows = activeTab.rawQueryRows || currentResults || [];
+      const cols = activeTab.rawQueryCols || currentColumns || [];
+      const filters = activeTab.queryFilters || {};
+      const filterKeys = Object.keys(filters).filter(k => (filters[k] || '').trim() !== '');
+
+      if (filterKeys.length === 0) {
+        renderGridResults(cols, allRows, activeGridPKCol, activeGridTable, activeGridDB, true);
+        const stats = document.getElementById('grid-result-stats');
+        if (stats) stats.textContent = `${allRows.length} rows`;
+        return;
+      }
+
+      const filtered = allRows.filter(row => {
+        return filterKeys.every(colName => {
+          const colIdx = cols.findIndex(c => c.name === colName);
+          if (colIdx === -1) return true;
+          const rawCellVal = row[colIdx];
+          const filterVal = filters[colName];
+          return matchesFilterCondition(rawCellVal, filterVal);
+        });
+      });
+
+      renderGridResults(cols, filtered, activeGridPKCol, activeGridTable, activeGridDB, true);
+      const stats = document.getElementById('grid-result-stats');
+      if (stats) stats.textContent = `${filtered.length} / ${allRows.length} rows (filtered)`;
     }
 
     // --- Floating Grid Row Context Menu ---
@@ -12094,7 +12341,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       return currentResults || [];
     }
 
-    function copyGridAsTSV() {
+    async function copyGridAsTSV() {
       if (!currentColumns || currentColumns.length === 0) {
         showNativeAlert('No data to copy.', 'Copy TSV');
         return;
@@ -12109,14 +12356,15 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       const body = rows.map(r => r.map(v => v === null ? '' : String(v).replace(/\t/g, ' ')).join('\t')).join('\n');
       const tsv = headers + '\n' + body;
 
-      navigator.clipboard.writeText(tsv).then(() => {
+      const ok = await copyTextToClipboard(tsv);
+      if (ok) {
         showNativeAlert(`✅ Copied ${rows.length} row(s) to clipboard as TSV!`, 'Copied TSV');
-      }).catch(err => {
-        showNativeAlert('Failed to copy to clipboard: ' + err.message, 'Clipboard Error');
-      });
+      } else {
+        showNativeAlert('Failed to copy to clipboard in this browser context.', 'Clipboard Error');
+      }
     }
 
-    function copyGridAsMarkdown() {
+    async function copyGridAsMarkdown() {
       if (!currentColumns || currentColumns.length === 0) {
         showNativeAlert('No data to copy.', 'Copy Markdown');
         return;
@@ -12132,11 +12380,12 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       const body = rows.map(r => '| ' + r.map(v => v === null ? 'NULL' : String(v).replace(/\|/g, '\\|')).join(' | ') + ' |').join('\n');
       const md = headers + '\n' + sep + '\n' + body;
 
-      navigator.clipboard.writeText(md).then(() => {
+      const ok = await copyTextToClipboard(md);
+      if (ok) {
         showNativeAlert(`✅ Copied ${rows.length} row(s) to clipboard as Markdown!`, 'Copied Markdown');
-      }).catch(err => {
-        showNativeAlert('Failed to copy to clipboard: ' + err.message, 'Clipboard Error');
-      });
+      } else {
+        showNativeAlert('Failed to copy to clipboard in this browser context.', 'Clipboard Error');
+      }
     }
 
     // --- Database-Level & Table-Level SQL Dump Export & Smart Seed ---
@@ -13413,21 +13662,27 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       if (container.lastChild) container.removeChild(container.lastChild);
     }
 
-    function copySQLToClipboard(sql) {
-      navigator.clipboard.writeText(sql);
-      showNativeAlert('📋 SQL copied to clipboard!', 'Clipboard');
+    async function copySQLToClipboard(sql) {
+      const ok = await copyTextToClipboard(sql);
+      if (ok) {
+        showNativeAlert('📋 SQL copied to clipboard!', 'Clipboard');
+      } else {
+        showNativeAlert('Failed to copy SQL in this browser context.', 'Clipboard Error');
+      }
     }
 
-    function copyAIMessageBubble(btn) {
+    async function copyAIMessageBubble(btn) {
       const bubble = btn.closest('.ai-chat-bubble');
       if (!bubble) return;
       const rawText = bubble.dataset.rawText || '';
-      navigator.clipboard.writeText(rawText);
-      const origHtml = btn.innerHTML;
-      btn.innerHTML = '<span class="text-emerald-400 font-bold">✓ Copied!</span>';
-      setTimeout(() => {
-        btn.innerHTML = origHtml;
-      }, 1600);
+      const ok = await copyTextToClipboard(rawText);
+      if (ok) {
+        const origHtml = btn.innerHTML;
+        btn.innerHTML = '<span class="text-emerald-400 font-bold">✓ Copied!</span>';
+        setTimeout(() => {
+          btn.innerHTML = origHtml;
+        }, 1600);
+      }
     }
 
     function saveAIMessageToNotes(btn) {
@@ -14046,10 +14301,14 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
     function closeDDLModal() {
       document.getElementById('ddl-modal').classList.add('hidden');
     }
-    function copyDDLToClipboard() {
+    async function copyDDLToClipboard() {
       const text = document.getElementById('ddl-modal-content').textContent;
-      navigator.clipboard.writeText(text);
-      showNativeAlert('Copied to clipboard!', 'Clipboard');
+      const ok = await copyTextToClipboard(text);
+      if (ok) {
+        showNativeAlert('Copied to clipboard!', 'Clipboard');
+      } else {
+        showNativeAlert('Failed to copy DDL in this browser context.', 'Clipboard Error');
+      }
     }
     function insertDDLToEditor() {
       const text = document.getElementById('ddl-modal-content').textContent;
