@@ -661,11 +661,11 @@ The persistent bottom viewport bar (`<footer>`) structured into two distinct reg
 _Avoid_: Bottom bar, taskbar, dock
 
 **Author Credit**:
-The workspace attribution element residing at the far-right terminus of the status bar footer (after the application version badge), featuring creator credit (`Created by herliansyah`) linked to the author's GitHub profile, the official repository icon, and an unobtrusive sponsorship link (`☕ Traktir Kopi`).
+The workspace attribution element residing at the far-right terminus of the status bar footer (after the application version badge), featuring creator credit (`Created by herliansyah`) linked to the author's GitHub profile, a dedicated GitHub repository pill button, and an unobtrusive sponsorship pill button (`☕ Sponsor`).
 _Avoid_: Footer branding, watermark, sponsor banner
 
 **Sponsorship Link**:
-A passive, non-intrusive external hyperlink in the right-side footer cluster pointing directly to the author's Saweria funding page (`https://saweria.co/herliansyah26`) for user-supported project appreciation without popups or interstitial modals.
+A passive, non-intrusive external pill button (`☕ Sponsor`) in the right-side footer cluster pointing directly to the author's Saweria funding page (`https://saweria.co/herliansyah26`) for user-supported project appreciation without popups or interstitial modals.
 _Avoid_: Donation popup, paywall, donation nag
 
 **Changelog**:
