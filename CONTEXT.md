@@ -698,6 +698,13 @@ _Avoid_: Header emoji, window title icon, navbar image
 The pre-compiled COFF resource object (`cmd/sqlfox/rsrc_windows_*.syso`) embedding the Brand Mark directly into the Windows PE binary header (`sqlfox.exe`) during standard Go compilation without external build-time compilers.
 _Avoid_: Resource hacker, external res wrapper, manual icon stamper
 
+## Documentation & Operator Resources
 
+**User Guide**:
+The comprehensive operator manual and operational playbook (`docs/USER_GUIDE.md` in English and `docs/USER_GUIDE_ID.md` in Bahasa Indonesia) serving as the authoritative reference across all experience levels, from developers to senior database administrators.
+_Avoid_: Wiki, help doc, manual pdf, readme clone
 
+**Documentation Link**:
+The persistent external hyperlink affordance (`📖 Docs`) embedded within the Status Bar Footer, Keyboard Shortcuts Modal, and Command Palette routing operators directly to the canonical GitHub-hosted User Guide.
+_Avoid_: Help button, doc url, external link
 

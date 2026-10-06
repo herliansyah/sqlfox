@@ -264,5 +264,30 @@ func TestLockContentionAndRootBlockerInspectorEmbedded(t *testing.T) {
 	}
 }
 
+func TestDocumentationLinkEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
 
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
 
+	expectedSnippets := []string{
+		`https://github.com/herliansyah/sqlfox/blob/main/docs/USER_GUIDE.md`,
+		`title="Open SqlFox Documentation on GitHub (Online Manual)"`,
+		`title="Open complete User Guide & DBA Playbook on GitHub"`,
+		`Open Documentation (GitHub)`,
+	}
+
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(content, snippet) {
+			t.Errorf("expected index.html to contain %q for documentation link, but was missing", snippet)
+		}
+	}
+}

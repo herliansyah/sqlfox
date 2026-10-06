@@ -19,7 +19,7 @@
 
 <br />
 
-**[ 🇬🇧 English ](#-english)** &nbsp;•&nbsp; **[ 🇮🇩 Bahasa Indonesia ](#-bahasa-indonesia)**
+**[ 🇬🇧 English ](#-english)** &nbsp;•&nbsp; **[ 🇮🇩 Bahasa Indonesia ](#-bahasa-indonesia)** &nbsp;•&nbsp; **[ 📖 User Guide (EN) ](docs/USER_GUIDE.md)** &nbsp;•&nbsp; **[ 📖 Panduan Pengguna (ID) ](docs/USER_GUIDE_ID.md)**
 
 <br />
 
@@ -31,6 +31,8 @@
 ## 🇬🇧 English
 
 **SqlFox** is a fast, lightweight, single-binary database management tool with an embedded modern web UI. Designed for developers and DBA teams who prioritize safety, speed, and intelligence without the bloat of traditional heavy desktop clients.
+
+> 📖 **Official Documentation**: Read the full **[English User Guide & DBA Playbook](docs/USER_GUIDE.md)** or **[Panduan Bahasa Indonesia](docs/USER_GUIDE_ID.md)**.
 
 Operates with a strict memory ceiling (**< 100MB RAM**), sub-second launch time (**< 1s**), zero CGO dependencies, and instant browser/LAN accessibility.
 
@@ -191,6 +193,8 @@ If you find SqlFox useful and would like to support its ongoing development, con
 ## 🇮🇩 Bahasa Indonesia
 
 **SqlFox** adalah aplikasi database management and viewer generasi baru yang super cepat, ringan, dan hadir dalam format **single-binary** dengan antarmuka web modern bawaan (*embedded*). Dirancang khusus untuk developer, software engineer, dan tim DBA yang mengutamakan keamanan data (*Safety Guard*), efisiensi performa, dan kecerdasan AI tanpa beban aplikasi desktop tradisional yang berat.
+
+> 📖 **Dokumentasi Resmi**: Baca **[Panduan Lengkap Pengguna & Playbook DBA (Bahasa Indonesia)](docs/USER_GUIDE_ID.md)** atau **[English User Guide](docs/USER_GUIDE.md)**.
 
 Berjalan dengan konsumsi memori sangat hemat (**< 100MB RAM**), waktu start kilat (**< 1 detik**), bebas dependensi CGO, serta bisa langsung diakses dari browser maupun perangkat lain di jaringan lokal (LAN/WiFi).
 
