@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Resilient RFC4122 v4 UUID generator fallback for non-secure HTTP / remote LAN contexts.
 - **Execution Plan Overhaul, Telemetry Status Bar & Menu Navigation**:
   - Restructured Execution Plan (EXPLAIN) inspector featuring a dedicated Target Query card with SQL syntax formatting, raw toggle, modern segmented tab switcher (`📊 Plan Grid`, `🌳 Visual Tree`, `💡 Advisor`, `{ } Raw Plan`), and rich visual tree rendering with universal fallback across MySQL, PostgreSQL, and SQLite.
-  - Overhauled bottom telemetry status bar displaying real-time engine flavor badge (`[MYSQL]`, `[POSTGRES]`, `[SQLITE]`), server uptime, ping round-trip latency, memory telemetry, and author attribution with Saweria sponsorship link.
+  - Overhauled bottom telemetry status bar displaying real-time engine flavor badge (`[MYSQL]`, `[POSTGRES]`, `[SQLITE]`), server uptime, ping round-trip latency, memory telemetry, and author attribution with themed `[GitHub]` and `[☕ Sponsor]` pill buttons.
   - Reorganized top navbar menus into ergonomic grouped dropdowns (`Monitor ▾`, `DB Tools ▾`, `Settings ▾`, `Copilot ▾`).
   - Formatted SQL view with raw toggle in Process Detail Inspector.
   - Responsive container height and scrolling fixes for Flight Recorder correlated queries table.

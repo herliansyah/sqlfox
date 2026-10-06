@@ -11,7 +11,7 @@
 [![GitHub Release](https://img.shields.io/github/v/release/herliansyah/sqlfox?style=flat-square&color=FF6B35&logo=github)](https://github.com/herliansyah/sqlfox/releases)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/herliansyah/sqlfox?style=flat-square&color=00ADD8&logo=go)](https://golang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-F59E0B?style=flat-square)](https://opensource.org/licenses/MIT)
-[![Donate: Saweria](https://img.shields.io/badge/Donate-Saweria-F97316?style=flat-square&logo=coffeescript)](https://saweria.co/herliansyah26)
+[![Sponsor: Saweria](https://img.shields.io/badge/Sponsor-Saweria-F97316?style=flat-square&logo=coffeescript)](https://saweria.co/herliansyah26)
 [![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-4B5563?style=flat-square&logo=linux)](https://github.com/herliansyah/sqlfox/releases)
 [![Arch](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-6366F1?style=flat-square)](https://github.com/herliansyah/sqlfox/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/herliansyah/sqlfox/ci.yml?branch=master&label=CI&style=flat-square&logo=githubactions)](https://github.com/herliansyah/sqlfox/actions)
@@ -178,10 +178,10 @@ sqlfox advise --dsn "root:pass@tcp(127.0.0.1:3306)/mydb" --sql "SELECT * FROM or
 
 ---
 
-### 💖 Support & Donation
+### 💖 Support & Sponsorship
 
-If you find SqlFox useful and would like to support its ongoing development, consider buying me a coffee:
-- ☕ **[Traktir Kopi / Support on Saweria](https://saweria.co/herliansyah26)**
+If you find SqlFox useful and would like to support its ongoing development, consider sponsoring the project:
+- ☕ **[Sponsor via Saweria (Buy a Coffee)](https://saweria.co/herliansyah26)**
 
 ---
 
@@ -320,10 +320,10 @@ sqlfox advise --dsn "root:pass@tcp(127.0.0.1:3306)/mydb" --sql "SELECT * FROM or
 
 ---
 
-### 💖 Dukungan & Donasi
+### 💖 Dukungan & Sponsor
 
 Jika Anda merasa SqlFox bermanfaat dan ingin mendukung pengembangan berkelanjutannya:
-- ☕ **[Traktir Kopi via Saweria](https://saweria.co/herliansyah26)**
+- ☕ **[Sponsor via Saweria](https://saweria.co/herliansyah26)**
 
 ---
 
