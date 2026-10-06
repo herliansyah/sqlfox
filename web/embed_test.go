@@ -85,6 +85,10 @@ func TestSessionTabStatePersistenceEmbedded(t *testing.T) {
 		"sqlfox_tabs_",
 		"window.addEventListener('beforeunload'",
 		"isQueryExecuting",
+		"isProcesslist: !!t.isProcesslist",
+		"isFlightRecorder: !!t.isFlightRecorder",
+		"isCluster: !!t.isCluster",
+		"isVariables: !!t.isVariables",
 	}
 
 	for _, snippet := range expectedSnippets {

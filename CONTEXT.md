@@ -478,6 +478,10 @@ _Avoid_: Cluster config checker, replication validator, wsrep reviewer
 
 ## Codebase Architecture & Maintenance (Ponytail)
 
+**Canonical UI Language**:
+The entire application user interface, notification modals, pre-built Copilot prompt templates, and CLI output strictly adhere to American English as the standard base language. User-preferred localizations (e.g. Bahasa Indonesia) are exclusively managed dynamically through the user-configured *AI Persona & System Instruction* for Copilot conversational output, avoiding premature i18n abstraction layers.
+_Avoid_: Mixed-language UI, multilingual i18n framework, hardcoded non-English templates
+
 **Native Platform Tunneling**:
 Relying on standard OS facilities (`ssh -N -L 3306:remote-db:3306 user@bastion` or platform VPN) for remote private network database connectivity, avoiding custom in-process SSH dialer complexity and unexposed vault database columns.
 _Avoid_: In-process tunnel, custom bastion client
