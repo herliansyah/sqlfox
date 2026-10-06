@@ -306,6 +306,13 @@
             </span>
             <span id="processlist-slow-badge" class="hidden bg-amber-500/20 text-amber-300 text-[10px] px-1.5 rounded-full font-bold"></span>
           </button>
+          <button id="btn-open-lock-inspector" onclick="openLockInspector(); toggleTopMonitorMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center justify-between border-t border-slate-800">
+            <span class="flex flex-col">
+              <span class="font-medium text-red-400">🔒 Lock Contention &amp; Blockers</span>
+              <span class="text-[10px] text-slate-400">Root blocker tree &amp; waiting query mitigation</span>
+            </span>
+            <span id="lock-blocker-badge" class="hidden bg-red-500/20 text-red-300 text-[10px] px-1.5 rounded-full font-bold"></span>
+          </button>
           <button id="btn-open-cluster" onclick="openClusterTab(); toggleTopMonitorMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center justify-between border-t border-slate-800">
             <span class="flex flex-col">
               <span class="font-medium text-emerald-400">🌐 Cluster</span>
@@ -414,12 +421,9 @@
     <aside id="left-sidebar" class="w-64 bg-app-surface border-r border-app-border flex flex-col flex-shrink-0 transition-all duration-200 z-10">
       <!-- Compact Session Switcher Header -->
       <div class="p-2.5 border-b border-app-border bg-slate-900/60 relative">
-        <div class="flex items-center justify-between text-[10px] text-slate-400 mb-1.5">
-          <span class="font-semibold uppercase tracking-wider flex items-center space-x-1">
-            <span>⚡</span>
-            <span>Session</span>
-          </span>
-          <button onclick="openNewConnModal()" class="text-app-accent hover:underline text-[11px] font-semibold" title="New Connection Session">+ New</button>
+        <div class="text-[10px] text-slate-400 mb-1.5 font-semibold uppercase tracking-wider flex items-center space-x-1">
+          <span>⚡</span>
+          <span>Session</span>
         </div>
 
         <!-- Compact Active Session Bar Button -->
@@ -451,15 +455,8 @@
 
       <!-- Database / Schema Switcher (for multi-database servers like MySQL/MariaDB) -->
       <div id="database-selector-container" class="relative p-2 border-b border-app-border bg-slate-950/60 hidden text-xs flex-shrink-0">
-        <div class="flex items-center justify-between text-[10px] text-slate-400 mb-1">
-          <span class="font-semibold uppercase tracking-wider">Database / Schema</span>
-          <div class="flex items-center space-x-2">
-            <button onclick="openDatabaseDiagnosticsModal()" class="text-sky-400 hover:text-sky-300 text-[10px] font-medium flex items-center space-x-0.5" title="Storage &amp; Health Inspector">
-              <span>📊</span>
-              <span>Inspect</span>
-            </button>
-            <button onclick="openCreateDatabaseModal()" class="text-app-accent hover:underline text-[11px] font-bold" title="Create New Database">+ New</button>
-          </div>
+        <div class="text-[10px] text-slate-400 mb-1 font-semibold uppercase tracking-wider">
+          Database / Schema
         </div>
         
         <!-- Dropdown trigger button -->
@@ -1121,6 +1118,15 @@
               <span>🚨</span><span id="pl-lock-count">0 Locks</span>
             </span>
           </div>
+        </div>
+
+        <!-- Green Confirmation Banner (Shown when user inspects locks and none exist) -->
+        <div id="pl-no-lock-banner" class="hidden bg-emerald-950/40 border-b border-emerald-900/60 p-2.5 px-3 flex items-center justify-between flex-shrink-0 text-xs text-emerald-300 transition">
+          <div class="flex items-center space-x-2">
+            <span>✅</span>
+            <span class="font-medium">No active lock contention detected. All database threads running unobstructed.</span>
+          </div>
+          <button onclick="dismissNoLockBanner()" class="text-emerald-400 hover:text-emerald-200 text-xs px-1 cursor-pointer" title="Dismiss">✕</button>
         </div>
 
         <!-- Lock Dependency Tree / Root Blocker Banner (Shown when locks exist) -->
@@ -6004,6 +6010,43 @@
       fetchProcesslist(false);
     }
 
+    let _noLockBannerTimeout = null;
+    function showNoLockBanner() {
+      const banner = document.getElementById('pl-no-lock-banner');
+      if (!banner) return;
+      banner.classList.remove('hidden');
+      if (_noLockBannerTimeout) clearTimeout(_noLockBannerTimeout);
+      _noLockBannerTimeout = setTimeout(() => {
+        banner.classList.add('hidden');
+      }, 4000);
+    }
+
+    function dismissNoLockBanner() {
+      const banner = document.getElementById('pl-no-lock-banner');
+      if (banner) banner.classList.add('hidden');
+      if (_noLockBannerTimeout) clearTimeout(_noLockBannerTimeout);
+    }
+
+    async function openLockInspector() {
+      if (!activeConnection) {
+        showNativeAlert('Please select and connect to a database session first.', 'Lock Inspector');
+        return;
+      }
+      openProcesslistTab();
+      await fetchProcesslist(false);
+      const locks = (processlistData && processlistData.locks) || [];
+      if (locks.length > 0) {
+        dismissNoLockBanner();
+        const banner = document.getElementById('pl-lock-banner');
+        if (banner) {
+          banner.classList.remove('hidden');
+          banner.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      } else {
+        showNoLockBanner();
+      }
+    }
+
     function setProcesslistInterval(interval) {
       processlistRefreshInterval = interval;
       ['pause', '1s', '3s', '5s'].forEach(opt => {
@@ -6071,10 +6114,15 @@
         }
       }
 
-      // Count slow threads (> 5 sec)
+      // Count slow threads (> 5 sec) and active lock contention
       const slowCount = threads.filter(t => t.time >= 5).length;
+      const rootBlockerCount = locks.filter(l => l.is_root_blocker).length;
+      const lockWaitCount = locks.length;
+
       const badgeHeader = document.getElementById('processlist-slow-badge');
+      const lockBadge = document.getElementById('lock-blocker-badge');
       const monitorAlert = document.getElementById('monitor-alert-badge');
+
       if (badgeHeader) {
         if (slowCount > 0) {
           badgeHeader.textContent = slowCount;
@@ -6083,9 +6131,25 @@
           badgeHeader.classList.add('hidden');
         }
       }
+
+      if (lockBadge) {
+        if (lockWaitCount > 0) {
+          lockBadge.textContent = rootBlockerCount > 0 ? `${rootBlockerCount} Blocker${rootBlockerCount > 1 ? 's' : ''}` : `${lockWaitCount} Locks`;
+          lockBadge.classList.remove('hidden');
+        } else {
+          lockBadge.classList.add('hidden');
+        }
+      }
+
+      // Priority alert escalation: Locks/Blockers (P0 Red) > Slow Queries (Amber)
       if (monitorAlert) {
-        if (slowCount > 0) {
+        if (lockWaitCount > 0) {
+          monitorAlert.textContent = rootBlockerCount > 0 ? `🚨 ${rootBlockerCount} Blocker` : `🚨 ${lockWaitCount} Locks`;
+          monitorAlert.className = "bg-red-500/30 text-red-200 border border-red-500/50 text-[10px] px-1.5 rounded-full font-bold animate-pulse";
+          monitorAlert.classList.remove('hidden');
+        } else if (slowCount > 0) {
           monitorAlert.textContent = slowCount;
+          monitorAlert.className = "bg-amber-500/20 text-amber-300 text-[10px] px-1 rounded-full font-bold";
           monitorAlert.classList.remove('hidden');
         } else {
           monitorAlert.classList.add('hidden');
@@ -6113,6 +6177,7 @@
       const lockList = document.getElementById('pl-lock-tree-list');
 
       if (locks.length > 0) {
+        dismissNoLockBanner();
         if (lockBanner) lockBanner.classList.remove('hidden');
         if (lockSummary) lockSummary.classList.remove('hidden');
         if (lockCountEl) lockCountEl.textContent = `${locks.length} Lock Waits`;
@@ -12541,6 +12606,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
       } else {
         menu.classList.toggle('hidden');
       }
+      if (!menu.classList.contains('hidden') && activeConnection) {
+        fetchProcesslist(true);
+      }
     }
 
     function toggleTopSettingsMenu(force = null) {
@@ -15510,6 +15578,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
         { name: 'Database Storage & Health Inspector', shortcut: '', run: () => openDatabaseDiagnosticsModal() },
         { name: 'Table Storage Diagnostics', shortcut: '', run: () => openDatabaseDiagnosticsModal() },
         { name: 'User Accounts & Privilege Matrix', shortcut: '', run: () => openPrivilegeMatrixModal() },
+        { name: 'Lock Contention & Root Blocker Analysis', shortcut: '', run: () => openLockInspector() },
         { name: 'Create Database', shortcut: '', run: () => openCreateDatabaseModal() },
         { name: 'Run Query', shortcut: 'Ctrl+Enter', run: () => runActiveQuery() },
         { name: 'Explain Query Plan', shortcut: 'Ctrl+Shift+Enter', run: () => explainActiveQuery() },
@@ -15543,6 +15612,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
       else if (name === 'Query Snippets Manager') openSnippetsManager();
       else if (name === 'Database Storage & Health Inspector' || name === 'Table Storage Diagnostics') openDatabaseDiagnosticsModal();
       else if (name === 'User Accounts & Privilege Matrix') openPrivilegeMatrixModal();
+      else if (name.startsWith('Lock Contention')) openLockInspector();
       else if (name === 'Create Database') openCreateDatabaseModal();
       else if (name === 'Run Query') runActiveQuery();
       else if (name === 'Explain Query Plan') explainActiveQuery();

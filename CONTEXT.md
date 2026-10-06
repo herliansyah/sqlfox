@@ -216,8 +216,8 @@ A cached multi-database schema index enabling contextual autocompletion across s
 _Avoid_: Single-db autocomplete, schema silo
 
 **Session Switcher**:
-A compact header picker for switching, filtering, and managing saved database connection sessions, reserving the sidebar tree exclusively for schema objects.
-_Avoid_: Permanent sidebar connection tree accordion
+A compact header picker for switching, filtering, and managing saved database connection sessions, reserving the sidebar tree exclusively for schema objects. Header labels are strictly reserved for section identification and stripped of redundant action triggers (`+ New`), hosting session creation canonically inside the popover search toolbar (`➕`) and Command Palette.
+_Avoid_: Permanent sidebar connection tree accordion, redundant header action buttons
 
 **Schema Search**:
 An instant cross-database catalog finder locating tables, views, and columns across all accessible schemas in the active connection.
@@ -240,8 +240,8 @@ An interactive tabular display of database engine execution plans (`EXPLAIN`), h
 _Avoid_: Flat explain list, console explain
 
 **Database Switcher**:
-A searchable popover dropdown in the sidebar for filtering and switching the active database schema in multi-database server connections, matching the Session Switcher interaction pattern.
-_Avoid_: Raw select dropdown, static DB selector
+A searchable popover dropdown in the sidebar for filtering and switching the active database schema in multi-database server connections, matching the Session Switcher interaction pattern. Stripped of redundant header buttons (`+ New`, `Inspect`), keeping schema creation canonically inside its popover toolbar (`➕`) and storage diagnostics in the Top Monitor menu and Command Palette.
+_Avoid_: Raw select dropdown, static DB selector, cluttered header label actions
 
 **Schema Object Filter**:
 An real-time, sticky client-side search input in the sidebar explorer for instantaneously filtering tables, views, and triggers by name with quick keyboard access (`/`).
@@ -354,6 +354,10 @@ _Avoid_: Process monitor, task list, thread viewer
 **Process Inspector Modal**:
 A dedicated diagnostic dialog displaying complete thread execution metadata, formatted full SQL statement text without truncation, 1-click clipboard actions, and integrated operational shortcuts (`EXPLAIN`, editor transfer, AI review, and termination).
 _Avoid_: Process details popup, thread viewer window, query popover
+
+**Lock Contention & Root Blocker Inspector**:
+A dedicated incident-triage access point in the Top Monitor menu and Command Palette that directly focuses the Processlist session on the Root Blocker dependency tree, surfacing blocking queries, locked resources, and single-click termination actions with P0 priority alert escalation.
+_Avoid_: Lock viewer, deadlock popup, blocker window
 
 **Table Diagnostics**:
 A physical storage inspection module providing exact data length, index length, and fragmentation overhead statistics alongside one-click table maintenance actions (`OPTIMIZE TABLE`, `ANALYZE TABLE`, `CHECK TABLE`).

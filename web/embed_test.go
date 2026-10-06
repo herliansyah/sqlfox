@@ -233,4 +233,36 @@ func TestTabGridDataIsolationEmbedded(t *testing.T) {
 	}
 }
 
+func TestLockContentionAndRootBlockerInspectorEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	expectedSnippets := []string{
+		`id="btn-open-lock-inspector"`,
+		"openLockInspector()",
+		`id="lock-blocker-badge"`,
+		`id="pl-no-lock-banner"`,
+		"No active lock contention detected.",
+		"dismissNoLockBanner()",
+		"Lock Contention & Root Blocker Analysis",
+	}
+
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(content, snippet) {
+			t.Errorf("expected index.html to contain %q for lock contention inspector, but was missing", snippet)
+		}
+	}
+}
+
+
 
