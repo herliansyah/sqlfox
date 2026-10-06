@@ -613,32 +613,86 @@ func (s *MySQLSession) KillProcess(ctx context.Context, threadID int64, killConn
 	return err
 }
 
+// GetDatabaseDiagnostics returns physical storage and metadata for all databases on the MySQL server.
+func (s *MySQLSession) GetDatabaseDiagnostics(ctx context.Context) ([]driver.DatabaseDiagnostics, error) {
+	query := `
+		SELECT 
+			s.SCHEMA_NAME, 
+			IFNULL(s.DEFAULT_CHARACTER_SET_NAME, ''), 
+			IFNULL(s.DEFAULT_COLLATION_NAME, ''), 
+			COUNT(t.TABLE_NAME), 
+			IFNULL(SUM(t.DATA_LENGTH), 0), 
+			IFNULL(SUM(t.INDEX_LENGTH), 0), 
+			IFNULL(SUM(t.DATA_FREE), 0)
+		FROM information_schema.SCHEMATA s
+		LEFT JOIN information_schema.TABLES t ON s.SCHEMA_NAME = t.TABLE_SCHEMA
+		GROUP BY s.SCHEMA_NAME, s.DEFAULT_CHARACTER_SET_NAME, s.DEFAULT_COLLATION_NAME
+		ORDER BY 
+			CASE WHEN s.SCHEMA_NAME IN ('information_schema', 'mysql', 'performance_schema', 'sys') THEN 1 ELSE 0 END,
+			(IFNULL(SUM(t.DATA_LENGTH), 0) + IFNULL(SUM(t.INDEX_LENGTH), 0)) DESC,
+			s.SCHEMA_NAME ASC
+	`
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query database diagnostics: %w", err)
+	}
+	defer rows.Close()
+
+	var result []driver.DatabaseDiagnostics
+	for rows.Next() {
+		var dd driver.DatabaseDiagnostics
+		if err := rows.Scan(
+			&dd.Name,
+			&dd.Charset,
+			&dd.Collation,
+			&dd.TableCount,
+			&dd.DataSize,
+			&dd.IndexSize,
+			&dd.OverheadSize,
+		); err == nil {
+			dd.TotalSize = dd.DataSize + dd.IndexSize
+			lowerName := strings.ToLower(dd.Name)
+			dd.IsSystem = lowerName == "information_schema" || lowerName == "mysql" || lowerName == "performance_schema" || lowerName == "sys"
+			result = append(result, dd)
+		}
+	}
+	if result == nil {
+		result = []driver.DatabaseDiagnostics{}
+	}
+	return result, nil
+}
+
 func (s *MySQLSession) GetTableDiagnostics(ctx context.Context, database, table string) ([]driver.TableDiagnostics, error) {
 	if database == "" {
 		database = s.cfg.DatabaseName
 	}
 	query := `
 		SELECT 
-			TABLE_NAME, 
-			IFNULL(ENGINE, ''), 
-			IFNULL(TABLE_ROWS, 0), 
-			IFNULL(DATA_LENGTH, 0), 
-			IFNULL(INDEX_LENGTH, 0), 
-			IFNULL(DATA_FREE, 0), 
-			IFNULL(ROW_FORMAT, ''), 
-			IFNULL(TABLE_COLLATION, ''), 
-			IFNULL(DATE_FORMAT(CREATE_TIME, '%Y-%m-%d %H:%i:%s'), ''), 
-			IFNULL(DATE_FORMAT(UPDATE_TIME, '%Y-%m-%d %H:%i:%s'), '')
-		FROM information_schema.TABLES
-		WHERE TABLE_SCHEMA = ?
+			t.TABLE_NAME, 
+			IFNULL(t.ENGINE, ''), 
+			IFNULL(t.TABLE_ROWS, 0), 
+			IFNULL(t.DATA_LENGTH, 0), 
+			IFNULL(t.INDEX_LENGTH, 0), 
+			IFNULL(t.DATA_FREE, 0), 
+			IFNULL(t.ROW_FORMAT, ''), 
+			IFNULL(t.TABLE_COLLATION, ''), 
+			IFNULL(DATE_FORMAT(t.CREATE_TIME, '%Y-%m-%d %H:%i:%s'), ''), 
+			IFNULL(DATE_FORMAT(t.UPDATE_TIME, '%Y-%m-%d %H:%i:%s'), ''),
+			CASE WHEN pk.TABLE_NAME IS NOT NULL THEN 1 ELSE 0 END
+		FROM information_schema.TABLES t
+		LEFT JOIN (
+			SELECT DISTINCT TABLE_NAME
+			FROM information_schema.STATISTICS
+			WHERE TABLE_SCHEMA = ? AND INDEX_NAME = 'PRIMARY'
+		) pk ON t.TABLE_NAME = pk.TABLE_NAME
+		WHERE t.TABLE_SCHEMA = ?
 	`
-	var args []any
-	args = append(args, database)
+	args := []any{database, database}
 	if table != "" {
-		query += " AND TABLE_NAME = ?"
+		query += " AND t.TABLE_NAME = ?"
 		args = append(args, table)
 	}
-	query += " ORDER BY (DATA_LENGTH + INDEX_LENGTH) DESC"
+	query += " ORDER BY (t.DATA_LENGTH + t.INDEX_LENGTH) DESC"
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -649,6 +703,7 @@ func (s *MySQLSession) GetTableDiagnostics(ctx context.Context, database, table 
 	var result []driver.TableDiagnostics
 	for rows.Next() {
 		var td driver.TableDiagnostics
+		var hasPk int
 		if err := rows.Scan(
 			&td.Name,
 			&td.Engine,
@@ -660,7 +715,9 @@ func (s *MySQLSession) GetTableDiagnostics(ctx context.Context, database, table 
 			&td.Collation,
 			&td.CreatedAt,
 			&td.UpdatedAt,
+			&hasPk,
 		); err == nil {
+			td.HasPrimaryKey = hasPk == 1
 			result = append(result, td)
 		}
 	}

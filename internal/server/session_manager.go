@@ -552,6 +552,16 @@ func (s *ActiveSession) Stream(ctx context.Context, sql string, maxRows int) (dr
 	return s.Session.QueryStream(ctx, trimmedSQL, maxRows)
 }
 
+// GetDatabaseDiagnostics returns physical storage and metadata for all databases.
+func (s *ActiveSession) GetDatabaseDiagnostics(ctx context.Context) ([]driver.DatabaseDiagnostics, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.Session == nil {
+		return nil, driver.ErrSessionClosed
+	}
+	return s.Session.GetDatabaseDiagnostics(ctx)
+}
+
 // GetTableDiagnostics returns physical storage and overhead metrics.
 func (s *ActiveSession) GetTableDiagnostics(ctx context.Context, database, table string) ([]driver.TableDiagnostics, error) {
 	s.mu.RLock()

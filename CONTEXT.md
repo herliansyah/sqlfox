@@ -359,6 +359,22 @@ _Avoid_: Process details popup, thread viewer window, query popover
 A physical storage inspection module providing exact data length, index length, and fragmentation overhead statistics alongside one-click table maintenance actions (`OPTIMIZE TABLE`, `ANALYZE TABLE`, `CHECK TABLE`).
 _Avoid_: Table health, storage checker, disk tool
 
+**Database Storage & Health Inspector**:
+A comprehensive two-level diagnostic interface inspecting physical storage, table counts, collation distribution, and operational hygiene across entire database sessions and individual schemas.
+_Avoid_: DB size checker, storage modal, disk viewer
+
+**Session Storage Overview**:
+The session-level view within the Database Storage & Health Inspector aggregating total instance storage, table counts, default character sets, and collations across all accessible databases with system schema toggling.
+_Avoid_: Database list, catalog summary, instance sizes
+
+**Table Storage & Health Grid**:
+The schema-level view within the Database Storage & Health Inspector detailing physical table storage (data, index, and overhead bytes), row formats, collations, and actionable health evaluations per table.
+_Avoid_: Table size list, db breakdown, storage table
+
+**Table Health Advisor**:
+A rule-based diagnostic engine evaluating tables for structural and performance anti-patterns (excessive fragmentation overhead, missing primary keys, legacy storage engines, and deprecated collations) with 1-click remediation handoffs.
+_Avoid_: Table linter, health assistant, schema checker
+
 **Privilege Matrix**:
 A visual user management and access control interface allowing DBAs to provision accounts, restrict host origins, and configure granular permissions across global, database, and table scopes via an interactive grid.
 _Avoid_: User editor, permission manager, grant wizard
