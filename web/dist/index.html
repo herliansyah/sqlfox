@@ -1607,11 +1607,11 @@
             <span id="ai-provider-badge" onclick="toggleAISettings()" class="text-[10px] text-slate-400 hover:text-app-accent font-mono cursor-pointer transition truncate max-w-[170px]" title="Click to configure AI Settings">BYOK</span>
           </div>
           <div class="relative flex flex-col">
-            <textarea id="ai-prompt-input" rows="2" class="w-full bg-app-surface p-2.5 text-xs text-white border border-app-border rounded outline-none resize-y focus:border-app-accent leading-relaxed min-h-[52px] max-h-[220px]" placeholder="Ask Copilot (e.g. 'Optimalkan query ini', 'Buat schema migration')... (Enter = Kirim, Shift+Enter = Baris baru)" oninput="autoResizeAIPrompt(this)" onkeydown="handleAIPromptKeydown(event)"></textarea>
+            <textarea id="ai-prompt-input" rows="2" class="w-full bg-app-surface p-2.5 text-xs text-white border border-app-border rounded outline-none resize-y focus:border-app-accent leading-relaxed min-h-[52px] max-h-[220px]" placeholder="Ask Copilot (e.g. 'Optimize this query', 'Generate schema migration')... (Enter = Send, Shift+Enter = New line)" oninput="autoResizeAIPrompt(this)" onkeydown="handleAIPromptKeydown(event)"></textarea>
             <div class="flex items-center justify-between mt-1.5 pt-1 text-[11px] text-slate-400">
-              <span class="text-[10px] text-slate-500">↵ Kirim &nbsp;•&nbsp; ⇧↵ Baris baru</span>
+              <span class="text-[10px] text-slate-500">↵ Send &nbsp;•&nbsp; ⇧↵ New line</span>
               <button type="submit" class="bg-app-accent hover:bg-sky-500 text-slate-950 font-bold px-3 py-1 rounded text-xs transition flex items-center space-x-1">
-                <span>Kirim</span>
+                <span>Send</span>
                 <span>▶</span>
               </button>
             </div>
@@ -2224,7 +2224,7 @@
           </label>
           <input type="text" id="ai-endpoint" placeholder="http://192.168.x.x:8000/v1 or https://api.openai.com/v1" class="w-full bg-slate-950 border border-slate-700 p-2 text-white rounded outline-none font-mono">
           <p class="text-[11px] text-slate-500 mt-1">
-            💡 Untuk <b>9router</b> atau proxy LAN, masukkan IP & Port proxy Anda (contoh: <code class="text-sky-300">http://192.168.1.50:8000/v1</code>).
+            💡 For <b>9router</b> or LAN proxy, enter your proxy IP & Port (e.g. <code class="text-sky-300">http://192.168.1.50:8000/v1</code>).
           </p>
         </div>
 
@@ -2246,15 +2246,15 @@
             <select id="ai-language" class="w-full bg-slate-950 border border-slate-700 p-2 text-white rounded outline-none">
               <option value="id">Bahasa Indonesia</option>
               <option value="en">English</option>
-              <option value="auto">Auto (Ikuti Prompt)</option>
+              <option value="auto">Auto (Match Prompt)</option>
             </select>
           </div>
           <div>
             <label class="block text-slate-400 mb-1 font-semibold">Response Style</label>
             <select id="ai-style" class="w-full bg-slate-950 border border-slate-700 p-2 text-white rounded outline-none">
-              <option value="concise">Ringkas & Fokus SQL</option>
-              <option value="detailed">Detail & Analisis Performa</option>
-              <option value="normal">Normal / Standar</option>
+              <option value="concise">Concise & SQL-focused</option>
+              <option value="detailed">Detailed & Performance Analysis</option>
+              <option value="normal">Standard / Normal</option>
             </select>
           </div>
         </div>
@@ -2262,9 +2262,9 @@
         <div>
           <label class="block text-slate-400 mb-1 font-semibold">
             Custom Instructions / Persona
-            <span class="text-slate-500 text-[10px] font-normal">(Opsional)</span>
+            <span class="text-slate-500 text-[10px] font-normal">(Optional)</span>
           </label>
-          <textarea id="ai-custom-prompt" rows="2" placeholder="Contoh: Utamakan query ramah index InnoDB, hindari subquery jika bisa pakai JOIN." class="w-full bg-slate-950 border border-slate-700 p-2 text-white rounded outline-none resize-none font-mono text-xs"></textarea>
+          <textarea id="ai-custom-prompt" rows="2" placeholder="e.g. Prioritize InnoDB index-friendly queries, avoid subqueries when JOIN is viable." class="w-full bg-slate-950 border border-slate-700 p-2 text-white rounded outline-none resize-none font-mono text-xs"></textarea>
         </div>
 
         <div class="p-3 bg-slate-950/80 rounded border border-slate-800 space-y-2">
@@ -2273,7 +2273,7 @@
             <span class="font-semibold text-white">Privacy Firewall: Mask Schema Identifiers</span>
           </label>
           <p class="text-[11px] text-slate-500">
-            Zero-Row Guarantee: Data baris Anda tidak pernah dikirim ke AI. Hanya metadata skema yang diproses, dan nama tabel/kolom disamarkan jika opsi ini aktif.
+            Zero-Row Guarantee: Your row data is never sent to AI. Only schema metadata is processed, and table/column names are masked if this option is active.
           </p>
         </div>
 
@@ -3110,7 +3110,7 @@
     <div id="fk-peek-content" class="max-h-60 overflow-y-auto font-mono space-y-1"></div>
     <div class="mt-2 pt-2 border-t border-slate-800 flex justify-end">
       <button id="fk-peek-btn-jump" class="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-[11px] font-semibold flex items-center space-x-1 transition">
-        <span>↗ Buka di Tab Baru</span>
+        <span>↗ Open in New Tab</span>
       </button>
     </div>
   </div>
@@ -3201,7 +3201,7 @@
             <span>🤖 AI Copilot</span>
           </button>
           <button id="pl-modal-btn-notes" onclick="saveProcessToNotesFromModal()" class="px-2.5 py-1 rounded bg-amber-950 hover:bg-amber-800 text-amber-300 border border-amber-800 font-medium transition flex items-center space-x-1 disabled:opacity-40 disabled:cursor-not-allowed">
-            <span>📑 Catatan</span>
+            <span>📑 Notes</span>
           </button>
         </div>
 
@@ -3571,7 +3571,7 @@
         <span>🤖</span><span>AI Copilot Review</span>
       </button>
       <button id="pl-menu-notes" onclick="saveProcessToNotesFromMenu()" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-amber-400 hover:text-amber-300">
-        <span>📑</span><span>Save to Catatan</span>
+        <span>📑</span><span>Save to Notes</span>
       </button>
     </div>
     <div class="py-1">
@@ -5726,7 +5726,7 @@
       const key = getTabsStorageKey();
       try {
         const curr = tabs.find(t => t.id === activeTabId);
-        if (curr && !curr.isTableViewer && !curr.isProcesslist && !curr.isCluster && !curr.isFlightRecorder) {
+        if (curr && !curr.isTableViewer && !curr.isProcesslist && !curr.isCluster && !curr.isFlightRecorder && !curr.isVariables) {
           if (cmEditor) {
             curr.sql = cmEditor.getValue();
           } else {
@@ -5735,7 +5735,6 @@
           }
         }
         const storableTabs = tabs
-          .filter(t => !t.isProcesslist && !t.isCluster && !t.isFlightRecorder)
           .map(t => ({
             id: t.id,
             title: t.title,
@@ -5752,7 +5751,11 @@
             sortCol: t.sortCol || '',
             sortDir: t.sortDir || '',
             offset: t.offset || 0,
-            isNote: !!t.isNote
+            isNote: !!t.isNote,
+            isProcesslist: !!t.isProcesslist,
+            isCluster: !!t.isCluster,
+            isFlightRecorder: !!t.isFlightRecorder,
+            isVariables: !!t.isVariables
           }));
 
         if (storableTabs.length === 0) {
@@ -5777,15 +5780,34 @@
           const parsed = JSON.parse(raw);
           if (parsed && Array.isArray(parsed.tabs) && parsed.tabs.length > 0) {
             tabs = parsed.tabs;
+            if (activeConnection && activeConnection.driver !== 'mysql' && activeConnection.driver !== 'mariadb') {
+              tabs = tabs.filter(t => !t.isProcesslist && !t.isCluster);
+              if (tabs.length === 0) {
+                tabs = [{ id: 'tab-1', title: 'Query 1.sql', sql: '', isTableViewer: false }];
+              }
+            }
             activeTabId = (tabs.some(t => t.id === parsed.activeTabId)) ? parsed.activeTabId : tabs[0].id;
             const activeTab = tabs.find(t => t.id === activeTabId);
-            if (activeTab && !activeTab.isTableViewer) {
+            if (activeTab && !activeTab.isTableViewer && !activeTab.isProcesslist && !activeTab.isCluster && !activeTab.isFlightRecorder && !activeTab.isVariables) {
               setEditorSQL(activeTab.sql || '');
             }
             renderTabs();
 
-            if (activeTab && activeTab.isTableViewer && activeTab.tableName && activeConnection) {
-              setTableMode(activeTab.tableMode || 'data', true);
+            if (activeTab && activeConnection) {
+              if (activeTab.isTableViewer && activeTab.tableName) {
+                setTableMode(activeTab.tableMode || 'data', true);
+              } else if (activeTab.isProcesslist) {
+                initProcesslistFilters();
+                fetchProcesslist(false);
+              } else if (activeTab.isCluster) {
+                fetchClusterHealth(false);
+              } else if (activeTab.isVariables) {
+                fetchServerVariables();
+              } else if (activeTab.isFlightRecorder) {
+                loadFlightSessions();
+                checkFlightRecorderStatus();
+                refreshFlightRecorderUI();
+              }
             }
             return true;
           }
@@ -6600,13 +6622,13 @@
       const promptInput = document.getElementById('ai-prompt-input');
       if (!promptInput) return;
 
-      const promptTemplate = `Tolong analisis query dari Processlist ini dan berikan saran optimasi serta indeks:\n\n\`\`\`sql\n${sql}\n\`\`\``;
+      const promptTemplate = `Please analyze this query from the Processlist and provide optimization suggestions and indexes:\n\n\`\`\`sql\n${sql}\n\`\`\``;
 
-      // Jika kotak input AI sedang berisi teks, jangan langsung overwrite; konfirmasi terlebih dahulu
+      // If AI input already has draft text, confirm before overwriting
       if (promptInput.value && promptInput.value.trim().length > 0) {
         const confirmReplace = await showNativeConfirm(
-          'Kotak input AI Copilot saat ini sedang berisi draf teks Anda.\n\nApakah Anda ingin menimpa (replace) teks tersebut dengan analisis query Processlist ini?\n\n(Pilih OK untuk Timpa, atau Cancel untuk membatalkan dan mempertahankan draf Anda)',
-          'Konfirmasi Input AI'
+          'AI Copilot input already contains your draft text.\n\nDo you want to overwrite it with this Processlist query analysis?\n\n(Choose OK to Overwrite, or Cancel to keep your draft)',
+          'Confirm AI Input'
         );
         if (!confirmReplace) return;
       }
@@ -6614,12 +6636,12 @@
       promptInput.value = promptTemplate;
       promptInput.focus();
       promptInput.setSelectionRange(promptInput.value.length, promptInput.value.length);
-      showNativeAlert('Query berhasil dimasukkan ke kotak input AI Copilot. Silakan tinjau dan klik Send.', 'Draf AI Siap');
+      showNativeAlert('Query has been inserted into AI Copilot input. Please review and click Send.', 'AI Draft Ready');
     }
 
     function saveProcessQueryToNotes(sql, dbName) {
       if (!sql) return;
-      const title = 'Query Analisis (Processlist' + (dbName ? ` - ${dbName}` : '') + ')';
+      const title = 'Query Analysis (Processlist' + (dbName ? ` - ${dbName}` : '') + ')';
       saveToInternalNotes(title, '```sql\n' + sql + '\n```');
     }
 
@@ -6964,24 +6986,24 @@
       const promptInput = document.getElementById('ai-prompt-input');
       if (!promptInput) return;
 
-      const promptTemplate = `Tolong analisis kondisi cluster database ini dan berikan rekomendasi tuning performa serta solusi bottleneck:
+      const promptTemplate = `Please analyze this database cluster health and provide performance tuning recommendations and bottleneck solutions:
 
 - **Topology**: ${d.topology_type} (${d.cluster_name || 'unnamed'})
 - **Quorum / Status**: ${d.cluster_status} (Size: ${d.cluster_size} nodes)
 - **Local State**: ${d.local_node_state} (${d.local_node_name})
-- **Diagnosis Utama**: ${d.bottleneck_diagnosis || 'Normal'} (Severity: ${d.bottleneck_severity})
+- **Primary Diagnosis**: ${d.bottleneck_diagnosis || 'Normal'} (Severity: ${d.bottleneck_severity})
 - **Slowest / Culprit Node**: ${d.slowest_node || 'None (Balanced)'}
 - **Flow Control Paused**: ${(d.flow_control_paused * 100).toFixed(2)}% (Sent: ${d.flow_control_sent}, Recv: ${d.flow_control_recv})
 - **Network EVS Latency**: avg ${tri.network_latency_avg_ms?.toFixed(2) || 0}ms, max ${tri.network_latency_max_ms?.toFixed(2) || 0}ms
 - **InnoDB Disk Stalls**: ${tri.buffer_pool_wait_free || 0} buffer pool wait free, ${tri.log_waits || 0} log flush waits
 - **Concurrency**: ${tri.slave_threads || 1} wsrep_slave_threads, ${tri.cert_failures || 0} cert failures, ${tri.bf_aborts || 0} bf aborts
 
-Apa langkah konkret untuk menyelesaikan bottleneck ini? Apakah perlu tuning my.cnf (seperti wsrep_slave_threads, innodb_buffer_pool_size), optimasi query write, atau pemeriksaan hardware/network?`;
+What are concrete steps to resolve this bottleneck? Is my.cnf tuning required (such as wsrep_slave_threads, innodb_buffer_pool_size), write query optimization, or hardware/network inspection?`;
 
       promptInput.value = promptTemplate;
       promptInput.focus();
       promptInput.setSelectionRange(promptInput.value.length, promptInput.value.length);
-      showNativeAlert('Ringkasan diagnosa cluster telah dimasukkan ke kotak Copilot. Silakan klik Send untuk rekomendasi tuning.', 'Copilot Siap');
+      showNativeAlert('Cluster diagnostic summary inserted into Copilot. Click Send for tuning recommendations.', 'Copilot Ready');
     }
 
     function switchSessionToNode(addr) {
@@ -6998,7 +7020,7 @@ Apa langkah konkret untuk menyelesaikan bottleneck ini? Apakah perlu tuning my.c
         if (hostInput) hostInput.value = host;
         if (portInput) portInput.value = port;
         if (nameInput) nameInput.value = `${activeConnection ? activeConnection.name : 'Cluster'} (${host})`;
-        showNativeAlert(`Modal koneksi telah diisi otomatis dengan host node ${host}:${port}. Masukkan kata sandi jika diperlukan lalu klik Connect.`, 'Ganti Sesi Node');
+        showNativeAlert(`Connection modal auto-filled with node host ${host}:${port}. Enter password if required and click Connect.`, 'Switch Node Session');
       }, 100);
     }
 
@@ -7167,24 +7189,24 @@ Apa langkah konkret untuk menyelesaikan bottleneck ini? Apakah perlu tuning my.c
                 <div class="space-y-3 max-w-4xl text-xs">
                   <div>
                     <div class="font-bold text-white text-[12px] flex items-center space-x-2">
-                      <span>📖 Maksud Variabel &amp; Fungsi</span>
+                      <span>📖 Variable Purpose &amp; Function</span>
                       <span class="text-slate-400 font-normal font-mono text-[11px]">(${escapeHtml(v.scope || 'Global')})</span>
                     </div>
-                    <div class="text-slate-300 mt-1 leading-relaxed">${escapeHtml(v.description || 'Tidak ada deskripsi tersedia.')}</div>
+                    <div class="text-slate-300 mt-1 leading-relaxed">${escapeHtml(v.description || 'No description available.')}</div>
                   </div>
 
                   <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
                     <div class="p-3 rounded bg-amber-950/20 border border-amber-800/40 text-amber-200 space-y-1">
                       <div class="font-semibold text-xs flex items-center space-x-1">
                         <span>🔻</span>
-                        <span>Dampak Jika Terlalu Rendah</span>
+                        <span>Impact If Too Low</span>
                       </div>
                       <div class="text-[11px] text-amber-300/90 leading-relaxed">${escapeHtml(v.impact_low || '-')}</div>
                     </div>
                     <div class="p-3 rounded bg-rose-950/20 border border-rose-800/40 text-rose-200 space-y-1">
                       <div class="font-semibold text-xs flex items-center space-x-1">
                         <span>🔺</span>
-                        <span>Dampak Jika Terlalu Tinggi</span>
+                        <span>Impact If Too High</span>
                       </div>
                       <div class="text-[11px] text-rose-300/90 leading-relaxed">${escapeHtml(v.impact_high || '-')}</div>
                     </div>
@@ -7193,10 +7215,10 @@ Apa langkah konkret untuk menyelesaikan bottleneck ini? Apakah perlu tuning my.c
                   <div class="p-3 rounded bg-emerald-950/20 border border-emerald-800/40 text-emerald-200 space-y-1">
                     <div class="font-semibold text-xs flex items-center space-x-1">
                       <span>🎯</span>
-                      <span>Rekomendasi Baseline / Rumus</span>
+                      <span>Baseline Recommendation / Formula</span>
                     </div>
                     <div class="text-[11px] text-emerald-300/90 leading-relaxed">${escapeHtml(v.recommendation || '-')}</div>
-                    ${v.suggested_value ? `<div class="text-[11px] font-mono text-white pt-0.5">Nilai Anjuran: <strong class="text-emerald-400">${escapeHtml(v.suggested_value)}</strong></div>` : ''}
+                    ${v.suggested_value ? `<div class="text-[11px] font-mono text-white pt-0.5">Recommended Value: <strong class="text-emerald-400">${escapeHtml(v.suggested_value)}</strong></div>` : ''}
                   </div>
 
                   <div class="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800">
@@ -7210,7 +7232,7 @@ Apa langkah konkret untuk menyelesaikan bottleneck ini? Apakah perlu tuning my.c
                     </div>
                     <div>
                       <button onclick="askCopilotAboutVariable('${escapeHtml(v.name)}', '${escapeHtml(v.value)}', '${escapeHtml(v.description || '')}')" class="px-2.5 py-1 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 rounded text-xs flex items-center space-x-1">
-                        <span>✨ Konsultasikan Variabel Ini ke Copilot</span>
+                        <span>✨ Consult This Variable with Copilot</span>
                       </button>
                     </div>
                   </div>
@@ -7236,17 +7258,17 @@ Apa langkah konkret untuk menyelesaikan bottleneck ini? Apakah perlu tuning my.c
       const promptInput = document.getElementById('ai-prompt-input');
       if (!promptInput) return;
 
-      const promptTemplate = `Tolong jelaskan secara mendalam tentang parameter database "${varName}" (nilai aktif saat ini: "${currVal}"):
+      const promptTemplate = `Please explain database parameter "${varName}" in depth (current active value: "${currVal}"):
 
-1. Apa fungsi dan peran utama variabel ini dalam arsitektur database?
-2. Bagaimana dampaknya jika nilai diset terlalu rendah vs terlalu tinggi (trade-off memori, disk I/O, latensi, dan konkurensi)?
-3. Apa rekomendasi nilai atau formula optimal untuk server produksi?
-4. Apakah variabel ini bersifat dynamic (bisa diubah via SET GLOBAL) atau static (harus restart mysqld dan edit my.cnf)?`;
+1. What is the primary purpose and role of this variable in database architecture?
+2. What are the impacts if set too low vs too high (trade-offs between memory, disk I/O, latency, and concurrency)?
+3. What is the recommended optimal value or formula for production servers?
+4. Is this variable dynamic (changeable via SET GLOBAL) or static (requires mysqld restart and editing my.cnf)?`;
 
       promptInput.value = promptTemplate;
       promptInput.focus();
       promptInput.setSelectionRange(promptInput.value.length, promptInput.value.length);
-      showNativeAlert(`Analisis variabel "${varName}" telah dimasukkan ke kotak Copilot. Silakan klik Send.`, 'Copilot Siap');
+      showNativeAlert(`Variable analysis for "${varName}" inserted into Copilot. Click Send to analyze.`, 'Copilot Ready');
     }
 
     // --- Performance Flight Recorder ---
@@ -7964,17 +7986,17 @@ Apa langkah konkret untuk menyelesaikan bottleneck ini? Apakah perlu tuning my.c
       const promptInput = document.getElementById('ai-prompt-input');
       if (!promptInput) return;
 
-      const template = `Query ini tertangkap saat lonjakan performa di Performance Flight Recorder (Durasi Query: ${q.time || 0}s, QPS Sistem: ${tick.qps}, Threads Running: ${tick.threads_running}):
+      const template = `This query was captured during a performance spike in Performance Flight Recorder (Query Duration: ${q.time || 0}s, System QPS: ${tick.qps}, Threads Running: ${tick.threads_running}):
 
 \`\`\`sql
 ${q.info}
 \`\`\`
 
-Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau index yang diperlukan.`;
+Please analyze what is causing this query to be slow and suggest necessary query or index optimizations.`;
 
       promptInput.value = template;
       promptInput.focus();
-      showNativeAlert('Query dan metrik lonjakan telah dimasukkan ke Copilot. Klik Send untuk analisis optimasi.', 'Copilot Siap');
+      showNativeAlert('Query and spike metrics inserted into Copilot. Click Send for optimization analysis.', 'Copilot Ready');
     }
 
     async function copyFlightQuery(btn, idx) {
@@ -8139,8 +8161,8 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       setEditorSQL(sql);
       toggleAuditDrawer(false);
       const activeTab = tabs.find(t => t.id === activeTabId);
-      if (activeTab && (activeTab.isTableViewer || activeTab.isProcesslist)) {
-        const queryTab = tabs.find(t => !t.isTableViewer && !t.isProcesslist);
+      if (activeTab && (activeTab.isTableViewer || activeTab.isProcesslist || activeTab.isCluster || activeTab.isFlightRecorder || activeTab.isVariables)) {
+        const queryTab = tabs.find(t => !t.isTableViewer && !t.isProcesslist && !t.isCluster && !t.isFlightRecorder && !t.isVariables);
         if (queryTab) switchTab(queryTab.id);
         else addNewQueryTab();
       }
@@ -13392,7 +13414,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
     async function toggleReadOnly() {
       if (!activeConnection) return;
       if (activeConnection.environment === 'Production' && activeSession && activeSession.read_only) {
-        const ok = await showNativeConfirm('Beralih ke mode Read-Write untuk sesi Production ini? Operasi modifikasi data (INSERT/UPDATE/DELETE/DDL) akan diizinkan.', 'Unlock Read-Write (Production)');
+        const ok = await showNativeConfirm('Switch to Read-Write mode for this Production session? Data modification operations (INSERT/UPDATE/DELETE/DDL) will be permitted.', 'Unlock Read-Write (Production)');
         if (!ok) return;
       }
       const res = await apiFetch(`/api/session/${activeConnection.id}/toggle-readonly`, { method: 'POST' });
@@ -13754,7 +13776,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
 
       updateChatHistoryCount();
       closeAIChatHistory();
-      showNativeAlert(`🔀 Percakapan berhasil di-fork ke sesi baru: "${forkedTitle}"`, 'Chat Forked');
+      showNativeAlert(`🔀 Conversation successfully forked to new session: "${forkedTitle}"`, 'Chat Forked');
     }
 
     function saveToInternalNotes(title, content) {
@@ -13782,7 +13804,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       switchTab(notesTab.id);
       setEditorSQL(notesTab.sql);
       setNotesTabMode('preview');
-      showNativeAlert('📝 Catatan berhasil disimpan ke Notes.md!', 'Internal Notes');
+      showNativeAlert('📝 Notes saved to Notes.md successfully!', 'Internal Notes');
     }
 
     function toggleAIMaximize() {

@@ -115,11 +115,11 @@ func main() {
 	fmt.Printf("\n🦊 SqlFox %s Database Manager is running!\n", Version)
 	fmt.Printf("   ➜  Local:       %s\n", localURL)
 	if lanIP != "" {
-		fmt.Printf("   ➜  Network:     http://%s:%d (Buka dari Tablet/LAN)\n", lanIP, actualPort)
+		fmt.Printf("   ➜  Network:     http://%s:%d (Open from Tablet/LAN)\n", lanIP, actualPort)
 	}
-	fmt.Printf("   ➜  Master PIN:  %s  (Ketik ini saat membuka dari Tablet/HP)\n", masterPassword)
+	fmt.Printf("   ➜  Master PIN:  %s  (Enter this when connecting from Tablet/Phone)\n", masterPassword)
 	if isNewPIN {
-		fmt.Printf("      (PIN baru dibuat dan disimpan di %s)\n", filepath.Join(configDir, "master.key"))
+		fmt.Printf("      (New PIN generated and saved to %s)\n", filepath.Join(configDir, "master.key"))
 	}
 	fmt.Printf("   ➜  Vault:       %s\n", dbPath)
 	fmt.Printf("   ➜  Backups:     %s\n\n", backupDir)
