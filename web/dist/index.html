@@ -5801,6 +5801,10 @@
     }
 
     function switchTab(tabId) {
+      if (tabId !== activeTabId) {
+        selectedRowIndices.clear();
+        updateSelectedRowsUI();
+      }
       const curr = tabs.find(t => t.id === activeTabId);
       if (curr && !curr.isTableViewer && !curr.isProcesslist && !curr.isCluster && !curr.isFlightRecorder && !curr.isVariables) {
         curr.sql = cmEditor ? cmEditor.getValue() : (document.getElementById('sql-editor-textarea') || {}).value || '';
@@ -5831,6 +5835,8 @@
       tabs = tabs.filter(t => t.id !== tabId);
       if (activeTabId === tabId) {
         activeTabId = tabs[0].id;
+        selectedRowIndices.clear();
+        updateSelectedRowsUI();
       }
       renderTabs();
       const activeTab = tabs.find(t => t.id === activeTabId);
@@ -9587,6 +9593,8 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
             activeTab.sortCol = '';
             activeTab.sortDir = '';
           }
+          selectedRowIndices.clear();
+          updateSelectedRowsUI();
           renderGridResults(data.columns, data.rows, null, detectedTable, detectedDB);
           document.getElementById('grid-result-stats').textContent = `${data.row_count} rows (${data.execution_ms}ms)`;
           if (/^\s*(CREATE|ALTER|DROP|RENAME)\b/i.test(sql) && activeConnection) {
@@ -10975,6 +10983,8 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
         stagedEdits.clear();
         updateStagedEditsUI();
         activeEditCell = null;
+        selectedRowIndices.clear();
+        updateSelectedRowsUI();
 
         const filter = (activeTab && activeTab.appliedFilter) || '';
         const sortCol = (activeTab && activeTab.sortCol) || '';
@@ -11937,7 +11947,11 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
     function updateSelectedRowsUI() {
       const btn = document.getElementById('btn-grid-delete-selected');
       const countSpan = document.getElementById('grid-selected-count');
+      const selectAll = document.getElementById('grid-select-all');
       const count = selectedRowIndices.size;
+      if (selectAll && count === 0) {
+        selectAll.checked = false;
+      }
       if (countSpan) countSpan.textContent = count;
       if (btn) {
         if (count > 0) {
