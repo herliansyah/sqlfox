@@ -291,3 +291,31 @@ func TestDocumentationLinkEmbedded(t *testing.T) {
 		}
 	}
 }
+
+func TestERDCanvasPrimaryAndForeignKeyEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	expectedSnippets := []string{
+		"c => c.is_primary_key || c.key === 'PRI'",
+		"erdRenderCards()",
+		"erdRenderLines()",
+	}
+
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(content, snippet) {
+			t.Errorf("expected index.html to contain %q for ERD canvas, but was missing", snippet)
+		}
+	}
+}
+
