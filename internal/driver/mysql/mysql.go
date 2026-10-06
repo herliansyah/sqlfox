@@ -256,9 +256,12 @@ func (s *MySQLSession) InspectSchema(ctx context.Context, dbName string) (*drive
 		}
 
 		tbl := driver.TableMetadata{
-			Name:     name,
-			Type:     tableType,
-			RowCount: rowCount,
+			Name:        name,
+			Type:        tableType,
+			RowCount:    rowCount,
+			Columns:     []driver.ColumnMetadata{},
+			Indexes:     []driver.IndexMetadata{},
+			ForeignKeys: []driver.ForeignKeyMetadata{},
 		}
 		tables = append(tables, tbl)
 		tableIndexMap[name] = len(tables) - 1
@@ -360,6 +363,62 @@ func (s *MySQLSession) InspectSchema(ctx context.Context, dbName string) (*drive
 			}
 		}
 		trigRows.Close()
+	}
+
+	// 5. Fetch Foreign Keys
+	// ponytail: introspect foreign key constraints via KEY_COLUMN_USAGE & REFERENTIAL_CONSTRAINTS
+	fkQuery := `
+	SELECT 
+		kcu.CONSTRAINT_NAME,
+		kcu.TABLE_NAME,
+		kcu.COLUMN_NAME,
+		kcu.REFERENCED_TABLE_NAME,
+		kcu.REFERENCED_COLUMN_NAME,
+		IFNULL(rc.UPDATE_RULE, ''),
+		IFNULL(rc.DELETE_RULE, '')
+	FROM information_schema.KEY_COLUMN_USAGE kcu
+	LEFT JOIN information_schema.REFERENTIAL_CONSTRAINTS rc
+		ON rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
+		AND rc.CONSTRAINT_SCHEMA = kcu.TABLE_SCHEMA
+	WHERE kcu.TABLE_SCHEMA = ?
+		AND kcu.REFERENCED_TABLE_NAME IS NOT NULL
+	ORDER BY kcu.TABLE_NAME, kcu.ORDINAL_POSITION;
+	`
+	fkRows, err := s.db.QueryContext(ctx, fkQuery, dbName)
+	if err != nil {
+		fkFallback := `
+		SELECT 
+			CONSTRAINT_NAME,
+			TABLE_NAME,
+			COLUMN_NAME,
+			REFERENCED_TABLE_NAME,
+			REFERENCED_COLUMN_NAME,
+			'',
+			''
+		FROM information_schema.KEY_COLUMN_USAGE
+		WHERE TABLE_SCHEMA = ?
+			AND REFERENCED_TABLE_NAME IS NOT NULL
+		ORDER BY TABLE_NAME, ORDINAL_POSITION;
+		`
+		fkRows, err = s.db.QueryContext(ctx, fkFallback, dbName)
+	}
+	if err == nil {
+		for fkRows.Next() {
+			var cName, tblName, colName, refTbl, refCol, onUpdate, onDelete string
+			if err := fkRows.Scan(&cName, &tblName, &colName, &refTbl, &refCol, &onUpdate, &onDelete); err == nil {
+				if idx, ok := tableIndexMap[tblName]; ok {
+					tables[idx].ForeignKeys = append(tables[idx].ForeignKeys, driver.ForeignKeyMetadata{
+						Name:             cName,
+						Column:           colName,
+						ReferencedTable:  refTbl,
+						ReferencedColumn: refCol,
+						OnUpdate:         onUpdate,
+						OnDelete:         onDelete,
+					})
+				}
+			}
+		}
+		fkRows.Close()
 	}
 
 	return &driver.SchemaMetadata{

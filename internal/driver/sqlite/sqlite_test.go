@@ -48,6 +48,11 @@ func TestSQLiteDriver_Lifecycle(t *testing.T) {
 		name TEXT,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);
+	CREATE TABLE orders (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id INTEGER NOT NULL REFERENCES users(id),
+		amount REAL
+	);
 	CREATE INDEX idx_users_name ON users(name);
 	CREATE VIEW v_active_users AS SELECT id, email FROM users;
 	CREATE TRIGGER trg_user_insert AFTER INSERT ON users BEGIN SELECT 1; END;
@@ -63,8 +68,8 @@ func TestSQLiteDriver_Lifecycle(t *testing.T) {
 		t.Fatalf("InspectSchema failed: %v", err)
 	}
 
-	if len(schema.Tables) < 2 {
-		t.Fatalf("expected at least 2 tables/views, got %d", len(schema.Tables))
+	if len(schema.Tables) < 3 {
+		t.Fatalf("expected at least 3 tables/views, got %d", len(schema.Tables))
 	}
 
 	var foundView bool
@@ -84,15 +89,36 @@ func TestSQLiteDriver_Lifecycle(t *testing.T) {
 		t.Fatalf("unexpected trigger metadata: %+v", schema.Triggers[0])
 	}
 
-	tbl := schema.Tables[0]
-	if tbl.Name != "users" {
-		t.Fatalf("expected table 'users', got %s", tbl.Name)
+	var usersTbl, ordersTbl *driver.TableMetadata
+	for i := range schema.Tables {
+		if schema.Tables[i].Name == "users" {
+			usersTbl = &schema.Tables[i]
+		}
+		if schema.Tables[i].Name == "orders" {
+			ordersTbl = &schema.Tables[i]
+		}
 	}
-	if len(tbl.Columns) < 4 {
-		t.Fatalf("expected at least 4 columns, got %d", len(tbl.Columns))
+	if usersTbl == nil {
+		t.Fatal("expected table 'users' in schema")
 	}
-	if len(tbl.Indexes) == 0 {
+	if len(usersTbl.Columns) < 4 {
+		t.Fatalf("expected at least 4 columns, got %d", len(usersTbl.Columns))
+	}
+	if !usersTbl.Columns[0].IsPrimaryKey {
+		t.Fatalf("expected users.id to have IsPrimaryKey=true, got false")
+	}
+	if len(usersTbl.Indexes) == 0 {
 		t.Fatal("expected idx_users_name index")
+	}
+
+	if ordersTbl == nil {
+		t.Fatal("expected table 'orders' in schema")
+	}
+	if len(ordersTbl.ForeignKeys) == 0 {
+		t.Fatal("expected orders table to have foreign keys inspected")
+	}
+	if ordersTbl.ForeignKeys[0].ReferencedTable != "users" || ordersTbl.ForeignKeys[0].Column != "user_id" {
+		t.Fatalf("unexpected foreign key metadata: %+v", ordersTbl.ForeignKeys[0])
 	}
 
 	// 4. Insert rows & QueryStream

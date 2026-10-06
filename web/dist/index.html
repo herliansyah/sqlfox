@@ -16767,7 +16767,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
       container.innerHTML = erdState.tables.map(t => {
         const pos = erdState.positions[t.name] || { x: 40, y: 40 };
         const fkCols = new Set((t.foreign_keys || []).map(fk => fk.column));
-        const pkCols = new Set((t.columns || []).filter(c => c.key === 'PRI').map(c => c.name));
+        const pkCols = new Set((t.columns || []).filter(c => c.is_primary_key || c.key === 'PRI').map(c => c.name));
         return `<div data-table="${escapeHtml(t.name)}" class="erd-card" style="position:absolute;left:${pos.x}px;top:${pos.y}px;width:220px;cursor:grab;z-index:10;background:#0f172a;border:1px solid #334155;border-radius:8px;box-shadow:0 4px 24px #0008;overflow:hidden;font-size:12px;">
           <div style="background:#1e293b;padding:6px 10px;font-weight:600;color:#7dd3fc;border-bottom:1px solid #1e3a5f;display:flex;align-items:center;justify-content:space-between;cursor:grab;">
             <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:170px;" title="${escapeHtml(t.name)}">📋 ${escapeHtml(t.name)}</span>
@@ -16793,9 +16793,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
       erdState.tables.forEach(src => {
         (src.foreign_keys || []).forEach(fk => {
           const sp = erdState.positions[src.name];
-          const dp = erdState.positions[fk.referenced_table];
+          const dst = erdState.tables.find(t => (t.name || '').toLowerCase() === (fk.referenced_table || '').toLowerCase());
+          const dp = dst ? erdState.positions[dst.name] : erdState.positions[fk.referenced_table];
           if (!sp || !dp) return;
-          const dst = erdState.tables.find(t => t.name === fk.referenced_table);
           const sh = 36 + Math.min(15, (src.columns || []).length) * 20;
           const dh = 36 + Math.min(15, (dst?.columns || []).length) * 20;
           const srcRight = sp.x + CARD_W < dp.x;
