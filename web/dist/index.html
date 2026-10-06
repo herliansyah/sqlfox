@@ -149,6 +149,16 @@
       font-weight: 700;
       text-transform: uppercase;
     }
+
+    /* Copilot overlay when maximized or widened beyond dock */
+    .ai-sidebar-overlay {
+      position: absolute !important;
+      top: 0 !important;
+      right: 0 !important;
+      bottom: 0 !important;
+      z-index: 30 !important;
+      box-shadow: -8px 0 24px -4px rgba(0, 0, 0, 0.6) !important;
+    }
     .cm-badge-kw { background: #334155; color: #94a3b8; }
     .cm-badge-tbl { background: rgba(16, 185, 129, 0.2); color: #34d399; }
     .cm-badge-col { background: rgba(56, 189, 248, 0.2); color: #38bdf8; }
@@ -157,6 +167,20 @@
     .cm-badge-snp { background: rgba(236, 72, 153, 0.2); color: #f472b6; }
     .cm-hint-label { flex: 1; }
     .cm-hint-type { margin-left: 8px; font-size: 10px; color: #64748b; }
+
+    /* Empty / No-data table layout: center text and stretch width */
+    #grid-thead th.text-center { text-align: center !important; }
+    #results-table.table-empty,
+    #results-table:has(th.w-full) {
+      width: 100% !important;
+      min-width: 100% !important;
+    }
+    #results-table.table-empty th,
+    #results-table.table-empty td,
+    #results-table:has(th.w-full) th,
+    #results-table:has(th.w-full) td {
+      text-align: center !important;
+    }
   </style>
 </head>
 <body class="bg-app-bg text-slate-100 font-sans h-screen flex flex-col overflow-hidden select-none">
@@ -384,7 +408,7 @@
   </header>
 
   <!-- Main 3-Column Work Area -->
-  <div class="flex-1 flex overflow-hidden">
+  <div class="flex-1 flex overflow-hidden relative">
 
     <!-- Left Sidebar: Session Switcher & Schema Explorer -->
     <aside id="left-sidebar" class="w-64 bg-app-surface border-r border-app-border flex flex-col flex-shrink-0 transition-all duration-200 z-10">
@@ -491,7 +515,7 @@
     </aside>
 
     <!-- Center Column: Multi-tab Workspace (Editor + Results Grid) -->
-    <main class="flex-1 flex flex-col overflow-hidden bg-app-bg min-w-0">
+    <main class="flex-1 flex flex-col overflow-hidden bg-app-bg min-w-0 relative" style="min-width: 480px;">
       
       <!-- Tabs Bar -->
       <div class="h-9 bg-app-surface border-b border-app-border flex items-center px-2 space-x-1 overflow-x-auto flex-shrink-0">
@@ -731,10 +755,10 @@
         <div id="virtual-grid-wrapper" class="flex-1 overflow-auto">
           <table id="results-table" class="border-collapse text-left font-mono text-xs w-auto">
             <thead id="grid-thead" class="sticky top-0 bg-slate-900 border-b border-app-border text-slate-400 z-10">
-              <tr><th class="p-2 pl-4">No data</th></tr>
+              <tr><th class="p-2.5 text-center text-slate-400 font-semibold w-full">No data</th></tr>
             </thead>
             <tbody id="grid-tbody" class="divide-y divide-slate-800/60 text-slate-200">
-              <tr><td class="p-8 text-center text-slate-500">Run a query or double click a table in the sidebar to view records</td></tr>
+              <tr><td class="p-12 text-center text-slate-500 w-full">Run a query or double click a table in the sidebar to view records</td></tr>
             </tbody>
           </table>
         </div>
@@ -1139,7 +1163,7 @@
       </div>
 
       <!-- Session Audit Log Drawer (Bottom Panel) -->
-      <div id="audit-drawer" class="hidden h-72 bg-slate-950 border-t border-app-border flex flex-col z-20 shadow-2xl flex-shrink-0">
+      <div id="audit-drawer" class="hidden h-72 bg-slate-950 border-t border-app-border flex flex-col z-20 shadow-2xl absolute bottom-0 left-0 right-0">
         <!-- Drawer Header -->
         <div class="h-9 bg-app-surface border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0 gap-3">
           <div class="flex items-center space-x-3 flex-1 min-w-0 mr-3">
@@ -1529,7 +1553,7 @@
     </main>
 
     <!-- Right Sidebar: AI Assistant & Privacy Firewall -->
-    <aside id="ai-sidebar" class="w-80 bg-app-surface border-l border-app-border flex flex-col flex-shrink-0 transition-all duration-200 z-10 relative select-text" style="min-width: 280px; max-width: calc(100vw - 360px);">
+    <aside id="ai-sidebar" class="w-80 bg-app-surface border-l border-app-border flex flex-col flex-shrink-0 transition-all duration-200 z-10 relative select-text" style="min-width: 280px; max-width: calc(100vw - 120px);">
       <!-- Drag Resizer Seam on Left Edge -->
       <div id="ai-sidebar-resizer" class="absolute top-0 bottom-0 -left-1.5 w-3 cursor-col-resize hover:bg-sky-500/50 active:bg-sky-500 z-20 transition-colors" title="Drag to resize Copilot sidebar"></div>
 
@@ -1554,6 +1578,7 @@
           <button onclick="toggleAISettings()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded text-[11px] transition" title="Configure AI Model & Response Style">
             ⚙️ BYOK
           </button>
+          <button onclick="toggleAISidebar(false)" class="text-slate-400 hover:text-white px-1.5 py-1 text-xs rounded hover:bg-slate-800 transition" title="Close Copilot (Ctrl+L)">✕</button>
         </div>
       </div>
 
@@ -3994,6 +4019,8 @@
 
     // --- Lifecycle Initialization ---
     window.addEventListener('DOMContentLoaded', async () => {
+      const initTable = document.getElementById('results-table');
+      if (initTable) initTable.classList.add('table-empty');
       initSidebarVisibility();
       restoreTabsState();
       initCodeMirror();
@@ -5822,6 +5849,36 @@
       return false;
     }
 
+    function clearGridToInitialState() {
+      currentColumns = [];
+      currentResults = [];
+      activeGridTable = null;
+      activeGridPKCol = null;
+      activeGridDB = '';
+      activeEditCell = null;
+      selectedRowIndices.clear();
+      updateGridEditModeUI();
+      updateStagedEditsUI();
+      updateSelectedRowsUI();
+      const table = document.getElementById('results-table');
+      if (table) {
+        table.classList.add('table-empty');
+        table.style.width = '100%';
+      }
+      const thead = document.getElementById('grid-thead');
+      if (thead) thead.innerHTML = '<tr><th class="p-2.5 text-center text-slate-400 font-semibold w-full">No data</th></tr>';
+      const tbody = document.getElementById('grid-tbody');
+      if (tbody) tbody.innerHTML = '<tr><td class="p-12 text-center text-slate-500 w-full">Run a query or double click a table in the sidebar to view records</td></tr>';
+      const stats = document.getElementById('grid-result-stats');
+      if (stats) stats.textContent = '0 rows';
+      const filterBar = document.getElementById('table-filter-bar');
+      if (filterBar) filterBar.classList.add('hidden');
+      const keysetPagination = document.getElementById('keyset-pagination');
+      if (keysetPagination) keysetPagination.classList.add('hidden');
+      const profileBtn = document.getElementById('btn-view-profile');
+      if (profileBtn) profileBtn.classList.add('hidden');
+    }
+
     function switchTab(tabId) {
       if (tabId !== activeTabId) {
         selectedRowIndices.clear();
@@ -5834,13 +5891,25 @@
       activeTabId = tabId;
       renderTabs();
       const nextTab = tabs.find(t => t.id === tabId);
-      if (nextTab && nextTab.isTableViewer && nextTab.tableName && (activeGridTable !== nextTab.tableName || currentResults.length === 0)) {
-        setTableMode(nextTab.tableMode || 'data', true);
+      if (nextTab && nextTab.isTableViewer && nextTab.tableName) {
+        if (activeGridTable !== nextTab.tableName || currentResults.length === 0) {
+          setTableMode(nextTab.tableMode || 'data', true);
+        }
+      } else if (nextTab && !nextTab.isTableViewer && nextTab.rawQueryError) {
+        renderQueryErrorBanner(nextTab.rawQueryError.sql, nextTab.rawQueryError.message);
       } else if (nextTab && !nextTab.isTableViewer && nextTab.rawQueryRows && nextTab.rawQueryCols) {
-        renderGridResults(nextTab.rawQueryCols, nextTab.rawQueryRows, null, null, nextTab.database);
+        renderGridResults(nextTab.rawQueryCols, nextTab.rawQueryRows, null, nextTab.queryTable || null, nextTab.queryDB || nextTab.database);
         if (nextTab.queryFilters && Object.keys(nextTab.queryFilters).length > 0) {
           applyQueryResultsFilter(nextTab);
         }
+        const stats = document.getElementById('grid-result-stats');
+        if (stats && nextTab.queryStats) {
+          stats.textContent = nextTab.queryStats;
+        }
+      } else if (nextTab && !nextTab.isTableViewer && !nextTab.isProcesslist && !nextTab.isCluster && !nextTab.isFlightRecorder && !nextTab.isVariables) {
+        // ponytail: Clean state isolation. Query tab with no execution results shows a clean empty grid
+        // instead of retaining previous tab's table or query results.
+        clearGridToInitialState();
       }
       saveTabsState();
     }
@@ -5856,16 +5925,11 @@
       if (tabs.length === 1) return;
       tabs = tabs.filter(t => t.id !== tabId);
       if (activeTabId === tabId) {
-        activeTabId = tabs[0].id;
-        selectedRowIndices.clear();
-        updateSelectedRowsUI();
+        switchTab(tabs[0].id);
+      } else {
+        renderTabs();
+        saveTabsState();
       }
-      renderTabs();
-      const activeTab = tabs.find(t => t.id === activeTabId);
-      if (activeTab && activeTab.isTableViewer && activeTab.tableName && (activeGridTable !== activeTab.tableName || currentResults.length === 0)) {
-        setTableMode(activeTab.tableMode || 'data', true);
-      }
-      saveTabsState();
     }
 
     // --- Processlist Manager & Lock Dependency Tree ---
@@ -9611,9 +9675,13 @@ Please analyze what is causing this query to be slow and suggest necessary query
           if (activeTab) {
             activeTab.rawQueryRows = data.rows || [];
             activeTab.rawQueryCols = data.columns || [];
+            activeTab.rawQueryError = null;
             activeTab.queryFilters = {};
             activeTab.sortCol = '';
             activeTab.sortDir = '';
+            activeTab.queryStats = `${data.row_count} rows (${data.execution_ms}ms)`;
+            activeTab.queryTable = detectedTable;
+            activeTab.queryDB = detectedDB;
           }
           selectedRowIndices.clear();
           updateSelectedRowsUI();
@@ -9623,6 +9691,13 @@ Please analyze what is causing this query to be slow and suggest necessary query
             await refreshSchema();
           }
         } else {
+          const activeTab = tabs.find(t => t.id === activeTabId);
+          if (activeTab) {
+            activeTab.rawQueryRows = null;
+            activeTab.rawQueryCols = null;
+            activeTab.rawQueryError = null;
+            activeTab.queryStats = `${data.message} (${data.execution_ms}ms)`;
+          }
           document.getElementById('grid-result-stats').textContent = `${data.message} (${data.execution_ms}ms)`;
           if (data.backup_file) {
             showNativeAlert(`Query succeeded!\nAutomated Backup Snapshot created at:\n${data.backup_file}`, 'Safety Guard Backup');
@@ -9638,6 +9713,12 @@ Please analyze what is causing this query to be slow and suggest necessary query
         }
       } catch (err) {
         setQueryRunning(false);
+        const activeTab = tabs.find(t => t.id === activeTabId);
+        if (activeTab) {
+          activeTab.rawQueryError = { sql, message: err.message };
+          activeTab.rawQueryRows = null;
+          activeTab.rawQueryCols = null;
+        }
         renderQueryErrorBanner(sql, err.message);
         const drawer = document.getElementById('audit-drawer');
         if (drawer && !drawer.classList.contains('hidden')) {
@@ -9647,6 +9728,12 @@ Please analyze what is causing this query to be slow and suggest necessary query
     }
 
     function renderQueryErrorBanner(sql, errMessage) {
+      currentColumns = [];
+      currentResults = [];
+      activeGridTable = null;
+      activeGridPKCol = null;
+      selectedRowIndices.clear();
+      updateSelectedRowsUI();
       const tbody = document.getElementById('grid-tbody');
       const thead = document.getElementById('grid-thead');
       thead.innerHTML = '<tr><th class="p-2 pl-4 text-red-400">Execution Error</th></tr>';
@@ -11071,9 +11158,20 @@ Please analyze what is causing this query to be slow and suggest necessary query
       updateSelectedRowsUI();
 
       if (!cols || cols.length === 0) {
-        thead.innerHTML = '<tr><th class="p-2 pl-4">No columns</th></tr>';
-        tbody.innerHTML = '<tr><td class="p-4 text-center text-slate-500">Zero records returned.</td></tr>';
+        const table = document.getElementById('results-table');
+        if (table) {
+          table.classList.add('table-empty');
+          table.style.width = '100%';
+        }
+        thead.innerHTML = '<tr><th class="p-2.5 text-center text-slate-400 font-semibold w-full">No data</th></tr>';
+        tbody.innerHTML = '<tr><td class="p-12 text-center text-slate-500 w-full">Zero records returned.</td></tr>';
         return;
+      }
+      const table = document.getElementById('results-table');
+      if (table) {
+        table.classList.remove('table-empty');
+        table.style.width = '';
+        table.style.minWidth = '';
       }
 
       const hasCheckbox = Boolean(activeTab && activeTab.isTableViewer);
@@ -11202,7 +11300,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
       // Render Regular Rows
       if ((!rows || rows.length === 0) && stagedDraftRows.length === 0) {
         const colSpan = hasCheckbox ? cols.length + 1 : cols.length;
-        tbody.innerHTML = `<tr><td colspan="${colSpan}" class="p-4 text-center text-slate-500">Zero rows returned.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="${colSpan}" class="p-12 text-center text-slate-500 w-full">Zero rows returned.</td></tr>`;
         return;
       }
 
@@ -13819,13 +13917,23 @@ Please analyze what is causing this query to be slow and suggest necessary query
         savedAIWidthBeforeMaximize = sidebar.style.width || (localStorage.getItem('sqlfox_copilot_width') || '380px');
         const leftSidebar = document.getElementById('left-sidebar');
         const leftWidth = (leftSidebar && !leftSidebar.classList.contains('hidden') && leftSidebar.offsetWidth > 0) ? leftSidebar.offsetWidth : 0;
-        const maxAllowed = Math.max(320, window.innerWidth - leftWidth - 460);
+        const maxAllowed = Math.max(320, window.innerWidth - leftWidth - 80);
         const targetWidth = Math.min(maxAllowed, Math.max(480, Math.floor(window.innerWidth * 0.45)));
         sidebar.style.width = targetWidth + 'px';
+        sidebar.classList.add('absolute', 'top-0', 'right-0', 'bottom-0', 'z-30', 'shadow-2xl', 'ai-sidebar-overlay');
+        sidebar.classList.remove('relative');
         if (icon) icon.textContent = '🗗';
       } else {
         const restoreWidth = savedAIWidthBeforeMaximize || localStorage.getItem('sqlfox_copilot_width') || '380px';
         sidebar.style.width = restoreWidth;
+        const widthNum = parseInt(restoreWidth, 10) || 320;
+        if (widthNum <= 380) {
+          sidebar.classList.remove('absolute', 'top-0', 'right-0', 'bottom-0', 'z-30', 'shadow-2xl', 'ai-sidebar-overlay');
+          sidebar.classList.add('relative', 'z-10');
+        } else {
+          sidebar.classList.add('absolute', 'top-0', 'right-0', 'bottom-0', 'z-30', 'shadow-2xl', 'ai-sidebar-overlay');
+          sidebar.classList.remove('relative');
+        }
         if (icon) icon.textContent = '⛶';
       }
     }
@@ -13839,6 +13947,14 @@ Please analyze what is causing this query to be slow and suggest necessary query
         const savedWidth = localStorage.getItem('sqlfox_copilot_width');
         if (savedWidth) {
           sidebar.style.width = savedWidth;
+          const widthNum = parseInt(savedWidth, 10) || 320;
+          const leftSidebar = document.getElementById('left-sidebar');
+          const leftWidth = (leftSidebar && !leftSidebar.classList.contains('hidden') && leftSidebar.offsetWidth > 0) ? leftSidebar.offsetWidth : 0;
+          const availableMain = window.innerWidth - leftWidth - widthNum;
+          if (widthNum > 380 || availableMain < 500) {
+            sidebar.classList.add('absolute', 'top-0', 'right-0', 'bottom-0', 'z-30', 'shadow-2xl', 'ai-sidebar-overlay');
+            sidebar.classList.remove('relative');
+          }
         }
       } catch (_) {}
 
@@ -13861,10 +13977,21 @@ Please analyze what is causing this query to be slow and suggest necessary query
         const delta = startX - e.clientX;
         const leftSidebar = document.getElementById('left-sidebar');
         const leftWidth = (leftSidebar && !leftSidebar.classList.contains('hidden') && leftSidebar.offsetWidth > 0) ? leftSidebar.offsetWidth : 0;
-        const minMainWidth = Math.min(460, Math.max(280, window.innerWidth - leftWidth - 300));
-        const maxAllowed = Math.max(300, window.innerWidth - leftWidth - minMainWidth);
+        const maxAllowed = Math.max(300, window.innerWidth - leftWidth - 80);
         const newWidth = Math.max(300, Math.min(maxAllowed, startWidth + delta));
         sidebar.style.width = newWidth + 'px';
+
+        // ponytail: When widened beyond standard dock width (380px) or when available space in main is cramped (<500px),
+        // transition to overlay floating mode so the center workspace is NEVER pushed or distorted.
+        const availableMain = window.innerWidth - leftWidth - newWidth;
+        if (newWidth > 380 || availableMain < 500) {
+          sidebar.classList.add('absolute', 'top-0', 'right-0', 'bottom-0', 'z-30', 'shadow-2xl', 'ai-sidebar-overlay');
+          sidebar.classList.remove('relative');
+        } else {
+          sidebar.classList.remove('absolute', 'top-0', 'right-0', 'bottom-0', 'z-30', 'shadow-2xl', 'ai-sidebar-overlay');
+          sidebar.classList.add('relative', 'z-10');
+        }
+
         isAIMaximized = false;
         const icon = document.getElementById('ai-maximize-icon');
         if (icon) icon.textContent = '⛶';
@@ -15307,8 +15434,19 @@ Please analyze what is causing this query to be slow and suggest necessary query
           const isAIVisible = aiSaved === 'true';
           const aiEl = document.getElementById('ai-sidebar');
           if (aiEl) {
-            if (isAIVisible) aiEl.classList.remove('hidden');
-            else aiEl.classList.add('hidden');
+            if (isAIVisible) {
+              aiEl.classList.remove('hidden');
+              const widthNum = parseInt(aiEl.style.width, 10) || 320;
+              const leftSidebar = document.getElementById('left-sidebar');
+              const leftWidth = (leftSidebar && !leftSidebar.classList.contains('hidden') && leftSidebar.offsetWidth > 0) ? leftSidebar.offsetWidth : 0;
+              const availableMain = window.innerWidth - leftWidth - widthNum;
+              if (widthNum > 380 || availableMain < 500) {
+                aiEl.classList.add('absolute', 'top-0', 'right-0', 'bottom-0', 'z-30', 'shadow-2xl', 'ai-sidebar-overlay');
+                aiEl.classList.remove('relative');
+              }
+            } else {
+              aiEl.classList.add('hidden');
+            }
           }
         }
       } catch (_) {}
@@ -15318,8 +15456,22 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const el = document.getElementById('ai-sidebar');
       if (!el) return;
       const willBeHidden = typeof forceState === 'boolean' ? !forceState : !el.classList.contains('hidden');
-      if (willBeHidden) el.classList.add('hidden');
-      else el.classList.remove('hidden');
+      if (willBeHidden) {
+        el.classList.add('hidden');
+      } else {
+        el.classList.remove('hidden');
+        const widthNum = parseInt(el.style.width, 10) || 320;
+        const leftSidebar = document.getElementById('left-sidebar');
+        const leftWidth = (leftSidebar && !leftSidebar.classList.contains('hidden') && leftSidebar.offsetWidth > 0) ? leftSidebar.offsetWidth : 0;
+        const availableMain = window.innerWidth - leftWidth - widthNum;
+        if (isAIMaximized || widthNum > 380 || availableMain < 500) {
+          el.classList.add('absolute', 'top-0', 'right-0', 'bottom-0', 'z-30', 'shadow-2xl', 'ai-sidebar-overlay');
+          el.classList.remove('relative');
+        } else {
+          el.classList.remove('absolute', 'top-0', 'right-0', 'bottom-0', 'z-30', 'shadow-2xl', 'ai-sidebar-overlay');
+          el.classList.add('relative', 'z-10');
+        }
+      }
 
       try {
         localStorage.setItem('sqlfox_copilot_visible', (!willBeHidden).toString());
