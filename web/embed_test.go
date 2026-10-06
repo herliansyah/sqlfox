@@ -54,12 +54,18 @@ func TestNaturalColumnSizingEmbedded(t *testing.T) {
 	expectedSnippets := []string{
 		`<table id="results-table" class="border-collapse text-left font-mono text-xs w-auto">`,
 		"min-w-[90px] max-w-md whitespace-nowrap",
+		"#results-table.table-empty",
 	}
 
 	for _, snippet := range expectedSnippets {
 		if !strings.Contains(content, snippet) {
 			t.Errorf("expected index.html to contain %q, but was missing", snippet)
 		}
+	}
+
+	// Verify global min-width: 100% is NOT applied directly to #results-table (only to empty state)
+	if strings.Contains(content, "#results-table { min-width: 100%; }") {
+		t.Errorf("expected #results-table to NOT have unconditional min-width: 100%%, allowing natural column sizing when data is present")
 	}
 }
 
@@ -167,3 +173,64 @@ func TestDatabaseStorageAndHealthInspectorEmbedded(t *testing.T) {
 		}
 	}
 }
+
+func TestCopilotAndDrawerNonPushingOverlayEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	expectedSnippets := []string{
+		"ai-sidebar-overlay",
+		"position: absolute !important;",
+		"z-index: 30 !important;",
+		`id="audit-drawer" class="hidden h-72 bg-slate-950 border-t border-app-border flex flex-col z-20 shadow-2xl absolute bottom-0 left-0 right-0"`,
+		`<main class="flex-1 flex flex-col overflow-hidden bg-app-bg min-w-0 relative" style="min-width: 480px;">`,
+		"sidebar.classList.add('absolute', 'top-0', 'right-0', 'bottom-0', 'z-30', 'shadow-2xl', 'ai-sidebar-overlay')",
+	}
+
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(content, snippet) {
+			t.Errorf("expected index.html to contain %q for non-pushing copilot overlay layout, but was missing", snippet)
+		}
+	}
+}
+
+func TestTabGridDataIsolationEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	expectedSnippets := []string{
+		"function clearGridToInitialState()",
+		"clearGridToInitialState();",
+		"activeTab.rawQueryError = null;",
+		"renderQueryErrorBanner(nextTab.rawQueryError.sql, nextTab.rawQueryError.message);",
+		"activeTab.queryStats = `${data.row_count} rows (${data.execution_ms}ms)`;",
+	}
+
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(content, snippet) {
+			t.Errorf("expected index.html to contain %q for tab grid data isolation, but was missing", snippet)
+		}
+	}
+}
+
+
