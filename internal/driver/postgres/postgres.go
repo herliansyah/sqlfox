@@ -592,34 +592,105 @@ func (s *PostgresSession) KillProcess(ctx context.Context, threadID int64, killC
 	return err
 }
 
+// GetDatabaseDiagnostics returns physical storage and metadata for all databases on PostgreSQL.
+func (s *PostgresSession) GetDatabaseDiagnostics(ctx context.Context) ([]driver.DatabaseDiagnostics, error) {
+	query := `
+		SELECT 
+			d.datname,
+			COALESCE(pg_database_size(d.datname), 0),
+			COALESCE(d.datcollate, ''),
+			COALESCE(pg_encoding_to_char(d.encoding), ''),
+			d.datistemplate
+		FROM pg_database d
+		ORDER BY 
+			CASE WHEN d.datname IN ('postgres', 'template0', 'template1') THEN 1 ELSE 0 END,
+			pg_database_size(d.datname) DESC,
+			d.datname ASC
+	`
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query postgres database diagnostics: %w", err)
+	}
+	defer rows.Close()
+
+	var result []driver.DatabaseDiagnostics
+	for rows.Next() {
+		var dd driver.DatabaseDiagnostics
+		var isTemplate bool
+		if err := rows.Scan(
+			&dd.Name,
+			&dd.TotalSize,
+			&dd.Collation,
+			&dd.Charset,
+			&isTemplate,
+		); err == nil {
+			dd.DataSize = dd.TotalSize
+			lowerName := strings.ToLower(dd.Name)
+			dd.IsSystem = isTemplate || lowerName == "postgres" || strings.HasPrefix(lowerName, "template")
+			result = append(result, dd)
+		}
+	}
+	if result == nil {
+		result = []driver.DatabaseDiagnostics{}
+	}
+	return result, nil
+}
+
 func (s *PostgresSession) GetTableDiagnostics(ctx context.Context, database, table string) ([]driver.TableDiagnostics, error) {
 	if database == "" {
 		database = s.currentSchema
 	}
-	regClass := fmt.Sprintf("%s.%s", quoteIdentifier(database), quoteIdentifier(table))
-
-	var totalSize, dataSize, indexSize int64
 	query := `
-		SELECT pg_total_relation_size($1::regclass),
-		       pg_relation_size($1::regclass),
-		       pg_indexes_size($1::regclass);
+		SELECT 
+			c.relname,
+			COALESCE(c.reltuples::bigint, 0),
+			COALESCE(pg_relation_size(c.oid), 0),
+			COALESCE(pg_indexes_size(c.oid), 0),
+			CASE WHEN pk.indrelid IS NOT NULL THEN 1 ELSE 0 END
+		FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		LEFT JOIN (
+			SELECT DISTINCT indrelid
+			FROM pg_index
+			WHERE indisprimary = true
+		) pk ON c.oid = pk.indrelid
+		WHERE n.nspname = $1 AND c.relkind IN ('r', 'p')
 	`
-	if err := s.db.QueryRowContext(ctx, query, regClass).Scan(&totalSize, &dataSize, &indexSize); err != nil {
-		return nil, fmt.Errorf("failed to get table diagnostics for %s: %w", regClass, err)
+	args := []any{database}
+	if table != "" {
+		query += " AND c.relname = $2"
+		args = append(args, table)
 	}
+	query += " ORDER BY (pg_relation_size(c.oid) + pg_indexes_size(c.oid)) DESC"
 
-	return []driver.TableDiagnostics{
-		{
-			Name:         table,
-			Engine:       "PostgreSQL Heap",
-			Rows:         0,
-			DataSize:     dataSize,
-			IndexSize:    indexSize,
-			OverheadSize: 0,
-			RowFormat:    "Dynamic",
-			Collation:    "default",
-		},
-	}, nil
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get table diagnostics: %w", err)
+	}
+	defer rows.Close()
+
+	var results []driver.TableDiagnostics
+	for rows.Next() {
+		var td driver.TableDiagnostics
+		var hasPk int
+		if err := rows.Scan(
+			&td.Name,
+			&td.Rows,
+			&td.DataSize,
+			&td.IndexSize,
+			&hasPk,
+		); err == nil {
+			td.Engine = "PostgreSQL Heap"
+			td.RowFormat = "Dynamic"
+			td.Collation = "default"
+			td.HasPrimaryKey = hasPk == 1
+			results = append(results, td)
+		}
+	}
+	if results == nil {
+		results = []driver.TableDiagnostics{}
+	}
+	return results, nil
 }
 
 func (s *PostgresSession) ExecuteMaintenance(ctx context.Context, database string, tables []string, action string) ([]driver.MaintenanceResult, error) {

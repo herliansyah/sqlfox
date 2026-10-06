@@ -306,8 +306,8 @@
             <span id="flight-recorder-timer-badge" class="hidden bg-rose-500/20 text-rose-300 text-[10px] px-1.5 py-0.5 rounded-full font-mono font-bold animate-pulse">REC 00:00</span>
           </button>
           <button id="btn-open-diagnostics" onclick="openDatabaseDiagnosticsModal(); toggleTopMonitorMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex flex-col border-t border-slate-800">
-            <span class="font-medium text-amber-400">📊 Diagnostics</span>
-            <span class="text-[10px] text-slate-400">Table storage stats & optimization</span>
+            <span class="font-medium text-amber-400">📊 Storage &amp; Health Inspector</span>
+            <span class="text-[10px] text-slate-400">Database storage, table footprints &amp; health advisor</span>
           </button>
           <button id="btn-open-audit-log" onclick="toggleAuditDrawer(); toggleTopMonitorMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex flex-col border-t border-slate-800">
             <span class="font-medium text-purple-400">📜 Audit Log</span>
@@ -429,7 +429,13 @@
       <div id="database-selector-container" class="relative p-2 border-b border-app-border bg-slate-950/60 hidden text-xs flex-shrink-0">
         <div class="flex items-center justify-between text-[10px] text-slate-400 mb-1">
           <span class="font-semibold uppercase tracking-wider">Database / Schema</span>
-          <button onclick="openCreateDatabaseModal()" class="text-app-accent hover:underline text-[11px] font-bold" title="Create New Database">+ New</button>
+          <div class="flex items-center space-x-2">
+            <button onclick="openDatabaseDiagnosticsModal()" class="text-sky-400 hover:text-sky-300 text-[10px] font-medium flex items-center space-x-0.5" title="Storage &amp; Health Inspector">
+              <span>📊</span>
+              <span>Inspect</span>
+            </button>
+            <button onclick="openCreateDatabaseModal()" class="text-app-accent hover:underline text-[11px] font-bold" title="Create New Database">+ New</button>
+          </div>
         </div>
         
         <!-- Dropdown trigger button -->
@@ -2788,90 +2794,150 @@
     </div>
   </dialog>
 
-  <!-- 18. Database Diagnostics & Storage Overhead Dialog (HTML5 <dialog>) -->
-  <dialog id="db-diagnostics-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-0 outline-none max-w-4xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm overflow-hidden">
+  <!-- 18. Database Storage & Health Inspector Dialog (HTML5 <dialog>) -->
+  <dialog id="db-diagnostics-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-0 outline-none max-w-7xl w-[95vw] backdrop:bg-black/75 backdrop:backdrop-blur-sm overflow-hidden">
     <div class="flex flex-col max-h-[88vh]">
       <!-- Header -->
       <div class="flex items-center justify-between px-5 py-3.5 bg-slate-950 border-b border-slate-800">
         <div class="flex items-center space-x-2">
           <span class="text-xl">📊</span>
           <div>
-            <h3 class="text-sm font-bold text-white">Database Storage &amp; Diagnostics</h3>
-            <p class="text-[11px] text-slate-400">Physical disk consumption, index overhead, and maintenance operations</p>
+            <div class="flex items-center space-x-2">
+              <h3 id="dbdiag-modal-title" class="text-sm font-bold text-white">Database Storage &amp; Health Inspector</h3>
+              <span id="dbdiag-breadcrumb-sep" class="text-slate-500 hidden text-xs">/</span>
+              <span id="dbdiag-breadcrumb-db" class="text-sky-400 font-mono text-xs font-semibold hidden"></span>
+            </div>
+            <p id="dbdiag-header-desc" class="text-[11px] text-slate-400">Session-wide physical disk consumption, table footprints, and health recommendations</p>
           </div>
         </div>
-        <button onclick="closeDatabaseDiagnosticsModal()" class="text-slate-400 hover:text-white text-xs">✕</button>
+        <div class="flex items-center space-x-2">
+          <button id="dbdiag-btn-back" onclick="showDbDiagDatabasesView()" class="hidden px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-sky-400 rounded text-xs font-medium flex items-center space-x-1 transition">
+            <span>←</span>
+            <span>All Databases</span>
+          </button>
+          <button onclick="closeDatabaseDiagnosticsModal()" class="text-slate-400 hover:text-white text-xs px-2 py-1">✕</button>
+        </div>
       </div>
 
       <!-- Stat Summary Cards -->
       <div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-3 bg-slate-950/40 border-b border-slate-800 text-xs">
         <div class="bg-slate-900 border border-slate-800 rounded p-2.5">
-          <span class="text-[10px] text-slate-500 uppercase font-semibold">Total Tables</span>
-          <span id="dbdiag-total-tables" class="text-base font-bold text-white block">-</span>
+          <span id="dbdiag-stat-label-1" class="text-[10px] text-slate-500 uppercase font-semibold">Total Databases</span>
+          <span id="dbdiag-stat-val-1" class="text-base font-bold text-white block">-</span>
+          <span id="dbdiag-total-tables" class="hidden">-</span>
         </div>
         <div class="bg-slate-900 border border-slate-800 rounded p-2.5">
-          <span class="text-[10px] text-slate-500 uppercase font-semibold">Total Data Size</span>
-          <span id="dbdiag-total-data" class="text-base font-bold text-sky-400 block">-</span>
+          <span id="dbdiag-stat-label-2" class="text-[10px] text-slate-500 uppercase font-semibold">Total Storage</span>
+          <span id="dbdiag-stat-val-2" class="text-base font-bold text-sky-400 block">-</span>
+          <span id="dbdiag-total-data" class="hidden">-</span>
         </div>
         <div class="bg-slate-900 border border-slate-800 rounded p-2.5">
-          <span class="text-[10px] text-slate-500 uppercase font-semibold">Total Index Size</span>
-          <span id="dbdiag-total-index" class="text-base font-bold text-indigo-400 block">-</span>
+          <span id="dbdiag-stat-label-3" class="text-[10px] text-slate-500 uppercase font-semibold">Total Tables</span>
+          <span id="dbdiag-stat-val-3" class="text-base font-bold text-indigo-400 block">-</span>
+          <span id="dbdiag-total-index" class="hidden">-</span>
         </div>
         <div class="bg-slate-900 border border-slate-800 rounded p-2.5">
-          <span class="text-[10px] text-slate-500 uppercase font-semibold">Fragmentation Overhead</span>
-          <span id="dbdiag-total-overhead" class="text-base font-bold text-amber-400 block">-</span>
+          <span id="dbdiag-stat-label-4" class="text-[10px] text-slate-500 uppercase font-semibold flex items-center space-x-1" title="Data Free: Ruang disk kosong/terbuang akibat fragmentasi setelah DELETE atau UPDATE berulang yang belum direklamasi oleh database engine"><span>Fragmentation Overhead</span><span class="cursor-help text-slate-400">ⓘ</span></span>
+          <span id="dbdiag-stat-val-4" class="text-base font-bold text-amber-400 block">-</span>
+          <span id="dbdiag-total-overhead" class="hidden">-</span>
         </div>
       </div>
 
-      <!-- Tab Navigation & Toolbar -->
-      <div class="px-4 py-2 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between text-xs">
-        <div class="flex items-center space-x-1">
-          <button id="dbdiag-tab-tables-btn" onclick="switchDbDiagTab('tables')" class="px-3 py-1 rounded text-xs font-semibold bg-app-surface text-sky-400 border border-sky-800/60">Tables Storage</button>
-          <button id="dbdiag-tab-indexes-btn" onclick="switchDbDiagTab('indexes')" class="px-3 py-1 rounded text-xs text-slate-400 hover:text-white">Redundant Indexes Scanner</button>
-        </div>
-        <div id="dbdiag-tables-toolbar" class="flex items-center space-x-2 flex-1 justify-end ml-3">
-          <div class="relative flex-1 max-w-xs flex items-center">
-            <span class="absolute left-2.5 text-slate-500 pointer-events-none text-xs">🔍</span>
-            <input type="text" id="dbdiag-search-input" oninput="onDbDiagSearchInput(this.value)" onkeydown="if(event.key==='Escape'){clearDbDiagSearch(); this.blur();}" placeholder="Filter tables by name..." class="w-full bg-slate-900 border border-slate-700 pl-8 pr-7 py-1 rounded text-xs text-slate-200 outline-none focus:border-app-accent font-mono transition">
-            <button type="button" id="dbdiag-search-clear-btn" onclick="clearDbDiagSearch()" class="hidden absolute right-2 text-slate-500 hover:text-slate-200 text-xs px-1 rounded transition cursor-pointer" title="Clear filter (Esc)">✕</button>
+      <!-- LEVEL 1: Session Storage Overview (Databases List) -->
+      <div id="dbdiag-level-databases" class="flex flex-col flex-1 overflow-hidden">
+        <!-- Toolbar Level 1 -->
+        <div class="px-4 py-2 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between text-xs">
+          <div class="flex items-center space-x-3">
+            <span class="text-slate-300 font-medium">Session Databases</span>
+            <label class="flex items-center space-x-1.5 text-slate-400 cursor-pointer select-none text-[11px]">
+              <input type="checkbox" id="dbdiag-toggle-system-dbs" onchange="onToggleSystemDbs(this.checked)" class="accent-sky-500">
+              <span>Show System Databases</span>
+            </label>
           </div>
-          <button onclick="runDbMaintenanceBatch('OPTIMIZE')" class="shrink-0 bg-sky-600 hover:bg-sky-500 text-white font-medium px-2.5 py-1 rounded text-xs transition">Optimize Selected</button>
-          <button onclick="runDbMaintenanceBatch('ANALYZE')" class="shrink-0 bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded text-xs transition">Analyze</button>
-          <button onclick="runDbMaintenanceBatch('CHECK')" class="shrink-0 bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded text-xs transition">Check</button>
+          <div class="flex items-center space-x-2 flex-1 justify-end ml-3">
+            <div class="relative flex-1 max-w-xs flex items-center">
+              <span class="absolute left-2.5 text-slate-500 pointer-events-none text-xs">🔍</span>
+              <input type="text" id="dbdiag-db-search-input" oninput="onDbDiagDbSearchInput(this.value)" placeholder="Filter databases by name..." class="w-full bg-slate-900 border border-slate-700 pl-8 pr-7 py-1 rounded text-xs text-slate-200 outline-none focus:border-app-accent font-mono transition">
+            </div>
+            <button onclick="loadAllDatabasesDiagnostics()" class="shrink-0 bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded text-xs transition" title="Refresh">↻ Refresh</button>
+          </div>
         </div>
-      </div>
 
-      <!-- Tab Content Area -->
-      <div class="p-4 flex-1 overflow-y-auto max-h-[50vh]">
-        <!-- 1. Tables Storage List -->
-        <div id="dbdiag-view-tables" class="overflow-x-auto">
+        <!-- Databases Table -->
+        <div class="p-4 flex-1 overflow-y-auto max-h-[50vh]">
           <table class="w-full text-left text-xs border-collapse">
             <thead class="bg-slate-950 text-slate-400 border-b border-slate-800 text-[11px]">
               <tr>
-                <th class="p-2 w-8"><input type="checkbox" id="dbdiag-select-all" onchange="toggleSelectAllDbDiagTables(this.checked)" class="accent-sky-500"></th>
-                <th class="p-2 font-semibold">Table</th>
-                <th class="p-2 font-semibold">Engine</th>
-                <th class="p-2 font-semibold text-right">Rows</th>
+                <th class="p-2 font-semibold">Database / Schema</th>
+                <th class="p-2 font-semibold text-right">Tables</th>
+                <th class="p-2 font-semibold text-right">Total Storage</th>
                 <th class="p-2 font-semibold text-right">Data Size</th>
                 <th class="p-2 font-semibold text-right">Index Size</th>
-                <th class="p-2 font-semibold text-right">Overhead</th>
+                <th class="p-2 font-semibold text-right" title="Data Free: Ruang kosong terfragmentasi dalam file database yang bisa direklamasi via OPTIMIZE/VACUUM">Overhead (Free Space) ⓘ</th>
+                <th class="p-2 font-semibold">Collation</th>
                 <th class="p-2 font-semibold text-center">Action</th>
               </tr>
             </thead>
-            <tbody id="dbdiag-tables-tbody" class="divide-y divide-slate-800/60 font-mono">
+            <tbody id="dbdiag-databases-tbody" class="divide-y divide-slate-800/60 font-mono">
               <!-- Dynamically populated -->
             </tbody>
           </table>
         </div>
+      </div>
 
-        <!-- 2. Redundant Indexes Scanner -->
-        <div id="dbdiag-view-indexes" class="hidden space-y-3">
-          <div class="flex items-center justify-between text-xs">
-            <span class="text-slate-400">Static schema check for duplicate, shadowed left-prefix, and redundant PK indexes.</span>
-            <button onclick="scanDatabaseRedundantIndexes()" class="bg-sky-600 hover:bg-sky-500 text-white font-semibold px-3 py-1 rounded text-xs transition">Scan Database</button>
+      <!-- LEVEL 2: Database Detail (Tables Storage & Health Grid + Redundant Indexes) -->
+      <div id="dbdiag-level-tables" class="hidden flex flex-col flex-1 overflow-hidden">
+        <!-- Tab Navigation & Toolbar Level 2 -->
+        <div class="px-4 py-2 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between text-xs">
+          <div class="flex items-center space-x-1">
+            <button id="dbdiag-tab-tables-btn" onclick="switchDbDiagTab('tables')" class="px-3 py-1 rounded text-xs font-semibold bg-app-surface text-sky-400 border border-sky-800/60">Tables Storage &amp; Health</button>
+            <button id="dbdiag-tab-indexes-btn" onclick="switchDbDiagTab('indexes')" class="px-3 py-1 rounded text-xs text-slate-400 hover:text-white">Redundant Indexes Scanner</button>
           </div>
-          <div id="dbdiag-indexes-container" class="space-y-2 font-mono text-xs">
-            <div class="text-slate-500 italic p-4 text-center">Click 'Scan Database' to analyze index hierarchies.</div>
+          <div id="dbdiag-tables-toolbar" class="flex items-center space-x-2 flex-1 justify-end ml-3">
+            <div class="relative flex-1 max-w-xs flex items-center">
+              <span class="absolute left-2.5 text-slate-500 pointer-events-none text-xs">🔍</span>
+              <input type="text" id="dbdiag-search-input" oninput="onDbDiagSearchInput(this.value)" onkeydown="if(event.key==='Escape'){clearDbDiagSearch(); this.blur();}" placeholder="Filter tables by name..." class="w-full bg-slate-900 border border-slate-700 pl-8 pr-7 py-1 rounded text-xs text-slate-200 outline-none focus:border-app-accent font-mono transition">
+              <button type="button" id="dbdiag-search-clear-btn" onclick="clearDbDiagSearch()" class="hidden absolute right-2 text-slate-500 hover:text-slate-200 text-xs px-1 rounded transition cursor-pointer" title="Clear filter (Esc)">✕</button>
+            </div>
+            <button onclick="runDbMaintenanceBatch('OPTIMIZE')" class="shrink-0 bg-sky-600 hover:bg-sky-500 text-white font-medium px-2.5 py-1 rounded text-xs transition">Optimize Selected</button>
+            <button onclick="runDbMaintenanceBatch('ANALYZE')" class="shrink-0 bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded text-xs transition">Analyze</button>
+            <button onclick="runDbMaintenanceBatch('CHECK')" class="shrink-0 bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded text-xs transition">Check</button>
+          </div>
+        </div>
+
+        <!-- Tab Content Area Level 2 -->
+        <div class="p-4 flex-1 overflow-y-auto max-h-[50vh]">
+          <!-- 1. Tables Storage & Health List -->
+          <div id="dbdiag-view-tables" class="overflow-x-auto">
+            <table class="w-full text-left text-xs border-collapse">
+              <thead class="bg-slate-950 text-slate-400 border-b border-slate-800 text-[11px]">
+                <tr>
+                  <th class="p-2 w-8"><input type="checkbox" id="dbdiag-select-all" onchange="toggleSelectAllDbDiagTables(this.checked)" class="accent-sky-500"></th>
+                  <th class="p-2 font-semibold">Table</th>
+                  <th class="p-2 font-semibold">Engine</th>
+                  <th class="p-2 font-semibold text-right">Rows</th>
+                  <th class="p-2 font-semibold text-right">Total Size</th>
+                  <th class="p-2 font-semibold text-right" title="Data Free: Ruang kosong terfragmentasi dalam file tabel yang belum direklamasi (bisa dirampingkan via OPTIMIZE/VACUUM)">Overhead (Fragmentation) ⓘ</th>
+                  <th class="p-2 font-semibold">Collation</th>
+                  <th class="p-2 font-semibold">Health &amp; Recommendations</th>
+                  <th class="p-2 font-semibold text-center">Action</th>
+                </tr>
+              </thead>
+              <tbody id="dbdiag-tables-tbody" class="divide-y divide-slate-800/60 font-mono">
+                <!-- Dynamically populated -->
+              </tbody>
+            </table>
+          </div>
+
+          <!-- 2. Redundant Indexes Scanner -->
+          <div id="dbdiag-view-indexes" class="hidden space-y-3">
+            <div class="flex items-center justify-between text-xs">
+              <span class="text-slate-400">Static schema check for duplicate, shadowed left-prefix, and redundant PK indexes.</span>
+              <button onclick="scanDatabaseRedundantIndexes()" class="bg-sky-600 hover:bg-sky-500 text-white font-semibold px-3 py-1 rounded text-xs transition">Scan Database</button>
+            </div>
+            <div id="dbdiag-indexes-container" class="space-y-2 font-mono text-xs">
+              <div class="text-slate-500 italic p-4 text-center">Click 'Scan Database' to analyze index hierarchies.</div>
+            </div>
           </div>
         </div>
       </div>
@@ -4511,15 +4577,17 @@
             ${isTablesCollapsed ? '' : `
             <div class="space-y-0.5">
               ${tablesList.length === 0 ? `<div class="text-slate-600 text-[11px] px-2 py-1 italic">No tables. Click ➕ to create.</div>` :
-                tablesList.map(t => `
-                  <div style="content-visibility: auto; contain-intrinsic-size: 0 28px;" class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" onclick="openTableViewer('${escapeHtml(t.name)}')" oncontextmenu="showTableContextMenu(event, '${escapeHtml(t.name)}')">
-                    <span class="flex items-center space-x-1.5 truncate text-slate-200 group-hover:text-white flex-1 min-w-0 mr-2">
-                      <span class="text-xs flex-shrink-0">📋</span>
-                      <span class="truncate">${escapeHtml(t.name)}</span>
-                    </span>
-                    <span class="text-[10px] text-slate-500 font-mono ml-auto flex-shrink-0 text-right">${t.row_count > 0 ? t.row_count.toLocaleString() + ' r' : ''}</span>
-                  </div>
-                `).join('')
+                tablesList.map(t => {
+                  const rowTip = t.row_count > 0 ? ` (~${t.row_count.toLocaleString()} rows)` : '';
+                  return `
+                    <div style="content-visibility: auto; contain-intrinsic-size: 0 28px;" class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" onclick="openTableViewer('${escapeHtml(t.name)}')" oncontextmenu="showTableContextMenu(event, '${escapeHtml(t.name)}')" title="${escapeHtml(t.name)}${rowTip}">
+                      <span class="flex items-center space-x-1.5 truncate text-slate-200 group-hover:text-white flex-1 min-w-0">
+                        <span class="text-xs flex-shrink-0">📋</span>
+                        <span class="truncate">${escapeHtml(t.name)}</span>
+                      </span>
+                    </div>
+                  `;
+                }).join('')
               }
             </div>
             `}
@@ -4546,9 +4614,9 @@
               ${viewsList.length === 0 ? `<div class="text-slate-600 text-[11px] px-2 py-1 italic">No views. Click ➕ to create.</div>` :
                 viewsList.map(v => `
                   <div style="content-visibility: auto; contain-intrinsic-size: 0 28px;" class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" onclick="openTableViewer('${escapeHtml(v.name)}')">
-                    <span class="flex items-center space-x-1.5 truncate text-purple-300 group-hover:text-white">
-                      <span class="text-xs">👁️</span>
-                      <span class="truncate max-w-[125px]">${escapeHtml(v.name)}</span>
+                    <span class="flex items-center space-x-1.5 truncate text-purple-300 group-hover:text-white flex-1 min-w-0 mr-1" title="${escapeHtml(v.name)}">
+                      <span class="text-xs flex-shrink-0">👁️</span>
+                      <span class="truncate">${escapeHtml(v.name)}</span>
                     </span>
                     <div class="flex items-center space-x-1">
                       <button onclick="event.stopPropagation(); openCreateViewModal('${escapeHtml(v.name)}')" class="opacity-0 group-hover:opacity-100 hover:text-app-accent px-1" title="Edit View">✏️</button>
@@ -14992,6 +15060,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
         { name: 'Schema Search (Quick Open Table/Column)', shortcut: 'Ctrl+P', run: () => toggleSchemaSearch() },
         { name: 'Keyboard Shortcuts Cheat Sheet', shortcut: '?', run: () => openShortcutsModal() },
         { name: 'Query Snippets Manager', shortcut: 'Ctrl+Shift+S', run: () => openSnippetsManager() },
+        { name: 'Database Storage & Health Inspector', shortcut: '', run: () => openDatabaseDiagnosticsModal() },
         { name: 'Table Storage Diagnostics', shortcut: '', run: () => openDatabaseDiagnosticsModal() },
         { name: 'User Accounts & Privilege Matrix', shortcut: '', run: () => openPrivilegeMatrixModal() },
         { name: 'Create Database', shortcut: '', run: () => openCreateDatabaseModal() },
@@ -15025,7 +15094,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       if (name.startsWith('Schema Search')) toggleSchemaSearch();
       else if (name === 'Keyboard Shortcuts Cheat Sheet') openShortcutsModal();
       else if (name === 'Query Snippets Manager') openSnippetsManager();
-      else if (name === 'Table Storage Diagnostics') openDatabaseDiagnosticsModal();
+      else if (name === 'Database Storage & Health Inspector' || name === 'Table Storage Diagnostics') openDatabaseDiagnosticsModal();
       else if (name === 'User Accounts & Privilege Matrix') openPrivilegeMatrixModal();
       else if (name === 'Create Database') openCreateDatabaseModal();
       else if (name === 'Run Query') runActiveQuery();
@@ -15172,16 +15241,27 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       });
     }
 
-    // --- Database-Wide Diagnostics Modal Handlers ---
-    function openDatabaseDiagnosticsModal() {
+    // --- Database Storage & Health Inspector Handlers ---
+    let dbDiagAllDatabases = [];
+    let dbDiagSelectedDbName = '';
+    let dbDiagShowSystemDbs = false;
+    let dbDiagLevel = 'databases'; // 'databases' or 'tables'
+
+    function openDatabaseDiagnosticsModal(targetDb = null) {
       if (!activeConnection) {
         showNativeAlert('Please connect to a database first.', 'No Active Session');
         return;
       }
       const dlg = document.getElementById('db-diagnostics-dialog');
       if (!dlg) return;
-      switchDbDiagTab('tables');
-      loadDatabaseDiagnostics();
+
+      if (targetDb) {
+        inspectDatabaseTables(targetDb);
+      } else {
+        showDbDiagDatabasesView();
+        loadAllDatabasesDiagnostics();
+      }
+
       if (typeof dlg.showModal === 'function') dlg.showModal();
       else dlg.setAttribute('open', '');
     }
@@ -15192,6 +15272,163 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
         if (typeof dlg.close === 'function') dlg.close();
         else dlg.removeAttribute('open');
       }
+    }
+
+    function showDbDiagDatabasesView() {
+      dbDiagLevel = 'databases';
+      document.getElementById('dbdiag-level-databases')?.classList.remove('hidden');
+      document.getElementById('dbdiag-level-tables')?.classList.add('hidden');
+      document.getElementById('dbdiag-btn-back')?.classList.add('hidden');
+      document.getElementById('dbdiag-breadcrumb-sep')?.classList.add('hidden');
+      const bcDb = document.getElementById('dbdiag-breadcrumb-db');
+      if (bcDb) {
+        bcDb.classList.add('hidden');
+        bcDb.textContent = '';
+      }
+      const titleEl = document.getElementById('dbdiag-modal-title');
+      if (titleEl) titleEl.textContent = 'Database Storage & Health Inspector';
+      const descEl = document.getElementById('dbdiag-header-desc');
+      if (descEl) descEl.textContent = 'Session-wide physical disk consumption, table footprints, and health recommendations';
+
+      updateDbDiagOverviewCards();
+    }
+
+    function updateDbDiagOverviewCards() {
+      const dbs = dbDiagAllDatabases.filter(d => dbDiagShowSystemDbs || !d.is_system);
+      let totalStorage = 0;
+      let totalTables = 0;
+      let totalOverhead = 0;
+
+      dbs.forEach(d => {
+        totalStorage += (d.total_size || (d.data_size + d.index_size) || 0);
+        totalTables += (d.table_count || 0);
+        totalOverhead += (d.overhead_size || 0);
+      });
+
+      const lbl1 = document.getElementById('dbdiag-stat-label-1');
+      const val1 = document.getElementById('dbdiag-stat-val-1');
+      if (lbl1) lbl1.textContent = 'Total Databases';
+      if (val1) val1.textContent = dbs.length.toString();
+
+      const lbl2 = document.getElementById('dbdiag-stat-label-2');
+      const val2 = document.getElementById('dbdiag-stat-val-2');
+      if (lbl2) lbl2.textContent = 'Total Storage';
+      if (val2) val2.textContent = formatBytes(totalStorage);
+
+      const lbl3 = document.getElementById('dbdiag-stat-label-3');
+      const val3 = document.getElementById('dbdiag-stat-val-3');
+      if (lbl3) lbl3.textContent = 'Total Tables';
+      if (val3) val3.textContent = totalTables.toLocaleString();
+
+      const lbl4 = document.getElementById('dbdiag-stat-label-4');
+      const val4 = document.getElementById('dbdiag-stat-val-4');
+      if (lbl4) lbl4.textContent = 'Fragmentation Overhead';
+      if (val4) val4.textContent = formatBytes(totalOverhead);
+
+      const t1 = document.getElementById('dbdiag-total-tables'); if (t1) t1.textContent = totalTables.toString();
+      const t2 = document.getElementById('dbdiag-total-data'); if (t2) t2.textContent = formatBytes(totalStorage);
+      const t3 = document.getElementById('dbdiag-total-index'); if (t3) t3.textContent = '0 B';
+      const t4 = document.getElementById('dbdiag-total-overhead'); if (t4) t4.textContent = formatBytes(totalOverhead);
+    }
+
+    async function loadAllDatabasesDiagnostics() {
+      if (!activeConnection) return;
+      const tbody = document.getElementById('dbdiag-databases-tbody');
+      if (tbody) tbody.innerHTML = '<tr><td colspan="8" class="p-4 text-center text-slate-500">Inspecting database storage across session...</td></tr>';
+
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/diagnostics/databases`);
+        const list = await res.json();
+        if (!res.ok || !Array.isArray(list)) {
+          if (tbody) tbody.innerHTML = `<tr><td colspan="8" class="p-4 text-center text-red-400">Failed to load databases diagnostics</td></tr>`;
+          return;
+        }
+
+        dbDiagAllDatabases = list;
+        updateDbDiagOverviewCards();
+        renderDbDiagDatabasesRows();
+      } catch (err) {
+        if (tbody) tbody.innerHTML = `<tr><td colspan="8" class="p-4 text-center text-red-400">Error: ${escapeHtml(err.message)}</td></tr>`;
+      }
+    }
+
+    function onToggleSystemDbs(checked) {
+      dbDiagShowSystemDbs = checked;
+      updateDbDiagOverviewCards();
+      renderDbDiagDatabasesRows();
+    }
+
+    function onDbDiagDbSearchInput(val) {
+      renderDbDiagDatabasesRows((val || '').toLowerCase().trim());
+    }
+
+    function renderDbDiagDatabasesRows(filterQuery = '') {
+      const tbody = document.getElementById('dbdiag-databases-tbody');
+      if (!tbody) return;
+
+      const filtered = dbDiagAllDatabases.filter(d => {
+        if (!dbDiagShowSystemDbs && d.is_system) return false;
+        if (filterQuery && !d.name.toLowerCase().includes(filterQuery)) return false;
+        return true;
+      });
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="p-4 text-center text-slate-500">No databases match filter.</td></tr>';
+        return;
+      }
+
+      const activeDb = schemaCatalogCache?.database_name || activeConnection.database_name || '';
+
+      tbody.innerHTML = filtered.map(d => {
+        const isCurrent = d.name.toLowerCase() === activeDb.toLowerCase();
+        const totalSize = d.total_size || (d.data_size + d.index_size) || 0;
+        return `
+          <tr class="hover:bg-slate-800/40 transition">
+            <td class="p-2">
+              <div class="flex items-center space-x-1.5">
+                <span class="text-sm">🗄️</span>
+                <span class="font-bold ${isCurrent ? 'text-app-accent' : 'text-white'}">${escapeHtml(d.name)}</span>
+                ${isCurrent ? '<span class="text-[9px] bg-sky-950 text-sky-400 border border-sky-800 px-1 rounded font-mono">active</span>' : ''}
+                ${d.is_system ? '<span class="text-[9px] bg-slate-800 text-slate-400 px-1 rounded font-mono">system</span>' : ''}
+              </div>
+            </td>
+            <td class="p-2 text-right text-slate-300 font-mono">${(d.table_count || 0).toLocaleString()}</td>
+            <td class="p-2 text-right font-bold text-sky-400 font-mono">${formatBytes(totalSize)}</td>
+            <td class="p-2 text-right text-slate-300 font-mono">${formatBytes(d.data_size || 0)}</td>
+            <td class="p-2 text-right text-indigo-400 font-mono">${formatBytes(d.index_size || 0)}</td>
+            <td class="p-2 text-right font-mono ${d.overhead_size > 0 ? 'text-amber-400 font-bold' : 'text-slate-500'}">${formatBytes(d.overhead_size || 0)}</td>
+            <td class="p-2 text-slate-400 text-xs">${escapeHtml(d.collation || d.charset || '-')}</td>
+            <td class="p-2 text-center">
+              <button onclick="inspectDatabaseTables('${escapeHtml(d.name)}')" class="bg-slate-800 hover:bg-sky-600 hover:text-white text-sky-400 px-2.5 py-1 rounded text-xs font-semibold transition flex items-center space-x-1 mx-auto">
+                <span>Inspect</span>
+                <span>➔</span>
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function inspectDatabaseTables(dbName) {
+      dbDiagLevel = 'tables';
+      dbDiagSelectedDbName = dbName;
+
+      document.getElementById('dbdiag-level-databases')?.classList.add('hidden');
+      document.getElementById('dbdiag-level-tables')?.classList.remove('hidden');
+      document.getElementById('dbdiag-btn-back')?.classList.remove('hidden');
+      document.getElementById('dbdiag-breadcrumb-sep')?.classList.remove('hidden');
+      const bcDb = document.getElementById('dbdiag-breadcrumb-db');
+      if (bcDb) {
+        bcDb.classList.remove('hidden');
+        bcDb.textContent = dbName;
+      }
+      const titleEl = document.getElementById('dbdiag-modal-title');
+      if (titleEl) titleEl.textContent = 'Table Storage & Health Grid';
+      const descEl = document.getElementById('dbdiag-header-desc');
+      if (descEl) descEl.textContent = `Physical storage, row counts, collations & recommendations for "${dbName}"`;
+
+      switchDbDiagTab('tables');
+      loadDatabaseDiagnostics(dbName);
     }
 
     function switchDbDiagTab(tab) {
@@ -15216,18 +15453,19 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
       }
     }
 
-    async function loadDatabaseDiagnostics() {
+    async function loadDatabaseDiagnostics(targetDb = null) {
       if (!activeConnection) return;
-      const currentDb = schemaCatalogCache?.database_name || activeConnection.database_name || '';
+      const currentDb = targetDb || dbDiagSelectedDbName || schemaCatalogCache?.database_name || activeConnection.database_name || '';
+      dbDiagSelectedDbName = currentDb;
       const tbody = document.getElementById('dbdiag-tables-tbody');
-      tbody.innerHTML = '<tr><td colspan="8" class="p-4 text-center text-slate-500">Inspecting physical table storage...</td></tr>';
+      if (tbody) tbody.innerHTML = '<tr><td colspan="9" class="p-4 text-center text-slate-500">Inspecting table storage & health...</td></tr>';
       dbDiagSelected.clear();
 
       try {
         const res = await apiFetch(`/api/session/${activeConnection.id}/diagnostics/tables?database=${encodeURIComponent(currentDb)}`);
         const tables = await res.json();
         if (!res.ok || !Array.isArray(tables)) {
-          tbody.innerHTML = `<tr><td colspan="8" class="p-4 text-center text-red-400">Failed to load diagnostics</td></tr>`;
+          if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="p-4 text-center text-red-400">Failed to load diagnostics</td></tr>`;
           return;
         }
 
@@ -15242,35 +15480,106 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
           totalOverhead += (t.overhead_size || 0);
         });
 
-        document.getElementById('dbdiag-total-tables').textContent = tables.length.toString();
-        document.getElementById('dbdiag-total-data').textContent = formatBytes(totalData);
-        document.getElementById('dbdiag-total-index').textContent = formatBytes(totalIndex);
-        document.getElementById('dbdiag-total-overhead').textContent = formatBytes(totalOverhead);
+        const lbl1 = document.getElementById('dbdiag-stat-label-1');
+        const val1 = document.getElementById('dbdiag-stat-val-1');
+        if (lbl1) lbl1.textContent = 'DB Tables';
+        if (val1) val1.textContent = tables.length.toString();
+
+        const lbl2 = document.getElementById('dbdiag-stat-label-2');
+        const val2 = document.getElementById('dbdiag-stat-val-2');
+        if (lbl2) lbl2.textContent = 'Data Size';
+        if (val2) val2.textContent = formatBytes(totalData);
+
+        const lbl3 = document.getElementById('dbdiag-stat-label-3');
+        const val3 = document.getElementById('dbdiag-stat-val-3');
+        if (lbl3) lbl3.textContent = 'Index Size';
+        if (val3) val3.textContent = formatBytes(totalIndex);
+
+        const lbl4 = document.getElementById('dbdiag-stat-label-4');
+        const val4 = document.getElementById('dbdiag-stat-val-4');
+        if (lbl4) lbl4.textContent = 'Fragmentation Overhead';
+        if (val4) val4.textContent = formatBytes(totalOverhead);
+
+        const t1 = document.getElementById('dbdiag-total-tables'); if (t1) t1.textContent = tables.length.toString();
+        const t2 = document.getElementById('dbdiag-total-data'); if (t2) t2.textContent = formatBytes(totalData);
+        const t3 = document.getElementById('dbdiag-total-index'); if (t3) t3.textContent = formatBytes(totalIndex);
+        const t4 = document.getElementById('dbdiag-total-overhead'); if (t4) t4.textContent = formatBytes(totalOverhead);
 
         renderDbDiagTableRows(tables);
       } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="8" class="p-4 text-center text-red-400">Error: ${escapeHtml(err.message)}</td></tr>`;
+        if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="p-4 text-center text-red-400">Error: ${escapeHtml(err.message)}</td></tr>`;
       }
     }
 
     function renderDbDiagTableRows(tables) {
       const tbody = document.getElementById('dbdiag-tables-tbody');
+      if (!tbody) return;
       if (!tables || tables.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" class="p-4 text-center text-slate-500">No tables match filter.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="p-4 text-center text-slate-500">No tables match filter.</td></tr>';
         return;
       }
 
       tbody.innerHTML = tables.map(t => {
         const isChecked = dbDiagSelected.has(t.name);
+        const totalSize = (t.data_size || 0) + (t.index_size || 0);
+
+        const recommendations = [];
+        const isView = (t.engine || '').toUpperCase() === 'VIEW';
+
+        // 1. High Fragmentation
+        if (t.overhead_size > 0 && (t.overhead_size > 50 * 1024 * 1024 || (totalSize > 0 && (t.overhead_size / totalSize) > 0.20))) {
+          recommendations.push(`
+            <button onclick="runDbMaintenanceBatch('OPTIMIZE', ['${escapeHtml(t.name)}'])" class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition cursor-pointer" title="Overhead: ${formatBytes(t.overhead_size)}. Click to run OPTIMIZE">
+              <span>⚠️</span>
+              <span>Fragmented</span>
+            </button>
+          `);
+        }
+
+        // 2. Missing Primary Key
+        if (!t.has_primary_key && !isView) {
+          recommendations.push(`
+            <button onclick="openTableHealthFix('pk', '${escapeHtml(t.name)}')" class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-500/20 text-rose-300 border border-rose-500/40 hover:bg-rose-500/30 transition cursor-pointer" title="Missing primary key. Click to open ADD PRIMARY KEY fix in editor">
+              <span>⛔</span>
+              <span>No PK</span>
+            </button>
+          `);
+        }
+
+        // 3. Legacy Storage Engine
+        if ((t.engine || '').toUpperCase() === 'MYISAM') {
+          recommendations.push(`
+            <button onclick="openTableHealthFix('engine', '${escapeHtml(t.name)}')" class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition cursor-pointer" title="Non-transactional MyISAM. Click to convert to InnoDB">
+              <span>⚠️</span>
+              <span>MyISAM</span>
+            </button>
+          `);
+        }
+
+        // 4. Legacy Charset / Collation
+        if (t.collation && (t.collation.toLowerCase().startsWith('latin1') || t.collation.toLowerCase().startsWith('utf8_') || t.collation.toLowerCase().startsWith('utf8mb3'))) {
+          recommendations.push(`
+            <button onclick="openTableHealthFix('charset', '${escapeHtml(t.name)}')" class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-500/30 transition cursor-pointer" title="Legacy collation ${escapeHtml(t.collation)}. Click to convert to utf8mb4">
+              <span>ℹ️</span>
+              <span>${escapeHtml(t.collation.split('_')[0])}</span>
+            </button>
+          `);
+        }
+
+        const healthHtml = recommendations.length > 0 
+          ? `<div class="flex flex-wrap gap-1">${recommendations.join('')}</div>`
+          : `<span class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"><span>✓</span><span>Optimal</span></span>`;
+
         return `
           <tr class="hover:bg-slate-800/40 transition">
             <td class="p-2"><input type="checkbox" onchange="toggleSelectDbDiagTable('${escapeHtml(t.name)}', this.checked)" ${isChecked ? 'checked' : ''} class="accent-sky-500"></td>
             <td class="p-2 font-bold text-white">${escapeHtml(t.name)}</td>
             <td class="p-2 text-slate-400">${escapeHtml(t.engine || '-')}</td>
             <td class="p-2 text-right text-slate-300 font-mono">${Number(t.rows).toLocaleString()}</td>
-            <td class="p-2 text-right text-sky-400 font-mono">${formatBytes(t.data_size)}</td>
-            <td class="p-2 text-right text-indigo-400 font-mono">${formatBytes(t.index_size)}</td>
+            <td class="p-2 text-right text-sky-400 font-mono">${formatBytes(totalSize)}</td>
             <td class="p-2 text-right font-mono ${t.overhead_size > 0 ? 'text-amber-400 font-bold' : 'text-slate-500'}">${formatBytes(t.overhead_size)}</td>
+            <td class="p-2 text-slate-400 text-xs">${escapeHtml(t.collation || '-')}</td>
+            <td class="p-2">${healthHtml}</td>
             <td class="p-2 text-center">
               <button onclick="runDbMaintenanceBatch('OPTIMIZE', ['${escapeHtml(t.name)}'])" class="bg-slate-800 hover:bg-sky-600 hover:text-white text-slate-300 px-2 py-0.5 rounded text-[11px] transition">
                 Optimize
@@ -15279,6 +15588,33 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
           </tr>
         `;
       }).join('');
+    }
+
+    function openTableHealthFix(fixType, tableName) {
+      const currentDb = dbDiagSelectedDbName || schemaCatalogCache?.database_name || activeConnection?.database_name || '';
+      const safeTable = '`' + tableName.replace(/`/g, '``') + '`';
+      let sql = '';
+      let title = `${tableName}-fix.sql`;
+
+      if (fixType === 'pk') {
+        sql = `-- Table Health Advisor: Add Primary Key to ${safeTable}\n-- Recommendation: Replace 'id' with your desired existing or new primary key column\nALTER TABLE ${safeTable} ADD PRIMARY KEY (\`id\`);\n`;
+      } else if (fixType === 'engine') {
+        sql = `-- Table Health Advisor: Convert ${safeTable} from MyISAM to crash-safe ACID InnoDB\nALTER TABLE ${safeTable} ENGINE = InnoDB;\n`;
+      } else if (fixType === 'charset') {
+        sql = `-- Table Health Advisor: Upgrade ${safeTable} to modern full Unicode utf8mb4\nALTER TABLE ${safeTable} CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n`;
+      }
+
+      closeDatabaseDiagnosticsModal();
+
+      const newId = 'tab-' + Date.now();
+      tabs.push({
+        id: newId,
+        title: title,
+        sql: sql,
+        database: currentDb,
+        isTableViewer: false
+      });
+      switchTab(newId);
     }
 
     function onDbDiagSearchInput(val) {
@@ -15330,7 +15666,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
         showNativeAlert('Please select at least one table to perform maintenance.', 'Select Table');
         return;
       }
-      const currentDb = schemaCatalogCache?.database_name || activeConnection.database_name || '';
+      const currentDb = dbDiagSelectedDbName || schemaCatalogCache?.database_name || activeConnection.database_name || '';
       const statusEl = document.getElementById('dbdiag-status-msg');
       if (statusEl) statusEl.textContent = `Running ${action} on ${tables.length} table(s)...`;
 
@@ -15346,7 +15682,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
           return;
         }
         if (statusEl) statusEl.textContent = `✓ ${action} completed successfully on ${tables.length} table(s).`;
-        setTimeout(loadDatabaseDiagnostics, 800);
+        setTimeout(() => loadDatabaseDiagnostics(currentDb), 800);
       } catch (err) {
         showNativeAlert('Maintenance failed: ' + err.message, 'Network Error');
       }
@@ -15354,7 +15690,7 @@ Tolong analisis apa penyebab query ini lambat dan sarankan optimasi query atau i
 
     async function scanDatabaseRedundantIndexes() {
       if (!activeConnection) return;
-      const currentDb = schemaCatalogCache?.database_name || activeConnection.database_name || '';
+      const currentDb = dbDiagSelectedDbName || schemaCatalogCache?.database_name || activeConnection.database_name || '';
       const container = document.getElementById('dbdiag-indexes-container');
       container.innerHTML = '<div class="text-slate-500 italic p-4 text-center">Scanning database index definitions...</div>';
 

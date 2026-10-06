@@ -228,7 +228,23 @@ func TestAdvancedDiagnosticsAndProfiling(t *testing.T) {
 	}
 	eResp.Body.Close()
 
-	// 1. Table Diagnostics
+	// 0. Database Diagnostics (Level 1)
+	ddResp, err := client.Get(ts.URL + "/api/session/" + connRec.ID + "/diagnostics/databases")
+	if err != nil || ddResp.StatusCode != http.StatusOK {
+		t.Fatalf("get database diagnostics failed: %v", err)
+	}
+	var dbDiagRows []map[string]any
+	_ = json.NewDecoder(ddResp.Body).Decode(&dbDiagRows)
+	ddResp.Body.Close()
+
+	if len(dbDiagRows) == 0 {
+		t.Fatalf("expected at least 1 database in diagnostics, got 0")
+	}
+	if dbDiagRows[0]["table_count"].(float64) < 1 {
+		t.Fatalf("expected table_count >= 1, got %v", dbDiagRows[0]["table_count"])
+	}
+
+	// 1. Table Diagnostics (Level 2)
 	tdResp, err := client.Get(ts.URL + "/api/session/" + connRec.ID + "/diagnostics/tables")
 	if err != nil || tdResp.StatusCode != http.StatusOK {
 		t.Fatalf("get table diagnostics failed: %v", err)
@@ -239,6 +255,9 @@ func TestAdvancedDiagnosticsAndProfiling(t *testing.T) {
 
 	if len(diagRows) == 0 {
 		t.Fatalf("expected at least 1 table in diagnostics, got 0")
+	}
+	if hasPK, ok := diagRows[0]["has_primary_key"].(bool); !ok || !hasPK {
+		t.Fatalf("expected has_primary_key true for users table, got %v", diagRows[0]["has_primary_key"])
 	}
 
 	// 2. Execute Maintenance

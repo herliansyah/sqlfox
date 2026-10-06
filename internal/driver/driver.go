@@ -74,6 +74,9 @@ type Session interface {
 	// KillProcess interrupts a query or connection out-of-band.
 	KillProcess(ctx context.Context, threadID int64, killConnection bool) error
 
+	// GetDatabaseDiagnostics returns physical storage and metadata for all databases in the session.
+	GetDatabaseDiagnostics(ctx context.Context) ([]DatabaseDiagnostics, error)
+
 	// GetTableDiagnostics returns physical storage and fragmentation overhead.
 	GetTableDiagnostics(ctx context.Context, database, table string) ([]TableDiagnostics, error)
 
@@ -323,18 +326,32 @@ type ProcesslistResult struct {
 	Locks           []LockWait    `json:"locks"`
 }
 
-// TableDiagnostics contains physical storage and fragmentation metrics.
-type TableDiagnostics struct {
+// DatabaseDiagnostics contains aggregated storage and metadata for a database schema.
+type DatabaseDiagnostics struct {
 	Name         string `json:"name"`
-	Engine       string `json:"engine"`
-	Rows         int64  `json:"rows"`
+	TableCount   int64  `json:"table_count"`
 	DataSize     int64  `json:"data_size"`
 	IndexSize    int64  `json:"index_size"`
 	OverheadSize int64  `json:"overhead_size"`
-	RowFormat    string `json:"row_format"`
+	TotalSize    int64  `json:"total_size"`
+	Charset      string `json:"charset"`
 	Collation    string `json:"collation"`
-	CreatedAt    string `json:"created_at,omitempty"`
-	UpdatedAt    string `json:"updated_at,omitempty"`
+	IsSystem     bool   `json:"is_system"`
+}
+
+// TableDiagnostics contains physical storage and fragmentation metrics.
+type TableDiagnostics struct {
+	Name          string `json:"name"`
+	Engine        string `json:"engine"`
+	Rows          int64  `json:"rows"`
+	DataSize      int64  `json:"data_size"`
+	IndexSize     int64  `json:"index_size"`
+	OverheadSize  int64  `json:"overhead_size"`
+	RowFormat     string `json:"row_format"`
+	Collation     string `json:"collation"`
+	HasPrimaryKey bool   `json:"has_primary_key"`
+	CreatedAt     string `json:"created_at,omitempty"`
+	UpdatedAt     string `json:"updated_at,omitempty"`
 }
 
 // MaintenanceResult holds the output of OPTIMIZE/ANALYZE/CHECK/VACUUM operations.

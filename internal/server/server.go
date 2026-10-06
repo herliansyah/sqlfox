@@ -91,6 +91,7 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /api/session/{id}/processlist", s.handleGetProcesslist)
 	mux.HandleFunc("GET /api/session/{id}/diagnostics/cluster", s.handleGetClusterHealth)
 	mux.HandleFunc("GET /api/session/{id}/diagnostics/variables", s.handleGetServerVariables)
+	mux.HandleFunc("GET /api/session/{id}/diagnostics/databases", s.handleGetDatabaseDiagnostics)
 	mux.HandleFunc("GET /api/session/{id}/diagnostics/tables", s.handleGetTableDiagnostics)
 	mux.HandleFunc("GET /api/session/{id}/diagnostics/redundant-indexes", s.handleGetRedundantIndexes)
 	mux.HandleFunc("GET /api/session/{id}/peek", s.handlePeekForeignKey)

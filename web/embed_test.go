@@ -131,3 +131,35 @@ func TestAuditSourceAttributionEmbedded(t *testing.T) {
 	}
 }
 
+func TestDatabaseStorageAndHealthInspectorEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	expectedSnippets := []string{
+		"Database Storage &amp; Health Inspector",
+		"dbdiag-level-databases",
+		"dbdiag-level-tables",
+		"loadAllDatabasesDiagnostics",
+		"inspectDatabaseTables",
+		"openTableHealthFix",
+		"Table Health Advisor",
+		"/api/session/${activeConnection.id}/diagnostics/databases",
+		"dbdiag-toggle-system-dbs",
+	}
+
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(content, snippet) {
+			t.Errorf("expected index.html to contain %q for database storage & health inspector, but was missing", snippet)
+		}
+	}
+}

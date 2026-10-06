@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -360,6 +361,42 @@ func (s *SQLiteSession) KillProcess(ctx context.Context, threadID int64, killCon
 	return nil
 }
 
+// GetDatabaseDiagnostics returns physical storage and metadata for SQLite.
+func (s *SQLiteSession) GetDatabaseDiagnostics(ctx context.Context) ([]driver.DatabaseDiagnostics, error) {
+	var pageSize, pageCount, freelistCount int64
+	_ = s.db.QueryRowContext(ctx, "PRAGMA page_size").Scan(&pageSize)
+	_ = s.db.QueryRowContext(ctx, "PRAGMA page_count").Scan(&pageCount)
+	_ = s.db.QueryRowContext(ctx, "PRAGMA freelist_count").Scan(&freelistCount)
+
+	totalSize := pageCount * pageSize
+	freeSize := freelistCount * pageSize
+
+	schema, _ := s.InspectSchema(ctx, "main")
+	tableCount := int64(0)
+	if schema != nil {
+		tableCount = int64(len(schema.Tables))
+	}
+
+	name := "main"
+	if s.dsn != "" {
+		name = filepath.Base(s.dsn)
+	}
+
+	return []driver.DatabaseDiagnostics{
+		{
+			Name:         name,
+			TableCount:   tableCount,
+			DataSize:     totalSize - freeSize,
+			IndexSize:    0,
+			OverheadSize: freeSize,
+			TotalSize:    totalSize,
+			Charset:      "UTF-8",
+			Collation:    "BINARY",
+			IsSystem:     false,
+		},
+	}, nil
+}
+
 func (s *SQLiteSession) GetTableDiagnostics(ctx context.Context, database, table string) ([]driver.TableDiagnostics, error) {
 	var pageSize, pageCount, freelistCount int64
 	_ = s.db.QueryRowContext(ctx, "PRAGMA page_size").Scan(&pageSize)
@@ -382,15 +419,24 @@ func (s *SQLiteSession) GetTableDiagnostics(ctx context.Context, database, table
 		var rowCount int64
 		_ = s.db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM %s", quoteIdentifier(tbl.Name))).Scan(&rowCount)
 
+		hasPk := false
+		for _, col := range tbl.Columns {
+			if col.IsPrimaryKey {
+				hasPk = true
+				break
+			}
+		}
+
 		results = append(results, driver.TableDiagnostics{
-			Name:         tbl.Name,
-			Engine:       "SQLite",
-			Rows:         rowCount,
-			DataSize:     totalSize,
-			IndexSize:    0,
-			OverheadSize: freeSize,
-			RowFormat:    "Dynamic",
-			Collation:    "BINARY",
+			Name:          tbl.Name,
+			Engine:        "SQLite",
+			Rows:          rowCount,
+			DataSize:      totalSize,
+			IndexSize:     0,
+			OverheadSize:  freeSize,
+			RowFormat:     "Dynamic",
+			Collation:     "BINARY",
+			HasPrimaryKey: hasPk,
 		})
 	}
 	if results == nil {
