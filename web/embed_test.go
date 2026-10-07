@@ -337,6 +337,9 @@ func TestCrossDatabaseGridTargetSchemaPrecedenceEmbedded(t *testing.T) {
 	expectedPatterns := []string{
 		"const dbName = activeGridDB || (activeTab && activeTab.database) || '';",
 		"multiDBCatalogCache[detectedDB.toLowerCase()] = s",
+		"async function loadTableRows(tableName, targetDb = null)",
+		"const dbName = targetDb || (activeTab && activeTab.isTableViewer && activeTab.database) || activeGridDB || (activeTab && activeTab.database) || (schemaCatalogCache && schemaCatalogCache.database_name) || '';",
+		"await loadTableRows(activeGridTable, activeGridDB);",
 	}
 
 	for _, p := range expectedPatterns {
