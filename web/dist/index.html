@@ -11163,11 +11163,12 @@ Please analyze what is causing this query to be slow and suggest necessary query
       loadTableRows(activeTab.tableName);
     }
 
-    async function loadTableRows(tableName) {
+    async function loadTableRows(tableName, targetDb = null) {
       if (!activeConnection) return;
       try {
         const activeTab = tabs.find(t => t.id === activeTabId);
-        const dbName = (activeTab && activeTab.database) || (schemaCatalogCache && schemaCatalogCache.database_name) || '';
+        // ponytail: Prioritize targetDb and activeGridDB over fallback schemaCatalogCache so cross-database tables load from their own schema.
+        const dbName = targetDb || (activeTab && activeTab.isTableViewer && activeTab.database) || activeGridDB || (activeTab && activeTab.database) || (schemaCatalogCache && schemaCatalogCache.database_name) || '';
         activeGridTable = tableName;
         activeGridDB = dbName;
         stagedEdits.clear();
@@ -12240,7 +12241,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
           updateSelectedRowsUI();
           showNativeAlert(`✅ Successfully deleted ${count} row(s)!`, 'Rows Deleted');
           if (activeTab && activeTab.isTableViewer) {
-            await loadTableRows(activeGridTable);
+            await loadTableRows(activeGridTable, activeGridDB);
           } else {
             await runActiveQuery();
           }
@@ -13565,8 +13566,12 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
       updateStagedEditsUI();
       showNativeAlert(`✅ Successfully applied ${totalCount} change(s)!`, 'Changes Applied');
-      if (activeGridTable) {
-        await loadTableRows(activeGridTable);
+      if (activeTab && activeTab.isTableViewer) {
+        if (activeGridTable) {
+          await loadTableRows(activeGridTable, activeGridDB);
+        }
+      } else {
+        await runActiveQuery();
       }
     }
 
@@ -13591,7 +13596,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
       updateStagedEditsUI();
 
       if (activeGridTable) {
-        renderGridResults(currentColumns, currentResults, activeGridPKCol, activeGridTable);
+        renderGridResults(currentColumns, currentResults, activeGridPKCol, activeGridTable, activeGridDB);
       }
     }
 
