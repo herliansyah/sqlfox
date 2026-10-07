@@ -319,3 +319,35 @@ func TestERDCanvasPrimaryAndForeignKeyEmbedded(t *testing.T) {
 	}
 }
 
+func TestCrossDatabaseGridTargetSchemaPrecedenceEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	// Verify that activeGridDB takes precedence over activeTab.database in cell-edit and grid operations
+	expectedPatterns := []string{
+		"const dbName = activeGridDB || (activeTab && activeTab.database) || '';",
+		"multiDBCatalogCache[detectedDB.toLowerCase()] = s",
+	}
+
+	for _, p := range expectedPatterns {
+		if !strings.Contains(content, p) {
+			t.Errorf("expected index.html to contain cross-database precedence pattern %q, but was missing", p)
+		}
+	}
+
+	// Verify old anti-pattern where stale activeTab.database took precedence over activeGridDB is gone in cell edit
+	if strings.Contains(content, "const dbName = (activeTab && activeTab.database) || activeGridDB || '';") {
+		t.Errorf("found anti-pattern 'const dbName = (activeTab && activeTab.database) || activeGridDB || '';' which breaks cross-database inline editing")
+	}
+}
+

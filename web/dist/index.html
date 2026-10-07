@@ -9758,6 +9758,12 @@ Please analyze what is causing this query to be slow and suggest necessary query
             activeTab.queryTable = detectedTable;
             activeTab.queryDB = detectedDB;
           }
+          if (detectedDB && activeConnection && (typeof multiDBCatalogCache === 'object') && !multiDBCatalogCache[detectedDB.toLowerCase()]) {
+            apiFetch(`/api/session/${activeConnection.id}/schema?db=${encodeURIComponent(detectedDB)}`)
+              .then(r => r.ok ? r.json() : null)
+              .then(s => { if (s && multiDBCatalogCache) multiDBCatalogCache[detectedDB.toLowerCase()] = s; })
+              .catch(() => {});
+          }
           selectedRowIndices.clear();
           updateSelectedRowsUI();
           renderGridResults(data.columns, data.rows, null, detectedTable, detectedDB);
@@ -11608,7 +11614,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
         });
       }
 
-      const dbName = (activeTab && activeTab.database) || activeGridDB || '';
+      // ponytail: Prioritize activeGridDB over activeTab.database so cross-database updates hit the correct schema.
+      const dbName = activeGridDB || (activeTab && activeTab.database) || '';
 
       if (gridEditMode === 'auto') {
         if (gridConfirmSave) {
@@ -11982,7 +11989,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
 
       const activeTab = tabs.find(t => t.id === activeTabId);
-      const dbName = (activeTab && activeTab.database) || activeGridDB || '';
+      // ponytail: Prioritize activeGridDB over activeTab.database so cross-database inline edits save to the correct schema.
+      const dbName = activeGridDB || (activeTab && activeTab.database) || '';
 
       const pkIdx = pkCol ? currentColumns.findIndex(c => (c.name || '').toLowerCase() === pkCol.toLowerCase()) : -1;
       const pkVal = pkIdx !== -1 ? currentResults[rIdx][pkIdx] : null;
@@ -12201,7 +12209,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
 
       const activeTab = tabs.find(t => t.id === activeTabId);
-      const dbName = (activeTab && activeTab.database) || activeGridDB || '';
+      const dbName = activeGridDB || (activeTab && activeTab.database) || '';
 
       const deletePayload = {
         database: dbName,
@@ -12649,7 +12657,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
         return;
       }
       const activeTab = tabs.find(t => t.id === activeTabId);
-      const dbName = (activeTab && activeTab.database) || activeGridDB || (schemaCatalogCache && schemaCatalogCache.database_name) || '';
+      const dbName = activeGridDB || (activeTab && activeTab.database) || (schemaCatalogCache && schemaCatalogCache.database_name) || '';
       let url = `/api/session/${activeConnection.id}/export-dump?schema=true&data=true`;
       if (dbName) url += `&db=${encodeURIComponent(dbName)}`;
       window.location.href = url;
@@ -12663,7 +12671,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
         return;
       }
       const activeTab = tabs.find(t => t.id === activeTabId);
-      const dbName = (activeTab && activeTab.database) || activeGridDB || '';
+      const dbName = activeGridDB || (activeTab && activeTab.database) || '';
       let url = `/api/session/${activeConnection.id}/export-dump?schema=true&data=true&table=${encodeURIComponent(tbl)}`;
       if (dbName) url += `&db=${encodeURIComponent(dbName)}`;
       window.location.href = url;
@@ -12691,7 +12699,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const ddl = ddlCheckbox ? ddlCheckbox.checked : true;
 
       const activeTab = tabs.find(t => t.id === activeTabId);
-      const dbName = (activeTab && activeTab.database) || activeGridDB || '';
+      const dbName = activeGridDB || (activeTab && activeTab.database) || '';
 
       let url = `/api/session/${activeConnection.id}/export-smart-seed?limit=${limit}&ddl=${ddl}`;
       if (dbName) url += `&db=${encodeURIComponent(dbName)}`;
@@ -12762,7 +12770,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
       formData.append('file', selectedRunSQLFile);
 
       const activeTab = tabs.find(t => t.id === activeTabId);
-      const dbName = (activeTab && activeTab.database) || activeGridDB || '';
+      const dbName = activeGridDB || (activeTab && activeTab.database) || '';
 
       try {
         let url = `/api/session/${activeConnection.id}/run-sql-script?stop_on_error=${stopOnError}`;
@@ -13496,7 +13504,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
 
       const activeTab = tabs.find(t => t.id === activeTabId);
-      const dbName = (activeTab && activeTab.database) || activeGridDB || '';
+      // ponytail: Prioritize activeGridDB over activeTab.database so staged edits commit to the table's schema.
+      const dbName = activeGridDB || (activeTab && activeTab.database) || '';
 
       // 1. Process any draft rows
       if (stagedDraftRows.length > 0) {
