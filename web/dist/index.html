@@ -8045,6 +8045,9 @@ What are concrete steps to resolve this bottleneck? Is my.cnf tuning required (s
         queries = [];
       }
 
+      // Filter out system threads or empty statements (defense-in-depth for historical recordings)
+      queries = queries.filter(q => q && q.info && q.info.trim() !== '' && q.user !== 'system user' && q.user !== 'event_scheduler');
+
       currentFlightQueries = queries;
 
       if (countEl) countEl.textContent = `${queries.length} active queries`;

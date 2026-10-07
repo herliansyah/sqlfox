@@ -1649,11 +1649,14 @@ func (s *MySQLSession) SampleFlightMetrics(ctx context.Context) (*driver.FlightM
 		}
 	}
 
-	// 2. Adaptive Correlated Queries: fetch active non-idle threads (Top 5)
+	// 2. Adaptive Correlated Queries: fetch active non-idle queries with non-empty SQL (Top 5)
+	// ponytail: Filter out background daemons and empty statements so flight recorder correlates actual SQL spikes.
 	qRows, qErr := s.db.QueryContext(ctx, `
 		SELECT ID, USER, HOST, IFNULL(DB, ''), COMMAND, TIME, IFNULL(STATE, ''), IFNULL(INFO, '')
 		FROM information_schema.PROCESSLIST
-		WHERE COMMAND != 'Sleep' AND (TIME >= 1 OR (INFO IS NOT NULL AND INFO != ''))
+		WHERE USER NOT IN ('system user', 'event_scheduler')
+		  AND COMMAND NOT IN ('Sleep', 'Binlog Dump', 'Daemon')
+		  AND INFO IS NOT NULL AND TRIM(INFO) != ''
 		ORDER BY TIME DESC
 		LIMIT 5
 	`)

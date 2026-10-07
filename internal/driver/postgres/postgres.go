@@ -970,6 +970,7 @@ func (s *PostgresSession) SampleFlightMetrics(ctx context.Context) (*driver.Flig
 	_ = s.db.QueryRowContext(ctx, "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND state = 'active'").Scan(&activeThreads)
 
 	// Fetch active queries
+	// ponytail: Filter out empty queries/daemon tasks and order by duration descending.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT pid, COALESCE(usename, '') as u, COALESCE(client_addr::text, 'local') as h,
 		       COALESCE(datname, '') as db, COALESCE(state, '') as st,
@@ -977,6 +978,8 @@ func (s *PostgresSession) SampleFlightMetrics(ctx context.Context) (*driver.Flig
 		       COALESCE(query, '') as q
 		FROM pg_stat_activity
 		WHERE datname = current_database() AND state = 'active' AND pid != pg_backend_pid()
+		  AND query IS NOT NULL AND TRIM(query) != ''
+		ORDER BY dur DESC
 		LIMIT 5;
 	`)
 
