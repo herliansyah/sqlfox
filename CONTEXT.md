@@ -176,6 +176,22 @@ _Avoid_: Autocomplete option, hint token
 A client-side storage mechanism bound per Connection (`sqlfox_tabs_<conn_id>`) that continuously synchronizes open Query Editor tabs, SQL draft buffers, active tab focus, and Table Viewer metadata across page reloads.
 _Avoid_: Tab autosave, tab cache, session restore
 
+**Tab Context Menu**:
+A secondary-click context menu attached to workspace tabs providing granular and batch tab lifecycle actions (`Close`, `Close Others`, `Close Tabs to the Right`, `Close All`, `Duplicate Tab`, `Rename Tab`).
+_Avoid_: Tab menu, tab popup, right-click actions
+
+**Tab Close Confirmation Guard**:
+An interactive pre-closure safeguard powered by the Native Modal Dialog that intercepts single and bulk tab closing actions when dirty SQL draft buffers or active states are present, preventing accidental work loss.
+_Avoid_: Tab alert, close warning, exit prompt
+
+**Tab Duplication**:
+An action creating an immediate clone of an existing workspace tab directly adjacent to the source tab, replicating its exact SQL draft buffer or view state into a fresh tab labeled `[Title] (Copy)`.
+_Avoid_: Copy tab, clone tab, tab fork
+
+**Tab Rename**:
+An action enabling users to customize workspace tab titles for organizing complex multi-tab query workflows.
+_Avoid_: Tab title editor, change tab label
+
 
 ## Schema Management & Native Dialogs
 

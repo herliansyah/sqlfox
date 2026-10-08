@@ -421,4 +421,46 @@ func TestDeadlockCardsResponsiveGridEmbedded(t *testing.T) {
 	}
 }
 
+func TestTabContextMenuAndCloseGuardEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	expectedSnippets := []string{
+		`id="tab-context-menu"`,
+		`id="tab-ctx-btn-close"`,
+		`id="tab-ctx-btn-close-others"`,
+		`id="tab-ctx-btn-close-right"`,
+		`id="tab-ctx-btn-close-all"`,
+		`id="tab-ctx-btn-duplicate"`,
+		`id="tab-ctx-btn-rename"`,
+		`function showTabContextMenu(e, tabId)`,
+		`function closeTabContextMenu()`,
+		`async function tabContextMenuAction(action)`,
+		`async function closeTab(tabId)`,
+		`async function closeOtherTabs(keepTabId)`,
+		`async function closeTabsToTheRight(fromTabId)`,
+		`async function closeAllTabs()`,
+		`function duplicateTab(tabId)`,
+		`async function renameTab(tabId)`,
+		`function isTabDirtyOrNonEmpty(tab)`,
+		`function showNativePrompt(message, defaultValue`,
+	}
+
+	for _, s := range expectedSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain tab context menu snippet %q, but was missing", s)
+		}
+	}
+}
+
 
