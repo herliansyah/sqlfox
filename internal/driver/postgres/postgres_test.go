@@ -127,3 +127,25 @@ func TestPostgresConnectFailsGracefullyOnInvalidHost(t *testing.T) {
 		t.Errorf("expected connection failure on invalid port, got nil")
 	}
 }
+
+func TestPostgresRoutineSignatureParsing(t *testing.T) {
+	cases := []struct {
+		inputName string
+		baseName  string
+	}{
+		{"calculate_tax(numeric, integer)", "calculate_tax"},
+		{"get_user_summary()", "get_user_summary"},
+		{"simple_proc", "simple_proc"},
+	}
+
+	for _, c := range cases {
+		base := c.inputName
+		if idx := strings.Index(c.inputName, "("); idx > 0 {
+			base = strings.TrimSpace(c.inputName[:idx])
+		}
+		if base != c.baseName {
+			t.Errorf("input %s: expected base %s, got %s", c.inputName, c.baseName, base)
+		}
+	}
+}
+

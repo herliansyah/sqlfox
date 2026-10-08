@@ -674,7 +674,7 @@ func (s *MySQLSession) GetProcesslist(ctx context.Context) (*driver.ProcesslistR
 		threads = []driver.ProcessItem{}
 	}
 
-	// 3. Inspect Lock Waits (Tier 1: sys.innodb_lock_waits)
+	// 3. Inspect Lock Waits (Tier 1: sys.innodb_lock_waits, fallback: information_schema.innodb_lock_waits for MariaDB)
 	var locks []driver.LockWait
 	lockRows, lErr := s.db.QueryContext(ctx, `
 		SELECT
@@ -689,6 +689,24 @@ func (s *MySQLSession) GetProcesslist(ctx context.Context) (*driver.ProcesslistR
 			IFNULL(waiting_lock_mode, '')
 		FROM sys.innodb_lock_waits
 	`)
+	if lErr != nil {
+		// ponytail: MariaDB / MySQL without sys schema fallback to information_schema
+		lockRows, lErr = s.db.QueryContext(ctx, `
+			SELECT
+				IFNULL(r.trx_mysql_thread_id, 0),
+				IFNULL(r.trx_query, ''),
+				'',
+				IFNULL(TIMESTAMPDIFF(SECOND, r.trx_wait_started, NOW()), 0),
+				IFNULL(b.trx_mysql_thread_id, 0),
+				IFNULL(b.trx_query, ''),
+				'',
+				IFNULL(w.waiting_table_id, ''),
+				IFNULL(w.waiting_lock_mode, '')
+			FROM information_schema.innodb_lock_waits w
+			JOIN information_schema.innodb_trx r ON r.trx_id = w.requesting_trx_id
+			JOIN information_schema.innodb_trx b ON b.trx_id = w.blocking_trx_id
+		`)
+	}
 	if lErr == nil {
 		defer lockRows.Close()
 		waitingPIDs := make(map[int64]bool)
@@ -1538,8 +1556,11 @@ func (s *MySQLSession) inspectStandardReplicationOrStandalone(ctx context.Contex
 		OSLogFsyncs:        osLogFsyncs,
 	}
 
-	// Check SHOW SLAVE STATUS / SHOW REPLICA STATUS
-	slaveRows, err := s.db.QueryContext(ctx, "SHOW SLAVE STATUS")
+	// ponytail: Universal Replication Normalizer: probe SHOW REPLICA STATUS (MySQL 8.4+/9.x), fallback to SHOW SLAVE STATUS (MySQL 5.7/8.0/MariaDB)
+	slaveRows, err := s.db.QueryContext(ctx, "SHOW REPLICA STATUS")
+	if err != nil {
+		slaveRows, err = s.db.QueryContext(ctx, "SHOW SLAVE STATUS")
+	}
 	if err == nil {
 		defer slaveRows.Close()
 		cols, err := slaveRows.Columns()
@@ -1564,26 +1585,37 @@ func (s *MySQLSession) inspectStandardReplicationOrStandalone(ctx context.Contex
 					}
 				}
 
-				ioRunning := strings.EqualFold(colMap["slave_io_running"], "yes")
-				sqlRunning := strings.EqualFold(colMap["slave_sql_running"], "yes")
+				// Normalize column names across MySQL 8.4+ and legacy MySQL 5.7/8.0
+				ioRunning := strings.EqualFold(colMap["replica_io_running"], "yes") || strings.EqualFold(colMap["slave_io_running"], "yes")
+				sqlRunning := strings.EqualFold(colMap["replica_sql_running"], "yes") || strings.EqualFold(colMap["slave_sql_running"], "yes")
+				
+				sbm := colMap["seconds_behind_source"]
+				if sbm == "" {
+					sbm = colMap["seconds_behind_master"]
+				}
 				var secBehind *int64
-				if sbm, ok := colMap["seconds_behind_master"]; ok && sbm != "NULL" && sbm != "" {
+				if sbm != "" && sbm != "NULL" {
 					val, _ := strconv.ParseInt(sbm, 10, 64)
 					secBehind = &val
 				}
+
 				lastErr := colMap["last_error"]
 				if lastErr == "" {
 					lastErr = colMap["last_sql_error"]
 				}
-				masterHost := colMap["master_host"]
+
+				masterHost := colMap["source_host"]
+				if masterHost == "" {
+					masterHost = colMap["master_host"]
+				}
 
 				diagnosis := "Replication synchronized and operating normally"
 				severity := "ok"
 				if !ioRunning || !sqlRunning {
-					diagnosis = fmt.Sprintf("Replication broken (IO: %s, SQL: %s): %s", colMap["slave_io_running"], colMap["slave_sql_running"], lastErr)
+					diagnosis = fmt.Sprintf("Replication broken (IO: %t, SQL: %t): %s", ioRunning, sqlRunning, lastErr)
 					severity = "critical"
 				} else if secBehind != nil && *secBehind > 10 {
-					diagnosis = fmt.Sprintf("Replication lag behind master: %d seconds", *secBehind)
+					diagnosis = fmt.Sprintf("Replication lag behind source: %d seconds", *secBehind)
 					severity = "warning"
 				} else if bufWaitFree > 0 || logWaits > 0 {
 					diagnosis = fmt.Sprintf("InnoDB storage write stall detected (wait_free: %d, log_waits: %d)", bufWaitFree, logWaits)
@@ -1629,11 +1661,15 @@ func (s *MySQLSession) inspectStandardReplicationOrStandalone(ctx context.Contex
 	}
 
 	// Check if this instance is a Source / Master with binary logging enabled
+	// ponytail: Dual-syntax probe: SHOW BINARY LOG STATUS (MySQL 8.4+) fallback to SHOW MASTER STATUS (MySQL 5.7/8.0)
 	var binlogFile string
 	var binlogPos int64
-	_ = s.db.QueryRowContext(ctx, "SHOW MASTER STATUS").Scan(&binlogFile, &binlogPos, new(string), new(string), new(string))
+	bErr := s.db.QueryRowContext(ctx, "SHOW BINARY LOG STATUS").Scan(&binlogFile, &binlogPos, new(string), new(string), new(string))
+	if bErr != nil {
+		_ = s.db.QueryRowContext(ctx, "SHOW MASTER STATUS").Scan(&binlogFile, &binlogPos, new(string), new(string), new(string))
+	}
 	if binlogFile != "" {
-		diagnosis := "Replication Source (Master): binary logging active"
+		diagnosis := "Replication Source: binary logging active"
 		severity := "ok"
 		if bufWaitFree > 0 || logWaits > 0 {
 			diagnosis = fmt.Sprintf("InnoDB storage write stall on Source (wait_free: %d, log_waits: %d)", bufWaitFree, logWaits)

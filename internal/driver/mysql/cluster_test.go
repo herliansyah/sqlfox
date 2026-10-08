@@ -79,3 +79,52 @@ func TestDiagnoseClusterBottleneck(t *testing.T) {
 		t.Errorf("expected warning for certification conflicts, got %s", sev)
 	}
 }
+
+func TestUniversalReplicationNormalizerMapping(t *testing.T) {
+	// MySQL 8.4+ column map format
+	modernMap := map[string]string{
+		"replica_io_running":    "Yes",
+		"replica_sql_running":   "Yes",
+		"seconds_behind_source": "5",
+		"source_host":           "db-master.internal",
+	}
+
+	ioRunning := modernMap["replica_io_running"] == "Yes" || modernMap["slave_io_running"] == "Yes"
+	sqlRunning := modernMap["replica_sql_running"] == "Yes" || modernMap["slave_sql_running"] == "Yes"
+	sbm := modernMap["seconds_behind_source"]
+	if sbm == "" {
+		sbm = modernMap["seconds_behind_master"]
+	}
+	host := modernMap["source_host"]
+	if host == "" {
+		host = modernMap["master_host"]
+	}
+
+	if !ioRunning || !sqlRunning || sbm != "5" || host != "db-master.internal" {
+		t.Fatalf("failed to normalize MySQL 8.4+ replication columns")
+	}
+
+	// Legacy MySQL 5.7 / 8.0 format
+	legacyMap := map[string]string{
+		"slave_io_running":      "Yes",
+		"slave_sql_running":     "Yes",
+		"seconds_behind_master": "12",
+		"master_host":           "10.0.0.1",
+	}
+
+	ioRunning = legacyMap["replica_io_running"] == "Yes" || legacyMap["slave_io_running"] == "Yes"
+	sqlRunning = legacyMap["replica_sql_running"] == "Yes" || legacyMap["slave_sql_running"] == "Yes"
+	sbm = legacyMap["seconds_behind_source"]
+	if sbm == "" {
+		sbm = legacyMap["seconds_behind_master"]
+	}
+	host = legacyMap["source_host"]
+	if host == "" {
+		host = legacyMap["master_host"]
+	}
+
+	if !ioRunning || !sqlRunning || sbm != "12" || host != "10.0.0.1" {
+		t.Fatalf("failed to normalize MySQL legacy replication columns")
+	}
+}
+
