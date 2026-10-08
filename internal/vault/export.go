@@ -16,9 +16,10 @@ type VaultArchive struct {
 
 // ExportPayload encapsulates all vault artifacts exported into an archive.
 type ExportPayload struct {
-	Connections []*ConnectionRecord `json:"connections"`
-	Snippets    []*Snippet          `json:"snippets,omitempty"`
-	TableNotes  []*TableNote        `json:"table_notes,omitempty"`
+	Connections      []*ConnectionRecord `json:"connections"`
+	Snippets         []*Snippet          `json:"snippets,omitempty"`
+	TableNotes       []*TableNote        `json:"table_notes,omitempty"`
+	OperationalNotes []*OperationalNote  `json:"operational_notes,omitempty"`
 }
 
 // ExportVault packages all stored connections, snippets, and table notes into an encrypted archive using the provided export passphrase.
@@ -54,10 +55,17 @@ func ExportVault(v *Vault, exportPassphrase string) ([]byte, error) {
 		return nil, err
 	}
 
+	// 4. Fetch all operational notes
+	opNotes, err := v.ListAllOperationalNotes()
+	if err != nil {
+		return nil, err
+	}
+
 	payload := ExportPayload{
-		Connections: fullConnections,
-		Snippets:    snippets,
-		TableNotes:  tableNotes,
+		Connections:      fullConnections,
+		Snippets:         snippets,
+		TableNotes:       tableNotes,
+		OperationalNotes: opNotes,
 	}
 
 	plainJSON, err := json.Marshal(payload)
@@ -110,7 +118,7 @@ func ImportVault(v *Vault, archiveJSON []byte, exportPassphrase string) (int, er
 	}
 
 	var payload ExportPayload
-	if err := json.Unmarshal(plainJSON, &payload); err == nil && (len(payload.Connections) > 0 || len(payload.Snippets) > 0 || len(payload.TableNotes) > 0) {
+	if err := json.Unmarshal(plainJSON, &payload); err == nil && (len(payload.Connections) > 0 || len(payload.Snippets) > 0 || len(payload.TableNotes) > 0 || len(payload.OperationalNotes) > 0) {
 		// New structured envelope
 		count := 0
 		for _, conn := range payload.Connections {
@@ -127,6 +135,11 @@ func ImportVault(v *Vault, archiveJSON []byte, exportPassphrase string) (int, er
 		for _, note := range payload.TableNotes {
 			if err := v.SaveTableNote(note); err != nil {
 				return count, fmt.Errorf("failed to import table note for '%s': %w", note.TableName, err)
+			}
+		}
+		for _, opNote := range payload.OperationalNotes {
+			if err := v.CreateOperationalNote(opNote); err != nil {
+				return count, fmt.Errorf("failed to import operational note '%s': %w", opNote.Title, err)
 			}
 		}
 		return count, nil

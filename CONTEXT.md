@@ -138,12 +138,24 @@ _Avoid_: Duplicate chat, copy thread
 Interactive action controls attached to rendered SQL code blocks within Copilot chat messages (`Copy`, `Insert & Run`, and `Replace`) enabling direct query execution and editor manipulation.
 _Avoid_: Code buttons, snippet toolbar
 
-**Internal Notes**:
-A persistent in-memory/in-tab Markdown scratchpad (`Notes.md`) allowing developers to accumulate query explanations, execution findings, and AI insights.
-_Avoid_: Text file, memo pad, clipboard buffer
+**Operational Note**:
+A local Vault-persisted record capturing database events, query findings, and runbook rules with object tagging, reminders, and AI mention capabilities.
+_Avoid_: Memo, post-it, scratch text
+
+**Notes Inbox**:
+The centralized operational hub in SqlFox for reviewing, searching, pinning, and triaging follow-up notes across all connections.
+_Avoid_: Notes list, message center, todo drawer
+
+**Object Tag**:
+A soft-link URI reference (`db://connection/database/object`) binding an Operational Note to database entities (tables, views, connections) without server-side schema mutation.
+_Avoid_: Schema pointer, table link, entity binder
+
+**Follow-up Reminder**:
+A scheduled timestamp on an Operational Note that alerts the user via in-app notifications and desktop alerts for pending investigations.
+_Avoid_: Clock alarm, cron event, time trigger
 
 **Notes Markdown Live Preview**:
-A segmented mode toggle (`Edit` / `Preview`) within the Internal Notes tab that compiles and renders Markdown formatted text, tables, and code blocks in real time.
+A segmented mode toggle (`Edit` / `Preview`) within notes editing surfaces that compiles and renders Markdown formatted text, tables, and code blocks in real time.
 _Avoid_: Notes viewer, markdown tab
 
 **Error Healer**:
@@ -571,6 +583,10 @@ _Avoid_: In-process tunnel, custom bastion client
 - **0038**: Grid Edit Presets, Type Constraints, and PK-Less Mutations (`docs/adr/0038-grid-edit-presets-type-constraints-and-pk-less-mutations.md`)
 - **0039**: Universal Mutation Logging and Audit Source Attribution (`docs/adr/0039-universal-mutation-logging-and-audit-source-attribution.md`)
 - **0040**: Server Variable Inspector and Cluster Tuning Advisor (`docs/adr/0040-server-variable-inspector-and-cluster-tuning-advisor.md`)
+- **0041**: MySQL Enterprise Operations & Programmability Suite (`docs/adr/0041-mysql-enterprise-operations-and-programmability-suite.md`)
+- **0042**: Multi-Engine Feature Parity & Dialect Resilience (`docs/adr/0042-multi-engine-feature-parity-and-dialect-resilience.md`)
+- **0043**: Diagnostic Logger and Observability Suite (`docs/adr/0043-diagnostic-logger-and-observability-suite.md`)
+- **0044**: Unified Operational Notes Inbox and Follow-up Lifecycle (`docs/adr/0044-unified-operational-notes-inbox-and-followup-lifecycle.md`)
 
 ## Visual Schema & ERD Canvas
 

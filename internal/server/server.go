@@ -78,6 +78,16 @@ func (s *Server) routes() {
 	mux.HandleFunc("POST /api/snippets", s.handleSaveSnippet)
 	mux.HandleFunc("DELETE /api/snippets/{id}", s.handleDeleteSnippet)
 
+	// Operational Notes Inbox & Follow-up endpoints
+	mux.HandleFunc("GET /api/notes", s.handleListOperationalNotes)
+	mux.HandleFunc("POST /api/notes", s.handleCreateOperationalNote)
+	mux.HandleFunc("GET /api/notes/reminders/due", s.handleListDueReminders)
+	mux.HandleFunc("GET /api/notes/{id}", s.handleGetOperationalNote)
+	mux.HandleFunc("PUT /api/notes/{id}", s.handleUpdateOperationalNote)
+	mux.HandleFunc("DELETE /api/notes/{id}", s.handleDeleteOperationalNote)
+	mux.HandleFunc("POST /api/notes/{id}/snooze", s.handleSnoozeReminder)
+	mux.HandleFunc("POST /api/notes/{id}/resolve", s.handleResolveOperationalNote)
+
 	// Session exploration and actions
 	mux.HandleFunc("POST /api/session/connect/{id}", s.handleConnectSession)
 	mux.HandleFunc("GET /api/session/{id}/schema", s.handleGetSchema)

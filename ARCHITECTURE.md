@@ -441,7 +441,8 @@ sqlfox/
 │   │   ├── vault.go                # Connections, master password, audit log, flight recorder schema
 │   │   ├── crypto.go               # Argon2id key derivation & AES-256-GCM
 │   │   ├── snippets.go             # Parameterized SQL snippets
-│   │   ├── notes.go                # Table documentation notes
+│   │   ├── notes.go                # Table documentation notes (legacy table_notes bridge)
+│   │   ├── operational_notes.go    # Unified Operational Notes Inbox, object tagging, reminders & follow-up lifecycle
 │   │   ├── export.go               # .sqlfox-vault portable archive export/import
 │   │   └── flight_recorder.go      # Performance flight recorder sessions & tick persistence with 24h purge
 │   ├── driver/                     # Database driver abstraction
@@ -484,6 +485,7 @@ sqlfox/
 │       ├── handlers_sync.go        # Structure sync, cross-connection data transfer, row data sync
 │       ├── handlers_dba.go         # Processlist, cluster health, diagnostics, privilege matrix
 │       ├── handlers_snippets.go    # Snippet management
+│       ├── handlers_notes.go       # Operational notes inbox, alarms, snooze, resolve REST endpoints
 │       ├── handlers_import.go      # CSV upload & import endpoints
 │       └── handlers_ai.go          # AI chat & assistance streaming
 ├── web/                            # Single-file zero-build SPA embedded into binary
@@ -777,6 +779,67 @@ flowchart TD
 4. **Dialect-Specific DDL in Structure Sync**:
    - PostgreSQL does not support MySQL's monolithic `MODIFY COLUMN col type attributes` clause.
    - SqlFox generates dialect-specific DDL: for PostgreSQL, it decomposes column mutations into atomic statements (`ALTER TABLE tbl ALTER COLUMN col TYPE ...; ALTER TABLE tbl ALTER COLUMN col SET NOT NULL;`), ensuring seamless schema synchronizations across heterogeneous environments.
+
+---
+
+## 15. Unified Operational Notes Inbox & Follow-up Architecture
+
+SqlFox unifies ad-hoc table annotations, diagnostic snapshots, and developer runbooks into a persistent operational inbox with scheduled follow-up reminders.
+
+```mermaid
+flowchart TD
+    subgraph UI ["Embedded Web UI"]
+        InboxDrawer["Notes Inbox Drawer (#notes-inbox-drawer)"]
+        ComposerModal["Note Composer Dialog (#note-composer-dialog)"]
+        TableRunbook["Table Viewer [📝 Notes & Runbook]"]
+        AICopilot["AI Copilot (@ Mention Autocomplete)"]
+        AudioEngine["Web Audio API (Chime Oscillator)"]
+        PollerLoop["Background Reminder Poller (30s setInterval)"]
+    end
+
+    subgraph API ["Go REST Transport"]
+        NotesAPI["/api/notes (CRUD & Filters)"]
+        DueAPI["/api/notes/reminders/due"]
+        SnoozeAPI["/api/notes/{id}/snooze"]
+        ResolveAPI["/api/notes/{id}/resolve"]
+        SchemaBridge["/api/connections/{id}/tables/{table}/notes (Bridge)"]
+        AIHandler["/api/ai/chat (Context Injection)"]
+    end
+
+    subgraph Storage ["SQLite Vault (config.db)"]
+        OpNotesTable[("operational_notes Table")]
+        OpNotesIdx["Indexes: (status, reminder_at), (object_tag)"]
+    end
+
+    InboxDrawer <-->|GET / POST / PUT| NotesAPI
+    TableRunbook <-->|GET ?object_tag=...| NotesAPI
+    TableRunbook -.->|Backward Compatible| SchemaBridge
+    PollerLoop -->|GET| DueAPI
+    DueAPI -->|Overdue Notes| AudioEngine
+    ComposerModal -->|Snooze / Resolve| SnoozeAPI & ResolveAPI
+    AICopilot -->|Prompt with @note:...| AIHandler
+    AIHandler -->|Extract note ID / title| NotesAPI
+    NotesAPI <--> OpNotesTable
+    DueAPI <--> OpNotesTable
+    SnoozeAPI <--> OpNotesTable
+    ResolveAPI <--> OpNotesTable
+    SchemaBridge <--> OpNotesTable
+```
+
+### Key Architectural Characteristics
+
+1. **Vault Persistence (`internal/vault/operational_notes.go`)**:
+   - Stored in the encrypted SQLite vault `config.db` under the `operational_notes` table.
+   - Captures metadata (`id`, `title`, `status`, `pinned`), categorization (`tags`, `object_tag` soft-link URI `db://conn/db/table`), developer markdown notes (`notes`), raw snapshot (`snapshot` with `sql` and `ai_explanation`), and reminder lifecycle (`reminder_at`, `snoozed_until`, `created_at`, `updated_at`).
+   - Indexed on `(status, reminder_at)` for sub-millisecond due-reminder polling and `(object_tag)` for instantaneous table runbook lookups.
+2. **Scheduled Reminder Engine**:
+   - The frontend evaluates `/api/notes/reminders/due` on a non-blocking 30-second polling interval.
+   - When an active reminder's timestamp elapses, SqlFox plays a distinctive pleasant chime via the native **Web Audio API** (`AudioContext` exponential ramp from 587.33 Hz [D5] to 880.00 Hz [A5]) without requesting or loading external audio files.
+   - Non-blocking notification toasts permit 1-click **Open Note**, **Snooze 10m**, or **Done** resolution.
+3. **AI Copilot Context Injection (`internal/ai/assistant.go`, `internal/server/handlers_ai.go`)**:
+   - Recognizes `@note:<id>` or `[@note:<title>]` reference tokens in prompt inputs.
+   - Fetches the referenced operational note and injects an isolated `=== REFERENCED OPERATIONAL NOTES ===` section into the AI system prompt before execution, providing full historical context (SQL snippet, diagnostic snapshot, and human developer notes) without manual copy-pasting.
+
 
 
 

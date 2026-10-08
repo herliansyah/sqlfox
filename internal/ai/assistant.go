@@ -14,25 +14,36 @@ type TableNoteSummary struct {
 	Content   string `json:"content"`
 }
 
+// OperationalNoteSummary carries an operational note for context window injection.
+type OperationalNoteSummary struct {
+	ID         string   `json:"id"`
+	Title      string   `json:"title"`
+	Content    string   `json:"content"`
+	SideNote   string   `json:"side_note,omitempty"`
+	ObjectTags []string `json:"object_tags,omitempty"`
+	UserTags   []string `json:"user_tags,omitempty"`
+}
+
 // AssistRequest defines all parameters for Copilot Assistant reasoning.
 type AssistRequest struct {
-	Action          string                 `json:"action"` // explain_query, explain_plan, optimize, nl_to_sql, chat, fix_query
-	Query           string                 `json:"query"`
-	Plan            string                 `json:"plan"`
-	Prompt          string                 `json:"prompt"`
-	ErrorMessage    string                 `json:"error_message,omitempty"`
-	Dialect         string                 `json:"dialect,omitempty"`
-	Schema          *driver.SchemaMetadata `json:"schema,omitempty"`
-	TableNotes      []TableNoteSummary     `json:"table_notes,omitempty"`
-	Provider        Provider               `json:"provider"`
-	APIKey          string                 `json:"api_key"`
-	Model           string                 `json:"model"`
-	Endpoint        string                 `json:"endpoint"`
-	MaskIdentifiers bool                   `json:"mask_identifiers"`
-	Language        string                 `json:"language,omitempty"`       // "id", "en", "auto"
-	ResponseStyle   string                 `json:"response_style,omitempty"` // "concise", "detailed", "normal"
-	CustomPrompt    string                 `json:"custom_prompt,omitempty"`  // custom persona / system instructions
-	IncludeSchema   bool                   `json:"include_schema"`
+	Action           string                   `json:"action"` // explain_query, explain_plan, optimize, nl_to_sql, chat, fix_query
+	Query            string                   `json:"query"`
+	Plan             string                   `json:"plan"`
+	Prompt           string                   `json:"prompt"`
+	ErrorMessage     string                   `json:"error_message,omitempty"`
+	Dialect          string                   `json:"dialect,omitempty"`
+	Schema           *driver.SchemaMetadata   `json:"schema,omitempty"`
+	TableNotes       []TableNoteSummary       `json:"table_notes,omitempty"`
+	OperationalNotes []OperationalNoteSummary `json:"operational_notes,omitempty"`
+	Provider         Provider                 `json:"provider"`
+	APIKey           string                   `json:"api_key"`
+	Model            string                   `json:"model"`
+	Endpoint         string                   `json:"endpoint"`
+	MaskIdentifiers  bool                     `json:"mask_identifiers"`
+	Language         string                   `json:"language,omitempty"`       // "id", "en", "auto"
+	ResponseStyle    string                   `json:"response_style,omitempty"` // "concise", "detailed", "normal"
+	CustomPrompt     string                   `json:"custom_prompt,omitempty"`  // custom persona / system instructions
+	IncludeSchema    bool                     `json:"include_schema"`
 }
 
 
@@ -64,6 +75,24 @@ func AssemblePrompts(req AssistRequest) (systemPrompt string, userPrompt string)
 	}
 
 	systemPrompt = BaseSystemPrompt(dialect, schemaPrompt)
+
+	// Operational Notes Injection: check if any notes are referenced or mentioned
+	if len(req.OperationalNotes) > 0 {
+		var noteEntries []string
+		for _, on := range req.OperationalNotes {
+			entry := fmt.Sprintf("### Operational Note: %s\n- **Captured Content / Snapshot:**\n%s", on.Title, on.Content)
+			if on.SideNote != "" {
+				entry += fmt.Sprintf("\n- **Developer Notes & Action Items:**\n%s", on.SideNote)
+			}
+			if len(on.ObjectTags) > 0 {
+				entry += fmt.Sprintf("\n- **Tagged Database Objects:** %s", strings.Join(on.ObjectTags, ", "))
+			}
+			noteEntries = append(noteEntries, entry)
+		}
+		if len(noteEntries) > 0 {
+			systemPrompt += "\n\n=== REFERENCED OPERATIONAL NOTES ===\n" + strings.Join(noteEntries, "\n\n")
+		}
+	}
 
 	// Append language preferences
 	if req.Language == "id" {

@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Workspace Tab Context Menu & Lifecycle Suite**: Added secondary-click context menu on workspace tabs providing granular and batch tab actions: `Close` (`Ctrl+W`), `Close Others`, `Close Tabs to the Right`, `Close All`, `Duplicate Tab` (with SQL draft clone), and `Rename Tab...` via native modal prompt.
 - **Tab Close Confirmation Guard**: Interactive pre-closure protection powered by the Native Modal Dialog safeguarding against accidental tab closure and discarding of dirty SQL drafts or active workspaces across single (`✕`, `Ctrl+W`, menu) and batch tab operations. Clean, unmodified tabs close instantaneously without alert fatigue.
 - **Empty Workspace Graceful Reset**: Closing all tabs or the final active tab cleanly resets the workspace into a fresh, empty `Query 1.sql` tab rather than freezing or blocking.
+- **Unified Operational Notes Inbox & Follow-up Lifecycle**:
+  - Centralized operational notebook engine persisted in SQLite vault (`operational_notes` schema) capturing titles, lifecycle status (`inbox`, `resolved`, `archived`), soft-link database object tags (`db://conn/db/table`), categorization tags (`#incident`, etc.), rich markdown developer action notes, and read-only raw execution/AI snapshots.
+  - Slide-over Notes Inbox drawer (`#notes-inbox-drawer`) accessible via the header `[📝 Notes]` button, featuring real-time overdue badge counts, search filtering, status tabs, and pinned runbook toggles.
+  - Follow-up reminder alarm scheduler with background 30-second evaluation loop, zero-dependency audio chime via Web Audio API (D5-A5 frequency ramp), and non-blocking interactive notification toasts (`Open Note`, `Snooze 10m`, `Done`).
+  - Scoped table documentation feed in the Table Viewer (`[📝 Notes & Runbook]`) displaying notes tagged to the active table with pinned runbooks at top.
+  - Interactive AI Copilot `@` mention autocomplete in chat textarea (`[@note:<title>]`) dynamically injecting snapshot query telemetry and developer action notes into AI prompt context.
+  - Full REST API suite (`/api/notes`, `/api/notes/reminders/due`, `/api/notes/{id}/snooze`, `/api/notes/{id}/resolve`) with backward compatibility bridging for legacy table notes.
 
 ## [v0.3.0] - 2026-10-08
 

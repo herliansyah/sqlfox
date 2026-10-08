@@ -691,6 +691,21 @@ func (s *Server) handleGetTableNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	targetTag := "db://" + connID + "/" + dbName + "/" + tableName
+	if opNotes, err := s.vault.ListOperationalNotes(vault.OperationalNoteFilter{ObjectTag: targetTag}); err == nil && len(opNotes) > 0 {
+		top := opNotes[0]
+		writeJSON(w, http.StatusOK, map[string]any{
+			"id":            top.ID,
+			"connection_id": connID,
+			"database_name": dbName,
+			"table_name":    tableName,
+			"content":       top.Content,
+			"side_note":     top.SideNote,
+			"updated_at":    top.UpdatedAt,
+		})
+		return
+	}
+
 	note, err := s.vault.GetTableNote(connID, dbName, tableName)
 	if err != nil {
 		if err == vault.ErrTableNoteNotFound {
@@ -718,24 +733,57 @@ func (s *Server) handleSaveTableNote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Content string `json:"content"`
+		Content  string `json:"content"`
+		SideNote string `json:"side_note"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
 		return
 	}
 
+	targetTag := "db://" + connID + "/" + dbName + "/" + tableName
+	// Check if operational note already exists for this table tag
+	var existingNote *vault.OperationalNote
+	if opNotes, err := s.vault.ListOperationalNotes(vault.OperationalNoteFilter{ObjectTag: targetTag}); err == nil && len(opNotes) > 0 {
+		for _, n := range opNotes {
+			if n.IsPinned || strings.HasPrefix(n.Title, "Runbook:") {
+				existingNote = n
+				break
+			}
+		}
+		if existingNote == nil && len(opNotes) > 0 {
+			existingNote = opNotes[0]
+		}
+	}
+
+	if existingNote != nil {
+		existingNote.Content = req.Content
+		if req.SideNote != "" {
+			existingNote.SideNote = req.SideNote
+		}
+		_ = s.vault.UpdateOperationalNote(existingNote)
+	} else {
+		newOpNote := &vault.OperationalNote{
+			Title:      "Runbook: " + tableName,
+			Content:    req.Content,
+			SideNote:   req.SideNote,
+			Status:     "inbox",
+			IsPinned:   true,
+			CapturedAt: time.Now(),
+			ObjectTags: []string{targetTag},
+			UserTags:   []string{"#runbook"},
+		}
+		_ = s.vault.CreateOperationalNote(newOpNote)
+	}
+
+	// Also maintain legacy table note for full compatibility
 	note := &vault.TableNote{
 		ConnectionID: connID,
 		DatabaseName: dbName,
 		TableName:    tableName,
 		Content:      req.Content,
 	}
-
-	if err := s.vault.SaveTableNote(note); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save table note: "+err.Error())
-		return
-	}
+	_ = s.vault.SaveTableNote(note)
 
 	writeJSON(w, http.StatusOK, note)
 }

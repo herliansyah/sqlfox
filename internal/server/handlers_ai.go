@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"sqlfox/internal/ai"
@@ -66,18 +67,55 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	var operationalNotes []ai.OperationalNoteSummary
+	if s.vault != nil {
+		allOpNotes, _ := s.vault.ListAllOperationalNotes()
+		queryAndPrompt := strings.ToLower(req.Prompt + " " + req.Query)
+
+		for _, on := range allOpNotes {
+			// Check if specifically mentioned via @note:<id>, @note:<title>, [@note:...] or title mention
+			isMentioned := strings.Contains(queryAndPrompt, "@note:"+strings.ToLower(on.ID)) ||
+				strings.Contains(queryAndPrompt, strings.ToLower(on.Title))
+
+			// Or if tagged to active table being queried
+			isTagRelevant := false
+			for _, tag := range on.ObjectTags {
+				parts := strings.Split(tag, "/")
+				if len(parts) > 0 {
+					lastPart := strings.ToLower(parts[len(parts)-1])
+					if lastPart != "" && strings.Contains(queryAndPrompt, lastPart) {
+						isTagRelevant = true
+						break
+					}
+				}
+			}
+
+			if isMentioned || isTagRelevant {
+				operationalNotes = append(operationalNotes, ai.OperationalNoteSummary{
+					ID:         on.ID,
+					Title:      on.Title,
+					Content:    on.Content,
+					SideNote:   on.SideNote,
+					ObjectTags: on.ObjectTags,
+					UserTags:   on.UserTags,
+				})
+			}
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
 	resp, err := ai.Assist(ctx, ai.AssistRequest{
-		Action:          req.Action,
-		Query:           req.Query,
-		Plan:            req.Plan,
-		Prompt:          req.Prompt,
-		ErrorMessage:    req.ErrorMessage,
-		Dialect:         dialect,
-		Schema:          schema,
-		TableNotes:      tableNotes,
+		Action:           req.Action,
+		Query:            req.Query,
+		Plan:             req.Plan,
+		Prompt:           req.Prompt,
+		ErrorMessage:     req.ErrorMessage,
+		Dialect:          dialect,
+		Schema:           schema,
+		TableNotes:       tableNotes,
+		OperationalNotes: operationalNotes,
 		Provider:        req.Provider,
 		APIKey:          req.APIKey,
 		Model:           req.Model,

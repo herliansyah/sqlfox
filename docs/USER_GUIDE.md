@@ -38,6 +38,7 @@
    - [Zero-Dependency CSV Import & Column Mapping](#zero-dependency-csv-import--column-mapping)
    - [Interactive Visual ERD Canvas](#interactive-visual-erd-canvas)
    - [BYOK AI Copilot & Automated Error Healer](#byok-ai-copilot--automated-error-healer)
+   - [Unified Operational Notes Inbox & Follow-up Lifecycle](#unified-operational-notes-inbox--follow-up-lifecycle)
 5. [Advanced DBA & Operations Playbook (DBA Level)](#5-advanced-dba--operations-playbook-dba-level)
    - [Deterministic AST Safety Guard & Challenge Modal](#deterministic-ast-safety-guard--challenge-modal)
    - [Pre-DDL Smart Tiered Backups](#pre-ddl-smart-tiered-backups)
@@ -283,6 +284,34 @@ SqlFox features a **Bring-Your-Own-Key (BYOK)** AI assistant:
 - **1-Click SQL Execution**: SQL suggestions rendered in chat include `Insert & Run` and `Replace in Editor` buttons.
 - **Chat Session Forking**: Fork an active AI discussion at any point into a new branch to explore alternative query strategies without losing previous context.
 - **Automated Error Healer**: When a query fails in the editor, click **🩺 Heal Error**; the AI diagnoses the syntax/logical error, explains the root cause, and provides the corrected SQL.
+
+### Unified Operational Notes Inbox & Follow-up Lifecycle
+SqlFox integrates a centralized operational notebook and follow-up engine directly into the application, bridging raw database telemetry with developer runbooks:
+
+- **Central Notes Inbox**:
+  - Click the **📝 Notes** button in the top navigation header at any time to open the slide-over Notes Inbox drawer (`#notes-inbox-drawer`).
+  - An overdue badge displays the count of actionable reminders requiring immediate attention.
+  - Filter notes seamlessly across status tabs (`All`, `Inbox`, `Resolved`, `Archived`), search titles and content in real-time, or toggle pinned runbooks (`📌`).
+- **Comprehensive Note Composer**:
+  - Click **+ New Note** or capture notes directly from query results, Processlist threads, or Table Views.
+  - Every note captures:
+    - **Metadata**: Title, lifecycle status (`inbox`, `resolved`, `archived`), and pin status.
+    - **Object Tags**: Soft-link URI tags (`db://{connection}/{database}/{table}`) tying notes directly to database objects.
+    - **User Tags**: Custom categorization tags (e.g. `#incident`, `#migration`, `#runbook`).
+    - **Developer Action Notes**: Rich markdown area for human analysis, follow-up steps, and resolution details.
+    - **Raw Snapshot**: Read-only capture of original SQL statements, AI explanations, or diagnostic payloads with syntax highlighting and live preview.
+- **Follow-up Reminders & Alarm Chime**:
+  - Schedule reminders with quick presets (`10m`, `1h`, `Tomorrow 09:00`, `Next Monday`) or a custom date-time picker.
+  - A background evaluation engine checks active reminders every 30 seconds.
+  - When a reminder matures, SqlFox triggers an audio chime via the native **Web Audio API** (zero external sound file dependencies) and renders a non-blocking interactive toast alert.
+  - Operators can take action directly from the toast: **Open Note**, **Snooze 10m**, or mark as **Done**.
+- **Table Viewer Runbook Feed**:
+  - Inside any table view, open the **📝 Notes & Runbook** sub-tab.
+  - Automatically displays a scoped feed of all operational notes tagged to the active table (`db://...`), keeping schema documentation, known data quirks, and maintenance runbooks pinned right where operators work.
+- **AI Copilot `@` Mention Autocomplete**:
+  - In the Copilot prompt input, type `@` to summon the interactive note picker dropdown.
+  - Selecting a note inserts an `[@note:<title>]` reference token.
+  - When submitted, SqlFox automatically extracts referenced notes and injects the raw snapshot and developer action notes directly into the AI system prompt context, empowering the AI to diagnose historical incidents and analyze past query issues accurately.
 
 ---
 

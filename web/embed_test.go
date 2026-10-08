@@ -539,4 +539,41 @@ func TestProcessDetailModalAndFooterPillsEmbedded(t *testing.T) {
 	}
 }
 
+func TestNotesInboxDrawerLayoutAndBorderEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	// Bug: notes-inbox-drawer had 'top-10', which is 40px, overlapping the 48px header
+	// and cutting into the top right controls (like the readonly button) with no top border.
+	if strings.Contains(content, `id="notes-inbox-drawer" class="hidden fixed top-10`) {
+		t.Errorf("notes-inbox-drawer has invalid 'top-10' class which overlaps header and collides with header controls")
+	}
+
+	// Must have proper top positioning below header and distinct top border
+	if !strings.Contains(content, `id="notes-inbox-drawer"`) {
+		t.Fatalf("index.html missing notes-inbox-drawer")
+	}
+
+	// Require proper top clearance and top border definition
+	expectedSnippets := []string{
+		`id="notes-inbox-drawer"`,
+		`border-t border-app-border`,
+	}
+	for _, s := range expectedSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain %q for notes inbox drawer layout, but was missing", s)
+		}
+	}
+}
+
 

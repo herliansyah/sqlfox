@@ -158,6 +158,25 @@ func initSchema(db *sql.DB) error {
 		UNIQUE(connection_id, database_name, table_name)
 	);
 
+	CREATE TABLE IF NOT EXISTS operational_notes (
+		id TEXT PRIMARY KEY,
+		title TEXT NOT NULL,
+		content TEXT NOT NULL,
+		side_note TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL DEFAULT 'inbox',
+		is_pinned INTEGER NOT NULL DEFAULT 0,
+		captured_at TIMESTAMP NOT NULL,
+		reminder_at TIMESTAMP,
+		object_tags TEXT NOT NULL DEFAULT '[]',
+		user_tags TEXT NOT NULL DEFAULT '[]',
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_operational_notes_status ON operational_notes(status);
+	CREATE INDEX IF NOT EXISTS idx_operational_notes_reminder ON operational_notes(reminder_at);
+	CREATE INDEX IF NOT EXISTS idx_operational_notes_pinned ON operational_notes(is_pinned DESC, updated_at DESC);
+
 	CREATE TABLE IF NOT EXISTS audit_logs (
 		id TEXT PRIMARY KEY,
 		session_id TEXT NOT NULL,
