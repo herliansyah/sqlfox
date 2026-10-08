@@ -2072,6 +2072,30 @@
     </button>
   </div>
 
+  <!-- Tab Item Context Menu -->
+  <div id="tab-context-menu" class="hidden fixed bg-slate-900 border border-slate-700 rounded-lg shadow-2xl z-50 text-xs py-1 min-w-[190px]" onclick="event.stopPropagation()">
+    <button id="tab-ctx-btn-close" onclick="tabContextMenuAction('close')" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 text-slate-200 flex items-center justify-between transition cursor-pointer">
+      <span class="flex items-center space-x-2"><span>✕</span><span>Close</span></span>
+      <kbd class="text-[10px] text-slate-500 font-mono">Ctrl+W</kbd>
+    </button>
+    <button id="tab-ctx-btn-close-others" onclick="tabContextMenuAction('close-others')" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 text-slate-200 flex items-center space-x-2 transition cursor-pointer">
+      <span>🗂️</span><span>Close Others</span>
+    </button>
+    <button id="tab-ctx-btn-close-right" onclick="tabContextMenuAction('close-right')" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 text-slate-200 flex items-center space-x-2 transition cursor-pointer">
+      <span>➡️</span><span>Close Tabs to the Right</span>
+    </button>
+    <button id="tab-ctx-btn-close-all" onclick="tabContextMenuAction('close-all')" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 text-slate-200 flex items-center space-x-2 transition cursor-pointer">
+      <span>🗑️</span><span>Close All</span>
+    </button>
+    <div class="border-t border-slate-800 my-1"></div>
+    <button id="tab-ctx-btn-duplicate" onclick="tabContextMenuAction('duplicate')" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 text-slate-200 flex items-center space-x-2 transition cursor-pointer">
+      <span>⎘</span><span>Duplicate Tab</span>
+    </button>
+    <button id="tab-ctx-btn-rename" onclick="tabContextMenuAction('rename')" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 text-slate-200 flex items-center space-x-2 transition cursor-pointer">
+      <span>✏️</span><span>Rename Tab...</span>
+    </button>
+  </div>
+
   <!-- 0. Remote Access Guard Lock Screen -->
   <div id="remote-lock-modal" class="fixed inset-0 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 z-[100] hidden">
     <div class="bg-slate-900 border-2 border-app-accent w-full max-w-sm rounded-xl shadow-2xl p-6 space-y-4 text-center">
@@ -2463,6 +2487,9 @@
         <h3 id="app-native-dialog-title" class="text-sm font-bold text-white">Notification</h3>
       </div>
       <p id="app-native-dialog-body" class="text-xs text-slate-300 whitespace-pre-wrap leading-relaxed max-h-80 overflow-y-auto"></p>
+      <div id="app-native-dialog-input-container" class="hidden">
+        <input type="text" id="app-native-dialog-input" class="w-full bg-slate-950 border border-slate-700 focus:border-app-accent text-white text-xs px-2.5 py-1.5 rounded outline-none font-mono">
+      </div>
       <div class="flex justify-end space-x-2 pt-2 border-t border-slate-800">
         <button id="app-native-dialog-cancel" class="px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 rounded transition hidden">Cancel</button>
         <button id="app-native-dialog-confirm" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-4 py-1.5 rounded text-xs transition">OK</button>
@@ -3910,6 +3937,8 @@
         }
         document.getElementById('app-native-dialog-title').textContent = title;
         document.getElementById('app-native-dialog-body').textContent = message;
+        const inputContainer = document.getElementById('app-native-dialog-input-container');
+        if (inputContainer) inputContainer.classList.add('hidden');
         const cancelBtn = document.getElementById('app-native-dialog-cancel');
         const confirmBtn = document.getElementById('app-native-dialog-confirm');
         cancelBtn.classList.add('hidden');
@@ -3936,6 +3965,8 @@
         }
         document.getElementById('app-native-dialog-title').textContent = title;
         document.getElementById('app-native-dialog-body').textContent = message;
+        const inputContainer = document.getElementById('app-native-dialog-input-container');
+        if (inputContainer) inputContainer.classList.add('hidden');
         const cancelBtn = document.getElementById('app-native-dialog-cancel');
         const confirmBtn = document.getElementById('app-native-dialog-confirm');
         cancelBtn.classList.remove('hidden');
@@ -3972,6 +4003,75 @@
         };
         if (typeof dlg.showModal === 'function') dlg.showModal();
         else dlg.setAttribute('open', '');
+      });
+    }
+
+    function showNativePrompt(message, defaultValue = '', title = 'Input') {
+      return new Promise((resolve) => {
+        const dlg = document.getElementById('app-native-dialog');
+        if (!dlg) {
+          return resolve(window.prompt(message, defaultValue));
+        }
+        document.getElementById('app-native-dialog-title').textContent = title;
+        document.getElementById('app-native-dialog-body').textContent = message;
+        const inputContainer = document.getElementById('app-native-dialog-input-container');
+        const input = document.getElementById('app-native-dialog-input');
+        if (inputContainer && input) {
+          inputContainer.classList.remove('hidden');
+          input.value = defaultValue || '';
+        }
+        const cancelBtn = document.getElementById('app-native-dialog-cancel');
+        const confirmBtn = document.getElementById('app-native-dialog-confirm');
+        cancelBtn.classList.remove('hidden');
+        confirmBtn.textContent = 'Save';
+        confirmBtn.className = 'bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-4 py-1.5 rounded text-xs transition';
+
+        let resolved = false;
+        const cleanup = () => {
+          confirmBtn.removeEventListener('click', onConfirm);
+          cancelBtn.removeEventListener('click', onCancel);
+          if (input) input.removeEventListener('keydown', onKeyDown);
+          if (inputContainer) inputContainer.classList.add('hidden');
+        };
+        const onConfirm = () => {
+          if (resolved) return;
+          resolved = true;
+          const val = input ? input.value : '';
+          cleanup();
+          dlg.close();
+          resolve(val);
+        };
+        const onCancel = () => {
+          if (resolved) return;
+          resolved = true;
+          cleanup();
+          dlg.close();
+          resolve(null);
+        };
+        const onKeyDown = (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            onConfirm();
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            onCancel();
+          }
+        };
+        confirmBtn.addEventListener('click', onConfirm);
+        cancelBtn.addEventListener('click', onCancel);
+        if (input) input.addEventListener('keydown', onKeyDown);
+        dlg.onclose = () => {
+          if (!resolved) {
+            resolved = true;
+            cleanup();
+            resolve(null);
+          }
+        };
+        if (typeof dlg.showModal === 'function') dlg.showModal();
+        else dlg.setAttribute('open', '');
+        if (input) {
+          setTimeout(() => { input.focus(); input.select(); }, 50);
+        }
       });
     }
 
@@ -4685,6 +4785,12 @@
       if (tblMenu && !tblMenu.classList.contains('hidden')) {
         if (!tblMenu.contains(e.target)) {
           closeTableContextMenu();
+        }
+      }
+      const tabMenu = document.getElementById('tab-context-menu');
+      if (tabMenu && !tabMenu.classList.contains('hidden')) {
+        if (!tabMenu.contains(e.target)) {
+          closeTabContextMenu();
         }
       }
     });
@@ -5980,10 +6086,10 @@
     function renderTabs() {
       const container = document.getElementById('tabs-container');
       container.innerHTML = tabs.map(t => `
-        <div onclick="switchTab('${t.id}')" class="flex items-center space-x-1 px-3 py-1 rounded cursor-pointer text-xs transition ${t.id === activeTabId ? 'bg-app-bg text-app-accent font-semibold border-t-2 border-app-accent' : 'hover:bg-slate-800 text-slate-400'}">
+        <div onclick="switchTab('${t.id}')" oncontextmenu="showTabContextMenu(event, '${t.id}')" class="flex items-center space-x-1 px-3 py-1 rounded cursor-pointer text-xs transition ${t.id === activeTabId ? 'bg-app-bg text-app-accent font-semibold border-t-2 border-app-accent' : 'hover:bg-slate-800 text-slate-400'}" title="${escapeHtml(t.title)} (Right-click for options)">
           <span>${t.isVariables ? '⚙️' : (t.isFlightRecorder ? '📈' : (t.isCluster ? '🌐' : (t.isProcesslist ? '⚡' : (t.isTableViewer ? '📊' : (t.isNote ? '📝' : '⚡')))))}</span>
           <span class="truncate max-w-[120px]">${escapeHtml(t.title)}</span>
-          <button onclick="event.stopPropagation(); closeTab('${t.id}')" class="hover:text-red-400 pl-1">✕</button>
+          <button onclick="event.stopPropagation(); closeTab('${t.id}')" class="hover:text-red-400 pl-1" title="Close Tab (Ctrl+W)">✕</button>
         </div>
       `).join('');
 
@@ -6297,12 +6403,238 @@
       saveTabsState();
     }
 
-    function closeTab(tabId) {
-      if (tabs.length === 1) return;
+    // --- Tab Context Menu & Lifecycle Management ---
+    let selectedContextMenuTabId = null;
+
+    function isTabDirtyOrNonEmpty(tab) {
+      if (!tab) return false;
+      if (!tab.isTableViewer && !tab.isProcesslist && !tab.isCluster && !tab.isFlightRecorder && !tab.isVariables && !tab.isNote) {
+        const sql = (tab.id === activeTabId && cmEditor) ? cmEditor.getValue().trim() : (tab.sql || '').trim();
+        return sql.length > 0;
+      }
+      if (tab.isNote) {
+        const text = (tab.id === activeTabId && cmEditor) ? cmEditor.getValue().trim() : (tab.sql || '').trim();
+        return text.length > 0;
+      }
+      if (tab.isTableViewer) {
+        if (typeof stagedEdits !== 'undefined' && stagedEdits && stagedEdits.size > 0 && activeGridTable === tab.tableName) return true;
+        return false;
+      }
+      return false;
+    }
+
+    function showTabContextMenu(e, tabId) {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      closeTableContextMenu();
+      const targetTab = tabs.find(t => t.id === tabId);
+      if (!targetTab) return;
+      selectedContextMenuTabId = tabId;
+
+      const menu = document.getElementById('tab-context-menu');
+      if (!menu) return;
+
+      const idx = tabs.findIndex(t => t.id === tabId);
+      const isOnlyTab = tabs.length <= 1;
+      const isLastTabRight = idx === tabs.length - 1;
+
+      const btnCloseOthers = document.getElementById('tab-ctx-btn-close-others');
+      if (btnCloseOthers) {
+        btnCloseOthers.disabled = isOnlyTab;
+        btnCloseOthers.classList.toggle('opacity-50', isOnlyTab);
+        btnCloseOthers.classList.toggle('cursor-not-allowed', isOnlyTab);
+        btnCloseOthers.classList.toggle('cursor-pointer', !isOnlyTab);
+      }
+      const btnCloseRight = document.getElementById('tab-ctx-btn-close-right');
+      if (btnCloseRight) {
+        btnCloseRight.disabled = isLastTabRight;
+        btnCloseRight.classList.toggle('opacity-50', isLastTabRight);
+        btnCloseRight.classList.toggle('cursor-not-allowed', isLastTabRight);
+        btnCloseRight.classList.toggle('cursor-pointer', !isLastTabRight);
+      }
+
+      const isSingleton = !!(targetTab.isProcesslist || targetTab.isCluster || targetTab.isFlightRecorder || targetTab.isVariables);
+      const btnDuplicate = document.getElementById('tab-ctx-btn-duplicate');
+      if (btnDuplicate) {
+        btnDuplicate.disabled = isSingleton;
+        btnDuplicate.classList.toggle('opacity-50', isSingleton);
+        btnDuplicate.classList.toggle('cursor-not-allowed', isSingleton);
+        btnDuplicate.classList.toggle('cursor-pointer', !isSingleton);
+      }
+
+      const x = Math.min(e.clientX, window.innerWidth - 200);
+      const y = Math.min(e.clientY, window.innerHeight - 230);
+      menu.style.left = `${Math.max(10, x)}px`;
+      menu.style.top = `${Math.max(10, y)}px`;
+      menu.classList.remove('hidden');
+    }
+
+    function closeTabContextMenu() {
+      const menu = document.getElementById('tab-context-menu');
+      if (menu) menu.classList.add('hidden');
+      selectedContextMenuTabId = null;
+    }
+
+    async function tabContextMenuAction(action) {
+      const tabId = selectedContextMenuTabId;
+      closeTabContextMenu();
+      if (!tabId) return;
+
+      if (action === 'close') {
+        await closeTab(tabId);
+      } else if (action === 'close-others') {
+        await closeOtherTabs(tabId);
+      } else if (action === 'close-right') {
+        await closeTabsToTheRight(tabId);
+      } else if (action === 'close-all') {
+        await closeAllTabs();
+      } else if (action === 'duplicate') {
+        duplicateTab(tabId);
+      } else if (action === 'rename') {
+        await renameTab(tabId);
+      }
+    }
+
+    async function closeTab(tabId) {
+      const tab = tabs.find(t => t.id === tabId);
+      if (!tab) return;
+
+      if (isTabDirtyOrNonEmpty(tab)) {
+        const title = tab.title || 'this tab';
+        const ok = await showNativeConfirm(`Are you sure you want to close "${title}"?\nAny unsaved query or modifications will be discarded.`, 'Close Tab');
+        if (!ok) return;
+      }
+
+      if (tabs.length === 1) {
+        tabs = [{ id: 'tab-' + Date.now(), title: 'Query 1.sql', sql: '', isTableViewer: false }];
+        activeTabId = tabs[0].id;
+        renderTabs();
+        setEditorSQL('');
+        clearGridToInitialState();
+        saveTabsState();
+        return;
+      }
+
+      const closeIdx = tabs.findIndex(t => t.id === tabId);
       tabs = tabs.filter(t => t.id !== tabId);
+
       if (activeTabId === tabId) {
-        switchTab(tabs[0].id);
+        const nextIdx = Math.min(closeIdx, tabs.length - 1);
+        switchTab(tabs[nextIdx].id);
       } else {
+        renderTabs();
+        saveTabsState();
+      }
+    }
+
+    async function closeOtherTabs(keepTabId) {
+      const otherTabs = tabs.filter(t => t.id !== keepTabId);
+      if (otherTabs.length === 0) return;
+
+      const hasDirty = otherTabs.some(t => isTabDirtyOrNonEmpty(t));
+      if (hasDirty) {
+        const ok = await showNativeConfirm(`Close other ${otherTabs.length} tab(s)?\nAny unsaved queries will be discarded.`, 'Close Other Tabs');
+        if (!ok) return;
+      }
+
+      tabs = tabs.filter(t => t.id === keepTabId);
+      if (activeTabId !== keepTabId) {
+        switchTab(keepTabId);
+      } else {
+        renderTabs();
+        saveTabsState();
+      }
+    }
+
+    async function closeTabsToTheRight(fromTabId) {
+      const fromIdx = tabs.findIndex(t => t.id === fromTabId);
+      if (fromIdx === -1 || fromIdx === tabs.length - 1) return;
+
+      const rightTabs = tabs.slice(fromIdx + 1);
+      if (rightTabs.length === 0) return;
+
+      const hasDirty = rightTabs.some(t => isTabDirtyOrNonEmpty(t));
+      if (hasDirty) {
+        const ok = await showNativeConfirm(`Close ${rightTabs.length} tab(s) to the right?\nAny unsaved queries will be discarded.`, 'Close Tabs to the Right');
+        if (!ok) return;
+      }
+
+      tabs = tabs.slice(0, fromIdx + 1);
+      if (!tabs.some(t => t.id === activeTabId)) {
+        switchTab(fromTabId);
+      } else {
+        renderTabs();
+        saveTabsState();
+      }
+    }
+
+    async function closeAllTabs() {
+      const hasDirty = tabs.some(t => isTabDirtyOrNonEmpty(t));
+      if (hasDirty || tabs.length > 1) {
+        const ok = await showNativeConfirm(`Close all ${tabs.length} tab(s)?\nWorkspace will be reset to a clean query tab.`, 'Close All Tabs');
+        if (!ok) return;
+      }
+
+      tabs = [{ id: 'tab-' + Date.now(), title: 'Query 1.sql', sql: '', isTableViewer: false }];
+      activeTabId = tabs[0].id;
+      renderTabs();
+      setEditorSQL('');
+      clearGridToInitialState();
+      saveTabsState();
+    }
+
+    function duplicateTab(tabId) {
+      const sourceIdx = tabs.findIndex(t => t.id === tabId);
+      if (sourceIdx === -1) return;
+      const src = tabs[sourceIdx];
+
+      let currentSql = src.sql || '';
+      if (src.id === activeTabId && !src.isTableViewer && !src.isProcesslist && !src.isCluster && !src.isFlightRecorder && !src.isVariables) {
+        currentSql = cmEditor ? cmEditor.getValue() : (document.getElementById('sql-editor-textarea')?.value || '');
+      }
+
+      let newTitle = src.title || 'Query.sql';
+      if (newTitle.endsWith('.sql')) {
+        const base = newTitle.slice(0, -4);
+        newTitle = `${base} (Copy).sql`;
+      } else {
+        newTitle = `${newTitle} (Copy)`;
+      }
+
+      const newId = 'tab-' + Date.now();
+      const clonedTab = {
+        id: newId,
+        title: newTitle,
+        sql: currentSql,
+        isTableViewer: !!src.isTableViewer,
+        tableName: src.tableName || '',
+        database: src.database || '',
+        tableMode: src.tableMode || 'data',
+        filterMode: src.filterMode || 'pills',
+        filterPills: Array.isArray(src.filterPills) ? JSON.parse(JSON.stringify(src.filterPills)) : [],
+        filterRaw: src.filterRaw || '',
+        appliedFilter: src.appliedFilter || '',
+        queryFilters: src.queryFilters ? JSON.parse(JSON.stringify(src.queryFilters)) : {},
+        sortCol: src.sortCol || '',
+        sortDir: src.sortDir || '',
+        offset: 0,
+        isNote: !!src.isNote
+      };
+
+      tabs.splice(sourceIdx + 1, 0, clonedTab);
+      switchTab(newId);
+      saveTabsState();
+    }
+
+    async function renameTab(tabId) {
+      const tab = tabs.find(t => t.id === tabId);
+      if (!tab) return;
+
+      const newTitle = await showNativePrompt('Enter new tab name:', tab.title, 'Rename Tab');
+      if (newTitle && newTitle.trim()) {
+        tab.title = newTitle.trim();
         renderTabs();
         saveTabsState();
       }
@@ -16441,6 +16773,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
           e.preventDefault();
           openSnippetsManager();
         } else if (e.key === 'Escape') {
+          closeTabContextMenu();
           closeTableContextMenu();
           closeShortcutsModal();
           closeSafetyModal();
