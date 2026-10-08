@@ -407,6 +407,10 @@ _Avoid_: Process monitor, task list, thread viewer
 A dedicated diagnostic dialog displaying complete thread execution metadata, formatted full SQL statement text without truncation, 1-click clipboard actions, and integrated operational shortcuts (`EXPLAIN`, editor transfer, AI review, and termination).
 _Avoid_: Process details popup, thread viewer window, query popover
 
+**Process Activity Trend Panel**:
+An ephemeral, collapsible in-memory rolling time-series visualization in the Processlist Manager rendering thread concurrency (`Threads Running` vs `Total Connected`) and operational metrics (`Now`, `Peak`, `Avg`) on native HTML5 Canvas without incurring background persistence or additional database queries.
+_Avoid_: Process chart, query monitor graph, live APM widget
+
 **Lock Contention & Root Blocker Inspector**:
 A dedicated incident-triage access point in the Top Monitor menu and Command Palette that directly focuses the Processlist session on the Root Blocker dependency tree, surfacing blocking queries, locked resources, and single-click termination actions with P0 priority alert escalation.
 _Avoid_: Lock viewer, deadlock popup, blocker window

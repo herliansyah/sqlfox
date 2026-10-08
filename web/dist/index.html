@@ -1190,6 +1190,11 @@
             <span id="pl-lock-summary" class="hidden text-red-400 font-semibold flex items-center space-x-1">
               <span>🚨</span><span id="pl-lock-count">0 Locks</span>
             </span>
+            <button id="pl-toggle-trend-btn" onclick="toggleProcesslistTrendPanel()" class="px-2 py-0.5 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center space-x-1.5 transition text-[11px]" title="Toggle In-Memory Activity Trend Panel">
+              <span>📈</span>
+              <span>Trend</span>
+              <span id="pl-trend-caret" class="text-[10px] text-slate-400">▾</span>
+            </button>
           </div>
         </div>
 
@@ -1239,6 +1244,40 @@
                 </tr>
               </tbody>
             </table>
+          </div>
+
+          <!-- Process Activity Trend Panel (Collapsible) -->
+          <div id="pl-trend-panel" class="hidden border-t border-app-border bg-slate-900/95 flex flex-col h-32 flex-shrink-0 select-none">
+            <div class="h-6 px-3 bg-slate-950/80 border-b border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
+              <div class="flex items-center space-x-3">
+                <span class="font-semibold text-slate-300 flex items-center space-x-1">
+                  <span>📈</span>
+                  <span>Activity Trend</span>
+                </span>
+                <span class="text-sky-400 flex items-center space-x-1">
+                  <span class="inline-block w-2.5 h-0.5 bg-sky-400 rounded"></span>
+                  <span>Running:</span>
+                  <b id="pl-trend-now" class="font-mono text-white">0</b>
+                </span>
+                <span class="text-slate-400 flex items-center space-x-1">
+                  <span class="inline-block w-2.5 h-0.5 bg-slate-500 rounded"></span>
+                  <span>Total:</span>
+                  <b id="pl-trend-total" class="font-mono text-slate-300">0</b>
+                </span>
+                <span class="text-amber-400/90">Peak: <b id="pl-trend-peak" class="font-mono">0</b></span>
+                <span class="text-slate-400">Avg: <b id="pl-trend-avg" class="font-mono">0.0</b></span>
+              </div>
+              <div class="flex items-center space-x-2">
+                <button onclick="escalateToFlightRecorder()" class="text-[10px] text-rose-300 hover:text-white flex items-center space-x-1 px-1.5 py-0.5 rounded bg-rose-950/50 border border-rose-800/60 hover:bg-rose-900 transition" title="Escalate to On-Demand Flight Recorder for deep forensics">
+                  <span class="text-rose-400">●</span>
+                  <span>Deep Record</span>
+                </button>
+                <button onclick="toggleProcesslistTrendPanel(false)" class="text-slate-500 hover:text-slate-300 px-1 text-xs" title="Close Panel">✕</button>
+              </div>
+            </div>
+            <div class="flex-1 relative p-1 overflow-hidden">
+              <canvas id="pl-trend-canvas" class="w-full h-full block"></canvas>
+            </div>
           </div>
         </div>
 
@@ -6378,6 +6417,7 @@
         if (frContainer) frContainer.classList.add('hidden');
         if (svContainer) svContainer.classList.add('hidden');
         if (plContainer) plContainer.classList.remove('hidden');
+        if (plTrendPanelOpen) requestAnimationFrame(() => renderProcesslistTrendChart());
         fetchProcesslist(true);
       } else {
         if (plContainer) plContainer.classList.add('hidden');
@@ -6903,6 +6943,8 @@
     let processlistRefreshInterval = 'pause';
     let processlistTimer = null;
     let _plFiltersInitialized = false;
+    const plTrendHistory = [];
+    let plTrendPanelOpen = false;
 
     function switchProcesslistView(view) {
       currentProcesslistView = view;
@@ -7152,6 +7194,10 @@
         const stored = localStorage.getItem('sqlfox_pl_hide_system');
         sysEl.checked = stored !== null ? stored === 'true' : true;
       }
+      const trendStored = localStorage.getItem('sqlfox_pl_trend_open');
+      if (trendStored === 'true') {
+        toggleProcesslistTrendPanel(true, true);
+      }
       _plFiltersInitialized = true;
     }
 
@@ -7297,6 +7343,12 @@
       const threads = processlistData.threads || [];
       const locks = processlistData.locks || [];
       const currentThreadId = processlistData.current_thread_id || 0;
+
+      // ponytail: record active concurrency into ephemeral ring buffer (max 60 ticks)
+      recordProcesslistTrendTick(threads);
+      if (plTrendPanelOpen) {
+        renderProcesslistTrendChart();
+      }
 
       const thresholdEl = document.getElementById('pl-slow-threshold');
       const minSeconds = thresholdEl ? (parseInt(thresholdEl.value, 10) || 0) : 0;
@@ -7513,6 +7565,208 @@
           </tr>
         `;
       }).join('');
+    }
+
+    // --- Process Activity Trend Panel (Ephemeral in-memory rolling buffer) ---
+    // ponytail: rolling in-memory buffer limited to 60 data points, zero backend persistence
+    function recordProcesslistTrendTick(threads) {
+      if (!Array.isArray(threads)) return;
+      // Active executing queries (Command != 'Sleep')
+      const running = threads.filter(t => t.command && t.command !== 'Sleep').length;
+      const total = threads.length;
+      plTrendHistory.push({ time: Date.now(), running, total });
+      if (plTrendHistory.length > 60) {
+        plTrendHistory.shift();
+      }
+    }
+
+    function toggleProcesslistTrendPanel(forceState, silent) {
+      const panel = document.getElementById('pl-trend-panel');
+      const btn = document.getElementById('pl-toggle-trend-btn');
+      const caret = document.getElementById('pl-trend-caret');
+      if (!panel) return;
+
+      if (typeof forceState === 'boolean') {
+        plTrendPanelOpen = forceState;
+      } else {
+        plTrendPanelOpen = !plTrendPanelOpen;
+      }
+
+      if (plTrendPanelOpen) {
+        panel.classList.remove('hidden');
+        if (caret) caret.textContent = '▴';
+        if (btn) {
+          btn.classList.add('bg-sky-950', 'text-sky-300', 'border-sky-700');
+          btn.classList.remove('bg-slate-800', 'text-slate-300');
+        }
+        if (!silent) localStorage.setItem('sqlfox_pl_trend_open', 'true');
+        requestAnimationFrame(() => renderProcesslistTrendChart());
+      } else {
+        panel.classList.add('hidden');
+        if (caret) caret.textContent = '▾';
+        if (btn) {
+          btn.classList.remove('bg-sky-950', 'text-sky-300', 'border-sky-700');
+          btn.classList.add('bg-slate-800', 'text-slate-300');
+        }
+        if (!silent) localStorage.setItem('sqlfox_pl_trend_open', 'false');
+      }
+    }
+
+    function escalateToFlightRecorder() {
+      openFlightRecorderTab();
+    }
+
+    function renderProcesslistTrendChart() {
+      if (!plTrendPanelOpen) return;
+      const canvas = document.getElementById('pl-trend-canvas');
+      if (!canvas) return;
+
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.scale(dpr, dpr);
+
+      const w = rect.width;
+      const h = rect.height;
+
+      ctx.clearRect(0, 0, w, h);
+
+      const count = plTrendHistory.length;
+      let latestRunning = 0;
+      let latestTotal = 0;
+      let peakRunning = 0;
+      let sumRunning = 0;
+
+      if (count > 0) {
+        const last = plTrendHistory[count - 1];
+        latestRunning = last.running;
+        latestTotal = last.total;
+        plTrendHistory.forEach(pt => {
+          if (pt.running > peakRunning) peakRunning = pt.running;
+          sumRunning += pt.running;
+        });
+      }
+
+      const avgRunning = count > 0 ? (sumRunning / count).toFixed(1) : '0.0';
+
+      const nowEl = document.getElementById('pl-trend-now');
+      const totalEl = document.getElementById('pl-trend-total');
+      const peakEl = document.getElementById('pl-trend-peak');
+      const avgEl = document.getElementById('pl-trend-avg');
+      if (nowEl) nowEl.textContent = latestRunning;
+      if (totalEl) totalEl.textContent = latestTotal;
+      if (peakEl) peakEl.textContent = peakRunning;
+      if (avgEl) avgEl.textContent = avgRunning;
+
+      if (count === 0) {
+        ctx.fillStyle = '#64748B';
+        ctx.font = '11px ui-monospace, SFMono-Regular, monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('Collecting activity ticks... Waiting for processlist polling.', w / 2, h / 2);
+        return;
+      }
+
+      const padLeft = 32;
+      const padRight = 12;
+      const padTop = 10;
+      const padBottom = 16;
+      const chartW = w - padLeft - padRight;
+      const chartH = h - padTop - padBottom;
+
+      let maxVal = Math.max(4, peakRunning);
+      plTrendHistory.forEach(pt => {
+        if (pt.total > maxVal) maxVal = pt.total;
+      });
+      maxVal = Math.ceil(maxVal * 1.15);
+
+      // Grid lines
+      ctx.strokeStyle = 'rgba(51, 65, 85, 0.35)';
+      ctx.lineWidth = 1;
+      ctx.fillStyle = '#64748B';
+      ctx.font = '9px ui-monospace, SFMono-Regular, monospace';
+      ctx.textAlign = 'right';
+
+      const steps = 3;
+      for (let i = 0; i <= steps; i++) {
+        const val = Math.round((maxVal / steps) * (steps - i));
+        const y = padTop + (chartH / steps) * i;
+        ctx.beginPath();
+        ctx.moveTo(padLeft, y);
+        ctx.lineTo(w - padRight, y);
+        ctx.stroke();
+        ctx.fillText(String(val), padLeft - 6, y + 3);
+      }
+
+      const maxSlots = 59;
+      const getX = (idx) => {
+        if (count <= 1) return padLeft + chartW;
+        return padLeft + (chartW / maxSlots) * (maxSlots - (count - 1 - idx));
+      };
+      const getY = (val) => padTop + chartH - (val / maxVal) * chartH;
+
+      // Draw secondary line: Total Threads (Slate-500, dashed)
+      ctx.beginPath();
+      ctx.strokeStyle = 'rgba(100, 116, 139, 0.55)';
+      ctx.setLineDash([3, 3]);
+      ctx.lineWidth = 1.2;
+      for (let i = 0; i < count; i++) {
+        const x = getX(i);
+        const y = getY(plTrendHistory[i].total);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Draw gradient fill for Running queries
+      const grad = ctx.createLinearGradient(0, padTop, 0, padTop + chartH);
+      grad.addColorStop(0, 'rgba(56, 189, 248, 0.25)');
+      grad.addColorStop(1, 'rgba(56, 189, 248, 0.01)');
+
+      ctx.beginPath();
+      for (let i = 0; i < count; i++) {
+        const x = getX(i);
+        const y = getY(plTrendHistory[i].running);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      const lastX = getX(count - 1);
+      const firstX = getX(0);
+      ctx.lineTo(lastX, padTop + chartH);
+      ctx.lineTo(firstX, padTop + chartH);
+      ctx.closePath();
+      ctx.fillStyle = grad;
+      ctx.fill();
+
+      // Draw primary line: Running Queries (Sky-400)
+      ctx.beginPath();
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 1.8;
+      for (let i = 0; i < count; i++) {
+        const x = getX(i);
+        const y = getY(plTrendHistory[i].running);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
+      // Draw glowing end dot on latest point
+      if (count > 0) {
+        const endX = getX(count - 1);
+        const endY = getY(plTrendHistory[count - 1].running);
+        ctx.beginPath();
+        ctx.arc(endX, endY, 3, 0, Math.PI * 2);
+        ctx.fillStyle = '#38bdf8';
+        ctx.fill();
+        ctx.strokeStyle = '#0284c7';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
     }
 
     let selectedProcessThread = null;
@@ -9074,6 +9328,9 @@ What are concrete steps to resolve this bottleneck? Is my.cnf tuning required (s
         const activeTab = tabs.find(t => t.id === activeTabId);
         if (activeTab && activeTab.isFlightRecorder) {
           drawFlightRecorderChart();
+        }
+        if (activeTab && activeTab.isProcesslist && plTrendPanelOpen) {
+          renderProcesslistTrendChart();
         }
       });
     }
