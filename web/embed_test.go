@@ -611,4 +611,41 @@ func TestQuerySnapshotCaptureAndNoteExtractionEmbedded(t *testing.T) {
 	}
 }
 
+func TestProcesslistActivityTrendEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	expectedSnippets := []string{
+		`id="pl-toggle-trend-btn"`,
+		`id="pl-trend-caret"`,
+		`id="pl-trend-panel"`,
+		`id="pl-trend-canvas"`,
+		`id="pl-trend-now"`,
+		`id="pl-trend-total"`,
+		`id="pl-trend-peak"`,
+		`id="pl-trend-avg"`,
+		`recordProcesslistTrendTick`,
+		`toggleProcesslistTrendPanel`,
+		`escalateToFlightRecorder`,
+		`renderProcesslistTrendChart`,
+		`sqlfox_pl_trend_open`,
+	}
+
+	for _, s := range expectedSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain %q for Processlist Activity Trend, but was missing", s)
+		}
+	}
+}
+
 
