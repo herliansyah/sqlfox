@@ -315,9 +315,9 @@ The AI Copilot interface integrates execution controls directly into generated m
    - Each assistant message includes a `🔀 Branch` button.
    - Clicking it branches a new Chat Session named `<Title> (Fork)`, copying the prompt and message sequence up to that point.
    - Allows users to explore alternative tuning ideas or test edge cases without losing the root conversation thread.
-3. **Internal Notes (`Notes.md`) Markdown Live Preview**:
-   - The Notes tab provides an `✏️ Edit` / `👁️ Preview` segmented switch.
-   - In preview mode, raw markdown is rendered with formatted headers, code blocks, lists, and tables.
+3. **Table Runbook Feed (`[📝 Notes & Runbook]`) & Markdown Live Preview**:
+   - Provides a scoped operational runbook feed for the active table, displaying tagged notes with pinned runbooks at top.
+   - The Note Composer provides live markdown preview rendering formatted headers, code blocks, checklists, and tables alongside captured SQL snapshots.
 4. **Fluid Workspace Layout & Minimum Width Constraints**:
    - Center workspace (`#center-workspace`) enforces a hard `min-w-[400px]` floor during horizontal sidebar dragging.
    - Cluster Inspector, Flight Recorder, and Table Diagnostics metric grids use CSS Grid `repeat(auto-fit, minmax(...))` to fluidly re-wrap cards on any display size without horizontal clipping.
@@ -588,6 +588,52 @@ The Entity-Relationship Diagram canvas allows developers to explore table relati
    - The Session Audit Log drawer renders dedicated source badges: `[Editor]`, `[Grid Edit]`, `[Grid Add]`, `[Grid Del]`, `[Script]`, `[CSV Import]`, `[Mock Data]`, `[Sync Transfer]`, `[Schema Sync]`.
    - A dropdown filter allows users to view audit entries by specific source context.
    - Audit CSV export includes the `Source` column for forensic tracking.
+
+---
+
+## 20. Operational Notes Inbox, Composer & Reminder Follow-up Lifecycle
+
+### Operational Notes Inbox Drawer & Composer Wireframe
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 📝 Operational Notes Inbox                                        [+ New] [×]│
+├─────────────────────────────────────────────────────────────────────────────┤
+│ 🔍 [Search notes, tags, tables...                    ]                      │
+│ [ All (12) ] [ Inbox (4) ] [ Overdue (1) ] [ Resolved (6) ] [ Archived (1) ]│
+├─────────────────────────────────────────────────────────────────────────────┤
+│ ┌─────────────────────────────────────────────────────────────────────────┐ │
+│ │ 📌 Slow Query Incident - checkout_orders             [🔔 Overdue 10m]   │ │
+│ │ 🏷️ db://prod_cluster/store/checkout_orders  #incident #slow-query        │ │
+│ │ Action: Needs compound index on (status, created_at) to avoid filesort.  │ │
+│ │ 📋 Snapshot: SELECT * FROM checkout_orders WHERE status = 'pending'...  │ │
+│ │ [Edit] [Snooze 10m] [✓ Resolve]                                         │ │
+│ └─────────────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Interaction Models
+
+1. **Header Inbox Trigger & Overdue Badge**:
+   - The global header features a dedicated `[📝 Notes]` button.
+   - A pulsing amber badge (`#notes-inbox-badge`) indicates when one or more notes have active reminders that are overdue, giving DBA and developers immediate situational awareness without intrusive modal blocking.
+2. **Slide-Over Notes Drawer (`#notes-inbox-drawer`)**:
+   - Slides smoothly from the right side of the screen over the active workspace.
+   - Provides instant search, segmented status filters (`All`, `Inbox`, `Resolved`, `Archived`), and pinned runbook toggles.
+   - Direct inline actions on cards: **Edit**, **Snooze 10m**, **Resolve/Reopen**, and **Delete**.
+3. **Dual-Context Note Composer Modal (`#note-composer-dialog`)**:
+   - **Operational Metadata**: Title, status, pin toggle, soft-link object tag (`db://conn/db/table`), and comma-separated user tags.
+   - **Reminder Alarms**: Quick-schedule buttons (`+10m`, `+1h`, `Tomorrow 09:00`, `Next Monday`) and datetime-local input.
+   - **Developer Notes**: Markdown textarea with live preview for runbooks and investigations.
+   - **Raw Snapshot**: Code block previewing captured SQL queries, execution metrics, or AI explanations, preserving ground-truth forensic evidence alongside developer annotations.
+4. **Interactive Alarm Chime & Toast**:
+   - When a reminder matures, a Web Audio API chime plays (587Hz -> 880Hz ramp, zero MP3 asset dependency).
+   - A non-blocking toast surfaces in the bottom-right corner with 1-click actions: `Open Note`, `Snooze 10m`, or `Done`.
+5. **AI Copilot `@` Mention Autocomplete**:
+   - Typing `@` in the Copilot prompt displays an interactive dropdown autocomplete matching operational note titles.
+   - Selecting a note inserts `[@note:<title>]`.
+   - On dispatch, the server extracts referenced notes and injects the raw snapshot and developer action notes directly into the system prompt context.
+
 
 
 

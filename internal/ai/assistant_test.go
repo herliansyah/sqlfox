@@ -127,3 +127,38 @@ func TestAssistant_ActionRouting(t *testing.T) {
 		})
 	}
 }
+
+func TestAssistant_OperationalNotesInjection(t *testing.T) {
+	opNotes := []OperationalNoteSummary{
+		{
+			ID:         "note-abc-123",
+			Title:      "Deadlock Investigation: Checkout Cart",
+			Content:    "SELECT * FROM cart_items WHERE cart_id = 999 FOR UPDATE;",
+			SideNote:   "Deadlock happens when payment worker locks orders first",
+			ObjectTags: []string{"db://conn-prod/shop_db/cart_items"},
+			UserTags:   []string{"#deadlock", "#high-severity"},
+		},
+	}
+
+	req := AssistRequest{
+		Action:           "chat",
+		Prompt:           "Please review the situation mentioned in [@note:Deadlock Investigation: Checkout Cart]",
+		OperationalNotes: opNotes,
+	}
+
+	systemPrompt, _ := AssemblePrompts(req)
+
+	if !strings.Contains(systemPrompt, "=== REFERENCED OPERATIONAL NOTES ===") {
+		t.Fatalf("expected REFERENCED OPERATIONAL NOTES section, got: %s", systemPrompt)
+	}
+	if !strings.Contains(systemPrompt, "Deadlock Investigation: Checkout Cart") {
+		t.Fatalf("expected note title in system prompt, got: %s", systemPrompt)
+	}
+	if !strings.Contains(systemPrompt, "Deadlock happens when payment worker locks orders first") {
+		t.Fatalf("expected side note in system prompt, got: %s", systemPrompt)
+	}
+	if !strings.Contains(systemPrompt, "db://conn-prod/shop_db/cart_items") {
+		t.Fatalf("expected tagged database object in system prompt, got: %s", systemPrompt)
+	}
+}
+

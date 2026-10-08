@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"sqlfox/internal/driver"
 	"sqlfox/internal/vault"
@@ -470,6 +471,140 @@ func TestServer_API_TableNotes(t *testing.T) {
 	if fetchedNote.Content != payload["content"] {
 		t.Fatalf("fetched note content mismatch: %+v", fetchedNote)
 	}
+}
+
+func TestServer_API_OperationalNotes(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "sqlfox-opnotes-api-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	dbPath := filepath.Join(tempDir, "config.db")
+	v, err := vault.OpenVault(dbPath, "test-master-pin")
+	if err != nil {
+		t.Fatalf("failed to open vault: %v", err)
+	}
+	defer v.Close()
+
+	srv := NewServer(v, nil, filepath.Join(tempDir, "backups"), "test-master-pin")
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	client := ts.Client()
+
+	// 1. GET /api/notes (initially empty)
+	resp, err := client.Get(ts.URL + "/api/notes")
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/notes failed: %v, status: %d", err, resp.StatusCode)
+	}
+	var notes []vault.OperationalNote
+	_ = json.NewDecoder(resp.Body).Decode(&notes)
+	resp.Body.Close()
+	if len(notes) != 0 {
+		t.Fatalf("expected 0 notes, got %d", len(notes))
+	}
+
+	// 2. POST /api/notes (create new note with past reminder)
+	pastReminder := time.Now().Add(-5 * time.Minute)
+	createPayload := map[string]any{
+		"title":       "Incident: Lock contention on users",
+		"content":     "SELECT * FROM users FOR UPDATE",
+		"side_note":   "Need to investigate lock wait timeout",
+		"status":      "inbox",
+		"is_pinned":   true,
+		"reminder_at": pastReminder,
+		"object_tags": []string{"db://conn-1/db/users"},
+		"user_tags":   []string{"#incident"},
+	}
+	body, _ := json.Marshal(createPayload)
+	resp, err = client.Post(ts.URL+"/api/notes", "application/json", bytes.NewReader(body))
+	if err != nil || resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST /api/notes failed: %v, status: %d", err, resp.StatusCode)
+	}
+	var createdNote vault.OperationalNote
+	_ = json.NewDecoder(resp.Body).Decode(&createdNote)
+	resp.Body.Close()
+	if createdNote.ID == "" || createdNote.Title != createPayload["title"] {
+		t.Fatalf("created note mismatch: %+v", createdNote)
+	}
+
+	// 3. GET /api/notes/reminders/due (should return the created note)
+	resp, err = client.Get(ts.URL + "/api/notes/reminders/due")
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/notes/reminders/due failed: %v", err)
+	}
+	var dueNotes []vault.OperationalNote
+	_ = json.NewDecoder(resp.Body).Decode(&dueNotes)
+	resp.Body.Close()
+	if len(dueNotes) != 1 || dueNotes[0].ID != createdNote.ID {
+		t.Fatalf("expected 1 due note, got %d", len(dueNotes))
+	}
+
+	// 4. POST /api/notes/{id}/snooze (snooze by 15 mins)
+	snoozeBody, _ := json.Marshal(map[string]int{"minutes": 15})
+	resp, err = client.Post(ts.URL+"/api/notes/"+createdNote.ID+"/snooze", "application/json", bytes.NewReader(snoozeBody))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /api/notes/snooze failed: %v", err)
+	}
+	resp.Body.Close()
+
+	// 5. GET /api/notes/reminders/due (should now be 0)
+	resp, err = client.Get(ts.URL + "/api/notes/reminders/due")
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/notes/reminders/due after snooze failed: %v", err)
+	}
+	var dueAfterSnooze []vault.OperationalNote
+	_ = json.NewDecoder(resp.Body).Decode(&dueAfterSnooze)
+	resp.Body.Close()
+	if len(dueAfterSnooze) != 0 {
+		t.Fatalf("expected 0 due notes after snooze, got %d", len(dueAfterSnooze))
+	}
+
+	// 6. PUT /api/notes/{id} (update side note)
+	createdNote.SideNote = "DBA verified: lock contention resolved"
+	putBody, _ := json.Marshal(createdNote)
+	reqPut, _ := http.NewRequest("PUT", ts.URL+"/api/notes/"+createdNote.ID, bytes.NewReader(putBody))
+	reqPut.Header.Set("Content-Type", "application/json")
+	resp, err = client.Do(reqPut)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT /api/notes failed: %v", err)
+	}
+	resp.Body.Close()
+
+	// 7. POST /api/notes/{id}/resolve
+	resp, err = client.Post(ts.URL+"/api/notes/"+createdNote.ID+"/resolve", "application/json", nil)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /api/notes/resolve failed: %v", err)
+	}
+	resp.Body.Close()
+
+	// 8. Verify note status is resolved
+	resp, err = client.Get(ts.URL + "/api/notes/" + createdNote.ID)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/notes/{id} failed: %v", err)
+	}
+	var fetchedNote vault.OperationalNote
+	_ = json.NewDecoder(resp.Body).Decode(&fetchedNote)
+	resp.Body.Close()
+	if fetchedNote.Status != "resolved" || fetchedNote.SideNote != "DBA verified: lock contention resolved" {
+		t.Fatalf("resolved note state mismatch: %+v", fetchedNote)
+	}
+
+	// 9. DELETE /api/notes/{id}
+	reqDel, _ := http.NewRequest("DELETE", ts.URL+"/api/notes/"+createdNote.ID, nil)
+	resp, err = client.Do(reqDel)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("DELETE /api/notes failed: %v", err)
+	}
+	resp.Body.Close()
+
+	// Verify 404
+	resp, _ = client.Get(ts.URL + "/api/notes/" + createdNote.ID)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 after delete, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
 }
 
 func TestServer_API_ImportCSV(t *testing.T) {

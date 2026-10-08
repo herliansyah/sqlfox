@@ -568,6 +568,23 @@ v2.2 (MySQL Enterprise Operations & Programmability Suite)
   - [x] **Documentation & Verification**: Recorded in ADR-0043, `CONTEXT.md`, `ARCHITECTURE.md`, `README.md`, `USER_GUIDE.md`, `USER_GUIDE_ID.md`, and unit tests in `internal/logger` and `cmd/sqlfox`.
 - **Runnable Verification**: Run `go test -v ./internal/logger` and `go test -v ./cmd/sqlfox -run "TestEnvFileLoading"` -> 100% pass.
 
+---
+
+### Milestone 35: Unified Operational Notes Inbox, Object Tagging & Follow-up Lifecycle
+- **Goal**: Unify ad-hoc table annotations, diagnostic query snapshots, and AI responses into a centralized operational notes inbox with database object soft-linking, scheduled reminder alarms, runbook views, and interactive AI context injection.
+- **Deliverables**:
+  - [x] **Vault Schema & Persistence (`internal/vault/operational_notes.go`)**: SQLite vault schema `operational_notes` with fields for `title`, `notes` (markdown), `snapshot` (SQL/AI JSON payload), `status` (`inbox`, `resolved`, `archived`), `pinned`, `tags`, `object_tag` (`db://conn/db/table`), `reminder_at`, `snoozed_until`, and composite indexes on `(status, reminder_at)` and `(object_tag)`.
+  - [x] **REST API Suite & Backward Compatibility (`internal/server/handlers_notes.go`, `handlers_schema.go`)**: Endpoints for note CRUD, filtering by object tag or status, due reminders retrieval (`/api/notes/reminders/due`), 10-minute snooze (`/api/notes/{id}/snooze`), and resolution toggles (`/api/notes/{id}/resolve`), with graceful fallback bridges for legacy table note handlers.
+  - [x] **Central Slide-Over Inbox Drawer (`web/dist/index.html`)**: Navigation header button `[📝 Notes]` with overdue reminder badge counter, full-text and status filtering (`All`, `Inbox`, `Resolved`, `Archived`), and pinned runbook toggles.
+  - [x] **Dual-Mode Note Composer Dialog**: Native modal supporting operational metadata, soft-link URI tagging, user tags, quick alarm presets (`10m`, `1h`, `Tomorrow 09:00`, `Next Monday`), rich markdown developer notes, and syntax-highlighted raw execution snapshot previews.
+  - [x] **Scheduled Reminder Engine & Audio Chime**: Client-side 30-second evaluation loop playing non-blocking audio chimes via native Web Audio API (D5-A5 frequency sweep) and surfacing actionable interactive toasts (`Open Note`, `Snooze 10m`, `Done`).
+  - [x] **Table Viewer Runbook Feed**: Scoped feed inside the Table Viewer `[📝 Notes & Runbook]` sub-tab presenting table-tagged notes with pinned runbooks at top.
+  - [x] **AI Copilot `@` Mention Autocomplete & Context Injection (`internal/ai/assistant.go`, `internal/server/handlers_ai.go`)**: Interactive note autocomplete popup in Copilot textarea inserting `[@note:<title>]`, with backend extraction injecting raw snapshots and developer action notes into the system prompt context.
+  - [x] **Portable Vault Archive Integration (`internal/vault/export.go`)**: Full export and import serialization of `operational_notes` in encrypted `.sqlfox-vault` bundles.
+  - [x] **Documentation & Verification**: Recorded in ADR-0044, `CONTEXT.md`, `ARCHITECTURE.md`, `UX_DESIGN.md`, `README.md`, `USER_GUIDE.md`, `USER_GUIDE_ID.md`, and unit tests in `internal/vault/operational_notes_test.go`, `internal/server/server_test.go`, and `internal/ai/assistant_test.go`.
+- **Runnable Verification**: Run `go test -v ./internal/vault -run "TestOperationalNotes"`, `go test -v ./internal/server -run "TestServer_API_OperationalNotes"`, and `go test -v ./internal/ai -run "TestAssemblePrompts_OperationalNotes"` -> 100% pass across all operational note lifecycles.
+
+
 
 
 

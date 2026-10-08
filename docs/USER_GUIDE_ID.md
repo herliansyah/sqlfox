@@ -38,6 +38,7 @@
    - [Impor CSV Bebas Dependensi & Pemetaan Kolom](#impor-csv-bebas-dependensi--pemetaan-kolom)
    - [Kanvas Visual ERD Interaktif](#kanvas-visual-erd-interaktif)
    - [BYOK AI Copilot & Automated Error Healer](#byok-ai-copilot--automated-error-healer)
+   - [Unified Operational Notes Inbox & Pengingat Follow-up](#unified-operational-notes-inbox--pengingat-follow-up)
 5. [Playbook Lanjutan DBA & DevOps (Level DBA)](#5-playbook-lanjutan-dba--devops-level-dba)
    - [AST Safety Guard & Challenge Modal (Pencegah Query Rusak)](#ast-safety-guard--challenge-modal-pencegah-query-rusak)
    - [Smart Tiered Backup Otomatis Pra-DDL](#smart-tiered-backup-otomatis-pra-ddl)
@@ -283,6 +284,34 @@ SqlFox dilengkapi asisten AI dengan arsitektur **Bring-Your-Own-Key (BYOK)**:
 - **Eksekusi SQL 1-Klik**: Setiap blok kode SQL hasil generasi AI dilengkapi tombol `Insert & Run` dan `Replace in Editor`.
 - **Chat Session Forking**: Percakapan dapat dicabangkan (*fork*) menjadi alur baru kapan saja untuk mencoba variasi pertanyaan tanpa kehilangan riwayat lama.
 - **Automated Error Healer**: Jika query Anda mengalami kegagalan di editor, klik tombol **🩺 Heal Error**; AI akan menganalisis pesan galat dari database, membeberkan letak kesalahannya, dan menyajikan query perbaikan yang siap dijalankan.
+
+### Unified Operational Notes Inbox & Pengingat Follow-up
+SqlFox menghadirkan sistem catatan operasional terpadu (*Operational Notes Inbox*) langsung di dalam aplikasi, menjembatani telemetri diagnostik database dengan dokumentasi runbook pengembang:
+
+- **Kotak Masuk Catatan Terpusat (Central Notes Inbox)**:
+  - Buka laci catatan (*slide-over drawer* `#notes-inbox-drawer`) kapan saja melalui tombol **📝 Notes** di header atas.
+  - Badge angka merah menampilkan jumlah pengingat yang telah jatuh tempo (*overdue*) dan butuh tindak lanjut segera.
+  - Saring catatan dengan mudah lewat tab status (`All`, `Inbox`, `Resolved`, `Archived`), fitur pencarian teks instan, atau pin catatan penting (`📌`).
+- **Note Composer Komprehensif**:
+  - Klik **+ New Note** atau simpan langsung dari hasil query, baris Processlist, maupun tabel database.
+  - Setiap catatan mengabadikan:
+    - **Metadata**: Judul, status siklus hidup (`inbox`, `resolved`, `archived`), dan penanda pin.
+    - **Tag Objek Database**: Soft-link berformat URI (`db://{connection}/{database}/{table}`) yang menautkan catatan secara presisi ke objek database terkait.
+    - **Tagar Kustom**: Kategorisasi fleksibel (misal `#incident`, `#migration`, `#runbook`).
+    - **Catatan Analisis Developer**: Area Markdown kaya untuk menuangkan investigasi manusia, langkah perbaikan, dan instruksi tim.
+    - **Raw Snapshot**: Salinan read-only dari query SQL asli, penjelasan AI, atau log diagnostik dengan penyorotan sintaks dan live preview.
+- **Pengingat Terjadwal & Alarm Audio Web Audio API**:
+  - Jadwalkan pengingat menggunakan preset cepat (`10m`, `1h`, `Besok 09:00`, `Senin Depan`) atau pemilih tanggal & jam manual.
+  - Mesin latar belakang mengevaluasi alarm setiap 30 detik.
+  - Saat alarm berbunyi, SqlFox memainkan nada dering (*audio chime*) berfrekuensi D5-A5 via native **Web Audio API** (tanpa dependensi file MP3 eksternal) dan memunculkan toast interaktif non-blocking.
+  - Operator dapat langsung mengambil tindakan dari notifikasi: **Buka Catatan**, **Tunda 10 Menit (Snooze)**, atau tandai **Selesai**.
+- **Feed Runbook Khusus di Table Viewer**:
+  - Buka sub-tab **📝 Notes & Runbook** pada tabel mana pun yang sedang dibuka.
+  - Otomatis menampilkan feed catatan yang ditautkan ke tabel aktif tersebut (`db://...`), menempatkan dokumentasi skema, catatan anomali data, dan runbook tepat di samping editor data.
+- **Integrasi Mention `@` di AI Copilot**:
+  - Ketik `@` di kotak pesan AI Copilot untuk memunculkan dropdown pilihan catatan secara interaktif.
+  - Memilih catatan akan menyisipkan token referensi `[@note:<judul>]`.
+  - Saat prompt dikirim, SqlFox mengekstrak catatan terkait dan menyuntikkan raw snapshot serta catatan developer langsung ke sistem prompt context AI, memampukan AI menganalisis insiden masa lalu dan kueri terkait secara akurat.
 
 ---
 
