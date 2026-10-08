@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Scoped table documentation feed in the Table Viewer (`[📝 Notes & Runbook]`) displaying notes tagged to the active table with pinned runbooks at top.
   - Interactive AI Copilot `@` mention autocomplete in chat textarea (`[@note:<title>]`) dynamically injecting snapshot query telemetry and developer action notes into AI prompt context.
   - Full REST API suite (`/api/notes`, `/api/notes/reminders/due`, `/api/notes/{id}/snooze`, `/api/notes/{id}/resolve`) with backward compatibility bridging for legacy table notes.
+- **Query Snapshot Capture & Note Query Extraction**: Seamless two-way bridge between Query Editor tabs and Operational Notes. Operators can instantly capture active queries (or highlighted SQL selections) directly into a Vault Operational Note from the editor toolbar (`📝 Save Note`), tab context menu (`📝 Save as Operational Note...`), or Command Palette (`Ctrl+K`). Conversely, notes can be extracted with 1 click (`⚡ Open in Query`) directly into the Query Editor, with automatic empty tab reuse, safe tab naming, and soft-link database target resolution.
 
 ## [v0.3.0] - 2026-10-08
 
