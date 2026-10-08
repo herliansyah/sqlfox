@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.3.0] - 2026-10-08
+
 ### Added
 - **Diagnostic Logging & Observability Suite (`internal/logger`)**: Built-in structured logging pipeline using Go standard library `log/slog` with zero external dependencies. Supports customizable verbosity levels (`debug`, `info`, `warn`, `error`), human-readable `text` and machine-parseable `json` formats, dual console/file streaming (`-log-file`), silent mode (`-silent`, `-q`), HTTP request telemetry middleware with static asset noise filtration, and sensitive credential masking (`/api/auth/unlock`, `/api/connections`).
 - **Windows Double-Click Automatic Configuration**: Automatic loader `loadEnvFiles()` reading `sqlfox.env` and `.env` files located in the executable directory, current working directory, and `~/.sqlfox/` for effortless logging and configuration when launching via Windows double-click without a terminal.
