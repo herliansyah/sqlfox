@@ -538,7 +538,7 @@
       </div>
 
       <!-- Upper Split: Query Editor Area -->
-      <div id="editor-container" class="h-1/2 flex flex-col border-b border-app-border bg-[#0b1120]">
+      <div id="editor-container" class="flex flex-col border-b border-app-border bg-[#0b1120]" style="height: 50%;">
         <!-- Editor Toolbar -->
         <div class="h-8 bg-app-surface/60 border-b border-app-border/60 px-3 flex items-center justify-between text-xs">
           <div class="flex items-center space-x-2">
@@ -592,6 +592,11 @@
           <textarea id="sql-editor-textarea" class="hidden" placeholder="-- Type SQL query here (Ctrl+Enter to run, Ctrl+Shift+Enter to explain)"></textarea>
           <div id="notes-tab-preview" class="hidden absolute inset-0 p-6 bg-app-bg text-slate-200 text-xs overflow-y-auto leading-relaxed z-10 font-sans"></div>
         </div>
+      </div>
+
+      <!-- Workspace Pane Splitter (ADR/Glossary: Workspace Pane Splitter) -->
+      <div id="workspace-pane-splitter" class="h-1.5 bg-slate-900 hover:bg-sky-500/80 active:bg-sky-400 transition-colors cursor-row-resize flex-shrink-0 relative z-20 flex items-center justify-center group" title="Drag to resize Query Editor and Data Grid (Double-click to reset 50:50)">
+        <div class="w-8 h-0.5 rounded-full bg-slate-600 group-hover:bg-sky-200 transition-colors"></div>
       </div>
 
       <!-- Lower Split: Data Grid / Results Area -->
@@ -4566,6 +4571,7 @@
       restoreTabsState();
       initCodeMirror();
       initAIChatSession();
+      initWorkspacePaneSplitter();
       updateAIProviderBadge();
       const authorized = await checkAuthStatus();
       if (authorized) {
@@ -6323,6 +6329,92 @@
       }
     });
 
+    // --- Workspace Pane Splitter (Query Editor vs Data Grid) ---
+    // ponytail: interactive draggable horizontal divider with min-height constraints (editor: 80px, grid: 120px),
+    // global localStorage persistence, double-click 50:50 reset, and CodeMirror auto-refresh.
+    function initWorkspacePaneSplitter() {
+      const splitter = document.getElementById('workspace-pane-splitter');
+      const editor = document.getElementById('editor-container');
+      if (!splitter || !editor) return;
+
+      const minEditorHeight = 80;
+      const minGridHeight = 120;
+
+      // Restore saved preference if any
+      try {
+        const savedHeight = localStorage.getItem('sqlfox_workspace_editor_height');
+        if (savedHeight) {
+          editor.style.height = savedHeight;
+        }
+      } catch (_) {}
+
+      let isDragging = false;
+      let startY = 0;
+      let startHeight = 0;
+
+      splitter.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        startY = e.clientY;
+        startHeight = editor.offsetHeight;
+        document.body.style.cursor = 'row-resize';
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+      });
+
+      // Double-click to reset to 50:50 default
+      splitter.addEventListener('dblclick', () => {
+        editor.style.height = '50%';
+        try {
+          localStorage.removeItem('sqlfox_workspace_editor_height');
+        } catch (_) {}
+        if (cmEditor) cmEditor.refresh();
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        const deltaY = e.clientY - startY;
+        const parent = editor.parentElement;
+        const parentHeight = parent ? parent.clientHeight : window.innerHeight;
+        const tabsBar = parent ? parent.querySelector('#tabs-container')?.parentElement : null;
+        const tabsHeight = tabsBar ? tabsBar.offsetHeight : 36;
+        const availableHeight = parentHeight - tabsHeight - splitter.offsetHeight;
+
+        const maxEditorHeight = Math.max(minEditorHeight, availableHeight - minGridHeight);
+        const newHeight = Math.max(minEditorHeight, Math.min(maxEditorHeight, startHeight + deltaY));
+
+        editor.style.height = `${newHeight}px`;
+        if (cmEditor) cmEditor.refresh();
+      });
+
+      window.addEventListener('mouseup', () => {
+        if (!isDragging) return;
+        isDragging = false;
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        try {
+          localStorage.setItem('sqlfox_workspace_editor_height', editor.style.height);
+        } catch (_) {}
+        if (cmEditor) cmEditor.refresh();
+      });
+
+      window.addEventListener('resize', () => {
+        if (!editor || editor.classList.contains('hidden')) return;
+        const parent = editor.parentElement;
+        if (!parent) return;
+        const tabsBar = parent.querySelector('#tabs-container')?.parentElement;
+        const tabsHeight = tabsBar ? tabsBar.offsetHeight : 36;
+        const availableHeight = parent.clientHeight - tabsHeight - splitter.offsetHeight;
+        if (availableHeight > minEditorHeight + minGridHeight) {
+          const currentHeight = editor.offsetHeight;
+          const maxEditorHeight = availableHeight - minGridHeight;
+          if (currentHeight > maxEditorHeight) {
+            editor.style.height = `${maxEditorHeight}px`;
+            if (cmEditor) cmEditor.refresh();
+          }
+        }
+      });
+    }
+
     // --- Tabs & Editor ---
     function renderTabs() {
       const container = document.getElementById('tabs-container');
@@ -6415,6 +6507,12 @@
         if (previewEl) previewEl.classList.add('hidden');
         const cmWrapper = cmEditor ? cmEditor.getWrapperElement() : null;
         if (cmWrapper) cmWrapper.classList.remove('hidden');
+      }
+
+      const splitter = document.getElementById('workspace-pane-splitter');
+      if (splitter) {
+        const isEditorVisible = editorContainer && !editorContainer.classList.contains('hidden');
+        splitter.classList.toggle('hidden', !isEditorVisible);
       }
 
       setTimeout(() => {
@@ -6717,7 +6815,10 @@
         btnSaveNote.classList.toggle('cursor-pointer', canSave);
       }
 
-      const x = Math.min(e.clientX, window.innerWidth - 200);
+      const clientX = (e && typeof e.clientX === 'number') ? e.clientX : 0;
+      const clientY = (e && typeof e.clientY === 'number') ? e.clientY : 0;
+      const x = Math.min(clientX, window.innerWidth - 200);
+      const y = Math.min(clientY, window.innerHeight - 250);
       menu.style.left = `${Math.max(10, x)}px`;
       menu.style.top = `${Math.max(10, y)}px`;
       menu.classList.remove('hidden');

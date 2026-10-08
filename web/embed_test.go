@@ -611,4 +611,37 @@ func TestQuerySnapshotCaptureAndNoteExtractionEmbedded(t *testing.T) {
 	}
 }
 
+func TestWorkspacePaneSplitterEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	expectedSnippets := []string{
+		`id="workspace-pane-splitter"`,
+		`cursor-row-resize`,
+		`function initWorkspacePaneSplitter()`,
+		`initWorkspacePaneSplitter()`,
+		`sqlfox_workspace_editor_height`,
+		`minEditorHeight = 80`,
+		`minGridHeight = 120`,
+		`splitter.addEventListener('dblclick'`,
+		`editor.style.height = '50%'`,
+	}
+
+	for _, s := range expectedSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain %q for workspace pane splitter, but was missing", s)
+		}
+	}
+}
+
 

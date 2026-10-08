@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Workspace Pane Splitter**: Draggable horizontal divider separating the Query Editor and Virtual Data Grid, featuring boundary constraints (min 80px editor, min 120px grid), double-click 50:50 reset, persistent layout preference in `localStorage`, and dynamic tab visibility.
 - **Workspace Tab Context Menu & Lifecycle Suite**: Added secondary-click context menu on workspace tabs providing granular and batch tab actions: `Close` (`Ctrl+W`), `Close Others`, `Close Tabs to the Right`, `Close All`, `Duplicate Tab` (with SQL draft clone), and `Rename Tab...` via native modal prompt.
 - **Tab Close Confirmation Guard**: Interactive pre-closure protection powered by the Native Modal Dialog safeguarding against accidental tab closure and discarding of dirty SQL drafts or active workspaces across single (`✕`, `Ctrl+W`, menu) and batch tab operations. Clean, unmodified tabs close instantaneously without alert fatigue.
 - **Empty Workspace Graceful Reset**: Closing all tabs or the final active tab cleanly resets the workspace into a fresh, empty `Query 1.sql` tab rather than freezing or blocking.
@@ -19,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Interactive AI Copilot `@` mention autocomplete in chat textarea (`[@note:<title>]`) dynamically injecting snapshot query telemetry and developer action notes into AI prompt context.
   - Full REST API suite (`/api/notes`, `/api/notes/reminders/due`, `/api/notes/{id}/snooze`, `/api/notes/{id}/resolve`) with backward compatibility bridging for legacy table notes.
 - **Query Snapshot Capture & Note Query Extraction**: Seamless two-way bridge between Query Editor tabs and Operational Notes. Operators can instantly capture active queries (or highlighted SQL selections) directly into a Vault Operational Note from the editor toolbar (`📝 Save Note`), tab context menu (`📝 Save as Operational Note...`), or Command Palette (`Ctrl+K`). Conversely, notes can be extracted with 1 click (`⚡ Open in Query`) directly into the Query Editor, with automatic empty tab reuse, safe tab naming, and soft-link database target resolution.
+
+### Fixed
+- **Tab Context Menu Event Coordinates**: Resolved unhandled `ReferenceError: y is not defined` when right-clicking on workspace tabs, ensuring the context menu opens reliably at cursor coordinates.
 
 ## [v0.3.0] - 2026-10-08
 
