@@ -463,4 +463,42 @@ func TestTabContextMenuAndCloseGuardEmbedded(t *testing.T) {
 	}
 }
 
+func TestMasterPINMaskingAndToggleEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	expectedSnippets := []string{
+		`id="master-pin-badge"`,
+		`id="master-pin-copy-btn"`,
+		`id="master-pin-toggle-btn"`,
+		`id="master-pin-eye-icon"`,
+		"function toggleMasterPINVisibility(",
+		"function updateMasterPINDisplay()",
+		"cachedMasterPIN",
+		"masterPINAutoMaskTimer",
+		"Master PIN copied to clipboard!",
+	}
+
+	for _, s := range expectedSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain master pin security snippet %q, but was missing", s)
+		}
+	}
+
+	// Verify plaintext PIN injection into copy alert popup is removed
+	if strings.Contains(content, "Master PIN '${pin}' copied to clipboard!") {
+		t.Errorf("expected raw PIN to NOT be exposed in copy alert popup")
+	}
+}
+
 

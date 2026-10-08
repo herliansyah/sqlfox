@@ -278,11 +278,19 @@
 
     <!-- Top Right Controls -->
     <div class="flex items-center space-x-2 text-xs">
-      <!-- PIN badge: security affordance, one-click copy, stays standalone -->
-      <button id="master-pin-badge" onclick="copyMasterPIN()" class="hidden h-7 bg-slate-800 hover:bg-slate-700 text-sky-400 px-2.5 rounded border border-sky-900 font-mono transition flex items-center space-x-1" title="Click to copy Master PIN for tablet / remote login">
-        <span>🔑 PIN:</span>
-        <span id="master-pin-text" class="font-bold text-white">...</span>
-      </button>
+      <!-- PIN badge: security affordance, compound pill (copy + peek toggle) -->
+      <div id="master-pin-badge" class="hidden h-7 bg-slate-800 text-sky-400 rounded border border-sky-900 font-mono transition inline-flex items-center text-xs overflow-hidden select-none" title="Click text to copy PIN, click eye to reveal">
+        <button id="master-pin-copy-btn" onclick="copyMasterPIN()" class="h-full px-2 hover:bg-slate-700 text-sky-400 hover:text-sky-300 transition flex items-center space-x-1.5 focus:outline-none" title="Click to copy Master PIN for tablet / remote login">
+          <span>🔑 PIN:</span>
+          <span id="master-pin-text" class="font-bold text-white tracking-widest">••••••</span>
+        </button>
+        <button id="master-pin-toggle-btn" onclick="toggleMasterPINVisibility(event)" class="h-full px-1.5 text-slate-400 hover:text-white hover:bg-slate-700 border-l border-sky-900/60 transition flex items-center justify-center focus:outline-none" title="Peek Master PIN (auto-hides in 10s)">
+          <svg id="master-pin-eye-icon" class="w-3.5 h-3.5 fill-none stroke-current" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+            <circle cx="12" cy="12" r="3"></circle>
+          </svg>
+        </button>
+      </div>
 
       <!-- Read-Only: state indicator, stays standalone -->
       <button id="readonly-toggle-btn" onclick="toggleReadOnly()" class="hidden h-7 px-2.5 rounded font-medium transition border flex items-center space-x-1.5">
@@ -4257,14 +4265,61 @@
       }
     }
 
+    let cachedMasterPIN = '';
+    let masterPINVisible = false;
+    let masterPINAutoMaskTimer = null;
+
+    const PIN_EYE_SVG = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle>';
+    const PIN_EYE_OFF_SVG = '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line>';
+
+    function updateMasterPINDisplay() {
+      const pinTextEl = document.getElementById('master-pin-text');
+      const eyeIconEl = document.getElementById('master-pin-eye-icon');
+      const toggleBtn = document.getElementById('master-pin-toggle-btn');
+      if (!pinTextEl) return;
+
+      if (masterPINVisible) {
+        pinTextEl.textContent = cachedMasterPIN;
+        pinTextEl.classList.remove('tracking-widest');
+        if (eyeIconEl) eyeIconEl.innerHTML = PIN_EYE_OFF_SVG;
+        if (toggleBtn) toggleBtn.title = 'Hide Master PIN';
+      } else {
+        const maskLen = (cachedMasterPIN && cachedMasterPIN.length) || 6;
+        pinTextEl.textContent = '•'.repeat(maskLen);
+        pinTextEl.classList.add('tracking-widest');
+        if (eyeIconEl) eyeIconEl.innerHTML = PIN_EYE_SVG;
+        if (toggleBtn) toggleBtn.title = 'Peek Master PIN (auto-hides in 10s)';
+      }
+    }
+
+    // ponytail: 10s auto-mask timeout prevents shoulder-surfing if screen is left unattended
+    function toggleMasterPINVisibility(e) {
+      if (e) e.stopPropagation();
+      masterPINVisible = !masterPINVisible;
+      if (masterPINAutoMaskTimer) {
+        clearTimeout(masterPINAutoMaskTimer);
+        masterPINAutoMaskTimer = null;
+      }
+      if (masterPINVisible) {
+        masterPINAutoMaskTimer = setTimeout(() => {
+          masterPINVisible = false;
+          updateMasterPINDisplay();
+        }, 10000);
+      }
+      updateMasterPINDisplay();
+    }
+
     async function loadMasterPIN() {
       try {
         const res = await apiFetch('/api/auth/master-key');
         if (res.ok) {
           const data = await res.json();
           if (data.master_password) {
-            document.getElementById('master-pin-text').textContent = data.master_password;
-            document.getElementById('master-pin-badge').classList.remove('hidden');
+            cachedMasterPIN = data.master_password;
+            masterPINVisible = false;
+            updateMasterPINDisplay();
+            const badgeEl = document.getElementById('master-pin-badge');
+            if (badgeEl) badgeEl.classList.remove('hidden');
           }
         }
       } catch (err) {
@@ -4308,10 +4363,11 @@
     }
 
     async function copyMasterPIN() {
-      const pin = document.getElementById('master-pin-text').textContent;
+      const pin = cachedMasterPIN || document.getElementById('master-pin-text').textContent;
       const ok = await copyTextToClipboard(pin);
       if (ok) {
-        showNativeAlert(`Master PIN '${pin}' copied to clipboard!\nUse this PIN to unlock SqlFox when accessing from your tablet/phone.`, 'Remote Access');
+        // ponytail: omit raw PIN value from alert message to prevent shoulder-surfing popups
+        showNativeAlert('Master PIN copied to clipboard!\nUse this PIN to unlock SqlFox when accessing from your tablet/phone.', 'Remote Access');
       } else {
         showNativeAlert('Failed to copy Master PIN to clipboard.', 'Clipboard Error');
       }
