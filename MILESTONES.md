@@ -540,5 +540,34 @@ v2.2 (MySQL Enterprise Operations & Programmability Suite)
   - [x] **Documentation & Verification**: Recorded in ADR-0041, `CONTEXT.md`, and unit tests in `internal/driver/mysql` and `internal/server`.
 - **Runnable Verification**: Run `go test -v ./internal/server -run "TestDBAOperationsAndAuditLog"` and `go test -v ./...` -> 100% pass.
 
+---
+
+### Milestone 33: Multi-Engine Feature Parity & Dialect Resilience
+- **Goal**: Ensure ironclad feature parity and fault tolerance across MySQL 5.7, 8.0, 8.4 LTS, 9.x, MariaDB, and PostgreSQL by eliminating dialect crashes and introspecting engine-native catalogs.
+- **Deliverables**:
+  - [x] **Universal Replication Normalizer (MySQL 8.4+ & MariaDB)**: Dual-syntax probe querying `SHOW REPLICA STATUS` and `SHOW BINARY LOG STATUS` with automatic fallback to `SHOW SLAVE STATUS` and `SHOW MASTER STATUS` for MySQL 5.7/8.0; normalized column keys (`replica_io_running` $\leftrightarrow$ `slave_io_running`, `seconds_behind_source` $\leftrightarrow$ `seconds_behind_master`).
+  - [x] **MariaDB Lock Wait Fallback**: Adaptive detection falling back to `information_schema.innodb_lock_waits` when `sys.innodb_lock_waits` is absent.
+  - [x] **PostgreSQL Routines Explorer**: Introspects `pg_proc` and `pg_namespace` with signature-aware labeling (`func_name(type1, type2)`) avoiding overload collisions, and extracts definitions via `pg_catalog.pg_get_functiondef`.
+  - [x] **PostgreSQL Adaptive Statement Digest**: Queries `pg_stat_statements` with 1-click helper note when the extension is disabled.
+  - [x] **PostgreSQL Replication & Standby Inspector**: Probes `pg_stat_replication` on primary nodes and `pg_stat_wal_receiver` on standbys.
+  - [x] **PostgreSQL Dialect-Aware Role Matrix**: Introspects `pg_roles` attributes (`SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION`, `BYPASSRLS`, `LOGIN`) and role hierarchy (`MEMBER OF`).
+  - [x] **PostgreSQL Dialect-Correct Structure Sync DDL**: Decomposes column alterations into atomic `ALTER TABLE tbl ALTER COLUMN col TYPE ...; ALTER TABLE tbl ALTER COLUMN col SET/DROP NOT NULL;` statements instead of unsupported `MODIFY COLUMN`.
+  - [x] **Documentation & Verification**: Recorded in ADR-0042, `CONTEXT.md`, `ARCHITECTURE.md`, `USER_GUIDE.md`, and unit tests in `internal/driver/mysql`, `internal/driver/postgres`, and `internal/server`.
+- **Runnable Verification**: Run `go test -v ./internal/driver/mysql -run "TestReplicationStatusNormalization"` and `go test -v ./internal/driver/postgres -run "TestPostgresRoutinesAndDigest"` -> 100% pass.
+
+---
+
+### Milestone 34: Diagnostic Logger Suite & Windows Double-Click Observability
+- **Goal**: Provide production-grade structured logging and request telemetry with zero third-party dependencies using Go stdlib `log/slog`, dual console/file sinks, and transparent Windows double-click configuration.
+- **Deliverables**:
+  - [x] **Zero-Dependency Structured Logger (`internal/logger`)**: Built on Go stdlib `log/slog` supporting `debug`, `info`, `warn`, `error` verbosity and `text` or `json` formats.
+  - [x] **Multi-Sink File Persistence**: Dual-stream Tee sink and atomic file appending via `-log-file <path>`, with silent mode (`-silent`, `-q`) discarding terminal output while retaining file logs.
+  - [x] **HTTP Telemetry Middleware**: End-to-end request latency, status code, and byte tracking, with static asset noise filtration and sensitive credential masking (`/api/auth/unlock`, `/api/connections`).
+  - [x] **Windows Double-Click Auto-Configuration**: Cascading configuration loader `loadEnvFiles()` reading `sqlfox.env` and `.env` from executable directory, working directory, and user profile directory (`~/.sqlfox/`).
+  - [x] **CLI Flag Integration**: Support for `-log-level`, `-v`, `-verbose`, `-log-format`, `-log-file`, `-silent`, and `-q`.
+  - [x] **Documentation & Verification**: Recorded in ADR-0043, `CONTEXT.md`, `ARCHITECTURE.md`, `README.md`, `USER_GUIDE.md`, `USER_GUIDE_ID.md`, and unit tests in `internal/logger` and `cmd/sqlfox`.
+- **Runnable Verification**: Run `go test -v ./internal/logger` and `go test -v ./cmd/sqlfox -run "TestEnvFileLoading"` -> 100% pass.
+
+
 
 

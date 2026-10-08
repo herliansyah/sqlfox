@@ -125,12 +125,65 @@ SqlFox menyediakan argumen baris perintah yang fleksibel:
 # Menjalankan mode headless server (tanpa membuka browser otomatis)
 ./sqlfox -no-browser
 
+# Mengaktifkan log diagnostik verbose / debug ke terminal
+./sqlfox -v
+./sqlfox -log-level debug
+
+# Format log terstruktur JSON
+./sqlfox -log-format json
+
+# Menyimpan log diagnostik ke file (dual-stream: terminal + file)
+./sqlfox -log-file sqlfox.log -log-level debug
+
+# Mode senyap (menonaktifkan log banner dan HTTP request di terminal)
+./sqlfox -silent   # atau -q
+
 # Mengaktifkan profil diagnostik memori loopback
 SQLFOX_PPROF=1 ./sqlfox -port 9090
 ```
 
+| Opsi Flag | Nilai Default | Penjelasan |
+| :--- | :--- | :--- |
+| `-port <nomor>` | `8080` | Port HTTP (dilengkapi fitur pencarian port berurutan otomatis) |
+| `-host <ip>` | `127.0.0.1` | Alamat IP antarmuka jaringan (`0.0.0.0` untuk akses LAN dengan proteksi PIN) |
+| `-log-level <lvl>`| `info` | Tingkat rincian log minimum: `debug`, `info`, `warn`, `error` |
+| `-v`, `-verbose` | `false` | Pintasan cepat untuk `-log-level debug` |
+| `-log-format <fmt>`| `text` | Format log terstruktur: `text` (mudah dibaca manusia) atau `json` |
+| `-log-file <path>`| `""` | Lokasi berkas log persistent (menulis ke terminal dan file sekaligus) |
+| `-silent`, `-q` | `false` | Mematikan tampilan log di terminal (pencatatan file tetap berjalan jika diset) |
+| `-no-browser` | `false` | Menjalankan server tanpa membuka browser web bawaan sistem operasi |
+
 > [!NOTE]
 > **Fitur Otomatis Port Hunting**: Jika port yang ditentukan (misalnya 8080) sedang digunakan oleh aplikasi lain (`EADDRINUSE`), SqlFox secara otomatis akan mencari dan mengikat port berurutan berikutnya yang bebas (8081, 8082, dst.) lalu menampilkan URL aktif di terminal.
+
+### Konfigurasi Logging Saat Dobel-Klik di Windows
+Saat Anda menjalankan `sqlfox.exe` dengan cara klik ganda (double-click) di Windows Explorer, jendela terminal tidak terbuka sehingga argumen flag baris perintah tidak dapat diketikkan secara langsung. SqlFox menyediakan 4 metode mudah untuk mengatur tingkat verbositas dan penyimpanan berkas log:
+
+1. **Berkas Konfigurasi Otomatis (`sqlfox.env` atau `.env`)**:
+   Buat atau letakkan file teks bernama `sqlfox.env` atau `.env` di folder yang sama dengan `sqlfox.exe` (atau di folder profil pengguna `~/.sqlfox/sqlfox.env`). SqlFox akan membaca dan menerapkannya secara otomatis saat dijalankan:
+   ```ini
+   # sqlfox.env
+   SQLFOX_LOG_LEVEL=debug
+   SQLFOX_LOG_FILE=sqlfox-debug.log
+   SQLFOX_LOG_FORMAT=text
+   # SQLFOX_SILENT=true
+   ```
+2. **Shortcut Desktop Windows**:
+   - Klik kanan `sqlfox.exe` &rarr; **Show more options** &rarr; **Create shortcut** (Buat pintasan).
+   - Klik kanan shortcut baru tersebut &rarr; **Properties**.
+   - Pada kolom **Target**, tambahkan parameter flag di bagian akhir:
+     ```
+     C:\path\to\sqlfox.exe -log-level debug -log-file C:\path\to\sqlfox.log
+     ```
+   - Cukup dobel-klik shortcut ini setiap kali ingin menjalankan SqlFox dengan opsi log tersebut.
+3. **Skrip Batch Eksekutor (`run-sqlfox.bat`)**:
+   Buat file batch kecil di folder yang sama dengan `sqlfox.exe`:
+   ```bat
+   @echo off
+   start "" "%~dp0sqlfox.exe" -v -log-file "%~dp0sqlfox-debug.log"
+   ```
+4. **Environment Variables Windows**:
+   Atur variabel lingkungan sistem/pengguna `SQLFOX_LOG_LEVEL=debug` atau `SQLFOX_LOG_FILE=C:\logs\sqlfox.log` melalui pengaturan Windows (*System Properties* &rarr; *Environment Variables*). SqlFox akan selalu membaca nilai tersebut terlepas dari cara file dijalankan.
 
 ### Remote Access Guard & PIN Keamanan
 Saat Anda menjalankan SqlFox di server jaringan lokal atau mengaksesnya via IP LAN (`http://192.168.1.50:8080`):
@@ -269,12 +322,34 @@ Dapat diakses melalui **⚡ Monitor &rarr; ⚡ Processlist**:
 - Opsi filter untuk menyembunyikan thread tidur (*Sleep*) agar DBA dapat berfokus pada thread yang sedang bekerja.
 - **Pembatalan Out-of-Band**: Tombol **Kill Query** mengirimkan perintah terminasi (`KILL QUERY <id>` pada MySQL atau `SELECT pg_cancel_backend(<pid>)` pada PostgreSQL) melalui koneksi kontrol terpisah, sehingga koneksi utama aplikasi tidak terputus.
 
-### Inspektur Cluster & Replikasi (PXC / Galera / Replika MySQL)
+### Inspektur Cluster & Replikasi (PXC / Galera / MySQL 8.4+ / PostgreSQL)
 Dapat diakses melalui **⚡ Monitor &rarr; 🌐 Cluster**:
-- Dioptimalkan untuk **Percona XtraDB Cluster (PXC)**, **MariaDB Galera Cluster**, dan replikasi standar Primary/Replica.
-- **Pendeteksi Flow Control**: Memantau metrik jeda replikasi kluster `wsrep_flow_control_paused` secara real-time.
+- Dioptimalkan untuk **Percona XtraDB Cluster (PXC)**, **MariaDB Galera**, **MySQL 8.4 LTS / 9.x**, dan replikasi **PostgreSQL Primary/Standby**.
+- **Universal Replication Normalizer (MySQL & MariaDB)**:
+  - Otomatis mengeksekusi sintaks modern `SHOW REPLICA STATUS` dan `SHOW BINARY LOG STATUS`, dengan fallback aman ke `SHOW SLAVE STATUS` dan `SHOW MASTER STATUS` pada MySQL 5.7 / 8.0 lawas.
+  - Menyelaraskan nama metrik kunci (`replica_io_running` vs `slave_io_running`, `seconds_behind_source` vs `seconds_behind_master`) di seluruh generasi MySQL.
+  - Pada MariaDB, otomatis mendeteksi ketiadaan skema `sys` dan beralih ke tabel bawaan `information_schema.innodb_lock_waits`.
+- **Telemetri Replikasi & Standby PostgreSQL**:
+  - Otomatis memantau `pg_stat_replication` pada primary (klien streaming, write/flush/replay LSN, status sinkronisasi) dan `pg_stat_wal_receiver` pada standby.
+- **Pendeteksi Flow Control Galera / PXC**: Memantau metrik jeda replikasi kluster `wsrep_flow_control_paused` secara real-time.
 - **Pelacak Node Paling Lambat**: Memeriksa seluruh node rekan di dalam kluster secara otomatis untuk mengisolasi node mana yang mengalami kemacetan I/O atau beban berlebih.
 - **Matriks Tri-Metric**: Mengevaluasi latensi jaringan EVS, hambatan disk/InnoDB, dan kapasitas antrean thread *applier worker*.
+
+### Statement Digest Historis & Post-Mortem Deadlock
+Dapat diakses melalui **⚡ Monitor &rarr; ⚡ Processlist** (Segmented Pill Switcher):
+- **Live Threads**: Memantau dan menghentikan query yang sedang berjalan secara out-of-band.
+- **Statement Digest**: Menganalisis latensi persentil dan pola query terlambat secara historis.
+  - MySQL/MariaDB: Mengambil metrik dari `sys.statement_analysis` dengan fallback ke `performance_schema.events_statements_summary_by_digest`.
+  - PostgreSQL: Memeriksa ekstensi `pg_stat_statements` secara adaptif lengkap dengan petunjuk aktivasi 1-klik jika ekstensi belum diaktifkan.
+- **Deadlock Inspector**: Mengekstrak dan membedah blok `LATEST DETECTED DEADLOCK` dari `SHOW ENGINE INNODB STATUS` ke dalam matriks perbandingan konflik Transaction 1 vs Transaction 2.
+
+### Programmability & Matriks Hak Akses User (MySQL & PostgreSQL)
+- **Routines Explorer**: Menampilkan Stored Procedure dan Function di sidebar navigasi:
+  - MySQL: Memindai `information_schema.routines` dengan aksi 1-klik untuk membuka template eksekusi `CALL sp(...)` di tab editor.
+  - PostgreSQL: Memindai `pg_proc` + `pg_namespace` dengan signature tipe parameter yang aman dari overload (`func_name(type1, type2)`) serta ekstraksi DDL via `pg_get_functiondef`.
+- **Manajemen User & Role**: Dapat diakses melalui **⚡ Monitor &rarr; 🛡️ Privilege Matrix**:
+  - MySQL: Memindai kolom grant `mysql.user` beserta status koneksi SSL dan masa kedaluwarsa sandi.
+  - PostgreSQL: Matriks role sadar dialek yang memeriksa atribut `pg_roles` (`SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION`, `BYPASSRLS`, `LOGIN`) dan keanggotaan grup (`MEMBER OF`).
 
 ### Performance Flight Recorder (Telemetri Quad-Metric)
 Dapat diakses melalui **⚡ Monitor &rarr; 📈 Recorder**:
@@ -290,10 +365,8 @@ Dapat diakses melalui **⚡ Monitor &rarr; 📈 Recorder**:
 Dapat diakses melalui **⚡ Monitor &rarr; ⚙️ Server Variables**:
 - Memeriksa ratusan variabel dan parameter sistem database dengan fitur pencarian dan pengelompokan kategori.
 - **Tuning Advisor**: Menganalisis parameter kunci dan memberikan rekomendasi optimasi:
-  - Ukuran `innodb_buffer_pool_size` relatif terhadap kapasitas total RAM server.
-  - Rasio `max_connections` terhadap thread cache.
-  - Konfigurasi durabilitas ACID pada `innodb_flush_log_at_trx_commit`.
-  - Batasan memori untuk tabel sementara (`tmp_table_size` & `max_heap_table_size`).
+  - MySQL: Ukuran `innodb_buffer_pool_size`, rasio `max_connections`, dan durabilitas `innodb_flush_log_at_trx_commit`.
+  - PostgreSQL: Pengaturan `shared_buffers`, `work_mem`, `maintenance_work_mem`, `effective_cache_size`, `wal_buffers`, `checkpoint_completion_target`, dan `autovacuum`.
 
 ### Heuristic Index Advisor & Query Tuner (Aturan ESR)
 1. Tulis atau tempel query `SELECT` yang lambat di Query Editor.
@@ -310,7 +383,7 @@ Dapat diakses melalui **📦 DB Tools &rarr; 🔄 Structure Sync**:
 1. Pilih sesi **Source** (Sumber) dan sesi **Target** (Tujuan).
 2. SqlFox memindai struktur kedua database, membedah DDL menjadi AST normal, lalu menghitung perbedaan strukturnya:
    - Tabel yang belum ada di target
-   - Kolom yang baru, dihapus, atau tipe data yang berubah
+   - Kolom yang baru, dihapus, atau tipe data yang berubah (dengan sintaks DDL sesuai dialek: `MODIFY COLUMN` pada MySQL vs `ALTER TABLE tabel ALTER COLUMN kolom TYPE ...; ALTER TABLE tabel ALTER COLUMN kolom SET/DROP NOT NULL;` pada PostgreSQL)
    - Perbedaan indeks dan Primary Key
    - Perbedaan relasi Foreign Key
 3. Menghasilkan skrip migrasi DDL berurutan yang aman lengkap dengan pratinjau sebelum dijalankan.

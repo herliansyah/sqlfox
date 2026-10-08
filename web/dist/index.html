@@ -6183,7 +6183,7 @@
           const parsed = JSON.parse(raw);
           if (parsed && Array.isArray(parsed.tabs) && parsed.tabs.length > 0) {
             tabs = parsed.tabs;
-            if (activeConnection && activeConnection.driver !== 'mysql' && activeConnection.driver !== 'mariadb') {
+            if (activeConnection && activeConnection.driver !== 'mysql' && activeConnection.driver !== 'mariadb' && activeConnection.driver !== 'postgres' && activeConnection.driver !== 'postgresql' && activeConnection.driver !== 'pg') {
               tabs = tabs.filter(t => !t.isProcesslist && !t.isCluster);
               if (tabs.length === 0) {
                 tabs = [{ id: 'tab-1', title: 'Query 1.sql', sql: '', isTableViewer: false }];
@@ -17441,8 +17441,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
     }
 
     function openPrivilegeMatrixModal() {
-      if (!activeConnection || (activeConnection.driver !== 'mysql' && activeConnection.driver !== 'mariadb')) {
-        showNativeAlert('User management is exclusively supported for MySQL/MariaDB database connections.', 'Privilege Matrix');
+      if (!activeConnection || (activeConnection.driver !== 'mysql' && activeConnection.driver !== 'mariadb' && activeConnection.driver !== 'postgres' && activeConnection.driver !== 'postgresql' && activeConnection.driver !== 'pg')) {
+        showNativeAlert('User and role management is supported for MySQL, MariaDB, and PostgreSQL connections.', 'Privilege Matrix');
         return;
       }
       initPrivilegeCheckboxes();
@@ -17498,15 +17498,18 @@ Please analyze what is causing this query to be slow and suggest necessary query
           return;
         }
 
-        listEl.innerHTML = users.map(u => `
+        const isPG = activeConnection && (activeConnection.driver === 'postgres' || activeConnection.driver === 'postgresql' || activeConnection.driver === 'pg');
+        listEl.innerHTML = users.map(u => {
+          const displayHost = isPG ? 'N/A (pg_hba.conf)' : u.host;
+          return `
           <div onclick="selectPrivilegeUser('${escapeHtml(u.user)}', '${escapeHtml(u.host)}')" class="p-2 rounded bg-slate-900/60 hover:bg-slate-800 cursor-pointer flex items-center justify-between border border-transparent priv-user-item ${activePrivUser && activePrivUser.user === u.user && activePrivUser.host === u.host ? 'border-sky-500 bg-slate-800 text-white' : 'text-slate-300'}">
             <div class="flex items-center space-x-1.5 truncate">
-              <span class="text-xs">👤</span>
+              <span class="text-xs">${isPG ? '🛡️' : '👤'}</span>
               <span class="font-bold truncate">${escapeHtml(u.user)}</span>
             </div>
-            <span class="text-[10px] bg-slate-950 text-slate-400 px-1 py-0.2 rounded font-mono">${escapeHtml(u.host)}</span>
+            <span class="text-[10px] bg-slate-950 text-slate-400 px-1 py-0.2 rounded font-mono">${escapeHtml(displayHost)}</span>
           </div>
-        `).join('');
+        `}).join('');
 
         if (users.length > 0 && !activePrivUser) {
           selectPrivilegeUser(users[0].user, users[0].host);
@@ -17517,12 +17520,17 @@ Please analyze what is causing this query to be slow and suggest necessary query
     }
 
     async function selectPrivilegeUser(user, host) {
+      const isPG = activeConnection && (activeConnection.driver === 'postgres' || activeConnection.driver === 'postgresql' || activeConnection.driver === 'pg');
       activePrivUser = { user, host, isNew: false };
       document.querySelectorAll('.priv-user-item').forEach(el => {
         el.classList.remove('border-sky-500', 'bg-slate-800', 'text-white');
       });
       document.getElementById('priv-input-user').value = user;
-      document.getElementById('priv-input-host').value = host;
+      const hostInput = document.getElementById('priv-input-host');
+      if (hostInput) {
+        hostInput.value = isPG ? 'N/A (pg_hba.conf)' : host;
+        hostInput.disabled = isPG;
+      }
       document.getElementById('priv-input-password').value = '';
 
       try {
@@ -17535,9 +17543,14 @@ Please analyze what is causing this query to be slow and suggest necessary query
     }
 
     function startCreateNewUser() {
-      activePrivUser = { user: '', host: '%', isNew: true };
+      const isPG = activeConnection && (activeConnection.driver === 'postgres' || activeConnection.driver === 'postgresql' || activeConnection.driver === 'pg');
+      activePrivUser = { user: '', host: isPG ? '' : '%', isNew: true };
       document.getElementById('priv-input-user').value = '';
-      document.getElementById('priv-input-host').value = '%';
+      const hostInput = document.getElementById('priv-input-host');
+      if (hostInput) {
+        hostInput.value = isPG ? 'N/A (pg_hba.conf)' : '%';
+        hostInput.disabled = isPG;
+      }
       document.getElementById('priv-input-password').value = '';
       switchPrivTab('account');
       applyPrivilegePreset('none');

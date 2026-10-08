@@ -227,6 +227,32 @@ func (s *Server) handleSyncStructureCompare(w http.ResponseWriter, r *http.Reque
 					var sql string
 					if tgtDriver == "sqlite" {
 						sql = fmt.Sprintf("-- SQLite: column %s definition differs (%s vs %s)", srcCol.Name, srcCol.Type, tgtCol.Type)
+					} else if tgtDriver == "postgres" || tgtDriver == "postgresql" || tgtDriver == "pg" {
+						// ponytail: Atomic granular ALTER statements for PostgreSQL; upgrade path: full alter column state machine
+						var pgStmts []string
+						tblQ := quoteIdent(srcTbl.Name, tgtDriver)
+						colQ := quoteIdent(srcCol.Name, tgtDriver)
+						if !strings.EqualFold(srcCol.Type, tgtCol.Type) {
+							pgStmts = append(pgStmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s TYPE %s;", tblQ, colQ, srcCol.Type))
+						}
+						if srcCol.IsNullable != tgtCol.IsNullable {
+							if srcCol.IsNullable {
+								pgStmts = append(pgStmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s DROP NOT NULL;", tblQ, colQ))
+							} else {
+								pgStmts = append(pgStmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s SET NOT NULL;", tblQ, colQ))
+							}
+						}
+						if srcCol.DefaultValue != tgtCol.DefaultValue {
+							if srcCol.DefaultValue == "" {
+								pgStmts = append(pgStmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s DROP DEFAULT;", tblQ, colQ))
+							} else {
+								pgStmts = append(pgStmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s SET DEFAULT %s;", tblQ, colQ, srcCol.DefaultValue))
+							}
+						}
+						if len(pgStmts) == 0 {
+							pgStmts = append(pgStmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s TYPE %s;", tblQ, colQ, srcCol.Type))
+						}
+						sql = strings.Join(pgStmts, "\n")
 					} else {
 						sql = fmt.Sprintf("ALTER TABLE %s MODIFY COLUMN %s %s;",
 							quoteIdent(srcTbl.Name, tgtDriver),

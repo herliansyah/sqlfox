@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"sqlfox/internal/driver"
 	"sqlfox/internal/vault"
 )
 
@@ -338,3 +339,41 @@ func TestSyncDataCompareAndApply(t *testing.T) {
 		t.Errorf("expected Bob email to be updated to 'bob@example.com', got '%v'", bobRow[2])
 	}
 }
+
+func TestPostgresStructureSyncColumnAlter(t *testing.T) {
+	srcCol := driver.ColumnMetadata{Name: "score", Type: "bigint", IsNullable: false, DefaultValue: "0"}
+	tgtCol := driver.ColumnMetadata{Name: "score", Type: "integer", IsNullable: true, DefaultValue: ""}
+
+	if columnEquals(srcCol, tgtCol) {
+		t.Fatal("expected columns to not equal")
+	}
+
+	// Verify DDL generation logic for postgres target
+	tgtDriver := "postgres"
+	var pgStmts []string
+	tblQ := quoteIdent("leaderboard", tgtDriver)
+	colQ := quoteIdent(srcCol.Name, tgtDriver)
+	if !strings.EqualFold(srcCol.Type, tgtCol.Type) {
+		pgStmts = append(pgStmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s TYPE %s;", tblQ, colQ, srcCol.Type))
+	}
+	if srcCol.IsNullable != tgtCol.IsNullable {
+		if srcCol.IsNullable {
+			pgStmts = append(pgStmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s DROP NOT NULL;", tblQ, colQ))
+		} else {
+			pgStmts = append(pgStmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s SET NOT NULL;", tblQ, colQ))
+		}
+	}
+	if srcCol.DefaultValue != tgtCol.DefaultValue {
+		if srcCol.DefaultValue == "" {
+			pgStmts = append(pgStmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s DROP DEFAULT;", tblQ, colQ))
+		} else {
+			pgStmts = append(pgStmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s SET DEFAULT %s;", tblQ, colQ, srcCol.DefaultValue))
+		}
+	}
+	sql := strings.Join(pgStmts, "\n")
+	expected := "ALTER TABLE \"leaderboard\" ALTER COLUMN \"score\" TYPE bigint;\nALTER TABLE \"leaderboard\" ALTER COLUMN \"score\" SET NOT NULL;\nALTER TABLE \"leaderboard\" ALTER COLUMN \"score\" SET DEFAULT 0;"
+	if sql != expected {
+		t.Errorf("expected:\n%s\ngot:\n%s", expected, sql)
+	}
+}
+

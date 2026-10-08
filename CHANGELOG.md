@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Diagnostic Logging & Observability Suite (`internal/logger`)**: Built-in structured logging pipeline using Go standard library `log/slog` with zero external dependencies. Supports customizable verbosity levels (`debug`, `info`, `warn`, `error`), human-readable `text` and machine-parseable `json` formats, dual console/file streaming (`-log-file`), silent mode (`-silent`, `-q`), HTTP request telemetry middleware with static asset noise filtration, and sensitive credential masking (`/api/auth/unlock`, `/api/connections`).
+- **Windows Double-Click Automatic Configuration**: Automatic loader `loadEnvFiles()` reading `sqlfox.env` and `.env` files located in the executable directory, current working directory, and `~/.sqlfox/` for effortless logging and configuration when launching via Windows double-click without a terminal.
+- **PostgreSQL Deep Catalog Introspection & Parity**:
+  - Routines Explorer for Stored Functions and Procedures introspecting `pg_proc` and `pg_namespace` with overload-safe signatures (`func_name(type1, type2)`) and full DDL retrieval via `pg_get_functiondef`.
+  - Adaptive Statement Digest querying `pg_stat_statements` with real-time average execution times, call counts, and a 1-click helper note when the extension is disabled.
+  - Replication and Standby Inspector probing `pg_stat_replication` on primary nodes and `pg_stat_wal_receiver` on standbys.
+  - User & Role Management Matrix introspecting `pg_roles` attributes (`SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION`, `BYPASSRLS`, `LOGIN`) and role hierarchy (`MEMBER OF`).
+- **Developer Programmability & Grid Suite**:
+  - Routines Explorer for MySQL/MariaDB with 1-click `CALL sp(...)` templates and OUT-variable queries.
+  - Scheduled Events controller with status toggles (`ALTER EVENT ENABLE/DISABLE`).
+  - Table Partitions telemetry sub-tab in Table Designer detailing partition methods, expressions, and row counts.
+  - JSON Cell Viewer modal in virtual grid with pretty-printed formatting and syntax validation.
+- **DBA Fire-Fighting Suite**:
+  - Deadlock Inspector parsing `SHOW ENGINE INNODB STATUS` with conflict transaction matrix.
+  - Statement Digest Dashboard querying `sys.statement_analysis` with Safety Guard challenge reset action.
 - **Universal Mutation Logging & Audit Source Attribution**: Comprehensive audit ledger persistence for all data and schema mutating operations across the platform with origin tracking (`source`). Attributions include `editor` (Query Editor / SQL Tab), `grid_cell_edit` (inline cell updates), `grid_insert` (inline `+ Add Row`), `grid_delete` (grid row deletions), `script_runner` (large SQL script runner), `csv_import` (CSV import wizard), `mock_data` (synthetic data generator), `sync_transfer` (cross-database data sync), and `schema_sync` (DDL structure synchronization). Added source badge visualization and dropdown source filtering to the Session Audit Log drawer and CSV export.
 - **Value Presets & PK-Less Grid Editing**:
   - Full-row criteria matching (`WHERE col1 = ? AND col2 = ? ... LIMIT 1`) enabling inline cell editing and row deletion on tables lacking primary keys, guarded by strict 1-row mutation limits.
@@ -23,7 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Responsive container height and scrolling fixes for Flight Recorder correlated queries table.
 - **Session Tab State Persistence**: Persistent tab state in `localStorage` scoped per connection (`sqlfox_tabs_<conn_id>`), preserving open Query Editor tabs, active SQL drafts, Table Viewer tabs, and active tab focus across page refreshes, with smart `beforeunload` guard for running queries and staged table edits.
 
+### Changed
+- **Universal MySQL 8.4 LTS & 9.x Replication Probe**: Dual-syntax probe querying `SHOW REPLICA STATUS` and `SHOW BINARY LOG STATUS` first, with graceful fallback to legacy `SHOW SLAVE STATUS` and `SHOW MASTER STATUS` for MySQL 5.7 / 8.0, normalizing all output column keys (`replica_io_running` $\leftrightarrow$ `slave_io_running`, `seconds_behind_source` $\leftrightarrow$ `seconds_behind_master`) across engine versions.
+- **MariaDB Lock Wait Fallback**: Added automatic fallback to `information_schema.innodb_lock_waits` when `sys.innodb_lock_waits` is not installed on MariaDB.
+
 ### Fixed
+- **PostgreSQL Structure Sync Column Alteration DDL**: Decomposed column modifications into dialect-valid atomic `ALTER TABLE tbl ALTER COLUMN col TYPE ...; ALTER TABLE tbl ALTER COLUMN col SET/DROP NOT NULL;` statements instead of MySQL-specific `MODIFY COLUMN` syntax.
 - Added missing `advise` command routing to top-level CLI dispatch in `cmd/sqlfox/main.go`.
 
 ## [v0.2.0] - 2026-10-05

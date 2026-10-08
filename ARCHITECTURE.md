@@ -681,6 +681,104 @@ Every mutating operation across the application is recorded to the local SQLite 
 - **Non-Blocking Dispatch**: Handled via `ActiveSession.RecordAudit(...)` in non-blocking background goroutines.
 - **Filtering & Compliance**: Query parameter filtering via `GET /api/session/{id}/audit-logs?source=...` and dedicated source badging in the UI with CSV export.
 
+---
+
+## 18. Diagnostic Logging & Request Observability Suite (`internal/logger`)
+
+SqlFox embeds a production-grade structured logging and request telemetry pipeline designed around the Go standard library `log/slog` (Go 1.21+):
+
+```mermaid
+flowchart TD
+    Config["CLI Flags / Env Vars / sqlfox.env"] --> Init["logger.Init(Config)"]
+    
+    Init --> SinkRouter{"Sink Configuration"}
+    
+    SinkRouter -->|Stderr Only| StderrSink["Console Handler (Text / JSON)"]
+    SinkRouter -->|File Only| FileSink["os.OpenFile (O_CREATE|O_APPEND|O_WRONLY)"]
+    SinkRouter -->|Console + File| TeeSink["Multi-Handler Tee Sink"]
+    SinkRouter -->|Silent / -q| SilentSink["io.Discard (File logging retained if set)"]
+    
+    TeeSink --> SlogDefault["slog.SetDefault(Logger)"]
+    StderrSink --> SlogDefault
+    FileSink --> SlogDefault
+    SilentSink --> SlogDefault
+    
+    Req["HTTP Requests"] --> Middleware["HTTPLogger Middleware"]
+    Middleware --> FilterStatic{"Path is Static Asset?"}
+    FilterStatic -->|Yes (.js, .css, .ico, /static)| SkipLog["Skip (No telemetry spam)"]
+    FilterStatic -->|No (/api/*)| MaskAudit{"Is Auth / Connection Payload?"}
+    MaskAudit -->|Yes (/api/auth/unlock, /api/connections)| MaskCreds["Mask Sensitive JSON Bodies"]
+    MaskAudit -->|No| LogTrace["slog.Info('HTTP request', method, path, status, latency)"]
+```
+
+1. **Zero-Dependency `log/slog` Architecture**:
+   - Strictly built upon Go standard library `log/slog` with zero third-party logging frameworks (no zap, logrus, or zerolog), preserving binary minimalism and instantaneous startup.
+   - Global standard logger delegation ensures all Go subsystems, internal drivers, and server handlers output through a unified structured channel.
+2. **Multi-Sink Pipeline & Atomic File Writes**:
+   - **Console Sink**: Configurable as human-readable formatted `text` or structured machine-parseable `json`.
+   - **Persistent File Sink (`-log-file`)**: Atomic appending via `os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)`.
+   - **Dual-Stream Tee Sink**: When both console and file are configured, log entries are broadcast synchronously to both sinks.
+   - **Silent Mode (`-silent`, `-q`)**: Routes console output to `io.Discard` while preserving persistent file logging when `-log-file` is configured.
+3. **HTTP Request Telemetry & Credential Masking**:
+   - `HTTPLogger` middleware measures end-to-end request latency, response HTTP status codes, and payload bytes written.
+   - High-frequency static assets (`/static/`, `/assets/`, `favicon.ico`, `manifest.webmanifest`) are silently bypassed to keep diagnostic logs focused on real database actions.
+   - Security-sensitive endpoints (`/api/auth/unlock`, `/api/connections`) have sensitive payload bodies masked to prevent master PIN, vault master password, or database credentials from leaking into log files.
+4. **Ergonomic Environment Loader (`sqlfox.env`)**:
+   - Windows double-click and daemon environments cannot easily pass CLI flags. SqlFox's `loadEnvFiles()` cascades configuration search across:
+     1. Directory containing the running executable (`filepath.Dir(exePath)/sqlfox.env`).
+     2. Current working directory (`./sqlfox.env`).
+     3. User home configuration directory (`~/.sqlfox/sqlfox.env`).
+
+---
+
+## 19. Multi-Engine Feature Parity & Dialect Resilience Architecture
+
+SqlFox enforces complete feature parity across MySQL (5.7, 8.0, 8.4 LTS, 9.x), MariaDB (10.3 - 11.x), PostgreSQL (9.6 - 16+), and SQLite:
+
+```mermaid
+flowchart TD
+    subgraph Drivers ["Dialect Resilience Layer"]
+        MySQLDriver["internal/driver/mysql"]
+        PGDriver["internal/driver/postgres"]
+        SQLiteDriver["internal/driver/sqlite"]
+    end
+
+    subgraph MySQLResilience ["MySQL & MariaDB Dialect Adaptation"]
+        ReplicaProbe["Universal Replication Normalizer"]
+        ReplicaProbe -->|MySQL 8.4+ / 9.x| ModernProbe["SHOW REPLICA STATUS / SHOW BINARY LOG STATUS"]
+        ReplicaProbe -->|MySQL 5.7 / 8.0| LegacyProbe["SHOW SLAVE STATUS / SHOW MASTER STATUS"]
+        LockFallback["MariaDB Lock Wait Fallback"]
+        LockFallback -->|sys schema missing| FallbackIS["information_schema.innodb_lock_waits"]
+    end
+
+    subgraph PGResilience ["PostgreSQL Deep Catalog Introspection"]
+        PGRoutines["Routines Explorer (pg_proc + pg_namespace)"]
+        PGDigest["Adaptive Statement Digest (pg_stat_statements)"]
+        PGReplication["Replication Telemetry (pg_stat_replication / pg_stat_wal_receiver)"]
+        PGRoles["Dialect-Aware Role Matrix (pg_roles)"]
+        PGDDL["Atomic DDL Generator (ALTER COLUMN TYPE ... SET/DROP NOT NULL)"]
+    end
+
+    MySQLDriver --> MySQLResilience
+    PGDriver --> PGResilience
+```
+
+1. **Universal Replication Normalizer (MySQL 8.4 LTS & 9.x Parity)**:
+   - MySQL 8.4 LTS and 9.x completely deprecate and remove legacy `SHOW SLAVE STATUS` and `SHOW MASTER STATUS` statements, causing syntax errors in standard database tools.
+   - SqlFox probes modern syntax (`SHOW REPLICA STATUS` and `SHOW BINARY LOG STATUS`) first; upon syntax errors or unsupported commands, it smoothly falls back to legacy commands.
+   - Key normalization ensures unified frontend telemetry across all MySQL engine generations (`replica_io_running` $\leftrightarrow$ `slave_io_running`, `seconds_behind_source` $\leftrightarrow$ `seconds_behind_master`).
+2. **MariaDB Sys Schema Fallback**:
+   - MariaDB installations often omit the `sys` schema by default. SqlFox's lock wait telemetry detects missing `sys.innodb_lock_waits` and falls back directly to `information_schema.innodb_lock_waits`, preventing silent monitoring crashes.
+3. **PostgreSQL Deep Catalog Introspection**:
+   - **Routines Explorer**: Introspects `pg_proc` joined with `pg_namespace`, extracting argument type signatures to distinguish overloaded functions (`calc(int)` vs `calc(text)`), and recovers full definitions via `pg_catalog.pg_get_functiondef`.
+   - **Adaptive Statement Digest**: Safely probes `pg_stat_statements` for execution metrics, average latencies, and total calls. If the extension is not active, it surfaces a non-disruptive 1-click guide (`CREATE EXTENSION pg_stat_statements;`) without breaking the Processlist dashboard.
+   - **Replication Telemetry**: Introspects `pg_stat_replication` on primary instances and `pg_stat_wal_receiver` on standbys to report real-time replication lag, WAL flush states, and connection modes.
+   - **Role & Privilege Matrix**: Introspects `pg_roles` to extract boolean attributes (`SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION`, `BYPASSRLS`, `LOGIN`) and parses `MEMBER OF` role inheritance.
+4. **Dialect-Specific DDL in Structure Sync**:
+   - PostgreSQL does not support MySQL's monolithic `MODIFY COLUMN col type attributes` clause.
+   - SqlFox generates dialect-specific DDL: for PostgreSQL, it decomposes column mutations into atomic statements (`ALTER TABLE tbl ALTER COLUMN col TYPE ...; ALTER TABLE tbl ALTER COLUMN col SET NOT NULL;`), ensuring seamless schema synchronizations across heterogeneous environments.
+
+
 
 
 

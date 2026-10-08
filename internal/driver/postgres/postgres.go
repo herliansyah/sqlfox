@@ -393,6 +393,42 @@ func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) 
 		}
 	}
 
+	// 7. Fetch Stored Procedures & Functions
+	var routines []driver.RoutineMetadata
+	procRows, err := s.db.QueryContext(ctx, `
+		SELECT 
+			p.proname,
+			COALESCE(pg_catalog.pg_get_function_identity_arguments(p.oid), '') as args,
+			COALESCE(pg_catalog.pg_get_function_result(p.oid), 'void') as res_type
+		FROM pg_catalog.pg_proc p
+		JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+		WHERE n.nspname = $1
+		  AND n.nspname NOT LIKE 'pg_%' 
+		  AND n.nspname != 'information_schema'
+		ORDER BY p.proname;
+	`, schemaName)
+	if err == nil {
+		defer procRows.Close()
+		for procRows.Next() {
+			var proname, args, resType string
+			if err := procRows.Scan(&proname, &args, &resType); err == nil {
+				displayName := proname
+				if args != "" {
+					displayName = fmt.Sprintf("%s(%s)", proname, args)
+				}
+				rType := "FUNCTION"
+				if strings.EqualFold(resType, "void") {
+					rType = "PROCEDURE"
+				}
+				routines = append(routines, driver.RoutineMetadata{
+					Name:     displayName,
+					Type:     rType,
+					DataType: resType,
+				})
+			}
+		}
+	}
+
 	var tables []driver.TableMetadata
 	for _, name := range tableOrder {
 		tables = append(tables, *tablesMap[name])
@@ -403,6 +439,7 @@ func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) 
 		Databases:    allSchemas,
 		Tables:       tables,
 		Triggers:     triggers,
+		Routines:     routines,
 	}, nil
 }
 
@@ -827,15 +864,53 @@ func (s *PostgresSession) GetUserList(ctx context.Context) ([]driver.DatabaseUse
 }
 
 func (s *PostgresSession) GetUserGrants(ctx context.Context, user, host string) ([]string, error) {
-	// Query user role memberships & superuser status
-	var isSuper bool
-	_ = s.db.QueryRowContext(ctx, "SELECT usesuper FROM pg_catalog.pg_user WHERE usename = $1", user).Scan(&isSuper)
+	// ponytail: Dialect-Aware Role Matrix: query role attributes and memberships from pg_roles
+	var isSuper, canCreateDB, canCreateRole, canLogin, isRep, bypassRLS bool
+	_ = s.db.QueryRowContext(ctx, `
+		SELECT rolsuper, rolcreatedb, rolcreaterole, rolcanlogin, rolreplication, rolbypassrls
+		FROM pg_catalog.pg_roles 
+		WHERE rolname = $1
+	`, user).Scan(&isSuper, &canCreateDB, &canCreateRole, &canLogin, &isRep, &bypassRLS)
 
 	var grants []string
 	if isSuper {
-		grants = append(grants, "SUPERUSER", "ALL PRIVILEGES")
-	} else {
-		grants = append(grants, "CONNECT", "USAGE")
+		grants = append(grants, "SUPERUSER")
+	}
+	if canCreateDB {
+		grants = append(grants, "CREATEDB")
+	}
+	if canCreateRole {
+		grants = append(grants, "CREATEROLE")
+	}
+	if canLogin {
+		grants = append(grants, "LOGIN")
+	}
+	if isRep {
+		grants = append(grants, "REPLICATION")
+	}
+	if bypassRLS {
+		grants = append(grants, "BYPASSRLS")
+	}
+
+	// Membership in other roles
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT r.rolname 
+		FROM pg_catalog.pg_roles r
+		JOIN pg_catalog.pg_auth_members m ON m.roleid = r.oid
+		JOIN pg_catalog.pg_roles u ON u.oid = m.member
+		WHERE u.rolname = $1
+	`, user)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var roleName string
+			if err := rows.Scan(&roleName); err == nil {
+				grants = append(grants, fmt.Sprintf("MEMBER OF %s", roleName))
+			}
+		}
+	}
+	if len(grants) == 0 {
+		grants = []string{"CONNECT", "USAGE"}
 	}
 	return grants, nil
 }
@@ -938,29 +1013,99 @@ func (s *PostgresSession) InspectClusterHealth(ctx context.Context) (*driver.Clu
 	var isRecovery bool
 	_ = s.db.QueryRowContext(ctx, "SELECT pg_is_in_recovery()").Scan(&isRecovery)
 
-	role := "Primary"
+	role := "Primary (Source)"
 	if isRecovery {
-		role = "Standby Replica"
+		role = "Standby (Replica)"
+	}
+
+	nodes := []driver.ClusterNodeInfo{
+		{
+			Name:    fmt.Sprintf("%s:%d", s.cfg.Host, s.cfg.Port),
+			Address: fmt.Sprintf("%s:%d", s.cfg.Host, s.cfg.Port),
+			State:   role,
+			IsLocal: true,
+			Status:  "online",
+		},
+	}
+
+	diagnosis := "PostgreSQL instance operating normally"
+	severity := "ok"
+	var repInfo *driver.ReplicationInfo
+
+	if !isRecovery {
+		// Primary: probe pg_stat_replication for active standbys
+		rows, err := s.db.QueryContext(ctx, `
+			SELECT 
+				COALESCE(client_addr::text, 'unknown'),
+				COALESCE(application_name, 'walreceiver'),
+				COALESCE(state, 'streaming'),
+				COALESCE(sync_state, 'async'),
+				COALESCE(EXTRACT(EPOCH FROM write_lag)::bigint, 0)
+			FROM pg_stat_replication
+		`)
+		if err == nil {
+			defer rows.Close()
+			standbyCount := 0
+			for rows.Next() {
+				var addr, app, st, syncSt string
+				var lagSec int64
+				if err := rows.Scan(&addr, &app, &st, &syncSt, &lagSec); err == nil {
+					standbyCount++
+					nodes = append(nodes, driver.ClusterNodeInfo{
+						Name:    fmt.Sprintf("%s (%s)", app, syncSt),
+						Address: addr,
+						State:   "Standby",
+						Status:  st,
+					})
+					if lagSec > 10 {
+						diagnosis = fmt.Sprintf("Replication lag on standby %s: %d seconds", app, lagSec)
+						severity = "warning"
+					}
+				}
+			}
+			if standbyCount > 0 {
+				repInfo = &driver.ReplicationInfo{
+					Role:       "Primary (Source)",
+					IORunning:  true,
+					SQLRunning: true,
+				}
+			}
+		}
+	} else {
+		// Standby: probe pg_stat_wal_receiver
+		var senderHost, status string
+		var lastMsgReceipt time.Time
+		err := s.db.QueryRowContext(ctx, `
+			SELECT COALESCE(sender_host, ''), COALESCE(status, ''), COALESCE(last_msg_receipt_time, now())
+			FROM pg_stat_wal_receiver
+		`).Scan(&senderHost, &status, &lastMsgReceipt)
+		if err == nil && senderHost != "" {
+			repInfo = &driver.ReplicationInfo{
+				Role:       "Standby (Replica)",
+				MasterHost: senderHost,
+				IORunning:  strings.EqualFold(status, "streaming"),
+				SQLRunning: true,
+			}
+			nodes = append(nodes, driver.ClusterNodeInfo{
+				Name:    "primary-source",
+				Address: senderHost,
+				State:   "Primary",
+				Status:  "online",
+			})
+		}
 	}
 
 	return &driver.ClusterHealthReport{
-		TopologyType:        "postgresql-native",
+		TopologyType:        "replication",
 		ClusterName:         s.cfg.DatabaseName,
 		ClusterStatus:       role,
-		ClusterSize:         1,
+		ClusterSize:         len(nodes),
 		LocalNodeName:       fmt.Sprintf("%s:%d", s.cfg.Host, s.cfg.Port),
 		LocalNodeState:      role,
-		BottleneckDiagnosis: "PostgreSQL instance operating normally",
-		BottleneckSeverity:  "ok",
-		Nodes: []driver.ClusterNodeInfo{
-			{
-				Name:    fmt.Sprintf("%s:%d", s.cfg.Host, s.cfg.Port),
-				Address: fmt.Sprintf("%s:%d", s.cfg.Host, s.cfg.Port),
-				State:   role,
-				IsLocal: true,
-				Status:  "online",
-			},
-		},
+		BottleneckDiagnosis: diagnosis,
+		BottleneckSeverity:  severity,
+		Replication:         repInfo,
+		Nodes:               nodes,
 	}, nil
 }
 
@@ -1140,7 +1285,7 @@ func generatePostgresCreateDDL(schema string, tbl driver.TableMetadata) string {
 	return sb.String()
 }
 
-// InspectServerVariables introspects all PostgreSQL settings from pg_settings.
+// InspectServerVariables introspects all PostgreSQL settings from pg_settings and applies curated DBA tuning rules.
 func (s *PostgresSession) InspectServerVariables(ctx context.Context) (*driver.ServerVariablesReport, error) {
 	rows, err := s.db.QueryContext(ctx, "SELECT name, setting, category, short_desc, context FROM pg_settings ORDER BY name ASC")
 	if err != nil {
@@ -1148,7 +1293,73 @@ func (s *PostgresSession) InspectServerVariables(ctx context.Context) (*driver.S
 	}
 	defer rows.Close()
 
+	curatedRules := map[string]struct {
+		Category       string
+		Recommendation string
+		SuggestedValue string
+		ImpactLow      string
+		ImpactHigh     string
+	}{
+		"shared_buffers": {
+			Category:       "Memory & Buffer",
+			Recommendation: "Typically set to 25% of total system RAM (e.g. 1GB - 8GB on modern servers)",
+			SuggestedValue: "25% of RAM",
+			ImpactLow:      "Frequent disk reads and cache thrashing",
+			ImpactHigh:     "Diminishing returns, double-buffering with OS page cache",
+		},
+		"work_mem": {
+			Category:       "Memory & Buffer",
+			Recommendation: "Allocate based on available RAM divided by max_connections (e.g. 16MB - 64MB)",
+			SuggestedValue: "16MB - 64MB",
+			ImpactLow:      "Complex sorts and hash joins spill to temporary disk files",
+			ImpactHigh:     "OOM risk when multiple concurrent backends run multi-node queries",
+		},
+		"maintenance_work_mem": {
+			Category:       "Memory & Buffer",
+			Recommendation: "10% of system RAM up to 1GB or 2GB for VACUUM, CREATE INDEX, and ALTER TABLE",
+			SuggestedValue: "256MB - 1GB",
+			ImpactLow:      "Slow VACUUM, autovacuum, and index build operations",
+			ImpactHigh:     "Starves other processes during bulk maintenance tasks",
+		},
+		"effective_cache_size": {
+			Category:       "Optimizer & Performance",
+			Recommendation: "Set to 50% - 75% of total system RAM to help planner estimate OS disk cache",
+			SuggestedValue: "50% - 75% of RAM",
+			ImpactLow:      "Planner underestimates memory cache and favors sequential scans over index scans",
+			ImpactHigh:     "Planner may overly favor index scans when pages aren't cached",
+		},
+		"wal_buffers": {
+			Category:       "IO & Durability",
+			Recommendation: "Typically 16MB (or automatic -1) for high-write transaction workloads",
+			SuggestedValue: "16MB",
+			ImpactLow:      "Frequent WAL flushes before transaction commit",
+			ImpactHigh:     "Wasted shared memory",
+		},
+		"checkpoint_completion_target": {
+			Category:       "IO & Durability",
+			Recommendation: "Set to 0.9 to spread checkpoint writes across 90% of checkpoint interval",
+			SuggestedValue: "0.9",
+			ImpactLow:      "Spiky I/O bursts causing query latency jitter during checkpoints",
+			ImpactHigh:     "Slightly longer crash recovery time",
+		},
+		"max_connections": {
+			Category:       "Concurrency & Lock",
+			Recommendation: "Keep between 100 - 300; use connection pooler (PgBouncer) for higher concurrency",
+			SuggestedValue: "100 - 200",
+			ImpactLow:      "Connection exhaustion ('too many clients already')",
+			ImpactHigh:     "Severe memory overhead and CPU context-switching contention",
+		},
+		"autovacuum": {
+			Category:       "IO & Durability",
+			Recommendation: "Keep 'on' to prevent table bloat and transaction ID (XID) wraparound failure",
+			SuggestedValue: "on",
+			ImpactLow:      "Critical table bloat, slow queries, and database shutdown on XID wraparound",
+			ImpactHigh:     "Excessive background I/O if cost limits are not properly tuned",
+		},
+	}
+
 	var vars []driver.ServerVariable
+	curatedCount := 0
 	for rows.Next() {
 		var name, setting, category, shortDesc, contextStr string
 		if err := rows.Scan(&name, &setting, &category, &shortDesc, &contextStr); err == nil {
@@ -1157,6 +1368,28 @@ func (s *PostgresSession) InspectServerVariables(ctx context.Context) (*driver.S
 			if contextStr == "user" {
 				scope = "Both"
 			}
+			isCurated := false
+			severity := "info"
+			recommendation := ""
+			suggestedVal := ""
+			impactLow := ""
+			impactHigh := ""
+
+			if rule, ok := curatedRules[name]; ok {
+				isCurated = true
+				curatedCount++
+				severity = "optimal"
+				category = rule.Category
+				recommendation = rule.Recommendation
+				suggestedVal = rule.SuggestedValue
+				impactLow = rule.ImpactLow
+				impactHigh = rule.ImpactHigh
+
+				if name == "autovacuum" && !strings.EqualFold(setting, "on") {
+					severity = "critical"
+				}
+			}
+
 			vars = append(vars, driver.ServerVariable{
 				Name:             name,
 				Value:            setting,
@@ -1164,8 +1397,12 @@ func (s *PostgresSession) InspectServerVariables(ctx context.Context) (*driver.S
 				IsDynamic:        isDynamic,
 				Category:         category,
 				Description:      shortDesc,
-				Severity:         "info",
-				IsCurated:        false,
+				ImpactLow:        impactLow,
+				ImpactHigh:       impactHigh,
+				Recommendation:   recommendation,
+				SuggestedValue:   suggestedVal,
+				Severity:         severity,
+				IsCurated:        isCurated,
 				MyCnfSnippet:     fmt.Sprintf("%s = '%s'", name, setting),
 				SetGlobalSnippet: fmt.Sprintf("ALTER SYSTEM SET %s = '%s';", name, setting),
 			})
@@ -1179,7 +1416,7 @@ func (s *PostgresSession) InspectServerVariables(ctx context.Context) (*driver.S
 		Engine:       "postgres",
 		Version:      version,
 		TotalCount:   len(vars),
-		CuratedCount: 0,
+		CuratedCount: curatedCount,
 		Variables:    vars,
 	}, nil
 }
@@ -1192,23 +1429,113 @@ func (s *PostgresSession) InspectDeadlock(ctx context.Context) (*driver.Deadlock
 }
 
 func (s *PostgresSession) GetStatementDigest(ctx context.Context, limit int) ([]driver.StatementDigestEntry, error) {
-	return []driver.StatementDigestEntry{}, nil
+	if limit <= 0 {
+		limit = 25
+	}
+	// ponytail: Adaptive Telemetry Probe: check pg_stat_statements (PG13+ uses total_exec_time, PG<13 uses total_time)
+	query := fmt.Sprintf(`
+		SELECT 
+			query,
+			calls,
+			ROUND(total_exec_time::numeric, 2) as total_latency,
+			ROUND(mean_exec_time::numeric, 2) as avg_latency,
+			ROUND(max_exec_time::numeric, 2) as max_latency,
+			0 as lock_time,
+			rows,
+			rows as rows_examined,
+			0 as rows_affected,
+			false as no_index_used,
+			'' as first_seen,
+			'' as last_seen,
+			queryid::text as digest
+		FROM pg_stat_statements
+		WHERE query IS NOT NULL AND TRIM(query) != ''
+		ORDER BY total_exec_time DESC
+		LIMIT %d;
+	`, limit)
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		fallbackQuery := fmt.Sprintf(`
+			SELECT 
+				query,
+				calls,
+				ROUND(total_time::numeric, 2) as total_latency,
+				ROUND(mean_time::numeric, 2) as avg_latency,
+				0 as max_latency,
+				0 as lock_time,
+				rows,
+				rows as rows_examined,
+				0 as rows_affected,
+				false as no_index_used,
+				'' as first_seen,
+				'' as last_seen,
+				queryid::text as digest
+			FROM pg_stat_statements
+			WHERE query IS NOT NULL AND TRIM(query) != ''
+			ORDER BY total_time DESC
+			LIMIT %d;
+		`, limit)
+		rows, err = s.db.QueryContext(ctx, fallbackQuery)
+	}
+	if err != nil {
+		return []driver.StatementDigestEntry{
+			{
+				Query: "-- pg_stat_statements extension is not installed or enabled in shared_preload_libraries. Run: CREATE EXTENSION IF NOT EXISTS pg_stat_statements;",
+				Digest: "uninstalled",
+			},
+		}, nil
+	}
+	defer rows.Close()
+
+	var list []driver.StatementDigestEntry
+	for rows.Next() {
+		var e driver.StatementDigestEntry
+		if err := rows.Scan(
+			&e.Query, &e.ExecCount, &e.TotalLatencyMs, &e.AvgLatencyMs, &e.MaxLatencyMs,
+			&e.LockTimeMs, &e.RowsSent, &e.RowsExamined, &e.RowsAffected,
+			&e.NoIndexUsed, &e.FirstSeen, &e.LastSeen, &e.Digest,
+		); err == nil {
+			list = append(list, e)
+		}
+	}
+	if list == nil {
+		list = []driver.StatementDigestEntry{}
+	}
+	return list, nil
 }
 
 func (s *PostgresSession) ResetStatementDigest(ctx context.Context) error {
-	return nil
+	_, err := s.db.ExecContext(ctx, "SELECT pg_stat_statements_reset()")
+	return err
 }
 
 func (s *PostgresSession) GetRoutineDDL(ctx context.Context, routineType, name string) (string, error) {
-	return "-- Routine DDL not supported for PostgreSQL session", nil
+	// Parse base function name if signature was included e.g. "calc_tax(numeric, integer)"
+	baseName := name
+	if idx := strings.Index(name, "("); idx > 0 {
+		baseName = strings.TrimSpace(name[:idx])
+	}
+	var ddl string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT pg_catalog.pg_get_functiondef(p.oid)
+		FROM pg_catalog.pg_proc p
+		JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+		WHERE n.nspname = $1 
+		  AND (p.proname = $2 OR (p.proname || '(' || COALESCE(pg_catalog.pg_get_function_identity_arguments(p.oid), '') || ')') = $3)
+		LIMIT 1
+	`, s.currentSchema, baseName, name).Scan(&ddl)
+	if err != nil {
+		return "", fmt.Errorf("routine %s not found: %w", name, err)
+	}
+	return ddl + ";", nil
 }
 
 func (s *PostgresSession) GetEventDDL(ctx context.Context, name string) (string, error) {
-	return "-- Scheduled Events not supported for PostgreSQL", nil
+	return "-- Scheduled Events not supported natively in PostgreSQL (use pg_cron or external scheduler)", nil
 }
 
 func (s *PostgresSession) ToggleEventStatus(ctx context.Context, name string, enable bool) error {
-	return nil
+	return errors.New("scheduled events not supported on PostgreSQL")
 }
 
 func (s *PostgresSession) GetTablePartitions(ctx context.Context, database, table string) ([]driver.PartitionMetadata, error) {

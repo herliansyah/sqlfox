@@ -3,10 +3,12 @@ package server
 import (
 	"encoding/json"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"sqlfox/internal/driver"
+	"sqlfox/internal/logger"
 	"sqlfox/internal/vault"
 
 	_ "sqlfox/internal/driver/mysql"
@@ -25,6 +27,7 @@ type Server struct {
 	masterPassword    string
 	assets            fs.FS
 	version           string
+	logger            *slog.Logger
 	updateAPIURL      string
 	targetExePath     string
 	restartFn         func() error
@@ -209,8 +212,21 @@ func (s *Server) routes() {
 		})
 	}
 
-	// ponytail: stdlib panic recoverer and remote access guard replace chi router & middleware
-	s.handler = recoverer(s.RemoteAccessGuardMiddleware(mux))
+	// ponytail: stdlib panic recoverer, logger, and remote access guard replace chi router & middleware
+	baseHandler := recoverer(s.RemoteAccessGuardMiddleware(mux))
+	if s.logger != nil {
+		s.handler = logger.HTTPMiddleware(s.logger)(baseHandler)
+	} else {
+		s.handler = baseHandler
+	}
+}
+
+// SetLogger attaches the Diagnostic Logger and wraps HTTP routing with logging telemetry.
+func (s *Server) SetLogger(l *slog.Logger) {
+	s.logger = l
+	if s.handler != nil {
+		s.handler = logger.HTTPMiddleware(l)(s.handler)
+	}
 }
 
 func recoverer(next http.Handler) http.Handler {

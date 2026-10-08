@@ -57,7 +57,8 @@ Operates with a strict memory ceiling (**< 100MB RAM**), sub-second launch time 
 - 📜 **Universal Mutation Logging & Audit Source Attribution**: Comprehensive audit ledger persistence for all data and schema mutations across the platform with origin tracking (`source`). Attributions include `editor`, `grid_cell_edit`, `grid_insert`, `grid_delete`, `script_runner`, `csv_import`, `mock_data`, `sync_transfer`, and `schema_sync`, with visual badges and dropdown source filtering.
 - 🩺 **Visual EXPLAIN Tree & Status Bar Telemetry**: Dedicated Target Query card with client-side SQL formatting, segmented navigation tabs (`📊 Plan Grid`, `🌳 Visual Tree`, `💡 Advisor`, `{ } Raw Plan`), and bottom telemetry displaying real-time engine flavor, server uptime, ping latency, and memory consumption.
 - 🚀 **In-App Self-Update & Changelog Viewer**: Upgrade your single binary directly from the web UI with 1-click in-place replacement, full Markdown changelog inspection from GitHub Releases, 24-hour rate-limit guarded checks, and graceful auto-restart.
-- 🔌 **Multi-Engine Support**: MySQL 5.7 / 8.x, MariaDB, PostgreSQL 9.6–16+ (pure-Go `pgx/v5`), and local pure-Go SQLite (direct connection or over SSH tunnel).
+- 📋 **Structured Diagnostic Logging & Observability**: Configurable verbosity tiers (`debug`, `info`, `warn`, `error`, `silent`), dual output formats (`text`, `json`), persistent atomic append file sinks (`-log-file`), and automatic `sqlfox.env` loader for seamless Windows double-click configuration.
+- 🔌 **Multi-Engine Parity & Resilience**: Resilient dual-syntax probes for MySQL 8.4 LTS / 9.x (`SHOW REPLICA STATUS`, `SHOW BINARY LOG STATUS`), MariaDB fallback diagnostics, full PostgreSQL Stored Function & Procedure introspection (`pg_proc`), Statement Digest (`pg_stat_statements`), Replication Inspector (`pg_stat_replication`), and atomic Structure Sync DDL.
 
 ---
 
@@ -219,7 +220,8 @@ Berjalan dengan konsumsi memori sangat hemat (**< 100MB RAM**), waktu start kila
 - 📜 **Universal Mutation Logging & Audit Source Attribution**: Pencatatan histori audit persisten untuk seluruh mutasi data dan skema di seluruh platform dengan pelacakan asal (`source`: `editor`, `grid_cell_edit`, `grid_insert`, `grid_delete`, `script_runner`, `csv_import`, `mock_data`, `sync_transfer`, `schema_sync`), lengkap dengan badge visual dan filter dropdown.
 - 🩺 **Visual EXPLAIN Tree & Telemetri Status Bar**: Kartu Target Query terdedikasi dengan formatting SQL otomatis, tab navigasi modern (`📊 Plan Grid`, `🌳 Visual Tree`, `💡 Advisor`, `{ } Raw Plan`), serta telemetri status bar bawah yang menampilkan mesin database, waktu uptime server, latensi ping, dan konsumsi memori.
 - 🚀 **In-App Self-Update & Changelog Viewer**: Update binary SqlFox langsung dari antarmuka web dengan 1 klik (in-place atomic replacement), inspeksi changelog rilis Markdown dari GitHub Releases, proteksi cache 24 jam untuk rate limit, dan auto-restart mulus.
-- 🔌 **Dukungan Multi Database**: MySQL 5.7 / 8.x, MariaDB, PostgreSQL 9.6–16+ (driver native pure-Go `pgx/v5`), dan SQLite (koneksi langsung maupun melalui SSH Tunneling).
+- 📋 **Logging Diagnostik & Observabilitas Terstruktur**: Konfigurasi tingkatan verbosity (`debug`, `info`, `warn`, `error`, `silent`), dual format (`text`, `json`), target file persisten append (`-log-file`), dan auto-load file `sqlfox.env` untuk konfigurasi instan saat double-klik di Windows.
+- 🔌 **Ketahanan & Paritas Multi-Engine**: Dual-syntax probe adaptif untuk MySQL 8.4 LTS / 9.x (`SHOW REPLICA STATUS`, `SHOW BINARY LOG STATUS`), fallback diagnostik MariaDB, introspeksi fungsi & prosedur PostgreSQL (`pg_proc`), kueri teratas (`pg_stat_statements`), monitoring replikasi (`pg_stat_replication`), dan sintaks DDL Structure Sync yang presisi.
 
 ---
 
@@ -292,6 +294,16 @@ Opsi Server (Mode Default):
         Langsung keluar jika port yang ditentukan sedang terpakai
   -version
         Tampilkan versi SqlFox dan keluar
+  -log-level string
+        Tingkat verbosity log: debug, info, warn, error, silent (atau SQLFOX_LOG_LEVEL)
+  -v, -verbose
+        Shortcut untuk mode verbose full debug (-log-level=debug)
+  -log-file string
+        Target file untuk menyimpan output log secara persisten (atau SQLFOX_LOG_FILE)
+  -log-format string
+        Format log: text, json (default text atau SQLFOX_LOG_FORMAT)
+  -silent, -q
+        Bungkam output konsol terminal (log tetap ditulis ke file jika -log-file ditentukan)
 ```
 
 #### Contoh Penggunaan
@@ -300,8 +312,11 @@ Opsi Server (Mode Default):
 # Menjalankan di port tertentu tanpa auto-buka browser:
 sqlfox -port 9090 -no-browser
 
-# Hanya izinkan akses dari laptop lokal (tutup akses LAN):
-sqlfox -host 127.0.0.1
+# Menjalankan dengan full debug logging ke file:
+sqlfox -v -log-file=./sqlfox-debug.log
+
+# Menjalankan mode hening (silent) dan hanya simpan error ke file:
+sqlfox -log-level=error -log-file=./sqlfox-error.log -silent
 
 # Headless CLI: jalankan query dan tampilkan output dalam format JSON:
 sqlfox query --dsn "root:pass@tcp(127.0.0.1:3306)/mydb" --sql "SELECT id, name FROM users" --format json
@@ -309,6 +324,19 @@ sqlfox query --dsn "root:pass@tcp(127.0.0.1:3306)/mydb" --sql "SELECT id, name F
 # Headless CLI: dapatkan rekomendasi indeks untuk optimasi query:
 sqlfox advise --dsn "root:pass@tcp(127.0.0.1:3306)/mydb" --sql "SELECT * FROM orders WHERE status = 'pending' ORDER BY created_at"
 ```
+
+#### 🪟 Menjalankan di Windows via Double-Klik (sqlfox.exe)
+
+Untuk mengatur log saat menjalankan `sqlfox.exe` tanpa membuka Command Prompt:
+1. **File `sqlfox.env` (Paling Praktis)**: Buat file bernama `sqlfox.env` di folder yang sama dengan `sqlfox.exe` (atau di `%USERPROFILE%\.sqlfox\sqlfox.env`):
+   ```ini
+   SQLFOX_LOG_LEVEL=debug
+   SQLFOX_LOG_FILE=sqlfox.log
+   SQLFOX_LOG_FORMAT=text
+   ```
+2. **Windows Shortcut**: Klik kanan `sqlfox.exe` ➔ *Create shortcut* ➔ Properties ➔ Tambahkan parameter di kolom Target: `sqlfox.exe -v -log-file=sqlfox.log`.
+3. **Batch File**: Buat `start.bat` berisi: `sqlfox.exe -v -log-file=sqlfox.log`.
+4. **Environment Variables**: Set `SQLFOX_LOG_LEVEL=debug` dan `SQLFOX_LOG_FILE=C:\path\sqlfox.log` di System Environment Variables Windows.
 
 ---
 

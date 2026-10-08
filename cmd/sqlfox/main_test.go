@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"sqlfox/internal/driver"
@@ -49,3 +51,27 @@ func TestDriversRegisteredInMain(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadEnvFiles(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "sqlfox-env-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	envFile := filepath.Join(tmpDir, "sqlfox.env")
+	err = os.WriteFile(envFile, []byte("TEST_SQLFOX_VAR=hello_windows\n# comment\nTEST_QUOTED=\"val123\"\n"), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	loadEnvFilesFromPaths(envFile)
+
+	if os.Getenv("TEST_SQLFOX_VAR") != "hello_windows" {
+		t.Errorf("expected hello_windows, got %q", os.Getenv("TEST_SQLFOX_VAR"))
+	}
+	if os.Getenv("TEST_QUOTED") != "val123" {
+		t.Errorf("expected val123, got %q", os.Getenv("TEST_QUOTED"))
+	}
+}
+
