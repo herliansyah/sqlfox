@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"sqlfox/internal/cli"
+	"sqlfox/internal/logger"
 	"sqlfox/internal/server"
 	"sqlfox/internal/vault"
 	"sqlfox/web"
@@ -30,9 +31,26 @@ import (
 var Version = "v0.2.0"
 
 func main() {
+	loadEnvFiles()
+
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "query", "transfer", "job", "advise", "help":
+			// ponytail: Setup default logger from environment before dispatching CLI
+			logLvl := os.Getenv("SQLFOX_LOG_LEVEL")
+			logFmt := os.Getenv("SQLFOX_LOG_FORMAT")
+			logSink := os.Getenv("SQLFOX_LOG_FILE")
+			if logLvl != "" || logSink != "" {
+				res, err := logger.Setup(logger.Config{
+					Level:    logLvl,
+					Format:   logFmt,
+					FilePath: logSink,
+					Silent:   false,
+				})
+				if err == nil && res.Closer != nil {
+					defer res.Closer.Close()
+				}
+			}
 			os.Exit(cli.Run(os.Args[1:], os.Stdout, os.Stderr, os.Stdin))
 		}
 	}
@@ -44,11 +62,59 @@ func main() {
 	noBrowserFlag := flag.Bool("no-browser", false, "Do not automatically launch web browser")
 	strictPortFlag := flag.Bool("strict-port", false, "Fail immediately if specified port is in use")
 	versionFlag := flag.Bool("version", false, "Print SqlFox version and exit")
+	logLevelFlag := flag.String("log-level", "", "Logging verbosity: debug, info, warn, error, silent (or SQLFOX_LOG_LEVEL)")
+	verboseFlag := flag.Bool("v", false, "Enable verbose debug logging (shortcut for -log-level=debug)")
+	verboseLongFlag := flag.Bool("verbose", false, "Enable verbose debug logging")
+	logFormatFlag := flag.String("log-format", "", "Log output format: text, json (default text or SQLFOX_LOG_FORMAT)")
+	logFileFlag := flag.String("log-file", "", "Target file for log output sink (or SQLFOX_LOG_FILE)")
+	silentFlag := flag.Bool("silent", false, "Suppress terminal console output (shortcut for -q)")
+	quietFlag := flag.Bool("q", false, "Suppress terminal console output")
 	flag.Parse()
 
 	if *versionFlag {
 		fmt.Printf("SqlFox %s\n", Version)
 		return
+	}
+
+	// Resolve logging configuration
+	level := *logLevelFlag
+	if level == "" {
+		level = os.Getenv("SQLFOX_LOG_LEVEL")
+	}
+	if *verboseFlag || *verboseLongFlag {
+		level = "debug"
+	}
+	if level == "" {
+		level = "info"
+	}
+
+	format := *logFormatFlag
+	if format == "" {
+		format = os.Getenv("SQLFOX_LOG_FORMAT")
+	}
+	if format == "" {
+		format = "text"
+	}
+
+	logFile := *logFileFlag
+	if logFile == "" {
+		logFile = os.Getenv("SQLFOX_LOG_FILE")
+	}
+
+	isSilent := *silentFlag || *quietFlag
+
+	logRes, err := logger.Setup(logger.Config{
+		Level:    level,
+		Format:   format,
+		FilePath: logFile,
+		Silent:   isSilent,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Error initializing logger: %v\n", err)
+		os.Exit(1)
+	}
+	if logRes.Closer != nil {
+		defer logRes.Closer.Close()
 	}
 
 	// Resolve config path
@@ -84,6 +150,7 @@ func main() {
 	// Initialize HTTP server with embedded web assets and master password
 	srv := server.NewServer(v, web.Assets(), backupDir, masterPassword)
 	srv.SetVersion(Version)
+	srv.SetLogger(logRes.Logger)
 
 	maxAttempts := 50
 	if *strictPortFlag {
@@ -112,18 +179,27 @@ func main() {
 		}
 	}()
 
-	fmt.Printf("\n🦊 SqlFox %s Database Manager is running!\n", Version)
-	fmt.Printf("   ➜  Local:       %s\n", localURL)
-	if lanIP != "" {
-		fmt.Printf("   ➜  Network:     http://%s:%d (Open from Tablet/LAN)\n", lanIP, actualPort)
+	logRes.Logger.Info("sqlfox_started",
+		"version", Version,
+		"port", actualPort,
+		"local_url", localURL,
+		"vault", dbPath,
+	)
+
+	if !isSilent {
+		fmt.Printf("\n🦊 SqlFox %s Database Manager is running!\n", Version)
+		fmt.Printf("   ➜  Local:       %s\n", localURL)
+		if lanIP != "" {
+			fmt.Printf("   ➜  Network:     http://%s:%d (Open from Tablet/LAN)\n", lanIP, actualPort)
+		}
+		fmt.Printf("   ➜  Master PIN:  %s  (Enter this when connecting from Tablet/Phone)\n", masterPassword)
+		if isNewPIN {
+			fmt.Printf("      (New PIN generated and saved to %s)\n", filepath.Join(configDir, "master.key"))
+		}
+		fmt.Printf("   ➜  Vault:       %s\n", dbPath)
+		fmt.Printf("   ➜  Backups:     %s\n\n", backupDir)
+		fmt.Println("   Press Ctrl+C to shut down gracefully.")
 	}
-	fmt.Printf("   ➜  Master PIN:  %s  (Enter this when connecting from Tablet/Phone)\n", masterPassword)
-	if isNewPIN {
-		fmt.Printf("      (New PIN generated and saved to %s)\n", filepath.Join(configDir, "master.key"))
-	}
-	fmt.Printf("   ➜  Vault:       %s\n", dbPath)
-	fmt.Printf("   ➜  Backups:     %s\n\n", backupDir)
-	fmt.Println("   Press Ctrl+C to shut down gracefully.")
 
 	// Auto launch browser to local URL
 	if !*noBrowserFlag {
@@ -232,3 +308,48 @@ func openBrowser(url string) {
 
 	_ = exec.Command(cmd, args...).Start()
 }
+
+// loadEnvFiles loads environment variables from .env or sqlfox.env if present.
+// ponytail: Lightweight zero-dependency env loader allows Windows double-click configuration.
+func loadEnvFiles() {
+	var candidates []string
+
+	// Next to executable
+	if exe, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exe)
+		candidates = append(candidates, filepath.Join(exeDir, "sqlfox.env"), filepath.Join(exeDir, ".env"))
+	}
+
+	// In current working directory
+	candidates = append(candidates, "sqlfox.env", ".env")
+
+	// In ~/.sqlfox/
+	if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates, filepath.Join(home, ".sqlfox", "sqlfox.env"), filepath.Join(home, ".sqlfox", ".env"))
+	}
+
+	loadEnvFilesFromPaths(candidates...)
+}
+
+func loadEnvFilesFromPaths(paths ...string) {
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			if k, v, ok := strings.Cut(line, "="); ok {
+				k = strings.TrimSpace(k)
+				v = strings.Trim(strings.TrimSpace(v), `"'`)
+				if os.Getenv(k) == "" {
+					_ = os.Setenv(k, v)
+				}
+			}
+		}
+	}
+}
+
