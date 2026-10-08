@@ -199,7 +199,12 @@ v2.1 (Multi-Engine & Developer Operations Suite)
 ├── [x] 23. Heuristic Index Advisor & Query Tuner (ESR Composite Recommendations & Bloat Guard)
 ├── [x] 24. In-App Self-Update Engine, Changelog Viewer & Brand Mark Standardization
 ├── [x] 25. Grid Edit Presets, Type Constraints & PK-Less Row Mutations
-└── [x] 26. Universal Mutation Logging & Audit Source Attribution
+├── [x] 26. Universal Mutation Logging & Audit Source Attribution
+      │
+      ▼
+v2.2 (MySQL Enterprise Operations & Programmability Suite)
+├── [ ] 31. DBA Fire-Fighting Suite (Deadlock Inspector, Statement Digest Dashboard & Processlist Trio)
+└── [ ] 32. Developer Programmability & Grid Suite (Routines Explorer, Smart Routine Caller, Table Partitions & JSON Modal)
 ```
 
 ---
@@ -509,6 +514,31 @@ v2.1 (Multi-Engine & Developer Operations Suite)
   - [x] **Drawer UI & CSV Export**: Visual source badges, source context dropdown filter, and source column in CSV export.
   - [x] **Documentation & Verification**: Recorded in ADR-0039, `CONTEXT.md`, `CHANGELOG.md`, and unit tests passing in `internal/vault/audit_test.go` and `internal/server/dba_test.go`.
 - **Runnable Verification**: Run `go test -v ./internal/vault -run TestAudit` and `go test -v ./internal/server -run TestAuditLogsSourceFiltering` -> 100% pass.
+
+---
+
+### Milestone 31: DBA Fire-Fighting Suite (Deadlock Inspector, Statement Digest Dashboard & Processlist Trio)
+- **Goal**: Empower DBAs with rapid, post-mortem and historical incident triage capabilities directly within the Processlist Manager without running third-party background monitoring daemons.
+- **Deliverables**:
+  - [x] **Deadlock Inspector**: Dedicated parser extracting the `LATEST DETECTED DEADLOCK` section from `SHOW ENGINE INNODB STATUS`; visually formats Transaction 1 vs Transaction 2, active conflicting queries, locks held vs waited, and rollback victim attribution, with graceful empty-state handling (`"No deadlocks detected since MySQL server restart"`).
+  - [x] **Statement Digest Dashboard**: Historical query performance analyzer pulling normalized query digests, cumulative latencies, average execution times, rows examined vs sent, and unindexed query ratios from `sys.statement_analysis` with automatic fallback to `performance_schema.events_statements_summary_by_digest`.
+  - [x] **Challenge-Guarded Statistics Reset**: Administrative action executing `CALL sys.ps_truncate_all_tables(false)` to clear digest metrics, protected by Safety Guard Challenge Modal verification.
+  - [x] **Processlist Manager Unified Trio**: Segmented pill navigation inside the Processlist tab switching seamlessly between `[ 🧵 Active Threads (Live) ]`, `[ 📊 Statement Digest (Historical) ]`, and `[ 💀 Deadlock History (Post-Mortem) ]`.
+  - [x] **Documentation & Verification**: Recorded in ADR-0041, `CONTEXT.md`, and unit tests in `internal/driver/mysql` and `internal/server/dba_test.go`.
+- **Runnable Verification**: Run `go test -v ./internal/driver/mysql -run "TestParseDeadlockStatus"` and `go test -v ./internal/server -run "TestDBAOperationsAndAuditLog|TestAdvancedDiagnosticsAndProfiling"` -> 100% pass.
+
+---
+
+### Milestone 32: Developer Programmability & Grid Suite (Routines Explorer, Smart Routine Caller, Table Partitions & JSON Modal)
+- **Goal**: Complete developer schema object parity and large-scale data navigation by introspecting Stored Procedures, Functions, Scheduled Events, and Table Partitions alongside high-density JSON cell editing.
+- **Deliverables**:
+  - [x] **Routines Explorer**: Collapsible sidebar sections for `Procedures`, `Functions`, and `Scheduled Events` introspecting metadata and DDL via `information_schema.routines` and `information_schema.events`.
+  - [x] **Smart Routine Caller (Ponytail)**: 1-click execution action generating clean `CALL sp_name(...)` templates into a fresh Query Editor tab with typed parameter comments and OUT-variable retrieval queries without complex form wizard bloat.
+  - [x] **Scheduled Events Status Controller**: DDL inspection accompanied by single-click enable/disable toggle actions (`ALTER EVENT name ENABLE/DISABLE`) for maintenance windows.
+  - [x] **Table Partitions Telemetry Sub-Tab**: Dedicated `[Partitions]` sub-tab in Table Designer detailing partition names, methods, expressions, value ranges, estimated row counts, and physical storage sizes via `information_schema.partitions`.
+  - [x] **JSON Cell Viewer Modal**: Focused native dialog for virtual grid JSON cells providing pretty-printed indentation, syntax error detection, and clipboard copying without sacrificing 60fps fixed-row virtual scrolling.
+  - [x] **Documentation & Verification**: Recorded in ADR-0041, `CONTEXT.md`, and unit tests in `internal/driver/mysql` and `internal/server`.
+- **Runnable Verification**: Run `go test -v ./internal/server -run "TestDBAOperationsAndAuditLog"` and `go test -v ./...` -> 100% pass.
 
 
 

@@ -1184,3 +1184,34 @@ func (s *PostgresSession) InspectServerVariables(ctx context.Context) (*driver.S
 	}, nil
 }
 
+func (s *PostgresSession) InspectDeadlock(ctx context.Context) (*driver.DeadlockReport, error) {
+	return &driver.DeadlockReport{
+		HasDeadlock: false,
+		Summary:     "PostgreSQL deadlock post-mortem is captured in pg_stat_activity / server logs.",
+	}, nil
+}
+
+func (s *PostgresSession) GetStatementDigest(ctx context.Context, limit int) ([]driver.StatementDigestEntry, error) {
+	return []driver.StatementDigestEntry{}, nil
+}
+
+func (s *PostgresSession) ResetStatementDigest(ctx context.Context) error {
+	return nil
+}
+
+func (s *PostgresSession) GetRoutineDDL(ctx context.Context, routineType, name string) (string, error) {
+	return "-- Routine DDL not supported for PostgreSQL session", nil
+}
+
+func (s *PostgresSession) GetEventDDL(ctx context.Context, name string) (string, error) {
+	return "-- Scheduled Events not supported for PostgreSQL", nil
+}
+
+func (s *PostgresSession) ToggleEventStatus(ctx context.Context, name string, enable bool) error {
+	return nil
+}
+
+func (s *PostgresSession) GetTablePartitions(ctx context.Context, database, table string) ([]driver.PartitionMetadata, error) {
+	return []driver.PartitionMetadata{}, nil
+}
+

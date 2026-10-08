@@ -79,6 +79,10 @@ func (s *Server) routes() {
 	mux.HandleFunc("POST /api/session/connect/{id}", s.handleConnectSession)
 	mux.HandleFunc("GET /api/session/{id}/schema", s.handleGetSchema)
 	mux.HandleFunc("GET /api/session/{id}/ddl/{table}", s.handleGetTableDDL)
+	mux.HandleFunc("GET /api/session/{id}/ddl/routine/{name}", s.handleGetRoutineDDL)
+	mux.HandleFunc("GET /api/session/{id}/ddl/event/{name}", s.handleGetEventDDL)
+	mux.HandleFunc("POST /api/session/{id}/event/{name}/toggle", s.handleToggleEvent)
+	mux.HandleFunc("GET /api/session/{id}/partitions/{table}", s.handleGetTablePartitions)
 	mux.HandleFunc("GET /api/session/{id}/preflight-ddl/{table}", s.handlePreflightDDL)
 	mux.HandleFunc("GET /api/session/{id}/table/{table}/rows", s.handleGetTableRows)
 	mux.HandleFunc("GET /api/session/{id}/notes/{table}", s.handleGetTableNote)
@@ -89,6 +93,9 @@ func (s *Server) routes() {
 
 	// Processlist & DBA operations
 	mux.HandleFunc("GET /api/session/{id}/processlist", s.handleGetProcesslist)
+	mux.HandleFunc("GET /api/session/{id}/diagnostics/deadlock", s.handleGetDeadlock)
+	mux.HandleFunc("GET /api/session/{id}/diagnostics/statement-digest", s.handleGetStatementDigest)
+	mux.HandleFunc("POST /api/session/{id}/diagnostics/statement-digest/reset", s.handleResetStatementDigest)
 	mux.HandleFunc("GET /api/session/{id}/diagnostics/cluster", s.handleGetClusterHealth)
 	mux.HandleFunc("GET /api/session/{id}/diagnostics/variables", s.handleGetServerVariables)
 	mux.HandleFunc("GET /api/session/{id}/diagnostics/databases", s.handleGetDatabaseDiagnostics)

@@ -190,6 +190,115 @@ func (s *Server) handleGetTableDDL(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleGetRoutineDDL(w http.ResponseWriter, r *http.Request) {
+	connID := r.PathValue("id")
+	routineName := r.PathValue("name")
+	routineType := r.URL.Query().Get("type")
+	if routineType == "" {
+		routineType = "PROCEDURE"
+	}
+
+	sess, err := s.sessionMgr.GetSession(connID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	ddl, err := sess.GetRoutineDDL(ctx, routineType, routineName)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to fetch routine DDL: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"name": routineName,
+		"type": routineType,
+		"ddl":  ddl,
+	})
+}
+
+func (s *Server) handleGetEventDDL(w http.ResponseWriter, r *http.Request) {
+	connID := r.PathValue("id")
+	eventName := r.PathValue("name")
+
+	sess, err := s.sessionMgr.GetSession(connID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	ddl, err := sess.GetEventDDL(ctx, eventName)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to fetch event DDL: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"name": eventName,
+		"ddl":  ddl,
+	})
+}
+
+func (s *Server) handleToggleEvent(w http.ResponseWriter, r *http.Request) {
+	connID := r.PathValue("id")
+	eventName := r.PathValue("name")
+
+	sess, err := s.sessionMgr.GetSession(connID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	var req struct {
+		Enable bool `json:"enable"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "enable flag required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	if err := sess.ToggleEventStatus(ctx, eventName, req.Enable); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to toggle event: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+func (s *Server) handleGetTablePartitions(w http.ResponseWriter, r *http.Request) {
+	connID := r.PathValue("id")
+	tableName := r.PathValue("table")
+
+	sess, err := s.sessionMgr.GetSession(connID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	database := r.URL.Query().Get("db")
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	partitions, err := sess.GetTablePartitions(ctx, database, tableName)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to fetch partitions: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, partitions)
+}
+
+
 func (s *Server) handlePreflightDDL(w http.ResponseWriter, r *http.Request) {
 	connID := r.PathValue("id")
 	tableName := r.PathValue("table")

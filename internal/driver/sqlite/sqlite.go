@@ -741,3 +741,34 @@ func quoteIdentifier(id string) string {
 	return driver.QuoteIdentifier(id, "sqlite")
 }
 
+func (s *SQLiteSession) InspectDeadlock(ctx context.Context) (*driver.DeadlockReport, error) {
+	return &driver.DeadlockReport{
+		HasDeadlock: false,
+		Summary:     "SQLite operates with database file-level locking and busy timeouts; deadlocks do not apply.",
+	}, nil
+}
+
+func (s *SQLiteSession) GetStatementDigest(ctx context.Context, limit int) ([]driver.StatementDigestEntry, error) {
+	return []driver.StatementDigestEntry{}, nil
+}
+
+func (s *SQLiteSession) ResetStatementDigest(ctx context.Context) error {
+	return nil
+}
+
+func (s *SQLiteSession) GetRoutineDDL(ctx context.Context, routineType, name string) (string, error) {
+	return "-- Stored Routines not supported in SQLite", nil
+}
+
+func (s *SQLiteSession) GetEventDDL(ctx context.Context, name string) (string, error) {
+	return "-- Scheduled Events not supported in SQLite", nil
+}
+
+func (s *SQLiteSession) ToggleEventStatus(ctx context.Context, name string, enable bool) error {
+	return nil
+}
+
+func (s *SQLiteSession) GetTablePartitions(ctx context.Context, database, table string) ([]driver.PartitionMetadata, error) {
+	return []driver.PartitionMetadata{}, nil
+}
+
