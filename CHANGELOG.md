@@ -20,9 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Scheduled Events controller with status toggles (`ALTER EVENT ENABLE/DISABLE`).
   - Table Partitions telemetry sub-tab in Table Designer detailing partition methods, expressions, and row counts.
   - JSON Cell Viewer modal in virtual grid with pretty-printed formatting and syntax validation.
-- **DBA Fire-Fighting Suite**:
+- **DBA Fire-Fighting & Diagnostic Suite**:
   - Deadlock Inspector parsing `SHOW ENGINE INNODB STATUS` with conflict transaction matrix.
   - Statement Digest Dashboard querying `sys.statement_analysis` with Safety Guard challenge reset action.
+  - Database Storage Inspector analyzing table disk allocation, indexes, fragmented free space, and data-to-index ratios.
+  - Table Health Advisor recommending fragmentation maintenance (`OPTIMIZE TABLE` / `VACUUM ANALYZE`) and engine optimizations.
+  - Server Variable Inspector and Cluster Tuning Advisor evaluating cache hit ratios, buffer pool utilization, connection saturation, and temp table spilling with actionable config recommendations.
+  - Real-Time Lock Contention Inspector displaying active lock waits and blocking transactions.
 - **Universal Mutation Logging & Audit Source Attribution**: Comprehensive audit ledger persistence for all data and schema mutating operations across the platform with origin tracking (`source`). Attributions include `editor` (Query Editor / SQL Tab), `grid_cell_edit` (inline cell updates), `grid_insert` (inline `+ Add Row`), `grid_delete` (grid row deletions), `script_runner` (large SQL script runner), `csv_import` (CSV import wizard), `mock_data` (synthetic data generator), `sync_transfer` (cross-database data sync), and `schema_sync` (DDL structure synchronization). Added source badge visualization and dropdown source filtering to the Session Audit Log drawer and CSV export.
 - **Value Presets & PK-Less Grid Editing**:
   - Full-row criteria matching (`WHERE col1 = ? AND col2 = ? ... LIMIT 1`) enabling inline cell editing and row deletion on tables lacking primary keys, guarded by strict 1-row mutation limits.
@@ -37,13 +41,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Formatted SQL view with raw toggle in Process Detail Inspector.
   - Responsive container height and scrolling fixes for Flight Recorder correlated queries table.
 - **Session Tab State Persistence**: Persistent tab state in `localStorage` scoped per connection (`sqlfox_tabs_<conn_id>`), preserving open Query Editor tabs, active SQL drafts, Table Viewer tabs, and active tab focus across page refreshes, with smart `beforeunload` guard for running queries and staged table edits.
+- **Comprehensive Bilingual Documentation**: Added comprehensive bilingual English and Indonesian user and DBA guides with direct in-app links.
 
 ### Changed
-- **Universal MySQL 8.4 LTS & 9.x Replication Probe**: Dual-syntax probe querying `SHOW REPLICA STATUS` and `SHOW BINARY LOG STATUS` first, with graceful fallback to legacy `SHOW SLAVE STATUS` and `SHOW MASTER STATUS` for MySQL 5.7 / 8.0, normalizing all output column keys (`replica_io_running` $\leftrightarrow$ `slave_io_running`, `seconds_behind_source` $\leftrightarrow$ `seconds_behind_master`) across engine versions.
+- **Universal MySQL 8.4 LTS & 9.x Replication Probe**: Dual-syntax probe querying `SHOW REPLICA STATUS` and `SHOW BINARY LOG STATUS` first, with graceful fallback to legacy `SHOW SLAVE STATUS` and `SHOW MASTER STATUS` for MySQL 5.7 / 8.0, normalizing all output column keys (`replica_io_running` <-> `slave_io_running`, `seconds_behind_source` <-> `seconds_behind_master`) across engine versions.
 - **MariaDB Lock Wait Fallback**: Added automatic fallback to `information_schema.innodb_lock_waits` when `sys.innodb_lock_waits` is not installed on MariaDB.
 
 ### Fixed
 - **PostgreSQL Structure Sync Column Alteration DDL**: Decomposed column modifications into dialect-valid atomic `ALTER TABLE tbl ALTER COLUMN col TYPE ...; ALTER TABLE tbl ALTER COLUMN col SET/DROP NOT NULL;` statements instead of MySQL-specific `MODIFY COLUMN` syntax.
+- **Virtual Grid & Navigation State**:
+  - Prioritized active grid database context during inline cell editing and table operations to prevent cross-database drift.
+  - Fixed query reload on query tab edit and schema preservation in cross-database table viewers.
+  - Reset row selections and table select-all checkboxes upon switching active tables.
+  - Fixed column filtering and clipboard copy fallback over non-secure HTTP / remote LAN contexts.
+  - Preserved natural column widths and isolated query tab results to prevent layout clipping.
+- **ERD Visualizer**: Resolved missing primary keys, foreign keys, and relationship connector lines.
+- **Performance Flight Recorder**: Filtered out background system threads and empty queries from correlated snapshots.
+- **Monitoring UI**: Persisted monitoring tabs across page reloads and standardized English terminology.
 - Added missing `advise` command routing to top-level CLI dispatch in `cmd/sqlfox/main.go`.
 
 ## [v0.2.0] - 2026-10-05
