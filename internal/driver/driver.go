@@ -53,6 +53,18 @@ type Session interface {
 	// GetTableDDL returns the raw CREATE TABLE statement.
 	GetTableDDL(ctx context.Context, tableName string) (string, error)
 
+	// GetRoutineDDL returns the raw CREATE PROCEDURE/FUNCTION statement.
+	GetRoutineDDL(ctx context.Context, routineType, name string) (string, error)
+
+	// GetEventDDL returns the raw CREATE EVENT statement.
+	GetEventDDL(ctx context.Context, name string) (string, error)
+
+	// ToggleEventStatus toggles MySQL scheduled event ENABLE / DISABLE.
+	ToggleEventStatus(ctx context.Context, name string, enable bool) error
+
+	// GetTablePartitions returns partition telemetry for a table.
+	GetTablePartitions(ctx context.Context, database, table string) ([]PartitionMetadata, error)
+
 	// GetTableEstimate returns estimated row count and byte size.
 	GetTableEstimate(ctx context.Context, tableName string) (*TableEstimate, error)
 
@@ -118,6 +130,15 @@ type Session interface {
 
 	// SampleFlightMetrics captures an on-demand performance telemetry slice with correlated active queries.
 	SampleFlightMetrics(ctx context.Context) (*FlightMetricSample, error)
+
+	// InspectDeadlock parses latest detected InnoDB deadlock from engine status.
+	InspectDeadlock(ctx context.Context) (*DeadlockReport, error)
+
+	// GetStatementDigest retrieves aggregated top SQL query statistics from sys/performance_schema.
+	GetStatementDigest(ctx context.Context, limit int) ([]StatementDigestEntry, error)
+
+	// ResetStatementDigest clears collected performance_schema statement statistics.
+	ResetStatementDigest(ctx context.Context) error
 
 	// ExecRaw executes a raw SQL statement bypassing the Safety Guard. For internal server use only.
 	ExecRaw(ctx context.Context, sql string, args ...any) (int64, error)
@@ -413,10 +434,12 @@ type UserGrantRequest struct {
 
 // Schema metadata structures
 type SchemaMetadata struct {
-	DatabaseName string            `json:"database_name"`
-	Databases    []string          `json:"databases,omitempty"`
-	Tables       []TableMetadata   `json:"tables"`
-	Triggers     []TriggerMetadata `json:"triggers,omitempty"`
+	DatabaseName string              `json:"database_name"`
+	Databases    []string            `json:"databases,omitempty"`
+	Tables       []TableMetadata     `json:"tables"`
+	Triggers     []TriggerMetadata   `json:"triggers,omitempty"`
+	Routines     []RoutineMetadata   `json:"routines,omitempty"`
+	Events       []EventMetadata     `json:"events,omitempty"`
 }
 
 type TriggerMetadata struct {
@@ -425,6 +448,43 @@ type TriggerMetadata struct {
 	Timing    string `json:"timing"`    // BEFORE, AFTER, INSTEAD OF
 	Event     string `json:"event"`     // INSERT, UPDATE, DELETE
 	Statement string `json:"statement"` // SQL body
+}
+
+// RoutineMetadata represents a Stored Procedure or Stored Function.
+type RoutineMetadata struct {
+	Name         string             `json:"name"`
+	Type         string             `json:"type"` // "PROCEDURE" or "FUNCTION"
+	DataType     string             `json:"data_type,omitempty"` // return type for functions
+	Definition   string             `json:"definition,omitempty"`
+	Parameters   []RoutineParameter `json:"parameters,omitempty"`
+}
+
+// RoutineParameter describes an IN, OUT, or INOUT parameter of a routine.
+type RoutineParameter struct {
+	Name string `json:"name"`
+	Mode string `json:"mode"` // "IN", "OUT", "INOUT"
+	Type string `json:"type"`
+}
+
+// EventMetadata represents a MySQL scheduled event.
+type EventMetadata struct {
+	Name       string `json:"name"`
+	Status     string `json:"status"` // "ENABLED", "DISABLED", "SLAVESIDE_DISABLED"
+	Interval   string `json:"interval,omitempty"`
+	StartsAt   string `json:"starts_at,omitempty"`
+	EndsAt     string `json:"ends_at,omitempty"`
+	Definition string `json:"definition,omitempty"`
+}
+
+// PartitionMetadata represents physical storage and row distribution of a table partition.
+type PartitionMetadata struct {
+	Name         string `json:"name"`
+	Method       string `json:"method"`
+	Expression   string `json:"expression,omitempty"`
+	Description  string `json:"description,omitempty"` // partition range/list values
+	TableRows    int64  `json:"table_rows"`
+	DataLength   int64  `json:"data_length"`
+	IndexLength  int64  `json:"index_length"`
 }
 
 type TableMetadata struct {
@@ -635,6 +695,51 @@ type ClusterNodeInfo struct {
 	IsCulprit       bool   `json:"is_culprit"`
 	Status          string `json:"status"` // "online", "unreachable"
 	Message         string `json:"message,omitempty"`
+}
+
+// DeadlockReport contains post-mortem analysis of the latest detected InnoDB deadlock.
+type DeadlockReport struct {
+	HasDeadlock     bool                  `json:"has_deadlock"`
+	DetectedAt      string                `json:"detected_at,omitempty"`
+	VictimTxID      string                `json:"victim_tx_id,omitempty"`
+	VictimThreadID  int64                 `json:"victim_thread_id,omitempty"`
+	Summary         string                `json:"summary"`
+	Transactions    []DeadlockTransaction `json:"transactions"`
+	RawSection      string                `json:"raw_section,omitempty"`
+}
+
+// DeadlockTransaction represents one of the conflicting transactions in an InnoDB deadlock.
+type DeadlockTransaction struct {
+	Index           int    `json:"index"` // 1 or 2
+	TxID            string `json:"tx_id"`
+	ThreadID        int64  `json:"thread_id"`
+	Query           string `json:"query"`
+	LockMode        string `json:"lock_mode"`
+	LockHeld        string `json:"lock_held,omitempty"`
+	LockWaited      string `json:"lock_waited,omitempty"`
+	AppUser         string `json:"app_user,omitempty"`
+	Host            string `json:"host,omitempty"`
+	IsVictim        bool   `json:"is_victim"`
+	ActiveSeconds   int64  `json:"active_seconds"`
+	UndoLogEntries  int64  `json:"undo_log_entries"`
+}
+
+// StatementDigestEntry aggregates query performance statistics from sys/performance_schema.
+type StatementDigestEntry struct {
+	Digest          string  `json:"digest"`
+	Query           string  `json:"query"`
+	ExecCount       int64   `json:"exec_count"`
+	TotalLatencyMs  float64 `json:"total_latency_ms"`
+	AvgLatencyMs    float64 `json:"avg_latency_ms"`
+	MaxLatencyMs    float64 `json:"max_latency_ms"`
+	LockTimeMs      float64 `json:"lock_time_ms"`
+	RowsSent        int64   `json:"rows_sent"`
+	RowsExamined    int64   `json:"rows_examined"`
+	RowsAffected    int64   `json:"rows_affected"`
+	FullScan        bool    `json:"full_scan"`
+	NoIndexUsed     int64   `json:"no_index_used"`
+	FirstSeen       string  `json:"first_seen,omitempty"`
+	LastSeen        string  `json:"last_seen,omitempty"`
 }
 
 // ReplicationInfo holds replication metrics for MySQL source/replica setups.

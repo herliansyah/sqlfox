@@ -227,6 +227,22 @@ _Avoid_: Global grep, object finder, quick navigator
 A structured modal dialog for provisioning a new database schema on the active target server with dialect-aware character set and collation defaults.
 _Avoid_: Raw create prompt, DB wizard
 
+**Routines Explorer**:
+Collapsible sidebar schema tree sections introspecting and categorizing Stored Procedures, Stored Functions, and Scheduled Events with DDL inspection and quick caller generation.
+_Avoid_: Routine tree, proc list, function manager
+
+**Smart Routine Caller**:
+An automated query generator formulating contextual `CALL sp_name(...)` invocation templates into a fresh Query Editor tab with typed parameter comments and OUT-variable extraction statements.
+_Avoid_: Param wizard, procedure runner form, call dialog
+
+**Table Partitions Inspector**:
+A dedicated telemetry sub-tab in the Table Designer detailing partition schemes, expressions, value ranges, estimated row counts, and physical storage distribution from `information_schema.partitions`.
+_Avoid_: Partition manager, partitioner, segment list
+
+**JSON Cell Viewer Modal**:
+A focused native HTML5 modal dialog providing formatted, syntax-highlighted indentation, copy-to-clipboard, and structure validation for large JSON documents in Virtual Data Grid cells.
+_Avoid_: JSON cell expander, raw json popup, text viewer
+
 **Execution Plan Inspector**:
 A comprehensive modal interface for inspecting database query execution plans (`EXPLAIN`), featuring a dedicated Target Query card with client-side formatting, a modern segmented tab switcher, the tabular **Execution Plan Grid**, the graphical **Visual Execution Tree**, the heuristic **Index Advisor**, and raw output inspection.
 _Avoid_: Raw plan dump, text explain drawer, query modal
@@ -358,6 +374,14 @@ _Avoid_: Process details popup, thread viewer window, query popover
 **Lock Contention & Root Blocker Inspector**:
 A dedicated incident-triage access point in the Top Monitor menu and Command Palette that directly focuses the Processlist session on the Root Blocker dependency tree, surfacing blocking queries, locked resources, and single-click termination actions with P0 priority alert escalation.
 _Avoid_: Lock viewer, deadlock popup, blocker window
+
+**Deadlock Inspector**:
+A dedicated post-mortem diagnostic parser within the Processlist Manager analyzing `SHOW ENGINE INNODB STATUS` (`LATEST DETECTED DEADLOCK`) to isolate victim transactions, holding locks, waiting locks, and conflicting SQL statements.
+_Avoid_: Deadlock alert, lock crash log, engine parser
+
+**Statement Digest Dashboard**:
+A zero-daemon analytical view aggregating normalized query executions, cumulative latencies, rows examined vs sent, and full table scans from `sys.statement_analysis` or `performance_schema.events_statements_summary_by_digest` with Challenge-guarded statistics reset.
+_Avoid_: Slow log viewer, query profiler, top sql list
 
 **Table Diagnostics**:
 A physical storage inspection module providing exact data length, index length, and fragmentation overhead statistics alongside one-click table maintenance actions (`OPTIMIZE TABLE`, `ANALYZE TABLE`, `CHECK TABLE`).

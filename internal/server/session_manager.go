@@ -662,3 +662,74 @@ func (s *ActiveSession) SampleFlightMetrics(ctx context.Context) (*driver.Flight
 	return s.Session.SampleFlightMetrics(ctx)
 }
 
+// InspectDeadlock delegates deadlock analysis to the driver session.
+func (s *ActiveSession) InspectDeadlock(ctx context.Context) (*driver.DeadlockReport, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.Session == nil {
+		return nil, driver.ErrSessionClosed
+	}
+	return s.Session.InspectDeadlock(ctx)
+}
+
+// GetStatementDigest delegates statement digest queries to the driver session.
+func (s *ActiveSession) GetStatementDigest(ctx context.Context, limit int) ([]driver.StatementDigestEntry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.Session == nil {
+		return nil, driver.ErrSessionClosed
+	}
+	return s.Session.GetStatementDigest(ctx, limit)
+}
+
+// ResetStatementDigest delegates statement digest statistics clearing to the driver session.
+func (s *ActiveSession) ResetStatementDigest(ctx context.Context) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.Session == nil {
+		return driver.ErrSessionClosed
+	}
+	return s.Session.ResetStatementDigest(ctx)
+}
+
+// GetRoutineDDL retrieves the raw CREATE statement for a Stored Procedure or Function.
+func (s *ActiveSession) GetRoutineDDL(ctx context.Context, routineType, name string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.Session == nil {
+		return "", driver.ErrSessionClosed
+	}
+	return s.Session.GetRoutineDDL(ctx, routineType, name)
+}
+
+// GetEventDDL retrieves the raw CREATE statement for a Scheduled Event.
+func (s *ActiveSession) GetEventDDL(ctx context.Context, name string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.Session == nil {
+		return "", driver.ErrSessionClosed
+	}
+	return s.Session.GetEventDDL(ctx, name)
+}
+
+// ToggleEventStatus toggles the status of a Scheduled Event.
+func (s *ActiveSession) ToggleEventStatus(ctx context.Context, name string, enable bool) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.Session == nil {
+		return driver.ErrSessionClosed
+	}
+	return s.Session.ToggleEventStatus(ctx, name, enable)
+}
+
+// GetTablePartitions retrieves partition telemetry for a table.
+func (s *ActiveSession) GetTablePartitions(ctx context.Context, database, table string) ([]driver.PartitionMetadata, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.Session == nil {
+		return nil, driver.ErrSessionClosed
+	}
+	return s.Session.GetTablePartitions(ctx, database, table)
+}
+
+

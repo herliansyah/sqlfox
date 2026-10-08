@@ -354,3 +354,71 @@ func TestCrossDatabaseGridTargetSchemaPrecedenceEmbedded(t *testing.T) {
 	}
 }
 
+func TestProcesslistDOMContainmentEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	// Verify that pl-threads-section is strictly contained inside processlist-view-container
+	plStart := strings.Index(content, `id="processlist-view-container"`)
+	if plStart == -1 {
+		t.Fatal("processlist-view-container element missing in index.html")
+	}
+
+	clStart := strings.Index(content, `id="cluster-view-container"`)
+	if clStart == -1 {
+		t.Fatal("cluster-view-container element missing in index.html")
+	}
+
+	plChunk := content[plStart:clStart]
+	threadsPos := strings.Index(plChunk, `id="pl-threads-section"`)
+	if threadsPos == -1 {
+		t.Fatal("pl-threads-section is missing or outside processlist-view-container chunk")
+	}
+
+	beforeThreads := plChunk[:threadsPos]
+	opens := strings.Count(beforeThreads, "<div")
+	closes := strings.Count(beforeThreads, "</div")
+	if opens-closes <= 0 {
+		t.Fatalf("DOM containment error: processlist-view-container was closed before pl-threads-section (open: %d, close: %d)", opens, closes)
+	}
+}
+
+func TestDeadlockCardsResponsiveGridEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	// Verify that renderDeadlockUI enforces grid constraint and text wrapping
+	expectedSnippets := []string{
+		`grid grid-cols-1 md:grid-cols-2 gap-4 w-full`,
+		`min-w-0 overflow-hidden shadow`,
+		`block break-all whitespace-normal`,
+	}
+
+	for _, s := range expectedSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain deadlock card layout snippet %q, but was missing", s)
+		}
+	}
+}
+
+

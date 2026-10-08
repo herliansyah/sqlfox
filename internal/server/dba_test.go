@@ -356,6 +356,61 @@ func TestAdvancedDiagnosticsAndProfiling(t *testing.T) {
 	if !ok || len(varsList) == 0 {
 		t.Fatalf("expected non-empty variables list, got %v", varsData["variables"])
 	}
+
+	// 9. Deadlock Inspection API
+	deadlockResp, err := client.Get(ts.URL + "/api/session/" + connRec.ID + "/diagnostics/deadlock")
+	if err != nil || deadlockResp.StatusCode != http.StatusOK {
+		t.Fatalf("deadlock request failed: %v", err)
+	}
+	var deadlockData map[string]any
+	_ = json.NewDecoder(deadlockResp.Body).Decode(&deadlockData)
+	deadlockResp.Body.Close()
+	if deadlockData["has_deadlock"] != false {
+		t.Fatalf("expected has_deadlock false for sqlite, got %v", deadlockData["has_deadlock"])
+	}
+
+	// 10. Statement Digest API
+	digestResp, err := client.Get(ts.URL + "/api/session/" + connRec.ID + "/diagnostics/statement-digest?limit=10")
+	if err != nil || digestResp.StatusCode != http.StatusOK {
+		t.Fatalf("statement digest request failed: %v", err)
+	}
+	var digestList []any
+	_ = json.NewDecoder(digestResp.Body).Decode(&digestList)
+	digestResp.Body.Close()
+
+	// 11. Reset Statement Digest API
+	resetResp, err := client.Post(ts.URL+"/api/session/"+connRec.ID+"/diagnostics/statement-digest/reset", "application/json", nil)
+	if err != nil || resetResp.StatusCode != http.StatusOK {
+		t.Fatalf("reset statement digest request failed: %v", err)
+	}
+	resetResp.Body.Close()
+
+	// 12. Routine & Event DDL and Partitions APIs
+	rDdlResp, err := client.Get(ts.URL + "/api/session/" + connRec.ID + "/ddl/routine/test_proc?type=PROCEDURE")
+	if err != nil || rDdlResp.StatusCode != http.StatusOK {
+		t.Fatalf("routine DDL request failed: %v", err)
+	}
+	rDdlResp.Body.Close()
+
+	eDdlResp, err := client.Get(ts.URL + "/api/session/" + connRec.ID + "/ddl/event/test_ev")
+	if err != nil || eDdlResp.StatusCode != http.StatusOK {
+		t.Fatalf("event DDL request failed: %v", err)
+	}
+	eDdlResp.Body.Close()
+
+	togglePayload, _ := json.Marshal(map[string]bool{"enable": true})
+	toggleResp, err := client.Post(ts.URL+"/api/session/"+connRec.ID+"/event/test_ev/toggle", "application/json", bytes.NewReader(togglePayload))
+	if err != nil || toggleResp.StatusCode != http.StatusOK {
+		t.Fatalf("toggle event request failed: %v", err)
+	}
+	toggleResp.Body.Close()
+
+	partResp, err := client.Get(ts.URL + "/api/session/" + connRec.ID + "/partitions/items")
+	if err != nil || partResp.StatusCode != http.StatusOK {
+		t.Fatalf("partitions request failed: %v", err)
+	}
+	partResp.Body.Close()
 }
+
 
 

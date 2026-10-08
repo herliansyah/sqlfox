@@ -421,13 +421,102 @@ func (s *MySQLSession) InspectSchema(ctx context.Context, dbName string) (*drive
 		fkRows.Close()
 	}
 
+	// 6. Fetch Stored Routines (Procedures and Functions)
+	var routines []driver.RoutineMetadata
+	routineQuery := `
+	SELECT ROUTINE_NAME, ROUTINE_TYPE, IFNULL(DTD_IDENTIFIER, ''), IFNULL(ROUTINE_DEFINITION, '')
+	FROM information_schema.ROUTINES
+	WHERE ROUTINE_SCHEMA = ?
+	ORDER BY ROUTINE_NAME ASC;
+	`
+	rRows, err := s.db.QueryContext(ctx, routineQuery, dbName)
+	if err == nil {
+		for rRows.Next() {
+			var rName, rType, dtd, rDef string
+			if err := rRows.Scan(&rName, &rType, &dtd, &rDef); err == nil {
+				routines = append(routines, driver.RoutineMetadata{
+					Name:       rName,
+					Type:       rType,
+					DataType:   dtd,
+					Definition: rDef,
+				})
+			}
+		}
+		rRows.Close()
+	}
+
+	// 7. Fetch Parameters for routines (to help smart caller)
+	if len(routines) > 0 {
+		paramQuery := `
+		SELECT SPECIFIC_NAME, ROUTINE_TYPE, IFNULL(PARAMETER_NAME, ''), IFNULL(PARAMETER_MODE, 'IN'), IFNULL(DTD_IDENTIFIER, '')
+		FROM information_schema.PARAMETERS
+		WHERE SPECIFIC_SCHEMA = ?
+		ORDER BY SPECIFIC_NAME, ORDINAL_POSITION;
+		`
+		pRows, pErr := s.db.QueryContext(ctx, paramQuery, dbName)
+		if pErr == nil {
+			rMap := make(map[string]int)
+			for i, r := range routines {
+				rMap[r.Name] = i
+			}
+			for pRows.Next() {
+				var sName, rType, pName, pMode, dtd string
+				if err := pRows.Scan(&sName, &rType, &pName, &pMode, &dtd); err == nil {
+					if idx, ok := rMap[sName]; ok {
+						if pName != "" {
+							routines[idx].Parameters = append(routines[idx].Parameters, driver.RoutineParameter{
+								Name: pName,
+								Mode: pMode,
+								Type: dtd,
+							})
+						}
+					}
+				}
+			}
+			pRows.Close()
+		}
+	}
+
+	// 8. Fetch Scheduled Events
+	var events []driver.EventMetadata
+	eventQuery := `
+	SELECT EVENT_NAME, STATUS, IFNULL(INTERVAL_VALUE, ''), IFNULL(INTERVAL_FIELD, ''), IFNULL(STARTS, ''), IFNULL(ENDS, ''), IFNULL(EVENT_DEFINITION, '')
+	FROM information_schema.EVENTS
+	WHERE EVENT_SCHEMA = ?
+	ORDER BY EVENT_NAME ASC;
+	`
+	eRows, eErr := s.db.QueryContext(ctx, eventQuery, dbName)
+	if eErr == nil {
+		for eRows.Next() {
+			var eName, eStatus, intVal, intField, starts, ends, eDef string
+			if err := eRows.Scan(&eName, &eStatus, &intVal, &intField, &starts, &ends, &eDef); err == nil {
+				intervalStr := ""
+				if intVal != "" && intField != "" {
+					intervalStr = fmt.Sprintf("EVERY %s %s", intVal, intField)
+				}
+				events = append(events, driver.EventMetadata{
+					Name:       eName,
+					Status:     eStatus,
+					Interval:   intervalStr,
+					StartsAt:   starts,
+					EndsAt:     ends,
+					Definition: eDef,
+				})
+			}
+		}
+		eRows.Close()
+	}
+
 	return &driver.SchemaMetadata{
 		DatabaseName: dbName,
 		Databases:    databases,
 		Tables:       tables,
 		Triggers:     triggers,
+		Routines:     routines,
+		Events:       events,
 	}, nil
 }
+
 
 func (s *MySQLSession) SelectDatabase(ctx context.Context, dbName string) error {
 	s.mu.Lock()
@@ -1751,4 +1840,393 @@ func (s *MySQLSession) InspectServerVariables(ctx context.Context) (*driver.Serv
 		Variables:    vars,
 	}, nil
 }
+
+// InspectDeadlock parses SHOW ENGINE INNODB STATUS to extract the latest detected deadlock.
+func (s *MySQLSession) InspectDeadlock(ctx context.Context) (*driver.DeadlockReport, error) {
+	var statusType, statusName, engineStatus string
+	row := s.db.QueryRowContext(ctx, "SHOW ENGINE INNODB STATUS")
+	if err := row.Scan(&statusType, &statusName, &engineStatus); err != nil {
+		return nil, fmt.Errorf("failed to execute SHOW ENGINE INNODB STATUS: %w", err)
+	}
+
+	return parseDeadlockStatus(engineStatus), nil
+}
+
+// parseDeadlockStatus extracts and formats deadlock information from engine status output.
+func parseDeadlockStatus(raw string) *driver.DeadlockReport {
+	deadlockHeader := "------------------------\nLATEST DETECTED DEADLOCK\n------------------------"
+	deadlockEnd := "------------\nTRANSACTIONS\n------------"
+
+	startIdx := strings.Index(raw, deadlockHeader)
+	if startIdx == -1 {
+		// ponytail: friendly empty state when no deadlock has occurred since server boot
+		return &driver.DeadlockReport{
+			HasDeadlock: false,
+			Summary:     "No deadlocks detected since MySQL server startup.",
+		}
+	}
+
+	content := raw[startIdx+len(deadlockHeader):]
+	endIdx := strings.Index(content, deadlockEnd)
+	var deadlockSection string
+	if endIdx != -1 {
+		deadlockSection = content[:endIdx]
+	} else {
+		// If end marker not found, take up to next major section boundary
+		nextSec := strings.Index(content, "\n---")
+		if nextSec != -1 {
+			deadlockSection = content[:nextSec]
+		} else {
+			deadlockSection = content
+		}
+	}
+	deadlockSection = strings.TrimSpace(deadlockSection)
+
+	rep := &driver.DeadlockReport{
+		HasDeadlock:  true,
+		RawSection:   deadlockSection,
+		Transactions: make([]driver.DeadlockTransaction, 0, 2),
+	}
+
+	// Extract timestamp e.g. "2026-10-08 04:15:30 0x7f8a3c007700"
+	lines := strings.Split(deadlockSection, "\n")
+	if len(lines) > 0 {
+		firstLine := strings.TrimSpace(lines[0])
+		parts := strings.Fields(firstLine)
+		if len(parts) >= 2 {
+			rep.DetectedAt = parts[0] + " " + parts[1]
+		}
+	}
+
+	// Extract WE ROLL BACK TRANSACTION (1) or (2)
+	rollbackVictim := 0
+	if idx := strings.Index(deadlockSection, "WE ROLL BACK TRANSACTION ("); idx != -1 {
+		sub := deadlockSection[idx+len("WE ROLL BACK TRANSACTION ("):]
+		if closeParen := strings.Index(sub, ")"); closeParen != -1 {
+			numStr := sub[:closeParen]
+			if n, err := strconv.Atoi(numStr); err == nil {
+				rollbackVictim = n
+			}
+		}
+	}
+
+	// Split by "*** (1) TRANSACTION:" and "*** (2) TRANSACTION:"
+	t1Idx := strings.Index(deadlockSection, "*** (1) TRANSACTION:")
+	t2Idx := strings.Index(deadlockSection, "*** (2) TRANSACTION:")
+
+	if t1Idx != -1 && t2Idx != -1 && t2Idx > t1Idx {
+		t1Chunk := deadlockSection[t1Idx:t2Idx]
+		t2Chunk := deadlockSection[t2Idx:]
+		if rbIdx := strings.Index(t2Chunk, "*** WE ROLL BACK TRANSACTION"); rbIdx != -1 {
+			t2Chunk = t2Chunk[:rbIdx]
+		}
+
+		tx1 := parseDeadlockTransactionChunk(1, t1Chunk, rollbackVictim == 1)
+		tx2 := parseDeadlockTransactionChunk(2, t2Chunk, rollbackVictim == 2)
+
+		rep.Transactions = append(rep.Transactions, tx1, tx2)
+		if tx1.IsVictim {
+			rep.VictimTxID = tx1.TxID
+			rep.VictimThreadID = tx1.ThreadID
+			rep.Summary = fmt.Sprintf("Deadlock resolved: Transaction 1 (Thread %d) was rolled back to unblock Transaction 2.", tx1.ThreadID)
+		} else if tx2.IsVictim {
+			rep.VictimTxID = tx2.TxID
+			rep.VictimThreadID = tx2.ThreadID
+			rep.Summary = fmt.Sprintf("Deadlock resolved: Transaction 2 (Thread %d) was rolled back to unblock Transaction 1.", tx2.ThreadID)
+		} else {
+			rep.Summary = "Deadlock detected between Transaction 1 and Transaction 2."
+		}
+	} else {
+		rep.Summary = "Deadlock detected. Review raw InnoDB status details."
+	}
+
+	return rep
+}
+
+// parseDeadlockTransactionChunk parses one transaction segment from a deadlock dump.
+func parseDeadlockTransactionChunk(idx int, chunk string, isVictim bool) driver.DeadlockTransaction {
+	tx := driver.DeadlockTransaction{
+		Index:    idx,
+		IsVictim: isVictim,
+	}
+
+	lines := strings.Split(chunk, "\n")
+	readingQuery := false
+	var queryLines []string
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// TRANSACTION 123456, ACTIVE 5 sec
+		if strings.HasPrefix(trimmed, "TRANSACTION ") {
+			parts := strings.Split(trimmed, ",")
+			if len(parts) > 0 {
+				txPart := strings.TrimPrefix(parts[0], "TRANSACTION ")
+				tx.TxID = strings.TrimSpace(txPart)
+			}
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				if strings.HasPrefix(p, "ACTIVE ") {
+					secStr := strings.TrimSuffix(strings.TrimPrefix(p, "ACTIVE "), " sec")
+					if s, err := strconv.ParseInt(strings.TrimSpace(secStr), 10, 64); err == nil {
+						tx.ActiveSeconds = s
+					}
+				}
+			}
+		}
+
+		// MySQL thread id 42, OS thread handle ...
+		if strings.Contains(trimmed, "MySQL thread id ") {
+			if idIdx := strings.Index(trimmed, "MySQL thread id "); idIdx != -1 {
+				sub := trimmed[idIdx+len("MySQL thread id "):]
+				if comma := strings.Index(sub, ","); comma != -1 {
+					thStr := strings.TrimSpace(sub[:comma])
+					if thID, err := strconv.ParseInt(thStr, 10, 64); err == nil {
+						tx.ThreadID = thID
+					}
+				}
+			}
+			if userIdx := strings.Index(trimmed, "query id "); userIdx != -1 {
+				sub := trimmed[userIdx:]
+				parts := strings.Fields(sub)
+				if len(parts) >= 4 {
+					tx.Host = parts[2]
+					tx.AppUser = parts[3]
+				}
+			}
+		}
+
+		// undo log entries 2
+		if strings.Contains(trimmed, "undo log entries ") {
+			if uIdx := strings.Index(trimmed, "undo log entries "); uIdx != -1 {
+				sub := trimmed[uIdx+len("undo log entries "):]
+				fields := strings.Fields(sub)
+				if len(fields) > 0 {
+					if u, err := strconv.ParseInt(fields[0], 10, 64); err == nil {
+						tx.UndoLogEntries = u
+					}
+				}
+			}
+		}
+
+		// Lock mode and wait
+		if strings.HasPrefix(trimmed, "*** (") && strings.Contains(trimmed, "WAITING FOR THIS LOCK TO BE GRANTED:") {
+			tx.LockWaited = trimmed
+		} else if strings.Contains(trimmed, "HOLDS THE LOCK(S):") {
+			tx.LockHeld = trimmed
+		} else if strings.HasPrefix(trimmed, "RECORD LOCKS space id") || strings.HasPrefix(trimmed, "TABLE LOCK table") {
+			if tx.LockMode == "" {
+				tx.LockMode = trimmed
+			}
+		}
+
+		// Query statement capture
+		if trimmed == "*** (1) HOLDS THE LOCK(S):" || trimmed == "*** (2) HOLDS THE LOCK(S):" ||
+			trimmed == "*** (1) WAITING FOR THIS LOCK TO BE GRANTED:" || trimmed == "*** (2) WAITING FOR THIS LOCK TO BE GRANTED:" {
+			readingQuery = false
+		}
+
+		if readingQuery {
+			if !strings.HasPrefix(trimmed, "***") {
+				queryLines = append(queryLines, trimmed)
+			}
+		}
+
+		if strings.HasPrefix(trimmed, "MySQL thread id") && strings.Contains(trimmed, "query id") {
+			readingQuery = true
+		}
+	}
+
+	if len(queryLines) > 0 {
+		tx.Query = strings.TrimSpace(strings.Join(queryLines, " "))
+	}
+
+	return tx
+}
+
+// GetStatementDigest retrieves aggregated top SQL query statistics from sys/performance_schema.
+func (s *MySQLSession) GetStatementDigest(ctx context.Context, limit int) ([]driver.StatementDigestEntry, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 25
+	}
+
+	// 1. Try querying sys.statement_analysis (default in MySQL 5.7+ & 8.0)
+	sysQuery := fmt.Sprintf(`
+		SELECT 
+			IFNULL(query, '') AS query_text,
+			IFNULL(exec_count, 0) AS exec_count,
+			IFNULL(ROUND(total_latency / 1000000, 2), 0) AS total_latency_ms,
+			IFNULL(ROUND(avg_latency / 1000000, 2), 0) AS avg_latency_ms,
+			IFNULL(ROUND(max_latency / 1000000, 2), 0) AS max_latency_ms,
+			IFNULL(ROUND(lock_latency / 1000000, 2), 0) AS lock_time_ms,
+			IFNULL(rows_sent, 0) AS rows_sent,
+			IFNULL(rows_examined, 0) AS rows_examined,
+			IFNULL(rows_affected, 0) AS rows_affected,
+			IFNULL(full_scan, '') AS full_scan,
+			IFNULL(no_index_used_count, 0) AS no_index_used,
+			IFNULL(DATE_FORMAT(first_seen, '%%Y-%%m-%%d %%H:%%i:%%s'), '') AS first_seen,
+			IFNULL(DATE_FORMAT(last_seen, '%%Y-%%m-%%d %%H:%%i:%%s'), '') AS last_seen,
+			IFNULL(digest, '') AS digest
+		FROM sys.statement_analysis
+		WHERE query IS NOT NULL AND query != ''
+		ORDER BY total_latency DESC
+		LIMIT %d;
+	`, limit)
+
+	rows, err := s.db.QueryContext(ctx, sysQuery)
+	if err == nil {
+		defer rows.Close()
+		var list []driver.StatementDigestEntry
+		for rows.Next() {
+			var e driver.StatementDigestEntry
+			var fullScanStr string
+			if err := rows.Scan(
+				&e.Query, &e.ExecCount, &e.TotalLatencyMs, &e.AvgLatencyMs, &e.MaxLatencyMs,
+				&e.LockTimeMs, &e.RowsSent, &e.RowsExamined, &e.RowsAffected,
+				&fullScanStr, &e.NoIndexUsed, &e.FirstSeen, &e.LastSeen, &e.Digest,
+			); err == nil {
+				e.FullScan = strings.Contains(strings.ToLower(fullScanStr), "yes") || strings.Contains(strings.ToLower(fullScanStr), "1") || strings.Contains(strings.ToLower(fullScanStr), "*")
+				list = append(list, e)
+			}
+		}
+		if len(list) > 0 {
+			return list, nil
+		}
+	}
+
+	// 2. Fallback directly to performance_schema.events_statements_summary_by_digest
+	psQuery := fmt.Sprintf(`
+		SELECT 
+			IFNULL(DIGEST_TEXT, '') AS query_text,
+			IFNULL(COUNT_STAR, 0) AS exec_count,
+			IFNULL(ROUND(SUM_TIMER_WAIT / 1000000000, 2), 0) AS total_latency_ms,
+			IFNULL(ROUND(AVG_TIMER_WAIT / 1000000000, 2), 0) AS avg_latency_ms,
+			IFNULL(ROUND(MAX_TIMER_WAIT / 1000000000, 2), 0) AS max_latency_ms,
+			IFNULL(ROUND(SUM_LOCK_TIME / 1000000000, 2), 0) AS lock_time_ms,
+			IFNULL(SUM_ROWS_SENT, 0) AS rows_sent,
+			IFNULL(SUM_ROWS_EXAMINED, 0) AS rows_examined,
+			IFNULL(SUM_ROWS_AFFECTED, 0) AS rows_affected,
+			IFNULL(SUM_NO_INDEX_USED, 0) AS no_index_used,
+			IFNULL(DATE_FORMAT(FIRST_SEEN, '%%Y-%%m-%%d %%H:%%i:%%s'), '') AS first_seen,
+			IFNULL(DATE_FORMAT(LAST_SEEN, '%%Y-%%m-%%d %%H:%%i:%%s'), '') AS last_seen,
+			IFNULL(DIGEST, '') AS digest
+		FROM performance_schema.events_statements_summary_by_digest
+		WHERE DIGEST_TEXT IS NOT NULL AND DIGEST_TEXT != ''
+		ORDER BY SUM_TIMER_WAIT DESC
+		LIMIT %d;
+	`, limit)
+
+	psRows, psErr := s.db.QueryContext(ctx, psQuery)
+	if psErr != nil {
+		return nil, fmt.Errorf("failed to introspect statement digest (performance_schema may be disabled): %w", psErr)
+	}
+	defer psRows.Close()
+
+	var list []driver.StatementDigestEntry
+	for psRows.Next() {
+		var e driver.StatementDigestEntry
+		if err := psRows.Scan(
+			&e.Query, &e.ExecCount, &e.TotalLatencyMs, &e.AvgLatencyMs, &e.MaxLatencyMs,
+			&e.LockTimeMs, &e.RowsSent, &e.RowsExamined, &e.RowsAffected,
+			&e.NoIndexUsed, &e.FirstSeen, &e.LastSeen, &e.Digest,
+		); err == nil {
+			e.FullScan = e.NoIndexUsed > 0
+			list = append(list, e)
+		}
+	}
+
+	return list, nil
+}
+
+// ResetStatementDigest clears performance_schema statement digest metrics.
+func (s *MySQLSession) ResetStatementDigest(ctx context.Context) error {
+	// Try sys helper first
+	_, err := s.db.ExecContext(ctx, "CALL sys.ps_truncate_all_tables(false)")
+	if err == nil {
+		return nil
+	}
+
+	// Fallback to truncating summary table directly
+	_, tErr := s.db.ExecContext(ctx, "TRUNCATE TABLE performance_schema.events_statements_summary_by_digest")
+	if tErr != nil {
+		return fmt.Errorf("failed to reset statement digest: %w", tErr)
+	}
+	return nil
+}
+
+// GetRoutineDDL returns the raw CREATE statement for a Stored Procedure or Function.
+func (s *MySQLSession) GetRoutineDDL(ctx context.Context, routineType, name string) (string, error) {
+	upperType := strings.ToUpper(strings.TrimSpace(routineType))
+	if upperType != "FUNCTION" {
+		upperType = "PROCEDURE"
+	}
+	query := fmt.Sprintf("SHOW CREATE %s `%s`", upperType, strings.ReplaceAll(name, "`", "``"))
+	var rName, sqlMode, createStmt, charSet, coll, dbColl string
+	row := s.db.QueryRowContext(ctx, query)
+	// SHOW CREATE PROCEDURE returns 6 columns: Procedure, sql_mode, Create Procedure, character_set_client, collation_connection, Database Collation
+	if err := row.Scan(&rName, &sqlMode, &createStmt, &charSet, &coll, &dbColl); err != nil {
+		return "", fmt.Errorf("failed to get %s DDL: %w", upperType, err)
+	}
+	return createStmt, nil
+}
+
+// GetEventDDL returns the raw CREATE statement for a Scheduled Event.
+func (s *MySQLSession) GetEventDDL(ctx context.Context, name string) (string, error) {
+	query := fmt.Sprintf("SHOW CREATE EVENT `%s`", strings.ReplaceAll(name, "`", "``"))
+	var eName, sqlMode, tz, createStmt, charSet, coll, dbColl string
+	row := s.db.QueryRowContext(ctx, query)
+	if err := row.Scan(&eName, &sqlMode, &tz, &createStmt, &charSet, &coll, &dbColl); err != nil {
+		return "", fmt.Errorf("failed to get EVENT DDL: %w", err)
+	}
+	return createStmt, nil
+}
+
+// ToggleEventStatus enables or disables a MySQL scheduled event.
+func (s *MySQLSession) ToggleEventStatus(ctx context.Context, name string, enable bool) error {
+	status := "DISABLE"
+	if enable {
+		status = "ENABLE"
+	}
+	query := fmt.Sprintf("ALTER EVENT `%s` %s", strings.ReplaceAll(name, "`", "``"), status)
+	_, err := s.db.ExecContext(ctx, query)
+	if err != nil {
+		return fmt.Errorf("failed to %s event %s: %w", status, name, err)
+	}
+	return nil
+}
+
+// GetTablePartitions returns partition telemetry from information_schema.partitions.
+func (s *MySQLSession) GetTablePartitions(ctx context.Context, database, table string) ([]driver.PartitionMetadata, error) {
+	if database == "" {
+		database = s.cfg.DatabaseName
+	}
+	query := `
+		SELECT 
+			IFNULL(PARTITION_NAME, '') AS p_name,
+			IFNULL(PARTITION_METHOD, '') AS p_method,
+			IFNULL(PARTITION_EXPRESSION, '') AS p_expr,
+			IFNULL(PARTITION_DESCRIPTION, '') AS p_desc,
+			IFNULL(TABLE_ROWS, 0) AS p_rows,
+			IFNULL(DATA_LENGTH, 0) AS p_data,
+			IFNULL(INDEX_LENGTH, 0) AS p_index
+		FROM information_schema.PARTITIONS
+		WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND PARTITION_NAME IS NOT NULL
+		ORDER BY PARTITION_ORDINAL_POSITION ASC;
+	`
+	rows, err := s.db.QueryContext(ctx, query, database, table)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect table partitions: %w", err)
+	}
+	defer rows.Close()
+
+	var partitions []driver.PartitionMetadata
+	for rows.Next() {
+		var p driver.PartitionMetadata
+		if err := rows.Scan(&p.Name, &p.Method, &p.Expression, &p.Description, &p.TableRows, &p.DataLength, &p.IndexLength); err == nil {
+			partitions = append(partitions, p)
+		}
+	}
+	return partitions, nil
+}
+
 

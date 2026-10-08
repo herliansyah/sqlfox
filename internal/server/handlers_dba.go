@@ -70,6 +70,72 @@ func (s *Server) handleGetServerVariables(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, report)
 }
 
+func (s *Server) handleGetDeadlock(w http.ResponseWriter, r *http.Request) {
+	connID := r.PathValue("id")
+	sess, err := s.sessionMgr.GetSession(connID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	report, err := sess.InspectDeadlock(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to inspect deadlock: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, report)
+}
+
+func (s *Server) handleGetStatementDigest(w http.ResponseWriter, r *http.Request) {
+	connID := r.PathValue("id")
+	sess, err := s.sessionMgr.GetSession(connID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	limit := 25
+	if lStr := r.URL.Query().Get("limit"); lStr != "" {
+		if l, err := strconv.Atoi(lStr); err == nil && l > 0 && l <= 100 {
+			limit = l
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	digest, err := sess.GetStatementDigest(ctx, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get statement digest: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, digest)
+}
+
+func (s *Server) handleResetStatementDigest(w http.ResponseWriter, r *http.Request) {
+	connID := r.PathValue("id")
+	sess, err := s.sessionMgr.GetSession(connID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	if err := sess.ResetStatementDigest(ctx); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to reset statement digest: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
 func (s *Server) handleKillProcess(w http.ResponseWriter, r *http.Request) {
 	connID := r.PathValue("id")
 	sess, err := s.sessionMgr.GetSession(connID)
