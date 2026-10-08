@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"sqlfox/internal/driver"
 	"sqlfox/internal/logger"
@@ -31,6 +33,8 @@ type Server struct {
 	updateAPIURL      string
 	targetExePath     string
 	restartFn         func() error
+	cloudSyncMu       sync.Mutex
+	cloudSyncTimer    *time.Timer
 }
 
 // NewServer initializes HTTP routes and application state.
@@ -87,6 +91,15 @@ func (s *Server) routes() {
 	mux.HandleFunc("DELETE /api/notes/{id}", s.handleDeleteOperationalNote)
 	mux.HandleFunc("POST /api/notes/{id}/snooze", s.handleSnoozeReminder)
 	mux.HandleFunc("POST /api/notes/{id}/resolve", s.handleResolveOperationalNote)
+
+	// Cloud Sync & Portability (Notes Bundle & GitHub Sync)
+	mux.HandleFunc("GET /api/cloud-sync/config", s.handleGetCloudSyncConfig)
+	mux.HandleFunc("POST /api/cloud-sync/config", s.handleSaveCloudSyncConfig)
+	mux.HandleFunc("POST /api/cloud-sync/test", s.handleTestCloudSync)
+	mux.HandleFunc("POST /api/cloud-sync/run", s.handleRunCloudSync)
+	mux.HandleFunc("GET /api/cloud-sync/status", s.handleGetCloudSyncStatus)
+	mux.HandleFunc("GET /api/notes/bundle/export", s.handleExportNotesBundle)
+	mux.HandleFunc("POST /api/notes/bundle/import", s.handleImportNotesBundle)
 
 	// Session exploration and actions
 	mux.HandleFunc("POST /api/session/connect/{id}", s.handleConnectSession)

@@ -409,6 +409,10 @@
             <span class="font-medium text-sky-400">🗄️ Connections</span>
             <span class="text-[10px] text-slate-400">Manage & export connection vault</span>
           </button>
+          <button onclick="openCloudSyncModal(); toggleTopSettingsMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex flex-col border-t border-slate-800">
+            <span class="font-medium text-emerald-400">☁️ Cloud Sync & Portability</span>
+            <span class="text-[10px] text-slate-400">GitHub replication & notes bundles</span>
+          </button>
           <button onclick="toggleAISettings(); toggleTopSettingsMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex flex-col border-t border-slate-800">
             <span class="font-medium text-purple-400">🤖 AI Config</span>
             <span class="text-[10px] text-slate-400">BYOK provider key & AI persona</span>
@@ -1844,8 +1848,16 @@
             <span>Notes Inbox</span>
           </span>
           <span id="notes-inbox-total" class="text-slate-400 text-[11px]">(0 notes)</span>
+          <button id="notes-cloud-sync-badge" onclick="openCloudSyncModal('github')" class="hidden items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 transition border border-slate-700 cursor-pointer" title="Click to manage GitHub Cloud Sync">
+            <span id="notes-cloud-sync-dot">🟢</span>
+            <span id="notes-cloud-sync-text">Synced</span>
+          </button>
         </div>
-        <div class="flex items-center space-x-2">
+        <div class="flex items-center space-x-1.5">
+          <button onclick="openCloudSyncModal('bundle')" class="text-slate-400 hover:text-emerald-400 px-2 py-1 text-xs rounded hover:bg-slate-800 transition flex items-center space-x-1 border border-slate-800" title="Cloud Sync & Export Notes Bundle">
+            <span>☁️</span>
+            <span class="text-[11px]">Sync/Export</span>
+          </button>
           <button onclick="openNoteComposerModal()" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-2.5 py-1 rounded text-xs transition flex items-center space-x-1 shadow-sm">
             <span>➕</span>
             <span>New Note</span>
@@ -2456,16 +2468,96 @@
     </div>
   </div>
 
-  <!-- 5. Vault Export/Import Modal -->
+  <!-- 5. Vault Export/Import & Cloud Sync Modal -->
   <div id="vault-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 hidden">
-    <div class="bg-slate-900 border border-app-border w-full max-w-md rounded-lg shadow-2xl p-6 space-y-4">
+    <div class="bg-slate-900 border border-app-border w-full max-w-xl rounded-lg shadow-2xl p-6 space-y-4">
       <div class="flex items-center justify-between border-b border-app-border pb-3">
-        <h3 class="text-base font-bold text-white">Connection Vault Migration</h3>
+        <div class="flex items-center space-x-2">
+          <span class="text-base font-bold text-white">Cloud Sync & Data Portability</span>
+        </div>
         <button onclick="closeVaultModal()" class="text-slate-400 hover:text-white">✕</button>
       </div>
-      <div class="space-y-4 text-xs">
+
+      <!-- Navigation Tabs -->
+      <div class="flex border-b border-slate-800 space-x-2 text-xs">
+        <button id="tab-btn-sync" onclick="switchVaultModalTab('github')" class="px-3 py-1.5 font-bold text-emerald-400 border-b-2 border-emerald-400">☁️ GitHub Sync</button>
+        <button id="tab-btn-bundle" onclick="switchVaultModalTab('bundle')" class="px-3 py-1.5 text-slate-400 hover:text-slate-200">📦 Notes Bundle (.zip)</button>
+        <button id="tab-btn-vault" onclick="switchVaultModalTab('vault')" class="px-3 py-1.5 text-slate-400 hover:text-slate-200">🔐 Vault Archive (.sqlfox-vault)</button>
+      </div>
+
+      <!-- Tab 1: GitHub Sync Pane -->
+      <div id="pane-vault-github" class="space-y-3 text-xs">
+        <div id="cloud-sync-status-card" class="p-2.5 bg-slate-950 rounded border border-slate-800 flex items-center justify-between">
+          <div class="flex items-center space-x-2">
+            <span id="cloud-sync-status-icon">⚪</span>
+            <div>
+              <div id="cloud-sync-status-title" class="font-bold text-slate-200">Cloud Sync Idle</div>
+              <div id="cloud-sync-status-sub" class="text-[11px] text-slate-500">Not configured yet</div>
+            </div>
+          </div>
+          <button onclick="runCloudSyncNow()" id="btn-cloud-sync-now" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded text-xs transition">Sync Now</button>
+        </div>
+
+        <div class="space-y-2">
+          <label class="flex items-center space-x-2 text-slate-300">
+            <input type="checkbox" id="cloud-sync-enabled" class="rounded bg-slate-800 border-slate-700 text-emerald-500">
+            <span class="font-bold">Enable Automatic GitHub Sync (Offline-First)</span>
+          </label>
+
+          <div>
+            <label class="block text-slate-400 mb-1">GitHub Personal Access Token (PAT):</label>
+            <input type="password" id="cloud-sync-token" placeholder="ghp_•••••••• (Token encrypted at rest with Master PIN)" class="w-full bg-slate-950 border border-slate-800 p-2 text-white rounded outline-none focus:border-emerald-500">
+            <span class="text-[10px] text-slate-500">Requires a token with repo or Contents: Read & Write permission.</span>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-slate-400 mb-1">Repository (owner/repo):</label>
+              <input type="text" id="cloud-sync-repo" placeholder="octocat/my-database-notes" class="w-full bg-slate-950 border border-slate-800 p-2 text-white rounded outline-none focus:border-emerald-500">
+            </div>
+            <div>
+              <label class="block text-slate-400 mb-1">Branch:</label>
+              <input type="text" id="cloud-sync-branch" value="main" placeholder="main" class="w-full bg-slate-950 border border-slate-800 p-2 text-white rounded outline-none focus:border-emerald-500">
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-slate-400 mb-1">Optional Subfolder / Path Prefix:</label>
+            <input type="text" id="cloud-sync-prefix" placeholder="e.g. sqlfox-notes (leave blank for root)" class="w-full bg-slate-950 border border-slate-800 p-2 text-white rounded outline-none focus:border-emerald-500">
+          </div>
+
+          <label class="flex items-center space-x-2 text-slate-400 pt-1">
+            <input type="checkbox" id="cloud-sync-include-vault" checked class="rounded bg-slate-800 border-slate-700 text-emerald-500">
+            <span>Include Encrypted Vault Archive (AES-256 backup of database connections)</span>
+          </label>
+        </div>
+
+        <div class="flex justify-end space-x-2 pt-2 border-t border-slate-800">
+          <button onclick="testCloudSync()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded">Test Connection</button>
+          <button onclick="saveCloudSyncConfig()" class="px-3 py-1.5 bg-app-accent hover:bg-sky-400 text-slate-950 font-bold rounded">Save Settings</button>
+        </div>
+      </div>
+
+      <!-- Tab 2: Notes Bundle (.zip) Pane -->
+      <div id="pane-vault-bundle" class="space-y-4 text-xs hidden">
+        <div class="p-3 bg-slate-950 rounded border border-slate-800 space-y-2">
+          <h4 class="font-bold text-slate-200">Download Notes Bundle (.zip)</h4>
+          <p class="text-slate-400 text-[11px]">Exports all Operational Notes, Table Notes, and SQL Snippets into a standard ZIP archive containing human-readable Markdown and SQL files.</p>
+          <button onclick="doExportNotesBundle()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-1.5 rounded">Download Notes Bundle (.zip)</button>
+        </div>
+        <div class="p-3 bg-slate-950 rounded border border-slate-800 space-y-2">
+          <h4 class="font-bold text-slate-200">Import Notes Bundle (.zip)</h4>
+          <p class="text-slate-400 text-[11px]">Restore or merge notes and snippets from a previously exported ZIP bundle without overwriting connection credentials.</p>
+          <input type="file" id="import-bundle-file" accept=".zip" class="w-full text-slate-400 text-xs">
+          <button onclick="doImportNotesBundle()" class="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 py-1.5 rounded font-bold">Import Notes from ZIP</button>
+        </div>
+      </div>
+
+      <!-- Tab 3: Encrypted Vault Archive (.sqlfox-vault) Pane -->
+      <div id="pane-vault-archive" class="space-y-4 text-xs hidden">
         <div class="p-3 bg-slate-950 rounded border border-slate-800 space-y-2">
           <h4 class="font-bold text-slate-200">Export Encrypted Vault (.sqlfox-vault)</h4>
+          <p class="text-slate-400 text-[11px]">Full migration backup including database connections, credentials, notes, and snippets protected by an export passphrase.</p>
           <input type="password" id="export-passphrase" placeholder="Choose an export passphrase" class="w-full bg-slate-900 border border-slate-700 p-2 text-white rounded outline-none">
           <button onclick="doExportVault()" class="w-full bg-app-accent text-slate-950 font-bold py-1.5 rounded">Download Vault File</button>
         </div>
@@ -2473,7 +2565,7 @@
           <h4 class="font-bold text-slate-200">Import Vault Archive</h4>
           <input type="file" id="import-file" accept=".sqlfox-vault,.json" class="w-full text-slate-400 text-xs">
           <input type="password" id="import-passphrase" placeholder="Enter the export passphrase" class="w-full bg-slate-900 border border-slate-700 p-2 text-white rounded outline-none">
-          <button onclick="doImportVault()" class="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 py-1.5 rounded">Import Connections</button>
+          <button onclick="doImportVault()" class="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 py-1.5 rounded font-bold">Import Connections & Notes</button>
         </div>
       </div>
     </div>
@@ -10716,6 +10808,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
       updateNotesBadgeAndCounts();
       renderNotesInboxList();
+      if (typeof updateCloudSyncHeaderBadge === 'function') {
+        updateCloudSyncHeaderBadge();
+      }
     }
 
     function updateNotesBadgeAndCounts() {
@@ -17779,13 +17874,237 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
     }
 
-    // --- Export / Import Vault ---
+    // --- Export / Import Vault & Cloud Sync ---
 
-    function openExportImportModal() {
+    function openExportImportModal(tab) {
       document.getElementById('vault-modal').classList.remove('hidden');
+      switchVaultModalTab(tab || 'vault');
+    }
+    function openCloudSyncModal(tab) {
+      document.getElementById('vault-modal').classList.remove('hidden');
+      switchVaultModalTab(tab || 'github');
     }
     function closeVaultModal() {
       document.getElementById('vault-modal').classList.add('hidden');
+    }
+
+    function switchVaultModalTab(tab) {
+      const tabs = ['github', 'bundle', 'vault'];
+      tabs.forEach(t => {
+        const pane = document.getElementById(t === 'github' ? 'pane-vault-github' : t === 'bundle' ? 'pane-vault-bundle' : 'pane-vault-archive');
+        const btn = document.getElementById(t === 'github' ? 'tab-btn-sync' : t === 'bundle' ? 'tab-btn-bundle' : 'tab-btn-vault');
+        if (pane) pane.classList.toggle('hidden', t !== tab);
+        if (btn) {
+          if (t === tab) {
+            btn.className = 'px-3 py-1.5 font-bold text-emerald-400 border-b-2 border-emerald-400';
+          } else {
+            btn.className = 'px-3 py-1.5 text-slate-400 hover:text-slate-200';
+          }
+        }
+      });
+      if (tab === 'github') {
+        loadCloudSyncConfig();
+      }
+    }
+
+    async function loadCloudSyncConfig() {
+      try {
+        const res = await apiFetch('/api/cloud-sync/config');
+        if (!res.ok) return;
+        const cfg = await res.json();
+        const enabledEl = document.getElementById('cloud-sync-enabled');
+        const tokenEl = document.getElementById('cloud-sync-token');
+        const repoEl = document.getElementById('cloud-sync-repo');
+        const branchEl = document.getElementById('cloud-sync-branch');
+        const prefixEl = document.getElementById('cloud-sync-prefix');
+        const vaultEl = document.getElementById('cloud-sync-include-vault');
+
+        if (enabledEl) enabledEl.checked = !!cfg.enabled;
+        if (tokenEl && cfg.has_token) tokenEl.placeholder = cfg.masked_token || '••••••••';
+        if (repoEl) repoEl.value = cfg.github_repo || '';
+        if (branchEl) branchEl.value = cfg.github_branch || 'main';
+        if (prefixEl) prefixEl.value = cfg.path_prefix || '';
+        if (vaultEl) vaultEl.checked = cfg.include_vault_backup !== false;
+
+        renderCloudSyncStatus(cfg);
+        updateCloudSyncHeaderBadge(cfg);
+      } catch (e) {
+        console.error('Failed to load cloud sync config', e);
+      }
+    }
+
+    function renderCloudSyncStatus(cfg) {
+      const iconEl = document.getElementById('cloud-sync-status-icon');
+      const titleEl = document.getElementById('cloud-sync-status-title');
+      const subEl = document.getElementById('cloud-sync-status-sub');
+      if (!iconEl || !titleEl || !subEl) return;
+
+      if (!cfg.enabled) {
+        iconEl.textContent = '⚪';
+        titleEl.textContent = 'Cloud Sync Disabled';
+        subEl.textContent = 'Enable automatic GitHub sync to replicate notes and snippets.';
+      } else if (cfg.last_sync_status === 'syncing') {
+        iconEl.textContent = '🟡';
+        titleEl.textContent = 'Syncing to GitHub...';
+        subEl.textContent = 'Replicating changes in background';
+      } else if (cfg.last_sync_status === 'error') {
+        iconEl.textContent = '🔴';
+        titleEl.textContent = 'Sync Error';
+        subEl.textContent = cfg.last_sync_error || 'Failed to sync with repository';
+      } else if (cfg.last_sync_status === 'synced') {
+        iconEl.textContent = '🟢';
+        titleEl.textContent = 'Synced with GitHub';
+        const at = cfg.last_sync_at ? new Date(cfg.last_sync_at).toLocaleTimeString() : 'Recently';
+        const sha = cfg.last_commit_sha ? ' (' + cfg.last_commit_sha.substring(0, 7) + ')' : '';
+        subEl.textContent = `Last sync at ${at}${sha}`;
+      } else {
+        iconEl.textContent = '⚪';
+        titleEl.textContent = 'Cloud Sync Ready';
+        subEl.textContent = cfg.github_repo ? `Bound to ${cfg.github_repo}` : 'Repository not configured';
+      }
+    }
+
+    async function updateCloudSyncHeaderBadge(cfgParam) {
+      try {
+        const badge = document.getElementById('notes-cloud-sync-badge');
+        const dot = document.getElementById('notes-cloud-sync-dot');
+        const txt = document.getElementById('notes-cloud-sync-text');
+        if (!badge || !dot || !txt) return;
+
+        let cfg = cfgParam;
+        if (!cfg) {
+          const res = await apiFetch('/api/cloud-sync/status');
+          if (res.ok) cfg = await res.json();
+        }
+        if (!cfg || !cfg.enabled) {
+          badge.classList.add('hidden');
+          return;
+        }
+
+        badge.classList.remove('hidden');
+        if (cfg.status === 'syncing') {
+          dot.textContent = '🟡';
+          txt.textContent = 'Syncing...';
+          badge.title = 'Syncing notes to GitHub';
+        } else if (cfg.status === 'error') {
+          dot.textContent = '🔴';
+          txt.textContent = 'Error';
+          badge.title = cfg.last_error || 'Cloud sync error';
+        } else if (cfg.status === 'pending') {
+          dot.textContent = '🟡';
+          txt.textContent = 'Pending';
+          badge.title = 'Changes queued for sync';
+        } else {
+          dot.textContent = '🟢';
+          txt.textContent = 'Synced';
+          badge.title = 'Notes synced with GitHub';
+        }
+      } catch (e) {
+        // non-blocking
+      }
+    }
+
+    async function saveCloudSyncConfig() {
+      const enabled = document.getElementById('cloud-sync-enabled').checked;
+      const token = document.getElementById('cloud-sync-token').value.trim();
+      const repo = document.getElementById('cloud-sync-repo').value.trim();
+      const branch = document.getElementById('cloud-sync-branch').value.trim();
+      const prefix = document.getElementById('cloud-sync-prefix').value.trim();
+      const includeVault = document.getElementById('cloud-sync-include-vault').checked;
+
+      const res = await apiFetch('/api/cloud-sync/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enabled,
+          github_token: token,
+          github_repo: repo,
+          github_branch: branch,
+          path_prefix: prefix,
+          include_vault_backup: includeVault
+        })
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        return showNativeAlert(err.message || 'Failed to save config', 'Cloud Sync');
+      }
+
+      showNativeAlert('Cloud Sync settings saved successfully', 'Cloud Sync');
+      await loadCloudSyncConfig();
+    }
+
+    async function testCloudSync() {
+      const token = document.getElementById('cloud-sync-token').value.trim();
+      const repo = document.getElementById('cloud-sync-repo').value.trim();
+      const branch = document.getElementById('cloud-sync-branch').value.trim();
+
+      const res = await apiFetch('/api/cloud-sync/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          github_token: token,
+          github_repo: repo,
+          github_branch: branch
+        })
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return showNativeAlert(data.message || 'Connection test failed', 'Cloud Sync Test');
+      }
+      showNativeAlert(data.message || 'Repository connection verified successfully!', 'Cloud Sync Test');
+    }
+
+    async function runCloudSyncNow() {
+      const btn = document.getElementById('btn-cloud-sync-now');
+      if (btn) btn.disabled = true;
+      try {
+        const res = await apiFetch('/api/cloud-sync/run', { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showNativeAlert(data.message || 'Sync failed', 'Cloud Sync Error');
+        } else {
+          showNativeAlert(data.message || `Successfully synced ${data.files_count} files (${data.commit_sha?.substring(0, 7)})`, 'Cloud Sync');
+        }
+        await loadCloudSyncConfig();
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    function doExportNotesBundle() {
+      window.location.href = '/api/notes/bundle/export';
+    }
+
+    async function doImportNotesBundle() {
+      const fileInput = document.getElementById('import-bundle-file');
+      if (!fileInput || !fileInput.files[0]) {
+        return showNativeAlert('Please select a .zip notes bundle file first', 'Notes Bundle Import');
+      }
+
+      const file = fileInput.files[0];
+      const formData = new FormData();
+      formData.append('bundle', file);
+
+      const res = await apiFetch('/api/notes/bundle/import', {
+        method: 'POST',
+        body: formData
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return showNativeAlert(data.message || 'Failed to import bundle', 'Notes Bundle Import');
+      }
+
+      showNativeAlert(data.message || `Imported ${data.imported_count} notes and snippets`, 'Notes Bundle Import');
+      closeVaultModal();
+      if (typeof fetchAndRenderInboxNotes === 'function') {
+        await fetchAndRenderInboxNotes();
+      }
+      if (typeof loadSnippetsList === 'function') {
+        await loadSnippetsList();
+      }
     }
 
     async function doExportVault() {
@@ -18488,6 +18807,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
         { name: 'New Query Tab', shortcut: 'Ctrl+T', run: () => addNewQueryTab() },
         { name: 'New Connection', shortcut: '', run: () => openNewConnModal() },
         { name: 'Toggle Read-Only Mode', shortcut: '', run: () => toggleReadOnly() },
+        { name: 'Cloud Sync & GitHub Replication', shortcut: '', run: () => openCloudSyncModal('github') },
+        { name: 'Download Notes Bundle (.zip)', shortcut: '', run: () => doExportNotesBundle() },
         { name: 'Export Vault (.sqlfox-vault)', shortcut: '', run: () => openExportImportModal() },
         { name: 'Toggle AI Copilot', shortcut: 'Ctrl+L', run: () => toggleAISidebar() },
         { name: 'Check for Updates', shortcut: '', run: () => checkOrOpenUpdate(true) },
@@ -18525,6 +18846,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
       else if (name === 'New Query Tab') addNewQueryTab();
       else if (name === 'New Connection') openNewConnModal();
       else if (name === 'Toggle Read-Only Mode') toggleReadOnly();
+      else if (name === 'Cloud Sync & GitHub Replication') openCloudSyncModal('github');
+      else if (name === 'Download Notes Bundle (.zip)') doExportNotesBundle();
       else if (name === 'Export Vault (.sqlfox-vault)') openExportImportModal();
       else if (name === 'Toggle AI Copilot') toggleAISidebar();
       else if (name === 'Check for Updates') checkOrOpenUpdate(true);

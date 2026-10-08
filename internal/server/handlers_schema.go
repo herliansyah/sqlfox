@@ -785,6 +785,7 @@ func (s *Server) handleSaveTableNote(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = s.vault.SaveTableNote(note)
 
+	s.notifyCloudSyncChange()
 	writeJSON(w, http.StatusOK, note)
 }
 

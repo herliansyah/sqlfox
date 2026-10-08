@@ -66,6 +66,7 @@ func (s *Server) handleCreateOperationalNote(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	s.notifyCloudSyncChange()
 	writeJSON(w, http.StatusCreated, note)
 }
 
@@ -124,6 +125,7 @@ func (s *Server) handleUpdateOperationalNote(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	s.notifyCloudSyncChange()
 	writeJSON(w, http.StatusOK, note)
 }
 
@@ -149,6 +151,7 @@ func (s *Server) handleDeleteOperationalNote(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	s.notifyCloudSyncChange()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
@@ -239,5 +242,6 @@ func (s *Server) handleResolveOperationalNote(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	s.notifyCloudSyncChange()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "resolved"})
 }
