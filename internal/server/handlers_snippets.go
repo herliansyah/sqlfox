@@ -40,6 +40,7 @@ func (s *Server) handleSaveSnippet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.notifyCloudSyncChange()
 	writeJSON(w, http.StatusOK, snip)
 }
 
@@ -59,5 +60,6 @@ func (s *Server) handleDeleteSnippet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.notifyCloudSyncChange()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Cloud Sync & GitHub Replication Engine (`internal/vault`, `internal/server`)**: Asynchronous, offline-first background replication of user notes, documentation, and SQL snippets to any GitHub repository using official GitHub REST API (v3/v4) without requiring external `git` CLI installations. Features sensitive token encryption at rest via AES-256-GCM and Argon2id, atomic commits using the Git Database API, mirror deletions, optional encrypted Connection Vault backup archive, and non-blocking real-time status indicators (`Synced 🟢`, `Syncing 🟡`, `Error 🔴`).
+- **Notes Bundle Portability Suite (.zip)**: 1-click export and import of all Operational Notes, Table Documentation, and SQL Snippets packaged into a portable, unencrypted ZIP bundle containing human-readable Markdown and SQL files for offline inspection and cross-tool migration.
+- **Unified Cloud Sync & Migration Modal**: Modern 3-tab modal (`☁️ GitHub Sync`, `📦 Notes Bundle (.zip)`, `🔐 Vault Archive (.sqlfox-vault)`) accessible from the Top Settings dropdown, Notes Inbox drawer header, and Command Palette (`Ctrl+K`).
+
 ## [v0.4.0] - 2026-10-08
 
 ### Added

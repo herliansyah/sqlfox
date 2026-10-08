@@ -818,4 +818,20 @@ The deterministic boundary filter intercepting log messages and attributes to sa
 _Avoid_: Secret hiding, raw dump, password censor
 
 
+## Cloud Replication & Portability
 
+**Cloud Sync**:
+The background replication mechanism that synchronizes notes, snippets, and encrypted vault archives to a remote Git repository via the GitHub REST API without requiring external git CLI dependencies.
+_Avoid_: Git backup, cloud upload, drive sync
+
+**Offline-First Replication**:
+The architectural boundary where local SQLite persistence is authoritative and immediate, with cloud synchronization acting as an asynchronous, non-blocking downstream replica.
+_Avoid_: Local cache, write-through
+
+**Sync Status**:
+The operational state indicator of the background replication queue (`Synced`, `Syncing`, `Pending`, `Error`) surfaced on the UI without interrupting editing workflows.
+_Avoid_: Upload status, git state
+
+**Notes Bundle**:
+A portable, unencrypted ZIP archive containing human-readable Markdown notes and SQL snippets for offline reading and cross-tool export when GitHub synchronization is not configured.
+_Avoid_: Note dump, export zip
