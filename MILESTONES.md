@@ -584,6 +584,21 @@ v2.2 (MySQL Enterprise Operations & Programmability Suite)
   - [x] **Documentation & Verification**: Recorded in ADR-0044, `CONTEXT.md`, `ARCHITECTURE.md`, `UX_DESIGN.md`, `README.md`, `USER_GUIDE.md`, `USER_GUIDE_ID.md`, and unit tests in `internal/vault/operational_notes_test.go`, `internal/server/server_test.go`, and `internal/ai/assistant_test.go`.
 - **Runnable Verification**: Run `go test -v ./internal/vault -run "TestOperationalNotes"`, `go test -v ./internal/server -run "TestServer_API_OperationalNotes"`, and `go test -v ./internal/ai -run "TestAssemblePrompts_OperationalNotes"` -> 100% pass across all operational note lifecycles.
 
+---
+
+### Milestone 36: Workspace Ergonomics, Tab Lifecycle Suite & Live Process Trend
+- **Goal**: Elevate workspace fluidity, prevent dirty buffer work loss, protect Master PIN privacy from shoulder surfing, and introduce rolling query concurrency telemetry with fluid pane resizing.
+- **Deliverables**:
+  - [x] **Workspace Pane Splitter (`web/dist/index.html`)**: Interactive draggable horizontal divider separating Query Editor and Virtual Data Grid with cursor `row-resize`, min-height constraints (editor min 80px, grid min 120px), double-click 50:50 reset, persistent layout preference in `localStorage`, and dynamic tab visibility.
+  - [x] **Workspace Tab Context Menu & Lifecycle Suite**: Secondary-click context menu providing `Close` (`Ctrl+W`), `Close Others`, `Close Tabs to the Right`, `Close All`, `Duplicate Tab` (with SQL draft clone), `Rename Tab...` via native modal prompt, and `Save as Operational Note...`.
+  - [x] **Tab Close Confirmation Guard**: Interactive pre-closure protection powered by the Native Modal Dialog safeguarding against accidental closing of dirty SQL drafts or modified workspaces across single and batch operations. Empty workspace resets gracefully to fresh `Query 1.sql`.
+  - [x] **Master PIN Shoulder-Surfing Masking & Toggle**: Header Master PIN badge masking sensitive digits by default (`fox-••••`) with interactive peek toggle button (`👁️`).
+  - [x] **Process Activity Trend Panel**: Ephemeral 60-point ring buffer rendered on native HTML5 Canvas in the Processlist Manager displaying running query concurrency, total thread counts, real-time KPI metrics (`Running Now`, `Total`, `Peak`, `Avg`), collapsible drawer with `localStorage` state, and 1-click Flight Recorder escalation.
+  - [x] **Process Detail Modal & Non-SSL Clipboard Fallback**: Comprehensive thread inspection modal with thread details, full SQL, and robust clipboard copy fallback in unencrypted HTTP network environments.
+  - [x] **Documentation & Verification**: Recorded in `CONTEXT.md`, `CHANGELOG.md`, `USER_GUIDE.md`, `USER_GUIDE_ID.md`, `UX_DESIGN.md`, `web/embed_test.go`, and automated suites in `scripts/test-workspace-pane-splitter.mjs` and `scripts/test-tab-context-menu-repro.mjs`.
+- **Runnable Verification**: Run `go test -v ./web` and `node scripts/test-workspace-pane-splitter.mjs` -> 100% pass across all workspace ergonomics and trend rendering routines.
+
+
 
 
 

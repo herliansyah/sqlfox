@@ -39,11 +39,13 @@
    - [Interactive Visual ERD Canvas](#interactive-visual-erd-canvas)
    - [BYOK AI Copilot & Automated Error Healer](#byok-ai-copilot--automated-error-healer)
    - [Unified Operational Notes Inbox & Follow-up Lifecycle](#unified-operational-notes-inbox--follow-up-lifecycle)
+   - [Workspace Ergonomics, Tab Context Menu & Fluid Splitter](#workspace-ergonomics-tab-context-menu--fluid-splitter)
 5. [Advanced DBA & Operations Playbook (DBA Level)](#5-advanced-dba--operations-playbook-dba-level)
    - [Deterministic AST Safety Guard & Challenge Modal](#deterministic-ast-safety-guard--challenge-modal)
    - [Pre-DDL Smart Tiered Backups](#pre-ddl-smart-tiered-backups)
    - [Pre-Flight Lock Contention & Root Blocker Tree](#pre-flight-lock-contention--root-blocker-tree)
    - [Real-Time Processlist & Out-of-Band Cancellation](#real-time-processlist--out-of-band-cancellation)
+   - [Process Activity Trend Panel](#process-activity-trend-panel)
    - [Cluster & Replication Inspector (PXC / Galera / Replica)](#cluster--replication-inspector-pxc--galera--replica)
    - [Performance Flight Recorder (Quad-Metric Telemetry)](#performance-flight-recorder-quad-metric-telemetry)
    - [Server Variables Inspector & Tuning Advisor](#server-variables-inspector--tuning-advisor)
@@ -191,6 +193,7 @@ When you bind SqlFox to a local network interface or access it over LAN (`http:/
 1. **Remote Access Guard** automatically triggers a full-screen lock modal on non-loopback devices.
 2. The user must authenticate using the **Master Password** or the 6-digit **Master PIN** generated in the host server terminal.
 3. This guarantees secure tablet, mobile, or team access across local WiFi without exposing raw credentials.
+4. **Shoulder-Surfing Privacy Guard**: In the desktop interface header, the Master PIN badge masks sensitive digits by default (`fox-••••`). Click the **👁️** toggle icon to temporarily reveal the PIN when pairing secondary devices, keeping credentials private in open office or screen-sharing environments.
 
 ---
 
@@ -313,6 +316,20 @@ SqlFox integrates a centralized operational notebook and follow-up engine direct
   - Selecting a note inserts an `[@note:<title>]` reference token.
   - When submitted, SqlFox automatically extracts referenced notes and injects the raw snapshot and developer action notes directly into the AI system prompt context, empowering the AI to diagnose historical incidents and analyze past query issues accurately.
 
+### Workspace Ergonomics, Tab Context Menu & Fluid Splitter
+SqlFox provides a modern, distraction-free desktop-grade workspace optimized for long development and debugging sessions:
+
+- **Workspace Pane Splitter**:
+  - Drag the horizontal divider between the Query Editor and Virtual Data Grid to flexibly reallocate screen real-estate based on your current task (more lines of SQL vs more result rows).
+  - Enforces strict boundary guards (editor minimum 80px, grid minimum 120px) to prevent toolbar and pagination controls from being clipped.
+  - **Double-Click Reset**: Double-click anywhere on the splitter bar to instantly snap the workspace back to a balanced **50:50** layout.
+  - **Global Workspace Persistence**: Custom pane heights are automatically remembered in `localStorage` across all query tabs and browser reloads.
+  - **Dynamic Tab Visibility**: The splitter cleanly hides when switching to single-surface views like Table Viewer, Processlist, or Cluster Inspector.
+- **Workspace Tab Context Menu & Lifecycle Suite**:
+  - Right-click any workspace tab to reveal comprehensive lifecycle actions: `Close` (`Ctrl+W`), `Close Others`, `Close Tabs to the Right`, `Close All`, `Duplicate Tab` (cloning draft SQL and filters), `Rename Tab...`, and `Save as Operational Note...`.
+  - **Tab Close Confirmation Guard**: Intercepts tab closures with a native challenge confirmation if dirty, unexecuted SQL drafts or unsaved mutations exist, preventing accidental data loss. Clean tabs close instantaneously without alert fatigue.
+  - **Empty Workspace Graceful Reset**: Closing all tabs automatically resets the workspace into a fresh, clean `Query 1.sql` tab.
+
 ---
 
 ## 5. Advanced DBA & Operations Playbook (DBA Level)
@@ -350,6 +367,17 @@ Access via **⚡ Monitor &rarr; ⚡ Processlist**:
 - Real-time tabular monitoring of all server threads, execution times, client hosts, and active query states.
 - Filter by non-idle threads to eliminate connection pool noise.
 - **Out-of-Band Cancellation**: Clicking **Kill Query** sends `KILL QUERY <id>` (MySQL) or `SELECT pg_cancel_backend(<pid>)` (PostgreSQL) through a dedicated control connection without terminating the primary database session.
+- **Process Detail Modal**: Inspect full query text, user, host, database, state, execution time, and lock dependencies with 1-click clipboard copy (featuring robust fallback support for plain HTTP non-SSL environments).
+
+### Process Activity Trend Panel
+Access via **⚡ Monitor &rarr; ⚡ Processlist** (Click **📈 Activity Trend** button):
+- **Live Concurrency Telemetry**: Renders an ephemeral rolling 60-point time-series chart directly on native HTML5 Canvas without backend polling overhead.
+- **Dual Metric Visualizer**:
+  - Sky blue solid line with soft gradient fill representing active executing query concurrency (`Command != 'Sleep'`).
+  - Slate dashed secondary line representing total connected client threads.
+- **Real-Time KPIs**: Dynamic metric pills detailing `Running Now`, `Total Threads`, `Peak Concurrency`, and `60s Avg Running`.
+- **Flight Recorder Escalation**: 1-click **Escalate to Flight Recorder** shortcut to immediately trigger deep 1-second interval forensic recording when query concurrency spikes.
+- **Collapsible Ergonomics**: Toggle button with state preserved in `localStorage` (`sqlfox_pl_trend_open`).
 
 ### Cluster & Replication Inspector (PXC / Galera / MySQL 8.4+ / PostgreSQL)
 Access via **⚡ Monitor &rarr; 🌐 Cluster**:

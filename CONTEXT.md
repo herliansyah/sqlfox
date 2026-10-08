@@ -28,6 +28,10 @@ _Avoid_: Backup zip, cred dump
 A security gate intercepting HTTP and WebSocket requests from non-loopback IP addresses, requiring Master Password authentication before granting access to the vault and sessions.
 _Avoid_: Firewall, IP filter
 
+**Master PIN Masking**:
+A shoulder-surfing privacy guard applied to the session header Master PIN badge, masking sensitive digits by default (`fox-••••`) with an interactive peek toggle button (`👁️`).
+_Avoid_: PIN hide, password star, secret mask
+
 **Port Hunting**:
 An automated sequential port probing mechanism that resolves `EADDRINUSE` port collision errors by scanning subsequent free ports.
 _Avoid_: Port hopping, auto-port

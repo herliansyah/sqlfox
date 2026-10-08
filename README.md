@@ -60,6 +60,7 @@ Operates with a strict memory ceiling (**< 100MB RAM**), sub-second launch time 
 - 📋 **Structured Diagnostic Logging & Observability**: Configurable verbosity tiers (`debug`, `info`, `warn`, `error`, `silent`), dual output formats (`text`, `json`), persistent atomic append file sinks (`-log-file`), and automatic `sqlfox.env` loader for seamless Windows double-click configuration.
 - 📝 **Unified Operational Notes Inbox & Follow-up Lifecycle**: Central inbox for captured SQL snippets, AI explanations, and developer runbooks. Features soft-link database object tagging (`db://conn/db/table`), scheduled reminder alarms with Web Audio API chime notifications, non-blocking snooze/done actions, table-filtered runbook views, and seamless AI Copilot `@` mention autocomplete context injection.
 - 🔌 **Multi-Engine Parity & Resilience**: Resilient dual-syntax probes for MySQL 8.4 LTS / 9.x (`SHOW REPLICA STATUS`, `SHOW BINARY LOG STATUS`), MariaDB fallback diagnostics, full PostgreSQL Stored Function & Procedure introspection (`pg_proc`), Statement Digest (`pg_stat_statements`), Replication Inspector (`pg_stat_replication`), and atomic Structure Sync DDL.
+- 📐 **Fluid Workspace & Live Concurrency Telemetry**: Draggable Workspace Pane Splitter separating Query Editor and Data Grid with 50:50 double-click reset, tab lifecycle suite with dirty buffer close confirmation guard, Master PIN shoulder-surfing privacy masking, and an ephemeral 60-point Processlist Activity Trend canvas.
 
 ---
 
@@ -224,6 +225,7 @@ Berjalan dengan konsumsi memori sangat hemat (**< 100MB RAM**), waktu start kila
 - 📋 **Logging Diagnostik & Observabilitas Terstruktur**: Konfigurasi tingkatan verbosity (`debug`, `info`, `warn`, `error`, `silent`), dual format (`text`, `json`), target file persisten append (`-log-file`), dan auto-load file `sqlfox.env` untuk konfigurasi instan saat double-klik di Windows.
 - 📝 **Operational Notes Inbox & Pengingat Terjadwal**: Kotak masuk terpusat untuk catatan operasional, snapshot SQL, penjelasan AI, dan runbook developer. Dilengkapi penandaan objek database relasional (`db://conn/db/table`), alarm pengingat tindak lanjut dengan notifikasi audio Web Audio API, aksi snooze/selesai non-blocking, feed runbook terfilter per tabel, serta injeksi konteks prompt instan melalui mention `@` di AI Copilot.
 - 🔌 **Ketahanan & Paritas Multi-Engine**: Dual-syntax probe adaptif untuk MySQL 8.4 LTS / 9.x (`SHOW REPLICA STATUS`, `SHOW BINARY LOG STATUS`), fallback diagnostik MariaDB, introspeksi fungsi & prosedur PostgreSQL (`pg_proc`), kueri teratas (`pg_stat_statements`), monitoring replikasi (`pg_stat_replication`), dan sintaks DDL Structure Sync yang presisi.
+- 📐 **Ergonomi Ruang Kerja & Telemetri Konkurensi**: Workspace Pane Splitter fleksibel antara Query Editor dan Data Grid dengan reset 50:50 klik ganda, suite siklus hidup tab dengan pengaman konfirmasi draf kotor (*dirty buffer guard*), proteksi privasi PIN Master dari *shoulder surfing*, dan kanvas grafik tren aktivitas kueri 60 titik di Processlist.
 
 ---
 

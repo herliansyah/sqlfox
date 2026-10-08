@@ -634,6 +634,87 @@ The Entity-Relationship Diagram canvas allows developers to explore table relati
    - Selecting a note inserts `[@note:<title>]`.
    - On dispatch, the server extracts referenced notes and injects the raw snapshot and developer action notes directly into the system prompt context.
 
+## 21. Workspace Ergonomics, Tab Lifecycle Suite & Process Activity Trend
+
+### Multi-Pane Workspace & Splitter Wireframe
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ [Query 1.sql ✕] [Query 2.sql ✕] [users (Table) ✕] [+]                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ ▶ Run (Ctrl+Enter) | ⚡ Explain | 🛡️ Safety | ✨ Format | 📝 Save Note     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ 1 | SELECT o.id, o.customer_id, o.amount, o.status                         │
+│ 2 | FROM orders o                                                           │
+│ 3 | WHERE o.created_at >= '2026-10-01'                                      │
+│ 4 | ORDER BY o.id DESC LIMIT 50;                                            │
+├═════════════════════════════════════════════════════════════════════════════┤
+│ ═════════════════════ [ ─── Workspace Pane Splitter ─── ] ═════════════════ │ ← Drag (row-resize) / DblClick (50:50)
+├─────────────────────────────────────────────────────────────────────────────┤
+│ 15 rows returned in 12ms                                     [Export CSV ▾] │
+├────┬────────────┬─────────────┬─────────────┬───────────┬───────────────────┤
+│    │ id (INT)   │ customer_id │ amount      │ status    │ created_at        │
+├────┼────────────┼─────────────┼─────────────┼───────────┼───────────────────┤
+│ 1  │ 98412      │ 1042        │ 450.00      │ completed │ 2026-10-08 14:22  │
+│ 2  │ 98411      │ 891         │ 120.50      │ pending   │ 2026-10-08 14:19  │
+└────┴────────────┴─────────────┴─────────────┴───────────┴───────────────────┘
+```
+
+### Tab Context Menu Wireframe
+
+```
+┌───────────────────────────────────────────┐
+│ ✕ Close                           Ctrl+W  │
+│ 🗂️ Close Others                            │
+│ ➡️ Close Tabs to the Right                 │
+│ 🗑️ Close All                               │
+├───────────────────────────────────────────┤
+│ 📝 Save as Operational Note...            │
+│ ⎘ Duplicate Tab                           │
+│ ✏️ Rename Tab...                           │
+└───────────────────────────────────────────┘
+```
+
+### Process Activity Trend Panel Wireframe
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ ⚡ Processlist (28 threads)    [Slow > 1s] [Filter...]  [📈 Activity Trend ▾]│
+├─────────────────────────────────────────────────────────────────────────────┤
+│ ┌─────────────────────────────────────────────────────────────────────────┐ │
+│ │ Running: 3  |  Total: 28  |  Peak: 12  |  Avg: 2.4  | [Escalate to Recorder]│ │
+│ │ 12 ┤                                   /\                               │ │
+│ │  8 ┤              /\                  /  \                              │ │
+│ │  4 ┤  ___________/  \________________/    \__________________________   │ │
+│ │  0 ┼─────────────────────────────────────────────────────────────────── │ │
+│ │    60s ago                                                      Now     │ │
+│ └─────────────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Interaction Models
+
+1. **Workspace Pane Splitter**:
+   - Draggable horizontal separator between `#editor-container` and `#grid-container`.
+   - Hover shows sky-blue accent with row-resize cursor.
+   - Enforces minimum height bounds (Editor min 80px, Grid min 120px).
+   - Double-click resets height to 50:50 ratio.
+   - Persists height ratio in `localStorage` (`sqlfox_workspace_editor_height`).
+   - Automatically hides when non-query tabs (Table Viewer, Processlist, etc.) are active.
+2. **Tab Context Menu & Close Confirmation Guard**:
+   - Right-click tab context menu provides `Close`, `Close Others`, `Close Tabs to the Right`, `Close All`, `Duplicate Tab`, `Rename Tab...`, and `Save as Operational Note...`.
+   - Modifying a query tab marks the buffer as dirty. Closing a dirty tab triggers a native confirm modal. Clean tabs close immediately without prompt.
+   - Closing all tabs resets to a fresh `Query 1.sql`.
+3. **Master PIN Shoulder-Surfing Masking**:
+   - Master PIN badge in header displays `fox-••••` by default.
+   - Clicking `👁️` temporarily reveals plain text digits.
+4. **Process Activity Trend Panel**:
+   - Collapsible 60-second in-memory circular buffer rendered on HTML5 Canvas.
+   - Primary solid sky-blue line shows active running queries (`Command != 'Sleep'`).
+   - Secondary dashed slate line shows total thread count.
+   - Metric pills show instant KPIs with 1-click shortcut to Flight Recorder.
+
+
 
 
 

@@ -39,11 +39,13 @@
    - [Kanvas Visual ERD Interaktif](#kanvas-visual-erd-interaktif)
    - [BYOK AI Copilot & Automated Error Healer](#byok-ai-copilot--automated-error-healer)
    - [Unified Operational Notes Inbox & Pengingat Follow-up](#unified-operational-notes-inbox--pengingat-follow-up)
+   - [Ergonomi Ruang Kerja, Tab Context Menu & Fluid Splitter](#ergonomi-ruang-kerja-tab-context-menu--fluid-splitter)
 5. [Playbook Lanjutan DBA & DevOps (Level DBA)](#5-playbook-lanjutan-dba--devops-level-dba)
    - [AST Safety Guard & Challenge Modal (Pencegah Query Rusak)](#ast-safety-guard--challenge-modal-pencegah-query-rusak)
    - [Smart Tiered Backup Otomatis Pra-DDL](#smart-tiered-backup-otomatis-pra-ddl)
    - [Inspeksi Lock Contention Pra-Eksekusi & Root Blocker Tree](#inspeksi-lock-contention-pra-eksekusi--root-blocker-tree)
    - [Processlist Real-Time & Pembatalan Query Out-of-Band](#processlist-real-time--pembatalan-query-out-of-band)
+   - [Panel Tren Aktivitas Query (Processlist Concurrency Trend)](#panel-tren-aktivitas-query-processlist-concurrency-trend)
    - [Inspektur Cluster & Replikasi (PXC / Galera / Replika MySQL)](#inspektur-cluster--replikasi-pxc--galera--replika-mysql)
    - [Performance Flight Recorder (Telemetri Quad-Metric)](#performance-flight-recorder-telemetri-quad-metric)
    - [Inspektur Server Variables & Advisor Tuning Performa](#inspektur-server-variables--advisor-tuning-performa)
@@ -191,6 +193,7 @@ Saat Anda menjalankan SqlFox di server jaringan lokal atau mengaksesnya via IP L
 1. **Remote Access Guard** akan langsung menampilkan layar kunci proteksi (*Lock Screen*) pada perangkat non-localhost.
 2. Pengguna wajib memasukkan **Master Password** atau **Master PIN** 6 digit yang tercetak di layar terminal induk.
 3. Fitur ini melindungi akses database Anda saat dibuka dari iPad, tablet, atau laptop rekan tim di satu jaringan WiFi tanpa khawatir bocornya kredensial.
+4. **Proteksi Privasi Shoulder-Surfing**: Di header aplikasi desktop, badge Master PIN secara default dimaskir (`fox-••••`). Klik ikon **👁️** untuk mengintip PIN sementara saat menghubungkan tablet, mencegah PIN terlihat orang lain di ruang kerja terbuka (*open space/coffee shop*) atau saat *screen sharing*.
 
 ---
 
@@ -313,6 +316,20 @@ SqlFox menghadirkan sistem catatan operasional terpadu (*Operational Notes Inbox
   - Memilih catatan akan menyisipkan token referensi `[@note:<judul>]`.
   - Saat prompt dikirim, SqlFox mengekstrak catatan terkait dan menyuntikkan raw snapshot serta catatan developer langsung ke sistem prompt context AI, memampukan AI menganalisis insiden masa lalu dan kueri terkait secara akurat.
 
+### Ergonomi Ruang Kerja, Tab Context Menu & Fluid Splitter
+SqlFox dirancang dengan fokus pada kenyamanan sesi pengodean dan investigasi database intensif:
+
+- **Workspace Pane Splitter (Pemisah Fleksibel Editor-Grid)**:
+  - Geser garis horizontal pemisah di antara Query Editor dan Virtual Data Grid untuk mengatur pembagian layar sesuai kebutuhan (memperbesar editor SQL vs memperluas tampilan tabel hasil).
+  - Dilengkapi pengaman batas minimum (*Strict Boundary Guards*): Editor minimal 80px dan Grid minimal 120px untuk mencegah tombol toolbar dan paginasi terpotong.
+  - **Double-Click Reset 50:50**: Klik ganda pada garis pemisah untuk mengembalikan ukuran panel ke rasio seimbang **50:50** secara instan.
+  - **Penyimpanan Preferensi Global**: Ukuran panel yang Anda pilih otomatis disimpan di `localStorage` dan berlaku konsisten di seluruh tab query serta saat refresh browser.
+  - **Visibilitas Kontekstual**: Splitter otomatis tersembunyi saat membuka tab non-query seperti Table Viewer spreadsheet, Processlist, atau Cluster monitor.
+- **Workspace Tab Context Menu & Siklus Hidup Tab**:
+  - Klik kanan pada tab workspace mana saja untuk membuka menu aksi: `Tutup Tab` (`Ctrl+W`), `Tutup Tab Lainnya`, `Tutup Tab di Sebelah Kanan`, `Tutup Semua Tab`, `Duplikat Tab` (menyalin buffer SQL dan filter), `Ubah Nama Tab...`, dan `Simpan sebagai Catatan Operasional...`.
+  - **Tab Close Confirmation Guard**: Mencegah hilangnya pekerjaan dengan dialog konfirmasi aman jika tab memiliki draf SQL yang belum dieksekusi atau perubahan belum tersimpan. Tab bersih dan kosong akan langsung tertutup tanpa interupsi modal.
+  - **Reset Ruang Kerja Bersih**: Menutup semua tab atau tab terakhir akan mereset ruang kerja secara anggun ke tab `Query 1.sql` baru yang bersih.
+
 ---
 
 ## 5. Playbook Lanjutan DBA & DevOps (Level DBA)
@@ -350,6 +367,17 @@ Dapat diakses melalui **⚡ Monitor &rarr; ⚡ Processlist**:
 - Menampilkan daftar seluruh thread server, durasi berjalan, host klien, dan status query aktif dalam format tabel yang disegarkan otomatis.
 - Opsi filter untuk menyembunyikan thread tidur (*Sleep*) agar DBA dapat berfokus pada thread yang sedang bekerja.
 - **Pembatalan Out-of-Band**: Tombol **Kill Query** mengirimkan perintah terminasi (`KILL QUERY <id>` pada MySQL atau `SELECT pg_cancel_backend(<pid>)` pada PostgreSQL) melalui koneksi kontrol terpisah, sehingga koneksi utama aplikasi tidak terputus.
+- **Modal Detail Proses**: Inspeksi teks lengkap SQL, user, host, database, state, waktu eksekusi, serta lock dependency dengan salin clipboard 1-klik (didukung fallback cerdas untuk protokol HTTP biasa tanpa SSL).
+
+### Panel Tren Aktivitas Query (Processlist Concurrency Trend)
+Dapat diakses melalui **⚡ Monitor &rarr; ⚡ Processlist** (Klik tombol **📈 Activity Trend**):
+- **Telemetri Konkurensi Real-Time**: Merender grafik deret waktu (*time-series*) bergulir 60 titik secara efisien di kanvas HTML5 Canvas native tanpa beban komputasi tambahan di sisi database.
+- **Visualisasi Dua Metrik**:
+  - Garis biru langit (*Sky blue*) dengan arsiran gradien halus menggambarkan kueri yang sedang dieksekusi aktif (`Command != 'Sleep'`).
+  - Garis putus-putus abu-abu (*Slate*) menggambarkan total seluruh thread klien yang tersambung.
+- **Indikator Metrik Cepat**: Menampilkan statistik operasional langsung (`Running Now`, `Total Threads`, `Peak Concurrency`, dan `60s Avg Running`).
+- **Eskalasi ke Flight Recorder**: Tombol 1-klik **Escalate to Flight Recorder** untuk langsung mengaktifkan perekaman diagnostik resolusi tinggi per 1 detik saat terjadi lonjakan query mencurigakan.
+- **Desain Kolapsibel**: Tombol buka/tutup panel dengan status tersimpan otomatis di `localStorage` (`sqlfox_pl_trend_open`).
 
 ### Inspektur Cluster & Replikasi (PXC / Galera / MySQL 8.4+ / PostgreSQL)
 Dapat diakses melalui **⚡ Monitor &rarr; 🌐 Cluster**:
