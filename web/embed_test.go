@@ -576,4 +576,39 @@ func TestNotesInboxDrawerLayoutAndBorderEmbedded(t *testing.T) {
 	}
 }
 
+func TestQuerySnapshotCaptureAndNoteExtractionEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	expectedSnippets := []string{
+		`id="btn-save-as-note"`,
+		`id="tab-ctx-btn-save-note"`,
+		`openCurrentComposerInQueryTab()`,
+		`openNoteInQueryTab('${n.id}')`,
+		`function saveActiveQueryToNotes()`,
+		`function saveTabQueryToNotes(tab)`,
+		`function extractSqlFromNoteContent(rawContent)`,
+		`function openExtractedQueryInTab(title, rawContent, objectTags)`,
+		`function openNoteInQueryTab(noteId)`,
+		`Save Query as Operational Note`,
+		`Open Operational Notes Inbox`,
+	}
+
+	for _, s := range expectedSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain %q for Query Note integration, but was missing", s)
+		}
+	}
+}
+
 

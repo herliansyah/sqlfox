@@ -555,6 +555,10 @@
             <button onclick="formatActiveQuery()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition" title="Format SQL (Ctrl+Shift+F)">
               ✨ Format SQL
             </button>
+            <button id="btn-save-as-note" onclick="saveActiveQueryToNotes()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition flex items-center space-x-1" title="Save Active Query as Operational Note">
+              <span>📝</span>
+              <span>Save Note</span>
+            </button>
             <button id="btn-snippets-menu" onclick="openSnippetsManager()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition flex items-center space-x-1" title="Query Snippets (Ctrl+Shift+S)">
               <span>📑</span>
               <span>Snippets</span>
@@ -2149,6 +2153,9 @@
       <span>🗑️</span><span>Close All</span>
     </button>
     <div class="border-t border-slate-800 my-1"></div>
+    <button id="tab-ctx-btn-save-note" onclick="tabContextMenuAction('save-note')" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 text-slate-200 flex items-center space-x-2 transition cursor-pointer">
+      <span>📝</span><span>Save as Operational Note...</span>
+    </button>
     <button id="tab-ctx-btn-duplicate" onclick="tabContextMenuAction('duplicate')" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 text-slate-200 flex items-center space-x-2 transition cursor-pointer">
       <span>⎘</span><span>Duplicate Tab</span>
     </button>
@@ -3964,6 +3971,9 @@
         <div class="flex items-center space-x-2">
           <button type="button" id="nc-btn-delete" onclick="deleteActiveComposerNote()" class="hidden text-rose-400 hover:text-rose-200 px-2 py-1 rounded hover:bg-rose-950/60 transition text-xs flex items-center space-x-1">
             <span>🗑️ Delete</span>
+          </button>
+          <button type="button" onclick="openCurrentComposerInQueryTab()" class="text-sky-300 hover:text-sky-100 px-2 py-1 rounded bg-sky-950/70 border border-sky-800/60 hover:bg-sky-900 transition text-xs flex items-center space-x-1" title="Extract and open SQL in Query Editor">
+            <span>⚡ Open in Query</span>
           </button>
           <button type="button" onclick="copyComposerMarkdown()" class="text-slate-300 hover:text-white px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 transition text-xs flex items-center space-x-1">
             <span>📋 Copy MD</span>
@@ -6391,13 +6401,16 @@
 
       const exportNotesBtn = document.getElementById('export-notes-btn');
       const notesModeToggle = document.getElementById('notes-tab-mode-toggle');
+      const saveAsNoteBtn = document.getElementById('btn-save-as-note');
       if (activeTab && activeTab.isNote) {
         if (exportNotesBtn) exportNotesBtn.classList.remove('hidden');
         if (notesModeToggle) notesModeToggle.classList.remove('hidden');
+        if (saveAsNoteBtn) saveAsNoteBtn.classList.add('hidden');
         setNotesTabMode(currentNotesTabMode || 'edit');
       } else {
         if (exportNotesBtn) exportNotesBtn.classList.add('hidden');
         if (notesModeToggle) notesModeToggle.classList.add('hidden');
+        if (saveAsNoteBtn) saveAsNoteBtn.classList.remove('hidden');
         const previewEl = document.getElementById('notes-tab-preview');
         if (previewEl) previewEl.classList.add('hidden');
         const cmWrapper = cmEditor ? cmEditor.getWrapperElement() : null;
@@ -6695,8 +6708,16 @@
         btnDuplicate.classList.toggle('cursor-pointer', !isSingleton);
       }
 
+      const btnSaveNote = document.getElementById('tab-ctx-btn-save-note');
+      if (btnSaveNote) {
+        const canSave = !targetTab.isNote && !targetTab.isProcesslist && !targetTab.isCluster && !targetTab.isFlightRecorder && !targetTab.isVariables;
+        btnSaveNote.disabled = !canSave;
+        btnSaveNote.classList.toggle('opacity-50', !canSave);
+        btnSaveNote.classList.toggle('cursor-not-allowed', !canSave);
+        btnSaveNote.classList.toggle('cursor-pointer', canSave);
+      }
+
       const x = Math.min(e.clientX, window.innerWidth - 200);
-      const y = Math.min(e.clientY, window.innerHeight - 230);
       menu.style.left = `${Math.max(10, x)}px`;
       menu.style.top = `${Math.max(10, y)}px`;
       menu.classList.remove('hidden');
@@ -6725,6 +6746,9 @@
         duplicateTab(tabId);
       } else if (action === 'rename') {
         await renameTab(tabId);
+      } else if (action === 'save-note') {
+        const targetTab = tabs.find(t => t.id === tabId);
+        if (targetTab) saveTabQueryToNotes(targetTab);
       }
     }
 
@@ -10522,6 +10546,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
           <div class="flex items-center justify-between pt-1.5 border-t border-slate-800/80 text-[11px] text-slate-400 mt-1">
             <div class="flex items-center space-x-2">
+              <button onclick="event.stopPropagation(); openNoteInQueryTab('${n.id}')" class="text-sky-400 hover:text-sky-300 flex items-center space-x-0.5 font-medium" title="Extract SQL and open in Query Editor">
+                <span>⚡</span><span>Open in Query</span>
+              </button>
               <button onclick="event.stopPropagation(); openNoteComposerModal('${n.id}')" class="hover:text-white flex items-center space-x-0.5">
                 <span>✏️</span><span>Edit</span>
               </button>
@@ -10871,6 +10898,142 @@ Please analyze what is causing this query to be slow and suggest necessary query
       downloadFile(md, filename, 'text/markdown');
     }
 
+    // --- Query Snapshot Capture & Note Query Extraction (ADR-0044) ---
+    // ponytail: capture active/selected query into Operational Note; extract markdown blocks back to query tab.
+    function saveActiveQueryToNotes() {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab) return;
+      saveTabQueryToNotes(activeTab);
+    }
+
+    function saveTabQueryToNotes(tab) {
+      if (!tab || tab.isNote) {
+        showNativeAlert('Cannot save an internal note scratchpad into another operational note.', 'Save Note');
+        return;
+      }
+
+      let sql = '';
+      if (tab.id === activeTabId && cmEditor) {
+        sql = (cmEditor.getSelection() || '').trim();
+        if (!sql) sql = (cmEditor.getValue() || '').trim();
+      } else {
+        sql = (tab.sql || '').trim();
+      }
+
+      if (!sql) {
+        showNativeAlert('The query tab is empty. Please enter or execute a SQL statement first.', 'Empty Query');
+        return;
+      }
+
+      const cleanTitle = (tab.title || 'Query Snapshot').replace(/\.sql$/i, '').trim() || 'Query Snapshot';
+      const objTags = [];
+      if (activeConnection && activeConnection.id) {
+        const db = tab.database || (activeConnection.database_name) || '';
+        if (tab.tableName && db) {
+          objTags.push(`db://${activeConnection.id}/${db}/${tab.tableName}`);
+        } else if (db) {
+          objTags.push(`db://${activeConnection.id}/${db}`);
+        } else {
+          objTags.push(`db://${activeConnection.id}`);
+        }
+      }
+
+      saveToInternalNotes(cleanTitle, '```sql\n' + sql + '\n```', objTags, ['#query-snapshot'], '');
+    }
+
+    function extractSqlFromNoteContent(rawContent) {
+      if (!rawContent || !rawContent.trim()) return '';
+      const str = rawContent.trim();
+      const sqlFenceRegex = /```(?:sql)?\s*([\s\S]*?)```/gi;
+      const blocks = [];
+      let match;
+      while ((match = sqlFenceRegex.exec(str)) !== null) {
+        const code = (match[1] || '').trim();
+        if (code) blocks.push(code);
+      }
+      if (blocks.length > 0) {
+        return blocks.join('\n\n');
+      }
+      return str;
+    }
+
+    function openExtractedQueryInTab(title, rawContent, objectTags) {
+      const sql = extractSqlFromNoteContent(rawContent);
+      if (!sql) {
+        showNativeAlert('This note does not contain any query or snapshot content to open.', 'Empty Content');
+        return;
+      }
+
+      let targetDb = '';
+      if (Array.isArray(objectTags)) {
+        for (const tag of objectTags) {
+          if (typeof tag === 'string' && tag.startsWith('db://')) {
+            const parts = tag.slice(5).split('/');
+            if (parts[1]) {
+              targetDb = parts[1];
+              break;
+            }
+          }
+        }
+      }
+      if (!targetDb && activeTab && activeTab.database) {
+        targetDb = activeTab.database;
+      } else if (!targetDb && activeConnection && activeConnection.database_name) {
+        targetDb = activeConnection.database_name;
+      }
+
+      const safeBase = (title || 'query').trim().replace(/[/\\?%*:|"<>]/g, '-').replace(/\.sql$/i, '') || 'query';
+      const tabTitle = `${safeBase}.sql`;
+
+      const curTab = tabs.find(t => t.id === activeTabId);
+      const canReuse = curTab && !curTab.isTableViewer && !curTab.isProcesslist && !curTab.isCluster &&
+                       !curTab.isFlightRecorder && !curTab.isVariables && !curTab.isNote && !isTabDirtyOrNonEmpty(curTab);
+
+      if (canReuse) {
+        curTab.title = tabTitle;
+        curTab.sql = sql;
+        if (targetDb) curTab.database = targetDb;
+        setEditorSQL(sql);
+        renderTabs();
+        saveTabsState();
+      } else {
+        const newId = 'tab-' + Date.now();
+        tabs.push({
+          id: newId,
+          title: tabTitle,
+          sql: sql,
+          database: targetDb,
+          isTableViewer: false
+        });
+        switchTab(newId);
+        saveTabsState();
+      }
+
+      const statusEl = document.getElementById('query-status-text');
+      if (statusEl) {
+        statusEl.textContent = `Opened: ${tabTitle}`;
+        setTimeout(() => {
+          if (statusEl.textContent === `Opened: ${tabTitle}`) statusEl.textContent = 'Ready';
+        }, 4000);
+      }
+    }
+
+    function openNoteInQueryTab(noteId) {
+      const n = (allOperationalNotes || []).find(note => note.id === noteId);
+      if (!n) return;
+      toggleNotesDrawer(false);
+      openExtractedQueryInTab(n.title, n.content, n.object_tags);
+    }
+
+    function openCurrentComposerInQueryTab() {
+      const content = document.getElementById('nc-content')?.value || '';
+      const title = document.getElementById('nc-title')?.value || 'Operational Note';
+      const rawObjTags = document.getElementById('nc-object-tags')?.value || '';
+      const objectTags = rawObjTags ? rawObjTags.split(',').map(s => s.trim()).filter(Boolean) : (activeComposerNote?.object_tags || []);
+      closeNoteComposerModal();
+      openExtractedQueryInTab(title, content, objectTags);
+    }
+
     // --- Table Viewer Filtered Feed Handlers ---
     let currentTableFeedTableName = '';
 
@@ -10939,6 +11102,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
                     <span class="text-[10px] text-slate-400 font-mono">Updated: ${new Date(n.updated_at).toLocaleString()}</span>
                   </div>
                   <div class="flex items-center space-x-2">
+                    <button onclick="openNoteInQueryTab('${n.id}')" class="bg-sky-950/70 hover:bg-sky-900 border border-sky-800/60 text-sky-300 px-2.5 py-1 rounded text-xs transition flex items-center space-x-1" title="Extract SQL and open in Query Editor">
+                      <span>⚡</span><span>Open in Query</span>
+                    </button>
                     <button onclick="openNoteComposerModal('${n.id}')" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded text-xs transition flex items-center space-x-1">
                       <span>✏️</span><span>Edit Runbook</span>
                     </button>
@@ -17959,6 +18125,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
         { name: 'Create Database', shortcut: '', run: () => openCreateDatabaseModal() },
         { name: 'Run Query', shortcut: 'Ctrl+Enter', run: () => runActiveQuery() },
         { name: 'Explain Query Plan', shortcut: 'Ctrl+Shift+Enter', run: () => explainActiveQuery() },
+        { name: 'Save Query as Operational Note', shortcut: '', run: () => saveActiveQueryToNotes() },
+        { name: 'Open Operational Notes Inbox', shortcut: '', run: () => toggleNotesDrawer(true) },
         { name: 'New Query Tab', shortcut: 'Ctrl+T', run: () => addNewQueryTab() },
         { name: 'New Connection', shortcut: '', run: () => openNewConnModal() },
         { name: 'Toggle Read-Only Mode', shortcut: '', run: () => toggleReadOnly() },
@@ -17994,6 +18162,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
       else if (name === 'Create Database') openCreateDatabaseModal();
       else if (name === 'Run Query') runActiveQuery();
       else if (name === 'Explain Query Plan') explainActiveQuery();
+      else if (name === 'Save Query as Operational Note') saveActiveQueryToNotes();
+      else if (name === 'Open Operational Notes Inbox') toggleNotesDrawer(true);
       else if (name === 'New Query Tab') addNewQueryTab();
       else if (name === 'New Connection') openNewConnModal();
       else if (name === 'Toggle Read-Only Mode') toggleReadOnly();

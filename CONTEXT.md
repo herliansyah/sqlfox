@@ -158,6 +158,14 @@ _Avoid_: Clock alarm, cron event, time trigger
 A segmented mode toggle (`Edit` / `Preview`) within notes editing surfaces that compiles and renders Markdown formatted text, tables, and code blocks in real time.
 _Avoid_: Notes viewer, markdown tab
 
+**Query Snapshot Capture**:
+The action of capturing active SQL text from a Query Editor tab into a new local Vault Operational Note with soft-link object tags bound to the active database connection.
+_Avoid_: Save tab as note, export query memo, tab backup
+
+**Note Query Extraction**:
+The action of extracting runnable SQL from an Operational Note's snapshot content and loading it into a Query Editor tab bound to the tagged database context.
+_Avoid_: Run note, execute memo, import note to tab
+
 **Error Healer**:
 An automated diagnostic loop intercepting failed SQL executions and dispatching root-cause analysis and query fixes to Copilot.
 _Avoid_: Error fixer, bug helper
