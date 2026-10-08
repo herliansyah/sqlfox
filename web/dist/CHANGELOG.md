@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.4.0] - 2026-10-08
+
 ### Added
 - **Process Activity Trend Panel**: Ephemeral in-memory rolling time-series panel in the Processlist Manager rendering active executing query concurrency and total thread counts on native HTML5 Canvas over a 60-point circular buffer. Surfaces real-time operational statistics (`Running Now`, `Total Threads`, `Peak Concurrency`, `60s Avg Running`), collapsible layout with persistent toggle state in `localStorage`, and 1-click deep escalation to the Flight Recorder.
 - **Master PIN Shoulder-Surfing Masking & Toggle**: Replaced exposed plain-text Master PIN badge in the application header with a secure masked view (`fox-••••`) and interactive peek toggle button (`👁️`), preventing casual shoulder-surfing observation in open office, coffee shop, or screen-sharing environments.
