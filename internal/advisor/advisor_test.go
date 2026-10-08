@@ -187,3 +187,84 @@ func TestAdvise_MultiTableJoin(t *testing.T) {
 		t.Errorf("expected status column in orders index, got %v", ordersRec.Columns)
 	}
 }
+
+func TestExecutionPlanNormalizer_PostgresAndSQLite(t *testing.T) {
+	// 1. PostgreSQL JSON Execution Plan with Seq Scan and Sort
+	pgPlanJSON := `[
+		{
+			"Plan": {
+				"Node Type": "Sort",
+				"Sort Key": ["created_at DESC"],
+				"Plans": [
+					{
+						"Node Type": "Seq Scan",
+						"Relation Name": "audit_logs",
+						"Plan Rows": 45000
+					}
+				]
+			}
+		}
+	]`
+
+	pgPlan := &driver.ExplainPlan{
+		RawJSON: pgPlanJSON,
+	}
+
+	pgHints := ParseExplainHints(pgPlan)
+	auditHint, ok := pgHints["audit_logs"]
+	if !ok {
+		t.Fatalf("expected hint for audit_logs in postgres JSON plan")
+	}
+	if auditHint.AccessType != "ALL" {
+		t.Errorf("expected AccessType ALL for Seq Scan, got %s", auditHint.AccessType)
+	}
+	if auditHint.RowsExamined != 45000 {
+		t.Errorf("expected RowsExamined 45000, got %d", auditHint.RowsExamined)
+	}
+	if !auditHint.UsingFilesort {
+		t.Errorf("expected UsingFilesort true due to Sort node")
+	}
+
+	// Test AdviseWithExplain with PG plan
+	query := "SELECT * FROM audit_logs WHERE action = 'LOGIN' ORDER BY created_at DESC"
+	tables := map[string]driver.TableMetadata{
+		"audit_logs": {Name: "audit_logs"},
+	}
+	pgRes := AdviseWithExplain(query, "postgres", tables, pgPlan)
+	if len(pgRes.Recommendations) == 0 {
+		t.Fatalf("expected recommendation for audit_logs")
+	}
+	rec := pgRes.Recommendations[0]
+	if !strings.Contains(rec.EstimatedBenefit, "Full Table Scan (ALL on ~45000 rows)") {
+		t.Errorf("expected EstimatedBenefit to mention ~45000 rows, got: %s", rec.EstimatedBenefit)
+	}
+	if !strings.Contains(rec.EstimatedBenefit, "Eliminates memory filesort") {
+		t.Errorf("expected EstimatedBenefit to mention Eliminates memory filesort, got: %s", rec.EstimatedBenefit)
+	}
+
+	// 2. SQLite EXPLAIN QUERY PLAN detail normalization
+	sqlitePlan := &driver.ExplainPlan{
+		Rows: []driver.ExplainRow{
+			{
+				ID:    1,
+				Extra: "SCAN TABLE transactions",
+			},
+			{
+				ID:    2,
+				Extra: "USE TEMP B-TREE FOR ORDER BY",
+			},
+		},
+	}
+
+	sqliteHints := ParseExplainHints(sqlitePlan)
+	txHint, ok := sqliteHints["transactions"]
+	if !ok {
+		t.Fatalf("expected hint for transactions in sqlite plan")
+	}
+	if txHint.AccessType != "ALL" {
+		t.Errorf("expected AccessType ALL for SCAN TABLE, got %s", txHint.AccessType)
+	}
+	if !txHint.UsingFilesort {
+		t.Errorf("expected UsingFilesort true for SQLite TEMP B-TREE")
+	}
+}

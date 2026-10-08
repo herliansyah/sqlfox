@@ -1,6 +1,7 @@
 package advisor
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"slices"
@@ -293,29 +294,77 @@ type ExplainTableHint struct {
 	UsingFilesort bool
 }
 
+// ponytail: Regex matchers for SQLite EXPLAIN QUERY PLAN details without third-party parser bloat.
+var (
+	sqliteScanRegex   = regexp.MustCompile(`(?i)\bSCAN\s+(?:TABLE\s+)?([a-zA-Z0-9_]+)`)
+	sqliteSearchRegex = regexp.MustCompile(`(?i)\bSEARCH\s+(?:TABLE\s+)?([a-zA-Z0-9_]+)`)
+)
+
 // ParseExplainHints extracts table-level scan types and filesort indicators from driver.ExplainPlan.
+// ponytail: Execution Plan Normalizer unifies MySQL tabular, PostgreSQL JSON tree, and SQLite detail rows.
 func ParseExplainHints(plan *driver.ExplainPlan) map[string]ExplainTableHint {
 	hints := make(map[string]ExplainTableHint)
 	if plan == nil {
 		return hints
 	}
 
-	// 1. Check tabular rows
+	var hasGlobalSort bool
+
+	// 1. Check tabular rows (MySQL & SQLite)
 	for _, row := range plan.Rows {
 		tbl := strings.ToLower(strings.TrimSpace(row.Table))
+		extra := strings.TrimSpace(row.Extra)
+		isFilesortRow := strings.Contains(strings.ToLower(extra), "using filesort") ||
+			strings.Contains(strings.ToLower(extra), "use temp b-tree")
+
+		// SQLite fallback: extract table name from detail/extra string if row.Table is empty
+		if tbl == "" && extra != "" {
+			if m := sqliteScanRegex.FindStringSubmatch(extra); len(m) > 1 {
+				tbl = strings.ToLower(m[1])
+			} else if m := sqliteSearchRegex.FindStringSubmatch(extra); len(m) > 1 {
+				tbl = strings.ToLower(m[1])
+			}
+		}
+
 		if tbl == "" {
+			if isFilesortRow {
+				hasGlobalSort = true
+			}
 			continue
 		}
+
 		h := hints[tbl]
-		h.AccessType = strings.ToUpper(strings.TrimSpace(row.Type))
-		h.RowsExamined = row.Rows
-		if strings.Contains(strings.ToLower(row.Extra), "using filesort") {
+		accType := strings.ToUpper(strings.TrimSpace(row.Type))
+
+		// SQLite detail mapping
+		if accType == "" || accType == "SCAN/SEARCH" {
+			if sqliteScanRegex.MatchString(extra) || strings.HasPrefix(strings.ToUpper(extra), "SCAN") {
+				accType = "ALL"
+			} else if sqliteSearchRegex.MatchString(extra) || strings.HasPrefix(strings.ToUpper(extra), "SEARCH") {
+				accType = "INDEX"
+			}
+		}
+
+		if accType != "" {
+			h.AccessType = accType
+		}
+		if row.Rows > 0 {
+			h.RowsExamined = row.Rows
+		}
+		if isFilesortRow {
 			h.UsingFilesort = true
 		}
 		hints[tbl] = h
 	}
 
-	// 2. Check JSON raw plan if available
+	if hasGlobalSort {
+		for tbl, h := range hints {
+			h.UsingFilesort = true
+			hints[tbl] = h
+		}
+	}
+
+	// 2. Check JSON raw plan if available (MySQL JSON & PostgreSQL JSON)
 	if plan.RawJSON != "" {
 		walkJSONHints(plan.RawJSON, hints)
 	}
@@ -324,7 +373,12 @@ func ParseExplainHints(plan *driver.ExplainPlan) map[string]ExplainTableHint {
 }
 
 func walkJSONHints(rawJSON string, hints map[string]ExplainTableHint) {
-	// Simple pattern search for JSON filesort and ALL access to avoid heavy reflections
+	trimmed := strings.TrimSpace(rawJSON)
+	if trimmed == "" {
+		return
+	}
+
+	// 1. MySQL JSON filesort heuristic
 	if strings.Contains(rawJSON, `"using_filesort": true`) {
 		for tbl := range hints {
 			h := hints[tbl]
@@ -332,6 +386,72 @@ func walkJSONHints(rawJSON string, hints map[string]ExplainTableHint) {
 			hints[tbl] = h
 		}
 	}
+
+	// 2. PostgreSQL JSON plan tree parsing
+	if strings.HasPrefix(trimmed, "[") || strings.HasPrefix(trimmed, "{") {
+		var rawData any
+		if err := json.Unmarshal([]byte(trimmed), &rawData); err == nil {
+			if walkPGPlanAny(rawData, hints) {
+				for tbl, h := range hints {
+					h.UsingFilesort = true
+					hints[tbl] = h
+				}
+			}
+		}
+	}
+}
+
+func walkPGPlanAny(data any, hints map[string]ExplainTableHint) bool {
+	var hasSort bool
+	switch v := data.(type) {
+	case []any:
+		for _, item := range v {
+			if walkPGPlanAny(item, hints) {
+				hasSort = true
+			}
+		}
+	case map[string]any:
+		if plan, ok := v["Plan"].(map[string]any); ok {
+			if walkPGPlanNode(plan, hints) {
+				hasSort = true
+			}
+		} else {
+			if walkPGPlanNode(v, hints) {
+				hasSort = true
+			}
+		}
+	}
+	return hasSort
+}
+
+func walkPGPlanNode(node map[string]any, hints map[string]ExplainTableHint) bool {
+	nodeType, _ := node["Node Type"].(string)
+	relName, _ := node["Relation Name"].(string)
+	isSort := strings.EqualFold(nodeType, "Sort")
+
+	if relName != "" {
+		tbl := strings.ToLower(relName)
+		h := hints[tbl]
+		if strings.EqualFold(nodeType, "Seq Scan") {
+			h.AccessType = "ALL"
+		} else if h.AccessType == "" && strings.Contains(strings.ToLower(nodeType), "index") {
+			h.AccessType = "INDEX"
+		}
+		if planRows, ok := node["Plan Rows"].(float64); ok && planRows > 0 {
+			h.RowsExamined = int64(planRows)
+		}
+		hints[tbl] = h
+	}
+
+	// Recursively walk sub-plans if any
+	if plans, ok := node["Plans"].([]any); ok {
+		for _, child := range plans {
+			if walkPGPlanAny(child, hints) {
+				isSort = true
+			}
+		}
+	}
+	return isSort
 }
 
 func sanitizeIdent(s string) string {

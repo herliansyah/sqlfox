@@ -66,6 +66,14 @@ _Avoid_: Result buffer, fetch array
 A query interruption mechanism dispatched via a secondary control connection issuing protocol termination (`KILL QUERY` on MySQL, `pg_cancel_backend(pid)` on PostgreSQL) without destroying the primary connection.
 _Avoid_: Context cancel, socket kill
 
+**Core Driver Scope**:
+The policy restricting SqlFox's database engine support to the core relational trio (MySQL/MariaDB, PostgreSQL, and SQLite) to maximize operational feature depth, query tuning parity, and zero-defect maintenance.
+_Avoid_: Database list, supported DBs, connection types
+
+**CGO-Free Invariant**:
+The non-negotiable architectural rule mandating that all driver integrations and server runtime binaries compile with `CGO_ENABLED=0`, rejecting any external database engine requiring local C toolchains.
+_Avoid_: Pure Go rule, no-C policy, static build restriction
+
 ## Safety & Governance
 
 **Safety Guard**:
@@ -115,6 +123,10 @@ _Avoid_: FK tracker, relation map
 **OSC Generator**:
 An automated utility formulating production-ready Online Schema Change commands (`gh-ost`, `pt-online-schema-change`) with load throttles and binlog streaming for non-instant schema migrations.
 _Avoid_: DDL scripter, ghost wrapper
+
+**Filter Pushdown Boundary**:
+The security and validation perimeter in the Virtual Grid that verifies table quick-filter expressions using a lightweight token regex guard before dispatching them into the server-side `WHERE` clause under an Implicit Safe Limit.
+_Avoid_: Grid filter validator, where clause sanitization, filter parser
 
 ## Artificial Intelligence
 
@@ -608,6 +620,7 @@ _Avoid_: In-process tunnel, custom bastion client
 - **0042**: Multi-Engine Feature Parity & Dialect Resilience (`docs/adr/0042-multi-engine-feature-parity-and-dialect-resilience.md`)
 - **0043**: Diagnostic Logger and Observability Suite (`docs/adr/0043-diagnostic-logger-and-observability-suite.md`)
 - **0044**: Unified Operational Notes Inbox and Follow-up Lifecycle (`docs/adr/0044-unified-operational-notes-inbox-and-followup-lifecycle.md`)
+- **0045**: Core Engine Scope Freeze and CGO-Free Invariant (`docs/adr/0045-core-engine-scope-freeze-and-cgo-free-invariant.md`)
 
 ## Visual Schema & ERD Canvas
 
@@ -722,6 +735,10 @@ _Avoid_: Too-many-indexes error, write penalty alert
 **Safe DDL Generation**:
 Dialect-aware index creation DDL leveraging non-blocking execution strategies (`ALGORITHM=INPLACE, LOCK=NONE` for MySQL 5.7 and 8.0, `CONCURRENTLY` for PostgreSQL, and `IF NOT EXISTS` for SQLite).
 _Avoid_: Raw index SQL, blocking alter, instant DDL
+
+**Execution Plan Normalizer**:
+The metadata extraction component in `internal/advisor/` that transforms heterogeneous database execution plan outputs (MySQL tabular/JSON `type: ALL`, PostgreSQL JSON tree `"Seq Scan"`, and SQLite `SCAN table`) into unified `ExplainTableHint` telemetry.
+_Avoid_: Plan parser, explain adapter, query translator
 
 ## Distribution & Workspace Attribution
 
