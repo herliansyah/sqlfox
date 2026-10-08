@@ -125,12 +125,65 @@ SqlFox supports intuitive command-line options:
 # Headless server mode (suppress automatic browser launch)
 ./sqlfox -no-browser
 
+# Enable verbose / debug logging to terminal
+./sqlfox -v
+./sqlfox -log-level debug
+
+# Output logs in structured JSON format
+./sqlfox -log-format json
+
+# Persist diagnostic logs to a file (dual-stream: console + file)
+./sqlfox -log-file sqlfox.log -log-level debug
+
+# Silent mode (suppress stdout/stderr banner and request logs)
+./sqlfox -silent   # or -q
+
 # Enable loopback-guarded performance profiling
 SQLFOX_PPROF=1 ./sqlfox -port 9090
 ```
 
+| Flag | Default | Description |
+| :--- | :--- | :--- |
+| `-port <num>` | `8080` | HTTP listening port (with automatic sequential port hunting) |
+| `-host <ip>` | `127.0.0.1` | Network interface to bind (`0.0.0.0` for LAN with Master PIN guard) |
+| `-log-level <lvl>`| `info` | Minimum log verbosity level: `debug`, `info`, `warn`, `error` |
+| `-v`, `-verbose` | `false` | Convenience shorthand for `-log-level debug` |
+| `-log-format <fmt>`| `text` | Structured log formatting: `text` (human-readable) or `json` |
+| `-log-file <path>`| `""` | File path to append logs into (writes to both console and file) |
+| `-silent`, `-q` | `false` | Suppresses console logs completely (file logging remains active if configured) |
+| `-no-browser` | `false` | Run headless without spawning the default OS web browser |
+
 > [!NOTE]
 > **Automatic Port Hunting**: If the chosen port is already in use by another service (`EADDRINUSE`), SqlFox automatically hunts for and claims the next available sequential port (e.g. 8081, 8082), printing the active URL to stdout.
+
+### Windows Double-Click Logging Configuration
+When you launch `sqlfox.exe` by double-clicking it on Windows, no terminal is attached, meaning command-line flags cannot be passed directly. SqlFox provides four seamless methods to configure logging and debug verbosity:
+
+1. **Local Configuration File (`sqlfox.env` or `.env`)**:
+   Place a plain text file named `sqlfox.env` or `.env` in the same folder as `sqlfox.exe` (or in `~/.sqlfox/sqlfox.env`). SqlFox automatically parses and applies it upon startup:
+   ```ini
+   # sqlfox.env
+   SQLFOX_LOG_LEVEL=debug
+   SQLFOX_LOG_FILE=sqlfox-debug.log
+   SQLFOX_LOG_FORMAT=text
+   # SQLFOX_SILENT=true
+   ```
+2. **Windows Desktop Shortcut**:
+   - Right-click `sqlfox.exe` &rarr; **Create shortcut**.
+   - Right-click the newly created shortcut &rarr; **Properties**.
+   - In the **Target** field, append the flags at the end:
+     ```
+     C:\path\to\sqlfox.exe -log-level debug -log-file C:\path\to\sqlfox.log
+     ```
+   - Double-clicking the shortcut will launch SqlFox with the specified flags.
+3. **Batch Launcher Script (`run-sqlfox.bat`)**:
+   Create a small batch file in the same directory:
+   ```bat
+   @echo off
+   start "" "%~dp0sqlfox.exe" -v -log-file "%~dp0sqlfox-debug.log"
+   ```
+4. **Windows System / User Environment Variables**:
+   Set `SQLFOX_LOG_LEVEL=debug` or `SQLFOX_LOG_FILE=C:\logs\sqlfox.log` in Windows Environment Variables (`sysdm.cpl` &rarr; *Environment Variables*). SqlFox respects these across all launch methods.
 
 ### Remote Access Guard & Master PIN
 When you bind SqlFox to a local network interface or access it over LAN (`http://<your-lan-ip>:8080`):
@@ -269,12 +322,34 @@ Access via **⚡ Monitor &rarr; ⚡ Processlist**:
 - Filter by non-idle threads to eliminate connection pool noise.
 - **Out-of-Band Cancellation**: Clicking **Kill Query** sends `KILL QUERY <id>` (MySQL) or `SELECT pg_cancel_backend(<pid>)` (PostgreSQL) through a dedicated control connection without terminating the primary database session.
 
-### Cluster & Replication Inspector (PXC / Galera / Replica)
+### Cluster & Replication Inspector (PXC / Galera / MySQL 8.4+ / PostgreSQL)
 Access via **⚡ Monitor &rarr; 🌐 Cluster**:
-- Designed for **Percona XtraDB Cluster (PXC)**, **MariaDB Galera**, and standard MySQL Primary/Replica topologies.
-- **Flow Control Monitor**: Real-time tracking of `wsrep_flow_control_paused` (evaluates pauses above 0.05).
+- Designed for **Percona XtraDB Cluster (PXC)**, **MariaDB Galera**, modern **MySQL 8.4 LTS / 9.x**, and **PostgreSQL Primary/Standby** topologies.
+- **Universal Replication Normalizer (MySQL & MariaDB)**:
+  - Automatically executes modern `SHOW REPLICA STATUS` and `SHOW BINARY LOG STATUS`, gracefully falling back to legacy `SHOW SLAVE STATUS` and `SHOW MASTER STATUS` on MySQL 5.7 / 8.0.
+  - Normalizes metric keys (`replica_io_running` vs `slave_io_running`, `seconds_behind_source` vs `seconds_behind_master`) across all engine generations.
+  - On MariaDB, seamlessly probes `information_schema.innodb_lock_waits` when `sys.innodb_lock_waits` is not installed.
+- **PostgreSQL Replication & Standby Telemetry**:
+  - Automatically probes `pg_stat_replication` on primary nodes (streaming clients, write/flush/replay LSNs, sync states) and `pg_stat_wal_receiver` on standbys.
+- **Galera / PXC Flow Control**: Real-time tracking of `wsrep_flow_control_paused` (evaluates pauses above 0.05).
 - **Slowest Node Pinpointer**: Automatically probes all cluster peer nodes to identify the specific node causing replication backpressure.
 - **Tri-Metric Matrix**: Evaluates EVS network latency, InnoDB disk stalls, and applier worker queue capacity.
+
+### Historical Statement Digest & Post-Mortem Deadlocks
+Access via **⚡ Monitor &rarr; ⚡ Processlist** (Segmented Pill Switcher):
+- **Live Threads**: View and cancel active queries out-of-band.
+- **Statement Digest**: Historical latency percentiles and slowest query patterns.
+  - MySQL/MariaDB: Queries `sys.statement_analysis` with fallback to `performance_schema.events_statements_summary_by_digest`.
+  - PostgreSQL: Probes `pg_stat_statements` with adaptive telemetry and 1-click extension enablement guidance when not loaded.
+- **Deadlock Inspector**: Extracts and parses the `LATEST DETECTED DEADLOCK` section from `SHOW ENGINE INNODB STATUS` with visual Transaction 1 vs Transaction 2 conflict matrix.
+
+### Programmability & User Privilege Matrix (MySQL & PostgreSQL)
+- **Routines Explorer**: Inspect Stored Procedures and Functions in the sidebar tree:
+  - MySQL: Introspects `information_schema.routines` with 1-click `CALL sp(...)` query tab templates.
+  - PostgreSQL: Introspects `pg_proc` + `pg_namespace` with overload-safe signatures (`func_name(type1, type2)`) and extracts DDL via `pg_get_functiondef`.
+- **User & Role Management**: Access via **⚡ Monitor &rarr; 🛡️ Privilege Matrix**:
+  - MySQL: Introspects `mysql.user` grant columns with SSL and password expiry states.
+  - PostgreSQL: Dialect-aware role matrix introspecting `pg_roles` attributes (`SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION`, `BYPASSRLS`, `LOGIN`) and role membership (`MEMBER OF`).
 
 ### Performance Flight Recorder (Quad-Metric Telemetry)
 Access via **⚡ Monitor &rarr; 📈 Recorder**:
@@ -290,10 +365,8 @@ Access via **⚡ Monitor &rarr; 📈 Recorder**:
 Access via **⚡ Monitor &rarr; ⚙️ Server Variables**:
 - Inspects hundreds of engine system parameters with instant search and categorical filtering.
 - **Tuning Advisor**: Evaluates critical memory, connection, and I/O variables against best practices:
-  - `innodb_buffer_pool_size` vs system RAM.
-  - `max_connections` vs thread cache size.
-  - `innodb_flush_log_at_trx_commit` durability configuration.
-  - `tmp_table_size` and `max_heap_table_size` memory limits.
+  - MySQL: `innodb_buffer_pool_size` vs system RAM, `max_connections`, `innodb_flush_log_at_trx_commit`.
+  - PostgreSQL: `shared_buffers`, `work_mem`, `maintenance_work_mem`, `effective_cache_size`, `wal_buffers`, `checkpoint_completion_target`, and `autovacuum`.
 
 ### Heuristic Index Advisor & Query Tuner (ESR Rule)
 1. Write or paste any `SELECT` query in the Query Editor.
@@ -310,7 +383,7 @@ Access via **📦 DB Tools &rarr; 🔄 Structure Sync**:
 1. Select **Source** session and **Target** session.
 2. SqlFox introspects both schemas, parses definitions into normalized ASTs, and calculates structural differences:
    - Missing tables
-   - Added / removed / modified columns
+   - Added / removed / modified columns (with dialect-specific DDL: MySQL `MODIFY COLUMN` vs PostgreSQL atomic `ALTER TABLE tbl ALTER COLUMN col TYPE ...; ALTER COLUMN col SET/DROP NOT NULL;`)
    - Index deltas and primary key changes
    - Foreign key constraint differences
 3. Generates a safe, order-aware DDL migration script with execution preview.

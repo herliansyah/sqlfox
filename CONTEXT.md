@@ -732,3 +732,37 @@ _Avoid_: Wiki, help doc, manual pdf, readme clone
 The persistent external hyperlink affordance (`📖 Docs`) embedded within the Status Bar Footer, Keyboard Shortcuts Modal, and Command Palette routing operators directly to the canonical GitHub-hosted User Guide.
 _Avoid_: Help button, doc url, external link
 
+## Multi-Engine Parity & Dialect Capabilities
+
+**Engine Capability Matrix**:
+The adaptive feature contract dynamically reporting supported capabilities per active database dialect (e.g. SQLite has no user management or routines; PostgreSQL has functions but no scheduled events; MySQL has native event scheduler). Governs UI visibility to gracefully disable or hide unsupported tabs without dead buttons.
+_Avoid_: Static driver check, hardcoded menu switches, feature hack
+
+**Universal Replication Normalizer**:
+The driver abstraction seam absorbing version-breaking telemetry terminology across MySQL generations (e.g. normalizing MySQL 8.4+ `SHOW REPLICA STATUS` / `SHOW BINARY LOG STATUS` and `replica_*`/`source_*` fields with legacy MySQL 5.7/8.0 `SHOW SLAVE STATUS` / `SHOW MASTER STATUS` and `slave_*`/`master_*` fields) into a unified `driver.ReplicationInfo`.
+_Avoid_: Ad-hoc version regex, duplicate replication structs
+
+**Adaptive Telemetry Probe**:
+A non-fatal diagnostic interrogation pattern for optional server features (such as `pg_stat_statements` on PostgreSQL or `performance_schema` / `sys` on MariaDB). If enabled, delivers full workload metrics; if uninstalled or disabled, presents contextual 1-click helper snippets and configuration guidance rather than hard application errors.
+_Avoid_: Silent failure, raw query error, mock stub
+
+**Dialect-Aware Role Matrix**:
+The security management domain model adapting to engine-specific authorization paradigms: displaying `'user'@'host'` and privilege hierarchies on MySQL/MariaDB, while mapping to login roles, role attributes (`SUPERUSER`, `CREATEDB`, etc.), and database grants on PostgreSQL where IP filtering is governed by `pg_hba.conf`.
+_Avoid_: MySQL-only user manager, forced host wildcarding
+
+## Observability & Diagnostic Logging
+
+**Diagnostic Logger**:
+The structured Go standard library (`log/slog`) telemetry coordinator governing runtime verbosity tiers (`debug`, `info`, `warn`, `error`, `silent`). Emits machine-readable JSON or human-friendly text formats without external logging libraries.
+_Avoid_: Print logger, raw stdout, debug print
+
+**Log Sink**:
+The destination pipeline receiving structured log events, configurable as terminal console, isolated file append stream, or concurrent dual-stream (Tee) with silent terminal override.
+_Avoid_: Log target, output dump, print destination
+
+**Credential Masking**:
+The deterministic boundary filter intercepting log messages and attributes to sanitize Master Passwords, PINs, database connection secrets, and authorization tokens into `[REDACTED]` prior to emission.
+_Avoid_: Secret hiding, raw dump, password censor
+
+
+
