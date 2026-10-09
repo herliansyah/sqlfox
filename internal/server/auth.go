@@ -232,7 +232,10 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 		unlocked = s.authMgr.ValidateToken(token)
 	}
 
+	w.Header().Set("X-SqlFox-App", "sqlfox")
 	writeJSON(w, http.StatusOK, map[string]any{
+		"app":       "sqlfox",
+		"version":   s.version,
 		"is_remote": isRemote,
 		"unlocked":  unlocked,
 	})

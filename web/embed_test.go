@@ -704,7 +704,7 @@ func TestUIResilienceAndNonWrappingControls(t *testing.T) {
 		"header-toolbar",
 		"editor-toolbar",
 		"table-toolbar",
-		`class="h-12 bg-app-surface border-b border-app-border flex items-center justify-between px-4 z-20 flex-shrink-0 overflow-x-auto gap-3"`,
+		`class="h-12 bg-app-surface border-b border-app-border flex items-center justify-between px-4 z-20 flex-shrink-0 gap-3"`,
 	}
 
 	for _, s := range expectedSnippets {
@@ -713,5 +713,29 @@ func TestUIResilienceAndNonWrappingControls(t *testing.T) {
 		}
 	}
 }
+
+func TestHeaderDropdownsNotClippedByOverflow(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(contentBytes)
+
+	// Header contains popups/dropdowns: #top-monitor-menu, #top-db-tools-menu, #top-settings-menu.
+	// In CSS, overflow-x: auto automatically forces overflow-y to auto/clip, which causes all
+	// dropdown menus to be clipped by the 48px header boundary and sink behind main content.
+	// Therefore, <header> must not have overflow-x-auto or overflow-hidden.
+	if strings.Contains(content, `<header class="h-12 bg-app-surface border-b border-app-border flex items-center justify-between px-4 z-20 flex-shrink-0 overflow-x-auto`) {
+		t.Errorf("critical UI bug: <header> has overflow-x-auto, which clips top-monitor-menu and top-db-tools-menu dropdowns")
+	}
+}
+
 
 

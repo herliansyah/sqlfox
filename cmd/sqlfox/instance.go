@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
+	"syscall"
 	"time"
 )
 
@@ -25,11 +27,15 @@ func checkExistingInstance(configDir string, defaultPort int) (string, int, bool
 	if data, err := os.ReadFile(lockPath); err == nil {
 		var info instanceInfo
 		if err := json.Unmarshal(data, &info); err == nil && info.Port > 0 {
-			if pingSqlFox(info.Port) {
+			if info.PID > 0 && !isPIDAlive(info.PID) {
+				// Process is dead: remove stale lock immediately
+				_ = os.Remove(lockPath)
+			} else if pingSqlFox(info.Port) {
 				return info.URL, info.PID, true
+			} else {
+				// Stale lock: previous process terminated abnormally or port occupied by another service
+				_ = os.Remove(lockPath)
 			}
-			// Stale lock: previous process terminated abnormally
-			_ = os.Remove(lockPath)
 		}
 	}
 
@@ -39,6 +45,22 @@ func checkExistingInstance(configDir string, defaultPort int) (string, int, bool
 	}
 
 	return "", 0, false
+}
+
+// isPIDAlive checks if a process with the specified PID is currently alive.
+// ponytail: Uses signal 0 error-checking on POSIX; zero runtime overhead without external CLI calls.
+func isPIDAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		return true // Defer to loopback ping on Windows
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return process.Signal(syscall.Signal(0)) == nil
 }
 
 func pingSqlFox(port int) bool {
@@ -63,11 +85,14 @@ func pingSqlFox(port int) bool {
 	}
 
 	var status struct {
-		IsRemote bool `json:"is_remote"`
-		Unlocked bool `json:"unlocked"`
+		App      string `json:"app"`
+		IsRemote bool   `json:"is_remote"`
+		Unlocked bool   `json:"unlocked"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&status); err == nil {
-		return status.Unlocked
+		// Strictly verify this is SqlFox and not a third-party application on the same port
+		isSqlFox := status.App == "sqlfox" || resp.Header.Get("X-SqlFox-App") == "sqlfox"
+		return isSqlFox && status.Unlocked
 	}
 	return false
 }
