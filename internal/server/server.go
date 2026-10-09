@@ -35,6 +35,8 @@ type Server struct {
 	restartFn         func() error
 	cloudSyncMu       sync.Mutex
 	cloudSyncTimer    *time.Timer
+	lanEnabled        bool
+	allowedHosts      []string
 }
 
 // NewServer initializes HTTP routes and application state.
@@ -235,13 +237,28 @@ func (s *Server) routes() {
 		})
 	}
 
-	// ponytail: stdlib panic recoverer, logger, and remote access guard replace chi router & middleware
-	baseHandler := recoverer(s.RemoteAccessGuardMiddleware(mux))
+	// ponytail: stdlib panic recoverer, logger, and ingress + remote access guards replace chi router & middleware
+	baseHandler := recoverer(s.IngressGuardMiddleware(s.RemoteAccessGuardMiddleware(mux)))
 	if s.logger != nil {
 		s.handler = logger.HTTPMiddleware(s.logger)(baseHandler)
 	} else {
 		s.handler = baseHandler
 	}
+}
+
+// SetLANEnabled toggles whether the server is configured to accept LAN connections and display Master PIN.
+func (s *Server) SetLANEnabled(enabled bool) {
+	s.lanEnabled = enabled
+}
+
+// IsLANEnabled returns whether LAN mode is currently active.
+func (s *Server) IsLANEnabled() bool {
+	return s.lanEnabled
+}
+
+// SetAllowedHosts sets explicit hostnames or IPs accepted by the DNS Rebinding Guard.
+func (s *Server) SetAllowedHosts(hosts []string) {
+	s.allowedHosts = hosts
 }
 
 // SetLogger attaches the Diagnostic Logger and wraps HTTP routing with logging telemetry.

@@ -3,12 +3,17 @@ package server
 import (
 	"archive/tar"
 	"archive/zip"
+	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -234,6 +239,16 @@ func (s *Server) handleApplyUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Origin verification (Release Manifest Verification policy)
+	if !s.isAllowedAssetURL(req.AssetURL) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": "asset_url rejected: binary downloads must originate strictly from the official SqlFox GitHub release repository",
+		})
+		return
+	}
+
 	// Determine current running executable path
 	var exePath string
 	var err error
@@ -275,7 +290,7 @@ func (s *Server) handleApplyUpdate(w http.ResponseWriter, r *http.Request) {
 		tempExePath += ".exe"
 	}
 
-	if err := downloadAndExtractBinary(r.Context(), req.AssetURL, tempExePath); err != nil {
+	if err := s.downloadAndExtractBinary(r.Context(), req.AssetURL, tempExePath); err != nil {
 		_ = os.Remove(tempExePath)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -355,8 +370,83 @@ func (s *Server) handleApplyUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// downloadAndExtractBinary downloads the archive from assetURL and extracts the sqlfox binary.
-func downloadAndExtractBinary(ctx context.Context, assetURL, destPath string) error {
+const officialReleasePrefix = "https://github.com/herliansyah/sqlfox/releases/download/"
+
+func (s *Server) isAllowedAssetURL(rawURL string) bool {
+	if strings.HasPrefix(rawURL, officialReleasePrefix) {
+		return true
+	}
+	if s.updateAPIURL != "" {
+		if u, err := url.Parse(s.updateAPIURL); err == nil {
+			if au, err := url.Parse(rawURL); err == nil && au.Host == u.Host {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (s *Server) verifyAssetChecksum(ctx context.Context, assetURL string, archiveBytes []byte) error {
+	idx := strings.LastIndex(assetURL, "/")
+	if idx == -1 {
+		return fmt.Errorf("invalid asset URL format")
+	}
+	baseDir := assetURL[:idx]
+	assetName := assetURL[idx+1:]
+	manifestURL := baseDir + "/checksums.txt"
+
+	fetchManifest := func(targetURL string) ([]byte, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("User-Agent", "SqlFox-Update-Engine")
+		client := &http.Client{Timeout: 15 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("manifest HTTP status: %s", resp.Status)
+		}
+		return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	}
+
+	manifestData, err := fetchManifest(manifestURL)
+	if err != nil {
+		manifestData, err = fetchManifest(baseDir + "/SHA256SUMS")
+		if err != nil {
+			return fmt.Errorf("release checksum manifest not found (fail-closed): %w", err)
+		}
+	}
+
+	actualHash := sha256.Sum256(archiveBytes)
+	actualHex := hex.EncodeToString(actualHash[:])
+
+	lines := strings.Split(string(manifestData), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) >= 2 {
+			expectedHash := strings.ToLower(fields[0])
+			fileName := filepath.Base(strings.TrimPrefix(fields[1], "*"))
+			if fileName == assetName || assetName == "" {
+				if subtle.ConstantTimeCompare([]byte(strings.ToLower(actualHex)), []byte(expectedHash)) != 1 {
+					return fmt.Errorf("SHA-256 digest mismatch for %s: expected %s, got %s", assetName, expectedHash, actualHex)
+				}
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("asset %s not found in release checksum manifest", assetName)
+}
+
+// downloadAndExtractBinary downloads the archive from assetURL, verifies the checksum, and extracts the sqlfox binary.
+func (s *Server) downloadAndExtractBinary(ctx context.Context, assetURL, destPath string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, assetURL, nil)
 	if err != nil {
 		return err
@@ -374,11 +464,21 @@ func downloadAndExtractBinary(ctx context.Context, assetURL, destPath string) er
 		return fmt.Errorf("download returned HTTP status %s", resp.Status)
 	}
 
+	archiveBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read downloaded archive: %w", err)
+	}
+
+	// Release Manifest Verification (fail-closed)
+	if err := s.verifyAssetChecksum(ctx, assetURL, archiveBytes); err != nil {
+		return fmt.Errorf("supply chain verification failed: %w", err)
+	}
+
 	lower := strings.ToLower(assetURL)
 	if strings.HasSuffix(lower, ".zip") {
-		return extractFromZipStream(resp.Body, destPath)
+		return extractFromZipStream(bytes.NewReader(archiveBytes), destPath)
 	}
-	return extractFromTarGzStream(resp.Body, destPath)
+	return extractFromTarGzStream(bytes.NewReader(archiveBytes), destPath)
 }
 
 // extractFromTarGzStream extracts the sqlfox or sqlfox.exe binary from a .tar.gz stream.

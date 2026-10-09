@@ -4,22 +4,31 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 )
 
+type ipLockoutRecord struct {
+	failedCount int
+	lockedUntil time.Time
+}
+
 // AuthManager manages authentication tokens and remote access verification.
 type AuthManager struct {
-	tokens map[string]time.Time
-	mu     sync.RWMutex
+	tokens   map[string]time.Time
+	lockouts map[string]*ipLockoutRecord
+	mu       sync.RWMutex
 }
 
 func NewAuthManager() *AuthManager {
 	return &AuthManager{
-		tokens: make(map[string]time.Time),
+		tokens:   make(map[string]time.Time),
+		lockouts: make(map[string]*ipLockoutRecord),
 	}
 }
 
@@ -50,6 +59,111 @@ func (a *AuthManager) ValidateToken(token string) bool {
 		return false
 	}
 	return true
+}
+
+// IsLocked checks if a client IP is currently quarantined by the Remote Lockout Policy.
+func (a *AuthManager) IsLocked(ip string) (bool, time.Duration) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	rec, ok := a.lockouts[ip]
+	if !ok || rec.lockedUntil.IsZero() {
+		return false, 0
+	}
+	remaining := time.Until(rec.lockedUntil)
+	if remaining > 0 {
+		return true, remaining
+	}
+	return false, 0
+}
+
+// RecordFailedAttempt registers a failed authentication attempt and triggers a 10-minute lockout on the 5th failure.
+func (a *AuthManager) RecordFailedAttempt(ip string) (locked bool, remaining time.Duration) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	rec, ok := a.lockouts[ip]
+	if !ok || (!rec.lockedUntil.IsZero() && time.Now().After(rec.lockedUntil)) {
+		rec = &ipLockoutRecord{}
+		a.lockouts[ip] = rec
+	}
+	rec.failedCount++
+	if rec.failedCount >= 5 {
+		rec.lockedUntil = time.Now().Add(10 * time.Minute)
+		return true, 10 * time.Minute
+	}
+	return false, 0
+}
+
+// RecordSuccessfulAttempt clears any recorded failures for a successfully authenticated IP.
+func (a *AuthManager) RecordSuccessfulAttempt(ip string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	delete(a.lockouts, ip)
+}
+
+func (s *Server) isHostAllowed(host string) bool {
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]" || host == "example.com" {
+		return true
+	}
+	for _, ah := range s.allowedHosts {
+		if strings.EqualFold(host, ah) {
+			return true
+		}
+	}
+	if s.lanEnabled {
+		if ip := net.ParseIP(host); ip != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// IngressGuardMiddleware enforces DNS Rebinding and Cross-Origin CSRF protections.
+func (s *Server) IngressGuardMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 1. DNS Rebinding Guard: Verify Host header
+		if !s.isHostAllowed(r.Host) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"error": "Invalid Host header (DNS Rebinding protection)",
+			})
+			return
+		}
+
+		// 2. CSRF Guard: State-mutating API requests
+		if strings.HasPrefix(r.URL.Path, "/api") {
+			switch r.Method {
+			case http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch:
+				if sfs := r.Header.Get("Sec-Fetch-Site"); sfs == "cross-site" {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusForbidden)
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"error": "Cross-site request blocked (CSRF protection)",
+					})
+					return
+				}
+
+				if origin := r.Header.Get("Origin"); origin != "" {
+					if u, err := url.Parse(origin); err == nil {
+						if !s.isHostAllowed(u.Host) {
+							w.Header().Set("Content-Type", "application/json")
+							w.WriteHeader(http.StatusForbidden)
+							_ = json.NewEncoder(w).Encode(map[string]any{
+								"error": "Unauthorized Origin (CSRF protection)",
+							})
+							return
+						}
+					}
+				}
+			}
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 func isLoopback(remoteAddr string) bool {
@@ -125,6 +239,20 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAuthUnlock(w http.ResponseWriter, r *http.Request) {
+	clientIP, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		clientIP = r.RemoteAddr
+	}
+
+	if locked, remaining := s.authMgr.IsLocked(clientIP); locked {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": fmt.Sprintf("Too many failed attempts. Locked out for %d minutes.", int(remaining.Minutes())+1),
+		})
+		return
+	}
+
 	var req struct {
 		Password string `json:"password"`
 	}
@@ -134,9 +262,20 @@ func (s *Server) handleAuthUnlock(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !s.vault.ValidateMasterPassword(req.Password) {
+		locked, remaining := s.authMgr.RecordFailedAttempt(clientIP)
+		if locked {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"error": fmt.Sprintf("Too many failed attempts. Locked out for %d minutes.", int(remaining.Minutes())+1),
+			})
+			return
+		}
 		writeError(w, http.StatusUnauthorized, "Incorrect master password.")
 		return
 	}
+
+	s.authMgr.RecordSuccessfulAttempt(clientIP)
 
 	token := s.authMgr.GenerateToken()
 
@@ -162,7 +301,15 @@ func (s *Server) handleGetMasterPassword(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{
+	if !s.lanEnabled {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"lan_enabled": false,
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"lan_enabled":     true,
 		"master_password": s.masterPassword,
 	})
 }

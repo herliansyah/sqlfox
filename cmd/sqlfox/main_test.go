@@ -75,3 +75,24 @@ func TestLoadEnvFiles(t *testing.T) {
 	}
 }
 
+func TestGenerateFriendlyPINEntropy(t *testing.T) {
+	pin1, err := generateFriendlyPIN()
+	if err != nil {
+		t.Fatalf("generateFriendlyPIN error: %v", err)
+	}
+	pin2, err := generateFriendlyPIN()
+	if err != nil {
+		t.Fatalf("generateFriendlyPIN error: %v", err)
+	}
+
+	if len(pin1) != 10 || len(pin2) != 10 {
+		t.Fatalf("expected 10 characters (fox- + 6 chars), got %q and %q", pin1, pin2)
+	}
+	if pin1[:4] != "fox-" || pin2[:4] != "fox-" {
+		t.Fatalf("expected 'fox-' prefix, got %q and %q", pin1, pin2)
+	}
+	if pin1 == pin2 {
+		t.Fatalf("expected high-entropy PINs to differ, got %q == %q", pin1, pin2)
+	}
+}
+

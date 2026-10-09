@@ -23,8 +23,8 @@ Security architecture, cryptographic protocols, environment isolation, and AI pr
 ```
 
 ### Trust Boundary Rules
-1. **Localhost Binding**: The backend web daemon strictly binds to `127.0.0.1` on a dynamic port or Unix socket. It never binds to `0.0.0.0`, preventing LAN unauthorized access.
-2. **Zero Ingress from Outside**: No public inbound open ports.
+1. **Secure-by-Default Ingress Binding**: The backend web daemon strictly binds to loopback (`127.0.0.1`) on a dynamic port or Unix socket. It never exposes ports to external networks unless the operator explicitly passes `--lan` (or `-host 0.0.0.0`).
+2. **Controlled LAN Access Guard**: When `--lan` is enabled for tablet or remote device management, all non-loopback connections must pass the `Remote Access Guard` requiring Master Password authentication before session access.
 3. **Third-Party Egress Control**: Outbound traffic is restricted strictly to configured target database endpoints and chosen AI provider endpoints.
 4. **Flight Recorder Telemetry Safety**: The on-demand Performance Flight Recorder samples only global engine counters (`SHOW GLOBAL STATUS`) and running statement text from `PROCESSLIST`. Zero table row data is recorded. All metrics remain strictly within the local SQLite vault with an automated 24-hour retention purge and a 10-minute auto-stop polling ceiling.
 
@@ -57,6 +57,11 @@ flowchart LR
 - Exporting connections generates an encrypted `.sqlfox-vault` JSON envelope.
 - The user provides an **Export Passphrase** used exclusively to derive an ephemeral Argon2id key for that specific archive.
 - Private keys and passwords never leave the machine in plaintext.
+
+### Master PIN Entropy & Remote Lockout Policy
+- **PIN Entropy**: Auto-generated Master PINs employ `fox-[a-z0-9]{6}` (>2.17 billion combinations), replacing legacy 4-digit PINs.
+- **Brute-Force Rate Limiting**: The `Remote Access Guard` tracks consecutive failed unlock attempts per remote IP address.
+- **10-Minute Quarantine**: Reaching 5 consecutive failed attempts immediately triggers a 10-minute lockout (`429 Too Many Requests`), completely neutralizing brute-force dictionary attacks.
 
 ---
 
@@ -139,5 +144,33 @@ To prevent production database lockups and performance regressions during schema
    - Index creation operations executed through SqlFox enforce an isolated connection with `SET SESSION lock_wait_timeout = 3` on MySQL, terminating fast rather than causing cascading metadata lock pileups.
 3. **Index Bloat Write Guard**:
    - The advisor evaluates write overhead risk before suggesting new indexes. Tables with >5 secondary indexes trigger prominent warnings to alert operators to the write throughput penalty on `INSERT`/`UPDATE` operations.
+
+---
+
+## 7. DNS Rebinding & Cross-Origin CSRF Guard
+
+To secure loopback communications against malicious websites accessed in local user browsers:
+
+1. **Host Header Validation**:
+   - Ingress middleware inspects the HTTP `Host` header on all requests.
+   - Only `localhost`, `127.0.0.1`, `[::1]`, and the explicitly bound network host (when `--lan` is specified) are accepted.
+   - External domains resolving to local loopback (DNS Rebinding attacks) are rejected with `403 Forbidden`.
+2. **Cross-Origin Mutation Guard**:
+   - State-altering endpoints (`POST`, `PUT`, `DELETE`, `PATCH`) enforce origin matching when `Origin` or `Referer` headers are supplied, rejecting `Sec-Fetch-Site: cross-site` requests.
+3. **Master Password Inspection Restriction**:
+   - `GET /api/auth/master-key` returns sensitive credentials only when `--lan` mode is active AND the request originates from loopback. In standard localhost mode, it returns `{ "lan_enabled": false }`.
+
+---
+
+## 8. In-App Self-Update & Supply Chain Verification
+
+To maintain binary execution integrity during in-app updates:
+
+1. **Strict Origin Enforcement**:
+   - Update downloads are restricted strictly to official GitHub release URLs matching `https://github.com/herliansyah/sqlfox/releases/download/*`.
+2. **Fail-Closed SHA-256 Digest Verification**:
+   - The server downloads official release checksum manifests (`checksums.txt` / `SHA256SUMS`).
+   - The downloaded binary archive is verified against the manifest digest.
+   - If checksums do not match or if the manifest is unavailable, the update is rejected and the existing executable remains untouched.
 
 

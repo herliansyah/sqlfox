@@ -12,6 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Notes Bundle Portability Suite (.zip)**: 1-click export and import of all Operational Notes, Table Documentation, and SQL Snippets packaged into a portable, unencrypted ZIP bundle containing human-readable Markdown and SQL files for offline inspection and cross-tool migration.
 - **Unified Cloud Sync & Migration Modal**: Modern 3-tab modal (`☁️ GitHub Sync`, `📦 Notes Bundle (.zip)`, `🔐 Vault Archive (.sqlfox-vault)`) accessible from the Top Settings dropdown, Notes Inbox drawer header, and Command Palette (`Ctrl+K`).
 
+### Security
+- **Secure-by-Default Ingress Binding & LAN Guard (`cmd/sqlfox`, `internal/server`)**: HTTP web daemon strictly binds to loopback (`127.0.0.1`) by default for zero network exposure on untrusted public Wi-Fi networks. Requires explicit `--lan` flag (or `-host 0.0.0.0`) to enable tablet and multi-device access.
+- **High-Entropy Master PIN & Remote Lockout Policy (`internal/server/auth`)**: Upgraded auto-generated PINs to 6-character alphanumeric strings (`fox-[a-z0-9]{6}`, >2.17 billion combinations). Remote Access Guard automatically locks out and quarantines any remote IP after 5 consecutive failed unlock attempts for 10 minutes (`429 Too Many Requests`).
+- **DNS Rebinding & Cross-Origin CSRF Guard (`internal/server/auth`)**: Ingress middleware inspects `Host` headers and rejects external hostnames pointing to loopback (`403 Forbidden`). State-mutating API requests reject unauthorized `Origin` and `Sec-Fetch-Site: cross-site` payloads.
+- **Fail-Closed Release Manifest Verification (`internal/server/update`)**: In-app self-update strictly restricts downloads to the official repository (`github.com/herliansyah/sqlfox/releases/download/...`) and cryptographically verifies archive SHA-256 digests against release checksum manifests (`checksums.txt` / `SHA256SUMS`).
+
+### Changed
+- **Terminal Console PIN Privacy**: Console startup output suppresses Master PIN and Network URLs in default localhost mode, revealing them only when `--lan` mode is activated.
+- **CLI Runner Server Flags**: Default host flag updated to `127.0.0.1` and `--lan` added to help documentation.
+
 ## [v0.4.0] - 2026-10-08
 
 ### Added

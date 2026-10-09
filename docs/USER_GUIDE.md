@@ -149,6 +149,7 @@ SQLFOX_PPROF=1 ./sqlfox -port 9090
 | :--- | :--- | :--- |
 | `-port <num>` | `8080` | HTTP listening port (with automatic sequential port hunting) |
 | `-host <ip>` | `127.0.0.1` | Network interface to bind (`0.0.0.0` for LAN with Master PIN guard) |
+| `--lan` | `false` | Enable LAN and tablet access (binds to `0.0.0.0` and reveals Master PIN) |
 | `-log-level <lvl>`| `info` | Minimum log verbosity level: `debug`, `info`, `warn`, `error` |
 | `-v`, `-verbose` | `false` | Convenience shorthand for `-log-level debug` |
 | `-log-format <fmt>`| `text` | Structured log formatting: `text` (human-readable) or `json` |

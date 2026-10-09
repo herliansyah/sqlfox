@@ -37,8 +37,20 @@ An automated sequential port probing mechanism that resolves `EADDRINUSE` port c
 _Avoid_: Port hopping, auto-port
 
 **Network Endpoint**:
-The non-loopback IPv4 network address of the host machine accessible from other devices on the local area network.
+A non-loopback IPv4 network address of the host machine accessible from other devices on the local area network.
 _Avoid_: Public URL, remote host
+
+**Secure-by-Default Binding**:
+The runtime policy restricting the daemon's HTTP listener strictly to the local loopback interface (`127.0.0.1`) unless the operator explicitly permits external access via the `--lan` parameter.
+_Avoid_: Localhost lock, private bind, internal port
+
+**Remote Lockout Policy**:
+The automated rate-limiting quarantine in the Remote Access Guard that temporarily blocks authentication attempts from a remote IP address following 5 consecutive failed Master PIN entries for a 10-minute window.
+_Avoid_: IP ban, firewall block, auth cooldown
+
+**DNS Rebinding Guard**:
+The ingress validation gate verifying incoming HTTP `Host` headers against approved loopback and explicitly configured network addresses to prevent unauthorized cross-origin requests from browser environments.
+_Avoid_: Host filter, domain check, origin gate
 
 ## Drivers & Sessions
 
@@ -127,6 +139,10 @@ _Avoid_: DDL scripter, ghost wrapper
 **Filter Pushdown Boundary**:
 The security and validation perimeter in the Virtual Grid that verifies table quick-filter expressions using a lightweight token regex guard before dispatching them into the server-side `WHERE` clause under an Implicit Safe Limit.
 _Avoid_: Grid filter validator, where clause sanitization, filter parser
+
+**Release Manifest Verification**:
+The cryptographic supply-chain verification policy requiring matching SHA-256 digests against an official release manifest before in-app self-update binaries can be unpacked or executed.
+_Avoid_: Checksum test, hash check, download verify
 
 ## Artificial Intelligence
 
@@ -621,6 +637,7 @@ _Avoid_: In-process tunnel, custom bastion client
 - **0043**: Diagnostic Logger and Observability Suite (`docs/adr/0043-diagnostic-logger-and-observability-suite.md`)
 - **0044**: Unified Operational Notes Inbox and Follow-up Lifecycle (`docs/adr/0044-unified-operational-notes-inbox-and-followup-lifecycle.md`)
 - **0045**: Core Engine Scope Freeze and CGO-Free Invariant (`docs/adr/0045-core-engine-scope-freeze-and-cgo-free-invariant.md`)
+- **0046**: Secure-by-Default Binding and Ingress Hardening (`docs/adr/0046-secure-default-binding-and-ingress-hardening.md`)
 
 ## Visual Schema & ERD Canvas
 
