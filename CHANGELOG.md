@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.5.1] - 2026-10-09
+
 ### Fixed
 - **Navbar Dropdown Menu Visibility**: Removed `overflow-x-auto` on the top navbar container to prevent CSS clipping of absolutely positioned dropdown menus (`Monitor`, `DB Tools`, `Settings`) at the 48px header boundary.
 - **Single-Instance Port Collision Guard (`cmd/sqlfox`)**: Added explicit application signature validation (`app: sqlfox` and `X-SqlFox-App` header) to health checks and PID liveness verification to prevent false single-instance detection when third-party services occupy port 8080.
