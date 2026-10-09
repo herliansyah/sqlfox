@@ -449,7 +449,7 @@ An ephemeral, collapsible in-memory rolling time-series visualization in the Pro
 _Avoid_: Process chart, query monitor graph, live APM widget
 
 **Lock Contention & Root Blocker Inspector**:
-A dedicated incident-triage access point in the Top Monitor menu and Command Palette that directly focuses the Processlist session on the Root Blocker dependency tree, surfacing blocking queries, locked resources, and single-click termination actions with P0 priority alert escalation.
+A dedicated zero-shift incident-triage modal accessible from the Top Monitor menu, Command Palette, and Processlist Manager toolbar displaying the Root Blocker dependency tree, surfacing blocking queries, locked resources, and single-click termination actions without incurring layout shifts on the active threads table.
 _Avoid_: Lock viewer, deadlock popup, blocker window
 
 **Deadlock Inspector**:

@@ -300,9 +300,9 @@
 
       <!-- Monitor dropdown: Processlist, Cluster, Recorder, Diagnostics, Audit Log -->
       <div class="relative inline-block text-left" id="top-monitor-container">
-        <button onclick="toggleTopMonitorMenu()" class="h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center space-x-1" title="Database Monitor & Diagnostics">
+        <button id="top-monitor-btn" onclick="toggleTopMonitorMenu()" class="relative h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center space-x-1" title="Database Monitor & Diagnostics">
           <span>⚡ Monitor</span>
-          <span id="monitor-alert-badge" class="hidden bg-amber-500/20 text-amber-300 text-[10px] px-1 rounded-full font-bold"></span>
+          <span id="monitor-alert-dot" class="hidden absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-slate-900 pointer-events-none"></span>
           <span id="monitor-rec-dot" class="hidden inline-block w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse"></span>
           <span class="text-[9px] text-slate-400">▼</span>
         </button>
@@ -1196,37 +1196,14 @@
 
           <div class="shrink-0 flex items-center space-x-3 text-slate-400 text-xs">
             <span id="pl-summary-text">Threads: 0</span>
-            <span id="pl-lock-summary" class="hidden text-red-400 font-semibold flex items-center space-x-1">
-              <span>🚨</span><span id="pl-lock-count">0 Locks</span>
-            </span>
+            <button id="pl-lock-summary" onclick="openLockInspectorModal()" class="hidden text-red-300 bg-red-950/60 hover:bg-red-900 border border-red-800/80 px-2 py-0.5 rounded text-[11px] font-mono flex items-center space-x-1.5 transition cursor-pointer" title="View Lock Contention & Root Blocker Analysis">
+              <span>🚨</span><span id="pl-lock-count">0 Locks</span><span class="text-[10px] text-red-400">↗</span>
+            </button>
             <button id="pl-toggle-trend-btn" onclick="toggleProcesslistTrendPanel()" class="px-2 py-0.5 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center space-x-1.5 transition text-[11px]" title="Toggle In-Memory Activity Trend Panel">
               <span>📈</span>
               <span>Trend</span>
               <span id="pl-trend-caret" class="text-[10px] text-slate-400">▾</span>
             </button>
-          </div>
-        </div>
-
-        <!-- Green Confirmation Banner (Shown when user inspects locks and none exist) -->
-        <div id="pl-no-lock-banner" class="hidden bg-emerald-950/40 border-b border-emerald-900/60 p-2.5 px-3 flex items-center justify-between flex-shrink-0 text-xs text-emerald-300 transition">
-          <div class="flex items-center space-x-2">
-            <span>✅</span>
-            <span class="font-medium">No active lock contention detected. All database threads running unobstructed.</span>
-          </div>
-          <button onclick="dismissNoLockBanner()" class="text-emerald-400 hover:text-emerald-200 text-xs px-1 cursor-pointer" title="Dismiss">✕</button>
-        </div>
-
-        <!-- Lock Dependency Tree / Root Blocker Banner (Shown when locks exist) -->
-        <div id="pl-lock-banner" class="hidden bg-red-950/40 border-b border-red-900/60 p-3 space-y-2 flex-shrink-0">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center space-x-2 text-xs font-bold text-red-300">
-              <span class="text-base">🚨</span>
-              <span>Lock Contention &amp; Root Blocker Analysis</span>
-            </div>
-            <span class="text-[11px] text-red-400 font-mono" id="pl-lock-banner-detail"></span>
-          </div>
-          <div id="pl-lock-tree-list" class="space-y-1.5 max-h-40 overflow-y-auto font-mono text-xs">
-            <!-- Root blockers and waiting threads rendered dynamically -->
           </div>
         </div>
 
@@ -3508,6 +3485,44 @@
       </button>
     </div>
   </div>
+
+  <!-- Lock Contention & Root Blocker Inspector Modal (HTML5 <dialog>) -->
+  <dialog id="lock-inspector-dialog" onclick="if (event.target === this) closeLockInspectorModal()" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-0 outline-none max-w-4xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm overflow-hidden">
+    <div class="flex flex-col max-h-[85vh]">
+      <!-- Header -->
+      <div class="bg-slate-950 px-5 py-3 border-b border-slate-800 flex items-center justify-between flex-shrink-0">
+        <div class="flex items-center space-x-2.5">
+          <span class="text-xl">🔒</span>
+          <div>
+            <h3 class="font-bold text-white text-sm flex items-center space-x-2">
+              <span>Lock Contention &amp; Root Blocker Analysis</span>
+              <span id="lock-modal-badge" class="px-2 py-0.5 rounded bg-red-950 text-red-300 text-xs font-mono border border-red-800">0 Locks</span>
+            </h3>
+            <p class="text-[11px] text-slate-400 font-mono" id="lock-modal-subtitle">Root blocker dependency graph &amp; waiting query mitigation</p>
+          </div>
+        </div>
+        <button onclick="closeLockInspectorModal()" class="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-800 transition cursor-pointer" title="Close (Esc)">✕</button>
+      </div>
+
+      <!-- Body -->
+      <div class="p-5 space-y-3 overflow-y-auto text-xs" id="lock-modal-content">
+        <div id="lock-modal-tree-list" class="space-y-2 font-mono text-xs">
+          <!-- Root blockers and waiting threads rendered dynamically -->
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="bg-slate-950 px-5 py-2.5 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400 flex-shrink-0">
+        <div class="flex items-center space-x-2">
+          <span>💡 Press <kbd class="px-1.5 py-0.5 bg-slate-800 text-slate-300 rounded font-mono text-[10px]">Esc</kbd> or click backdrop to close</span>
+        </div>
+        <div class="flex items-center space-x-2">
+          <button onclick="fetchProcesslist(false)" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 transition text-xs font-medium cursor-pointer">🔄 Refresh</button>
+          <button onclick="closeLockInspectorModal()" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600 text-white transition text-xs font-medium cursor-pointer">Close</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
 
   <!-- 20. Process Detail Inspector Modal (HTML5 <dialog>) -->
   <dialog id="pl-detail-modal" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-0 outline-none max-w-5xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm overflow-hidden">
@@ -7446,21 +7461,97 @@
       fetchProcesslist(false);
     }
 
-    let _noLockBannerTimeout = null;
+    // ponytail: zero-shift lock contention inspection via dedicated modal & unobtrusive toasts
+    function openLockInspectorModal() {
+      const dlg = document.getElementById('lock-inspector-dialog');
+      if (!dlg) return;
+      renderLockInspectorModalContent();
+      if (typeof dlg.showModal === 'function') dlg.showModal();
+      else dlg.setAttribute('open', '');
+    }
+
+    function closeLockInspectorModal() {
+      const dlg = document.getElementById('lock-inspector-dialog');
+      if (dlg) {
+        if (typeof dlg.close === 'function') dlg.close();
+        else dlg.removeAttribute('open');
+      }
+    }
+
+    function renderLockInspectorModalContent() {
+      const locks = (processlistData && processlistData.locks) || [];
+      const rootBlockerCount = locks.filter(l => l.is_root_blocker).length;
+      const modalBadge = document.getElementById('lock-modal-badge');
+      const modalSubtitle = document.getElementById('lock-modal-subtitle');
+      const listEl = document.getElementById('lock-modal-tree-list');
+
+      if (modalBadge) {
+        modalBadge.textContent = rootBlockerCount > 0 ? `${rootBlockerCount} Root Blocker${rootBlockerCount > 1 ? 's' : ''}` : `${locks.length} Lock Waits`;
+      }
+      if (modalSubtitle) {
+        modalSubtitle.textContent = rootBlockerCount > 0
+          ? `${rootBlockerCount} root blocker(s) detected holding database transactions`
+          : 'Root blocker dependency graph & waiting query mitigation';
+      }
+
+      if (!listEl) return;
+
+      if (locks.length === 0) {
+        listEl.innerHTML = `
+          <div class="p-8 text-center text-slate-400 space-y-2 select-none">
+            <div class="text-3xl">✅</div>
+            <div class="font-bold text-slate-200 text-sm">No Active Lock Contention</div>
+            <div class="text-xs text-slate-400">All database threads and transactions are running unobstructed.</div>
+          </div>
+        `;
+        return;
+      }
+
+      listEl.innerHTML = locks.map(l => {
+        if (l.is_root_blocker) {
+          return `
+            <div class="p-3 bg-red-950/30 border border-red-800 rounded-lg flex flex-col space-y-2">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-2">
+                  <span class="bg-red-600 text-white font-bold text-[10px] px-2 py-0.5 rounded">🚨 ROOT BLOCKER</span>
+                  <span class="font-bold text-white text-sm">Thread #${l.blocking_thread_id}</span>
+                  <span class="text-slate-400">(${escapeHtml(l.blocking_user || 'unknown')})</span>
+                  <span class="text-amber-400">holding ${escapeHtml(l.lock_mode || 'LOCK')}</span>
+                  ${l.locked_resource ? `<span class="text-sky-300">on ${escapeHtml(l.locked_resource)}</span>` : ''}
+                </div>
+                <div class="flex items-center space-x-2">
+                  <button onclick="confirmKillProcess(${l.blocking_thread_id}, 'query')" class="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold text-[11px] transition cursor-pointer">Kill Query</button>
+                  <button onclick="confirmKillProcess(${l.blocking_thread_id}, 'connection')" class="px-2.5 py-1 rounded bg-red-600 hover:bg-red-500 text-white font-bold text-[11px] transition cursor-pointer">Kill Blocker</button>
+                </div>
+              </div>
+              ${l.blocking_query ? `<div class="p-2 bg-slate-950 rounded text-xs text-slate-300 font-mono whitespace-pre-wrap break-all border border-slate-800" title="${escapeHtml(l.blocking_query)}"><span class="text-slate-500 select-none">SQL: </span>${escapeHtml(l.blocking_query)}</div>` : ''}
+              <div class="pl-4 border-l-2 border-red-700/80 text-xs text-red-200 space-y-1">
+                <div>↳ Blocked: <span class="font-bold text-white">Thread #${l.waiting_thread_id}</span> (${escapeHtml(l.waiting_user || 'unknown')}) waiting ${l.waiting_seconds}s for ${escapeHtml(l.lock_mode || 'lock')}:</div>
+                <div class="text-slate-400 font-mono truncate">${escapeHtml(l.waiting_query || 'active query')}</div>
+              </div>
+            </div>
+          `;
+        } else {
+          return `
+            <div class="p-2.5 bg-slate-950/60 border border-slate-800 rounded-lg flex items-center justify-between text-xs">
+              <div class="truncate mr-3">
+                <span class="text-amber-400 font-bold">Thread #${l.waiting_thread_id}</span> waiting on <span class="text-red-400 font-bold">#${l.blocking_thread_id}</span> (${l.waiting_seconds}s)
+                ${l.locked_resource ? `- resource: <span class="text-sky-300">${escapeHtml(l.locked_resource)}</span>` : ''}
+              </div>
+              <button onclick="confirmKillProcess(${l.blocking_thread_id}, 'connection')" class="px-2 py-0.5 rounded bg-red-950 hover:bg-red-800 text-red-300 text-[11px] border border-red-800 transition whitespace-nowrap cursor-pointer">Kill Target #${l.blocking_thread_id}</button>
+            </div>
+          `;
+        }
+      }).join('');
+    }
+
     function showNoLockBanner() {
-      const banner = document.getElementById('pl-no-lock-banner');
-      if (!banner) return;
-      banner.classList.remove('hidden');
-      if (_noLockBannerTimeout) clearTimeout(_noLockBannerTimeout);
-      _noLockBannerTimeout = setTimeout(() => {
-        banner.classList.add('hidden');
-      }, 4000);
+      // ponytail: unobtrusive toast replacement, no vertical layout shift
+      showToast('✅ No active lock contention detected. All database threads running unobstructed.', 'success');
     }
 
     function dismissNoLockBanner() {
-      const banner = document.getElementById('pl-no-lock-banner');
-      if (banner) banner.classList.add('hidden');
-      if (_noLockBannerTimeout) clearTimeout(_noLockBannerTimeout);
+      // ponytail: backwards compatibility no-op
     }
 
     async function openLockInspector() {
@@ -7472,14 +7563,9 @@
       await fetchProcesslist(false);
       const locks = (processlistData && processlistData.locks) || [];
       if (locks.length > 0) {
-        dismissNoLockBanner();
-        const banner = document.getElementById('pl-lock-banner');
-        if (banner) {
-          banner.classList.remove('hidden');
-          banner.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        }
+        openLockInspectorModal();
       } else {
-        showNoLockBanner();
+        showToast('✅ No active lock contention detected. All database threads running unobstructed.', 'success');
       }
     }
 
@@ -7583,18 +7669,21 @@
         }
       }
 
-      // Priority alert escalation: Locks/Blockers (P0 Red) > Slow Queries (Amber)
-      if (monitorAlert) {
+      // ponytail: zero-shift monitor button alert dot & tooltip update (preserves navbar layout width completely)
+      const monitorAlertDot = document.getElementById('monitor-alert-dot');
+      const monitorBtn = document.getElementById('top-monitor-btn');
+      if (monitorAlertDot) {
         if (lockWaitCount > 0) {
-          monitorAlert.textContent = rootBlockerCount > 0 ? `🚨 ${rootBlockerCount} Blocker` : `🚨 ${lockWaitCount} Locks`;
-          monitorAlert.className = "bg-red-500/30 text-red-200 border border-red-500/50 text-[10px] px-1.5 rounded-full font-bold animate-pulse";
-          monitorAlert.classList.remove('hidden');
+          monitorAlertDot.className = "absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-red-500 border border-slate-900 animate-pulse pointer-events-none";
+          monitorAlertDot.classList.remove('hidden');
+          if (monitorBtn) monitorBtn.title = `⚡ Monitor - 🚨 ${rootBlockerCount > 0 ? `${rootBlockerCount} Root Blocker(s)` : `${lockWaitCount} Lock Wait(s)`} active`;
         } else if (slowCount > 0) {
-          monitorAlert.textContent = slowCount;
-          monitorAlert.className = "bg-amber-500/20 text-amber-300 text-[10px] px-1 rounded-full font-bold";
-          monitorAlert.classList.remove('hidden');
+          monitorAlertDot.className = "absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-amber-400 border border-slate-900 pointer-events-none";
+          monitorAlertDot.classList.remove('hidden');
+          if (monitorBtn) monitorBtn.title = `⚡ Monitor - ⚠️ ${slowCount} Slow Query thread(s) running (>5s)`;
         } else {
-          monitorAlert.classList.add('hidden');
+          monitorAlertDot.classList.add('hidden');
+          if (monitorBtn) monitorBtn.title = "Database Monitor & Diagnostics";
         }
       }
 
@@ -7612,63 +7701,23 @@
         summaryEl.textContent = `Threads: ${threads.length}${slowCount > 0 ? ` (${slowCount} slow)` : ''}`;
       }
 
-      // Lock Dependency Tree banner
-      const lockBanner = document.getElementById('pl-lock-banner');
+      // ponytail: zero-shift lock indicator in Processlist toolbar
       const lockSummary = document.getElementById('pl-lock-summary');
       const lockCountEl = document.getElementById('pl-lock-count');
-      const lockList = document.getElementById('pl-lock-tree-list');
 
       if (locks.length > 0) {
-        dismissNoLockBanner();
-        if (lockBanner) lockBanner.classList.remove('hidden');
         if (lockSummary) lockSummary.classList.remove('hidden');
-        if (lockCountEl) lockCountEl.textContent = `${locks.length} Lock Waits`;
-        const bannerDetail = document.getElementById('pl-lock-banner-detail');
-        if (bannerDetail) {
-          bannerDetail.textContent = `${locks.filter(l => l.is_root_blocker).length} root blocker(s) detected`;
-        }
-
-        if (lockList) {
-          lockList.innerHTML = locks.map(l => {
-            if (l.is_root_blocker) {
-              return `
-                <div class="p-2 bg-red-900/30 border border-red-800 rounded flex flex-col space-y-1">
-                  <div class="flex items-center justify-between">
-                    <div class="flex items-center space-x-2">
-                      <span class="bg-red-600 text-white font-bold text-[10px] px-1.5 py-0.5 rounded">🚨 ROOT BLOCKER</span>
-                      <span class="font-bold text-white">Thread #${l.blocking_thread_id}</span>
-                      <span class="text-slate-400">(${escapeHtml(l.blocking_user || 'unknown')})</span>
-                      <span class="text-amber-400">holding ${escapeHtml(l.lock_mode || 'LOCK')}</span>
-                      ${l.locked_resource ? `<span class="text-sky-300">on ${escapeHtml(l.locked_resource)}</span>` : ''}
-                    </div>
-                    <div class="flex items-center space-x-2">
-                      <button onclick="confirmKillProcess(${l.blocking_thread_id}, 'query')" class="px-2 py-0.5 rounded bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold text-[10px]">Kill Query</button>
-                      <button onclick="confirmKillProcess(${l.blocking_thread_id}, 'connection')" class="px-2 py-0.5 rounded bg-red-600 hover:bg-red-500 text-white font-bold text-[10px]">Kill Blocker</button>
-                    </div>
-                  </div>
-                  ${l.blocking_query ? `<div class="text-[11px] text-slate-300 truncate" title="${escapeHtml(l.blocking_query)}">SQL: ${escapeHtml(l.blocking_query)}</div>` : ''}
-                  <div class="pl-4 border-l border-red-800/80 text-[11px] text-red-200">
-                    ↳ Blocked: Thread #${l.waiting_thread_id} (${escapeHtml(l.waiting_user || 'unknown')}) waiting ${l.waiting_seconds}s for ${escapeHtml(l.lock_mode || 'lock')}:
-                    <span class="text-slate-400 truncate">${escapeHtml(l.waiting_query || 'active query')}</span>
-                  </div>
-                </div>
-              `;
-            } else {
-              return `
-                <div class="p-1.5 bg-slate-900/60 border border-slate-800 rounded flex items-center justify-between text-[11px]">
-                  <div class="truncate">
-                    <span class="text-amber-400">Thread #${l.waiting_thread_id}</span> waiting on <span class="text-red-400">#${l.blocking_thread_id}</span> (${l.waiting_seconds}s)
-                    ${l.locked_resource ? `- resource: <span class="text-sky-300">${escapeHtml(l.locked_resource)}</span>` : ''}
-                  </div>
-                  <button onclick="confirmKillProcess(${l.blocking_thread_id}, 'connection')" class="px-1.5 py-0.5 rounded bg-red-950 hover:bg-red-800 text-red-300 text-[10px] border border-red-800">Kill Target #${l.blocking_thread_id}</button>
-                </div>
-              `;
-            }
-          }).join('');
+        if (lockCountEl) {
+          lockCountEl.textContent = rootBlockerCount > 0 ? `${rootBlockerCount} Blocker${rootBlockerCount > 1 ? 's' : ''}` : `${locks.length} Locks`;
         }
       } else {
-        if (lockBanner) lockBanner.classList.add('hidden');
         if (lockSummary) lockSummary.classList.add('hidden');
+      }
+
+      // Keep open lock inspector dialog in sync if active
+      const lockDialog = document.getElementById('lock-inspector-dialog');
+      if (lockDialog && lockDialog.open) {
+        renderLockInspectorModalContent();
       }
 
       if (!_plFiltersInitialized) {
@@ -7705,6 +7754,8 @@
       }
 
       tbody.innerHTML = filtered.map(t => {
+        const isRootBlocker = locks.some(l => l.is_root_blocker && l.blocking_thread_id === t.id);
+        const isWaitingOnLock = locks.some(l => l.waiting_thread_id === t.id);
         const isSelf = t.id === currentThreadId;
         const isSystem = (t.user === 'system user' || t.user === 'event_scheduler' || t.command === 'Binlog Dump');
         const isCritical = t.time >= 30;
@@ -7714,7 +7765,11 @@
         const sqlSnippet = rawSql.length > 100 ? rawSql.slice(0, 100) + '...' : rawSql;
 
         let rowClass = 'hover:bg-slate-800/40 transition cursor-pointer select-none';
-        if (isCritical) {
+        if (isRootBlocker) {
+          rowClass += ' bg-red-950/40 text-red-100 border-l-4 border-red-500 font-semibold';
+        } else if (isWaitingOnLock) {
+          rowClass += ' bg-amber-950/20 text-amber-200 border-l-2 border-amber-600';
+        } else if (isCritical) {
           rowClass += ' bg-red-950/20 text-red-200 border-l-2 border-red-500';
         } else if (isWarning) {
           rowClass += ' bg-amber-950/20 text-amber-200 border-l-2 border-amber-500';
@@ -7728,11 +7783,11 @@
                   <span>👁️</span><span>View</span>
                 </button>
                 ${hasQuery ? `
-                  <button type="button" onclick="confirmKillProcess(${t.id}, 'query')" ${isSystem ? 'disabled' : ''} class="px-1.5 py-0.5 rounded bg-amber-950 hover:bg-amber-800 text-amber-300 text-[10px] font-semibold border border-amber-800 disabled:opacity-30 disabled:cursor-not-allowed transition" title="Kill currently executing query only (KILL QUERY)">
+                  <button type="button" onclick="confirmKillProcess(${t.id}, 'query')" ${isSystem ? 'disabled' : ''} class="px-1.5 py-0.5 rounded bg-amber-950 hover:bg-amber-800 text-amber-300 text-[10px] font-semibold border border-amber-800 disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer" title="Kill currently executing query only (KILL QUERY)">
                     Kill Q
                   </button>
                 ` : `
-                  <button type="button" onclick="confirmKillProcess(${t.id}, 'connection')" ${isSelf || isSystem ? 'disabled' : ''} class="px-1.5 py-0.5 rounded bg-red-950 hover:bg-red-800 text-red-300 text-[10px] font-semibold border border-red-800 disabled:opacity-30 disabled:cursor-not-allowed transition" title="${isSelf ? 'Cannot kill own active session connection' : 'Terminate client connection (KILL)'}">
+                  <button type="button" onclick="confirmKillProcess(${t.id}, 'connection')" ${isSelf || isSystem ? 'disabled' : ''} class="px-1.5 py-0.5 rounded bg-red-950 hover:bg-red-800 text-red-300 text-[10px] font-semibold border border-red-800 disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer" title="${isSelf ? 'Cannot kill own active session connection' : 'Terminate client connection (KILL)'}">
                     Kill C
                   </button>
                 `}
@@ -7743,6 +7798,8 @@
             </td>
             <td class="p-2 font-bold whitespace-nowrap">
               <span>${t.id}</span>
+              ${isRootBlocker ? '<span class="ml-1 px-1.5 py-0.5 rounded bg-red-600 text-white font-bold text-[9px] animate-pulse">🚨 Blocker</span>' : ''}
+              ${isWaitingOnLock && !isRootBlocker ? '<span class="ml-1 px-1.5 py-0.5 rounded bg-amber-950 text-amber-300 text-[9px] border border-amber-800">🔒 Waiting</span>' : ''}
               ${isSelf ? '<span class="ml-1 px-1 py-0.2 rounded bg-sky-950 text-sky-400 text-[9px] border border-sky-800">You</span>' : ''}
               ${isSystem ? '<span class="ml-1 px-1 py-0.2 rounded bg-slate-800 text-slate-400 text-[9px]">Sys</span>' : ''}
             </td>

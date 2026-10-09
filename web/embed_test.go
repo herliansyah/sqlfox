@@ -251,10 +251,12 @@ func TestLockContentionAndRootBlockerInspectorEmbedded(t *testing.T) {
 		`id="btn-open-lock-inspector"`,
 		"openLockInspector()",
 		`id="lock-blocker-badge"`,
-		`id="pl-no-lock-banner"`,
+		`id="lock-inspector-dialog"`,
+		"openLockInspectorModal()",
 		"No active lock contention detected.",
 		"dismissNoLockBanner()",
 		"Lock Contention & Root Blocker Analysis",
+		`id="monitor-alert-dot"`,
 	}
 
 	for _, snippet := range expectedSnippets {
