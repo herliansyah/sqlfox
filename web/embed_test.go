@@ -873,7 +873,21 @@ func TestConnectionHoverActionsAndAffordance(t *testing.T) {
 	}
 }
 
+func TestChangelogCheckForUpdatesButtonEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
 
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(contentBytes)
 
-
-
+	if !strings.Contains(content, `id="btn-changelog-check-update"`) || !strings.Contains(content, `checkOrOpenUpdate(true)`) {
+		t.Errorf("changelog modal must have a manual Check for Updates button")
+	}
+}
