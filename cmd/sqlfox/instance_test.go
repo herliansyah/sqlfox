@@ -34,7 +34,9 @@ func TestSingleInstanceGuard(t *testing.T) {
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/api/auth/status" {
 				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-SqlFox-App", "sqlfox")
 				_ = json.NewEncoder(w).Encode(map[string]any{
+					"app":       "sqlfox",
 					"is_remote": false,
 					"unlocked":  true,
 				})
@@ -108,3 +110,40 @@ func TestSingleInstanceGuard(t *testing.T) {
 	expectedFallbackURL := "http://localhost:" + string(rune(mockPort))
 	_ = expectedFallbackURL
 }
+
+func TestThirdPartyServiceOnPortNotDetectedAsSqlFox(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "sqlfox-thirdparty-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Simulate a third-party application (e.g. auth service, mock API, etc.)
+	// that returns 200 OK with generic JSON containing unlocked: true or status: ok
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	thirdPartyPort := listener.Addr().(*net.TCPAddr).Port
+
+	thirdPartyServer := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"service":  "some-other-app",
+				"unlocked": true,
+			})
+		}),
+	}
+	go func() {
+		_ = thirdPartyServer.Serve(listener)
+	}()
+	defer thirdPartyServer.Close()
+
+	// Direct probe on the third party port should NOT identify it as SqlFox
+	url, pid, running := checkExistingInstance(tempDir, thirdPartyPort)
+	if running {
+		t.Fatalf("expected running=false for third party application, got true (url=%s, pid=%d)", url, pid)
+	}
+}
+
