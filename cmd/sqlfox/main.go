@@ -62,6 +62,7 @@ func main() {
 	passFlag := flag.String("pass", "", "Master password for vault encryption (leave blank to auto-generate or reuse ~/.sqlfox/master.key)")
 	noBrowserFlag := flag.Bool("no-browser", false, "Do not automatically launch web browser")
 	strictPortFlag := flag.Bool("strict-port", false, "Fail immediately if specified port is in use")
+	multiFlag := flag.Bool("multi", false, "Allow multiple SqlFox instances to run concurrently")
 	versionFlag := flag.Bool("version", false, "Print SqlFox version and exit")
 	logLevelFlag := flag.String("log-level", "", "Logging verbosity: debug, info, warn, error, silent (or SQLFOX_LOG_LEVEL)")
 	verboseFlag := flag.Bool("v", false, "Enable verbose debug logging (shortcut for -log-level=debug)")
@@ -131,6 +132,24 @@ func main() {
 	configDir := filepath.Dir(dbPath)
 	backupDir := filepath.Join(configDir, "backups")
 
+	// Single-Instance Guard: prevent duplicate instances and unneeded port hunting
+	if !*multiFlag && os.Getenv("SQLFOX_MULTI_INSTANCE") != "1" {
+		if activeURL, activePID, isRunning := checkExistingInstance(configDir, *portFlag); isRunning {
+			if !isSilent {
+				if activePID > 0 {
+					fmt.Printf("ℹ️  SqlFox is already running at %s (PID %d)\n", activeURL, activePID)
+				} else {
+					fmt.Printf("ℹ️  SqlFox is already running at %s\n", activeURL)
+				}
+			}
+			if !*noBrowserFlag {
+				go openBrowser(activeURL)
+				time.Sleep(300 * time.Millisecond)
+			}
+			return
+		}
+	}
+
 	// Resolve or auto-generate Master Password / PIN
 	masterPassword, isNewPIN, err := resolveMasterPassword(*passFlag, configDir)
 	if err != nil {
@@ -174,6 +193,15 @@ func main() {
 
 	localURL := fmt.Sprintf("http://localhost:%d", actualPort)
 	lanIP := getLocalNetworkIP()
+
+	var lockCleanup func()
+	if !*multiFlag && os.Getenv("SQLFOX_MULTI_INSTANCE") != "1" {
+		cleanup, err := writeInstanceLock(configDir, actualPort, localURL)
+		if err == nil {
+			lockCleanup = cleanup
+			defer lockCleanup()
+		}
+	}
 
 	httpServer := &http.Server{
 		Handler:      srv.Router(),
@@ -229,6 +257,9 @@ func main() {
 
 	if err := httpServer.Shutdown(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "Server shutdown error: %v\n", err)
+	}
+	if lockCleanup != nil {
+		lockCleanup()
 	}
 	fmt.Println("SqlFox stopped.")
 }

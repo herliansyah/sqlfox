@@ -156,9 +156,14 @@ SQLFOX_PPROF=1 ./sqlfox -port 9090
 | `-log-file <path>`| `""` | File path to append logs into (writes to both console and file) |
 | `-silent`, `-q` | `false` | Suppresses console logs completely (file logging remains active if configured) |
 | `-no-browser` | `false` | Run headless without spawning the default OS web browser |
+| `-strict-port` | `false` | Fail immediately if specified port is in use |
+| `-multi` | `false` | Allow multiple SqlFox instances to run concurrently |
 
 > [!NOTE]
-> **Automatic Port Hunting**: If the chosen port is already in use by another service (`EADDRINUSE`), SqlFox automatically hunts for and claims the next available sequential port (e.g. 8081, 8082), printing the active URL to stdout.
+> **Single-Instance Protection & Port Hunting**:
+> - If an active SqlFox instance is already running on this PC, launching `sqlfox` automatically detects the running instance, brings up/opens it in your browser, and exits cleanly without running a redundant server on another port.
+> - If the chosen port is occupied by a different third-party service (`EADDRINUSE`), SqlFox automatically hunts for and claims the next available sequential port (e.g. 8081, 8082), printing the active URL to stdout.
+> - To explicitly run multiple concurrent instances on different ports, pass the `-multi` flag (or set `SQLFOX_MULTI_INSTANCE=1`).
 
 ### Windows Double-Click Logging Configuration
 When you launch `sqlfox.exe` by double-clicking it on Windows, no terminal is attached, meaning command-line flags cannot be passed directly. SqlFox provides four seamless methods to configure logging and debug verbosity:
