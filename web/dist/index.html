@@ -191,7 +191,7 @@
       white-space: nowrap !important;
       flex-shrink: 0;
     }
-    .header-toolbar, .editor-toolbar, .table-toolbar {
+    .header-toolbar, .editor-toolbar, .table-toolbar, .processlist-toolbar {
       flex-wrap: nowrap;
     }
   </style>
@@ -1151,8 +1151,8 @@
       <!-- Processlist & Thread Monitor View (Dedicated Tab) -->
       <div id="processlist-view-container" class="hidden flex-1 flex flex-col overflow-hidden bg-app-bg">
         <!-- Processlist Toolbar -->
-        <div class="h-10 bg-app-surface border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0 gap-3 overflow-x-auto">
-          <div class="flex items-center space-x-2.5 flex-1 min-w-0">
+        <div class="processlist-toolbar h-10 bg-app-surface border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0 gap-3 overflow-x-auto">
+          <div class="flex items-center space-x-2.5 flex-1 min-w-0 shrink-0">
             <!-- Processlist Trio Segmented Switcher -->
             <div class="shrink-0 flex items-center space-x-1 bg-slate-900 border border-slate-700 rounded p-0.5">
               <button id="pl-view-threads-btn" onclick="switchProcesslistView('threads')" class="px-2.5 py-1 rounded text-xs bg-slate-800 text-sky-400 font-semibold flex items-center space-x-1.5 transition">
@@ -1172,7 +1172,7 @@
             <div class="h-4 w-px bg-slate-700 shrink-0"></div>
 
             <div id="pl-refresh-control-group" class="shrink-0 flex items-center space-x-1 bg-slate-900 border border-slate-700 rounded p-0.5">
-              <span class="text-slate-400 text-[11px] px-1.5 font-medium">Refresh:</span>
+              <span class="text-slate-400 text-[11px] px-1.5 font-medium whitespace-nowrap">Refresh:</span>
               <button id="pl-refresh-pause" onclick="setProcesslistInterval('pause')" class="px-2 py-0.5 rounded text-[11px] bg-slate-800 text-white font-medium">Pause</button>
               <button id="pl-refresh-1s" onclick="setProcesslistInterval(1000)" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">1s</button>
               <button id="pl-refresh-3s" onclick="setProcesslistInterval(3000)" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">3s</button>
@@ -1183,32 +1183,32 @@
               <span>🔄 Refresh Now</span>
             </button>
 
-            <div class="shrink-0 flex items-center space-x-1.5 text-slate-400 text-xs">
-              <span>Slow &gt;</span>
-              <input type="number" id="pl-slow-threshold" value="0" min="0" oninput="renderProcesslistUI()" class="w-14 bg-slate-900 border border-slate-700 px-1.5 py-0.5 rounded text-white text-xs font-mono text-center outline-none focus:border-app-accent" title="Filter threads running longer than N seconds (0 = all)">
-              <span>sec</span>
+            <div class="shrink-0 flex items-center space-x-1.5 text-slate-400 text-xs whitespace-nowrap">
+              <span class="whitespace-nowrap">Slow &gt;</span>
+              <input type="number" id="pl-slow-threshold" value="0" min="0" oninput="renderProcesslistUI()" class="w-14 bg-slate-900 border border-slate-700 px-1.5 py-0.5 rounded text-white text-xs font-mono text-center outline-none focus:border-app-accent shrink-0" title="Filter threads running longer than N seconds (0 = all)">
+              <span class="whitespace-nowrap">sec</span>
             </div>
 
-            <div class="relative flex-1 min-w-[200px] flex items-center">
+            <div class="relative flex-1 min-w-[180px] flex items-center">
               <span class="absolute left-2.5 text-slate-500 pointer-events-none text-xs">🔍</span>
               <input type="text" id="pl-search-input" oninput="onProcesslistSearchInput(this.value)" onkeydown="if(event.key==='Escape'){clearProcesslistSearch(); this.blur();}" placeholder="Search user, host, db, state, or SQL query statement..." class="w-full bg-slate-900 border border-slate-700 pl-8 pr-7 py-1 rounded text-white text-xs outline-none focus:border-app-accent font-mono transition">
               <button type="button" id="pl-search-clear-btn" onclick="clearProcesslistSearch()" class="hidden absolute right-2 text-slate-500 hover:text-slate-200 text-xs px-1 rounded transition cursor-pointer" title="Clear filter (Esc)">✕</button>
             </div>
 
             <!-- Best Practice Filter Toggles -->
-            <label class="shrink-0 flex items-center space-x-1.5 text-slate-300 hover:text-white cursor-pointer select-none text-[11px]" title="Hide idle client connections currently in Sleep state">
-              <input type="checkbox" id="pl-hide-sleep" onchange="onProcesslistFilterChange()" class="rounded bg-slate-900 border-slate-700 text-app-accent">
-              <span>Hide Sleep</span>
+            <label class="shrink-0 flex items-center space-x-1.5 text-slate-300 hover:text-white cursor-pointer select-none text-[11px] whitespace-nowrap control-label" title="Hide idle client connections currently in Sleep state">
+              <input type="checkbox" id="pl-hide-sleep" onchange="onProcesslistFilterChange()" class="rounded bg-slate-900 border-slate-700 text-app-accent shrink-0">
+              <span class="whitespace-nowrap">Hide Sleep</span>
             </label>
 
-            <label class="shrink-0 flex items-center space-x-1.5 text-slate-300 hover:text-white cursor-pointer select-none text-[11px]" title="Hide internal system threads (event_scheduler, binlog dump, etc.)">
-              <input type="checkbox" id="pl-hide-system" onchange="onProcesslistFilterChange()" class="rounded bg-slate-900 border-slate-700 text-app-accent">
-              <span>Hide System</span>
+            <label class="shrink-0 flex items-center space-x-1.5 text-slate-300 hover:text-white cursor-pointer select-none text-[11px] whitespace-nowrap control-label" title="Hide internal system threads (event_scheduler, binlog dump, etc.)">
+              <input type="checkbox" id="pl-hide-system" onchange="onProcesslistFilterChange()" class="rounded bg-slate-900 border-slate-700 text-app-accent shrink-0">
+              <span class="whitespace-nowrap">Hide System</span>
             </label>
           </div>
 
-          <div class="shrink-0 flex items-center space-x-3 text-slate-400 text-xs">
-            <span id="pl-summary-text">Threads: 0</span>
+          <div class="shrink-0 flex items-center space-x-3 text-slate-400 text-xs whitespace-nowrap">
+            <span id="pl-summary-text" class="whitespace-nowrap control-label">Threads: 0</span>
             <button id="pl-lock-summary" onclick="openLockInspectorModal()" class="hidden text-red-300 bg-red-950/60 hover:bg-red-900 border border-red-800/80 px-2 py-0.5 rounded text-[11px] font-mono flex items-center space-x-1.5 transition cursor-pointer" title="View Lock Contention & Root Blocker Analysis">
               <span>🚨</span><span id="pl-lock-count">0 Locks</span><span class="text-[10px] text-red-400">↗</span>
             </button>
@@ -1247,31 +1247,31 @@
 
           <!-- Process Activity Trend Panel (Collapsible) -->
           <div id="pl-trend-panel" class="hidden border-t border-app-border bg-slate-900/95 flex flex-col h-32 flex-shrink-0 select-none">
-            <div class="h-6 px-3 bg-slate-950/80 border-b border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
-              <div class="flex items-center space-x-3">
-                <span class="font-semibold text-slate-300 flex items-center space-x-1">
+            <div class="h-6 px-3 bg-slate-950/80 border-b border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400 flex-shrink-0 overflow-x-auto gap-3">
+              <div class="flex items-center space-x-3 shrink-0 whitespace-nowrap">
+                <span class="font-semibold text-slate-300 flex items-center space-x-1 shrink-0 whitespace-nowrap">
                   <span>📈</span>
-                  <span>Activity Trend</span>
+                  <span class="whitespace-nowrap">Activity Trend</span>
                 </span>
-                <span class="text-sky-400 flex items-center space-x-1">
-                  <span class="inline-block w-2.5 h-0.5 bg-sky-400 rounded"></span>
-                  <span>Running:</span>
+                <span class="text-sky-400 flex items-center space-x-1 shrink-0 whitespace-nowrap">
+                  <span class="inline-block w-2.5 h-0.5 bg-sky-400 rounded shrink-0"></span>
+                  <span class="whitespace-nowrap">Running:</span>
                   <b id="pl-trend-now" class="font-mono text-white">0</b>
                 </span>
-                <span class="text-slate-400 flex items-center space-x-1">
-                  <span class="inline-block w-2.5 h-0.5 bg-slate-500 rounded"></span>
-                  <span>Total:</span>
+                <span class="text-slate-400 flex items-center space-x-1 shrink-0 whitespace-nowrap">
+                  <span class="inline-block w-2.5 h-0.5 bg-slate-500 rounded shrink-0"></span>
+                  <span class="whitespace-nowrap">Total:</span>
                   <b id="pl-trend-total" class="font-mono text-slate-300">0</b>
                 </span>
-                <span class="text-amber-400/90">Peak: <b id="pl-trend-peak" class="font-mono">0</b></span>
-                <span class="text-slate-400">Avg: <b id="pl-trend-avg" class="font-mono">0.0</b></span>
+                <span class="text-amber-400/90 shrink-0 whitespace-nowrap">Peak: <b id="pl-trend-peak" class="font-mono">0</b></span>
+                <span class="text-slate-400 shrink-0 whitespace-nowrap">Avg: <b id="pl-trend-avg" class="font-mono">0.0</b></span>
               </div>
-              <div class="flex items-center space-x-2">
-                <button onclick="escalateToFlightRecorder()" class="text-[10px] text-rose-300 hover:text-white flex items-center space-x-1 px-1.5 py-0.5 rounded bg-rose-950/50 border border-rose-800/60 hover:bg-rose-900 transition" title="Escalate to On-Demand Flight Recorder for deep forensics">
+              <div class="flex items-center space-x-2 shrink-0 whitespace-nowrap">
+                <button onclick="escalateToFlightRecorder()" class="text-[10px] text-rose-300 hover:text-white flex items-center space-x-1 px-1.5 py-0.5 rounded bg-rose-950/50 border border-rose-800/60 hover:bg-rose-900 transition shrink-0" title="Escalate to On-Demand Flight Recorder for deep forensics">
                   <span class="text-rose-400">●</span>
-                  <span>Deep Record</span>
+                  <span class="whitespace-nowrap">Deep Record</span>
                 </button>
-                <button onclick="toggleProcesslistTrendPanel(false)" class="text-slate-500 hover:text-slate-300 px-1 text-xs" title="Close Panel">✕</button>
+                <button onclick="toggleProcesslistTrendPanel(false)" class="text-slate-500 hover:text-slate-300 px-1 text-xs shrink-0" title="Close Panel">✕</button>
               </div>
             </div>
             <div class="flex-1 relative p-1 overflow-hidden">
@@ -1282,15 +1282,15 @@
 
         <!-- View 2: Statement Digest Section (Historical Analytics) -->
         <div id="pl-digest-section" class="hidden flex-1 flex flex-col overflow-hidden bg-app-bg">
-          <div class="h-10 bg-slate-900 border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0">
-            <div class="flex items-center space-x-2">
-              <span class="font-bold text-sky-400 flex items-center space-x-1.5">
+          <div class="h-10 bg-slate-900 border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0 gap-3 overflow-x-auto">
+            <div class="flex items-center space-x-2 shrink-0 whitespace-nowrap">
+              <span class="font-bold text-sky-400 flex items-center space-x-1.5 shrink-0 whitespace-nowrap">
                 <span>📊</span>
-                <span>Top Statement Digest</span>
+                <span class="whitespace-nowrap">Top Statement Digest</span>
               </span>
-              <span class="text-slate-400 text-[11px]">Aggregated workload telemetry from <code class="text-sky-300 font-mono">sys.statement_analysis</code></span>
+              <span class="text-slate-400 text-[11px] whitespace-nowrap shrink-0">Aggregated workload telemetry from <code class="text-sky-300 font-mono">sys.statement_analysis</code></span>
             </div>
-            <div class="flex items-center space-x-2">
+            <div class="flex items-center space-x-2 shrink-0 whitespace-nowrap">
               <button onclick="fetchStatementDigest()" class="bg-app-card hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded border border-app-border text-xs flex items-center space-x-1">
                 <span>🔄 Refresh Digest</span>
               </button>
@@ -1324,15 +1324,15 @@
 
         <!-- View 3: Deadlock History Section (Post-Mortem Engine Analysis) -->
         <div id="pl-deadlock-section" class="hidden flex-1 flex flex-col overflow-hidden bg-app-bg">
-          <div class="h-10 bg-slate-900 border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0">
-            <div class="flex items-center space-x-2">
-              <span class="font-bold text-red-400 flex items-center space-x-1.5">
+          <div class="h-10 bg-slate-900 border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0 gap-3 overflow-x-auto">
+            <div class="flex items-center space-x-2 shrink-0 whitespace-nowrap">
+              <span class="font-bold text-red-400 flex items-center space-x-1.5 shrink-0 whitespace-nowrap">
                 <span>💀</span>
-                <span>Latest Detected Deadlock</span>
+                <span class="whitespace-nowrap">Latest Detected Deadlock</span>
               </span>
-              <span id="pl-deadlock-time-badge" class="text-slate-400 text-[11px] font-mono"></span>
+              <span id="pl-deadlock-time-badge" class="text-slate-400 text-[11px] font-mono shrink-0 whitespace-nowrap"></span>
             </div>
-            <button onclick="fetchDeadlockStatus()" class="bg-app-card hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded border border-app-border text-xs flex items-center space-x-1">
+            <button onclick="fetchDeadlockStatus()" class="bg-app-card hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded border border-app-border text-xs flex items-center space-x-1 shrink-0 whitespace-nowrap">
               <span>🔄 Check Deadlock</span>
             </button>
           </div>
@@ -1345,13 +1345,13 @@
       <!-- Session Audit Log Drawer (Bottom Panel) -->
       <div id="audit-drawer" class="hidden h-72 bg-slate-950 border-t border-app-border flex flex-col z-20 shadow-2xl absolute bottom-0 left-0 right-0">
         <!-- Drawer Header -->
-        <div class="h-9 bg-app-surface border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0 gap-3">
-          <div class="flex items-center space-x-3 flex-1 min-w-0 mr-3">
-            <span class="shrink-0 font-bold text-white flex items-center space-x-1.5">
+        <div class="h-9 bg-app-surface border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0 gap-3 overflow-x-auto">
+          <div class="flex items-center space-x-3 flex-1 min-w-0 mr-3 shrink-0">
+            <span class="shrink-0 font-bold text-white flex items-center space-x-1.5 whitespace-nowrap">
               <span>📜</span>
-              <span>Session Audit Log</span>
+              <span class="whitespace-nowrap">Session Audit Log</span>
             </span>
-            <span id="audit-total-count" class="shrink-0 text-slate-400 text-[11px]">(0 entries)</span>
+            <span id="audit-total-count" class="shrink-0 text-slate-400 text-[11px] whitespace-nowrap">(0 entries)</span>
 
             <div class="relative flex-1 min-w-[200px] flex items-center">
               <span class="absolute left-2.5 text-slate-500 pointer-events-none text-xs">🔍</span>
