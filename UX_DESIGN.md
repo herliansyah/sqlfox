@@ -715,6 +715,11 @@ The Entity-Relationship Diagram canvas allows developers to explore table relati
    - Primary solid sky-blue line shows active running queries (`Command != 'Sleep'`).
    - Secondary dashed slate line shows total thread count.
    - Metric pills show instant KPIs with 1-click shortcut to Flight Recorder.
+5. **UI Resilience & Non-Wrapping Controls**:
+   - Universal anti-shrink and anti-wrap guard on all buttons (`button:not(.allow-wrap)`) preventing multi-line label collapse or deformed pill dimensions when the window narrows.
+   - Horizontal toolbars (`header`, `editor-toolbar`, `table-mode-tabs`, `grid-toolbar`, `footer`) employ bounded horizontal overflow (`overflow-x-auto gap-3`) with `shrink-0` groups to prevent button overlap, text collisions, or UI clipping.
+   - Content text (AI chats, Operational Notes, modal logs) preserves word wrapping for maximum reading comfort.
+
 
 
 

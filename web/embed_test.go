@@ -683,4 +683,35 @@ func TestProcesslistActivityTrendEmbedded(t *testing.T) {
 	}
 }
 
+func TestUIResilienceAndNonWrappingControls(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	expectedSnippets := []string{
+		"button:not(.allow-wrap)",
+		"white-space: nowrap !important;",
+		"flex-shrink: 0;",
+		"header-toolbar",
+		"editor-toolbar",
+		"table-toolbar",
+		`class="h-12 bg-app-surface border-b border-app-border flex items-center justify-between px-4 z-20 flex-shrink-0 overflow-x-auto gap-3"`,
+	}
+
+	for _, s := range expectedSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain UI resilience rule %q, but was missing", s)
+		}
+	}
+}
+
 

@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fail-Closed Release Manifest Verification (`internal/server/update`)**: In-app self-update strictly restricts downloads to the official repository (`github.com/herliansyah/sqlfox/releases/download/...`) and cryptographically verifies archive SHA-256 digests against release checksum manifests (`checksums.txt` / `SHA256SUMS`).
 
 ### Changed
+- **UI Resilience & Non-Wrapping Controls**: Universal CSS and layout guard across all application buttons and toolbar chrome (`button:not(.allow-wrap)`). Enforces `white-space: nowrap !important;` and `flex-shrink: 0;` to eliminate awkward squished button shapes, button multi-line word-wrapping, and overlapping toolbar items when the browser window narrows. High-density toolbars (`header`, `editor-toolbar`, `table-mode-tabs`, `grid-toolbar`, `footer`) now feature smooth horizontal scrolling (`overflow-x-auto gap-3`) with preserved icon and label geometry.
 - **Terminal Console PIN Privacy**: Console startup output suppresses Master PIN and Network URLs in default localhost mode, revealing them only when `--lan` mode is activated.
 - **CLI Runner Server Flags**: Default host flag updated to `127.0.0.1` and `--lan` added to help documentation.
 

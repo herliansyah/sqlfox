@@ -591,6 +591,10 @@ _Avoid_: Mixed-language UI, multilingual i18n framework, hardcoded non-English t
 Relying on standard OS facilities (`ssh -N -L 3306:remote-db:3306 user@bastion` or platform VPN) for remote private network database connectivity, avoiding custom in-process SSH dialer complexity and unexposed vault database columns.
 _Avoid_: In-process tunnel, custom bastion client
 
+**Non-Wrapping Controls**:
+The design and styling invariant enforcing `white-space: nowrap !important;` and `flex-shrink: 0;` on all interactive buttons, toolbar icons, badge pills, and tab headers, preventing distorted pill dimensions and multi-line label collapse during viewport resizing.
+_Avoid_: Multiline button labels, squished button shapes, colliding controls
+
 ## Architectural Decision Records (ADR)
 - **0001**: CGo-Free Pure Go Drivers (`docs/adr/0001-cgo-free-pure-go-drivers.md`)
 - **0002**: Deterministic AST Safety Guard (`docs/adr/0002-deterministic-ast-safety-guard.md`)
@@ -638,6 +642,8 @@ _Avoid_: In-process tunnel, custom bastion client
 - **0044**: Unified Operational Notes Inbox and Follow-up Lifecycle (`docs/adr/0044-unified-operational-notes-inbox-and-followup-lifecycle.md`)
 - **0045**: Core Engine Scope Freeze and CGO-Free Invariant (`docs/adr/0045-core-engine-scope-freeze-and-cgo-free-invariant.md`)
 - **0046**: Secure-by-Default Binding and Ingress Hardening (`docs/adr/0046-secure-default-binding-and-ingress-hardening.md`)
+- **0047**: Single-Instance Guard and Lock Management (`docs/adr/0047-single-instance-guard-and-lock-management.md`)
+- **0048**: UI Resilience and Non-Wrapping Controls (`docs/adr/0048-ui-resilience-and-non-wrapping-controls.md`)
 
 ## Visual Schema & ERD Canvas
 
