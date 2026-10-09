@@ -149,6 +149,7 @@ SQLFOX_PPROF=1 ./sqlfox -port 9090
 | :--- | :--- | :--- |
 | `-port <nomor>` | `8080` | Port HTTP (dilengkapi fitur pencarian port berurutan otomatis) |
 | `-host <ip>` | `127.0.0.1` | Alamat IP antarmuka jaringan (`0.0.0.0` untuk akses LAN dengan proteksi PIN) |
+| `--lan` | `false` | Buka akses jaringan LAN & tablet (bind ke `0.0.0.0` dan tampilkan Master PIN) |
 | `-log-level <lvl>`| `info` | Tingkat rincian log minimum: `debug`, `info`, `warn`, `error` |
 | `-v`, `-verbose` | `false` | Pintasan cepat untuk `-log-level debug` |
 | `-log-format <fmt>`| `text` | Format log terstruktur: `text` (mudah dibaca manusia) atau `json` |

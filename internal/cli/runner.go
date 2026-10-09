@@ -37,7 +37,8 @@ Commands:
 
 Server Flags (Default Mode):
   -port int       Port to listen on (default 8080)
-  -host string    Host interface to bind (default "0.0.0.0")
+  -host string    Host interface to bind (default "127.0.0.1")
+  --lan           Enable LAN and tablet access (binds to 0.0.0.0)
   -db string      Path to config vault database (default: ~/.sqlfox/config.db)
   -pass string    Master password for vault encryption
   -no-browser     Do not automatically launch web browser

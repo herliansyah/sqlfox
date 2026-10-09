@@ -1,6 +1,9 @@
 # 0007: Multi-IP Network Access and Linear Port Hunting
 
-SqlFox binds to `0.0.0.0` by default to enable tablet and remote LAN access, while protecting database credentials via an automated Remote Access Guard and linear port collision hunting.
+> [!NOTE]
+> **Amended by [ADR-0046](0046-secure-default-binding-and-ingress-hardening.md)**: The default network binding has been updated to strictly bind to `127.0.0.1` by default for zero network exposure, requiring the explicit `--lan` flag (or `-host 0.0.0.0`) to open port access across local networks.
+
+SqlFox binds to `127.0.0.1` by default (and `0.0.0.0` when `--lan` is specified) to enable tablet and remote LAN access, while protecting database credentials via an automated Remote Access Guard and linear port collision hunting.
 
 ## Considered Options
 

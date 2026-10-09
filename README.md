@@ -122,7 +122,9 @@ Server Flags (Default Mode):
   -port int
         Port to listen on (default 8080, with automatic scanning if busy)
   -host string
-        Host interface to bind (default "0.0.0.0" for LAN/Tablet access, "127.0.0.1" for local only)
+        Host interface to bind (default "127.0.0.1"; use --lan or "0.0.0.0" for LAN access)
+  -lan
+        Enable LAN and tablet access (binds to 0.0.0.0 and displays Master PIN)
   -pass string
         Master password for vault encryption (leave blank to auto-generate or reuse ~/.sqlfox/master.key)
   -db string
@@ -287,7 +289,9 @@ Opsi Server (Mode Default):
   -port int
         Port server (default 8080, otomatis mencari port berikutnya jika bentrok)
   -host string
-        Interface jaringan yang di-bind (default "0.0.0.0" untuk akses LAN/Tablet, "127.0.0.1" untuk lokal saja)
+        Interface jaringan yang di-bind (default "127.0.0.1"; gunakan --lan atau "0.0.0.0" untuk akses LAN)
+  -lan
+        Aktifkan akses jaringan LAN & tablet (bind ke 0.0.0.0 dan tampilkan Master PIN)
   -pass string
         Master password enkripsi vault (kosongkan untuk generate PIN otomatis atau baca dari ~/.sqlfox/master.key)
   -db string

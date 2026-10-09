@@ -56,7 +56,8 @@ func main() {
 	}
 
 	portFlag := flag.Int("port", 8080, "Port to listen on (default 8080, with automatic scanning if busy)")
-	hostFlag := flag.String("host", "0.0.0.0", "Host interface to bind (0.0.0.0 for LAN/Tablet access, 127.0.0.1 for local only)")
+	hostFlag := flag.String("host", "127.0.0.1", "Host interface to bind (default 127.0.0.1; use --lan or 0.0.0.0 for LAN/Tablet access)")
+	lanFlag := flag.Bool("lan", false, "Enable LAN and tablet access (binds to 0.0.0.0 and displays Master PIN)")
 	dbFlag := flag.String("db", "", "Path to config vault database (default: ~/.sqlfox/config.db)")
 	passFlag := flag.String("pass", "", "Master password for vault encryption (leave blank to auto-generate or reuse ~/.sqlfox/master.key)")
 	noBrowserFlag := flag.Bool("no-browser", false, "Do not automatically launch web browser")
@@ -147,10 +148,17 @@ func main() {
 	}
 	defer v.Close()
 
+	bindHost := *hostFlag
+	isLAN := *lanFlag || bindHost == "0.0.0.0"
+	if *lanFlag && bindHost == "127.0.0.1" {
+		bindHost = "0.0.0.0"
+	}
+
 	// Initialize HTTP server with embedded web assets and master password
 	srv := server.NewServer(v, web.Assets(), backupDir, masterPassword)
 	srv.SetVersion(Version)
 	srv.SetLogger(logRes.Logger)
+	srv.SetLANEnabled(isLAN)
 
 	maxAttempts := 50
 	if *strictPortFlag {
@@ -158,7 +166,7 @@ func main() {
 	}
 
 	// Automatic port hunting
-	listener, actualPort, err := listenWithPortHunting(*hostFlag, *portFlag, maxAttempts)
+	listener, actualPort, err := listenWithPortHunting(bindHost, *portFlag, maxAttempts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "❌ Failed to bind listener: %v\n", err)
 		os.Exit(1)
@@ -189,12 +197,16 @@ func main() {
 	if !isSilent {
 		fmt.Printf("\n🦊 SqlFox %s Database Manager is running!\n", Version)
 		fmt.Printf("   ➜  Local:       %s\n", localURL)
-		if lanIP != "" {
-			fmt.Printf("   ➜  Network:     http://%s:%d (Open from Tablet/LAN)\n", lanIP, actualPort)
-		}
-		fmt.Printf("   ➜  Master PIN:  %s  (Enter this when connecting from Tablet/Phone)\n", masterPassword)
-		if isNewPIN {
-			fmt.Printf("      (New PIN generated and saved to %s)\n", filepath.Join(configDir, "master.key"))
+		if isLAN {
+			if lanIP != "" {
+				fmt.Printf("   ➜  Network:     http://%s:%d (Open from Tablet/LAN)\n", lanIP, actualPort)
+			}
+			fmt.Printf("   ➜  Master PIN:  %s  (Enter this when connecting from Tablet/Phone)\n", masterPassword)
+			if isNewPIN {
+				fmt.Printf("      (New PIN generated and saved to %s)\n", filepath.Join(configDir, "master.key"))
+			}
+		} else {
+			fmt.Printf("      (Localhost only; run with --lan for tablet/remote access)\n")
 		}
 		fmt.Printf("   ➜  Vault:       %s\n", dbPath)
 		fmt.Printf("   ➜  Backups:     %s\n\n", backupDir)
@@ -253,12 +265,15 @@ func resolveMasterPassword(flagPass string, configDir string) (string, bool, err
 }
 
 func generateFriendlyPIN() (string, error) {
-	b := make([]byte, 2)
+	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
+	b := make([]byte, 6)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	num := int(b[0])<<8 | int(b[1])
-	return fmt.Sprintf("fox-%04d", num%10000), nil
+	for i := range b {
+		b[i] = charset[int(b[i])%len(charset)]
+	}
+	return "fox-" + string(b), nil
 }
 
 func listenWithPortHunting(host string, startPort int, maxAttempts int) (net.Listener, int, error) {

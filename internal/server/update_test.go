@@ -5,7 +5,10 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -225,7 +228,15 @@ func TestHandleApplyUpdate(t *testing.T) {
 	tw.Close()
 	gzw.Close()
 
+	actualHash := sha256.Sum256(archiveBuf.Bytes())
+	hexHash := hex.EncodeToString(actualHash[:])
+
 	mockDownload := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "checksums.txt") {
+			w.Header().Set("Content-Type", "text/plain")
+			w.Write([]byte(fmt.Sprintf("%s  sqlfox-v0.2.0-linux-amd64.tar.gz\n", hexHash)))
+			return
+		}
 		w.Header().Set("Content-Type", "application/gzip")
 		w.Write(archiveBuf.Bytes())
 	}))
@@ -233,6 +244,7 @@ func TestHandleApplyUpdate(t *testing.T) {
 
 	restartChan := make(chan struct{}, 1)
 	srv := &Server{
+		updateAPIURL:  mockDownload.URL,
 		targetExePath: fakeExe,
 		restartFn: func() error {
 			restartChan <- struct{}{}
@@ -241,7 +253,7 @@ func TestHandleApplyUpdate(t *testing.T) {
 	}
 
 	body := map[string]string{
-		"asset_url": mockDownload.URL,
+		"asset_url": mockDownload.URL + "/sqlfox-v0.2.0-linux-amd64.tar.gz",
 		"version":   "v0.2.0",
 	}
 	bodyBytes, _ := json.Marshal(body)
@@ -309,6 +321,72 @@ func TestHandleGetChangelog(t *testing.T) {
 
 	if !strings.Contains(changelog, "Keep a Changelog") {
 		t.Errorf("expected changelog to contain 'Keep a Changelog'")
+	}
+}
+
+func TestRejectUntrustedUpdateOrigin(t *testing.T) {
+	srv := &Server{}
+	body := map[string]string{
+		"asset_url": "http://evil.com/malicious_sqlfox.tar.gz",
+		"version":   "v0.9.9",
+	}
+	bodyBytes, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/system/update/apply", bytes.NewReader(bodyBytes))
+	rr := httptest.NewRecorder()
+
+	srv.handleApplyUpdate(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for untrusted origin, got: %d (%s)", rr.Code, rr.Body.String())
+	}
+}
+
+func TestRejectMismatchedChecksum(t *testing.T) {
+	tmpDir := t.TempDir()
+	fakeExe := filepath.Join(tmpDir, "sqlfox")
+	_ = os.WriteFile(fakeExe, []byte("old"), 0755)
+
+	var archiveBuf bytes.Buffer
+	gzw := gzip.NewWriter(&archiveBuf)
+	tw := tar.NewWriter(gzw)
+	payload := []byte("compromised-content")
+	_ = tw.WriteHeader(&tar.Header{Name: "sqlfox", Mode: 0755, Size: int64(len(payload))})
+	_, _ = tw.Write(payload)
+	_ = tw.Close()
+	_ = gzw.Close()
+
+	mockDownload := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "checksums.txt") {
+			w.Header().Set("Content-Type", "text/plain")
+			// Provide completely wrong hash
+			w.Write([]byte("0000000000000000000000000000000000000000000000000000000000000000  sqlfox-compromised.tar.gz\n"))
+			return
+		}
+		w.Header().Set("Content-Type", "application/gzip")
+		w.Write(archiveBuf.Bytes())
+	}))
+	defer mockDownload.Close()
+
+	srv := &Server{
+		updateAPIURL:  mockDownload.URL,
+		targetExePath: fakeExe,
+	}
+
+	body := map[string]string{
+		"asset_url": mockDownload.URL + "/sqlfox-compromised.tar.gz",
+		"version":   "v0.2.0",
+	}
+	bodyBytes, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/system/update/apply", bytes.NewReader(bodyBytes))
+	rr := httptest.NewRecorder()
+
+	srv.handleApplyUpdate(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 InternalServerError for checksum mismatch, got: %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "digest mismatch") && !strings.Contains(rr.Body.String(), "supply chain verification failed") {
+		t.Fatalf("expected digest mismatch error, got: %s", rr.Body.String())
 	}
 }
 
