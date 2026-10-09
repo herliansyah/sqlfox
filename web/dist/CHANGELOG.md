@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.5.0] - 2026-10-09
+
 ### Added
 - **Cloud Sync & GitHub Replication Engine (`internal/vault`, `internal/server`)**: Asynchronous, offline-first background replication of user notes, documentation, and SQL snippets to any GitHub repository using official GitHub REST API (v3/v4) without requiring external `git` CLI installations. Features sensitive token encryption at rest via AES-256-GCM and Argon2id, atomic commits using the Git Database API, mirror deletions, optional encrypted Connection Vault backup archive, and non-blocking real-time status indicators (`Synced 🟢`, `Syncing 🟡`, `Error 🔴`).
 - **Single-Instance Desktop Guard & Lock Management (`cmd/sqlfox`)**: Automatic single-instance protection on desktop and local environments. Re-launching SqlFox while an instance is already running on the PC detects the active server via state file verification (`sqlfox.lock`) and fast loopback health check, focuses/opens the running instance in the user's default browser, and cleanly exits (code 0) without spawning redundant processes on other ports. Added `-multi` flag to permit concurrent instances when intentionally desired.
