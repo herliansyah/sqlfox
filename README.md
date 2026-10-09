@@ -133,6 +133,8 @@ Server Flags (Default Mode):
         Do not automatically launch web browser
   -strict-port
         Fail immediately if specified port is in use
+  -multi
+        Allow multiple SqlFox instances to run concurrently
   -version
         Print SqlFox version and exit
 ```

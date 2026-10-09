@@ -156,9 +156,14 @@ SQLFOX_PPROF=1 ./sqlfox -port 9090
 | `-log-file <path>`| `""` | Lokasi berkas log persistent (menulis ke terminal dan file sekaligus) |
 | `-silent`, `-q` | `false` | Mematikan tampilan log di terminal (pencatatan file tetap berjalan jika diset) |
 | `-no-browser` | `false` | Menjalankan server tanpa membuka browser web bawaan sistem operasi |
+| `-strict-port` | `false` | Langsung gagal jika port yang diminta sedang digunakan |
+| `-multi` | `false` | Izinkan beberapa instance SqlFox berjalan bersamaan di port berbeda |
 
 > [!NOTE]
-> **Fitur Otomatis Port Hunting**: Jika port yang ditentukan (misalnya 8080) sedang digunakan oleh aplikasi lain (`EADDRINUSE`), SqlFox secara otomatis akan mencari dan mengikat port berurutan berikutnya yang bebas (8081, 8082, dst.) lalu menampilkan URL aktif di terminal.
+> **Proteksi Single-Instance & Port Hunting**:
+> - Jika SqlFox sudah berjalan aktif di PC ini, menjalankan kembali `./sqlfox` akan otomatis mendeteksi instance yang sudah ada, membukanya di browser, lalu keluar tanpa menyalakan server baru di port lain.
+> - Jika port terisi oleh aplikasi lain (seperti Apache/Nginx), SqlFox otomatis mencari port berurutan berikutnya yang bebas (8081, 8082, dst.).
+> - Untuk sengaja menjalankan lebih dari satu instance, gunakan flag `-multi` (atau variabel lingkungan `SQLFOX_MULTI_INSTANCE=1`).
 
 ### Konfigurasi Logging Saat Dobel-Klik di Windows
 Saat Anda menjalankan `sqlfox.exe` dengan cara klik ganda (double-click) di Windows Explorer, jendela terminal tidak terbuka sehingga argumen flag baris perintah tidak dapat diketikkan secara langsung. SqlFox menyediakan 4 metode mudah untuk mengatur tingkat verbositas dan penyimpanan berkas log:
