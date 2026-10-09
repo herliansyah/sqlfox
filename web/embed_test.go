@@ -2,6 +2,7 @@ package web
 
 import (
 	"io"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -736,6 +737,93 @@ func TestHeaderDropdownsNotClippedByOverflow(t *testing.T) {
 		t.Errorf("critical UI bug: <header> has overflow-x-auto, which clips top-monitor-menu and top-db-tools-menu dropdowns")
 	}
 }
+
+func TestProcesslistHeaderAndTrendPanelResilience(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(contentBytes)
+
+	// Processlist toolbar controls must be non-wrapping
+	expectedProcesslistSnippets := []string{
+		// Processlist Hide Sleep and Hide System checkboxes must not wrap text
+		`id="pl-hide-sleep"`,
+		`id="pl-hide-system"`,
+		`id="pl-summary-text"`,
+	}
+	for _, s := range expectedProcesslistSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain %q", s)
+		}
+	}
+
+	// Trend panel header must have overflow-x-auto and non-wrapping items
+	if !strings.Contains(content, `id="pl-trend-panel"`) {
+		t.Fatalf("pl-trend-panel not found")
+	}
+
+	// Verify trend panel header bar has overflow-x-auto and gap-3
+	if !strings.Contains(content, `pl-trend-panel`) || !strings.Contains(content, `Activity Trend`) {
+		t.Fatalf("trend panel content missing")
+	}
+
+	// Check that Activity Trend and its statistics labels are protected with whitespace-nowrap
+	trendSnippetChecks := []string{
+		`whitespace-nowrap`,
+		`Activity Trend`,
+	}
+	for _, s := range trendSnippetChecks {
+		if !strings.Contains(content, s) {
+			t.Errorf("missing %q in index.html", s)
+		}
+	}
+
+	// Verify pl-summary-text has whitespace-nowrap
+	if !regexpMatch(`id="pl-summary-text"[^>]*class="[^"]*whitespace-nowrap`, content) &&
+		!regexpMatch(`class="[^"]*whitespace-nowrap[^"]*"[^>]*id="pl-summary-text"`, content) {
+		t.Errorf("pl-summary-text must have whitespace-nowrap to prevent line breaks on window resize")
+	}
+
+	// Verify pl-hide-sleep has whitespace-nowrap
+	if !regexpMatch(`<label[^>]*id="pl-hide-sleep"`, content) && !regexpMatch(`<label[^>]*class="[^"]*whitespace-nowrap[^"]*"[^>]*>[^<]*<input[^>]*id="pl-hide-sleep"`, content) {
+		t.Errorf("pl-hide-sleep label must have whitespace-nowrap to prevent word wrapping on window resize")
+	}
+
+	// Verify pl-hide-system has whitespace-nowrap
+	if !regexpMatch(`<label[^>]*id="pl-hide-system"`, content) && !regexpMatch(`<label[^>]*class="[^"]*whitespace-nowrap[^"]*"[^>]*>[^<]*<input[^>]*id="pl-hide-system"`, content) {
+		t.Errorf("pl-hide-system label must have whitespace-nowrap to prevent word wrapping on window resize")
+	}
+
+	// Verify trend panel header has overflow-x-auto
+	if !regexpMatch(`id="pl-trend-panel"[\s\S]*?class="[^"]*h-6[^"]*overflow-x-auto`, content) {
+		t.Errorf("pl-trend-panel header must have overflow-x-auto to prevent clipping and content distortion on resize")
+	}
+
+	// Verify Activity Trend label in trend panel has whitespace-nowrap
+	if !regexpMatch(`class="[^"]*whitespace-nowrap[^"]*"[\s\S]*?Activity Trend`, content) &&
+		!regexpMatch(`Activity Trend[\s\S]*?class="[^"]*whitespace-nowrap`, content) {
+		t.Errorf("Activity Trend label must have whitespace-nowrap")
+	}
+
+	// Verify trend stats (running, total, peak, avg) are wrapped in whitespace-nowrap
+	if !regexpMatch(`id="pl-trend-now"[\s\S]*?id="pl-trend-total"[\s\S]*?id="pl-trend-peak"[\s\S]*?id="pl-trend-avg"`, content) {
+		t.Errorf("pl-trend statistics elements missing")
+	}
+}
+
+func regexpMatch(pattern, text string) bool {
+	matched, _ := regexp.MatchString(pattern, text)
+	return matched
+}
+
 
 
 

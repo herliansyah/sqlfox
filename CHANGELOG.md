@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Processlist & Activity Trend UI Resilience**: Enforced `whitespace-nowrap`, `shrink-0`, and `overflow-x-auto gap-3` across Processlist toolbar toggles (`Hide Sleep`, `Hide System`, `Threads: N`), collapsible Activity Trend panel header, Statement Digest, and Deadlock History toolbars to prevent word wrapping and squashed controls during window resizing.
+
 ## [v0.5.1] - 2026-10-09
 
 ### Fixed

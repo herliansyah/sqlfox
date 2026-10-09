@@ -18,8 +18,8 @@ This created three primary visual bugs:
 - Long database, table, or column names within headers or status bars continue using bounded truncation (`truncate` with ellipsis) alongside native `title="..."` tooltips to preserve adjacent controls.
 
 ### 2. Smooth Horizontal Overflow for Toolbars
-- High-density toolbars (`header`, `editor-toolbar`, `table-mode-tabs`, `grid-toolbar`, `footer`) are configured with `overflow-x-auto`, `gap-3`, and `shrink-0` groups.
-- When the application window is narrower than the cumulative width of toolbar buttons, the container gracefully scrolls horizontally without collapsing buttons or warping layout hierarchy.
+- High-density toolbars (`header`, `editor-toolbar`, `table-mode-tabs`, `grid-toolbar`, `footer`, `processlist-toolbar`, `pl-trend-panel` header, Statement Digest, and Deadlock History toolbars) are configured with `overflow-x-auto`, `gap-3`, and `shrink-0` groups.
+- When the application window is narrower than the cumulative width of toolbar buttons and filter toggles, the container gracefully scrolls horizontally without collapsing buttons or warping layout hierarchy.
 
 ### 3. Clear Separation Between Controls and Content Text
 - Text content surfaces (AI Copilot chat answers, Operational Notes bodies, error modal stack traces, and SQL execution diagnostics) retain word wrapping (`break-words`, `whitespace-pre-wrap`) to maintain maximum readability without horizontal clipping.
