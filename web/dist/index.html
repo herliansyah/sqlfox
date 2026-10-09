@@ -457,14 +457,17 @@
         </div>
 
         <!-- Compact Active Session Bar Button -->
-        <button id="session-switcher-btn" onclick="toggleSessionDropdown()" class="w-full bg-slate-950 border border-slate-700 hover:border-slate-500 px-2 py-1.5 rounded flex items-center justify-between text-xs transition group">
+        <div id="session-switcher-btn" onclick="toggleSessionDropdown()" role="button" tabindex="0" class="w-full bg-slate-950 border border-slate-700 hover:border-slate-500 px-2 py-1.5 rounded flex items-center justify-between text-xs transition group cursor-pointer select-none">
           <div class="flex items-center space-x-2 truncate">
             <span id="session-switcher-icon">🗄️</span>
             <span id="session-switcher-name" class="font-medium text-white truncate">Select Connection</span>
             <span id="session-switcher-env-badge" class="hidden text-[9px] px-1 py-0.2 rounded border font-mono uppercase"></span>
           </div>
-          <span class="text-slate-500 group-hover:text-slate-300 text-[10px] ml-1">▼</span>
-        </button>
+          <div class="flex items-center space-x-1 shrink-0">
+            <button id="session-switcher-edit-btn" onclick="event.stopPropagation(); if(activeConnection) openEditConnModal(activeConnection.id);" class="opacity-0 group-hover:opacity-100 hover:text-white px-1 text-xs text-slate-400 transition" title="Edit Active Connection">✏️</button>
+            <span class="text-slate-500 group-hover:text-slate-300 text-[10px] ml-1">▼</span>
+          </div>
+        </div>
 
         <!-- Session Dropdown / Popover -->
         <div id="session-dropdown-menu" class="hidden absolute top-full left-2 right-2 mt-1 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl z-50 p-2 space-y-1.5">
@@ -654,7 +657,7 @@
 
         <!-- Grid Toolbar (Data Mode) -->
         <!-- Grid Toolbar (Data Mode) -->
-        <div id="grid-toolbar" class="h-8 bg-app-surface/40 border-b border-app-border px-3 flex items-center justify-between text-xs text-slate-400 flex-shrink-0 overflow-x-auto gap-3">
+        <div id="grid-toolbar" class="h-8 bg-app-surface/40 border-b border-app-border px-3 flex items-center justify-between text-xs text-slate-400 flex-shrink-0 z-20 gap-3">
           <div class="flex items-center space-x-2.5 shrink-0">
             <span id="grid-result-stats">0 rows</span>
             <button id="btn-view-profile" onclick="toggleProfileView()" class="hidden px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-400 border border-sky-800 text-[11px] font-semibold flex items-center space-x-1 transition" title="Inspect query execution stages and timings">
@@ -4844,6 +4847,9 @@
       const stripe = document.getElementById('top-ambient-stripe');
       if (!badgeEl) return;
       if (!conn) {
+        badgeEl.className = "flex items-center space-x-2 text-xs";
+        badgeEl.onclick = null;
+        badgeEl.title = "";
         badgeEl.innerHTML = '<span class="text-slate-400">No active connection</span>';
         if (stripe) stripe.classList.add('hidden');
         return;
@@ -4862,9 +4868,13 @@
       }
 
       const statusHtml = status ? ` <span class="text-slate-400 text-xs font-normal">(${escapeHtml(status)})</span>` : '';
+      badgeEl.className = "flex items-center space-x-2 text-xs group cursor-pointer";
+      badgeEl.title = `Active Connection: ${conn.name} (${env}) - Click or hover ✏️ to edit`;
+      badgeEl.onclick = () => openEditConnModal(conn.id);
       badgeEl.innerHTML = `
         <span class="px-2 py-0.5 rounded font-bold font-mono text-[11px] ${pillClass}">${pillLabel}</span>
-        <span class="font-semibold text-white">${escapeHtml(conn.name)}${statusHtml}</span>
+        <span class="font-semibold text-white group-hover:text-sky-300 transition">${escapeHtml(conn.name)}${statusHtml}</span>
+        <button onclick="event.stopPropagation(); openEditConnModal('${conn.id}')" class="opacity-0 group-hover:opacity-100 hover:text-white px-1 text-xs text-slate-400 transition" title="Edit Connection: ${escapeHtml(conn.name)}">✏️</button>
       `;
     }
 
@@ -4872,13 +4882,19 @@
       const el = document.getElementById('connections-tree');
       const switcherName = document.getElementById('session-switcher-name');
       const switcherEnvBadge = document.getElementById('session-switcher-env-badge');
+      const switcherEditBtn = document.getElementById('session-switcher-edit-btn');
 
       if (activeConnection) {
         if (switcherName) switcherName.textContent = activeConnection.name;
         if (switcherEnvBadge) switcherEnvBadge.classList.add('hidden'); // Free sidebar button from redundant badge
+        if (switcherEditBtn) {
+          switcherEditBtn.classList.remove('hidden');
+          switcherEditBtn.title = `Edit Connection: ${activeConnection.name}`;
+        }
       } else {
         if (switcherName) switcherName.textContent = 'Select Connection';
         if (switcherEnvBadge) switcherEnvBadge.classList.add('hidden');
+        if (switcherEditBtn) switcherEditBtn.classList.add('hidden');
       }
 
       if (!el) return;
@@ -4924,8 +4940,8 @@
               </div>
               <div class="flex items-center space-x-1">
                 <span class="text-[10px] text-slate-500 font-mono group-hover:hidden">${escapeHtml(c.driver)}</span>
-                <button onclick="event.stopPropagation(); openEditConnModal('${c.id}'); toggleSessionDropdown(false);" class="hidden group-hover:inline-block hover:text-white px-1 text-xs" title="Edit Connection">✏️</button>
-                <button onclick="event.stopPropagation(); deleteConnection('${c.id}')" class="hidden group-hover:inline-block hover:text-app-danger px-1 text-xs" title="Delete Connection">🗑️</button>
+                <button onclick="event.stopPropagation(); openEditConnModal('${c.id}'); toggleSessionDropdown(false);" class="opacity-0 group-hover:opacity-100 hover:text-white px-1 text-xs transition" title="Edit Connection">✏️</button>
+                <button onclick="event.stopPropagation(); deleteConnection('${c.id}', event)" class="opacity-0 group-hover:opacity-100 hover:text-app-danger px-1 text-xs transition" title="Delete Connection">🗑️</button>
               </div>
             </div>
           `;

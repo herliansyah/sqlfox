@@ -824,6 +824,56 @@ func regexpMatch(pattern, text string) bool {
 	return matched
 }
 
+func TestGridToolbarDropdownNotClipped(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(contentBytes)
+
+	// #grid-toolbar contains #export-csv-menu (an absolutely positioned dropdown).
+	// Having overflow-x-auto or overflow-hidden on #grid-toolbar forces overflow-y to clip,
+	// causing the export dropdown to be clipped / sunken ("mendem") behind the grid table.
+	if strings.Contains(content, `id="grid-toolbar" class="h-8 bg-app-surface/40 border-b border-app-border px-3 flex items-center justify-between text-xs text-slate-400 flex-shrink-0 overflow-x-auto`) {
+		t.Errorf("critical UI bug: #grid-toolbar has overflow-x-auto, which clips #export-csv-menu dropdown")
+	}
+}
+
+func TestConnectionHoverActionsAndAffordance(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(contentBytes)
+
+	// Critical check: [hidden], .hidden { display: none !important; } prevents elements with class "hidden"
+	// from ever displaying on hover (e.g. group-hover:inline-block).
+	// Connection list items must use opacity-0 group-hover:opacity-100 instead of "hidden group-hover:inline-block".
+	if strings.Contains(content, `class="hidden group-hover:inline-block hover:text-white px-1 text-xs" title="Edit Connection"`) {
+		t.Errorf("critical UI bug: connection edit button uses 'hidden group-hover:inline-block' which is permanently suppressed by .hidden !important")
+	}
+
+	// Verify session row / switcher bar has edit connection affordance
+	if !strings.Contains(content, `openEditConnModal(activeConnection.id)`) && !strings.Contains(content, `openEditConnModal(conn.id)`) {
+		t.Errorf("active connection bar or badge must afford editing the active connection via openEditConnModal")
+	}
+}
+
+
 
 
 
