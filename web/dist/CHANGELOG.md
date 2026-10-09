@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.5.2] - 2026-10-09
+
 ### Added
 - **Manual Update Check Affordance**: Dedicated "Check for Updates" button in the Changelog modal footer (`#changelog-check-updates-btn`) allowing operators to trigger on-demand release checks directly from the UI, with explicit error state feedback when GitHub API limits or network issues occur.
 
