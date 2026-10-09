@@ -7,8 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Manual Update Check Affordance**: Dedicated "Check for Updates" button in the Changelog modal footer (`#changelog-check-updates-btn`) allowing operators to trigger on-demand release checks directly from the UI, with explicit error state feedback when GitHub API limits or network issues occur.
+
 ### Fixed
 - **Processlist & Activity Trend UI Resilience**: Enforced `whitespace-nowrap`, `shrink-0`, and `overflow-x-auto gap-3` across Processlist toolbar toggles (`Hide Sleep`, `Hide System`, `Threads: N`), collapsible Activity Trend panel header, Statement Digest, and Deadlock History toolbars to prevent word wrapping and squashed controls during window resizing.
+- **Connection Action Visibility & Grid Export Dropdown**: Replaced `hidden group-hover:inline-block` with `opacity-0 group-hover:opacity-100` on connection sidebar items to bypass global `.hidden !important` suppression, added hover/click edit affordances to the sidebar session switcher and navbar connection badge, and removed `overflow-x-auto` from the grid toolbar to prevent clipping the CSV/JSON export dropdown menu.
 
 ## [v0.5.1] - 2026-10-09
 
