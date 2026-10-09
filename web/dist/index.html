@@ -181,6 +181,19 @@
     #results-table:has(th.w-full) td {
       text-align: center !important;
     }
+
+    /* UI Resilience: Non-wrapping controls, button shape preservation, and overlap prevention */
+    button:not(.allow-wrap) {
+      white-space: nowrap !important;
+      flex-shrink: 0;
+    }
+    .badge-pill, .control-label, .tab-label, .toolbar-item {
+      white-space: nowrap !important;
+      flex-shrink: 0;
+    }
+    .header-toolbar, .editor-toolbar, .table-toolbar {
+      flex-wrap: nowrap;
+    }
   </style>
 </head>
 <body class="bg-app-bg text-slate-100 font-sans h-screen flex flex-col overflow-hidden select-none">
@@ -245,8 +258,8 @@
   <div id="top-ambient-stripe" class="hidden h-[2px] w-full bg-rose-500 flex-shrink-0 z-50"></div>
 
   <!-- Top Navbar -->
-  <header class="h-12 bg-app-surface border-b border-app-border flex items-center justify-between px-4 z-20 flex-shrink-0">
-    <div class="flex items-center space-x-3">
+  <header class="h-12 bg-app-surface border-b border-app-border flex items-center justify-between px-4 z-20 flex-shrink-0 overflow-x-auto gap-3">
+    <div class="flex items-center space-x-3 shrink-0">
       <button onclick="toggleLeftSidebar()" class="h-7 w-7 flex items-center justify-center rounded bg-app-card hover:bg-slate-700 text-slate-400 hover:text-white border border-app-border transition text-xs cursor-pointer" title="Toggle Sidebar (Ctrl+B)">
         <span>◨</span>
       </button>
@@ -265,7 +278,7 @@
     </div>
 
     <!-- Center Search & Command Palette Shortcuts -->
-    <div class="flex items-center space-x-2">
+    <div class="flex items-center space-x-2 shrink-0">
       <button onclick="toggleCommandPalette()" class="h-7 bg-app-card hover:bg-slate-700 text-slate-400 hover:text-slate-200 px-2.5 rounded text-xs flex items-center space-x-1.5 border border-app-border transition" title="Open Command Palette (Ctrl+K)">
         <span>⚡</span>
         <span>Command Palette</span>
@@ -277,7 +290,7 @@
     </div>
 
     <!-- Top Right Controls -->
-    <div class="flex items-center space-x-2 text-xs">
+    <div class="flex items-center space-x-2 text-xs shrink-0">
       <!-- PIN badge: security affordance, compound pill (copy + peek toggle) -->
       <div id="master-pin-badge" class="hidden h-7 bg-slate-800 text-sky-400 rounded border border-sky-900 font-mono transition inline-flex items-center text-xs overflow-hidden select-none" title="Click text to copy PIN, click eye to reveal">
         <button id="master-pin-copy-btn" onclick="copyMasterPIN()" class="h-full px-2 hover:bg-slate-700 text-sky-400 hover:text-sky-300 transition flex items-center space-x-1.5 focus:outline-none" title="Click to copy Master PIN for tablet / remote login">
@@ -544,8 +557,8 @@
       <!-- Upper Split: Query Editor Area -->
       <div id="editor-container" class="flex flex-col border-b border-app-border bg-[#0b1120]" style="height: 50%;">
         <!-- Editor Toolbar -->
-        <div class="h-8 bg-app-surface/60 border-b border-app-border/60 px-3 flex items-center justify-between text-xs">
-          <div class="flex items-center space-x-2">
+        <div class="h-8 bg-app-surface/60 border-b border-app-border/60 px-3 flex items-center justify-between text-xs flex-shrink-0 overflow-x-auto gap-3">
+          <div class="flex items-center space-x-2 shrink-0">
             <button onclick="runActiveQuery()" class="bg-app-safe hover:bg-emerald-600 text-slate-950 font-bold px-3 py-1 rounded flex items-center space-x-1 transition shadow-sm">
               <span>▶ Run</span>
               <kbd class="text-[10px] opacity-75 font-normal">Ctrl+Enter</kbd>
@@ -583,7 +596,7 @@
             </button>
           </div>
 
-          <div class="flex items-center space-x-3 text-slate-400">
+          <div class="flex items-center space-x-3 text-slate-400 shrink-0">
             <span id="query-status-text">Ready</span>
             <button id="cancel-query-btn" onclick="cancelRunningQuery()" class="hidden bg-app-danger/20 text-app-danger hover:bg-app-danger/30 px-2 py-0.5 rounded transition">
               Cancel Query (Esc)
@@ -606,8 +619,8 @@
       <!-- Lower Split: Data Grid / Results Area -->
       <div id="grid-container" class="flex-1 flex flex-col bg-app-bg overflow-hidden">
         <!-- Table Sub-Tabs -->
-        <div id="table-mode-tabs" class="hidden h-8 bg-slate-950 border-b border-app-border px-3 flex items-center justify-between text-xs">
-          <div class="flex items-center space-x-1">
+        <div id="table-mode-tabs" class="hidden h-8 bg-slate-950 border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0 overflow-x-auto gap-3">
+          <div class="flex items-center space-x-1 shrink-0">
             <button id="btn-mode-data" onclick="setTableMode('data')" class="px-3 py-1 rounded text-xs font-semibold bg-app-surface text-app-accent border-b-2 border-app-accent flex items-center space-x-1">
               <span>📊</span><span>Data</span>
             </button>
@@ -633,7 +646,7 @@
               <span>🗂️</span><span>Partitions</span>
             </button>
           </div>
-          <button id="btn-drop-active-table" onclick="dropCurrentActiveTable()" class="text-rose-400 hover:text-rose-200 hover:bg-rose-950/60 px-2.5 py-0.5 rounded text-[11px] border border-rose-900/60 transition flex items-center space-x-1" title="Drop this Table (Safety Guard Challenge)">
+          <button id="btn-drop-active-table" onclick="dropCurrentActiveTable()" class="text-rose-400 hover:text-rose-200 hover:bg-rose-950/60 px-2.5 py-0.5 rounded text-[11px] border border-rose-900/60 transition flex items-center space-x-1 shrink-0" title="Drop this Table (Safety Guard Challenge)">
             <span>🗑️</span><span>Drop Table</span>
           </button>
         </div>
@@ -641,8 +654,8 @@
 
         <!-- Grid Toolbar (Data Mode) -->
         <!-- Grid Toolbar (Data Mode) -->
-        <div id="grid-toolbar" class="h-8 bg-app-surface/40 border-b border-app-border px-3 flex items-center justify-between text-xs text-slate-400">
-          <div class="flex items-center space-x-2.5">
+        <div id="grid-toolbar" class="h-8 bg-app-surface/40 border-b border-app-border px-3 flex items-center justify-between text-xs text-slate-400 flex-shrink-0 overflow-x-auto gap-3">
+          <div class="flex items-center space-x-2.5 shrink-0">
             <span id="grid-result-stats">0 rows</span>
             <button id="btn-view-profile" onclick="toggleProfileView()" class="hidden px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-400 border border-sky-800 text-[11px] font-semibold flex items-center space-x-1 transition" title="Inspect query execution stages and timings">
               <span>⏱️ Profiler</span>
@@ -667,7 +680,7 @@
           </div>
 
           <!-- Edit Mode Toggle & Keyset / Export Controls -->
-          <div class="flex items-center space-x-2">
+          <div class="flex items-center space-x-2 shrink-0">
             <!-- Edit Mode Selector -->
             <div class="flex items-center space-x-1 bg-slate-900 border border-slate-800 px-2 py-0.5 rounded text-[11px]" id="grid-edit-mode-container">
               <span class="text-slate-400 text-[10px]">Edit:</span>
@@ -1872,9 +1885,9 @@
   </div>
 
   <!-- Bottom Status Bar -->
-  <footer class="h-8 bg-app-surface border-t border-app-border px-3 flex items-center justify-between text-[11px] text-slate-400 flex-shrink-0 z-20">
+  <footer class="h-8 bg-app-surface border-t border-app-border px-3 flex items-center justify-between text-[11px] text-slate-400 flex-shrink-0 z-20 overflow-x-auto gap-3">
     <!-- Left: Connection, Engine Version, Uptime & Latency -->
-    <div class="flex items-center space-x-2 min-w-0 truncate">
+    <div class="flex items-center space-x-2 min-w-0 truncate shrink-0">
       <span id="footer-server-engine" class="inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800/70 text-slate-400 border border-slate-700/60 shadow-sm shrink-0" title="Database Engine & Version">
         <span id="footer-engine-icon">🗄️</span>
         <span id="footer-engine-label">No Engine</span>
