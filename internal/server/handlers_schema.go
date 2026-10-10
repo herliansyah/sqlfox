@@ -428,12 +428,19 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 
 	// Find primary key or unique key if exists
 	var pkCol string
+	tableFoundInCache := false
 	if sess.CachedSchema != nil {
+		for _, t := range sess.CachedSchema.Tables {
+			if strings.EqualFold(t.Name, tableName) {
+				tableFoundInCache = true
+				break
+			}
+		}
 		pkCol = findKeyCol(sess.CachedSchema.Tables)
 	}
 
-	// If key not found in cache (e.g. multi-db context, newly created table, or stale cache), inspect on demand
-	if pkCol == "" {
+	// If table not found in cache (e.g. multi-db context, newly created table, or stale cache), inspect on demand
+	if !tableFoundInCache {
 		if schema, err := sess.Session.InspectSchema(ctx, targetDB); err == nil && schema != nil {
 			sess.CachedSchema = schema
 			pkCol = findKeyCol(schema.Tables)

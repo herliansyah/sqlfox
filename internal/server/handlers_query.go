@@ -70,7 +70,14 @@ func (s *Server) handleExplainQuery(w http.ResponseWriter, r *http.Request) {
 
 	// Fetch table metadata to formulate heuristic index recommendations & bloat warnings
 	tblsMap := make(map[string]driver.TableMetadata)
-	if sc, sErr := sess.Session.InspectSchema(ctx, req.Database); sErr == nil && sc != nil {
+	sc := sess.CachedSchema
+	if sc == nil || (req.Database != "" && sc.DatabaseName != req.Database) {
+		if newSc, sErr := sess.Session.InspectSchema(ctx, req.Database); sErr == nil && newSc != nil {
+			sc = newSc
+			sess.CachedSchema = newSc
+		}
+	}
+	if sc != nil {
 		for _, t := range sc.Tables {
 			tblsMap[t.Name] = t
 		}
@@ -105,8 +112,15 @@ func (s *Server) handleAdviseQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tblsMap := make(map[string]driver.TableMetadata)
-	if sc, sErr := sess.Session.InspectSchema(ctx, req.Database); sErr == nil && sc != nil {
-		for _, t := range sc.Tables {
+	advSc := sess.CachedSchema
+	if advSc == nil || (req.Database != "" && advSc.DatabaseName != req.Database) {
+		if newSc, sErr := sess.Session.InspectSchema(ctx, req.Database); sErr == nil && newSc != nil {
+			advSc = newSc
+			sess.CachedSchema = newSc
+		}
+	}
+	if advSc != nil {
+		for _, t := range advSc.Tables {
 			tblsMap[t.Name] = t
 		}
 	}
