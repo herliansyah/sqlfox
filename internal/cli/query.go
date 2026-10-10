@@ -103,15 +103,19 @@ func RunQuery(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 	}
 
 	// 5. Transaction wrapper if requested
+	var activeTx driver.TxSession
 	if *txFlag && len(statements) > 1 {
-		beginSQL := "BEGIN TRANSACTION"
-		if target.Driver == "mysql" {
-			beginSQL = "START TRANSACTION"
-		}
-		if _, err := target.Session.Exec(ctx, beginSQL); err != nil {
+		tx, err := target.Session.BeginTx(ctx)
+		if err != nil {
 			fmt.Fprintf(stderr, "❌ Failed to begin transaction: %v\n", err)
 			return 1
 		}
+		activeTx = tx
+		defer func() {
+			if activeTx != nil {
+				_ = activeTx.Rollback()
+			}
+		}()
 	}
 
 	// 6. Execute statements
@@ -122,18 +126,22 @@ func RunQuery(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 		if isQuery && len(statements) == 1 {
 			// Stream query results directly
 			if err := executeAndFormatQuery(ctx, target.Session, stmt, limit, format, stdout, stderr); err != nil {
-				if *txFlag && len(statements) > 1 {
-					_, _ = target.Session.Exec(ctx, "ROLLBACK")
-				}
 				fmt.Fprintf(stderr, "❌ Query Error: %v\n", err)
 				return 1
 			}
 		} else {
-			res, err := target.Session.Exec(ctx, stmt)
+			var res *driver.ExecResult
+			var err error
+			if activeTx != nil {
+				res, err = activeTx.Exec(ctx, stmt)
+			} else {
+				res, err = target.Session.Exec(ctx, stmt)
+			}
 			elapsed := time.Since(start).Truncate(time.Millisecond)
 			if err != nil {
-				if *txFlag && len(statements) > 1 {
-					_, _ = target.Session.Exec(ctx, "ROLLBACK")
+				if activeTx != nil {
+					_ = activeTx.Rollback()
+					activeTx = nil
 				}
 				fmt.Fprintf(stderr, "❌ SQL Error (statement %d/%d): %v\n", idx+1, len(statements), err)
 				return 1
@@ -144,11 +152,12 @@ func RunQuery(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 		}
 	}
 
-	if *txFlag && len(statements) > 1 {
-		if _, err := target.Session.Exec(ctx, "COMMIT"); err != nil {
+	if activeTx != nil {
+		if err := activeTx.Commit(); err != nil {
 			fmt.Fprintf(stderr, "❌ Failed to commit transaction: %v\n", err)
 			return 1
 		}
+		activeTx = nil
 	}
 
 	return 0

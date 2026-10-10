@@ -153,12 +153,9 @@ func RunTransfer(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 			continue
 		}
 
-		// D. Target transaction for per-table atomicity
-		beginSQL := "BEGIN TRANSACTION"
-		if toTarget.Driver == "mysql" {
-			beginSQL = "START TRANSACTION"
-		}
-		if _, err := toTarget.Session.Exec(ctx, beginSQL); err != nil {
+		// D. Target transaction for per-table atomicity pinned to dedicated connection
+		tx, err := toTarget.Session.BeginTx(ctx)
+		if err != nil {
 			stream.Close()
 			fmt.Fprintf(stderr, "  ❌ Failed to start target transaction for '%s': %v\n", tbl, err)
 			hasError = true
@@ -180,7 +177,7 @@ func RunTransfer(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 		for {
 			chunk, err := stream.NextChunk(*batchSizeFlag)
 			if len(chunk) > 0 {
-				if err := flushInsertBatch(ctx, toTarget.Session, tbl, columns, chunk, toTarget.Driver); err != nil {
+				if err := flushInsertBatch(ctx, tx, tbl, columns, chunk, toTarget.Driver); err != nil {
 					transferErr = err
 					break
 				}
@@ -199,7 +196,7 @@ func RunTransfer(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 		stream.Close()
 
 		if transferErr != nil {
-			_, _ = toTarget.Session.Exec(ctx, "ROLLBACK")
+			_ = tx.Rollback()
 			fmt.Fprintf(stderr, "\n  ❌ Transfer failed for '%s' (rolled back): %v\n", tbl, transferErr)
 			hasError = true
 			if !*continueOnErrorFlag {
@@ -208,7 +205,7 @@ func RunTransfer(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 			continue
 		}
 
-		if _, err := toTarget.Session.Exec(ctx, "COMMIT"); err != nil {
+		if err := tx.Commit(); err != nil {
 			fmt.Fprintf(stderr, "\n  ❌ Failed to commit target transaction for '%s': %v\n", tbl, err)
 			hasError = true
 			if !*continueOnErrorFlag {
@@ -230,7 +227,11 @@ func RunTransfer(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 	return 0
 }
 
-func flushInsertBatch(ctx context.Context, sess driver.Session, table string, columns []string, batch [][]any, drv string) error {
+type queryExecutor interface {
+	Exec(ctx context.Context, sql string, args ...any) (*driver.ExecResult, error)
+}
+
+func flushInsertBatch(ctx context.Context, sess queryExecutor, table string, columns []string, batch [][]any, drv string) error {
 	if len(batch) == 0 || len(columns) == 0 {
 		return nil
 	}
