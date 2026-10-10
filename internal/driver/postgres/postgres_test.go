@@ -149,3 +149,17 @@ func TestPostgresRoutineSignatureParsing(t *testing.T) {
 	}
 }
 
+func TestPostgresCancelQueryFallback(t *testing.T) {
+	s := &PostgresSession{
+		queryPids: map[string]int{
+			"q-specific-456": 12345,
+		},
+	}
+	ctx := context.Background()
+	// Should gracefully resolve fallback pid and return nil when db is nil
+	if err := s.CancelQuery(ctx, "active"); err != nil {
+		t.Fatalf("unexpected CancelQuery error: %v", err)
+	}
+}
+
+

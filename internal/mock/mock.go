@@ -127,17 +127,12 @@ func Generate(ctx context.Context, sess driver.Session, cfg Config) (*Result, er
 
 	const batchSize = 200
 
-	// One transaction wrapping all batches for this table.
-	if _, err := sess.ExecRaw(ctx, "BEGIN"); err != nil {
+	// One transaction wrapping all batches for this table pinned to a dedicated connection.
+	tx, err := sess.BeginTx(ctx)
+	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
-
-	committed := false
-	defer func() {
-		if !committed {
-			sess.ExecRaw(ctx, "ROLLBACK") //nolint:errcheck
-		}
-	}()
+	defer tx.Rollback() //nolint:errcheck
 
 	totalInserted := 0
 	for batchStart := 0; batchStart < cfg.Rows; batchStart += batchSize {
@@ -169,17 +164,16 @@ func Generate(ctx context.Context, sess driver.Session, cfg Config) (*Result, er
 		insertSQL := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s",
 			qTable, colList, strings.Join(placeholderRows, ", "))
 
-		n, err := sess.ExecRaw(ctx, insertSQL, args...)
+		n, err := tx.ExecRaw(ctx, insertSQL, args...)
 		if err != nil {
 			return nil, fmt.Errorf("insert batch at offset %d: %w", batchStart, err)
 		}
 		totalInserted += int(n)
 	}
 
-	if _, err := sess.ExecRaw(ctx, "COMMIT"); err != nil {
+	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit: %w", err)
 	}
-	committed = true
 
 	// Second pass: resolve self-referential FK columns.
 	// Find the PK column name.

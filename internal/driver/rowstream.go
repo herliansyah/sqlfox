@@ -7,15 +7,21 @@ import (
 
 // SQLRowStream provides canonical chunked row streaming across all standard SQL drivers.
 type SQLRowStream struct {
-	rows *sql.Rows
-	cols []ColumnDefinition
+	rows    *sql.Rows
+	cols    []ColumnDefinition
+	cleanup func()
 }
 
 // NewSQLRowStream creates a shared RowStream adapter from standard sql.Rows.
-func NewSQLRowStream(rows *sql.Rows, cols []ColumnDefinition) RowStream {
+func NewSQLRowStream(rows *sql.Rows, cols []ColumnDefinition, cleanup ...func()) RowStream {
+	var cl func()
+	if len(cleanup) > 0 {
+		cl = cleanup[0]
+	}
 	return &SQLRowStream{
-		rows: rows,
-		cols: cols,
+		rows:    rows,
+		cols:    cols,
+		cleanup: cl,
 	}
 }
 
@@ -58,5 +64,8 @@ func (r *SQLRowStream) NextChunk(batchSize int) ([][]any, error) {
 }
 
 func (r *SQLRowStream) Close() error {
+	if r.cleanup != nil {
+		defer r.cleanup()
+	}
 	return r.rows.Close()
 }

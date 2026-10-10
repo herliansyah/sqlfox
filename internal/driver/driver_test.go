@@ -127,3 +127,96 @@ func TestRegistry(t *testing.T) {
 	}
 }
 
+func TestTxSession_CommitAndRollback(t *testing.T) {
+	d, err := driver.GetDriver("sqlite")
+	if err != nil {
+		t.Fatalf("failed to get sqlite driver: %v", err)
+	}
+
+	sess, err := d.Connect(t.Context(), driver.Config{
+		Driver:       "sqlite",
+		DatabaseName: ":memory:",
+	})
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+	defer sess.Close()
+
+	if _, err := sess.Exec(t.Context(), "CREATE TABLE items (id INT, name TEXT)"); err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+
+	// 1. Test Rollback
+	tx, err := sess.BeginTx(t.Context())
+	if err != nil {
+		t.Fatalf("BeginTx failed: %v", err)
+	}
+	if _, err := tx.Exec(t.Context(), "INSERT INTO items VALUES (1, 'Alpha')"); err != nil {
+		t.Fatalf("insert in tx failed: %v", err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("rollback failed: %v", err)
+	}
+
+	stream, err := sess.QueryStream(t.Context(), "SELECT count(*) FROM items", 1)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	chunk, _ := stream.NextChunk(1)
+	_ = stream.Close()
+	if len(chunk) != 1 || chunk[0][0].(int64) != 0 {
+		t.Fatalf("expected 0 items after rollback, got %v", chunk)
+	}
+
+	// 2. Test Commit
+	tx2, err := sess.BeginTx(t.Context())
+	if err != nil {
+		t.Fatalf("BeginTx failed: %v", err)
+	}
+	if _, err := tx2.Exec(t.Context(), "INSERT INTO items VALUES (2, 'Beta')"); err != nil {
+		t.Fatalf("insert in tx failed: %v", err)
+	}
+	if err := tx2.Commit(); err != nil {
+		t.Fatalf("commit failed: %v", err)
+	}
+
+	stream2, err := sess.QueryStream(t.Context(), "SELECT count(*) FROM items", 1)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	chunk2, _ := stream2.NextChunk(1)
+	_ = stream2.Close()
+	if len(chunk2) != 1 || chunk2[0][0].(int64) != 1 {
+		t.Fatalf("expected 1 item after commit, got %v", chunk2)
+	}
+}
+
+func TestQueryStream_WithQueryIDCancellation(t *testing.T) {
+	d, err := driver.GetDriver("sqlite")
+	if err != nil {
+		t.Fatalf("failed to get sqlite driver: %v", err)
+	}
+
+	sess, err := d.Connect(t.Context(), driver.Config{
+		Driver:       "sqlite",
+		DatabaseName: ":memory:",
+	})
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+	defer sess.Close()
+
+	ctx := driver.WithQueryID(t.Context(), "test-query-id")
+	stream, err := sess.QueryStream(ctx, "SELECT 1", 1)
+	if err != nil {
+		t.Fatalf("QueryStream failed: %v", err)
+	}
+
+	// Cancel query
+	if err := sess.CancelQuery(t.Context(), "test-query-id"); err != nil {
+		t.Fatalf("CancelQuery failed: %v", err)
+	}
+
+	_ = stream.Close()
+}
+
