@@ -85,6 +85,41 @@ func (s *SQLiteSession) QueryStream(ctx context.Context, querySQL string, limit 
 		querySQL = fmt.Sprintf("%s LIMIT %d", strings.TrimSuffix(trimmed, ";"), limit)
 	}
 
+	queryID := driver.QueryIDFromContext(ctx)
+	if queryID != "" {
+		ctx, cancel := context.WithCancel(ctx)
+		s.mu.Lock()
+		s.queries[queryID] = cancel
+		s.mu.Unlock()
+		cleanup := func() {
+			s.mu.Lock()
+			delete(s.queries, queryID)
+			s.mu.Unlock()
+			cancel()
+		}
+		rows, err := s.db.QueryContext(ctx, querySQL)
+		if err != nil {
+			cleanup()
+			return nil, err
+		}
+		colTypes, err := rows.ColumnTypes()
+		if err != nil {
+			rows.Close()
+			cleanup()
+			return nil, err
+		}
+		cols := make([]driver.ColumnDefinition, len(colTypes))
+		for i, ct := range colTypes {
+			nullable, _ := ct.Nullable()
+			cols[i] = driver.ColumnDefinition{
+				Name:     ct.Name(),
+				Type:     ct.DatabaseTypeName(),
+				Nullable: nullable,
+			}
+		}
+		return driver.NewSQLRowStream(rows, cols, cleanup), nil
+	}
+
 	rows, err := s.db.QueryContext(ctx, querySQL)
 	if err != nil {
 		return nil, err
@@ -125,6 +160,76 @@ func (s *SQLiteSession) Exec(ctx context.Context, querySQL string, args ...any) 
 		ExecutionMs:  time.Since(start).Milliseconds(),
 		Message:      fmt.Sprintf("Query executed successfully. %d rows affected.", rowsAffected),
 	}, nil
+}
+
+type sqliteTx struct {
+	tx *sql.Tx
+}
+
+func (t *sqliteTx) Exec(ctx context.Context, query string, args ...any) (*driver.ExecResult, error) {
+	start := time.Now()
+	res, err := t.tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	ra, _ := res.RowsAffected()
+	li, _ := res.LastInsertId()
+	return &driver.ExecResult{
+		RowsAffected: ra,
+		LastInsertID: li,
+		ExecutionMs:  time.Since(start).Milliseconds(),
+		Message:      fmt.Sprintf("Query executed successfully. %d rows affected.", ra),
+	}, nil
+}
+
+func (t *sqliteTx) ExecRaw(ctx context.Context, query string, args ...any) (int64, error) {
+	res, err := t.tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (t *sqliteTx) Commit() error   { return t.tx.Commit() }
+func (t *sqliteTx) Rollback() error { return t.tx.Rollback() }
+
+func (t *sqliteTx) QueryStream(ctx context.Context, querySQL string, limit int) (driver.RowStream, error) {
+	trimmed := strings.TrimSpace(querySQL)
+	upper := strings.ToUpper(trimmed)
+	if strings.HasPrefix(upper, "SELECT") && !strings.Contains(upper, "LIMIT") && limit > 0 {
+		querySQL = fmt.Sprintf("%s LIMIT %d", strings.TrimSuffix(trimmed, ";"), limit)
+	}
+
+	rows, err := t.tx.QueryContext(ctx, querySQL)
+	if err != nil {
+		return nil, err
+	}
+
+	colTypes, err := rows.ColumnTypes()
+	if err != nil {
+		rows.Close()
+		return nil, err
+	}
+
+	cols := make([]driver.ColumnDefinition, len(colTypes))
+	for i, ct := range colTypes {
+		nullable, _ := ct.Nullable()
+		cols[i] = driver.ColumnDefinition{
+			Name:     ct.Name(),
+			Type:     ct.DatabaseTypeName(),
+			Nullable: nullable,
+		}
+	}
+
+	return driver.NewSQLRowStream(rows, cols), nil
+}
+
+func (s *SQLiteSession) BeginTx(ctx context.Context) (driver.TxSession, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &sqliteTx{tx: tx}, nil
 }
 
 func (s *SQLiteSession) InspectSchema(ctx context.Context, dbName string) (*driver.SchemaMetadata, error) {

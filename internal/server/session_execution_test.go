@@ -266,3 +266,145 @@ func TestActiveSession_CancelQuery_ClientCancelGuaranteed(t *testing.T) {
 	}
 }
 
+func TestActiveSession_TransactionLifecycle(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "sqlfox-tx-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	dbPath := filepath.Join(tempDir, "tx.db")
+	dbSession, err := driver.Connect(context.Background(), driver.Config{
+		Driver:       "sqlite",
+		DatabaseName: dbPath,
+	})
+	if err != nil {
+		t.Fatalf("driver.Connect failed: %v", err)
+	}
+	defer dbSession.Close()
+
+	sess := &ActiveSession{
+		ID:          "conn-tx",
+		Environment: "Development",
+		DriverName:  "sqlite",
+		Session:     dbSession,
+	}
+
+	ctx := context.Background()
+
+	// 1. Create table
+	_, err = sess.Execute(ctx, ExecuteRequest{
+		SQL: "CREATE TABLE accounts (id INTEGER PRIMARY KEY, balance REAL);",
+	})
+	if err != nil {
+		t.Fatalf("CREATE TABLE failed: %v", err)
+	}
+
+	// 2. Begin transaction
+	res, err := sess.Execute(ctx, ExecuteRequest{SQL: "BEGIN;"})
+	if err != nil {
+		t.Fatalf("BEGIN failed: %v", err)
+	}
+	if !strings.Contains(res.Message, "Transaction started") {
+		t.Fatalf("expected transaction started message, got: %s", res.Message)
+	}
+
+	// 3. Double BEGIN should fail
+	_, err = sess.Execute(ctx, ExecuteRequest{SQL: "START TRANSACTION;"})
+	if err == nil {
+		t.Fatal("expected error on nested/duplicate transaction begin")
+	}
+
+	// 4. Mutation within transaction
+	res, err = sess.Execute(ctx, ExecuteRequest{
+		SQL: "INSERT INTO accounts (id, balance) VALUES (1, 500.0);",
+	})
+	if err != nil {
+		t.Fatalf("INSERT in tx failed: %v", err)
+	}
+	if !strings.Contains(res.Message, "in transaction") {
+		t.Fatalf("expected '(in transaction)' note, got: %s", res.Message)
+	}
+
+	// 5. Query within transaction
+	qRes, err := sess.Execute(ctx, ExecuteRequest{
+		SQL: "SELECT balance FROM accounts WHERE id = 1;",
+	})
+	if err != nil {
+		t.Fatalf("SELECT in tx failed: %v", err)
+	}
+	if qRes.RowCount != 1 {
+		t.Fatalf("expected 1 row, got %d", qRes.RowCount)
+	}
+
+	// 6. Commit
+	cRes, err := sess.Execute(ctx, ExecuteRequest{SQL: "COMMIT;"})
+	if err != nil {
+		t.Fatalf("COMMIT failed: %v", err)
+	}
+	if !strings.Contains(cRes.Message, "committed") {
+		t.Fatalf("expected commit message, got: %s", cRes.Message)
+	}
+
+	// 7. Verify committed data
+	vRes, err := sess.Execute(ctx, ExecuteRequest{
+		SQL: "SELECT balance FROM accounts WHERE id = 1;",
+	})
+	if err != nil || vRes.RowCount != 1 {
+		t.Fatalf("expected committed data to persist, got rows: %d, err: %v", vRes.RowCount, err)
+	}
+
+	// 8. Test Rollback
+	_, _ = sess.Execute(ctx, ExecuteRequest{SQL: "BEGIN;"})
+	_, _ = sess.Execute(ctx, ExecuteRequest{
+		SQL: "INSERT INTO accounts (id, balance) VALUES (2, 300.0);",
+	})
+	_, err = sess.Execute(ctx, ExecuteRequest{SQL: "ROLLBACK;"})
+	if err != nil {
+		t.Fatalf("ROLLBACK failed: %v", err)
+	}
+
+	rbRes, err := sess.Execute(ctx, ExecuteRequest{
+		SQL: "SELECT balance FROM accounts WHERE id = 2;",
+	})
+	if err != nil {
+		t.Fatalf("query after rollback failed: %v", err)
+	}
+	if rbRes.RowCount != 0 {
+		t.Fatalf("expected 0 rows after rollback, got %d", rbRes.RowCount)
+	}
+
+	// 9. Test Auto-Rollback on sess.Close()
+	_, _ = sess.Execute(ctx, ExecuteRequest{SQL: "BEGIN;"})
+	_, _ = sess.Execute(ctx, ExecuteRequest{
+		SQL: "INSERT INTO accounts (id, balance) VALUES (3, 999.0);",
+	})
+	// Close session without committing
+	_ = sess.Close()
+	if sess.activeTx != nil {
+		t.Fatal("expected activeTx to be cleared on Close()")
+	}
+}
+
+func TestActiveSession_CancelQueryFallback(t *testing.T) {
+	cancelled := false
+	sess := &ActiveSession{
+		ID: "test-sess",
+		runningQueries: map[string]context.CancelFunc{
+			"q-specific-123": func() {
+				cancelled = true
+			},
+		},
+	}
+
+	// Calling CancelQuery with "active" should invoke any running query's cancel func
+	err := sess.CancelQuery(context.Background(), "active")
+	if err != nil {
+		t.Fatalf("unexpected CancelQuery error: %v", err)
+	}
+	if !cancelled {
+		t.Fatal("expected CancelQuery with 'active' to cancel running query via fallback")
+	}
+}
+
+

@@ -76,6 +76,7 @@ func (d *PostgresDriver) Connect(ctx context.Context, cfg driver.Config) (driver
 	db.SetMaxOpenConns(10)
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(30 * time.Minute)
+	db.SetConnMaxIdleTime(2 * time.Minute)
 
 	// Test connection
 	if err := db.PingContext(ctx); err != nil {
@@ -149,6 +150,53 @@ func (s *PostgresSession) QueryStream(ctx context.Context, querySQL string, limi
 		querySQL = fmt.Sprintf("%s LIMIT %d", strings.TrimSuffix(trimmed, ";"), limit)
 	}
 
+	queryID := driver.QueryIDFromContext(ctx)
+	if queryID != "" {
+		conn, err := s.db.Conn(ctx)
+		if err == nil {
+			var pid int
+			_ = conn.QueryRowContext(ctx, "SELECT pg_backend_pid()").Scan(&pid)
+			if pid > 0 {
+				s.mu.Lock()
+				s.queryPids[queryID] = pid
+				s.mu.Unlock()
+			}
+			rows, qErr := conn.QueryContext(ctx, querySQL)
+			if qErr != nil {
+				s.mu.Lock()
+				delete(s.queryPids, queryID)
+				s.mu.Unlock()
+				conn.Close()
+				return nil, qErr
+			}
+			colTypes, cErr := rows.ColumnTypes()
+			if cErr != nil {
+				rows.Close()
+				s.mu.Lock()
+				delete(s.queryPids, queryID)
+				s.mu.Unlock()
+				conn.Close()
+				return nil, cErr
+			}
+			cols := make([]driver.ColumnDefinition, len(colTypes))
+			for i, ct := range colTypes {
+				nullable, _ := ct.Nullable()
+				cols[i] = driver.ColumnDefinition{
+					Name:     ct.Name(),
+					Type:     ct.DatabaseTypeName(),
+					Nullable: nullable,
+				}
+			}
+			cleanup := func() {
+				s.mu.Lock()
+				delete(s.queryPids, queryID)
+				s.mu.Unlock()
+				conn.Close()
+			}
+			return driver.NewSQLRowStream(rows, cols, cleanup), nil
+		}
+	}
+
 	rows, err := s.db.QueryContext(ctx, querySQL)
 	if err != nil {
 		return nil, err
@@ -175,6 +223,39 @@ func (s *PostgresSession) QueryStream(ctx context.Context, querySQL string, limi
 
 func (s *PostgresSession) Exec(ctx context.Context, querySQL string, args ...any) (*driver.ExecResult, error) {
 	start := time.Now()
+	queryID := driver.QueryIDFromContext(ctx)
+	if queryID != "" {
+		conn, err := s.db.Conn(ctx)
+		if err == nil {
+			defer conn.Close()
+			var pid int
+			_ = conn.QueryRowContext(ctx, "SELECT pg_backend_pid()").Scan(&pid)
+			if pid > 0 {
+				s.mu.Lock()
+				s.queryPids[queryID] = pid
+				s.mu.Unlock()
+				defer func() {
+					s.mu.Lock()
+					delete(s.queryPids, queryID)
+					s.mu.Unlock()
+				}()
+			}
+			res, execErr := conn.ExecContext(ctx, querySQL, args...)
+			if execErr != nil {
+				return nil, execErr
+			}
+			duration := time.Since(start).Milliseconds()
+			rowsAff, _ := res.RowsAffected()
+			lastID, _ := res.LastInsertId()
+			return &driver.ExecResult{
+				RowsAffected: rowsAff,
+				LastInsertID: lastID,
+				ExecutionMs:  duration,
+				Message:      fmt.Sprintf("Query executed successfully. %d rows affected.", rowsAff),
+			}, nil
+		}
+	}
+
 	res, err := s.db.ExecContext(ctx, querySQL, args...)
 	if err != nil {
 		return nil, err
@@ -192,6 +273,76 @@ func (s *PostgresSession) Exec(ctx context.Context, querySQL string, args ...any
 	}, nil
 }
 
+type postgresTx struct {
+	tx *sql.Tx
+}
+
+func (t *postgresTx) Exec(ctx context.Context, query string, args ...any) (*driver.ExecResult, error) {
+	start := time.Now()
+	res, err := t.tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	ra, _ := res.RowsAffected()
+	li, _ := res.LastInsertId()
+	return &driver.ExecResult{
+		RowsAffected: ra,
+		LastInsertID: li,
+		ExecutionMs:  time.Since(start).Milliseconds(),
+		Message:      fmt.Sprintf("Query executed successfully. %d rows affected.", ra),
+	}, nil
+}
+
+func (t *postgresTx) ExecRaw(ctx context.Context, query string, args ...any) (int64, error) {
+	res, err := t.tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (t *postgresTx) Commit() error   { return t.tx.Commit() }
+func (t *postgresTx) Rollback() error { return t.tx.Rollback() }
+
+func (t *postgresTx) QueryStream(ctx context.Context, querySQL string, limit int) (driver.RowStream, error) {
+	trimmed := strings.TrimSpace(querySQL)
+	upper := strings.ToUpper(trimmed)
+	if strings.HasPrefix(upper, "SELECT") && !strings.Contains(upper, "LIMIT") && limit > 0 {
+		querySQL = fmt.Sprintf("%s LIMIT %d", strings.TrimSuffix(trimmed, ";"), limit)
+	}
+
+	rows, err := t.tx.QueryContext(ctx, querySQL)
+	if err != nil {
+		return nil, err
+	}
+
+	colTypes, err := rows.ColumnTypes()
+	if err != nil {
+		rows.Close()
+		return nil, err
+	}
+
+	cols := make([]driver.ColumnDefinition, len(colTypes))
+	for i, ct := range colTypes {
+		nullable, _ := ct.Nullable()
+		cols[i] = driver.ColumnDefinition{
+			Name:     ct.Name(),
+			Type:     ct.DatabaseTypeName(),
+			Nullable: nullable,
+		}
+	}
+
+	return driver.NewSQLRowStream(rows, cols), nil
+}
+
+func (s *PostgresSession) BeginTx(ctx context.Context) (driver.TxSession, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &postgresTx{tx: tx}, nil
+}
+
 func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) (*driver.SchemaMetadata, error) {
 	if schemaName == "" || schemaName == s.cfg.DatabaseName {
 		schemaName = s.currentSchema
@@ -201,6 +352,7 @@ func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) 
 	}
 
 	// 1. Fetch all user-defined schemas in the active physical database
+	// ponytail: Close each result set immediately to prevent holding 7 concurrent connections and deadlocking sql.DB pool.
 	schemaRows, err := s.db.QueryContext(ctx, `
 		SELECT nspname FROM pg_catalog.pg_namespace
 		WHERE nspname NOT LIKE 'pg_%' AND nspname != 'information_schema'
@@ -208,13 +360,13 @@ func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) 
 	`)
 	var allSchemas []string
 	if err == nil {
-		defer schemaRows.Close()
 		for schemaRows.Next() {
 			var sch string
 			if err := schemaRows.Scan(&sch); err == nil {
 				allSchemas = append(allSchemas, sch)
 			}
 		}
+		schemaRows.Close()
 	}
 	if len(allSchemas) == 0 {
 		allSchemas = []string{schemaName}
@@ -233,7 +385,6 @@ func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch tables for schema %s: %w", schemaName, err)
 	}
-	defer tableRows.Close()
 
 	tablesMap := make(map[string]*driver.TableMetadata)
 	var tableOrder []string
@@ -242,6 +393,7 @@ func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) 
 		var name, reltype string
 		var rowCount int64
 		if err := tableRows.Scan(&name, &reltype, &rowCount); err != nil {
+			tableRows.Close()
 			return nil, err
 		}
 		if rowCount < 0 {
@@ -257,6 +409,7 @@ func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) 
 		}
 		tableOrder = append(tableOrder, name)
 	}
+	tableRows.Close()
 
 	// 3. Fetch columns for all tables in this schema
 	colRows, err := s.db.QueryContext(ctx, `
@@ -274,7 +427,6 @@ func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) 
 		ORDER BY c.relname, a.attnum;
 	`, schemaName)
 	if err == nil {
-		defer colRows.Close()
 		for colRows.Next() {
 			var tbl, col, dataType, defaultVal string
 			var isNullable, isPK bool
@@ -295,6 +447,7 @@ func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) 
 				}
 			}
 		}
+		colRows.Close()
 	}
 
 	// 4. Fetch indexes
@@ -313,7 +466,6 @@ func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) 
 		ORDER BY c.relname, i.relname;
 	`, schemaName)
 	if err == nil {
-		defer idxRows.Close()
 		for idxRows.Next() {
 			var tbl, idxName, indexDef, indexType string
 			var isUnique bool
@@ -330,6 +482,7 @@ func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) 
 				}
 			}
 		}
+		idxRows.Close()
 	}
 
 	// 5. Fetch Foreign Keys
@@ -349,7 +502,6 @@ func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) 
 		ORDER BY con.conname;
 	`, schemaName)
 	if err == nil {
-		defer fkRows.Close()
 		for fkRows.Next() {
 			var fkName, tbl, col, refTbl, refCol string
 			if err := fkRows.Scan(&fkName, &tbl, &col, &refTbl, &refCol); err == nil {
@@ -363,6 +515,7 @@ func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) 
 				}
 			}
 		}
+		fkRows.Close()
 	}
 
 	// 6. Fetch Triggers
@@ -378,7 +531,6 @@ func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) 
 		ORDER BY tgname;
 	`, schemaName)
 	if err == nil {
-		defer trigRows.Close()
 		for trigRows.Next() {
 			var tgName, tbl, def string
 			if err := trigRows.Scan(&tgName, &tbl, &def); err == nil {
@@ -391,6 +543,7 @@ func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) 
 				})
 			}
 		}
+		trigRows.Close()
 	}
 
 	// 7. Fetch Stored Procedures & Functions
@@ -408,7 +561,6 @@ func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) 
 		ORDER BY p.proname;
 	`, schemaName)
 	if err == nil {
-		defer procRows.Close()
 		for procRows.Next() {
 			var proname, args, resType string
 			if err := procRows.Scan(&proname, &args, &resType); err == nil {
@@ -427,6 +579,7 @@ func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) 
 				})
 			}
 		}
+		procRows.Close()
 	}
 
 	var tables []driver.TableMetadata
@@ -532,6 +685,15 @@ func (s *PostgresSession) Explain(ctx context.Context, querySQL string) (*driver
 func (s *PostgresSession) CancelQuery(ctx context.Context, queryID string) error {
 	s.mu.Lock()
 	pid, ok := s.queryPids[queryID]
+	if !ok && (queryID == "active" || queryID == "") {
+		for _, p := range s.queryPids {
+			if p > 0 {
+				pid = p
+				ok = true
+				break
+			}
+		}
+	}
 	s.mu.Unlock()
 
 	if !ok || pid <= 0 {
@@ -542,12 +704,26 @@ func (s *PostgresSession) CancelQuery(ctx context.Context, queryID string) error
 	ctxCancel, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	_, err := s.db.ExecContext(ctxCancel, "SELECT pg_cancel_backend($1)", pid)
-	if err != nil {
-		if errors.Is(ctxCancel.Err(), context.DeadlineExceeded) {
-			return fmt.Errorf("control channel timeout (3s): target database connection pool may be saturated: %w", err)
+	// ponytail: Dial independent single-shot control connection to bypass saturated s.db pool
+	if s.dsn != "" {
+		controlDB, dErr := sql.Open("pgx", s.dsn)
+		if dErr == nil {
+			defer controlDB.Close()
+			if _, kErr := controlDB.ExecContext(ctxCancel, "SELECT pg_cancel_backend($1)", pid); kErr == nil {
+				return nil
+			}
 		}
-		return fmt.Errorf("failed to cancel query via control channel: %w", err)
+	}
+
+	// Fallback to pool if independent connection dial failed
+	if s.db != nil {
+		_, err := s.db.ExecContext(ctxCancel, "SELECT pg_cancel_backend($1)", pid)
+		if err != nil {
+			if errors.Is(ctxCancel.Err(), context.DeadlineExceeded) {
+				return fmt.Errorf("control channel timeout (3s): target database connection pool may be saturated: %w", err)
+			}
+			return fmt.Errorf("failed to cancel query via control channel: %w", err)
+		}
 	}
 	return nil
 }
@@ -988,6 +1164,10 @@ func (s *PostgresSession) ExecSafeDDL(ctx context.Context, ddl string, lockTimeo
 		return nil, fmt.Errorf("failed to acquire dedicated postgres connection: %w", err)
 	}
 	defer conn.Close()
+	defer func() {
+		// ponytail: Reset session lock_timeout to prevent pool state pollution
+		_, _ = conn.ExecContext(context.Background(), "RESET lock_timeout")
+	}()
 
 	_, _ = conn.ExecContext(ctx, fmt.Sprintf("SET lock_timeout = '%ds'", lockTimeoutSec))
 

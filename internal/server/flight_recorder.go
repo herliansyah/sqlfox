@@ -24,8 +24,9 @@ type ActiveRecording struct {
 	prevQuestions int64
 	prevSampleAt  time.Time
 
-	mu          sync.RWMutex
-	recentTicks []*vault.FlightRecordingTick
+	mu           sync.RWMutex
+	recentTicks  []*vault.FlightRecordingTick
+	lastStatusAt time.Time
 }
 
 // FlightRecorderManager oversees on-demand recording lifecycles.
@@ -93,6 +94,7 @@ func (m *FlightRecorderManager) StartRecording(sessionID, connID, name string, i
 		Interval:     interval,
 		cancel:       cancel,
 		recentTicks:  make([]*vault.FlightRecordingTick, 0, 100),
+		lastStatusAt: time.Now(),
 	}
 	m.active[sessionID] = rec
 
@@ -135,6 +137,10 @@ func (m *FlightRecorderManager) GetStatus(sessionID string) (map[string]any, err
 		}, nil
 	}
 
+	rec.mu.Lock()
+	rec.lastStatusAt = time.Now()
+	rec.mu.Unlock()
+
 	rec.mu.RLock()
 	defer rec.mu.RUnlock()
 
@@ -170,6 +176,15 @@ func (m *FlightRecorderManager) runLoop(ctx context.Context, rec *ActiveRecordin
 		case <-ctx.Done():
 			return
 		case now := <-ticker.C:
+			// ponytail: Auto-terminate recording if no UI client has polled status for 45s (prevent abandoned background polling)
+			rec.mu.RLock()
+			lastStatus := rec.lastStatusAt
+			rec.mu.RUnlock()
+			if time.Since(rec.StartedAt) > 30*time.Second && time.Since(lastStatus) > 45*time.Second {
+				rec.cancel()
+				return
+			}
+
 			sess, err := m.sessionMgr.GetSession(rec.ConnectionID)
 			if err != nil {
 				return

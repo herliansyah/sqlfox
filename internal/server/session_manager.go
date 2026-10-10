@@ -66,7 +66,29 @@ type ActiveSession struct {
 	backupDir      string
 	vault          *vault.Vault
 	runningQueries map[string]context.CancelFunc
+	activeTx       driver.TxSession
+	txStartedAt    time.Time
 	mu             sync.RWMutex
+}
+
+// Close gracefully releases the session, rolling back any uncommitted transactions to avoid orphaned locks.
+func (s *ActiveSession) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	if s.activeTx != nil {
+		_ = s.activeTx.Rollback()
+		s.activeTx = nil
+	}
+	sess := s.Session
+	s.Session = nil
+	s.mu.Unlock()
+
+	if sess != nil {
+		return sess.Close()
+	}
+	return nil
 }
 
 // UseDatabase selects the active database context if a non-empty name is provided.
@@ -111,17 +133,52 @@ func (s *ActiveSession) RecordAudit(querySQL, source string, durationMs, rowsAff
 
 // SessionManager manages connected database sessions.
 type SessionManager struct {
-	vault     *vault.Vault
-	backupDir string
-	sessions  map[string]*ActiveSession
-	mu        sync.RWMutex
+	vault      *vault.Vault
+	backupDir  string
+	sessions   map[string]*ActiveSession
+	stopReaper chan struct{}
+	mu         sync.RWMutex
 }
 
 func NewSessionManager(v *vault.Vault, backupDir string) *SessionManager {
-	return &SessionManager{
-		vault:     v,
-		backupDir: backupDir,
-		sessions:  make(map[string]*ActiveSession),
+	sm := &SessionManager{
+		vault:      v,
+		backupDir:  backupDir,
+		sessions:   make(map[string]*ActiveSession),
+		stopReaper: make(chan struct{}),
+	}
+	go sm.startReaper()
+	return sm
+}
+
+// startReaper evicts inactive sessions older than 30 minutes to prevent resource and connection pool leaks.
+// ponytail: Background ticker reaps dead connections and rollbacks idle transactions without blocking active requests.
+func (sm *SessionManager) startReaper() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-sm.stopReaper:
+			return
+		case <-ticker.C:
+			sm.mu.Lock()
+			now := time.Now()
+			for id, sess := range sm.sessions {
+				// Rollback idle transactions older than 60 seconds to prevent orphan lock contention on DB server
+				sess.mu.Lock()
+				if sess.activeTx != nil && now.Sub(sess.txStartedAt) > 60*time.Second {
+					_ = sess.activeTx.Rollback()
+					sess.activeTx = nil
+				}
+				sess.mu.Unlock()
+
+				if now.Sub(sess.LastActive) > 30*time.Minute {
+					_ = sess.Close()
+					delete(sm.sessions, id)
+				}
+			}
+			sm.mu.Unlock()
+		}
 	}
 }
 
@@ -227,7 +284,7 @@ func (sm *SessionManager) CloseSession(connectionID string) error {
 
 	if sess, ok := sm.sessions[connectionID]; ok {
 		delete(sm.sessions, connectionID)
-		return sess.Session.Close()
+		return sess.Close()
 	}
 	return nil
 }
@@ -236,8 +293,14 @@ func (sm *SessionManager) CloseAll() {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
+	select {
+	case <-sm.stopReaper:
+	default:
+		close(sm.stopReaper)
+	}
+
 	for id, sess := range sm.sessions {
-		_ = sess.Session.Close()
+		_ = sess.Close()
 		delete(sm.sessions, id)
 	}
 }
@@ -276,7 +339,14 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 			if locks, err := s.Session.InspectTableLocks(ctx, req.Database, inspection.TargetTable); err == nil {
 				inspection.TableLocks = locks
 			}
-			if schema, err := s.Session.InspectSchema(ctx, req.Database); err == nil {
+			schema := s.CachedSchema
+			if schema == nil || (req.Database != "" && schema.DatabaseName != req.Database) {
+				if sSc, sErr := s.Session.InspectSchema(ctx, req.Database); sErr == nil {
+					schema = sSc
+					s.CachedSchema = sSc
+				}
+			}
+			if schema != nil {
 				inspection.Relationships = driver.InspectTableRelationships(schema, inspection.TargetTable)
 			}
 		}
@@ -315,6 +385,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	}
 
 	execCtx, cancel := context.WithCancel(ctx)
+	execCtx = driver.WithQueryID(execCtx, queryID)
 	defer cancel()
 
 	s.mu.Lock()
@@ -328,6 +399,12 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		s.mu.Lock()
 		delete(s.runningQueries, queryID)
 		s.mu.Unlock()
+		if execCtx.Err() != nil && s.Session != nil {
+			// ponytail: Actively cancel runaway query on DB server to prevent CPU/IO exhaustion
+			cancelCtx, cCancel := context.WithTimeout(context.Background(), 3*time.Second)
+			_ = s.Session.CancelQuery(cancelCtx, queryID)
+			cCancel()
+		}
 	}()
 
 	var execErr error
@@ -400,8 +477,148 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		}
 	}
 
+	// Intercept explicit transaction statements to ensure connection pinning and prevent orphaned locks
+	cleanUpper := strings.TrimRight(upperSQL, ";")
+	isTxBegin := cleanUpper == "BEGIN" || cleanUpper == "START TRANSACTION" || cleanUpper == "BEGIN WORK"
+	isTxCommit := cleanUpper == "COMMIT" || cleanUpper == "COMMIT WORK"
+	isTxRollback := cleanUpper == "ROLLBACK" || cleanUpper == "ROLLBACK WORK"
+
+	if isTxBegin {
+		s.mu.Lock()
+		if s.activeTx != nil {
+			s.mu.Unlock()
+			return nil, fmt.Errorf("a transaction is already active in this session; please COMMIT or ROLLBACK first")
+		}
+		// ponytail: Use non-cancelled background context so transaction persists across subsequent HTTP requests
+		tx, err := s.Session.BeginTx(context.Background())
+		if err != nil {
+			s.mu.Unlock()
+			return nil, fmt.Errorf("failed to begin transaction: %w", err)
+		}
+		s.activeTx = tx
+		s.txStartedAt = time.Now()
+		s.mu.Unlock()
+
+		return &ExecuteResponse{
+			Type:        "exec",
+			Message:     "Transaction started. All subsequent queries will run atomically on this dedicated connection.",
+			ExecutionMs: time.Since(start).Milliseconds(),
+		}, nil
+	}
+
+	if isTxCommit {
+		s.mu.Lock()
+		tx := s.activeTx
+		s.activeTx = nil
+		s.mu.Unlock()
+
+		if tx == nil {
+			_, err := s.Session.Exec(execCtx, trimmedSQL)
+			if err != nil {
+				return nil, err
+			}
+			return &ExecuteResponse{
+				Type:        "exec",
+				Message:     "COMMIT executed.",
+				ExecutionMs: time.Since(start).Milliseconds(),
+			}, nil
+		}
+
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("failed to commit transaction: %w", err)
+		}
+		return &ExecuteResponse{
+			Type:        "exec",
+			Message:     "Transaction committed successfully.",
+			ExecutionMs: time.Since(start).Milliseconds(),
+		}, nil
+	}
+
+	if isTxRollback {
+		s.mu.Lock()
+		tx := s.activeTx
+		s.activeTx = nil
+		s.mu.Unlock()
+
+		if tx == nil {
+			_, err := s.Session.Exec(execCtx, trimmedSQL)
+			if err != nil {
+				return nil, err
+			}
+			return &ExecuteResponse{
+				Type:        "exec",
+				Message:     "ROLLBACK executed.",
+				ExecutionMs: time.Since(start).Milliseconds(),
+			}, nil
+		}
+
+		if err := tx.Rollback(); err != nil {
+			return nil, fmt.Errorf("failed to rollback transaction: %w", err)
+		}
+		return &ExecuteResponse{
+			Type:        "exec",
+			Message:     "Transaction rolled back successfully.",
+			ExecutionMs: time.Since(start).Milliseconds(),
+		}, nil
+	}
+
 	// 5. Route to Exec vs QueryStream
 	isSelect := strings.HasPrefix(upperSQL, "SELECT") || strings.HasPrefix(upperSQL, "SHOW") || strings.HasPrefix(upperSQL, "DESC") || strings.HasPrefix(upperSQL, "EXPLAIN")
+
+	// If transaction is active, execute strictly on pinned transaction connection
+	s.mu.RLock()
+	currentTx := s.activeTx
+	s.mu.RUnlock()
+
+	if currentTx != nil {
+		if !isSelect {
+			execRes, err := currentTx.Exec(execCtx, trimmedSQL)
+			if err != nil {
+				execErr = err
+				return nil, err
+			}
+			rowsAffected = execRes.RowsAffected
+			return &ExecuteResponse{
+				Type:               "exec",
+				RowsAffected:       execRes.RowsAffected,
+				LastInsertID:       execRes.LastInsertID,
+				ExecutionMs:        execRes.ExecutionMs,
+				Message:            execRes.Message + " (in transaction)",
+				BackupFile:         backupFile,
+				BackupDataIncluded: backupDataIncluded,
+				Profile:            collectProfile(),
+			}, nil
+		}
+
+		stream, err := currentTx.QueryStream(execCtx, trimmedSQL, 1000)
+		if err != nil {
+			execErr = err
+			return nil, err
+		}
+		defer stream.Close()
+
+		cols := stream.Columns()
+		var allRows [][]any
+		for len(allRows) < 1000 {
+			chunk, err := stream.NextChunk(200)
+			if len(chunk) > 0 {
+				allRows = append(allRows, chunk...)
+			}
+			if err != nil {
+				break
+			}
+		}
+
+		rowsAffected = int64(len(allRows))
+		return &ExecuteResponse{
+			Type:        "query",
+			Columns:     cols,
+			Rows:        allRows,
+			RowCount:    len(allRows),
+			ExecutionMs: time.Since(start).Milliseconds(),
+			Profile:     collectProfile(),
+		}, nil
+	}
 
 	if !isSelect {
 		// Mutation execution
@@ -469,6 +686,13 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 func (s *ActiveSession) CancelQuery(ctx context.Context, queryID string) error {
 	s.mu.Lock()
 	cancel, ok := s.runningQueries[queryID]
+	if !ok && (queryID == "active" || queryID == "") {
+		for _, c := range s.runningQueries {
+			if c != nil {
+				c()
+			}
+		}
+	}
 	s.mu.Unlock()
 
 	if ok && cancel != nil {

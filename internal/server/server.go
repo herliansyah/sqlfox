@@ -261,6 +261,13 @@ func (s *Server) SetAllowedHosts(hosts []string) {
 	s.allowedHosts = hosts
 }
 
+// Close gracefully shuts down all active database sessions and background managers.
+func (s *Server) Close() {
+	if s.sessionMgr != nil {
+		s.sessionMgr.CloseAll()
+	}
+}
+
 // SetLogger attaches the Diagnostic Logger and wraps HTTP routing with logging telemetry.
 func (s *Server) SetLogger(l *slog.Logger) {
 	s.logger = l

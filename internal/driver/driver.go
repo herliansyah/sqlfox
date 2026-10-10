@@ -146,7 +146,34 @@ type Session interface {
 	// QueryRaw executes a raw SQL query bypassing the Safety Guard and returns all rows. For internal server use only.
 	QueryRaw(ctx context.Context, sql string, args ...any) ([][]any, error)
 
+	// BeginTx initiates a database transaction on a dedicated physical connection.
+	BeginTx(ctx context.Context) (TxSession, error)
+
 	io.Closer
+}
+
+// TxSession represents a database transaction bound to a dedicated connection.
+type TxSession interface {
+	Exec(ctx context.Context, sql string, args ...any) (*ExecResult, error)
+	ExecRaw(ctx context.Context, sql string, args ...any) (int64, error)
+	QueryStream(ctx context.Context, sql string, limit int) (RowStream, error)
+	Commit() error
+	Rollback() error
+}
+
+type queryIDContextKey struct{}
+
+// WithQueryID associates a query ID with context for out-of-band cancellation tracking.
+func WithQueryID(ctx context.Context, queryID string) context.Context {
+	return context.WithValue(ctx, queryIDContextKey{}, queryID)
+}
+
+// QueryIDFromContext extracts the query ID from context if present.
+func QueryIDFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(queryIDContextKey{}).(string); ok {
+		return v
+	}
+	return ""
 }
 
 // FlightMetricSample represents an instant performance telemetry slice.

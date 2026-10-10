@@ -258,6 +258,7 @@ func main() {
 	if err := httpServer.Shutdown(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "Server shutdown error: %v\n", err)
 	}
+	srv.Close()
 	if lockCleanup != nil {
 		lockCleanup()
 	}

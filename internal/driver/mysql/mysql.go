@@ -72,7 +72,7 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 
 	// 2. Assemble DSN
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
-	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&tls=%s&timeout=10s",
+	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&tls=%s&timeout=10s&readTimeout=60s&writeTimeout=30s",
 		cfg.User, cfg.Password, addr, cfg.DatabaseName, tlsParam,
 	)
 
@@ -85,6 +85,7 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 	db.SetMaxOpenConns(10)
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(30 * time.Minute)
+	db.SetConnMaxIdleTime(2 * time.Minute)
 
 	// Test connection
 	if err := db.PingContext(ctx); err != nil {
@@ -95,6 +96,7 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 	return &MySQLSession{
 		db:           db,
 		cfg:          cfg,
+		dsn:          dsn,
 		queryThreads: make(map[string]int64),
 	}, nil
 }
@@ -102,6 +104,7 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 type MySQLSession struct {
 	db           *sql.DB
 	cfg          driver.Config
+	dsn          string
 	mu           sync.Mutex
 	queryThreads map[string]int64
 }
@@ -138,6 +141,53 @@ func (s *MySQLSession) QueryStream(ctx context.Context, querySQL string, limit i
 		querySQL = fmt.Sprintf("%s LIMIT %d", strings.TrimSuffix(trimmed, ";"), limit)
 	}
 
+	queryID := driver.QueryIDFromContext(ctx)
+	if queryID != "" {
+		conn, err := s.db.Conn(ctx)
+		if err == nil {
+			var threadID int64
+			_ = conn.QueryRowContext(ctx, "SELECT CONNECTION_ID()").Scan(&threadID)
+			if threadID > 0 {
+				s.mu.Lock()
+				s.queryThreads[queryID] = threadID
+				s.mu.Unlock()
+			}
+			rows, qErr := conn.QueryContext(ctx, querySQL)
+			if qErr != nil {
+				s.mu.Lock()
+				delete(s.queryThreads, queryID)
+				s.mu.Unlock()
+				conn.Close()
+				return nil, qErr
+			}
+			colTypes, cErr := rows.ColumnTypes()
+			if cErr != nil {
+				rows.Close()
+				s.mu.Lock()
+				delete(s.queryThreads, queryID)
+				s.mu.Unlock()
+				conn.Close()
+				return nil, cErr
+			}
+			cols := make([]driver.ColumnDefinition, len(colTypes))
+			for i, ct := range colTypes {
+				nullable, _ := ct.Nullable()
+				cols[i] = driver.ColumnDefinition{
+					Name:     ct.Name(),
+					Type:     ct.DatabaseTypeName(),
+					Nullable: nullable,
+				}
+			}
+			cleanup := func() {
+				s.mu.Lock()
+				delete(s.queryThreads, queryID)
+				s.mu.Unlock()
+				conn.Close()
+			}
+			return driver.NewSQLRowStream(rows, cols, cleanup), nil
+		}
+	}
+
 	rows, err := s.db.QueryContext(ctx, querySQL)
 	if err != nil {
 		return nil, err
@@ -164,6 +214,38 @@ func (s *MySQLSession) QueryStream(ctx context.Context, querySQL string, limit i
 
 func (s *MySQLSession) Exec(ctx context.Context, querySQL string, args ...any) (*driver.ExecResult, error) {
 	start := time.Now()
+	queryID := driver.QueryIDFromContext(ctx)
+	if queryID != "" {
+		conn, err := s.db.Conn(ctx)
+		if err == nil {
+			defer conn.Close()
+			var threadID int64
+			_ = conn.QueryRowContext(ctx, "SELECT CONNECTION_ID()").Scan(&threadID)
+			if threadID > 0 {
+				s.mu.Lock()
+				s.queryThreads[queryID] = threadID
+				s.mu.Unlock()
+				defer func() {
+					s.mu.Lock()
+					delete(s.queryThreads, queryID)
+					s.mu.Unlock()
+				}()
+			}
+			res, execErr := conn.ExecContext(ctx, querySQL, args...)
+			if execErr != nil {
+				return nil, execErr
+			}
+			rowsAffected, _ := res.RowsAffected()
+			lastInsertID, _ := res.LastInsertId()
+			return &driver.ExecResult{
+				RowsAffected: rowsAffected,
+				LastInsertID: lastInsertID,
+				ExecutionMs:  time.Since(start).Milliseconds(),
+				Message:      fmt.Sprintf("Query OK, %d rows affected.", rowsAffected),
+			}, nil
+		}
+	}
+
 	res, err := s.db.ExecContext(ctx, querySQL, args...)
 	if err != nil {
 		return nil, err
@@ -178,6 +260,76 @@ func (s *MySQLSession) Exec(ctx context.Context, querySQL string, args ...any) (
 		ExecutionMs:  time.Since(start).Milliseconds(),
 		Message:      fmt.Sprintf("Query OK, %d rows affected.", rowsAffected),
 	}, nil
+}
+
+type mysqlTx struct {
+	tx *sql.Tx
+}
+
+func (t *mysqlTx) Exec(ctx context.Context, query string, args ...any) (*driver.ExecResult, error) {
+	start := time.Now()
+	res, err := t.tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	ra, _ := res.RowsAffected()
+	li, _ := res.LastInsertId()
+	return &driver.ExecResult{
+		RowsAffected: ra,
+		LastInsertID: li,
+		ExecutionMs:  time.Since(start).Milliseconds(),
+		Message:      fmt.Sprintf("Query OK, %d rows affected.", ra),
+	}, nil
+}
+
+func (t *mysqlTx) ExecRaw(ctx context.Context, query string, args ...any) (int64, error) {
+	res, err := t.tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (t *mysqlTx) Commit() error   { return t.tx.Commit() }
+func (t *mysqlTx) Rollback() error { return t.tx.Rollback() }
+
+func (t *mysqlTx) QueryStream(ctx context.Context, querySQL string, limit int) (driver.RowStream, error) {
+	trimmed := strings.TrimSpace(querySQL)
+	upper := strings.ToUpper(trimmed)
+	if strings.HasPrefix(upper, "SELECT") && !strings.Contains(upper, "LIMIT") && limit > 0 {
+		querySQL = fmt.Sprintf("%s LIMIT %d", strings.TrimSuffix(trimmed, ";"), limit)
+	}
+
+	rows, err := t.tx.QueryContext(ctx, querySQL)
+	if err != nil {
+		return nil, err
+	}
+
+	colTypes, err := rows.ColumnTypes()
+	if err != nil {
+		rows.Close()
+		return nil, err
+	}
+
+	cols := make([]driver.ColumnDefinition, len(colTypes))
+	for i, ct := range colTypes {
+		nullable, _ := ct.Nullable()
+		cols[i] = driver.ColumnDefinition{
+			Name:     ct.Name(),
+			Type:     ct.DatabaseTypeName(),
+			Nullable: nullable,
+		}
+	}
+
+	return driver.NewSQLRowStream(rows, cols), nil
+}
+
+func (s *MySQLSession) BeginTx(ctx context.Context) (driver.TxSession, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &mysqlTx{tx: tx}, nil
 }
 
 func (s *MySQLSession) InspectSchema(ctx context.Context, dbName string) (*driver.SchemaMetadata, error) {
@@ -602,6 +754,15 @@ func (s *MySQLSession) Explain(ctx context.Context, querySQL string) (*driver.Ex
 func (s *MySQLSession) CancelQuery(ctx context.Context, queryID string) error {
 	s.mu.Lock()
 	threadID, ok := s.queryThreads[queryID]
+	if !ok && (queryID == "active" || queryID == "") {
+		for _, tid := range s.queryThreads {
+			if tid > 0 {
+				threadID = tid
+				ok = true
+				break
+			}
+		}
+	}
 	s.mu.Unlock()
 
 	if !ok || threadID <= 0 {
@@ -612,13 +773,26 @@ func (s *MySQLSession) CancelQuery(ctx context.Context, queryID string) error {
 	ctxCancel, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	// Execute out-of-band KILL QUERY on independent connection
-	_, err := s.db.ExecContext(ctxCancel, fmt.Sprintf("KILL QUERY %d", threadID))
-	if err != nil {
-		if errors.Is(ctxCancel.Err(), context.DeadlineExceeded) {
-			return fmt.Errorf("control channel timeout (3s): target database connection pool may be saturated: %w", err)
+	// ponytail: Dial independent single-shot control connection to bypass saturated s.db pool
+	if s.dsn != "" {
+		controlDB, dErr := sql.Open("mysql", s.dsn)
+		if dErr == nil {
+			defer controlDB.Close()
+			if _, kErr := controlDB.ExecContext(ctxCancel, fmt.Sprintf("KILL QUERY %d", threadID)); kErr == nil {
+				return nil
+			}
 		}
-		return fmt.Errorf("failed to cancel query via control channel: %w", err)
+	}
+
+	// Fallback to pool if independent connection dial failed
+	if s.db != nil {
+		_, err := s.db.ExecContext(ctxCancel, fmt.Sprintf("KILL QUERY %d", threadID))
+		if err != nil {
+			if errors.Is(ctxCancel.Err(), context.DeadlineExceeded) {
+				return fmt.Errorf("control channel timeout (3s): target database connection pool may be saturated: %w", err)
+			}
+			return fmt.Errorf("failed to cancel query via control channel: %w", err)
+		}
 	}
 	return nil
 }
@@ -628,44 +802,63 @@ func (s *MySQLSession) GetProcesslist(ctx context.Context) (*driver.ProcesslistR
 	var currentThreadID int64
 	_ = s.db.QueryRowContext(ctx, "SELECT CONNECTION_ID()").Scan(&currentThreadID)
 
-	// 2. Fetch processes from information_schema.PROCESSLIST or SHOW FULL PROCESSLIST
+	// 2. Fetch processes: prefer performance_schema.threads (lock-free) to prevent LOCK_thread_count mutex contention
 	var threads []driver.ProcessItem
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT ID, USER, HOST, IFNULL(DB, ''), COMMAND, TIME, IFNULL(STATE, ''), IFNULL(INFO, '')
-		FROM information_schema.PROCESSLIST
-		ORDER BY TIME DESC
+	pfsRows, pfsErr := s.db.QueryContext(ctx, `
+		SELECT PROCESSLIST_ID, IFNULL(PROCESSLIST_USER, ''), IFNULL(PROCESSLIST_HOST, ''),
+		       IFNULL(PROCESSLIST_DB, ''), IFNULL(PROCESSLIST_COMMAND, ''), IFNULL(PROCESSLIST_TIME, 0),
+		       IFNULL(PROCESSLIST_STATE, ''), IFNULL(PROCESSLIST_INFO, '')
+		FROM performance_schema.threads
+		WHERE PROCESSLIST_ID IS NOT NULL
+		ORDER BY PROCESSLIST_TIME DESC
 	`)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
+	if pfsErr == nil {
+		defer pfsRows.Close()
+		for pfsRows.Next() {
 			var p driver.ProcessItem
-			if err := rows.Scan(&p.ID, &p.User, &p.Host, &p.DB, &p.Command, &p.Time, &p.State, &p.Info); err == nil {
+			if err := pfsRows.Scan(&p.ID, &p.User, &p.Host, &p.DB, &p.Command, &p.Time, &p.State, &p.Info); err == nil {
 				threads = append(threads, p)
 			}
 		}
 	} else {
-		// Fallback to SHOW FULL PROCESSLIST
-		fallbackRows, fErr := s.db.QueryContext(ctx, "SHOW FULL PROCESSLIST")
-		if fErr != nil {
-			return nil, fmt.Errorf("failed to fetch processlist: %w", fErr)
-		}
-		defer fallbackRows.Close()
-		for fallbackRows.Next() {
-			var id int64
-			var user, host, command string
-			var db, state, info sql.NullString
-			var timeVal int64
-			if err := fallbackRows.Scan(&id, &user, &host, &db, &command, &timeVal, &state, &info); err == nil {
-				threads = append(threads, driver.ProcessItem{
-					ID:      id,
-					User:    user,
-					Host:    host,
-					DB:      db.String,
-					Command: command,
-					Time:    timeVal,
-					State:   state.String,
-					Info:    info.String,
-				})
+		// Fallback to information_schema.PROCESSLIST
+		rows, err := s.db.QueryContext(ctx, `
+			SELECT ID, USER, HOST, IFNULL(DB, ''), COMMAND, TIME, IFNULL(STATE, ''), IFNULL(INFO, '')
+			FROM information_schema.PROCESSLIST
+			ORDER BY TIME DESC
+		`)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var p driver.ProcessItem
+				if err := rows.Scan(&p.ID, &p.User, &p.Host, &p.DB, &p.Command, &p.Time, &p.State, &p.Info); err == nil {
+					threads = append(threads, p)
+				}
+			}
+		} else {
+			// Fallback to SHOW FULL PROCESSLIST
+			fallbackRows, fErr := s.db.QueryContext(ctx, "SHOW FULL PROCESSLIST")
+			if fErr != nil {
+				return nil, fmt.Errorf("failed to fetch processlist: %w", fErr)
+			}
+			defer fallbackRows.Close()
+			for fallbackRows.Next() {
+				var id int64
+				var user, host, command string
+				var db, state, info sql.NullString
+				var timeVal int64
+				if err := fallbackRows.Scan(&id, &user, &host, &db, &command, &timeVal, &state, &info); err == nil {
+					threads = append(threads, driver.ProcessItem{
+						ID:      id,
+						User:    user,
+						Host:    host,
+						DB:      db.String,
+						Command: command,
+						Time:    timeVal,
+						State:   state.String,
+						Info:    info.String,
+					})
+				}
 			}
 		}
 	}
@@ -1186,6 +1379,10 @@ func (s *MySQLSession) ExecSafeDDL(ctx context.Context, ddl string, lockTimeoutS
 		return nil, fmt.Errorf("failed to obtain dedicated connection: %w", err)
 	}
 	defer conn.Close()
+	defer func() {
+		// ponytail: Reset session lock_wait_timeout back to DEFAULT before returning connection to pool
+		_, _ = conn.ExecContext(context.Background(), "SET SESSION lock_wait_timeout = DEFAULT")
+	}()
 
 	// Enforce fail-fast session lock timeout on dedicated connection
 	if _, err := conn.ExecContext(ctx, fmt.Sprintf("SET SESSION lock_wait_timeout = %d", lockTimeoutSec)); err != nil {
@@ -1775,16 +1972,31 @@ func (s *MySQLSession) SampleFlightMetrics(ctx context.Context) (*driver.FlightM
 	}
 
 	// 2. Adaptive Correlated Queries: fetch active non-idle queries with non-empty SQL (Top 5)
-	// ponytail: Filter out background daemons and empty statements so flight recorder correlates actual SQL spikes.
+	// ponytail: Prefer performance_schema.threads (lock-free) to avoid LOCK_thread_count mutex contention.
 	qRows, qErr := s.db.QueryContext(ctx, `
-		SELECT ID, USER, HOST, IFNULL(DB, ''), COMMAND, TIME, IFNULL(STATE, ''), IFNULL(INFO, '')
-		FROM information_schema.PROCESSLIST
-		WHERE USER NOT IN ('system user', 'event_scheduler')
-		  AND COMMAND NOT IN ('Sleep', 'Binlog Dump', 'Daemon')
-		  AND INFO IS NOT NULL AND TRIM(INFO) != ''
-		ORDER BY TIME DESC
+		SELECT PROCESSLIST_ID, IFNULL(PROCESSLIST_USER, ''), IFNULL(PROCESSLIST_HOST, ''),
+		       IFNULL(PROCESSLIST_DB, ''), IFNULL(PROCESSLIST_COMMAND, ''), IFNULL(PROCESSLIST_TIME, 0),
+		       IFNULL(PROCESSLIST_STATE, ''), IFNULL(PROCESSLIST_INFO, '')
+		FROM performance_schema.threads
+		WHERE PROCESSLIST_ID IS NOT NULL
+		  AND PROCESSLIST_USER NOT IN ('system user', 'event_scheduler')
+		  AND PROCESSLIST_COMMAND NOT IN ('Sleep', 'Binlog Dump', 'Daemon')
+		  AND PROCESSLIST_INFO IS NOT NULL AND TRIM(PROCESSLIST_INFO) != ''
+		ORDER BY PROCESSLIST_TIME DESC
 		LIMIT 5
 	`)
+	if qErr != nil {
+		// Fallback to information_schema.PROCESSLIST if performance_schema is disabled
+		qRows, qErr = s.db.QueryContext(ctx, `
+			SELECT ID, USER, HOST, IFNULL(DB, ''), COMMAND, TIME, IFNULL(STATE, ''), IFNULL(INFO, '')
+			FROM information_schema.PROCESSLIST
+			WHERE USER NOT IN ('system user', 'event_scheduler')
+			  AND COMMAND NOT IN ('Sleep', 'Binlog Dump', 'Daemon')
+			  AND INFO IS NOT NULL AND TRIM(INFO) != ''
+			ORDER BY TIME DESC
+			LIMIT 5
+		`)
+	}
 	if qErr == nil {
 		defer qRows.Close()
 		for qRows.Next() {
