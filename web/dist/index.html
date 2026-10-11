@@ -278,14 +278,14 @@
     </div>
 
     <!-- Center Search & Command Palette Shortcuts -->
-    <div class="flex items-center space-x-2 shrink-0">
+    <div class="hidden md:flex items-center space-x-2 shrink-0">
       <button onclick="toggleCommandPalette()" class="h-7 bg-app-card hover:bg-slate-700 text-slate-400 hover:text-slate-200 px-2.5 rounded text-xs flex items-center space-x-1.5 border border-app-border transition" title="Open Command Palette (Ctrl+K)">
         <span>⚡</span>
-        <span>Command Palette</span>
+        <span class="hidden xl:inline">Command Palette</span>
       </button>
       <button onclick="toggleSchemaSearch()" class="h-7 bg-app-card hover:bg-slate-700 text-slate-400 hover:text-slate-200 px-2.5 rounded text-xs flex items-center space-x-1.5 border border-app-border transition" title="Quick Open Table or Column (Ctrl+P)">
         <span>🔍</span>
-        <span>Schema Search</span>
+        <span class="hidden xl:inline">Schema Search</span>
       </button>
     </div>
 
@@ -549,10 +549,10 @@
       
       <!-- Tabs Bar -->
       <div class="h-9 bg-app-surface border-b border-app-border flex items-center px-2 space-x-1 overflow-x-auto flex-shrink-0">
-        <div id="tabs-container" class="flex items-center space-x-1">
+        <div id="tabs-container" class="flex items-center space-x-1 shrink-0">
           <!-- Dynamic tabs injected here -->
         </div>
-        <button onclick="addNewQueryTab()" class="text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-800 text-xs transition" title="New Query Tab (Ctrl+T)">
+        <button onclick="addNewQueryTab()" class="text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-800 text-xs transition shrink-0" title="New Query Tab (Ctrl+T)">
           +
         </button>
       </div>
@@ -1863,7 +1863,7 @@
       <div class="p-2.5 border-b border-slate-800 bg-slate-900/60 flex flex-col space-y-2 flex-shrink-0">
         <div class="relative flex items-center">
           <span class="absolute left-2.5 text-slate-500 pointer-events-none text-xs">🔍</span>
-          <input type="text" id="notes-search-input" oninput="onNotesSearchInput(this.value)" placeholder="Search title, snapshot query, or developer notes..." class="w-full bg-slate-950 border border-slate-800 pl-8 pr-7 py-1 rounded text-white text-xs outline-none focus:border-app-accent transition">
+          <input type="text" id="notes-search-input" oninput="onNotesSearchInput(this.value)" onkeydown="if(event.key === 'Escape'){ clearNotesSearch(); this.blur(); event.stopPropagation(); }" placeholder="Search title, snapshot query, or developer notes..." class="w-full bg-slate-950 border border-slate-800 pl-8 pr-7 py-1 rounded text-white text-xs outline-none focus:border-app-accent transition">
           <button type="button" id="notes-search-clear-btn" onclick="clearNotesSearch()" class="hidden absolute right-2 text-slate-500 hover:text-slate-200 text-xs px-1">✕</button>
         </div>
         <!-- Filter Pills -->
@@ -2237,7 +2237,7 @@
 
   <!-- 1. Safety Guard Challenge Modal -->
   <div id="safety-challenge-modal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
-    <div class="bg-slate-900 border-2 border-app-danger w-full max-w-lg rounded-lg shadow-2xl p-6 space-y-4">
+    <div class="bg-slate-900 border-2 border-app-danger w-full max-w-lg rounded-lg shadow-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
       <div class="flex items-center space-x-3 text-app-danger">
         <span class="text-2xl">⚠️</span>
         <h3 class="text-lg font-bold">SAFETY GUARD: DESTRUCTIVE QUERY INTERCEPTED</h3>
@@ -2384,7 +2384,7 @@
 
   <!-- 3. New / Edit Connection Modal -->
   <div id="connection-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 hidden">
-    <div class="bg-slate-900 border border-app-border w-full max-w-lg rounded-lg shadow-2xl p-6 space-y-4">
+    <div class="bg-slate-900 border border-app-border w-full max-w-lg rounded-lg shadow-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
       <h3 id="modal-conn-title" class="text-base font-bold text-white border-b border-app-border pb-3">Add Database Connection</h3>
       <form onsubmit="saveConnection(event)" class="space-y-3 text-xs">
         <input type="hidden" id="modal-conn-id" value="">
@@ -2453,8 +2453,8 @@
   </div>
 
   <!-- 4. DDL Viewer Modal -->
-  <div id="ddl-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 hidden">
-    <div class="bg-slate-900 border border-app-border w-full max-w-3xl rounded-lg shadow-2xl p-6 space-y-4">
+  <div id="ddl-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 hidden" onclick="if(event.target === this) closeDDLModal()">
+    <div class="bg-slate-900 border border-app-border w-full max-w-3xl rounded-lg shadow-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
       <div class="flex items-center justify-between border-b border-app-border pb-3">
         <h3 id="ddl-modal-title" class="text-base font-bold text-white font-mono">CREATE TABLE</h3>
         <button onclick="closeDDLModal()" class="text-slate-400 hover:text-white">✕</button>
@@ -2469,7 +2469,7 @@
 
   <!-- 5. Vault Export/Import & Cloud Sync Modal -->
   <div id="vault-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 hidden">
-    <div class="bg-slate-900 border border-app-border w-full max-w-xl rounded-lg shadow-2xl p-6 space-y-4">
+    <div class="bg-slate-900 border border-app-border w-full max-w-xl rounded-lg shadow-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
       <div class="flex items-center justify-between border-b border-app-border pb-3">
         <div class="flex items-center space-x-2">
           <span class="text-base font-bold text-white">Cloud Sync & Data Portability</span>
@@ -2587,7 +2587,7 @@
 
   <!-- 7. AI Copilot / BYOK Settings Modal -->
   <div id="ai-settings-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 hidden">
-    <div class="bg-slate-900 border border-app-border w-full max-w-lg rounded-lg shadow-2xl p-6 space-y-4">
+    <div class="bg-slate-900 border border-app-border w-full max-w-lg rounded-lg shadow-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
       <div class="flex items-center justify-between border-b border-app-border pb-3">
         <div class="flex items-center space-x-2">
           <span>⚙️</span>
@@ -2681,7 +2681,7 @@
   </div>
 
   <!-- 7. Native Alert & Confirm Dialog (HTML5 <dialog>) -->
-  <dialog id="app-native-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-md w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm">
+  <dialog id="app-native-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-md w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto">
     <div class="space-y-4">
       <div class="flex items-center space-x-2 border-b border-slate-800 pb-2">
         <span id="app-native-dialog-icon" class="flex-shrink-0 flex items-center">
@@ -2701,7 +2701,7 @@
   </dialog>
 
   <!-- 8. Safety Guard Inspection Dialog (HTML5 <dialog>) -->
-  <dialog id="safety-inspection-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-lg w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm">
+  <dialog id="safety-inspection-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-lg w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto">
     <div class="space-y-4">
       <div class="flex items-center justify-between border-b border-slate-800 pb-2">
         <div class="flex items-center space-x-2">
@@ -2741,7 +2741,7 @@
   </dialog>
 
   <!-- 9. DDL Review Modal (HTML5 <dialog>) -->
-  <dialog id="ddl-review-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-2xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm">
+  <dialog id="ddl-review-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-2xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto">
     <div class="space-y-4">
       <div class="flex items-center justify-between border-b border-slate-800 pb-2">
         <div class="flex items-center space-x-2">
@@ -2760,7 +2760,7 @@
   </dialog>
 
   <!-- 10. Create Table Designer Dialog (HTML5 <dialog>) -->
-  <dialog id="table-creator-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-4xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm">
+  <dialog id="table-creator-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-4xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto">
     <div class="space-y-4">
       <div class="flex items-center justify-between border-b border-slate-800 pb-2">
         <div class="flex items-center space-x-2">
@@ -2806,7 +2806,7 @@
   </dialog>
 
   <!-- 11. View Designer Dialog (HTML5 <dialog>) -->
-  <dialog id="view-designer-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm">
+  <dialog id="view-designer-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto">
     <div class="space-y-4">
       <div class="flex items-center justify-between border-b border-slate-800 pb-2">
         <div class="flex items-center space-x-2">
@@ -2833,7 +2833,7 @@
   </dialog>
 
   <!-- 12. Trigger Designer Dialog (HTML5 <dialog>) -->
-  <dialog id="trigger-designer-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm">
+  <dialog id="trigger-designer-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto">
     <div class="space-y-4">
       <div class="flex items-center justify-between border-b border-slate-800 pb-2">
         <div class="flex items-center space-x-2">
@@ -2912,7 +2912,7 @@
   </dialog>
 
   <!-- 14. Create Database Dialog (HTML5 <dialog>) -->
-  <dialog id="database-creator-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-md w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm">
+  <dialog id="database-creator-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-md w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto">
     <div class="space-y-4">
       <div class="flex items-center justify-between border-b border-slate-800 pb-2">
         <div class="flex items-center space-x-2">
@@ -3056,7 +3056,7 @@
   </dialog>
 
   <!-- 16b. Mock Data Generator Dialog -->
-  <dialog id="mock-data-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-0 outline-none max-w-md w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm overflow-hidden">
+  <dialog id="mock-data-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-0 outline-none max-w-md w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto">
     <div class="flex flex-col">
       <!-- Header -->
       <div class="flex items-center justify-between px-5 py-3.5 bg-slate-950 border-b border-slate-800">
@@ -3652,7 +3652,7 @@
   </dialog>
 
   <!-- 21. Smart Seed Dump Dialog (HTML5 <dialog>) -->
-  <dialog id="smart-seed-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-md w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm">
+  <dialog id="smart-seed-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-md w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto">
     <div class="space-y-4">
       <div class="flex items-center justify-between border-b border-slate-800 pb-3">
         <h3 class="text-base font-bold text-amber-400 flex items-center space-x-2">
@@ -3683,7 +3683,7 @@
   </dialog>
 
   <!-- 22. Large SQL Script Runner Dialog (HTML5 <dialog>) -->
-  <dialog id="run-sql-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm">
+  <dialog id="run-sql-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto">
     <div class="space-y-4">
       <div class="flex items-center justify-between border-b border-slate-800 pb-3">
         <h3 class="text-base font-bold text-indigo-400 flex items-center space-x-2">
@@ -3725,7 +3725,7 @@
   </dialog>
 
   <!-- 23. Structure Sync Dialog (HTML5 <dialog>) -->
-  <dialog id="structure-sync-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-4xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm">
+  <dialog id="structure-sync-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-4xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto">
     <div class="space-y-4">
       <div class="flex items-center justify-between border-b border-slate-800 pb-3">
         <h3 class="text-base font-bold text-emerald-400 flex items-center space-x-2">
@@ -3819,7 +3819,7 @@
   </dialog>
 
   <!-- 24. Cross-Connection Data Transfer Dialog (HTML5 <dialog>) -->
-  <dialog id="data-transfer-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-2xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm">
+  <dialog id="data-transfer-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-2xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto">
     <div class="space-y-4">
       <div class="flex items-center justify-between border-b border-slate-800 pb-3">
         <h3 class="text-base font-bold text-cyan-400 flex items-center space-x-2">
@@ -3902,7 +3902,7 @@
   </dialog>
 
   <!-- 25. Row-Level Data Sync Dialog (HTML5 <dialog>) -->
-  <dialog id="data-sync-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-4xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm">
+  <dialog id="data-sync-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-4xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto">
     <div class="space-y-4">
       <div class="flex items-center justify-between border-b border-slate-800 pb-3">
         <h3 class="text-base font-bold text-purple-400 flex items-center space-x-2">
@@ -4025,8 +4025,8 @@
       </div>
 
       <!-- Body / Editor -->
-      <div class="p-5 flex-1 min-h-[320px] flex flex-col space-y-2 overflow-hidden">
-        <textarea id="json-cell-editor" oninput="validateJsonCellInput()" class="flex-1 w-full min-h-[300px] h-96 font-mono text-xs bg-slate-950 text-slate-100 p-3 rounded-lg border border-slate-800 outline-none focus:border-amber-400 resize-y leading-relaxed" spellcheck="false" placeholder="{ ... }"></textarea>
+      <div class="p-5 flex-1 min-h-[180px] flex flex-col space-y-2 overflow-y-auto">
+        <textarea id="json-cell-editor" oninput="validateJsonCellInput()" class="flex-1 w-full min-h-[160px] h-72 sm:h-80 font-mono text-xs bg-slate-950 text-slate-100 p-3 rounded-lg border border-slate-800 outline-none focus:border-amber-400 resize-none leading-relaxed" spellcheck="false" placeholder="{ ... }"></textarea>
       </div>
 
       <!-- Footer -->
@@ -4204,7 +4204,7 @@
   </div>
 
   <!-- Floating Grid Row & Cell Context Menu -->
-  <div id="grid-context-menu" class="hidden fixed z-50 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-1 text-xs text-slate-200 min-w-56 ring-2 ring-black/50 font-sans divide-y divide-slate-800">
+  <div id="grid-context-menu" class="hidden fixed z-50 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-1 text-xs text-slate-200 min-w-56 ring-2 ring-black/50 font-sans divide-y divide-slate-800 max-h-[85vh] overflow-y-auto">
     <div id="grid-ctx-insert-section" class="py-1">
       <div class="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between select-none">
         <span>⚡ Insert Value</span>
@@ -4795,6 +4795,7 @@
       if (!menu) return;
       const shouldOpen = typeof forceState === 'boolean' ? forceState : menu.classList.contains('hidden');
       if (shouldOpen) {
+        toggleDatabaseDropdown(false);
         menu.classList.remove('hidden');
         const input = document.getElementById('session-search-input');
         const clearBtn = document.getElementById('session-search-clear-btn');
@@ -5107,6 +5108,7 @@
       if (!menu) return;
       const shouldOpen = typeof forceState === 'boolean' ? forceState : menu.classList.contains('hidden');
       if (shouldOpen) {
+        toggleSessionDropdown(false);
         menu.classList.remove('hidden');
         const input = document.getElementById('database-search-input');
         const clearBtn = document.getElementById('database-search-clear-btn');
@@ -5209,19 +5211,24 @@
           menu.classList.add('hidden');
         }
       }
-      const tblMenu = document.getElementById('table-context-menu');
-      if (tblMenu && !tblMenu.classList.contains('hidden')) {
-        if (!tblMenu.contains(e.target)) {
-          closeTableContextMenu();
-        }
-      }
-      const tabMenu = document.getElementById('tab-context-menu');
-      if (tabMenu && !tabMenu.classList.contains('hidden')) {
-        if (!tabMenu.contains(e.target)) {
-          closeTabContextMenu();
-        }
+      if (!e.target.closest('#table-context-menu, #tab-context-menu, #grid-context-menu, #pl-context-menu')) {
+        closeAllContextMenus();
       }
     });
+
+    // Dismiss context menus when right-clicking on unhandled page surfaces
+    document.addEventListener('contextmenu', (e) => {
+      if (!e.target.closest('#table-context-menu, #tab-context-menu, #grid-context-menu, #pl-context-menu, td[data-col], #tabs-container, #schema-tree, .pl-row')) {
+        closeAllContextMenus();
+      }
+    });
+
+    function closeAllContextMenus() {
+      if (typeof closeTabContextMenu === 'function') closeTabContextMenu();
+      if (typeof closeTableContextMenu === 'function') closeTableContextMenu();
+      if (typeof closeGridContextMenu === 'function') closeGridContextMenu();
+      if (typeof closeProcessContextMenu === 'function') closeProcessContextMenu();
+    }
 
     // --- Table Context Menu & Actions ---
     let selectedContextMenuTable = null;
@@ -5231,12 +5238,13 @@
         e.preventDefault();
         e.stopPropagation();
       }
+      closeAllContextMenus();
       selectedContextMenuTable = tableName;
       const menu = document.getElementById('table-context-menu');
       if (!menu) return;
 
-      const x = Math.min(e.clientX, window.innerWidth - 170);
-      const y = Math.min(e.clientY, window.innerHeight - 130);
+      const x = Math.max(10, Math.min(e.clientX, window.innerWidth - 170));
+      const y = Math.max(10, Math.min(e.clientY, window.innerHeight - 130));
       menu.style.left = `${x}px`;
       menu.style.top = `${y}px`;
       menu.classList.remove('hidden');
@@ -5382,7 +5390,7 @@
                 tablesList.map(t => {
                   const rowTip = t.row_count > 0 ? ` (~${t.row_count.toLocaleString()} rows)` : '';
                   return `
-                    <div style="content-visibility: auto; contain-intrinsic-size: 0 28px;" class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" onclick="openTableViewer('${escapeHtml(t.name)}')" oncontextmenu="showTableContextMenu(event, '${escapeHtml(t.name)}')" title="${escapeHtml(t.name)}${rowTip}">
+                    <div style="content-visibility: auto; contain-intrinsic-size: 0 28px;" class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" data-name="${escapeHtml(t.name)}" onclick="openTableViewer(this.dataset.name)" oncontextmenu="showTableContextMenu(event, this.dataset.name)" title="${escapeHtml(t.name)}${rowTip}">
                       <span class="flex items-center space-x-1.5 truncate text-slate-200 group-hover:text-white flex-1 min-w-0">
                         <span class="text-xs flex-shrink-0">📋</span>
                         <span class="truncate">${escapeHtml(t.name)}</span>
@@ -5415,14 +5423,14 @@
             <div class="space-y-0.5">
               ${viewsList.length === 0 ? `<div class="text-slate-600 text-[11px] px-2 py-1 italic">No views. Click ➕ to create.</div>` :
                 viewsList.map(v => `
-                  <div style="content-visibility: auto; contain-intrinsic-size: 0 28px;" class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" onclick="openTableViewer('${escapeHtml(v.name)}')">
+                  <div style="content-visibility: auto; contain-intrinsic-size: 0 28px;" class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" data-name="${escapeHtml(v.name)}" onclick="openTableViewer(this.dataset.name)">
                     <span class="flex items-center space-x-1.5 truncate text-purple-300 group-hover:text-white flex-1 min-w-0 mr-1" title="${escapeHtml(v.name)}">
                       <span class="text-xs flex-shrink-0">👁️</span>
                       <span class="truncate">${escapeHtml(v.name)}</span>
                     </span>
                     <div class="flex items-center space-x-1">
-                      <button onclick="event.stopPropagation(); openCreateViewModal('${escapeHtml(v.name)}')" class="opacity-0 group-hover:opacity-100 hover:text-app-accent px-1" title="Edit View">✏️</button>
-                      <button onclick="event.stopPropagation(); dropView('${escapeHtml(v.name)}')" class="opacity-0 group-hover:opacity-100 hover:text-red-400 px-0.5" title="Drop View">🗑️</button>
+                      <button type="button" data-name="${escapeHtml(v.name)}" onclick="event.stopPropagation(); openCreateViewModal(this.dataset.name)" class="opacity-0 group-hover:opacity-100 hover:text-app-accent px-1" title="Edit View">✏️</button>
+                      <button type="button" data-name="${escapeHtml(v.name)}" onclick="event.stopPropagation(); dropView(this.dataset.name)" class="opacity-0 group-hover:opacity-100 hover:text-red-400 px-0.5" title="Drop View">🗑️</button>
                     </div>
                   </div>
                 `).join('')
@@ -5451,14 +5459,14 @@
             <div class="space-y-0.5">
               ${triggersList.length === 0 ? `<div class="text-slate-600 text-[11px] px-2 py-1 italic">No triggers. Click ➕ to create.</div>` :
                 triggersList.map(trg => `
-                  <div class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" onclick="openCreateTriggerModal('${escapeHtml(trg.name)}', ${escapeHtml(JSON.stringify(trg))})">
+                  <div class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" data-name="${escapeHtml(trg.name)}" onclick="openCreateTriggerModal(this.dataset.name)">
                     <span class="flex items-center space-x-1.5 truncate text-amber-300 group-hover:text-white">
                       <span class="text-xs">⚡</span>
                       <span class="truncate max-w-[120px]">${escapeHtml(trg.name)}</span>
                     </span>
                     <div class="flex items-center space-x-1">
                       <span class="text-[10px] text-slate-500 font-mono">${escapeHtml(trg.table || '')}</span>
-                      <button onclick="event.stopPropagation(); dropTrigger('${escapeHtml(trg.name)}')" class="opacity-0 group-hover:opacity-100 hover:text-red-400 px-0.5" title="Drop Trigger">🗑️</button>
+                      <button type="button" data-name="${escapeHtml(trg.name)}" onclick="event.stopPropagation(); dropTrigger(this.dataset.name)" class="opacity-0 group-hover:opacity-100 hover:text-red-400 px-0.5" title="Drop Trigger">🗑️</button>
                     </div>
                   </div>
                 `).join('')
@@ -5488,14 +5496,14 @@
             <div class="space-y-0.5">
               ${routinesList.length === 0 ? `<div class="text-slate-600 text-[11px] px-2 py-1 italic">No stored procedures or functions.</div>` :
                 routinesList.map(r => `
-                  <div class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" onclick="openRoutineCaller('${escapeHtml(r.name)}', '${escapeHtml(r.type)}')">
+                  <div class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" data-name="${escapeHtml(r.name)}" data-type="${escapeHtml(r.type)}" onclick="openRoutineCaller(this.dataset.name, this.dataset.type)">
                     <span class="flex items-center space-x-1.5 truncate text-sky-300 group-hover:text-white flex-1 min-w-0 mr-1" title="${escapeHtml(r.name)} (${r.type})">
                       <span class="text-xs flex-shrink-0">${r.type === 'FUNCTION' ? 'ƒ' : '⚙️'}</span>
                       <span class="truncate">${escapeHtml(r.name)}</span>
                     </span>
                     <div class="flex items-center space-x-1">
-                      <button onclick="event.stopPropagation(); viewRoutineDDL('${escapeHtml(r.name)}', '${escapeHtml(r.type)}')" class="opacity-0 group-hover:opacity-100 hover:text-sky-300 px-1 text-[11px]" title="View DDL">📄</button>
-                      <button onclick="event.stopPropagation(); openRoutineCaller('${escapeHtml(r.name)}', '${escapeHtml(r.type)}')" class="opacity-0 group-hover:opacity-100 hover:text-emerald-400 px-1 text-[11px]" title="Call in Query Editor">▶</button>
+                      <button type="button" data-name="${escapeHtml(r.name)}" data-type="${escapeHtml(r.type)}" onclick="event.stopPropagation(); viewRoutineDDL(this.dataset.name, this.dataset.type)" class="opacity-0 group-hover:opacity-100 hover:text-sky-300 px-1 text-[11px]" title="View DDL">📄</button>
+                      <button type="button" data-name="${escapeHtml(r.name)}" data-type="${escapeHtml(r.type)}" onclick="event.stopPropagation(); openRoutineCaller(this.dataset.name, this.dataset.type)" class="opacity-0 group-hover:opacity-100 hover:text-emerald-400 px-1 text-[11px]" title="Call in Query Editor">▶</button>
                     </div>
                   </div>
                 `).join('')
@@ -5527,14 +5535,14 @@
                 eventsList.map(ev => {
                   const isEnabled = (ev.status || '').toUpperCase() === 'ENABLED';
                   return `
-                    <div class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" onclick="viewEventDDL('${escapeHtml(ev.name)}')">
+                    <div class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" data-name="${escapeHtml(ev.name)}" onclick="viewEventDDL(this.dataset.name)">
                       <span class="flex items-center space-x-1.5 truncate ${isEnabled ? 'text-emerald-300' : 'text-slate-400'} group-hover:text-white flex-1 min-w-0 mr-1" title="${escapeHtml(ev.name)} (${ev.status})">
                         <span class="text-xs flex-shrink-0">${isEnabled ? '🟢' : '⚪'}</span>
                         <span class="truncate">${escapeHtml(ev.name)}</span>
                       </span>
                       <div class="flex items-center space-x-1">
-                        <button onclick="event.stopPropagation(); viewEventDDL('${escapeHtml(ev.name)}')" class="opacity-0 group-hover:opacity-100 hover:text-sky-300 px-1 text-[11px]" title="View DDL">📄</button>
-                        <button onclick="event.stopPropagation(); toggleEventStatusAction('${escapeHtml(ev.name)}', ${!isEnabled})" class="opacity-0 group-hover:opacity-100 hover:text-amber-300 px-1 text-[11px]" title="${isEnabled ? 'Disable Event' : 'Enable Event'}">${isEnabled ? '⏸️' : '▶️'}</button>
+                        <button type="button" data-name="${escapeHtml(ev.name)}" onclick="event.stopPropagation(); viewEventDDL(this.dataset.name)" class="opacity-0 group-hover:opacity-100 hover:text-sky-300 px-1 text-[11px]" title="View DDL">📄</button>
+                        <button type="button" data-name="${escapeHtml(ev.name)}" data-next-enabled="${!isEnabled}" onclick="event.stopPropagation(); toggleEventStatusAction(this.dataset.name, this.dataset.nextEnabled === 'true')" class="opacity-0 group-hover:opacity-100 hover:text-amber-300 px-1 text-[11px]" title="${isEnabled ? 'Disable Event' : 'Enable Event'}">${isEnabled ? '⏸️' : '▶️'}</button>
                       </div>
                     </div>
                   `;
@@ -6600,7 +6608,7 @@
     function renderTabs() {
       const container = document.getElementById('tabs-container');
       container.innerHTML = tabs.map(t => `
-        <div onclick="switchTab('${t.id}')" oncontextmenu="showTabContextMenu(event, '${t.id}')" class="flex items-center space-x-1 px-3 py-1 rounded cursor-pointer text-xs transition ${t.id === activeTabId ? 'bg-app-bg text-app-accent font-semibold border-t-2 border-app-accent' : 'hover:bg-slate-800 text-slate-400'}" title="${escapeHtml(t.title)} (Right-click for options)">
+        <div onclick="switchTab('${t.id}')" oncontextmenu="showTabContextMenu(event, '${t.id}')" class="flex items-center space-x-1 px-3 py-1 rounded cursor-pointer text-xs transition tab-label shrink-0 whitespace-nowrap ${t.id === activeTabId ? 'bg-app-bg text-app-accent font-semibold border-t-2 border-app-accent' : 'hover:bg-slate-800 text-slate-400'}" title="${escapeHtml(t.title)} (Right-click for options)">
           <span>${t.isVariables ? '⚙️' : (t.isFlightRecorder ? '📈' : (t.isCluster ? '🌐' : (t.isProcesslist ? '⚡' : (t.isTableViewer ? '📊' : (t.isNote ? '📝' : '⚡')))))}</span>
           <span class="truncate max-w-[120px]">${escapeHtml(t.title)}</span>
           <button onclick="event.stopPropagation(); closeTab('${t.id}')" class="hover:text-red-400 pl-1" title="Close Tab (Ctrl+W)">✕</button>
@@ -6952,7 +6960,7 @@
         e.preventDefault();
         e.stopPropagation();
       }
-      closeTableContextMenu();
+      closeAllContextMenus();
       const targetTab = tabs.find(t => t.id === tabId);
       if (!targetTab) return;
       selectedContextMenuTabId = tabId;
@@ -7217,12 +7225,16 @@
       if (digestSec) digestSec.classList.toggle('hidden', view !== 'digest');
       if (deadlockSec) deadlockSec.classList.toggle('hidden', view !== 'deadlock');
 
-      // Refresh controls and lock banners only visible on live threads view
+      // Refresh controls and lock summary only visible on live threads view
       if (refreshGroup) refreshGroup.classList.toggle('hidden', view !== 'threads');
-      const lockBanner = document.getElementById('pl-lock-banner');
-      if (lockBanner && view !== 'threads') lockBanner.classList.add('hidden');
-      const noLockBanner = document.getElementById('pl-no-lock-banner');
-      if (noLockBanner && view !== 'threads') noLockBanner.classList.add('hidden');
+      const lockSummary = document.getElementById('pl-lock-summary');
+      if (lockSummary) {
+        if (view !== 'threads') {
+          lockSummary.classList.add('hidden');
+        } else if ((processlistData?.locks || []).length > 0) {
+          lockSummary.classList.remove('hidden');
+        }
+      }
 
       if (view === 'digest' && (!statementDigestData || statementDigestData.length === 0)) {
         fetchStatementDigest();
@@ -7282,7 +7294,7 @@
               <code>${escapeHtml(item.query || '-')}</code>
             </td>
             <td class="p-2.5 text-center">
-              <button onclick="sendDigestQueryToEditor('${escapeHtml(encodeURIComponent(item.query || ''))}')" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2 py-0.5 rounded text-[11px] border border-app-border transition" title="Open query in Editor tab">
+              <button data-query="${escapeHtml(item.query || '')}" onclick="sendProcessQueryToEditor(this.dataset.query)" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2 py-0.5 rounded text-[11px] border border-app-border transition" title="Open query in Editor tab">
                 <span>📝 Edit</span>
               </button>
             </td>
@@ -7395,7 +7407,7 @@
             <div class="space-y-1">
               <div class="flex items-center justify-between text-xs text-slate-400">
                 <span class="font-semibold">Executing SQL Statement:</span>
-                <button onclick="sendProcessQueryToEditor('${escapeHtml(tx.query || '')}')" class="text-sky-400 hover:text-sky-200 text-[11px]">📝 Open in Editor</button>
+                <button data-query="${escapeHtml(tx.query || '')}" onclick="sendProcessQueryToEditor(this.dataset.query)" class="text-sky-400 hover:text-sky-200 text-[11px]">📝 Open in Editor</button>
               </div>
               <pre class="bg-slate-950 border border-slate-800 p-2.5 rounded font-mono text-xs text-slate-200 overflow-x-auto whitespace-pre-wrap break-all max-h-48 leading-relaxed">${escapeHtml(tx.query || '-- Query not available')}</pre>
             </div>
@@ -7684,7 +7696,6 @@
 
       const badgeHeader = document.getElementById('processlist-slow-badge');
       const lockBadge = document.getElementById('lock-blocker-badge');
-      const monitorAlert = document.getElementById('monitor-alert-badge');
 
       if (badgeHeader) {
         if (slowCount > 0) {
@@ -8207,6 +8218,7 @@
         closeProcessContextMenu();
         return;
       }
+      closeAllContextMenus();
 
       const thread = (processlistData.threads || []).find(t => String(t.id) === String(threadId));
       if (!thread) {
@@ -8838,11 +8850,11 @@
                 </div>
                 <div class="shrink-0 flex items-center space-x-2 pt-1 md:pt-0">
                   ${c.remediation ? `
-                    <button onclick="copySnippetText('${escapeHtml(c.remediation)}', 'Remediation snippet copied!')" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 text-[11px] font-mono flex items-center space-x-1" title="Copy remediation fix">
+                    <button data-snippet="${escapeHtml(c.remediation)}" data-msg="Remediation snippet copied!" onclick="copySnippetText(this.dataset.snippet, this.dataset.msg)" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 text-[11px] font-mono flex items-center space-x-1" title="Copy remediation fix">
                       <span>📋 Copy Fix</span>
                     </button>
                   ` : ''}
-                  <button onclick="askCopilotAboutVariable('${escapeHtml(c.variable)}', '${escapeHtml(c.current_value)}', '${escapeHtml(c.summary)}')" class="px-2 py-1 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 rounded text-[11px] flex items-center space-x-1" title="Ask AI Copilot for advice">
+                  <button data-var="${escapeHtml(c.variable)}" data-val="${escapeHtml(c.current_value)}" data-summary="${escapeHtml(c.summary)}" onclick="askCopilotAboutVariable(this.dataset.var, this.dataset.val, this.dataset.summary)" class="px-2 py-1 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 rounded text-[11px] flex items-center space-x-1" title="Ask AI Copilot for advice">
                     <span>✨ Ask Copilot</span>
                   </button>
                 </div>
@@ -8892,9 +8904,9 @@ What are concrete steps to resolve this bottleneck? Is my.cnf tuning required (s
 
       openNewConnModal();
       setTimeout(() => {
-        const hostInput = document.getElementById('conn-host');
-        const portInput = document.getElementById('conn-port');
-        const nameInput = document.getElementById('conn-name');
+        const hostInput = document.getElementById('modal-conn-host');
+        const portInput = document.getElementById('modal-conn-port');
+        const nameInput = document.getElementById('modal-conn-name');
         if (hostInput) hostInput.value = host;
         if (portInput) portInput.value = port;
         if (nameInput) nameInput.value = `${activeConnection ? activeConnection.name : 'Cluster'} (${host})`;
@@ -9051,11 +9063,11 @@ What are concrete steps to resolve this bottleneck? Is my.cnf tuning required (s
             <td class="py-2 px-3 text-right">
               <div class="flex items-center justify-end space-x-1">
                 ${v.set_global_snippet ? `
-                  <button onclick="copySnippetText('${escapeHtml(v.set_global_snippet)}', 'SET GLOBAL snippet copied!')" class="p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded" title="Copy SET GLOBAL / SQL command">
+                  <button data-snippet="${escapeHtml(v.set_global_snippet)}" data-msg="SET GLOBAL snippet copied!" onclick="copySnippetText(this.dataset.snippet, this.dataset.msg)" class="p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded" title="Copy SET GLOBAL / SQL command">
                     📋
                   </button>
                 ` : ''}
-                <button onclick="askCopilotAboutVariable('${escapeHtml(v.name)}', '${escapeHtml(v.value)}', '${escapeHtml(v.description || '')}')" class="px-1.5 py-0.5 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 rounded text-[10px] flex items-center space-x-1" title="Ask AI Copilot for deep analysis">
+                <button data-var="${escapeHtml(v.name)}" data-val="${escapeHtml(v.value)}" data-desc="${escapeHtml(v.description || '')}" onclick="askCopilotAboutVariable(this.dataset.var, this.dataset.val, this.dataset.desc)" class="px-1.5 py-0.5 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 rounded text-[10px] flex items-center space-x-1" title="Ask AI Copilot for deep analysis">
                   <span>✨ Ask AI</span>
                 </button>
               </div>
@@ -9101,15 +9113,15 @@ What are concrete steps to resolve this bottleneck? Is my.cnf tuning required (s
 
                   <div class="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800">
                     <div class="flex items-center space-x-2">
-                      <button onclick="copySnippetText('${escapeHtml(v.set_global_snippet)}', 'SET GLOBAL snippet copied!')" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-mono text-[11px] flex items-center space-x-1">
+                      <button data-snippet="${escapeHtml(v.set_global_snippet)}" data-msg="SET GLOBAL snippet copied!" onclick="copySnippetText(this.dataset.snippet, this.dataset.msg)" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-mono text-[11px] flex items-center space-x-1">
                         <span>📋 Copy SET GLOBAL</span>
                       </button>
-                      <button onclick="copySnippetText('${escapeHtml(v.my_cnf_snippet)}', 'my.cnf directive copied!')" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-mono text-[11px] flex items-center space-x-1">
+                      <button data-snippet="${escapeHtml(v.my_cnf_snippet)}" data-msg="my.cnf directive copied!" onclick="copySnippetText(this.dataset.snippet, this.dataset.msg)" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-mono text-[11px] flex items-center space-x-1">
                         <span>📋 Copy my.cnf</span>
                       </button>
                     </div>
                     <div>
-                      <button onclick="askCopilotAboutVariable('${escapeHtml(v.name)}', '${escapeHtml(v.value)}', '${escapeHtml(v.description || '')}')" class="px-2.5 py-1 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 rounded text-xs flex items-center space-x-1">
+                      <button data-var="${escapeHtml(v.name)}" data-val="${escapeHtml(v.value)}" data-desc="${escapeHtml(v.description || '')}" onclick="askCopilotAboutVariable(this.dataset.var, this.dataset.val, this.dataset.desc)" class="px-2.5 py-1 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 rounded text-xs flex items-center space-x-1">
                         <span>✨ Consult This Variable with Copilot</span>
                       </button>
                     </div>
@@ -10002,7 +10014,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
         return;
       }
 
-      tbody.innerHTML = auditLogsCache.map(l => {
+      tbody.innerHTML = auditLogsCache.map((l, idx) => {
         const dt = new Date(l.executed_at);
         const timeStr = isNaN(dt.getTime()) ? l.executed_at : dt.toLocaleTimeString();
         const isErr = !!l.error;
@@ -10023,8 +10035,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
             </td>
             <td class="p-2 text-center whitespace-nowrap">
               <div class="inline-flex space-x-1">
-                <button onclick="copyAuditSQL(${JSON.stringify(l.query_sql).replace(/"/g, '&quot;')})" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] border border-slate-700" title="Copy SQL statement">Copy</button>
-                <button onclick="insertAuditSQLToEditor(${JSON.stringify(l.query_sql).replace(/"/g, '&quot;')})" class="px-2 py-0.5 rounded bg-app-accent hover:bg-sky-400 text-slate-950 font-bold text-[10px]" title="Insert into Query Editor">To Editor</button>
+                <button onclick="copyAuditSQL(${idx})" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] border border-slate-700" title="Copy SQL statement">Copy</button>
+                <button onclick="insertAuditSQLToEditor(${idx})" class="px-2 py-0.5 rounded bg-app-accent hover:bg-sky-400 text-slate-950 font-bold text-[10px]" title="Insert into Query Editor">To Editor</button>
               </div>
             </td>
           </tr>
@@ -10032,7 +10044,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }).join('');
     }
 
-    async function copyAuditSQL(sql) {
+    async function copyAuditSQL(sqlOrIdx) {
+      const sql = (typeof sqlOrIdx === 'number' && auditLogsCache[sqlOrIdx]) ? auditLogsCache[sqlOrIdx].query_sql : sqlOrIdx;
       const ok = await copyTextToClipboard(sql);
       if (ok) {
         showNativeAlert('SQL statement copied to clipboard.', 'Copied');
@@ -10041,7 +10054,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
     }
 
-    function insertAuditSQLToEditor(sql) {
+    function insertAuditSQLToEditor(sqlOrIdx) {
+      const sql = (typeof sqlOrIdx === 'number' && auditLogsCache[sqlOrIdx]) ? auditLogsCache[sqlOrIdx].query_sql : sqlOrIdx;
       setEditorSQL(sql);
       toggleAuditDrawer(false);
       const activeTab = tabs.find(t => t.id === activeTabId);
@@ -10663,7 +10677,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
           <td class="p-2 text-center">${idx.is_unique ? '<span class="text-emerald-400">UNIQUE</span>' : '<span class="text-slate-500">INDEX</span>'}</td>
           <td class="p-2 font-mono text-slate-400">${escapeHtml(idx.type || 'BTREE')}</td>
           <td class="p-2 text-center">
-            ${idx.name === 'PRIMARY' ? '<span class="text-slate-600 text-xs">PK</span>' : `<button onclick="dropTableIndex('${escapeHtml(idx.name)}')" class="text-slate-500 hover:text-red-400 p-1" title="Drop Index">🗑️</button>`}
+            ${idx.name === 'PRIMARY' ? '<span class="text-slate-600 text-xs">PK</span>' : `<button type="button" data-index="${escapeHtml(idx.name)}" onclick="dropTableIndex(this.dataset.index)" class="text-slate-500 hover:text-red-400 p-1" title="Drop Index">🗑️</button>`}
           </td>
         </tr>
       `).join('');
@@ -10739,7 +10753,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
           <td class="p-2 font-mono text-xs text-slate-400">${escapeHtml(fk.on_delete || 'NO ACTION')}</td>
           <td class="p-2 font-mono text-xs text-slate-400">${escapeHtml(fk.on_update || 'NO ACTION')}</td>
           <td class="p-2 text-center">
-            <button onclick="dropTableFK('${escapeHtml(fk.name)}')" class="text-slate-500 hover:text-red-400 p-1" title="Drop Foreign Key">🗑️</button>
+            <button type="button" data-fk="${escapeHtml(fk.name)}" onclick="dropTableFK(this.dataset.fk)" class="text-slate-500 hover:text-red-400 p-1" title="Drop Foreign Key">🗑️</button>
           </td>
         </tr>
       `).join('');
@@ -12020,6 +12034,10 @@ Please analyze what is causing this query to be slow and suggest necessary query
       if (tblSelect && schemaCatalogCache) {
         const baseTables = (schemaCatalogCache.tables || []).filter(t => t.type !== 'VIEW');
         tblSelect.innerHTML = baseTables.map(t => `<option value="${escapeHtml(t.name)}">${escapeHtml(t.name)}</option>`).join('');
+      }
+
+      if (!existingData && triggerName && schemaCatalogCache && Array.isArray(schemaCatalogCache.triggers)) {
+        existingData = schemaCatalogCache.triggers.find(tr => tr.name === triggerName) || null;
       }
 
       if (existingData) {
@@ -13976,7 +13994,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
                 <td class="p-1 px-2 border-r border-slate-800/40 min-w-[90px] max-w-md ${typeStyle.align}">
                   <input type="text" value="${escapeHtml(String(val))}" placeholder="${isAutoPK ? '(auto)' : escapeHtml(c.name)}"
                          data-col="${escapeHtml(c.name)}" data-draft-idx="${dIdx}"
-                         oninput="updateGridDraftCell(${dIdx}, '${escapeHtml(c.name)}', this.value)"
+                         oninput="updateGridDraftCell(${dIdx}, this.dataset.col, this.value)"
                          class="w-full bg-slate-950 ${typeStyle.inputColor} ${typeStyle.inputAlign} border border-sky-500/50 rounded px-1.5 py-0.5 text-xs font-mono outline-none focus:border-sky-400 shadow-inner">
                 </td>
               `;
@@ -14012,7 +14030,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
             const fkInfo = fkMap.get(colName);
             let fkBadge = '';
             if (fkInfo && displayVal !== null && displayVal !== '') {
-              fkBadge = `<button type="button" onclick="event.stopPropagation(); peekForeignKey(event, '${escapeHtml(tableName || '')}', '${escapeHtml(colName)}', '${escapeHtml(fkInfo.referenced_table)}', '${escapeHtml(fkInfo.referenced_column)}', '${escapeHtml(String(displayVal))}')" class="ml-1 opacity-0 group-hover:opacity-100 hover:text-sky-300 text-sky-400 font-bold transition text-xs" title="Peek referenced record (${escapeHtml(fkInfo.referenced_table)}.${escapeHtml(fkInfo.referenced_column)})">🔗</button>`;
+              fkBadge = `<button type="button" data-table="${escapeHtml(tableName || '')}" data-col="${escapeHtml(colName)}" data-reftable="${escapeHtml(fkInfo.referenced_table)}" data-refcol="${escapeHtml(fkInfo.referenced_column)}" data-val="${escapeHtml(String(displayVal))}" onclick="event.stopPropagation(); peekForeignKey(event, this.dataset.table, this.dataset.col, this.dataset.reftable, this.dataset.refcol, this.dataset.val)" class="ml-1 opacity-0 group-hover:opacity-100 hover:text-sky-300 text-sky-400 font-bold transition text-xs" title="Peek referenced record (${escapeHtml(fkInfo.referenced_table)}.${escapeHtml(fkInfo.referenced_column)})">🔗</button>`;
             }
             const isJson = displayVal !== null && typeof displayVal === 'string' && (typeStyle.category === 'json' || (displayVal.trim().startsWith('{') && displayVal.trim().endsWith('}')) || (displayVal.trim().startsWith('[') && displayVal.trim().endsWith(']')));
             let jsonBadge = '';
@@ -14025,8 +14043,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
             return `
               <td class="${cellClass}"
                   data-row="${rIdx}" data-col="${cIdx}"
+                  data-pk="${escapeHtml(pkCol || '')}" data-table="${escapeHtml(tableName || '')}"
                   onclick="selectGridCell(this, ${rIdx}, ${cIdx})"
-                  ondblclick="startInlineEdit(this, ${rIdx}, ${cIdx}, '${pkCol || ''}', '${tableName || ''}')">
+                  ondblclick="startInlineEdit(this, ${rIdx}, ${cIdx}, this.dataset.pk, this.dataset.table)">
                 <span class="cell-val">${displayVal === null ? '<span class="text-slate-500 italic">NULL</span>' : escapeHtml(String(displayVal))}</span>
                 ${fkBadge}
                 ${jsonBadge}
@@ -15044,6 +15063,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
     // --- Floating Grid Row Context Menu ---
     function openGridContextMenu(e, rIdx) {
       e.preventDefault();
+      closeAllContextMenus();
       const td = e.target.closest('td[data-col]');
       const cIdx = td ? parseInt(td.dataset.col, 10) : -1;
 
@@ -15094,7 +15114,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
                 <span class="text-[10px] text-slate-500 font-mono">Ctrl+Shift+N</span>
               </button>
               ${enumValues.map(v => `
-                <button onclick="insertGridCellValue('${escapeHtml(v)}')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-slate-200 hover:text-white transition">
+                <button data-val="${escapeHtml(v)}" onclick="insertGridCellValue(this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-slate-200 hover:text-white transition">
                   <span class="text-sky-400">●</span><span class="font-mono">${escapeHtml(v)}</span>
                 </button>
               `).join('')}
@@ -15160,8 +15180,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
       menu.classList.remove('hidden');
 
-      const x = Math.min(e.clientX, window.innerWidth - 240);
-      const y = Math.min(e.clientY, window.innerHeight - 340);
+      const x = Math.max(10, Math.min(e.clientX, window.innerWidth - 240));
+      const y = Math.max(10, Math.min(e.clientY, window.innerHeight - 340));
       menu.style.left = `${x}px`;
       menu.style.top = `${y}px`;
     }
@@ -18758,6 +18778,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
           e.preventDefault();
           openSnippetsManager();
         } else if (e.key === 'Escape') {
+          closeAllContextMenus();
           closeTabContextMenu();
           closeTableContextMenu();
           closeShortcutsModal();
@@ -18779,12 +18800,32 @@ Please analyze what is causing this query to be slow and suggest necessary query
           closeProfileView();
           closeUpdateDialog();
           closeChangelogDialog();
+          closeLockInspectorModal();
+          closeJsonCellModal();
+          closeNoteComposerModal();
+          closeMockDataModal();
+          closeCSVImportModal();
+          closeRunSQLScriptModal();
+          closeStructureSyncModal();
+          closeDataTransferModal();
+          closeDataSyncModal();
+          closeSmartSeedModal();
+          toggleSessionDropdown(false);
+          toggleDatabaseDropdown(false);
+          toggleTopMonitorMenu(false);
+          toggleTopDBToolsMenu(false);
+          toggleTopSettingsMenu(false);
+          toggleExportCSVMenu(false);
           toggleNotesDrawer(false);
+          ['erd-dialog', 'table-creator-dialog', 'view-designer-dialog', 'trigger-designer-dialog', 'database-creator-dialog', 'safety-inspection-dialog', 'ddl-review-dialog'].forEach(id => {
+            const dlg = document.getElementById(id);
+            if (dlg && typeof dlg.close === 'function') dlg.close();
+          });
         }
       });
 
       // Close native dialogs when clicking on backdrop
-      ['snippets-manager-dialog', 'snippet-param-dialog', 'database-creator-dialog', 'csv-import-dialog', 'schema-search-modal', 'db-diagnostics-dialog', 'privilege-matrix-dialog', 'pl-detail-modal', 'update-dialog', 'changelog-dialog'].forEach(id => {
+      ['snippets-manager-dialog', 'snippet-param-dialog', 'database-creator-dialog', 'csv-import-dialog', 'mock-data-dialog', 'schema-search-modal', 'db-diagnostics-dialog', 'privilege-matrix-dialog', 'pl-detail-modal', 'update-dialog', 'changelog-dialog', 'note-composer-dialog', 'erd-dialog', 'smart-seed-dialog', 'run-sql-dialog', 'structure-sync-dialog', 'data-transfer-dialog', 'data-sync-dialog', 'table-creator-dialog', 'view-designer-dialog', 'trigger-designer-dialog', 'safety-inspection-dialog', 'ddl-review-dialog'].forEach(id => {
         const dlg = document.getElementById(id);
         if (dlg) {
           dlg.addEventListener('click', (e) => {
@@ -19042,7 +19083,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
               </div>
               <div class="text-[11px] text-slate-400">${escapeHtml(item.reason)}</div>
             </div>
-            <button onclick="promptDropRedundantIndex(${JSON.stringify(item.drop_sql).replace(/"/g, '&quot;')}, '${escapeHtml(tableName)}')" class="bg-rose-900 hover:bg-rose-800 text-rose-200 px-2.5 py-1 rounded text-xs transition">
+            <button data-drop-sql="${escapeHtml(item.drop_sql)}" data-table="${escapeHtml(tableName)}" onclick="promptDropRedundantIndex(this.dataset.dropSql, this.dataset.table)" class="bg-rose-900 hover:bg-rose-800 text-rose-200 px-2.5 py-1 rounded text-xs transition">
               Drop Index
             </button>
           </div>
@@ -19238,7 +19279,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
             <td class="p-2 text-right font-mono ${d.overhead_size > 0 ? 'text-amber-400 font-bold' : 'text-slate-500'}">${formatBytes(d.overhead_size || 0)}</td>
             <td class="p-2 text-slate-400 text-xs">${escapeHtml(d.collation || d.charset || '-')}</td>
             <td class="p-2 text-center">
-              <button onclick="inspectDatabaseTables('${escapeHtml(d.name)}')" class="bg-slate-800 hover:bg-sky-600 hover:text-white text-sky-400 px-2.5 py-1 rounded text-xs font-semibold transition flex items-center space-x-1 mx-auto">
+              <button type="button" data-name="${escapeHtml(d.name)}" onclick="inspectDatabaseTables(this.dataset.name)" class="bg-slate-800 hover:bg-sky-600 hover:text-white text-sky-400 px-2.5 py-1 rounded text-xs font-semibold transition flex items-center space-x-1 mx-auto">
                 <span>Inspect</span>
                 <span>➔</span>
               </button>
@@ -19368,7 +19409,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
         // 1. High Fragmentation
         if (t.overhead_size > 0 && (t.overhead_size > 50 * 1024 * 1024 || (totalSize > 0 && (t.overhead_size / totalSize) > 0.20))) {
           recommendations.push(`
-            <button onclick="runDbMaintenanceBatch('OPTIMIZE', ['${escapeHtml(t.name)}'])" class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition cursor-pointer" title="Overhead: ${formatBytes(t.overhead_size)}. Click to run OPTIMIZE">
+            <button type="button" data-table="${escapeHtml(t.name)}" onclick="runDbMaintenanceBatch('OPTIMIZE', [this.dataset.table])" class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition cursor-pointer" title="Overhead: ${formatBytes(t.overhead_size)}. Click to run OPTIMIZE">
               <span>⚠️</span>
               <span>Fragmented</span>
             </button>
@@ -19378,7 +19419,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
         // 2. Missing Primary Key
         if (!t.has_primary_key && !isView) {
           recommendations.push(`
-            <button onclick="openTableHealthFix('pk', '${escapeHtml(t.name)}')" class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-500/20 text-rose-300 border border-rose-500/40 hover:bg-rose-500/30 transition cursor-pointer" title="Missing primary key. Click to open ADD PRIMARY KEY fix in editor">
+            <button type="button" data-table="${escapeHtml(t.name)}" onclick="openTableHealthFix('pk', this.dataset.table)" class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-500/20 text-rose-300 border border-rose-500/40 hover:bg-rose-500/30 transition cursor-pointer" title="Missing primary key. Click to open ADD PRIMARY KEY fix in editor">
               <span>⛔</span>
               <span>No PK</span>
             </button>
@@ -19388,7 +19429,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
         // 3. Legacy Storage Engine
         if ((t.engine || '').toUpperCase() === 'MYISAM') {
           recommendations.push(`
-            <button onclick="openTableHealthFix('engine', '${escapeHtml(t.name)}')" class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition cursor-pointer" title="Non-transactional MyISAM. Click to convert to InnoDB">
+            <button type="button" data-table="${escapeHtml(t.name)}" onclick="openTableHealthFix('engine', this.dataset.table)" class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition cursor-pointer" title="Non-transactional MyISAM. Click to convert to InnoDB">
               <span>⚠️</span>
               <span>MyISAM</span>
             </button>
@@ -19398,7 +19439,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
         // 4. Legacy Charset / Collation
         if (t.collation && (t.collation.toLowerCase().startsWith('latin1') || t.collation.toLowerCase().startsWith('utf8_') || t.collation.toLowerCase().startsWith('utf8mb3'))) {
           recommendations.push(`
-            <button onclick="openTableHealthFix('charset', '${escapeHtml(t.name)}')" class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-500/30 transition cursor-pointer" title="Legacy collation ${escapeHtml(t.collation)}. Click to convert to utf8mb4">
+            <button type="button" data-table="${escapeHtml(t.name)}" onclick="openTableHealthFix('charset', this.dataset.table)" class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-500/30 transition cursor-pointer" title="Legacy collation ${escapeHtml(t.collation)}. Click to convert to utf8mb4">
               <span>ℹ️</span>
               <span>${escapeHtml(t.collation.split('_')[0])}</span>
             </button>
@@ -19411,7 +19452,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
         return `
           <tr class="hover:bg-slate-800/40 transition">
-            <td class="p-2"><input type="checkbox" onchange="toggleSelectDbDiagTable('${escapeHtml(t.name)}', this.checked)" ${isChecked ? 'checked' : ''} class="accent-sky-500"></td>
+            <td class="p-2"><input type="checkbox" data-table="${escapeHtml(t.name)}" onchange="toggleSelectDbDiagTable(this.dataset.table, this.checked)" ${isChecked ? 'checked' : ''} class="accent-sky-500"></td>
             <td class="p-2 font-bold text-white">${escapeHtml(t.name)}</td>
             <td class="p-2 text-slate-400">${escapeHtml(t.engine || '-')}</td>
             <td class="p-2 text-right text-slate-300 font-mono">${Number(t.rows).toLocaleString()}</td>
@@ -19420,7 +19461,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
             <td class="p-2 text-slate-400 text-xs">${escapeHtml(t.collation || '-')}</td>
             <td class="p-2">${healthHtml}</td>
             <td class="p-2 text-center">
-              <button onclick="runDbMaintenanceBatch('OPTIMIZE', ['${escapeHtml(t.name)}'])" class="bg-slate-800 hover:bg-sky-600 hover:text-white text-slate-300 px-2 py-0.5 rounded text-[11px] transition">
+              <button type="button" data-table="${escapeHtml(t.name)}" onclick="runDbMaintenanceBatch('OPTIMIZE', [this.dataset.table])" class="bg-slate-800 hover:bg-sky-600 hover:text-white text-slate-300 px-2 py-0.5 rounded text-[11px] transition">
                 Optimize
               </button>
             </td>
@@ -19554,7 +19595,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
               </div>
               <div class="text-[11px] text-slate-400">${escapeHtml(item.reason)}</div>
             </div>
-            <button onclick="promptDropRedundantIndex(${JSON.stringify(item.drop_sql).replace(/"/g, '&quot;')}, '${escapeHtml(item.table)}')" class="bg-rose-900 hover:bg-rose-800 text-white px-3 py-1 rounded text-xs transition">
+            <button data-drop-sql="${escapeHtml(item.drop_sql)}" data-table="${escapeHtml(item.table)}" onclick="promptDropRedundantIndex(this.dataset.dropSql, this.dataset.table)" class="bg-rose-900 hover:bg-rose-800 text-white px-3 py-1 rounded text-xs transition">
               Drop Index
             </button>
           </div>
@@ -19719,9 +19760,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
-        closeProcessContextMenu();
+        closeAllContextMenus();
         closeFKPeekPopover();
-        closeGridContextMenu();
         return;
       }
 
@@ -19829,7 +19869,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
         listEl.innerHTML = users.map(u => {
           const displayHost = isPG ? 'N/A (pg_hba.conf)' : u.host;
           return `
-          <div onclick="selectPrivilegeUser('${escapeHtml(u.user)}', '${escapeHtml(u.host)}')" class="p-2 rounded bg-slate-900/60 hover:bg-slate-800 cursor-pointer flex items-center justify-between border border-transparent priv-user-item ${activePrivUser && activePrivUser.user === u.user && activePrivUser.host === u.host ? 'border-sky-500 bg-slate-800 text-white' : 'text-slate-300'}">
+          <div data-user="${escapeHtml(u.user)}" data-host="${escapeHtml(u.host)}" onclick="selectPrivilegeUser(this.dataset.user, this.dataset.host)" class="p-2 rounded bg-slate-900/60 hover:bg-slate-800 cursor-pointer flex items-center justify-between border border-transparent priv-user-item ${activePrivUser && activePrivUser.user === u.user && activePrivUser.host === u.host ? 'border-sky-500 bg-slate-800 text-white' : 'text-slate-300'}">
             <div class="flex items-center space-x-1.5 truncate">
               <span class="text-xs">${isPG ? '🛡️' : '👤'}</span>
               <span class="font-bold truncate">${escapeHtml(u.user)}</span>
@@ -19912,6 +19952,10 @@ Please analyze what is causing this query to be slow and suggest necessary query
       } else if (preset === 'readwrite') {
         document.querySelectorAll('input[data-priv="SELECT"], input[data-priv="INSERT"], input[data-priv="UPDATE"], input[data-priv="DELETE"], input[data-priv="SHOW VIEW"]').forEach(cb => cb.checked = true);
       }
+    }
+
+    function onPrivScopeChanged() {
+      // Scope toggle between GLOBAL (*.*) and DATABASE (Active Database); applied during applyUserGrantsFromMatrix
     }
 
     async function savePrivilegeAccount() {
@@ -20403,7 +20447,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
     }
 
     function escapeHtml(str) {
-      return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
     // --- Update Engine & Changelog Viewer ---

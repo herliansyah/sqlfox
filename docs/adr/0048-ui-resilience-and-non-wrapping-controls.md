@@ -24,7 +24,13 @@ This created three primary visual bugs:
 ### 3. Clear Separation Between Controls and Content Text
 - Text content surfaces (AI Copilot chat answers, Operational Notes bodies, error modal stack traces, and SQL execution diagnostics) retain word wrapping (`break-words`, `whitespace-pre-wrap`) to maintain maximum readability without horizontal clipping.
 
+### 4. Modal Dialog and Floating Menu Viewport Resilience
+- High-density modal dialogs (`structure-sync-dialog`, `data-sync-dialog`, `data-transfer-dialog`, `table-creator-dialog`, `smart-seed-dialog`, `run-sql-dialog`, `ddl-review-dialog`) enforce `max-h-[90vh]` alongside `overflow-y-auto`, ensuring action footers (Execute, Apply, Transfer, Create) remain accessible on smaller laptop screens or zoomed displays.
+- Floating context menus (`#grid-context-menu`) enforce `max-h-[85vh]` and `overflow-y-auto` with bounded coordinate clamping (`Math.max(10, ...)`) to prevent long option lists (such as table columns with multiple ENUM values) from overflowing the screen boundary.
+- Context menu lifecycle enforces mutual exclusion via `closeAllContextMenus()`, preventing ghost menus from lingering when invoking adjacent surface menus.
+
 ## Consequences
 - Buttons and action controls consistently retain their intended ergonomic geometry across all screen resolutions and zoom levels.
 - Zero text wrapping or overlapping within UI toolbars and navigation chrome.
+- Zero modal action clipping or unclickable buttons on small or zoomed viewports.
 - Zero third-party CSS or JS dependencies; enforced via native CSS stylesheet rules and Tailwind utility containment.
