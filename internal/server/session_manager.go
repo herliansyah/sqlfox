@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"runtime"
 	"strconv"
@@ -68,6 +69,7 @@ type ActiveSession struct {
 	runningQueries map[string]context.CancelFunc
 	activeTx       driver.TxSession
 	txStartedAt    time.Time
+	txLastActive   time.Time
 	mu             sync.RWMutex
 }
 
@@ -164,9 +166,13 @@ func (sm *SessionManager) startReaper() {
 			sm.mu.Lock()
 			now := time.Now()
 			for id, sess := range sm.sessions {
-				// Rollback idle transactions older than 60 seconds to prevent orphan lock contention on DB server
+				// Rollback idle transactions inactive for 60 seconds to prevent orphan lock contention on DB server
 				sess.mu.Lock()
-				if sess.activeTx != nil && now.Sub(sess.txStartedAt) > 60*time.Second {
+				refTime := sess.txLastActive
+				if refTime.IsZero() {
+					refTime = sess.txStartedAt
+				}
+				if sess.activeTx != nil && now.Sub(refTime) > 60*time.Second {
 					_ = sess.activeTx.Rollback()
 					sess.activeTx = nil
 				}
@@ -321,6 +327,18 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		return nil, errors.New("sql query is required")
 	}
 
+	cleanSQL := driver.StripLeadingComments(trimmedSQL)
+	cleanUpper := strings.TrimRight(strings.ToUpper(cleanSQL), "; \t\r\n")
+	isSelect := driver.IsQueryStatement(trimmedSQL)
+
+	if strings.HasPrefix(cleanUpper, "USE ") {
+		dbTarget := strings.TrimSpace(cleanSQL[4:])
+		dbTarget = strings.Trim(strings.TrimRight(dbTarget, "; \t\r\n"), "`'\"")
+		if dbTarget != "" {
+			_ = s.UseDatabase(ctx, dbTarget)
+		}
+	}
+
 	if req.Database != "" && s.Session != nil {
 		_ = s.Session.SelectDatabase(ctx, req.Database)
 	}
@@ -328,8 +346,8 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	// 1. Safety Guard Inspection
 	inspection := safety.Inspect(trimmedSQL, s.Environment)
 
-	// 2. Read-Only Enforcement
-	if s.ReadOnly && inspection.IsDestructive {
+	// 2. Read-Only Enforcement: blocks all destructive operations or any mutation when locked
+	if s.ReadOnly && (!isSelect || inspection.IsDestructive) {
 		return nil, ErrReadOnlySession
 	}
 
@@ -366,10 +384,10 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	// 4. Pre-DDL Automated Backup
 	var backupFile string
 	var backupDataIncluded bool
-	if inspection.Operation == "DROP" || inspection.Operation == "TRUNCATE" {
+	if (inspection.Operation == "DROP" || inspection.Operation == "TRUNCATE") && !strings.EqualFold(inspection.TargetType, "DATABASE") && !strings.EqualFold(inspection.TargetType, "VIEW") {
 		if inspection.TargetTable != "" && s.backupDir != "" && s.Session != nil {
 			var err error
-			backupFile, backupDataIncluded, err = safety.BackupTable(ctx, s.Session, s.backupDir, inspection.TargetTable)
+			backupFile, backupDataIncluded, err = safety.BackupTable(ctx, s.Session, s.backupDir, inspection.TargetTable, s.DriverName)
 			if err != nil {
 				// Log backup warning, proceed with explicit challenge confirmation
 			}
@@ -377,7 +395,6 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	}
 
 	start := time.Now()
-	upperSQL := strings.ToUpper(trimmedSQL)
 
 	queryID := req.QueryID
 	if queryID == "" {
@@ -478,10 +495,10 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	}
 
 	// Intercept explicit transaction statements to ensure connection pinning and prevent orphaned locks
-	cleanUpper := strings.TrimRight(upperSQL, ";")
-	isTxBegin := cleanUpper == "BEGIN" || cleanUpper == "START TRANSACTION" || cleanUpper == "BEGIN WORK"
-	isTxCommit := cleanUpper == "COMMIT" || cleanUpper == "COMMIT WORK"
-	isTxRollback := cleanUpper == "ROLLBACK" || cleanUpper == "ROLLBACK WORK"
+	cleanUpper = strings.TrimRight(strings.ToUpper(cleanSQL), "; \t\r\n")
+	isTxBegin := cleanUpper == "BEGIN" || cleanUpper == "START TRANSACTION" || cleanUpper == "BEGIN WORK" || cleanUpper == "BEGIN TRANSACTION"
+	isTxCommit := cleanUpper == "COMMIT" || cleanUpper == "COMMIT WORK" || cleanUpper == "COMMIT TRANSACTION"
+	isTxRollback := cleanUpper == "ROLLBACK" || cleanUpper == "ROLLBACK WORK" || cleanUpper == "ROLLBACK TRANSACTION"
 
 	if isTxBegin {
 		s.mu.Lock()
@@ -497,6 +514,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		}
 		s.activeTx = tx
 		s.txStartedAt = time.Now()
+		s.txLastActive = time.Now()
 		s.mu.Unlock()
 
 		return &ExecuteResponse{
@@ -563,12 +581,13 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	}
 
 	// 5. Route to Exec vs QueryStream
-	isSelect := strings.HasPrefix(upperSQL, "SELECT") || strings.HasPrefix(upperSQL, "SHOW") || strings.HasPrefix(upperSQL, "DESC") || strings.HasPrefix(upperSQL, "EXPLAIN")
-
 	// If transaction is active, execute strictly on pinned transaction connection
-	s.mu.RLock()
+	s.mu.Lock()
 	currentTx := s.activeTx
-	s.mu.RUnlock()
+	if currentTx != nil {
+		s.txLastActive = time.Now()
+	}
+	s.mu.Unlock()
 
 	if currentTx != nil {
 		if !isSelect {
@@ -605,6 +624,10 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 				allRows = append(allRows, chunk...)
 			}
 			if err != nil {
+				if err != io.EOF {
+					execErr = err
+					return nil, err
+				}
 				break
 			}
 		}
@@ -667,6 +690,10 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 			allRows = append(allRows, chunk...)
 		}
 		if err != nil {
+			if err != io.EOF {
+				execErr = err
+				return nil, err
+			}
 			break
 		}
 	}
@@ -761,12 +788,16 @@ func (s *ActiveSession) Stream(ctx context.Context, sql string, maxRows int) (dr
 		return nil, errors.New("sql query is required")
 	}
 
+	isSelect := driver.IsQueryStatement(trimmedSQL)
 	inspection := safety.Inspect(trimmedSQL, s.Environment)
-	if s.ReadOnly && inspection.IsDestructive {
+	if s.ReadOnly && (!isSelect || inspection.IsDestructive) {
 		return nil, ErrReadOnlySession
 	}
 	if inspection.IsDestructive || inspection.RequiresChallenge {
 		return nil, fmt.Errorf("destructive query cannot be streamed: %s; use query editor with confirmation", inspection.Reason)
+	}
+	if !isSelect {
+		return nil, errors.New("only query statements (SELECT, SHOW, DESCRIBE, EXPLAIN) can be streamed")
 	}
 
 	if maxRows <= 0 {

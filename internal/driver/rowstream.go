@@ -35,6 +35,9 @@ func (r *SQLRowStream) NextChunk(batchSize int) ([][]any, error) {
 
 	for len(chunk) < batchSize {
 		if !r.rows.Next() {
+			if err := r.rows.Err(); err != nil {
+				return chunk, err
+			}
 			if len(chunk) > 0 {
 				return chunk, nil
 			}

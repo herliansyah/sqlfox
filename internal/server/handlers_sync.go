@@ -585,8 +585,8 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 				for rIdx, row := range chunk {
 					ph := make([]string, len(row))
 					for cIdx, val := range row {
-						ph[cIdx] = "?"
 						args = append(args, val)
+						ph[cIdx] = driver.Placeholder(tgtDriver, len(args))
 					}
 					rowPlaceholders[rIdx] = "(" + strings.Join(ph, ", ") + ")"
 				}
@@ -942,7 +942,7 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 		case "insert":
 			placeholders := make([]string, len(op.Data))
 			for i := range op.Data {
-				placeholders[i] = "?"
+				placeholders[i] = driver.Placeholder(tgtDriver, i+1)
 			}
 			sql := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
 				quoteIdent(req.Table, tgtDriver),
@@ -958,11 +958,13 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 		case "update":
 			var setClauses []string
 			var args []any
+			pIdx := 1
 			for i, c := range tgtTbl.Columns {
 				if c.IsPrimaryKey {
 					continue
 				}
-				setClauses = append(setClauses, fmt.Sprintf("%s = ?", quoteIdent(c.Name, tgtDriver)))
+				setClauses = append(setClauses, fmt.Sprintf("%s = %s", quoteIdent(c.Name, tgtDriver), driver.Placeholder(tgtDriver, pIdx)))
+				pIdx++
 				if i < len(op.Data) {
 					args = append(args, op.Data[i])
 				} else {
@@ -970,10 +972,11 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			args = append(args, op.PK)
-			sql := fmt.Sprintf("UPDATE %s SET %s WHERE %s = ?",
+			sql := fmt.Sprintf("UPDATE %s SET %s WHERE %s = %s",
 				quoteIdent(req.Table, tgtDriver),
 				strings.Join(setClauses, ", "),
 				quoteIdent(pkCol, tgtDriver),
+				driver.Placeholder(tgtDriver, pIdx),
 			)
 			if _, err := tgtSess.Session.Exec(ctx, sql, args...); err != nil {
 				errors = append(errors, fmt.Sprintf("update error (pk %v): %s", op.PK, err.Error()))
@@ -982,9 +985,10 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 			}
 
 		case "delete":
-			sql := fmt.Sprintf("DELETE FROM %s WHERE %s = ?",
+			sql := fmt.Sprintf("DELETE FROM %s WHERE %s = %s",
 				quoteIdent(req.Table, tgtDriver),
 				quoteIdent(pkCol, tgtDriver),
+				driver.Placeholder(tgtDriver, 1),
 			)
 			if _, err := tgtSess.Session.Exec(ctx, sql, op.PK); err != nil {
 				errors = append(errors, fmt.Sprintf("delete error (pk %v): %s", op.PK, err.Error()))

@@ -220,3 +220,103 @@ func TestQueryStream_WithQueryIDCancellation(t *testing.T) {
 	_ = stream.Close()
 }
 
+func TestPlaceholder_Dialects(t *testing.T) {
+	if p := driver.Placeholder("postgres", 1); p != "$1" {
+		t.Fatalf("expected $1, got %s", p)
+	}
+	if p := driver.Placeholder("PostgreSQL", 5); p != "$5" {
+		t.Fatalf("expected $5, got %s", p)
+	}
+	if p := driver.Placeholder("pg", 2); p != "$2" {
+		t.Fatalf("expected $2, got %s", p)
+	}
+	if p := driver.Placeholder("mysql", 1); p != "?" {
+		t.Fatalf("expected ?, got %s", p)
+	}
+	if p := driver.Placeholder("sqlite", 3); p != "?" {
+		t.Fatalf("expected ?, got %s", p)
+	}
+}
+
+func TestFormatSQLValue_Booleans(t *testing.T) {
+	if v := driver.FormatSQLValue(true); v != "TRUE" {
+		t.Fatalf("expected TRUE, got %s", v)
+	}
+	if v := driver.FormatSQLValue(false); v != "FALSE" {
+		t.Fatalf("expected FALSE, got %s", v)
+	}
+}
+
+func TestHasLimitClause(t *testing.T) {
+	if !driver.HasLimitClause("SELECT * FROM users LIMIT 10") {
+		t.Fatal("expected true for explicit LIMIT 10")
+	}
+	if !driver.HasLimitClause("SELECT * FROM users limit 50;") {
+		t.Fatal("expected true for explicit limit 50")
+	}
+	if driver.HasLimitClause("SELECT id, credit_limit FROM accounts") {
+		t.Fatal("expected false for column name containing limit")
+	}
+	if driver.HasLimitClause("SELECT * FROM users WHERE status = 'UNLIMITED'") {
+		t.Fatal("expected false for string containing UNLIMITED")
+	}
+}
+
+func TestStripLeadingComments(t *testing.T) {
+	cases := []struct {
+		input    string
+		expected string
+	}{
+		{"-- line comment\nSELECT 1", "SELECT 1"},
+		{"/* block comment */ SELECT 2", "SELECT 2"},
+		{"# mysql comment\nSELECT 3", "SELECT 3"},
+		{"-- c1\n/* c2 */\n# c3\nSELECT 4", "SELECT 4"},
+		{"   \n\t-- c1\n  SELECT 5", "SELECT 5"},
+		{"SELECT 6", "SELECT 6"},
+		{"-- only comment", ""},
+	}
+	for _, tc := range cases {
+		out := driver.StripLeadingComments(tc.input)
+		if out != tc.expected {
+			t.Fatalf("StripLeadingComments(%q) = %q, want %q", tc.input, out, tc.expected)
+		}
+	}
+}
+
+func TestIsQueryStatement(t *testing.T) {
+	queries := []string{
+		"SELECT * FROM tbl",
+		"-- comment\nSELECT * FROM tbl",
+		"/* block */ SHOW TABLES",
+		"(SELECT 1)",
+		"((SELECT 1))",
+		"DESCRIBE users",
+		"EXPLAIN SELECT 1",
+		"PRAGMA table_info('items')",
+		"WITH cte AS (SELECT 1) SELECT * FROM cte",
+		"VALUES (1, 2)",
+		"TABLE my_table",
+	}
+	for _, q := range queries {
+		if !driver.IsQueryStatement(q) {
+			t.Fatalf("expected IsQueryStatement(%q) = true", q)
+		}
+	}
+
+	mutations := []string{
+		"INSERT INTO tbl VALUES (1)",
+		"-- comment\nINSERT INTO tbl VALUES (1)",
+		"UPDATE tbl SET a = 1",
+		"DELETE FROM tbl",
+		"DROP TABLE tbl",
+		"ALTER TABLE tbl ADD COLUMN c INT",
+		"CREATE TABLE tbl (id INT)",
+		"TRUNCATE TABLE tbl",
+	}
+	for _, m := range mutations {
+		if driver.IsQueryStatement(m) {
+			t.Fatalf("expected IsQueryStatement(%q) = false", m)
+		}
+	}
+}
+

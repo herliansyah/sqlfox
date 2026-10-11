@@ -25,6 +25,7 @@ type InspectionResult struct {
 	IsDestructive     bool                           `json:"is_destructive"`
 	RequiresChallenge bool                           `json:"requires_challenge"`
 	TargetTable       string                         `json:"target_table,omitempty"`
+	TargetType        string                         `json:"target_type,omitempty"`
 	Operation         string                         `json:"operation,omitempty"`
 	Reason            string                         `json:"reason,omitempty"`
 	Suggestion        string                         `json:"suggestion,omitempty"`
@@ -40,14 +41,19 @@ func Inspect(query string, environment string) *InspectionResult {
 		return &InspectionResult{RiskLevel: RiskNone}
 	}
 
+	clean := driver.StripLeadingComments(trimmed)
+	if clean == "" {
+		return &InspectionResult{RiskLevel: RiskNone}
+	}
+
 	// Try AST parsing first (Vitess parser)
-	stmt, err := sqlparser.Parse(trimmed)
+	stmt, err := sqlparser.Parse(clean)
 	if err == nil {
 		return inspectAST(stmt, environment)
 	}
 
 	// ponytail: Lexical fallback for statements Vitess parser doesn't cover (e.g. multi-statements or SQLite specific syntax); upgrade path: dedicated SQLite lexer
-	return inspectLexicalFallback(trimmed, environment)
+	return inspectLexicalFallback(clean, environment)
 }
 
 func inspectAST(stmt sqlparser.Statement, environment string) *InspectionResult {
@@ -141,11 +147,11 @@ func inspectAST(stmt sqlparser.Statement, environment string) *InspectionResult 
 }
 
 var (
-	reDrop     = regexp.MustCompile(`(?i)^\s*DROP\s+(TABLE|DATABASE|VIEW)\s+(IF\s+EXISTS\s+)?([` + "`" + `"'\w\.]+)`)
-	reTruncate = regexp.MustCompile(`(?i)^\s*TRUNCATE\s+(TABLE\s+)?([` + "`" + `"'\w\.]+)`)
-	reDelete   = regexp.MustCompile(`(?i)^\s*DELETE\s+FROM\s+([` + "`" + `"'\w\.]+)`)
-	reUpdate   = regexp.MustCompile(`(?i)^\s*UPDATE\s+([` + "`" + `"'\w\.]+)`)
-	reAlter    = regexp.MustCompile(`(?i)^\s*ALTER\s+TABLE\s+([` + "`" + `"'\w\.]+)`)
+	reDrop     = regexp.MustCompile(`(?i)^\s*DROP\s+(TABLE|DATABASE|VIEW)\s+(IF\s+EXISTS\s+)?([` + "`" + `"'\w\.\-]+)`)
+	reTruncate = regexp.MustCompile(`(?i)^\s*TRUNCATE\s+(TABLE\s+)?([` + "`" + `"'\w\.\-]+)`)
+	reDelete   = regexp.MustCompile(`(?i)^\s*DELETE\s+FROM\s+([` + "`" + `"'\w\.\-]+)`)
+	reUpdate   = regexp.MustCompile(`(?i)^\s*UPDATE\s+([` + "`" + `"'\w\.\-]+)`)
+	reAlter    = regexp.MustCompile(`(?i)^\s*ALTER\s+TABLE\s+([` + "`" + `"'\w\.\-]+)`)
 	reWhere    = regexp.MustCompile(`(?i)\bWHERE\b`)
 )
 
@@ -159,6 +165,7 @@ func inspectLexicalFallback(query string, environment string) *InspectionResult 
 			IsDestructive:     true,
 			RequiresChallenge: true,
 			TargetTable:       target,
+			TargetType:        strings.ToUpper(match[1]),
 			Operation:         "DROP",
 			Reason:            fmt.Sprintf("DROP statement will permanently delete '%s'.", target),
 		}

@@ -81,7 +81,7 @@ func (s *SQLiteSession) QueryStream(ctx context.Context, querySQL string, limit 
 	// Apply implicit safe limit if query is a SELECT without LIMIT
 	trimmed := strings.TrimSpace(querySQL)
 	upper := strings.ToUpper(trimmed)
-	if strings.HasPrefix(upper, "SELECT") && !strings.Contains(upper, "LIMIT") && limit > 0 {
+	if strings.HasPrefix(upper, "SELECT") && !driver.HasLimitClause(upper) && limit > 0 {
 		querySQL = fmt.Sprintf("%s LIMIT %d", strings.TrimSuffix(trimmed, ";"), limit)
 	}
 
@@ -196,7 +196,7 @@ func (t *sqliteTx) Rollback() error { return t.tx.Rollback() }
 func (t *sqliteTx) QueryStream(ctx context.Context, querySQL string, limit int) (driver.RowStream, error) {
 	trimmed := strings.TrimSpace(querySQL)
 	upper := strings.ToUpper(trimmed)
-	if strings.HasPrefix(upper, "SELECT") && !strings.Contains(upper, "LIMIT") && limit > 0 {
+	if strings.HasPrefix(upper, "SELECT") && !driver.HasLimitClause(upper) && limit > 0 {
 		querySQL = fmt.Sprintf("%s LIMIT %d", strings.TrimSuffix(trimmed, ";"), limit)
 	}
 

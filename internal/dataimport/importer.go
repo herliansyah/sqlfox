@@ -18,6 +18,7 @@ type ImportOptions struct {
 	EmptyAsNull bool              `json:"empty_as_null"`
 	SkipErrors  bool              `json:"skip_errors"`
 	Mapping     map[string]string `json:"mapping,omitempty"`
+	DriverName  string            `json:"driver_name,omitempty"`
 }
 
 // ImportResult contains statistics and errors from a completed import.
@@ -150,7 +151,7 @@ func Import(ctx context.Context, sess driver.Session, tableName string, r io.Rea
 		if len(currentBatch) == 0 {
 			return nil
 		}
-		imported, errs := executeBatchInsert(ctx, sess, tableName, targetColNames, currentBatch, opts.SkipErrors)
+		imported, errs := executeBatchInsert(ctx, sess, tableName, targetColNames, currentBatch, opts.SkipErrors, opts.DriverName)
 		importedRows += imported
 		skippedRows += len(currentBatch) - imported
 		if len(errs) > 0 {
@@ -230,22 +231,25 @@ func Import(ctx context.Context, sess driver.Session, tableName string, r io.Rea
 
 // executeBatchInsert executes a multi-row parameterized INSERT.
 // If skipErrors is true and the batch fails, it falls back to row-by-row insertion.
-func executeBatchInsert(ctx context.Context, sess driver.Session, tableName string, colNames []string, batch [][]any, skipErrors bool) (int, []string) {
+func executeBatchInsert(ctx context.Context, sess driver.Session, tableName string, colNames []string, batch [][]any, skipErrors bool, driverName ...string) (int, []string) {
 	if len(batch) == 0 {
 		return 0, nil
 	}
 
+	drv := "mysql"
+	if len(driverName) > 0 && driverName[0] != "" {
+		drv = driverName[0]
+	}
+
 	var sb strings.Builder
-	sb.WriteString("INSERT INTO `")
-	sb.WriteString(strings.ReplaceAll(tableName, "`", "``"))
-	sb.WriteString("` (")
+	sb.WriteString("INSERT INTO ")
+	sb.WriteString(driver.QuoteIdentifier(tableName, drv))
+	sb.WriteString(" (")
 	for i, c := range colNames {
 		if i > 0 {
 			sb.WriteString(", ")
 		}
-		sb.WriteString("`")
-		sb.WriteString(strings.ReplaceAll(c, "`", "``"))
-		sb.WriteString("`")
+		sb.WriteString(driver.QuoteIdentifier(c, drv))
 	}
 	sb.WriteString(") VALUES ")
 
@@ -258,11 +262,10 @@ func executeBatchInsert(ctx context.Context, sess driver.Session, tableName stri
 		}
 		for cIdx, val := range row {
 			if cIdx > 0 {
-				sb.WriteString(", ?")
-			} else {
-				sb.WriteString("?")
+				sb.WriteString(", ")
 			}
 			args = append(args, val)
+			sb.WriteString(driver.Placeholder(drv, len(args)))
 		}
 		sb.WriteString(")")
 	}
@@ -281,24 +284,21 @@ func executeBatchInsert(ctx context.Context, sess driver.Session, tableName stri
 	imported := 0
 
 	var singleSb strings.Builder
-	singleSb.WriteString("INSERT INTO `")
-	singleSb.WriteString(strings.ReplaceAll(tableName, "`", "``"))
-	singleSb.WriteString("` (")
+	singleSb.WriteString("INSERT INTO ")
+	singleSb.WriteString(driver.QuoteIdentifier(tableName, drv))
+	singleSb.WriteString(" (")
 	for i, c := range colNames {
 		if i > 0 {
 			singleSb.WriteString(", ")
 		}
-		singleSb.WriteString("`")
-		singleSb.WriteString(strings.ReplaceAll(c, "`", "``"))
-		singleSb.WriteString("`")
+		singleSb.WriteString(driver.QuoteIdentifier(c, drv))
 	}
 	singleSb.WriteString(") VALUES (")
 	for i := range colNames {
 		if i > 0 {
-			singleSb.WriteString(", ?")
-		} else {
-			singleSb.WriteString("?")
+			singleSb.WriteString(", ")
 		}
+		singleSb.WriteString(driver.Placeholder(drv, i+1))
 	}
 	singleSb.WriteString(")")
 	singleSQL := singleSb.String()

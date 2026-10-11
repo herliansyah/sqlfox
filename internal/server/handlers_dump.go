@@ -283,6 +283,7 @@ func splitSQLStatements(reader io.Reader) []string {
 	inSingleQuote := false
 	inDoubleQuote := false
 	inBacktick := false
+	inDollarQuote := false
 	inBlockComment := false
 
 	for scanner.Scan() {
@@ -290,7 +291,7 @@ func splitSQLStatements(reader io.Reader) []string {
 		trimmedLine := strings.TrimSpace(line)
 
 		// Check for line comments when not inside quotes or block comment
-		if !inSingleQuote && !inDoubleQuote && !inBacktick && !inBlockComment {
+		if !inSingleQuote && !inDoubleQuote && !inBacktick && !inDollarQuote && !inBlockComment {
 			if strings.HasPrefix(trimmedLine, "--") || strings.HasPrefix(trimmedLine, "#") {
 				continue
 			}
@@ -301,7 +302,7 @@ func splitSQLStatements(reader io.Reader) []string {
 			r := runes[i]
 
 			// Handle block comments
-			if !inSingleQuote && !inDoubleQuote && !inBacktick {
+			if !inSingleQuote && !inDoubleQuote && !inBacktick && !inDollarQuote {
 				if inBlockComment {
 					if r == '*' && i+1 < len(runes) && runes[i+1] == '/' {
 						inBlockComment = false
@@ -319,26 +320,38 @@ func splitSQLStatements(reader io.Reader) []string {
 
 			// Handle quotes
 			if !inBlockComment {
-				if r == '\'' && !inDoubleQuote && !inBacktick {
+				if r == '$' && i+1 < len(runes) && runes[i+1] == '$' && !inSingleQuote && !inDoubleQuote && !inBacktick {
+					inDollarQuote = !inDollarQuote
+					currentStmt.WriteString("$$")
+					i++
+					continue
+				} else if r == '\'' && !inDoubleQuote && !inBacktick && !inDollarQuote {
+					if inSingleQuote && i+1 < len(runes) && runes[i+1] == '\'' {
+						// Doubled single quote escape '' inside string
+						currentStmt.WriteRune('\'')
+						currentStmt.WriteRune('\'')
+						i++
+						continue
+					}
 					// Check for escape \'
 					if i > 0 && runes[i-1] == '\\' {
 						// escaped quote
 					} else {
 						inSingleQuote = !inSingleQuote
 					}
-				} else if r == '"' && !inSingleQuote && !inBacktick {
+				} else if r == '"' && !inSingleQuote && !inBacktick && !inDollarQuote {
 					if i > 0 && runes[i-1] == '\\' {
 						// escaped quote
 					} else {
 						inDoubleQuote = !inDoubleQuote
 					}
-				} else if r == '`' && !inSingleQuote && !inDoubleQuote {
+				} else if r == '`' && !inSingleQuote && !inDoubleQuote && !inDollarQuote {
 					inBacktick = !inBacktick
 				}
 			}
 
 			// Statement terminator
-			if r == ';' && !inSingleQuote && !inDoubleQuote && !inBacktick && !inBlockComment {
+			if r == ';' && !inSingleQuote && !inDoubleQuote && !inBacktick && !inDollarQuote && !inBlockComment {
 				stmtStr := strings.TrimSpace(currentStmt.String())
 				if stmtStr != "" {
 					statements = append(statements, stmtStr)

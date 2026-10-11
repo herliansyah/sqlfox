@@ -143,69 +143,60 @@ func (s *PostgresSession) SelectDatabase(ctx context.Context, schemaName string)
 	return nil
 }
 
+func (s *PostgresSession) applyActiveSchema(ctx context.Context, conn *sql.Conn) {
+	s.mu.Lock()
+	schema := s.currentSchema
+	s.mu.Unlock()
+	if schema != "" {
+		_, _ = conn.ExecContext(ctx, fmt.Sprintf("SET search_path = %s", quoteIdentifier(schema)))
+	}
+}
+
 func (s *PostgresSession) QueryStream(ctx context.Context, querySQL string, limit int) (driver.RowStream, error) {
 	trimmed := strings.TrimSpace(querySQL)
 	upper := strings.ToUpper(trimmed)
-	if strings.HasPrefix(upper, "SELECT") && !strings.Contains(upper, "LIMIT") && limit > 0 {
+	if strings.HasPrefix(upper, "SELECT") && !driver.HasLimitClause(upper) && limit > 0 {
 		querySQL = fmt.Sprintf("%s LIMIT %d", strings.TrimSuffix(trimmed, ";"), limit)
 	}
 
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.applyActiveSchema(ctx, conn)
+
 	queryID := driver.QueryIDFromContext(ctx)
 	if queryID != "" {
-		conn, err := s.db.Conn(ctx)
-		if err == nil {
-			var pid int
-			_ = conn.QueryRowContext(ctx, "SELECT pg_backend_pid()").Scan(&pid)
-			if pid > 0 {
-				s.mu.Lock()
-				s.queryPids[queryID] = pid
-				s.mu.Unlock()
-			}
-			rows, qErr := conn.QueryContext(ctx, querySQL)
-			if qErr != nil {
-				s.mu.Lock()
-				delete(s.queryPids, queryID)
-				s.mu.Unlock()
-				conn.Close()
-				return nil, qErr
-			}
-			colTypes, cErr := rows.ColumnTypes()
-			if cErr != nil {
-				rows.Close()
-				s.mu.Lock()
-				delete(s.queryPids, queryID)
-				s.mu.Unlock()
-				conn.Close()
-				return nil, cErr
-			}
-			cols := make([]driver.ColumnDefinition, len(colTypes))
-			for i, ct := range colTypes {
-				nullable, _ := ct.Nullable()
-				cols[i] = driver.ColumnDefinition{
-					Name:     ct.Name(),
-					Type:     ct.DatabaseTypeName(),
-					Nullable: nullable,
-				}
-			}
-			cleanup := func() {
-				s.mu.Lock()
-				delete(s.queryPids, queryID)
-				s.mu.Unlock()
-				conn.Close()
-			}
-			return driver.NewSQLRowStream(rows, cols, cleanup), nil
+		var pid int
+		_ = conn.QueryRowContext(ctx, "SELECT pg_backend_pid()").Scan(&pid)
+		if pid > 0 {
+			s.mu.Lock()
+			s.queryPids[queryID] = pid
+			s.mu.Unlock()
 		}
 	}
 
-	rows, err := s.db.QueryContext(ctx, querySQL)
-	if err != nil {
-		return nil, err
+	rows, qErr := conn.QueryContext(ctx, querySQL)
+	if qErr != nil {
+		if queryID != "" {
+			s.mu.Lock()
+			delete(s.queryPids, queryID)
+			s.mu.Unlock()
+		}
+		conn.Close()
+		return nil, qErr
 	}
 
-	colTypes, err := rows.ColumnTypes()
-	if err != nil {
+	colTypes, cErr := rows.ColumnTypes()
+	if cErr != nil {
 		rows.Close()
-		return nil, err
+		if queryID != "" {
+			s.mu.Lock()
+			delete(s.queryPids, queryID)
+			s.mu.Unlock()
+		}
+		conn.Close()
+		return nil, cErr
 	}
 
 	cols := make([]driver.ColumnDefinition, len(colTypes))
@@ -217,54 +208,49 @@ func (s *PostgresSession) QueryStream(ctx context.Context, querySQL string, limi
 			Nullable: nullable,
 		}
 	}
-
-	return driver.NewSQLRowStream(rows, cols), nil
+	cleanup := func() {
+		if queryID != "" {
+			s.mu.Lock()
+			delete(s.queryPids, queryID)
+			s.mu.Unlock()
+		}
+		conn.Close()
+	}
+	return driver.NewSQLRowStream(rows, cols, cleanup), nil
 }
 
 func (s *PostgresSession) Exec(ctx context.Context, querySQL string, args ...any) (*driver.ExecResult, error) {
 	start := time.Now()
-	queryID := driver.QueryIDFromContext(ctx)
-	if queryID != "" {
-		conn, err := s.db.Conn(ctx)
-		if err == nil {
-			defer conn.Close()
-			var pid int
-			_ = conn.QueryRowContext(ctx, "SELECT pg_backend_pid()").Scan(&pid)
-			if pid > 0 {
-				s.mu.Lock()
-				s.queryPids[queryID] = pid
-				s.mu.Unlock()
-				defer func() {
-					s.mu.Lock()
-					delete(s.queryPids, queryID)
-					s.mu.Unlock()
-				}()
-			}
-			res, execErr := conn.ExecContext(ctx, querySQL, args...)
-			if execErr != nil {
-				return nil, execErr
-			}
-			duration := time.Since(start).Milliseconds()
-			rowsAff, _ := res.RowsAffected()
-			lastID, _ := res.LastInsertId()
-			return &driver.ExecResult{
-				RowsAffected: rowsAff,
-				LastInsertID: lastID,
-				ExecutionMs:  duration,
-				Message:      fmt.Sprintf("Query executed successfully. %d rows affected.", rowsAff),
-			}, nil
-		}
-	}
-
-	res, err := s.db.ExecContext(ctx, querySQL, args...)
+	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer conn.Close()
+	s.applyActiveSchema(ctx, conn)
 
+	queryID := driver.QueryIDFromContext(ctx)
+	if queryID != "" {
+		var pid int
+		_ = conn.QueryRowContext(ctx, "SELECT pg_backend_pid()").Scan(&pid)
+		if pid > 0 {
+			s.mu.Lock()
+			s.queryPids[queryID] = pid
+			s.mu.Unlock()
+			defer func() {
+				s.mu.Lock()
+				delete(s.queryPids, queryID)
+				s.mu.Unlock()
+			}()
+		}
+	}
+
+	res, execErr := conn.ExecContext(ctx, querySQL, args...)
+	if execErr != nil {
+		return nil, execErr
+	}
 	duration := time.Since(start).Milliseconds()
 	rowsAff, _ := res.RowsAffected()
 	lastID, _ := res.LastInsertId()
-
 	return &driver.ExecResult{
 		RowsAffected: rowsAff,
 		LastInsertID: lastID,
@@ -307,7 +293,7 @@ func (t *postgresTx) Rollback() error { return t.tx.Rollback() }
 func (t *postgresTx) QueryStream(ctx context.Context, querySQL string, limit int) (driver.RowStream, error) {
 	trimmed := strings.TrimSpace(querySQL)
 	upper := strings.ToUpper(trimmed)
-	if strings.HasPrefix(upper, "SELECT") && !strings.Contains(upper, "LIMIT") && limit > 0 {
+	if strings.HasPrefix(upper, "SELECT") && !driver.HasLimitClause(upper) && limit > 0 {
 		querySQL = fmt.Sprintf("%s LIMIT %d", strings.TrimSuffix(trimmed, ";"), limit)
 	}
 
@@ -1164,6 +1150,7 @@ func (s *PostgresSession) ExecSafeDDL(ctx context.Context, ddl string, lockTimeo
 		return nil, fmt.Errorf("failed to acquire dedicated postgres connection: %w", err)
 	}
 	defer conn.Close()
+	s.applyActiveSchema(ctx, conn)
 	defer func() {
 		// ponytail: Reset session lock_timeout to prevent pool state pollution
 		_, _ = conn.ExecContext(context.Background(), "RESET lock_timeout")
@@ -1416,9 +1403,11 @@ func generatePostgresCreateDDL(schema string, tbl driver.TableMetadata) string {
 
 	// Primary Key
 	var pkCols []string
+	pkColMap := make(map[string]bool)
 	for _, col := range tbl.Columns {
 		if col.IsPrimaryKey {
 			pkCols = append(pkCols, quoteIdentifier(col.Name))
+			pkColMap[strings.ToLower(col.Name)] = true
 		}
 	}
 	if len(pkCols) > 0 {
@@ -1442,6 +1431,18 @@ func generatePostgresCreateDDL(schema string, tbl driver.TableMetadata) string {
 	for _, idx := range tbl.Indexes {
 		if strings.HasSuffix(idx.Name, "_pkey") {
 			continue // Skip PK indexes
+		}
+		if len(pkColMap) > 0 && len(idx.Columns) == len(pkColMap) && idx.IsUnique {
+			allMatch := true
+			for _, c := range idx.Columns {
+				if !pkColMap[strings.ToLower(c)] {
+					allMatch = false
+					break
+				}
+			}
+			if allMatch {
+				continue
+			}
 		}
 		uniqueStr := ""
 		if idx.IsUnique {
