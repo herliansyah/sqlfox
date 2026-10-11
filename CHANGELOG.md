@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.6.0] - 2026-10-11
+
 ### Added
 - **Transaction Session Engine & Dedicated Connection Pinning (`internal/driver`, `internal/server`)**: Implemented `TxSession` driver interface with transaction isolation, context-based query cancellation, and row-stream cleanup across SQLite, MySQL, and PostgreSQL. Intercepts `BEGIN`/`COMMIT`/`ROLLBACK` statements to pin dedicated database connections per workspace tab, backed by an automated 60-second idle transaction rollback reaper and background session cleanup.
 
