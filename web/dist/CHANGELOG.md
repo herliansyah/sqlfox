@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **UI Glitch & Viewport Resilience Hardening**:
+  - **Context Menu Lifecycle & Mutual Exclusion**: Unified context menu dismissal via `closeAllContextMenus()` across Tab, Sidebar Table, Data Grid, and Processlist context menus, preventing multiple floating menus from rendering concurrently when right-clicking across workspace boundaries. Added coordinate clamping (`Math.max(10, ...)`) and `max-h-[85vh] overflow-y-auto` to `#grid-context-menu` to prevent long ENUM option lists from overflowing offscreen.
+  - **Tab Bar Compression Guard**: Enforced `shrink-0` on `#tabs-container` and `shrink-0 whitespace-nowrap tab-label` on tab items in `renderTabs()` per ADR-0048 to prevent flex squishing when numerous tabs are open.
+  - **Modal Dialog & Form Height Resilience**: Added `max-h-[90vh]` and `overflow-y-auto` across all dialogs and modals (`ddl-modal`, `app-native-dialog`, `connection-modal`, `ai-settings-modal`, `vault-modal`, `safety-challenge-modal`, `view-designer-dialog`, `trigger-designer-dialog`, `database-creator-dialog`, `safety-inspection-dialog`, `mock-data-dialog`, `structure-sync-dialog`, `data-sync-dialog`, `data-transfer-dialog`, `table-creator-dialog`, `smart-seed-dialog`, `run-sql-dialog`, `ddl-review-dialog`) and backdrop-click dismissal to ensure action buttons and footers remain visible and accessible on constrained screen heights or high zoom.
+  - **Processlist Lock Contention Indicator Synchronization**: Fixed view switcher in Processlist tab (`setProcesslistView`) to toggle `pl-lock-summary` instead of non-existent orphan IDs `pl-lock-banner` and `pl-no-lock-banner`, ensuring lock alert badges properly hide when switching away to digest/deadlock views.
+  - **Inline Attribute Single-Quote Sanitization**: Enhanced `escapeHtml` to escape single-quotes (`'`) as `&#39;`, preventing JavaScript syntax errors (`Uncaught SyntaxError: Unexpected identifier`) when values, usernames, or database identifiers containing apostrophes are rendered into inline `onclick` handlers.
+  - **New Tab Plus Button Flex Guard**: Enforced `shrink-0` on `#tabs-container` new query tab button (`+`) to prevent flex compression when multiple tabs are open.
+  - **Cluster Node Switcher Connection Auto-Fill**: Corrected target input IDs in `switchSessionToNode` from non-existent legacy IDs (`conn-host`, `conn-port`, `conn-name`) to modal elements (`modal-conn-host`, `modal-conn-port`, `modal-conn-name`), allowing one-click cluster node connections from the Galera/Cluster tab to properly populate the connection form.
+  - **Privilege Matrix Scope Handler**: Defined missing `onPrivScopeChanged()` function to eliminate unhandled `ReferenceError` when switching between Global (`*.*`) and Active Database scope in the User Accounts & Privilege Matrix dialog.
+  - **Inline Attribute Dataset Safety**: Replaced fragile inline string literal passing with HTML5 dataset attributes (`data-query`, `data-snippet`, `data-var`, `data-val`) across Root Blocker Inspector, Server Variables, Cluster Health checks, and Foreign Key Peek, completely eliminating JavaScript `SyntaxError` caused by browser attribute entity decoding on values containing single quotes, contractions, or newlines.
+  - **JSON Cell Viewer Viewport Resilience**: Added `overflow-y-auto`, resilient `min-h-[180px]`, and `resize-none` to `#json-cell-dialog` body to prevent action buttons and footer metadata from being pushed offscreen or clipped on compact displays.
+  - **Responsive Header Search Squeeze Protection**: Added responsive collapsing (`hidden xl:inline`) on Command Palette and Schema Search labels to retain clickable icon triggers while preventing right-side toolbar controls (Monitor, DB Tools, Settings, Notes, Copilot) from overflowing outside the viewport on <1280px displays.
+  - **Complete Backdrop Dismissal & Escape Coverage**: Added `table-creator-dialog`, `view-designer-dialog`, `trigger-designer-dialog`, `safety-inspection-dialog`, and `ddl-review-dialog` to the native backdrop click auto-dismiss listener and global Escape key teardown loop.
+  - **Notes Search Escape Isolation**: Handled `Escape` key inside `#notes-search-input` to clear query and blur with `event.stopPropagation()`, preventing unexpected collapse of the entire Notes Inbox drawer.
+  - **Universal Single-Quote Dataset Hardening**: Converted table, view, routine, and event items in Schema Explorer, database diagnostics maintenance buttons, table index/FK drop actions, and grid inline editing (`startInlineEdit`, `updateGridDraftCell`) to use HTML5 `dataset` attributes, eliminating `SyntaxError: missing ) after argument list` on identifiers containing apostrophes or quotes.
+
+
 ## [v0.5.2] - 2026-10-09
 
 ### Added

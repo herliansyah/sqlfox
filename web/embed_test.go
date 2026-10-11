@@ -891,3 +891,224 @@ func TestChangelogCheckForUpdatesButtonEmbedded(t *testing.T) {
 		t.Errorf("changelog modal must have a manual Check for Updates button")
 	}
 }
+
+func TestUIGlitchAndResilienceGuards(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(contentBytes)
+
+	// 1. Unified context menu cleanup & mutual exclusion
+	if !strings.Contains(content, "function closeAllContextMenus()") {
+		t.Errorf("expected closeAllContextMenus() to exist in index.html")
+	}
+	if !strings.Contains(content, "id=\"grid-context-menu\"") || !strings.Contains(content, "max-h-[85vh] overflow-y-auto") {
+		t.Errorf("expected grid-context-menu to have max-h-[85vh] and overflow-y-auto to prevent offscreen overflow")
+	}
+
+	// 2. Tab container and item non-shrinking resilience (ADR 0048)
+	if !strings.Contains(content, `id="tabs-container" class="flex items-center space-x-1 shrink-0"`) {
+		t.Errorf("expected #tabs-container to have shrink-0 to prevent flex compression when multiple tabs exist")
+	}
+	if !strings.Contains(content, "tab-label shrink-0 whitespace-nowrap") {
+		t.Errorf("expected tab items in renderTabs() to enforce tab-label shrink-0 whitespace-nowrap")
+	}
+
+	// 3. Dense modal dialogs height resilience
+	dialogs := []string{
+		`id="structure-sync-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-4xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto"`,
+		`id="data-sync-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-4xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto"`,
+		`id="data-transfer-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-2xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto"`,
+		`id="table-creator-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-4xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto"`,
+	}
+	for _, dlg := range dialogs {
+		if !strings.Contains(content, dlg) {
+			t.Errorf("expected dialog to enforce max-h-[90vh] overflow-y-auto: %s", dlg)
+		}
+	}
+
+	// 4. Scope change handler existence in Privilege Matrix
+	if !strings.Contains(content, "function onPrivScopeChanged()") {
+		t.Errorf("expected onPrivScopeChanged() to be defined to prevent ReferenceError when toggling scope in privilege matrix")
+	}
+
+	// 5. Cluster node session switcher input ID correctness
+	if strings.Contains(content, "document.getElementById('conn-host')") ||
+		strings.Contains(content, "document.getElementById('conn-port')") ||
+		strings.Contains(content, "document.getElementById('conn-name')") {
+		t.Errorf("switchSessionToNode references non-existent conn-host/conn-port/conn-name IDs instead of modal-conn-*")
+	}
+
+	// 6. Height resilience for modal forms and dialogs to prevent viewport overflow on smaller displays
+	additionalHeightGuards := []string{
+		`id="view-designer-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto"`,
+		`id="trigger-designer-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto"`,
+		`id="database-creator-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-md w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto"`,
+		`id="safety-inspection-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-lg w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto"`,
+		`id="connection-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 hidden"`,
+		`id="ai-settings-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 hidden"`,
+	}
+	for _, guard := range additionalHeightGuards {
+		if !strings.Contains(content, guard) {
+			t.Errorf("expected index.html to contain dialog height guard: %s", guard)
+		}
+	}
+	if !strings.Contains(content, `id="connection-modal"`) || !regexpMatch(`id="connection-modal"[\s\S]*?max-h-\[90vh\] overflow-y-auto`, content) {
+		t.Errorf("expected connection-modal inner container to enforce max-h-[90vh] overflow-y-auto")
+	}
+	if !strings.Contains(content, `id="ai-settings-modal"`) || !regexpMatch(`id="ai-settings-modal"[\s\S]*?max-h-\[90vh\] overflow-y-auto`, content) {
+		t.Errorf("expected ai-settings-modal inner container to enforce max-h-[90vh] overflow-y-auto")
+	}
+	if !strings.Contains(content, `id="vault-modal"`) || !regexpMatch(`id="vault-modal"[\s\S]*?max-h-\[90vh\] overflow-y-auto`, content) {
+		t.Errorf("expected vault-modal inner container to enforce max-h-[90vh] overflow-y-auto")
+	}
+	if !strings.Contains(content, `id="safety-challenge-modal"`) || !regexpMatch(`id="safety-challenge-modal"[\s\S]*?max-h-\[90vh\] overflow-y-auto`, content) {
+		t.Errorf("expected safety-challenge-modal inner container to enforce max-h-[90vh] overflow-y-auto")
+	}
+
+	// 7. Sidebar session & database dropdown mutual exclusion
+	if !strings.Contains(content, "toggleDatabaseDropdown(false);") || !strings.Contains(content, "toggleSessionDropdown(false);") {
+		t.Errorf("expected toggleSessionDropdown and toggleDatabaseDropdown to enforce mutual exclusion")
+	}
+}
+
+func TestComprehensiveUIGlitchGuards(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(contentBytes)
+
+	// 1. DDL modal inner container height resilience
+	if !regexpMatch(`id="ddl-modal"[^>]*>\s*<div class="[^"]*max-h-\[90vh\] overflow-y-auto`, content) {
+		t.Errorf("expected ddl-modal inner container to enforce max-h-[90vh] overflow-y-auto to prevent button clipping on compact displays")
+	}
+
+	// 2. Native app alert/confirm dialog height resilience
+	if !strings.Contains(content, `id="app-native-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-md w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto"`) {
+		t.Errorf("expected app-native-dialog to enforce max-h-[90vh] overflow-y-auto to prevent viewport overflow on long error messages")
+	}
+
+	// 3. Mock data dialog height resilience & backdrop click close
+	if !regexpMatch(`id="mock-data-dialog"[^>]*>\s*<div class="[^"]*max-h-\[85vh\]`, content) &&
+		!strings.Contains(content, `id="mock-data-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-0 outline-none max-w-md w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto"`) {
+		t.Errorf("expected mock-data-dialog to enforce height resilience")
+	}
+	if !regexpMatch(`\[[^\]]*'mock-data-dialog'[^\]]*\]\.forEach`, content) {
+		t.Errorf("expected mock-data-dialog to be included in backdrop click dismiss listeners")
+	}
+
+	// 4. Processlist view switcher must reference existing pl-lock-summary, not orphan pl-lock-banner
+	if strings.Contains(content, "document.getElementById('pl-lock-banner')") || strings.Contains(content, "document.getElementById('pl-no-lock-banner')") {
+		t.Errorf("critical UI glitch: setProcesslistView queries orphan pl-lock-banner instead of pl-lock-summary")
+	}
+
+	// 5. escapeHtml must escape single quotes (&#39;) to prevent JavaScript SyntaxError in inline onclick handlers
+	if !strings.Contains(content, "replace(/'/g, '&#39;')") {
+		t.Errorf("critical UI glitch: escapeHtml does not escape single quotes, risking SyntaxError in onclick attributes")
+	}
+
+	// 6. DDL modal backdrop click dismissal
+	if !strings.Contains(content, `id="ddl-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 hidden" onclick="if(event.target === this) closeDDLModal()"`) {
+		t.Errorf("expected ddl-modal to support backdrop click dismissal via onclick='if(event.target === this) closeDDLModal()'")
+	}
+
+	// 7. Tabs bar add tab '+' button shrink-0 resilience
+	if !regexpMatch(`<button onclick="addNewQueryTab\(\)" class="[^"]*shrink-0`, content) {
+		t.Errorf("expected new query tab '+' button to have shrink-0 to prevent flex compression")
+	}
+
+	// 8. Action handlers attribute safety against single-quote decode SyntaxError
+	if strings.Contains(content, `<button onclick="sendProcessQueryToEditor('${escapeHtml(tx.query || '')}')"`) {
+		t.Errorf("critical UI glitch: sendProcessQueryToEditor interpolates tx.query directly into inline JS string literal")
+	}
+	if !strings.Contains(content, `data-query="${escapeHtml(tx.query || '')}" onclick="sendProcessQueryToEditor(this.dataset.query)"`) {
+		t.Errorf("expected lock root blocker button to use data-query attribute")
+	}
+	if !strings.Contains(content, `peekForeignKey(event, this.dataset.table, this.dataset.col, this.dataset.reftable, this.dataset.refcol, this.dataset.val)`) {
+		t.Errorf("expected peekForeignKey to use dataset attributes to avoid single-quote decode SyntaxError on row values")
+	}
+
+	// 9. JSON Cell Viewer modal height resilience
+	if !regexpMatch(`id="json-cell-editor"[\s\S]*?resize-none`, content) {
+		t.Errorf("expected json-cell-editor to use resize-none to prevent manual vertical overflow")
+	}
+	if !regexpMatch(`id="json-cell-dialog"[\s\S]*?min-h-\[180px\][\s\S]*?overflow-y-auto`, content) {
+		t.Errorf("expected json-cell-dialog body to enforce min-h-[180px] and overflow-y-auto")
+	}
+
+	// 10. Backdrop click auto-dismiss listener inclusion
+	if !strings.Contains(content, "'note-composer-dialog'") || !strings.Contains(content, "'erd-dialog'") {
+		t.Errorf("expected note-composer-dialog and erd-dialog to be in backdrop auto-dismiss list")
+	}
+
+	// 11. Trigger sidebar dataset onclick handler safety
+	if strings.Contains(content, "onclick=\"openCreateTriggerModal('${escapeHtml(trg.name)}', ${escapeHtml(JSON.stringify(trg))})\"") {
+		t.Errorf("expected openCreateTriggerModal to use dataset and avoid inline JSON.stringify to prevent SyntaxError")
+	}
+	if !strings.Contains(content, `data-name="${escapeHtml(trg.name)}" onclick="openCreateTriggerModal(this.dataset.name)"`) {
+		t.Errorf("expected trigger item in sidebar to use data-name and openCreateTriggerModal(this.dataset.name)")
+	}
+
+	// 12. Operational dialogs included in backdrop dismissal loop
+	for _, opDlg := range []string{"'smart-seed-dialog'", "'run-sql-dialog'", "'structure-sync-dialog'", "'data-transfer-dialog'", "'data-sync-dialog'"} {
+		if !strings.Contains(content, opDlg) {
+			t.Errorf("expected %s to be included in backdrop auto-dismiss listener loop", opDlg)
+		}
+	}
+
+	// 13. Drop redundant index buttons dataset safety
+	if strings.Contains(content, "promptDropRedundantIndex(${JSON.stringify(item.drop_sql)") {
+		t.Errorf("expected promptDropRedundantIndex to use data-drop-sql and dataset attributes instead of inline JSON.stringify")
+	}
+
+	// 14. All utility dialogs included in backdrop dismissal loop
+	for _, dlg := range []string{"'table-creator-dialog'", "'view-designer-dialog'", "'trigger-designer-dialog'", "'safety-inspection-dialog'", "'ddl-review-dialog'"} {
+		if !strings.Contains(content, dlg) {
+			t.Errorf("expected %s to be included in backdrop auto-dismiss listener loop", dlg)
+		}
+	}
+
+	// 15. Escape key handling includes safety-inspection-dialog and ddl-review-dialog
+	if !regexpMatch(`\['erd-dialog'[^\]]*'safety-inspection-dialog'[^\]]*'ddl-review-dialog'[^\]]*\]\.forEach`, content) {
+		t.Errorf("expected safety-inspection-dialog and ddl-review-dialog to be included in Escape key teardown loop")
+	}
+
+	// 16. Notes search input Escape key handling with event.stopPropagation
+	if !strings.Contains(content, `id="notes-search-input"`) || !strings.Contains(content, `clearNotesSearch(); this.blur(); event.stopPropagation();`) {
+		t.Errorf("expected notes-search-input to have onkeydown Escape handling with event.stopPropagation to prevent drawer collapse")
+	}
+
+	// 17. Schema tree table and view items dataset onclick safety
+	if strings.Contains(content, `onclick="openTableViewer('${escapeHtml(t.name)}')`) || strings.Contains(content, `onclick="openTableViewer('${escapeHtml(v.name)}')`) {
+		t.Errorf("critical UI glitch: openTableViewer interpolates table/view name directly into single-quoted string literal")
+	}
+	if !strings.Contains(content, `data-name="${escapeHtml(t.name)}" onclick="openTableViewer(this.dataset.name)"`) {
+		t.Errorf("expected schema tree table items to use data-name and openTableViewer(this.dataset.name)")
+	}
+
+	// 18. Virtual grid double-click inline edit dataset safety
+	if strings.Contains(content, `ondblclick="startInlineEdit(this, ${rIdx}, ${cIdx}, '${pkCol || ''}', '${tableName || ''}')"`) {
+		t.Errorf("critical UI glitch: startInlineEdit interpolates tableName into single-quoted string literal risking SyntaxError on quotes")
+	}
+	if !strings.Contains(content, `ondblclick="startInlineEdit(this, ${rIdx}, ${cIdx}, this.dataset.pk, this.dataset.table)"`) {
+		t.Errorf("expected grid cells to use dataset attributes for startInlineEdit")
+	}
+}
+
+
