@@ -106,6 +106,7 @@ func (s *Server) handleImportCSV(w http.ResponseWriter, r *http.Request) {
 		EmptyAsNull: emptyAsNullParam,
 		SkipErrors:  skipErrorsParam,
 		Mapping:     mapping,
+		DriverName:  sess.DriverName,
 	})
 	importDur := time.Since(importStart).Milliseconds()
 	if err != nil {

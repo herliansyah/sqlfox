@@ -162,3 +162,30 @@ INSERT INTO tags (id, name) VALUES (2, 'Sci-Fi');
 		t.Fatalf("expected 2 tags, got %d", len(tagRows.Rows))
 	}
 }
+
+func TestSplitSQLStatements_DoubledQuotesAndDollarQuotes(t *testing.T) {
+	script := `
+INSERT INTO logs (msg) VALUES ('Failed; couldn''t connect');
+CREATE FUNCTION hello() RETURNS text AS $$
+BEGIN
+    SELECT 'internal; semicolon';
+    RETURN 'ok';
+END;
+$$ LANGUAGE plpgsql;
+SELECT * FROM users;
+`
+	stmts := splitSQLStatements(strings.NewReader(script))
+	if len(stmts) != 3 {
+		t.Fatalf("expected exactly 3 statements, got %d: %+v", len(stmts), stmts)
+	}
+	if !strings.Contains(stmts[0], "couldn''t connect") {
+		t.Errorf("stmt 0 should preserve doubled quotes: %s", stmts[0])
+	}
+	if !strings.Contains(stmts[1], "$$") || !strings.Contains(stmts[1], "internal; semicolon") {
+		t.Errorf("stmt 1 should keep entire dollar block intact: %s", stmts[1])
+	}
+	if !strings.Contains(stmts[2], "SELECT * FROM users") {
+		t.Errorf("stmt 2 should be select: %s", stmts[2])
+	}
+}
+

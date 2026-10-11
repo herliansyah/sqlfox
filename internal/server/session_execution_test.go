@@ -145,12 +145,63 @@ func TestActiveSession_SafeExecutionPipeline(t *testing.T) {
 		SQL: "DROP TABLE logs;",
 	})
 	if err != ErrReadOnlySession {
-		t.Fatalf("expected ErrReadOnlySession, got: %v", err)
+		t.Fatalf("expected ErrReadOnlySession on DROP, got: %v", err)
 	}
 
+	_, err = sess.Execute(ctx, ExecuteRequest{
+		SQL: "INSERT INTO items (title, price) VALUES ('Evil', 0.0);",
+	})
+	if err != ErrReadOnlySession {
+		t.Fatalf("expected ErrReadOnlySession on INSERT, got: %v", err)
+	}
+
+	_, err = sess.Execute(ctx, ExecuteRequest{
+		SQL: "UPDATE items SET price = 9.99 WHERE id = 1;",
+	})
+	if err != ErrReadOnlySession {
+		t.Fatalf("expected ErrReadOnlySession on UPDATE, got: %v", err)
+	}
+
+	_, err = sess.Execute(ctx, ExecuteRequest{
+		SQL: "CREATE TABLE evil (id INT);",
+	})
+	if err != ErrReadOnlySession {
+		t.Fatalf("expected ErrReadOnlySession on CREATE TABLE, got: %v", err)
+	}
+
+	// SELECT must still be permitted in Read-Only mode
+	selRes, err := sess.Execute(ctx, ExecuteRequest{
+		SQL: "SELECT * FROM logs;",
+	})
+	if err != nil || selRes.Type != "query" {
+		t.Fatalf("expected SELECT to succeed in Read-Only mode, got: %v", err)
+	}
+
+	// Comment-prefixed SELECT must succeed and return rows in Read-Only mode
+	commentSel, err := sess.Execute(ctx, ExecuteRequest{
+		SQL: "-- check logs\n/* multiline */\nSELECT * FROM logs;",
+	})
+	if err != nil || commentSel.Type != "query" {
+		t.Fatalf("expected comment-prefixed SELECT to succeed in Read-Only mode, got: %v (%+v)", err, commentSel)
+	}
+
+	// PRAGMA query on SQLite must return rows as query type
+	pragmaRes, err := sess.Execute(ctx, ExecuteRequest{
+		SQL: "PRAGMA table_info('logs');",
+	})
+	if err != nil || pragmaRes.Type != "query" || len(pragmaRes.Rows) == 0 {
+		t.Fatalf("expected PRAGMA table_info to return query rows, got: %v (%+v)", err, pragmaRes)
+	}
+
+	// Stream must reject DDL and DML statements
 	_, err = sess.Stream(ctx, "DROP TABLE logs;", 100)
 	if err != ErrReadOnlySession {
 		t.Fatalf("expected ErrReadOnlySession on Stream, got: %v", err)
+	}
+
+	_, err = sess.Stream(ctx, "INSERT INTO items (id, title) VALUES (999, 'Hacked');", 100)
+	if err == nil {
+		t.Fatal("expected Stream to reject non-query INSERT")
 	}
 }
 
@@ -372,6 +423,39 @@ func TestActiveSession_TransactionLifecycle(t *testing.T) {
 	}
 	if rbRes.RowCount != 0 {
 		t.Fatalf("expected 0 rows after rollback, got %d", rbRes.RowCount)
+	}
+
+	// 8b. Test BEGIN TRANSACTION and COMMIT TRANSACTION syntax
+	bRes, err := sess.Execute(ctx, ExecuteRequest{SQL: "BEGIN TRANSACTION;"})
+	if err != nil || !strings.Contains(bRes.Message, "Transaction started") {
+		t.Fatalf("expected BEGIN TRANSACTION to start dedicated transaction, got: %v (msg: %v)", err, bRes)
+	}
+	_, _ = sess.Execute(ctx, ExecuteRequest{SQL: "INSERT INTO accounts (id, balance) VALUES (99, 123.0);"})
+	cRes2, err := sess.Execute(ctx, ExecuteRequest{SQL: "COMMIT TRANSACTION;"})
+	if err != nil || !strings.Contains(cRes2.Message, "committed") {
+		t.Fatalf("expected COMMIT TRANSACTION to succeed, got: %v", err)
+	}
+
+	// 8c. Test ROLLBACK TRANSACTION syntax
+	_, _ = sess.Execute(ctx, ExecuteRequest{SQL: "BEGIN TRANSACTION;"})
+	_, _ = sess.Execute(ctx, ExecuteRequest{SQL: "INSERT INTO accounts (id, balance) VALUES (100, 456.0);"})
+	_, err = sess.Execute(ctx, ExecuteRequest{SQL: "ROLLBACK TRANSACTION;"})
+	if err != nil {
+		t.Fatalf("expected ROLLBACK TRANSACTION to succeed, got: %v", err)
+	}
+	rRes, _ := sess.Execute(ctx, ExecuteRequest{SQL: "SELECT balance FROM accounts WHERE id = 100;"})
+	if rRes.RowCount != 0 {
+		t.Fatalf("expected 0 rows after ROLLBACK TRANSACTION, got %d", rRes.RowCount)
+	}
+
+	// 8d. Test BEGIN with leading comments
+	bResComment, err := sess.Execute(ctx, ExecuteRequest{SQL: "-- start tx\n/* block */\nBEGIN TRANSACTION;"})
+	if err != nil || !strings.Contains(bResComment.Message, "Transaction started") {
+		t.Fatalf("expected BEGIN with comments to start transaction, got: %v (msg: %v)", err, bResComment)
+	}
+	_, err = sess.Execute(ctx, ExecuteRequest{SQL: "ROLLBACK;"})
+	if err != nil {
+		t.Fatalf("expected ROLLBACK to succeed, got: %v", err)
 	}
 
 	// 9. Test Auto-Rollback on sess.Close()

@@ -137,66 +137,48 @@ func (s *MySQLSession) QueryStream(ctx context.Context, querySQL string, limit i
 	// Apply implicit safe limit for unbounded SELECTs
 	trimmed := strings.TrimSpace(querySQL)
 	upper := strings.ToUpper(trimmed)
-	if strings.HasPrefix(upper, "SELECT") && !strings.Contains(upper, "LIMIT") && limit > 0 {
+	if strings.HasPrefix(upper, "SELECT") && !driver.HasLimitClause(upper) && limit > 0 {
 		querySQL = fmt.Sprintf("%s LIMIT %d", strings.TrimSuffix(trimmed, ";"), limit)
 	}
 
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.applyActiveDatabase(ctx, conn)
+
 	queryID := driver.QueryIDFromContext(ctx)
 	if queryID != "" {
-		conn, err := s.db.Conn(ctx)
-		if err == nil {
-			var threadID int64
-			_ = conn.QueryRowContext(ctx, "SELECT CONNECTION_ID()").Scan(&threadID)
-			if threadID > 0 {
-				s.mu.Lock()
-				s.queryThreads[queryID] = threadID
-				s.mu.Unlock()
-			}
-			rows, qErr := conn.QueryContext(ctx, querySQL)
-			if qErr != nil {
-				s.mu.Lock()
-				delete(s.queryThreads, queryID)
-				s.mu.Unlock()
-				conn.Close()
-				return nil, qErr
-			}
-			colTypes, cErr := rows.ColumnTypes()
-			if cErr != nil {
-				rows.Close()
-				s.mu.Lock()
-				delete(s.queryThreads, queryID)
-				s.mu.Unlock()
-				conn.Close()
-				return nil, cErr
-			}
-			cols := make([]driver.ColumnDefinition, len(colTypes))
-			for i, ct := range colTypes {
-				nullable, _ := ct.Nullable()
-				cols[i] = driver.ColumnDefinition{
-					Name:     ct.Name(),
-					Type:     ct.DatabaseTypeName(),
-					Nullable: nullable,
-				}
-			}
-			cleanup := func() {
-				s.mu.Lock()
-				delete(s.queryThreads, queryID)
-				s.mu.Unlock()
-				conn.Close()
-			}
-			return driver.NewSQLRowStream(rows, cols, cleanup), nil
+		var threadID int64
+		_ = conn.QueryRowContext(ctx, "SELECT CONNECTION_ID()").Scan(&threadID)
+		if threadID > 0 {
+			s.mu.Lock()
+			s.queryThreads[queryID] = threadID
+			s.mu.Unlock()
 		}
 	}
 
-	rows, err := s.db.QueryContext(ctx, querySQL)
-	if err != nil {
-		return nil, err
+	rows, qErr := conn.QueryContext(ctx, querySQL)
+	if qErr != nil {
+		if queryID != "" {
+			s.mu.Lock()
+			delete(s.queryThreads, queryID)
+			s.mu.Unlock()
+		}
+		conn.Close()
+		return nil, qErr
 	}
 
-	colTypes, err := rows.ColumnTypes()
-	if err != nil {
+	colTypes, cErr := rows.ColumnTypes()
+	if cErr != nil {
 		rows.Close()
-		return nil, err
+		if queryID != "" {
+			s.mu.Lock()
+			delete(s.queryThreads, queryID)
+			s.mu.Unlock()
+		}
+		conn.Close()
+		return nil, cErr
 	}
 
 	cols := make([]driver.ColumnDefinition, len(colTypes))
@@ -208,52 +190,57 @@ func (s *MySQLSession) QueryStream(ctx context.Context, querySQL string, limit i
 			Nullable: nullable,
 		}
 	}
+	cleanup := func() {
+		if queryID != "" {
+			s.mu.Lock()
+			delete(s.queryThreads, queryID)
+			s.mu.Unlock()
+		}
+		conn.Close()
+	}
+	return driver.NewSQLRowStream(rows, cols, cleanup), nil
+}
 
-	return driver.NewSQLRowStream(rows, cols), nil
+func (s *MySQLSession) applyActiveDatabase(ctx context.Context, conn *sql.Conn) {
+	s.mu.Lock()
+	dbName := s.cfg.DatabaseName
+	s.mu.Unlock()
+	if dbName != "" {
+		_, _ = conn.ExecContext(ctx, fmt.Sprintf("USE `%s`", strings.ReplaceAll(dbName, "`", "``")))
+	}
 }
 
 func (s *MySQLSession) Exec(ctx context.Context, querySQL string, args ...any) (*driver.ExecResult, error) {
 	start := time.Now()
-	queryID := driver.QueryIDFromContext(ctx)
-	if queryID != "" {
-		conn, err := s.db.Conn(ctx)
-		if err == nil {
-			defer conn.Close()
-			var threadID int64
-			_ = conn.QueryRowContext(ctx, "SELECT CONNECTION_ID()").Scan(&threadID)
-			if threadID > 0 {
-				s.mu.Lock()
-				s.queryThreads[queryID] = threadID
-				s.mu.Unlock()
-				defer func() {
-					s.mu.Lock()
-					delete(s.queryThreads, queryID)
-					s.mu.Unlock()
-				}()
-			}
-			res, execErr := conn.ExecContext(ctx, querySQL, args...)
-			if execErr != nil {
-				return nil, execErr
-			}
-			rowsAffected, _ := res.RowsAffected()
-			lastInsertID, _ := res.LastInsertId()
-			return &driver.ExecResult{
-				RowsAffected: rowsAffected,
-				LastInsertID: lastInsertID,
-				ExecutionMs:  time.Since(start).Milliseconds(),
-				Message:      fmt.Sprintf("Query OK, %d rows affected.", rowsAffected),
-			}, nil
-		}
-	}
-
-	res, err := s.db.ExecContext(ctx, querySQL, args...)
+	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer conn.Close()
+	s.applyActiveDatabase(ctx, conn)
 
+	queryID := driver.QueryIDFromContext(ctx)
+	if queryID != "" {
+		var threadID int64
+		_ = conn.QueryRowContext(ctx, "SELECT CONNECTION_ID()").Scan(&threadID)
+		if threadID > 0 {
+			s.mu.Lock()
+			s.queryThreads[queryID] = threadID
+			s.mu.Unlock()
+			defer func() {
+				s.mu.Lock()
+				delete(s.queryThreads, queryID)
+				s.mu.Unlock()
+			}()
+		}
+	}
+
+	res, execErr := conn.ExecContext(ctx, querySQL, args...)
+	if execErr != nil {
+		return nil, execErr
+	}
 	rowsAffected, _ := res.RowsAffected()
 	lastInsertID, _ := res.LastInsertId()
-
 	return &driver.ExecResult{
 		RowsAffected: rowsAffected,
 		LastInsertID: lastInsertID,
@@ -296,7 +283,7 @@ func (t *mysqlTx) Rollback() error { return t.tx.Rollback() }
 func (t *mysqlTx) QueryStream(ctx context.Context, querySQL string, limit int) (driver.RowStream, error) {
 	trimmed := strings.TrimSpace(querySQL)
 	upper := strings.ToUpper(trimmed)
-	if strings.HasPrefix(upper, "SELECT") && !strings.Contains(upper, "LIMIT") && limit > 0 {
+	if strings.HasPrefix(upper, "SELECT") && !driver.HasLimitClause(upper) && limit > 0 {
 		querySQL = fmt.Sprintf("%s LIMIT %d", strings.TrimSuffix(trimmed, ";"), limit)
 	}
 
@@ -1318,7 +1305,8 @@ func (s *MySQLSession) InspectTableLocks(ctx context.Context, database, table st
 			IFNULL(p.STATE, ''), 
 			IFNULL(m.LOCK_TYPE, '')
 		FROM performance_schema.metadata_locks m
-		JOIN information_schema.processlist p ON m.OWNER_THREAD_ID = p.ID
+		JOIN performance_schema.threads pt ON m.OWNER_THREAD_ID = pt.THREAD_ID
+		JOIN information_schema.processlist p ON pt.PROCESSLIST_ID = p.ID
 		WHERE m.OBJECT_SCHEMA = ? AND m.OBJECT_NAME = ?
 	`
 	if rows, err := s.db.QueryContext(ctx, queryPfs, database, table); err == nil {
@@ -1379,6 +1367,7 @@ func (s *MySQLSession) ExecSafeDDL(ctx context.Context, ddl string, lockTimeoutS
 		return nil, fmt.Errorf("failed to obtain dedicated connection: %w", err)
 	}
 	defer conn.Close()
+	s.applyActiveDatabase(ctx, conn)
 	defer func() {
 		// ponytail: Reset session lock_wait_timeout back to DEFAULT before returning connection to pool
 		_, _ = conn.ExecContext(context.Background(), "SET SESSION lock_wait_timeout = DEFAULT")

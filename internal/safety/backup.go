@@ -15,9 +15,14 @@ const maxDataBackupBytes = 50 * 1024 * 1024 // 50 MB threshold
 
 // BackupTable performs a smart tiered backup: DDL always, and data if under 50MB.
 // ponytail: Pure stateless function replacing single-method BackupManager wrapper.
-func BackupTable(ctx context.Context, sess driver.Session, backupDir, tableName string) (string, bool, error) {
+func BackupTable(ctx context.Context, sess driver.Session, backupDir, tableName string, driverName ...string) (string, bool, error) {
 	if backupDir == "" {
 		backupDir = filepath.Join(".scratch", "backups")
+	}
+
+	drv := "mysql"
+	if len(driverName) > 0 && driverName[0] != "" {
+		drv = driverName[0]
 	}
 
 	if err := os.MkdirAll(backupDir, 0755); err != nil {
@@ -51,13 +56,13 @@ func BackupTable(ctx context.Context, sess driver.Session, backupDir, tableName 
 	dataIncluded := false
 	if err == nil && estimate.SizeBytes < maxDataBackupBytes && estimate.RowCount < 100000 {
 		// Dump rows
-		stream, err := sess.QueryStream(ctx, fmt.Sprintf("SELECT * FROM %s", tableName), 100000)
+		stream, err := sess.QueryStream(ctx, fmt.Sprintf("SELECT * FROM %s", driver.QuoteIdentifier(tableName, drv)), 100000)
 		if err == nil {
 			defer stream.Close()
 			cols := stream.Columns()
 			colNames := make([]string, len(cols))
 			for i, c := range cols {
-				colNames[i] = fmt.Sprintf("`%s`", c.Name)
+				colNames[i] = driver.QuoteIdentifier(c.Name, drv)
 			}
 			colsStr := strings.Join(colNames, ", ")
 
@@ -70,7 +75,8 @@ func BackupTable(ctx context.Context, sess driver.Session, backupDir, tableName 
 						for i, v := range row {
 							vals[i] = driver.FormatSQLValue(v)
 						}
-						insertSQL := fmt.Sprintf("INSERT INTO `%s` (%s) VALUES (%s);\n", tableName, colsStr, strings.Join(vals, ", "))
+						insertSQL := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s);\n",
+							driver.QuoteIdentifier(tableName, drv), colsStr, strings.Join(vals, ", "))
 						f.WriteString(insertSQL)
 					}
 				}

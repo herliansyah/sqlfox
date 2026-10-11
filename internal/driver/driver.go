@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -801,6 +802,79 @@ func QuoteIdentifier(name, driverName string) string {
 	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
 }
 
+// Placeholder returns the parameter placeholder for the given driver and 1-based index.
+func Placeholder(driverName string, index int) string {
+	d := strings.ToLower(driverName)
+	if strings.HasPrefix(d, "postgre") || d == "pg" {
+		return fmt.Sprintf("$%d", index)
+	}
+	return "?"
+}
+
+var reLimitClause = regexp.MustCompile(`(?i)\bLIMIT\s+\d+`)
+
+// HasLimitClause reports whether the SQL statement contains an explicit LIMIT clause.
+func HasLimitClause(sql string) bool {
+	return reLimitClause.MatchString(sql)
+}
+
+// StripLeadingComments removes leading whitespace and SQL comments (-- , #, and /* ... */).
+func StripLeadingComments(sql string) string {
+	s := strings.TrimSpace(sql)
+	for {
+		if strings.HasPrefix(s, "--") {
+			idx := strings.IndexByte(s, '\n')
+			if idx == -1 {
+				return ""
+			}
+			s = strings.TrimSpace(s[idx+1:])
+			continue
+		}
+		if strings.HasPrefix(s, "#") {
+			idx := strings.IndexByte(s, '\n')
+			if idx == -1 {
+				return ""
+			}
+			s = strings.TrimSpace(s[idx+1:])
+			continue
+		}
+		if strings.HasPrefix(s, "/*") {
+			idx := strings.Index(s, "*/")
+			if idx == -1 {
+				return ""
+			}
+			s = strings.TrimSpace(s[idx+2:])
+			continue
+		}
+		break
+	}
+	return s
+}
+
+// IsQueryStatement reports whether a SQL statement returns rows (SELECT, SHOW, DESC, EXPLAIN, WITH, PRAGMA, VALUES, TABLE, etc.).
+func IsQueryStatement(sql string) bool {
+	clean := StripLeadingComments(sql)
+	clean = strings.TrimLeft(clean, "(\t\r\n ")
+	upper := strings.ToUpper(clean)
+	if strings.HasPrefix(upper, "SELECT") ||
+		strings.HasPrefix(upper, "SHOW") ||
+		strings.HasPrefix(upper, "DESC") ||
+		strings.HasPrefix(upper, "EXPLAIN") ||
+		strings.HasPrefix(upper, "PRAGMA") ||
+		strings.HasPrefix(upper, "VALUES") ||
+		strings.HasPrefix(upper, "TABLE") ||
+		strings.HasPrefix(upper, "CHECK TABLE") ||
+		strings.HasPrefix(upper, "ANALYZE TABLE") ||
+		strings.HasPrefix(upper, "OPTIMIZE TABLE") ||
+		strings.HasPrefix(upper, "REPAIR TABLE") {
+		return true
+	}
+	if strings.HasPrefix(upper, "WITH") && !strings.Contains(upper, "INSERT ") && !strings.Contains(upper, "UPDATE ") && !strings.Contains(upper, "DELETE ") {
+		return true
+	}
+	return false
+}
+
 // FormatSQLValue formats a Go value into a valid SQL literal for dumps, inserts, and filters.
 func FormatSQLValue(val any) string {
 	if val == nil {
@@ -809,9 +883,9 @@ func FormatSQLValue(val any) string {
 	switch v := val.(type) {
 	case bool:
 		if v {
-			return "1"
+			return "TRUE"
 		}
-		return "0"
+		return "FALSE"
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 		return fmt.Sprintf("%d", v)
 	case float32, float64:

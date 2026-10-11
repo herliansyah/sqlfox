@@ -447,13 +447,9 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var targetTable string
+	targetTable := quoteIdent(tableName, sess.DriverName)
 	if targetDB != "" && sess.DriverName != "sqlite" {
-		targetTable = fmt.Sprintf("`%s`.`%s`", strings.ReplaceAll(targetDB, "`", "``"), strings.ReplaceAll(tableName, "`", "``"))
-	} else if sess.DriverName == "sqlite" {
-		targetTable = fmt.Sprintf(`"%s"`, strings.ReplaceAll(tableName, `"`, `""`))
-	} else {
-		targetTable = fmt.Sprintf("`%s`", strings.ReplaceAll(tableName, "`", "``"))
+		targetTable = quoteIdent(targetDB, sess.DriverName) + "." + targetTable
 	}
 
 	filter := strings.TrimSpace(r.URL.Query().Get("filter"))
@@ -474,11 +470,7 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 
 	var escSortCol string
 	if sortCol != "" {
-		if sess.DriverName == "sqlite" {
-			escSortCol = fmt.Sprintf(`"%s"`, strings.ReplaceAll(sortCol, `"`, `""`))
-		} else {
-			escSortCol = fmt.Sprintf("`%s`", strings.ReplaceAll(sortCol, "`", "``"))
-		}
+		escSortCol = quoteIdent(sortCol, sess.DriverName)
 	}
 
 	if lastKey != "" && pkCol != "" && sortCol == pkCol {
@@ -623,7 +615,7 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 		if db == "" {
 			db = req.Database
 		}
-		if db != "" {
+		if db != "" && sess.DriverName != "sqlite" {
 			tableRef = fmt.Sprintf("%s.%s", quoteIdent(db), quoteIdent(item.Table))
 		}
 

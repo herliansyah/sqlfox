@@ -2,14 +2,18 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
+	"sqlfox/internal/driver"
 	"sqlfox/internal/vault"
 )
 
@@ -156,4 +160,126 @@ func TestServer_InsertRowAndBatchDelete(t *testing.T) {
 	if fmt.Sprintf("%v", rowsResult.Rows[0][1]) != "Widget B" {
 		t.Fatalf("expected remaining row to be Widget B, got %v", rowsResult.Rows[0][1])
 	}
+
+	// 8. Test insert-row with explicit database name (must not fail on SQLite)
+	insertWithDB := map[string]any{
+		"database": targetDB,
+		"table":    "items",
+		"data": map[string]any{
+			"name":  "Widget D",
+			"stock": 40,
+		},
+	}
+	body, _ = json.Marshal(insertWithDB)
+	resp, err = client.Post(fmt.Sprintf("%s/api/session/%s/insert-row", ts.URL, conn.ID), "application/json", bytes.NewReader(body))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("insert-row with database failed on SQLite: status=%d, err=%v", resp.StatusCode, err)
+	}
+	resp.Body.Close()
+
+	// 9. Test cell-edit with explicit database name (must not fail on SQLite)
+	editWithDB := map[string]any{
+		"database":  targetDB,
+		"table":     "items",
+		"column":    "stock",
+		"value":     99,
+		"pk_column": "name",
+		"pk_value":  "Widget D",
+	}
+	body, _ = json.Marshal(editWithDB)
+	resp, err = client.Post(fmt.Sprintf("%s/api/session/%s/cell-edit", ts.URL, conn.ID), "application/json", bytes.NewReader(body))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("cell-edit with database failed on SQLite: status=%d, err=%v", resp.StatusCode, err)
+	}
+	resp.Body.Close()
+
+	// 10. Test delete-rows with explicit database name (must not fail on SQLite)
+	delWithDB := map[string]any{
+		"database":  targetDB,
+		"table":     "items",
+		"pk_column": "name",
+		"pk_values": []any{"Widget D"},
+	}
+	body, _ = json.Marshal(delWithDB)
+	resp, err = client.Post(fmt.Sprintf("%s/api/session/%s/delete-rows", ts.URL, conn.ID), "application/json", bytes.NewReader(body))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("delete-rows with database failed on SQLite: status=%d, err=%v", resp.StatusCode, err)
+	}
+	resp.Body.Close()
 }
+
+type mockCrudSession struct {
+	driver.Session
+	lastSQL  string
+	lastArgs []any
+}
+
+func (m *mockCrudSession) Exec(ctx context.Context, sql string, args ...any) (*driver.ExecResult, error) {
+	m.lastSQL = sql
+	m.lastArgs = args
+	return &driver.ExecResult{RowsAffected: 1, LastInsertID: 1}, nil
+}
+
+func (m *mockCrudSession) SelectDatabase(ctx context.Context, dbName string) error {
+	return nil
+}
+
+func TestServer_PostgresCRUDPlaceholders(t *testing.T) {
+	tempDir := t.TempDir()
+	v, err := vault.OpenVault(filepath.Join(tempDir, "config.db"), "pin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	srv := NewServer(v, nil, filepath.Join(tempDir, "backups"), "pin")
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	mockSess := &mockCrudSession{}
+	srv.sessionMgr.sessions["pg-1"] = &ActiveSession{
+		ID:         "pg-1",
+		DriverName: "postgres",
+		Session:    mockSess,
+		LastActive: time.Now(),
+	}
+
+	client := ts.Client()
+
+	// 1. Insert row on PostgreSQL
+	insBody, _ := json.Marshal(map[string]any{
+		"table": "users",
+		"data": map[string]any{
+			"username": "charlie",
+		},
+	})
+	resp, err := client.Post(ts.URL+"/api/session/pg-1/insert-row", "application/json", bytes.NewReader(insBody))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("insert failed: status=%d, err=%v", resp.StatusCode, err)
+	}
+	resp.Body.Close()
+
+	if !strings.Contains(mockSess.lastSQL, "$1") || strings.Contains(mockSess.lastSQL, "?") {
+		t.Fatalf("expected $1 placeholder for postgres insert, got: %s", mockSess.lastSQL)
+	}
+	if !strings.Contains(mockSess.lastSQL, `"users"`) || strings.Contains(mockSess.lastSQL, "`") {
+		t.Fatalf("expected double-quoted identifier for postgres, got: %s", mockSess.lastSQL)
+	}
+
+	// 2. Batch Delete on PostgreSQL
+	delBody, _ := json.Marshal(map[string]any{
+		"table":     "users",
+		"pk_column": "id",
+		"pk_values": []any{101, 102},
+	})
+	resp, err = client.Post(ts.URL+"/api/session/pg-1/delete-rows", "application/json", bytes.NewReader(delBody))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("delete failed: status=%d, err=%v", resp.StatusCode, err)
+	}
+	resp.Body.Close()
+
+	if !strings.Contains(mockSess.lastSQL, "IN ($1, $2)") || strings.Contains(mockSess.lastSQL, "?") {
+		t.Fatalf("expected IN ($1, $2) for postgres batch delete, got: %s", mockSess.lastSQL)
+	}
+}
+

@@ -50,7 +50,7 @@ func (s *Server) handleInsertRow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	targetTable := quoteIdent(req.Table, sess.DriverName)
-	if req.Database != "" {
+	if req.Database != "" && sess.DriverName != "sqlite" {
 		targetTable = quoteIdent(req.Database, sess.DriverName) + "." + targetTable
 	}
 
@@ -59,7 +59,7 @@ func (s *Server) handleInsertRow(w http.ResponseWriter, r *http.Request) {
 	var args []any
 	for col, val := range req.Data {
 		cols = append(cols, quoteIdent(col, sess.DriverName))
-		placeholders = append(placeholders, "?")
+		placeholders = append(placeholders, driver.Placeholder(sess.DriverName, len(placeholders)+1))
 		args = append(args, val)
 	}
 
@@ -121,7 +121,7 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 	}
 
 	targetTable := quoteIdent(req.Table, sess.DriverName)
-	if req.Database != "" {
+	if req.Database != "" && sess.DriverName != "sqlite" {
 		targetTable = quoteIdent(req.Database, sess.DriverName) + "." + targetTable
 	}
 
@@ -139,7 +139,7 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 		args := make([]any, len(req.PKValues))
 		valStrs := make([]string, len(req.PKValues))
 		for i, v := range req.PKValues {
-			placeholders[i] = "?"
+			placeholders[i] = driver.Placeholder(sess.DriverName, i+1)
 			args[i] = v
 			valStrs[i] = driver.FormatSQLValue(v)
 		}

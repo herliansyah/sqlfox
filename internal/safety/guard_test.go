@@ -97,6 +97,22 @@ func TestSafetyGuard_Inspect(t *testing.T) {
 			expectedChallenge: true,
 			expectedTable:     "page_views",
 		},
+		{
+			name:              "PostgreSQL DROP TABLE with leading comments",
+			query:             "-- Important migration\n/* block comment */\nDROP TABLE IF EXISTS \"analytics\".\"page_views\";",
+			env:               "Production",
+			expectedRisk:      RiskCritical,
+			expectedChallenge: true,
+			expectedTable:     "page_views",
+		},
+		{
+			name:              "Unqualified DELETE with leading comments",
+			query:             "-- purge data\nDELETE FROM customers;",
+			env:               "Development",
+			expectedRisk:      RiskCritical,
+			expectedChallenge: true,
+			expectedTable:     "customers",
+		},
 	}
 
 	for _, tc := range tests {
