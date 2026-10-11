@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Transaction Session Engine & Dedicated Connection Pinning (`internal/driver`, `internal/server`)**: Implemented `TxSession` driver interface with transaction isolation, context-based query cancellation, and row-stream cleanup across SQLite, MySQL, and PostgreSQL. Intercepts `BEGIN`/`COMMIT`/`ROLLBACK` statements to pin dedicated database connections per workspace tab, backed by an automated 60-second idle transaction rollback reaper and background session cleanup.
+
+### Security
+- **SQL Execution & Identifier Safety Hardening (`internal/safety`, `internal/driver`)**: Strips leading single-line (`--`) and multi-line (`/* ... */`) comments before safety classification to prevent rule-bypass; strictly sanitizes and dialect-escapes table and column identifiers across MySQL, PostgreSQL, and SQLite; restricts pre-execution auto-backups on `DROP`/`TRUNCATE` to physical tables (skipping views and databases); and blocks non-query statements on read-only sessions and `/stream` endpoints.
+
+### Changed
+- **CLI Row-Streaming Execution (`internal/cli`)**: Aligned headless query execution (`sqlfox query`) and data transfer (`sqlfox transfer`) CLI runners with driver row-streaming iterators, optimizing memory footprints and chunk throughput during large dataset dumps and transfers.
+
 ### Fixed
 - **UI Glitch & Viewport Resilience Hardening**:
   - **Context Menu Lifecycle & Mutual Exclusion**: Unified context menu dismissal via `closeAllContextMenus()` across Tab, Sidebar Table, Data Grid, and Processlist context menus, preventing multiple floating menus from rendering concurrently when right-clicking across workspace boundaries. Added coordinate clamping (`Math.max(10, ...)`) and `max-h-[85vh] overflow-y-auto` to `#grid-context-menu` to prevent long ENUM option lists from overflowing offscreen.
