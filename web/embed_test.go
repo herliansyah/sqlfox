@@ -1220,6 +1220,32 @@ func TestHeaderDropdownsAboveNotesDrawerEmbedded(t *testing.T) {
 	}
 }
 
+func TestBrandMarkCanonicalIconConsistency(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	// Verify old low-poly polygons are completely removed from index.html symbol
+	if strings.Contains(content, `points="256,140 200,140 108,48 170,180"`) {
+		t.Errorf("critical visual bug: index.html still embeds legacy low-poly fox facets in #sqlfox-brand-mark")
+	}
+
+	// Verify canonical Puma-style Leaping Fox mark is embedded inside #sqlfox-brand-mark
+	if !strings.Contains(content, `id="sqlfox-brand-mark"`) || !strings.Contains(content, `id="sqlfox-fox-mark"`) {
+		t.Errorf("expected #sqlfox-brand-mark symbol to contain #sqlfox-fox-mark path in index.html")
+	}
+}
+
+
 
 
 
