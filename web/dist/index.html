@@ -489,10 +489,7 @@
             <span id="session-switcher-name" class="font-medium text-white truncate">Select Connection</span>
             <span id="session-switcher-env-badge" class="hidden text-[9px] px-1 py-0.2 rounded border font-mono uppercase"></span>
           </div>
-          <div class="flex items-center space-x-1 shrink-0">
-            <button id="session-switcher-edit-btn" onclick="event.stopPropagation(); if(activeConnection) openEditConnModal(activeConnection.id);" class="opacity-0 group-hover:opacity-100 hover:text-white px-1 text-xs text-slate-400 transition" title="Edit Active Connection">✏️</button>
-            <span class="text-slate-500 group-hover:text-slate-300 text-[10px] ml-1">▼</span>
-          </div>
+          <span class="text-slate-500 group-hover:text-slate-300 text-[10px] ml-1 shrink-0">▼</span>
         </div>
 
         <!-- Session Dropdown / Popover -->
@@ -539,6 +536,10 @@
               <button type="button" id="database-search-clear-btn" onclick="clearDatabaseSearch()" class="hidden absolute right-2 text-slate-500 hover:text-slate-200 text-xs px-1 rounded transition cursor-pointer" title="Clear filter (Esc)">✕</button>
             </div>
             <button onclick="openCreateDatabaseModal(); toggleDatabaseDropdown(false);" class="shrink-0 bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-2 py-1 rounded text-xs transition" title="Create New Database">➕</button>
+            <button onclick="openRefreshAllModal(); toggleDatabaseDropdown(false);" class="shrink-0 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 px-2 py-1 rounded text-xs transition flex items-center space-x-1" title="Refresh All Catalogs (Synchronize Schema Cache)">
+              <span>🔄</span>
+              <span class="text-[10px] font-sans font-medium">All</span>
+            </button>
           </div>
           <div id="database-list-tree" class="overflow-y-auto max-h-52 space-y-0.5 text-xs font-mono">
           </div>
@@ -552,9 +553,12 @@
             <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Objects</span>
             <span id="table-count-badge" class="bg-slate-800 text-slate-400 px-1.5 py-0.2 rounded text-[10px] font-mono font-bold">0</span>
           </div>
-          <button onclick="refreshSchema()" title="Refresh Schema" class="text-slate-400 hover:text-white text-xs p-1 hover:bg-slate-800 rounded transition">
-            🔄
-          </button>
+          <div class="flex items-center space-x-1.5">
+            <span id="schema-cache-badge" class="hidden text-[10px] text-slate-500 font-mono" title="Last cached time"></span>
+            <button onclick="refreshSchema()" title="Refresh Schema (Active DB)" class="text-slate-400 hover:text-white text-xs p-1 hover:bg-slate-800 rounded transition">
+              🔄
+            </button>
+          </div>
         </div>
 
         <div id="schema-filter-container" class="relative flex items-center">
@@ -2720,6 +2724,68 @@
     </div>
   </dialog>
 
+  <!-- Refresh All Schema Catalogs Pre-flight Dialog -->
+  <dialog id="refresh-all-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-lg w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto">
+    <div class="space-y-4">
+      <div class="flex items-center space-x-2 border-b border-slate-800 pb-2">
+        <span class="text-xl">🔄</span>
+        <div>
+          <h3 class="text-sm font-bold text-white">Refresh All Schema Catalogs</h3>
+          <p class="text-[11px] text-slate-400">Synchronize local autocomplete & search catalog cache</p>
+        </div>
+      </div>
+
+      <!-- Feature Benefits Explanation Card -->
+      <div class="bg-slate-950/70 border border-slate-800 rounded-lg p-3 space-y-2 text-xs">
+        <div class="text-sky-400 font-semibold flex items-center space-x-1.5">
+          <span>💡</span>
+          <span>Why is this feature useful?</span>
+        </div>
+        <ul class="space-y-1.5 text-slate-300 text-[11px] list-disc list-inside">
+          <li><strong class="text-white">Cross-DB Autocomplete:</strong> Typing <code class="text-sky-300 font-mono">db.table</code> or <code class="text-sky-300 font-mono">table.col</code> triggers instant completions without manually opening other databases in the sidebar.</li>
+          <li><strong class="text-white">Global Search (Ctrl+P):</strong> Find tables, views, and columns across all server databases in real-time.</li>
+          <li><strong class="text-white">Zero Foreign Key Lock:</strong> Scans only lightweight table & column identifiers without issuing heavy relation scans (<code class="text-amber-300 font-mono">KEY_COLUMN_USAGE</code>).</li>
+          <li><strong class="text-white">Isolated Persistence:</strong> Cache is preserved per-session and never lost when switching active sessions.</li>
+        </ul>
+      </div>
+
+      <!-- Server Health & Safety Warning Section -->
+      <div id="refresh-all-health-container" class="rounded-lg p-3 text-xs border space-y-2">
+        <div class="flex items-center justify-between font-mono">
+          <span class="text-slate-400">Server Health Status:</span>
+          <span id="refresh-all-thread-count" class="font-bold">Checking...</span>
+        </div>
+        <div id="refresh-all-health-message" class="text-[11px] leading-relaxed"></div>
+      </div>
+
+      <!-- Confirmation Checkbox for 10-20 thread range -->
+      <div id="refresh-all-ack-container" class="hidden flex items-start space-x-2 bg-amber-950/30 border border-amber-800/60 p-2.5 rounded-lg text-xs text-amber-200">
+        <input type="checkbox" id="refresh-all-ack-checkbox" onchange="toggleRefreshAllProceedState()" class="mt-0.5 rounded border-amber-700 bg-amber-950 text-amber-500 focus:ring-0">
+        <label for="refresh-all-ack-checkbox" class="text-[11px] cursor-pointer select-none">
+          I understand the potential temporary server overhead and wish to proceed with the catalog refresh.
+        </label>
+      </div>
+
+      <!-- Progress bar container (during execution) -->
+      <div id="refresh-all-progress-container" class="hidden space-y-1.5 pt-1">
+        <div class="flex justify-between text-[11px] text-slate-400">
+          <span id="refresh-all-progress-label">Synchronizing catalogs...</span>
+          <span id="refresh-all-progress-counter" class="font-mono text-sky-400">0/0</span>
+        </div>
+        <div class="w-full bg-slate-950 rounded-full h-1.5 overflow-hidden border border-slate-800">
+          <div id="refresh-all-progress-bar" class="bg-app-accent h-full transition-all duration-300" style="width: 0%"></div>
+        </div>
+      </div>
+
+      <div class="flex justify-end space-x-2 pt-2 border-t border-slate-800">
+        <button id="refresh-all-btn-cancel" onclick="closeRefreshAllModal()" class="px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 rounded transition">Cancel</button>
+        <button id="refresh-all-btn-proceed" onclick="executeRefreshAll()" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-4 py-1.5 rounded text-xs transition disabled:opacity-50 disabled:cursor-not-allowed">
+          Proceed with Refresh All
+        </button>
+      </div>
+    </div>
+  </dialog>
+
   <!-- 8. Safety Guard Inspection Dialog (HTML5 <dialog>) -->
   <dialog id="safety-inspection-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-lg w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto">
     <div class="space-y-4">
@@ -3529,26 +3595,26 @@
   </div>
 
   <!-- Lock Contention & Root Blocker Inspector Modal (HTML5 <dialog>) -->
-  <dialog id="lock-inspector-dialog" onclick="if (event.target === this) closeLockInspectorModal()" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-0 outline-none max-w-4xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm overflow-hidden">
+  <dialog id="lock-inspector-dialog" onclick="if (event.target === this) closeLockInspectorModal()" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-0 outline-none max-w-6xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm overflow-hidden">
     <div class="flex flex-col max-h-[85vh]">
       <!-- Header -->
-      <div class="bg-slate-950 px-5 py-3 border-b border-slate-800 flex items-center justify-between flex-shrink-0">
-        <div class="flex items-center space-x-2.5">
-          <span class="text-xl">🔒</span>
+      <div class="bg-slate-950 px-6 py-3.5 border-b border-slate-800 flex items-center justify-between flex-shrink-0">
+        <div class="flex items-center space-x-3">
+          <span class="text-2xl">🔒</span>
           <div>
-            <h3 class="font-bold text-white text-sm flex items-center space-x-2">
+            <h3 class="font-bold text-white text-base flex items-center space-x-2.5">
               <span>Lock Contention &amp; Root Blocker Analysis</span>
-              <span id="lock-modal-badge" class="px-2 py-0.5 rounded bg-red-950 text-red-300 text-xs font-mono border border-red-800">0 Locks</span>
+              <span id="lock-modal-badge" class="px-2.5 py-0.5 rounded bg-red-950 text-red-300 text-xs font-mono font-semibold border border-red-800">0 Locks</span>
             </h3>
-            <p class="text-[11px] text-slate-400 font-mono" id="lock-modal-subtitle">Root blocker dependency graph &amp; waiting query mitigation</p>
+            <p class="text-xs text-slate-400 font-mono mt-0.5" id="lock-modal-subtitle">Root blocker dependency graph &amp; waiting query mitigation</p>
           </div>
         </div>
-        <button onclick="closeLockInspectorModal()" class="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-800 transition cursor-pointer" title="Close (Esc)">✕</button>
+        <button onclick="closeLockInspectorModal()" class="text-slate-400 hover:text-white p-1.5 rounded hover:bg-slate-800 transition cursor-pointer text-sm" title="Close (Esc)">✕</button>
       </div>
 
       <!-- Body -->
-      <div class="p-5 space-y-3 overflow-y-auto text-xs" id="lock-modal-content">
-        <div id="lock-modal-tree-list" class="space-y-2 font-mono text-xs">
+      <div class="p-6 space-y-4 overflow-y-auto" id="lock-modal-content">
+        <div id="lock-modal-tree-list" class="space-y-3 font-mono text-xs">
           <!-- Root blockers and waiting threads rendered dynamically -->
         </div>
       </div>
@@ -4810,6 +4876,8 @@
     // --- Connections & Session Management ---
     let sessionFilterQuery = '';
     let multiDBCatalogCache = {};
+    const sessionCatalogStore = {}; // Map of connId -> { [dbName]: schemaOrCatalog }
+    const sessionCatalogTimestamps = {}; // Map of connId -> { [dbName]: timestamp }
 
     async function loadConnections() {
       try {
@@ -4921,19 +4989,13 @@
       const el = document.getElementById('connections-tree');
       const switcherName = document.getElementById('session-switcher-name');
       const switcherEnvBadge = document.getElementById('session-switcher-env-badge');
-      const switcherEditBtn = document.getElementById('session-switcher-edit-btn');
 
       if (activeConnection) {
         if (switcherName) switcherName.textContent = activeConnection.name;
         if (switcherEnvBadge) switcherEnvBadge.classList.add('hidden'); // Free sidebar button from redundant badge
-        if (switcherEditBtn) {
-          switcherEditBtn.classList.remove('hidden');
-          switcherEditBtn.title = `Edit Connection: ${activeConnection.name}`;
-        }
       } else {
         if (switcherName) switcherName.textContent = 'Select Connection';
         if (switcherEnvBadge) switcherEnvBadge.classList.add('hidden');
-        if (switcherEditBtn) switcherEditBtn.classList.add('hidden');
       }
 
       if (!el) return;
@@ -4996,7 +5058,11 @@
         saveTabsState();
       }
       activeConnection = conn;
-      multiDBCatalogCache = {};
+      if (!sessionCatalogStore[conn.id]) {
+        sessionCatalogStore[conn.id] = {};
+        sessionCatalogTimestamps[conn.id] = {};
+      }
+      multiDBCatalogCache = sessionCatalogStore[conn.id];
       localStorage.setItem('sqlfox_last_conn_id', conn.id);
       renderConnectionsTree();
 
@@ -5071,22 +5137,38 @@
         // Index into multi-database catalog cache
         const activeDb = (schema.database_name || targetDB || 'default').toLowerCase();
         multiDBCatalogCache[activeDb] = schema;
+        if (!sessionCatalogTimestamps[connId]) sessionCatalogTimestamps[connId] = {};
+        sessionCatalogTimestamps[connId][activeDb] = Date.now();
+        updateSchemaTimestampBadge(activeDb);
 
-        // Lazily prefetch schemas of other databases in background sequentially
-        if (schema.databases && Array.isArray(schema.databases)) {
-          const queue = schema.databases.filter(d => d.toLowerCase() !== activeDb && !multiDBCatalogCache[d.toLowerCase()]);
+        // Fetch lightweight fast-catalog in background (only if not already populated)
+        // ponytail: fast-catalog inspects only tables and columns in a single query, eliminating heavy foreign key scans on background databases
+        const hasOtherDBs = Object.keys(multiDBCatalogCache).some(k => k !== activeDb);
+        if (!hasOtherDBs) {
           (async () => {
-            for (const db of queue) {
-              const lower = db.toLowerCase();
-              if (multiDBCatalogCache[lower]) continue;
-              try {
-                const r = await apiFetch(`/api/session/${connId}/schema?db=${encodeURIComponent(db)}`);
-                if (r.ok) {
-                  const otherSchema = await r.json();
-                  if (otherSchema) multiDBCatalogCache[lower] = otherSchema;
+            try {
+              const r = await apiFetch(`/api/session/${connId}/fast-catalog`);
+              if (r.ok) {
+                const fastCat = await r.json();
+                if (fastCat && typeof fastCat === 'object') {
+                  const now = Date.now();
+                  Object.keys(fastCat).forEach(dbKey => {
+                    const lk = dbKey.toLowerCase();
+                    if (!multiDBCatalogCache[lk]) {
+                      multiDBCatalogCache[lk] = {
+                        database_name: dbKey,
+                        databases: schema.databases || [],
+                        tables: fastCat[dbKey] || [],
+                        triggers: [],
+                        routines: [],
+                        events: []
+                      };
+                      sessionCatalogTimestamps[connId][lk] = now;
+                    }
+                  });
                 }
-              } catch (_) {}
-            }
+              }
+            } catch (_) {}
           })();
         }
 
@@ -5198,15 +5280,31 @@
       }
 
       const activeDb = schemaCatalogCache.database_name || '';
+      const connId = activeConnection ? activeConnection.id : '';
+      const tsMap = (connId && sessionCatalogTimestamps[connId]) ? sessionCatalogTimestamps[connId] : {};
+
       listEl.innerHTML = dbs.map(d => {
-        const isAct = d.toLowerCase() === activeDb.toLowerCase();
+        const lower = d.toLowerCase();
+        const isAct = lower === activeDb.toLowerCase();
+        const cached = !!(multiDBCatalogCache && multiDBCatalogCache[lower]);
+        const ts = tsMap[lower];
+        let cacheLabel = '';
+        if (cached && ts) {
+          const dt = new Date(ts);
+          cacheLabel = `${dt.getHours().toString().padStart(2,'0')}:${dt.getMinutes().toString().padStart(2,'0')}`;
+        }
+
         return `
           <div onclick="selectDatabase('${escapeHtml(d)}'); toggleDatabaseDropdown(false);" class="group flex items-center justify-between px-2 py-1.5 rounded cursor-pointer ${isAct ? 'bg-sky-950/60 text-app-accent font-bold border border-sky-800' : 'hover:bg-slate-800 text-slate-300'}">
             <span class="truncate flex items-center space-x-1.5">
               <span>🗄️</span>
               <span class="truncate">${escapeHtml(d)}</span>
             </span>
-            ${isAct ? '<span class="text-[9px] text-sky-400 uppercase font-mono">active</span>' : ''}
+            <div class="flex items-center space-x-1.5 shrink-0">
+              ${cacheLabel ? `<span class="text-[9px] text-slate-500 font-mono" title="Cached at ${cacheLabel}">⚡${cacheLabel}</span>` : ''}
+              ${isAct ? '<span class="text-[9px] text-sky-400 uppercase font-mono">active</span>' : ''}
+              <button onclick="event.stopPropagation(); refreshDatabaseCatalog('${escapeHtml(d)}');" class="opacity-0 group-hover:opacity-100 hover:text-white p-0.5 text-[10px] rounded hover:bg-slate-700 transition" title="Refresh ${escapeHtml(d)} catalog">🔄</button>
+            </div>
           </div>
         `;
       }).join('');
@@ -5914,10 +6012,241 @@
       });
     }
 
+    function updateSchemaTimestampBadge(dbName) {
+      const badge = document.getElementById('schema-cache-badge');
+      if (!badge) return;
+      const connId = activeConnection ? activeConnection.id : '';
+      const ts = (connId && sessionCatalogTimestamps[connId]) ? sessionCatalogTimestamps[connId][dbName.toLowerCase()] : null;
+      if (ts) {
+        const dt = new Date(ts);
+        const timeStr = `${dt.getHours().toString().padStart(2,'0')}:${dt.getMinutes().toString().padStart(2,'0')}`;
+        badge.textContent = `⚡${timeStr}`;
+        badge.title = `Cached at ${dt.toLocaleTimeString()}`;
+        badge.classList.remove('hidden');
+      } else {
+        badge.classList.add('hidden');
+      }
+    }
+
+    async function refreshDatabaseCatalog(dbName) {
+      if (!activeConnection || !dbName) return;
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/schema?db=${encodeURIComponent(dbName)}`);
+        if (res.ok) {
+          const sc = await res.json();
+          const lower = dbName.toLowerCase();
+          multiDBCatalogCache[lower] = sc;
+          if (!sessionCatalogTimestamps[activeConnection.id]) sessionCatalogTimestamps[activeConnection.id] = {};
+          sessionCatalogTimestamps[activeConnection.id][lower] = Date.now();
+          if (schemaCatalogCache && (schemaCatalogCache.database_name || '').toLowerCase() === lower) {
+            schemaCatalogCache = sc;
+            renderSchemaTree(sc);
+            updateSchemaTimestampBadge(dbName);
+          }
+          renderDatabaseDropdownList();
+        }
+      } catch (err) {
+        console.warn('refreshDatabaseCatalog error:', err);
+      }
+    }
+
     async function refreshSchema() {
       if (!activeConnection) return;
       await apiFetch(`/api/session/${activeConnection.id}/refresh-schema`, { method: 'POST' });
-      await loadSchemaTree(activeConnection.id);
+      const currentDB = schemaCatalogCache ? schemaCatalogCache.database_name : '';
+      await loadSchemaTree(activeConnection.id, currentDB);
+    }
+
+    // --- Refresh All Schema Catalogs with Active Threads Safety Guard ---
+    let refreshAllActiveThreads = 0;
+    let isExecutingRefreshAll = false;
+
+    async function openRefreshAllModal() {
+      if (!activeConnection) return;
+      const dialog = document.getElementById('refresh-all-dialog');
+      if (!dialog) return;
+
+      const threadCountEl = document.getElementById('refresh-all-thread-count');
+      const healthContainer = document.getElementById('refresh-all-health-container');
+      const msgEl = document.getElementById('refresh-all-health-message');
+      const ackContainer = document.getElementById('refresh-all-ack-container');
+      const ackCheckbox = document.getElementById('refresh-all-ack-checkbox');
+      const proceedBtn = document.getElementById('refresh-all-btn-proceed');
+      const progressContainer = document.getElementById('refresh-all-progress-container');
+
+      if (ackCheckbox) ackCheckbox.checked = false;
+      if (progressContainer) progressContainer.classList.add('hidden');
+      if (proceedBtn) {
+        proceedBtn.disabled = true;
+        proceedBtn.textContent = 'Mulai Refresh All';
+        proceedBtn.classList.remove('bg-rose-600', 'hover:bg-rose-500');
+        proceedBtn.classList.add('bg-app-accent', 'hover:bg-sky-400');
+      }
+
+      if (threadCountEl) threadCountEl.textContent = 'Checking...';
+      if (msgEl) msgEl.textContent = 'Connecting to database server...';
+      if (healthContainer) {
+        healthContainer.className = 'rounded-lg p-3 text-xs border space-y-2 bg-slate-950/50 border-slate-800 text-slate-300';
+      }
+
+      if (typeof dialog.showModal === 'function') {
+        dialog.showModal();
+      }
+
+      // Check active threads out-of-band
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/active-threads`);
+        if (!res.ok) throw new Error('Failed to inspect server workload status.');
+        const data = await res.json();
+        const threads = typeof data.active_threads === 'number' ? data.active_threads : 1;
+        refreshAllActiveThreads = threads;
+
+        if (threadCountEl) {
+          threadCountEl.textContent = `${threads} active query threads`;
+        }
+
+        if (threads < 10) {
+          // Level 1: < 10 threads -> Safe
+          if (healthContainer) {
+            healthContainer.className = 'rounded-lg p-3 text-xs border space-y-2 bg-emerald-950/30 border-emerald-800/60 text-emerald-300';
+          }
+          if (msgEl) {
+            msgEl.innerHTML = '✅ <strong>Safe Condition:</strong> Server workload is low (&lt; 10 active threads). It is safe to synchronize schema catalogs across all databases.';
+          }
+          if (ackContainer) ackContainer.classList.add('hidden');
+          if (proceedBtn) proceedBtn.disabled = false;
+        } else if (threads <= 20) {
+          // Level 2: 10 - 20 threads -> Severe Warning with mandatory ack
+          if (healthContainer) {
+            healthContainer.className = 'rounded-lg p-3 text-xs border space-y-2 bg-amber-950/40 border-amber-800/80 text-amber-200';
+          }
+          if (msgEl) {
+            msgEl.innerHTML = '⚠️ <strong>Elevated Workload Warning:</strong> Server is actively processing concurrent queries (10–20 threads). Full schema catalog refresh may incur temporary dictionary I/O overhead.';
+          }
+          if (ackContainer) ackContainer.classList.remove('hidden');
+          if (proceedBtn) proceedBtn.disabled = true; // Requires checkbox
+        } else {
+          // Level 3: > 20 threads -> HARD AUTO-BLOCK
+          if (healthContainer) {
+            healthContainer.className = 'rounded-lg p-3 text-xs border space-y-2 bg-rose-950/50 border-rose-800 text-rose-200';
+          }
+          if (msgEl) {
+            msgEl.innerHTML = '🚫 <strong>ACTION BLOCKED:</strong> Critical server workload detected (&gt; 20 active query threads). To safeguard production database performance and prevent thread queueing, Refresh All is restricted. Please retry when query traffic subsides.';
+          }
+          if (ackContainer) ackContainer.classList.add('hidden');
+          if (proceedBtn) {
+            proceedBtn.disabled = true;
+            proceedBtn.textContent = 'Blocked (Server Busy)';
+          }
+        }
+      } catch (err) {
+        if (threadCountEl) threadCountEl.textContent = 'N/A';
+        if (msgEl) msgEl.textContent = `Notice: Could not inspect active query threads (${err.message}).`;
+        if (proceedBtn) proceedBtn.disabled = false;
+      }
+    }
+
+    function toggleRefreshAllProceedState() {
+      const ackCheckbox = document.getElementById('refresh-all-ack-checkbox');
+      const proceedBtn = document.getElementById('refresh-all-btn-proceed');
+      if (proceedBtn && refreshAllActiveThreads >= 10 && refreshAllActiveThreads <= 20) {
+        proceedBtn.disabled = !ackCheckbox.checked;
+      }
+    }
+
+    function closeRefreshAllModal() {
+      const dialog = document.getElementById('refresh-all-dialog');
+      if (dialog && typeof dialog.close === 'function') {
+        dialog.close();
+      }
+    }
+
+    async function executeRefreshAll() {
+      if (!activeConnection || isExecutingRefreshAll) return;
+      isExecutingRefreshAll = true;
+
+      const proceedBtn = document.getElementById('refresh-all-btn-proceed');
+      const cancelBtn = document.getElementById('refresh-all-btn-cancel');
+      const progressContainer = document.getElementById('refresh-all-progress-container');
+      const progressLabel = document.getElementById('refresh-all-progress-label');
+      const progressCounter = document.getElementById('refresh-all-progress-counter');
+      const progressBar = document.getElementById('refresh-all-progress-bar');
+
+      if (proceedBtn) {
+        proceedBtn.disabled = true;
+        proceedBtn.textContent = 'Processing...';
+      }
+      if (cancelBtn) cancelBtn.disabled = true;
+      if (progressContainer) progressContainer.classList.remove('hidden');
+
+      try {
+        if (progressLabel) progressLabel.textContent = 'Fetching fast catalogs...';
+        if (progressBar) progressBar.style.width = '30%';
+
+        // 1. Fetch Fast-Catalog for all databases in single lightweight pass
+        const res = await apiFetch(`/api/session/${activeConnection.id}/fast-catalog`);
+        if (!res.ok) throw new Error('Failed to retrieve cross-database catalogs.');
+        const fastCat = await res.json();
+
+        const connId = activeConnection.id;
+        const now = Date.now();
+        if (!sessionCatalogTimestamps[connId]) sessionCatalogTimestamps[connId] = {};
+
+        const dbKeys = Object.keys(fastCat || {});
+        let count = 0;
+        const total = dbKeys.length;
+
+        for (const dbKey of dbKeys) {
+          count++;
+          const lk = dbKey.toLowerCase();
+          multiDBCatalogCache[lk] = {
+            database_name: dbKey,
+            databases: schemaCatalogCache ? schemaCatalogCache.databases : [],
+            tables: fastCat[dbKey] || [],
+            triggers: [],
+            routines: [],
+            events: []
+          };
+          sessionCatalogTimestamps[connId][lk] = now;
+
+          if (progressBar) progressBar.style.width = `${Math.round((count / total) * 100)}%`;
+          if (progressCounter) progressCounter.textContent = `${count}/${total}`;
+          if (progressLabel) progressLabel.textContent = `Caching ${dbKey}...`;
+
+          // Small throttling pace to yield to browser UI loop
+          await new Promise(r => setTimeout(r, 40));
+        }
+
+        // 2. Refresh active database with full schema if present
+        const activeDb = schemaCatalogCache ? schemaCatalogCache.database_name : '';
+        if (activeDb) {
+          if (progressLabel) progressLabel.textContent = `Refreshing active database (${activeDb})...`;
+          const actRes = await apiFetch(`/api/session/${connId}/schema?db=${encodeURIComponent(activeDb)}`);
+          if (actRes.ok) {
+            const sc = await actRes.json();
+            schemaCatalogCache = sc;
+            multiDBCatalogCache[activeDb.toLowerCase()] = sc;
+            sessionCatalogTimestamps[connId][activeDb.toLowerCase()] = Date.now();
+            renderSchemaTree(sc);
+            updateSchemaTimestampBadge(activeDb);
+          }
+        }
+
+        renderDatabaseDropdownList();
+        if (progressLabel) progressLabel.textContent = 'Complete! All schema catalogs synchronized.';
+        await new Promise(r => setTimeout(r, 600));
+        closeRefreshAllModal();
+        showToast('All database schema catalogs refreshed successfully.', 'success');
+      } catch (err) {
+        showNativeAlert('Failed to refresh catalogs:\n' + err.message, 'Refresh Error');
+      } finally {
+        isExecutingRefreshAll = false;
+        if (cancelBtn) cancelBtn.disabled = false;
+        if (proceedBtn) {
+          proceedBtn.disabled = false;
+          proceedBtn.textContent = 'Proceed with Refresh All';
+        }
+      }
     }
 
     // --- SQL Autocomplete & CodeMirror Engine ---
@@ -7640,35 +7969,43 @@
       listEl.innerHTML = locks.map(l => {
         if (l.is_root_blocker) {
           return `
-            <div class="p-3 bg-red-950/30 border border-red-800 rounded-lg flex flex-col space-y-2">
-              <div class="flex items-center justify-between">
-                <div class="flex items-center space-x-2">
-                  <span class="bg-red-600 text-white font-bold text-[10px] px-2 py-0.5 rounded">🚨 ROOT BLOCKER</span>
-                  <span class="font-bold text-white text-sm">Thread #${l.blocking_thread_id}</span>
-                  <span class="text-slate-400">(${escapeHtml(l.blocking_user || 'unknown')})</span>
-                  <span class="text-amber-400">holding ${escapeHtml(l.lock_mode || 'LOCK')}</span>
-                  ${l.locked_resource ? `<span class="text-sky-300">on ${escapeHtml(l.locked_resource)}</span>` : ''}
+            <div class="p-4 bg-red-950/30 border border-red-800 rounded-lg flex flex-col space-y-3">
+              <div class="flex flex-wrap items-center justify-between gap-2.5">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="bg-red-600 text-white font-bold text-xs px-2.5 py-0.5 rounded tracking-wide">🚨 ROOT BLOCKER</span>
+                  <span class="font-bold text-white text-base">Thread #${l.blocking_thread_id}</span>
+                  <span class="text-slate-400 text-xs">(${escapeHtml(l.blocking_user || 'unknown')})</span>
+                  <span class="text-amber-400 text-xs font-semibold px-2 py-0.5 bg-amber-950/60 rounded border border-amber-800/80">holding ${escapeHtml(l.lock_mode || 'LOCK')}</span>
+                  ${l.locked_resource ? `<span class="text-sky-300 text-xs font-mono px-2 py-0.5 bg-sky-950/60 rounded border border-sky-800/80">on ${escapeHtml(l.locked_resource)}</span>` : ''}
                 </div>
-                <div class="flex items-center space-x-2">
-                  <button onclick="confirmKillProcess(${l.blocking_thread_id}, 'query')" class="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold text-[11px] transition cursor-pointer">Kill Query</button>
-                  <button onclick="confirmKillProcess(${l.blocking_thread_id}, 'connection')" class="px-2.5 py-1 rounded bg-red-600 hover:bg-red-500 text-white font-bold text-[11px] transition cursor-pointer">Kill Blocker</button>
+                <div class="flex items-center space-x-2 shrink-0">
+                  <button onclick="confirmKillProcess(${l.blocking_thread_id}, 'query')" class="px-3 py-1 rounded bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold text-xs transition cursor-pointer">Kill Query</button>
+                  <button onclick="confirmKillProcess(${l.blocking_thread_id}, 'connection')" class="px-3 py-1 rounded bg-red-600 hover:bg-red-500 text-white font-bold text-xs transition cursor-pointer">Kill Blocker</button>
                 </div>
               </div>
-              ${l.blocking_query ? `<div class="p-2 bg-slate-950 rounded text-xs text-slate-300 font-mono whitespace-pre-wrap break-all border border-slate-800" title="${escapeHtml(l.blocking_query)}"><span class="text-slate-500 select-none">SQL: </span>${escapeHtml(l.blocking_query)}</div>` : ''}
-              <div class="pl-4 border-l-2 border-red-700/80 text-xs text-red-200 space-y-1">
-                <div>↳ Blocked: <span class="font-bold text-white">Thread #${l.waiting_thread_id}</span> (${escapeHtml(l.waiting_user || 'unknown')}) waiting ${l.waiting_seconds}s for ${escapeHtml(l.lock_mode || 'lock')}:</div>
-                <div class="text-slate-400 font-mono truncate">${escapeHtml(l.waiting_query || 'active query')}</div>
+              ${l.blocking_query ? `<div class="p-2.5 bg-slate-950 rounded text-[13px] leading-relaxed text-slate-300 font-mono whitespace-pre-wrap break-all border border-slate-800 max-h-48 overflow-y-auto" title="${escapeHtml(l.blocking_query)}"><span class="text-slate-500 select-none font-semibold">SQL: </span>${escapeHtml(l.blocking_query)}</div>` : ''}
+              <div class="pl-4 border-l-2 border-red-700/80 text-xs text-red-200 space-y-1.5 pt-0.5">
+                <div class="flex flex-wrap items-center gap-1.5 text-xs">
+                  <span>↳ Blocked:</span>
+                  <span class="font-bold text-white">Thread #${l.waiting_thread_id}</span>
+                  <span class="text-slate-300">(${escapeHtml(l.waiting_user || 'unknown')})</span>
+                  <span class="text-red-300">waiting <strong class="text-white">${l.waiting_seconds}s</strong> for ${escapeHtml(l.lock_mode || 'lock')}</span>
+                </div>
+                <div class="p-2 bg-slate-950/80 rounded text-xs text-slate-300 font-mono break-all border border-slate-800/80">${escapeHtml(l.waiting_query || 'active query')}</div>
               </div>
             </div>
           `;
         } else {
           return `
-            <div class="p-2.5 bg-slate-950/60 border border-slate-800 rounded-lg flex items-center justify-between text-xs">
-              <div class="truncate mr-3">
-                <span class="text-amber-400 font-bold">Thread #${l.waiting_thread_id}</span> waiting on <span class="text-red-400 font-bold">#${l.blocking_thread_id}</span> (${l.waiting_seconds}s)
-                ${l.locked_resource ? `- resource: <span class="text-sky-300">${escapeHtml(l.locked_resource)}</span>` : ''}
+            <div class="p-3.5 bg-slate-950/60 border border-slate-800 rounded-lg flex flex-wrap items-center justify-between gap-2.5 text-xs">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="text-amber-400 font-bold text-sm">Thread #${l.waiting_thread_id}</span>
+                <span class="text-slate-300">waiting on</span>
+                <span class="text-red-400 font-bold text-sm">#${l.blocking_thread_id}</span>
+                <span class="text-slate-400">(${l.waiting_seconds}s)</span>
+                ${l.locked_resource ? `<span class="text-sky-300 font-mono px-2 py-0.5 bg-sky-950/50 rounded border border-sky-800/60">resource: ${escapeHtml(l.locked_resource)}</span>` : ''}
               </div>
-              <button onclick="confirmKillProcess(${l.blocking_thread_id}, 'connection')" class="px-2 py-0.5 rounded bg-red-950 hover:bg-red-800 text-red-300 text-[11px] border border-red-800 transition whitespace-nowrap cursor-pointer">Kill Target #${l.blocking_thread_id}</button>
+              <button onclick="confirmKillProcess(${l.blocking_thread_id}, 'connection')" class="px-3 py-1 rounded bg-red-950 hover:bg-red-800 text-red-300 text-xs border border-red-800 transition whitespace-nowrap cursor-pointer shrink-0">Kill Target #${l.blocking_thread_id}</button>
             </div>
           `;
         }

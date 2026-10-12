@@ -24,10 +24,9 @@ assert(html.includes('class="opacity-0 group-hover:opacity-100 hover:text-white 
   'FAIL: connection tree edit button must use opacity-0 group-hover:opacity-100 transition');
 console.log("✅ Test 3 Passed: connection tree edit button uses opacity-0 group-hover:opacity-100");
 
-// 4. Session switcher bar contains edit button affordance
-assert(html.includes('id="session-switcher-edit-btn"'), 'FAIL: session-switcher-edit-btn must exist in session switcher bar');
-assert(html.includes('openEditConnModal(activeConnection.id)'), 'FAIL: session-switcher-edit-btn must call openEditConnModal');
-console.log("✅ Test 4 Passed: session switcher bar has edit button affordance");
+// 4. Session switcher bar does not have edit button (prevents misclick with dropdown arrow)
+assert(!html.includes('id="session-switcher-edit-btn"'), 'FAIL: session-switcher-edit-btn must be removed to avoid misclick with dropdown arrow');
+console.log("✅ Test 4 Passed: session switcher bar does not have misclickable edit button");
 
 // 5. Header active connection badge has edit button and click affordance
 assert(html.includes("badgeEl.onclick = () => openEditConnModal(conn.id)"), 'FAIL: badgeEl must open edit connection modal on click');
