@@ -7,9 +7,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"sqlfox/internal/vault"
+	"sqlfox/web"
 )
 
 func TestRemoteAccessGuard(t *testing.T) {
@@ -264,3 +266,87 @@ func TestMasterKeyLANExclusivity(t *testing.T) {
 		t.Fatalf("expected pin-123456, got: %v", resLAN["master_password"])
 	}
 }
+
+func TestRemoteAccessInitialPageLoad(t *testing.T) {
+	tempDir := t.TempDir()
+	v, err := vault.OpenVault(filepath.Join(tempDir, "config.db"), "test-pin-123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	srv := NewServer(v, web.Assets(), filepath.Join(tempDir, "backups"), "test-pin-123")
+	srv.SetLANEnabled(true)
+	handler := srv.Router()
+
+	// 1. Remote unauthenticated request to GET / (from LAN IP e.g. 192.168.1.100)
+	reqRemote := httptest.NewRequest("GET", "/", nil)
+	reqRemote.RemoteAddr = "192.168.1.100:54321"
+	recRemote := httptest.NewRecorder()
+	handler.ServeHTTP(recRemote, reqRemote)
+
+	if recRemote.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for GET /, got: %d", recRemote.Code)
+	}
+	bodyRemote := recRemote.Body.String()
+
+	// For remote unauthenticated access, the remote lock modal must NOT be hidden by default,
+	// and body must be marked with vault-locked so that progressive streaming rendering during
+	// hard refresh (Ctrl+F5) suppresses inner layout elements before tailwind runs.
+	if strings.Contains(bodyRemote, `id="remote-lock-modal" class="fixed inset-0 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 z-[100] hidden"`) {
+		t.Fatalf("remote unauthenticated response has remote-lock-modal hidden by default; inner UI will flash before password prompt appears")
+	}
+	if !strings.Contains(bodyRemote, `<body class="vault-locked `) {
+		t.Fatalf("remote unauthenticated response must have vault-locked class on body to prevent inner UI flash during hard refresh (Ctrl+F5)")
+	}
+
+	// 2. Localhost request to GET / (from 127.0.0.1)
+	reqLocal := httptest.NewRequest("GET", "/", nil)
+	reqLocal.RemoteAddr = "127.0.0.1:12345"
+	recLocal := httptest.NewRecorder()
+	handler.ServeHTTP(recLocal, reqLocal)
+
+	if recLocal.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for localhost GET /, got: %d", recLocal.Code)
+	}
+	bodyLocal := recLocal.Body.String()
+	// Localhost should have direct access (lock modal is hidden and not vault-locked)
+	if !strings.Contains(bodyLocal, `id="remote-lock-modal"`) || !strings.Contains(bodyLocal, `hidden`) {
+		t.Fatalf("localhost response should keep remote lock modal hidden")
+	}
+	if strings.Contains(bodyLocal, `<body class="vault-locked `) {
+		t.Fatalf("localhost response must not have vault-locked class on body")
+	}
+
+	// 3. Unlock remote access
+	unlockReq := httptest.NewRequest("POST", "/api/auth/unlock", bytes.NewReader([]byte(`{"password":"test-pin-123"}`)))
+	unlockReq.RemoteAddr = "192.168.1.100:54321"
+	recUnlock := httptest.NewRecorder()
+	handler.ServeHTTP(recUnlock, unlockReq)
+	if recUnlock.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for unlock, got: %d", recUnlock.Code)
+	}
+	var authResp struct {
+		Token string `json:"token"`
+	}
+	_ = json.NewDecoder(recUnlock.Body).Decode(&authResp)
+	if authResp.Token == "" {
+		t.Fatal("expected token in unlock response")
+	}
+
+	// 4. Remote request with valid cookie (e.g. page reload after unlock) -> lock modal should be hidden
+	reqReload := httptest.NewRequest("GET", "/", nil)
+	reqReload.RemoteAddr = "192.168.1.100:54321"
+	reqReload.AddCookie(&http.Cookie{Name: "sqlfox_token", Value: authResp.Token})
+	recReload := httptest.NewRecorder()
+	handler.ServeHTTP(recReload, reqReload)
+
+	if recReload.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for reload, got: %d", recReload.Code)
+	}
+	bodyReload := recReload.Body.String()
+	if !strings.Contains(bodyReload, `id="remote-lock-modal" class="fixed inset-0 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 z-[100] hidden"`) {
+		t.Fatalf("remote authenticated response should have lock modal hidden")
+	}
+}
+
