@@ -283,9 +283,6 @@
     </div>
   </div>
 
-  <!-- Ambient Top Accent Stripe (Active on Production) -->
-  <div id="top-ambient-stripe" class="hidden h-[2px] w-full bg-rose-500 flex-shrink-0 z-50"></div>
-
   <!-- Top Navbar -->
   <header class="h-12 bg-app-surface border-b border-app-border flex items-center justify-between px-4 z-40 flex-shrink-0 gap-3">
     <div class="flex items-center space-x-3 shrink-0">
@@ -1203,12 +1200,17 @@
 
             <div class="h-4 w-px bg-slate-700 shrink-0"></div>
 
-            <div id="pl-refresh-control-group" class="shrink-0 flex items-center space-x-1 bg-slate-900 border border-slate-700 rounded p-0.5">
-              <span class="text-slate-400 text-[11px] px-1.5 font-medium whitespace-nowrap">Refresh:</span>
-              <button id="pl-refresh-pause" onclick="setProcesslistInterval('pause')" class="px-2 py-0.5 rounded text-[11px] bg-slate-800 text-white font-medium">Pause</button>
-              <button id="pl-refresh-1s" onclick="setProcesslistInterval(1000)" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">1s</button>
-              <button id="pl-refresh-3s" onclick="setProcesslistInterval(3000)" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">3s</button>
-              <button id="pl-refresh-5s" onclick="setProcesslistInterval(5000)" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">5s</button>
+            <div id="pl-refresh-control-group" class="shrink-0 flex flex-col bg-slate-900 border border-slate-700 rounded overflow-hidden">
+              <div class="flex items-center space-x-1 p-0.5">
+                <span class="text-slate-400 text-[11px] px-1.5 font-medium whitespace-nowrap">Refresh:</span>
+                <button id="pl-refresh-pause" onclick="setProcesslistInterval('pause')" class="px-2 py-0.5 rounded text-[11px] bg-slate-800 text-white font-medium">Pause</button>
+                <button id="pl-refresh-1s" onclick="setProcesslistInterval(1000)" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">1s</button>
+                <button id="pl-refresh-3s" onclick="setProcesslistInterval(3000)" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">3s</button>
+                <button id="pl-refresh-5s" onclick="setProcesslistInterval(5000)" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">5s</button>
+              </div>
+              <div class="h-[2px] w-full bg-slate-800/80 overflow-hidden">
+                <div id="pl-refresh-bar" class="h-full bg-sky-400 w-0" style="transition: width linear;"></div>
+              </div>
             </div>
 
             <button onclick="fetchProcesslist()" class="shrink-0 bg-app-card hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded border border-app-border transition flex items-center space-x-1" title="Fetch active threads immediately">
@@ -1444,12 +1446,17 @@
         <!-- Cluster Toolbar -->
         <div class="h-10 bg-app-surface border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0 gap-3 overflow-x-auto">
           <div class="flex items-center space-x-2.5 flex-1 min-w-0">
-            <div class="shrink-0 flex items-center space-x-1 bg-slate-900 border border-slate-700 rounded p-0.5">
-              <span class="text-slate-400 text-[11px] px-1.5 font-medium">Refresh:</span>
-              <button id="cl-refresh-pause" onclick="setClusterInterval('pause')" class="px-2 py-0.5 rounded text-[11px] bg-slate-800 text-white font-medium">Pause</button>
-              <button id="cl-refresh-1s" onclick="setClusterInterval(1000)" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">1s</button>
-              <button id="cl-refresh-3s" onclick="setClusterInterval(3000)" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">3s</button>
-              <button id="cl-refresh-5s" onclick="setClusterInterval(5000)" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">5s</button>
+            <div id="cl-refresh-control-group" class="shrink-0 flex flex-col bg-slate-900 border border-slate-700 rounded overflow-hidden">
+              <div class="flex items-center space-x-1 p-0.5">
+                <span class="text-slate-400 text-[11px] px-1.5 font-medium whitespace-nowrap">Refresh:</span>
+                <button id="cl-refresh-pause" onclick="setClusterInterval('pause')" class="px-2 py-0.5 rounded text-[11px] bg-slate-800 text-white font-medium">Pause</button>
+                <button id="cl-refresh-1s" onclick="setClusterInterval(1000)" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">1s</button>
+                <button id="cl-refresh-3s" onclick="setClusterInterval(3000)" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">3s</button>
+                <button id="cl-refresh-5s" onclick="setClusterInterval(5000)" class="px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white">5s</button>
+              </div>
+              <div class="h-[2px] w-full bg-slate-800/80 overflow-hidden">
+                <div id="cl-refresh-bar" class="h-full bg-sky-400 w-0" style="transition: width linear;"></div>
+              </div>
             </div>
 
             <button onclick="fetchClusterHealth()" class="shrink-0 bg-app-card hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded border border-app-border transition flex items-center space-x-1" title="Fetch cluster telemetry immediately">
@@ -4883,14 +4890,12 @@
 
     function renderHeaderConnectionBadge(conn, status = '') {
       const badgeEl = document.getElementById('active-conn-badge');
-      const stripe = document.getElementById('top-ambient-stripe');
       if (!badgeEl) return;
       if (!conn) {
         badgeEl.className = "flex items-center space-x-2 text-xs";
         badgeEl.onclick = null;
         badgeEl.title = "";
         badgeEl.innerHTML = '<span class="text-slate-400">No active connection</span>';
-        if (stripe) stripe.classList.add('hidden');
         return;
       }
       const env = conn.environment || 'Development';
@@ -4900,11 +4905,6 @@
                         (isStage ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40' :
                                    'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40');
       const pillLabel = isProd ? 'PROD 🔴' : (isStage ? 'STAGE 🟡' : 'DEV 🟢');
-
-      if (stripe) {
-        if (isProd) stripe.classList.remove('hidden');
-        else stripe.classList.add('hidden');
-      }
 
       const statusHtml = status ? ` <span class="text-slate-400 text-xs font-normal">(${escapeHtml(status)})</span>` : '';
       badgeEl.className = "flex items-center space-x-2 text-xs group cursor-pointer";
@@ -5009,8 +5009,6 @@
         const res = await apiFetch(`/api/session/connect/${conn.id}`, { method: 'POST' });
         const data = await res.json();
         if (!res.ok) {
-          const stripe = document.getElementById('top-ambient-stripe');
-          if (stripe) stripe.classList.add('hidden');
           document.getElementById('active-conn-badge').innerHTML = `
             <span class="px-2 py-0.5 rounded font-bold font-mono text-[11px] border bg-red-950 text-red-400 border-red-800">ERROR</span>
             <span class="font-semibold text-white">${escapeHtml(conn.name)} (Disconnected)</span>
@@ -5050,8 +5048,6 @@
         restoreTabsState(conn.id);
         updateFooterStats(data.latency_ms, data.memory_mb);
       } catch (err) {
-        const stripe = document.getElementById('top-ambient-stripe');
-        if (stripe) stripe.classList.add('hidden');
         document.getElementById('active-conn-badge').innerHTML = `
           <span class="px-2 py-0.5 rounded font-bold font-mono text-[11px] border bg-red-950 text-red-400 border-red-800">ERROR</span>
           <span class="font-semibold text-white">${escapeHtml(conn.name)}</span>
@@ -6925,6 +6921,43 @@
       if (profileBtn) profileBtn.classList.add('hidden');
     }
 
+    // ponytail: Countdown progress bar indicator using GPU-accelerated CSS transition.
+    // Drains smoothly from 100% to 0% over interval duration with zero continuous JS frame loops.
+    function triggerCountdownBar(barId, interval) {
+      const bar = document.getElementById(barId);
+      if (!bar) return;
+      if (!interval || interval === 'pause' || typeof interval !== 'number' || document.hidden) {
+        bar.style.transition = 'none';
+        bar.style.width = '0%';
+        return;
+      }
+      // Instant reset to 100% without transition
+      bar.style.transition = 'none';
+      bar.style.width = '100%';
+      // Force layout reflow so next transition triggers properly
+      void bar.offsetWidth;
+      // Animate smoothly to 0% over interval duration
+      bar.style.transition = `width ${interval}ms linear`;
+      bar.style.width = '0%';
+    }
+
+    document.addEventListener('visibilitychange', () => {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (document.hidden) {
+        triggerCountdownBar('pl-refresh-bar', 'pause');
+        triggerCountdownBar('cl-refresh-bar', 'pause');
+      } else {
+        if (activeTab && activeTab.isProcesslist && typeof processlistRefreshInterval !== 'undefined' && processlistRefreshInterval !== 'pause') {
+          fetchProcesslist(true);
+          triggerCountdownBar('pl-refresh-bar', processlistRefreshInterval);
+        }
+        if (activeTab && activeTab.isCluster && typeof clusterRefreshInterval !== 'undefined' && clusterRefreshInterval !== 'pause') {
+          fetchClusterHealth(true);
+          triggerCountdownBar('cl-refresh-bar', clusterRefreshInterval);
+        }
+      }
+    });
+
     function switchTab(tabId) {
       if (tabId !== activeTabId) {
         selectedRowIndices.clear();
@@ -6957,6 +6990,24 @@
         // instead of retaining previous tab's table or query results.
         clearGridToInitialState();
       }
+
+      // Sync auto-refresh countdown bar on active tab
+      if (nextTab && nextTab.isProcesslist) {
+        if (typeof processlistRefreshInterval !== 'undefined' && processlistRefreshInterval !== 'pause') {
+          triggerCountdownBar('pl-refresh-bar', processlistRefreshInterval);
+        }
+      } else {
+        triggerCountdownBar('pl-refresh-bar', 'pause');
+      }
+
+      if (nextTab && nextTab.isCluster) {
+        if (typeof clusterRefreshInterval !== 'undefined' && clusterRefreshInterval !== 'pause') {
+          triggerCountdownBar('cl-refresh-bar', clusterRefreshInterval);
+        }
+      } else {
+        triggerCountdownBar('cl-refresh-bar', 'pause');
+      }
+
       saveTabsState();
     }
 
@@ -7662,17 +7713,24 @@
         processlistTimer = null;
       }
       if (interval !== 'pause') {
+        triggerCountdownBar('pl-refresh-bar', interval);
         processlistTimer = setInterval(() => {
           const activeTab = tabs.find(t => t.id === activeTabId);
           if (activeTab && activeTab.isProcesslist && !document.hidden) {
             fetchProcesslist(true);
+            triggerCountdownBar('pl-refresh-bar', interval);
           }
         }, interval);
+      } else {
+        triggerCountdownBar('pl-refresh-bar', 'pause');
       }
     }
 
     async function fetchProcesslist(silent = false) {
       if (!activeConnection) return;
+      if (!silent && processlistRefreshInterval !== 'pause') {
+        setProcesslistInterval(processlistRefreshInterval);
+      }
       try {
         const res = await apiFetch(`/api/session/${activeConnection.id}/processlist`);
         if (!res.ok) {
@@ -8604,17 +8662,24 @@
         clusterTimer = null;
       }
       if (interval !== 'pause') {
+        triggerCountdownBar('cl-refresh-bar', interval);
         clusterTimer = setInterval(() => {
           const activeTab = tabs.find(t => t.id === activeTabId);
           if (activeTab && activeTab.isCluster && !document.hidden) {
             fetchClusterHealth(true);
+            triggerCountdownBar('cl-refresh-bar', interval);
           }
         }, interval);
+      } else {
+        triggerCountdownBar('cl-refresh-bar', 'pause');
       }
     }
 
     async function fetchClusterHealth(silent = false) {
       if (!activeConnection) return;
+      if (!silent && clusterRefreshInterval !== 'pause') {
+        setClusterInterval(clusterRefreshInterval);
+      }
       try {
         const res = await apiFetch(`/api/session/${activeConnection.id}/diagnostics/cluster`);
         if (!res.ok) {

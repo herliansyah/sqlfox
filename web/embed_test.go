@@ -1273,6 +1273,40 @@ func TestCodeMirrorDarkThemeTokensEmbedded(t *testing.T) {
 	}
 }
 
+func TestAutoRefreshCountdownAndTopStripeEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	// 1. Invariant: top-ambient-stripe removed in favor of SSOT Environment Badge
+	if strings.Contains(content, "top-ambient-stripe") {
+		t.Errorf("expected top-ambient-stripe to be completely removed from index.html")
+	}
+
+	// 2. Invariant: countdown indicators present on both Processlist and Cluster Inspector
+	expectedSnippets := []string{
+		`id="pl-refresh-bar"`,
+		`id="cl-refresh-bar"`,
+		`function triggerCountdownBar(barId, interval)`,
+		`triggerCountdownBar('pl-refresh-bar', interval)`,
+		`triggerCountdownBar('cl-refresh-bar', interval)`,
+	}
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(content, snippet) {
+			t.Errorf("expected index.html to contain countdown snippet %q, but was missing", snippet)
+		}
+	}
+}
+
 
 
 
