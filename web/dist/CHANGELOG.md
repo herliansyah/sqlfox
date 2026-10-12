@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Rich Markdown Note Previews (`web`)**: Render formatted Markdown previews directly in note cards within the Notes Inbox drawer.
+
+### Fixed
+- **Remote Lock Screen Flash Elimination (`internal/server`)**: Inject the `vault-locked` class and unhide the `#remote-lock-modal` directly into the server-rendered HTML for unauthenticated remote sessions, eliminating visual UI flashing during initial stream rendering and hard reloads.
+- **Processlist Fallback & Lock Contention Parsing (`internal/driver`)**:
+  - **MySQL / MariaDB**: Added automatic fallback to `information_schema.processlist` when `performance_schema` is disabled or empty, and fixed lock wait joins for MariaDB and MySQL 5.7.
+  - **PostgreSQL**: Extended blocking PID parser to handle pgx `int4[]` slices, `int64` arrays, and string representations from `pg_blocking_pids()`.
+- **Dropdown Menu Stacking Order (`web`)**: Adjusted Notes Inbox drawer stacking to `z-[35]` to prevent overlapping top navbar dropdown menus (`Monitor`, `DB Tools`, `Settings`).
+
 ## [v0.6.0] - 2026-10-11
 
 ### Added
