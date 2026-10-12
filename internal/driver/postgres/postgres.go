@@ -119,13 +119,17 @@ func (s *PostgresSession) ServerInfo(ctx context.Context) (*driver.ServerInfo, e
 	var activeConns int
 	_ = s.db.QueryRowContext(ctx, "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()").Scan(&activeConns)
 
+	var activeThreads int
+	_ = s.db.QueryRowContext(ctx, "SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND pid <> pg_backend_pid()").Scan(&activeThreads)
+
 	var uptimeSec int64
 	_ = s.db.QueryRowContext(ctx, "SELECT COALESCE(EXTRACT(EPOCH FROM (now() - pg_postmaster_start_time()))::bigint, 0)").Scan(&uptimeSec)
 
 	return &driver.ServerInfo{
-		Version:     version,
-		UptimeSec:   uptimeSec,
-		ActiveConns: activeConns,
+		Version:       version,
+		UptimeSec:     uptimeSec,
+		ActiveConns:   activeConns,
+		ActiveThreads: activeThreads,
 	}, nil
 }
 
@@ -581,6 +585,76 @@ func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) 
 		Triggers:     triggers,
 		Routines:     routines,
 	}, nil
+}
+
+// InspectFastCatalog retrieves lightweight tables and columns across all non-system schemas in a single fast sweep.
+func (s *PostgresSession) InspectFastCatalog(ctx context.Context) (map[string][]driver.TableMetadata, error) {
+	tblQuery := `
+	SELECT table_schema, table_name, table_type
+	FROM information_schema.tables
+	WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+	  AND table_schema NOT LIKE 'pg_toast%'
+	ORDER BY table_schema, table_name;
+	`
+	rows, err := s.db.QueryContext(ctx, tblQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect catalog tables: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string][]driver.TableMetadata)
+	type tblRef struct {
+		dbName string
+		idx    int
+	}
+	tableMap := make(map[string]tblRef)
+
+	for rows.Next() {
+		var schemaName, tblName, tblType string
+		if err := rows.Scan(&schemaName, &tblName, &tblType); err == nil {
+			t := driver.TableMetadata{
+				Name:        tblName,
+				Type:        tblType,
+				Columns:     []driver.ColumnMetadata{},
+				Indexes:     []driver.IndexMetadata{},
+				ForeignKeys: []driver.ForeignKeyMetadata{},
+			}
+			lowerSchema := strings.ToLower(schemaName)
+			result[lowerSchema] = append(result[lowerSchema], t)
+			tableMap[lowerSchema+"."+strings.ToLower(tblName)] = tblRef{
+				dbName: lowerSchema,
+				idx:    len(result[lowerSchema]) - 1,
+			}
+		}
+	}
+
+	colQuery := `
+	SELECT table_schema, table_name, column_name, data_type, is_nullable, COALESCE(column_default, '')
+	FROM information_schema.columns
+	WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+	  AND table_schema NOT LIKE 'pg_toast%'
+	ORDER BY table_schema, table_name, ordinal_position;
+	`
+	cRows, cErr := s.db.QueryContext(ctx, colQuery)
+	if cErr == nil {
+		defer cRows.Close()
+		for cRows.Next() {
+			var schemaName, tblName, colName, colType, isNullable, colDefault string
+			if err := cRows.Scan(&schemaName, &tblName, &colName, &colType, &isNullable, &colDefault); err == nil {
+				key := strings.ToLower(schemaName) + "." + strings.ToLower(tblName)
+				if ref, ok := tableMap[key]; ok {
+					result[ref.dbName][ref.idx].Columns = append(result[ref.dbName][ref.idx].Columns, driver.ColumnMetadata{
+						Name:         colName,
+						Type:         colType,
+						IsNullable:   isNullable == "YES",
+						DefaultValue: colDefault,
+					})
+				}
+			}
+		}
+	}
+
+	return result, nil
 }
 
 func (s *PostgresSession) GetTableDDL(ctx context.Context, tableName string) (string, error) {

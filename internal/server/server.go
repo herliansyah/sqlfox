@@ -106,6 +106,8 @@ func (s *Server) routes() {
 	// Session exploration and actions
 	mux.HandleFunc("POST /api/session/connect/{id}", s.handleConnectSession)
 	mux.HandleFunc("GET /api/session/{id}/schema", s.handleGetSchema)
+	mux.HandleFunc("GET /api/session/{id}/fast-catalog", s.handleGetFastCatalog)
+	mux.HandleFunc("GET /api/session/{id}/active-threads", s.handleGetActiveThreads)
 	mux.HandleFunc("GET /api/session/{id}/ddl/{table}", s.handleGetTableDDL)
 	mux.HandleFunc("GET /api/session/{id}/ddl/routine/{name}", s.handleGetRoutineDDL)
 	mux.HandleFunc("GET /api/session/{id}/ddl/event/{name}", s.handleGetEventDDL)
