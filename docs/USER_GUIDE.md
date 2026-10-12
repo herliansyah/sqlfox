@@ -284,6 +284,10 @@ Click the **🔒 Read-Only** toggle in the top header at any time:
 - **PostgreSQL Schema Switcher**: Easily switch between `public`, `tenant_1`, and private schemas without reconnecting.
 - **Table Context Menu**: Right-click any table to quickly Open Table, View DDL, Inspect Footprint, or Copy Table Name.
 - **Quick Jump (Ctrl+P)**: Open the Schema Search modal to instantly find any table or column across the entire database.
+- **Fast Schema Catalog Synchronization (`🔄 All`)**: Click the **🔄 All** button beside the Database Switcher to synchronize autocomplete and global search catalogs across all server databases.
+  - **Zero Foreign Key Locks**: Queries lightweight table and column identifiers in a single fast sweep (`InspectFastCatalog`), bypassing heavy relation scans (`KEY_COLUMN_USAGE`).
+  - **Pre-Flight Health Evaluation**: Checks server active thread saturation (`ActiveThreads`) before running—issuing warnings if threads exceed 50 (caution) or 100 (critical).
+  - **Cache Timestamp Badge**: Displays the last catalog refresh time (`#schema-cache-badge`) next to the active schema refresh icon.
 
 ### Keyset Pagination & Quick Search
 Traditional `OFFSET 1000000` pagination forces database engines to scan and discard millions of rows. SqlFox employs **Keyset Pagination**:
@@ -396,13 +400,13 @@ Before running dangerous `ALTER TABLE` or `DROP TABLE` statements:
 ### Pre-Flight Lock Contention & Root Blocker Tree
 Access via **⚡ Monitor &rarr; 🔒 Lock Contention & Blockers**:
 - Analyzes active locks on MySQL (`sys.innodb_lock_waits`, `performance_schema.data_locks`) and PostgreSQL (`pg_locks`, `pg_blocking_pids`).
-- **Root Blocker Tree**: Visualizes the exact hierarchical dependency graph:
-  ```
-  Root Blocker (PID: 4120, User: batch_worker, Time: 182s, Query: UPDATE orders ...)
-  └── Waiting Query (PID: 4891, Time: 45s, Query: ALTER TABLE orders ADD COLUMN ...)
-      └── Blocked Query (PID: 5102, Time: 12s, Query: SELECT * FROM orders WHERE ...)
-  ```
-- **Mitigation Action**: Terminate the root blocking session safely with out-of-band cancellation directly from the tree view.
+- **Root Blocker Incident Triage**:
+  - Highlights culprit threads with a prominent `🚨 ROOT BLOCKER` tag displaying Thread ID, database user, lock mode held (`holding LOCK`), and locked resource identifier.
+  - **Scrollable Full SQL Container**: Renders complete un-truncated SQL queries (`font-mono text-[13px]`) with vertical scrolling up to 192px (`max-h-48`) for effortless query inspection during production incidents.
+  - **Granular Mitigation Actions**:
+    - **Kill Query** (Amber): Out-of-band cancellation of the executing statement without dropping the client connection.
+    - **Kill Blocker** (Red): Immediate termination of the entire blocking connection to clear lock storms.
+  - **Blocked Session Hierarchy**: Surfaces affected downstream sessions with waiting durations highlighted in red/white (`waiting 45s for lock`), blocked user names, and exact waiting query text.
 
 ### Real-Time Processlist & Out-of-Band Cancellation
 Access via **⚡ Monitor &rarr; ⚡ Processlist**:

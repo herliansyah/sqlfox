@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Fast Schema Catalog Synchronization & Pre-Flight Health Check (`driver`, `server`, `web`)**: Added `InspectFastCatalog` across the core Driver interface, MySQL, PostgreSQL, and SQLite, querying table names and column definitions in a single sweep without issuing heavy foreign key (`KEY_COLUMN_USAGE`) or index queries. Added `GET /api/session/{id}/fast-catalog` and `GET /api/session/{id}/active-threads`.
+- **Schema Cache Pre-Flight Modal & Status Badge (`web`)**: Added `#refresh-all-dialog` triggered by the `🔄 All` button next to the Database Switcher with feature benefits, live server health evaluation (>50 caution, >100 critical warning based on `ActiveThreads`), and an animated progress bar. Added `#schema-cache-badge` displaying the last cached timestamp on the active schema header.
+- **Windows PE Binary Icon Consistency Test (`build`, `test`)**: Added automatic recompilation of `rsrc_windows_amd64.syso` and `rsrc_windows_arm64.syso` in `scripts/generate-icons.py` using `rsrc` and unit test `TestWindowsEmbeddedIconConsistency` in `cmd/sqlfox/main_test.go` verifying that all icon frames from `assets/icon.ico` are embedded into Windows PE resource files.
+
+### Changed
+- **Lock Contention & Root Blocker UX Overhaul (`web`)**: Redesigned Root Blocker visual hierarchy in the Lock Contention Inspector with prominent `🚨 ROOT BLOCKER` tags, scrollable full SQL query containers (`max-h-48 overflow-y-auto font-mono text-[13px]`), color-coded `Kill Query` (amber) vs `Kill Blocker` (red) buttons, and high-visibility waiting durations for blocked queries.
+- **Session Switcher Bar Ergonomics (`web`)**: Removed redundant edit button next to the session switcher dropdown arrow to prevent misclicks when switching active database connections.
+
 ## [v0.7.0] - 2026-10-12
 
 ### Added

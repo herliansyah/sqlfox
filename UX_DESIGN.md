@@ -13,7 +13,6 @@ User experience architecture, ASCII wireframes, design tokens, and interaction m
 ## 2. Main Interface Wireframe (3-Column Layout)
 
 ```
-▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ (2px Red Ambient Line on PROD)
 ┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │ [SqlFox]  Prod-MySQL-Cluster [PROD 🔴]  [🔒 Read-Only]   [Ctrl+K Command Palette]  [⚙️ Settings] [−][□][×]│
 ├──────────────┬─────────────────────────────────────────────────────────┬───────────────────────────────┤
@@ -197,8 +196,7 @@ For microservices and multi-database architectures:
 
 ## 10. Compact Session Switcher & Environment SSOT
 
-- **Compact Header Button & SSOT**: Replaces permanent sidebar connection accordions with a compact session bar displaying the active database icon, name, and environment tag (`[PROD 🔴]`, `[STAGE 🟡]`, `[DEV 🟢]`). This header button is the **Single Source of Truth (SSOT)** for environment identity; sidebar and footer are strictly freed from redundant environment badges to prevent visual clutter and alert fatigue.
-- **Ambient Safety Cue (Top Accent Line)**: Active connections in the `Production` tier display a subtle 2px red ambient accent stripe (`#ef4444`) across the top border of the window/navbar, establishing immediate peripheral awareness without occupying interface height or repeating text.
+- **Compact Header Button & SSOT**: Replaces permanent sidebar connection accordions with a compact session bar displaying the active database icon, name, and environment tag (`[PROD 🔴]`, `[STAGE 🟡]`, `[DEV 🟢]`). This header button is the **Single Source of Truth (SSOT)** for environment identity; sidebar, footer, and top borders are strictly freed from redundant environment badges and top ambient stripes to prevent visual clutter and alert fatigue. Redundant edit buttons on the session switcher bar are removed to prevent accidental misclicks with the dropdown arrow.
 - **Production Read-Only Safety Interlock**: Connections marked as `Production` automatically initialize with the navbar toggle locked to `🔒 Read-Only`. Clicking to switch to `🔓 Read-Write` displays a confirmation modal (*"Switch to Read-Write mode on Production?"*), preventing inadvertent data mutations. High-risk statements (`DROP`, `DELETE`/`UPDATE` without WHERE) continue to require the AST Safety Guard Challenge Modal.
 - **Instant Search & Grouping**: Expanding the switcher reveals an inline search filter, environment-grouped connections, and quick-action buttons (`➕ New`, `✏️ Edit`, `🗑️ Delete`).
 - **Full-Height Schema Tree**: Reserves 100% of the sidebar's vertical space for exploring schema objects (Tables, Views, Triggers).
@@ -719,6 +717,51 @@ The Entity-Relationship Diagram canvas allows developers to explore table relati
    - Universal anti-shrink and anti-wrap guard on all buttons (`button:not(.allow-wrap)`) preventing multi-line label collapse or deformed pill dimensions when the window narrows.
    - Horizontal toolbars (`header`, `editor-toolbar`, `table-mode-tabs`, `grid-toolbar`, `footer`) employ bounded horizontal overflow (`overflow-x-auto gap-3`) with `shrink-0` groups to prevent button overlap, text collisions, or UI clipping.
    - Content text (AI chats, Operational Notes, modal logs) preserves word wrapping for maximum reading comfort.
+
+---
+
+## 22. Fast Schema Catalog Synchronization & Root Blocker Incident Triage
+
+### 1. Fast Schema Catalog Synchronization Pre-Flight Modal (`#refresh-all-dialog`)
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│ 🔄 Refresh All Schema Catalogs                                     [×]│
+│ Synchronize local autocomplete & search catalog cache                  │
+├────────────────────────────────────────────────────────────────────────┤
+│ 💡 Why is this feature useful?                                         │
+│ • Cross-DB Autocomplete: Instant db.table and table.col completions   │
+│ • Global Search (Ctrl+P): Find tables & views across all databases     │
+│ • Zero Foreign Key Lock: Scans lightweight identifiers only           │
+│ • Isolated Persistence: Cache preserved per active session             │
+├────────────────────────────────────────────────────────────────────────┤
+│ Server Health Status:  [● Normal: 3 Running Threads]                   │
+│ Safe to synchronize. Server is currently experiencing low thread load. │
+├────────────────────────────────────────────────────────────────────────┤
+│ Progress: [████████████████████████████████████████] 100% (8/8 DBs)   │
+│ Complete! All schema catalogs synchronized.                            │
+├────────────────────────────────────────────────────────────────────────┤
+│ [Cancel]                                     [Proceed with Refresh All]│
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+### 2. Root Blocker Incident Triage Wireframe (`#lock-dialog`)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│ 🚨 ROOT BLOCKER   Thread #4120  (batch_worker)  holding EXCLUSIVE on orders             │
+│                                              [Kill Query] [🚨 Kill Blocker]             │
+├─────────────────────────────────────────────────────────────────────────────────────────┤
+│ SQL: UPDATE orders SET status = 'processing', updated_at = NOW()                        │
+│      WHERE status = 'pending' AND batch_id = 941;                                       │
+├─────────────────────────────────────────────────────────────────────────────────────────┤
+│ ↳ Blocked: Thread #4891 (web_app) waiting 45s for lock:                                 │
+│   ALTER TABLE orders ADD COLUMN priority_score INT DEFAULT 0;                           │
+├─────────────────────────────────────────────────────────────────────────────────────────┤
+│ ↳ Blocked: Thread #5102 (read_replica) waiting 18s for lock:                            │
+│   SELECT * FROM orders WHERE id = 1042 FOR UPDATE;                                      │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+```
 
 
 

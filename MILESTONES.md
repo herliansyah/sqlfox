@@ -598,6 +598,20 @@ v2.2 (MySQL Enterprise Operations & Programmability Suite)
   - [x] **Documentation & Verification**: Recorded in `CONTEXT.md`, `CHANGELOG.md`, `USER_GUIDE.md`, `USER_GUIDE_ID.md`, `UX_DESIGN.md`, `web/embed_test.go`, and automated suites in `scripts/test-workspace-pane-splitter.mjs` and `scripts/test-tab-context-menu-repro.mjs`.
 - **Runnable Verification**: Run `go test -v ./web` and `node scripts/test-workspace-pane-splitter.mjs` -> 100% pass across all workspace ergonomics and trend rendering routines.
 
+---
+
+### Milestone 37: Fast Schema Catalog Synchronization, Root Blocker Triage & Binary Icon Verification
+- **Goal**: Accelerate multi-database autocomplete and search cache warm-up without metadata lock contention, elevate incident response UX for root blocking queries in lock storms, and ensure automated Windows PE binary branding fidelity.
+- **Deliverables**:
+  - [x] **Fast Catalog Introspection (`internal/driver`, `internal/server`)**: `InspectFastCatalog` driver contract and implementation across MySQL, PostgreSQL, and SQLite, querying lightweight table and column identifiers in a single sweep and bypassing heavy `KEY_COLUMN_USAGE` foreign key scans. Exposed via `GET /api/session/{id}/fast-catalog`.
+  - [x] **Active Thread Health Probe (`internal/server`)**: Extended `ServerInfo.ActiveThreads` on MySQL (`SHOW GLOBAL STATUS LIKE 'Threads_running'`) and PostgreSQL (`pg_stat_activity`), exposed via `GET /api/session/{id}/active-threads`.
+  - [x] **Schema Cache Pre-Flight Modal & Timestamp Badge (`web/dist/index.html`)**: Interactive pre-execution modal (`#refresh-all-dialog`) with feature benefits explanation, live server health evaluation (>50 caution, >100 critical warning), animated progress bar, and active DB schema cache timestamp badge (`#schema-cache-badge`).
+  - [x] **Root Blocker Incident Triage UX Overhaul (`web/dist/index.html`)**: High-contrast root blocker card with prominent `🚨 ROOT BLOCKER` tags, scrollable full SQL query containers (`max-h-48 overflow-y-auto font-mono text-[13px]`), color-coded `Kill Query` (amber) vs `Kill Blocker` (red) actions, and highlighted waiting durations for downstream blocked sessions.
+  - [x] **Session Switcher Toolbar Ergonomics (`web/dist/index.html`, `scripts/test-connection-and-export-repro.mjs`)**: Removed redundant edit button next to dropdown arrow in the session switcher bar to eliminate misclicks.
+  - [x] **Windows PE Resource Icon Compilation & Consistency Test (`cmd/sqlfox/main_test.go`, `scripts/generate-icons.py`)**: Automated recompilation of `rsrc_windows_amd64.syso` and `rsrc_windows_arm64.syso` via `rsrc` and unit test `TestWindowsEmbeddedIconConsistency` verifying all canonical icon frames from `assets/icon.ico` exist in Windows PE resource objects.
+  - [x] **Documentation & Verification**: Recorded in ADR-0050, `CONTEXT.md`, `ARCHITECTURE.md`, `UX_DESIGN.md`, `CHANGELOG.md`, `README.md`, `USER_GUIDE.md`, `USER_GUIDE_ID.md`, and verified via `go test -v ./cmd/sqlfox -run "TestWindowsEmbeddedIconConsistency"`.
+- **Runnable Verification**: Run `go test -v ./cmd/sqlfox -run "TestWindowsEmbeddedIconConsistency"` and `node scripts/test-connection-and-export-repro.mjs` -> 100% pass.
+
 
 
 

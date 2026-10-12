@@ -146,6 +146,7 @@ type Session interface {
     
     // Schema introspection
     InspectSchema(ctx context.Context, schemaName string) (*SchemaMetadata, error)
+    InspectFastCatalog(ctx context.Context) (map[string][]TableMetadata, error)
     GetTableDDL(ctx context.Context, tableName string) (string, error)
     GetTableEstimate(ctx context.Context, tableName string) (TableEstimate, error)
     
@@ -839,6 +840,50 @@ flowchart TD
 3. **AI Copilot Context Injection (`internal/ai/assistant.go`, `internal/server/handlers_ai.go`)**:
    - Recognizes `@note:<id>` or `[@note:<title>]` reference tokens in prompt inputs.
    - Fetches the referenced operational note and injects an isolated `=== REFERENCED OPERATIONAL NOTES ===` section into the AI system prompt before execution, providing full historical context (SQL snippet, diagnostic snapshot, and human developer notes) without manual copy-pasting.
+
+---
+
+## 20. Fast Schema Catalog Synchronization & Root Blocker Incident Triage Architecture
+
+### 1. Fast Catalog Sweeping (`InspectFastCatalog`)
+
+Standard schema introspection queries foreign key constraints (`KEY_COLUMN_USAGE`), indexes, and comments per table. On instances with hundreds of databases and thousands of tables, this can introduce metadata lock contention.
+
+To support rapid client-side autocomplete (`dbname.tablename.colname`) and global Schema Search (`Ctrl+P`), `InspectFastCatalog` extracts table names and column definitions in a single sweep:
+- **MySQL**: Two queries against `information_schema.tables` and `information_schema.columns` across all non-system databases (`information_schema`, `mysql`, `performance_schema`, `sys`).
+- **PostgreSQL**: Queries non-system schemas (excluding `pg_catalog`, `information_schema`, and `pg_toast%`).
+- **SQLite**: Reads all tables and columns from the `main` schema.
+
+```mermaid
+flowchart LR
+    UI["Frontend (🔄 All Button)"] -->|GET /api/session/{id}/active-threads| Probe["Server Load Check (Threads_running)"]
+    Probe -->|Healthy (Threads <= 50)| Exec["Pre-Flight Modal Approval"]
+    Exec -->|GET /api/session/{id}/fast-catalog| API["Go Server (InspectFastCatalog)"]
+    API -->|Bulk Scan tables + columns| DB[(Target DB Instance)]
+    DB -->|Lightweight Map Result| API
+    API -->|Synchronized Catalogs JSON| UI
+    UI -->|Warm Cache| Cache["multiDBCatalogCache & CodeMirror Autocomplete"]
+```
+
+### 2. Active Thread Safety Probe (`GET /api/session/{id}/active-threads`)
+
+Before executing wide catalog sweeps, the client queries live server concurrency:
+- **MySQL**: `SHOW GLOBAL STATUS LIKE 'Threads_running'` mapped to `ServerInfo.ActiveThreads`.
+- **PostgreSQL**: `SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND pid <> pg_backend_pid()`.
+- **Pre-Flight Modal (`#refresh-all-dialog`)**: Displays server status pills:
+  - `> 100 threads`: Critical warning (red), recommends waiting for off-peak windows.
+  - `> 50 threads`: Caution warning (amber), advises caution under concurrent traffic.
+  - `<= 50 threads`: Normal state (emerald), safe to execute immediately.
+
+### 3. Root Blocker Incident Triage Architecture
+
+In production lock storms, the Lock Contention Inspector (`#lock-dialog`) visualizes the blocking chain:
+- **Root Blocker Identification**: Isolates the head blocking thread (`is_root_blocker = true`), user, lock mode held, and locked resource.
+- **Scrollable Full SQL Container**: Full query text rendered in `max-h-48 overflow-y-auto font-mono text-[13px]` syntax container.
+- **Dual Out-of-Band Mitigations**:
+  - `Kill Query`: Sends `KILL QUERY <thread_id>` or `pg_cancel_backend(<pid>)` without dropping the client connection.
+  - `Kill Blocker`: Sends `KILL CONNECTION <thread_id>` or `pg_terminate_backend(<pid>)` to immediately relieve cascaded contention.
+- **Blocked Sessions Hierarchy**: Shows all waiting threads with elapsed waiting duration in seconds (`waiting 45s for lock`) and waiting SQL statements.
 
 
 
