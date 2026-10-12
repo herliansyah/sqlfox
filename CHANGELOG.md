@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.6.1] - 2026-10-12
+
 ### Added
 - **Rich Markdown Note Previews (`web`)**: Render formatted Markdown previews directly in note cards within the Notes Inbox drawer.
 
