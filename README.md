@@ -78,21 +78,38 @@ Grab the pre-compiled binary for your OS and architecture from [GitHub Releases]
 **Linux / macOS (One-liner download & run):**
 ```bash
 # Linux amd64
-curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.2.0-linux-amd64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.6.1-linux-amd64.tar.gz | tar -xz
 ./sqlfox
 
 # macOS Apple Silicon
-curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.2.0-darwin-arm64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.6.1-darwin-arm64.tar.gz | tar -xz
 ./sqlfox
 ```
 
-#### Method 2: Install with Go
+#### Method 2: Run with Docker or Docker Compose
+Run the official ultra-lightweight (~20MB) multi-arch container image directly:
+
+```bash
+docker run -d \
+  --name sqlfox \
+  -p 8080:8080 \
+  -v sqlfox_data:/data \
+  --add-host=host.docker.internal:host-gateway \
+  ghcr.io/herliansyah/sqlfox:latest
+```
+
+Or deploy with Docker Compose:
+```bash
+docker compose up -d
+```
+
+#### Method 3: Install with Go
 ```bash
 go install github.com/herliansyah/sqlfox/cmd/sqlfox@latest
 sqlfox
 ```
 
-#### Method 3: Build from Source
+#### Method 4: Build from Source
 ```bash
 git clone https://github.com/herliansyah/sqlfox.git
 cd sqlfox
@@ -137,6 +154,16 @@ Server Flags (Default Mode):
         Allow multiple SqlFox instances to run concurrently
   -version
         Print SqlFox version and exit
+  -log-level string
+        Logging verbosity: debug, info, warn, error, silent (or SQLFOX_LOG_LEVEL)
+  -v, -verbose
+        Enable verbose debug logging (shortcut for -log-level=debug)
+  -log-file string
+        Target file for log output sink (or SQLFOX_LOG_FILE)
+  -log-format string
+        Log output format: text, json (default text or SQLFOX_LOG_FORMAT)
+  -silent, -q
+        Suppress terminal console output (logs still written to file if -log-file is set)
 ```
 
 #### Examples
@@ -247,21 +274,38 @@ Unduh paket binary sesuai sistem operasi dan arsitektur Anda di halaman [GitHub 
 **Linux / macOS (Download & ekstrak sekali jalan):**
 ```bash
 # Linux amd64
-curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.2.0-linux-amd64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.6.1-linux-amd64.tar.gz | tar -xz
 ./sqlfox
 
 # macOS Apple Silicon
-curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.2.0-darwin-arm64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.6.1-darwin-arm64.tar.gz | tar -xz
 ./sqlfox
 ```
 
-#### Cara 2: Install Menggunakan Go
+#### Cara 2: Jalankan via Docker / Docker Compose
+Jalankan image container multi-arsitektur resmi yang sangat ringan (~20MB):
+
+```bash
+docker run -d \
+  --name sqlfox \
+  -p 8080:8080 \
+  -v sqlfox_data:/data \
+  --add-host=host.docker.internal:host-gateway \
+  ghcr.io/herliansyah/sqlfox:latest
+```
+
+Atau menggunakan Docker Compose:
+```bash
+docker compose up -d
+```
+
+#### Cara 3: Install Menggunakan Go
 ```bash
 go install github.com/herliansyah/sqlfox/cmd/sqlfox@latest
 sqlfox
 ```
 
-#### Cara 3: Kompilasi Manual dari Source Code
+#### Cara 4: Kompilasi Manual dari Source Code
 ```bash
 git clone https://github.com/herliansyah/sqlfox.git
 cd sqlfox

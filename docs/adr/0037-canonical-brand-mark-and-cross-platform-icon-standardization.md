@@ -13,9 +13,9 @@ SqlFox previously utilized an ad-hoc emoji (`🦊`) across its user interfaces (
 ## Decisions
 
 ### 1. Vector Master Brand Mark
-A canonical, symmetrical front-facing low-poly geometric fox head emblem was designed and recorded as the master vector (`docs/assets/logo.svg` and `web/dist/assets/logo.svg`):
-- **Color Palette**: *SqlFox Amber* (`#f97316`), deep shadow orange (`#ea580c`, `#c2410c`), futuristic *Cyan Accent* (`#38bdf8`, `#7dd3fc`), and high-contrast white snout facets (`#ffffff`, `#f1f5f9`).
-- **Mathematical Symmetry**: Precise polygon facet vertices centered along `x = 256` within a `512x512` viewBox, guaranteeing razor-sharp legibility at micro scales (16x16 px) and high resolutions (512x512 px).
+A canonical, modern geometric tech fox head emblem was designed and recorded as the master vector (`docs/assets/logo.svg` and `web/dist/assets/logo.svg`):
+- **Color & Style**: Solid vibrant brand orange (`#ea580c`) featuring sleek minimalist geometric contours, replacing legacy multi-faceted polygons for instant visual recognition at any scale.
+- **Precision Scaling**: Centered vector paths within a `512x512` viewBox, guaranteeing razor-sharp legibility at micro scales (16x16 px) and high resolutions (512x512 px).
 
 ### 2. Multi-Platform Icon Set
 An automated, reproducible generator (`scripts/generate-icons.py`) derives all required cross-platform icon artifacts directly from the master facet definitions using 4x supersampling anti-aliasing:

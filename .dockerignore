@@ -1,0 +1,10 @@
+.git
+.github
+.scratch
+dist
+bin
+*.log
+*.tar.gz
+*.zip
+coverage.out
+docs/assets/banner-mockup.png
