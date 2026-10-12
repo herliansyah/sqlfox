@@ -216,6 +216,18 @@ _Avoid_: Text box, input area, raw textarea
 An in-memory client-side cache of active database tables, columns, data types, and indexes fetched via session schema introspection.
 _Avoid_: DB dump, schema buffer, table registry
 
+**Fast Catalog Introspection**:
+A lightweight, single-sweep database schema inspection mechanism (`InspectFastCatalog`) that extracts table names and column definitions across all user schemas without querying heavy foreign key constraints (`KEY_COLUMN_USAGE`) or index structures, preventing metadata lock contention during global autocomplete synchronization.
+_Avoid_: Fast dump, quick schema scan, shallow schema
+
+**Schema Cache Pre-Flight Dialog**:
+An interactive pre-execution safeguard (`#refresh-all-dialog`) intercepting global schema cache refreshes, detailing performance benefits (cross-DB autocomplete, global search, zero FK locks), probing active server thread saturation (`ActiveThreads`), and warning against synchronization under heavy production query load.
+_Avoid_: Refresh popup, cache confirm, sync alert
+
+**Schema Cache Timestamp Badge**:
+A status badge in the schema header displaying the last synchronization time of the cached database catalog (`#schema-cache-badge`).
+_Avoid_: Cache clock, sync tag, schema age
+
 **Context-Aware Completion Provider**:
 An AST-lite SQL tokenizer and suggestion engine that dynamically filters completion candidates based on caret position (e.g. table names after `FROM`/`JOIN`, columns after `SELECT`/`WHERE`, and alias resolution `alias.column`).
 _Avoid_: Word predictor, auto-suggester, flat matcher
@@ -456,6 +468,10 @@ _Avoid_: Process chart, query monitor graph, live APM widget
 A dedicated zero-shift incident-triage modal accessible from the Top Monitor menu, Command Palette, and Processlist Manager toolbar displaying the Root Blocker dependency tree, surfacing blocking queries, locked resources, and single-click termination actions without incurring layout shifts on the active threads table.
 _Avoid_: Lock viewer, deadlock popup, blocker window
 
+**Root Blocker Incident Triage**:
+The elevated visual diagnostic card in the Lock Contention Inspector displaying root blocking transactions with prominent status badging (`🚨 ROOT BLOCKER`), scrollable full SQL queries (`max-h-48 overflow-y-auto`), dedicated mitigation buttons (`Kill Query` vs `Kill Blocker`), and waiting session duration metrics.
+_Avoid_: Blocker card, kill widget, blocker box
+
 **Deadlock Inspector**:
 A dedicated post-mortem diagnostic parser within the Processlist Manager analyzing `SHOW ENGINE INNODB STATUS` (`LATEST DETECTED DEADLOCK`) to isolate victim transactions, holding locks, waiting locks, and conflicting SQL statements.
 _Avoid_: Deadlock alert, lock crash log, engine parser
@@ -648,6 +664,8 @@ _Avoid_: Multiline button labels, squished button shapes, colliding controls
 - **0046**: Secure-by-Default Binding and Ingress Hardening (`docs/adr/0046-secure-default-binding-and-ingress-hardening.md`)
 - **0047**: Single-Instance Guard and Lock Management (`docs/adr/0047-single-instance-guard-and-lock-management.md`)
 - **0048**: UI Resilience and Non-Wrapping Controls (`docs/adr/0048-ui-resilience-and-non-wrapping-controls.md`)
+- **0049**: Containerized Deployment and Multi-Arch Docker Distribution (`docs/adr/0049-containerized-deployment-and-multi-arch-docker-distribution.md`)
+- **0050**: Fast Schema Catalog Synchronization and Root Blocker Incident Triage (`docs/adr/0050-fast-catalog-synchronization-and-root-blocker-triage.md`)
 
 ## Visual Schema & ERD Canvas
 

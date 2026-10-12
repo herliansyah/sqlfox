@@ -103,6 +103,51 @@ func (s *Server) handleGetSchema(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, sess.CachedSchema)
 }
 
+func (s *Server) handleGetFastCatalog(w http.ResponseWriter, r *http.Request) {
+	connID := r.PathValue("id")
+	sess, err := s.sessionMgr.GetSession(connID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	catalog, err := sess.Session.InspectFastCatalog(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to inspect fast catalog: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, catalog)
+}
+
+func (s *Server) handleGetActiveThreads(w http.ResponseWriter, r *http.Request) {
+	connID := r.PathValue("id")
+	sess, err := s.sessionMgr.GetSession(connID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	info, err := sess.Session.ServerInfo(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get server info: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"active_threads": info.ActiveThreads,
+		"active_conns":   info.ActiveConns,
+		"version":        info.Version,
+	})
+}
+
+
 func (s *Server) handleSelectDatabase(w http.ResponseWriter, r *http.Request) {
 	connID := r.PathValue("id")
 	sess, err := s.sessionMgr.GetSession(connID)

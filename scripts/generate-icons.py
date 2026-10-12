@@ -101,6 +101,22 @@ def main():
         )
         print(f"  ✅ Created {os.path.relpath(p, root)}")
 
+    # 3b. Recompile Native Windows PE Resource Objects (.syso)
+    import subprocess
+    ico_asset = os.path.join(root, "assets", "icon.ico")
+    for arch in ["amd64", "arm64"]:
+        syso_target = os.path.join(root, "cmd", "sqlfox", f"rsrc_windows_{arch}.syso")
+        try:
+            subprocess.run(
+                ["go", "run", "github.com/akavel/rsrc@latest", "-ico", ico_asset, "-arch", arch, "-o", syso_target],
+                check=True,
+                cwd=root,
+                capture_output=True,
+            )
+            print(f"  ✅ Compiled Windows PE resource: {os.path.relpath(syso_target, root)}")
+        except Exception as e:
+            print(f"  ⚠️ Warning: Could not compile Windows {arch} .syso resource: {e}")
+
     # 4. Generate Web App Manifest
     manifest_path = os.path.join(root, "web", "dist", "manifest.webmanifest")
     manifest_content = """{

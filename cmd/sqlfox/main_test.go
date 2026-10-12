@@ -84,7 +84,6 @@ func TestGenerateFriendlyPINEntropy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generateFriendlyPIN error: %v", err)
 	}
-
 	if len(pin1) != 10 || len(pin2) != 10 {
 		t.Fatalf("expected 10 characters (fox- + 6 chars), got %q and %q", pin1, pin2)
 	}
@@ -94,5 +93,99 @@ func TestGenerateFriendlyPINEntropy(t *testing.T) {
 	if pin1 == pin2 {
 		t.Fatalf("expected high-entropy PINs to differ, got %q == %q", pin1, pin2)
 	}
+}
+
+func TestWindowsEmbeddedIconConsistency(t *testing.T) {
+	// Root-relative path to assets/icon.ico and cmd/sqlfox syso files
+	icoPath := filepath.Join("..", "..", "assets", "icon.ico")
+	icoData, err := os.ReadFile(icoPath)
+	if err != nil {
+		t.Fatalf("failed to read assets/icon.ico: %v", err)
+	}
+
+	if len(icoData) < 6 {
+		t.Fatalf("invalid icon.ico size: %d", len(icoData))
+	}
+
+	numImages := int(icoData[4]) | int(icoData[5])<<8
+	if numImages == 0 {
+		t.Fatalf("icon.ico contains 0 images")
+	}
+
+	type frameInfo struct {
+		width  int
+		height int
+		data   []byte
+	}
+	frames := make([]frameInfo, 0, numImages)
+
+	for i := 0; i < numImages; i++ {
+		entryOffset := 6 + i*16
+		if entryOffset+16 > len(icoData) {
+			t.Fatalf("corrupted ico directory entry %d", i)
+		}
+		w := int(icoData[entryOffset])
+		if w == 0 {
+			w = 256
+		}
+		h := int(icoData[entryOffset+1])
+		if h == 0 {
+			h = 256
+		}
+		bytesLen := int(icoData[entryOffset+8]) | int(icoData[entryOffset+9])<<8 | int(icoData[entryOffset+10])<<16 | int(icoData[entryOffset+11])<<24
+		imgOffset := int(icoData[entryOffset+12]) | int(icoData[entryOffset+13])<<8 | int(icoData[entryOffset+14])<<16 | int(icoData[entryOffset+15])<<24
+
+		if imgOffset+bytesLen > len(icoData) {
+			t.Fatalf("corrupted ico frame %d offsets", i)
+		}
+		frames = append(frames, frameInfo{
+			width:  w,
+			height: h,
+			data:   icoData[imgOffset : imgOffset+bytesLen],
+		})
+	}
+
+	sysoFiles := []string{
+		"rsrc_windows_amd64.syso",
+		"rsrc_windows_arm64.syso",
+	}
+
+	for _, sysoFile := range sysoFiles {
+		sysoPath := sysoFile
+		sysoData, err := os.ReadFile(sysoPath)
+		if err != nil {
+			t.Fatalf("failed to read %s: %v", sysoFile, err)
+		}
+
+		for _, frame := range frames {
+			// Check if frame raw bytes exist in syso file
+			checkLen := len(frame.data)
+			if checkLen > 128 {
+				checkLen = 128
+			}
+			if !bytesContains(sysoData, frame.data[:checkLen]) {
+				t.Errorf("critical branding bug: %s does not contain the canonical %dx%d icon frame from assets/icon.ico (still embedding old icon)", sysoFile, frame.width, frame.height)
+			}
+		}
+	}
+}
+
+func bytesContains(haystack, needle []byte) bool {
+	if len(needle) == 0 {
+		return true
+	}
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		match := true
+		for j := 0; j < len(needle); j++ {
+			if haystack[i+j] != needle[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
 }
 

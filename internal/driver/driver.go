@@ -48,6 +48,9 @@ type Session interface {
 	// InspectSchema returns database metadata (tables, columns, indexes).
 	InspectSchema(ctx context.Context, dbName string) (*SchemaMetadata, error)
 
+	// InspectFastCatalog returns lightweight table & column metadata for all user databases without heavy foreign key or index scans.
+	InspectFastCatalog(ctx context.Context) (map[string][]TableMetadata, error)
+
 	// SelectDatabase switches the active database context for subsequent operations.
 	SelectDatabase(ctx context.Context, dbName string) error
 
@@ -325,9 +328,10 @@ func ScanExplainRows(rows *sql.Rows) ([]ExplainRow, error) {
 
 // ServerInfo reports database runtime statistics.
 type ServerInfo struct {
-	Version     string `json:"version"`
-	UptimeSec   int64  `json:"uptime_sec"`
-	ActiveConns int    `json:"active_conns"`
+	Version       string `json:"version"`
+	UptimeSec     int64  `json:"uptime_sec"`
+	ActiveConns   int    `json:"active_conns"`
+	ActiveThreads int    `json:"active_threads"`
 }
 
 // ProcessItem represents an active thread / query on the database server.

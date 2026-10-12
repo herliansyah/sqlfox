@@ -284,6 +284,10 @@ Klik tombol **🔒 Read-Only** pada bilah menu atas kapan saja:
 - **Peralihan Skema PostgreSQL**: Berpindah skema dari `public` ke skema tenant tanpa perlu membuat koneksi baru.
 - **Menu Klik Kanan Tabel**: Klik kanan tabel mana pun untuk membuka data (*Open Table*), melihat struktur pembuatan (*View DDL*), atau memeriksa ukuran disk (*Inspect Storage*).
 - **Pencarian Skema Universal (Ctrl+P)**: Buka jendela Schema Search untuk melompat langsung ke tabel atau kolom apa pun dalam hitungan milidetik.
+- **Sinkronisasi Cepat Katalog Skema (`🔄 All`)**: Klik tombol **🔄 All** di samping pemilih database (*Database Switcher*) untuk memperbarui cache autocomplete dan pencarian lintas database server secara instan.
+  - **Bebas Kunci Foreign Key (Zero FK Lock)**: Memindai hanya identitas tabel dan kolom dalam satu sapuan cepat (`InspectFastCatalog`) tanpa memicu relasi berat (`KEY_COLUMN_USAGE`).
+  - **Pengecekan Kesehatan Pra-Eksekusi**: Memeriksa beban thread aktif server (`ActiveThreads`) sebelum sinkronisasi dimulai—memberikan peringatan jika thread aktif melebihi 50 (waspada) atau 100 (kritis).
+  - **Lencana Waktu Cache**: Menampilkan stempel waktu sinkronisasi terakhir (`#schema-cache-badge`) di sebelah tombol penyegaran skema database aktif.
 
 ### Keyset Pagination & Pencarian Data Kilat
 Sistem pagination konvensional `OFFSET 1000000` memaksa server memindai dan membuang jutaan baris sebelum menampilkan data. SqlFox menerapkan **Keyset Pagination**:
@@ -396,13 +400,13 @@ Saat Anda hendak mengeksekusi operasi skema kritis seperti `ALTER TABLE` atau `D
 ### Inspeksi Lock Contention Pra-Eksekusi & Root Blocker Tree
 Dapat diakses melalui **⚡ Monitor &rarr; 🔒 Lock Contention & Blockers**:
 - Menganalisis antrean kunci aktif pada MySQL (`sys.innodb_lock_waits`, `data_locks`) dan PostgreSQL (`pg_locks`, `pg_blocking_pids`).
-- **Pohon Penyebab Utama (Root Blocker Tree)**: Memvisualisasikan rantai query yang saling mengunci:
-  ```
-  Root Blocker (PID: 4120, User: batch_worker, Time: 182s, Query: UPDATE orders ...)
-  └── Waiting Query (PID: 4891, Time: 45s, Query: ALTER TABLE orders ADD COLUMN ...)
-      └── Blocked Query (PID: 5102, Time: 12s, Query: SELECT * FROM orders WHERE ...)
-  ```
-- **Tindakan Mitigasi**: Hentikan sesi biang keladi (*root blocker*) secara aman via pembatalan out-of-band langsung dari tampilan pohon tanpa membuka terminal terpisah.
+- **Tampilan Root Blocker Triage**:
+  - Menyorot thread biang keladi dengan lencana tegas `🚨 ROOT BLOCKER` yang menampilkan Thread ID, user database, mode kunci yang dipegang (`holding LOCK`), dan identitas resource yang terkunci.
+  - **Kontainer Teks SQL Lengkap (Scrollable)**: Menampilkan query SQL lengkap (`font-mono text-[13px]`) dengan batas tinggi gulir vertikal (`max-h-48 overflow-y-auto`) agar query panjang dapat diperiksa tuntas saat insiden produksi.
+  - **Tombol Mitigasi Spesifik**:
+    - **Kill Query** (Kuning Kunyit): Membatalkan query aktif yang sedang berjalan tanpa memutus koneksi klien.
+    - **Kill Blocker** (Merah): Menghentikan seluruh koneksi pemblokir seketika untuk meredakan badai lock contention.
+  - **Hierarki Sesi yang Terblokir**: Menampilkan rincian sesi downstream yang tertahan lengkap dengan durasi menunggu yang disorot merah/putih (`waiting 45s for lock`), nama user, dan teks query yang terhenti.
 
 ### Processlist Real-Time & Pembatalan Query Out-of-Band
 Dapat diakses melalui **⚡ Monitor &rarr; ⚡ Processlist**:

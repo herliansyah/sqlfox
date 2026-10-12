@@ -374,6 +374,18 @@ func (s *SQLiteSession) InspectSchema(ctx context.Context, dbName string) (*driv
 	}, nil
 }
 
+// InspectFastCatalog returns tables and columns for SQLite.
+func (s *SQLiteSession) InspectFastCatalog(ctx context.Context) (map[string][]driver.TableMetadata, error) {
+	schema, err := s.InspectSchema(ctx, "main")
+	if err != nil {
+		return nil, err
+	}
+	return map[string][]driver.TableMetadata{
+		"main": schema.Tables,
+	}, nil
+}
+
+
 func (s *SQLiteSession) SelectDatabase(ctx context.Context, dbName string) error {
 	return nil
 }

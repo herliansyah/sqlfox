@@ -131,13 +131,16 @@ func (s *MySQLSession) ServerInfo(ctx context.Context) (*driver.ServerInfo, erro
 
 	var uptimeSec int64
 	var activeConns int
+	var activeThreads int
 	_ = s.db.QueryRowContext(ctx, "SHOW STATUS LIKE 'Uptime'").Scan(new(string), &uptimeSec)
 	_ = s.db.QueryRowContext(ctx, "SHOW STATUS LIKE 'Threads_connected'").Scan(new(string), &activeConns)
+	_ = s.db.QueryRowContext(ctx, "SHOW STATUS LIKE 'Threads_running'").Scan(new(string), &activeThreads)
 
 	return &driver.ServerInfo{
-		Version:     version,
-		UptimeSec:   uptimeSec,
-		ActiveConns: activeConns,
+		Version:       version,
+		UptimeSec:     uptimeSec,
+		ActiveConns:   activeConns,
+		ActiveThreads: activeThreads,
 	}, nil
 }
 
@@ -662,6 +665,81 @@ func (s *MySQLSession) InspectSchema(ctx context.Context, dbName string) (*drive
 		Routines:     routines,
 		Events:       events,
 	}, nil
+}
+
+// InspectFastCatalog retrieves lightweight tables and columns across all non-system databases in a single fast sweep.
+// ponytail: eliminates O(N) information_schema.KEY_COLUMN_USAGE foreign key joins that flood processlist on session switches
+func (s *MySQLSession) InspectFastCatalog(ctx context.Context) (map[string][]driver.TableMetadata, error) {
+	// Query all user tables
+	tblQuery := `
+	SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE, IFNULL(TABLE_ROWS, 0)
+	FROM information_schema.TABLES
+	WHERE TABLE_SCHEMA NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys')
+	ORDER BY TABLE_SCHEMA, TABLE_NAME;
+	`
+	rows, err := s.db.QueryContext(ctx, tblQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect catalog tables: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string][]driver.TableMetadata)
+	type tblRef struct {
+		dbName string
+		idx    int
+	}
+	tableMap := make(map[string]tblRef) // key: db.table
+
+	for rows.Next() {
+		var schemaName, tblName, tblType string
+		var rowCount int64
+		if err := rows.Scan(&schemaName, &tblName, &tblType, &rowCount); err == nil {
+			t := driver.TableMetadata{
+				Name:        tblName,
+				Type:        tblType,
+				RowCount:    rowCount,
+				Columns:     []driver.ColumnMetadata{},
+				Indexes:     []driver.IndexMetadata{},
+				ForeignKeys: []driver.ForeignKeyMetadata{},
+			}
+			lowerDB := strings.ToLower(schemaName)
+			result[lowerDB] = append(result[lowerDB], t)
+			tableMap[lowerDB+"."+strings.ToLower(tblName)] = tblRef{
+				dbName: lowerDB,
+				idx:    len(result[lowerDB]) - 1,
+			}
+		}
+	}
+
+	// Query columns across user tables in single pass
+	colQuery := `
+	SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, IFNULL(COLUMN_DEFAULT, ''), EXTRA
+	FROM information_schema.COLUMNS
+	WHERE TABLE_SCHEMA NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys')
+	ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION;
+	`
+	cRows, cErr := s.db.QueryContext(ctx, colQuery)
+	if cErr == nil {
+		defer cRows.Close()
+		for cRows.Next() {
+			var schemaName, tblName, colName, colType, isNullable, colKey, colDefault, extra string
+			if err := cRows.Scan(&schemaName, &tblName, &colName, &colType, &isNullable, &colKey, &colDefault, &extra); err == nil {
+				key := strings.ToLower(schemaName) + "." + strings.ToLower(tblName)
+				if ref, ok := tableMap[key]; ok {
+					result[ref.dbName][ref.idx].Columns = append(result[ref.dbName][ref.idx].Columns, driver.ColumnMetadata{
+						Name:         colName,
+						Type:         colType,
+						IsNullable:   isNullable == "YES",
+						IsPrimaryKey: colKey == "PRI",
+						DefaultValue: colDefault,
+						Extra:        extra,
+					})
+				}
+			}
+		}
+	}
+
+	return result, nil
 }
 
 
