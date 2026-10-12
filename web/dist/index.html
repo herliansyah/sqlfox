@@ -128,8 +128,25 @@
     .cm-number { color: #fbbf24 !important; font-variant-numeric: tabular-nums; }
     .cm-comment { color: #64748b !important; font-style: italic !important; }
     .cm-variable { color: #e2e8f0 !important; }
+    .cm-variable-2, .cm-variable-3 { color: #7dd3fc !important; }
+    .cm-type { color: #c084fc !important; font-weight: 500 !important; }
+    .cm-atom { color: #fb923c !important; }
     .cm-builtin { color: #38bdf8 !important; }
     .cm-operator { color: #94a3b8 !important; }
+    .cm-punctuation { color: #94a3b8 !important; }
+    .cm-bracket { color: #cbd5e1 !important; }
+    div.CodeMirror span.CodeMirror-matchingbracket {
+      color: #38bdf8 !important;
+      background: rgba(56, 189, 248, 0.2) !important;
+      outline: 1px solid rgba(56, 189, 248, 0.4) !important;
+      border-radius: 2px !important;
+    }
+    div.CodeMirror span.CodeMirror-nonmatchingbracket {
+      color: #f87171 !important;
+      background: rgba(239, 68, 68, 0.2) !important;
+      outline: 1px solid rgba(239, 68, 68, 0.4) !important;
+      border-radius: 2px !important;
+    }
 
     /* Autocomplete Popover */
     .CodeMirror-hints {

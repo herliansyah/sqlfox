@@ -1245,6 +1245,34 @@ func TestBrandMarkCanonicalIconConsistency(t *testing.T) {
 	}
 }
 
+func TestCodeMirrorDarkThemeTokensEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	requiredRules := []string{
+		".cm-variable-2, .cm-variable-3 { color: #7dd3fc !important; }",
+		".cm-type { color: #c084fc !important;",
+		".cm-atom { color: #fb923c !important; }",
+		"div.CodeMirror span.CodeMirror-matchingbracket",
+	}
+
+	for _, rule := range requiredRules {
+		if !strings.Contains(content, rule) {
+			t.Errorf("expected index.html to contain CodeMirror dark theme override %q, but was missing", rule)
+		}
+	}
+}
+
 
 
 
