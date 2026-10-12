@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.7.0] - 2026-10-12
+
 ### Added
 - **Auto-Refresh Visual Countdown Bar (`web`)**: Added GPU-accelerated CSS draining countdown progress bar under refresh controls for Processlist Manager and Cluster & Replication Inspector, synchronized with interval timers, manual refresh triggers, tab switching, and page visibility changes.
 - **Multi-Arch Docker & Containerized Distribution (`deploy`, `ci`)**: Published ultra-lightweight (~20MB), non-root Alpine container image (`ghcr.io/herliansyah/sqlfox`) supporting `linux/amd64` and `linux/arm64`. Includes multi-stage `Dockerfile`, production-ready `docker-compose.yml`, persistent volume `/data` mapping, automated GHCR release publishing, and comprehensive host-gateway connection documentation.
