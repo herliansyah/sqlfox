@@ -93,11 +93,18 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 		return nil, fmt.Errorf("failed to connect to MySQL server (%s:%d): %w", cfg.Host, cfg.Port, err)
 	}
 
+	var pfsVal int
+	pfsEnabled := false
+	if err := db.QueryRowContext(ctx, "SELECT @@performance_schema").Scan(&pfsVal); err == nil && pfsVal == 1 {
+		pfsEnabled = true
+	}
+
 	return &MySQLSession{
 		db:           db,
 		cfg:          cfg,
 		dsn:          dsn,
 		queryThreads: make(map[string]int64),
+		pfsEnabled:   pfsEnabled,
 	}, nil
 }
 
@@ -107,6 +114,7 @@ type MySQLSession struct {
 	dsn          string
 	mu           sync.Mutex
 	queryThreads map[string]int64
+	pfsEnabled   bool
 }
 
 func (s *MySQLSession) Ping(ctx context.Context) (time.Duration, error) {
@@ -791,26 +799,30 @@ func (s *MySQLSession) GetProcesslist(ctx context.Context) (*driver.ProcesslistR
 
 	// 2. Fetch processes: prefer performance_schema.threads (lock-free) to prevent LOCK_thread_count mutex contention
 	var threads []driver.ProcessItem
-	pfsRows, pfsErr := s.db.QueryContext(ctx, `
-		SELECT PROCESSLIST_ID, IFNULL(PROCESSLIST_USER, ''), IFNULL(PROCESSLIST_HOST, ''),
-		       IFNULL(PROCESSLIST_DB, ''), IFNULL(PROCESSLIST_COMMAND, ''), IFNULL(PROCESSLIST_TIME, 0),
-		       IFNULL(PROCESSLIST_STATE, ''), IFNULL(PROCESSLIST_INFO, '')
-		FROM performance_schema.threads
-		WHERE PROCESSLIST_ID IS NOT NULL
-		ORDER BY PROCESSLIST_TIME DESC
-	`)
-	if pfsErr == nil {
-		defer pfsRows.Close()
-		for pfsRows.Next() {
-			var p driver.ProcessItem
-			if err := pfsRows.Scan(&p.ID, &p.User, &p.Host, &p.DB, &p.Command, &p.Time, &p.State, &p.Info); err == nil {
-				threads = append(threads, p)
+	if s.pfsEnabled {
+		pfsRows, pfsErr := s.db.QueryContext(ctx, `
+			SELECT PROCESSLIST_ID, IFNULL(PROCESSLIST_USER, ''), IFNULL(PROCESSLIST_HOST, ''),
+			       IFNULL(PROCESSLIST_DB, ''), IFNULL(PROCESSLIST_COMMAND, ''), IFNULL(PROCESSLIST_TIME, 0),
+			       IFNULL(PROCESSLIST_STATE, ''), IFNULL(PROCESSLIST_INFO, '')
+			FROM performance_schema.threads
+			WHERE PROCESSLIST_ID IS NOT NULL
+			ORDER BY PROCESSLIST_TIME DESC
+		`)
+		if pfsErr == nil {
+			defer pfsRows.Close()
+			for pfsRows.Next() {
+				var p driver.ProcessItem
+				if err := pfsRows.Scan(&p.ID, &p.User, &p.Host, &p.DB, &p.Command, &p.Time, &p.State, &p.Info); err == nil {
+					threads = append(threads, p)
+				}
 			}
 		}
-	} else {
-		// Fallback to information_schema.PROCESSLIST
+	}
+
+	// Fallback to information_schema.PROCESSLIST if performance_schema is disabled or empty
+	if len(threads) == 0 {
 		rows, err := s.db.QueryContext(ctx, `
-			SELECT ID, USER, HOST, IFNULL(DB, ''), COMMAND, TIME, IFNULL(STATE, ''), IFNULL(INFO, '')
+			SELECT IFNULL(ID, 0), IFNULL(USER, ''), IFNULL(HOST, ''), IFNULL(DB, ''), IFNULL(COMMAND, ''), IFNULL(TIME, 0), IFNULL(STATE, ''), IFNULL(INFO, '')
 			FROM information_schema.PROCESSLIST
 			ORDER BY TIME DESC
 		`)
@@ -822,30 +834,32 @@ func (s *MySQLSession) GetProcesslist(ctx context.Context) (*driver.ProcesslistR
 					threads = append(threads, p)
 				}
 			}
-		} else {
-			// Fallback to SHOW FULL PROCESSLIST
-			fallbackRows, fErr := s.db.QueryContext(ctx, "SHOW FULL PROCESSLIST")
-			if fErr != nil {
-				return nil, fmt.Errorf("failed to fetch processlist: %w", fErr)
-			}
-			defer fallbackRows.Close()
-			for fallbackRows.Next() {
-				var id int64
-				var user, host, command string
-				var db, state, info sql.NullString
-				var timeVal int64
-				if err := fallbackRows.Scan(&id, &user, &host, &db, &command, &timeVal, &state, &info); err == nil {
-					threads = append(threads, driver.ProcessItem{
-						ID:      id,
-						User:    user,
-						Host:    host,
-						DB:      db.String,
-						Command: command,
-						Time:    timeVal,
-						State:   state.String,
-						Info:    info.String,
-					})
-				}
+		}
+	}
+
+	// Fallback to SHOW FULL PROCESSLIST if still empty or restricted
+	if len(threads) == 0 {
+		fallbackRows, fErr := s.db.QueryContext(ctx, "SHOW FULL PROCESSLIST")
+		if fErr != nil {
+			return nil, fmt.Errorf("failed to fetch processlist: %w", fErr)
+		}
+		defer fallbackRows.Close()
+		for fallbackRows.Next() {
+			var id sql.NullInt64
+			var user, host, command sql.NullString
+			var db, state, info sql.NullString
+			var timeVal sql.NullInt64
+			if err := fallbackRows.Scan(&id, &user, &host, &db, &command, &timeVal, &state, &info); err == nil {
+				threads = append(threads, driver.ProcessItem{
+					ID:      id.Int64,
+					User:    user.String,
+					Host:    host.String,
+					DB:      db.String,
+					Command: command.String,
+					Time:    timeVal.Int64,
+					State:   state.String,
+					Info:    info.String,
+				})
 			}
 		}
 	}
@@ -854,23 +868,23 @@ func (s *MySQLSession) GetProcesslist(ctx context.Context) (*driver.ProcesslistR
 		threads = []driver.ProcessItem{}
 	}
 
-	// 3. Inspect Lock Waits (Tier 1: sys.innodb_lock_waits, fallback: information_schema.innodb_lock_waits for MariaDB)
+	// 3. Inspect Lock Waits (Tier 1: sys.innodb_lock_waits, fallback: information_schema.innodb_lock_waits for MariaDB / MySQL 5.7)
 	var locks []driver.LockWait
 	lockRows, lErr := s.db.QueryContext(ctx, `
 		SELECT
 			IFNULL(waiting_pid, 0),
 			IFNULL(waiting_query, ''),
-			IFNULL(waiting_account, ''),
+			'',
 			IFNULL(wait_age_secs, 0),
 			IFNULL(blocking_pid, 0),
 			IFNULL(blocking_query, ''),
-			IFNULL(blocking_account, ''),
+			'',
 			IFNULL(locked_table, ''),
 			IFNULL(waiting_lock_mode, '')
 		FROM sys.innodb_lock_waits
 	`)
 	if lErr != nil {
-		// ponytail: MariaDB / MySQL without sys schema fallback to information_schema
+		// ponytail: MariaDB / MySQL 5.7 without sys schema fallback to information_schema
 		lockRows, lErr = s.db.QueryContext(ctx, `
 			SELECT
 				IFNULL(r.trx_mysql_thread_id, 0),
@@ -880,11 +894,12 @@ func (s *MySQLSession) GetProcesslist(ctx context.Context) (*driver.ProcesslistR
 				IFNULL(b.trx_mysql_thread_id, 0),
 				IFNULL(b.trx_query, ''),
 				'',
-				IFNULL(w.waiting_table_id, ''),
-				IFNULL(w.waiting_lock_mode, '')
+				IFNULL(rl.lock_table, ''),
+				IFNULL(rl.lock_mode, '')
 			FROM information_schema.innodb_lock_waits w
 			JOIN information_schema.innodb_trx r ON r.trx_id = w.requesting_trx_id
 			JOIN information_schema.innodb_trx b ON b.trx_id = w.blocking_trx_id
+			LEFT JOIN information_schema.innodb_locks rl ON rl.lock_id = w.requested_lock_id
 		`)
 	}
 	if lErr == nil {
@@ -1962,19 +1977,23 @@ func (s *MySQLSession) SampleFlightMetrics(ctx context.Context) (*driver.FlightM
 
 	// 2. Adaptive Correlated Queries: fetch active non-idle queries with non-empty SQL (Top 5)
 	// ponytail: Prefer performance_schema.threads (lock-free) to avoid LOCK_thread_count mutex contention.
-	qRows, qErr := s.db.QueryContext(ctx, `
-		SELECT PROCESSLIST_ID, IFNULL(PROCESSLIST_USER, ''), IFNULL(PROCESSLIST_HOST, ''),
-		       IFNULL(PROCESSLIST_DB, ''), IFNULL(PROCESSLIST_COMMAND, ''), IFNULL(PROCESSLIST_TIME, 0),
-		       IFNULL(PROCESSLIST_STATE, ''), IFNULL(PROCESSLIST_INFO, '')
-		FROM performance_schema.threads
-		WHERE PROCESSLIST_ID IS NOT NULL
-		  AND PROCESSLIST_USER NOT IN ('system user', 'event_scheduler')
-		  AND PROCESSLIST_COMMAND NOT IN ('Sleep', 'Binlog Dump', 'Daemon')
-		  AND PROCESSLIST_INFO IS NOT NULL AND TRIM(PROCESSLIST_INFO) != ''
-		ORDER BY PROCESSLIST_TIME DESC
-		LIMIT 5
-	`)
-	if qErr != nil {
+	var qRows *sql.Rows
+	var qErr error
+	if s.pfsEnabled {
+		qRows, qErr = s.db.QueryContext(ctx, `
+			SELECT PROCESSLIST_ID, IFNULL(PROCESSLIST_USER, ''), IFNULL(PROCESSLIST_HOST, ''),
+			       IFNULL(PROCESSLIST_DB, ''), IFNULL(PROCESSLIST_COMMAND, ''), IFNULL(PROCESSLIST_TIME, 0),
+			       IFNULL(PROCESSLIST_STATE, ''), IFNULL(PROCESSLIST_INFO, '')
+			FROM performance_schema.threads
+			WHERE PROCESSLIST_ID IS NOT NULL
+			  AND PROCESSLIST_USER NOT IN ('system user', 'event_scheduler')
+			  AND PROCESSLIST_COMMAND NOT IN ('Sleep', 'Binlog Dump', 'Daemon')
+			  AND PROCESSLIST_INFO IS NOT NULL AND TRIM(PROCESSLIST_INFO) != ''
+			ORDER BY PROCESSLIST_TIME DESC
+			LIMIT 5
+		`)
+	}
+	if !s.pfsEnabled || qErr != nil {
 		// Fallback to information_schema.PROCESSLIST if performance_schema is disabled
 		qRows, qErr = s.db.QueryContext(ctx, `
 			SELECT ID, USER, HOST, IFNULL(DB, ''), COMMAND, TIME, IFNULL(STATE, ''), IFNULL(INFO, '')
