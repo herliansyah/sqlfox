@@ -232,6 +232,20 @@ func (s *Server) routes() {
 			}
 			if path == "index.html" {
 				w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+				isRemote := !isLoopback(req.RemoteAddr)
+				token := extractToken(req)
+				unlocked := !isRemote || s.authMgr.ValidateToken(token)
+				if isRemote && !unlocked {
+					content, err := fs.ReadFile(s.assets, "index.html")
+					if err == nil {
+						// ponytail: unhide remote-lock-modal and mark body vault-locked so streaming / Ctrl+F5 suppresses inner UI
+						modified := strings.Replace(string(content), `<body class="`, `<body class="vault-locked `, 1)
+						modified = strings.Replace(modified, `id="remote-lock-modal" class="fixed inset-0 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 z-[100] hidden"`, `id="remote-lock-modal" class="fixed inset-0 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 z-[100]"`, 1)
+						w.Header().Set("Content-Type", "text/html; charset=utf-8")
+						_, _ = w.Write([]byte(modified))
+						return
+					}
+				}
 			}
 			fileServer.ServeHTTP(w, req)
 		})

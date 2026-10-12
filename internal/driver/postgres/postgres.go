@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -743,12 +744,13 @@ func (s *PostgresSession) GetProcesslist(ctx context.Context) (*driver.Processli
 	for rows.Next() {
 		var pid, timeSec int64
 		var user, host, db, state, command, query string
-		var blockingPids []int64
+		var rawBlockers any
 
-		if err := rows.Scan(&pid, &user, &host, &db, &state, &timeSec, &command, &query, &blockingPids); err != nil {
-			// Some versions scan array as string format {123,456}
+		if err := rows.Scan(&pid, &user, &host, &db, &state, &timeSec, &command, &query, &rawBlockers); err != nil {
 			continue
 		}
+
+		blockingPids := parseBlockingPids(rawBlockers)
 
 		threads = append(threads, driver.ProcessItem{
 			ID:      pid,
@@ -778,6 +780,37 @@ func (s *PostgresSession) GetProcesslist(ctx context.Context) (*driver.Processli
 		Threads:         threads,
 		Locks:           locks,
 	}, nil
+}
+
+func parseBlockingPids(rawBlockers any) []int64 {
+	var blockingPids []int64
+	switch v := rawBlockers.(type) {
+	case []int64:
+		blockingPids = v
+	case []int32:
+		for _, b := range v {
+			blockingPids = append(blockingPids, int64(b))
+		}
+	case []any:
+		for _, item := range v {
+			switch num := item.(type) {
+			case int64:
+				blockingPids = append(blockingPids, num)
+			case int32:
+				blockingPids = append(blockingPids, int64(num))
+			}
+		}
+	case string:
+		trimmed := strings.Trim(v, "{}")
+		if trimmed != "" {
+			for _, part := range strings.Split(trimmed, ",") {
+				if n, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64); err == nil {
+					blockingPids = append(blockingPids, n)
+				}
+			}
+		}
+	}
+	return blockingPids
 }
 
 func (s *PostgresSession) KillProcess(ctx context.Context, threadID int64, killConnection bool) error {

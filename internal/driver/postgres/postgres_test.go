@@ -162,4 +162,34 @@ func TestPostgresCancelQueryFallback(t *testing.T) {
 	}
 }
 
+func TestParseBlockingPids(t *testing.T) {
+	// Test nil
+	if pids := parseBlockingPids(nil); len(pids) != 0 {
+		t.Errorf("expected empty for nil, got %v", pids)
+	}
+
+	// Test []int32 (pgx int4[] mapping)
+	pids32 := parseBlockingPids([]int32{12, 34})
+	if len(pids32) != 2 || pids32[0] != 12 || pids32[1] != 34 {
+		t.Errorf("expected [12 34], got %v", pids32)
+	}
+
+	// Test []int64
+	pids64 := parseBlockingPids([]int64{56, 78})
+	if len(pids64) != 2 || pids64[0] != 56 || pids64[1] != 78 {
+		t.Errorf("expected [56 78], got %v", pids64)
+	}
+
+	// Test string representation "{101, 102}"
+	pidsStr := parseBlockingPids("{101, 102}")
+	if len(pidsStr) != 2 || pidsStr[0] != 101 || pidsStr[1] != 102 {
+		t.Errorf("expected [101 102], got %v", pidsStr)
+	}
+
+	// Test empty string "{}"
+	if pidsEmpty := parseBlockingPids("{}"); len(pidsEmpty) != 0 {
+		t.Errorf("expected empty for '{}', got %v", pidsEmpty)
+	}
+}
+
 

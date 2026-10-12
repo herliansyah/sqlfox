@@ -705,7 +705,7 @@ func TestUIResilienceAndNonWrappingControls(t *testing.T) {
 		"header-toolbar",
 		"editor-toolbar",
 		"table-toolbar",
-		`class="h-12 bg-app-surface border-b border-app-border flex items-center justify-between px-4 z-20 flex-shrink-0 gap-3"`,
+		`class="h-12 bg-app-surface border-b border-app-border flex items-center justify-between px-4 z-40 flex-shrink-0 gap-3"`,
 	}
 
 	for _, s := range expectedSnippets {
@@ -735,6 +735,22 @@ func TestHeaderDropdownsNotClippedByOverflow(t *testing.T) {
 	// Therefore, <header> must not have overflow-x-auto or overflow-hidden.
 	if strings.Contains(content, `<header class="h-12 bg-app-surface border-b border-app-border flex items-center justify-between px-4 z-20 flex-shrink-0 overflow-x-auto`) {
 		t.Errorf("critical UI bug: <header> has overflow-x-auto, which clips top-monitor-menu and top-db-tools-menu dropdowns")
+	}
+
+	// Dropdown menus must have solid background so underlying tabs/editors do not bleed through transparently.
+	if !strings.Contains(content, "#top-monitor-menu") || !strings.Contains(content, "background-color: #0f172a !important;") {
+		t.Errorf("expected solid opaque background (#0f172a) for header dropdown menus in index.html")
+	}
+
+	// Header must have higher z-index (z-40) than workspace toolbars/splitters (z-20) and overlay panels (z-30)
+	// so that top header dropdowns (Monitor, DB Tools, Settings) always render on top of the workspace.
+	if !strings.Contains(content, `<header class="h-12 bg-app-surface border-b border-app-border flex items-center justify-between px-4 z-40 flex-shrink-0 gap-3">`) {
+		t.Errorf("expected <header> to have z-40 so header dropdown menus float over editor, grid toolbars, and splitters")
+	}
+
+	// top-monitor-menu must have adequate width and non-shrinking badge layout so dynamic blocker badges don't spill
+	if !strings.Contains(content, `id="top-monitor-menu" class="hidden absolute right-0 mt-1 w-72`) {
+		t.Errorf("expected #top-monitor-menu to have w-72 to fit dynamic lock badges cleanly")
 	}
 }
 
@@ -816,6 +832,11 @@ func TestProcesslistHeaderAndTrendPanelResilience(t *testing.T) {
 	// Verify trend stats (running, total, peak, avg) are wrapped in whitespace-nowrap
 	if !regexpMatch(`id="pl-trend-now"[\s\S]*?id="pl-trend-total"[\s\S]*?id="pl-trend-peak"[\s\S]*?id="pl-trend-avg"`, content) {
 		t.Errorf("pl-trend statistics elements missing")
+	}
+
+	// Verify processlist toolbar left control group has min-w-max to prevent overlapping right summary controls on narrow viewports
+	if !regexpMatch(`class="[^"]*processlist-toolbar[^"]*"[\s\S]*?<div[^>]*class="[^"]*min-w-max`, content) {
+		t.Errorf("processlist-toolbar left control group must have min-w-max to prevent overlapping right summary controls on resize")
 	}
 }
 
@@ -1110,5 +1131,96 @@ func TestComprehensiveUIGlitchGuards(t *testing.T) {
 		t.Errorf("expected grid cells to use dataset attributes for startInlineEdit")
 	}
 }
+
+func TestRemoteAccessLockScreenEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	expectedSnippets := []string{
+		`id="remote-lock-modal"`,
+		`id="remote-unlock-password" autofocus`,
+		`function checkAuthStatus()`,
+		`apiFetch('/api/auth/status')`,
+		`function unlockRemoteVault(`,
+		`sqlfox_token=`,
+		`body.vault-locked`,
+		`classList.add('vault-locked')`,
+		`classList.remove('vault-locked')`,
+	}
+
+	for _, s := range expectedSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain remote lock screen snippet %q, but was missing", s)
+		}
+	}
+}
+
+func TestNotesCardMarkdownPreviewEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	expectedSnippets := []string{
+		`function renderNoteSnippetPreview(`,
+		`renderCopilotMarkdown(snippet)`,
+		`note-preview-content`,
+		`renderNoteSnippetPreview(n.content)`,
+	}
+
+	for _, s := range expectedSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain note card markdown preview snippet %q, but was missing", s)
+		}
+	}
+}
+
+func TestHeaderDropdownsAboveNotesDrawerEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	// Bug: notes-inbox-drawer had z-40, matching <header class="... z-40">.
+	// Because notes-inbox-drawer comes later in DOM, it stacked on top of <header>'s dropdown menus
+	// (#top-settings-menu, #top-db-tools-menu, #top-monitor-menu).
+	// notes-inbox-drawer must be strictly lower than header (e.g. z-[35] or z-index: 35)
+	if strings.Contains(content, `id="notes-inbox-drawer" class="hidden absolute top-0 right-0 bottom-0 w-[540px] max-w-[95vw] bg-slate-950 border-l border-t border-app-border flex flex-col z-40`) {
+		t.Errorf("critical UI stacking bug: notes-inbox-drawer has z-40 which collides with header z-40 and covers header dropdown menus")
+	}
+
+	if !strings.Contains(content, `z-[35]`) && !strings.Contains(content, `z-index: 35`) {
+		t.Errorf("expected notes-inbox-drawer to have z-[35] so header dropdown menus float over notes drawer")
+	}
+}
+
+
+
 
 

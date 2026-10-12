@@ -66,6 +66,23 @@
     [hidden], .hidden { display: none !important; }
     dialog:not([open]) { display: none !important; }
 
+    /* Critical remote vault lockdown guard (prevents layout painting during streaming / hard reload) */
+    body.vault-locked > *:not(#remote-lock-modal):not(script):not(style):not(svg) {
+      display: none !important;
+    }
+    body.vault-locked #remote-lock-modal,
+    #remote-lock-modal:not(.hidden) {
+      position: fixed !important;
+      inset: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      background-color: #020617 !important;
+      z-index: 99999 !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+    }
+
     body {
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
@@ -194,6 +211,34 @@
     .header-toolbar, .editor-toolbar, .table-toolbar, .processlist-toolbar {
       flex-wrap: nowrap;
     }
+
+    /* Solid opaque background for header dropdown menus and context popovers */
+    #top-monitor-menu,
+    #top-db-tools-menu,
+    #top-settings-menu,
+    #export-csv-menu,
+    #session-dropdown-menu,
+    #database-dropdown-menu,
+    #table-context-menu,
+    #tab-context-menu,
+    #pl-context-menu,
+    #grid-context-menu {
+      background-color: #0f172a !important;
+      background: #0f172a !important;
+      opacity: 1 !important;
+    }
+
+    /* Operational note list preview compact styling */
+    .note-preview-content p:first-child,
+    .note-preview-content h1:first-child,
+    .note-preview-content h2:first-child,
+    .note-preview-content h3:first-child { margin-top: 0 !important; }
+    .note-preview-content p:last-child { margin-bottom: 0 !important; }
+
+    /* Notes inbox slide-over drawer: z-index 35 (below header z-40 so dropdowns float over drawer, above copilot z-30) */
+    #notes-inbox-drawer {
+      z-index: 35 !important;
+    }
   </style>
 </head>
 <body class="bg-app-bg text-slate-100 font-sans h-screen flex flex-col overflow-hidden select-none">
@@ -254,11 +299,27 @@
     </symbol>
   </svg>
 
+  <!-- 0. Remote Access Guard Lock Screen -->
+  <div id="remote-lock-modal" class="fixed inset-0 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 z-[100] hidden">
+    <div class="bg-slate-900 border-2 border-app-accent w-full max-w-sm rounded-xl shadow-2xl p-6 space-y-4 text-center">
+      <div class="flex justify-center items-center space-x-2 py-1">
+        <svg class="w-12 h-12 flex-shrink-0" aria-label="SqlFox Logo"><use href="#sqlfox-brand-mark"/></svg>
+        <span class="text-3xl">🔒</span>
+      </div>
+      <h2 class="text-base font-bold text-white tracking-wide">SqlFox Remote Access Guard</h2>
+      <p class="text-xs text-slate-400 leading-relaxed">You are accessing SqlFox from a network device. Please enter your Master Password to unlock this vault.</p>
+      <form onsubmit="unlockRemoteVault(event)" class="space-y-3 pt-2">
+        <input type="password" id="remote-unlock-password" autofocus required placeholder="Enter Master Password" class="w-full bg-slate-950 border border-slate-700 p-2.5 rounded text-white text-center text-sm outline-none focus:border-app-accent font-mono">
+        <button type="submit" class="w-full bg-app-accent hover:bg-sky-400 text-slate-950 font-bold py-2 rounded text-sm transition">Unlock Vault</button>
+      </form>
+    </div>
+  </div>
+
   <!-- Ambient Top Accent Stripe (Active on Production) -->
   <div id="top-ambient-stripe" class="hidden h-[2px] w-full bg-rose-500 flex-shrink-0 z-50"></div>
 
   <!-- Top Navbar -->
-  <header class="h-12 bg-app-surface border-b border-app-border flex items-center justify-between px-4 z-20 flex-shrink-0 gap-3">
+  <header class="h-12 bg-app-surface border-b border-app-border flex items-center justify-between px-4 z-40 flex-shrink-0 gap-3">
     <div class="flex items-center space-x-3 shrink-0">
       <button onclick="toggleLeftSidebar()" class="h-7 w-7 flex items-center justify-center rounded bg-app-card hover:bg-slate-700 text-slate-400 hover:text-white border border-app-border transition text-xs cursor-pointer" title="Toggle Sidebar (Ctrl+B)">
         <span>◨</span>
@@ -319,20 +380,20 @@
           <span id="monitor-rec-dot" class="hidden inline-block w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse"></span>
           <span class="text-[9px] text-slate-400">▼</span>
         </button>
-        <div id="top-monitor-menu" class="hidden absolute right-0 mt-1 w-64 bg-slate-900 border border-slate-700 rounded shadow-xl z-50 text-xs py-1">
-          <button id="btn-open-processlist" onclick="openProcesslistTab(); toggleTopMonitorMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center justify-between">
-            <span class="flex flex-col">
+        <div id="top-monitor-menu" class="hidden absolute right-0 mt-1 w-72 bg-slate-900 border border-slate-700 rounded shadow-xl z-50 text-xs py-1">
+          <button id="btn-open-processlist" onclick="openProcesslistTab(); toggleTopMonitorMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center justify-between gap-2">
+            <span class="flex flex-col min-w-0">
               <span class="font-medium text-sky-400">⚡ Processlist</span>
               <span class="text-[10px] text-slate-400">Thread monitor & slow query alerts</span>
             </span>
-            <span id="processlist-slow-badge" class="hidden bg-amber-500/20 text-amber-300 text-[10px] px-1.5 rounded-full font-bold"></span>
+            <span id="processlist-slow-badge" class="hidden shrink-0 bg-amber-500/20 text-amber-300 text-[10px] px-1.5 rounded-full font-bold whitespace-nowrap"></span>
           </button>
-          <button id="btn-open-lock-inspector" onclick="openLockInspector(); toggleTopMonitorMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center justify-between border-t border-slate-800">
-            <span class="flex flex-col">
+          <button id="btn-open-lock-inspector" onclick="openLockInspector(); toggleTopMonitorMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center justify-between gap-2 border-t border-slate-800">
+            <span class="flex flex-col min-w-0">
               <span class="font-medium text-red-400">🔒 Lock Contention &amp; Blockers</span>
               <span class="text-[10px] text-slate-400">Root blocker tree &amp; waiting query mitigation</span>
             </span>
-            <span id="lock-blocker-badge" class="hidden bg-red-500/20 text-red-300 text-[10px] px-1.5 rounded-full font-bold"></span>
+            <span id="lock-blocker-badge" class="hidden shrink-0 bg-red-500/20 text-red-300 text-[10px] px-1.5 py-0.5 rounded-full font-bold whitespace-nowrap"></span>
           </button>
           <button id="btn-open-cluster" onclick="openClusterTab(); toggleTopMonitorMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center justify-between border-t border-slate-800">
             <span class="flex flex-col">
@@ -1155,7 +1216,7 @@
       <div id="processlist-view-container" class="hidden flex-1 flex flex-col overflow-hidden bg-app-bg">
         <!-- Processlist Toolbar -->
         <div class="processlist-toolbar h-10 bg-app-surface border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0 gap-3 overflow-x-auto">
-          <div class="flex items-center space-x-2.5 flex-1 min-w-0 shrink-0">
+          <div class="flex items-center space-x-2.5 flex-1 min-w-max shrink-0">
             <!-- Processlist Trio Segmented Switcher -->
             <div class="shrink-0 flex items-center space-x-1 bg-slate-900 border border-slate-700 rounded p-0.5">
               <button id="pl-view-threads-btn" onclick="switchProcesslistView('threads')" class="px-2.5 py-1 rounded text-xs bg-slate-800 text-sky-400 font-semibold flex items-center space-x-1.5 transition">
@@ -1349,7 +1410,7 @@
       <div id="audit-drawer" class="hidden h-72 bg-slate-950 border-t border-app-border flex flex-col z-20 shadow-2xl absolute bottom-0 left-0 right-0">
         <!-- Drawer Header -->
         <div class="h-9 bg-app-surface border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0 gap-3 overflow-x-auto">
-          <div class="flex items-center space-x-3 flex-1 min-w-0 mr-3 shrink-0">
+          <div class="flex items-center space-x-3 flex-1 min-w-max mr-3 shrink-0">
             <span class="shrink-0 font-bold text-white flex items-center space-x-1.5 whitespace-nowrap">
               <span>📜</span>
               <span class="whitespace-nowrap">Session Audit Log</span>
@@ -1832,7 +1893,7 @@
     </aside>
 
     <!-- Operational Notes Inbox Slide-over Drawer (Right Overlay) -->
-    <div id="notes-inbox-drawer" class="hidden absolute top-0 right-0 bottom-0 w-[540px] max-w-[95vw] bg-slate-950 border-l border-t border-app-border flex flex-col z-40 shadow-2xl transition-transform duration-200">
+    <div id="notes-inbox-drawer" class="hidden absolute top-0 right-0 bottom-0 w-[540px] max-w-[95vw] bg-slate-950 border-l border-t border-app-border flex flex-col z-[35] shadow-2xl transition-transform duration-200">
       <!-- Drawer Header -->
       <div class="h-11 bg-slate-900 border-b border-app-border px-3.5 flex items-center justify-between text-xs flex-shrink-0">
         <div class="flex items-center space-x-2">
@@ -2217,22 +2278,6 @@
     <button id="tab-ctx-btn-rename" onclick="tabContextMenuAction('rename')" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 text-slate-200 flex items-center space-x-2 transition cursor-pointer">
       <span>✏️</span><span>Rename Tab...</span>
     </button>
-  </div>
-
-  <!-- 0. Remote Access Guard Lock Screen -->
-  <div id="remote-lock-modal" class="fixed inset-0 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 z-[100] hidden">
-    <div class="bg-slate-900 border-2 border-app-accent w-full max-w-sm rounded-xl shadow-2xl p-6 space-y-4 text-center">
-      <div class="flex justify-center items-center space-x-2 py-1">
-        <svg class="w-12 h-12 flex-shrink-0" aria-label="SqlFox Logo"><use href="#sqlfox-brand-mark"/></svg>
-        <span class="text-3xl">🔒</span>
-      </div>
-      <h2 class="text-base font-bold text-white tracking-wide">SqlFox Remote Access Guard</h2>
-      <p class="text-xs text-slate-400 leading-relaxed">You are accessing SqlFox from a network device. Please enter your Master Password to unlock this vault.</p>
-      <form onsubmit="unlockRemoteVault(event)" class="space-y-3 pt-2">
-        <input type="password" id="remote-unlock-password" required placeholder="Enter Master Password" class="w-full bg-slate-950 border border-slate-700 p-2.5 rounded text-white text-center text-sm outline-none focus:border-app-accent font-mono">
-        <button type="submit" class="w-full bg-app-accent hover:bg-sky-400 text-slate-950 font-bold py-2 rounded text-sm transition">Unlock Vault</button>
-      </form>
-    </div>
   </div>
 
   <!-- 1. Safety Guard Challenge Modal -->
@@ -3539,6 +3584,7 @@
           <span>💡 Press <kbd class="px-1.5 py-0.5 bg-slate-800 text-slate-300 rounded font-mono text-[10px]">Esc</kbd> or click backdrop to close</span>
         </div>
         <div class="flex items-center space-x-2">
+          <button onclick="closeLockInspectorModal(); openProcesslistTab();" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-sky-400 hover:text-sky-300 transition text-xs font-medium cursor-pointer flex items-center space-x-1" title="Open full active thread table in Processlist tab"><span>⚡ Processlist Tab</span></button>
           <button onclick="fetchProcesslist(false)" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 transition text-xs font-medium cursor-pointer">🔄 Refresh</button>
           <button onclick="closeLockInspectorModal()" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600 text-white transition text-xs font-medium cursor-pointer">Close</button>
         </div>
@@ -4581,11 +4627,13 @@
 
     async function checkAuthStatus() {
       try {
-        const res = await fetch('/api/auth/status');
+        const res = await apiFetch('/api/auth/status');
         const data = await res.json();
         if (data.is_remote && !data.unlocked) {
           showRemoteLockScreen();
           return false;
+        } else {
+          document.body.classList.remove('vault-locked');
         }
       } catch (err) {
         console.warn('Auth status check skipped:', err);
@@ -4594,6 +4642,7 @@
     }
 
     function showRemoteLockScreen() {
+      document.body.classList.add('vault-locked');
       document.getElementById('remote-lock-modal').classList.remove('hidden');
       setTimeout(() => document.getElementById('remote-unlock-password').focus(), 100);
     }
@@ -4610,8 +4659,9 @@
         const data = await res.json();
         if (res.ok && data.token) {
           sessionStorage.setItem('sqlfox_remote_token', data.token);
-          document.getElementById('remote-lock-modal').classList.add('hidden');
-          await loadConnections();
+          // ponytail: sync token to cookie so browser page reloads from LAN do not re-lock the screen
+          document.cookie = 'sqlfox_token=' + encodeURIComponent(data.token) + '; path=/; SameSite=Lax';
+          await initAppWorkspace();
         } else {
           showNativeAlert('Incorrect master password!', 'Authentication');
         }
@@ -4731,8 +4781,9 @@
       }
     }
 
-    // --- Lifecycle Initialization ---
-    window.addEventListener('DOMContentLoaded', async () => {
+    async function initAppWorkspace() {
+      document.body.classList.remove('vault-locked');
+      document.getElementById('remote-lock-modal').classList.add('hidden');
       const initTable = document.getElementById('results-table');
       if (initTable) initTable.classList.add('table-empty');
       initSidebarVisibility();
@@ -4741,15 +4792,28 @@
       initAIChatSession();
       initWorkspacePaneSplitter();
       updateAIProviderBadge();
-      const authorized = await checkAuthStatus();
-      if (authorized) {
-        await loadConnections();
-        await loadMasterPIN();
-        await loadSnippets();
-      }
+      await loadConnections();
+      await loadMasterPIN();
+      await loadSnippets();
       renderTabs();
       setupKeyboardShortcuts();
       updateFooterStats();
+      if (typeof startNotesReminderPoller === 'function') startNotesReminderPoller();
+      if (typeof startAutoUpdateCheck === 'function') startAutoUpdateCheck();
+    }
+
+    // --- Lifecycle Initialization ---
+    window.addEventListener('DOMContentLoaded', async () => {
+      const lockModal = document.getElementById('remote-lock-modal');
+      if (lockModal && !lockModal.classList.contains('hidden')) {
+        const passInput = document.getElementById('remote-unlock-password');
+        if (passInput) passInput.focus();
+      }
+      const authorized = await checkAuthStatus();
+      if (!authorized) {
+        return; // Remote client is locked: do not initialize workspace
+      }
+      await initAppWorkspace();
     });
 
     // ponytail: reload safety guard for in-flight queries and uncommitted staged table edits
@@ -7606,14 +7670,9 @@
         showNativeAlert('Please select and connect to a database session first.', 'Lock Inspector');
         return;
       }
-      openProcesslistTab();
-      await fetchProcesslist(false);
-      const locks = (processlistData && processlistData.locks) || [];
-      if (locks.length > 0) {
-        openLockInspectorModal();
-      } else {
-        showToast('✅ No active lock contention detected. All database threads running unobstructed.', 'success');
-      }
+      openLockInspectorModal();
+      await fetchProcesslist(true);
+      renderLockInspectorModalContent();
     }
 
     function setProcesslistInterval(interval) {
@@ -11019,6 +11078,19 @@ Please analyze what is causing this query to be slow and suggest necessary query
       container.innerHTML = filtered.map(n => renderNoteCardHTML(n, now)).join('');
     }
 
+    function renderNoteSnippetPreview(content) {
+      if (!content || !content.trim()) return '';
+      let text = content.trim();
+      // ponytail: if note content is pure SQL statement without markdown fences, wrap in sql block for interactive preview
+      const firstWord = (text.split(/\s+/)[0] || '').toUpperCase();
+      const sqlKeywords = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP', 'TRUNCATE', 'EXPLAIN', 'WITH', 'SHOW', 'DESCRIBE'];
+      if (!text.includes('```') && !text.includes('# ') && sqlKeywords.includes(firstWord)) {
+        text = '```sql\n' + text + '\n```';
+      }
+      const snippet = text.length > 360 ? text.substring(0, 360) + '...' : text;
+      return renderCopilotMarkdown(snippet);
+    }
+
     function renderNoteCardHTML(n, now) {
       if (!now) now = new Date();
       const isDue = n.status !== 'resolved' && n.reminder_at && new Date(n.reminder_at) <= now;
@@ -11072,10 +11144,10 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
       let contentSnippet = '';
       if (n.content && n.content.trim()) {
-        const snippetText = n.content.length > 280 ? n.content.substring(0, 280) + '...' : n.content;
+        const previewHtml = renderNoteSnippetPreview(n.content);
         contentSnippet = `
-          <div class="mt-2 p-2 bg-slate-950 border border-slate-800 rounded font-mono text-[11px] text-slate-300 whitespace-pre-wrap overflow-x-auto max-h-32 leading-relaxed">
-            ${escapeHtml(snippetText)}
+          <div onclick="event.stopPropagation()" class="mt-2 p-2.5 bg-slate-950 border border-slate-800/80 rounded text-slate-200 text-xs leading-relaxed font-sans overflow-y-auto max-h-36 select-text note-preview-content">
+            ${previewHtml}
           </div>
         `;
       }
@@ -11786,10 +11858,11 @@ Please analyze what is causing this query to be slow and suggest necessary query
     }
 
     // Start background timer: check reminders every 30s
-    if (notesReminderTimer) clearInterval(notesReminderTimer);
-    notesReminderTimer = setInterval(checkDueNotesReminders, 30000);
-    // Initial check after 3s
-    setTimeout(checkDueNotesReminders, 3000);
+    function startNotesReminderPoller() {
+      if (notesReminderTimer) clearInterval(notesReminderTimer);
+      notesReminderTimer = setInterval(checkDueNotesReminders, 30000);
+      setTimeout(checkDueNotesReminders, 3000);
+    }
 
     // --- Create Table Designer Modal Handlers ---
     function openCreateTableModal() {
@@ -20684,9 +20757,11 @@ Please analyze what is causing this query to be slow and suggest necessary query
     }
 
     // Auto-check for updates 2 seconds after page load
-    setTimeout(() => {
-      checkOrOpenUpdate(false);
-    }, 2000);
+    function startAutoUpdateCheck() {
+      setTimeout(() => {
+        checkOrOpenUpdate(false);
+      }, 2000);
+    }
   </script>
 </body>
 </html>
