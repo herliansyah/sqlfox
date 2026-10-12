@@ -1,138 +1,35 @@
 #!/usr/bin/env python3
 """
 SqlFox Brand Mark & Standard Icon Generator
-Generates canonical multi-platform icon assets from geometric SVG master:
+Generates canonical multi-platform icon assets from Modern Geometric Tech Fox Head (GitLab style):
 - web/dist/assets/logo.svg & docs/assets/logo.svg (Master Vector)
 - web/dist/favicon.svg (Optimized browser favicon)
 - web/dist/favicon.ico (Multi-res 16, 32, 48, 256 Windows/Browser ICO)
 - web/dist/apple-touch-icon.png (180x180 iOS/iPad bookmark)
 - web/dist/icon-192.png & web/dist/icon-512.png (PWA Manifest)
 - web/dist/manifest.webmanifest (PWA configuration)
+- web/dist/index.html (Inline SVG Brand Symbol)
 - assets/icon.ico & assets/icon.png (Desktop package archives)
-- cmd/sqlfox/rsrc_windows_amd64.syso & arm64.syso (Windows PE embedded resource)
 """
 
 import os
 import sys
-from PIL import Image, ImageDraw
+from PIL import Image
 
 # Canonical Brand Colors
-ORANGE_LIGHT  = "#fb923c"  # Amber 400
-ORANGE_MAIN   = "#f97316"  # Amber 500 (Primary Brand)
-ORANGE_DEEP   = "#ea580c"  # Orange 600
-ORANGE_DARK   = "#c2410c"  # Orange 700
-CYAN_ACCENT   = "#38bdf8"  # Sky 400 (SqlFox Cyan)
-CYAN_GLOW     = "#7dd3fc"  # Sky 300
-CYAN_DARK     = "#0284c7"  # Sky 600
-WHITE_PURE    = "#ffffff"  # Pure White
-WHITE_SOFT    = "#f1f5f9"  # Slate 100
-SLATE_LIGHT   = "#cbd5e1"  # Slate 300
-SLATE_DARK    = "#1e293b"  # Slate 800
-NOSE_COLOR    = "#090d16"  # Background Deep
+ORANGE_BRAND = "#ea580c"  # SqlFox Deep Vibrant Orange
 
-# Low-Poly Geometric Fox Head Facets (viewBox: 0 0 512 512, Symmetrical along x=256)
-FACETS = [
-    # --- Ears (Outer & Inner) ---
-    # Left Ear Outer
-    ([(256, 140), (200, 140), (108, 48), (170, 180)], ORANGE_DARK),
-    # Right Ear Outer
-    ([(256, 140), (312, 140), (404, 48), (342, 180)], ORANGE_DARK),
-    # Left Ear Outer Flank
-    ([(108, 48), (76, 210), (170, 180)], ORANGE_DEEP),
-    # Right Ear Outer Flank
-    ([(404, 48), (436, 210), (342, 180)], ORANGE_DEEP),
-    # Left Ear Inner (Shadow depth)
-    ([(170, 180), (116, 68), (196, 150)], SLATE_DARK),
-    # Right Ear Inner (Shadow depth)
-    ([(342, 180), (396, 68), (316, 150)], SLATE_DARK),
-    # Left Ear Inner Highlight
-    ([(170, 180), (196, 150), (216, 190)], ORANGE_MAIN),
-    # Right Ear Inner Highlight
-    ([(342, 180), (316, 150), (296, 190)], ORANGE_MAIN),
-
-    # --- Forehead & Crown ---
-    # Forehead Upper Diamond Top
-    ([(256, 140), (216, 190), (256, 224)], ORANGE_LIGHT),
-    ([(256, 140), (296, 190), (256, 224)], ORANGE_MAIN),
-    # Forehead Temple Left
-    ([(200, 140), (170, 180), (216, 190)], ORANGE_DEEP),
-    # Forehead Temple Right
-    ([(312, 140), (342, 180), (296, 190)], ORANGE_DEEP),
-    # Forehead Flank to Brow Left
-    ([(170, 180), (150, 240), (216, 190)], ORANGE_MAIN),
-    # Forehead Flank to Brow Right
-    ([(342, 180), (362, 240), (296, 190)], ORANGE_MAIN),
-    # Forehead Center Lower Diamond (Database / Core Emblem)
-    ([(256, 224), (216, 190), (216, 260), (256, 290)], ORANGE_MAIN),
-    ([(256, 224), (296, 190), (296, 260), (256, 290)], ORANGE_LIGHT),
-    # Brow to Eye Top Left
-    ([(216, 190), (150, 240), (216, 260)], ORANGE_DEEP),
-    # Brow to Eye Top Right
-    ([(296, 190), (362, 240), (296, 260)], ORANGE_DEEP),
-
-    # --- Cheek Wings (Wide Fox Cheeks) ---
-    # Left Upper Cheek Outer
-    ([(76, 210), (52, 280), (150, 240)], ORANGE_MAIN),
-    # Right Upper Cheek Outer
-    ([(436, 210), (460, 280), (362, 240)], ORANGE_MAIN),
-    # Left Cheek Wing Outer Spike
-    ([(52, 280), (36, 330), (130, 310)], ORANGE_LIGHT),
-    # Right Cheek Wing Outer Spike
-    ([(460, 280), (476, 330), (382, 310)], ORANGE_LIGHT),
-    # Left Mid Cheek
-    ([(150, 240), (52, 280), (130, 310)], ORANGE_DEEP),
-    # Right Mid Cheek
-    ([(362, 240), (460, 280), (382, 310)], ORANGE_DEEP),
-
-    # --- White / Light Cheek Tufts ---
-    # Left Lower Cheek White Outer
-    ([(36, 330), (100, 390), (130, 310)], WHITE_SOFT),
-    # Right Lower Cheek White Outer
-    ([(476, 330), (412, 390), (382, 310)], WHITE_SOFT),
-    # Left Cheek Inner White
-    ([(130, 310), (100, 390), (190, 350)], WHITE_PURE),
-    # Right Cheek Inner White
-    ([(382, 310), (412, 390), (322, 350)], WHITE_PURE),
-
-    # --- Eye Sockets & Cheeks Lower ---
-    # Left Sub-Eye Bridge
-    ([(150, 240), (130, 310), (190, 300)], ORANGE_DEEP),
-    # Right Sub-Eye Bridge
-    ([(362, 240), (382, 310), (322, 300)], ORANGE_DEEP),
-    # Left Eye Under-Tuft
-    ([(190, 300), (130, 310), (190, 350)], SLATE_LIGHT),
-    # Right Eye Under-Tuft
-    ([(322, 300), (382, 310), (322, 350)], SLATE_LIGHT),
-
-    # --- Glowing Cyan Tech Eyes ---
-    # Left Eye (Sharp, Sleek, Futuristic)
-    ([(162, 252), (212, 268), (178, 280)], CYAN_ACCENT),
-    ([(178, 280), (212, 268), (206, 276)], CYAN_DARK),
-    ([(174, 260), (194, 266), (182, 274)], CYAN_GLOW),
-    # Right Eye
-    ([(350, 252), (300, 268), (334, 280)], CYAN_ACCENT),
-    ([(334, 280), (300, 268), (306, 276)], CYAN_DARK),
-    ([(338, 260), (318, 266), (330, 274)], CYAN_GLOW),
-
-    # --- Snout & Muzzle ---
-    # Bridge of Nose (Center Ridge)
-    ([(256, 290), (216, 260), (210, 350)], ORANGE_LIGHT),
-    ([(256, 290), (296, 260), (302, 350)], ORANGE_MAIN),
-    ([(256, 290), (210, 350), (256, 390)], ORANGE_LIGHT),
-    ([(256, 290), (302, 350), (256, 390)], ORANGE_MAIN),
-    # Muzzle Flanks (White Snout)
-    ([(210, 350), (190, 350), (220, 420), (256, 420)], WHITE_PURE),
-    ([(302, 350), (322, 350), (292, 420), (256, 420)], WHITE_SOFT),
-    ([(210, 350), (256, 390), (256, 420)], WHITE_PURE),
-    ([(302, 350), (256, 390), (256, 420)], WHITE_SOFT),
-    # Muzzle Lower Chin (Jawline)
-    ([(220, 420), (256, 420), (256, 464)], WHITE_SOFT),
-    ([(292, 420), (256, 420), (256, 464)], SLATE_LIGHT),
-
-    # --- Nose Tip (Black / Deep Obsidian Triangle) ---
-    ([(256, 422), (242, 436), (270, 436)], NOSE_COLOR),
-    ([(242, 436), (270, 436), (256, 448)], NOSE_COLOR),
-]
+# Vector SVG Path for the Modern Geometric Tech Fox Head with Eyes
+FOX_SVG_PATH = (
+    "M 89,36 L 203,130 L 254,117 L 308,130 L 420,36 L 423,37 L 440,112 L 421,223 "
+    "L 460,307 L 459,311 L 399,371 L 351,387 L 294,463 L 258,476 L 218,463 L 161,388 "
+    "L 113,371 L 51,309 L 90,223 L 71,111 L 89,37 Z "
+    "M 445,311 L 341,329 L 285,412 L 283,426 L 262,443 L 288,452 L 292,452 L 296,441 "
+    "L 335,378 L 445,316 L 450,312 L 446,311 Z "
+    "M 63,312 L 177,378 L 219,452 L 249,443 L 228,426 L 225,411 L 170,329 L 64,312 Z "
+    "M 160,260 L 175,290 L 215,302 L 200,272 Z "
+    "M 352,260 L 337,290 L 297,302 L 312,272 Z"
+)
 
 def generate_svg(standalone=True):
     """Generate canonical SVG code."""
@@ -143,32 +40,21 @@ def generate_svg(standalone=True):
     else:
         lines.append('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" shape-rendering="geometricPrecision">')
 
-    lines.append('  <!-- SqlFox Canonical Brand Mark - Geometric Low-Poly Fox Head -->')
-    lines.append('  <g id="sqlfox-fox-mark">')
-    for points, color in FACETS:
-        pts_str = " ".join(f"{x},{y}" for x, y in points)
-        lines.append(f'    <polygon points="{pts_str}" fill="{color}" />')
-    lines.append('  </g>')
+    lines.append('  <!-- SqlFox Brand Mark - Modern Geometric Tech Fox Head (Option 1) -->')
+    lines.append(f'  <path id="sqlfox-fox-mark" fill="{ORANGE_BRAND}" fill-rule="evenodd" d="{FOX_SVG_PATH}" />')
     lines.append('</svg>')
     return "\n".join(lines)
 
-def render_raster_image(target_size):
-    """Render anti-aliased image at target_size using 4x supersampling."""
-    scale = 4
-    canvas_size = 512 * scale
-    img = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-
-    for points, color in FACETS:
-        scaled_pts = [(x * scale, y * scale) for x, y in points]
-        draw.polygon(scaled_pts, fill=color)
-
-    # Downsample with Lanczos filter for crisp edge antialiasing
-    return img.resize((target_size, target_size), Image.Resampling.LANCZOS)
+def load_master_square(root):
+    """Load canonical master 512x512 square icon."""
+    canonical_master = os.path.join(root, "assets", "icon.png")
+    if os.path.exists(canonical_master):
+        return Image.open(canonical_master).convert("RGBA")
+    raise FileNotFoundError(f"Missing canonical master icon: {canonical_master}")
 
 def main():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    print(f"🦊 Generating SqlFox Standard Brand Assets in: {root}")
+    print(f"🦊 Generating SqlFox Modern Geometric Fox Brand Assets in: {root}")
 
     # 1. Generate Master SVGs
     svg_code = generate_svg(standalone=True)
@@ -183,14 +69,11 @@ def main():
             f.write(svg_code)
         print(f"  ✅ Created {os.path.relpath(p, root)}")
 
-    # 2. Render Hi-Res Master Image (512x512)
-    master_512 = render_raster_image(512)
-    master_192 = render_raster_image(192)
-    apple_180 = render_raster_image(180)
-    master_256 = render_raster_image(256)
-    ico_48 = render_raster_image(48)
-    ico_32 = render_raster_image(32)
-    ico_16 = render_raster_image(16)
+    # 2. Render Hi-Res Master Image & Downsamples
+    master_512 = load_master_square(root)
+    master_192 = master_512.resize((192, 192), Image.Resampling.LANCZOS)
+    apple_180  = master_512.resize((180, 180), Image.Resampling.LANCZOS)
+    master_256 = master_512.resize((256, 256), Image.Resampling.LANCZOS)
 
     # Save PNG Assets
     png_targets = [
@@ -251,7 +134,25 @@ def main():
         f.write(manifest_content)
     print(f"  ✅ Created {os.path.relpath(manifest_path, root)}")
 
-    print("🎉 All graphic icon assets successfully standardized!")
+    # 5. Synchronize Inline SVG Symbol in web/dist/index.html
+    index_html_path = os.path.join(root, "web", "dist", "index.html")
+    if os.path.exists(index_html_path):
+        import re
+        with open(index_html_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        symbol_pattern = r'<symbol id="sqlfox-brand-mark"[^>]*>[\s\S]*?</symbol>'
+        new_symbol = (
+            f'<symbol id="sqlfox-brand-mark" viewBox="0 0 512 512" shape-rendering="geometricPrecision">\n'
+            f'      <path id="sqlfox-fox-mark" fill="{ORANGE_BRAND}" fill-rule="evenodd" d="{FOX_SVG_PATH}" />\n'
+            f'    </symbol>'
+        )
+        updated_content = re.sub(symbol_pattern, new_symbol, content)
+        with open(index_html_path, "w", encoding="utf-8") as f:
+            f.write(updated_content)
+        print(f"  ✅ Updated inline brand mark symbol in {os.path.relpath(index_html_path, root)}")
+
+    print("🎉 All graphic icon assets successfully replaced with Option 1 (Modern Geometric Fox)!")
 
 if __name__ == "__main__":
     main()
