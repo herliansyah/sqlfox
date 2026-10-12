@@ -8,10 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Auto-Refresh Visual Countdown Bar (`web`)**: Added GPU-accelerated CSS draining countdown progress bar under refresh controls for Processlist Manager and Cluster & Replication Inspector, synchronized with interval timers, manual refresh triggers, tab switching, and page visibility changes.
 - **Multi-Arch Docker & Containerized Distribution (`deploy`, `ci`)**: Published ultra-lightweight (~20MB), non-root Alpine container image (`ghcr.io/herliansyah/sqlfox`) supporting `linux/amd64` and `linux/arm64`. Includes multi-stage `Dockerfile`, production-ready `docker-compose.yml`, persistent volume `/data` mapping, automated GHCR release publishing, and comprehensive host-gateway connection documentation.
 - **High-Contrast CodeMirror Dark Theme Palette (`web`)**: Fully customized syntax highlighting for dark background workspaces. Table, database, and column backtick identifiers (`.cm-variable-2`, `.cm-variable-3`) render in Sky-300 cyan (`#7dd3fc`), data types (`.cm-type`) in Violet (`#c084fc`), constants and booleans (`.cm-atom`) in Coral (`#fb923c`), and parentheses/brackets in neutral slate with glowing cyan matching-bracket highlights, eliminating illegible dark-blue defaults.
 
 ### Changed
+- **Production Ambient Top Stripe Elimination (`web`)**: Removed the top ambient red accent stripe on production connections, consolidating production environment awareness onto the Session Switcher environment badge as the single source of truth.
 - **Modern Geometric Tech Fox Brand Mark & Icon Set (`brand`, `web`)**: Replaced legacy multi-facet low-poly fox emblem with a unified, solid orange (`#ea580c`) geometric tech fox mark. Synchronized master SVG vectors across `docs/assets/logo.svg`, `web/dist/assets/logo.svg`, and `web/dist/favicon.svg`, regenerated multi-resolution desktop and PWA icon bundles (`icon.png`, `icon.ico`, `icon-512`, `icon-192`, `apple-touch-icon`), and updated embedded `#sqlfox-brand-mark` symbol in `web/dist/index.html`.
 
 ## [v0.6.1] - 2026-10-12
