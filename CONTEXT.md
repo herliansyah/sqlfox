@@ -249,6 +249,10 @@ _Avoid_: Copy tab, clone tab, tab fork
 An action enabling users to customize workspace tab titles for organizing complex multi-tab query workflows.
 _Avoid_: Tab title editor, change tab label
 
+**Editor Syntax Theme**:
+The curated, high-contrast dark-mode syntax color palette governing CodeMirror token styling in the Query Editor, ensuring optimal legibility on dark backgrounds (`#090d16`) by mapping backtick table/database identifiers (`.cm-variable-2`) to Sky-300 cyan (`#7dd3fc`), data types (`.cm-type`) to Violet (`#c084fc`), constants/atoms (`.cm-atom`) to Coral (`#fb923c`), and matching brackets to glowing cyan highlights.
+_Avoid_: Custom theme picker, external CSS theme, light theme fallback
+
 
 ## Schema Management & Native Dialogs
 
@@ -797,10 +801,18 @@ _Avoid_: Manual tag, ad-hoc release, unversioned bump
 The native HTML5 modal dialog (`#changelog-dialog`) presenting complete application history and offline-accessible release logs rendered from embedded markdown, accessible directly from the footer version element and Command Palette.
 _Avoid_: Release popup, changelog window, version toast
 
+**Containerized Deployment**:
+The operational execution pattern of SqlFox packaged as a minimal, non-root multi-arch container image (`ghcr.io/herliansyah/sqlfox`), binding the HTTP server to `0.0.0.0` and consolidating persistent state (`config.db`, `master.key`, backups) under a dedicated `/data` volume.
+_Avoid_: Docker app, virtual machine, container bundle
+
+**Host Gateway**:
+The network bridge mapping (`host.docker.internal:host-gateway`) enabling a containerized SqlFox instance to connect directly to databases hosted natively on the container host machine.
+_Avoid_: Localhost forwarder, host proxy, loopback redirect
+
 ## Brand Identity & Application Icons
 
 **Brand Mark**:
-The canonical geometric low-poly fox emblem in vector SVG format embodying SqlFox's identity, featuring Amber/Orange facets (`#f97316`), deep orange shadow depth (`#ea580c`), and futuristic cyan accents (`#38bdf8`).
+The canonical modern geometric tech fox head emblem in vector SVG format embodying SqlFox's identity, rendered in solid brand orange (`#ea580c`) with sharp minimalist contours.
 _Avoid_: Generic fox emoji, temporary logo, mascot image
 
 **App Icon Set**:

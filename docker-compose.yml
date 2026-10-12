@@ -1,0 +1,23 @@
+services:
+  sqlfox:
+    image: ghcr.io/herliansyah/sqlfox:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sqlfox
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Optional: fix master password/PIN (leave unset to auto-generate once into /data/master.key)
+      # - SQLFOX_PASS=your-secure-pin
+      - SQLFOX_LOG_LEVEL=info
+    volumes:
+      - sqlfox_data:/data
+    extra_hosts:
+      # Allows SqlFox inside container to reach host-machine databases via 'host.docker.internal'
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  sqlfox_data:
+    name: sqlfox_data

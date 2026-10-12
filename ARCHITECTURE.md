@@ -8,9 +8,9 @@ SqlFox is designed as a **single-binary local application** with an embedded rea
 
 ```mermaid
 flowchart TD
-    subgraph UI ["Embedded Frontend (CodeMirror 6 + Vue 3 / Svelte)"]
-        UI_Editor["Query Editor (CodeMirror 6)"]
-        UI_Grid["Virtual Data Grid (@tanstack/virtual)"]
+    subgraph UI ["Embedded Frontend (CodeMirror 5 + Vanilla JS Single-File SPA)"]
+        UI_Editor["Query Editor (CodeMirror 5)"]
+        UI_Grid["Data Grid (Plain DOM + Keyset Pagination)"]
         UI_Tree["Schema Explorer Tree"]
         UI_Guard["Safety Challenge Modal"]
         UI_AI["AI Assistant Panel"]
@@ -55,7 +55,7 @@ The following sequence details how arbitrary SQL queries flow from the editor th
 sequenceDiagram
     autonumber
     actor User
-    participant Editor as CodeMirror 6
+    participant Editor as CodeMirror 5 (Query Editor)
     participant Server as Go API Server
     participant Guard as Safety Guard (AST)
     participant Driver as DB Driver (MySQL/SQLite)

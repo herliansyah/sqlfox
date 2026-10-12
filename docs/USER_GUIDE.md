@@ -94,15 +94,51 @@ Download the latest archive from [GitHub Releases](https://github.com/herliansya
 
 ```bash
 # Linux amd64
-curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.2.0-linux-amd64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.6.1-linux-amd64.tar.gz | tar -xz
 ./sqlfox
 
 # macOS Apple Silicon (ARM64)
-curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.2.0-darwin-arm64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.6.1-darwin-arm64.tar.gz | tar -xz
 ./sqlfox
 ```
 
 On Windows, download the `.zip` archive, extract `sqlfox.exe`, and double-click to launch.
+
+### Docker & Container Deployment
+SqlFox publishes official multi-arch container images (`linux/amd64` and `linux/arm64`) to the GitHub Container Registry.
+
+```bash
+docker run -d \
+  --name sqlfox \
+  -p 8080:8080 \
+  -v sqlfox_data:/data \
+  --add-host=host.docker.internal:host-gateway \
+  ghcr.io/herliansyah/sqlfox:latest
+```
+
+#### Docker Compose Template (`docker-compose.yml`)
+```yaml
+services:
+  sqlfox:
+    image: ghcr.io/herliansyah/sqlfox:latest
+    container_name: sqlfox
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Optional: custom static PIN instead of auto-generating into /data/master.key
+      # - SQLFOX_PASS=mysecretpin
+      - SQLFOX_LOG_LEVEL=info
+    volumes:
+      - sqlfox_data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  sqlfox_data:
+```
+
+> **Note on Connecting to Host Databases**: To connect to MySQL or PostgreSQL running natively on your host machine, set the connection Host to `host.docker.internal` rather than `127.0.0.1` or `localhost`.
 
 ### Install via Go
 ```bash

@@ -94,15 +94,51 @@ Unduh arsip rilis terbaru di halaman resmi [GitHub Releases](https://github.com/
 
 ```bash
 # Linux amd64 (Download & ekstrak sekali jalan)
-curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.2.0-linux-amd64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.6.1-linux-amd64.tar.gz | tar -xz
 ./sqlfox
 
 # macOS Apple Silicon (ARM64 M1/M2/M3/M4)
-curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.2.0-darwin-arm64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.6.1-darwin-arm64.tar.gz | tar -xz
 ./sqlfox
 ```
 
 Bagi pengguna Windows, unduh file arsip `.zip`, ekstrak berkas `sqlfox.exe`, lalu klik ganda untuk menjalankannya.
+
+### Deployment via Docker & Docker Compose
+SqlFox menyediakan image container multi-arsitektur resmi (`linux/amd64` dan `linux/arm64`) melalui GitHub Container Registry (GHCR):
+
+```bash
+docker run -d \
+  --name sqlfox \
+  -p 8080:8080 \
+  -v sqlfox_data:/data \
+  --add-host=host.docker.internal:host-gateway \
+  ghcr.io/herliansyah/sqlfox:latest
+```
+
+#### Template Docker Compose (`docker-compose.yml`)
+```yaml
+services:
+  sqlfox:
+    image: ghcr.io/herliansyah/sqlfox:latest
+    container_name: sqlfox
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Opsional: tentukan PIN statis (jika kosong, auto-generate ke /data/master.key)
+      # - SQLFOX_PASS=pin-keamanan-anda
+      - SQLFOX_LOG_LEVEL=info
+    volumes:
+      - sqlfox_data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  sqlfox_data:
+```
+
+> **Tips Menghubungkan ke Database di Komputer Host**: Untuk terhubung ke MySQL atau PostgreSQL yang berjalan langsung di sistem operasi host Anda, isi Host koneksi dengan `host.docker.internal` (bukan `127.0.0.1` atau `localhost`).
 
 ### Instalasi via Go Tools
 ```bash
