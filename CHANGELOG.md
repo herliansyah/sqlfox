@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.8.0] - 2026-10-12
+
 ### Added
 - **Fast Schema Catalog Synchronization & Pre-Flight Health Check (`driver`, `server`, `web`)**: Added `InspectFastCatalog` across the core Driver interface, MySQL, PostgreSQL, and SQLite, querying table names and column definitions in a single sweep without issuing heavy foreign key (`KEY_COLUMN_USAGE`) or index queries. Added `GET /api/session/{id}/fast-catalog` and `GET /api/session/{id}/active-threads`.
 - **Schema Cache Pre-Flight Modal & Status Badge (`web`)**: Added `#refresh-all-dialog` triggered by the `🔄 All` button next to the Database Switcher with feature benefits, live server health evaluation (>50 caution, >100 critical warning based on `ActiveThreads`), and an animated progress bar. Added `#schema-cache-badge` displaying the last cached timestamp on the active schema header.
