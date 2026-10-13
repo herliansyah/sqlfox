@@ -14453,6 +14453,11 @@ Please analyze what is causing this query to be slow and suggest necessary query
         return;
       }
 
+      const colMetaMap = new Map();
+      (tableMeta?.columns || []).forEach(c => {
+        if (c && c.name) colMetaMap.set(c.name.toLowerCase(), c);
+      });
+
       tbody.innerHTML = draftRowsHTML + (rows || []).map((row, rIdx) => {
         const isSelected = selectedRowIndices.has(rIdx);
         let checkboxCell = '';
@@ -14465,11 +14470,15 @@ Please analyze what is causing this query to be slow and suggest necessary query
           ${row.map((val, cIdx) => {
             const stagedKey = `${tableName || ''}:${rIdx}:${cIdx}`;
             const staged = stagedEdits.get(stagedKey);
-            const displayVal = staged ? staged.newVal : val;
+            const rawVal = staged ? staged.newVal : val;
             const isDirty = Boolean(staged);
             const colName = cols[cIdx]?.name;
             const colType = cols[cIdx]?.type;
-            const typeStyle = getGridTypeStyle(colType);
+            const colMeta = colName ? colMetaMap.get(colName.toLowerCase()) : null;
+            const resolvedType = colMeta?.type || colType;
+            const displayVal = formatGridCellValue(rawVal, resolvedType);
+            let typeStyle = getGridTypeStyle(colType);
+            if (colMeta?.type) typeStyle = getGridTypeStyle(colMeta.type);
             const fkInfo = fkMap.get(colName);
             let fkBadge = '';
             if (fkInfo && displayVal !== null && displayVal !== '') {
@@ -14582,6 +14591,212 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const d = new Date();
       const pad = (n) => String(n).padStart(2, '0');
       return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    }
+
+    // ponytail: Format cell values according to data type semantics.
+    // Specifically formats DATE as strictly YYYY-MM-DD, DATETIME as YYYY-MM-DD HH:mm:ss, TIME as HH:mm:ss.
+    function formatGridCellValue(val, typeStr) {
+      if (val === null || val === undefined) return null;
+      if (typeof val !== 'string' && typeof val !== 'number' && !(val instanceof Date)) {
+        return val;
+      }
+      const s = String(val).trim();
+      if (!s) return s;
+      const t = (typeStr || '').trim().toLowerCase();
+
+      // 1. DATE type: strictly date only (YYYY-MM-DD), no hours/minutes/seconds
+      if (t === 'date' || t.startsWith('date(')) {
+        const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+        if (m) return m[1];
+        const d = new Date(s);
+        if (!isNaN(d.getTime())) {
+          const pad = (n) => String(n).padStart(2, '0');
+          return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+        }
+        return s;
+      }
+
+      // 2. DATETIME / TIMESTAMP types: clean SQL format YYYY-MM-DD HH:mm:ss
+      if (/^(datetime|timestamp|timestamptz)/i.test(t)) {
+        const m = s.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})/);
+        if (m) return `${m[1]} ${m[2]}`;
+        const d = new Date(s);
+        if (!isNaN(d.getTime())) {
+          const pad = (n) => String(n).padStart(2, '0');
+          return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+        }
+        return s;
+      }
+
+      // 3. TIME types: HH:mm:ss
+      if (/^(time|timetz)/i.test(t)) {
+        const m = s.match(/(\d{2}:\d{2}:\d{2})/);
+        if (m) return m[1];
+        return s;
+      }
+
+      // 4. Default fallback: if string is an ISO timestamp with T00:00:00Z, clean it
+      if (s.includes('T') && s.endsWith('Z')) {
+        const m = s.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})/);
+        if (m) {
+          return m[2] === '00:00:00' ? m[1] : `${m[1]} ${m[2]}`;
+        }
+      }
+
+      return s;
+    }
+
+    // ponytail: Edge-case-correct days in month calculation using native Date.
+    function getDaysInMonth(year, month) {
+      // month is 1-indexed (1 = Jan, 12 = Dec). Day 0 of next month is last day of current month.
+      return new Date(year, month, 0).getDate();
+    }
+
+    // ponytail: Dynamic segment stepping for date/datetime/time based on caret/selection position.
+    // Handles leap years, month boundaries, and auto-clamps days (e.g. 2026-01-31 + 1 month -> 2026-02-28).
+    function stepActiveDatePart(delta) {
+      if (!activeEditCell || !activeEditCell.input) return;
+      const inp = activeEditCell.input;
+      const cur = inp.value.trim();
+      const rawType = (activeEditCell.rawType || '').toLowerCase();
+      const isTimeOnly = rawType === 'time';
+      const isDatetime = !isTimeOnly && /^(datetime|timestamp|timestamptz)/i.test(rawType);
+      const pad = (n) => String(n).padStart(2, '0');
+
+      let year = 2026, month = 1, day = 1, hours = 0, minutes = 0, seconds = 0;
+      const now = new Date();
+
+      if (isTimeOnly) {
+        hours = now.getHours();
+        minutes = now.getMinutes();
+        seconds = now.getSeconds();
+        const tm = cur.match(/^(\d{2}):(\d{2})(?::(\d{2}))?/);
+        if (tm) {
+          hours = parseInt(tm[1], 10);
+          minutes = parseInt(tm[2], 10);
+          if (tm[3]) seconds = parseInt(tm[3], 10);
+        }
+      } else {
+        year = now.getFullYear();
+        month = now.getMonth() + 1;
+        day = now.getDate();
+        hours = now.getHours();
+        minutes = now.getMinutes();
+        seconds = now.getSeconds();
+        const m = cur.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+        if (m) {
+          year = parseInt(m[1], 10);
+          month = parseInt(m[2], 10);
+          day = parseInt(m[3], 10);
+          if (m[4]) hours = parseInt(m[4], 10);
+          if (m[5]) minutes = parseInt(m[5], 10);
+          if (m[6]) seconds = parseInt(m[6], 10);
+        }
+      }
+
+      // Detect caret / selection segment
+      // YYYY-MM-DD HH:mm:ss
+      // 0123 56 89 12 45 78
+      const pos = (inp.selectionStart !== undefined && inp.selectionStart !== null)
+        ? inp.selectionStart
+        : (activeEditCell.lastPartPos !== undefined ? activeEditCell.lastPartPos : 8);
+
+      let part = 'day';
+      let selRange = [8, 10]; // default day
+
+      if (isTimeOnly) {
+        if (pos <= 2) {
+          part = 'hour';
+          selRange = [0, 2];
+        } else if (pos <= 5) {
+          part = 'minute';
+          selRange = [3, 5];
+        } else {
+          part = 'second';
+          selRange = [6, 8];
+        }
+      } else {
+        if (pos <= 4) {
+          part = 'year';
+          selRange = [0, 4];
+        } else if (pos <= 7) {
+          part = 'month';
+          selRange = [5, 7];
+        } else if (pos <= 10) {
+          part = 'day';
+          selRange = [8, 10];
+        } else if (pos <= 13) {
+          part = 'hour';
+          selRange = [11, 13];
+        } else if (pos <= 16) {
+          part = 'minute';
+          selRange = [14, 16];
+        } else {
+          part = 'second';
+          selRange = [17, 19];
+        }
+      }
+
+      // Step targeted part
+      if (part === 'year') {
+        year += delta;
+        const maxD = getDaysInMonth(year, month);
+        if (day > maxD) day = maxD;
+      } else if (part === 'month') {
+        month += delta;
+        while (month > 12) {
+          month -= 12;
+          year += 1;
+        }
+        while (month < 1) {
+          month += 12;
+          year -= 1;
+        }
+        const maxD = getDaysInMonth(year, month);
+        if (day > maxD) day = maxD;
+      } else if (part === 'day') {
+        const dObj = new Date(year, month - 1, day + delta, hours, minutes, seconds);
+        year = dObj.getFullYear();
+        month = dObj.getMonth() + 1;
+        day = dObj.getDate();
+        hours = dObj.getHours();
+        minutes = dObj.getMinutes();
+        seconds = dObj.getSeconds();
+      } else if (part === 'hour') {
+        hours = (hours + delta) % 24;
+        if (hours < 0) hours += 24;
+      } else if (part === 'minute') {
+        minutes = (minutes + delta) % 60;
+        if (minutes < 0) minutes += 60;
+      } else if (part === 'second') {
+        seconds = (seconds + delta) % 60;
+        if (seconds < 0) seconds += 60;
+      }
+
+      // Format updated string
+      if (isTimeOnly) {
+        inp.value = `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+      } else if (isDatetime) {
+        inp.value = `${year}-${pad(month)}-${pad(day)} ${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+      } else {
+        inp.value = `${year}-${pad(month)}-${pad(day)}`;
+      }
+
+      activeEditCell.lastPartPos = selRange[0];
+      if (typeof inp.setSelectionRange === 'function') {
+        try {
+          inp.setSelectionRange(selRange[0], selRange[1]);
+        } catch (_) {}
+      }
+
+      if (typeof Event !== 'undefined' && typeof inp.dispatchEvent === 'function') {
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      if (typeof inp.focus === 'function') inp.focus();
+    }
+
+    function stepActiveDate(delta) {
+      return stepActiveDatePart(delta);
     }
 
     function generateUUID() {
@@ -14758,8 +14973,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
         return;
       }
 
+      const activeTab = tabs.find(t => t.id === activeTabId);
       if (!tableName) {
-        const activeTab = tabs.find(t => t.id === activeTabId);
         tableName = activeGridTable || (activeTab && activeTab.tableName) || '';
         if (!tableName) {
           const sql = (activeTab && activeTab.sql) || getEditorSQL();
@@ -14775,7 +14990,6 @@ Please analyze what is causing this query to be slow and suggest necessary query
       if (!pkCol) {
         pkCol = activeGridPKCol;
         if (!pkCol && tableName) {
-          const activeTab = tabs.find(t => t.id === activeTabId);
           const targetCatalog = (activeGridDB && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeGridDB.toLowerCase()]) || (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
           const tableMeta = (targetCatalog?.tables || []).find(t => (t.name || '').toLowerCase() === tableName.toLowerCase());
           if (tableMeta && Array.isArray(tableMeta.columns)) {
@@ -14861,26 +15075,64 @@ Please analyze what is causing this query to be slow and suggest necessary query
                  class="w-full bg-slate-950 text-sky-200 border border-sky-400 px-1 py-0.5 rounded outline-none font-mono text-xs ring-2 ring-sky-500/40 shadow-inner">
           <datalist id="${datalistId}"></datalist>
         `;
-      } else if (rawType === 'date') {
+      } else if (rawType === 'date' || rawType.startsWith('date(')) {
+        const defaultDate = formatGridCellValue(currentVal, 'date') || '';
         editorHtml = `
           <div id="active-cell-preset-bar" class="absolute ${pillPosClass} left-0 z-30 bg-slate-900 border border-slate-700/80 rounded shadow-xl px-1.5 py-0.5 flex items-center space-x-1 text-[10px] select-none whitespace-nowrap ring-1 ring-black/40">
             <span class="text-slate-400 font-semibold mr-0.5">⚡</span>
+            <button type="button" onmousedown="event.preventDefault(); stepActiveDatePart(1)" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-sky-300 hover:text-white rounded border border-slate-700 font-mono font-bold transition" title="Increment Active Segment (Arrow Up)">▲</button>
+            <button type="button" onmousedown="event.preventDefault(); stepActiveDatePart(-1)" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-sky-300 hover:text-white rounded border border-slate-700 font-mono font-bold transition" title="Decrement Active Segment (Arrow Down)">▼</button>
             <button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit('DATE')" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-teal-400 hover:text-teal-300 rounded border border-slate-700 font-mono transition" title="Current Date (Ctrl+Shift+D)">Today</button>
             <button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit(null)" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-sky-300 hover:text-sky-200 rounded border border-slate-700 font-mono transition" title="Set to NULL (Ctrl+Shift+N)">NULL</button>
             <button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit('')" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded border border-slate-700 font-mono transition" title="Set to Empty String (Ctrl+Shift+E)">'' Empty</button>
           </div>
-          <input type="date" value="${currentVal === null ? '' : escapeHtml(String(currentVal))}"
-                 class="w-full bg-slate-950 text-sky-200 border border-sky-400 px-1 py-0.5 rounded outline-none font-mono text-xs ring-2 ring-sky-500/40 shadow-inner">
+          <div class="flex items-stretch w-full bg-slate-950 border border-sky-400 rounded ring-2 ring-sky-500/40 shadow-inner overflow-hidden">
+            <input type="text" value="${escapeHtml(defaultDate)}" placeholder="YYYY-MM-DD"
+                   class="flex-1 min-w-0 bg-transparent text-sky-200 px-1 py-0.5 outline-none font-mono text-xs">
+            <div class="flex flex-col border-l border-slate-700/80 bg-slate-900 divide-y divide-slate-800 select-none">
+              <button type="button" tabindex="-1" onmousedown="event.preventDefault(); stepActiveDatePart(1)" class="px-1 text-[9px] leading-none h-1/2 flex items-center justify-center text-slate-400 hover:text-sky-300 hover:bg-slate-800 transition" title="Increment (Up)">▲</button>
+              <button type="button" tabindex="-1" onmousedown="event.preventDefault(); stepActiveDatePart(-1)" class="px-1 text-[9px] leading-none h-1/2 flex items-center justify-center text-slate-400 hover:text-sky-300 hover:bg-slate-800 transition" title="Decrement (Down)">▼</button>
+            </div>
+          </div>
+        `;
+      } else if (/^(datetime|timestamp|timestamptz)/i.test(rawType)) {
+        const defaultDatetime = formatGridCellValue(currentVal, 'datetime') || '';
+        editorHtml = `
+          <div id="active-cell-preset-bar" class="absolute ${pillPosClass} left-0 z-30 bg-slate-900 border border-slate-700/80 rounded shadow-xl px-1.5 py-0.5 flex items-center space-x-1 text-[10px] select-none whitespace-nowrap ring-1 ring-black/40">
+            <span class="text-slate-400 font-semibold mr-0.5">⚡</span>
+            <button type="button" onmousedown="event.preventDefault(); stepActiveDatePart(1)" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-sky-300 hover:text-white rounded border border-slate-700 font-mono font-bold transition" title="Increment Active Segment (Arrow Up)">▲</button>
+            <button type="button" onmousedown="event.preventDefault(); stepActiveDatePart(-1)" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-sky-300 hover:text-white rounded border border-slate-700 font-mono font-bold transition" title="Decrement Active Segment (Arrow Down)">▼</button>
+            <button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit('NOW')" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 rounded border border-slate-700 font-mono transition" title="Current Timestamp (Ctrl+Shift+T)">NOW</button>
+            <button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit('DATE')" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-teal-400 hover:text-teal-300 rounded border border-slate-700 font-mono transition" title="Current Date">Today</button>
+            <button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit(null)" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-sky-300 hover:text-sky-200 rounded border border-slate-700 font-mono transition" title="Set to NULL (Ctrl+Shift+N)">NULL</button>
+            <button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit('')" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded border border-slate-700 font-mono transition" title="Set to Empty String (Ctrl+Shift+E)">'' Empty</button>
+          </div>
+          <div class="flex items-stretch w-full bg-slate-950 border border-sky-400 rounded ring-2 ring-sky-500/40 shadow-inner overflow-hidden">
+            <input type="text" value="${escapeHtml(defaultDatetime)}" placeholder="YYYY-MM-DD HH:mm:ss"
+                   class="flex-1 min-w-0 bg-transparent text-purple-300 px-1 py-0.5 outline-none font-mono text-xs">
+            <div class="flex flex-col border-l border-slate-700/80 bg-slate-900 divide-y divide-slate-800 select-none">
+              <button type="button" tabindex="-1" onmousedown="event.preventDefault(); stepActiveDatePart(1)" class="px-1 text-[9px] leading-none h-1/2 flex items-center justify-center text-slate-400 hover:text-sky-300 hover:bg-slate-800 transition" title="Increment (Up)">▲</button>
+              <button type="button" tabindex="-1" onmousedown="event.preventDefault(); stepActiveDatePart(-1)" class="px-1 text-[9px] leading-none h-1/2 flex items-center justify-center text-slate-400 hover:text-sky-300 hover:bg-slate-800 transition" title="Decrement (Down)">▼</button>
+            </div>
+          </div>
         `;
       } else if (rawType === 'time') {
         editorHtml = `
           <div id="active-cell-preset-bar" class="absolute ${pillPosClass} left-0 z-30 bg-slate-900 border border-slate-700/80 rounded shadow-xl px-1.5 py-0.5 flex items-center space-x-1 text-[10px] select-none whitespace-nowrap ring-1 ring-black/40">
             <span class="text-slate-400 font-semibold mr-0.5">⚡</span>
+            <button type="button" onmousedown="event.preventDefault(); stepActiveDatePart(1)" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-sky-300 hover:text-white rounded border border-slate-700 font-mono font-bold transition" title="Increment Active Segment (Arrow Up)">▲</button>
+            <button type="button" onmousedown="event.preventDefault(); stepActiveDatePart(-1)" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-sky-300 hover:text-white rounded border border-slate-700 font-mono font-bold transition" title="Decrement Active Segment (Arrow Down)">▼</button>
             <button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit(null)" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-sky-300 hover:text-sky-200 rounded border border-slate-700 font-mono transition" title="Set to NULL (Ctrl+Shift+N)">NULL</button>
             <button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit('')" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded border border-slate-700 font-mono transition" title="Set to Empty String (Ctrl+Shift+E)">'' Empty</button>
           </div>
-          <input type="time" step="1" value="${currentVal === null ? '' : escapeHtml(String(currentVal))}"
-                 class="w-full bg-slate-950 text-sky-200 border border-sky-400 px-1 py-0.5 rounded outline-none font-mono text-xs ring-2 ring-sky-500/40 shadow-inner">
+          <div class="flex items-stretch w-full bg-slate-950 border border-sky-400 rounded ring-2 ring-sky-500/40 shadow-inner overflow-hidden">
+            <input type="text" value="${currentVal === null ? '' : escapeHtml(String(currentVal))}" placeholder="HH:mm:ss"
+                   class="flex-1 min-w-0 bg-transparent text-sky-200 px-1 py-0.5 outline-none font-mono text-xs">
+            <div class="flex flex-col border-l border-slate-700/80 bg-slate-900 divide-y divide-slate-800 select-none">
+              <button type="button" tabindex="-1" onmousedown="event.preventDefault(); stepActiveDatePart(1)" class="px-1 text-[9px] leading-none h-1/2 flex items-center justify-center text-slate-400 hover:text-sky-300 hover:bg-slate-800 transition" title="Increment (Up)">▲</button>
+              <button type="button" tabindex="-1" onmousedown="event.preventDefault(); stepActiveDatePart(-1)" class="px-1 text-[9px] leading-none h-1/2 flex items-center justify-center text-slate-400 hover:text-sky-300 hover:bg-slate-800 transition" title="Decrement (Down)">▼</button>
+            </div>
+          </div>
         `;
       } else {
         const typeStyle = getGridTypeStyle(colMeta?.type || col?.type);
@@ -14899,6 +15151,13 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
 
       td.innerHTML = editorHtml;
+      // Allow popups/steppers to be visible outside truncated table cells during edit
+      if (td) {
+        td.classList.remove('truncate');
+        td.style.overflow = 'visible';
+        td.style.zIndex = '35';
+      }
+
       const input = td.querySelector('input, select');
       const editInfo = {
         td,
@@ -14912,9 +15171,20 @@ Please analyze what is causing this query to be slow and suggest necessary query
         hasExplicitVal: false,
         explicitVal: null,
         rawType,
-        enumValues
+        enumValues,
+        lastPartPos: 8 // default to day part
       };
       activeEditCell = editInfo;
+
+      // Track caret position when clicking or typing in date/datetime inputs
+      const trackCaret = () => {
+        if (input && input.selectionStart !== undefined && input.selectionStart !== null) {
+          editInfo.lastPartPos = input.selectionStart;
+        }
+      };
+      input.addEventListener('click', trackCaret);
+      input.addEventListener('keyup', trackCaret);
+      input.addEventListener('select', trackCaret);
 
       // Asynchronously fetch FK parent rows if FK column
       if (fkInfo && fkInfo.referenced_table && fkInfo.referenced_column) {
@@ -14942,7 +15212,21 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
 
       input.focus();
-      if (typeof input.select === 'function') input.select();
+      const isDateOrTimeType = rawType === 'date' || rawType.startsWith('date(') || /^(datetime|timestamp|timestamptz|time)/i.test(rawType);
+      if (isDateOrTimeType) {
+        // Highlight day segment by default for fast date adjustments
+        try {
+          if (rawType === 'time') {
+            input.setSelectionRange(0, 2);
+            editInfo.lastPartPos = 0;
+          } else {
+            input.setSelectionRange(8, 10);
+            editInfo.lastPartPos = 8;
+          }
+        } catch (_) {}
+      } else if (typeof input.select === 'function') {
+        input.select();
+      }
 
       if (input.tagName === 'SELECT') {
         input.addEventListener('change', () => {
@@ -14951,6 +15235,14 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
 
       input.addEventListener('keydown', async (e) => {
+        const isDateType = rawType === 'date' || rawType.startsWith('date(');
+        const isDatetimeType = /^(datetime|timestamp|timestamptz)/i.test(rawType);
+        const isTimeType = rawType === 'time';
+        if ((isDateType || isDatetimeType || isTimeType) && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+          e.preventDefault();
+          stepActiveDatePart(e.key === 'ArrowUp' ? 1 : -1);
+          return;
+        }
         if (e.key === 'Enter') {
           e.preventDefault();
           commitInlineEdit(editInfo, false);
@@ -14993,7 +15285,12 @@ Please analyze what is causing this query to be slow and suggest necessary query
     async function commitInlineEdit(editInfo, isSwitchingCells) {
       if (!editInfo || editInfo.isCommitting) return;
       editInfo.isCommitting = true;
-      if (editInfo.td) editInfo.td.style.position = '';
+      if (editInfo.td) {
+        editInfo.td.style.position = '';
+        editInfo.td.style.overflow = '';
+        editInfo.td.style.zIndex = '';
+        editInfo.td.classList.add('truncate');
+      }
 
       const input = editInfo.input;
       const td = editInfo.td;
@@ -15048,12 +15345,44 @@ Please analyze what is causing this query to be slow and suggest necessary query
             if (activeEditCell === editInfo) activeEditCell = null;
             return;
           }
-        } else if (rawType === 'date') {
-          if (valStr !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(valStr)) {
-            showNativeAlert(`Value "${valStr}" is not a valid date for '${col.name}'. Expected YYYY-MM-DD.`, 'Validation Error');
-            renderCellContent(td, rIdx, cIdx, pkCol, tableName);
-            if (activeEditCell === editInfo) activeEditCell = null;
-            return;
+        } else if (rawType === 'date' || rawType.startsWith('date(')) {
+          if (valStr !== '') {
+            const normalized = formatGridCellValue(valStr, 'date');
+            const m = normalized ? normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/) : null;
+            if (m) {
+              const y = parseInt(m[1], 10);
+              const mon = parseInt(m[2], 10);
+              let d = parseInt(m[3], 10);
+              const maxD = getDaysInMonth(y, mon);
+              if (d > maxD) d = maxD;
+              const pad = (n) => String(n).padStart(2, '0');
+              effectiveVal = `${y}-${pad(mon)}-${pad(d)}`;
+            } else {
+              showNativeAlert(`Value "${valStr}" is not a valid date for '${col.name}'. Expected YYYY-MM-DD.`, 'Validation Error');
+              renderCellContent(td, rIdx, cIdx, pkCol, tableName);
+              if (activeEditCell === editInfo) activeEditCell = null;
+              return;
+            }
+          }
+        } else if (/^(datetime|timestamp|timestamptz)/i.test(rawType)) {
+          if (valStr !== '' && valStr !== 'NOW()' && valStr !== 'CURRENT_TIMESTAMP') {
+            const normalized = formatGridCellValue(valStr, 'datetime');
+            const m = normalized ? normalized.match(/^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}:\d{2}:\d{2}))?$/) : null;
+            if (m) {
+              const y = parseInt(m[1], 10);
+              const mon = parseInt(m[2], 10);
+              let d = parseInt(m[3], 10);
+              const maxD = getDaysInMonth(y, mon);
+              if (d > maxD) d = maxD;
+              const pad = (n) => String(n).padStart(2, '0');
+              const timePart = m[4] || '00:00:00';
+              effectiveVal = `${y}-${pad(mon)}-${pad(d)} ${timePart}`;
+            } else {
+              showNativeAlert(`Value "${valStr}" is not a valid datetime for '${col.name}'. Expected YYYY-MM-DD HH:mm:ss.`, 'Validation Error');
+              renderCellContent(td, rIdx, cIdx, pkCol, tableName);
+              if (activeEditCell === editInfo) activeEditCell = null;
+              return;
+            }
           }
         }
       }
@@ -15148,18 +15477,40 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
     function cancelInlineEdit(editInfo) {
       if (!editInfo) return;
-      if (editInfo.td) editInfo.td.style.position = '';
+      if (editInfo.td) {
+        editInfo.td.style.position = '';
+        editInfo.td.style.overflow = '';
+        editInfo.td.style.zIndex = '';
+        editInfo.td.classList.add('truncate');
+      }
       renderCellContent(editInfo.td, editInfo.rIdx, editInfo.cIdx, editInfo.pkCol, editInfo.tableName);
       activeEditCell = null;
     }
 
     function renderCellContent(td, rIdx, cIdx, pkCol, tableName) {
-      if (td) td.style.position = '';
+      if (td) {
+        td.style.position = '';
+        td.style.overflow = '';
+        td.style.zIndex = '';
+        td.classList.add('truncate');
+      }
       const stagedKey = `${tableName}:${rIdx}:${cIdx}`;
       const staged = stagedEdits.get(stagedKey);
-      const val = staged ? staged.newVal : currentResults[rIdx][cIdx];
+      const rawVal = staged ? staged.newVal : currentResults[rIdx][cIdx];
       const isDirty = Boolean(staged);
-      const isJson = val !== null && typeof val === 'string' && ((val.trim().startsWith('{') && val.trim().endsWith('}')) || (val.trim().startsWith('[') && val.trim().endsWith(']')));
+      const col = currentColumns[cIdx];
+      const colName = col?.name;
+      const colType = col?.type;
+
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const targetCatalog = (activeGridDB && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeGridDB.toLowerCase()]) || (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
+      const tableMeta = (targetCatalog?.tables || []).find(t => (t.name || '').toLowerCase() === (tableName || '').toLowerCase());
+      const colMeta = (tableMeta?.columns || []).find(c => (c.name || '').toLowerCase() === (colName || '').toLowerCase());
+      const resolvedType = colMeta?.type || colType;
+
+      const val = formatGridCellValue(rawVal, resolvedType);
+      const typeStyle = getGridTypeStyle(resolvedType);
+      const isJson = val !== null && typeof val === 'string' && (typeStyle.category === 'json' || (val.trim().startsWith('{') && val.trim().endsWith('}')) || (val.trim().startsWith('[') && val.trim().endsWith(']')));
       let jsonBadge = '';
       if (isJson) {
         jsonBadge = `<button type="button" onclick="event.stopPropagation(); openJsonCellModal(${rIdx}, ${cIdx})" class="ml-1 opacity-0 group-hover:opacity-100 hover:text-amber-300 text-amber-400 font-mono font-bold transition text-xs" title="Open JSON Cell Viewer">{ }</button>`;
@@ -15173,9 +15524,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
       `;
 
       if (isDirty) {
-        td.className = "p-1.5 px-3 truncate max-w-xs grid-cell group select-text cursor-default transition bg-amber-950/40 border border-amber-600/60 text-amber-200";
+        td.className = "p-1.5 px-3 truncate max-w-xs grid-cell group select-text cursor-default transition bg-amber-950/40 border border-amber-600/60 text-amber-200 " + typeStyle.align;
       } else {
-        td.className = "p-1.5 px-3 truncate max-w-xs grid-cell group select-text cursor-default transition border-r border-slate-800/40 text-slate-200";
+        td.className = `p-1.5 px-3 truncate max-w-xs grid-cell group select-text cursor-default transition border-r border-slate-800/40 ${typeStyle.color} ${typeStyle.align}`;
       }
     }
 
