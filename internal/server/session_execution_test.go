@@ -247,6 +247,70 @@ func TestSessionManager_ConnectPassesGuardAndBackup(t *testing.T) {
 	}
 }
 
+func TestSessionManager_LazyAutoReconnectAfterEviction(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "sqlfox-lazy-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	vaultDB := filepath.Join(tempDir, "vault.db")
+	targetDB := filepath.Join(tempDir, "target.db")
+	v, err := vault.OpenVault(vaultDB, "test-master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	conn := &vault.ConnectionRecord{
+		Name:         "Lazy SQLite",
+		Environment:  "Development",
+		Driver:       "sqlite",
+		DatabaseName: targetDB,
+	}
+	if err := v.SaveConnection(conn); err != nil {
+		t.Fatal(err)
+	}
+
+	backupDir := filepath.Join(tempDir, "backups")
+	sm := NewSessionManager(v, backupDir)
+	defer sm.CloseAll()
+
+	// 1. Initial connect
+	sess, err := sm.ConnectSession(context.Background(), conn.ID)
+	if err != nil {
+		t.Fatalf("initial ConnectSession failed: %v", err)
+	}
+	if sess == nil {
+		t.Fatal("expected non-nil session")
+	}
+
+	// 2. Simulate session eviction (as done by startReaper when idle for > 30 mins)
+	if err := sm.CloseSession(conn.ID); err != nil {
+		t.Fatalf("CloseSession failed: %v", err)
+	}
+
+	// 3. User comes back after idle timeout: GetSession must transparently auto-rehydrate
+	rehydratedSess, err := sm.GetSession(conn.ID)
+	if err != nil {
+		t.Fatalf("GetSession failed after eviction: %v", err)
+	}
+	if rehydratedSess == nil {
+		t.Fatal("expected auto-rehydrated session to be non-nil")
+	}
+
+	// 4. Verify rehydrated session can execute queries
+	res, err := rehydratedSess.Execute(context.Background(), ExecuteRequest{
+		SQL: "SELECT 1;",
+	})
+	if err != nil {
+		t.Fatalf("Execute on rehydrated session failed: %v", err)
+	}
+	if res == nil || len(res.Rows) != 1 {
+		t.Fatalf("unexpected query result on rehydrated session: %+v", res)
+	}
+}
+
 func TestActiveSession_CancelQuery(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "sqlfox-cancel-test-*")
 	if err != nil {
