@@ -120,7 +120,7 @@ func TestDBAOperationsAndAuditLog(t *testing.T) {
 		"column": "name",
 		"value": "gadget",
 		"pk_column": "id",
-		"pk_value": 1
+		"pk_value": 16906691
 	}`)
 	ceResp, err := client.Post(ts.URL+"/api/session/"+connRec.ID+"/cell-edit", "application/json", cellEditPayload)
 	if err != nil || ceResp.StatusCode != http.StatusOK {
@@ -148,6 +148,10 @@ func TestDBAOperationsAndAuditLog(t *testing.T) {
 	}
 	if ceAuditData.Logs[0]["source"] != "grid_cell_edit" {
 		t.Fatalf("expected source grid_cell_edit, got %v", ceAuditData.Logs[0]["source"])
+	}
+	auditSQL, _ := ceAuditData.Logs[0]["query_sql"].(string)
+	if strings.Contains(auditSQL, "1.6906691e+07") || !strings.Contains(auditSQL, "16906691") {
+		t.Fatalf("expected query_sql to contain integer ID 16906691 without scientific notation, got: %s", auditSQL)
 	}
 
 	// 5. Test ClearAuditLogs

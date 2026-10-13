@@ -3,9 +3,11 @@ package driver
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -880,6 +882,7 @@ func IsQueryStatement(sql string) bool {
 }
 
 // FormatSQLValue formats a Go value into a valid SQL literal for dumps, inserts, and filters.
+// ponytail: Uses 'f' formatting to avoid scientific notation on large numeric IDs and metrics.
 func FormatSQLValue(val any) string {
 	if val == nil {
 		return "NULL"
@@ -892,8 +895,19 @@ func FormatSQLValue(val any) string {
 		return "FALSE"
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 		return fmt.Sprintf("%d", v)
-	case float32, float64:
-		return fmt.Sprintf("%v", v)
+	case float32:
+		f := float64(v)
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return "NULL"
+		}
+		return strconv.FormatFloat(f, 'f', -1, 32)
+	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return "NULL"
+		}
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	case json.Number:
+		return v.String()
 	case []byte:
 		return fmt.Sprintf("'%s'", strings.ReplaceAll(string(v), "'", "''"))
 	case string:
