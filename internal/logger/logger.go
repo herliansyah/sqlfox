@@ -347,6 +347,11 @@ func HTTPMiddleware(l *slog.Logger) func(http.Handler) http.Handler {
 
 			durMs := time.Since(start).Milliseconds()
 
+			// Filter out repetitive background polling noise on 200 OK to keep activity log focused on real actions
+			if sw.status < 400 && (path == "/api/notes/reminders/due" || strings.HasSuffix(path, "/flight-recorder/status") || strings.HasSuffix(path, "/processlist")) {
+				return
+			}
+
 			// Credential masking: sensitive endpoints do not log raw parameters
 			isAuth := strings.HasPrefix(path, "/api/auth/")
 			clientIP := r.RemoteAddr

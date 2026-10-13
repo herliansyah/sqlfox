@@ -21656,11 +21656,22 @@ Please analyze what is causing this query to be slow and suggest necessary query
         updateActivityErrorBadge();
       }
 
-      if (activityPaused) {
+      // Do not waste CPU/memory rendering DOM when drawer is closed or paused
+      if (activityPaused || !activityConsoleOpen) {
         return;
       }
 
-      renderActivityLogs();
+      scheduleActivityRender();
+    }
+
+    let activityRenderScheduled = false;
+    function scheduleActivityRender() {
+      if (activityRenderScheduled || !activityConsoleOpen || activityPaused) return;
+      activityRenderScheduled = true;
+      requestAnimationFrame(() => {
+        activityRenderScheduled = false;
+        renderActivityLogs();
+      });
     }
 
     function updateActivityErrorBadge() {
