@@ -176,9 +176,10 @@ func (sm *SessionManager) startReaper() {
 					_ = sess.activeTx.Rollback()
 					sess.activeTx = nil
 				}
+				isIdle := now.Sub(sess.LastActive) > 30*time.Minute
 				sess.mu.Unlock()
 
-				if now.Sub(sess.LastActive) > 30*time.Minute {
+				if isIdle {
 					_ = sess.Close()
 					delete(sm.sessions, id)
 				}
@@ -195,7 +196,9 @@ func (sm *SessionManager) ConnectSession(ctx context.Context, connectionID strin
 
 	// Check existing session
 	if sess, ok := sm.sessions[connectionID]; ok {
+		sess.mu.Lock()
 		sess.LastActive = time.Now()
+		sess.mu.Unlock()
 		return sess, nil
 	}
 
@@ -254,32 +257,42 @@ func (sm *SessionManager) ConnectSession(ctx context.Context, connectionID strin
 
 func (sm *SessionManager) GetSession(connectionID string) (*ActiveSession, error) {
 	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-
 	sess, ok := sm.sessions[connectionID]
-	if !ok {
-		return nil, fmt.Errorf("session not found for connection %s; please connect first", connectionID)
+	if ok {
+		sm.mu.RUnlock()
+		sess.mu.Lock()
+		sess.LastActive = time.Now()
+		sess.mu.Unlock()
+		return sess, nil
 	}
-	return sess, nil
+	sm.mu.RUnlock()
+
+	// ponytail: lazy auto-reconnect on demand when an evicted session is accessed
+	if sm.vault != nil && connectionID != "" {
+		if _, err := sm.vault.GetConnection(connectionID); err == nil {
+			return sm.ConnectSession(context.Background(), connectionID)
+		}
+	}
+
+	return nil, fmt.Errorf("session not found for connection %s; please connect first", connectionID)
 }
 
 // GetActiveOrSingleSession finds the session by ID, or if ID is empty and exactly one session is active, returns it.
 func (sm *SessionManager) GetActiveOrSingleSession(connectionID string) (*ActiveSession, error) {
+	if connectionID != "" {
+		return sm.GetSession(connectionID)
+	}
+
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
-	if connectionID != "" {
-		if sess, ok := sm.sessions[connectionID]; ok {
-			return sess, nil
-		}
-	}
 	if len(sm.sessions) == 1 {
 		for _, sess := range sm.sessions {
+			sess.mu.Lock()
+			sess.LastActive = time.Now()
+			sess.mu.Unlock()
 			return sess, nil
 		}
-	}
-	if connectionID != "" {
-		return nil, fmt.Errorf("session not found for connection %s; please connect first", connectionID)
 	}
 	return nil, fmt.Errorf("no active database session found")
 }
