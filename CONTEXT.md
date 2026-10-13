@@ -797,16 +797,12 @@ A native HTML5 dialog (`#update-dialog`) presenting release metadata, version di
 _Avoid_: Update popup, new version alert, release prompt
 
 **Status Bar Footer**:
-The persistent bottom viewport bar (`<footer>`) structured into two distinct regions: real-time database runtime telemetry on the left (dialect engine flavor & version, connection target, server uptime, interactive ping latency), and developer attribution, system heap memory consumption, keyboard shortcuts modal launcher, and application version badge with self-update notifications on the right.
-_Avoid_: Bottom bar, taskbar, dock
+The persistent bottom viewport bar (`<footer>`) structured into two distinct regions: real-time database runtime telemetry on the left (dialect engine flavor & version, connection target, server uptime, interactive ping latency), and system heap memory consumption, documentation link, keyboard shortcuts modal launcher, and application version badge with self-update notifications on the right.
+_Avoid_: Bottom bar, taskbar, dock, personal branding in workspace chrome
 
 **Author Credit**:
-The workspace attribution element residing at the far-right terminus of the status bar footer (after the application version badge), featuring creator credit (`Created by herliansyah`) linked to the author's GitHub profile, a dedicated GitHub repository pill button, and an unobtrusive sponsorship pill button (`☕ Sponsor`).
-_Avoid_: Footer branding, watermark, sponsor banner
-
-**Sponsorship Link**:
-A passive, non-intrusive external pill button (`☕ Sponsor`) in the right-side footer cluster pointing directly to the author's Saweria funding page (`https://saweria.co/herliansyah26`) for user-supported project appreciation without popups or interstitial modals.
-_Avoid_: Donation popup, paywall, donation nag
+The creator and repository attribution residing elegantly inside the Changelog / About dialog footer (`#changelog-dialog`), featuring creator credit (`Created by herliansyah`) linked to the author's GitHub profile alongside the official repository link, keeping the primary workspace status bar completely clean and distraction-free.
+_Avoid_: Footer branding in status bar, watermark, sponsor banner, donation nag, personal promo in main workspace
 
 **Changelog**:
 The canonical, structured human-readable document (`CHANGELOG.md`) tracking notable application changes across releases, formatted strictly under the Keep a Changelog standard and Semantic Versioning.

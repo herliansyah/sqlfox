@@ -11,7 +11,6 @@
 [![GitHub Release](https://img.shields.io/github/v/release/herliansyah/sqlfox?style=flat-square&color=FF6B35&logo=github)](https://github.com/herliansyah/sqlfox/releases)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/herliansyah/sqlfox?style=flat-square&color=00ADD8&logo=go)](https://golang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-F59E0B?style=flat-square)](https://opensource.org/licenses/MIT)
-[![Sponsor: Saweria](https://img.shields.io/badge/Sponsor-Saweria-F97316?style=flat-square&logo=coffeescript)](https://saweria.co/herliansyah26)
 [![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-4B5563?style=flat-square&logo=linux)](https://github.com/herliansyah/sqlfox/releases)
 [![Arch](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-6366F1?style=flat-square)](https://github.com/herliansyah/sqlfox/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/herliansyah/sqlfox/ci.yml?branch=master&label=CI&style=flat-square&logo=githubactions)](https://github.com/herliansyah/sqlfox/actions)
@@ -213,13 +212,6 @@ sqlfox advise --dsn "root:pass@tcp(127.0.0.1:3306)/mydb" --sql "SELECT * FROM or
 
 ---
 
-### 💖 Support & Sponsorship
-
-If you find SqlFox useful and would like to support its ongoing development, consider sponsoring the project:
-- ☕ **[Sponsor via Saweria (Buy a Coffee)](https://saweria.co/herliansyah26)**
-
----
-
 <br />
 
 ---
@@ -401,13 +393,6 @@ Untuk mengatur log saat menjalankan `sqlfox.exe` tanpa membuka Command Prompt:
 1. **Pencegahan Human Error**: Fitur **Safety Guard** aktif secara default untuk lingkungan *Production*. Query seperti `UPDATE akun SET saldo = 0;` tanpa klausa `WHERE` akan dicegat sebelum menyentuh database.
 2. **Privasi AI (BYOK)**: SqlFox **TIDAK PERNAH** mengirimkan data baris tabel atau data pelanggan ke server AI. Hanya struktur DDL skema terkait yang dikirimkan untuk konteks pembuatan query.
 3. **Penyimpanan Kredensial Aman**: Password database dan private key SSH dienkripsi menggunakan algoritma standar industri **AES-256-GCM** dengan derivasi kunci **Argon2id**.
-
----
-
-### 💖 Dukungan & Sponsor
-
-Jika Anda merasa SqlFox bermanfaat dan ingin mendukung pengembangan berkelanjutannya:
-- ☕ **[Sponsor via Saweria](https://saweria.co/herliansyah26)**
 
 ---
 
