@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.8.1] - 2026-10-13
+
 ### Fixed
 - **Lazy Session Auto-Reconnect (`internal/session`, `internal/server`)**: Transparently re-establish database connection sessions from the vault when accessed after being evicted due to inactivity, preventing unexpected HTTP 404 errors across processlist, query execution, and schema inspection when the app is left idle. Protect `LastActive` timestamps under session mutex.
 - **Dynamic Date Segment Stepper & Clamping (`web`)**: Replaced native date input with custom text input and inline segment stepper buttons in the table editor. Increment/decrement active segment (year, month, day, hour, minute, second) based on caret position, auto-clamp day values to valid days in month, ensure table cell overflow remains visible during inline editing, and format temporal values cleanly.
