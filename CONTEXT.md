@@ -666,6 +666,7 @@ _Avoid_: Multiline button labels, squished button shapes, colliding controls
 - **0048**: UI Resilience and Non-Wrapping Controls (`docs/adr/0048-ui-resilience-and-non-wrapping-controls.md`)
 - **0049**: Containerized Deployment and Multi-Arch Docker Distribution (`docs/adr/0049-containerized-deployment-and-multi-arch-docker-distribution.md`)
 - **0050**: Fast Schema Catalog Synchronization and Root Blocker Incident Triage (`docs/adr/0050-fast-catalog-synchronization-and-root-blocker-triage.md`)
+- **0051**: In-App Activity Console and Live Event Stream (`docs/adr/0051-in-app-activity-console-and-live-event-stream.md`)
 
 ## Visual Schema & ERD Canvas
 
@@ -886,6 +887,24 @@ _Avoid_: Log target, output dump, print destination
 **Credential Masking**:
 The deterministic boundary filter intercepting log messages and attributes to sanitize Master Passwords, PINs, database connection secrets, and authorization tokens into `[REDACTED]` prior to emission.
 _Avoid_: Secret hiding, raw dump, password censor
+
+**Live Event Stream**:
+The server-sent event (`/api/logs/stream`) subscription delivering structured runtime telemetry directly from the Diagnostic Logger to connected web sessions in real time.
+_Avoid_: Log socket, polling feed, stdout pipe
+
+**Activity Console**:
+The collapsible bottom-docked diagnostic drawer in the user interface rendering streaming application events in an interactive, filterable, pausable, and exportable running table.
+_Avoid_: Log window, debug popup, terminal tab
+
+**Telemetry Ring Buffer**:
+An in-memory fixed-capacity ring buffer capturing the latest 100 diagnostic log records to provide immediate operational context upon client connection.
+_Avoid_: Memory dump, unconstrained queue
+
+**Smart Auto-Scroll**:
+The viewport tracking behavior in the Activity Console that automatically pauses auto-scrolling when the operator scrolls upward to inspect historical entries and resumes when scrolled to the newest record.
+_Avoid_: Forced scroll, jump lock
+
+
 
 
 ## Cloud Replication & Portability

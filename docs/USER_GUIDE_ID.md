@@ -530,6 +530,15 @@ Untuk membuktikan komitmen efisiensi konsumsi memori `<100MB RAM` pada beban ker
    go tool pprof http://127.0.0.1:8080/debug/pprof/heap
    ```
 
+### In-App Activity Console & Live Diagnostic Stream
+Dapat dibuka dengan mengklik tombol **⚡ Activity** pada status bar bawah atau menekan pintasan **`Ctrl + \``**:
+- **Aliran Telemetri Real-Time**: Memancarkan event runtime daemon secara langsung melalui Server-Sent Events (`GET /api/logs/stream`) tanpa dependensi eksternal dengan latensi di bawah 10ms.
+- **Riwayat Cold-Start Instan**: Secara otomatis menampilkan 100 entri event historis terakhir dari buffer memori (ring buffer) begitu panel dibuka.
+- **Tabel Berjalan 5 Kolom**: Menampilkan jam (HH:mm:ss.SSS), level status (`INFO`, `WARN`, `ERROR`, `DEBUG`), kategori modul (`query`, `http`, `schema`, `auth`, `ai`, `sync`), deskripsi aktivitas aplikasi, dan detail JSON interaktif yang bisa di-expand (durasi eksekusi ms, baris terdampak, status HTTP).
+- **Smart Auto-Scroll & Freeze**: Tampilan otomatis bergulir ke baris terbaru di bawah, dan secara cerdas menjeda auto-scroll saat operator menggulir ke atas untuk membaca entri lama.
+- **Filter Tingkat Keparahan & Pencarian Instan**: Menyaring log berdasarkan severity (`ALL`, `ERROR`, `WARN`, `INFO`, `DEBUG`) serta pencarian teks instan untuk query SQL atau endpoint HTTP.
+- **Rekam & Unduh File Log**: Menyimpan riwayat log sesi (hingga 1.000 baris) dengan 1-klik unduh format teks rapi (`.log`) atau format data terstruktur (`.json`).
+
 ---
 
 ## 6. Tabel Pintasan Keyboard (Shortcuts Cheatsheet)
@@ -544,6 +553,7 @@ Untuk membuktikan komitmen efisiensi konsumsi memori `<100MB RAM` pada beban ker
 | `Ctrl + P` | Universal | Membuka Schema Search (Lompat cepat ke tabel/kolom) |
 | `Ctrl + B` | Universal | Menyembunyikan/menampilkan Sidebar kiri (Layar luas) |
 | `Ctrl + L` | Universal | Menyembunyikan/menampilkan Sidebar AI Copilot |
+| `Ctrl + \`` | Universal | Membuka/menutup In-App Activity Console |
 | `Alt + N` | Spreadsheet Grid | Mengisi preset nilai `NULL` ke dalam sel aktif |
 | `Alt + E` | Spreadsheet Grid | Mengisi preset string kosong `""` |
 | `Alt + T` | Spreadsheet Grid | Mengisi preset fungsi waktu sekarang `NOW()` |

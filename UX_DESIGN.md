@@ -105,6 +105,7 @@ User experience architecture, ASCII wireframes, design tokens, and interaction m
 | `Cmd+B` / `Ctrl+B` | Toggle Connections & Schema Sidebar | Global |
 | `Cmd+Shift+F` / `Ctrl+Shift+F` | Format SQL Statement | Query Editor |
 | `Cmd+S` / `Ctrl+S` | Save Active Query as Snippet | Query Editor |
+| `Cmd+\`` / `Ctrl+\`` | Toggle In-App Activity Console | Global |
 
 ---
 
@@ -757,11 +758,32 @@ The Entity-Relationship Diagram canvas allows developers to explore table relati
 ├─────────────────────────────────────────────────────────────────────────────────────────┤
 │ ↳ Blocked: Thread #4891 (web_app) waiting 45s for lock:                                 │
 │   ALTER TABLE orders ADD COLUMN priority_score INT DEFAULT 0;                           │
-├─────────────────────────────────────────────────────────────────────────────────────────┤
-│ ↳ Blocked: Thread #5102 (read_replica) waiting 18s for lock:                            │
-│   SELECT * FROM orders WHERE id = 1042 FOR UPDATE;                                      │
-└─────────────────────────────────────────────────────────────────────────────────────────┘
+## 23. In-App Activity Console & Live Diagnostic Stream
+
+A collapsible bottom-docked telemetry drawer situated above the status footer, providing real-time visibility into internal daemon activities without leaving the query workspace.
+
+### 1. Activity Console Drawer Wireframe (`#activity-console-drawer`)
+
 ```
+┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ ⚡ Activity Console  [● LIVE]   [ALL] [ERROR] [WARN] [INFO] [DEBUG]   [Filter logs...]  [⏸ Pause] [🗑️ Clear] [💾 Export ▼] [✕] │
+├──────────────┬───────┬──────────┬─────────────────────────────────────────────────────────┬────────────┤
+│ TIME         │ LEVEL │ MODULE   │ ACTIVITY / MESSAGE                                      │ DETAILS    │
+├──────────────┼───────┼──────────┼─────────────────────────────────────────────────────────┼────────────┤
+│ 15:04:02.140 │ INFO  │ query    │ query_executed (SELECT * FROM users WHERE active = 1)   │ 12ms • 5 rows ▶│
+│ 15:04:05.812 │ WARN  │ http     │ http_request (POST /api/connections/4/test)             │ 400 • 28ms ▶│
+│ 15:04:08.330 │ ERROR │ query    │ query_failed (SELECT * FROM nonexistent_table)          │ 3ms • syntax err ▶│
+└──────────────┴───────┴──────────┴─────────────────────────────────────────────────────────┴────────────┘
+│ Footer: 🗄️ MySQL 8.0 • prod-db • Latency: 12ms • ⚡ Activity [● Live] [🔴 1] • Memory: 32MB        │
+└────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 2. Interaction & State Design
+- **Toggle Access**: Open or close via `Ctrl + ` ` keyboard shortcut or clicking the footer button `⚡ Activity`.
+- **Smart Auto-Scroll**: Viewport tracks newest events at bottom. When an operator scrolls up to inspect historical entries, auto-scrolling automatically freezes until scrolled back to the newest row.
+- **Freeze & Pause**: The `⏸ Pause` button locks incoming table updates while retaining the telemetry connection in the background.
+- **Client-Side Retention & Export**: Maintains a FIFO ring buffer of 1,000 items in browser memory. 1-click export allows instant download as human-readable `.log` (plain text) or structured `.json`.
+
 
 
 
