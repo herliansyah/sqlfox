@@ -530,6 +530,15 @@ To verify the `<100MB RAM` guarantee under enterprise workloads:
    go tool pprof http://127.0.0.1:8080/debug/pprof/heap
    ```
 
+### In-App Activity Console & Live Diagnostic Stream
+Access via clicking **⚡ Activity** in the footer or pressing **`Ctrl + \``**:
+- **Real-Time Telemetry Feed**: Streams structured runtime daemon events over Server-Sent Events (`GET /api/logs/stream`) with zero external dependencies and sub-10ms delivery latency.
+- **Cold-Start History**: Automatically loads the last 100 historical events from the in-memory ring buffer upon opening.
+- **5-Column Running Table**: Displays timestamp (HH:mm:ss.SSS), status level (`INFO`, `WARN`, `ERROR`, `DEBUG`), module category (`query`, `http`, `schema`, `auth`, `ai`, `sync`), human-readable activity description, and expandable JSON details (duration, rows affected, HTTP status).
+- **Smart Auto-Scroll & Freeze**: Viewport pauses scrolling automatically when you scroll up to inspect older records and resumes when scrolled to the latest entry.
+- **Filtering & Instant Search**: Filter by log severity (`ALL`, `ERROR`, `WARN`, `INFO`, `DEBUG`) and instant substring search across queries and paths.
+- **Export & Download**: 1-click export of captured logs (up to 1,000 lines) as `.log` (formatted plain text) or `.json` (structured array).
+
 ---
 
 ## 6. Keyboard Shortcuts Cheatsheet
@@ -544,6 +553,7 @@ To verify the `<100MB RAM` guarantee under enterprise workloads:
 | `Ctrl + P` | Universal | Open Schema Search (Quick Table / Column Jump) |
 | `Ctrl + B` | Universal | Toggle Left Sidebar (Maximize workspace) |
 | `Ctrl + L` | Universal | Toggle AI Copilot Sidebar |
+| `Ctrl + \`` | Universal | Toggle In-App Activity Console |
 | `Alt + N` | Table Grid | Insert `NULL` preset into active cell |
 | `Alt + E` | Table Grid | Insert Empty string `""` preset |
 | `Alt + T` | Table Grid | Insert `NOW()` / current timestamp preset |

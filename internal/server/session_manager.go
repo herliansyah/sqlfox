@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"runtime"
 	"strconv"
@@ -119,11 +120,12 @@ func (s *ActiveSession) RecordAudit(querySQL, source string, durationMs, rowsAff
 	if len(executedAt) > 0 && !executedAt[0].IsZero() {
 		t = executedAt[0]
 	}
+	cleanSQL := strings.TrimSpace(querySQL)
 	go func() {
 		_ = s.vault.RecordAuditLog(&vault.AuditLogRecord{
 			SessionID:    s.ID,
 			ConnectionID: s.ConnectionID,
-			QuerySQL:     strings.TrimSpace(querySQL),
+			QuerySQL:     cleanSQL,
 			Source:       source,
 			DurationMs:   durationMs,
 			RowsAffected: rowsAffected,
@@ -131,6 +133,25 @@ func (s *ActiveSession) RecordAudit(querySQL, source string, durationMs, rowsAff
 			ExecutedAt:   t,
 		})
 	}()
+
+	// ponytail: Emits structured telemetry event for live Activity Console
+	if execErr != nil {
+		slog.Error("query_failed",
+			"module", "query",
+			"sql", cleanSQL,
+			"source", source,
+			"duration_ms", durationMs,
+			"error", errStr,
+		)
+	} else {
+		slog.Info("query_executed",
+			"module", "query",
+			"sql", cleanSQL,
+			"source", source,
+			"duration_ms", durationMs,
+			"rows", rowsAffected,
+		)
+	}
 }
 
 // SessionManager manages connected database sessions.

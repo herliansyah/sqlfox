@@ -145,3 +145,35 @@ func TestHTTPMiddleware(t *testing.T) {
 		t.Errorf("static asset logo.svg should have been filtered out")
 	}
 }
+
+func TestBroadcasterAndLiveStreaming(t *testing.T) {
+	b := NewBroadcaster(3)
+	ch, unsub := b.Subscribe()
+	defer unsub()
+
+	// Emit events
+	b.Broadcast(Event{Message: "event 1", Level: "INFO"})
+	b.Broadcast(Event{Message: "event 2", Level: "WARN"})
+	b.Broadcast(Event{Message: "event 3", Level: "ERROR"})
+	b.Broadcast(Event{Message: "event 4", Level: "DEBUG"})
+
+	// Check channel received
+	select {
+	case evt := <-ch:
+		if evt.Message != "event 1" {
+			t.Errorf("expected event 1, got %s", evt.Message)
+		}
+	default:
+		t.Errorf("expected event on subscriber channel")
+	}
+
+	// Check history (ring buffer capacity was 3, so should hold events 2, 3, 4)
+	hist := b.History()
+	if len(hist) != 3 {
+		t.Fatalf("expected 3 history items, got %d", len(hist))
+	}
+	if hist[0].Message != "event 2" || hist[1].Message != "event 3" || hist[2].Message != "event 4" {
+		t.Errorf("unexpected history order: %+v", hist)
+	}
+}
+

@@ -731,6 +731,10 @@ flowchart TD
      1. Directory containing the running executable (`filepath.Dir(exePath)/sqlfox.env`).
      2. Current working directory (`./sqlfox.env`).
      3. User home configuration directory (`~/.sqlfox/sqlfox.env`).
+5. **Live Event Stream & In-App Activity Console (`/api/logs/stream`)**:
+   - **Broadcaster & Telemetry Ring Buffer**: In-memory fixed-capacity ring buffer (100 records) capturing structured runtime events across subsystems. Emits non-blocking fan-out channel events to connected HTTP clients without stalling database threads.
+   - **Server-Sent Events (SSE)**: Powered entirely by Go standard library `http.Flusher` delivering unidirectional real-time event frames (`data: <json>\n\n`) to the browser's native `EventSource`.
+   - **Frontend Ergonomics**: Collapsible bottom-docked Activity Console with smart auto-scroll detection, client-side FIFO buffer (1,000 items), level filtering, keyword search, and instantaneous `.log` / `.json` export.
 
 ---
 

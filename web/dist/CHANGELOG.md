@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **In-App Activity Console & Live Event Stream (`internal/logger`, `internal/server`, `web`)**: Real-time operational observability console directly inside the SqlFox interface. Emits runtime application telemetry over Server-Sent Events (SSE: `GET /api/logs/stream`) backed by a 100-entry in-memory ring buffer for instant cold-start history. Features a collapsible bottom-docked drawer with a 5-column running table (Time, Level, Module, Message, Details), smart auto-scroll with freeze detection on upward scroll, level filtering (ALL, ERROR, WARN, INFO, DEBUG), instant search, client-side log export (`.log` plain text or `.json`), and a footer status button (`⚡ Activity`) with live pulsing indicator and unread error badge (ADR 0051).
+- **Driver & Query Execution Telemetry (`internal/server`)**: Integrated structured `slog` telemetry into query execution and audit logging (`RecordAudit`), broadcasting executed SQL statements, latencies (`duration_ms`), affected rows, and error details in real-time.
+
 ## [v0.8.1] - 2026-10-13
 
 ### Fixed

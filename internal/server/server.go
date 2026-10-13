@@ -213,6 +213,9 @@ func (s *Server) routes() {
 	mux.HandleFunc("POST /api/system/update/apply", s.handleApplyUpdate)
 	mux.HandleFunc("GET /api/system/changelog", s.handleGetChangelog)
 
+	// Observability & Live Activity Stream
+	mux.HandleFunc("GET /api/logs/stream", s.handleLogsStream)
+
 	// Profiling endpoints (conditional on SQLFOX_PPROF=1)
 	s.registerPprof(mux)
 
