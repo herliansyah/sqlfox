@@ -2,6 +2,8 @@ package driver_test
 
 import (
 	"database/sql"
+	"encoding/json"
+	"math"
 	"testing"
 
 	"sqlfox/internal/driver"
@@ -244,6 +246,28 @@ func TestFormatSQLValue_Booleans(t *testing.T) {
 	}
 	if v := driver.FormatSQLValue(false); v != "FALSE" {
 		t.Fatalf("expected FALSE, got %s", v)
+	}
+}
+
+func TestFormatSQLValue_LargeNumber(t *testing.T) {
+	cases := []struct {
+		input    any
+		expected string
+	}{
+		{float64(16906691), "16906691"},
+		{float32(12345), "12345"},
+		{float64(16906691.5), "16906691.5"},
+		{json.Number("16906691"), "16906691"},
+		{json.Number("99.95"), "99.95"},
+		{math.NaN(), "NULL"},
+		{math.Inf(1), "NULL"},
+		{math.Inf(-1), "NULL"},
+	}
+
+	for _, tc := range cases {
+		if v := driver.FormatSQLValue(tc.input); v != tc.expected {
+			t.Errorf("FormatSQLValue(%v) = %q, expected %q", tc.input, v, tc.expected)
+		}
 	}
 }
 

@@ -781,7 +781,7 @@ func (s *Server) handleSyncDataCompare(w http.ResponseWriter, r *http.Request) {
 		var parts []string
 		for _, idx := range indices {
 			if idx < len(row) {
-				parts = append(parts, fmt.Sprintf("%v", row[idx]))
+				parts = append(parts, driver.FormatSQLValue(row[idx]))
 			}
 		}
 		return strings.Join(parts, ":")
@@ -950,7 +950,7 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 				strings.Join(placeholders, ", "),
 			)
 			if _, err := tgtSess.Session.Exec(ctx, sql, op.Data...); err != nil {
-				errors = append(errors, fmt.Sprintf("insert error (pk %v): %s", op.PK, err.Error()))
+				errors = append(errors, fmt.Sprintf("insert error (pk %s): %s", driver.FormatSQLValue(op.PK), err.Error()))
 			} else {
 				inserted++
 			}
@@ -979,7 +979,7 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 				driver.Placeholder(tgtDriver, pIdx),
 			)
 			if _, err := tgtSess.Session.Exec(ctx, sql, args...); err != nil {
-				errors = append(errors, fmt.Sprintf("update error (pk %v): %s", op.PK, err.Error()))
+				errors = append(errors, fmt.Sprintf("update error (pk %s): %s", driver.FormatSQLValue(op.PK), err.Error()))
 			} else {
 				updated++
 			}
@@ -991,7 +991,7 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 				driver.Placeholder(tgtDriver, 1),
 			)
 			if _, err := tgtSess.Session.Exec(ctx, sql, op.PK); err != nil {
-				errors = append(errors, fmt.Sprintf("delete error (pk %v): %s", op.PK, err.Error()))
+				errors = append(errors, fmt.Sprintf("delete error (pk %s): %s", driver.FormatSQLValue(op.PK), err.Error()))
 			} else {
 				deleted++
 			}
