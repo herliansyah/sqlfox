@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **In-App Activity Console & Live Event Stream (`internal/logger`, `internal/server`, `web`)**: Real-time operational observability console directly inside the SqlFox interface. Emits runtime application telemetry over Server-Sent Events (SSE: `GET /api/logs/stream`) backed by a 100-entry in-memory ring buffer for instant cold-start history. Features a collapsible bottom-docked drawer with a 5-column running table (Time, Level, Module, Message, Details), smart auto-scroll with freeze detection on upward scroll, level filtering (ALL, ERROR, WARN, INFO, DEBUG), instant search, client-side log export (`.log` plain text or `.json`), and a footer status button (`⚡ Activity`) with live pulsing indicator and unread error badge (ADR 0051).
 - **Driver & Query Execution Telemetry (`internal/server`)**: Integrated structured `slog` telemetry into query execution and audit logging (`RecordAudit`), broadcasting executed SQL statements, latencies (`duration_ms`), affected rows, and error details in real-time.
 
+### Removed
+- **Status Bar Footer Personal Branding & GitHub Pill (`web`)**: Removed `Created by herliansyah` and the external GitHub pill button from the persistent bottom status bar footer to provide an uncluttered, distraction-free enterprise workspace interface. Relocated author credit and repository link elegantly into the Changelog / About dialog footer.
+- **Donation & Sponsorship References**: Removed all forms of donations, including the Saweria sponsorship link and pill button in the status bar footer, `.github/FUNDING.yml`, and sponsorship badges/sections from documentation.
+
 ## [v0.8.1] - 2026-10-13
 
 ### Fixed

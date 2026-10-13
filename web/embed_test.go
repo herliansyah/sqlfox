@@ -519,9 +519,8 @@ func TestProcessDetailModalAndFooterPillsEmbedded(t *testing.T) {
 	content := string(contentBytes)
 
 	expectedSnippets := []string{
-		// 1. Footer pills rounded-full and matching slate styling
-		`href="https://github.com/herliansyah/sqlfox" target="_blank" rel="noopener noreferrer" class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800/70 hover:bg-slate-700/80 text-slate-300 hover:text-white border border-slate-700/60 transition shadow-sm"`,
-		`href="https://saweria.co/herliansyah26" target="_blank" rel="noopener noreferrer" class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800/70 hover:bg-slate-700/80 text-slate-300 hover:text-white border border-slate-700/60 transition shadow-sm"`,
+		// 1. Clean footer version launcher
+		`id="footer-version-btn" onclick="openChangelogDialog()"`,
 		// 2. Process detail modal widened to max-w-5xl
 		`<dialog id="pl-detail-modal" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-0 outline-none max-w-5xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm overflow-hidden">`,
 		// 3. Fallback clipboard container targeting active open dialog
@@ -538,6 +537,22 @@ func TestProcessDetailModalAndFooterPillsEmbedded(t *testing.T) {
 	for _, s := range expectedSnippets {
 		if !strings.Contains(content, s) {
 			t.Errorf("expected index.html to contain snippet %q, but was missing", s)
+		}
+	}
+
+	if strings.Contains(content, "saweria.co") {
+		t.Errorf("expected index.html to NOT contain saweria link")
+	}
+
+	footerIdx := strings.Index(content, "<footer")
+	footerEndIdx := strings.Index(content, "</footer>")
+	if footerIdx != -1 && footerEndIdx != -1 {
+		footerHTML := content[footerIdx:footerEndIdx]
+		if strings.Contains(footerHTML, "Created by") {
+			t.Errorf("expected status bar footer to NOT contain 'Created by'")
+		}
+		if strings.Contains(footerHTML, "href=\"https://github.com/herliansyah/sqlfox\"") {
+			t.Errorf("expected status bar footer to NOT contain GitHub pill button")
 		}
 	}
 }

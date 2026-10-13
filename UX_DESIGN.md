@@ -521,7 +521,7 @@ The Entity-Relationship Diagram canvas allows developers to explore table relati
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │ 🐬 MySQL 8.0.35 • localhost:3306 / mydb • Up 4d 12h • Latency: 2ms                                    │
-│   Memory: 42MB  [⌨️ Shortcuts]  SqlFox v0.2.0 • Created by herliansyah • [GitHub] [☕ Sponsor]     │
+│   Memory: 42MB  [📖 Docs]  [⌨️ Shortcuts]  [🚀 Update]  SqlFox v0.2.0                                 │
 └────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -549,7 +549,7 @@ The Entity-Relationship Diagram canvas allows developers to explore table relati
 
 1. **Two-Region Status Bar**:
    - **Left**: Real-time database connection telemetry: dialect engine flavor & version (`🐬 MySQL 8.0.35` / `🦭 MariaDB 10.11`), connection host/database target, server uptime (`Up 4d 12h`), and interactive latency ping (`footer-latency`).
-   - **Right**: Workspace utility cluster: heap memory telemetry, keyboard shortcuts cheatsheet launcher, dynamic update action badge (`#footer-update-btn`), application version tag, followed by author attribution (`Created by herliansyah • [GitHub] [☕ Sponsor]`) at the far-right edge.
+   - **Right**: Workspace utility cluster: live activity console button, heap memory telemetry, documentation link, keyboard shortcuts cheatsheet launcher, dynamic update action badge (`#footer-update-btn`), and persistent application version launcher (`#footer-version-btn`) opening the Changelog and About dialog.
 2. **Transparent Changelog Inspection**:
    - Renders GitHub release notes using SqlFox's built-in zero-dependency Markdown parser, displaying formatted bullet points, headers, and code snippets before the user commits to updating.
 3. **One-Click In-App Binary Replacement**:
