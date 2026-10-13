@@ -36,6 +36,37 @@ func TestPortHunting(t *testing.T) {
 	}
 }
 
+func TestPortAutoScanPantauCollision(t *testing.T) {
+	// Simulate Pantau or dual-stack service listening on IPv6 loopback [::1]
+	// On Windows or dual-stack systems, net.Listen("tcp", "127.0.0.1:port") can bind silently
+	// even when another service answers on [::1]:port or wildcard.
+	l1, err := net.Listen("tcp", "[::1]:0")
+	if err != nil {
+		t.Skipf("skipping IPv6 test: %v", err)
+	}
+	defer l1.Close()
+
+	busyPort := l1.Addr().(*net.TCPAddr).Port
+
+	// listenWithPortHunting on 127.0.0.1 should detect that busyPort is answering connections
+	// and auto-scan past it.
+	l2, pickedPort, err := listenWithPortHunting("127.0.0.1", busyPort, 10)
+	if err != nil {
+		t.Fatalf("listenWithPortHunting failed: %v", err)
+	}
+	defer l2.Close()
+
+	if pickedPort == busyPort {
+		t.Fatalf("BUG REPRODUCED: expected port hunting to detect busy port %d and scan past it, but stubbornly bound to %d without error", busyPort, pickedPort)
+	}
+
+	// In strict mode (maxAttempts = 1), listenWithPortHunting should fail-fast
+	_, _, err = listenWithPortHunting("127.0.0.1", busyPort, 1)
+	if err == nil {
+		t.Fatalf("expected strict listenWithPortHunting to fail on busy port %d, but succeeded", busyPort)
+	}
+}
+
 func TestGetLocalNetworkIP(t *testing.T) {
 	ip := getLocalNetworkIP()
 	fmt.Printf("Detected LAN IP: %s\n", ip)

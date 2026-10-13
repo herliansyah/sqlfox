@@ -308,19 +308,47 @@ func generateFriendlyPIN() (string, error) {
 	return "fox-" + string(b), nil
 }
 
+// tryListen checks if port is free on loopback interfaces before binding.
+// ponytail: on Windows Winsock and dual-stack setups, net.Listen("tcp", "127.0.0.1:p") or wildcard
+// can bind without error even when another service (e.g. Pantau) already listens on [::1]:p or :p.
+// Probing via DialTimeout and verifying IPv4 binding ensures busy ports trigger auto-scanning.
+func tryListen(host string, port int) net.Listener {
+	for _, probeHost := range []string{"127.0.0.1", "[::1]"} {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", probeHost, port), 50*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return nil
+		}
+	}
+
+	l4, err := net.Listen("tcp4", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		return nil
+	}
+	_ = l4.Close()
+
+	l, err := net.Listen("tcp", fmt.Sprintf("%s:%d", host, port))
+	if err != nil {
+		return nil
+	}
+	return l
+}
+
 func listenWithPortHunting(host string, startPort int, maxAttempts int) (net.Listener, int, error) {
 	for i := 0; i < maxAttempts; i++ {
 		port := startPort + i
-		addr := fmt.Sprintf("%s:%d", host, port)
-		l, err := net.Listen("tcp", addr)
-		if err == nil {
+		l := tryListen(host, port)
+		if l != nil {
 			if i > 0 {
 				fmt.Printf("⚠️  Port %d was busy. Automatically switched to free port %d.\n", startPort, port)
 			}
 			return l, port, nil
 		}
 	}
-	return nil, 0, fmt.Errorf("could not find an available port after %d attempts starting at %d", maxAttempts, startPort)
+	if maxAttempts == 1 {
+		return nil, startPort, fmt.Errorf("port %d is already in use", startPort)
+	}
+	return nil, startPort, fmt.Errorf("could not find an available port after %d attempts starting at %d", maxAttempts, startPort)
 }
 
 func getLocalNetworkIP() string {
