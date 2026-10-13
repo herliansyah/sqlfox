@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Lazy Session Auto-Reconnect (`internal/session`, `internal/server`)**: Transparently re-establish database connection sessions from the vault when accessed after being evicted due to inactivity, preventing unexpected HTTP 404 errors across processlist, query execution, and schema inspection when the app is left idle. Protect `LastActive` timestamps under session mutex.
+- **Dynamic Date Segment Stepper & Clamping (`web`)**: Replaced native date input with custom text input and inline segment stepper buttons in the table editor. Increment/decrement active segment (year, month, day, hour, minute, second) based on caret position, auto-clamp day values to valid days in month, ensure table cell overflow remains visible during inline editing, and format temporal values cleanly.
+- **Large Numeric Formatting & Scientific Notation Prevention (`internal/driver`, `internal/sync`)**: Format numeric values using decimal notation instead of `%v` in `FormatSQLValue`, preventing Go from switching to exponential scientific notation (e.g. `1.6906691e+07`) on values $\ge 10^6$. Added native unquoted handling for `json.Number`, standardized primary key representation in data synchronization transfers, and added test coverage for large integer PKs.
+
 ## [v0.8.0] - 2026-10-12
 
 ### Added
