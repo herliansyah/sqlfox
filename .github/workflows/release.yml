@@ -144,7 +144,7 @@ jobs:
             ghcr.io/${{ github.repository }}:latest
 
       - name: Publish to NPM
-        if: ${{ env.NPM_TOKEN != '' }}
+        if: ${{ env.NPM_TOKEN != '' && hashFiles('package.json') != '' }}
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
