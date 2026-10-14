@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -248,6 +249,58 @@ func TestSyncDataTransfer(t *testing.T) {
 	}
 }
 
+func TestSyncDataTransfer_ErrorRollbackAndStatus(t *testing.T) {
+	srv, ts, srcID, tgtID := setupTwoTestDatabases(t)
+	client := ts.Client()
+
+	srcSess, _ := srv.sessionMgr.GetSession(srcID)
+	tgtSess, _ := srv.sessionMgr.GetSession(tgtID)
+
+	// Create source table with rows
+	_, _ = srcSess.Session.Exec(context.Background(), "CREATE TABLE items (id INTEGER, val TEXT);")
+	_, _ = srcSess.Session.Exec(context.Background(), "INSERT INTO items VALUES (1, 'a'), (1, 'b');")
+
+	// Create target table with UNIQUE constraint so inserting duplicate id fails midway
+	_, _ = tgtSess.Session.Exec(context.Background(), "CREATE TABLE items (id INTEGER UNIQUE, val TEXT);")
+
+	reqBody := SyncDataTransferRequest{
+		SourceSessionID: srcID,
+		TargetSessionID: tgtID,
+		Tables:          []string{"items"},
+		BatchSize:       1,
+	}
+	b, _ := json.Marshal(reqBody)
+	resp, err := client.Post(ts.URL+"/api/sync/data/transfer", "application/json", bytes.NewReader(b))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("transfer request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	bodyStr := string(bodyBytes)
+
+	if !strings.Contains(bodyStr, `"event":"table_error"`) {
+		t.Errorf("expected table_error event in stream, got:\n%s", bodyStr)
+	}
+	if !strings.Contains(bodyStr, `"status":"Transfer completed with errors"`) {
+		t.Errorf("expected status 'Transfer completed with errors', got:\n%s", bodyStr)
+	}
+	if !strings.Contains(bodyStr, `"has_errors":true`) {
+		t.Errorf("expected has_errors:true, got:\n%s", bodyStr)
+	}
+
+	// Verify target table was rolled back and contains 0 rows
+	stream, err := tgtSess.Session.QueryStream(context.Background(), "SELECT COUNT(*) FROM items", 1)
+	if err != nil {
+		t.Fatalf("failed to query target items: %v", err)
+	}
+	defer stream.Close()
+	chunk, _ := stream.NextChunk(1)
+	if len(chunk) == 0 || fmt.Sprintf("%v", chunk[0][0]) != "0" {
+		t.Fatalf("expected 0 rows in target due to rollback, got %v", chunk)
+	}
+}
+
 func TestSyncDataCompareAndApply(t *testing.T) {
 	srv, ts, srcID, tgtID := setupTwoTestDatabases(t)
 	client := ts.Client()
@@ -377,3 +430,134 @@ func TestPostgresStructureSyncColumnAlter(t *testing.T) {
 	}
 }
 
+func TestSyncData_CompositePKCompareAndApply(t *testing.T) {
+	srv, ts, srcID, tgtID := setupTwoTestDatabases(t)
+	client := ts.Client()
+
+	srcSess, _ := srv.sessionMgr.GetSession(srcID)
+	tgtSess, _ := srv.sessionMgr.GetSession(tgtID)
+
+	schemaSQL := `CREATE TABLE order_items (
+		order_id INTEGER,
+		product_id INTEGER,
+		quantity INTEGER,
+		PRIMARY KEY (order_id, product_id)
+	);`
+	_, _ = srcSess.Session.Exec(context.Background(), schemaSQL)
+	_, _ = tgtSess.Session.Exec(context.Background(), schemaSQL)
+
+	// Source: (1, 10, 2), (1, 20, 5)
+	_, _ = srcSess.Session.Exec(context.Background(), "INSERT INTO order_items VALUES (1, 10, 2), (1, 20, 5);")
+
+	// Target: (1, 10, 1), (1, 20, 5), (1, 30, 9)
+	_, _ = tgtSess.Session.Exec(context.Background(), "INSERT INTO order_items VALUES (1, 10, 1), (1, 20, 5), (1, 30, 9);")
+
+	// 1. Compare
+	compReq := SyncDataCompareRequest{
+		SourceSessionID: srcID,
+		TargetSessionID: tgtID,
+		Table:           "order_items",
+		DeleteMissing:   true,
+	}
+	b, _ := json.Marshal(compReq)
+	resp, err := client.Post(ts.URL+"/api/sync/data/compare", "application/json", bytes.NewReader(b))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("compare failed: %v", err)
+	}
+	var compResp SyncDataCompareResponse
+	_ = json.NewDecoder(resp.Body).Decode(&compResp)
+	resp.Body.Close()
+
+	if compResp.Summary["update_count"] != 1 || compResp.Summary["delete_count"] != 1 {
+		t.Fatalf("expected 1 update and 1 delete in summary, got: %+v", compResp.Summary)
+	}
+
+	// 2. Apply
+	applyReq := SyncDataApplyRequest{
+		TargetSessionID: tgtID,
+		Table:           "order_items",
+		Operations:      compResp.Operations,
+	}
+	b, _ = json.Marshal(applyReq)
+	resp, err = client.Post(ts.URL+"/api/sync/data/apply", "application/json", bytes.NewReader(b))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("apply failed: %v", err)
+	}
+	var applyResp struct {
+		Success  bool     `json:"success"`
+		Inserted int      `json:"inserted"`
+		Updated  int      `json:"updated"`
+		Deleted  int      `json:"deleted"`
+		Errors   []string `json:"errors"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&applyResp)
+	resp.Body.Close()
+
+	if len(applyResp.Errors) > 0 {
+		t.Fatalf("apply had errors: %v", applyResp.Errors)
+	}
+
+	// 3. Verify target has exactly 2 rows: (1, 10, 2) and (1, 20, 5)
+	stream, err := tgtSess.Session.QueryStream(context.Background(), "SELECT order_id, product_id, quantity FROM order_items ORDER BY product_id ASC", 10)
+	if err != nil {
+		t.Fatalf("query target failed: %v", err)
+	}
+	defer stream.Close()
+	rows, _ := stream.NextChunk(10)
+	if len(rows) != 2 {
+		t.Fatalf("expected exactly 2 rows in target after sync, got %d: %v", len(rows), rows)
+	}
+
+	// Row 1: product 10, quantity 2
+	if fmt.Sprintf("%v", rows[0][1]) != "10" || fmt.Sprintf("%v", rows[0][2]) != "2" {
+		t.Errorf("expected (1, 10, 2), got %v", rows[0])
+	}
+	// Row 2: product 20, quantity 5
+	if fmt.Sprintf("%v", rows[1][1]) != "20" || fmt.Sprintf("%v", rows[1][2]) != "5" {
+		t.Errorf("expected (1, 20, 5), got %v", rows[1])
+	}
+}
+
+// Regression: target columns ordered differently from source must not receive swapped values.
+func TestSyncData_ColumnOrderMismatch(t *testing.T) {
+	srv, ts, srcID, tgtID := setupTwoTestDatabases(t)
+	client := ts.Client()
+	ctx := context.Background()
+	srcSess, _ := srv.sessionMgr.GetSession(srcID)
+	tgtSess, _ := srv.sessionMgr.GetSession(tgtID)
+
+	_, _ = srcSess.Session.Exec(ctx, "CREATE TABLE p (id INTEGER PRIMARY KEY, name TEXT, city TEXT)")
+	_, _ = tgtSess.Session.Exec(ctx, "CREATE TABLE p (city TEXT, id INTEGER PRIMARY KEY, name TEXT)")
+	_, _ = srcSess.Session.Exec(ctx, "INSERT INTO p VALUES (1, 'ann', 'oslo'), (2, 'bob', 'rome')")
+	_, _ = tgtSess.Session.Exec(ctx, "INSERT INTO p VALUES ('oslo', 1, 'ann'), ('paris', 2, 'bob')")
+
+	b, _ := json.Marshal(SyncDataCompareRequest{SourceSessionID: srcID, TargetSessionID: tgtID, Table: "p"})
+	resp, err := client.Post(ts.URL+"/api/sync/data/compare", "application/json", bytes.NewReader(b))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("compare failed: %v", err)
+	}
+	var comp SyncDataCompareResponse
+	_ = json.NewDecoder(resp.Body).Decode(&comp)
+	resp.Body.Close()
+	if comp.Summary["update_count"] != 1 || comp.Summary["insert_count"] != 0 {
+		t.Fatalf("expected exactly 1 update (row 2 city), got %+v", comp.Summary)
+	}
+
+	b, _ = json.Marshal(SyncDataApplyRequest{TargetSessionID: tgtID, Table: "p", Columns: comp.Columns, Operations: comp.Operations})
+	resp, err = client.Post(ts.URL+"/api/sync/data/apply", "application/json", bytes.NewReader(b))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("apply failed: %v", err)
+	}
+	resp.Body.Close()
+
+	stream, err := tgtSess.Session.QueryStream(ctx, "SELECT id, name, city FROM p ORDER BY id", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	rows, _ := stream.NextChunk(10)
+	got := fmt.Sprint(rows)
+	if got != "[[1 ann oslo] [2 bob rome]]" {
+		t.Fatalf("target rows wrong after sync: %s", got)
+	}
+}
