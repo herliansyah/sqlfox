@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Multi-Statement Compound Safety Gate (`internal/server`, `internal/safety`)**: Decompose and inspect all statements within multi-statement SQL executions. Reject compound inputs containing multiple destructive commands that require confirmation challenges, preventing trailing destructive command smuggling (e.g. `SELECT 1; DROP TABLE victim`) and ensuring read-only session enforcement across all sub-statements.
+- **Dialect-Specific Single-Row Targeting for PK-Less Mutations (`internal/server`)**: Enforce physical single-row targeting (`singleRowWhere`) for cell edits and row deletions on tables without a primary key. Uses `LIMIT 1` for MySQL, `rowid IN (SELECT rowid ... LIMIT 1)` for SQLite, and `(tableoid, ctid) IN (SELECT tableoid, ctid ... LIMIT 1)` for PostgreSQL (partition-safe via `tableoid`), guaranteeing that mutating or deleting one duplicate row never touches identical sister rows.
+- **Composite Primary Key Data Sync (`internal/server`)**: Full composite primary key support for row-level data comparison and application. Serializes composite keys with an unambiguous unit separator (`\x1f`), synthesizes multi-clause `WHERE` criteria, and maps source columns to target columns (`dataIdx`) to prevent omitted columns from being overwritten with `NULL`.
+- **Dialect-Aware Value Formatting & Literal Serialization (`internal/driver`)**: Standardize cross-engine literal generation (`FormatSQLValueForDriver`, `hexLiteral`) supporting engine-native hex formats (`X'...'` for MySQL/SQLite, `'\x...'::bytea` for PostgreSQL), string escaping (`EscapeSQLString`), and custom delimiter script splitting (`SplitWithDelimiters`) with PostgreSQL dollar-quoting (`$$`).
+- **Comprehensive Mutation Safety Regression Suite (`internal/server/mutation_safety_test.go`)**: Added automated regression checks covering PK-less duplicate-row isolation, multi-statement DROP injection protection, truncate-transfer rollback recovery, and row-level sync table size caps.
+
+### Changed
+- **Data Sync Memory Safety Ceiling (`internal/server`)**: Enforce an upper bound (10,000 rows) on row-level data sync comparisons, responding with HTTP 422 Unprocessable Entity to protect against daemon memory exhaustion on oversized tables.
+- **Canonical Sync Value Normalization (`internal/server`)**: Standardized row comparison hashing (`syncValueKey`) across driver types (`int64`, string representations, byte slices) while strictly distinguishing `NULL` (`\x00NULL`) from empty strings or literal strings.
+
+### Fixed
+- **Safety Guard Lexical Comment & Literal Bypass (`internal/safety`)**: Preprocess queries by masking line comments (`--`, `#`), block comments (`/* ... */`), and quoted literals (`maskCommentsAndLiterals`) before running regex-based fallback checks, preventing comments from concealing destructive queries or triggering false positives.
+- **Common Table Expression (CTE) Inspection Bypass (`internal/safety`)**: Strip leading `WITH ... AS (...)` CTE clauses (`stripLeadingCTE`) to inspect the underlying root executable operation (`SELECT`, `INSERT`, `UPDATE`, `DELETE`, `MERGE`) when Vitess parser AST parsing fails.
+- **Data Transfer Truncate Rollback Protection (`internal/server`)**: Ensure target table rows are preserved inside an atomic transaction when a cross-connection data transfer with `truncate_target: true` encounters batch insertion failures.
+- **Explicit Database Selection Error Handling (`internal/server`)**: Verify and handle errors from `UseDatabase` / `SelectDatabase` across CRUD, sync, dump, and query handlers rather than ignoring return values.
+
 ## [v0.9.0] - 2026-10-14
 
 ### Added

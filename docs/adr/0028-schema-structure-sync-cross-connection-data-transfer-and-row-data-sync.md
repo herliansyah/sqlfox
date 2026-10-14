@@ -33,15 +33,20 @@ To support complete database lifecycle management, continuous staging/production
    - Strictly memory bounded (<50MB buffer) using batch streaming.
 3. **Row-Level Data Sync (Delta Reconciler)**:
    - Endpoints: `POST /api/sync/data/compare` and `POST /api/sync/data/apply`.
-   - Inspects primary key definitions of selected tables on source and target.
+   - Inspects primary key definitions of selected tables on source and target, supporting both single and composite primary keys.
+   - Concatenates composite keys using an unambiguous unit separator (`\x1f`) to prevent key collisions.
+   - Employs canonical value normalization (`syncValueKey`) to ensure cross-driver data equality across `int64`, byte slices, and strings, distinguishing `NULL` (`\x00NULL`) from literal values.
+   - Maps source column indices to target column indices (`dataIdx`), preventing omitted columns from being overwritten with `NULL` during `UPDATE` or `INSERT`.
    - Computes set operations on keyset:
      - PK in source, not in target -> queued for `INSERT`.
      - PK in both, with differing column values -> queued for `UPDATE`.
      - PK in target, not in source -> queued for `DELETE` (toggleable option).
+   - Enforces a table size comparison ceiling (e.g. 10,000 rows max, returning HTTP 422 Unprocessable Entity) to protect daemon memory from out-of-memory exhaustion during row diffing.
    - Shows interactive diff preview and applies modifications inside an atomic transaction on target.
 4. **Ergonomics & Safety**:
    - Dedicated dialog modals (`#structure-sync-dialog`, `#data-transfer-dialog`, `#data-sync-dialog`) accessible from the top navbar `📦 DB Tools ▾` menu.
    - Production target environments strictly enforce the Safety Guard Challenge confirmation modal before DDL or data mutations execute.
+   - In Cross-Connection Data Transfer with `truncate_target: true`, batch insertion failures trigger transaction rollback, keeping original target rows intact rather than losing data.
 
 ## Consequences
 

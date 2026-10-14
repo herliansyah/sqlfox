@@ -144,6 +144,18 @@ _Avoid_: Grid filter validator, where clause sanitization, filter parser
 The cryptographic supply-chain verification policy requiring matching SHA-256 digests against an official release manifest before in-app self-update binaries can be unpacked or executed.
 _Avoid_: Checksum test, hash check, download verify
 
+**Lexical Masking**:
+The token-sanitization phase in the Safety Guard (`maskCommentsAndLiterals`) that blanks out comments (`--`, `#`, `/* ... */`), quoted string literals, and quoted identifiers before keyword regex evaluation, preventing SQL keywords hidden in comments or strings from triggering false positives or concealing destructive clauses.
+_Avoid_: Comment stripper, SQL cleaner
+
+**Multi-Statement Inspection Gate**:
+The safety evaluation policy (`inspectAllStatements`) that parses and evaluates every statement within a compound query batch individually, ensuring that trailing destructive operations (e.g. `DROP` or `DELETE` appended after a `SELECT`) cannot evade inspection, while failing closed if multiple statements demand confirmation challenges.
+_Avoid_: Multi-query validator, compound gate
+
+**CTE Clause Stripping**:
+A syntax preprocessing step (`stripLeadingCTE`) that isolates and removes leading Common Table Expression (`WITH ... AS (...)`) definitions to evaluate the root executable operation (`SELECT`, `INSERT`, `UPDATE`, `DELETE`, `MERGE`) under the Safety Guard.
+_Avoid_: CTE cleaner, WITH handler
+
 ## Artificial Intelligence
 
 **BYOK (Bring Your Own Key)**:
@@ -435,8 +447,20 @@ A responsive column layout policy within the Virtual Data Grid that sizes table 
 _Avoid_: Full-width grid, stretched columns, bloated cells.
 
 **Row Criteria**:
-A synthesized parameter map and WHERE predicate (`WHERE col1 = ? AND col2 = ? ... LIMIT 1`) constructed from all non-null column values of an existing row, enabling safe inline updates and deletions on tables lacking a formal primary key or unique index.
+A synthesized parameter map and deterministic WHERE predicate (`singleRowWhere`) constructed from all non-null column values of an existing row, narrowed to match at most one physical row (`LIMIT 1` for MySQL, `rowid IN (...)` for SQLite, `(tableoid, ctid) IN (...)` for PostgreSQL) to ensure safe mutations on tables lacking a formal primary key without altering identical duplicate rows.
 _Avoid_: Synthetic PK, pseudo-key, blind update
+
+**Composite Primary Key Sync**:
+The multi-column reconciliation algorithm in Data Sync that serializes composite keys using an unambiguous unit separator (`\x1f`), maps source column indices to target positions, and synthesizes multi-clause predicates (`WHERE pk1 = ? AND pk2 = ?`) for updates and deletes.
+_Avoid_: Multi-key sync, combined key matcher
+
+**Canonical Sync Key**:
+A normalized data representation (`syncValueKey`) used during cross-driver row comparisons that reconciles type variations (such as `int64`, string numbers, and raw byte arrays) and reliably distinguishes `NULL` (`\x00NULL`) from empty string or text values.
+_Avoid_: Value normalizer, diff hash
+
+**Data Sync Comparison Ceiling**:
+A memory protection threshold (e.g., 10,000 rows) that prevents memory exhaustion by rejecting row-level data diffing on oversized tables with an HTTP 422 Unprocessable Entity error.
+_Avoid_: Row limit, sync cap
 
 **Grid Value Presets**:
 A floating quick-action toolbar and keyboard shortcut suite (`Alt+N` for NULL, `Alt+E` for Empty String, `Alt+T` for NOW(), `Alt+D` for Current Date, `Alt+U` for UUID v4) providing rapid data entry during grid cell editing.
