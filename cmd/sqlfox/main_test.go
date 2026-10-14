@@ -1,11 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"sqlfox/internal/driver"
 )
@@ -219,4 +224,110 @@ func bytesContains(haystack, needle []byte) bool {
 	}
 	return false
 }
+
+func TestStartupBannerAndLoggingOrder(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "sqlfox-banner-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	binPath := filepath.Join(tmpDir, "sqlfox")
+	buildCmd := exec.Command("go", "build", "-o", binPath, ".")
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to build test binary: %v\nOutput: %s", err, string(out))
+	}
+
+	// Case 1: Default execution without logging flags.
+	// Expected: Stderr should NOT contain "level=INFO msg=sqlfox_started"
+	// Terminal should remain clean with only the banner on stdout.
+	{
+		cmd := exec.Command(binPath, "-port", "19888", "-multi", "-no-browser", "-db", filepath.Join(tmpDir, "config1.db"))
+		var stdoutBuf, stderrBuf safeBuffer
+		cmd.Stdout = &stdoutBuf
+		cmd.Stderr = &stderrBuf
+
+		if err := cmd.Start(); err != nil {
+			t.Fatalf("failed to start cmd: %v", err)
+		}
+
+		// Wait for banner to appear on stdout
+		deadline := time.Now().Add(15 * time.Second)
+		for time.Now().Before(deadline) {
+			if strings.Contains(stdoutBuf.String(), "SqlFox") {
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+
+		_ = cmd.Process.Signal(os.Interrupt)
+		_ = cmd.Wait()
+
+		stderrStr := stderrBuf.String()
+		stdoutStr := stdoutBuf.String()
+
+		if strings.Contains(stderrStr, "level=INFO msg=sqlfox_started") {
+			t.Errorf("default startup should NOT print log to console stderr unless logging is explicitly enabled, got stderr:\n%s", stderrStr)
+		}
+		if !strings.Contains(stdoutStr, "SqlFox") {
+			t.Errorf("default startup should print banner to stdout, got stdout: %q, stderr: %q", stdoutStr, stderrStr)
+		}
+	}
+
+	// Case 2: Explicit verbose flag (-v).
+	// Expected: Both banner and log are produced, but banner MUST appear before any log in combined stream.
+	{
+		cmd := exec.Command(binPath, "-v", "-port", "19889", "-multi", "-no-browser", "-db", filepath.Join(tmpDir, "config2.db"))
+		var combined safeBuffer
+		cmd.Stdout = &combined
+		cmd.Stderr = &combined
+
+		if err := cmd.Start(); err != nil {
+			t.Fatalf("failed to start cmd: %v", err)
+		}
+
+		deadline := time.Now().Add(15 * time.Second)
+		for time.Now().Before(deadline) {
+			if strings.Contains(combined.String(), "SqlFox") {
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+
+		_ = cmd.Process.Signal(os.Interrupt)
+		_ = cmd.Wait()
+
+		combinedStr := combined.String()
+		bannerIdx := strings.Index(combinedStr, "SqlFox")
+		logIdx := strings.Index(combinedStr, "sqlfox_started")
+
+		if bannerIdx == -1 {
+			t.Fatalf("expected banner in output, got:\n%s", combinedStr)
+		}
+		if logIdx == -1 {
+			t.Fatalf("expected sqlfox_started log in output when -v is enabled, got:\n%s", combinedStr)
+		}
+		if logIdx < bannerIdx {
+			t.Errorf("BUG REPRODUCED: sqlfox_started log (idx %d) appeared BEFORE banner (idx %d) in output:\n%s", logIdx, bannerIdx, combinedStr)
+		}
+	}
+}
+
+type safeBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *safeBuffer) Write(p []byte) (n int, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *safeBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
+}
+
 

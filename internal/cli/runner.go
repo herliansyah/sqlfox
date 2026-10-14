@@ -22,8 +22,8 @@ import (
 
 // PrintHelp writes the CLI command help to the provided writer.
 func PrintHelp(w io.Writer) {
-	help := `SqlFox - Modern Database Management & Automation Suite
-
+	RenderHelpHeader(w, "v0.9.0")
+	help := `
 Usage:
   sqlfox [command] [flags]
   sqlfox [server-flags] (launches desktop web UI)
