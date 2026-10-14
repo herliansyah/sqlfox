@@ -145,7 +145,6 @@ func ImportVault(v *Vault, archiveJSON []byte, exportPassphrase string) (int, er
 		return count, nil
 	}
 
-
 	// Fallback to legacy raw connections list
 	var connections []*ConnectionRecord
 	if err := json.Unmarshal(plainJSON, &connections); err != nil {
@@ -162,4 +161,3 @@ func ImportVault(v *Vault, archiveJSON []byte, exportPassphrase string) (int, er
 
 	return count, nil
 }
-

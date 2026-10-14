@@ -18,14 +18,14 @@ var (
 type OperationalNote struct {
 	ID         string     `json:"id"`
 	Title      string     `json:"title"`
-	Content    string     `json:"content"`              // Raw snapshot (query, AI answer, DDL, error log)
-	SideNote   string     `json:"side_note"`            // Developer annotations & action items
-	Status     string     `json:"status"`               // "inbox", "resolved", "archived"
+	Content    string     `json:"content"`   // Raw snapshot (query, AI answer, DDL, error log)
+	SideNote   string     `json:"side_note"` // Developer annotations & action items
+	Status     string     `json:"status"`    // "inbox", "resolved", "archived"
 	IsPinned   bool       `json:"is_pinned"`
-	CapturedAt time.Time  `json:"captured_at"`          // Timestamp when the incident/snapshot was taken
+	CapturedAt time.Time  `json:"captured_at"`           // Timestamp when the incident/snapshot was taken
 	ReminderAt *time.Time `json:"reminder_at,omitempty"` // Scheduled follow-up alarm timestamp (nullable)
-	ObjectTags []string   `json:"object_tags"`          // JSON array: ["db://conn/db/table", "@note:uuid"]
-	UserTags   []string   `json:"user_tags"`            // JSON array: ["#incident", "#slow-query"]
+	ObjectTags []string   `json:"object_tags"`           // JSON array: ["db://conn/db/table", "@note:uuid"]
+	UserTags   []string   `json:"user_tags"`             // JSON array: ["#incident", "#slow-query"]
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
 }

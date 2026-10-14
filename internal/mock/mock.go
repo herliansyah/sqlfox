@@ -69,8 +69,8 @@ func Generate(ctx context.Context, sess driver.Session, cfg Config) (*Result, er
 	}
 
 	// Detect self-referential FKs and build FK pool for cross-table references.
-	isSelfRef := map[string]bool{}   // col.Name → true if self-ref FK
-	fkPool := map[string][]any{}      // col.Name → sampled parent PKs
+	isSelfRef := map[string]bool{} // col.Name → true if self-ref FK
+	fkPool := map[string][]any{}   // col.Name → sampled parent PKs
 
 	for _, fk := range targetTable.ForeignKeys {
 		if strings.EqualFold(fk.ReferencedTable, cfg.Table) {

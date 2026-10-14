@@ -175,5 +175,3 @@ func TestFirewall_BuildSchemaPrompt_LargeSchema(t *testing.T) {
 		t.Fatal("expected summary list of other tables")
 	}
 }
-
-

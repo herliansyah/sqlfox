@@ -235,5 +235,3 @@ func TestVault_TableNotes(t *testing.T) {
 		t.Fatalf("expected 1 note for conn-1, got %d", len(notes))
 	}
 }
-
-

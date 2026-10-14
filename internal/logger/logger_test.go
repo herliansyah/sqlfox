@@ -176,4 +176,3 @@ func TestBroadcasterAndLiveStreaming(t *testing.T) {
 		t.Errorf("unexpected history order: %+v", hist)
 	}
 }
-
