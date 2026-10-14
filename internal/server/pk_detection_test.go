@@ -231,3 +231,122 @@ func TestInlineEditWithoutPrimaryKey_RowCriteria(t *testing.T) {
 		t.Fatalf("expected 1 record remaining after delete, got %v", remaining)
 	}
 }
+
+func TestGetTableRows_CompositePKDetection(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "sqlfox-composite-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dbPath := filepath.Join(tmpDir, "config.db")
+	v, err := vault.OpenVault(dbPath, "testpass123")
+	if err != nil {
+		t.Fatalf("failed to open vault: %v", err)
+	}
+	defer v.Close()
+
+	testSQLitePath := filepath.Join(tmpDir, "test.sqlite")
+	connRec := &vault.ConnectionRecord{
+		Name:         "Composite SQLite",
+		Environment:  "Development",
+		Driver:       "sqlite",
+		DatabaseName: testSQLitePath,
+	}
+	_ = v.SaveConnection(connRec)
+
+	s := NewServer(v, nil, filepath.Join(tmpDir, "backups"), "testpass123")
+	ts := httptest.NewServer(s.Router())
+	defer ts.Close()
+
+	client := ts.Client()
+
+	connResp, err := client.Post(ts.URL+"/api/session/connect/"+connRec.ID, "application/json", nil)
+	if err != nil || connResp.StatusCode != http.StatusOK {
+		t.Fatalf("connect failed: %v", err)
+	}
+	connResp.Body.Close()
+
+	sess, _ := s.sessionMgr.GetSession(connRec.ID)
+	ctx := context.Background()
+
+	// Create composite PK table
+	_, err = sess.Session.Exec(ctx, `CREATE TABLE order_items (
+		order_id INTEGER,
+		product_id INTEGER,
+		title TEXT,
+		PRIMARY KEY (order_id, product_id)
+	);`)
+	if err != nil {
+		t.Fatalf("create composite table failed: %v", err)
+	}
+	_, err = sess.Session.Exec(ctx, "INSERT INTO order_items VALUES (1, 10, 'widget A'), (1, 20, 'widget B');")
+	if err != nil {
+		t.Fatalf("insert failed: %v", err)
+	}
+
+	// 1. GET table rows - pk_col should be "" because it is a composite PK, NOT a single column!
+	resp, err := client.Get(fmt.Sprintf("%s/api/session/%s/table/order_items/rows", ts.URL, connRec.ID))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET table rows failed: %v", err)
+	}
+	var res struct {
+		PKCol string `json:"pk_col"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&res)
+	resp.Body.Close()
+
+	if res.PKCol != "" {
+		t.Fatalf("expected empty pk_col for composite PK table, got %q (should not single out first column)", res.PKCol)
+	}
+
+	// 2. Edit cell using row_criteria on (1, 10)
+	editPayload := map[string]any{
+		"table":  "order_items",
+		"column": "title",
+		"value":  "widget A updated",
+		"row_criteria": map[string]any{
+			"order_id":   1,
+			"product_id": 10,
+			"title":      "widget A",
+		},
+	}
+	b, _ := json.Marshal(editPayload)
+	editResp, err := client.Post(fmt.Sprintf("%s/api/session/%s/cell-edit", ts.URL, connRec.ID), "application/json", bytes.NewReader(b))
+	if err != nil || editResp.StatusCode != http.StatusOK {
+		t.Fatalf("cell-edit failed: %v", err)
+	}
+	editResp.Body.Close()
+
+	// Verify (1, 10) is updated, and sibling (1, 20) is UNTOUCHED
+	qRows, err := sess.Session.QueryRaw(ctx, "SELECT product_id, title FROM order_items WHERE order_id = 1 ORDER BY product_id ASC")
+	if err != nil || len(qRows) != 2 {
+		t.Fatalf("expected 2 rows, got %v", qRows)
+	}
+	if fmt.Sprint(qRows[0][1]) != "widget A updated" {
+		t.Errorf("expected product 10 updated, got %v", qRows[0][1])
+	}
+	if fmt.Sprint(qRows[1][1]) != "widget B" {
+		t.Errorf("expected sibling product 20 unchanged, got %v", qRows[1][1])
+	}
+
+	// 3. Delete row (1, 10) using row_criterias
+	delPayload := map[string]any{
+		"table": "order_items",
+		"row_criterias": []map[string]any{
+			{"order_id": 1, "product_id": 10, "title": "widget A updated"},
+		},
+	}
+	b, _ = json.Marshal(delPayload)
+	delResp, err := client.Post(fmt.Sprintf("%s/api/session/%s/delete-rows", ts.URL, connRec.ID), "application/json", bytes.NewReader(b))
+	if err != nil || delResp.StatusCode != http.StatusOK {
+		t.Fatalf("delete-rows failed: %v", err)
+	}
+	delResp.Body.Close()
+
+	// Verify (1, 10) deleted, and sibling (1, 20) REMAINS!
+	qRows2, _ := sess.Session.QueryRaw(ctx, "SELECT product_id, title FROM order_items WHERE order_id = 1")
+	if len(qRows2) != 1 || fmt.Sprint(qRows2[0][0]) != "20" {
+		t.Fatalf("expected only sibling product 20 to remain, got %v", qRows2)
+	}
+}
