@@ -61,7 +61,9 @@ func DetectRedundantIndexes(dialect, database string, tables []TableMetadata) []
 
 				// Check exact duplicate: same columns in same order
 				if isSameColumns(idxA.Columns, idxB.Columns) {
-					if idxA.Name > idxB.Name || (idxA.IsUnique == idxB.IsUnique && i > j) {
+					// Always keep the UNIQUE one; among equals, drop the lexically greater name.
+					if (idxB.IsUnique && !idxA.IsUnique) ||
+						(idxA.IsUnique == idxB.IsUnique && (idxA.Name > idxB.Name || (idxA.Name == idxB.Name && i > j))) {
 						results = append(results, RedundantIndex{
 							Table:          tbl.Name,
 							RedundantIndex: idxA.Name,

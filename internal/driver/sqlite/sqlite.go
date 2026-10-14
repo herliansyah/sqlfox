@@ -79,11 +79,7 @@ func (s *SQLiteSession) ServerInfo(ctx context.Context) (*driver.ServerInfo, err
 
 func (s *SQLiteSession) QueryStream(ctx context.Context, querySQL string, limit int) (driver.RowStream, error) {
 	// Apply implicit safe limit if query is a SELECT without LIMIT
-	trimmed := strings.TrimSpace(querySQL)
-	upper := strings.ToUpper(trimmed)
-	if strings.HasPrefix(upper, "SELECT") && !driver.HasLimitClause(upper) && limit > 0 {
-		querySQL = fmt.Sprintf("%s LIMIT %d", strings.TrimSuffix(trimmed, ";"), limit)
-	}
+	querySQL = driver.ApplyLimitClause(querySQL, limit)
 
 	queryID := driver.QueryIDFromContext(ctx)
 	if queryID != "" {
@@ -194,11 +190,7 @@ func (t *sqliteTx) Commit() error   { return t.tx.Commit() }
 func (t *sqliteTx) Rollback() error { return t.tx.Rollback() }
 
 func (t *sqliteTx) QueryStream(ctx context.Context, querySQL string, limit int) (driver.RowStream, error) {
-	trimmed := strings.TrimSpace(querySQL)
-	upper := strings.ToUpper(trimmed)
-	if strings.HasPrefix(upper, "SELECT") && !driver.HasLimitClause(upper) && limit > 0 {
-		querySQL = fmt.Sprintf("%s LIMIT %d", strings.TrimSuffix(trimmed, ";"), limit)
-	}
+	querySQL = driver.ApplyLimitClause(querySQL, limit)
 
 	rows, err := t.tx.QueryContext(ctx, querySQL)
 	if err != nil {
@@ -384,7 +376,6 @@ func (s *SQLiteSession) InspectFastCatalog(ctx context.Context) (map[string][]dr
 		"main": schema.Tables,
 	}, nil
 }
-
 
 func (s *SQLiteSession) SelectDatabase(ctx context.Context, dbName string) error {
 	return nil
@@ -853,7 +844,6 @@ func (s *SQLiteSession) InspectServerVariables(ctx context.Context) (*driver.Ser
 	}, nil
 }
 
-
 func quoteIdentifier(id string) string {
 	return driver.QuoteIdentifier(id, "sqlite")
 }
@@ -888,4 +878,3 @@ func (s *SQLiteSession) ToggleEventStatus(ctx context.Context, name string, enab
 func (s *SQLiteSession) GetTablePartitions(ctx context.Context, database, table string) ([]driver.PartitionMetadata, error) {
 	return []driver.PartitionMetadata{}, nil
 }
-

@@ -1,6 +1,8 @@
 package mysql
 
 import (
+	"context"
+	"database/sql"
 	"testing"
 
 	"sqlfox/internal/driver"
@@ -128,3 +130,23 @@ func TestUniversalReplicationNormalizerMapping(t *testing.T) {
 	}
 }
 
+func TestMySQLTx_CloseConn(t *testing.T) {
+	tx := &mysqlTx{}
+	tx.closeConn() // must not panic when conn is nil
+	if tx.conn != nil {
+		t.Errorf("expected conn to be nil")
+	}
+}
+
+func TestMySQLSession_BeginTx_FailsGracefully(t *testing.T) {
+	db, err := sql.Open("mysql", "invalid:invalid@tcp(127.0.0.1:33069)/invaliddb")
+	if err != nil {
+		t.Fatalf("sql.Open failed: %v", err)
+	}
+	db.Close()
+	s := &MySQLSession{db: db}
+	_, err = s.BeginTx(context.Background())
+	if err == nil {
+		t.Errorf("expected error on closed db Conn, got nil")
+	}
+}

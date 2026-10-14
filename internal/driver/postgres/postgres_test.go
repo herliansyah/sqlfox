@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"testing"
 	"time"
@@ -192,4 +193,46 @@ func TestParseBlockingPids(t *testing.T) {
 	}
 }
 
+func TestPostgresApplyUserGrants_PropagatesError(t *testing.T) {
+	db, err := sql.Open("pgx", "postgres://invalid:invalid@127.0.0.1:54329/invaliddb?sslmode=disable")
+	if err != nil {
+		t.Fatalf("sql.Open failed: %v", err)
+	}
+	defer db.Close()
 
+	s := &PostgresSession{
+		db:  db,
+		cfg: driver.Config{DatabaseName: "testdb"},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	err = s.ApplyUserGrants(ctx, driver.UserGrantRequest{
+		User:       "alice",
+		Privileges: []string{"SELECT"},
+	})
+	if err == nil {
+		t.Fatalf("expected error from ApplyUserGrants on unreachable db, got nil")
+	}
+}
+
+func TestPostgresTx_CloseConn(t *testing.T) {
+	tx := &postgresTx{}
+	tx.closeConn() // must not panic when conn is nil
+	if tx.conn != nil {
+		t.Errorf("expected conn to be nil")
+	}
+}
+
+func TestPostgresSession_BeginTx_FailsGracefully(t *testing.T) {
+	db, err := sql.Open("pgx", "postgres://invalid:invalid@127.0.0.1:54329/invaliddb?sslmode=disable")
+	if err != nil {
+		t.Fatalf("sql.Open failed: %v", err)
+	}
+	db.Close()
+	s := &PostgresSession{db: db}
+	_, err = s.BeginTx(context.Background())
+	if err == nil {
+		t.Errorf("expected error on closed db Conn, got nil")
+	}
+}

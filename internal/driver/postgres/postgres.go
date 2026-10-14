@@ -148,27 +148,30 @@ func (s *PostgresSession) SelectDatabase(ctx context.Context, schemaName string)
 	return nil
 }
 
-func (s *PostgresSession) applyActiveSchema(ctx context.Context, conn *sql.Conn) {
+func (s *PostgresSession) applyActiveSchema(ctx context.Context, conn *sql.Conn) error {
 	s.mu.Lock()
 	schema := s.currentSchema
 	s.mu.Unlock()
 	if schema != "" {
-		_, _ = conn.ExecContext(ctx, fmt.Sprintf("SET search_path = %s", quoteIdentifier(schema)))
+		// A failed SET must abort the statement; otherwise unqualified names resolve in the default schema.
+		if _, err := conn.ExecContext(ctx, fmt.Sprintf("SET search_path = %s", quoteIdentifier(schema))); err != nil {
+			return fmt.Errorf("failed to switch PostgreSQL schema to %s: %w", schema, err)
+		}
 	}
+	return nil
 }
 
 func (s *PostgresSession) QueryStream(ctx context.Context, querySQL string, limit int) (driver.RowStream, error) {
-	trimmed := strings.TrimSpace(querySQL)
-	upper := strings.ToUpper(trimmed)
-	if strings.HasPrefix(upper, "SELECT") && !driver.HasLimitClause(upper) && limit > 0 {
-		querySQL = fmt.Sprintf("%s LIMIT %d", strings.TrimSuffix(trimmed, ";"), limit)
-	}
+	querySQL = driver.ApplyLimitClause(querySQL, limit)
 
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return nil, err
 	}
-	s.applyActiveSchema(ctx, conn)
+	if err := s.applyActiveSchema(ctx, conn); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
 
 	queryID := driver.QueryIDFromContext(ctx)
 	if queryID != "" {
@@ -231,7 +234,9 @@ func (s *PostgresSession) Exec(ctx context.Context, querySQL string, args ...any
 		return nil, err
 	}
 	defer conn.Close()
-	s.applyActiveSchema(ctx, conn)
+	if err := s.applyActiveSchema(ctx, conn); err != nil {
+		return nil, err
+	}
 
 	queryID := driver.QueryIDFromContext(ctx)
 	if queryID != "" {
@@ -265,7 +270,15 @@ func (s *PostgresSession) Exec(ctx context.Context, querySQL string, args ...any
 }
 
 type postgresTx struct {
-	tx *sql.Tx
+	conn *sql.Conn
+	tx   *sql.Tx
+}
+
+func (t *postgresTx) closeConn() {
+	if t.conn != nil {
+		_ = t.conn.Close()
+		t.conn = nil
+	}
 }
 
 func (t *postgresTx) Exec(ctx context.Context, query string, args ...any) (*driver.ExecResult, error) {
@@ -292,15 +305,18 @@ func (t *postgresTx) ExecRaw(ctx context.Context, query string, args ...any) (in
 	return res.RowsAffected()
 }
 
-func (t *postgresTx) Commit() error   { return t.tx.Commit() }
-func (t *postgresTx) Rollback() error { return t.tx.Rollback() }
+func (t *postgresTx) Commit() error {
+	defer t.closeConn()
+	return t.tx.Commit()
+}
+
+func (t *postgresTx) Rollback() error {
+	defer t.closeConn()
+	return t.tx.Rollback()
+}
 
 func (t *postgresTx) QueryStream(ctx context.Context, querySQL string, limit int) (driver.RowStream, error) {
-	trimmed := strings.TrimSpace(querySQL)
-	upper := strings.ToUpper(trimmed)
-	if strings.HasPrefix(upper, "SELECT") && !driver.HasLimitClause(upper) && limit > 0 {
-		querySQL = fmt.Sprintf("%s LIMIT %d", strings.TrimSuffix(trimmed, ";"), limit)
-	}
+	querySQL = driver.ApplyLimitClause(querySQL, limit)
 
 	rows, err := t.tx.QueryContext(ctx, querySQL)
 	if err != nil {
@@ -327,11 +343,20 @@ func (t *postgresTx) QueryStream(ctx context.Context, querySQL string, limit int
 }
 
 func (s *PostgresSession) BeginTx(ctx context.Context) (driver.TxSession, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return &postgresTx{tx: tx}, nil
+	if err := s.applyActiveSchema(ctx, conn); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return &postgresTx{conn: conn, tx: tx}, nil
 }
 
 func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) (*driver.SchemaMetadata, error) {
@@ -1207,7 +1232,9 @@ func (s *PostgresSession) ApplyUserGrants(ctx context.Context, req driver.UserGr
 	quotedUser := quoteIdentifier(req.User)
 	for _, priv := range req.Privileges {
 		cmd := fmt.Sprintf("GRANT %s ON DATABASE %s TO %s", priv, quoteIdentifier(s.cfg.DatabaseName), quotedUser)
-		_, _ = s.db.ExecContext(ctx, cmd)
+		if _, err := s.db.ExecContext(ctx, cmd); err != nil {
+			return fmt.Errorf("failed to grant %s on database %s to %s: %w", priv, s.cfg.DatabaseName, req.User, err)
+		}
 	}
 	return nil
 }
@@ -1257,7 +1284,9 @@ func (s *PostgresSession) ExecSafeDDL(ctx context.Context, ddl string, lockTimeo
 		return nil, fmt.Errorf("failed to acquire dedicated postgres connection: %w", err)
 	}
 	defer conn.Close()
-	s.applyActiveSchema(ctx, conn)
+	if err := s.applyActiveSchema(ctx, conn); err != nil {
+		return nil, err
+	}
 	defer func() {
 		// ponytail: Reset session lock_timeout to prevent pool state pollution
 		_, _ = conn.ExecContext(context.Background(), "RESET lock_timeout")
@@ -1768,7 +1797,7 @@ func (s *PostgresSession) GetStatementDigest(ctx context.Context, limit int) ([]
 	if err != nil {
 		return []driver.StatementDigestEntry{
 			{
-				Query: "-- pg_stat_statements extension is not installed or enabled in shared_preload_libraries. Run: CREATE EXTENSION IF NOT EXISTS pg_stat_statements;",
+				Query:  "-- pg_stat_statements extension is not installed or enabled in shared_preload_libraries. Run: CREATE EXTENSION IF NOT EXISTS pg_stat_statements;",
 				Digest: "uninstalled",
 			},
 		}, nil
@@ -1829,4 +1858,3 @@ func (s *PostgresSession) ToggleEventStatus(ctx context.Context, name string, en
 func (s *PostgresSession) GetTablePartitions(ctx context.Context, database, table string) ([]driver.PartitionMetadata, error) {
 	return []driver.PartitionMetadata{}, nil
 }
-
