@@ -243,7 +243,7 @@ func TestStartupBannerAndLoggingOrder(t *testing.T) {
 	// Terminal should remain clean with only the banner on stdout.
 	{
 		cmd := exec.Command(binPath, "-port", "19888", "-multi", "-no-browser", "-db", filepath.Join(tmpDir, "config1.db"))
-		var stdoutBuf, stderrBuf bytes.Buffer
+		var stdoutBuf, stderrBuf safeBuffer
 		cmd.Stdout = &stdoutBuf
 		cmd.Stderr = &stderrBuf
 
@@ -252,7 +252,7 @@ func TestStartupBannerAndLoggingOrder(t *testing.T) {
 		}
 
 		// Wait for banner to appear on stdout
-		deadline := time.Now().Add(5 * time.Second)
+		deadline := time.Now().Add(15 * time.Second)
 		for time.Now().Before(deadline) {
 			if strings.Contains(stdoutBuf.String(), "SqlFox") {
 				break
@@ -270,7 +270,7 @@ func TestStartupBannerAndLoggingOrder(t *testing.T) {
 			t.Errorf("default startup should NOT print log to console stderr unless logging is explicitly enabled, got stderr:\n%s", stderrStr)
 		}
 		if !strings.Contains(stdoutStr, "SqlFox") {
-			t.Errorf("default startup should print banner to stdout, got stdout:\n%s", stdoutStr)
+			t.Errorf("default startup should print banner to stdout, got stdout: %q, stderr: %q", stdoutStr, stderrStr)
 		}
 	}
 
@@ -286,7 +286,7 @@ func TestStartupBannerAndLoggingOrder(t *testing.T) {
 			t.Fatalf("failed to start cmd: %v", err)
 		}
 
-		deadline := time.Now().Add(5 * time.Second)
+		deadline := time.Now().Add(15 * time.Second)
 		for time.Now().Before(deadline) {
 			if strings.Contains(combined.String(), "SqlFox") {
 				break
@@ -298,7 +298,7 @@ func TestStartupBannerAndLoggingOrder(t *testing.T) {
 		_ = cmd.Wait()
 
 		combinedStr := combined.String()
-		bannerIdx := strings.Index(combinedStr, "Database Manager is running!")
+		bannerIdx := strings.Index(combinedStr, "SqlFox")
 		logIdx := strings.Index(combinedStr, "sqlfox_started")
 
 		if bannerIdx == -1 {

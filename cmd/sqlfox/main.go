@@ -221,22 +221,17 @@ func main() {
 	}()
 
 	if !isSilent {
-		fmt.Printf("\n🦊 SqlFox %s Database Manager is running!\n", Version)
-		fmt.Printf("   ➜  Local:       %s\n", localURL)
-		if isLAN {
-			if lanIP != "" {
-				fmt.Printf("   ➜  Network:     http://%s:%d (Open from Tablet/LAN)\n", lanIP, actualPort)
-			}
-			fmt.Printf("   ➜  Master PIN:  %s  (Enter this when connecting from Tablet/Phone)\n", masterPassword)
-			if isNewPIN {
-				fmt.Printf("      (New PIN generated and saved to %s)\n", filepath.Join(configDir, "master.key"))
-			}
-		} else {
-			fmt.Printf("      (Localhost only; run with --lan for tablet/remote access)\n")
-		}
-		fmt.Printf("   ➜  Vault:       %s\n", dbPath)
-		fmt.Printf("   ➜  Backups:     %s\n\n", backupDir)
-		fmt.Println("   Press Ctrl+C to shut down gracefully.")
+		cli.RenderServerBanner(os.Stdout, cli.ServerBannerConfig{
+			Version:        Version,
+			LocalURL:       localURL,
+			IsLAN:          isLAN,
+			LANIP:          lanIP,
+			Port:           actualPort,
+			MasterPassword: masterPassword,
+			IsNewPIN:       isNewPIN,
+			VaultPath:      dbPath,
+			BackupDir:      backupDir,
+		})
 	}
 
 	logRes.Logger.Info("sqlfox_started",

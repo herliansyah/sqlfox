@@ -728,6 +728,14 @@ _Avoid_: File garbage collection, cleaner, auto-purge
 A non-destructive validation execution triggered via `sqlfox job check` verifying job specification syntax, vault credentials, network connectivity, and destination filesystem write permissions without performing data mutations.
 _Avoid_: Dry run, linter, config test
 
+**Terminal Startup Banner**:
+An ANSI-accented terminal status card rendered upon interactive daemon launch displaying the fox mascot, active network endpoints (Local / LAN), master PIN security status, vault path, and core database driver availability.
+_Avoid_: Splash screen, CLI intro, boot logo
+
+**CLI Hero Header**:
+A compact stylized ANSI title banner displayed at the head of interactive `sqlfox help` output establishing product identity without obstructing command reference readability.
+_Avoid_: Help splash, console banner
+
 ## Mock Data Generation
 
 **Mock Data Generator**:
