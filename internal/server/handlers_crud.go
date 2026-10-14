@@ -68,11 +68,14 @@ func (s *Server) handleInsertRow(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	_ = sess.UseDatabase(ctx, req.Database)
+	if err := sess.UseDatabase(ctx, req.Database); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	var valStrs []string
 	for _, a := range args {
-		valStrs = append(valStrs, driver.FormatSQLValue(a))
+		valStrs = append(valStrs, driver.FormatSQLValueForDriver(a, sess.DriverName))
 	}
 	auditSQL := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", targetTable, strings.Join(cols, ", "), strings.Join(valStrs, ", "))
 
@@ -128,7 +131,10 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	_ = sess.UseDatabase(ctx, req.Database)
+	if err := sess.UseDatabase(ctx, req.Database); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	var totalAffected int64
 	var execMs int64
@@ -141,7 +147,7 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 		for i, v := range req.PKValues {
 			placeholders[i] = driver.Placeholder(sess.DriverName, i+1)
 			args[i] = v
-			valStrs[i] = driver.FormatSQLValue(v)
+			valStrs[i] = driver.FormatSQLValueForDriver(v, sess.DriverName)
 		}
 
 		sqlQuery := fmt.Sprintf("DELETE FROM %s WHERE %s IN (%s)", targetTable, targetPK, strings.Join(placeholders, ", "))
@@ -161,29 +167,34 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 		}
 	} else if len(req.RowCriterias) > 0 {
 		start := time.Now()
-		limitClause := ""
-		if sess.DriverName == "mysql" {
-			limitClause = " LIMIT 1"
-		}
 		for _, rc := range req.RowCriterias {
 			var whereParts []string
+			var auditWhereParts []string
+			var args []any
+			pIdx := 1
 			for cName, cVal := range rc {
 				if cVal == nil {
 					whereParts = append(whereParts, fmt.Sprintf("%s IS NULL", quoteIdent(cName, sess.DriverName)))
+					auditWhereParts = append(auditWhereParts, fmt.Sprintf("%s IS NULL", quoteIdent(cName, sess.DriverName)))
 				} else {
-					whereParts = append(whereParts, fmt.Sprintf("%s = %s", quoteIdent(cName, sess.DriverName), driver.FormatSQLValue(cVal)))
+					pCrit := driver.Placeholder(sess.DriverName, pIdx)
+					pIdx++
+					args = append(args, cVal)
+					whereParts = append(whereParts, fmt.Sprintf("%s = %s", quoteIdent(cName, sess.DriverName), pCrit))
+					auditWhereParts = append(auditWhereParts, fmt.Sprintf("%s = %s", quoteIdent(cName, sess.DriverName), driver.FormatSQLValueForDriver(cVal, sess.DriverName)))
 				}
 			}
-			delSQL := fmt.Sprintf("DELETE FROM %s WHERE %s%s", targetTable, strings.Join(whereParts, " AND "), limitClause)
+			delSQL := "DELETE FROM " + targetTable + " WHERE " + singleRowWhere(sess.DriverName, targetTable, strings.Join(whereParts, " AND "))
+			auditSQL := "DELETE FROM " + targetTable + " WHERE " + singleRowWhere(sess.DriverName, targetTable, strings.Join(auditWhereParts, " AND "))
 			rowStart := time.Now()
-			res, err := sess.Session.Exec(ctx, delSQL)
+			res, err := sess.Session.Exec(ctx, delSQL, args...)
 			rowDur := time.Since(rowStart).Milliseconds()
 			var rowAffected int64
 			if res != nil {
 				rowAffected = res.RowsAffected
 				totalAffected += res.RowsAffected
 			}
-			sess.RecordAudit(delSQL, "grid_delete", rowDur, rowAffected, err, rowStart)
+			sess.RecordAudit(auditSQL, "grid_delete", rowDur, rowAffected, err, rowStart)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "delete failed: "+err.Error())
 				return
@@ -196,4 +207,21 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 		"rows_affected": totalAffected,
 		"execution_ms":  execMs,
 	})
+}
+
+// singleRowWhere turns a full-row criteria predicate into one that matches at most ONE physical row,
+// so editing/deleting one of several identical rows in a PK-less table never touches its duplicates.
+// MySQL supports UPDATE/DELETE ... LIMIT 1; SQLite and Postgres need a physical row-id subquery.
+func singleRowWhere(driverName, tableRef, where string) string {
+	switch driverName {
+	case "mysql":
+		return where + " LIMIT 1"
+	case "sqlite":
+		// PK-less tables are never WITHOUT ROWID, so rowid always exists here.
+		return fmt.Sprintf("rowid IN (SELECT rowid FROM %s WHERE %s LIMIT 1)", tableRef, where)
+	case "postgres":
+		// tableoid keeps ctid unique across partitions of a partitioned table.
+		return fmt.Sprintf("(tableoid, ctid) IN (SELECT tableoid, ctid FROM %s WHERE %s LIMIT 1)", tableRef, where)
+	}
+	return where
 }

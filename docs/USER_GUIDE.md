@@ -309,7 +309,7 @@ Traditional `OFFSET 1000000` pagination forces database engines to scan and disc
   - `Alt+T` &rarr; `NOW()` / Current timestamp
   - `Alt+D` &rarr; Current date (`YYYY-MM-DD`)
   - `Alt+U` &rarr; Generated RFC4122 `UUID v4`
-- **Tables Without Primary Keys (PK-Less)**: SqlFox generates safe full-row criteria (`WHERE col1 = ? AND col2 = ? AND col3 = ? LIMIT 1`) ensuring reliable updates and deletions without unintended cascade damage.
+- **Tables Without Primary Keys (PK-Less)**: SqlFox generates safe full-row criteria narrowed strictly to at most one physical row (`LIMIT 1` for MySQL, `rowid IN (SELECT rowid ... LIMIT 1)` for SQLite, and `(tableoid, ctid) IN (SELECT tableoid, ctid ... LIMIT 1)` for PostgreSQL), ensuring that updating or deleting one of several identical rows never touches duplicate sister rows.
 
 ### Zero-Dependency CSV Import & Column Mapping
 1. Click **Import CSV** in any open table view.
@@ -389,6 +389,9 @@ SqlFox parses SQL statements into an Abstract Syntax Tree (AST) before sending t
   - Unqualified `UPDATE tbl SET ...` (without `WHERE` clause)
   - Mass mutations affecting unexpected row thresholds
 - **Challenge Modal**: Displays the intercepted SQL, explains the risk, and requires the DBA to explicitly type the target table name before execution can proceed.
+- **Compound Multi-Statement Inspection**: Every statement in a batch is inspected individually. Smuggled destructive operations (e.g. `SELECT 1; DROP TABLE victim`) are detected and intercepted, and batches containing multiple challenge-requiring statements are blocked.
+- **Lexical Comment & Literal Sanitization**: Blanks out line/block comments and string literals before running regex checks, preventing keyword cloaking.
+- **CTE Preprocessing**: Strips leading `WITH ... AS (...)` clauses to inspect the root DML/DDL command under Safety Guard.
 
 ### Pre-DDL Smart Tiered Backups
 Before running dangerous `ALTER TABLE` or `DROP TABLE` statements:
@@ -492,8 +495,8 @@ Access via **📦 DB Tools &rarr; 🔄 Structure Sync**:
 3. Generates a safe, order-aware DDL migration script with execution preview.
 
 ### Cross-Connection Data Transfer & Keyset Row Sync
-- **Data Transfer**: Stream entire tables directly from one database to another across different hosts, cloud providers, or engines with a strictly bounded `<50MB` memory buffer.
-- **Row-Level Data Sync**: Reconciles table data row-by-row using keyset delta hashing. Detects `INSERT`, `UPDATE`, and `DELETE` deltas and applies synchronization safely without full-table locks.
+- **Data Transfer**: Stream entire tables directly from one database to another across different hosts, cloud providers, or engines with a strictly bounded `<50MB` memory buffer. If `truncate_target` is enabled and a transfer fails, atomic transaction rollback guarantees original target rows are preserved.
+- **Row-Level Data Sync**: Reconciles table data row-by-row using keyset delta hashing. Supports both single and composite primary keys (delimited by unit separator `\x1f`), maps source-to-target column positions, normalizes cross-engine values (`syncValueKey`), and enforces a 10,000-row comparison ceiling to protect daemon memory.
 
 ### Headless CLI Suite (`run`, `transfer`, `advise`)
 SqlFox includes powerful headless commands for automation scripts, cron jobs, and CI/CD pipelines:

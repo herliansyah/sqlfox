@@ -283,3 +283,117 @@ func TestServer_PostgresCRUDPlaceholders(t *testing.T) {
 	}
 }
 
+func TestServer_CellEditAndCriteriaDelete_ParameterizedSecurity(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "sqlfox-sec-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	vaultDB := filepath.Join(tempDir, "config.db")
+	targetDB := filepath.Join(tempDir, "target.db")
+
+	v, err := vault.OpenVault(vaultDB, "test-master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	srv := NewServer(v, nil, filepath.Join(tempDir, "backups"), "test-master")
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	client := ts.Client()
+
+	// 1. Create SQLite connection & session
+	connRec := vault.ConnectionRecord{
+		Name:         "Sec SQLite Test",
+		Environment:  "Development",
+		Driver:       "sqlite",
+		DatabaseName: targetDB,
+	}
+	body, _ := json.Marshal(connRec)
+	resp, err := client.Post(ts.URL+"/api/connections", "application/json", bytes.NewReader(body))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("create connection failed: %v", err)
+	}
+	var conn vault.ConnectionRecord
+	_ = json.NewDecoder(resp.Body).Decode(&conn)
+	resp.Body.Close()
+
+	resp, err = client.Post(fmt.Sprintf("%s/api/session/connect/%s", ts.URL, conn.ID), "application/json", nil)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("connect session failed: %v", err)
+	}
+	resp.Body.Close()
+
+	// 2. Create test table and insert initial rows
+	execSQL := func(sql string) {
+		b, _ := json.Marshal(map[string]any{"sql": sql})
+		r, e := client.Post(fmt.Sprintf("%s/api/session/%s/execute", ts.URL, conn.ID), "application/json", bytes.NewReader(b))
+		if e != nil || r.StatusCode != http.StatusOK {
+			t.Fatalf("execute failed: %s: %v", sql, e)
+		}
+		r.Body.Close()
+	}
+	execSQL("CREATE TABLE files (id INTEGER PRIMARY KEY, path TEXT, notes TEXT);")
+	execSQL("INSERT INTO files (id, path, notes) VALUES (1, 'C:\\old\\', 'note 1'), (2, 'D:\\docs\\', 'note 2');")
+
+	// 3. Test cell-edit with trailing backslash and special chars
+	editPayload := map[string]any{
+		"table":     "files",
+		"column":    "path",
+		"value":     `C:\new\folder\`,
+		"pk_column": "id",
+		"pk_value":  1,
+	}
+	b, _ := json.Marshal(editPayload)
+	resp, err = client.Post(fmt.Sprintf("%s/api/session/%s/cell-edit", ts.URL, conn.ID), "application/json", bytes.NewReader(b))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("cell-edit with trailing backslash failed: %v", err)
+	}
+	resp.Body.Close()
+
+	// 4. Test cell-edit with SQL injection payload
+	sqliPayload := map[string]any{
+		"table":     "files",
+		"column":    "notes",
+		"value":     `\' OR 1=1 -- `,
+		"pk_column": "id",
+		"pk_value":  1,
+	}
+	b, _ = json.Marshal(sqliPayload)
+	resp, err = client.Post(fmt.Sprintf("%s/api/session/%s/cell-edit", ts.URL, conn.ID), "application/json", bytes.NewReader(b))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("cell-edit with SQLi string failed: %v", err)
+	}
+	resp.Body.Close()
+
+	// 5. Test delete-rows by criteria with trailing backslash
+	delPayload := map[string]any{
+		"table": "files",
+		"row_criterias": []map[string]any{
+			{"id": 1, "path": `C:\new\folder\`},
+		},
+	}
+	b, _ = json.Marshal(delPayload)
+	resp, err = client.Post(fmt.Sprintf("%s/api/session/%s/delete-rows", ts.URL, conn.ID), "application/json", bytes.NewReader(b))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("delete-rows by criteria with backslash failed: %v", err)
+	}
+	resp.Body.Close()
+
+	// Verify row 1 was deleted and row 2 was NOT deleted
+	resp, err = client.Get(fmt.Sprintf("%s/api/session/%s/table/files/rows", ts.URL, conn.ID))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("get rows failed: %v", err)
+	}
+	var resData struct {
+		Rows [][]any `json:"rows"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&resData)
+	resp.Body.Close()
+	if len(resData.Rows) != 1 {
+		t.Fatalf("expected 1 remaining row, got %d", len(resData.Rows))
+	}
+}

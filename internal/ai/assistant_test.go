@@ -161,4 +161,3 @@ func TestAssistant_OperationalNotesInjection(t *testing.T) {
 		t.Fatalf("expected tagged database object in system prompt, got: %s", systemPrompt)
 	}
 }
-

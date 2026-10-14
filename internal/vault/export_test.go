@@ -92,4 +92,3 @@ func TestVault_ExportImport(t *testing.T) {
 		t.Fatal("expected imported snippets in vault2, got 0")
 	}
 }
-

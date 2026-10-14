@@ -16,8 +16,7 @@ Data editing within database data grids often presents challenging edge cases:
 When mutating rows in tables lacking a detected primary key:
 - The frontend extracts the complete prior state of the row as `row_criteria: Record<string, any>`.
 - The backend (`internal/server/handlers_crud.go`) constructs a deterministic parameterized WHERE predicate matching all non-null columns (`WHERE col1 = ? AND col2 = ? ... LIMIT 1`).
-- For SQL engines supporting `LIMIT 1` on `UPDATE`/`DELETE` (MySQL, SQLite), the limit is strictly appended.
-- Affected row counts are verified to be exactly 1; any ambiguity (0 or >1 affected rows) results in transaction rollback and error notification.
+- The predicate is narrowed to exactly one physical row (`singleRowWhere`): MySQL appends `LIMIT 1`; SQLite uses `rowid IN (SELECT rowid ... LIMIT 1)`; PostgreSQL uses `(tableoid, ctid) IN (SELECT tableoid, ctid ... LIMIT 1)` (`tableoid` keeps it correct on partitioned tables). Editing or deleting one of several identical rows never touches its duplicates.
 
 ### 2. Multi-Driver Dynamic PK Introspection Fallback
 To prevent false negatives where primary keys exist on the server but were omitted from cached metadata:

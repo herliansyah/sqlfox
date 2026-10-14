@@ -55,4 +55,13 @@ func TestDetectRedundantIndexes(t *testing.T) {
 	if !foundDup {
 		t.Errorf("failed to detect duplicate index idx_email_dup")
 	}
+
+	// UNIQUE index must never be the one dropped, regardless of name order.
+	uniq := DetectRedundantIndexes("mysql", "db", []TableMetadata{{Name: "t", Indexes: []IndexMetadata{
+		{Name: "a_dup", Columns: []string{"email"}},
+		{Name: "z_uniq", Columns: []string{"email"}, IsUnique: true},
+	}}})
+	if len(uniq) != 1 || uniq[0].RedundantIndex != "a_dup" {
+		t.Errorf("expected non-unique a_dup to be redundant, got %+v", uniq)
+	}
 }

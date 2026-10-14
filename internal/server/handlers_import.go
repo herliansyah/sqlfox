@@ -97,7 +97,10 @@ func (s *Server) handleImportCSV(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if dbName != "" && sess.Session != nil {
-		_ = sess.Session.SelectDatabase(ctx, dbName)
+		if err := sess.Session.SelectDatabase(ctx, dbName); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	importStart := time.Now()

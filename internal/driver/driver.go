@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 var (
@@ -222,38 +224,38 @@ type RowStream interface {
 
 // ExecResult contains the outcome of an Exec statement.
 type ExecResult struct {
-	RowsAffected int64         `json:"rows_affected"`
-	LastInsertID int64         `json:"last_insert_id"`
-	ExecutionMs  int64         `json:"execution_ms"`
-	Message      string        `json:"message"`
+	RowsAffected int64  `json:"rows_affected"`
+	LastInsertID int64  `json:"last_insert_id"`
+	ExecutionMs  int64  `json:"execution_ms"`
+	Message      string `json:"message"`
 }
 
 // TableEstimate provides fast schema size estimations for Safety Guard decisions.
 type TableEstimate struct {
-	RowCount int64 `json:"row_count"`
+	RowCount  int64 `json:"row_count"`
 	SizeBytes int64 `json:"size_bytes"`
 }
 
 // ExplainPlan represents query execution plan items.
 type ExplainPlan struct {
-	RawJSON string         `json:"raw_json"`
-	Rows    []ExplainRow   `json:"rows"`
-	Advisor any            `json:"advisor,omitempty"`
+	RawJSON string       `json:"raw_json"`
+	Rows    []ExplainRow `json:"rows"`
+	Advisor any          `json:"advisor,omitempty"`
 }
 
 type ExplainRow struct {
-	ID           int    `json:"id"`
-	SelectType   string `json:"select_type"`
-	Table        string `json:"table"`
-	Partitions   string `json:"partitions,omitempty"`
-	Type         string `json:"type"` // ALL, index, range, ref, eq_ref, const
-	PossibleKeys string `json:"possible_keys"`
-	Key          string `json:"key"`
-	KeyLen       string `json:"key_len"`
-	Ref          string `json:"ref"`
-	Rows         int64  `json:"rows"`
+	ID           int     `json:"id"`
+	SelectType   string  `json:"select_type"`
+	Table        string  `json:"table"`
+	Partitions   string  `json:"partitions,omitempty"`
+	Type         string  `json:"type"` // ALL, index, range, ref, eq_ref, const
+	PossibleKeys string  `json:"possible_keys"`
+	Key          string  `json:"key"`
+	KeyLen       string  `json:"key_len"`
+	Ref          string  `json:"ref"`
+	Rows         int64   `json:"rows"`
 	Filtered     float64 `json:"filtered"`
-	Extra        string `json:"extra"`
+	Extra        string  `json:"extra"`
 }
 
 // ScanExplainRows scans rows from an EXPLAIN query dynamically mapping column names.
@@ -468,12 +470,12 @@ type UserGrantRequest struct {
 
 // Schema metadata structures
 type SchemaMetadata struct {
-	DatabaseName string              `json:"database_name"`
-	Databases    []string            `json:"databases,omitempty"`
-	Tables       []TableMetadata     `json:"tables"`
-	Triggers     []TriggerMetadata   `json:"triggers,omitempty"`
-	Routines     []RoutineMetadata   `json:"routines,omitempty"`
-	Events       []EventMetadata     `json:"events,omitempty"`
+	DatabaseName string            `json:"database_name"`
+	Databases    []string          `json:"databases,omitempty"`
+	Tables       []TableMetadata   `json:"tables"`
+	Triggers     []TriggerMetadata `json:"triggers,omitempty"`
+	Routines     []RoutineMetadata `json:"routines,omitempty"`
+	Events       []EventMetadata   `json:"events,omitempty"`
 }
 
 type TriggerMetadata struct {
@@ -486,11 +488,11 @@ type TriggerMetadata struct {
 
 // RoutineMetadata represents a Stored Procedure or Stored Function.
 type RoutineMetadata struct {
-	Name         string             `json:"name"`
-	Type         string             `json:"type"` // "PROCEDURE" or "FUNCTION"
-	DataType     string             `json:"data_type,omitempty"` // return type for functions
-	Definition   string             `json:"definition,omitempty"`
-	Parameters   []RoutineParameter `json:"parameters,omitempty"`
+	Name       string             `json:"name"`
+	Type       string             `json:"type"`                // "PROCEDURE" or "FUNCTION"
+	DataType   string             `json:"data_type,omitempty"` // return type for functions
+	Definition string             `json:"definition,omitempty"`
+	Parameters []RoutineParameter `json:"parameters,omitempty"`
 }
 
 // RoutineParameter describes an IN, OUT, or INOUT parameter of a routine.
@@ -512,13 +514,13 @@ type EventMetadata struct {
 
 // PartitionMetadata represents physical storage and row distribution of a table partition.
 type PartitionMetadata struct {
-	Name         string `json:"name"`
-	Method       string `json:"method"`
-	Expression   string `json:"expression,omitempty"`
-	Description  string `json:"description,omitempty"` // partition range/list values
-	TableRows    int64  `json:"table_rows"`
-	DataLength   int64  `json:"data_length"`
-	IndexLength  int64  `json:"index_length"`
+	Name        string `json:"name"`
+	Method      string `json:"method"`
+	Expression  string `json:"expression,omitempty"`
+	Description string `json:"description,omitempty"` // partition range/list values
+	TableRows   int64  `json:"table_rows"`
+	DataLength  int64  `json:"data_length"`
+	IndexLength int64  `json:"index_length"`
 }
 
 type TableMetadata struct {
@@ -547,12 +549,12 @@ type IndexMetadata struct {
 }
 
 type ForeignKeyMetadata struct {
-	Name              string `json:"name"`
-	Column            string `json:"column"`
-	ReferencedTable   string `json:"referenced_table"`
-	ReferencedColumn  string `json:"referenced_column"`
-	OnDelete          string `json:"on_delete"`
-	OnUpdate          string `json:"on_update"`
+	Name             string `json:"name"`
+	Column           string `json:"column"`
+	ReferencedTable  string `json:"referenced_table"`
+	ReferencedColumn string `json:"referenced_column"`
+	OnDelete         string `json:"on_delete"`
+	OnUpdate         string `json:"on_update"`
 }
 
 var drivers = make(map[string]Driver)
@@ -660,20 +662,20 @@ func GenerateOSCCommand(tool, host string, port int, user, database, table, alte
 
 // ClusterHealthReport describes database cluster synchronization, topology, and performance diagnostics.
 type ClusterHealthReport struct {
-	TopologyType        string            `json:"topology_type"` // "galera", "replication", "standalone"
-	ClusterName         string            `json:"cluster_name,omitempty"`
-	ClusterStatus       string            `json:"cluster_status,omitempty"` // "Primary", "Non-Primary", etc.
-	ClusterSize         int               `json:"cluster_size,omitempty"`
-	LocalNodeName       string            `json:"local_node_name,omitempty"`
-	LocalNodeAddress    string            `json:"local_node_address,omitempty"`
-	LocalNodeState      string            `json:"local_node_state,omitempty"` // "Synced", "Donor", "Joiner", etc.
-	FlowControlPaused   float64           `json:"flow_control_paused"`        // fraction paused (0.0 to 1.0)
-	FlowControlSent     int64             `json:"flow_control_sent"`
-	FlowControlRecv     int64             `json:"flow_control_recv"`
-	BottleneckDiagnosis string            `json:"bottleneck_diagnosis,omitempty"`
-	BottleneckSeverity  string            `json:"bottleneck_severity,omitempty"` // "ok", "warning", "critical"
-	SlowestNode         string            `json:"slowest_node,omitempty"`
-	Nodes               []ClusterNodeInfo `json:"nodes,omitempty"`
+	TopologyType        string               `json:"topology_type"` // "galera", "replication", "standalone"
+	ClusterName         string               `json:"cluster_name,omitempty"`
+	ClusterStatus       string               `json:"cluster_status,omitempty"` // "Primary", "Non-Primary", etc.
+	ClusterSize         int                  `json:"cluster_size,omitempty"`
+	LocalNodeName       string               `json:"local_node_name,omitempty"`
+	LocalNodeAddress    string               `json:"local_node_address,omitempty"`
+	LocalNodeState      string               `json:"local_node_state,omitempty"` // "Synced", "Donor", "Joiner", etc.
+	FlowControlPaused   float64              `json:"flow_control_paused"`        // fraction paused (0.0 to 1.0)
+	FlowControlSent     int64                `json:"flow_control_sent"`
+	FlowControlRecv     int64                `json:"flow_control_recv"`
+	BottleneckDiagnosis string               `json:"bottleneck_diagnosis,omitempty"`
+	BottleneckSeverity  string               `json:"bottleneck_severity,omitempty"` // "ok", "warning", "critical"
+	SlowestNode         string               `json:"slowest_node,omitempty"`
+	Nodes               []ClusterNodeInfo    `json:"nodes,omitempty"`
 	Replication         *ReplicationInfo     `json:"replication,omitempty"`
 	TriMetric           TriMetricStats       `json:"tri_metric"`
 	TuningChecks        []ClusterTuningCheck `json:"tuning_checks,omitempty"`
@@ -694,15 +696,15 @@ type ClusterTuningCheck struct {
 type ServerVariable struct {
 	Name             string `json:"name"`
 	Value            string `json:"value"`
-	Scope            string `json:"scope,omitempty"`      // "Global", "Session", "Both"
-	IsDynamic        bool   `json:"is_dynamic"`           // can be changed live without restart
-	Category         string `json:"category"`             // "Cluster & WSREP", "Memory & Buffer", "Concurrency & Lock", "IO & Durability", "Optimizer & Performance", "General"
+	Scope            string `json:"scope,omitempty"` // "Global", "Session", "Both"
+	IsDynamic        bool   `json:"is_dynamic"`      // can be changed live without restart
+	Category         string `json:"category"`        // "Cluster & WSREP", "Memory & Buffer", "Concurrency & Lock", "IO & Durability", "Optimizer & Performance", "General"
 	Description      string `json:"description,omitempty"`
-	ImpactLow        string `json:"impact_low,omitempty"`        // what happens if too low
-	ImpactHigh       string `json:"impact_high,omitempty"`       // what happens if too high
-	Recommendation   string `json:"recommendation,omitempty"`    // baseline formula or best-practice value
-	SuggestedValue   string `json:"suggested_value,omitempty"`   // concrete recommended value
-	Severity         string `json:"severity"`                    // "optimal", "warning", "critical", "info"
+	ImpactLow        string `json:"impact_low,omitempty"`      // what happens if too low
+	ImpactHigh       string `json:"impact_high,omitempty"`     // what happens if too high
+	Recommendation   string `json:"recommendation,omitempty"`  // baseline formula or best-practice value
+	SuggestedValue   string `json:"suggested_value,omitempty"` // concrete recommended value
+	Severity         string `json:"severity"`                  // "optimal", "warning", "critical", "info"
 	IsCurated        bool   `json:"is_curated"`
 	MyCnfSnippet     string `json:"my_cnf_snippet,omitempty"`
 	SetGlobalSnippet string `json:"set_global_snippet,omitempty"`
@@ -733,47 +735,47 @@ type ClusterNodeInfo struct {
 
 // DeadlockReport contains post-mortem analysis of the latest detected InnoDB deadlock.
 type DeadlockReport struct {
-	HasDeadlock     bool                  `json:"has_deadlock"`
-	DetectedAt      string                `json:"detected_at,omitempty"`
-	VictimTxID      string                `json:"victim_tx_id,omitempty"`
-	VictimThreadID  int64                 `json:"victim_thread_id,omitempty"`
-	Summary         string                `json:"summary"`
-	Transactions    []DeadlockTransaction `json:"transactions"`
-	RawSection      string                `json:"raw_section,omitempty"`
+	HasDeadlock    bool                  `json:"has_deadlock"`
+	DetectedAt     string                `json:"detected_at,omitempty"`
+	VictimTxID     string                `json:"victim_tx_id,omitempty"`
+	VictimThreadID int64                 `json:"victim_thread_id,omitempty"`
+	Summary        string                `json:"summary"`
+	Transactions   []DeadlockTransaction `json:"transactions"`
+	RawSection     string                `json:"raw_section,omitempty"`
 }
 
 // DeadlockTransaction represents one of the conflicting transactions in an InnoDB deadlock.
 type DeadlockTransaction struct {
-	Index           int    `json:"index"` // 1 or 2
-	TxID            string `json:"tx_id"`
-	ThreadID        int64  `json:"thread_id"`
-	Query           string `json:"query"`
-	LockMode        string `json:"lock_mode"`
-	LockHeld        string `json:"lock_held,omitempty"`
-	LockWaited      string `json:"lock_waited,omitempty"`
-	AppUser         string `json:"app_user,omitempty"`
-	Host            string `json:"host,omitempty"`
-	IsVictim        bool   `json:"is_victim"`
-	ActiveSeconds   int64  `json:"active_seconds"`
-	UndoLogEntries  int64  `json:"undo_log_entries"`
+	Index          int    `json:"index"` // 1 or 2
+	TxID           string `json:"tx_id"`
+	ThreadID       int64  `json:"thread_id"`
+	Query          string `json:"query"`
+	LockMode       string `json:"lock_mode"`
+	LockHeld       string `json:"lock_held,omitempty"`
+	LockWaited     string `json:"lock_waited,omitempty"`
+	AppUser        string `json:"app_user,omitempty"`
+	Host           string `json:"host,omitempty"`
+	IsVictim       bool   `json:"is_victim"`
+	ActiveSeconds  int64  `json:"active_seconds"`
+	UndoLogEntries int64  `json:"undo_log_entries"`
 }
 
 // StatementDigestEntry aggregates query performance statistics from sys/performance_schema.
 type StatementDigestEntry struct {
-	Digest          string  `json:"digest"`
-	Query           string  `json:"query"`
-	ExecCount       int64   `json:"exec_count"`
-	TotalLatencyMs  float64 `json:"total_latency_ms"`
-	AvgLatencyMs    float64 `json:"avg_latency_ms"`
-	MaxLatencyMs    float64 `json:"max_latency_ms"`
-	LockTimeMs      float64 `json:"lock_time_ms"`
-	RowsSent        int64   `json:"rows_sent"`
-	RowsExamined    int64   `json:"rows_examined"`
-	RowsAffected    int64   `json:"rows_affected"`
-	FullScan        bool    `json:"full_scan"`
-	NoIndexUsed     int64   `json:"no_index_used"`
-	FirstSeen       string  `json:"first_seen,omitempty"`
-	LastSeen        string  `json:"last_seen,omitempty"`
+	Digest         string  `json:"digest"`
+	Query          string  `json:"query"`
+	ExecCount      int64   `json:"exec_count"`
+	TotalLatencyMs float64 `json:"total_latency_ms"`
+	AvgLatencyMs   float64 `json:"avg_latency_ms"`
+	MaxLatencyMs   float64 `json:"max_latency_ms"`
+	LockTimeMs     float64 `json:"lock_time_ms"`
+	RowsSent       int64   `json:"rows_sent"`
+	RowsExamined   int64   `json:"rows_examined"`
+	RowsAffected   int64   `json:"rows_affected"`
+	FullScan       bool    `json:"full_scan"`
+	NoIndexUsed    int64   `json:"no_index_used"`
+	FirstSeen      string  `json:"first_seen,omitempty"`
+	LastSeen       string  `json:"last_seen,omitempty"`
 }
 
 // ReplicationInfo holds replication metrics for MySQL source/replica setups.
@@ -822,6 +824,25 @@ var reLimitClause = regexp.MustCompile(`(?i)\bLIMIT\s+\d+`)
 // HasLimitClause reports whether the SQL statement contains an explicit LIMIT clause.
 func HasLimitClause(sql string) bool {
 	return reLimitClause.MatchString(sql)
+}
+
+// ApplyLimitClause appends a LIMIT clause to SELECT queries if not already present and limit > 0.
+// It strips leading comments before detecting the SELECT keyword, and inserts a newline
+// before LIMIT so that trailing single-line comments (-- comment or # comment) do not swallow the LIMIT clause.
+func ApplyLimitClause(querySQL string, limit int) string {
+	if limit <= 0 {
+		return querySQL
+	}
+	trimmed := strings.TrimSpace(querySQL)
+	cleanUpper := strings.ToUpper(StripLeadingComments(trimmed))
+	if strings.HasPrefix(cleanUpper, "SELECT") && !HasLimitClause(cleanUpper) {
+		// Drop a trailing terminator followed only by comments/whitespace (e.g. "SELECT 1; -- note")
+		if i := strings.LastIndex(trimmed, ";"); i >= 0 && !HasExecutableSQL(trimmed[i+1:], true) {
+			trimmed = strings.TrimSpace(trimmed[:i])
+		}
+		return fmt.Sprintf("%s\nLIMIT %d", trimmed, limit)
+	}
+	return querySQL
 }
 
 // StripLeadingComments removes leading whitespace and SQL comments (-- , #, and /* ... */).
@@ -881,9 +902,150 @@ func IsQueryStatement(sql string) bool {
 	return false
 }
 
-// FormatSQLValue formats a Go value into a valid SQL literal for dumps, inserts, and filters.
-// ponytail: Uses 'f' formatting to avoid scientific notation on large numeric IDs and metrics.
-func FormatSQLValue(val any) string {
+// SplitWithDelimiters honors MySQL client `DELIMITER xx` lines (used by mysqldump and routine scripts
+// so BEGIN ... END bodies keep their inner semicolons). Segments under the default ";" delimiter go
+// through split; segments under a custom delimiter are cut at each occurrence of it.
+// ponytail: custom-delimiter segments are cut textually (not quote-aware), same as the mysql client's
+// common usage; upgrade path: teach the token-aware splitters a variable terminator.
+func SplitWithDelimiters(sqlText string, isMySQL bool, split func(string) []string) []string {
+	delim := ";"
+	var out []string
+	var seg strings.Builder
+	flush := func() {
+		text := seg.String()
+		seg.Reset()
+		if delim == ";" {
+			out = append(out, split(text)...)
+			return
+		}
+		for _, part := range strings.Split(text, delim) {
+			if part = strings.TrimSpace(part); part != "" && HasExecutableSQL(part, isMySQL) {
+				out = append(out, part)
+			}
+		}
+	}
+	for _, line := range strings.SplitAfter(sqlText, "\n") {
+		t := strings.TrimSpace(line)
+		if len(t) > len("DELIMITER ") && strings.EqualFold(t[:len("DELIMITER ")], "DELIMITER ") {
+			flush()
+			delim = strings.Fields(t[len("DELIMITER "):])[0]
+			continue
+		}
+		seg.WriteString(line)
+	}
+	flush()
+	return out
+}
+
+// HasExecutableSQL checks whether a SQL statement string contains executable tokens
+// (i.e. not entirely comments, whitespace, or empty semicolons).
+func HasExecutableSQL(stmt string, isMySQL bool) bool {
+	inSingleQuote := false
+	inDoubleQuote := false
+	inBacktick := false
+	inBlockComment := false
+	inLineComment := false
+
+	runes := []rune(stmt)
+	n := len(runes)
+	tokenCount := 0
+
+	for i := 0; i < n; i++ {
+		r := runes[i]
+		if inLineComment {
+			if r == '\n' {
+				inLineComment = false
+			}
+			continue
+		}
+		if inBlockComment {
+			if r == '*' && i+1 < n && runes[i+1] == '/' {
+				inBlockComment = false
+				i++
+			}
+			continue
+		}
+		if !inSingleQuote && !inDoubleQuote && !inBacktick {
+			if r == '-' && i+1 < n && runes[i+1] == '-' {
+				inLineComment = true
+				i++
+				continue
+			}
+			if isMySQL && r == '#' {
+				inLineComment = true
+				continue
+			}
+			if r == '/' && i+1 < n && runes[i+1] == '*' {
+				if isMySQL && i+2 < n && runes[i+2] == '!' {
+					// In MySQL, /*! ... */ is a versioned executable comment containing SQL
+					tokenCount++
+					i += 2
+					continue
+				}
+				inBlockComment = true
+				i++
+				continue
+			}
+		}
+		if r == '\'' && !inDoubleQuote && !inBacktick {
+			inSingleQuote = !inSingleQuote
+			tokenCount++
+			continue
+		}
+		if r == '"' && !inSingleQuote && !inBacktick {
+			inDoubleQuote = !inDoubleQuote
+			tokenCount++
+			continue
+		}
+		if r == '`' && !inSingleQuote && !inDoubleQuote {
+			inBacktick = !inBacktick
+			tokenCount++
+			continue
+		}
+		if !unicode.IsSpace(r) && r != ';' {
+			tokenCount++
+		}
+	}
+	return tokenCount > 0
+}
+
+// EscapeSQLString escapes a string literal for the specified SQL driver dialect.
+// ponytail: MySQL/MariaDB requires escaping backslashes and control chars; standard SQL doubles single quotes.
+func EscapeSQLString(s string, driverName string) string {
+	switch strings.ToLower(driverName) {
+	case "mysql", "mariadb":
+		var sb strings.Builder
+		sb.WriteByte('\'')
+		for i := 0; i < len(s); i++ {
+			b := s[i]
+			switch b {
+			case 0:
+				sb.WriteString(`\0`)
+			case '\n':
+				sb.WriteString(`\n`)
+			case '\r':
+				sb.WriteString(`\r`)
+			case '\\':
+				sb.WriteString(`\\`)
+			case '\'':
+				sb.WriteString(`\'`)
+			case '"':
+				sb.WriteString(`\"`)
+			case '\032':
+				sb.WriteString(`\Z`)
+			default:
+				sb.WriteByte(b)
+			}
+		}
+		sb.WriteByte('\'')
+		return sb.String()
+	default:
+		return fmt.Sprintf("'%s'", strings.ReplaceAll(s, "'", "''"))
+	}
+}
+
+// FormatSQLValueForDriver formats a Go value into a valid SQL literal for a specific driver dialect.
+func FormatSQLValueForDriver(val any, driverName string) string {
 	if val == nil {
 		return "NULL"
 	}
@@ -909,12 +1071,33 @@ func FormatSQLValue(val any) string {
 	case json.Number:
 		return v.String()
 	case []byte:
-		return fmt.Sprintf("'%s'", strings.ReplaceAll(string(v), "'", "''"))
+		return hexLiteral(v, driverName)
 	case string:
-		return fmt.Sprintf("'%s'", strings.ReplaceAll(v, "'", "''"))
+		// Streamed rows carry binary columns as Go strings; NUL or non-UTF-8 bytes cannot
+		// round-trip through a quoted literal, so emit them as a binary hex literal.
+		if strings.IndexByte(v, 0) >= 0 || !utf8.ValidString(v) {
+			return hexLiteral([]byte(v), driverName)
+		}
+		return EscapeSQLString(v, driverName)
 	default:
-		return fmt.Sprintf("'%s'", strings.ReplaceAll(fmt.Sprintf("%v", v), "'", "''"))
+		return EscapeSQLString(fmt.Sprintf("%v", v), driverName)
 	}
+}
+
+// hexLiteral renders raw bytes as a dialect-correct binary literal (PostgreSQL X” is a bit string, not bytea).
+func hexLiteral(b []byte, driverName string) string {
+	switch strings.ToLower(driverName) {
+	case "postgres", "postgresql", "pgx":
+		return fmt.Sprintf("'\\x%x'::bytea", b)
+	default:
+		return fmt.Sprintf("X'%X'", b)
+	}
+}
+
+// FormatSQLValue formats a Go value into a valid SQL literal for dumps, inserts, and filters.
+// ponytail: Uses 'f' formatting to avoid scientific notation on large numeric IDs and metrics.
+func FormatSQLValue(val any) string {
+	return FormatSQLValueForDriver(val, "")
 }
 
 // TopologicalSortTables orders tables so that referenced parent tables appear before dependent child tables.

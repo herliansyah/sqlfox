@@ -10,7 +10,6 @@ import (
 
 	"sqlfox/internal/advisor"
 	"sqlfox/internal/driver"
-	"sqlfox/internal/safety"
 )
 
 func (s *Server) handleInspectQuery(w http.ResponseWriter, r *http.Request) {
@@ -29,7 +28,11 @@ func (s *Server) handleInspectQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res := safety.Inspect(req.SQL, sess.Environment)
+	res, _, err := inspectAllStatements(req.SQL, sess.Environment, sess.DriverName)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, res)
 }
 
@@ -54,7 +57,10 @@ func (s *Server) handleExplainQuery(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if req.Database != "" {
-		_ = sess.Session.SelectDatabase(ctx, req.Database)
+		if err := sess.Session.SelectDatabase(ctx, req.Database); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	plan, err := sess.Session.Explain(ctx, req.SQL)
@@ -108,7 +114,10 @@ func (s *Server) handleAdviseQuery(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if req.Database != "" {
-		_ = sess.Session.SelectDatabase(ctx, req.Database)
+		if err := sess.Session.SelectDatabase(ctx, req.Database); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	tblsMap := make(map[string]driver.TableMetadata)

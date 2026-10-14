@@ -48,11 +48,11 @@ type AdviceResult struct {
 
 // PredicateAnalysis holds categorized columns according to the ESR rule.
 type PredicateAnalysis struct {
-	Table           string
-	EqualityCols    []string
-	SortCols        []string
-	RangeCols       []string
-	ReferencedCols  []string
+	Table          string
+	EqualityCols   []string
+	SortCols       []string
+	RangeCols      []string
+	ReferencedCols []string
 }
 
 // Advise analyzes a SQL statement and returns heuristic index recommendations and bloat warnings.

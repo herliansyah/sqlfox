@@ -473,4 +473,3 @@ func (s *Server) handleApplyUserGrants(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
-

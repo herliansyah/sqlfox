@@ -277,9 +277,9 @@ func TestServer_API_Lifecycle(t *testing.T) {
 		t.Fatalf("POST /api/session/explain failed: %v, status: %d", err, resp.StatusCode)
 	}
 	var explainResult struct {
-		RawJSON string               `json:"raw_json"`
+		RawJSON string              `json:"raw_json"`
 		Rows    []driver.ExplainRow `json:"rows"`
-		Advisor any                  `json:"advisor"`
+		Advisor any                 `json:"advisor"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&explainResult); err != nil {
 		t.Fatalf("failed to decode explain response: %v", err)
@@ -801,7 +801,3 @@ func TestServer_StaticBrandAssets(t *testing.T) {
 		resp.Body.Close()
 	}
 }
-
-
-
-

@@ -32,16 +32,16 @@ const validationToken = "sqlfox_master_valid_token"
 
 // ConnectionRecord represents a stored database connection configuration.
 type ConnectionRecord struct {
-	ID                   string    `json:"id"`
-	Name                 string    `json:"name"`
-	Environment          string    `json:"environment"` // Production, Staging, Development
-	Driver               string    `json:"driver"`      // mysql, sqlite
-	Host                 string    `json:"host"`
-	Port                 int       `json:"port"`
-	DatabaseName         string    `json:"database_name"`
-	User                 string    `json:"user"`
-	Password             string    `json:"password,omitempty"` // Plaintext when in-memory
-	EncryptedPassword    string    `json:"-"`
+	ID                string    `json:"id"`
+	Name              string    `json:"name"`
+	Environment       string    `json:"environment"` // Production, Staging, Development
+	Driver            string    `json:"driver"`      // mysql, sqlite
+	Host              string    `json:"host"`
+	Port              int       `json:"port"`
+	DatabaseName      string    `json:"database_name"`
+	User              string    `json:"user"`
+	Password          string    `json:"password,omitempty"` // Plaintext when in-memory
+	EncryptedPassword string    `json:"-"`
 	UseSSL            bool      `json:"use_ssl"`
 	SSLCA             string    `json:"ssl_ca,omitempty"`
 	SSLCert           string    `json:"ssl_cert,omitempty"`
@@ -285,7 +285,6 @@ func seedDefaultSnippets(db *sql.DB) error {
 	return nil
 }
 
-
 func getMeta(db *sql.DB) ([]byte, string, error) {
 	var saltB64, checkCipher string
 	row := db.QueryRow(`SELECT value FROM meta WHERE key = 'salt'`)
@@ -454,7 +453,6 @@ func (v *Vault) GetConnectionByName(nameOrID string) (*ConnectionRecord, error) 
 	return conn, nil
 }
 
-
 // ListConnections returns all connections without plaintext secrets.
 func (v *Vault) ListConnections() ([]*ConnectionRecord, error) {
 	v.mu.RLock()
@@ -542,5 +540,3 @@ func (v *Vault) decryptConnection(c *ConnectionRecord) error {
 	}
 	return nil
 }
-
-

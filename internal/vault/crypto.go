@@ -16,7 +16,7 @@ const (
 	argonTime    = 3
 	argonMemory  = 64 * 1024 // 64 MB
 	argonThreads = 4
-	argonKeyLen  = 32        // 256 bits
+	argonKeyLen  = 32 // 256 bits
 	saltLen      = 16
 	nonceLen     = 12
 )

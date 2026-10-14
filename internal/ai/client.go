@@ -102,8 +102,8 @@ func DetectOllama(ctx context.Context, endpoint string) bool {
 }
 
 type CompletionRequest struct {
-	SystemPrompt string `json:"system_prompt"`
-	UserPrompt   string `json:"user_prompt"`
+	SystemPrompt string  `json:"system_prompt"`
+	UserPrompt   string  `json:"user_prompt"`
 	Temperature  float32 `json:"temperature,omitempty"`
 }
 

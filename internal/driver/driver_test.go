@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"math"
+	"strings"
 	"testing"
 
 	"sqlfox/internal/driver"
@@ -271,6 +272,31 @@ func TestFormatSQLValue_LargeNumber(t *testing.T) {
 	}
 }
 
+func TestFormatSQLValue_MySQLBackslashAndBytes(t *testing.T) {
+	// 1. MySQL backslash escaping
+	path := `C:\temp\`
+	escapedMySQL := driver.FormatSQLValueForDriver(path, "mysql")
+	expectedMySQL := `'C:\\temp\\'`
+	if escapedMySQL != expectedMySQL {
+		t.Fatalf("expected MySQL escaped %q, got %q", expectedMySQL, escapedMySQL)
+	}
+
+	// 2. SQL injection payload with \'
+	sqli := `\' OR 1=1 -- `
+	escapedSQLi := driver.FormatSQLValueForDriver(sqli, "mysql")
+	expectedSQLi := `'\\\' OR 1=1 -- '`
+	if escapedSQLi != expectedSQLi {
+		t.Fatalf("expected MySQL escaped %q, got %q", expectedSQLi, escapedSQLi)
+	}
+
+	// 3. Binary blob formatting as hex literal
+	blob := []byte{0xDE, 0xAD, 0xBE, 0xEF}
+	hexVal := driver.FormatSQLValue(blob)
+	if hexVal != "X'DEADBEEF'" {
+		t.Fatalf("expected X'DEADBEEF', got %s", hexVal)
+	}
+}
+
 func TestHasLimitClause(t *testing.T) {
 	if !driver.HasLimitClause("SELECT * FROM users LIMIT 10") {
 		t.Fatal("expected true for explicit LIMIT 10")
@@ -283,6 +309,57 @@ func TestHasLimitClause(t *testing.T) {
 	}
 	if driver.HasLimitClause("SELECT * FROM users WHERE status = 'UNLIMITED'") {
 		t.Fatal("expected false for string containing UNLIMITED")
+	}
+}
+
+func TestApplyLimitClause(t *testing.T) {
+	// Case 1: Plain SELECT without LIMIT
+	q1 := driver.ApplyLimitClause("SELECT * FROM users;", 100)
+	if q1 != "SELECT * FROM users\nLIMIT 100" {
+		t.Errorf("expected SELECT * FROM users\\nLIMIT 100, got: %q", q1)
+	}
+
+	// Case 2: SELECT with leading line comment
+	q2 := driver.ApplyLimitClause("-- list\nSELECT 42 AS answer;", 100)
+	if q2 != "-- list\nSELECT 42 AS answer\nLIMIT 100" {
+		t.Errorf("expected comment preserved with \\nLIMIT 100, got: %q", q2)
+	}
+
+	// Case 3: SELECT with leading block comment
+	q3 := driver.ApplyLimitClause("/* block */ SELECT 1;", 50)
+	if q3 != "/* block */ SELECT 1\nLIMIT 50" {
+		t.Errorf("expected block comment preserved with \\nLIMIT 50, got: %q", q3)
+	}
+
+	// Case 4: Already has LIMIT
+	q4 := driver.ApplyLimitClause("-- list\nSELECT * FROM users LIMIT 10;", 100)
+	if q4 != "-- list\nSELECT * FROM users LIMIT 10;" {
+		t.Errorf("expected existing LIMIT untouched, got: %s", q4)
+	}
+
+	// Case 5: Non-SELECT query
+	q5 := driver.ApplyLimitClause("-- list\nINSERT INTO users VALUES (1);", 100)
+	if q5 != "-- list\nINSERT INTO users VALUES (1);" {
+		t.Errorf("expected non-SELECT query untouched, got: %s", q5)
+	}
+
+	// Case 6: Query ending with single-line comment (prevents comment swallowing LIMIT)
+	q6 := driver.ApplyLimitClause("SELECT * FROM t -- note", 100)
+	if q6 != "SELECT * FROM t -- note\nLIMIT 100" {
+		t.Errorf("expected LIMIT on new line after comment, got: %q", q6)
+	}
+
+	// Case 7: Terminator followed by trailing comments must be dropped, not left before LIMIT
+	for in, want := range map[string]string{
+		"SELECT 1; -- note":  "SELECT 1\nLIMIT 100",
+		"SELECT 1;\n-- note": "SELECT 1\nLIMIT 100",
+		"SELECT 1; /* c */":  "SELECT 1\nLIMIT 100",
+		"SELECT ';' AS s":    "SELECT ';' AS s\nLIMIT 100",
+		"SELECT 1 -- a;b":    "SELECT 1 -- a;b\nLIMIT 100",
+	} {
+		if got := driver.ApplyLimitClause(in, 100); got != want {
+			t.Errorf("ApplyLimitClause(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 
@@ -344,3 +421,44 @@ func TestIsQueryStatement(t *testing.T) {
 	}
 }
 
+// Regression: binary values streamed as Go strings must dump as hex literals that round-trip.
+func TestFormatSQLValue_BinaryStringRoundTrip(t *testing.T) {
+	raw := string([]byte{0x00, 0x27, 0x5c, 0xff, 0x41})
+	if got := driver.FormatSQLValueForDriver(raw, "postgres"); got != `'\x00275cff41'::bytea` {
+		t.Errorf("postgres binary literal = %s", got)
+	}
+	if got := driver.FormatSQLValueForDriver("plain 'text'", "postgres"); got != "'plain ''text'''" {
+		t.Errorf("text must stay a quoted literal, got %s", got)
+	}
+
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec("CREATE TABLE b (v BLOB); INSERT INTO b VALUES (" + driver.FormatSQLValueForDriver(raw, "sqlite") + ")"); err != nil {
+		t.Fatal(err)
+	}
+	var back []byte
+	if err := db.QueryRow("SELECT v FROM b").Scan(&back); err != nil || string(back) != raw {
+		t.Fatalf("round-trip mismatch: %x (err %v)", back, err)
+	}
+}
+
+func TestSplitWithDelimiters(t *testing.T) {
+	script := "SELECT 1;\nDELIMITER $$\nCREATE PROCEDURE p() BEGIN SELECT 1; SELECT 2; END$$\nDELIMITER ;\nSELECT 3;"
+	naive := func(s string) []string {
+		var out []string
+		for _, p := range strings.Split(s, ";") {
+			if p = strings.TrimSpace(p); p != "" {
+				out = append(out, p)
+			}
+		}
+		return out
+	}
+	got := driver.SplitWithDelimiters(script, true, naive)
+	want := []string{"SELECT 1", "CREATE PROCEDURE p() BEGIN SELECT 1; SELECT 2; END", "SELECT 3"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("got %q", got)
+	}
+}

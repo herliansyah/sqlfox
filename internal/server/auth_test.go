@@ -349,4 +349,3 @@ func TestRemoteAccessInitialPageLoad(t *testing.T) {
 		t.Fatalf("remote authenticated response should have lock modal hidden")
 	}
 }
-

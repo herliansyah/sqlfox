@@ -46,7 +46,6 @@ type AssistRequest struct {
 	IncludeSchema    bool                     `json:"include_schema"`
 }
 
-
 // AssemblePrompts compiles the system prompt (incorporating Schema Context Window,
 // Table Knowledge Notes, AI Persona, and Firewall masking) and user prompt.
 func AssemblePrompts(req AssistRequest) (systemPrompt string, userPrompt string) {

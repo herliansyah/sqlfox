@@ -389,5 +389,3 @@ func TestRejectMismatchedChecksum(t *testing.T) {
 		t.Fatalf("expected digest mismatch error, got: %s", rr.Body.String())
 	}
 }
-
-

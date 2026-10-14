@@ -309,7 +309,7 @@ Sistem pagination konvensional `OFFSET 1000000` memaksa server memindai dan memb
   - `Alt+T` &rarr; Mengisi fungsi waktu `NOW()`
   - `Alt+D` &rarr; Mengisi tanggal saat ini (`YYYY-MM-DD`)
   - `Alt+U` &rarr; Mengisi nilai unik `UUID v4`
-- **Tabel Tanpa Primary Key (PK-Less)**: Jika tabel tidak memiliki kolom Primary Key, SqlFox secara otomatis menyusun kriteria pencocokan seluruh kolom (`WHERE col1 = ? AND col2 = ? AND col3 = ? LIMIT 1`) sehingga proses pengeditan dan penghapusan tetap aman dan tidak merusak baris data lainnya.
+- **Tabel Tanpa Primary Key (PK-Less)**: Jika tabel tidak memiliki kolom Primary Key, SqlFox secara otomatis mempersempit kriteria mutasi ke tepat satu baris fisik (`singleRowWhere`: `LIMIT 1` pada MySQL, `rowid IN (SELECT rowid ... LIMIT 1)` pada SQLite, dan `(tableoid, ctid) IN (SELECT tableoid, ctid ... LIMIT 1)` pada PostgreSQL), menjamin bahwa pengeditan atau penghapusan satu baris tidak akan merusak atau mengubah baris duplikat identik lainnya.
 
 ### Impor CSV Bebas Dependensi & Pemetaan Kolom
 1. Buka tabel yang diinginkan lalu klik tombol **Import CSV**.
@@ -389,6 +389,9 @@ Sebelum sebuah query dikirimkan ke server basis data, mesin pengurai AST SqlFox 
   - Perintah `UPDATE tabel SET ...` massal tanpa klausa `WHERE`
   - Perintah mutasi data dengan potensi dampak di luar ambang batas aman
 - **Challenge Modal**: Menampilkan preview query yang dicegat, menjabarkan risiko fatalnya, dan mewajibkan DBA mengetik nama tabel target secara manual dan presisi sebelum eksekusi diperkenankan berjalan.
+- **Inspeksi Multi-Statement Senyawa**: Memeriksa setiap baris perintah dalam satu batch multi-statement secara individual. Mencegah penyelundupan perintah destruktif (misal `SELECT 1; DROP TABLE korban`) dan menolak eksekusi jika terdapat lebih dari satu perintah destruktif yang memerlukan konfirmasi challenge.
+- **Sanitasi Komentar & String Literal**: Mengaburkan (*masking*) komentar baris/blok dan teks literal sebelum pengecekan regex, mencegah manipulasi kata kunci destruktif.
+- **Pra-Pemrosesan CTE**: Menanggalkan klausa awalan `WITH ... AS (...)` untuk memeriksa perintah inti DML/DDL di bawah pengawasan Safety Guard.
 
 ### Smart Tiered Backup Otomatis Pra-DDL
 Saat Anda hendak mengeksekusi operasi skema kritis seperti `ALTER TABLE` atau `DROP TABLE`:
@@ -492,8 +495,8 @@ Dapat diakses melalui **📦 DB Tools &rarr; 🔄 Structure Sync**:
 3. Menghasilkan skrip migrasi DDL berurutan yang aman lengkap dengan pratinjau sebelum dijalankan.
 
 ### Cross-Connection Data Transfer & Keyset Row Sync
-- **Data Transfer**: Melakukan streaming transfer tabel secara langsung dari satu server database ke server lain melintasi penyedia cloud yang berbeda dengan batas penggunaan memori ketat `<50MB`.
-- **Row-Level Data Sync**: Membandingkan baris data antar dua tabel menggunakan teknik hashing berbasis keyset delta. Menemukan perbedaan baris data (`INSERT`, `UPDATE`, `DELETE`) dan menyinkronkannya tanpa perlu mengunci keseluruhan tabel.
+- **Data Transfer**: Melakukan streaming transfer tabel secara langsung dari satu server database ke server lain melintasi penyedia cloud yang berbeda dengan batas penggunaan memori ketat `<50MB`. Apabila opsi `truncate_target` aktif dan transfer gagal, transaksi dibatalkan (*rollback*) sehingga data tabel target tetap terjaga utuh.
+- **Row-Level Data Sync**: Membandingkan baris data antar dua tabel menggunakan teknik hashing berbasis keyset delta. Mendukung Primary Key tunggal maupun komposit (dipisahkan pemisah unik `\x1f`), memetakan posisi kolom sumber ke target, menormalkan representasi tipe data lintas driver (`syncValueKey`), serta membatasi perbandingan maksimal 10.000 baris guna melindungi memori server.
 
 ### Headless CLI Suite (`run`, `transfer`, `advise`)
 SqlFox menyediakan perintah CLI headless yang sangat cocok untuk skrip otomatisasi bash, cronjob, dan pipeline CI/CD:

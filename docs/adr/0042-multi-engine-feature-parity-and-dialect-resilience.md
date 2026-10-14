@@ -36,6 +36,8 @@ To transform SqlFox from a MySQL-centric database manager into a truly resilient
     - **Replication Inspector**: Query `pg_stat_replication` and `pg_stat_wal_receiver` for primary/standby lag telemetry.
     - **Dialect-Aware Role Matrix**: Expose User Management for PostgreSQL using native `ROLE` models (login roles, role attributes, database grants) without forced host wildcarding.
     - **Dialect-Correct Structure Sync**: Generate atomic `ALTER TABLE tbl ALTER COLUMN col TYPE ...`, `SET NOT NULL`, and `SET DEFAULT` statements for PostgreSQL.
+  - **Dialect-Aware Value Formatting & Literal Serialization**: Standardize SQL value and binary literal formatting across engines via `FormatSQLValueForDriver` (e.g. `X'...'` for MySQL/SQLite vs `'\x...'::bytea` for PostgreSQL) and proper string escaping (`EscapeSQLString`) for reliable cross-engine export, dump, and audit logs.
+  - **Delimiters & Quoting Resilience**: Support custom MySQL `DELIMITER` statements (`SplitWithDelimiters`) and PostgreSQL dollar-quoting (`$$...$$`) in SQL script splitters, preventing routine definitions and complex blocks from being prematurely truncated at standard semicolons.
 
 ## Decision
 

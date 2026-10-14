@@ -52,6 +52,22 @@ func TestSafetyGuard_Inspect(t *testing.T) {
 			expectedTable:     "accounts",
 		},
 		{
+			name:              "CTE-wrapped unqualified DELETE",
+			query:             "WITH x AS (SELECT 1 WHERE 1=1) DELETE FROM users",
+			env:               "Development",
+			expectedRisk:      RiskCritical,
+			expectedChallenge: true,
+			expectedTable:     "users",
+		},
+		{
+			name:              "CTE-wrapped unqualified UPDATE",
+			query:             "with recursive x(n) as (select 1) update accounts set balance = 0",
+			env:               "Development",
+			expectedRisk:      RiskCritical,
+			expectedChallenge: true,
+			expectedTable:     "accounts",
+		},
+		{
 			name:              "DROP TABLE",
 			query:             "DROP TABLE customers;",
 			env:               "Production",
@@ -175,5 +191,21 @@ func TestBackupManager_BackupTable(t *testing.T) {
 
 	if len(content) == 0 {
 		t.Fatal("expected non-empty backup content")
+	}
+}
+
+// Regression: lexical fallback must not trust WHERE inside comments or string literals.
+func TestSafetyGuard_LexicalFallbackIgnoresWhereInCommentsAndStrings(t *testing.T) {
+	for _, q := range []string{
+		"DELETE FROM t -- keep rows WHERE active=1\nRETURNING *",
+		"UPDATE t SET note='only WHERE active' RETURNING *",
+		"DELETE FROM t /* WHERE x */ RETURNING *",
+	} {
+		if r := Inspect(q, "Development"); !r.RequiresChallenge {
+			t.Errorf("expected challenge for %q", q)
+		}
+	}
+	if r := Inspect("DELETE FROM t WHERE id = 1 RETURNING *", "Development"); r.RequiresChallenge {
+		t.Errorf("qualified DELETE ... RETURNING must not require challenge")
 	}
 }

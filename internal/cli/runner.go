@@ -301,7 +301,19 @@ func parseDirectDSN(raw string, driverOverride string) (string, driver.Config, b
 
 // SplitStatements breaks SQL text into executable individual statements.
 // ponytail: Token-aware splitter handling quotes, backticks, and comments without third-party lexers.
-func SplitStatements(reader io.Reader) []string {
+func SplitStatements(reader io.Reader, driverName ...string) []string {
+	content, err := io.ReadAll(reader)
+	if err != nil {
+		return nil
+	}
+	isMySQL := len(driverName) > 0 && (strings.EqualFold(driverName[0], "mysql") || strings.EqualFold(driverName[0], "mariadb"))
+	return driver.SplitWithDelimiters(string(content), isMySQL, func(seg string) []string {
+		return splitDefaultDelimiter(strings.NewReader(seg), driverName...)
+	})
+}
+
+func splitDefaultDelimiter(reader io.Reader, driverName ...string) []string {
+	isMySQL := len(driverName) > 0 && (strings.EqualFold(driverName[0], "mysql") || strings.EqualFold(driverName[0], "mariadb"))
 	var statements []string
 	content, err := io.ReadAll(reader)
 	if err != nil || len(content) == 0 {
@@ -312,16 +324,29 @@ func SplitStatements(reader io.Reader) []string {
 	inSingleQuote := false
 	inDoubleQuote := false
 	inBacktick := false
+	inDollarQuote := false
 	inLineComment := false
 	inBlockComment := false
 
 	runes := []rune(string(content))
 	n := len(runes)
 
+	isQuoteEscaped := func(runes []rune, i int) bool {
+		if !isMySQL {
+			return false
+		}
+		bsCount := 0
+		for j := i - 1; j >= 0 && runes[j] == '\\'; j-- {
+			bsCount++
+		}
+		return bsCount%2 == 1
+	}
+
 	for i := 0; i < n; i++ {
 		r := runes[i]
 
 		if inLineComment {
+			current.WriteRune(r)
 			if r == '\n' {
 				inLineComment = false
 			}
@@ -329,49 +354,69 @@ func SplitStatements(reader io.Reader) []string {
 		}
 
 		if inBlockComment {
+			current.WriteRune(r)
 			if r == '*' && i+1 < n && runes[i+1] == '/' {
 				inBlockComment = false
+				current.WriteRune('/')
 				i++
 			}
 			continue
 		}
 
-		if !inSingleQuote && !inDoubleQuote && !inBacktick {
+		if !inSingleQuote && !inDoubleQuote && !inBacktick && !inDollarQuote {
 			if r == '-' && i+1 < n && runes[i+1] == '-' {
 				inLineComment = true
+				current.WriteRune('-')
+				current.WriteRune('-')
 				i++
 				continue
 			}
-			if r == '#' {
+			if isMySQL && r == '#' {
 				inLineComment = true
+				current.WriteRune('#')
 				continue
 			}
 			if r == '/' && i+1 < n && runes[i+1] == '*' {
 				inBlockComment = true
+				current.WriteRune('/')
+				current.WriteRune('*')
 				i++
 				continue
 			}
 		}
 
-		if r == '\'' && !inDoubleQuote && !inBacktick {
-			if i > 0 && runes[i-1] == '\\' {
-				// escaped
-			} else {
-				inSingleQuote = !inSingleQuote
+		if !inBlockComment {
+			if r == '$' && i+1 < n && runes[i+1] == '$' && !inSingleQuote && !inDoubleQuote && !inBacktick {
+				inDollarQuote = !inDollarQuote
+				current.WriteString("$$")
+				i++
+				continue
+			} else if r == '\'' && !inDoubleQuote && !inBacktick && !inDollarQuote {
+				if inSingleQuote && i+1 < n && runes[i+1] == '\'' {
+					current.WriteRune('\'')
+					current.WriteRune('\'')
+					i++
+					continue
+				}
+				if isQuoteEscaped(runes, i) {
+					// escaped
+				} else {
+					inSingleQuote = !inSingleQuote
+				}
+			} else if r == '"' && !inSingleQuote && !inBacktick && !inDollarQuote {
+				if isQuoteEscaped(runes, i) {
+					// escaped
+				} else {
+					inDoubleQuote = !inDoubleQuote
+				}
+			} else if r == '`' && !inSingleQuote && !inDoubleQuote && !inDollarQuote {
+				inBacktick = !inBacktick
 			}
-		} else if r == '"' && !inSingleQuote && !inBacktick {
-			if i > 0 && runes[i-1] == '\\' {
-				// escaped
-			} else {
-				inDoubleQuote = !inDoubleQuote
-			}
-		} else if r == '`' && !inSingleQuote && !inDoubleQuote {
-			inBacktick = !inBacktick
 		}
 
-		if r == ';' && !inSingleQuote && !inDoubleQuote && !inBacktick {
+		if r == ';' && !inSingleQuote && !inDoubleQuote && !inBacktick && !inDollarQuote && !inBlockComment {
 			stmt := strings.TrimSpace(current.String())
-			if stmt != "" {
+			if stmt != "" && driver.HasExecutableSQL(stmt, isMySQL) {
 				statements = append(statements, stmt)
 			}
 			current.Reset()
@@ -382,7 +427,7 @@ func SplitStatements(reader io.Reader) []string {
 	}
 
 	last := strings.TrimSpace(current.String())
-	if last != "" {
+	if last != "" && driver.HasExecutableSQL(last, isMySQL) {
 		statements = append(statements, last)
 	}
 

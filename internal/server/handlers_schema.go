@@ -147,7 +147,6 @@ func (s *Server) handleGetActiveThreads(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-
 func (s *Server) handleSelectDatabase(w http.ResponseWriter, r *http.Request) {
 	connID := r.PathValue("id")
 	sess, err := s.sessionMgr.GetSession(connID)
@@ -220,7 +219,10 @@ func (s *Server) handleGetTableDDL(w http.ResponseWriter, r *http.Request) {
 
 	targetDB := r.URL.Query().Get("db")
 	if targetDB != "" {
-		_ = sess.Session.SelectDatabase(ctx, targetDB)
+		if err := sess.Session.SelectDatabase(ctx, targetDB); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	ddl, err := sess.Session.GetTableDDL(ctx, tableName)
@@ -343,7 +345,6 @@ func (s *Server) handleGetTablePartitions(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, partitions)
 }
 
-
 func (s *Server) handlePreflightDDL(w http.ResponseWriter, r *http.Request) {
 	connID := r.PathValue("id")
 	tableName := r.PathValue("table")
@@ -359,7 +360,10 @@ func (s *Server) handlePreflightDDL(w http.ResponseWriter, r *http.Request) {
 
 	targetDB := r.URL.Query().Get("db")
 	if targetDB != "" {
-		_ = sess.Session.SelectDatabase(ctx, targetDB)
+		if err := sess.Session.SelectDatabase(ctx, targetDB); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	locks, err := sess.Session.InspectTableLocks(ctx, targetDB, tableName)
@@ -447,17 +451,27 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 
 	targetDB := r.URL.Query().Get("db")
 	if targetDB != "" {
-		_ = sess.Session.SelectDatabase(ctx, targetDB)
+		if err := sess.Session.SelectDatabase(ctx, targetDB); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	findKeyCol := func(tables []driver.TableMetadata) string {
 		for _, t := range tables {
 			if strings.EqualFold(t.Name, tableName) {
-				// 1. Primary key
+				// 1. Primary key - only if single column
+				var pkCols []string
 				for _, c := range t.Columns {
 					if c.IsPrimaryKey {
-						return c.Name
+						pkCols = append(pkCols, c.Name)
 					}
+				}
+				if len(pkCols) == 1 {
+					return pkCols[0]
+				}
+				if len(pkCols) > 1 {
+					return "" // Composite PK: cannot use single-column seek or single WHERE pk=val
 				}
 				// 2. Single-column unique key fallback
 				for _, idx := range t.Indexes {
@@ -525,11 +539,11 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 			op = "<"
 		}
 		if whereClause != "" {
-			querySQL = fmt.Sprintf("SELECT * FROM %s %s AND %s %s '%s' ORDER BY %s %s LIMIT %d",
-				targetTable, whereClause, escSortCol, op, strings.ReplaceAll(lastKey, "'", "''"), escSortCol, sortDir, limit)
+			querySQL = fmt.Sprintf("SELECT * FROM %s %s AND %s %s %s ORDER BY %s %s LIMIT %d",
+				targetTable, whereClause, escSortCol, op, driver.EscapeSQLString(lastKey, sess.DriverName), escSortCol, sortDir, limit)
 		} else {
-			querySQL = fmt.Sprintf("SELECT * FROM %s WHERE %s %s '%s' ORDER BY %s %s LIMIT %d",
-				targetTable, escSortCol, op, strings.ReplaceAll(lastKey, "'", "''"), escSortCol, sortDir, limit)
+			querySQL = fmt.Sprintf("SELECT * FROM %s WHERE %s %s %s ORDER BY %s %s LIMIT %d",
+				targetTable, escSortCol, op, driver.EscapeSQLString(lastKey, sess.DriverName), escSortCol, sortDir, limit)
 		}
 	} else if sortCol != "" {
 		// Bounded offset
@@ -653,8 +667,6 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 
 	var totalAffected int64
 	for _, item := range items {
-		valStr := driver.FormatSQLValue(item.Value)
-
 		tableRef := quoteIdent(item.Table)
 		db := item.Database
 		if db == "" {
@@ -665,38 +677,55 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var updateSQL string
-		if item.PKColumn != "" && item.PKValue != nil {
-			pkStr := driver.FormatSQLValue(item.PKValue)
+		var auditSQL string
+		var args []any
+		pIdx := 1
+		pVal := driver.Placeholder(sess.DriverName, pIdx)
+		pIdx++
+		args = append(args, item.Value)
+		valLiteral := driver.FormatSQLValueForDriver(item.Value, sess.DriverName)
+
+		if item.PKColumn != "" && item.PKValue != nil && len(item.RowCriteria) == 0 {
+			pPK := driver.Placeholder(sess.DriverName, pIdx)
+			pIdx++
+			args = append(args, item.PKValue)
+			pkLiteral := driver.FormatSQLValueForDriver(item.PKValue, sess.DriverName)
 			updateSQL = fmt.Sprintf("UPDATE %s SET %s = %s WHERE %s = %s",
-				tableRef, quoteIdent(item.Column), valStr, quoteIdent(item.PKColumn), pkStr)
+				tableRef, quoteIdent(item.Column), pVal, quoteIdent(item.PKColumn), pPK)
+			auditSQL = fmt.Sprintf("UPDATE %s SET %s = %s WHERE %s = %s",
+				tableRef, quoteIdent(item.Column), valLiteral, quoteIdent(item.PKColumn), pkLiteral)
 		} else if len(item.RowCriteria) > 0 {
 			var whereParts []string
+			var auditWhereParts []string
 			for cName, cVal := range item.RowCriteria {
 				if cVal == nil {
 					whereParts = append(whereParts, fmt.Sprintf("%s IS NULL", quoteIdent(cName)))
+					auditWhereParts = append(auditWhereParts, fmt.Sprintf("%s IS NULL", quoteIdent(cName)))
 				} else {
-					whereParts = append(whereParts, fmt.Sprintf("%s = %s", quoteIdent(cName), driver.FormatSQLValue(cVal)))
+					pCrit := driver.Placeholder(sess.DriverName, pIdx)
+					pIdx++
+					args = append(args, cVal)
+					whereParts = append(whereParts, fmt.Sprintf("%s = %s", quoteIdent(cName), pCrit))
+					auditWhereParts = append(auditWhereParts, fmt.Sprintf("%s = %s", quoteIdent(cName), driver.FormatSQLValueForDriver(cVal, sess.DriverName)))
 				}
 			}
-			limitClause := ""
-			if sess.DriverName == "mysql" {
-				limitClause = " LIMIT 1"
-			}
-			updateSQL = fmt.Sprintf("UPDATE %s SET %s = %s WHERE %s%s",
-				tableRef, quoteIdent(item.Column), valStr, strings.Join(whereParts, " AND "), limitClause)
+			updateSQL = fmt.Sprintf("UPDATE %s SET %s = %s WHERE %s",
+				tableRef, quoteIdent(item.Column), pVal, singleRowWhere(sess.DriverName, tableRef, strings.Join(whereParts, " AND ")))
+			auditSQL = fmt.Sprintf("UPDATE %s SET %s = %s WHERE %s",
+				tableRef, quoteIdent(item.Column), valLiteral, singleRowWhere(sess.DriverName, tableRef, strings.Join(auditWhereParts, " AND ")))
 		} else {
 			continue
 		}
 
 		cellStart := time.Now()
-		res, err := sess.Session.Exec(ctx, updateSQL)
+		res, err := sess.Session.Exec(ctx, updateSQL, args...)
 		cellDur := time.Since(cellStart).Milliseconds()
 		var cellAffected int64
 		if res != nil {
 			cellAffected = res.RowsAffected
 			totalAffected += res.RowsAffected
 		}
-		sess.RecordAudit(updateSQL, "grid_cell_edit", cellDur, cellAffected, err, cellStart)
+		sess.RecordAudit(auditSQL, "grid_cell_edit", cellDur, cellAffected, err, cellStart)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to update cell: "+err.Error())
 			return
@@ -832,4 +861,3 @@ func (s *Server) handleSaveTableNote(w http.ResponseWriter, r *http.Request) {
 	s.notifyCloudSyncChange()
 	writeJSON(w, http.StatusOK, note)
 }
-

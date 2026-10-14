@@ -19,11 +19,11 @@ import (
 
 type StructureDiffItem struct {
 	ID        string `json:"id"`
-	Type      string `json:"type"`      // table_missing, column_missing, column_mismatch, index_missing, table_extra
+	Type      string `json:"type"` // table_missing, column_missing, column_mismatch, index_missing, table_extra
 	Table     string `json:"table"`
 	Column    string `json:"column,omitempty"`
 	Index     string `json:"index,omitempty"`
-	Action    string `json:"action"`    // CREATE TABLE, ADD COLUMN, MODIFY COLUMN, CREATE INDEX, DROP TABLE
+	Action    string `json:"action"` // CREATE TABLE, ADD COLUMN, MODIFY COLUMN, CREATE INDEX, DROP TABLE
 	SourceDef string `json:"source_def,omitempty"`
 	TargetDef string `json:"target_def,omitempty"`
 	SQL       string `json:"sql"`
@@ -81,17 +81,18 @@ type SyncDataOperation struct {
 }
 
 type SyncDataCompareResponse struct {
-	Table       string              `json:"table"`
-	PKColumns   []string            `json:"pk_columns"`
-	Columns     []string            `json:"columns"`
-	Summary     map[string]int      `json:"summary"`
-	Operations  []SyncDataOperation `json:"operations"`
+	Table      string              `json:"table"`
+	PKColumns  []string            `json:"pk_columns"`
+	Columns    []string            `json:"columns"`
+	Summary    map[string]int      `json:"summary"`
+	Operations []SyncDataOperation `json:"operations"`
 }
 
 type SyncDataApplyRequest struct {
 	TargetSessionID string              `json:"target_session_id"`
 	TargetDB        string              `json:"target_db"`
 	Table           string              `json:"table"`
+	Columns         []string            `json:"columns,omitempty"` // column order of op.Data (from compare response)
 	Operations      []SyncDataOperation `json:"operations"`
 	Confirmed       bool                `json:"confirmed"`
 	ChallengeInput  string              `json:"challenge_input"`
@@ -128,8 +129,14 @@ func (s *Server) handleSyncStructureCompare(w http.ResponseWriter, r *http.Reque
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	_ = srcSess.UseDatabase(ctx, req.SourceDB)
-	_ = tgtSess.UseDatabase(ctx, req.TargetDB)
+	if err := srcSess.UseDatabase(ctx, req.SourceDB); err != nil {
+		writeError(w, http.StatusBadRequest, "source: "+err.Error())
+		return
+	}
+	if err := tgtSess.UseDatabase(ctx, req.TargetDB); err != nil {
+		writeError(w, http.StatusBadRequest, "target: "+err.Error())
+		return
+	}
 
 	srcSchema, err := srcSess.Session.InspectSchema(ctx, req.SourceDB)
 	if err != nil {
@@ -421,7 +428,10 @@ func (s *Server) handleSyncStructureApply(w http.ResponseWriter, r *http.Request
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
-	_ = tgtSess.UseDatabase(ctx, req.TargetDB)
+	if err := tgtSess.UseDatabase(ctx, req.TargetDB); err != nil {
+		writeError(w, http.StatusBadRequest, "target: "+err.Error())
+		return
+	}
 
 	var executedCount int
 	var errors []string
@@ -500,6 +510,15 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if err := srcSess.UseDatabase(r.Context(), req.SourceDB); err != nil {
+		writeError(w, http.StatusBadRequest, "source: "+err.Error())
+		return
+	}
+	if err := tgtSess.UseDatabase(r.Context(), req.TargetDB); err != nil {
+		writeError(w, http.StatusBadRequest, "target: "+err.Error())
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.Header().Set("Transfer-Encoding", "chunked")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -513,13 +532,12 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 	}
 
 	ctx := r.Context()
-	_ = srcSess.UseDatabase(ctx, req.SourceDB)
-	_ = tgtSess.UseDatabase(ctx, req.TargetDB)
 
 	srcDriver := srcSess.DriverName
 	tgtDriver := tgtSess.DriverName
 
 	var grandTotalRows int64
+	var hasErrors bool
 
 	for _, tbl := range req.Tables {
 		sendEvent(map[string]any{
@@ -537,19 +555,11 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 			}
 		}
 
-		// Truncate table if requested
-		if req.TruncateTarget {
-			truncSQL := fmt.Sprintf("TRUNCATE TABLE %s", quoteIdent(tbl, tgtDriver))
-			if tgtDriver == "sqlite" {
-				truncSQL = fmt.Sprintf("DELETE FROM %s", quoteIdent(tbl, tgtDriver))
-			}
-			_, _ = tgtSess.Session.Exec(ctx, truncSQL)
-		}
-
 		// Stream rows from source
 		querySQL := fmt.Sprintf("SELECT * FROM %s", quoteIdent(tbl, srcDriver))
 		stream, err := srcSess.Session.QueryStream(ctx, querySQL, 0)
 		if err != nil {
+			hasErrors = true
 			sendEvent(map[string]any{
 				"event": "table_error",
 				"table": tbl,
@@ -565,16 +575,34 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 		}
 		colListStr := strings.Join(colNames, ", ")
 
-		var tableRowsCopied int64
+		// Begin transaction for per-table atomicity
+		tx, err := tgtSess.Session.BeginTx(ctx)
+		if err != nil {
+			stream.Close()
+			hasErrors = true
+			sendEvent(map[string]any{
+				"event": "table_error",
+				"table": tbl,
+				"error": "failed to begin transaction: " + err.Error(),
+			})
+			continue
+		}
 
-		for {
+		var tableRowsCopied int64
+		var tableErr error
+
+		// Empty the target inside the transaction (DELETE, not TRUNCATE: MySQL TRUNCATE implicitly
+		// commits) so a failed copy rolls back to the original rows instead of leaving the table empty.
+		if req.TruncateTarget {
+			if _, err := tx.Exec(ctx, fmt.Sprintf("DELETE FROM %s", quoteIdent(tbl, tgtDriver))); err != nil {
+				tableErr = fmt.Errorf("failed to clear target table: %w", err)
+			}
+		}
+
+		for tableErr == nil {
 			chunk, err := stream.NextChunk(batchSize)
 			if err != nil && err != io.EOF {
-				sendEvent(map[string]any{
-					"event": "table_error",
-					"table": tbl,
-					"error": err.Error(),
-				})
+				tableErr = err
 				break
 			}
 
@@ -597,23 +625,18 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 					strings.Join(rowPlaceholders, ", "),
 				)
 
-				if _, execErr := tgtSess.Session.Exec(ctx, insertSQL, args...); execErr != nil {
-					sendEvent(map[string]any{
-						"event": "table_error",
-						"table": tbl,
-						"error": execErr.Error(),
-					})
+				if _, execErr := tx.Exec(ctx, insertSQL, args...); execErr != nil {
+					tableErr = execErr
 					break
 				}
 
 				tableRowsCopied += int64(len(chunk))
-				grandTotalRows += int64(len(chunk))
 
 				sendEvent(map[string]any{
 					"event":             "progress",
 					"table":             tbl,
 					"rows_copied":       tableRowsCopied,
-					"total_transferred": grandTotalRows,
+					"total_transferred": grandTotalRows + tableRowsCopied,
 				})
 			}
 
@@ -624,6 +647,29 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 
 		_ = stream.Close()
 
+		if tableErr != nil {
+			_ = tx.Rollback()
+			hasErrors = true
+			sendEvent(map[string]any{
+				"event": "table_error",
+				"table": tbl,
+				"error": tableErr.Error(),
+			})
+			continue
+		}
+
+		if err := tx.Commit(); err != nil {
+			_ = tx.Rollback()
+			hasErrors = true
+			sendEvent(map[string]any{
+				"event": "table_error",
+				"table": tbl,
+				"error": "failed to commit transaction: " + err.Error(),
+			})
+			continue
+		}
+
+		grandTotalRows += tableRowsCopied
 		sendEvent(map[string]any{
 			"event":       "table_done",
 			"table":       tbl,
@@ -641,11 +687,16 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	status := "Transfer completed successfully"
+	if hasErrors {
+		status = "Transfer completed with errors"
+	}
 	sendEvent(map[string]any{
 		"event":        "done",
 		"total_tables": len(req.Tables),
 		"total_rows":   grandTotalRows,
-		"status":       "Transfer completed successfully",
+		"status":       status,
+		"has_errors":   hasErrors,
 	})
 }
 
@@ -680,8 +731,14 @@ func (s *Server) handleSyncDataCompare(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	_ = srcSess.UseDatabase(ctx, req.SourceDB)
-	_ = tgtSess.UseDatabase(ctx, req.TargetDB)
+	if err := srcSess.UseDatabase(ctx, req.SourceDB); err != nil {
+		writeError(w, http.StatusBadRequest, "source: "+err.Error())
+		return
+	}
+	if err := tgtSess.UseDatabase(ctx, req.TargetDB); err != nil {
+		writeError(w, http.StatusBadRequest, "target: "+err.Error())
+		return
+	}
 
 	srcSchema, err := srcSess.Session.InspectSchema(ctx, req.SourceDB)
 	if err != nil {
@@ -722,15 +779,24 @@ func (s *Server) handleSyncDataCompare(w http.ResponseWriter, r *http.Request) {
 	srcDriver := srcSess.DriverName
 	tgtDriver := tgtSess.DriverName
 
-	// Order by PK for fast deterministic alignment
-	var pkOrderClauses []string
-	for _, pk := range pkCols {
-		pkOrderClauses = append(pkOrderClauses, quoteIdent(pk, srcDriver))
+	// Select the source column list explicitly on both sides so rows align by column name even when
+	// the target table orders its columns differently; quote per driver (MySQL backticks break PostgreSQL).
+	selectSQL := func(drv string) string {
+		cols := make([]string, len(srcTbl.Columns))
+		for i, c := range srcTbl.Columns {
+			cols[i] = quoteIdent(c.Name, drv)
+		}
+		pks := make([]string, len(pkCols))
+		for i, pk := range pkCols {
+			pks[i] = quoteIdent(pk, drv)
+		}
+		return fmt.Sprintf("SELECT %s FROM %s ORDER BY %s", strings.Join(cols, ", "), quoteIdent(req.Table, drv), strings.Join(pks, ", "))
 	}
-	orderBySQL := " ORDER BY " + strings.Join(pkOrderClauses, ", ")
 
-	// Fetch all rows from source (capped at 10,000 for safe comparison)
-	srcStream, err := srcSess.Session.QueryStream(ctx, fmt.Sprintf("SELECT * FROM %s%s", quoteIdent(req.Table, srcDriver), orderBySQL), 10000)
+	// Fetch all rows from source. Comparison is in-memory and capped; one extra row is fetched to
+	// detect overflow, because diffing a truncated window would emit bogus INSERT/DELETE operations.
+	const maxSyncRows = 10000
+	srcStream, err := srcSess.Session.QueryStream(ctx, selectSQL(srcDriver), maxSyncRows+1)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to query source rows: "+err.Error())
 		return
@@ -757,7 +823,7 @@ func (s *Server) handleSyncDataCompare(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch all rows from target
-	tgtStream, err := tgtSess.Session.QueryStream(ctx, fmt.Sprintf("SELECT * FROM %s%s", quoteIdent(req.Table, tgtDriver), orderBySQL), 10000)
+	tgtStream, err := tgtSess.Session.QueryStream(ctx, selectSQL(tgtDriver), maxSyncRows+1)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to query target rows: "+err.Error())
 		return
@@ -777,14 +843,19 @@ func (s *Server) handleSyncDataCompare(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if len(srcRows) > maxSyncRows || len(tgtRows) > maxSyncRows {
+		writeError(w, http.StatusUnprocessableEntity, fmt.Sprintf("table %q has more than %d rows on source or target; row-level sync would compare a partial window and produce wrong inserts/deletes. Use Data Transfer instead", req.Table, maxSyncRows))
+		return
+	}
+
 	makePKKey := func(row []any, indices []int) string {
 		var parts []string
 		for _, idx := range indices {
 			if idx < len(row) {
-				parts = append(parts, driver.FormatSQLValue(row[idx]))
+				parts = append(parts, syncValueKey(row[idx]))
 			}
 		}
-		return strings.Join(parts, ":")
+		return strings.Join(parts, "\x1f") // unit separator: ":" could collide inside composite key values
 	}
 
 	// Map target rows
@@ -801,6 +872,13 @@ func (s *Server) handleSyncDataCompare(w http.ResponseWriter, r *http.Request) {
 	updateCount := 0
 	deleteCount := 0
 
+	formatPKVal := func(row []any) any {
+		if len(pkIndices) == 1 && pkIndices[0] < len(row) {
+			return row[pkIndices[0]]
+		}
+		return makePKKey(row, pkIndices)
+	}
+
 	for _, sRow := range srcRows {
 		key := makePKKey(sRow, pkIndices)
 		tRow, exists := targetMap[key]
@@ -808,7 +886,7 @@ func (s *Server) handleSyncDataCompare(w http.ResponseWriter, r *http.Request) {
 			// Row in source but not in target -> INSERT
 			operations = append(operations, SyncDataOperation{
 				Type: "insert",
-				PK:   sRow[pkIndices[0]],
+				PK:   formatPKVal(sRow),
 				Data: sRow,
 			})
 			insertCount++
@@ -818,7 +896,7 @@ func (s *Server) handleSyncDataCompare(w http.ResponseWriter, r *http.Request) {
 				// Row exists in both but data has changed -> UPDATE
 				operations = append(operations, SyncDataOperation{
 					Type:    "update",
-					PK:      sRow[pkIndices[0]],
+					PK:      formatPKVal(sRow),
 					OldData: tRow,
 					Data:    sRow,
 				})
@@ -834,7 +912,7 @@ func (s *Server) handleSyncDataCompare(w http.ResponseWriter, r *http.Request) {
 				// Row exists in target but not in source -> DELETE
 				operations = append(operations, SyncDataOperation{
 					Type: "delete",
-					PK:   tRow[pkIndices[0]],
+					PK:   formatPKVal(tRow),
 					Data: tRow,
 				})
 				deleteCount++
@@ -893,7 +971,10 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
-	_ = tgtSess.UseDatabase(ctx, req.TargetDB)
+	if err := tgtSess.UseDatabase(ctx, req.TargetDB); err != nil {
+		writeError(w, http.StatusBadRequest, "target: "+err.Error())
+		return
+	}
 	syncStart := time.Now()
 
 	tgtDriver := tgtSess.DriverName
@@ -916,23 +997,51 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var pkCol string
-	for _, c := range tgtTbl.Columns {
+	var pkIndices []int
+	for idx, c := range tgtTbl.Columns {
 		if c.IsPrimaryKey {
-			pkCol = c.Name
-			break
+			pkIndices = append(pkIndices, idx)
 		}
 	}
-	if pkCol == "" {
+	if len(pkIndices) == 0 {
 		writeError(w, http.StatusBadRequest, "table has no primary key")
 		return
 	}
 
-	colNames := make([]string, len(tgtTbl.Columns))
+	// dataIdx maps each target column to its position in op.Data. Compare emits rows in the order
+	// of req.Columns (source column order); legacy clients without columns fall back to target order.
+	dataIdx := make([]int, len(tgtTbl.Columns))
 	for i, c := range tgtTbl.Columns {
-		colNames[i] = quoteIdent(c.Name, tgtDriver)
+		dataIdx[i] = i
+		if len(req.Columns) > 0 {
+			dataIdx[i] = slices.IndexFunc(req.Columns, func(n string) bool { return strings.EqualFold(n, c.Name) })
+		}
 	}
-	colListStr := strings.Join(colNames, ", ")
+	valueAt := func(op SyncDataOperation, tgtIdx int) (any, bool) {
+		if di := dataIdx[tgtIdx]; di >= 0 && di < len(op.Data) {
+			return op.Data[di], true
+		}
+		return nil, false
+	}
+	// pkWhere builds the PK predicate; it refuses to guess (NULL) a missing PK value, which would
+	// otherwise silently match nothing or the wrong row.
+	pkWhere := func(op SyncDataOperation, pIdx int) (string, []any, error) {
+		var clauses []string
+		var args []any
+		for _, pkIdx := range pkIndices {
+			v, ok := valueAt(op, pkIdx)
+			if !ok {
+				if len(pkIndices) != 1 || op.PK == nil {
+					return "", nil, fmt.Errorf("missing primary key column %s", tgtTbl.Columns[pkIdx].Name)
+				}
+				v = op.PK
+			}
+			clauses = append(clauses, fmt.Sprintf("%s = %s", quoteIdent(tgtTbl.Columns[pkIdx].Name, tgtDriver), driver.Placeholder(tgtDriver, pIdx)))
+			args = append(args, v)
+			pIdx++
+		}
+		return strings.Join(clauses, " AND "), args, nil
+	}
 
 	var inserted, updated, deleted int
 	var errors []string
@@ -940,17 +1049,22 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 	for _, op := range req.Operations {
 		switch op.Type {
 		case "insert":
-			placeholders := make([]string, len(op.Data))
-			for i := range op.Data {
-				placeholders[i] = driver.Placeholder(tgtDriver, i+1)
+			var cols, placeholders []string
+			var args []any
+			for i, c := range tgtTbl.Columns {
+				if v, ok := valueAt(op, i); ok {
+					cols = append(cols, quoteIdent(c.Name, tgtDriver))
+					args = append(args, v)
+					placeholders = append(placeholders, driver.Placeholder(tgtDriver, len(args)))
+				}
 			}
 			sql := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
 				quoteIdent(req.Table, tgtDriver),
-				colListStr,
+				strings.Join(cols, ", "),
 				strings.Join(placeholders, ", "),
 			)
-			if _, err := tgtSess.Session.Exec(ctx, sql, op.Data...); err != nil {
-				errors = append(errors, fmt.Sprintf("insert error (pk %s): %s", driver.FormatSQLValue(op.PK), err.Error()))
+			if _, err := tgtSess.Session.Exec(ctx, sql, args...); err != nil {
+				errors = append(errors, fmt.Sprintf("insert error (pk %v): %s", op.PK, err.Error()))
 			} else {
 				inserted++
 			}
@@ -958,40 +1072,44 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 		case "update":
 			var setClauses []string
 			var args []any
-			pIdx := 1
 			for i, c := range tgtTbl.Columns {
 				if c.IsPrimaryKey {
 					continue
 				}
-				setClauses = append(setClauses, fmt.Sprintf("%s = %s", quoteIdent(c.Name, tgtDriver), driver.Placeholder(tgtDriver, pIdx)))
-				pIdx++
-				if i < len(op.Data) {
-					args = append(args, op.Data[i])
-				} else {
-					args = append(args, nil)
+				// Columns absent from the source row are left untouched rather than overwritten with NULL.
+				if v, ok := valueAt(op, i); ok {
+					args = append(args, v)
+					setClauses = append(setClauses, fmt.Sprintf("%s = %s", quoteIdent(c.Name, tgtDriver), driver.Placeholder(tgtDriver, len(args))))
 				}
 			}
-			args = append(args, op.PK)
-			sql := fmt.Sprintf("UPDATE %s SET %s WHERE %s = %s",
+			if len(setClauses) == 0 {
+				continue
+			}
+			where, whereArgs, err := pkWhere(op, len(args)+1)
+			if err != nil {
+				errors = append(errors, fmt.Sprintf("update error (pk %v): %s", op.PK, err.Error()))
+				continue
+			}
+			sql := fmt.Sprintf("UPDATE %s SET %s WHERE %s",
 				quoteIdent(req.Table, tgtDriver),
 				strings.Join(setClauses, ", "),
-				quoteIdent(pkCol, tgtDriver),
-				driver.Placeholder(tgtDriver, pIdx),
+				where,
 			)
-			if _, err := tgtSess.Session.Exec(ctx, sql, args...); err != nil {
-				errors = append(errors, fmt.Sprintf("update error (pk %s): %s", driver.FormatSQLValue(op.PK), err.Error()))
+			if _, err := tgtSess.Session.Exec(ctx, sql, append(args, whereArgs...)...); err != nil {
+				errors = append(errors, fmt.Sprintf("update error (pk %v): %s", op.PK, err.Error()))
 			} else {
 				updated++
 			}
 
 		case "delete":
-			sql := fmt.Sprintf("DELETE FROM %s WHERE %s = %s",
-				quoteIdent(req.Table, tgtDriver),
-				quoteIdent(pkCol, tgtDriver),
-				driver.Placeholder(tgtDriver, 1),
-			)
-			if _, err := tgtSess.Session.Exec(ctx, sql, op.PK); err != nil {
-				errors = append(errors, fmt.Sprintf("delete error (pk %s): %s", driver.FormatSQLValue(op.PK), err.Error()))
+			where, args, err := pkWhere(op, 1)
+			if err != nil {
+				errors = append(errors, fmt.Sprintf("delete error (pk %v): %s", op.PK, err.Error()))
+				continue
+			}
+			sql := fmt.Sprintf("DELETE FROM %s WHERE %s", quoteIdent(req.Table, tgtDriver), where)
+			if _, err := tgtSess.Session.Exec(ctx, sql, args...); err != nil {
+				errors = append(errors, fmt.Sprintf("delete error (pk %v): %s", op.PK, err.Error()))
 			} else {
 				deleted++
 			}
@@ -1075,8 +1193,21 @@ func columnEquals(a, b driver.ColumnMetadata) bool {
 	return true
 }
 
+// syncValueKey canonicalizes a scanned value for cross-driver comparison: drivers return the same
+// logical value as int64, string or []byte, and NULL must never collide with any text value.
+func syncValueKey(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return "\x00NULL"
+	case []byte:
+		return string(x)
+	default:
+		return fmt.Sprint(x)
+	}
+}
+
 func rowValuesEqual(rowA, rowB []any) bool {
 	return slices.EqualFunc(rowA, rowB, func(a, b any) bool {
-		return fmt.Sprint(a) == fmt.Sprint(b)
+		return syncValueKey(a) == syncValueKey(b)
 	})
 }

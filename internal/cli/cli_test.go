@@ -298,3 +298,119 @@ func TestParseDirectDSN_Postgres(t *testing.T) {
 	}
 }
 
+func TestSplitStatements_EscapedBackslashAndInlineComment(t *testing.T) {
+	script := "INSERT INTO paths VALUES ('c:\\\\');\nSELECT 2;"
+	stmts := SplitStatements(strings.NewReader(script))
+	if len(stmts) != 2 {
+		t.Fatalf("expected exactly 2 statements, got %d: %+v", len(stmts), stmts)
+	}
+	if !strings.Contains(stmts[0], "c:\\") {
+		t.Errorf("stmt 0 should contain path: %s", stmts[0])
+	}
+	if !strings.Contains(stmts[1], "SELECT 2") {
+		t.Errorf("stmt 1 should be SELECT 2: %s", stmts[1])
+	}
+}
+
+func TestSplitStatements_PostgresOperatorAndTrailingComments(t *testing.T) {
+	pgScript := "SELECT data #>> '{a}' FROM t;\nSELECT 2;"
+	stmts1 := SplitStatements(strings.NewReader(pgScript), "postgres")
+	if len(stmts1) != 2 {
+		t.Fatalf("expected 2 statements for postgres #>> operator, got %d: %+v", len(stmts1), stmts1)
+	}
+	if !strings.Contains(stmts1[0], "#>>") {
+		t.Errorf("stmt 0 should contain #>>: %s", stmts1[0])
+	}
+	if !strings.Contains(stmts1[1], "SELECT 2") {
+		t.Errorf("stmt 1 should be SELECT 2: %s", stmts1[1])
+	}
+
+	script2 := "COMMIT;\n-- done comment"
+	stmts2 := SplitStatements(strings.NewReader(script2))
+	if len(stmts2) != 1 {
+		t.Fatalf("expected 1 statement (excluding comment-only trailing statement), got %d: %+v", len(stmts2), stmts2)
+	}
+}
+
+type mockTxSession struct {
+	lastSQL string
+}
+
+func (m *mockTxSession) Exec(ctx context.Context, sql string, args ...any) (*driver.ExecResult, error) {
+	m.lastSQL = sql
+	return &driver.ExecResult{RowsAffected: 1}, nil
+}
+func (m *mockTxSession) ExecRaw(ctx context.Context, sql string, args ...any) (int64, error) {
+	m.lastSQL = sql
+	return 1, nil
+}
+func (m *mockTxSession) QueryStream(ctx context.Context, sql string, limit int) (driver.RowStream, error) {
+	return nil, nil
+}
+func (m *mockTxSession) Commit() error   { return nil }
+func (m *mockTxSession) Rollback() error { return nil }
+
+func TestFlushInsertBatch_MySQLBackslash(t *testing.T) {
+	mockTx := &mockTxSession{}
+	err := flushInsertBatch(context.Background(), mockTx, "paths", []string{"dir"}, [][]any{{`C:\temp\`}}, "mysql")
+	if err != nil {
+		t.Fatalf("flushInsertBatch failed: %v", err)
+	}
+	expected := `'C:\\temp\\'`
+	if !strings.Contains(mockTx.lastSQL, expected) {
+		t.Errorf("expected MySQL query to contain %s, got: %s", expected, mockTx.lastSQL)
+	}
+}
+
+func TestSplitStatements_MySQLVersionComments(t *testing.T) {
+	script := `
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
+CREATE TABLE users (id int) ENGINE=InnoDB /*!40101 DEFAULT CHARSET=utf8mb4 */;
+/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
+`
+	stmts := SplitStatements(strings.NewReader(script), "mysql")
+	if len(stmts) != 4 {
+		t.Fatalf("expected 4 statements including version comments, got %d: %+v", len(stmts), stmts)
+	}
+	if !strings.Contains(stmts[0], "CHARACTER_SET_CLIENT") {
+		t.Errorf("stmt 0 should be character set client statement: %s", stmts[0])
+	}
+	if !strings.Contains(stmts[1], "FOREIGN_KEY_CHECKS=0") {
+		t.Errorf("stmt 1 should contain FOREIGN_KEY_CHECKS=0: %s", stmts[1])
+	}
+	if !strings.Contains(stmts[2], "/*!40101 DEFAULT CHARSET=utf8mb4 */") {
+		t.Errorf("stmt 2 should contain version comment: %s", stmts[2])
+	}
+}
+
+func TestSplitStatements_PostgresTrailingBackslashInString(t *testing.T) {
+	pgScript := "INSERT INTO paths VALUES ('C:\\');\nSELECT 2;"
+	stmts := SplitStatements(strings.NewReader(pgScript), "postgres")
+	if len(stmts) != 2 {
+		t.Fatalf("expected 2 statements in postgres, got %d: %+v", len(stmts), stmts)
+	}
+	if !strings.Contains(stmts[0], "'C:\\'") {
+		t.Errorf("stmt 0 should contain 'C:\\', got: %s", stmts[0])
+	}
+	if !strings.Contains(stmts[1], "SELECT 2") {
+		t.Errorf("stmt 1 should be SELECT 2, got: %s", stmts[1])
+	}
+}
+
+func TestIsRowReturningQuery_WithLeadingComments(t *testing.T) {
+	// Leading single-line comment
+	if !isRowReturningQuery("-- list\nSELECT 42 AS answer;") {
+		t.Errorf("expected isRowReturningQuery to be true for SELECT with leading comment")
+	}
+
+	// Leading block comment
+	if !isRowReturningQuery("/* block comment */ SELECT 1;") {
+		t.Errorf("expected isRowReturningQuery to be true for SELECT with block comment")
+	}
+
+	// Leading comment before mutation should still be false
+	if isRowReturningQuery("-- comment\nUPDATE users SET active = 1;") {
+		t.Errorf("expected isRowReturningQuery to be false for UPDATE statement")
+	}
+}

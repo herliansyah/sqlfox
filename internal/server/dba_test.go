@@ -415,6 +415,3 @@ func TestAdvancedDiagnosticsAndProfiling(t *testing.T) {
 	}
 	partResp.Body.Close()
 }
-
-
-

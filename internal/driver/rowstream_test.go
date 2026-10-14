@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"sqlfox/internal/driver"
 	_ "modernc.org/sqlite"
+	"sqlfox/internal/driver"
 )
 
 func TestSQLRowStream(t *testing.T) {
