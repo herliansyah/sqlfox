@@ -105,11 +105,16 @@ func main() {
 
 	isSilent := *silentFlag || *quietFlag
 
+	// ponytail: Console logging to terminal is opt-in (active when -v, -verbose, -log-level, or SQLFOX_LOG_LEVEL is set).
+	// Default interactive desktop server keeps terminal focused on clean banner while broadcaster still logs to Activity Console.
+	hasExplicitLogLevel := *logLevelFlag != "" || os.Getenv("SQLFOX_LOG_LEVEL") != "" || *verboseFlag || *verboseLongFlag
+	consoleSilent := isSilent || !hasExplicitLogLevel
+
 	logRes, err := logger.Setup(logger.Config{
 		Level:    level,
 		Format:   format,
 		FilePath: logFile,
-		Silent:   isSilent,
+		Silent:   consoleSilent,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "❌ Error initializing logger: %v\n", err)
@@ -215,13 +220,6 @@ func main() {
 		}
 	}()
 
-	logRes.Logger.Info("sqlfox_started",
-		"version", Version,
-		"port", actualPort,
-		"local_url", localURL,
-		"vault", dbPath,
-	)
-
 	if !isSilent {
 		fmt.Printf("\n🦊 SqlFox %s Database Manager is running!\n", Version)
 		fmt.Printf("   ➜  Local:       %s\n", localURL)
@@ -240,6 +238,13 @@ func main() {
 		fmt.Printf("   ➜  Backups:     %s\n\n", backupDir)
 		fmt.Println("   Press Ctrl+C to shut down gracefully.")
 	}
+
+	logRes.Logger.Info("sqlfox_started",
+		"version", Version,
+		"port", actualPort,
+		"local_url", localURL,
+		"vault", dbPath,
+	)
 
 	// Auto launch browser to local URL
 	if !*noBrowserFlag {
