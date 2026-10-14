@@ -15,8 +15,8 @@ import (
 )
 
 // formatSQLValue formats a Go value into a valid SQL literal for dumps and inserts.
-func formatSQLValue(val any) string {
-	return driver.FormatSQLValue(val)
+func formatSQLValue(val any, driverName string) string {
+	return driver.FormatSQLValueForDriver(val, driverName)
 }
 
 func (s *Server) handleExportDump(w http.ResponseWriter, r *http.Request) {
@@ -36,7 +36,10 @@ func (s *Server) handleExportDump(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if targetDB != "" {
-		_ = sess.Session.SelectDatabase(ctx, targetDB)
+		if err := sess.Session.SelectDatabase(ctx, targetDB); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	schema, err := sess.Session.InspectSchema(ctx, targetDB)
@@ -124,7 +127,7 @@ func (s *Server) handleExportDump(w http.ResponseWriter, r *http.Request) {
 						for _, row := range rowsChunk {
 							var rowVals []string
 							for _, val := range row {
-								rowVals = append(rowVals, formatSQLValue(val))
+								rowVals = append(rowVals, formatSQLValue(val, sess.DriverName))
 							}
 							valueClauses = append(valueClauses, fmt.Sprintf("  (%s)", strings.Join(rowVals, ", ")))
 						}
@@ -174,7 +177,10 @@ func (s *Server) handleExportSmartSeed(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if targetDB != "" {
-		_ = sess.Session.SelectDatabase(ctx, targetDB)
+		if err := sess.Session.SelectDatabase(ctx, targetDB); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	schema, err := sess.Session.InspectSchema(ctx, targetDB)
@@ -246,7 +252,7 @@ func (s *Server) handleExportSmartSeed(w http.ResponseWriter, r *http.Request) {
 				for _, row := range rowsChunk {
 					var rowVals []string
 					for _, val := range row {
-						rowVals = append(rowVals, formatSQLValue(val))
+						rowVals = append(rowVals, formatSQLValue(val, sess.DriverName))
 					}
 					valueClauses = append(valueClauses, fmt.Sprintf("  (%s)", strings.Join(rowVals, ", ")))
 				}
@@ -272,7 +278,19 @@ func (s *Server) handleExportSmartSeed(w http.ResponseWriter, r *http.Request) {
 
 // splitSQLStatements splits a multi-statement SQL script into individual statements,
 // respecting single/double quotes, backticks, and single-line/multi-line comments.
-func splitSQLStatements(reader io.Reader) []string {
+func splitSQLStatements(reader io.Reader, driverName ...string) []string {
+	content, err := io.ReadAll(reader)
+	if err != nil {
+		return nil
+	}
+	isMySQL := len(driverName) > 0 && (strings.EqualFold(driverName[0], "mysql") || strings.EqualFold(driverName[0], "mariadb"))
+	return driver.SplitWithDelimiters(string(content), isMySQL, func(seg string) []string {
+		return splitDefaultDelimiter(strings.NewReader(seg), driverName...)
+	})
+}
+
+func splitDefaultDelimiter(reader io.Reader, driverName ...string) []string {
+	isMySQL := len(driverName) > 0 && (strings.EqualFold(driverName[0], "mysql") || strings.EqualFold(driverName[0], "mariadb"))
 	var statements []string
 	scanner := bufio.NewScanner(reader)
 	// Buffer up to 10MB per line/token if needed
@@ -286,13 +304,24 @@ func splitSQLStatements(reader io.Reader) []string {
 	inDollarQuote := false
 	inBlockComment := false
 
+	isQuoteEscaped := func(runes []rune, i int) bool {
+		if !isMySQL {
+			return false
+		}
+		bsCount := 0
+		for j := i - 1; j >= 0 && runes[j] == '\\'; j-- {
+			bsCount++
+		}
+		return bsCount%2 == 1
+	}
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		trimmedLine := strings.TrimSpace(line)
 
 		// Check for line comments when not inside quotes or block comment
 		if !inSingleQuote && !inDoubleQuote && !inBacktick && !inDollarQuote && !inBlockComment {
-			if strings.HasPrefix(trimmedLine, "--") || strings.HasPrefix(trimmedLine, "#") {
+			if strings.HasPrefix(trimmedLine, "--") || (isMySQL && strings.HasPrefix(trimmedLine, "#")) {
 				continue
 			}
 		}
@@ -301,20 +330,28 @@ func splitSQLStatements(reader io.Reader) []string {
 		for i := 0; i < len(runes); i++ {
 			r := runes[i]
 
-			// Handle block comments
+			// Handle block and inline comments
 			if !inSingleQuote && !inDoubleQuote && !inBacktick && !inDollarQuote {
 				if inBlockComment {
+					currentStmt.WriteRune(r)
 					if r == '*' && i+1 < len(runes) && runes[i+1] == '/' {
 						inBlockComment = false
+						currentStmt.WriteRune('/')
 						i++
-						continue
 					}
 					continue
 				}
 				if r == '/' && i+1 < len(runes) && runes[i+1] == '*' {
 					inBlockComment = true
+					currentStmt.WriteRune('/')
+					currentStmt.WriteRune('*')
 					i++
 					continue
+				}
+				if (r == '-' && i+1 < len(runes) && runes[i+1] == '-') || (isMySQL && r == '#') {
+					// Inline comment extends to end of line
+					currentStmt.WriteString(string(runes[i:]))
+					break
 				}
 			}
 
@@ -334,13 +371,13 @@ func splitSQLStatements(reader io.Reader) []string {
 						continue
 					}
 					// Check for escape \'
-					if i > 0 && runes[i-1] == '\\' {
+					if isQuoteEscaped(runes, i) {
 						// escaped quote
 					} else {
 						inSingleQuote = !inSingleQuote
 					}
 				} else if r == '"' && !inSingleQuote && !inBacktick && !inDollarQuote {
-					if i > 0 && runes[i-1] == '\\' {
+					if isQuoteEscaped(runes, i) {
 						// escaped quote
 					} else {
 						inDoubleQuote = !inDoubleQuote
@@ -353,7 +390,7 @@ func splitSQLStatements(reader io.Reader) []string {
 			// Statement terminator
 			if r == ';' && !inSingleQuote && !inDoubleQuote && !inBacktick && !inDollarQuote && !inBlockComment {
 				stmtStr := strings.TrimSpace(currentStmt.String())
-				if stmtStr != "" {
+				if stmtStr != "" && driver.HasExecutableSQL(stmtStr, isMySQL) {
 					statements = append(statements, stmtStr)
 				}
 				currentStmt.Reset()
@@ -366,7 +403,7 @@ func splitSQLStatements(reader io.Reader) []string {
 	}
 
 	remaining := strings.TrimSpace(currentStmt.String())
-	if remaining != "" {
+	if remaining != "" && driver.HasExecutableSQL(remaining, isMySQL) {
 		statements = append(statements, remaining)
 	}
 
@@ -408,7 +445,7 @@ func (s *Server) handleRunSQLScript(w http.ResponseWriter, r *http.Request) {
 		scriptReader = r.Body
 	}
 
-	statements := splitSQLStatements(scriptReader)
+	statements := splitSQLStatements(scriptReader, sess.DriverName)
 	if len(statements) == 0 {
 		writeError(w, http.StatusBadRequest, "no executable SQL statements found in script")
 		return
@@ -421,7 +458,10 @@ func (s *Server) handleRunSQLScript(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if targetDB != "" {
-		_ = sess.Session.SelectDatabase(ctx, targetDB)
+		if err := sess.Session.SelectDatabase(ctx, targetDB); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	totalStatements := len(statements)

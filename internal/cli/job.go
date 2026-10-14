@@ -758,7 +758,7 @@ func writeTableDump(ctx context.Context, sess driver.Session, drvName, dbName st
 			for _, row := range chunk {
 				var rowVals []string
 				for _, val := range row {
-					rowVals = append(rowVals, driver.FormatSQLValue(val))
+					rowVals = append(rowVals, driver.FormatSQLValueForDriver(val, drvName))
 				}
 				valRows = append(valRows, fmt.Sprintf("  (%s)", strings.Join(rowVals, ", ")))
 			}

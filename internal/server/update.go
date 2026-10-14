@@ -594,4 +594,3 @@ func (s *Server) handleGetChangelog(w http.ResponseWriter, r *http.Request) {
 		"changelog": string(content),
 	})
 }
-

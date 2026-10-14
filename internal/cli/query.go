@@ -70,14 +70,7 @@ func RunQuery(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 		return 1
 	}
 
-	// 2. Split statements cleanly
-	statements := SplitStatements(strings.NewReader(sqlText))
-	if len(statements) == 0 {
-		fmt.Fprintln(stderr, "❌ Error: No executable SQL statements found in input.")
-		return 1
-	}
-
-	// 3. Connect to target
+	// 2. Connect to target
 	ctx := context.Background()
 	target, err := ResolveTarget(ctx, targetParam, *driverFlag, *vaultDbFlag, *passFlag)
 	if err != nil {
@@ -85,6 +78,13 @@ func RunQuery(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 		return 1
 	}
 	defer target.Cleanup()
+
+	// 3. Split statements cleanly with dialect awareness
+	statements := SplitStatements(strings.NewReader(sqlText), target.Driver)
+	if len(statements) == 0 {
+		fmt.Fprintln(stderr, "❌ Error: No executable SQL statements found in input.")
+		return 1
+	}
 
 	// 4. Pre-execution Safety Guard inspection (Fail-closed)
 	for idx, stmt := range statements {
@@ -185,13 +185,7 @@ func resolveSQLInput(positional []string, file string, stdin io.Reader) (string,
 }
 
 func isRowReturningQuery(sql string) bool {
-	upper := strings.ToUpper(strings.TrimSpace(sql))
-	return strings.HasPrefix(upper, "SELECT") ||
-		strings.HasPrefix(upper, "SHOW") ||
-		strings.HasPrefix(upper, "EXPLAIN") ||
-		strings.HasPrefix(upper, "PRAGMA") ||
-		strings.HasPrefix(upper, "DESC") ||
-		strings.HasPrefix(upper, "WITH")
+	return driver.IsQueryStatement(sql)
 }
 
 func executeAndFormatQuery(ctx context.Context, sess driver.Session, sql string, limit int, format string, stdout, stderr io.Writer) error {

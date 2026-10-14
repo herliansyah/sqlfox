@@ -189,3 +189,80 @@ SELECT * FROM users;
 	}
 }
 
+func TestSplitSQLStatements_InlineCommentsAndEscapedBackslashes(t *testing.T) {
+	// Case 1: Inline comment with semicolon should NOT terminate the statement prematurely
+	script1 := "SELECT 1 -- ; this is a comment with semicolon\n;"
+	stmts1 := splitSQLStatements(strings.NewReader(script1))
+	if len(stmts1) != 1 {
+		t.Fatalf("expected exactly 1 statement, got %d: %+v", len(stmts1), stmts1)
+	}
+
+	// Case 2: Windows path with trailing escaped backslash
+	script2 := "INSERT INTO paths VALUES ('c:\\\\');\nSELECT 2;"
+	stmts2 := splitSQLStatements(strings.NewReader(script2))
+	if len(stmts2) != 2 {
+		t.Fatalf("expected exactly 2 statements, got %d: %+v", len(stmts2), stmts2)
+	}
+	if !strings.Contains(stmts2[0], "c:\\") {
+		t.Errorf("stmt 0 should contain path: %s", stmts2[0])
+	}
+	if !strings.Contains(stmts2[1], "SELECT 2") {
+		t.Errorf("stmt 1 should be SELECT 2: %s", stmts2[1])
+	}
+}
+
+func TestSplitSQLStatements_PostgresHashOperatorAndTrailingComments(t *testing.T) {
+	// Case 1: Postgres #>> operator should NOT be treated as a comment!
+	pgScript := "SELECT data #>> '{a}' FROM t;\nSELECT 2;"
+	stmts1 := splitSQLStatements(strings.NewReader(pgScript), "postgres")
+	if len(stmts1) != 2 {
+		t.Fatalf("expected 2 statements for postgres #>> operator, got %d: %+v", len(stmts1), stmts1)
+	}
+	if !strings.Contains(stmts1[0], "#>>") {
+		t.Errorf("stmt 0 should contain #>>: %s", stmts1[0])
+	}
+	if !strings.Contains(stmts1[1], "SELECT 2") {
+		t.Errorf("stmt 1 should be SELECT 2: %s", stmts1[1])
+	}
+
+	// Case 2: Trailing comment only should NOT produce an empty statement
+	script2 := "COMMIT;\n-- done comment"
+	stmts2 := splitSQLStatements(strings.NewReader(script2))
+	if len(stmts2) != 1 {
+		t.Fatalf("expected 1 statement (excluding comment-only trailing statement), got %d: %+v", len(stmts2), stmts2)
+	}
+}
+
+func TestSplitSQLStatements_MySQLVersionComments(t *testing.T) {
+	script := `
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
+CREATE TABLE users (id int) ENGINE=InnoDB /*!40101 DEFAULT CHARSET=utf8mb4 */;
+/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
+`
+	stmts := splitSQLStatements(strings.NewReader(script), "mysql")
+	if len(stmts) != 4 {
+		t.Fatalf("expected 4 statements including version comments, got %d: %+v", len(stmts), stmts)
+	}
+	if !strings.Contains(stmts[0], "FOREIGN_KEY_CHECKS") && !strings.Contains(stmts[1], "FOREIGN_KEY_CHECKS=0") {
+		t.Errorf("expected FOREIGN_KEY_CHECKS statement, got %s", stmts[1])
+	}
+	if !strings.Contains(stmts[2], "/*!40101 DEFAULT CHARSET=utf8mb4 */") {
+		t.Errorf("expected table DDL to preserve version comment, got %s", stmts[2])
+	}
+}
+
+func TestSplitSQLStatements_PostgresTrailingBackslashInString(t *testing.T) {
+	// In Postgres, backslash is not an escape character in standard strings
+	pgScript := "INSERT INTO paths VALUES ('C:\\');\nSELECT 2;"
+	stmts := splitSQLStatements(strings.NewReader(pgScript), "postgres")
+	if len(stmts) != 2 {
+		t.Fatalf("expected 2 statements in postgres, got %d: %+v", len(stmts), stmts)
+	}
+	if !strings.Contains(stmts[0], "'C:\\'") {
+		t.Errorf("stmt 0 should contain 'C:\\', got: %s", stmts[0])
+	}
+	if !strings.Contains(stmts[1], "SELECT 2") {
+		t.Errorf("stmt 1 should be SELECT 2, got: %s", stmts[1])
+	}
+}

@@ -120,7 +120,6 @@ func (s *Server) routes() {
 	mux.HandleFunc("POST /api/session/{id}/table/{table}/mock-data", s.handleGenerateMockData)
 	mux.HandleFunc("POST /api/session/{id}/table/{table}/import-csv", s.handleImportCSV)
 
-
 	// Processlist & DBA operations
 	mux.HandleFunc("GET /api/session/{id}/processlist", s.handleGetProcesslist)
 	mux.HandleFunc("GET /api/session/{id}/diagnostics/deadlock", s.handleGetDeadlock)
@@ -320,4 +319,3 @@ func writeError(w http.ResponseWriter, status int, message string) {
 func quoteIdent(name, driverName string) string {
 	return driver.QuoteIdentifier(name, driverName)
 }
-

@@ -554,5 +554,3 @@ func TestActiveSession_CancelQueryFallback(t *testing.T) {
 		t.Fatal("expected CancelQuery with 'active' to cancel running query via fallback")
 	}
 }
-
-

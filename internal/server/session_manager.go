@@ -53,18 +53,18 @@ type ExecuteResponse struct {
 // ActiveSession holds an active database connection session and its cached metadata.
 // It acts as a deep module providing the Safe Execution Pipeline across all transports.
 type ActiveSession struct {
-	ID           string                 `json:"id"`
-	ConnectionID string                 `json:"connection_id"`
-	Name         string                 `json:"name"`
-	Environment  string                 `json:"environment"`
-	DriverName   string                 `json:"driver_name"`
-	ReadOnly     bool                   `json:"read_only"`
-	Session      driver.Session         `json:"-"`
-	CachedSchema *driver.SchemaMetadata `json:"schema,omitempty"`
-	ServerInfo   *driver.ServerInfo     `json:"server_info,omitempty"`
-	LatencyMs    int64                  `json:"latency_ms"`
-	MemoryMB     float64                `json:"memory_mb,omitempty"`
-	LastActive   time.Time              `json:"last_active"`
+	ID             string                 `json:"id"`
+	ConnectionID   string                 `json:"connection_id"`
+	Name           string                 `json:"name"`
+	Environment    string                 `json:"environment"`
+	DriverName     string                 `json:"driver_name"`
+	ReadOnly       bool                   `json:"read_only"`
+	Session        driver.Session         `json:"-"`
+	CachedSchema   *driver.SchemaMetadata `json:"schema,omitempty"`
+	ServerInfo     *driver.ServerInfo     `json:"server_info,omitempty"`
+	LatencyMs      int64                  `json:"latency_ms"`
+	MemoryMB       float64                `json:"memory_mb,omitempty"`
+	LastActive     time.Time              `json:"last_active"`
 	backupDir      string
 	vault          *vault.Vault
 	runningQueries map[string]context.CancelFunc
@@ -374,14 +374,19 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	}
 
 	if req.Database != "" && s.Session != nil {
-		_ = s.Session.SelectDatabase(ctx, req.Database)
+		if err := s.Session.SelectDatabase(ctx, req.Database); err != nil {
+			return nil, err
+		}
 	}
 
 	// 1. Safety Guard Inspection
-	inspection := safety.Inspect(trimmedSQL, s.Environment)
+	inspection, allQueries, err := inspectAllStatements(trimmedSQL, s.Environment, s.DriverName)
+	if err != nil {
+		return nil, err
+	}
 
 	// 2. Read-Only Enforcement: blocks all destructive operations or any mutation when locked
-	if s.ReadOnly && (!isSelect || inspection.IsDestructive) {
+	if s.ReadOnly && (!isSelect || !allQueries || inspection.IsDestructive) {
 		return nil, ErrReadOnlySession
 	}
 
@@ -823,14 +828,17 @@ func (s *ActiveSession) Stream(ctx context.Context, sql string, maxRows int) (dr
 	}
 
 	isSelect := driver.IsQueryStatement(trimmedSQL)
-	inspection := safety.Inspect(trimmedSQL, s.Environment)
-	if s.ReadOnly && (!isSelect || inspection.IsDestructive) {
+	inspection, allQueries, err := inspectAllStatements(trimmedSQL, s.Environment, s.DriverName)
+	if err != nil {
+		return nil, err
+	}
+	if s.ReadOnly && (!isSelect || !allQueries || inspection.IsDestructive) {
 		return nil, ErrReadOnlySession
 	}
 	if inspection.IsDestructive || inspection.RequiresChallenge {
 		return nil, fmt.Errorf("destructive query cannot be streamed: %s; use query editor with confirmation", inspection.Reason)
 	}
-	if !isSelect {
+	if !isSelect || !allQueries {
 		return nil, errors.New("only query statements (SELECT, SHOW, DESCRIBE, EXPLAIN) can be streamed")
 	}
 
@@ -1021,4 +1029,36 @@ func (s *ActiveSession) GetTablePartitions(ctx context.Context, database, table 
 	return s.Session.GetTablePartitions(ctx, database, table)
 }
 
-
+// inspectAllStatements runs the Safety Guard on every statement of a (possibly multi-statement) input,
+// because drivers such as SQLite execute all of them in one Exec. It returns the inspection that must
+// gate execution and whether every statement is a read-only query. More than one statement requiring a
+// challenge is rejected, since one typed confirmation and one pre-DDL backup can only cover one target.
+func inspectAllStatements(sql, environment, driverName string) (*safety.InspectionResult, bool, error) {
+	stmts := splitSQLStatements(strings.NewReader(sql), driverName)
+	if len(stmts) <= 1 {
+		return safety.Inspect(sql, environment), driver.IsQueryStatement(sql), nil
+	}
+	var gate, firstDestructive *safety.InspectionResult
+	allQueries := true
+	for _, stmt := range stmts {
+		if !driver.IsQueryStatement(stmt) {
+			allQueries = false
+		}
+		insp := safety.Inspect(stmt, environment)
+		if insp.RequiresChallenge {
+			if gate != nil {
+				return nil, false, errors.New("multiple destructive statements require confirmation: run them one at a time")
+			}
+			gate = insp
+		} else if insp.IsDestructive && firstDestructive == nil {
+			firstDestructive = insp
+		}
+	}
+	if gate == nil {
+		gate = firstDestructive
+	}
+	if gate == nil {
+		gate = &safety.InspectionResult{RiskLevel: safety.RiskNone}
+	}
+	return gate, allQueries, nil
+}

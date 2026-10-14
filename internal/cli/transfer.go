@@ -131,16 +131,6 @@ func RunTransfer(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 			}
 		}
 
-		// B. Truncate if requested
-		if *truncateFlag {
-			truncSQL := fmt.Sprintf("DELETE FROM %s", driver.QuoteIdentifier(tbl, toTarget.Driver))
-			if _, err := toTarget.Session.Exec(ctx, truncSQL); err != nil {
-				fmt.Fprintf(stderr, "  ⚠️ Truncate failed on '%s': %v\n", tbl, err)
-			} else {
-				fmt.Fprintf(stderr, "  🧹 Truncated target table '%s'\n", tbl)
-			}
-		}
-
 		// C. Stream data from source
 		selectSQL := fmt.Sprintf("SELECT * FROM %s", driver.QuoteIdentifier(tbl, fromTarget.Driver))
 		stream, err := fromTarget.Session.QueryStream(ctx, selectSQL, 0)
@@ -174,7 +164,16 @@ func RunTransfer(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 		totalRows := 0
 		var transferErr error
 
-		for {
+		// B. Truncate inside the transaction so a failed copy restores the original rows.
+		if *truncateFlag {
+			if _, err := tx.Exec(ctx, fmt.Sprintf("DELETE FROM %s", driver.QuoteIdentifier(tbl, toTarget.Driver))); err != nil {
+				transferErr = fmt.Errorf("truncate failed: %w", err)
+			} else {
+				fmt.Fprintf(stderr, "  🧹 Cleared target table '%s' (pending commit)\n", tbl)
+			}
+		}
+
+		for transferErr == nil {
 			chunk, err := stream.NextChunk(*batchSizeFlag)
 			if len(chunk) > 0 {
 				if err := flushInsertBatch(ctx, tx, tbl, columns, chunk, toTarget.Driver); err != nil {
@@ -258,7 +257,7 @@ func flushInsertBatch(ctx context.Context, sess queryExecutor, table string, col
 				sb.WriteString(", ")
 			}
 			if cIdx < len(row) {
-				sb.WriteString(driver.FormatSQLValue(row[cIdx]))
+				sb.WriteString(driver.FormatSQLValueForDriver(row[cIdx], drv))
 			} else {
 				sb.WriteString("NULL")
 			}
@@ -269,4 +268,3 @@ func flushInsertBatch(ctx context.Context, sess queryExecutor, table string, col
 	_, err := sess.Exec(ctx, sb.String())
 	return err
 }
-
