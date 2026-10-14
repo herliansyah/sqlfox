@@ -14366,8 +14366,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const targetCatalog = (activeGridDB && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeGridDB.toLowerCase()]) || (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
       const tableMeta = (targetCatalog?.tables || []).find(t => (t.name || '').toLowerCase() === (tableName || '').toLowerCase());
       if (!pkCol && tableMeta && Array.isArray(tableMeta.columns)) {
-        const pk = tableMeta.columns.find(c => c.is_primary_key);
-        if (pk) pkCol = pk.name;
+        const pks = tableMeta.columns.filter(c => c.is_primary_key);
+        if (pks.length === 1) pkCol = pks[0].name;
       }
 
       activeGridPKCol = pkCol;
@@ -14963,9 +14963,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
         const targetCatalog = (activeGridDB && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeGridDB.toLowerCase()]) || (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
         const tableMeta = (targetCatalog?.tables || []).find(t => (t.name || '').toLowerCase() === tableName.toLowerCase());
         if (tableMeta && Array.isArray(tableMeta.columns)) {
-          const pk = tableMeta.columns.find(c => c.is_primary_key);
-          if (pk) {
-            pkCol = pk.name;
+          const pks = tableMeta.columns.filter(c => c.is_primary_key);
+          if (pks.length === 1) {
+            pkCol = pks[0].name;
             activeGridPKCol = pkCol;
           }
         }
@@ -15066,9 +15066,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
           const targetCatalog = (activeGridDB && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeGridDB.toLowerCase()]) || (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
           const tableMeta = (targetCatalog?.tables || []).find(t => (t.name || '').toLowerCase() === tableName.toLowerCase());
           if (tableMeta && Array.isArray(tableMeta.columns)) {
-            const pk = tableMeta.columns.find(c => c.is_primary_key);
-            if (pk) {
-              pkCol = pk.name;
+            const pks = tableMeta.columns.filter(c => c.is_primary_key);
+            if (pks.length === 1) {
+              pkCol = pks[0].name;
               activeGridPKCol = pkCol;
             }
           }
@@ -15699,8 +15699,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
         const targetCatalog = (activeGridDB && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeGridDB.toLowerCase()]) || (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
         const tableMeta = (targetCatalog?.tables || []).find(t => (t.name || '').toLowerCase() === activeGridTable.toLowerCase());
         if (tableMeta && Array.isArray(tableMeta.columns)) {
-          const pk = tableMeta.columns.find(c => c.is_primary_key);
-          if (pk) activeGridPKCol = pk.name;
+          const pks = tableMeta.columns.filter(c => c.is_primary_key);
+          if (pks.length === 1) activeGridPKCol = pks[0].name;
         }
       }
 
@@ -16264,9 +16264,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
         const targetCatalog = (activeGridDB && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeGridDB.toLowerCase()]) || (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
         const tableMeta = (targetCatalog?.tables || []).find(t => (t.name || '').toLowerCase() === tableName.toLowerCase());
         if (tableMeta && Array.isArray(tableMeta.columns)) {
-          const pk = tableMeta.columns.find(c => c.is_primary_key);
-          if (pk) {
-            pkCol = pk.name;
+          const pks = tableMeta.columns.filter(c => c.is_primary_key);
+          if (pks.length === 1) {
+            pkCol = pks[0].name;
             activeGridPKCol = pkCol;
           }
         }
@@ -17071,6 +17071,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
     // --- 3. Row-Level Data Sync UI ---
     let currentDataSyncOperations = [];
+    let currentDataSyncColumns = [];
 
     function openDataSyncModal() {
       populateSyncConnectionSelects('sync-data-source-conn', 'sync-data-target-conn');
@@ -17155,6 +17156,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
         const data = await res.json();
         currentDataSyncOperations = data.operations || [];
+        currentDataSyncColumns = data.columns || [];
 
         const resultsContainer = document.getElementById('sync-data-results-container');
         if (resultsContainer) resultsContainer.classList.remove('hidden');
@@ -17258,6 +17260,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
             target_session_id: tgtConnId,
             target_db: tgtDB,
             table: table,
+            columns: currentDataSyncColumns,
             operations: currentDataSyncOperations,
             confirmed: true,
             challenge_input: challengeInput
