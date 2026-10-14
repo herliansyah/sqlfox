@@ -33,7 +33,6 @@ type InspectionResult struct {
 	Relationships     []driver.TableRelationshipInfo `json:"relationships,omitempty"`
 }
 
-
 // Inspect analyzes a query string against the target environment (Production, Staging, Development).
 func Inspect(query string, environment string) *InspectionResult {
 	trimmed := strings.TrimSpace(query)
@@ -44,6 +43,11 @@ func Inspect(query string, environment string) *InspectionResult {
 	clean := driver.StripLeadingComments(trimmed)
 	if clean == "" {
 		return &InspectionResult{RiskLevel: RiskNone}
+	}
+
+	// The Vitess parser has no CTE support, so inspect the main statement behind WITH ... AS (...).
+	if main, ok := stripLeadingCTE(clean); ok {
+		return Inspect(main, environment)
 	}
 
 	// Try AST parsing first (Vitess parser)
@@ -155,6 +159,46 @@ var (
 	reWhere    = regexp.MustCompile(`(?i)\bWHERE\b`)
 )
 
+// maskCommentsAndLiterals blanks out comments, quoted strings and quoted identifiers so keyword
+// regexes (e.g. WHERE) only see real SQL tokens.
+func maskCommentsAndLiterals(q string) string {
+	b := []byte(q)
+	for i := 0; i < len(b); i++ {
+		switch {
+		case b[i] == '-' && i+1 < len(b) && b[i+1] == '-', b[i] == '#':
+			for ; i < len(b) && b[i] != '\n'; i++ {
+				b[i] = ' '
+			}
+		case b[i] == '/' && i+1 < len(b) && b[i+1] == '*':
+			end := strings.Index(q[i+2:], "*/")
+			stop := len(b)
+			if end >= 0 {
+				stop = i + 2 + end + 2
+			}
+			for ; i < stop; i++ {
+				b[i] = ' '
+			}
+			i--
+		case b[i] == '\'' || b[i] == '"' || b[i] == '`':
+			quote := b[i]
+			b[i] = ' '
+			for i++; i < len(b); i++ {
+				if b[i] == '\\' && quote != '`' && i+1 < len(b) {
+					b[i], b[i+1] = ' ', ' '
+					i++
+					continue
+				}
+				if b[i] == quote {
+					b[i] = ' '
+					break
+				}
+				b[i] = ' '
+			}
+		}
+	}
+	return string(b)
+}
+
 func inspectLexicalFallback(query string, environment string) *InspectionResult {
 	isProd := strings.EqualFold(environment, "Production")
 
@@ -185,7 +229,7 @@ func inspectLexicalFallback(query string, environment string) *InspectionResult 
 
 	if match := reDelete.FindStringSubmatch(query); len(match) > 1 {
 		target := cleanTableName(match[1])
-		if !reWhere.MatchString(query) {
+		if !reWhere.MatchString(maskCommentsAndLiterals(query)) {
 			return &InspectionResult{
 				RiskLevel:         RiskCritical,
 				IsDestructive:     true,
@@ -208,7 +252,7 @@ func inspectLexicalFallback(query string, environment string) *InspectionResult 
 
 	if match := reUpdate.FindStringSubmatch(query); len(match) > 1 {
 		target := cleanTableName(match[1])
-		if !reWhere.MatchString(query) {
+		if !reWhere.MatchString(maskCommentsAndLiterals(query)) {
 			return &InspectionResult{
 				RiskLevel:         RiskCritical,
 				IsDestructive:     true,
@@ -249,4 +293,51 @@ func cleanTableName(raw string) string {
 	parts := strings.Split(s, ".")
 	last := parts[len(parts)-1]
 	return strings.Trim(last, "`'\"")
+}
+
+var reCTEStart = regexp.MustCompile(`(?i)^WITH\b`)
+
+// stripLeadingCTE returns the main statement following a WITH clause, i.e. the first
+// SELECT/INSERT/UPDATE/DELETE/MERGE keyword found outside parentheses and quotes.
+func stripLeadingCTE(q string) (string, bool) {
+	if !reCTEStart.MatchString(q) {
+		return "", false
+	}
+	depth := 0
+	var quote byte
+	for i := 4; i < len(q); i++ {
+		c := q[i]
+		if quote != 0 {
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '\'', '"', '`':
+			quote = c
+		case '(':
+			depth++
+		case ')':
+			depth--
+		default:
+			if depth != 0 || !isIdentByte(c) || isIdentByte(q[i-1]) {
+				continue
+			}
+			j := i
+			for j < len(q) && isIdentByte(q[j]) {
+				j++
+			}
+			switch strings.ToUpper(q[i:j]) {
+			case "SELECT", "INSERT", "UPDATE", "DELETE", "MERGE":
+				return q[i:], true
+			}
+			i = j - 1
+		}
+	}
+	return "", false
+}
+
+func isIdentByte(c byte) bool {
+	return c == '_' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 }
