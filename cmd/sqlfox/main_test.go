@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -232,7 +233,11 @@ func TestStartupBannerAndLoggingOrder(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	binPath := filepath.Join(tmpDir, "sqlfox")
+	binName := "sqlfox"
+	if runtime.GOOS == "windows" {
+		binName += ".exe"
+	}
+	binPath := filepath.Join(tmpDir, binName)
 	buildCmd := exec.Command("go", "build", "-o", binPath, ".")
 	if out, err := buildCmd.CombinedOutput(); err != nil {
 		t.Fatalf("failed to build test binary: %v\nOutput: %s", err, string(out))
@@ -329,5 +334,4 @@ func (s *safeBuffer) String() string {
 	defer s.mu.Unlock()
 	return s.buf.String()
 }
-
 
