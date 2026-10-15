@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Terminal Startup Banner & CLI Hero Header (`internal/cli`, `cmd/sqlfox`)**: Interactive startup banner styled as a heavy devtool box (K9s/Lazygit aesthetic) displaying local/LAN endpoints, Master PIN, vault location, and supported database engines. Added compact ANSI hero header for `sqlfox help` with strict TTY, `NO_COLOR`, and `TERM=dumb` guards to keep redirection and Unix pipes clean.
 - **Multi-Statement Compound Safety Gate (`internal/server`, `internal/safety`)**: Decompose and inspect all statements within multi-statement SQL executions. Reject compound inputs containing multiple destructive commands that require confirmation challenges, preventing trailing destructive command smuggling (e.g. `SELECT 1; DROP TABLE victim`) and ensuring read-only session enforcement across all sub-statements.
 - **Dialect-Specific Single-Row Targeting for PK-Less Mutations (`internal/server`)**: Enforce physical single-row targeting (`singleRowWhere`) for cell edits and row deletions on tables without a primary key. Uses `LIMIT 1` for MySQL, `rowid IN (SELECT rowid ... LIMIT 1)` for SQLite, and `(tableoid, ctid) IN (SELECT tableoid, ctid ... LIMIT 1)` for PostgreSQL (partition-safe via `tableoid`), guaranteeing that mutating or deleting one duplicate row never touches identical sister rows.
 - **Composite Primary Key Data Sync (`internal/server`)**: Full composite primary key support for row-level data comparison and application. Serializes composite keys with an unambiguous unit separator (`\x1f`), synthesizes multi-clause `WHERE` criteria, and maps source columns to target columns (`dataIdx`) to prevent omitted columns from being overwritten with `NULL`.
@@ -15,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Comprehensive Mutation Safety Regression Suite (`internal/server/mutation_safety_test.go`)**: Added automated regression checks covering PK-less duplicate-row isolation, multi-statement DROP injection protection, truncate-transfer rollback recovery, and row-level sync table size caps.
 
 ### Changed
+- **Opt-In Console Logging & Startup Log Placement (`cmd/sqlfox`)**: Made terminal console logging opt-in (enabled only via `-v`, `-verbose`, `-log-level`, or `SQLFOX_LOG_LEVEL`) to keep the startup banner clean, while continuing full event streaming to the in-app Activity Console. Startup logs are placed below the banner when logging is active.
 - **Data Sync Memory Safety Ceiling (`internal/server`)**: Enforce an upper bound (10,000 rows) on row-level data sync comparisons, responding with HTTP 422 Unprocessable Entity to protect against daemon memory exhaustion on oversized tables.
 - **Canonical Sync Value Normalization (`internal/server`)**: Standardized row comparison hashing (`syncValueKey`) across driver types (`int64`, string representations, byte slices) while strictly distinguishing `NULL` (`\x00NULL`) from empty strings or literal strings.
 
