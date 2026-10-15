@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.1] - 2026-10-15
+
 ### Added
 - **Terminal Startup Banner & CLI Hero Header (`internal/cli`, `cmd/sqlfox`)**: Interactive startup banner styled as a heavy devtool box (K9s/Lazygit aesthetic) displaying local/LAN endpoints, Master PIN, vault location, and supported database engines. Added compact ANSI hero header for `sqlfox help` with strict TTY, `NO_COLOR`, and `TERM=dumb` guards to keep redirection and Unix pipes clean.
 - **Multi-Statement Compound Safety Gate (`internal/server`, `internal/safety`)**: Decompose and inspect all statements within multi-statement SQL executions. Reject compound inputs containing multiple destructive commands that require confirmation challenges, preventing trailing destructive command smuggling (e.g. `SELECT 1; DROP TABLE victim`) and ensuring read-only session enforcement across all sub-statements.
