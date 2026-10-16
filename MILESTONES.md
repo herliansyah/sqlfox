@@ -612,6 +612,17 @@ v2.2 (MySQL Enterprise Operations & Programmability Suite)
   - [x] **Documentation & Verification**: Recorded in ADR-0050, `CONTEXT.md`, `ARCHITECTURE.md`, `UX_DESIGN.md`, `CHANGELOG.md`, `README.md`, `USER_GUIDE.md`, `USER_GUIDE_ID.md`, and verified via `go test -v ./cmd/sqlfox -run "TestWindowsEmbeddedIconConsistency"`.
 - **Runnable Verification**: Run `go test -v ./cmd/sqlfox -run "TestWindowsEmbeddedIconConsistency"` and `node scripts/test-connection-and-export-repro.mjs` -> 100% pass.
 
+---
+
+### Milestone 38: Virtual Grid Ergonomics Suite (Quick-Filters, Column Visibility & Vertical Record Inspector)
+- **Goal**: Elevate grid inspection and data manipulation efficiency for DBAs and power users without adding bloat, bringing TablePlus-style instant cell filtering and column visibility management alongside DBeaver-style vertical single record form inspection.
+- **Deliverables**:
+  - [x] **Grid Right-Click Quick-Filters (`web/dist/index.html`)**: Context menu integration on data cells providing instant filtering operators (`=`, `!=`, `>`, `<`, `LIKE %val%`, `IS NULL`, `IS NOT NULL`) with dialect-safe literal escaping, merging smoothly into the Table Viewer filter bar and executing immediately.
+  - [x] **Column Visibility Picker (`web/dist/index.html`)**: Dynamic column toggle dropdown (`Columns (N/Total)`) with live search filter, `Show All` / `Hide All` convenience actions, sticky Primary Key protection (`🔒 PKs cannot be hidden`) safeguarding keyset pagination and mutation integrity, and tab-level `sessionStorage` state persistence.
+  - [x] **Vertical Record Inspector / Single Record Form View (`web/dist/index.html`)**: Accessible via `Spacebar` or right-click &rarr; `📋 Inspect Record (Form View)`. Two-column responsive card layout displaying every field vertically with field search filter, live record pager (`Previous` / `Next` or `ArrowLeft` / `ArrowRight`), 1-click JSON formatting and syntax copy (`Copy JSON`, `Copy Text`), and inline field editing wired directly to `stagedEdits`.
+  - [x] **Documentation & Verification**: Recorded in `CHANGELOG.md`, `MILESTONES.md`, `docs/USER_GUIDE.md`, `docs/USER_GUIDE_ID.md`, and validated via automated test harness `scripts/test-grid-ergonomics-suite.mjs` and `go test -v ./web`.
+- **Runnable Verification**: Run `node scripts/test-grid-ergonomics-suite.mjs` and `go test -v ./web` -> 100% pass across all ergonomics and rendering routines.
+
 
 
 

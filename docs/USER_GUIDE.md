@@ -311,6 +311,27 @@ Traditional `OFFSET 1000000` pagination forces database engines to scan and disc
   - `Alt+U` &rarr; Generated RFC4122 `UUID v4`
 - **Tables Without Primary Keys (PK-Less)**: SqlFox generates safe full-row criteria narrowed strictly to at most one physical row (`LIMIT 1` for MySQL, `rowid IN (SELECT rowid ... LIMIT 1)` for SQLite, and `(tableoid, ctid) IN (SELECT tableoid, ctid ... LIMIT 1)` for PostgreSQL), ensuring that updating or deleting one of several identical rows never touches duplicate sister rows.
 
+### Virtual Grid Ergonomics Suite
+SqlFox delivers advanced grid exploration tools designed for high-density, multi-column database inspection:
+- **Right-Click Quick-Filters (TablePlus style)**:
+  - Right-click any cell in the table viewer or query results grid to reveal contextual filter actions: `column = 'val'`, `column != 'val'`, `column > 'val'`, `column < 'val'`, `column LIKE '%val%'`, `column IS NULL`, or `IS NOT NULL`.
+  - Automatically handles dialect-specific string escaping and quotes.
+  - In Table Viewer, seamlessly appends criteria to the filter bar (`AND column = 'val'`) and reloads instantly.
+  - In Query Editor results, automatically appends or wraps criteria into the active `WHERE` clause and executes immediately.
+- **Column Visibility Picker (TablePlus style)**:
+  - Click the **Columns (N/Total)** button in the Table Viewer toolbar to manage visible columns.
+  - **Live Filter**: Quickly find columns in wide tables by typing in the search box.
+  - **Show All / Hide All**: Quickly hide all optional columns with one click.
+  - **Sticky Primary Key Protection**: Primary key columns are permanently locked (`🔒 PKs cannot be hidden`), safeguarding keyset pagination and mutation integrity.
+  - **Tab-Level Persistence**: Column visibility choices are saved to `sessionStorage` per connection, database, and table, preserving your customized view across tab switching.
+- **Vertical Record Inspector / Single Record Form View (DBeaver style)**:
+  - Select any row and press **`Spacebar`**, or right-click any cell and choose **`📋 Inspect Record (Form View)`**.
+  - Transforms wide or tall records (50+ columns, deep JSON, or long text blobs) into a responsive two-column card view.
+  - **Live Record Pager**: Navigate between records seamlessly using **Previous / Next** buttons or **ArrowLeft / ArrowRight** hotkeys.
+  - **Column Search**: Filter displayed fields instantly with the built-in search input.
+  - **1-Click Copy Actions**: Copy the active record as formatted JSON (`Copy JSON`) or tab-delimited text (`Copy Text`).
+  - **Live Staged Mutations**: Edit values directly in the inspector inputs or textareas; changes are tagged with `● Modified` and wired directly to the global `stagedEdits` transaction tracker and save bar.
+
 ### Zero-Dependency CSV Import & Column Mapping
 1. Click **Import CSV** in any open table view.
 2. Select your `.csv` file. SqlFox inspects headers and previews the first 10 rows automatically.
