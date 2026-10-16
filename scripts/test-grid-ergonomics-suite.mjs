@@ -143,6 +143,7 @@ assert(typeof sandbox.applyQuickFilterFromCell === 'function', 'applyQuickFilter
 assert(typeof sandbox.toggleColumnPickerDropdown === 'function', 'toggleColumnPickerDropdown must be defined as a function');
 assert(typeof sandbox.toggleColumnVisibility === 'function', 'toggleColumnVisibility must be defined as a function');
 assert(typeof sandbox.showAllColumns === 'function', 'showAllColumns must be defined as a function');
+assert(typeof sandbox.hideAllColumns === 'function', 'hideAllColumns must be defined as a function');
 assert(typeof sandbox.openRecordInspector === 'function', 'openRecordInspector must be defined as a function');
 assert(typeof sandbox.navigateRecordInspector === 'function', 'navigateRecordInspector must be defined as a function');
 assert(typeof sandbox.onRecordFieldChange === 'function', 'onRecordFieldChange must be defined as a function');
@@ -187,6 +188,12 @@ vm.runInContext(`
   if (!isColumnHidden('created_at', 'users')) throw new Error('isColumnHidden(created_at) should return true');
   if (isColumnHidden('email', 'users')) throw new Error('isColumnHidden(email) should return false');
   if (isColumnHidden('id', 'users')) throw new Error('PK column id should NEVER be hidden');
+
+  hideAllColumns();
+  if (!t2.hiddenColumns.has('created_at')) throw new Error('hideAllColumns should hide created_at');
+  if (!t2.hiddenColumns.has('email')) throw new Error('hideAllColumns should hide email');
+  if (t2.hiddenColumns.has('id')) throw new Error('hideAllColumns should keep PK id visible');
+  if (isColumnHidden('id', 'users')) throw new Error('isColumnHidden(id) should be false after hideAllColumns');
 
   showAllColumns();
   if (t2.hiddenColumns.size !== 0) throw new Error('showAllColumns should clear hiddenColumns');

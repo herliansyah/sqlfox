@@ -252,6 +252,12 @@
     .note-preview-content h3:first-child { margin-top: 0 !important; }
     .note-preview-content p:last-child { margin-bottom: 0 !important; }
 
+    /* Header stacking context: ensure header is positioned relative so dropdown menus (#top-monitor-menu, etc.) always float over the main workspace and grid dropdowns */
+    header {
+      position: relative !important;
+      z-index: 40 !important;
+    }
+
     /* Notes inbox slide-over drawer: z-index 35 (below header z-40 so dropdowns float over drawer, above copilot z-30) */
     #notes-inbox-drawer {
       z-index: 35 !important;
@@ -818,10 +824,14 @@
                 <span id="col-picker-count-badge" class="text-[10px] text-slate-400 font-mono">(0/0)</span>
                 <span class="text-[9px] text-slate-500">▾</span>
               </button>
-              <div id="col-picker-dropdown" class="hidden absolute right-0 mt-1 z-50 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-2 text-xs text-slate-200 min-w-60 max-h-80 flex flex-col ring-2 ring-black/50">
+              <div id="col-picker-dropdown" class="hidden absolute right-0 mt-1 z-30 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-2 text-xs text-slate-200 min-w-60 max-h-80 flex flex-col ring-2 ring-black/50">
                 <div class="pb-1.5 mb-1.5 border-b border-slate-800 flex items-center justify-between gap-1.5">
                   <input type="text" id="col-picker-search" oninput="filterColumnPickerList(this.value)" placeholder="Search column..." class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-0.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 font-mono" />
-                  <button type="button" onclick="showAllColumns()" class="text-[10px] text-sky-400 hover:text-sky-300 whitespace-nowrap px-1 font-semibold">All</button>
+                  <div class="flex items-center space-x-1 shrink-0">
+                    <button type="button" onclick="showAllColumns()" class="text-[10px] text-sky-400 hover:text-sky-300 whitespace-nowrap px-1 py-0.5 rounded hover:bg-slate-800 font-semibold" title="Show all columns">All</button>
+                    <span class="text-slate-600 text-[10px]">|</span>
+                    <button type="button" onclick="hideAllColumns()" class="text-[10px] text-amber-400 hover:text-amber-300 whitespace-nowrap px-1 py-0.5 rounded hover:bg-slate-800 font-semibold" title="Hide all optional columns (keep Primary Key)">Hide All</button>
+                  </div>
                 </div>
                 <div id="col-picker-list" class="overflow-y-auto flex-1 space-y-1 max-h-60 pr-1"></div>
               </div>
@@ -1792,32 +1802,33 @@
     </main>
 
     <!-- Right Sidebar: AI Assistant & Privacy Firewall -->
-    <aside id="ai-sidebar" class="w-80 bg-app-surface border-l border-app-border flex flex-col flex-shrink-0 transition-all duration-200 z-10 relative select-text" style="min-width: 280px; max-width: calc(100vw - 120px);">
+    <aside id="ai-sidebar" class="w-80 bg-app-surface border-l border-app-border flex flex-col flex-shrink-0 transition-all duration-200 z-10 relative select-text right-0 max-w-full" style="min-width: 280px; max-width: calc(100vw - 120px);">
       <!-- Drag Resizer Seam on Left Edge -->
       <div id="ai-sidebar-resizer" class="absolute top-0 bottom-0 -left-1.5 w-3 cursor-col-resize hover:bg-sky-500/50 active:bg-sky-500 z-20 transition-colors" title="Drag to resize Copilot sidebar"></div>
 
       <!-- AI Header -->
-      <div class="p-2.5 border-b border-app-border flex items-center justify-between">
-        <div class="flex items-center space-x-1.5">
+      <div class="p-2 border-b border-app-border flex items-center justify-between shrink-0">
+        <div class="flex items-center space-x-1.5 shrink-0">
           <span>🤖</span>
           <span class="text-xs font-bold text-white tracking-wide">Copilot</span>
         </div>
-        <div class="flex items-center space-x-1 text-xs">
-          <button onclick="toggleAIMaximize()" id="ai-maximize-btn" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded text-[11px] transition flex items-center space-x-1" title="Maximize / Restore Sidebar (Toggle 50% width)">
+        <div class="flex items-center space-x-1 text-xs shrink-0">
+          <button onclick="toggleAIMaximize()" id="ai-maximize-btn" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-1.5 py-1 rounded text-[11px] transition flex items-center" title="Maximize / Restore Sidebar (Toggle 50% width)">
             <span id="ai-maximize-icon">⛶</span>
           </button>
-          <button onclick="startNewAIChat()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded text-[11px] transition flex items-center space-x-1" title="Start a fresh chat conversation">
+          <button onclick="startNewAIChat()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-1.5 py-1 rounded text-[11px] transition flex items-center space-x-0.5" title="Start a fresh chat conversation">
             <span>➕</span>
-            <span>New</span>
+            <span class="hidden sm:inline">New</span>
           </button>
-          <button onclick="toggleAIChatHistory()" id="ai-history-btn" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded text-[11px] transition flex items-center space-x-1" title="View past chat sessions">
+          <button onclick="toggleAIChatHistory()" id="ai-history-btn" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-1.5 py-1 rounded text-[11px] transition flex items-center space-x-0.5" title="View past chat sessions">
             <span>📜</span>
-            <span id="ai-history-count">History</span>
+            <span id="ai-history-count" class="hidden sm:inline">History</span>
           </button>
-          <button onclick="toggleAISettings()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded text-[11px] transition" title="Configure AI Model & Response Style">
-            ⚙️ BYOK
+          <button onclick="toggleAISettings()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-1.5 py-1 rounded text-[11px] transition flex items-center space-x-0.5" title="Configure AI Model & Response Style (BYOK)">
+            <span>⚙️</span>
+            <span class="hidden sm:inline">BYOK</span>
           </button>
-          <button onclick="toggleAISidebar(false)" class="text-slate-400 hover:text-white px-1.5 py-1 text-xs rounded hover:bg-slate-800 transition" title="Close Copilot (Ctrl+L)">✕</button>
+          <button onclick="toggleAISidebar(false)" class="text-slate-400 hover:text-white px-2 py-1 text-xs font-bold rounded hover:bg-slate-800 transition shrink-0 ml-0.5" title="Close Copilot (Ctrl+L)">✕</button>
         </div>
       </div>
 
@@ -5495,14 +5506,14 @@
           menu.classList.add('hidden');
         }
       }
-      if (!e.target.closest('#table-context-menu, #tab-context-menu, #grid-context-menu, #pl-context-menu')) {
+      if (!e.target.closest('#table-context-menu, #tab-context-menu, #grid-context-menu, #pl-context-menu, #btn-col-picker, #col-picker-dropdown, #btn-export-csv, #export-csv-menu')) {
         closeAllContextMenus();
       }
     });
 
     // Dismiss context menus when right-clicking on unhandled page surfaces
     document.addEventListener('contextmenu', (e) => {
-      if (!e.target.closest('#table-context-menu, #tab-context-menu, #grid-context-menu, #pl-context-menu, td[data-col], #tabs-container, #schema-tree, .pl-row')) {
+      if (!e.target.closest('#table-context-menu, #tab-context-menu, #grid-context-menu, #pl-context-menu, td[data-col], #tabs-container, #schema-tree, .pl-row, #btn-col-picker, #col-picker-dropdown, #btn-export-csv, #export-csv-menu')) {
         closeAllContextMenus();
       }
     });
@@ -5512,6 +5523,10 @@
       if (typeof closeTableContextMenu === 'function') closeTableContextMenu();
       if (typeof closeGridContextMenu === 'function') closeGridContextMenu();
       if (typeof closeProcessContextMenu === 'function') closeProcessContextMenu();
+      const colPicker = document.getElementById('col-picker-dropdown');
+      if (colPicker) colPicker.classList.add('hidden');
+      const exportCsv = document.getElementById('export-csv-menu');
+      if (exportCsv) exportCsv.classList.add('hidden');
     }
 
     // --- Table Context Menu & Actions ---
@@ -14579,6 +14594,30 @@ Please analyze what is causing this query to be slow and suggest necessary query
       renderColumnPickerList(document.getElementById('col-picker-search')?.value || '');
     }
 
+    function hideAllColumns() {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab || !currentColumns || currentColumns.length === 0) return;
+      const hidden = getHiddenColumns(activeGridTable);
+      hidden.clear();
+      const effectivePK = activeGridPKCol || currentColumns[0]?.name;
+      currentColumns.forEach(c => {
+        // Sticky PK protection: Primary Key (or fallback first column) remains visible
+        if (c.name !== effectivePK && !c.isPrimary) {
+          hidden.add(c.name);
+        }
+      });
+      const tName = activeGridTable || activeTab.tableName || '';
+      const dbName = activeGridDB || activeTab.database || '';
+      if (tName) {
+        try {
+          sessionStorage.setItem(`sqlfox-hidden-cols:${dbName}:${tName}`, JSON.stringify([...hidden]));
+        } catch (e) {}
+      }
+      updateColumnPickerBadge();
+      renderGridResults(currentColumns, currentResults, activeGridPKCol, activeGridTable, activeGridDB, true);
+      renderColumnPickerList(document.getElementById('col-picker-search')?.value || '');
+    }
+
     const renderVirtualGrid = renderGridResults;
 
     function renderGridResults(cols, rows, pkCol = null, tableName = null, databaseName = null, isFilterPass = false) {
@@ -17018,6 +17057,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
     function toggleTopDBToolsMenu(force = null) {
       const menu = document.getElementById('top-db-tools-menu');
       if (!menu) return;
+      const willOpen = typeof force === 'boolean' ? force : menu.classList.contains('hidden');
+      if (willOpen) closeAllContextMenus();
       if (typeof force === 'boolean') {
         menu.classList.toggle('hidden', !force);
       } else {
@@ -17028,6 +17069,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
     function toggleTopMonitorMenu(force = null) {
       const menu = document.getElementById('top-monitor-menu');
       if (!menu) return;
+      const willOpen = typeof force === 'boolean' ? force : menu.classList.contains('hidden');
+      if (willOpen) closeAllContextMenus();
       if (typeof force === 'boolean') {
         menu.classList.toggle('hidden', !force);
       } else {
@@ -17041,6 +17084,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
     function toggleTopSettingsMenu(force = null) {
       const menu = document.getElementById('top-settings-menu');
       if (!menu) return;
+      const willOpen = typeof force === 'boolean' ? force : menu.classList.contains('hidden');
+      if (willOpen) closeAllContextMenus();
       if (typeof force === 'boolean') {
         menu.classList.toggle('hidden', !force);
       } else {
@@ -18587,15 +18632,24 @@ Please analyze what is causing this query to be slow and suggest necessary query
       } else {
         const restoreWidth = savedAIWidthBeforeMaximize || localStorage.getItem('sqlfox_copilot_width') || '380px';
         sidebar.style.width = restoreWidth;
-        const widthNum = parseInt(restoreWidth, 10) || 320;
-        if (widthNum <= 380) {
-          sidebar.classList.remove('absolute', 'top-0', 'right-0', 'bottom-0', 'z-30', 'shadow-2xl', 'ai-sidebar-overlay');
-          sidebar.classList.add('relative', 'z-10');
-        } else {
-          sidebar.classList.add('absolute', 'top-0', 'right-0', 'bottom-0', 'z-30', 'shadow-2xl', 'ai-sidebar-overlay');
-          sidebar.classList.remove('relative');
-        }
+        updateAISidebarMode();
         if (icon) icon.textContent = '⛶';
+      }
+    }
+
+    function updateAISidebarMode() {
+      const sidebar = document.getElementById('ai-sidebar');
+      if (!sidebar || sidebar.classList.contains('hidden')) return;
+      const widthNum = parseInt(sidebar.style.width, 10) || sidebar.offsetWidth || 320;
+      const leftSidebar = document.getElementById('left-sidebar');
+      const leftWidth = (leftSidebar && !leftSidebar.classList.contains('hidden') && leftSidebar.offsetWidth > 0) ? leftSidebar.offsetWidth : 0;
+      const availableMain = window.innerWidth - leftWidth - widthNum;
+      if (isAIMaximized || widthNum > 380 || availableMain < 500 || window.innerWidth < 1024) {
+        sidebar.classList.add('absolute', 'top-0', 'right-0', 'bottom-0', 'z-30', 'shadow-2xl', 'ai-sidebar-overlay');
+        sidebar.classList.remove('relative');
+      } else {
+        sidebar.classList.remove('absolute', 'top-0', 'right-0', 'bottom-0', 'z-30', 'shadow-2xl', 'ai-sidebar-overlay');
+        sidebar.classList.add('relative', 'z-10');
       }
     }
 
@@ -18608,16 +18662,11 @@ Please analyze what is causing this query to be slow and suggest necessary query
         const savedWidth = localStorage.getItem('sqlfox_copilot_width');
         if (savedWidth) {
           sidebar.style.width = savedWidth;
-          const widthNum = parseInt(savedWidth, 10) || 320;
-          const leftSidebar = document.getElementById('left-sidebar');
-          const leftWidth = (leftSidebar && !leftSidebar.classList.contains('hidden') && leftSidebar.offsetWidth > 0) ? leftSidebar.offsetWidth : 0;
-          const availableMain = window.innerWidth - leftWidth - widthNum;
-          if (widthNum > 380 || availableMain < 500) {
-            sidebar.classList.add('absolute', 'top-0', 'right-0', 'bottom-0', 'z-30', 'shadow-2xl', 'ai-sidebar-overlay');
-            sidebar.classList.remove('relative');
-          }
         }
       } catch (_) {}
+
+      updateAISidebarMode();
+      window.addEventListener('resize', updateAISidebarMode);
 
       let isDragging = false;
       let startX = 0;
@@ -20344,16 +20393,18 @@ Please analyze what is causing this query to be slow and suggest necessary query
           if (aiEl) {
             if (isAIVisible) {
               aiEl.classList.remove('hidden');
-              const widthNum = parseInt(aiEl.style.width, 10) || 320;
-              const leftSidebar = document.getElementById('left-sidebar');
-              const leftWidth = (leftSidebar && !leftSidebar.classList.contains('hidden') && leftSidebar.offsetWidth > 0) ? leftSidebar.offsetWidth : 0;
-              const availableMain = window.innerWidth - leftWidth - widthNum;
-              if (widthNum > 380 || availableMain < 500) {
-                aiEl.classList.add('absolute', 'top-0', 'right-0', 'bottom-0', 'z-30', 'shadow-2xl', 'ai-sidebar-overlay');
-                aiEl.classList.remove('relative');
-              }
+              updateAISidebarMode();
             } else {
               aiEl.classList.add('hidden');
+            }
+          }
+        } else {
+          const aiEl = document.getElementById('ai-sidebar');
+          if (aiEl) {
+            if (window.innerWidth < 768) {
+              aiEl.classList.add('hidden');
+            } else {
+              updateAISidebarMode();
             }
           }
         }
@@ -20368,17 +20419,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
         el.classList.add('hidden');
       } else {
         el.classList.remove('hidden');
-        const widthNum = parseInt(el.style.width, 10) || 320;
-        const leftSidebar = document.getElementById('left-sidebar');
-        const leftWidth = (leftSidebar && !leftSidebar.classList.contains('hidden') && leftSidebar.offsetWidth > 0) ? leftSidebar.offsetWidth : 0;
-        const availableMain = window.innerWidth - leftWidth - widthNum;
-        if (isAIMaximized || widthNum > 380 || availableMain < 500) {
-          el.classList.add('absolute', 'top-0', 'right-0', 'bottom-0', 'z-30', 'shadow-2xl', 'ai-sidebar-overlay');
-          el.classList.remove('relative');
-        } else {
-          el.classList.remove('absolute', 'top-0', 'right-0', 'bottom-0', 'z-30', 'shadow-2xl', 'ai-sidebar-overlay');
-          el.classList.add('relative', 'z-10');
-        }
+        updateAISidebarMode();
       }
 
       try {
@@ -20392,6 +20433,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const willBeHidden = typeof forceState === 'boolean' ? !forceState : !el.classList.contains('hidden');
       if (willBeHidden) el.classList.add('hidden');
       else el.classList.remove('hidden');
+
+      updateAISidebarMode();
 
       try {
         localStorage.setItem('sqlfox_left_sidebar_visible', (!willBeHidden).toString());
