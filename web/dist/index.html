@@ -4364,6 +4364,13 @@
 
   <!-- Floating Grid Row & Cell Context Menu -->
   <div id="grid-context-menu" class="hidden fixed z-50 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-1 text-xs text-slate-200 min-w-56 ring-2 ring-black/50 font-sans divide-y divide-slate-800 max-h-[85vh] overflow-y-auto">
+    <div id="grid-ctx-filter-section" class="py-1 hidden">
+      <div class="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between select-none">
+        <span>🔍 Quick Filter</span>
+        <span class="text-sky-400 font-mono text-[10px]" id="grid-ctx-filter-colname"></span>
+      </div>
+      <div id="grid-ctx-filter-options" class="space-y-0.5"></div>
+    </div>
     <div id="grid-ctx-insert-section" class="py-1">
       <div class="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between select-none">
         <span>⚡ Insert Value</span>
@@ -15952,6 +15959,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const menu = document.getElementById('grid-context-menu');
       if (!menu) return;
 
+      const filterSec = document.getElementById('grid-ctx-filter-section');
+      const filterColLabel = document.getElementById('grid-ctx-filter-colname');
+      const filterOpts = document.getElementById('grid-ctx-filter-options');
       const insertSec = document.getElementById('grid-ctx-insert-section');
       const colLabel = document.getElementById('grid-ctx-colname');
       const btnEdit = document.getElementById('grid-ctx-btn-edit');
@@ -15966,6 +15976,60 @@ Please analyze what is causing this query to be slow and suggest necessary query
         const rawType = (colMeta?.type || col?.type || '').toLowerCase();
         const enumValues = parseEnumValues(colMeta?.type || col?.type);
         const fkInfo = (tableMeta?.foreign_keys || []).find(fk => (fk.column || '').toLowerCase() === (col?.name || '').toLowerCase());
+
+        if (filterSec && filterOpts) {
+          filterSec.classList.remove('hidden');
+          if (filterColLabel) filterColLabel.textContent = `(${col.name})`;
+          
+          const tableName = activeGridTable || (activeTab && activeTab.tableName) || '';
+          const stagedKey = `${tableName || ''}:${rIdx}:${cIdx}`;
+          const staged = (typeof stagedEdits !== 'undefined' && stagedEdits) ? stagedEdits.get(stagedKey) : null;
+          const currentVal = staged ? staged.newVal : (currentResults[rIdx] ? currentResults[rIdx][cIdx] : null);
+          const typeCategory = getGridTypeCategory(rawType);
+
+          if (currentVal === null || currentVal === undefined) {
+            filterOpts.innerHTML = `
+              <button data-col="${escapeHtml(col.name)}" onclick="applyQuickFilterFromCell(this.dataset.col, 'IS NULL', '')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-sky-300 hover:text-white transition">
+                <span class="font-mono">∅ Filter IS NULL</span>
+              </button>
+              <button data-col="${escapeHtml(col.name)}" onclick="applyQuickFilterFromCell(this.dataset.col, 'IS NOT NULL', '')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-300 hover:text-white transition">
+                <span class="font-mono">✓ Filter IS NOT NULL</span>
+              </button>
+            `;
+          } else {
+            const valStr = String(currentVal);
+            const displayStr = valStr.length > 20 ? valStr.substring(0, 18) + '…' : valStr;
+            let rangeButtons = '';
+            if (typeCategory === 'numeric' || typeCategory === 'temporal') {
+              rangeButtons = `
+                <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '>', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-slate-300 hover:text-white transition">
+                  <span class="font-mono text-emerald-400">&gt;</span><span class="truncate font-mono">${escapeHtml(col.name)} &gt; '${escapeHtml(displayStr)}'</span>
+                </button>
+                <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '<', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-slate-300 hover:text-white transition">
+                  <span class="font-mono text-emerald-400">&lt;</span><span class="truncate font-mono">${escapeHtml(col.name)} &lt; '${escapeHtml(displayStr)}'</span>
+                </button>
+              `;
+            }
+            let likeButton = '';
+            if (typeCategory === 'text') {
+              likeButton = `
+                <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, 'LIKE', '%' + this.dataset.val + '%')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-purple-300 hover:text-white transition">
+                  <span class="font-mono text-purple-400">*</span><span class="truncate font-mono">${escapeHtml(col.name)} LIKE '%${escapeHtml(displayStr)}%'</span>
+                </button>
+              `;
+            }
+            filterOpts.innerHTML = `
+              <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '=', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-sky-300 hover:text-white transition">
+                <span class="font-mono text-sky-400">=</span><span class="truncate font-mono">${escapeHtml(col.name)} = '${escapeHtml(displayStr)}'</span>
+              </button>
+              <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '!=', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-rose-300 hover:text-white transition">
+                <span class="font-mono text-rose-400">!=</span><span class="truncate font-mono">${escapeHtml(col.name)} != '${escapeHtml(displayStr)}'</span>
+              </button>
+              ${rangeButtons}
+              ${likeButton}
+            `;
+          }
+        }
 
         if (insertSec) insertSec.classList.remove('hidden');
         if (colLabel) colLabel.textContent = `(${col.name})`;
@@ -16040,6 +16104,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
           }
         }
       } else {
+        if (filterSec) filterSec.classList.add('hidden');
         if (insertSec) insertSec.classList.add('hidden');
         if (btnEdit) btnEdit.classList.add('hidden');
         if (btnJson) btnJson.classList.add('hidden');
@@ -16051,6 +16116,34 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const y = Math.max(10, Math.min(e.clientY, window.innerHeight - 340));
       menu.style.left = `${x}px`;
       menu.style.top = `${y}px`;
+    }
+
+    function applyQuickFilterFromCell(colName, op, val) {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab || !activeTab.isTableViewer) return;
+
+      if (typeof setFilterBarMode === 'function' && typeof filterBarMode !== 'undefined' && filterBarMode === 'raw') {
+        setFilterBarMode('pills');
+      }
+      if (!Array.isArray(activeTab.filterPills)) {
+        activeTab.filterPills = [];
+      }
+      const rawVal = val !== undefined && val !== null ? String(val) : '';
+      activeTab.filterPills.push({
+        col: colName,
+        column: colName,
+        op: op,
+        operator: op,
+        val: rawVal,
+        value: rawVal
+      });
+      if (typeof renderFilterPills === 'function') {
+        renderFilterPills(activeTab);
+      }
+      if (typeof applyTableFilter === 'function') {
+        applyTableFilter();
+      }
+      closeGridContextMenu();
     }
 
     function closeGridContextMenu() {
