@@ -811,6 +811,22 @@
 
           <!-- Right side: Actions -->
           <div class="flex items-center space-x-1.5 shrink-0">
+            <!-- Column Visibility Picker -->
+            <div class="relative inline-block">
+              <button type="button" id="btn-col-picker" onclick="toggleColumnPickerDropdown(event)" class="text-slate-300 hover:text-white hover:bg-slate-800 px-2 py-1 rounded border border-slate-700 text-xs transition flex items-center space-x-1" title="Show or hide columns">
+                <span>👁️</span><span>Columns</span>
+                <span id="col-picker-count-badge" class="text-[10px] text-slate-400 font-mono">(0/0)</span>
+                <span class="text-[9px] text-slate-500">▾</span>
+              </button>
+              <div id="col-picker-dropdown" class="hidden absolute right-0 mt-1 z-50 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-2 text-xs text-slate-200 min-w-60 max-h-80 flex flex-col ring-2 ring-black/50">
+                <div class="pb-1.5 mb-1.5 border-b border-slate-800 flex items-center justify-between gap-1.5">
+                  <input type="text" id="col-picker-search" oninput="filterColumnPickerList(this.value)" placeholder="Search column..." class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-0.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 font-mono" />
+                  <button type="button" onclick="showAllColumns()" class="text-[10px] text-sky-400 hover:text-sky-300 whitespace-nowrap px-1 font-semibold">All</button>
+                </div>
+                <div id="col-picker-list" class="overflow-y-auto flex-1 space-y-1 max-h-60 pr-1"></div>
+              </div>
+            </div>
+
             <button type="button" id="btn-run-filter" onclick="applyTableFilter()" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-2.5 py-1 rounded text-xs transition flex items-center space-x-1 shadow-sm" title="Apply filter (Enter)">
               <span>🔍</span><span>Filter</span>
             </button>
@@ -14351,7 +14367,155 @@ Please analyze what is causing this query to be slow and suggest necessary query
       } catch (err) {
         console.error('Failed to load rows:', err);
       }
+    // --- Column Visibility Picker Logic ---
+    function getHiddenColumns(tableName) {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab) return new Set();
+      if (!activeTab.hiddenColumns) {
+        activeTab.hiddenColumns = new Set();
+        const tName = tableName || activeGridTable || activeTab.tableName || '';
+        const dbName = activeGridDB || activeTab.database || '';
+        if (tName) {
+          try {
+            const raw = sessionStorage.getItem(`sqlfox-hidden-cols:${dbName}:${tName}`);
+            if (raw) {
+              const arr = JSON.parse(raw);
+              if (Array.isArray(arr)) {
+                activeTab.hiddenColumns = new Set(arr);
+              }
+            }
+          } catch (e) {}
+        }
+      }
+      return activeTab.hiddenColumns;
     }
+
+    function isColumnHidden(colName, tableName) {
+      if (!colName) return false;
+      const hidden = getHiddenColumns(tableName);
+      if (activeGridPKCol && colName.toLowerCase() === activeGridPKCol.toLowerCase()) {
+        return false;
+      }
+      return hidden.has(colName);
+    }
+
+    function updateColumnPickerBadge() {
+      const badge = document.getElementById('col-picker-count-badge');
+      if (!badge) return;
+      if (!currentColumns || currentColumns.length === 0) {
+        badge.textContent = '(0/0)';
+        badge.classList.remove('text-amber-400', 'font-bold');
+        badge.classList.add('text-slate-400');
+        return;
+      }
+      const total = currentColumns.length;
+      let hiddenCount = 0;
+      currentColumns.forEach(c => {
+        if (isColumnHidden(c.name, activeGridTable)) hiddenCount++;
+      });
+      const visible = total - hiddenCount;
+      badge.textContent = `(${visible}/${total})`;
+      if (hiddenCount > 0) {
+        badge.classList.remove('text-slate-400');
+        badge.classList.add('text-amber-400', 'font-bold');
+      } else {
+        badge.classList.remove('text-amber-400', 'font-bold');
+        badge.classList.add('text-slate-400');
+      }
+    }
+
+    function toggleColumnPickerDropdown(e) {
+      if (e) e.stopPropagation();
+      const dropdown = document.getElementById('col-picker-dropdown');
+      if (!dropdown) return;
+      const isHidden = dropdown.classList.contains('hidden');
+      closeAllContextMenus();
+      if (isHidden) {
+        renderColumnPickerList();
+        dropdown.classList.remove('hidden');
+      } else {
+        dropdown.classList.add('hidden');
+      }
+    }
+
+    function renderColumnPickerList(filterText = '') {
+      const container = document.getElementById('col-picker-list');
+      if (!container || !currentColumns) return;
+      const hidden = getHiddenColumns(activeGridTable);
+      const query = (filterText || '').toLowerCase().trim();
+
+      const items = currentColumns.filter(c => {
+        if (!query) return true;
+        return c.name.toLowerCase().includes(query) || (c.type || '').toLowerCase().includes(query);
+      });
+
+      if (items.length === 0) {
+        container.innerHTML = '<div class="p-2 text-center text-slate-500 italic text-[11px]">No columns match</div>';
+        return;
+      }
+
+      container.innerHTML = items.map(c => {
+        const isPK = Boolean(activeGridPKCol && c.name.toLowerCase() === activeGridPKCol.toLowerCase());
+        const isChecked = !hidden.has(c.name);
+        const lockBadge = isPK ? '<span class="text-amber-400 font-bold ml-1 text-[10px]" title="Primary Key cannot be hidden">🔒 PK</span>' : '';
+        return `
+          <label class="flex items-center justify-between p-1 hover:bg-slate-800 rounded cursor-pointer select-none text-[11px] ${isPK ? 'opacity-90' : ''}">
+            <div class="flex items-center space-x-2 truncate">
+              <input type="checkbox" ${isChecked ? 'checked' : ''} ${isPK ? 'disabled' : ''}
+                     onchange="toggleColumnVisibility('${escapeHtml(c.name)}', this.checked)"
+                     class="accent-sky-500 w-3.5 h-3.5 rounded cursor-pointer ${isPK ? 'cursor-not-allowed opacity-60' : ''}">
+              <span class="truncate font-mono ${isChecked ? 'text-slate-200' : 'text-slate-500 line-through'}">${escapeHtml(c.name)}</span>
+              ${lockBadge}
+            </div>
+            <span class="text-[9px] text-slate-500 font-mono ml-2 shrink-0">${escapeHtml(c.type || '')}</span>
+          </label>
+        `;
+      }).join('');
+    }
+
+    function filterColumnPickerList(val) {
+      renderColumnPickerList(val);
+    }
+
+    function toggleColumnVisibility(colName, isVisible) {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab) return;
+      const hidden = getHiddenColumns(activeGridTable);
+      if (isVisible) {
+        hidden.delete(colName);
+      } else {
+        hidden.add(colName);
+      }
+      const tName = activeGridTable || activeTab.tableName || '';
+      const dbName = activeGridDB || activeTab.database || '';
+      if (tName) {
+        try {
+          sessionStorage.setItem(`sqlfox-hidden-cols:${dbName}:${tName}`, JSON.stringify([...hidden]));
+        } catch (e) {}
+      }
+      updateColumnPickerBadge();
+      renderGridResults(currentColumns, currentResults, activeGridPKCol, activeGridTable, activeGridDB, true);
+      renderColumnPickerList(document.getElementById('col-picker-search')?.value || '');
+    }
+
+    function showAllColumns() {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab) return;
+      const hidden = getHiddenColumns(activeGridTable);
+      hidden.clear();
+      const tName = activeGridTable || activeTab.tableName || '';
+      const dbName = activeGridDB || activeTab.database || '';
+      if (tName) {
+        try {
+          sessionStorage.removeItem(`sqlfox-hidden-cols:${dbName}:${tName}`);
+        } catch (e) {}
+      }
+      updateColumnPickerBadge();
+      renderGridResults(currentColumns, currentResults, activeGridPKCol, activeGridTable, activeGridDB, true);
+      renderColumnPickerList(document.getElementById('col-picker-search')?.value || '');
+    }
+
+    const renderVirtualGrid = renderGridResults;
 
     function renderGridResults(cols, rows, pkCol = null, tableName = null, databaseName = null, isFilterPass = false) {
       currentColumns = cols || [];
@@ -14379,6 +14543,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
       activeGridPKCol = pkCol;
       activeEditCell = null;
+      updateColumnPickerBadge();
 
       const thead = document.getElementById('grid-thead');
       const tbody = document.getElementById('grid-tbody');
@@ -14414,6 +14579,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
         </th>`;
       }
       headerRow1 += cols.map((c, i) => {
+        if (isColumnHidden(c.name, tableName)) return '';
         let sortIcon = '';
         if (activeTab && activeTab.sortCol === c.name) {
           sortIcon = activeTab.sortDir === 'DESC' ? ' <span class="text-sky-400 font-bold">▼</span>' : ' <span class="text-sky-400 font-bold">▲</span>';
@@ -14432,6 +14598,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
         headerRow2 += '<th class="p-1 w-8 text-center text-slate-500 border-r border-slate-800 text-[10px]">🔍</th>';
       }
       headerRow2 += cols.map(c => {
+        if (isColumnHidden(c.name, tableName)) return '';
         let initialVal = '';
         if (activeTab?.isTableViewer) {
           const existingPill = (activeTab?.filterPills || []).find(p => (p.col || p.column) === c.name);
@@ -14510,6 +14677,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
               <button onclick="removeGridDraftRow(${dIdx})" class="text-rose-400 hover:text-rose-200 text-xs font-bold" title="Discard this draft row">✕</button>
             </td>
             ${cols.map(c => {
+              if (isColumnHidden(c.name, tableName)) return '';
               const val = draft.data[c.name] ?? '';
               const isAutoPK = c.name === pkCol && (c.extra?.includes('auto') || c.type?.toLowerCase().includes('int'));
               const typeStyle = getGridTypeStyle(c.type);
@@ -14527,8 +14695,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
 
       // Render Regular Rows
+      const visibleCols = cols.filter(c => !isColumnHidden(c.name, tableName));
       if ((!rows || rows.length === 0) && stagedDraftRows.length === 0) {
-        const colSpan = hasCheckbox ? cols.length + 1 : cols.length;
+        const colSpan = hasCheckbox ? visibleCols.length + 1 : visibleCols.length;
         tbody.innerHTML = `<tr><td colspan="${colSpan}" class="p-12 text-center text-slate-500 w-full">Zero rows returned.</td></tr>`;
         return;
       }
@@ -14548,6 +14717,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
         <tr class="hover:bg-slate-800/40 transition ${isSelected ? 'bg-sky-950/20' : ''}" oncontextmenu="openGridContextMenu(event, ${rIdx})">
           ${checkboxCell}
           ${row.map((val, cIdx) => {
+            if (isColumnHidden(cols[cIdx]?.name, tableName)) return '';
             const stagedKey = `${tableName || ''}:${rIdx}:${cIdx}`;
             const staged = stagedEdits.get(stagedKey);
             const rawVal = staged ? staged.newVal : val;
