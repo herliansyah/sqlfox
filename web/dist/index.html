@@ -4219,6 +4219,64 @@
     </div>
   </dialog>
 
+  <!-- Vertical Record Inspector (Single Record Form View) Dialog -->
+  <dialog id="record-inspector-dialog" onclick="if (event.target === this) closeRecordInspector()" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-0 outline-none max-w-3xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm overflow-hidden">
+    <div class="flex flex-col max-h-[85vh]">
+      <!-- Header -->
+      <div class="bg-slate-950 px-5 py-3 border-b border-slate-800 flex items-center justify-between flex-shrink-0">
+        <div class="flex items-center space-x-2.5">
+          <span class="text-sky-400 font-bold text-lg">📋</span>
+          <div>
+            <h3 class="font-bold text-white text-sm flex items-center space-x-2">
+              <span id="record-inspector-title">Record Details</span>
+              <span id="record-inspector-table-badge" class="px-2 py-0.5 rounded bg-sky-950/80 text-sky-300 text-xs font-mono border border-sky-800/60">table</span>
+            </h3>
+            <p class="text-[11px] text-slate-400 font-mono">Vertical field inspection and single-row editing with staged mutations</p>
+          </div>
+        </div>
+        <div class="flex items-center space-x-3">
+          <!-- Pager -->
+          <div id="record-inspector-pager" class="flex items-center space-x-1 bg-slate-900 border border-slate-800 rounded px-1 py-0.5 text-xs font-mono">
+            <button type="button" id="record-inspector-prev" onclick="navigateRecordInspector(-1)" class="px-2 py-0.5 rounded hover:bg-slate-800 text-slate-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition" title="Previous Record (Left Arrow)">◀</button>
+            <span id="record-inspector-row-info" class="px-2 text-slate-300 text-[11px]">Row 1 of 1</span>
+            <button type="button" id="record-inspector-next" onclick="navigateRecordInspector(1)" class="px-2 py-0.5 rounded hover:bg-slate-800 text-slate-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition" title="Next Record (Right Arrow)">▶</button>
+          </div>
+          <button type="button" onclick="closeRecordInspector()" class="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-800 transition">✕</button>
+        </div>
+      </div>
+
+      <!-- Toolbar -->
+      <div class="bg-slate-900/90 px-5 py-2 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 flex-shrink-0">
+        <div class="relative flex-1 max-w-xs">
+          <input type="text" id="record-inspector-search" oninput="filterRecordInspectorFields(this.value)" placeholder="Search fields..." class="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 font-mono" />
+        </div>
+        <div class="flex items-center space-x-2">
+          <button type="button" onclick="copyRecordAsJSON()" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded text-xs font-medium border border-slate-700 flex items-center space-x-1 transition" title="Copy full record as JSON">
+            <span>📋</span><span>Copy JSON</span>
+          </button>
+          <button type="button" onclick="copyRecordAsText()" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded text-xs font-medium border border-slate-700 flex items-center space-x-1 transition" title="Copy as Key-Value text">
+            <span>📄</span><span>Copy Text</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Fields List (Scrollable) -->
+      <div id="record-inspector-fields" class="p-4 overflow-y-auto space-y-2 text-xs font-sans divide-y divide-slate-800/60">
+        <!-- Rendered dynamically -->
+      </div>
+
+      <!-- Footer -->
+      <div class="bg-slate-950 px-5 py-2.5 border-t border-slate-800 flex items-center justify-between flex-shrink-0 text-xs">
+        <div id="record-inspector-status" class="text-slate-400 font-mono text-[11px]">
+          Press Space on any row to open • Arrow Left/Right to navigate
+        </div>
+        <div class="flex items-center space-x-2">
+          <button type="button" onclick="closeRecordInspector()" class="px-3.5 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition">Done</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
   <!-- Operational Note Composer / Editor Dialog -->
   <dialog id="note-composer-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-0 outline-none max-w-3xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm overflow-hidden">
     <div class="flex flex-col max-h-[85vh]">
@@ -4395,6 +4453,10 @@
       <div id="grid-ctx-insert-options"></div>
     </div>
     <div class="py-1">
+      <button onclick="openRecordInspectorFromContextMenu(); closeGridContextMenu()" id="grid-ctx-btn-inspect" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-sky-300 hover:text-white">
+        <span class="flex items-center space-x-2"><span>📋</span><span>Inspect Record (Form View)</span></span>
+        <span class="text-[10px] text-slate-500 font-mono">Space</span>
+      </button>
       <button onclick="editRightClickedCell(); closeGridContextMenu()" id="grid-ctx-btn-edit" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-slate-200 hover:text-white">
         <span>✏️</span><span>Edit Cell</span>
       </button>
@@ -14367,6 +14429,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
       } catch (err) {
         console.error('Failed to load rows:', err);
       }
+    }
+
     // --- Column Visibility Picker Logic ---
     function getHiddenColumns(tableName) {
       const activeTab = tabs.find(t => t.id === activeTabId);
@@ -16324,6 +16388,296 @@ Please analyze what is causing this query to be slow and suggest necessary query
     document.addEventListener('click', (e) => {
       if (!e.target.closest('#grid-context-menu')) {
         closeGridContextMenu();
+      }
+    });
+
+    // --- Vertical Record Inspector (Single Record Form View) ---
+    let activeInspectorRowIdx = -1;
+
+    function openRecordInspector(rIdx) {
+      if (!currentResults || currentResults.length === 0) {
+        if (typeof showNativeAlert === 'function') {
+          showNativeAlert('No records to inspect in the active table.', 'Record Inspector');
+        }
+        return;
+      }
+      const targetIdx = Math.max(0, Math.min(rIdx !== undefined && rIdx !== null ? rIdx : 0, currentResults.length - 1));
+      activeInspectorRowIdx = targetIdx;
+
+      const dlg = document.getElementById('record-inspector-dialog');
+      if (!dlg) return;
+
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const tableName = activeGridTable || (activeTab && activeTab.tableName) || 'Record';
+      const tblBadge = document.getElementById('record-inspector-table-badge');
+      if (tblBadge) tblBadge.textContent = tableName;
+
+      renderRecordInspectorFields();
+      if (!dlg.open && typeof dlg.showModal === 'function') {
+        dlg.showModal();
+      }
+    }
+
+    function openRecordInspectorFromContextMenu() {
+      const rIdx = (typeof activeGridRightClickedRow === 'number' && activeGridRightClickedRow >= 0) 
+        ? activeGridRightClickedRow 
+        : ((typeof activeGridSelectedRow === 'number' && activeGridSelectedRow >= 0) ? activeGridSelectedRow : 0);
+      openRecordInspector(rIdx);
+    }
+
+    function closeRecordInspector() {
+      const dlg = document.getElementById('record-inspector-dialog');
+      if (dlg && (dlg.open || typeof dlg.close === 'function')) {
+        dlg.close();
+      }
+      activeInspectorRowIdx = -1;
+    }
+
+    function navigateRecordInspector(delta) {
+      if (!currentResults || currentResults.length === 0) return;
+      const newIdx = activeInspectorRowIdx + delta;
+      if (newIdx >= 0 && newIdx < currentResults.length) {
+        activeInspectorRowIdx = newIdx;
+        activeGridSelectedRow = newIdx;
+        renderRecordInspectorFields();
+      }
+    }
+
+    function filterRecordInspectorFields(query) {
+      renderRecordInspectorFields(query);
+    }
+
+    function renderRecordInspectorFields(filterText = '') {
+      const container = document.getElementById('record-inspector-fields');
+      const rowInfo = document.getElementById('record-inspector-row-info');
+      const prevBtn = document.getElementById('record-inspector-prev');
+      const nextBtn = document.getElementById('record-inspector-next');
+      if (!container || !currentColumns || !currentResults) return;
+
+      const rIdx = activeInspectorRowIdx >= 0 ? activeInspectorRowIdx : 0;
+      const row = currentResults[rIdx];
+      if (!row) return;
+
+      if (rowInfo) rowInfo.textContent = `Row ${rIdx + 1} of ${currentResults.length}`;
+      if (prevBtn) prevBtn.disabled = rIdx <= 0;
+      if (nextBtn) nextBtn.disabled = rIdx >= currentResults.length - 1;
+
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const tableName = activeGridTable || (activeTab && activeTab.tableName) || '';
+      const targetCatalog = (activeGridDB && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeGridDB.toLowerCase()]) || (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
+      const tableMeta = (targetCatalog?.tables || []).find(t => (t.name || '').toLowerCase() === (tableName || '').toLowerCase());
+      const fkMap = new Map();
+      if (tableMeta && Array.isArray(tableMeta.foreign_keys)) {
+        tableMeta.foreign_keys.forEach(fk => {
+          if (fk.column && fk.referenced_table && fk.referenced_column) fkMap.set(fk.column, fk);
+        });
+      }
+
+      const query = (filterText || '').toLowerCase().trim();
+
+      const items = currentColumns.map((col, cIdx) => ({ col, cIdx })).filter(({ col }) => {
+        if (!query) return true;
+        return col.name.toLowerCase().includes(query) || (col.type || '').toLowerCase().includes(query);
+      });
+
+      if (items.length === 0) {
+        container.innerHTML = '<div class="p-6 text-center text-slate-500 italic">No columns match filter</div>';
+        return;
+      }
+
+      container.innerHTML = items.map(({ col, cIdx }) => {
+        const stagedKey = `${tableName}:${rIdx}:${cIdx}`;
+        const staged = (typeof stagedEdits !== 'undefined' && stagedEdits) ? stagedEdits.get(stagedKey) : null;
+        const currentVal = staged ? staged.newVal : row[cIdx];
+        const isModified = Boolean(staged);
+        const isPK = Boolean(activeGridPKCol && col.name.toLowerCase() === activeGridPKCol.toLowerCase());
+        const fkInfo = fkMap.get(col.name);
+        const typeCat = getGridTypeCategory(col.type);
+
+        const pkBadge = isPK ? '<span class="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 font-mono text-[10px] font-bold border border-emerald-800">🔑 PK</span>' : '';
+        const fkBadge = fkInfo ? `<button type="button" data-table="${escapeHtml(tableName)}" data-col="${escapeHtml(col.name)}" data-reftable="${escapeHtml(fkInfo.referenced_table)}" data-refcol="${escapeHtml(fkInfo.referenced_column)}" data-val="${escapeHtml(String(currentVal ?? ''))}" onclick="peekForeignKey(event, this.dataset.table, this.dataset.col, this.dataset.reftable, this.dataset.refcol, this.dataset.val)" class="px-1.5 py-0.5 rounded bg-sky-950 text-sky-300 font-mono text-[10px] hover:bg-sky-900 border border-sky-800 cursor-pointer" title="Peek referenced record">🔗 ${escapeHtml(fkInfo.referenced_table)}.${escapeHtml(fkInfo.referenced_column)}</button>` : '';
+        const modBadge = isModified ? '<span class="text-amber-400 font-bold text-[10px] flex items-center space-x-1"><span>●</span><span>Modified</span></span>' : '';
+
+        let valueFieldHTML = '';
+        if (typeCat === 'json') {
+          let prettyJSON = '';
+          try {
+            const parsed = typeof currentVal === 'string' ? JSON.parse(currentVal) : currentVal;
+            prettyJSON = JSON.stringify(parsed, null, 2);
+          } catch (e) {
+            prettyJSON = String(currentVal ?? '');
+          }
+          valueFieldHTML = `
+            <div class="space-y-1">
+              <textarea data-col="${escapeHtml(col.name)}" data-cidx="${cIdx}" onchange="onRecordFieldChange(this.dataset.col, parseInt(this.dataset.cidx, 10), this.value)" class="w-full bg-slate-950 text-amber-300 border ${isModified ? 'border-amber-500' : 'border-slate-800'} rounded p-2 text-xs font-mono outline-none focus:border-amber-400 h-24 resize-y">${escapeHtml(prettyJSON)}</textarea>
+              <div class="flex items-center justify-between">
+                <button type="button" onclick="closeRecordInspector(); openJsonCellModal(${rIdx}, ${cIdx})" class="text-[11px] text-amber-400 hover:text-amber-300 font-mono font-medium flex items-center space-x-1">
+                  <span>{ }</span><span>Open Dedicated JSON Modal</span>
+                </button>
+              </div>
+            </div>
+          `;
+        } else if (typeCat === 'boolean') {
+          const isTrue = currentVal === true || currentVal === 1 || currentVal === '1' || currentVal === 'true';
+          const isNull = currentVal === null || currentVal === undefined;
+          valueFieldHTML = `
+            <div class="flex items-center space-x-2">
+              <button type="button" data-col="${escapeHtml(col.name)}" data-cidx="${cIdx}" onclick="onRecordFieldChange(this.dataset.col, parseInt(this.dataset.cidx, 10), '1')" class="px-2.5 py-1 rounded text-xs font-mono font-semibold transition ${isTrue ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}">✓ TRUE (1)</button>
+              <button type="button" data-col="${escapeHtml(col.name)}" data-cidx="${cIdx}" onclick="onRecordFieldChange(this.dataset.col, parseInt(this.dataset.cidx, 10), '0')" class="px-2.5 py-1 rounded text-xs font-mono font-semibold transition ${!isTrue && !isNull ? 'bg-rose-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}">✕ FALSE (0)</button>
+              <button type="button" data-col="${escapeHtml(col.name)}" data-cidx="${cIdx}" onclick="onRecordFieldChange(this.dataset.col, parseInt(this.dataset.cidx, 10), null)" class="px-2 py-1 rounded text-xs font-mono transition ${isNull ? 'bg-slate-700 text-amber-300 font-bold' : 'bg-slate-800 text-slate-400 hover:text-white'}">∅ NULL</button>
+            </div>
+          `;
+        } else if (typeCat === 'text' && String(currentVal || '').length > 60) {
+          valueFieldHTML = `
+            <textarea data-col="${escapeHtml(col.name)}" data-cidx="${cIdx}" onchange="onRecordFieldChange(this.dataset.col, parseInt(this.dataset.cidx, 10), this.value)" class="w-full bg-slate-950 text-slate-200 border ${isModified ? 'border-amber-500' : 'border-slate-800'} rounded p-2 text-xs font-mono outline-none focus:border-sky-400 h-20 resize-y">${escapeHtml(String(currentVal ?? ''))}</textarea>
+          `;
+        } else {
+          const valDisplay = currentVal === null || currentVal === undefined ? '' : String(currentVal);
+          valueFieldHTML = `
+            <div class="flex items-center space-x-2">
+              <input type="text" value="${escapeHtml(valDisplay)}" placeholder="${currentVal === null ? 'NULL' : ''}"
+                     data-col="${escapeHtml(col.name)}" data-cidx="${cIdx}"
+                     onchange="onRecordFieldChange(this.dataset.col, parseInt(this.dataset.cidx, 10), this.value)"
+                     class="w-full bg-slate-950 text-slate-200 border ${isModified ? 'border-amber-500' : 'border-slate-800'} rounded px-2.5 py-1 text-xs font-mono outline-none focus:border-sky-400" />
+              <button type="button" data-col="${escapeHtml(col.name)}" data-cidx="${cIdx}" onclick="onRecordFieldChange(this.dataset.col, parseInt(this.dataset.cidx, 10), null)" class="text-[11px] px-1.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-amber-300 rounded font-mono shrink-0 transition" title="Set to NULL">∅</button>
+            </div>
+          `;
+        }
+
+        return `
+          <div class="pt-2.5 pb-2 grid grid-cols-1 md:grid-cols-[200px,1fr] gap-2 items-start">
+            <div class="space-y-1">
+              <div class="flex items-center space-x-1.5">
+                <span class="font-mono font-semibold text-slate-200 text-xs">${escapeHtml(col.name)}</span>
+                ${pkBadge}
+              </div>
+              <div class="flex flex-wrap items-center gap-1.5">
+                <span class="text-[10px] text-slate-500 font-mono">${escapeHtml(col.type || '')}</span>
+                ${fkBadge}
+                ${modBadge}
+              </div>
+            </div>
+            <div>
+              ${valueFieldHTML}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function onRecordFieldChange(colName, cIdx, newVal) {
+      if (activeInspectorRowIdx < 0 || !currentResults || !currentResults[activeInspectorRowIdx]) return;
+      const rIdx = activeInspectorRowIdx;
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const tableName = activeGridTable || (activeTab && activeTab.tableName) || '';
+      const db = activeGridDB || (activeTab && activeTab.database) || '';
+      const stagedKey = `${tableName}:${rIdx}:${cIdx}`;
+
+      const row = currentResults[rIdx];
+      const oldVal = row ? row[cIdx] : null;
+
+      // Primary Key resolution (using activeGridPKCol or row values)
+      let pkVal = null;
+      let pkCol = activeGridPKCol;
+      if (pkCol && currentColumns) {
+        const pkIdx = currentColumns.findIndex(c => c.name.toLowerCase() === pkCol.toLowerCase());
+        if (pkIdx >= 0 && row) pkVal = row[pkIdx];
+      }
+
+      if (typeof stagedEdits !== 'undefined' && stagedEdits) {
+        if (newVal === oldVal) {
+          stagedEdits.delete(stagedKey);
+        } else {
+          stagedEdits.set(stagedKey, {
+            rIdx,
+            cIdx,
+            db,
+            table: tableName,
+            colName,
+            pkCol,
+            pkVal,
+            oldVal,
+            newVal
+          });
+        }
+      }
+
+      if (typeof updateStagedEditsUI === 'function') updateStagedEditsUI();
+      renderRecordInspectorFields(document.getElementById('record-inspector-search')?.value || '');
+      renderGridResults(currentColumns, currentResults, activeGridPKCol, activeGridTable, activeGridDB, true);
+    }
+
+    function copyRecordAsJSON() {
+      if (activeInspectorRowIdx < 0 || !currentResults || !currentResults[activeInspectorRowIdx]) return;
+      const row = currentResults[activeInspectorRowIdx];
+      const obj = {};
+      const tableName = activeGridTable || '';
+      currentColumns.forEach((col, cIdx) => {
+        const stagedKey = `${tableName}:${activeInspectorRowIdx}:${cIdx}`;
+        const staged = (typeof stagedEdits !== 'undefined' && stagedEdits) ? stagedEdits.get(stagedKey) : null;
+        obj[col.name] = staged ? staged.newVal : row[cIdx];
+      });
+      const str = JSON.stringify(obj, null, 2);
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(str).then(() => {
+          if (typeof showNativeAlert === 'function') showNativeAlert('Record copied to clipboard as JSON', 'Clipboard');
+        }).catch(() => {
+          fallbackCopyTextToClipboard(str);
+        });
+      } else {
+        fallbackCopyTextToClipboard(str);
+      }
+    }
+
+    function copyRecordAsText() {
+      if (activeInspectorRowIdx < 0 || !currentResults || !currentResults[activeInspectorRowIdx]) return;
+      const row = currentResults[activeInspectorRowIdx];
+      const tableName = activeGridTable || '';
+      const lines = currentColumns.map((col, cIdx) => {
+        const stagedKey = `${tableName}:${activeInspectorRowIdx}:${cIdx}`;
+        const staged = (typeof stagedEdits !== 'undefined' && stagedEdits) ? stagedEdits.get(stagedKey) : null;
+        const val = staged ? staged.newVal : row[cIdx];
+        return `${col.name}: ${val === null ? 'NULL' : String(val)}`;
+      });
+      const str = lines.join('\n');
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(str).then(() => {
+          if (typeof showNativeAlert === 'function') showNativeAlert('Record copied to clipboard as text', 'Clipboard');
+        }).catch(() => {
+          fallbackCopyTextToClipboard(str);
+        });
+      } else {
+        fallbackCopyTextToClipboard(str);
+      }
+    }
+
+    // Keyboard Shortcuts: Space to open Inspector, Arrow Left/Right to navigate
+    document.addEventListener('keydown', (e) => {
+      if (e.target && (e.target.matches('input, textarea, select') || e.target.isContentEditable)) {
+        return;
+      }
+
+      const dlg = document.getElementById('record-inspector-dialog');
+      if (dlg && dlg.open) {
+        if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          navigateRecordInspector(-1);
+        } else if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          navigateRecordInspector(1);
+        } else if (e.key === 'Escape') {
+          closeRecordInspector();
+        }
+        return;
+      }
+
+      if (e.key === ' ' || e.code === 'Space') {
+        const activeTab = tabs.find(t => t.id === activeTabId);
+        if (activeTab && activeTab.isTableViewer && currentResults && currentResults.length > 0) {
+          e.preventDefault();
+          const targetRow = (typeof activeGridSelectedRow === 'number' && activeGridSelectedRow >= 0) ? activeGridSelectedRow : 0;
+          openRecordInspector(targetRow);
+        }
       }
     });
 

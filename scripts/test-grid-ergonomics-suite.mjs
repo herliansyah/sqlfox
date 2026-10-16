@@ -147,4 +147,76 @@ assert(typeof sandbox.openRecordInspector === 'function', 'openRecordInspector m
 assert(typeof sandbox.navigateRecordInspector === 'function', 'navigateRecordInspector must be defined as a function');
 assert(typeof sandbox.onRecordFieldChange === 'function', 'onRecordFieldChange must be defined as a function');
 
-console.log("✓ All assertions passed successfully!");
+// 5. Behavioral Test: Quick-Filters
+vm.runInContext(`
+  tabs = [{
+    id: 'tab-test',
+    isTableViewer: true,
+    tableName: 'users',
+    filterPills: []
+  }];
+  activeTabId = 'tab-test';
+
+  applyQuickFilterFromCell('status', '=', 'active');
+  const t = tabs[0];
+  if (t.filterPills.length !== 1) throw new Error('filterPills should have 1 pill');
+  if (t.filterPills[0].col !== 'status') throw new Error('filterPill col should be status');
+  if (t.filterPills[0].op !== '=') throw new Error('filterPill op should be =');
+  if (t.filterPills[0].val !== 'active') throw new Error('filterPill val should be active');
+
+  applyQuickFilterFromCell('deleted_at', 'IS NULL', '');
+  if (t.filterPills.length !== 2) throw new Error('filterPills should have 2 pills');
+  if (t.filterPills[1].col !== 'deleted_at') throw new Error('filterPill col should be deleted_at');
+  if (t.filterPills[1].op !== 'IS NULL') throw new Error('filterPill op should be IS NULL');
+`, sandbox);
+console.log("✓ Quick-Filter behavioral tests passed!");
+
+// 6. Behavioral Test: Column Visibility Picker
+vm.runInContext(`
+  currentColumns = [
+    { name: 'id', type: 'bigint' },
+    { name: 'email', type: 'varchar(255)' },
+    { name: 'created_at', type: 'datetime' }
+  ];
+  activeGridPKCol = 'id';
+  activeGridTable = 'users';
+
+  toggleColumnVisibility('created_at', false);
+  const t2 = tabs.find(x => x.id === activeTabId);
+  if (!t2.hiddenColumns.has('created_at')) throw new Error('created_at should be in hiddenColumns');
+  if (!isColumnHidden('created_at', 'users')) throw new Error('isColumnHidden(created_at) should return true');
+  if (isColumnHidden('email', 'users')) throw new Error('isColumnHidden(email) should return false');
+  if (isColumnHidden('id', 'users')) throw new Error('PK column id should NEVER be hidden');
+
+  showAllColumns();
+  if (t2.hiddenColumns.size !== 0) throw new Error('showAllColumns should clear hiddenColumns');
+`, sandbox);
+console.log("✓ Column Visibility Picker behavioral tests passed!");
+
+// 7. Behavioral Test: Vertical Record Inspector & Navigation & stagedEdits
+vm.runInContext(`
+  currentResults = [
+    ['101', 'alice@test.com', '2026-01-01'],
+    ['102', 'bob@test.com', '2026-01-02']
+  ];
+
+  openRecordInspector(0);
+  if (activeInspectorRowIdx !== 0) throw new Error('activeInspectorRowIdx should be 0');
+
+  navigateRecordInspector(1);
+  if (activeInspectorRowIdx !== 1) throw new Error('navigateRecordInspector(1) should move to row 1');
+
+  navigateRecordInspector(1);
+  if (activeInspectorRowIdx !== 1) throw new Error('navigateRecordInspector should clamp to last row');
+
+  navigateRecordInspector(-1);
+  if (activeInspectorRowIdx !== 0) throw new Error('navigateRecordInspector(-1) should move back to row 0');
+
+  onRecordFieldChange('email', 1, 'alice_updated@test.com');
+  const stagedKey = 'users:0:1';
+  if (!stagedEdits.has(stagedKey)) throw new Error('stagedEdits should record change on users:0:1');
+  if (stagedEdits.get(stagedKey).newVal !== 'alice_updated@test.com') throw new Error('stagedEdits should have updated newVal');
+`, sandbox);
+console.log("✓ Record Inspector behavioral & stagedEdits tests passed!");
+
+console.log("\n🎉 ALL GRID ERGONOMICS SUITE TESTS PASSED 100%!");
