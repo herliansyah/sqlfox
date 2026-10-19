@@ -598,7 +598,7 @@
         <!-- Editor Toolbar -->
         <div class="h-8 bg-app-surface/60 border-b border-app-border/60 px-3 flex items-center justify-between text-xs flex-shrink-0 overflow-x-auto gap-3">
           <div class="flex items-center space-x-2 shrink-0">
-            <button onclick="runActiveQuery()" class="bg-app-safe hover:bg-emerald-600 text-slate-950 font-bold px-3 py-1 rounded flex items-center space-x-1 transition shadow-sm">
+            <button id="btn-run-query" onclick="runActiveQuery()" class="bg-app-safe hover:bg-emerald-600 text-slate-950 font-bold px-3 py-1 rounded flex items-center space-x-1 transition shadow-sm">
               <span>▶ Run</span>
               <kbd class="text-[10px] opacity-75 font-normal">Ctrl+Enter</kbd>
             </button>
@@ -13591,6 +13591,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
     // --- Query Execution & Safety Guard ---
     async function runActiveQuery(confirmed = false, challengeInput = '') {
+      // ponytail: Concurrency guard prevents duplicate simultaneous executions (e.g. double-click, DDL multi-trigger)
+      if (isQueryExecuting) return;
       if (!activeConnection) {
         showNativeAlert('Please select or create a connection first.', 'No Connection');
         return;
@@ -13847,6 +13849,15 @@ Please analyze what is causing this query to be slow and suggest necessary query
       isQueryExecuting = !!isRunning;
       const btn = document.getElementById('cancel-query-btn');
       const status = document.getElementById('query-status-text');
+      const runBtn = document.getElementById('btn-run-query');
+      if (runBtn) {
+        runBtn.disabled = isRunning;
+        if (isRunning) {
+          runBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        } else {
+          runBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+      }
       if (isRunning) {
         status.textContent = 'Executing...';
         btn.classList.remove('hidden');
@@ -20883,7 +20894,12 @@ Please analyze what is causing this query to be slow and suggest necessary query
     }
 
     // --- Keyboard Shortcuts ---
+    let keyboardShortcutsInitialized = false;
     function setupKeyboardShortcuts() {
+      // ponytail: Idempotency guard prevents duplicate keydown listeners on re-init
+      if (keyboardShortcutsInitialized) return;
+      keyboardShortcutsInitialized = true;
+
       const searchInput = document.getElementById('schema-search-input');
       if (searchInput) {
         searchInput.addEventListener('input', (e) => {
@@ -20928,6 +20944,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
       window.addEventListener('keydown', (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
           e.preventDefault();
+          // ponytail: If CodeMirror is focused, its extraKeys already executes the query; prevent bubbling double-dispatch
+          if (cmEditor && cmEditor.hasFocus()) return;
           if (e.shiftKey) explainActiveQuery();
           else runActiveQuery();
         } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && !e.shiftKey) {
