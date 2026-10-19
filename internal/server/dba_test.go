@@ -121,8 +121,8 @@ func TestDBAOperationsAndAuditLog(t *testing.T) {
 	// Sleep briefly for async audit log write
 	time.Sleep(150 * time.Millisecond)
 
-	// 4. Test GetAuditLogs
-	auditResp, err := client.Get(ts.URL + "/api/session/" + connRec.ID + "/audit-logs")
+	// 4. Test GetAuditLogs for editor source entry
+	auditResp, err := client.Get(ts.URL + "/api/session/" + connRec.ID + "/audit-logs?source=editor")
 	if err != nil || auditResp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(auditResp.Body)
 		t.Fatalf("get audit logs failed with code %d: %s", auditResp.StatusCode, string(body))
@@ -138,7 +138,7 @@ func TestDBAOperationsAndAuditLog(t *testing.T) {
 	auditResp.Body.Close()
 
 	if auditData.Total < 1 || len(auditData.Logs) < 1 {
-		t.Fatalf("expected at least 1 audit log, got total=%d len=%d", auditData.Total, len(auditData.Logs))
+		t.Fatalf("expected at least 1 editor audit log, got total=%d len=%d", auditData.Total, len(auditData.Logs))
 	}
 	if auditData.Logs[0]["source"] != "editor" {
 		t.Fatalf("expected source 'editor', got %v", auditData.Logs[0]["source"])
