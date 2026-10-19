@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.10.1] - 2026-10-19
+
 ### Fixed
 - **Self-Update & Toast Feedback System (`web/dist/index.html`)**: Implemented global `showToast(message, type)` notification system supporting dialog top-layers and multi-severity styling (`info`, `success`, `warning`, `error`), resolving `ReferenceError: showToast is not defined` across 34 call sites.
 - **In-App Update Check Button Responsiveness (`web/dist/index.html`)**: Added immediate loading spinner and in-modal feedback to the `Check for Updates` button in the Changelog dialog.
