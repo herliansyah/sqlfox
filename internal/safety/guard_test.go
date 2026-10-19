@@ -129,6 +129,30 @@ func TestSafetyGuard_Inspect(t *testing.T) {
 			expectedChallenge: true,
 			expectedTable:     "customers",
 		},
+		{
+			name:              "CREATE TABLE in Dev requires affirmation",
+			query:             "CREATE TABLE orders (id INT, total DECIMAL);",
+			env:               "Development",
+			expectedRisk:      RiskWarning,
+			expectedChallenge: false,
+			expectedTable:     "orders",
+		},
+		{
+			name:              "CREATE TABLE in Prod requires challenge",
+			query:             "CREATE TABLE orders (id INT, total DECIMAL);",
+			env:               "Production",
+			expectedRisk:      RiskWarning,
+			expectedChallenge: true,
+			expectedTable:     "orders",
+		},
+		{
+			name:              "ALTER TABLE in Dev requires affirmation",
+			query:             "ALTER TABLE orders ADD COLUMN status VARCHAR(20);",
+			env:               "Development",
+			expectedRisk:      RiskDangerous,
+			expectedChallenge: false,
+			expectedTable:     "orders",
+		},
 	}
 
 	for _, tc := range tests {
@@ -144,6 +168,35 @@ func TestSafetyGuard_Inspect(t *testing.T) {
 				t.Fatalf("expected target table %s, got %s", tc.expectedTable, res.TargetTable)
 			}
 		})
+	}
+}
+
+func TestSafetyGuard_InspectWithScope(t *testing.T) {
+	// 1. Qualified DDL with matching tab scope
+	res := InspectWithScope("ALTER TABLE `db_a`.`orders` ADD COLUMN status INT", "Development", "db_a")
+	if res.SchemaScopeMismatch {
+		t.Fatalf("expected no mismatch for matching db_a, got mismatch: %s", res.Reason)
+	}
+	if res.TargetDatabase != "db_a" {
+		t.Fatalf("expected target database 'db_a', got '%s'", res.TargetDatabase)
+	}
+
+	// 2. Qualified DDL with mismatched tab scope (targets db_b while tab is db_a)
+	mismatchRes := InspectWithScope("ALTER TABLE `db_b`.`orders` ADD COLUMN status INT", "Development", "db_a")
+	if !mismatchRes.SchemaScopeMismatch {
+		t.Fatalf("expected SchemaScopeMismatch=true when query targets db_b but scope is db_a")
+	}
+	if !mismatchRes.RequiresChallenge {
+		t.Fatalf("expected RequiresChallenge=true on SchemaScopeMismatch")
+	}
+
+	// 3. Unqualified DDL adopts tab scope
+	unqualifiedRes := InspectWithScope("CREATE TABLE items (id INT);", "Development", "db_production")
+	if unqualifiedRes.TargetDatabase != "db_production" {
+		t.Fatalf("expected unqualified DDL to adopt scoped database 'db_production', got '%s'", unqualifiedRes.TargetDatabase)
+	}
+	if !unqualifiedRes.RequiresAffirmation {
+		t.Fatalf("expected RequiresAffirmation=true for CREATE TABLE")
 	}
 }
 

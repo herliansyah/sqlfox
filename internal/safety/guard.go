@@ -21,16 +21,19 @@ const (
 
 // InspectionResult details the safety evaluation of a SQL query.
 type InspectionResult struct {
-	RiskLevel         RiskLevel                      `json:"risk_level"`
-	IsDestructive     bool                           `json:"is_destructive"`
-	RequiresChallenge bool                           `json:"requires_challenge"`
-	TargetTable       string                         `json:"target_table,omitempty"`
-	TargetType        string                         `json:"target_type,omitempty"`
-	Operation         string                         `json:"operation,omitempty"`
-	Reason            string                         `json:"reason,omitempty"`
-	Suggestion        string                         `json:"suggestion,omitempty"`
-	TableLocks        []driver.TableLockInfo         `json:"table_locks,omitempty"`
-	Relationships     []driver.TableRelationshipInfo `json:"relationships,omitempty"`
+	RiskLevel           RiskLevel                      `json:"risk_level"`
+	IsDestructive       bool                           `json:"is_destructive"`
+	RequiresChallenge   bool                           `json:"requires_challenge"`
+	RequiresAffirmation bool                           `json:"requires_affirmation,omitempty"`
+	SchemaScopeMismatch bool                           `json:"schema_scope_mismatch,omitempty"`
+	TargetDatabase      string                         `json:"target_database,omitempty"`
+	TargetTable         string                         `json:"target_table,omitempty"`
+	TargetType          string                         `json:"target_type,omitempty"`
+	Operation           string                         `json:"operation,omitempty"`
+	Reason              string                         `json:"reason,omitempty"`
+	Suggestion          string                         `json:"suggestion,omitempty"`
+	TableLocks          []driver.TableLockInfo         `json:"table_locks,omitempty"`
+	Relationships       []driver.TableRelationshipInfo `json:"relationships,omitempty"`
 }
 
 // Inspect analyzes a query string against the target environment (Production, Staging, Development).
@@ -112,37 +115,65 @@ func inspectAST(stmt sqlparser.Statement, environment string) *InspectionResult 
 
 	case *sqlparser.DDL:
 		tableName := node.Table.Name.String()
+		if tableName == "" {
+			tableName = node.NewName.Name.String()
+		}
+		qualifier := node.Table.Qualifier.String()
+		if qualifier == "" {
+			qualifier = node.NewName.Qualifier.String()
+		}
 		action := strings.ToLower(node.Action)
 
 		switch action {
+		case "create":
+			return &InspectionResult{
+				RiskLevel:           RiskWarning,
+				IsDestructive:       false,
+				RequiresChallenge:   isProd,
+				RequiresAffirmation: true,
+				TargetDatabase:      qualifier,
+				TargetTable:         tableName,
+				TargetType:          "TABLE",
+				Operation:           "CREATE",
+				Reason:              fmt.Sprintf("CREATE TABLE will create schema object '%s'.", tableName),
+			}
 		case "drop":
 			return &InspectionResult{
-				RiskLevel:         RiskCritical,
-				IsDestructive:     true,
-				RequiresChallenge: true,
-				TargetTable:       tableName,
-				Operation:         "DROP",
-				Reason:            fmt.Sprintf("DROP statement will permanently delete table or database '%s'.", tableName),
-				Suggestion:        "Ensure backups exist before dropping schema objects.",
+				RiskLevel:           RiskCritical,
+				IsDestructive:       true,
+				RequiresChallenge:   true,
+				RequiresAffirmation: true,
+				TargetDatabase:      qualifier,
+				TargetTable:         tableName,
+				TargetType:          "TABLE",
+				Operation:           "DROP",
+				Reason:              fmt.Sprintf("DROP statement will permanently delete table or database '%s'.", tableName),
+				Suggestion:          "Ensure backups exist before dropping schema objects.",
 			}
 		case "truncate":
 			return &InspectionResult{
-				RiskLevel:         RiskCritical,
-				IsDestructive:     true,
-				RequiresChallenge: true,
-				TargetTable:       tableName,
-				Operation:         "TRUNCATE",
-				Reason:            fmt.Sprintf("TRUNCATE statement will empty ALL records from '%s'.", tableName),
-				Suggestion:        "Consider soft-deleting or creating a backup snapshot before truncating.",
+				RiskLevel:           RiskCritical,
+				IsDestructive:       true,
+				RequiresChallenge:   true,
+				RequiresAffirmation: true,
+				TargetDatabase:      qualifier,
+				TargetTable:         tableName,
+				TargetType:          "TABLE",
+				Operation:           "TRUNCATE",
+				Reason:              fmt.Sprintf("TRUNCATE statement will empty ALL records from '%s'.", tableName),
+				Suggestion:          "Consider soft-deleting or creating a backup snapshot before truncating.",
 			}
 		case "alter":
 			return &InspectionResult{
-				RiskLevel:         RiskDangerous,
-				IsDestructive:     true,
-				RequiresChallenge: isProd,
-				TargetTable:       tableName,
-				Operation:         "ALTER",
-				Reason:            fmt.Sprintf("ALTER TABLE modifies schema structure on '%s'.", tableName),
+				RiskLevel:           RiskDangerous,
+				IsDestructive:       true,
+				RequiresChallenge:   isProd,
+				RequiresAffirmation: true,
+				TargetDatabase:      qualifier,
+				TargetTable:         tableName,
+				TargetType:          "TABLE",
+				Operation:           "ALTER",
+				Reason:              fmt.Sprintf("ALTER TABLE modifies schema structure on '%s'.", tableName),
 			}
 		}
 	}
@@ -156,6 +187,7 @@ var (
 	reDelete   = regexp.MustCompile(`(?i)^\s*DELETE\s+FROM\s+([` + "`" + `"'\w\.\-]+)`)
 	reUpdate   = regexp.MustCompile(`(?i)^\s*UPDATE\s+([` + "`" + `"'\w\.\-]+)`)
 	reAlter    = regexp.MustCompile(`(?i)^\s*ALTER\s+TABLE\s+([` + "`" + `"'\w\.\-]+)`)
+	reCreate   = regexp.MustCompile(`(?i)^\s*CREATE\s+(TABLE|VIEW|INDEX|UNIQUE\s+INDEX)\s+(IF\s+NOT\s+EXISTS\s+)?([` + "`" + `"'\w\.\-]+)`)
 	reWhere    = regexp.MustCompile(`(?i)\bWHERE\b`)
 )
 
@@ -203,27 +235,32 @@ func inspectLexicalFallback(query string, environment string) *InspectionResult 
 	isProd := strings.EqualFold(environment, "Production")
 
 	if match := reDrop.FindStringSubmatch(query); len(match) > 3 {
-		target := cleanTableName(match[3])
+		db, target := extractDBAndTable(match[3])
 		return &InspectionResult{
-			RiskLevel:         RiskCritical,
-			IsDestructive:     true,
-			RequiresChallenge: true,
-			TargetTable:       target,
-			TargetType:        strings.ToUpper(match[1]),
-			Operation:         "DROP",
-			Reason:            fmt.Sprintf("DROP statement will permanently delete '%s'.", target),
+			RiskLevel:           RiskCritical,
+			IsDestructive:       true,
+			RequiresChallenge:   true,
+			RequiresAffirmation: true,
+			TargetDatabase:      db,
+			TargetTable:         target,
+			TargetType:          strings.ToUpper(match[1]),
+			Operation:           "DROP",
+			Reason:              fmt.Sprintf("DROP statement will permanently delete '%s'.", target),
 		}
 	}
 
 	if match := reTruncate.FindStringSubmatch(query); len(match) > 2 {
-		target := cleanTableName(match[2])
+		db, target := extractDBAndTable(match[2])
 		return &InspectionResult{
-			RiskLevel:         RiskCritical,
-			IsDestructive:     true,
-			RequiresChallenge: true,
-			TargetTable:       target,
-			Operation:         "TRUNCATE",
-			Reason:            fmt.Sprintf("TRUNCATE statement will permanently empty '%s'.", target),
+			RiskLevel:           RiskCritical,
+			IsDestructive:       true,
+			RequiresChallenge:   true,
+			RequiresAffirmation: true,
+			TargetDatabase:      db,
+			TargetTable:         target,
+			TargetType:          "TABLE",
+			Operation:           "TRUNCATE",
+			Reason:              fmt.Sprintf("TRUNCATE statement will permanently empty '%s'.", target),
 		}
 	}
 
@@ -274,18 +311,61 @@ func inspectLexicalFallback(query string, environment string) *InspectionResult 
 	}
 
 	if match := reAlter.FindStringSubmatch(query); len(match) > 1 {
-		target := cleanTableName(match[1])
+		db, target := extractDBAndTable(match[1])
 		return &InspectionResult{
-			RiskLevel:         RiskDangerous,
-			IsDestructive:     true,
-			RequiresChallenge: isProd,
-			TargetTable:       target,
-			Operation:         "ALTER",
-			Reason:            fmt.Sprintf("ALTER TABLE modifies schema structure on '%s'.", target),
+			RiskLevel:           RiskDangerous,
+			IsDestructive:       true,
+			RequiresChallenge:   isProd,
+			RequiresAffirmation: true,
+			TargetDatabase:      db,
+			TargetTable:         target,
+			TargetType:          "TABLE",
+			Operation:           "ALTER",
+			Reason:              fmt.Sprintf("ALTER TABLE modifies schema structure on '%s'.", target),
+		}
+	}
+
+	if match := reCreate.FindStringSubmatch(query); len(match) > 3 {
+		db, target := extractDBAndTable(match[3])
+		return &InspectionResult{
+			RiskLevel:           RiskWarning,
+			IsDestructive:       false,
+			RequiresChallenge:   isProd,
+			RequiresAffirmation: true,
+			TargetDatabase:      db,
+			TargetTable:         target,
+			TargetType:          strings.ToUpper(match[1]),
+			Operation:           "CREATE",
+			Reason:              fmt.Sprintf("CREATE %s will create new schema object '%s'.", strings.ToUpper(match[1]), target),
 		}
 	}
 
 	return &InspectionResult{RiskLevel: RiskNone}
+}
+
+func extractDBAndTable(raw string) (string, string) {
+	s := strings.TrimSpace(raw)
+	parts := strings.Split(s, ".")
+	if len(parts) >= 2 {
+		db := strings.Trim(parts[len(parts)-2], "`'\"")
+		tbl := strings.Trim(parts[len(parts)-1], "`'\"")
+		return db, tbl
+	}
+	return "", cleanTableName(raw)
+}
+
+// InspectWithScope analyzes a query string against the target environment and scoped database.
+func InspectWithScope(query string, environment string, scopedDatabase string) *InspectionResult {
+	res := Inspect(query, environment)
+	if res.TargetDatabase != "" && scopedDatabase != "" && !strings.EqualFold(res.TargetDatabase, scopedDatabase) {
+		res.SchemaScopeMismatch = true
+		res.RiskLevel = RiskDangerous
+		res.RequiresChallenge = true
+		res.Reason = fmt.Sprintf("Schema Scope Mismatch: query explicitly targets database '%s', but active tab is set to '%s'.", res.TargetDatabase, scopedDatabase)
+	} else if res.TargetDatabase == "" && scopedDatabase != "" {
+		res.TargetDatabase = scopedDatabase
+	}
+	return res
 }
 
 func cleanTableName(raw string) string {

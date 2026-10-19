@@ -21,14 +21,19 @@ func (s *Server) handleInspectQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		SQL string `json:"sql"`
+		SQL      string `json:"sql"`
+		Database string `json:"database"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request: "+err.Error())
 		return
 	}
 
-	res, _, err := inspectAllStatements(req.SQL, sess.Environment, sess.DriverName)
+	targetDB := req.Database
+	if targetDB == "" && sess.CachedSchema != nil {
+		targetDB = sess.CachedSchema.DatabaseName
+	}
+	res, _, err := inspectAllStatements(req.SQL, sess.Environment, sess.DriverName, targetDB)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
