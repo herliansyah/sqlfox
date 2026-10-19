@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.10.3] - 2026-10-19
+
 ### Added
 - **Tab Database Scope & Target Database Switcher (`web/dist/index.html`, `internal/server`)**: Bound database schema context directly to individual query tabs, decoupling tab execution scope from sidebar selection. Added an interactive Target Database Pill in the query editor toolbar with search filtering, keyboard navigation, and quick switching across available databases (ADR 0055).
 - **Schema Scope Mismatch Guard (`internal/safety`, `web/dist/index.html`)**: Enhanced SQL safety guardrails to detect cross-database execution conflicts when statement target schemas differ from the active tab's bound database scope, surfacing an explicit safety warning prior to execution.
