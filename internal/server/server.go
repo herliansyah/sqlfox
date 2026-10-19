@@ -190,6 +190,8 @@ func (s *Server) routes() {
 			s.handleCancelQuery(w, r)
 		case "kill":
 			s.handleKillProcess(w, r)
+		case "batch-kill":
+			s.handleBatchKillProcess(w, r)
 		case "maintenance":
 			s.handleExecuteMaintenance(w, r)
 		case "save-user":

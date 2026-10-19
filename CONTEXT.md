@@ -484,9 +484,33 @@ _Avoid_: Process monitor, task list, thread viewer
 A dedicated diagnostic dialog displaying complete thread execution metadata, formatted full SQL statement text without truncation, 1-click clipboard actions, and integrated operational shortcuts (`EXPLAIN`, editor transfer, AI review, and termination).
 _Avoid_: Process details popup, thread viewer window, query popover
 
+**Processlist Batch Action Bar**:
+An ephemeral floating action dock in the Processlist Manager triggered when one or more non-immune threads are selected, providing bulk operational commands (`Batch Kill Query`, `Batch Kill Connection`, `Copy IDs`, `Export`, `Save to Notes`) and selection counters without layout shift.
+_Avoid_: Bulk action bar, multi-select toolbar, process action dock
+
+**Protected Process Thread**:
+A database thread immune to client selection and termination within SqlFox, specifically the user's active session connection (`isSelf`) and essential database system/replication threads (`isSystem`: `system user`, `event_scheduler`, `Binlog Dump`).
+_Avoid_: Immune thread, system process, locked thread
+
+**Batch Termination Guardrail Modal**:
+A dedicated high-safety confirmation dialog summarizing targeted threads (IDs, users, durations, SQL snippets) before executing multi-thread terminations, enforcing an explicit challenge input in Production environments or when terminating multiple sessions.
+_Avoid_: Batch kill popup, confirmation dialog, kill alert
+
 **Process Activity Trend Panel**:
 An ephemeral, collapsible in-memory rolling time-series visualization in the Processlist Manager rendering thread concurrency (`Threads Running` vs `Total Connected`) and operational metrics (`Now`, `Peak`, `Avg`) on native HTML5 Canvas without incurring background persistence or additional database queries.
 _Avoid_: Process chart, query monitor graph, live APM widget
+
+**Processlist Primary Toolbar**:
+The top-level operational navigation bar in the Processlist Manager hosting the view switcher (`Active Threads`, `Statement Digest`, `Deadlock History`), live thread summary pill (`Threads: N`), root blocker alert badge (`🚨 X Locks`), and global telemetry controls (auto-refresh intervals, manual refresh, and trend toggle).
+_Avoid_: Process header, processlist topbar, thread nav bar
+
+**Processlist Filter Subtoolbar**:
+The contextual secondary toolbar positioned directly beneath the primary toolbar in the Processlist Manager dedicated to the Active Threads view, housing quick filter chips (`All`, `Active`, `Locked`, `Slow`, `Sleep`), flexible multi-field search input, sleep/system visibility toggles, and slow-query execution threshold controls.
+_Avoid_: Process filter bar, thread search line, sub-header filter
+
+**Processlist Column Visibility Picker**:
+An ephemeral popover dropdown in the Processlist Filter Subtoolbar allowing users to customize visible table columns (`Action`, `User`, `Host`, `Database`, `Command`, `Time`, `State`), enforcing strict immunity on essential identifier columns (`Select`, `ID`, `SQL / Query Info`), with persistent configuration stored in browser `localStorage`.
+_Avoid_: Column manager, processlist column chooser, hide column menu
 
 **Lock Contention & Root Blocker Inspector**:
 A dedicated zero-shift incident-triage modal accessible from the Top Monitor menu, Command Palette, and Processlist Manager toolbar displaying the Root Blocker dependency tree, surfacing blocking queries, locked resources, and single-click termination actions without incurring layout shifts on the active threads table.

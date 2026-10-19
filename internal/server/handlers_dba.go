@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -166,6 +167,104 @@ func (s *Server) handleKillProcess(w http.ResponseWriter, r *http.Request) {
 		"success":   true,
 		"thread_id": req.ThreadID,
 		"mode":      req.Mode,
+	})
+}
+
+func (s *Server) handleBatchKillProcess(w http.ResponseWriter, r *http.Request) {
+	connID := r.PathValue("id")
+	sess, err := s.sessionMgr.GetSession(connID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	var req struct {
+		ThreadIDs []int64 `json:"thread_ids"`
+		Mode      string  `json:"mode"` // "query" or "connection"
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.ThreadIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "at least one thread_id is required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	// ponytail: detect immune threads (self connection and critical system processes) to enforce safety guardrails at backend layer
+	immunePIDs := make(map[int64]string)
+	if pl, pErr := sess.GetProcesslist(ctx); pErr == nil && pl != nil {
+		if pl.CurrentThreadID > 0 {
+			immunePIDs[pl.CurrentThreadID] = "own active connection (self)"
+		}
+		for _, th := range pl.Threads {
+			if th.User == "system user" || th.User == "event_scheduler" || th.Command == "Binlog Dump" {
+				immunePIDs[th.ID] = fmt.Sprintf("system process (%s)", th.User)
+			}
+		}
+	}
+
+	killConn := req.Mode == "connection"
+	type ItemResult struct {
+		ThreadID int64  `json:"thread_id"`
+		Success  bool   `json:"success"`
+		Error    string `json:"error,omitempty"`
+	}
+
+	results := make([]ItemResult, 0, len(req.ThreadIDs))
+	successCount := 0
+	failedCount := 0
+
+	for _, tid := range req.ThreadIDs {
+		if tid <= 0 {
+			results = append(results, ItemResult{
+				ThreadID: tid,
+				Success:  false,
+				Error:    "invalid thread id",
+			})
+			failedCount++
+			continue
+		}
+
+		if reason, immune := immunePIDs[tid]; immune {
+			results = append(results, ItemResult{
+				ThreadID: tid,
+				Success:  false,
+				Error:    "protected immune thread: " + reason,
+			})
+			failedCount++
+			continue
+		}
+
+		kErr := sess.KillProcess(ctx, tid, killConn)
+		if kErr != nil {
+			results = append(results, ItemResult{
+				ThreadID: tid,
+				Success:  false,
+				Error:    kErr.Error(),
+			})
+			failedCount++
+		} else {
+			results = append(results, ItemResult{
+				ThreadID: tid,
+				Success:  true,
+			})
+			successCount++
+		}
+	}
+
+	modeLabel := "KILL QUERY"
+	if killConn {
+		modeLabel = "KILL CONNECTION"
+	}
+	auditMsg := fmt.Sprintf("BATCH %s on %d thread(s): %d succeeded, %d failed", modeLabel, len(req.ThreadIDs), successCount, failedCount)
+	sess.RecordAudit(auditMsg, "processlist", 0, int64(successCount), nil)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"total":         len(req.ThreadIDs),
+		"success_count": successCount,
+		"failed_count":  failedCount,
+		"mode":          req.Mode,
+		"results":       results,
 	})
 }
 

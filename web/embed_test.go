@@ -1322,6 +1322,195 @@ func TestAutoRefreshCountdownAndTopStripeEmbedded(t *testing.T) {
 	}
 }
 
+func TestProcesslistBatchOperationsEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	expectedSnippets := []string{
+		`id="pl-filter-chips"`,
+		`data-pl-chip="all"`,
+		`data-pl-chip="active"`,
+		`data-pl-chip="locked"`,
+		`data-pl-chip="slow"`,
+		`data-pl-chip="sleep"`,
+		`id="pl-select-all"`,
+		`id="pl-batch-action-bar"`,
+		`id="pl-batch-count"`,
+		`id="pl-batch-kill-dialog"`,
+		`id="pl-batch-challenge-input"`,
+		`id="pl-batch-execute-btn"`,
+		`function setProcesslistFilterChip(chip)`,
+		`function toggleSelectAllProcesslistThreads(checked)`,
+		`function openBatchKillModal(mode)`,
+		`function executeBatchKill()`,
+		`function removeThreadFromBatchKill(threadId)`,
+		`function renderBatchKillModalContent()`,
+		`removeThreadFromBatchKill(${t.id})`,
+		`/api/session/${activeConnection.id}/batch-kill`,
+	}
+
+	for _, s := range expectedSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain %q for Processlist Batch Operations, but was missing", s)
+		}
+	}
+
+	// Ensure batch kill modal has clean English copy and no leftover untranslated strings
+	if strings.Contains(content, "Untuk mencegah") || strings.Contains(content, "Ketik KILL") {
+		t.Errorf("batch kill modal contains untranslated Indonesian copy")
+	}
+}
+
+func TestProcesslistBatchModalScriptIntegrity(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(contentBytes)
+
+	// Must NOT reference undeclared plInterval or plTimer
+	if strings.Contains(content, "plInterval") {
+		t.Errorf("critical bug: index.html references undeclared variable 'plInterval'")
+	}
+	if strings.Contains(content, "plTimer") {
+		t.Errorf("critical bug: index.html references undeclared variable 'plTimer'")
+	}
+}
+
+func TestProcesslistTwoTierToolbarLayout(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(contentBytes)
+
+	// Verify Primary Toolbar (Tier 1) and subtoolbar (Tier 2) exist
+	if !strings.Contains(content, `id="pl-primary-toolbar"`) {
+		t.Errorf("expected id=\"pl-primary-toolbar\" in index.html")
+	}
+	if !strings.Contains(content, `id="pl-filter-subtoolbar"`) {
+		t.Errorf("expected id=\"pl-filter-subtoolbar\" in index.html")
+	}
+
+	// Verify primary toolbar order and elements
+	tier1Snippets := []string{
+		`id="pl-view-threads-btn"`,
+		`id="pl-view-digest-btn"`,
+		`id="pl-view-deadlock-btn"`,
+		`id="pl-summary-text"`,
+		`id="pl-lock-summary"`,
+		`id="pl-refresh-control-group"`,
+		`id="pl-refresh-now-btn"`,
+		`id="pl-toggle-trend-btn"`,
+	}
+	for _, snip := range tier1Snippets {
+		if !strings.Contains(content, snip) {
+			t.Errorf("expected Tier 1 toolbar snippet %q in index.html", snip)
+		}
+	}
+
+	// Verify filter subtoolbar elements
+	tier2Snippets := []string{
+		`id="pl-filter-chips"`,
+		`id="pl-search-input"`,
+		`id="pl-search-clear-btn"`,
+		`id="pl-hide-sleep"`,
+		`id="pl-hide-system"`,
+		`id="pl-slow-threshold"`,
+	}
+	for _, snip := range tier2Snippets {
+		if !strings.Contains(content, snip) {
+			t.Errorf("expected Tier 2 subtoolbar snippet %q in index.html", snip)
+		}
+	}
+
+	// Verify JS switchProcesslistView toggles pl-filter-subtoolbar
+	if !strings.Contains(content, `document.getElementById('pl-filter-subtoolbar')`) {
+		t.Errorf("switchProcesslistView should query pl-filter-subtoolbar")
+	}
+}
+
+func TestProcesslistColumnVisibilityPicker(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(contentBytes)
+
+	// Verify trigger and dropdown elements
+	expectedSnippets := []string{
+		`id="pl-btn-col-picker"`,
+		`id="pl-col-picker-dropdown"`,
+		`id="pl-col-picker-list"`,
+		`id="pl-col-picker-count"`,
+		`data-pl-col="select"`,
+		`data-pl-col="action"`,
+		`data-pl-col="id"`,
+		`data-pl-col="user"`,
+		`data-pl-col="host"`,
+		`data-pl-col="db"`,
+		`data-pl-col="command"`,
+		`data-pl-col="time"`,
+		`data-pl-col="state"`,
+		`data-pl-col="query"`,
+		`function toggleProcesslistColPicker(e)`,
+		`function renderProcesslistColPickerList()`,
+		`function setProcesslistColVisibility(key, isVisible)`,
+		`function showAllProcesslistColumns()`,
+		`function resetDefaultProcesslistColumns()`,
+		`function isProcesslistColVisible(key)`,
+		`sqlfox-processlist-hidden-cols`,
+	}
+
+	for _, s := range expectedSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain %q for Processlist Column Visibility, but was missing", s)
+		}
+	}
+
+	// Verify stacking context and non-clipping: pl-filter-subtoolbar must not have overflow-x-auto,
+	// and must have z-30 or z-20 to elevate above sticky thead (z-10)
+	if strings.Contains(content, `id="pl-filter-subtoolbar" class="h-9 bg-slate-900/70 border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0 gap-3 overflow-x-auto`) {
+		t.Errorf("critical UI bug: #pl-filter-subtoolbar has overflow-x-auto, which clips #pl-col-picker-dropdown")
+	}
+	if !regexpMatch(`id="pl-filter-subtoolbar"[^>]*class="[^"]*z-(20|30)`, content) {
+		t.Errorf("#pl-filter-subtoolbar must have elevated z-index (z-20 or z-30) to sit above table sticky header (z-10)")
+	}
+}
+
+
+
 
 
 
