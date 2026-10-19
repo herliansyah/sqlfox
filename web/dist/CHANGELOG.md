@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Self-Update & Toast Feedback System (`web/dist/index.html`)**: Implemented global `showToast(message, type)` notification system supporting dialog top-layers and multi-severity styling (`info`, `success`, `warning`, `error`), resolving `ReferenceError: showToast is not defined` across 34 call sites.
 - **In-App Update Check Button Responsiveness (`web/dist/index.html`)**: Added immediate loading spinner and in-modal feedback to the `Check for Updates` button in the Changelog dialog.
 - **Version Alignment & Release Automation (`scripts/release.sh`, `web/dist/index.html`)**: Updated hardcoded legacy footer version to current release (`v0.10.0`) and extended `scripts/release.sh` to automatically synchronize version strings across `web/dist/index.html` on every release.
+- **Windows Startup Banner Test Stability (`cmd/sqlfox`)**: Prevent process hang on Windows test runners by providing an empty stdin buffer.
 
 ## [v0.10.0] - 2026-10-19
 
