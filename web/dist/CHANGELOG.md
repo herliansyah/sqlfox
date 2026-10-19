@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.10.2] - 2026-10-19
+
 ### Added
 - **Global Settings Shortcut (`web/dist/index.html`)**: Added `Ctrl+,` (and `Cmd+,` on macOS) global keyboard shortcut to open the App Settings modal instantly, aligned with standard desktop developer tooling.
 
