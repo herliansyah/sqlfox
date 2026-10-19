@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Unified App Settings Modal & Navbar Simplification (`web/dist/index.html`)**: Replaced top navbar Settings dropdown with a single direct `⚙️ Settings` button that opens a consolidated 4-tab modal (`🔐 Connections`, `☁️ GitHub Sync`, `📦 Notes Bundle`, `🤖 AI Copilot`). Merged standalone AI Copilot settings into the unified modal with seamless tab delegation across all existing UI entry points (Notes Drawer, Copilot panel, Command Palette `Ctrl+K`).
 
+### Fixed
+- **Query Execution Concurrency & Keydown Guard (`web/dist/index.html`)**: Added an `isQueryExecuting` guard to `runActiveQuery` and disabled the Run button during execution to prevent duplicate simultaneous queries and race conditions. Guarded global window `keydown` handler when CodeMirror is focused to prevent duplicate execution dispatch on `Ctrl+Enter`, and made keyboard shortcuts registration idempotent.
+- **Footer Connection Latency Display (`web/dist/index.html`)**: Stopped passing query execution duration (`execution_ms`) to `updateFooterStats`, preventing SQL runtimes from overwriting network ping latency. Sub-millisecond ping response is now cleanly formatted as `<1ms` instead of `0ms`.
+
 ## [v0.10.1] - 2026-10-19
 
 ### Fixed
