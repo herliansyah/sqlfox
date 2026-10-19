@@ -585,6 +585,13 @@
               <span>▶ Run</span>
               <kbd class="text-[10px] opacity-75 font-normal">Ctrl+Enter</kbd>
             </button>
+
+            <!-- Target Database Pill (ADR 0055) -->
+            <div id="tab-database-pill-container" onclick="openTabDatabaseSwitcher(event)" class="flex items-center space-x-1.5 bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 hover:border-amber-500/60 rounded px-2.5 py-1 text-xs transition cursor-pointer select-none" title="Active Target Database for this Tab (Click to change)">
+              <span class="text-amber-400 text-xs">🗄️</span>
+              <span id="tab-database-pill-name" class="font-mono font-semibold text-amber-200">default</span>
+              <span class="text-[9px] text-slate-400">▼</span>
+            </div>
             <button onclick="explainActiveQuery()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition">
               ⚡ Explain
             </button>
@@ -2413,24 +2420,48 @@
     </button>
   </div>
 
+  <!-- Tab Database Switcher Dropdown (ADR 0055) -->
+  <div id="tab-db-switcher-menu" class="hidden fixed bg-slate-900 border border-slate-700 rounded-lg shadow-2xl z-50 text-xs py-1 min-w-[220px] max-w-[280px] flex flex-col" onclick="event.stopPropagation()">
+    <div class="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400 border-b border-slate-800 flex items-center justify-between">
+      <span>Target Database</span>
+      <span class="text-[9px] text-amber-400 font-mono">Tab Scope</span>
+    </div>
+    <div class="p-1.5 border-b border-slate-800 bg-slate-950/60">
+      <input type="text" id="tab-db-search-input" oninput="filterTabDatabaseList(this.value)" onkeydown="handleTabDbSearchKeydown(event)" placeholder="Search database..." class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white placeholder-slate-500 font-mono outline-none focus:border-amber-500 transition">
+    </div>
+    <div id="tab-db-switcher-items" class="py-1 max-h-[220px] overflow-y-auto">
+      <!-- Injected database options -->
+    </div>
+  </div>
+
   <!-- 1. Safety Guard Challenge Modal -->
   <div id="safety-challenge-modal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
     <div class="bg-slate-900 border-2 border-app-danger w-full max-w-lg rounded-lg shadow-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
       <div class="flex items-center space-x-3 text-app-danger">
         <span class="text-2xl">⚠️</span>
-        <h3 class="text-lg font-bold">SAFETY GUARD: DESTRUCTIVE QUERY INTERCEPTED</h3>
+        <h3 id="challenge-modal-title" class="text-lg font-bold">SAFETY GUARD: DESTRUCTIVE QUERY INTERCEPTED</h3>
       </div>
+
+      <!-- Target Database Affirmation Badge (ADR 0055) -->
+      <div id="challenge-target-db-badge" class="flex items-center justify-between bg-slate-950 px-3 py-2 rounded border border-slate-800 text-xs">
+        <div class="flex items-center space-x-2">
+          <span class="text-slate-400">Target Database:</span>
+          <span id="challenge-target-db-name" class="font-mono font-bold text-amber-300 px-2 py-0.5 rounded bg-amber-950/80 border border-amber-800"></span>
+        </div>
+        <span id="challenge-mismatch-tag" class="hidden text-rose-300 bg-rose-950 border border-rose-800 px-1.5 py-0.5 rounded font-semibold text-[10px] uppercase animate-pulse">⚠️ Schema Mismatch</span>
+      </div>
+
       <p id="challenge-reason" class="text-xs text-slate-300 leading-relaxed"></p>
       <div class="bg-slate-950 p-3 rounded font-mono text-xs text-red-300 overflow-x-auto border border-red-950" id="challenge-sql-preview"></div>
-      <div class="space-y-1">
-        <label class="text-xs font-semibold text-slate-300">
-          To proceed, type the target table name (<span id="challenge-target-name" class="text-app-danger font-mono font-bold"></span>) below:
+      <div id="challenge-input-group" class="space-y-1">
+        <label id="challenge-input-label" class="text-xs font-semibold text-slate-300">
+          To proceed, type the target name (<span id="challenge-target-name" class="text-app-danger font-mono font-bold"></span>) below:
         </label>
-        <input type="text" id="challenge-input" class="w-full bg-slate-950 border border-slate-700 p-2 text-sm text-white font-mono rounded outline-none focus:border-app-danger" placeholder="Type table name...">
+        <input type="text" id="challenge-input" class="w-full bg-slate-950 border border-slate-700 p-2 text-sm text-white font-mono rounded outline-none focus:border-app-danger" placeholder="Type target name...">
       </div>
       <div class="flex justify-end space-x-3 pt-2">
         <button onclick="closeSafetyModal()" class="px-4 py-1.5 text-xs text-slate-300 hover:bg-slate-800 rounded transition">Cancel (Esc)</button>
-        <button onclick="confirmSafetyChallenge()" class="bg-app-danger hover:bg-red-600 text-white font-bold px-4 py-1.5 text-xs rounded transition shadow">Confirm & Execute (Danger)</button>
+        <button id="challenge-confirm-btn" onclick="confirmSafetyChallenge()" class="bg-app-danger hover:bg-red-600 text-white font-bold px-4 py-1.5 text-xs rounded transition shadow">Confirm & Execute (Danger)</button>
       </div>
     </div>
   </div>
@@ -5609,14 +5640,14 @@
           menu.classList.add('hidden');
         }
       }
-      if (!e.target.closest('#table-context-menu, #tab-context-menu, #grid-context-menu, #pl-context-menu, #btn-col-picker, #col-picker-dropdown, #pl-btn-col-picker, #pl-col-picker-dropdown, #btn-export-csv, #export-csv-menu')) {
+      if (!e.target.closest('#table-context-menu, #tab-context-menu, #grid-context-menu, #pl-context-menu, #btn-col-picker, #col-picker-dropdown, #pl-btn-col-picker, #pl-col-picker-dropdown, #btn-export-csv, #export-csv-menu, #tab-database-pill-container, #tab-db-switcher-menu')) {
         closeAllContextMenus();
       }
     });
 
     // Dismiss context menus when right-clicking on unhandled page surfaces
     document.addEventListener('contextmenu', (e) => {
-      if (!e.target.closest('#table-context-menu, #tab-context-menu, #grid-context-menu, #pl-context-menu, td[data-col], #tabs-container, #schema-tree, .pl-row, #btn-col-picker, #col-picker-dropdown, #pl-btn-col-picker, #pl-col-picker-dropdown, #btn-export-csv, #export-csv-menu')) {
+      if (!e.target.closest('#table-context-menu, #tab-context-menu, #grid-context-menu, #pl-context-menu, td[data-col], #tabs-container, #schema-tree, .pl-row, #btn-col-picker, #col-picker-dropdown, #pl-btn-col-picker, #pl-col-picker-dropdown, #btn-export-csv, #export-csv-menu, #tab-database-pill-container, #tab-db-switcher-menu')) {
         closeAllContextMenus();
       }
     });
@@ -5632,6 +5663,8 @@
       if (plColPicker) plColPicker.classList.add('hidden');
       const exportCsv = document.getElementById('export-csv-menu');
       if (exportCsv) exportCsv.classList.add('hidden');
+      const tabDbMenu = document.getElementById('tab-db-switcher-menu');
+      if (tabDbMenu) tabDbMenu.classList.add('hidden');
     }
 
     // --- Table Context Menu & Actions ---
@@ -7340,6 +7373,8 @@
         splitter.classList.toggle('hidden', !isEditorVisible);
       }
 
+      updateTabDatabasePill(activeTab);
+
       setTimeout(() => {
         if (cmEditor) cmEditor.refresh();
       }, 10);
@@ -7611,18 +7646,116 @@
         if (typeof clusterRefreshInterval !== 'undefined' && clusterRefreshInterval !== 'pause') {
           triggerCountdownBar('cl-refresh-bar', clusterRefreshInterval);
         }
-      } else {
-        triggerCountdownBar('cl-refresh-bar', 'pause');
       }
 
+      updateTabDatabasePill(nextTab);
       saveTabsState();
     }
 
     function addNewQueryTab() {
       const newId = 'tab-' + Date.now();
-      tabs.push({ id: newId, title: `Query ${tabs.length + 1}.sql`, sql: '', isTableViewer: false });
+      const currentActiveTab = tabs.find(t => t.id === activeTabId);
+      const inheritedDB = (currentActiveTab && currentActiveTab.database) || schemaCatalogCache?.database_name || activeConnection?.database_name || '';
+      tabs.push({ id: newId, title: `Query ${tabs.length + 1}.sql`, sql: '', isTableViewer: false, database: inheritedDB });
       switchTab(newId);
       saveTabsState();
+    }
+
+    // --- Tab Database Scope & Pill (ADR 0055) ---
+    function updateTabDatabasePill(tab) {
+      const pillContainer = document.getElementById('tab-database-pill-container');
+      const pillName = document.getElementById('tab-database-pill-name');
+      if (!pillContainer || !pillName) return;
+      if (!tab || tab.isTableViewer || tab.isProcesslist || tab.isCluster || tab.isFlightRecorder || tab.isVariables) {
+        pillContainer.classList.add('hidden');
+        return;
+      }
+      pillContainer.classList.remove('hidden');
+      if (!tab.database) {
+        tab.database = schemaCatalogCache?.database_name || activeConnection?.database_name || 'default';
+      }
+      pillName.textContent = tab.database || 'default';
+    }
+
+    let cachedTabDatabases = [];
+
+    function renderTabDatabaseList(filterQuery = '') {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const itemsContainer = document.getElementById('tab-db-switcher-items');
+      if (!itemsContainer) return;
+      const currentDb = (activeTab && activeTab.database) || schemaCatalogCache?.database_name || activeConnection?.database_name || 'default';
+      const q = (filterQuery || '').trim().toLowerCase();
+      const filtered = q ? cachedTabDatabases.filter(d => d.toLowerCase().includes(q)) : cachedTabDatabases;
+
+      if (filtered.length === 0) {
+        itemsContainer.innerHTML = '<div class="text-slate-500 text-center py-3 text-xs italic">No matching database</div>';
+        return;
+      }
+
+      itemsContainer.innerHTML = filtered.map(db => {
+        const isCurrent = db.toLowerCase() === currentDb.toLowerCase();
+        return `
+          <button onclick="selectTabDatabase('${escapeHtml(db)}')" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center justify-between transition cursor-pointer ${isCurrent ? 'text-amber-400 font-bold bg-amber-950/30' : 'text-slate-300'}">
+            <span class="font-mono text-xs truncate max-w-[190px]">${escapeHtml(db)}</span>
+            ${isCurrent ? '<span class="text-xs shrink-0">✓</span>' : ''}
+          </button>
+        `;
+      }).join('');
+    }
+
+    function filterTabDatabaseList(query) {
+      renderTabDatabaseList(query);
+    }
+
+    function handleTabDbSearchKeydown(e) {
+      if (e.key === 'Escape') {
+        closeAllContextMenus();
+      } else if (e.key === 'Enter') {
+        const itemsContainer = document.getElementById('tab-db-switcher-items');
+        if (itemsContainer) {
+          const firstBtn = itemsContainer.querySelector('button');
+          if (firstBtn) firstBtn.click();
+        }
+      }
+    }
+
+    function openTabDatabaseSwitcher(e) {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      closeAllContextMenus();
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab) return;
+      const menu = document.getElementById('tab-db-switcher-menu');
+      const pill = document.getElementById('tab-database-pill-container');
+      const searchInput = document.getElementById('tab-db-search-input');
+      if (!menu || !pill) return;
+
+      const dbs = (schemaCatalogCache && Array.isArray(schemaCatalogCache.databases) && schemaCatalogCache.databases.length > 0)
+        ? schemaCatalogCache.databases
+        : (activeConnection ? [activeConnection.database_name || 'default'] : ['default']);
+
+      cachedTabDatabases = dbs;
+      if (searchInput) searchInput.value = '';
+      renderTabDatabaseList('');
+
+      const rect = pill.getBoundingClientRect();
+      menu.style.top = `${rect.bottom + 4}px`;
+      menu.style.left = `${rect.left}px`;
+      menu.classList.remove('hidden');
+      setTimeout(() => { if (searchInput) searchInput.focus(); }, 50);
+    }
+
+    function selectTabDatabase(dbName) {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (activeTab) {
+        activeTab.database = dbName;
+        updateTabDatabasePill(activeTab);
+        saveTabsState();
+        showToast(`Tab database context switched to '${dbName}'`);
+      }
+      closeAllContextMenus();
     }
 
     // --- Tab Context Menu & Lifecycle Management ---
@@ -13575,9 +13708,55 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const sql = getEditorSQL().trim();
       if (!sql) return;
 
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const currentDb = (activeTab && activeTab.database) ? activeTab.database : (schemaCatalogCache?.database_name || activeConnection.database_name || '');
+
+      // ADR 0055: Bidirectional USE <database> synchronization
+      const useMatch = sql.match(/^\s*USE\s+[`'"]?([\w\.\-]+)[`'"]?\s*;?$/i);
+      if (useMatch) {
+        const newDb = useMatch[1];
+        if (activeTab) {
+          activeTab.database = newDb;
+          updateTabDatabasePill(activeTab);
+          saveTabsState();
+          showToast(`Tab database context switched to '${newDb}'`);
+        }
+      }
+
+      // ADR 0055: Intercept unconfirmed DDL for Target Database Affirmation
+      if (!confirmed && /^\s*(CREATE|ALTER)\s+(TABLE|VIEW|INDEX)/i.test(sql)) {
+        const ddlMatch = sql.match(/^\s*(CREATE|ALTER)\s+(TABLE|VIEW|INDEX)\s+(?:IF\s+(?:NOT\s+)?EXISTS\s+)?([`'"\w\.\-]+)/i);
+        let extractedTable = '';
+        let extractedDB = '';
+        if (ddlMatch && ddlMatch[3]) {
+          const parts = ddlMatch[3].replace(/[`'"]/g, '').split('.');
+          if (parts.length >= 2) {
+            extractedDB = parts[parts.length - 2];
+            extractedTable = parts[parts.length - 1];
+          } else {
+            extractedTable = parts[0];
+          }
+        }
+        const targetDB = extractedDB || currentDb;
+        const isMismatch = !!(extractedDB && currentDb && extractedDB.toLowerCase() !== currentDb.toLowerCase());
+        const isProdOrStaging = activeConnection?.environment === 'Production' || activeConnection?.environment === 'Staging';
+        openSafetyModal(sql, {
+          risk_level: isMismatch || isProdOrStaging ? 'DANGEROUS' : 'WARNING',
+          requires_affirmation: true,
+          requires_challenge: isMismatch || isProdOrStaging,
+          schema_scope_mismatch: isMismatch,
+          target_table: extractedTable,
+          target_database: targetDB,
+          operation: (ddlMatch && ddlMatch[1].toUpperCase()) || 'DDL',
+          reason: isMismatch
+            ? `Schema Scope Mismatch: query explicitly targets database '${extractedDB}', but current tab is scoped to '${currentDb}'.`
+            : `${(ddlMatch && ddlMatch[1].toUpperCase()) || 'DDL'} statement targeting database '${targetDB}'. Verify destination before execution.`
+        });
+        return;
+      }
+
       setQueryRunning(true);
 
-      const currentDb = schemaCatalogCache?.database_name || activeConnection.database_name || '';
       try {
         const res = await apiFetch(`/api/session/${activeConnection.id}/execute`, {
           method: 'POST',
@@ -13850,16 +14029,54 @@ Please analyze what is causing this query to be slow and suggest necessary query
       setQueryRunning(false);
     }
 
-    // --- Safety Challenge Modal ---
+    // --- Safety Challenge Modal (ADR 0055 Target Database Affirmation) ---
     function openSafetyModal(sql, inspection) {
       pendingDestructiveSQL = sql;
       pendingDestructiveResult = inspection;
-      document.getElementById('challenge-reason').textContent = inspection.reason;
+      document.getElementById('challenge-reason').textContent = inspection.reason || '';
       document.getElementById('challenge-sql-preview').textContent = sql;
-      document.getElementById('challenge-target-name').textContent = inspection.target_table;
-      document.getElementById('challenge-input').value = '';
+      document.getElementById('challenge-target-name').textContent = inspection.target_table || inspection.target_database || 'target';
+
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const targetDb = inspection.target_database || (activeTab && activeTab.database) || schemaCatalogCache?.database_name || activeConnection?.database_name || 'default';
+      const targetDbNameEl = document.getElementById('challenge-target-db-name');
+      if (targetDbNameEl) targetDbNameEl.textContent = targetDb;
+
+      const mismatchTag = document.getElementById('challenge-mismatch-tag');
+      if (mismatchTag) {
+        if (inspection.schema_scope_mismatch) {
+          mismatchTag.classList.remove('hidden');
+        } else {
+          mismatchTag.classList.add('hidden');
+        }
+      }
+
+      const modalTitle = document.getElementById('challenge-modal-title');
+      const confirmBtn = document.getElementById('challenge-confirm-btn');
+      const inputGroup = document.getElementById('challenge-input-group');
+      const inputEl = document.getElementById('challenge-input');
+      inputEl.value = '';
+
+      const isDevAffirmation = inspection.requires_affirmation && !inspection.requires_challenge && activeConnection?.environment === 'Development' && !inspection.schema_scope_mismatch;
+
+      if (isDevAffirmation) {
+        if (modalTitle) modalTitle.textContent = 'TARGET DATABASE AFFIRMATION (DDL)';
+        if (inputGroup) inputGroup.classList.add('hidden');
+        if (confirmBtn) {
+          confirmBtn.className = 'bg-amber-600 hover:bg-amber-500 text-white font-bold px-4 py-1.5 text-xs rounded transition shadow cursor-pointer';
+          confirmBtn.textContent = `Confirm & Execute on [${targetDb}]`;
+        }
+      } else {
+        if (modalTitle) modalTitle.textContent = inspection.schema_scope_mismatch ? 'SAFETY GUARD: SCHEMA SCOPE MISMATCH DETECTED' : 'SAFETY GUARD: DESTRUCTIVE QUERY INTERCEPTED';
+        if (inputGroup) inputGroup.classList.remove('hidden');
+        if (confirmBtn) {
+          confirmBtn.className = 'bg-app-danger hover:bg-red-600 text-white font-bold px-4 py-1.5 text-xs rounded transition shadow cursor-pointer';
+          confirmBtn.textContent = 'Confirm & Execute (Danger)';
+        }
+        setTimeout(() => inputEl.focus(), 100);
+      }
+
       document.getElementById('safety-challenge-modal').classList.remove('hidden');
-      setTimeout(() => document.getElementById('challenge-input').focus(), 100);
     }
 
     function closeSafetyModal() {
@@ -13869,10 +14086,20 @@ Please analyze what is causing this query to be slow and suggest necessary query
     }
 
     function confirmSafetyChallenge() {
-      const typed = document.getElementById('challenge-input').value.trim();
-      if (typed !== pendingDestructiveResult.target_table) {
-        showNativeAlert(`Verification failed! You typed '${typed}', but expected '${pendingDestructiveResult.target_table}'.`, 'Safety Challenge');
-        return;
+      if (!pendingDestructiveResult) return;
+      const isDevAffirmation = pendingDestructiveResult.requires_affirmation && !pendingDestructiveResult.requires_challenge && activeConnection?.environment === 'Development' && !pendingDestructiveResult.schema_scope_mismatch;
+
+      let typed = '';
+      if (!isDevAffirmation) {
+        typed = document.getElementById('challenge-input').value.trim();
+        const expectedTable = pendingDestructiveResult.target_table || '';
+        const expectedDB = pendingDestructiveResult.target_database || '';
+        const matchTable = expectedTable && typed.toLowerCase() === expectedTable.toLowerCase();
+        const matchDB = expectedDB && typed.toLowerCase() === expectedDB.toLowerCase();
+        if (!matchTable && !matchDB) {
+          showNativeAlert(`Verification failed! You typed '${typed}', but expected '${expectedTable || expectedDB}'.`, 'Safety Challenge');
+          return;
+        }
       }
       closeSafetyModal();
       runActiveQuery(true, typed);

@@ -1615,4 +1615,43 @@ func TestFooterLatencyIntegrity(t *testing.T) {
 	}
 }
 
+func TestTabDatabaseScopeAndDDLAffirmationEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	requiredElements := []string{
+		`id="tab-database-pill-container"`,
+		`id="tab-database-pill-name"`,
+		`id="tab-db-switcher-menu"`,
+		`id="tab-db-search-input"`,
+		`id="tab-db-switcher-items"`,
+		`id="challenge-target-db-badge"`,
+		`id="challenge-target-db-name"`,
+		`id="challenge-mismatch-tag"`,
+		"function updateTabDatabasePill(tab)",
+		"function openTabDatabaseSwitcher(e)",
+		"function filterTabDatabaseList(query)",
+		"function handleTabDbSearchKeydown(e)",
+		"function selectTabDatabase(dbName)",
+		"Tab database context switched to",
+	}
+
+	for _, elem := range requiredElements {
+		if !strings.Contains(content, elem) {
+			t.Errorf("expected index.html to contain %q, but was missing", elem)
+		}
+	}
+}
+
+
 

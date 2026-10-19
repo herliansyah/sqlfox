@@ -52,6 +52,10 @@ _Avoid_: IP ban, firewall block, auth cooldown
 The ingress validation gate verifying incoming HTTP `Host` headers against approved loopback and explicitly configured network addresses to prevent unauthorized cross-origin requests from browser environments.
 _Avoid_: Host filter, domain check, origin gate
 
+**Strict Connection Mode**:
+A Connection configuration policy that pins an active session strictly to a single target database, rejecting cross-database queries or DDL mutations even when authenticated as a superuser.
+_Avoid_: Locked connection, single DB profile, pinned vault entry
+
 ## Drivers & Sessions
 
 **Driver**:
@@ -155,6 +159,14 @@ _Avoid_: Multi-query validator, compound gate
 **CTE Clause Stripping**:
 A syntax preprocessing step (`stripLeadingCTE`) that isolates and removes leading Common Table Expression (`WITH ... AS (...)`) definitions to evaluate the root executable operation (`SELECT`, `INSERT`, `UPDATE`, `DELETE`, `MERGE`) under the Safety Guard.
 _Avoid_: CTE cleaner, WITH handler
+
+**Target Database Affirmation**:
+A dedicated visual confirmation gate inside the Challenge Modal and pre-DDL review presenting the resolved target database in prominent contrast, requiring operator acknowledgement or manual typing before executing schema modifications.
+_Avoid_: DDL confirm, database check prompt, target alert
+
+**Schema Scope Mismatch Guard**:
+An AST analysis check in the Safety Guard that detects discrepancies between a tab's bound Tab Database Scope and an explicitly qualified database prefix in a SQL statement, intercepting accidental cross-database executions.
+_Avoid_: Cross-DB validator, schema mismatch warning
 
 ## Artificial Intelligence
 
@@ -277,6 +289,13 @@ _Avoid_: Tab title editor, change tab label
 The curated, high-contrast dark-mode syntax color palette governing CodeMirror token styling in the Query Editor, ensuring optimal legibility on dark backgrounds (`#090d16`) by mapping backtick table/database identifiers (`.cm-variable-2`) to Sky-300 cyan (`#7dd3fc`), data types (`.cm-type`) to Violet (`#c084fc`), constants/atoms (`.cm-atom`) to Coral (`#fb923c`), and matching brackets to glowing cyan highlights.
 _Avoid_: Custom theme picker, external CSS theme, light theme fallback
 
+**Tab Database Scope**:
+The explicit, isolated database context bound to an individual Query Editor tab, decoupled from global sidebar navigation and synchronized with `USE` statements.
+_Avoid_: Global database state, active tab schema, session DB pointer
+
+**Target Database Pill**:
+The persistent visual status pill rendered adjacent to the Query Editor execution controls displaying the tab's currently bound target database (`[ 🗄️ db_name ]`).
+_Avoid_: DB badge, header label, current schema indicator
 
 ## Schema Management & Native Dialogs
 

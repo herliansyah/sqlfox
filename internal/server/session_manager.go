@@ -379,8 +379,12 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		}
 	}
 
-	// 1. Safety Guard Inspection
-	inspection, allQueries, err := inspectAllStatements(trimmedSQL, s.Environment, s.DriverName)
+	// 1. Safety Guard Inspection with Scoped Database Context
+	targetDB := req.Database
+	if targetDB == "" && s.CachedSchema != nil {
+		targetDB = s.CachedSchema.DatabaseName
+	}
+	inspection, allQueries, err := inspectAllStatements(trimmedSQL, s.Environment, s.DriverName, targetDB)
 	if err != nil {
 		return nil, err
 	}
@@ -390,8 +394,9 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		return nil, ErrReadOnlySession
 	}
 
-	// 3. Challenge Enforcement
-	if inspection.RequiresChallenge && !req.Confirmed {
+	// 3. Challenge Enforcement (ADR 0055)
+	requiresGate := inspection.RequiresChallenge
+	if requiresGate && !req.Confirmed {
 		if inspection.TargetTable != "" && s.Session != nil {
 			if locks, err := s.Session.InspectTableLocks(ctx, req.Database, inspection.TargetTable); err == nil {
 				inspection.TableLocks = locks
@@ -413,10 +418,12 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		}, nil
 	}
 
-	// Challenge typed table name validation
+	// Challenge typed table name validation (required on RequiresChallenge when not a 1-click Dev affirmation)
 	if inspection.RequiresChallenge && req.Confirmed && inspection.TargetTable != "" {
-		if !strings.EqualFold(strings.TrimSpace(req.ChallengeInput), inspection.TargetTable) {
-			return nil, fmt.Errorf("Challenge confirmation failed: expected '%s', got '%s'", inspection.TargetTable, req.ChallengeInput)
+		expected := inspection.TargetTable
+		typed := strings.TrimSpace(req.ChallengeInput)
+		if !strings.EqualFold(typed, expected) && !strings.EqualFold(typed, inspection.TargetDatabase) {
+			return nil, fmt.Errorf("Challenge confirmation failed: expected '%s', got '%s'", expected, req.ChallengeInput)
 		}
 	}
 
@@ -828,7 +835,11 @@ func (s *ActiveSession) Stream(ctx context.Context, sql string, maxRows int) (dr
 	}
 
 	isSelect := driver.IsQueryStatement(trimmedSQL)
-	inspection, allQueries, err := inspectAllStatements(trimmedSQL, s.Environment, s.DriverName)
+	targetDB := ""
+	if s.CachedSchema != nil {
+		targetDB = s.CachedSchema.DatabaseName
+	}
+	inspection, allQueries, err := inspectAllStatements(trimmedSQL, s.Environment, s.DriverName, targetDB)
 	if err != nil {
 		return nil, err
 	}
@@ -1033,10 +1044,10 @@ func (s *ActiveSession) GetTablePartitions(ctx context.Context, database, table 
 // because drivers such as SQLite execute all of them in one Exec. It returns the inspection that must
 // gate execution and whether every statement is a read-only query. More than one statement requiring a
 // challenge is rejected, since one typed confirmation and one pre-DDL backup can only cover one target.
-func inspectAllStatements(sql, environment, driverName string) (*safety.InspectionResult, bool, error) {
+func inspectAllStatements(sql, environment, driverName, scopedDB string) (*safety.InspectionResult, bool, error) {
 	stmts := splitSQLStatements(strings.NewReader(sql), driverName)
 	if len(stmts) <= 1 {
-		return safety.Inspect(sql, environment), driver.IsQueryStatement(sql), nil
+		return safety.InspectWithScope(sql, environment, scopedDB), driver.IsQueryStatement(sql), nil
 	}
 	var gate, firstDestructive *safety.InspectionResult
 	allQueries := true
@@ -1044,14 +1055,16 @@ func inspectAllStatements(sql, environment, driverName string) (*safety.Inspecti
 		if !driver.IsQueryStatement(stmt) {
 			allQueries = false
 		}
-		insp := safety.Inspect(stmt, environment)
+		insp := safety.InspectWithScope(stmt, environment, scopedDB)
 		if insp.RequiresChallenge {
-			if gate != nil {
+			if gate != nil && gate.RequiresChallenge {
 				return nil, false, errors.New("multiple destructive statements require confirmation: run them one at a time")
 			}
 			gate = insp
 		} else if insp.IsDestructive && firstDestructive == nil {
 			firstDestructive = insp
+		} else if insp.RequiresAffirmation && gate == nil {
+			gate = insp
 		}
 	}
 	if gate == nil {
