@@ -13661,9 +13661,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
           }
           await refreshSchema();
         }
-        if (data.execution_ms !== undefined) {
-          updateFooterStats(data.execution_ms);
-        }
+        // ponytail: refresh memory telemetry without overwriting ping latency with query execution duration
+        updateFooterStats();
         const drawer = document.getElementById('audit-drawer');
         if (drawer && !drawer.classList.contains('hidden')) {
           setTimeout(loadAuditLogs, 150);
@@ -22611,7 +22610,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
         if (latencyEl) {
           if (lat !== null && lat !== undefined) {
-            latencyEl.textContent = `Latency: ${lat}ms`;
+            const latStr = lat === 0 ? '<1ms' : `${lat}ms`;
+            latencyEl.textContent = `Latency: ${latStr}`;
             latencyEl.className = lat < 50 ? 'text-emerald-400 font-mono cursor-pointer hover:underline transition' :
                                   (lat < 150 ? 'text-amber-400 font-mono cursor-pointer hover:underline transition' :
                                                'text-rose-400 font-mono cursor-pointer hover:underline transition');
