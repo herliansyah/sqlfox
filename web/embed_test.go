@@ -1509,10 +1509,40 @@ func TestProcesslistColumnVisibilityPicker(t *testing.T) {
 	}
 }
 
+func TestUpdateAndToastIntegration(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html: %v", err)
+	}
+	defer f.Close()
 
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
 
+	// 1. Ensure stale v0.2.0 hardcoded text is completely removed from footer
+	if strings.Contains(content, `<span id="footer-version-text">SqlFox v0.2.0</span>`) {
+		t.Errorf("critical bug: index.html still contains stale hardcoded 'SqlFox v0.2.0' in footer")
+	}
 
+	// 2. Ensure showToast is defined as a global function
+	if !strings.Contains(content, `function showToast(message, type = 'info')`) {
+		t.Errorf("critical bug: showToast definition is missing in index.html, causing ReferenceError on 34 call sites")
+	}
 
+	// 3. Ensure toast container targets active open dialog or document.body for top-layer visibility
+	if !strings.Contains(content, `const activeDialog = document.querySelector('dialog[open]');`) ||
+		!strings.Contains(content, `const host = activeDialog || document.body;`) {
+		t.Errorf("expected showToast to resolve container via active open dialog or document.body")
+	}
 
-
+	// 4. Ensure checkOrOpenUpdate provides immediate visual feedback on the changelog button
+	if !strings.Contains(content, `document.getElementById('btn-changelog-check-update')`) ||
+		!strings.Contains(content, `Up to date`) {
+		t.Errorf("expected checkOrOpenUpdate to provide button feedback on #btn-changelog-check-update")
+	}
+}
 

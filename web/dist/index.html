@@ -2138,7 +2138,7 @@
         <span id="footer-update-badge-text">Update</span>
       </button>
       <button id="footer-version-btn" onclick="openChangelogDialog()" class="text-slate-400 hover:text-slate-200 cursor-pointer transition select-none flex items-center space-x-1 hover:bg-slate-800/60 px-1.5 py-0.5 rounded text-left" title="Click to view Changelog">
-        <span id="footer-version-text">SqlFox v0.2.0</span>
+        <span id="footer-version-text">SqlFox v0.10.0</span>
       </button>
     </div>
   </footer>
@@ -2171,7 +2171,7 @@
         <div class="flex items-center justify-between bg-slate-950/60 border border-slate-800/80 rounded-xl px-4 py-3 text-xs">
           <div class="flex items-center space-x-2">
             <span class="text-slate-400">Current:</span>
-            <span id="update-cur-ver" class="font-mono text-slate-300 font-medium">v0.1.0</span>
+            <span id="update-cur-ver" class="font-mono text-slate-300 font-medium">v0.10.0</span>
             <span class="text-slate-500">➔</span>
             <span class="text-slate-400">New:</span>
             <span id="update-new-ver" class="font-mono text-emerald-400 font-semibold">vX.Y.Z</span>
@@ -2238,7 +2238,7 @@
           <div>
             <div class="flex items-center space-x-2">
               <h3 class="font-semibold text-white text-base">SqlFox Changelog</h3>
-              <span id="changelog-current-badge" class="px-2 py-0.5 rounded-full text-[11px] font-mono font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/30">v0.1.0</span>
+              <span id="changelog-current-badge" class="px-2 py-0.5 rounded-full text-[11px] font-mono font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/30">v0.10.0</span>
             </div>
             <p class="text-xs text-slate-400 mt-0.5">Application release history & notable changes</p>
           </div>
@@ -22640,12 +22640,57 @@ Please analyze what is causing this query to be slow and suggest necessary query
       return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
+    // ponytail: unified lightweight toast notification system supporting dialog top-layers and multi-severity styling
+    function showToast(message, type = 'info') {
+      if (!message) return;
+      const activeDialog = document.querySelector('dialog[open]');
+      const host = activeDialog || document.body;
+      let container = host.querySelector('.app-toast-container');
+      if (!container) {
+        container = document.createElement('div');
+        container.className = 'app-toast-container fixed bottom-8 right-6 z-[9999] flex flex-col space-y-2 max-w-sm pointer-events-auto';
+        host.appendChild(container);
+      }
+
+      const styles = {
+        info: 'bg-slate-900 border-sky-500/80 text-sky-200 ring-sky-500/30',
+        success: 'bg-slate-900 border-emerald-500/80 text-emerald-200 ring-emerald-500/30',
+        warning: 'bg-slate-900 border-amber-500/80 text-amber-200 ring-amber-500/30',
+        error: 'bg-slate-900 border-rose-500/80 text-rose-200 ring-rose-500/30'
+      };
+      const icons = {
+        info: 'ℹ️',
+        success: '✅',
+        warning: '⚠️',
+        error: '❌'
+      };
+
+      const toast = document.createElement('div');
+      const styleClass = styles[type] || styles.info;
+      const icon = icons[type] || icons.info;
+      toast.className = `border rounded-xl px-3.5 py-2.5 shadow-2xl text-xs flex items-center space-x-2.5 transition-all duration-300 ring-2 animate-in fade-in slide-in-from-bottom-2 ${styleClass}`;
+      toast.innerHTML = `
+        <span class="text-sm select-none">${icon}</span>
+        <span class="flex-1 font-medium leading-tight">${escapeHtml(message)}</span>
+        <button onclick="this.parentElement.remove()" class="text-slate-400 hover:text-white text-xs px-1 select-none">✕</button>
+      `;
+      container.appendChild(toast);
+      setTimeout(() => {
+        if (toast.parentNode) {
+          toast.classList.add('opacity-0', 'translate-y-2');
+          setTimeout(() => toast.remove(), 300);
+        }
+      }, 4000);
+    }
+
     // --- Update Engine & Changelog Viewer ---
     let latestUpdateInfo = null;
 
     async function checkOrOpenUpdate(userInitiated = false) {
       const verTextEl = document.getElementById('footer-version-text');
       const updateBtn = document.getElementById('footer-update-btn');
+      const checkBtn = document.getElementById('btn-changelog-check-update');
+      let originalBtnHTML = '';
 
       if (userInitiated && latestUpdateInfo && latestUpdateInfo.has_update) {
         openUpdateDialog(latestUpdateInfo);
@@ -22654,6 +22699,11 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
       if (userInitiated) {
         showToast('Checking for updates...', 'info');
+        if (checkBtn) {
+          originalBtnHTML = checkBtn.innerHTML;
+          checkBtn.disabled = true;
+          checkBtn.innerHTML = '<span class="animate-spin">🔄</span><span>Checking...</span>';
+        }
       }
 
       try {
@@ -22669,6 +22719,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
         if (data.error && userInitiated) {
           showToast(`Update check: ${data.error}`, 'warning');
+          if (checkBtn && originalBtnHTML) checkBtn.innerHTML = originalBtnHTML;
           return;
         }
 
@@ -22686,12 +22737,27 @@ Please analyze what is causing this query to be slow and suggest necessary query
           if (updateBtn) updateBtn.classList.add('hidden');
           if (userInitiated) {
             showToast(`You are running the latest version (${data.current_version || 'current'})`, 'success');
+            if (checkBtn) {
+              checkBtn.innerHTML = `<span>✅</span><span>Up to date (${data.current_version || 'latest'})</span>`;
+              setTimeout(() => {
+                if (checkBtn && originalBtnHTML) checkBtn.innerHTML = originalBtnHTML;
+              }, 3000);
+            }
           }
         }
       } catch (err) {
         console.error('Update check failed:', err);
         if (userInitiated) {
           showToast(`Update check failed: ${err.message}`, 'error');
+          if (checkBtn && originalBtnHTML) checkBtn.innerHTML = originalBtnHTML;
+        }
+      } finally {
+        if (checkBtn && (!latestUpdateInfo || latestUpdateInfo.has_update || latestUpdateInfo.error)) {
+          checkBtn.disabled = false;
+        } else if (checkBtn && !userInitiated) {
+          checkBtn.disabled = false;
+        } else if (checkBtn) {
+          checkBtn.disabled = false;
         }
       }
     }
@@ -22787,6 +22853,13 @@ Please analyze what is causing this query to be slow and suggest necessary query
           bodyEl.innerHTML = renderCopilotMarkdown(data.changelog);
           if (data.version && badgeEl) {
             badgeEl.textContent = data.version;
+          }
+          if (data.version && verTextEl) {
+            verTextEl.textContent = `SqlFox ${data.version}`;
+          }
+          const updateCurVerEl = document.getElementById('update-cur-ver');
+          if (data.version && updateCurVerEl) {
+            updateCurVerEl.textContent = data.version;
           }
         } else if (bodyEl) {
           bodyEl.innerHTML = '<p class="text-slate-400 italic">No changelog entries found.</p>';

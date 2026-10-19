@@ -127,6 +127,7 @@ RELEASE_DATE=$(date +%Y-%m-%d)
 if [ "$DRY_RUN" = true ]; then
   echo "🔎 [DRY-RUN] Would update CHANGELOG.md with [${NEW_VERSION}] - ${RELEASE_DATE}"
   echo "🔎 [DRY-RUN] Would update cmd/sqlfox/main.go Version = \"${NEW_VERSION}\""
+  echo "🔎 [DRY-RUN] Would update web/dist/index.html version to ${NEW_VERSION}"
   echo "🔎 [DRY-RUN] Would commit and create tag ${NEW_VERSION}"
   if [ "$PUSH_REMOTE" = true ]; then
     echo "🔎 [DRY-RUN] Would push to git origin"
@@ -173,8 +174,16 @@ if [ -f "cmd/sqlfox/main.go" ]; then
   echo "📝 Updated cmd/sqlfox/main.go Version to ${NEW_VERSION}"
 fi
 
+# 6b. Synchronize version in web/dist/index.html
+if [ -f "web/dist/index.html" ]; then
+  sed -i -E "s/id=\"footer-version-text\">SqlFox v[^<]*/id=\"footer-version-text\">SqlFox ${NEW_VERSION}/g" web/dist/index.html
+  sed -i -E "s/id=\"update-cur-ver\"([^>]*)>v[^<]*/id=\"update-cur-ver\"\1>${NEW_VERSION}/g" web/dist/index.html
+  sed -i -E "s/id=\"changelog-current-badge\"([^>]*)>v[^<]*/id=\"changelog-current-badge\"\1>${NEW_VERSION}/g" web/dist/index.html
+  echo "📝 Updated web/dist/index.html version to ${NEW_VERSION}"
+fi
+
 # 7. Commit & Tag
-git add CHANGELOG.md web/dist/CHANGELOG.md cmd/sqlfox/main.go
+git add CHANGELOG.md web/dist/CHANGELOG.md cmd/sqlfox/main.go web/dist/index.html
 git commit -m "chore(release): ${NEW_VERSION}"
 git tag -a "${NEW_VERSION}" -m "Release ${NEW_VERSION} (${RELEASE_DATE})"
 
