@@ -265,8 +265,7 @@ func TestStartupBannerAndLoggingOrder(t *testing.T) {
 			time.Sleep(50 * time.Millisecond)
 		}
 
-		_ = cmd.Process.Signal(os.Interrupt)
-		_ = cmd.Wait()
+		stopProcess(t, cmd)
 
 		stderrStr := stderrBuf.String()
 		stdoutStr := stdoutBuf.String()
@@ -299,8 +298,7 @@ func TestStartupBannerAndLoggingOrder(t *testing.T) {
 			time.Sleep(50 * time.Millisecond)
 		}
 
-		_ = cmd.Process.Signal(os.Interrupt)
-		_ = cmd.Wait()
+		stopProcess(t, cmd)
 
 		combinedStr := combined.String()
 		bannerIdx := strings.Index(combinedStr, "SqlFox")
@@ -323,6 +321,31 @@ type safeBuffer struct {
 	buf bytes.Buffer
 }
 
+func stopProcess(t *testing.T, cmd *exec.Cmd) {
+	t.Helper()
+
+	waitCh := make(chan error, 1)
+	go func() {
+		waitCh <- cmd.Wait()
+	}()
+
+	_ = cmd.Process.Signal(os.Interrupt)
+
+	select {
+	case <-waitCh:
+		return
+	case <-time.After(2 * time.Second):
+	}
+
+	_ = cmd.Process.Kill()
+
+	select {
+	case <-waitCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for test process to stop")
+	}
+}
+
 func (s *safeBuffer) Write(p []byte) (n int, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -334,4 +357,3 @@ func (s *safeBuffer) String() string {
 	defer s.mu.Unlock()
 	return s.buf.String()
 }
-
