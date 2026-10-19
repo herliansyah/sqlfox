@@ -1546,3 +1546,43 @@ func TestUpdateAndToastIntegration(t *testing.T) {
 	}
 }
 
+func TestQueryExecutionConcurrencyAndDebounceGuardsEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	// 1. Ensure runActiveQuery has isQueryExecuting concurrency guard
+	if !strings.Contains(content, "if (isQueryExecuting) return;") {
+		t.Errorf("expected runActiveQuery to guard against concurrent/duplicate execution via 'if (isQueryExecuting) return;'")
+	}
+
+	// 2. Ensure Run button has distinct id and is toggled in setQueryRunning
+	if !strings.Contains(content, `id="btn-run-query"`) {
+		t.Errorf("expected editor Run button to have id='btn-run-query'")
+	}
+	if !strings.Contains(content, `runBtn.disabled = isRunning;`) {
+		t.Errorf("expected setQueryRunning to disable #btn-run-query when query is executing")
+	}
+
+	// 3. Ensure keyboard shortcuts has idempotency guard against multiple registration
+	if !strings.Contains(content, "let keyboardShortcutsInitialized = false;") ||
+		!strings.Contains(content, "if (keyboardShortcutsInitialized) return;") {
+		t.Errorf("expected setupKeyboardShortcuts to have idempotency guard")
+	}
+
+	// 4. Ensure window keydown handler does not double-dispatch Ctrl+Enter when CodeMirror is focused
+	if !strings.Contains(content, "if (cmEditor && cmEditor.hasFocus()) return;") {
+		t.Errorf("expected window keydown listener to check cmEditor.hasFocus() to prevent double-execution")
+	}
+}
+
+
