@@ -311,6 +311,27 @@ Sistem pagination konvensional `OFFSET 1000000` memaksa server memindai dan memb
   - `Alt+U` &rarr; Mengisi nilai unik `UUID v4`
 - **Tabel Tanpa Primary Key (PK-Less)**: Jika tabel tidak memiliki kolom Primary Key, SqlFox secara otomatis mempersempit kriteria mutasi ke tepat satu baris fisik (`singleRowWhere`: `LIMIT 1` pada MySQL, `rowid IN (SELECT rowid ... LIMIT 1)` pada SQLite, dan `(tableoid, ctid) IN (SELECT tableoid, ctid ... LIMIT 1)` pada PostgreSQL), menjamin bahwa pengeditan atau penghapusan satu baris tidak akan merusak atau mengubah baris duplikat identik lainnya.
 
+### Virtual Grid Ergonomics Suite
+SqlFox menyediakan fitur eksplorasi kisi data (*virtual grid*) tingkat lanjut yang dirancang untuk mempermudah navigasi tabel berkolom banyak:
+- **Filter Cepat Klik Kanan (Gaya TablePlus)**:
+  - Klik kanan sel data mana saja pada penampil tabel atau hasil query untuk memunculkan aksi filter instan: `kolom = 'nilai'`, `kolom != 'nilai'`, `kolom > 'nilai'`, `kolom < 'nilai'`, `kolom LIKE '%nilai%'`, `kolom IS NULL`, atau `IS NOT NULL`.
+  - Secara otomatis menerapkan *escape* string dan tanda kutip sesuai dialek database aktif.
+  - Pada penampil tabel (*Table Viewer*), klausa kriteria otomatis ditambahkan ke bilah filter (`AND kolom = 'nilai'`) dan hasil diperbarui seketika.
+  - Pada editor query (*Query Editor*), kriteria otomatis digabungkan ke dalam klausa `WHERE` aktif dan query langsung dieksekusi.
+- **Pemilih Visibilitas Kolom (Gaya TablePlus)**:
+  - Klik tombol **Columns (N/Total)** di toolbar penampil tabel untuk memilih kolom mana yang ingin ditampilkan atau disembunyikan.
+  - **Pencarian Kolom**: Ketik nama kolom pada kotak pencarian untuk menemukan kolom dengan cepat pada tabel yang memiliki puluhan kolom.
+  - **Show All / Hide All**: Tampilkan atau sembunyikan semua kolom opsional dalam satu klik.
+  - **Proteksi Permanen Primary Key**: Kolom Primary Key dikunci secara permanen (`🔒 PKs cannot be hidden`) untuk menjaga integritas keyset pagination dan mutasi data baris.
+  - **Penyimpanan Status Per Tab**: Pengaturan visibilitas kolom disimpan ke dalam `sessionStorage` per koneksi, database, dan tabel, sehingga konfigurasi tampilan Anda tetap terjaga saat berpindah tab.
+- **Inspektur Baris Vertikal / Tampilan Formulir Baris Tunggal (Gaya DBeaver)**:
+  - Pilih baris data lalu tekan tombol **`Spacebar`**, atau klik kanan sel dan pilih **`📋 Inspect Record (Form View)`**.
+  - Mengubah tampilan baris horizontal yang lebar (50+ kolom, data JSON bertingkat, atau teks panjang) menjadi kartu formulir dua kolom vertikal yang responsif.
+  - **Paginasi Baris Langsung**: Berpindah antar baris dengan mudah menggunakan tombol **Previous / Next** atau tombol panah keyboard **ArrowLeft / ArrowRight**.
+  - **Pencarian Field**: Saring field yang ditampilkan secara instan dengan input pencarian bawaan.
+  - **Salin 1-Klik**: Salin seluruh data baris aktif sebagai format JSON yang rapi (`Copy JSON`) atau teks berpemisah tab (`Copy Text`).
+  - **Pengeditan Terintegrasi**: Ubah nilai data secara langsung di dalam input atau textarea modal; perubahan ditandai dengan `● Modified` dan terhubung langsung ke pelacak transaksi `stagedEdits` serta bilah simpan (*Save Changes*).
+
 ### Impor CSV Bebas Dependensi & Pemetaan Kolom
 1. Buka tabel yang diinginkan lalu klik tombol **Import CSV**.
 2. Pilih file `.csv` Anda. SqlFox akan memindai baris awal dan memetakan header secara otomatis.

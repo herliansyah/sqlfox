@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Virtual Grid Ergonomics Suite — Right-Click Quick-Filters (`web/dist/index.html`)**: Instant contextual filtering directly from any grid cell via right-click (TablePlus ergonomics). Supports `= 'val'`, `!= 'val'`, `> 'val'`, `< 'val'`, `LIKE '%val%'`, and `IS NULL` / `IS NOT NULL`. Automatically resolves dialect-specific quoting (single-quotes, double-escaped apostrophes), merges filters into the Table Viewer filter clause, and refreshes the result set instantaneously.
+- **Virtual Grid Ergonomics Suite — Column Visibility Picker (`web/dist/index.html`)**: Interactive column toggle dropdown (`Columns (N/Total)`) in the Table Viewer toolbar. Supports instant search/filtering across column names, `Show All` / `Hide All` one-click actions, sticky Primary Key protection (`🔒 PKs cannot be hidden`) to prevent breaks in row mutations and keyset pagination, and tab-level `sessionStorage` persistence preserving user column layouts during tab switching.
+- **Virtual Grid Ergonomics Suite — Vertical Record Inspector / Single Record Form View (`web/dist/index.html`)**: Modal dialog (`Spacebar` hotkey or right-click &rarr; `📋 Inspect Record (Form View)`) transforming horizontal row data into a vertical, searchable two-column card view (DBeaver ergonomics). Ideal for wide tables (50+ columns) and lengthy text/JSON payloads. Features two-column responsive grid layout, live record pagination (`Previous` / `Next` or `ArrowLeft` / `ArrowRight`), column search filter, 1-click JSON formatting and syntax copy (`Copy JSON`, `Copy Text`), and full inline editing integrated seamlessly with the global `stagedEdits` change tracker and save bar.
+
+### Fixed
+- **Copilot Drawer Responsive Overlay & Boundary Clamping (`web/dist/index.html`)**: Automatically switch the Copilot sidebar into floating overlay mode (`absolute right-0 top-0 bottom-0 z-30`) on initial load and window resize when viewport width is $\le 1024\text{px}$ or when available workspace is $<500\text{px}$, preventing horizontal clipping and ensuring the close button (`✕`) is always accessible on tablet and laptop screens. Compacted header buttons with responsive labels to prevent header overflow.
+- **Header Dropdown Stacking Context Over Grid Controls (`web/dist/index.html`)**: Explicitly set `position: relative !important; z-index: 40 !important;` on `<header>`, ensuring top dropdown menus (Monitor, DB Tools, Settings) always stack on top of the virtual grid and column picker dropdown. Automatically dismiss open grid dropdowns when opening header menus or clicking outside.
+
 ## [v0.9.1] - 2026-10-15
 
 ### Added
