@@ -1590,4 +1590,29 @@ func TestQueryExecutionConcurrencyAndDebounceGuardsEmbedded(t *testing.T) {
 	}
 }
 
+func TestFooterLatencyIntegrity(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	// 1. Ensure query execution does not overwrite ping latency with data.execution_ms
+	if strings.Contains(content, "updateFooterStats(data.execution_ms)") {
+		t.Errorf("expected index.html to NOT pass data.execution_ms to updateFooterStats")
+	}
+
+	// 2. Ensure sub-millisecond latency is displayed cleanly as <1ms
+	if !strings.Contains(content, "lat === 0 ? '<1ms' : `${lat}ms`") {
+		t.Errorf("expected updateFooterStats to format 0ms latency as '<1ms'")
+	}
+}
+
 
