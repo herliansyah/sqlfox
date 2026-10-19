@@ -990,7 +990,6 @@ func TestUIGlitchAndResilienceGuards(t *testing.T) {
 		`id="database-creator-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-md w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto"`,
 		`id="safety-inspection-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-lg w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto"`,
 		`id="connection-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 hidden"`,
-		`id="ai-settings-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 hidden"`,
 	}
 	for _, guard := range additionalHeightGuards {
 		if !strings.Contains(content, guard) {
@@ -1000,11 +999,17 @@ func TestUIGlitchAndResilienceGuards(t *testing.T) {
 	if !strings.Contains(content, `id="connection-modal"`) || !regexpMatch(`id="connection-modal"[\s\S]*?max-h-\[90vh\] overflow-y-auto`, content) {
 		t.Errorf("expected connection-modal inner container to enforce max-h-[90vh] overflow-y-auto")
 	}
-	if !strings.Contains(content, `id="ai-settings-modal"`) || !regexpMatch(`id="ai-settings-modal"[\s\S]*?max-h-\[90vh\] overflow-y-auto`, content) {
-		t.Errorf("expected ai-settings-modal inner container to enforce max-h-[90vh] overflow-y-auto")
-	}
 	if !strings.Contains(content, `id="vault-modal"`) || !regexpMatch(`id="vault-modal"[\s\S]*?max-h-\[90vh\] overflow-y-auto`, content) {
 		t.Errorf("expected vault-modal inner container to enforce max-h-[90vh] overflow-y-auto")
+	}
+	// Unified Settings modal 4-tab assertions
+	for _, tabId := range []string{`id="tab-btn-vault"`, `id="tab-btn-sync"`, `id="tab-btn-bundle"`, `id="tab-btn-ai"`} {
+		if !strings.Contains(content, tabId) {
+			t.Errorf("expected unified settings modal to contain tab: %s", tabId)
+		}
+	}
+	if !strings.Contains(content, `openSettingsModal()`) {
+		t.Errorf("expected index.html to have openSettingsModal handler")
 	}
 	if !strings.Contains(content, `id="safety-challenge-modal"`) || !regexpMatch(`id="safety-challenge-modal"[\s\S]*?max-h-\[90vh\] overflow-y-auto`, content) {
 		t.Errorf("expected safety-challenge-modal inner container to enforce max-h-[90vh] overflow-y-auto")

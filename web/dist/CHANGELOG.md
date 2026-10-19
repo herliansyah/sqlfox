@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Global Settings Shortcut (`web/dist/index.html`)**: Added `Ctrl+,` (and `Cmd+,` on macOS) global keyboard shortcut to open the App Settings modal instantly, aligned with standard desktop developer tooling.
+
+### Changed
+- **Unified App Settings Modal & Navbar Simplification (`web/dist/index.html`)**: Replaced top navbar Settings dropdown with a single direct `⚙️ Settings` button that opens a consolidated 4-tab modal (`🔐 Connections`, `☁️ GitHub Sync`, `📦 Notes Bundle`, `🤖 AI Copilot`). Merged standalone AI Copilot settings into the unified modal with seamless tab delegation across all existing UI entry points (Notes Drawer, Copilot panel, Command Palette `Ctrl+K`).
+
 ## [v0.10.1] - 2026-10-19
 
 ### Fixed
