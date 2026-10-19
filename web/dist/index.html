@@ -1209,9 +1209,9 @@
 
       <!-- Processlist & Thread Monitor View (Dedicated Tab) -->
       <div id="processlist-view-container" class="hidden flex-1 flex flex-col overflow-hidden bg-app-bg">
-        <!-- Processlist Toolbar -->
-        <div class="processlist-toolbar h-10 bg-app-surface border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0 gap-3 overflow-x-auto">
-          <div class="flex items-center space-x-2.5 flex-1 min-w-max shrink-0">
+        <!-- Processlist Primary Toolbar (Baris 1: Navigasi Tab, Status, & Kontrol Global) -->
+        <div id="pl-primary-toolbar" class="processlist-toolbar h-10 bg-app-surface border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0 gap-3 overflow-x-auto">
+          <div class="flex items-center space-x-2.5 min-w-max shrink-0">
             <!-- Processlist Trio Segmented Switcher -->
             <div class="shrink-0 flex items-center space-x-1 bg-slate-900 border border-slate-700 rounded p-0.5">
               <button id="pl-view-threads-btn" onclick="switchProcesslistView('threads')" class="px-2.5 py-1 rounded text-xs bg-slate-800 text-sky-400 font-semibold flex items-center space-x-1.5 transition">
@@ -1230,6 +1230,16 @@
 
             <div class="h-4 w-px bg-slate-700 shrink-0"></div>
 
+            <!-- Thread Counter Badge Pill -->
+            <span id="pl-summary-text" class="px-2.5 py-0.5 rounded-full bg-slate-800/90 border border-slate-700 text-slate-300 font-mono text-[11px] font-medium whitespace-nowrap shrink-0">Threads: 0</span>
+
+            <!-- Lock Contention Alert Button -->
+            <button id="pl-lock-summary" onclick="openLockInspectorModal()" class="hidden text-red-300 bg-red-950/60 hover:bg-red-900 border border-red-800/80 px-2 py-0.5 rounded text-[11px] font-mono flex items-center space-x-1.5 transition cursor-pointer shrink-0" title="View Lock Contention & Root Blocker Analysis">
+              <span>🚨</span><span id="pl-lock-count">0 Locks</span><span class="text-[10px] text-red-400">↗</span>
+            </button>
+          </div>
+
+          <div class="shrink-0 flex items-center space-x-2 text-slate-400 text-xs whitespace-nowrap">
             <div id="pl-refresh-control-group" class="shrink-0 flex flex-col bg-slate-900 border border-slate-700 rounded overflow-hidden">
               <div class="flex items-center space-x-1 p-0.5">
                 <span class="text-slate-400 text-[11px] px-1.5 font-medium whitespace-nowrap">Refresh:</span>
@@ -1243,23 +1253,38 @@
               </div>
             </div>
 
-            <button onclick="fetchProcesslist()" class="shrink-0 bg-app-card hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded border border-app-border transition flex items-center space-x-1" title="Fetch active threads immediately">
+            <button id="pl-refresh-now-btn" onclick="fetchProcesslist()" class="shrink-0 bg-app-card hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded border border-app-border transition flex items-center space-x-1" title="Fetch active threads immediately">
               <span>🔄 Refresh Now</span>
             </button>
 
-            <div class="shrink-0 flex items-center space-x-1.5 text-slate-400 text-xs whitespace-nowrap">
-              <span class="whitespace-nowrap">Slow &gt;</span>
-              <input type="number" id="pl-slow-threshold" value="0" min="0" oninput="renderProcesslistUI()" class="w-14 bg-slate-900 border border-slate-700 px-1.5 py-0.5 rounded text-white text-xs font-mono text-center outline-none focus:border-app-accent shrink-0" title="Filter threads running longer than N seconds (0 = all)">
-              <span class="whitespace-nowrap">sec</span>
-            </div>
+            <button id="pl-toggle-trend-btn" onclick="toggleProcesslistTrendPanel()" class="px-2 py-0.5 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center space-x-1.5 transition text-[11px]" title="Toggle In-Memory Activity Trend Panel">
+              <span>📈</span>
+              <span>Trend</span>
+              <span id="pl-trend-caret" class="text-[10px] text-slate-400">▾</span>
+            </button>
+          </div>
+        </div>
 
-            <div class="relative flex-1 min-w-[180px] flex items-center">
-              <span class="absolute left-2.5 text-slate-500 pointer-events-none text-xs">🔍</span>
-              <input type="text" id="pl-search-input" oninput="onProcesslistSearchInput(this.value)" onkeydown="if(event.key==='Escape'){clearProcesslistSearch(); this.blur();}" placeholder="Search user, host, db, state, or SQL query statement..." class="w-full bg-slate-900 border border-slate-700 pl-8 pr-7 py-1 rounded text-white text-xs outline-none focus:border-app-accent font-mono transition">
-              <button type="button" id="pl-search-clear-btn" onclick="clearProcesslistSearch()" class="hidden absolute right-2 text-slate-500 hover:text-slate-200 text-xs px-1 rounded transition cursor-pointer" title="Clear filter (Esc)">✕</button>
-            </div>
+        <!-- Processlist Filter Subtoolbar (Baris 2: Filter Chips, Search Bar, & Toggles) -->
+        <div id="pl-filter-subtoolbar" class="relative z-30 h-9 bg-slate-900/90 border-b border-app-border px-3 flex items-center justify-between text-xs flex-shrink-0 gap-3">
+          <!-- Quick Filter Chips -->
+          <div class="shrink-0 flex items-center space-x-0.5 bg-slate-900 border border-slate-700 rounded p-0.5 text-[11px] font-medium select-none" id="pl-filter-chips">
+            <button type="button" data-pl-chip="all" onclick="setProcesslistFilterChip('all')" class="px-2 py-0.5 rounded text-white bg-slate-800 font-semibold transition cursor-pointer" title="Show all threads">All</button>
+            <button type="button" data-pl-chip="active" onclick="setProcesslistFilterChip('active')" class="px-2 py-0.5 rounded text-slate-400 hover:text-white transition cursor-pointer" title="Active executing queries (non-sleep)">Active</button>
+            <button type="button" data-pl-chip="locked" onclick="setProcesslistFilterChip('locked')" class="px-2 py-0.5 rounded text-slate-400 hover:text-white transition cursor-pointer" title="Threads involved in lock contention">Locked</button>
+            <button type="button" data-pl-chip="slow" onclick="setProcesslistFilterChip('slow')" class="px-2 py-0.5 rounded text-slate-400 hover:text-white transition cursor-pointer" title="Slow threads (>= 5s)">Slow</button>
+            <button type="button" data-pl-chip="sleep" onclick="setProcesslistFilterChip('sleep')" class="px-2 py-0.5 rounded text-slate-400 hover:text-white transition cursor-pointer" title="Long idle sleep connections (>= 60s)">Sleep</button>
+          </div>
 
-            <!-- Best Practice Filter Toggles -->
+          <!-- Search Input Multifield Fleksibel -->
+          <div class="relative flex-1 min-w-[180px] flex items-center">
+            <span class="absolute left-2.5 text-slate-500 pointer-events-none text-xs">🔍</span>
+            <input type="text" id="pl-search-input" oninput="onProcesslistSearchInput(this.value)" onkeydown="if(event.key==='Escape'){clearProcesslistSearch(); this.blur();}" placeholder="Search user, host, db, state, or SQL query statement..." class="w-full bg-slate-900 border border-slate-700 pl-8 pr-7 py-1 rounded text-white text-xs outline-none focus:border-app-accent font-mono transition">
+            <button type="button" id="pl-search-clear-btn" onclick="clearProcesslistSearch()" class="hidden absolute right-2 text-slate-500 hover:text-slate-200 text-xs px-1 rounded transition cursor-pointer" title="Clear filter (Esc)">✕</button>
+          </div>
+
+          <!-- Quick Best-Practice Toggles & Slow Threshold -->
+          <div class="shrink-0 flex items-center space-x-3 text-slate-300 text-xs whitespace-nowrap">
             <label class="shrink-0 flex items-center space-x-1.5 text-slate-300 hover:text-white cursor-pointer select-none text-[11px] whitespace-nowrap control-label" title="Hide idle client connections currently in Sleep state">
               <input type="checkbox" id="pl-hide-sleep" onchange="onProcesslistFilterChange()" class="rounded bg-slate-900 border-slate-700 text-app-accent shrink-0">
               <span class="whitespace-nowrap">Hide Sleep</span>
@@ -1269,41 +1294,62 @@
               <input type="checkbox" id="pl-hide-system" onchange="onProcesslistFilterChange()" class="rounded bg-slate-900 border-slate-700 text-app-accent shrink-0">
               <span class="whitespace-nowrap">Hide System</span>
             </label>
-          </div>
 
-          <div class="shrink-0 flex items-center space-x-3 text-slate-400 text-xs whitespace-nowrap">
-            <span id="pl-summary-text" class="whitespace-nowrap control-label">Threads: 0</span>
-            <button id="pl-lock-summary" onclick="openLockInspectorModal()" class="hidden text-red-300 bg-red-950/60 hover:bg-red-900 border border-red-800/80 px-2 py-0.5 rounded text-[11px] font-mono flex items-center space-x-1.5 transition cursor-pointer" title="View Lock Contention & Root Blocker Analysis">
-              <span>🚨</span><span id="pl-lock-count">0 Locks</span><span class="text-[10px] text-red-400">↗</span>
-            </button>
-            <button id="pl-toggle-trend-btn" onclick="toggleProcesslistTrendPanel()" class="px-2 py-0.5 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center space-x-1.5 transition text-[11px]" title="Toggle In-Memory Activity Trend Panel">
-              <span>📈</span>
-              <span>Trend</span>
-              <span id="pl-trend-caret" class="text-[10px] text-slate-400">▾</span>
-            </button>
+            <div class="h-3.5 w-px bg-slate-700 shrink-0"></div>
+
+            <div class="shrink-0 flex items-center space-x-1.5 text-slate-400 text-xs whitespace-nowrap">
+              <span class="whitespace-nowrap text-[11px]">Slow &gt;</span>
+              <input type="number" id="pl-slow-threshold" value="0" min="0" oninput="renderProcesslistUI()" class="w-14 bg-slate-900 border border-slate-700 px-1.5 py-0.5 rounded text-white text-xs font-mono text-center outline-none focus:border-app-accent shrink-0" title="Filter threads running longer than N seconds (0 = all)">
+              <span class="whitespace-nowrap text-[11px]">sec</span>
+            </div>
+
+            <div class="h-3.5 w-px bg-slate-700 shrink-0"></div>
+
+            <!-- Column Visibility Picker Popover -->
+            <div class="relative inline-block shrink-0">
+              <button type="button" id="pl-btn-col-picker" onclick="toggleProcesslistColPicker(event)" class="text-slate-300 hover:text-white bg-slate-900 hover:bg-slate-800 px-2 py-0.5 rounded border border-slate-700 text-[11px] transition flex items-center space-x-1 cursor-pointer" title="Show or hide Processlist columns">
+                <span>👁️</span><span>Cols</span>
+                <span id="pl-col-picker-count" class="text-[10px] text-slate-400 font-mono">(9/9)</span>
+                <span class="text-[9px] text-slate-500">▾</span>
+              </button>
+              <div id="pl-col-picker-dropdown" class="hidden absolute right-0 mt-1 z-50 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-2 text-xs text-slate-200 min-w-56 max-h-80 flex flex-col ring-2 ring-black/50 select-none">
+                <div class="pb-1.5 mb-1.5 border-b border-slate-800 flex items-center justify-between gap-1.5">
+                  <span class="text-[11px] font-semibold text-slate-300">Visible Columns</span>
+                  <div class="flex items-center space-x-1 shrink-0">
+                    <button type="button" onclick="showAllProcesslistColumns()" class="text-[10px] text-sky-400 hover:text-sky-300 px-1 py-0.5 rounded hover:bg-slate-800 font-semibold cursor-pointer" title="Show all optional columns">Show All</button>
+                    <span class="text-slate-600 text-[10px]">|</span>
+                    <button type="button" onclick="resetDefaultProcesslistColumns()" class="text-[10px] text-slate-400 hover:text-slate-200 px-1 py-0.5 rounded hover:bg-slate-800 font-semibold cursor-pointer" title="Reset to standard view">Reset</button>
+                  </div>
+                </div>
+                <div id="pl-col-picker-list" class="overflow-y-auto flex-1 space-y-1 max-h-60 pr-1"></div>
+              </div>
+            </div>
           </div>
         </div>
 
         <!-- View 1: Active Threads Section -->
-        <div id="pl-threads-section" class="flex-1 flex flex-col overflow-hidden">
+        <div id="pl-threads-section" class="flex-1 flex flex-col overflow-hidden relative">
           <div class="flex-1 overflow-auto bg-[#0b1120]">
             <table class="w-full text-left text-xs border-collapse">
               <thead class="bg-slate-900 border-b border-app-border text-slate-400 sticky top-0 z-10 font-mono text-[11px] select-none">
                 <tr>
-                  <th class="p-2.5 w-24 text-center whitespace-nowrap">Action</th>
-                  <th class="p-2.5 w-20 whitespace-nowrap">ID</th>
-                  <th class="p-2.5 w-28 whitespace-nowrap">User</th>
-                  <th class="p-2.5 w-36 whitespace-nowrap">Host</th>
-                  <th class="p-2.5 w-28 whitespace-nowrap">Database</th>
-                  <th class="p-2.5 w-24 whitespace-nowrap">Command</th>
-                  <th class="p-2.5 w-20 text-right whitespace-nowrap">Time (s)</th>
-                  <th class="p-2.5 w-36 whitespace-nowrap">State</th>
-                  <th class="p-2.5 whitespace-nowrap">SQL / Query Info</th>
+                  <th data-pl-col="select" class="p-2.5 w-10 text-center whitespace-nowrap">
+                    <input type="checkbox" id="pl-select-all" onchange="toggleSelectAllProcesslistThreads(this.checked)" class="accent-sky-500 w-3.5 h-3.5 cursor-pointer" title="Select all visible non-immune threads">
+                  </th>
+                  <th data-pl-col="action" class="p-2.5 min-w-[130px] w-32 text-center whitespace-nowrap">Action</th>
+                  <th data-pl-col="id" class="p-2.5 min-w-[110px] w-32 whitespace-nowrap">ID</th>
+                  <th data-pl-col="user" class="p-2.5 w-28 whitespace-nowrap">User</th>
+                  <th data-pl-col="host" class="p-2.5 w-36 whitespace-nowrap">Host</th>
+                  <th data-pl-col="db" class="p-2.5 w-28 whitespace-nowrap">Database</th>
+                  <th data-pl-col="command" class="p-2.5 w-24 whitespace-nowrap">Command</th>
+                  <th data-pl-col="time" class="p-2.5 w-20 text-right whitespace-nowrap">Time (s)</th>
+                  <th data-pl-col="state" class="p-2.5 w-36 whitespace-nowrap">State</th>
+                  <th data-pl-col="query" class="p-2.5 whitespace-nowrap w-full">SQL / Query Info</th>
                 </tr>
               </thead>
               <tbody id="pl-tbody" class="divide-y divide-slate-800/60 font-mono text-xs text-slate-200">
                 <tr>
-                  <td colspan="9" class="p-8 text-center text-slate-500 italic">No active processes loaded.</td>
+                  <td colspan="10" class="p-8 text-center text-slate-500 italic">No active processes loaded.</td>
                 </tr>
               </tbody>
             </table>
@@ -1341,6 +1387,32 @@
             <div class="flex-1 relative p-1 overflow-hidden">
               <canvas id="pl-trend-canvas" class="w-full h-full block"></canvas>
             </div>
+          </div>
+
+          <!-- Processlist Batch Action Bar (Ephemeral Floating Dock) -->
+          <div id="pl-batch-action-bar" class="hidden absolute bottom-6 left-1/2 -translate-x-1/2 z-30 bg-slate-900/95 border border-slate-700 shadow-2xl rounded-full px-4 py-2 flex items-center space-x-2.5 backdrop-blur text-xs select-none">
+            <span class="px-2.5 py-0.5 rounded-full bg-sky-950 text-sky-300 font-mono text-[11px] font-semibold border border-sky-800" id="pl-batch-count">0 Selected</span>
+            <div class="h-4 w-px bg-slate-700"></div>
+            <button type="button" onclick="openBatchKillModal('query')" class="px-2.5 py-1 rounded-full bg-amber-950 hover:bg-amber-900 text-amber-200 border border-amber-800 font-medium transition flex items-center space-x-1 cursor-pointer" title="Cancel running query for selected threads (KEEP CONNECTIONS)">
+              <span>⚡ Kill Query</span>
+            </button>
+            <button type="button" onclick="openBatchKillModal('connection')" class="px-2.5 py-1 rounded-full bg-red-950 hover:bg-red-900 text-red-200 border border-red-800 font-medium transition flex items-center space-x-1 cursor-pointer" title="Terminate client connections for selected threads">
+              <span>💀 Kill Conn</span>
+            </button>
+            <div class="h-4 w-px bg-slate-700"></div>
+            <button type="button" onclick="copyBatchThreadIds()" class="px-2 py-1 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 transition flex items-center space-x-1 cursor-pointer" title="Copy selected thread IDs as comma-separated list">
+              <span>📋 IDs</span>
+            </button>
+            <button type="button" onclick="exportBatchProcesslist()" class="px-2 py-1 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 transition flex items-center space-x-1 cursor-pointer" title="Export selected threads to JSON">
+              <span>💾 Export</span>
+            </button>
+            <button type="button" onclick="saveBatchProcessesToNotes()" class="px-2 py-1 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 transition flex items-center space-x-1 cursor-pointer" title="Save selected queries to Notes Inbox">
+              <span>📝 Notes</span>
+            </button>
+            <div class="h-4 w-px bg-slate-700"></div>
+            <button type="button" onclick="clearProcesslistSelection()" class="px-2 py-1 rounded-full text-slate-400 hover:text-white transition cursor-pointer" title="Clear selection">
+              ✕
+            </button>
           </div>
         </div>
 
@@ -3837,6 +3909,63 @@
     </div>
   </dialog>
 
+  <!-- Batch Termination Guardrail Modal (HTML5 <dialog>) -->
+  <dialog id="pl-batch-kill-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-0 outline-none max-w-2xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm overflow-hidden">
+    <div class="flex flex-col max-h-[90vh]">
+      <!-- Header -->
+      <div class="bg-slate-950 px-5 py-3 border-b border-slate-800 flex items-center justify-between flex-shrink-0">
+        <div class="flex items-center space-x-2.5">
+          <span class="text-xl" id="pl-batch-modal-icon">🚨</span>
+          <div>
+            <h3 class="font-bold text-white text-sm flex items-center space-x-2">
+              <span id="pl-batch-modal-title">Confirm Batch Termination</span>
+              <span id="pl-batch-modal-count" class="px-2 py-0.5 rounded bg-red-950 text-red-300 text-xs font-mono border border-red-800">0 Threads</span>
+            </h3>
+            <p class="text-[11px] text-slate-400 font-mono" id="pl-batch-modal-subtitle">Review selected threads before executing batch termination</p>
+          </div>
+        </div>
+        <button onclick="closeBatchKillModal()" class="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-800 transition cursor-pointer">✕</button>
+      </div>
+
+      <!-- Body -->
+      <div class="p-5 space-y-4 overflow-y-auto text-xs">
+        <!-- Target Threads List -->
+        <div>
+          <label class="block text-slate-400 font-semibold mb-1 text-[11px]">Targeted Threads to Terminate:</label>
+          <div id="pl-batch-modal-list" class="space-y-1.5 max-h-56 overflow-y-auto font-mono text-[11px] bg-slate-950 p-2.5 rounded border border-slate-800 divide-y divide-slate-800/60">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+
+        <!-- Safety Challenge Box (Shown for Production or >5 threads) -->
+        <div id="pl-batch-challenge-box" class="hidden p-3.5 bg-red-950/40 border border-red-800/80 rounded-lg space-y-2">
+          <div class="flex items-center space-x-2 text-red-300 font-semibold text-xs">
+            <span>🛡️</span>
+            <span id="pl-batch-challenge-reason">Production Safety Challenge</span>
+          </div>
+          <p class="text-slate-300 text-[11px] leading-relaxed">
+            To prevent accidental termination, type <strong class="text-white font-mono bg-red-900/60 px-1.5 py-0.5 rounded border border-red-700/80">KILL</strong> below to unlock the execution button:
+          </p>
+          <input type="text" id="pl-batch-challenge-input" oninput="validateBatchKillChallenge()" placeholder="Type KILL here..." class="w-full bg-slate-900 border border-red-700/80 px-3 py-1.5 rounded text-white font-mono text-xs outline-none focus:border-red-500 uppercase tracking-widest">
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="bg-slate-950 px-5 py-3 border-t border-slate-800 flex items-center justify-between flex-shrink-0">
+        <span class="text-[11px] text-slate-500" id="pl-batch-modal-footer-hint">This action will be recorded in the Session Audit Log.</span>
+        <div class="flex items-center space-x-2 text-xs">
+          <button type="button" onclick="closeBatchKillModal()" class="px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition cursor-pointer">
+            Cancel
+          </button>
+          <button type="button" id="pl-batch-execute-btn" onclick="executeBatchKill()" class="px-3.5 py-1 rounded bg-red-600 hover:bg-red-500 text-white font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex items-center space-x-1">
+            <span id="pl-batch-execute-icon">⚡</span>
+            <span id="pl-batch-execute-label">Execute Kill</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
   <!-- 21. Smart Seed Dump Dialog (HTML5 <dialog>) -->
   <dialog id="smart-seed-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-md w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto">
     <div class="space-y-4">
@@ -5506,14 +5635,14 @@
           menu.classList.add('hidden');
         }
       }
-      if (!e.target.closest('#table-context-menu, #tab-context-menu, #grid-context-menu, #pl-context-menu, #btn-col-picker, #col-picker-dropdown, #btn-export-csv, #export-csv-menu')) {
+      if (!e.target.closest('#table-context-menu, #tab-context-menu, #grid-context-menu, #pl-context-menu, #btn-col-picker, #col-picker-dropdown, #pl-btn-col-picker, #pl-col-picker-dropdown, #btn-export-csv, #export-csv-menu')) {
         closeAllContextMenus();
       }
     });
 
     // Dismiss context menus when right-clicking on unhandled page surfaces
     document.addEventListener('contextmenu', (e) => {
-      if (!e.target.closest('#table-context-menu, #tab-context-menu, #grid-context-menu, #pl-context-menu, td[data-col], #tabs-container, #schema-tree, .pl-row, #btn-col-picker, #col-picker-dropdown, #btn-export-csv, #export-csv-menu')) {
+      if (!e.target.closest('#table-context-menu, #tab-context-menu, #grid-context-menu, #pl-context-menu, td[data-col], #tabs-container, #schema-tree, .pl-row, #btn-col-picker, #col-picker-dropdown, #pl-btn-col-picker, #pl-col-picker-dropdown, #btn-export-csv, #export-csv-menu')) {
         closeAllContextMenus();
       }
     });
@@ -5525,6 +5654,8 @@
       if (typeof closeProcessContextMenu === 'function') closeProcessContextMenu();
       const colPicker = document.getElementById('col-picker-dropdown');
       if (colPicker) colPicker.classList.add('hidden');
+      const plColPicker = document.getElementById('pl-col-picker-dropdown');
+      if (plColPicker) plColPicker.classList.add('hidden');
       const exportCsv = document.getElementById('export-csv-menu');
       if (exportCsv) exportCsv.classList.add('hidden');
     }
@@ -7810,14 +7941,33 @@
       if (digestSec) digestSec.classList.toggle('hidden', view !== 'digest');
       if (deadlockSec) deadlockSec.classList.toggle('hidden', view !== 'deadlock');
 
-      // Refresh controls and lock summary only visible on live threads view
+      // Subtoolbar, refresh controls, counters, and lock summary only visible on live threads view
+      const filterSubbar = document.getElementById('pl-filter-subtoolbar');
+      if (filterSubbar) filterSubbar.classList.toggle('hidden', view !== 'threads');
       if (refreshGroup) refreshGroup.classList.toggle('hidden', view !== 'threads');
+
+      const summaryText = document.getElementById('pl-summary-text');
+      if (summaryText) summaryText.classList.toggle('hidden', view !== 'threads');
+
+      const refreshNowBtn = document.getElementById('pl-refresh-now-btn');
+      if (refreshNowBtn) refreshNowBtn.classList.toggle('hidden', view !== 'threads');
+
+      const trendBtn = document.getElementById('pl-toggle-trend-btn');
+      if (trendBtn) trendBtn.classList.toggle('hidden', view !== 'threads');
+
       const lockSummary = document.getElementById('pl-lock-summary');
       if (lockSummary) {
         if (view !== 'threads') {
           lockSummary.classList.add('hidden');
         } else if ((processlistData?.locks || []).length > 0) {
           lockSummary.classList.remove('hidden');
+        }
+      }
+
+      if (view !== 'threads') {
+        const trendPanel = document.getElementById('pl-trend-panel');
+        if (trendPanel && !trendPanel.classList.contains('hidden')) {
+          toggleProcesslistTrendPanel();
         }
       }
 
@@ -8023,6 +8173,362 @@
     }
 
 
+    // --- Processlist Batch Operations & Quick Filter Chips (ADR 0052) ---
+    let plActiveChip = 'all';
+    let plSelectedThreadIds = new Set();
+    let plSavedIntervalBeforeModal = null;
+    let plBatchKillMode = 'query';
+
+    function setProcesslistFilterChip(chip) {
+      plActiveChip = chip || 'all';
+      updateProcesslistFilterChipsUI();
+      renderProcesslistUI();
+    }
+
+    function updateProcesslistFilterChipsUI() {
+      const container = document.getElementById('pl-filter-chips');
+      if (!container) return;
+      const btns = container.querySelectorAll('button[data-pl-chip]');
+      btns.forEach(btn => {
+        const chip = btn.getAttribute('data-pl-chip');
+        if (chip === plActiveChip) {
+          btn.className = 'px-2 py-0.5 rounded text-white bg-slate-800 font-semibold transition cursor-pointer';
+        } else {
+          btn.className = 'px-2 py-0.5 rounded text-slate-400 hover:text-white transition cursor-pointer';
+        }
+      });
+    }
+
+    function toggleSelectAllProcesslistThreads(checked) {
+      const threads = processlistData.threads || [];
+      const locks = processlistData.locks || [];
+      const currentThreadId = processlistData.current_thread_id || 0;
+      const hideSleep = document.getElementById('pl-hide-sleep')?.checked ?? false;
+      const hideSystem = document.getElementById('pl-hide-system')?.checked ?? false;
+      const thresholdEl = document.getElementById('pl-slow-threshold');
+      const minSeconds = thresholdEl ? (parseInt(thresholdEl.value, 10) || 0) : 0;
+      const searchEl = document.getElementById('pl-search-input');
+      const search = searchEl ? searchEl.value.trim().toLowerCase() : '';
+
+      const visibleSelectable = threads.filter(t => {
+        const isSelf = t.id === currentThreadId;
+        const isSystem = (t.user === 'system user' || t.user === 'event_scheduler' || t.command === 'Binlog Dump');
+        if (isSelf || isSystem) return false;
+
+        if (hideSleep && (t.command === 'Sleep' || t.state === 'Sleep')) return false;
+        if (hideSystem && (t.user === 'system user' || t.user === 'event_scheduler' || t.command === 'Binlog Dump')) return false;
+        if (minSeconds > 0 && t.time < minSeconds) return false;
+        if (search) {
+          const matchUser = (t.user || '').toLowerCase().includes(search);
+          const matchHost = (t.host || '').toLowerCase().includes(search);
+          const matchDb = (t.db || '').toLowerCase().includes(search);
+          const matchInfo = (t.info || '').toLowerCase().includes(search);
+          const matchState = (t.state || '').toLowerCase().includes(search);
+          const matchCmd = (t.command || '').toLowerCase().includes(search);
+          const matchId = String(t.id).includes(search);
+          if (!matchUser && !matchHost && !matchDb && !matchInfo && !matchState && !matchCmd && !matchId) return false;
+        }
+
+        if (plActiveChip === 'active' && (t.command === 'Sleep' || t.state === 'Sleep')) return false;
+        if (plActiveChip === 'locked') {
+          const isLocked = locks.some(l => l.waiting_thread_id === t.id || l.blocking_thread_id === t.id);
+          if (!isLocked) return false;
+        }
+        if (plActiveChip === 'slow' && t.time < 5) return false;
+        if (plActiveChip === 'sleep' && !((t.command === 'Sleep' || t.state === 'Sleep') && t.time >= 60)) return false;
+
+        return true;
+      });
+
+      if (checked) {
+        visibleSelectable.forEach(t => plSelectedThreadIds.add(t.id));
+      } else {
+        visibleSelectable.forEach(t => plSelectedThreadIds.delete(t.id));
+      }
+      renderProcesslistUI();
+    }
+
+    function onProcesslistThreadCheckboxChange(threadId, checked) {
+      const tid = Number(threadId);
+      if (checked) {
+        plSelectedThreadIds.add(tid);
+      } else {
+        plSelectedThreadIds.delete(tid);
+      }
+      updateProcesslistBatchBarUI();
+      updateProcesslistSelectAllHeader();
+    }
+
+    function updateProcesslistSelectAllHeader() {
+      const selectAllEl = document.getElementById('pl-select-all');
+      if (!selectAllEl) return;
+      const checkboxes = document.querySelectorAll('#pl-tbody input[type="checkbox"][data-pl-tid]');
+      if (checkboxes.length === 0) {
+        selectAllEl.checked = false;
+        selectAllEl.disabled = true;
+      } else {
+        selectAllEl.disabled = false;
+        selectAllEl.checked = Array.from(checkboxes).every(cb => cb.checked);
+      }
+    }
+
+    function updateProcesslistBatchBarUI() {
+      const bar = document.getElementById('pl-batch-action-bar');
+      const countEl = document.getElementById('pl-batch-count');
+      if (!bar) return;
+      const count = plSelectedThreadIds.size;
+      if (count > 0) {
+        bar.classList.remove('hidden');
+        if (countEl) countEl.textContent = `${count} Selected`;
+      } else {
+        bar.classList.add('hidden');
+      }
+    }
+
+    function clearProcesslistSelection() {
+      plSelectedThreadIds.clear();
+      renderProcesslistUI();
+    }
+
+    async function copyBatchThreadIds() {
+      if (plSelectedThreadIds.size === 0) return;
+      const idsStr = Array.from(plSelectedThreadIds).sort((a, b) => a - b).join(', ');
+      const ok = await copyTextToClipboard(idsStr);
+      if (ok) {
+        showToast(`Copied ${plSelectedThreadIds.size} thread IDs to clipboard`, 'success');
+      } else {
+        showNativeAlert(`Thread IDs: ${idsStr}`, 'Thread IDs');
+      }
+    }
+
+    function exportBatchProcesslist() {
+      if (plSelectedThreadIds.size === 0) return;
+      const threads = (processlistData.threads || []).filter(t => plSelectedThreadIds.has(Number(t.id)));
+      const jsonStr = JSON.stringify(threads, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `sqlfox-processlist-batch-${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast(`Exported ${threads.length} threads to JSON`, 'success');
+    }
+
+    function saveBatchProcessesToNotes() {
+      if (plSelectedThreadIds.size === 0) return;
+      const threads = (processlistData.threads || []).filter(t => plSelectedThreadIds.has(Number(t.id)) && t.info && t.command !== 'Sleep');
+      if (threads.length === 0) {
+        showToast('None of the selected threads have active query statements to save.', 'warning');
+        return;
+      }
+      threads.forEach(t => {
+        saveProcessQueryToNotes(t.info, t.db);
+      });
+      showToast(`Saved ${threads.length} query note(s) to Notes Inbox`, 'success');
+    }
+
+    function removeThreadFromBatchKill(threadId) {
+      const numId = Number(threadId);
+      plSelectedThreadIds.delete(numId);
+
+      // Uncheck in the main processlist table
+      const cb = document.querySelector(`input[data-pl-tid="${numId}"]`);
+      if (cb) cb.checked = false;
+
+      // Update select-all header checkbox and floating batch dock
+      updateProcesslistSelectAllHeader();
+      updateProcesslistBatchBarUI();
+
+      if (plSelectedThreadIds.size === 0) {
+        closeBatchKillModal();
+        showToast('All threads removed from termination batch', 'info');
+        return;
+      }
+
+      // Re-render modal content
+      renderBatchKillModalContent();
+    }
+
+    function renderBatchKillModalContent() {
+      const isConn = plBatchKillMode === 'connection';
+      const actionName = isConn ? 'KILL CONNECTION' : 'KILL QUERY';
+
+      const titleEl = document.getElementById('pl-batch-modal-title');
+      const countEl = document.getElementById('pl-batch-modal-count');
+      const subEl = document.getElementById('pl-batch-modal-subtitle');
+      const iconEl = document.getElementById('pl-batch-modal-icon');
+      const execBtn = document.getElementById('pl-batch-execute-btn');
+      const listEl = document.getElementById('pl-batch-modal-list');
+      const challengeBox = document.getElementById('pl-batch-challenge-box');
+      const challengeInput = document.getElementById('pl-batch-challenge-input');
+      const challengeReason = document.getElementById('pl-batch-challenge-reason');
+
+      if (titleEl) titleEl.textContent = `Confirm Batch ${actionName}`;
+      if (countEl) countEl.textContent = `${plSelectedThreadIds.size} Threads`;
+      if (subEl) subEl.textContent = isConn
+        ? 'Disconnecting client connections will terminate their database sessions immediately.'
+        : 'Cancelling running queries will abort active statements while keeping client connections open.';
+      if (iconEl) iconEl.textContent = isConn ? '💀' : '⚡';
+      if (execBtn) {
+        execBtn.innerHTML = `<span id="pl-batch-execute-icon">${isConn ? '💀' : '⚡'}</span><span id="pl-batch-execute-label">Execute ${actionName}</span>`;
+      }
+
+      const selectedThreads = (processlistData.threads || []).filter(t => plSelectedThreadIds.has(Number(t.id)));
+      if (listEl) {
+        listEl.innerHTML = selectedThreads.map(t => {
+          const rawSql = t.info || (t.command === 'Sleep' ? 'Idle connection (Sleep)' : '-');
+          const displaySql = rawSql.replace(/[\r\n\t]+/g, ' ').trim();
+          const sqlSnippet = displaySql.length > 90 ? displaySql.slice(0, 90) + '...' : displaySql;
+          return `
+            <div class="py-1.5 flex items-center justify-between gap-2 group hover:bg-slate-900/60 px-1.5 rounded transition">
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center space-x-1.5">
+                  <span class="font-bold text-sky-400">#${t.id}</span>
+                  <span class="text-slate-300 font-semibold">${escapeHtml(t.user)}@${escapeHtml(t.host)}</span>
+                  <span class="text-slate-500">(${escapeHtml(t.db || '-')})</span>
+                  <span class="px-1 py-0.2 rounded bg-slate-800 text-slate-300 text-[10px]">${escapeHtml(t.command)}</span>
+                </div>
+                <div class="text-[10px] text-slate-400 truncate mt-0.5" title="${escapeHtml(rawSql)}">${escapeHtml(sqlSnippet)}</div>
+              </div>
+              <div class="flex items-center space-x-2 shrink-0">
+                <span class="font-bold text-right ${t.time >= 30 ? 'text-red-400' : (t.time >= 5 ? 'text-amber-400' : 'text-slate-300')}">${t.time}s</span>
+                <button type="button" onclick="removeThreadFromBatchKill(${t.id})" class="text-slate-500 hover:text-red-400 hover:bg-slate-800 p-1 rounded transition text-xs cursor-pointer flex items-center justify-center w-5 h-5" title="Remove thread #${t.id} from this batch">
+                  ✕
+                </button>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+
+      // Check if Safety Challenge is required (Production environment OR >5 threads)
+      const isProd = activeConnection && (activeConnection.environment || '').toLowerCase() === 'production';
+      const isLargeBatch = plSelectedThreadIds.size > 5;
+      const needsChallenge = isProd || isLargeBatch;
+
+      if (challengeBox) {
+        if (needsChallenge) {
+          challengeBox.classList.remove('hidden');
+          if (challengeReason) {
+            challengeReason.textContent = isProd
+              ? 'Production Environment Safety Guardrail'
+              : `Large Batch Safety Guardrail (${plSelectedThreadIds.size} threads)`;
+          }
+          if (execBtn) {
+            const isMatch = challengeInput && challengeInput.value.trim().toUpperCase() === 'KILL';
+            execBtn.disabled = !isMatch;
+          }
+        } else {
+          challengeBox.classList.add('hidden');
+          if (execBtn) execBtn.disabled = false;
+        }
+      }
+    }
+
+    function openBatchKillModal(mode) {
+      if (plSelectedThreadIds.size === 0) return;
+      plBatchKillMode = mode === 'connection' ? 'connection' : 'query';
+      const dlg = document.getElementById('pl-batch-kill-dialog');
+      if (!dlg) return;
+
+      // Temporarily pause polling
+      if (typeof processlistRefreshInterval !== 'undefined') {
+        plSavedIntervalBeforeModal = processlistRefreshInterval;
+      }
+      if (typeof processlistTimer !== 'undefined' && processlistTimer) {
+        clearInterval(processlistTimer);
+        processlistTimer = null;
+      }
+
+      renderBatchKillModalContent();
+
+      const challengeInput = document.getElementById('pl-batch-challenge-input');
+      if (challengeInput) {
+        challengeInput.value = '';
+        setTimeout(() => challengeInput.focus(), 50);
+      }
+
+      if (typeof dlg.showModal === 'function') {
+        if (!dlg.open) {
+          dlg.showModal();
+        }
+      } else {
+        dlg.setAttribute('open', '');
+      }
+    }
+
+    function validateBatchKillChallenge() {
+      const inp = document.getElementById('pl-batch-challenge-input');
+      const btn = document.getElementById('pl-batch-execute-btn');
+      if (!inp || !btn) return;
+      const isMatch = inp.value.trim().toUpperCase() === 'KILL';
+      btn.disabled = !isMatch;
+    }
+
+    function closeBatchKillModal() {
+      const dlg = document.getElementById('pl-batch-kill-dialog');
+      if (dlg && dlg.open) dlg.close();
+      // Restore polling
+      if (plSavedIntervalBeforeModal && plSavedIntervalBeforeModal !== 'pause') {
+        setProcesslistInterval(plSavedIntervalBeforeModal);
+      }
+      plSavedIntervalBeforeModal = null;
+    }
+
+    async function executeBatchKill() {
+      if (!activeConnection || plSelectedThreadIds.size === 0) return;
+      const targetIds = Array.from(plSelectedThreadIds);
+      const mode = plBatchKillMode;
+      const modeLabel = mode === 'connection' ? 'KILL CONNECTION' : 'KILL QUERY';
+
+      const execBtn = document.getElementById('pl-batch-execute-btn');
+      if (execBtn) {
+        execBtn.disabled = true;
+        execBtn.innerHTML = '<span>⏳</span><span>Terminating...</span>';
+      }
+
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/batch-kill`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ thread_ids: targetIds, mode: mode })
+        });
+        const data = await res.json();
+        closeBatchKillModal();
+
+        if (!res.ok) {
+          showNativeAlert('Batch termination failed: ' + (data.error || res.statusText), 'Batch Kill Error');
+          return;
+        }
+
+        const successCount = data.success_count || 0;
+        const failedCount = data.failed_count || 0;
+
+        if (failedCount === 0) {
+          showToast(`✓ Batch ${modeLabel} succeeded for ${successCount} thread(s)`, 'success');
+        } else if (successCount > 0) {
+          const failReasons = (data.results || [])
+            .filter(r => !r.success)
+            .map(r => `#${r.thread_id}: ${r.error}`)
+            .slice(0, 3)
+            .join(', ');
+          showToast(`⚠️ Batch ${modeLabel}: ${successCount} terminated, ${failedCount} skipped (${failReasons})`, 'warning');
+        } else {
+          showToast(`❌ Batch ${modeLabel} failed: all ${failedCount} thread(s) rejected or skipped`, 'error');
+        }
+
+        // Clear selection & refetch processlist
+        clearProcesslistSelection();
+        await fetchProcesslist(true);
+      } catch (err) {
+        closeBatchKillModal();
+        showNativeAlert('Batch termination request failed: ' + err.message, 'Network Error');
+      }
+    }
+
     function initProcesslistFilters() {
       const sleepEl = document.getElementById('pl-hide-sleep');
       const sysEl = document.getElementById('pl-hide-system');
@@ -8039,6 +8545,7 @@
         toggleProcesslistTrendPanel(true, true);
       }
       _plFiltersInitialized = true;
+      applyProcesslistColVisibility();
     }
 
     function onProcesslistFilterChange() {
@@ -8071,6 +8578,127 @@
       if (clearBtn) {
         clearBtn.classList.add('hidden');
       }
+      renderProcesslistUI();
+    }
+
+    // --- Processlist Column Visibility Management (ADR 0054) ---
+    const PL_COLUMNS = [
+      { key: 'select', label: 'Select', mandatory: true, inPicker: false },
+      { key: 'action', label: 'Action', mandatory: false, inPicker: true },
+      { key: 'id', label: 'ID', mandatory: true, inPicker: true },
+      { key: 'user', label: 'User', mandatory: false, inPicker: true },
+      { key: 'host', label: 'Host', mandatory: false, inPicker: true },
+      { key: 'db', label: 'Database', mandatory: false, inPicker: true },
+      { key: 'command', label: 'Command', mandatory: false, inPicker: true },
+      { key: 'time', label: 'Time (s)', mandatory: false, inPicker: true },
+      { key: 'state', label: 'State', mandatory: false, inPicker: true },
+      { key: 'query', label: 'SQL / Query Info', mandatory: true, inPicker: true }
+    ];
+
+    let plHiddenColumns = new Set();
+    try {
+      const stored = localStorage.getItem('sqlfox-processlist-hidden-cols');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          // Strictly protect mandatory columns from being hidden
+          const valid = parsed.filter(k => k !== 'select' && k !== 'id' && k !== 'query');
+          plHiddenColumns = new Set(valid);
+        }
+      }
+    } catch (e) {}
+
+    function isProcesslistColVisible(key) {
+      if (key === 'select' || key === 'id' || key === 'query') return true;
+      return !plHiddenColumns.has(key);
+    }
+
+    function toggleProcesslistColPicker(e) {
+      if (e) e.stopPropagation();
+      const dropdown = document.getElementById('pl-col-picker-dropdown');
+      if (!dropdown) return;
+      const isHidden = dropdown.classList.contains('hidden');
+      closeAllContextMenus();
+      if (isHidden) {
+        renderProcesslistColPickerList();
+        dropdown.classList.remove('hidden');
+      } else {
+        dropdown.classList.add('hidden');
+      }
+    }
+
+    function renderProcesslistColPickerList() {
+      const container = document.getElementById('pl-col-picker-list');
+      if (!container) return;
+      const pickerCols = PL_COLUMNS.filter(c => c.inPicker);
+
+      container.innerHTML = pickerCols.map(c => {
+        const isMandatory = c.mandatory;
+        const isVisible = isProcesslistColVisible(c.key);
+        const lockBadge = isMandatory ? '<span class="text-amber-400 font-bold ml-1 text-[10px]" title="Mandatory column cannot be hidden">🔒 Mandatory</span>' : '';
+        return `
+          <label class="flex items-center justify-between p-1 hover:bg-slate-800 rounded cursor-pointer select-none text-[11px] ${isMandatory ? 'opacity-80' : ''}">
+            <div class="flex items-center space-x-2 truncate">
+              <input type="checkbox" ${isVisible ? 'checked' : ''} ${isMandatory ? 'disabled' : ''}
+                     onchange="setProcesslistColVisibility('${c.key}', this.checked)"
+                     class="accent-sky-500 w-3.5 h-3.5 rounded cursor-pointer ${isMandatory ? 'cursor-not-allowed opacity-60' : ''}">
+              <span class="truncate font-mono ${isVisible ? 'text-slate-200' : 'text-slate-500 line-through'}">${escapeHtml(c.label)}</span>
+              ${lockBadge}
+            </div>
+          </label>
+        `;
+      }).join('');
+
+      updateProcesslistColPickerBadge();
+    }
+
+    function setProcesslistColVisibility(key, isVisible) {
+      if (key === 'select' || key === 'id' || key === 'query') return;
+      if (isVisible) {
+        plHiddenColumns.delete(key);
+      } else {
+        plHiddenColumns.add(key);
+      }
+      try {
+        localStorage.setItem('sqlfox-processlist-hidden-cols', JSON.stringify([...plHiddenColumns]));
+      } catch (e) {}
+
+      applyProcesslistColVisibility();
+      renderProcesslistColPickerList();
+    }
+
+    function showAllProcesslistColumns() {
+      plHiddenColumns.clear();
+      try {
+        localStorage.removeItem('sqlfox-processlist-hidden-cols');
+      } catch (e) {}
+      applyProcesslistColVisibility();
+      renderProcesslistColPickerList();
+    }
+
+    function resetDefaultProcesslistColumns() {
+      showAllProcesslistColumns();
+    }
+
+    function updateProcesslistColPickerBadge() {
+      const badge = document.getElementById('pl-col-picker-count');
+      if (!badge) return;
+      const pickerCols = PL_COLUMNS.filter(c => c.inPicker);
+      const total = pickerCols.length;
+      const visible = pickerCols.filter(c => isProcesslistColVisible(c.key)).length;
+      badge.textContent = `(${visible}/${total})`;
+    }
+
+    function applyProcesslistColVisibility() {
+      // Synchronize <th> elements in thead
+      PL_COLUMNS.forEach(c => {
+        const th = document.querySelector(`th[data-pl-col="${c.key}"]`);
+        if (th) {
+          th.classList.toggle('hidden', !isProcesslistColVisible(c.key));
+        }
+      });
+      updateProcesslistColPickerBadge();
+      // Synchronize <td> elements in tbody
       renderProcesslistUI();
     }
 
@@ -8383,14 +9011,35 @@
           const matchId = String(t.id).includes(search);
           if (!matchUser && !matchHost && !matchDb && !matchInfo && !matchState && !matchCmd && !matchId) return false;
         }
+
+        // Quick filter chips (ADR 0052)
+        if (plActiveChip === 'active' && (t.command === 'Sleep' || t.state === 'Sleep')) return false;
+        if (plActiveChip === 'locked') {
+          const isLocked = locks.some(l => l.waiting_thread_id === t.id || l.blocking_thread_id === t.id);
+          if (!isLocked) return false;
+        }
+        if (plActiveChip === 'slow' && t.time < 5) return false;
+        if (plActiveChip === 'sleep' && !((t.command === 'Sleep' || t.state === 'Sleep') && t.time >= 60)) return false;
+
         return true;
       });
+
+      // ponytail: prune disappeared threads from selection set across polling ticks
+      const currentIds = new Set(threads.map(t => t.id));
+      for (const id of plSelectedThreadIds) {
+        if (!currentIds.has(id)) {
+          plSelectedThreadIds.delete(id);
+        }
+      }
+      updateProcesslistBatchBarUI();
 
       const tbody = document.getElementById('pl-tbody');
       if (!tbody) return;
 
+      const visibleColCount = PL_COLUMNS.filter(c => isProcesslistColVisible(c.key)).length;
       if (filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="9" class="p-8 text-center text-slate-500 italic">No threads matched the current filter.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="${visibleColCount}" class="p-8 text-center text-slate-500 italic">No threads matched the current filter.</td></tr>`;
+        updateProcesslistSelectAllHeader();
         return;
       }
 
@@ -8403,7 +9052,9 @@
         const isWarning = t.time >= 5 && !isCritical;
         const hasQuery = t.info && t.command !== 'Sleep' && t.info.trim() !== '';
         const rawSql = t.info || (t.command === 'Sleep' ? 'Idle connection (Sleep)' : '-');
-        const sqlSnippet = rawSql.length > 100 ? rawSql.slice(0, 100) + '...' : rawSql;
+        const displaySql = rawSql.replace(/[\r\n\t]+/g, ' ').trim();
+        const isImmune = isSelf || isSystem;
+        const isSelected = plSelectedThreadIds.has(t.id);
 
         let rowClass = 'hover:bg-slate-800/40 transition cursor-pointer select-none';
         if (isRootBlocker) {
@@ -8418,7 +9069,14 @@
 
         return `
           <tr class="${rowClass}" onclick="openProcessDetailModal(${t.id})">
-            <td class="p-2 text-center whitespace-nowrap" onclick="event.stopPropagation()">
+            <td data-pl-col="select" class="p-2 text-center whitespace-nowrap ${isProcesslistColVisible('select') ? '' : 'hidden'}" onclick="event.stopPropagation()">
+              ${isImmune ? `
+                <input type="checkbox" disabled class="opacity-20 cursor-not-allowed w-3.5 h-3.5" title="${isSelf ? 'Cannot target own active connection' : 'Cannot target protected system thread'}">
+              ` : `
+                <input type="checkbox" data-pl-tid="${t.id}" ${isSelected ? 'checked' : ''} onchange="onProcesslistThreadCheckboxChange(${t.id}, this.checked)" class="accent-sky-500 w-3.5 h-3.5 cursor-pointer">
+              `}
+            </td>
+            <td data-pl-col="action" class="p-2 text-center whitespace-nowrap ${isProcesslistColVisible('action') ? '' : 'hidden'}" onclick="event.stopPropagation()">
               <div class="inline-flex items-center space-x-1">
                 <button type="button" onclick="openProcessDetailModal(${t.id})" class="px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-800 text-sky-300 text-[10px] font-semibold border border-sky-800 transition flex items-center space-x-1 cursor-pointer" title="Inspect full thread details &amp; SQL">
                   <span>👁️</span><span>View</span>
@@ -8437,25 +9095,27 @@
                 </button>
               </div>
             </td>
-            <td class="p-2 font-bold whitespace-nowrap">
+            <td data-pl-col="id" class="p-2 font-bold whitespace-nowrap ${isProcesslistColVisible('id') ? '' : 'hidden'}">
               <span>${t.id}</span>
               ${isRootBlocker ? '<span class="ml-1 px-1.5 py-0.5 rounded bg-red-600 text-white font-bold text-[9px] animate-pulse">🚨 Blocker</span>' : ''}
               ${isWaitingOnLock && !isRootBlocker ? '<span class="ml-1 px-1.5 py-0.5 rounded bg-amber-950 text-amber-300 text-[9px] border border-amber-800">🔒 Waiting</span>' : ''}
               ${isSelf ? '<span class="ml-1 px-1 py-0.2 rounded bg-sky-950 text-sky-400 text-[9px] border border-sky-800">You</span>' : ''}
               ${isSystem ? '<span class="ml-1 px-1 py-0.2 rounded bg-slate-800 text-slate-400 text-[9px]">Sys</span>' : ''}
             </td>
-            <td class="p-2 truncate max-w-[100px] whitespace-nowrap" title="${escapeHtml(t.user)}">${escapeHtml(t.user)}</td>
-            <td class="p-2 text-slate-400 truncate max-w-[130px] whitespace-nowrap" title="${escapeHtml(t.host)}">${escapeHtml(t.host)}</td>
-            <td class="p-2 text-sky-300 truncate max-w-[100px] whitespace-nowrap" title="${escapeHtml(t.db || '-')}">${escapeHtml(t.db || '-')}</td>
-            <td class="p-2 text-slate-300 whitespace-nowrap">${escapeHtml(t.command)}</td>
-            <td class="p-2 text-right font-bold whitespace-nowrap ${isCritical ? 'text-red-400' : (isWarning ? 'text-amber-400' : 'text-slate-300')}">${t.time}s</td>
-            <td class="p-2 text-slate-400 text-[11px] truncate max-w-[140px] whitespace-nowrap" title="${escapeHtml(t.state || '-')}">${escapeHtml(t.state || '-')}</td>
-            <td class="p-2 font-mono text-[11px] truncate max-w-xl whitespace-nowrap select-text cursor-text ${hasQuery ? 'text-slate-200' : 'text-slate-500 italic'}" title="${escapeHtml(rawSql)}">
-              ${escapeHtml(sqlSnippet)}
+            <td data-pl-col="user" class="p-2 truncate max-w-[100px] whitespace-nowrap ${isProcesslistColVisible('user') ? '' : 'hidden'}" title="${escapeHtml(t.user)}">${escapeHtml(t.user)}</td>
+            <td data-pl-col="host" class="p-2 text-slate-400 truncate max-w-[130px] whitespace-nowrap ${isProcesslistColVisible('host') ? '' : 'hidden'}" title="${escapeHtml(t.host)}">${escapeHtml(t.host)}</td>
+            <td data-pl-col="db" class="p-2 text-sky-300 truncate max-w-[100px] whitespace-nowrap ${isProcesslistColVisible('db') ? '' : 'hidden'}" title="${escapeHtml(t.db || '-')}">${escapeHtml(t.db || '-')}</td>
+            <td data-pl-col="command" class="p-2 text-slate-300 whitespace-nowrap ${isProcesslistColVisible('command') ? '' : 'hidden'}">${escapeHtml(t.command)}</td>
+            <td data-pl-col="time" class="p-2 text-right font-bold whitespace-nowrap ${isProcesslistColVisible('time') ? '' : 'hidden'} ${isCritical ? 'text-red-400' : (isWarning ? 'text-amber-400' : 'text-slate-300')}">${t.time}s</td>
+            <td data-pl-col="state" class="p-2 text-slate-400 text-[11px] truncate max-w-[140px] whitespace-nowrap ${isProcesslistColVisible('state') ? '' : 'hidden'}" title="${escapeHtml(t.state || '-')}">${escapeHtml(t.state || '-')}</td>
+            <td data-pl-col="query" class="p-2 font-mono text-[11px] select-text cursor-text max-w-0 w-full ${isProcesslistColVisible('query') ? '' : 'hidden'} ${hasQuery ? 'text-slate-200' : 'text-slate-500 italic'}" title="${escapeHtml(rawSql)}">
+              <div class="truncate w-full">${escapeHtml(displaySql)}</div>
             </td>
           </tr>
         `;
       }).join('');
+
+      updateProcesslistSelectAllHeader();
     }
 
     // --- Process Activity Trend Panel (Ephemeral in-memory rolling buffer) ---

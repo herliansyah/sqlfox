@@ -79,6 +79,36 @@ func TestDBAOperationsAndAuditLog(t *testing.T) {
 	}
 	killResp.Body.Close()
 
+	// 2b. Test BatchKillProcess
+	batchKillPayload := bytes.NewBufferString(`{"thread_ids": [1, 2, -5], "mode": "query"}`)
+	batchResp, err := client.Post(ts.URL+"/api/session/"+connRec.ID+"/batch-kill", "application/json", batchKillPayload)
+	if err != nil || batchResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(batchResp.Body)
+		t.Fatalf("batch-kill failed with code %d: %s", batchResp.StatusCode, string(body))
+	}
+	var batchResult struct {
+		Total        int `json:"total"`
+		SuccessCount int `json:"success_count"`
+		FailedCount  int `json:"failed_count"`
+		Results      []struct {
+			ThreadID int64  `json:"thread_id"`
+			Success  bool   `json:"success"`
+			Error    string `json:"error"`
+		} `json:"results"`
+	}
+	_ = json.NewDecoder(batchResp.Body).Decode(&batchResult)
+	batchResp.Body.Close()
+
+	if batchResult.Total != 3 || batchResult.SuccessCount != 1 || batchResult.FailedCount != 2 {
+		t.Fatalf("unexpected batch-kill summary: %+v", batchResult)
+	}
+	if !strings.Contains(batchResult.Results[0].Error, "protected immune thread") {
+		t.Fatalf("expected immune protection for thread 1, got: %s", batchResult.Results[0].Error)
+	}
+	if !batchResult.Results[1].Success {
+		t.Fatalf("expected thread 2 to succeed, got error: %s", batchResult.Results[1].Error)
+	}
+
 	// 3. Test Execute Query records into Session Audit Log
 	execPayload := bytes.NewBufferString(`{"sql": "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT); INSERT INTO items (name) VALUES ('widget'); SELECT * FROM items;"}`)
 	execResp, err := client.Post(ts.URL+"/api/session/"+connRec.ID+"/execute", "application/json", execPayload)
