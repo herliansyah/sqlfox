@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Tab Database Scope & Target Database Switcher (`web/dist/index.html`, `internal/server`)**: Bound database schema context directly to individual query tabs, decoupling tab execution scope from sidebar selection. Added an interactive Target Database Pill in the query editor toolbar with search filtering, keyboard navigation, and quick switching across available databases (ADR 0055).
+- **Schema Scope Mismatch Guard (`internal/safety`, `web/dist/index.html`)**: Enhanced SQL safety guardrails to detect cross-database execution conflicts when statement target schemas differ from the active tab's bound database scope, surfacing an explicit safety warning prior to execution.
+- **Tiered DDL Target Database Affirmation (`internal/safety`, `web/dist/index.html`)**: Introduced environment-aware DDL execution safety: streamlined one-click target confirmation in Development environments while enforcing full typing verification challenges in Production and Staging.
+- **Bidirectional `USE <database>` Synchronization (`web/dist/index.html`)**: Automatically syncs tab database scope and UI indicators when running manual `USE <database>` statements in SQL queries, surfacing instant feedback via toast notification.
+
+### Fixed
+- **Windows Audit Log Test Stability (`internal/server/dba_test.go`)**: Filtered audit log query by `source=editor` to eliminate order-dependent race assertions across asynchronous audit writes on Windows runners.
+
 ## [v0.10.2] - 2026-10-19
 
 ### Added
