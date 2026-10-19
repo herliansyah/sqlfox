@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.10.0] - 2026-10-19
+
 ### Added
 - **Processlist Manager — Batch Kill Operations & Safety Guardrails (`internal/server`, `web/dist/index.html`)**: Multi-select batch query and connection termination (`POST /api/session/{id}/batch-kill`) with immune thread guardrails protecting caller connection and engine background workers, complete with structured audit logging (ADR 0052).
 - **Processlist Manager — Two-Tier Responsive Toolbar (`web/dist/index.html`)**: Split toolbar into primary navigation (refresh, auto-refresh interval, batch actions) and contextual filter subtoolbar (state, command, user, database, minimum elapsed time) to eliminate horizontal crowding on standard displays (ADR 0053).
