@@ -30,21 +30,26 @@
    - [Konfigurasi Multi-Engine (MySQL, PostgreSQL, SQLite)](#konfigurasi-multi-engine-mysql-postgresql-sqlite)
    - [Tingkatan Environment (Production, Staging, Development)](#tingkatan-environment-production-staging-development)
    - [Penegakan Mode Read-Only](#penegakan-mode-read-only)
+   - [Modal Pengaturan Terpadu (4-Tab) & Pintasan Global](#modal-pengaturan-terpadu-4-tab--pintasan-global)
 4. [Panduan Pengembang & Operator Data (Level Pengguna Umum)](#4-panduan-pengembang--operator-data-level-pengguna-umum)
    - [Navigasi Schema Explorer & Filter Cepat](#navigasi-schema-explorer--filter-cepat)
    - [Keyset Pagination & Pencarian Data Kilat](#keyset-pagination--pencarian-data-kilat)
    - [Spreadsheet CRUD & Pengeditan Sel Langsung (Inline)](#spreadsheet-crud--pengeditan-sel-langsung-inline)
    - [Preset Nilai Instan & Mutasi Baris Tanpa Primary Key](#preset-nilai-instan--mutasi-baris-tanpa-primary-key)
+   - [Virtual Grid Ergonomics Suite](#virtual-grid-ergonomics-suite)
    - [Impor CSV Bebas Dependensi & Pemetaan Kolom](#impor-csv-bebas-dependensi--pemetaan-kolom)
    - [Kanvas Visual ERD Interaktif](#kanvas-visual-erd-interaktif)
    - [BYOK AI Copilot & Automated Error Healer](#byok-ai-copilot--automated-error-healer)
    - [Unified Operational Notes Inbox & Pengingat Follow-up](#unified-operational-notes-inbox--pengingat-follow-up)
    - [Ergonomi Ruang Kerja, Tab Context Menu & Fluid Splitter](#ergonomi-ruang-kerja-tab-context-menu--fluid-splitter)
+   - [Isolasi Database Tab & DDL Target Affirmation Guardrails](#isolasi-database-tab--ddl-target-affirmation-guardrails)
+   - [Table Designer Relasional & Pembangun Batasan (Constraint Builder)](#table-designer-relasional--pembangun-batasan-constraint-builder)
 5. [Playbook Lanjutan DBA & DevOps (Level DBA)](#5-playbook-lanjutan-dba--devops-level-dba)
    - [AST Safety Guard & Challenge Modal (Pencegah Query Rusak)](#ast-safety-guard--challenge-modal-pencegah-query-rusak)
    - [Smart Tiered Backup Otomatis Pra-DDL](#smart-tiered-backup-otomatis-pra-ddl)
    - [Inspeksi Lock Contention Pra-Eksekusi & Root Blocker Tree](#inspeksi-lock-contention-pra-eksekusi--root-blocker-tree)
    - [Processlist Real-Time & Pembatalan Query Out-of-Band](#processlist-real-time--pembatalan-query-out-of-band)
+   - [Operasi Batch Processlist, Toolbar 2 Baris & Pemilih Visibilitas Kolom](#operasi-batch-processlist-toolbar-2-baris--pemilih-visibilitas-kolom)
    - [Panel Tren Aktivitas Query (Processlist Concurrency Trend)](#panel-tren-aktivitas-query-processlist-concurrency-trend)
    - [Inspektur Cluster & Replikasi (PXC / Galera / Replika MySQL)](#inspektur-cluster--replikasi-pxc--galera--replika-mysql)
    - [Performance Flight Recorder (Telemetri Quad-Metric)](#performance-flight-recorder-telemetri-quad-metric)
@@ -94,11 +99,11 @@ Unduh arsip rilis terbaru di halaman resmi [GitHub Releases](https://github.com/
 
 ```bash
 # Linux amd64 (Download & ekstrak sekali jalan)
-curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.6.1-linux-amd64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.10.4/sqlfox-v0.10.4-linux-amd64.tar.gz | tar -xz
 ./sqlfox
 
 # macOS Apple Silicon (ARM64 M1/M2/M3/M4)
-curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.6.1-darwin-arm64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.10.4/sqlfox-v0.10.4-darwin-arm64.tar.gz | tar -xz
 ./sqlfox
 ```
 
@@ -275,6 +280,15 @@ Klik tombol **🔒 Read-Only** pada bilah menu atas kapan saja:
 - Seluruh perintah mutasi (`INSERT`, `UPDATE`, `DELETE`, `ALTER`, `DROP`, `TRUNCATE`, `CREATE`) dicegat langsung di lapisan driver sebelum dikirim ke kabel jaringan database.
 - Sangat penting saat DBA melakukan investigasi insiden, audit data sensitif, atau peninjauan log produksi.
 
+### Modal Pengaturan Terpadu (4-Tab) & Pintasan Global
+SqlFox menyatukan seluruh konfigurasi ruang kerja dan preferensi sistem ke dalam satu modal dialog 4-tab yang elegan dan terintegrasi (`#settings-modal`):
+- **Akses Seketika**: Klik tombol **`⚙️ Settings`** pada bilah navigasi atas atau gunakan tombol pintasan global standar industri **`Ctrl + ,`** (atau **`Cmd + ,`** di macOS). Menu pengaturan ini juga dapat dipanggil langsung dari Command Palette (**`Ctrl + K`**).
+- **4 Tab Konfigurasi Terpadu**:
+  1. **`🔐 Connections`**: Kelola profil berkas brankas terenkripsi (*Connection Vault*), modifikasi kredensial koneksi, uji latensi ping TCP, dan konfigurasi bastion tunnel SSH native.
+  2. **`☁️ GitHub Sync`**: Konfigurasi GitHub Personal Access Token (PAT) dan path repositori untuk sinkronisasi otomatis snippet query dan skema DDL ke repositori Git jarak jauh.
+  3. **`📦 Notes Bundle`**: Ekspor dan impor arsip bundel catatan operasional terenkripsi (`.sqlfox-vault`), memudahkan pembagian playbook antaranggota tim atau backup offline.
+  4. **`🤖 AI Copilot`**: Pengaturan mandiri kredensial BYOK API Key (OpenAI, Claude, Gemini, DeepSeek, atau Ollama lokal), konfigurasi model AI, temperatur, dan prompt sistem kustom. Terintegrasi mulus dari drawer Notes maupun sidebar Copilot.
+
 ---
 
 ## 4. Panduan Pengembang & Operator Data (Level Pengguna Umum)
@@ -397,6 +411,45 @@ SqlFox dirancang dengan fokus pada kenyamanan sesi pengodean dan investigasi dat
   - **Tab Close Confirmation Guard**: Mencegah hilangnya pekerjaan dengan dialog konfirmasi aman jika tab memiliki draf SQL yang belum dieksekusi atau perubahan belum tersimpan. Tab bersih dan kosong akan langsung tertutup tanpa interupsi modal.
   - **Reset Ruang Kerja Bersih**: Menutup semua tab atau tab terakhir akan mereset ruang kerja secara anggun ke tab `Query 1.sql` baru yang bersih.
 
+### Isolasi Database Tab & DDL Target Affirmation Guardrails
+Pada server basis data multi-database, mengeksekusi DDL atau query mutasi pada skema database yang keliru (misalnya menjalankan skrip migrasi `dev_orders` di dalam skema `prod_orders`) merupakan penyebab utama terjadinya insiden operasional. SqlFox menerapkan isolasi ketat **Tab Database Scope**:
+
+- **Isolasi Konteks Database per Tab**:
+  - Setiap tab editor query memiliki ikatan database aktifnya sendiri (`tab.db`), terisolasi sepenuhnya dari pemilihan database di panel navigasi sidebar. Mengklik atau menjelajahi database lain di sidebar tidak akan pernah mengubah konteks database pada tab-tab kueri yang sedang terbuka.
+- **Pill Pemilih Database Target (Toolbar Tab)**:
+  - Toolbar Query Editor menampilkan indikator tombol pill interaktif (contoh: `🗄️ orders_db ▼`).
+  - Mengklik tombol pill ini memunculkan dropdown pencarian instan yang memuat seluruh katalog database dengan navigasi keyboard yang mulus, memungkinkan pergantian konteks eksekusi tab dalam satu klik.
+- **Peringatan Schema Scope Mismatch Guard**:
+  - Apabila perintah SQL yang akan dijalankan secara eksplisit menyasar skema lain (misalnya `UPDATE analitik.laporan ...`) sementara tab aktif terikat pada skema `inventaris`, Safety Guard akan mencegat operasi sebelum dikirim ke database dan memunculkan modal peringatan diskrepansi skema.
+- **Afirmasi Target DDL Bertingkat (Tiered Affirmation)**:
+  - Untuk eksekusi perintah DDL (`CREATE`, `ALTER`, `DROP`, `TRUNCATE`), sistem memeriksa tingkatan environment koneksi:
+    - **Development (`dev`)**: Menggunakan modal afirmasi ringkas satu-klik untuk kenyamanan rekayasa cepat.
+    - **Staging / Production (`staging`, `prod`)**: Menegakkan dialog tantangan verifikasi ketik manual nama database target secara presisi untuk menjamin intensi eksekutor.
+- **Sinkronisasi Otomatis Dua Arah Perintah `USE`**:
+  - Mengeksekusi perintah SQL manual seperti `USE database_tujuan;` secara otomatis memperbarui ikatan database pada tab aktif, memperbarui indikator tombol pill di toolbar, dan memunculkan toast non-blocking: *"Tab database context switched to <database>"*.
+
+### Table Designer Relasional & Pembangun Batasan (Constraint Builder)
+SqlFox menyediakan antarmuka Table Designer dan Create Table modern berkecepatan tinggi dengan pembangun batasan relasional bawaan:
+
+- **Retensi Fokus Pengetikan In-Place (Tanpa Lonjakan Kursor)**:
+  - Baris definisi kolom diperbarui secara in-place melalui manajemen state DOM bedah mikro. Mengetik nama kolom, tipe data, nullability, nilai bawaan (*default*), dan status primary key dapat dilakukan tanpa henti tanpa memicu render ulang tabel secara total (`innerHTML`), melenyapkan masalah kursor melompat atau kehilangan fokus saat mengetik cepat.
+- **Floating ENUM / SET Value Builder**:
+  - Saat memilih tipe data `ENUM` atau `SET`, klik tombol edit untuk memunculkan popover interaktif (`#enum-builder-popover`).
+  - **Tag Chips & Entri Cepat**: Tambahkan opsi nilai dengan menekan tombol `Enter` atau `,`.
+  - **Smart Paste Parsing**: Tempel teks yang dipisahkan koma, baris baru, atau tanda petik (misalnya `'menunggu', 'aktif', 'ditolak'`); sistem otomatis membedah, memotong spasi liar, dan membersihkan nilainya.
+  - **Validasi Sintaks Real-Time**: Memberikan peringatan instan jika terdapat opsi kosong atau nilai duplikat sebelum sintaks DDL dibuat.
+  - **Preview Live & Injeksi Nilai Default**: Menampilkan preview sintaks SQL (`ENUM('a','b')`) secara langsung dan secara otomatis menginjeksikan opsi nilai yang telah dikonfigurasi ke dalam preset tombol pilihan **Default Value** kolom.
+- **Composite Index Builder Visual**:
+  - Pada sub-tab `[🔑 Indexes]`, buat indeks gabungan multi-kolom secara visual dengan pengaturan urutan kolom bernomor urut (#1, #2, #3...).
+  - Mendukung klasifikasi indeks `INDEX` (BTREE), `UNIQUE`, `FULLTEXT`, dan `SPATIAL`.
+  - Dilengkapi generator penamaan otomatis yang konsisten (`idx_{table}_{col1}_{col2}`) serta alur kerja penyuntingan in-place sebelum DDL dieksekusi.
+- **Pemilih Foreign Key Berjenjang & Guard Kompatibilitas Tipe Data**:
+  - Pada sub-tab `[🔗 Foreign Keys]`, hubungkan kolom anak ke tabel induk di seluruh katalog database yang aktif.
+  - Memilih tabel referensi secara otomatis memilih kolom Primary Key tabel tersebut dan menghasilkan nama batasan kanonikal (`fk_{source}_{referenced}_{col}`).
+  - **DataType Compatibility Guard**: Memvalidasi kesesuaian tipe data kolom sumber dan referensi secara real-time. Jika terdapat ketidakcocokan (misalnya mereferensikan kolom bertipe `INT UNSIGNED` dengan kolom anak bertipe `BIGINT`), SqlFox langsung menampilkan badge peringatan visual, mencegah kegagalan eksekusi error MySQL `errno 150` sebelum SQL dijalankan.
+- **Engine Validasi Pra-Eksekusi Struktur Tabel**:
+  - Mengevaluasi seluruh rancangan tabel secara real-time sebelum pembuatan DDL: mendeteksi nama kolom duplikat, nama kosong, opsi enum kosong, serta panjang tipe data yang tidak valid, menonaktifkan tombol eksekusi DDL hingga seluruh anomali terselesaikan.
+
 ---
 
 ## 5. Playbook Lanjutan DBA & DevOps (Level DBA)
@@ -438,6 +491,22 @@ Dapat diakses melalui **⚡ Monitor &rarr; ⚡ Processlist**:
 - Opsi filter untuk menyembunyikan thread tidur (*Sleep*) agar DBA dapat berfokus pada thread yang sedang bekerja.
 - **Pembatalan Out-of-Band**: Tombol **Kill Query** mengirimkan perintah terminasi (`KILL QUERY <id>` pada MySQL atau `SELECT pg_cancel_backend(<pid>)` pada PostgreSQL) melalui koneksi kontrol terpisah, sehingga koneksi utama aplikasi tidak terputus.
 - **Modal Detail Proses**: Inspeksi teks lengkap SQL, user, host, database, state, waktu eksekusi, serta lock dependency dengan salin clipboard 1-klik (didukung fallback cerdas untuk protokol HTTP biasa tanpa SSL).
+
+### Operasi Batch Processlist, Toolbar 2 Baris & Pemilih Visibilitas Kolom
+Saat terjadi lonjakan lock contention parah atau kebocoran ratusan koneksi menganggur (*idle sleep connections*), menghentikan query atau koneksi satu per satu menjadi tidak praktis. SqlFox menghadirkan manajemen thread tingkat enterprise:
+
+- **Operasi Batch Kill & Pengaman Kebal Thread (Safety Guardrails)**:
+  - Pilih beberapa thread menggunakan checkbox atau klik **Pilih Semua yang Tersaring**.
+  - Pilih opsi **Batch Kill Queries** untuk membatalkan kueri aktif yang membebani CPU tanpa memutus pool koneksi aplikasi, atau **Batch Kill Connections** untuk menghentikan total koneksi klien.
+  - **Proteksi Thread Kebal**: Secara otomatis memproteksi thread internal sistem basis data (`system user`, `event_scheduler`, `binlog_dump`, dll.) dan koneksi caller aktif milik operator sendiri (`@@pseudo_thread_id` / `pg_backend_pid()`) dari terminasi tidak sengaja (*self-kill prevention*).
+  - Menghasilkan catatan audit mutasi terstruktur (`source=batch_kill`) lengkap dengan daftar Thread ID yang dihentikan.
+- **Tata Letak Toolbar Responsif 2 Baris**:
+  - **Baris Utama**: Memuat aksi global (tombol Segarkan, interval Auto-Refresh: 1s, 2s, 5s, 10s, aksi batch kill, kolom pencarian).
+  - **Baris Filter Kontekstual**: Terletak tepat di bawah baris utama dengan dropdown filter khusus Command/State, User, Database, dan Durasi Minimum (`Time > N`), melenyapkan masalah tombol terpotong pada layar laptop standar.
+- **Pemilih Visibilitas Kolom (Column Visibility Picker)**:
+  - Klik tombol **Columns (N/Total)** di toolbar Processlist untuk mengatur kolom mana saja yang ingin ditampilkan (`ID`, `User`, `Host`, `DB`, `Command`, `Time`, `State`, `Info`, `Memory`, `Locks`).
+  - Kolom esensial diagnosa (`ID`, `User`, `Time`, `Info`) dilengkapi kunci permanen agar tidak tersembunyi tanpa sengaja.
+  - Konfigurasi kolom disimpan secara persisten di `localStorage`.
 
 ### Panel Tren Aktivitas Query (Processlist Concurrency Trend)
 Dapat diakses melalui **⚡ Monitor &rarr; ⚡ Processlist** (Klik tombol **📈 Activity Trend**):
@@ -574,6 +643,7 @@ Dapat dibuka dengan mengklik tombol **⚡ Activity** pada status bar bawah atau 
 | `Ctrl + T` | Workspace | Membuka Tab Query baru |
 | `Ctrl + W` | Workspace | Menutup tab aktif |
 | `Ctrl + K` | Universal | Membuka Command Palette universal |
+| `Ctrl + ,` | Universal | Membuka Modal Pengaturan Terpadu (4-Tab) |
 | `Ctrl + P` | Universal | Membuka Schema Search (Lompat cepat ke tabel/kolom) |
 | `Ctrl + B` | Universal | Menyembunyikan/menampilkan Sidebar kiri (Layar luas) |
 | `Ctrl + L` | Universal | Menyembunyikan/menampilkan Sidebar AI Copilot |

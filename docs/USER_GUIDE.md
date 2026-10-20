@@ -30,21 +30,26 @@
    - [Multi-Engine Configuration (MySQL, PostgreSQL, SQLite)](#multi-engine-configuration-mysql-postgresql-sqlite)
    - [Environment Tiers (Production, Staging, Development)](#environment-tiers-production-staging-development)
    - [Read-Only Mode Enforcement](#read-only-mode-enforcement)
+   - [Unified App Settings Modal (4-Tab) & Global Shortcut](#unified-app-settings-modal-4-tab--global-shortcut)
 4. [Developer & Data Operator Manual (User Level)](#4-developer--data-operator-manual-user-level)
    - [Table Explorer & Search Path Navigation](#table-explorer--search-path-navigation)
    - [Keyset Pagination & Quick Search](#keyset-pagination--quick-search)
    - [Spreadsheet CRUD & Inline Cell Editing](#spreadsheet-crud--inline-cell-editing)
    - [Quick Value Presets & PK-Less Row Mutations](#quick-value-presets--pk-less-row-mutations)
+   - [Virtual Grid Ergonomics Suite](#virtual-grid-ergonomics-suite)
    - [Zero-Dependency CSV Import & Column Mapping](#zero-dependency-csv-import--column-mapping)
    - [Interactive Visual ERD Canvas](#interactive-visual-erd-canvas)
    - [BYOK AI Copilot & Automated Error Healer](#byok-ai-copilot--automated-error-healer)
    - [Unified Operational Notes Inbox & Follow-up Lifecycle](#unified-operational-notes-inbox--follow-up-lifecycle)
    - [Workspace Ergonomics, Tab Context Menu & Fluid Splitter](#workspace-ergonomics-tab-context-menu--fluid-splitter)
+   - [Tab Database Scope & DDL Target Affirmation Guardrails](#tab-database-scope--ddl-target-affirmation-guardrails)
+   - [Relational Table Designer & Constraint Builders](#relational-table-designer--constraint-builders)
 5. [Advanced DBA & Operations Playbook (DBA Level)](#5-advanced-dba--operations-playbook-dba-level)
    - [Deterministic AST Safety Guard & Challenge Modal](#deterministic-ast-safety-guard--challenge-modal)
    - [Pre-DDL Smart Tiered Backups](#pre-ddl-smart-tiered-backups)
    - [Pre-Flight Lock Contention & Root Blocker Tree](#pre-flight-lock-contention--root-blocker-tree)
    - [Real-Time Processlist & Out-of-Band Cancellation](#real-time-processlist--out-of-band-cancellation)
+   - [Processlist Batch Operations, Two-Tier Toolbar & Column Visibility](#processlist-batch-operations-two-tier-toolbar--column-visibility)
    - [Process Activity Trend Panel](#process-activity-trend-panel)
    - [Cluster & Replication Inspector (PXC / Galera / Replica)](#cluster--replication-inspector-pxc--galera--replica)
    - [Performance Flight Recorder (Quad-Metric Telemetry)](#performance-flight-recorder-quad-metric-telemetry)
@@ -94,11 +99,11 @@ Download the latest archive from [GitHub Releases](https://github.com/herliansya
 
 ```bash
 # Linux amd64
-curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.6.1-linux-amd64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.10.4/sqlfox-v0.10.4-linux-amd64.tar.gz | tar -xz
 ./sqlfox
 
 # macOS Apple Silicon (ARM64)
-curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.6.1-darwin-arm64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.10.4/sqlfox-v0.10.4-darwin-arm64.tar.gz | tar -xz
 ./sqlfox
 ```
 
@@ -275,6 +280,15 @@ Click the **🔒 Read-Only** toggle in the top header at any time:
 - Intercepts and rejects `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `CREATE`, and `TRUNCATE` at the driver layer before queries reach the database wire.
 - Essential for safe auditing, incident triage, and production log investigations.
 
+### Unified App Settings Modal (4-Tab) & Global Shortcut
+SqlFox consolidates all workspace and service configurations into a clean, unified 4-tab modal dialog (`#settings-modal`):
+- **Direct Access**: Click the top navbar **`⚙️ Settings`** button or press the universal desktop shortcut **`Ctrl + ,`** (or **`Cmd + ,`** on macOS). It is also fully searchable via the Command Palette (**`Ctrl + K`**).
+- **The 4 Configuration Tabs**:
+  1. **`🔐 Connections`**: Manage encrypted Connection Vault profiles, edit credentials, test TCP connectivity, and configure SSH tunneling bastions.
+  2. **`☁️ GitHub Sync`**: Configure GitHub personal access tokens (PAT) and repository paths to synchronize SQL snippets and schema definitions automatically with remote Git repos.
+  3. **`📦 Notes Bundle`**: Export and import encrypted operational notes packages (`.sqlfox-vault`), enabling portable team sharing and offline backup runbooks.
+  4. **`🤖 AI Copilot`**: Set BYOK API keys (OpenAI, Claude, Gemini, DeepSeek, or local Ollama), configure model parameters, temperature, and custom system prompt overrides. Seamlessly delegated from Copilot headers and Notes drawers.
+
 ---
 
 ## 4. Developer & Data Operator Manual (User Level)
@@ -397,6 +411,45 @@ SqlFox provides a modern, distraction-free desktop-grade workspace optimized for
   - **Tab Close Confirmation Guard**: Intercepts tab closures with a native challenge confirmation if dirty, unexecuted SQL drafts or unsaved mutations exist, preventing accidental data loss. Clean tabs close instantaneously without alert fatigue.
   - **Empty Workspace Graceful Reset**: Closing all tabs automatically resets the workspace into a fresh, clean `Query 1.sql` tab.
 
+### Tab Database Scope & DDL Target Affirmation Guardrails
+In enterprise environments with shared database servers, inadvertent execution of DDL or mutations against the wrong schema (e.g. running migrations intended for `dev_orders` against `prod_orders`) is a primary source of outages. SqlFox implements strict **Tab Database Scope** isolation:
+
+- **Isolated Tab Database Context**:
+  - Every Query Tab maintains its own independent database context (`tab.db`), completely decoupled from the sidebar database picker. Switching databases in the sidebar tree never unexpectedly changes the active database of background or open query tabs.
+- **Target Database Switcher Pill**:
+  - The Query Editor toolbar displays an interactive **Target Database Pill** (e.g. `🗄️ orders_db ▼`).
+  - Clicking the pill opens a quick search-filterable dropdown displaying all introspected databases with keyboard navigation, enabling 1-click context switching for that specific tab.
+- **Schema Scope Mismatch Guard**:
+  - When an executing SQL statement references an explicit schema (e.g. `UPDATE analytics.daily_stats ...`) that conflicts with the tab's bound database scope (`inventory`), the Safety Guard flags the operation before execution, displaying an alert modal warning the operator of the schema discrepancy.
+- **Environment-Tiered DDL Target Affirmation**:
+  - For DDL operations (`CREATE`, `ALTER`, `DROP`, `TRUNCATE`), SqlFox checks the connection environment tier:
+    - **Development (`dev`)**: A frictionless one-click affirmation dialog allows fast iteration.
+    - **Staging / Production (`staging`, `prod`)**: An explicit verification challenge requires typing the exact target database name to affirm execution intent.
+- **Bidirectional `USE <database>` Synchronization**:
+  - Executing a manual `USE target_database;` query automatically updates the active tab's bound database context, refreshes the toolbar pill, and displays a non-blocking toast notification: *"Tab database context switched to <database>"*.
+
+### Relational Table Designer & Constraint Builders
+SqlFox delivers a high-speed, visual Table Designer and Create Table Suite with native relational constraint builders:
+
+- **In-Place DOM Focus Retention**:
+  - Table column definition rows are updated in-place via surgical DOM state management. Column name, type, nullability, default values, and primary keys can be typed continuously without full-table `innerHTML` re-rendering, completely eliminating lost focus or caret jumps during fast keyboard input.
+- **Floating ENUM / SET Value Builder**:
+  - When setting a column data type to `ENUM` or `SET`, click the interactive edit button to summon the floating builder popover (`#enum-builder-popover`).
+  - **Tag Chips & Quick-Add**: Add options quickly by pressing `Enter` or `,`.
+  - **Smart Paste Parsing**: Paste comma-separated, newline-separated, or quoted strings (e.g. `'pending', 'active', 'suspended'`); SqlFox automatically parses, trims, and cleans each value.
+  - **Syntax Validation**: Warns immediately about empty options or duplicate values before generating DDL.
+  - **Live Preview & Default Presets**: Displays live syntax preview (`ENUM('a','b')`) and automatically injects configured enum values as 1-click presets into the column's **Default Value** selector.
+- **Visual Composite Index Builder**:
+  - Under the `[🔑 Indexes]` sub-tab, create composite indexes across multiple columns with visual drag-and-drop or column selection order badges (`#1`, `#2`, `#3...`).
+  - Supports `INDEX` (BTREE), `UNIQUE`, `FULLTEXT`, and `SPATIAL` index classifications.
+  - Intelligent auto-naming generator (`idx_{table}_{col1}_{col2}`) and staged in-place modification workflow before DDL deployment.
+- **Cascading Foreign Key Selector & DataType Compatibility Guard**:
+  - Under the `[🔗 Foreign Keys]` sub-tab, link child columns to parent tables across the active database catalog.
+  - Selecting a referenced parent table automatically selects its primary key column and auto-generates canonical constraint names (`fk_{source}_{referenced}_{col}`).
+  - **DataType Compatibility Guard**: Analyzes source and target column definitions in real-time. If there is a mismatch (such as referencing an `INT UNSIGNED` column with a `BIGINT` column), SqlFox displays a warning badge, preventing dreaded MySQL `errno 150` foreign key errors before SQL execution.
+- **Pre-Flight Table Validation Engine**:
+  - Evaluates table definitions in real-time prior to DDL generation: detects duplicate column names, empty names, missing ENUM choices, and illegal type lengths, disabling execution until resolved.
+
 ---
 
 ## 5. Advanced DBA & Operations Playbook (DBA Level)
@@ -438,6 +491,22 @@ Access via **⚡ Monitor &rarr; ⚡ Processlist**:
 - Filter by non-idle threads to eliminate connection pool noise.
 - **Out-of-Band Cancellation**: Clicking **Kill Query** sends `KILL QUERY <id>` (MySQL) or `SELECT pg_cancel_backend(<pid>)` (PostgreSQL) through a dedicated control connection without terminating the primary database session.
 - **Process Detail Modal**: Inspect full query text, user, host, database, state, execution time, and lock dependencies with 1-click clipboard copy (featuring robust fallback support for plain HTTP non-SSL environments).
+
+### Processlist Batch Operations, Two-Tier Toolbar & Column Visibility
+During severe lock storms or when rogue applications leak hundreds of idle connections, manually terminating threads one-by-one is unfeasible. SqlFox provides enterprise-grade thread management:
+
+- **Batch Kill Operations & Safety Guardrails**:
+  - Select multiple threads using checkboxes or click **Select All Filtered**.
+  - Choose **Batch Kill Queries** to abort long-running statements while keeping connection pools intact, or **Batch Kill Connections** to forcefully terminate sessions.
+  - **Immune Thread Guardrails**: Automatically skips and shields internal background workers (`system user`, `event_scheduler`, `binlog_dump`, etc.) and protects the operator's current connection session (`@@pseudo_thread_id` / `pg_backend_pid()`) from accidental suicide.
+  - Generates structured mutation audit records (`source=batch_kill`) with total victim counts and thread ID lists.
+- **Two-Tier Responsive Toolbar Layout**:
+  - **Primary Tier**: Holds global commands (Refresh button, Auto-Refresh interval dropdown: 1s, 2s, 5s, 10s, batch actions, search bar).
+  - **Contextual Filter Tier**: Sits cleanly below the primary bar with dedicated dropdown filters for thread Command/State, User, Database, and Minimum Elapsed Time (`Time > N`), eliminating control wrapping and layout shifts on small laptop displays.
+- **Processlist Column Visibility Picker**:
+  - Click **Columns (N/Total)** in the Processlist toolbar to toggle displayed fields (`ID`, `User`, `Host`, `DB`, `Command`, `Time`, `State`, `Info`, `Memory`, `Locks`).
+  - Essential session identifiers (`ID`, `User`, `Time`, `Info`) have sticky locks to maintain diagnostic visibility.
+  - Layout settings persist in `localStorage` across restarts.
 
 ### Process Activity Trend Panel
 Access via **⚡ Monitor &rarr; ⚡ Processlist** (Click **📈 Activity Trend** button):
@@ -574,6 +643,7 @@ Access via clicking **⚡ Activity** in the footer or pressing **`Ctrl + \``**:
 | `Ctrl + T` | Workspace | Open new Query Tab |
 | `Ctrl + W` | Workspace | Close current active tab |
 | `Ctrl + K` | Universal | Open Command Palette |
+| `Ctrl + ,` | Universal | Open Unified App Settings Modal (4-Tab) |
 | `Ctrl + P` | Universal | Open Schema Search (Quick Table / Column Jump) |
 | `Ctrl + B` | Universal | Toggle Left Sidebar (Maximize workspace) |
 | `Ctrl + L` | Universal | Toggle AI Copilot Sidebar |
