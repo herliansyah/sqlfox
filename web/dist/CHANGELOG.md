@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Table Structure Pre-Flight Validation Engine (`web/dist/index.html`)**: Added real-time validation for duplicate column names, empty names, missing ENUM options, and invalid lengths, surfacing visual error badges and disabling DDL execution until resolved.
 
 ### Fixed
+- **Grid Export Dropdown Toggle & Outside-Click Collision (`web/dist/index.html`)**: Added missing button identifier (`btn-export-csv`) and included `#export-csv-dropdown-container` in outside-click detection, preventing inadvertent menu dismissals and ensuring active context menus close cleanly when opening export options.
 - **Table Designer & Creator Focus Retention (`web/dist/index.html`)**: Eliminated full-table DOM re-rendering (`innerHTML` destruction) on column attribute input, preserving active cursor focus and caret position during continuous typing.
 
 ## [v0.10.3] - 2026-10-19
