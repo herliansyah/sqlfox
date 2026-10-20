@@ -1695,6 +1695,35 @@ func TestTableDesignerFocusRetentionAndConstraintBuildersEmbedded(t *testing.T) 
 	}
 }
 
+func TestExportDropdownClickAffordanceAndExclusion(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open embedded index.html: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	// Critical UI bug: If the export dropdown toggle button does not have id="btn-export-csv",
+	// or if #export-csv-dropdown-container / #btn-export-csv is not matched in document click listeners,
+	// then clicking it fails the e.target.closest check in the document-level contextmenu/click listener,
+	// immediately triggering closeAllContextMenus() which re-adds 'hidden' to #export-csv-menu
+	// in the exact same click, causing the button to have zero reaction.
+	if !strings.Contains(content, `id="btn-export-csv"`) {
+		t.Errorf("critical UI bug: export toggle button in #grid-toolbar must have id=\"btn-export-csv\" to match closest selector in document click listener")
+	}
+
+	if !strings.Contains(content, `id="export-csv-dropdown-container"`) {
+		t.Errorf("expected id=\"export-csv-dropdown-container\" to exist in index.html")
+	}
+}
+
+
 
 
 
