@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.10.4] - 2026-10-20
+
 ### Added
 - **Floating ENUM / SET Value Builder (`web/dist/index.html`)**: Added a floating modal popover for defining and managing `ENUM` and `SET` column options with interactive tag chips, quick-add input (Enter or comma delimiters), smart paste parsing (auto-sanitizing quotes/spaces), real-time syntax checking (duplicate and empty option warnings), live SQL preview, and dynamic injection into column Default Value presets (ADR 0056).
 - **Composite Index Builder (`web/dist/index.html`)**: Introduced an interactive visual column ordering picker with order badges (#1, #2...), available table column chips, index type selection (`INDEX`, `UNIQUE`, `FULLTEXT`, `SPATIAL`), auto-naming (`autoGenerateIndexName`), and staged in-place edit workflow (`editTableIndex`).
