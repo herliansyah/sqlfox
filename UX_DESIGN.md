@@ -100,6 +100,7 @@ User experience architecture, ASCII wireframes, design tokens, and interaction m
 | `Cmd+T` / `Ctrl+T` | Open New Query Tab | Tabs |
 | `Cmd+W` / `Ctrl+W` | Close Active Tab | Tabs |
 | `Cmd+K` / `Ctrl+K` | Open Command Palette | Global |
+| `Cmd+,` / `Ctrl+,` | Open Unified App Settings Modal (4-Tab) | Global |
 | `Cmd+P` / `Ctrl+P` | Open Schema Search (Quick Open Table/Column) | Global |
 | `Cmd+L` / `Ctrl+L` | Toggle AI Assistant Sidebar | Global |
 | `Cmd+B` / `Ctrl+B` | Toggle Connections & Schema Sidebar | Global |

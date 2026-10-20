@@ -623,8 +623,29 @@ v2.2 (MySQL Enterprise Operations & Programmability Suite)
   - [x] **Documentation & Verification**: Recorded in `CHANGELOG.md`, `MILESTONES.md`, `docs/USER_GUIDE.md`, `docs/USER_GUIDE_ID.md`, and validated via automated test harness `scripts/test-grid-ergonomics-suite.mjs` and `go test -v ./web`.
 - **Runnable Verification**: Run `node scripts/test-grid-ergonomics-suite.mjs` and `go test -v ./web` -> 100% pass across all ergonomics and rendering routines.
 
+---
 
+### Milestone 39: Processlist Batch Operations, Two-Tier Responsive Toolbar & Column Visibility
+- **Goal**: Provide enterprise-grade thread management and lock contention remediation in the Processlist Manager by introducing multi-select batch kill capabilities, a clean two-tier responsive toolbar layout, and persistent column visibility customization.
+- **Deliverables**:
+  - [x] **Batch Kill Operations & Safety Guardrails (`internal/server`, `web/dist/index.html`)**: Multi-select batch termination endpoint (`POST /api/session/{id}/batch-kill`) with immune thread guardrails protecting the caller connection and engine background workers (e.g. `system user`, `event_scheduler`), accompanied by structured audit logging with `source=batch_kill` (ADR 0052).
+  - [x] **Two-Tier Responsive Toolbar (`web/dist/index.html`)**: Separated primary command actions (refresh, auto-refresh interval, batch actions, search) from contextual filter subtoolbar (thread state, command, user, database, minimum elapsed time) to eliminate horizontal control crowding across standard viewport widths (ADR 0053).
+  - [x] **Column Visibility Picker (`web/dist/index.html`)**: Dynamic column toggle dropdown with live search, `Show All` and `Reset to Default` actions, protecting core identifiers (`ID`, `User`, `Time`, `Info`) from accidental hiding, persisted across sessions in `localStorage` (ADR 0054).
+  - [x] **Documentation & Verification**: Recorded in ADR-0052, ADR-0053, ADR-0054, `CHANGELOG.md`, `MILESTONES.md`, and validated via backend test suites in `internal/server` and frontend integration tests in `web/embed_test.go`.
+- **Runnable Verification**: Run `go test -v ./internal/server -run "TestProcesslist"` and `go test -v ./web` -> 100% pass.
 
+---
 
-
+### Milestone 40: Unified App Settings, Tab Database Scope & Relational Table Designer Suite
+- **Goal**: Streamline application configuration into a unified 4-tab modal with standard developer keyboard shortcuts, decouple query tab execution scope from sidebar selections with DDL safety affirmation, and elevate the Table Designer with in-place focus retention and relational constraint builders.
+- **Deliverables**:
+  - [x] **Unified 4-Tab Settings Modal & Global Shortcut (`web/dist/index.html`)**: Replaced top navbar Settings dropdown with a single direct `⚙️ Settings` button and global `Ctrl+,` (Cmd+, on macOS) shortcut opening a consolidated 4-tab dialog (`🔐 Connections`, `☁️ GitHub Sync`, `📦 Notes Bundle`, `🤖 AI Copilot`) with Command Palette (`Ctrl+K`) integration.
+  - [x] **Tab Database Scope & Target Database Switcher (`web/dist/index.html`, `internal/server`)**: Bound database schema context directly to individual query tabs, decoupling tab execution scope from sidebar selection. Added an interactive Target Database Pill in the query editor toolbar with search filtering, keyboard navigation, and quick switching across available databases (ADR 0055).
+  - [x] **Schema Scope Mismatch Guard & Tiered DDL Target Affirmation (`internal/safety`, `web/dist/index.html`)**: Enhanced SQL safety guardrails to detect cross-database execution conflicts when statement target schemas differ from the active tab's bound database scope. Enforced environment-aware affirmation: 1-click confirmation in Dev vs full typing verification challenge in Prod and Staging. Added bidirectional `USE <database>` auto-synchronization (ADR 0055).
+  - [x] **Table Designer In-Place Focus Retention (`web/dist/index.html`)**: Eliminated full-table DOM re-rendering (`innerHTML` destruction) on column attribute input, preserving active cursor focus and caret position during continuous editing (ADR 0056).
+  - [x] **Floating ENUM / SET Value Builder (`web/dist/index.html`)**: Added floating popover with interactive tag chips, quick-add input, smart paste parsing, real-time syntax checking (duplicate and empty option warnings), live SQL preview, and dynamic injection into column Default Value presets (ADR 0056).
+  - [x] **Visual Composite Index Builder (`web/dist/index.html`)**: Interactive column ordering picker with order badges (#1, #2...), available table column chips, index type selection (`INDEX`, `UNIQUE`, `FULLTEXT`, `SPATIAL`), auto-naming (`autoGenerateIndexName`), and staged in-place edit workflow (ADR 0056).
+  - [x] **Cascading Foreign Key Selector & Real-Time Type Guard (`web/dist/index.html`)**: Multi-database catalog awareness (`multiDBCatalogCache`), dynamic referenced column dropdown with Primary Key auto-selection, auto-naming, and real-time DataType Compatibility verification preventing MySQL errno 150 errors prior to DDL generation (ADR 0056).
+  - [x] **Documentation & Verification**: Recorded in ADR-0055, ADR-0056, `CONTEXT.md`, `CHANGELOG.md`, `MILESTONES.md`, `README.md`, `docs/USER_GUIDE.md`, `docs/USER_GUIDE_ID.md`, and verified via `go test -v ./internal/safety`, `go test -v ./internal/server`, and `go test -v ./web`.
+- **Runnable Verification**: Run `go test -v ./internal/safety`, `go test -v ./internal/server -run "TestSafeDDL"`, and `go test -v ./web` -> 100% pass across all safety, server, and embedded frontend suites.
 

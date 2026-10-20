@@ -61,6 +61,10 @@ Operates with a strict memory ceiling (**< 100MB RAM**), sub-second launch time 
 - 🔌 **Multi-Engine Parity & Resilience**: Resilient dual-syntax probes for MySQL 8.4 LTS / 9.x (`SHOW REPLICA STATUS`, `SHOW BINARY LOG STATUS`), MariaDB fallback diagnostics, full PostgreSQL Stored Function & Procedure introspection (`pg_proc`), Statement Digest (`pg_stat_statements`), Replication Inspector (`pg_stat_replication`), and atomic Structure Sync DDL.
 - 📐 **Fluid Workspace & Live Concurrency Telemetry**: Draggable Workspace Pane Splitter separating Query Editor and Data Grid with 50:50 double-click reset, tab lifecycle suite with dirty buffer close confirmation guard, Master PIN shoulder-surfing privacy masking, and an ephemeral 60-point Processlist Activity Trend canvas.
 - 🔄 **Fast Catalog Sync & Root Blocker Incident Triage**: Synchronize cross-database autocomplete and search caches in a single fast sweep (`InspectFastCatalog`) without foreign key metadata lock contention (`KEY_COLUMN_USAGE`), backed by a pre-flight server health check on active thread load (`Threads_running`), cache timestamp badge, and a high-contrast Root Blocker triage display with scrollable SQL queries and dedicated Kill Query vs Kill Blocker actions.
+- 🛡️ **Tab Database Scope & DDL Target Affirmation**: Isolated active database execution context per query tab decoupled from sidebar selection, featuring an interactive Target Database Pill switcher in the editor toolbar, Schema Scope Mismatch Guard, environment-tiered DDL affirmation (1-click confirmation in Dev, verification challenge in Prod/Staging), and bidirectional `USE <database>` auto-sync.
+- 🏗️ **Relational Table Designer & Constraint Builders**: In-place DOM state management eliminating focus loss while editing column attributes, floating ENUM / SET Value Builder popover with real-time syntax verification, visual Composite Index Builder (#1, #2 column ordering), cascading Foreign Key selector with DataType Compatibility guards preventing MySQL errno 150 errors, and pre-flight table structure validation.
+- ⚡ **Processlist Batch Operations & Two-Tier Toolbar**: Terminate hung queries or idle connections in bulk (`POST /api/session/{id}/batch-kill`) with immune thread guardrails protecting internal workers, a streamlined two-tier responsive toolbar, and a customizable column visibility picker.
+- ⚙️ **Unified 4-Tab Settings Modal (`Ctrl+,`)**: Consolidated application settings into a unified 4-tab modal (`🔐 Connections`, `☁️ GitHub Sync`, `📦 Notes Bundle`, `🤖 AI Copilot`) accessible via global `Ctrl+,` (Cmd+, on macOS) shortcut and Command Palette (`Ctrl+K`).
 
 ---
 
@@ -78,11 +82,11 @@ Grab the pre-compiled binary for your OS and architecture from [GitHub Releases]
 **Linux / macOS (One-liner download & run):**
 ```bash
 # Linux amd64
-curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.6.1-linux-amd64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.10.4/sqlfox-v0.10.4-linux-amd64.tar.gz | tar -xz
 ./sqlfox
 
 # macOS Apple Silicon
-curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.6.1-darwin-arm64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.10.4/sqlfox-v0.10.4-darwin-arm64.tar.gz | tar -xz
 ./sqlfox
 ```
 
@@ -251,6 +255,10 @@ Berjalan dengan konsumsi memori sangat hemat (**< 100MB RAM**), waktu start kila
 - 🔌 **Ketahanan & Paritas Multi-Engine**: Dual-syntax probe adaptif untuk MySQL 8.4 LTS / 9.x (`SHOW REPLICA STATUS`, `SHOW BINARY LOG STATUS`), fallback diagnostik MariaDB, introspeksi fungsi & prosedur PostgreSQL (`pg_proc`), kueri teratas (`pg_stat_statements`), monitoring replikasi (`pg_stat_replication`), dan sintaks DDL Structure Sync yang presisi.
 - 📐 **Ergonomi Ruang Kerja & Telemetri Konkurensi**: Workspace Pane Splitter fleksibel antara Query Editor dan Data Grid dengan reset 50:50 klik ganda, suite siklus hidup tab dengan pengaman konfirmasi draf kotor (*dirty buffer guard*), proteksi privasi PIN Master dari *shoulder surfing*, dan kanvas grafik tren aktivitas kueri 60 titik di Processlist.
 - 🔄 **Sinkronisasi Cepat Katalog Skema & Root Blocker Triage**: Perbarui cache autocomplete dan pencarian lintas database dalam satu sapuan kilat (`InspectFastCatalog`) tanpa memicu kunci metadata foreign key (`KEY_COLUMN_USAGE`), didukung evaluasi kesehatan pra-eksekusi beban thread server (`Threads_running`), lencana stempel waktu cache, dan tampilan Root Blocker triage dengan query SQL scrollable serta tombol terminasi terpisah (Kill Query vs Kill Blocker).
+- 🛡️ **Isolasi Database Tab & DDL Target Affirmation**: Mengikat konteks database aktif secara independen pada setiap tab kueri (terpisah dari pilihan aktif di sidebar), dilengkapi pill switcher database interaktif di toolbar editor dengan fitur pencarian cepat, *Schema Scope Mismatch Guard*, proteksi konfirmasi DDL bertingkat (1-klik di Dev, tantangan verifikasi ketik di Prod/Staging), serta sinkronisasi otomatis dua arah saat mengeksekusi `USE <database>`.
+- 🏗️ **Table Designer Relasional & Pembangun Batasan (Constraint)**: Manajemen state DOM in-place yang mencegah hilangnya fokus kursor saat mengedit kolom tabel, popover interaktif Floating ENUM / SET Value Builder dengan validasi sintaks instan, Composite Index Builder visual dengan pemilih urutan kolom (#1, #2), pemilih Foreign Key berjenjang dengan *DataType Compatibility guard* untuk mencegah error MySQL errno 150, serta validasi pre-flight struktur tabel menyeluruh.
+- ⚡ **Operasi Batch Processlist & Toolbar 2 Baris**: Terminasi massal (*batch kill*) kueri yang macet maupun koneksi yang menganggur (*sleep*) dengan pengaman thread internal dan log audit terstruktur, layout toolbar responsif 2 baris (navigasi utama dan filter kontekstual), serta pemilih visibilitas kolom (*column picker*) dengan proteksi kolom identitas esensial.
+- ⚙️ **Modal Pengaturan Terpadu 4-Tab (`Ctrl+,`)**: Konsolidasi seluruh konfigurasi aplikasi ke dalam modal 4-tab yang rapi (`🔐 Connections`, `☁️ GitHub Sync`, `📦 Notes Bundle`, `🤖 AI Copilot`) yang dapat diakses instan melalui shortcut keyboard global `Ctrl+,` (Cmd+, di macOS) maupun Command Palette (`Ctrl+K`).
 
 ---
 
@@ -268,11 +276,11 @@ Unduh paket binary sesuai sistem operasi dan arsitektur Anda di halaman [GitHub 
 **Linux / macOS (Download & ekstrak sekali jalan):**
 ```bash
 # Linux amd64
-curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.6.1-linux-amd64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.10.4/sqlfox-v0.10.4-linux-amd64.tar.gz | tar -xz
 ./sqlfox
 
 # macOS Apple Silicon
-curl -sL https://github.com/herliansyah/sqlfox/releases/latest/download/sqlfox-v0.6.1-darwin-arm64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.10.4/sqlfox-v0.10.4-darwin-arm64.tar.gz | tar -xz
 ./sqlfox
 ```
 
