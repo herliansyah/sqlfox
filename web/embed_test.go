@@ -1653,5 +1653,48 @@ func TestTabDatabaseScopeAndDDLAffirmationEmbedded(t *testing.T) {
 	}
 }
 
+func TestTableDesignerFocusRetentionAndConstraintBuildersEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open embedded index.html: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	requiredElements := []string{
+		`id="enum-builder-popover"`,
+		`id="enum-quick-input"`,
+		`id="enum-tags-list"`,
+		`id="enum-builder-warning"`,
+		`id="enum-builder-sql-preview"`,
+		`id="fk-type-mismatch-warning"`,
+		`id="index-selected-chips"`,
+		`id="index-available-chips"`,
+		"function parseEnumOptionList(raw)",
+		"function renderEnumPillSummary(lengthStr)",
+		"function renderDefaultPresetSelect(c, idx, context)",
+		"function validateTableColumns(columns, isCreator)",
+		"function updateStagedColLength(idx, newLength)",
+		"function updateCreatorColLength(idx, newLength)",
+		"function openEnumValuesPopover(event, context, colIdx)",
+		"function checkFKTypeCompatibility()",
+		"function autoGenerateIndexName()",
+		"function autoGenerateFKName()",
+	}
+
+	for _, elem := range requiredElements {
+		if !strings.Contains(content, elem) {
+			t.Errorf("expected index.html to contain %q, but was missing", elem)
+		}
+	}
+}
+
+
 
 

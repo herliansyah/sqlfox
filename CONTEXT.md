@@ -311,6 +311,22 @@ _Avoid_: Alert box, confirm prompt, window.alert, window.confirm
 An interactive visual workspace for inspecting and altering table definitions (columns, data types, primary keys, indexes, and foreign keys) with staged change accumulation.
 _Avoid_: Schema wizard, raw alter window
 
+**Table Designer Focus Engine**:
+An in-place DOM state management pattern in the Table Designer that stages column modifications without destroying or re-rendering active input elements, preserving cursor position and caret state during continuous typing.
+_Avoid_: Full-tbody re-rendering on input, losing focus, input flicker
+
+**ENUM / SET Value Builder**:
+A dedicated popover tag and raw-text editor with quote auto-sanitization, syntax validation, duplicate detection, and empty-option prevention for MySQL `ENUM` and `SET` data types in the Table Designer and Create Table modal.
+_Avoid_: Tiny length box, unvalidated enum string, raw comma box
+
+**Cascading Foreign Key Selector**:
+A dialect-aware relational constraint builder featuring contextual referenced-table column dropdowns and real-time type compatibility checks against target schema catalogs.
+_Avoid_: Free-text referenced column input, hardcoded default catalog FK
+
+**Composite Index Builder**:
+A visual index configuration interface supporting column selection, order rearrangement for composite keys, index type selection (`INDEX`, `UNIQUE`, `FULLTEXT`, `SPATIAL`), and automated canonical index naming.
+_Avoid_: Comma-separated index column text box, manual index syntax
+
 **View Designer**:
 A specialized schema editor for creating and modifying database views with query syntax verification.
 _Avoid_: View wizard
@@ -734,6 +750,11 @@ _Avoid_: Multiline button labels, squished button shapes, colliding controls
 - **0049**: Containerized Deployment and Multi-Arch Docker Distribution (`docs/adr/0049-containerized-deployment-and-multi-arch-docker-distribution.md`)
 - **0050**: Fast Schema Catalog Synchronization and Root Blocker Incident Triage (`docs/adr/0050-fast-catalog-synchronization-and-root-blocker-triage.md`)
 - **0051**: In-App Activity Console and Live Event Stream (`docs/adr/0051-in-app-activity-console-and-live-event-stream.md`)
+- **0052**: Processlist Batch Operations and Safety Guardrails (`docs/adr/0052-processlist-batch-operations-and-safety-guardrails.md`)
+- **0053**: Processlist Two-Tier Header Layout (`docs/adr/0053-processlist-two-tier-header-layout.md`)
+- **0054**: Processlist Column Visibility Picker (`docs/adr/0054-processlist-column-visibility-picker.md`)
+- **0055**: Tab Database Scope and DDL Target Affirmation (`docs/adr/0055-tab-database-scope-and-ddl-target-affirmation.md`)
+- **0056**: Table Designer Focus Retention and Relational Constraint Builders (`docs/adr/0056-table-designer-focus-retention-and-relational-constraint-builders.md`)
 
 ## Visual Schema & ERD Canvas
 

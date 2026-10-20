@@ -915,25 +915,53 @@
             <button onclick="openAddIndexForm()" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-2.5 py-1 rounded transition flex items-center space-x-1">
               <span>➕</span><span>Add Index</span>
             </button>
-            <span class="text-slate-400 text-[11px]">Table Indexes (BTREE / UNIQUE)</span>
+            <span class="text-slate-400 text-[11px]">Table Indexes (BTREE / UNIQUE / FULLTEXT)</span>
           </div>
-          <div id="add-index-inline-form" class="hidden p-3 bg-slate-950 border-b border-app-border space-y-2 text-xs">
-            <div class="grid grid-cols-3 gap-3">
+          <div id="add-index-inline-form" class="hidden p-3 bg-slate-950 border-b border-app-border space-y-2.5 text-xs">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-1.5">
+              <div class="flex items-center space-x-2">
+                <span class="text-sky-400 font-bold">⚡</span>
+                <span id="index-form-title" class="font-bold text-white">Add New Index</span>
+                <span id="index-form-mode-badge" class="hidden bg-sky-950 text-sky-300 border border-sky-700 px-1.5 py-0.5 rounded text-[10px]">Editing</span>
+              </div>
+              <button onclick="document.getElementById('add-index-inline-form').classList.add('hidden')" class="text-slate-400 hover:text-white text-xs">✕</button>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div>
-                <label class="block text-slate-400 mb-1">Index Name</label>
-                <input type="text" id="new-index-name" placeholder="idx_column" class="w-full bg-slate-900 border border-slate-700 p-1.5 rounded text-white font-mono text-xs outline-none focus:border-app-accent">
+                <div class="flex items-center justify-between mb-1">
+                  <label class="text-slate-400">Index Name</label>
+                  <button type="button" onclick="autoGenerateIndexName()" class="text-[10px] text-sky-400 hover:underline">⚡ Auto Name</button>
+                </div>
+                <input type="text" id="new-index-name" placeholder="idx_table_col" class="w-full bg-slate-900 border border-slate-700 p-1.5 rounded text-white font-mono text-xs outline-none focus:border-app-accent">
               </div>
               <div>
-                <label class="block text-slate-400 mb-1">Columns (comma separated)</label>
-                <input type="text" id="new-index-cols" placeholder="col1, col2" class="w-full bg-slate-900 border border-slate-700 p-1.5 rounded text-white font-mono text-xs outline-none focus:border-app-accent">
+                <label class="block text-slate-400 mb-1">Index Type</label>
+                <select id="new-index-type" onchange="onIndexTypeChange(this.value)" class="w-full bg-slate-900 border border-slate-700 p-1.5 rounded text-white font-mono text-xs outline-none focus:border-app-accent">
+                  <option value="INDEX">INDEX (Normal BTREE)</option>
+                  <option value="UNIQUE">UNIQUE</option>
+                  <option value="FULLTEXT">FULLTEXT</option>
+                  <option value="SPATIAL">SPATIAL</option>
+                </select>
+                <input type="checkbox" id="new-index-unique" class="hidden">
               </div>
-              <div class="flex items-center space-x-4 pt-5">
-                <label class="flex items-center space-x-1 text-slate-300 cursor-pointer">
-                  <input type="checkbox" id="new-index-unique" class="rounded bg-slate-900 border-slate-700 text-app-accent">
-                  <span>Unique Index</span>
-                </label>
-                <button onclick="submitNewIndex()" class="bg-app-safe hover:bg-emerald-600 text-slate-950 font-bold px-3 py-1 rounded transition text-xs">Save</button>
-                <button onclick="document.getElementById('add-index-inline-form').classList.add('hidden')" class="text-slate-400 hover:text-white px-2 py-1 text-xs">Cancel</button>
+              <div>
+                <label class="block text-slate-400 mb-1">Selected Columns in Order</label>
+                <div id="index-selected-chips" class="flex flex-wrap gap-1 p-1 bg-slate-900 border border-slate-700 rounded min-h-[32px] items-center">
+                  <span class="text-slate-500 italic text-[11px] px-1">Click column pills below...</span>
+                </div>
+                <input type="hidden" id="new-index-cols">
+              </div>
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1">Available Table Columns (click to add/remove from index):</label>
+              <div id="index-available-chips" class="flex flex-wrap gap-1.5 p-1.5 bg-slate-900/60 border border-slate-800 rounded">
+              </div>
+            </div>
+            <div class="flex items-center justify-between pt-1 border-t border-slate-800/80">
+              <span id="index-form-sql-preview" class="font-mono text-[11px] text-slate-400 truncate max-w-lg"></span>
+              <div class="flex items-center space-x-2">
+                <button type="button" onclick="document.getElementById('add-index-inline-form').classList.add('hidden')" class="text-slate-400 hover:text-white px-2.5 py-1 text-xs">Cancel</button>
+                <button type="button" onclick="submitNewIndex()" class="bg-app-safe hover:bg-emerald-600 text-slate-950 font-bold px-3 py-1 rounded transition text-xs">Save Index</button>
               </div>
             </div>
           </div>
@@ -963,24 +991,28 @@
             <span class="text-slate-400 text-[11px]">Foreign Key Relationships</span>
           </div>
           <div id="add-fk-inline-form" class="hidden p-3 bg-slate-950 border-b border-app-border space-y-2 text-xs">
-            <div class="grid grid-cols-3 gap-2">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
               <div>
-                <label class="block text-slate-400 mb-1">Constraint Name</label>
+                <div class="flex items-center justify-between mb-1">
+                  <label class="text-slate-400">Constraint Name</label>
+                  <button type="button" onclick="autoGenerateFKName()" class="text-[10px] text-sky-400 hover:underline">⚡ Auto Name</button>
+                </div>
                 <input type="text" id="new-fk-name" placeholder="fk_table_col" class="w-full bg-slate-900 border border-slate-700 p-1.5 rounded text-white font-mono text-xs outline-none focus:border-app-accent">
               </div>
               <div>
                 <label class="block text-slate-400 mb-1">Source Column</label>
-                <select id="new-fk-col" class="w-full bg-slate-900 border border-slate-700 p-1.5 rounded text-white font-mono text-xs outline-none">
+                <select id="new-fk-col" onchange="checkFKTypeCompatibility()" class="w-full bg-slate-900 border border-slate-700 p-1.5 rounded text-white font-mono text-xs outline-none focus:border-app-accent">
                 </select>
               </div>
               <div>
                 <label class="block text-slate-400 mb-1">Referenced Table</label>
-                <select id="new-fk-ref-table" onchange="onFKRefTableChange(this.value)" class="w-full bg-slate-900 border border-slate-700 p-1.5 rounded text-white font-mono text-xs outline-none">
+                <select id="new-fk-ref-table" onchange="onFKRefTableChange(this.value)" class="w-full bg-slate-900 border border-slate-700 p-1.5 rounded text-white font-mono text-xs outline-none focus:border-app-accent">
                 </select>
               </div>
               <div>
                 <label class="block text-slate-400 mb-1">Referenced Column</label>
-                <input type="text" id="new-fk-ref-col" placeholder="id" class="w-full bg-slate-900 border border-slate-700 p-1.5 rounded text-white font-mono text-xs outline-none focus:border-app-accent">
+                <select id="new-fk-ref-col" onchange="checkFKTypeCompatibility()" class="w-full bg-slate-900 border border-slate-700 p-1.5 rounded text-white font-mono text-xs outline-none focus:border-app-accent">
+                </select>
               </div>
               <div>
                 <label class="block text-slate-400 mb-1">On Delete</label>
@@ -1001,7 +1033,12 @@
                 </select>
               </div>
             </div>
-            <div class="flex justify-end space-x-2 pt-2">
+            <!-- Type Compatibility Warning Banner -->
+            <div id="fk-type-mismatch-warning" class="hidden text-amber-300 text-xs flex items-center space-x-1.5 bg-amber-950/40 border border-amber-800/60 p-2 rounded">
+              <span>⚠️</span>
+              <span id="fk-mismatch-text">Type mismatch between source and referenced column.</span>
+            </div>
+            <div class="flex justify-end space-x-2 pt-1 border-t border-slate-800/80">
               <button onclick="document.getElementById('add-fk-inline-form').classList.add('hidden')" class="text-slate-400 hover:text-white px-2.5 py-1 text-xs">Cancel</button>
               <button onclick="submitNewFK()" class="bg-app-safe hover:bg-emerald-600 text-slate-950 font-bold px-3 py-1 rounded transition text-xs">Create Foreign Key</button>
             </div>
@@ -3020,6 +3057,46 @@
       </div>
     </div>
   </dialog>
+
+  <!-- ENUM / SET Value Builder Popover -->
+  <div id="enum-builder-popover" class="hidden fixed z-50 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-3 w-80 text-xs text-white ring-1 ring-black/50 space-y-2.5">
+    <div class="flex items-center justify-between border-b border-slate-800 pb-1.5">
+      <div class="flex items-center space-x-1.5">
+        <span class="text-sky-400">🏷️</span>
+        <span id="enum-popover-title" class="font-bold text-slate-200">Edit ENUM Values</span>
+        <span id="enum-popover-col" class="text-[10px] text-slate-400 font-mono bg-slate-950 px-1 rounded truncate max-w-[100px]">col</span>
+      </div>
+      <button type="button" onclick="closeEnumBuilderPopover()" class="text-slate-400 hover:text-white text-xs px-1">✕</button>
+    </div>
+    
+    <div class="space-y-1">
+      <label class="block text-[10px] text-slate-400 font-semibold uppercase tracking-wider">Defined Options (<span id="enum-tag-count">0</span>)</label>
+      <div id="enum-tags-list" class="flex flex-wrap gap-1.5 p-2 bg-slate-950 border border-slate-800 rounded min-h-[44px] max-h-36 overflow-y-auto">
+      </div>
+    </div>
+
+    <div>
+      <input type="text" id="enum-quick-input" placeholder="Type value & Enter or paste list..." class="w-full bg-slate-950 border border-slate-700 focus:border-app-accent px-2 py-1.5 rounded text-white font-mono text-xs outline-none">
+      <span class="text-[10px] text-slate-500 block mt-0.5">Press Enter or comma to add. Paste formatted list supported.</span>
+    </div>
+
+    <div id="enum-builder-warning" class="hidden text-amber-400 text-[11px] flex items-center space-x-1 bg-amber-950/30 border border-amber-800/40 p-1.5 rounded">
+      <span>⚠️</span>
+      <span id="enum-warning-text"></span>
+    </div>
+
+    <div class="pt-1 border-t border-slate-800/80">
+      <div class="text-[10px] text-slate-400 mb-0.5 font-semibold">SQL Preview:</div>
+      <div id="enum-builder-sql-preview" class="font-mono text-[11px] text-sky-300 bg-slate-950 px-2 py-1 rounded border border-slate-800 truncate">
+        ENUM()
+      </div>
+    </div>
+
+    <div class="flex justify-end space-x-2 pt-1 border-t border-slate-800/80">
+      <button type="button" onclick="closeEnumBuilderPopover()" class="px-2.5 py-1 text-xs text-slate-400 hover:text-white rounded">Cancel</button>
+      <button type="button" id="btn-apply-enum-builder" onclick="applyEnumBuilder()" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-3 py-1 rounded text-xs transition">Apply</button>
+    </div>
+  </div>
 
   <!-- 10. Create Table Designer Dialog (HTML5 <dialog>) -->
   <dialog id="table-creator-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-4xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto">
@@ -11659,6 +11736,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
     const STANDARD_DATA_TYPES = [
       { group: 'Numeric', types: ['INT', 'BIGINT', 'TINYINT', 'SMALLINT', 'DECIMAL', 'FLOAT', 'DOUBLE'] },
       { group: 'Text & String', types: ['VARCHAR', 'CHAR', 'TEXT', 'LONGTEXT', 'MEDIUMTEXT'] },
+      { group: 'Selection / Enum', types: ['ENUM', 'SET'] },
       { group: 'Date & Time', types: ['DATETIME', 'TIMESTAMP', 'DATE', 'TIME'] },
       { group: 'Other / Binary', types: ['JSON', 'BOOLEAN', 'BLOB', 'LONGBLOB'] }
     ];
@@ -11668,6 +11746,33 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const match = String(fullType).match(/^([a-zA-Z0-9_]+)(?:\(([^)]+)\))?/i);
       if (!match) return { base: fullType.toUpperCase(), length: '' };
       return { base: match[1].toUpperCase(), length: match[2] ? match[2].trim() : '' };
+    }
+
+    function parseEnumOptionList(raw) {
+      if (!raw) return [];
+      let s = String(raw).trim();
+      const wrapMatch = s.match(/^(?:enum|set)\s*\(([\s\S]+)\)$/i);
+      if (wrapMatch) s = wrapMatch[1].trim();
+      const list = [];
+      const regex = /\s*(?:'((?:''|[^'])*)'|"((?:""|[^"])*)"|([^,]+))\s*(?:,|$)/g;
+      let m;
+      while ((m = regex.exec(s)) !== null) {
+        let val = '';
+        if (m[1] !== undefined) val = m[1].replace(/''/g, "'");
+        else if (m[2] !== undefined) val = m[2].replace(/""/g, '"');
+        else if (m[3] !== undefined) val = m[3].trim().replace(/^['"]+|['"]+$/g, '');
+        val = val.trim();
+        if (val && !list.includes(val)) list.push(val);
+        if (regex.lastIndex === m.index) regex.lastIndex++;
+      }
+      return list;
+    }
+
+    function renderEnumPillSummary(lengthStr) {
+      const opts = parseEnumOptionList(lengthStr);
+      if (opts.length === 0) return 'Set values...';
+      if (opts.length <= 2) return opts.map(o => `'${escapeHtml(o)}'`).join(',');
+      return `${opts.length} values ('${escapeHtml(opts[0])}',...)`;
     }
 
     function isLengthlessType(base) {
@@ -11714,11 +11819,51 @@ Please analyze what is causing this query to be slow and suggest necessary query
       return `DEFAULT '${u.replace(/'/g, "''")}'`;
     }
 
+    function renderDefaultPresetSelect(c, idx, context) {
+      const parsed = parseColumnType(c.type);
+      const isEnum = parsed.base === 'ENUM' || parsed.base === 'SET';
+      const enumOpts = isEnum ? parseEnumOptionList(parsed.length) : [];
+      const preset = detectDefaultPreset(c.default_value);
+      const isCustomPreset = preset === 'custom';
+      const cleanDefault = (c.default_value || '').replace(/^'(.*)'$/, '$1');
+      const isEnumPreset = enumOpts.includes(cleanDefault);
+
+      const onChangeFn = context === 'staged' ? `updateStagedColDefaultPreset(${idx}, this.value)` : `updateCreatorColDefaultPreset(${idx}, this.value)`;
+      const onInputFn = context === 'staged' ? `updateStagedCol(${idx}, 'default_value', this.value)` : `newTableColumns[${idx}].default_value = this.value; validateCreatorColumns();`;
+      const bgClass = context === 'staged' ? 'bg-slate-950' : 'bg-slate-900';
+
+      let enumOptHtml = '';
+      if (enumOpts.length > 0) {
+        enumOptHtml = `
+          <optgroup label="Enum Options">
+            ${enumOpts.map(opt => `<option value="__ENUM__:${escapeHtml(opt)}" ${(cleanDefault === opt) ? 'selected' : ''}>'${escapeHtml(opt)}'</option>`).join('')}
+          </optgroup>
+        `;
+      }
+
+      return `
+        <div class="flex items-center space-x-1">
+          <select onchange="${onChangeFn}" class="${bgClass} border border-slate-700 text-slate-300 text-xs py-1 px-1 rounded outline-none font-mono focus:border-app-accent max-w-[125px]">
+            <option value="none" ${preset === 'none' && !isEnumPreset ? 'selected' : ''}>None</option>
+            <option value="NULL" ${preset === 'NULL' ? 'selected' : ''} ${c.is_primary_key ? 'disabled' : ''}>NULL</option>
+            <option value="CURRENT_TIMESTAMP" ${preset === 'CURRENT_TIMESTAMP' ? 'selected' : ''}>CURRENT_TIMESTAMP</option>
+            <option value="0" ${preset === '0' && !isEnumPreset ? 'selected' : ''}>0</option>
+            <option value="empty_string" ${preset === 'empty_string' ? 'selected' : ''}>'' (Empty)</option>
+            ${enumOptHtml}
+            <option value="custom" ${isCustomPreset && !isEnumPreset ? 'selected' : ''}>Custom...</option>
+          </select>
+          <input type="text" value="${(isCustomPreset && !isEnumPreset) ? escapeHtml(c.default_value || '') : ''}" placeholder="Expr/Val" oninput="${onInputFn}" class="${(isCustomPreset && !isEnumPreset) ? '' : 'hidden'} w-24 ${bgClass} border border-slate-700 focus:border-app-accent px-1.5 py-1 rounded text-slate-200 font-mono text-xs outline-none">
+        </div>
+      `;
+    }
+
     function renderTypeSelectOptions(currentBase) {
+      const isSQLite = activeConnection && (activeConnection.driver === 'sqlite' || activeConnection.driver === 'sqlite3');
       const upper = (currentBase || 'VARCHAR').toUpperCase();
       let hasCurrent = false;
       let html = '';
       STANDARD_DATA_TYPES.forEach(group => {
+        if (isSQLite && group.group === 'Selection / Enum') return;
         html += `<optgroup label="${group.group}">`;
         group.types.forEach(t => {
           if (t === upper) hasCurrent = true;
@@ -11730,6 +11875,40 @@ Please analyze what is causing this query to be slow and suggest necessary query
         html = `<option value="${escapeHtml(upper)}" selected>${escapeHtml(upper)}</option>` + html;
       }
       return html;
+    }
+
+    function validateTableColumns(columns, isCreator) {
+      const errors = [];
+      const nameCounts = new Map();
+
+      (columns || []).forEach((c, idx) => {
+        if (c._deleted) return;
+        const name = (c.name || '').trim();
+        const rowLabel = name ? `'${name}'` : `Row ${idx + 1}`;
+        if (!name) {
+          errors.push(`Row ${idx + 1}: Column name cannot be empty.`);
+        } else {
+          const lower = name.toLowerCase();
+          nameCounts.set(lower, (nameCounts.get(lower) || 0) + 1);
+          if (nameCounts.get(lower) > 1) {
+            errors.push(`Duplicate column name "${name}".`);
+          }
+        }
+
+        const { base, length } = parseColumnType(c.type);
+        if (base === 'ENUM' || base === 'SET') {
+          const opts = parseEnumOptionList(length);
+          if (opts.length === 0) {
+            errors.push(`Column ${rowLabel} (${base}): At least 1 option value must be defined.`);
+          }
+        } else if (base === 'VARCHAR' || base === 'CHAR') {
+          if (!length || !/^\d+$/.test(length.trim()) || parseInt(length, 10) <= 0) {
+            errors.push(`Column ${rowLabel} (${base}): Requires a positive numeric length (e.g. 255).`);
+          }
+        }
+      });
+
+      return errors;
     }
 
     function renderStructureRows() {
@@ -11758,8 +11937,16 @@ Please analyze what is causing this query to be slow and suggest necessary query
         const { base, length } = parseColumnType(c.type);
         const isLenDisabled = isLengthlessType(base);
         const isInt = isIntegerType(base);
-        const preset = detectDefaultPreset(c.default_value);
-        const isCustomPreset = preset === 'custom';
+        const isEnum = base === 'ENUM' || base === 'SET';
+
+        const typeLengthHtml = isEnum ? `
+          <button type="button" onclick="openEnumValuesPopover(event, 'staged', ${i})" class="flex items-center space-x-1.5 bg-slate-950 border border-slate-700 hover:border-app-accent px-2 py-1 rounded text-sky-300 font-mono text-xs max-w-[150px] truncate group transition shadow-inner" title="Click to edit ${base} values">
+            <span class="text-sky-400 group-hover:scale-110 transition-transform">🏷️</span>
+            <span id="staged-enum-pill-${i}" class="truncate">${renderEnumPillSummary(length)}</span>
+          </button>
+        ` : `
+          <input type="text" value="${escapeHtml(length)}" ${isLenDisabled ? 'disabled placeholder="N/A"' : 'placeholder="Len"'} oninput="updateStagedColLength(${i}, this.value)" class="w-16 bg-slate-950 border border-slate-700 text-white text-xs py-1 px-1 rounded outline-none font-mono ${isLenDisabled ? 'opacity-30 cursor-not-allowed bg-slate-900' : 'focus:border-app-accent'}">
+        `;
 
         return `
           <tr class="${rowBg} transition border-b border-slate-800/40">
@@ -11773,27 +11960,17 @@ Please analyze what is causing this query to be slow and suggest necessary query
             </td>
             <td class="p-2">
               <div class="flex items-center space-x-1">
-                <select onchange="updateStagedColType(${i}, this.value, null)" class="bg-slate-950 border border-slate-700 text-sky-200 text-xs py-1 px-1 rounded outline-none font-mono focus:border-app-accent">
+                <select onchange="updateStagedColTypeBase(${i}, this.value)" class="bg-slate-950 border border-slate-700 text-sky-200 text-xs py-1 px-1 rounded outline-none font-mono focus:border-app-accent">
                   ${renderTypeSelectOptions(base)}
                 </select>
-                <input type="text" value="${escapeHtml(length)}" ${isLenDisabled ? 'disabled placeholder="N/A"' : 'placeholder="Len"'} oninput="updateStagedColType(${i}, null, this.value)" class="w-16 bg-slate-950 border border-slate-700 text-white text-xs py-1 px-1 rounded outline-none font-mono ${isLenDisabled ? 'opacity-30 cursor-not-allowed bg-slate-900' : 'focus:border-app-accent'}">
+                ${typeLengthHtml}
               </div>
             </td>
             <td class="p-2 text-center">
               <input type="checkbox" ${c.is_nullable ? 'checked' : ''} ${c.is_primary_key ? 'disabled title="Primary Key cannot be nullable"' : ''} onchange="updateStagedCol(${i}, 'is_nullable', this.checked)" class="rounded bg-slate-900 border-slate-700 text-app-accent ${c.is_primary_key ? 'opacity-30 cursor-not-allowed' : ''}">
             </td>
             <td class="p-2">
-              <div class="flex items-center space-x-1">
-                <select onchange="updateStagedColDefaultPreset(${i}, this.value)" class="bg-slate-950 border border-slate-700 text-slate-300 text-xs py-1 px-1 rounded outline-none font-mono focus:border-app-accent">
-                  <option value="none" ${preset === 'none' ? 'selected' : ''}>None</option>
-                  <option value="NULL" ${preset === 'NULL' ? 'selected' : ''} ${c.is_primary_key ? 'disabled' : ''}>NULL</option>
-                  <option value="CURRENT_TIMESTAMP" ${preset === 'CURRENT_TIMESTAMP' ? 'selected' : ''}>CURRENT_TIMESTAMP</option>
-                  <option value="0" ${preset === '0' ? 'selected' : ''}>0</option>
-                  <option value="empty_string" ${preset === 'empty_string' ? 'selected' : ''}>'' (Empty)</option>
-                  <option value="custom" ${isCustomPreset ? 'selected' : ''}>Custom...</option>
-                </select>
-                <input type="text" value="${isCustomPreset ? escapeHtml(c.default_value || '') : ''}" placeholder="Expr/Val" oninput="updateStagedCol(${i}, 'default_value', this.value)" class="${isCustomPreset ? '' : 'hidden'} w-24 bg-slate-950 border border-slate-700 focus:border-app-accent px-1.5 py-1 rounded text-slate-200 font-mono text-xs outline-none">
-              </div>
+              ${renderDefaultPresetSelect(c, i, 'staged')}
             </td>
             <td class="p-2 text-center">
               <input type="checkbox" ${(c.extra || '').toLowerCase().includes('auto_increment') ? 'checked' : ''} ${!isInt ? 'disabled title="Auto increment only supported on integer types"' : ''} onchange="updateStagedCol(${i}, 'auto_increment', this.checked)" class="rounded bg-slate-900 border-slate-700 text-app-accent ${!isInt ? 'opacity-30 cursor-not-allowed' : ''}">
@@ -11822,24 +11999,26 @@ Please analyze what is causing this query to be slow and suggest necessary query
       renderStructureRows();
     }
 
-    function updateStagedColType(idx, newBase, newLength) {
+    // ponytail: In-place DOM updates preserves focus and caret position during continuous editing
+    function updateStagedColTypeBase(idx, newBase) {
       if (!stagedStructure || !stagedStructure.columns[idx]) return;
       const col = stagedStructure.columns[idx];
       const parsed = parseColumnType(col.type);
-      let base = (newBase !== null && newBase !== undefined) ? newBase.toUpperCase() : parsed.base;
-      let length = (newLength !== null && newLength !== undefined) ? newLength : parsed.length;
+      let base = (newBase || 'VARCHAR').toUpperCase();
+      let length = parsed.length;
 
-      if (newBase !== null && newBase !== undefined) {
-        if (isLengthlessType(base)) {
-          length = '';
-        } else if (!length) {
-          if (base === 'VARCHAR') length = '255';
-          else if (base === 'DECIMAL') length = '10,2';
-          else if (base === 'CHAR') length = '1';
-        }
-        if (!isIntegerType(base) && (col.extra || '').toLowerCase().includes('auto_increment')) {
-          col.extra = '';
-        }
+      if (isLengthlessType(base)) {
+        length = '';
+      } else if (base === 'ENUM' || base === 'SET') {
+        length = (length && (parsed.base === 'ENUM' || parsed.base === 'SET')) ? length : "'option1', 'option2'";
+      } else if (!length) {
+        if (base === 'VARCHAR') length = '255';
+        else if (base === 'DECIMAL') length = '10,2';
+        else if (base === 'CHAR') length = '1';
+      }
+
+      if (!isIntegerType(base) && (col.extra || '').toLowerCase().includes('auto_increment')) {
+        col.extra = '';
       }
 
       col.type = formatColumnType(base, length);
@@ -11847,10 +12026,21 @@ Please analyze what is causing this query to be slow and suggest necessary query
       renderStructureRows();
     }
 
+    function updateStagedColLength(idx, newLength) {
+      if (!stagedStructure || !stagedStructure.columns[idx]) return;
+      const col = stagedStructure.columns[idx];
+      const parsed = parseColumnType(col.type);
+      col.type = formatColumnType(parsed.base, newLength);
+      if (!col._isNew) col._modified = true;
+      updateStructureSaveState();
+    }
+
     function updateStagedColDefaultPreset(idx, preset) {
       if (!stagedStructure || !stagedStructure.columns[idx]) return;
       const col = stagedStructure.columns[idx];
-      if (preset === 'none') {
+      if (preset.startsWith('__ENUM__:')) {
+        col.default_value = preset.slice(9);
+      } else if (preset === 'none') {
         col.default_value = '';
       } else if (preset === 'NULL') {
         col.default_value = 'NULL';
@@ -11939,27 +12129,234 @@ Please analyze what is causing this query to be slow and suggest necessary query
     }
 
     function updateStructureSaveState() {
+      if (!stagedStructure) return;
       const diffCount = getStructureDiffCount();
+      const errors = validateTableColumns(stagedStructure.columns, false);
       const saveBtn = document.getElementById('btn-save-structure');
       const discardBtn = document.getElementById('btn-discard-structure');
       const diffBadge = document.getElementById('structure-diff-badge');
 
       if (diffCount > 0) {
-        saveBtn.disabled = false;
-        saveBtn.className = 'bg-app-safe hover:bg-emerald-600 text-slate-950 font-bold px-3 py-1 rounded transition cursor-pointer flex items-center space-x-1 shadow-sm';
         discardBtn.classList.remove('hidden');
         diffBadge.classList.remove('hidden');
-        diffBadge.textContent = diffCount;
+        if (errors.length > 0) {
+          saveBtn.disabled = true;
+          saveBtn.className = 'bg-slate-800 text-amber-400 border border-amber-600/60 font-bold px-3 py-1 rounded transition cursor-not-allowed flex items-center space-x-1';
+          diffBadge.className = 'bg-red-950 text-red-300 border border-red-600 px-1.5 rounded text-[10px] font-bold';
+          diffBadge.textContent = `⚠️ ${errors.length} issue${errors.length > 1 ? 's' : ''}`;
+          saveBtn.title = errors.join('\n');
+        } else {
+          saveBtn.disabled = false;
+          saveBtn.className = 'bg-app-safe hover:bg-emerald-600 text-slate-950 font-bold px-3 py-1 rounded transition cursor-pointer flex items-center space-x-1 shadow-sm';
+          diffBadge.className = 'bg-emerald-950 text-emerald-300 border border-emerald-600 px-1 rounded text-[10px]';
+          diffBadge.textContent = diffCount;
+          saveBtn.title = 'Save changes to database structure';
+        }
       } else {
         saveBtn.disabled = true;
         saveBtn.className = 'bg-slate-800 text-slate-500 font-bold px-3 py-1 rounded transition cursor-not-allowed flex items-center space-x-1';
         discardBtn.classList.add('hidden');
         diffBadge.classList.add('hidden');
+        saveBtn.title = '';
       }
+    }
+
+    // --- Floating ENUM / SET Value Builder Popover Handlers ---
+    let activeEnumBuilderState = null; // { context: 'staged'|'creator', colIdx: number, base: 'ENUM'|'SET', tags: string[] }
+
+    function openEnumValuesPopover(event, context, colIdx) {
+      if (event) event.stopPropagation();
+      const col = context === 'staged' ? stagedStructure?.columns[colIdx] : newTableColumns[colIdx];
+      if (!col) return;
+
+      const { base, length } = parseColumnType(col.type);
+      const initialTags = parseEnumOptionList(length);
+      activeEnumBuilderState = {
+        context,
+        colIdx,
+        base: (base === 'SET') ? 'SET' : 'ENUM',
+        tags: initialTags.length > 0 ? initialTags : ['option1', 'option2']
+      };
+
+      const popover = document.getElementById('enum-builder-popover');
+      const titleEl = document.getElementById('enum-popover-title');
+      const colEl = document.getElementById('enum-popover-col');
+      const inputEl = document.getElementById('enum-quick-input');
+      const warningEl = document.getElementById('enum-builder-warning');
+
+      if (titleEl) titleEl.textContent = `Edit ${activeEnumBuilderState.base} Values`;
+      if (colEl) colEl.textContent = col.name || `Col #${colIdx + 1}`;
+      if (inputEl) inputEl.value = '';
+      if (warningEl) warningEl.classList.add('hidden');
+
+      renderEnumBuilderTags();
+
+      // Position popover relative to trigger button
+      popover.classList.remove('hidden');
+      const rect = event ? event.currentTarget.getBoundingClientRect() : { left: 100, top: 100, bottom: 130 };
+      const popoverWidth = 320;
+      let left = rect.left;
+      if (left + popoverWidth > window.innerWidth - 16) {
+        left = window.innerWidth - popoverWidth - 16;
+      }
+      if (left < 16) left = 16;
+
+      let top = rect.bottom + 6;
+      if (top + 280 > window.innerHeight) {
+        top = Math.max(16, rect.top - 280);
+      }
+
+      popover.style.left = `${left}px`;
+      popover.style.top = `${top}px`;
+
+      initEnumQuickInputListeners();
+      setTimeout(() => {
+        if (inputEl) inputEl.focus();
+      }, 50);
+    }
+
+    function renderEnumBuilderTags() {
+      if (!activeEnumBuilderState) return;
+      const listEl = document.getElementById('enum-tags-list');
+      const countEl = document.getElementById('enum-tag-count');
+      if (countEl) countEl.textContent = activeEnumBuilderState.tags.length;
+
+      if (!listEl) return;
+      if (activeEnumBuilderState.tags.length === 0) {
+        listEl.innerHTML = `<span class="text-slate-500 italic text-[11px] p-1">No options yet. Type below and press Enter.</span>`;
+      } else {
+        listEl.innerHTML = activeEnumBuilderState.tags.map((t, idx) => `
+          <span class="inline-flex items-center space-x-1 bg-sky-950/80 text-sky-200 border border-sky-800/80 px-2 py-0.5 rounded font-mono text-[11px]">
+            <span>${escapeHtml(t)}</span>
+            <button type="button" onclick="removeEnumBuilderTag(${idx})" class="text-sky-400 hover:text-red-300 ml-1 font-bold">✕</button>
+          </span>
+        `).join('');
+      }
+
+      updateEnumBuilderPreview();
+    }
+
+    function addEnumBuilderTag(rawVal) {
+      if (!activeEnumBuilderState) return;
+      let cleaned = String(rawVal || '').trim();
+      cleaned = cleaned.replace(/^['"]+|['"]+$/g, '').trim();
+      if (!cleaned) return;
+
+      const warningEl = document.getElementById('enum-builder-warning');
+      const warningText = document.getElementById('enum-warning-text');
+
+      if (activeEnumBuilderState.tags.includes(cleaned)) {
+        if (warningEl && warningText) {
+          warningText.textContent = `Option "${cleaned}" already exists.`;
+          warningEl.classList.remove('hidden');
+        }
+        return;
+      }
+
+      if (warningEl) warningEl.classList.add('hidden');
+      activeEnumBuilderState.tags.push(cleaned);
+      renderEnumBuilderTags();
+    }
+
+    function removeEnumBuilderTag(idx) {
+      if (!activeEnumBuilderState) return;
+      activeEnumBuilderState.tags.splice(idx, 1);
+      renderEnumBuilderTags();
+    }
+
+    function updateEnumBuilderPreview() {
+      if (!activeEnumBuilderState) return;
+      const previewEl = document.getElementById('enum-builder-sql-preview');
+      const warningEl = document.getElementById('enum-builder-warning');
+      const warningText = document.getElementById('enum-warning-text');
+
+      const formatted = activeEnumBuilderState.tags.map(t => `'${t.replace(/'/g, "''")}'`).join(', ');
+      const sqlPreview = `${activeEnumBuilderState.base}(${formatted})`;
+      if (previewEl) previewEl.textContent = sqlPreview;
+
+      if (activeEnumBuilderState.tags.length === 0) {
+        if (warningEl && warningText) {
+          warningText.textContent = 'At least 1 option is required.';
+          warningEl.classList.remove('hidden');
+        }
+      } else if (warningEl && warningText && warningText.textContent.includes('At least 1')) {
+        warningEl.classList.add('hidden');
+      }
+    }
+
+    function applyEnumBuilder() {
+      if (!activeEnumBuilderState) return;
+      if (activeEnumBuilderState.tags.length === 0) {
+        showNativeAlert('Please define at least one option for the ' + activeEnumBuilderState.base + ' type.', 'Enum Validation');
+        return;
+      }
+
+      const formatted = activeEnumBuilderState.tags.map(t => `'${t.replace(/'/g, "''")}'`).join(', ');
+      const newType = `${activeEnumBuilderState.base}(${formatted})`;
+      const { context, colIdx } = activeEnumBuilderState;
+
+      if (context === 'staged' && stagedStructure && stagedStructure.columns[colIdx]) {
+        const col = stagedStructure.columns[colIdx];
+        col.type = newType;
+        if (!col._isNew) col._modified = true;
+        renderStructureRows();
+      } else if (context === 'creator' && newTableColumns[colIdx]) {
+        const col = newTableColumns[colIdx];
+        col.type = newType;
+        renderCreatorColumns();
+      }
+
+      closeEnumBuilderPopover();
+    }
+
+    function closeEnumBuilderPopover() {
+      activeEnumBuilderState = null;
+      const popover = document.getElementById('enum-builder-popover');
+      if (popover) popover.classList.add('hidden');
+    }
+
+    let enumListenersBound = false;
+    function initEnumQuickInputListeners() {
+      if (enumListenersBound) return;
+      const input = document.getElementById('enum-quick-input');
+      if (!input) return;
+      enumListenersBound = true;
+
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ',') {
+          e.preventDefault();
+          const val = input.value;
+          if (val) {
+            addEnumBuilderTag(val);
+            input.value = '';
+          }
+        } else if (e.key === 'Escape') {
+          closeEnumBuilderPopover();
+        }
+      });
+
+      input.addEventListener('paste', (e) => {
+        e.preventDefault();
+        const text = (e.clipboardData || window.clipboardData).getData('text');
+        if (text) {
+          const list = parseEnumOptionList(text);
+          if (list.length > 0) {
+            list.forEach(item => addEnumBuilderTag(item));
+          } else {
+            addEnumBuilderTag(text);
+          }
+          input.value = '';
+        }
+      });
     }
 
     function saveStructureChanges() {
       if (!stagedStructure || !currentTableMetadata) return;
+      const errors = validateTableColumns(stagedStructure.columns, false);
+      if (errors.length > 0) {
+        showNativeAlert('Cannot save table structure due to validation errors:\n• ' + errors.join('\n• '), 'Structure Validation');
+        return;
+      }
       const tableName = stagedStructure.name;
       const originalCols = currentTableMetadata.columns || [];
       const ddlStatements = [];
@@ -12030,6 +12427,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
     }
 
     // --- Indexes & Foreign Keys View Handlers ---
+    let selectedIndexCols = [];
+    let editingIndexOldName = null;
+
     function renderTableIndexes(tableName) {
       const activeTab = tabs.find(t => t.id === activeTabId);
       const targetCatalog = (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
@@ -12043,20 +12443,173 @@ Please analyze what is causing this query to be slow and suggest necessary query
         <tr class="hover:bg-slate-800/40 border-b border-slate-800/40">
           <td class="p-2 font-mono font-semibold text-sky-200">${escapeHtml(idx.name)}</td>
           <td class="p-2 font-mono text-slate-300">${escapeHtml((idx.columns || []).join(', '))}</td>
-          <td class="p-2 text-center">${idx.is_unique ? '<span class="text-emerald-400">UNIQUE</span>' : '<span class="text-slate-500">INDEX</span>'}</td>
+          <td class="p-2 text-center">${idx.is_unique ? '<span class="text-emerald-400 font-bold">UNIQUE</span>' : '<span class="text-slate-500">INDEX</span>'}</td>
           <td class="p-2 font-mono text-slate-400">${escapeHtml(idx.type || 'BTREE')}</td>
           <td class="p-2 text-center">
-            ${idx.name === 'PRIMARY' ? '<span class="text-slate-600 text-xs">PK</span>' : `<button type="button" data-index="${escapeHtml(idx.name)}" onclick="dropTableIndex(this.dataset.index)" class="text-slate-500 hover:text-red-400 p-1" title="Drop Index">🗑️</button>`}
+            ${idx.name === 'PRIMARY' ? '<span class="text-slate-600 text-xs font-bold">PK</span>' : `
+              <div class="flex items-center justify-center space-x-1">
+                <button type="button" data-index="${escapeHtml(idx.name)}" onclick="editTableIndex(this.dataset.index)" class="text-slate-400 hover:text-sky-300 p-1" title="Edit Index">✏️</button>
+                <button type="button" data-index="${escapeHtml(idx.name)}" onclick="dropTableIndex(this.dataset.index)" class="text-slate-500 hover:text-red-400 p-1" title="Drop Index">🗑️</button>
+              </div>
+            `}
           </td>
         </tr>
       `).join('');
     }
 
-    function openAddIndexForm() {
-      document.getElementById('add-index-inline-form').classList.remove('hidden');
-      document.getElementById('new-index-name').value = '';
-      document.getElementById('new-index-cols').value = '';
-      document.getElementById('new-index-unique').checked = false;
+    function openAddIndexForm(editIdxName = null) {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab || !activeTab.tableName) return;
+      const tableName = activeTab.tableName;
+      const targetCatalog = (activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
+      const tableMeta = (targetCatalog?.tables || []).find(t => t.name === tableName);
+      const isSQLite = activeConnection && (activeConnection.driver === 'sqlite' || activeConnection.driver === 'sqlite3');
+
+      editingIndexOldName = editIdxName;
+      selectedIndexCols = [];
+
+      const form = document.getElementById('add-index-inline-form');
+      const titleEl = document.getElementById('index-form-title');
+      const badgeEl = document.getElementById('index-form-mode-badge');
+      const nameInput = document.getElementById('new-index-name');
+      const typeSelect = document.getElementById('new-index-type');
+
+      // Adjust type select for SQLite
+      if (typeSelect) {
+        if (isSQLite) {
+          typeSelect.innerHTML = `
+            <option value="INDEX">INDEX (Normal)</option>
+            <option value="UNIQUE">UNIQUE</option>
+          `;
+        } else {
+          typeSelect.innerHTML = `
+            <option value="INDEX">INDEX (Normal BTREE)</option>
+            <option value="UNIQUE">UNIQUE</option>
+            <option value="FULLTEXT">FULLTEXT</option>
+            <option value="SPATIAL">SPATIAL</option>
+          `;
+        }
+      }
+
+      if (editingIndexOldName) {
+        const existing = (tableMeta?.indexes || []).find(idx => idx.name === editingIndexOldName);
+        if (existing) {
+          selectedIndexCols = Array.isArray(existing.columns) ? [...existing.columns] : [];
+          if (nameInput) nameInput.value = existing.name;
+          if (typeSelect) {
+            if (existing.is_unique) typeSelect.value = 'UNIQUE';
+            else if (existing.type && ['FULLTEXT', 'SPATIAL'].includes(existing.type.toUpperCase())) typeSelect.value = existing.type.toUpperCase();
+            else typeSelect.value = 'INDEX';
+          }
+        }
+        if (titleEl) titleEl.textContent = `Edit Index: ${editingIndexOldName}`;
+        if (badgeEl) badgeEl.classList.remove('hidden');
+      } else {
+        if (titleEl) titleEl.textContent = 'Add New Index';
+        if (badgeEl) badgeEl.classList.add('hidden');
+        if (nameInput) nameInput.value = '';
+        if (typeSelect) typeSelect.value = 'INDEX';
+      }
+
+      renderIndexColumnPickers(tableMeta?.columns || []);
+      form.classList.remove('hidden');
+    }
+
+    function editTableIndex(idxName) {
+      openAddIndexForm(idxName);
+    }
+
+    function renderIndexColumnPickers(availableCols) {
+      const selectedContainer = document.getElementById('index-selected-chips');
+      const availableContainer = document.getElementById('index-available-chips');
+      const hiddenInput = document.getElementById('new-index-cols');
+
+      if (hiddenInput) hiddenInput.value = selectedIndexCols.join(', ');
+
+      if (selectedContainer) {
+        if (selectedIndexCols.length === 0) {
+          selectedContainer.innerHTML = '<span class="text-slate-500 italic text-[11px] px-1">Click column pills below to add in order...</span>';
+        } else {
+          selectedContainer.innerHTML = selectedIndexCols.map((c, i) => `
+            <span class="inline-flex items-center space-x-1 bg-sky-950 border border-sky-700 text-sky-200 px-2 py-0.5 rounded font-mono text-[11px] shadow-sm">
+              <span class="text-slate-400 font-sans text-[10px]">#${i + 1}</span>
+              <span class="font-bold">${escapeHtml(c)}</span>
+              <button type="button" onclick="removeIndexCol('${escapeHtml(c)}')" class="text-sky-400 hover:text-red-300 ml-1">✕</button>
+            </span>
+          `).join('');
+        }
+      }
+
+      if (availableContainer) {
+        availableContainer.innerHTML = availableCols.map(col => {
+          const isSelected = selectedIndexCols.includes(col.name);
+          return `
+            <button type="button" onclick="toggleIndexCol('${escapeHtml(col.name)}')" class="px-2 py-1 rounded font-mono text-xs transition border flex items-center space-x-1 ${isSelected ? 'bg-sky-900/60 border-sky-500 text-sky-200 shadow-sm' : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500 hover:text-white'}">
+              <span>${isSelected ? '✓' : '+'}</span>
+              <span>${escapeHtml(col.name)}</span>
+              <span class="text-[10px] text-slate-500 ml-1">${escapeHtml(col.type)}</span>
+            </button>
+          `;
+        }).join('');
+      }
+
+      updateIndexPreview();
+    }
+
+    function toggleIndexCol(colName) {
+      if (selectedIndexCols.includes(colName)) {
+        selectedIndexCols = selectedIndexCols.filter(c => c !== colName);
+      } else {
+        selectedIndexCols.push(colName);
+      }
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const targetCatalog = (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
+      const tableMeta = (targetCatalog?.tables || []).find(t => t.name === activeTab?.tableName);
+      renderIndexColumnPickers(tableMeta?.columns || []);
+      if (!document.getElementById('new-index-name').value.trim()) {
+        autoGenerateIndexName();
+      }
+    }
+
+    function removeIndexCol(colName) {
+      toggleIndexCol(colName);
+    }
+
+    function onIndexTypeChange() {
+      updateIndexPreview();
+      autoGenerateIndexName();
+    }
+
+    function autoGenerateIndexName() {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab || !activeTab.tableName) return;
+      const tableName = activeTab.tableName;
+      const type = document.getElementById('new-index-type')?.value || 'INDEX';
+      const prefix = type === 'UNIQUE' ? 'uniq' : (type === 'FULLTEXT' ? 'ft' : (type === 'SPATIAL' ? 'sp' : 'idx'));
+      const colSlug = selectedIndexCols.slice(0, 3).join('_') || 'cols';
+      const nameInput = document.getElementById('new-index-name');
+      if (nameInput) nameInput.value = `${prefix}_${tableName}_${colSlug}`;
+      updateIndexPreview();
+    }
+
+    function updateIndexPreview() {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const tableName = activeTab ? activeTab.tableName : 'table';
+      const previewEl = document.getElementById('index-form-sql-preview');
+      const name = document.getElementById('new-index-name')?.value.trim() || 'idx_name';
+      const type = document.getElementById('new-index-type')?.value || 'INDEX';
+      const isSQLite = activeConnection && (activeConnection.driver === 'sqlite' || activeConnection.driver === 'sqlite3');
+
+      if (!previewEl) return;
+      if (selectedIndexCols.length === 0) {
+        previewEl.textContent = '-- Select columns to build index definition';
+        return;
+      }
+
+      const formattedCols = isSQLite ? selectedIndexCols.map(c => `"${c}"`).join(', ') : selectedIndexCols.map(c => `\`${c}\``).join(', ');
+      const typeClause = type === 'UNIQUE' ? 'UNIQUE ' : (type === 'FULLTEXT' ? 'FULLTEXT ' : (type === 'SPATIAL' ? 'SPATIAL ' : ''));
+      const quote = isSQLite ? '"' : '`';
+      previewEl.textContent = `CREATE ${typeClause}INDEX ${quote}${name}${quote} ON ${quote}${tableName}${quote} (${formattedCols});`;
     }
 
     async function submitNewIndex() {
@@ -12064,23 +12617,39 @@ Please analyze what is causing this query to be slow and suggest necessary query
       if (!activeTab || !activeTab.tableName) return;
       const tableName = activeTab.tableName;
       const name = document.getElementById('new-index-name').value.trim();
-      const colsStr = document.getElementById('new-index-cols').value.trim();
-      const isUnique = document.getElementById('new-index-unique').checked;
-      if (!name || !colsStr) {
-        showNativeAlert('Index name and columns are required.', 'Add Index');
+      const type = document.getElementById('new-index-type')?.value || 'INDEX';
+
+      if (!name) {
+        showNativeAlert('Please specify an index name.', 'Index Builder');
         return;
       }
+      if (selectedIndexCols.length === 0) {
+        showNativeAlert('Please select at least one column for the index.', 'Index Builder');
+        return;
+      }
+
       const isSQLite = activeConnection && (activeConnection.driver === 'sqlite' || activeConnection.driver === 'sqlite3');
-      const cols = colsStr.split(',').map(s => s.trim()).filter(Boolean);
-      const formattedCols = isSQLite ? cols.map(c => `"${c}"`).join(', ') : cols.map(c => `\`${c}\``).join(', ');
-      const sql = isSQLite
-        ? `CREATE ${isUnique ? 'UNIQUE ' : ''}INDEX "${name}" ON "${tableName}" (${formattedCols});`
-        : `CREATE ${isUnique ? 'UNIQUE ' : ''}INDEX \`${name}\` ON \`${tableName}\` (${formattedCols});`;
+      const quote = isSQLite ? '"' : '`';
+      const formattedCols = isSQLite ? selectedIndexCols.map(c => `"${c}"`).join(', ') : selectedIndexCols.map(c => `\`${c}\``).join(', ');
+      const typeClause = type === 'UNIQUE' ? 'UNIQUE ' : (type === 'FULLTEXT' ? 'FULLTEXT ' : (type === 'SPATIAL' ? 'SPATIAL ' : ''));
+
+      const ddlStatements = [];
+      if (editingIndexOldName) {
+        if (isSQLite) {
+          ddlStatements.push(`DROP INDEX "${editingIndexOldName}";`);
+        } else {
+          ddlStatements.push(`ALTER TABLE \`${tableName}\` DROP INDEX \`${editingIndexOldName}\`;`);
+        }
+      }
+
+      ddlStatements.push(`CREATE ${typeClause}INDEX ${quote}${name}${quote} ON ${quote}${tableName}${quote} (${formattedCols});`);
+      const fullDDL = ddlStatements.join('\n');
 
       document.getElementById('add-index-inline-form').classList.add('hidden');
-      openDDLReviewModal(sql, async () => {
-        const ok = await executeDDLStatements(sql, `Index "${name}" created successfully.`);
+      openDDLReviewModal(fullDDL, async () => {
+        const ok = await executeDDLStatements(fullDDL, editingIndexOldName ? `Index "${name}" updated successfully.` : `Index "${name}" created successfully.`);
         if (ok) {
+          editingIndexOldName = null;
           await loadSchemaTree(activeConnection.id);
           renderTableIndexes(tableName);
         }
@@ -12132,28 +12701,99 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const activeTab = tabs.find(t => t.id === activeTabId);
       if (!activeTab || !activeTab.tableName) return;
       const tableName = activeTab.tableName;
-      const tableMeta = (schemaCatalogCache?.tables || []).find(t => t.name === tableName);
-      
+      const isSQLite = activeConnection && (activeConnection.driver === 'sqlite' || activeConnection.driver === 'sqlite3');
+
+      if (isSQLite) {
+        showNativeAlert('Foreign Key constraints in SQLite can only be defined during table creation (CREATE TABLE) and cannot be added via ALTER TABLE.', 'SQLite Dialect Guard');
+        return;
+      }
+
+      const targetCatalog = (activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
+      const tableMeta = (targetCatalog?.tables || []).find(t => t.name === tableName);
+      const allTables = targetCatalog?.tables || [];
+
       const colSelect = document.getElementById('new-fk-col');
       const refTableSelect = document.getElementById('new-fk-ref-table');
+
       if (colSelect && tableMeta) {
-        colSelect.innerHTML = (tableMeta.columns || []).map(c => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
+        colSelect.innerHTML = (tableMeta.columns || []).map(c => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)} (${escapeHtml(c.type)})</option>`).join('');
       }
-      if (refTableSelect && schemaCatalogCache) {
-        refTableSelect.innerHTML = (schemaCatalogCache.tables || []).map(t => `<option value="${escapeHtml(t.name)}">${escapeHtml(t.name)}</option>`).join('');
+
+      if (refTableSelect) {
+        refTableSelect.innerHTML = allTables.map(t => `<option value="${escapeHtml(t.name)}" ${t.name !== tableName ? 'selected' : ''}>${escapeHtml(t.name)}</option>`).join('');
       }
-      document.getElementById('new-fk-name').value = `fk_${tableName}_col`;
-      document.getElementById('new-fk-ref-col').value = 'id';
+
+      const initialRefTable = refTableSelect ? refTableSelect.value : '';
+      if (initialRefTable) {
+        onFKRefTableChange(initialRefTable);
+      } else {
+        autoGenerateFKName();
+      }
+
       document.getElementById('add-fk-inline-form').classList.remove('hidden');
     }
 
     function onFKRefTableChange(refTableName) {
-      const refTableMeta = (schemaCatalogCache?.tables || []).find(t => t.name === refTableName);
-      const refColInput = document.getElementById('new-fk-ref-col');
-      if (refTableMeta && refColInput) {
-        const pk = refTableMeta.columns?.find(c => c.is_primary_key);
-        if (pk) refColInput.value = pk.name;
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const targetCatalog = (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
+      const refTableMeta = (targetCatalog?.tables || []).find(t => t.name === refTableName);
+      const refColSelect = document.getElementById('new-fk-ref-col');
+
+      if (refTableMeta && refColSelect) {
+        const pkCol = (refTableMeta.columns || []).find(c => c.is_primary_key);
+        refColSelect.innerHTML = (refTableMeta.columns || []).map(c => `
+          <option value="${escapeHtml(c.name)}" ${(pkCol && pkCol.name === c.name) ? 'selected' : ''}>${escapeHtml(c.name)} (${escapeHtml(c.type)}) ${c.is_primary_key ? '🔑' : ''}</option>
+        `).join('');
       }
+
+      checkFKTypeCompatibility();
+      autoGenerateFKName();
+    }
+
+    function autoGenerateFKName() {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab || !activeTab.tableName) return;
+      const tableName = activeTab.tableName;
+      const colSelect = document.getElementById('new-fk-col');
+      const refTableSelect = document.getElementById('new-fk-ref-table');
+      const nameInput = document.getElementById('new-fk-name');
+
+      const col = colSelect ? colSelect.value : 'col';
+      const refTable = refTableSelect ? refTableSelect.value : 'ref';
+      if (nameInput) nameInput.value = `fk_${tableName}_${col}_${refTable}`;
+    }
+
+    function checkFKTypeCompatibility() {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab || !activeTab.tableName) return;
+      const targetCatalog = (activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
+      const tableMeta = (targetCatalog?.tables || []).find(t => t.name === activeTab.tableName);
+
+      const colName = document.getElementById('new-fk-col')?.value;
+      const refTableName = document.getElementById('new-fk-ref-table')?.value;
+      const refColName = document.getElementById('new-fk-ref-col')?.value;
+      const warningEl = document.getElementById('fk-type-mismatch-warning');
+      const mismatchText = document.getElementById('fk-mismatch-text');
+
+      if (!colName || !refTableName || !refColName || !warningEl) return;
+
+      const srcCol = (tableMeta?.columns || []).find(c => c.name === colName);
+      const refTable = (targetCatalog?.tables || []).find(t => t.name === refTableName);
+      const refCol = (refTable?.columns || []).find(c => c.name === refColName);
+
+      if (srcCol && refCol) {
+        const srcBase = parseColumnType(srcCol.type).base;
+        const refBase = parseColumnType(refCol.type).base;
+        if (srcBase !== refBase) {
+          if (mismatchText) {
+            mismatchText.textContent = `Type mismatch warning: Source column "${colName}" is ${srcCol.type}, but referenced column "${refColName}" is ${refCol.type}. MySQL may reject this constraint (errno 150).`;
+          }
+          warningEl.classList.remove('hidden');
+          return;
+        }
+      }
+
+      warningEl.classList.add('hidden');
     }
 
     async function submitNewFK() {
@@ -13193,8 +13833,16 @@ Please analyze what is causing this query to be slow and suggest necessary query
         const { base, length } = parseColumnType(c.type);
         const isLenDisabled = isLengthlessType(base);
         const isInt = isIntegerType(base);
-        const preset = detectDefaultPreset(c.default_value);
-        const isCustom = preset === 'custom';
+        const isEnum = base === 'ENUM' || base === 'SET';
+
+        const typeLengthHtml = isEnum ? `
+          <button type="button" onclick="openEnumValuesPopover(event, 'creator', ${i})" class="flex items-center space-x-1.5 bg-slate-900 border border-slate-700 hover:border-app-accent px-2 py-1 rounded text-sky-300 font-mono text-xs max-w-[150px] truncate group transition shadow-inner" title="Click to edit ${base} values">
+            <span class="text-sky-400 group-hover:scale-110 transition-transform">🏷️</span>
+            <span id="creator-enum-pill-${i}" class="truncate">${renderEnumPillSummary(length)}</span>
+          </button>
+        ` : `
+          <input type="text" value="${escapeHtml(length)}" ${isLenDisabled ? 'disabled placeholder="N/A"' : 'placeholder="Len"'} oninput="updateCreatorColLength(${i}, this.value)" class="w-16 bg-slate-900 border border-slate-700 text-white text-xs py-1 px-1 rounded outline-none font-mono ${isLenDisabled ? 'opacity-30 cursor-not-allowed bg-slate-950' : 'focus:border-app-accent'}">
+        `;
 
         return `
           <tr>
@@ -13202,31 +13850,21 @@ Please analyze what is causing this query to be slow and suggest necessary query
               <button type="button" onclick="toggleCreatorColPK(${i})" class="p-1 rounded hover:bg-slate-800 ${c.is_primary_key ? 'text-amber-400 font-bold' : 'text-slate-600'}" title="Toggle Primary Key">🔑</button>
             </td>
             <td class="p-1.5">
-              <input type="text" value="${escapeHtml(c.name)}" oninput="newTableColumns[${i}].name = this.value" class="w-full bg-slate-900 border border-slate-700 px-1.5 py-1 rounded text-white font-mono text-xs outline-none focus:border-app-accent">
+              <input type="text" value="${escapeHtml(c.name)}" oninput="newTableColumns[${i}].name = this.value; validateCreatorColumns();" class="w-full bg-slate-900 border border-slate-700 px-1.5 py-1 rounded text-white font-mono text-xs outline-none focus:border-app-accent">
             </td>
             <td class="p-1.5">
               <div class="flex items-center space-x-1">
-                <select onchange="updateCreatorColType(${i}, this.value, null)" class="bg-slate-900 border border-slate-700 text-sky-200 text-xs py-1 px-1 rounded outline-none font-mono focus:border-app-accent">
+                <select onchange="updateCreatorColTypeBase(${i}, this.value)" class="bg-slate-900 border border-slate-700 text-sky-200 text-xs py-1 px-1 rounded outline-none font-mono focus:border-app-accent">
                   ${renderTypeSelectOptions(base)}
                 </select>
-                <input type="text" value="${escapeHtml(length)}" ${isLenDisabled ? 'disabled placeholder="N/A"' : 'placeholder="Len"'} oninput="updateCreatorColType(${i}, null, this.value)" class="w-16 bg-slate-900 border border-slate-700 text-white text-xs py-1 px-1 rounded outline-none font-mono ${isLenDisabled ? 'opacity-30 cursor-not-allowed bg-slate-950' : 'focus:border-app-accent'}">
+                ${typeLengthHtml}
               </div>
             </td>
             <td class="p-1.5 text-center">
               <input type="checkbox" ${c.is_nullable ? 'checked' : ''} ${c.is_primary_key ? 'disabled title="Primary Key cannot be nullable"' : ''} onchange="newTableColumns[${i}].is_nullable = this.checked; if (!this.checked && newTableColumns[${i}].default_value === 'NULL') newTableColumns[${i}].default_value = ''; renderCreatorColumns();" class="rounded bg-slate-900 text-app-accent ${c.is_primary_key ? 'opacity-30 cursor-not-allowed' : ''}">
             </td>
             <td class="p-1.5">
-              <div class="flex items-center space-x-1">
-                <select onchange="updateCreatorColDefaultPreset(${i}, this.value)" class="bg-slate-900 border border-slate-700 text-slate-300 text-xs py-1 px-1 rounded outline-none font-mono focus:border-app-accent">
-                  <option value="none" ${preset === 'none' ? 'selected' : ''}>None</option>
-                  <option value="NULL" ${preset === 'NULL' ? 'selected' : ''} ${c.is_primary_key ? 'disabled' : ''}>NULL</option>
-                  <option value="CURRENT_TIMESTAMP" ${preset === 'CURRENT_TIMESTAMP' ? 'selected' : ''}>CURRENT_TIMESTAMP</option>
-                  <option value="0" ${preset === '0' ? 'selected' : ''}>0</option>
-                  <option value="empty_string" ${preset === 'empty_string' ? 'selected' : ''}>'' (Empty)</option>
-                  <option value="custom" ${isCustom ? 'selected' : ''}>Custom...</option>
-                </select>
-                <input type="text" value="${isCustom ? escapeHtml(c.default_value || '') : ''}" placeholder="Val" oninput="newTableColumns[${i}].default_value = this.value" class="${isCustom ? '' : 'hidden'} w-24 bg-slate-900 border border-slate-700 focus:border-app-accent px-1.5 py-1 rounded text-slate-200 font-mono text-xs outline-none">
-              </div>
+              ${renderDefaultPresetSelect(c, i, 'creator')}
             </td>
             <td class="p-1.5 text-center">
               <input type="checkbox" ${(c.extra || '').toLowerCase().includes('auto_increment') ? 'checked' : ''} ${!isInt ? 'disabled title="Only integer types can auto-increment"' : ''} onchange="newTableColumns[${i}].extra = this.checked ? 'auto_increment' : ''" class="rounded bg-slate-900 text-app-accent ${!isInt ? 'opacity-30 cursor-not-allowed' : ''}">
@@ -13237,36 +13875,49 @@ Please analyze what is causing this query to be slow and suggest necessary query
           </tr>
         `;
       }).join('');
+
+      validateCreatorColumns();
     }
 
-    function updateCreatorColType(idx, newBase, newLength) {
+    function updateCreatorColTypeBase(idx, newBase) {
       if (!newTableColumns[idx]) return;
       const col = newTableColumns[idx];
       const parsed = parseColumnType(col.type);
-      let base = (newBase !== null && newBase !== undefined) ? newBase.toUpperCase() : parsed.base;
-      let length = (newLength !== null && newLength !== undefined) ? newLength : parsed.length;
+      let base = (newBase || 'VARCHAR').toUpperCase();
+      let length = parsed.length;
 
-      if (newBase !== null && newBase !== undefined) {
-        if (isLengthlessType(base)) {
-          length = '';
-        } else if (!length) {
-          if (base === 'VARCHAR') length = '255';
-          else if (base === 'DECIMAL') length = '10,2';
-          else if (base === 'CHAR') length = '1';
-        }
-        if (!isIntegerType(base) && (col.extra || '').toLowerCase().includes('auto_increment')) {
-          col.extra = '';
-        }
+      if (isLengthlessType(base)) {
+        length = '';
+      } else if (base === 'ENUM' || base === 'SET') {
+        length = (length && (parsed.base === 'ENUM' || parsed.base === 'SET')) ? length : "'option1', 'option2'";
+      } else if (!length) {
+        if (base === 'VARCHAR') length = '255';
+        else if (base === 'DECIMAL') length = '10,2';
+        else if (base === 'CHAR') length = '1';
+      }
+
+      if (!isIntegerType(base) && (col.extra || '').toLowerCase().includes('auto_increment')) {
+        col.extra = '';
       }
 
       col.type = formatColumnType(base, length);
       renderCreatorColumns();
     }
 
+    function updateCreatorColLength(idx, newLength) {
+      if (!newTableColumns[idx]) return;
+      const col = newTableColumns[idx];
+      const parsed = parseColumnType(col.type);
+      col.type = formatColumnType(parsed.base, newLength);
+      validateCreatorColumns();
+    }
+
     function updateCreatorColDefaultPreset(idx, preset) {
       if (!newTableColumns[idx]) return;
       const col = newTableColumns[idx];
-      if (preset === 'none') {
+      if (preset.startsWith('__ENUM__:')) {
+        col.default_value = preset.slice(9);
+      } else if (preset === 'none') {
         col.default_value = '';
       } else if (preset === 'NULL') {
         col.default_value = 'NULL';
@@ -13283,6 +13934,11 @@ Please analyze what is causing this query to be slow and suggest necessary query
         }
       }
       renderCreatorColumns();
+    }
+
+    function validateCreatorColumns() {
+      // In-place validation for table creator
+      return validateTableColumns(newTableColumns, true);
     }
 
     function toggleCreatorColPK(idx) {
@@ -13316,6 +13972,12 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
       if (newTableColumns.length === 0) {
         showNativeAlert('At least one column is required.', 'Create Table');
+        return;
+      }
+
+      const errors = validateTableColumns(newTableColumns, true);
+      if (errors.length > 0) {
+        showNativeAlert('Please resolve column errors before creating the table:\n• ' + errors.join('\n• '), 'Table Validation');
         return;
       }
 
