@@ -732,7 +732,7 @@
               <span>📥</span><span>Import CSV</span>
             </button>
             <div class="relative inline-block text-left" id="export-csv-dropdown-container">
-              <button onclick="toggleExportCSVMenu()" class="hover:bg-slate-800 px-2 py-0.5 rounded border border-slate-700 transition flex items-center space-x-1">
+              <button id="btn-export-csv" onclick="toggleExportCSVMenu(undefined, event)" class="hover:bg-slate-800 px-2 py-0.5 rounded border border-slate-700 transition flex items-center space-x-1">
                 <span>Export</span>
                 <span class="text-[9px] text-slate-400">▼</span>
               </button>
@@ -5717,14 +5717,14 @@
           menu.classList.add('hidden');
         }
       }
-      if (!e.target.closest('#table-context-menu, #tab-context-menu, #grid-context-menu, #pl-context-menu, #btn-col-picker, #col-picker-dropdown, #pl-btn-col-picker, #pl-col-picker-dropdown, #btn-export-csv, #export-csv-menu, #tab-database-pill-container, #tab-db-switcher-menu')) {
+      if (!e.target.closest('#table-context-menu, #tab-context-menu, #grid-context-menu, #pl-context-menu, #btn-col-picker, #col-picker-dropdown, #pl-btn-col-picker, #pl-col-picker-dropdown, #btn-export-csv, #export-csv-menu, #export-csv-dropdown-container, #tab-database-pill-container, #tab-db-switcher-menu')) {
         closeAllContextMenus();
       }
     });
 
     // Dismiss context menus when right-clicking on unhandled page surfaces
     document.addEventListener('contextmenu', (e) => {
-      if (!e.target.closest('#table-context-menu, #tab-context-menu, #grid-context-menu, #pl-context-menu, td[data-col], #tabs-container, #schema-tree, .pl-row, #btn-col-picker, #col-picker-dropdown, #pl-btn-col-picker, #pl-col-picker-dropdown, #btn-export-csv, #export-csv-menu, #tab-database-pill-container, #tab-db-switcher-menu')) {
+      if (!e.target.closest('#table-context-menu, #tab-context-menu, #grid-context-menu, #pl-context-menu, td[data-col], #tabs-container, #schema-tree, .pl-row, #btn-col-picker, #col-picker-dropdown, #pl-btn-col-picker, #pl-col-picker-dropdown, #btn-export-csv, #export-csv-menu, #export-csv-dropdown-container, #tab-database-pill-container, #tab-db-switcher-menu')) {
         closeAllContextMenus();
       }
     });
@@ -21348,13 +21348,20 @@ Please analyze what is causing this query to be slow and suggest necessary query
     }
 
     // --- Export Grid Results ---
-    function toggleExportCSVMenu(force) {
+    function toggleExportCSVMenu(force, e) {
+      if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
       const menu = document.getElementById('export-csv-menu');
       if (!menu) return;
       if (typeof force === 'boolean') {
         menu.classList.toggle('hidden', !force);
       } else {
-        menu.classList.toggle('hidden');
+        const isHidden = menu.classList.contains('hidden');
+        closeAllContextMenus();
+        if (isHidden) {
+          menu.classList.remove('hidden');
+        } else {
+          menu.classList.add('hidden');
+        }
       }
     }
 
