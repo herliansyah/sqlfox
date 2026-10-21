@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -93,7 +94,16 @@ func (s *Server) handleExplainQuery(w http.ResponseWriter, r *http.Request) {
 			tblsMap[t.Name] = t
 		}
 	}
-	plan.Advisor = advisor.AdviseWithExplain(req.SQL, sess.DriverName, tblsMap, plan)
+	dialect := sess.DriverName
+	if sess.ServerInfo == nil {
+		if sInfo, sErr := sess.Session.ServerInfo(ctx); sErr == nil && sInfo != nil {
+			sess.ServerInfo = sInfo
+		}
+	}
+	if sess.ServerInfo != nil && sess.ServerInfo.Version != "" {
+		dialect = fmt.Sprintf("%s %s", sess.DriverName, sess.ServerInfo.Version)
+	}
+	plan.Advisor = advisor.AdviseWithExplain(req.SQL, dialect, tblsMap, plan)
 
 	writeJSON(w, http.StatusOK, plan)
 }
@@ -140,7 +150,16 @@ func (s *Server) handleAdviseQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	plan, _ := sess.Session.Explain(ctx, req.SQL)
-	adv := advisor.AdviseWithExplain(req.SQL, sess.DriverName, tblsMap, plan)
+	dialect := sess.DriverName
+	if sess.ServerInfo == nil {
+		if sInfo, sErr := sess.Session.ServerInfo(ctx); sErr == nil && sInfo != nil {
+			sess.ServerInfo = sInfo
+		}
+	}
+	if sess.ServerInfo != nil && sess.ServerInfo.Version != "" {
+		dialect = fmt.Sprintf("%s %s", sess.DriverName, sess.ServerInfo.Version)
+	}
+	adv := advisor.AdviseWithExplain(req.SQL, dialect, tblsMap, plan)
 	writeJSON(w, http.StatusOK, adv)
 }
 

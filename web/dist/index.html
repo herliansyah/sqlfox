@@ -14788,10 +14788,13 @@ Please analyze what is causing this query to be slow and suggest necessary query
       updateImpactQuerySnippet();
     }
 
-    function copyImpactQuery() {
+    async function copyImpactQuery() {
       if (!currentImpactRawSQL) return;
       const text = isImpactSQLFormatted ? formatSQL(currentImpactRawSQL) : currentImpactRawSQL;
-      copyTextToClipboard(text);
+      const ok = await copyTextToClipboard(text);
+      if (ok) {
+        showToast('Query copied to clipboard', 'success');
+      }
     }
 
     function openImpactQueryInEditor() {
@@ -14803,10 +14806,13 @@ Please analyze what is causing this query to be slow and suggest necessary query
       showToast('Query loaded into Query Editor');
     }
 
-    function copyImpactRawJSON() {
+    async function copyImpactRawJSON() {
       const rawPlanEl = document.getElementById('impact-raw-plan');
       if (rawPlanEl && rawPlanEl.textContent) {
-        copyTextToClipboard(rawPlanEl.textContent);
+        const ok = await copyTextToClipboard(rawPlanEl.textContent);
+        if (ok) {
+          showToast('Raw execution plan copied to clipboard', 'success');
+        }
       }
     }
 
@@ -15044,8 +15050,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
             <div class="bg-slate-950 border border-slate-800 rounded p-2 flex items-center justify-between">
               <code class="font-mono text-[11px] text-sky-300 select-all overflow-x-auto whitespace-pre">${escapeHtml(rec.safe_ddl)}</code>
               <div class="flex items-center space-x-1 ml-2 flex-shrink-0">
-                <button type="button" data-ddl="${escapeHtml(rec.safe_ddl)}" onclick="copyTextToClipboard(this.getAttribute('data-ddl'))" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[11px] transition flex items-center space-x-1">
-                  <span>📋</span><span>Copy</span>
+                <button type="button" data-ddl="${escapeHtml(rec.safe_ddl)}" onclick="copyAdvisorDDL(this)" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[11px] transition flex items-center space-x-1" title="Copy Index DDL">
+                  <span class="advisor-copy-icon">📋</span><span class="advisor-copy-label">Copy</span>
                 </button>
                 <button type="button" data-ddl="${escapeHtml(rec.safe_ddl)}" onclick="applyAdvisorDDLToEditor(this.getAttribute('data-ddl'))" class="px-2 py-1 bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800 rounded text-[11px] transition flex items-center space-x-1">
                   <span>⚡</span><span>Editor</span>
@@ -15057,6 +15063,32 @@ Please analyze what is causing this query to be slow and suggest necessary query
         });
       } else if (!adv.bloat_warnings || adv.bloat_warnings.length === 0) {
         if (empty) empty.classList.remove('hidden');
+      }
+    }
+
+    async function copyAdvisorDDL(btn) {
+      if (!btn) return;
+      const ddl = btn.getAttribute('data-ddl');
+      if (!ddl) return;
+      const ok = await copyTextToClipboard(ddl);
+      if (ok) {
+        showToast('Index DDL copied to clipboard', 'success');
+        const iconSpan = btn.querySelector('.advisor-copy-icon');
+        const labelSpan = btn.querySelector('.advisor-copy-label');
+        if (iconSpan && labelSpan) {
+          const oldIcon = iconSpan.textContent;
+          const oldLabel = labelSpan.textContent;
+          iconSpan.textContent = '✓';
+          labelSpan.textContent = 'Copied!';
+          btn.classList.add('text-emerald-400');
+          setTimeout(() => {
+            iconSpan.textContent = oldIcon;
+            labelSpan.textContent = oldLabel;
+            btn.classList.remove('text-emerald-400');
+          }, 1500);
+        }
+      } else {
+        showNativeAlert('Failed to copy index DDL to clipboard.', 'Clipboard Error');
       }
     }
 

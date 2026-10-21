@@ -91,6 +91,9 @@ func RunAdvise(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 		defer sessTarget.Cleanup()
 
 		dialect = sessTarget.Driver
+		if sInfo, sErr := sessTarget.Session.ServerInfo(ctx); sErr == nil && sInfo != nil && sInfo.Version != "" {
+			dialect = fmt.Sprintf("%s %s", sessTarget.Driver, sInfo.Version)
+		}
 		if sc, sErr := sessTarget.Session.InspectSchema(ctx, sessTarget.DBName); sErr == nil && sc != nil {
 			for _, t := range sc.Tables {
 				tablesMap[t.Name] = t

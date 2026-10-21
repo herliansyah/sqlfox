@@ -532,6 +532,9 @@ func TestProcessDetailModalAndFooterPillsEmbedded(t *testing.T) {
 		`btnFormat.innerHTML = '<span>↺ Raw SQL</span>';`,
 		// 5. copyJsonCellContent using copyTextToClipboard
 		`const ok = await copyTextToClipboard(editor.value);`,
+		// 6. copyAdvisorDDL using copyTextToClipboard with visual toast and button feedback
+		`async function copyAdvisorDDL(btn) {`,
+		`onclick="copyAdvisorDDL(this)"`,
 	}
 
 	for _, s := range expectedSnippets {
