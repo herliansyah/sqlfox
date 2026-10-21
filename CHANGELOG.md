@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **JavaScript Syntax Error in `selectConnection` Startup Routine (`web/dist/index.html`)**: Removed duplicate unclosed `try` block in `selectConnection` that caused browser parsing failures and prevented the web interface from loading on startup.
+- **Embedded Web JavaScript Syntax Test Guard (`web/embed_test.go`)**: Added automated syntax verification test (`TestEmbeddedIndexHTMLJavaScriptSyntax`) to parse and validate embedded HTML script blocks during test runs.
+
+
 ## [v0.10.5] - 2026-10-21
 
 ### Added
