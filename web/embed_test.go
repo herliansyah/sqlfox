@@ -1788,4 +1788,40 @@ func TestQuerySuccessBannerEmbedded(t *testing.T) {
 	}
 }
 
+func TestPendingBusyStateGuardsAndLoadingEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open embedded index.html: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	expectedSnippets := []string{
+		"animate-indeterminate",
+		`id="query-progress-bar"`,
+		`id="btn-explain-query"`,
+		`id="btn-explain-icon"`,
+		`id="btn-explain-text"`,
+		"queryTimerInterval",
+		"Explaining...",
+		"if (isQueryExecuting) return;",
+		"btn.disabled = true",
+		"btn.classList.add('opacity-50', 'cursor-not-allowed')",
+		"Executing DDL",
+		"ddl-exec-timer",
+		"isConnectionSwitching",
+	}
+	for _, s := range expectedSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain %q, but was missing", s)
+		}
+	}
+}
+
 

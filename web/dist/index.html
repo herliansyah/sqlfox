@@ -96,6 +96,16 @@
     .grid-cell { font-variant-numeric: tabular-nums; }
     .grid-cell:hover .edit-hint { opacity: 1; }
 
+    /* Indeterminate progress bar animation for pending actions (Explain, DDL, Connect) */
+    @keyframes indeterminate-slide {
+      0% { left: -40%; width: 40%; }
+      50% { left: 20%; width: 60%; }
+      100% { left: 100%; width: 40%; }
+    }
+    .animate-indeterminate {
+      animation: indeterminate-slide 1.2s infinite ease-in-out;
+    }
+
     /* CodeMirror Dark Custom Theme for SqlFox */
     .CodeMirror {
       height: 100% !important;
@@ -592,8 +602,9 @@
               <span id="tab-database-pill-name" class="font-mono font-semibold text-amber-200">default</span>
               <span class="text-[9px] text-slate-400">▼</span>
             </div>
-            <button onclick="explainActiveQuery()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition">
-              ⚡ Explain
+            <button id="btn-explain-query" onclick="explainActiveQuery()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition flex items-center space-x-1" title="Explain Execution Plan (Ctrl+Shift+Enter)">
+              <span id="btn-explain-icon">⚡</span>
+              <span id="btn-explain-text">Explain</span>
             </button>
             <button onclick="inspectActiveQuery()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition">
               🛡️ Safety Check
@@ -631,6 +642,11 @@
               Cancel Query (Esc)
             </button>
           </div>
+        </div>
+
+        <!-- Top Indeterminate Progress Bar for pending active operations (ADR 0005/0011) -->
+        <div id="query-progress-bar" class="hidden h-[2px] w-full bg-slate-800 overflow-hidden relative flex-shrink-0">
+          <div class="h-full bg-amber-400 absolute animate-indeterminate"></div>
         </div>
 
         <!-- SQL Code Editor Container -->
@@ -4915,14 +4931,40 @@
       if (!dlg) return;
       document.getElementById('ddl-review-sql').textContent = sql;
       const confirmBtn = document.getElementById('ddl-review-confirm-btn');
+      const cancelBtns = dlg.querySelectorAll('button:not(#ddl-review-confirm-btn)');
       
       const newBtn = confirmBtn.cloneNode(true);
+      newBtn.disabled = false;
+      newBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+      newBtn.innerHTML = 'Execute DDL';
+      cancelBtns.forEach(b => { b.disabled = false; b.classList.remove('opacity-50', 'cursor-not-allowed'); });
       confirmBtn.parentNode.replaceChild(newBtn, confirmBtn);
       
       newBtn.onclick = async () => {
-        dlg.close();
-        if (typeof onConfirm === 'function') {
-          await onConfirm();
+        // ponytail: prevent duplicate DDL execution clicks and lock UI with timer
+        if (newBtn.disabled) return;
+        newBtn.disabled = true;
+        newBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        cancelBtns.forEach(b => { b.disabled = true; b.classList.add('opacity-50', 'cursor-not-allowed'); });
+
+        const ddlStart = Date.now();
+        newBtn.innerHTML = '<span class="animate-spin inline-block mr-1.5">⏳</span> Executing DDL (<span id="ddl-exec-timer">0.0s</span>)...';
+        const timerInterval = setInterval(() => {
+          const el = document.getElementById('ddl-exec-timer');
+          if (el) el.textContent = ((Date.now() - ddlStart) / 1000).toFixed(1) + 's';
+        }, 100);
+
+        try {
+          if (typeof onConfirm === 'function') {
+            await onConfirm();
+          }
+          dlg.close();
+        } finally {
+          clearInterval(timerInterval);
+          newBtn.disabled = false;
+          newBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+          newBtn.innerHTML = 'Execute DDL';
+          cancelBtns.forEach(b => { b.disabled = false; b.classList.remove('opacity-50', 'cursor-not-allowed'); });
         }
       };
       if (typeof dlg.showModal === 'function') dlg.showModal();
@@ -5431,24 +5473,28 @@
       el.innerHTML = html;
     }
 
+    let isConnectionSwitching = false;
     async function selectConnection(connId) {
+      if (isConnectionSwitching) return;
       const conn = connections.find(c => c.id === connId);
       if (!conn) return;
-      if (activeConnection && activeConnection.id !== connId) {
-        saveTabsState();
-      }
-      activeConnection = conn;
-      if (!sessionCatalogStore[conn.id]) {
-        sessionCatalogStore[conn.id] = {};
-        sessionCatalogTimestamps[conn.id] = {};
-      }
-      multiDBCatalogCache = sessionCatalogStore[conn.id];
-      localStorage.setItem('sqlfox_last_conn_id', conn.id);
-      renderConnectionsTree();
+      isConnectionSwitching = true;
+      try {
+        if (activeConnection && activeConnection.id !== connId) {
+          saveTabsState();
+        }
+        activeConnection = conn;
+        if (!sessionCatalogStore[conn.id]) {
+          sessionCatalogStore[conn.id] = {};
+          sessionCatalogTimestamps[conn.id] = {};
+        }
+        multiDBCatalogCache = sessionCatalogStore[conn.id];
+        localStorage.setItem('sqlfox_last_conn_id', conn.id);
+        renderConnectionsTree();
 
-      // Update badge to indicate connecting status via SSOT helper
-      renderHeaderConnectionBadge(conn, 'Connecting...');
-      document.getElementById('schema-tree').innerHTML = '<div class="text-slate-500 text-center py-4">Connecting to database...</div>';
+        // Update badge to indicate connecting status via SSOT helper
+        renderHeaderConnectionBadge(conn, 'Connecting...');
+        document.getElementById('schema-tree').innerHTML = '<div class="text-slate-500 text-center py-4 flex items-center justify-center space-x-2"><span class="animate-spin inline-block">⏳</span><span>Connecting to database...</span></div>';
 
       // Connect session
       try {
@@ -5500,6 +5546,8 @@
         `;
         document.getElementById('schema-tree').innerHTML = `<div class="text-app-danger p-2 text-xs">Connection Error: ${escapeHtml(err.message)}</div>`;
         showNativeAlert('Failed to connect: ' + err.message, 'Connection Error');
+      } finally {
+        isConnectionSwitching = false;
       }
     }
 
@@ -14727,7 +14775,84 @@ Please analyze what is causing this query to be slow and suggest necessary query
       else dlg.setAttribute('open', '');
     }
 
+    let queryTimerInterval = null;
+    let queryStartTime = 0;
+
+    function setQueryRunning(isRunning, label = 'Executing...') {
+      isQueryExecuting = !!isRunning;
+      const cancelBtn = document.getElementById('cancel-query-btn');
+      const status = document.getElementById('query-status-text');
+      const runBtn = document.getElementById('btn-run-query');
+      const explainBtn = document.getElementById('btn-explain-query');
+      const explainIcon = document.getElementById('btn-explain-icon');
+      const explainText = document.getElementById('btn-explain-text');
+      const progressBar = document.getElementById('query-progress-bar');
+
+      if (queryTimerInterval) {
+        clearInterval(queryTimerInterval);
+        queryTimerInterval = null;
+      }
+
+      if (runBtn) {
+        runBtn.disabled = isRunning;
+        if (isRunning) {
+          runBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        } else {
+          runBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+      }
+
+      if (explainBtn) {
+        explainBtn.disabled = isRunning;
+        if (isRunning) {
+          explainBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        } else {
+          explainBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+      }
+
+      if (isRunning) {
+        queryStartTime = Date.now();
+        if (progressBar) progressBar.classList.remove('hidden');
+
+        const isExplain = label.toLowerCase().includes('explain');
+        if (isExplain && explainIcon && explainText) {
+          explainIcon.innerHTML = '<span class="animate-spin inline-block">⏳</span>';
+          explainText.textContent = 'Explaining...';
+        }
+
+        if (status) {
+          status.textContent = `${label} (0.0s)`;
+        }
+        if (cancelBtn) cancelBtn.classList.remove('hidden');
+
+        queryTimerInterval = setInterval(() => {
+          if (!isQueryExecuting) {
+            clearInterval(queryTimerInterval);
+            queryTimerInterval = null;
+            return;
+          }
+          const elapsedSec = ((Date.now() - queryStartTime) / 1000).toFixed(1);
+          if (status) status.textContent = `${label} (${elapsedSec}s)`;
+        }, 100);
+      } else {
+        if (progressBar) progressBar.classList.add('hidden');
+
+        if (explainIcon && explainText) {
+          explainIcon.textContent = '⚡';
+          explainText.textContent = 'Explain';
+        }
+
+        if (status && (status.textContent.startsWith('Executing') || status.textContent.startsWith('Explaining'))) {
+          status.textContent = 'Ready';
+        }
+        if (cancelBtn) cancelBtn.classList.add('hidden');
+      }
+    }
+
     async function explainActiveQuery() {
+      // ponytail: Concurrency guard prevents duplicate simultaneous explain dispatches
+      if (isQueryExecuting) return;
       if (!activeConnection) {
         showNativeAlert('Please select or create a connection first.', 'No Connection');
         return;
@@ -14738,11 +14863,19 @@ Please analyze what is causing this query to be slow and suggest necessary query
         return;
       }
       const currentDb = schemaCatalogCache?.database_name || activeConnection.database_name || '';
+
+      setQueryRunning(true, 'Explaining...');
+
+      // ponytail: 30s timeout guard to prevent UI hanging indefinitely on slow remote connections
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+
       try {
         const res = await apiFetch(`/api/session/${activeConnection.id}/explain`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sql, database: currentDb })
+          body: JSON.stringify({ sql, database: currentDb }),
+          signal: controller.signal
         });
         const data = await res.json();
         if (!res.ok) {
@@ -14751,29 +14884,14 @@ Please analyze what is causing this query to be slow and suggest necessary query
         }
         openImpactModal(data, sql);
       } catch (err) {
-        showNativeAlert('Explain request failed: ' + err.message, 'Network Error');
-      }
-    }
-
-    function setQueryRunning(isRunning) {
-      isQueryExecuting = !!isRunning;
-      const btn = document.getElementById('cancel-query-btn');
-      const status = document.getElementById('query-status-text');
-      const runBtn = document.getElementById('btn-run-query');
-      if (runBtn) {
-        runBtn.disabled = isRunning;
-        if (isRunning) {
-          runBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        if (err.name === 'AbortError') {
+          showNativeAlert('Explain request timed out after 30s. The query execution plan took too long to generate.', 'Timeout');
         } else {
-          runBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+          showNativeAlert('Explain request failed: ' + err.message, 'Network Error');
         }
-      }
-      if (isRunning) {
-        status.textContent = 'Executing...';
-        btn.classList.remove('hidden');
-      } else {
-        status.textContent = 'Ready';
-        btn.classList.add('hidden');
+      } finally {
+        clearTimeout(timeoutId);
+        setQueryRunning(false);
       }
     }
 
@@ -20729,6 +20847,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
     }
 
     async function testConnectionFromModal() {
+      const btn = document.querySelector('#connection-modal button[onclick*="testConnectionFromModal"]');
+      if (btn && btn.disabled) return;
       const driver = document.getElementById('modal-conn-driver').value;
       const host = document.getElementById('modal-conn-host').value.trim();
       if (!host) {
@@ -20750,15 +20870,23 @@ Please analyze what is causing this query to be slow and suggest necessary query
         password: document.getElementById('modal-conn-pass').value
       };
 
-      const btn = document.querySelector('#connection-modal button[onclick*="testConnectionFromModal"]');
-      const origText = btn ? btn.textContent : '';
-      if (btn) btn.textContent = '⏳ Testing...';
+      const origHtml = btn ? btn.innerHTML : '';
+      if (btn) {
+        btn.disabled = true;
+        btn.classList.add('opacity-50', 'cursor-not-allowed');
+        btn.innerHTML = '<span class="animate-spin inline-block mr-1">⏳</span> Testing...';
+      }
+
+      // ponytail: 15s timeout guard prevents freeze on unreachable IP / blackholed TCP port
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
 
       try {
         const res = await apiFetch('/api/connections/test-transient/test', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          body: JSON.stringify(payload),
+          signal: controller.signal
         });
         const data = await res.json();
         if (res.ok && data.success) {
@@ -20767,9 +20895,18 @@ Please analyze what is causing this query to be slow and suggest necessary query
           showNativeAlert(`❌ Connection failed: ${data.error || res.statusText || 'Unable to connect'}`, 'Connection Test');
         }
       } catch (err) {
-        showNativeAlert(`❌ Connection failed: ${err.message}`, 'Connection Test');
+        if (err.name === 'AbortError') {
+          showNativeAlert('❌ Connection test timed out after 15s. Verify host IP, port, and firewall rules.', 'Connection Timeout');
+        } else {
+          showNativeAlert(`❌ Connection failed: ${err.message}`, 'Connection Test');
+        }
       } finally {
-        if (btn) btn.textContent = origText;
+        clearTimeout(timeoutId);
+        if (btn) {
+          btn.disabled = false;
+          btn.classList.remove('opacity-50', 'cursor-not-allowed');
+          btn.innerHTML = origHtml;
+        }
       }
     }
 
