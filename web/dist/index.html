@@ -7705,6 +7705,18 @@
         if (stats && nextTab.queryStats) {
           stats.textContent = nextTab.queryStats;
         }
+      } else if (nextTab && !nextTab.isTableViewer && nextTab.rawQueryExec) {
+        renderQuerySuccessBanner(
+          nextTab.rawQueryExec.sql,
+          nextTab.rawQueryExec.message,
+          nextTab.rawQueryExec.executionMs,
+          nextTab.rawQueryExec.rowsAffected,
+          nextTab.rawQueryExec.backupFile
+        );
+        const stats = document.getElementById('grid-result-stats');
+        if (stats && nextTab.queryStats) {
+          stats.textContent = nextTab.queryStats;
+        }
       } else if (nextTab && !nextTab.isTableViewer && !nextTab.isProcesslist && !nextTab.isCluster && !nextTab.isFlightRecorder && !nextTab.isVariables) {
         // ponytail: Clean state isolation. Query tab with no execution results shows a clean empty grid
         // instead of retaining previous tab's table or query results.
@@ -14445,6 +14457,13 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
         if (!res.ok) {
           const errMsg = data.error || 'Execution failed';
+          const activeTab = tabs.find(t => t.id === activeTabId);
+          if (activeTab) {
+            activeTab.rawQueryError = { sql, message: errMsg };
+            activeTab.rawQueryRows = null;
+            activeTab.rawQueryCols = null;
+            activeTab.rawQueryExec = null;
+          }
           renderQueryErrorBanner(sql, errMsg);
           return;
         }
@@ -14469,6 +14488,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
             activeTab.rawQueryRows = data.rows || [];
             activeTab.rawQueryCols = data.columns || [];
             activeTab.rawQueryError = null;
+            activeTab.rawQueryExec = null;
             activeTab.queryFilters = {};
             activeTab.sortCol = '';
             activeTab.sortDir = '';
@@ -14484,6 +14504,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
           }
           selectedRowIndices.clear();
           updateSelectedRowsUI();
+          window.lastFailedQuery = null;
+          window.lastFailedError = null;
           renderGridResults(data.columns, data.rows, null, detectedTable, detectedDB);
           document.getElementById('grid-result-stats').textContent = `${data.row_count} rows (${data.execution_ms}ms)`;
           if (/^\s*(CREATE|ALTER|DROP|RENAME)\b/i.test(sql) && activeConnection) {
@@ -14495,8 +14517,16 @@ Please analyze what is causing this query to be slow and suggest necessary query
             activeTab.rawQueryRows = null;
             activeTab.rawQueryCols = null;
             activeTab.rawQueryError = null;
+            activeTab.rawQueryExec = {
+              sql: sql,
+              message: data.message,
+              executionMs: data.execution_ms,
+              rowsAffected: data.rows_affected,
+              backupFile: data.backup_file
+            };
             activeTab.queryStats = `${data.message} (${data.execution_ms}ms)`;
           }
+          renderQuerySuccessBanner(sql, data.message, data.execution_ms, data.rows_affected, data.backup_file);
           document.getElementById('grid-result-stats').textContent = `${data.message} (${data.execution_ms}ms)`;
           if (data.backup_file) {
             showNativeAlert(`Query succeeded!\nAutomated Backup Snapshot created at:\n${data.backup_file}`, 'Safety Guard Backup');
@@ -14516,6 +14546,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
           activeTab.rawQueryError = { sql, message: err.message };
           activeTab.rawQueryRows = null;
           activeTab.rawQueryCols = null;
+          activeTab.rawQueryExec = null;
         }
         renderQueryErrorBanner(sql, err.message);
         const drawer = document.getElementById('audit-drawer');
@@ -14532,6 +14563,11 @@ Please analyze what is causing this query to be slow and suggest necessary query
       activeGridPKCol = null;
       selectedRowIndices.clear();
       updateSelectedRowsUI();
+      const table = document.getElementById('results-table');
+      if (table) {
+        table.classList.add('table-empty');
+        table.style.width = '100%';
+      }
       const tbody = document.getElementById('grid-tbody');
       const thead = document.getElementById('grid-thead');
       thead.innerHTML = '<tr><th class="p-2 pl-4 text-red-400">Execution Error</th></tr>';
@@ -14557,6 +14593,65 @@ Please analyze what is causing this query to be slow and suggest necessary query
       document.getElementById('grid-result-stats').textContent = 'Error executing query';
       window.lastFailedQuery = sql;
       window.lastFailedError = errMessage;
+    }
+
+    function renderQuerySuccessBanner(sql, message, executionMs, rowsAffected, backupFile) {
+      currentColumns = [];
+      currentResults = [];
+      activeGridTable = null;
+      activeGridPKCol = null;
+      selectedRowIndices.clear();
+      updateSelectedRowsUI();
+      window.lastFailedQuery = null;
+      window.lastFailedError = null;
+
+      const table = document.getElementById('results-table');
+      if (table) {
+        table.classList.add('table-empty');
+        table.style.width = '100%';
+      }
+      const thead = document.getElementById('grid-thead');
+      const tbody = document.getElementById('grid-tbody');
+      thead.innerHTML = '<tr><th class="p-2 pl-4 text-emerald-400 font-semibold w-full">Execution Succeeded</th></tr>';
+
+      const statsBadge = (executionMs !== undefined && executionMs !== null)
+        ? `<span class="bg-emerald-900/50 border border-emerald-700/60 text-emerald-300 px-2 py-0.5 rounded text-xs font-mono">⚡ ${executionMs}ms</span>`
+        : '';
+      const rowsBadge = (rowsAffected !== undefined && rowsAffected !== null)
+        ? `<span class="bg-slate-800 border border-slate-700 text-slate-300 px-2 py-0.5 rounded text-xs font-mono">📊 ${rowsAffected} row(s) affected</span>`
+        : '';
+      const backupHtml = backupFile ? `
+        <div class="mt-3 p-3 bg-amber-950/30 border border-amber-800/60 rounded text-amber-200 text-xs flex items-start space-x-2">
+          <span>🛡️</span>
+          <div>
+            <span class="font-semibold">Automated Backup Snapshot created:</span>
+            <div class="font-mono text-[11px] text-amber-300/90 break-all mt-0.5">${escapeHtml(backupFile)}</div>
+          </div>
+        </div>
+      ` : '';
+
+      tbody.innerHTML = `
+        <tr>
+          <td class="p-6">
+            <div class="bg-emerald-950/30 border border-emerald-800/80 rounded-lg p-4 text-emerald-200 space-y-3">
+              <div class="flex items-center justify-between flex-wrap gap-2">
+                <span class="font-bold flex items-center space-x-2 text-emerald-400 text-sm">
+                  <span>✅</span>
+                  <span>Command Executed Successfully</span>
+                </span>
+                <div class="flex items-center space-x-2">
+                  ${statsBadge}
+                  ${rowsBadge}
+                </div>
+              </div>
+              <div class="font-mono text-xs text-emerald-300 bg-emerald-950/60 p-3 rounded border border-emerald-900/60">
+                ${escapeHtml(message || 'Statement executed successfully.')}
+              </div>
+              ${backupHtml}
+            </div>
+          </td>
+        </tr>
+      `;
     }
 
     async function fixCurrentQueryWithAI() {

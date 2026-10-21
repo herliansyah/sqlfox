@@ -1760,8 +1760,32 @@ func TestExplainQueryToEditorWiring(t *testing.T) {
 	}
 }
 
+func TestQuerySuccessBannerEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open embedded index.html: %v", err)
+	}
+	defer f.Close()
 
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
 
-
+	expectedSnippets := []string{
+		"function renderQuerySuccessBanner(sql, message, executionMs, rowsAffected, backupFile)",
+		"nextTab.rawQueryExec",
+		"renderQuerySuccessBanner(sql, data.message, data.execution_ms, data.rows_affected, data.backup_file)",
+		"Command Executed Successfully",
+		"Execution Succeeded",
+	}
+	for _, s := range expectedSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain %q, but was missing", s)
+		}
+	}
+}
 
 
