@@ -5496,8 +5496,7 @@
         renderHeaderConnectionBadge(conn, 'Connecting...');
         document.getElementById('schema-tree').innerHTML = '<div class="text-slate-500 text-center py-4 flex items-center justify-center space-x-2"><span class="animate-spin inline-block">⏳</span><span>Connecting to database...</span></div>';
 
-      // Connect session
-      try {
+        // Connect session
         const res = await apiFetch(`/api/session/connect/${conn.id}`, { method: 'POST' });
         const data = await res.json();
         if (!res.ok) {

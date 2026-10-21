@@ -2,6 +2,7 @@ package web
 
 import (
 	"io"
+	"os/exec"
 	"regexp"
 	"strings"
 	"testing"
@@ -1821,6 +1822,30 @@ func TestPendingBusyStateGuardsAndLoadingEmbedded(t *testing.T) {
 		if !strings.Contains(content, s) {
 			t.Errorf("expected index.html to contain %q, but was missing", s)
 		}
+	}
+}
+
+func TestEmbeddedIndexHTMLJavaScriptSyntax(t *testing.T) {
+	nodePath, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not available on host system to parse index.html JavaScript syntax")
+	}
+
+	cmd := exec.Command(nodePath, "-e", `
+const fs = require('fs');
+const html = fs.readFileSync('dist/index.html', 'utf8');
+const lastScriptStart = html.lastIndexOf('<script>');
+const lastScriptEnd = html.lastIndexOf('</script>');
+if (lastScriptStart === -1 || lastScriptEnd === -1) {
+  process.exit(2);
+}
+const scriptContent = html.substring(lastScriptStart + '<script>'.length, lastScriptEnd);
+const vm = require('vm');
+new vm.Script(scriptContent, { filename: 'index.html' });
+`)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("index.html contains JavaScript syntax errors:\n%s", string(output))
 	}
 }
 
