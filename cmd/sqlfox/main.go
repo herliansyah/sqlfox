@@ -28,7 +28,7 @@ import (
 )
 
 // Version is populated at build time via -ldflags "-X main.Version=..."
-var Version = "v0.10.4"
+var Version = "v0.10.5"
 
 func main() {
 	loadEnvFiles()

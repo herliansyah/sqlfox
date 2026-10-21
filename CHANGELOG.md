@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.10.5] - 2026-10-21
+
 ### Added
 - **Web Busy State Guards, Timers & Progress Indicators (`web/dist/index.html`)**: Added concurrency locks and execution guards for EXPLAIN, DDL review, and connection tests to prevent duplicate submissions and race conditions. Added live elapsed stopwatch timer, indeterminate progress bar, and timeout safety guards (30s for EXPLAIN, 15s for connection tests) preventing indefinite UI freezes.
 - **DDL/DML Execution Success Banner (`web/dist/index.html`)**: Dedicated success banner in the query results panel for non-query statements (ALTER, CREATE, UPDATE, DELETE), cleanly clearing previous errors and preserving execution state across tab switching.
