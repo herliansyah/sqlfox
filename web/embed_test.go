@@ -1726,6 +1726,41 @@ func TestExportDropdownClickAffordanceAndExclusion(t *testing.T) {
 	}
 }
 
+func TestExplainQueryToEditorWiring(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open embedded index.html: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	// Ensure window.editorInstance is assigned to cmEditor
+	if !strings.Contains(content, "window.editorInstance = cmEditor;") {
+		t.Errorf("expected window.editorInstance = cmEditor; to be assigned for legacy/external compatibility")
+	}
+
+	// Ensure openImpactQueryInEditor uses setEditorSQL and opens/switches to a query tab if needed
+	expectedSnippets := []string{
+		"function openImpactQueryInEditor()",
+		"setEditorSQL(currentImpactRawSQL)",
+		"addNewQueryTab()",
+		"function applyAdvisorDDLToEditor(ddl)",
+		"setEditorSQL(ddl)",
+	}
+	for _, s := range expectedSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain %q, but was missing", s)
+		}
+	}
+}
+
+
 
 
 

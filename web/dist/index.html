@@ -7086,6 +7086,7 @@
           }
         }
       });
+      window.editorInstance = cmEditor;
 
       cmEditor.on('inputRead', function(cm, change) {
         if (change.origin === '+input') {
@@ -14799,9 +14800,15 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
     function openImpactQueryInEditor() {
       if (!currentImpactRawSQL) return;
-      if (window.editorInstance) {
-        window.editorInstance.setValue(currentImpactRawSQL);
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const isQueryTab = activeTab && !activeTab.isTableViewer && !activeTab.isProcesslist && !activeTab.isCluster && !activeTab.isFlightRecorder && !activeTab.isVariables && !activeTab.isNote;
+      if (!isQueryTab) {
+        addNewQueryTab();
       }
+      setEditorSQL(currentImpactRawSQL);
+      const currentTab = tabs.find(t => t.id === activeTabId);
+      if (currentTab) currentTab.sql = currentImpactRawSQL;
+      if (cmEditor) cmEditor.focus();
       closeImpactModal();
       showToast('Query loaded into Query Editor');
     }
@@ -15093,9 +15100,16 @@ Please analyze what is causing this query to be slow and suggest necessary query
     }
 
     function applyAdvisorDDLToEditor(ddl) {
-      if (window.editorInstance && ddl) {
-        window.editorInstance.setValue(ddl);
+      if (!ddl) return;
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const isQueryTab = activeTab && !activeTab.isTableViewer && !activeTab.isProcesslist && !activeTab.isCluster && !activeTab.isFlightRecorder && !activeTab.isVariables && !activeTab.isNote;
+      if (!isQueryTab) {
+        addNewQueryTab();
       }
+      setEditorSQL(ddl);
+      const currentTab = tabs.find(t => t.id === activeTabId);
+      if (currentTab) currentTab.sql = ddl;
+      if (cmEditor) cmEditor.focus();
       closeImpactModal();
       showToast('Index DDL inserted into Query Editor');
     }
