@@ -41,10 +41,93 @@ func TestAdvise_ESRRuleOrdering(t *testing.T) {
 		t.Errorf("expected columns %v under ESR rule, got %v", expectedCols, rec.Columns)
 	}
 
-	// MySQL 5.7 Safe DDL check
-	expectedDDL := "ALTER TABLE `orders` ADD INDEX `idx_orders_user_id_created_at_amount` (`user_id`, `created_at`, `amount`) ALGORITHM=INPLACE, LOCK=NONE;"
+	// MySQL 5.7 Safe DDL check (with valid comma separator before ALGORITHM)
+	expectedDDL := "ALTER TABLE `orders` ADD INDEX `idx_orders_user_id_created_at_amount` (`user_id`, `created_at`, `amount`), ALGORITHM=INPLACE, LOCK=NONE;"
 	if rec.SafeDDL != expectedDDL {
 		t.Errorf("expected Safe DDL %q, got %q", expectedDDL, rec.SafeDDL)
+	}
+}
+
+func TestAdvise_DialectAndVersionVariations(t *testing.T) {
+	query := "SELECT * FROM orders WHERE user_id = 1 AND amount > 100 ORDER BY created_at DESC"
+	tables := map[string]driver.TableMetadata{
+		"orders": {
+			Name: "orders",
+			Columns: []driver.ColumnMetadata{
+				{Name: "user_id", Type: "int"},
+				{Name: "created_at", Type: "datetime"},
+				{Name: "amount", Type: "decimal(10,2)"},
+				{Name: "notes", Type: "text"},
+			},
+		},
+	}
+
+	tests := []struct {
+		name        string
+		dialect     string
+		query       string
+		expectedDDL string
+	}{
+		{
+			name:        "MySQL 8.0 default non-blocking online DDL",
+			dialect:     "mysql 8.0.35",
+			query:       query,
+			expectedDDL: "ALTER TABLE `orders` ADD INDEX `idx_orders_user_id_created_at_amount` (`user_id`, `created_at`, `amount`), ALGORITHM=INPLACE, LOCK=NONE;",
+		},
+		{
+			name:        "MySQL 5.7 non-blocking online DDL",
+			dialect:     "mysql 5.7.42-log",
+			query:       query,
+			expectedDDL: "ALTER TABLE `orders` ADD INDEX `idx_orders_user_id_created_at_amount` (`user_id`, `created_at`, `amount`), ALGORITHM=INPLACE, LOCK=NONE;",
+		},
+		{
+			name:        "MySQL 5.5 legacy DDL without unsupported ALGORITHM",
+			dialect:     "mysql 5.5.62",
+			query:       query,
+			expectedDDL: "ALTER TABLE `orders` ADD INDEX `idx_orders_user_id_created_at_amount` (`user_id`, `created_at`, `amount`);",
+		},
+		{
+			name:        "MariaDB 10.5 non-blocking online DDL",
+			dialect:     "mariadb 10.5.18-MariaDB",
+			query:       query,
+			expectedDDL: "ALTER TABLE `orders` ADD INDEX `idx_orders_user_id_created_at_amount` (`user_id`, `created_at`, `amount`), ALGORITHM=INPLACE, LOCK=NONE;",
+		},
+		{
+			name:        "MariaDB 5.5 legacy DDL without unsupported ALGORITHM",
+			dialect:     "mariadb 5.5.68-MariaDB",
+			query:       query,
+			expectedDDL: "ALTER TABLE `orders` ADD INDEX `idx_orders_user_id_created_at_amount` (`user_id`, `created_at`, `amount`);",
+		},
+		{
+			name:        "PostgreSQL 14 modern DDL with IF NOT EXISTS",
+			dialect:     "postgres 14.9",
+			query:       query,
+			expectedDDL: "CREATE INDEX CONCURRENTLY IF NOT EXISTS \"idx_orders_user_id_created_at_amount\" ON \"orders\" (\"user_id\", \"created_at\", \"amount\");",
+		},
+		{
+			name:        "PostgreSQL 9.4 legacy DDL without IF NOT EXISTS",
+			dialect:     "postgres 9.4.26",
+			query:       query,
+			expectedDDL: "CREATE INDEX CONCURRENTLY \"idx_orders_user_id_created_at_amount\" ON \"orders\" (\"user_id\", \"created_at\", \"amount\");",
+		},
+		{
+			name:        "MySQL TEXT column with prefix length limit (191)",
+			dialect:     "mysql 8.0.35",
+			query:       "SELECT * FROM orders WHERE notes = 'rush'",
+			expectedDDL: "ALTER TABLE `orders` ADD INDEX `idx_orders_notes` (`notes`(191)), ALGORITHM=INPLACE, LOCK=NONE;",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			res := Advise(tc.query, tc.dialect, tables)
+			if len(res.Recommendations) == 0 {
+				t.Fatalf("expected 1 recommendation, got 0")
+			}
+			if res.Recommendations[0].SafeDDL != tc.expectedDDL {
+				t.Errorf("\nexpected: %s\ngot:      %s", tc.expectedDDL, res.Recommendations[0].SafeDDL)
+			}
+		})
 	}
 }
 

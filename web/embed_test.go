@@ -532,6 +532,9 @@ func TestProcessDetailModalAndFooterPillsEmbedded(t *testing.T) {
 		`btnFormat.innerHTML = '<span>↺ Raw SQL</span>';`,
 		// 5. copyJsonCellContent using copyTextToClipboard
 		`const ok = await copyTextToClipboard(editor.value);`,
+		// 6. copyAdvisorDDL using copyTextToClipboard with visual toast and button feedback
+		`async function copyAdvisorDDL(btn) {`,
+		`onclick="copyAdvisorDDL(this)"`,
 	}
 
 	for _, s := range expectedSnippets {
@@ -1723,7 +1726,102 @@ func TestExportDropdownClickAffordanceAndExclusion(t *testing.T) {
 	}
 }
 
+func TestExplainQueryToEditorWiring(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open embedded index.html: %v", err)
+	}
+	defer f.Close()
 
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
 
+	// Ensure window.editorInstance is assigned to cmEditor
+	if !strings.Contains(content, "window.editorInstance = cmEditor;") {
+		t.Errorf("expected window.editorInstance = cmEditor; to be assigned for legacy/external compatibility")
+	}
+
+	// Ensure openImpactQueryInEditor uses setEditorSQL and opens/switches to a query tab if needed
+	expectedSnippets := []string{
+		"function openImpactQueryInEditor()",
+		"setEditorSQL(currentImpactRawSQL)",
+		"addNewQueryTab()",
+		"function applyAdvisorDDLToEditor(ddl)",
+		"setEditorSQL(ddl)",
+	}
+	for _, s := range expectedSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain %q, but was missing", s)
+		}
+	}
+}
+
+func TestQuerySuccessBannerEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open embedded index.html: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	expectedSnippets := []string{
+		"function renderQuerySuccessBanner(sql, message, executionMs, rowsAffected, backupFile)",
+		"nextTab.rawQueryExec",
+		"renderQuerySuccessBanner(sql, data.message, data.execution_ms, data.rows_affected, data.backup_file)",
+		"Command Executed Successfully",
+		"Execution Succeeded",
+	}
+	for _, s := range expectedSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain %q, but was missing", s)
+		}
+	}
+}
+
+func TestPendingBusyStateGuardsAndLoadingEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open embedded index.html: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	expectedSnippets := []string{
+		"animate-indeterminate",
+		`id="query-progress-bar"`,
+		`id="btn-explain-query"`,
+		`id="btn-explain-icon"`,
+		`id="btn-explain-text"`,
+		"queryTimerInterval",
+		"Explaining...",
+		"if (isQueryExecuting) return;",
+		"btn.disabled = true",
+		"btn.classList.add('opacity-50', 'cursor-not-allowed')",
+		"Executing DDL",
+		"ddl-exec-timer",
+		"isConnectionSwitching",
+	}
+	for _, s := range expectedSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain %q, but was missing", s)
+		}
+	}
+}
 
 

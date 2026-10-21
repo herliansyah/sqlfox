@@ -253,18 +253,75 @@ func EvaluateIndexBloat(tableName string, meta driver.TableMetadata) BloatInfo {
 	return info
 }
 
+var versionRegex = regexp.MustCompile(`(\d+)\.(\d+)`)
+
+// parseVersion extracts major and minor version numbers and MariaDB indicators from a dialect string.
+func parseVersion(dialect string) (major int, minor int, hasVersion bool, isMariaDB bool) {
+	d := strings.ToLower(dialect)
+	isMariaDB = strings.Contains(d, "mariadb")
+	if isMariaDB {
+		// Strip common PHP / proxy prefix e.g. "5.5.5-10.4.12-MariaDB"
+		d = strings.ReplaceAll(d, "5.5.5-", "")
+	}
+	m := versionRegex.FindStringSubmatch(d)
+	if len(m) >= 3 {
+		var maj, min int
+		_, _ = fmt.Sscanf(m[1], "%d", &maj)
+		_, _ = fmt.Sscanf(m[2], "%d", &min)
+		return maj, min, true, isMariaDB
+	}
+	return 0, 0, false, isMariaDB
+}
+
+// supportsMySQLOnlineDDL determines if MySQL/MariaDB version supports ALGORITHM=INPLACE, LOCK=NONE.
+func supportsMySQLOnlineDDL(dialect string) bool {
+	maj, min, hasVersion, isMariaDB := parseVersion(dialect)
+	if !hasVersion {
+		// Default to modern MySQL (5.7 / 8.0+) or modern MariaDB (10.x+)
+		return true
+	}
+	if isMariaDB {
+		return maj >= 10
+	}
+	if maj > 5 {
+		return true
+	}
+	if maj == 5 {
+		return min >= 6
+	}
+	return false
+}
+
+// supportsPostgresIfNotExists determines if PostgreSQL version supports IF NOT EXISTS on CREATE INDEX (PG >= 9.5).
+func supportsPostgresIfNotExists(dialect string) bool {
+	maj, min, hasVersion, _ := parseVersion(dialect)
+	if !hasVersion {
+		return true
+	}
+	if maj > 9 {
+		return true
+	}
+	if maj == 9 {
+		return min >= 5
+	}
+	return false
+}
+
 // GenerateSafeIndexDDL formats dialect-appropriate non-blocking index creation statements.
 func GenerateSafeIndexDDL(dialect, table, indexName string, cols []string, meta driver.TableMetadata) string {
 	d := strings.ToLower(dialect)
 
 	switch {
 	case strings.Contains(d, "postgres"):
-		// PostgreSQL: CREATE INDEX CONCURRENTLY IF NOT EXISTS
+		// PostgreSQL: CREATE INDEX CONCURRENTLY IF NOT EXISTS (PG 9.5+)
 		quotedCols := make([]string, len(cols))
 		for i, c := range cols {
 			quotedCols[i] = fmt.Sprintf("%q", c)
 		}
-		return fmt.Sprintf("CREATE INDEX CONCURRENTLY IF NOT EXISTS %q ON %q (%s);", indexName, table, strings.Join(quotedCols, ", "))
+		if supportsPostgresIfNotExists(d) {
+			return fmt.Sprintf("CREATE INDEX CONCURRENTLY IF NOT EXISTS %q ON %q (%s);", indexName, table, strings.Join(quotedCols, ", "))
+		}
+		return fmt.Sprintf("CREATE INDEX CONCURRENTLY %q ON %q (%s);", indexName, table, strings.Join(quotedCols, ", "))
 
 	case strings.Contains(d, "sqlite"):
 		// SQLite: CREATE INDEX IF NOT EXISTS (Exclusive write lock)
@@ -275,14 +332,28 @@ func GenerateSafeIndexDDL(dialect, table, indexName string, cols []string, meta 
 		return fmt.Sprintf("CREATE INDEX IF NOT EXISTS %q ON %q (%s);", indexName, table, strings.Join(quotedCols, ", "))
 
 	default:
-		// MySQL (5.7 & 8.0): ALTER TABLE tbl ADD INDEX idx (...) ALGORITHM=INPLACE, LOCK=NONE;
-		// Check for MySQL 5.7 prefix length limit (767 bytes on COMPACT row format with utf8mb4)
+		// MySQL (5.7 & 8.0) / MariaDB: ALTER TABLE tbl ADD INDEX idx (...) [, ALGORITHM=INPLACE, LOCK=NONE];
+		colTypeMap := make(map[string]string)
+		for _, col := range meta.Columns {
+			colTypeMap[strings.ToLower(col.Name)] = strings.ToLower(col.Type)
+		}
+
 		quotedCols := make([]string, len(cols))
 		for i, c := range cols {
-			// ponytail: heuristic check: if column looks like wide text or varchar(255) on older MySQL, suggest 191 prefix limit
-			quotedCols[i] = fmt.Sprintf("`%s`", c)
+			colType := colTypeMap[strings.ToLower(c)]
+			// ponytail: heuristic check: TEXT or BLOB columns require key prefix length in MySQL (Error 1170)
+			if strings.Contains(colType, "text") || strings.Contains(colType, "blob") {
+				quotedCols[i] = fmt.Sprintf("`%s`(191)", c)
+			} else {
+				quotedCols[i] = fmt.Sprintf("`%s`", c)
+			}
 		}
-		return fmt.Sprintf("ALTER TABLE `%s` ADD INDEX `%s` (%s) ALGORITHM=INPLACE, LOCK=NONE;",
+
+		if supportsMySQLOnlineDDL(d) {
+			return fmt.Sprintf("ALTER TABLE `%s` ADD INDEX `%s` (%s), ALGORITHM=INPLACE, LOCK=NONE;",
+				table, indexName, strings.Join(quotedCols, ", "))
+		}
+		return fmt.Sprintf("ALTER TABLE `%s` ADD INDEX `%s` (%s);",
 			table, indexName, strings.Join(quotedCols, ", "))
 	}
 }

@@ -96,6 +96,16 @@
     .grid-cell { font-variant-numeric: tabular-nums; }
     .grid-cell:hover .edit-hint { opacity: 1; }
 
+    /* Indeterminate progress bar animation for pending actions (Explain, DDL, Connect) */
+    @keyframes indeterminate-slide {
+      0% { left: -40%; width: 40%; }
+      50% { left: 20%; width: 60%; }
+      100% { left: 100%; width: 40%; }
+    }
+    .animate-indeterminate {
+      animation: indeterminate-slide 1.2s infinite ease-in-out;
+    }
+
     /* CodeMirror Dark Custom Theme for SqlFox */
     .CodeMirror {
       height: 100% !important;
@@ -592,8 +602,9 @@
               <span id="tab-database-pill-name" class="font-mono font-semibold text-amber-200">default</span>
               <span class="text-[9px] text-slate-400">▼</span>
             </div>
-            <button onclick="explainActiveQuery()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition">
-              ⚡ Explain
+            <button id="btn-explain-query" onclick="explainActiveQuery()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition flex items-center space-x-1" title="Explain Execution Plan (Ctrl+Shift+Enter)">
+              <span id="btn-explain-icon">⚡</span>
+              <span id="btn-explain-text">Explain</span>
             </button>
             <button onclick="inspectActiveQuery()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition">
               🛡️ Safety Check
@@ -631,6 +642,11 @@
               Cancel Query (Esc)
             </button>
           </div>
+        </div>
+
+        <!-- Top Indeterminate Progress Bar for pending active operations (ADR 0005/0011) -->
+        <div id="query-progress-bar" class="hidden h-[2px] w-full bg-slate-800 overflow-hidden relative flex-shrink-0">
+          <div class="h-full bg-amber-400 absolute animate-indeterminate"></div>
         </div>
 
         <!-- SQL Code Editor Container -->
@@ -4915,14 +4931,40 @@
       if (!dlg) return;
       document.getElementById('ddl-review-sql').textContent = sql;
       const confirmBtn = document.getElementById('ddl-review-confirm-btn');
+      const cancelBtns = dlg.querySelectorAll('button:not(#ddl-review-confirm-btn)');
       
       const newBtn = confirmBtn.cloneNode(true);
+      newBtn.disabled = false;
+      newBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+      newBtn.innerHTML = 'Execute DDL';
+      cancelBtns.forEach(b => { b.disabled = false; b.classList.remove('opacity-50', 'cursor-not-allowed'); });
       confirmBtn.parentNode.replaceChild(newBtn, confirmBtn);
       
       newBtn.onclick = async () => {
-        dlg.close();
-        if (typeof onConfirm === 'function') {
-          await onConfirm();
+        // ponytail: prevent duplicate DDL execution clicks and lock UI with timer
+        if (newBtn.disabled) return;
+        newBtn.disabled = true;
+        newBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        cancelBtns.forEach(b => { b.disabled = true; b.classList.add('opacity-50', 'cursor-not-allowed'); });
+
+        const ddlStart = Date.now();
+        newBtn.innerHTML = '<span class="animate-spin inline-block mr-1.5">⏳</span> Executing DDL (<span id="ddl-exec-timer">0.0s</span>)...';
+        const timerInterval = setInterval(() => {
+          const el = document.getElementById('ddl-exec-timer');
+          if (el) el.textContent = ((Date.now() - ddlStart) / 1000).toFixed(1) + 's';
+        }, 100);
+
+        try {
+          if (typeof onConfirm === 'function') {
+            await onConfirm();
+          }
+          dlg.close();
+        } finally {
+          clearInterval(timerInterval);
+          newBtn.disabled = false;
+          newBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+          newBtn.innerHTML = 'Execute DDL';
+          cancelBtns.forEach(b => { b.disabled = false; b.classList.remove('opacity-50', 'cursor-not-allowed'); });
         }
       };
       if (typeof dlg.showModal === 'function') dlg.showModal();
@@ -5431,24 +5473,28 @@
       el.innerHTML = html;
     }
 
+    let isConnectionSwitching = false;
     async function selectConnection(connId) {
+      if (isConnectionSwitching) return;
       const conn = connections.find(c => c.id === connId);
       if (!conn) return;
-      if (activeConnection && activeConnection.id !== connId) {
-        saveTabsState();
-      }
-      activeConnection = conn;
-      if (!sessionCatalogStore[conn.id]) {
-        sessionCatalogStore[conn.id] = {};
-        sessionCatalogTimestamps[conn.id] = {};
-      }
-      multiDBCatalogCache = sessionCatalogStore[conn.id];
-      localStorage.setItem('sqlfox_last_conn_id', conn.id);
-      renderConnectionsTree();
+      isConnectionSwitching = true;
+      try {
+        if (activeConnection && activeConnection.id !== connId) {
+          saveTabsState();
+        }
+        activeConnection = conn;
+        if (!sessionCatalogStore[conn.id]) {
+          sessionCatalogStore[conn.id] = {};
+          sessionCatalogTimestamps[conn.id] = {};
+        }
+        multiDBCatalogCache = sessionCatalogStore[conn.id];
+        localStorage.setItem('sqlfox_last_conn_id', conn.id);
+        renderConnectionsTree();
 
-      // Update badge to indicate connecting status via SSOT helper
-      renderHeaderConnectionBadge(conn, 'Connecting...');
-      document.getElementById('schema-tree').innerHTML = '<div class="text-slate-500 text-center py-4">Connecting to database...</div>';
+        // Update badge to indicate connecting status via SSOT helper
+        renderHeaderConnectionBadge(conn, 'Connecting...');
+        document.getElementById('schema-tree').innerHTML = '<div class="text-slate-500 text-center py-4 flex items-center justify-center space-x-2"><span class="animate-spin inline-block">⏳</span><span>Connecting to database...</span></div>';
 
       // Connect session
       try {
@@ -5500,6 +5546,8 @@
         `;
         document.getElementById('schema-tree').innerHTML = `<div class="text-app-danger p-2 text-xs">Connection Error: ${escapeHtml(err.message)}</div>`;
         showNativeAlert('Failed to connect: ' + err.message, 'Connection Error');
+      } finally {
+        isConnectionSwitching = false;
       }
     }
 
@@ -7086,6 +7134,7 @@
           }
         }
       });
+      window.editorInstance = cmEditor;
 
       cmEditor.on('inputRead', function(cm, change) {
         if (change.origin === '+input') {
@@ -7700,6 +7749,18 @@
         if (nextTab.queryFilters && Object.keys(nextTab.queryFilters).length > 0) {
           applyQueryResultsFilter(nextTab);
         }
+        const stats = document.getElementById('grid-result-stats');
+        if (stats && nextTab.queryStats) {
+          stats.textContent = nextTab.queryStats;
+        }
+      } else if (nextTab && !nextTab.isTableViewer && nextTab.rawQueryExec) {
+        renderQuerySuccessBanner(
+          nextTab.rawQueryExec.sql,
+          nextTab.rawQueryExec.message,
+          nextTab.rawQueryExec.executionMs,
+          nextTab.rawQueryExec.rowsAffected,
+          nextTab.rawQueryExec.backupFile
+        );
         const stats = document.getElementById('grid-result-stats');
         if (stats && nextTab.queryStats) {
           stats.textContent = nextTab.queryStats;
@@ -14444,6 +14505,13 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
         if (!res.ok) {
           const errMsg = data.error || 'Execution failed';
+          const activeTab = tabs.find(t => t.id === activeTabId);
+          if (activeTab) {
+            activeTab.rawQueryError = { sql, message: errMsg };
+            activeTab.rawQueryRows = null;
+            activeTab.rawQueryCols = null;
+            activeTab.rawQueryExec = null;
+          }
           renderQueryErrorBanner(sql, errMsg);
           return;
         }
@@ -14468,6 +14536,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
             activeTab.rawQueryRows = data.rows || [];
             activeTab.rawQueryCols = data.columns || [];
             activeTab.rawQueryError = null;
+            activeTab.rawQueryExec = null;
             activeTab.queryFilters = {};
             activeTab.sortCol = '';
             activeTab.sortDir = '';
@@ -14483,6 +14552,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
           }
           selectedRowIndices.clear();
           updateSelectedRowsUI();
+          window.lastFailedQuery = null;
+          window.lastFailedError = null;
           renderGridResults(data.columns, data.rows, null, detectedTable, detectedDB);
           document.getElementById('grid-result-stats').textContent = `${data.row_count} rows (${data.execution_ms}ms)`;
           if (/^\s*(CREATE|ALTER|DROP|RENAME)\b/i.test(sql) && activeConnection) {
@@ -14494,8 +14565,16 @@ Please analyze what is causing this query to be slow and suggest necessary query
             activeTab.rawQueryRows = null;
             activeTab.rawQueryCols = null;
             activeTab.rawQueryError = null;
+            activeTab.rawQueryExec = {
+              sql: sql,
+              message: data.message,
+              executionMs: data.execution_ms,
+              rowsAffected: data.rows_affected,
+              backupFile: data.backup_file
+            };
             activeTab.queryStats = `${data.message} (${data.execution_ms}ms)`;
           }
+          renderQuerySuccessBanner(sql, data.message, data.execution_ms, data.rows_affected, data.backup_file);
           document.getElementById('grid-result-stats').textContent = `${data.message} (${data.execution_ms}ms)`;
           if (data.backup_file) {
             showNativeAlert(`Query succeeded!\nAutomated Backup Snapshot created at:\n${data.backup_file}`, 'Safety Guard Backup');
@@ -14515,6 +14594,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
           activeTab.rawQueryError = { sql, message: err.message };
           activeTab.rawQueryRows = null;
           activeTab.rawQueryCols = null;
+          activeTab.rawQueryExec = null;
         }
         renderQueryErrorBanner(sql, err.message);
         const drawer = document.getElementById('audit-drawer');
@@ -14531,6 +14611,11 @@ Please analyze what is causing this query to be slow and suggest necessary query
       activeGridPKCol = null;
       selectedRowIndices.clear();
       updateSelectedRowsUI();
+      const table = document.getElementById('results-table');
+      if (table) {
+        table.classList.add('table-empty');
+        table.style.width = '100%';
+      }
       const tbody = document.getElementById('grid-tbody');
       const thead = document.getElementById('grid-thead');
       thead.innerHTML = '<tr><th class="p-2 pl-4 text-red-400">Execution Error</th></tr>';
@@ -14556,6 +14641,65 @@ Please analyze what is causing this query to be slow and suggest necessary query
       document.getElementById('grid-result-stats').textContent = 'Error executing query';
       window.lastFailedQuery = sql;
       window.lastFailedError = errMessage;
+    }
+
+    function renderQuerySuccessBanner(sql, message, executionMs, rowsAffected, backupFile) {
+      currentColumns = [];
+      currentResults = [];
+      activeGridTable = null;
+      activeGridPKCol = null;
+      selectedRowIndices.clear();
+      updateSelectedRowsUI();
+      window.lastFailedQuery = null;
+      window.lastFailedError = null;
+
+      const table = document.getElementById('results-table');
+      if (table) {
+        table.classList.add('table-empty');
+        table.style.width = '100%';
+      }
+      const thead = document.getElementById('grid-thead');
+      const tbody = document.getElementById('grid-tbody');
+      thead.innerHTML = '<tr><th class="p-2 pl-4 text-emerald-400 font-semibold w-full">Execution Succeeded</th></tr>';
+
+      const statsBadge = (executionMs !== undefined && executionMs !== null)
+        ? `<span class="bg-emerald-900/50 border border-emerald-700/60 text-emerald-300 px-2 py-0.5 rounded text-xs font-mono">⚡ ${executionMs}ms</span>`
+        : '';
+      const rowsBadge = (rowsAffected !== undefined && rowsAffected !== null)
+        ? `<span class="bg-slate-800 border border-slate-700 text-slate-300 px-2 py-0.5 rounded text-xs font-mono">📊 ${rowsAffected} row(s) affected</span>`
+        : '';
+      const backupHtml = backupFile ? `
+        <div class="mt-3 p-3 bg-amber-950/30 border border-amber-800/60 rounded text-amber-200 text-xs flex items-start space-x-2">
+          <span>🛡️</span>
+          <div>
+            <span class="font-semibold">Automated Backup Snapshot created:</span>
+            <div class="font-mono text-[11px] text-amber-300/90 break-all mt-0.5">${escapeHtml(backupFile)}</div>
+          </div>
+        </div>
+      ` : '';
+
+      tbody.innerHTML = `
+        <tr>
+          <td class="p-6">
+            <div class="bg-emerald-950/30 border border-emerald-800/80 rounded-lg p-4 text-emerald-200 space-y-3">
+              <div class="flex items-center justify-between flex-wrap gap-2">
+                <span class="font-bold flex items-center space-x-2 text-emerald-400 text-sm">
+                  <span>✅</span>
+                  <span>Command Executed Successfully</span>
+                </span>
+                <div class="flex items-center space-x-2">
+                  ${statsBadge}
+                  ${rowsBadge}
+                </div>
+              </div>
+              <div class="font-mono text-xs text-emerald-300 bg-emerald-950/60 p-3 rounded border border-emerald-900/60">
+                ${escapeHtml(message || 'Statement executed successfully.')}
+              </div>
+              ${backupHtml}
+            </div>
+          </td>
+        </tr>
+      `;
     }
 
     async function fixCurrentQueryWithAI() {
@@ -14631,7 +14775,84 @@ Please analyze what is causing this query to be slow and suggest necessary query
       else dlg.setAttribute('open', '');
     }
 
+    let queryTimerInterval = null;
+    let queryStartTime = 0;
+
+    function setQueryRunning(isRunning, label = 'Executing...') {
+      isQueryExecuting = !!isRunning;
+      const cancelBtn = document.getElementById('cancel-query-btn');
+      const status = document.getElementById('query-status-text');
+      const runBtn = document.getElementById('btn-run-query');
+      const explainBtn = document.getElementById('btn-explain-query');
+      const explainIcon = document.getElementById('btn-explain-icon');
+      const explainText = document.getElementById('btn-explain-text');
+      const progressBar = document.getElementById('query-progress-bar');
+
+      if (queryTimerInterval) {
+        clearInterval(queryTimerInterval);
+        queryTimerInterval = null;
+      }
+
+      if (runBtn) {
+        runBtn.disabled = isRunning;
+        if (isRunning) {
+          runBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        } else {
+          runBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+      }
+
+      if (explainBtn) {
+        explainBtn.disabled = isRunning;
+        if (isRunning) {
+          explainBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        } else {
+          explainBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+      }
+
+      if (isRunning) {
+        queryStartTime = Date.now();
+        if (progressBar) progressBar.classList.remove('hidden');
+
+        const isExplain = label.toLowerCase().includes('explain');
+        if (isExplain && explainIcon && explainText) {
+          explainIcon.innerHTML = '<span class="animate-spin inline-block">⏳</span>';
+          explainText.textContent = 'Explaining...';
+        }
+
+        if (status) {
+          status.textContent = `${label} (0.0s)`;
+        }
+        if (cancelBtn) cancelBtn.classList.remove('hidden');
+
+        queryTimerInterval = setInterval(() => {
+          if (!isQueryExecuting) {
+            clearInterval(queryTimerInterval);
+            queryTimerInterval = null;
+            return;
+          }
+          const elapsedSec = ((Date.now() - queryStartTime) / 1000).toFixed(1);
+          if (status) status.textContent = `${label} (${elapsedSec}s)`;
+        }, 100);
+      } else {
+        if (progressBar) progressBar.classList.add('hidden');
+
+        if (explainIcon && explainText) {
+          explainIcon.textContent = '⚡';
+          explainText.textContent = 'Explain';
+        }
+
+        if (status && (status.textContent.startsWith('Executing') || status.textContent.startsWith('Explaining'))) {
+          status.textContent = 'Ready';
+        }
+        if (cancelBtn) cancelBtn.classList.add('hidden');
+      }
+    }
+
     async function explainActiveQuery() {
+      // ponytail: Concurrency guard prevents duplicate simultaneous explain dispatches
+      if (isQueryExecuting) return;
       if (!activeConnection) {
         showNativeAlert('Please select or create a connection first.', 'No Connection');
         return;
@@ -14642,11 +14863,19 @@ Please analyze what is causing this query to be slow and suggest necessary query
         return;
       }
       const currentDb = schemaCatalogCache?.database_name || activeConnection.database_name || '';
+
+      setQueryRunning(true, 'Explaining...');
+
+      // ponytail: 30s timeout guard to prevent UI hanging indefinitely on slow remote connections
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+
       try {
         const res = await apiFetch(`/api/session/${activeConnection.id}/explain`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sql, database: currentDb })
+          body: JSON.stringify({ sql, database: currentDb }),
+          signal: controller.signal
         });
         const data = await res.json();
         if (!res.ok) {
@@ -14655,29 +14884,14 @@ Please analyze what is causing this query to be slow and suggest necessary query
         }
         openImpactModal(data, sql);
       } catch (err) {
-        showNativeAlert('Explain request failed: ' + err.message, 'Network Error');
-      }
-    }
-
-    function setQueryRunning(isRunning) {
-      isQueryExecuting = !!isRunning;
-      const btn = document.getElementById('cancel-query-btn');
-      const status = document.getElementById('query-status-text');
-      const runBtn = document.getElementById('btn-run-query');
-      if (runBtn) {
-        runBtn.disabled = isRunning;
-        if (isRunning) {
-          runBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        if (err.name === 'AbortError') {
+          showNativeAlert('Explain request timed out after 30s. The query execution plan took too long to generate.', 'Timeout');
         } else {
-          runBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+          showNativeAlert('Explain request failed: ' + err.message, 'Network Error');
         }
-      }
-      if (isRunning) {
-        status.textContent = 'Executing...';
-        btn.classList.remove('hidden');
-      } else {
-        status.textContent = 'Ready';
-        btn.classList.add('hidden');
+      } finally {
+        clearTimeout(timeoutId);
+        setQueryRunning(false);
       }
     }
 
@@ -14788,25 +15002,37 @@ Please analyze what is causing this query to be slow and suggest necessary query
       updateImpactQuerySnippet();
     }
 
-    function copyImpactQuery() {
+    async function copyImpactQuery() {
       if (!currentImpactRawSQL) return;
       const text = isImpactSQLFormatted ? formatSQL(currentImpactRawSQL) : currentImpactRawSQL;
-      copyTextToClipboard(text);
+      const ok = await copyTextToClipboard(text);
+      if (ok) {
+        showToast('Query copied to clipboard', 'success');
+      }
     }
 
     function openImpactQueryInEditor() {
       if (!currentImpactRawSQL) return;
-      if (window.editorInstance) {
-        window.editorInstance.setValue(currentImpactRawSQL);
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const isQueryTab = activeTab && !activeTab.isTableViewer && !activeTab.isProcesslist && !activeTab.isCluster && !activeTab.isFlightRecorder && !activeTab.isVariables && !activeTab.isNote;
+      if (!isQueryTab) {
+        addNewQueryTab();
       }
+      setEditorSQL(currentImpactRawSQL);
+      const currentTab = tabs.find(t => t.id === activeTabId);
+      if (currentTab) currentTab.sql = currentImpactRawSQL;
+      if (cmEditor) cmEditor.focus();
       closeImpactModal();
       showToast('Query loaded into Query Editor');
     }
 
-    function copyImpactRawJSON() {
+    async function copyImpactRawJSON() {
       const rawPlanEl = document.getElementById('impact-raw-plan');
       if (rawPlanEl && rawPlanEl.textContent) {
-        copyTextToClipboard(rawPlanEl.textContent);
+        const ok = await copyTextToClipboard(rawPlanEl.textContent);
+        if (ok) {
+          showToast('Raw execution plan copied to clipboard', 'success');
+        }
       }
     }
 
@@ -15044,8 +15270,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
             <div class="bg-slate-950 border border-slate-800 rounded p-2 flex items-center justify-between">
               <code class="font-mono text-[11px] text-sky-300 select-all overflow-x-auto whitespace-pre">${escapeHtml(rec.safe_ddl)}</code>
               <div class="flex items-center space-x-1 ml-2 flex-shrink-0">
-                <button type="button" data-ddl="${escapeHtml(rec.safe_ddl)}" onclick="copyTextToClipboard(this.getAttribute('data-ddl'))" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[11px] transition flex items-center space-x-1">
-                  <span>📋</span><span>Copy</span>
+                <button type="button" data-ddl="${escapeHtml(rec.safe_ddl)}" onclick="copyAdvisorDDL(this)" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[11px] transition flex items-center space-x-1" title="Copy Index DDL">
+                  <span class="advisor-copy-icon">📋</span><span class="advisor-copy-label">Copy</span>
                 </button>
                 <button type="button" data-ddl="${escapeHtml(rec.safe_ddl)}" onclick="applyAdvisorDDLToEditor(this.getAttribute('data-ddl'))" class="px-2 py-1 bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800 rounded text-[11px] transition flex items-center space-x-1">
                   <span>⚡</span><span>Editor</span>
@@ -15060,10 +15286,43 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
     }
 
-    function applyAdvisorDDLToEditor(ddl) {
-      if (window.editorInstance && ddl) {
-        window.editorInstance.setValue(ddl);
+    async function copyAdvisorDDL(btn) {
+      if (!btn) return;
+      const ddl = btn.getAttribute('data-ddl');
+      if (!ddl) return;
+      const ok = await copyTextToClipboard(ddl);
+      if (ok) {
+        showToast('Index DDL copied to clipboard', 'success');
+        const iconSpan = btn.querySelector('.advisor-copy-icon');
+        const labelSpan = btn.querySelector('.advisor-copy-label');
+        if (iconSpan && labelSpan) {
+          const oldIcon = iconSpan.textContent;
+          const oldLabel = labelSpan.textContent;
+          iconSpan.textContent = '✓';
+          labelSpan.textContent = 'Copied!';
+          btn.classList.add('text-emerald-400');
+          setTimeout(() => {
+            iconSpan.textContent = oldIcon;
+            labelSpan.textContent = oldLabel;
+            btn.classList.remove('text-emerald-400');
+          }, 1500);
+        }
+      } else {
+        showNativeAlert('Failed to copy index DDL to clipboard.', 'Clipboard Error');
       }
+    }
+
+    function applyAdvisorDDLToEditor(ddl) {
+      if (!ddl) return;
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const isQueryTab = activeTab && !activeTab.isTableViewer && !activeTab.isProcesslist && !activeTab.isCluster && !activeTab.isFlightRecorder && !activeTab.isVariables && !activeTab.isNote;
+      if (!isQueryTab) {
+        addNewQueryTab();
+      }
+      setEditorSQL(ddl);
+      const currentTab = tabs.find(t => t.id === activeTabId);
+      if (currentTab) currentTab.sql = ddl;
+      if (cmEditor) cmEditor.focus();
       closeImpactModal();
       showToast('Index DDL inserted into Query Editor');
     }
@@ -20588,6 +20847,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
     }
 
     async function testConnectionFromModal() {
+      const btn = document.querySelector('#connection-modal button[onclick*="testConnectionFromModal"]');
+      if (btn && btn.disabled) return;
       const driver = document.getElementById('modal-conn-driver').value;
       const host = document.getElementById('modal-conn-host').value.trim();
       if (!host) {
@@ -20609,15 +20870,23 @@ Please analyze what is causing this query to be slow and suggest necessary query
         password: document.getElementById('modal-conn-pass').value
       };
 
-      const btn = document.querySelector('#connection-modal button[onclick*="testConnectionFromModal"]');
-      const origText = btn ? btn.textContent : '';
-      if (btn) btn.textContent = '⏳ Testing...';
+      const origHtml = btn ? btn.innerHTML : '';
+      if (btn) {
+        btn.disabled = true;
+        btn.classList.add('opacity-50', 'cursor-not-allowed');
+        btn.innerHTML = '<span class="animate-spin inline-block mr-1">⏳</span> Testing...';
+      }
+
+      // ponytail: 15s timeout guard prevents freeze on unreachable IP / blackholed TCP port
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
 
       try {
         const res = await apiFetch('/api/connections/test-transient/test', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          body: JSON.stringify(payload),
+          signal: controller.signal
         });
         const data = await res.json();
         if (res.ok && data.success) {
@@ -20626,9 +20895,18 @@ Please analyze what is causing this query to be slow and suggest necessary query
           showNativeAlert(`❌ Connection failed: ${data.error || res.statusText || 'Unable to connect'}`, 'Connection Test');
         }
       } catch (err) {
-        showNativeAlert(`❌ Connection failed: ${err.message}`, 'Connection Test');
+        if (err.name === 'AbortError') {
+          showNativeAlert('❌ Connection test timed out after 15s. Verify host IP, port, and firewall rules.', 'Connection Timeout');
+        } else {
+          showNativeAlert(`❌ Connection failed: ${err.message}`, 'Connection Test');
+        }
       } finally {
-        if (btn) btn.textContent = origText;
+        clearTimeout(timeoutId);
+        if (btn) {
+          btn.disabled = false;
+          btn.classList.remove('opacity-50', 'cursor-not-allowed');
+          btn.innerHTML = origHtml;
+        }
       }
     }
 
