@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Web Busy State Guards, Timers & Progress Indicators (`web/dist/index.html`)**: Added concurrency locks and execution guards for EXPLAIN, DDL review, and connection tests to prevent duplicate submissions and race conditions. Added live elapsed stopwatch timer, indeterminate progress bar, and timeout safety guards (30s for EXPLAIN, 15s for connection tests) preventing indefinite UI freezes.
+- **DDL/DML Execution Success Banner (`web/dist/index.html`)**: Dedicated success banner in the query results panel for non-query statements (ALTER, CREATE, UPDATE, DELETE), cleanly clearing previous errors and preserving execution state across tab switching.
+
+### Fixed
+- **Advisor MySQL Online DDL Syntax & Version Awareness (`internal/advisor`, `internal/server`)**: Fixed MySQL Error 1064 syntax error by ensuring correct comma placement before `ALGORITHM` in ALTER TABLE statements. Added database version awareness to safely fall back to standard DDL on legacy MySQL (< 5.6) and MariaDB (< 10.0), enforced length prefix limits on `TEXT`/`BLOB` indexed columns, and connected advisor copy buttons to the toast notification system.
+- **Query Editor Routing for EXPLAIN & Advisor DDL (`web/dist/index.html`)**: Routed `openImpactQueryInEditor` and `applyAdvisorDDLToEditor` through the canonical `setEditorSQL` helper, automatically opening and focusing a new query tab when triggered from non-editor views (e.g. Processlist or Flight Recorder).
+
+
 ## [v0.10.4] - 2026-10-20
 
 ### Added
