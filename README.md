@@ -42,7 +42,7 @@ Operates with a strict memory ceiling (**< 100MB RAM**), sub-second launch time 
 - 🔄 **Schema & Data Synchronization Suite**: AST-based Structure Sync (side-by-side DDL comparison & safe migration generation), direct memory-bounded Cross-Connection Data Transfer (<50MB buffer), and Row-Level Data Sync (keyset delta reconciliation).
 - 📊 **Spreadsheet CRUD & Smart Seeding**: Inline "+ Add Row" drafting, multi-row deletion with Safety Guard challenge, instant column filtering, streaming SQL dumps (<10MB buffer), and FK-Aware Smart Seed Dumps (referential topological closure).
 - 🛡️ **Deterministic Safety Guard**: Intercepts accidental destructive queries (`DROP TABLE`, `TRUNCATE`, unqualified `UPDATE`/`DELETE` without `WHERE`) via AST evaluation with a mandatory Challenge Modal, lexical comment/literal masking, CTE pre-processing, and compound multi-statement batch inspection.
-- 🔐 **Encrypted Connection Vault**: Database credentials and SSH keys encrypted at rest with **AES-256-GCM** and **Argon2id**. Protected by a Master PIN / Password.
+- 🔐 **Encrypted Connection Vault**: Database credentials and SSL/TLS keys encrypted at rest with **AES-256-GCM** and **Argon2id**. Protected by a Master PIN / Password.
 - 📱 **Remote & LAN Access Guard**: Access your database workspace from your tablet, phone, or team members on the same network with PIN verification.
 - 🤖 **BYOK AI Copilot & Error Healer**: Bring Your Own Key (OpenAI, Claude, Gemini, DeepSeek, or local Ollama). Explains schemas, generates optimized queries, and automatically analyzes and heals SQL execution errors. Features rich Markdown rendering with 1-click execution blocks (`Insert & Run`, `Replace`) and chat session branching/forking.
 - 🏎️ **Keyset Pagination & Out-of-Band Cancellation**: High-speed row streaming without memory spikes and instantaneous query termination (`KILL QUERY`) through dedicated control sessions.
@@ -236,7 +236,7 @@ Berjalan dengan konsumsi memori sangat hemat (**< 100MB RAM**), waktu start kila
 - 🔄 **Sinkronisasi Skema & Data (Navicat Power Suite)**: Perbandingan struktur DDL berdampingan (*Structure Sync*) beserta migrasi aman, transfer streaming antar-koneksi langsung (*Data Transfer* dengan batas buffer <50MB), dan rekonsiliasi data per baris berbasis primary key (*Row-Level Data Sync*).
 - 📊 **Spreadsheet Grid CRUD & Smart Seed**: Penambahan baris draf instan ("+ Add Row"), penghapusan banyak baris dengan proteksi Safety Guard, filter kolom instan, streaming SQL dump langsung (<10MB buffer), dan *FK-Aware Smart Seed Dump* dengan resolusi graf relasi rekursif (*topological closure*).
 - 🛡️ **Safety Guard Terintegrasi**: Menganalisis sintaks SQL (*AST parser*) secara deterministik untuk mencegat query destruktif berbahaya (`DROP TABLE`, `TRUNCATE`, `DELETE`/`UPDATE` massal tanpa `WHERE`) dengan dialog konfirmasi aman (*Challenge Modal*), sanitasi komentar/literal teks (*lexical masking*), pra-pemrosesan CTE, serta inspeksi batch multi-statement terpadu.
-- 🔐 **Connection Vault Terenkripsi**: Menyimpan kredensial database dan SSH key dengan standar kriptografi **AES-256-GCM** dan **Argon2id**. Dilengkapi PIN / Master Password otomatis yang praktis.
+- 🔐 **Connection Vault Terenkripsi**: Menyimpan kredensial database dan sertifikat SSL/TLS dengan standar kriptografi **AES-256-GCM** dan **Argon2id**. Dilengkapi PIN / Master Password otomatis yang praktis.
 - 📱 **Akses Multi-Device (Remote LAN Guard)**: Buka SqlFox dari tablet, iPad, atau HP melalui koneksi WiFi lokal dengan otentikasi PIN keamanan.
 - 🤖 **AI Copilot & Error Healer (BYOK)**: Gunakan API Key Anda sendiri (OpenAI, Claude, Gemini, DeepSeek, atau Ollama lokal). Mampu membuat query dari bahasa manusia, optimasi indeks, memperbaiki query error secara otomatis (*Error Healer*), formatting Markdown kaya dengan tombol eksekusi SQL instan (*Insert & Run*, *Replace*), serta *Chat Session Forking* untuk eksplorasi prompt independen.
 - 🏎️ **Keyset Pagination & Out-of-Band Cancel**: Tampilan data super responsif tanpa lonjakan RAM, serta fitur pembatalan query instan (*KILL QUERY*) lewat secondary connection tanpa memutus koneksi utama.
@@ -400,7 +400,7 @@ Untuk mengatur log saat menjalankan `sqlfox.exe` tanpa membuka Command Prompt:
 
 1. **Pencegahan Human Error**: Fitur **Safety Guard** aktif secara default untuk lingkungan *Production*. Query seperti `UPDATE akun SET saldo = 0;` tanpa klausa `WHERE` akan dicegat sebelum menyentuh database.
 2. **Privasi AI (BYOK)**: SqlFox **TIDAK PERNAH** mengirimkan data baris tabel atau data pelanggan ke server AI. Hanya struktur DDL skema terkait yang dikirimkan untuk konteks pembuatan query.
-3. **Penyimpanan Kredensial Aman**: Password database dan private key SSH dienkripsi menggunakan algoritma standar industri **AES-256-GCM** dengan derivasi kunci **Argon2id**.
+3. **Penyimpanan Kredensial Aman**: Password database dan sertifikat SSL/TLS dienkripsi menggunakan algoritma standar industri **AES-256-GCM** dengan derivasi kunci **Argon2id**.
 
 ---
 

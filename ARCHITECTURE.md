@@ -25,7 +25,7 @@ flowchart TD
     end
 
     subgraph TargetDB ["Target Databases"]
-        MySQL["MySQL 5.7/8.x / MariaDB (Direct / SSH)"]
+        MySQL["MySQL 5.7/8.x / MariaDB (Direct / SSL)"]
         Postgres["PostgreSQL 9.6-16+ (pgx/v5 Pure Go)"]
         SQLite["Local SQLite (Pure Go)"]
     end

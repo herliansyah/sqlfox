@@ -26,7 +26,7 @@
    - [Remote Access Guard & PIN Keamanan](#remote-access-guard--pin-keamanan)
 3. [Connection Vault & Arsitektur Keamanan](#3-connection-vault--arsitektur-keamanan)
    - [Enkripsi AES-256-GCM & KDF Argon2id](#enkripsi-aes-256-gcm--kdf-argon2id)
-   - [SSH Tunneling Native (Bastion / Jump Host)](#ssh-tunneling-native-bastion--jump-host)
+   - [Akses Bastion / Jump Host melalui Port Forwarding SSH Platform](#akses-bastion--jump-host-melalui-port-forwarding-ssh-platform)
    - [Konfigurasi Multi-Engine (MySQL, PostgreSQL, SQLite)](#konfigurasi-multi-engine-mysql-postgresql-sqlite)
    - [Tingkatan Environment (Production, Staging, Development)](#tingkatan-environment-production-staging-development)
    - [Penegakan Mode Read-Only](#penegakan-mode-read-only)
@@ -88,7 +88,7 @@ SqlFox dibangun secara khusus bagi para rekayasawan perangkat lunak dan tim DBA 
 | **MySQL** | 5.7, 8.0, 8.4+ | Pure-Go `go-sql-driver/mysql` dengan dukungan penuh SSL/TLS dan TLS 1.3 |
 | **MariaDB** | 10.3 s/d 11.x+ | Protokol native MySQL dengan inspeksi kluster Galera bawaan |
 | **PostgreSQL** | 9.6 s/d 16+ | Driver native `pgx/v5` dengan pembatalan query `pg_cancel_backend` |
-| **SQLite** | 3.x | Engine murni Go tanpa CGO `modernc.org/sqlite` (lokal maupun via SSH) |
+| **SQLite** | 3.x | Engine murni Go tanpa CGO `modernc.org/sqlite` (lokal) |
 
 ---
 
@@ -247,23 +247,23 @@ Saat Anda menjalankan SqlFox di server jaringan lokal atau mengaksesnya via IP L
 ## 3. Connection Vault & Arsitektur Keamanan
 
 ### Enkripsi AES-256-GCM & KDF Argon2id
-- Seluruh host database, port, username, password, dan SSH private key tersimpan rapi di basis data SQLite lokal terenkripsi (`~/.sqlfox/vault.db`).
+- Seluruh host database, port, username, password, dan sertifikat SSL/TLS tersimpan rapi di basis data SQLite lokal terenkripsi (`~/.sqlfox/config.db`).
 - Setiap catatan dienkripsi menggunakan blok sandi **AES-256-GCM** dengan vektor inisialisasi (IV) 96-bit unik per catatan.
 - Kunci derivasi diolah menggunakan algoritma **Argon2id** berstandar keamanan tinggi guna menangkal serangan *brute-force* berbasis kluster GPU.
 - Kredensial dapat diekspor menjadi arsip portabel (`.sqlfox-vault`) berpaspor sandi untuk mempermudah migrasi perangkat kerja atau berbagi profil koneksi tim secara aman.
 
-### SSH Tunneling Native (Bastion / Jump Host)
-SqlFox memiliki klien SSH native pure-Go bawaan di dalam binary:
-- Terhubung secara aman ke instans AWS RDS, Google Cloud SQL, atau server on-premise yang berada di dalam subnet privat tanpa IP publik.
-- Mendukung otentikasi kata sandi serta private key SSH **RSA** maupun **Ed25519** ber-passphrase.
-- Berjalan sepenuhnya di dalam memori tanpa perlu mengeksekusi proses `ssh` eksternal di OS.
+### Akses Bastion / Jump Host melalui Port Forwarding SSH Platform
+Sesuai dengan ADR 0020 (filosofi single binary yang ramping tanpa dependensi berat), SqlFox memanfaatkan mekanisme port forwarding platform standar untuk menjangkau database privat di dalam VPC:
+- Gunakan perintah port forwarding standar: `ssh -N -L 3306:remote-db-host:3306 user@bastion`
+- Arahkan SqlFox ke host `127.0.0.1:3306` dengan kredensial tersimpan aman di Connection Vault.
+- Menjaga ukuran binary tetap ultra-ringan (~20MB), terintegrasi langsung dengan konfigurasi SSH lokal (`~/.ssh/config`), agent keys, dan VPN perusahaan.
 
 ### Konfigurasi Multi-Engine (MySQL, PostgreSQL, SQLite)
 1. Klik tombol **+ New Connection** di sidebar kiri.
 2. Pilih dialek database yang Anda tuju:
    - **MySQL / MariaDB**: Host, Port (standar `3306`), Username, Password, Database Name, dan mode SSL.
    - **PostgreSQL**: Host, Port (standar `5432`), Username, Password, Database, SSL, dan skema awal **Search Path** (`public` atau skema kustom).
-   - **SQLite**: Path berkas absolut di disk lokal (contoh `/var/db/app.db`) atau path berkas remote melalui tunnel SSH.
+   - **SQLite**: Path berkas absolut di disk lokal (contoh `/var/db/app.db`).
 3. Klik **Test Connection** untuk memvalidasi koneksi sebelum menyimpannya ke Vault.
 
 ### Tingkatan Environment (Production, Staging, Development)
@@ -284,7 +284,7 @@ Klik tombol **🔒 Read-Only** pada bilah menu atas kapan saja:
 SqlFox menyatukan seluruh konfigurasi ruang kerja dan preferensi sistem ke dalam satu modal dialog 4-tab yang elegan dan terintegrasi (`#settings-modal`):
 - **Akses Seketika**: Klik tombol **`⚙️ Settings`** pada bilah navigasi atas atau gunakan tombol pintasan global standar industri **`Ctrl + ,`** (atau **`Cmd + ,`** di macOS). Menu pengaturan ini juga dapat dipanggil langsung dari Command Palette (**`Ctrl + K`**).
 - **4 Tab Konfigurasi Terpadu**:
-  1. **`🔐 Connections`**: Kelola profil berkas brankas terenkripsi (*Connection Vault*), modifikasi kredensial koneksi, uji latensi ping TCP, dan konfigurasi bastion tunnel SSH native.
+  1. **`🔐 Connections`**: Kelola profil berkas brankas terenkripsi (*Connection Vault*), modifikasi kredensial koneksi, uji latensi ping TCP, dan konfigurasi sertifikat SSL/TLS.
   2. **`☁️ GitHub Sync`**: Konfigurasi GitHub Personal Access Token (PAT) dan path repositori untuk sinkronisasi otomatis snippet query dan skema DDL ke repositori Git jarak jauh.
   3. **`📦 Notes Bundle`**: Ekspor dan impor arsip bundel catatan operasional terenkripsi (`.sqlfox-vault`), memudahkan pembagian playbook antaranggota tim atau backup offline.
   4. **`🤖 AI Copilot`**: Pengaturan mandiri kredensial BYOK API Key (OpenAI, Claude, Gemini, DeepSeek, atau Ollama lokal), konfigurasi model AI, temperatur, dan prompt sistem kustom. Terintegrasi mulus dari drawer Notes maupun sidebar Copilot.
