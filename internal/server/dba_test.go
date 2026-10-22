@@ -118,24 +118,25 @@ func TestDBAOperationsAndAuditLog(t *testing.T) {
 	}
 	execResp.Body.Close()
 
-	// Sleep briefly for async audit log write
-	time.Sleep(150 * time.Millisecond)
-
-	// 4. Test GetAuditLogs for editor source entry
-	auditResp, err := client.Get(ts.URL + "/api/session/" + connRec.ID + "/audit-logs?source=editor")
-	if err != nil || auditResp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(auditResp.Body)
-		t.Fatalf("get audit logs failed with code %d: %s", auditResp.StatusCode, string(body))
-	}
-
+	// 4. Test GetAuditLogs for editor source entry (poll briefly for async audit log write)
 	var auditData struct {
 		Logs   []map[string]any `json:"logs"`
 		Total  int              `json:"total"`
 		Limit  int              `json:"limit"`
 		Offset int              `json:"offset"`
 	}
-	_ = json.NewDecoder(auditResp.Body).Decode(&auditData)
-	auditResp.Body.Close()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		auditResp, err := client.Get(ts.URL + "/api/session/" + connRec.ID + "/audit-logs?source=editor")
+		if err == nil && auditResp.StatusCode == http.StatusOK {
+			_ = json.NewDecoder(auditResp.Body).Decode(&auditData)
+			auditResp.Body.Close()
+			if auditData.Total >= 1 && len(auditData.Logs) >= 1 {
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 
 	if auditData.Total < 1 || len(auditData.Logs) < 1 {
 		t.Fatalf("expected at least 1 editor audit log, got total=%d len=%d", auditData.Total, len(auditData.Logs))
@@ -159,19 +160,22 @@ func TestDBAOperationsAndAuditLog(t *testing.T) {
 	}
 	ceResp.Body.Close()
 
-	time.Sleep(150 * time.Millisecond)
-
-	// Verify cell-edit source filtering in audit logs
-	ceAuditResp, err := client.Get(ts.URL + "/api/session/" + connRec.ID + "/audit-logs?source=grid_cell_edit")
-	if err != nil || ceAuditResp.StatusCode != http.StatusOK {
-		t.Fatalf("get audit logs with source failed: %v", err)
-	}
 	var ceAuditData struct {
 		Logs  []map[string]any `json:"logs"`
 		Total int              `json:"total"`
 	}
-	_ = json.NewDecoder(ceAuditResp.Body).Decode(&ceAuditData)
-	ceAuditResp.Body.Close()
+	ceDeadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(ceDeadline) {
+		ceAuditResp, err := client.Get(ts.URL + "/api/session/" + connRec.ID + "/audit-logs?source=grid_cell_edit")
+		if err == nil && ceAuditResp.StatusCode == http.StatusOK {
+			_ = json.NewDecoder(ceAuditResp.Body).Decode(&ceAuditData)
+			ceAuditResp.Body.Close()
+			if ceAuditData.Total >= 1 && len(ceAuditData.Logs) >= 1 {
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 
 	if ceAuditData.Total != 1 || len(ceAuditData.Logs) != 1 {
 		t.Fatalf("expected 1 grid_cell_edit log, got total=%d len=%d", ceAuditData.Total, len(ceAuditData.Logs))

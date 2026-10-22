@@ -8767,6 +8767,10 @@
         // Clear selection & refetch processlist
         clearProcesslistSelection();
         await fetchProcesslist(true);
+        // ponytail: Deferred refresh to capture async DB engine cleanup / rollback completion
+        setTimeout(() => {
+          fetchProcesslist(true);
+        }, 750);
       } catch (err) {
         closeBatchKillModal();
         showNativeAlert('Batch termination request failed: ' + err.message, 'Network Error');
@@ -9328,6 +9332,9 @@
                 ${hasQuery ? `
                   <button type="button" onclick="confirmKillProcess(${t.id}, 'query')" ${isSystem ? 'disabled' : ''} class="px-1.5 py-0.5 rounded bg-amber-950 hover:bg-amber-800 text-amber-300 text-[10px] font-semibold border border-amber-800 disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer" title="Kill currently executing query only (KILL QUERY)">
                     Kill Q
+                  </button>
+                  <button type="button" onclick="confirmKillProcess(${t.id}, 'connection')" ${isSelf || isSystem ? 'disabled' : ''} class="px-1.5 py-0.5 rounded bg-red-950 hover:bg-red-800 text-red-300 text-[10px] font-semibold border border-red-800 disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer" title="${isSelf ? 'Cannot kill own active session connection' : 'Terminate client connection (KILL)'}">
+                    Kill C
                   </button>
                 ` : `
                   <button type="button" onclick="confirmKillProcess(${t.id}, 'connection')" ${isSelf || isSystem ? 'disabled' : ''} class="px-1.5 py-0.5 rounded bg-red-950 hover:bg-red-800 text-red-300 text-[10px] font-semibold border border-red-800 disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer" title="${isSelf ? 'Cannot kill own active session connection' : 'Terminate client connection (KILL)'}">
@@ -9954,6 +9961,7 @@
 
     async function doKillProcess(threadId, mode) {
       if (!activeConnection) return;
+      const modeLabel = mode === 'connection' ? 'KILL CONNECTION' : 'KILL QUERY';
       try {
         const res = await apiFetch(`/api/session/${activeConnection.id}/kill`, {
           method: 'POST',
@@ -9965,7 +9973,12 @@
           showNativeAlert('Kill action failed: ' + (data.error || res.statusText), 'Kill Error');
           return;
         }
+        showToast(`✓ ${modeLabel} sent for thread #${threadId}`, 'success');
+        // ponytail: Initial immediate refresh followed by deferred refresh to capture async DB engine cleanup
         await fetchProcesslist(true);
+        setTimeout(() => {
+          fetchProcesslist(true);
+        }, 750);
       } catch (err) {
         showNativeAlert('Kill action failed: ' + err.message, 'Kill Error');
       }

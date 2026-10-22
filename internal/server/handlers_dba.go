@@ -163,6 +163,13 @@ func (s *Server) handleKillProcess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	modeLabel := "KILL QUERY"
+	if killConn {
+		modeLabel = "KILL CONNECTION"
+	}
+	auditMsg := fmt.Sprintf("%s on thread #%d", modeLabel, req.ThreadID)
+	sess.RecordAudit(auditMsg, "processlist", 0, 1, nil)
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success":   true,
 		"thread_id": req.ThreadID,

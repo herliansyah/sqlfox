@@ -236,3 +236,27 @@ func TestPostgresSession_BeginTx_FailsGracefully(t *testing.T) {
 		t.Errorf("expected error on closed db Conn, got nil")
 	}
 }
+
+func TestPostgresKillProcess_Validation(t *testing.T) {
+	s := &PostgresSession{}
+	ctx := context.Background()
+
+	// 1. Thread ID validation
+	if err := s.KillProcess(ctx, 0, true); err == nil || !strings.Contains(err.Error(), "invalid thread id") {
+		t.Fatalf("expected invalid thread id error for 0, got %v", err)
+	}
+	if err := s.KillProcess(ctx, -10, false); err == nil || !strings.Contains(err.Error(), "invalid thread id") {
+		t.Fatalf("expected invalid thread id error for negative id, got %v", err)
+	}
+
+	// 2. Closed database returns error
+	db, err := sql.Open("pgx", "postgres://invalid:invalid@127.0.0.1:54329/invaliddb?sslmode=disable")
+	if err != nil {
+		t.Fatalf("sql.Open failed: %v", err)
+	}
+	db.Close()
+	s.db = db
+	if err := s.KillProcess(ctx, 42, true); err == nil {
+		t.Fatalf("expected error on closed db, got nil")
+	}
+}
