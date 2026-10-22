@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.10.7] - 2026-10-22
+
 ### Added
 - **Visual Transaction Controls & Toolbar Status (`web/dist/index.html`, `internal/server`)**: Integrated visual active transaction pill (`[⚡ TX Active]`) into query editor toolbar displaying live transaction state (`tx_active`), paired with direct `Commit` and `Rollback` buttons and global keyboard shortcuts (`Ctrl+Shift+C` and `Ctrl+Shift+R`) (ADR 0057, Roadmap 1.2).
 - **Processlist Dual Kill Controls & State Sync (`web/dist/index.html`, `internal/server`)**: Added dedicated `Kill C` (terminate connection) action alongside `Kill Q` (cancel query) for active processes in Processlist table, complete with deferred auto-refresh (600ms) and structured audit logging.
