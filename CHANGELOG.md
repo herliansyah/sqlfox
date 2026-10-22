@@ -7,7 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Visual Transaction Controls & Toolbar Status (`web/dist/index.html`, `internal/server`)**: Integrated visual active transaction pill (`[⚡ TX Active]`) into query editor toolbar displaying live transaction state (`tx_active`), paired with direct `Commit` and `Rollback` buttons and global keyboard shortcuts (`Ctrl+Shift+C` and `Ctrl+Shift+R`) (ADR 0057, Roadmap 1.2).
+- **Processlist Dual Kill Controls & State Sync (`web/dist/index.html`, `internal/server`)**: Added dedicated `Kill C` (terminate connection) action alongside `Kill Q` (cancel query) for active processes in Processlist table, complete with deferred auto-refresh (600ms) and structured audit logging.
+
 ### Fixed
+- **Uncommitted Transaction Tab Close Guard (`web/dist/index.html`)**: Added confirmation warning dialog preventing accidental query tab closure while an uncommitted database transaction remains active, executing clean rollback on confirmed tab exit.
+- **Vault Audit Log Auto-Retention & Disk Ceiling (`internal/vault`)**: Enforced a 50,000-record ceiling and automatic 30-day retention purge on vault open, eliminating unbounded audit log disk storage growth.
+- **Cross-Engine Transfer DDL & Type Normalization (`internal/driver`)**: Normalized column types and stripped dialect-specific clauses (e.g. `UNSIGNED`, engine-specific collations, `ON UPDATE CURRENT_TIMESTAMP`) during cross-database data transfers and structure sync across MySQL, PostgreSQL, and SQLite.
+- **Out-of-Band Processlist Kill Connection (`internal/driver/mysql`, `internal/driver/postgres`)**: Dialed dedicated control connections in MySQL and PostgreSQL `KillProcess` to terminate hung threads even when the connection pool is fully saturated.
+- **PostgreSQL Kill Result Verification (`internal/driver/postgres`)**: Verified boolean return values of `pg_terminate_backend` and `pg_cancel_backend` to detect and propagate process termination failures.
+- **Extended Transaction Connection Pinning (`internal/server`)**: Added connection pinning support for `BEGIN READ ONLY`, `BEGIN IMMEDIATE`, and `BEGIN EXCLUSIVE` transaction statements.
+- **MySQL EXPLAIN Dedicated Connection Context (`internal/driver/mysql`)**: Applied active database context to dedicated explain connections, preventing "no database selected" errors.
+- **Multipart Form Temporary File Leaks (`internal/server`)**: Guaranteed cleanup of uploaded multipart form temporary files during data import, dump restoration, and cloud notes bundle sync.
+- **DefaultBroadcaster Data Race (`internal/logger`)**: Resolved data race in log broadcaster initialization via double-checked mutex locking.
+- **Grid JSON Export Object Formatting (`web/dist/index.html`)**: Formatted exported JSON data as an array of key-value objects keyed by column names instead of raw 2D arrays.
+- **Cluster Tab Polling Timer Cleanup (`web/dist/index.html`)**: Cleared background cluster polling timer when closing Galera Cluster tabs.
 - **HTTP Server Persistent Stream & Large Dump Write Timeout (`cmd/sqlfox/main.go`)**: Disabled global `WriteTimeout` on daemon `http.Server` (retaining `ReadHeaderTimeout: 10s` and `IdleTimeout: 120s`), eliminating 60-second connection drops on SSE telemetry streams (`/api/logs/stream`) and large SQL database dumps.
 - **Safety Guard CTE Comment & Escape Bypass (`internal/safety/guard.go`, `internal/safety/guard_test.go`)**: Enhanced `stripLeadingCTE` to properly ignore single-line comments (`--`, `#`), multi-line comments (`/* ... */`), and escaped quotes (`\'`, `\"`) within CTE definitions, preventing destructive `DELETE` and `UPDATE` statements from bypassing Safety Guard evaluation. Added `stripLeadingCTE` fallback to lexical inspection.
 - **MySQL Multi-Statement Execution in Query Editor (`internal/driver/mysql/mysql.go`)**: Appended `&multiStatements=true` to the MySQL driver DSN, enabling execution of multi-statement batches without MySQL Error 1064 syntax failures.
@@ -15,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **IPv6 Host Literal Parsing (`internal/driver/mysql/mysql.go`, `internal/driver/postgres/postgres.go`)**: Replaced raw string concatenation with standard `net.JoinHostPort` for MySQL and PostgreSQL dialers, ensuring IPv6 addresses (e.g. `::1`) are properly bracketed (`[::1]:port`).
 
 ### Security
+- **DNS Rebinding Test Bypass Restriction (`internal/server/auth.go`)**: Restricted Host header validation bypass strictly to unit test environments via `testing.Testing()`.
 - **Connection Save Plaintext Password Sanitization (`internal/server/handlers_connections.go`)**: Sanitized `conn.Password = ""` prior to serializing the JSON response of `handleSaveConnection`, preventing plaintext database passwords from being echoed back in HTTP response bodies.
 - **Auth Manager In-Memory Token and Lockout Expiry Purge (`internal/server/auth.go`)**: Added `purgeExpiredLocked()` to automatically sweep expired authentication tokens and expired IP lockout records during token generation, validation, and failed login tracking.
 - **MySQL Driver TLS Configuration Cleanup (`internal/driver/mysql/mysql.go`)**: Stored `tlsKey` on `MySQLSession` and registered `gomysql.DeregisterTLSConfig(s.tlsKey)` upon session closure (`Close()`), eliminating monotonic memory growth in the driver's global TLS config map.
