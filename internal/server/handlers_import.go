@@ -46,6 +46,9 @@ func (s *Server) handleImportCSV(w http.ResponseWriter, r *http.Request) {
 	var mappingJSON string
 
 	if err == nil && r.MultipartForm != nil {
+		defer func() {
+			_ = r.MultipartForm.RemoveAll()
+		}()
 		files := r.MultipartForm.File["file"]
 		if len(files) == 0 {
 			writeError(w, http.StatusBadRequest, "no file uploaded in 'file' form field")

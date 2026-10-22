@@ -434,6 +434,11 @@ func (s *Server) handleRunSQLScript(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "failed to parse multipart form: "+err.Error())
 			return
 		}
+		if r.MultipartForm != nil {
+			defer func() {
+				_ = r.MultipartForm.RemoveAll()
+			}()
+		}
 		file, _, err := r.FormFile("file")
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "missing 'file' form field")

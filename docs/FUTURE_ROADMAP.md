@@ -44,6 +44,18 @@ Fitur-fitur esensial yang diharapkan oleh developer dan DBA dari sebuah Database
   - Simpan metadata tab dan draft query secara ter-debounce (500ms) ke browser `localStorage` atau `indexedDB`.
   - Muat ulang state tab aktif secara otomatis saat antarmuka pertama kali dibuka.
 
+### 1.6 Penerjemahan Skema / DDL Lintas-Engine pada Data Transfer
+* **Status Saat Ini**: Pada fitur Cross-Connection Data Transfer (`POST /api/sync/data/transfer`), opsi `create_tables: true` mengeksekusi DDL sumber mentah secara langsung ke target database.
+* **Kebutuhan Lapangan**: Jika migrasi dilakukan lintas-engine (misalnya dari MySQL ke PostgreSQL atau SQLite), pembuatan tabel otomatis gagal karena sintaks DDL spesifik engine (`AUTO_INCREMENT`, `ENGINE=InnoDB`, tipe data enum/set).
+* **Rekomendasi Implementasi**:
+  - Implementasikan AST DDL converter sederhana yang memetakan tipe data standar (misal `VARCHAR`, `INT`, `DATETIME`, `TEXT`) dan mengabaikan clause spesifik storage engine saat target berbeda dialek.
+
+### 1.7 Kebijakan Retensi Otomatis & Pembersihan Log Audit (`audit_logs`)
+* **Status Saat Ini**: Semua kueri dan mutasi data dicatat secara asinkron ke tabel `audit_logs` di dalam SQLite vault (`config.db`), namun belum memiliki batas retensi atau pembersihan otomatis berkala.
+* **Kebutuhan Lapangan**: Mencegah ukuran file database konfigurasi membengkak tanpa batas pada workstation pengguna aktif yang menjalankan ribuan kueri setiap hari.
+* **Rekomendasi Implementasi**:
+  - Tambahkan background purge saat startup daemon yang menghapus log audit lebih tua dari 30 hari atau membatasi maksimal 50.000 entri log terbaru per instance.
+
 ---
 
 ## 2. Analisis Fitur Bloated & Potensi Perampingan (Over-Engineering Review)
@@ -88,3 +100,14 @@ Fitur-fitur yang sudah ada di codebase namun menambah kompleksitas berlebih, mem
   - Hal ini membuat navigasi kode frontend sulit, memperlambat code review, dan berpotensi menghambat rendering DOM pada mesin dengan spesifikasi rendah.
 * **Rencana Perampingan**:
   - Pisahkan menjadi modul-modul JS logis di direktori sumber (`web/src/js/`), lalu gunakan bundler ringan (seperti esbuild) saat build time untuk menghasilkan `web/dist/index.html` teroptimasi secara deterministik.
+
+### 2.5 Operational Notes dengan Web Audio API Alarm & Snooze
+* **File Terkait**:
+  - `internal/vault/operational_notes.go`
+  - `internal/server/handlers_notes.go`
+  - `web/dist/index.html` (fungsi `playReminderChime`, interval polling `/api/notes/reminders/due` tiap 30 detik)
+* **Analisis**:
+  - SqlFox menyertakan sistem alarm reminder berbasis Web Audio API (chime synthesizer oscillator), snooze interval, dan background polling berkala.
+  - Untuk tool database manager yang berorientasi performa tinggi dan ringan, sistem task scheduler/reminder alarm di dalam browser terasa over-engineering dan menambah polling noise.
+* **Rencana Perampingan**:
+  - Hapus background audio chime dan polling scheduler 30 detik, pertahankan fungsionalitas catatan query / runbook sebagai snippet markdown biasa yang terikat ke tabel atau query tab.

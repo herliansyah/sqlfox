@@ -522,6 +522,22 @@ func TestActiveSession_TransactionLifecycle(t *testing.T) {
 		t.Fatalf("expected ROLLBACK to succeed, got: %v", err)
 	}
 
+	// 8e. Test START TRANSACTION READ ONLY and END / ABORT syntax
+	bResReadOnly, err := sess.Execute(ctx, ExecuteRequest{SQL: "START TRANSACTION READ ONLY;"})
+	if err != nil || !strings.Contains(bResReadOnly.Message, "Transaction started") {
+		t.Fatalf("expected START TRANSACTION READ ONLY to start transaction, got: %v", err)
+	}
+	if sess.activeTx == nil {
+		t.Fatal("expected activeTx to be pinned")
+	}
+	_, err = sess.Execute(ctx, ExecuteRequest{SQL: "END;"})
+	if err != nil {
+		t.Fatalf("expected END to commit transaction, got: %v", err)
+	}
+	if sess.activeTx != nil {
+		t.Fatal("expected activeTx to be cleared after END")
+	}
+
 	// 9. Test Auto-Rollback on sess.Close()
 	_, _ = sess.Execute(ctx, ExecuteRequest{SQL: "BEGIN;"})
 	_, _ = sess.Execute(ctx, ExecuteRequest{
