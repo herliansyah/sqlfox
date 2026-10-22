@@ -52,7 +52,14 @@ func NewBroadcaster(capacity int) *Broadcaster {
 // DefaultBroadcaster returns the global default telemetry broadcaster.
 func DefaultBroadcaster() *Broadcaster {
 	defaultBroadcasterMu.RLock()
-	defer defaultBroadcasterMu.RUnlock()
+	if defaultBroadcaster != nil {
+		defer defaultBroadcasterMu.RUnlock()
+		return defaultBroadcaster
+	}
+	defaultBroadcasterMu.RUnlock()
+
+	defaultBroadcasterMu.Lock()
+	defer defaultBroadcasterMu.Unlock()
 	if defaultBroadcaster == nil {
 		defaultBroadcaster = NewBroadcaster(100)
 	}

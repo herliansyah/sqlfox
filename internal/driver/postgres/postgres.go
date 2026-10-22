@@ -1457,9 +1457,11 @@ func (s *PostgresSession) InspectClusterHealth(ctx context.Context) (*driver.Clu
 }
 
 func (s *PostgresSession) SampleFlightMetrics(ctx context.Context) (*driver.FlightMetricSample, error) {
-	var activeConns, activeThreads int64
+	var activeConns, activeThreads, questions, rowLockWaits int64
 	_ = s.db.QueryRowContext(ctx, "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()").Scan(&activeConns)
 	_ = s.db.QueryRowContext(ctx, "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND state = 'active'").Scan(&activeThreads)
+	_ = s.db.QueryRowContext(ctx, "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'").Scan(&rowLockWaits)
+	_ = s.db.QueryRowContext(ctx, "SELECT COALESCE(sum(xact_commit + xact_rollback), 0) FROM pg_stat_database WHERE datname = current_database()").Scan(&questions)
 
 	// Fetch active queries
 	// ponytail: Filter out empty queries/daemon tasks and order by duration descending.
@@ -1498,10 +1500,10 @@ func (s *PostgresSession) SampleFlightMetrics(ctx context.Context) (*driver.Flig
 
 	return &driver.FlightMetricSample{
 		SampledAt:          time.Now(),
-		Questions:          activeThreads * 10,
+		Questions:          questions,
 		ThreadsRunning:     activeThreads,
 		ThreadsConnected:   activeConns,
-		RowLockWaits:       0,
+		RowLockWaits:       rowLockWaits,
 		BufferPoolWaitFree: 0,
 		ActiveQueries:      queries,
 	}, nil

@@ -176,3 +176,21 @@ func TestBroadcasterAndLiveStreaming(t *testing.T) {
 		t.Errorf("unexpected history order: %+v", hist)
 	}
 }
+
+func TestDefaultBroadcasterConcurrent(t *testing.T) {
+	SetDefaultBroadcaster(nil)
+	done := make(chan bool)
+	for i := 0; i < 20; i++ {
+		go func() {
+			b := DefaultBroadcaster()
+			if b == nil {
+				t.Error("expected non-nil broadcaster")
+			}
+			done <- true
+		}()
+	}
+	for i := 0; i < 20; i++ {
+		<-done
+	}
+}
+

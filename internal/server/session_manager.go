@@ -542,9 +542,13 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 
 	// Intercept explicit transaction statements to ensure connection pinning and prevent orphaned locks
 	cleanUpper = strings.TrimRight(strings.ToUpper(cleanSQL), "; \t\r\n")
-	isTxBegin := cleanUpper == "BEGIN" || cleanUpper == "START TRANSACTION" || cleanUpper == "BEGIN WORK" || cleanUpper == "BEGIN TRANSACTION"
-	isTxCommit := cleanUpper == "COMMIT" || cleanUpper == "COMMIT WORK" || cleanUpper == "COMMIT TRANSACTION"
-	isTxRollback := cleanUpper == "ROLLBACK" || cleanUpper == "ROLLBACK WORK" || cleanUpper == "ROLLBACK TRANSACTION"
+	isTxBegin := cleanUpper == "BEGIN" || cleanUpper == "START TRANSACTION" || cleanUpper == "BEGIN WORK" || cleanUpper == "BEGIN TRANSACTION" ||
+		strings.HasPrefix(cleanUpper, "START TRANSACTION ") ||
+		strings.HasPrefix(cleanUpper, "BEGIN TRANSACTION ") ||
+		strings.HasPrefix(cleanUpper, "BEGIN WORK ") ||
+		(strings.HasPrefix(cleanUpper, "BEGIN ") && (strings.Contains(cleanUpper, "DEFERRED") || strings.Contains(cleanUpper, "IMMEDIATE") || strings.Contains(cleanUpper, "EXCLUSIVE") || strings.Contains(cleanUpper, "READ ONLY") || strings.Contains(cleanUpper, "READ WRITE") || strings.Contains(cleanUpper, "ISOLATION LEVEL")))
+	isTxCommit := cleanUpper == "COMMIT" || cleanUpper == "COMMIT WORK" || cleanUpper == "COMMIT TRANSACTION" || cleanUpper == "END" || cleanUpper == "END WORK" || cleanUpper == "END TRANSACTION"
+	isTxRollback := cleanUpper == "ROLLBACK" || cleanUpper == "ROLLBACK WORK" || cleanUpper == "ROLLBACK TRANSACTION" || cleanUpper == "ABORT" || cleanUpper == "ABORT WORK" || cleanUpper == "ABORT TRANSACTION"
 
 	if isTxBegin {
 		s.mu.Lock()

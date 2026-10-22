@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"sqlfox/internal/driver"
@@ -53,10 +54,11 @@ func (d *SQLiteDriver) Connect(ctx context.Context, cfg driver.Config) (driver.S
 }
 
 type SQLiteSession struct {
-	db      *sql.DB
-	dsn     string
-	mu      sync.Mutex
-	queries map[string]context.CancelFunc
+	db         *sql.DB
+	dsn        string
+	mu         sync.Mutex
+	queries    map[string]context.CancelFunc
+	queryCount atomic.Int64
 }
 
 func (s *SQLiteSession) Ping(ctx context.Context) (time.Duration, error) {
@@ -78,6 +80,7 @@ func (s *SQLiteSession) ServerInfo(ctx context.Context) (*driver.ServerInfo, err
 }
 
 func (s *SQLiteSession) QueryStream(ctx context.Context, querySQL string, limit int) (driver.RowStream, error) {
+	s.queryCount.Add(1)
 	// Apply implicit safe limit if query is a SELECT without LIMIT
 	querySQL = driver.ApplyLimitClause(querySQL, limit)
 
@@ -141,6 +144,7 @@ func (s *SQLiteSession) QueryStream(ctx context.Context, querySQL string, limit 
 }
 
 func (s *SQLiteSession) Exec(ctx context.Context, querySQL string, args ...any) (*driver.ExecResult, error) {
+	s.queryCount.Add(1)
 	start := time.Now()
 	res, err := s.db.ExecContext(ctx, querySQL, args...)
 	if err != nil {
@@ -756,7 +760,7 @@ func (s *SQLiteSession) InspectClusterHealth(ctx context.Context) (*driver.Clust
 func (s *SQLiteSession) SampleFlightMetrics(ctx context.Context) (*driver.FlightMetricSample, error) {
 	return &driver.FlightMetricSample{
 		SampledAt:          time.Now(),
-		Questions:          1,
+		Questions:          s.queryCount.Load(),
 		ThreadsRunning:     1,
 		ThreadsConnected:   1,
 		RowLockWaits:       0,
@@ -770,6 +774,7 @@ func (s *SQLiteSession) Close() error {
 }
 
 func (s *SQLiteSession) ExecRaw(ctx context.Context, sql string, args ...any) (int64, error) {
+	s.queryCount.Add(1)
 	res, err := s.db.ExecContext(ctx, sql, args...)
 	if err != nil {
 		return 0, err

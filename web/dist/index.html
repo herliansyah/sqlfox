@@ -8003,6 +8003,16 @@
       }
     }
 
+    function cleanupClosedTabResources(closedTabs) {
+      const list = Array.isArray(closedTabs) ? closedTabs : [closedTabs];
+      if (list.some(t => t && t.isCluster)) {
+        if (typeof clusterTimer !== 'undefined' && clusterTimer) {
+          clearInterval(clusterTimer);
+          clusterTimer = null;
+        }
+      }
+    }
+
     async function closeTab(tabId) {
       const tab = tabs.find(t => t.id === tabId);
       if (!tab) return;
@@ -8012,6 +8022,8 @@
         const ok = await showNativeConfirm(`Are you sure you want to close "${title}"?\nAny unsaved query or modifications will be discarded.`, 'Close Tab');
         if (!ok) return;
       }
+
+      cleanupClosedTabResources(tab);
 
       if (tabs.length === 1) {
         tabs = [{ id: 'tab-' + Date.now(), title: 'Query 1.sql', sql: '', isTableViewer: false }];
@@ -8045,6 +8057,8 @@
         if (!ok) return;
       }
 
+      cleanupClosedTabResources(otherTabs);
+
       tabs = tabs.filter(t => t.id === keepTabId);
       if (activeTabId !== keepTabId) {
         switchTab(keepTabId);
@@ -8067,6 +8081,8 @@
         if (!ok) return;
       }
 
+      cleanupClosedTabResources(rightTabs);
+
       tabs = tabs.slice(0, fromIdx + 1);
       if (!tabs.some(t => t.id === activeTabId)) {
         switchTab(fromTabId);
@@ -8082,6 +8098,8 @@
         const ok = await showNativeConfirm(`Close all ${tabs.length} tab(s)?\nWorkspace will be reset to a clean query tab.`, 'Close All Tabs');
         if (!ok) return;
       }
+
+      cleanupClosedTabResources(tabs);
 
       tabs = [{ id: 'tab-' + Date.now(), title: 'Query 1.sql', sql: '', isTableViewer: false }];
       activeTabId = tabs[0].id;
@@ -21692,7 +21710,19 @@ Please analyze what is causing this query to be slow and suggest necessary query
       if (!currentResults || currentResults.length === 0) {
         return showNativeAlert('No results to export', 'Export JSON');
       }
-      const json = JSON.stringify(currentResults, null, 2);
+      let exportData = currentResults;
+      if (Array.isArray(currentColumns) && currentColumns.length > 0) {
+        exportData = currentResults.map(row => {
+          if (!Array.isArray(row)) return row;
+          const obj = {};
+          currentColumns.forEach((col, idx) => {
+            const colName = (col && col.name) ? col.name : `col_${idx + 1}`;
+            obj[colName] = row[idx] !== undefined ? row[idx] : null;
+          });
+          return obj;
+        });
+      }
+      const json = JSON.stringify(exportData, null, 2);
       downloadFile(json, 'query-results.json', 'application/json');
     }
 

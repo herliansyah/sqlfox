@@ -349,3 +349,58 @@ func TestRemoteAccessInitialPageLoad(t *testing.T) {
 		t.Fatalf("remote authenticated response should have lock modal hidden")
 	}
 }
+
+func TestDNSRebindingGuardHostCheck(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "sqlfox-dns-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	vaultDB := filepath.Join(tempDir, "config.db")
+	v, err := vault.OpenVault(vaultDB, "testpass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	srv := NewServer(v, nil, filepath.Join(tempDir, "backups"), "testpass")
+	handler := srv.Router()
+
+	// 1. Host: localhost -> OK
+	req1 := httptest.NewRequest("GET", "/api/auth/status", nil)
+	req1.Host = "localhost:8080"
+	rec1 := httptest.NewRecorder()
+	handler.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusOK {
+		t.Errorf("expected localhost to be allowed, got: %d", rec1.Code)
+	}
+
+	// 2. Host: 127.0.0.1 -> OK
+	req2 := httptest.NewRequest("GET", "/api/auth/status", nil)
+	req2.Host = "127.0.0.1:8080"
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Errorf("expected 127.0.0.1 to be allowed, got: %d", rec2.Code)
+	}
+
+	// 3. Host: evil.com -> Forbidden 403
+	req3 := httptest.NewRequest("GET", "/api/auth/status", nil)
+	req3.Host = "evil.com"
+	rec3 := httptest.NewRecorder()
+	handler.ServeHTTP(rec3, req3)
+	if rec3.Code != http.StatusForbidden {
+		t.Errorf("expected evil.com to be blocked with 403, got: %d", rec3.Code)
+	}
+
+	// 4. Host: attacker-rebinding.com -> Forbidden 403
+	req4 := httptest.NewRequest("GET", "/api/auth/status", nil)
+	req4.Host = "attacker-rebinding.com"
+	rec4 := httptest.NewRecorder()
+	handler.ServeHTTP(rec4, req4)
+	if rec4.Code != http.StatusForbidden {
+		t.Errorf("expected attacker domain to be blocked with 403, got: %d", rec4.Code)
+	}
+}
+
