@@ -494,10 +494,16 @@ func TestActiveSession_TransactionLifecycle(t *testing.T) {
 	if err != nil || !strings.Contains(bRes.Message, "Transaction started") {
 		t.Fatalf("expected BEGIN TRANSACTION to start dedicated transaction, got: %v (msg: %v)", err, bRes)
 	}
+	if !bRes.TxActive {
+		t.Fatal("expected bRes.TxActive to be true")
+	}
 	_, _ = sess.Execute(ctx, ExecuteRequest{SQL: "INSERT INTO accounts (id, balance) VALUES (99, 123.0);"})
 	cRes2, err := sess.Execute(ctx, ExecuteRequest{SQL: "COMMIT TRANSACTION;"})
 	if err != nil || !strings.Contains(cRes2.Message, "committed") {
 		t.Fatalf("expected COMMIT TRANSACTION to succeed, got: %v", err)
+	}
+	if cRes2.TxActive {
+		t.Fatal("expected cRes2.TxActive to be false after commit")
 	}
 
 	// 8c. Test ROLLBACK TRANSACTION syntax

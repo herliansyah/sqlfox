@@ -16,45 +16,44 @@ Fitur-fitur esensial yang diharapkan oleh developer dan DBA dari sebuah Database
   - Implementasikan dialer SSH standar menggunakan library Go murni (`golang.org/x/crypto/ssh`) secara lazy (hanya di-dial jika `use_ssh == true`).
 
 ### 1.2 Kontrol Transaksi Visual di Toolbar UI (Commit & Rollback Controls)
-* **Status Saat Ini**: Backend Go mendukung transaksi eksplisit (`BEGIN`, `COMMIT`, `ROLLBACK`) melalui connection pinning dan idle transaction auto-rollback (60 detik). Namun, UI web belum memiliki indikator status transaksi aktif.
-* **Kebutuhan Lapangan**: Developer sering tidak sadar bahwa sebuah transaksi masih terbuka (misalnya setelah menjalankan `BEGIN`), sehingga berisiko terkena auto-rollback otomatis atau menahan row lock pada tabel produksi.
-* **Rekomendasi Implementasi**:
-  - Tambahkan badge status transaksi pada navbar/toolbar editor: `[TX: IDLE]` vs `[TX: ACTIVE (00:15s)]`.
-  - Sediakan tombol cepat visual: `Commit (Ctrl+Shift+C)` dan `Rollback (Ctrl+Shift+R)`.
-  - Tampilkan peringatan jika tab query akan ditutup sementara transaksi masih berstatus *uncommitted*.
+* **Status Saat Ini**: **Terimplementasi (v0.10.7)**
+* **Detail Implementasi**:
+  - Backend menyematkan status `tx_active` pada setiap `ExecuteResponse`.
+  - Frontend menampilkan pill status transaksi berkedip (`[⚡ TX Active]`) di toolbar editor query saat transaksi terbuka.
+  - Tersedia tombol cepat visual `Commit` dan `Rollback` serta shortcut keyboard global `Ctrl+Shift+C` dan `Ctrl+Shift+R`.
+  - Dilengkapi dialog konfirmasi pengaman pada `closeTab` jika tab ditutup saat transaksi masih uncommitted.
 
 ### 1.3 Manajemen & Editor Visual Objek Database (Views, Triggers, Stored Procedures, Functions)
-* **Status Saat Ini**: SqlFox memiliki Table Designer yang baik untuk tabel relasional, namun untuk View, Trigger, Function, dan Stored Procedure, dukungan baru sebatas inspeksi DDL read-only.
+* **Status Saat Ini**: Backlog Terbuka. SqlFox memiliki Table Designer yang baik untuk tabel relasional, namun untuk View, Trigger, Function, dan Stored Procedure, dukungan baru sebatas inspeksi DDL read-only.
 * **Kebutuhan Lapangan**: DBA membutuhkan kemampuan untuk membuat, mengubah (*ALTER/REPLACE*), dan mengompilasi ulang View dan Trigger tanpa harus menulis DDL dari nol di Query Editor.
 * **Rekomendasi Implementasi**:
   - Modal editor DDL terstruktur khusus untuk View dan Stored Routines dengan validasi sintaks pra-eksekusi.
   - Dukungan pemanggilan rutin berparameter (*Execute Stored Procedure with arguments*).
 
 ### 1.4 Format Ekspor Data Tambahan (Excel `.xlsx` & Streaming NDJSON)
-* **Status Saat Ini**: Ekspor data mendukung SQL dump, CSV, dan format copy Markdown ke clipboard.
+* **Status Saat Ini**: Backlog Terbuka. Ekspor data mendukung SQL dump, CSV, JSON, dan format copy Markdown ke clipboard.
 * **Kebutuhan Lapangan**: Pengguna bisnis, manajer produk, dan analis data kerap meminta hasil query dalam format spreadsheet Excel (`.xlsx`) asli untuk pengolahan formula dan laporan.
 * **Rekomendasi Implementasi**:
   - Tambahkan parser generator Excel streaming tanpa CGO (menggunakan library Go murni seperti `excelize`).
   - Opsi format export pada data grid: CSV, Excel (.xlsx), Markdown, dan NDJSON.
 
 ### 1.5 Persistensi Tab Query dan Draft SQL Lintas Reload Browser
-* **Status Saat Ini**: State array tab (`tabs`) disimpan murni di memori JavaScript browser. Jika browser ditutup atau halaman di-refresh (`Ctrl+F5`), semua tab dan draft query yang belum disimpan hilang.
-* **Kebutuhan Lapangan**: Mencegah kehilangan draft SQL saat browser tidak sengaja tertutup atau jaringan terputus.
-* **Rekomendasi Implementasi**:
-  - Simpan metadata tab dan draft query secara ter-debounce (500ms) ke browser `localStorage` atau `indexedDB`.
-  - Muat ulang state tab aktif secara otomatis saat antarmuka pertama kali dibuka.
+* **Status Saat Ini**: **Terimplementasi**
+* **Detail Implementasi**:
+  - State metadata tab dan draft query disimpan secara otomatis ter-debounce (250ms) ke browser `localStorage` dengan scoping per-koneksi (`sqlfox_tabs_<conn_id>`).
+  - Memulihkan tab aktif dan teks draft query saat halaman browser di-refresh.
 
 ### 1.6 Penerjemahan Skema / DDL Lintas-Engine pada Data Transfer
-* **Status Saat Ini**: Pada fitur Cross-Connection Data Transfer (`POST /api/sync/data/transfer`), opsi `create_tables: true` mengeksekusi DDL sumber mentah secara langsung ke target database.
-* **Kebutuhan Lapangan**: Jika migrasi dilakukan lintas-engine (misalnya dari MySQL ke PostgreSQL atau SQLite), pembuatan tabel otomatis gagal karena sintaks DDL spesifik engine (`AUTO_INCREMENT`, `ENGINE=InnoDB`, tipe data enum/set).
-* **Rekomendasi Implementasi**:
-  - Implementasikan AST DDL converter sederhana yang memetakan tipe data standar (misal `VARCHAR`, `INT`, `DATETIME`, `TEXT`) dan mengabaikan clause spesifik storage engine saat target berbeda dialek.
+* **Status Saat Ini**: **Terimplementasi (v0.10.7)**
+* **Detail Implementasi**:
+  - Mengimplementasikan `normalizeColumnType(col.Type, targetDriver)` dan `buildCreateTableDDL(tbl, targetDriver)` pada `internal/server/handlers_sync.go`.
+  - Menghilangkan *clause* spesifik MySQL seperti `AUTO_INCREMENT` dan storage engine options saat mentransfer data ke target SQLite atau PostgreSQL, serta menormalisasi tipe data standar (`int(11)` -> `INTEGER`, `mediumtext` -> `TEXT`, `datetime` -> `TIMESTAMP`, dll).
 
 ### 1.7 Kebijakan Retensi Otomatis & Pembersihan Log Audit (`audit_logs`)
-* **Status Saat Ini**: Semua kueri dan mutasi data dicatat secara asinkron ke tabel `audit_logs` di dalam SQLite vault (`config.db`), namun belum memiliki batas retensi atau pembersihan otomatis berkala.
-* **Kebutuhan Lapangan**: Mencegah ukuran file database konfigurasi membengkak tanpa batas pada workstation pengguna aktif yang menjalankan ribuan kueri setiap hari.
-* **Rekomendasi Implementasi**:
-  - Tambahkan background purge saat startup daemon yang menghapus log audit lebih tua dari 30 hari atau membatasi maksimal 50.000 entri log terbaru per instance.
+* **Status Saat Ini**: **Terimplementasi (v0.10.7)**
+* **Detail Implementasi**:
+  - Menambahkan metode `PurgeAuditLogs(retentionDays, maxEntries)` pada `internal/vault/audit.go` serta indeks performa `idx_audit_logs_executed`.
+  - Dijalankan secara otomatis saat inisialisasi vault database (`OpenVault`) dengan kebijakan retensi 30 hari dan pembatasan batas atas (*ceiling limit*) maksimal 50.000 log terbaru untuk mencegah kebocoran ruang disk (*disk leak*).
 
 ---
 

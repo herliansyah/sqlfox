@@ -1877,4 +1877,34 @@ new vm.Script(scriptContent, { filename: 'index.html' });
 	}
 }
 
+func TestVisualTransactionControlsEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	expectedSnippets := []string{
+		`id="tab-tx-pill-container"`,
+		`TX Active`,
+		`commitActiveTransaction`,
+		`rollbackActiveTransaction`,
+		`updateTransactionStatusUI`,
+		`isCurrentSessionTxActive`,
+	}
+
+	for _, s := range expectedSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain %q, but was missing", s)
+		}
+	}
+}
+
 

@@ -48,6 +48,7 @@ type ExecuteResponse struct {
 	RowCount           int                       `json:"row_count,omitempty"`
 	ExecutionMs        int64                     `json:"execution_ms"`
 	Profile            *driver.QueryProfile      `json:"profile,omitempty"`
+	TxActive           bool                      `json:"tx_active"`
 }
 
 // ActiveSession holds an active database connection session and its cached metadata.
@@ -571,6 +572,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 			Type:        "exec",
 			Message:     "Transaction started. All subsequent queries will run atomically on this dedicated connection.",
 			ExecutionMs: time.Since(start).Milliseconds(),
+			TxActive:    true,
 		}, nil
 	}
 
@@ -589,6 +591,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 				Type:        "exec",
 				Message:     "COMMIT executed.",
 				ExecutionMs: time.Since(start).Milliseconds(),
+				TxActive:    false,
 			}, nil
 		}
 
@@ -599,6 +602,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 			Type:        "exec",
 			Message:     "Transaction committed successfully.",
 			ExecutionMs: time.Since(start).Milliseconds(),
+			TxActive:    false,
 		}, nil
 	}
 
@@ -617,6 +621,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 				Type:        "exec",
 				Message:     "ROLLBACK executed.",
 				ExecutionMs: time.Since(start).Milliseconds(),
+				TxActive:    false,
 			}, nil
 		}
 
@@ -627,6 +632,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 			Type:        "exec",
 			Message:     "Transaction rolled back successfully.",
 			ExecutionMs: time.Since(start).Milliseconds(),
+			TxActive:    false,
 		}, nil
 	}
 
@@ -690,6 +696,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 			RowCount:    len(allRows),
 			ExecutionMs: time.Since(start).Milliseconds(),
 			Profile:     collectProfile(),
+			TxActive:    currentTx != nil,
 		}, nil
 	}
 
@@ -720,6 +727,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 			BackupFile:         backupFile,
 			BackupDataIncluded: backupDataIncluded,
 			Profile:            collectProfile(),
+			TxActive:           currentTx != nil,
 		}, nil
 	}
 
@@ -756,6 +764,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		RowCount:    len(allRows),
 		ExecutionMs: time.Since(start).Milliseconds(),
 		Profile:     collectProfile(),
+		TxActive:    currentTx != nil,
 	}, nil
 }
 

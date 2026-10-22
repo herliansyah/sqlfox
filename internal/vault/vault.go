@@ -108,10 +108,13 @@ func OpenVault(dbPath string, masterPassword string) (*Vault, error) {
 		}
 	}
 
-	return &Vault{
+	v := &Vault{
 		db:  db,
 		key: key,
-	}, nil
+	}
+	// ponytail: Purge stale audit logs on vault open to prevent unbounded disk growth
+	_, _ = v.PurgeAuditLogs(30, 50000)
+	return v, nil
 }
 
 func initSchema(db *sql.DB) error {
@@ -190,6 +193,7 @@ func initSchema(db *sql.DB) error {
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_audit_logs_session ON audit_logs(session_id, executed_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_audit_logs_executed ON audit_logs(executed_at DESC);
 
 	CREATE TABLE IF NOT EXISTS flight_recorder_sessions (
 		id TEXT PRIMARY KEY,

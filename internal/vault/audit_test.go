@@ -107,3 +107,64 @@ func TestAuditLogPersistence(t *testing.T) {
 		t.Fatalf("expected 0 logs after clear, got %d", afterTotal)
 	}
 }
+
+func TestAuditLogPurge(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "vault-audit-purge-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dbPath := filepath.Join(tmpDir, "vault.db")
+	v, err := OpenVault(dbPath, "test-master-password")
+	if err != nil {
+		t.Fatalf("failed to open vault: %v", err)
+	}
+	defer v.Close()
+
+	sessID := "sess-purge-test"
+
+	// Insert 10 records: 3 very old (>40 days), 7 recent (<10 days)
+	for i := 0; i < 3; i++ {
+		_ = v.RecordAuditLog(&AuditLogRecord{
+			SessionID:    sessID,
+			ConnectionID: sessID,
+			QuerySQL:     "OLD QUERY",
+			ExecutedAt:   time.Now().AddDate(0, 0, -45-i),
+		})
+	}
+	for i := 0; i < 7; i++ {
+		_ = v.RecordAuditLog(&AuditLogRecord{
+			SessionID:    sessID,
+			ConnectionID: sessID,
+			QuerySQL:     "RECENT QUERY",
+			ExecutedAt:   time.Now().AddDate(0, 0, -i),
+		})
+	}
+
+	// Purge logs older than 30 days
+	deleted, err := v.PurgeAuditLogs(30, 100)
+	if err != nil {
+		t.Fatalf("PurgeAuditLogs failed: %v", err)
+	}
+	if deleted != 3 {
+		t.Fatalf("expected 3 old records deleted, got %d", deleted)
+	}
+
+	// Test maxEntries ceiling: keep at most 4
+	deletedCeiling, err := v.PurgeAuditLogs(30, 4)
+	if err != nil {
+		t.Fatalf("PurgeAuditLogs ceiling failed: %v", err)
+	}
+	if deletedCeiling != 3 { // 7 recent - 4 = 3 deleted
+		t.Fatalf("expected 3 ceiling records deleted, got %d", deletedCeiling)
+	}
+
+	logs, total, err := v.ListAuditLogs(sessID, 10, 0, "", "")
+	if err != nil {
+		t.Fatalf("ListAuditLogs failed: %v", err)
+	}
+	if total != 4 || len(logs) != 4 {
+		t.Fatalf("expected 4 remaining logs, got total=%d len=%d", total, len(logs))
+	}
+}
