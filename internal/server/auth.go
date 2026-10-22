@@ -32,6 +32,22 @@ func NewAuthManager() *AuthManager {
 	}
 }
 
+// purgeExpiredLocked cleans up stale tokens and expired lockouts to prevent memory leaks.
+// Caller must hold a.mu.Lock().
+func (a *AuthManager) purgeExpiredLocked() {
+	now := time.Now()
+	for t, exp := range a.tokens {
+		if now.After(exp) {
+			delete(a.tokens, t)
+		}
+	}
+	for ip, rec := range a.lockouts {
+		if !rec.lockedUntil.IsZero() && now.After(rec.lockedUntil) {
+			delete(a.lockouts, ip)
+		}
+	}
+}
+
 func (a *AuthManager) GenerateToken() string {
 	bytes := make([]byte, 24)
 	_, _ = rand.Read(bytes)
@@ -39,6 +55,7 @@ func (a *AuthManager) GenerateToken() string {
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.purgeExpiredLocked()
 	a.tokens[token] = time.Now().Add(24 * time.Hour)
 	return token
 }
@@ -57,6 +74,9 @@ func (a *AuthManager) ValidateToken(token string) bool {
 	if time.Now().After(exp) {
 		delete(a.tokens, token)
 		return false
+	}
+	if len(a.tokens) > 50 {
+		a.purgeExpiredLocked()
 	}
 	return true
 }
@@ -80,6 +100,7 @@ func (a *AuthManager) IsLocked(ip string) (bool, time.Duration) {
 func (a *AuthManager) RecordFailedAttempt(ip string) (locked bool, remaining time.Duration) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.purgeExpiredLocked()
 	rec, ok := a.lockouts[ip]
 	if !ok || (!rec.lockedUntil.IsZero() && time.Now().After(rec.lockedUntil)) {
 		rec = &ipLockoutRecord{}

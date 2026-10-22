@@ -208,10 +208,12 @@ func main() {
 		}
 	}
 
+	// ponytail: WriteTimeout must remain disabled (0) so persistent SSE streams (/api/logs/stream)
+	// and large streaming database dumps are not abruptly disconnected after 60 seconds.
 	httpServer := &http.Server{
-		Handler:      srv.Router(),
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 60 * time.Second,
+		Handler:           srv.Router(),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	go func() {
