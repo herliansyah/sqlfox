@@ -232,6 +232,10 @@ func maskCommentsAndLiterals(q string) string {
 }
 
 func inspectLexicalFallback(query string, environment string) *InspectionResult {
+	if main, ok := stripLeadingCTE(query); ok {
+		return inspectLexicalFallback(main, environment)
+	}
+
 	isProd := strings.EqualFold(environment, "Production")
 
 	if match := reDrop.FindStringSubmatch(query); len(match) > 3 {
@@ -385,27 +389,54 @@ func stripLeadingCTE(q string) (string, bool) {
 	}
 	depth := 0
 	var quote byte
-	for i := 4; i < len(q); i++ {
+	n := len(q)
+	for i := 4; i < n; i++ {
 		c := q[i]
+
 		if quote != 0 {
+			if c == '\\' && quote != '`' && i+1 < n {
+				i++
+				continue
+			}
 			if c == quote {
 				quote = 0
 			}
 			continue
 		}
+
+		// Single-line comment (-- or #)
+		if (c == '-' && i+1 < n && q[i+1] == '-') || c == '#' {
+			for i < n && q[i] != '\n' {
+				i++
+			}
+			continue
+		}
+
+		// Multi-line comment (/* ... */)
+		if c == '/' && i+1 < n && q[i+1] == '*' {
+			i += 2
+			for i+1 < n && !(q[i] == '*' && q[i+1] == '/') {
+				i++
+			}
+			i++ // skip '/'
+			continue
+		}
+
 		switch c {
 		case '\'', '"', '`':
 			quote = c
 		case '(':
 			depth++
 		case ')':
-			depth--
+			if depth > 0 {
+				depth--
+			}
 		default:
 			if depth != 0 || !isIdentByte(c) || isIdentByte(q[i-1]) {
 				continue
 			}
 			j := i
-			for j < len(q) && isIdentByte(q[j]) {
+			for j < n && isIdentByte(q[j]) {
 				j++
 			}
 			switch strings.ToUpper(q[i:j]) {

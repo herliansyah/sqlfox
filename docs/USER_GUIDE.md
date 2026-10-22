@@ -26,7 +26,7 @@
    - [Remote Access Guard & Master PIN](#remote-access-guard--master-pin)
 3. [Connection Vault & Security Architecture](#3-connection-vault--security-architecture)
    - [AES-256-GCM & Argon2id Vault](#aes-256-gcm--argon2id-vault)
-   - [Native SSH Tunneling (Bastion / Jump Hosts)](#native-ssh-tunneling-bastion--jump-hosts)
+   - [Bastion / Jump Host Access via Native Platform SSH Forwarding](#bastion--jump-host-access-via-native-platform-ssh-forwarding)
    - [Multi-Engine Configuration (MySQL, PostgreSQL, SQLite)](#multi-engine-configuration-mysql-postgresql-sqlite)
    - [Environment Tiers (Production, Staging, Development)](#environment-tiers-production-staging-development)
    - [Read-Only Mode Enforcement](#read-only-mode-enforcement)
@@ -88,7 +88,7 @@ SqlFox is engineered from the ground up for teams who demand instant responsiven
 | **MySQL** | 5.7, 8.0, 8.4+ | Pure-Go `go-sql-driver/mysql` with full SSL/TLS and TLS 1.3 support |
 | **MariaDB** | 10.3 to 11.x+ | Pure-Go MySQL protocol driver with Galera cluster inspection |
 | **PostgreSQL** | 9.6 through 16+ | Native `pgx/v5` protocol driver with out-of-band `pg_cancel_backend` |
-| **SQLite** | 3.x | Pure-Go CGO-free `modernc.org/sqlite` engine (local and over SSH) |
+| **SQLite** | 3.x | Pure-Go CGO-free `modernc.org/sqlite` engine (local) |
 
 ---
 
@@ -247,23 +247,23 @@ When you bind SqlFox to a local network interface or access it over LAN (`http:/
 ## 3. Connection Vault & Security Architecture
 
 ### AES-256-GCM & Argon2id Vault
-- All connection endpoints, usernames, passwords, and private SSH keys are stored in an encrypted SQLite database (`~/.sqlfox/vault.db`).
+- All connection endpoints, usernames, passwords, and SSL/TLS certificates are stored in an encrypted SQLite database (`~/.sqlfox/config.db`).
 - Vault records are encrypted using **AES-256-GCM** authenticated cipher blocks with unique 96-bit initialization vectors.
 - Encryption keys are derived using **Argon2id** key derivation function (KDF) parameterized to defend against GPU/ASIC brute-force attacks.
 - Portable Vault Archives (`.sqlfox-vault`) can be exported and imported with password protection for seamless team onboarding or machine migration.
 
-### Native SSH Tunneling (Bastion / Jump Hosts)
-SqlFox embeds an in-process, pure-Go SSH client:
-- Connect securely to private RDS/Aurora clusters, internal VPC databases, or on-premise servers behind bastion hosts.
-- Supports password authentication and encrypted **RSA / Ed25519** private SSH keys with passphrases.
-- Zero external `ssh` commands or background agent dependencies.
+### Bastion / Jump Host Access via Native Platform SSH Forwarding
+In accordance with ADR 0020 (zero-bloat single binary philosophy), SqlFox leverages standard platform port forwarding for VPC and private database endpoints:
+- Use standard platform port forwarding: `ssh -N -L 3306:remote-db-host:3306 user@bastion`
+- Point SqlFox to `127.0.0.1:3306` with credentials encrypted in your local Connection Vault.
+- Keeps binary lean, avoids pulling heavy in-process SSH dependencies, and integrates seamlessly with existing SSH config (`~/.ssh/config`), agent keys, and corporate VPNs.
 
 ### Multi-Engine Configuration (MySQL, PostgreSQL, SQLite)
 1. Click **+ New Connection** in the sidebar.
 2. Select your dialect:
    - **MySQL / MariaDB**: Host, Port (default `3306`), Username, Password, Database, SSL Mode (`disable`, `prefer`, `require`).
    - **PostgreSQL**: Host, Port (default `5432`), Username, Password, Database, SSL Mode, and default **Search Path** (`public` or custom schema).
-   - **SQLite**: Local absolute path (e.g. `/var/data/app.db`) or remote path over an active SSH bastion connection.
+   - **SQLite**: Local absolute path (e.g. `/var/data/app.db`).
 3. Click **Test Connection** for an instant pre-flight ping before saving.
 
 ### Environment Tiers (Production, Staging, Development)
@@ -284,7 +284,7 @@ Click the **🔒 Read-Only** toggle in the top header at any time:
 SqlFox consolidates all workspace and service configurations into a clean, unified 4-tab modal dialog (`#settings-modal`):
 - **Direct Access**: Click the top navbar **`⚙️ Settings`** button or press the universal desktop shortcut **`Ctrl + ,`** (or **`Cmd + ,`** on macOS). It is also fully searchable via the Command Palette (**`Ctrl + K`**).
 - **The 4 Configuration Tabs**:
-  1. **`🔐 Connections`**: Manage encrypted Connection Vault profiles, edit credentials, test TCP connectivity, and configure SSH tunneling bastions.
+  1. **`🔐 Connections`**: Manage encrypted Connection Vault profiles, edit credentials, test TCP connectivity, and configure SSL/TLS encryption.
   2. **`☁️ GitHub Sync`**: Configure GitHub personal access tokens (PAT) and repository paths to synchronize SQL snippets and schema definitions automatically with remote Git repos.
   3. **`📦 Notes Bundle`**: Export and import encrypted operational notes packages (`.sqlfox-vault`), enabling portable team sharing and offline backup runbooks.
   4. **`🤖 AI Copilot`**: Set BYOK API keys (OpenAI, Claude, Gemini, DeepSeek, or local Ollama), configure model parameters, temperature, and custom system prompt overrides. Seamlessly delegated from Copilot headers and Notes drawers.

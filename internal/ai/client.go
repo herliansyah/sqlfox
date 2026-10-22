@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -293,7 +294,7 @@ func (c *AIClient) completeAnthropic(ctx context.Context, req CompletionRequest)
 
 func (c *AIClient) completeGemini(ctx context.Context, req CompletionRequest) (*CompletionResponse, error) {
 	endpoint := fmt.Sprintf("%s/models/%s:generateContent?key=%s",
-		strings.TrimSuffix(c.cfg.Endpoint, "/"), c.cfg.Model, c.cfg.APIKey)
+		strings.TrimSuffix(c.cfg.Endpoint, "/"), c.cfg.Model, url.QueryEscape(c.cfg.APIKey))
 
 	payload := map[string]any{
 		"system_instruction": map[string]any{

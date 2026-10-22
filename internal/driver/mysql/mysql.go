@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -70,14 +71,17 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 		}
 	}
 
-	// 2. Assemble DSN
-	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
-	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&tls=%s&timeout=10s&readTimeout=60s&writeTimeout=30s",
+	// 2. Assemble DSN (net.JoinHostPort handles IPv6 literals safely)
+	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
+	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&tls=%s&timeout=10s&readTimeout=60s&writeTimeout=30s&multiStatements=true",
 		cfg.User, cfg.Password, addr, cfg.DatabaseName, tlsParam,
 	)
 
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
+		if strings.HasPrefix(tlsParam, "custom-tls-") {
+			gomysql.DeregisterTLSConfig(tlsParam)
+		}
 		return nil, fmt.Errorf("failed to open mysql connection: %w", err)
 	}
 
@@ -90,6 +94,9 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 	// Test connection
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
+		if strings.HasPrefix(tlsParam, "custom-tls-") {
+			gomysql.DeregisterTLSConfig(tlsParam)
+		}
 		return nil, fmt.Errorf("failed to connect to MySQL server (%s:%d): %w", cfg.Host, cfg.Port, err)
 	}
 
@@ -99,10 +106,16 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 		pfsEnabled = true
 	}
 
+	tlsKey := ""
+	if strings.HasPrefix(tlsParam, "custom-tls-") {
+		tlsKey = tlsParam
+	}
+
 	return &MySQLSession{
 		db:           db,
 		cfg:          cfg,
 		dsn:          dsn,
+		tlsKey:       tlsKey,
 		queryThreads: make(map[string]int64),
 		pfsEnabled:   pfsEnabled,
 	}, nil
@@ -112,6 +125,7 @@ type MySQLSession struct {
 	db           *sql.DB
 	cfg          driver.Config
 	dsn          string
+	tlsKey       string
 	mu           sync.Mutex
 	queryThreads map[string]int64
 	pfsEnabled   bool
@@ -2137,6 +2151,10 @@ func (s *MySQLSession) SampleFlightMetrics(ctx context.Context) (*driver.FlightM
 }
 
 func (s *MySQLSession) Close() error {
+	if s.tlsKey != "" {
+		gomysql.DeregisterTLSConfig(s.tlsKey)
+		s.tlsKey = ""
+	}
 	return s.db.Close()
 }
 

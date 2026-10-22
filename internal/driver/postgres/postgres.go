@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"strconv"
 	"strings"
@@ -48,7 +49,7 @@ func (d *PostgresDriver) Connect(ctx context.Context, cfg driver.Config) (driver
 
 	u := &url.URL{
 		Scheme: "postgres",
-		Host:   fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
+		Host:   net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)),
 		Path:   "/" + strings.TrimPrefix(cfg.DatabaseName, "/"),
 	}
 	if cfg.User != "" || cfg.Password != "" {

@@ -45,6 +45,7 @@ func (s *Server) handleSaveConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	conn.Password = ""
 	writeJSON(w, http.StatusOK, conn)
 }
 

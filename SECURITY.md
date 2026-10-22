@@ -16,7 +16,7 @@ Security architecture, cryptographic protocols, environment isolation, and AI pr
 │   └── Disk: ~/.sqlfox/config.db (Encrypted AES-256-GCM) │
 └────────┬──────────────────────────────────┬─────────────┘
          │                                  │
-         │ Direct TLS or SSH Tunnel         │ HTTPS (Metadata Only)
+         │ Direct TLS or Platform SSH Tunnel│ HTTPS (Metadata Only)
          ▼                                  ▼
 [ Remote Database Server ]         [ Third-Party AI API ]
 (Production / Staging / Dev)       (OpenAI / Claude / Gemini / Ollama)
@@ -32,7 +32,7 @@ Security architecture, cryptographic protocols, environment isolation, and AI pr
 
 ## 2. Credential Encryption & Key Management
 
-All database passwords, SSH private keys, and AI API keys stored locally in SQLite are encrypted at rest using **AES-256-GCM** with authentication tags.
+All database passwords, SSL/TLS certificates, and AI API keys stored locally in SQLite are encrypted at rest using **AES-256-GCM** with authentication tags.
 
 ```mermaid
 flowchart LR

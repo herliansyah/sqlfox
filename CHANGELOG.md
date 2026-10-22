@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **HTTP Server Persistent Stream & Large Dump Write Timeout (`cmd/sqlfox/main.go`)**: Disabled global `WriteTimeout` on daemon `http.Server` (retaining `ReadHeaderTimeout: 10s` and `IdleTimeout: 120s`), eliminating 60-second connection drops on SSE telemetry streams (`/api/logs/stream`) and large SQL database dumps.
+- **Safety Guard CTE Comment & Escape Bypass (`internal/safety/guard.go`, `internal/safety/guard_test.go`)**: Enhanced `stripLeadingCTE` to properly ignore single-line comments (`--`, `#`), multi-line comments (`/* ... */`), and escaped quotes (`\'`, `\"`) within CTE definitions, preventing destructive `DELETE` and `UPDATE` statements from bypassing Safety Guard evaluation. Added `stripLeadingCTE` fallback to lexical inspection.
+- **MySQL Multi-Statement Execution in Query Editor (`internal/driver/mysql/mysql.go`)**: Appended `&multiStatements=true` to the MySQL driver DSN, enabling execution of multi-statement batches without MySQL Error 1064 syntax failures.
+- **Google Gemini API Key Special Character URL Encoding (`internal/ai/client.go`)**: Added `url.QueryEscape` to Gemini completion request URL formation, preventing API key corruption when keys contain characters like `+`, `/`, `&`, or `=`.
+- **IPv6 Host Literal Parsing (`internal/driver/mysql/mysql.go`, `internal/driver/postgres/postgres.go`)**: Replaced raw string concatenation with standard `net.JoinHostPort` for MySQL and PostgreSQL dialers, ensuring IPv6 addresses (e.g. `::1`) are properly bracketed (`[::1]:port`).
+
+### Security
+- **Connection Save Plaintext Password Sanitization (`internal/server/handlers_connections.go`)**: Sanitized `conn.Password = ""` prior to serializing the JSON response of `handleSaveConnection`, preventing plaintext database passwords from being echoed back in HTTP response bodies.
+- **Auth Manager In-Memory Token and Lockout Expiry Purge (`internal/server/auth.go`)**: Added `purgeExpiredLocked()` to automatically sweep expired authentication tokens and expired IP lockout records during token generation, validation, and failed login tracking.
+- **MySQL Driver TLS Configuration Cleanup (`internal/driver/mysql/mysql.go`)**: Stored `tlsKey` on `MySQLSession` and registered `gomysql.DeregisterTLSConfig(s.tlsKey)` upon session closure (`Close()`), eliminating monotonic memory growth in the driver's global TLS config map.
+
+### Documentation
+- **ADR 0020 SSH Documentation Alignment (`README.md`, `ARCHITECTURE.md`, `SECURITY.md`, `docs/USER_GUIDE.md`, `docs/USER_GUIDE_ID.md`)**: Synchronized user guides, architecture specifications, and security threat models to reflect native platform SSH forwarding (`ssh -N -L`) and SSL/TLS certificate vault storage in accordance with ADR 0020.
+- **SqlFox Future Roadmap & Architectural Backlog (`docs/FUTURE_ROADMAP.md`)**: Documented comprehensive future backlog for missing features (in-process bastion manager, visual transaction controls, database object designers, Excel export, localStorage tab persistence) and bloat evaluations (GitHub notes sync, PXC cluster driver weight, flight recorder APM scope, frontend single-file SPA modularization).
+
 ## [v0.10.6] - 2026-10-21
 
 ### Fixed
