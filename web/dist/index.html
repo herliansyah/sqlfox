@@ -602,6 +602,16 @@
               <span id="tab-database-pill-name" class="font-mono font-semibold text-amber-200">default</span>
               <span class="text-[9px] text-slate-400">▼</span>
             </div>
+
+            <!-- Transaction Status Pill (Roadmap 1.2) -->
+            <div id="tab-tx-pill-container" class="hidden items-center space-x-1.5 bg-amber-950/90 border border-amber-500/80 rounded px-2.5 py-1 text-xs transition select-none shadow-sm" title="Active Transaction in this Session">
+              <span class="text-amber-400 font-bold flex items-center space-x-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
+                <span>TX Active</span>
+              </span>
+              <button onclick="commitActiveTransaction(event)" class="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-2 py-0.5 rounded text-[10px] transition" title="Commit Transaction (Ctrl+Shift+C)">Commit</button>
+              <button onclick="rollbackActiveTransaction(event)" class="bg-rose-600 hover:bg-rose-500 text-white font-bold px-2 py-0.5 rounded text-[10px] transition" title="Rollback Transaction (Ctrl+Shift+R)">Rollback</button>
+            </div>
             <button id="btn-explain-query" onclick="explainActiveQuery()" class="bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-app-border transition flex items-center space-x-1" title="Explain Execution Plan (Ctrl+Shift+Enter)">
               <span id="btn-explain-icon">⚡</span>
               <span id="btn-explain-text">Explain</span>
@@ -5484,6 +5494,7 @@
           saveTabsState();
         }
         activeConnection = conn;
+        updateTransactionStatusUI(false);
         if (!sessionCatalogStore[conn.id]) {
           sessionCatalogStore[conn.id] = {};
           sessionCatalogTimestamps[conn.id] = {};
@@ -7303,11 +7314,23 @@
       setEditorSQL(formatSQL(sql));
     }
 
-    // --- Global Format Shortcut (Ctrl+Shift+F / Cmd+Shift+F) ---
+    // --- Global Format & Transaction Shortcuts ---
     window.addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'F' || e.key === 'f')) {
         e.preventDefault();
         formatActiveQuery();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'C' || e.key === 'c')) {
+        if (isCurrentSessionTxActive) {
+          e.preventDefault();
+          commitActiveTransaction();
+        }
+      }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'R' || e.key === 'r')) {
+        if (isCurrentSessionTxActive) {
+          e.preventDefault();
+          rollbackActiveTransaction();
+        }
       }
     });
 
@@ -8016,6 +8039,12 @@
     async function closeTab(tabId) {
       const tab = tabs.find(t => t.id === tabId);
       if (!tab) return;
+
+      if (isCurrentSessionTxActive && !tab.isTableViewer && !tab.isProcesslist && !tab.isCluster && !tab.isFlightRecorder && !tab.isVariables) {
+        const ok = await showNativeConfirm('An uncommitted transaction is currently active in this session.\nClosing this tab will ROLLBACK the transaction. Continue?', 'Active Transaction Warning');
+        if (!ok) return;
+        await rollbackActiveTransaction();
+      }
 
       if (isTabDirtyOrNonEmpty(tab)) {
         const title = tab.title || 'this tab';
@@ -14449,6 +14478,53 @@ Please analyze what is causing this query to be slow and suggest necessary query
       openTableViewer(item.table);
     }
 
+    // --- Visual Transaction Management (Roadmap 1.2) ---
+    let isCurrentSessionTxActive = false;
+
+    function updateTransactionStatusUI(txActive) {
+      isCurrentSessionTxActive = !!txActive;
+      const pill = document.getElementById('tab-tx-pill-container');
+      if (pill) {
+        if (isCurrentSessionTxActive) {
+          pill.classList.remove('hidden');
+          pill.classList.add('flex');
+        } else {
+          pill.classList.add('hidden');
+          pill.classList.remove('flex');
+        }
+      }
+    }
+
+    async function commitActiveTransaction(event) {
+      if (event) event.stopPropagation();
+      await executeDirectSQL("COMMIT;");
+    }
+
+    async function rollbackActiveTransaction(event) {
+      if (event) event.stopPropagation();
+      await executeDirectSQL("ROLLBACK;");
+    }
+
+    async function executeDirectSQL(sqlText) {
+      if (!activeConnection) return;
+      try {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/execute`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sql: sqlText })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          showNativeAlert(data.error || 'Execution failed', 'Transaction Error');
+          return;
+        }
+        updateTransactionStatusUI(data.tx_active);
+        renderQuerySuccessBanner(sqlText, data.message || `${sqlText.trim()} executed`, data.execution_ms || 0, 0, null);
+      } catch (err) {
+        showNativeAlert(err.message, 'Transaction Error');
+      }
+    }
+
     // --- Query Execution & Safety Guard ---
     async function runActiveQuery(confirmed = false, challengeInput = '') {
       // ponytail: Concurrency guard prevents duplicate simultaneous executions (e.g. double-click, DDL multi-trigger)
@@ -14556,6 +14632,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
           const btnViewProf = document.getElementById('btn-view-profile');
           if (btnViewProf) btnViewProf.classList.add('hidden');
         }
+
+        updateTransactionStatusUI(data.tx_active);
 
         if (data.type === 'query') {
           const parsed = extractSingleTableFromSQL(sql);

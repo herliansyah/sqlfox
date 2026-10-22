@@ -153,3 +153,38 @@ func (v *Vault) ClearAuditLogs(sessionID string) error {
 	}
 	return nil
 }
+
+// PurgeAuditLogs prunes audit logs older than retentionDays and enforces maxEntries ceiling.
+// If retentionDays <= 0, defaults to 30 days. If maxEntries <= 0, defaults to 50,000.
+func (v *Vault) PurgeAuditLogs(retentionDays int, maxEntries int) (int64, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if retentionDays <= 0 {
+		retentionDays = 30
+	}
+	if maxEntries <= 0 {
+		maxEntries = 50000
+	}
+
+	cutoff := time.Now().AddDate(0, 0, -retentionDays)
+	res1, err := v.db.Exec("DELETE FROM audit_logs WHERE executed_at < ?", cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("failed to prune expired audit logs: %w", err)
+	}
+	deletedTime, _ := res1.RowsAffected()
+
+	// Enforce maxEntries ceiling by trimming oldest records beyond the limit
+	trimQuery := `
+	DELETE FROM audit_logs WHERE id IN (
+		SELECT id FROM audit_logs ORDER BY executed_at DESC LIMIT -1 OFFSET ?
+	)
+	`
+	res2, err := v.db.Exec(trimQuery, maxEntries)
+	if err != nil {
+		return deletedTime, fmt.Errorf("failed to trim audit logs ceiling: %w", err)
+	}
+	deletedCeiling, _ := res2.RowsAffected()
+
+	return deletedTime + deletedCeiling, nil
+}

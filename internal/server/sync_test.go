@@ -561,3 +561,42 @@ func TestSyncData_ColumnOrderMismatch(t *testing.T) {
 		t.Fatalf("target rows wrong after sync: %s", got)
 	}
 }
+
+func TestCrossDialectDDLNormalization(t *testing.T) {
+	tbl := driver.TableMetadata{
+		Name: "customers",
+		Columns: []driver.ColumnMetadata{
+			{Name: "id", Type: "int(11)", IsPrimaryKey: true, Extra: "auto_increment"},
+			{Name: "bio", Type: "mediumtext", IsNullable: true},
+			{Name: "created_at", Type: "datetime", DefaultValue: "CURRENT_TIMESTAMP"},
+			{Name: "score", Type: "double", IsNullable: false},
+		},
+	}
+
+	// SQLite target
+	sqliteDDL := buildCreateTableDDL(tbl, "sqlite")
+	if strings.Contains(sqliteDDL, "auto_increment") {
+		t.Errorf("expected SQLite DDL to strip MySQL auto_increment, got:\n%s", sqliteDDL)
+	}
+	if !strings.Contains(sqliteDDL, `"id" INTEGER`) {
+		t.Errorf("expected SQLite DDL to normalize int(11) to INTEGER, got:\n%s", sqliteDDL)
+	}
+	if !strings.Contains(sqliteDDL, `"bio" TEXT`) {
+		t.Errorf("expected SQLite DDL to normalize mediumtext to TEXT, got:\n%s", sqliteDDL)
+	}
+
+	// Postgres target
+	pgDDL := buildCreateTableDDL(tbl, "postgres")
+	if strings.Contains(pgDDL, "auto_increment") {
+		t.Errorf("expected Postgres DDL to strip MySQL auto_increment, got:\n%s", pgDDL)
+	}
+	if !strings.Contains(pgDDL, `"id" INTEGER`) {
+		t.Errorf("expected Postgres DDL to normalize int(11) to INTEGER without width, got:\n%s", pgDDL)
+	}
+	if !strings.Contains(pgDDL, `"created_at" TIMESTAMP`) {
+		t.Errorf("expected Postgres DDL to normalize datetime to TIMESTAMP, got:\n%s", pgDDL)
+	}
+	if !strings.Contains(pgDDL, `"score" DOUBLE PRECISION`) {
+		t.Errorf("expected Postgres DDL to normalize double to DOUBLE PRECISION, got:\n%s", pgDDL)
+	}
+}

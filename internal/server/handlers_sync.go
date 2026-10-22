@@ -150,6 +150,7 @@ func (s *Server) handleSyncStructureCompare(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	srcDriver := srcSess.DriverName
 	tgtDriver := tgtSess.DriverName
 	tgtTableMap := make(map[string]driver.TableMetadata)
 	for _, t := range tgtSchema.Tables {
@@ -169,8 +170,11 @@ func (s *Server) handleSyncStructureCompare(w http.ResponseWriter, r *http.Reque
 		tgtTbl, exists := tgtTableMap[strings.ToLower(srcTbl.Name)]
 		if !exists {
 			// Missing table in target -> CREATE TABLE
-			ddl, err := srcSess.Session.GetTableDDL(ctx, srcTbl.Name)
-			if err != nil || strings.TrimSpace(ddl) == "" {
+			var ddl string
+			if strings.EqualFold(srcDriver, tgtDriver) {
+				ddl, _ = srcSess.Session.GetTableDDL(ctx, srcTbl.Name)
+			}
+			if strings.TrimSpace(ddl) == "" {
 				ddl = buildCreateTableDDL(srcTbl, tgtDriver)
 			} else {
 				ddl = strings.TrimSpace(ddl)
@@ -208,7 +212,7 @@ func (s *Server) handleSyncStructureCompare(w http.ResponseWriter, r *http.Reque
 			tgtCol, colExists := tgtColMap[strings.ToLower(srcCol.Name)]
 			if !colExists {
 				// Column missing in target -> ADD COLUMN
-				clause := buildColumnDefinition(srcCol)
+				clause := buildColumnDefinition(srcCol, tgtDriver)
 				sql := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s;",
 					quoteIdent(srcTbl.Name, tgtDriver),
 					quoteIdent(srcCol.Name, tgtDriver),
@@ -230,7 +234,7 @@ func (s *Server) handleSyncStructureCompare(w http.ResponseWriter, r *http.Reque
 			} else {
 				// Column exists -> check for type/nullability discrepancy
 				if !columnEquals(srcCol, tgtCol) {
-					clause := buildColumnDefinition(srcCol)
+					clause := buildColumnDefinition(srcCol, tgtDriver)
 					var sql string
 					if tgtDriver == "sqlite" {
 						sql = fmt.Sprintf("-- SQLite: column %s definition differs (%s vs %s)", srcCol.Name, srcCol.Type, tgtCol.Type)
@@ -275,7 +279,7 @@ func (s *Server) handleSyncStructureCompare(w http.ResponseWriter, r *http.Reque
 						Column:    srcCol.Name,
 						Action:    "MODIFY COLUMN",
 						SourceDef: fmt.Sprintf("%s %s", srcCol.Name, clause),
-						TargetDef: fmt.Sprintf("%s %s", tgtCol.Name, buildColumnDefinition(tgtCol)),
+						TargetDef: fmt.Sprintf("%s %s", tgtCol.Name, buildColumnDefinition(tgtCol, tgtDriver)),
 						SQL:       sql,
 						Selected:  true,
 					})
@@ -299,7 +303,7 @@ func (s *Server) handleSyncStructureCompare(w http.ResponseWriter, r *http.Reque
 						Column:    tgtCol.Name,
 						Action:    "DROP COLUMN",
 						SourceDef: "Does not exist",
-						TargetDef: fmt.Sprintf("%s %s", tgtCol.Name, buildColumnDefinition(tgtCol)),
+						TargetDef: fmt.Sprintf("%s %s", tgtCol.Name, buildColumnDefinition(tgtCol, tgtDriver)),
 						SQL:       sql,
 						Selected:  false,
 					})
@@ -548,9 +552,27 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 
 		// Auto-create table if requested
 		if req.CreateTables {
-			ddl, err := srcSess.Session.GetTableDDL(ctx, tbl)
-			if err == nil && ddl != "" {
-				// Strip foreign keys or dialect specifics if cross-driver, but standard exec is best-effort
+			var ddl string
+			var ddlErr error
+
+			// If cross-driver, construct target-compatible DDL from schema inspection
+			if !strings.EqualFold(srcDriver, tgtDriver) {
+				if srcSchema, err := srcSess.Session.InspectSchema(ctx, req.SourceDB); err == nil {
+					for _, t := range srcSchema.Tables {
+						if strings.EqualFold(t.Name, tbl) {
+							ddl = buildCreateTableDDL(t, tgtDriver)
+							break
+						}
+					}
+				}
+			}
+
+			// Fallback to GetTableDDL if same driver or if schema lookup didn't yield DDL
+			if ddl == "" {
+				ddl, ddlErr = srcSess.Session.GetTableDDL(ctx, tbl)
+			}
+
+			if ddlErr == nil && ddl != "" {
 				_, _ = tgtSess.Session.Exec(ctx, ddl)
 			}
 		}
@@ -1140,8 +1162,54 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 // Helper Functions
 // ----------------------------------------------------------------------------
 
-func buildColumnDefinition(col driver.ColumnMetadata) string {
-	clause := col.Type
+func normalizeColumnType(t string, driverName string) string {
+	raw := strings.TrimSpace(t)
+	upper := strings.ToUpper(raw)
+	isPg := strings.EqualFold(driverName, "postgres") || strings.EqualFold(driverName, "postgresql") || strings.EqualFold(driverName, "pg")
+	isSqlite := strings.EqualFold(driverName, "sqlite") || strings.EqualFold(driverName, "sqlite3")
+
+	if isSqlite {
+		if strings.HasPrefix(upper, "INT") || strings.HasPrefix(upper, "TINYINT") || strings.HasPrefix(upper, "SMALLINT") || strings.HasPrefix(upper, "BIGINT") {
+			return "INTEGER"
+		}
+		if strings.Contains(upper, "TEXT") || strings.HasPrefix(upper, "VARCHAR") || strings.HasPrefix(upper, "CHAR") || strings.HasPrefix(upper, "ENUM") || strings.HasPrefix(upper, "SET") || strings.HasPrefix(upper, "JSON") {
+			return "TEXT"
+		}
+		if strings.HasPrefix(upper, "DOUBLE") || strings.HasPrefix(upper, "FLOAT") || strings.HasPrefix(upper, "DECIMAL") || strings.HasPrefix(upper, "NUMERIC") {
+			return "REAL"
+		}
+		if strings.Contains(upper, "BLOB") || strings.Contains(upper, "BINARY") || upper == "BYTEA" {
+			return "BLOB"
+		}
+	} else if isPg {
+		if strings.HasPrefix(upper, "INT(") || upper == "INT" || upper == "INTEGER" {
+			return "INTEGER"
+		}
+		if strings.HasPrefix(upper, "BIGINT(") || upper == "BIGINT" {
+			return "BIGINT"
+		}
+		if strings.HasPrefix(upper, "TINYINT") || strings.HasPrefix(upper, "SMALLINT") {
+			return "SMALLINT"
+		}
+		if strings.Contains(upper, "TEXT") || strings.HasPrefix(upper, "ENUM") || strings.HasPrefix(upper, "SET") {
+			return "TEXT"
+		}
+		if upper == "DATETIME" {
+			return "TIMESTAMP"
+		}
+		if upper == "DOUBLE" {
+			return "DOUBLE PRECISION"
+		}
+		if strings.Contains(upper, "BLOB") || strings.Contains(upper, "BINARY") {
+			return "BYTEA"
+		}
+	}
+
+	return raw
+}
+
+func buildColumnDefinition(col driver.ColumnMetadata, driverName string) string {
+	clause := normalizeColumnType(col.Type, driverName)
 	if !col.IsNullable {
 		clause += " NOT NULL"
 	}
@@ -1152,7 +1220,9 @@ func buildColumnDefinition(col driver.ColumnMetadata) string {
 			clause += " DEFAULT '" + strings.ReplaceAll(col.DefaultValue, "'", "''") + "'"
 		}
 	}
-	if col.Extra != "" {
+	isPg := strings.EqualFold(driverName, "postgres") || strings.EqualFold(driverName, "postgresql") || strings.EqualFold(driverName, "pg")
+	isSqlite := strings.EqualFold(driverName, "sqlite") || strings.EqualFold(driverName, "sqlite3")
+	if col.Extra != "" && !isPg && !isSqlite {
 		clause += " " + col.Extra
 	}
 	return clause
@@ -1163,7 +1233,7 @@ func buildCreateTableDDL(tbl driver.TableMetadata, driverName string) string {
 	var pkCols []string
 
 	for _, col := range tbl.Columns {
-		def := fmt.Sprintf("  %s %s", quoteIdent(col.Name, driverName), buildColumnDefinition(col))
+		def := fmt.Sprintf("  %s %s", quoteIdent(col.Name, driverName), buildColumnDefinition(col, driverName))
 		lines = append(lines, def)
 		if col.IsPrimaryKey {
 			pkCols = append(pkCols, quoteIdent(col.Name, driverName))
