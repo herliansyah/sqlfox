@@ -1403,6 +1403,34 @@ func TestProcesslistBatchModalScriptIntegrity(t *testing.T) {
 	}
 }
 
+func TestProcesslistActionButtonsAndDeferredRefresh(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(contentBytes)
+
+	// Ensure both Kill Q and Kill C are rendered for active queries
+	if !strings.Contains(content, `onclick="confirmKillProcess(${t.id}, 'query')"`) {
+		t.Errorf("expected confirmKillProcess with query mode in index.html")
+	}
+	if !strings.Contains(content, `onclick="confirmKillProcess(${t.id}, 'connection')"`) {
+		t.Errorf("expected confirmKillProcess with connection mode in index.html")
+	}
+
+	// Ensure deferred refresh pattern exists to handle async DB engine cleanup
+	if !strings.Contains(content, "✓ ${modeLabel} sent for thread #${threadId}") {
+		t.Errorf("expected toast feedback in doKillProcess")
+	}
+}
+
 func TestProcesslistTwoTierToolbarLayout(t *testing.T) {
 	fsys := Assets()
 	f, err := fsys.Open("index.html")

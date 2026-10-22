@@ -913,14 +913,57 @@ func parseBlockingPids(rawBlockers any) []int64 {
 }
 
 func (s *PostgresSession) KillProcess(ctx context.Context, threadID int64, killConnection bool) error {
+	if threadID <= 0 {
+		return errors.New("invalid thread id")
+	}
+
 	var query string
 	if killConnection {
 		query = "SELECT pg_terminate_backend($1)"
 	} else {
 		query = "SELECT pg_cancel_backend($1)"
 	}
-	_, err := s.db.ExecContext(ctx, query, threadID)
-	return err
+
+	executeKill := func(db *sql.DB) (bool, error) {
+		var ok bool
+		err := db.QueryRowContext(ctx, query, threadID).Scan(&ok)
+		return ok, err
+	}
+
+	// ponytail: Dial independent single-shot control connection to bypass saturated s.db pool
+	if s.dsn != "" {
+		controlDB, dErr := sql.Open("pgx", s.dsn)
+		if dErr == nil {
+			defer controlDB.Close()
+			ok, kErr := executeKill(controlDB)
+			if kErr == nil {
+				if !ok {
+					action := "cancel query"
+					if killConnection {
+						action = "terminate connection"
+					}
+					return fmt.Errorf("failed to %s for backend PID %d (process may not exist or insufficient privilege)", action, threadID)
+				}
+				return nil
+			}
+		}
+	}
+
+	if s.db != nil {
+		ok, err := executeKill(s.db)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			action := "cancel query"
+			if killConnection {
+				action = "terminate connection"
+			}
+			return fmt.Errorf("failed to %s for backend PID %d (process may not exist or insufficient privilege)", action, threadID)
+		}
+		return nil
+	}
+	return errors.New("database connection not available")
 }
 
 // GetDatabaseDiagnostics returns physical storage and metadata for all databases on PostgreSQL.

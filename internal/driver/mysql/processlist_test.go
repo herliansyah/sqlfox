@@ -89,3 +89,20 @@ func TestGetProcesslist_FallbackWhenPerformanceSchemaEmpty(t *testing.T) {
 		t.Errorf("expected thread ID 101, got %d", res.Threads[0].ID)
 	}
 }
+
+func TestMySQLKillProcess_Validation(t *testing.T) {
+	s := &MySQLSession{}
+	ctx := context.Background()
+
+	if err := s.KillProcess(ctx, 0, true); err == nil {
+		t.Fatalf("expected error for thread ID 0, got nil")
+	}
+	if err := s.KillProcess(ctx, -1, false); err == nil {
+		t.Fatalf("expected error for thread ID -1, got nil")
+	}
+
+	// Without db or dsn, should return error
+	if err := s.KillProcess(ctx, 100, true); err == nil {
+		t.Fatalf("expected error on unconfigured session, got nil")
+	}
+}

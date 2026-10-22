@@ -1072,8 +1072,22 @@ func (s *MySQLSession) KillProcess(ctx context.Context, threadID int64, killConn
 		cmd = fmt.Sprintf("KILL QUERY %d", threadID)
 	}
 
-	_, err := s.db.ExecContext(ctx, cmd)
-	return err
+	// ponytail: Dial independent single-shot control connection to bypass saturated s.db pool
+	if s.dsn != "" {
+		controlDB, dErr := sql.Open("mysql", s.dsn)
+		if dErr == nil {
+			defer controlDB.Close()
+			if _, kErr := controlDB.ExecContext(ctx, cmd); kErr == nil {
+				return nil
+			}
+		}
+	}
+
+	if s.db != nil {
+		_, err := s.db.ExecContext(ctx, cmd)
+		return err
+	}
+	return errors.New("database connection not available")
 }
 
 // GetDatabaseDiagnostics returns physical storage and metadata for all databases on the MySQL server.
