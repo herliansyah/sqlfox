@@ -24,13 +24,14 @@ var (
 
 // ExecuteRequest encapsulates SQL query parameters and challenge verification.
 type ExecuteRequest struct {
-	SQL            string `json:"sql"`
-	Confirmed      bool   `json:"confirmed"`
-	ChallengeInput string `json:"challenge_input"`
-	QueryID        string `json:"query_id"`
-	Database       string `json:"database"`
-	Profile        bool   `json:"profile"`
-	LockTimeoutSec int    `json:"lock_timeout_sec,omitempty"` // Fail-fast session lock timeout (default 3s for DDL)
+	SQL                   string `json:"sql"`
+	Confirmed             bool   `json:"confirmed"`
+	ChallengeInput        string `json:"challenge_input"`
+	QueryID               string `json:"query_id"`
+	Database              string `json:"database"`
+	Profile               bool   `json:"profile"`
+	LockTimeoutSec        int    `json:"lock_timeout_sec,omitempty"` // Fail-fast session lock timeout (default 3s for DDL)
+	BypassMutationConfirm bool   `json:"bypass_mutation_confirm,omitempty"` // Dev-only session toggle (ADR 0057)
 }
 
 // ExecuteResponse provides the unified outcome of a mutation or buffered query.
@@ -395,8 +396,58 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		return nil, ErrReadOnlySession
 	}
 
-	// 3. Challenge Enforcement (ADR 0055)
-	requiresGate := inspection.RequiresChallenge
+	// 3. Pre-Execution Row Estimation & Tiered Affirmation Gate (ADR 0057)
+	isDev := strings.EqualFold(s.Environment, "Development")
+	isMutation := inspection.Operation == "DELETE" || inspection.Operation == "UPDATE" || len(inspection.StatementEstimates) > 0
+	canBypass := isDev && req.BypassMutationConfirm && !inspection.RequiresChallenge
+
+	if isMutation && !canBypass && !req.Confirmed {
+		s.estimateAffectedRows(ctx, inspection)
+
+		anyMissingWhere := false
+		anyOverThreshold := false
+		if len(inspection.StatementEstimates) > 0 {
+			for _, est := range inspection.StatementEstimates {
+				if !est.HasWhere {
+					anyMissingWhere = true
+				}
+				if est.EstimatedRows != nil && *est.EstimatedRows > 100 {
+					anyOverThreshold = true
+				}
+			}
+		} else {
+			if !inspection.HasWhere {
+				anyMissingWhere = true
+			}
+			if inspection.EstimatedRows != nil && *inspection.EstimatedRows > 100 {
+				anyOverThreshold = true
+			}
+		}
+
+		if isDev {
+			// Single-row PK/Unique mutation in Development: auto-allow without challenge
+			if len(inspection.StatementEstimates) == 0 && inspection.HasWhere && inspection.EstimatedRows != nil && *inspection.EstimatedRows == 1 {
+				inspection.RequiresAffirmation = false
+				inspection.RequiresChallenge = false
+			} else {
+				// > 1 rows, 0 rows, unknown rows, unqualified, or multi-statement batch
+				if anyOverThreshold || anyMissingWhere {
+					inspection.RequiresChallenge = true
+				} else {
+					inspection.RequiresAffirmation = true
+				}
+			}
+		} else {
+			// Staging or Production: universal confirmation
+			if anyOverThreshold || anyMissingWhere {
+				inspection.RequiresChallenge = true
+			} else {
+				inspection.RequiresAffirmation = true
+			}
+		}
+	}
+
+	requiresGate := inspection.RequiresChallenge || (isMutation && !canBypass && inspection.RequiresAffirmation) || (!isDev && inspection.RequiresAffirmation)
 	if requiresGate && !req.Confirmed {
 		if inspection.TargetTable != "" && s.Session != nil {
 			if locks, err := s.Session.InspectTableLocks(ctx, req.Database, inspection.TargetTable); err == nil {
@@ -653,15 +704,20 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 				return nil, err
 			}
 			rowsAffected = execRes.RowsAffected
+			msg := execRes.Message + " (in transaction)"
+			if isMutation && inspection.EstimatedRows != nil && *inspection.EstimatedRows != rowsAffected {
+				msg = fmt.Sprintf("%s (Estimated: %d rows, Actual: %d rows)", msg, *inspection.EstimatedRows, rowsAffected)
+			}
 			return &ExecuteResponse{
 				Type:               "exec",
 				RowsAffected:       execRes.RowsAffected,
 				LastInsertID:       execRes.LastInsertID,
 				ExecutionMs:        execRes.ExecutionMs,
-				Message:            execRes.Message + " (in transaction)",
+				Message:            msg,
 				BackupFile:         backupFile,
 				BackupDataIncluded: backupDataIncluded,
 				Profile:            collectProfile(),
+				Inspection:         inspection,
 			}, nil
 		}
 
@@ -718,16 +774,21 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 			return nil, err
 		}
 		rowsAffected = execRes.RowsAffected
+		msg := execRes.Message
+		if isMutation && inspection.EstimatedRows != nil && *inspection.EstimatedRows != rowsAffected {
+			msg = fmt.Sprintf("%s (Estimated: %d rows, Actual: %d rows)", msg, *inspection.EstimatedRows, rowsAffected)
+		}
 		return &ExecuteResponse{
 			Type:               "exec",
 			RowsAffected:       execRes.RowsAffected,
 			LastInsertID:       execRes.LastInsertID,
 			ExecutionMs:        execRes.ExecutionMs,
-			Message:            execRes.Message,
+			Message:            msg,
 			BackupFile:         backupFile,
 			BackupDataIncluded: backupDataIncluded,
 			Profile:            collectProfile(),
 			TxActive:           currentTx != nil,
+			Inspection:         inspection,
 		}, nil
 	}
 
@@ -1063,14 +1124,28 @@ func inspectAllStatements(sql, environment, driverName, scopedDB string) (*safet
 		return safety.InspectWithScope(sql, environment, scopedDB), driver.IsQueryStatement(sql), nil
 	}
 	var gate, firstDestructive *safety.InspectionResult
+	var stmtEstimates []safety.StatementEstimate
 	allQueries := true
-	for _, stmt := range stmts {
+	for idx, stmt := range stmts {
 		if !driver.IsQueryStatement(stmt) {
 			allQueries = false
 		}
 		insp := safety.InspectWithScope(stmt, environment, scopedDB)
+		if insp.Operation == "DELETE" || insp.Operation == "UPDATE" {
+			stmtEstimates = append(stmtEstimates, safety.StatementEstimate{
+				StatementIndex:    idx + 1,
+				SQL:               stmt,
+				Operation:         insp.Operation,
+				TargetTable:       insp.TargetTable,
+				TargetDatabase:    insp.TargetDatabase,
+				HasWhere:          insp.HasWhere,
+				CountQuery:        insp.CountQuery,
+				RequiresChallenge: insp.RequiresChallenge,
+				Reason:            insp.Reason,
+			})
+		}
 		if insp.RequiresChallenge {
-			if gate != nil && gate.RequiresChallenge {
+			if gate != nil && gate.RequiresChallenge && (gate.Operation == "DROP" || insp.Operation == "DROP" || gate.Operation == "TRUNCATE" || insp.Operation == "TRUNCATE") {
 				return nil, false, errors.New("multiple destructive statements require confirmation: run them one at a time")
 			}
 			gate = insp
@@ -1083,8 +1158,107 @@ func inspectAllStatements(sql, environment, driverName, scopedDB string) (*safet
 	if gate == nil {
 		gate = firstDestructive
 	}
+	if gate == nil && len(stmtEstimates) > 0 {
+		gate = &safety.InspectionResult{
+			RiskLevel:           safety.RiskWarning,
+			IsDestructive:       true,
+			Operation:           "MUTATION_BATCH",
+			RequiresAffirmation: true,
+			Reason:              fmt.Sprintf("Batch contains %d mutation statements.", len(stmtEstimates)),
+		}
+	}
 	if gate == nil {
 		gate = &safety.InspectionResult{RiskLevel: safety.RiskNone}
 	}
+	if len(stmtEstimates) > 0 {
+		gate.StatementEstimates = stmtEstimates
+	}
 	return gate, allQueries, nil
+}
+
+func (s *ActiveSession) estimateAffectedRows(ctx context.Context, insp *safety.InspectionResult) {
+	if insp == nil || s.Session == nil {
+		return
+	}
+	if len(insp.StatementEstimates) > 0 {
+		var total int64
+		allExact := true
+		for i := range insp.StatementEstimates {
+			est := &insp.StatementEstimates[i]
+			if est.CountQuery != "" {
+				count, exact := s.runSingleCountEstimate(ctx, est.CountQuery, est.TargetDatabase)
+				if count != nil {
+					est.EstimatedRows = count
+					est.EstimatedIsExact = exact
+					total += *count
+					if !exact {
+						allExact = false
+					}
+				}
+			}
+		}
+		insp.EstimatedRows = &total
+		insp.EstimatedIsExact = allExact
+		return
+	}
+
+	if insp.CountQuery != "" {
+		count, exact := s.runSingleCountEstimate(ctx, insp.CountQuery, insp.TargetDatabase)
+		if count != nil {
+			insp.EstimatedRows = count
+			insp.EstimatedIsExact = exact
+		}
+	}
+}
+
+func (s *ActiveSession) runSingleCountEstimate(ctx context.Context, countSQL, targetDB string) (*int64, bool) {
+	if s.Session == nil || countSQL == "" {
+		return nil, false
+	}
+	countCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	if targetDB != "" && s.CachedSchema != nil && s.CachedSchema.DatabaseName != targetDB {
+		_ = s.Session.SelectDatabase(countCtx, targetDB)
+	}
+
+	rows, err := s.Session.QueryRaw(countCtx, countSQL)
+	if err == nil && len(rows) > 0 && len(rows[0]) > 0 {
+		if cnt, ok := parseCountValue(rows[0][0]); ok {
+			return &cnt, true
+		}
+	}
+
+	// Fallback to EXPLAIN
+	plan, expErr := s.Session.Explain(countCtx, countSQL)
+	if expErr == nil && plan != nil && len(plan.Rows) > 0 {
+		if plan.Rows[0].Rows > 0 {
+			est := plan.Rows[0].Rows
+			return &est, false
+		}
+	}
+
+	return nil, false
+}
+
+func parseCountValue(v any) (int64, bool) {
+	switch val := v.(type) {
+	case int64:
+		return val, true
+	case int:
+		return int64(val), true
+	case int32:
+		return int64(val), true
+	case uint64:
+		return int64(val), true
+	case float64:
+		return int64(val), true
+	case string:
+		n, err := strconv.ParseInt(strings.TrimSpace(val), 10, 64)
+		return n, err == nil
+	case []byte:
+		n, err := strconv.ParseInt(strings.TrimSpace(string(val)), 10, 64)
+		return n, err == nil
+	}
+	return 0, false
 }

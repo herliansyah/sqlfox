@@ -168,6 +168,18 @@ _Avoid_: DDL confirm, database check prompt, target alert
 An AST analysis check in the Safety Guard that detects discrepancies between a tab's bound Tab Database Scope and an explicitly qualified database prefix in a SQL statement, intercepting accidental cross-database executions.
 _Avoid_: Cross-DB validator, schema mismatch warning
 
+**Pre-Execution Row Estimation**:
+A deterministic pre-flight query phase rewriting `UPDATE` or `DELETE` statements into bounded `SELECT COUNT(*)` queries to evaluate affected row counts before operator confirmation.
+_Avoid_: Dry-run count, mutation estimation, row preview
+
+**Tiered Affirmation Gate**:
+An adaptive Safety Guard policy distinguishing between low-impact mutations (1–100 rows: 1-click inspection modal) and high-impact operations (>100 rows or unqualified: typed Challenge Modal).
+_Avoid_: Confirmation dialog, warning popup, double check
+
+**Environment-Aware Mutation Threshold**:
+An execution policy permitting single-row primary-key mutations to run without interruption in `Development`, while enforcing pre-execution affirmation across `Staging` and `Production`.
+_Avoid_: Env toggle, safety level, dev bypass
+
 ## Artificial Intelligence
 
 **BYOK (Bring Your Own Key)**:
