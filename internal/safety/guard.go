@@ -19,6 +19,21 @@ const (
 	RiskCritical  RiskLevel = "CRITICAL"
 )
 
+// StatementEstimate summarizes the estimated pre-execution blast radius of a statement in a batch.
+type StatementEstimate struct {
+	StatementIndex    int    `json:"statement_index"`
+	SQL               string `json:"sql"`
+	Operation         string `json:"operation"`
+	TargetTable       string `json:"target_table"`
+	TargetDatabase    string `json:"target_database,omitempty"`
+	HasWhere          bool   `json:"has_where"`
+	CountQuery        string `json:"count_query,omitempty"`
+	EstimatedRows     *int64 `json:"estimated_rows,omitempty"`
+	EstimatedIsExact  bool   `json:"estimated_is_exact,omitempty"`
+	RequiresChallenge bool   `json:"requires_challenge"`
+	Reason            string `json:"reason,omitempty"`
+}
+
 // InspectionResult details the safety evaluation of a SQL query.
 type InspectionResult struct {
 	RiskLevel           RiskLevel                      `json:"risk_level"`
@@ -34,6 +49,11 @@ type InspectionResult struct {
 	Suggestion          string                         `json:"suggestion,omitempty"`
 	TableLocks          []driver.TableLockInfo         `json:"table_locks,omitempty"`
 	Relationships       []driver.TableRelationshipInfo `json:"relationships,omitempty"`
+	HasWhere            bool                           `json:"has_where,omitempty"`
+	CountQuery          string                         `json:"count_query,omitempty"`
+	EstimatedRows       *int64                         `json:"estimated_rows,omitempty"`
+	EstimatedIsExact    bool                           `json:"estimated_is_exact,omitempty"`
+	StatementEstimates  []StatementEstimate            `json:"statement_estimates,omitempty"`
 }
 
 // Inspect analyzes a query string against the target environment (Production, Staging, Development).
@@ -65,53 +85,90 @@ func Inspect(query string, environment string) *InspectionResult {
 
 func inspectAST(stmt sqlparser.Statement, environment string) *InspectionResult {
 	isProd := strings.EqualFold(environment, "Production")
+	isStaging := strings.EqualFold(environment, "Staging")
 
 	switch node := stmt.(type) {
 	case *sqlparser.Delete:
 		tableName := sqlparser.String(node.TableExprs)
+		targetTbl := cleanTableName(tableName)
+		db, _ := extractDBAndTable(tableName)
 		if node.Where == nil {
 			return &InspectionResult{
 				RiskLevel:         RiskCritical,
 				IsDestructive:     true,
 				RequiresChallenge: true,
-				TargetTable:       cleanTableName(tableName),
+				TargetDatabase:    db,
+				TargetTable:       targetTbl,
 				Operation:         "DELETE",
-				Reason:            fmt.Sprintf("Unqualified DELETE statement on '%s' without a WHERE clause will delete ALL rows.", tableName),
+				Reason:            fmt.Sprintf("Unqualified DELETE statement on '%s' without a WHERE clause will delete ALL rows.", targetTbl),
 				Suggestion:        "Add a specific WHERE clause targeting rows (e.g. WHERE id = ?).",
+				CountQuery:        fmt.Sprintf("SELECT COUNT(*) FROM %s", tableName),
 			}
+		}
+		whereClause := strings.TrimSpace(sqlparser.String(node.Where))
+		countQ := fmt.Sprintf("SELECT COUNT(*) FROM %s %s", tableName, whereClause)
+		res := &InspectionResult{
+			IsDestructive:  true,
+			HasWhere:       true,
+			TargetDatabase: db,
+			TargetTable:    targetTbl,
+			Operation:      "DELETE",
+			CountQuery:     countQ,
 		}
 		if isProd {
-			return &InspectionResult{
-				RiskLevel:     RiskWarning,
-				IsDestructive: true,
-				TargetTable:   cleanTableName(tableName),
-				Operation:     "DELETE",
-				Reason:        fmt.Sprintf("DELETE query executing on PRODUCTION environment on table '%s'.", tableName),
-			}
+			res.RiskLevel = RiskWarning
+			res.RequiresAffirmation = true
+			res.Reason = fmt.Sprintf("DELETE query executing on PRODUCTION environment on table '%s'.", targetTbl)
+		} else if isStaging {
+			res.RiskLevel = RiskWarning
+			res.RequiresAffirmation = true
+			res.Reason = fmt.Sprintf("DELETE query executing on STAGING environment on table '%s'.", targetTbl)
+		} else {
+			res.RiskLevel = RiskNone
+			res.Reason = fmt.Sprintf("DELETE query targeting table '%s'.", targetTbl)
 		}
+		return res
 
 	case *sqlparser.Update:
 		tableName := sqlparser.String(node.TableExprs)
+		targetTbl := cleanTableName(tableName)
+		db, _ := extractDBAndTable(tableName)
 		if node.Where == nil {
 			return &InspectionResult{
 				RiskLevel:         RiskCritical,
 				IsDestructive:     true,
 				RequiresChallenge: true,
-				TargetTable:       cleanTableName(tableName),
+				TargetDatabase:    db,
+				TargetTable:       targetTbl,
 				Operation:         "UPDATE",
-				Reason:            fmt.Sprintf("Unqualified UPDATE statement on '%s' without a WHERE clause will modify ALL rows.", tableName),
+				Reason:            fmt.Sprintf("Unqualified UPDATE statement on '%s' without a WHERE clause will modify ALL rows.", targetTbl),
 				Suggestion:        "Add a specific WHERE clause targeting rows (e.g. WHERE id = ?).",
+				CountQuery:        fmt.Sprintf("SELECT COUNT(*) FROM %s", tableName),
 			}
+		}
+		whereClause := strings.TrimSpace(sqlparser.String(node.Where))
+		countQ := fmt.Sprintf("SELECT COUNT(*) FROM %s %s", tableName, whereClause)
+		res := &InspectionResult{
+			IsDestructive:  true,
+			HasWhere:       true,
+			TargetDatabase: db,
+			TargetTable:    targetTbl,
+			Operation:      "UPDATE",
+			CountQuery:     countQ,
 		}
 		if isProd {
-			return &InspectionResult{
-				RiskLevel:     RiskWarning,
-				IsDestructive: true,
-				TargetTable:   cleanTableName(tableName),
-				Operation:     "UPDATE",
-				Reason:        fmt.Sprintf("UPDATE query executing on PRODUCTION environment on table '%s'.", tableName),
-			}
+			res.RiskLevel = RiskWarning
+			res.RequiresAffirmation = true
+			res.Reason = fmt.Sprintf("UPDATE query executing on PRODUCTION environment on table '%s'.", targetTbl)
+		} else if isStaging {
+			res.RiskLevel = RiskWarning
+			res.RequiresAffirmation = true
+			res.Reason = fmt.Sprintf("UPDATE query executing on STAGING environment on table '%s'.", targetTbl)
+		} else {
+			res.RiskLevel = RiskNone
+			res.Reason = fmt.Sprintf("UPDATE query targeting table '%s'.", targetTbl)
 		}
+		return res
 
 	case *sqlparser.DDL:
 		tableName := node.Table.Name.String()
@@ -231,12 +288,27 @@ func maskCommentsAndLiterals(q string) string {
 	return string(b)
 }
 
+var reReturning = regexp.MustCompile(`(?i)\bRETURNING\b.*$`)
+
+func buildLexicalCountQuery(table, query string) string {
+	masked := maskCommentsAndLiterals(query)
+	whereLoc := reWhere.FindStringIndex(masked)
+	if whereLoc == nil {
+		return fmt.Sprintf("SELECT COUNT(*) FROM %s", table)
+	}
+	clause := strings.TrimSpace(query[whereLoc[0]:])
+	clause = reReturning.ReplaceAllString(clause, "")
+	clause = strings.TrimRight(clause, "; \t\r\n")
+	return fmt.Sprintf("SELECT COUNT(*) FROM %s %s", table, clause)
+}
+
 func inspectLexicalFallback(query string, environment string) *InspectionResult {
 	if main, ok := stripLeadingCTE(query); ok {
 		return inspectLexicalFallback(main, environment)
 	}
 
 	isProd := strings.EqualFold(environment, "Production")
+	isStaging := strings.EqualFold(environment, "Staging")
 
 	if match := reDrop.FindStringSubmatch(query); len(match) > 3 {
 		db, target := extractDBAndTable(match[3])
@@ -269,49 +341,83 @@ func inspectLexicalFallback(query string, environment string) *InspectionResult 
 	}
 
 	if match := reDelete.FindStringSubmatch(query); len(match) > 1 {
-		target := cleanTableName(match[1])
-		if !reWhere.MatchString(maskCommentsAndLiterals(query)) {
+		db, target := extractDBAndTable(match[1])
+		hasWhere := reWhere.MatchString(maskCommentsAndLiterals(query))
+		cleanTable := match[1]
+		if !hasWhere {
 			return &InspectionResult{
 				RiskLevel:         RiskCritical,
 				IsDestructive:     true,
 				RequiresChallenge: true,
+				TargetDatabase:    db,
 				TargetTable:       target,
 				Operation:         "DELETE",
 				Reason:            fmt.Sprintf("Unqualified DELETE statement on '%s' without a WHERE clause will delete ALL rows.", target),
+				CountQuery:        fmt.Sprintf("SELECT COUNT(*) FROM %s", cleanTable),
 			}
+		}
+		countQ := buildLexicalCountQuery(cleanTable, query)
+		res := &InspectionResult{
+			IsDestructive:  true,
+			HasWhere:       true,
+			TargetDatabase: db,
+			TargetTable:    target,
+			Operation:      "DELETE",
+			CountQuery:     countQ,
 		}
 		if isProd {
-			return &InspectionResult{
-				RiskLevel:     RiskWarning,
-				IsDestructive: true,
-				TargetTable:   target,
-				Operation:     "DELETE",
-				Reason:        fmt.Sprintf("DELETE on PRODUCTION environment targeting '%s'.", target),
-			}
+			res.RiskLevel = RiskWarning
+			res.RequiresAffirmation = true
+			res.Reason = fmt.Sprintf("DELETE on PRODUCTION environment targeting '%s'.", target)
+		} else if isStaging {
+			res.RiskLevel = RiskWarning
+			res.RequiresAffirmation = true
+			res.Reason = fmt.Sprintf("DELETE on STAGING environment targeting '%s'.", target)
+		} else {
+			res.RiskLevel = RiskNone
+			res.Reason = fmt.Sprintf("DELETE query targeting '%s'.", target)
 		}
+		return res
 	}
 
 	if match := reUpdate.FindStringSubmatch(query); len(match) > 1 {
-		target := cleanTableName(match[1])
-		if !reWhere.MatchString(maskCommentsAndLiterals(query)) {
+		db, target := extractDBAndTable(match[1])
+		hasWhere := reWhere.MatchString(maskCommentsAndLiterals(query))
+		cleanTable := match[1]
+		if !hasWhere {
 			return &InspectionResult{
 				RiskLevel:         RiskCritical,
 				IsDestructive:     true,
 				RequiresChallenge: true,
+				TargetDatabase:    db,
 				TargetTable:       target,
 				Operation:         "UPDATE",
 				Reason:            fmt.Sprintf("Unqualified UPDATE statement on '%s' without a WHERE clause will modify ALL rows.", target),
+				CountQuery:        fmt.Sprintf("SELECT COUNT(*) FROM %s", cleanTable),
 			}
+		}
+		countQ := buildLexicalCountQuery(cleanTable, query)
+		res := &InspectionResult{
+			IsDestructive:  true,
+			HasWhere:       true,
+			TargetDatabase: db,
+			TargetTable:    target,
+			Operation:      "UPDATE",
+			CountQuery:     countQ,
 		}
 		if isProd {
-			return &InspectionResult{
-				RiskLevel:     RiskWarning,
-				IsDestructive: true,
-				TargetTable:   target,
-				Operation:     "UPDATE",
-				Reason:        fmt.Sprintf("UPDATE on PRODUCTION environment targeting '%s'.", target),
-			}
+			res.RiskLevel = RiskWarning
+			res.RequiresAffirmation = true
+			res.Reason = fmt.Sprintf("UPDATE on PRODUCTION environment targeting '%s'.", target)
+		} else if isStaging {
+			res.RiskLevel = RiskWarning
+			res.RequiresAffirmation = true
+			res.Reason = fmt.Sprintf("UPDATE on STAGING environment targeting '%s'.", target)
+		} else {
+			res.RiskLevel = RiskNone
+			res.Reason = fmt.Sprintf("UPDATE query targeting '%s'.", target)
 		}
+		return res
 	}
 
 	if match := reAlter.FindStringSubmatch(query); len(match) > 1 {

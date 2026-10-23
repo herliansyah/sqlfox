@@ -286,3 +286,55 @@ func TestSafetyGuard_LexicalFallbackIgnoresWhereInCommentsAndStrings(t *testing.
 		t.Errorf("qualified DELETE ... RETURNING must not require challenge")
 	}
 }
+
+func TestSafetyGuard_PreExecutionCountQuery(t *testing.T) {
+	tests := []struct {
+		query            string
+		env              string
+		expectedOp       string
+		expectedHasWhere bool
+		expectedCount    string
+	}{
+		{
+			query:            "DELETE FROM users WHERE id = 10",
+			env:              "Development",
+			expectedOp:       "DELETE",
+			expectedHasWhere: true,
+			expectedCount:    "SELECT COUNT(*) FROM users where id = 10",
+		},
+		{
+			query:            "UPDATE accounts SET balance = 100 WHERE status = 'active'",
+			env:              "Production",
+			expectedOp:       "UPDATE",
+			expectedHasWhere: true,
+			expectedCount:    "SELECT COUNT(*) FROM accounts where `status` = 'active'",
+		},
+		{
+			query:            "DELETE FROM orders RETURNING *",
+			env:              "Development",
+			expectedOp:       "DELETE",
+			expectedHasWhere: false,
+			expectedCount:    "SELECT COUNT(*) FROM orders",
+		},
+		{
+			query:            "DELETE FROM orders WHERE status = 'cancelled' RETURNING *",
+			env:              "Development",
+			expectedOp:       "DELETE",
+			expectedHasWhere: true,
+			expectedCount:    "SELECT COUNT(*) FROM orders WHERE status = 'cancelled'",
+		},
+	}
+
+	for _, tc := range tests {
+		res := Inspect(tc.query, tc.env)
+		if res.Operation != tc.expectedOp {
+			t.Errorf("[%s] expected op %q, got %q", tc.query, tc.expectedOp, res.Operation)
+		}
+		if res.HasWhere != tc.expectedHasWhere {
+			t.Errorf("[%s] expected hasWhere %v, got %v", tc.query, tc.expectedHasWhere, res.HasWhere)
+		}
+		if res.CountQuery != tc.expectedCount {
+			t.Errorf("[%s] expected count query %q, got %q", tc.query, tc.expectedCount, res.CountQuery)
+		}
+	}
+}
