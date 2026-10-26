@@ -156,10 +156,10 @@ const runResult = vm.runInContext(`
   const trCount = (tbody.innerHTML.match(/<tr/g) || []).length;
 
   const stats = document.getElementById('grid-result-stats').textContent;
-  const keysetEl = document.getElementById('keyset-pagination');
-  const isKeysetHidden = keysetEl.classList.contains('hidden');
-  const prevBtn = keysetEl.querySelector('button:first-child');
-  const nextBtn = keysetEl.querySelector('button:last-child');
+  const paginationBar = document.getElementById('grid-pagination-bar');
+  const isPaginationBarHidden = paginationBar.classList.contains('hidden');
+  const prevBtn = document.getElementById('btn-page-prev');
+  const nextBtn = document.getElementById('btn-page-next');
 
   ({
     durationMs: duration,
@@ -168,7 +168,7 @@ const runResult = vm.runInContext(`
     tdCount,
     buttonCount,
     stats,
-    isKeysetHidden,
+    isPaginationBarHidden,
     prevDisabled: prevBtn.disabled,
     nextDisabled: nextBtn.disabled
   });
@@ -191,7 +191,7 @@ assert(
 );
 
 assert.strictEqual(runResult.trCount, 50, 'Page 0 must render exactly 50 rows in DOM');
-assert.strictEqual(runResult.isKeysetHidden, false, 'Keyset pagination should be visible for 1,000 rows');
+assert.strictEqual(runResult.isPaginationBarHidden, false, 'Pagination bar should be visible for 1,000 rows');
 assert.strictEqual(runResult.prevDisabled, true, 'Prev button should be disabled on first page');
 assert.strictEqual(runResult.nextDisabled, false, 'Next button should be enabled on first page');
 assert(runResult.stats.includes('1 - 50 of 1000 rows'), 'Stats text should state "1 - 50 of 1000 rows", got: ' + runResult.stats);
@@ -206,9 +206,8 @@ const page1Result = vm.runInContext(`
   const stats1 = document.getElementById('grid-result-stats').textContent;
   const firstDataRowMatch1 = tbody1.innerHTML.match(/data-row="(\\d+)"/);
   const firstDataRow1 = firstDataRowMatch1 ? parseInt(firstDataRowMatch1[1], 10) : -1;
-  const keysetEl1 = document.getElementById('keyset-pagination');
-  const prevBtn1 = keysetEl1.querySelector('button:first-child');
-  const nextBtn1 = keysetEl1.querySelector('button:last-child');
+  const prevBtn1 = document.getElementById('btn-page-prev');
+  const nextBtn1 = document.getElementById('btn-page-next');
 
   ({
     page: curTab1.queryPage,
