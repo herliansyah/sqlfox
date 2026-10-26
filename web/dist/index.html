@@ -877,6 +877,47 @@
           </table>
         </div>
 
+        <!-- Bottom Pagination & Results Bar (Data Mode) -->
+        <div id="grid-pagination-bar" class="h-9 bg-slate-900/95 border-t border-app-border px-3 flex items-center justify-between text-xs text-slate-300 flex-shrink-0 z-20 select-none">
+          <!-- Left: Row statistics -->
+          <div class="flex items-center space-x-2 shrink-0">
+            <span class="text-slate-300 font-mono text-[11px]" id="grid-bottom-stats">0 rows</span>
+            <button id="btn-count-accurate" type="button" onclick="requestAccurateTableCount()" class="hidden text-[10px] text-sky-400 hover:text-sky-300 underline font-mono cursor-pointer ml-1" title="Execute COUNT(*) to get exact row count">Hitung Akurat</button>
+          </div>
+
+          <!-- Center: Page Size Selector -->
+          <div class="flex items-center space-x-1.5 shrink-0">
+            <span class="text-[11px] text-slate-400">Tampilkan:</span>
+            <select id="grid-page-size-select" onchange="onGridPageSizeChange(this.value)" class="bg-slate-950 border border-slate-700 text-slate-200 text-[11px] font-mono rounded px-1.5 py-0.5 outline-none cursor-pointer focus:border-sky-500">
+              <option value="25">25 / hal</option>
+              <option value="50" selected>50 / hal</option>
+              <option value="100">100 / hal</option>
+              <option value="200">200 / hal</option>
+            </select>
+          </div>
+
+          <!-- Right: First, Prev, Page [ 1 ] of 20, Next, Last -->
+          <div class="flex items-center space-x-1 shrink-0 font-mono text-xs">
+            <button id="btn-page-first" type="button" onclick="goToFirstPage()" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed border border-slate-700 text-slate-300 transition" title="First Page">
+              |◀
+            </button>
+            <button id="btn-page-prev" type="button" onclick="goToPreviousPage()" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed border border-slate-700 text-slate-300 transition" title="Previous Page">
+              ◀ Prev
+            </button>
+            <div class="flex items-center space-x-1 px-1.5 text-slate-400 text-[11px]">
+              <span>Hal</span>
+              <input type="number" id="grid-page-input" min="1" value="1" onkeydown="onPageInputKeydown(event, this)" class="w-12 bg-slate-950 border border-slate-700 text-slate-100 text-center text-xs font-mono rounded py-0.5 outline-none focus:border-sky-500">
+              <span>dari <span id="grid-total-pages" class="text-slate-200 font-semibold">1</span></span>
+            </div>
+            <button id="btn-page-next" type="button" onclick="goToNextPage()" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed border border-slate-700 text-slate-300 transition" title="Next Page">
+              Next ▶
+            </button>
+            <button id="btn-page-last" type="button" onclick="goToLastPage()" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed border border-slate-700 text-slate-300 transition" title="Last Page">
+              ▶|
+            </button>
+          </div>
+        </div>
+
         <!-- Structure Designer View (Structure Mode) -->
         <div id="table-structure-view" class="hidden flex-1 flex flex-col overflow-hidden bg-app-bg">
           <div class="h-9 bg-app-surface/60 border-b border-app-border px-3 flex items-center justify-between text-xs">
@@ -7623,6 +7664,8 @@
             sortCol: t.sortCol || '',
             sortDir: t.sortDir || '',
             offset: t.offset || 0,
+            pageSize: t.pageSize || 50,
+            queryPage: t.queryPage || 0,
             isNote: !!t.isNote,
             isProcesslist: !!t.isProcesslist,
             isCluster: !!t.isCluster,
@@ -7716,6 +7759,22 @@
       if (tbody) tbody.innerHTML = '<tr><td class="p-12 text-center text-slate-500 w-full">Run a query or double click a table in the sidebar to view records</td></tr>';
       const stats = document.getElementById('grid-result-stats');
       if (stats) stats.textContent = '0 rows';
+      const bottomStats = document.getElementById('grid-bottom-stats');
+      if (bottomStats) bottomStats.textContent = '0 rows';
+      const pageInput = document.getElementById('grid-page-input');
+      if (pageInput) pageInput.value = '1';
+      const totalPagesEl = document.getElementById('grid-total-pages');
+      if (totalPagesEl) totalPagesEl.textContent = '1';
+      const btnFirst = document.getElementById('btn-page-first');
+      if (btnFirst) btnFirst.disabled = true;
+      const btnPrev = document.getElementById('btn-page-prev');
+      if (btnPrev) btnPrev.disabled = true;
+      const btnNext = document.getElementById('btn-page-next');
+      if (btnNext) btnNext.disabled = true;
+      const btnLast = document.getElementById('btn-page-last');
+      if (btnLast) btnLast.disabled = true;
+      const btnCount = document.getElementById('btn-count-accurate');
+      if (btnCount) btnCount.classList.add('hidden');
       const filterBar = document.getElementById('table-filter-bar');
       if (filterBar) filterBar.classList.add('hidden');
       const keysetPagination = document.getElementById('keyset-pagination');
@@ -11779,6 +11838,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const gridToolbar = document.getElementById('grid-toolbar');
       const filterBar = document.getElementById('table-filter-bar');
       const gridTable = document.getElementById('virtual-grid-wrapper');
+      const paginationBar = document.getElementById('grid-pagination-bar');
       const structView = document.getElementById('table-structure-view');
       const idxView = document.getElementById('table-indexes-view');
       const fkView = document.getElementById('table-fk-view');
@@ -11794,6 +11854,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
         if (isDataViewer) syncFilterBarUI(activeTab);
       }
       if (gridTable) gridTable.classList.toggle('hidden', mode !== 'data');
+      if (paginationBar) paginationBar.classList.toggle('hidden', mode !== 'data');
       if (structView) structView.classList.toggle('hidden', mode !== 'structure');
       if (idxView) idxView.classList.toggle('hidden', mode !== 'indexes');
       if (fkView) fkView.classList.toggle('hidden', mode !== 'foreign-keys');
@@ -16357,16 +16418,85 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
     }
 
-    function loadNextPage() {
+    function getGridActivePageSize(activeTab) {
+      if (activeTab && typeof activeTab.pageSize === 'number' && activeTab.pageSize > 0) {
+        return activeTab.pageSize;
+      }
+      return 50;
+    }
+
+    function getTableViewerTotalRows(activeTab) {
+      if (!activeTab || !activeTab.isTableViewer) return null;
+      if (typeof activeTab.exactRowCount === 'number') {
+        return activeTab.exactRowCount;
+      }
+      if (activeTab.appliedFilter) {
+        return null;
+      }
+      const targetCatalog = (activeGridDB && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeGridDB.toLowerCase()]) || (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
+      const tableMeta = (targetCatalog?.tables || []).find(t => (t.name || '').toLowerCase() === (activeGridTable || activeTab.tableName || '').toLowerCase());
+      if (tableMeta && typeof tableMeta.row_count === 'number' && tableMeta.row_count >= 0) {
+        return tableMeta.row_count;
+      }
+      return null;
+    }
+
+    function goToFirstPage() {
       const activeTab = tabs.find(t => t.id === activeTabId);
       if (!activeTab) return;
       if (activeTab.isTableViewer) {
-        activeTab.offset = (activeTab.offset || 0) + 50;
+        if ((activeTab.offset || 0) === 0) return;
+        activeTab.offset = 0;
         loadTableRows(activeTab.tableName);
       } else {
-        const totalRows = currentResults ? currentResults.length : 0;
+        if ((activeTab.queryPage || 0) === 0) return;
+        activeTab.queryPage = 0;
+        renderGridResults(currentColumns, currentResults, activeGridPKCol, activeGridTable, activeGridDB, true);
+        const gridWrapper = document.getElementById('virtual-grid-wrapper');
+        if (gridWrapper) gridWrapper.scrollTop = 0;
+      }
+    }
+
+    function goToLastPage() {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab) return;
+      const pageSize = getGridActivePageSize(activeTab);
+      if (activeTab.isTableViewer) {
+        const totalRows = getTableViewerTotalRows(activeTab);
+        if (typeof totalRows === 'number' && totalRows > 0) {
+          const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+          const targetOffset = Math.max(0, (totalPages - 1) * pageSize);
+          if (activeTab.offset !== targetOffset) {
+            activeTab.offset = targetOffset;
+            loadTableRows(activeTab.tableName);
+          }
+        }
+      } else {
+        const rows = (activeTab.queryFilters && Object.keys(activeTab.queryFilters).length > 0) ? currentResults : (activeTab.rawQueryRows || currentResults || []);
+        const totalRows = rows ? rows.length : 0;
+        const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+        const targetPage = Math.max(0, totalPages - 1);
+        if (activeTab.queryPage !== targetPage) {
+          activeTab.queryPage = targetPage;
+          renderGridResults(currentColumns, currentResults, activeGridPKCol, activeGridTable, activeGridDB, true);
+          const gridWrapper = document.getElementById('virtual-grid-wrapper');
+          if (gridWrapper) gridWrapper.scrollTop = 0;
+        }
+      }
+    }
+
+    function goToNextPage() {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab) return;
+      const pageSize = getGridActivePageSize(activeTab);
+      if (activeTab.isTableViewer) {
+        activeTab.offset = (activeTab.offset || 0) + pageSize;
+        loadTableRows(activeTab.tableName);
+      } else {
+        const rows = (activeTab.queryFilters && Object.keys(activeTab.queryFilters).length > 0) ? currentResults : (activeTab.rawQueryRows || currentResults || []);
+        const totalRows = rows ? rows.length : 0;
         const page = activeTab.queryPage || 0;
-        if ((page + 1) * 50 < totalRows) {
+        if ((page + 1) * pageSize < totalRows) {
           activeTab.queryPage = page + 1;
           renderGridResults(currentColumns, currentResults, activeGridPKCol, activeGridTable, activeGridDB, true);
           const gridWrapper = document.getElementById('virtual-grid-wrapper');
@@ -16375,11 +16505,12 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
     }
 
-    function loadPreviousPage() {
+    function goToPreviousPage() {
       const activeTab = tabs.find(t => t.id === activeTabId);
       if (!activeTab) return;
+      const pageSize = getGridActivePageSize(activeTab);
       if (activeTab.isTableViewer) {
-        activeTab.offset = Math.max(0, (activeTab.offset || 0) - 50);
+        activeTab.offset = Math.max(0, (activeTab.offset || 0) - pageSize);
         loadTableRows(activeTab.tableName);
       } else {
         const page = activeTab.queryPage || 0;
@@ -16389,6 +16520,109 @@ Please analyze what is causing this query to be slow and suggest necessary query
           const gridWrapper = document.getElementById('virtual-grid-wrapper');
           if (gridWrapper) gridWrapper.scrollTop = 0;
         }
+      }
+    }
+
+    function loadNextPage() {
+      goToNextPage();
+    }
+
+    function loadPreviousPage() {
+      goToPreviousPage();
+    }
+
+    function goToPage(pageNum) {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab) return;
+      const pageSize = getGridActivePageSize(activeTab);
+      let target = parseInt(pageNum, 10);
+      if (isNaN(target) || target < 1) target = 1;
+
+      if (activeTab.isTableViewer) {
+        const totalRows = getTableViewerTotalRows(activeTab);
+        if (typeof totalRows === 'number' && totalRows > 0) {
+          const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+          if (target > totalPages) target = totalPages;
+        }
+        activeTab.offset = (target - 1) * pageSize;
+        loadTableRows(activeTab.tableName);
+      } else {
+        const rows = (activeTab.queryFilters && Object.keys(activeTab.queryFilters).length > 0) ? currentResults : (activeTab.rawQueryRows || currentResults || []);
+        const totalRows = rows ? rows.length : 0;
+        const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+        if (target > totalPages) target = totalPages;
+        activeTab.queryPage = Math.max(0, target - 1);
+        renderGridResults(currentColumns, currentResults, activeGridPKCol, activeGridTable, activeGridDB, true);
+        const gridWrapper = document.getElementById('virtual-grid-wrapper');
+        if (gridWrapper) gridWrapper.scrollTop = 0;
+      }
+    }
+
+    function onPageInputKeydown(event, input) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        goToPage(input.value);
+      } else if (event.key === 'Escape') {
+        const activeTab = tabs.find(t => t.id === activeTabId);
+        const pageSize = getGridActivePageSize(activeTab);
+        if (activeTab?.isTableViewer) {
+          input.value = Math.floor((activeTab.offset || 0) / pageSize) + 1;
+        } else {
+          input.value = (activeTab?.queryPage || 0) + 1;
+        }
+        input.blur();
+      }
+    }
+
+    function onGridPageSizeChange(val) {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab) return;
+      const newSize = parseInt(val, 10);
+      if (isNaN(newSize) || newSize <= 0) return;
+      activeTab.pageSize = newSize;
+      if (activeTab.isTableViewer) {
+        activeTab.offset = 0;
+        loadTableRows(activeTab.tableName);
+      } else {
+        activeTab.queryPage = 0;
+        renderGridResults(currentColumns, currentResults, activeGridPKCol, activeGridTable, activeGridDB, true);
+        const gridWrapper = document.getElementById('virtual-grid-wrapper');
+        if (gridWrapper) gridWrapper.scrollTop = 0;
+      }
+    }
+
+    async function requestAccurateTableCount() {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab || !activeTab.isTableViewer || !activeConnection) return;
+      const btn = document.getElementById('btn-count-accurate');
+      if (btn) btn.textContent = 'Menghitung...';
+      try {
+        const tableName = activeTab.tableName;
+        const targetTable = '`' + tableName.replace(/`/g, '``') + '`';
+        let sql = `SELECT COUNT(*) AS total FROM ${targetTable}`;
+        if (activeTab.appliedFilter) {
+          sql += ` WHERE (${activeTab.appliedFilter})`;
+        }
+        const db = activeGridDB || activeTab.database;
+        const res = await apiFetch(`/api/session/${activeConnection.id}/query`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sql, database: db })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.rows && data.rows.length > 0 && data.rows[0].length > 0) {
+            const count = Number(data.rows[0][0]);
+            if (!isNaN(count)) {
+              activeTab.exactRowCount = count;
+              renderGridResults(currentColumns, currentResults, activeGridPKCol, activeGridTable, activeGridDB, true);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Failed to count table rows:', e);
+      } finally {
+        if (btn) btn.textContent = 'Hitung Akurat';
       }
     }
 
@@ -16410,9 +16644,10 @@ Please analyze what is causing this query to be slow and suggest necessary query
         const sortCol = (activeTab && activeTab.sortCol) || '';
         const sortDir = (activeTab && activeTab.sortDir) || '';
         const offset = (activeTab && activeTab.offset) || 0;
+        const pageSize = getGridActivePageSize(activeTab);
         saveTabsState();
 
-        let url = `/api/session/${activeConnection.id}/table/${encodeURIComponent(tableName)}/rows?limit=50&offset=${offset}`;
+        let url = `/api/session/${activeConnection.id}/table/${encodeURIComponent(tableName)}/rows?limit=${pageSize}&offset=${offset}`;
         if (dbName) url += `&db=${encodeURIComponent(dbName)}`;
         if (filter) url += `&filter=${encodeURIComponent(filter)}`;
         if (sortCol) url += `&sort=${encodeURIComponent(sortCol)}&dir=${encodeURIComponent(sortDir || 'ASC')}`;
@@ -16609,6 +16844,96 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
     const renderVirtualGrid = renderGridResults;
 
+    function renderGridPaginationBar(activeTab, rows, isFilterPass) {
+      const bar = document.getElementById('grid-pagination-bar');
+      if (!bar) return;
+      if (!activeTab) activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab) return;
+
+      const pageSize = getGridActivePageSize(activeTab);
+      const isTable = Boolean(activeTab.isTableViewer);
+      const bottomStats = document.getElementById('grid-bottom-stats');
+      const btnCountAccurate = document.getElementById('btn-count-accurate');
+      const pageSizeSelect = document.getElementById('grid-page-size-select');
+      const pageInput = document.getElementById('grid-page-input');
+      const totalPagesEl = document.getElementById('grid-total-pages');
+      const btnFirst = document.getElementById('btn-page-first');
+      const btnPrev = document.getElementById('btn-page-prev');
+      const btnNext = document.getElementById('btn-page-next');
+      const btnLast = document.getElementById('btn-page-last');
+
+      if (pageSizeSelect) {
+        pageSizeSelect.value = String(pageSize);
+      }
+
+      if (isTable) {
+        const off = activeTab.offset || 0;
+        const curRowsCount = rows ? rows.length : 0;
+        const startRow = curRowsCount > 0 ? (off + 1) : 0;
+        const endRow = off + curRowsCount;
+        const totalRows = getTableViewerTotalRows(activeTab);
+        const curPage = Math.floor(off / pageSize) + 1;
+
+        if (typeof totalRows === 'number') {
+          const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+          if (bottomStats) {
+            bottomStats.textContent = `Menampilkan ${startRow} - ${endRow} dari ${totalRows.toLocaleString()} baris${activeTab.appliedFilter ? ' (filtered)' : ''}`;
+          }
+          if (pageInput) {
+            pageInput.value = curPage;
+            pageInput.max = totalPages;
+          }
+          if (totalPagesEl) totalPagesEl.textContent = String(totalPages);
+          if (btnFirst) btnFirst.disabled = curPage <= 1;
+          if (btnPrev) btnPrev.disabled = curPage <= 1;
+          if (btnNext) btnNext.disabled = curPage >= totalPages;
+          if (btnLast) btnLast.disabled = curPage >= totalPages;
+          if (btnCountAccurate) btnCountAccurate.classList.add('hidden');
+        } else {
+          // Total rows not known yet (e.g. filtered table without exact count)
+          const hasMore = curRowsCount >= pageSize;
+          if (bottomStats) {
+            bottomStats.textContent = `Menampilkan ${startRow} - ${endRow} baris (filtered)`;
+          }
+          if (pageInput) {
+            pageInput.value = curPage;
+            pageInput.max = '';
+            if (typeof pageInput.removeAttribute === 'function') {
+              pageInput.removeAttribute('max');
+            }
+          }
+          if (totalPagesEl) totalPagesEl.textContent = hasMore ? (curPage + '+') : String(curPage);
+          if (btnFirst) btnFirst.disabled = curPage <= 1;
+          if (btnPrev) btnPrev.disabled = curPage <= 1;
+          if (btnNext) btnNext.disabled = !hasMore;
+          if (btnLast) btnLast.disabled = true;
+          if (btnCountAccurate) btnCountAccurate.classList.remove('hidden');
+        }
+      } else {
+        // Query Results Tab (in-memory)
+        if (btnCountAccurate) btnCountAccurate.classList.add('hidden');
+        const allRows = rows || [];
+        const totalRows = allRows.length;
+        const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+        const curPage = Math.min((activeTab.queryPage || 0) + 1, totalPages);
+        const startRow = totalRows > 0 ? ((curPage - 1) * pageSize + 1) : 0;
+        const endRow = Math.min(curPage * pageSize, totalRows);
+
+        if (bottomStats) {
+          bottomStats.textContent = `Menampilkan ${startRow} - ${endRow} dari ${totalRows.toLocaleString()} baris${isFilterPass && activeTab?.rawQueryRows && rows.length !== activeTab.rawQueryRows.length ? ' (filtered)' : ''}`;
+        }
+        if (pageInput) {
+          pageInput.value = curPage;
+          pageInput.max = totalPages;
+        }
+        if (totalPagesEl) totalPagesEl.textContent = String(totalPages);
+        if (btnFirst) btnFirst.disabled = curPage <= 1;
+        if (btnPrev) btnPrev.disabled = curPage <= 1;
+        if (btnNext) btnNext.disabled = curPage >= totalPages;
+        if (btnLast) btnLast.disabled = curPage >= totalPages;
+      }
+    }
+
     function renderGridResults(cols, rows, pkCol = null, tableName = null, databaseName = null, isFilterPass = false) {
       currentColumns = cols || [];
       currentResults = rows || [];
@@ -16730,7 +17055,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
       // ponytail: Client-side row windowing / pagination for query results to prevent DOM bloat and main-thread freeze on large result sets (>50 rows).
       // Known ceiling: Client-side slice of in-memory rows. Upgrade path: Server-side cursor keyset pagination if queries exceed 1,000 rows.
-      const QUERY_PAGE_SIZE = 50;
+      const QUERY_PAGE_SIZE = getGridActivePageSize(activeTab);
       const isPagedQuery = Boolean(activeTab && !activeTab.isTableViewer && rows && rows.length > QUERY_PAGE_SIZE);
       const queryPage = (activeTab && typeof activeTab.queryPage === 'number') ? activeTab.queryPage : 0;
       const startIdx = isPagedQuery ? queryPage * QUERY_PAGE_SIZE : 0;
@@ -16762,7 +17087,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
           const prevBtn = keysetPagination.querySelector('button:first-child');
           const nextBtn = keysetPagination.querySelector('button:last-child');
           if (prevBtn) prevBtn.disabled = off <= 0;
-          if (nextBtn) nextBtn.disabled = !rows || rows.length < 50;
+          if (nextBtn) nextBtn.disabled = !rows || rows.length < QUERY_PAGE_SIZE;
         } else if (isPagedQuery) {
           keysetPagination.classList.remove('hidden');
           const prevBtn = keysetPagination.querySelector('button:first-child');
@@ -16773,6 +17098,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
           keysetPagination.classList.add('hidden');
         }
       }
+
+      // Update Bottom Pagination Bar UI
+      renderGridPaginationBar(activeTab, rows, isFilterPass);
 
       if (activeTab && activeTab.isTableViewer) {
         syncFilterBarUI(activeTab);
@@ -23249,11 +23577,13 @@ Please analyze what is causing this query to be slow and suggest necessary query
     function toggleProfileView() {
       const panel = document.getElementById('query-profiler-panel');
       const gridTable = document.getElementById('virtual-grid-wrapper');
+      const paginationBar = document.getElementById('grid-pagination-bar');
       if (!panel) return;
       const isHidden = panel.classList.contains('hidden');
       if (isHidden) {
         panel.classList.remove('hidden');
         if (gridTable) gridTable.classList.add('hidden');
+        if (paginationBar) paginationBar.classList.add('hidden');
         if (lastQueryProfile) renderQueryProfile(lastQueryProfile);
       } else {
         closeProfileView();
@@ -23263,8 +23593,10 @@ Please analyze what is causing this query to be slow and suggest necessary query
     function closeProfileView() {
       const panel = document.getElementById('query-profiler-panel');
       const gridTable = document.getElementById('virtual-grid-wrapper');
+      const paginationBar = document.getElementById('grid-pagination-bar');
       if (panel) panel.classList.add('hidden');
       if (gridTable) gridTable.classList.remove('hidden');
+      if (paginationBar) paginationBar.classList.remove('hidden');
     }
 
     function renderQueryProfile(profile) {
