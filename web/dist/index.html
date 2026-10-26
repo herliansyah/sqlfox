@@ -14702,6 +14702,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
             activeTab.queryFilters = {};
             activeTab.sortCol = '';
             activeTab.sortDir = '';
+            activeTab.queryPage = 0;
             activeTab.queryStats = `${data.row_count} rows (${data.execution_ms}ms)`;
             activeTab.queryTable = detectedTable;
             activeTab.queryDB = detectedDB;
@@ -16315,6 +16316,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
         activeTab.offset = 0;
         loadTableRows(activeTab.tableName);
       } else {
+        activeTab.queryPage = 0;
         const rows = (activeTab.queryFilters && Object.keys(activeTab.queryFilters).length > 0) ? currentResults : (activeTab.rawQueryRows || currentResults || []);
         if (!activeTab.sortCol) {
           if (activeTab.queryFilters && Object.keys(activeTab.queryFilters).length > 0) {
@@ -16345,16 +16347,37 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
     function loadNextPage() {
       const activeTab = tabs.find(t => t.id === activeTabId);
-      if (!activeTab || !activeTab.isTableViewer) return;
-      activeTab.offset = (activeTab.offset || 0) + 50;
-      loadTableRows(activeTab.tableName);
+      if (!activeTab) return;
+      if (activeTab.isTableViewer) {
+        activeTab.offset = (activeTab.offset || 0) + 50;
+        loadTableRows(activeTab.tableName);
+      } else {
+        const totalRows = currentResults ? currentResults.length : 0;
+        const page = activeTab.queryPage || 0;
+        if ((page + 1) * 50 < totalRows) {
+          activeTab.queryPage = page + 1;
+          renderGridResults(currentColumns, currentResults, activeGridPKCol, activeGridTable, activeGridDB, true);
+          const gridWrapper = document.getElementById('virtual-grid-wrapper');
+          if (gridWrapper) gridWrapper.scrollTop = 0;
+        }
+      }
     }
 
     function loadPreviousPage() {
       const activeTab = tabs.find(t => t.id === activeTabId);
-      if (!activeTab || !activeTab.isTableViewer) return;
-      activeTab.offset = Math.max(0, (activeTab.offset || 0) - 50);
-      loadTableRows(activeTab.tableName);
+      if (!activeTab) return;
+      if (activeTab.isTableViewer) {
+        activeTab.offset = Math.max(0, (activeTab.offset || 0) - 50);
+        loadTableRows(activeTab.tableName);
+      } else {
+        const page = activeTab.queryPage || 0;
+        if (page > 0) {
+          activeTab.queryPage = page - 1;
+          renderGridResults(currentColumns, currentResults, activeGridPKCol, activeGridTable, activeGridDB, true);
+          const gridWrapper = document.getElementById('virtual-grid-wrapper');
+          if (gridWrapper) gridWrapper.scrollTop = 0;
+        }
+      }
     }
 
     async function loadTableRows(tableName, targetDb = null) {
@@ -16600,6 +16623,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
       activeGridPKCol = pkCol;
       activeEditCell = null;
+      activeGridSelectedTd = null;
       updateColumnPickerBadge();
 
       const thead = document.getElementById('grid-thead');
@@ -16692,6 +16716,15 @@ Please analyze what is causing this query to be slow and suggest necessary query
         });
       }
 
+      // ponytail: Client-side row windowing / pagination for query results to prevent DOM bloat and main-thread freeze on large result sets (>50 rows).
+      // Known ceiling: Client-side slice of in-memory rows. Upgrade path: Server-side cursor keyset pagination if queries exceed 1,000 rows.
+      const QUERY_PAGE_SIZE = 50;
+      const isPagedQuery = Boolean(activeTab && !activeTab.isTableViewer && rows && rows.length > QUERY_PAGE_SIZE);
+      const queryPage = (activeTab && typeof activeTab.queryPage === 'number') ? activeTab.queryPage : 0;
+      const startIdx = isPagedQuery ? queryPage * QUERY_PAGE_SIZE : 0;
+      const endIdx = isPagedQuery ? Math.min(startIdx + QUERY_PAGE_SIZE, rows.length) : (rows ? rows.length : 0);
+      const pagedRows = isPagedQuery ? rows.slice(startIdx, endIdx) : (rows || []);
+
       // Update grid result stats and pagination
       const gridResultStats = document.getElementById('grid-result-stats');
       if (gridResultStats) {
@@ -16702,8 +16735,10 @@ Please analyze what is causing this query to be slow and suggest necessary query
           } else {
             gridResultStats.textContent = `${off + 1} - ${off + rows.length} rows${activeTab.appliedFilter ? ' (filtered)' : ''}`;
           }
+        } else if (isPagedQuery) {
+          gridResultStats.textContent = `${startIdx + 1} - ${endIdx} of ${rows.length} rows${isFilterPass && activeTab?.rawQueryRows && rows.length !== activeTab.rawQueryRows.length ? ' (filtered)' : ''}`;
         } else {
-          gridResultStats.textContent = `${rows ? rows.length : 0} rows`;
+          gridResultStats.textContent = `${rows ? rows.length : 0} rows${isFilterPass && activeTab?.rawQueryRows && rows.length !== activeTab.rawQueryRows.length ? ' (filtered)' : ''}`;
         }
       }
 
@@ -16716,6 +16751,12 @@ Please analyze what is causing this query to be slow and suggest necessary query
           const nextBtn = keysetPagination.querySelector('button:last-child');
           if (prevBtn) prevBtn.disabled = off <= 0;
           if (nextBtn) nextBtn.disabled = !rows || rows.length < 50;
+        } else if (isPagedQuery) {
+          keysetPagination.classList.remove('hidden');
+          const prevBtn = keysetPagination.querySelector('button:first-child');
+          const nextBtn = keysetPagination.querySelector('button:last-child');
+          if (prevBtn) prevBtn.disabled = startIdx <= 0;
+          if (nextBtn) nextBtn.disabled = endIdx >= rows.length;
         } else {
           keysetPagination.classList.add('hidden');
         }
@@ -16764,7 +16805,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
         if (c && c.name) colMetaMap.set(c.name.toLowerCase(), c);
       });
 
-      tbody.innerHTML = draftRowsHTML + (rows || []).map((row, rIdx) => {
+      tbody.innerHTML = draftRowsHTML + pagedRows.map((row, pIdx) => {
+        const rIdx = isPagedQuery ? (startIdx + pIdx) : pIdx;
         const isSelected = selectedRowIndices.has(rIdx);
         let checkboxCell = '';
         if (hasCheckbox) {
@@ -16822,12 +16864,15 @@ Please analyze what is causing this query to be slow and suggest necessary query
         if (activeEditCell.td === td) return;
         commitInlineEdit(activeEditCell, true);
       }
+      if (activeGridSelectedTd && activeGridSelectedTd !== td) {
+        activeGridSelectedTd.classList.remove('cell-selected', 'ring-1', 'ring-sky-400', 'bg-sky-950/20');
+      }
       activeGridSelectedRow = rIdx;
       activeGridSelectedCol = cIdx;
       activeGridSelectedTd = td;
 
       document.querySelectorAll('#grid-tbody td.cell-selected').forEach(el => {
-        el.classList.remove('cell-selected', 'ring-1', 'ring-sky-400', 'bg-sky-950/20');
+        if (el !== td) el.classList.remove('cell-selected', 'ring-1', 'ring-sky-400', 'bg-sky-950/20');
       });
       td.classList.add('cell-selected', 'ring-1', 'ring-sky-400', 'bg-sky-950/20');
     }
@@ -18134,6 +18179,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
     function applyQueryResultsFilter(activeTab) {
       if (!activeTab) activeTab = tabs.find(t => t.id === activeTabId);
       if (!activeTab || activeTab.isTableViewer) return;
+      activeTab.queryPage = 0;
       const allRows = activeTab.rawQueryRows || currentResults || [];
       const cols = activeTab.rawQueryCols || currentColumns || [];
       const filters = activeTab.queryFilters || {};

@@ -1936,5 +1936,36 @@ func TestAutoWakeupAndFetchTimeoutEmbedded(t *testing.T) {
 	}
 }
 
+func TestQueryResultsRowWindowingEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	expectedSnippets := []string{
+		`const QUERY_PAGE_SIZE = 50;`,
+		`isPagedQuery`,
+		`pagedRows`,
+		`activeTab.queryPage`,
+		`loadNextPage()`,
+		`loadPreviousPage()`,
+	}
+
+	for _, s := range expectedSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain %q for query results row windowing, but was missing", s)
+		}
+	}
+}
+
+
 
 
