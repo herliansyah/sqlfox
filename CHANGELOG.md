@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.10.9] - 2026-10-26
+
 ### Fixed
 - **Query Grid Row Windowing & Pagination on Large Result Sets (`web/dist/index.html`)**: Added client-side row windowing (50 rows per page) and keyset pagination controls to the SQL Query Editor grid. Eliminates main-thread freeze, memory bloat (HTML payload reduced by 95%), and sluggish scrolling when rendering large result sets (~1,000 rows with many columns), while preserving all in-memory rows for complete CSV and JSON exports.
 
