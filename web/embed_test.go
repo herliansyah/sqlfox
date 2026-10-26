@@ -1951,7 +1951,7 @@ func TestQueryResultsRowWindowingEmbedded(t *testing.T) {
 	content := string(contentBytes)
 
 	expectedSnippets := []string{
-		`const QUERY_PAGE_SIZE = 50;`,
+		`const QUERY_PAGE_SIZE = getGridActivePageSize(activeTab);`,
 		`isPagedQuery`,
 		`pagedRows`,
 		`activeTab.queryPage`,
