@@ -124,7 +124,7 @@ const qBtnNext0 = vm.runInContext(`document.getElementById('btn-page-next').disa
 const qBtnLast0 = vm.runInContext(`document.getElementById('btn-page-last').disabled`, sandbox);
 
 console.log('Test 1 (Initial page 1 of 5):', { stats: qStats0, totalPages: qTotalPages0, page: qPageInput0, firstDisabled: qBtnFirst0, nextDisabled: qBtnNext0 });
-assert(qStats0.includes('1 - 50 dari 250 baris'), 'Expected stats to state 1 - 50 of 250, got: ' + qStats0);
+assert(qStats0.includes('1 - 50 of 250 rows'), 'Expected stats to state 1 - 50 of 250, got: ' + qStats0);
 assert.strictEqual(qTotalPages0, '5', 'Expected 5 total pages');
 assert.strictEqual(qPageInput0, 1, 'Expected page input 1');
 assert.strictEqual(qBtnFirst0, true, 'First button should be disabled on page 1');
@@ -137,7 +137,7 @@ vm.runInContext(`goToNextPage();`, sandbox);
 const qStats1 = vm.runInContext(`document.getElementById('grid-bottom-stats').textContent`, sandbox);
 const qPageInput1 = vm.runInContext(`document.getElementById('grid-page-input').value`, sandbox);
 console.log('Test 1 (Page 2):', { stats: qStats1, page: qPageInput1 });
-assert(qStats1.includes('51 - 100 dari 250 baris'), 'Expected 51 - 100, got: ' + qStats1);
+assert(qStats1.includes('51 - 100 of 250 rows'), 'Expected 51 - 100, got: ' + qStats1);
 assert.strictEqual(qPageInput1, 2);
 
 // Jump to last page
@@ -147,7 +147,7 @@ const qPageInputLast = vm.runInContext(`document.getElementById('grid-page-input
 const qBtnNextLast = vm.runInContext(`document.getElementById('btn-page-next').disabled`, sandbox);
 const qBtnLastLast = vm.runInContext(`document.getElementById('btn-page-last').disabled`, sandbox);
 console.log('Test 1 (Last page):', { stats: qStatsLast, page: qPageInputLast, nextDisabled: qBtnNextLast });
-assert(qStatsLast.includes('201 - 250 dari 250 baris'), 'Expected 201 - 250, got: ' + qStatsLast);
+assert(qStatsLast.includes('201 - 250 of 250 rows'), 'Expected 201 - 250, got: ' + qStatsLast);
 assert.strictEqual(qPageInputLast, 5);
 assert.strictEqual(qBtnNextLast, true, 'Next button should be disabled on last page');
 assert.strictEqual(qBtnLastLast, true, 'Last button should be disabled on last page');
@@ -155,14 +155,14 @@ assert.strictEqual(qBtnLastLast, true, 'Last button should be disabled on last p
 // Jump directly to page 3
 vm.runInContext(`goToPage(3);`, sandbox);
 const qStatsPage3 = vm.runInContext(`document.getElementById('grid-bottom-stats').textContent`, sandbox);
-assert(qStatsPage3.includes('101 - 150 dari 250 baris'), 'Expected 101 - 150, got: ' + qStatsPage3);
+assert(qStatsPage3.includes('101 - 150 of 250 rows'), 'Expected 101 - 150, got: ' + qStatsPage3);
 
 // Change page size to 100
 vm.runInContext(`onGridPageSizeChange(100);`, sandbox);
 const qStats100 = vm.runInContext(`document.getElementById('grid-bottom-stats').textContent`, sandbox);
 const qTotalPages100 = vm.runInContext(`document.getElementById('grid-total-pages').textContent`, sandbox);
 console.log('Test 1 (Page size 100):', { stats: qStats100, totalPages: qTotalPages100 });
-assert(qStats100.includes('1 - 100 dari 250 baris'), 'Expected 1 - 100 with size 100, got: ' + qStats100);
+assert(qStats100.includes('1 - 100 of 250 rows'), 'Expected 1 - 100 with size 100, got: ' + qStats100);
 assert.strictEqual(qTotalPages100, '3', 'Expected 3 pages with 100 page size');
 
 // TEST 2: Table Viewer Server-side Pagination
@@ -200,7 +200,7 @@ const tblStats0 = vm.runInContext(`document.getElementById('grid-bottom-stats').
 const tblPages0 = vm.runInContext(`document.getElementById('grid-total-pages').textContent`, sandbox);
 const tblPage0 = vm.runInContext(`document.getElementById('grid-page-input').value`, sandbox);
 console.log('Test 2 Table Viewer (Initial):', { stats: tblStats0, totalPages: tblPages0, page: tblPage0 });
-assert(tblStats0.includes('1 - 50 dari 1,500 baris'), 'Expected 1 - 50 of 1,500, got: ' + tblStats0);
+assert(tblStats0.includes('1 - 50 of 1,500 rows'), 'Expected 1 - 50 of 1,500, got: ' + tblStats0);
 assert.strictEqual(tblPages0, '30', '1500 / 50 = 30 pages');
 assert.strictEqual(tblPage0, 1);
 
@@ -237,7 +237,7 @@ vm.runInContext(`
 const filteredStats = vm.runInContext(`document.getElementById('grid-bottom-stats').textContent`, sandbox);
 const accurateBtnHidden = vm.runInContext(`document.getElementById('btn-count-accurate').classList.contains('hidden')`, sandbox);
 console.log('Test 2 Filtered Table:', { stats: filteredStats, accurateBtnHidden });
-assert(filteredStats.includes('Menampilkan 1 - 50 baris (filtered)'), 'Expected filtered stats, got: ' + filteredStats);
-assert.strictEqual(accurateBtnHidden, false, 'Hitung Akurat button should be visible when filtered');
+assert(filteredStats.includes('Showing 1 - 50 rows (filtered)'), 'Expected filtered stats, got: ' + filteredStats);
+assert.strictEqual(accurateBtnHidden, false, 'Exact Count button should be visible when filtered');
 
 console.log("🎉 ALL BOTTOM PAGINATION TESTS PASSED 100%!");

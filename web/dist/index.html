@@ -747,10 +747,6 @@
               </label>
             </div>
 
-            <div id="keyset-pagination" class="hidden flex items-center space-x-1">
-              <button onclick="loadPreviousPage()" class="hover:bg-slate-800 px-2 py-0.5 rounded border border-slate-700">◀ Prev</button>
-              <button onclick="loadNextPage()" class="hover:bg-slate-800 px-2 py-0.5 rounded border border-slate-700">Next ▶</button>
-            </div>
             <button id="btn-mock-data" onclick="openMockDataModal()" class="hover:bg-slate-800 px-2 py-0.5 rounded border border-slate-700 text-purple-400 hover:text-purple-300 transition flex items-center space-x-1">
               <span>🎲</span><span>Mock Data</span>
             </button>
@@ -878,21 +874,21 @@
         </div>
 
         <!-- Bottom Pagination & Results Bar (Data Mode) -->
-        <div id="grid-pagination-bar" class="h-9 bg-slate-900/95 border-t border-app-border px-3 flex items-center justify-between text-xs text-slate-300 flex-shrink-0 z-20 select-none">
+        <div id="grid-pagination-bar" class="hidden h-9 bg-slate-900/95 border-t border-app-border px-3 flex items-center justify-between text-xs text-slate-300 flex-shrink-0 z-20 select-none">
           <!-- Left: Row statistics -->
           <div class="flex items-center space-x-2 shrink-0">
             <span class="text-slate-300 font-mono text-[11px]" id="grid-bottom-stats">0 rows</span>
-            <button id="btn-count-accurate" type="button" onclick="requestAccurateTableCount()" class="hidden text-[10px] text-sky-400 hover:text-sky-300 underline font-mono cursor-pointer ml-1" title="Execute COUNT(*) to get exact row count">Hitung Akurat</button>
+            <button id="btn-count-accurate" type="button" onclick="requestAccurateTableCount()" class="hidden text-[10px] text-sky-400 hover:text-sky-300 underline font-mono cursor-pointer ml-1" title="Execute COUNT(*) to get exact row count">Exact Count</button>
           </div>
 
           <!-- Center: Page Size Selector -->
           <div class="flex items-center space-x-1.5 shrink-0">
-            <span class="text-[11px] text-slate-400">Tampilkan:</span>
+            <span class="text-[11px] text-slate-400">Show:</span>
             <select id="grid-page-size-select" onchange="onGridPageSizeChange(this.value)" class="bg-slate-950 border border-slate-700 text-slate-200 text-[11px] font-mono rounded px-1.5 py-0.5 outline-none cursor-pointer focus:border-sky-500">
-              <option value="25">25 / hal</option>
-              <option value="50" selected>50 / hal</option>
-              <option value="100">100 / hal</option>
-              <option value="200">200 / hal</option>
+              <option value="25">25 / page</option>
+              <option value="50" selected>50 / page</option>
+              <option value="100">100 / page</option>
+              <option value="200">200 / page</option>
             </select>
           </div>
 
@@ -905,9 +901,9 @@
               ◀ Prev
             </button>
             <div class="flex items-center space-x-1 px-1.5 text-slate-400 text-[11px]">
-              <span>Hal</span>
+              <span>Page</span>
               <input type="number" id="grid-page-input" min="1" value="1" onkeydown="onPageInputKeydown(event, this)" class="w-12 bg-slate-950 border border-slate-700 text-slate-100 text-center text-xs font-mono rounded py-0.5 outline-none focus:border-sky-500">
-              <span>dari <span id="grid-total-pages" class="text-slate-200 font-semibold">1</span></span>
+              <span>of <span id="grid-total-pages" class="text-slate-200 font-semibold">1</span></span>
             </div>
             <button id="btn-page-next" type="button" onclick="goToNextPage()" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed border border-slate-700 text-slate-300 transition" title="Next Page">
               Next ▶
@@ -7777,8 +7773,8 @@
       if (btnCount) btnCount.classList.add('hidden');
       const filterBar = document.getElementById('table-filter-bar');
       if (filterBar) filterBar.classList.add('hidden');
-      const keysetPagination = document.getElementById('keyset-pagination');
-      if (keysetPagination) keysetPagination.classList.add('hidden');
+      const paginationBar = document.getElementById('grid-pagination-bar');
+      if (paginationBar) paginationBar.classList.add('hidden');
       const profileBtn = document.getElementById('btn-view-profile');
       if (profileBtn) profileBtn.classList.add('hidden');
     }
@@ -16850,6 +16846,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
       if (!activeTab) activeTab = tabs.find(t => t.id === activeTabId);
       if (!activeTab) return;
 
+      bar.classList.remove('hidden');
+
       const pageSize = getGridActivePageSize(activeTab);
       const isTable = Boolean(activeTab.isTableViewer);
       const bottomStats = document.getElementById('grid-bottom-stats');
@@ -16877,7 +16875,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
         if (typeof totalRows === 'number') {
           const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
           if (bottomStats) {
-            bottomStats.textContent = `Menampilkan ${startRow} - ${endRow} dari ${totalRows.toLocaleString()} baris${activeTab.appliedFilter ? ' (filtered)' : ''}`;
+            bottomStats.textContent = `Showing ${startRow} - ${endRow} of ${totalRows.toLocaleString()} rows${activeTab.appliedFilter ? ' (filtered)' : ''}`;
           }
           if (pageInput) {
             pageInput.value = curPage;
@@ -16893,7 +16891,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
           // Total rows not known yet (e.g. filtered table without exact count)
           const hasMore = curRowsCount >= pageSize;
           if (bottomStats) {
-            bottomStats.textContent = `Menampilkan ${startRow} - ${endRow} baris (filtered)`;
+            bottomStats.textContent = `Showing ${startRow} - ${endRow} rows (filtered)`;
           }
           if (pageInput) {
             pageInput.value = curPage;
@@ -16920,7 +16918,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
         const endRow = Math.min(curPage * pageSize, totalRows);
 
         if (bottomStats) {
-          bottomStats.textContent = `Menampilkan ${startRow} - ${endRow} dari ${totalRows.toLocaleString()} baris${isFilterPass && activeTab?.rawQueryRows && rows.length !== activeTab.rawQueryRows.length ? ' (filtered)' : ''}`;
+          bottomStats.textContent = `Showing ${startRow} - ${endRow} of ${totalRows.toLocaleString()} rows${isFilterPass && activeTab?.rawQueryRows && rows.length !== activeTab.rawQueryRows.length ? ' (filtered)' : ''}`;
         }
         if (pageInput) {
           pageInput.value = curPage;
@@ -17079,25 +17077,6 @@ Please analyze what is causing this query to be slow and suggest necessary query
         }
       }
 
-      const keysetPagination = document.getElementById('keyset-pagination');
-      if (keysetPagination) {
-        if (activeTab && activeTab.isTableViewer) {
-          keysetPagination.classList.remove('hidden');
-          const off = activeTab.offset || 0;
-          const prevBtn = keysetPagination.querySelector('button:first-child');
-          const nextBtn = keysetPagination.querySelector('button:last-child');
-          if (prevBtn) prevBtn.disabled = off <= 0;
-          if (nextBtn) nextBtn.disabled = !rows || rows.length < QUERY_PAGE_SIZE;
-        } else if (isPagedQuery) {
-          keysetPagination.classList.remove('hidden');
-          const prevBtn = keysetPagination.querySelector('button:first-child');
-          const nextBtn = keysetPagination.querySelector('button:last-child');
-          if (prevBtn) prevBtn.disabled = startIdx <= 0;
-          if (nextBtn) nextBtn.disabled = endIdx >= rows.length;
-        } else {
-          keysetPagination.classList.add('hidden');
-        }
-      }
 
       // Update Bottom Pagination Bar UI
       renderGridPaginationBar(activeTab, rows, isFilterPass);
