@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Pre-Execution Mutation Row Estimation & Tiered Safety Guard (`internal/safety`, `internal/server`)**: Integrated pre-flight DML inspection that rewrites `UPDATE` and `DELETE` queries into bounded `SELECT COUNT(*)` probes with strict 500ms timeouts to estimate row impact before execution. Features adaptive tiered affirmation: silent execution for single-row primary-key mutations in Development, streamlined 1-click affirmation for 1–100 rows, and automatic escalation to full typing verification for mutations exceeding 100 rows or lacking a `WHERE` clause. Multi-statement batches aggregate row impacts with compound escalation (ADR 0057).
+- **Environment-Enforced Mutation Safety Policies (`internal/safety`, `internal/server`)**: Enforces mandatory confirmation challenges across all mutation operations in Staging and Production environments, regardless of affected row counts.
+
+### Fixed
+- **Fail-Fast Fetch Timeout for Metadata Requests (`web/dist/index.html`)**: Added default 15-second timeout via `AbortSignal.timeout(15000)` in `apiFetch`, preventing UI freezes and indefinite hangs on dead or half-open TCP sockets.
+- **Idle Session Auto-Wakeup & Tab Focus Re-Ping (`web/dist/index.html`)**: Implemented automatic background session wake-up on `visibilitychange` and window `focus` after >5 minutes of idle time or system sleep, seamlessly re-validating database connectivity and refreshing state without manual page reloads.
+- **Processlist Fetch Loading State Indicator (`web/dist/index.html`)**: Added visual pulsing loading indicator to the Processlist table header during in-flight data fetching.
+
+
 ## [v0.10.7] - 2026-10-22
 
 ### Added
