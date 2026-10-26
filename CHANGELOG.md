@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.10.10] - 2026-10-26
+
 ### Added
 - **Unified Bottom Pagination Bar with Page Jump & Sizing (`web/dist/index.html`)**: Introduced a sticky bottom pagination bar below the data grid for both SQL Query Editor results and Table Data Viewer. Supports first/previous/next/last page controls (`⏮️`, `◀`, `▶`, `⏭️`), direct page jump input, configurable page sizes (25, 50, 100, 200 rows per page), and on-demand accurate total count calculation for filtered tables.
 - **Smart Wildcard Auto-Wrapping for `LIKE` / `NOT LIKE` Filters (`web/dist/index.html`)**: Automatically wraps plain search terms with `%...%` wildcards when using `LIKE` and `NOT LIKE` filter operators if no wildcards (`%` or `_`) are explicitly entered. Preserves explicit wildcards as-is and synchronizes compiled expressions when switching between visual filter builder, raw WHERE mode, and exporting to SQL query tabs.
