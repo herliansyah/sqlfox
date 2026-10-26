@@ -1907,4 +1907,34 @@ func TestVisualTransactionControlsEmbedded(t *testing.T) {
 	}
 }
 
+func TestAutoWakeupAndFetchTimeoutEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	expectedSnippets := []string{
+		`AbortSignal.timeout`,
+		`wakeUpSessionIfNeeded`,
+		`lastTabVisibilityTimestamp`,
+		`pingActiveSession`,
+		`Loading processlist...`,
+	}
+
+	for _, s := range expectedSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain %q for auto-wakeup and fetch timeout, but was missing", s)
+		}
+	}
+}
+
+
 

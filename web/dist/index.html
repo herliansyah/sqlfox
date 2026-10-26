@@ -5049,6 +5049,9 @@
       isServerReconnecting = false;
       reconnectAttempts = 0;
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (activeConnection && typeof pingActiveSession === 'function') {
+        pingActiveSession();
+      }
     }
 
     function triggerAutoReconnect() {
@@ -5083,6 +5086,16 @@
       if (token && !options.headers['Authorization']) {
         options.headers['Authorization'] = `Bearer ${token}`;
       }
+
+      // ponytail: fail-fast timeout on idle/dead sockets unless caller explicitly configures signal or timeout
+      if (!options.signal) {
+        const isLongRunning = url.includes('/execute') || url.includes('/dump') || url.includes('/import') || url.includes('/sync') || url.includes('/transfer');
+        const timeoutMs = options.timeout !== undefined ? options.timeout : (isLongRunning ? 0 : 15000);
+        if (timeoutMs > 0 && typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+          options.signal = AbortSignal.timeout(timeoutMs);
+        }
+      }
+
       try {
         const res = await fetch(url, options);
         if (res.status === 401) {
@@ -7731,12 +7744,41 @@
       bar.style.width = '0%';
     }
 
+    // ponytail: silent background auto-wakeup on tab focus when left idle (>5m)
+    let lastTabVisibilityTimestamp = Date.now();
+    let isWakingUpSession = false;
+
+    async function wakeUpSessionIfNeeded() {
+      if (isWakingUpSession) return;
+      const now = Date.now();
+      const elapsedMinutes = (now - lastTabVisibilityTimestamp) / 1000 / 60;
+      lastTabVisibilityTimestamp = now;
+
+      if (elapsedMinutes >= 5) {
+        isWakingUpSession = true;
+        try {
+          if (typeof checkAuthStatus === 'function') {
+            await checkAuthStatus();
+          }
+          if (activeConnection && typeof pingActiveSession === 'function') {
+            await pingActiveSession();
+          }
+        } catch (_) {
+          // quiet auto-wakeup probe
+        } finally {
+          isWakingUpSession = false;
+        }
+      }
+    }
+
     document.addEventListener('visibilitychange', () => {
       const activeTab = tabs.find(t => t.id === activeTabId);
       if (document.hidden) {
+        lastTabVisibilityTimestamp = Date.now();
         triggerCountdownBar('pl-refresh-bar', 'pause');
         triggerCountdownBar('cl-refresh-bar', 'pause');
       } else {
+        wakeUpSessionIfNeeded();
         if (activeTab && activeTab.isProcesslist && typeof processlistRefreshInterval !== 'undefined' && processlistRefreshInterval !== 'pause') {
           fetchProcesslist(true);
           triggerCountdownBar('pl-refresh-bar', processlistRefreshInterval);
@@ -7745,6 +7787,12 @@
           fetchClusterHealth(true);
           triggerCountdownBar('cl-refresh-bar', clusterRefreshInterval);
         }
+      }
+    });
+
+    window.addEventListener('focus', () => {
+      if (!document.hidden) {
+        wakeUpSessionIfNeeded();
       }
     });
 
@@ -9163,6 +9211,12 @@
       if (!activeConnection) return;
       if (!silent && processlistRefreshInterval !== 'pause') {
         setProcesslistInterval(processlistRefreshInterval);
+      }
+      if (!silent) {
+        const tbody = document.getElementById('pl-tbody');
+        if (tbody && (!processlistData.threads || processlistData.threads.length === 0)) {
+          tbody.innerHTML = `<tr><td colspan="9" class="p-8 text-center text-slate-400"><div class="animate-pulse">Loading processlist...</div></td></tr>`;
+        }
       }
       try {
         const res = await apiFetch(`/api/session/${activeConnection.id}/processlist`);
