@@ -16003,6 +16003,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
     function setFilterBarMode(mode) {
       const activeTab = tabs.find(t => t.id === activeTabId);
       if (!activeTab || !activeTab.isTableViewer) return;
+      if (mode === 'raw' && (!activeTab.filterRaw || activeTab.filterRaw.trim() === '') && activeTab.filterPills && activeTab.filterPills.length > 0) {
+        activeTab.filterRaw = compileFilterPills(activeTab.filterPills);
+      }
       activeTab.filterMode = mode;
       syncFilterBarUI(activeTab);
     }
@@ -16090,7 +16093,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
             </select>
             <input type="text" class="pill-val bg-transparent text-slate-100 font-mono text-xs outline-none px-1 py-0.5 w-24 focus:w-36 transition-all ${isUnary ? 'hidden' : ''}"
                    value="${escapeHtml(String(val))}"
-                   placeholder="${op === 'LIKE' || op === 'NOT LIKE' ? '%val%' : (op === 'IN' ? '1, 2, 3' : 'val')}"
+                   placeholder="${op === 'LIKE' || op === 'NOT LIKE' ? 'substring or %wildcard%' : (op === 'IN' ? '1, 2, 3' : 'val')}"
                    onkeydown="if(event.key === 'Enter') applyTableFilter()"
                    oninput="onPillValueInput(${i}, this.value)">
             <button type="button" onclick="removeFilterPill(${i})" class="text-slate-500 hover:text-rose-400 px-0.5 py-0.5 transition" title="Remove condition">
@@ -16176,8 +16179,17 @@ Please analyze what is causing this query to be slow and suggest necessary query
             }).join(', ');
             clauses.push(`${colEscaped} IN (${formatted})`);
           }
+        } else if (op === 'LIKE' || op === 'NOT LIKE') {
+          // ponytail: smart wildcard auto-wrap for LIKE/NOT LIKE filter.
+          // If the user didn't explicitly include SQL wildcards (% or _), automatically wrap with '%...%'.
+          // If explicit wildcards exist (e.g. 'effendi%', '%effendi'), preserve them as-is.
+          let finalVal = val;
+          if (!val.includes('%') && !val.includes('_')) {
+            finalVal = `%${val}%`;
+          }
+          clauses.push(`${colEscaped} ${op} '${finalVal.replace(/'/g, "''")}'`);
         } else {
-          if (!isNaN(val) && val !== '' && !val.includes(' ') && op !== 'LIKE' && op !== 'NOT LIKE') {
+          if (!isNaN(val) && val !== '' && !val.includes(' ')) {
             clauses.push(`${colEscaped} ${op} ${val}`);
           } else {
             clauses.push(`${colEscaped} ${op} '${val.replace(/'/g, "''")}'`);
@@ -18164,7 +18176,12 @@ Please analyze what is causing this query to be slow and suggest necessary query
         if (op === '<=') return cellStr <= targetVal;
       }
       if (op === 'LIKE' || op === 'NOT LIKE') {
-        const regexStr = '^' + targetVal
+        let pattern = targetVal;
+        // ponytail: smart wildcard auto-wrap for in-memory grid filter matching
+        if (!pattern.includes('%') && !pattern.includes('_')) {
+          pattern = `%${pattern}%`;
+        }
+        const regexStr = '^' + pattern
           .replace(/[.+^${}()|[\]\\]/g, '\\$&')
           .replace(/%/g, '.*')
           .replace(/_/g, '.') + '$';
@@ -18286,7 +18303,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
             let likeButton = '';
             if (typeCategory === 'text') {
               likeButton = `
-                <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, 'LIKE', '%' + this.dataset.val + '%')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-purple-300 hover:text-white transition">
+                <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, 'LIKE', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-purple-300 hover:text-white transition">
                   <span class="font-mono text-purple-400">*</span><span class="truncate font-mono">${escapeHtml(col.name)} LIKE '%${escapeHtml(displayStr)}%'</span>
                 </button>
               `;
