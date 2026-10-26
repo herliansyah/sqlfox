@@ -718,7 +718,7 @@
             <span id="grid-limit-badge" class="bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded text-[10px]">Safe Limit: 1,000</span>
 
             <!-- Table CRUD Suite: Add Row & Delete Selected -->
-            <button id="btn-grid-add-row" onclick="addGridDraftRow()" class="px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-400 border border-sky-800 text-[11px] font-semibold flex items-center space-x-1 transition" title="Add a new row draft inline">
+            <button id="btn-grid-add-row" onclick="addGridDraftRow()" class="hidden px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-400 border border-sky-800 text-[11px] font-semibold flex items-center space-x-1 transition" title="Add a new row draft inline">
               <span>➕</span><span>Add Row</span>
             </button>
             <button id="btn-grid-delete-selected" onclick="deleteSelectedGridRows()" class="hidden px-2 py-0.5 rounded bg-rose-950 hover:bg-rose-900 text-rose-300 border border-rose-800 text-[11px] font-semibold flex items-center space-x-1 transition" title="Delete selected rows">
@@ -737,7 +737,7 @@
           <!-- Edit Mode Toggle & Keyset / Export Controls -->
           <div class="flex items-center space-x-2 shrink-0">
             <!-- Edit Mode Selector -->
-            <div class="flex items-center space-x-1 bg-slate-900 border border-slate-800 px-2 py-0.5 rounded text-[11px]" id="grid-edit-mode-container">
+            <div class="hidden flex items-center space-x-1 bg-slate-900 border border-slate-800 px-2 py-0.5 rounded text-[11px]" id="grid-edit-mode-container">
               <span class="text-slate-400 text-[10px]">Edit:</span>
               <button id="btn-grid-mode-staged" onclick="setGridEditMode('staged')" class="px-1.5 py-0.5 rounded text-[10px] font-medium transition" title="Manual Apply: Staged changes until you click Apply">📝 Staged</button>
               <button id="btn-grid-mode-auto" onclick="setGridEditMode('auto')" class="px-1.5 py-0.5 rounded text-[10px] font-medium transition" title="Auto-commit: Persist directly on blur/Enter">⚡ Auto</button>
@@ -747,10 +747,10 @@
               </label>
             </div>
 
-            <button id="btn-mock-data" onclick="openMockDataModal()" class="hover:bg-slate-800 px-2 py-0.5 rounded border border-slate-700 text-purple-400 hover:text-purple-300 transition flex items-center space-x-1">
+            <button id="btn-mock-data" onclick="openMockDataModal()" class="hidden hover:bg-slate-800 px-2 py-0.5 rounded border border-slate-700 text-purple-400 hover:text-purple-300 transition flex items-center space-x-1">
               <span>🎲</span><span>Mock Data</span>
             </button>
-            <button id="btn-import-csv" onclick="openCSVImportModal()" class="hover:bg-slate-800 px-2 py-0.5 rounded border border-slate-700 text-emerald-400 hover:text-emerald-300 transition flex items-center space-x-1">
+            <button id="btn-import-csv" onclick="openCSVImportModal()" class="hidden hover:bg-slate-800 px-2 py-0.5 rounded border border-slate-700 text-emerald-400 hover:text-emerald-300 transition flex items-center space-x-1">
               <span>📥</span><span>Import CSV</span>
             </button>
             <div class="relative inline-block text-left" id="export-csv-dropdown-container">
@@ -767,7 +767,7 @@
                   <span class="font-medium text-emerald-400">Excel-Safe CSV</span>
                   <span class="text-[10px] text-slate-400">BOM + keep leading 0s (="0812...")</span>
                 </button>
-                <button onclick="exportTableDump(); toggleExportCSVMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex flex-col border-b border-slate-800">
+                <button id="export-menu-table-dump" onclick="exportTableDump(); toggleExportCSVMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex flex-col border-b border-slate-800">
                   <span class="font-medium text-sky-400">Table SQL Dump</span>
                   <span class="text-[10px] text-slate-400">Export this table's DDL + data (.sql)</span>
                 </button>
@@ -4758,7 +4758,7 @@
         <span class="text-[10px] text-slate-500">GFM</span>
       </button>
     </div>
-    <div class="py-1">
+    <div id="grid-ctx-table-mutations" class="py-1 hidden">
       <button onclick="addGridDraftRow(); closeGridContextMenu()" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-sky-400 hover:text-sky-300">
         <span>➕</span><span>Add Row Draft</span>
       </button>
@@ -7744,6 +7744,7 @@
       updateGridEditModeUI();
       updateStagedEditsUI();
       updateSelectedRowsUI();
+      syncGridToolbarMode();
       const table = document.getElementById('results-table');
       if (table) {
         table.classList.add('table-empty');
@@ -11845,6 +11846,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
       const isDataViewer = mode === 'data' && activeTab && activeTab.isTableViewer;
       if (gridToolbar) gridToolbar.classList.toggle('hidden', mode !== 'data');
+      if (mode === 'data') syncGridToolbarMode();
       if (filterBar) {
         filterBar.classList.toggle('hidden', !isDataViewer);
         if (isDataViewer) syncFilterBarUI(activeTab);
@@ -16056,6 +16058,25 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
     }
 
+    // ponytail: Grid toolbar mode-switching between Table Viewer and Query Result modes
+    function syncGridToolbarMode() {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const isTableViewer = Boolean(activeTab && activeTab.isTableViewer);
+
+      const btnAddRow = document.getElementById('btn-grid-add-row');
+      const btnMockData = document.getElementById('btn-mock-data');
+      const btnImportCSV = document.getElementById('btn-import-csv');
+      const editModeContainer = document.getElementById('grid-edit-mode-container');
+      const tableDumpBtn = document.getElementById('export-menu-table-dump');
+
+      if (btnAddRow) btnAddRow.classList.toggle('hidden', !isTableViewer);
+      if (btnMockData) btnMockData.classList.toggle('hidden', !isTableViewer);
+      if (btnImportCSV) btnImportCSV.classList.toggle('hidden', !isTableViewer);
+      if (editModeContainer) editModeContainer.classList.toggle('hidden', !isTableViewer);
+      if (tableDumpBtn) tableDumpBtn.classList.toggle('hidden', !isTableViewer);
+      updateSelectedRowsUI();
+    }
+
     // --- TablePlus-Style Inline Filter Bar & Pushdown ---
     function setFilterBarMode(mode) {
       const activeTab = tabs.find(t => t.id === activeTabId);
@@ -16966,6 +16987,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
       updateGridEditModeUI();
       updateStagedEditsUI();
       updateSelectedRowsUI();
+      syncGridToolbarMode();
 
       if (!cols || cols.length === 0) {
         const table = document.getElementById('results-table');
@@ -17569,6 +17591,11 @@ Please analyze what is causing this query to be slow and suggest necessary query
         }
       }
 
+      if (activeTab && !activeTab.isTableViewer && !pkCol) {
+        showNativeAlert(`Inline editing in query results requires a Primary Key on table '${tableName}'.`, 'Edit Cell');
+        return;
+      }
+
       const col = currentColumns[cIdx];
       const pkIdx = pkCol ? currentColumns.findIndex(c => (c.name || '').toLowerCase() === pkCol.toLowerCase()) : -1;
       const pkVal = pkIdx !== -1 ? currentResults[rIdx][pkIdx] : null;
@@ -17675,6 +17702,11 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
       if (!tableName) {
         showNativeAlert('Inline editing is only available for single-table queries. Specify a table to edit.', 'Edit Cell');
+        return;
+      }
+
+      if (activeTab && !activeTab.isTableViewer && !pkCol) {
+        showNativeAlert(`Inline editing in query results requires a Primary Key on table '${tableName}'.`, 'Edit Cell');
         return;
       }
 
@@ -18556,6 +18588,13 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const menu = document.getElementById('grid-context-menu');
       if (!menu) return;
 
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const isTableViewer = Boolean(activeTab && activeTab.isTableViewer);
+      const ctxMutations = document.getElementById('grid-ctx-table-mutations');
+      if (ctxMutations) {
+        ctxMutations.classList.toggle('hidden', !isTableViewer);
+      }
+
       const filterSec = document.getElementById('grid-ctx-filter-section');
       const filterColLabel = document.getElementById('grid-ctx-filter-colname');
       const filterOpts = document.getElementById('grid-ctx-filter-options');
@@ -18566,7 +18605,6 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
       if (cIdx >= 0 && currentColumns[cIdx]) {
         const col = currentColumns[cIdx];
-        const activeTab = tabs.find(t => t.id === activeTabId);
         const targetCatalog = (activeGridDB && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeGridDB.toLowerCase()]) || (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
         const tableMeta = (targetCatalog?.tables || []).find(t => (t.name || '').toLowerCase() === (activeGridTable || '').toLowerCase());
         const colMeta = (tableMeta?.columns || []).find(c => (c.name || '').toLowerCase() === (col?.name || '').toLowerCase());
@@ -18575,63 +18613,87 @@ Please analyze what is causing this query to be slow and suggest necessary query
         const fkInfo = (tableMeta?.foreign_keys || []).find(fk => (fk.column || '').toLowerCase() === (col?.name || '').toLowerCase());
 
         if (filterSec && filterOpts) {
-          filterSec.classList.remove('hidden');
-          if (filterColLabel) filterColLabel.textContent = `(${col.name})`;
-          
-          const tableName = activeGridTable || (activeTab && activeTab.tableName) || '';
-          const stagedKey = `${tableName || ''}:${rIdx}:${cIdx}`;
-          const staged = (typeof stagedEdits !== 'undefined' && stagedEdits) ? stagedEdits.get(stagedKey) : null;
-          const currentVal = staged ? staged.newVal : (currentResults[rIdx] ? currentResults[rIdx][cIdx] : null);
-          const typeCategory = getGridTypeCategory(rawType);
-
-          if (currentVal === null || currentVal === undefined) {
-            filterOpts.innerHTML = `
-              <button data-col="${escapeHtml(col.name)}" onclick="applyQuickFilterFromCell(this.dataset.col, 'IS NULL', '')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-sky-300 hover:text-white transition">
-                <span class="font-mono">∅ Filter IS NULL</span>
-              </button>
-              <button data-col="${escapeHtml(col.name)}" onclick="applyQuickFilterFromCell(this.dataset.col, 'IS NOT NULL', '')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-300 hover:text-white transition">
-                <span class="font-mono">✓ Filter IS NOT NULL</span>
-              </button>
-            `;
+          if (!isTableViewer) {
+            filterSec.classList.add('hidden');
           } else {
-            const valStr = String(currentVal);
-            const displayStr = valStr.length > 20 ? valStr.substring(0, 18) + '…' : valStr;
-            let rangeButtons = '';
-            if (typeCategory === 'numeric' || typeCategory === 'temporal') {
-              rangeButtons = `
-                <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '>', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-slate-300 hover:text-white transition">
-                  <span class="font-mono text-emerald-400">&gt;</span><span class="truncate font-mono">${escapeHtml(col.name)} &gt; '${escapeHtml(displayStr)}'</span>
+            filterSec.classList.remove('hidden');
+            if (filterColLabel) filterColLabel.textContent = `(${col.name})`;
+            
+            const tableName = activeGridTable || (activeTab && activeTab.tableName) || '';
+            const stagedKey = `${tableName || ''}:${rIdx}:${cIdx}`;
+            const staged = (typeof stagedEdits !== 'undefined' && stagedEdits) ? stagedEdits.get(stagedKey) : null;
+            const currentVal = staged ? staged.newVal : (currentResults[rIdx] ? currentResults[rIdx][cIdx] : null);
+            const typeCategory = getGridTypeCategory(rawType);
+
+            if (currentVal === null || currentVal === undefined) {
+              filterOpts.innerHTML = `
+                <button data-col="${escapeHtml(col.name)}" onclick="applyQuickFilterFromCell(this.dataset.col, 'IS NULL', '')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-sky-300 hover:text-white transition">
+                  <span class="font-mono">∅ Filter IS NULL</span>
                 </button>
-                <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '<', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-slate-300 hover:text-white transition">
-                  <span class="font-mono text-emerald-400">&lt;</span><span class="truncate font-mono">${escapeHtml(col.name)} &lt; '${escapeHtml(displayStr)}'</span>
-                </button>
-              `;
-            }
-            let likeButton = '';
-            if (typeCategory === 'text') {
-              likeButton = `
-                <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, 'LIKE', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-purple-300 hover:text-white transition">
-                  <span class="font-mono text-purple-400">*</span><span class="truncate font-mono">${escapeHtml(col.name)} LIKE '%${escapeHtml(displayStr)}%'</span>
+                <button data-col="${escapeHtml(col.name)}" onclick="applyQuickFilterFromCell(this.dataset.col, 'IS NOT NULL', '')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-300 hover:text-white transition">
+                  <span class="font-mono">✓ Filter IS NOT NULL</span>
                 </button>
               `;
+            } else {
+              const valStr = String(currentVal);
+              const displayStr = valStr.length > 20 ? valStr.substring(0, 18) + '…' : valStr;
+              let rangeButtons = '';
+              if (typeCategory === 'numeric' || typeCategory === 'temporal') {
+                rangeButtons = `
+                  <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '>', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-slate-300 hover:text-white transition">
+                    <span class="font-mono text-emerald-400">&gt;</span><span class="truncate font-mono">${escapeHtml(col.name)} &gt; '${escapeHtml(displayStr)}'</span>
+                  </button>
+                  <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '<', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-slate-300 hover:text-white transition">
+                    <span class="font-mono text-emerald-400">&lt;</span><span class="truncate font-mono">${escapeHtml(col.name)} &lt; '${escapeHtml(displayStr)}'</span>
+                  </button>
+                `;
+              }
+              let likeButton = '';
+              if (typeCategory === 'text') {
+                likeButton = `
+                  <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, 'LIKE', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-purple-300 hover:text-white transition">
+                    <span class="font-mono text-purple-400">*</span><span class="truncate font-mono">${escapeHtml(col.name)} LIKE '%${escapeHtml(displayStr)}%'</span>
+                  </button>
+                `;
+              }
+              filterOpts.innerHTML = `
+                <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '=', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-sky-300 hover:text-white transition">
+                  <span class="font-mono text-sky-400">=</span><span class="truncate font-mono">${escapeHtml(col.name)} = '${escapeHtml(displayStr)}'</span>
+                </button>
+                <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '!=', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-rose-300 hover:text-white transition">
+                  <span class="font-mono text-rose-400">!=</span><span class="truncate font-mono">${escapeHtml(col.name)} != '${escapeHtml(displayStr)}'</span>
+                </button>
+                ${rangeButtons}
+                ${likeButton}
+              `;
             }
-            filterOpts.innerHTML = `
-              <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '=', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-sky-300 hover:text-white transition">
-                <span class="font-mono text-sky-400">=</span><span class="truncate font-mono">${escapeHtml(col.name)} = '${escapeHtml(displayStr)}'</span>
-              </button>
-              <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '!=', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-rose-300 hover:text-white transition">
-                <span class="font-mono text-rose-400">!=</span><span class="truncate font-mono">${escapeHtml(col.name)} != '${escapeHtml(displayStr)}'</span>
-              </button>
-              ${rangeButtons}
-              ${likeButton}
-            `;
           }
         }
 
-        if (insertSec) insertSec.classList.remove('hidden');
+        let canEditCell = isTableViewer;
+        if (!canEditCell) {
+          let tName = activeGridTable || (activeTab && activeTab.tableName) || '';
+          if (!tName) {
+            const sql = (activeTab && activeTab.sql) || getEditorSQL();
+            const parsed = extractSingleTableFromSQL(sql);
+            if (parsed && parsed.table) tName = parsed.table;
+          }
+          let pkName = activeGridPKCol;
+          if (!pkName && tName) {
+            const tCatalog = (activeGridDB && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeGridDB.toLowerCase()]) || (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
+            const tMeta = (tCatalog?.tables || []).find(t => (t.name || '').toLowerCase() === tName.toLowerCase());
+            if (tMeta && Array.isArray(tMeta.columns)) {
+              const pks = tMeta.columns.filter(c => c.is_primary_key);
+              if (pks.length === 1) pkName = pks[0].name;
+            }
+          }
+          canEditCell = Boolean(tName) && Boolean(pkName);
+        }
+
+        if (insertSec) insertSec.classList.toggle('hidden', !canEditCell);
         if (colLabel) colLabel.textContent = `(${col.name})`;
-        if (btnEdit) btnEdit.classList.remove('hidden');
-        if (btnJson) btnJson.classList.remove('hidden');
+        if (btnEdit) btnEdit.classList.toggle('hidden', !canEditCell);
+        if (btnJson) btnJson.classList.toggle('hidden', !canEditCell);
 
         const optsContainer = document.getElementById('grid-ctx-insert-options');
         if (optsContainer) {
