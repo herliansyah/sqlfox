@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.10.8] - 2026-10-26
+
 ### Added
 - **Pre-Execution Mutation Row Estimation & Tiered Safety Guard (`internal/safety`, `internal/server`)**: Integrated pre-flight DML inspection that rewrites `UPDATE` and `DELETE` queries into bounded `SELECT COUNT(*)` probes with strict 500ms timeouts to estimate row impact before execution. Features adaptive tiered affirmation: silent execution for single-row primary-key mutations in Development, streamlined 1-click affirmation for 1–100 rows, and automatic escalation to full typing verification for mutations exceeding 100 rows or lacking a `WHERE` clause. Multi-statement batches aggregate row impacts with compound escalation (ADR 0057).
 - **Environment-Enforced Mutation Safety Policies (`internal/safety`, `internal/server`)**: Enforces mandatory confirmation challenges across all mutation operations in Staging and Production environments, regardless of affected row counts.
