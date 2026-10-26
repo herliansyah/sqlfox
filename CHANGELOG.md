@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.10.11] - 2026-10-26
+
 ### Fixed
 - **Grid Pagination Initial Visibility & Toolbar Cleanup (`web/dist/index.html`)**: Hid `#grid-pagination-bar` by default on cold start and during empty/reset states until a query or table view produces data. Completely eliminated redundant legacy top pagination controls from the toolbar in favor of the unified sticky bottom bar.
 - **Pagination UI Localization (`web/dist/index.html`)**: Standardized all bottom pagination bar button labels, tooltips, and dynamic status texts to English (e.g. "Showing X - Y of Z rows", "Page N of M", and "Calculate total row count").
