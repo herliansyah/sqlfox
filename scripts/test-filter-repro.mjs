@@ -201,6 +201,31 @@ console.log('Test 7 clearTableFilter reset appliedFilter to empty?:', tabInfo7.a
 assert.strictEqual(tabInfo7.appliedFilter, '', 'Test 7 Failed');
 assert.strictEqual(tabInfo7.pillsLength, 0, 'Test 7 Failed');
 
+// TEST 8: LIKE filter smart auto-wrap (%effendi% when no wildcard provided)
+vm.runInContext(`
+  tabs[0].filterPills = [{ col: 'name', op: 'LIKE', val: 'effendi' }];
+  applyTableFilter();
+`, sandbox);
+const tabInfo8 = vm.runInContext(`tabs[0].appliedFilter`, sandbox);
+console.log('Test 8 LIKE smart auto-wrap filter:', tabInfo8);
+assert.strictEqual(tabInfo8, "`name` LIKE '%effendi%'", 'Test 8 Failed');
+
+// TEST 9: LIKE filter preserves explicit wildcards (e.g. 'effendi%')
+vm.runInContext(`
+  tabs[0].filterPills = [{ col: 'name', op: 'LIKE', val: 'effendi%' }];
+  applyTableFilter();
+`, sandbox);
+const tabInfo9 = vm.runInContext(`tabs[0].appliedFilter`, sandbox);
+console.log('Test 9 LIKE explicit wildcard filter:', tabInfo9);
+assert.strictEqual(tabInfo9, "`name` LIKE 'effendi%'", 'Test 9 Failed');
+
+// TEST 10: In-memory predicate matchesFilterCondition with LIKE auto-wrap
+const matchRes = vm.runInContext(`matchesFilterCondition('Ahmad Effendi Siregar', 'LIKE effendi')`, sandbox);
+const nonMatchRes = vm.runInContext(`matchesFilterCondition('Budi Santoso', 'LIKE effendi')`, sandbox);
+console.log('Test 10 matchesFilterCondition LIKE auto-wrap:', matchRes, nonMatchRes);
+assert.strictEqual(matchRes, true, 'Test 10 Failed: should match substring');
+assert.strictEqual(nonMatchRes, false, 'Test 10 Failed: should not match');
+
 console.log('ALL COMPREHENSIVE TESTS PASSED!');
 
 
