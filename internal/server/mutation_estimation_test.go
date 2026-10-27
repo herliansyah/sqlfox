@@ -38,6 +38,7 @@ func TestMutationEstimation_TieredSafetyGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	_, _ = rawSess.Exec(ctx, "BEGIN TRANSACTION;")
 	for i := 1; i <= 150; i++ {
 		st := "active"
 		if i > 120 {
@@ -48,6 +49,7 @@ func TestMutationEstimation_TieredSafetyGate(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	_, _ = rawSess.Exec(ctx, "COMMIT;")
 
 	devSess := &ActiveSession{
 		ConnectionID: "conn-dev",
