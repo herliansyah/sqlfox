@@ -715,10 +715,10 @@
             <button id="btn-view-profile" onclick="toggleProfileView()" class="hidden px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-400 border border-sky-800 text-[11px] font-semibold flex items-center space-x-1 transition" title="Inspect query execution stages and timings">
               <span>⏱️ Profiler</span>
             </button>
-            <span id="grid-limit-badge" class="bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded text-[10px]">Safe Limit: 1,000</span>
+            <span id="grid-limit-badge" class="bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded text-[10px]">Safe Limit: 5,000</span>
 
             <!-- Table CRUD Suite: Add Row & Delete Selected -->
-            <button id="btn-grid-add-row" onclick="addGridDraftRow()" class="px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-400 border border-sky-800 text-[11px] font-semibold flex items-center space-x-1 transition" title="Add a new row draft inline">
+            <button id="btn-grid-add-row" onclick="addGridDraftRow()" class="hidden px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-400 border border-sky-800 text-[11px] font-semibold flex items-center space-x-1 transition" title="Add a new row draft inline">
               <span>➕</span><span>Add Row</span>
             </button>
             <button id="btn-grid-delete-selected" onclick="deleteSelectedGridRows()" class="hidden px-2 py-0.5 rounded bg-rose-950 hover:bg-rose-900 text-rose-300 border border-rose-800 text-[11px] font-semibold flex items-center space-x-1 transition" title="Delete selected rows">
@@ -737,7 +737,7 @@
           <!-- Edit Mode Toggle & Keyset / Export Controls -->
           <div class="flex items-center space-x-2 shrink-0">
             <!-- Edit Mode Selector -->
-            <div class="flex items-center space-x-1 bg-slate-900 border border-slate-800 px-2 py-0.5 rounded text-[11px]" id="grid-edit-mode-container">
+            <div class="hidden flex items-center space-x-1 bg-slate-900 border border-slate-800 px-2 py-0.5 rounded text-[11px]" id="grid-edit-mode-container">
               <span class="text-slate-400 text-[10px]">Edit:</span>
               <button id="btn-grid-mode-staged" onclick="setGridEditMode('staged')" class="px-1.5 py-0.5 rounded text-[10px] font-medium transition" title="Manual Apply: Staged changes until you click Apply">📝 Staged</button>
               <button id="btn-grid-mode-auto" onclick="setGridEditMode('auto')" class="px-1.5 py-0.5 rounded text-[10px] font-medium transition" title="Auto-commit: Persist directly on blur/Enter">⚡ Auto</button>
@@ -747,10 +747,22 @@
               </label>
             </div>
 
-            <button id="btn-mock-data" onclick="openMockDataModal()" class="hover:bg-slate-800 px-2 py-0.5 rounded border border-slate-700 text-purple-400 hover:text-purple-300 transition flex items-center space-x-1">
+            <!-- Query Stream 5k Batch Pager (ADR 0058) -->
+            <div id="query-stream-pager" class="hidden items-center space-x-1.5 bg-slate-900 border border-amber-600/70 px-2 py-0.5 rounded text-[11px] font-mono">
+              <span class="text-amber-400 font-bold flex items-center space-x-1">
+                <span>⚠️</span><span id="query-stream-batch-info">5,000+ rows</span>
+              </span>
+              <div class="flex items-center space-x-1 ml-1 pl-1 border-l border-slate-700">
+                <button id="btn-stream-prev" type="button" onclick="loadPreviousStreamBatch()" disabled class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-slate-300 hover:text-white transition" title="Previous 5,000 rows">◀ Prev 5k</button>
+                <span id="query-stream-page-badge" class="text-[10px] text-slate-400 font-mono px-0.5">Batch 1</span>
+                <button id="btn-stream-next" type="button" onclick="loadNextStreamBatch()" class="px-1.5 py-0.5 rounded bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500 text-slate-950 font-bold transition flex items-center space-x-1" title="Fetch next 5,000 rows (subquery pagination)">Next 5k ▶</button>
+              </div>
+            </div>
+
+            <button id="btn-mock-data" onclick="openMockDataModal()" class="hidden hover:bg-slate-800 px-2 py-0.5 rounded border border-slate-700 text-purple-400 hover:text-purple-300 transition flex items-center space-x-1">
               <span>🎲</span><span>Mock Data</span>
             </button>
-            <button id="btn-import-csv" onclick="openCSVImportModal()" class="hover:bg-slate-800 px-2 py-0.5 rounded border border-slate-700 text-emerald-400 hover:text-emerald-300 transition flex items-center space-x-1">
+            <button id="btn-import-csv" onclick="openCSVImportModal()" class="hidden hover:bg-slate-800 px-2 py-0.5 rounded border border-slate-700 text-emerald-400 hover:text-emerald-300 transition flex items-center space-x-1">
               <span>📥</span><span>Import CSV</span>
             </button>
             <div class="relative inline-block text-left" id="export-csv-dropdown-container">
@@ -767,7 +779,7 @@
                   <span class="font-medium text-emerald-400">Excel-Safe CSV</span>
                   <span class="text-[10px] text-slate-400">BOM + keep leading 0s (="0812...")</span>
                 </button>
-                <button onclick="exportTableDump(); toggleExportCSVMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex flex-col border-b border-slate-800">
+                <button id="export-menu-table-dump" onclick="exportTableDump(); toggleExportCSVMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex flex-col border-b border-slate-800">
                   <span class="font-medium text-sky-400">Table SQL Dump</span>
                   <span class="text-[10px] text-slate-400">Export this table's DDL + data (.sql)</span>
                 </button>
@@ -858,6 +870,9 @@
             <button type="button" id="btn-open-sql-tab" onclick="handoffTableQueryToEditor()" class="text-sky-400 hover:text-sky-300 hover:bg-sky-950/60 px-2 py-1 rounded border border-sky-800/80 text-xs transition flex items-center space-x-1" title="Open complete SELECT query in a new SQL Tab">
               <span>📝</span><span>Open in SQL Tab</span>
             </button>
+            <button type="button" id="btn-toggle-cell-drawer" onclick="toggleCellDetailDrawer()" class="text-slate-300 hover:text-white hover:bg-slate-800 px-2 py-1 rounded border border-slate-700 text-xs transition flex items-center space-x-1" title="Toggle Cell Inspector Drawer">
+              <span>🔍</span><span>Inspector</span>
+            </button>
           </div>
         </div>
 
@@ -871,6 +886,24 @@
               <tr><td class="p-12 text-center text-slate-500 w-full">Run a query or double click a table in the sidebar to view records</td></tr>
             </tbody>
           </table>
+        </div>
+
+        <!-- Persistent Cell Detail Drawer (ADR 0058) -->
+        <div id="cell-detail-drawer" class="hidden border-t border-app-border bg-slate-900 flex flex-col h-44 flex-shrink-0 transition-all duration-150 z-20">
+          <div class="flex items-center justify-between px-3 py-1 bg-slate-950 border-b border-app-border text-xs select-none">
+            <div class="flex items-center space-x-2">
+              <span class="text-sky-400 font-bold font-mono">🔍 Cell Inspector</span>
+              <span id="cell-drawer-col" class="text-slate-300 font-mono text-[11px] bg-slate-800 px-1.5 py-0.5 rounded">column</span>
+              <span id="cell-drawer-type" class="text-slate-500 font-mono text-[10px]">type</span>
+              <span id="cell-drawer-row" class="text-slate-500 font-mono text-[10px]">Row #1</span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <button type="button" onclick="formatCellDrawerJSON()" class="text-[11px] text-sky-400 hover:text-white px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 font-mono border border-slate-700 transition" title="Format valid JSON string">Format JSON</button>
+              <button type="button" onclick="copyCellDrawerContent()" class="text-[11px] text-emerald-400 hover:text-white px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 font-mono border border-slate-700 transition" title="Copy cell value to clipboard">📋 Copy</button>
+              <button type="button" onclick="closeCellDetailDrawer()" class="text-slate-400 hover:text-white font-bold px-1.5 text-sm" title="Close inspector">✕</button>
+            </div>
+          </div>
+          <div class="flex-1 p-2 overflow-auto font-mono text-xs text-slate-200 bg-slate-900/90 whitespace-pre-wrap select-text selection:bg-sky-500/30" id="cell-drawer-content"></div>
         </div>
 
         <!-- Bottom Pagination & Results Bar (Data Mode) -->
@@ -4758,7 +4791,7 @@
         <span class="text-[10px] text-slate-500">GFM</span>
       </button>
     </div>
-    <div class="py-1">
+    <div id="grid-ctx-table-mutations" class="py-1 hidden">
       <button onclick="addGridDraftRow(); closeGridContextMenu()" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-sky-400 hover:text-sky-300">
         <span>➕</span><span>Add Row Draft</span>
       </button>
@@ -5538,6 +5571,9 @@
       if (isConnectionSwitching) return;
       const conn = connections.find(c => c.id === connId);
       if (!conn) return;
+      if (activeConnection && activeConnection.id !== connId && isQueryExecuting) {
+        await cancelRunningQuery();
+      }
       isConnectionSwitching = true;
       try {
         if (activeConnection && activeConnection.id !== connId) {
@@ -5666,10 +5702,41 @@
       }
     }
 
-    // --- Schema Tree Filtering & Database Switcher ---
+    // --- Schema Tree Filtering & Prefix Index (ADR 0058) ---
     let schemaFilterQuery = '';
     let databaseFilterQuery = '';
-    let schemaFilterDebounceTimer = null;
+    let schemaTreeFastIndex = null;
+
+    function buildSchemaTreeFastIndex(schema) {
+      if (!schema) {
+        schemaTreeFastIndex = null;
+        return;
+      }
+      const tables = [];
+      const views = [];
+      const triggers = schema.triggers || [];
+
+      (schema.tables || []).forEach(t => {
+        const item = {
+          ...t,
+          columns: t.columns || [],
+          _lower: (t.name || '').toLowerCase()
+        };
+        if (t.type === 'VIEW') views.push(item);
+        else tables.push(item);
+      });
+
+      schemaTreeFastIndex = {
+        _schemaRef: schema,
+        database: schema.database_name,
+        tables: tables,
+        views: views,
+        triggers: triggers.map(tr => ({
+          ...tr,
+          _lower: ((tr.name || '') + ' ' + (tr.table || '')).toLowerCase()
+        }))
+      };
+    }
 
     function filterSchemaTree(query) {
       schemaFilterQuery = (query || '').toLowerCase().trim();
@@ -5678,16 +5745,13 @@
         if (schemaFilterQuery) clearBtn.classList.remove('hidden');
         else clearBtn.classList.add('hidden');
       }
-      clearTimeout(schemaFilterDebounceTimer);
-      schemaFilterDebounceTimer = setTimeout(() => {
-        if (schemaCatalogCache) {
-          renderSchemaTree(schemaCatalogCache);
-        }
-      }, 150);
+      // Instant sub-5ms filtering via pre-warmed schema search index without debounce delay (ADR 0058)
+      if (schemaCatalogCache) {
+        renderSchemaTree(schemaCatalogCache);
+      }
     }
 
     function clearSchemaFilter() {
-      clearTimeout(schemaFilterDebounceTimer);
       const input = document.getElementById('schema-filter-input');
       if (input) {
         input.value = '';
@@ -5947,8 +6011,16 @@
       const dbActiveName = document.getElementById('database-switcher-active-name');
       const dbSelect = document.getElementById('database-selector');
 
+      if (!schema) {
+        if (dbContainer) dbContainer.classList.add('hidden');
+        if (treeEl) treeEl.innerHTML = `<div class="text-slate-500 text-center py-6 text-xs">No schema loaded.</div>`;
+        const badgeEl = document.getElementById('table-count-badge');
+        if (badgeEl) badgeEl.textContent = '0';
+        return;
+      }
+
       // Populate database switcher
-      if (schema && schema.databases && schema.databases.length > 0) {
+      if (schema.databases && schema.databases.length > 0) {
         if (dbContainer) dbContainer.classList.remove('hidden');
         if (dbActiveName) dbActiveName.textContent = schema.database_name || schema.databases[0] || 'default';
         if (dbSelect) {
@@ -5961,23 +6033,22 @@
         if (dbContainer) dbContainer.classList.add('hidden');
       }
 
-      const allTables = (schema.tables || []).filter(t => t.type !== 'VIEW');
-      const allViews = (schema.tables || []).filter(t => t.type === 'VIEW');
-      const allTriggers = schema.triggers || [];
+      if (!schemaTreeFastIndex || schemaTreeFastIndex._schemaRef !== schema || schemaTreeFastIndex.database !== schema.database_name) {
+        buildSchemaTreeFastIndex(schema);
+      }
+
+      const allTables = schemaTreeFastIndex ? schemaTreeFastIndex.tables : ((schema.tables || []).filter(t => t.type !== 'VIEW'));
+      const allViews = schemaTreeFastIndex ? schemaTreeFastIndex.views : ((schema.tables || []).filter(t => t.type === 'VIEW'));
+      const allTriggers = schemaTreeFastIndex ? schemaTreeFastIndex.triggers : (schema.triggers || []);
 
       const q = schemaFilterQuery;
-      const tablesList = q ? allTables.filter(t => t.name.toLowerCase().includes(q)) : allTables;
-      const viewsList = q ? allViews.filter(v => v.name.toLowerCase().includes(q)) : allViews;
-      const triggersList = q ? allTriggers.filter(tr => tr.name.toLowerCase().includes(q) || (tr.table || '').toLowerCase().includes(q)) : allTriggers;
+      const tablesList = q ? allTables.filter(t => t._lower ? t._lower.includes(q) : t.name.toLowerCase().includes(q)) : allTables;
+      const viewsList = q ? allViews.filter(v => v._lower ? v._lower.includes(q) : v.name.toLowerCase().includes(q)) : allViews;
+      const triggersList = q ? allTriggers.filter(tr => tr._lower ? tr._lower.includes(q) : tr.name.toLowerCase().includes(q)) : allTriggers;
 
       const badgeEl = document.getElementById('table-count-badge');
       if (badgeEl) {
         badgeEl.textContent = q ? `${tablesList.length}/${allTables.length}` : allTables.length;
-      }
-
-      if (!schema) {
-        treeEl.innerHTML = `<div class="text-slate-500 text-center py-6 text-xs">No schema loaded.</div>`;
-        return;
       }
 
       if (q && tablesList.length === 0 && viewsList.length === 0 && triggersList.length === 0) {
@@ -7475,7 +7546,7 @@
       const container = document.getElementById('tabs-container');
       container.innerHTML = tabs.map(t => `
         <div onclick="switchTab('${t.id}')" oncontextmenu="showTabContextMenu(event, '${t.id}')" class="flex items-center space-x-1 px-3 py-1 rounded cursor-pointer text-xs transition tab-label shrink-0 whitespace-nowrap ${t.id === activeTabId ? 'bg-app-bg text-app-accent font-semibold border-t-2 border-app-accent' : 'hover:bg-slate-800 text-slate-400'}" title="${escapeHtml(t.title)} (Right-click for options)">
-          <span>${t.isVariables ? '⚙️' : (t.isFlightRecorder ? '📈' : (t.isCluster ? '🌐' : (t.isProcesslist ? '⚡' : (t.isTableViewer ? '📊' : (t.isNote ? '📝' : '⚡')))))}</span>
+          <span>${t.isExecuting ? '<span class="animate-spin inline-block">⏳</span>' : t.isVariables ? '⚙️' : t.isFlightRecorder ? '📈' : t.isCluster ? '🌐' : t.isProcesslist ? '⚡' : t.isTableViewer ? '📊' : t.isNote ? '📝' : '⚡'}</span>
           <span class="truncate max-w-[120px]">${escapeHtml(t.title)}</span>
           <button onclick="event.stopPropagation(); closeTab('${t.id}')" class="hover:text-red-400 pl-1" title="Close Tab (Ctrl+W)">✕</button>
         </div>
@@ -7740,10 +7811,18 @@
       activeGridPKCol = null;
       activeGridDB = '';
       activeEditCell = null;
+      activeGridSelectedRow = null;
+      activeGridSelectedCol = null;
+      activeGridSelectedTd = null;
+      if (typeof closeCellDetailDrawer === 'function') closeCellDetailDrawer();
       selectedRowIndices.clear();
+      isVirtualGridActive = false;
+      virtualGridRows = [];
+      virtualGridStartIdx = 0;
       updateGridEditModeUI();
       updateStagedEditsUI();
       updateSelectedRowsUI();
+      syncGridToolbarMode();
       const table = document.getElementById('results-table');
       if (table) {
         table.classList.add('table-empty');
@@ -7754,7 +7833,15 @@
       const tbody = document.getElementById('grid-tbody');
       if (tbody) tbody.innerHTML = '<tr><td class="p-12 text-center text-slate-500 w-full">Run a query or double click a table in the sidebar to view records</td></tr>';
       const stats = document.getElementById('grid-result-stats');
-      if (stats) stats.textContent = '0 rows';
+      if (stats) {
+        stats.textContent = '0 rows';
+        stats.classList.remove('text-amber-400', 'font-medium');
+      }
+      const streamPager = document.getElementById('query-stream-pager');
+      if (streamPager) {
+        streamPager.classList.add('hidden');
+        streamPager.classList.remove('flex');
+      }
       const bottomStats = document.getElementById('grid-bottom-stats');
       if (bottomStats) bottomStats.textContent = '0 rows';
       const pageInput = document.getElementById('grid-page-input');
@@ -7877,6 +7964,11 @@
         const stats = document.getElementById('grid-result-stats');
         if (stats && nextTab.queryStats) {
           stats.textContent = nextTab.queryStats;
+          if (nextTab.hasMoreStream) {
+            stats.classList.add('text-amber-400', 'font-medium');
+          } else {
+            stats.classList.remove('text-amber-400', 'font-medium');
+          }
         }
       } else if (nextTab && !nextTab.isTableViewer && nextTab.rawQueryExec) {
         renderQuerySuccessBanner(
@@ -7889,6 +7981,11 @@
         const stats = document.getElementById('grid-result-stats');
         if (stats && nextTab.queryStats) {
           stats.textContent = nextTab.queryStats;
+          if (nextTab.hasMoreStream) {
+            stats.classList.add('text-amber-400', 'font-medium');
+          } else {
+            stats.classList.remove('text-amber-400', 'font-medium');
+          }
         }
       } else if (nextTab && !nextTab.isTableViewer && !nextTab.isProcesslist && !nextTab.isCluster && !nextTab.isFlightRecorder && !nextTab.isVariables) {
         // ponytail: Clean state isolation. Query tab with no execution results shows a clean empty grid
@@ -7912,6 +8009,16 @@
       }
 
       updateTabDatabasePill(nextTab);
+      updateQueryStreamPagerUI(nextTab);
+      if (isQueryExecuting) {
+        const executingTab = tabs.find(t => t.isExecuting);
+        const runBtn = document.getElementById('btn-run-query');
+        if (runBtn) {
+          runBtn.title = executingTab && executingTab.id !== tabId
+            ? `Query is currently executing in '${executingTab.title}'`
+            : 'Executing query...';
+        }
+      }
       saveTabsState();
     }
 
@@ -8137,11 +8244,18 @@
           clusterTimer = null;
         }
       }
+      if (list.some(t => t && t.isExecuting)) {
+        cancelRunningQuery().catch(() => {});
+      }
     }
 
     async function closeTab(tabId) {
       const tab = tabs.find(t => t.id === tabId);
       if (!tab) return;
+
+      if (tab.isExecuting) {
+        await cancelRunningQuery();
+      }
 
       if (isCurrentSessionTxActive && !tab.isTableViewer && !tab.isProcesslist && !tab.isCluster && !tab.isFlightRecorder && !tab.isVariables) {
         const ok = await showNativeConfirm('An uncommitted transaction is currently active in this session.\nClosing this tab will ROLLBACK the transaction. Continue?', 'Active Transaction Warning');
@@ -11845,6 +11959,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
       const isDataViewer = mode === 'data' && activeTab && activeTab.isTableViewer;
       if (gridToolbar) gridToolbar.classList.toggle('hidden', mode !== 'data');
+      if (mode === 'data') syncGridToolbarMode();
       if (filterBar) {
         filterBar.classList.toggle('hidden', !isDataViewer);
         if (isDataViewer) syncFilterBarUI(activeTab);
@@ -14636,8 +14751,96 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
     }
 
+    // --- Query Stream 5k Batch Pager (ADR 0058) ---
+    function hasExplicitSQLLimit(sql) {
+      if (!sql || typeof sql !== 'string') return false;
+      const cleaned = sql.replace(/--[^\r\n]*|\/\*[\s\S]*?\*\//g, '').trim().replace(/;+\s*$/, '');
+      return /\bLIMIT\s+\d+(\s*,\s*\d+)?(\s+OFFSET\s+\d+)?\s*$/i.test(cleaned);
+    }
+
+    function wrapSQLWithPagination(sql, limit, offset) {
+      const cleaned = (sql || '').trim().replace(/;+\s*$/, '');
+      // ponytail: CTE queries in MySQL cannot be wrapped inside derived tables; preserve top-level WITH
+      const cteMatch = cleaned.match(/^(\s*WITH\s+[\s\S]+?\))\s*(SELECT[\s\S]+)$/i);
+      if (cteMatch) {
+        return `${cteMatch[1]} SELECT * FROM (\n${cteMatch[2]}\n) AS _p LIMIT ${limit} OFFSET ${offset}`;
+      }
+      return `SELECT * FROM (\n${cleaned}\n) AS _p LIMIT ${limit} OFFSET ${offset}`;
+    }
+
+    function updateQueryStreamPagerUI(tab) {
+      const pager = document.getElementById('query-stream-pager');
+      if (!pager) return;
+
+      if (!tab || tab.isTableViewer || tab.isProcesslist || tab.isCluster || tab.isFlightRecorder || tab.isVariables) {
+        pager.classList.add('hidden');
+        pager.classList.remove('flex');
+        return;
+      }
+
+      const offset = tab.streamBatchOffset || 0;
+      const hasMore = !!tab.hasMoreStream;
+
+      if (!hasMore && offset === 0) {
+        pager.classList.add('hidden');
+        pager.classList.remove('flex');
+        return;
+      }
+
+      pager.classList.remove('hidden');
+      pager.classList.add('flex');
+
+      const batchNum = Math.floor(offset / 5000) + 1;
+      const badge = document.getElementById('query-stream-page-badge');
+      if (badge) {
+        badge.textContent = `Batch ${batchNum}`;
+      }
+
+      const batchInfo = document.getElementById('query-stream-batch-info');
+      if (batchInfo) {
+        if (offset === 0) {
+          batchInfo.textContent = '5,000+ rows';
+        } else {
+          const start = (offset + 1).toLocaleString();
+          const currentRows = (tab.rawQueryRows && tab.rawQueryRows.length) || 0;
+          const end = (offset + currentRows).toLocaleString();
+          batchInfo.textContent = hasMore ? `${start}–${end}+ rows` : `${start}–${end} rows`;
+        }
+      }
+
+      const btnPrev = document.getElementById('btn-stream-prev');
+      if (btnPrev) {
+        btnPrev.disabled = offset <= 0;
+      }
+
+      const btnNext = document.getElementById('btn-stream-next');
+      if (btnNext) {
+        btnNext.disabled = !hasMore;
+      }
+    }
+
+    function loadNextStreamBatch() {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab || !activeTab.baseStreamSQL) return;
+      const nextOffset = (activeTab.streamBatchOffset || 0) + 5000;
+      const wrappedSQL = wrapSQLWithPagination(activeTab.baseStreamSQL, 5000, nextOffset);
+      runActiveQuery(true, '', wrappedSQL, nextOffset);
+    }
+
+    function loadPreviousStreamBatch() {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (!activeTab || !activeTab.baseStreamSQL) return;
+      const prevOffset = Math.max(0, (activeTab.streamBatchOffset || 0) - 5000);
+      if (prevOffset === 0) {
+        runActiveQuery(true, '', activeTab.baseStreamSQL, 0);
+      } else {
+        const wrappedSQL = wrapSQLWithPagination(activeTab.baseStreamSQL, 5000, prevOffset);
+        runActiveQuery(true, '', wrappedSQL, prevOffset);
+      }
+    }
+
     // --- Query Execution & Safety Guard ---
-    async function runActiveQuery(confirmed = false, challengeInput = '') {
+    async function runActiveQuery(confirmed = false, challengeInput = '', overrideSQL = null, overrideOffset = null) {
       // ponytail: Concurrency guard prevents duplicate simultaneous executions (e.g. double-click, DDL multi-trigger)
       if (isQueryExecuting) return;
       if (!activeConnection) {
@@ -14645,26 +14848,47 @@ Please analyze what is causing this query to be slow and suggest necessary query
         return;
       }
 
-      const sql = getEditorSQL().trim();
+      const isBatchPaging = overrideSQL !== null && overrideOffset !== null;
+      const sql = isBatchPaging ? overrideSQL : getEditorSQL().trim();
       if (!sql) return;
 
       const activeTab = tabs.find(t => t.id === activeTabId);
+      const targetTabId = activeTab ? activeTab.id : activeTabId;
       const currentDb = (activeTab && activeTab.database) ? activeTab.database : (schemaCatalogCache?.database_name || activeConnection.database_name || '');
 
+      if (activeTab) {
+        if (isBatchPaging) {
+          activeTab.streamBatchOffset = overrideOffset;
+        } else {
+          activeTab.baseStreamSQL = sql;
+          activeTab.streamBatchOffset = 0;
+          activeTab.hasMoreStream = false;
+          // ponytail: Clear previous execution artifacts to ensure clean state isolation
+          activeTab.rawQueryRows = null;
+          activeTab.rawQueryCols = null;
+          activeTab.rawQueryError = null;
+          activeTab.rawQueryExec = null;
+          activeTab.queryStats = '';
+        }
+      }
+      updateQueryStreamPagerUI(activeTab);
+
       // ADR 0055: Bidirectional USE <database> synchronization
-      const useMatch = sql.match(/^\s*USE\s+[`'"]?([\w\.\-]+)[`'"]?\s*;?$/i);
-      if (useMatch) {
-        const newDb = useMatch[1];
-        if (activeTab) {
-          activeTab.database = newDb;
-          updateTabDatabasePill(activeTab);
-          saveTabsState();
-          showToast(`Tab database context switched to '${newDb}'`);
+      if (!isBatchPaging) {
+        const useMatch = sql.match(/^\s*USE\s+[`'"]?([\w\.\-]+)[`'"]?\s*;?$/i);
+        if (useMatch) {
+          const newDb = useMatch[1];
+          if (activeTab) {
+            activeTab.database = newDb;
+            updateTabDatabasePill(activeTab);
+            saveTabsState();
+            showToast(`Tab database context switched to '${newDb}'`);
+          }
         }
       }
 
       // ADR 0055: Intercept unconfirmed DDL for Target Database Affirmation
-      if (!confirmed && /^\s*(CREATE|ALTER)\s+(TABLE|VIEW|INDEX)/i.test(sql)) {
+      if (!isBatchPaging && !confirmed && /^\s*(CREATE|ALTER)\s+(TABLE|VIEW|INDEX)/i.test(sql)) {
         const ddlMatch = sql.match(/^\s*(CREATE|ALTER)\s+(TABLE|VIEW|INDEX)\s+(?:IF\s+(?:NOT\s+)?EXISTS\s+)?([`'"\w\.\-]+)/i);
         let extractedTable = '';
         let extractedDB = '';
@@ -14695,10 +14919,14 @@ Please analyze what is causing this query to be slow and suggest necessary query
         return;
       }
 
+      if (activeTab) {
+        activeTab.isExecuting = true;
+        renderTabs();
+      }
       setQueryRunning(true);
 
       try {
-        const res = await apiFetch(`/api/session/${activeConnection.id}/execute`, {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/execute-stream`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -14707,41 +14935,154 @@ Please analyze what is causing this query to be slow and suggest necessary query
             challenge_input: challengeInput,
             database: currentDb,
             query_id: 'active',
-            profile: enableQueryProfiling
+            profile: enableQueryProfiling,
+            limit: 5000
           })
         });
 
-        const data = await res.json();
-        setQueryRunning(false);
-
-        if (res.status === 422 && data.blocked) {
-          // Safety Guard Triggered!
-          openSafetyModal(sql, data.inspection);
-          return;
+        if (res.status === 422) {
+          const data = await res.json();
+          setQueryRunning(false);
+          const originTab = tabs.find(t => t.id === targetTabId);
+          if (originTab) originTab.isExecuting = false;
+          renderTabs();
+          if (data.blocked) {
+            // Safety Guard Triggered!
+            openSafetyModal(sql, data.inspection);
+            return;
+          }
         }
 
         if (!res.ok) {
+          const data = await res.json().catch(() => ({ error: 'Execution failed' }));
+          setQueryRunning(false);
+          const originTab = tabs.find(t => t.id === targetTabId);
+          if (originTab) originTab.isExecuting = false;
+          renderTabs();
           const errMsg = data.error || 'Execution failed';
-          const activeTab = tabs.find(t => t.id === activeTabId);
-          if (activeTab) {
-            activeTab.rawQueryError = { sql, message: errMsg };
-            activeTab.rawQueryRows = null;
-            activeTab.rawQueryCols = null;
-            activeTab.rawQueryExec = null;
+          if (originTab) {
+            originTab.rawQueryError = { sql, message: errMsg };
+            originTab.rawQueryRows = null;
+            originTab.rawQueryCols = null;
+            originTab.rawQueryExec = null;
           }
-          renderQueryErrorBanner(sql, errMsg);
+          if (activeTabId === targetTabId) {
+            updateQueryStreamPagerUI(originTab);
+            renderQueryErrorBanner(sql, errMsg);
+          } else {
+            showToast(`Query in '${originTab?.title || 'tab'}' failed: ${errMsg}`);
+          }
           return;
+        }
+
+        const contentType = (res.headers && typeof res.headers.get === 'function' ? res.headers.get('content-type') : '') || '';
+        let data = null;
+        let doneResult = null;
+
+        if (contentType.includes('application/x-ndjson') && res.body) {
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let streamBuf = '';
+          let streamedCols = null;
+          let streamedRows = [];
+          let firstChunkPainted = false;
+          let execResult = null;
+
+          const parsed = extractSingleTableFromSQL(sql);
+          const detectedTable = parsed ? parsed.table : null;
+          const detectedDB = (parsed && parsed.database) || currentDb;
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            // ponytail: Abort stream reading immediately if originating tab was closed during streaming
+            if (!tabs.some(t => t.id === targetTabId)) {
+              try { await reader.cancel(); } catch (_) {}
+              break;
+            }
+            streamBuf += decoder.decode(value, { stream: true });
+            const lines = streamBuf.split('\n');
+            streamBuf = lines.pop();
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed) continue;
+              let item;
+              try { item = JSON.parse(trimmed); } catch (e) { continue; }
+
+              if (item.type === 'error' || item.error) {
+                const errMsg = item.error || 'Query stream error';
+                throw new Error(errMsg);
+              } else if (item.type === 'meta') {
+                streamedCols = item.columns || [];
+              } else if (item.type === 'chunk') {
+                if (Array.isArray(item.rows) && item.rows.length > 0) {
+                  if (streamedRows.length < 25000) {
+                    streamedRows.push(...item.rows);
+                  }
+                  // First micro-chunk instant paint (<50ms TTFR) - only if still viewing target tab
+                  if (!firstChunkPainted && streamedRows.length >= 20) {
+                    firstChunkPainted = true;
+                    if (activeTabId === targetTabId) {
+                      renderGridResults(streamedCols, streamedRows, null, detectedTable, detectedDB);
+                      const stats = document.getElementById('grid-result-stats');
+                      if (stats) stats.textContent = `${streamedRows.length} rows (streaming...)`;
+                    }
+                  }
+                }
+              } else if (item.type === 'exec') {
+                execResult = item;
+              } else if (item.type === 'done') {
+                doneResult = item;
+              }
+            }
+          }
+
+          if (streamedCols && !doneResult && tabs.some(t => t.id === targetTabId)) {
+            throw new Error('Query stream ended prematurely');
+          }
+
+          setQueryRunning(false);
+          const originTab = tabs.find(t => t.id === targetTabId);
+          if (originTab) originTab.isExecuting = false;
+          renderTabs();
+
+          if (streamedCols) {
+            data = {
+              type: 'query',
+              columns: streamedCols,
+              rows: streamedRows,
+              row_count: doneResult ? doneResult.row_count : streamedRows.length,
+              execution_ms: doneResult ? doneResult.execution_ms : 0,
+              tx_active: doneResult ? doneResult.tx_active : false,
+              profile: doneResult ? doneResult.profile : null
+            };
+          } else if (execResult) {
+            data = execResult;
+          } else {
+            data = doneResult || { type: 'exec', message: 'Query completed', execution_ms: 0, rows_affected: 0 };
+          }
+        } else {
+          data = await res.json();
+          setQueryRunning(false);
+          const originTab = tabs.find(t => t.id === targetTabId);
+          if (originTab) originTab.isExecuting = false;
+          renderTabs();
         }
 
         if (data.profile) {
           lastQueryProfile = data.profile;
-          const btnViewProf = document.getElementById('btn-view-profile');
-          if (btnViewProf) btnViewProf.classList.remove('hidden');
-          renderQueryProfile(data.profile);
+          if (activeTabId === targetTabId) {
+            const btnViewProf = document.getElementById('btn-view-profile');
+            if (btnViewProf) btnViewProf.classList.remove('hidden');
+            renderQueryProfile(data.profile);
+          }
         } else {
           lastQueryProfile = null;
-          const btnViewProf = document.getElementById('btn-view-profile');
-          if (btnViewProf) btnViewProf.classList.add('hidden');
+          if (activeTabId === targetTabId) {
+            const btnViewProf = document.getElementById('btn-view-profile');
+            if (btnViewProf) btnViewProf.classList.add('hidden');
+          }
         }
 
         updateTransactionStatusUI(data.tx_active);
@@ -14750,7 +15091,16 @@ Please analyze what is causing this query to be slow and suggest necessary query
           const parsed = extractSingleTableFromSQL(sql);
           const detectedTable = parsed ? parsed.table : null;
           const detectedDB = (parsed && parsed.database) || currentDb;
-          const activeTab = tabs.find(t => t.id === activeTabId);
+          const originTab = tabs.find(t => t.id === targetTabId);
+          const activeTab = originTab;
+
+          const rawCount = (data.rows && data.rows.length) || 0;
+          const hasExplicit = hasExplicitSQLLimit(activeTab?.baseStreamSQL || sql);
+          const hasMore = !hasExplicit && Boolean(
+            (doneResult && doneResult.has_more) ||
+            (!doneResult && rawCount >= 5000)
+          );
+
           if (activeTab) {
             activeTab.rawQueryRows = data.rows || [];
             activeTab.rawQueryCols = data.columns || [];
@@ -14760,9 +15110,21 @@ Please analyze what is causing this query to be slow and suggest necessary query
             activeTab.sortCol = '';
             activeTab.sortDir = '';
             activeTab.queryPage = 0;
-            activeTab.queryStats = `${data.row_count} rows (${data.execution_ms}ms)`;
             activeTab.queryTable = detectedTable;
             activeTab.queryDB = detectedDB;
+            activeTab.hasMoreStream = hasMore;
+
+            activeTab.queryStats = `${data.row_count} rows (${data.execution_ms}ms)`;
+            const curOffset = activeTab.streamBatchOffset || 0;
+            if (hasMore) {
+              const startNum = (curOffset + 1).toLocaleString();
+              const endNum = (curOffset + rawCount).toLocaleString();
+              activeTab.queryStats = curOffset > 0 ? `Rows ${startNum}–${endNum}+ (${data.execution_ms}ms)` : `5,000+ rows (${data.execution_ms}ms)`;
+            } else if (curOffset > 0) {
+              const startNum = (curOffset + 1).toLocaleString();
+              const endNum = (curOffset + rawCount).toLocaleString();
+              activeTab.queryStats = `Rows ${startNum}–${endNum} (${data.execution_ms}ms)`;
+            }
           }
           if (detectedDB && activeConnection && (typeof multiDBCatalogCache === 'object') && !multiDBCatalogCache[detectedDB.toLowerCase()]) {
             apiFetch(`/api/session/${activeConnection.id}/schema?db=${encodeURIComponent(detectedDB)}`)
@@ -14770,32 +15132,58 @@ Please analyze what is causing this query to be slow and suggest necessary query
               .then(s => { if (s && multiDBCatalogCache) multiDBCatalogCache[detectedDB.toLowerCase()] = s; })
               .catch(() => {});
           }
-          selectedRowIndices.clear();
-          updateSelectedRowsUI();
-          window.lastFailedQuery = null;
-          window.lastFailedError = null;
-          renderGridResults(data.columns, data.rows, null, detectedTable, detectedDB);
-          document.getElementById('grid-result-stats').textContent = `${data.row_count} rows (${data.execution_ms}ms)`;
+
+          if (activeTabId === targetTabId) {
+            selectedRowIndices.clear();
+            updateSelectedRowsUI();
+            window.lastFailedQuery = null;
+            window.lastFailedError = null;
+            renderGridResults(data.columns, data.rows, null, detectedTable, detectedDB);
+            const statsEl = document.getElementById('grid-result-stats');
+            if (statsEl && originTab) {
+              statsEl.textContent = originTab.queryStats;
+              if (hasMore) {
+                statsEl.classList.add('text-amber-400', 'font-medium');
+              } else {
+                statsEl.classList.remove('text-amber-400', 'font-medium');
+              }
+            }
+            updateQueryStreamPagerUI(originTab);
+          } else {
+            const originTab = tabs.find(t => t.id === targetTabId);
+            if (originTab) {
+              showToast(`Query in '${originTab.title || 'tab'}' completed (${data.row_count} rows)`);
+            }
+          }
+
           if (/^\s*(CREATE|ALTER|DROP|RENAME)\b/i.test(sql) && activeConnection) {
             await refreshSchema();
           }
         } else {
-          const activeTab = tabs.find(t => t.id === activeTabId);
-          if (activeTab) {
-            activeTab.rawQueryRows = null;
-            activeTab.rawQueryCols = null;
-            activeTab.rawQueryError = null;
-            activeTab.rawQueryExec = {
+          const originTab = tabs.find(t => t.id === targetTabId);
+          if (originTab) {
+            originTab.rawQueryRows = null;
+            originTab.rawQueryCols = null;
+            originTab.rawQueryError = null;
+            originTab.hasMoreStream = false;
+            originTab.streamBatchOffset = 0;
+            originTab.rawQueryExec = {
               sql: sql,
               message: data.message,
               executionMs: data.execution_ms,
               rowsAffected: data.rows_affected,
               backupFile: data.backup_file
             };
-            activeTab.queryStats = `${data.message} (${data.execution_ms}ms)`;
+            originTab.queryStats = `${data.message} (${data.execution_ms}ms)`;
           }
-          renderQuerySuccessBanner(sql, data.message, data.execution_ms, data.rows_affected, data.backup_file);
-          document.getElementById('grid-result-stats').textContent = `${data.message} (${data.execution_ms}ms)`;
+          if (activeTabId === targetTabId) {
+            updateQueryStreamPagerUI(originTab);
+            renderQuerySuccessBanner(sql, data.message, data.execution_ms, data.rows_affected, data.backup_file);
+            const statsEl = document.getElementById('grid-result-stats');
+            if (statsEl && originTab) statsEl.textContent = originTab.queryStats;
+          } else if (originTab) {
+            showToast(`Query in '${originTab.title || 'tab'}' completed: ${data.message}`);
+          }
           if (data.backup_file) {
             showNativeAlert(`Query succeeded!\nAutomated Backup Snapshot created at:\n${data.backup_file}`, 'Safety Guard Backup');
           }
@@ -14809,14 +15197,21 @@ Please analyze what is causing this query to be slow and suggest necessary query
         }
       } catch (err) {
         setQueryRunning(false);
-        const activeTab = tabs.find(t => t.id === activeTabId);
-        if (activeTab) {
-          activeTab.rawQueryError = { sql, message: err.message };
-          activeTab.rawQueryRows = null;
-          activeTab.rawQueryCols = null;
-          activeTab.rawQueryExec = null;
+        const originTab = tabs.find(t => t.id === targetTabId);
+        if (originTab) originTab.isExecuting = false;
+        renderTabs();
+        if (originTab) {
+          originTab.rawQueryError = { sql, message: err.message };
+          originTab.rawQueryRows = null;
+          originTab.rawQueryCols = null;
+          originTab.rawQueryExec = null;
         }
-        renderQueryErrorBanner(sql, err.message);
+        if (activeTabId === targetTabId) {
+          updateQueryStreamPagerUI(originTab);
+          renderQueryErrorBanner(sql, err.message);
+        } else if (originTab) {
+          showToast(`Query in '${originTab.title || 'tab'}' failed: ${err.message}`);
+        }
         const drawer = document.getElementById('audit-drawer');
         if (drawer && !drawer.classList.contains('hidden')) {
           setTimeout(loadAuditLogs, 150);
@@ -14829,6 +15224,10 @@ Please analyze what is causing this query to be slow and suggest necessary query
       currentResults = [];
       activeGridTable = null;
       activeGridPKCol = null;
+      activeGridSelectedRow = null;
+      activeGridSelectedCol = null;
+      activeGridSelectedTd = null;
+      if (typeof closeCellDetailDrawer === 'function') closeCellDetailDrawer();
       selectedRowIndices.clear();
       updateSelectedRowsUI();
       const table = document.getElementById('results-table');
@@ -15123,6 +15522,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
         body: JSON.stringify({ query_id: 'active' })
       });
       setQueryRunning(false);
+      tabs.forEach(t => { t.isExecuting = false; });
+      renderTabs();
     }
 
     // --- Safety Challenge Modal (ADR 0055 Target Database Affirmation) ---
@@ -16056,6 +16457,25 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
     }
 
+    // ponytail: Grid toolbar mode-switching between Table Viewer and Query Result modes
+    function syncGridToolbarMode() {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const isTableViewer = Boolean(activeTab && activeTab.isTableViewer);
+
+      const btnAddRow = document.getElementById('btn-grid-add-row');
+      const btnMockData = document.getElementById('btn-mock-data');
+      const btnImportCSV = document.getElementById('btn-import-csv');
+      const editModeContainer = document.getElementById('grid-edit-mode-container');
+      const tableDumpBtn = document.getElementById('export-menu-table-dump');
+
+      if (btnAddRow) btnAddRow.classList.toggle('hidden', !isTableViewer);
+      if (btnMockData) btnMockData.classList.toggle('hidden', !isTableViewer);
+      if (btnImportCSV) btnImportCSV.classList.toggle('hidden', !isTableViewer);
+      if (editModeContainer) editModeContainer.classList.toggle('hidden', !isTableViewer);
+      if (tableDumpBtn) tableDumpBtn.classList.toggle('hidden', !isTableViewer);
+      updateSelectedRowsUI();
+    }
+
     // --- TablePlus-Style Inline Filter Bar & Pushdown ---
     function setFilterBarMode(mode) {
       const activeTab = tabs.find(t => t.id === activeTabId);
@@ -16626,6 +17046,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
       if (!activeConnection) return;
       try {
         const activeTab = tabs.find(t => t.id === activeTabId);
+        const requestingTabId = activeTab ? activeTab.id : activeTabId;
         // ponytail: Prioritize targetDb and activeGridDB over fallback schemaCatalogCache so cross-database tables load from their own schema.
         const dbName = targetDb || (activeTab && activeTab.isTableViewer && activeTab.database) || activeGridDB || (activeTab && activeTab.database) || (schemaCatalogCache && schemaCatalogCache.database_name) || '';
         activeGridTable = tableName;
@@ -16649,6 +17070,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
         if (sortCol) url += `&sort=${encodeURIComponent(sortCol)}&dir=${encodeURIComponent(sortDir || 'ASC')}`;
 
         const res = await apiFetch(url);
+        if (activeTabId !== requestingTabId) return;
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
           console.error('Failed to load rows:', errData);
@@ -16660,6 +17082,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
           return;
         }
         const data = await res.json();
+        if (activeTabId !== requestingTabId) return;
         renderGridResults(data.columns, data.rows, data.pk_col, tableName);
       } catch (err) {
         console.error('Failed to load rows:', err);
@@ -16932,6 +17355,239 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
     }
 
+    // --- Persistent Cell Detail Drawer (ADR 0058) ---
+    let isCellDrawerOpen = false;
+
+    function openCellDetailDrawer(colName, colType, rowIndex, rawVal) {
+      const drawer = document.getElementById('cell-detail-drawer');
+      if (!drawer) return;
+      drawer.classList.remove('hidden');
+      isCellDrawerOpen = true;
+
+      const colEl = document.getElementById('cell-drawer-col');
+      const typeEl = document.getElementById('cell-drawer-type');
+      const rowEl = document.getElementById('cell-drawer-row');
+      const contentEl = document.getElementById('cell-drawer-content');
+
+      if (colEl) colEl.textContent = colName || 'Column';
+      if (typeEl) typeEl.textContent = colType || 'text';
+      if (rowEl) rowEl.textContent = `Row #${rowIndex + 1}`;
+      if (contentEl) {
+        if (rawVal === null || rawVal === undefined) {
+          contentEl.textContent = 'NULL';
+          contentEl.classList.add('italic', 'text-amber-400');
+        } else {
+          contentEl.classList.remove('italic', 'text-amber-400');
+          if (typeof rawVal === 'object') {
+            try {
+              contentEl.textContent = JSON.stringify(rawVal, null, 2);
+            } catch (e) {
+              contentEl.textContent = String(rawVal);
+            }
+          } else {
+            contentEl.textContent = String(rawVal);
+          }
+        }
+      }
+    }
+
+    function syncCellDetailDrawer(td, rIdx, cIdx) {
+      if (!isCellDrawerOpen) return;
+      const col = currentColumns[cIdx];
+      const colName = col ? col.name : `Col ${cIdx}`;
+      const colType = col ? col.type : 'text';
+      let rawVal = null;
+      if (currentResults && currentResults[rIdx] && currentResults[rIdx][cIdx] !== undefined) {
+        rawVal = currentResults[rIdx][cIdx];
+      } else if (td) {
+        if (td.dataset.isNull === 'true') {
+          rawVal = null;
+        } else if (td.dataset.rawVal !== undefined) {
+          rawVal = td.dataset.rawVal;
+        } else {
+          rawVal = td.textContent;
+        }
+      }
+      openCellDetailDrawer(colName, colType, rIdx, rawVal);
+    }
+
+    function closeCellDetailDrawer() {
+      const drawer = document.getElementById('cell-detail-drawer');
+      if (drawer) drawer.classList.add('hidden');
+      isCellDrawerOpen = false;
+    }
+
+    function toggleCellDetailDrawer() {
+      if (isCellDrawerOpen) {
+        closeCellDetailDrawer();
+      } else {
+        if (activeGridSelectedTd && activeGridSelectedRow !== null && activeGridSelectedCol !== null) {
+          isCellDrawerOpen = true;
+          syncCellDetailDrawer(activeGridSelectedTd, activeGridSelectedRow, activeGridSelectedCol);
+        } else {
+          openCellDetailDrawer('No cell selected', '', 0, 'Select any table cell to inspect full content');
+        }
+      }
+    }
+
+    function formatCellDrawerJSON() {
+      const contentEl = document.getElementById('cell-drawer-content');
+      if (!contentEl) return;
+      try {
+        const parsed = JSON.parse(contentEl.textContent);
+        contentEl.textContent = JSON.stringify(parsed, null, 2);
+        showToast('JSON formatted');
+      } catch (e) {
+        showToast('Cell content is not valid JSON');
+      }
+    }
+
+    function copyCellDrawerContent() {
+      const contentEl = document.getElementById('cell-drawer-content');
+      if (!contentEl) return;
+      navigator.clipboard.writeText(contentEl.textContent)
+        .then(() => showToast('Cell content copied to clipboard'))
+        .catch(() => showToast('Failed to copy'));
+    }
+
+    // --- Virtual Data Grid Windowing Engine (ADR 0058) ---
+    const VIRTUAL_ROW_HEIGHT = 32;
+    let virtualGridRows = [];
+    let virtualGridCols = [];
+    let virtualGridPKCol = null;
+    let virtualGridTable = null;
+    let virtualGridDB = null;
+    let virtualGridHasCheckbox = false;
+    let virtualGridFkMap = null;
+    let virtualGridColMetaMap = null;
+    let isVirtualGridActive = false;
+    let virtualGridStartIdx = 0;
+
+    function renderVirtualWindow() {
+      const wrapper = document.getElementById('virtual-grid-wrapper');
+      const tbody = document.getElementById('grid-tbody');
+      if (!wrapper || !tbody || !isVirtualGridActive) return;
+
+      const totalRows = virtualGridRows.length;
+      if (totalRows === 0) return;
+
+      // ponytail: Auto-commit in-flight inline edit on scroll to prevent data loss
+      if (activeEditCell) {
+        commitInlineEdit(activeEditCell, true);
+      }
+
+      const scrollTop = wrapper.scrollTop;
+      const clientHeight = wrapper.clientHeight || 500;
+
+      const buffer = 5;
+      const startIndex = Math.max(0, Math.floor(scrollTop / VIRTUAL_ROW_HEIGHT) - buffer);
+      const visibleCount = Math.ceil(clientHeight / VIRTUAL_ROW_HEIGHT) + (buffer * 2);
+      const endIndex = Math.min(totalRows, startIndex + visibleCount);
+
+      const topPadding = startIndex * VIRTUAL_ROW_HEIGHT;
+      const bottomPadding = Math.max(0, (totalRows - endIndex) * VIRTUAL_ROW_HEIGHT);
+
+      const slice = virtualGridRows.slice(startIndex, endIndex);
+      const visibleColsCount = virtualGridCols.filter(c => !isColumnHidden(c?.name, virtualGridTable)).length;
+      const colSpan = virtualGridHasCheckbox ? visibleColsCount + 1 : visibleColsCount;
+
+      let html = '';
+      if (topPadding > 0) {
+        html += `<tr style="height: ${topPadding}px; pointer-events: none;"><td colspan="${colSpan}" style="padding:0; border:0; height:${topPadding}px;"></td></tr>`;
+      }
+
+      html += slice.map((row, pIdx) => {
+        const rIdx = (virtualGridStartIdx || 0) + startIndex + pIdx;
+        const isSelected = selectedRowIndices.has(rIdx);
+        let checkboxCell = '';
+        if (virtualGridHasCheckbox) {
+          checkboxCell = `<td class="p-1.5 w-8 text-center border-r border-slate-800/40"><input type="checkbox" class="grid-row-checkbox accent-sky-500 w-3.5 h-3.5 cursor-pointer" data-row="${rIdx}" ${isSelected ? 'checked' : ''} onchange="toggleSelectRow(${rIdx}, this.checked)"></td>`;
+        }
+        return `
+        <tr class="h-8 hover:bg-slate-800/40 transition ${isSelected ? 'bg-sky-950/20' : ''}" oncontextmenu="openGridContextMenu(event, ${rIdx})">
+          ${checkboxCell}
+          ${row.map((val, cIdx) => {
+            if (isColumnHidden(virtualGridCols[cIdx]?.name, virtualGridTable)) return '';
+            const stagedKey = `${virtualGridTable || ''}:${rIdx}:${cIdx}`;
+            const staged = stagedEdits.get(stagedKey);
+            const rawVal = staged ? staged.newVal : val;
+            const isDirty = Boolean(staged);
+            const isNullVal = rawVal === null || rawVal === undefined;
+            const rawValStr = isNullVal ? '' : (typeof rawVal === 'object' ? JSON.stringify(rawVal) : String(rawVal));
+            const colName = virtualGridCols[cIdx]?.name;
+            const colType = virtualGridCols[cIdx]?.type;
+            const colMeta = colName ? (virtualGridColMetaMap ? virtualGridColMetaMap.get(colName.toLowerCase()) : null) : null;
+            const resolvedType = colMeta?.type || colType;
+            const displayVal = formatGridCellValue(rawVal, resolvedType);
+            let typeStyle = getGridTypeStyle(colType);
+            if (colMeta?.type) typeStyle = getGridTypeStyle(colMeta.type);
+            const fkInfo = virtualGridFkMap ? virtualGridFkMap.get(colName) : null;
+            let fkBadge = '';
+            if (fkInfo && displayVal !== null && displayVal !== '') {
+              fkBadge = `<button type="button" data-table="${escapeHtml(virtualGridTable || '')}" data-col="${escapeHtml(colName)}" data-reftable="${escapeHtml(fkInfo.referenced_table)}" data-refcol="${escapeHtml(fkInfo.referenced_column)}" data-val="${escapeHtml(String(displayVal))}" onclick="event.stopPropagation(); peekForeignKey(event, this.dataset.table, this.dataset.col, this.dataset.reftable, this.dataset.refcol, this.dataset.val)" class="ml-1 opacity-0 group-hover:opacity-100 hover:text-sky-300 text-sky-400 font-bold transition text-xs" title="Peek referenced record">🔗</button>`;
+            }
+            const isJson = displayVal !== null && typeof displayVal === 'string' && (typeStyle.category === 'json' || (displayVal.trim().startsWith('{') && displayVal.trim().endsWith('}')) || (displayVal.trim().startsWith('[') && displayVal.trim().endsWith(']')));
+            let jsonBadge = '';
+            if (isJson) {
+              jsonBadge = `<button type="button" onclick="event.stopPropagation(); openJsonCellModal(${rIdx}, ${cIdx})" class="ml-1 opacity-0 group-hover:opacity-100 hover:text-amber-300 text-amber-400 font-mono font-bold transition text-xs" title="Open JSON Cell Viewer">{ }</button>`;
+            }
+            const isCellSelected = rIdx === activeGridSelectedRow && cIdx === activeGridSelectedCol;
+            let cellClass = isDirty
+              ? `p-1 px-3 border border-amber-600/60 bg-amber-950/40 text-amber-200 ${typeStyle.align} min-w-[90px] max-w-md truncate whitespace-nowrap grid-cell group select-text cursor-default transition h-8 max-h-8`
+              : `p-1 px-3 border-r border-slate-800/40 ${typeStyle.color} ${typeStyle.align} min-w-[90px] max-w-md truncate whitespace-nowrap grid-cell group select-text cursor-default transition h-8 max-h-8`;
+            if (isCellSelected) {
+              cellClass += ' cell-selected ring-1 ring-sky-400 bg-sky-950/20';
+            }
+            return `
+              <td class="${cellClass}"
+                  data-row="${rIdx}" data-col="${cIdx}"
+                  data-pk="${escapeHtml(virtualGridPKCol || '')}" data-table="${escapeHtml(virtualGridTable || '')}"
+                  data-is-null="${isNullVal ? 'true' : 'false'}"
+                  data-raw-val="${escapeHtml(rawValStr)}"
+                  onclick="selectGridCell(this, ${rIdx}, ${cIdx})"
+                  ondblclick="startInlineEdit(this, ${rIdx}, ${cIdx}, this.dataset.pk, this.dataset.table)">
+                <span class="cell-val">${displayVal === null ? '<span class="text-slate-500 italic">NULL</span>' : escapeHtml(String(displayVal))}</span>
+                ${fkBadge}
+                ${jsonBadge}
+              </td>
+            `;
+          }).join('')}
+        </tr>
+        `;
+      }).join('');
+
+      if (bottomPadding > 0) {
+        html += `<tr style="height: ${bottomPadding}px; pointer-events: none;"><td colspan="${colSpan}" style="padding:0; border:0; height:${bottomPadding}px;"></td></tr>`;
+      }
+
+      tbody.innerHTML = html;
+
+      // ponytail: Re-bind activeGridSelectedTd if selected cell is in recycled viewport, otherwise nullify to avoid retaining detached DOM node
+      if (activeGridSelectedRow !== null && activeGridSelectedCol !== null) {
+        const selectedTd = tbody.querySelector(`td[data-row="${activeGridSelectedRow}"][data-col="${activeGridSelectedCol}"]`);
+        activeGridSelectedTd = selectedTd || null;
+      } else {
+        activeGridSelectedTd = null;
+      }
+    }
+
+    function initVirtualGridScroll() {
+      const wrapper = document.getElementById('virtual-grid-wrapper');
+      if (wrapper && !wrapper.dataset.virtualScrollBound) {
+        wrapper.dataset.virtualScrollBound = 'true';
+        let ticking = false;
+        wrapper.addEventListener('scroll', () => {
+          if (isVirtualGridActive && !ticking) {
+            ticking = true;
+            window.requestAnimationFrame(() => {
+              renderVirtualWindow();
+              ticking = false;
+            });
+          }
+        }, { passive: true });
+      }
+    }
+
     function renderGridResults(cols, rows, pkCol = null, tableName = null, databaseName = null, isFilterPass = false) {
       currentColumns = cols || [];
       currentResults = rows || [];
@@ -16966,6 +17622,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
       updateGridEditModeUI();
       updateStagedEditsUI();
       updateSelectedRowsUI();
+      syncGridToolbarMode();
 
       if (!cols || cols.length === 0) {
         const table = document.getElementById('results-table');
@@ -17124,6 +17781,25 @@ Please analyze what is causing this query to be slow and suggest necessary query
         if (c && c.name) colMetaMap.set(c.name.toLowerCase(), c);
       });
 
+      // Activate Virtual Data Grid Windowing Engine for datasets > 50 rows (ADR 0058)
+      if (pagedRows.length > 50 && stagedDraftRows.length === 0) {
+        isVirtualGridActive = true;
+        virtualGridRows = pagedRows;
+        virtualGridCols = cols;
+        virtualGridPKCol = pkCol;
+        virtualGridTable = tableName;
+        virtualGridDB = activeGridDB;
+        virtualGridHasCheckbox = hasCheckbox;
+        virtualGridFkMap = fkMap;
+        virtualGridColMetaMap = colMetaMap;
+        virtualGridStartIdx = isPagedQuery ? startIdx : 0;
+        initVirtualGridScroll();
+        renderVirtualWindow();
+        return;
+      }
+      isVirtualGridActive = false;
+      virtualGridStartIdx = 0;
+
       tbody.innerHTML = draftRowsHTML + pagedRows.map((row, pIdx) => {
         const rIdx = isPagedQuery ? (startIdx + pIdx) : pIdx;
         const isSelected = selectedRowIndices.has(rIdx);
@@ -17194,6 +17870,72 @@ Please analyze what is causing this query to be slow and suggest necessary query
         if (el !== td) el.classList.remove('cell-selected', 'ring-1', 'ring-sky-400', 'bg-sky-950/20');
       });
       td.classList.add('cell-selected', 'ring-1', 'ring-sky-400', 'bg-sky-950/20');
+      syncCellDetailDrawer(td, rIdx, cIdx);
+    }
+
+    // ponytail: Keyboard arrow navigation across data grid cells live-synced with Cell Detail Drawer (ADR 0058)
+    function navigateGridCellByArrow(key) {
+      if (activeGridSelectedRow === null || activeGridSelectedCol === null) return;
+      const totalRows = (currentResults && currentResults.length) || 0;
+      if (totalRows === 0) return;
+
+      const cols = currentColumns || [];
+      const visibleColIndices = [];
+      cols.forEach((c, idx) => {
+        if (!isColumnHidden(c.name, activeGridTable)) {
+          visibleColIndices.push(idx);
+        }
+      });
+      if (visibleColIndices.length === 0) return;
+
+      let newRow = activeGridSelectedRow;
+      let newCol = activeGridSelectedCol;
+
+      const currentVisIdx = visibleColIndices.indexOf(activeGridSelectedCol);
+      const safeVisIdx = currentVisIdx >= 0 ? currentVisIdx : 0;
+
+      if (key === 'ArrowUp') {
+        newRow = Math.max(0, activeGridSelectedRow - 1);
+      } else if (key === 'ArrowDown') {
+        newRow = Math.min(totalRows - 1, activeGridSelectedRow + 1);
+      } else if (key === 'ArrowLeft') {
+        if (safeVisIdx > 0) {
+          newCol = visibleColIndices[safeVisIdx - 1];
+        }
+      } else if (key === 'ArrowRight') {
+        if (safeVisIdx < visibleColIndices.length - 1) {
+          newCol = visibleColIndices[safeVisIdx + 1];
+        }
+      }
+
+      if (newRow === activeGridSelectedRow && newCol === activeGridSelectedCol) return;
+
+      activeGridSelectedRow = newRow;
+      activeGridSelectedCol = newCol;
+
+      const wrapper = document.getElementById('virtual-grid-wrapper');
+      if (isVirtualGridActive && wrapper) {
+        const targetTop = (newRow - (virtualGridStartIdx || 0)) * VIRTUAL_ROW_HEIGHT;
+        const currentScroll = wrapper.scrollTop;
+        const clientHeight = wrapper.clientHeight || 500;
+        if (targetTop < currentScroll) {
+          wrapper.scrollTop = targetTop;
+        } else if (targetTop + VIRTUAL_ROW_HEIGHT > currentScroll + clientHeight) {
+          wrapper.scrollTop = targetTop + VIRTUAL_ROW_HEIGHT - clientHeight;
+        }
+        renderVirtualWindow();
+      }
+
+      const tbody = document.getElementById('grid-tbody');
+      const targetTd = tbody ? tbody.querySelector(`td[data-row="${newRow}"][data-col="${newCol}"]`) : null;
+      if (targetTd) {
+        selectGridCell(targetTd, newRow, newCol);
+        if (typeof targetTd.scrollIntoView === 'function') {
+          targetTd.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        }
+      } else {
+        syncCellDetailDrawer(null, newRow, newCol);
+      }
     }
 
     // ponytail: heuristic data type categorization for data grid syntax coloring and alignment.
@@ -17569,6 +18311,11 @@ Please analyze what is causing this query to be slow and suggest necessary query
         }
       }
 
+      if (activeTab && !activeTab.isTableViewer && !pkCol) {
+        showNativeAlert(`Inline editing in query results requires a Primary Key on table '${tableName}'.`, 'Edit Cell');
+        return;
+      }
+
       const col = currentColumns[cIdx];
       const pkIdx = pkCol ? currentColumns.findIndex(c => (c.name || '').toLowerCase() === pkCol.toLowerCase()) : -1;
       const pkVal = pkIdx !== -1 ? currentResults[rIdx][pkIdx] : null;
@@ -17675,6 +18422,11 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
       if (!tableName) {
         showNativeAlert('Inline editing is only available for single-table queries. Specify a table to edit.', 'Edit Cell');
+        return;
+      }
+
+      if (activeTab && !activeTab.isTableViewer && !pkCol) {
+        showNativeAlert(`Inline editing in query results requires a Primary Key on table '${tableName}'.`, 'Edit Cell');
         return;
       }
 
@@ -18556,6 +19308,13 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const menu = document.getElementById('grid-context-menu');
       if (!menu) return;
 
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const isTableViewer = Boolean(activeTab && activeTab.isTableViewer);
+      const ctxMutations = document.getElementById('grid-ctx-table-mutations');
+      if (ctxMutations) {
+        ctxMutations.classList.toggle('hidden', !isTableViewer);
+      }
+
       const filterSec = document.getElementById('grid-ctx-filter-section');
       const filterColLabel = document.getElementById('grid-ctx-filter-colname');
       const filterOpts = document.getElementById('grid-ctx-filter-options');
@@ -18566,7 +19325,6 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
       if (cIdx >= 0 && currentColumns[cIdx]) {
         const col = currentColumns[cIdx];
-        const activeTab = tabs.find(t => t.id === activeTabId);
         const targetCatalog = (activeGridDB && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeGridDB.toLowerCase()]) || (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
         const tableMeta = (targetCatalog?.tables || []).find(t => (t.name || '').toLowerCase() === (activeGridTable || '').toLowerCase());
         const colMeta = (tableMeta?.columns || []).find(c => (c.name || '').toLowerCase() === (col?.name || '').toLowerCase());
@@ -18575,63 +19333,87 @@ Please analyze what is causing this query to be slow and suggest necessary query
         const fkInfo = (tableMeta?.foreign_keys || []).find(fk => (fk.column || '').toLowerCase() === (col?.name || '').toLowerCase());
 
         if (filterSec && filterOpts) {
-          filterSec.classList.remove('hidden');
-          if (filterColLabel) filterColLabel.textContent = `(${col.name})`;
-          
-          const tableName = activeGridTable || (activeTab && activeTab.tableName) || '';
-          const stagedKey = `${tableName || ''}:${rIdx}:${cIdx}`;
-          const staged = (typeof stagedEdits !== 'undefined' && stagedEdits) ? stagedEdits.get(stagedKey) : null;
-          const currentVal = staged ? staged.newVal : (currentResults[rIdx] ? currentResults[rIdx][cIdx] : null);
-          const typeCategory = getGridTypeCategory(rawType);
-
-          if (currentVal === null || currentVal === undefined) {
-            filterOpts.innerHTML = `
-              <button data-col="${escapeHtml(col.name)}" onclick="applyQuickFilterFromCell(this.dataset.col, 'IS NULL', '')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-sky-300 hover:text-white transition">
-                <span class="font-mono">∅ Filter IS NULL</span>
-              </button>
-              <button data-col="${escapeHtml(col.name)}" onclick="applyQuickFilterFromCell(this.dataset.col, 'IS NOT NULL', '')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-300 hover:text-white transition">
-                <span class="font-mono">✓ Filter IS NOT NULL</span>
-              </button>
-            `;
+          if (!isTableViewer) {
+            filterSec.classList.add('hidden');
           } else {
-            const valStr = String(currentVal);
-            const displayStr = valStr.length > 20 ? valStr.substring(0, 18) + '…' : valStr;
-            let rangeButtons = '';
-            if (typeCategory === 'numeric' || typeCategory === 'temporal') {
-              rangeButtons = `
-                <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '>', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-slate-300 hover:text-white transition">
-                  <span class="font-mono text-emerald-400">&gt;</span><span class="truncate font-mono">${escapeHtml(col.name)} &gt; '${escapeHtml(displayStr)}'</span>
+            filterSec.classList.remove('hidden');
+            if (filterColLabel) filterColLabel.textContent = `(${col.name})`;
+            
+            const tableName = activeGridTable || (activeTab && activeTab.tableName) || '';
+            const stagedKey = `${tableName || ''}:${rIdx}:${cIdx}`;
+            const staged = (typeof stagedEdits !== 'undefined' && stagedEdits) ? stagedEdits.get(stagedKey) : null;
+            const currentVal = staged ? staged.newVal : (currentResults[rIdx] ? currentResults[rIdx][cIdx] : null);
+            const typeCategory = getGridTypeCategory(rawType);
+
+            if (currentVal === null || currentVal === undefined) {
+              filterOpts.innerHTML = `
+                <button data-col="${escapeHtml(col.name)}" onclick="applyQuickFilterFromCell(this.dataset.col, 'IS NULL', '')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-sky-300 hover:text-white transition">
+                  <span class="font-mono">∅ Filter IS NULL</span>
                 </button>
-                <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '<', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-slate-300 hover:text-white transition">
-                  <span class="font-mono text-emerald-400">&lt;</span><span class="truncate font-mono">${escapeHtml(col.name)} &lt; '${escapeHtml(displayStr)}'</span>
-                </button>
-              `;
-            }
-            let likeButton = '';
-            if (typeCategory === 'text') {
-              likeButton = `
-                <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, 'LIKE', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-purple-300 hover:text-white transition">
-                  <span class="font-mono text-purple-400">*</span><span class="truncate font-mono">${escapeHtml(col.name)} LIKE '%${escapeHtml(displayStr)}%'</span>
+                <button data-col="${escapeHtml(col.name)}" onclick="applyQuickFilterFromCell(this.dataset.col, 'IS NOT NULL', '')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-300 hover:text-white transition">
+                  <span class="font-mono">✓ Filter IS NOT NULL</span>
                 </button>
               `;
+            } else {
+              const valStr = String(currentVal);
+              const displayStr = valStr.length > 20 ? valStr.substring(0, 18) + '…' : valStr;
+              let rangeButtons = '';
+              if (typeCategory === 'numeric' || typeCategory === 'temporal') {
+                rangeButtons = `
+                  <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '>', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-slate-300 hover:text-white transition">
+                    <span class="font-mono text-emerald-400">&gt;</span><span class="truncate font-mono">${escapeHtml(col.name)} &gt; '${escapeHtml(displayStr)}'</span>
+                  </button>
+                  <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '<', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-slate-300 hover:text-white transition">
+                    <span class="font-mono text-emerald-400">&lt;</span><span class="truncate font-mono">${escapeHtml(col.name)} &lt; '${escapeHtml(displayStr)}'</span>
+                  </button>
+                `;
+              }
+              let likeButton = '';
+              if (typeCategory === 'text') {
+                likeButton = `
+                  <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, 'LIKE', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-purple-300 hover:text-white transition">
+                    <span class="font-mono text-purple-400">*</span><span class="truncate font-mono">${escapeHtml(col.name)} LIKE '%${escapeHtml(displayStr)}%'</span>
+                  </button>
+                `;
+              }
+              filterOpts.innerHTML = `
+                <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '=', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-sky-300 hover:text-white transition">
+                  <span class="font-mono text-sky-400">=</span><span class="truncate font-mono">${escapeHtml(col.name)} = '${escapeHtml(displayStr)}'</span>
+                </button>
+                <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '!=', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-rose-300 hover:text-white transition">
+                  <span class="font-mono text-rose-400">!=</span><span class="truncate font-mono">${escapeHtml(col.name)} != '${escapeHtml(displayStr)}'</span>
+                </button>
+                ${rangeButtons}
+                ${likeButton}
+              `;
             }
-            filterOpts.innerHTML = `
-              <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '=', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-sky-300 hover:text-white transition">
-                <span class="font-mono text-sky-400">=</span><span class="truncate font-mono">${escapeHtml(col.name)} = '${escapeHtml(displayStr)}'</span>
-              </button>
-              <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '!=', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-rose-300 hover:text-white transition">
-                <span class="font-mono text-rose-400">!=</span><span class="truncate font-mono">${escapeHtml(col.name)} != '${escapeHtml(displayStr)}'</span>
-              </button>
-              ${rangeButtons}
-              ${likeButton}
-            `;
           }
         }
 
-        if (insertSec) insertSec.classList.remove('hidden');
+        let canEditCell = isTableViewer;
+        if (!canEditCell) {
+          let tName = activeGridTable || (activeTab && activeTab.tableName) || '';
+          if (!tName) {
+            const sql = (activeTab && activeTab.sql) || getEditorSQL();
+            const parsed = extractSingleTableFromSQL(sql);
+            if (parsed && parsed.table) tName = parsed.table;
+          }
+          let pkName = activeGridPKCol;
+          if (!pkName && tName) {
+            const tCatalog = (activeGridDB && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeGridDB.toLowerCase()]) || (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
+            const tMeta = (tCatalog?.tables || []).find(t => (t.name || '').toLowerCase() === tName.toLowerCase());
+            if (tMeta && Array.isArray(tMeta.columns)) {
+              const pks = tMeta.columns.filter(c => c.is_primary_key);
+              if (pks.length === 1) pkName = pks[0].name;
+            }
+          }
+          canEditCell = Boolean(tName) && Boolean(pkName);
+        }
+
+        if (insertSec) insertSec.classList.toggle('hidden', !canEditCell);
         if (colLabel) colLabel.textContent = `(${col.name})`;
-        if (btnEdit) btnEdit.classList.remove('hidden');
-        if (btnJson) btnJson.classList.remove('hidden');
+        if (btnEdit) btnEdit.classList.toggle('hidden', !canEditCell);
+        if (btnJson) btnJson.classList.toggle('hidden', !canEditCell);
 
         const optsContainer = document.getElementById('grid-ctx-insert-options');
         if (optsContainer) {
@@ -23707,6 +24489,11 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
 
       if (activeGridSelectedTd && activeGridSelectedRow !== null && activeGridSelectedCol !== null) {
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+          e.preventDefault();
+          navigateGridCellByArrow(e.key);
+          return;
+        }
         if (e.ctrlKey && e.shiftKey && (e.key === 'N' || e.key === 'n')) {
           e.preventDefault();
           insertGridCellValue(null);

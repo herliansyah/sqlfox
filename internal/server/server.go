@@ -186,6 +186,8 @@ func (s *Server) routes() {
 			s.handleAdviseQuery(w, r)
 		case "execute":
 			s.handleExecuteQuery(w, r)
+		case "execute-stream":
+			s.handleExecuteStream(w, r)
 		case "cancel":
 			s.handleCancelQuery(w, r)
 		case "kill":
@@ -224,6 +226,10 @@ func (s *Server) routes() {
 	if s.assets != nil {
 		fileServer := http.FileServer(http.FS(s.assets))
 		mux.HandleFunc("GET /", func(w http.ResponseWriter, req *http.Request) {
+			if req.URL.Path == "/ws" || strings.HasPrefix(req.URL.Path, "/ws/") {
+				http.NotFound(w, req)
+				return
+			}
 			path := strings.TrimPrefix(req.URL.Path, "/")
 			if path == "" {
 				path = "index.html"

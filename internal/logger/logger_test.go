@@ -146,6 +146,60 @@ func TestHTTPMiddleware(t *testing.T) {
 	}
 }
 
+func TestHTTPMiddleware_FlusherSupport(t *testing.T) {
+	mw := HTTPMiddleware(slog.Default())
+	var handlerFlushed bool
+	flushingRec := &mockFlusherRecorder{
+		ResponseRecorder: httptest.NewRecorder(),
+	}
+
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f, ok := w.(http.Flusher)
+		if !ok {
+			t.Errorf("expected w to implement http.Flusher, but type assertion failed")
+			return
+		}
+		f.Flush()
+		handlerFlushed = true
+	}))
+
+	req := httptest.NewRequest("POST", "/api/stream", nil)
+	handler.ServeHTTP(flushingRec, req)
+
+	if !handlerFlushed {
+		t.Errorf("handler failed to flush")
+	}
+	if flushingRec.flushes == 0 {
+		t.Errorf("underlying recorder was not flushed")
+	}
+}
+
+type mockFlusherRecorder struct {
+	*httptest.ResponseRecorder
+	flushes int
+}
+
+func (m *mockFlusherRecorder) Flush() {
+	m.flushes++
+}
+
+func TestHTTPMiddleware_ImplicitStatusOKRecorded(t *testing.T) {
+	mw := HTTPMiddleware(slog.Default())
+	rec := httptest.NewRecorder()
+
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Write without explicit WriteHeader (common in streaming / ndjson / encoders)
+		_, _ = w.Write([]byte("line1\n"))
+	}))
+
+	req := httptest.NewRequest("POST", "/api/data", nil)
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected recorder status 200, got %d", rec.Code)
+	}
+}
+
 func TestBroadcasterAndLiveStreaming(t *testing.T) {
 	b := NewBroadcaster(3)
 	ch, unsub := b.Subscribe()

@@ -1966,6 +1966,62 @@ func TestQueryResultsRowWindowingEmbedded(t *testing.T) {
 	}
 }
 
+func TestVirtualDataGridAndStreamingEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	expectedSnippets := []string{
+		// ADR 0058: Virtual Data Grid & Windowing
+		`const VIRTUAL_ROW_HEIGHT = 32;`,
+		`function renderVirtualWindow()`,
+		`function initVirtualGridScroll()`,
+		`isVirtualGridActive`,
+		// Persistent Cell Detail Drawer
+		`id="cell-detail-drawer"`,
+		`function openCellDetailDrawer`,
+		`function closeCellDetailDrawer`,
+		`function toggleCellDetailDrawer`,
+		`function syncCellDetailDrawer`,
+		`function formatCellDrawerJSON`,
+		`function copyCellDrawerContent`,
+		`function navigateGridCellByArrow`,
+		`id="btn-toggle-cell-drawer"`,
+		// Schema Tree In-Memory Index
+		`function buildSchemaTreeFastIndex`,
+		`schemaTreeFastIndex`,
+		// NDJSON Streaming Execution
+		`/api/session/${activeConnection.id}/execute-stream`,
+		`application/x-ndjson`,
+		// Query Stream 5k Batch Pager
+		`id="query-stream-pager"`,
+		`id="query-stream-batch-info"`,
+		`id="btn-stream-prev"`,
+		`id="btn-stream-next"`,
+		`id="query-stream-page-badge"`,
+		`function hasExplicitSQLLimit`,
+		`function wrapSQLWithPagination`,
+		`function updateQueryStreamPagerUI`,
+		`function loadNextStreamBatch`,
+		`function loadPreviousStreamBatch`,
+	}
+
+	for _, s := range expectedSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain %q for Virtual Data Grid (ADR 0058), but was missing", s)
+		}
+	}
+}
+
 
 
 

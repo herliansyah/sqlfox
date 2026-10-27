@@ -207,6 +207,96 @@ func (s *Server) handleExecuteQuery(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+func (s *Server) handleExecuteStream(w http.ResponseWriter, r *http.Request) {
+	connID := r.PathValue("id")
+	sess, err := s.sessionMgr.GetSession(connID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	var req ExecuteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.SQL) == "" {
+		writeError(w, http.StatusBadRequest, "sql query is required")
+		return
+	}
+
+	if _, ok := w.(http.Flusher); !ok {
+		writeError(w, http.StatusInternalServerError, "Streaming unsupported")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	// Only set streaming headers once pre-execution gate passes
+	headerWritten := false
+	writeStreamHeaders := func() {
+		if !headerWritten {
+			w.Header().Set("Content-Type", "application/x-ndjson")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
+			w.Header().Set("X-Accel-Buffering", "no")
+			headerWritten = true
+		}
+	}
+
+	// Wrapper writer that sets headers on first write if not blocked
+	sw := &streamResponseWriter{
+		ResponseWriter: w,
+		beforeWrite:    writeStreamHeaders,
+	}
+
+	resp, err := sess.ExecuteStream(ctx, req, sw, sw)
+	if err != nil {
+		if headerWritten {
+			// Stream headers already sent; error was emitted as an NDJSON line
+			return
+		}
+		if errors.Is(err, ErrReadOnlySession) {
+			writeError(w, http.StatusForbidden, err.Error())
+			return
+		}
+		if strings.HasPrefix(err.Error(), "Challenge confirmation failed") {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if resp != nil && resp.Blocked {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"blocked":    true,
+			"inspection": resp.Inspection,
+		})
+		return
+	}
+}
+
+type streamResponseWriter struct {
+	http.ResponseWriter
+	beforeWrite func()
+}
+
+func (s *streamResponseWriter) Write(p []byte) (int, error) {
+	if s.beforeWrite != nil {
+		s.beforeWrite()
+	}
+	return s.ResponseWriter.Write(p)
+}
+
+func (s *streamResponseWriter) Flush() {
+	if s.beforeWrite != nil {
+		s.beforeWrite()
+	}
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 func (s *Server) handleCancelQuery(w http.ResponseWriter, r *http.Request) {
 	connID := r.PathValue("id")
 	sess, err := s.sessionMgr.GetSession(connID)

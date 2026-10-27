@@ -333,16 +333,27 @@ func (w *statusWriter) WriteHeader(status int) {
 	w.ResponseWriter.WriteHeader(status)
 }
 
+func (w *statusWriter) Write(p []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.ResponseWriter.Write(p)
+}
+
+func (w *statusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // HTTPMiddleware logs incoming HTTP requests with credential masking and static asset filtering.
 func HTTPMiddleware(l *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
 
-			// Filter out static asset noise and streaming SSE logs endpoint
-			if path == "/api/logs/stream" || strings.HasPrefix(path, "/assets/") || strings.HasSuffix(path, ".svg") ||
-				strings.HasSuffix(path, ".ico") || strings.HasSuffix(path, ".png") ||
-				strings.HasSuffix(path, ".css") || strings.HasSuffix(path, ".js") {
+			// Filter out non-API noise (static files, external probes like /ws) and streaming SSE telemetry endpoint
+			if !strings.HasPrefix(path, "/api/") || path == "/api/logs/stream" {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -354,8 +365,8 @@ func HTTPMiddleware(l *slog.Logger) func(http.Handler) http.Handler {
 
 			durMs := time.Since(start).Milliseconds()
 
-			// Filter out repetitive background polling noise on 200 OK to keep activity log focused on real actions
-			if sw.status < 400 && (path == "/api/notes/reminders/due" || strings.HasSuffix(path, "/flight-recorder/status") || strings.HasSuffix(path, "/processlist")) {
+			// Filter out repetitive background polling noise (reminders, pings, processlist, flight recorder status)
+			if (sw.status < 400 || sw.status == http.StatusUnauthorized) && (path == "/api/notes/reminders/due" || strings.HasSuffix(path, "/ping") || strings.HasSuffix(path, "/flight-recorder/status") || strings.HasSuffix(path, "/processlist")) {
 				return
 			}
 
