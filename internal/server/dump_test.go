@@ -67,6 +67,7 @@ CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT);
 CREATE TABLE books (id INTEGER PRIMARY KEY, author_id INTEGER, title TEXT, FOREIGN KEY(author_id) REFERENCES authors(id));
 INSERT INTO authors (id, name) VALUES (1, 'Tolkien'), (2, 'Asimov');
 INSERT INTO books (id, author_id, title) VALUES (10, 1, 'The Hobbit'), (20, 2, 'Foundation');
+CREATE VIEW a_titles AS SELECT title FROM books;
 `
 	for _, stmt := range strings.Split(setupSQL, ";") {
 		stmt = strings.TrimSpace(stmt)
@@ -97,6 +98,13 @@ INSERT INTO books (id, author_id, title) VALUES (10, 1, 'The Hobbit'), (20, 2, '
 	}
 	if !strings.Contains(dumpContent, "Tolkien") || !strings.Contains(dumpContent, "The Hobbit") {
 		t.Fatalf("expected data in dump, got:\n%s", dumpContent)
+	}
+	// Views must be dropped with DROP VIEW and created after their base tables.
+	if strings.Contains(dumpContent, `DROP TABLE IF EXISTS "a_titles"`) || !strings.Contains(dumpContent, `DROP VIEW IF EXISTS "a_titles"`) {
+		t.Fatalf("expected DROP VIEW for view in dump, got:\n%s", dumpContent)
+	}
+	if strings.Index(dumpContent, `DROP VIEW IF EXISTS "a_titles"`) < strings.Index(dumpContent, `CREATE TABLE books`) {
+		t.Fatalf("expected view after base tables in dump, got:\n%s", dumpContent)
 	}
 
 	// 5. Test GET /api/session/{id}/export-smart-seed?limit=2&ddl=true

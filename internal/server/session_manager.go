@@ -1544,7 +1544,7 @@ func (s *ActiveSession) estimateAffectedRows(ctx context.Context, insp *safety.I
 		for i := range insp.StatementEstimates {
 			est := &insp.StatementEstimates[i]
 			if est.CountQuery != "" {
-				count, exact := s.runSingleCountEstimate(ctx, est.CountQuery, est.TargetDatabase)
+				count, exact := s.runSingleCountEstimate(ctx, est.CountQuery)
 				if count != nil {
 					est.EstimatedRows = count
 					est.EstimatedIsExact = exact
@@ -1561,7 +1561,7 @@ func (s *ActiveSession) estimateAffectedRows(ctx context.Context, insp *safety.I
 	}
 
 	if insp.CountQuery != "" {
-		count, exact := s.runSingleCountEstimate(ctx, insp.CountQuery, insp.TargetDatabase)
+		count, exact := s.runSingleCountEstimate(ctx, insp.CountQuery)
 		if count != nil {
 			insp.EstimatedRows = count
 			insp.EstimatedIsExact = exact
@@ -1569,16 +1569,15 @@ func (s *ActiveSession) estimateAffectedRows(ctx context.Context, insp *safety.I
 	}
 }
 
-func (s *ActiveSession) runSingleCountEstimate(ctx context.Context, countSQL, targetDB string) (*int64, bool) {
+func (s *ActiveSession) runSingleCountEstimate(ctx context.Context, countSQL string) (*int64, bool) {
 	if s.Session == nil || countSQL == "" {
 		return nil, false
 	}
 	countCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	if targetDB != "" && s.CachedSchema != nil && s.CachedSchema.DatabaseName != targetDB {
-		_ = s.Session.SelectDatabase(countCtx, targetDB)
-	}
+	// No SelectDatabase here: it would persist the session's active DB before the user confirms.
+	// Qualified statements yield qualified count queries; unqualified ones already run in req.Database.
 
 	rows, err := s.Session.QueryRaw(countCtx, countSQL)
 	if err == nil && len(rows) > 0 && len(rows[0]) > 0 {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -372,6 +373,16 @@ func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 		}
 	}
 
+	// The client private key is a secret like the password; keep values already sealed by this vault.
+	sslKey := conn.SSLKey
+	if sslKey != "" && !strings.HasPrefix(sslKey, sealedPrefix) {
+		enc, err := Encrypt([]byte(sslKey), v.key)
+		if err != nil {
+			return fmt.Errorf("failed to encrypt ssl key: %w", err)
+		}
+		sslKey = sealedPrefix + enc
+	}
+
 	useSSLInt := 0
 	if conn.UseSSL {
 		useSSLInt = 1
@@ -401,7 +412,7 @@ func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 
 	_, err = v.db.Exec(query,
 		conn.ID, conn.Name, conn.Environment, conn.Driver, conn.Host, conn.Port, conn.DatabaseName, conn.User,
-		encPass, useSSLInt, conn.SSLCA, conn.SSLCert, conn.SSLKey,
+		encPass, useSSLInt, conn.SSLCA, conn.SSLCert, sslKey,
 		conn.CreatedAt, conn.UpdatedAt,
 	)
 	return err
@@ -542,5 +553,15 @@ func (v *Vault) decryptConnection(c *ConnectionRecord) error {
 		}
 		c.Password = string(dec)
 	}
+	if strings.HasPrefix(c.SSLKey, sealedPrefix) {
+		dec, err := Decrypt(strings.TrimPrefix(c.SSLKey, sealedPrefix), v.key)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt ssl key: %w", err)
+		}
+		c.SSLKey = string(dec)
+	}
 	return nil
 }
+
+// sealedPrefix marks ssl_key values encrypted at rest; legacy plaintext rows still load unchanged.
+const sealedPrefix = "enc:v1:"

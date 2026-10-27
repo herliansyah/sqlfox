@@ -17014,13 +17014,16 @@ Please analyze what is causing this query to be slow and suggest necessary query
       if (btn) btn.textContent = 'Menghitung...';
       try {
         const tableName = activeTab.tableName;
-        const targetTable = '`' + tableName.replace(/`/g, '``') + '`';
+        const isMySQLFamily = ['mysql', 'mariadb'].includes(activeConnection.driver);
+        const targetTable = isMySQLFamily
+          ? '`' + tableName.replace(/`/g, '``') + '`'
+          : '"' + tableName.replace(/"/g, '""') + '"';
         let sql = `SELECT COUNT(*) AS total FROM ${targetTable}`;
         if (activeTab.appliedFilter) {
           sql += ` WHERE (${activeTab.appliedFilter})`;
         }
         const db = activeGridDB || activeTab.database;
-        const res = await apiFetch(`/api/session/${activeConnection.id}/query`, {
+        const res = await apiFetch(`/api/session/${activeConnection.id}/execute`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sql, database: db })
@@ -18615,8 +18618,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
         const refTable = fkInfo.referenced_table;
         const refCol = fkInfo.referenced_column;
         const targetDb = activeGridDB || (activeTab && activeTab.database) || '';
-        apiFetch(`/api/session/${activeConnection.id}/table-rows?table=${encodeURIComponent(refTable)}&database=${encodeURIComponent(targetDb)}&limit=100`)
-          .then(res => res.json())
+        apiFetch(`/api/session/${activeConnection.id}/table/${encodeURIComponent(refTable)}/rows?db=${encodeURIComponent(targetDb)}&limit=100`)
+          .then(res => res.ok ? res.json() : null)
           .then(data => {
             const dl = document.getElementById(datalistId);
             if (dl && data && Array.isArray(data.rows) && Array.isArray(data.columns)) {

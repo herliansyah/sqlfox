@@ -64,11 +64,11 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 		}
 
 		tlsName := fmt.Sprintf("custom-tls-%d", time.Now().UnixNano())
-		if err := gomysql.RegisterTLSConfig(tlsName, tlsConfig); err == nil {
-			tlsParam = tlsName
-		} else {
-			tlsParam = "skip-verify"
+		if err := gomysql.RegisterTLSConfig(tlsName, tlsConfig); err != nil {
+			// Never silently downgrade to skip-verify when the user asked for TLS.
+			return nil, fmt.Errorf("failed to register TLS config: %w", err)
 		}
+		tlsParam = tlsName
 	}
 
 	// 2. Assemble DSN (net.JoinHostPort handles IPv6 literals safely)
@@ -225,10 +225,15 @@ func (s *MySQLSession) QueryStream(ctx context.Context, querySQL string, limit i
 	return driver.NewSQLRowStream(rows, cols, cleanup), nil
 }
 
-func (s *MySQLSession) applyActiveDatabase(ctx context.Context, conn *sql.Conn) error {
+// activeDB returns the current database; SelectDatabase may change it concurrently.
+func (s *MySQLSession) activeDB() string {
 	s.mu.Lock()
-	dbName := s.cfg.DatabaseName
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	return s.cfg.DatabaseName
+}
+
+func (s *MySQLSession) applyActiveDatabase(ctx context.Context, conn *sql.Conn) error {
+	dbName := s.activeDB()
 	if dbName != "" {
 		// A failed USE must abort the statement; otherwise it runs against the conn's previous database.
 		if _, err := conn.ExecContext(ctx, fmt.Sprintf("USE `%s`", strings.ReplaceAll(dbName, "`", "``"))); err != nil {
@@ -401,7 +406,7 @@ func (s *MySQLSession) InspectSchema(ctx context.Context, dbName string) (*drive
 	}
 
 	if dbName == "" {
-		dbName = s.cfg.DatabaseName
+		dbName = s.activeDB()
 	}
 	if dbName == "" {
 		_ = s.db.QueryRowContext(ctx, "SELECT DATABASE()").Scan(&dbName)
@@ -801,13 +806,33 @@ func (s *MySQLSession) GetTableDDL(ctx context.Context, tableName string) (strin
 	var tbl, ddl string
 	escapedTbl := strings.ReplaceAll(tableName, "`", "``")
 	var query string
-	if s.cfg.DatabaseName != "" {
-		escapedDB := strings.ReplaceAll(s.cfg.DatabaseName, "`", "``")
+	if dbName := s.activeDB(); dbName != "" {
+		escapedDB := strings.ReplaceAll(dbName, "`", "``")
 		query = fmt.Sprintf("SHOW CREATE TABLE `%s`.`%s`", escapedDB, escapedTbl)
 	} else {
 		query = fmt.Sprintf("SHOW CREATE TABLE `%s`", escapedTbl)
 	}
-	if err := s.db.QueryRowContext(ctx, query).Scan(&tbl, &ddl); err != nil {
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil {
+		return "", err
+	}
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return "", err
+		}
+		return "", sql.ErrNoRows
+	}
+	// Views return 4 columns (View, Create View, character_set_client, collation_connection).
+	dest := []any{&tbl, &ddl}
+	for i := 2; i < len(cols); i++ {
+		dest = append(dest, new(sql.RawBytes))
+	}
+	if err := rows.Scan(dest...); err != nil {
 		return "", err
 	}
 	return ddl, nil
@@ -820,7 +845,7 @@ func (s *MySQLSession) GetTableEstimate(ctx context.Context, tableName string) (
 	FROM information_schema.TABLES
 	WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?;
 	`
-	err := s.db.QueryRowContext(ctx, query, s.cfg.DatabaseName, tableName).Scan(&rowCount, &sizeBytes)
+	err := s.db.QueryRowContext(ctx, query, s.activeDB(), tableName).Scan(&rowCount, &sizeBytes)
 	if err != nil {
 		return &driver.TableEstimate{RowCount: 0, SizeBytes: 0}, nil
 	}
@@ -1165,7 +1190,7 @@ func (s *MySQLSession) GetDatabaseDiagnostics(ctx context.Context) ([]driver.Dat
 
 func (s *MySQLSession) GetTableDiagnostics(ctx context.Context, database, table string) ([]driver.TableDiagnostics, error) {
 	if database == "" {
-		database = s.cfg.DatabaseName
+		database = s.activeDB()
 	}
 	query := `
 		SELECT 
@@ -1230,7 +1255,7 @@ func (s *MySQLSession) GetTableDiagnostics(ctx context.Context, database, table 
 
 func (s *MySQLSession) ExecuteMaintenance(ctx context.Context, database string, tables []string, action string) ([]driver.MaintenanceResult, error) {
 	if database == "" {
-		database = s.cfg.DatabaseName
+		database = s.activeDB()
 	}
 	upperAction := strings.ToUpper(strings.TrimSpace(action))
 	if upperAction != "OPTIMIZE" && upperAction != "ANALYZE" && upperAction != "CHECK" {
@@ -1271,7 +1296,7 @@ func (s *MySQLSession) ExecuteMaintenance(ctx context.Context, database string, 
 
 func (s *MySQLSession) GetRedundantIndexes(ctx context.Context, database, table string) ([]driver.RedundantIndex, error) {
 	if database == "" {
-		database = s.cfg.DatabaseName
+		database = s.activeDB()
 	}
 	schema, err := s.InspectSchema(ctx, database)
 	if err != nil {
@@ -1292,7 +1317,7 @@ func (s *MySQLSession) GetRedundantIndexes(ctx context.Context, database, table 
 
 func (s *MySQLSession) PeekForeignKeyRow(ctx context.Context, database, table, column string, value any) (*driver.PeekResult, error) {
 	if database == "" {
-		database = s.cfg.DatabaseName
+		database = s.activeDB()
 	}
 	sqlCmd := fmt.Sprintf("SELECT * FROM `%s`.`%s` WHERE `%s` = ? LIMIT 1", database, table, column)
 	rows, err := s.db.QueryContext(ctx, sqlCmd, value)
@@ -1444,7 +1469,7 @@ func (s *MySQLSession) ApplyUserGrants(ctx context.Context, req driver.UserGrant
 
 func (s *MySQLSession) InspectTableLocks(ctx context.Context, database, table string) ([]driver.TableLockInfo, error) {
 	if database == "" {
-		database = s.cfg.DatabaseName
+		database = s.activeDB()
 	}
 	var locks []driver.TableLockInfo
 
@@ -1772,7 +1797,7 @@ func (s *MySQLSession) probePeerNode(parentCtx context.Context, hostPort, origAd
 	defer cancel()
 
 	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&timeout=1200ms&readTimeout=1200ms",
-		s.cfg.User, s.cfg.Password, hostPort, s.cfg.DatabaseName,
+		s.cfg.User, s.cfg.Password, hostPort, s.activeDB(),
 	)
 	peerDB, err := sql.Open("mysql", dsn)
 	if err != nil {
@@ -2600,7 +2625,7 @@ func (s *MySQLSession) ToggleEventStatus(ctx context.Context, name string, enabl
 // GetTablePartitions returns partition telemetry from information_schema.partitions.
 func (s *MySQLSession) GetTablePartitions(ctx context.Context, database, table string) ([]driver.PartitionMetadata, error) {
 	if database == "" {
-		database = s.cfg.DatabaseName
+		database = s.activeDB()
 	}
 	query := `
 		SELECT 

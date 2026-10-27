@@ -287,6 +287,24 @@ func TestSafetyGuard_LexicalFallbackIgnoresWhereInCommentsAndStrings(t *testing.
 	}
 }
 
+// Regression: MySQL executable comments (/*! ... */) run their body, so the guard must inspect it.
+func TestSafetyGuard_MySQLExecutableCommentNotBypassed(t *testing.T) {
+	for _, q := range []string{
+		"/*! DROP TABLE users */",
+		"/*!40000 DROP TABLE users */",
+		"/*! DELETE FROM users */",
+		"/* note */ /*!40001 UPDATE accounts SET balance=0 */",
+		"/*!TRUNCATE TABLE users*/",
+	} {
+		if r := Inspect(q, "Development"); !r.RequiresChallenge {
+			t.Errorf("expected challenge for %q, got risk=%v", q, r.RiskLevel)
+		}
+	}
+	if r := Inspect("/* plain comment */ SELECT 1", "Development"); r.RequiresChallenge {
+		t.Errorf("plain comment before SELECT must not require challenge")
+	}
+}
+
 func TestSafetyGuard_PreExecutionCountQuery(t *testing.T) {
 	tests := []struct {
 		query            string

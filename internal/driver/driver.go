@@ -870,6 +870,13 @@ func StripLeadingComments(sql string) string {
 			if idx == -1 {
 				return ""
 			}
+			// MySQL executes /*! ... */ and /*!NNNNN ... */ bodies, so unwrap them instead of
+			// discarding; otherwise callers (e.g. the Safety Guard) would miss the real statement.
+			if strings.HasPrefix(s, "/*!") {
+				body := strings.TrimLeft(s[3:idx], "0123456789")
+				s = strings.TrimSpace(body + " " + s[idx+2:])
+				continue
+			}
 			s = strings.TrimSpace(s[idx+2:])
 			continue
 		}

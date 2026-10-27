@@ -17,7 +17,7 @@ The singular visual status tag in the Session Switcher displaying the connection
 _Avoid_: Multi-surface environment tags, sidebar environment headers, footer environment labels
 
 **Connection Vault**:
-The encrypted local SQLite storage holding connection metadata and credentials.
+The encrypted local SQLite storage holding connection metadata and credentials, encrypting both connection passwords and client SSL private keys at rest via AES-256-GCM sealed envelopes (`enc:v1:`).
 _Avoid_: Credential manager, config file
 
 **Vault Archive**:
@@ -51,6 +51,10 @@ _Avoid_: IP ban, firewall block, auth cooldown
 **DNS Rebinding Guard**:
 The ingress validation gate verifying incoming HTTP `Host` headers against approved loopback and explicitly configured network addresses to prevent unauthorized cross-origin requests from browser environments.
 _Avoid_: Host filter, domain check, origin gate
+
+**Same-Origin Ingress Guard**:
+The ingress validation gate strictly enforcing that incoming state-mutating HTTP requests possess an `Origin` matching the target `Host` byte-for-byte, preventing cross-port CSRF execution from other local applications.
+_Avoid_: CORS bypass, cross-port allowance
 
 **Strict Connection Mode**:
 A Connection configuration policy that pins an active session strictly to a single target database, rejecting cross-database queries or DDL mutations even when authenticated as a superuser.
@@ -90,10 +94,14 @@ _Avoid_: Database list, supported DBs, connection types
 The non-negotiable architectural rule mandating that all driver integrations and server runtime binaries compile with `CGO_ENABLED=0`, rejecting any external database engine requiring local C toolchains.
 _Avoid_: Pure Go rule, no-C policy, static build restriction
 
+**Thread-Safe Active Scoping**:
+The concurrency pattern ensuring active database and schema search path state within session instances are read and mutated under mutual exclusion locks, preventing data races during concurrent queries.
+_Avoid_: Unlocked session state, race condition
+
 ## Safety & Governance
 
 **Safety Guard**:
-The deterministic AST analysis gate that intercepts and evaluates SQL statements prior to execution against the target database.
+The deterministic AST analysis gate that intercepts and evaluates SQL statements prior to execution against the target database, automatically unwrapping MySQL executable comments (`/*! ... */`) to prevent challenge evasion.
 _Avoid_: Linter, query validator, firewall
 
 **Destructive Query**:
@@ -459,6 +467,10 @@ _Avoid_: Excel patch, quote hack
 A streaming data import module that combines automated Delimiter Sniffing, Column Mapping Matrix resolution, parameter ceiling batching, and row-by-row fallback retries to populate target database tables from arbitrary CSV feeds.
 _Avoid_: CSV loader, import script, raw insert loop
 
+**View-Ordered Dump Pipeline**:
+The schema dump generation sequence that topologically arranges SQL tables before SQL views (`viewsLast`), ensuring dumped schemas restore without missing-relation errors, paired with object-accurate `DROP VIEW IF EXISTS` statements.
+_Avoid_: Unordered export, raw table dump
+
 ## Data Synchronization & Table Operations
 
 **Data Transfer**:
@@ -769,6 +781,7 @@ _Avoid_: Multiline button labels, squished button shapes, colliding controls
 - **0056**: Table Designer Focus Retention and Relational Constraint Builders (`docs/adr/0056-table-designer-focus-retention-and-relational-constraint-builders.md`)
 - **0057**: Pre-Execution Mutation Estimation and Tiered Safety Guard (`docs/adr/0057-pre-execution-mutation-estimation-and-tiered-safety-guard.md`)
 - **0058**: Virtual Data Grid and Micro-Chunk Streaming (`docs/adr/0058-virtual-datagrid-and-micro-chunk-streaming.md`)
+- **0059**: Systemic Security Hardening and Multi-Engine Resilience (`docs/adr/0059-systemic-security-hardening-and-engine-resilience.md`)
 
 ## Visual Schema & ERD Canvas
 
