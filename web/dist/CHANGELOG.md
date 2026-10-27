@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.10.12] - 2026-10-27
+
 ### Added
 - **Virtual Data Grid & Fast Schema Index (`web/dist/index.html`, `internal/server`)**: Implemented fixed-height DOM row windowing (32px uniform height) with `< 500` active DOM nodes, full keyboard arrow navigation, persistent cell inspector drawer for multiline strings and JSON payloads, and an in-memory prefix index delivering sub-5ms schema explorer keyword filtering (ADR 0058).
 - **NDJSON Micro-Chunk Query Streaming Endpoint (`internal/server`)**: Added `/api/session/{id}/execute-stream` delivering line-by-line streaming with immediate 20-row micro-chunk flush for low Time to First Row (TTFR < 50ms), native `AbortController` cancellation tracking, and MySQL profiler support (ADR 0058).
