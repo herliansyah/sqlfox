@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"flag"
 	"fmt"
 	"net"
@@ -162,6 +163,28 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Claim the lock atomically (after any interactive password prompt, so a waiting launch never
+	// mistakes a prompting instance for a stuck one); if another launch won the race, defer to it.
+	if !*multiFlag && os.Getenv("SQLFOX_MULTI_INSTANCE") != "1" {
+		release, err := claimInstanceLock(configDir)
+		if errors.Is(err, os.ErrExist) {
+			if activeURL, _, isRunning := checkExistingInstance(configDir, *portFlag); isRunning {
+				if !isSilent {
+					fmt.Printf("ℹ️  SqlFox is already running at %s\n", activeURL)
+				}
+				if !*noBrowserFlag {
+					go openBrowser(activeURL)
+					time.Sleep(300 * time.Millisecond)
+				}
+				return
+			}
+			release, err = claimInstanceLock(configDir) // the stale lock was removed by the check
+		}
+		if err == nil {
+			defer release()
+		}
+	}
+
 	// Open or create encrypted connection vault
 	v, err := vault.OpenVault(dbPath, masterPassword)
 	if err != nil {
@@ -201,7 +224,7 @@ func main() {
 
 	var lockCleanup func()
 	if !*multiFlag && os.Getenv("SQLFOX_MULTI_INSTANCE") != "1" {
-		cleanup, err := writeInstanceLock(configDir, actualPort, localURL)
+		cleanup, err := writeInstanceLock(configDir, actualPort, localURL, bindHost)
 		if err == nil {
 			lockCleanup = cleanup
 			defer lockCleanup()
@@ -429,4 +452,3 @@ func loadEnvFilesFromPaths(paths ...string) {
 		}
 	}
 }
-

@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -370,10 +371,13 @@ func (s *Server) handleApplyUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-const officialReleasePrefix = "https://github.com/herliansyah/sqlfox/releases/download/"
-
 func (s *Server) isAllowedAssetURL(rawURL string) bool {
-	if strings.HasPrefix(rawURL, officialReleasePrefix) {
+	// Compare the parsed, dot-segment-free path: a raw prefix check would accept
+	// ".../releases/download/../../../other/repo/..." which escapes the official repository.
+	if u, err := url.Parse(rawURL); err == nil && u.Scheme == "https" && u.Host == "github.com" &&
+		u.RawQuery == "" && u.Fragment == "" && u.User == nil &&
+		!strings.Contains(u.Path, "..") && !strings.Contains(u.EscapedPath(), "%2") &&
+		path.Clean(u.Path) == u.Path && strings.HasPrefix(u.Path, "/herliansyah/sqlfox/releases/download/") {
 		return true
 	}
 	if s.updateAPIURL != "" {

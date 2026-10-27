@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"regexp"
@@ -52,20 +53,20 @@ func (s *Server) handlePingSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "ping failed: "+err.Error())
 		return
 	}
-	sess.LatencyMs = latency.Milliseconds()
+	sess.SetLatency(latency.Milliseconds())
 
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	allocMB := math.Round(float64(m.Alloc)/1024/1024*10) / 10
 	info, _ := sess.Session.ServerInfo(ctx)
 	if info != nil {
-		sess.ServerInfo = info
+		sess.SetInfo(info)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"latency_ms":  latency.Milliseconds(),
 		"memory_mb":   allocMB,
-		"server_info": sess.ServerInfo,
+		"server_info": sess.Info(),
 	})
 }
 
@@ -86,10 +87,10 @@ func (s *Server) handleGetSchema(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to inspect schema: "+err.Error())
 			return
 		}
-		sess.CachedSchema = schema
+		sess.SetSchema(schema)
 		writeJSON(w, http.StatusOK, schema)
 		return
-	} else if sess.CachedSchema == nil {
+	} else if sess.Schema() == nil {
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
 		schema, err := sess.Session.InspectSchema(ctx, "")
@@ -97,10 +98,10 @@ func (s *Server) handleGetSchema(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to inspect schema: "+err.Error())
 			return
 		}
-		sess.CachedSchema = schema
+		sess.SetSchema(schema)
 	}
 
-	writeJSON(w, http.StatusOK, sess.CachedSchema)
+	writeJSON(w, http.StatusOK, sess.Schema())
 }
 
 func (s *Server) handleGetFastCatalog(w http.ResponseWriter, r *http.Request) {
@@ -176,7 +177,7 @@ func (s *Server) handleSelectDatabase(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to inspect schema: "+err.Error())
 		return
 	}
-	sess.CachedSchema = schema
+	sess.SetSchema(schema)
 
 	writeJSON(w, http.StatusOK, schema)
 }
@@ -199,7 +200,7 @@ func (s *Server) handleRefreshSchema(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to refresh schema: "+err.Error())
 		return
 	}
-	sess.CachedSchema = schema
+	sess.SetSchema(schema)
 
 	writeJSON(w, http.StatusOK, schema)
 }
@@ -299,6 +300,9 @@ func (s *Server) handleToggleEvent(w http.ResponseWriter, r *http.Request) {
 	sess, err := s.sessionMgr.GetSession(connID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if rejectIfReadOnly(w, sess) {
 		return
 	}
 
@@ -488,20 +492,20 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 	// Find primary key or unique key if exists
 	var pkCol string
 	tableFoundInCache := false
-	if sess.CachedSchema != nil {
-		for _, t := range sess.CachedSchema.Tables {
+	if sess.Schema() != nil {
+		for _, t := range sess.Schema().Tables {
 			if strings.EqualFold(t.Name, tableName) {
 				tableFoundInCache = true
 				break
 			}
 		}
-		pkCol = findKeyCol(sess.CachedSchema.Tables)
+		pkCol = findKeyCol(sess.Schema().Tables)
 	}
 
 	// If table not found in cache (e.g. multi-db context, newly created table, or stale cache), inspect on demand
 	if !tableFoundInCache {
 		if schema, err := sess.Session.InspectSchema(ctx, targetDB); err == nil && schema != nil {
-			sess.CachedSchema = schema
+			sess.SetSchema(schema)
 			pkCol = findKeyCol(schema.Tables)
 		}
 	}
@@ -571,7 +575,11 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 
 	cols := stream.Columns()
 	chunk, err := stream.NextChunk(limit)
-	if err != nil && len(chunk) == 0 {
+	if err != nil && err != io.EOF {
+		writeError(w, http.StatusBadRequest, "query failed: "+err.Error())
+		return
+	}
+	if chunk == nil {
 		chunk = [][]any{}
 	}
 
@@ -611,7 +619,7 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if sess.ReadOnly {
+	if sess.IsReadOnly() {
 		writeError(w, http.StatusForbidden, "Session is locked in READ-ONLY mode")
 		return
 	}
@@ -664,6 +672,12 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
+
+	exec, finish, err := sess.gridWriter(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update cell: "+err.Error())
+		return
+	}
 
 	var totalAffected int64
 	for _, item := range items {
@@ -718,7 +732,7 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 		}
 
 		cellStart := time.Now()
-		res, err := sess.Session.Exec(ctx, updateSQL, args...)
+		res, err := exec.Exec(ctx, updateSQL, args...)
 		cellDur := time.Since(cellStart).Milliseconds()
 		var cellAffected int64
 		if res != nil {
@@ -727,9 +741,14 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 		}
 		sess.RecordAudit(auditSQL, "grid_cell_edit", cellDur, cellAffected, err, cellStart)
 		if err != nil {
+			_ = finish(err)
 			writeError(w, http.StatusInternalServerError, "failed to update cell: "+err.Error())
 			return
 		}
+	}
+	if err := finish(nil); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update cell: "+err.Error())
+		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -747,10 +766,10 @@ func (s *Server) handleToggleReadOnly(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess.ReadOnly = !sess.ReadOnly
+	ro := sess.ToggleReadOnly()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"connection_id": connID,
-		"read_only":     sess.ReadOnly,
+		"read_only":     ro,
 	})
 }
 

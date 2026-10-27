@@ -33,7 +33,7 @@ func (s *Server) handleInsertRow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if sess.ReadOnly {
+	if sess.IsReadOnly() {
 		writeError(w, http.StatusForbidden, "Session is locked in READ-ONLY mode")
 		return
 	}
@@ -107,7 +107,7 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if sess.ReadOnly {
+	if sess.IsReadOnly() {
 		writeError(w, http.StatusForbidden, "Session is locked in READ-ONLY mode")
 		return
 	}
@@ -167,6 +167,11 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 		}
 	} else if len(req.RowCriterias) > 0 {
 		start := time.Now()
+		exec, finish, err := sess.gridWriter(ctx)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "delete failed: "+err.Error())
+			return
+		}
 		for _, rc := range req.RowCriterias {
 			var whereParts []string
 			var auditWhereParts []string
@@ -187,7 +192,7 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 			delSQL := "DELETE FROM " + targetTable + " WHERE " + singleRowWhere(sess.DriverName, targetTable, strings.Join(whereParts, " AND "))
 			auditSQL := "DELETE FROM " + targetTable + " WHERE " + singleRowWhere(sess.DriverName, targetTable, strings.Join(auditWhereParts, " AND "))
 			rowStart := time.Now()
-			res, err := sess.Session.Exec(ctx, delSQL, args...)
+			res, err := exec.Exec(ctx, delSQL, args...)
 			rowDur := time.Since(rowStart).Milliseconds()
 			var rowAffected int64
 			if res != nil {
@@ -196,9 +201,14 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 			}
 			sess.RecordAudit(auditSQL, "grid_delete", rowDur, rowAffected, err, rowStart)
 			if err != nil {
+				_ = finish(err)
 				writeError(w, http.StatusInternalServerError, "delete failed: "+err.Error())
 				return
 			}
+		}
+		if err := finish(nil); err != nil {
+			writeError(w, http.StatusInternalServerError, "delete failed: "+err.Error())
+			return
 		}
 		execMs = time.Since(start).Milliseconds()
 	}

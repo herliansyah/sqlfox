@@ -34,6 +34,7 @@ type Server struct {
 	targetExePath     string
 	restartFn         func() error
 	cloudSyncMu       sync.Mutex
+	cloudSyncRunMu    sync.Mutex // serializes SyncToGitHub runs (manual + debounced)
 	cloudSyncTimer    *time.Timer
 	lanEnabled        bool
 	allowedHosts      []string

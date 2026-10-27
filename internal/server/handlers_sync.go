@@ -2,13 +2,17 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"sqlfox/internal/driver"
 )
@@ -165,8 +169,8 @@ func (s *Server) handleSyncStructureCompare(w http.ResponseWriter, r *http.Reque
 	var diffs []StructureDiffItem
 	diffIndex := 1
 
-	// Check tables in source
-	for _, srcTbl := range srcSchema.Tables {
+	// Check tables in source; FK parents first so generated CREATE TABLEs apply in order.
+	for _, srcTbl := range driver.TopologicalSortTables(srcSchema.Tables) {
 		tgtTbl, exists := tgtTableMap[strings.ToLower(srcTbl.Name)]
 		if !exists {
 			// Missing table in target -> CREATE TABLE
@@ -175,7 +179,7 @@ func (s *Server) handleSyncStructureCompare(w http.ResponseWriter, r *http.Reque
 				ddl, _ = srcSess.Session.GetTableDDL(ctx, srcTbl.Name)
 			}
 			if strings.TrimSpace(ddl) == "" {
-				ddl = buildCreateTableDDL(srcTbl, tgtDriver)
+				ddl = buildCreateTableDDL(srcTbl, srcDriver, tgtDriver)
 			} else {
 				ddl = strings.TrimSpace(ddl)
 				if !strings.HasSuffix(ddl, ";") {
@@ -212,7 +216,7 @@ func (s *Server) handleSyncStructureCompare(w http.ResponseWriter, r *http.Reque
 			tgtCol, colExists := tgtColMap[strings.ToLower(srcCol.Name)]
 			if !colExists {
 				// Column missing in target -> ADD COLUMN
-				clause := buildColumnDefinition(srcCol, tgtDriver)
+				clause := buildColumnDefinition(srcCol, srcDriver, tgtDriver)
 				sql := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s;",
 					quoteIdent(srcTbl.Name, tgtDriver),
 					quoteIdent(srcCol.Name, tgtDriver),
@@ -233,8 +237,8 @@ func (s *Server) handleSyncStructureCompare(w http.ResponseWriter, r *http.Reque
 				diffIndex++
 			} else {
 				// Column exists -> check for type/nullability discrepancy
-				if !columnEquals(srcCol, tgtCol) {
-					clause := buildColumnDefinition(srcCol, tgtDriver)
+				if !columnEquals(srcCol, tgtCol, srcDriver, tgtDriver) {
+					clause := buildColumnDefinition(srcCol, srcDriver, tgtDriver)
 					var sql string
 					if tgtDriver == "sqlite" {
 						sql = fmt.Sprintf("-- SQLite: column %s definition differs (%s vs %s)", srcCol.Name, srcCol.Type, tgtCol.Type)
@@ -243,8 +247,9 @@ func (s *Server) handleSyncStructureCompare(w http.ResponseWriter, r *http.Reque
 						var pgStmts []string
 						tblQ := quoteIdent(srcTbl.Name, tgtDriver)
 						colQ := quoteIdent(srcCol.Name, tgtDriver)
-						if !strings.EqualFold(srcCol.Type, tgtCol.Type) {
-							pgStmts = append(pgStmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s TYPE %s;", tblQ, colQ, srcCol.Type))
+						srcType := normalizeColumnType(srcCol.Type, tgtDriver)
+						if !strings.EqualFold(srcType, normalizeColumnType(tgtCol.Type, tgtDriver)) {
+							pgStmts = append(pgStmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s TYPE %s USING %s::%s;", tblQ, colQ, srcType, colQ, srcType))
 						}
 						if srcCol.IsNullable != tgtCol.IsNullable {
 							if srcCol.IsNullable {
@@ -253,15 +258,16 @@ func (s *Server) handleSyncStructureCompare(w http.ResponseWriter, r *http.Reque
 								pgStmts = append(pgStmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s SET NOT NULL;", tblQ, colQ))
 							}
 						}
-						if srcCol.DefaultValue != tgtCol.DefaultValue {
-							if srcCol.DefaultValue == "" {
+						srcDefault := renderColumnDefault(srcCol, srcDriver, tgtDriver)
+						if !strings.EqualFold(canonDefault(srcDefault), canonDefault(renderColumnDefault(tgtCol, tgtDriver, tgtDriver))) {
+							if srcDefault == "" {
 								pgStmts = append(pgStmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s DROP DEFAULT;", tblQ, colQ))
 							} else {
-								pgStmts = append(pgStmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s SET DEFAULT %s;", tblQ, colQ, srcCol.DefaultValue))
+								pgStmts = append(pgStmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s SET DEFAULT %s;", tblQ, colQ, srcDefault))
 							}
 						}
 						if len(pgStmts) == 0 {
-							pgStmts = append(pgStmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s TYPE %s;", tblQ, colQ, srcCol.Type))
+							pgStmts = append(pgStmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s TYPE %s;", tblQ, colQ, srcType))
 						}
 						sql = strings.Join(pgStmts, "\n")
 					} else {
@@ -279,7 +285,7 @@ func (s *Server) handleSyncStructureCompare(w http.ResponseWriter, r *http.Reque
 						Column:    srcCol.Name,
 						Action:    "MODIFY COLUMN",
 						SourceDef: fmt.Sprintf("%s %s", srcCol.Name, clause),
-						TargetDef: fmt.Sprintf("%s %s", tgtCol.Name, buildColumnDefinition(tgtCol, tgtDriver)),
+						TargetDef: fmt.Sprintf("%s %s", tgtCol.Name, buildColumnDefinition(tgtCol, tgtDriver, tgtDriver)),
 						SQL:       sql,
 						Selected:  true,
 					})
@@ -303,7 +309,7 @@ func (s *Server) handleSyncStructureCompare(w http.ResponseWriter, r *http.Reque
 						Column:    tgtCol.Name,
 						Action:    "DROP COLUMN",
 						SourceDef: "Does not exist",
-						TargetDef: fmt.Sprintf("%s %s", tgtCol.Name, buildColumnDefinition(tgtCol, tgtDriver)),
+						TargetDef: fmt.Sprintf("%s %s", tgtCol.Name, buildColumnDefinition(tgtCol, tgtDriver, tgtDriver)),
 						SQL:       sql,
 						Selected:  false,
 					})
@@ -404,7 +410,7 @@ func (s *Server) handleSyncStructureApply(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if tgtSess.ReadOnly {
+	if tgtSess.IsReadOnly() {
 		writeError(w, http.StatusForbidden, "Target session is locked in READ-ONLY mode")
 		return
 	}
@@ -495,7 +501,7 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if tgtSess.ReadOnly {
+	if tgtSess.IsReadOnly() {
 		writeError(w, http.StatusForbidden, "Target session is locked in READ-ONLY mode")
 		return
 	}
@@ -560,7 +566,7 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 				if srcSchema, err := srcSess.Session.InspectSchema(ctx, req.SourceDB); err == nil {
 					for _, t := range srcSchema.Tables {
 						if strings.EqualFold(t.Name, tbl) {
-							ddl = buildCreateTableDDL(t, tgtDriver)
+							ddl = buildCreateTableDDL(t, srcDriver, tgtDriver)
 							break
 						}
 					}
@@ -622,7 +628,17 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 		}
 
 		for tableErr == nil {
-			chunk, err := stream.NextChunk(batchSize)
+			// One placeholder per cell: keep each INSERT under the driver's bind-variable limit
+			// (SQLite 32766, MySQL/PostgreSQL 65535) however wide the table is.
+			maxParams := 65535
+			if isSqliteDriver(tgtDriver) {
+				maxParams = 32766
+			}
+			tblBatch := batchSize
+			if n := len(cols); n > 0 && tblBatch*n > maxParams {
+				tblBatch = max(1, maxParams/n)
+			}
+			chunk, err := stream.NextChunk(tblBatch)
 			if err != nil && err != io.EOF {
 				tableErr = err
 				break
@@ -908,8 +924,8 @@ func (s *Server) handleSyncDataCompare(w http.ResponseWriter, r *http.Request) {
 			// Row in source but not in target -> INSERT
 			operations = append(operations, SyncDataOperation{
 				Type: "insert",
-				PK:   formatPKVal(sRow),
-				Data: sRow,
+				PK:   syncWireValue(formatPKVal(sRow)),
+				Data: syncWireRow(sRow),
 			})
 			insertCount++
 		} else {
@@ -918,9 +934,9 @@ func (s *Server) handleSyncDataCompare(w http.ResponseWriter, r *http.Request) {
 				// Row exists in both but data has changed -> UPDATE
 				operations = append(operations, SyncDataOperation{
 					Type:    "update",
-					PK:      formatPKVal(sRow),
-					OldData: tRow,
-					Data:    sRow,
+					PK:      syncWireValue(formatPKVal(sRow)),
+					OldData: syncWireRow(tRow),
+					Data:    syncWireRow(sRow),
 				})
 				updateCount++
 			}
@@ -934,8 +950,8 @@ func (s *Server) handleSyncDataCompare(w http.ResponseWriter, r *http.Request) {
 				// Row exists in target but not in source -> DELETE
 				operations = append(operations, SyncDataOperation{
 					Type: "delete",
-					PK:   formatPKVal(tRow),
-					Data: tRow,
+					PK:   syncWireValue(formatPKVal(tRow)),
+					Data: syncWireRow(tRow),
 				})
 				deleteCount++
 			}
@@ -958,7 +974,9 @@ func (s *Server) handleSyncDataCompare(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 	var req SyncDataApplyRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	dec := json.NewDecoder(r.Body)
+	dec.UseNumber() // keep BIGINT/DECIMAL digits exact instead of rounding through float64
+	if err := dec.Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request: "+err.Error())
 		return
 	}
@@ -969,7 +987,7 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if tgtSess.ReadOnly {
+	if tgtSess.IsReadOnly() {
 		writeError(w, http.StatusForbidden, "Target session is locked in READ-ONLY mode")
 		return
 	}
@@ -1041,7 +1059,7 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 	}
 	valueAt := func(op SyncDataOperation, tgtIdx int) (any, bool) {
 		if di := dataIdx[tgtIdx]; di >= 0 && di < len(op.Data) {
-			return op.Data[di], true
+			return fromSyncWire(op.Data[di], tgtTbl.Columns[tgtIdx].Type), true
 		}
 		return nil, false
 	}
@@ -1056,7 +1074,7 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 				if len(pkIndices) != 1 || op.PK == nil {
 					return "", nil, fmt.Errorf("missing primary key column %s", tgtTbl.Columns[pkIdx].Name)
 				}
-				v = op.PK
+				v = fromSyncWire(op.PK, tgtTbl.Columns[pkIdx].Type)
 			}
 			clauses = append(clauses, fmt.Sprintf("%s = %s", quoteIdent(tgtTbl.Columns[pkIdx].Name, tgtDriver), driver.Placeholder(tgtDriver, pIdx)))
 			args = append(args, v)
@@ -1067,6 +1085,20 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 
 	var inserted, updated, deleted int
 	var errors []string
+
+	// All operations apply in one transaction: a failure rolls everything back, so the target is
+	// never left half-synced (which the next compare would misreport as new diffs).
+	tx, err := tgtSess.Session.BeginTx(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to begin target transaction: "+err.Error())
+		return
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
 
 	for _, op := range req.Operations {
 		switch op.Type {
@@ -1085,7 +1117,7 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 				strings.Join(cols, ", "),
 				strings.Join(placeholders, ", "),
 			)
-			if _, err := tgtSess.Session.Exec(ctx, sql, args...); err != nil {
+			if _, err := tx.Exec(ctx, sql, args...); err != nil {
 				errors = append(errors, fmt.Sprintf("insert error (pk %v): %s", op.PK, err.Error()))
 			} else {
 				inserted++
@@ -1117,7 +1149,7 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 				strings.Join(setClauses, ", "),
 				where,
 			)
-			if _, err := tgtSess.Session.Exec(ctx, sql, append(args, whereArgs...)...); err != nil {
+			if _, err := tx.Exec(ctx, sql, append(args, whereArgs...)...); err != nil {
 				errors = append(errors, fmt.Sprintf("update error (pk %v): %s", op.PK, err.Error()))
 			} else {
 				updated++
@@ -1130,12 +1162,26 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			sql := fmt.Sprintf("DELETE FROM %s WHERE %s", quoteIdent(req.Table, tgtDriver), where)
-			if _, err := tgtSess.Session.Exec(ctx, sql, args...); err != nil {
+			if _, err := tx.Exec(ctx, sql, args...); err != nil {
 				errors = append(errors, fmt.Sprintf("delete error (pk %v): %s", op.PK, err.Error()))
 			} else {
 				deleted++
 			}
 		}
+	}
+
+	if len(errors) == 0 {
+		if err := tx.Commit(); err != nil {
+			errors = append(errors, "commit failed: "+err.Error())
+		} else {
+			committed = true
+		}
+	}
+	if !committed {
+		_ = tx.Rollback()
+		committed = true // rolled back explicitly; skip the deferred rollback
+		errors = append(errors, "no changes were applied (transaction rolled back)")
+		inserted, updated, deleted = 0, 0, 0
 	}
 
 	if inserted > 0 || updated > 0 || deleted > 0 {
@@ -1162,78 +1208,265 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 // Helper Functions
 // ----------------------------------------------------------------------------
 
+func isPgDriver(d string) bool {
+	return strings.EqualFold(d, "postgres") || strings.EqualFold(d, "postgresql") || strings.EqualFold(d, "pg")
+}
+
+func isSqliteDriver(d string) bool {
+	return strings.EqualFold(d, "sqlite") || strings.EqualFold(d, "sqlite3")
+}
+
+var reMySQLTypeModifiers = regexp.MustCompile(`(?i)\s+(unsigned|zerofill|signed)\b`)
+
+// normalizeColumnType maps a source column type onto a type the target driver accepts.
+// ponytail: covers the common MySQL<->PostgreSQL<->SQLite types; exotic types pass through unchanged.
 func normalizeColumnType(t string, driverName string) string {
 	raw := strings.TrimSpace(t)
 	upper := strings.ToUpper(raw)
-	isPg := strings.EqualFold(driverName, "postgres") || strings.EqualFold(driverName, "postgresql") || strings.EqualFold(driverName, "pg")
-	isSqlite := strings.EqualFold(driverName, "sqlite") || strings.EqualFold(driverName, "sqlite3")
 
-	if isSqlite {
-		if strings.HasPrefix(upper, "INT") || strings.HasPrefix(upper, "TINYINT") || strings.HasPrefix(upper, "SMALLINT") || strings.HasPrefix(upper, "BIGINT") {
+	if isSqliteDriver(driverName) {
+		if strings.Contains(upper, "INT") {
 			return "INTEGER"
 		}
-		if strings.Contains(upper, "TEXT") || strings.HasPrefix(upper, "VARCHAR") || strings.HasPrefix(upper, "CHAR") || strings.HasPrefix(upper, "ENUM") || strings.HasPrefix(upper, "SET") || strings.HasPrefix(upper, "JSON") {
+		if strings.Contains(upper, "TEXT") || strings.Contains(upper, "CHAR") || strings.HasPrefix(upper, "ENUM") || strings.HasPrefix(upper, "SET") || strings.HasPrefix(upper, "JSON") || upper == "UUID" {
 			return "TEXT"
 		}
-		if strings.HasPrefix(upper, "DOUBLE") || strings.HasPrefix(upper, "FLOAT") || strings.HasPrefix(upper, "DECIMAL") || strings.HasPrefix(upper, "NUMERIC") {
+		if strings.HasPrefix(upper, "DOUBLE") || strings.HasPrefix(upper, "FLOAT") || strings.HasPrefix(upper, "REAL") {
 			return "REAL"
+		}
+		if strings.HasPrefix(upper, "DECIMAL") || strings.HasPrefix(upper, "NUMERIC") {
+			return "NUMERIC"
 		}
 		if strings.Contains(upper, "BLOB") || strings.Contains(upper, "BINARY") || upper == "BYTEA" {
 			return "BLOB"
 		}
-	} else if isPg {
-		if strings.HasPrefix(upper, "INT(") || upper == "INT" || upper == "INTEGER" {
-			return "INTEGER"
-		}
-		if strings.HasPrefix(upper, "BIGINT(") || upper == "BIGINT" {
-			return "BIGINT"
-		}
-		if strings.HasPrefix(upper, "TINYINT") || strings.HasPrefix(upper, "SMALLINT") {
-			return "SMALLINT"
-		}
-		if strings.Contains(upper, "TEXT") || strings.HasPrefix(upper, "ENUM") || strings.HasPrefix(upper, "SET") {
-			return "TEXT"
-		}
-		if upper == "DATETIME" {
-			return "TIMESTAMP"
-		}
-		if upper == "DOUBLE" {
-			return "DOUBLE PRECISION"
-		}
-		if strings.Contains(upper, "BLOB") || strings.Contains(upper, "BINARY") {
-			return "BYTEA"
-		}
+		return raw
 	}
 
+	if isPgDriver(driverName) {
+		base := strings.TrimSpace(reMySQLTypeModifiers.ReplaceAllString(upper, ""))
+		unsigned := base != upper
+		switch {
+		case base == "TINYINT(1)":
+			return "SMALLINT"
+		case strings.HasPrefix(base, "BIGINT"):
+			if unsigned {
+				return "NUMERIC(20)"
+			}
+			return "BIGINT"
+		case strings.HasPrefix(base, "MEDIUMINT"):
+			return "INTEGER"
+		case strings.HasPrefix(base, "INT(") || base == "INT" || base == "INTEGER":
+			if unsigned {
+				return "BIGINT"
+			}
+			return "INTEGER"
+		case strings.HasPrefix(base, "TINYINT") || strings.HasPrefix(base, "SMALLINT"):
+			if unsigned && strings.HasPrefix(base, "SMALLINT") {
+				return "INTEGER"
+			}
+			return "SMALLINT"
+		case base == "YEAR" || strings.HasPrefix(base, "YEAR("):
+			return "SMALLINT"
+		case strings.Contains(base, "TEXT") || strings.HasPrefix(base, "ENUM") || strings.HasPrefix(base, "SET("):
+			return "TEXT"
+		case base == "DATETIME":
+			return "TIMESTAMP"
+		case strings.HasPrefix(base, "DATETIME("):
+			return "TIMESTAMP" + strings.TrimPrefix(base, "DATETIME")
+		case base == "DOUBLE" || strings.HasPrefix(base, "DOUBLE("):
+			return "DOUBLE PRECISION"
+		case base == "FLOAT" || strings.HasPrefix(base, "FLOAT("):
+			return "REAL"
+		case strings.Contains(base, "BLOB") || strings.Contains(base, "BINARY"):
+			return "BYTEA"
+		}
+		if unsigned {
+			return base
+		}
+		return raw
+	}
+
+	// MySQL/MariaDB target: map PostgreSQL information_schema type names (never produced by MySQL).
+	switch strings.ToLower(raw) {
+	case "integer":
+		return "INT"
+	case "boolean":
+		return "TINYINT(1)"
+	case "character varying", "character", "uuid":
+		if strings.ToLower(raw) == "uuid" {
+			return "CHAR(36)"
+		}
+		return "TEXT"
+	case "timestamp without time zone":
+		return "DATETIME(6)"
+	case "timestamp with time zone":
+		return "TIMESTAMP(6)"
+	case "time without time zone", "time with time zone":
+		return "TIME(6)"
+	case "double precision":
+		return "DOUBLE"
+	case "real":
+		return "FLOAT"
+	case "numeric":
+		return "DECIMAL(65,30)"
+	case "bytea":
+		return "LONGBLOB"
+	case "jsonb", "json":
+		return "JSON"
+	}
 	return raw
 }
 
-func buildColumnDefinition(col driver.ColumnMetadata, driverName string) string {
+var (
+	rePgCast          = regexp.MustCompile(`::[A-Za-z_][\w ]*(\[\])?(\(\s*\d+(\s*,\s*\d+)?\s*\))?`)
+	reNumericLiteral  = regexp.MustCompile(`^-?\d+(\.\d+)?([eE][-+]?\d+)?$`)
+	reFuncCallExpr    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*\(.*\)$`) // MariaDB unquoted expression default, e.g. uuid()
+	reCurrentTimeExpr = regexp.MustCompile(`(?i)^(CURRENT_TIMESTAMP|CURRENT_DATE|CURRENT_TIME|LOCALTIMESTAMP|LOCALTIME|NOW)\s*(\(\s*\d*\s*\))?$`)
+)
+
+// renderColumnDefault returns the DEFAULT expression (without the keyword) for col as read from
+// srcDriver, rendered for tgtDriver; "" means no default. MySQL's information_schema returns literal
+// defaults unquoted and marks expression defaults with EXTRA=DEFAULT_GENERATED, while PostgreSQL and
+// SQLite already return SQL expressions (PostgreSQL with ::type casts).
+func renderColumnDefault(col driver.ColumnMetadata, srcDriver, tgtDriver string) string {
+	v := strings.TrimSpace(col.DefaultValue)
+	if v == "" {
+		return ""
+	}
+	if strings.EqualFold(v, "NULL") {
+		return "NULL"
+	}
+	if reCurrentTimeExpr.MatchString(v) {
+		if !strings.EqualFold(srcDriver, tgtDriver) && (isPgDriver(tgtDriver) || isSqliteDriver(tgtDriver)) {
+			if strings.HasPrefix(strings.ToUpper(v), "CURRENT_TIMESTAMP") || strings.HasPrefix(strings.ToUpper(v), "NOW") {
+				return "CURRENT_TIMESTAMP"
+			}
+		}
+		return v
+	}
+
+	srcIsMySQL := !isPgDriver(srcDriver) && !isSqliteDriver(srcDriver)
+	if srcIsMySQL {
+		if strings.Contains(strings.ToUpper(col.Extra), "DEFAULT_GENERATED") {
+			// MySQL 8 expression default: must be parenthesized when re-emitted.
+			return "(" + v + ")"
+		}
+		// MariaDB already returns quoted literals / expressions; bit literals are SQL as-is.
+		if strings.HasPrefix(v, "'") || strings.HasPrefix(strings.ToLower(v), "b'") || reFuncCallExpr.MatchString(v) {
+			return v
+		}
+		if reNumericLiteral.MatchString(v) {
+			return v
+		}
+		return driver.EscapeSQLString(v, tgtDriver)
+	}
+
+	// PostgreSQL / SQLite source: already an SQL expression.
+	if isPgDriver(srcDriver) && !isPgDriver(tgtDriver) {
+		if strings.HasPrefix(strings.ToLower(v), "nextval(") {
+			return "" // sequence default has no portable equivalent (auto-increment is a column property)
+		}
+		v = strings.TrimSpace(stripPgCasts(v))
+		if strings.HasPrefix(v, "(") && strings.HasSuffix(v, ")") && strings.Count(v, "(") == 1 {
+			v = strings.TrimSpace(v[1 : len(v)-1])
+		}
+		if strings.HasPrefix(v, "'") && strings.HasSuffix(v, "'") && len(v) >= 2 && !isSqliteDriver(tgtDriver) {
+			// Re-escape for MySQL (backslashes are escapes there).
+			return driver.EscapeSQLString(strings.ReplaceAll(v[1:len(v)-1], "''", "'"), tgtDriver)
+		}
+	}
+	return v
+}
+
+// stripPgCasts removes ::type casts outside quoted literals ('a::b'::text keeps 'a::b').
+func stripPgCasts(v string) string {
+	var out strings.Builder
+	for i := 0; i < len(v); {
+		if v[i] == '\'' {
+			j := i + 1
+			for j < len(v) {
+				if v[j] == '\'' {
+					if j+1 < len(v) && v[j+1] == '\'' {
+						j += 2
+						continue
+					}
+					break
+				}
+				j++
+			}
+			end := min(j+1, len(v))
+			out.WriteString(v[i:end])
+			i = end
+			continue
+		}
+		next := strings.IndexByte(v[i:], '\'')
+		if next < 0 {
+			next = len(v) - i
+		}
+		out.WriteString(rePgCast.ReplaceAllString(v[i:i+next], ""))
+		i += next
+	}
+	return out.String()
+}
+
+// canonDefault folds equivalent current-time spellings so they don't count as a difference.
+func canonDefault(d string) string {
+	if reCurrentTimeExpr.MatchString(d) && (strings.HasPrefix(strings.ToUpper(d), "CURRENT_TIMESTAMP") || strings.HasPrefix(strings.ToUpper(d), "NOW")) {
+		return "CURRENT_TIMESTAMP"
+	}
+	return d
+}
+
+// extraClause keeps only the MySQL EXTRA attributes that are valid in a column definition
+// (auto_increment, ON UPDATE ..., INVISIBLE); DEFAULT_GENERATED and VIRTUAL/STORED GENERATED are
+// metadata flags, not syntax.
+func extraClause(extra string) string {
+	e := strings.TrimSpace(extra)
+	if e == "" {
+		return ""
+	}
+	upper := strings.ToUpper(e)
+	var parts []string
+	if strings.Contains(upper, "AUTO_INCREMENT") {
+		parts = append(parts, "AUTO_INCREMENT")
+	}
+	if i := strings.Index(upper, "ON UPDATE "); i >= 0 {
+		rest := e[i:]
+		if j := strings.Index(strings.ToUpper(rest), " INVISIBLE"); j >= 0 {
+			rest = rest[:j]
+		}
+		parts = append(parts, strings.TrimSpace(rest))
+	}
+	if strings.Contains(upper, "INVISIBLE") {
+		parts = append(parts, "INVISIBLE")
+	}
+	return strings.Join(parts, " ")
+}
+
+func buildColumnDefinition(col driver.ColumnMetadata, srcDriver, driverName string) string {
 	clause := normalizeColumnType(col.Type, driverName)
 	if !col.IsNullable {
 		clause += " NOT NULL"
 	}
-	if col.DefaultValue != "" {
-		if strings.EqualFold(col.DefaultValue, "null") || strings.Contains(col.DefaultValue, "CURRENT_TIMESTAMP") || strings.HasPrefix(col.DefaultValue, "'") {
-			clause += " DEFAULT " + col.DefaultValue
-		} else {
-			clause += " DEFAULT '" + strings.ReplaceAll(col.DefaultValue, "'", "''") + "'"
-		}
+	if def := renderColumnDefault(col, srcDriver, driverName); def != "" {
+		clause += " DEFAULT " + def
 	}
-	isPg := strings.EqualFold(driverName, "postgres") || strings.EqualFold(driverName, "postgresql") || strings.EqualFold(driverName, "pg")
-	isSqlite := strings.EqualFold(driverName, "sqlite") || strings.EqualFold(driverName, "sqlite3")
-	if col.Extra != "" && !isPg && !isSqlite {
-		clause += " " + col.Extra
+	srcIsMySQL := !isPgDriver(srcDriver) && !isSqliteDriver(srcDriver)
+	if srcIsMySQL && !isPgDriver(driverName) && !isSqliteDriver(driverName) {
+		if x := extraClause(col.Extra); x != "" {
+			clause += " " + x
+		}
 	}
 	return clause
 }
 
-func buildCreateTableDDL(tbl driver.TableMetadata, driverName string) string {
+func buildCreateTableDDL(tbl driver.TableMetadata, srcDriver, driverName string) string {
 	var lines []string
 	var pkCols []string
 
 	for _, col := range tbl.Columns {
-		def := fmt.Sprintf("  %s %s", quoteIdent(col.Name, driverName), buildColumnDefinition(col, driverName))
+		def := fmt.Sprintf("  %s %s", quoteIdent(col.Name, driverName), buildColumnDefinition(col, srcDriver, driverName))
 		lines = append(lines, def)
 		if col.IsPrimaryKey {
 			pkCols = append(pkCols, quoteIdent(col.Name, driverName))
@@ -1247,20 +1480,92 @@ func buildCreateTableDDL(tbl driver.TableMetadata, driverName string) string {
 	return fmt.Sprintf("CREATE TABLE %s (\n%s\n);", quoteIdent(tbl.Name, driverName), strings.Join(lines, ",\n"))
 }
 
-func columnEquals(a, b driver.ColumnMetadata) bool {
-	// Standardize types (e.g. INT vs int, VARCHAR(255) vs varchar(255))
-	normA := strings.ToLower(strings.TrimSpace(a.Type))
-	normB := strings.ToLower(strings.TrimSpace(b.Type))
-	if normA != normB {
+// columnEquals compares a source column with a target column as the target would see them,
+// so cross-driver syncs don't flag every column merely for spelling types/defaults differently.
+func columnEquals(src, tgt driver.ColumnMetadata, srcDriver, tgtDriver string) bool {
+	if !strings.EqualFold(normalizeColumnType(src.Type, tgtDriver), normalizeColumnType(tgt.Type, tgtDriver)) {
 		return false
 	}
-	if a.IsNullable != b.IsNullable {
+	if src.IsNullable != tgt.IsNullable {
 		return false
 	}
-	if strings.TrimSpace(a.DefaultValue) != strings.TrimSpace(b.DefaultValue) {
-		return false
+	return strings.EqualFold(canonDefault(renderColumnDefault(src, srcDriver, tgtDriver)), canonDefault(renderColumnDefault(tgt, tgtDriver, tgtDriver)))
+}
+
+// maxJSONSafeInt is the largest integer a browser's JSON.parse (float64) represents exactly.
+const maxJSONSafeInt = 1<<53 - 1
+
+// syncWireValue makes a scanned value survive the browser round-trip between compare and apply:
+// integers beyond 2^53 travel as decimal strings and non-UTF-8 (binary) values as {"$base64": ...}
+// (encoding/json would otherwise replace invalid bytes with U+FFFD). fromSyncWire reverses this.
+func syncWireValue(v any) any {
+	switch x := v.(type) {
+	case int64:
+		if x > maxJSONSafeInt || x < -maxJSONSafeInt {
+			return strconv.FormatInt(x, 10)
+		}
+	case uint64:
+		if x > maxJSONSafeInt {
+			return strconv.FormatUint(x, 10)
+		}
+	case []byte:
+		if !utf8.Valid(x) {
+			return map[string]string{"$base64": base64.StdEncoding.EncodeToString(x)}
+		}
+		return string(x)
+	case string:
+		if !utf8.ValidString(x) {
+			return map[string]string{"$base64": base64.StdEncoding.EncodeToString([]byte(x))}
+		}
 	}
-	return true
+	return v
+}
+
+func syncWireRow(row []any) []any {
+	out := make([]any, len(row))
+	for i, v := range row {
+		out[i] = syncWireValue(v)
+	}
+	return out
+}
+
+var reIntegerColumnType = regexp.MustCompile(`(?i)^((tiny|small|medium|big)?int(eger|[248])?|(small|big)?serial)\b`)
+
+// isIntegerColumnType matches integer types only (not INTERVAL/POINT, which merely contain "INT").
+func isIntegerColumnType(t string) bool {
+	return reIntegerColumnType.MatchString(strings.TrimSpace(t))
+}
+
+// fromSyncWire converts a JSON-decoded (UseNumber) apply value back into a bind parameter for a
+// target column of colType. Integers are bound as int64/uint64 so comparisons never go through
+// float64 (MySQL compares BIGINT with a string/double argument as DOUBLE and could match a neighbour).
+func fromSyncWire(v any, colType string) any {
+	switch x := v.(type) {
+	case map[string]any:
+		if b64, ok := x["$base64"].(string); ok && len(x) == 1 {
+			if b, err := base64.StdEncoding.DecodeString(b64); err == nil {
+				return b
+			}
+		}
+	case json.Number:
+		if i, err := x.Int64(); err == nil {
+			return i
+		}
+		if u, err := strconv.ParseUint(string(x), 10, 64); err == nil {
+			return u
+		}
+		return string(x) // decimal text keeps full precision for DECIMAL/NUMERIC columns
+	case string:
+		if isIntegerColumnType(colType) {
+			if i, err := strconv.ParseInt(x, 10, 64); err == nil {
+				return i
+			}
+			if u, err := strconv.ParseUint(x, 10, 64); err == nil {
+				return u
+			}
+		}
+	}
+	return v
 }
 
 // syncValueKey canonicalizes a scanned value for cross-driver comparison: drivers return the same

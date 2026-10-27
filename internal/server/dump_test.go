@@ -103,8 +103,12 @@ CREATE VIEW a_titles AS SELECT title FROM books;
 	if strings.Contains(dumpContent, `DROP TABLE IF EXISTS "a_titles"`) || !strings.Contains(dumpContent, `DROP VIEW IF EXISTS "a_titles"`) {
 		t.Fatalf("expected DROP VIEW for view in dump, got:\n%s", dumpContent)
 	}
-	if strings.Index(dumpContent, `DROP VIEW IF EXISTS "a_titles"`) < strings.Index(dumpContent, `CREATE TABLE books`) {
+	if strings.Index(dumpContent, `CREATE VIEW a_titles`) < strings.Index(dumpContent, `CREATE TABLE books`) {
 		t.Fatalf("expected view after base tables in dump, got:\n%s", dumpContent)
+	}
+	// Drops come first, children before parents, so re-imports over an existing DB succeed.
+	if dropBooks, dropAuthors := strings.Index(dumpContent, `DROP TABLE IF EXISTS "books"`), strings.Index(dumpContent, `DROP TABLE IF EXISTS "authors"`); dropBooks < 0 || dropBooks > dropAuthors || dropAuthors > strings.Index(dumpContent, `CREATE TABLE authors`) {
+		t.Fatalf("expected reverse-dependency DROPs before CREATEs, got:\n%s", dumpContent)
 	}
 
 	// 5. Test GET /api/session/{id}/export-smart-seed?limit=2&ddl=true
@@ -119,8 +123,8 @@ CREATE VIEW a_titles AS SELECT title FROM books;
 	}
 	seedContent := string(seedBytes)
 	// Authors (parent) must appear before Books (child) in DDL and INSERT
-	authorsIdx := strings.Index(seedContent, "authors")
-	booksIdx := strings.Index(seedContent, "books")
+	authorsIdx := strings.Index(seedContent, "CREATE TABLE authors")
+	booksIdx := strings.Index(seedContent, "CREATE TABLE books")
 	if authorsIdx == -1 || booksIdx == -1 || authorsIdx > booksIdx {
 		t.Fatalf("expected parent 'authors' to precede child 'books' in smart seed, got:\n%s", seedContent)
 	}
@@ -272,5 +276,22 @@ func TestSplitSQLStatements_PostgresTrailingBackslashInString(t *testing.T) {
 	}
 	if !strings.Contains(stmts[1], "SELECT 2") {
 		t.Errorf("stmt 1 should be SELECT 2, got: %s", stmts[1])
+	}
+}
+
+func TestSplitSQLStatements_TaggedDollarQuotesAndLongLines(t *testing.T) {
+	pgScript := "CREATE FUNCTION f() RETURNS int AS $body$ BEGIN PERFORM 1; RETURN 2; END $body$ LANGUAGE plpgsql;\n" +
+		"SELECT $1::int, price$usd FROM t;\n" +
+		"SELECT $_$ a;b $_$;"
+	stmts := splitSQLStatements(strings.NewReader(pgScript), "postgres")
+	if len(stmts) != 3 || !strings.Contains(stmts[0], "RETURN 2; END $body$ LANGUAGE plpgsql") {
+		t.Fatalf("tagged dollar quotes split incorrectly: %q", stmts)
+	}
+
+	// A single line longer than any scanner buffer must not truncate the script.
+	long := "INSERT INTO t VALUES ('" + strings.Repeat("x", 11*1024*1024) + "');\nSELECT 2;"
+	stmts = splitSQLStatements(strings.NewReader(long), "mysql")
+	if len(stmts) != 2 || stmts[1] != "SELECT 2" {
+		t.Fatalf("long line truncated the script: got %d statements", len(stmts))
 	}
 }

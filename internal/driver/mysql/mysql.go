@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -919,19 +920,42 @@ func (s *MySQLSession) CancelQuery(ctx context.Context, queryID string) error {
 	ctxCancel, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
+	// The query may finish while the control connection is being dialed; its connection then
+	// returns to the pool with the same CONNECTION_ID and could be running another tab's query.
+	// Re-check right before KILL so we never interrupt an unrelated statement.
+	stillRunning := func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		for _, tid := range s.queryThreads {
+			if tid == threadID {
+				return true
+			}
+		}
+		return false
+	}
+
 	// ponytail: Dial independent single-shot control connection to bypass saturated s.db pool
 	if s.dsn != "" {
 		controlDB, dErr := sql.Open("mysql", s.dsn)
 		if dErr == nil {
 			defer controlDB.Close()
-			if _, kErr := controlDB.ExecContext(ctxCancel, fmt.Sprintf("KILL QUERY %d", threadID)); kErr == nil {
-				return nil
+			if conn, cErr := controlDB.Conn(ctxCancel); cErr == nil {
+				defer conn.Close()
+				if !stillRunning() {
+					return nil
+				}
+				if _, kErr := conn.ExecContext(ctxCancel, fmt.Sprintf("KILL QUERY %d", threadID)); kErr == nil {
+					return nil
+				}
 			}
 		}
 	}
 
 	// Fallback to pool if independent connection dial failed
 	if s.db != nil {
+		if !stillRunning() {
+			return nil
+		}
 		_, err := s.db.ExecContext(ctxCancel, fmt.Sprintf("KILL QUERY %d", threadID))
 		if err != nil {
 			if errors.Is(ctxCancel.Err(), context.DeadlineExceeded) {
@@ -1264,7 +1288,7 @@ func (s *MySQLSession) ExecuteMaintenance(ctx context.Context, database string, 
 
 	var results []driver.MaintenanceResult
 	for _, tbl := range tables {
-		sqlCmd := fmt.Sprintf("%s TABLE `%s`.`%s`", upperAction, database, tbl)
+		sqlCmd := fmt.Sprintf("%s TABLE %s.%s", upperAction, driver.QuoteIdentifier(database, "mysql"), driver.QuoteIdentifier(tbl, "mysql"))
 		rows, err := s.db.QueryContext(ctx, sqlCmd)
 		if err != nil {
 			results = append(results, driver.MaintenanceResult{
@@ -1319,7 +1343,7 @@ func (s *MySQLSession) PeekForeignKeyRow(ctx context.Context, database, table, c
 	if database == "" {
 		database = s.activeDB()
 	}
-	sqlCmd := fmt.Sprintf("SELECT * FROM `%s`.`%s` WHERE `%s` = ? LIMIT 1", database, table, column)
+	sqlCmd := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s = ? LIMIT 1", driver.QuoteIdentifier(database, "mysql"), driver.QuoteIdentifier(table, "mysql"), driver.QuoteIdentifier(column, "mysql"))
 	rows, err := s.db.QueryContext(ctx, sqlCmd, value)
 	if err != nil {
 		return nil, fmt.Errorf("failed to peek foreign key row: %w", err)
@@ -1391,7 +1415,7 @@ func (s *MySQLSession) GetUserList(ctx context.Context) ([]driver.DatabaseUser, 
 }
 
 func (s *MySQLSession) GetUserGrants(ctx context.Context, user, host string) ([]string, error) {
-	sqlCmd := fmt.Sprintf("SHOW GRANTS FOR '%s'@'%s'", strings.ReplaceAll(user, "'", "''"), strings.ReplaceAll(host, "'", "''"))
+	sqlCmd := fmt.Sprintf("SHOW GRANTS FOR %s@%s", driver.EscapeSQLString(user, "mysql"), driver.EscapeSQLString(host, "mysql"))
 	rows, err := s.db.QueryContext(ctx, sqlCmd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch user grants: %w", err)
@@ -1412,17 +1436,17 @@ func (s *MySQLSession) GetUserGrants(ctx context.Context, user, host string) ([]
 }
 
 func (s *MySQLSession) SaveUser(ctx context.Context, user, host, password string, isNew bool) error {
-	uEsc := strings.ReplaceAll(user, "'", "''")
-	hEsc := strings.ReplaceAll(host, "'", "''")
-	pEsc := strings.ReplaceAll(password, "'", "''")
+	uEsc := driver.EscapeSQLString(user, "mysql")
+	hEsc := driver.EscapeSQLString(host, "mysql")
+	pEsc := driver.EscapeSQLString(password, "mysql")
 
 	if isNew {
-		cmd := fmt.Sprintf("CREATE USER '%s'@'%s' IDENTIFIED BY '%s'", uEsc, hEsc, pEsc)
+		cmd := fmt.Sprintf("CREATE USER %s@%s IDENTIFIED BY %s", uEsc, hEsc, pEsc)
 		if _, err := s.db.ExecContext(ctx, cmd); err != nil {
 			return fmt.Errorf("failed to create user: %w", err)
 		}
 	} else if password != "" {
-		cmd := fmt.Sprintf("ALTER USER '%s'@'%s' IDENTIFIED BY '%s'", uEsc, hEsc, pEsc)
+		cmd := fmt.Sprintf("ALTER USER %s@%s IDENTIFIED BY %s", uEsc, hEsc, pEsc)
 		if _, err := s.db.ExecContext(ctx, cmd); err != nil {
 			return fmt.Errorf("failed to update user password: %w", err)
 		}
@@ -1432,9 +1456,9 @@ func (s *MySQLSession) SaveUser(ctx context.Context, user, host, password string
 }
 
 func (s *MySQLSession) DropUser(ctx context.Context, user, host string) error {
-	uEsc := strings.ReplaceAll(user, "'", "''")
-	hEsc := strings.ReplaceAll(host, "'", "''")
-	cmd := fmt.Sprintf("DROP USER '%s'@'%s'", uEsc, hEsc)
+	uEsc := driver.EscapeSQLString(user, "mysql")
+	hEsc := driver.EscapeSQLString(host, "mysql")
+	cmd := fmt.Sprintf("DROP USER %s@%s", uEsc, hEsc)
 	if _, err := s.db.ExecContext(ctx, cmd); err != nil {
 		return fmt.Errorf("failed to drop user: %w", err)
 	}
@@ -1442,9 +1466,17 @@ func (s *MySQLSession) DropUser(ctx context.Context, user, host string) error {
 	return nil
 }
 
+// rePrivilegeName allows only bare privilege keywords (e.g. "SELECT", "CREATE TEMPORARY TABLES").
+var rePrivilegeName = regexp.MustCompile(`^[A-Za-z]+( [A-Za-z]+)*$`)
+
 func (s *MySQLSession) ApplyUserGrants(ctx context.Context, req driver.UserGrantRequest) error {
-	uEsc := strings.ReplaceAll(req.User, "'", "''")
-	hEsc := strings.ReplaceAll(req.Host, "'", "''")
+	uEsc := driver.EscapeSQLString(req.User, "mysql")
+	hEsc := driver.EscapeSQLString(req.Host, "mysql")
+	for _, p := range req.Privileges {
+		if !rePrivilegeName.MatchString(p) {
+			return fmt.Errorf("invalid privilege name: %q", p)
+		}
+	}
 	privs := strings.Join(req.Privileges, ", ")
 	if privs == "" {
 		privs = "USAGE"
@@ -1452,10 +1484,10 @@ func (s *MySQLSession) ApplyUserGrants(ctx context.Context, req driver.UserGrant
 
 	target := "*.*"
 	if req.Scope == "DATABASE" && req.Database != "" {
-		target = fmt.Sprintf("`%s`.*", req.Database)
+		target = driver.QuoteIdentifier(req.Database, "mysql") + ".*"
 	}
 
-	cmd := fmt.Sprintf("GRANT %s ON %s TO '%s'@'%s'", privs, target, uEsc, hEsc)
+	cmd := fmt.Sprintf("GRANT %s ON %s TO %s@%s", privs, target, uEsc, hEsc)
 	if req.WithGrant {
 		cmd += " WITH GRANT OPTION"
 	}
@@ -2193,8 +2225,18 @@ func (s *MySQLSession) Close() error {
 	return s.db.Close()
 }
 
+// ExecRaw/QueryRaw run on a dedicated connection with the active database/schema applied:
+// a random pooled connection may carry another database from a previous USE/search_path.
 func (s *MySQLSession) ExecRaw(ctx context.Context, sql string, args ...any) (int64, error) {
-	res, err := s.db.ExecContext(ctx, sql, args...)
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer conn.Close()
+	if err := s.applyActiveDatabase(ctx, conn); err != nil {
+		return 0, err
+	}
+	res, err := conn.ExecContext(ctx, sql, args...)
 	if err != nil {
 		return 0, err
 	}
@@ -2203,7 +2245,15 @@ func (s *MySQLSession) ExecRaw(ctx context.Context, sql string, args ...any) (in
 }
 
 func (s *MySQLSession) QueryRaw(ctx context.Context, sql string, args ...any) ([][]any, error) {
-	rows, err := s.db.QueryContext(ctx, sql, args...)
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	if err := s.applyActiveDatabase(ctx, conn); err != nil {
+		return nil, err
+	}
+	rows, err := conn.QueryContext(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -356,3 +356,46 @@ func TestSafetyGuard_PreExecutionCountQuery(t *testing.T) {
 		}
 	}
 }
+
+func TestSafetyGuard_DropDatabaseAndDialectLiteralBypasses(t *testing.T) {
+	critical := []string{
+		"DROP DATABASE prod_db",
+		"DROP SCHEMA prod_db",
+		"DROP PROCEDURE sp_cleanup",
+		// PostgreSQL/SQLite: '\' is a complete literal, so these have no real WHERE.
+		`UPDATE accounts SET note = '\', flag = ' WHERE '`,
+		`UPDATE accounts SET a = '\', b = ' WHERE id=1 OR 1=1 -- '`,
+		`DELETE FROM accounts /* /* */ WHERE id = 1 */`,
+		`UPDATE accounts SET a = $$ WHERE id = 1 $$`,
+		`UPDATE accounts SET a = $x$ WHERE id = 1 $x$`,
+	}
+	for _, q := range critical {
+		r := Inspect(q, "Production")
+		if r.RiskLevel != RiskCritical || !r.RequiresChallenge {
+			t.Errorf("%q: expected CRITICAL + challenge, got risk=%v challenge=%v", q, r.RiskLevel, r.RequiresChallenge)
+		}
+	}
+	if r := Inspect("DROP DATABASE prod_db", "Development"); r.TargetType != "DATABASE" || r.TargetTable != "prod_db" {
+		t.Errorf("DROP DATABASE target: got type=%q table=%q", r.TargetType, r.TargetTable)
+	}
+
+	qualified := []string{
+		"UPDATE accounts SET a = 'x' WHERE id = 1",
+		`UPDATE accounts SET a = 'it''s' WHERE id = 1`,
+		"DELETE FROM accounts WHERE id = $1",
+	}
+	for _, q := range qualified {
+		if r := Inspect(q, "Development"); !r.HasWhere || r.RequiresChallenge {
+			t.Errorf("%q: expected qualified mutation, got where=%v challenge=%v", q, r.HasWhere, r.RequiresChallenge)
+		}
+	}
+}
+
+func TestBackupFileName_StaysInsideBackupDir(t *testing.T) {
+	for _, name := range []string{"/../../../../home/user/.profile", "..", "a/b\\c", ""} {
+		fn := backupFileName("20260101-000000", name)
+		if filepath.Base(fn) != fn || filepath.Clean(filepath.Join("/backups", fn)) != filepath.Join("/backups", fn) {
+			t.Errorf("backupFileName(%q) = %q escapes the backup dir", name, fn)
+		}
+	}
+}

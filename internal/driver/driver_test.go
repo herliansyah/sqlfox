@@ -462,3 +462,63 @@ func TestSplitWithDelimiters(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestSequenceResetStatementsAndExplainTarget(t *testing.T) {
+	tbl := driver.TableMetadata{Name: "Order Items", Columns: []driver.ColumnMetadata{
+		{Name: "id", Type: "integer", DefaultValue: "nextval('order_items_id_seq'::regclass)"},
+		{Name: "qty", Type: "integer", DefaultValue: "1"},
+	}}
+	got := driver.SequenceResetStatements(tbl, "postgres")
+	want := `SELECT setval(pg_get_serial_sequence('"Order Items"', 'id'), COALESCE((SELECT MAX("id") FROM "Order Items"), 0) + 1, false);`
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("driver.SequenceResetStatements = %q, want [%q]", got, want)
+	}
+	if driver.SequenceResetStatements(tbl, "mysql") != nil {
+		t.Fatalf("non-postgres drivers need no sequence reset")
+	}
+
+	ok := map[string]string{
+		"SELECT 1":                    "SELECT 1",
+		"EXPLAIN SELECT * FROM t;":    "SELECT * FROM t",
+		"explain query plan SELECT 1": "SELECT 1",
+		"DELETE FROM t WHERE id = 1":  "DELETE FROM t WHERE id = 1",
+	}
+	for in, want := range ok {
+		if got, err := driver.ExplainTarget([]string{in}); err != nil || got != want {
+			t.Errorf("driver.ExplainTarget(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, bad := range [][]string{
+		{"SELECT 1", "DELETE FROM t"},
+		{"EXPLAIN ANALYZE DELETE FROM t"},
+		{"EXPLAIN (ANALYZE) DELETE FROM t"},
+		{""},
+	} {
+		if _, err := driver.ExplainTarget(bad); err == nil {
+			t.Errorf("driver.ExplainTarget(%q) should be rejected", bad)
+		}
+	}
+}
+
+func TestApplyLimitClause_TopLevelAwareness(t *testing.T) {
+	cases := map[string]string{
+		// LIMIT inside a subquery / literal / comment is not the statement's own limit.
+		"SELECT * FROM big JOIN (SELECT id FROM x LIMIT 10) d USING(id)": "SELECT * FROM big JOIN (SELECT id FROM x LIMIT 10) d USING(id)\nLIMIT 100",
+		"SELECT * FROM big WHERE note <> 'LIMIT 5'":                      "SELECT * FROM big WHERE note <> 'LIMIT 5'\nLIMIT 100",
+		"SELECT * FROM big /* LIMIT 5 */":                                "SELECT * FROM big /* LIMIT 5 */\nLIMIT 100",
+		// Locking clauses must follow LIMIT.
+		"SELECT * FROM t WHERE id > 1 FOR UPDATE":  "SELECT * FROM t WHERE id > 1\nLIMIT 100\nFOR UPDATE",
+		"SELECT * FROM t LOCK IN SHARE MODE;":      "SELECT * FROM t\nLIMIT 100\nLOCK IN SHARE MODE",
+		"SELECT * FROM t FOR NO KEY UPDATE NOWAIT": "SELECT * FROM t\nLIMIT 100\nFOR NO KEY UPDATE NOWAIT",
+		// Existing outer limits of any spelling are respected; SELECT ... INTO is untouched.
+		"SELECT * FROM t FETCH FIRST 5 ROWS ONLY": "SELECT * FROM t FETCH FIRST 5 ROWS ONLY",
+		"SELECT * FROM t LIMIT ALL":               "SELECT * FROM t LIMIT ALL",
+		"SELECT * FROM t LIMIT $1":                "SELECT * FROM t LIMIT $1",
+		"SELECT id INTO @x FROM t":                "SELECT id INTO @x FROM t",
+	}
+	for in, want := range cases {
+		if got := driver.ApplyLimitClause(in, 100); got != want {
+			t.Errorf("ApplyLimitClause(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

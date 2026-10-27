@@ -31,8 +31,8 @@ func (s *Server) handleInspectQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	targetDB := req.Database
-	if targetDB == "" && sess.CachedSchema != nil {
-		targetDB = sess.CachedSchema.DatabaseName
+	if targetDB == "" && sess.Schema() != nil {
+		targetDB = sess.Schema().DatabaseName
 	}
 	res, _, err := inspectAllStatements(req.SQL, sess.Environment, sess.DriverName, targetDB)
 	if err != nil {
@@ -62,6 +62,12 @@ func (s *Server) handleExplainQuery(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
+	explainSQL, err := driver.ExplainTarget(splitSQLStatements(strings.NewReader(req.SQL), sess.DriverName))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	if req.Database != "" {
 		if err := sess.Session.SelectDatabase(ctx, req.Database); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -69,7 +75,7 @@ func (s *Server) handleExplainQuery(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	plan, err := sess.Session.Explain(ctx, req.SQL)
+	plan, err := sess.Session.Explain(ctx, explainSQL)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "explain failed: "+err.Error())
 		return
@@ -82,11 +88,11 @@ func (s *Server) handleExplainQuery(w http.ResponseWriter, r *http.Request) {
 
 	// Fetch table metadata to formulate heuristic index recommendations & bloat warnings
 	tblsMap := make(map[string]driver.TableMetadata)
-	sc := sess.CachedSchema
+	sc := sess.Schema()
 	if sc == nil || (req.Database != "" && sc.DatabaseName != req.Database) {
 		if newSc, sErr := sess.Session.InspectSchema(ctx, req.Database); sErr == nil && newSc != nil {
 			sc = newSc
-			sess.CachedSchema = newSc
+			sess.SetSchema(newSc)
 		}
 	}
 	if sc != nil {
@@ -95,13 +101,13 @@ func (s *Server) handleExplainQuery(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	dialect := sess.DriverName
-	if sess.ServerInfo == nil {
+	if sess.Info() == nil {
 		if sInfo, sErr := sess.Session.ServerInfo(ctx); sErr == nil && sInfo != nil {
-			sess.ServerInfo = sInfo
+			sess.SetInfo(sInfo)
 		}
 	}
-	if sess.ServerInfo != nil && sess.ServerInfo.Version != "" {
-		dialect = fmt.Sprintf("%s %s", sess.DriverName, sess.ServerInfo.Version)
+	if sess.Info() != nil && sess.Info().Version != "" {
+		dialect = fmt.Sprintf("%s %s", sess.DriverName, sess.Info().Version)
 	}
 	plan.Advisor = advisor.AdviseWithExplain(req.SQL, dialect, tblsMap, plan)
 
@@ -136,11 +142,11 @@ func (s *Server) handleAdviseQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tblsMap := make(map[string]driver.TableMetadata)
-	advSc := sess.CachedSchema
+	advSc := sess.Schema()
 	if advSc == nil || (req.Database != "" && advSc.DatabaseName != req.Database) {
 		if newSc, sErr := sess.Session.InspectSchema(ctx, req.Database); sErr == nil && newSc != nil {
 			advSc = newSc
-			sess.CachedSchema = newSc
+			sess.SetSchema(newSc)
 		}
 	}
 	if advSc != nil {
@@ -149,15 +155,18 @@ func (s *Server) handleAdviseQuery(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	plan, _ := sess.Session.Explain(ctx, req.SQL)
+	var plan *driver.ExplainPlan
+	if explainSQL, tErr := driver.ExplainTarget(splitSQLStatements(strings.NewReader(req.SQL), sess.DriverName)); tErr == nil {
+		plan, _ = sess.Session.Explain(ctx, explainSQL)
+	}
 	dialect := sess.DriverName
-	if sess.ServerInfo == nil {
+	if sess.Info() == nil {
 		if sInfo, sErr := sess.Session.ServerInfo(ctx); sErr == nil && sInfo != nil {
-			sess.ServerInfo = sInfo
+			sess.SetInfo(sInfo)
 		}
 	}
-	if sess.ServerInfo != nil && sess.ServerInfo.Version != "" {
-		dialect = fmt.Sprintf("%s %s", sess.DriverName, sess.ServerInfo.Version)
+	if sess.Info() != nil && sess.Info().Version != "" {
+		dialect = fmt.Sprintf("%s %s", sess.DriverName, sess.Info().Version)
 	}
 	adv := advisor.AdviseWithExplain(req.SQL, dialect, tblsMap, plan)
 	writeJSON(w, http.StatusOK, adv)

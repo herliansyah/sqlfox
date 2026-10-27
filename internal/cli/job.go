@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -177,31 +179,49 @@ func LoadJobSpec(filePath string) (*JobSpec, error) {
 	return &spec, nil
 }
 
+var reJobEnvRef = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)`)
+
+// expandEnv interpolates ${VAR} (empty when unset, like os.ExpandEnv) and $VAR only when VAR is set.
+// Everything else is literal, so SQL dollar quotes ($$, $tag$), positional params ($1) and
+// passwords containing "$" survive intact instead of being silently rewritten by os.ExpandEnv.
+func expandEnv(s string) string {
+	return reJobEnvRef.ReplaceAllStringFunc(s, func(m string) string {
+		sub := reJobEnvRef.FindStringSubmatch(m)
+		if sub[1] != "" {
+			return os.Getenv(sub[1])
+		}
+		if v, ok := os.LookupEnv(sub[2]); ok {
+			return v
+		}
+		return m
+	})
+}
+
 func expandJobSpecEnv(spec *JobSpec) {
-	spec.Name = os.ExpandEnv(spec.Name)
+	spec.Name = expandEnv(spec.Name)
 	for i := range spec.Tasks {
 		task := &spec.Tasks[i]
-		task.Name = os.ExpandEnv(task.Name)
-		task.Type = os.ExpandEnv(task.Type)
-		task.Target = os.ExpandEnv(task.Target)
-		task.Driver = os.ExpandEnv(task.Driver)
-		task.Timeout = os.ExpandEnv(task.Timeout)
-		task.DumpType = os.ExpandEnv(task.DumpType)
-		task.Output = os.ExpandEnv(task.Output)
-		task.From = os.ExpandEnv(task.From)
-		task.To = os.ExpandEnv(task.To)
-		task.DriverFrom = os.ExpandEnv(task.DriverFrom)
-		task.DriverTo = os.ExpandEnv(task.DriverTo)
+		task.Name = expandEnv(task.Name)
+		task.Type = expandEnv(task.Type)
+		task.Target = expandEnv(task.Target)
+		task.Driver = expandEnv(task.Driver)
+		task.Timeout = expandEnv(task.Timeout)
+		task.DumpType = expandEnv(task.DumpType)
+		task.Output = expandEnv(task.Output)
+		task.From = expandEnv(task.From)
+		task.To = expandEnv(task.To)
+		task.DriverFrom = expandEnv(task.DriverFrom)
+		task.DriverTo = expandEnv(task.DriverTo)
 		for j := range task.Tables {
-			task.Tables[j] = os.ExpandEnv(task.Tables[j])
+			task.Tables[j] = expandEnv(task.Tables[j])
 		}
-		task.SQL = os.ExpandEnv(task.SQL)
-		task.File = os.ExpandEnv(task.File)
-		task.Format = os.ExpandEnv(task.Format)
-		task.VaultDB = os.ExpandEnv(task.VaultDB)
-		task.Pass = os.ExpandEnv(task.Pass)
+		task.SQL = expandEnv(task.SQL)
+		task.File = expandEnv(task.File)
+		task.Format = expandEnv(task.Format)
+		task.VaultDB = expandEnv(task.VaultDB)
+		task.Pass = expandEnv(task.Pass)
 		if task.Rotation != nil {
-			task.Rotation.MaxAge = os.ExpandEnv(task.Rotation.MaxAge)
+			task.Rotation.MaxAge = expandEnv(task.Rotation.MaxAge)
 		}
 	}
 }
@@ -462,12 +482,21 @@ func executeDumpTask(ctx context.Context, task JobTask, vaultPath, pass string, 
 		return 1
 	}
 
-	file, err := os.OpenFile(resolvedOut, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	// Write to a temp file in the same directory and atomically rename only after a complete,
+	// flushed dump: a failed run never truncates an existing dump, and rotation only runs on success.
+	file, err := os.CreateTemp(outDir, "."+filepath.Base(resolvedOut)+".tmp-*")
 	if err != nil {
 		fmt.Fprintf(stderr, "  ❌ Failed to create output file '%s': %v\n", resolvedOut, err)
 		return 1
 	}
-	defer file.Close()
+	tmpPath := file.Name()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = file.Close()
+			_ = os.Remove(tmpPath)
+		}
+	}()
 
 	includeSchema := true
 	if task.IncludeSchema != nil {
@@ -484,17 +513,31 @@ func executeDumpTask(ctx context.Context, task JobTask, vaultPath, pass string, 
 	}
 
 	fmt.Fprintf(stderr, "  💾 Exporting dump to: %s\n", resolvedOut)
+	bw := bufio.NewWriterSize(file, 256*1024)
 	var dumpErr error
 	if strings.ToLower(task.DumpType) == "smart-seed" {
-		dumpErr = WriteSmartSeedDump(cCtx, t.Session, t.Driver, t.DBName, sampleLimit, includeSchema, file)
+		dumpErr = WriteSmartSeedDump(cCtx, t.Session, t.Driver, t.DBName, sampleLimit, includeSchema, bw)
 	} else {
-		dumpErr = WriteStandardDump(cCtx, t.Session, t.Driver, t.DBName, includeSchema, includeData, file)
+		dumpErr = WriteStandardDump(cCtx, t.Session, t.Driver, t.DBName, includeSchema, includeData, bw)
 	}
-
+	if dumpErr == nil {
+		dumpErr = bw.Flush()
+	}
+	if dumpErr == nil {
+		dumpErr = file.Sync()
+	}
+	if dumpErr == nil {
+		dumpErr = file.Close()
+	}
+	if dumpErr == nil {
+		_ = os.Chmod(tmpPath, 0644)
+		dumpErr = os.Rename(tmpPath, resolvedOut)
+	}
 	if dumpErr != nil {
 		fmt.Fprintf(stderr, "  ❌ Dump generation failed: %v\n", dumpErr)
 		return 1
 	}
+	committed = true
 
 	// Apply retention rotation if configured
 	if task.Rotation != nil {
@@ -539,7 +582,8 @@ func executeQueryTask(ctx context.Context, task JobTask, vaultPath, pass string,
 	}
 
 	if task.SQL != "" {
-		args = append(args, task.SQL)
+		// "--" ends flag parsing so SQL starting with "-" (e.g. a "-- comment" header) stays positional.
+		args = append(args, "--", task.SQL)
 	}
 
 	outWriter := stdout
@@ -608,20 +652,46 @@ func InterpolatePathTokens(pattern string) string {
 	return res
 }
 
+// rotationPattern builds an exact filename matcher for a dump template: literal parts must match
+// verbatim and each {DATE}/{DATETIME}/{TIMESTAMP} token only matches its own format, so rotation can
+// never touch another job's dumps or unrelated files. Returns nil for token-less templates (a single
+// fixed file that is simply overwritten, nothing to rotate).
+func rotationPattern(baseTemplate string) *regexp.Regexp {
+	tokenRe := regexp.MustCompile(`\{(DATE|DATETIME|TIMESTAMP)\}`)
+	if !tokenRe.MatchString(baseTemplate) {
+		return nil
+	}
+	var sb strings.Builder
+	sb.WriteString("^")
+	last := 0
+	for _, loc := range tokenRe.FindAllStringSubmatchIndex(baseTemplate, -1) {
+		sb.WriteString(regexp.QuoteMeta(baseTemplate[last:loc[0]]))
+		switch baseTemplate[loc[2]:loc[3]] {
+		case "DATE":
+			sb.WriteString(`\d{4}-\d{2}-\d{2}`)
+		case "DATETIME":
+			sb.WriteString(`\d{8}-\d{6}`)
+		case "TIMESTAMP":
+			sb.WriteString(`\d+`)
+		}
+		last = loc[1]
+	}
+	sb.WriteString(regexp.QuoteMeta(baseTemplate[last:]))
+	sb.WriteString("$")
+	return regexp.MustCompile(sb.String())
+}
+
 // ApplyDumpRotation prunes older matching dump files according to keep_last and max_age.
-// ponytail: Prefix pattern matching ensures only files originating from this job's template are pruned.
+// Only files whose names match this job's template exactly (see rotationPattern) are considered.
 func ApplyDumpRotation(dir, template string, rot *JobRotation, stderr io.Writer) {
 	if rot == nil || (rot.KeepLast <= 0 && rot.MaxAge == "") {
 		return
 	}
 
-	baseTemplate := filepath.Base(template)
-	// Extract prefix before first token `{`
-	prefix := baseTemplate
-	if idx := strings.Index(baseTemplate, "{"); idx != -1 {
-		prefix = baseTemplate[:idx]
+	pattern := rotationPattern(filepath.Base(template))
+	if pattern == nil {
+		return
 	}
-	suffix := filepath.Ext(baseTemplate)
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -640,7 +710,7 @@ func ApplyDumpRotation(dir, template string, rot *JobRotation, stderr io.Writer)
 			continue
 		}
 		name := entry.Name()
-		if strings.HasPrefix(name, prefix) && (suffix == "" || strings.HasSuffix(name, suffix)) {
+		if pattern.MatchString(name) {
 			info, err := entry.Info()
 			if err == nil {
 				matching = append(matching, fileMeta{
@@ -693,6 +763,18 @@ func WriteSmartSeedDump(ctx context.Context, sess driver.Session, drvName, dbNam
 	return writeTableDump(ctx, sess, drvName, dbName, true, limit, includeSchema, true, w)
 }
 
+// errWriter remembers the first write error so dump code can write freely and check once.
+type errWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (e *errWriter) printf(format string, args ...any) {
+	if e.err == nil {
+		_, e.err = fmt.Fprintf(e.w, format, args...)
+	}
+}
+
 func writeTableDump(ctx context.Context, sess driver.Session, drvName, dbName string, isSmartSeed bool, limit int, includeSchema, includeData bool, w io.Writer) error {
 	schema, err := sess.InspectSchema(ctx, dbName)
 	if err != nil {
@@ -702,17 +784,30 @@ func writeTableDump(ctx context.Context, sess driver.Session, drvName, dbName st
 	tables := schema.Tables
 	title := "SqlFox Standard SQL Dump"
 	if isSmartSeed {
-		tables = driver.TopologicalSortTables(schema.Tables)
 		title = fmt.Sprintf("SqlFox FK-Aware Smart Seed Dump (Limit: %d rows)", limit)
 	}
+	// FK parents first and views last, so the dump restores on engines without a FK-check toggle (PostgreSQL).
+	tables = driver.TopologicalSortTables(tables)
+	var baseTables, views []driver.TableMetadata
+	isView := func(t driver.TableMetadata) bool { return strings.HasSuffix(strings.ToUpper(t.Type), "VIEW") }
+	for _, t := range tables {
+		if isView(t) {
+			views = append(views, t)
+		} else {
+			baseTables = append(baseTables, t)
+		}
+	}
+	tables = append(baseTables, views...)
 
 	quoteIdent := func(s string) string { return driver.QuoteIdentifier(s, drvName) }
+	isPg := drvName == "postgres" || drvName == "postgresql" || drvName == "pg"
+	out := &errWriter{w: w}
 
-	_, _ = fmt.Fprintf(w, "-- %s\n-- Database: %s\n-- Dump Date: %s\n\n", title, dbName, time.Now().Format(time.RFC3339))
+	out.printf("-- %s\n-- Database: %s\n-- Dump Date: %s\n\n", title, dbName, time.Now().Format(time.RFC3339))
 	if drvName == "mysql" {
-		_, _ = fmt.Fprint(w, "SET FOREIGN_KEY_CHECKS = 0;\nSET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';\n\n")
+		out.printf("SET FOREIGN_KEY_CHECKS = 0;\nSET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';\n\n")
 	} else if drvName == "sqlite" {
-		_, _ = fmt.Fprint(w, "PRAGMA foreign_keys = OFF;\n\n")
+		out.printf("PRAGMA foreign_keys = OFF;\n\n")
 	}
 
 	chunkBatch := 100
@@ -720,15 +815,40 @@ func writeTableDump(ctx context.Context, sess driver.Session, drvName, dbName st
 		chunkBatch = limit
 	}
 
+	if includeSchema {
+		// Drop in reverse dependency order so children go before their parents.
+		for i := len(tables) - 1; i >= 0; i-- {
+			kind := "TABLE"
+			if isView(tables[i]) {
+				kind = "VIEW"
+				if strings.Contains(strings.ToUpper(tables[i].Type), "MATERIALIZED") {
+					kind = "MATERIALIZED VIEW"
+				}
+			}
+			cascade := ""
+			if isPg {
+				cascade = " CASCADE"
+			}
+			out.printf("DROP %s IF EXISTS %s%s;\n", kind, quoteIdent(tables[i].Name), cascade)
+		}
+		out.printf("\n")
+	}
+
 	for _, tbl := range tables {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if includeSchema {
 			ddl, err := sess.GetTableDDL(ctx, tbl.Name)
-			if err == nil && ddl != "" {
-				_, _ = fmt.Fprintf(w, "DROP TABLE IF EXISTS %s;\n%s;\n\n", quoteIdent(tbl.Name), strings.TrimSuffix(strings.TrimSpace(ddl), ";"))
+			if err != nil {
+				return fmt.Errorf("get DDL for %s: %w", tbl.Name, err)
+			}
+			if ddl != "" {
+				out.printf("%s;\n\n", strings.TrimSuffix(strings.TrimSpace(ddl), ";"))
 			}
 		}
 
-		if tbl.Type == "VIEW" || !includeData {
+		if isView(tbl) || !includeData {
 			continue
 		}
 
@@ -737,9 +857,13 @@ func writeTableDump(ctx context.Context, sess driver.Session, drvName, dbName st
 			querySQL = fmt.Sprintf("SELECT * FROM %s LIMIT %d", quoteIdent(tbl.Name), limit)
 		}
 
-		stream, err := sess.QueryStream(ctx, querySQL, limit)
+		streamLimit := 0
+		if isSmartSeed {
+			streamLimit = limit
+		}
+		stream, err := sess.QueryStream(ctx, querySQL, streamLimit)
 		if err != nil {
-			continue
+			return fmt.Errorf("read rows of %s: %w", tbl.Name, err)
 		}
 
 		cols := stream.Columns()
@@ -749,31 +873,48 @@ func writeTableDump(ctx context.Context, sess driver.Session, drvName, dbName st
 		}
 		colHeader := strings.Join(colNames, ", ")
 
+		written := 0
 		for {
 			chunk, err := stream.NextChunk(chunkBatch)
-			if err != nil || len(chunk) == 0 {
+			if len(chunk) > 0 {
+				var valRows []string
+				for _, row := range chunk {
+					var rowVals []string
+					for _, val := range row {
+						rowVals = append(rowVals, driver.FormatSQLValueForDriver(val, drvName))
+					}
+					valRows = append(valRows, fmt.Sprintf("  (%s)", strings.Join(rowVals, ", ")))
+				}
+				out.printf("INSERT INTO %s (%s) VALUES\n%s;\n\n", quoteIdent(tbl.Name), colHeader, strings.Join(valRows, ",\n"))
+				written += len(chunk)
+			}
+			if err == io.EOF || (err == nil && len(chunk) == 0) {
 				break
 			}
-			var valRows []string
-			for _, row := range chunk {
-				var rowVals []string
-				for _, val := range row {
-					rowVals = append(rowVals, driver.FormatSQLValueForDriver(val, drvName))
-				}
-				valRows = append(valRows, fmt.Sprintf("  (%s)", strings.Join(rowVals, ", ")))
+			if err != nil {
+				_ = stream.Close()
+				return fmt.Errorf("read rows of %s: %w", tbl.Name, err)
 			}
-			_, _ = fmt.Fprintf(w, "INSERT INTO %s (%s) VALUES\n%s;\n\n", quoteIdent(tbl.Name), colHeader, strings.Join(valRows, ",\n"))
-			if isSmartSeed {
+			if out.err != nil || (isSmartSeed && limit > 0 && written >= limit) {
 				break
 			}
 		}
 		_ = stream.Close()
+		for _, stmt := range driver.SequenceResetStatements(tbl, drvName) {
+			out.printf("%s\n\n", stmt)
+		}
+		if out.err != nil {
+			return fmt.Errorf("write dump: %w", out.err)
+		}
 	}
 
 	if drvName == "mysql" {
-		_, _ = fmt.Fprint(w, "SET FOREIGN_KEY_CHECKS = 1;\n")
+		out.printf("SET FOREIGN_KEY_CHECKS = 1;\n")
 	} else if drvName == "sqlite" {
-		_, _ = fmt.Fprint(w, "PRAGMA foreign_keys = ON;\n")
+		out.printf("PRAGMA foreign_keys = ON;\n")
+	}
+	if out.err != nil {
+		return fmt.Errorf("write dump: %w", out.err)
 	}
 	return nil
 }

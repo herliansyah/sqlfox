@@ -141,6 +141,29 @@ func Import(ctx context.Context, sess driver.Session, tableName string, r io.Rea
 		}
 	}
 
+	// Fail-fast imports run in one transaction so an error leaves the table untouched (re-running
+	// after a fix would otherwise duplicate the rows already committed by earlier batches).
+	// skip_errors imports stay autocommit: a failed row would abort a PostgreSQL transaction.
+	var target execer = sess
+	commit := func() error { return nil }
+	if !opts.SkipErrors {
+		tx, err := sess.BeginTx(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to begin import transaction: %w", err)
+		}
+		committed := false
+		defer func() {
+			if !committed {
+				_ = tx.Rollback()
+			}
+		}()
+		target = tx
+		commit = func() error {
+			committed = true
+			return tx.Commit()
+		}
+	}
+
 	totalRows := 0
 	importedRows := 0
 	skippedRows := 0
@@ -151,7 +174,7 @@ func Import(ctx context.Context, sess driver.Session, tableName string, r io.Rea
 		if len(currentBatch) == 0 {
 			return nil
 		}
-		imported, errs := executeBatchInsert(ctx, sess, tableName, targetColNames, currentBatch, opts.SkipErrors, opts.DriverName)
+		imported, errs := executeBatchInsert(ctx, target, tableName, targetColNames, currentBatch, opts.SkipErrors, opts.DriverName)
 		importedRows += imported
 		skippedRows += len(currentBatch) - imported
 		if len(errs) > 0 {
@@ -219,6 +242,10 @@ func Import(ctx context.Context, sess driver.Session, tableName string, r io.Rea
 		}
 	}
 
+	if err := commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit import: %w", err)
+	}
+
 	return &ImportResult{
 		Success:      importedRows > 0 || totalRows == 0,
 		Delimiter:    string(comma),
@@ -231,7 +258,12 @@ func Import(ctx context.Context, sess driver.Session, tableName string, r io.Rea
 
 // executeBatchInsert executes a multi-row parameterized INSERT.
 // If skipErrors is true and the batch fails, it falls back to row-by-row insertion.
-func executeBatchInsert(ctx context.Context, sess driver.Session, tableName string, colNames []string, batch [][]any, skipErrors bool, driverName ...string) (int, []string) {
+// execer is satisfied by both driver.Session and driver.TxSession.
+type execer interface {
+	Exec(ctx context.Context, sql string, args ...any) (*driver.ExecResult, error)
+}
+
+func executeBatchInsert(ctx context.Context, sess execer, tableName string, colNames []string, batch [][]any, skipErrors bool, driverName ...string) (int, []string) {
 	if len(batch) == 0 {
 		return 0, nil
 	}

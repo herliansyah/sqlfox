@@ -19,13 +19,17 @@ func (s *Server) handleGenerateMockData(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
+	if rejectIfReadOnly(w, sess) {
+		return
+	}
 
 	var req struct {
 		Rows     int    `json:"rows"`
 		Database string `json:"database"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Rows <= 0 {
-		writeError(w, http.StatusBadRequest, "rows must be a positive integer")
+	const maxMockRows = 5000 // mock.Generate limit
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Rows <= 0 || req.Rows > maxMockRows {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("rows must be between 1 and %d", maxMockRows))
 		return
 	}
 

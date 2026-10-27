@@ -58,8 +58,9 @@ func AssemblePrompts(req AssistRequest) (systemPrompt string, userPrompt string)
 	if req.IncludeSchema && req.Schema != nil {
 		schemaPrompt = BuildSchemaPrompt(req.Schema, req.Query+" "+req.Prompt+" "+req.ErrorMessage, req.MaskIdentifiers)
 
-		// Table Notes Injection: check if any referenced tables have table notes
-		if len(req.TableNotes) > 0 {
+		// Table Notes Injection: check if any referenced tables have table notes.
+		// Notes are free text naming real tables/columns, so they are withheld when masking is on.
+		if len(req.TableNotes) > 0 && !req.MaskIdentifiers {
 			queryAndPrompt := strings.ToLower(req.Query + " " + req.Prompt + " " + req.ErrorMessage)
 			var relevantNotes []string
 			for _, n := range req.TableNotes {

@@ -819,30 +819,100 @@ func Placeholder(driverName string, index int) string {
 	return "?"
 }
 
-var reLimitClause = regexp.MustCompile(`(?i)\bLIMIT\s+\d+`)
+var (
+	reLimitClause  = regexp.MustCompile(`(?i)\b(LIMIT\s+(\d+|ALL\b|\?|\$\d+)|FETCH\s+(FIRST|NEXT)\b)`)
+	reLockingTail  = regexp.MustCompile(`(?i)\b(FOR\s+(UPDATE|SHARE|NO\s+KEY\s+UPDATE|KEY\s+SHARE)|LOCK\s+IN\s+SHARE\s+MODE)\b`)
+	reTopLevelInto = regexp.MustCompile(`(?i)\bINTO\b`)
+)
 
-// HasLimitClause reports whether the SQL statement contains an explicit LIMIT clause.
-func HasLimitClause(sql string) bool {
-	return reLimitClause.MatchString(sql)
+// maskNonTopLevel blanks comments, quoted literals/identifiers and everything inside parentheses
+// (byte offsets preserved), so keyword scans only see the outermost statement: a LIMIT inside a
+// subquery, string or comment must not count as the statement's own LIMIT.
+// ponytail: backslash is treated as an escape inside quotes (MySQL); a PostgreSQL literal ending in
+// a backslash can desync the mask, in which case the cap may be skipped or the query rejected by
+// the server — never silently widened.
+func maskNonTopLevel(q string) string {
+	b := []byte(q)
+	depth := 0
+	for i := 0; i < len(b); i++ {
+		switch {
+		case b[i] == '-' && i+1 < len(b) && b[i+1] == '-':
+			for ; i < len(b) && b[i] != '\n'; i++ {
+				b[i] = ' '
+			}
+		case b[i] == '/' && i+1 < len(b) && b[i+1] == '*':
+			end := strings.Index(q[i+2:], "*/")
+			stop := len(b)
+			if end >= 0 {
+				stop = i + 2 + end + 2
+			}
+			for ; i < stop; i++ {
+				b[i] = ' '
+			}
+			i--
+		case b[i] == '\'' || b[i] == '"' || b[i] == '`':
+			quote := b[i]
+			b[i] = ' '
+			for i++; i < len(b); i++ {
+				if b[i] == '\\' && quote != '`' && i+1 < len(b) {
+					b[i], b[i+1] = ' ', ' '
+					i++
+					continue
+				}
+				if b[i] == quote {
+					b[i] = ' '
+					break
+				}
+				b[i] = ' '
+			}
+		case b[i] == '(':
+			depth++
+			b[i] = ' '
+		case b[i] == ')':
+			if depth > 0 {
+				depth--
+			}
+			b[i] = ' '
+		default:
+			if depth > 0 {
+				b[i] = ' '
+			}
+		}
+	}
+	return string(b)
 }
 
-// ApplyLimitClause appends a LIMIT clause to SELECT queries if not already present and limit > 0.
-// It strips leading comments before detecting the SELECT keyword, and inserts a newline
-// before LIMIT so that trailing single-line comments (-- comment or # comment) do not swallow the LIMIT clause.
+// HasLimitClause reports whether the SQL statement's outermost query has a row limit
+// (LIMIT n / LIMIT ALL / LIMIT ? / FETCH FIRST|NEXT).
+func HasLimitClause(sql string) bool {
+	return reLimitClause.MatchString(maskNonTopLevel(sql))
+}
+
+// ApplyLimitClause adds a LIMIT to SELECT queries that have no outermost limit and limit > 0.
+// It strips leading comments before detecting the SELECT keyword and puts LIMIT on its own line so
+// trailing single-line comments cannot swallow it. A locking clause (FOR UPDATE, LOCK IN SHARE MODE)
+// must follow LIMIT, so LIMIT is inserted before it; SELECT ... INTO is left untouched.
 func ApplyLimitClause(querySQL string, limit int) string {
 	if limit <= 0 {
 		return querySQL
 	}
 	trimmed := strings.TrimSpace(querySQL)
 	cleanUpper := strings.ToUpper(StripLeadingComments(trimmed))
-	if strings.HasPrefix(cleanUpper, "SELECT") && !HasLimitClause(cleanUpper) {
-		// Drop a trailing terminator followed only by comments/whitespace (e.g. "SELECT 1; -- note")
-		if i := strings.LastIndex(trimmed, ";"); i >= 0 && !HasExecutableSQL(trimmed[i+1:], true) {
-			trimmed = strings.TrimSpace(trimmed[:i])
-		}
-		return fmt.Sprintf("%s\nLIMIT %d", trimmed, limit)
+	if !strings.HasPrefix(cleanUpper, "SELECT") || HasLimitClause(trimmed) {
+		return querySQL
 	}
-	return querySQL
+	// Drop a trailing terminator followed only by comments/whitespace (e.g. "SELECT 1; -- note")
+	if i := strings.LastIndex(trimmed, ";"); i >= 0 && !HasExecutableSQL(trimmed[i+1:], true) {
+		trimmed = strings.TrimSpace(trimmed[:i])
+	}
+	masked := maskNonTopLevel(trimmed)
+	if reTopLevelInto.MatchString(masked) {
+		return querySQL
+	}
+	if loc := reLockingTail.FindStringIndex(masked); loc != nil {
+		return fmt.Sprintf("%s\nLIMIT %d\n%s", strings.TrimRight(trimmed[:loc[0]], " \t\r\n"), limit, trimmed[loc[0]:])
+	}
+	return fmt.Sprintf("%s\nLIMIT %d", trimmed, limit)
 }
 
 // StripLeadingComments removes leading whitespace and SQL comments (-- , #, and /* ... */).
@@ -885,6 +955,33 @@ func StripLeadingComments(sql string) string {
 	return s
 }
 
+// ErrExplainTarget is returned when SQL cannot be explained without risking its execution.
+var ErrExplainTarget = errors.New("explain requires exactly one statement without EXPLAIN ANALYZE/options (they are applied automatically)")
+
+var reExplainPrefix = regexp.MustCompile(`(?is)^EXPLAIN(\s+QUERY\s+PLAN)?\s+`)
+
+// ExplainTarget validates the statements of an Explain request and returns the bare statement to plan.
+// stmts must come from a quote-aware splitter. Multiple statements are rejected because drivers that
+// accept multi-statement text would execute everything after the first one, and EXPLAIN ANALYZE /
+// EXPLAIN (options) are rejected because ANALYZE executes the statement.
+func ExplainTarget(stmts []string) (string, error) {
+	if len(stmts) != 1 {
+		return "", ErrExplainTarget
+	}
+	s := strings.TrimRight(strings.TrimSpace(StripLeadingComments(stmts[0])), "; \t\r\n")
+	if loc := reExplainPrefix.FindStringIndex(s); loc != nil {
+		s = strings.TrimSpace(s[loc[1]:])
+		up := strings.ToUpper(s)
+		if strings.HasPrefix(up, "ANALYZE") || strings.HasPrefix(up, "ANALYSE") || strings.HasPrefix(up, "(") || strings.HasPrefix(up, "FORMAT") {
+			return "", ErrExplainTarget
+		}
+	}
+	if s == "" {
+		return "", ErrExplainTarget
+	}
+	return s, nil
+}
+
 // IsQueryStatement reports whether a SQL statement returns rows (SELECT, SHOW, DESC, EXPLAIN, WITH, PRAGMA, VALUES, TABLE, etc.).
 func IsQueryStatement(sql string) bool {
 	clean := StripLeadingComments(sql)
@@ -907,6 +1004,163 @@ func IsQueryStatement(sql string) bool {
 		return true
 	}
 	return false
+}
+
+// SplitSQLStatements splits SQL text into executable statements. It honors MySQL `DELIMITER` lines
+// and, under the default ";" terminator, is quote/comment aware: '...' (with ” and, for MySQL,
+// backslash escapes), "...", `...`, -- and /* */ comments (# too for MySQL), and PostgreSQL
+// dollar quotes ($$...$$ and $tag$...$tag$). Comment-only fragments are dropped.
+func SplitSQLStatements(sqlText, driverName string) []string {
+	isMySQL := strings.EqualFold(driverName, "mysql") || strings.EqualFold(driverName, "mariadb")
+	return SplitWithDelimiters(sqlText, isMySQL, func(seg string) []string {
+		return splitDefaultDelimiter(seg, isMySQL)
+	})
+}
+
+// dollarTagAt returns the dollar-quote opener at runes[i] ("$$" or "$tag$"), or "" if none.
+// A tag cannot start with a digit, so positional parameters like $1 are never mistaken for one.
+func dollarTagAt(runes []rune, i int) string {
+	if runes[i] != '$' {
+		return ""
+	}
+	// Like PostgreSQL's lexer: "$" inside an identifier (price$usd) never opens a dollar quote.
+	if i > 0 && (runes[i-1] == '_' || runes[i-1] == '$' || unicode.IsLetter(runes[i-1]) || unicode.IsDigit(runes[i-1])) {
+		return ""
+	}
+	j := i + 1
+	for j < len(runes) && (runes[j] == '_' || unicode.IsLetter(runes[j]) || (j > i+1 && unicode.IsDigit(runes[j]))) {
+		j++
+	}
+	if j < len(runes) && runes[j] == '$' {
+		return string(runes[i : j+1])
+	}
+	return ""
+}
+
+func splitDefaultDelimiter(content string, isMySQL bool) []string {
+	var statements []string
+	var current strings.Builder
+	inSingleQuote, inDoubleQuote, inBacktick := false, false, false
+	inLineComment, inBlockComment := false, false
+	dollarTag := "" // non-empty while inside a dollar-quoted body
+
+	runes := []rune(content)
+	n := len(runes)
+
+	isQuoteEscaped := func(i int) bool {
+		if !isMySQL {
+			return false
+		}
+		bs := 0
+		for j := i - 1; j >= 0 && runes[j] == '\\'; j-- {
+			bs++
+		}
+		return bs%2 == 1
+	}
+	hasPrefixAt := func(i int, s string) bool {
+		rs := []rune(s)
+		if i+len(rs) > n {
+			return false
+		}
+		for k, r := range rs {
+			if runes[i+k] != r {
+				return false
+			}
+		}
+		return true
+	}
+
+	for i := 0; i < n; i++ {
+		r := runes[i]
+
+		if inLineComment {
+			current.WriteRune(r)
+			if r == '\n' {
+				inLineComment = false
+			}
+			continue
+		}
+		if inBlockComment {
+			current.WriteRune(r)
+			if r == '*' && i+1 < n && runes[i+1] == '/' {
+				inBlockComment = false
+				current.WriteRune('/')
+				i++
+			}
+			continue
+		}
+		if dollarTag != "" {
+			if hasPrefixAt(i, dollarTag) {
+				current.WriteString(dollarTag)
+				i += len([]rune(dollarTag)) - 1
+				dollarTag = ""
+				continue
+			}
+			current.WriteRune(r)
+			continue
+		}
+
+		if !inSingleQuote && !inDoubleQuote && !inBacktick {
+			if r == '-' && i+1 < n && runes[i+1] == '-' {
+				inLineComment = true
+				current.WriteString("--")
+				i++
+				continue
+			}
+			if isMySQL && r == '#' {
+				inLineComment = true
+				current.WriteRune('#')
+				continue
+			}
+			if r == '/' && i+1 < n && runes[i+1] == '*' {
+				inBlockComment = true
+				current.WriteString("/*")
+				i++
+				continue
+			}
+			if !isMySQL {
+				if tag := dollarTagAt(runes, i); tag != "" {
+					dollarTag = tag
+					current.WriteString(tag)
+					i += len([]rune(tag)) - 1
+					continue
+				}
+			}
+		}
+
+		switch {
+		case r == '\'' && !inDoubleQuote && !inBacktick:
+			if inSingleQuote && i+1 < n && runes[i+1] == '\'' {
+				current.WriteString("''")
+				i++
+				continue
+			}
+			if !isQuoteEscaped(i) {
+				inSingleQuote = !inSingleQuote
+			}
+		case r == '"' && !inSingleQuote && !inBacktick:
+			if !isQuoteEscaped(i) {
+				inDoubleQuote = !inDoubleQuote
+			}
+		case r == '`' && !inSingleQuote && !inDoubleQuote:
+			inBacktick = !inBacktick
+		}
+
+		if r == ';' && !inSingleQuote && !inDoubleQuote && !inBacktick {
+			if stmt := strings.TrimSpace(current.String()); stmt != "" && HasExecutableSQL(stmt, isMySQL) {
+				statements = append(statements, stmt)
+			}
+			current.Reset()
+			continue
+		}
+
+		current.WriteRune(r)
+	}
+
+	if last := strings.TrimSpace(current.String()); last != "" && HasExecutableSQL(last, isMySQL) {
+		statements = append(statements, last)
+	}
+	return statements
 }
 
 // SplitWithDelimiters honors MySQL client `DELIMITER xx` lines (used by mysqldump and routine scripts
@@ -1105,6 +1359,27 @@ func hexLiteral(b []byte, driverName string) string {
 // ponytail: Uses 'f' formatting to avoid scientific notation on large numeric IDs and metrics.
 func FormatSQLValue(val any) string {
 	return FormatSQLValueForDriver(val, "")
+}
+
+// SequenceResetStatements returns PostgreSQL statements that advance each serial/nextval column's
+// sequence past the dumped rows, so inserts after a restore don't collide with restored ids.
+// Other drivers need nothing (AUTO_INCREMENT / rowid track the max automatically).
+func SequenceResetStatements(tbl TableMetadata, driverName string) []string {
+	d := strings.ToLower(driverName)
+	if d != "postgres" && d != "postgresql" && d != "pg" {
+		return nil
+	}
+	var out []string
+	qTable := QuoteIdentifier(tbl.Name, d)
+	for _, col := range tbl.Columns {
+		if !strings.HasPrefix(strings.ToLower(col.DefaultValue), "nextval(") {
+			continue
+		}
+		qCol := QuoteIdentifier(col.Name, d)
+		out = append(out, fmt.Sprintf("SELECT setval(pg_get_serial_sequence(%s, %s), COALESCE((SELECT MAX(%s) FROM %s), 0) + 1, false);",
+			EscapeSQLString(qTable, d), EscapeSQLString(col.Name, d), qCol, qTable))
+	}
+	return out
 }
 
 // TopologicalSortTables orders tables so that referenced parent tables appear before dependent child tables.

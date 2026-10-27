@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -55,14 +56,8 @@ func Generate(ctx context.Context, sess driver.Session, cfg Config) (*Result, er
 	isMySQL := cfg.DriverName == "mysql" || cfg.DriverName == "mariadb"
 	isSQLite := cfg.DriverName == "sqlite"
 
-	// Disable FK checks to allow flexible insert order.
-	// MySQL's FOREIGN_KEY_CHECKS is per-connection, so it is set on the pinned tx connection below.
-	if isSQLite {
-		if _, err := sess.ExecRaw(ctx, "PRAGMA foreign_keys=OFF"); err != nil {
-			return nil, fmt.Errorf("disable FK checks: %w", err)
-		}
-		defer sess.ExecRaw(ctx, "PRAGMA foreign_keys=ON") //nolint:errcheck
-	}
+	// FK checks are relaxed on the pinned transaction connection below (MySQL FOREIGN_KEY_CHECKS,
+	// SQLite defer_foreign_keys); session-level PRAGMAs on the pool would leak to arbitrary connections.
 
 	// Detect self-referential FKs and build FK pool for cross-table references.
 	isSelfRef := map[string]bool{} // col.Name → true if self-ref FK
@@ -100,8 +95,9 @@ func Generate(ctx context.Context, sess driver.Session, cfg Config) (*Result, er
 		}
 		// For postgres serial/sequence columns (no explicit auto_increment flag but type is serial)
 		tp := strings.ToLower(col.Type)
-		if col.IsPrimaryKey && (tp == "serial" || tp == "bigserial" || tp == "smallserial") {
-			continue
+		if col.IsPrimaryKey && (tp == "serial" || tp == "bigserial" || tp == "smallserial" ||
+			strings.HasPrefix(strings.ToLower(col.DefaultValue), "nextval(")) {
+			continue // explicit ids would leave the sequence behind and break later inserts
 		}
 		insertCols = append(insertCols, col)
 	}
@@ -110,8 +106,24 @@ func Generate(ctx context.Context, sess driver.Session, cfg Config) (*Result, er
 		return nil, fmt.Errorf("no insertable columns found in table %q", cfg.Table)
 	}
 
-	// Sequence counter for deterministic integer PKs.
+	// Sequence counter for integer PKs, continuing after the current maximum so repeated runs
+	// (or a table that already has rows) never collide on the primary key.
 	seq := 0
+	for _, col := range insertCols {
+		if !col.IsPrimaryKey || !isIntegerType(col.Type) {
+			continue
+		}
+		maxSQL := fmt.Sprintf("SELECT MAX(%s) FROM %s", driver.QuoteIdentifier(col.Name, cfg.DriverName), driver.QuoteIdentifier(cfg.Table, cfg.DriverName))
+		if rows, err := sess.QueryRaw(ctx, maxSQL); err == nil && len(rows) > 0 && len(rows[0]) > 0 && rows[0][0] != nil {
+			raw := rows[0][0]
+			if b, ok := raw.([]byte); ok {
+				raw = string(b)
+			}
+			if n, err := strconv.ParseInt(fmt.Sprint(raw), 10, 64); err == nil && int(n) > seq {
+				seq = int(n)
+			}
+		}
+	}
 	qTable := driver.QuoteIdentifier(cfg.Table, cfg.DriverName)
 
 	// Build quoted column list once.
@@ -130,6 +142,12 @@ func Generate(ctx context.Context, sess driver.Session, cfg Config) (*Result, er
 	}
 	defer tx.Rollback() //nolint:errcheck
 
+	if isSQLite {
+		// Scoped to this transaction; SQLite resets it automatically at COMMIT/ROLLBACK.
+		if _, err := tx.ExecRaw(ctx, "PRAGMA defer_foreign_keys = ON"); err != nil {
+			return nil, fmt.Errorf("defer FK checks: %w", err)
+		}
+	}
 	if isMySQL {
 		if _, err := tx.ExecRaw(ctx, "SET FOREIGN_KEY_CHECKS=0"); err != nil {
 			return nil, fmt.Errorf("disable FK checks: %w", err)
@@ -220,6 +238,14 @@ func Generate(ctx context.Context, sess driver.Session, cfg Config) (*Result, er
 	}, nil
 }
 
+func isIntegerType(t string) bool {
+	tp := strings.ToLower(strings.TrimSpace(t))
+	if tp == "tinyint(1)" || tp == "bool" || tp == "boolean" {
+		return false
+	}
+	return strings.Contains(tp, "int")
+}
+
 var enumRegex = regexp.MustCompile(`'([^']*)'`)
 
 // generateValue synthesizes a single column value.
@@ -237,6 +263,9 @@ func generateValue(col driver.ColumnMetadata, fkPool map[string][]any, isSelfRef
 
 	*seq++
 	tp := strings.ToLower(strings.TrimSpace(col.Type))
+	if col.IsPrimaryKey && isIntegerType(tp) {
+		return *seq // unique and increasing; random values would collide (birthday bound)
+	}
 
 	switch {
 	case tp == "tinyint(1)" || tp == "bool" || tp == "boolean":

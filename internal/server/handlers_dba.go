@@ -125,6 +125,9 @@ func (s *Server) handleResetStatementDigest(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
+	if rejectIfReadOnly(w, sess) {
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
@@ -142,6 +145,9 @@ func (s *Server) handleKillProcess(w http.ResponseWriter, r *http.Request) {
 	sess, err := s.sessionMgr.GetSession(connID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if rejectIfReadOnly(w, sess) {
 		return
 	}
 
@@ -182,6 +188,9 @@ func (s *Server) handleBatchKillProcess(w http.ResponseWriter, r *http.Request) 
 	sess, err := s.sessionMgr.GetSession(connID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if rejectIfReadOnly(w, sess) {
 		return
 	}
 
@@ -384,6 +393,9 @@ func (s *Server) handleExecuteMaintenance(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
+	if rejectIfReadOnly(w, sess) {
+		return
+	}
 
 	var req struct {
 		Database string   `json:"database"`
@@ -514,6 +526,9 @@ func (s *Server) handleSaveUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
+	if rejectIfReadOnly(w, sess) {
+		return
+	}
 
 	var req struct {
 		User     string `json:"user"`
@@ -544,6 +559,9 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
+	if rejectIfReadOnly(w, sess) {
+		return
+	}
 
 	user := r.URL.Query().Get("user")
 	host := r.URL.Query().Get("host")
@@ -568,6 +586,9 @@ func (s *Server) handleApplyUserGrants(w http.ResponseWriter, r *http.Request) {
 	sess, err := s.sessionMgr.GetSession(connID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if rejectIfReadOnly(w, sess) {
 		return
 	}
 

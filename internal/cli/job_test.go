@@ -238,3 +238,96 @@ func TestApplyDumpRotation(t *testing.T) {
 type ioDiscard struct{}
 
 func (ioDiscard) Write(p []byte) (int, error) { return len(p), nil }
+
+func TestApplyDumpRotation_OnlyExactTemplateMatches(t *testing.T) {
+	tempDir := t.TempDir()
+	old := time.Now().Add(-48 * time.Hour)
+	files := []string{
+		"2026-10-01.sql", "2026-10-02.sql", // this job ({DATE}.sql)
+		"app-users-2026-10-01.sql", // another job's dump
+		"notes.sql", "schema.sql",  // hand-placed files
+	}
+	for _, f := range files {
+		p := filepath.Join(tempDir, f)
+		_ = os.WriteFile(p, []byte("x"), 0644)
+		_ = os.Chtimes(p, old, old)
+	}
+	var stderr bytes.Buffer
+	ApplyDumpRotation(tempDir, filepath.Join(tempDir, "{DATE}.sql"), &JobRotation{MaxAge: "1d"}, &stderr)
+	for _, keep := range []string{"app-users-2026-10-01.sql", "notes.sql", "schema.sql"} {
+		if _, err := os.Stat(filepath.Join(tempDir, keep)); err != nil {
+			t.Errorf("%s must not be rotated: %v", keep, err)
+		}
+	}
+	for _, gone := range []string{"2026-10-01.sql", "2026-10-02.sql"} {
+		if _, err := os.Stat(filepath.Join(tempDir, gone)); err == nil {
+			t.Errorf("%s should have been rotated", gone)
+		}
+	}
+
+	// Token-less template: nothing in the directory may be deleted.
+	ApplyDumpRotation(tempDir, filepath.Join(tempDir, "fixed.sql"), &JobRotation{KeepLast: 1}, &stderr)
+	if _, err := os.Stat(filepath.Join(tempDir, "notes.sql")); err != nil {
+		t.Errorf("token-less template rotated unrelated files: %v", err)
+	}
+}
+
+func TestExpandEnv_PreservesLiteralDollars(t *testing.T) {
+	t.Setenv("SQLFOX_TEST_HOST", "db.local")
+	cases := map[string]string{
+		"${SQLFOX_TEST_HOST}":            "db.local",
+		"$SQLFOX_TEST_HOST:3306":         "db.local:3306",
+		"${SQLFOX_TEST_UNSET_VAR}x":      "x",
+		"DO $$ BEGIN PERFORM 1; END $$":  "DO $$ BEGIN PERFORM 1; END $$",
+		"WHERE price = '$5' AND id = $1": "WHERE price = '$5' AND id = $1",
+		"pa$word_unset_SQLFOX":           "pa$word_unset_SQLFOX",
+		"AS $body$ SELECT 1 $body$":      "AS $body$ SELECT 1 $body$",
+	}
+	for in, want := range cases {
+		if got := expandEnv(in); got != want {
+			t.Errorf("expandEnv(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestJob_SmartSeedHonorsSampleRowsAndFailedDumpKeepsOldFile(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "src.db")
+	var sb strings.Builder
+	sb.WriteString("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT);")
+	for i := 1; i <= 250; i++ {
+		sb.WriteString(fmt.Sprintf("INSERT INTO t (id, v) VALUES (%d, 'v');", i))
+	}
+	var stderr bytes.Buffer
+	if code := executeQueryTask(context.Background(), JobTask{Type: "query", Target: "sqlite://" + dbPath, SQL: sb.String(), Tx: true}, "", "", ioDiscard{}, &stderr, nil); code != 0 {
+		t.Fatalf("seed failed: %s", stderr.String())
+	}
+
+	out := filepath.Join(tempDir, "seed.sql")
+	task := JobTask{Type: "dump", DumpType: "smart-seed", SampleRows: 150, Target: "sqlite://" + dbPath, Output: out}
+	if code := executeDumpTask(context.Background(), task, "", "", ioDiscard{}, &stderr); code != 0 {
+		t.Fatalf("dump failed: %s", stderr.String())
+	}
+	content, _ := os.ReadFile(out)
+	if n := strings.Count(string(content), ", 'v')"); n != 150 {
+		t.Errorf("smart-seed wrote %d rows, want 150", n)
+	}
+
+	// A failing dump (unreachable target file inside a missing dir is created by sqlite, so use a
+	// cancelled context) must leave the previous output untouched.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if code := executeDumpTask(ctx, JobTask{Type: "dump", Target: "sqlite://" + dbPath, Output: out}, "", "", ioDiscard{}, &stderr); code == 0 {
+		t.Fatalf("expected dump with cancelled context to fail")
+	}
+	after, _ := os.ReadFile(out)
+	if string(after) != string(content) {
+		t.Errorf("failed dump modified the existing output file")
+	}
+	entries, _ := os.ReadDir(tempDir)
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".tmp-") {
+			t.Errorf("temp file left behind: %s", e.Name())
+		}
+	}
+}

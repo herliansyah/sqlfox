@@ -50,10 +50,14 @@ func RunAdvise(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 			return 1
 		}
 		sqlStmt = strings.TrimSpace(string(content))
-	} else if sqlStmt == "" {
-		// Read from stdin if available
-		stat, _ := os.Stdin.Stat()
-		if (stat.Mode() & os.ModeCharDevice) == 0 {
+	} else if sqlStmt == "" && stdin != nil {
+		// Read piped stdin; skip an interactive terminal (or a closed fd) so the command never blocks/panics.
+		if f, ok := stdin.(*os.File); ok {
+			if stat, err := f.Stat(); err != nil || stat.Mode()&os.ModeCharDevice != 0 {
+				stdin = nil
+			}
+		}
+		if stdin != nil {
 			b, _ := io.ReadAll(stdin)
 			sqlStmt = strings.TrimSpace(string(b))
 		}
@@ -99,7 +103,11 @@ func RunAdvise(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 				tablesMap[t.Name] = t
 			}
 		}
-		explainPlan, _ = sessTarget.Session.Explain(ctx, sqlStmt)
+		if explainSQL, tErr := driver.ExplainTarget(SplitStatements(strings.NewReader(sqlStmt), sessTarget.Driver)); tErr == nil {
+			explainPlan, _ = sessTarget.Session.Explain(ctx, explainSQL)
+		} else {
+			fmt.Fprintf(stderr, "Skipping live EXPLAIN: %v\n", tErr)
+		}
 	}
 
 	// 3. Formulate Advice

@@ -33,7 +33,7 @@ type ExecuteRequest struct {
 	Database              string `json:"database"`
 	Profile               bool   `json:"profile"`
 	Limit                 int    `json:"limit,omitempty"`
-	LockTimeoutSec        int    `json:"lock_timeout_sec,omitempty"` // Fail-fast session lock timeout (default 3s for DDL)
+	LockTimeoutSec        int    `json:"lock_timeout_sec,omitempty"`        // Fail-fast session lock timeout (default 3s for DDL)
 	BypassMutationConfirm bool   `json:"bypass_mutation_confirm,omitempty"` // Dev-only session toggle (ADR 0057)
 }
 
@@ -46,6 +46,7 @@ type ExecuteResponse struct {
 	LastInsertID       int64                     `json:"last_insert_id,omitempty"`
 	Message            string                    `json:"message,omitempty"`
 	BackupFile         string                    `json:"backup_file,omitempty"`
+	BackupWarning      string                    `json:"backup_warning,omitempty"`
 	BackupDataIncluded bool                      `json:"backup_data_included,omitempty"`
 	Columns            []driver.ColumnDefinition `json:"columns,omitempty"`
 	Rows               [][]any                   `json:"rows,omitempty"`
@@ -76,6 +77,8 @@ type ActiveSession struct {
 	activeTx       driver.TxSession
 	txStartedAt    time.Time
 	txLastActive   time.Time
+	closed         bool
+	runSeq         uint64
 	mu             sync.RWMutex
 }
 
@@ -89,14 +92,136 @@ func (s *ActiveSession) Close() error {
 		_ = s.activeTx.Rollback()
 		s.activeTx = nil
 	}
+	// Keep s.Session set: in-flight requests holding this *ActiveSession then get a clean
+	// "database is closed" error from the driver instead of a nil-pointer panic.
 	sess := s.Session
-	s.Session = nil
+	alreadyClosed := s.closed
+	s.closed = true
 	s.mu.Unlock()
 
-	if sess != nil {
+	if sess != nil && !alreadyClosed {
 		return sess.Close()
 	}
 	return nil
+}
+
+// Mutable session state is read and written by concurrent requests, so it goes through s.mu.
+
+func (s *ActiveSession) IsReadOnly() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.ReadOnly
+}
+
+// ToggleReadOnly flips the read-only lock and returns the new state.
+func (s *ActiveSession) ToggleReadOnly() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ReadOnly = !s.ReadOnly
+	return s.ReadOnly
+}
+
+func (s *ActiveSession) Schema() *driver.SchemaMetadata {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.CachedSchema
+}
+
+// SetSchema replaces the cached schema; nil is ignored so a nil-check followed by Schema() stays safe.
+func (s *ActiveSession) SetSchema(sc *driver.SchemaMetadata) {
+	if sc == nil {
+		return
+	}
+	s.mu.Lock()
+	s.CachedSchema = sc
+	s.mu.Unlock()
+}
+
+func (s *ActiveSession) Info() *driver.ServerInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.ServerInfo
+}
+
+func (s *ActiveSession) SetInfo(info *driver.ServerInfo) {
+	if info == nil {
+		return
+	}
+	s.mu.Lock()
+	s.ServerInfo = info
+	s.mu.Unlock()
+}
+
+func (s *ActiveSession) SetLatency(ms int64) {
+	s.mu.Lock()
+	s.LatencyMs = ms
+	s.mu.Unlock()
+}
+
+// MarshalJSON snapshots the exported fields under the lock.
+func (s *ActiveSession) MarshalJSON() ([]byte, error) {
+	type view struct {
+		ID           string                 `json:"id"`
+		ConnectionID string                 `json:"connection_id"`
+		Name         string                 `json:"name"`
+		Environment  string                 `json:"environment"`
+		DriverName   string                 `json:"driver_name"`
+		ReadOnly     bool                   `json:"read_only"`
+		CachedSchema *driver.SchemaMetadata `json:"schema,omitempty"`
+		ServerInfo   *driver.ServerInfo     `json:"server_info,omitempty"`
+		LatencyMs    int64                  `json:"latency_ms"`
+		MemoryMB     float64                `json:"memory_mb,omitempty"`
+		LastActive   time.Time              `json:"last_active"`
+	}
+	s.mu.RLock()
+	v := view{s.ID, s.ConnectionID, s.Name, s.Environment, s.DriverName, s.ReadOnly, s.CachedSchema, s.ServerInfo, s.LatencyMs, s.MemoryMB, s.LastActive}
+	s.mu.RUnlock()
+	return json.Marshal(v)
+}
+
+// sqlExecer is satisfied by driver.Session and driver.TxSession.
+type sqlExecer interface {
+	Exec(ctx context.Context, sql string, args ...any) (*driver.ExecResult, error)
+}
+
+// gridWriter returns the executor for grid mutations plus a finish func. When the user has an open
+// transaction the grid joins it (instead of blocking on that transaction's own row locks on another
+// pooled connection) and finish is a no-op; otherwise a fresh transaction makes multi-row edits
+// all-or-nothing: finish(nil) commits, finish(err) rolls back and returns err.
+func (s *ActiveSession) gridWriter(ctx context.Context) (sqlExecer, func(error) error, error) {
+	s.mu.Lock()
+	tx := s.activeTx
+	if tx != nil {
+		s.txLastActive = time.Now()
+	}
+	sess := s.Session
+	s.mu.Unlock()
+	if tx != nil {
+		return tx, func(err error) error { return err }, nil
+	}
+	if sess == nil {
+		return nil, nil, errors.New("no active database session")
+	}
+	own, err := sess.BeginTx(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return own, func(err error) error {
+		if err != nil {
+			_ = own.Rollback()
+			return err
+		}
+		return own.Commit()
+	}, nil
+}
+
+// rejectIfReadOnly writes 403 and returns true when the session is locked read-only.
+func rejectIfReadOnly(w http.ResponseWriter, sess *ActiveSession) bool {
+	if sess.IsReadOnly() {
+		writeError(w, http.StatusForbidden, "Session is locked in READ-ONLY mode")
+		return true
+	}
+	return false
 }
 
 // UseDatabase selects the active database context if a non-empty name is provided.
@@ -217,16 +342,17 @@ func (sm *SessionManager) startReaper() {
 
 // ConnectSession creates or activates a session for the given connection ID.
 func (sm *SessionManager) ConnectSession(ctx context.Context, connectionID string) (*ActiveSession, error) {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	// Check existing session
+	// Check existing session. The network I/O below (dial, ServerInfo, InspectSchema) runs without
+	// sm.mu so one slow or unreachable database cannot stall requests for every other connection.
+	sm.mu.RLock()
 	if sess, ok := sm.sessions[connectionID]; ok {
+		sm.mu.RUnlock()
 		sess.mu.Lock()
 		sess.LastActive = time.Now()
 		sess.mu.Unlock()
 		return sess, nil
 	}
+	sm.mu.RUnlock()
 
 	conn, err := sm.vault.GetConnection(connectionID)
 	if err != nil {
@@ -277,7 +403,18 @@ func (sm *SessionManager) ConnectSession(ctx context.Context, connectionID strin
 		runningQueries: make(map[string]context.CancelFunc),
 	}
 
+	sm.mu.Lock()
+	if existing, ok := sm.sessions[connectionID]; ok {
+		// A concurrent request connected first; keep its session and discard ours.
+		sm.mu.Unlock()
+		_ = dbSession.Close()
+		existing.mu.Lock()
+		existing.LastActive = time.Now()
+		existing.mu.Unlock()
+		return existing, nil
+	}
 	sm.sessions[connectionID] = active
+	sm.mu.Unlock()
 	return active, nil
 }
 
@@ -296,7 +433,9 @@ func (sm *SessionManager) GetSession(connectionID string) (*ActiveSession, error
 	// ponytail: lazy auto-reconnect on demand when an evicted session is accessed
 	if sm.vault != nil && connectionID != "" {
 		if _, err := sm.vault.GetConnection(connectionID); err == nil {
-			return sm.ConnectSession(context.Background(), connectionID)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			return sm.ConnectSession(ctx, connectionID)
 		}
 	}
 
@@ -386,8 +525,8 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 
 	// 1. Safety Guard Inspection with Scoped Database Context
 	targetDB := req.Database
-	if targetDB == "" && s.CachedSchema != nil {
-		targetDB = s.CachedSchema.DatabaseName
+	if targetDB == "" && s.Schema() != nil {
+		targetDB = s.Schema().DatabaseName
 	}
 	inspection, allQueries, err := inspectAllStatements(trimmedSQL, s.Environment, s.DriverName, targetDB)
 	if err != nil {
@@ -395,7 +534,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	}
 
 	// 2. Read-Only Enforcement: blocks all destructive operations or any mutation when locked
-	if s.ReadOnly && (!isSelect || !allQueries || inspection.IsDestructive) {
+	if s.IsReadOnly() && (!isSelect || !allQueries || inspection.IsDestructive) {
 		return nil, ErrReadOnlySession
 	}
 
@@ -404,7 +543,8 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	isMutation := inspection.Operation == "DELETE" || inspection.Operation == "UPDATE" || len(inspection.StatementEstimates) > 0
 	canBypass := isDev && req.BypassMutationConfirm && !inspection.RequiresChallenge
 
-	if isMutation && !canBypass && !req.Confirmed {
+	if isMutation && !canBypass {
+		// Re-derived on confirmed requests too, so a client cannot skip the typed challenge by sending confirmed=true first.
 		s.estimateAffectedRows(ctx, inspection)
 
 		anyMissingWhere := false
@@ -456,11 +596,11 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 			if locks, err := s.Session.InspectTableLocks(ctx, req.Database, inspection.TargetTable); err == nil {
 				inspection.TableLocks = locks
 			}
-			schema := s.CachedSchema
+			schema := s.Schema()
 			if schema == nil || (req.Database != "" && schema.DatabaseName != req.Database) {
 				if sSc, sErr := s.Session.InspectSchema(ctx, req.Database); sErr == nil {
 					schema = sSc
-					s.CachedSchema = sSc
+					s.SetSchema(sSc)
 				}
 			}
 			if schema != nil {
@@ -477,6 +617,11 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	if inspection.RequiresChallenge && req.Confirmed && inspection.TargetTable != "" {
 		expected := inspection.TargetTable
 		typed := strings.TrimSpace(req.ChallengeInput)
+		if typed == "" {
+			// Confirmed without a typed challenge (the requirement escalated since the preview, e.g. the
+			// row estimate grew past the threshold): ask again instead of failing the request.
+			return &ExecuteResponse{Blocked: true, Inspection: inspection}, nil
+		}
 		if !strings.EqualFold(typed, expected) && !strings.EqualFold(typed, inspection.TargetDatabase) {
 			return nil, fmt.Errorf("Challenge confirmation failed: expected '%s', got '%s'", expected, req.ChallengeInput)
 		}
@@ -485,12 +630,26 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	// 4. Pre-DDL Automated Backup
 	var backupFile string
 	var backupDataIncluded bool
-	if (inspection.Operation == "DROP" || inspection.Operation == "TRUNCATE") && !strings.EqualFold(inspection.TargetType, "DATABASE") && !strings.EqualFold(inspection.TargetType, "VIEW") {
+	var backupWarning string
+	tt := strings.ToUpper(inspection.TargetType)
+	if (inspection.Operation == "DROP" || inspection.Operation == "TRUNCATE") && (tt == "" || tt == "TABLE") {
 		if inspection.TargetTable != "" && s.backupDir != "" && s.Session != nil {
-			var err error
-			backupFile, backupDataIncluded, err = safety.BackupTable(ctx, s.Session, s.backupDir, inspection.TargetTable, s.DriverName)
-			if err != nil {
-				// Log backup warning, proceed with explicit challenge confirmation
+			// BackupTable reads the table from the session's active database. A qualified target in
+			// another database (DROP TABLE archive.orders) is not snapshotted at all rather than
+			// snapshotting a same-named table here, or switching the shared session's database
+			// under concurrent requests.
+			if inspection.TargetDatabase != "" && targetDB != "" && !strings.EqualFold(inspection.TargetDatabase, targetDB) {
+				backupWarning = fmt.Sprintf("Pre-execution backup skipped: '%s.%s' is outside the active database '%s'; run it from that database to get an automatic snapshot.",
+					inspection.TargetDatabase, inspection.TargetTable, targetDB)
+			} else {
+				var err error
+				backupFile, backupDataIncluded, err = safety.BackupTable(ctx, s.Session, s.backupDir, inspection.TargetTable, s.DriverName)
+				if err != nil {
+					backupWarning = "Pre-execution backup incomplete: " + err.Error()
+				}
+			}
+			if backupWarning != "" {
+				slog.Warn("pre_ddl_backup_failed", "module", "safety", "table", inspection.TargetTable, "warning", backupWarning)
 			}
 		}
 	}
@@ -503,24 +662,20 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	}
 
 	execCtx, cancel := context.WithCancel(ctx)
-	execCtx = driver.WithQueryID(execCtx, queryID)
 	defer cancel()
-
-	s.mu.Lock()
-	if s.runningQueries == nil {
-		s.runningQueries = make(map[string]context.CancelFunc)
-	}
-	s.runningQueries[queryID] = cancel
-	s.mu.Unlock()
+	// Each execution gets a unique run key: clients reuse query IDs (the editor always sends
+	// "active"), and a shared key let the first query to finish unregister a still-running one.
+	runKey := s.registerQuery(queryID, cancel)
+	execCtx = driver.WithQueryID(execCtx, runKey)
 
 	defer func() {
 		s.mu.Lock()
-		delete(s.runningQueries, queryID)
+		delete(s.runningQueries, runKey)
 		s.mu.Unlock()
 		if execCtx.Err() != nil && s.Session != nil {
 			// ponytail: Actively cancel runaway query on DB server to prevent CPU/IO exhaustion
 			cancelCtx, cCancel := context.WithTimeout(context.Background(), 3*time.Second)
-			_ = s.Session.CancelQuery(cancelCtx, queryID)
+			_ = s.Session.CancelQuery(cancelCtx, runKey)
 			cCancel()
 		}
 	}()
@@ -719,6 +874,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 				Message:            msg,
 				BackupFile:         backupFile,
 				BackupDataIncluded: backupDataIncluded,
+				BackupWarning:      backupWarning,
 				Profile:            collectProfile(),
 				Inspection:         inspection,
 			}, nil
@@ -789,6 +945,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 			Message:            msg,
 			BackupFile:         backupFile,
 			BackupDataIncluded: backupDataIncluded,
+			BackupWarning:      backupWarning,
 			Profile:            collectProfile(),
 			TxActive:           currentTx != nil,
 			Inspection:         inspection,
@@ -864,8 +1021,8 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 
 	// 1. Safety Guard Inspection with Scoped Database Context
 	targetDB := req.Database
-	if targetDB == "" && s.CachedSchema != nil {
-		targetDB = s.CachedSchema.DatabaseName
+	if targetDB == "" && s.Schema() != nil {
+		targetDB = s.Schema().DatabaseName
 	}
 	inspection, allQueries, err := inspectAllStatements(trimmedSQL, s.Environment, s.DriverName, targetDB)
 	if err != nil {
@@ -873,7 +1030,7 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 	}
 
 	// 2. Read-Only Enforcement
-	if s.ReadOnly && (!isSelect || !allQueries || inspection.IsDestructive) {
+	if s.IsReadOnly() && (!isSelect || !allQueries || inspection.IsDestructive) {
 		return nil, ErrReadOnlySession
 	}
 
@@ -882,7 +1039,8 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 	isMutation := inspection.Operation == "DELETE" || inspection.Operation == "UPDATE" || len(inspection.StatementEstimates) > 0
 	canBypass := isDev && req.BypassMutationConfirm && !inspection.RequiresChallenge
 
-	if isMutation && !canBypass && !req.Confirmed {
+	if isMutation && !canBypass {
+		// Re-derived on confirmed requests too, so a client cannot skip the typed challenge by sending confirmed=true first.
 		s.estimateAffectedRows(ctx, inspection)
 
 		anyMissingWhere := false
@@ -931,11 +1089,11 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 			if locks, err := s.Session.InspectTableLocks(ctx, req.Database, inspection.TargetTable); err == nil {
 				inspection.TableLocks = locks
 			}
-			schema := s.CachedSchema
+			schema := s.Schema()
 			if schema == nil || (req.Database != "" && schema.DatabaseName != req.Database) {
 				if sSc, sErr := s.Session.InspectSchema(ctx, req.Database); sErr == nil {
 					schema = sSc
-					s.CachedSchema = sSc
+					s.SetSchema(sSc)
 				}
 			}
 			if schema != nil {
@@ -952,13 +1110,19 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 	if inspection.RequiresChallenge && req.Confirmed && inspection.TargetTable != "" {
 		expected := inspection.TargetTable
 		typed := strings.TrimSpace(req.ChallengeInput)
+		if typed == "" {
+			// Confirmed without a typed challenge (the requirement escalated since the preview, e.g. the
+			// row estimate grew past the threshold): ask again instead of failing the request.
+			return &ExecuteResponse{Blocked: true, Inspection: inspection}, nil
+		}
 		if !strings.EqualFold(typed, expected) && !strings.EqualFold(typed, inspection.TargetDatabase) {
 			return nil, fmt.Errorf("Challenge confirmation failed: expected '%s', got '%s'", expected, req.ChallengeInput)
 		}
 	}
 
-	// Non-SELECT queries (mutations/DDL/transactions): run synchronously and output single NDJSON line
-	if !isSelect {
+	// Non-SELECT queries (mutations/DDL/transactions) and mixed batches such as "SELECT 1; DROP TABLE t"
+	// run synchronously through Execute (which owns the pre-DDL backup) and output a single NDJSON line.
+	if !isSelect || !allQueries {
 		resp, execErr := s.Execute(ctx, req)
 		if execErr != nil {
 			return nil, execErr
@@ -990,23 +1154,19 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 	}()
 
 	execCtx, cancel := context.WithCancel(ctx)
-	execCtx = driver.WithQueryID(execCtx, queryID)
 	defer cancel()
-
-	s.mu.Lock()
-	if s.runningQueries == nil {
-		s.runningQueries = make(map[string]context.CancelFunc)
-	}
-	s.runningQueries[queryID] = cancel
-	s.mu.Unlock()
+	// Each execution gets a unique run key: clients reuse query IDs (the editor always sends
+	// "active"), and a shared key let the first query to finish unregister a still-running one.
+	runKey := s.registerQuery(queryID, cancel)
+	execCtx = driver.WithQueryID(execCtx, runKey)
 
 	defer func() {
 		s.mu.Lock()
-		delete(s.runningQueries, queryID)
+		delete(s.runningQueries, runKey)
 		s.mu.Unlock()
 		if execCtx.Err() != nil && s.Session != nil {
 			cancelCtx, cCancel := context.WithTimeout(context.Background(), 3*time.Second)
-			_ = s.Session.CancelQuery(cancelCtx, queryID)
+			_ = s.Session.CancelQuery(cancelCtx, runKey)
 			cCancel()
 		}
 	}()
@@ -1027,14 +1187,15 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 	}
 	s.mu.Unlock()
 
+	// Fetch one row past the limit so has_more is exact (a result of exactly `limit` rows is complete).
 	var stream driver.RowStream
 	if currentTx != nil {
-		stream, streamErr = currentTx.QueryStream(execCtx, trimmedSQL, limit)
+		stream, streamErr = currentTx.QueryStream(execCtx, trimmedSQL, limit+1)
 	} else {
 		if s.Session == nil {
 			return nil, errors.New("no active database session")
 		}
-		stream, streamErr = s.Session.QueryStream(execCtx, trimmedSQL, limit)
+		stream, streamErr = s.Session.QueryStream(execCtx, trimmedSQL, limit+1)
 	}
 	if streamErr != nil {
 		return nil, streamErr
@@ -1060,7 +1221,7 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 	}
 
 	// 2. Micro-Chunk: first 20 rows flushed immediately (<15ms)
-	firstChunk, err := stream.NextChunk(20)
+	firstChunk, err := stream.NextChunk(min(20, limit))
 	if len(firstChunk) > 0 {
 		totalRows += len(firstChunk)
 		if encErr := enc.Encode(map[string]any{
@@ -1124,6 +1285,12 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 		return nil, err
 	}
 
+	hasMore := false
+	if err == nil && totalRows >= limit {
+		extra, _ := stream.NextChunk(1)
+		hasMore = len(extra) > 0
+	}
+
 	// 4. Final Line: done
 	dur := time.Since(start).Milliseconds()
 	var prof *driver.QueryProfile
@@ -1170,7 +1337,7 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 		"type":         "done",
 		"row_count":    totalRows,
 		"execution_ms": dur,
-		"has_more":     totalRows >= limit,
+		"has_more":     hasMore,
 		"tx_active":    currentTx != nil,
 	}
 	if prof != nil {
@@ -1188,26 +1355,49 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 }
 
 // CancelQuery attempts to interrupt a running query by queryID.
-func (s *ActiveSession) CancelQuery(ctx context.Context, queryID string) error {
+// registerQuery records cancel under a unique run key derived from the client's query ID.
+func (s *ActiveSession) registerQuery(queryID string, cancel context.CancelFunc) string {
 	s.mu.Lock()
-	cancel, ok := s.runningQueries[queryID]
-	if !ok && (queryID == "active" || queryID == "") {
-		for _, c := range s.runningQueries {
+	defer s.mu.Unlock()
+	if s.runningQueries == nil {
+		s.runningQueries = make(map[string]context.CancelFunc)
+	}
+	s.runSeq++
+	key := fmt.Sprintf("%s#%d", queryID, s.runSeq)
+	s.runningQueries[key] = cancel
+	return key
+}
+
+// CancelQuery cancels every running execution registered under queryID ("active"/"" cancels all),
+// both client-side (context) and server-side (driver KILL / pg_cancel_backend per run key).
+func (s *ActiveSession) CancelQuery(ctx context.Context, queryID string) error {
+	all := queryID == "" || queryID == "active"
+	s.mu.Lock()
+	var keys []string
+	for k, c := range s.runningQueries {
+		if all || k == queryID || strings.HasPrefix(k, queryID+"#") {
+			keys = append(keys, k)
 			if c != nil {
 				c()
 			}
 		}
 	}
+	sess := s.Session
 	s.mu.Unlock()
 
-	if ok && cancel != nil {
-		cancel()
+	if sess == nil {
+		return nil
 	}
-
-	if s.Session != nil {
-		return s.Session.CancelQuery(ctx, queryID)
+	if len(keys) == 0 {
+		return sess.CancelQuery(ctx, queryID)
 	}
-	return nil
+	var firstErr error
+	for _, k := range keys {
+		if err := sess.CancelQuery(ctx, k); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 // GetProcesslist retrieves active threads and lock wait graph from the active driver.
@@ -1268,14 +1458,14 @@ func (s *ActiveSession) Stream(ctx context.Context, sql string, maxRows int) (dr
 
 	isSelect := driver.IsQueryStatement(trimmedSQL)
 	targetDB := ""
-	if s.CachedSchema != nil {
-		targetDB = s.CachedSchema.DatabaseName
+	if s.Schema() != nil {
+		targetDB = s.Schema().DatabaseName
 	}
 	inspection, allQueries, err := inspectAllStatements(trimmedSQL, s.Environment, s.DriverName, targetDB)
 	if err != nil {
 		return nil, err
 	}
-	if s.ReadOnly && (!isSelect || !allQueries || inspection.IsDestructive) {
+	if s.IsReadOnly() && (!isSelect || !allQueries || inspection.IsDestructive) {
 		return nil, ErrReadOnlySession
 	}
 	if inspection.IsDestructive || inspection.RequiresChallenge {

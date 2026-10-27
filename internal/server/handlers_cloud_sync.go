@@ -199,17 +199,20 @@ func (s *Server) handleRunCloudSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg.LastSyncStatus = "syncing"
-	_ = s.vault.SaveCloudSyncConfig(cfg)
+	if !s.cloudSyncRunMu.TryLock() {
+		writeError(w, http.StatusConflict, "a cloud sync is already in progress")
+		return
+	}
+	defer s.cloudSyncRunMu.Unlock()
+
+	_ = s.vault.UpdateCloudSyncStatus("syncing", "", nil, "")
 
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
 	res, err := vault.SyncToGitHub(ctx, s.vault, cfg, s.masterPassword)
 	if err != nil {
-		cfg.LastSyncStatus = "error"
-		cfg.LastSyncError = err.Error()
-		_ = s.vault.SaveCloudSyncConfig(cfg)
+		_ = s.vault.UpdateCloudSyncStatus("error", err.Error(), nil, "")
 		writeError(w, http.StatusInternalServerError, "Sync failed: "+err.Error())
 		return
 	}
@@ -335,14 +338,16 @@ func (s *Server) notifyCloudSyncChange() {
 	s.cloudSyncMu.Lock()
 	defer s.cloudSyncMu.Unlock()
 
-	cfg.LastSyncStatus = "pending"
-	_ = s.vault.SaveCloudSyncConfig(cfg)
+	_ = s.vault.UpdateCloudSyncStatus("pending", cfg.LastSyncError, nil, "")
 
 	if s.cloudSyncTimer != nil {
 		s.cloudSyncTimer.Stop()
 	}
 
 	s.cloudSyncTimer = time.AfterFunc(30*time.Second, func() {
+		s.cloudSyncRunMu.Lock()
+		defer s.cloudSyncRunMu.Unlock()
+
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 
@@ -351,14 +356,11 @@ func (s *Server) notifyCloudSyncChange() {
 			return
 		}
 
-		currentCfg.LastSyncStatus = "syncing"
-		_ = s.vault.SaveCloudSyncConfig(currentCfg)
+		_ = s.vault.UpdateCloudSyncStatus("syncing", "", nil, "")
 
 		_, syncErr := vault.SyncToGitHub(ctx, s.vault, currentCfg, s.masterPassword)
 		if syncErr != nil {
-			currentCfg.LastSyncStatus = "error"
-			currentCfg.LastSyncError = syncErr.Error()
-			_ = s.vault.SaveCloudSyncConfig(currentCfg)
+			_ = s.vault.UpdateCloudSyncStatus("error", syncErr.Error(), nil, "")
 		}
 	})
 }

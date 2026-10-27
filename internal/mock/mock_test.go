@@ -1,10 +1,13 @@
 package mock
 
 import (
+	"context"
 	"math/rand"
+	"path/filepath"
 	"testing"
 
 	"sqlfox/internal/driver"
+	_ "sqlfox/internal/driver/sqlite"
 )
 
 // Self-check: covers generateValue type dispatch and basic topology helpers.
@@ -167,4 +170,28 @@ func kahnSort(deps map[string][]string) []string {
 		}
 	}
 	return result
+}
+
+func TestGenerate_RepeatedRunsDoNotCollideOnPK(t *testing.T) {
+	ctx := context.Background()
+	sess, err := driver.Connect(ctx, driver.Config{Driver: "sqlite", DatabaseName: filepath.Join(t.TempDir(), "m.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	if _, err := sess.ExecRaw(ctx, "CREATE TABLE items (id BIGINT PRIMARY KEY, name VARCHAR(40) NOT NULL)"); err != nil {
+		t.Fatal(err)
+	}
+	for run := 0; run < 2; run++ {
+		if _, err := Generate(ctx, sess, Config{DriverName: "sqlite", Table: "items", Rows: 3000}); err != nil {
+			t.Fatalf("run %d: %v", run+1, err)
+		}
+	}
+	rows, err := sess.QueryRaw(ctx, "SELECT COUNT(*), COUNT(DISTINCT id) FROM items")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows[0][0] != int64(6000) || rows[0][1] != int64(6000) {
+		t.Fatalf("expected 6000 distinct ids, got %v", rows[0])
+	}
 }
