@@ -175,3 +175,25 @@ func TestFirewall_BuildSchemaPrompt_LargeSchema(t *testing.T) {
 		t.Fatal("expected summary list of other tables")
 	}
 }
+
+func TestFirewall_MaskingCoversEveryIdentifier(t *testing.T) {
+	var tables []driver.TableMetadata
+	for i := 0; i < 40; i++ { // > 30 tables exercises the "Other Tables" list
+		tables = append(tables, driver.TableMetadata{
+			Name:    fmt.Sprintf("secret_tbl_%d", i),
+			Columns: []driver.ColumnMetadata{{Name: "pelanggan_ü-id", Type: "int"}},
+			Indexes: []driver.IndexMetadata{{Name: "idx_hidden", Columns: []string{"customer_email"}}},
+		})
+	}
+	prompt := BuildSchemaPrompt(&driver.SchemaMetadata{Tables: tables}, "", true)
+	for _, leak := range []string{"secret_tbl", "pelanggan", "idx_hidden", "customer_email"} {
+		if strings.Contains(prompt, leak) {
+			t.Fatalf("masked prompt leaks %q:\n%s", leak, prompt)
+		}
+	}
+	sysPrompt, userPrompt := AssemblePrompts(AssistRequest{IncludeSchema: true, MaskIdentifiers: true, Schema: &driver.SchemaMetadata{Tables: tables[:1]},
+		TableNotes: []TableNoteSummary{{TableName: "secret_tbl_0", Content: "VIP customers live here"}}})
+	if strings.Contains(sysPrompt+userPrompt, "VIP customers") {
+		t.Fatalf("table notes leaked while masking is enabled")
+	}
+}

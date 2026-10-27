@@ -40,6 +40,11 @@ func RunTransfer(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 		return 1
 	}
 
+	if *batchSizeFlag <= 0 {
+		fmt.Fprintln(stderr, "❌ Error: --batch-size must be a positive integer.")
+		return 1
+	}
+
 	if *tablesFlag == "" && !*allTablesFlag {
 		fmt.Fprintln(stderr, "❌ Error: Specify either --tables \"tbl1,tbl2\" or --all-tables.")
 		return 1

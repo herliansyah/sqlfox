@@ -397,7 +397,7 @@ func TestPostgresStructureSyncColumnAlter(t *testing.T) {
 	srcCol := driver.ColumnMetadata{Name: "score", Type: "bigint", IsNullable: false, DefaultValue: "0"}
 	tgtCol := driver.ColumnMetadata{Name: "score", Type: "integer", IsNullable: true, DefaultValue: ""}
 
-	if columnEquals(srcCol, tgtCol) {
+	if columnEquals(srcCol, tgtCol, "postgres", "postgres") {
 		t.Fatal("expected columns to not equal")
 	}
 
@@ -574,7 +574,7 @@ func TestCrossDialectDDLNormalization(t *testing.T) {
 	}
 
 	// SQLite target
-	sqliteDDL := buildCreateTableDDL(tbl, "sqlite")
+	sqliteDDL := buildCreateTableDDL(tbl, "mysql", "sqlite")
 	if strings.Contains(sqliteDDL, "auto_increment") {
 		t.Errorf("expected SQLite DDL to strip MySQL auto_increment, got:\n%s", sqliteDDL)
 	}
@@ -586,7 +586,7 @@ func TestCrossDialectDDLNormalization(t *testing.T) {
 	}
 
 	// Postgres target
-	pgDDL := buildCreateTableDDL(tbl, "postgres")
+	pgDDL := buildCreateTableDDL(tbl, "mysql", "postgres")
 	if strings.Contains(pgDDL, "auto_increment") {
 		t.Errorf("expected Postgres DDL to strip MySQL auto_increment, got:\n%s", pgDDL)
 	}
@@ -598,5 +598,113 @@ func TestCrossDialectDDLNormalization(t *testing.T) {
 	}
 	if !strings.Contains(pgDDL, `"score" DOUBLE PRECISION`) {
 		t.Errorf("expected Postgres DDL to normalize double to DOUBLE PRECISION, got:\n%s", pgDDL)
+	}
+}
+
+func TestStructureSync_ColumnDefinitionsAreValidSQL(t *testing.T) {
+	cases := []struct {
+		col                  driver.ColumnMetadata
+		src, tgt, want, deny string
+	}{
+		// MySQL 8 marks CURRENT_TIMESTAMP defaults with DEFAULT_GENERATED: metadata, not syntax.
+		{driver.ColumnMetadata{Type: "timestamp", DefaultValue: "CURRENT_TIMESTAMP", Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
+			"mysql", "mysql", "timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP on update CURRENT_TIMESTAMP", "DEFAULT_GENERATED"},
+		// MySQL 8 expression default must be parenthesized, not quoted.
+		{driver.ColumnMetadata{Type: "char(36)", DefaultValue: "uuid()", Extra: "DEFAULT_GENERATED"},
+			"mysql", "mysql", "char(36) NOT NULL DEFAULT (uuid())", "'uuid()'"},
+		// MySQL literal defaults come back unquoted and must be escaped for MySQL.
+		{driver.ColumnMetadata{Type: "varchar(20)", DefaultValue: `C:\tmp`, IsNullable: true},
+			"mysql", "mysql", `varchar(20) DEFAULT 'C:\\tmp'`, ""},
+		{driver.ColumnMetadata{Type: "int", DefaultValue: "0", Extra: "auto_increment"},
+			"mysql", "mysql", "int NOT NULL DEFAULT 0 AUTO_INCREMENT", ""},
+		// PostgreSQL defaults are expressions already.
+		{driver.ColumnMetadata{Type: "timestamp without time zone", DefaultValue: "now()"},
+			"postgres", "postgres", "timestamp without time zone NOT NULL DEFAULT now()", "'now()'"},
+		{driver.ColumnMetadata{Type: "character varying", DefaultValue: "'new'::character varying", IsNullable: true},
+			"postgres", "postgres", "character varying DEFAULT 'new'::character varying", ""},
+		// Cross-driver: casts and sequences don't leak into MySQL.
+		{driver.ColumnMetadata{Type: "character varying", DefaultValue: "'new'::character varying", IsNullable: true},
+			"postgres", "mysql", "TEXT DEFAULT 'new'", "::"},
+		{driver.ColumnMetadata{Type: "integer", DefaultValue: "nextval('t_id_seq'::regclass)"},
+			"postgres", "mysql", "INT NOT NULL", "nextval"},
+		{driver.ColumnMetadata{Type: "int unsigned", IsNullable: true},
+			"mysql", "postgres", "BIGINT", "unsigned"},
+		{driver.ColumnMetadata{Type: "datetime(6)", IsNullable: true},
+			"mysql", "postgres", "TIMESTAMP(6)", ""},
+	}
+	for _, c := range cases {
+		got := buildColumnDefinition(c.col, c.src, c.tgt)
+		if !strings.EqualFold(got, c.want) {
+			t.Errorf("%s->%s %+v: got %q, want %q", c.src, c.tgt, c.col, got, c.want)
+		}
+		if c.deny != "" && strings.Contains(got, c.deny) {
+			t.Errorf("%s->%s: %q must not contain %q", c.src, c.tgt, got, c.deny)
+		}
+	}
+
+	// Same logical column across drivers is not reported as a mismatch.
+	src := driver.ColumnMetadata{Type: "int(11)", DefaultValue: "0"}
+	tgt := driver.ColumnMetadata{Type: "integer", DefaultValue: "0"}
+	if !columnEquals(src, tgt, "mysql", "postgres") {
+		t.Errorf("int(11) DEFAULT 0 (mysql) should equal integer DEFAULT 0 (postgres)")
+	}
+}
+
+func TestSyncWire_BigIntAndBinaryRoundTrip(t *testing.T) {
+	big := int64(9007199254740993) // 2^53 + 1: not representable as float64
+	bin := string([]byte{0x00, 0xff, 0xfe, 'a'})
+	row := []any{big, bin, "plain", int64(42), nil}
+
+	payload, err := json.Marshal(syncWireRow(row))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dec := json.NewDecoder(strings.NewReader(string(payload)))
+	dec.UseNumber()
+	var back []any
+	if err := dec.Decode(&back); err != nil {
+		t.Fatal(err)
+	}
+	types := []string{"bigint", "varbinary(8)", "varchar(10)", "int", "text"}
+	got := make([]any, len(back))
+	for i, v := range back {
+		got[i] = fromSyncWire(v, types[i])
+	}
+	if got[0] != big {
+		t.Errorf("bigint: got %#v, want %d", got[0], big)
+	}
+	if b, ok := got[1].([]byte); !ok || string(b) != bin {
+		t.Errorf("binary: got %#v", got[1])
+	}
+	if got[2] != "plain" || got[3] != int64(42) || got[4] != nil {
+		t.Errorf("scalars changed: %#v", got)
+	}
+	// A numeric-looking string in a text column must stay a string.
+	if v := fromSyncWire("00123", "varchar(10)"); v != "00123" {
+		t.Errorf("varchar value converted: %#v", v)
+	}
+}
+
+func TestStripPgCastsAndIntegerTypes(t *testing.T) {
+	cases := map[string]string{
+		"'a::b'::text":               "'a::b'",
+		"'it''s'::character varying": "'it''s'",
+		"(0)::numeric(10,2)":         "(0)",
+		"'{}'::jsonb":                "'{}'",
+	}
+	for in, want := range cases {
+		if got := stripPgCasts(in); got != want {
+			t.Errorf("stripPgCasts(%q) = %q, want %q", in, got, want)
+		}
+	}
+	for _, ty := range []string{"int", "INTEGER", "bigint unsigned", "int(11)", "smallserial", "int8"} {
+		if !isIntegerColumnType(ty) {
+			t.Errorf("%q should be an integer type", ty)
+		}
+	}
+	for _, ty := range []string{"interval", "point", "varchar(10)", "numeric"} {
+		if isIntegerColumnType(ty) {
+			t.Errorf("%q must not be an integer type", ty)
+		}
 	}
 }

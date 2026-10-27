@@ -130,3 +130,46 @@ func TestNotesBundle_ExportAndImport(t *testing.T) {
 		t.Errorf("snippet sql content mismatch: got %q, want %q", foundSnippet.SQLContent, snip.SQLContent)
 	}
 }
+
+func TestNotesBundle_TableNoteIdentifiersRoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	v1, err := OpenVault(filepath.Join(tmpDir, "a.db"), "pin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v1.Close()
+	v2, err := OpenVault(filepath.Join(tmpDir, "b.db"), "pin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v2.Close()
+
+	names := [][3]string{
+		{"conn-1", "my_app", "order_items"},
+		{"conn-1", "my_app", "Order_Items"},
+		{"conn-1", "", "a/b"},
+		{"conn-1", "db", ".."},
+		{"conn-1", "db", "pengguna_ü"},
+	}
+	for _, n := range names {
+		if err := v1.SaveTableNote(&TableNote{ConnectionID: n[0], DatabaseName: n[1], TableName: n[2], Content: "note " + n[2]}); err != nil {
+			t.Fatalf("SaveTableNote %v: %v", n, err)
+		}
+	}
+	zipBytes, err := ExportNotesBundle(v1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ImportNotesBundle(v2, zipBytes); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range names {
+		got, err := v2.GetTableNote(n[0], n[1], n[2])
+		if err != nil {
+			t.Fatalf("table note %v not restored: %v", n, err)
+		}
+		if got.Content != "note "+n[2] {
+			t.Errorf("table note %v content = %q", n, got.Content)
+		}
+	}
+}

@@ -2,7 +2,6 @@ package ai
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	"sqlfox/internal/driver"
@@ -61,11 +60,27 @@ func BuildSchemaPrompt(schema *driver.SchemaMetadata, referencedQuery string, ma
 		}
 	}
 
+	// Masking is applied to every identifier as the prompt is built (table, column, index and
+	// index-column names, and the "other tables" list), so no real name can slip through a
+	// post-hoc regex that only recognised backticked ASCII tokens.
+	mapping := make(map[string]string)
+	ident := func(name string) string {
+		if !maskIdentifiers {
+			return name
+		}
+		if m, ok := mapping[name]; ok {
+			return m
+		}
+		m := fmt.Sprintf("masked_%d", len(mapping)+1)
+		mapping[name] = m
+		return m
+	}
+
 	var sb strings.Builder
 	sb.WriteString("Database Schema Context (Metadata Only - No Row Data Included):\n\n")
 
 	for _, tbl := range activeTables {
-		sb.WriteString(fmt.Sprintf("Table `%s` (%d estimated rows):\n", tbl.Name, tbl.RowCount))
+		sb.WriteString(fmt.Sprintf("Table `%s` (%d estimated rows):\n", ident(tbl.Name), tbl.RowCount))
 		sb.WriteString("  Columns:\n")
 		for _, col := range tbl.Columns {
 			pkStr := ""
@@ -76,7 +91,7 @@ func BuildSchemaPrompt(schema *driver.SchemaMetadata, referencedQuery string, ma
 			if col.IsNullable {
 				nullStr = " NULL"
 			}
-			sb.WriteString(fmt.Sprintf("    - `%s` %s%s%s\n", col.Name, col.Type, nullStr, pkStr))
+			sb.WriteString(fmt.Sprintf("    - `%s` %s%s%s\n", ident(col.Name), col.Type, nullStr, pkStr))
 		}
 		if len(tbl.Indexes) > 0 {
 			sb.WriteString("  Indexes:\n")
@@ -85,38 +100,23 @@ func BuildSchemaPrompt(schema *driver.SchemaMetadata, referencedQuery string, ma
 				if idx.IsUnique {
 					uniqueStr = "UNIQUE "
 				}
-				sb.WriteString(fmt.Sprintf("    - %sINDEX `%s` (%s)\n", uniqueStr, idx.Name, strings.Join(idx.Columns, ", ")))
+				cols := make([]string, len(idx.Columns))
+				for i, c := range idx.Columns {
+					cols[i] = "`" + ident(c) + "`"
+				}
+				sb.WriteString(fmt.Sprintf("    - %sINDEX `%s` (%s)\n", uniqueStr, ident(idx.Name), strings.Join(cols, ", ")))
 			}
 		}
 		sb.WriteString("\n")
 	}
 
 	if len(otherTableNames) > 0 {
-		sb.WriteString(fmt.Sprintf("Other Tables in Database (columns omitted for brevity):\n%s\n\n", strings.Join(otherTableNames, ", ")))
-	}
-
-	result := sb.String()
-	if maskIdentifiers {
-		result = applyMasking(result)
-	}
-
-	return result
-}
-
-var tokenRegex = regexp.MustCompile("`[a-zA-Z0-9_]+`")
-
-func applyMasking(ddl string) string {
-	mapping := make(map[string]string)
-	colCounter := 1
-
-	return tokenRegex.ReplaceAllStringFunc(ddl, func(match string) string {
-		clean := strings.Trim(match, "`")
-		if val, exists := mapping[clean]; exists {
-			return "`" + val + "`"
+		names := make([]string, len(otherTableNames))
+		for i, n := range otherTableNames {
+			names[i] = ident(n)
 		}
-		masked := fmt.Sprintf("masked_%d", colCounter)
-		colCounter++
-		mapping[clean] = masked
-		return "`" + masked + "`"
-	})
+		sb.WriteString(fmt.Sprintf("Other Tables in Database (columns omitted for brevity):\n%s\n\n", strings.Join(names, ", ")))
+	}
+
+	return sb.String()
 }

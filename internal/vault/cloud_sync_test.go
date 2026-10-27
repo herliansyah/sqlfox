@@ -226,3 +226,25 @@ func TestCloudSync_MockGitHubReplication(t *testing.T) {
 		t.Errorf("expected non-nil LastSyncAt")
 	}
 }
+
+func TestCloudSync_MirrorDeletionScope(t *testing.T) {
+	cases := []struct {
+		path, prefix string
+		managed      bool
+	}{
+		{"README.md", "", false},
+		{"src/main.go", "", false},
+		{"notes/1-a.md", "", true},
+		{"table-notes/c/d/t.md", "", true},
+		{"snippets/1-x.sql", "", true},
+		{"vault-backup.sqlfox-vault", "", true},
+		{"backup/notes/1-a.md", "backup", true},
+		{"notes/1-a.md", "backup", false},
+		{"backup/README.md", "backup", false},
+	}
+	for _, c := range cases {
+		if got := isSyncManagedPath(c.path, c.prefix); got != c.managed {
+			t.Errorf("isSyncManagedPath(%q, %q) = %v, want %v", c.path, c.prefix, got, c.managed)
+		}
+	}
+}

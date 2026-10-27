@@ -76,14 +76,14 @@ func Inspect(query string, environment string) *InspectionResult {
 	// Try AST parsing first (Vitess parser)
 	stmt, err := sqlparser.Parse(clean)
 	if err == nil {
-		return inspectAST(stmt, environment)
+		return inspectAST(stmt, environment, clean)
 	}
 
 	// ponytail: Lexical fallback for statements Vitess parser doesn't cover (e.g. multi-statements or SQLite specific syntax); upgrade path: dedicated SQLite lexer
 	return inspectLexicalFallback(clean, environment)
 }
 
-func inspectAST(stmt sqlparser.Statement, environment string) *InspectionResult {
+func inspectAST(stmt sqlparser.Statement, environment, query string) *InspectionResult {
 	isProd := strings.EqualFold(environment, "Production")
 	isStaging := strings.EqualFold(environment, "Staging")
 
@@ -92,7 +92,7 @@ func inspectAST(stmt sqlparser.Statement, environment string) *InspectionResult 
 		tableName := sqlparser.String(node.TableExprs)
 		targetTbl := cleanTableName(tableName)
 		db, _ := extractDBAndTable(tableName)
-		if node.Where == nil {
+		if node.Where == nil || !hasWhereOutsideLiterals(query) {
 			return &InspectionResult{
 				RiskLevel:         RiskCritical,
 				IsDestructive:     true,
@@ -133,7 +133,7 @@ func inspectAST(stmt sqlparser.Statement, environment string) *InspectionResult 
 		tableName := sqlparser.String(node.TableExprs)
 		targetTbl := cleanTableName(tableName)
 		db, _ := extractDBAndTable(tableName)
-		if node.Where == nil {
+		if node.Where == nil || !hasWhereOutsideLiterals(query) {
 			return &InspectionResult{
 				RiskLevel:         RiskCritical,
 				IsDestructive:     true,
@@ -233,13 +233,41 @@ func inspectAST(stmt sqlparser.Statement, environment string) *InspectionResult 
 				Reason:              fmt.Sprintf("ALTER TABLE modifies schema structure on '%s'.", tableName),
 			}
 		}
+
+	case *sqlparser.DBDDL:
+		if strings.EqualFold(node.Action, sqlparser.DropStr) {
+			return &InspectionResult{
+				RiskLevel:           RiskCritical,
+				IsDestructive:       true,
+				RequiresChallenge:   true,
+				RequiresAffirmation: true,
+				TargetDatabase:      node.DBName,
+				TargetTable:         node.DBName,
+				TargetType:          "DATABASE",
+				Operation:           "DROP",
+				Reason:              fmt.Sprintf("DROP DATABASE will permanently delete database '%s' and every object in it.", node.DBName),
+				Suggestion:          "Ensure a full dump exists before dropping a database.",
+			}
+		}
+		if strings.EqualFold(node.Action, sqlparser.CreateStr) {
+			return &InspectionResult{
+				RiskLevel:           RiskWarning,
+				RequiresChallenge:   isProd,
+				RequiresAffirmation: true,
+				TargetDatabase:      node.DBName,
+				TargetTable:         node.DBName,
+				TargetType:          "DATABASE",
+				Operation:           "CREATE",
+				Reason:              fmt.Sprintf("CREATE DATABASE will create database '%s'.", node.DBName),
+			}
+		}
 	}
 
 	return &InspectionResult{RiskLevel: RiskNone}
 }
 
 var (
-	reDrop     = regexp.MustCompile(`(?i)^\s*DROP\s+(TABLE|DATABASE|VIEW)\s+(IF\s+EXISTS\s+)?([` + "`" + `"'\w\.\-]+)`)
+	reDrop     = regexp.MustCompile(`(?i)^\s*DROP\s+(TABLE|DATABASE|SCHEMA|VIEW|MATERIALIZED\s+VIEW|INDEX|SEQUENCE|FUNCTION|PROCEDURE|TRIGGER|EVENT|TYPE|DOMAIN|EXTENSION)\s+(IF\s+EXISTS\s+)?([` + "`" + `"'\w\.\-]+)`)
 	reTruncate = regexp.MustCompile(`(?i)^\s*TRUNCATE\s+(TABLE\s+)?([` + "`" + `"'\w\.\-]+)`)
 	reDelete   = regexp.MustCompile(`(?i)^\s*DELETE\s+FROM\s+([` + "`" + `"'\w\.\-]+)`)
 	reUpdate   = regexp.MustCompile(`(?i)^\s*UPDATE\s+([` + "`" + `"'\w\.\-]+)`)
@@ -249,30 +277,63 @@ var (
 )
 
 // maskCommentsAndLiterals blanks out comments, quoted strings and quoted identifiers so keyword
-// regexes (e.g. WHERE) only see real SQL tokens.
-func maskCommentsAndLiterals(q string) string {
+// regexes (e.g. WHERE) only see real SQL tokens. The guard has no dialect, so callers use
+// hasWhereOutsideLiterals, which requires a WHERE to survive both MySQL-style lexing (backslash
+// escapes, # comments) and standard-SQL lexing (PostgreSQL/SQLite: no backslash escapes, nested block
+// comments, $tag$ dollar quotes). Masking more than the real dialect only makes the guard stricter.
+func maskCommentsAndLiterals(q string) string { return maskSQL(q, true) }
+
+func maskSQL(q string, mysqlLexing bool) string {
 	b := []byte(q)
+	blank := func(from, to int) {
+		for k := from; k < to && k < len(b); k++ {
+			b[k] = ' '
+		}
+	}
 	for i := 0; i < len(b); i++ {
 		switch {
-		case b[i] == '-' && i+1 < len(b) && b[i+1] == '-', b[i] == '#':
+		case b[i] == '-' && i+1 < len(b) && b[i+1] == '-', mysqlLexing && b[i] == '#':
 			for ; i < len(b) && b[i] != '\n'; i++ {
 				b[i] = ' '
 			}
 		case b[i] == '/' && i+1 < len(b) && b[i+1] == '*':
-			end := strings.Index(q[i+2:], "*/")
-			stop := len(b)
-			if end >= 0 {
-				stop = i + 2 + end + 2
+			depth, j := 1, i+2
+			for j < len(b) && depth > 0 {
+				if b[j] == '*' && j+1 < len(b) && b[j+1] == '/' {
+					depth--
+					j += 2
+					continue
+				}
+				if !mysqlLexing && b[j] == '/' && j+1 < len(b) && b[j+1] == '*' {
+					depth++
+					j += 2
+					continue
+				}
+				j++
 			}
-			for ; i < stop; i++ {
-				b[i] = ' '
+			blank(i, j)
+			i = j - 1
+		case !mysqlLexing && b[i] == '$':
+			// PostgreSQL dollar quote: $$...$$ or $tag$...$tag$
+			j := i + 1
+			for j < len(b) && (b[j] == '_' || b[j] >= 'a' && b[j] <= 'z' || b[j] >= 'A' && b[j] <= 'Z' || b[j] >= '0' && b[j] <= '9') {
+				j++
 			}
-			i--
+			if j < len(b) && b[j] == '$' && (j == i+1 || !(b[i+1] >= '0' && b[i+1] <= '9')) {
+				tag := q[i : j+1]
+				end := strings.Index(q[j+1:], tag)
+				stop := len(b)
+				if end >= 0 {
+					stop = j + 1 + end + len(tag)
+				}
+				blank(i, stop)
+				i = stop - 1
+			}
 		case b[i] == '\'' || b[i] == '"' || b[i] == '`':
 			quote := b[i]
 			b[i] = ' '
 			for i++; i < len(b); i++ {
-				if b[i] == '\\' && quote != '`' && i+1 < len(b) {
+				if mysqlLexing && b[i] == '\\' && quote != '`' && i+1 < len(b) {
 					b[i], b[i+1] = ' ', ' '
 					i++
 					continue
@@ -286,6 +347,11 @@ func maskCommentsAndLiterals(q string) string {
 		}
 	}
 	return string(b)
+}
+
+// hasWhereOutsideLiterals reports whether a real WHERE keyword exists under every supported lexing.
+func hasWhereOutsideLiterals(q string) bool {
+	return reWhere.MatchString(maskSQL(q, true)) && reWhere.MatchString(maskSQL(q, false))
 }
 
 var reReturning = regexp.MustCompile(`(?i)\bRETURNING\b.*$`)
@@ -342,7 +408,7 @@ func inspectLexicalFallback(query string, environment string) *InspectionResult 
 
 	if match := reDelete.FindStringSubmatch(query); len(match) > 1 {
 		db, target := extractDBAndTable(match[1])
-		hasWhere := reWhere.MatchString(maskCommentsAndLiterals(query))
+		hasWhere := hasWhereOutsideLiterals(query)
 		cleanTable := match[1]
 		if !hasWhere {
 			return &InspectionResult{
@@ -382,7 +448,7 @@ func inspectLexicalFallback(query string, environment string) *InspectionResult 
 
 	if match := reUpdate.FindStringSubmatch(query); len(match) > 1 {
 		db, target := extractDBAndTable(match[1])
-		hasWhere := reWhere.MatchString(maskCommentsAndLiterals(query))
+		hasWhere := hasWhereOutsideLiterals(query)
 		cleanTable := match[1]
 		if !hasWhere {
 			return &InspectionResult{

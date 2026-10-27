@@ -5075,7 +5075,7 @@
           showNativeAlert('DDL execution failed:\n' + (data.error || res.statusText), 'Execution Error');
           return false;
         }
-        showNativeAlert(successMessage + (data.backup_file ? `\n\nBackup snapshot created:\n${data.backup_file}` : ''), 'Success');
+        showNativeAlert(successMessage + (data.backup_file ? `\n\nBackup snapshot created:\n${data.backup_file}` : '') + (data.backup_warning ? `\n\nWARNING: ${data.backup_warning}` : ''), 'Success');
         await refreshSchema();
         return true;
       } catch (err) {
@@ -5085,9 +5085,20 @@
     }
 
     // AI Settings State (stored in localStorage)
-    let aiConfig = JSON.parse(localStorage.getItem('sqlfox_ai_config') || '{"provider":"openai","model":"gpt-4o-mini","apiKey":"","endpoint":"","language":"id","responseStyle":"concise","customPrompt":"","includeSchema":true,"maskIdentifiers":false}');
+    // Corrupt/legacy localStorage must not abort the whole script (every global handler is defined below).
+    function readStoredJSON(key, fallback) {
+      try {
+        const raw = localStorage.getItem(key);
+        if (raw == null) return fallback;
+        const parsed = JSON.parse(raw);
+        return (parsed !== null && typeof parsed === typeof fallback && Array.isArray(parsed) === Array.isArray(fallback)) ? parsed : fallback;
+      } catch (_) {
+        return fallback;
+      }
+    }
+    let aiConfig = readStoredJSON('sqlfox_ai_config', {"provider":"openai","model":"gpt-4o-mini","apiKey":"","endpoint":"","language":"id","responseStyle":"concise","customPrompt":"","includeSchema":true,"maskIdentifiers":false});
     let currentChatSessionId = null;
-    let chatSessions = JSON.parse(localStorage.getItem('sqlfox_ai_sessions') || '[]');
+    let chatSessions = readStoredJSON('sqlfox_ai_sessions', []);
 
     // --- Global Network Error Boundary & Health Watcher (Milestone 26) ---
     let isServerReconnecting = false;
@@ -5698,7 +5709,7 @@
 
         renderSchemaTree(schema);
       } catch (err) {
-        treeEl.innerHTML = `<div class="text-app-danger p-2">Error: ${err.message}</div>`;
+        treeEl.innerHTML = `<div class="text-app-danger p-2">Error: ${escapeHtml(err.message)}</div>`;
       }
     }
 
@@ -5847,7 +5858,7 @@
         }
 
         return `
-          <div onclick="selectDatabase('${escapeHtml(d)}'); toggleDatabaseDropdown(false);" class="group flex items-center justify-between px-2 py-1.5 rounded cursor-pointer ${isAct ? 'bg-sky-950/60 text-app-accent font-bold border border-sky-800' : 'hover:bg-slate-800 text-slate-300'}">
+          <div onclick="selectDatabase(${jsArg(d)}); toggleDatabaseDropdown(false);" class="group flex items-center justify-between px-2 py-1.5 rounded cursor-pointer ${isAct ? 'bg-sky-950/60 text-app-accent font-bold border border-sky-800' : 'hover:bg-slate-800 text-slate-300'}">
             <span class="truncate flex items-center space-x-1.5">
               <span>🗄️</span>
               <span class="truncate">${escapeHtml(d)}</span>
@@ -5855,7 +5866,7 @@
             <div class="flex items-center space-x-1.5 shrink-0">
               ${cacheLabel ? `<span class="text-[9px] text-slate-500 font-mono" title="Cached at ${cacheLabel}">⚡${cacheLabel}</span>` : ''}
               ${isAct ? '<span class="text-[9px] text-sky-400 uppercase font-mono">active</span>' : ''}
-              <button onclick="event.stopPropagation(); refreshDatabaseCatalog('${escapeHtml(d)}');" class="opacity-0 group-hover:opacity-100 hover:text-white p-0.5 text-[10px] rounded hover:bg-slate-700 transition" title="Refresh ${escapeHtml(d)} catalog">🔄</button>
+              <button onclick="event.stopPropagation(); refreshDatabaseCatalog(${jsArg(d)});" class="opacity-0 group-hover:opacity-100 hover:text-white p-0.5 text-[10px] rounded hover:bg-slate-700 transition" title="Refresh ${escapeHtml(d)} catalog">🔄</button>
             </div>
           </div>
         `;
@@ -7939,6 +7950,7 @@
     });
 
     function switchTab(tabId) {
+      const prevTabId = activeTabId;
       if (tabId !== activeTabId) {
         selectedRowIndices.clear();
         updateSelectedRowsUI();
@@ -7951,7 +7963,9 @@
       renderTabs();
       const nextTab = tabs.find(t => t.id === tabId);
       if (nextTab && nextTab.isTableViewer && nextTab.tableName) {
-        if (activeGridTable !== nextTab.tableName || currentResults.length === 0) {
+        // The grid is shared by all tabs, so a different tab's rows (another DB's same-named table,
+        // or a query result on that table) must never be reused: reload whenever the tab changes.
+        if (prevTabId !== tabId || activeGridTable !== nextTab.tableName || currentResults.length === 0) {
           setTableMode(nextTab.tableMode || 'data', true);
         }
       } else if (nextTab && !nextTab.isTableViewer && nextTab.rawQueryError) {
@@ -7960,6 +7974,9 @@
         renderGridResults(nextTab.rawQueryCols, nextTab.rawQueryRows, null, nextTab.queryTable || null, nextTab.queryDB || nextTab.database);
         if (nextTab.queryFilters && Object.keys(nextTab.queryFilters).length > 0) {
           applyQueryResultsFilter(nextTab);
+        }
+        if (nextTab.sortCol) {
+          renderGridResults(currentColumns, sortQueryRows(nextTab, currentResults), activeGridPKCol, activeGridTable, activeGridDB, true);
         }
         const stats = document.getElementById('grid-result-stats');
         if (stats && nextTab.queryStats) {
@@ -8065,7 +8082,7 @@
       itemsContainer.innerHTML = filtered.map(db => {
         const isCurrent = db.toLowerCase() === currentDb.toLowerCase();
         return `
-          <button onclick="selectTabDatabase('${escapeHtml(db)}')" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center justify-between transition cursor-pointer ${isCurrent ? 'text-amber-400 font-bold bg-amber-950/30' : 'text-slate-300'}">
+          <button onclick="selectTabDatabase(${jsArg(db)})" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center justify-between transition cursor-pointer ${isCurrent ? 'text-amber-400 font-bold bg-amber-950/30' : 'text-slate-300'}">
             <span class="font-mono text-xs truncate max-w-[190px]">${escapeHtml(db)}</span>
             ${isCurrent ? '<span class="text-xs shrink-0">✓</span>' : ''}
           </button>
@@ -10602,7 +10619,7 @@
                   <span>⚡ Inspect Processlist</span>
                 </button>
               ` : `
-                <button onclick="switchSessionToNode('${escapeHtml(n.address)}')" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-medium border border-slate-700 transition flex items-center space-x-1" title="Switch active session connection to this node">
+                <button onclick="switchSessionToNode(${jsArg(n.address)})" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-medium border border-slate-700 transition flex items-center space-x-1" title="Switch active session connection to this node">
                   <span>🔗 Switch Session</span>
                 </button>
               `}
@@ -10825,7 +10842,7 @@ What are concrete steps to resolve this bottleneck? Is my.cnf tuning required (s
           <tr class="hover:bg-slate-900/60 transition ${v.is_curated ? 'bg-slate-950/40' : ''}">
             <td class="py-2 px-3 text-center">
               ${v.is_curated ? `
-                <button onclick="toggleVariableExpand('${escapeHtml(v.name)}')" class="text-slate-400 hover:text-white font-mono font-bold text-xs" title="Expand tuning details">
+                <button onclick="toggleVariableExpand(${jsArg(v.name)})" class="text-slate-400 hover:text-white font-mono font-bold text-xs" title="Expand tuning details">
                   ${isExpanded ? '▼' : '▶'}
                 </button>
               ` : '<span class="text-slate-700">•</span>'}
@@ -12880,7 +12897,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
             <span class="inline-flex items-center space-x-1 bg-sky-950 border border-sky-700 text-sky-200 px-2 py-0.5 rounded font-mono text-[11px] shadow-sm">
               <span class="text-slate-400 font-sans text-[10px]">#${i + 1}</span>
               <span class="font-bold">${escapeHtml(c)}</span>
-              <button type="button" onclick="removeIndexCol('${escapeHtml(c)}')" class="text-sky-400 hover:text-red-300 ml-1">✕</button>
+              <button type="button" onclick="removeIndexCol(${jsArg(c)})" class="text-sky-400 hover:text-red-300 ml-1">✕</button>
             </span>
           `).join('');
         }
@@ -12890,7 +12907,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
         availableContainer.innerHTML = availableCols.map(col => {
           const isSelected = selectedIndexCols.includes(col.name);
           return `
-            <button type="button" onclick="toggleIndexCol('${escapeHtml(col.name)}')" class="px-2 py-1 rounded font-mono text-xs transition border flex items-center space-x-1 ${isSelected ? 'bg-sky-900/60 border-sky-500 text-sky-200 shadow-sm' : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500 hover:text-white'}">
+            <button type="button" onclick="toggleIndexCol(${jsArg(col.name)})" class="px-2 py-1 rounded font-mono text-xs transition border flex items-center space-x-1 ${isSelected ? 'bg-sky-900/60 border-sky-500 text-sky-200 shadow-sm' : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500 hover:text-white'}">
               <span>${isSelected ? '✓' : '+'}</span>
               <span>${escapeHtml(col.name)}</span>
               <span class="text-[10px] text-slate-500 ml-1">${escapeHtml(col.type)}</span>
@@ -13417,7 +13434,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const pinClass = n.is_pinned ? 'text-amber-400 font-bold' : 'text-slate-500 hover:text-slate-300';
 
       const objTagsHtml = (n.object_tags || []).map(tag => `
-        <span onclick="event.stopPropagation(); filterNotesByTag('${escapeHtml(tag)}')" class="inline-flex items-center space-x-0.5 px-1.5 py-0.2 rounded text-[10px] font-mono bg-sky-950/70 text-sky-300 border border-sky-800/40 hover:border-sky-500 cursor-pointer transition truncate max-w-[220px]" title="Filter notes by this object">
+        <span onclick="event.stopPropagation(); filterNotesByTag(${jsArg(tag)})" class="inline-flex items-center space-x-0.5 px-1.5 py-0.2 rounded text-[10px] font-mono bg-sky-950/70 text-sky-300 border border-sky-800/40 hover:border-sky-500 cursor-pointer transition truncate max-w-[220px]" title="Filter notes by this object">
           <span>🏷️</span><span>${escapeHtml(tag.replace(/^db:\/\//, ''))}</span>
         </span>
       `).join(' ');
@@ -14940,21 +14957,23 @@ Please analyze what is causing this query to be slow and suggest necessary query
           })
         });
 
+        let errBody = null;
         if (res.status === 422) {
-          const data = await res.json();
+          errBody = await res.json().catch(() => ({ error: 'Execution failed' }));
           setQueryRunning(false);
           const originTab = tabs.find(t => t.id === targetTabId);
           if (originTab) originTab.isExecuting = false;
           renderTabs();
-          if (data.blocked) {
+          if (errBody.blocked) {
             // Safety Guard Triggered!
-            openSafetyModal(sql, data.inspection);
+            openSafetyModal(sql, errBody.inspection);
             return;
           }
         }
 
         if (!res.ok) {
-          const data = await res.json().catch(() => ({ error: 'Execution failed' }));
+          // The 422 body was already consumed above; reuse it instead of reading the stream twice.
+          const data = errBody || await res.json().catch(() => ({ error: 'Execution failed' }));
           setQueryRunning(false);
           const originTab = tabs.find(t => t.id === targetTabId);
           if (originTab) originTab.isExecuting = false;
@@ -15184,7 +15203,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
           } else if (originTab) {
             showToast(`Query in '${originTab.title || 'tab'}' completed: ${data.message}`);
           }
-          if (data.backup_file) {
+          if (data.backup_warning) {
+            showNativeAlert(`Query succeeded, but the automated backup is NOT complete:\n${data.backup_warning}${data.backup_file ? `\n\nPartial snapshot:\n${data.backup_file}` : ''}`, 'Safety Guard Backup Warning');
+          } else if (data.backup_file) {
             showNativeAlert(`Query succeeded!\nAutomated Backup Snapshot created at:\n${data.backup_file}`, 'Safety Guard Backup');
           }
           await refreshSchema();
@@ -16811,27 +16832,35 @@ Please analyze what is causing this query to be slow and suggest necessary query
           if (activeTab.queryFilters && Object.keys(activeTab.queryFilters).length > 0) {
             applyQueryResultsFilter(activeTab);
           } else {
-            renderGridResults(currentColumns, activeTab.rawQueryRows || rows, activeGridPKCol, activeGridTable, activeGridDB);
+            renderGridResults(currentColumns, activeTab.rawQueryRows || rows, activeGridPKCol, activeGridTable, activeGridDB, true);
           }
           return;
         }
-        const sorted = [...rows].sort((a, b) => {
-          const valA = a[colIndex];
-          const valB = b[colIndex];
-          if (valA === null || valA === undefined) return 1;
-          if (valB === null || valB === undefined) return -1;
-          const numA = Number(valA);
-          const numB = Number(valB);
-          let cmp = 0;
-          if (!isNaN(numA) && !isNaN(numB)) {
-            cmp = numA - numB;
-          } else {
-            cmp = String(valA).localeCompare(String(valB));
-          }
-          return activeTab.sortDir === 'DESC' ? -cmp : cmp;
-        });
-        renderGridResults(currentColumns, sorted, activeGridPKCol, activeGridTable, activeGridDB);
+        // isFilterPass=true: a sorted view must not overwrite the tab's raw (server-order) result set.
+        renderGridResults(currentColumns, sortQueryRows(activeTab, rows), activeGridPKCol, activeGridTable, activeGridDB, true);
       }
+    }
+
+    // sortQueryRows returns a sorted copy of rows by the tab's sortCol/sortDir (row arrays are shared,
+    // so staged edits keyed by row identity keep pointing at the right rows).
+    function sortQueryRows(tab, rows) {
+      const colIndex = (currentColumns || []).findIndex(c => c.name === tab.sortCol);
+      if (colIndex < 0 || !tab.sortCol) return rows || [];
+      return [...(rows || [])].sort((a, b) => {
+        const valA = a[colIndex];
+        const valB = b[colIndex];
+        if (valA === null || valA === undefined) return 1;
+        if (valB === null || valB === undefined) return -1;
+        const numA = Number(valA);
+        const numB = Number(valB);
+        let cmp = 0;
+        if (!isNaN(numA) && !isNaN(numB)) {
+          cmp = numA - numB;
+        } else {
+          cmp = String(valA).localeCompare(String(valB));
+        }
+        return tab.sortDir === 'DESC' ? -cmp : cmp;
+      });
     }
 
     function getGridActivePageSize(activeTab) {
@@ -16956,7 +16985,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
       if (activeTab.isTableViewer) {
         const totalRows = getTableViewerTotalRows(activeTab);
-        if (typeof totalRows === 'number' && totalRows > 0) {
+        // Only an exact count may clamp the page; catalog estimates can be lower than reality.
+        if (typeof activeTab.exactRowCount === 'number' && typeof totalRows === 'number' && totalRows > 0) {
           const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
           if (target > totalPages) target = totalPages;
         }
@@ -17050,6 +17080,10 @@ Please analyze what is causing this query to be slow and suggest necessary query
       try {
         const activeTab = tabs.find(t => t.id === activeTabId);
         const requestingTabId = activeTab ? activeTab.id : activeTabId;
+        // Only the latest request per tab may render: rapid paging/sorting must not let a slower,
+        // older response overwrite the page the pager now shows.
+        const loadSeq = activeTab ? (activeTab._loadSeq = (activeTab._loadSeq || 0) + 1) : 0;
+        const isStale = () => activeTabId !== requestingTabId || (activeTab && activeTab._loadSeq !== loadSeq);
         // ponytail: Prioritize targetDb and activeGridDB over fallback schemaCatalogCache so cross-database tables load from their own schema.
         const dbName = targetDb || (activeTab && activeTab.isTableViewer && activeTab.database) || activeGridDB || (activeTab && activeTab.database) || (schemaCatalogCache && schemaCatalogCache.database_name) || '';
         activeGridTable = tableName;
@@ -17073,11 +17107,12 @@ Please analyze what is causing this query to be slow and suggest necessary query
         if (sortCol) url += `&sort=${encodeURIComponent(sortCol)}&dir=${encodeURIComponent(sortDir || 'ASC')}`;
 
         const res = await apiFetch(url);
-        if (activeTabId !== requestingTabId) return;
+        if (isStale()) return;
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
+          if (isStale()) return;
           console.error('Failed to load rows:', errData);
-          renderGridResults([], [], null, tableName);
+          renderGridResults([], [], null, tableName, dbName);
           const tbody = document.getElementById('grid-tbody');
           if (tbody) {
             tbody.innerHTML = `<tr><td class="p-8 text-center text-app-danger font-mono text-xs">Failed to load data: ${escapeHtml(errData.error || res.statusText)}</td></tr>`;
@@ -17085,8 +17120,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
           return;
         }
         const data = await res.json();
-        if (activeTabId !== requestingTabId) return;
-        renderGridResults(data.columns, data.rows, data.pk_col, tableName);
+        if (isStale()) return;
+        renderGridResults(data.columns, data.rows, data.pk_col, tableName, dbName);
       } catch (err) {
         console.error('Failed to load rows:', err);
       }
@@ -17187,7 +17222,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
           <label class="flex items-center justify-between p-1 hover:bg-slate-800 rounded cursor-pointer select-none text-[11px] ${isPK ? 'opacity-90' : ''}">
             <div class="flex items-center space-x-2 truncate">
               <input type="checkbox" ${isChecked ? 'checked' : ''} ${isPK ? 'disabled' : ''}
-                     onchange="toggleColumnVisibility('${escapeHtml(c.name)}', this.checked)"
+                     onchange="toggleColumnVisibility(${jsArg(c.name)}, this.checked)"
                      class="accent-sky-500 w-3.5 h-3.5 rounded cursor-pointer ${isPK ? 'cursor-not-allowed opacity-60' : ''}">
               <span class="truncate font-mono ${isChecked ? 'text-slate-200' : 'text-slate-500 line-through'}">${escapeHtml(c.name)}</span>
               ${lockBadge}
@@ -17299,18 +17334,25 @@ Please analyze what is causing this query to be slow and suggest necessary query
         const curPage = Math.floor(off / pageSize) + 1;
 
         if (typeof totalRows === 'number') {
+          // Catalog row counts are estimates (e.g. InnoDB TABLE_ROWS): never let them block paging.
+          const isExact = typeof activeTab.exactRowCount === 'number';
           const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
           if (bottomStats) {
             bottomStats.textContent = `Showing ${startRow} - ${endRow} of ${totalRows.toLocaleString()} rows${activeTab.appliedFilter ? ' (filtered)' : ''}`;
           }
           if (pageInput) {
             pageInput.value = curPage;
-            pageInput.max = totalPages;
+            if (isExact) {
+              pageInput.max = totalPages;
+            } else if (typeof pageInput.removeAttribute === 'function') {
+              pageInput.removeAttribute('max'); // an estimate must not cap manual page entry
+            }
           }
           if (totalPagesEl) totalPagesEl.textContent = String(totalPages);
           if (btnFirst) btnFirst.disabled = curPage <= 1;
           if (btnPrev) btnPrev.disabled = curPage <= 1;
-          if (btnNext) btnNext.disabled = curPage >= totalPages;
+          // With an estimate, a full page means there may be more rows than the catalog claims.
+          if (btnNext) btnNext.disabled = isExact ? curPage >= totalPages : (curPage >= totalPages && curRowsCount < pageSize);
           if (btnLast) btnLast.disabled = curPage >= totalPages;
           if (btnCountAccurate) btnCountAccurate.classList.add('hidden');
         } else {
@@ -17511,7 +17553,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
           ${checkboxCell}
           ${row.map((val, cIdx) => {
             if (isColumnHidden(virtualGridCols[cIdx]?.name, virtualGridTable)) return '';
-            const stagedKey = `${virtualGridTable || ''}:${rIdx}:${cIdx}`;
+            const stagedKey = stagedKeyFor(virtualGridTable || '', rIdx, cIdx);
             const staged = stagedEdits.get(stagedKey);
             const rawVal = staged ? staged.newVal : val;
             const isDirty = Boolean(staged);
@@ -17815,7 +17857,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
           ${checkboxCell}
           ${row.map((val, cIdx) => {
             if (isColumnHidden(cols[cIdx]?.name, tableName)) return '';
-            const stagedKey = `${tableName || ''}:${rIdx}:${cIdx}`;
+            const stagedKey = stagedKeyFor(tableName || '', rIdx, cIdx);
             const staged = stagedEdits.get(stagedKey);
             const rawVal = staged ? staged.newVal : val;
             const isDirty = Boolean(staged);
@@ -18334,6 +18376,10 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const dbName = activeGridDB || (activeTab && activeTab.database) || '';
 
       if (gridEditMode === 'auto') {
+        // The grid may be re-rendered (page/tab change) while awaiting: update the edited row object,
+        // never "whatever is at index rIdx now".
+        const rowRef = currentResults[rIdx];
+        const stillShown = () => currentResults[rIdx] === rowRef && td && td.isConnected;
         if (gridConfirmSave) {
           const colName = col ? col.name : `Column #${cIdx}`;
           const displayVal = val === null ? 'NULL' : `"${val}"`;
@@ -18356,21 +18402,23 @@ Please analyze what is causing this query to be slow and suggest necessary query
             })
           });
           if (res.ok) {
-            currentResults[rIdx][cIdx] = val;
-            renderCellContent(td, rIdx, cIdx, pkCol, tableName);
-            td.classList.add('bg-emerald-950/40', 'border-emerald-600/60');
-            setTimeout(() => td.classList.remove('bg-emerald-950/40', 'border-emerald-600/60'), 1500);
+            if (rowRef) rowRef[cIdx] = val;
+            if (stillShown()) {
+              renderCellContent(td, rIdx, cIdx, pkCol, tableName);
+              td.classList.add('bg-emerald-950/40', 'border-emerald-600/60');
+              setTimeout(() => td.classList.remove('bg-emerald-950/40', 'border-emerald-600/60'), 1500);
+            }
           } else {
             const err = await res.json().catch(() => ({}));
             showNativeAlert('Failed to save cell: ' + (err.error || res.statusText), 'Save Error');
-            renderCellContent(td, rIdx, cIdx, pkCol, tableName);
+            if (stillShown()) renderCellContent(td, rIdx, cIdx, pkCol, tableName);
           }
         } catch (err) {
           showNativeAlert('Network error saving cell: ' + err.message, 'Save Error');
         }
       } else {
-        const stagedKey = `${tableName}:${rIdx}:${cIdx}`;
-        stagedEdits.set(stagedKey, {
+        const stagedKey = stagedKeyFor(tableName, rIdx, cIdx);
+        stageGridEdit(stagedKey, {
           rIdx,
           cIdx,
           db: dbName,
@@ -18441,7 +18489,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
         commitInlineEdit(activeEditCell, true);
       }
 
-      const stagedKey = `${tableName}:${rIdx}:${cIdx}`;
+      const stagedKey = stagedKeyFor(tableName, rIdx, cIdx);
       const staged = stagedEdits.get(stagedKey);
       const originalVal = currentResults[rIdx][cIdx];
       const currentVal = staged ? staged.newVal : originalVal;
@@ -18465,7 +18513,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
           <div id="active-cell-preset-bar" class="absolute ${pillPosClass} left-0 z-30 bg-slate-900 border border-slate-700/80 rounded shadow-xl px-1.5 py-0.5 flex items-center space-x-1 text-[10px] select-none whitespace-nowrap ring-1 ring-black/40">
             <span class="text-sky-400 font-semibold mr-0.5">ENUM:</span>
             ${enumValues.slice(0, 5).map(v => `
-              <button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit('${escapeHtml(v)}')" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-sky-200 hover:text-white rounded border border-slate-700 font-mono transition">${escapeHtml(v)}</button>
+              <button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit(${jsArg(v)})" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-sky-200 hover:text-white rounded border border-slate-700 font-mono transition">${escapeHtml(v)}</button>
             `).join('')}
             ${isNullable ? `<button type="button" onmousedown="event.preventDefault(); applyPresetToActiveEdit(null)" class="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded border border-slate-700 font-mono transition">NULL</button>` : ''}
           </div>
@@ -18878,9 +18926,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
           renderCellContent(td, rIdx, cIdx, pkCol, tableName);
         }
       } else {
-        const stagedKey = `${tableName}:${rIdx}:${cIdx}`;
+        const stagedKey = stagedKeyFor(tableName, rIdx, cIdx);
 
-        stagedEdits.set(stagedKey, {
+        stageGridEdit(stagedKey, {
           rIdx,
           cIdx,
           db: dbName,
@@ -18920,7 +18968,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
         td.style.zIndex = '';
         td.classList.add('truncate');
       }
-      const stagedKey = `${tableName}:${rIdx}:${cIdx}`;
+      const stagedKey = stagedKeyFor(tableName, rIdx, cIdx);
       const staged = stagedEdits.get(stagedKey);
       const rawVal = staged ? staged.newVal : currentResults[rIdx][cIdx];
       const isDirty = Boolean(staged);
@@ -19343,7 +19391,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
             if (filterColLabel) filterColLabel.textContent = `(${col.name})`;
             
             const tableName = activeGridTable || (activeTab && activeTab.tableName) || '';
-            const stagedKey = `${tableName || ''}:${rIdx}:${cIdx}`;
+            const stagedKey = stagedKeyFor(tableName || '', rIdx, cIdx);
             const staged = (typeof stagedEdits !== 'undefined' && stagedEdits) ? stagedEdits.get(stagedKey) : null;
             const currentVal = staged ? staged.newVal : (currentResults[rIdx] ? currentResults[rIdx][cIdx] : null);
             const typeCategory = getGridTypeCategory(rawType);
@@ -19634,7 +19682,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
 
       container.innerHTML = items.map(({ col, cIdx }) => {
-        const stagedKey = `${tableName}:${rIdx}:${cIdx}`;
+        const stagedKey = stagedKeyFor(tableName, rIdx, cIdx);
         const staged = (typeof stagedEdits !== 'undefined' && stagedEdits) ? stagedEdits.get(stagedKey) : null;
         const currentVal = staged ? staged.newVal : row[cIdx];
         const isModified = Boolean(staged);
@@ -19719,7 +19767,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const activeTab = tabs.find(t => t.id === activeTabId);
       const tableName = activeGridTable || (activeTab && activeTab.tableName) || '';
       const db = activeGridDB || (activeTab && activeTab.database) || '';
-      const stagedKey = `${tableName}:${rIdx}:${cIdx}`;
+      const stagedKey = stagedKeyFor(tableName, rIdx, cIdx);
 
       const row = currentResults[rIdx];
       const oldVal = row ? row[cIdx] : null;
@@ -19733,10 +19781,14 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
 
       if (typeof stagedEdits !== 'undefined' && stagedEdits) {
-        if (newVal === oldVal) {
+        const prevStaged = stagedEdits.get(stagedKey);
+        const originalVal = prevStaged ? prevStaged.oldVal : oldVal;
+        if (newVal === originalVal) {
+          // Reverted to the original value: drop the staged edit and undo any inline mutation.
           stagedEdits.delete(stagedKey);
+          if (row) row[cIdx] = originalVal;
         } else {
-          stagedEdits.set(stagedKey, {
+          stageGridEdit(stagedKey, {
             rIdx,
             cIdx,
             db,
@@ -19761,7 +19813,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const obj = {};
       const tableName = activeGridTable || '';
       currentColumns.forEach((col, cIdx) => {
-        const stagedKey = `${tableName}:${activeInspectorRowIdx}:${cIdx}`;
+        const stagedKey = stagedKeyFor(tableName, activeInspectorRowIdx, cIdx);
         const staged = (typeof stagedEdits !== 'undefined' && stagedEdits) ? stagedEdits.get(stagedKey) : null;
         obj[col.name] = staged ? staged.newVal : row[cIdx];
       });
@@ -19782,7 +19834,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const row = currentResults[activeInspectorRowIdx];
       const tableName = activeGridTable || '';
       const lines = currentColumns.map((col, cIdx) => {
-        const stagedKey = `${tableName}:${activeInspectorRowIdx}:${cIdx}`;
+        const stagedKey = stagedKeyFor(tableName, activeInspectorRowIdx, cIdx);
         const staged = (typeof stagedEdits !== 'undefined' && stagedEdits) ? stagedEdits.get(stagedKey) : null;
         const val = staged ? staged.newVal : row[cIdx];
         return `${col.name}: ${val === null ? 'NULL' : String(val)}`;
@@ -19841,7 +19893,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const activeTab = tabs.find(t => t.id === activeTabId);
       const tableName = activeGridTable || (activeTab && activeTab.tableName) || '';
 
-      const stagedKey = `${tableName || ''}:${rIdx}:${cIdx}`;
+      const stagedKey = stagedKeyFor(tableName || '', rIdx, cIdx);
       const staged = stagedEdits.get(stagedKey);
       const rawVal = staged ? staged.newVal : (currentResults[rIdx] ? currentResults[rIdx][cIdx] : null);
 
@@ -20088,8 +20140,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
           showNativeAlert('Network error saving cell: ' + err.message, 'Save Error');
         }
       } else {
-        const stagedKey = `${tableName}:${rIdx}:${cIdx}`;
-        stagedEdits.set(stagedKey, {
+        const stagedKey = stagedKeyFor(tableName, rIdx, cIdx);
+        stageGridEdit(stagedKey, {
           rIdx,
           cIdx,
           db: dbName,
@@ -20954,7 +21006,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
                 badge = `<span class="px-1.5 py-0.5 rounded bg-rose-950 border border-rose-800 text-rose-400 font-semibold text-[10px]">DELETE</span>`;
               }
 
-              const rowPreview = (op.data || []).map(v => v === null ? '<null>' : v).join(', ');
+              const rowPreview = (op.data || []).map(v => v === null ? '<null>' : (typeof v === 'object' ? (v.$base64 !== undefined ? '<binary>' : JSON.stringify(v)) : v)).join(', ');
 
               return `<tr class="hover:bg-slate-900/60">
                 <td class="p-2">${badge}</td>
@@ -21155,7 +21207,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
       stagedDraftRows = [];
       for (const item of stagedEdits.values()) {
-        currentResults[item.rIdx][item.cIdx] = item.oldVal;
+        const row = item.rowRef || currentResults[item.rIdx];
+        if (row) row[item.cIdx] = item.oldVal;
       }
       stagedEdits.clear();
       updateStagedEditsUI();
@@ -24898,7 +24951,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
           const y2 = dp.y + dh / 2;
           const cx = (x1 + x2) / 2;
           html += `<path d="M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}" stroke="#f59e0b" stroke-width="1.5" stroke-opacity="0.55" fill="none" marker-end="url(#erd-arrow)"/>` +
-                  `<text x="${cx}" y="${(y1 + y2) / 2 - 4}" text-anchor="middle" fill="#64748b" font-size="9" font-family="monospace">${fk.column}→${fk.referenced_column}</text>`;
+                  `<text x="${cx}" y="${(y1 + y2) / 2 - 4}" text-anchor="middle" fill="#64748b" font-size="9" font-family="monospace">${escapeHtml(fk.column)}→${escapeHtml(fk.referenced_column)}</text>`;
         });
       });
       g.innerHTML = html;
@@ -25173,8 +25226,41 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
     }
 
+    // Staged grid edits are keyed by row identity instead of array index, so sorting, filtering or
+    // paging the grid can never re-target a staged edit (or its discard) at a different row.
+    const gridRowUids = new WeakMap();
+    let gridRowUidSeq = 0;
+    function stagedKeyFor(tableName, rIdx, cIdx) {
+      const row = currentResults && currentResults[rIdx];
+      let uid = 'i' + rIdx;
+      if (row && typeof row === 'object') {
+        uid = gridRowUids.get(row);
+        if (uid === undefined) {
+          uid = ++gridRowUidSeq;
+          gridRowUids.set(row, uid);
+        }
+      }
+      return `${tableName || ''}:${uid}:${cIdx}`;
+    }
+
+    // stageGridEdit records the edited row object (restored on discard) and keeps the ORIGINAL old
+    // value when the same cell is edited more than once.
+    function stageGridEdit(key, entry) {
+      const prev = stagedEdits.get(key);
+      if (prev) entry.oldVal = prev.oldVal;
+      entry.rowRef = prev?.rowRef || (currentResults && currentResults[entry.rIdx]) || null;
+      stagedEdits.set(key, entry);
+    }
+
     function escapeHtml(str) {
       return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    // jsArg renders a value as a JS string literal safe inside a double-quoted inline handler attribute
+    // (onclick="fn(${jsArg(v)})"). escapeHtml alone is not enough there: the HTML parser decodes &#39;
+    // back to ' before the handler's JS is compiled.
+    function jsArg(value) {
+      return escapeHtml(JSON.stringify(String(value ?? '')));
     }
 
     // ponytail: unified lightweight toast notification system supporting dialog top-layers and multi-severity styling

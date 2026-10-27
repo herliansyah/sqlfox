@@ -220,10 +220,30 @@ vm.runInContext(`
   if (activeInspectorRowIdx !== 0) throw new Error('navigateRecordInspector(-1) should move back to row 0');
 
   onRecordFieldChange('email', 1, 'alice_updated@test.com');
-  const stagedKey = 'users:0:1';
+  const stagedKey = stagedKeyFor('users', 0, 1);
   if (!stagedEdits.has(stagedKey)) throw new Error('stagedEdits should record change on users:0:1');
   if (stagedEdits.get(stagedKey).newVal !== 'alice_updated@test.com') throw new Error('stagedEdits should have updated newVal');
 `, sandbox);
 console.log("✓ Record Inspector behavioral & stagedEdits tests passed!");
+
+// 8. Regression: staged edits follow the row, not the array index (sort/filter must not re-target them)
+vm.runInContext(`
+  stagedEdits.clear();
+  const rowA = [1, 'a@test.com', 'x'];
+  const rowB = [2, 'b@test.com', 'y'];
+  currentResults = [rowA, rowB];
+  stageGridEdit(stagedKeyFor('users', 0, 1), { rIdx: 0, cIdx: 1, table: 'users', colName: 'email', oldVal: 'a@test.com', newVal: 'a2@test.com' });
+  rowA[1] = 'a2@test.com';
+  stageGridEdit(stagedKeyFor('users', 0, 1), { rIdx: 0, cIdx: 1, table: 'users', colName: 'email', oldVal: 'a2@test.com', newVal: 'a3@test.com' });
+  rowA[1] = 'a3@test.com';
+  if (stagedEdits.size !== 1) throw new Error('re-editing a cell must update one staged entry');
+  if ([...stagedEdits.values()][0].oldVal !== 'a@test.com') throw new Error('re-edit must keep the ORIGINAL old value');
+  currentResults = [rowB, rowA]; // sorted
+  if (!stagedEdits.has(stagedKeyFor('users', 1, 1))) throw new Error('staged edit must follow its row after sort');
+  if (stagedEdits.has(stagedKeyFor('users', 0, 1))) throw new Error('another row must not inherit the staged edit');
+  for (const item of stagedEdits.values()) { (item.rowRef || currentResults[item.rIdx])[item.cIdx] = item.oldVal; }
+  if (rowA[1] !== 'a@test.com' || rowB[1] !== 'b@test.com') throw new Error('discard must restore the edited row only');
+`, sandbox);
+console.log("✓ Staged-edit row identity regression passed!");
 
 console.log("\n🎉 ALL GRID ERGONOMICS SUITE TESTS PASSED 100%!");

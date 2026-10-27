@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -765,38 +766,64 @@ func (s *PostgresSession) Explain(ctx context.Context, querySQL string) (*driver
 		cleaned = strings.TrimSpace(cleaned[8:])
 	}
 
-	// Tier 1: Full ANALYZE+BUFFERS plan (actual row counts, buffer hits — best for visual tree)
-	// ponytail: ANALYZE actually executes the query; safe for SELECT but skips for DML.
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	if err := s.applyActiveSchema(ctx, conn); err != nil {
+		return nil, err
+	}
+
+	// ANALYZE executes the statement, so every tier runs inside a READ ONLY transaction that is
+	// always rolled back: DML (or data-modifying CTEs) can never be applied by an Explain request.
+	inReadOnlyTx := func(fn func(tx *sql.Tx) error) error {
+		tx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback() //nolint:errcheck
+		return fn(tx)
+	}
+
+	// Tier 1: Full ANALYZE+BUFFERS plan (actual row counts) — only for row-returning statements.
 	var rawJSON string
-	const analyzeFmt = "EXPLAIN (ANALYZE, COSTS, VERBOSE, BUFFERS, FORMAT JSON) "
-	if err := s.db.QueryRowContext(ctx, analyzeFmt+cleaned).Scan(&rawJSON); err == nil {
-		return &driver.ExplainPlan{RawJSON: rawJSON, Rows: []driver.ExplainRow{}}, nil
+	if driver.IsQueryStatement(cleaned) {
+		const analyzeFmt = "EXPLAIN (ANALYZE, COSTS, VERBOSE, BUFFERS, FORMAT JSON) "
+		if err := inReadOnlyTx(func(tx *sql.Tx) error {
+			return tx.QueryRowContext(ctx, analyzeFmt+cleaned).Scan(&rawJSON)
+		}); err == nil {
+			return &driver.ExplainPlan{RawJSON: rawJSON, Rows: []driver.ExplainRow{}}, nil
+		}
 	}
 
 	// Tier 2: Cost-only JSON plan (no execution; works for DML without running it)
-	if err := s.db.QueryRowContext(ctx, "EXPLAIN (FORMAT JSON) "+cleaned).Scan(&rawJSON); err == nil {
+	if err := inReadOnlyTx(func(tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, "EXPLAIN (FORMAT JSON) "+cleaned).Scan(&rawJSON)
+	}); err == nil {
 		return &driver.ExplainPlan{RawJSON: rawJSON, Rows: []driver.ExplainRow{}}, nil
 	}
 
 	// Tier 3: Text EXPLAIN fallback (ancient PG or unusual syntax)
-	rows, err := s.db.QueryContext(ctx, "EXPLAIN "+cleaned)
+	var planRows []driver.ExplainRow
+	err = inReadOnlyTx(func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, "EXPLAIN "+cleaned)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		id := 1
+		for rows.Next() {
+			var line string
+			if err := rows.Scan(&line); err == nil {
+				planRows = append(planRows, driver.ExplainRow{ID: id, Table: line, Extra: line})
+				id++
+			}
+		}
+		return rows.Err()
+	})
 	if err != nil {
 		return nil, err
-	}
-	defer rows.Close()
-
-	var planRows []driver.ExplainRow
-	id := 1
-	for rows.Next() {
-		var line string
-		if err := rows.Scan(&line); err == nil {
-			planRows = append(planRows, driver.ExplainRow{
-				ID:    id,
-				Table: line,
-				Extra: line,
-			})
-			id++
-		}
 	}
 
 	return &driver.ExplainPlan{Rows: planRows}, nil
@@ -824,19 +851,41 @@ func (s *PostgresSession) CancelQuery(ctx context.Context, queryID string) error
 	ctxCancel, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
+	// The query may finish while the control connection is being dialed and its backend be reused
+	// by another query from the pool; re-check right before cancelling.
+	stillRunning := func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		for _, p := range s.queryPids {
+			if p == pid {
+				return true
+			}
+		}
+		return false
+	}
+
 	// ponytail: Dial independent single-shot control connection to bypass saturated s.db pool
 	if s.dsn != "" {
 		controlDB, dErr := sql.Open("pgx", s.dsn)
 		if dErr == nil {
 			defer controlDB.Close()
-			if _, kErr := controlDB.ExecContext(ctxCancel, "SELECT pg_cancel_backend($1)", pid); kErr == nil {
-				return nil
+			if conn, cErr := controlDB.Conn(ctxCancel); cErr == nil {
+				defer conn.Close()
+				if !stillRunning() {
+					return nil
+				}
+				if _, kErr := conn.ExecContext(ctxCancel, "SELECT pg_cancel_backend($1)", pid); kErr == nil {
+					return nil
+				}
 			}
 		}
 	}
 
 	// Fallback to pool if independent connection dial failed
 	if s.db != nil {
+		if !stillRunning() {
+			return nil
+		}
 		_, err := s.db.ExecContext(ctxCancel, "SELECT pg_cancel_backend($1)", pid)
 		if err != nil {
 			if errors.Is(ctxCancel.Err(), context.DeadlineExceeded) {
@@ -1305,9 +1354,15 @@ func (s *PostgresSession) DropUser(ctx context.Context, user, host string) error
 	return err
 }
 
+// rePrivilegeName allows only bare privilege keywords (e.g. "CONNECT", "TEMPORARY").
+var rePrivilegeName = regexp.MustCompile(`^[A-Za-z]+( [A-Za-z]+)*$`)
+
 func (s *PostgresSession) ApplyUserGrants(ctx context.Context, req driver.UserGrantRequest) error {
 	quotedUser := quoteIdentifier(req.User)
 	for _, priv := range req.Privileges {
+		if !rePrivilegeName.MatchString(priv) {
+			return fmt.Errorf("invalid privilege name: %q", priv)
+		}
 		cmd := fmt.Sprintf("GRANT %s ON DATABASE %s TO %s", priv, quoteIdentifier(s.cfg.DatabaseName), quotedUser)
 		if _, err := s.db.ExecContext(ctx, cmd); err != nil {
 			return fmt.Errorf("failed to grant %s on database %s to %s: %w", priv, s.cfg.DatabaseName, req.User, err)
@@ -1546,8 +1601,18 @@ func (s *PostgresSession) Close() error {
 	return s.db.Close()
 }
 
+// ExecRaw/QueryRaw run on a dedicated connection with the active database/schema applied:
+// a random pooled connection may carry another database from a previous USE/search_path.
 func (s *PostgresSession) ExecRaw(ctx context.Context, sql string, args ...any) (int64, error) {
-	res, err := s.db.ExecContext(ctx, sql, args...)
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer conn.Close()
+	if err := s.applyActiveSchema(ctx, conn); err != nil {
+		return 0, err
+	}
+	res, err := conn.ExecContext(ctx, sql, args...)
 	if err != nil {
 		return 0, err
 	}
@@ -1556,7 +1621,15 @@ func (s *PostgresSession) ExecRaw(ctx context.Context, sql string, args ...any) 
 }
 
 func (s *PostgresSession) QueryRaw(ctx context.Context, sql string, args ...any) ([][]any, error) {
-	rows, err := s.db.QueryContext(ctx, sql, args...)
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	if err := s.applyActiveSchema(ctx, conn); err != nil {
+		return nil, err
+	}
+	rows, err := conn.QueryContext(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1606,12 +1679,26 @@ func generatePostgresCreateDDL(schema string, tbl driver.TableMetadata) string {
 
 	var lines []string
 	for _, col := range tbl.Columns {
-		line := fmt.Sprintf("  %s %s", quoteIdentifier(col.Name), col.Type)
+		colType := col.Type
+		defaultValue := col.DefaultValue
+		// nextval('x_seq') defaults reference a sequence the DDL never creates; emit the equivalent
+		// serial type instead so the CREATE succeeds on a fresh database (the sequence is created and owned).
+		if strings.HasPrefix(strings.ToLower(defaultValue), "nextval(") {
+			switch strings.ToLower(colType) {
+			case "integer", "int", "int4":
+				colType, defaultValue = "serial", ""
+			case "bigint", "int8":
+				colType, defaultValue = "bigserial", ""
+			case "smallint", "int2":
+				colType, defaultValue = "smallserial", ""
+			}
+		}
+		line := fmt.Sprintf("  %s %s", quoteIdentifier(col.Name), colType)
 		if !col.IsNullable {
 			line += " NOT NULL"
 		}
-		if col.DefaultValue != "" {
-			line += " DEFAULT " + col.DefaultValue
+		if defaultValue != "" {
+			line += " DEFAULT " + defaultValue
 		}
 		lines = append(lines, line)
 	}

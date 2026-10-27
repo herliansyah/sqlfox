@@ -389,3 +389,22 @@ func TestRejectMismatchedChecksum(t *testing.T) {
 		t.Fatalf("expected digest mismatch error, got: %s", rr.Body.String())
 	}
 }
+
+func TestIsAllowedAssetURL_RejectsTraversalOutOfOfficialRepo(t *testing.T) {
+	srv := &Server{}
+	allowed := "https://github.com/herliansyah/sqlfox/releases/download/v1.2.3/sqlfox-linux-amd64.tar.gz"
+	if !srv.isAllowedAssetURL(allowed) {
+		t.Fatalf("official asset URL rejected: %s", allowed)
+	}
+	for _, bad := range []string{
+		"https://github.com/herliansyah/sqlfox/releases/download/../../../evil/x/releases/download/v1/sqlfox-linux-amd64.tar.gz",
+		"https://github.com/herliansyah/sqlfox/releases/download/%2e%2e/%2e%2e/evil/sqlfox.tar.gz",
+		"http://github.com/herliansyah/sqlfox/releases/download/v1/sqlfox.tar.gz",
+		"https://github.com.evil.io/herliansyah/sqlfox/releases/download/v1/sqlfox.tar.gz",
+		"https://user@github.com/herliansyah/sqlfox/releases/download/v1/sqlfox.tar.gz",
+	} {
+		if srv.isAllowedAssetURL(bad) {
+			t.Errorf("untrusted asset URL accepted: %s", bad)
+		}
+	}
+}

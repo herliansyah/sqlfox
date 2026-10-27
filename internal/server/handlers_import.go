@@ -32,7 +32,7 @@ func (s *Server) handleImportCSV(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if sess.ReadOnly {
+	if sess.IsReadOnly() {
 		writeError(w, http.StatusForbidden, "cannot import data: session is in read-only mode")
 		return
 	}

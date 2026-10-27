@@ -19,6 +19,7 @@ type ActiveRecording struct {
 	StartedAt    time.Time
 	Interval     time.Duration
 	cancel       context.CancelFunc
+	done         chan struct{} // closed when runLoop exits
 	sampleCount  int
 
 	prevQuestions int64
@@ -93,6 +94,7 @@ func (m *FlightRecorderManager) StartRecording(sessionID, connID, name string, i
 		StartedAt:    recSession.StartedAt,
 		Interval:     interval,
 		cancel:       cancel,
+		done:         make(chan struct{}),
 		recentTicks:  make([]*vault.FlightRecordingTick, 0, 100),
 		lastStatusAt: time.Now(),
 	}
@@ -114,9 +116,18 @@ func (m *FlightRecorderManager) StopRecording(sessionID string) (*vault.FlightRe
 	m.mu.Unlock()
 
 	rec.cancel()
+	// Wait for an in-flight tick to finish so no tick is appended after the session is finalized
+	// and sampleCount is final (a sample is bounded by its 3s timeout).
+	select {
+	case <-rec.done:
+	case <-time.After(5 * time.Second):
+	}
 
+	rec.mu.RLock()
+	samples := rec.sampleCount
+	rec.mu.RUnlock()
 	durationSec := int64(time.Since(rec.StartedAt).Seconds())
-	_ = m.vault.FinishFlightRecordingSession(rec.ID, durationSec, rec.sampleCount)
+	_ = m.vault.FinishFlightRecordingSession(rec.ID, durationSec, samples)
 
 	detail, err := m.vault.GetFlightRecordingSessionWithTicks(rec.ID)
 	if err != nil {
@@ -160,6 +171,7 @@ func (m *FlightRecorderManager) GetStatus(sessionID string) (map[string]any, err
 func (m *FlightRecorderManager) runLoop(ctx context.Context, rec *ActiveRecording) {
 	ticker := time.NewTicker(rec.Interval)
 	defer ticker.Stop()
+	defer close(rec.done)
 
 	defer func() {
 		m.mu.Lock()
@@ -223,6 +235,9 @@ func (m *FlightRecorderManager) runLoop(ctx context.Context, rec *ActiveRecordin
 				TopQueriesJSON:     string(queriesJSON),
 			}
 
+			if ctx.Err() != nil {
+				return // stopped while sampling: the session is being finalized
+			}
 			_ = m.vault.AppendFlightRecordingTick(tick)
 
 			rec.mu.Lock()

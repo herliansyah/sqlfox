@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -62,7 +61,8 @@ func (s *Server) handleExportDump(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		tablesToDump = viewsLast(schema.Tables)
+		// FK parents before children and views last, so the dump restores without a FK-check toggle (PostgreSQL).
+		tablesToDump = viewsLast(driver.TopologicalSortTables(schema.Tables))
 	}
 
 	dbName := targetDB
@@ -82,80 +82,175 @@ func (s *Server) handleExportDump(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", fileName))
 
 	flusher, _ := w.(http.Flusher)
+	out := &dumpWriter{w: w, flusher: flusher}
+	defer out.abortOnError()
 
 	quoteIdent := func(name string) string { return quoteIdent(name, sess.DriverName) }
 
 	// Dump header
-	_, _ = fmt.Fprintf(w, "-- SqlFox SQL Dump\n-- Database: %s\n-- Dump Date: %s\n\n", dbName, time.Now().Format(time.RFC3339))
-	if sess.DriverName == "mysql" {
-		_, _ = fmt.Fprint(w, "SET FOREIGN_KEY_CHECKS = 0;\nSET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';\n\n")
-	} else if sess.DriverName == "sqlite" {
-		_, _ = fmt.Fprint(w, "PRAGMA foreign_keys = OFF;\n\n")
-	}
-	if flusher != nil {
-		flusher.Flush()
+	out.printf("-- SqlFox SQL Dump\n-- Database: %s\n-- Dump Date: %s\n\n", dbName, time.Now().Format(time.RFC3339))
+	writeDumpPrologue(out, sess.DriverName)
+
+	if includeSchema {
+		out.fail(writeDumpDrops(ctx, out, sess, tablesToDump))
 	}
 
 	for _, tbl := range tablesToDump {
+		if out.err != nil {
+			return
+		}
 		// Schema DDL
 		if includeSchema {
 			ddl, err := sess.Session.GetTableDDL(ctx, tbl.Name)
-			if err == nil && ddl != "" {
-				_, _ = fmt.Fprintf(w, "DROP %s IF EXISTS %s;\n%s;\n\n", dropKind(tbl, ddl), quoteIdent(tbl.Name), strings.TrimSuffix(strings.TrimSpace(ddl), ";"))
-				if flusher != nil {
-					flusher.Flush()
-				}
+			if err != nil {
+				out.fail(fmt.Errorf("get DDL for %s: %w", tbl.Name, err))
+				return
+			}
+			if ddl != "" {
+				out.printf("%s;\n\n", strings.TrimSuffix(strings.TrimSpace(ddl), ";"))
+				out.flush()
 			}
 		}
 
 		// Table Rows Data
-		if includeData && tbl.Type != "VIEW" {
-			querySQL := fmt.Sprintf("SELECT * FROM %s", quoteIdent(tbl.Name))
-			stream, err := sess.Session.QueryStream(ctx, querySQL, 0)
-			if err == nil {
-				cols := stream.Columns()
-				var colNames []string
-				for _, c := range cols {
-					colNames = append(colNames, quoteIdent(c.Name))
-				}
-				colHeader := strings.Join(colNames, ", ")
-
-				batchSize := 50
-				for {
-					rowsChunk, err := stream.NextChunk(batchSize)
-					if len(rowsChunk) > 0 {
-						var valueClauses []string
-						for _, row := range rowsChunk {
-							var rowVals []string
-							for _, val := range row {
-								rowVals = append(rowVals, formatSQLValue(val, sess.DriverName))
-							}
-							valueClauses = append(valueClauses, fmt.Sprintf("  (%s)", strings.Join(rowVals, ", ")))
-						}
-						_, _ = fmt.Fprintf(w, "INSERT INTO %s (%s) VALUES\n%s;\n\n",
-							quoteIdent(tbl.Name), colHeader, strings.Join(valueClauses, ",\n"))
-						if flusher != nil {
-							flusher.Flush()
-						}
-					}
-					if err != nil || len(rowsChunk) == 0 {
-						break
-					}
-				}
-				_ = stream.Close()
+		if includeData && !isView(tbl) {
+			out.fail(writeDumpRows(ctx, out, sess, tbl.Name, fmt.Sprintf("SELECT * FROM %s", quoteIdent(tbl.Name)), 0))
+			for _, stmt := range driver.SequenceResetStatements(tbl, sess.DriverName) {
+				out.printf("%s\n\n", stmt)
 			}
 		}
 	}
 
-	// Dump footer
-	if sess.DriverName == "mysql" {
-		_, _ = fmt.Fprint(w, "SET FOREIGN_KEY_CHECKS = 1;\n")
-	} else if sess.DriverName == "sqlite" {
-		_, _ = fmt.Fprint(w, "PRAGMA foreign_keys = ON;\n")
+	writeDumpEpilogue(out, sess.DriverName)
+}
+
+// dumpWriter streams a SQL dump and remembers the first error. The HTTP status is already 200 once
+// streaming starts, so on failure it appends an error marker and aborts the connection: the browser
+// then reports a failed (not a silently truncated) download.
+type dumpWriter struct {
+	w       io.Writer
+	flusher http.Flusher
+	err     error
+}
+
+func (d *dumpWriter) printf(format string, args ...any) {
+	if d.err == nil {
+		_, d.err = fmt.Fprintf(d.w, format, args...)
 	}
-	if flusher != nil {
-		flusher.Flush()
+}
+
+func (d *dumpWriter) fail(err error) {
+	if d.err == nil && err != nil {
+		d.err = err
 	}
+}
+
+func (d *dumpWriter) flush() {
+	if d.flusher != nil && d.err == nil {
+		d.flusher.Flush()
+	}
+}
+
+func (d *dumpWriter) abortOnError() {
+	if d.err == nil {
+		d.flush()
+		return
+	}
+	_, _ = fmt.Fprintf(d.w, "\n-- SQLFOX DUMP INCOMPLETE: %s\n", strings.ReplaceAll(d.err.Error(), "\n", " "))
+	if d.flusher != nil {
+		d.flusher.Flush()
+	}
+	panic(http.ErrAbortHandler)
+}
+
+func writeDumpPrologue(out *dumpWriter, driverName string) {
+	if driverName == "mysql" {
+		out.printf("SET FOREIGN_KEY_CHECKS = 0;\nSET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';\n\n")
+	} else if driverName == "sqlite" {
+		out.printf("PRAGMA foreign_keys = OFF;\n\n")
+	}
+	out.flush()
+}
+
+func writeDumpEpilogue(out *dumpWriter, driverName string) {
+	if driverName == "mysql" {
+		out.printf("SET FOREIGN_KEY_CHECKS = 1;\n")
+	} else if driverName == "sqlite" {
+		out.printf("PRAGMA foreign_keys = ON;\n")
+	}
+}
+
+// writeDumpDrops emits DROP statements in reverse dependency order (children and views first), with
+// CASCADE on PostgreSQL, so re-importing over an existing database does not fail on dependencies.
+func writeDumpDrops(ctx context.Context, out *dumpWriter, sess *ActiveSession, tables []driver.TableMetadata) error {
+	isPg := sess.DriverName == "postgres" || sess.DriverName == "postgresql" || sess.DriverName == "pg"
+	for i := len(tables) - 1; i >= 0; i-- {
+		tbl := tables[i]
+		kind := "TABLE"
+		if isView(tbl) {
+			ddl, err := sess.Session.GetTableDDL(ctx, tbl.Name)
+			if err != nil {
+				return fmt.Errorf("get DDL for %s: %w", tbl.Name, err)
+			}
+			kind = dropKind(tbl, ddl)
+		}
+		cascade := ""
+		if isPg {
+			cascade = " CASCADE"
+		}
+		out.printf("DROP %s IF EXISTS %s%s;\n", kind, quoteIdent(tbl.Name, sess.DriverName), cascade)
+	}
+	out.printf("\n")
+	return nil
+}
+
+// writeDumpRows streams the rows of querySQL as batched INSERTs; any read error is returned rather
+// than treated as end of data. maxRows <= 0 means unbounded.
+func writeDumpRows(ctx context.Context, out *dumpWriter, sess *ActiveSession, table, querySQL string, maxRows int) error {
+	stream, err := sess.Session.QueryStream(ctx, querySQL, maxRows)
+	if err != nil {
+		return fmt.Errorf("read rows of %s: %w", table, err)
+	}
+	defer stream.Close()
+
+	cols := stream.Columns()
+	colNames := make([]string, len(cols))
+	for i, c := range cols {
+		colNames[i] = quoteIdent(c.Name, sess.DriverName)
+	}
+	colHeader := strings.Join(colNames, ", ")
+
+	written := 0
+	for out.err == nil {
+		batch := 50
+		if maxRows > 0 && maxRows-written < batch {
+			batch = maxRows - written
+		}
+		rowsChunk, err := stream.NextChunk(batch)
+		if len(rowsChunk) > 0 {
+			valueClauses := make([]string, 0, len(rowsChunk))
+			for _, row := range rowsChunk {
+				rowVals := make([]string, len(row))
+				for i, val := range row {
+					rowVals[i] = formatSQLValue(val, sess.DriverName)
+				}
+				valueClauses = append(valueClauses, fmt.Sprintf("  (%s)", strings.Join(rowVals, ", ")))
+			}
+			out.printf("INSERT INTO %s (%s) VALUES\n%s;\n\n", quoteIdent(table, sess.DriverName), colHeader, strings.Join(valueClauses, ",\n"))
+			out.flush()
+			written += len(rowsChunk)
+		}
+		if err == io.EOF || (err == nil && len(rowsChunk) == 0) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read rows of %s: %w", table, err)
+		}
+		if maxRows > 0 && written >= maxRows {
+			return nil
+		}
+	}
+	return out.err
 }
 
 func (s *Server) handleExportSmartSeed(w http.ResponseWriter, r *http.Request) {
@@ -204,211 +299,63 @@ func (s *Server) handleExportSmartSeed(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", fmt.Sprintf("%s_smart_seed.sql", dbName)))
 
 	flusher, _ := w.(http.Flusher)
+	out := &dumpWriter{w: w, flusher: flusher}
+	defer out.abortOnError()
 
 	quoteIdent := func(name string) string { return quoteIdent(name, sess.DriverName) }
 
 	// Smart seed header
-	_, _ = fmt.Fprintf(w, "-- SqlFox FK-Aware Smart Seed Dump (Transitive Closure)\n-- Database: %s\n-- Sample Limit: %d rows/table\n-- Exported At: %s\n\n",
+	out.printf("-- SqlFox FK-Aware Smart Seed Dump (Transitive Closure)\n-- Database: %s\n-- Sample Limit: %d rows/table\n-- Exported At: %s\n\n",
 		dbName, limit, time.Now().Format(time.RFC3339))
+	writeDumpPrologue(out, sess.DriverName)
 
-	if sess.DriverName == "mysql" {
-		_, _ = fmt.Fprint(w, "SET FOREIGN_KEY_CHECKS = 0;\nSET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';\n\n")
-	} else if sess.DriverName == "sqlite" {
-		_, _ = fmt.Fprint(w, "PRAGMA foreign_keys = OFF;\n\n")
-	}
-	if flusher != nil {
-		flusher.Flush()
+	if includeDDL {
+		out.fail(writeDumpDrops(ctx, out, sess, sortedTables))
 	}
 
 	// Output tables in topological order (parents before children)
 	for _, tbl := range sortedTables {
+		if out.err != nil {
+			return
+		}
 		if includeDDL {
 			ddl, err := sess.Session.GetTableDDL(ctx, tbl.Name)
-			if err == nil && ddl != "" {
-				_, _ = fmt.Fprintf(w, "DROP %s IF EXISTS %s;\n%s;\n\n", dropKind(tbl, ddl), quoteIdent(tbl.Name), strings.TrimSuffix(strings.TrimSpace(ddl), ";"))
-				if flusher != nil {
-					flusher.Flush()
-				}
+			if err != nil {
+				out.fail(fmt.Errorf("get DDL for %s: %w", tbl.Name, err))
+				return
+			}
+			if ddl != "" {
+				out.printf("%s;\n\n", strings.TrimSuffix(strings.TrimSpace(ddl), ";"))
+				out.flush()
 			}
 		}
 
-		if tbl.Type == "VIEW" {
+		if isView(tbl) {
 			continue
 		}
 
 		// Query bounded sample rows
 		querySQL := fmt.Sprintf("SELECT * FROM %s LIMIT %d", quoteIdent(tbl.Name), limit)
-		stream, err := sess.Session.QueryStream(ctx, querySQL, limit)
-		if err == nil {
-			cols := stream.Columns()
-			var colNames []string
-			for _, c := range cols {
-				colNames = append(colNames, quoteIdent(c.Name))
-			}
-			colHeader := strings.Join(colNames, ", ")
-
-			rowsChunk, _ := stream.NextChunk(limit)
-			if len(rowsChunk) > 0 {
-				var valueClauses []string
-				for _, row := range rowsChunk {
-					var rowVals []string
-					for _, val := range row {
-						rowVals = append(rowVals, formatSQLValue(val, sess.DriverName))
-					}
-					valueClauses = append(valueClauses, fmt.Sprintf("  (%s)", strings.Join(rowVals, ", ")))
-				}
-				_, _ = fmt.Fprintf(w, "INSERT INTO %s (%s) VALUES\n%s;\n\n",
-					quoteIdent(tbl.Name), colHeader, strings.Join(valueClauses, ",\n"))
-				if flusher != nil {
-					flusher.Flush()
-				}
-			}
-			_ = stream.Close()
+		out.fail(writeDumpRows(ctx, out, sess, tbl.Name, querySQL, limit))
+		for _, stmt := range driver.SequenceResetStatements(tbl, sess.DriverName) {
+			out.printf("%s\n\n", stmt)
 		}
 	}
 
-	if sess.DriverName == "mysql" {
-		_, _ = fmt.Fprint(w, "SET FOREIGN_KEY_CHECKS = 1;\n")
-	} else if sess.DriverName == "sqlite" {
-		_, _ = fmt.Fprint(w, "PRAGMA foreign_keys = ON;\n")
-	}
-	if flusher != nil {
-		flusher.Flush()
-	}
+	writeDumpEpilogue(out, sess.DriverName)
 }
 
-// splitSQLStatements splits a multi-statement SQL script into individual statements,
-// respecting single/double quotes, backticks, and single-line/multi-line comments.
+// splitSQLStatements splits a multi-statement SQL script into individual statements (see driver.SplitSQLStatements).
 func splitSQLStatements(reader io.Reader, driverName ...string) []string {
 	content, err := io.ReadAll(reader)
 	if err != nil {
 		return nil
 	}
-	isMySQL := len(driverName) > 0 && (strings.EqualFold(driverName[0], "mysql") || strings.EqualFold(driverName[0], "mariadb"))
-	return driver.SplitWithDelimiters(string(content), isMySQL, func(seg string) []string {
-		return splitDefaultDelimiter(strings.NewReader(seg), driverName...)
-	})
-}
-
-func splitDefaultDelimiter(reader io.Reader, driverName ...string) []string {
-	isMySQL := len(driverName) > 0 && (strings.EqualFold(driverName[0], "mysql") || strings.EqualFold(driverName[0], "mariadb"))
-	var statements []string
-	scanner := bufio.NewScanner(reader)
-	// Buffer up to 10MB per line/token if needed
-	buf := make([]byte, 64*1024)
-	scanner.Buffer(buf, 10*1024*1024)
-
-	var currentStmt strings.Builder
-	inSingleQuote := false
-	inDoubleQuote := false
-	inBacktick := false
-	inDollarQuote := false
-	inBlockComment := false
-
-	isQuoteEscaped := func(runes []rune, i int) bool {
-		if !isMySQL {
-			return false
-		}
-		bsCount := 0
-		for j := i - 1; j >= 0 && runes[j] == '\\'; j-- {
-			bsCount++
-		}
-		return bsCount%2 == 1
+	drv := ""
+	if len(driverName) > 0 {
+		drv = driverName[0]
 	}
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		trimmedLine := strings.TrimSpace(line)
-
-		// Check for line comments when not inside quotes or block comment
-		if !inSingleQuote && !inDoubleQuote && !inBacktick && !inDollarQuote && !inBlockComment {
-			if strings.HasPrefix(trimmedLine, "--") || (isMySQL && strings.HasPrefix(trimmedLine, "#")) {
-				continue
-			}
-		}
-
-		runes := []rune(line)
-		for i := 0; i < len(runes); i++ {
-			r := runes[i]
-
-			// Handle block and inline comments
-			if !inSingleQuote && !inDoubleQuote && !inBacktick && !inDollarQuote {
-				if inBlockComment {
-					currentStmt.WriteRune(r)
-					if r == '*' && i+1 < len(runes) && runes[i+1] == '/' {
-						inBlockComment = false
-						currentStmt.WriteRune('/')
-						i++
-					}
-					continue
-				}
-				if r == '/' && i+1 < len(runes) && runes[i+1] == '*' {
-					inBlockComment = true
-					currentStmt.WriteRune('/')
-					currentStmt.WriteRune('*')
-					i++
-					continue
-				}
-				if (r == '-' && i+1 < len(runes) && runes[i+1] == '-') || (isMySQL && r == '#') {
-					// Inline comment extends to end of line
-					currentStmt.WriteString(string(runes[i:]))
-					break
-				}
-			}
-
-			// Handle quotes
-			if !inBlockComment {
-				if r == '$' && i+1 < len(runes) && runes[i+1] == '$' && !inSingleQuote && !inDoubleQuote && !inBacktick {
-					inDollarQuote = !inDollarQuote
-					currentStmt.WriteString("$$")
-					i++
-					continue
-				} else if r == '\'' && !inDoubleQuote && !inBacktick && !inDollarQuote {
-					if inSingleQuote && i+1 < len(runes) && runes[i+1] == '\'' {
-						// Doubled single quote escape '' inside string
-						currentStmt.WriteRune('\'')
-						currentStmt.WriteRune('\'')
-						i++
-						continue
-					}
-					// Check for escape \'
-					if isQuoteEscaped(runes, i) {
-						// escaped quote
-					} else {
-						inSingleQuote = !inSingleQuote
-					}
-				} else if r == '"' && !inSingleQuote && !inBacktick && !inDollarQuote {
-					if isQuoteEscaped(runes, i) {
-						// escaped quote
-					} else {
-						inDoubleQuote = !inDoubleQuote
-					}
-				} else if r == '`' && !inSingleQuote && !inDoubleQuote && !inDollarQuote {
-					inBacktick = !inBacktick
-				}
-			}
-
-			// Statement terminator
-			if r == ';' && !inSingleQuote && !inDoubleQuote && !inBacktick && !inDollarQuote && !inBlockComment {
-				stmtStr := strings.TrimSpace(currentStmt.String())
-				if stmtStr != "" && driver.HasExecutableSQL(stmtStr, isMySQL) {
-					statements = append(statements, stmtStr)
-				}
-				currentStmt.Reset()
-				continue
-			}
-
-			currentStmt.WriteRune(r)
-		}
-		currentStmt.WriteString("\n")
-	}
-
-	remaining := strings.TrimSpace(currentStmt.String())
-	if remaining != "" && driver.HasExecutableSQL(remaining, isMySQL) {
-		statements = append(statements, remaining)
-	}
-
-	return statements
+	return driver.SplitSQLStatements(string(content), drv)
 }
 
 func (s *Server) handleRunSQLScript(w http.ResponseWriter, r *http.Request) {
@@ -419,7 +366,7 @@ func (s *Server) handleRunSQLScript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if sess.ReadOnly {
+	if sess.IsReadOnly() {
 		writeError(w, http.StatusForbidden, "Session is locked in READ-ONLY mode")
 		return
 	}

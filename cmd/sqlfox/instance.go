@@ -3,40 +3,65 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
 
 type instanceInfo struct {
 	PID       int       `json:"pid"`
-	Port      int       `json:"port"`
+	Port      int       `json:"port"` // 0 while the owning process is still starting up
+	Host      string    `json:"host,omitempty"`
 	URL       string    `json:"url"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// ponytail: Lightweight single-instance guard using lock file + loopback health check.
+const instanceStartupWait = 15 * time.Second // a claimed-but-not-yet-listening instance (vault open, bind)
+
+// ponytail: Lightweight single-instance guard using lock file + health check.
 // Eliminates duplicate process port sprawl across platforms without extra dependencies.
 func checkExistingInstance(configDir string, defaultPort int) (string, int, bool) {
 	lockPath := filepath.Join(configDir, "sqlfox.lock")
+	deadline := time.Now().Add(instanceStartupWait)
 
 	// 1. Check state file if present
-	if data, err := os.ReadFile(lockPath); err == nil {
-		var info instanceInfo
-		if err := json.Unmarshal(data, &info); err == nil && info.Port > 0 {
-			if info.PID > 0 && !isPIDAlive(info.PID) {
-				// Process is dead: remove stale lock immediately
-				_ = os.Remove(lockPath)
-			} else if pingSqlFox(info.Port) {
-				return info.URL, info.PID, true
-			} else {
-				// Stale lock: previous process terminated abnormally or port occupied by another service
-				_ = os.Remove(lockPath)
-			}
+	for {
+		data, err := os.ReadFile(lockPath)
+		if err != nil {
+			break
 		}
+		var info instanceInfo
+		if err := json.Unmarshal(data, &info); err != nil {
+			_ = os.Remove(lockPath) // corrupt lock
+			break
+		}
+		if info.PID > 0 && !isPIDAlive(info.PID) {
+			// Process is dead: remove stale lock immediately
+			_ = os.Remove(lockPath)
+			break
+		}
+		if info.Port <= 0 {
+			// Another instance claimed the lock and is still binding its port: wait for it.
+			if time.Now().After(deadline) {
+				_ = os.Remove(lockPath)
+				break
+			}
+			time.Sleep(150 * time.Millisecond)
+			continue
+		}
+		// Retry once: a busy (but alive) instance must not lose its lock to a single slow probe.
+		if pingSqlFoxHost(info.Host, info.Port) || pingSqlFoxHost(info.Host, info.Port) {
+			return info.URL, info.PID, true
+		}
+		// Stale lock: previous process terminated abnormally or port occupied by another service
+		_ = os.Remove(lockPath)
+		break
 	}
 
 	// 2. Fallback: probe defaultPort directly in case lock file was removed or missing
@@ -45,6 +70,42 @@ func checkExistingInstance(configDir string, defaultPort int) (string, int, bool
 	}
 
 	return "", 0, false
+}
+
+// claimInstanceLock atomically creates the lock file (O_EXCL) before startup, so two launches at
+// the same moment (e.g. a double-click) cannot both pass the check. It returns os.ErrExist if
+// another process holds the lock. The release func only removes a lock this process still owns.
+func claimInstanceLock(configDir string) (func(), error) {
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		return func() {}, err
+	}
+	lockPath := filepath.Join(configDir, "sqlfox.lock")
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return func() {}, err
+	}
+	data, _ := json.Marshal(instanceInfo{PID: os.Getpid(), CreatedAt: time.Now()})
+	_, werr := f.Write(data)
+	cerr := f.Close()
+	if werr != nil || cerr != nil {
+		_ = os.Remove(lockPath)
+		return func() {}, fmt.Errorf("write instance lock: %v %v", werr, cerr)
+	}
+	return func() { removeOwnLock(lockPath) }, nil
+}
+
+// removeOwnLock deletes the lock only if it still records this process, so an exiting instance
+// never deletes a lock that a newer instance has taken over.
+func removeOwnLock(lockPath string) {
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		return
+	}
+	var info instanceInfo
+	if json.Unmarshal(data, &info) == nil && info.PID != os.Getpid() {
+		return
+	}
+	_ = os.Remove(lockPath)
 }
 
 // isPIDAlive checks if a process with the specified PID is currently alive.
@@ -63,16 +124,26 @@ func isPIDAlive(pid int) bool {
 	return process.Signal(syscall.Signal(0)) == nil
 }
 
-func pingSqlFox(port int) bool {
-	client := &http.Client{
-		Timeout: 350 * time.Millisecond,
+func pingSqlFox(port int) bool { return pingSqlFoxHost("", port) }
+
+// pingSqlFoxHost probes the instance on the address it is bound to; wildcard/empty binds are
+// reachable on loopback, but an instance bound to a specific LAN IP is not.
+func pingSqlFoxHost(host string, port int) bool {
+	if host == "" || host == "0.0.0.0" || host == "::" || host == "localhost" {
+		host = "127.0.0.1"
 	}
-	url := fmt.Sprintf("http://127.0.0.1:%d/api/auth/status", port)
+	client := &http.Client{
+		Timeout: 750 * time.Millisecond,
+	}
+	url := fmt.Sprintf("http://%s/api/auth/status", net.JoinHostPort(host, strconv.Itoa(port)))
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return false
 	}
-	req.Host = "127.0.0.1"
+	req.Host = host
+	if strings.Contains(host, ":") {
+		req.Host = "[" + host + "]" // IPv6 literal
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -92,12 +163,15 @@ func pingSqlFox(port int) bool {
 	if err := json.NewDecoder(resp.Body).Decode(&status); err == nil {
 		// Strictly verify this is SqlFox and not a third-party application on the same port
 		isSqlFox := status.App == "sqlfox" || resp.Header.Get("X-SqlFox-App") == "sqlfox"
-		return isSqlFox && status.Unlocked
+		// Probing a LAN-bound instance on its LAN IP is seen as a remote client (locked), which
+		// still proves the instance is alive.
+		return isSqlFox && (status.Unlocked || status.IsRemote)
 	}
 	return false
 }
 
-func writeInstanceLock(configDir string, port int, localURL string) (func(), error) {
+// writeInstanceLock records the bound port/host in the lock (atomically via rename) once listening.
+func writeInstanceLock(configDir string, port int, localURL string, bindHost ...string) (func(), error) {
 	if err := os.MkdirAll(configDir, 0700); err != nil {
 		return func() {}, err
 	}
@@ -108,15 +182,20 @@ func writeInstanceLock(configDir string, port int, localURL string) (func(), err
 		URL:       localURL,
 		CreatedAt: time.Now(),
 	}
+	if len(bindHost) > 0 {
+		info.Host = bindHost[0]
+	}
 	data, err := json.MarshalIndent(info, "", "  ")
 	if err != nil {
 		return func() {}, err
 	}
-	if err := os.WriteFile(lockPath, data, 0600); err != nil {
+	tmp := lockPath + fmt.Sprintf(".%d.tmp", os.Getpid())
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
 		return func() {}, err
 	}
-	cleanup := func() {
-		_ = os.Remove(lockPath)
+	if err := os.Rename(tmp, lockPath); err != nil {
+		_ = os.Remove(tmp)
+		return func() {}, err
 	}
-	return cleanup, nil
+	return func() { removeOwnLock(lockPath) }, nil
 }

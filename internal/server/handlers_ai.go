@@ -46,14 +46,14 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 		if err == nil && sess != nil {
 			dialect = sess.DriverName
 			// ponytail: lazy schema inspection ensures prompt has column metadata even if initial connection inspection was incomplete
-			if (sess.CachedSchema == nil || len(sess.CachedSchema.Tables) == 0) && sess.Session != nil {
+			if (sess.Schema() == nil || len(sess.Schema().Tables) == 0) && sess.Session != nil {
 				ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 				if sc, err := sess.Session.InspectSchema(ctx, ""); err == nil {
-					sess.CachedSchema = sc
+					sess.SetSchema(sc)
 				}
 				cancel()
 			}
-			schema = sess.CachedSchema
+			schema = sess.Schema()
 
 			// Fetch table notes for the connection
 			if notes, err := s.vault.ListTableNotesForConnection(sess.ConnectionID); err == nil && len(notes) > 0 {

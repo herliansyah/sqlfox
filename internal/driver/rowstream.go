@@ -30,6 +30,10 @@ func (r *SQLRowStream) Columns() []ColumnDefinition {
 }
 
 func (r *SQLRowStream) NextChunk(batchSize int) ([][]any, error) {
+	if batchSize <= 0 {
+		// A non-positive size would return (nil, nil) forever and spin callers that loop until EOF.
+		batchSize = 1
+	}
 	var chunk [][]any
 	count := len(r.cols)
 

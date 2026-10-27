@@ -162,6 +162,42 @@ func (v *Vault) SaveCloudSyncConfig(cfg *CloudSyncConfig) error {
 	return err
 }
 
+// UpdateCloudSyncStatus atomically updates only the sync-status fields, leaving settings the user may
+// have saved during a long-running sync (repo, branch, prefix, token) untouched.
+// lastSyncAt/commitSHA are only written when non-nil/non-empty.
+func (v *Vault) UpdateCloudSyncStatus(status, syncErr string, lastSyncAt *time.Time, commitSHA string) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	var stored cloudSyncStoredPayload
+	var val string
+	if err := v.db.QueryRow(`SELECT value FROM meta WHERE key = 'cloud_sync_config'`).Scan(&val); err == nil {
+		if err := json.Unmarshal([]byte(val), &stored); err != nil {
+			return fmt.Errorf("failed to unmarshal cloud sync config: %w", err)
+		}
+	} else if errors.Is(err, sql.ErrNoRows) {
+		stored = cloudSyncStoredPayload{GitHubBranch: "main", IncludeVaultBackup: true}
+	} else {
+		return fmt.Errorf("failed to load cloud sync config: %w", err)
+	}
+
+	stored.LastSyncStatus = status
+	stored.LastSyncError = syncErr
+	if lastSyncAt != nil {
+		stored.LastSyncAt = lastSyncAt
+	}
+	if commitSHA != "" {
+		stored.LastCommitSHA = commitSHA
+	}
+
+	raw, err := json.Marshal(stored)
+	if err != nil {
+		return fmt.Errorf("failed to serialize cloud sync config: %w", err)
+	}
+	_, err = v.db.Exec(`INSERT OR REPLACE INTO meta (key, value) VALUES ('cloud_sync_config', ?)`, string(raw))
+	return err
+}
+
 // TestGitHubAccess verifies that the provided token has access to the target repository.
 func TestGitHubAccess(ctx context.Context, apiBaseURL, token, repo, branch string) error {
 	if token == "" {
@@ -208,6 +244,24 @@ func TestGitHubAccess(ctx context.Context, apiBaseURL, token, repo, branch strin
 	return nil
 }
 
+const vaultBackupFile = "vault-backup.sqlfox-vault"
+
+// isSyncManagedPath reports whether a repo path is one SqlFox owns (and may mirror-delete): only the
+// exported notes/table-notes/snippets trees and the vault archive, under the configured prefix.
+// Anything else in the repository (README, user files) is never touched.
+func isSyncManagedPath(p, prefix string) bool {
+	if prefix != "" {
+		if !strings.HasPrefix(p, prefix+"/") {
+			return false
+		}
+		p = strings.TrimPrefix(p, prefix+"/")
+	}
+	return p == vaultBackupFile ||
+		strings.HasPrefix(p, "notes/") ||
+		strings.HasPrefix(p, "table-notes/") ||
+		strings.HasPrefix(p, "snippets/")
+}
+
 // SyncToGitHub executes the full atomic synchronization of notes, snippets, and encrypted vault archive.
 func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPassword string) (*CloudSyncResult, error) {
 	if cfg.GitHubToken == "" {
@@ -235,12 +289,20 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 		return nil, fmt.Errorf("failed to export notes files: %w", err)
 	}
 
-	// 2. Include encrypted Vault Archive if enabled
-	if cfg.IncludeVaultBackup && masterPassword != "" {
-		archiveBytes, err := ExportVault(v, masterPassword)
-		if err == nil && len(archiveBytes) > 0 {
-			files["vault-backup.sqlfox-vault"] = archiveBytes
+	// 2. Include encrypted Vault Archive if enabled. Fail closed: syncing without it would mirror-delete
+	// the previous remote backup.
+	if cfg.IncludeVaultBackup {
+		if masterPassword == "" {
+			return nil, errors.New("vault backup is enabled but the master password is unavailable")
 		}
+		archiveBytes, err := ExportVault(v, masterPassword)
+		if err != nil {
+			return nil, fmt.Errorf("failed to export encrypted vault backup: %w", err)
+		}
+		if len(archiveBytes) == 0 {
+			return nil, errors.New("failed to export encrypted vault backup: empty archive")
+		}
+		files[vaultBackupFile] = archiveBytes
 	}
 
 	// 3. Prepend PathPrefix if set
@@ -345,10 +407,8 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 		}
 		if err := json.NewDecoder(treeResp.Body).Decode(&treeData); err == nil {
 			for _, item := range treeData.Tree {
-				if item.Type == "blob" {
-					if prefix == "" || strings.HasPrefix(item.Path, prefix+"/") {
-						existingFiles = append(existingFiles, item.Path)
-					}
+				if item.Type == "blob" && isSyncManagedPath(item.Path, prefix) {
+					existingFiles = append(existingFiles, item.Path)
 				}
 			}
 		}
@@ -427,7 +487,7 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 		cfg.LastSyncStatus = "synced"
 		cfg.LastCommitSHA = latestCommitSHA
 		cfg.LastSyncError = ""
-		_ = v.SaveCloudSyncConfig(cfg)
+		_ = v.UpdateCloudSyncStatus("synced", "", &now, latestCommitSHA)
 		return &CloudSyncResult{
 			CommitSHA:  latestCommitSHA,
 			FilesCount: len(files),
@@ -495,7 +555,7 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 	cfg.LastSyncStatus = "synced"
 	cfg.LastCommitSHA = newCommitData.SHA
 	cfg.LastSyncError = ""
-	_ = v.SaveCloudSyncConfig(cfg)
+	_ = v.UpdateCloudSyncStatus("synced", "", &now, newCommitData.SHA)
 
 	return &CloudSyncResult{
 		CommitSHA:  newCommitData.SHA,

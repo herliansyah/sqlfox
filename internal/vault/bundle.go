@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net/url"
 	"path"
 	"strings"
 	"time"
@@ -32,7 +33,7 @@ func ExportNotesFiles(v *Vault) (map[string][]byte, error) {
 		return nil, fmt.Errorf("failed to list table notes: %w", err)
 	}
 	for _, tn := range tableNotes {
-		filename := fmt.Sprintf("table-notes/%s/%s/%s.md", slugify(tn.ConnectionID), slugify(tn.DatabaseName), slugify(tn.TableName))
+		filename := fmt.Sprintf("table-notes/%s/%s/%s.md", encodePathSegment(tn.ConnectionID), encodePathSegment(tn.DatabaseName), encodePathSegment(tn.TableName))
 		files[filename] = []byte(tn.Content)
 	}
 
@@ -116,14 +117,11 @@ func ImportNotesBundle(v *Vault, zipData []byte) (int, error) {
 		}
 
 		// Case 2: Table Note: "table-notes/<conn>/<db>/<table>.md"
-		if len(parts) >= 4 && parts[0] == "table-notes" && strings.HasSuffix(cleanPath, ".md") {
-			connID := parts[1]
-			dbName := parts[2]
-			tableName := strings.TrimSuffix(parts[3], ".md")
+		if len(parts) == 4 && parts[0] == "table-notes" && strings.HasSuffix(cleanPath, ".md") {
 			tn := &TableNote{
-				ConnectionID: connID,
-				DatabaseName: dbName,
-				TableName:    tableName,
+				ConnectionID: decodePathSegment(parts[1]),
+				DatabaseName: decodePathSegment(parts[2]),
+				TableName:    decodePathSegment(strings.TrimSuffix(parts[3], ".md")),
 				Content:      string(contentBytes),
 			}
 			if err := v.SaveTableNote(tn); err == nil {
@@ -301,6 +299,31 @@ func parseSnippetSQL(raw string, filename string) *Snippet {
 func sanitizeYAMLString(s string) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "\r", "")
+	return s
+}
+
+// encodePathSegment makes an identifier a lossless, traversal-safe path segment (unlike slugify, which
+// is only for display names): percent-encoding round-trips any name, a leading '.' is escaped so ".."
+// cannot form, and the empty name becomes "%" (a token PathEscape never emits).
+func encodePathSegment(s string) string {
+	if s == "" {
+		return "%"
+	}
+	enc := url.PathEscape(s)
+	if strings.HasPrefix(enc, ".") {
+		enc = "%2E" + enc[1:]
+	}
+	return enc
+}
+
+// decodePathSegment reverses encodePathSegment; legacy slug paths decode to themselves.
+func decodePathSegment(s string) string {
+	if s == "%" {
+		return ""
+	}
+	if dec, err := url.PathUnescape(s); err == nil {
+		return dec
+	}
 	return s
 }
 

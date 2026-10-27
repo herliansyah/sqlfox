@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 )
@@ -293,8 +292,10 @@ func (c *AIClient) completeAnthropic(ctx context.Context, req CompletionRequest)
 }
 
 func (c *AIClient) completeGemini(ctx context.Context, req CompletionRequest) (*CompletionResponse, error) {
-	endpoint := fmt.Sprintf("%s/models/%s:generateContent?key=%s",
-		strings.TrimSuffix(c.cfg.Endpoint, "/"), c.cfg.Model, url.QueryEscape(c.cfg.APIKey))
+	// The key travels in the x-goog-api-key header, never the URL: *url.Error messages (DNS, TLS,
+	// timeout failures) embed the full request URL and would leak a ?key= parameter to logs/UI.
+	endpoint := fmt.Sprintf("%s/models/%s:generateContent",
+		strings.TrimSuffix(c.cfg.Endpoint, "/"), c.cfg.Model)
 
 	payload := map[string]any{
 		"system_instruction": map[string]any{
@@ -321,6 +322,7 @@ func (c *AIClient) completeGemini(ctx context.Context, req CompletionRequest) (*
 	if err != nil {
 		return nil, err
 	}
+	httpReq.Header.Set("x-goog-api-key", c.cfg.APIKey)
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(httpReq)

@@ -111,16 +111,16 @@ func isPrefixColumns(prefix, full []string) bool {
 
 func generateDropIndexSQL(dialect, database, table, index string) string {
 	if strings.EqualFold(dialect, "sqlite") {
-		return fmt.Sprintf("DROP INDEX %q;", index)
+		return fmt.Sprintf("DROP INDEX %s;", QuoteIdentifier(index, "sqlite"))
 	}
 	if strings.EqualFold(dialect, "postgres") || strings.EqualFold(dialect, "postgresql") {
 		if database != "" {
-			return fmt.Sprintf("DROP INDEX CONCURRENTLY IF EXISTS %q.%q;", database, index)
+			return fmt.Sprintf("DROP INDEX CONCURRENTLY IF EXISTS %s.%s;", QuoteIdentifier(database, "postgres"), QuoteIdentifier(index, "postgres"))
 		}
-		return fmt.Sprintf("DROP INDEX CONCURRENTLY IF EXISTS %q;", index)
+		return fmt.Sprintf("DROP INDEX CONCURRENTLY IF EXISTS %s;", QuoteIdentifier(index, "postgres"))
 	}
 	if database != "" {
-		return fmt.Sprintf("ALTER TABLE `%s`.`%s` DROP INDEX `%s`;", database, table, index)
+		return fmt.Sprintf("ALTER TABLE %s.%s DROP INDEX %s;", QuoteIdentifier(database, "mysql"), QuoteIdentifier(table, "mysql"), QuoteIdentifier(index, "mysql"))
 	}
-	return fmt.Sprintf("ALTER TABLE `%s` DROP INDEX `%s`;", table, index)
+	return fmt.Sprintf("ALTER TABLE %s DROP INDEX %s;", QuoteIdentifier(table, "mysql"), QuoteIdentifier(index, "mysql"))
 }
