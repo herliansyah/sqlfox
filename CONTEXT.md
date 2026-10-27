@@ -767,6 +767,8 @@ _Avoid_: Multiline button labels, squished button shapes, colliding controls
 - **0054**: Processlist Column Visibility Picker (`docs/adr/0054-processlist-column-visibility-picker.md`)
 - **0055**: Tab Database Scope and DDL Target Affirmation (`docs/adr/0055-tab-database-scope-and-ddl-target-affirmation.md`)
 - **0056**: Table Designer Focus Retention and Relational Constraint Builders (`docs/adr/0056-table-designer-focus-retention-and-relational-constraint-builders.md`)
+- **0057**: Pre-Execution Mutation Estimation and Tiered Safety Guard (`docs/adr/0057-pre-execution-mutation-estimation-and-tiered-safety-guard.md`)
+- **0058**: Virtual Data Grid and Micro-Chunk Streaming (`docs/adr/0058-virtual-datagrid-and-micro-chunk-streaming.md`)
 
 ## Visual Schema & ERD Canvas
 
@@ -871,6 +873,50 @@ _Avoid_: Virtual tree, windowing component, lazy DOM
 **Fail-Fast Control Channel**:
 A time-bounded (3s) secondary database connection path used for out-of-band cancellation (`KILL QUERY` / `pg_cancel_backend`) that aborts client-side streaming and surfaces pool exhaustion diagnostics when server-side connection slots are saturated.
 _Avoid_: Secondary killer, kill connection, cancel hook
+
+**Virtual Data Grid**:
+A DOM-recycling table component that maintains a fixed pool of DOM row elements (`<tr>`) matching the viewport height, recalculating rendered row slice offsets via O(1) arithmetic to guarantee 60fps scrolling without rendering unmounted dataset rows.
+_Avoid_: Infinite scroll, lazy table, react-window clone
+
+**Time to First Row (TTFR)**:
+The latency budget measured from SQL query submission until the initial micro-chunk of result rows (20–50 records) is painted in the Virtual Data Grid.
+_Avoid_: First byte, query delay, initial render latency
+
+**Micro-Chunked Streaming**:
+A response streaming pattern where the query execution engine dispatches an immediate small batch of rows upon first read, followed by larger batched buffers for remaining records to minimize perceived latency.
+_Avoid_: Row trickle, tiny chunks, fast burst
+
+**Warm Catalog Cache**:
+An in-memory schema metadata store populated on initial connection and refreshed asynchronously to provide sub-50ms Schema Explorer filtering and CodeMirror autocomplete lookups.
+_Avoid_: Schema cache, local catalog, metadata store
+
+**Fixed-Height Row Windowing**:
+The grid layout policy enforcing a uniform 32px row height with cell truncation (`text-overflow: ellipsis`) and an on-demand detail inspector popover, enabling O(1) index projection without browser DOM layout reflows.
+_Avoid_: Dynamic row height, variable height grid, auto-sizing row
+
+**Hybrid Column Windowing**:
+An adaptive virtualization strategy that renders all columns directly when column count is <= 50, dynamically switching to horizontal column windowing only when wide result sets exceed 50 columns.
+_Avoid_: Full-time column virtualizer, wide table splitter
+
+**AST DDL Interceptor**:
+A reactive cache invalidation mechanism in the query executor that detects schema-mutating statements (`CREATE`, `ALTER`, `DROP`, `TRUNCATE`) to asynchronously invalidate and warm the catalog cache without manual user intervention.
+_Avoid_: Schema watcher, DDL hook, table invalidate trigger
+
+**Fetch Stream Ingestion**:
+The client-side query result transport leveraging standard browser `fetch()` and `ReadableStream` reader to incrementally deserialize NDJSON chunks into the Virtual Data Grid buffer with native `AbortController` cancellation.
+_Avoid_: WebSocket stream, SSE reader, bulk response parser
+
+**Keyset Segmented Streaming**:
+A client-side streaming buffer policy fetching up to 5,000 rows per stream segment with a hard browser memory ceiling of 25,000 active records to prevent client-side JavaScript heap bloat and GC pauses.
+_Avoid_: Infinite array buffer, boundless stream, memory hoard
+
+**Cell Detail Drawer**:
+A persistent, keyboard-synchronized side or bottom inspection panel that live-renders complete multiline text, formatted JSON, or hex payload of the currently focused cell in the Virtual Data Grid without modal interruption.
+_Avoid_: Cell modal, cell popup, value dialog
+
+**Prefix Substring Index**:
+A zero-dependency in-memory client-side lookup structure compiled upon catalog cache loading to deliver sub-5ms instant schema filtering without debounce delays.
+_Avoid_: Debounced search, linear tree scan, regex filter
 
 ## Query Optimization & Index Tuning
 
