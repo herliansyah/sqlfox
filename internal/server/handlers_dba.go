@@ -199,14 +199,22 @@ func (s *Server) handleBatchKillProcess(w http.ResponseWriter, r *http.Request) 
 
 	// ponytail: detect immune threads (self connection and critical system processes) to enforce safety guardrails at backend layer
 	immunePIDs := make(map[int64]string)
-	if pl, pErr := sess.GetProcesslist(ctx); pErr == nil && pl != nil {
-		if pl.CurrentThreadID > 0 {
-			immunePIDs[pl.CurrentThreadID] = "own active connection (self)"
+	pl, pErr := sess.GetProcesslist(ctx)
+	if pErr != nil || pl == nil {
+		// Fail closed: without the processlist we cannot tell which threads are immune.
+		msg := "cannot verify immune threads: processlist unavailable"
+		if pErr != nil {
+			msg += ": " + pErr.Error()
 		}
-		for _, th := range pl.Threads {
-			if th.User == "system user" || th.User == "event_scheduler" || th.Command == "Binlog Dump" {
-				immunePIDs[th.ID] = fmt.Sprintf("system process (%s)", th.User)
-			}
+		writeError(w, http.StatusServiceUnavailable, msg)
+		return
+	}
+	if pl.CurrentThreadID > 0 {
+		immunePIDs[pl.CurrentThreadID] = "own active connection (self)"
+	}
+	for _, th := range pl.Threads {
+		if th.User == "system user" || th.User == "event_scheduler" || th.Command == "Binlog Dump" {
+			immunePIDs[th.ID] = fmt.Sprintf("system process (%s)", th.User)
 		}
 	}
 

@@ -247,8 +247,8 @@ When you bind SqlFox to a local network interface or access it over LAN (`http:/
 ## 3. Connection Vault & Security Architecture
 
 ### AES-256-GCM & Argon2id Vault
-- All connection endpoints, usernames, passwords, and SSL/TLS certificates are stored in an encrypted SQLite database (`~/.sqlfox/config.db`).
-- Vault records are encrypted using **AES-256-GCM** authenticated cipher blocks with unique 96-bit initialization vectors.
+- All connection endpoints, usernames, passwords, and SSL/TLS certificates and private keys are stored in an encrypted SQLite database (`~/.sqlfox/config.db`).
+- Vault records, passwords, and client SSL private keys are encrypted at rest using **AES-256-GCM** authenticated cipher blocks with unique 96-bit initialization vectors and versioned envelopes (`enc:v1:`).
 - Encryption keys are derived using **Argon2id** key derivation function (KDF) parameterized to defend against GPU/ASIC brute-force attacks.
 - Portable Vault Archives (`.sqlfox-vault`) can be exported and imported with password protection for seamless team onboarding or machine migration.
 

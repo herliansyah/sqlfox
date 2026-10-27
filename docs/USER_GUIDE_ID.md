@@ -247,8 +247,8 @@ Saat Anda menjalankan SqlFox di server jaringan lokal atau mengaksesnya via IP L
 ## 3. Connection Vault & Arsitektur Keamanan
 
 ### Enkripsi AES-256-GCM & KDF Argon2id
-- Seluruh host database, port, username, password, dan sertifikat SSL/TLS tersimpan rapi di basis data SQLite lokal terenkripsi (`~/.sqlfox/config.db`).
-- Setiap catatan dienkripsi menggunakan blok sandi **AES-256-GCM** dengan vektor inisialisasi (IV) 96-bit unik per catatan.
+- Seluruh host database, port, username, password, sertifikat SSL/TLS, dan *private key* SSL klien tersimpan rapi di basis data SQLite lokal terenkripsi (`~/.sqlfox/config.db`).
+- Setiap catatan kredensial (termasuk password dan *private key* SSL) dienkripsi saat istirahat (*at rest*) menggunakan blok sandi **AES-256-GCM** dengan amplop berversi (`enc:v1:`) dan vektor inisialisasi (IV) 96-bit unik per catatan.
 - Kunci derivasi diolah menggunakan algoritma **Argon2id** berstandar keamanan tinggi guna menangkal serangan *brute-force* berbasis kluster GPU.
 - Kredensial dapat diekspor menjadi arsip portabel (`.sqlfox-vault`) berpaspor sandi untuk mempermudah migrasi perangkat kerja atau berbagi profil koneksi tim secara aman.
 

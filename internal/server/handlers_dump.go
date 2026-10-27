@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -61,7 +62,7 @@ func (s *Server) handleExportDump(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		tablesToDump = schema.Tables
+		tablesToDump = viewsLast(schema.Tables)
 	}
 
 	dbName := targetDB
@@ -100,7 +101,7 @@ func (s *Server) handleExportDump(w http.ResponseWriter, r *http.Request) {
 		if includeSchema {
 			ddl, err := sess.Session.GetTableDDL(ctx, tbl.Name)
 			if err == nil && ddl != "" {
-				_, _ = fmt.Fprintf(w, "DROP TABLE IF EXISTS %s;\n%s;\n\n", quoteIdent(tbl.Name), strings.TrimSuffix(strings.TrimSpace(ddl), ";"))
+				_, _ = fmt.Fprintf(w, "DROP %s IF EXISTS %s;\n%s;\n\n", dropKind(tbl, ddl), quoteIdent(tbl.Name), strings.TrimSuffix(strings.TrimSpace(ddl), ";"))
 				if flusher != nil {
 					flusher.Flush()
 				}
@@ -189,7 +190,7 @@ func (s *Server) handleExportSmartSeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sortedTables := driver.TopologicalSortTables(schema.Tables)
+	sortedTables := viewsLast(driver.TopologicalSortTables(schema.Tables))
 
 	dbName := targetDB
 	if dbName == "" {
@@ -224,7 +225,7 @@ func (s *Server) handleExportSmartSeed(w http.ResponseWriter, r *http.Request) {
 		if includeDDL {
 			ddl, err := sess.Session.GetTableDDL(ctx, tbl.Name)
 			if err == nil && ddl != "" {
-				_, _ = fmt.Fprintf(w, "DROP TABLE IF EXISTS %s;\n%s;\n\n", quoteIdent(tbl.Name), strings.TrimSuffix(strings.TrimSpace(ddl), ";"))
+				_, _ = fmt.Fprintf(w, "DROP %s IF EXISTS %s;\n%s;\n\n", dropKind(tbl, ddl), quoteIdent(tbl.Name), strings.TrimSuffix(strings.TrimSpace(ddl), ";"))
 				if flusher != nil {
 					flusher.Flush()
 				}
@@ -531,4 +532,34 @@ func (s *Server) handleRunSQLScript(w http.ResponseWriter, r *http.Request) {
 	if flusher != nil {
 		flusher.Flush()
 	}
+}
+
+func isView(t driver.TableMetadata) bool { return strings.HasSuffix(strings.ToUpper(t.Type), "VIEW") }
+
+// dropKind returns the DROP object keyword for a dumped relation (DROP TABLE fails on views).
+func dropKind(t driver.TableMetadata, ddl string) string {
+	if !isView(t) {
+		return "TABLE"
+	}
+	if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(ddl)), "CREATE MATERIALIZED VIEW") {
+		return "MATERIALIZED VIEW"
+	}
+	return "VIEW"
+}
+
+// viewsLast keeps table order but moves views after base tables so CREATE VIEW finds its sources.
+// ponytail: views referencing other views keep their relative order; upgrade path: view dependency sort.
+func viewsLast(tables []driver.TableMetadata) []driver.TableMetadata {
+	out := slices.Clone(tables)
+	slices.SortStableFunc(out, func(a, b driver.TableMetadata) int {
+		switch av, bv := isView(a), isView(b); {
+		case av == bv:
+			return 0
+		case av:
+			return 1
+		default:
+			return -1
+		}
+	})
+	return out
 }

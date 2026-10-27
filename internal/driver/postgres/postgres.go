@@ -149,10 +149,15 @@ func (s *PostgresSession) SelectDatabase(ctx context.Context, schemaName string)
 	return nil
 }
 
-func (s *PostgresSession) applyActiveSchema(ctx context.Context, conn *sql.Conn) error {
+// activeSchema returns the current schema; SelectDatabase may change it concurrently.
+func (s *PostgresSession) activeSchema() string {
 	s.mu.Lock()
-	schema := s.currentSchema
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	return s.currentSchema
+}
+
+func (s *PostgresSession) applyActiveSchema(ctx context.Context, conn *sql.Conn) error {
+	schema := s.activeSchema()
 	if schema != "" {
 		// A failed SET must abort the statement; otherwise unqualified names resolve in the default schema.
 		if _, err := conn.ExecContext(ctx, fmt.Sprintf("SET search_path = %s", quoteIdentifier(schema))); err != nil {
@@ -362,7 +367,7 @@ func (s *PostgresSession) BeginTx(ctx context.Context) (driver.TxSession, error)
 
 func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) (*driver.SchemaMetadata, error) {
 	if schemaName == "" || schemaName == s.cfg.DatabaseName {
-		schemaName = s.currentSchema
+		schemaName = s.activeSchema()
 	}
 	if schemaName == "" {
 		schemaName = "public"
@@ -508,26 +513,32 @@ func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) 
 		       c.relname as table_name,
 		       a.attname as column_name,
 		       cf.relname as ref_table,
-		       af.attname as ref_column
+		       af.attname as ref_column,
+		       CASE con.confdeltype WHEN 'c' THEN 'CASCADE' WHEN 'n' THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT' WHEN 'r' THEN 'RESTRICT' ELSE 'NO ACTION' END,
+		       CASE con.confupdtype WHEN 'c' THEN 'CASCADE' WHEN 'n' THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT' WHEN 'r' THEN 'RESTRICT' ELSE 'NO ACTION' END
 		FROM pg_catalog.pg_constraint con
 		JOIN pg_catalog.pg_class c ON c.oid = con.conrelid
 		JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
 		JOIN pg_catalog.pg_class cf ON cf.oid = con.confrelid
-		JOIN pg_catalog.pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = con.conkey[1]
-		JOIN pg_catalog.pg_attribute af ON af.attrelid = con.confrelid AND af.attnum = con.confkey[1]
+		-- One row per column pair so composite FKs keep every column (same Name groups them).
+		CROSS JOIN LATERAL unnest(con.conkey, con.confkey) WITH ORDINALITY AS k(attnum, fattnum, pos)
+		JOIN pg_catalog.pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum
+		JOIN pg_catalog.pg_attribute af ON af.attrelid = con.confrelid AND af.attnum = k.fattnum
 		WHERE con.contype = 'f' AND n.nspname = $1
-		ORDER BY con.conname;
+		ORDER BY con.conname, k.pos;
 	`, schemaName)
 	if err == nil {
 		for fkRows.Next() {
-			var fkName, tbl, col, refTbl, refCol string
-			if err := fkRows.Scan(&fkName, &tbl, &col, &refTbl, &refCol); err == nil {
+			var fkName, tbl, col, refTbl, refCol, onDel, onUpd string
+			if err := fkRows.Scan(&fkName, &tbl, &col, &refTbl, &refCol, &onDel, &onUpd); err == nil {
 				if t, ok := tablesMap[tbl]; ok {
 					t.ForeignKeys = append(t.ForeignKeys, driver.ForeignKeyMetadata{
 						Name:             fkName,
 						Column:           col,
 						ReferencedTable:  refTbl,
 						ReferencedColumn: refCol,
+						OnDelete:         onDel,
+						OnUpdate:         onUpd,
 					})
 				}
 			}
@@ -684,25 +695,47 @@ func (s *PostgresSession) InspectFastCatalog(ctx context.Context) (map[string][]
 }
 
 func (s *PostgresSession) GetTableDDL(ctx context.Context, tableName string) (string, error) {
-	schema, err := s.InspectSchema(ctx, s.currentSchema)
+	schemaName := s.activeSchema()
+	schema, err := s.InspectSchema(ctx, schemaName)
 	if err != nil {
 		return "", err
 	}
 
 	for _, tbl := range schema.Tables {
 		if strings.EqualFold(tbl.Name, tableName) {
-			return generatePostgresCreateDDL(s.currentSchema, tbl), nil
+			if tbl.Type == "VIEW" {
+				return s.viewDDL(ctx, schemaName, tbl.Name)
+			}
+			return generatePostgresCreateDDL(schemaName, tbl), nil
 		}
 	}
 
-	return "", fmt.Errorf("table %s not found in schema %s", tableName, s.currentSchema)
+	return "", fmt.Errorf("table %s not found in schema %s", tableName, schemaName)
+}
+
+// viewDDL rebuilds CREATE [MATERIALIZED] VIEW from the catalog (views have no column DDL).
+func (s *PostgresSession) viewDDL(ctx context.Context, schemaName, viewName string) (string, error) {
+	var relkind, def string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT c.relkind::text, pg_get_viewdef(c.oid, true)
+		FROM pg_catalog.pg_class c
+		JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = $1 AND c.relname = $2 AND c.relkind IN ('v', 'm')`, schemaName, viewName).Scan(&relkind, &def)
+	if err != nil {
+		return "", err
+	}
+	kind := "VIEW"
+	if relkind == "m" {
+		kind = "MATERIALIZED VIEW"
+	}
+	return fmt.Sprintf("CREATE %s %s.%s AS\n%s", kind, quoteIdentifier(schemaName), quoteIdentifier(viewName), strings.TrimSuffix(strings.TrimSpace(def), ";")), nil
 }
 
 func (s *PostgresSession) GetTableEstimate(ctx context.Context, tableName string) (*driver.TableEstimate, error) {
 	var rowCount int64
 	var sizeBytes int64
 
-	regClass := fmt.Sprintf("%s.%s", quoteIdentifier(s.currentSchema), quoteIdentifier(tableName))
+	regClass := fmt.Sprintf("%s.%s", quoteIdentifier(s.activeSchema()), quoteIdentifier(tableName))
 	query := `
 		SELECT COALESCE(reltuples::bigint, 0),
 		       pg_total_relation_size($1::regclass)
@@ -1013,7 +1046,7 @@ func (s *PostgresSession) GetDatabaseDiagnostics(ctx context.Context) ([]driver.
 
 func (s *PostgresSession) GetTableDiagnostics(ctx context.Context, database, table string) ([]driver.TableDiagnostics, error) {
 	if database == "" {
-		database = s.currentSchema
+		database = s.activeSchema()
 	}
 	query := `
 		SELECT 
@@ -1071,7 +1104,7 @@ func (s *PostgresSession) GetTableDiagnostics(ctx context.Context, database, tab
 func (s *PostgresSession) ExecuteMaintenance(ctx context.Context, database string, tables []string, action string) ([]driver.MaintenanceResult, error) {
 	var results []driver.MaintenanceResult
 	for _, tbl := range tables {
-		regClass := fmt.Sprintf("%s.%s", quoteIdentifier(s.currentSchema), quoteIdentifier(tbl))
+		regClass := fmt.Sprintf("%s.%s", quoteIdentifier(s.activeSchema()), quoteIdentifier(tbl))
 		var cmd string
 		switch strings.ToUpper(action) {
 		case "OPTIMIZE":
@@ -1106,7 +1139,7 @@ func (s *PostgresSession) ExecuteMaintenance(ctx context.Context, database strin
 }
 
 func (s *PostgresSession) GetRedundantIndexes(ctx context.Context, database, table string) ([]driver.RedundantIndex, error) {
-	schema, err := s.InspectSchema(ctx, s.currentSchema)
+	schema, err := s.InspectSchema(ctx, s.activeSchema())
 	if err != nil {
 		return nil, err
 	}
@@ -1120,11 +1153,11 @@ func (s *PostgresSession) GetRedundantIndexes(ctx context.Context, database, tab
 	} else {
 		tables = schema.Tables
 	}
-	return driver.DetectRedundantIndexes("postgres", s.currentSchema, tables), nil
+	return driver.DetectRedundantIndexes("postgres", s.activeSchema(), tables), nil
 }
 
 func (s *PostgresSession) PeekForeignKeyRow(ctx context.Context, database, table, column string, value any) (*driver.PeekResult, error) {
-	schema := s.currentSchema
+	schema := s.activeSchema()
 	if database != "" {
 		schema = database
 	}
@@ -1597,13 +1630,32 @@ func generatePostgresCreateDDL(schema string, tbl driver.TableMetadata) string {
 	}
 
 	// Foreign Keys
+	// Composite FKs arrive as one entry per column sharing the same Name; group them in order.
+	var fkOrder []string
+	fkGroups := map[string][]driver.ForeignKeyMetadata{}
 	for _, fk := range tbl.ForeignKeys {
-		lines = append(lines, fmt.Sprintf("  CONSTRAINT %s FOREIGN KEY (%s) REFERENCES %s (%s)",
-			quoteIdentifier(fk.Name),
-			quoteIdentifier(fk.Column),
-			quoteIdentifier(fk.ReferencedTable),
-			quoteIdentifier(fk.ReferencedColumn),
-		))
+		if _, seen := fkGroups[fk.Name]; !seen {
+			fkOrder = append(fkOrder, fk.Name)
+		}
+		fkGroups[fk.Name] = append(fkGroups[fk.Name], fk)
+	}
+	for _, name := range fkOrder {
+		group := fkGroups[name]
+		cols := make([]string, len(group))
+		refCols := make([]string, len(group))
+		for i, fk := range group {
+			cols[i] = quoteIdentifier(fk.Column)
+			refCols[i] = quoteIdentifier(fk.ReferencedColumn)
+		}
+		line := fmt.Sprintf("  CONSTRAINT %s FOREIGN KEY (%s) REFERENCES %s (%s)",
+			quoteIdentifier(name), strings.Join(cols, ", "), quoteIdentifier(group[0].ReferencedTable), strings.Join(refCols, ", "))
+		if r := group[0].OnDelete; r != "" && r != "NO ACTION" {
+			line += " ON DELETE " + r
+		}
+		if r := group[0].OnUpdate; r != "" && r != "NO ACTION" {
+			line += " ON UPDATE " + r
+		}
+		lines = append(lines, line)
 	}
 
 	sb.WriteString(strings.Join(lines, ",\n"))
@@ -1886,7 +1938,7 @@ func (s *PostgresSession) GetRoutineDDL(ctx context.Context, routineType, name s
 		WHERE n.nspname = $1 
 		  AND (p.proname = $2 OR (p.proname || '(' || COALESCE(pg_catalog.pg_get_function_identity_arguments(p.oid), '') || ')') = $3)
 		LIMIT 1
-	`, s.currentSchema, baseName, name).Scan(&ddl)
+	`, s.activeSchema(), baseName, name).Scan(&ddl)
 	if err != nil {
 		return "", fmt.Errorf("routine %s not found: %w", name, err)
 	}

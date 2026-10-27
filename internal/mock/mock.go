@@ -56,12 +56,8 @@ func Generate(ctx context.Context, sess driver.Session, cfg Config) (*Result, er
 	isSQLite := cfg.DriverName == "sqlite"
 
 	// Disable FK checks to allow flexible insert order.
-	if isMySQL {
-		if _, err := sess.ExecRaw(ctx, "SET FOREIGN_KEY_CHECKS=0"); err != nil {
-			return nil, fmt.Errorf("disable FK checks: %w", err)
-		}
-		defer sess.ExecRaw(ctx, "SET FOREIGN_KEY_CHECKS=1") //nolint:errcheck
-	} else if isSQLite {
+	// MySQL's FOREIGN_KEY_CHECKS is per-connection, so it is set on the pinned tx connection below.
+	if isSQLite {
 		if _, err := sess.ExecRaw(ctx, "PRAGMA foreign_keys=OFF"); err != nil {
 			return nil, fmt.Errorf("disable FK checks: %w", err)
 		}
@@ -134,6 +130,14 @@ func Generate(ctx context.Context, sess driver.Session, cfg Config) (*Result, er
 	}
 	defer tx.Rollback() //nolint:errcheck
 
+	if isMySQL {
+		if _, err := tx.ExecRaw(ctx, "SET FOREIGN_KEY_CHECKS=0"); err != nil {
+			return nil, fmt.Errorf("disable FK checks: %w", err)
+		}
+		// Restore before the connection returns to the pool (runs before Rollback on error paths).
+		defer tx.ExecRaw(ctx, "SET FOREIGN_KEY_CHECKS=1") //nolint:errcheck
+	}
+
 	totalInserted := 0
 	for batchStart := 0; batchStart < cfg.Rows; batchStart += batchSize {
 		count := batchSize
@@ -171,6 +175,11 @@ func Generate(ctx context.Context, sess driver.Session, cfg Config) (*Result, er
 		totalInserted += int(n)
 	}
 
+	if isMySQL {
+		if _, err := tx.ExecRaw(ctx, "SET FOREIGN_KEY_CHECKS=1"); err != nil {
+			return nil, fmt.Errorf("restore FK checks: %w", err)
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit: %w", err)
 	}

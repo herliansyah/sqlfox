@@ -221,6 +221,26 @@ func TestCrossSiteCSRFGuard(t *testing.T) {
 	if recOrigin.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 Forbidden for malicious origin, got: %d", recOrigin.Code)
 	}
+
+	// A different localhost port (another local app) is a different origin and must be blocked.
+	reqPort := httptest.NewRequest("POST", "/api/connections", bytes.NewReader([]byte(`{}`)))
+	reqPort.Host = "localhost:8080"
+	reqPort.Header.Set("Origin", "http://localhost:3000")
+	recPort := httptest.NewRecorder()
+	handler.ServeHTTP(recPort, reqPort)
+	if recPort.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for other-port origin, got: %d", recPort.Code)
+	}
+
+	// Same-origin requests pass the CSRF guard (may still fail auth, but not with the CSRF 403).
+	reqSame := httptest.NewRequest("POST", "/api/connections", bytes.NewReader([]byte(`{}`)))
+	reqSame.Host = "localhost:8080"
+	reqSame.Header.Set("Origin", "http://localhost:8080")
+	recSame := httptest.NewRecorder()
+	handler.ServeHTTP(recSame, reqSame)
+	if strings.Contains(recSame.Body.String(), "CSRF") {
+		t.Fatalf("same-origin request blocked by CSRF guard: %d %s", recSame.Code, recSame.Body.String())
+	}
 }
 
 func TestMasterKeyLANExclusivity(t *testing.T) {

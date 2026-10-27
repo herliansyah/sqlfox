@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Virtual Data Grid & Fast Schema Index (`web/dist/index.html`, `internal/server`)**: Implemented fixed-height DOM row windowing (32px uniform height) with `< 500` active DOM nodes, full keyboard arrow navigation, persistent cell inspector drawer for multiline strings and JSON payloads, and an in-memory prefix index delivering sub-5ms schema explorer keyword filtering (ADR 0058).
+- **NDJSON Micro-Chunk Query Streaming Endpoint (`internal/server`)**: Added `/api/session/{id}/execute-stream` delivering line-by-line streaming with immediate 20-row micro-chunk flush for low Time to First Row (TTFR < 50ms), native `AbortController` cancellation tracking, and MySQL profiler support (ADR 0058).
+- **PostgreSQL View DDL Introspection & Materialized Views (`internal/driver/postgres`)**: Rebuilt view DDL generation via `pg_get_viewdef` supporting both standard `CREATE VIEW` and `CREATE MATERIALIZED VIEW` definitions (ADR 0059).
+- **PostgreSQL Composite Foreign Key & Referential Action Extraction (`internal/driver/postgres`)**: Introspect composite foreign keys using `unnest(con.conkey, con.confkey) WITH ORDINALITY`, capturing all participating column pairs and mapping `confdeltype`/`confupdtype` to standard `ON DELETE` and `ON UPDATE` actions (`CASCADE`, `SET NULL`, `SET DEFAULT`, `RESTRICT`, `NO ACTION`) (ADR 0059).
+
+### Security
+- **Client SSL Private Key Encryption at Rest (`internal/vault`)**: Encrypted client SSL private keys (`SSLKey`) in the Connection Vault with AES-256-GCM using versioned envelope markers (`enc:v1:`), preventing plaintext exposure on disk while preserving backward compatibility with legacy unsealed records (ADR 0059).
+- **Strict Same-Origin Ingress Guard (`internal/server/auth`)**: Hardened `IngressGuardMiddleware` CSRF validation to require exact same-origin matching (`Origin` host matching request `Host`), blocking cross-port state-mutating requests from other local web servers (e.g., `localhost:3000` targeting `localhost:8080`) (ADR 0059).
+- **MySQL Executable Comment Unwrapping in AST Safety Guard (`internal/driver`, `internal/safety`)**: Updated `StripLeadingComments` to unwrap MySQL executable comments (`/*! ... */` and `/*!NNNNN ... */`) into raw executable SQL instead of stripping them, closing an evasion vector and ensuring destructive operations wrapped in comments trigger mandatory confirmation challenges (ADR 0059).
+- **Fail-Closed Processlist Batch Termination (`internal/server/handlers_dba`)**: Enforced a fail-closed policy in `handleBatchKillProcess` returning HTTP 503 if the processlist cannot be retrieved, preventing process termination when immune threads (self connection and system threads) cannot be verified (ADR 0059).
+- **Release Update Asset Verification Hardening (`internal/server/update`)**: Enforced explicit non-empty asset name validation and strict exact filename matching during SHA-256 digest checks against official release manifests (ADR 0059).
+
+### Fixed
+- **Thread-Safe Active Database and Schema Scoping (`internal/driver/mysql`, `internal/driver/postgres`)**: Encapsulated session active database/schema state within mutex-protected accessors (`activeDB()`, `activeSchema()`), preventing data races during concurrent query execution and runtime database switches (ADR 0059).
+- **MySQL Custom TLS Failure Handling (`internal/driver/mysql`)**: Aborted connection setup with an explicit error when custom TLS configuration registration fails, preventing silent downgrades to insecure `skip-verify` (ADR 0059).
+- **MySQL Multi-Column View DDL Scan (`internal/driver/mysql`)**: Handled 4-column output (`View`, `Create View`, `character_set_client`, `collation_connection`) from `SHOW CREATE TABLE` on MySQL views without triggering column scan errors (ADR 0059).
+- **Transaction-Scoped FK Checks in Mock Generator (`internal/mock`)**: Moved MySQL `SET FOREIGN_KEY_CHECKS=0` and `=1` inside the pinned transaction connection (`tx.ExecRaw`), ensuring foreign key constraints are bypassed strictly on the connection performing bulk insertions (ADR 0059).
+- **Stateless Pre-Execution Mutation Estimation (`internal/server/session_manager`)**: Eliminated `SelectDatabase` calls during pre-flight row count probes, preventing accidental active session database switching prior to user confirmation (ADR 0059).
+- **SQL Dump & Smart Seed View Dependency Ordering (`internal/server/handlers_dump`)**: Sorted views after base tables (`viewsLast`) and generated object-appropriate `DROP VIEW IF EXISTS` / `DROP MATERIALIZED VIEW IF EXISTS` statements, preventing restore failures caused by missing table references or view type mismatches (ADR 0059).
+- **Query Mode Toolbar Cleanup & Edit Scoping (`web/dist/index.html`)**: Hid table mutation buttons (Add Row, Mock Data, Import CSV, Edit Mode, and Table SQL Dump) in query mode, restricting query-mode inline cell edits to single-table queries containing a Primary Key.
+- **Data Grid Total Row Count Dialect Quoting & Endpoint (`web/dist/index.html`)**: Added dialect-aware identifier quoting (backticks for MySQL/MariaDB, double quotes for PostgreSQL/SQLite) in total count calculations and routed requests through `/api/session/{id}/execute` (ADR 0059).
+- **Foreign Key Value Picker Datalist Route (`web/dist/index.html`)**: Corrected FK datalist row lookup endpoint path to `/api/session/{id}/table/{table}/rows` with HTTP status verification (ADR 0059).
+
 ## [v0.10.11] - 2026-10-26
 
 ### Fixed

@@ -174,15 +174,15 @@ func (s *Server) IngressGuardMiddleware(next http.Handler) http.Handler {
 				}
 
 				if origin := r.Header.Get("Origin"); origin != "" {
-					if u, err := url.Parse(origin); err == nil {
-						if !s.isHostAllowed(u.Host) {
-							w.Header().Set("Content-Type", "application/json")
-							w.WriteHeader(http.StatusForbidden)
-							_ = json.NewEncoder(w).Encode(map[string]any{
-								"error": "Unauthorized Origin (CSRF protection)",
-							})
-							return
-						}
+					// Same-origin only: an allowed-but-different origin (another localhost port,
+					// any LAN IP) must not be able to ride the session cookie.
+					if u, err := url.Parse(origin); err != nil || !strings.EqualFold(u.Host, r.Host) {
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(http.StatusForbidden)
+						_ = json.NewEncoder(w).Encode(map[string]any{
+							"error": "Unauthorized Origin (CSRF protection)",
+						})
+						return
 					}
 				}
 			}

@@ -393,6 +393,9 @@ func (s *Server) verifyAssetChecksum(ctx context.Context, assetURL string, archi
 	}
 	baseDir := assetURL[:idx]
 	assetName := assetURL[idx+1:]
+	if assetName == "" {
+		return fmt.Errorf("invalid asset URL: missing file name")
+	}
 	manifestURL := baseDir + "/checksums.txt"
 
 	fetchManifest := func(targetURL string) ([]byte, error) {
@@ -434,7 +437,7 @@ func (s *Server) verifyAssetChecksum(ctx context.Context, assetURL string, archi
 		if len(fields) >= 2 {
 			expectedHash := strings.ToLower(fields[0])
 			fileName := filepath.Base(strings.TrimPrefix(fields[1], "*"))
-			if fileName == assetName || assetName == "" {
+			if fileName == assetName {
 				if subtle.ConstantTimeCompare([]byte(strings.ToLower(actualHex)), []byte(expectedHash)) != 1 {
 					return fmt.Errorf("SHA-256 digest mismatch for %s: expected %s, got %s", assetName, expectedHash, actualHex)
 				}

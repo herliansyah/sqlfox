@@ -3,6 +3,7 @@ package vault
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -233,5 +234,37 @@ func TestVault_TableNotes(t *testing.T) {
 	notes, err := v.ListTableNotesForConnection("conn-1")
 	if err != nil || len(notes) != 1 {
 		t.Fatalf("expected 1 note for conn-1, got %d", len(notes))
+	}
+}
+
+// Regression: the SSL client private key must be encrypted at rest and round-trip intact.
+func TestVault_SSLKeyEncryptedAtRest(t *testing.T) {
+	v, err := OpenVault(filepath.Join(t.TempDir(), "config.db"), "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	const key = "-----BEGIN PRIVATE KEY-----\nSECRET\n-----END PRIVATE KEY-----"
+	conn := &ConnectionRecord{Name: "c", Driver: "mysql", Environment: "Development", SSLKey: key}
+	if err := v.SaveConnection(conn); err != nil {
+		t.Fatal(err)
+	}
+	var raw string
+	if err := v.db.QueryRow(`SELECT ssl_key FROM connections WHERE id = ?`, conn.ID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(raw, "SECRET") || !strings.HasPrefix(raw, sealedPrefix) {
+		t.Fatalf("ssl_key stored in plaintext: %q", raw)
+	}
+
+	// Re-saving a listed (still sealed) record must not double-encrypt.
+	list, _ := v.ListConnections()
+	if err := v.SaveConnection(list[0]); err != nil {
+		t.Fatal(err)
+	}
+	got, err := v.GetConnection(conn.ID)
+	if err != nil || got.SSLKey != key {
+		t.Fatalf("round-trip failed: %q %v", got.SSLKey, err)
 	}
 }
