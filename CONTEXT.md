@@ -20,6 +20,10 @@ _Avoid_: Multi-surface environment tags, sidebar environment headers, footer env
 The encrypted local SQLite storage holding connection metadata and credentials, encrypting both connection passwords and client SSL private keys at rest via AES-256-GCM sealed envelopes (`enc:v1:`).
 _Avoid_: Credential manager, config file
 
+**Client SSL Key Encryption**:
+The cryptographic protection in the Connection Vault that encrypts client SSL/TLS private keys (`SSLKey`) at rest using AES-256-GCM sealed envelopes (`enc:v1:`), preventing plaintext exposure while preserving backward compatibility.
+_Avoid_: Plaintext cert key, raw pem storage
+
 **Vault Archive**:
 An encrypted, portable export file (`.sqlfox-vault`) protected by an export passphrase for cross-machine migration.
 _Avoid_: Backup zip, cred dump
@@ -97,6 +101,14 @@ _Avoid_: Pure Go rule, no-C policy, static build restriction
 **Thread-Safe Active Scoping**:
 The concurrency pattern ensuring active database and schema search path state within session instances are read and mutated under mutual exclusion locks, preventing data races during concurrent queries.
 _Avoid_: Unlocked session state, race condition
+
+**Singleflight Connection Deduplication**:
+The concurrency synchronization pattern in `SessionManager` that coalesces concurrent connection attempts targeting the same connection ID into a single in-flight physical connect operation, eliminating reconnect stampedes.
+_Avoid_: Lock stampede, reconnect storm, duplicate dialer
+
+**Lazy Schema Inspection**:
+The connection startup pattern that defers full schema and catalog introspection until explicit on-demand browsing, enabling instant session readiness without metadata lock contention.
+_Avoid_: Blocking introspection, connect-time full crawl
 
 ## Safety & Governance
 
@@ -187,6 +199,14 @@ _Avoid_: Confirmation dialog, warning popup, double check
 **Environment-Aware Mutation Threshold**:
 An execution policy permitting single-row primary-key mutations to run without interruption in `Development`, while enforcing pre-execution affirmation across `Staging` and `Production`.
 _Avoid_: Env toggle, safety level, dev bypass
+
+**MySQL Executable Comment Unwrapping**:
+The lexical preprocessing step in the Safety Guard (`StripLeadingComments`) that unwraps MySQL executable comments (`/*! ... */`) into raw executable SQL, preventing destructive commands wrapped in conditional comments from evading inspection.
+_Avoid_: Comment skipping, conditional syntax bypass
+
+**Fail-Closed Batch Termination**:
+The defensive safety policy enforcing that batch process termination aborts with HTTP 503 if the live processlist cannot be retrieved, ensuring immune threads and caller connections cannot be terminated blindly.
+_Avoid_: Blind process kill, optimistic batch termination
 
 ## Artificial Intelligence
 
@@ -316,6 +336,14 @@ _Avoid_: Global database state, active tab schema, session DB pointer
 **Target Database Pill**:
 The persistent visual status pill rendered adjacent to the Query Editor execution controls displaying the tab's currently bound target database (`[ 🗄️ db_name ]`).
 _Avoid_: DB badge, header label, current schema indicator
+
+**Tab Bar Overflow Dropdown**:
+The adaptive navigation element (`#tab-bar-overflow-btn` and `#tab-bar-overflow-menu`) that dynamically activates when workspace tab widths exceed the visible tab container, providing quick access and close actions for off-screen tabs.
+_Avoid_: Hidden tab scroll, squished tab bar
+
+**Enhanced Tab Close Guard**:
+The pre-closure protection pattern verifying whether non-empty queries or non-query tabs are closing, prompting a confirmation guard dialog to prevent accidental loss of active work or context.
+_Avoid_: Unchecked tab dismissal, silent tab close
 
 ## Schema Management & Native Dialogs
 

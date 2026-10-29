@@ -203,8 +203,23 @@ v2.1 (Multi-Engine & Developer Operations Suite)
       │
       ▼
 v2.2 (MySQL Enterprise Operations & Programmability Suite)
-├── [ ] 31. DBA Fire-Fighting Suite (Deadlock Inspector, Statement Digest Dashboard & Processlist Trio)
-└── [ ] 32. Developer Programmability & Grid Suite (Routines Explorer, Smart Routine Caller, Table Partitions & JSON Modal)
+├── [x] 31. DBA Fire-Fighting Suite (Deadlock Inspector, Statement Digest Dashboard & Processlist Trio)
+├── [x] 32. Developer Programmability & Grid Suite (Routines Explorer, Smart Routine Caller, Table Partitions & JSON Modal)
+├── [x] 33. Multi-Engine Feature Parity & Dialect Resilience
+├── [x] 34. Diagnostic Logger Suite & Windows Double-Click Observability
+├── [x] 35. Unified Operational Notes Inbox, Object Tagging & Follow-up Lifecycle
+├── [x] 36. Workspace Ergonomics, Tab Lifecycle Suite & Live Process Trend
+├── [x] 37. Fast Schema Catalog Synchronization & Root Blocker Triage
+├── [x] 38. Virtual Grid Ergonomics Suite (Quick-Filters, Column Visibility & Vertical Record Inspector)
+├── [x] 39. Processlist Batch Operations & Two-Tier Responsive Toolbar
+└── [x] 40. Unified App Settings, Tab Database Scope & Relational Table Designer Suite
+      │
+      ▼
+v2.3 (Mutation Safety, High-Performance Virtual Grid & Hardening Suite)
+├── [x] 41. Pre-Execution Mutation Row Estimation & Tiered Safety Guard (ADR 0057)
+├── [x] 42. Virtual Data Grid, Sticky Bottom Pagination Bar & NDJSON Micro-Chunk Streaming (ADR 0058)
+├── [x] 43. Systemic Security Hardening & Concurrency Reliability (ADR 0059)
+└── [x] 44. Tab Bar Overflow Dropdown & Enhanced Close Guard (v0.10.13)
 ```
 
 ---
@@ -648,4 +663,51 @@ v2.2 (MySQL Enterprise Operations & Programmability Suite)
   - [x] **Cascading Foreign Key Selector & Real-Time Type Guard (`web/dist/index.html`)**: Multi-database catalog awareness (`multiDBCatalogCache`), dynamic referenced column dropdown with Primary Key auto-selection, auto-naming, and real-time DataType Compatibility verification preventing MySQL errno 150 errors prior to DDL generation (ADR 0056).
   - [x] **Documentation & Verification**: Recorded in ADR-0055, ADR-0056, `CONTEXT.md`, `CHANGELOG.md`, `MILESTONES.md`, `README.md`, `docs/USER_GUIDE.md`, `docs/USER_GUIDE_ID.md`, and verified via `go test -v ./internal/safety`, `go test -v ./internal/server`, and `go test -v ./web`.
 - **Runnable Verification**: Run `go test -v ./internal/safety`, `go test -v ./internal/server -run "TestSafeDDL"`, and `go test -v ./web` -> 100% pass across all safety, server, and embedded frontend suites.
+
+---
+
+### Milestone 41: Pre-Execution Mutation Row Estimation & Tiered Safety Guard
+- **Goal**: Protect databases from accidental mass data destruction by estimating affected rows via pre-flight bounded probes and escalating confirmation challenges based on impact and environment.
+- **Deliverables**:
+  - [x] **Pre-Flight DML Inspection (`internal/safety`, `internal/server`)**: Rewrites `UPDATE` and `DELETE` queries into bounded `SELECT COUNT(*)` probes with strict 500ms timeouts to estimate row impact before user confirmation (ADR 0057).
+  - [x] **Adaptive Tiered Affirmation**: Silent execution for single-row PK mutations in Development; 1-click affirmation modal for 1–100 rows; typed Challenge Modal verification for >100 rows, unqualified queries, and multi-statement batches with compound escalation (ADR 0057).
+  - [x] **Environment-Enforced Mutation Policies**: Mandatory confirmation challenges across all mutations in Staging and Production regardless of row count.
+  - [x] **Documentation & Verification**: Recorded in ADR-0057, `CONTEXT.md`, `ARCHITECTURE.md`, `README.md`, `USER_GUIDE.md`, and unit tests in `internal/safety/safety_test.go`.
+- **Runnable Verification**: Run `go test -v ./internal/safety -run "TestSafetyGuard_PreExecutionCountQuery"` -> 100% pass.
+
+---
+
+### Milestone 42: Virtual Data Grid, Sticky Bottom Pagination Bar & NDJSON Micro-Chunk Streaming
+- **Goal**: Deliver zero-freeze data grid interaction on 100,000+ row datasets with sub-50ms Time to First Row (TTFR), uniform row windowing, and an ergonomic bottom pagination bar.
+- **Deliverables**:
+  - [x] **Virtual DOM Row Windowing (`web/dist/index.html`)**: Implemented fixed-height DOM row windowing (32px uniform height) with `<500` active DOM nodes, full keyboard arrow navigation, and persistent cell inspector drawer for multiline strings and JSON (ADR 0058).
+  - [x] **NDJSON Micro-Chunk Streaming (`internal/server`)**: Added `/api/session/{id}/execute-stream` delivering line-by-line streaming with immediate 20-row micro-chunk flush for low TTFR (<50ms) and native `AbortController` cancellation (ADR 0058).
+  - [x] **Unified Sticky Bottom Pagination Bar (`web/dist/index.html`)**: Replaced fragmented pagination with sticky bottom bar supporting first/prev/next/last controls (`⏮️`, `◀`, `▶`, `⏭️`), direct page jump, configurable page sizes (25, 50, 100, 200), on-demand accurate total count calculation, and smart wildcard auto-wrapping for `LIKE`/`NOT LIKE`.
+  - [x] **Documentation & Verification**: Recorded in ADR-0058, `CONTEXT.md`, `ARCHITECTURE.md`, `README.md`, `USER_GUIDE.md`, and test suites in `web/embed_test.go`.
+- **Runnable Verification**: Run `go test -v ./web` and verify sub-50ms streaming and windowed grid rendering.
+
+---
+
+### Milestone 43: Systemic Security Hardening & Concurrency Reliability
+- **Goal**: Fortify client credentials, HTTP ingress boundaries, SQL AST unwrapping, and session concurrency against security vulnerabilities and race conditions.
+- **Deliverables**:
+  - [x] **Client SSL Private Key Encryption at Rest (`internal/vault`)**: Encrypted `SSLKey` credentials in the vault with AES-256-GCM using `enc:v1:` envelope markers (ADR 0059).
+  - [x] **Strict Same-Origin Ingress Guard (`internal/server/auth`)**: Validated exact same-origin matching (`Origin` host matching request `Host`), blocking cross-port CSRF from local applications (ADR 0059).
+  - [x] **MySQL Executable Comment Unwrapping (`internal/safety`)**: Unwrapped `/*! ... */` comments into executable SQL during AST evaluation to close challenge evasion vectors (ADR 0059).
+  - [x] **Fail-Closed Processlist Batch Termination (`internal/server/handlers_dba`)**: Enforced HTTP 503 if the processlist cannot be retrieved, preventing accidental termination of immune threads (ADR 0059).
+  - [x] **Driver Resilience & Catalog Parity (`internal/driver`)**: Added PostgreSQL View DDL introspection via `pg_get_viewdef` (materialized views), composite foreign key referential actions extraction, thread-safe active database/schema scoping (`activeDB()`, `activeSchema()`), and transaction-pinned foreign key checks in mock generator (ADR 0059).
+  - [x] **Documentation & Verification**: Recorded in ADR-0059, `CONTEXT.md`, `ARCHITECTURE.md`, `SECURITY.md`, and unit tests in `internal/safety`, `internal/vault`, and `internal/driver`.
+- **Runnable Verification**: Run `go test -v ./internal/safety -run "TestSafetyGuard_MySQLExecutableCommentNotBypassed"` and `go test -v ./internal/vault -run "TestVaultCrypto"` -> 100% pass.
+
+---
+
+### Milestone 44: Tab Bar Overflow Dropdown & Enhanced Close Guard
+- **Goal**: Guarantee workspace fluidity when dozens of tabs are open, prevent reconnect stampedes on concurrent connections, and eliminate data loss on tab dismissal.
+- **Deliverables**:
+  - [x] **Tab Bar Overflow Dropdown (`web/dist/index.html`)**: Added `#tab-bar-overflow-btn` and `#tab-bar-overflow-menu` that dynamically activates when tab widths exceed the visible container width, providing direct navigation to off-screen tabs.
+  - [x] **Enhanced Close Confirmation Guard (`web/dist/index.html`)**: Guarded against accidental closure of unsaved non-empty query tabs or non-query tabs, with deduplicated sequential copy numbering on tab duplication.
+  - [x] **Concurrent Connection Deduplication (`internal/server/session_manager`)**: Singleflight deduplication coalescing concurrent connection requests to eliminate reconnect stampedes during network reconnects.
+  - [x] **Lazy Schema Inspection (`internal/server/session_manager`, `internal/server/handlers_query`)**: Deferred initial schema introspection to lazy on-demand retrieval, eliminating connect-time metadata lock contention.
+  - [x] **Documentation & Verification**: Recorded in `CHANGELOG.md`, `CONTEXT.md`, `ARCHITECTURE.md`, `USER_GUIDE.md`, and frontend verification tests.
+- **Runnable Verification**: Run `go test -v ./internal/server -run "TestSessionManager"` and `go test -v ./web` -> 100% pass.
 

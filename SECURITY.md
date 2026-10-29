@@ -170,7 +170,77 @@ To maintain binary execution integrity during in-app updates:
    - Update downloads are restricted strictly to official GitHub release URLs matching `https://github.com/herliansyah/sqlfox/releases/download/*`.
 2. **Fail-Closed SHA-256 Digest Verification**:
    - The server downloads official release checksum manifests (`checksums.txt` / `SHA256SUMS`).
-   - The downloaded binary archive is verified against the manifest digest.
+   - The downloaded binary archive is verified against the manifest digest with explicit non-empty asset name validation and strict exact filename matching.
    - If checksums do not match or if the manifest is unavailable, the update is rejected and the existing executable remains untouched.
+
+---
+
+## 9. Client SSL Private Key Encryption at Rest (`SSLKey`)
+
+To prevent plaintext certificate exposure on disk:
+
+1. **Envelope Encryption (`enc:v1:`)**:
+   - Client SSL private keys (`SSLKey`) stored in the SQLite Connection Vault are encrypted at rest with AES-256-GCM.
+   - Encrypted keys are prefixed with versioned envelope markers (`enc:v1:`), preventing accidental exposure if the database file is backed up or inspected.
+2. **Backward Compatibility**:
+   - Existing unsealed connection records continue to decode transparently, migrating to encrypted envelopes upon their next credential update or save.
+
+---
+
+## 10. Strict Same-Origin Ingress Guard
+
+To completely eliminate cross-port CSRF execution from other local services running on the machine (e.g. a rogue node or python server on `localhost:3000` targeting SqlFox on `localhost:8080`):
+
+1. **Byte-for-Byte Origin Host Matching**:
+   - `IngressGuardMiddleware` parses incoming `Origin` and `Host` headers on all state-mutating requests (`POST`, `PUT`, `DELETE`, `PATCH`).
+   - If the origin's host does not match the request host byte-for-byte, the request is immediately rejected with `403 Forbidden`.
+2. **Direct Browser Navigation Preservation**:
+   - Same-origin requests and standard GET requests continue without disruption.
+
+---
+
+## 11. MySQL Executable Comment Unwrapping in AST Safety Guard
+
+To prevent evasion of destructive statement interception:
+
+1. **Evasion Vector Elimination**:
+   - Attackers or unintended scripts may wrap destructive statements inside MySQL conditional/executable comments (e.g. `/*! DROP TABLE users */` or `/*!50000 DELETE FROM orders */`).
+2. **Syntax Unwrapping (`StripLeadingComments`)**:
+   - The lexical preprocessor detects `/*!` opening delimiters, unwraps the enclosed SQL into raw executable tokens, and passes the unwrapped statement to the AST parser.
+   - Destructive statements wrapped in comments trigger mandatory Challenge Modals and tiered affirmations without bypass.
+
+---
+
+## 12. Fail-Closed Processlist Batch Termination Policy
+
+To ensure high-privilege thread management never accidentally harms the system:
+
+1. **Fail-Closed Verification**:
+   - `handleBatchKillProcess` requires a fresh, validated processlist from the database driver before dispatching any kill commands.
+   - If the processlist query fails or times out, the handler aborts immediately with `HTTP 503 Service Unavailable`.
+2. **Immune Caller & System Worker Protection**:
+   - Thread candidate lists are strictly cross-referenced against immune thread identifiers (`@@pseudo_thread_id`, `pg_backend_pid()`, `system user`, `event_scheduler`, `binlog_dump`).
+   - If candidate validation cannot be guaranteed, no terminations are executed.
+
+---
+
+## 13. Path Traversal Guard in Backup Filename Sanitization
+
+To ensure backup artifacts cannot escape authorized storage locations:
+
+1. **Directory Boundary Enforcement**:
+   - Table and schema backup filenames generated before DDL execution (`internal/safety`) are sanitized against directory traversal sequences (`../`, `..\`).
+   - Output paths are strictly resolved within the configured `.scratch/backups/` directory boundary.
+
+---
+
+## 14. Singleflight Connection Deduplication & Lazy Metadata Inspection
+
+To prevent metadata lock exhaustion and denial-of-service during connection spikes:
+
+1. **Singleflight Request Coalescing**:
+   - Concurrent connect requests targeting the same connection ID are synchronized using `singleflight.Group` in `SessionManager`, collapsing concurrent UI requests into a single physical connection routine.
+2. **Lazy Catalog Introspection**:
+   - Schema and table metadata introspection is deferred from initial connection establishment to lazy on-demand retrieval, eliminating heavy metadata locks (`KEY_COLUMN_USAGE`) during initial session connection.
 
 

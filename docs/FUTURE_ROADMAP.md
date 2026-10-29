@@ -31,7 +31,9 @@ Fitur-fitur esensial yang diharapkan oleh developer dan DBA dari sebuah Database
   - Dukungan pemanggilan rutin berparameter (*Execute Stored Procedure with arguments*).
 
 ### 1.4 Format Ekspor Data Tambahan (Excel `.xlsx` & Streaming NDJSON)
-* **Status Saat Ini**: Backlog Terbuka. Ekspor data mendukung SQL dump, CSV, JSON, dan format copy Markdown ke clipboard.
+* **Status Saat Ini**: 
+  - **Streaming NDJSON**: **Terimplementasi (v0.10.12, ADR 0058)** via endpoint `/api/session/{id}/execute-stream` dengan immediate 20-row micro-chunk flush.
+  - **Format Excel `.xlsx`**: Backlog Terbuka. Ekspor data saat ini mendukung SQL dump, CSV, JSON, NDJSON streaming, dan format copy Markdown/TSV ke clipboard.
 * **Kebutuhan Lapangan**: Pengguna bisnis, manajer produk, dan analis data kerap meminta hasil query dalam format spreadsheet Excel (`.xlsx`) asli untuk pengolahan formula dan laporan.
 * **Rekomendasi Implementasi**:
   - Tambahkan parser generator Excel streaming tanpa CGO (menggunakan library Go murni seperti `excelize`).

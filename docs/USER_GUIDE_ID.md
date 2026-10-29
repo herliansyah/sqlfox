@@ -12,9 +12,9 @@
 
 ---
 
-## 📑 Daftar Isi
+## Daftar Isi
 
-1. [Gambaran Umum & Filosofi Arsitektur](#1-gambaran-umum--filosofi-arsitektur)
+1. [Gambaran Umum & Arsitektur](#1-gambaran-umum--arsitektur)
    - [Model Single-Binary Bebas Dependensi CGO](#model-single-binary-bebas-dependensi-cgo)
    - [Plafon Memori Ketat (< 100MB RAM)](#plafon-memori-ketat--100mb-ram)
    - [Dukungan Mesin Database & Driver](#dukungan-mesin-database--driver)
@@ -31,21 +31,24 @@
    - [Tingkatan Environment (Production, Staging, Development)](#tingkatan-environment-production-staging-development)
    - [Penegakan Mode Read-Only](#penegakan-mode-read-only)
    - [Modal Pengaturan Terpadu (4-Tab) & Pintasan Global](#modal-pengaturan-terpadu-4-tab--pintasan-global)
-4. [Panduan Pengembang & Operator Data (Level Pengguna Umum)](#4-panduan-pengembang--operator-data-level-pengguna-umum)
+4. [Panduan Pengguna & Alur Kerja Antarmuka](#4-panduan-pengguna--alur-kerja-antarmuka)
    - [Navigasi Schema Explorer & Filter Cepat](#navigasi-schema-explorer--filter-cepat)
    - [Keyset Pagination & Pencarian Data Kilat](#keyset-pagination--pencarian-data-kilat)
    - [Spreadsheet CRUD & Pengeditan Sel Langsung (Inline)](#spreadsheet-crud--pengeditan-sel-langsung-inline)
    - [Preset Nilai Instan & Mutasi Baris Tanpa Primary Key](#preset-nilai-instan--mutasi-baris-tanpa-primary-key)
-   - [Virtual Grid Ergonomics Suite](#virtual-grid-ergonomics-suite)
+   - [Virtual Grid Ergonomics Suite & Windowing Baris](#virtual-grid-ergonomics-suite--windowing-baris)
+   - [Bilah Paginasi Bawah Terpadu & Streaming NDJSON](#bilah-paginasi-bawah-terpadu--streaming-ndjson)
    - [Impor CSV Bebas Dependensi & Pemetaan Kolom](#impor-csv-bebas-dependensi--pemetaan-kolom)
    - [Kanvas Visual ERD Interaktif](#kanvas-visual-erd-interaktif)
    - [BYOK AI Copilot & Automated Error Healer](#byok-ai-copilot--automated-error-healer)
    - [Unified Operational Notes Inbox & Pengingat Follow-up](#unified-operational-notes-inbox--pengingat-follow-up)
    - [Ergonomi Ruang Kerja, Tab Context Menu & Fluid Splitter](#ergonomi-ruang-kerja-tab-context-menu--fluid-splitter)
+   - [Menu Overflow Tab Bar & Guard Penutupan Draf](#menu-overflow-tab-bar--guard-penutupan-draf)
    - [Isolasi Database Tab & DDL Target Affirmation Guardrails](#isolasi-database-tab--ddl-target-affirmation-guardrails)
    - [Table Designer Relasional & Pembangun Batasan (Constraint Builder)](#table-designer-relasional--pembangun-batasan-constraint-builder)
-5. [Playbook Lanjutan DBA & DevOps (Level DBA)](#5-playbook-lanjutan-dba--devops-level-dba)
+5. [Playbook Operasional DBA & DevOps](#5-playbook-operasional-dba--devops)
    - [AST Safety Guard & Challenge Modal (Pencegah Query Rusak)](#ast-safety-guard--challenge-modal-pencegah-query-rusak)
+   - [Estimasi Mutasi Pra-Eksekusi & Tiered Safety Guard](#estimasi-mutasi-pra-eksekusi--tiered-safety-guard)
    - [Smart Tiered Backup Otomatis Pra-DDL](#smart-tiered-backup-otomatis-pra-ddl)
    - [Inspeksi Lock Contention Pra-Eksekusi & Root Blocker Tree](#inspeksi-lock-contention-pra-eksekusi--root-blocker-tree)
    - [Processlist Real-Time & Pembatalan Query Out-of-Band](#processlist-real-time--pembatalan-query-out-of-band)
@@ -57,15 +60,18 @@
    - [Heuristic Index Advisor & Query Tuner (Aturan ESR)](#heuristic-index-advisor--query-tuner-aturan-esr)
    - [Structure Sync (Perbandingan DDL & Pembuat Migrasi AST)](#structure-sync-perbandingan-ddl--pembuat-migrasi-ast)
    - [Cross-Connection Data Transfer & Keyset Row Sync](#cross-connection-data-transfer--keyset-row-sync)
+   - [Deduplikasi Singleflight Koneksi & Lazy Schema Inspection](#deduplikasi-singleflight-koneksi--lazy-schema-inspection)
+   - [Pengerasan Keamanan Sistemik & Ketahanan Multi-Engine](#pengerasan-keamanan-sistemik--ketahanan-multi-engine)
    - [Headless CLI Suite (`run`, `transfer`, `advise`)](#headless-cli-suite-run-transfer-advise)
    - [Task Runner Terjadwal Deklaratif Tanpa Daemon](#task-runner-terjadwal-deklaratif-tanpa-daemon)
    - [Pengujian Plafon Memori & Profiling `pprof`](#pengujian-plafon-memori--profiling-pprof)
-6. [Tabel Pintasan Keyboard (Shortcuts Cheatsheet)](#6-tabel-pintasan-keyboard-shortcuts-cheatsheet)
+   - [In-App Activity Console & Live Diagnostic Stream](#in-app-activity-console--live-diagnostic-stream)
+6. [Referensi Pintasan Keyboard](#6-referensi-pintasan-keyboard)
 7. [Tanya Jawab & Penyelesaian Masalah (Troubleshooting & FAQ)](#7-tanya-jawab--penyelesaian-masalah-troubleshooting--faq)
 
 ---
 
-## 1. Gambaran Umum & Filosofi Arsitektur
+## 1. Gambaran Umum & Arsitektur
 
 SqlFox dibangun secara khusus bagi para rekayasawan perangkat lunak dan tim DBA yang membutuhkan kecepatan respon seketika, proteksi data berlapis baja, serta wawasan diagnostik mendalam tanpa kompromi konsumsi memori tinggi dari aplikasi desktop berbasis Electron atau Java Virtual Machine (JVM).
 
@@ -99,11 +105,11 @@ Unduh arsip rilis terbaru di halaman resmi [GitHub Releases](https://github.com/
 
 ```bash
 # Linux amd64 (Download & ekstrak sekali jalan)
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.10.4/sqlfox-v0.10.4-linux-amd64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.10.13/sqlfox-v0.10.13-linux-amd64.tar.gz | tar -xz
 ./sqlfox
 
 # macOS Apple Silicon (ARM64 M1/M2/M3/M4)
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.10.4/sqlfox-v0.10.4-darwin-arm64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.10.13/sqlfox-v0.10.13-darwin-arm64.tar.gz | tar -xz
 ./sqlfox
 ```
 
@@ -291,7 +297,7 @@ SqlFox menyatukan seluruh konfigurasi ruang kerja dan preferensi sistem ke dalam
 
 ---
 
-## 4. Panduan Pengembang & Operator Data (Level Pengguna Umum)
+## 4. Panduan Pengguna & Alur Kerja Antarmuka
 
 ### Navigasi Schema Explorer & Filter Cepat
 - **Filter Bar Sidebar**: Ketik nama tabel atau view di kolom filter sidebar; hasil tersaring seketika dengan debounce 150ms.
@@ -325,8 +331,15 @@ Sistem pagination konvensional `OFFSET 1000000` memaksa server memindai dan memb
   - `Alt+U` &rarr; Mengisi nilai unik `UUID v4`
 - **Tabel Tanpa Primary Key (PK-Less)**: Jika tabel tidak memiliki kolom Primary Key, SqlFox secara otomatis mempersempit kriteria mutasi ke tepat satu baris fisik (`singleRowWhere`: `LIMIT 1` pada MySQL, `rowid IN (SELECT rowid ... LIMIT 1)` pada SQLite, dan `(tableoid, ctid) IN (SELECT tableoid, ctid ... LIMIT 1)` pada PostgreSQL), menjamin bahwa pengeditan atau penghapusan satu baris tidak akan merusak atau mengubah baris duplikat identik lainnya.
 
-### Virtual Grid Ergonomics Suite
-SqlFox menyediakan fitur eksplorasi kisi data (*virtual grid*) tingkat lanjut yang dirancang untuk mempermudah navigasi tabel berkolom banyak:
+### Virtual Grid Ergonomics Suite & Windowing Baris
+SqlFox menyediakan fitur eksplorasi kisi data (*virtual grid*) tingkat lanjut yang dirancang untuk mempermudah navigasi tabel masif dan berkolom banyak:
+- **Virtualisasi Baris DOM (Tinggi Seragam 32px)**:
+  - Mengimplementasikan virtualisasi windowing baris DOM tetap (tinggi seragam 32px) yang hanya me-render `< 500` node DOM aktif, sekalipun hasil kueri menghasilkan 1.000 hingga 100.000+ baris data.
+  - Meniadakan pembekuan (*freeze*) thread utama browser, mereduksi konsumsi memori dan payload HTML hingga 95%, sembari tetap mempertahankan seluruh baris dalam memori untuk ekspor instan.
+  - Navigasi keyboard lengkap menggunakan tombol panah melintasi sel, baris, dan halaman.
+- **Drawer Inspektor Sel Persisten (Cell Inspector)**:
+  - Panel inspektor samping/bawah terpasang persisten yang merender teks multibaris lengkap, payload JSON terformat, atau teks biner heksadesimal dari sel yang sedang dipilih secara real-time tanpa mengganggu tampilan dengan popup modal yang memblokir.
+  - Dilengkapi tombol 1-klik **Format JSON**, **Copy Text**, dan **Wrap Lines**.
 - **Filter Cepat Klik Kanan (Gaya TablePlus)**:
   - Klik kanan sel data mana saja pada penampil tabel atau hasil query untuk memunculkan aksi filter instan: `kolom = 'nilai'`, `kolom != 'nilai'`, `kolom > 'nilai'`, `kolom < 'nilai'`, `kolom LIKE '%nilai%'`, `kolom IS NULL`, atau `IS NOT NULL`.
   - Secara otomatis menerapkan *escape* string dan tanda kutip sesuai dialek database aktif.
@@ -345,6 +358,19 @@ SqlFox menyediakan fitur eksplorasi kisi data (*virtual grid*) tingkat lanjut ya
   - **Pencarian Field**: Saring field yang ditampilkan secara instan dengan input pencarian bawaan.
   - **Salin 1-Klik**: Salin seluruh data baris aktif sebagai format JSON yang rapi (`Copy JSON`) atau teks berpemisah tab (`Copy Text`).
   - **Pengeditan Terintegrasi**: Ubah nilai data secara langsung di dalam input atau textarea modal; perubahan ditandai dengan `● Modified` dan terhubung langsung ke pelacak transaksi `stagedEdits` serta bilah simpan (*Save Changes*).
+
+### Bilah Paginasi Bawah Terpadu & Streaming NDJSON
+SqlFox menyatukan kendali navigasi data ke dalam bilah paginasi bawah yang rapi (*sticky bottom bar*) di bawah grid Query Editor maupun Table Viewer:
+- **Navigasi & Loncat Halaman Langsung**:
+  - Tombol paginasi awal, sebelumnya, berikutnya, dan akhir (`⏮️`, `◀`, `▶`, `⏭️`) dengan kotak input nomor halaman untuk melompat langsung ke halaman yang diinginkan.
+  - Konfigurasi ukuran baris per halaman yang fleksibel (25, 50, 100, 200 baris) tersimpan per sesi.
+- **Perhitungan Total Baris Akurat On-Demand**:
+  - Menghindari query `COUNT(*)` berat yang membebani database jutaan baris saat pertama kali dibuka. Operator dapat mengklik **Calculate total row count** kapan saja untuk menghitung total baris akurat sesuai filter aktif.
+- **Pembungkusan Wildcard Otomatis pada Filter `LIKE` / `NOT LIKE`**:
+  - Kata pencarian polos yang dimasukkan pada filter otomatis dibungkus dengan `%...%` jika tidak terdapat wildcard (`%` atau `_`), memberikan pencarian parsial yang intuitif.
+- **Streaming Kueri Mikro-Chunk NDJSON (`/api/session/{id}/execute-stream`)**:
+  - Hasil kueri dikirim secara streaming baris demi baris menggunakan format NDJSON dengan pembersihan instan pada 20 baris pertama (*micro-chunk flush*), menghasilkan Time to First Row (TTFR) super kilat di bawah 50ms.
+  - Didukung terminasi native via `AbortController` saat berpindah tab atau menekan tombol Cancel.
 
 ### Impor CSV Bebas Dependensi & Pemetaan Kolom
 1. Buka tabel yang diinginkan lalu klik tombol **Import CSV**.
@@ -411,6 +437,16 @@ SqlFox dirancang dengan fokus pada kenyamanan sesi pengodean dan investigasi dat
   - **Tab Close Confirmation Guard**: Mencegah hilangnya pekerjaan dengan dialog konfirmasi aman jika tab memiliki draf SQL yang belum dieksekusi atau perubahan belum tersimpan. Tab bersih dan kosong akan langsung tertutup tanpa interupsi modal.
   - **Reset Ruang Kerja Bersih**: Menutup semua tab atau tab terakhir akan mereset ruang kerja secara anggun ke tab `Query 1.sql` baru yang bersih.
 
+### Menu Overflow Tab Bar & Guard Penutupan Draf
+Saat mengelola banyak tab query, skema tabel, dan monitor server sekaligus:
+- **Indikator Menu Overflow Dinamis (`#tab-bar-overflow-btn`)**:
+  - Otomatis aktif saat jumlah dan lebar tab melebihi batas kontainer horizontal bar.
+  - Menampilkan tombol pill rapi (`▾ N more`) dengan dropdown pencarian yang memuat daftar seluruh tab yang tersembunyi di luar layar.
+  - Klik nama tab mana saja untuk langsung membawanya ke tampilan aktif, atau klik tombol silang (`✕`) di sampingnya untuk menutup tab langsung dari dropdown.
+- **Guard Penutupan Draf yang Ditingkatkan**:
+  - Memunculkan dialog tantangan konfirmasi sebelum menutup kueri non-kosong yang belum tersimpan atau tab objek non-kueri, mencegah hilangnya konteks kerja berharga.
+  - Aksi duplikasi tab secara otomatis menghasilkan penomoran berurutan unik (`Query 1 (Copy)`, `Query 1 (Copy 2)`) tanpa penumpukan label yang berulang.
+
 ### Isolasi Database Tab & DDL Target Affirmation Guardrails
 Pada server basis data multi-database, mengeksekusi DDL atau query mutasi pada skema database yang keliru (misalnya menjalankan skrip migrasi `dev_orders` di dalam skema `prod_orders`) merupakan penyebab utama terjadinya insiden operasional. SqlFox menerapkan isolasi ketat **Tab Database Scope**:
 
@@ -452,7 +488,7 @@ SqlFox menyediakan antarmuka Table Designer dan Create Table modern berkecepatan
 
 ---
 
-## 5. Playbook Lanjutan DBA & DevOps (Level DBA)
+## 5. Playbook Operasional DBA & DevOps
 
 ### AST Safety Guard & Challenge Modal (Pencegah Query Rusak)
 Sebelum sebuah query dikirimkan ke server basis data, mesin pengurai AST SqlFox membedah struktur perintah SQL tersebut:
@@ -466,6 +502,21 @@ Sebelum sebuah query dikirimkan ke server basis data, mesin pengurai AST SqlFox 
 - **Inspeksi Multi-Statement Senyawa**: Memeriksa setiap baris perintah dalam satu batch multi-statement secara individual. Mencegah penyelundupan perintah destruktif (misal `SELECT 1; DROP TABLE korban`) dan menolak eksekusi jika terdapat lebih dari satu perintah destruktif yang memerlukan konfirmasi challenge.
 - **Sanitasi Komentar & String Literal**: Mengaburkan (*masking*) komentar baris/blok dan teks literal sebelum pengecekan regex, mencegah manipulasi kata kunci destruktif.
 - **Pra-Pemrosesan CTE**: Menanggalkan klausa awalan `WITH ... AS (...)` untuk memeriksa perintah inti DML/DDL di bawah pengawasan Safety Guard.
+- **Penguraian Komentar Tereksekusi MySQL**: Secara otomatis mengurai komentar tereksekusi MySQL (`/*! ... */` dan `/*!NNNNN ... */`) menjadi sintaks SQL polos yang dapat dievaluasi, menutup celah bypass keamanan.
+
+### Estimasi Mutasi Pra-Eksekusi & Tiered Safety Guard
+Untuk mencegah kehancuran data massal akibat salah ketik klausa `WHERE`, SqlFox menerapkan estimasi baris deterministik pra-eksekusi (ADR 0057):
+- **Probe Hitung Baris Pra-Eksekusi**:
+  - Setiap kali perintah `UPDATE` atau `DELETE` diajukan, SqlFox mengubah query menjadi probe `SELECT COUNT(*)` terikat batas waktu (500ms) sebelum perintah tulis dikirimkan ke database.
+- **Afirmasi Bertingkat Adaptif (Tiered Affirmation)**:
+  - **Development (`dev`)**:
+    - **Mutasi satu baris PK**: Berjalan langsung secara senyap tanpa dialog konfirmasi untuk kenyamanan rekayasa cepat developer.
+    - **1–100 baris**: Memunculkan modal afirmasi ringkas satu-klik yang menampilkan jumlah baris yang terdampak secara akurat.
+    - **> 100 baris atau tanpa klausa WHERE**: Secara otomatis dieskalasi ke Challenge Modal penuh yang mewajibkan pengetikan nama tabel.
+  - **Staging & Production (`staging`, `prod`)**:
+    - Menegakkan tantangan konfirmasi verifikasi ketik secara mutlak pada **seluruh** mutasi data berapapun jumlah barisnya.
+  - **Eskalasi Majemuk Batch Multi-Statement**:
+    - Perintah dalam batch multi-statement diagregasikan dampak barisnya, memicu eskalasi proteksi jika salah satu perintah melampaui batas aman.
 
 ### Smart Tiered Backup Otomatis Pra-DDL
 Saat Anda hendak mengeksekusi operasi skema kritis seperti `ALTER TABLE` atau `DROP TABLE`:
@@ -588,6 +639,29 @@ Dapat diakses melalui **📦 DB Tools &rarr; 🔄 Structure Sync**:
 - **Data Transfer**: Melakukan streaming transfer tabel secara langsung dari satu server database ke server lain melintasi penyedia cloud yang berbeda dengan batas penggunaan memori ketat `<50MB`. Apabila opsi `truncate_target` aktif dan transfer gagal, transaksi dibatalkan (*rollback*) sehingga data tabel target tetap terjaga utuh.
 - **Row-Level Data Sync**: Membandingkan baris data antar dua tabel menggunakan teknik hashing berbasis keyset delta. Mendukung Primary Key tunggal maupun komposit (dipisahkan pemisah unik `\x1f`), memetakan posisi kolom sumber ke target, menormalkan representasi tipe data lintas driver (`syncValueKey`), serta membatasi perbandingan maksimal 10.000 baris guna melindungi memori server.
 
+### Deduplikasi Singleflight Koneksi & Lazy Schema Inspection
+Untuk menangani fluktuasi jaringan produksi dan rekoneksi konkurensi tinggi tanpa membebani server database (v0.10.13):
+- **Deduplikasi Permintaan Singleflight**:
+  - Menggunakan `singleflight.Group` pada manajer sesi untuk menyatukan panggilan koneksi bersamaan yang menyasar koneksi yang sama ke dalam satu proses dial fisik tunggal, melenyapkan fenomena *reconnect stampede* saat terjadi pemulihan koneksi massal di browser.
+- **Lazy Schema Inspection**:
+  - Menunda introspeksi skema dan katalog tabel secara menyeluruh hingga pengguna benar-benar mengakses tabel atau memperluas pohon navigasi, menghasilkan waktu pembentukan sesi instan tanpa memicu kunci metadata (*metadata locks / KEY_COLUMN_USAGE*) pada database besar.
+- **Proteksi Reentrancy**:
+  - Memproteksi polling status latar belakang dan pemantau processlist dengan kunci reentrancy, mencegah tumpang tindih request yang memicu spanduk rekoneksi palsu.
+
+### Pengerasan Keamanan Sistemik & Ketahanan Multi-Engine
+SqlFox menyematkan proteksi keamanan komprehensif dan ketahanan lintas-mesin (ADR 0059):
+- **Enkripsi Kunci Privat SSL Klien pada Vault**:
+  - Kunci SSL klien (`SSLKey`) di Connection Vault dienkripsi secara persisten dengan standar AES-256-GCM menggunakan penanda amplop berversi (`enc:v1:`), meniadakan risiko tereksposnya kunci privat sertifikat di disk.
+- **Same-Origin Ingress Guard Ketat**:
+  - Menegakkan pencocokan origin dan host permintaan secara identik bita-demi-bita, memblokir serangan CSRF lintas-port dari server web lokal lain (contoh: aplikasi lokal `localhost:3000` yang menembak `localhost:8080`).
+- **Terminasi Batch Processlist Fail-Closed**:
+  - Mengembalikan status HTTP 503 jika status thread server yang sedang berjalan gagal diambil, melindungi thread kebal (`system user`, koneksi pemanggil sendiri) dari pemutusan yang keliru.
+- **Introspeksi DDL View & Foreign Key Komposit PostgreSQL**:
+  - Mengambil definisi DDL view standar (`CREATE VIEW`) maupun Materialized View (`CREATE MATERIALIZED VIEW`) melalui `pg_get_viewdef`.
+  - Mengurai Foreign Key komposit multi-kolom lengkap dengan aksi referensial standar (`CASCADE`, `SET NULL`, `SET DEFAULT`, `RESTRICT`, `NO ACTION`).
+- **Scoping Sesi Sadar Thread (Thread-Safe Scoping)**:
+  - Konteks database dan skema aktif pada sesi diproteksi dengan kunci mutual exclusion (`activeDB()`, `activeSchema()`), mencegah timbulnya *data race* saat eksekusi query simultan.
+
 ### Headless CLI Suite (`run`, `transfer`, `advise`)
 SqlFox menyediakan perintah CLI headless yang sangat cocok untuk skrip otomatisasi bash, cronjob, dan pipeline CI/CD:
 
@@ -634,27 +708,42 @@ Dapat dibuka dengan mengklik tombol **⚡ Activity** pada status bar bawah atau 
 
 ---
 
-## 6. Tabel Pintasan Keyboard (Shortcuts Cheatsheet)
+## 6. Referensi Pintasan Keyboard
 
-| Pintasan Keyboard | Cakupan Area | Kegunaan |
+### Query Editor & Transaksi
+| Pintasan Keyboard | Konteks | Kegunaan |
 | :--- | :--- | :--- |
-| `Ctrl + Enter` | Query Editor | Menjalankan query aktif atau teks yang sedang diblok |
+| `Ctrl + Enter` (atau `Cmd+Enter`) | Query Editor | Menjalankan query aktif atau teks yang diblok |
 | `Ctrl + Shift + Enter` | Query Editor | Mengeksekusi `EXPLAIN` dan membuka Visual Plan Tree |
-| `Ctrl + T` | Workspace | Membuka Tab Query baru |
-| `Ctrl + W` | Workspace | Menutup tab aktif |
+| `Ctrl + Shift + F` | Query Editor | Memformat dan merapikan teks query SQL aktif |
+| `Ctrl + S` | Query Editor | Menyimpan query aktif sebagai snippet persisten |
+| `Ctrl + Shift + C` | Query Editor | Melakukan `COMMIT` transaksi aktif |
+| `Ctrl + Shift + R` | Query Editor | Melakukan `ROLLBACK` transaksi aktif |
+| `Esc` atau `Ctrl + .` | Kueri Berjalan | Membatalkan kueri yang sedang dieksekusi secara out-of-band |
+
+### Ruang Kerja & Panel Navigasi
+| Pintasan Keyboard | Konteks | Kegunaan |
+| :--- | :--- | :--- |
+| `Ctrl + T` | Ruang Kerja | Membuka Tab Query baru |
+| `Ctrl + W` | Ruang Kerja | Menutup tab aktif (terproteksi jika ada draf kotor) |
 | `Ctrl + K` | Universal | Membuka Command Palette universal |
 | `Ctrl + ,` | Universal | Membuka Modal Pengaturan Terpadu (4-Tab) |
 | `Ctrl + P` | Universal | Membuka Schema Search (Lompat cepat ke tabel/kolom) |
 | `Ctrl + B` | Universal | Menyembunyikan/menampilkan Sidebar kiri (Layar luas) |
 | `Ctrl + L` | Universal | Menyembunyikan/menampilkan Sidebar AI Copilot |
-| `Ctrl + \`` | Universal | Membuka/menutup In-App Activity Console |
+| `Ctrl + \`` | Universal | Membuka/menutup Drawer In-App Activity Console |
+
+### Data Grid & Inspeksi Baris
+| Pintasan Keyboard | Konteks | Kegunaan |
+| :--- | :--- | :--- |
+| `Spacebar` | Spreadsheet Grid | Inspeksi Baris Tunggal (Formulir Vertikal) |
 | `Alt + N` | Spreadsheet Grid | Mengisi preset nilai `NULL` ke dalam sel aktif |
 | `Alt + E` | Spreadsheet Grid | Mengisi preset string kosong `""` |
 | `Alt + T` | Spreadsheet Grid | Mengisi preset fungsi waktu sekarang `NOW()` |
 | `Alt + D` | Spreadsheet Grid | Mengisi preset tanggal saat ini (`YYYY-MM-DD`) |
 | `Alt + U` | Spreadsheet Grid | Mengisi preset nilai unik acak `UUID v4` |
-| `F1` atau `?` | Universal | Membuka Modal Pintasan Keyboard & Tautan Dokumentasi |
-| `Esc` | Dialog / Modal | Menutup dialog, modal, atau menu pop-up aktif |
+| `F1` atau `?` | Universal | Membuka Modal Pintasan Keyboard |
+| `Esc` | Universal | Menutup modal, drawer, atau popover aktif |
 
 ---
 
