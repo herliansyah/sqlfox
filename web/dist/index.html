@@ -5428,10 +5428,15 @@
         connections = await res.json();
         renderConnectionsTree();
 
-        // Auto-restore last active connection or single connection
-        const lastConnId = localStorage.getItem('sqlfox_last_conn_id');
-        if (lastConnId && connections.some(c => c.id === lastConnId)) {
-          await selectConnection(lastConnId);
+        // Auto-restore active connection: check per-tab sessionStorage first, fallback to global localStorage
+        let activeConnId = null;
+        try {
+          activeConnId = sessionStorage.getItem('sqlfox_active_conn_id') || localStorage.getItem('sqlfox_last_conn_id');
+        } catch {
+          activeConnId = null;
+        }
+        if (activeConnId && connections.some(c => c.id === activeConnId)) {
+          await selectConnection(activeConnId);
         } else if (connections.length === 1) {
           await selectConnection(connections[0].id);
         }
@@ -5614,7 +5619,10 @@
           sessionCatalogTimestamps[conn.id] = {};
         }
         multiDBCatalogCache = sessionCatalogStore[conn.id];
-        localStorage.setItem('sqlfox_last_conn_id', conn.id);
+        try {
+          sessionStorage.setItem('sqlfox_active_conn_id', conn.id);
+          localStorage.setItem('sqlfox_last_conn_id', conn.id);
+        } catch {}
         renderConnectionsTree();
 
         // Update badge to indicate connecting status via SSOT helper
@@ -7900,8 +7908,10 @@
     function getTabsStorageKey(targetConnId) {
       if (targetConnId) return `sqlfox_tabs_${targetConnId}`;
       if (activeConnection && activeConnection.id) return `sqlfox_tabs_${activeConnection.id}`;
-      const lastConnId = localStorage.getItem('sqlfox_last_conn_id');
-      if (lastConnId) return `sqlfox_tabs_${lastConnId}`;
+      try {
+        const lastConnId = sessionStorage.getItem('sqlfox_active_conn_id') || localStorage.getItem('sqlfox_last_conn_id');
+        if (lastConnId) return `sqlfox_tabs_${lastConnId}`;
+      } catch {}
       return 'sqlfox_tabs_default';
     }
 
@@ -22441,6 +22451,12 @@ Please analyze what is causing this query to be slow and suggest necessary query
           if (activeConnection && activeConnection.id === connId) {
             activeConnection = null;
             activeSession = null;
+            try {
+              sessionStorage.removeItem('sqlfox_active_conn_id');
+              if (localStorage.getItem('sqlfox_last_conn_id') === connId) {
+                localStorage.removeItem('sqlfox_last_conn_id');
+              }
+            } catch {}
             renderHeaderConnectionBadge(null);
             updateFooterStats();
             document.getElementById('schema-tree').innerHTML = '<div class="text-slate-500 text-center py-4">Select a connection to view schema</div>';

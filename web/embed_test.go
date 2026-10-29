@@ -106,6 +106,34 @@ func TestSessionTabStatePersistenceEmbedded(t *testing.T) {
 	}
 }
 
+func TestTabSessionIsolationEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	requiredSnippets := []string{
+		"sessionStorage.getItem('sqlfox_active_conn_id')",
+		"sessionStorage.setItem('sqlfox_active_conn_id', conn.id)",
+		"sessionStorage.removeItem('sqlfox_active_conn_id')",
+		"localStorage.getItem('sqlfox_last_conn_id')",
+	}
+
+	for _, snippet := range requiredSnippets {
+		if !strings.Contains(content, snippet) {
+			t.Errorf("expected index.html to contain %q for per-tab session isolation, but was missing", snippet)
+		}
+	}
+}
+
 func TestAuditSourceAttributionEmbedded(t *testing.T) {
 	fsys := Assets()
 	f, err := fsys.Open("index.html")
