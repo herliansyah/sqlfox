@@ -577,13 +577,22 @@
     <main class="flex-1 flex flex-col overflow-hidden bg-app-bg min-w-0 relative" style="min-width: 480px;">
       
       <!-- Tabs Bar -->
-      <div class="h-9 bg-app-surface border-b border-app-border flex items-center px-2 space-x-1 overflow-x-auto flex-shrink-0">
-        <div id="tabs-container" class="flex items-center space-x-1 shrink-0">
-          <!-- Dynamic tabs injected here -->
+      <div id="tabs-bar" class="h-9 bg-app-surface border-b border-app-border flex items-center justify-between px-2 overflow-hidden flex-shrink-0 relative">
+        <div class="flex items-center space-x-1 min-w-0 overflow-hidden flex-1">
+          <div id="tabs-container" class="flex items-center space-x-1 shrink-0">
+            <!-- Dynamic tabs injected here -->
+          </div>
+          <button onclick="addNewQueryTab()" class="text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-800 text-xs transition shrink-0" id="add-tab-btn" title="New Query Tab (Ctrl+T)">
+            +
+          </button>
         </div>
-        <button onclick="addNewQueryTab()" class="text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-800 text-xs transition shrink-0" title="New Query Tab (Ctrl+T)">
-          +
-        </button>
+        <!-- Tab Overflow Trigger Button (ADR 0048 / Feature) -->
+        <div id="tab-overflow-wrapper" class="flex items-center shrink-0 hidden pl-1.5 bg-app-surface z-10">
+          <button id="tab-overflow-btn" onclick="toggleTabOverflowMenu(event)" class="flex items-center space-x-1 px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-sky-400 border border-slate-700 text-xs font-mono transition" title="More Tabs">
+            <span>»</span>
+            <span id="tab-overflow-count" class="font-bold">0</span>
+          </button>
+        </div>
       </div>
 
       <!-- Upper Split: Query Editor Area -->
@@ -2551,6 +2560,11 @@
     <button id="tab-ctx-btn-rename" onclick="tabContextMenuAction('rename')" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 text-slate-200 flex items-center space-x-2 transition cursor-pointer">
       <span>✏️</span><span>Rename Tab...</span>
     </button>
+  </div>
+
+  <!-- Tab Overflow Dropdown Menu -->
+  <div id="tab-overflow-dropdown" class="hidden fixed bg-slate-900 border border-slate-700 rounded-lg shadow-2xl z-50 text-xs py-1 min-w-[220px] max-w-[320px] max-h-[70vh] overflow-y-auto" onclick="event.stopPropagation()">
+    <!-- Dynamic overflow tab list injected here -->
   </div>
 
   <!-- Tab Database Switcher Dropdown (ADR 0055) -->
@@ -5900,14 +5914,14 @@
           menu.classList.add('hidden');
         }
       }
-      if (!e.target.closest('#table-context-menu, #tab-context-menu, #grid-context-menu, #pl-context-menu, #btn-col-picker, #col-picker-dropdown, #pl-btn-col-picker, #pl-col-picker-dropdown, #btn-export-csv, #export-csv-menu, #export-csv-dropdown-container, #tab-database-pill-container, #tab-db-switcher-menu')) {
+      if (!e.target.closest('#table-context-menu, #tab-context-menu, #grid-context-menu, #pl-context-menu, #btn-col-picker, #col-picker-dropdown, #pl-btn-col-picker, #pl-col-picker-dropdown, #btn-export-csv, #export-csv-menu, #export-csv-dropdown-container, #tab-database-pill-container, #tab-db-switcher-menu, #tab-overflow-wrapper, #tab-overflow-dropdown')) {
         closeAllContextMenus();
       }
     });
 
     // Dismiss context menus when right-clicking on unhandled page surfaces
     document.addEventListener('contextmenu', (e) => {
-      if (!e.target.closest('#table-context-menu, #tab-context-menu, #grid-context-menu, #pl-context-menu, td[data-col], #tabs-container, #schema-tree, .pl-row, #btn-col-picker, #col-picker-dropdown, #pl-btn-col-picker, #pl-col-picker-dropdown, #btn-export-csv, #export-csv-menu, #export-csv-dropdown-container, #tab-database-pill-container, #tab-db-switcher-menu')) {
+      if (!e.target.closest('#table-context-menu, #tab-context-menu, #grid-context-menu, #pl-context-menu, td[data-col], #tabs-container, #schema-tree, .pl-row, #btn-col-picker, #col-picker-dropdown, #pl-btn-col-picker, #pl-col-picker-dropdown, #btn-export-csv, #export-csv-menu, #export-csv-dropdown-container, #tab-database-pill-container, #tab-db-switcher-menu, #tab-overflow-wrapper, #tab-overflow-dropdown')) {
         closeAllContextMenus();
       }
     });
@@ -5925,6 +5939,7 @@
       if (exportCsv) exportCsv.classList.add('hidden');
       const tabDbMenu = document.getElementById('tab-db-switcher-menu');
       if (tabDbMenu) tabDbMenu.classList.add('hidden');
+      if (typeof closeTabOverflowMenu === 'function') closeTabOverflowMenu();
     }
 
     // --- Table Context Menu & Actions ---
@@ -7298,6 +7313,13 @@
         const ta = document.getElementById('sql-editor-textarea');
         if (ta) ta.value = val;
         scheduleSaveTabs();
+
+        // ponytail: re-render tabs dirty dot only when dirty state actually flips
+        const isDirtyNow = val.trim().length > 0;
+        if (curr && curr._lastDirty !== isDirtyNow) {
+          curr._lastDirty = isDirtyNow;
+          renderTabs();
+        }
       });
     }
 
@@ -7553,15 +7575,25 @@
     }
 
     // --- Tabs & Editor ---
-    function renderTabs() {
+    function renderTabs(hasSwapped = false) {
       const container = document.getElementById('tabs-container');
-      container.innerHTML = tabs.map(t => `
-        <div onclick="switchTab('${t.id}')" oncontextmenu="showTabContextMenu(event, '${t.id}')" class="flex items-center space-x-1 px-3 py-1 rounded cursor-pointer text-xs transition tab-label shrink-0 whitespace-nowrap ${t.id === activeTabId ? 'bg-app-bg text-app-accent font-semibold border-t-2 border-app-accent' : 'hover:bg-slate-800 text-slate-400'}" title="${escapeHtml(t.title)} (Right-click for options)">
-          <span>${t.isExecuting ? '<span class="animate-spin inline-block">⏳</span>' : t.isVariables ? '⚙️' : t.isFlightRecorder ? '📈' : t.isCluster ? '🌐' : t.isProcesslist ? '⚡' : t.isTableViewer ? '📊' : t.isNote ? '📝' : '⚡'}</span>
-          <span class="truncate max-w-[120px]">${escapeHtml(t.title)}</span>
-          <button onclick="event.stopPropagation(); closeTab('${t.id}')" class="hover:text-red-400 pl-1" title="Close Tab (Ctrl+W)">✕</button>
+      container.innerHTML = tabs.map(t => {
+        const isActive = t.id === activeTabId;
+        const isDirty = !t.isTableViewer && !t.isProcesslist && !t.isCluster && !t.isFlightRecorder && !t.isVariables && !t.isNote && ((t.id === activeTabId && cmEditor) ? cmEditor.getValue().trim().length > 0 : (t.sql || '').trim().length > 0);
+        const icon = t.isExecuting ? '<span class="animate-spin inline-block">⏳</span>' : t.isVariables ? '⚙️' : t.isFlightRecorder ? '📈' : t.isCluster ? '🌐' : t.isProcesslist ? '⚡' : t.isTableViewer ? '📊' : t.isNote ? '📝' : '⚡';
+        const activeClasses = 'bg-[#0b1120] text-slate-100 font-semibold border-t-2 border-t-app-accent border-r border-slate-800 shadow-inner';
+        const inactiveClasses = 'bg-[#0c1324]/50 hover:bg-slate-800/60 text-slate-400 hover:text-slate-200 border-r border-slate-800/80';
+        return `
+        <div onclick="switchTab('${t.id}')" oncontextmenu="showTabContextMenu(event, '${t.id}')" class="group flex items-center space-x-1.5 px-3 py-1 cursor-pointer text-xs transition-colors tab-label shrink-0 whitespace-nowrap ${isActive ? activeClasses : inactiveClasses}" title="${escapeHtml(t.title)} (Right-click for options)">
+          <span class="text-xs shrink-0">${icon}</span>
+          <span class="truncate max-w-[130px]">${escapeHtml(t.title)}</span>
+          ${isDirty ? '<span class="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" title="Unsaved query"></span>' : ''}
+          <button onclick="event.stopPropagation(); closeTab('${t.id}')" class="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-500/20 hover:text-red-400 text-slate-400 transition-opacity ml-1 shrink-0" title="Close Tab (Ctrl+W)">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor"><path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/></svg>
+          </button>
         </div>
-      `).join('');
+      `;
+      }).join('');
 
       const activeTab = tabs.find(t => t.id === activeTabId);
       const modeTabs = document.getElementById('table-mode-tabs');
@@ -7658,6 +7690,171 @@
       setTimeout(() => {
         if (cmEditor) cmEditor.refresh();
       }, 10);
+
+      updateTabOverflow(hasSwapped);
+    }
+
+    // --- Tab Overflow Dropdown ---
+    function updateTabOverflow(hasSwapped = false) {
+      const tabsBar = document.getElementById('tabs-bar');
+      const container = document.getElementById('tabs-container');
+      const overflowWrapper = document.getElementById('tab-overflow-wrapper');
+      const overflowCountEl = document.getElementById('tab-overflow-count');
+      const addBtn = document.getElementById('add-tab-btn');
+      if (!tabsBar || !container) return;
+
+      const barWidth = tabsBar.clientWidth;
+      if (!barWidth || barWidth <= 0) {
+        if (overflowWrapper) overflowWrapper.classList.add('hidden');
+        return;
+      }
+
+      const tabEls = Array.from(container.children);
+      if (tabEls.length === 0) {
+        if (overflowWrapper) overflowWrapper.classList.add('hidden');
+        closeTabOverflowMenu();
+        return;
+      }
+
+      tabEls.forEach(el => el.classList.remove('hidden'));
+
+      const addBtnWidth = addBtn ? (addBtn.offsetWidth || 28) : 28;
+      const overflowReserve = 58;
+      const maxAllowedWidth = barWidth - addBtnWidth - overflowReserve - 16;
+
+      let currentWidth = 0;
+      let visibleCount = 0;
+
+      for (let i = 0; i < tabEls.length; i++) {
+        const w = tabEls[i].offsetWidth || 120;
+        if (currentWidth + w <= maxAllowedWidth) {
+          currentWidth += w + 4;
+          visibleCount++;
+        } else {
+          break;
+        }
+      }
+
+      if (visibleCount < tabEls.length) {
+        const maxWithoutOverflow = barWidth - addBtnWidth - 16;
+        let totalW = 0;
+        for (let i = 0; i < tabEls.length; i++) {
+          totalW += (tabEls[i].offsetWidth || 120) + 4;
+        }
+        if (totalW <= maxWithoutOverflow) {
+          visibleCount = tabEls.length;
+        }
+      }
+
+      if (visibleCount === 0 && tabEls.length > 0) {
+        visibleCount = 1;
+      }
+
+      // Rule: active tab must always be in visible portion
+      const activeIdx = tabs.findIndex(t => t.id === activeTabId);
+      if (!hasSwapped && activeIdx >= visibleCount && visibleCount > 0) {
+        const [activeTabObj] = tabs.splice(activeIdx, 1);
+        tabs.splice(visibleCount - 1, 0, activeTabObj);
+        saveTabsState();
+        renderTabs(true);
+        return;
+      }
+
+      const overflowTabsList = [];
+      for (let i = 0; i < tabEls.length; i++) {
+        if (i >= visibleCount) {
+          tabEls[i].classList.add('hidden');
+          if (tabs[i]) overflowTabsList.push(tabs[i]);
+        } else {
+          tabEls[i].classList.remove('hidden');
+        }
+      }
+
+      if (overflowTabsList.length > 0) {
+        if (overflowWrapper) overflowWrapper.classList.remove('hidden');
+        if (overflowCountEl) overflowCountEl.textContent = overflowTabsList.length;
+        renderTabOverflowDropdown(overflowTabsList);
+      } else {
+        if (overflowWrapper) overflowWrapper.classList.add('hidden');
+        if (overflowCountEl) overflowCountEl.textContent = '0';
+        closeTabOverflowMenu();
+        const dd = document.getElementById('tab-overflow-dropdown');
+        if (dd) {
+          dd.innerHTML = '';
+          dd.classList.add('hidden');
+        }
+      }
+    }
+
+    function renderTabOverflowDropdown(overflowTabsList) {
+      const dd = document.getElementById('tab-overflow-dropdown');
+      if (!dd) return;
+      dd.innerHTML = `
+        <div class="px-3 py-1.5 text-[10px] uppercase tracking-wider font-bold text-slate-500 border-b border-slate-800 flex items-center justify-between">
+          <span>More Open Tabs</span>
+          <span class="text-sky-400 font-mono">${overflowTabsList.length}</span>
+        </div>
+        <div class="py-1">
+          ${overflowTabsList.map(t => {
+            const isDirty = !t.isTableViewer && !t.isProcesslist && !t.isCluster && !t.isFlightRecorder && !t.isVariables && !t.isNote && ((t.id === activeTabId && cmEditor) ? cmEditor.getValue().trim().length > 0 : (t.sql || '').trim().length > 0);
+            const icon = t.isExecuting ? '<span class="animate-spin inline-block">⏳</span>' : t.isVariables ? '⚙️' : t.isFlightRecorder ? '📈' : t.isCluster ? '🌐' : t.isProcesslist ? '⚡' : t.isTableViewer ? '📊' : t.isNote ? '📝' : '⚡';
+            return `
+              <div onclick="selectOverflowTab('${t.id}')" class="flex items-center justify-between px-3 py-1.5 hover:bg-slate-800 cursor-pointer text-xs group transition">
+                <div class="flex items-center space-x-2 truncate mr-2">
+                  <span class="text-xs shrink-0">${icon}</span>
+                  <span class="text-slate-300 group-hover:text-white truncate max-w-[170px]">${escapeHtml(t.title)}</span>
+                  ${isDirty ? '<span class="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" title="Unsaved query"></span>' : ''}
+                </div>
+                <button onclick="event.stopPropagation(); closeTabFromOverflow('${t.id}')" class="text-slate-500 hover:text-red-400 p-0.5 rounded hover:bg-red-500/20 transition shrink-0 ml-1" title="Close Tab">
+                  ✕
+                </button>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `;
+    }
+
+    function toggleTabOverflowMenu(e) {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      const dd = document.getElementById('tab-overflow-dropdown');
+      const btn = document.getElementById('tab-overflow-btn');
+      if (!dd || !btn) return;
+      const isHidden = dd.classList.contains('hidden');
+      closeAllContextMenus();
+      if (isHidden) {
+        const rect = btn.getBoundingClientRect();
+        const x = Math.min(rect.right - 220, window.innerWidth - 230);
+        dd.style.left = `${Math.max(10, x)}px`;
+        dd.style.top = `${rect.bottom + 4}px`;
+        dd.classList.remove('hidden');
+      } else {
+        dd.classList.add('hidden');
+      }
+    }
+
+    function closeTabOverflowMenu() {
+      const dd = document.getElementById('tab-overflow-dropdown');
+      if (dd) dd.classList.add('hidden');
+    }
+
+    function selectOverflowTab(tabId) {
+      closeTabOverflowMenu();
+      switchTab(tabId);
+    }
+
+    async function closeTabFromOverflow(tabId) {
+      await closeTab(tabId);
+      const overflowWrapper = document.getElementById('tab-overflow-wrapper');
+      const dd = document.getElementById('tab-overflow-dropdown');
+      if (overflowWrapper && !overflowWrapper.classList.contains('hidden')) {
+        if (dd) dd.classList.remove('hidden');
+      } else {
+        closeTabOverflowMenu();
+      }
     }
 
     let currentNotesTabMode = 'edit';
@@ -8039,11 +8236,29 @@
       saveTabsState();
     }
 
+    function getNextQueryTabTitle() {
+      let maxNum = 0;
+      const existingTitles = new Set(tabs.map(t => (t.title || '').toLowerCase().trim()));
+      const queryRegex = /^query\s+(\d+)\.sql$/i;
+      for (const t of tabs) {
+        const m = (t.title || '').trim().match(queryRegex);
+        if (m) {
+          const num = parseInt(m[1], 10);
+          if (num > maxNum) maxNum = num;
+        }
+      }
+      let nextNum = maxNum + 1;
+      while (existingTitles.has(`query ${nextNum}.sql`)) {
+        nextNum++;
+      }
+      return `Query ${nextNum}.sql`;
+    }
+
     function addNewQueryTab() {
       const newId = 'tab-' + Date.now();
       const currentActiveTab = tabs.find(t => t.id === activeTabId);
       const inheritedDB = (currentActiveTab && currentActiveTab.database) || schemaCatalogCache?.database_name || activeConnection?.database_name || '';
-      tabs.push({ id: newId, title: `Query ${tabs.length + 1}.sql`, sql: '', isTableViewer: false, database: inheritedDB });
+      tabs.push({ id: newId, title: getNextQueryTabTitle(), sql: '', isTableViewer: false, database: inheritedDB });
       switchTab(newId);
       saveTabsState();
     }
@@ -8280,9 +8495,16 @@
         await rollbackActiveTransaction();
       }
 
-      if (isTabDirtyOrNonEmpty(tab)) {
+      const isQueryTab = !tab.isTableViewer && !tab.isProcesslist && !tab.isCluster && !tab.isFlightRecorder && !tab.isVariables && !tab.isNote;
+      const sql = (tab.id === activeTabId && cmEditor) ? cmEditor.getValue().trim() : (tab.sql || '').trim();
+      const isEmptyQuery = isQueryTab && sql.length === 0;
+
+      if (!isEmptyQuery) {
         const title = tab.title || 'this tab';
-        const ok = await showNativeConfirm(`Are you sure you want to close "${title}"?\nAny unsaved query or modifications will be discarded.`, 'Close Tab');
+        const msg = isQueryTab
+          ? `Are you sure you want to close "${title}"?\nAny unsaved query or modifications will be discarded.`
+          : `Are you sure you want to close "${title}"?`;
+        const ok = await showNativeConfirm(msg, 'Close Tab');
         if (!ok) return;
       }
 
@@ -8383,12 +8605,18 @@
       }
 
       let newTitle = src.title || 'Query.sql';
-      if (newTitle.endsWith('.sql')) {
-        const base = newTitle.slice(0, -4);
-        newTitle = `${base} (Copy).sql`;
-      } else {
-        newTitle = `${newTitle} (Copy)`;
+      const isSql = newTitle.endsWith('.sql');
+      const base = isSql ? newTitle.slice(0, -4) : newTitle;
+      const cleanBase = base.replace(/\s+\(Copy(\s+\d+)?\)$/i, '');
+      const existingTitles = new Set(tabs.map(t => (t.title || '').toLowerCase().trim()));
+
+      let candidate = isSql ? `${cleanBase} (Copy).sql` : `${cleanBase} (Copy)`;
+      let copyIndex = 2;
+      while (existingTitles.has(candidate.toLowerCase())) {
+        candidate = isSql ? `${cleanBase} (Copy ${copyIndex}).sql` : `${cleanBase} (Copy ${copyIndex})`;
+        copyIndex++;
       }
+      newTitle = candidate;
 
       const newId = 'tab-' + Date.now();
       const clonedTab = {
@@ -21795,6 +22023,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
         const restoreWidth = savedAIWidthBeforeMaximize || localStorage.getItem('sqlfox_copilot_width') || '380px';
         sidebar.style.width = restoreWidth;
         updateAISidebarMode();
+      setTimeout(() => { if (typeof updateTabOverflow === 'function') updateTabOverflow(); }, 150);
         if (icon) icon.textContent = '⛶';
       }
     }
@@ -21828,7 +22057,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
       } catch (_) {}
 
       updateAISidebarMode();
+      setTimeout(() => { if (typeof updateTabOverflow === 'function') updateTabOverflow(); }, 150);
       window.addEventListener('resize', updateAISidebarMode);
+      window.addEventListener('resize', () => { if (typeof updateTabOverflow === 'function') requestAnimationFrame(updateTabOverflow); });
 
       let isDragging = false;
       let startX = 0;
@@ -23630,6 +23861,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
             if (isAIVisible) {
               aiEl.classList.remove('hidden');
               updateAISidebarMode();
+      setTimeout(() => { if (typeof updateTabOverflow === 'function') updateTabOverflow(); }, 150);
             } else {
               aiEl.classList.add('hidden');
             }
@@ -23641,6 +23873,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
               aiEl.classList.add('hidden');
             } else {
               updateAISidebarMode();
+      setTimeout(() => { if (typeof updateTabOverflow === 'function') updateTabOverflow(); }, 150);
             }
           }
         }
@@ -23656,6 +23889,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
       } else {
         el.classList.remove('hidden');
         updateAISidebarMode();
+      setTimeout(() => { if (typeof updateTabOverflow === 'function') updateTabOverflow(); }, 150);
       }
 
       try {
@@ -23671,6 +23905,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
       else el.classList.remove('hidden');
 
       updateAISidebarMode();
+      setTimeout(() => { if (typeof updateTabOverflow === 'function') updateTabOverflow(); }, 150);
 
       try {
         localStorage.setItem('sqlfox_left_sidebar_visible', (!willBeHidden).toString());

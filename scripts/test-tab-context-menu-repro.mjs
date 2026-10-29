@@ -259,7 +259,26 @@ async function runTests() {
   assert.strictEqual(confirmCalls.length, 1, 'Close all must ask confirmation');
   console.log("✅ Test 10 Passed: Close all tabs resets workspace with confirmation");
 
-  console.log("\n🎉 ALL 10 TESTS PASSED (GREEN)!");
+  // Test 11: Close non-query tab (table viewer, processlist) must trigger confirmation prompt
+  vm.runInContext(`
+    tabs = [
+      { id: 'tab-query-empty', title: 'Query 1.sql', sql: '', isTableViewer: false },
+      { id: 'tab-tbl', title: 'users', sql: '', isTableViewer: true, tableName: 'users' },
+      { id: 'tab-pl', title: 'Processlist', sql: '', isProcesslist: true }
+    ];
+    activeTabId = 'tab-query-empty';
+  `, sandbox);
+  confirmCalls.length = 0;
+  confirmMockResult = true;
+  await vm.runInContext(`closeTab('tab-tbl')`, sandbox);
+  assert.strictEqual(confirmCalls.length, 1, 'Closing table viewer tab must trigger confirmation');
+  await vm.runInContext(`closeTab('tab-pl')`, sandbox);
+  assert.strictEqual(confirmCalls.length, 2, 'Closing processlist tab must trigger confirmation');
+  await vm.runInContext(`closeTab('tab-query-empty')`, sandbox);
+  assert.strictEqual(confirmCalls.length, 2, 'Closing empty query tab must NOT trigger confirmation');
+  console.log("✅ Test 11 Passed: All tabs except empty query prompt confirmation on close");
+
+  console.log("\n🎉 ALL 11 TESTS PASSED (GREEN)!");
 }
 
 runTests().catch(err => {
