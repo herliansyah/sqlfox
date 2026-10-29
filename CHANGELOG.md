@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Tab Bar Overflow Dropdown & Enhanced Close Guard (`web/dist/index.html`)**: Added an overflow dropdown indicator (`#tab-bar-overflow-btn` and `#tab-bar-overflow-menu`) that dynamically activates when tab count exceeds the visible container width, prompted confirmation guards before closing unsaved non-empty queries or non-query tabs, and deduplicated sequential copy numbering on tab duplication.
+
+### Fixed
+- **Concurrent Connection Deduplication & Lazy Schema Inspection (`internal/server/session_manager`, `internal/server/handlers_query`, `web/dist/index.html`)**: Introduced singleflight deduplication on in-flight connection requests to eliminate reconnect stampedes, deferred initial schema introspection to lazy on-demand retrieval to prevent heavy metadata lock contention during connect, retained `DatabaseName` on `ActiveSession` for pre-schema statement inspection, guarded rapid processlist polling with reentrancy checks, and prevented aborted or timed-out fetch requests from spuriously triggering the global reconnect banner.
+
 ## [v0.10.12] - 2026-10-27
 
 ### Added
