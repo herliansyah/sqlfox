@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.10.14] - 2026-10-29
+
 ### Changed
 - **Bilingual Documentation Restructuring & Codebase Synchronization**: Synchronized all architecture, context, milestones, security, and UX documentation with codebase state up to v0.10.13 and ADR 0059, separated documentation into dedicated English (`README.md`, `docs/USER_GUIDE.md`) and Indonesian (`README_ID.md`, `docs/USER_GUIDE_ID.md`) guides, and improved technical formatting.
 
