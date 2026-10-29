@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Bilingual Documentation Restructuring & Codebase Synchronization**: Synchronized all architecture, context, milestones, security, and UX documentation with codebase state up to v0.10.13 and ADR 0059, separated documentation into dedicated English (`README.md`, `docs/USER_GUIDE.md`) and Indonesian (`README_ID.md`, `docs/USER_GUIDE_ID.md`) guides, and improved technical formatting.
+
+### Fixed
+- **Per-Tab Active Connection Isolation via Session Storage (`web/dist/index.html`)**: Prioritized `sessionStorage` over `localStorage` for tracking the active database connection ID, preventing cross-tab connection state interference and unexpected connection switching when duplicating tabs or managing multiple connections concurrently, with seamless fallback to `localStorage` for initial browser sessions.
+
 ## [v0.10.13] - 2026-10-29
 
 ### Added
