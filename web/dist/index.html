@@ -5200,7 +5200,10 @@
         }
         return res;
       } catch (err) {
-        triggerAutoReconnect();
+        // ponytail: only trigger global reconnect banner for real network/daemon drops, not aborted non-critical timeouts
+        if (err && err.name !== 'AbortError' && err.name !== 'TimeoutError') {
+          triggerAutoReconnect();
+        }
         throw err;
       }
     }
@@ -9621,8 +9624,12 @@
       }
     }
 
+    let isFetchingProcesslist = false;
+
     async function fetchProcesslist(silent = false) {
       if (!activeConnection) return;
+      if (isFetchingProcesslist) return; // ponytail: prevent concurrent overlapping requests when interval is fast
+      isFetchingProcesslist = true;
       if (!silent && processlistRefreshInterval !== 'pause') {
         setProcesslistInterval(processlistRefreshInterval);
       }
@@ -9648,6 +9655,8 @@
         if (!silent) {
           showNativeAlert('Failed to load processlist: ' + err.message, 'Processlist Error');
         }
+      } finally {
+        isFetchingProcesslist = false;
       }
     }
 

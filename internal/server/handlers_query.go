@@ -34,6 +34,9 @@ func (s *Server) handleInspectQuery(w http.ResponseWriter, r *http.Request) {
 	if targetDB == "" && sess.Schema() != nil {
 		targetDB = sess.Schema().DatabaseName
 	}
+	if targetDB == "" {
+		targetDB = sess.DatabaseName
+	}
 	res, _, err := inspectAllStatements(req.SQL, sess.Environment, sess.DriverName, targetDB)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
