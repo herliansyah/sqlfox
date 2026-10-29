@@ -62,6 +62,7 @@ type ActiveSession struct {
 	ID             string                 `json:"id"`
 	ConnectionID   string                 `json:"connection_id"`
 	Name           string                 `json:"name"`
+	DatabaseName   string                 `json:"database_name,omitempty"`
 	Environment    string                 `json:"environment"`
 	DriverName     string                 `json:"driver_name"`
 	ReadOnly       bool                   `json:"read_only"`
@@ -164,6 +165,7 @@ func (s *ActiveSession) MarshalJSON() ([]byte, error) {
 		ID           string                 `json:"id"`
 		ConnectionID string                 `json:"connection_id"`
 		Name         string                 `json:"name"`
+		DatabaseName string                 `json:"database_name,omitempty"`
 		Environment  string                 `json:"environment"`
 		DriverName   string                 `json:"driver_name"`
 		ReadOnly     bool                   `json:"read_only"`
@@ -174,7 +176,7 @@ func (s *ActiveSession) MarshalJSON() ([]byte, error) {
 		LastActive   time.Time              `json:"last_active"`
 	}
 	s.mu.RLock()
-	v := view{s.ID, s.ConnectionID, s.Name, s.Environment, s.DriverName, s.ReadOnly, s.CachedSchema, s.ServerInfo, s.LatencyMs, s.MemoryMB, s.LastActive}
+	v := view{s.ID, s.ConnectionID, s.Name, s.DatabaseName, s.Environment, s.DriverName, s.ReadOnly, s.CachedSchema, s.ServerInfo, s.LatencyMs, s.MemoryMB, s.LastActive}
 	s.mu.RUnlock()
 	return json.Marshal(v)
 }
@@ -284,11 +286,19 @@ func (s *ActiveSession) RecordAudit(querySQL, source string, durationMs, rowsAff
 	}
 }
 
+// connectCall tracks in-flight connection dialing to deduplicate concurrent connection attempts.
+type connectCall struct {
+	wg  sync.WaitGroup
+	val *ActiveSession
+	err error
+}
+
 // SessionManager manages connected database sessions.
 type SessionManager struct {
 	vault      *vault.Vault
 	backupDir  string
 	sessions   map[string]*ActiveSession
+	connecting map[string]*connectCall
 	stopReaper chan struct{}
 	mu         sync.RWMutex
 }
@@ -298,6 +308,7 @@ func NewSessionManager(v *vault.Vault, backupDir string) *SessionManager {
 		vault:      v,
 		backupDir:  backupDir,
 		sessions:   make(map[string]*ActiveSession),
+		connecting: make(map[string]*connectCall),
 		stopReaper: make(chan struct{}),
 	}
 	go sm.startReaper()
@@ -342,21 +353,36 @@ func (sm *SessionManager) startReaper() {
 
 // ConnectSession creates or activates a session for the given connection ID.
 func (sm *SessionManager) ConnectSession(ctx context.Context, connectionID string) (*ActiveSession, error) {
-	// Check existing session. The network I/O below (dial, ServerInfo, InspectSchema) runs without
-	// sm.mu so one slow or unreachable database cannot stall requests for every other connection.
-	sm.mu.RLock()
+	sm.mu.Lock()
 	if sess, ok := sm.sessions[connectionID]; ok {
-		sm.mu.RUnlock()
+		sm.mu.Unlock()
 		sess.mu.Lock()
 		sess.LastActive = time.Now()
 		sess.mu.Unlock()
 		return sess, nil
 	}
-	sm.mu.RUnlock()
+	// ponytail: singleflight in-flight connection requests for the same connectionID to prevent stampeding the DB
+	if call, ok := sm.connecting[connectionID]; ok {
+		sm.mu.Unlock()
+		call.wg.Wait()
+		return call.val, call.err
+	}
+	call := &connectCall{}
+	call.wg.Add(1)
+	sm.connecting[connectionID] = call
+	sm.mu.Unlock()
+
+	defer func() {
+		sm.mu.Lock()
+		delete(sm.connecting, connectionID)
+		sm.mu.Unlock()
+		call.wg.Done()
+	}()
 
 	conn, err := sm.vault.GetConnection(connectionID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get connection config: %w", err)
+		call.err = fmt.Errorf("failed to get connection config: %w", err)
+		return nil, call.err
 	}
 
 	cfg := driver.Config{
@@ -374,11 +400,13 @@ func (sm *SessionManager) ConnectSession(ctx context.Context, connectionID strin
 
 	dbSession, err := driver.Connect(ctx, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to database: %w", err)
+		call.err = fmt.Errorf("failed to connect to database: %w", err)
+		return nil, call.err
 	}
 
 	info, _ := dbSession.ServerInfo(ctx)
-	schema, _ := dbSession.InspectSchema(ctx, conn.DatabaseName)
+	// ponytail: defer schema introspection to lazy on-demand fetching (handleGetSchema)
+	// to eliminate heavy KEY_COLUMN_USAGE lock contention during session connection / reconnect
 	latency, _ := dbSession.Ping(ctx)
 
 	var m runtime.MemStats
@@ -389,11 +417,11 @@ func (sm *SessionManager) ConnectSession(ctx context.Context, connectionID strin
 		ID:             connectionID,
 		ConnectionID:   connectionID,
 		Name:           conn.Name,
+		DatabaseName:   conn.DatabaseName,
 		Environment:    conn.Environment,
 		DriverName:     conn.Driver,
 		ReadOnly:       conn.Environment == "Production", // Production defaults to Read-Only
 		Session:        dbSession,
-		CachedSchema:   schema,
 		ServerInfo:     info,
 		LatencyMs:      latency.Milliseconds(),
 		MemoryMB:       allocMB,
@@ -404,17 +432,10 @@ func (sm *SessionManager) ConnectSession(ctx context.Context, connectionID strin
 	}
 
 	sm.mu.Lock()
-	if existing, ok := sm.sessions[connectionID]; ok {
-		// A concurrent request connected first; keep its session and discard ours.
-		sm.mu.Unlock()
-		_ = dbSession.Close()
-		existing.mu.Lock()
-		existing.LastActive = time.Now()
-		existing.mu.Unlock()
-		return existing, nil
-	}
 	sm.sessions[connectionID] = active
 	sm.mu.Unlock()
+
+	call.val = active
 	return active, nil
 }
 
@@ -527,6 +548,9 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	targetDB := req.Database
 	if targetDB == "" && s.Schema() != nil {
 		targetDB = s.Schema().DatabaseName
+	}
+	if targetDB == "" {
+		targetDB = s.DatabaseName
 	}
 	inspection, allQueries, err := inspectAllStatements(trimmedSQL, s.Environment, s.DriverName, targetDB)
 	if err != nil {
@@ -1024,6 +1048,9 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 	if targetDB == "" && s.Schema() != nil {
 		targetDB = s.Schema().DatabaseName
 	}
+	if targetDB == "" {
+		targetDB = s.DatabaseName
+	}
 	inspection, allQueries, err := inspectAllStatements(trimmedSQL, s.Environment, s.DriverName, targetDB)
 	if err != nil {
 		return nil, err
@@ -1460,6 +1487,9 @@ func (s *ActiveSession) Stream(ctx context.Context, sql string, maxRows int) (dr
 	targetDB := ""
 	if s.Schema() != nil {
 		targetDB = s.Schema().DatabaseName
+	}
+	if targetDB == "" {
+		targetDB = s.DatabaseName
 	}
 	inspection, allQueries, err := inspectAllStatements(trimmedSQL, s.Environment, s.DriverName, targetDB)
 	if err != nil {
