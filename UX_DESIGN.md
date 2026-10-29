@@ -90,23 +90,40 @@ User experience architecture, ASCII wireframes, design tokens, and interaction m
 
 ---
 
-## 4. Keyboard Shortcuts
+## 4. Keyboard Shortcuts Reference
 
-| Shortcut (macOS / Linux-Win) | Action | Scope |
+### Query Editor & Execution
+| Shortcut (macOS / Linux & Windows) | Action | Context |
 | :--- | :--- | :--- |
 | `Cmd+Enter` / `Ctrl+Enter` | Run Selected or Current Query | Query Editor |
 | `Cmd+Shift+Enter` / `Ctrl+Shift+Enter` | Run Query with Impact Preview (`EXPLAIN`) | Query Editor |
-| `Esc` or `Cmd+.` / `Ctrl+.` | Cancel Currently Running Query (Out-of-band) | Global |
-| `Cmd+T` / `Ctrl+T` | Open New Query Tab | Tabs |
-| `Cmd+W` / `Ctrl+W` | Close Active Tab | Tabs |
-| `Cmd+K` / `Ctrl+K` | Open Command Palette | Global |
-| `Cmd+,` / `Ctrl+,` | Open Unified App Settings Modal (4-Tab) | Global |
-| `Cmd+P` / `Ctrl+P` | Open Schema Search (Quick Open Table/Column) | Global |
-| `Cmd+L` / `Ctrl+L` | Toggle AI Assistant Sidebar | Global |
-| `Cmd+B` / `Ctrl+B` | Toggle Connections & Schema Sidebar | Global |
 | `Cmd+Shift+F` / `Ctrl+Shift+F` | Format SQL Statement | Query Editor |
 | `Cmd+S` / `Ctrl+S` | Save Active Query as Snippet | Query Editor |
-| `Cmd+\`` / `Ctrl+\`` | Toggle In-App Activity Console | Global |
+| `Cmd+Shift+C` / `Ctrl+Shift+C` | Commit Active Transaction | Query Editor |
+| `Cmd+Shift+R` / `Ctrl+Shift+R` | Rollback Active Transaction | Query Editor |
+| `Esc` or `Cmd+.` / `Ctrl+.` | Cancel Currently Running Query (Out-of-band) | Active Execution |
+
+### Workspace & Navigation
+| Shortcut (macOS / Linux & Windows) | Action | Context |
+| :--- | :--- | :--- |
+| `Cmd+T` / `Ctrl+T` | Open New Query Tab | Tabs Bar |
+| `Cmd+W` / `Ctrl+W` | Close Active Tab (Guarded if unsaved) | Tabs Bar |
+| `Cmd+K` / `Ctrl+K` | Open Command Palette | Global |
+| `Cmd+,` / `Ctrl+,` | Open Unified Settings Modal (4-Tab) | Global |
+| `Cmd+P` / `Ctrl+P` | Open Schema Search (Quick Jump) | Global |
+| `Cmd+B` / `Ctrl+B` | Toggle Sidebar (Connections & Schema Tree) | Global |
+| `Cmd+L` / `Ctrl+L` | Toggle AI Copilot Assistant Panel | Global |
+| `Cmd+\`` / `Ctrl+\`` | Toggle In-App Activity Console Drawer | Global |
+
+### Data Grid & Cell Editing
+| Shortcut (macOS / Linux & Windows) | Action | Context |
+| :--- | :--- | :--- |
+| `Spacebar` | Inspect Record (Single Record Form View) | Data Grid |
+| `Alt+N` | Insert `NULL` Value Preset | Active Cell |
+| `Alt+E` | Insert Empty String `""` Preset | Active Cell |
+| `Alt+T` | Insert `NOW()` / Current Timestamp Preset | Active Cell |
+| `Alt+D` | Insert Current Date (`YYYY-MM-DD`) Preset | Active Cell |
+| `Alt+U` | Insert Generated RFC4122 `UUID v4` Preset | Active Cell |
 
 ---
 
@@ -759,6 +776,8 @@ The Entity-Relationship Diagram canvas allows developers to explore table relati
 ├─────────────────────────────────────────────────────────────────────────────────────────┤
 │ ↳ Blocked: Thread #4891 (web_app) waiting 45s for lock:                                 │
 │   ALTER TABLE orders ADD COLUMN priority_score INT DEFAULT 0;                           │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+```
 ## 23. In-App Activity Console & Live Diagnostic Stream
 
 A collapsible bottom-docked telemetry drawer situated above the status footer, providing real-time visibility into internal daemon activities without leaving the query workspace.
@@ -780,10 +799,233 @@ A collapsible bottom-docked telemetry drawer situated above the status footer, p
 ```
 
 ### 2. Interaction & State Design
-- **Toggle Access**: Open or close via `Ctrl + ` ` keyboard shortcut or clicking the footer button `⚡ Activity`.
+- **Toggle Access**: Open or close via `Ctrl + \`` keyboard shortcut or clicking the footer button `⚡ Activity`.
 - **Smart Auto-Scroll**: Viewport tracks newest events at bottom. When an operator scrolls up to inspect historical entries, auto-scrolling automatically freezes until scrolled back to the newest row.
 - **Freeze & Pause**: The `⏸ Pause` button locks incoming table updates while retaining the telemetry connection in the background.
 - **Client-Side Retention & Export**: Maintains a FIFO ring buffer of 1,000 items in browser memory. 1-click export allows instant download as human-readable `.log` (plain text) or structured `.json`.
+
+---
+
+## 24. Processlist Batch Operations & Two-Tier Responsive Toolbar
+
+A structured two-tier toolbar layout organizing processlist controls across viewports, paired with batch kill capabilities and sticky column visibility management.
+
+### 1. Two-Tier Toolbar Wireframe
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ [🔄 Refresh] [Auto: 3s ▼]  [⚡ Batch Actions ▼]  [🔍 Search threads...               ] [Columns (8/10) ▼]│
+├────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Filters: [Command: All ▼]  [User: All ▼]  [Database: orders_db ▼]  [Time > 5s]  [Hide Sleep ☑] [Hide System ☑] │
+├──────┬──────┬─────────┬──────────────┬────────────┬─────────┬──────┬─────────┬─────────────────────────────┤
+│ [ ]  │ ID   │ USER    │ HOST         │ DB         │ COMMAND │ TIME │ STATE   │ INFO                        │
+├──────┼──────┼─────────┼──────────────┼────────────┼─────────┼──────┼─────────┼─────────────────────────────┤
+│ [☑]  │ 1042 │ app_usr │ 10.0.1.4     │ orders_db  │ Query   │ 14s  │ Sorting │ SELECT * FROM orders ORDER..│
+│ [☑]  │ 1045 │ report  │ 10.0.1.9     │ orders_db  │ Query   │ 28s  │ Exec    │ SELECT SUM(amount) FROM sa..│
+└──────┴──────┴─────────┴──────────────┴────────────┴─────────┴──────┴─────────┴─────────────────────────────┘
+```
+
+### 2. Batch Kill Modal Wireframe (`#batch-kill-modal`)
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ ⚠️ BATCH PROCESS TERMINATION                                            │
+├─────────────────────────────────────────────────────────────────────────┤
+│ Target Action:       Terminate 2 Active Queries (Kill Query)            │
+│ Target Processes:    #1042 (app_usr), #1045 (report)                    │
+│ Protected Threads:   #1001 (caller connection, shielded)                │
+│                                                                         │
+│ ℹ️ Terminating queries cancels active execution while preserving client  │
+│ connection sockets in application pools.                                │
+├─────────────────────────────────────────────────────────────────────────┤
+│ [Cancel (Esc)]                                    [Confirm Batch Kill]  │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 25. Tab Database Scope & Target Database Switcher Pill
+
+Decouples query tab execution context from global sidebar selection and provides instant visual database affirmation.
+
+### 1. Editor Toolbar Database Pill Wireframe
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ [▶ Run (Ctrl+Enter)] [⚡ Explain] [🛡️ Impact]  |  [🗄️ orders_db ▼]  |  Result: 100 rows (18ms)           │
+│                                                  ┌──────────────────────────────┐                      │
+│                                                  │ 🔍 Filter databases...       │                      │
+│                                                  ├──────────────────────────────┤                      │
+│                                                  │ ✓ orders_db (active tab)     │                      │
+│                                                  │   inventory_db               │                      │
+│                                                  │   analytics_warehouse        │                      │
+│                                                  └──────────────────────────────┘                      │
+```
+
+### 2. Schema Scope Mismatch Guard Wireframe
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ ⚠️ SCHEMA SCOPE MISMATCH DETECTED                                       │
+├─────────────────────────────────────────────────────────────────────────┤
+│ Tab Database Context:    orders_db                                      │
+│ Statement Target Schema: analytics_warehouse                            │
+│                                                                         │
+│ Query:                                                                  │
+│ UPDATE analytics_warehouse.daily_rollup SET processed = 1 WHERE id = 4; │
+│                                                                         │
+│ ⚠️ You are executing a query against 'analytics_warehouse' while this   │
+│ tab is scoped to 'orders_db'.                                           │
+├─────────────────────────────────────────────────────────────────────────┤
+│ [Switch Tab to analytics_warehouse]   [Cancel]   [Execute in orders_db] │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 26. Relational Table Designer & In-Place Constraint Builders
+
+High-speed visual table structure authoring without full-DOM re-rendering focus loss.
+
+### 1. Floating ENUM / SET Value Builder Wireframe (`#enum-builder-popover`)
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│  Configure ENUM Options: status                                      │
+├──────────────────────────────────────────────────────────────────────┤
+│  [ pending ✕ ] [ processing ✕ ] [ completed ✕ ] [ cancelled ✕ ]      │
+│  [+ Type new option and press Enter...                             ] │
+│                                                                      │
+│  📋 Paste comma-separated values:                                    │
+│  [ 'pending', 'processing', 'completed', 'cancelled'              ] │
+│                                                                      │
+│  Generated SQL: ENUM('pending', 'processing', 'completed', ...)      │
+├──────────────────────────────────────────────────────────────────────┤
+│  [Discard]                                           [Apply Options] │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### 2. Visual Composite Index & FK Compatibility Wireframe
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ Composite Index Builder: idx_orders_customer_date                    │
+├──────────────────────────────────────────────────────────────────────┤
+│ Order:   #1 [customer_id ✕]   #2 [created_at ✕]   #3 [status ✕]      │
+│ Type:    (•) INDEX (BTREE)   ( ) UNIQUE   ( ) FULLTEXT               │
+│                                                                      │
+│ Foreign Key Compatibility Check:                                     │
+│ Source: orders.customer_id (BIGINT UNSIGNED)                         │
+│ Target: customers.id (BIGINT UNSIGNED) [✓ Compatible]                │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 27. Pre-Execution Mutation Estimation & Tiered Affirmation Modals
+
+Adaptive safety verification distinguishing low-impact from high-impact data changes.
+
+### 1. Low-Impact 1-Click Confirmation (1–100 Rows Affected in Development)
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ ℹ️ REVIEW MUTATION IMPACT                                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│ Target Environment:  Development [🟢 DEV]                               │
+│ Estimated Rows:      12 rows (Pre-flight probe: SELECT COUNT(*))        │
+│ Query:               UPDATE users SET verified = 1 WHERE invited_by = 4 │
+├─────────────────────────────────────────────────────────────────────────┤
+│ [Cancel (Esc)]                                    [Confirm & Execute]   │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### 2. High-Impact Verification Challenge (>100 Rows, Unqualified, or Staging/Prod)
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 🚨 DANGEROUS MUTATION CHALLENGE                                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│ Target Environment:  Production [🔴 PROD]                               │
+│ Target Table:        `orders`                                           │
+│ Estimated Rows:      84,200 rows                                        │
+│ Query:               DELETE FROM orders WHERE status = 'expired';       │
+│                                                                         │
+│ ⚠️ Pre-DDL Snapshot: DDL saved to .scratch/backups/                     │
+│                                                                         │
+│ To confirm execution, type the exact table name below:                  │
+│ [ orders                                                              ] │
+├─────────────────────────────────────────────────────────────────────────┤
+│ [Abort Execution (Esc)]                           [Execute Mutation]    │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 28. Virtual Data Grid, Sticky Bottom Pagination Bar & Cell Inspector Drawer
+
+High-performance spreadsheet interface handling 100,000+ buffered rows with zero UI freeze.
+
+### 1. Unified Bottom Pagination Bar Wireframe
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ [⏮️ First] [◀ Prev]  Page [ 1 ] of 42  [Next ▶] [Last ⏭️]   [50 / page ▼]                                │
+│ Showing 1 - 50 of 2,100 rows                  [🔍 Calculate Total Count]  [⚡ Cell Inspector (Ctrl+I)]  │
+└────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 2. Persistent Cell Inspector Drawer Wireframe
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ 📋 CELL INSPECTOR: payload (Row #4, Column #6)                  [Format JSON] [Copy Text] [Wrap Lines] [✕] │
+├────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ {                                                                                                      │
+│   "event": "order_placed",                                                                             │
+│   "customer_id": 84102,                                                                                │
+│   "items": [                                                                                           │
+│     { "sku": "SKU-902", "quantity": 2, "price": 49.99 }                                                │
+│   ]                                                                                                    │
+│ }                                                                                                      │
+└────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 29. Tab Bar Overflow Dropdown & Enhanced Close Guard
+
+Responsive tab navigation and draft protection for power users with many active tabs.
+
+### 1. Tab Bar Overflow Wireframe
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ [Query 1.sql] [orders.sql ●] [users] [analytics] [audit_log] ... [+] [ ▾ 6 more ]                      │
+│                                                                      ┌───────────────────────────────┐ │
+│                                                                      │ 🔍 Search tabs...             │ │
+│                                                                      ├───────────────────────────────┤ │
+│                                                                      │ • payments.sql ● [✕]          │ │
+│                                                                      │   inventory.sql  [✕]          │ │
+│                                                                      │   Processlist    [✕]          │ │
+│                                                                      │   Cluster Status [✕]          │ │
+│                                                                      └───────────────────────────────┘ │
+└────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 2. Enhanced Tab Close Confirmation Guard Wireframe
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ ⚠️ CLOSE UNSAVED TAB                                                    │
+├─────────────────────────────────────────────────────────────────────────┤
+│ Tab: payments.sql                                                       │
+│ This tab contains modified SQL or uncommitted draft content.            │
+│ Closing will discard these changes.                                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│ [Keep Editing (Esc)]                         [Discard & Close Tab]      │
+└─────────────────────────────────────────────────────────────────────────┘
+```
 
 
 

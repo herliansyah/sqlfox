@@ -12,9 +12,9 @@
 
 ---
 
-## 📑 Table of Contents
+## Table of Contents
 
-1. [Overview & Architectural Philosophy](#1-overview--architectural-philosophy)
+1. [Overview & Architecture](#1-overview--architecture)
    - [Single-Binary Zero-CGO Model](#single-binary-zero-cgo-model)
    - [Strict Memory Ceiling (< 100MB RAM)](#strict-memory-ceiling--100mb-ram)
    - [Supported Engines & Drivers](#supported-engines--drivers)
@@ -31,21 +31,24 @@
    - [Environment Tiers (Production, Staging, Development)](#environment-tiers-production-staging-development)
    - [Read-Only Mode Enforcement](#read-only-mode-enforcement)
    - [Unified App Settings Modal (4-Tab) & Global Shortcut](#unified-app-settings-modal-4-tab--global-shortcut)
-4. [Developer & Data Operator Manual (User Level)](#4-developer--data-operator-manual-user-level)
+4. [User Guide & Interface Workflows](#4-user-guide--interface-workflows)
    - [Table Explorer & Search Path Navigation](#table-explorer--search-path-navigation)
    - [Keyset Pagination & Quick Search](#keyset-pagination--quick-search)
    - [Spreadsheet CRUD & Inline Cell Editing](#spreadsheet-crud--inline-cell-editing)
    - [Quick Value Presets & PK-Less Row Mutations](#quick-value-presets--pk-less-row-mutations)
-   - [Virtual Grid Ergonomics Suite](#virtual-grid-ergonomics-suite)
+   - [Virtual Grid Ergonomics Suite & Keyset Windowing](#virtual-grid-ergonomics-suite--keyset-windowing)
+   - [Unified Sticky Bottom Pagination Bar & Streaming](#unified-sticky-bottom-pagination-bar--streaming)
    - [Zero-Dependency CSV Import & Column Mapping](#zero-dependency-csv-import--column-mapping)
    - [Interactive Visual ERD Canvas](#interactive-visual-erd-canvas)
    - [BYOK AI Copilot & Automated Error Healer](#byok-ai-copilot--automated-error-healer)
    - [Unified Operational Notes Inbox & Follow-up Lifecycle](#unified-operational-notes-inbox--follow-up-lifecycle)
    - [Workspace Ergonomics, Tab Context Menu & Fluid Splitter](#workspace-ergonomics-tab-context-menu--fluid-splitter)
+   - [Tab Bar Overflow Dropdown & Enhanced Close Guard](#tab-bar-overflow-dropdown--enhanced-close-guard)
    - [Tab Database Scope & DDL Target Affirmation Guardrails](#tab-database-scope--ddl-target-affirmation-guardrails)
    - [Relational Table Designer & Constraint Builders](#relational-table-designer--constraint-builders)
-5. [Advanced DBA & Operations Playbook (DBA Level)](#5-advanced-dba--operations-playbook-dba-level)
+5. [Operations & DBA Playbook](#5-operations--dba-playbook)
    - [Deterministic AST Safety Guard & Challenge Modal](#deterministic-ast-safety-guard--challenge-modal)
+   - [Pre-Execution Mutation Row Estimation & Tiered Safety Guard](#pre-execution-mutation-row-estimation--tiered-safety-guard)
    - [Pre-DDL Smart Tiered Backups](#pre-ddl-smart-tiered-backups)
    - [Pre-Flight Lock Contention & Root Blocker Tree](#pre-flight-lock-contention--root-blocker-tree)
    - [Real-Time Processlist & Out-of-Band Cancellation](#real-time-processlist--out-of-band-cancellation)
@@ -57,15 +60,18 @@
    - [Heuristic Index Advisor & Query Tuner (ESR Rule)](#heuristic-index-advisor--query-tuner-esr-rule)
    - [Structure Sync (AST-Powered Schema Diff & Migration)](#structure-sync-ast-powered-schema-diff--migration)
    - [Cross-Connection Data Transfer & Keyset Row Sync](#cross-connection-data-transfer--keyset-row-sync)
+   - [Singleflight Connection Deduplication & Lazy Schema Inspection](#singleflight-connection-deduplication--lazy-schema-inspection)
+   - [Systemic Security Hardening & Engine Resilience](#systemic-security-hardening--engine-resilience)
    - [Headless CLI Suite (`run`, `transfer`, `advise`)](#headless-cli-suite-run-transfer-advise)
    - [Zero-Daemon Scheduled Task Runner](#zero-daemon-scheduled-task-runner)
    - [Memory Ceiling Diagnostics & `pprof` Profiling](#memory-ceiling-diagnostics--pprof-profiling)
-6. [Keyboard Shortcuts Cheatsheet](#6-keyboard-shortcuts-cheatsheet)
+   - [In-App Activity Console & Live Diagnostic Stream](#in-app-activity-console--live-diagnostic-stream)
+6. [Keyboard Shortcuts Reference](#6-keyboard-shortcuts-reference)
 7. [Troubleshooting & FAQ](#7-troubleshooting--faq)
 
 ---
 
-## 1. Overview & Architectural Philosophy
+## 1. Overview & Architecture
 
 SqlFox is engineered from the ground up for teams who demand instant responsiveness, ironclad database safety, and deep diagnostic observability without the overhead of heavy Electron wrappers or JVM runtimes.
 
@@ -99,11 +105,11 @@ Download the latest archive from [GitHub Releases](https://github.com/herliansya
 
 ```bash
 # Linux amd64
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.10.4/sqlfox-v0.10.4-linux-amd64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.10.13/sqlfox-v0.10.13-linux-amd64.tar.gz | tar -xz
 ./sqlfox
 
 # macOS Apple Silicon (ARM64)
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.10.4/sqlfox-v0.10.4-darwin-arm64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.10.13/sqlfox-v0.10.13-darwin-arm64.tar.gz | tar -xz
 ./sqlfox
 ```
 
@@ -291,7 +297,7 @@ SqlFox consolidates all workspace and service configurations into a clean, unifi
 
 ---
 
-## 4. Developer & Data Operator Manual (User Level)
+## 4. User Guide & Interface Workflows
 
 ### Table Explorer & Search Path Navigation
 - **Filter Bar**: Type in the sidebar to filter schemas and tables instantly with 150ms debounce.
@@ -325,8 +331,15 @@ Traditional `OFFSET 1000000` pagination forces database engines to scan and disc
   - `Alt+U` &rarr; Generated RFC4122 `UUID v4`
 - **Tables Without Primary Keys (PK-Less)**: SqlFox generates safe full-row criteria narrowed strictly to at most one physical row (`LIMIT 1` for MySQL, `rowid IN (SELECT rowid ... LIMIT 1)` for SQLite, and `(tableoid, ctid) IN (SELECT tableoid, ctid ... LIMIT 1)` for PostgreSQL), ensuring that updating or deleting one of several identical rows never touches duplicate sister rows.
 
-### Virtual Grid Ergonomics Suite
-SqlFox delivers advanced grid exploration tools designed for high-density, multi-column database inspection:
+### Virtual Grid Ergonomics Suite & Keyset Windowing
+SqlFox delivers advanced grid exploration tools designed for high-density, multi-column database inspection and massive datasets:
+- **Virtual DOM Row Windowing (32px Uniform Height)**:
+  - Employs fixed-height DOM row windowing (32px uniform height) that renders `< 500` active DOM nodes regardless of whether a query yields 1,000 or 100,000+ rows.
+  - Eliminates main-thread freeze, memory bloat (HTML payload reduced by 95%), and sluggish scrolling on large result sets while keeping all in-memory rows available for instant exports.
+  - Full keyboard arrow navigation across cells, rows, and pages.
+- **Persistent Cell Inspector Drawer**:
+  - Live-docked inspector panel live-rendering the full multiline text, formatted JSON payload, or hex string of the currently focused cell without blocking modal popups.
+  - Includes 1-click **Format JSON**, **Copy Text**, and **Wrap Lines** toggles.
 - **Right-Click Quick-Filters (TablePlus style)**:
   - Right-click any cell in the table viewer or query results grid to reveal contextual filter actions: `column = 'val'`, `column != 'val'`, `column > 'val'`, `column < 'val'`, `column LIKE '%val%'`, `column IS NULL`, or `IS NOT NULL`.
   - Automatically handles dialect-specific string escaping and quotes.
@@ -345,6 +358,19 @@ SqlFox delivers advanced grid exploration tools designed for high-density, multi
   - **Column Search**: Filter displayed fields instantly with the built-in search input.
   - **1-Click Copy Actions**: Copy the active record as formatted JSON (`Copy JSON`) or tab-delimited text (`Copy Text`).
   - **Live Staged Mutations**: Edit values directly in the inspector inputs or textareas; changes are tagged with `● Modified` and wired directly to the global `stagedEdits` transaction tracker and save bar.
+
+### Unified Sticky Bottom Pagination Bar & Streaming
+SqlFox unifies pagination controls into a sticky, responsive bottom bar below both the SQL Query Editor grid and the Table Data Viewer:
+- **Navigation & Direct Page Jump**:
+  - First, previous, next, and last page navigation buttons (`⏮️`, `◀`, `▶`, `⏭️`) with direct page number input for jumping across long datasets.
+  - Configurable page size options (25, 50, 100, 200 rows per page) stored per session.
+- **On-Demand Accurate Total Count**:
+  - To prevent heavy table scans on million-row tables during simple browsing, total row calculation is deferred. Click **Calculate total row count** at any time to compute exact dialect-quoted total rows on-demand.
+- **Smart Wildcard Auto-Wrapping for `LIKE` / `NOT LIKE` Filters**:
+  - Plain search terms entered in visual filter builders are automatically wrapped with `%...%` wildcards if no explicit wildcards (`%` or `_`) are present, ensuring intuitive partial matching.
+- **NDJSON Micro-Chunk Query Streaming (`/api/session/{id}/execute-stream`)**:
+  - Query results stream line-by-line via NDJSON with immediate flushing of the initial micro-chunk (first 20 rows), achieving low Time to First Row (TTFR < 50ms).
+  - Built-in cancellation via browser `AbortController` cleanly terminates remote stream execution when navigating away or clicking Cancel.
 
 ### Zero-Dependency CSV Import & Column Mapping
 1. Click **Import CSV** in any open table view.
@@ -411,6 +437,16 @@ SqlFox provides a modern, distraction-free desktop-grade workspace optimized for
   - **Tab Close Confirmation Guard**: Intercepts tab closures with a native challenge confirmation if dirty, unexecuted SQL drafts or unsaved mutations exist, preventing accidental data loss. Clean tabs close instantaneously without alert fatigue.
   - **Empty Workspace Graceful Reset**: Closing all tabs automatically resets the workspace into a fresh, clean `Query 1.sql` tab.
 
+### Tab Bar Overflow Dropdown & Enhanced Close Guard
+When working across numerous tables, queries, and server monitors simultaneously:
+- **Dynamic Overflow Menu Indicator (`#tab-bar-overflow-btn`)**:
+  - Automatically activates when the aggregate tab width exceeds the horizontal container boundary.
+  - Displays a clean overflow pill (`▾ N more`) with a searchable dropdown menu listing all off-screen tabs.
+  - Click any tab item to bring it immediately into view, or click its inline close button (`✕`) to dismiss it directly from the menu.
+- **Enhanced Close Guard**:
+  - Prompts confirmation challenges before closing any unsaved non-empty query tab or non-query object tab, completely preventing unintended workflow disruptions.
+  - Duplicating tabs assigns deduplicated sequential numbering (`Query 1 (Copy)`, `Query 1 (Copy 2)`), avoiding cumulative label clutter.
+
 ### Tab Database Scope & DDL Target Affirmation Guardrails
 In enterprise environments with shared database servers, inadvertent execution of DDL or mutations against the wrong schema (e.g. running migrations intended for `dev_orders` against `prod_orders`) is a primary source of outages. SqlFox implements strict **Tab Database Scope** isolation:
 
@@ -452,7 +488,7 @@ SqlFox delivers a high-speed, visual Table Designer and Create Table Suite with 
 
 ---
 
-## 5. Advanced DBA & Operations Playbook (DBA Level)
+## 5. Operations & DBA Playbook
 
 ### Deterministic AST Safety Guard & Challenge Modal
 SqlFox parses SQL statements into an Abstract Syntax Tree (AST) before sending them to the database engine:
@@ -466,6 +502,21 @@ SqlFox parses SQL statements into an Abstract Syntax Tree (AST) before sending t
 - **Compound Multi-Statement Inspection**: Every statement in a batch is inspected individually. Smuggled destructive operations (e.g. `SELECT 1; DROP TABLE victim`) are detected and intercepted, and batches containing multiple challenge-requiring statements are blocked.
 - **Lexical Comment & Literal Sanitization**: Blanks out line/block comments and string literals before running regex checks, preventing keyword cloaking.
 - **CTE Preprocessing**: Strips leading `WITH ... AS (...)` clauses to inspect the root DML/DDL command under Safety Guard.
+- **MySQL Executable Comment Unwrapping**: Automatically unwraps `/*! ... */` and `/*!NNNNN ... */` comments into raw executable SQL, closing evasion vectors.
+
+### Pre-Execution Mutation Row Estimation & Tiered Safety Guard
+To eliminate accidental mass table updates and deletes caused by subtle typos in `WHERE` clauses, SqlFox introduces deterministic pre-execution row estimation (ADR 0057):
+- **Pre-Flight Row Count Probes**:
+  - Whenever an `UPDATE` or `DELETE` statement is submitted, SqlFox rewrites the query into a bounded `SELECT COUNT(*)` probe with a strict 500ms timeout before submitting the write to the database engine.
+- **Adaptive Tiered Affirmation**:
+  - **Development (`dev`)**:
+    - **Single-row PK mutations**: Silent execution with zero interruptions for fast developer iteration.
+    - **1–100 rows**: Streamlined 1-click affirmation modal showing exact affected row counts.
+    - **> 100 rows or unqualified WHERE**: Escalates automatically to full typed Challenge Modal verification.
+  - **Staging & Production (`staging`, `prod`)**:
+    - Enforces mandatory verification challenges across **all** mutations regardless of row count.
+  - **Multi-Statement Compound Escalation**:
+    - Statements within multi-query batches have their affected rows aggregated, triggering compound escalation if any statement crosses risk thresholds.
 
 ### Pre-DDL Smart Tiered Backups
 Before running dangerous `ALTER TABLE` or `DROP TABLE` statements:
@@ -588,6 +639,29 @@ Access via **📦 DB Tools &rarr; 🔄 Structure Sync**:
 - **Data Transfer**: Stream entire tables directly from one database to another across different hosts, cloud providers, or engines with a strictly bounded `<50MB` memory buffer. If `truncate_target` is enabled and a transfer fails, atomic transaction rollback guarantees original target rows are preserved.
 - **Row-Level Data Sync**: Reconciles table data row-by-row using keyset delta hashing. Supports both single and composite primary keys (delimited by unit separator `\x1f`), maps source-to-target column positions, normalizes cross-engine values (`syncValueKey`), and enforces a 10,000-row comparison ceiling to protect daemon memory.
 
+### Singleflight Connection Deduplication & Lazy Schema Inspection
+To handle unpredictable production network conditions and high-concurrency reconnect events without overwhelming target database instances (v0.10.13):
+- **Singleflight Request Deduplication**:
+  - Employs `singleflight.Group` inside the session manager to coalesce in-flight connection attempts targeting the same connection ID into a single physical connection routine, preventing reconnect stampedes during browser reconnect sweeps or rapid tab clicks.
+- **Lazy Schema Inspection**:
+  - Defers full catalog and table schema introspection until explicit user exploration (opening table viewer, expanding sidebar trees), enabling instantaneous session establishment without acquiring heavy metadata locks (`KEY_COLUMN_USAGE`) on large databases.
+- **Reentrancy Protection**:
+  - Guards background health probes and processlist polling with in-flight reentrancy locks, preventing overlapping requests from triggering spurious reconnect banners.
+
+### Systemic Security Hardening & Engine Resilience
+SqlFox includes comprehensive security and multi-engine resilience protections (ADR 0059):
+- **Client SSL Private Key Encryption at Rest**:
+  - Client SSL keys (`SSLKey`) in the Connection Vault are encrypted with AES-256-GCM using versioned envelope markers (`enc:v1:`), eliminating plaintext exposure on disk.
+- **Strict Same-Origin Ingress Guard**:
+  - Enforces exact same-origin matching between incoming request `Origin` and `Host` headers, blocking cross-port CSRF attacks from other local servers (e.g. `localhost:3000` targeting `localhost:8080`).
+- **Fail-Closed Processlist Batch Termination**:
+  - Returns HTTP 503 if live server threads cannot be verified, safeguarding immune threads (`system user`, caller connection).
+- **PostgreSQL View DDL & Composite Foreign Keys**:
+  - Introspects both standard `CREATE VIEW` and `CREATE MATERIALIZED VIEW` definitions via `pg_get_viewdef`.
+  - Introspects multi-column composite foreign keys with standard `ON DELETE` and `ON UPDATE` referential actions (`CASCADE`, `SET NULL`, `SET DEFAULT`, `RESTRICT`, `NO ACTION`).
+- **Thread-Safe Active Scoping**:
+  - Active session database and search path states are guarded with mutual exclusion locks (`activeDB()`, `activeSchema()`), preventing data races during concurrent queries.
+
 ### Headless CLI Suite (`run`, `transfer`, `advise`)
 SqlFox includes powerful headless commands for automation scripts, cron jobs, and CI/CD pipelines:
 
@@ -634,27 +708,42 @@ Access via clicking **⚡ Activity** in the footer or pressing **`Ctrl + \``**:
 
 ---
 
-## 6. Keyboard Shortcuts Cheatsheet
+## 6. Keyboard Shortcuts Reference
 
-| Shortcut | Scope | Description |
+### Query Editor & Transactions
+| Shortcut | Context | Description |
 | :--- | :--- | :--- |
-| `Ctrl + Enter` | Query Editor | Execute current query or selected block |
-| `Ctrl + Shift + Enter` | Query Editor | Execute `EXPLAIN` and view Visual Plan Tree |
+| `Ctrl + Enter` (or `Cmd+Enter`) | Query Editor | Execute current query or selected block |
+| `Ctrl + Shift + Enter` | Query Editor | Execute `EXPLAIN` and open Visual Plan Tree |
+| `Ctrl + Shift + F` | Query Editor | Format and beautify active SQL query |
+| `Ctrl + S` | Query Editor | Save active query as a persistent snippet |
+| `Ctrl + Shift + C` | Query Editor | Commit active transaction |
+| `Ctrl + Shift + R` | Query Editor | Rollback active transaction |
+| `Esc` or `Ctrl + .` | Active Query | Cancel running query out-of-band |
+
+### Workspace & Panes
+| Shortcut | Context | Description |
+| :--- | :--- | :--- |
 | `Ctrl + T` | Workspace | Open new Query Tab |
-| `Ctrl + W` | Workspace | Close current active tab |
+| `Ctrl + W` | Workspace | Close current active tab (guarded if unsaved) |
 | `Ctrl + K` | Universal | Open Command Palette |
-| `Ctrl + ,` | Universal | Open Unified App Settings Modal (4-Tab) |
-| `Ctrl + P` | Universal | Open Schema Search (Quick Table / Column Jump) |
-| `Ctrl + B` | Universal | Toggle Left Sidebar (Maximize workspace) |
-| `Ctrl + L` | Universal | Toggle AI Copilot Sidebar |
-| `Ctrl + \`` | Universal | Toggle In-App Activity Console |
+| `Ctrl + ,` | Universal | Open Unified Settings Modal (4-Tab) |
+| `Ctrl + P` | Universal | Open Schema Search (Quick Table/Column jump) |
+| `Ctrl + B` | Universal | Toggle Connections & Schema Sidebar |
+| `Ctrl + L` | Universal | Toggle AI Copilot Assistant Panel |
+| `Ctrl + \`` | Universal | Toggle In-App Activity Console Drawer |
+
+### Data Grid & Record Inspection
+| Shortcut | Context | Description |
+| :--- | :--- | :--- |
+| `Spacebar` | Table Grid | Inspect Record (Single Record Form View) |
 | `Alt + N` | Table Grid | Insert `NULL` preset into active cell |
 | `Alt + E` | Table Grid | Insert Empty string `""` preset |
 | `Alt + T` | Table Grid | Insert `NOW()` / current timestamp preset |
 | `Alt + D` | Table Grid | Insert current date (`YYYY-MM-DD`) preset |
 | `Alt + U` | Table Grid | Insert generated `UUID v4` preset |
-| `F1` or `?` | Universal | Open Keyboard Shortcuts Modal & Online Docs link |
-| `Esc` | Dialogs / Modals | Dismiss any active modal or context menu |
+| `F1` or `?` | Universal | Open Keyboard Shortcuts Modal |
+| `Esc` | Universal | Dismiss any active modal, drawer, or popover |
 
 ---
 

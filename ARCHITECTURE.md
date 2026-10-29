@@ -787,7 +787,7 @@ flowchart TD
 
 ---
 
-## 15. Unified Operational Notes Inbox & Follow-up Architecture
+## 20. Unified Operational Notes Inbox & Follow-up Architecture
 
 SqlFox unifies ad-hoc table annotations, diagnostic snapshots, and developer runbooks into a persistent operational inbox with scheduled follow-up reminders.
 
@@ -847,7 +847,7 @@ flowchart TD
 
 ---
 
-## 20. Fast Schema Catalog Synchronization & Root Blocker Incident Triage Architecture
+## 21. Fast Schema Catalog Synchronization & Root Blocker Incident Triage Architecture
 
 ### 1. Fast Catalog Sweeping (`InspectFastCatalog`)
 
@@ -888,6 +888,166 @@ In production lock storms, the Lock Contention Inspector (`#lock-dialog`) visual
   - `Kill Query`: Sends `KILL QUERY <thread_id>` or `pg_cancel_backend(<pid>)` without dropping the client connection.
   - `Kill Blocker`: Sends `KILL CONNECTION <thread_id>` or `pg_terminate_backend(<pid>)` to immediately relieve cascaded contention.
 - **Blocked Sessions Hierarchy**: Shows all waiting threads with elapsed waiting duration in seconds (`waiting 45s for lock`) and waiting SQL statements.
+
+---
+
+## 22. Processlist Batch Operations & Two-Tier Responsive Toolbar Architecture
+
+To handle server lock storms and massive connection leaks where terminating threads individually is too slow:
+
+```mermaid
+flowchart TD
+    UI["Processlist UI (Multi-Select Rows)"] -->|POST /api/session/{id}/batch-kill {pids, action}| Handler["handleBatchKillProcess"]
+    Handler --> Guard{"Inspect Immune Threads"}
+    Guard -->|Caller PID or System User| Skip["Shield Protected Thread"]
+    Guard -->|Safe Target Threads| Engine["Driver.KillProcess(ctx, pid)"]
+    Engine --> Audit["RecordAuditLog (source: batch_kill)"]
+    Audit --> Response["HTTP 200 {killed_count, skipped_count}"]
+```
+
+1. **Immune Thread Guardrails**:
+   - Compares candidate thread IDs against the caller's connection thread (`@@pseudo_thread_id` on MySQL, `pg_backend_pid()` on PostgreSQL) and background worker usernames (`system user`, `event_scheduler`, `binlog_dump`).
+   - Immune threads are automatically shielded to prevent self-termination.
+2. **Two-Tier Responsive Toolbar**:
+   - **Primary Action Tier**: Houses global actions (Refresh, auto-refresh intervals, batch kill triggers, and search filter).
+   - **Contextual Filter Tier**: Dedicated secondary row containing dropdown filter pills for Command/State, User, Database, and Minimum Elapsed Time (`Time > N`), eliminating control wrapping across compact displays.
+3. **Column Visibility Picker**:
+   - Persistent dropdown customization (`localStorage`) for toggling table columns (`ID`, `User`, `Host`, `DB`, `Command`, `Time`, `State`, `Info`, `Memory`, `Locks`).
+   - Sticky locks guarantee core diagnostic identifiers cannot be hidden.
+
+---
+
+## 23. Tab Database Scope & DDL Target Affirmation Architecture
+
+Decouples query tab execution context from global sidebar selection and enforces strict schema target verification:
+
+```mermaid
+flowchart LR
+    Tab["Query Tab (Bound db: orders_db)"] --> Pill["Target Database Pill Switcher"]
+    Pill -->|Switches Tab DB| Tab
+    Tab -->|Submit DDL Statement| Safety["Safety Guard Gate"]
+    Safety --> CheckScope{"Matches tab.db scope?"}
+    CheckScope -->|Mismatch| ScopeModal["Schema Scope Mismatch Alert"]
+    CheckScope -->|Match| EnvGate{"Environment Tier?"}
+    EnvGate -->|Development| OneClick["1-Click Affirmation Dialog"]
+    EnvGate -->|Staging / Production| TypedModal["Typed DB Verification Challenge"]
+```
+
+1. **Tab-Scoped Database Execution**:
+   - Every workspace query tab maintains its own database context (`tab.db`), completely decoupled from the sidebar database picker.
+   - Executing `USE target_db;` updates the active tab's bound database context bidirectionally.
+2. **Schema Scope Mismatch Guard**:
+   - Inspects SQL ASTs for qualified table references (e.g. `UPDATE analytics.logs ...`). If the target database differs from the tab's bound database scope, execution is intercepted with a mismatch warning.
+3. **Environment-Tiered DDL Target Affirmation**:
+   - Development environments present a quick 1-click confirmation dialog.
+   - Staging and Production require typing the exact database name into the confirmation modal before DDL statements are executed.
+
+---
+
+## 24. Relational Table Designer & In-Place Constraint Builders Architecture
+
+Delivers sub-millisecond, focused table designing without DOM recreation:
+
+1. **In-Place DOM Focus Retention**:
+   - Attribute inputs (`name`, `type`, `length`, `nullable`, `default_value`, `primary_key`) update internal state models in-place without calling full-table `innerHTML` redraws, preserving keyboard focus and cursor position continuously.
+2. **Floating ENUM / SET Value Builder**:
+   - Popover editor with interactive tag chips, smart paste splitting for comma-separated or quoted values, duplicate prevention, and automatic injection into Default Value presets.
+3. **Visual Composite Index Builder**:
+   - Drag-and-drop and numbered column badges (#1, #2, #3...) for ordering multi-column composite indexes, supporting `INDEX`, `UNIQUE`, `FULLTEXT`, and `SPATIAL` types.
+4. **Cascading Foreign Key Selector & Type Guard**:
+   - Dynamic catalog lookup linking child columns to parent tables.
+   - Pre-flight DataType Compatibility checks detect mismatches (e.g., `INT UNSIGNED` child referencing `BIGINT` parent) and display warnings before DDL generation to prevent MySQL `errno 150` errors.
+
+---
+
+## 25. Pre-Execution Mutation Estimation & Tiered Safety Guard Pipeline
+
+Pre-flight inspection prevents catastrophic mass updates or deletes:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant Editor as Query Editor
+    participant Server as Go API Server
+    participant Safety as Safety Guard
+    participant DB as Target Database
+
+    User->>Editor: Execute UPDATE / DELETE statement
+    Editor->>Server: POST /api/session/{id}/execute {sql}
+    Server->>Safety: InspectQuery(sql, env)
+    Safety->>DB: Pre-flight probe: SELECT COUNT(*) WHERE ... (500ms timeout)
+    DB-->>Safety: Probe Result: estimated_rows
+
+    alt Development & Single-Row PK Mutation
+        Safety-->>Server: Approved (Silent Execution)
+    else 1 to 100 Rows Affected
+        Safety-->>Server: Requires 1-Click Confirmation
+        Server-->>Editor: 422 Confirmation Needed {estimated_rows}
+        Editor->>User: Display 1-Click Confirmation Dialog
+    else Over 100 Rows, Unqualified WHERE, or Staging/Prod
+        Safety-->>Server: Requires Typed Challenge
+        Server-->>Editor: 422 Challenge Needed {estimated_rows}
+        Editor->>User: Display Challenge Modal (Type table name)
+    end
+```
+
+1. **Pre-Flight DML Inspection**:
+   - Rewrites `UPDATE` and `DELETE` queries into bounded `SELECT COUNT(*)` queries with a 500ms timeout before execution.
+2. **Tiered Affirmation Policy**:
+   - **Silent Mode**: Permitted exclusively in Development for single-row mutations targeting Primary Keys.
+   - **1-Click Affirmation**: For mutations affecting 1–100 rows in Development.
+   - **Typed Challenge Modal**: Required for mutations affecting >100 rows, queries lacking a `WHERE` clause, or **any** mutation in Staging and Production.
+
+---
+
+## 26. Virtual Data Grid & NDJSON Micro-Chunk Streaming Architecture
+
+Engineered for massive datasets with strict memory ceilings:
+
+```mermaid
+flowchart TD
+    Client["Browser Virtual Data Grid"] -->|POST /api/session/{id}/execute-stream| Endpoint["Query Stream Endpoint"]
+    Endpoint --> Driver["Database Driver (rows.Next)"]
+    Driver --> FirstChunk{"First 20 Rows Ready?"}
+    FirstChunk -->|Yes (TTFR < 50ms)| Flush["Immediate Flush Chunk (NDJSON)"]
+    Flush --> Stream["NDJSON Line-by-Line Stream"]
+    Stream --> Reader["Browser ReadableStream + AbortController"]
+    Reader --> Buffer["Client Data Buffer (In-Memory)"]
+    Buffer --> DOM["Virtual Row Window (32px uniform, <500 DOM Nodes)"]
+    Buffer --> Drawer["Persistent Cell Inspector Drawer (JSON / Multiline)"]
+    Buffer --> BottomBar["Sticky Bottom Pagination Bar (Page Jump & Sizing)"]
+```
+
+1. **Fixed-Height DOM Row Windowing**:
+   - Uniform 32px row height keeping total rendered DOM elements strictly below 500 nodes regardless of dataset size (100,000+ rows).
+   - Full keyboard arrow navigation across cells.
+2. **NDJSON Micro-Chunk Streaming (`/api/session/{id}/execute-stream`)**:
+   - Immediately flushes the initial micro-chunk (first 20 rows) for sub-50ms Time to First Row (TTFR).
+   - Subsequent rows stream line-by-line via NDJSON, cancellable at any instant via native `AbortController`.
+3. **Unified Sticky Bottom Pagination Bar**:
+   - Direct page jump input, first/previous/next/last navigation buttons (`⏮️`, `◀`, `▶`, `⏭️`), configurable page sizes (25, 50, 100, 200), on-demand accurate total count calculation, and smart wildcard auto-wrapping for `LIKE`/`NOT LIKE`.
+4. **Persistent Cell Inspector Drawer**:
+   - Keyboard-synchronized drawer live-rendering formatted JSON, multiline text, and raw payloads of the focused cell without opening blocking modals.
+
+---
+
+## 27. Systemic Security Hardening & Concurrency Reliability Architecture
+
+1. **Client SSL Private Key Encryption at Rest (`internal/vault`)**:
+   - Encrypts client SSL private keys (`SSLKey`) with AES-256-GCM using versioned envelope markers (`enc:v1:`).
+2. **Strict Same-Origin Ingress Guard (`internal/server/auth`)**:
+   - Validates that state-mutating HTTP requests contain an `Origin` host matching the request `Host` byte-for-byte, blocking cross-port CSRF from malicious local web servers (e.g. `localhost:3000` targeting `localhost:8080`).
+3. **MySQL Executable Comment Unwrapping (`internal/safety`)**:
+   - `StripLeadingComments` unwraps MySQL executable comments (`/*! ... */`) into raw executable SQL, eliminating comment-cloaking evasion vectors.
+4. **Fail-Closed Processlist Batch Termination (`internal/server/handlers_dba`)**:
+   - Enforces HTTP 503 if live server processlist cannot be verified, safeguarding immune threads.
+5. **Singleflight Connection Deduplication & Lazy Schema Inspection (`internal/server/session_manager`)**:
+   - Uses `singleflight.Group` to coalesce concurrent connection requests for the same connection ID into a single physical connection routine, preventing reconnect stampedes.
+   - Defers heavy schema and catalog introspection to lazy on-demand requests, preventing metadata lock contention during connect.
+6. **Tab Bar Overflow Dropdown & Enhanced Close Guard (`web/dist/index.html`)**:
+   - Dynamically activates `#tab-bar-overflow-btn` and `#tab-bar-overflow-menu` when tab count exceeds the visible container width.
+   - Enforces confirmation guards before closing unsaved non-empty queries or non-query tabs.
 
 
 
