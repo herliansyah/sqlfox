@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.10.13] - 2026-10-29
+
 ### Added
 - **Tab Bar Overflow Dropdown & Enhanced Close Guard (`web/dist/index.html`)**: Added an overflow dropdown indicator (`#tab-bar-overflow-btn` and `#tab-bar-overflow-menu`) that dynamically activates when tab count exceeds the visible container width, prompted confirmation guards before closing unsaved non-empty queries or non-query tabs, and deduplicated sequential copy numbering on tab duplication.
 
