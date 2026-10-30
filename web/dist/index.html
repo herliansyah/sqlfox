@@ -2006,12 +2006,12 @@
     </main>
 
     <!-- Right Sidebar: AI Assistant & Privacy Firewall -->
-    <aside id="ai-sidebar" class="w-80 bg-app-surface border-l border-app-border flex flex-col flex-shrink-0 transition-all duration-200 z-10 relative select-text right-0 max-w-full" style="min-width: 280px; max-width: calc(100vw - 120px);">
+    <aside id="ai-sidebar" class="w-[380px] bg-app-surface border-l border-app-border flex flex-col flex-shrink-0 transition-all duration-200 z-10 relative select-text right-0 max-w-full" style="min-width: 280px; max-width: calc(100vw - 120px);">
       <!-- Drag Resizer Seam on Left Edge -->
-      <div id="ai-sidebar-resizer" class="absolute top-0 bottom-0 -left-1.5 w-3 cursor-col-resize hover:bg-sky-500/50 active:bg-sky-500 z-20 transition-colors" title="Drag to resize Copilot sidebar"></div>
+      <div id="ai-sidebar-resizer" class="absolute top-0 bottom-0 -left-1.5 w-3 cursor-col-resize hover:bg-sky-500/50 active:bg-sky-500 z-20 transition-colors" title="Drag to resize Copilot sidebar (Double-click to reset width)"></div>
 
       <!-- AI Header -->
-      <div class="p-2 border-b border-app-border flex items-center justify-between shrink-0">
+      <div class="h-9 px-2 border-b border-app-border flex items-center justify-between shrink-0">
         <div class="flex items-center space-x-1.5 shrink-0">
           <span>🤖</span>
           <span class="text-xs font-bold text-white tracking-wide">Copilot</span>
@@ -2037,7 +2037,7 @@
       </div>
 
       <!-- Chat History Dropdown Popover -->
-      <div id="ai-history-popover" class="hidden absolute top-11 left-2 right-2 bg-slate-900 border border-app-border rounded-lg shadow-2xl z-30 p-2 text-xs flex flex-col max-h-80">
+      <div id="ai-history-popover" class="hidden absolute top-10 left-2 right-2 bg-slate-900 border border-app-border rounded-lg shadow-2xl z-30 p-2 text-xs flex flex-col max-h-80">
         <div class="flex items-center justify-between border-b border-slate-800 pb-1.5 mb-1 px-1">
           <span class="font-bold text-slate-300 text-[11px]">Chat History</span>
           <button onclick="clearAllAIHistory()" class="text-red-400 hover:underline text-[10px]">Clear All</button>
@@ -2089,7 +2089,7 @@
             <!-- Mentions Autocomplete Dropdown Popover -->
             <div id="ai-mention-dropdown" class="hidden absolute bottom-full mb-1 left-0 right-0 max-h-48 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl overflow-y-auto z-50 text-xs divide-y divide-slate-800">
             </div>
-            <textarea id="ai-prompt-input" rows="2" class="w-full bg-app-surface p-2.5 text-xs text-white border border-app-border rounded outline-none resize-y focus:border-app-accent leading-relaxed min-h-[52px] max-h-[220px]" placeholder="Ask Copilot (use @ to mention notes)... (Enter = Send, Shift+Enter = New line)" oninput="handleAIPromptInput(this)" onkeydown="handleAIPromptKeydown(event)"></textarea>
+            <textarea id="ai-prompt-input" rows="4" class="w-full bg-app-surface p-2.5 text-xs text-white border border-app-border rounded outline-none resize-y focus:border-app-accent leading-relaxed min-h-[96px] max-h-[260px]" placeholder="Ask Copilot (use @ to mention notes)... (Enter = Send, Shift+Enter = New line)" oninput="handleAIPromptInput(this)" onkeydown="handleAIPromptKeydown(event)"></textarea>
             <div class="flex items-center justify-between mt-1.5 pt-1 text-[11px] text-slate-400">
               <span class="text-[10px] text-slate-500">↵ Send &nbsp;•&nbsp; ⇧↵ New line</span>
               <button type="submit" class="bg-app-accent hover:bg-sky-500 text-slate-950 font-bold px-3 py-1 rounded text-xs transition flex items-center space-x-1">
@@ -2101,6 +2101,23 @@
         </form>
       </div>
     </aside>
+    <!-- ponytail: restore sidebar visibility immediately before initial render to prevent Copilot FOUC flicker -->
+    <script>
+      (function() {
+        try {
+          var aiSaved = localStorage.getItem('sqlfox_copilot_visible');
+          if (aiSaved === 'false' || (aiSaved === null && window.innerWidth < 768)) {
+            var ai = document.getElementById('ai-sidebar');
+            if (ai) ai.classList.add('hidden');
+          }
+          var leftSaved = localStorage.getItem('sqlfox_left_sidebar_visible');
+          if (leftSaved === 'false') {
+            var left = document.getElementById('left-sidebar');
+            if (left) left.classList.add('hidden');
+          }
+        } catch (_) {}
+      })();
+    </script>
 
     <!-- Operational Notes Inbox Slide-over Drawer (Right Overlay) -->
     <div id="notes-inbox-drawer" class="hidden absolute top-0 right-0 bottom-0 w-[540px] max-w-[95vw] bg-slate-950 border-l border-t border-app-border flex flex-col z-[35] shadow-2xl transition-transform duration-200">
@@ -4087,14 +4104,17 @@
         </div>
 
         <div class="flex items-center space-x-2 text-xs">
-          <button id="pl-modal-btn-kill-q" onclick="killProcessQueryFromModal()" class="px-2.5 py-1 rounded bg-amber-950 hover:bg-amber-800 text-amber-300 border border-amber-800 font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed">
-            Kill Query
+          <button id="pl-modal-btn-kill-q" onclick="killProcessQueryFromModal()" class="px-2.5 py-1 rounded bg-amber-950 hover:bg-amber-800 text-amber-300 border border-amber-800 font-semibold transition flex items-center space-x-1 disabled:opacity-40 disabled:cursor-not-allowed" title="Terminate running query (KILL QUERY)">
+            <span>⚠️</span>
+            <span>Kill Query</span>
           </button>
-          <button id="pl-modal-btn-kill-c" onclick="killProcessConnFromModal()" class="px-2.5 py-1 rounded bg-red-950 hover:bg-red-800 text-red-300 border border-red-800 font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed">
-            Kill Connection
+          <button id="pl-modal-btn-kill-c" onclick="killProcessConnFromModal()" class="px-2.5 py-1 rounded bg-red-950 hover:bg-red-800 text-red-300 border border-red-800 font-semibold transition flex items-center space-x-1 disabled:opacity-40 disabled:cursor-not-allowed" title="Terminate entire client connection (KILL)">
+            <span>🛑</span>
+            <span>Kill Connection</span>
           </button>
-          <button onclick="closeProcessDetailModal()" class="px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition">
-            Tutup
+          <button onclick="closeProcessDetailModal()" class="px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition flex items-center space-x-1" title="Close dialog (Esc)">
+            <span>✕</span>
+            <span>Close</span>
           </button>
         </div>
       </div>
@@ -5388,6 +5408,7 @@
 
     // --- Lifecycle Initialization ---
     window.addEventListener('DOMContentLoaded', async () => {
+      initSidebarVisibility();
       const lockModal = document.getElementById('remote-lock-modal');
       if (lockModal && !lockModal.classList.contains('hidden')) {
         const passInput = document.getElementById('remote-unlock-password');
@@ -9492,6 +9513,48 @@
     }
 
     // ponytail: zero-shift lock contention inspection via dedicated modal & unobtrusive toasts
+    let currentLockInspectorLocks = [];
+
+    async function copyLockQueryFromData(btn, lockIdx, field) {
+      const lock = (currentLockInspectorLocks || [])[lockIdx];
+      if (!lock) return;
+      const sql = lock[field] || '';
+      if (!sql) return;
+      const ok = await copyTextToClipboard(sql);
+      if (ok) {
+        showToast('SQL query copied to clipboard', 'success');
+        if (btn) {
+          const origHTML = btn.innerHTML;
+          btn.innerHTML = '<span>✓ Copied!</span>';
+          btn.classList.add('bg-emerald-900', 'text-emerald-200', 'border-emerald-700');
+          setTimeout(() => {
+            if (btn) {
+              btn.innerHTML = origHTML;
+              btn.classList.remove('bg-emerald-900', 'text-emerald-200', 'border-emerald-700');
+            }
+          }, 1500);
+        }
+      } else {
+        showToast('Failed to copy SQL query', 'error');
+      }
+    }
+
+    function openLockProcessDetail(threadId, lockIdx, field) {
+      const lock = (currentLockInspectorLocks || [])[lockIdx];
+      let fallback = null;
+      if (lock) {
+        const isBlocking = field === 'blocking_query';
+        fallback = {
+          user: isBlocking ? lock.blocking_user : lock.waiting_user,
+          info: lock[field] || '',
+          is_root_blocker: lock.is_root_blocker && isBlocking,
+          time: isBlocking ? 0 : (lock.waiting_seconds || 0),
+          state: isBlocking ? `Holding ${lock.lock_mode || 'Lock'}` : `Waiting for Thread #${lock.blocking_thread_id}`
+        };
+      }
+      openProcessDetailModal(threadId, fallback);
+    }
+
     function openLockInspectorModal() {
       const dlg = document.getElementById('lock-inspector-dialog');
       if (!dlg) return;
@@ -9510,6 +9573,7 @@
 
     function renderLockInspectorModalContent() {
       const locks = (processlistData && processlistData.locks) || [];
+      currentLockInspectorLocks = locks;
       const rootBlockerCount = locks.filter(l => l.is_root_blocker).length;
       const modalBadge = document.getElementById('lock-modal-badge');
       const modalSubtitle = document.getElementById('lock-modal-subtitle');
@@ -9537,7 +9601,7 @@
         return;
       }
 
-      listEl.innerHTML = locks.map(l => {
+      listEl.innerHTML = locks.map((l, idx) => {
         if (l.is_root_blocker) {
           return `
             <div class="p-4 bg-red-950/30 border border-red-800 rounded-lg flex flex-col space-y-3">
@@ -9550,33 +9614,139 @@
                   ${l.locked_resource ? `<span class="text-sky-300 text-xs font-mono px-2 py-0.5 bg-sky-950/60 rounded border border-sky-800/80">on ${escapeHtml(l.locked_resource)}</span>` : ''}
                 </div>
                 <div class="flex items-center space-x-2 shrink-0">
+                  <button onclick="openLockProcessDetail(${l.blocking_thread_id}, ${idx}, 'blocking_query')" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs transition cursor-pointer flex items-center space-x-1" title="Inspect full thread metrics and statement">
+                    <span>🔍 Show Detail</span>
+                  </button>
                   <button onclick="confirmKillProcess(${l.blocking_thread_id}, 'query')" class="px-3 py-1 rounded bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold text-xs transition cursor-pointer">Kill Query</button>
                   <button onclick="confirmKillProcess(${l.blocking_thread_id}, 'connection')" class="px-3 py-1 rounded bg-red-600 hover:bg-red-500 text-white font-bold text-xs transition cursor-pointer">Kill Blocker</button>
                 </div>
               </div>
-              ${l.blocking_query ? `<div class="p-2.5 bg-slate-950 rounded text-[13px] leading-relaxed text-slate-300 font-mono whitespace-pre-wrap break-all border border-slate-800 max-h-48 overflow-y-auto" title="${escapeHtml(l.blocking_query)}"><span class="text-slate-500 select-none font-semibold">SQL: </span>${escapeHtml(l.blocking_query)}</div>` : ''}
-              <div class="pl-4 border-l-2 border-red-700/80 text-xs text-red-200 space-y-1.5 pt-0.5">
-                <div class="flex flex-wrap items-center gap-1.5 text-xs">
-                  <span>↳ Blocked:</span>
-                  <span class="font-bold text-white">Thread #${l.waiting_thread_id}</span>
-                  <span class="text-slate-300">(${escapeHtml(l.waiting_user || 'unknown')})</span>
-                  <span class="text-red-300">waiting <strong class="text-white">${l.waiting_seconds}s</strong> for ${escapeHtml(l.lock_mode || 'lock')}</span>
+
+              ${l.blocking_query ? `
+                <div class="bg-slate-950 rounded-lg border border-slate-800 overflow-hidden">
+                  <div class="bg-slate-900/90 px-3 py-1.5 border-b border-slate-800 flex items-center justify-between text-xs">
+                    <span class="text-slate-400 font-semibold text-[11px] flex items-center space-x-1.5">
+                      <span>⚡</span>
+                      <span>Blocking Query (Holding Lock):</span>
+                    </span>
+                    <div class="flex items-center space-x-2">
+                      <button onclick="copyLockQueryFromData(this, ${idx}, 'blocking_query')" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] font-medium flex items-center space-x-1 transition cursor-pointer" title="Copy SQL statement to clipboard">
+                        <span>📋 Copy SQL</span>
+                      </button>
+                      <button onclick="openLockProcessDetail(${l.blocking_thread_id}, ${idx}, 'blocking_query')" class="px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800 text-[11px] font-medium flex items-center space-x-1 transition cursor-pointer" title="Open in Process Detail Inspector">
+                        <span>🔍 Detail</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="p-3 text-[13px] leading-relaxed text-slate-200 font-mono whitespace-pre-wrap break-all max-h-60 overflow-y-auto select-text">${escapeHtml(l.blocking_query)}</div>
                 </div>
-                <div class="p-2 bg-slate-950/80 rounded text-xs text-slate-300 font-mono break-all border border-slate-800/80">${escapeHtml(l.waiting_query || 'active query')}</div>
+              ` : `
+                <div class="p-2.5 bg-slate-950/70 rounded-lg border border-slate-800 text-xs text-slate-400 italic flex items-center justify-between">
+                  <span>-- Connection is idle in transaction (holding locks without active running query)</span>
+                  <button onclick="openLockProcessDetail(${l.blocking_thread_id}, ${idx}, 'blocking_query')" class="text-sky-400 hover:text-sky-300 text-[11px] font-mono underline cursor-pointer">🔍 Show Detail</button>
+                </div>
+              `}
+
+              <div class="pl-4 border-l-2 border-red-700/80 text-xs text-red-200 space-y-2 pt-1">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div class="flex flex-wrap items-center gap-1.5 text-xs">
+                    <span>↳ Blocked:</span>
+                    <span class="font-bold text-white text-sm">Thread #${l.waiting_thread_id}</span>
+                    <span class="text-slate-300">(${escapeHtml(l.waiting_user || 'unknown')})</span>
+                    <span class="text-red-300 font-medium">waiting <strong class="text-white font-mono">${l.waiting_seconds}s</strong> for ${escapeHtml(l.lock_mode || 'lock')}</span>
+                  </div>
+                  <div class="flex items-center space-x-2">
+                    <button onclick="openLockProcessDetail(${l.waiting_thread_id}, ${idx}, 'waiting_query')" class="px-2.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] font-medium flex items-center space-x-1 transition cursor-pointer" title="Inspect waiting thread">
+                      <span>🔍 Show Detail</span>
+                    </button>
+                    <button onclick="confirmKillProcess(${l.waiting_thread_id}, 'connection')" class="px-2.5 py-0.5 rounded bg-red-950 hover:bg-red-900 text-red-300 border border-red-800 text-[11px] font-medium transition cursor-pointer">
+                      Kill Waiting #${l.waiting_thread_id}
+                    </button>
+                  </div>
+                </div>
+
+                ${l.waiting_query ? `
+                  <div class="bg-slate-950 rounded-lg border border-slate-800 overflow-hidden">
+                    <div class="bg-slate-900/70 px-2.5 py-1 border-b border-slate-800 flex items-center justify-between text-[11px]">
+                      <span class="text-slate-400 font-semibold flex items-center space-x-1">
+                        <span>⏳</span>
+                        <span>Waiting Query:</span>
+                      </span>
+                      <div class="flex items-center space-x-1.5">
+                        <button onclick="copyLockQueryFromData(this, ${idx}, 'waiting_query')" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[10px] font-medium flex items-center space-x-1 transition cursor-pointer" title="Copy waiting SQL to clipboard">
+                          <span>📋 Copy SQL</span>
+                        </button>
+                        <button onclick="openLockProcessDetail(${l.waiting_thread_id}, ${idx}, 'waiting_query')" class="px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800 text-[10px] font-medium flex items-center space-x-1 transition cursor-pointer" title="Inspect waiting query detail">
+                          <span>🔍 Detail</span>
+                        </button>
+                      </div>
+                    </div>
+                    <div class="p-2.5 text-xs leading-relaxed text-slate-300 font-mono whitespace-pre-wrap break-all max-h-48 overflow-y-auto select-text">${escapeHtml(l.waiting_query)}</div>
+                  </div>
+                ` : `
+                  <div class="p-2 bg-slate-950/60 rounded text-xs text-slate-500 font-mono italic">-- No waiting query text available</div>
+                `}
               </div>
             </div>
           `;
         } else {
           return `
-            <div class="p-3.5 bg-slate-950/60 border border-slate-800 rounded-lg flex flex-wrap items-center justify-between gap-2.5 text-xs">
-              <div class="flex flex-wrap items-center gap-2">
-                <span class="text-amber-400 font-bold text-sm">Thread #${l.waiting_thread_id}</span>
-                <span class="text-slate-300">waiting on</span>
-                <span class="text-red-400 font-bold text-sm">#${l.blocking_thread_id}</span>
-                <span class="text-slate-400">(${l.waiting_seconds}s)</span>
-                ${l.locked_resource ? `<span class="text-sky-300 font-mono px-2 py-0.5 bg-sky-950/50 rounded border border-sky-800/60">resource: ${escapeHtml(l.locked_resource)}</span>` : ''}
+            <div class="p-3.5 bg-slate-950/60 border border-slate-800 rounded-lg flex flex-col space-y-2.5 text-xs">
+              <div class="flex flex-wrap items-center justify-between gap-2.5">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="text-amber-400 font-bold text-sm">Thread #${l.waiting_thread_id}</span>
+                  <span class="text-slate-400">waiting on</span>
+                  <span class="text-red-400 font-bold text-sm">Thread #${l.blocking_thread_id}</span>
+                  <span class="text-slate-400 font-mono">(${l.waiting_seconds}s)</span>
+                  ${l.locked_resource ? `<span class="text-sky-300 font-mono px-2 py-0.5 bg-sky-950/50 rounded border border-sky-800/60">resource: ${escapeHtml(l.locked_resource)}</span>` : ''}
+                </div>
+                <div class="flex items-center space-x-2 shrink-0">
+                  <button onclick="openLockProcessDetail(${l.blocking_thread_id}, ${idx}, 'blocking_query')" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs transition cursor-pointer flex items-center space-x-1">
+                    <span>🔍 Blocker #${l.blocking_thread_id}</span>
+                  </button>
+                  <button onclick="openLockProcessDetail(${l.waiting_thread_id}, ${idx}, 'waiting_query')" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs transition cursor-pointer flex items-center space-x-1">
+                    <span>🔍 Waiting #${l.waiting_thread_id}</span>
+                  </button>
+                  <button onclick="confirmKillProcess(${l.blocking_thread_id}, 'connection')" class="px-3 py-1 rounded bg-red-950 hover:bg-red-800 text-red-300 text-xs border border-red-800 transition whitespace-nowrap cursor-pointer shrink-0">Kill Target #${l.blocking_thread_id}</button>
+                </div>
               </div>
-              <button onclick="confirmKillProcess(${l.blocking_thread_id}, 'connection')" class="px-3 py-1 rounded bg-red-950 hover:bg-red-800 text-red-300 text-xs border border-red-800 transition whitespace-nowrap cursor-pointer shrink-0">Kill Target #${l.blocking_thread_id}</button>
+
+              ${(l.waiting_query || l.blocking_query) ? `
+                <div class="space-y-1.5 pt-1">
+                  ${l.blocking_query ? `
+                    <div class="bg-slate-950 rounded border border-slate-800 overflow-hidden">
+                      <div class="bg-slate-900/60 px-2.5 py-1 border-b border-slate-800 flex items-center justify-between text-[11px]">
+                        <span class="text-slate-400 font-semibold">Blocker Query (#${l.blocking_thread_id}):</span>
+                        <div class="flex items-center space-x-1.5">
+                          <button onclick="copyLockQueryFromData(this, ${idx}, 'blocking_query')" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[10px] font-medium transition cursor-pointer">
+                            <span>📋 Copy SQL</span>
+                          </button>
+                          <button onclick="openLockProcessDetail(${l.blocking_thread_id}, ${idx}, 'blocking_query')" class="px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800 text-[10px] font-medium transition cursor-pointer">
+                            <span>🔍 Detail</span>
+                          </button>
+                        </div>
+                      </div>
+                      <div class="p-2 text-xs leading-relaxed text-slate-300 font-mono whitespace-pre-wrap break-all max-h-36 overflow-y-auto select-text">${escapeHtml(l.blocking_query)}</div>
+                    </div>
+                  ` : ''}
+                  ${l.waiting_query ? `
+                    <div class="bg-slate-950 rounded border border-slate-800 overflow-hidden">
+                      <div class="bg-slate-900/60 px-2.5 py-1 border-b border-slate-800 flex items-center justify-between text-[11px]">
+                        <span class="text-slate-400 font-semibold">Waiting Query (#${l.waiting_thread_id}):</span>
+                        <div class="flex items-center space-x-1.5">
+                          <button onclick="copyLockQueryFromData(this, ${idx}, 'waiting_query')" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[10px] font-medium transition cursor-pointer">
+                            <span>📋 Copy SQL</span>
+                          </button>
+                          <button onclick="openLockProcessDetail(${l.waiting_thread_id}, ${idx}, 'waiting_query')" class="px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800 text-[10px] font-medium transition cursor-pointer">
+                            <span>🔍 Detail</span>
+                          </button>
+                        </div>
+                      </div>
+                      <div class="p-2 text-xs leading-relaxed text-slate-300 font-mono whitespace-pre-wrap break-all max-h-36 overflow-y-auto select-text">${escapeHtml(l.waiting_query)}</div>
+                    </div>
+                  ` : ''}
+                </div>
+              ` : ''}
             </div>
           `;
         }
@@ -9893,7 +10063,7 @@
             <td data-pl-col="command" class="p-2 text-slate-300 whitespace-nowrap ${isProcesslistColVisible('command') ? '' : 'hidden'}">${escapeHtml(t.command)}</td>
             <td data-pl-col="time" class="p-2 text-right font-bold whitespace-nowrap ${isProcesslistColVisible('time') ? '' : 'hidden'} ${isCritical ? 'text-red-400' : (isWarning ? 'text-amber-400' : 'text-slate-300')}">${t.time}s</td>
             <td data-pl-col="state" class="p-2 text-slate-400 text-[11px] truncate max-w-[140px] whitespace-nowrap ${isProcesslistColVisible('state') ? '' : 'hidden'}" title="${escapeHtml(t.state || '-')}">${escapeHtml(t.state || '-')}</td>
-            <td data-pl-col="query" class="p-2 font-mono text-[11px] select-text cursor-text max-w-0 w-full ${isProcesslistColVisible('query') ? '' : 'hidden'} ${hasQuery ? 'text-slate-200' : 'text-slate-500 italic'}" title="${escapeHtml(rawSql)}">
+            <td data-pl-col="query" class="p-2 font-mono text-[11px] select-text cursor-pointer max-w-0 w-full ${isProcesslistColVisible('query') ? '' : 'hidden'} ${hasQuery ? 'text-slate-200' : 'text-slate-500 italic'}" title="${escapeHtml(rawSql)}">
               <div class="truncate w-full">${escapeHtml(displaySql)}</div>
             </td>
           </tr>
@@ -10107,12 +10277,24 @@
 
     let selectedProcessThread = null;
 
-    function openProcessDetailModal(threadId) {
+    function openProcessDetailModal(threadId, fallbackThread) {
       try {
         closeProcessContextMenu();
-        const thread = (processlistData.threads || []).find(t => String(t.id) === String(threadId));
+        let thread = (processlistData.threads || []).find(t => String(t.id) === String(threadId));
+        if (!thread && fallbackThread) {
+          thread = {
+            id: Number(threadId) || threadId,
+            user: fallbackThread.user || 'unknown',
+            host: fallbackThread.host || '-',
+            db: fallbackThread.db || (activeConnection ? activeConnection.database : '-'),
+            command: fallbackThread.command || (fallbackThread.info ? 'Query' : 'Sleep'),
+            time: fallbackThread.time || 0,
+            state: fallbackThread.state || (fallbackThread.is_root_blocker ? 'Holding Locks' : 'Waiting for Lock'),
+            info: fallbackThread.info || fallbackThread.query || ''
+          };
+        }
         if (!thread) {
-          console.warn('[SqlFox] Process thread not found:', threadId);
+          showToast(`Process thread #${threadId} is not available in processlist.`, 'info');
           return;
         }
         selectedProcessThread = thread;
@@ -10184,17 +10366,17 @@
           }
         }
 
-        // Full SQL Code display (default formatted for readability)
+        // Full SQL Code display (default raw SQL)
         const sqlCodeEl = document.getElementById('pl-modal-sql-code');
         const btnFormat = document.getElementById('pl-modal-format-sql-btn');
         if (sqlCodeEl) {
           if (hasQuery) {
-            sqlCodeEl.textContent = formatSQL(thread.info);
-            isModalSQLFormatted = true;
+            sqlCodeEl.textContent = thread.info;
+            isModalSQLFormatted = false;
             if (btnFormat) {
               btnFormat.disabled = false;
-              btnFormat.innerHTML = '<span>↺ Raw SQL</span>';
-              btnFormat.classList.add('bg-indigo-900', 'text-indigo-200', 'border-indigo-700');
+              btnFormat.innerHTML = '<span>✨ Format SQL</span>';
+              btnFormat.classList.remove('bg-indigo-900', 'text-indigo-200', 'border-indigo-700');
             }
           } else {
             sqlCodeEl.textContent = (thread.command === 'Sleep' ? '-- Connection is idle (Sleep)\n-- No query currently executing' : '-- No query details provided');
@@ -21502,7 +21684,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
     function autoResizeAIPrompt(el) {
       if (!el) return;
       el.style.height = 'auto';
-      const newHeight = Math.min(Math.max(el.scrollHeight, 52), 220);
+      const newHeight = Math.min(Math.max(el.scrollHeight, 96), 260);
       el.style.height = newHeight + 'px';
     }
 
@@ -22039,7 +22221,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
         sidebar.classList.remove('relative');
         if (icon) icon.textContent = '🗗';
       } else {
-        const restoreWidth = savedAIWidthBeforeMaximize || localStorage.getItem('sqlfox_copilot_width') || '380px';
+        const restoreWidth = savedAIWidthBeforeMaximize || localStorage.getItem('sqlfox_copilot_width') || '';
         sidebar.style.width = restoreWidth;
         updateAISidebarMode();
       setTimeout(() => { if (typeof updateTabOverflow === 'function') updateTabOverflow(); }, 150);
@@ -22050,11 +22232,11 @@ Please analyze what is causing this query to be slow and suggest necessary query
     function updateAISidebarMode() {
       const sidebar = document.getElementById('ai-sidebar');
       if (!sidebar || sidebar.classList.contains('hidden')) return;
-      const widthNum = parseInt(sidebar.style.width, 10) || sidebar.offsetWidth || 320;
+      const widthNum = parseInt(sidebar.style.width, 10) || sidebar.offsetWidth || 380;
       const leftSidebar = document.getElementById('left-sidebar');
       const leftWidth = (leftSidebar && !leftSidebar.classList.contains('hidden') && leftSidebar.offsetWidth > 0) ? leftSidebar.offsetWidth : 0;
       const availableMain = window.innerWidth - leftWidth - widthNum;
-      if (isAIMaximized || widthNum > 380 || availableMain < 500 || window.innerWidth < 1024) {
+      if (isAIMaximized || widthNum > 420 || availableMain < 500 || window.innerWidth < 1024) {
         sidebar.classList.add('absolute', 'top-0', 'right-0', 'bottom-0', 'z-30', 'shadow-2xl', 'ai-sidebar-overlay');
         sidebar.classList.remove('relative');
       } else {
@@ -22103,10 +22285,10 @@ Please analyze what is causing this query to be slow and suggest necessary query
         const newWidth = Math.max(300, Math.min(maxAllowed, startWidth + delta));
         sidebar.style.width = newWidth + 'px';
 
-        // ponytail: When widened beyond standard dock width (380px) or when available space in main is cramped (<500px),
+        // ponytail: When widened beyond standard dock width (420px) or when available space in main is cramped (<500px),
         // transition to overlay floating mode so the center workspace is NEVER pushed or distorted.
         const availableMain = window.innerWidth - leftWidth - newWidth;
-        if (newWidth > 380 || availableMain < 500) {
+        if (newWidth > 420 || availableMain < 500) {
           sidebar.classList.add('absolute', 'top-0', 'right-0', 'bottom-0', 'z-30', 'shadow-2xl', 'ai-sidebar-overlay');
           sidebar.classList.remove('relative');
         } else {
@@ -22128,6 +22310,22 @@ Please analyze what is causing this query to be slow and suggest necessary query
         try {
           localStorage.setItem('sqlfox_copilot_width', sidebar.style.width);
         } catch (_) {}
+      });
+
+      // ponytail: double click resizer resets sidebar width to default w-[380px] (380px) and clears stored width
+      resizer.addEventListener('dblclick', (e) => {
+        e.preventDefault();
+        sidebar.classList.add('transition-all', 'duration-200');
+        sidebar.style.width = '';
+        try {
+          localStorage.removeItem('sqlfox_copilot_width');
+        } catch (_) {}
+        isAIMaximized = false;
+        savedAIWidthBeforeMaximize = null;
+        const icon = document.getElementById('ai-maximize-icon');
+        if (icon) icon.textContent = '⛶';
+        updateAISidebarMode();
+        setTimeout(() => { if (typeof updateTabOverflow === 'function') updateTabOverflow(); }, 150);
       });
     }
 

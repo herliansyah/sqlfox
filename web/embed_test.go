@@ -287,6 +287,10 @@ func TestLockContentionAndRootBlockerInspectorEmbedded(t *testing.T) {
 		"dismissNoLockBanner()",
 		"Lock Contention & Root Blocker Analysis",
 		`id="monitor-alert-dot"`,
+		"copyLockQueryFromData",
+		"openLockProcessDetail",
+		"📋 Copy SQL",
+		"🔍 Show Detail",
 	}
 
 	for _, snippet := range expectedSnippets {
@@ -555,15 +559,22 @@ func TestProcessDetailModalAndFooterPillsEmbedded(t *testing.T) {
 		// 3. Fallback clipboard container targeting active open dialog
 		`const activeDialog = document.querySelector('dialog[open]');`,
 		`const container = activeDialog || document.body;`,
-		// 4. Default formatted query in openProcessDetailModal
-		`sqlCodeEl.textContent = formatSQL(thread.info);`,
-		`isModalSQLFormatted = true;`,
-		`btnFormat.innerHTML = '<span>↺ Raw SQL</span>';`,
+		// 4. Default raw query in openProcessDetailModal
+		`sqlCodeEl.textContent = thread.info;`,
+		`isModalSQLFormatted = false;`,
+		`btnFormat.innerHTML = '<span>✨ Format SQL</span>';`,
 		// 5. copyJsonCellContent using copyTextToClipboard
 		`const ok = await copyTextToClipboard(editor.value);`,
 		// 6. copyAdvisorDDL using copyTextToClipboard with visual toast and button feedback
 		`async function copyAdvisorDDL(btn) {`,
 		`onclick="copyAdvisorDDL(this)"`,
+		// 7. Process detail modal action buttons canonical icons consistency
+		`<span>⚠️</span>`,
+		`<span>Kill Query</span>`,
+		`<span>🛑</span>`,
+		`<span>Kill Connection</span>`,
+		`<span>✕</span>`,
+		`<span>Close</span>`,
 	}
 
 	for _, s := range expectedSnippets {
@@ -1548,7 +1559,7 @@ func TestProcesslistColumnVisibilityPicker(t *testing.T) {
 		`data-pl-col="command"`,
 		`data-pl-col="time"`,
 		`data-pl-col="state"`,
-		`data-pl-col="query"`,
+		`data-pl-col="query" class="p-2 font-mono text-[11px] select-text cursor-pointer`,
 		`function toggleProcesslistColPicker(e)`,
 		`function renderProcesslistColPickerList()`,
 		`function setProcesslistColVisibility(key, isVisible)`,
@@ -2049,6 +2060,65 @@ func TestVirtualDataGridAndStreamingEmbedded(t *testing.T) {
 		}
 	}
 }
+
+func TestSidebarVisibilityFOUCGuardEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	requiredSnippets := []string{
+		`var aiSaved = localStorage.getItem('sqlfox_copilot_visible');`,
+		`ai.classList.add('hidden')`,
+		`initSidebarVisibility();`,
+	}
+
+	for _, s := range requiredSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain %q for sidebar anti-FOUC visibility guard, but was missing", s)
+		}
+	}
+}
+
+func TestCopilotErgonomicsEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	requiredSnippets := []string{
+		`<aside id="ai-sidebar" class="w-[380px]`,
+		`resizer.addEventListener('dblclick'`,
+		`localStorage.removeItem('sqlfox_copilot_width')`,
+		`<div class="h-9 px-2 border-b border-app-border flex items-center justify-between shrink-0">`,
+		`min-h-[96px] max-h-[260px]`,
+		`Math.max(el.scrollHeight, 96)`,
+	}
+
+	for _, s := range requiredSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain %q for copilot ergonomics, but was missing", s)
+		}
+	}
+}
+
+
 
 
 
