@@ -4792,45 +4792,66 @@
   <div id="grid-context-menu" class="hidden fixed z-50 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-1 text-xs text-slate-200 min-w-56 ring-2 ring-black/50 font-sans divide-y divide-slate-800 max-h-[85vh] overflow-y-auto">
     <div id="grid-ctx-filter-section" class="py-1 hidden">
       <div class="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between select-none">
-        <span>🔍 Quick Filter</span>
+        <span class="flex items-center space-x-2"><span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center text-xs">🔍</span><span>Quick Filter</span></span>
         <span class="text-sky-400 font-mono text-[10px]" id="grid-ctx-filter-colname"></span>
       </div>
       <div id="grid-ctx-filter-options" class="space-y-0.5"></div>
     </div>
     <div id="grid-ctx-insert-section" class="py-1">
       <div class="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between select-none">
-        <span>⚡ Insert Value</span>
+        <span class="flex items-center space-x-2"><span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center text-xs">⚡</span><span>Insert Value</span></span>
         <span class="text-sky-400 font-mono text-[10px]" id="grid-ctx-colname"></span>
       </div>
-      <div id="grid-ctx-insert-options"></div>
+      <div id="grid-ctx-insert-options" class="space-y-0.5"></div>
     </div>
-    <div class="py-1">
-      <button onclick="openRecordInspectorFromContextMenu(); closeGridContextMenu()" id="grid-ctx-btn-inspect" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-sky-300 hover:text-white">
-        <span class="flex items-center space-x-2"><span>📋</span><span>Inspect Record (Form View)</span></span>
-        <span class="text-[10px] text-slate-500 font-mono">Space</span>
+    <div class="py-1 space-y-0.5">
+      <button onclick="openRecordInspectorFromContextMenu(); closeGridContextMenu()" id="grid-ctx-btn-inspect" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-sky-300 hover:text-white transition">
+        <span class="flex items-center space-x-2 min-w-0">
+          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center text-xs">📋</span>
+          <span class="whitespace-nowrap">Inspect Record (Form View)</span>
+        </span>
+        <span class="text-[10px] text-slate-500 font-mono flex-shrink-0 ml-2">Space</span>
       </button>
-      <button onclick="editRightClickedCell(); closeGridContextMenu()" id="grid-ctx-btn-edit" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-slate-200 hover:text-white">
-        <span>✏️</span><span>Edit Cell</span>
+      <button onclick="editRightClickedCell(); closeGridContextMenu()" id="grid-ctx-btn-edit" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white transition">
+        <span class="flex items-center space-x-2 min-w-0">
+          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center text-xs">✏️</span>
+          <span class="whitespace-nowrap">Edit Cell</span>
+        </span>
       </button>
-      <button onclick="openJsonCellModalFromContextMenu(); closeGridContextMenu()" id="grid-ctx-btn-json" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-amber-300 hover:text-white">
-        <span class="flex items-center space-x-2"><span class="font-mono font-bold text-amber-400">{ }</span><span>Inspect / Edit JSON</span></span>
-        <span class="text-[10px] text-slate-500 font-mono">Modal</span>
+      <button onclick="openJsonCellModalFromContextMenu(); closeGridContextMenu()" id="grid-ctx-btn-json" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-amber-300 hover:text-white transition">
+        <span class="flex items-center space-x-2 min-w-0">
+          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono font-bold text-amber-400 text-xs">{ }</span>
+          <span class="whitespace-nowrap">Inspect / Edit JSON</span>
+        </span>
+        <span class="text-[10px] text-slate-500 font-mono flex-shrink-0 ml-2">Modal</span>
       </button>
-      <button onclick="copyGridAsTSV(); closeGridContextMenu()" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white">
-        <span>📋 Copy as TSV</span>
-        <span class="text-[10px] text-slate-500">Excel</span>
+      <button onclick="copyGridAsTSV(); closeGridContextMenu()" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white transition">
+        <span class="flex items-center space-x-2 min-w-0">
+          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center text-xs">📋</span>
+          <span class="whitespace-nowrap">Copy as TSV</span>
+        </span>
+        <span class="text-[10px] text-slate-500 flex-shrink-0 ml-2">Excel</span>
       </button>
-      <button onclick="copyGridAsMarkdown(); closeGridContextMenu()" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white">
-        <span>📋 Copy as Markdown</span>
-        <span class="text-[10px] text-slate-500">GFM</span>
+      <button onclick="copyGridAsMarkdown(); closeGridContextMenu()" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white transition">
+        <span class="flex items-center space-x-2 min-w-0">
+          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center text-xs">📋</span>
+          <span class="whitespace-nowrap">Copy as Markdown</span>
+        </span>
+        <span class="text-[10px] text-slate-500 flex-shrink-0 ml-2">GFM</span>
       </button>
     </div>
-    <div id="grid-ctx-table-mutations" class="py-1 hidden">
-      <button onclick="addGridDraftRow(); closeGridContextMenu()" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-sky-400 hover:text-sky-300">
-        <span>➕</span><span>Add Row Draft</span>
+    <div id="grid-ctx-table-mutations" class="py-1 space-y-0.5 hidden">
+      <button onclick="addGridDraftRow(); closeGridContextMenu()" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-sky-400 hover:text-sky-300 transition">
+        <span class="flex items-center space-x-2 min-w-0">
+          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center text-xs">➕</span>
+          <span class="whitespace-nowrap">Add Row Draft</span>
+        </span>
       </button>
-      <button onclick="deleteSelectedGridRows(); closeGridContextMenu()" class="w-full text-left px-2.5 py-1.5 hover:bg-rose-950/60 rounded flex items-center space-x-2 text-rose-400 hover:text-rose-300">
-        <span>🗑️</span><span>Delete Selected Row(s)</span>
+      <button onclick="deleteSelectedGridRows(); closeGridContextMenu()" class="w-full text-left px-2.5 py-1.5 hover:bg-rose-950/60 rounded flex items-center justify-between text-rose-400 hover:text-rose-300 transition">
+        <span class="flex items-center space-x-2 min-w-0">
+          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center text-xs">🗑️</span>
+          <span class="whitespace-nowrap">Delete Selected Row(s)</span>
+        </span>
       </button>
     </div>
   </div>
@@ -19828,10 +19849,16 @@ Please analyze what is causing this query to be slow and suggest necessary query
             if (currentVal === null || currentVal === undefined) {
               filterOpts.innerHTML = `
                 <button data-col="${escapeHtml(col.name)}" onclick="applyQuickFilterFromCell(this.dataset.col, 'IS NULL', '')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-sky-300 hover:text-white transition">
-                  <span class="font-mono">∅ Filter IS NULL</span>
+                  <span class="flex items-center space-x-2 min-w-0">
+                    <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono text-sky-400 text-sm">∅</span>
+                    <span class="font-mono whitespace-nowrap">Filter IS NULL</span>
+                  </span>
                 </button>
                 <button data-col="${escapeHtml(col.name)}" onclick="applyQuickFilterFromCell(this.dataset.col, 'IS NOT NULL', '')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-300 hover:text-white transition">
-                  <span class="font-mono">✓ Filter IS NOT NULL</span>
+                  <span class="flex items-center space-x-2 min-w-0">
+                    <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono text-emerald-400 text-xs">✓</span>
+                    <span class="font-mono whitespace-nowrap">Filter IS NOT NULL</span>
+                  </span>
                 </button>
               `;
             } else {
@@ -19840,28 +19867,43 @@ Please analyze what is causing this query to be slow and suggest necessary query
               let rangeButtons = '';
               if (typeCategory === 'numeric' || typeCategory === 'temporal') {
                 rangeButtons = `
-                  <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '>', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-slate-300 hover:text-white transition">
-                    <span class="font-mono text-emerald-400">&gt;</span><span class="truncate font-mono">${escapeHtml(col.name)} &gt; '${escapeHtml(displayStr)}'</span>
+                  <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '>', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-300 hover:text-white transition">
+                    <span class="flex items-center space-x-2 min-w-0">
+                      <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono text-emerald-400 font-bold text-xs">&gt;</span>
+                      <span class="truncate font-mono">${escapeHtml(col.name)} &gt; '${escapeHtml(displayStr)}'</span>
+                    </span>
                   </button>
-                  <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '<', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-slate-300 hover:text-white transition">
-                    <span class="font-mono text-emerald-400">&lt;</span><span class="truncate font-mono">${escapeHtml(col.name)} &lt; '${escapeHtml(displayStr)}'</span>
+                  <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '<', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-300 hover:text-white transition">
+                    <span class="flex items-center space-x-2 min-w-0">
+                      <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono text-emerald-400 font-bold text-xs">&lt;</span>
+                      <span class="truncate font-mono">${escapeHtml(col.name)} &lt; '${escapeHtml(displayStr)}'</span>
+                    </span>
                   </button>
                 `;
               }
               let likeButton = '';
               if (typeCategory === 'text') {
                 likeButton = `
-                  <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, 'LIKE', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-purple-300 hover:text-white transition">
-                    <span class="font-mono text-purple-400">*</span><span class="truncate font-mono">${escapeHtml(col.name)} LIKE '%${escapeHtml(displayStr)}%'</span>
+                  <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, 'LIKE', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-purple-300 hover:text-white transition">
+                    <span class="flex items-center space-x-2 min-w-0">
+                      <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono text-purple-400 font-bold text-sm">*</span>
+                      <span class="truncate font-mono">${escapeHtml(col.name)} LIKE '%${escapeHtml(displayStr)}%'</span>
+                    </span>
                   </button>
                 `;
               }
               filterOpts.innerHTML = `
-                <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '=', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-sky-300 hover:text-white transition">
-                  <span class="font-mono text-sky-400">=</span><span class="truncate font-mono">${escapeHtml(col.name)} = '${escapeHtml(displayStr)}'</span>
+                <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '=', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-sky-300 hover:text-white transition">
+                  <span class="flex items-center space-x-2 min-w-0">
+                    <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono text-sky-400 font-bold text-xs">=</span>
+                    <span class="truncate font-mono">${escapeHtml(col.name)} = '${escapeHtml(displayStr)}'</span>
+                  </span>
                 </button>
-                <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '!=', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-rose-300 hover:text-white transition">
-                  <span class="font-mono text-rose-400">!=</span><span class="truncate font-mono">${escapeHtml(col.name)} != '${escapeHtml(displayStr)}'</span>
+                <button data-col="${escapeHtml(col.name)}" data-val="${escapeHtml(valStr)}" onclick="applyQuickFilterFromCell(this.dataset.col, '!=', this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-rose-300 hover:text-white transition">
+                  <span class="flex items-center space-x-2 min-w-0">
+                    <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono text-rose-400 font-bold text-xs">!=</span>
+                    <span class="truncate font-mono">${escapeHtml(col.name)} != '${escapeHtml(displayStr)}'</span>
+                  </span>
                 </button>
                 ${rangeButtons}
                 ${likeButton}
@@ -19900,64 +19942,100 @@ Please analyze what is causing this query to be slow and suggest necessary query
           if (enumValues && enumValues.length > 0) {
             optsContainer.innerHTML = `
               <button onclick="insertGridCellValue(null)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-sky-300 hover:text-white transition">
-                <span class="font-mono">∅ Set NULL</span>
-                <span class="text-[10px] text-slate-500 font-mono">Ctrl+Shift+N</span>
+                <span class="flex items-center space-x-2 min-w-0">
+                  <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono text-sky-400 text-sm">∅</span>
+                  <span class="truncate font-mono">Set NULL</span>
+                </span>
+                <span class="text-[10px] text-slate-500 font-mono flex-shrink-0 ml-2">Ctrl+Shift+N</span>
               </button>
               ${enumValues.map(v => `
-                <button data-val="${escapeHtml(v)}" onclick="insertGridCellValue(this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-slate-200 hover:text-white transition">
-                  <span class="text-sky-400">●</span><span class="font-mono">${escapeHtml(v)}</span>
+                <button data-val="${escapeHtml(v)}" onclick="insertGridCellValue(this.dataset.val)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white transition">
+                  <span class="flex items-center space-x-2 min-w-0">
+                    <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center text-sky-400 text-xs">●</span>
+                    <span class="truncate font-mono">${escapeHtml(v)}</span>
+                  </span>
                 </button>
               `).join('')}
             `;
           } else if (rawType === 'boolean' || rawType === 'bool' || rawType === 'tinyint(1)') {
             optsContainer.innerHTML = `
               <button onclick="insertGridCellValue(null)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-sky-300 hover:text-white transition">
-                <span class="font-mono">∅ Set NULL</span>
-                <span class="text-[10px] text-slate-500 font-mono">Ctrl+Shift+N</span>
+                <span class="flex items-center space-x-2 min-w-0">
+                  <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono text-sky-400 text-sm">∅</span>
+                  <span class="truncate font-mono">Set NULL</span>
+                </span>
+                <span class="text-[10px] text-slate-500 font-mono flex-shrink-0 ml-2">Ctrl+Shift+N</span>
               </button>
-              <button onclick="insertGridCellValue('1')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-emerald-400 hover:text-white transition">
-                <span>✓</span><span class="font-mono">1 (TRUE)</span>
+              <button onclick="insertGridCellValue('1')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-emerald-400 hover:text-white transition">
+                <span class="flex items-center space-x-2 min-w-0">
+                  <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono text-emerald-400 text-xs">✓</span>
+                  <span class="truncate font-mono">1 (TRUE)</span>
+                </span>
               </button>
-              <button onclick="insertGridCellValue('0')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center space-x-2 text-rose-400 hover:text-white transition">
-                <span>✕</span><span class="font-mono">0 (FALSE)</span>
+              <button onclick="insertGridCellValue('0')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-rose-400 hover:text-white transition">
+                <span class="flex items-center space-x-2 min-w-0">
+                  <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono text-rose-400 text-xs">✕</span>
+                  <span class="truncate font-mono">0 (FALSE)</span>
+                </span>
               </button>
             `;
           } else if (fkInfo && fkInfo.referenced_table && fkInfo.referenced_column) {
             optsContainer.innerHTML = `
-              <div class="px-2.5 py-1 text-[10px] text-slate-400 font-mono flex items-center space-x-1 select-none">
-                <span>🔗 References:</span>
-                <span class="text-sky-400 font-semibold">${escapeHtml(fkInfo.referenced_table)}.${escapeHtml(fkInfo.referenced_column)}</span>
+              <div class="px-2.5 py-1 text-[10px] text-slate-400 font-mono flex items-center space-x-2 select-none">
+                <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center text-xs">🔗</span>
+                <span class="truncate">References: <span class="text-sky-400 font-semibold">${escapeHtml(fkInfo.referenced_table)}.${escapeHtml(fkInfo.referenced_column)}</span></span>
               </div>
               <button onclick="insertGridCellValue(null)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-sky-300 hover:text-white transition">
-                <span class="font-mono">∅ Set NULL</span>
-                <span class="text-[10px] text-slate-500 font-mono">Ctrl+Shift+N</span>
+                <span class="flex items-center space-x-2 min-w-0">
+                  <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono text-sky-400 text-sm">∅</span>
+                  <span class="truncate font-mono">Set NULL</span>
+                </span>
+                <span class="text-[10px] text-slate-500 font-mono flex-shrink-0 ml-2">Ctrl+Shift+N</span>
               </button>
               <button onclick="insertGridCellValue('')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-300 hover:text-white transition">
-                <span class="font-mono">"" Set Empty String</span>
-                <span class="text-[10px] text-slate-500 font-mono">Ctrl+Shift+E</span>
+                <span class="flex items-center space-x-2 min-w-0">
+                  <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono text-slate-400 font-bold text-xs">""</span>
+                  <span class="truncate font-mono">Set Empty String</span>
+                </span>
+                <span class="text-[10px] text-slate-500 font-mono flex-shrink-0 ml-2">Ctrl+Shift+E</span>
               </button>
             `;
           } else {
             optsContainer.innerHTML = `
               <button onclick="insertGridCellValue(null)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-sky-300 hover:text-white transition">
-                <span class="font-mono">∅ Set NULL</span>
-                <span class="text-[10px] text-slate-500 font-mono">Ctrl+Shift+N</span>
+                <span class="flex items-center space-x-2 min-w-0">
+                  <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono text-sky-400 text-sm">∅</span>
+                  <span class="truncate font-mono">Set NULL</span>
+                </span>
+                <span class="text-[10px] text-slate-500 font-mono flex-shrink-0 ml-2">Ctrl+Shift+N</span>
               </button>
               <button onclick="insertGridCellValue('')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-300 hover:text-white transition">
-                <span class="font-mono">"" Set Empty String</span>
-                <span class="text-[10px] text-slate-500 font-mono">Ctrl+Shift+E</span>
+                <span class="flex items-center space-x-2 min-w-0">
+                  <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono text-slate-400 font-bold text-xs">""</span>
+                  <span class="truncate font-mono">Set Empty String</span>
+                </span>
+                <span class="text-[10px] text-slate-500 font-mono flex-shrink-0 ml-2">Ctrl+Shift+E</span>
               </button>
               <button onclick="insertGridCellValue('NOW')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-emerald-400 hover:text-white transition">
-                <span class="font-mono">🕒 Current Timestamp (NOW)</span>
-                <span class="text-[10px] text-slate-500 font-mono">Ctrl+Shift+T</span>
+                <span class="flex items-center space-x-2 min-w-0">
+                  <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center text-xs">🕒</span>
+                  <span class="truncate font-mono">Current Timestamp (NOW)</span>
+                </span>
+                <span class="text-[10px] text-slate-500 font-mono flex-shrink-0 ml-2">Ctrl+Shift+T</span>
               </button>
               <button onclick="insertGridCellValue('DATE')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-teal-400 hover:text-white transition">
-                <span class="font-mono">📅 Current Date</span>
-                <span class="text-[10px] text-slate-500 font-mono">Ctrl+Shift+D</span>
+                <span class="flex items-center space-x-2 min-w-0">
+                  <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center text-xs">📅</span>
+                  <span class="truncate font-mono">Current Date</span>
+                </span>
+                <span class="text-[10px] text-slate-500 font-mono flex-shrink-0 ml-2">Ctrl+Shift+D</span>
               </button>
               <button onclick="insertGridCellValue('UUID')" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-purple-400 hover:text-white transition">
-                <span class="font-mono">🔑 UUID()</span>
-                <span class="text-[10px] text-slate-500 font-mono">v4</span>
+                <span class="flex items-center space-x-2 min-w-0">
+                  <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center text-xs">🔑</span>
+                  <span class="truncate font-mono">UUID()</span>
+                </span>
+                <span class="text-[10px] text-slate-500 font-mono flex-shrink-0 ml-2">v4</span>
               </button>
             `;
           }
