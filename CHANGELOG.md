@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.10.15] - 2026-10-30
+
 ### Added
 - **Copilot Ergonomics & Lock Contention Query Inspector (`web/dist/index.html`)**: Widened default Copilot panel width to 380px with double-click reset on the resizer seam, aligned Copilot header height to 36px (`h-9`) to match the query tab bar, enlarged prompt textarea to `min-h-[96px]` (`rows=4`), added inline Copy SQL and Show Detail action buttons in the Lock Contention analysis modal, standardized Process Detail action buttons with canonical icons, and defaulted Process Detail SQL view to raw SQL.
 
