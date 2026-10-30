@@ -246,4 +246,55 @@ vm.runInContext(`
 `, sandbox);
 console.log("✓ Staged-edit row identity regression passed!");
 
+// 9. Behavioral Test: Grid Context Menu Icon Slot Normalization (consistent w-5 slot)
+vm.runInContext(`
+  tabs = [{
+    id: 'tab-align-test',
+    isTableViewer: true,
+    tableName: 'users',
+    filterPills: []
+  }];
+  activeTabId = 'tab-align-test';
+  activeGridTable = 'users';
+  activeGridPKCol = 'id';
+  currentColumns = [
+    { name: 'id', type: 'int' },
+    { name: 'name', type: 'varchar(100)' }
+  ];
+  currentResults = [[1, 'Alice']];
+
+  const fakeTd = {
+    dataset: { col: '1' },
+    closest: (sel) => fakeTd,
+    classList: { add: () => {}, remove: () => {} }
+  };
+  const fakeEvent = {
+    preventDefault: () => {},
+    target: fakeTd,
+    clientX: 200,
+    clientY: 200
+  };
+
+  openGridContextMenu(fakeEvent, 0);
+
+  const filterOptsHtml = document.getElementById('grid-ctx-filter-options').innerHTML;
+  const insertOptsHtml = document.getElementById('grid-ctx-insert-options').innerHTML;
+
+  if (!filterOptsHtml.includes('w-5 text-center flex-shrink-0 inline-flex items-center justify-center')) {
+    throw new Error('Quick filter option icons must use normalized w-5 container for consistent indentation');
+  }
+  if (!insertOptsHtml.includes('w-5 text-center flex-shrink-0 inline-flex items-center justify-center')) {
+    throw new Error('Insert value option icons must use normalized w-5 container for consistent indentation');
+  }
+
+  // Also verify NULL value branch in quick filter
+  currentResults = [[1, null]];
+  openGridContextMenu(fakeEvent, 0);
+  const filterNullHtml = document.getElementById('grid-ctx-filter-options').innerHTML;
+  if (!filterNullHtml.includes('w-5 text-center flex-shrink-0 inline-flex items-center justify-center')) {
+    throw new Error('Null quick filter options must use normalized w-5 container');
+  }
+`, sandbox);
+console.log("✓ Grid context menu icon slot normalization test passed!");
+
 console.log("\n🎉 ALL GRID ERGONOMICS SUITE TESTS PASSED 100%!");
