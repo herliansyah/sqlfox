@@ -2101,6 +2101,23 @@
         </form>
       </div>
     </aside>
+    <!-- ponytail: restore sidebar visibility immediately before initial render to prevent Copilot FOUC flicker -->
+    <script>
+      (function() {
+        try {
+          var aiSaved = localStorage.getItem('sqlfox_copilot_visible');
+          if (aiSaved === 'false' || (aiSaved === null && window.innerWidth < 768)) {
+            var ai = document.getElementById('ai-sidebar');
+            if (ai) ai.classList.add('hidden');
+          }
+          var leftSaved = localStorage.getItem('sqlfox_left_sidebar_visible');
+          if (leftSaved === 'false') {
+            var left = document.getElementById('left-sidebar');
+            if (left) left.classList.add('hidden');
+          }
+        } catch (_) {}
+      })();
+    </script>
 
     <!-- Operational Notes Inbox Slide-over Drawer (Right Overlay) -->
     <div id="notes-inbox-drawer" class="hidden absolute top-0 right-0 bottom-0 w-[540px] max-w-[95vw] bg-slate-950 border-l border-t border-app-border flex flex-col z-[35] shadow-2xl transition-transform duration-200">
@@ -5388,6 +5405,7 @@
 
     // --- Lifecycle Initialization ---
     window.addEventListener('DOMContentLoaded', async () => {
+      initSidebarVisibility();
       const lockModal = document.getElementById('remote-lock-modal');
       if (lockModal && !lockModal.classList.contains('hidden')) {
         const passInput = document.getElementById('remote-unlock-password');
@@ -9893,7 +9911,7 @@
             <td data-pl-col="command" class="p-2 text-slate-300 whitespace-nowrap ${isProcesslistColVisible('command') ? '' : 'hidden'}">${escapeHtml(t.command)}</td>
             <td data-pl-col="time" class="p-2 text-right font-bold whitespace-nowrap ${isProcesslistColVisible('time') ? '' : 'hidden'} ${isCritical ? 'text-red-400' : (isWarning ? 'text-amber-400' : 'text-slate-300')}">${t.time}s</td>
             <td data-pl-col="state" class="p-2 text-slate-400 text-[11px] truncate max-w-[140px] whitespace-nowrap ${isProcesslistColVisible('state') ? '' : 'hidden'}" title="${escapeHtml(t.state || '-')}">${escapeHtml(t.state || '-')}</td>
-            <td data-pl-col="query" class="p-2 font-mono text-[11px] select-text cursor-text max-w-0 w-full ${isProcesslistColVisible('query') ? '' : 'hidden'} ${hasQuery ? 'text-slate-200' : 'text-slate-500 italic'}" title="${escapeHtml(rawSql)}">
+            <td data-pl-col="query" class="p-2 font-mono text-[11px] select-text cursor-pointer max-w-0 w-full ${isProcesslistColVisible('query') ? '' : 'hidden'} ${hasQuery ? 'text-slate-200' : 'text-slate-500 italic'}" title="${escapeHtml(rawSql)}">
               <div class="truncate w-full">${escapeHtml(displaySql)}</div>
             </td>
           </tr>

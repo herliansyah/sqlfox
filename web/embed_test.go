@@ -1548,7 +1548,7 @@ func TestProcesslistColumnVisibilityPicker(t *testing.T) {
 		`data-pl-col="command"`,
 		`data-pl-col="time"`,
 		`data-pl-col="state"`,
-		`data-pl-col="query"`,
+		`data-pl-col="query" class="p-2 font-mono text-[11px] select-text cursor-pointer`,
 		`function toggleProcesslistColPicker(e)`,
 		`function renderProcesslistColPickerList()`,
 		`function setProcesslistColVisibility(key, isVisible)`,
@@ -2049,6 +2049,34 @@ func TestVirtualDataGridAndStreamingEmbedded(t *testing.T) {
 		}
 	}
 }
+
+func TestSidebarVisibilityFOUCGuardEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	requiredSnippets := []string{
+		`var aiSaved = localStorage.getItem('sqlfox_copilot_visible');`,
+		`ai.classList.add('hidden')`,
+		`initSidebarVisibility();`,
+	}
+
+	for _, s := range requiredSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain %q for sidebar anti-FOUC visibility guard, but was missing", s)
+		}
+	}
+}
+
 
 
 
