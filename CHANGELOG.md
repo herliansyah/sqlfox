@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Visual CRUD Designers for Views, Routines & Scheduled Events (`web/dist/index.html`, `web/embed_test.go`)**: Interactive visual designer dialogs for Views, Triggers, Stored Procedures, Functions, and Scheduled Events with embedded CodeMirror SQL editors, 1-click "Open in Query Tab" handoff, dynamic parameter grids for routines, schedule interval selectors for events, definer sanitization preserving comments and formatting, original-name tracking for safe rename/drop cycles, and schema tree search filtering (#121).
+- **Pre-Flight Database Dump Confirmation Guard (`web/dist/index.html`, `web/embed_test.go`)**: Introduced confirmation dialog (`#dump-database-dialog`) before executing full database dumps, displaying target database indicator, multi-gigabyte warning banner, configurable structure/data checkboxes, and keyboard Escape / backdrop dismissal (#121).
+
+### Fixed
+- **Process Detail Copy SQL Button Label Glitch (`web/dist/index.html`, `web/embed_test.go`)**: Replaced unparsed template literal in Process Detail Inspector copy button with canonical SVG copy icon (#121).
+
+### Added
 - **MySQL & MariaDB Object CRUD & Visual Designer Suite (`web/dist/index.html`, `web/embed_test.go`)**: Introduced interactive visual designer dialogs for Views, Triggers, Stored Routines (Procedures & Functions), and Scheduled Events with syntax-highlighted embedded CodeMirror SQL editors, dynamic parameter grid builder, schedule interval selectors, deterministic and completion toggles, 1-click "Open in Query Tab" handoff, and safe replacement DDL generators.
 - **Full Database Dump Pre-Flight Confirmation Dialog (`web/dist/index.html`, `web/embed_test.go`)**: Added pre-flight confirmation dialog (`#dump-database-dialog`) when triggering "Dump Entire Database", displaying the target database name, a prominent warning regarding server I/O, read locks, and network bandwidth on multi-gigabyte databases, and options to export structure (DDL) and/or table data (INSERTs), preventing accidental unconstrained streaming downloads on large production datasets.
 
