@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **MySQL & MariaDB Object CRUD & Visual Designer Suite (`web/dist/index.html`, `web/embed_test.go`)**: Introduced interactive visual designer dialogs for Views, Triggers, Stored Routines (Procedures & Functions), and Scheduled Events with syntax-highlighted embedded CodeMirror SQL editors, dynamic parameter grid builder, schedule interval selectors, deterministic and completion toggles, 1-click "Open in Query Tab" handoff, and safe replacement DDL generators.
+- **Full Database Dump Pre-Flight Confirmation Dialog (`web/dist/index.html`, `web/embed_test.go`)**: Added pre-flight confirmation dialog (`#dump-database-dialog`) when triggering "Dump Entire Database", displaying the target database name, a prominent warning regarding server I/O, read locks, and network bandwidth on multi-gigabyte databases, and options to export structure (DDL) and/or table data (INSERTs), preventing accidental unconstrained streaming downloads on large production datasets.
+
+### Fixed
+- **Process Detail Inspector Copy SQL Button Label Glitch (`web/dist/index.html`, `web/embed_test.go`)**: Fixed unrendered template interpolation `${renderIcon('copy', ...)}` in static HTML markup on the Process Detail Inspector modal, restoring canonical SVG copy icon and clean "Copy SQL" label.
+- **SQL Definer Sanitization & Multi-Line Comment Preservation (`web/dist/index.html`, `web/embed_test.go`)**: Restrained `stripDefiner` to horizontal whitespace collapsing (`[ \t]{2,}`), preventing unintended destruction of vertical line breaks and protecting single-line SQL comments (`-- comment`) from swallowing subsequent executable statements during routine, view, and event inspection.
+- **Sidebar Schema Search Filter Coverage for Routines and Events (`web/dist/index.html`, `web/embed_test.go`)**: Included Stored Procedures, Functions, and Events in the sidebar schema search filter empty-check, resolving a glitch where typing routine or event names in the search bar falsely returned "No objects matching".
+- **Safe Object Renaming and Trailing Semicolon Normalization (`web/dist/index.html`, `web/embed_test.go`)**: Added original name tracking during edit cycles to drop old object names upon renaming, preventing orphaned procedures, triggers, views, and events, while trimming trailing semicolons in DDL assemblers to avoid `;;` syntax glitches.
+
 ## [v0.10.16] - 2026-11-02
 
 ### Fixed
