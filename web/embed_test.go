@@ -289,8 +289,10 @@ func TestLockContentionAndRootBlockerInspectorEmbedded(t *testing.T) {
 		`id="monitor-alert-dot"`,
 		"copyLockQueryFromData",
 		"openLockProcessDetail",
-		"📋 Copy SQL",
-		"🔍 Show Detail",
+		"icon-copy",
+		"Copy SQL",
+		"icon-search",
+		"Show Detail",
 	}
 
 	for _, snippet := range expectedSnippets {
@@ -562,18 +564,18 @@ func TestProcessDetailModalAndFooterPillsEmbedded(t *testing.T) {
 		// 4. Default raw query in openProcessDetailModal
 		`sqlCodeEl.textContent = thread.info;`,
 		`isModalSQLFormatted = false;`,
-		`btnFormat.innerHTML = '<span>✨ Format SQL</span>';`,
+		"btnFormat.innerHTML = `<svg class=\"w-3.5 h-3.5 text-amber-300 shrink-0 inline mr-1\" aria-hidden=\"true\"><use href=\"#icon-sparkles\"/></svg><span>Format SQL</span>`;",
 		// 5. copyJsonCellContent using copyTextToClipboard
 		`const ok = await copyTextToClipboard(editor.value);`,
 		// 6. copyAdvisorDDL using copyTextToClipboard with visual toast and button feedback
 		`async function copyAdvisorDDL(btn) {`,
 		`onclick="copyAdvisorDDL(this)"`,
 		// 7. Process detail modal action buttons canonical icons consistency
-		`<span>⚠️</span>`,
+		`use href="#icon-alert-triangle"`,
 		`<span>Kill Query</span>`,
-		`<span>🛑</span>`,
+		`use href="#icon-square"`,
 		`<span>Kill Connection</span>`,
-		`<span>✕</span>`,
+		`use href="#icon-x"`,
 		`<span>Close</span>`,
 	}
 
