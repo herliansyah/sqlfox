@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.11.0] - 2026-11-02
+
 ### Added
 - **Visual CRUD Designers for Views, Routines & Scheduled Events (`web/dist/index.html`, `web/embed_test.go`)**: Interactive visual designer dialogs for Views, Triggers, Stored Procedures, Functions, and Scheduled Events with embedded CodeMirror SQL editors, 1-click "Open in Query Tab" handoff, dynamic parameter grids for routines, schedule interval selectors for events, definer sanitization preserving comments and formatting, original-name tracking for safe rename/drop cycles, and schema tree search filtering (#121).
 - **Pre-Flight Database Dump Confirmation Guard (`web/dist/index.html`, `web/embed_test.go`)**: Introduced confirmation dialog (`#dump-database-dialog`) before executing full database dumps, displaying target database indicator, multi-gigabyte warning banner, configurable structure/data checkboxes, and keyboard Escape / backdrop dismissal (#121).
