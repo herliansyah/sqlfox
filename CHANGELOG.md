@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Full Database Dump Pre-Flight Confirmation Dialog (`web/dist/index.html`, `web/embed_test.go`)**: Added pre-flight confirmation dialog (`#dump-database-dialog`) when triggering "Dump Entire Database", displaying the target database name, a prominent warning regarding server I/O, read locks, and network bandwidth on multi-gigabyte databases, and options to export structure (DDL) and/or table data (INSERTs), preventing accidental unconstrained streaming downloads on large production datasets.
+
+### Fixed
+- **Process Detail Inspector Copy SQL Button Label Glitch (`web/dist/index.html`, `web/embed_test.go`)**: Fixed unrendered template interpolation `${renderIcon('copy', ...)}` in static HTML markup on the Process Detail Inspector modal, restoring canonical SVG copy icon and clean "Copy SQL" label.
+
 ## [v0.10.16] - 2026-11-02
 
 ### Fixed

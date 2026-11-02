@@ -1152,7 +1152,7 @@ func TestComprehensiveUIGlitchGuards(t *testing.T) {
 	}
 
 	// 12. Operational dialogs included in backdrop dismissal loop
-	for _, opDlg := range []string{"'smart-seed-dialog'", "'run-sql-dialog'", "'structure-sync-dialog'", "'data-transfer-dialog'", "'data-sync-dialog'"} {
+	for _, opDlg := range []string{"'dump-database-dialog'", "'smart-seed-dialog'", "'run-sql-dialog'", "'structure-sync-dialog'", "'data-transfer-dialog'", "'data-sync-dialog'"} {
 		if !strings.Contains(content, opDlg) {
 			t.Errorf("expected %s to be included in backdrop auto-dismiss listener loop", opDlg)
 		}
@@ -1194,6 +1194,53 @@ func TestComprehensiveUIGlitchGuards(t *testing.T) {
 	}
 	if !strings.Contains(content, `ondblclick="startInlineEdit(this, ${rIdx}, ${cIdx}, this.dataset.pk, this.dataset.table)"`) {
 		t.Errorf("expected grid cells to use dataset attributes for startInlineEdit")
+	}
+
+	// 19. Process detail inspector copy SQL button label glitch guard
+	if strings.Contains(content, `<button id="pl-modal-copy-sql-btn"`) {
+		btnIdx := strings.Index(content, `<button id="pl-modal-copy-sql-btn"`)
+		btnEnd := strings.Index(content[btnIdx:], "</button>")
+		if btnEnd != -1 {
+			btnHTML := content[btnIdx : btnIdx+btnEnd]
+			if strings.Contains(btnHTML, "${renderIcon") {
+				t.Errorf("critical UI glitch: Process Detail modal Copy SQL button contains unrendered template literal ${renderIcon}")
+			}
+			if !strings.Contains(btnHTML, `use href="#icon-copy"`) || !strings.Contains(btnHTML, `<span>Copy SQL</span>`) {
+				t.Errorf("expected Process Detail modal Copy SQL button to contain canonical icon and label")
+			}
+		}
+	}
+
+	// 20. Static HTML template glitch guard: no unescaped ${renderIcon in static markup before script
+	scriptTagIdx := strings.Index(content, "<script>\n    // --- State Management ---")
+	if scriptTagIdx == -1 {
+		scriptTagIdx = strings.Index(content, "<script>")
+	}
+	if scriptTagIdx != -1 {
+		htmlPrefix := content[:scriptTagIdx]
+		if strings.Contains(htmlPrefix, "${renderIcon") {
+			t.Errorf("critical UI glitch: static HTML before script tag contains unrendered ${renderIcon}")
+		}
+	}
+
+	// 21. Dump Entire Database pre-flight modal, large DB warning, and safety controls
+	if !strings.Contains(content, `<dialog id="dump-database-dialog"`) {
+		t.Errorf("expected dump-database-dialog to exist")
+	}
+	if !strings.Contains(content, `id="dump-modal-target-db"`) {
+		t.Errorf("expected dump-modal-target-db indicator to exist")
+	}
+	if !strings.Contains(content, "Large Database Pre-Flight Notice") {
+		t.Errorf("expected Large Database Pre-Flight Notice warning banner in dump dialog")
+	}
+	if !strings.Contains(content, `id="dump-include-schema"`) || !strings.Contains(content, `id="dump-include-data"`) {
+		t.Errorf("expected dump-include-schema and dump-include-data checkboxes to exist")
+	}
+	if !strings.Contains(content, "openDumpDatabaseModal") || !strings.Contains(content, "closeDumpDatabaseModal") || !strings.Contains(content, "executeDatabaseDump") {
+		t.Errorf("expected openDumpDatabaseModal, closeDumpDatabaseModal, and executeDatabaseDump functions to exist")
+	}
+	if !strings.Contains(content, "closeDumpDatabaseModal();") {
+		t.Errorf("expected Escape key listener to close dump-database-dialog via closeDumpDatabaseModal()")
 	}
 }
 
