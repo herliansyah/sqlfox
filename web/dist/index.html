@@ -3379,12 +3379,19 @@
         </div>
         <div>
           <label class="block text-slate-400 mb-1 font-semibold">View Query (SELECT statement)</label>
-          <textarea id="view-designer-query" rows="6" placeholder="SELECT id, name, email FROM users WHERE active = 1" class="w-full bg-slate-950 border border-slate-700 p-2 text-white font-mono rounded outline-none resize-none focus:border-app-accent"></textarea>
+          <div id="view-designer-cm-container" class="h-52 border border-slate-700 rounded bg-slate-950 overflow-hidden font-mono text-xs"></div>
+          <textarea id="view-designer-query" rows="6" placeholder="SELECT id, name, email FROM users WHERE active = 1" class="hidden"></textarea>
         </div>
       </div>
-      <div class="flex justify-end space-x-2 pt-2 border-t border-slate-800">
-        <button onclick="document.getElementById('view-designer-dialog').close()" class="px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 rounded">Cancel</button>
-        <button onclick="submitCreateView()" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-4 py-1.5 rounded text-xs transition">Save View</button>
+      <div class="flex items-center justify-between pt-2 border-t border-slate-800">
+        <button type="button" onclick="openActiveViewInQueryTab()" class="px-2.5 py-1.5 text-xs text-sky-400 hover:text-sky-300 hover:bg-sky-950/50 border border-sky-800/80 rounded transition flex items-center space-x-1" title="Open View DDL in a new Query tab for full-screen editing">
+          <span>Open in Query Tab</span>
+          <span class="text-xs">↗</span>
+        </button>
+        <div class="flex items-center space-x-2">
+          <button onclick="document.getElementById('view-designer-dialog').close()" class="px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 rounded">Cancel</button>
+          <button onclick="submitCreateView()" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-4 py-1.5 rounded text-xs transition">Save View</button>
+        </div>
       </div>
     </div>
   </dialog>
@@ -3430,12 +3437,180 @@
         </div>
         <div>
           <label class="block text-slate-400 mb-1 font-semibold">Trigger Body (Statements)</label>
-          <textarea id="trigger-designer-body" rows="6" placeholder="BEGIN&#10;  -- Statements&#10;END" class="w-full bg-slate-950 border border-slate-700 p-2 text-white font-mono rounded outline-none resize-none focus:border-app-accent"></textarea>
+          <div id="trigger-designer-cm-container" class="h-52 border border-slate-700 rounded bg-slate-950 overflow-hidden font-mono text-xs"></div>
+          <textarea id="trigger-designer-body" rows="6" placeholder="BEGIN&#10;  -- Statements&#10;END" class="hidden"></textarea>
         </div>
       </div>
-      <div class="flex justify-end space-x-2 pt-2 border-t border-slate-800">
-        <button onclick="document.getElementById('trigger-designer-dialog').close()" class="px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 rounded">Cancel</button>
-        <button onclick="submitCreateTrigger()" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-4 py-1.5 rounded text-xs transition">Save Trigger</button>
+      <div class="flex items-center justify-between pt-2 border-t border-slate-800">
+        <button type="button" onclick="openActiveTriggerInQueryTab()" class="px-2.5 py-1.5 text-xs text-amber-400 hover:text-amber-300 hover:bg-amber-950/50 border border-amber-800/80 rounded transition flex items-center space-x-1" title="Open Trigger DDL in a new Query tab for full-screen editing">
+          <span>Open in Query Tab</span>
+          <span class="text-xs">↗</span>
+        </button>
+        <div class="flex items-center space-x-2">
+          <button onclick="document.getElementById('trigger-designer-dialog').close()" class="px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 rounded">Cancel</button>
+          <button onclick="submitCreateTrigger()" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-4 py-1.5 rounded text-xs transition">Save Trigger</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 13. Routine Designer Dialog (HTML5 <dialog>) -->
+  <dialog id="routine-designer-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto">
+    <div class="space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+        <div class="flex items-center space-x-2">
+          <svg class="w-5 h-5 text-indigo-400 shrink-0" aria-hidden="true"><use href="#icon-sliders"/></svg>
+          <h3 id="routine-designer-title" class="text-sm font-bold text-white">Create Stored Routine</h3>
+        </div>
+        <button onclick="document.getElementById('routine-designer-dialog').close()" class="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-800 transition"><svg class="w-3.5 h-3.5"><use href="#icon-x"/></svg></button>
+      </div>
+      <div class="space-y-3 text-xs">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-slate-400 mb-1 font-semibold">Routine Name</label>
+            <input type="text" id="routine-designer-name" placeholder="sp_process_orders" class="w-full bg-slate-950 border border-slate-700 p-2 text-white font-mono rounded outline-none focus:border-app-accent">
+          </div>
+          <div>
+            <label class="block text-slate-400 mb-1 font-semibold">Routine Type</label>
+            <select id="routine-designer-type" onchange="toggleRoutineTypeUI()" class="w-full bg-slate-950 border border-slate-700 p-2 text-white font-mono rounded outline-none">
+              <option value="PROCEDURE" selected>PROCEDURE</option>
+              <option value="FUNCTION">FUNCTION</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 items-center">
+          <div id="routine-return-type-container" class="hidden">
+            <label class="block text-slate-400 mb-1 font-semibold">Returns Data Type</label>
+            <input type="text" id="routine-designer-returns" placeholder="VARCHAR(255)" class="w-full bg-slate-950 border border-slate-700 p-2 text-white font-mono rounded outline-none focus:border-app-accent">
+          </div>
+          <div class="flex items-center space-x-2 pt-2">
+            <input type="checkbox" id="routine-designer-deterministic" class="rounded bg-slate-950 border-slate-700 text-app-accent focus:ring-0">
+            <label for="routine-designer-deterministic" class="text-slate-300 font-semibold cursor-pointer">DETERMINISTIC</label>
+          </div>
+        </div>
+
+        <!-- Parameters Builder -->
+        <div>
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="text-slate-400 font-semibold">Parameters</label>
+            <button type="button" onclick="addRoutineParameterRow()" class="text-indigo-400 hover:text-indigo-300 text-xs flex items-center space-x-1" title="Add Parameter">
+              <span>+ Add Parameter</span>
+            </button>
+          </div>
+          <div id="routine-params-list" class="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+            <!-- Dynamic rows -->
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-slate-400 mb-1 font-semibold">Routine Body (Statements)</label>
+          <div id="routine-designer-cm-container" class="h-48 border border-slate-700 rounded bg-slate-950 overflow-hidden font-mono text-xs"></div>
+        </div>
+      </div>
+      <div class="flex items-center justify-between pt-2 border-t border-slate-800">
+        <button type="button" onclick="openActiveRoutineInQueryTab()" class="px-2.5 py-1.5 text-xs text-indigo-400 hover:text-indigo-300 hover:bg-indigo-950/50 border border-indigo-800/80 rounded transition flex items-center space-x-1" title="Open Routine DDL in a new Query tab for full-screen editing">
+          <span>Open in Query Tab</span>
+          <span class="text-xs">↗</span>
+        </button>
+        <div class="flex items-center space-x-2">
+          <button onclick="document.getElementById('routine-designer-dialog').close()" class="px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 rounded">Cancel</button>
+          <button onclick="submitCreateRoutine()" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-4 py-1.5 rounded text-xs transition">Save Routine</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 14. Event Designer Dialog (HTML5 <dialog>) -->
+  <dialog id="event-designer-dialog" class="m-auto bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl p-6 outline-none max-w-xl w-full backdrop:bg-black/75 backdrop:backdrop-blur-sm max-h-[90vh] overflow-y-auto">
+    <div class="space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+        <div class="flex items-center space-x-2">
+          <svg class="w-5 h-5 text-cyan-400 shrink-0" aria-hidden="true"><use href="#icon-clock"/></svg>
+          <h3 id="event-designer-title" class="text-sm font-bold text-white">Create Scheduled Event</h3>
+        </div>
+        <button onclick="document.getElementById('event-designer-dialog').close()" class="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-800 transition"><svg class="w-3.5 h-3.5"><use href="#icon-x"/></svg></button>
+      </div>
+      <div class="space-y-3 text-xs">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-slate-400 mb-1 font-semibold">Event Name</label>
+            <input type="text" id="event-designer-name" placeholder="ev_purge_logs" class="w-full bg-slate-950 border border-slate-700 p-2 text-white font-mono rounded outline-none focus:border-app-accent">
+          </div>
+          <div>
+            <label class="block text-slate-400 mb-1 font-semibold">Status & Preservation</label>
+            <div class="flex items-center space-x-3 pt-2">
+              <select id="event-designer-status" class="bg-slate-950 border border-slate-700 p-1.5 text-white font-mono rounded text-xs outline-none">
+                <option value="ENABLE" selected>ENABLE</option>
+                <option value="DISABLE">DISABLE</option>
+              </select>
+              <label class="flex items-center space-x-1 text-slate-300 cursor-pointer">
+                <input type="checkbox" id="event-designer-preserve" checked class="rounded bg-slate-950 border-slate-700 text-app-accent focus:ring-0">
+                <span>PRESERVE</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Schedule Selector -->
+        <div class="p-2.5 rounded bg-slate-950 border border-slate-800 space-y-2">
+          <div class="flex items-center space-x-4">
+            <label class="flex items-center space-x-1.5 cursor-pointer font-semibold text-slate-300">
+              <input type="radio" name="event-schedule-type" value="EVERY" checked onchange="toggleEventScheduleTypeUI()" class="text-app-accent">
+              <span>Recurring (EVERY)</span>
+            </label>
+            <label class="flex items-center space-x-1.5 cursor-pointer font-semibold text-slate-300">
+              <input type="radio" name="event-schedule-type" value="AT" onchange="toggleEventScheduleTypeUI()" class="text-app-accent">
+              <span>One-Time (AT)</span>
+            </label>
+          </div>
+
+          <div id="event-sched-every-container" class="space-y-2">
+            <div class="flex items-center space-x-2">
+              <span class="text-slate-400">Every</span>
+              <input type="number" id="event-designer-interval-val" value="1" min="1" class="w-20 bg-slate-900 border border-slate-700 p-1.5 text-white font-mono rounded text-xs outline-none">
+              <select id="event-designer-interval-unit" class="bg-slate-900 border border-slate-700 p-1.5 text-white font-mono rounded text-xs outline-none">
+                <option value="DAY" selected>DAY</option>
+                <option value="HOUR">HOUR</option>
+                <option value="MINUTE">MINUTE</option>
+                <option value="SECOND">SECOND</option>
+                <option value="WEEK">WEEK</option>
+                <option value="MONTH">MONTH</option>
+                <option value="YEAR">YEAR</option>
+              </select>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-[11px] pt-1">
+              <div>
+                <label class="text-slate-400 block mb-0.5">Starts At (optional)</label>
+                <input type="text" id="event-designer-starts" placeholder="YYYY-MM-DD HH:MM:SS" class="w-full bg-slate-900 border border-slate-700 p-1 text-white font-mono rounded outline-none">
+              </div>
+              <div>
+                <label class="text-slate-400 block mb-0.5">Ends At (optional)</label>
+                <input type="text" id="event-designer-ends" placeholder="YYYY-MM-DD HH:MM:SS" class="w-full bg-slate-900 border border-slate-700 p-1 text-white font-mono rounded outline-none">
+              </div>
+            </div>
+          </div>
+
+          <div id="event-sched-at-container" class="hidden">
+            <label class="text-slate-400 block mb-1">Execute At Timestamp</label>
+            <input type="text" id="event-designer-at" placeholder="YYYY-MM-DD HH:MM:SS" class="w-full bg-slate-900 border border-slate-700 p-1.5 text-white font-mono rounded text-xs outline-none">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-slate-400 mb-1 font-semibold">Event Action Statement (DO)</label>
+          <div id="event-designer-cm-container" class="h-48 border border-slate-700 rounded bg-slate-950 overflow-hidden font-mono text-xs"></div>
+        </div>
+      </div>
+      <div class="flex items-center justify-between pt-2 border-t border-slate-800">
+        <button type="button" onclick="openActiveEventInQueryTab()" class="px-2.5 py-1.5 text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-950/50 border border-cyan-800/80 rounded transition flex items-center space-x-1" title="Open Event DDL in a new Query tab for full-screen editing">
+          <span>Open in Query Tab</span>
+          <span class="text-xs">↗</span>
+        </button>
+        <div class="flex items-center space-x-2">
+          <button onclick="document.getElementById('event-designer-dialog').close()" class="px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 rounded">Cancel</button>
+          <button onclick="submitCreateEvent()" class="bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-4 py-1.5 rounded text-xs transition">Save Event</button>
+        </div>
       </div>
     </div>
   </dialog>
@@ -6204,6 +6379,8 @@
       tables: false,
       views: false,
       triggers: false,
+      procedures: false,
+      functions: false,
       routines: false,
       events: false
     };
@@ -6214,14 +6391,15 @@
     } catch (_) {}
 
     function toggleSchemaSection(section) {
-      if (schemaSectionCollapsed[section] !== undefined) {
-        schemaSectionCollapsed[section] = !schemaSectionCollapsed[section];
-        try {
-          localStorage.setItem('sqlfox_schema_collapse', JSON.stringify(schemaSectionCollapsed));
-        } catch (_) {}
-        if (schemaCatalogCache) {
-          renderSchemaTree(schemaCatalogCache);
-        }
+      if (schemaSectionCollapsed[section] === undefined) {
+        schemaSectionCollapsed[section] = false;
+      }
+      schemaSectionCollapsed[section] = !schemaSectionCollapsed[section];
+      try {
+        localStorage.setItem('sqlfox_schema_collapse', JSON.stringify(schemaSectionCollapsed));
+      } catch (_) {}
+      if (schemaCatalogCache) {
+        renderSchemaTree(schemaCatalogCache);
       }
     }
 
@@ -6283,12 +6461,22 @@
       const viewsList = q ? allViews.filter(v => v._lower ? v._lower.includes(q) : v.name.toLowerCase().includes(q)) : allViews;
       const triggersList = q ? allTriggers.filter(tr => tr._lower ? tr._lower.includes(q) : tr.name.toLowerCase().includes(q)) : allTriggers;
 
+      const allRoutines = schema.routines || [];
+      const allProcedures = allRoutines.filter(r => (r.type || 'PROCEDURE').toUpperCase() === 'PROCEDURE');
+      const proceduresList = q ? allProcedures.filter(r => r.name.toLowerCase().includes(q)) : allProcedures;
+
+      const allFunctions = allRoutines.filter(r => (r.type || '').toUpperCase() === 'FUNCTION');
+      const functionsList = q ? allFunctions.filter(r => r.name.toLowerCase().includes(q)) : allFunctions;
+
+      const allEvents = schema.events || [];
+      const eventsList = q ? allEvents.filter(e => e.name.toLowerCase().includes(q)) : allEvents;
+
       const badgeEl = document.getElementById('table-count-badge');
       if (badgeEl) {
         badgeEl.textContent = q ? `${tablesList.length}/${allTables.length}` : allTables.length;
       }
 
-      if (q && tablesList.length === 0 && viewsList.length === 0 && triggersList.length === 0) {
+      if (q && tablesList.length === 0 && viewsList.length === 0 && triggersList.length === 0 && proceduresList.length === 0 && functionsList.length === 0 && eventsList.length === 0) {
         treeEl.innerHTML = `
           <div class="text-slate-500 text-center py-6 text-xs italic">
             No objects matching "${escapeHtml(q)}"<br>
@@ -6407,33 +6595,34 @@
         `;
       }
 
-      // 4. Stored Routines (Procedures & Functions) Section
-      const allRoutines = schema.routines || [];
-      const routinesList = q ? allRoutines.filter(r => r.name.toLowerCase().includes(q)) : allRoutines;
-      const isRoutinesCollapsed = schemaSectionCollapsed.routines && !q;
-      if (!q || routinesList.length > 0) {
+      // 4. Stored Procedures Section
+      const isProceduresCollapsed = schemaSectionCollapsed.procedures && !q;
+      if (!q || proceduresList.length > 0) {
         html += `
           <div class="mb-2.5">
             <div class="flex items-center justify-between text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-1 py-1 border-b border-slate-800/80 mb-1 hover:bg-slate-800/40 rounded transition select-none">
-              <button onclick="toggleSchemaSection('routines')" class="flex items-center space-x-1.5 flex-1 text-left group cursor-pointer" title="${isRoutinesCollapsed ? 'Expand Routines' : 'Collapse Routines'}">
-                <span class="text-[9px] text-slate-500 group-hover:text-slate-300 font-mono w-3">${isRoutinesCollapsed ? '▶' : '▼'}</span>
+              <button onclick="toggleSchemaSection('procedures')" class="flex items-center space-x-1.5 flex-1 text-left group cursor-pointer" title="${isProceduresCollapsed ? 'Expand Procedures' : 'Collapse Procedures'}">
+                <span class="text-[9px] text-slate-500 group-hover:text-slate-300 font-mono w-3">${isProceduresCollapsed ? '▶' : '▼'}</span>
                 ${renderIcon('sliders', 'w-3.5 h-3.5 text-indigo-400 shrink-0')}
-                <span class="group-hover:text-white transition">Routines</span>
-                <span class="text-[10px] text-slate-500 font-mono font-normal">(${routinesList.length}${q ? '/' + allRoutines.length : ''})</span>
+                <span class="group-hover:text-white transition">Procedures</span>
+                <span class="text-[10px] text-slate-500 font-mono font-normal">(${proceduresList.length}${q ? '/' + allProcedures.length : ''})</span>
               </button>
+              <button onclick="openCreateRoutineModal('', 'PROCEDURE')" class="text-app-accent hover:text-white text-xs px-1 flex items-center" title="Create New Stored Procedure">${renderIcon('plus', 'w-3.5 h-3.5 text-indigo-400')}</button>
             </div>
-            ${isRoutinesCollapsed ? '' : `
+            ${isProceduresCollapsed ? '' : `
             <div class="space-y-0.5">
-              ${routinesList.length === 0 ? `<div class="text-slate-600 text-[11px] px-2 py-1 italic">No stored procedures or functions.</div>` :
-                routinesList.map(r => `
-                  <div class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" data-name="${escapeHtml(r.name)}" data-type="${escapeHtml(r.type)}" onclick="openRoutineCaller(this.dataset.name, this.dataset.type)">
-                    <span class="flex items-center space-x-1.5 truncate text-sky-300 group-hover:text-white flex-1 min-w-0 mr-1" title="${escapeHtml(r.name)} (${r.type})">
-                      <span class="text-xs flex-shrink-0 flex items-center">${r.type === 'FUNCTION' ? '<span class="font-serif italic font-bold text-sky-400 text-xs">ƒ</span>' : renderIcon('sliders', 'w-3 h-3 text-indigo-400')}</span>
+              ${proceduresList.length === 0 ? `<div class="text-slate-600 text-[11px] px-2 py-1 italic">No stored procedures.</div>` :
+                proceduresList.map(r => `
+                  <div class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" data-name="${escapeHtml(r.name)}" data-type="${escapeHtml(r.type || 'PROCEDURE')}" onclick="openRoutineCaller(this.dataset.name, this.dataset.type)">
+                    <span class="flex items-center space-x-1.5 truncate text-sky-300 group-hover:text-white flex-1 min-w-0 mr-1" title="${escapeHtml(r.name)} (${r.type || 'PROCEDURE'})">
+                      <span class="text-xs flex-shrink-0 flex items-center">${renderIcon('sliders', 'w-3 h-3 text-indigo-400')}</span>
                       <span class="truncate">${escapeHtml(r.name)}</span>
                     </span>
                     <div class="flex items-center space-x-1">
-                      <button type="button" data-name="${escapeHtml(r.name)}" data-type="${escapeHtml(r.type)}" onclick="event.stopPropagation(); viewRoutineDDL(this.dataset.name, this.dataset.type)" class="opacity-0 group-hover:opacity-100 hover:text-sky-300 px-1 text-[11px] flex items-center" title="View DDL">${renderIcon('file-code', 'w-3 h-3 text-sky-400')}</button>
-                      <button type="button" data-name="${escapeHtml(r.name)}" data-type="${escapeHtml(r.type)}" onclick="event.stopPropagation(); openRoutineCaller(this.dataset.name, this.dataset.type)" class="opacity-0 group-hover:opacity-100 hover:text-emerald-400 px-1 text-[11px] flex items-center" title="Call in Query Editor">${renderIcon('play', 'w-3 h-3 text-emerald-400')}</button>
+                      <button type="button" data-name="${escapeHtml(r.name)}" data-type="${escapeHtml(r.type || 'PROCEDURE')}" onclick="event.stopPropagation(); viewRoutineDDL(this.dataset.name, this.dataset.type)" class="opacity-0 group-hover:opacity-100 hover:text-sky-300 px-1 text-[11px] flex items-center" title="View DDL">${renderIcon('file-code', 'w-3 h-3 text-sky-400')}</button>
+                      <button type="button" data-name="${escapeHtml(r.name)}" data-type="${escapeHtml(r.type || 'PROCEDURE')}" onclick="event.stopPropagation(); openCreateRoutineModal(this.dataset.name, this.dataset.type)" class="opacity-0 group-hover:opacity-100 hover:text-indigo-300 px-1 text-[11px] flex items-center" title="Edit Routine">${renderIcon('edit', 'w-3 h-3 text-indigo-400')}</button>
+                      <button type="button" data-name="${escapeHtml(r.name)}" data-type="${escapeHtml(r.type || 'PROCEDURE')}" onclick="event.stopPropagation(); dropRoutine(this.dataset.name, this.dataset.type)" class="opacity-0 group-hover:opacity-100 hover:text-rose-400 px-0.5 text-[11px] flex items-center" title="Drop Routine">${renderIcon('trash-2', 'w-3 h-3 text-rose-400')}</button>
+                      <button type="button" data-name="${escapeHtml(r.name)}" data-type="${escapeHtml(r.type || 'PROCEDURE')}" onclick="event.stopPropagation(); openRoutineCaller(this.dataset.name, this.dataset.type)" class="opacity-0 group-hover:opacity-100 hover:text-emerald-400 px-1 text-[11px] flex items-center" title="Call in Query Editor">${renderIcon('play', 'w-3 h-3 text-emerald-400')}</button>
                     </div>
                   </div>
                 `).join('')
@@ -6444,9 +6633,45 @@
         `;
       }
 
-      // 5. Scheduled Events Section
-      const allEvents = schema.events || [];
-      const eventsList = q ? allEvents.filter(e => e.name.toLowerCase().includes(q)) : allEvents;
+      // 5. Stored Functions Section
+      const isFunctionsCollapsed = schemaSectionCollapsed.functions && !q;
+      if (!q || functionsList.length > 0) {
+        html += `
+          <div class="mb-2.5">
+            <div class="flex items-center justify-between text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-1 py-1 border-b border-slate-800/80 mb-1 hover:bg-slate-800/40 rounded transition select-none">
+              <button onclick="toggleSchemaSection('functions')" class="flex items-center space-x-1.5 flex-1 text-left group cursor-pointer" title="${isFunctionsCollapsed ? 'Expand Functions' : 'Collapse Functions'}">
+                <span class="text-[9px] text-slate-500 group-hover:text-slate-300 font-mono w-3">${isFunctionsCollapsed ? '▶' : '▼'}</span>
+                <span class="font-serif italic font-bold text-sky-400 text-xs shrink-0 w-3.5 text-center">ƒ</span>
+                <span class="group-hover:text-white transition">Functions</span>
+                <span class="text-[10px] text-slate-500 font-mono font-normal">(${functionsList.length}${q ? '/' + allFunctions.length : ''})</span>
+              </button>
+              <button onclick="openCreateRoutineModal('', 'FUNCTION')" class="text-app-accent hover:text-white text-xs px-1 flex items-center" title="Create New Stored Function">${renderIcon('plus', 'w-3.5 h-3.5 text-sky-400')}</button>
+            </div>
+            ${isFunctionsCollapsed ? '' : `
+            <div class="space-y-0.5">
+              ${functionsList.length === 0 ? `<div class="text-slate-600 text-[11px] px-2 py-1 italic">No stored functions.</div>` :
+                functionsList.map(r => `
+                  <div class="rounded hover:bg-slate-800/60 p-1 group flex items-center justify-between cursor-pointer" data-name="${escapeHtml(r.name)}" data-type="${escapeHtml(r.type || 'FUNCTION')}" onclick="openRoutineCaller(this.dataset.name, this.dataset.type)">
+                    <span class="flex items-center space-x-1.5 truncate text-sky-300 group-hover:text-white flex-1 min-w-0 mr-1" title="${escapeHtml(r.name)} (${r.type || 'FUNCTION'})">
+                      <span class="font-serif italic font-bold text-sky-400 text-xs shrink-0 w-3 text-center">ƒ</span>
+                      <span class="truncate">${escapeHtml(r.name)}</span>
+                    </span>
+                    <div class="flex items-center space-x-1">
+                      <button type="button" data-name="${escapeHtml(r.name)}" data-type="${escapeHtml(r.type || 'FUNCTION')}" onclick="event.stopPropagation(); viewRoutineDDL(this.dataset.name, this.dataset.type)" class="opacity-0 group-hover:opacity-100 hover:text-sky-300 px-1 text-[11px] flex items-center" title="View DDL">${renderIcon('file-code', 'w-3 h-3 text-sky-400')}</button>
+                      <button type="button" data-name="${escapeHtml(r.name)}" data-type="${escapeHtml(r.type || 'FUNCTION')}" onclick="event.stopPropagation(); openCreateRoutineModal(this.dataset.name, this.dataset.type)" class="opacity-0 group-hover:opacity-100 hover:text-indigo-300 px-1 text-[11px] flex items-center" title="Edit Routine">${renderIcon('edit', 'w-3 h-3 text-indigo-400')}</button>
+                      <button type="button" data-name="${escapeHtml(r.name)}" data-type="${escapeHtml(r.type || 'FUNCTION')}" onclick="event.stopPropagation(); dropRoutine(this.dataset.name, this.dataset.type)" class="opacity-0 group-hover:opacity-100 hover:text-rose-400 px-0.5 text-[11px] flex items-center" title="Drop Routine">${renderIcon('trash-2', 'w-3 h-3 text-rose-400')}</button>
+                      <button type="button" data-name="${escapeHtml(r.name)}" data-type="${escapeHtml(r.type || 'FUNCTION')}" onclick="event.stopPropagation(); openRoutineCaller(this.dataset.name, this.dataset.type)" class="opacity-0 group-hover:opacity-100 hover:text-emerald-400 px-1 text-[11px] flex items-center" title="Call in Query Editor">${renderIcon('play', 'w-3 h-3 text-emerald-400')}</button>
+                    </div>
+                  </div>
+                `).join('')
+              }
+            </div>
+            `}
+          </div>
+        `;
+      }
+
+      // 6. Scheduled Events Section
       const isEventsCollapsed = schemaSectionCollapsed.events && !q;
       if (!q || eventsList.length > 0) {
         html += `
@@ -6458,6 +6683,7 @@
                 <span class="group-hover:text-white transition">Events</span>
                 <span class="text-[10px] text-slate-500 font-mono font-normal">(${eventsList.length}${q ? '/' + allEvents.length : ''})</span>
               </button>
+              <button onclick="openCreateEventModal()" class="text-app-accent hover:text-white text-xs px-1 flex items-center" title="Create New Scheduled Event">${renderIcon('plus', 'w-3.5 h-3.5 text-cyan-400')}</button>
             </div>
             ${isEventsCollapsed ? '' : `
             <div class="space-y-0.5">
@@ -6472,6 +6698,8 @@
                       </span>
                       <div class="flex items-center space-x-1">
                         <button type="button" data-name="${escapeHtml(ev.name)}" onclick="event.stopPropagation(); viewEventDDL(this.dataset.name)" class="opacity-0 group-hover:opacity-100 hover:text-sky-300 px-1 text-[11px] flex items-center" title="View DDL">${renderIcon('file-code', 'w-3 h-3 text-sky-400')}</button>
+                        <button type="button" data-name="${escapeHtml(ev.name)}" onclick="event.stopPropagation(); openCreateEventModal(this.dataset.name)" class="opacity-0 group-hover:opacity-100 hover:text-cyan-300 px-1 text-[11px] flex items-center" title="Edit Event">${renderIcon('edit', 'w-3 h-3 text-cyan-400')}</button>
+                        <button type="button" data-name="${escapeHtml(ev.name)}" onclick="event.stopPropagation(); dropEvent(this.dataset.name)" class="opacity-0 group-hover:opacity-100 hover:text-rose-400 px-0.5 text-[11px] flex items-center" title="Drop Event">${renderIcon('trash-2', 'w-3 h-3 text-rose-400')}</button>
                         <button type="button" data-name="${escapeHtml(ev.name)}" data-next-enabled="${!isEnabled}" onclick="event.stopPropagation(); toggleEventStatusAction(this.dataset.name, this.dataset.nextEnabled === 'true')" class="opacity-0 group-hover:opacity-100 hover:text-amber-300 px-1 text-[11px] flex items-center" title="${isEnabled ? 'Disable Event' : 'Enable Event'}">${isEnabled ? renderIcon('square', 'w-2.5 h-2.5 text-amber-400') : renderIcon('play', 'w-2.5 h-2.5 text-emerald-400')}</button>
                       </div>
                     </div>
@@ -15004,35 +15232,161 @@ Please analyze what is causing this query to be slow and suggest necessary query
       });
     }
 
+    // --- Shared Modal CodeMirror & Hybrid Tab Handoff Architecture ---
+    let viewCMInstance = null;
+    let triggerCMInstance = null;
+
+    function stripDefiner(sql) {
+      if (!sql || typeof sql !== 'string') return '';
+      return sql.replace(/\s*(?:\/\*!\d+\s*)?DEFINER\s*=\s*(?:`[^`]+`|'[^']+'|[^\s@]+)@(?:`[^`]+`|'[^']+'|[^\s]+)(?:\s*\*\/)?/gi, '');
+    }
+
+    function extractViewSelectQuery(ddl) {
+      if (!ddl || typeof ddl !== 'string') return '';
+      const clean = stripDefiner(ddl);
+      const viewMatch = clean.match(/\bVIEW\s+(?:`[^`]+`|"[^"]+"|[^\s(]+)(?:\s*\([^)]*\))?\s+AS\s+([\s\S]+)$/i);
+      if (viewMatch) {
+        return viewMatch[1].trim().replace(/;+$/, '');
+      }
+      const match = clean.match(/\bAS\s+([\s\S]+)$/i);
+      if (match) {
+        return match[1].trim().replace(/;+$/, '');
+      }
+      return clean.trim();
+    }
+
+    function getOrCreateModalCodeMirror(containerId, initialValue = '', mode = 'text/x-mysql') {
+      const container = document.getElementById(containerId);
+      if (!container || typeof CodeMirror === 'undefined') return null;
+      if (container._cmInstance) {
+        container._cmInstance.setValue(initialValue || '');
+        return container._cmInstance;
+      }
+      container.innerHTML = '';
+      const cm = CodeMirror(container, {
+        value: initialValue || '',
+        mode: mode,
+        lineNumbers: true,
+        matchBrackets: true,
+        autoCloseBrackets: true,
+        lineWrapping: true,
+        extraKeys: {
+          'Ctrl-Space': function(cmInst) {
+            if (typeof sqlContextHint === 'function') {
+              cmInst.showHint({ hint: sqlContextHint, completeSingle: false });
+            }
+          }
+        }
+      });
+      container._cmInstance = cm;
+      return cm;
+    }
+
+    function openInQueryEditor(sql, title = null) {
+      addNewQueryTab();
+      if (title) {
+        const tab = tabs.find(t => t.id === activeTabId);
+        if (tab) {
+          tab.title = title;
+          renderTabs();
+        }
+      }
+      setEditorSQL(sql);
+      if (cmEditor) {
+        cmEditor.focus();
+        cmEditor.setCursor(cmEditor.lineCount(), 0);
+      }
+    }
+
     // --- View Designer Handlers ---
-    function openCreateViewModal(viewName = '', existingSQL = '') {
+    async function openCreateViewModal(viewName = '', existingSQL = '') {
       document.getElementById('view-designer-title').textContent = viewName ? 'Alter View ' + viewName : 'Create Database View';
       document.getElementById('view-designer-name').value = viewName;
-      document.getElementById('view-designer-query').value = existingSQL || 'SELECT * FROM ...';
       const dlg = document.getElementById('view-designer-dialog');
+      dlg.dataset.isEditing = viewName ? 'true' : 'false';
+      dlg.dataset.originalName = viewName || '';
+
+      let queryToUse = existingSQL || '';
+      if (viewName && !existingSQL && activeConnection) {
+        try {
+          const res = await apiFetch(`/api/session/${activeConnection.id}/ddl/${encodeURIComponent(viewName)}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.ddl) {
+              queryToUse = extractViewSelectQuery(data.ddl);
+            }
+          }
+        } catch (err) {
+          console.warn('Failed to introspect existing view DDL:', err);
+        }
+      }
+
+      if (!queryToUse) {
+        queryToUse = 'SELECT * FROM ...';
+      }
+
+      document.getElementById('view-designer-query').value = queryToUse;
+      viewCMInstance = getOrCreateModalCodeMirror('view-designer-cm-container', queryToUse);
+
       if (typeof dlg.showModal === 'function') dlg.showModal();
       else dlg.setAttribute('open', '');
+
+      setTimeout(() => {
+        if (viewCMInstance) {
+          viewCMInstance.refresh();
+          viewCMInstance.focus();
+        }
+      }, 50);
+    }
+
+    function getViewEditorQuery() {
+      if (viewCMInstance) return viewCMInstance.getValue().trim();
+      const el = document.getElementById('view-designer-query');
+      return el ? el.value.trim() : '';
+    }
+
+    function assembleViewDDL(name, query, isEditing = false, originalName = '') {
+      const isSQLite = activeConnection && (activeConnection.driver === 'sqlite' || activeConnection.driver === 'sqlite3');
+      const quote = isSQLite ? '"' : '`';
+      const safeName = isSQLite ? name.replace(/"/g, '""') : name.replace(/`/g, '``');
+      const cleanQuery = (query || '').trim().replace(/;+$/, '');
+      let sql = '';
+      if (isEditing && originalName && originalName !== name) {
+        const safeOrig = isSQLite ? originalName.replace(/"/g, '""') : originalName.replace(/`/g, '``');
+        sql += `DROP VIEW IF EXISTS ${quote}${safeOrig}${quote};\n`;
+      }
+      const createStmt = isSQLite
+        ? `CREATE VIEW IF NOT EXISTS ${quote}${safeName}${quote} AS\n${cleanQuery};`
+        : `CREATE OR REPLACE VIEW ${quote}${safeName}${quote} AS\n${cleanQuery};`;
+      return sql + createStmt;
+    }
+
+    function openActiveViewInQueryTab() {
+      const dlg = document.getElementById('view-designer-dialog');
+      const isEditing = dlg && dlg.dataset.isEditing === 'true';
+      const originalName = dlg ? dlg.dataset.originalName || '' : '';
+      const name = document.getElementById('view-designer-name').value.trim() || 'v_new_view';
+      const query = getViewEditorQuery() || 'SELECT 1';
+      const sql = assembleViewDDL(name, query, isEditing, originalName);
+      if (dlg) dlg.close();
+      openInQueryEditor(sql, `View: ${name}`);
     }
 
     async function submitCreateView() {
+      const dlg = document.getElementById('view-designer-dialog');
+      const isEditing = dlg && dlg.dataset.isEditing === 'true';
+      const originalName = dlg ? dlg.dataset.originalName || '' : '';
       const name = document.getElementById('view-designer-name').value.trim();
-      const query = document.getElementById('view-designer-query').value.trim();
+      const query = getViewEditorQuery();
       if (!name || !query) {
         showNativeAlert('View name and SELECT query are required.', 'View Designer');
         return;
       }
-      const isSQLite = activeConnection && (activeConnection.driver === 'sqlite' || activeConnection.driver === 'sqlite3');
-      const quote = isSQLite ? '"' : '`';
-      const sql = isSQLite
-        ? `CREATE VIEW IF NOT EXISTS ${quote}${name}${quote} AS\n${query};`
-        : `CREATE OR REPLACE VIEW ${quote}${name}${quote} AS\n${query};`;
+      const sql = assembleViewDDL(name, query, isEditing, originalName);
 
-      document.getElementById('view-designer-dialog').close();
+      if (dlg) dlg.close();
       openDDLReviewModal(sql, async () => {
-        const ok = await executeDDLStatements(sql, `View "${name}" created successfully.`);
-        if (ok) {
-          await loadSchemaTree(activeConnection.id);
-        }
+        await executeDDLStatements(sql, `View "${name}" saved successfully.`);
       });
     }
 
@@ -15042,12 +15396,10 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
       const isSQLite = activeConnection && (activeConnection.driver === 'sqlite' || activeConnection.driver === 'sqlite3');
       const quote = isSQLite ? '"' : '`';
-      const sql = `DROP VIEW ${quote}${viewName}${quote};`;
+      const safeName = isSQLite ? viewName.replace(/"/g, '""') : viewName.replace(/`/g, '``');
+      const sql = `DROP VIEW IF EXISTS ${quote}${safeName}${quote};`;
       openDDLReviewModal(sql, async () => {
-        const ok = await executeDDLStatements(sql, `View "${viewName}" dropped successfully.`);
-        if (ok) {
-          await loadSchemaTree(activeConnection.id);
-        }
+        await executeDDLStatements(sql, `View "${viewName}" dropped successfully.`);
       });
     }
 
@@ -15055,6 +15407,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
     function openCreateTriggerModal(triggerName = '', existingData = null) {
       document.getElementById('trigger-designer-title').textContent = triggerName ? 'Edit Trigger ' + triggerName : 'Create Database Trigger';
       document.getElementById('trigger-designer-name').value = triggerName;
+      const dlg = document.getElementById('trigger-designer-dialog');
+      dlg.dataset.isEditing = triggerName ? 'true' : 'false';
+      dlg.dataset.originalName = triggerName || '';
       
       const tblSelect = document.getElementById('trigger-designer-table');
       if (tblSelect && schemaCatalogCache) {
@@ -15066,44 +15421,98 @@ Please analyze what is causing this query to be slow and suggest necessary query
         existingData = schemaCatalogCache.triggers.find(tr => tr.name === triggerName) || null;
       }
 
+      let bodyToUse = 'BEGIN\n  -- Trigger logic here\nEND;';
       if (existingData) {
-        if (existingData.table) tblSelect.value = existingData.table;
+        if (existingData.table && tblSelect) {
+          if (!tblSelect.querySelector(`option[value="${CSS.escape ? CSS.escape(existingData.table) : existingData.table}"]`)) {
+            const opt = document.createElement('option');
+            opt.value = existingData.table;
+            opt.textContent = existingData.table;
+            tblSelect.appendChild(opt);
+          }
+          tblSelect.value = existingData.table;
+        }
         if (existingData.timing) document.getElementById('trigger-designer-timing').value = existingData.timing;
         if (existingData.event) document.getElementById('trigger-designer-event').value = existingData.event;
-        if (existingData.statement) document.getElementById('trigger-designer-body').value = existingData.statement;
-      } else {
-        document.getElementById('trigger-designer-body').value = 'BEGIN\n  -- Trigger logic here\nEND;';
+        if (existingData.statement) bodyToUse = existingData.statement;
       }
 
-      const dlg = document.getElementById('trigger-designer-dialog');
+      document.getElementById('trigger-designer-body').value = bodyToUse;
+      triggerCMInstance = getOrCreateModalCodeMirror('trigger-designer-cm-container', bodyToUse);
+
       if (typeof dlg.showModal === 'function') dlg.showModal();
       else dlg.setAttribute('open', '');
+
+      setTimeout(() => {
+        if (triggerCMInstance) {
+          triggerCMInstance.refresh();
+          triggerCMInstance.focus();
+        }
+      }, 50);
+    }
+
+    function getTriggerEditorBody() {
+      if (triggerCMInstance) return triggerCMInstance.getValue().trim();
+      const el = document.getElementById('trigger-designer-body');
+      return el ? el.value.trim() : '';
+    }
+
+    function assembleTriggerDDL(name, table, timing, event, body, isEditing = false, originalName = '') {
+      const isSQLite = activeConnection && (activeConnection.driver === 'sqlite' || activeConnection.driver === 'sqlite3');
+      const quote = isSQLite ? '"' : '`';
+      const safeName = isSQLite ? name.replace(/"/g, '""') : name.replace(/`/g, '``');
+      const safeTable = isSQLite ? table.replace(/"/g, '""') : table.replace(/`/g, '``');
+      const cleanBody = (body || '').trim().replace(/;+$/, '');
+      let sql = '';
+      if (isEditing) {
+        if (originalName && originalName !== name) {
+          const safeOrig = isSQLite ? originalName.replace(/"/g, '""') : originalName.replace(/`/g, '``');
+          sql += `DROP TRIGGER IF EXISTS ${quote}${safeOrig}${quote};\n`;
+        }
+        sql += `DROP TRIGGER IF EXISTS ${quote}${safeName}${quote};\n`;
+      }
+      if (isSQLite) {
+        sql += `CREATE TRIGGER ${quote}${safeName}${quote} ${timing} ${event} ON ${quote}${safeTable}${quote}\n${cleanBody};`;
+      } else {
+        sql += `CREATE TRIGGER ${quote}${safeName}${quote} ${timing} ${event} ON ${quote}${safeTable}${quote} FOR EACH ROW\n${cleanBody};`;
+      }
+      return sql;
+    }
+
+    function openActiveTriggerInQueryTab() {
+      const dlg = document.getElementById('trigger-designer-dialog');
+      const isEditing = dlg && dlg.dataset.isEditing === 'true';
+      const originalName = dlg ? dlg.dataset.originalName || '' : '';
+      const name = document.getElementById('trigger-designer-name').value.trim() || 'trg_new';
+      const table = document.getElementById('trigger-designer-table').value || 'target_table';
+      const timing = document.getElementById('trigger-designer-timing').value;
+      const event = document.getElementById('trigger-designer-event').value;
+      const body = getTriggerEditorBody() || 'BEGIN\n  -- Trigger logic\nEND;';
+      const sql = assembleTriggerDDL(name, table, timing, event, body, isEditing, originalName);
+      if (dlg) dlg.close();
+      openInQueryEditor(sql, `Trigger: ${name}`);
     }
 
     async function submitCreateTrigger() {
+      const dlg = document.getElementById('trigger-designer-dialog');
+      const isEditing = dlg && dlg.dataset.isEditing === 'true';
+      const originalName = dlg ? dlg.dataset.originalName || '' : '';
       const name = document.getElementById('trigger-designer-name').value.trim();
       const table = document.getElementById('trigger-designer-table').value;
       const timing = document.getElementById('trigger-designer-timing').value;
       const event = document.getElementById('trigger-designer-event').value;
-      const body = document.getElementById('trigger-designer-body').value.trim();
+      const body = getTriggerEditorBody();
 
       if (!name || !table || !body) {
         showNativeAlert('Trigger name, target table, and body statements are required.', 'Trigger Designer');
         return;
       }
 
-      const isSQLite = activeConnection && (activeConnection.driver === 'sqlite' || activeConnection.driver === 'sqlite3');
-      const quote = isSQLite ? '"' : '`';
-      const sql = isSQLite
-        ? `CREATE TRIGGER ${quote}${name}${quote} ${timing} ${event} ON ${quote}${table}${quote}\n${body};`
-        : `CREATE TRIGGER ${quote}${name}${quote} ${timing} ${event} ON ${quote}${table}${quote} FOR EACH ROW\n${body};`;
+      const sql = assembleTriggerDDL(name, table, timing, event, body, isEditing, originalName);
 
-      document.getElementById('trigger-designer-dialog').close();
+      if (dlg) dlg.close();
       openDDLReviewModal(sql, async () => {
-        const ok = await executeDDLStatements(sql, `Trigger "${name}" created successfully.`);
-        if (ok) {
-          await loadSchemaTree(activeConnection.id);
-        }
+        await executeDDLStatements(sql, `Trigger "${name}" saved successfully.`);
       });
     }
 
@@ -15113,12 +15522,445 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
       const isSQLite = activeConnection && (activeConnection.driver === 'sqlite' || activeConnection.driver === 'sqlite3');
       const quote = isSQLite ? '"' : '`';
-      const sql = `DROP TRIGGER ${quote}${triggerName}${quote};`;
+      const safeName = isSQLite ? triggerName.replace(/"/g, '""') : triggerName.replace(/`/g, '``');
+      const sql = `DROP TRIGGER IF EXISTS ${quote}${safeName}${quote};`;
       openDDLReviewModal(sql, async () => {
-        const ok = await executeDDLStatements(sql, `Trigger "${triggerName}" dropped successfully.`);
-        if (ok) {
-          await loadSchemaTree(activeConnection.id);
+        await executeDDLStatements(sql, `Trigger "${triggerName}" dropped successfully.`);
+      });
+    }
+
+    // --- Routine Designer Handlers ---
+    let routineCMInstance = null;
+
+    function toggleRoutineTypeUI() {
+      const type = document.getElementById('routine-designer-type').value;
+      const returnContainer = document.getElementById('routine-return-type-container');
+      const isFunc = type === 'FUNCTION';
+      if (returnContainer) {
+        if (isFunc) returnContainer.classList.remove('hidden');
+        else returnContainer.classList.add('hidden');
+      }
+      const dlg = document.getElementById('routine-designer-dialog');
+      const isEditing = dlg && dlg.dataset.isEditing === 'true';
+      const typeDisplay = isFunc ? 'Function' : 'Procedure';
+      if (!isEditing) {
+        document.getElementById('routine-designer-title').textContent = `Create Stored ${typeDisplay}`;
+      }
+      const nameInput = document.getElementById('routine-designer-name');
+      if (nameInput) {
+        nameInput.placeholder = isFunc ? 'fn_calculate_tax' : 'sp_process_orders';
+      }
+      document.querySelectorAll('.routine-param-mode').forEach(sel => {
+        sel.style.display = isFunc ? 'none' : 'block';
+      });
+    }
+
+    function addRoutineParameterRow(name = '', mode = 'IN', type = 'INT') {
+      const list = document.getElementById('routine-params-list');
+      if (!list) return;
+      const isFunc = document.getElementById('routine-designer-type').value === 'FUNCTION';
+      const row = document.createElement('div');
+      row.className = 'flex items-center space-x-1.5 routine-param-row';
+      row.innerHTML = `
+        <select class="routine-param-mode bg-slate-950 border border-slate-700 p-1 text-white font-mono rounded text-[11px] w-20" style="display: ${isFunc ? 'none' : 'block'};">
+          <option value="IN" ${mode === 'IN' ? 'selected' : ''}>IN</option>
+          <option value="OUT" ${mode === 'OUT' ? 'selected' : ''}>OUT</option>
+          <option value="INOUT" ${mode === 'INOUT' ? 'selected' : ''}>INOUT</option>
+        </select>
+        <input type="text" placeholder="param_name" value="${escapeHtml(name)}" class="routine-param-name flex-1 bg-slate-950 border border-slate-700 p-1 text-white font-mono rounded text-[11px] outline-none focus:border-app-accent">
+        <input type="text" placeholder="INT / VARCHAR(255)" value="${escapeHtml(type)}" class="routine-param-type flex-1 bg-slate-950 border border-slate-700 p-1 text-white font-mono rounded text-[11px] outline-none focus:border-app-accent">
+        <button type="button" onclick="this.closest('.routine-param-row').remove()" class="text-slate-500 hover:text-rose-400 p-1 font-mono text-xs" title="Remove parameter">✕</button>
+      `;
+      list.appendChild(row);
+    }
+
+    async function openCreateRoutineModal(routineName = '', routineType = 'PROCEDURE') {
+      const isEditing = Boolean(routineName);
+      const dlg = document.getElementById('routine-designer-dialog');
+      dlg.dataset.isEditing = isEditing ? 'true' : 'false';
+      dlg.dataset.originalName = routineName || '';
+      dlg.dataset.originalType = routineType || 'PROCEDURE';
+
+      const isFunc = (routineType || '').toUpperCase() === 'FUNCTION';
+      const typeDisplay = isFunc ? 'Function' : 'Procedure';
+      document.getElementById('routine-designer-title').textContent = isEditing
+        ? `Edit Stored ${typeDisplay} "${routineName}"`
+        : `Create Stored ${typeDisplay}`;
+      document.getElementById('routine-designer-name').value = routineName || '';
+      document.getElementById('routine-designer-type').value = routineType || 'PROCEDURE';
+      document.getElementById('routine-designer-deterministic').checked = true;
+      document.getElementById('routine-designer-returns').value = 'INT';
+
+      const paramsList = document.getElementById('routine-params-list');
+      if (paramsList) paramsList.innerHTML = '';
+
+      let bodyToUse = routineType === 'FUNCTION'
+        ? 'BEGIN\n  -- Statements\n  RETURN 0;\nEND'
+        : 'BEGIN\n  -- Statements\nEND';
+
+      if (isEditing && activeConnection) {
+        const routineMeta = schemaCatalogCache?.routines?.find(r => r.name === routineName && (r.type || '').toUpperCase() === (routineType || '').toUpperCase());
+        if (routineMeta) {
+          if (routineMeta.data_type) {
+            document.getElementById('routine-designer-returns').value = routineMeta.data_type;
+          }
+          if (Array.isArray(routineMeta.parameters)) {
+            routineMeta.parameters.forEach(p => {
+              addRoutineParameterRow(p.name, p.mode || 'IN', p.type || 'INT');
+            });
+          }
         }
+
+        try {
+          const res = await apiFetch(`/api/session/${activeConnection.id}/ddl/routine/${encodeURIComponent(routineName)}?type=${encodeURIComponent(routineType)}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.ddl) {
+              const cleanDDL = stripDefiner(data.ddl);
+              if (/\bDETERMINISTIC\b/i.test(cleanDDL) && !/\bNOT\s+DETERMINISTIC\b/i.test(cleanDDL)) {
+                document.getElementById('routine-designer-deterministic').checked = true;
+              } else if (/\bNOT\s+DETERMINISTIC\b/i.test(cleanDDL)) {
+                document.getElementById('routine-designer-deterministic').checked = false;
+              }
+              const beginMatch = cleanDDL.match(/\bBEGIN\b[\s\S]*\bEND\b/i);
+              if (beginMatch) {
+                bodyToUse = beginMatch[0];
+              } else {
+                const returnMatch = cleanDDL.match(/\bRETURN\b[\s\S]+$/i);
+                if (returnMatch) {
+                  bodyToUse = returnMatch[0].replace(/;+$/, '');
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('Failed to introspect routine DDL:', err);
+        }
+      }
+
+      toggleRoutineTypeUI();
+
+      routineCMInstance = getOrCreateModalCodeMirror('routine-designer-cm-container', bodyToUse);
+
+      if (typeof dlg.showModal === 'function') dlg.showModal();
+      else dlg.setAttribute('open', '');
+
+      setTimeout(() => {
+        if (routineCMInstance) {
+          routineCMInstance.refresh();
+          routineCMInstance.focus();
+        }
+      }, 50);
+    }
+
+    function getRoutineEditorBody() {
+      if (routineCMInstance) return routineCMInstance.getValue().trim();
+      return 'BEGIN\nEND';
+    }
+
+    function collectRoutineParameters() {
+      const params = [];
+      document.querySelectorAll('.routine-param-row').forEach(row => {
+        const name = (row.querySelector('.routine-param-name')?.value || '').trim();
+        const type = (row.querySelector('.routine-param-type')?.value || '').trim() || 'INT';
+        const mode = (row.querySelector('.routine-param-mode')?.value || 'IN').trim();
+        if (name) {
+          params.push({ name, mode, type });
+        }
+      });
+      return params;
+    }
+
+    function assembleRoutineDDL(name, type, params, returnType, isDeterministic, body, isEditing = false, originalName = '', originalType = '') {
+      const quote = '`';
+      const isFunc = type.toUpperCase() === 'FUNCTION';
+      const cleanBody = (body || '').trim().replace(/;+$/, '');
+      const paramList = params.map(p => {
+        const pName = `${quote}${p.name.replace(/`/g, '``')}${quote}`;
+        const pType = p.type;
+        if (isFunc) return `${pName} ${pType}`;
+        const mode = (p.mode || 'IN').toUpperCase();
+        return `${mode} ${pName} ${pType}`;
+      }).join(', ');
+
+      let header = isFunc
+        ? `CREATE FUNCTION ${quote}${name.replace(/`/g, '``')}${quote}(${paramList}) RETURNS ${returnType || 'INT'}`
+        : `CREATE PROCEDURE ${quote}${name.replace(/`/g, '``')}${quote}(${paramList})`;
+
+      if (isDeterministic) {
+        header += ' DETERMINISTIC';
+      } else {
+        header += ' NOT DETERMINISTIC';
+      }
+
+      const createStmt = `${header}\n${cleanBody};`;
+      if (isEditing) {
+        const dropKeyword = isFunc ? 'FUNCTION' : 'PROCEDURE';
+        let dropSQL = '';
+        if (originalName && (originalName !== name || (originalType && originalType.toUpperCase() !== type.toUpperCase()))) {
+          const origKeyword = (originalType || type).toUpperCase() === 'FUNCTION' ? 'FUNCTION' : 'PROCEDURE';
+          dropSQL += `DROP ${origKeyword} IF EXISTS ${quote}${originalName.replace(/`/g, '``')}${quote};\n`;
+        }
+        dropSQL += `DROP ${dropKeyword} IF EXISTS ${quote}${name.replace(/`/g, '``')}${quote};\n`;
+        return `${dropSQL}${createStmt}`;
+      }
+      return createStmt;
+    }
+
+    function openActiveRoutineInQueryTab() {
+      const dlg = document.getElementById('routine-designer-dialog');
+      const isEditing = dlg && dlg.dataset.isEditing === 'true';
+      const originalName = dlg ? dlg.dataset.originalName || '' : '';
+      const originalType = dlg ? dlg.dataset.originalType || '' : '';
+      const name = document.getElementById('routine-designer-name').value.trim() || 'sp_new';
+      const type = document.getElementById('routine-designer-type').value;
+      const returnType = document.getElementById('routine-designer-returns').value.trim() || 'INT';
+      const isDeterministic = document.getElementById('routine-designer-deterministic').checked;
+      const params = collectRoutineParameters();
+      const body = getRoutineEditorBody();
+
+      const sql = assembleRoutineDDL(name, type, params, returnType, isDeterministic, body, isEditing, originalName, originalType);
+      if (dlg) dlg.close();
+      openInQueryEditor(sql, `${type}: ${name}`);
+    }
+
+    async function submitCreateRoutine() {
+      const dlg = document.getElementById('routine-designer-dialog');
+      const isEditing = dlg && dlg.dataset.isEditing === 'true';
+      const originalName = dlg ? dlg.dataset.originalName || '' : '';
+      const originalType = dlg ? dlg.dataset.originalType || '' : '';
+      const name = document.getElementById('routine-designer-name').value.trim();
+      const type = document.getElementById('routine-designer-type').value;
+      const returnType = document.getElementById('routine-designer-returns').value.trim();
+      const isDeterministic = document.getElementById('routine-designer-deterministic').checked;
+      const params = collectRoutineParameters();
+      const body = getRoutineEditorBody();
+
+      if (!name) {
+        showNativeAlert('Routine name is required.', 'Routine Designer');
+        return;
+      }
+      if (type === 'FUNCTION' && !returnType) {
+        showNativeAlert('Function return data type is required (e.g. INT, VARCHAR(255)).', 'Routine Designer');
+        return;
+      }
+      if (!body) {
+        showNativeAlert('Routine body statements are required.', 'Routine Designer');
+        return;
+      }
+
+      const sql = assembleRoutineDDL(name, type, params, returnType, isDeterministic, body, isEditing, originalName, originalType);
+
+      if (dlg) dlg.close();
+      openDDLReviewModal(sql, async () => {
+        await executeDDLStatements(sql, `${type} "${name}" saved successfully.`);
+      });
+    }
+
+    async function dropRoutine(name, type = 'PROCEDURE') {
+      const upperType = (type || 'PROCEDURE').toUpperCase();
+      if (!await showNativeConfirm(`Are you sure you want to DROP ${upperType} "${name}"?`, `Drop ${upperType}`)) {
+        return;
+      }
+      const quote = '`';
+      const sql = `DROP ${upperType} IF EXISTS ${quote}${name.replace(/`/g, '``')}${quote};`;
+      openDDLReviewModal(sql, async () => {
+        await executeDDLStatements(sql, `${upperType} "${name}" dropped successfully.`);
+      });
+    }
+
+    // --- Event Designer Handlers ---
+    let eventCMInstance = null;
+
+    function toggleEventScheduleTypeUI() {
+      const mode = document.querySelector('input[name="event-schedule-type"]:checked')?.value || 'EVERY';
+      const everyContainer = document.getElementById('event-sched-every-container');
+      const atContainer = document.getElementById('event-sched-at-container');
+      if (everyContainer && atContainer) {
+        if (mode === 'EVERY') {
+          everyContainer.classList.remove('hidden');
+          atContainer.classList.add('hidden');
+        } else {
+          everyContainer.classList.add('hidden');
+          atContainer.classList.remove('hidden');
+        }
+      }
+    }
+
+    async function openCreateEventModal(eventName = '') {
+      const isEditing = Boolean(eventName);
+      const dlg = document.getElementById('event-designer-dialog');
+      dlg.dataset.isEditing = isEditing ? 'true' : 'false';
+      dlg.dataset.originalName = eventName || '';
+
+      document.getElementById('event-designer-title').textContent = isEditing
+        ? `Edit Event "${eventName}"`
+        : 'Create Scheduled Event';
+      document.getElementById('event-designer-name').value = eventName || '';
+      document.getElementById('event-designer-status').value = 'ENABLE';
+      document.getElementById('event-designer-preserve').checked = true;
+
+      const everyRadio = document.querySelector('input[name="event-schedule-type"][value="EVERY"]');
+      if (everyRadio) everyRadio.checked = true;
+      document.getElementById('event-designer-interval-val').value = '1';
+      document.getElementById('event-designer-interval-unit').value = 'DAY';
+      document.getElementById('event-designer-starts').value = '';
+      document.getElementById('event-designer-ends').value = '';
+      document.getElementById('event-designer-at').value = '';
+
+      let bodyToUse = 'BEGIN\n  -- Statements\nEND';
+
+      if (isEditing && activeConnection) {
+        const evMeta = schemaCatalogCache?.events?.find(e => e.name === eventName);
+        if (evMeta) {
+          if (evMeta.status) {
+            document.getElementById('event-designer-status').value = evMeta.status.toUpperCase().includes('ENABLE') ? 'ENABLE' : 'DISABLE';
+          }
+          if (evMeta.interval && evMeta.interval.toUpperCase().startsWith('EVERY ')) {
+            const parts = evMeta.interval.trim().split(/\s+/);
+            if (parts.length >= 3) {
+              document.getElementById('event-designer-interval-val').value = parts[1];
+              document.getElementById('event-designer-interval-unit').value = parts[2].toUpperCase();
+            }
+          }
+          if (evMeta.starts_at) {
+            document.getElementById('event-designer-starts').value = evMeta.starts_at;
+          }
+          if (evMeta.ends_at) {
+            document.getElementById('event-designer-ends').value = evMeta.ends_at;
+          }
+          if (evMeta.definition) {
+            bodyToUse = evMeta.definition.trim();
+          }
+        }
+
+        try {
+          const res = await apiFetch(`/api/session/${activeConnection.id}/ddl/event/${encodeURIComponent(eventName)}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.ddl) {
+              const cleanDDL = stripDefiner(data.ddl);
+              const doMatch = cleanDDL.match(/\bDO\s+([\s\S]+)$/i);
+              if (doMatch) {
+                bodyToUse = doMatch[1].trim().replace(/;$/, '');
+              }
+              if (/\bON\s+COMPLETION\s+NOT\s+PRESERVE\b/i.test(cleanDDL)) {
+                document.getElementById('event-designer-preserve').checked = false;
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('Failed to introspect event DDL:', err);
+        }
+      }
+
+      toggleEventScheduleTypeUI();
+
+      eventCMInstance = getOrCreateModalCodeMirror('event-designer-cm-container', bodyToUse);
+
+      if (typeof dlg.showModal === 'function') dlg.showModal();
+      else dlg.setAttribute('open', '');
+
+      setTimeout(() => {
+        if (eventCMInstance) {
+          eventCMInstance.refresh();
+          eventCMInstance.focus();
+        }
+      }, 50);
+    }
+
+    function getEventEditorBody() {
+      if (eventCMInstance) return eventCMInstance.getValue().trim();
+      return 'BEGIN\nEND';
+    }
+
+    function assembleEventDDL(name, scheduleMode, intervalVal, intervalUnit, startsAt, endsAt, atTime, status, preserve, body, isEditing = false, originalName = '') {
+      const quote = '`';
+      const cleanBody = (body || '').trim().replace(/;+$/, '');
+      const formatTs = (ts) => /^(?:NOW\(\)|CURRENT_TIMESTAMP)/i.test((ts || '').trim()) ? ts.trim() : `'${(ts || '').replace(/'/g, "''")}'`;
+      let sched = '';
+      if (scheduleMode === 'EVERY') {
+        sched = `EVERY ${intervalVal || 1} ${intervalUnit || 'DAY'}`;
+        if (startsAt) sched += ` STARTS ${formatTs(startsAt)}`;
+        if (endsAt) sched += ` ENDS ${formatTs(endsAt)}`;
+      } else {
+        sched = `AT ${formatTs(atTime)}`;
+      }
+
+      const completion = preserve ? 'ON COMPLETION PRESERVE' : 'ON COMPLETION NOT PRESERVE';
+      const statusStr = status || 'ENABLE';
+      const createStmt = `CREATE EVENT ${quote}${name.replace(/`/g, '``')}${quote}\nON SCHEDULE ${sched}\n${completion} ${statusStr}\nDO\n${cleanBody};`;
+
+      if (isEditing) {
+        let dropSQL = '';
+        if (originalName && originalName !== name) {
+          dropSQL += `DROP EVENT IF EXISTS ${quote}${originalName.replace(/`/g, '``')}${quote};\n`;
+        }
+        dropSQL += `DROP EVENT IF EXISTS ${quote}${name.replace(/`/g, '``')}${quote};\n`;
+        return `${dropSQL}${createStmt}`;
+      }
+      return createStmt;
+    }
+
+    function collectEventFormData() {
+      const name = document.getElementById('event-designer-name').value.trim();
+      const status = document.getElementById('event-designer-status').value;
+      const preserve = document.getElementById('event-designer-preserve').checked;
+      const scheduleMode = document.querySelector('input[name="event-schedule-type"]:checked')?.value || 'EVERY';
+      const intervalVal = document.getElementById('event-designer-interval-val').value.trim() || '1';
+      const intervalUnit = document.getElementById('event-designer-interval-unit').value;
+      const startsAt = document.getElementById('event-designer-starts').value.trim();
+      const endsAt = document.getElementById('event-designer-ends').value.trim();
+      const atTime = document.getElementById('event-designer-at').value.trim();
+      const body = getEventEditorBody();
+      const dlg = document.getElementById('event-designer-dialog');
+      const isEditing = dlg && dlg.dataset.isEditing === 'true';
+      const originalName = dlg ? dlg.dataset.originalName || '' : '';
+
+      return { name, status, preserve, scheduleMode, intervalVal, intervalUnit, startsAt, endsAt, atTime, body, isEditing, originalName };
+    }
+
+    function openActiveEventInQueryTab() {
+      const data = collectEventFormData();
+      const name = data.name || 'ev_new';
+      const sql = assembleEventDDL(name, data.scheduleMode, data.intervalVal, data.intervalUnit, data.startsAt, data.endsAt, data.atTime, data.status, data.preserve, data.body, data.isEditing, data.originalName);
+      const dlg = document.getElementById('event-designer-dialog');
+      if (dlg) dlg.close();
+      openInQueryEditor(sql, `Event: ${name}`);
+    }
+
+    async function submitCreateEvent() {
+      const data = collectEventFormData();
+      if (!data.name) {
+        showNativeAlert('Event name is required.', 'Event Designer');
+        return;
+      }
+      if (data.scheduleMode === 'AT' && !data.atTime) {
+        showNativeAlert('Timestamp is required for one-time (AT) schedule.', 'Event Designer');
+        return;
+      }
+      if (!data.body) {
+        showNativeAlert('Event action statement (DO) is required.', 'Event Designer');
+        return;
+      }
+
+      const sql = assembleEventDDL(data.name, data.scheduleMode, data.intervalVal, data.intervalUnit, data.startsAt, data.endsAt, data.atTime, data.status, data.preserve, data.body, data.isEditing, data.originalName);
+
+      const dlg = document.getElementById('event-designer-dialog');
+      if (dlg) dlg.close();
+      openDDLReviewModal(sql, async () => {
+        await executeDDLStatements(sql, `Scheduled event "${data.name}" saved successfully.`);
+      });
+    }
+
+    async function dropEvent(name) {
+      if (!await showNativeConfirm(`Are you sure you want to DROP scheduled event "${name}"?`, 'Drop Event')) {
+        return;
+      }
+      const quote = '`';
+      const sql = `DROP EVENT IF EXISTS ${quote}${name.replace(/`/g, '``')}${quote};`;
+      openDDLReviewModal(sql, async () => {
+        await executeDDLStatements(sql, `Scheduled event "${name}" dropped successfully.`);
       });
     }
 
@@ -24329,7 +25171,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
           toggleTopSettingsMenu(false);
           toggleExportCSVMenu(false);
           toggleNotesDrawer(false);
-          ['erd-dialog', 'table-creator-dialog', 'view-designer-dialog', 'trigger-designer-dialog', 'database-creator-dialog', 'safety-inspection-dialog', 'ddl-review-dialog'].forEach(id => {
+          ['erd-dialog', 'table-creator-dialog', 'view-designer-dialog', 'trigger-designer-dialog', 'routine-designer-dialog', 'event-designer-dialog', 'database-creator-dialog', 'safety-inspection-dialog', 'ddl-review-dialog'].forEach(id => {
             const dlg = document.getElementById(id);
             if (dlg && typeof dlg.close === 'function') dlg.close();
           });
@@ -24337,7 +25179,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
       });
 
       // Close native dialogs when clicking on backdrop
-      ['snippets-manager-dialog', 'snippet-param-dialog', 'database-creator-dialog', 'csv-import-dialog', 'mock-data-dialog', 'schema-search-modal', 'db-diagnostics-dialog', 'privilege-matrix-dialog', 'pl-detail-modal', 'update-dialog', 'changelog-dialog', 'note-composer-dialog', 'erd-dialog', 'dump-database-dialog', 'smart-seed-dialog', 'run-sql-dialog', 'structure-sync-dialog', 'data-transfer-dialog', 'data-sync-dialog', 'table-creator-dialog', 'view-designer-dialog', 'trigger-designer-dialog', 'safety-inspection-dialog', 'ddl-review-dialog'].forEach(id => {
+      ['snippets-manager-dialog', 'snippet-param-dialog', 'database-creator-dialog', 'csv-import-dialog', 'mock-data-dialog', 'schema-search-modal', 'db-diagnostics-dialog', 'privilege-matrix-dialog', 'pl-detail-modal', 'update-dialog', 'changelog-dialog', 'note-composer-dialog', 'erd-dialog', 'dump-database-dialog', 'smart-seed-dialog', 'run-sql-dialog', 'structure-sync-dialog', 'data-transfer-dialog', 'data-sync-dialog', 'table-creator-dialog', 'view-designer-dialog', 'trigger-designer-dialog', 'routine-designer-dialog', 'event-designer-dialog', 'safety-inspection-dialog', 'ddl-review-dialog'].forEach(id => {
         const dlg = document.getElementById(id);
         if (dlg) {
           dlg.addEventListener('click', (e) => {

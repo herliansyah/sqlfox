@@ -2167,6 +2167,128 @@ func TestCopilotErgonomicsEmbedded(t *testing.T) {
 	}
 }
 
+func TestViewAndTriggerCodeMirrorIntegrationEmbedded(t *testing.T) {
+	contentBytes, err := distFS.ReadFile("dist/index.html")
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	requiredSnippets := []string{
+		`id="view-designer-cm-container"`,
+		`id="trigger-designer-cm-container"`,
+		`openActiveViewInQueryTab()`,
+		`openActiveTriggerInQueryTab()`,
+		`function stripDefiner(`,
+		`function extractViewSelectQuery(`,
+		`function getOrCreateModalCodeMirror(`,
+		`function openInQueryEditor(`,
+		`sql += "DROP TRIGGER IF EXISTS `,
+	}
+
+	for _, s := range requiredSnippets {
+		// Normalize double quotes for checking JS templates
+		normalizedSnippet := strings.ReplaceAll(s, `"`, "`")
+		if !strings.Contains(content, s) && !strings.Contains(content, normalizedSnippet) {
+			t.Errorf("expected index.html to contain %q for view/trigger CodeMirror and safe replacement, but was missing", s)
+		}
+	}
+}
+
+func TestRoutineDesignerSuiteEmbedded(t *testing.T) {
+	contentBytes, err := distFS.ReadFile("dist/index.html")
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	requiredSnippets := []string{
+		`id="routine-designer-dialog"`,
+		`id="routine-designer-cm-container"`,
+		`id="routine-params-list"`,
+		`openCreateRoutineModal(`,
+		`openActiveRoutineInQueryTab()`,
+		`function toggleRoutineTypeUI()`,
+		`function addRoutineParameterRow(`,
+		`function openCreateRoutineModal(`,
+		`function assembleRoutineDDL(`,
+		`function submitCreateRoutine()`,
+		`function dropRoutine(`,
+		`title="Create New Stored Procedure"`,
+		`title="Create New Stored Function"`,
+		`title="Edit Routine"`,
+		`title="Drop Routine"`,
+	}
+
+	for _, s := range requiredSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain %q for routine designer suite, but was missing", s)
+		}
+	}
+}
+
+func TestEventDesignerSuiteEmbedded(t *testing.T) {
+	contentBytes, err := distFS.ReadFile("dist/index.html")
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	requiredSnippets := []string{
+		`id="event-designer-dialog"`,
+		`id="event-designer-cm-container"`,
+		`openCreateEventModal()`,
+		`openActiveEventInQueryTab()`,
+		`function toggleEventScheduleTypeUI()`,
+		`function openCreateEventModal(`,
+		`function assembleEventDDL(`,
+		`function submitCreateEvent()`,
+		`function dropEvent(`,
+		`title="Create New Scheduled Event"`,
+		`title="Edit Event"`,
+		`title="Drop Event"`,
+	}
+
+	for _, s := range requiredSnippets {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected index.html to contain %q for event designer suite, but was missing", s)
+		}
+	}
+}
+
+func TestMySQLObjectsCRUDHardeningAndSafetyGuards(t *testing.T) {
+	contentBytes, err := distFS.ReadFile("dist/index.html")
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	// Guard 1: stripDefiner must preserve newlines and indentation to avoid breaking multi-line comments
+	if strings.Contains(content, ".replace(/\\s{2,}/g, ' ')") {
+		t.Errorf("critical glitch: stripDefiner collapses \\s{2,} destroying line breaks and multi-line comments")
+	}
+	if !strings.Contains(content, `sql.replace(/\s*(?:\/\*!\d+\s*)?DEFINER`) {
+		t.Errorf("expected stripDefiner to target whitespace around DEFINER clause without altering body indentation")
+	}
+
+	// Guard 2: Schema tree search filter must not return early and hide procedures/functions/events
+	if !strings.Contains(content, "proceduresList.length === 0 && functionsList.length === 0 && eventsList.length === 0") {
+		t.Errorf("expected renderSchemaTree to check procedures, functions, and events in early empty check")
+	}
+
+	// Guard 3: Semicolon trimming in DDL assemblers to avoid double-semicolons (;;)
+	if !strings.Contains(content, "const cleanBody = (body || '').trim().replace(/;+$/, '');") {
+		t.Errorf("expected DDL assemblers to trim trailing semicolons before appending DDL terminator")
+	}
+
+	// Guard 4: Object rename safety in triggers, views, routines, and events
+	if !strings.Contains(content, "if (isEditing && originalName && originalName !== name)") &&
+		!strings.Contains(content, "if (originalName && originalName !== name)") {
+		t.Errorf("expected DDL generators to drop originalName when renamed during edit")
+	}
+}
+
+
 
 
 
