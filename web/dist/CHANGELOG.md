@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.10.16] - 2026-11-02
+
 ### Fixed
 - **Vector Icons Standardization & Functional Accent Color Harmonization (`web/dist/index.html`, `web/embed_test.go`)**: Replaced ad-hoc emojis and mismatched unicode glyphs with canonical SVG vector symbols (ADR 0037) across the web client, aligning functional accent colors across the top navbar, table mode sub-tabs, grid toolbars, context menus, and sidebar action controls (#119, #120).
 - **Normalized Icon Slot Widths in Grid Cell Context Menu (`web/dist/index.html`)**: Wrapped icons and symbols in a uniform fixed-width container (`w-5`) across all grid context menu sections (Quick Filter, Insert Value, cell inspection, and row mutations), ensuring consistent 38px left label alignment and eliminating uneven indentation caused by glyphs with differing intrinsic widths (#118).
