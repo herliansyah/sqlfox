@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Multi-Statement Sequential Execution & Multi-Result Tabs (`internal/server/session_manager.go`, `internal/driver/sqlite/sqlite.go`, `web/dist/index.html`, `web/embed_test.go`)**: Added sequential execution and streaming for multi-statement SQL scripts in session manager, multi-result tab bar (`#tab-results-bar`) rendering distinct sub-tabs for each statement result with per-statement timing and row count badges, "Run All Statements" toolbar action and keyboard shortcuts (`Ctrl+Alt+Enter`, `F5`), and SQLite WAL journal mode with 5000ms busy timeout for concurrent execution resilience (#124).
+- **Fixed-Width Row Gutter in Data Grids & Schema Tables (`web/dist/index.html`, `web/embed_test.go`, `CONTEXT.md`)**: Introduced 1-based, pagination-offset-aware row number gutter columns (`#`) across the virtual data grid, processlist manager, schema tabs (table structure, indexes, foreign keys), server status variables, and CSV import column mapping (#125).
+
 ## [v0.12.0] - 2026-11-03
 
 ### Added
