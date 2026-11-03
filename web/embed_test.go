@@ -2353,10 +2353,36 @@ func TestDropdownKeyboardNavigationEmbedded(t *testing.T) {
 	}
 }
 
+func TestMultiResultSuiteAndBatchPagingEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
 
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
 
+	expectedSnippets := []string{
+		`id="multi-result-bar"`,
+		`id="multi-result-tabs"`,
+		`id="multi-result-actions"`,
+		"function renderMultiResultTabsUI(",
+		"function openMultiResultInNewTab(",
+		"function selectMultiResultTab(",
+		"openMultiResultInNewTab(",
+		"Capped at 5k rows",
+		"Open in New Tab",
+		"(tab.multiResults && tab.multiResults.length > 1)",
+	}
 
-
-
-
-
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(content, snippet) {
+			t.Errorf("expected index.html to contain multi-result suite snippet %q, but was missing", snippet)
+		}
+	}
+}

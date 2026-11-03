@@ -46,6 +46,13 @@ func (d *SQLiteDriver) Connect(ctx context.Context, cfg driver.Config) (driver.S
 		return nil, fmt.Errorf("failed to ping sqlite database: %w", err)
 	}
 
+	// Enable WAL mode (Write-Ahead Logging) and busy timeout for concurrent read/write resilience
+	if !strings.Contains(dsn, ":memory:") && !strings.Contains(dsn, "mode=memory") {
+		var mode string
+		_ = db.QueryRowContext(ctx, "PRAGMA journal_mode = WAL;").Scan(&mode)
+	}
+	_, _ = db.ExecContext(ctx, "PRAGMA busy_timeout = 5000;")
+
 	return &SQLiteSession{
 		db:      db,
 		dsn:     dsn,
