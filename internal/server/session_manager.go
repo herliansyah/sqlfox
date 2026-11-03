@@ -35,11 +35,13 @@ type ExecuteRequest struct {
 	Limit                 int    `json:"limit,omitempty"`
 	LockTimeoutSec        int    `json:"lock_timeout_sec,omitempty"`        // Fail-fast session lock timeout (default 3s for DDL)
 	BypassMutationConfirm bool   `json:"bypass_mutation_confirm,omitempty"` // Dev-only session toggle (ADR 0057)
+	TabID                 string `json:"tab_id,omitempty"`                  // Tab-scoped transaction isolation
 }
 
 // ExecuteResponse provides the unified outcome of a mutation or buffered query.
 type ExecuteResponse struct {
-	Type               string                    `json:"type"` // "exec" or "query"
+	SQL                string                    `json:"sql,omitempty"`
+	Type               string                    `json:"type"` // "exec", "query", or "batch"
 	Blocked            bool                      `json:"blocked,omitempty"`
 	Inspection         *safety.InspectionResult  `json:"inspection,omitempty"`
 	RowsAffected       int64                     `json:"rows_affected,omitempty"`
@@ -54,33 +56,41 @@ type ExecuteResponse struct {
 	ExecutionMs        int64                     `json:"execution_ms"`
 	Profile            *driver.QueryProfile      `json:"profile,omitempty"`
 	TxActive           bool                      `json:"tx_active"`
+	Results            []*ExecuteResponse        `json:"results,omitempty"`
+}
+
+type activeTxInfo struct {
+	tx         driver.TxSession
+	startedAt  time.Time
+	lastActive time.Time
 }
 
 // ActiveSession holds an active database connection session and its cached metadata.
 // It acts as a deep module providing the Safe Execution Pipeline across all transports.
 type ActiveSession struct {
-	ID             string                 `json:"id"`
-	ConnectionID   string                 `json:"connection_id"`
-	Name           string                 `json:"name"`
-	DatabaseName   string                 `json:"database_name,omitempty"`
-	Environment    string                 `json:"environment"`
-	DriverName     string                 `json:"driver_name"`
-	ReadOnly       bool                   `json:"read_only"`
-	Session        driver.Session         `json:"-"`
-	CachedSchema   *driver.SchemaMetadata `json:"schema,omitempty"`
-	ServerInfo     *driver.ServerInfo     `json:"server_info,omitempty"`
-	LatencyMs      int64                  `json:"latency_ms"`
-	MemoryMB       float64                `json:"memory_mb,omitempty"`
-	LastActive     time.Time              `json:"last_active"`
-	backupDir      string
-	vault          *vault.Vault
-	runningQueries map[string]context.CancelFunc
-	activeTx       driver.TxSession
-	txStartedAt    time.Time
-	txLastActive   time.Time
-	closed         bool
-	runSeq         uint64
-	mu             sync.RWMutex
+	ID              string                 `json:"id"`
+	ConnectionID    string                 `json:"connection_id"`
+	Name            string                 `json:"name"`
+	DatabaseName    string                 `json:"database_name,omitempty"`
+	Environment     string                 `json:"environment"`
+	DriverName      string                 `json:"driver_name"`
+	ReadOnly        bool                   `json:"read_only"`
+	Session         driver.Session         `json:"-"`
+	CachedSchema    *driver.SchemaMetadata `json:"schema,omitempty"`
+	ServerInfo      *driver.ServerInfo     `json:"server_info,omitempty"`
+	LatencyMs       int64                  `json:"latency_ms"`
+	MemoryMB        float64                `json:"memory_mb,omitempty"`
+	LastActive      time.Time              `json:"last_active"`
+	backupDir       string
+	vault           *vault.Vault
+	runningQueries  map[string]context.CancelFunc
+	activeTx        driver.TxSession
+	tabTransactions map[string]*activeTxInfo
+	txStartedAt     time.Time
+	txLastActive    time.Time
+	closed          bool
+	runSeq          uint64
+	mu              sync.RWMutex
 }
 
 // Close gracefully releases the session, rolling back any uncommitted transactions to avoid orphaned locks.
@@ -89,6 +99,14 @@ func (s *ActiveSession) Close() error {
 		return nil
 	}
 	s.mu.Lock()
+	if s.tabTransactions != nil {
+		for _, entry := range s.tabTransactions {
+			if entry != nil && entry.tx != nil {
+				_ = entry.tx.Rollback()
+			}
+		}
+		s.tabTransactions = nil
+	}
 	if s.activeTx != nil {
 		_ = s.activeTx.Rollback()
 		s.activeTx = nil
@@ -104,6 +122,80 @@ func (s *ActiveSession) Close() error {
 		return sess.Close()
 	}
 	return nil
+}
+
+func (s *ActiveSession) getTx(tabID string) driver.TxSession {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	if tabID != "" && s.tabTransactions != nil {
+		if entry, ok := s.tabTransactions[tabID]; ok && entry != nil && entry.tx != nil {
+			entry.lastActive = now
+			return entry.tx
+		}
+	}
+	if s.activeTx != nil {
+		s.txLastActive = now
+		return s.activeTx
+	}
+	return nil
+}
+
+func (s *ActiveSession) setTx(tabID string, tx driver.TxSession) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	if s.tabTransactions == nil {
+		s.tabTransactions = make(map[string]*activeTxInfo)
+	}
+	if tx != nil {
+		s.tabTransactions[tabID] = &activeTxInfo{
+			tx:         tx,
+			startedAt:  now,
+			lastActive: now,
+		}
+		if tabID == "" || tabID == "default" {
+			s.activeTx = tx
+			s.txStartedAt = now
+			s.txLastActive = now
+		}
+	} else {
+		delete(s.tabTransactions, tabID)
+		if tabID == "" || tabID == "default" || len(s.tabTransactions) == 0 {
+			s.activeTx = nil
+		}
+	}
+}
+
+func (s *ActiveSession) clearTx(tabID string) driver.TxSession {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var tx driver.TxSession
+	if tabID != "" && s.tabTransactions != nil {
+		if entry, ok := s.tabTransactions[tabID]; ok && entry != nil {
+			tx = entry.tx
+			delete(s.tabTransactions, tabID)
+		}
+	}
+	if tx == nil && s.activeTx != nil {
+		tx = s.activeTx
+		s.activeTx = nil
+	}
+	if len(s.tabTransactions) == 0 {
+		s.activeTx = nil
+	}
+	return tx
+}
+
+func (s *ActiveSession) hasActiveTx(tabID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if tabID != "" && s.tabTransactions != nil {
+		if entry, ok := s.tabTransactions[tabID]; ok && entry != nil && entry.tx != nil {
+			return true
+		}
+	}
+	return s.activeTx != nil
 }
 
 // Mutable session state is read and written by concurrent requests, so it goes through s.mu.
@@ -330,6 +422,25 @@ func (sm *SessionManager) startReaper() {
 			for id, sess := range sm.sessions {
 				// Rollback idle transactions inactive for 60 seconds to prevent orphan lock contention on DB server
 				sess.mu.Lock()
+				if sess.tabTransactions != nil {
+					for tabID, entry := range sess.tabTransactions {
+						if entry == nil || entry.tx == nil {
+							delete(sess.tabTransactions, tabID)
+							continue
+						}
+						refTime := entry.lastActive
+						if refTime.IsZero() {
+							refTime = entry.startedAt
+						}
+						if now.Sub(refTime) > 60*time.Second {
+							_ = entry.tx.Rollback()
+							delete(sess.tabTransactions, tabID)
+						}
+					}
+					if len(sess.tabTransactions) == 0 {
+						sess.activeTx = nil
+					}
+				}
 				refTime := sess.txLastActive
 				if refTime.IsZero() {
 					refTime = sess.txStartedAt
@@ -785,21 +896,15 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	isTxRollback := cleanUpper == "ROLLBACK" || cleanUpper == "ROLLBACK WORK" || cleanUpper == "ROLLBACK TRANSACTION" || cleanUpper == "ABORT" || cleanUpper == "ABORT WORK" || cleanUpper == "ABORT TRANSACTION"
 
 	if isTxBegin {
-		s.mu.Lock()
-		if s.activeTx != nil {
-			s.mu.Unlock()
-			return nil, fmt.Errorf("a transaction is already active in this session; please COMMIT or ROLLBACK first")
+		if s.hasActiveTx(req.TabID) {
+			return nil, fmt.Errorf("a transaction is already active in this tab; please COMMIT or ROLLBACK first")
 		}
 		// ponytail: Use non-cancelled background context so transaction persists across subsequent HTTP requests
 		tx, err := s.Session.BeginTx(context.Background())
 		if err != nil {
-			s.mu.Unlock()
 			return nil, fmt.Errorf("failed to begin transaction: %w", err)
 		}
-		s.activeTx = tx
-		s.txStartedAt = time.Now()
-		s.txLastActive = time.Now()
-		s.mu.Unlock()
+		s.setTx(req.TabID, tx)
 
 		return &ExecuteResponse{
 			Type:        "exec",
@@ -810,10 +915,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	}
 
 	if isTxCommit {
-		s.mu.Lock()
-		tx := s.activeTx
-		s.activeTx = nil
-		s.mu.Unlock()
+		tx := s.clearTx(req.TabID)
 
 		if tx == nil {
 			_, err := s.Session.Exec(execCtx, trimmedSQL)
@@ -840,10 +942,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	}
 
 	if isTxRollback {
-		s.mu.Lock()
-		tx := s.activeTx
-		s.activeTx = nil
-		s.mu.Unlock()
+		tx := s.clearTx(req.TabID)
 
 		if tx == nil {
 			_, err := s.Session.Exec(execCtx, trimmedSQL)
@@ -871,12 +970,12 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 
 	// 5. Route to Exec vs QueryStream
 	// If transaction is active, execute strictly on pinned transaction connection
-	s.mu.Lock()
-	currentTx := s.activeTx
-	if currentTx != nil {
-		s.txLastActive = time.Now()
+	currentTx := s.getTx(req.TabID)
+
+	stmts := splitSQLStatements(strings.NewReader(trimmedSQL), s.DriverName)
+	if len(stmts) > 1 {
+		return s.executeMulti(execCtx, req, stmts, inspection, targetDB, start, currentTx, collectProfile)
 	}
-	s.mu.Unlock()
 
 	if currentTx != nil {
 		if !isSelect {
@@ -1207,12 +1306,12 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 		_, _ = s.Session.Exec(execCtx, "SET profiling = 1")
 	}
 
-	s.mu.Lock()
-	currentTx := s.activeTx
-	if currentTx != nil {
-		s.txLastActive = time.Now()
+	currentTx := s.getTx(req.TabID)
+
+	stmts := splitSQLStatements(strings.NewReader(trimmedSQL), s.DriverName)
+	if len(stmts) > 1 {
+		return s.executeStreamMulti(execCtx, req, stmts, inspection, targetDB, start, currentTx, w, flusher, runKey)
 	}
-	s.mu.Unlock()
 
 	// Fetch one row past the limit so has_more is exact (a result of exactly `limit` rows is complete).
 	var stream driver.RowStream
@@ -1365,7 +1464,7 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 		"row_count":    totalRows,
 		"execution_ms": dur,
 		"has_more":     hasMore,
-		"tx_active":    currentTx != nil,
+		"tx_active":    s.hasActiveTx(req.TabID),
 	}
 	if prof != nil {
 		donePayload["profile"] = prof
@@ -1378,6 +1477,570 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 		flusher.Flush()
 	}
 
+	return nil, nil
+}
+
+func previewStmt(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) > 60 {
+		return s[:57] + "..."
+	}
+	return s
+}
+
+func (s *ActiveSession) executeMulti(
+	ctx context.Context,
+	req ExecuteRequest,
+	stmts []string,
+	inspection *safety.InspectionResult,
+	targetDB string,
+	start time.Time,
+	currentTx driver.TxSession,
+	collectProfile func() *driver.QueryProfile,
+) (*ExecuteResponse, error) {
+	var results []*ExecuteResponse
+	var totalRowsAffected int64
+	var firstQuery *ExecuteResponse
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 1000
+	}
+
+	for i, stmt := range stmts {
+		stmtTrimmed := strings.TrimSpace(stmt)
+		if stmtTrimmed == "" {
+			continue
+		}
+		stmtStart := time.Now()
+		cleanSQL := driver.StripLeadingComments(stmtTrimmed)
+		cleanUpper := strings.TrimRight(strings.ToUpper(cleanSQL), "; \t\r\n")
+		isStmtSelect := driver.IsQueryStatement(stmtTrimmed)
+
+		if strings.HasPrefix(cleanUpper, "USE ") {
+			dbTarget := strings.TrimSpace(cleanSQL[4:])
+			dbTarget = strings.Trim(strings.TrimRight(dbTarget, "; \t\r\n"), "`'\"")
+			if dbTarget != "" {
+				_ = s.UseDatabase(ctx, dbTarget)
+			}
+		}
+
+		isTxBegin := cleanUpper == "BEGIN" || cleanUpper == "START TRANSACTION" || cleanUpper == "BEGIN WORK" || cleanUpper == "BEGIN TRANSACTION" ||
+			strings.HasPrefix(cleanUpper, "START TRANSACTION ") ||
+			strings.HasPrefix(cleanUpper, "BEGIN TRANSACTION ") ||
+			strings.HasPrefix(cleanUpper, "BEGIN WORK ") ||
+			(strings.HasPrefix(cleanUpper, "BEGIN ") && (strings.Contains(cleanUpper, "DEFERRED") || strings.Contains(cleanUpper, "IMMEDIATE") || strings.Contains(cleanUpper, "EXCLUSIVE") || strings.Contains(cleanUpper, "READ ONLY") || strings.Contains(cleanUpper, "READ WRITE") || strings.Contains(cleanUpper, "ISOLATION LEVEL")))
+		isTxCommit := cleanUpper == "COMMIT" || cleanUpper == "COMMIT WORK" || cleanUpper == "COMMIT TRANSACTION" || cleanUpper == "END" || cleanUpper == "END WORK" || cleanUpper == "END TRANSACTION"
+		isTxRollback := cleanUpper == "ROLLBACK" || cleanUpper == "ROLLBACK WORK" || cleanUpper == "ROLLBACK TRANSACTION" || cleanUpper == "ABORT" || cleanUpper == "ABORT WORK" || cleanUpper == "ABORT TRANSACTION"
+
+		if isTxBegin {
+			if s.hasActiveTx(req.TabID) {
+				return nil, fmt.Errorf("a transaction is already active in this tab; please COMMIT or ROLLBACK first")
+			}
+			tx, err := s.Session.BeginTx(context.Background())
+			if err != nil {
+				return nil, fmt.Errorf("failed to begin transaction: %w", err)
+			}
+			s.setTx(req.TabID, tx)
+			currentTx = tx
+			res := &ExecuteResponse{
+				SQL:         stmtTrimmed,
+				Type:        "exec",
+				Message:     "Transaction started.",
+				ExecutionMs: time.Since(stmtStart).Milliseconds(),
+				TxActive:    true,
+			}
+			results = append(results, res)
+			continue
+		}
+
+		if isTxCommit {
+			tx := s.clearTx(req.TabID)
+			currentTx = nil
+			if tx == nil {
+				_, err := s.Session.Exec(ctx, stmtTrimmed)
+				if err != nil {
+					return nil, err
+				}
+				results = append(results, &ExecuteResponse{
+					SQL:         stmtTrimmed,
+					Type:        "exec",
+					Message:     "COMMIT executed.",
+					ExecutionMs: time.Since(stmtStart).Milliseconds(),
+					TxActive:    false,
+				})
+			} else {
+				if err := tx.Commit(); err != nil {
+					return nil, fmt.Errorf("failed to commit transaction: %w", err)
+				}
+				results = append(results, &ExecuteResponse{
+					SQL:         stmtTrimmed,
+					Type:        "exec",
+					Message:     "Transaction committed successfully.",
+					ExecutionMs: time.Since(stmtStart).Milliseconds(),
+					TxActive:    false,
+				})
+			}
+			continue
+		}
+
+		if isTxRollback {
+			tx := s.clearTx(req.TabID)
+			currentTx = nil
+			if tx == nil {
+				_, err := s.Session.Exec(ctx, stmtTrimmed)
+				if err != nil {
+					return nil, err
+				}
+				results = append(results, &ExecuteResponse{
+					SQL:         stmtTrimmed,
+					Type:        "exec",
+					Message:     "ROLLBACK executed.",
+					ExecutionMs: time.Since(stmtStart).Milliseconds(),
+					TxActive:    false,
+				})
+			} else {
+				if err := tx.Rollback(); err != nil {
+					return nil, fmt.Errorf("failed to rollback transaction: %w", err)
+				}
+				results = append(results, &ExecuteResponse{
+					SQL:         stmtTrimmed,
+					Type:        "exec",
+					Message:     "Transaction rolled back successfully.",
+					ExecutionMs: time.Since(stmtStart).Milliseconds(),
+					TxActive:    false,
+				})
+			}
+			continue
+		}
+
+		if isStmtSelect {
+			var stream driver.RowStream
+			var streamErr error
+			if currentTx != nil {
+				stream, streamErr = currentTx.QueryStream(ctx, stmtTrimmed, limit)
+			} else {
+				if s.Session == nil {
+					return nil, errors.New("no active database session")
+				}
+				stream, streamErr = s.Session.QueryStream(ctx, stmtTrimmed, limit)
+			}
+			if streamErr != nil {
+				if s.vault != nil {
+					s.RecordAudit(stmtTrimmed, "editor_batch", time.Since(stmtStart).Milliseconds(), 0, streamErr, stmtStart)
+				}
+				return nil, fmt.Errorf("statement %d (%s) failed: %w", i+1, previewStmt(stmtTrimmed), streamErr)
+			}
+			defer stream.Close()
+
+			cols := stream.Columns()
+			var allRows [][]any
+			for len(allRows) < limit {
+				chunk, err := stream.NextChunk(200)
+				if len(chunk) > 0 {
+					allRows = append(allRows, chunk...)
+				}
+				if err != nil {
+					if err != io.EOF {
+						return nil, fmt.Errorf("statement %d reading rows failed: %w", i+1, err)
+					}
+					break
+				}
+			}
+			qRes := &ExecuteResponse{
+				SQL:         stmtTrimmed,
+				Type:        "query",
+				Columns:     cols,
+				Rows:        allRows,
+				RowCount:    len(allRows),
+				ExecutionMs: time.Since(stmtStart).Milliseconds(),
+				TxActive:    currentTx != nil,
+			}
+			if firstQuery == nil {
+				firstQuery = qRes
+			}
+			results = append(results, qRes)
+			if s.vault != nil {
+				s.RecordAudit(stmtTrimmed, "editor_batch", qRes.ExecutionMs, int64(len(allRows)), nil, stmtStart)
+			}
+			continue
+		}
+
+		var execRes *driver.ExecResult
+		var execErr error
+		if currentTx != nil {
+			execRes, execErr = currentTx.Exec(ctx, stmtTrimmed)
+		} else {
+			if strings.HasPrefix(cleanUpper, "ALTER ") {
+				lockTimeout := req.LockTimeoutSec
+				if lockTimeout <= 0 {
+					lockTimeout = 3
+				}
+				execRes, execErr = s.Session.ExecSafeDDL(ctx, stmtTrimmed, lockTimeout)
+			} else {
+				execRes, execErr = s.Session.Exec(ctx, stmtTrimmed)
+			}
+		}
+		if execErr != nil {
+			if s.vault != nil {
+				s.RecordAudit(stmtTrimmed, "editor_batch", time.Since(stmtStart).Milliseconds(), 0, execErr, stmtStart)
+			}
+			return nil, fmt.Errorf("statement %d (%s) failed: %w", i+1, previewStmt(stmtTrimmed), execErr)
+		}
+		totalRowsAffected += execRes.RowsAffected
+		eRes := &ExecuteResponse{
+			SQL:          stmtTrimmed,
+			Type:         "exec",
+			RowsAffected: execRes.RowsAffected,
+			LastInsertID: execRes.LastInsertID,
+			ExecutionMs:  execRes.ExecutionMs,
+			Message:      execRes.Message,
+			TxActive:     currentTx != nil,
+		}
+		results = append(results, eRes)
+		if s.vault != nil {
+			s.RecordAudit(stmtTrimmed, "editor_batch", eRes.ExecutionMs, execRes.RowsAffected, nil, stmtStart)
+		}
+	}
+
+	finalResp := &ExecuteResponse{
+		Type:         "batch",
+		Results:      results,
+		ExecutionMs:  time.Since(start).Milliseconds(),
+		TxActive:     s.hasActiveTx(req.TabID),
+		Profile:      collectProfile(),
+		Inspection:   inspection,
+		RowsAffected: totalRowsAffected,
+	}
+	if firstQuery != nil {
+		finalResp.Type = "query"
+		finalResp.Columns = firstQuery.Columns
+		finalResp.Rows = firstQuery.Rows
+		finalResp.RowCount = firstQuery.RowCount
+	} else if len(results) > 0 {
+		finalResp.Type = "exec"
+		finalResp.Message = fmt.Sprintf("%d statements executed successfully (%d rows affected)", len(results), totalRowsAffected)
+	}
+	return finalResp, nil
+}
+
+func (s *ActiveSession) executeStreamMulti(
+	ctx context.Context,
+	req ExecuteRequest,
+	stmts []string,
+	inspection *safety.InspectionResult,
+	targetDB string,
+	start time.Time,
+	currentTx driver.TxSession,
+	w io.Writer,
+	flusher http.Flusher,
+	runKey string,
+) (*ExecuteResponse, error) {
+	enc := json.NewEncoder(w)
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 5000
+	}
+	totalRowsAll := 0
+	var streamErr error
+
+	for i, stmt := range stmts {
+		stmtTrimmed := strings.TrimSpace(stmt)
+		if stmtTrimmed == "" {
+			continue
+		}
+		stmtStart := time.Now()
+		cleanSQL := driver.StripLeadingComments(stmtTrimmed)
+		cleanUpper := strings.TrimRight(strings.ToUpper(cleanSQL), "; \t\r\n")
+		isStmtSelect := driver.IsQueryStatement(stmtTrimmed)
+
+		if strings.HasPrefix(cleanUpper, "USE ") {
+			dbTarget := strings.TrimSpace(cleanSQL[4:])
+			dbTarget = strings.Trim(strings.TrimRight(dbTarget, "; \t\r\n"), "`'\"")
+			if dbTarget != "" {
+				_ = s.UseDatabase(ctx, dbTarget)
+			}
+		}
+
+		isTxBegin := cleanUpper == "BEGIN" || cleanUpper == "START TRANSACTION" || cleanUpper == "BEGIN WORK" || cleanUpper == "BEGIN TRANSACTION" ||
+			strings.HasPrefix(cleanUpper, "START TRANSACTION ") ||
+			strings.HasPrefix(cleanUpper, "BEGIN TRANSACTION ") ||
+			strings.HasPrefix(cleanUpper, "BEGIN WORK ") ||
+			(strings.HasPrefix(cleanUpper, "BEGIN ") && (strings.Contains(cleanUpper, "DEFERRED") || strings.Contains(cleanUpper, "IMMEDIATE") || strings.Contains(cleanUpper, "EXCLUSIVE") || strings.Contains(cleanUpper, "READ ONLY") || strings.Contains(cleanUpper, "READ WRITE") || strings.Contains(cleanUpper, "ISOLATION LEVEL")))
+		isTxCommit := cleanUpper == "COMMIT" || cleanUpper == "COMMIT WORK" || cleanUpper == "COMMIT TRANSACTION" || cleanUpper == "END" || cleanUpper == "END WORK" || cleanUpper == "END TRANSACTION"
+		isTxRollback := cleanUpper == "ROLLBACK" || cleanUpper == "ROLLBACK WORK" || cleanUpper == "ROLLBACK TRANSACTION" || cleanUpper == "ABORT" || cleanUpper == "ABORT WORK" || cleanUpper == "ABORT TRANSACTION"
+
+		if isTxBegin {
+			if s.hasActiveTx(req.TabID) {
+				streamErr = fmt.Errorf("a transaction is already active in this tab; please COMMIT or ROLLBACK first")
+				_ = enc.Encode(map[string]any{"type": "error", "result_index": i, "sql": stmtTrimmed, "error": streamErr.Error()})
+				if flusher != nil {
+					flusher.Flush()
+				}
+				return nil, streamErr
+			}
+			tx, err := s.Session.BeginTx(context.Background())
+			if err != nil {
+				streamErr = fmt.Errorf("failed to begin transaction: %w", err)
+				_ = enc.Encode(map[string]any{"type": "error", "result_index": i, "sql": stmtTrimmed, "error": streamErr.Error()})
+				if flusher != nil {
+					flusher.Flush()
+				}
+				return nil, streamErr
+			}
+			s.setTx(req.TabID, tx)
+			currentTx = tx
+			_ = enc.Encode(map[string]any{
+				"type":         "exec",
+				"result_index": i,
+				"sql":          stmtTrimmed,
+				"message":      "Transaction started.",
+				"tx_active":    true,
+				"execution_ms": time.Since(stmtStart).Milliseconds(),
+			})
+			if flusher != nil {
+				flusher.Flush()
+			}
+			continue
+		}
+
+		if isTxCommit {
+			tx := s.clearTx(req.TabID)
+			currentTx = nil
+			if tx == nil {
+				_, err := s.Session.Exec(ctx, stmtTrimmed)
+				if err != nil {
+					_ = enc.Encode(map[string]any{"type": "error", "result_index": i, "sql": stmtTrimmed, "error": err.Error()})
+					if flusher != nil {
+						flusher.Flush()
+					}
+					return nil, err
+				}
+				_ = enc.Encode(map[string]any{
+					"type":         "exec",
+					"result_index": i,
+					"sql":          stmtTrimmed,
+					"message":      "COMMIT executed.",
+					"tx_active":    false,
+					"execution_ms": time.Since(stmtStart).Milliseconds(),
+				})
+			} else {
+				if err := tx.Commit(); err != nil {
+					_ = enc.Encode(map[string]any{"type": "error", "result_index": i, "sql": stmtTrimmed, "error": err.Error()})
+					if flusher != nil {
+						flusher.Flush()
+					}
+					return nil, err
+				}
+				_ = enc.Encode(map[string]any{
+					"type":         "exec",
+					"result_index": i,
+					"sql":          stmtTrimmed,
+					"message":      "Transaction committed successfully.",
+					"tx_active":    false,
+					"execution_ms": time.Since(stmtStart).Milliseconds(),
+				})
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+			continue
+		}
+
+		if isTxRollback {
+			tx := s.clearTx(req.TabID)
+			currentTx = nil
+			if tx == nil {
+				_, err := s.Session.Exec(ctx, stmtTrimmed)
+				if err != nil {
+					_ = enc.Encode(map[string]any{"type": "error", "result_index": i, "sql": stmtTrimmed, "error": err.Error()})
+					if flusher != nil {
+						flusher.Flush()
+					}
+					return nil, err
+				}
+				_ = enc.Encode(map[string]any{
+					"type":         "exec",
+					"result_index": i,
+					"sql":          stmtTrimmed,
+					"message":      "ROLLBACK executed.",
+					"tx_active":    false,
+					"execution_ms": time.Since(stmtStart).Milliseconds(),
+				})
+			} else {
+				if err := tx.Rollback(); err != nil {
+					_ = enc.Encode(map[string]any{"type": "error", "result_index": i, "sql": stmtTrimmed, "error": err.Error()})
+					if flusher != nil {
+						flusher.Flush()
+					}
+					return nil, err
+				}
+				_ = enc.Encode(map[string]any{
+					"type":         "exec",
+					"result_index": i,
+					"sql":          stmtTrimmed,
+					"message":      "Transaction rolled back successfully.",
+					"tx_active":    false,
+					"execution_ms": time.Since(stmtStart).Milliseconds(),
+				})
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+			continue
+		}
+
+		if isStmtSelect {
+			var stream driver.RowStream
+			var err error
+			if currentTx != nil {
+				stream, err = currentTx.QueryStream(ctx, stmtTrimmed, limit+1)
+			} else {
+				if s.Session == nil {
+					return nil, errors.New("no active database session")
+				}
+				stream, err = s.Session.QueryStream(ctx, stmtTrimmed, limit+1)
+			}
+			if err != nil {
+				_ = enc.Encode(map[string]any{"type": "error", "result_index": i, "sql": stmtTrimmed, "error": err.Error()})
+				if flusher != nil {
+					flusher.Flush()
+				}
+				return nil, err
+			}
+
+			_ = enc.Encode(map[string]any{
+				"type":         "meta",
+				"result_index": i,
+				"sql":          stmtTrimmed,
+				"columns":      stream.Columns(),
+				"tx_active":    currentTx != nil,
+				"database":     targetDB,
+			})
+			if flusher != nil {
+				flusher.Flush()
+			}
+
+			stmtRows := 0
+			firstChunk, cErr := stream.NextChunk(min(20, limit))
+			if len(firstChunk) > 0 {
+				stmtRows += len(firstChunk)
+				totalRowsAll += len(firstChunk)
+				_ = enc.Encode(map[string]any{
+					"type":         "chunk",
+					"result_index": i,
+					"rows":         firstChunk,
+				})
+				if flusher != nil {
+					flusher.Flush()
+				}
+			}
+			if cErr != nil && cErr != io.EOF {
+				stream.Close()
+				_ = enc.Encode(map[string]any{"type": "error", "result_index": i, "sql": stmtTrimmed, "error": cErr.Error()})
+				if flusher != nil {
+					flusher.Flush()
+				}
+				return nil, cErr
+			}
+
+			for stmtRows < limit && cErr == nil {
+				batchSize := 200
+				if stmtRows+batchSize > limit {
+					batchSize = limit - stmtRows
+				}
+				chunk, nextErr := stream.NextChunk(batchSize)
+				if len(chunk) > 0 {
+					stmtRows += len(chunk)
+					totalRowsAll += len(chunk)
+					_ = enc.Encode(map[string]any{
+						"type":         "chunk",
+						"result_index": i,
+						"rows":         chunk,
+					})
+					if flusher != nil {
+						flusher.Flush()
+					}
+				}
+				if nextErr != nil {
+					if nextErr != io.EOF {
+						stream.Close()
+						_ = enc.Encode(map[string]any{"type": "error", "result_index": i, "sql": stmtTrimmed, "error": nextErr.Error()})
+						if flusher != nil {
+							flusher.Flush()
+						}
+						return nil, nextErr
+					}
+					break
+				}
+			}
+			stream.Close()
+
+			_ = enc.Encode(map[string]any{
+				"type":         "statement_done",
+				"result_index": i,
+				"sql":          stmtTrimmed,
+				"row_count":    stmtRows,
+				"execution_ms": time.Since(stmtStart).Milliseconds(),
+			})
+			if flusher != nil {
+				flusher.Flush()
+			}
+			if s.vault != nil {
+				s.RecordAudit(stmtTrimmed, "editor_stream", time.Since(stmtStart).Milliseconds(), int64(stmtRows), nil, stmtStart)
+			}
+			continue
+		}
+
+		// Mutation statement
+		var execRes *driver.ExecResult
+		var execErr error
+		if currentTx != nil {
+			execRes, execErr = currentTx.Exec(ctx, stmtTrimmed)
+		} else {
+			if strings.HasPrefix(cleanUpper, "ALTER ") {
+				lockTimeout := req.LockTimeoutSec
+				if lockTimeout <= 0 {
+					lockTimeout = 3
+				}
+				execRes, execErr = s.Session.ExecSafeDDL(ctx, stmtTrimmed, lockTimeout)
+			} else {
+				execRes, execErr = s.Session.Exec(ctx, stmtTrimmed)
+			}
+		}
+		if execErr != nil {
+			_ = enc.Encode(map[string]any{"type": "error", "result_index": i, "sql": stmtTrimmed, "error": execErr.Error()})
+			if flusher != nil {
+				flusher.Flush()
+			}
+			return nil, execErr
+		}
+		_ = enc.Encode(map[string]any{
+			"type":           "exec",
+			"result_index":   i,
+			"sql":            stmtTrimmed,
+			"rows_affected":  execRes.RowsAffected,
+			"last_insert_id": execRes.LastInsertID,
+			"message":        execRes.Message,
+			"execution_ms":   execRes.ExecutionMs,
+			"tx_active":      currentTx != nil,
+		})
+		if flusher != nil {
+			flusher.Flush()
+		}
+		if s.vault != nil {
+			s.RecordAudit(stmtTrimmed, "editor_stream", execRes.ExecutionMs, execRes.RowsAffected, nil, stmtStart)
+		}
+	}
+
+	_ = enc.Encode(map[string]any{
+		"type":          "done",
+		"total_results": len(stmts),
+		"execution_ms":  time.Since(start).Milliseconds(),
+		"tx_active":     s.hasActiveTx(req.TabID),
+	})
+	if flusher != nil {
+		flusher.Flush()
+	}
 	return nil, nil
 }
 

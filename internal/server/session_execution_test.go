@@ -1,7 +1,9 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -574,5 +576,234 @@ func TestActiveSession_CancelQueryFallback(t *testing.T) {
 	}
 	if !cancelled {
 		t.Fatal("expected CancelQuery with 'active' to cancel running query via fallback")
+	}
+}
+
+func TestActiveSession_MultiStatementsExecute(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "sqlfox-multi-exec-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	dbPath := filepath.Join(tempDir, "test.db")
+	ctx := context.Background()
+
+	driverSess, err := driver.Connect(ctx, driver.Config{
+		Driver:       "sqlite",
+		DatabaseName: dbPath,
+	})
+	if err != nil {
+		t.Fatalf("Connect failed: %v", err)
+	}
+	defer driverSess.Close()
+
+	sess := &ActiveSession{
+		ID:          "multi-exec-test",
+		DriverName:  "sqlite",
+		Environment: "Development",
+		Session:     driverSess,
+	}
+
+	// Multi-statement: CREATE + INSERT + SELECT + SELECT
+	multiSQL := `
+		CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+		INSERT INTO users VALUES (1, 'Alice'), (2, 'Bob');
+		SELECT * FROM users WHERE id = 1;
+		SELECT * FROM users ORDER BY id DESC;
+	`
+	resp, err := sess.Execute(ctx, ExecuteRequest{
+		SQL: multiSQL,
+	})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+	if len(resp.Results) != 4 {
+		t.Fatalf("expected 4 results in multi-statement response, got %d", len(resp.Results))
+	}
+	// Verify result 1: CREATE TABLE
+	if resp.Results[0].Type != "exec" {
+		t.Errorf("expected result 0 to be exec, got %s", resp.Results[0].Type)
+	}
+	// Verify result 2: INSERT
+	if resp.Results[1].Type != "exec" || resp.Results[1].RowsAffected != 2 {
+		t.Errorf("expected result 1 to affect 2 rows, got %d", resp.Results[1].RowsAffected)
+	}
+	// Verify result 3: SELECT 1 row
+	if resp.Results[2].Type != "query" || resp.Results[2].RowCount != 1 {
+		t.Errorf("expected result 2 to have 1 row, got %d", resp.Results[2].RowCount)
+	}
+	// Verify result 4: SELECT 2 rows
+	if resp.Results[3].Type != "query" || resp.Results[3].RowCount != 2 {
+		t.Errorf("expected result 3 to have 2 rows, got %d", resp.Results[3].RowCount)
+	}
+}
+
+func TestActiveSession_MultiStatementsStream(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "sqlfox-multi-stream-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	dbPath := filepath.Join(tempDir, "test.db")
+	ctx := context.Background()
+
+	driverSess, err := driver.Connect(ctx, driver.Config{
+		Driver:       "sqlite",
+		DatabaseName: dbPath,
+	})
+	if err != nil {
+		t.Fatalf("Connect failed: %v", err)
+	}
+	defer driverSess.Close()
+
+	sess := &ActiveSession{
+		ID:          "multi-stream-test",
+		DriverName:  "sqlite",
+		Environment: "Development",
+		Session:     driverSess,
+	}
+
+	_, _ = sess.Execute(ctx, ExecuteRequest{
+		SQL: "CREATE TABLE t (id INT, v TEXT); INSERT INTO t VALUES (10, 'A'), (20, 'B');",
+	})
+
+	var buf bytes.Buffer
+	flusher := &dummyFlusher{}
+
+	multiSQL := `
+		SELECT * FROM t WHERE id = 10;
+		SELECT * FROM t WHERE id = 20;
+	`
+	_, err = sess.ExecuteStream(ctx, ExecuteRequest{
+		SQL: multiSQL,
+	}, &buf, flusher)
+	if err != nil {
+		t.Fatalf("ExecuteStream failed: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) < 4 {
+		t.Fatalf("expected at least 4 NDJSON lines, got %d: %s", len(lines), buf.String())
+	}
+
+	metaCount := 0
+	statementDoneCount := 0
+	doneCount := 0
+	for _, l := range lines {
+		var item map[string]any
+		if err := json.Unmarshal([]byte(l), &item); err != nil {
+			t.Fatalf("failed to unmarshal line %s: %v", l, err)
+		}
+		switch item["type"] {
+		case "meta":
+			metaCount++
+		case "statement_done":
+			statementDoneCount++
+		case "done":
+			doneCount++
+		}
+	}
+
+	if metaCount != 2 {
+		t.Errorf("expected 2 meta events for 2 queries, got %d", metaCount)
+	}
+	if statementDoneCount != 2 {
+		t.Errorf("expected 2 statement_done events, got %d", statementDoneCount)
+	}
+	if doneCount != 1 {
+		t.Errorf("expected 1 final done event, got %d", doneCount)
+	}
+}
+
+func TestActiveSession_TabScopedTransactions(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "sqlfox-tab-tx-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	dbPath := filepath.Join(tempDir, "test.db")
+	ctx := context.Background()
+
+	driverSess, err := driver.Connect(ctx, driver.Config{
+		Driver:       "sqlite",
+		DatabaseName: dbPath,
+	})
+	if err != nil {
+		t.Fatalf("Connect failed: %v", err)
+	}
+	defer driverSess.Close()
+
+	sess := &ActiveSession{
+		ID:          "tab-tx-test",
+		DriverName:  "sqlite",
+		Environment: "Development",
+		Session:     driverSess,
+	}
+
+	_, _ = sess.Execute(ctx, ExecuteRequest{
+		SQL: "CREATE TABLE accounts (id INT PRIMARY KEY, balance REAL);",
+	})
+
+	// Tab 1 starts transaction
+	t1Begin, err := sess.Execute(ctx, ExecuteRequest{
+		SQL:   "BEGIN;",
+		TabID: "tab-1",
+	})
+	if err != nil {
+		t.Fatalf("Tab 1 BEGIN failed: %v", err)
+	}
+	if !t1Begin.TxActive {
+		t.Fatal("expected Tab 1 TxActive to be true")
+	}
+
+	// Tab 2 checks transaction status - must be false!
+	t2Check, err := sess.Execute(ctx, ExecuteRequest{
+		SQL:   "SELECT count(*) FROM accounts;",
+		TabID: "tab-2",
+	})
+	if err != nil {
+		t.Fatalf("Tab 2 query failed: %v", err)
+	}
+	if t2Check.TxActive {
+		t.Fatal("expected Tab 2 TxActive to be false while Tab 1 is in tx")
+	}
+
+	// Tab 1 inserts row in its transaction
+	_, err = sess.Execute(ctx, ExecuteRequest{
+		SQL:   "INSERT INTO accounts VALUES (1, 100.0);",
+		TabID: "tab-1",
+	})
+	if err != nil {
+		t.Fatalf("Tab 1 insert failed: %v", err)
+	}
+
+	// Tab 1 commits
+	t1Commit, err := sess.Execute(ctx, ExecuteRequest{
+		SQL:   "COMMIT;",
+		TabID: "tab-1",
+	})
+	if err != nil {
+		t.Fatalf("Tab 1 COMMIT failed: %v", err)
+	}
+	if t1Commit.TxActive {
+		t.Fatal("expected Tab 1 TxActive to be false after COMMIT")
+	}
+
+	// Tab 2 now sees the committed row
+	t2Select, err := sess.Execute(ctx, ExecuteRequest{
+		SQL:   "SELECT count(*) FROM accounts;",
+		TabID: "tab-2",
+	})
+	if err != nil {
+		t.Fatalf("Tab 2 select failed: %v", err)
+	}
+	if t2Select.RowCount != 1 {
+		t.Fatalf("expected 1 row, got %d", t2Select.RowCount)
 	}
 }
