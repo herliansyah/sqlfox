@@ -482,6 +482,12 @@ The Entity-Relationship Diagram canvas allows developers to explore table relati
    - Upon reconnection, transitions smoothly to a green toast (`✓ Connection restored`) for 1.5s before fading out.
 4. **State Retention Guarantee**:
    - Editor tabs, unsaved SQL scripts, active query results, and staged cell modifications (`stagedInserts`, `stagedUpdates`, `stagedDeletions`) remain untouched in client memory during disconnections, preventing accidental data loss.
+5. **Standardized In-Flight Interaction Guard & Loading Feedback**:
+   - **Global Top Progress Bar**: Ambient, high-visibility indeterminate progress bar (`#global-app-progress-bar`) active across all in-flight asynchronous operations via `apiFetch` request counting.
+   - **Active Element Mutex & Disabled State**: Triggers (Database Switcher `#database-switcher-btn`, Connection Switcher, Refresh Buttons, Apply Changes `#btn-grid-apply`) immediately enter an in-flight locked state with spinning loader icon and scoped `pointer-events-none` / `cursor-wait` to eliminate duplicate clicks and race conditions.
+   - **Adaptive Slow Network Warning (> 3s)**: On high-latency or slow connections, status updates dynamically (`"Server responding slowly..."`) with a warning toast, reassuring the user without freezing the UI.
+   - **Safe State Reversion**: Failed or timed-out requests show explicit error toasts and cleanly revert to the previous active database / connection name without state corruption.
+   - **Target Container Skeleton/Spinner**: Content areas (Schema Tree and Data Grid tbody) render dedicated loader states while data is in-flight, preventing blank or frozen screens.
 
 ---
 

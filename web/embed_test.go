@@ -1922,6 +1922,10 @@ func TestPendingBusyStateGuardsAndLoadingEmbedded(t *testing.T) {
 	expectedSnippets := []string{
 		"animate-indeterminate",
 		`id="query-progress-bar"`,
+		`id="global-app-progress-bar"`,
+		"globalInFlightRequests",
+		"startGlobalProgress",
+		"stopGlobalProgress",
 		`id="btn-explain-query"`,
 		`id="btn-explain-icon"`,
 		`id="btn-explain-text"`,
@@ -1933,6 +1937,18 @@ func TestPendingBusyStateGuardsAndLoadingEmbedded(t *testing.T) {
 		"Executing DDL",
 		"ddl-exec-timer",
 		"isConnectionSwitching",
+		"isDatabaseSwitching",
+		"Switching to",
+		`id="session-switcher-btn"`,
+		`id="session-switcher-icon"`,
+		`id="btn-refresh-schema"`,
+		"isRefreshingCatalog",
+		"isRefreshingSchema",
+		"isApplyingGridChanges",
+		"Server responding slowly",
+		"prevConnection",
+		"prevDbName",
+		"stagedDraftRows.shift()",
 	}
 	for _, s := range expectedSnippets {
 		if !strings.Contains(content, s) {
