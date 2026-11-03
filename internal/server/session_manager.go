@@ -2059,34 +2059,42 @@ func (s *ActiveSession) registerQuery(queryID string, cancel context.CancelFunc)
 }
 
 // CancelQuery cancels every running execution registered under queryID ("active"/"" cancels all),
-// both client-side (context) and server-side (driver KILL / pg_cancel_backend per run key).
+// both server-side (driver KILL / pg_cancel_backend per run key) and client-side (context).
 func (s *ActiveSession) CancelQuery(ctx context.Context, queryID string) error {
 	all := queryID == "" || queryID == "active"
 	s.mu.Lock()
 	var keys []string
+	var cancels []context.CancelFunc
 	for k, c := range s.runningQueries {
 		if all || k == queryID || strings.HasPrefix(k, queryID+"#") {
 			keys = append(keys, k)
 			if c != nil {
-				c()
+				cancels = append(cancels, c)
 			}
 		}
 	}
 	sess := s.Session
 	s.mu.Unlock()
 
-	if sess == nil {
-		return nil
-	}
-	if len(keys) == 0 {
-		return sess.CancelQuery(ctx, queryID)
-	}
+	// ponytail: Dispatch server-side KILL first while query mapping is still registered in driver
 	var firstErr error
-	for _, k := range keys {
-		if err := sess.CancelQuery(ctx, k); err != nil && firstErr == nil {
-			firstErr = err
+	if sess != nil {
+		if all || len(keys) == 0 {
+			firstErr = sess.CancelQuery(ctx, queryID)
+		} else {
+			for _, k := range keys {
+				if err := sess.CancelQuery(ctx, k); err != nil && firstErr == nil {
+					firstErr = err
+				}
+			}
 		}
 	}
+
+	// Always invoke client-side cancel funcs after server-side cancellation has been dispatched
+	for _, c := range cancels {
+		c()
+	}
+
 	return firstErr
 }
 

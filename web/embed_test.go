@@ -1261,11 +1261,13 @@ func TestRemoteAccessLockScreenEmbedded(t *testing.T) {
 	expectedSnippets := []string{
 		`id="remote-lock-modal"`,
 		`id="remote-unlock-password" autofocus`,
+		`id="remote-unlock-error"`,
 		`function checkAuthStatus()`,
 		`apiFetch('/api/auth/status')`,
 		`function unlockRemoteVault(`,
 		`sqlfox_token=`,
 		`body.vault-locked`,
+		`:not(#app-native-dialog)`,
 		`classList.add('vault-locked')`,
 		`classList.remove('vault-locked')`,
 	}

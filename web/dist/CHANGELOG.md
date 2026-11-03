@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Out-of-Band Query Cancellation Concurrency & Fallback (`internal/driver/mysql/mysql.go`, `internal/driver/postgres/postgres.go`, `internal/driver/sqlite/sqlite.go`, `internal/server/session_manager.go`)**: Hardened `CancelQuery` against connection and PID reuse race conditions, retained thread and PID mappings when cancellation fails so retry attempts remain possible, eliminated connection explosion on fallback "active" query ID by dispatching single-connection multi-target batch cancellation, added base query ID prefix matching across drivers, gracefully handled MySQL Error 1094 (Unknown thread id) as finished queries, and implemented fallback and prefix matching in SQLite session cancellation.
+- **Remote Access Guard Freeze & State Reset on Authentication (`web/dist/index.html`, `web/embed_test.go`)**: Resolved page freeze when entering an incorrect password by preventing `body.vault-locked` CSS rule from applying `display: none !important` to `#app-native-dialog`, added inline error notice (`#remote-unlock-error`) with password input error highlight, auto-focus, submit button state management, cleared password input memory upon successful unlock, and reset error states when re-opening lock screen.
+
 ## [v0.13.0] - 2026-11-03
 
 ### Added
