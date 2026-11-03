@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **In-Flight Interaction Guards & Ambient Loading Feedback (`web/dist/index.html`, `web/embed_test.go`, `UX_DESIGN.md`)**: Introduced standardized in-flight mutex locks, ambient indeterminate global top progress bar (`#global-app-progress-bar`) tracked via `apiFetch` in-flight request counter with silent probe filtering, spinner feedback states for database switcher, session switcher, schema refresh, and grid apply buttons, adaptive slow network latency warnings (>3s) via non-intrusive toasts, safe state reversion on connection/database switch failures, duplication guards for partial staged draft row inserts on retry, and network error handling in data grid row fetch to prevent infinite loading state (#122).
+
+### Fixed
+- **Processlist Action Buttons Alignment & Dropdown Keyboard Navigation (`web/dist/index.html`, `web/embed_test.go`)**: Rendered disabled "Kill Q" button on idle processlist threads to eliminate action column layout shifts and maintain button alignment across rows; added Arrow Up/Down and Enter keyboard navigation across session switcher, header database switcher, and per-tab database switcher dropdown menus (#123).
+
 ## [v0.11.0] - 2026-11-02
 
 ### Added
