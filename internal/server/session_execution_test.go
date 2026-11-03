@@ -383,6 +383,41 @@ func TestActiveSession_CancelQuery_ClientCancelGuaranteed(t *testing.T) {
 	}
 }
 
+type mockCancelRecorderSession struct {
+	driver.Session
+	calls []string
+}
+
+func (m *mockCancelRecorderSession) CancelQuery(ctx context.Context, queryID string) error {
+	m.calls = append(m.calls, queryID)
+	return nil
+}
+
+func TestActiveSession_CancelQuery_BatchedFallbackDispatch(t *testing.T) {
+	mockSess := &mockCancelRecorderSession{}
+	sess := &ActiveSession{
+		ID:         "conn-batch",
+		DriverName: "mysql",
+		Session:    mockSess,
+		runningQueries: map[string]context.CancelFunc{
+			"active#1": func() {},
+			"active#2": func() {},
+		},
+	}
+
+	// When cancelling "active", driver CancelQuery should be invoked with "active" in a single batch call,
+	// rather than looping over every individual query key and opening separate connections.
+	err := sess.CancelQuery(context.Background(), "active")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(mockSess.calls) != 1 || mockSess.calls[0] != "active" {
+		t.Fatalf("expected 1 call with 'active', got %v", mockSess.calls)
+	}
+}
+
+
 func TestActiveSession_TransactionLifecycle(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "sqlfox-tx-test-*")
 	if err != nil {

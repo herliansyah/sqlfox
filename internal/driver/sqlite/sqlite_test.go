@@ -173,3 +173,33 @@ func TestSQLiteDriver_Lifecycle(t *testing.T) {
 		t.Errorf("expected severity ok, got %s", report.BottleneckSeverity)
 	}
 }
+
+func TestSQLiteCancelQuery(t *testing.T) {
+	c1Cancelled := false
+	c2Cancelled := false
+
+	s := &SQLiteSession{
+		queries: map[string]context.CancelFunc{
+			"active#1": func() { c1Cancelled = true },
+			"tab-1#1":  func() { c2Cancelled = true },
+		},
+	}
+
+	ctx := context.Background()
+
+	// 1. Prefix cancellation on tab-1
+	if err := s.CancelQuery(ctx, "tab-1"); err != nil {
+		t.Fatalf("unexpected CancelQuery error: %v", err)
+	}
+	if !c2Cancelled {
+		t.Fatal("expected tab-1#1 to be cancelled via prefix 'tab-1'")
+	}
+
+	// 2. Active fallback cancellation
+	if err := s.CancelQuery(ctx, "active"); err != nil {
+		t.Fatalf("unexpected CancelQuery error: %v", err)
+	}
+	if !c1Cancelled {
+		t.Fatal("expected active#1 to be cancelled via 'active'")
+	}
+}

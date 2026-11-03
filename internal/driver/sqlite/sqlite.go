@@ -444,13 +444,28 @@ func (s *SQLiteSession) Explain(ctx context.Context, querySQL string) (*driver.E
 }
 
 func (s *SQLiteSession) CancelQuery(ctx context.Context, queryID string) error {
+	all := queryID == "" || queryID == "active"
 	s.mu.Lock()
-	cancel, ok := s.queries[queryID]
+	var toCancel []context.CancelFunc
+	if all {
+		for _, c := range s.queries {
+			if c != nil {
+				toCancel = append(toCancel, c)
+			}
+		}
+	} else if c, ok := s.queries[queryID]; ok && c != nil {
+		toCancel = append(toCancel, c)
+	} else {
+		for k, c := range s.queries {
+			if strings.HasPrefix(k, queryID+"#") && c != nil {
+				toCancel = append(toCancel, c)
+			}
+		}
+	}
 	s.mu.Unlock()
 
-	if ok && cancel != nil {
-		cancel()
-		return nil
+	for _, c := range toCancel {
+		c()
 	}
 	return nil
 }
