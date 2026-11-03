@@ -2386,3 +2386,41 @@ func TestMultiResultSuiteAndBatchPagingEmbedded(t *testing.T) {
 		}
 	}
 }
+
+func TestGridRowGutterEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	expectedSnippets := []string{
+		// Virtual Data Grid header and gutter
+		`border-r border-slate-800 bg-slate-900/80 select-none">#</th>`,
+		`headerRow2 += '<th class="p-1 w-10 text-center text-slate-600 border-r border-slate-800 text-[10px] font-mono select-none">#</th>';`,
+		`title="Draft new row">+</td>`,
+		`w-10 text-right pr-2 text-slate-500 font-mono text-xs border-r border-slate-800/40 select-none">${rowNum}</td>`,
+		// Processlist Manager rownum gutter
+		`<th data-pl-col="rownum" class="p-2.5 w-10 text-right pr-2 text-slate-500 font-mono text-[11px] select-none border-r border-slate-800">#</th>`,
+		`data-pl-col="rownum"`,
+		// Table Schema & Secondary Grids
+		`id="structure-tbody"`,
+		`id="indexes-tbody"`,
+		`id="foreign-keys-tbody"`,
+		`id="server-variables-tbody"`,
+		`id="csv-mapping-tbody"`,
+	}
+
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(content, snippet) {
+			t.Errorf("expected index.html to contain Grid Row Gutter snippet %q, but was missing", snippet)
+		}
+	}
+}

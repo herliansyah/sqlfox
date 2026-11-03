@@ -919,6 +919,10 @@ _Avoid_: Secondary killer, kill connection, cancel hook
 A DOM-recycling table component that maintains a fixed pool of DOM row elements (`<tr>`) matching the viewport height, recalculating rendered row slice offsets via O(1) arithmetic to guarantee 60fps scrolling without rendering unmounted dataset rows.
 _Avoid_: Infinite scroll, lazy table, react-window clone
 
+**Grid Row Gutter**:
+A fixed-width, zero-mutation visual column docked at the leading edge of tabular data grids rendering 1-based, offset-aware ordinal numbers (`#`), preserving strict separation from underlying table attributes, primary keys, and data export payloads.
+_Avoid_: Line number column, row ID cell, row indexer, line gutter
+
 **Time to First Row (TTFR)**:
 The latency budget measured from SQL query submission until the initial micro-chunk of result rows (20–50 records) is painted in the Virtual Data Grid.
 _Avoid_: First byte, query delay, initial render latency

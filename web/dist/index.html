@@ -1111,6 +1111,7 @@
             <table class="w-full border-collapse text-left font-mono text-xs">
               <thead class="sticky top-0 bg-slate-900 border-b border-app-border text-slate-400 z-10">
                 <tr>
+                  <th class="p-2 w-10 text-right pr-2 text-slate-500 font-mono text-xs select-none border-r border-slate-800">#</th>
                   <th class="p-2 w-10 text-center">PK</th>
                   <th class="p-2">Column Name</th>
                   <th class="p-2">Data Type</th>
@@ -1186,6 +1187,7 @@
             <table class="w-full border-collapse text-left font-mono text-xs">
               <thead class="sticky top-0 bg-slate-900 border-b border-app-border text-slate-400 z-10">
                 <tr>
+                  <th class="p-2 w-10 text-right pr-2 text-slate-500 font-mono text-xs select-none border-r border-slate-800">#</th>
                   <th class="p-2">Index Name</th>
                   <th class="p-2">Indexed Columns</th>
                   <th class="p-2 w-24 text-center">Unique</th>
@@ -1264,6 +1266,7 @@
             <table class="w-full border-collapse text-left font-mono text-xs">
               <thead class="sticky top-0 bg-slate-900 border-b border-app-border text-slate-400 z-10">
                 <tr>
+                  <th class="p-2 w-10 text-right pr-2 text-slate-500 font-mono text-xs select-none border-r border-slate-800">#</th>
                   <th class="p-2">Name</th>
                   <th class="p-2">Column</th>
                   <th class="p-2">References</th>
@@ -1577,6 +1580,7 @@
             <table class="w-full text-left text-xs border-collapse">
               <thead class="bg-slate-900 border-b border-app-border text-slate-400 sticky top-0 z-10 font-mono text-[11px] select-none">
                 <tr>
+                  <th data-pl-col="rownum" class="p-2.5 w-10 text-right pr-2 text-slate-500 font-mono text-[11px] select-none border-r border-slate-800">#</th>
                   <th data-pl-col="select" class="p-2.5 w-10 text-center whitespace-nowrap">
                     <input type="checkbox" id="pl-select-all" onchange="toggleSelectAllProcesslistThreads(this.checked)" class="accent-sky-500 w-3.5 h-3.5 cursor-pointer" title="Select all visible non-immune threads">
                   </th>
@@ -1593,7 +1597,7 @@
               </thead>
               <tbody id="pl-tbody" class="divide-y divide-slate-800/60 font-mono text-xs text-slate-200">
                 <tr>
-                  <td colspan="10" class="p-8 text-center text-slate-500 italic">No active processes loaded.</td>
+                  <td colspan="11" class="p-8 text-center text-slate-500 italic">No active processes loaded.</td>
                 </tr>
               </tbody>
             </table>
@@ -2100,6 +2104,7 @@
           <table class="w-full text-left text-xs border-collapse">
             <thead class="bg-slate-900 sticky top-0 border-b border-app-border z-10 text-[11px] text-slate-400 font-medium">
               <tr>
+                <th class="py-2 px-3 w-10 text-right pr-2 text-slate-500 font-mono text-[11px] select-none border-r border-slate-800">#</th>
                 <th class="py-2 px-3 w-8"></th>
                 <th class="py-2 px-3">Variable Name</th>
                 <th class="py-2 px-3">Current Value</th>
@@ -2811,7 +2816,7 @@
         <table class="w-full text-left text-xs border-collapse">
           <thead class="bg-slate-800/90 text-slate-300 font-semibold sticky top-0 border-b border-slate-700 z-10 backdrop-blur-sm">
             <tr>
-              <th class="p-2.5 w-12 text-center">#</th>
+              <th class="p-2.5 w-10 text-right pr-2 text-slate-500 font-mono text-xs select-none border-r border-slate-800">#</th>
               <th class="p-2.5">Type</th>
               <th class="p-2.5">Table</th>
               <th class="p-2.5">Access Type</th>
@@ -3917,6 +3922,7 @@
             <table class="w-full text-left font-mono text-xs">
               <thead class="bg-slate-900 border-b border-slate-800 text-slate-400">
                 <tr>
+                  <th class="p-2 w-10 text-right pr-2 text-slate-500 font-mono text-xs select-none border-r border-slate-800">#</th>
                   <th class="p-2 pl-3">CSV Column Header</th>
                   <th class="p-2 w-8 text-center text-slate-600"><svg class="w-3.5 h-3.5 mx-auto"><use href="#icon-arrow-right"/></svg></th>
                   <th class="p-2 pr-3">Target Table Column</th>
@@ -10285,6 +10291,7 @@
 
     // --- Processlist Column Visibility Management (ADR 0054) ---
     const PL_COLUMNS = [
+      { key: 'rownum', label: '#', mandatory: true, inPicker: false },
       { key: 'select', label: 'Select', mandatory: true, inPicker: false },
       { key: 'action', label: 'Action', mandatory: false, inPicker: true },
       { key: 'id', label: 'ID', mandatory: true, inPicker: true },
@@ -10304,14 +10311,14 @@
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed)) {
           // Strictly protect mandatory columns from being hidden
-          const valid = parsed.filter(k => k !== 'select' && k !== 'id' && k !== 'query');
+          const valid = parsed.filter(k => k !== 'rownum' && k !== 'select' && k !== 'id' && k !== 'query');
           plHiddenColumns = new Set(valid);
         }
       }
     } catch (e) {}
 
     function isProcesslistColVisible(key) {
-      if (key === 'select' || key === 'id' || key === 'query') return true;
+      if (key === 'rownum' || key === 'select' || key === 'id' || key === 'query') return true;
       return !plHiddenColumns.has(key);
     }
 
@@ -10906,7 +10913,7 @@
         return;
       }
 
-      tbody.innerHTML = filtered.map(t => {
+      tbody.innerHTML = filtered.map((t, rIdx) => {
         const isRootBlocker = locks.some(l => l.is_root_blocker && l.blocking_thread_id === t.id);
         const isWaitingOnLock = locks.some(l => l.waiting_thread_id === t.id);
         const isSelf = t.id === currentThreadId;
@@ -10932,6 +10939,7 @@
 
         return `
           <tr class="${rowClass}" onclick="openProcessDetailModal(${t.id})">
+            <td data-pl-col="rownum" class="p-2 w-10 text-right pr-2 text-slate-500 font-mono text-xs border-r border-slate-800/40 select-none ${isProcesslistColVisible('rownum') ? '' : 'hidden'}">${rIdx + 1}</td>
             <td data-pl-col="select" class="p-2 text-center whitespace-nowrap ${isProcesslistColVisible('select') ? '' : 'hidden'}" onclick="event.stopPropagation()">
               ${isImmune ? `
                 <input type="checkbox" disabled class="opacity-20 cursor-not-allowed w-3.5 h-3.5" title="${isSelf ? 'Cannot target own active connection' : 'Cannot target protected system thread'}">
@@ -12157,11 +12165,11 @@ What are concrete steps to resolve this bottleneck? Is my.cnf tuning required (s
       }
 
       if (filtered.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="p-6 text-center text-slate-500 italic">No matching server variables found.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="p-6 text-center text-slate-500 italic">No matching server variables found.</td></tr>';
         return;
       }
 
-      tbody.innerHTML = filtered.map(v => {
+      tbody.innerHTML = filtered.map((v, idx) => {
         const isExpanded = !!serverVariablesExpanded[v.name];
         const isOpt = v.severity === 'optimal';
         const isWarn = v.severity === 'warning';
@@ -12180,6 +12188,7 @@ What are concrete steps to resolve this bottleneck? Is my.cnf tuning required (s
 
         return `
           <tr class="hover:bg-slate-900/60 transition ${v.is_curated ? 'bg-slate-950/40' : ''}">
+            <td class="py-2 px-3 w-10 text-right pr-2 text-slate-500 font-mono text-xs border-r border-slate-800/40 select-none">${idx + 1}</td>
             <td class="py-2 px-3 text-center">
               ${v.is_curated ? `
                 <button onclick="toggleVariableExpand(${jsArg(v.name)})" class="text-slate-400 hover:text-white font-mono font-bold text-xs" title="Expand tuning details">
@@ -13422,7 +13431,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const nameEl = document.getElementById('structure-table-name');
       if (nameEl) nameEl.textContent = tableName;
       if (!tableMeta) {
-        document.getElementById('structure-tbody').innerHTML = '<tr><td colspan="7" class="p-4 text-center text-slate-500">Table metadata not found in cache. Refresh schema.</td></tr>';
+        document.getElementById('structure-tbody').innerHTML = '<tr><td colspan="8" class="p-4 text-center text-slate-500">Table metadata not found in cache. Refresh schema.</td></tr>';
         return;
       }
 
@@ -13622,6 +13631,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
         if (c._deleted) {
           return `
             <tr class="bg-red-950/20 text-slate-500 line-through opacity-60">
+              <td class="p-2 w-10 text-right pr-2 text-slate-500 font-mono text-xs border-r border-slate-800/40 select-none">${i + 1}</td>
               <td class="p-2 text-center">${c.is_primary_key ? renderIcon('key', 'w-3.5 h-3.5 text-amber-400 inline shrink-0') : ''}</td>
               <td class="p-2 font-semibold">${escapeHtml(c.name)}</td>
               <td class="p-2">${escapeHtml(c.type)}</td>
@@ -13653,6 +13663,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
         return `
           <tr class="${rowBg} transition border-b border-slate-800/40">
+            <td class="p-2 w-10 text-right pr-2 text-slate-500 font-mono text-xs border-r border-slate-800/40 select-none">${i + 1}</td>
             <td class="p-2 text-center">
               <button onclick="toggleColPK(${i})" class="p-1 rounded hover:bg-slate-700 ${c.is_primary_key ? 'text-amber-400 font-bold' : 'text-slate-600'}" title="Toggle Primary Key">
                 ${renderIcon('key', 'w-3.5 h-3.5 text-amber-400')}
@@ -14139,11 +14150,12 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const tableMeta = (targetCatalog?.tables || []).find(t => t.name === tableName);
       const tbody = document.getElementById('indexes-tbody');
       if (!tableMeta || !tableMeta.indexes || tableMeta.indexes.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-slate-500">No custom indexes on this table.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="p-4 text-center text-slate-500">No custom indexes on this table.</td></tr>';
         return;
       }
-      tbody.innerHTML = tableMeta.indexes.map(idx => `
+      tbody.innerHTML = tableMeta.indexes.map((idx, i) => `
         <tr class="hover:bg-slate-800/40 border-b border-slate-800/40">
+          <td class="p-2 w-10 text-right pr-2 text-slate-500 font-mono text-xs border-r border-slate-800/40 select-none">${i + 1}</td>
           <td class="p-2 font-mono font-semibold text-sky-200">${escapeHtml(idx.name)}</td>
           <td class="p-2 font-mono text-slate-300">${escapeHtml((idx.columns || []).join(', '))}</td>
           <td class="p-2 text-center">${idx.is_unique ? '<span class="text-emerald-400 font-bold">UNIQUE</span>' : '<span class="text-slate-500">INDEX</span>'}</td>
@@ -14383,11 +14395,12 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const tableMeta = (targetCatalog?.tables || []).find(t => t.name === tableName);
       const tbody = document.getElementById('foreign-keys-tbody');
       if (!tableMeta || !tableMeta.foreign_keys || tableMeta.foreign_keys.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="p-4 text-center text-slate-500">No foreign keys configured on this table.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="p-4 text-center text-slate-500">No foreign keys configured on this table.</td></tr>';
         return;
       }
-      tbody.innerHTML = tableMeta.foreign_keys.map(fk => `
+      tbody.innerHTML = tableMeta.foreign_keys.map((fk, i) => `
         <tr class="hover:bg-slate-800/40 border-b border-slate-800/40">
+          <td class="p-2 w-10 text-right pr-2 text-slate-500 font-mono text-xs border-r border-slate-800/40 select-none">${i + 1}</td>
           <td class="p-2 font-mono font-semibold text-sky-200">${escapeHtml(fk.name)}</td>
           <td class="p-2 font-mono text-slate-300">${escapeHtml(fk.column)}</td>
           <td class="p-2 font-mono text-emerald-300">${escapeHtml(fk.referenced_table)} (${escapeHtml(fk.referenced_column)})</td>
@@ -16739,12 +16752,14 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
     function wrapSQLWithPagination(sql, limit, offset) {
       const cleaned = (sql || '').trim().replace(/;+\s*$/, '');
+      // ponytail: Query limit + 1 so backend cursor can probe the extra row and correctly determine has_more for continuous Next 5k paging past batch 2
+      const fetchLimit = limit + 1;
       // ponytail: CTE queries in MySQL cannot be wrapped inside derived tables; preserve top-level WITH
       const cteMatch = cleaned.match(/^(\s*WITH\s+[\s\S]+?\))\s*(SELECT[\s\S]+)$/i);
       if (cteMatch) {
-        return `${cteMatch[1]} SELECT * FROM (\n${cteMatch[2]}\n) AS _p LIMIT ${limit} OFFSET ${offset}`;
+        return `${cteMatch[1]} SELECT * FROM (\n${cteMatch[2]}\n) AS _p LIMIT ${fetchLimit} OFFSET ${offset}`;
       }
-      return `SELECT * FROM (\n${cleaned}\n) AS _p LIMIT ${limit} OFFSET ${offset}`;
+      return `SELECT * FROM (\n${cleaned}\n) AS _p LIMIT ${fetchLimit} OFFSET ${offset}`;
     }
 
     function updateQueryStreamPagerUI(tab) {
@@ -18043,7 +18058,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
           }
 
           tr.innerHTML = `
-            <td class="p-2.5 text-center text-slate-500 font-mono">${r.id || (idx + 1)}</td>
+            <td class="p-2.5 w-10 text-right pr-2 text-slate-500 font-mono text-xs border-r border-slate-800/40 select-none">${idx + 1}</td>
             <td class="p-2.5 text-slate-300">${escapeHtml(r.select_type || '-')}</td>
             <td class="p-2.5 font-bold text-white"><span class="text-slate-500 font-normal mr-1">🗄️</span>${escapeHtml(r.table || '-')}</td>
             <td class="p-2.5">${typeBadge}</td>
@@ -19795,7 +19810,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
       const slice = virtualGridRows.slice(startIndex, endIndex);
       const visibleColsCount = virtualGridCols.filter(c => !isColumnHidden(c?.name, virtualGridTable)).length;
-      const colSpan = virtualGridHasCheckbox ? visibleColsCount + 1 : visibleColsCount;
+      const colSpan = visibleColsCount + 1 + (virtualGridHasCheckbox ? 1 : 0);
 
       let html = '';
       if (topPadding > 0) {
@@ -19804,6 +19819,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
       html += slice.map((row, pIdx) => {
         const rIdx = (virtualGridStartIdx || 0) + startIndex + pIdx;
+        const rowNum = rIdx + 1;
+        const gutterCell = `<td class="p-1 px-2 w-10 text-right pr-2 text-slate-500 font-mono text-xs border-r border-slate-800/40 select-none">${rowNum}</td>`;
         const isSelected = selectedRowIndices.has(rIdx);
         let checkboxCell = '';
         if (virtualGridHasCheckbox) {
@@ -19811,6 +19828,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
         }
         return `
         <tr class="h-8 hover:bg-slate-800/40 transition ${isSelected ? 'bg-sky-950/20' : ''}" oncontextmenu="openGridContextMenu(event, ${rIdx})">
+          ${gutterCell}
           ${checkboxCell}
           ${row.map((val, cIdx) => {
             if (isColumnHidden(virtualGridCols[cIdx]?.name, virtualGridTable)) return '';
@@ -19951,6 +19969,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
       // Render Headers (Row 1: Names & Sort, Row 2: Subheader Filters)
       let headerRow1 = '<tr>';
+      headerRow1 += `<th class="p-2 w-10 text-right pr-2 text-slate-500 font-mono text-xs border-r border-slate-800 bg-slate-900/80 select-none">#</th>`;
       if (hasCheckbox) {
         const allSelected = currentResults.length > 0 && selectedRowIndices.size === currentResults.length;
         headerRow1 += `<th class="p-2 w-8 text-center border-r border-slate-800 bg-slate-900/80 select-none">
@@ -19973,6 +19992,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
       `;}).join('') + '</tr>';
 
       let headerRow2 = '<tr class="bg-slate-950/90 border-b border-slate-800">';
+      headerRow2 += '<th class="p-1 w-10 text-center text-slate-600 border-r border-slate-800 text-[10px] font-mono select-none">#</th>';
       if (hasCheckbox) {
         headerRow2 += '<th class="p-1 w-8 text-center text-slate-500 border-r border-slate-800 text-[10px]">🔍</th>';
       }
@@ -20053,6 +20073,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
       if (hasCheckbox && stagedDraftRows.length > 0) {
         draftRowsHTML = stagedDraftRows.map((draft, dIdx) => `
           <tr class="bg-sky-950/40 border-b border-sky-800/40 text-sky-200 draft-row" data-draft-idx="${dIdx}">
+            <td class="p-1.5 w-10 text-center text-sky-400 font-mono font-bold text-xs border-r border-slate-800/40 select-none" title="Draft new row">+</td>
             <td class="p-1.5 w-8 text-center border-r border-slate-800/40">
               <button onclick="removeGridDraftRow(${dIdx})" class="text-rose-400 hover:text-rose-200 text-xs font-bold" title="Discard this draft row"><svg class="w-3.5 h-3.5" aria-hidden="true"><use href="#icon-x"/></svg></button>
             </td>
@@ -20077,7 +20098,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
       // Render Regular Rows
       const visibleCols = cols.filter(c => !isColumnHidden(c.name, tableName));
       if ((!rows || rows.length === 0) && stagedDraftRows.length === 0) {
-        const colSpan = hasCheckbox ? visibleCols.length + 1 : visibleCols.length;
+        const colSpan = visibleCols.length + 1 + (hasCheckbox ? 1 : 0);
         tbody.innerHTML = `<tr><td colspan="${colSpan}" class="p-12 text-center text-slate-500 w-full">Zero rows returned.</td></tr>`;
         return;
       }
@@ -20098,23 +20119,26 @@ Please analyze what is causing this query to be slow and suggest necessary query
         virtualGridHasCheckbox = hasCheckbox;
         virtualGridFkMap = fkMap;
         virtualGridColMetaMap = colMetaMap;
-        virtualGridStartIdx = isPagedQuery ? startIdx : 0;
+        virtualGridStartIdx = (activeTab && activeTab.isTableViewer) ? (activeTab.offset || 0) : (isPagedQuery ? startIdx : 0);
         initVirtualGridScroll();
         renderVirtualWindow();
         return;
       }
       isVirtualGridActive = false;
-      virtualGridStartIdx = 0;
+      virtualGridStartIdx = (activeTab && activeTab.isTableViewer) ? (activeTab.offset || 0) : 0;
 
       tbody.innerHTML = draftRowsHTML + pagedRows.map((row, pIdx) => {
         const rIdx = isPagedQuery ? (startIdx + pIdx) : pIdx;
+        const rowNum = (activeTab && activeTab.isTableViewer) ? ((activeTab.offset || 0) + pIdx + 1) : (isPagedQuery ? (startIdx + pIdx + 1) : (pIdx + 1));
         const isSelected = selectedRowIndices.has(rIdx);
+        const gutterCell = `<td class="p-1.5 w-10 text-right pr-2 text-slate-500 font-mono text-xs border-r border-slate-800/40 select-none">${rowNum}</td>`;
         let checkboxCell = '';
         if (hasCheckbox) {
           checkboxCell = `<td class="p-1.5 w-8 text-center border-r border-slate-800/40"><input type="checkbox" class="grid-row-checkbox accent-sky-500 w-3.5 h-3.5 cursor-pointer" data-row="${rIdx}" ${isSelected ? 'checked' : ''} onchange="toggleSelectRow(${rIdx}, this.checked)"></td>`;
         }
         return `
         <tr class="hover:bg-slate-800/40 transition ${isSelected ? 'bg-sky-950/20' : ''}" oncontextmenu="openGridContextMenu(event, ${rIdx})">
+          ${gutterCell}
           ${checkboxCell}
           ${row.map((val, cIdx) => {
             if (isColumnHidden(cols[cIdx]?.name, tableName)) return '';
@@ -25703,6 +25727,10 @@ Please analyze what is causing this query to be slow and suggest necessary query
         const tr = document.createElement('tr');
         tr.className = 'hover:bg-slate-900/60';
 
+        const tdNum = document.createElement('td');
+        tdNum.className = 'p-2 w-10 text-right pr-2 text-slate-500 font-mono text-xs border-r border-slate-800/40 select-none';
+        tdNum.textContent = idx + 1;
+
         // Sample text
         const samples = currentCSVSamples.map(r => r[idx] || '').filter(Boolean).slice(0, 2);
         const sampleText = samples.length > 0 ? ` (e.g. "${samples.join('", "')}")` : '';
@@ -25761,6 +25789,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
         tdRight.appendChild(select);
 
+        tr.appendChild(tdNum);
         tr.appendChild(tdLeft);
         tr.appendChild(tdMid);
         tr.appendChild(tdRight);
