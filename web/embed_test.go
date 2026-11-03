@@ -1513,6 +1513,11 @@ func TestProcesslistActionButtonsAndDeferredRefresh(t *testing.T) {
 		t.Errorf("expected confirmKillProcess with connection mode in index.html")
 	}
 
+	// Ensure disabled Kill Q is rendered for idle threads to maintain consistent action column alignment
+	if !strings.Contains(content, `title="No active query running on this thread"`) {
+		t.Errorf("expected disabled Kill Q button in index.html to maintain action column alignment")
+	}
+
 	// Ensure deferred refresh pattern exists to handle async DB engine cleanup
 	if !strings.Contains(content, "✓ ${modeLabel} sent for thread #${threadId}") {
 		t.Errorf("expected toast feedback in doKillProcess")
@@ -2303,6 +2308,51 @@ func TestMySQLObjectsCRUDHardeningAndSafetyGuards(t *testing.T) {
 		t.Errorf("expected DDL generators to drop originalName when renamed during edit")
 	}
 }
+
+func TestDropdownKeyboardNavigationEmbedded(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	expectedSnippets := []string{
+		`id="database-search-input" oninput="onDatabaseSearchInput(this.value)" onkeydown="onDatabaseSearchKeyDown(event)"`,
+		`id="session-search-input" oninput="onSessionSearchInput(this.value)" onkeydown="onSessionSearchKeyDown(event)"`,
+		"let databaseDropdownSelectedIndex = -1;",
+		"let currentFilteredDatabases = [];",
+		"let sessionDropdownSelectedIndex = -1;",
+		"let currentFilteredConnections = [];",
+		"function onDatabaseSearchKeyDown(e)",
+		"function onSessionSearchKeyDown(e)",
+		`id="database-item-${idx}"`,
+		`id="session-item-${itemIdx}"`,
+		"databaseDropdownSelectedIndex = (databaseDropdownSelectedIndex + 1) % currentFilteredDatabases.length;",
+		"sessionDropdownSelectedIndex = (sessionDropdownSelectedIndex + 1) % currentFilteredConnections.length;",
+		"const firstClickable = document.querySelector('#schema-tree [data-name]');",
+		"firstClickable.click();",
+		"let tabDbDropdownSelectedIndex = -1;",
+		"let currentFilteredTabDatabases = [];",
+		`id="tab-db-item-${idx}"`,
+		"tabDbDropdownSelectedIndex = (tabDbDropdownSelectedIndex + 1) % currentFilteredTabDatabases.length;",
+		"selectTabDatabase(currentFilteredTabDatabases[targetIdx]);",
+		"const tabDbPill = document.getElementById('tab-database-pill-container');",
+	}
+
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(content, snippet) {
+			t.Errorf("expected index.html to contain dropdown keyboard navigation snippet %q, but was missing", snippet)
+		}
+	}
+}
+
 
 
 

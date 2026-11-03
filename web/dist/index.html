@@ -590,7 +590,7 @@
           <div class="flex items-center space-x-1.5 pb-1 border-b border-slate-800">
             <div class="relative flex-1 flex items-center">
               <span class="absolute left-2 text-slate-500 pointer-events-none text-xs flex items-center"><svg class="w-3.5 h-3.5 text-slate-500 shrink-0" aria-hidden="true"><use href="#icon-search"/></svg></span>
-              <input type="text" id="session-search-input" oninput="onSessionSearchInput(this.value)" onkeydown="if(event.key==='Escape'){clearSessionSearch(); this.blur();}" placeholder="Filter sessions..." class="w-full bg-slate-950 border border-slate-800 focus:border-app-accent text-white text-xs pl-7 pr-6 py-1 rounded outline-none font-mono transition">
+              <input type="text" id="session-search-input" oninput="onSessionSearchInput(this.value)" onkeydown="onSessionSearchKeyDown(event)" placeholder="Filter sessions..." class="w-full bg-slate-950 border border-slate-800 focus:border-app-accent text-white text-xs pl-7 pr-6 py-1 rounded outline-none font-mono transition">
               <button type="button" id="session-search-clear-btn" onclick="clearSessionSearch()" class="hidden absolute right-2 text-slate-500 hover:text-slate-200 text-xs px-1 rounded transition cursor-pointer" title="Clear filter (Esc)"><svg class="w-3 h-3" aria-hidden="true"><use href="#icon-x"/></svg></button>
             </div>
             <button onclick="openNewConnModal(); toggleSessionDropdown(false);" class="shrink-0 bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-2 py-1 rounded text-xs transition" title="Add Session"><svg class="w-3.5 h-3.5" aria-hidden="true"><use href="#icon-plus"/></svg></button>
@@ -625,7 +625,7 @@
           <div class="flex items-center space-x-1.5 pb-1 border-b border-slate-800">
             <div class="relative flex-1 flex items-center">
               <svg class="w-3.5 h-3.5 absolute left-2 text-slate-500 pointer-events-none shrink-0" aria-hidden="true"><use href="#icon-search"/></svg>
-              <input type="text" id="database-search-input" oninput="onDatabaseSearchInput(this.value)" onkeydown="if(event.key==='Escape'){clearDatabaseSearch(); this.blur();}" placeholder="Filter databases..." class="w-full bg-slate-950 border border-slate-800 focus:border-app-accent text-white text-xs pl-7 pr-6 py-1 rounded outline-none font-mono transition">
+              <input type="text" id="database-search-input" oninput="onDatabaseSearchInput(this.value)" onkeydown="onDatabaseSearchKeyDown(event)" placeholder="Filter databases..." class="w-full bg-slate-950 border border-slate-800 focus:border-app-accent text-white text-xs pl-7 pr-6 py-1 rounded outline-none font-mono transition">
               <button type="button" id="database-search-clear-btn" onclick="clearDatabaseSearch()" class="hidden absolute right-2 text-slate-500 hover:text-slate-200 text-xs px-1 rounded transition cursor-pointer" title="Clear filter (Esc)"><svg class="w-3 h-3" aria-hidden="true"><use href="#icon-x"/></svg></button>
             </div>
             <button onclick="openCreateDatabaseModal(); toggleDatabaseDropdown(false);" class="shrink-0 bg-app-accent hover:bg-sky-400 text-slate-950 font-bold px-2 py-1 rounded text-xs transition" title="Create New Database"><svg class="w-3.5 h-3.5" aria-hidden="true"><use href="#icon-plus"/></svg></button>
@@ -700,7 +700,7 @@
             </button>
 
             <!-- Target Database Pill (ADR 0055) -->
-            <div id="tab-database-pill-container" onclick="openTabDatabaseSwitcher(event)" class="flex items-center space-x-1.5 bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 hover:border-amber-500/60 rounded px-2.5 py-1 text-xs transition cursor-pointer select-none" title="Active Target Database for this Tab (Click to change)">
+            <div id="tab-database-pill-container" role="button" tabindex="0" onclick="openTabDatabaseSwitcher(event)" class="flex items-center space-x-1.5 bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 hover:border-amber-500/60 rounded px-2.5 py-1 text-xs transition cursor-pointer select-none" title="Active Target Database for this Tab (Click to change)">
               <svg class="w-3.5 h-3.5 text-amber-400 shrink-0" aria-hidden="true"><use href="#icon-database"/></svg>
               <span id="tab-database-pill-name" class="font-mono font-semibold text-amber-200">default</span>
               <span class="text-[9px] text-slate-400">▼</span>
@@ -5844,6 +5844,9 @@
       }
     }
 
+    let sessionDropdownSelectedIndex = -1;
+    let currentFilteredConnections = [];
+
     function toggleSessionDropdown(forceState) {
       const menu = document.getElementById('session-dropdown-menu');
       if (!menu) return;
@@ -5852,6 +5855,7 @@
       if (shouldOpen) {
         toggleDatabaseDropdown(false);
         menu.classList.remove('hidden');
+        sessionDropdownSelectedIndex = -1;
         const input = document.getElementById('session-search-input');
         const clearBtn = document.getElementById('session-search-clear-btn');
         if (clearBtn) clearBtn.classList.add('hidden');
@@ -5867,6 +5871,7 @@
     }
 
     function onSessionSearchInput(val) {
+      sessionDropdownSelectedIndex = -1;
       const clearBtn = document.getElementById('session-search-clear-btn');
       if (clearBtn) {
         if (val && val.length > 0) clearBtn.classList.remove('hidden');
@@ -5875,7 +5880,37 @@
       filterSessionList(val);
     }
 
+    function onSessionSearchKeyDown(e) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        toggleSessionDropdown(false);
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (currentFilteredConnections.length > 0) {
+          sessionDropdownSelectedIndex = (sessionDropdownSelectedIndex + 1) % currentFilteredConnections.length;
+          renderConnectionsTree();
+        }
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (currentFilteredConnections.length > 0) {
+          sessionDropdownSelectedIndex = sessionDropdownSelectedIndex <= 0
+            ? currentFilteredConnections.length - 1
+            : sessionDropdownSelectedIndex - 1;
+          renderConnectionsTree();
+        }
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        const targetIdx = sessionDropdownSelectedIndex >= 0 ? sessionDropdownSelectedIndex : 0;
+        if (currentFilteredConnections.length > 0 && targetIdx < currentFilteredConnections.length) {
+          const selectedConn = currentFilteredConnections[targetIdx];
+          selectConnection(selectedConn.id);
+          toggleSessionDropdown(false);
+        }
+      }
+    }
+
     function clearSessionSearch() {
+      sessionDropdownSelectedIndex = -1;
       const input = document.getElementById('session-search-input');
       const clearBtn = document.getElementById('session-search-clear-btn');
       if (input) {
@@ -5951,6 +5986,8 @@
       if (!el) return;
 
       if (!connections || connections.length === 0) {
+        currentFilteredConnections = [];
+        sessionDropdownSelectedIndex = -1;
         el.innerHTML = `<div class="text-slate-500 text-center py-4">No saved connections.<br><button onclick="openNewConnModal(); toggleSessionDropdown(false);" class="text-app-accent hover:underline mt-1">+ Create one</button></div>`;
         return;
       }
@@ -5965,6 +6002,8 @@
       }
 
       if (filteredConns.length === 0) {
+        currentFilteredConnections = [];
+        sessionDropdownSelectedIndex = -1;
         el.innerHTML = `<div class="text-slate-500 text-center py-3 text-xs italic">No matching connections</div>`;
         return;
       }
@@ -5976,15 +6015,34 @@
         groups[env].push(c);
       });
 
+      currentFilteredConnections = [];
+      for (const [env, list] of Object.entries(groups)) {
+        list.forEach(c => currentFilteredConnections.push(c));
+      }
+
+      if (sessionDropdownSelectedIndex >= currentFilteredConnections.length) {
+        sessionDropdownSelectedIndex = currentFilteredConnections.length > 0 ? currentFilteredConnections.length - 1 : -1;
+      }
+
       let html = '';
       for (const [env, list] of Object.entries(groups)) {
         if (list.length === 0) continue;
         const envColor = env === 'Production' ? 'text-app-danger' : (env === 'Staging' ? 'text-app-warning' : 'text-app-safe');
         html += `<div class="font-bold ${envColor} uppercase text-[10px] mt-2 mb-1 px-1 flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-current inline-block"></span><span>${env}</span></div>`;
         list.forEach(c => {
+          const itemIdx = currentFilteredConnections.indexOf(c);
           const isAct = activeConnection && activeConnection.id === c.id;
+          const isHighlighted = itemIdx === sessionDropdownSelectedIndex;
+          let itemClasses = 'group flex items-center justify-between px-2 py-1.5 rounded cursor-pointer transition ';
+          if (isHighlighted) {
+            itemClasses += 'bg-sky-900/80 text-white font-semibold ring-1 ring-app-accent';
+          } else if (isAct) {
+            itemClasses += 'bg-sky-950/60 text-app-accent font-semibold border border-sky-800';
+          } else {
+            itemClasses += 'hover:bg-slate-800 text-slate-300';
+          }
           html += `
-            <div onclick="selectConnection('${c.id}'); toggleSessionDropdown(false);" class="group flex items-center justify-between px-2 py-1.5 rounded cursor-pointer ${isAct ? 'bg-sky-950/60 text-app-accent font-semibold border border-sky-800' : 'hover:bg-slate-800 text-slate-300'}">
+            <div id="session-item-${itemIdx}" onclick="selectConnection('${c.id}'); toggleSessionDropdown(false);" class="${itemClasses}">
               <div class="flex items-center space-x-1.5 truncate">
                 ${renderIcon('database', 'w-3.5 h-3.5 text-sky-400 shrink-0')}
                 <span class="truncate">${escapeHtml(c.name)}</span>
@@ -5999,6 +6057,13 @@
         });
       }
       el.innerHTML = html;
+
+      if (sessionDropdownSelectedIndex >= 0) {
+        const activeItem = document.getElementById(`session-item-${sessionDropdownSelectedIndex}`);
+        if (activeItem) {
+          activeItem.scrollIntoView({ block: 'nearest' });
+        }
+      }
     }
 
     let isConnectionSwitching = false;
@@ -6240,6 +6305,9 @@
       }
     }
 
+    let databaseDropdownSelectedIndex = -1;
+    let currentFilteredDatabases = [];
+
     function toggleDatabaseDropdown(forceState) {
       const menu = document.getElementById('database-dropdown-menu');
       if (!menu) return;
@@ -6248,6 +6316,7 @@
       if (shouldOpen) {
         toggleSessionDropdown(false);
         menu.classList.remove('hidden');
+        databaseDropdownSelectedIndex = -1;
         const input = document.getElementById('database-search-input');
         const clearBtn = document.getElementById('database-search-clear-btn');
         if (clearBtn) clearBtn.classList.add('hidden');
@@ -6263,6 +6332,7 @@
     }
 
     function onDatabaseSearchInput(val) {
+      databaseDropdownSelectedIndex = -1;
       const clearBtn = document.getElementById('database-search-clear-btn');
       if (clearBtn) {
         if (val && val.length > 0) clearBtn.classList.remove('hidden');
@@ -6271,7 +6341,37 @@
       filterDatabaseList(val);
     }
 
+    function onDatabaseSearchKeyDown(e) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        toggleDatabaseDropdown(false);
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (currentFilteredDatabases.length > 0) {
+          databaseDropdownSelectedIndex = (databaseDropdownSelectedIndex + 1) % currentFilteredDatabases.length;
+          renderDatabaseDropdownList();
+        }
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (currentFilteredDatabases.length > 0) {
+          databaseDropdownSelectedIndex = databaseDropdownSelectedIndex <= 0
+            ? currentFilteredDatabases.length - 1
+            : databaseDropdownSelectedIndex - 1;
+          renderDatabaseDropdownList();
+        }
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        const targetIdx = databaseDropdownSelectedIndex >= 0 ? databaseDropdownSelectedIndex : 0;
+        if (currentFilteredDatabases.length > 0 && targetIdx < currentFilteredDatabases.length) {
+          const selectedDb = currentFilteredDatabases[targetIdx];
+          selectDatabase(selectedDb);
+          toggleDatabaseDropdown(false);
+        }
+      }
+    }
+
     function clearDatabaseSearch() {
+      databaseDropdownSelectedIndex = -1;
       const input = document.getElementById('database-search-input');
       const clearBtn = document.getElementById('database-search-clear-btn');
       if (input) {
@@ -6293,6 +6393,8 @@
       const listEl = document.getElementById('database-list-tree');
       if (!listEl) return;
       if (!schemaCatalogCache || !schemaCatalogCache.databases || schemaCatalogCache.databases.length === 0) {
+        currentFilteredDatabases = [];
+        databaseDropdownSelectedIndex = -1;
         listEl.innerHTML = '<div class="text-slate-500 text-center py-2 text-xs italic">No databases found</div>';
         return;
       }
@@ -6302,18 +6404,26 @@
         dbs = dbs.filter(d => d.toLowerCase().includes(databaseFilterQuery));
       }
 
+      currentFilteredDatabases = dbs;
+
       if (dbs.length === 0) {
+        databaseDropdownSelectedIndex = -1;
         listEl.innerHTML = `<div class="text-slate-500 text-center py-2 text-xs italic">No databases matching "${escapeHtml(databaseFilterQuery)}"</div>`;
         return;
+      }
+
+      if (databaseDropdownSelectedIndex >= dbs.length) {
+        databaseDropdownSelectedIndex = dbs.length > 0 ? dbs.length - 1 : -1;
       }
 
       const activeDb = schemaCatalogCache.database_name || '';
       const connId = activeConnection ? activeConnection.id : '';
       const tsMap = (connId && sessionCatalogTimestamps[connId]) ? sessionCatalogTimestamps[connId] : {};
 
-      listEl.innerHTML = dbs.map(d => {
+      listEl.innerHTML = dbs.map((d, idx) => {
         const lower = d.toLowerCase();
         const isAct = lower === activeDb.toLowerCase();
+        const isHighlighted = idx === databaseDropdownSelectedIndex;
         const cached = !!(multiDBCatalogCache && multiDBCatalogCache[lower]);
         const ts = tsMap[lower];
         let cacheLabel = '';
@@ -6322,8 +6432,17 @@
           cacheLabel = `${dt.getHours().toString().padStart(2,'0')}:${dt.getMinutes().toString().padStart(2,'0')}`;
         }
 
+        let itemClasses = 'group flex items-center justify-between px-2 py-1.5 rounded cursor-pointer transition ';
+        if (isHighlighted) {
+          itemClasses += 'bg-sky-900/80 text-white font-semibold ring-1 ring-app-accent';
+        } else if (isAct) {
+          itemClasses += 'bg-sky-950/60 text-app-accent font-bold border border-sky-800';
+        } else {
+          itemClasses += 'hover:bg-slate-800 text-slate-300';
+        }
+
         return `
-          <div onclick="selectDatabase(${jsArg(d)}); toggleDatabaseDropdown(false);" class="group flex items-center justify-between px-2 py-1.5 rounded cursor-pointer ${isAct ? 'bg-sky-950/60 text-app-accent font-bold border border-sky-800' : 'hover:bg-slate-800 text-slate-300'}">
+          <div id="database-item-${idx}" onclick="selectDatabase(${jsArg(d)}); toggleDatabaseDropdown(false);" class="${itemClasses}">
             <span class="truncate flex items-center space-x-1.5">
               ${renderIcon('database', 'w-3.5 h-3.5 text-sky-400 shrink-0')}
               <span class="truncate">${escapeHtml(d)}</span>
@@ -6336,6 +6455,13 @@
           </div>
         `;
       }).join('');
+
+      if (databaseDropdownSelectedIndex >= 0) {
+        const activeItem = document.getElementById(`database-item-${databaseDropdownSelectedIndex}`);
+        if (activeItem) {
+          activeItem.scrollIntoView({ block: 'nearest' });
+        }
+      }
     }
 
     let isDatabaseSwitching = false;
@@ -8875,6 +9001,8 @@
     }
 
     let cachedTabDatabases = [];
+    let tabDbDropdownSelectedIndex = -1;
+    let currentFilteredTabDatabases = [];
 
     function renderTabDatabaseList(filterQuery = '') {
       const activeTab = tabs.find(t => t.id === activeTabId);
@@ -8883,35 +9011,76 @@
       const currentDb = (activeTab && activeTab.database) || schemaCatalogCache?.database_name || activeConnection?.database_name || 'default';
       const q = (filterQuery || '').trim().toLowerCase();
       const filtered = q ? cachedTabDatabases.filter(d => d.toLowerCase().includes(q)) : cachedTabDatabases;
+      currentFilteredTabDatabases = filtered;
 
       if (filtered.length === 0) {
+        tabDbDropdownSelectedIndex = -1;
         itemsContainer.innerHTML = '<div class="text-slate-500 text-center py-3 text-xs italic">No matching database</div>';
         return;
       }
 
-      itemsContainer.innerHTML = filtered.map(db => {
+      if (tabDbDropdownSelectedIndex >= filtered.length) {
+        tabDbDropdownSelectedIndex = filtered.length > 0 ? filtered.length - 1 : -1;
+      }
+
+      itemsContainer.innerHTML = filtered.map((db, idx) => {
         const isCurrent = db.toLowerCase() === currentDb.toLowerCase();
+        const isHighlighted = idx === tabDbDropdownSelectedIndex;
+        let itemClasses = 'w-full text-left px-3 py-1.5 flex items-center justify-between transition cursor-pointer ';
+        if (isHighlighted) {
+          itemClasses += 'bg-amber-900/80 text-white font-semibold ring-1 ring-amber-400';
+        } else if (isCurrent) {
+          itemClasses += 'text-amber-400 font-bold bg-amber-950/30 hover:bg-slate-800';
+        } else {
+          itemClasses += 'text-slate-300 hover:bg-slate-800';
+        }
+
         return `
-          <button onclick="selectTabDatabase(${jsArg(db)})" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center justify-between transition cursor-pointer ${isCurrent ? 'text-amber-400 font-bold bg-amber-950/30' : 'text-slate-300'}">
+          <button id="tab-db-item-${idx}" onclick="selectTabDatabase(${jsArg(db)})" class="${itemClasses}">
             <span class="font-mono text-xs truncate max-w-[190px]">${escapeHtml(db)}</span>
             ${isCurrent ? '<span class="text-xs shrink-0">✓</span>' : ''}
           </button>
         `;
       }).join('');
+
+      if (tabDbDropdownSelectedIndex >= 0) {
+        const activeItem = document.getElementById(`tab-db-item-${tabDbDropdownSelectedIndex}`);
+        if (activeItem) {
+          activeItem.scrollIntoView({ block: 'nearest' });
+        }
+      }
     }
 
     function filterTabDatabaseList(query) {
+      tabDbDropdownSelectedIndex = -1;
       renderTabDatabaseList(query);
     }
 
     function handleTabDbSearchKeydown(e) {
       if (e.key === 'Escape') {
+        e.preventDefault();
         closeAllContextMenus();
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (currentFilteredTabDatabases.length > 0) {
+          tabDbDropdownSelectedIndex = (tabDbDropdownSelectedIndex + 1) % currentFilteredTabDatabases.length;
+          const searchInput = document.getElementById('tab-db-search-input');
+          renderTabDatabaseList(searchInput ? searchInput.value : '');
+        }
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (currentFilteredTabDatabases.length > 0) {
+          tabDbDropdownSelectedIndex = tabDbDropdownSelectedIndex <= 0
+            ? currentFilteredTabDatabases.length - 1
+            : tabDbDropdownSelectedIndex - 1;
+          const searchInput = document.getElementById('tab-db-search-input');
+          renderTabDatabaseList(searchInput ? searchInput.value : '');
+        }
       } else if (e.key === 'Enter') {
-        const itemsContainer = document.getElementById('tab-db-switcher-items');
-        if (itemsContainer) {
-          const firstBtn = itemsContainer.querySelector('button');
-          if (firstBtn) firstBtn.click();
+        e.preventDefault();
+        const targetIdx = tabDbDropdownSelectedIndex >= 0 ? tabDbDropdownSelectedIndex : 0;
+        if (currentFilteredTabDatabases.length > 0 && targetIdx < currentFilteredTabDatabases.length) {
+          selectTabDatabase(currentFilteredTabDatabases[targetIdx]);
         }
       }
     }
@@ -8934,6 +9103,7 @@
         : (activeConnection ? [activeConnection.database_name || 'default'] : ['default']);
 
       cachedTabDatabases = dbs;
+      tabDbDropdownSelectedIndex = -1;
       if (searchInput) searchInput.value = '';
       renderTabDatabaseList('');
 
@@ -10593,17 +10763,17 @@
                   ${renderIcon('eye', 'w-3.5 h-3.5 mr-1')}<span>View</span>
                 </button>
                 ${hasQuery ? `
-                  <button type="button" onclick="confirmKillProcess(${t.id}, 'query')" ${isSystem ? 'disabled' : ''} class="px-1.5 py-0.5 rounded bg-amber-950 hover:bg-amber-800 text-amber-300 text-[10px] font-semibold border border-amber-800 disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer" title="Kill currently executing query only (KILL QUERY)">
+                  <button type="button" onclick="confirmKillProcess(${t.id}, 'query')" ${isSystem ? 'disabled' : ''} class="px-1.5 py-0.5 rounded bg-amber-950 hover:bg-amber-800 text-amber-300 text-[10px] font-semibold border border-amber-800 disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer" title="${isSystem ? 'Cannot kill query on protected system thread' : 'Kill currently executing query only (KILL QUERY)'}">
                     Kill Q
                   </button>
-                  <button type="button" onclick="confirmKillProcess(${t.id}, 'connection')" ${isSelf || isSystem ? 'disabled' : ''} class="px-1.5 py-0.5 rounded bg-red-950 hover:bg-red-800 text-red-300 text-[10px] font-semibold border border-red-800 disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer" title="${isSelf ? 'Cannot kill own active session connection' : 'Terminate client connection (KILL)'}">
-                    Kill C
-                  </button>
                 ` : `
-                  <button type="button" onclick="confirmKillProcess(${t.id}, 'connection')" ${isSelf || isSystem ? 'disabled' : ''} class="px-1.5 py-0.5 rounded bg-red-950 hover:bg-red-800 text-red-300 text-[10px] font-semibold border border-red-800 disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer" title="${isSelf ? 'Cannot kill own active session connection' : 'Terminate client connection (KILL)'}">
-                    Kill C
+                  <button type="button" disabled class="px-1.5 py-0.5 rounded bg-slate-900/50 text-slate-600 border border-slate-800/80 text-[10px] font-semibold opacity-35 cursor-not-allowed transition" title="No active query running on this thread">
+                    Kill Q
                   </button>
                 `}
+                <button type="button" onclick="confirmKillProcess(${t.id}, 'connection')" ${isSelf || isSystem ? 'disabled' : ''} class="px-1.5 py-0.5 rounded bg-red-950 hover:bg-red-800 text-red-300 text-[10px] font-semibold border border-red-800 disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer" title="${isSelf ? 'Cannot kill own active session connection' : 'Terminate client connection (KILL)'}">
+                  Kill C
+                </button>
                 <button type="button" data-pl-menu-btn onclick="showProcessContextMenu(event, this, ${t.id})" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs border border-slate-700 transition cursor-pointer" title="More thread actions">
                   ⋮
                 </button>
@@ -25260,6 +25430,42 @@ Please analyze what is causing this query to be slow and suggest necessary query
             e.stopPropagation();
             clearSchemaFilter();
             schemaFilterEl.blur();
+          } else if (e.key === 'ArrowDown' || e.key === 'Enter') {
+            const firstClickable = document.querySelector('#schema-tree [data-name]');
+            if (firstClickable) {
+              e.preventDefault();
+              firstClickable.click();
+            }
+          }
+        });
+      }
+
+      const dbSwitcherBtn = document.getElementById('database-switcher-btn');
+      if (dbSwitcherBtn) {
+        dbSwitcherBtn.addEventListener('keydown', (e) => {
+          if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            toggleDatabaseDropdown(true);
+          }
+        });
+      }
+
+      const sessionSwitcherBtn = document.getElementById('session-switcher-btn');
+      if (sessionSwitcherBtn) {
+        sessionSwitcherBtn.addEventListener('keydown', (e) => {
+          if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            toggleSessionDropdown(true);
+          }
+        });
+      }
+
+      const tabDbPill = document.getElementById('tab-database-pill-container');
+      if (tabDbPill) {
+        tabDbPill.addEventListener('keydown', (e) => {
+          if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            openTabDatabaseSwitcher(e);
           }
         });
       }
