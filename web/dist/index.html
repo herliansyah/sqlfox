@@ -5617,6 +5617,15 @@
         const res = await fetch(url, options);
         if (res.status === 401) {
           showRemoteLockScreen();
+        } else if (res.status === 403 && typeof activeSession !== 'undefined' && activeSession && !activeSession.read_only) {
+          try {
+            res.clone().json().then(body => {
+              if (body && typeof body.error === 'string' && body.error.toLowerCase().includes('read-only')) {
+                activeSession.read_only = true;
+                if (typeof updateReadOnlyUI === 'function') updateReadOnlyUI(true);
+              }
+            }).catch(() => {});
+          } catch (_) {}
         } else if (isServerReconnecting && res.ok) {
           hideReconnectBanner();
         }
@@ -27640,6 +27649,10 @@ Please analyze what is causing this query to be slow and suggest necessary query
             activeSession.memory_mb = data.memory_mb;
             if (data.server_info) {
               activeSession.server_info = data.server_info;
+            }
+            if (typeof data.read_only === 'boolean' && activeSession.read_only !== data.read_only) {
+              activeSession.read_only = data.read_only;
+              if (typeof updateReadOnlyUI === 'function') updateReadOnlyUI(activeSession.read_only);
             }
           }
           updateFooterStats(data.latency_ms, data.memory_mb);

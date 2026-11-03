@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -310,6 +311,89 @@ func TestSessionManager_LazyAutoReconnectAfterEviction(t *testing.T) {
 	}
 	if res == nil || len(res.Rows) != 1 {
 		t.Fatalf("unexpected query result on rehydrated session: %+v", res)
+	}
+}
+
+func TestSessionManager_LazyAutoReconnect_PreservesReadOnlyToggle(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "sqlfox-ro-reconnect-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	vaultDB := filepath.Join(tempDir, "vault.db")
+	targetDB := filepath.Join(tempDir, "target.db")
+	v, err := vault.OpenVault(vaultDB, "test-master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	// Create sqlite DB with test table
+	db, err := sql.Open("sqlite", targetDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);"); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	conn := &vault.ConnectionRecord{
+		Name:         "Prod SQLite",
+		Environment:  "Production",
+		Driver:       "sqlite",
+		DatabaseName: targetDB,
+	}
+	if err := v.SaveConnection(conn); err != nil {
+		t.Fatal(err)
+	}
+
+	backupDir := filepath.Join(tempDir, "backups")
+	sm := NewSessionManager(v, backupDir)
+	defer sm.CloseAll()
+
+	// 1. Initial connect: Production defaults to Read-Only
+	sess, err := sm.ConnectSession(context.Background(), conn.ID)
+	if err != nil {
+		t.Fatalf("initial ConnectSession failed: %v", err)
+	}
+	if !sess.IsReadOnly() {
+		t.Fatal("expected Production session to default to Read-Only")
+	}
+
+	// 2. User toggles to Writeable (Read-Only: false)
+	newRO := sess.ToggleReadOnly()
+	if newRO != false || sess.IsReadOnly() != false {
+		t.Fatalf("expected ReadOnly to be false after toggle, got %v", newRO)
+	}
+
+	// 3. Session is evicted due to idle timeout (>30m)
+	if err := sm.CloseSession(conn.ID); err != nil {
+		t.Fatalf("CloseSession failed: %v", err)
+	}
+
+	// 4. User returns: GetSession rehydrates transparently
+	rehydrated, err := sm.GetSession(conn.ID)
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+
+	// Read-Only state must STILL be false (preserved across eviction)
+	if rehydrated.IsReadOnly() != false {
+		t.Fatalf("expected rehydrated session to preserve writeable mode (ReadOnly=false), got ReadOnly=%v", rehydrated.IsReadOnly())
+	}
+
+	// 5. Destructive mutation must be permitted
+	execRes, err := rehydrated.Execute(context.Background(), ExecuteRequest{
+		SQL:       "INSERT INTO users (id, name) VALUES (1, 'Alice');",
+		Confirmed: true,
+	})
+	if err != nil {
+		t.Fatalf("Execute on writeable rehydrated session failed: %v", err)
+	}
+	if execRes == nil || execRes.RowsAffected != 1 {
+		t.Fatalf("expected 1 row affected, got %+v", execRes)
 	}
 }
 
