@@ -67,7 +67,7 @@
     dialog:not([open]) { display: none !important; }
 
     /* Critical remote vault lockdown guard (prevents layout painting during streaming / hard reload) */
-    body.vault-locked > *:not(#remote-lock-modal):not(script):not(style):not(svg) {
+    body.vault-locked > *:not(#remote-lock-modal):not(#app-native-dialog):not(script):not(style):not(svg) {
       display: none !important;
     }
     body.vault-locked #remote-lock-modal,
@@ -81,6 +81,9 @@
       display: flex !important;
       align-items: center !important;
       justify-content: center !important;
+    }
+    body.vault-locked #app-native-dialog {
+      z-index: 100000 !important;
     }
 
     body {
@@ -392,8 +395,9 @@
       <h2 class="text-base font-bold text-white tracking-wide">SqlFox Remote Access Guard</h2>
       <p class="text-xs text-slate-400 leading-relaxed">You are accessing SqlFox from a network device. Please enter your Master Password to unlock this vault.</p>
       <form onsubmit="unlockRemoteVault(event)" class="space-y-3 pt-2">
-        <input type="password" id="remote-unlock-password" autofocus required placeholder="Enter Master Password" class="w-full bg-slate-950 border border-slate-700 p-2.5 rounded text-white text-center text-sm outline-none focus:border-app-accent font-mono">
-        <button type="submit" class="w-full bg-app-accent hover:bg-sky-400 text-slate-950 font-bold py-2 rounded text-sm transition">Unlock Vault</button>
+        <input type="password" id="remote-unlock-password" autofocus required placeholder="Enter Master Password" oninput="const e=document.getElementById('remote-unlock-error');if(e)e.classList.add('hidden');this.classList.remove('border-red-500','focus:border-red-500')" class="w-full bg-slate-950 border border-slate-700 p-2.5 rounded text-white text-center text-sm outline-none focus:border-app-accent font-mono transition">
+        <div id="remote-unlock-error" class="hidden text-xs text-red-400 bg-red-950/60 border border-red-800/80 rounded px-2.5 py-1.5 font-medium leading-relaxed"></div>
+        <button id="remote-unlock-btn" type="submit" class="w-full bg-app-accent hover:bg-sky-400 text-slate-950 font-bold py-2 rounded text-sm transition">Unlock Vault</button>
       </form>
     </div>
   </div>
@@ -5580,20 +5584,14 @@
     }
 
     // --- Remote Access Guard & API Fetch Helper ---
-    // ponytail: global progress bar tracks active in-flight requests across all modules
+    // ponytail: global top progress bar disabled to eliminate visual noise; all modules utilize localized in-place spinners
     let globalInFlightRequests = 0;
     function startGlobalProgress() {
       globalInFlightRequests++;
-      const bar = document.getElementById('global-app-progress-bar');
-      if (bar) bar.classList.remove('hidden');
     }
 
     function stopGlobalProgress() {
       globalInFlightRequests = Math.max(0, globalInFlightRequests - 1);
-      if (globalInFlightRequests === 0) {
-        const bar = document.getElementById('global-app-progress-bar');
-        if (bar) bar.classList.add('hidden');
-      }
     }
 
     async function apiFetch(url, options = {}) {
@@ -5652,30 +5650,84 @@
 
     function showRemoteLockScreen() {
       document.body.classList.add('vault-locked');
-      document.getElementById('remote-lock-modal').classList.remove('hidden');
-      setTimeout(() => document.getElementById('remote-unlock-password').focus(), 100);
+      const modal = document.getElementById('remote-lock-modal');
+      if (modal) modal.classList.remove('hidden');
+      const passInput = document.getElementById('remote-unlock-password');
+      const errorEl = document.getElementById('remote-unlock-error');
+      if (errorEl) {
+        errorEl.classList.add('hidden');
+        errorEl.textContent = '';
+      }
+      if (passInput) {
+        passInput.classList.remove('border-red-500', 'focus:border-red-500');
+        passInput.value = '';
+        setTimeout(() => passInput.focus(), 100);
+      }
     }
 
     async function unlockRemoteVault(e) {
       e.preventDefault();
-      const pass = document.getElementById('remote-unlock-password').value;
+      const passInput = document.getElementById('remote-unlock-password');
+      const errorEl = document.getElementById('remote-unlock-error');
+      const submitBtn = document.getElementById('remote-unlock-btn') || (e.target && e.target.querySelector('button[type="submit"]'));
+      const pass = passInput ? passInput.value : '';
+
+      if (errorEl) {
+        errorEl.classList.add('hidden');
+        errorEl.textContent = '';
+      }
+      if (passInput) {
+        passInput.classList.remove('border-red-500', 'focus:border-red-500');
+      }
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.classList.add('opacity-70', 'cursor-not-allowed');
+      }
+
       try {
         const res = await fetch('/api/auth/unlock', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password: pass })
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         if (res.ok && data.token) {
+          if (passInput) passInput.value = '';
           sessionStorage.setItem('sqlfox_remote_token', data.token);
           // ponytail: sync token to cookie so browser page reloads from LAN do not re-lock the screen
           document.cookie = 'sqlfox_token=' + encodeURIComponent(data.token) + '; path=/; SameSite=Lax';
           await initAppWorkspace();
         } else {
-          showNativeAlert('Incorrect master password!', 'Authentication');
+          const errMsg = (data && data.error) ? data.error : 'Incorrect master password!';
+          if (errorEl) {
+            errorEl.textContent = errMsg;
+            errorEl.classList.remove('hidden');
+          } else {
+            showNativeAlert(errMsg, 'Authentication');
+          }
+          if (passInput) {
+            passInput.classList.add('border-red-500', 'focus:border-red-500');
+            passInput.select();
+            passInput.focus();
+          }
         }
       } catch (err) {
-        showNativeAlert('Unlock failed: ' + err.message, 'Authentication');
+        const errMsg = 'Unlock failed: ' + (err && err.message ? err.message : 'Network error');
+        if (errorEl) {
+          errorEl.textContent = errMsg;
+          errorEl.classList.remove('hidden');
+        } else {
+          showNativeAlert(errMsg, 'Authentication');
+        }
+        if (passInput) {
+          passInput.select();
+          passInput.focus();
+        }
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.classList.remove('opacity-70', 'cursor-not-allowed');
+        }
       }
     }
 
@@ -17712,7 +17764,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
       if (isRunning) {
         queryStartTime = Date.now();
-        if (progressBar) progressBar.classList.remove('hidden');
+        // ponytail: query-progress-bar disabled to keep editor UI quiet; tab spinner + status toolbar provide sufficient feedback
+        if (progressBar) progressBar.classList.add('hidden');
 
         const isExplain = label.toLowerCase().includes('explain');
         if (isExplain && explainIcon && explainText) {
