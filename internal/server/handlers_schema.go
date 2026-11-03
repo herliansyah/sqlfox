@@ -67,6 +67,7 @@ func (s *Server) handlePingSession(w http.ResponseWriter, r *http.Request) {
 		"latency_ms":  latency.Milliseconds(),
 		"memory_mb":   allocMB,
 		"server_info": sess.Info(),
+		"read_only":   sess.IsReadOnly(),
 	})
 }
 
@@ -767,6 +768,7 @@ func (s *Server) handleToggleReadOnly(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ro := sess.ToggleReadOnly()
+	s.sessionMgr.SetReadOnly(connID, ro)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"connection_id": connID,
 		"read_only":     ro,

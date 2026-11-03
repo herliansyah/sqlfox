@@ -57,6 +57,7 @@ func (s *Server) handleDeleteConnection(w http.ResponseWriter, r *http.Request) 
 	}
 
 	_ = s.sessionMgr.CloseSession(id)
+	s.sessionMgr.RemoveReadOnly(id)
 	if err := s.vault.DeleteConnection(id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

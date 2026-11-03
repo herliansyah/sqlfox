@@ -83,6 +83,7 @@ type ActiveSession struct {
 	LastActive      time.Time              `json:"last_active"`
 	backupDir       string
 	vault           *vault.Vault
+	sessionMgr      *SessionManager
 	runningQueries  map[string]context.CancelFunc
 	activeTx        driver.TxSession
 	tabTransactions map[string]*activeTxInfo
@@ -209,9 +210,16 @@ func (s *ActiveSession) IsReadOnly() bool {
 // ToggleReadOnly flips the read-only lock and returns the new state.
 func (s *ActiveSession) ToggleReadOnly() bool {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.ReadOnly = !s.ReadOnly
-	return s.ReadOnly
+	ro := s.ReadOnly
+	sm := s.sessionMgr
+	connID := s.ConnectionID
+	s.mu.Unlock()
+
+	if sm != nil && connID != "" {
+		sm.SetReadOnly(connID, ro)
+	}
+	return ro
 }
 
 func (s *ActiveSession) Schema() *driver.SchemaMetadata {
@@ -387,21 +395,23 @@ type connectCall struct {
 
 // SessionManager manages connected database sessions.
 type SessionManager struct {
-	vault      *vault.Vault
-	backupDir  string
-	sessions   map[string]*ActiveSession
-	connecting map[string]*connectCall
-	stopReaper chan struct{}
-	mu         sync.RWMutex
+	vault          *vault.Vault
+	backupDir      string
+	sessions       map[string]*ActiveSession
+	connecting     map[string]*connectCall
+	readOnlyStates map[string]bool
+	stopReaper     chan struct{}
+	mu             sync.RWMutex
 }
 
 func NewSessionManager(v *vault.Vault, backupDir string) *SessionManager {
 	sm := &SessionManager{
-		vault:      v,
-		backupDir:  backupDir,
-		sessions:   make(map[string]*ActiveSession),
-		connecting: make(map[string]*connectCall),
-		stopReaper: make(chan struct{}),
+		vault:          v,
+		backupDir:      backupDir,
+		sessions:       make(map[string]*ActiveSession),
+		connecting:     make(map[string]*connectCall),
+		readOnlyStates: make(map[string]bool),
+		stopReaper:     make(chan struct{}),
 	}
 	go sm.startReaper()
 	return sm
@@ -524,6 +534,14 @@ func (sm *SessionManager) ConnectSession(ctx context.Context, connectionID strin
 	runtime.ReadMemStats(&m)
 	allocMB := math.Round(float64(m.Alloc)/1024/1024*10) / 10
 
+	sm.mu.Lock()
+	ro, hasOverride := sm.readOnlyStates[connectionID]
+	if !hasOverride {
+		ro = conn.Environment == "Production"
+		sm.readOnlyStates[connectionID] = ro
+	}
+	sm.mu.Unlock()
+
 	active := &ActiveSession{
 		ID:             connectionID,
 		ConnectionID:   connectionID,
@@ -531,7 +549,7 @@ func (sm *SessionManager) ConnectSession(ctx context.Context, connectionID strin
 		DatabaseName:   conn.DatabaseName,
 		Environment:    conn.Environment,
 		DriverName:     conn.Driver,
-		ReadOnly:       conn.Environment == "Production", // Production defaults to Read-Only
+		ReadOnly:       ro,
 		Session:        dbSession,
 		ServerInfo:     info,
 		LatencyMs:      latency.Milliseconds(),
@@ -539,6 +557,7 @@ func (sm *SessionManager) ConnectSession(ctx context.Context, connectionID strin
 		LastActive:     time.Now(),
 		backupDir:      sm.backupDir,
 		vault:          sm.vault,
+		sessionMgr:     sm,
 		runningQueries: make(map[string]context.CancelFunc),
 	}
 
@@ -548,6 +567,30 @@ func (sm *SessionManager) ConnectSession(ctx context.Context, connectionID strin
 
 	call.val = active
 	return active, nil
+}
+
+// SetReadOnly updates and persists the read-only state override for a connection.
+func (sm *SessionManager) SetReadOnly(connectionID string, ro bool) {
+	sm.mu.Lock()
+	if sm.readOnlyStates == nil {
+		sm.readOnlyStates = make(map[string]bool)
+	}
+	sm.readOnlyStates[connectionID] = ro
+	sess := sm.sessions[connectionID]
+	sm.mu.Unlock()
+
+	if sess != nil {
+		sess.mu.Lock()
+		sess.ReadOnly = ro
+		sess.mu.Unlock()
+	}
+}
+
+// RemoveReadOnly clears the stored read-only state for a connection.
+func (sm *SessionManager) RemoveReadOnly(connectionID string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	delete(sm.readOnlyStates, connectionID)
 }
 
 func (sm *SessionManager) GetSession(connectionID string) (*ActiveSession, error) {
