@@ -33,6 +33,8 @@ Commands:
   transfer  Perform direct cross-connection data transfer between databases
   job       Execute declarative database automation jobs or dry-run checks
   advise    Analyze SQL query and generate heuristic index recommendations and bloat warnings
+  stop      Stop a running background SqlFox instance
+  desktop   Manage desktop application launcher (install, uninstall, status)
   help      Show help for commands
 
 Server Flags (Default Mode):
@@ -41,7 +43,9 @@ Server Flags (Default Mode):
   --lan           Enable LAN and tablet access (binds to 0.0.0.0)
   -db string      Path to config vault database (default: ~/.sqlfox/config.db)
   -pass string    Master password for vault encryption
-  -no-browser     Do not automatically launch web browser
+  -app            Launch in standalone native window mode using Chrome/Edge/Chromium (default true)
+  -browser        Force launch in standard web browser tab instead of native standalone app window
+  -no-browser     Do not automatically launch web browser or app window
 
 Run 'sqlfox <command> --help' for details on a specific command.
 `
@@ -70,6 +74,12 @@ func Run(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 		return RunJob(subArgs, stdout, stderr, stdin)
 	case "advise":
 		return RunAdvise(subArgs, stdout, stderr, stdin)
+	case "stop":
+		fmt.Fprintln(stdout, "To stop a running background SqlFox instance, run 'sqlfox stop'.")
+		return 0
+	case "desktop":
+		fmt.Fprintln(stdout, "To manage the desktop application launcher, run 'sqlfox desktop [install|uninstall|status]'.")
+		return 0
 	default:
 		fmt.Fprintf(stderr, "Unknown command '%s'. Run 'sqlfox help' for usage.\n", cmd)
 		return 1

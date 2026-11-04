@@ -202,6 +202,8 @@ SQLFOX_PPROF=1 ./sqlfox -port 9090
 | `-log-format <fmt>`| `text` | Format log terstruktur: `text` (mudah dibaca manusia) atau `json` |
 | `-log-file <path>`| `""` | Lokasi berkas log persistent (menulis ke terminal dan file sekaligus) |
 | `-silent`, `-q` | `false` | Mematikan tampilan log di terminal (pencatatan file tetap berjalan jika diset) |
+| `-app` | `true` | Buka antarmuka dalam mode jendela mandiri (Native App Window via Chrome/Edge/Chromium) |
+| `-browser` | `false` | Paksa buka di tab peramban web standar daripada jendela aplikasi native |
 | `-no-browser` | `false` | Menjalankan server tanpa membuka browser web bawaan sistem operasi |
 | `-strict-port` | `false` | Langsung gagal jika port yang diminta sedang digunakan |
 | `-multi` | `false` | Izinkan beberapa instance SqlFox berjalan bersamaan di port berbeda |

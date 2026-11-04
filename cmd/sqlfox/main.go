@@ -3,16 +3,15 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -32,6 +31,7 @@ import (
 var Version = "v0.14.1"
 
 func main() {
+	initConsole()
 	loadEnvFiles()
 
 	if len(os.Args) > 1 {
@@ -53,6 +53,34 @@ func main() {
 				}
 			}
 			os.Exit(cli.Run(os.Args[1:], os.Stdout, os.Stderr, os.Stdin))
+
+		case "stop":
+			home, err := os.UserHomeDir()
+			if err != nil {
+				home = "."
+			}
+			configDir := filepath.Join(home, ".sqlfox")
+			lockPath := filepath.Join(configDir, "sqlfox.lock")
+			var pid int
+			if data, err := os.ReadFile(lockPath); err == nil {
+				var info instanceInfo
+				if json.Unmarshal(data, &info) == nil {
+					pid = info.PID
+				}
+			}
+			if err := stopExistingInstance(configDir, 8080); err != nil {
+				fmt.Printf("ℹ️  %v\n", err)
+				os.Exit(0)
+			}
+			if pid > 0 {
+				fmt.Printf("✅ SqlFox (PID %d) stopped successfully.\n", pid)
+			} else {
+				fmt.Println("✅ SqlFox stopped successfully.")
+			}
+			os.Exit(0)
+
+		case "desktop":
+			os.Exit(handleDesktopCommand(os.Args[2:]))
 		}
 	}
 
@@ -61,7 +89,9 @@ func main() {
 	lanFlag := flag.Bool("lan", false, "Enable LAN and tablet access (binds to 0.0.0.0 and displays Master PIN)")
 	dbFlag := flag.String("db", "", "Path to config vault database (default: ~/.sqlfox/config.db)")
 	passFlag := flag.String("pass", "", "Master password for vault encryption (leave blank to auto-generate or reuse ~/.sqlfox/master.key)")
-	noBrowserFlag := flag.Bool("no-browser", false, "Do not automatically launch web browser")
+	appFlag := flag.Bool("app", true, "Launch in standalone native window mode using Chrome/Edge/Chromium if available")
+	browserFlag := flag.Bool("browser", false, "Force launch in standard web browser tab instead of native standalone app window")
+	noBrowserFlag := flag.Bool("no-browser", false, "Do not automatically launch web browser or app window")
 	strictPortFlag := flag.Bool("strict-port", false, "Fail immediately if specified port is in use")
 	multiFlag := flag.Bool("multi", false, "Allow multiple SqlFox instances to run concurrently")
 	versionFlag := flag.Bool("version", false, "Print SqlFox version and exit")
@@ -73,6 +103,11 @@ func main() {
 	silentFlag := flag.Bool("silent", false, "Suppress terminal console output (shortcut for -q)")
 	quietFlag := flag.Bool("q", false, "Suppress terminal console output")
 	flag.Parse()
+
+	preferApp := *appFlag && !*browserFlag
+	if os.Getenv("SQLFOX_BROWSER") == "1" || os.Getenv("SQLFOX_APP") == "0" || os.Getenv("SQLFOX_APP_MODE") == "0" {
+		preferApp = false
+	}
 
 	if *versionFlag {
 		fmt.Printf("SqlFox %s\n", Version)
@@ -149,8 +184,7 @@ func main() {
 				}
 			}
 			if !*noBrowserFlag {
-				go openBrowser(activeURL)
-				time.Sleep(300 * time.Millisecond)
+				openUI(activeURL, preferApp)
 			}
 			return
 		}
@@ -173,8 +207,7 @@ func main() {
 					fmt.Printf("ℹ️  SqlFox is already running at %s\n", activeURL)
 				}
 				if !*noBrowserFlag {
-					go openBrowser(activeURL)
-					time.Sleep(300 * time.Millisecond)
+					openUI(activeURL, preferApp)
 				}
 				return
 			}
@@ -196,16 +229,33 @@ func main() {
 	defer v.Close()
 
 	bindHost := *hostFlag
-	isLAN := *lanFlag || bindHost == "0.0.0.0"
-	if *lanFlag && bindHost == "127.0.0.1" {
+	envLAN := os.Getenv("SQLFOX_LAN") == "1" || strings.ToLower(os.Getenv("SQLFOX_LAN")) == "true"
+	isLAN := *lanFlag || envLAN || bindHost == "0.0.0.0"
+	if (*lanFlag || envLAN) && bindHost == "127.0.0.1" {
 		bindHost = "0.0.0.0"
 	}
+
+	lanIP := getLocalNetworkIP()
 
 	// Initialize HTTP server with embedded web assets and master password
 	srv := server.NewServer(v, web.Assets(), backupDir, masterPassword)
 	srv.SetVersion(Version)
 	srv.SetLogger(logRes.Logger)
 	srv.SetLANEnabled(isLAN)
+	srv.SetLANIP(lanIP)
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+
+	srv.SetOpenBrowserFn(func(targetURL string) error {
+		return openDefaultBrowser(targetURL)
+	})
+	srv.SetShutdownFn(func() {
+		select {
+		case quit <- syscall.SIGTERM:
+		default:
+		}
+	})
 
 	maxAttempts := 50
 	if *strictPortFlag {
@@ -220,7 +270,6 @@ func main() {
 	}
 
 	localURL := fmt.Sprintf("http://localhost:%d", actualPort)
-	lanIP := getLocalNetworkIP()
 
 	var lockCleanup func()
 	if !*multiFlag && os.Getenv("SQLFOX_MULTI_INSTANCE") != "1" {
@@ -266,14 +315,15 @@ func main() {
 		"vault", dbPath,
 	)
 
-	// Auto launch browser to local URL
+	// Auto launch browser or native app window to local URL
 	if !*noBrowserFlag {
-		go openBrowser(localURL)
+		go func() {
+			time.Sleep(150 * time.Millisecond)
+			openUI(localURL, preferApp)
+		}()
 	}
 
 	// Graceful shutdown
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 	<-quit
 
 	fmt.Println("\nShutting down SqlFox gracefully...")
@@ -387,26 +437,6 @@ func getLocalNetworkIP() string {
 		}
 	}
 	return ""
-}
-
-func openBrowser(url string) {
-	time.Sleep(200 * time.Millisecond)
-	var cmd string
-	var args []string
-
-	switch runtime.GOOS {
-	case "windows":
-		cmd = "rundll32"
-		args = []string{"url.dll,FileProtocolHandler", url}
-	case "darwin":
-		cmd = "open"
-		args = []string{url}
-	default:
-		cmd = "xdg-open"
-		args = []string{url}
-	}
-
-	_ = exec.Command(cmd, args...).Start()
 }
 
 // loadEnvFiles loads environment variables from .env or sqlfox.env if present.

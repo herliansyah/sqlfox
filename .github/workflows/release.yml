@@ -76,12 +76,14 @@ jobs:
             cp LICENSE "$BUILD_DIR/"
 
             BINARY_NAME="sqlfox"
+            TARGET_LDFLAGS="$LDFLAGS"
             if [ "$GOOS" = "windows" ]; then
               BINARY_NAME="sqlfox.exe"
+              TARGET_LDFLAGS="$LDFLAGS -H=windowsgui"
             fi
 
             CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build \
-              -ldflags="$LDFLAGS" \
+              -ldflags="$TARGET_LDFLAGS" \
               -o "$BUILD_DIR/$BINARY_NAME" \
               ./cmd/sqlfox
 
