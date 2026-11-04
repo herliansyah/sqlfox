@@ -5153,100 +5153,163 @@
 
   <!-- Floating Grid Row & Cell Context Menu -->
   <div id="grid-context-menu" class="hidden fixed z-50 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-1 text-xs text-slate-200 min-w-56 ring-2 ring-black/50 font-sans divide-y divide-slate-800 max-h-[85vh] overflow-y-auto">
-    <div id="grid-ctx-filter-section" class="py-1 hidden">
-      <div class="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between select-none">
-        <span class="flex items-center space-x-2"><span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center text-xs"><svg class="w-3.5 h-3.5 text-sky-400"><use href="#icon-filter"/></svg></span><span>Quick Filter</span></span>
-        <span class="text-sky-400 font-mono text-[10px]" id="grid-ctx-filter-colname"></span>
-      </div>
-      <div id="grid-ctx-filter-options" class="space-y-0.5"></div>
-    </div>
-    <div id="grid-ctx-insert-section" class="py-1">
-      <div class="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between select-none">
-        <span class="flex items-center space-x-2"><span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center text-xs"><svg class="w-3.5 h-3.5 text-amber-400"><use href="#icon-zap"/></svg></span><span>Insert Value</span></span>
-        <span class="text-sky-400 font-mono text-[10px]" id="grid-ctx-colname"></span>
-      </div>
-      <div id="grid-ctx-insert-options" class="space-y-0.5"></div>
-    </div>
-    <div class="py-1 space-y-0.5">
-      <button onclick="openRecordInspectorFromContextMenu(); closeGridContextMenu()" id="grid-ctx-btn-inspect" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-sky-300 hover:text-white transition">
+    <!-- Primary Cell / Record Actions -->
+    <div class="py-0.5 space-y-0.5">
+      <button onmouseenter="cancelCloseGridSubmenus(); closeAllGridSubmenus()" onclick="openRecordInspectorFromContextMenu(); closeGridContextMenu()" id="grid-ctx-btn-inspect" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-sky-300 hover:text-white transition cursor-pointer">
         <span class="flex items-center space-x-2 min-w-0">
           <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-sky-400"><use href="#icon-search"/></svg></span>
           <span class="whitespace-nowrap">Inspect Record (Form View)</span>
         </span>
         <span class="text-[10px] text-slate-500 font-mono flex-shrink-0 ml-2">Space</span>
       </button>
-      <button onclick="editRightClickedCell(); closeGridContextMenu()" id="grid-ctx-btn-edit" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white transition">
+      <button onmouseenter="cancelCloseGridSubmenus(); closeAllGridSubmenus()" onclick="editRightClickedCell(); closeGridContextMenu()" id="grid-ctx-btn-edit" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white transition cursor-pointer">
         <span class="flex items-center space-x-2 min-w-0">
           <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-sky-400"><use href="#icon-edit"/></svg></span>
           <span class="whitespace-nowrap">Edit Cell</span>
         </span>
       </button>
-      <button onclick="openJsonCellModalFromContextMenu(); closeGridContextMenu()" id="grid-ctx-btn-json" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-amber-300 hover:text-white transition">
+      <button onmouseenter="cancelCloseGridSubmenus(); closeAllGridSubmenus()" onclick="openJsonCellModalFromContextMenu(); closeGridContextMenu()" id="grid-ctx-btn-json" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-amber-300 hover:text-white transition cursor-pointer">
         <span class="flex items-center space-x-2 min-w-0">
           <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono font-bold text-amber-400 text-xs">{ }</span>
           <span class="whitespace-nowrap">Inspect / Edit JSON</span>
         </span>
         <span class="text-[10px] text-slate-500 font-mono flex-shrink-0 ml-2">Modal</span>
       </button>
-      <button onclick="copyCellValueFromGrid(); closeGridContextMenu()" id="grid-ctx-btn-copy-cell" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white transition">
+      <button onmouseenter="cancelCloseGridSubmenus(); closeAllGridSubmenus()" onclick="copyCellValueFromGrid(); closeGridContextMenu()" id="grid-ctx-btn-copy-cell" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white transition cursor-pointer">
         <span class="flex items-center space-x-2 min-w-0">
           <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-slate-400"><use href="#icon-copy"/></svg></span>
           <span class="whitespace-nowrap">Copy Cell Value</span>
         </span>
       </button>
-      <button onclick="copySelectedRowsAsTSV(); closeGridContextMenu()" id="grid-ctx-btn-copy-row-tsv" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white transition">
+    </div>
+
+    <!-- Quick Filter & Insert Value Submenu Triggers -->
+    <div id="grid-ctx-smart-actions" class="py-0.5 space-y-0.5">
+      <button id="grid-ctx-filter-parent" onmouseenter="openGridSubmenu('grid-ctx-filter-submenu', this)" onmouseleave="scheduleCloseGridSubmenus()" onclick="toggleGridSubmenu('grid-ctx-filter-submenu', this)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-sky-300 hover:text-white transition group cursor-pointer">
         <span class="flex items-center space-x-2 min-w-0">
-          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-slate-400"><use href="#icon-file-text"/></svg></span>
-          <span class="whitespace-nowrap" id="grid-ctx-copy-tsv-label">Copy Row(s) as TSV</span>
+          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-sky-400"><use href="#icon-filter"/></svg></span>
+          <span class="whitespace-nowrap">Quick Filter</span>
         </span>
+        <svg class="w-3 h-3 text-slate-500 group-hover:text-slate-300 shrink-0 ml-2"><use href="#icon-chevron-right"/></svg>
       </button>
-      <button onclick="copySelectedRowsAsJSON(); closeGridContextMenu()" id="grid-ctx-btn-copy-row-json" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white transition">
+      <button id="grid-ctx-insert-parent" onmouseenter="openGridSubmenu('grid-ctx-insert-submenu', this)" onmouseleave="scheduleCloseGridSubmenus()" onclick="toggleGridSubmenu('grid-ctx-insert-submenu', this)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-amber-300 hover:text-white transition group cursor-pointer">
         <span class="flex items-center space-x-2 min-w-0">
-          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-amber-400"><use href="#icon-code"/></svg></span>
-          <span class="whitespace-nowrap" id="grid-ctx-copy-json-label">Copy Row(s) as JSON</span>
+          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-amber-400"><use href="#icon-zap"/></svg></span>
+          <span class="whitespace-nowrap">Insert Value</span>
         </span>
-      </button>
-      <button onclick="copySelectedRowsAsSQL(); closeGridContextMenu()" id="grid-ctx-btn-copy-row-sql" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white transition">
-        <span class="flex items-center space-x-2 min-w-0">
-          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-emerald-400"><use href="#icon-database"/></svg></span>
-          <span class="whitespace-nowrap" id="grid-ctx-copy-sql-label">Copy Row(s) as SQL INSERT</span>
-        </span>
-      </button>
-      <button onclick="copyGridAsTSV(); closeGridContextMenu()" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white transition">
-        <span class="flex items-center space-x-2 min-w-0">
-          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-slate-400"><use href="#icon-copy"/></svg></span>
-          <span class="whitespace-nowrap">Copy Grid as TSV</span>
-        </span>
-        <span class="text-[10px] text-slate-500 flex-shrink-0 ml-2">Excel</span>
-      </button>
-      <button onclick="copyGridAsMarkdown(); closeGridContextMenu()" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white transition">
-        <span class="flex items-center space-x-2 min-w-0">
-          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-slate-400"><use href="#icon-copy"/></svg></span>
-          <span class="whitespace-nowrap">Copy Grid as Markdown</span>
-        </span>
-        <span class="text-[10px] text-slate-500 flex-shrink-0 ml-2">GFM</span>
+        <svg class="w-3 h-3 text-slate-500 group-hover:text-slate-300 shrink-0 ml-2"><use href="#icon-chevron-right"/></svg>
       </button>
     </div>
-    <div id="grid-ctx-table-mutations" class="py-1 space-y-0.5 border-t border-slate-800">
-      <button onclick="duplicateGridRow(true); closeGridContextMenu()" id="grid-ctx-btn-dup-nokey" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-sky-400 hover:text-sky-300 transition">
+
+    <!-- Copy / Export & Row Operations Submenu Triggers -->
+    <div class="py-0.5 space-y-0.5">
+      <button id="grid-ctx-copy-parent" onmouseenter="openGridSubmenu('grid-ctx-copy-submenu', this)" onmouseleave="scheduleCloseGridSubmenus()" onclick="toggleGridSubmenu('grid-ctx-copy-submenu', this)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white transition group cursor-pointer">
+        <span class="flex items-center space-x-2 min-w-0">
+          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-slate-400"><use href="#icon-copy"/></svg></span>
+          <span class="whitespace-nowrap">Copy / Export</span>
+        </span>
+        <svg class="w-3 h-3 text-slate-500 group-hover:text-slate-300 shrink-0 ml-2"><use href="#icon-chevron-right"/></svg>
+      </button>
+      <button id="grid-ctx-mutations-parent" onmouseenter="openGridSubmenu('grid-ctx-mutations-submenu', this)" onmouseleave="scheduleCloseGridSubmenus()" onclick="toggleGridSubmenu('grid-ctx-mutations-submenu', this)" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white transition group cursor-pointer">
+        <span class="flex items-center space-x-2 min-w-0">
+          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-emerald-400"><use href="#icon-database"/></svg></span>
+          <span class="whitespace-nowrap" id="grid-ctx-mutations-label">Row Operations</span>
+        </span>
+        <svg class="w-3 h-3 text-slate-500 group-hover:text-slate-300 shrink-0 ml-2"><use href="#icon-chevron-right"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Submenu: Quick Filter -->
+  <div id="grid-ctx-filter-submenu" onmouseenter="cancelCloseGridSubmenus()" onmouseleave="scheduleCloseGridSubmenus()" class="grid-submenu hidden fixed z-50 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-1 text-xs text-slate-200 min-w-56 ring-2 ring-black/50 font-sans max-h-[75vh] overflow-y-auto">
+    <div id="grid-ctx-filter-section" class="py-0.5">
+      <div class="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between select-none border-b border-slate-800/80 mb-1">
+        <span class="flex items-center space-x-2"><span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center text-xs"><svg class="w-3.5 h-3.5 text-sky-400"><use href="#icon-filter"/></svg></span><span>Quick Filter</span></span>
+        <span class="text-sky-400 font-mono text-[10px]" id="grid-ctx-filter-colname"></span>
+      </div>
+      <div id="grid-ctx-filter-options" class="space-y-0.5"></div>
+    </div>
+  </div>
+
+  <!-- Submenu: Insert Value -->
+  <div id="grid-ctx-insert-submenu" onmouseenter="cancelCloseGridSubmenus()" onmouseleave="scheduleCloseGridSubmenus()" class="grid-submenu hidden fixed z-50 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-1 text-xs text-slate-200 min-w-56 ring-2 ring-black/50 font-sans max-h-[75vh] overflow-y-auto">
+    <div id="grid-ctx-insert-section" class="py-0.5">
+      <div class="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between select-none border-b border-slate-800/80 mb-1">
+        <span class="flex items-center space-x-2"><span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center text-xs"><svg class="w-3.5 h-3.5 text-amber-400"><use href="#icon-zap"/></svg></span><span>Insert Value</span></span>
+        <span class="text-sky-400 font-mono text-[10px]" id="grid-ctx-colname"></span>
+      </div>
+      <div id="grid-ctx-insert-options" class="space-y-0.5"></div>
+    </div>
+  </div>
+
+  <!-- Submenu: Copy / Export -->
+  <div id="grid-ctx-copy-submenu" onmouseenter="cancelCloseGridSubmenus()" onmouseleave="scheduleCloseGridSubmenus()" class="grid-submenu hidden fixed z-50 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-1 text-xs text-slate-200 min-w-60 ring-2 ring-black/50 font-sans space-y-0.5">
+    <div class="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center space-x-1 select-none border-b border-slate-800/80 mb-1">
+      <span>Copy Selected Rows</span>
+    </div>
+    <button onclick="copySelectedRowsAsTSV(); closeGridContextMenu()" id="grid-ctx-btn-copy-row-tsv" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white transition cursor-pointer">
+      <span class="flex items-center space-x-2 min-w-0">
+        <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-slate-400"><use href="#icon-file-text"/></svg></span>
+        <span class="whitespace-nowrap" id="grid-ctx-copy-tsv-label">Copy Row(s) as TSV</span>
+      </span>
+    </button>
+    <button onclick="copySelectedRowsAsJSON(); closeGridContextMenu()" id="grid-ctx-btn-copy-row-json" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white transition cursor-pointer">
+      <span class="flex items-center space-x-2 min-w-0">
+        <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-amber-400"><use href="#icon-code"/></svg></span>
+        <span class="whitespace-nowrap" id="grid-ctx-copy-json-label">Copy Row(s) as JSON</span>
+      </span>
+    </button>
+    <button onclick="copySelectedRowsAsSQL(); closeGridContextMenu()" id="grid-ctx-btn-copy-row-sql" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white transition cursor-pointer">
+      <span class="flex items-center space-x-2 min-w-0">
+        <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-emerald-400"><use href="#icon-database"/></svg></span>
+        <span class="whitespace-nowrap" id="grid-ctx-copy-sql-label">Copy Row(s) as SQL INSERT</span>
+      </span>
+    </button>
+    <div class="my-1 border-t border-slate-800"></div>
+    <div class="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center space-x-1 select-none border-b border-slate-800/80 mb-1">
+      <span>Copy Result Grid</span>
+    </div>
+    <button onclick="copyGridAsTSV(); closeGridContextMenu()" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white transition cursor-pointer">
+      <span class="flex items-center space-x-2 min-w-0">
+        <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-slate-400"><use href="#icon-copy"/></svg></span>
+        <span class="whitespace-nowrap">Copy Grid as TSV</span>
+      </span>
+      <span class="text-[10px] text-slate-500 flex-shrink-0 ml-2">Excel</span>
+    </button>
+    <button onclick="copyGridAsMarkdown(); closeGridContextMenu()" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white transition cursor-pointer">
+      <span class="flex items-center space-x-2 min-w-0">
+        <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-slate-400"><use href="#icon-copy"/></svg></span>
+        <span class="whitespace-nowrap">Copy Grid as Markdown</span>
+      </span>
+      <span class="text-[10px] text-slate-500 flex-shrink-0 ml-2">GFM</span>
+    </button>
+  </div>
+
+  <!-- Submenu: Row Operations -->
+  <div id="grid-ctx-mutations-submenu" onmouseenter="cancelCloseGridSubmenus()" onmouseleave="scheduleCloseGridSubmenus()" class="grid-submenu hidden fixed z-50 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-1 text-xs text-slate-200 min-w-56 ring-2 ring-black/50 font-sans">
+    <div id="grid-ctx-table-mutations" class="py-0.5 space-y-0.5">
+      <div class="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center space-x-1 select-none border-b border-slate-800/80 mb-1">
+        <span>Row Mutations</span>
+      </div>
+      <button onclick="duplicateGridRow(true); closeGridContextMenu()" id="grid-ctx-btn-dup-nokey" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-sky-400 hover:text-sky-300 transition cursor-pointer">
         <span class="flex items-center space-x-2 min-w-0">
           <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-sky-400"><use href="#icon-copy"/></svg></span>
           <span class="whitespace-nowrap">Duplicate Row (Without Key)</span>
         </span>
       </button>
-      <button onclick="duplicateGridRow(false); closeGridContextMenu()" id="grid-ctx-btn-dup-key" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-indigo-400 hover:text-indigo-300 transition">
+      <button onclick="duplicateGridRow(false); closeGridContextMenu()" id="grid-ctx-btn-dup-key" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-indigo-400 hover:text-indigo-300 transition cursor-pointer">
         <span class="flex items-center space-x-2 min-w-0">
           <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-indigo-400"><use href="#icon-key"/></svg></span>
           <span class="whitespace-nowrap">Duplicate Row (With Key)</span>
         </span>
       </button>
-      <button onclick="addGridDraftRow(); closeGridContextMenu()" id="grid-ctx-btn-add-draft" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-emerald-400 hover:text-emerald-300 transition">
+      <button onclick="addGridDraftRow(); closeGridContextMenu()" id="grid-ctx-btn-add-draft" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-emerald-400 hover:text-emerald-300 transition cursor-pointer">
         <span class="flex items-center space-x-2 min-w-0">
           <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-emerald-400"><use href="#icon-plus"/></svg></span>
           <span class="whitespace-nowrap">Add Row Draft</span>
         </span>
       </button>
-      <button onclick="deleteSelectedGridRows(); closeGridContextMenu()" id="grid-ctx-btn-delete-row" class="w-full text-left px-2.5 py-1.5 hover:bg-rose-950/60 rounded flex items-center justify-between text-rose-400 hover:text-rose-300 transition">
+      <button onclick="deleteSelectedGridRows(); closeGridContextMenu()" id="grid-ctx-btn-delete-row" class="w-full text-left px-2.5 py-1.5 hover:bg-rose-950/60 rounded flex items-center justify-between text-rose-400 hover:text-rose-300 transition cursor-pointer">
         <span class="flex items-center space-x-2 min-w-0">
           <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-rose-400"><use href="#icon-trash-2"/></svg></span>
           <span class="whitespace-nowrap" id="grid-ctx-delete-row-label">Delete Selected Row(s)</span>
@@ -6670,7 +6733,7 @@
 
     // Dismiss context menus when right-clicking on unhandled page surfaces
     document.addEventListener('contextmenu', (e) => {
-      if (!e.target.closest('#table-context-menu, #tab-context-menu, #grid-context-menu, #pl-context-menu, td[data-col], #tabs-container, #schema-tree, .pl-row, #btn-col-picker, #col-picker-dropdown, #pl-btn-col-picker, #pl-col-picker-dropdown, #btn-export-csv, #export-csv-menu, #export-csv-dropdown-container, #tab-database-pill-container, #tab-db-switcher-menu, #tab-overflow-wrapper, #tab-overflow-dropdown')) {
+      if (!e.target.closest('#table-context-menu, #tab-context-menu, #grid-context-menu, .grid-submenu, #pl-context-menu, td[data-col], #tabs-container, #schema-tree, .pl-row, #btn-col-picker, #col-picker-dropdown, #pl-btn-col-picker, #pl-col-picker-dropdown, #btn-export-csv, #export-csv-menu, #export-csv-dropdown-container, #tab-database-pill-container, #tab-db-switcher-menu, #tab-overflow-wrapper, #tab-overflow-dropdown')) {
         closeAllContextMenus();
       }
     });
@@ -21829,6 +21892,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const canMutate = gridMeta.canMutate;
 
       const ctxMutations = document.getElementById('grid-ctx-table-mutations');
+      const mutParent = document.getElementById('grid-ctx-mutations-parent');
+      const mutLabel = document.getElementById('grid-ctx-mutations-label');
       if (ctxMutations) {
         ctxMutations.classList.remove('hidden');
         const mutButtons = [
@@ -21851,6 +21916,19 @@ Please analyze what is causing this query to be slow and suggest necessary query
             btn.title = titleMsg;
           }
         });
+      }
+      if (mutParent) {
+        mutParent.disabled = !canMutate;
+        if (canMutate) {
+          mutParent.classList.remove('opacity-40', 'cursor-not-allowed');
+          if (typeof mutParent.removeAttribute === 'function') mutParent.removeAttribute('title');
+          mutParent.title = '';
+        } else {
+          mutParent.classList.add('opacity-40', 'cursor-not-allowed');
+          const titleMsg = 'Mutations are only available for single-table queries containing a Primary Key';
+          if (typeof mutParent.setAttribute === 'function') mutParent.setAttribute('title', titleMsg);
+          mutParent.title = titleMsg;
+        }
       }
 
       const btnCopyCell = document.getElementById('grid-ctx-btn-copy-cell');
@@ -21876,11 +21954,17 @@ Please analyze what is causing this query to be slow and suggest necessary query
       if (copySqlLabel) {
         copySqlLabel.textContent = selCount > 1 ? `Copy ${selCount} Rows as SQL INSERT` : 'Copy Row as SQL INSERT';
       }
+      if (mutLabel) {
+        mutLabel.textContent = selCount > 1 ? `Row Operations (${selCount})` : 'Row Operations';
+      }
 
       const filterSec = document.getElementById('grid-ctx-filter-section');
+      const filterParent = document.getElementById('grid-ctx-filter-parent');
       const filterColLabel = document.getElementById('grid-ctx-filter-colname');
       const filterOpts = document.getElementById('grid-ctx-filter-options');
       const insertSec = document.getElementById('grid-ctx-insert-section');
+      const insertParent = document.getElementById('grid-ctx-insert-parent');
+      const smartActions = document.getElementById('grid-ctx-smart-actions');
       const colLabel = document.getElementById('grid-ctx-colname');
       const btnEdit = document.getElementById('grid-ctx-btn-edit');
       const btnJson = document.getElementById('grid-ctx-btn-json');
@@ -21897,8 +21981,10 @@ Please analyze what is causing this query to be slow and suggest necessary query
         if (filterSec && filterOpts) {
           if (!isTableViewer) {
             filterSec.classList.add('hidden');
+            if (filterParent) filterParent.classList.add('hidden');
           } else {
             filterSec.classList.remove('hidden');
+            if (filterParent) filterParent.classList.remove('hidden');
             if (filterColLabel) filterColLabel.textContent = `(${col.name})`;
             
             const tableName = activeGridTable || (activeTab && activeTab.tableName) || '';
@@ -21976,6 +22062,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
         let canEditCell = canMutate;
 
         if (insertSec) insertSec.classList.toggle('hidden', !canEditCell);
+        if (insertParent) insertParent.classList.toggle('hidden', !canEditCell);
+        if (smartActions) smartActions.classList.toggle('hidden', (!isTableViewer) && (!canEditCell));
         if (colLabel) colLabel.textContent = `(${col.name})`;
         if (btnEdit) btnEdit.classList.toggle('hidden', !canEditCell);
         if (btnJson) btnJson.classList.toggle('hidden', !canEditCell);
@@ -22085,17 +22173,158 @@ Please analyze what is causing this query to be slow and suggest necessary query
         }
       } else {
         if (filterSec) filterSec.classList.add('hidden');
+        if (filterParent) filterParent.classList.add('hidden');
         if (insertSec) insertSec.classList.add('hidden');
+        if (insertParent) insertParent.classList.add('hidden');
+        if (smartActions) smartActions.classList.add('hidden');
         if (btnEdit) btnEdit.classList.add('hidden');
         if (btnJson) btnJson.classList.add('hidden');
       }
 
       menu.classList.remove('hidden');
+      closeAllGridSubmenus();
 
-      const x = Math.max(10, Math.min(e.clientX, window.innerWidth - 240));
-      const y = Math.max(10, Math.min(e.clientY, window.innerHeight - 340));
-      menu.style.left = `${x}px`;
-      menu.style.top = `${y}px`;
+      const pad = 8;
+      const rect = (typeof menu.getBoundingClientRect === 'function')
+        ? menu.getBoundingClientRect()
+        : { width: 220, height: 220 };
+      const menuWidth = rect.width || 220;
+      const menuHeight = rect.height || 220;
+
+      const clientX = (e && typeof e.clientX === 'number') ? e.clientX : 0;
+      const clientY = (e && typeof e.clientY === 'number') ? e.clientY : 0;
+      const winW = (typeof window !== 'undefined' && window.innerWidth) ? window.innerWidth : 1200;
+      const winH = (typeof window !== 'undefined' && window.innerHeight) ? window.innerHeight : 800;
+
+      // Ensure menu never exceeds viewport height
+      const maxH = Math.max(120, winH - (pad * 2));
+      menu.style.maxHeight = `${maxH}px`;
+      menu.style.overflowY = 'auto';
+
+      let x = clientX;
+      if (x + menuWidth > winW - pad) {
+        x = Math.max(pad, winW - menuWidth - pad);
+      } else {
+        x = Math.max(pad, x);
+      }
+
+      let y = clientY;
+      if (y + menuHeight > winH - pad) {
+        if (clientY - menuHeight >= pad) {
+          y = clientY - menuHeight;
+        } else {
+          y = Math.max(pad, winH - menuHeight - pad);
+        }
+      } else {
+        y = Math.max(pad, y);
+      }
+
+      menu.style.left = `${Math.round(x)}px`;
+      menu.style.top = `${Math.round(y)}px`;
+    }
+
+    // --- Submenu Management for Grid Context Menu ---
+    let activeGridSubmenuTimer = null;
+    let activeGridSubmenuId = null;
+
+    function closeAllGridSubmenus() {
+      if (activeGridSubmenuTimer) {
+        clearTimeout(activeGridSubmenuTimer);
+        activeGridSubmenuTimer = null;
+      }
+      const submenus = (typeof document !== 'undefined' && document.querySelectorAll) ? document.querySelectorAll('.grid-submenu') : [];
+      if (submenus && submenus.forEach) {
+        submenus.forEach(sub => {
+          if (sub && sub.classList) sub.classList.add('hidden');
+        });
+      }
+      activeGridSubmenuId = null;
+    }
+
+    function cancelCloseGridSubmenus() {
+      if (activeGridSubmenuTimer) {
+        clearTimeout(activeGridSubmenuTimer);
+        activeGridSubmenuTimer = null;
+      }
+    }
+
+    function scheduleCloseGridSubmenus() {
+      if (activeGridSubmenuTimer) {
+        clearTimeout(activeGridSubmenuTimer);
+      }
+      activeGridSubmenuTimer = setTimeout(() => {
+        closeAllGridSubmenus();
+      }, 180);
+    }
+
+    function openGridSubmenu(submenuId, triggerEl) {
+      if (!triggerEl) return;
+      if (triggerEl.disabled || (triggerEl.classList && triggerEl.classList.contains('cursor-not-allowed'))) {
+        closeAllGridSubmenus();
+        return;
+      }
+      cancelCloseGridSubmenus();
+
+      // Hide other open submenus
+      const submenus = (typeof document !== 'undefined' && document.querySelectorAll) ? document.querySelectorAll('.grid-submenu') : [];
+      if (submenus && submenus.forEach) {
+        submenus.forEach(s => {
+          if (s && s.id !== submenuId && s.classList) s.classList.add('hidden');
+        });
+      }
+
+      const sub = document.getElementById(submenuId);
+      if (!sub) return;
+
+      sub.classList.remove('hidden');
+      activeGridSubmenuId = submenuId;
+
+      const triggerRect = (typeof triggerEl.getBoundingClientRect === 'function')
+        ? triggerEl.getBoundingClientRect()
+        : { left: 0, right: 220, top: 0, bottom: 30 };
+      const pad = 6;
+      const subRect = (typeof sub.getBoundingClientRect === 'function')
+        ? sub.getBoundingClientRect()
+        : { width: 220, height: 160 };
+      const subWidth = subRect.width || 220;
+      const subHeight = subRect.height || 160;
+
+      const winW = (typeof window !== 'undefined' && window.innerWidth) ? window.innerWidth : 1200;
+      const winH = (typeof window !== 'undefined' && window.innerHeight) ? window.innerHeight : 800;
+
+      // Horizontal: open to right by default; flip to left if overflows screen
+      let left = triggerRect.right + 2;
+      if (left + subWidth > winW - pad) {
+        left = triggerRect.left - subWidth - 2;
+      }
+      if (left < pad) {
+        left = Math.max(pad, winW - subWidth - pad);
+      }
+
+      // Vertical: align with trigger top; clamp if exceeds bottom
+      let top = triggerRect.top;
+      if (top + subHeight > winH - pad) {
+        top = Math.max(pad, winH - subHeight - pad);
+      }
+      if (top < pad) {
+        top = pad;
+      }
+
+      sub.style.maxHeight = `${Math.max(120, winH - (pad * 2))}px`;
+      sub.style.overflowY = 'auto';
+      sub.style.left = `${Math.round(left)}px`;
+      sub.style.top = `${Math.round(top)}px`;
+    }
+
+    function toggleGridSubmenu(submenuId, triggerEl) {
+      const sub = document.getElementById(submenuId);
+      if (!sub) return;
+      if (sub.classList.contains('hidden')) {
+        openGridSubmenu(submenuId, triggerEl);
+      } else {
+        sub.classList.add('hidden');
+        activeGridSubmenuId = null;
+      }
     }
 
     function applyQuickFilterFromCell(colName, op, val) {
@@ -22129,10 +22358,15 @@ Please analyze what is causing this query to be slow and suggest necessary query
     function closeGridContextMenu() {
       const menu = document.getElementById('grid-context-menu');
       if (menu) menu.classList.add('hidden');
+      closeAllGridSubmenus();
     }
 
     document.addEventListener('click', (e) => {
-      if (!e.target.closest('#grid-context-menu')) {
+      if (e.target && e.target.closest) {
+        if (!e.target.closest('#grid-context-menu') && !e.target.closest('.grid-submenu')) {
+          closeGridContextMenu();
+        }
+      } else {
         closeGridContextMenu();
       }
     });
