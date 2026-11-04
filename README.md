@@ -17,7 +17,7 @@
 
 <br />
 
-[ 🇬🇧 English ](README.md) &nbsp;•&nbsp; [ 🇮🇩 Bahasa Indonesia ](README_ID.md) &nbsp;•&nbsp; [ User Guide (EN) ](docs/USER_GUIDE.md) &nbsp;•&nbsp; [ Panduan Pengguna (ID) ](docs/USER_GUIDE_ID.md)
+[ 🇬🇧 English ](README.md) &nbsp;•&nbsp; [ 🇮🇩 Bahasa Indonesia ](README_ID.md) &nbsp;•&nbsp; [ User Guide (EN) ](docs/USER_GUIDE.md) &nbsp;•&nbsp; [ Panduan Pengguna (ID) ](docs/USER_GUIDE_ID.md) &nbsp;•&nbsp; [ 📸 Screenshots (16) ](docs/SCREENSHOTS.md)
 
 </div>
 
@@ -27,7 +27,11 @@
 
 SqlFox operates with zero runtime dependencies (no Electron, no JVM, zero CGO), maintains a strict memory budget (**< 100MB RAM**), launches in under one second, and enforces deterministic safety guardrails before destructive operations can touch production databases.
 
-> Detailed operational guides and architectural specifications are available in the **[User Guide & DBA Playbook](docs/USER_GUIDE.md)** and **[Architecture Documentation](ARCHITECTURE.md)**.
+<p align="center">
+  <img src="docs/assets/screenshots/01_hero_workspace.png" alt="SqlFox Modern Database Workspace & High-Performance Virtual Grid" width="100%" />
+</p>
+
+> Detailed operational guides and architectural specifications are available in the **[User Guide & DBA Playbook](docs/USER_GUIDE.md)**, **[Architecture Documentation](ARCHITECTURE.md)**, and the **[Complete Visual Showcase (16 Screenshots)](docs/SCREENSHOTS.md)**.
 
 ### Core Capabilities
 
@@ -45,6 +49,10 @@ SqlFox operates with zero runtime dependencies (no Electron, no JVM, zero CGO), 
 - **Comment Unwrapping**: Unwraps MySQL executable comments (`/*! ... */`) to prevent syntax-cloaked destructive query evasion.
 - **Pre-DDL Tiered Backups**: Automatically snapshots schema DDL and table rows (<50MB) to local disk before executing structural changes.
 
+<p align="center">
+  <img src="docs/assets/screenshots/02_safety_guard_destructive.png" alt="SqlFox Deterministic Safety Guardrail Challenge Modal" width="85%" />
+</p>
+
 #### DBA Operations & Incident Triage
 - **Real-Time Processlist**: Live server thread inspection with auto-refresh (1s, 2s, 5s), state filtering, and out-of-band termination (`KILL QUERY`, `KILL CONNECTION`).
 - **Batch Termination Guardrails**: Terminate runaway queries or idle connections in bulk with fail-closed checks and immune shields for system workers and caller sessions.
@@ -53,6 +61,10 @@ SqlFox operates with zero runtime dependencies (no Electron, no JVM, zero CGO), 
 - **Performance Flight Recorder**: On-demand 1-second telemetry recorder capturing QPS, active thread counts, row lock waits, and buffer pool waits, correlated directly with concurrent query text.
 - **Replication Diagnostics**: Dual-syntax telemetry for modern MySQL 8.4 LTS / 9.x (`SHOW REPLICA STATUS`), legacy MySQL 5.7 / 8.0, MariaDB Galera Flow Control pauses, and PostgreSQL standby sync states (`pg_stat_replication`).
 
+<p align="center">
+  <img src="docs/assets/screenshots/03_flight_recorder_telemetry.png" alt="SqlFox Flight Recorder On-Demand Performance Telemetry" width="85%" />
+</p>
+
 #### Schema & Data Synchronization
 - **Structure Sync**: AST-based DDL comparison across databases and engines, generating color-coded diffs and safe, ordered migration scripts.
 - **Cross-Connection Data Transfer**: Direct, memory-bounded (<50MB buffer) data streaming between connections with transaction rollback protection.
@@ -60,11 +72,28 @@ SqlFox operates with zero runtime dependencies (no Electron, no JVM, zero CGO), 
 - **Visual Table Designer**: In-place DOM state management preserving keyboard focus, with interactive ENUM/SET value builders, composite index builders, and foreign key compatibility guards.
 - **Visual ERD Canvas**: Drag-and-drop table relationship visualizer with dynamic SVG Bézier curves, auto-layout, and viewport scaling.
 
+<p align="center">
+  <img src="docs/assets/screenshots/08_structure_sync_schema_diff.png" alt="SqlFox Structure Sync DDL Migration Diff" width="85%" />
+</p>
+
 #### Security & Access Control
 - **Connection Vault**: Local credentials and client SSL private keys (`SSLKey`) encrypted at rest with **AES-256-GCM** and **Argon2id** key derivation.
 - **Strict Ingress Filtering**: Loopback-default binding (`127.0.0.1`), DNS rebinding protection, and byte-for-byte Same-Origin checks blocking cross-port CSRF.
 - **Remote LAN Mode**: Controlled non-loopback access (`--lan`) guarded by a Master PIN with rate-limited brute-force lockout.
 - **BYOK AI Copilot**: Cloud (OpenAI, Claude, Gemini, DeepSeek) or local (Ollama) AI integration with a zero-data-leakage guarantee—only sanitized DDL schema metadata is passed, never row data.
+
+---
+
+### 📸 Feature Gallery & Showcase
+
+All screenshots are captured in high resolution (**2x Retina / HiDPI**) with high-volume enterprise dummy data. View the **[Full Visual Tour & Gallery (16 Screenshots)](docs/SCREENSHOTS.md)**:
+
+| Category | Highlights & Direct Links |
+| :--- | :--- |
+| **Workspace & Querying** | [Hero Workspace](docs/assets/screenshots/01_hero_workspace.png) • [Record Inspector](docs/assets/screenshots/15_vertical_record_inspector.png) • [AI Copilot](docs/assets/screenshots/16_ai_copilot_assistant.png) |
+| **Safety & Guardrails** | [Safety Guard Modal](docs/assets/screenshots/02_safety_guard_destructive.png) |
+| **DBA & Live Telemetry** | [Flight Recorder](docs/assets/screenshots/03_flight_recorder_telemetry.png) • [Cluster Inspector](docs/assets/screenshots/04_cluster_replication_inspector.png) • [Root Blocker Triage](docs/assets/screenshots/05_lock_contention_root_blocker.png) • [Real-Time Processlist](docs/assets/screenshots/06_realtime_processlist.png) • [Storage Diagnostics](docs/assets/screenshots/13_storage_health_diagnostics.png) • [Server Variables](docs/assets/screenshots/14_server_variables_tuning.png) |
+| **DB Tools & Sync** | [Smart Seed Exporter](docs/assets/screenshots/07_smart_seed_fk_exporter.png) • [Structure Sync](docs/assets/screenshots/08_structure_sync_schema_diff.png) • [Cross-Connection Data Transfer](docs/assets/screenshots/09_cross_connection_data_transfer.png) • [Row-Level Data Sync](docs/assets/screenshots/10_row_level_data_sync.png) • [Visual ERD Canvas](docs/assets/screenshots/11_visual_erd_canvas.png) • [Table Designer](docs/assets/screenshots/12_visual_table_designer.png) |
 
 ---
 

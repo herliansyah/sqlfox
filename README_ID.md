@@ -17,7 +17,7 @@
 
 <br />
 
-[ 🇬🇧 English ](README.md) &nbsp;•&nbsp; [ 🇮🇩 Bahasa Indonesia ](README_ID.md) &nbsp;•&nbsp; [ User Guide (EN) ](docs/USER_GUIDE.md) &nbsp;•&nbsp; [ Panduan Pengguna (ID) ](docs/USER_GUIDE_ID.md)
+[ 🇬🇧 English ](README.md) &nbsp;•&nbsp; [ 🇮🇩 Bahasa Indonesia ](README_ID.md) &nbsp;•&nbsp; [ User Guide (EN) ](docs/USER_GUIDE.md) &nbsp;•&nbsp; [ Panduan Pengguna (ID) ](docs/USER_GUIDE_ID.md) &nbsp;•&nbsp; [ 📸 Galeri Screenshot (16) ](docs/SCREENSHOTS.md)
 
 </div>
 
@@ -27,7 +27,11 @@
 
 SqlFox beroperasi tanpa dependensi runtime eksternal (tanpa Electron, tanpa JVM, bebas CGO), menjaga pagu konsumsi memori yang ketat (**< 100MB RAM**), waktu start sub-detik (**< 1 detik**), dan menegakkan sistem pengaman deterministik (*Safety Guard*) sebelum operasi mutasi menyentuh server database.
 
-> Dokumentasi teknis dan panduan operasional lengkap tersedia di **[Panduan Pengguna & Playbook DBA](docs/USER_GUIDE_ID.md)** serta **[Spesifikasi Arsitektur](ARCHITECTURE.md)**.
+<p align="center">
+  <img src="docs/assets/screenshots/01_hero_workspace.png" alt="SqlFox Workspace Modern & Virtual Data Grid" width="100%" />
+</p>
+
+> Dokumentasi teknis dan panduan operasional lengkap tersedia di **[Panduan Pengguna & Playbook DBA](docs/USER_GUIDE_ID.md)**, **[Spesifikasi Arsitektur](ARCHITECTURE.md)**, serta **[Galeri Screenshot Lengkap (16 Tampilan)](docs/SCREENSHOTS.md)**.
 
 ### Ringkasan Kemampuan Utama
 
@@ -45,6 +49,10 @@ SqlFox beroperasi tanpa dependensi runtime eksternal (tanpa Electron, tanpa JVM,
 - **Penguraian Komentar Eksekutabel**: Mengurai komentar tereksekusi MySQL (`/*! ... */`) menjadi perintah SQL terbuka untuk menutup celah bypass keamanan.
 - **Smart Backup Otomatis Pra-DDL**: Mencadangkan struktur DDL dan data baris tabel (<50MB) ke penyimpanan lokal sebelum eksekusi perubahan skema dijalankan.
 
+<p align="center">
+  <img src="docs/assets/screenshots/02_safety_guard_destructive.png" alt="SqlFox Challenge Modal Proteksi Query Destruktif" width="85%" />
+</p>
+
 #### Operasi DBA & Tanggap Insiden
 - **Processlist Real-Time**: Pemantauan thread server aktif dengan auto-refresh berkala (1s, 2s, 5s), filter status, dan terminasi query out-of-band (`KILL QUERY`, `KILL CONNECTION`).
 - **Terminasi Batch & Proteksi Thread Kebal**: Penghentian kueri macet atau koneksi menganggur secara massal dengan kebijakan fail-closed dan pelindung otomatis untuk thread sistem dan koneksi operator sendiri.
@@ -53,6 +61,10 @@ SqlFox beroperasi tanpa dependensi runtime eksternal (tanpa Electron, tanpa JVM,
 - **Perekam Telemetri (Flight Recorder)**: Perekam performa on-demand per 1 detik yang mencatat QPS, `Threads_running`, row lock waits, dan buffer pool waits, dikorelasikan langsung dengan teks query aktif.
 - **Inspektur Replikasi**: Telemetri adaptif untuk MySQL 8.4 LTS / 9.x modern (`SHOW REPLICA STATUS`), MySQL 5.7 / 8.0 lawas, replikasi MariaDB Galera (Flow Control), dan status PostgreSQL standby (`pg_stat_replication`).
 
+<p align="center">
+  <img src="docs/assets/screenshots/03_flight_recorder_telemetry.png" alt="SqlFox Perekam Telemetri Performa Flight Recorder" width="85%" />
+</p>
+
 #### Sinkronisasi Skema & Data
 - **Structure Sync**: Perbandingan DDL berbasis AST antar-database, menghasilkan ringkasan perbedaan terstruktur dan skrip migrasi berurutan yang aman.
 - **Cross-Connection Data Transfer**: Streaming transfer data antar-koneksi langsung dengan batas buffer memori ketat (<50MB) dan perlindungan rollback transaksi.
@@ -60,11 +72,28 @@ SqlFox beroperasi tanpa dependensi runtime eksternal (tanpa Electron, tanpa JVM,
 - **Visual Table Designer**: Manajemen struktur tabel in-place tanpa lonjakan kursor pengetikan, dilengkapi builder ENUM/SET interaktif, pembuat indeks komposit visual, dan validasi kompatibilitas Foreign Key.
 - **Kanvas Visual ERD**: Visualisasi diagram relasi antar-tabel dengan garis kurva Bézier SVG dinamis, auto-layout, dan navigasi viewport.
 
+<p align="center">
+  <img src="docs/assets/screenshots/08_structure_sync_schema_diff.png" alt="SqlFox Structure Sync DDL Migration Diff" width="85%" />
+</p>
+
 #### Keamanan Kredensial & Akses Jaringan
 - **Connection Vault Terenkripsi**: Kredensial dan private key SSL klien (`SSLKey`) dienkripsi secara persisten dengan **AES-256-GCM** dan KDF **Argon2id**.
 - **Perlindungan Ingress Ketat**: Binding loopback default (`127.0.0.1`), proteksi DNS rebinding, dan validasi Same-Origin identik bita-demi-bita penangkal serangan CSRF lintas-port.
 - **Akses Jaringan Lokal (LAN)**: Akses multi-perangkat via flag `--lan` yang dilindungi autentikasi Master PIN dan karantina otomatis terhadap brute force.
 - **AI Copilot Sadar Privasi (BYOK)**: Integrasi AI cloud (Claude, OpenAI, Gemini, DeepSeek) atau lokal (Ollama) dengan garansi privasi data—hanya DDL skema yang dikirim, data baris tabel tidak pernah keluar dari mesin lokal.
+
+---
+
+### 📸 Galeri Fitur & Screenshot Lengkap
+
+Seluruh tangkapan layar di-capture dalam resolusi tinggi (**2x Retina / HiDPI**) dengan data dummy skala enterprise. Kunjungi **[Galeri Visual Lengkap (16 Screenshot)](docs/SCREENSHOTS.md)** untuk melihat seluruh fitur:
+
+| Kategori | Sorotan & Tautan Langsung |
+| :--- | :--- |
+| **Workspace & Kueri** | [Hero Workspace](docs/assets/screenshots/01_hero_workspace.png) • [Record Inspector](docs/assets/screenshots/15_vertical_record_inspector.png) • [AI Copilot](docs/assets/screenshots/16_ai_copilot_assistant.png) |
+| **Keamanan & Guardrail** | [Modal Safety Guard](docs/assets/screenshots/02_safety_guard_destructive.png) |
+| **Operasi DBA & Telemetri** | [Flight Recorder](docs/assets/screenshots/03_flight_recorder_telemetry.png) • [Cluster Inspector](docs/assets/screenshots/04_cluster_replication_inspector.png) • [Triage Root Blocker](docs/assets/screenshots/05_lock_contention_root_blocker.png) • [Processlist Real-Time](docs/assets/screenshots/06_realtime_processlist.png) • [Diagnostik Storage](docs/assets/screenshots/13_storage_health_diagnostics.png) • [Server Variables](docs/assets/screenshots/14_server_variables_tuning.png) |
+| **DB Tools & Sinkronisasi** | [Smart Seed Exporter](docs/assets/screenshots/07_smart_seed_fk_exporter.png) • [Structure Sync](docs/assets/screenshots/08_structure_sync_schema_diff.png) • [Cross-Connection Data Transfer](docs/assets/screenshots/09_cross_connection_data_transfer.png) • [Row-Level Data Sync](docs/assets/screenshots/10_row_level_data_sync.png) • [Kanvas Visual ERD](docs/assets/screenshots/11_visual_erd_canvas.png) • [Table Designer](docs/assets/screenshots/12_visual_table_designer.png) |
 
 ---
 

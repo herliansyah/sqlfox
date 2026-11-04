@@ -3,10 +3,8 @@ const path = require('path');
 const fs = require('fs');
 
 const OUTPUT_DIR = path.resolve(__dirname, '../docs/assets/screenshots');
-const THREADS_DIR = path.resolve(__dirname, '../docs/assets/threads_screenshots');
 
 if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true });
-if (!fs.existsSync(THREADS_DIR)) fs.mkdirSync(THREADS_DIR, { recursive: true });
 
 async function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -87,7 +85,6 @@ ORDER BY SUM(o.total_amount) DESC;`;
   await page.waitForTimeout(3000);
   await dismissAlerts();
   await page.screenshot({ path: path.join(OUTPUT_DIR, '01_hero_workspace.png'), fullPage: false });
-  fs.copyFileSync(path.join(OUTPUT_DIR, '01_hero_workspace.png'), path.join(THREADS_DIR, '01_hero_workspace.png'));
 
   // =========================================================================
   // 2. SAFETY GUARD (Destructive Query Challenge Modal)
@@ -107,7 +104,6 @@ ORDER BY SUM(o.total_amount) DESC;`;
   }, dangerousSQL);
   await page.waitForTimeout(1000);
   await page.screenshot({ path: path.join(OUTPUT_DIR, '02_safety_guard_destructive.png'), fullPage: false });
-  fs.copyFileSync(path.join(OUTPUT_DIR, '02_safety_guard_destructive.png'), path.join(THREADS_DIR, '02_safety_guard_destructive.png'));
   await page.evaluate(() => closeSafetyModal());
   await page.waitForTimeout(600);
 
@@ -482,7 +478,6 @@ ORDER BY SUM(o.total_amount) DESC;`;
   await dismissAlerts();
   await page.waitForTimeout(3000);
   await page.screenshot({ path: path.join(OUTPUT_DIR, '11_visual_erd_canvas.png'), fullPage: false });
-  fs.copyFileSync(path.join(OUTPUT_DIR, '11_visual_erd_canvas.png'), path.join(THREADS_DIR, '03_visual_erd_canvas.png'));
   await page.evaluate(() => {
     const dlg = document.getElementById('erd-dialog');
     if (dlg) dlg.close();
@@ -557,7 +552,6 @@ ORDER BY SUM(o.total_amount) DESC;`;
   await dismissAlerts();
   await page.waitForTimeout(1500);
   await page.screenshot({ path: path.join(OUTPUT_DIR, '15_vertical_record_inspector.png'), fullPage: false });
-  fs.copyFileSync(path.join(OUTPUT_DIR, '15_vertical_record_inspector.png'), path.join(THREADS_DIR, '04_vertical_record_inspector.png'));
   await page.evaluate(() => closeRecordInspector());
   await page.waitForTimeout(600);
 
@@ -602,7 +596,6 @@ ORDER BY SUM(o.total_amount) DESC;`;
   await dismissAlerts();
   await page.waitForTimeout(1500);
   await page.screenshot({ path: path.join(OUTPUT_DIR, '16_ai_copilot_assistant.png'), fullPage: false });
-  fs.copyFileSync(path.join(OUTPUT_DIR, '16_ai_copilot_assistant.png'), path.join(THREADS_DIR, '05_ai_copilot_assistant.png'));
 
   await browser.close();
   console.log('🎉 ALL 16 HIGH-RESOLUTION SHOWCASE SCREENSHOTS CAPTURED WITH FULL ACTIVE DATA!');
