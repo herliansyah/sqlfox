@@ -6177,7 +6177,6 @@
       // ponytail: adaptive slow-network timer for connection handshake
       let slowConnTimer = setTimeout(() => {
         if (isConnectionSwitching) {
-          renderHeaderConnectionBadge(conn, 'Slow server, connecting...');
           showToast(`Server connection to '${conn.name}' is slow, still connecting...`, 'warning');
         }
       }, 3000);
@@ -6194,8 +6193,8 @@
         multiDBCatalogCache = sessionCatalogStore[conn.id];
         renderConnectionsTree();
 
-        // Update badge to indicate connecting status via SSOT helper
-        renderHeaderConnectionBadge(conn, 'Connecting...');
+        // Update badge to indicate active session cleanly without intrusive status text
+        renderHeaderConnectionBadge(conn);
         document.getElementById('schema-tree').innerHTML = `<div class="text-slate-500 text-center py-4 flex items-center justify-center space-x-2">${renderIcon('loader', 'w-4 h-4 animate-spin')}<span>Connecting to database...</span></div>`;
 
         // Connect session
@@ -6260,6 +6259,7 @@
         if (sessionIcon) {
           sessionIcon.innerHTML = prevSessionIconHTML || `<svg class="w-3.5 h-3.5 text-sky-400 shrink-0" aria-hidden="true"><use href="#icon-database"/></svg>`;
         }
+        renderHeaderConnectionBadge(activeConnection);
       }
     }
 
@@ -9126,6 +9126,7 @@
       }
       activeTabId = tabId;
       renderTabs();
+      syncGridToolbarMode();
       const nextTab = tabs.find(t => t.id === tabId);
       if (nextTab && nextTab.isTableViewer && nextTab.tableName) {
         // The grid is shared by all tabs, so a different tab's rows (another DB's same-named table,
@@ -18809,12 +18810,16 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const btnImportCSV = document.getElementById('btn-import-csv');
       const editModeContainer = document.getElementById('grid-edit-mode-container');
       const tableDumpBtn = document.getElementById('export-menu-table-dump');
+      const gridResultStats = document.getElementById('grid-result-stats');
+      const gridLimitBadge = document.getElementById('grid-limit-badge');
 
       if (btnAddRow) btnAddRow.classList.toggle('hidden', !isTableViewer);
       if (btnMockData) btnMockData.classList.toggle('hidden', !isTableViewer);
       if (btnImportCSV) btnImportCSV.classList.toggle('hidden', !isTableViewer);
       if (editModeContainer) editModeContainer.classList.toggle('hidden', !isTableViewer);
       if (tableDumpBtn) tableDumpBtn.classList.toggle('hidden', !isTableViewer);
+      if (gridResultStats) gridResultStats.classList.toggle('hidden', isTableViewer);
+      if (gridLimitBadge) gridLimitBadge.classList.toggle('hidden', isTableViewer);
       updateSelectedRowsUI();
     }
 
