@@ -152,6 +152,8 @@ assert(getOrCreateElement('btn-mock-data').classList.contains('hidden'), 'Mock D
 assert(getOrCreateElement('btn-import-csv').classList.contains('hidden'), 'Import CSV button MUST be hidden in Query tab');
 assert(getOrCreateElement('grid-edit-mode-container').classList.contains('hidden'), 'Edit mode container MUST be hidden in Query tab');
 assert(getOrCreateElement('export-menu-table-dump').classList.contains('hidden'), 'Table SQL Dump in export menu MUST be hidden in Query tab');
+assert(!getOrCreateElement('grid-result-stats').classList.contains('hidden'), 'Result stats MUST be visible in Query tab');
+assert(!getOrCreateElement('grid-limit-badge').classList.contains('hidden'), 'Safe Limit badge MUST be visible in Query tab');
 
 console.log("✓ Test Case 1 passed: Table-specific buttons hidden on Query tab");
 
@@ -167,6 +169,8 @@ assert(!getOrCreateElement('btn-mock-data').classList.contains('hidden'), 'Mock 
 assert(!getOrCreateElement('btn-import-csv').classList.contains('hidden'), 'Import CSV button MUST be visible in Table Viewer tab');
 assert(!getOrCreateElement('grid-edit-mode-container').classList.contains('hidden'), 'Edit mode container MUST be visible in Table Viewer tab');
 assert(!getOrCreateElement('export-menu-table-dump').classList.contains('hidden'), 'Table SQL Dump MUST be visible in Table Viewer tab');
+assert(getOrCreateElement('grid-result-stats').classList.contains('hidden'), 'Result stats in toolbar MUST be hidden in Table Viewer tab (bottom bar is SSOT)');
+assert(getOrCreateElement('grid-limit-badge').classList.contains('hidden'), 'Safe Limit badge MUST be hidden in Table Viewer tab (paginated)');
 
 console.log("✓ Test Case 2 passed: Table-specific buttons visible on Table Viewer tab");
 
@@ -182,8 +186,8 @@ assert(getOrCreateElement('btn-mock-data').classList.contains('hidden'), 'Mock D
 assert(getOrCreateElement('btn-import-csv').classList.contains('hidden'), 'Import CSV button MUST be hidden after switching back to Query tab');
 assert(getOrCreateElement('grid-edit-mode-container').classList.contains('hidden'), 'Edit mode container MUST be hidden after switching back to Query tab');
 assert(getOrCreateElement('export-menu-table-dump').classList.contains('hidden'), 'Table SQL Dump MUST be hidden after switching back to Query tab');
-
-console.log("✓ Test Case 3 passed: Switching back to Query tab hides table buttons correctly");
+assert(!getOrCreateElement('grid-result-stats').classList.contains('hidden'), 'Result stats MUST be visible after switching back to Query tab');
+assert(!getOrCreateElement('grid-limit-badge').classList.contains('hidden'), 'Safe Limit badge MUST be visible after switching back to Query tab');
 
 console.log("✓ Test Case 3 passed: Switching back to Query tab hides table buttons correctly");
 
