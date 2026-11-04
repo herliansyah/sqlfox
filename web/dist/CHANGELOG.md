@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Standalone Native App Window Mode & Desktop Management (`cmd/sqlfox/browser*.go`, `cmd/sqlfox/desktop*.go`, `cmd/sqlfox/instance.go`, `internal/server/handlers_system.go`, `web/dist/index.html`)**: Added standalone frameless native application window support across Linux, macOS, and Windows utilizing Chromium/Edge `--app` mode with graceful fallback to system browser. Introduced `-app`, `-browser`, and `-no-browser` CLI flags, `sqlfox desktop [install|uninstall|status]` command for Linux desktop launcher entries, `sqlfox stop` and `/api/system/shutdown` for clean background shutdown, and `/api/system/open-browser` endpoint with frontend UI controls (#131).
+
 ## [v0.14.1] - 2026-11-04
 
 ### Fixed
