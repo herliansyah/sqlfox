@@ -2426,3 +2426,47 @@ func TestGridRowGutterEmbedded(t *testing.T) {
 		}
 	}
 }
+
+func TestQueryResultUpdatableAndContextMenuActions(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html from embedded FS: %v", err)
+	}
+	defer f.Close()
+
+	contentBytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(contentBytes)
+
+	expectedSnippets := []string{
+		// Context menu HTML buttons
+		`id="grid-ctx-btn-copy-cell"`,
+		`id="grid-ctx-btn-copy-row-tsv"`,
+		`id="grid-ctx-btn-copy-row-json"`,
+		`id="grid-ctx-btn-copy-row-sql"`,
+		`id="grid-ctx-btn-dup-nokey"`,
+		`id="grid-ctx-btn-dup-key"`,
+		`id="grid-ctx-btn-delete-row"`,
+		// JavaScript helper functions
+		"function quoteIdentifierForDriver(name)",
+		"function resolveGridTableMeta()",
+		"function getTargetGridRowIndices()",
+		"async function copyCellValueFromGrid()",
+		"async function copySelectedRowsAsTSV(",
+		"async function copySelectedRowsAsJSON()",
+		"async function copySelectedRowsAsSQL()",
+		"function duplicateGridRow(withoutKey = true)",
+		// Updatable result set heuristic
+		"const hasCheckbox = isTableViewer || Boolean(tableName && pkCol && pkInCols);",
+	}
+
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(content, snippet) {
+			t.Errorf("expected index.html to contain %q, but was missing", snippet)
+		}
+	}
+}
+
