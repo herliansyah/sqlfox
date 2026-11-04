@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.14.1] - 2026-11-04
+
 ### Fixed
 - **Grid Context Menu Submenu Grouping & Viewport Collision Clamping (`web/dist/index.html`, `scripts/test-grid-context-menu-grouping-and-overflow.mjs`)**: Grouped filter, insert, copy/export, and mutation actions into nested submenus with hover delays to prevent context menus from vertically overflowing the browser viewport. Added collision detection with boundary clamping to keep all parent and child menus fully visible within viewport bounds (#130).
 
