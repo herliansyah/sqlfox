@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Query Result Row Mutations & SQL Export Context Actions (`web/dist/index.html`, `web/embed_test.go`, `scripts/test-query-grid-mutations-and-sql-copy.mjs`)**: Enabled row deletions, draft insertions, and row duplications directly within query result grids for single-table queries with a resolved primary key. Added context menu actions to copy cell values or selected rows as TSV, JSON, and driver-formatted SQL INSERT statements (#129).
+
+### Fixed
+- **Connection Badge State & Stats Toolbar Visibility Toggle (`web/dist/index.html`, `scripts/test-query-vs-table-toolbar-visibility.mjs`)**: Removed intrusive connecting/slow-server text overrides on the header badge in favor of toast notifications, and properly toggled query result stats and safe limit badge visibility based on active tab type in `syncGridToolbarMode` (#128).
+- **Session Read-Only Persistence & State Synchronization (`internal/server/session_manager.go`, `internal/server/handlers_connections.go`, `internal/server/handlers_schema.go`, `web/dist/index.html`)**: Persisted read-only mode overrides in `SessionManager` so state survives lazy auto-reconnection and session rehydration, purged stored overrides upon connection removal, reported `read_only` status in ping responses to synchronize client state, and updated frontend handling to automatically reflect 403 read-only restrictions (#127).
+
 ## [v0.13.1] - 2026-11-03
 
 ### Fixed
