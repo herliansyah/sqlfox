@@ -1,80 +1,153 @@
 <div align="center">
 
   <a href="https://github.com/herliansyah/sqlfox">
-    <img src="docs/assets/logo.svg" alt="SqlFox Logo" width="120" height="120" />
+    <img src="docs/assets/logo.svg" alt="SqlFox Logo" width="130" height="130" />
   </a>
 
   <h1>SqlFox</h1>
 
-  <p><b>Lightweight Database Manager &amp; Headless CLI for PostgreSQL, MySQL, MariaDB, and SQLite</b></p>
+  <p><b>High-Performance, Single-Binary Database Manager &amp; Headless Automation CLI</b></p>
+  <p><i>Tailored for PostgreSQL, MySQL, MariaDB, and SQLite with zero external dependencies.</i></p>
 
 [![GitHub Release](https://img.shields.io/github/v/release/herliansyah/sqlfox?style=flat-square&color=FF6B35&logo=github)](https://github.com/herliansyah/sqlfox/releases)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/herliansyah/sqlfox?style=flat-square&color=00ADD8&logo=go)](https://golang.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-F59E0B?style=flat-square)](https://opensource.org/licenses/MIT)
+[![Memory Ceiling](https://img.shields.io/badge/memory-%3C%20100MB%20RAM-success?style=flat-square&color=10B981)](ARCHITECTURE.md)
+[![Zero Electron](https://img.shields.io/badge/runtime-Zero%20Electron%20%7C%20CGO--Free-blue?style=flat-square&color=3B82F6)](ARCHITECTURE.md)
 [![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-4B5563?style=flat-square&logo=linux)](https://github.com/herliansyah/sqlfox/releases)
 [![Arch](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-6366F1?style=flat-square)](https://github.com/herliansyah/sqlfox/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-F59E0B?style=flat-square)](https://opensource.org/licenses/MIT)
 [![CI](https://img.shields.io/github/actions/workflow/status/herliansyah/sqlfox/ci.yml?branch=master&label=CI&style=flat-square&logo=githubactions)](https://github.com/herliansyah/sqlfox/actions)
 
 <br />
 
-[ 🇬🇧 English ](README.md) &nbsp;•&nbsp; [ 🇮🇩 Bahasa Indonesia ](README_ID.md) &nbsp;•&nbsp; [ User Guide (EN) ](docs/USER_GUIDE.md) &nbsp;•&nbsp; [ Panduan Pengguna (ID) ](docs/USER_GUIDE_ID.md)
+[ 🇬🇧 English ](README.md) &nbsp;•&nbsp; [ 🇮🇩 Bahasa Indonesia ](README_ID.md) &nbsp;•&nbsp; [ 📖 User Guide (EN) ](docs/USER_GUIDE.md) &nbsp;•&nbsp; [ 📖 Panduan Pengguna (ID) ](docs/USER_GUIDE_ID.md) &nbsp;•&nbsp; [ 📸 Visual Showcase (16 Captures) ](docs/SCREENSHOTS.md)
 
 </div>
 
 ---
 
-**SqlFox** is a fast, standalone database client and automation runner distributed as a single static binary. It embeds a responsive local web workspace and includes a headless CLI designed for development, site reliability, and database operations.
+### Why SqlFox?
 
-SqlFox operates with zero runtime dependencies (no Electron, no JVM, zero CGO), maintains a strict memory budget (**< 100MB RAM**), launches in under one second, and enforces deterministic safety guardrails before destructive operations can touch production databases.
+Most modern database tools are either bulky Electron apps consuming hundreds of megabytes of RAM before connecting, or terminal-only clients lacking intuitive visual ergonomics. **SqlFox delivers the best of both worlds**:
 
-> Detailed operational guides and architectural specifications are available in the **[User Guide & DBA Playbook](docs/USER_GUIDE.md)** and **[Architecture Documentation](ARCHITECTURE.md)**.
-
-### Core Capabilities
-
-#### Architecture & Performance
-- **Standalone Binary**: Zero installation dependencies. Compiles to static executables via pure-Go drivers (`CGO_ENABLED=0`) across Linux, macOS, and Windows.
-- **Strict Memory Ceiling**: Operates within a `< 100MB RAM` budget under enterprise workloads (1,000+ tables, 50,000+ columns).
-- **Virtual Data Grid**: Fixed-height DOM row windowing (32px uniform height) maintaining `< 500` active DOM nodes across result sets of 100,000+ records, eliminating browser tab freezes.
-- **Low-Latency Streaming**: Query results stream over NDJSON (`/api/session/{id}/execute-stream`) with an immediate 20-row initial flush for Time to First Row (TTFR) under 50ms, cancellable out-of-band via browser `AbortController`.
-- **Bottom Pagination Bar**: Unified sticky navigation bar supporting direct page jumps, configurable page sizes (25, 50, 100, 200), on-demand accurate count probes, and automatic `%...%` wildcard formatting for filter operators.
-
-#### Safety Guardrails & Governance
-- **Deterministic AST Inspection**: Evaluates SQL queries against target database catalogs before execution, detecting unqualified `UPDATE`/`DELETE`, `DROP`, and `TRUNCATE` operations.
-- **Pre-Execution Mutation Estimation**: Rewrites `UPDATE` and `DELETE` statements into bounded `SELECT COUNT(*)` probes (500ms timeout) to inspect affected row counts prior to user confirmation.
-- **Tiered Affirmation Pipeline**: Adaptive execution gating offering silent execution for single-row primary-key mutations in Development, a 1-click affirmation modal for 1–100 rows, and mandatory typed Challenge Modals for large mutations, unqualified queries, and all operations in Staging/Production.
-- **Comment Unwrapping**: Unwraps MySQL executable comments (`/*! ... */`) to prevent syntax-cloaked destructive query evasion.
-- **Pre-DDL Tiered Backups**: Automatically snapshots schema DDL and table rows (<50MB) to local disk before executing structural changes.
-
-#### DBA Operations & Incident Triage
-- **Real-Time Processlist**: Live server thread inspection with auto-refresh (1s, 2s, 5s), state filtering, and out-of-band termination (`KILL QUERY`, `KILL CONNECTION`).
-- **Batch Termination Guardrails**: Terminate runaway queries or idle connections in bulk with fail-closed checks and immune shields for system workers and caller sessions.
-- **Root Blocker Triage**: Isolates blocking transactions in lock storms using `sys.innodb_lock_waits` and `pg_locks`, showing full scrollable SQL and dedicated kill triggers.
-- **Heuristic Index Advisor**: Rule-based index recommendations based on the ESR rule (Equality, Sort, Range) with index bloat warnings (>5 secondary indexes) and non-blocking DDL syntax (`ALGORITHM=INPLACE` on MySQL, `CONCURRENTLY` on PostgreSQL).
-- **Performance Flight Recorder**: On-demand 1-second telemetry recorder capturing QPS, active thread counts, row lock waits, and buffer pool waits, correlated directly with concurrent query text.
-- **Replication Diagnostics**: Dual-syntax telemetry for modern MySQL 8.4 LTS / 9.x (`SHOW REPLICA STATUS`), legacy MySQL 5.7 / 8.0, MariaDB Galera Flow Control pauses, and PostgreSQL standby sync states (`pg_stat_replication`).
-
-#### Schema & Data Synchronization
-- **Structure Sync**: AST-based DDL comparison across databases and engines, generating color-coded diffs and safe, ordered migration scripts.
-- **Cross-Connection Data Transfer**: Direct, memory-bounded (<50MB buffer) data streaming between connections with transaction rollback protection.
-- **Row-Level Data Sync**: Primary-key keyset reconciliation calculating row-by-row deltas (inserts, updates, deletes) with atomic apply scripts.
-- **Visual Table Designer**: In-place DOM state management preserving keyboard focus, with interactive ENUM/SET value builders, composite index builders, and foreign key compatibility guards.
-- **Visual ERD Canvas**: Drag-and-drop table relationship visualizer with dynamic SVG Bézier curves, auto-layout, and viewport scaling.
-
-#### Security & Access Control
-- **Connection Vault**: Local credentials and client SSL private keys (`SSLKey`) encrypted at rest with **AES-256-GCM** and **Argon2id** key derivation.
-- **Strict Ingress Filtering**: Loopback-default binding (`127.0.0.1`), DNS rebinding protection, and byte-for-byte Same-Origin checks blocking cross-port CSRF.
-- **Remote LAN Mode**: Controlled non-loopback access (`--lan`) guarded by a Master PIN with rate-limited brute-force lockout.
-- **BYOK AI Copilot**: Cloud (OpenAI, Claude, Gemini, DeepSeek) or local (Ollama) AI integration with a zero-data-leakage guarantee—only sanitized DDL schema metadata is passed, never row data.
+- ⚡ **Lightweight & Blazing Fast**: Single static binary compiled with pure-Go drivers (`CGO_ENABLED=0`). Boots in under **1 second** and operates strictly within a **< 100MB RAM** ceiling even with 1,000+ tables.
+- 🛡️ **Deterministic Safety Guard™**: Pre-execution AST inspection and row mutation estimation intercepts accidental `DROP TABLE` or `UPDATE`/`DELETE` without `WHERE` before they hit production.
+- 🖥️ **Native App Window & Web Workspace**: Launches automatically in a clean frameless native desktop window via Chromium/Edge `--app` mode, in a browser tab, or as a background daemon.
+- 🤖 **Private AI Copilot (BYOK)**: Schema-aware query optimization and index advice powered by your own API key (Claude, OpenAI, Gemini, DeepSeek, or local Ollama) with **zero row data leakage**.
+- 🔄 **Production-Grade DBA Suite**: Real-time Flight Recorder telemetry, lock contention & root blocker triage, structure sync diffs, and streaming cross-connection data transfer.
 
 ---
 
-### Quick Start
+### 🌟 Core Workspace
 
-#### Standalone Binary
+<p align="center">
+  <img src="docs/assets/screenshots/01_hero_workspace.png" alt="SqlFox Modern Database Workspace & High-Performance Virtual Grid" width="100%" />
+</p>
+<p align="center">
+  <i>The unified SqlFox workspace: High-concurrency SQL editor, multi-tab execution, live stats, and DOM-windowed virtual data grid rendering 10,000+ records at a buttery-smooth 60fps.</i>
+</p>
 
-Pre-built static binaries for Linux, macOS, and Windows are available from [GitHub Releases](https://github.com/herliansyah/sqlfox/releases):
+---
 
-| Operating System | Architecture | Archive Format |
+### 📸 Highlight Showcase
+
+#### 1. Interactive Visual ERD Canvas
+Explore complex relational schemas effortlessly. Drag-and-drop table entities connected by dynamic SVG cubic Bézier curves, with auto-layout, viewport scaling, and column cardinality inspection.
+
+<p align="center">
+  <img src="docs/assets/screenshots/11_visual_erd_canvas.png" alt="SqlFox Interactive Visual ERD Canvas" width="95%" />
+</p>
+
+---
+
+#### 2. Deterministic Safety Guardrails & Row Impact Estimation
+Never accidentally drop a table or mutate production rows again. Destructive statements (`DROP`, `TRUNCATE`, unqualified `UPDATE`/`DELETE`) trigger an automated bounded `SELECT COUNT(*)` probe and demand typed table name affirmation before execution.
+
+<p align="center">
+  <img src="docs/assets/screenshots/02_safety_guard_destructive.png" alt="SqlFox Deterministic Safety Guard Challenge Modal" width="90%" />
+</p>
+
+---
+
+#### 3. DBA Flight Recorder & Root Blocker Triage
+Diagnose production incidents with 1-second interval telemetry recording QPS, running threads, and lock waits correlated with active SQL queries. Isolate root blocker transactions during lock storms with dedicated out-of-band kill triggers.
+
+<p align="center">
+  <img src="docs/assets/screenshots/03_flight_recorder_telemetry.png" alt="SqlFox On-Demand Performance Flight Recorder" width="95%" />
+</p>
+
+<p align="center">
+  <img src="docs/assets/screenshots/05_lock_contention_root_blocker.png" alt="SqlFox Lock Contention Root Blocker Triage" width="90%" />
+</p>
+
+---
+
+#### 4. Structure Sync & Cross-Connection Data Transfer
+Compare database schemas across staging and production to generate color-coded DDL diffs and safe migration scripts. Stream tables directly between servers with a bounded memory buffer (<50MB) and transaction rollback safety.
+
+<p align="center">
+  <img src="docs/assets/screenshots/08_structure_sync_schema_diff.png" alt="SqlFox Structure Sync DDL Migration Diff" width="95%" />
+</p>
+
+<p align="center">
+  <img src="docs/assets/screenshots/09_cross_connection_data_transfer.png" alt="SqlFox Cross-Connection Data Transfer" width="90%" />
+</p>
+
+---
+
+#### 5. In-Context AI Copilot & Query Tuner
+Accelerate SQL development with schema-aware AI assistance. Suggests ESR-guided composite indexes, optimizes slow queries, explains execution plans, and inserts code directly into the editor with 1 click.
+
+<p align="center">
+  <img src="docs/assets/screenshots/16_ai_copilot_assistant.png" alt="SqlFox AI Copilot Assistant & Query Tuner" width="95%" />
+</p>
+
+---
+
+#### 6. Vertical Record Inspector & Nested JSON Viewer
+Inspect complex rows, multi-line text, and raw payloads comfortably with formatted card views and syntax-highlighted pretty-printed nested JSON.
+
+<p align="center">
+  <img src="docs/assets/screenshots/15_vertical_record_inspector.png" alt="SqlFox Vertical Record Inspector & Pretty JSON Viewer" width="90%" />
+</p>
+
+---
+
+### 🖼️ Complete Visual Showcase (16 Screenshots)
+
+All captures are taken in high resolution (**2x Retina / HiDPI**) on an enterprise dummy dataset (10,000+ orders, 25,000 order items, customers, and system audit logs). Explore the **[Full Feature Gallery (docs/SCREENSHOTS.md)](docs/SCREENSHOTS.md)**:
+
+| Category | High-Resolution Captures |
+| :--- | :--- |
+| **Workspace & Querying** | [01. Hero Workspace](docs/assets/screenshots/01_hero_workspace.png) • [15. Record Inspector](docs/assets/screenshots/15_vertical_record_inspector.png) • [16. AI Copilot Assistant](docs/assets/screenshots/16_ai_copilot_assistant.png) |
+| **Safety & Guardrails** | [02. Safety Guard Challenge Modal](docs/assets/screenshots/02_safety_guard_destructive.png) |
+| **DBA & Live Telemetry** | [03. Flight Recorder Telemetry](docs/assets/screenshots/03_flight_recorder_telemetry.png) • [04. Cluster & Replication](docs/assets/screenshots/04_cluster_replication_inspector.png) • [05. Lock Contention & Root Blocker](docs/assets/screenshots/05_lock_contention_root_blocker.png) • [06. Real-Time Processlist](docs/assets/screenshots/06_realtime_processlist.png) • [13. Storage Diagnostics](docs/assets/screenshots/13_storage_health_diagnostics.png) • [14. Server Variables Tuning](docs/assets/screenshots/14_server_variables_tuning.png) |
+| **DB Tools & Sync** | [07. Smart Seed FK Exporter](docs/assets/screenshots/07_smart_seed_fk_exporter.png) • [08. Structure Sync Diff](docs/assets/screenshots/08_structure_sync_schema_diff.png) • [09. Cross-Connection Data Transfer](docs/assets/screenshots/09_cross_connection_data_transfer.png) • [10. Row-Level Data Sync](docs/assets/screenshots/10_row_level_data_sync.png) • [11. Visual ERD Canvas](docs/assets/screenshots/11_visual_erd_canvas.png) • [12. Visual Table Designer](docs/assets/screenshots/12_visual_table_designer.png) |
+
+---
+
+### 🚀 Key Features
+
+- **Multi-Engine Support**: Native pure-Go drivers for **PostgreSQL** (9.6–16+ via pgx), **MySQL** (5.7, 8.0, 8.4 LTS, 9.x), **MariaDB** (10.3–11.x), and local **SQLite** (3.x).
+- **Standalone Native Window**: Starts as a native desktop application window via Chromium/Edge `--app` mode without requiring Electron. Includes `sqlfox desktop install` for Linux desktop entries.
+- **Fixed-Height Virtual Data Grid**: Uniform 32px DOM row windowing maintaining `< 500` active DOM nodes across 100,000+ rows.
+- **Micro-Chunk NDJSON Streaming**: TTFR (Time to First Row) under 50ms with an initial 20-row flush, cancellable out-of-band at any time.
+- **Query Result Mutations**: Directly edit cells, insert draft rows, duplicate records, or delete rows on query results with a resolved primary key.
+- **Multi-Statement Execution & Multi-Result Tabs**: Execute complex SQL batches (`Ctrl+Alt+Enter` or `F5`) and review isolated result sub-tabs with per-statement execution times and row counts.
+- **Visual Programmability Designers**: Interactive visual editors for Views, Stored Procedures, Functions, Triggers, and Scheduled Events with embedded CodeMirror syntax editors.
+- **Encrypted Connection Vault**: Database passwords and client SSL keys encrypted at rest via **AES-256-GCM** and **Argon2id**.
+- **Ingress Security**: Default loopback binding (`127.0.0.1`), DNS rebinding protection, and byte-for-byte Same-Origin validation against cross-port CSRF.
+- **Remote LAN Mode**: Tablet and remote browser access (`--lan`) guarded by Master PIN authentication and brute-force lockout.
+
+---
+
+### 📦 Quick Start & Installation
+
+#### Standalone Binary (Recommended)
+
+Download the latest pre-compiled static binary (**v0.15.0**) from [GitHub Releases](https://github.com/herliansyah/sqlfox/releases):
+
+| OS | Architecture | Archive Format |
 | :--- | :--- | :--- |
 | **Linux** | `x86_64` (amd64), `ARM64` | `.tar.gz` |
 | **macOS** | Apple Silicon (`arm64`), Intel (`amd64`) | `.tar.gz` |
@@ -82,14 +155,19 @@ Pre-built static binaries for Linux, macOS, and Windows are available from [GitH
 
 **Linux (amd64):**
 ```bash
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.10.13/sqlfox-v0.10.13-linux-amd64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.15.0/sqlfox-v0.15.0-linux-amd64.tar.gz | tar -xz
 ./sqlfox
 ```
 
 **macOS (Apple Silicon):**
 ```bash
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.10.13/sqlfox-v0.10.13-darwin-arm64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.15.0/sqlfox-v0.15.0-darwin-arm64.tar.gz | tar -xz
 ./sqlfox
+```
+
+**Register Desktop Launcher (Linux):**
+```bash
+./sqlfox desktop install
 ```
 
 #### Docker Container
@@ -103,18 +181,18 @@ docker run -d \
   ghcr.io/herliansyah/sqlfox:latest
 ```
 
-Or deploy with Docker Compose:
+Or deploy via Docker Compose:
 ```bash
 docker compose up -d
 ```
 
-#### Go Install / Source Build
+#### Go Install / Build from Source
 
 ```bash
 # Install via Go toolchain
 go install github.com/herliansyah/sqlfox/cmd/sqlfox@latest
 
-# Build from source
+# Or build from source
 git clone https://github.com/herliansyah/sqlfox.git
 cd sqlfox
 go build -o sqlfox ./cmd/sqlfox
@@ -122,14 +200,14 @@ go build -o sqlfox ./cmd/sqlfox
 
 ---
 
-### Command-Line Interface
+### 💻 Command-Line Interface (CLI)
 
-SqlFox provides both desktop daemon mode and headless automation commands:
+SqlFox functions both as an interactive desktop workspace and a headless automation utility:
 
 ```text
 Usage:
   sqlfox [command] [flags]
-  sqlfox [server-flags]    (launches desktop web UI)
+  sqlfox [server-flags]    (launches native desktop app or web workspace)
 
 Commands:
   query     Execute SQL queries or scripts with streaming output (table, json, ndjson, csv)
@@ -143,11 +221,11 @@ Commands:
 Server Options:
   -port int          Port to listen on (default 8080, with automatic port hunting)
   -host string       Interface address to bind (default "127.0.0.1")
-  -lan               Enable remote LAN and tablet access (binds 0.0.0.0 and prints Master PIN)
+  -lan               Enable remote LAN and tablet access (binds 0.0.0.0 and displays Master PIN)
   -pass string       Master password for vault encryption (or uses ~/.sqlfox/master.key)
   -db string         Path to config vault database (default: ~/.sqlfox/config.db)
   -app               Launch in standalone native window mode using Chrome/Edge/Chromium (default true)
-  -browser           Force launch in standard web browser tab instead of native standalone app window
+  -browser           Force launch in standard web browser tab instead of native app window
   -no-browser        Disable automatic browser or app window launch on startup
   -strict-port       Exit immediately if specified port is occupied
   -log-level string  Log verbosity: debug, info, warn, error, silent (default "info")
@@ -159,35 +237,42 @@ Server Options:
 #### CLI Examples
 
 ```bash
-# Launch web workspace on port 9000 without opening browser
+# Launch in native app window on port 9000
+sqlfox -port 9000
+
+# Launch headless daemon without opening window or browser
 sqlfox -port 9000 -no-browser
 
-# Execute headless query and output clean JSON
+# Execute query headlessly and output clean JSON
 sqlfox query --dsn "root:secret@tcp(127.0.0.1:3306)/app" --sql "SELECT id, email FROM users" --format json
 
-# Pipe SQL through STDIN in CI/CD pipelines
+# Pipe SQL via STDIN in CI/CD pipelines
 echo "SELECT count(*) FROM orders WHERE status = 'pending';" | sqlfox query --dsn "$DATABASE_URL" --format csv
 
-# Run heuristic index advice on a slow query
+# Run heuristic index advisor on a slow query
 sqlfox advise --dsn "$DATABASE_URL" --sql "SELECT * FROM orders WHERE user_id = 42 ORDER BY created_at DESC"
+
+# Gracefully stop running background instance
+sqlfox stop
 ```
 
 ---
 
-### High-Level Architecture
+### 🏗️ Architecture
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│ User Browser / Tablet / LAN Client                                     │
+│ User Interface: Desktop App Window / Browser / Tablet / LAN Client      │
 │        ▲                                                               │
 │        │ Local HTTP REST & SSE (Protected by Master PIN & Origin Guard)│
 │        ▼                                                               │
-│ Go Backend Process (< 100MB RAM, Single Static Binary)                 │
-│   ├── Safety Guard: Deterministic AST Analyzer & Row Impact Probes     │
+│ Go Core Daemon (< 100MB RAM, Single Static Binary)                     │
+│   ├── Safety Guard™: Deterministic AST Analyzer & Row Impact Probes    │
 │   ├── Session Manager: Singleflight Deduplication & Control Pools      │
 │   ├── Virtual Data Grid: Fixed-Height DOM Windowing & Micro-Chunk NDJSON│
 │   ├── AI Firewall: Schema-Only Context Sanitizer (BYOK)                │
 │   └── Connection Vault: AES-256-GCM & Argon2id at Rest                 │
+│   └── Desktop Manager: Frameless Chromium/Edge Window & OS Integration │
 └────────┬─────────────────────────────────────────────┬─────────────────┘
          │                                             │
          │ TLS / Local Socket (MySQL, PG, SQLite)      │ HTTPS (DDL Metadata Only)
@@ -196,8 +281,10 @@ sqlfox advise --dsn "$DATABASE_URL" --sql "SELECT * FROM orders WHERE user_id = 
 (MySQL, MariaDB, PostgreSQL, SQLite)          (Claude, OpenAI, Gemini, Ollama)
 ```
 
+For in-depth architectural specifications, see **[ARCHITECTURE.md](ARCHITECTURE.md)** and **[SECURITY.md](SECURITY.md)**.
+
 ---
 
-### License
+### 📄 License
 
 Distributed under the [MIT](LICENSE) open-source license.

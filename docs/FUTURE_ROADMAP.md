@@ -23,12 +23,13 @@ Fitur-fitur esensial yang diharapkan oleh developer dan DBA dari sebuah Database
   - Tersedia tombol cepat visual `Commit` dan `Rollback` serta shortcut keyboard global `Ctrl+Shift+C` dan `Ctrl+Shift+R`.
   - Dilengkapi dialog konfirmasi pengaman pada `closeTab` jika tab ditutup saat transaksi masih uncommitted.
 
-### 1.3 Manajemen & Editor Visual Objek Database (Views, Triggers, Stored Procedures, Functions)
-* **Status Saat Ini**: Backlog Terbuka. SqlFox memiliki Table Designer yang baik untuk tabel relasional, namun untuk View, Trigger, Function, dan Stored Procedure, dukungan baru sebatas inspeksi DDL read-only.
-* **Kebutuhan Lapangan**: DBA membutuhkan kemampuan untuk membuat, mengubah (*ALTER/REPLACE*), dan mengompilasi ulang View dan Trigger tanpa harus menulis DDL dari nol di Query Editor.
-* **Rekomendasi Implementasi**:
-  - Modal editor DDL terstruktur khusus untuk View dan Stored Routines dengan validasi sintaks pra-eksekusi.
-  - Dukungan pemanggilan rutin berparameter (*Execute Stored Procedure with arguments*).
+### 1.3 Manajemen & Editor Visual Objek Database (Views, Triggers, Stored Procedures, Functions, Scheduled Events)
+* **Status Saat Ini**: **Terimplementasi (v0.11.0)**
+* **Detail Implementasi**:
+  - Dialog desainer visual interaktif untuk Views, Triggers, Stored Routines (Procedures & Functions), dan Scheduled Events dengan editor CodeMirror bawaan.
+  - Builder grid parameter dinamis untuk input/output rutin terprogram.
+  - Pemilih interval penjadwalan visual untuk events (`EVERY`, `AT`, `STARTS`, `ENDS`).
+  - Handoff 1-klik "Open in Query Tab" dan sanitasi definer SQL dengan preservasi komentar multibaris.
 
 ### 1.4 Format Ekspor Data Tambahan (Excel `.xlsx` & Streaming NDJSON)
 * **Status Saat Ini**: 

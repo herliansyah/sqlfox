@@ -20,6 +20,8 @@
    - [Supported Engines & Drivers](#supported-engines--drivers)
 2. [Installation & Launch Modes](#2-installation--launch-modes)
    - [Standalone Binaries (Linux, macOS, Windows)](#standalone-binaries-linux-macos-windows)
+   - [Standalone Native Window Mode & Desktop Launcher Integration](#standalone-native-window-mode--desktop-launcher-integration)
+   - [Docker & Container Deployment](#docker--container-deployment)
    - [Install via Go](#install-via-go)
    - [Build from Source](#build-from-source)
    - [CLI Runtime Flags & Port Hunting](#cli-runtime-flags--port-hunting)
@@ -46,6 +48,9 @@
    - [Tab Bar Overflow Dropdown & Enhanced Close Guard](#tab-bar-overflow-dropdown--enhanced-close-guard)
    - [Tab Database Scope & DDL Target Affirmation Guardrails](#tab-database-scope--ddl-target-affirmation-guardrails)
    - [Relational Table Designer & Constraint Builders](#relational-table-designer--constraint-builders)
+   - [Query Result Row Mutations & Context Export Actions](#query-result-row-mutations--context-export-actions)
+   - [Multi-Statement Sequential Execution & Multi-Result Tabs](#multi-statement-sequential-execution--multi-result-tabs)
+   - [Visual CRUD Designers for Views, Routines & Scheduled Events](#visual-crud-designers-for-views-routines--scheduled-events)
 5. [Operations & DBA Playbook](#5-operations--dba-playbook)
    - [Deterministic AST Safety Guard & Challenge Modal](#deterministic-ast-safety-guard--challenge-modal)
    - [Pre-Execution Mutation Row Estimation & Tiered Safety Guard](#pre-execution-mutation-row-estimation--tiered-safety-guard)
@@ -62,8 +67,9 @@
    - [Cross-Connection Data Transfer & Keyset Row Sync](#cross-connection-data-transfer--keyset-row-sync)
    - [Singleflight Connection Deduplication & Lazy Schema Inspection](#singleflight-connection-deduplication--lazy-schema-inspection)
    - [Systemic Security Hardening & Engine Resilience](#systemic-security-hardening--engine-resilience)
-   - [Headless CLI Suite (`run`, `transfer`, `advise`)](#headless-cli-suite-run-transfer-advise)
+   - [Headless CLI Suite (`query`, `transfer`, `job`, `advise`)](#headless-cli-suite-query-transfer-job-advise)
    - [Zero-Daemon Scheduled Task Runner](#zero-daemon-scheduled-task-runner)
+   - [Storage & Health Diagnostics](#storage--health-diagnostics)
    - [Memory Ceiling Diagnostics & `pprof` Profiling](#memory-ceiling-diagnostics--pprof-profiling)
    - [In-App Activity Console & Live Diagnostic Stream](#in-app-activity-console--live-diagnostic-stream)
 6. [Keyboard Shortcuts Reference](#6-keyboard-shortcuts-reference)
@@ -96,6 +102,13 @@ SqlFox is engineered from the ground up for teams who demand instant responsiven
 | **PostgreSQL** | 9.6 through 16+ | Native `pgx/v5` protocol driver with out-of-band `pg_cancel_backend` |
 | **SQLite** | 3.x | Pure-Go CGO-free `modernc.org/sqlite` engine (local) |
 
+<p align="center">
+  <img src="assets/screenshots/01_hero_workspace.png" alt="SqlFox Modern Database Workspace & High-Performance Virtual Grid" width="95%" />
+</p>
+<p align="center">
+  <i>SqlFox Unified Workspace: CodeMirror query editor, multi-tab execution, and DOM-windowed virtual data grid.</i>
+</p>
+
 ---
 
 ## 2. Installation & Launch Modes
@@ -105,15 +118,39 @@ Download the latest archive from [GitHub Releases](https://github.com/herliansya
 
 ```bash
 # Linux amd64
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.10.13/sqlfox-v0.10.13-linux-amd64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.15.0/sqlfox-v0.15.0-linux-amd64.tar.gz | tar -xz
 ./sqlfox
 
 # macOS Apple Silicon (ARM64)
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.10.13/sqlfox-v0.10.13-darwin-arm64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.15.0/sqlfox-v0.15.0-darwin-arm64.tar.gz | tar -xz
 ./sqlfox
 ```
 
 On Windows, download the `.zip` archive, extract `sqlfox.exe`, and double-click to launch.
+
+### Standalone Native Window Mode & Desktop Launcher Integration
+SqlFox provides a native desktop experience without shipping heavy Chromium binaries:
+- **Chromium / Edge `--app` Mode**: When launched, SqlFox automatically checks for installed Chrome, Chromium, or Edge browsers and spawns a standalone frameless application window.
+- **CLI Window Controls**:
+  - `sqlfox` &rarr; Launches native app window by default.
+  - `sqlfox -browser` &rarr; Forces launching inside a standard web browser tab.
+  - `sqlfox -no-browser` &rarr; Starts headless without opening any GUI window.
+- **Linux Desktop Launcher Management**:
+  ```bash
+  # Register SqlFox in your application launcher (creates ~/.local/share/applications/sqlfox.desktop and high-res icon)
+  ./sqlfox desktop install
+
+  # Check desktop launcher status
+  ./sqlfox desktop status
+
+  # Remove desktop launcher entry
+  ./sqlfox desktop uninstall
+  ```
+- **Clean Background Process Control**:
+  ```bash
+  # Gracefully stop any running background SqlFox instance
+  ./sqlfox stop
+  ```
 
 ### Docker & Container Deployment
 SqlFox publishes official multi-arch container images (`linux/amd64` and `linux/arm64`) to the GitHub Container Registry.
@@ -197,12 +234,14 @@ SQLFOX_PPROF=1 ./sqlfox -port 9090
 | `-port <num>` | `8080` | HTTP listening port (with automatic sequential port hunting) |
 | `-host <ip>` | `127.0.0.1` | Network interface to bind (`0.0.0.0` for LAN with Master PIN guard) |
 | `--lan` | `false` | Enable LAN and tablet access (binds to `0.0.0.0` and reveals Master PIN) |
-| `-log-level <lvl>`| `info` | Minimum log verbosity level: `debug`, `info`, `warn`, `error` |
+| `-app` | `true` | Launch in standalone native window mode using Chrome/Edge/Chromium |
+| `-browser` | `false` | Force launch in standard web browser tab instead of native app window |
+| `-no-browser` | `false` | Run headless without spawning the default OS web browser or app window |
+| `-log-level <lvl>`| `info` | Minimum log verbosity level: `debug`, `info`, `warn`, `error`, `silent` |
 | `-v`, `-verbose` | `false` | Convenience shorthand for `-log-level debug` |
 | `-log-format <fmt>`| `text` | Structured log formatting: `text` (human-readable) or `json` |
 | `-log-file <path>`| `""` | File path to append logs into (writes to both console and file) |
 | `-silent`, `-q` | `false` | Suppresses console logs completely (file logging remains active if configured) |
-| `-no-browser` | `false` | Run headless without spawning the default OS web browser |
 | `-strict-port` | `false` | Fail immediately if specified port is in use |
 | `-multi` | `false` | Allow multiple SqlFox instances to run concurrently |
 
@@ -359,6 +398,10 @@ SqlFox delivers advanced grid exploration tools designed for high-density, multi
   - **1-Click Copy Actions**: Copy the active record as formatted JSON (`Copy JSON`) or tab-delimited text (`Copy Text`).
   - **Live Staged Mutations**: Edit values directly in the inspector inputs or textareas; changes are tagged with `● Modified` and wired directly to the global `stagedEdits` transaction tracker and save bar.
 
+<p align="center">
+  <img src="assets/screenshots/15_vertical_record_inspector.png" alt="SqlFox Vertical Record Inspector & Nested JSON Viewer" width="90%" />
+</p>
+
 ### Unified Sticky Bottom Pagination Bar & Streaming
 SqlFox unifies pagination controls into a sticky, responsive bottom bar below both the SQL Query Editor grid and the Table Data Viewer:
 - **Navigation & Direct Page Jump**:
@@ -387,6 +430,10 @@ Navigate to **📦 DB Tools &rarr; 🗺️ Visual ERD Canvas**:
 - **Fit Viewport**: Scales and centers the entire schema diagram in a single click.
 - **Card Inspector**: Displays column names, data types, Primary Key (`🔑`), and Foreign Key (`🔗`) badges.
 
+<p align="center">
+  <img src="assets/screenshots/11_visual_erd_canvas.png" alt="SqlFox Interactive Visual ERD Canvas" width="95%" />
+</p>
+
 ### BYOK AI Copilot & Automated Error Healer
 SqlFox features a **Bring-Your-Own-Key (BYOK)** AI assistant:
 - Supported Providers: **OpenAI**, **Anthropic Claude**, **Google Gemini**, **DeepSeek**, and local **Ollama** (`http://localhost:11434`).
@@ -394,6 +441,10 @@ SqlFox features a **Bring-Your-Own-Key (BYOK)** AI assistant:
 - **1-Click SQL Execution**: SQL suggestions rendered in chat include `Insert & Run` and `Replace in Editor` buttons.
 - **Chat Session Forking**: Fork an active AI discussion at any point into a new branch to explore alternative query strategies without losing previous context.
 - **Automated Error Healer**: When a query fails in the editor, click **🩺 Heal Error**; the AI diagnoses the syntax/logical error, explains the root cause, and provides the corrected SQL.
+
+<p align="center">
+  <img src="assets/screenshots/16_ai_copilot_assistant.png" alt="SqlFox In-Context AI Copilot Assistant & Query Tuner" width="95%" />
+</p>
 
 ### Unified Operational Notes Inbox & Follow-up Lifecycle
 SqlFox integrates a centralized operational notebook and follow-up engine directly into the application, bridging raw database telemetry with developer runbooks:
@@ -486,6 +537,32 @@ SqlFox delivers a high-speed, visual Table Designer and Create Table Suite with 
 - **Pre-Flight Table Validation Engine**:
   - Evaluates table definitions in real-time prior to DDL generation: detects duplicate column names, empty names, missing ENUM choices, and illegal type lengths, disabling execution until resolved.
 
+<p align="center">
+  <img src="assets/screenshots/12_visual_table_designer.png" alt="SqlFox Relational Table Designer" width="95%" />
+</p>
+
+### Query Result Row Mutations & Context Export Actions
+SqlFox enables direct spreadsheet-style row mutations and copy actions on arbitrary `SELECT` queries that resolve to a single underlying table with a primary key:
+- **Direct Row Edits**: Double-click any cell in the query result grid to stage inline modifications.
+- **Draft Row Insertion**: Insert new rows directly into query result sets via toolbar or context menu.
+- **Duplicate & Delete Rows**: Duplicate selected records or stage deletions with safety guardrails.
+- **Export Context Actions**: Right-click selected rows to `Copy as TSV`, `Copy as JSON`, or generate driver-formatted `INSERT INTO` statements.
+- **Submenu Viewport Clamping**: Context menu items (Quick Filter, Insert Value, Mutations, Copy/Export) are grouped into structured submenus with automatic collision clamping, ensuring menus never overflow the screen.
+
+### Multi-Statement Sequential Execution & Multi-Result Tabs
+For batch migrations and complex investigative scripts:
+- **Run All Statements**: Press `Ctrl+Alt+Enter` or `F5` to execute multiple SQL statements sequentially in a single transaction or execution pass.
+- **Sub-Tabs per Result (`#tab-results-bar`)**: Each statement output renders in its own dedicated sub-tab with statement timing (ms) and row count badges.
+- **SQLite Concurrency Resilience**: Operates under WAL journal mode with a 5,000ms busy timeout, preventing lock contention during concurrent script runs.
+
+### Visual CRUD Designers for Views, Routines & Scheduled Events
+Manage database programmability without writing tedious boilerplate DDL:
+- **Interactive Visual Dialogs**: Dedicated visual designers for Views, Triggers, Stored Procedures, Functions, and Scheduled Events.
+- **CodeMirror SQL Editor Integration**: Embedded syntax-highlighted SQL editors with bracket matching and 1-click **Open in Query Tab** handoff.
+- **Dynamic Parameter Grids**: Add, remove, and reorder routine input/output parameters visually.
+- **Event Scheduling Selectors**: Configure recurrence intervals (`EVERY 1 DAY`, `AT ...`) visually.
+- **Pre-Flight Full Database Dump Confirmation**: Prompts a safety modal before running full database dumps, displaying target schemas, bandwidth/lock warnings, and granular structure vs data toggles.
+
 ---
 
 ## 5. Operations & DBA Playbook
@@ -503,6 +580,10 @@ SqlFox parses SQL statements into an Abstract Syntax Tree (AST) before sending t
 - **Lexical Comment & Literal Sanitization**: Blanks out line/block comments and string literals before running regex checks, preventing keyword cloaking.
 - **CTE Preprocessing**: Strips leading `WITH ... AS (...)` clauses to inspect the root DML/DDL command under Safety Guard.
 - **MySQL Executable Comment Unwrapping**: Automatically unwraps `/*! ... */` and `/*!NNNNN ... */` comments into raw executable SQL, closing evasion vectors.
+
+<p align="center">
+  <img src="assets/screenshots/02_safety_guard_destructive.png" alt="SqlFox Safety Guard Challenge Modal" width="90%" />
+</p>
 
 ### Pre-Execution Mutation Row Estimation & Tiered Safety Guard
 To eliminate accidental mass table updates and deletes caused by subtle typos in `WHERE` clauses, SqlFox introduces deterministic pre-execution row estimation (ADR 0057):
@@ -536,12 +617,20 @@ Access via **⚡ Monitor &rarr; 🔒 Lock Contention & Blockers**:
     - **Kill Blocker** (Red): Immediate termination of the entire blocking connection to clear lock storms.
   - **Blocked Session Hierarchy**: Surfaces affected downstream sessions with waiting durations highlighted in red/white (`waiting 45s for lock`), blocked user names, and exact waiting query text.
 
+<p align="center">
+  <img src="assets/screenshots/05_lock_contention_root_blocker.png" alt="SqlFox Lock Contention Root Blocker Triage" width="90%" />
+</p>
+
 ### Real-Time Processlist & Out-of-Band Cancellation
 Access via **⚡ Monitor &rarr; ⚡ Processlist**:
 - Real-time tabular monitoring of all server threads, execution times, client hosts, and active query states.
 - Filter by non-idle threads to eliminate connection pool noise.
 - **Out-of-Band Cancellation**: Clicking **Kill Query** sends `KILL QUERY <id>` (MySQL) or `SELECT pg_cancel_backend(<pid>)` (PostgreSQL) through a dedicated control connection without terminating the primary database session.
 - **Process Detail Modal**: Inspect full query text, user, host, database, state, execution time, and lock dependencies with 1-click clipboard copy (featuring robust fallback support for plain HTTP non-SSL environments).
+
+<p align="center">
+  <img src="assets/screenshots/06_realtime_processlist.png" alt="SqlFox Real-Time Processlist Manager" width="95%" />
+</p>
 
 ### Processlist Batch Operations, Two-Tier Toolbar & Column Visibility
 During severe lock storms or when rogue applications leak hundreds of idle connections, manually terminating threads one-by-one is unfeasible. SqlFox provides enterprise-grade thread management:
@@ -582,6 +671,10 @@ Access via **⚡ Monitor &rarr; 🌐 Cluster**:
 - **Slowest Node Pinpointer**: Automatically probes all cluster peer nodes to identify the specific node causing replication backpressure.
 - **Tri-Metric Matrix**: Evaluates EVS network latency, InnoDB disk stalls, and applier worker queue capacity.
 
+<p align="center">
+  <img src="assets/screenshots/04_cluster_replication_inspector.png" alt="SqlFox Cluster & Replication Inspector" width="95%" />
+</p>
+
 ### Historical Statement Digest & Post-Mortem Deadlocks
 Access via **⚡ Monitor &rarr; ⚡ Processlist** (Segmented Pill Switcher):
 - **Live Threads**: View and cancel active queries out-of-band.
@@ -608,12 +701,20 @@ Access via **⚡ Monitor &rarr; 📈 Recorder**:
 - **Correlated Query Inspector**: Click any spike on the timeline scrubber to inspect the exact SQL queries running during that second.
 - **10-Minute Auto-Stop Safety Guard**: Prevents runaway recording sessions from filling disk space or impacting production servers.
 
+<p align="center">
+  <img src="assets/screenshots/03_flight_recorder_telemetry.png" alt="SqlFox Performance Flight Recorder" width="95%" />
+</p>
+
 ### Server Variables Inspector & Tuning Advisor
 Access via **⚡ Monitor &rarr; ⚙️ Server Variables**:
 - Inspects hundreds of engine system parameters with instant search and categorical filtering.
 - **Tuning Advisor**: Evaluates critical memory, connection, and I/O variables against best practices:
   - MySQL: `innodb_buffer_pool_size` vs system RAM, `max_connections`, `innodb_flush_log_at_trx_commit`.
   - PostgreSQL: `shared_buffers`, `work_mem`, `maintenance_work_mem`, `effective_cache_size`, `wal_buffers`, `checkpoint_completion_target`, and `autovacuum`.
+
+<p align="center">
+  <img src="assets/screenshots/14_server_variables_tuning.png" alt="SqlFox Server Variables Inspector & Tuning Advisor" width="95%" />
+</p>
 
 ### Heuristic Index Advisor & Query Tuner (ESR Rule)
 1. Write or paste any `SELECT` query in the Query Editor.
@@ -635,12 +736,29 @@ Access via **📦 DB Tools &rarr; 🔄 Structure Sync**:
    - Foreign key constraint differences
 3. Generates a safe, order-aware DDL migration script with execution preview.
 
+<p align="center">
+  <img src="assets/screenshots/08_structure_sync_schema_diff.png" alt="SqlFox Structure Sync DDL Migration Diff" width="95%" />
+</p>
+
 ### Cross-Connection Data Transfer & Keyset Row Sync
 - **Data Transfer**: Stream entire tables directly from one database to another across different hosts, cloud providers, or engines with a strictly bounded `<50MB` memory buffer. If `truncate_target` is enabled and a transfer fails, atomic transaction rollback guarantees original target rows are preserved.
 - **Row-Level Data Sync**: Reconciles table data row-by-row using keyset delta hashing. Supports both single and composite primary keys (delimited by unit separator `\x1f`), maps source-to-target column positions, normalizes cross-engine values (`syncValueKey`), and enforces a 10,000-row comparison ceiling to protect daemon memory.
+- **Smart Seed Exporter (FK-Aware Topological Slicer)**: Automatically crawls schema-wide foreign key dependencies to export complete DDL + bounded row sample, resolving all parent references recursively to ensure clean, error-free restores in dev and staging.
+
+<p align="center">
+  <img src="assets/screenshots/09_cross_connection_data_transfer.png" alt="SqlFox Cross-Connection Data Transfer" width="90%" />
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/10_row_level_data_sync.png" alt="SqlFox Keyset Row-Level Data Sync" width="90%" />
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/07_smart_seed_fk_exporter.png" alt="SqlFox Smart Seed FK-Aware Topological Exporter" width="90%" />
+</p>
 
 ### Singleflight Connection Deduplication & Lazy Schema Inspection
-To handle unpredictable production network conditions and high-concurrency reconnect events without overwhelming target database instances (v0.10.13):
+To handle unpredictable production network conditions and high-concurrency reconnect events without overwhelming target database instances (v0.15.0):
 - **Singleflight Request Deduplication**:
   - Employs `singleflight.Group` inside the session manager to coalesce in-flight connection attempts targeting the same connection ID into a single physical connection routine, preventing reconnect stampedes during browser reconnect sweeps or rapid tab clicks.
 - **Lazy Schema Inspection**:
@@ -662,21 +780,21 @@ SqlFox includes comprehensive security and multi-engine resilience protections (
 - **Thread-Safe Active Scoping**:
   - Active session database and search path states are guarded with mutual exclusion locks (`activeDB()`, `activeSchema()`), preventing data races during concurrent queries.
 
-### Headless CLI Suite (`run`, `transfer`, `advise`)
+### Headless CLI Suite (`query`, `transfer`, `job`, `advise`)
 SqlFox includes powerful headless commands for automation scripts, cron jobs, and CI/CD pipelines:
 
 ```bash
 # Execute SQL and output clean tabular or JSON data
-./sqlfox run -conn "my-prod-db" -query "SELECT id, status FROM orders WHERE status = 'pending'" -format json
+./sqlfox query --conn "my-prod-db" --sql "SELECT id, status FROM orders WHERE status = 'pending'" --format json
 
 # Pipe SQL directly via STDIN with raw DSN (zero vault dependencies in CI)
-echo "SELECT count(*) FROM users;" | ./sqlfox run -dsn "user:pass@tcp(10.0.0.5:3306)/app" -format csv
+echo "SELECT count(*) FROM users;" | ./sqlfox query --dsn "user:pass@tcp(10.0.0.5:3306)/app" --format csv
 
 # Run Cross-Connection Data Transfer headlessly
 ./sqlfox transfer --from "source-db" --to "backup-db" --tables "orders,order_items" --batch 1000
 
 # Run Heuristic Index Advisor on a slow query
-./sqlfox advise -conn "my-prod-db" -query "SELECT * FROM logs WHERE tenant_id = 4 AND created_at > NOW() - INTERVAL 1 DAY ORDER BY id DESC"
+./sqlfox advise --conn "my-prod-db" --sql "SELECT * FROM logs WHERE tenant_id = 4 AND created_at > NOW() - INTERVAL 1 DAY ORDER BY id DESC"
 ```
 
 ### Zero-Daemon Scheduled Task Runner
@@ -684,6 +802,16 @@ Schedule recurring database maintenance, telemetry dumps, and health checks with
 - Configure tasks via declarative YAML / JSON definitions.
 - Automatic retry on network glitches with exponential backoff.
 - Direct output streaming to local storage or monitoring endpoints.
+
+### Storage & Health Diagnostics
+Access via **⚡ Monitor &rarr; 📊 Diagnostics**:
+- Real-time disk storage footprint analysis across tables and indexes.
+- Data-to-index storage ratio breakdown with fragmentation overhead indicators.
+- Proactive health recommendations for engine tuning, vacuuming, and tablespace reclamation.
+
+<p align="center">
+  <img src="assets/screenshots/13_storage_health_diagnostics.png" alt="SqlFox Storage & Health Diagnostics" width="95%" />
+</p>
 
 ### Memory Ceiling Diagnostics & `pprof` Profiling
 To verify the `<100MB RAM` guarantee under enterprise workloads:

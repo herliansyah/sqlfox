@@ -219,7 +219,13 @@ v2.3 (Mutation Safety, High-Performance Virtual Grid & Hardening Suite)
 ├── [x] 41. Pre-Execution Mutation Row Estimation & Tiered Safety Guard (ADR 0057)
 ├── [x] 42. Virtual Data Grid, Sticky Bottom Pagination Bar & NDJSON Micro-Chunk Streaming (ADR 0058)
 ├── [x] 43. Systemic Security Hardening & Concurrency Reliability (ADR 0059)
-└── [x] 44. Tab Bar Overflow Dropdown & Enhanced Close Guard (v0.10.13)
+├── [x] 44. Tab Bar Overflow Dropdown & Enhanced Close Guard (v0.10.13)
+│
+▼
+v2.4 (Programmability, Native Desktop Window & Advanced Grid Ergonomics)
+├── [x] 45. Visual Object CRUD Designers, Multi-Statement Execution & Multi-Result Tabs (v0.11 - v0.13)
+├── [x] 46. Query Result In-Place Mutations & Viewport-Clamped Context Submenus (v0.14)
+└── [x] 47. Standalone Native Desktop App Mode, OS Launcher & Process Management (v0.15.0)
 ```
 
 ---
