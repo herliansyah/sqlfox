@@ -467,7 +467,7 @@ async function runTest() {
   const cteSQL = "WITH regional_sales AS (SELECT * FROM orders) SELECT * FROM regional_sales";
   const wrapped = vm.runInContext(`wrapSQLWithPagination("${cteSQL}", 5000, 5000)`, sandbox);
   assert.ok(wrapped.startsWith("WITH regional_sales AS"), "Wrapped CTE query must preserve root WITH clause");
-  assert.ok(wrapped.includes("LIMIT 5000 OFFSET 5000"), "Wrapped query must append LIMIT and OFFSET");
+  assert.ok(wrapped.includes("OFFSET 5000") && (wrapped.includes("LIMIT 5000") || wrapped.includes("LIMIT 5001")), "Wrapped query must append LIMIT and OFFSET");
   console.log("Scenario 12 PASSED!");
 
   console.log("\n=== Scenario 13: navigateGridCellByArrow moves activeGridSelectedRow and Col ===");

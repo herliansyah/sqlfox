@@ -5188,32 +5188,68 @@
         </span>
         <span class="text-[10px] text-slate-500 font-mono flex-shrink-0 ml-2">Modal</span>
       </button>
+      <button onclick="copyCellValueFromGrid(); closeGridContextMenu()" id="grid-ctx-btn-copy-cell" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white transition">
+        <span class="flex items-center space-x-2 min-w-0">
+          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-slate-400"><use href="#icon-copy"/></svg></span>
+          <span class="whitespace-nowrap">Copy Cell Value</span>
+        </span>
+      </button>
+      <button onclick="copySelectedRowsAsTSV(); closeGridContextMenu()" id="grid-ctx-btn-copy-row-tsv" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white transition">
+        <span class="flex items-center space-x-2 min-w-0">
+          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-slate-400"><use href="#icon-file-text"/></svg></span>
+          <span class="whitespace-nowrap" id="grid-ctx-copy-tsv-label">Copy Row(s) as TSV</span>
+        </span>
+      </button>
+      <button onclick="copySelectedRowsAsJSON(); closeGridContextMenu()" id="grid-ctx-btn-copy-row-json" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white transition">
+        <span class="flex items-center space-x-2 min-w-0">
+          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-amber-400"><use href="#icon-code"/></svg></span>
+          <span class="whitespace-nowrap" id="grid-ctx-copy-json-label">Copy Row(s) as JSON</span>
+        </span>
+      </button>
+      <button onclick="copySelectedRowsAsSQL(); closeGridContextMenu()" id="grid-ctx-btn-copy-row-sql" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white transition">
+        <span class="flex items-center space-x-2 min-w-0">
+          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-emerald-400"><use href="#icon-database"/></svg></span>
+          <span class="whitespace-nowrap" id="grid-ctx-copy-sql-label">Copy Row(s) as SQL INSERT</span>
+        </span>
+      </button>
       <button onclick="copyGridAsTSV(); closeGridContextMenu()" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white transition">
         <span class="flex items-center space-x-2 min-w-0">
           <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-slate-400"><use href="#icon-copy"/></svg></span>
-          <span class="whitespace-nowrap">Copy as TSV</span>
+          <span class="whitespace-nowrap">Copy Grid as TSV</span>
         </span>
         <span class="text-[10px] text-slate-500 flex-shrink-0 ml-2">Excel</span>
       </button>
       <button onclick="copyGridAsMarkdown(); closeGridContextMenu()" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-slate-200 hover:text-white transition">
         <span class="flex items-center space-x-2 min-w-0">
           <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-slate-400"><use href="#icon-copy"/></svg></span>
-          <span class="whitespace-nowrap">Copy as Markdown</span>
+          <span class="whitespace-nowrap">Copy Grid as Markdown</span>
         </span>
         <span class="text-[10px] text-slate-500 flex-shrink-0 ml-2">GFM</span>
       </button>
     </div>
-    <div id="grid-ctx-table-mutations" class="py-1 space-y-0.5 hidden">
-      <button onclick="addGridDraftRow(); closeGridContextMenu()" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-sky-400 hover:text-sky-300 transition">
+    <div id="grid-ctx-table-mutations" class="py-1 space-y-0.5 border-t border-slate-800">
+      <button onclick="duplicateGridRow(true); closeGridContextMenu()" id="grid-ctx-btn-dup-nokey" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-sky-400 hover:text-sky-300 transition">
         <span class="flex items-center space-x-2 min-w-0">
-          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-sky-400"><use href="#icon-plus"/></svg></span>
+          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-sky-400"><use href="#icon-copy"/></svg></span>
+          <span class="whitespace-nowrap">Duplicate Row (Without Key)</span>
+        </span>
+      </button>
+      <button onclick="duplicateGridRow(false); closeGridContextMenu()" id="grid-ctx-btn-dup-key" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-indigo-400 hover:text-indigo-300 transition">
+        <span class="flex items-center space-x-2 min-w-0">
+          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-indigo-400"><use href="#icon-key"/></svg></span>
+          <span class="whitespace-nowrap">Duplicate Row (With Key)</span>
+        </span>
+      </button>
+      <button onclick="addGridDraftRow(); closeGridContextMenu()" id="grid-ctx-btn-add-draft" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 rounded flex items-center justify-between text-emerald-400 hover:text-emerald-300 transition">
+        <span class="flex items-center space-x-2 min-w-0">
+          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-emerald-400"><use href="#icon-plus"/></svg></span>
           <span class="whitespace-nowrap">Add Row Draft</span>
         </span>
       </button>
-      <button onclick="deleteSelectedGridRows(); closeGridContextMenu()" class="w-full text-left px-2.5 py-1.5 hover:bg-rose-950/60 rounded flex items-center justify-between text-rose-400 hover:text-rose-300 transition">
+      <button onclick="deleteSelectedGridRows(); closeGridContextMenu()" id="grid-ctx-btn-delete-row" class="w-full text-left px-2.5 py-1.5 hover:bg-rose-950/60 rounded flex items-center justify-between text-rose-400 hover:text-rose-300 transition">
         <span class="flex items-center space-x-2 min-w-0">
           <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center"><svg class="w-3.5 h-3.5 text-rose-400"><use href="#icon-trash-2"/></svg></span>
-          <span class="whitespace-nowrap">Delete Selected Row(s)</span>
+          <span class="whitespace-nowrap" id="grid-ctx-delete-row-label">Delete Selected Row(s)</span>
         </span>
       </button>
     </div>
@@ -8304,6 +8340,16 @@
       const match = clean.match(/\bFROM\s+(?:[`"\[]?([a-zA-Z0-9_$\u0080-\uffff]+)[`"\]]?\.)?[`"\[]?([a-zA-Z0-9_$\u0080-\uffff]+)[`"\]]?(?:\s+(?:AS\s+)?[`"\[]?[a-zA-Z0-9_$\u0080-\uffff]+[`"\]]?)?(?:\s+(?:WHERE|ORDER|GROUP|HAVING|LIMIT|OFFSET|PROCEDURE|FOR|LOCK|WINDOW|;)|;|\s*$)/i);
       if (!match) return null;
       return { database: match[1] || '', table: match[2] };
+    }
+
+    // Driver-aware SQL identifier quoter (PostgreSQL/SQLite use double-quotes, MySQL/MariaDB use backticks)
+    function quoteIdentifierForDriver(name) {
+      const driver = (activeConnection && activeConnection.driver) ? activeConnection.driver.toLowerCase() : 'mysql';
+      const clean = String(name || '').replace(/^[`"\[]+|[`"\]]+$/g, '');
+      if (driver === 'postgres' || driver === 'postgresql' || driver === 'pg' || driver === 'sqlite' || driver === 'sqlite3') {
+        return `"${clean.replace(/"/g, '""')}"`;
+      }
+      return `\`${clean.replace(/`/g, '``')}\``;
     }
 
     // --- Pure Client-Side SQL Formatter ---
@@ -17283,7 +17329,14 @@ Please analyze what is causing this query to be slow and suggest necessary query
             if (detectedDB && activeConnection && (typeof multiDBCatalogCache === 'object') && !multiDBCatalogCache[detectedDB.toLowerCase()]) {
               apiFetch(`/api/session/${activeConnection.id}/schema?db=${encodeURIComponent(detectedDB)}`)
                 .then(r => r.ok ? r.json() : null)
-                .then(s => { if (s && multiDBCatalogCache) multiDBCatalogCache[detectedDB.toLowerCase()] = s; })
+                .then(s => {
+                  if (s && multiDBCatalogCache) {
+                    multiDBCatalogCache[detectedDB.toLowerCase()] = s;
+                    if (activeTabId === targetTabId) {
+                      renderGridResults(data.columns, data.rows, null, detectedTable, detectedDB, true);
+                    }
+                  }
+                })
                 .catch(() => {});
             }
 
@@ -18790,7 +18843,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
       if (countSpan) countSpan.textContent = count;
 
       if (applyBtn && discardBtn) {
-        if (count > 0 && gridEditMode === 'staged') {
+        if (count > 0 && (gridEditMode === 'staged' || stagedDraftRows.length > 0)) {
           applyBtn.classList.remove('hidden');
           discardBtn.classList.remove('hidden');
         } else {
@@ -18800,10 +18853,60 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
     }
 
+    // Resolves table metadata, primary key, and whether grid mutations are safe/permitted
+    function resolveGridTableMeta() {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const isTableViewer = Boolean(activeTab && activeTab.isTableViewer);
+      let tableName = activeGridTable || (activeTab && (activeTab.tableName || activeTab.queryTable)) || '';
+      let dbName = activeGridDB || (activeTab && (activeTab.database || activeTab.queryDB)) || (schemaCatalogCache && schemaCatalogCache.database_name) || '';
+
+      if (!tableName && activeTab && !isTableViewer) {
+        const sql = activeTab.sql || getEditorSQL();
+        const parsed = extractSingleTableFromSQL(sql);
+        if (parsed && parsed.table) {
+          tableName = parsed.table;
+          if (parsed.database) dbName = parsed.database;
+        }
+      }
+
+      const targetCatalog = (dbName && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[dbName.toLowerCase()]) ||
+                            (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) ||
+                            schemaCatalogCache;
+      const tableMeta = (targetCatalog?.tables || []).find(t => (t.name || '').toLowerCase() === (tableName || '').toLowerCase());
+
+      let pkCol = activeGridPKCol;
+      if (tableMeta && Array.isArray(tableMeta.columns)) {
+        const pks = tableMeta.columns.filter(c => c.is_primary_key || c.key === 'PRI');
+        if (pks.length === 1) {
+          pkCol = pks[0].name;
+        } else {
+          pkCol = null;
+        }
+      } else if (!pkCol && tableMeta && Array.isArray(tableMeta.columns)) {
+        const pks = tableMeta.columns.filter(c => c.is_primary_key || c.key === 'PRI');
+        if (pks.length === 1) pkCol = pks[0].name;
+      }
+
+      const pkInCols = Boolean(pkCol && currentColumns && currentColumns.some(c => (c.name || '').toLowerCase() === pkCol.toLowerCase()));
+      const canMutate = isTableViewer || Boolean(tableName && pkCol && pkInCols);
+
+      return {
+        isTableViewer,
+        tableName,
+        dbName,
+        tableMeta,
+        pkCol,
+        pkInCols,
+        canMutate
+      };
+    }
+
     // ponytail: Grid toolbar mode-switching between Table Viewer and Query Result modes
     function syncGridToolbarMode() {
       const activeTab = tabs.find(t => t.id === activeTabId);
       const isTableViewer = Boolean(activeTab && activeTab.isTableViewer);
+      const meta = resolveGridTableMeta();
+      const canMutate = isTableViewer || meta.canMutate;
 
       const btnAddRow = document.getElementById('btn-grid-add-row');
       const btnMockData = document.getElementById('btn-mock-data');
@@ -18813,10 +18916,10 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const gridResultStats = document.getElementById('grid-result-stats');
       const gridLimitBadge = document.getElementById('grid-limit-badge');
 
-      if (btnAddRow) btnAddRow.classList.toggle('hidden', !isTableViewer);
+      if (btnAddRow) btnAddRow.classList.toggle('hidden', !canMutate);
       if (btnMockData) btnMockData.classList.toggle('hidden', !isTableViewer);
       if (btnImportCSV) btnImportCSV.classList.toggle('hidden', !isTableViewer);
-      if (editModeContainer) editModeContainer.classList.toggle('hidden', !isTableViewer);
+      if (editModeContainer) editModeContainer.classList.toggle('hidden', !canMutate);
       if (tableDumpBtn) tableDumpBtn.classList.toggle('hidden', !isTableViewer);
       if (gridResultStats) gridResultStats.classList.toggle('hidden', isTableViewer);
       if (gridLimitBadge) gridLimitBadge.classList.toggle('hidden', isTableViewer);
@@ -19992,6 +20095,14 @@ Please analyze what is causing this query to be slow and suggest necessary query
       if (!tableName && activeTab && activeTab.tableName) {
         tableName = activeTab.tableName;
       }
+      if (!tableName && activeTab && !activeTab.isTableViewer) {
+        const sql = activeTab.sql || getEditorSQL();
+        const parsed = extractSingleTableFromSQL(sql);
+        if (parsed && parsed.table) {
+          tableName = parsed.table;
+          if (parsed.database) databaseName = parsed.database;
+        }
+      }
       activeGridTable = tableName;
       activeGridDB = databaseName || (activeTab && activeTab.database) || (schemaCatalogCache && schemaCatalogCache.database_name) || '';
 
@@ -19999,7 +20110,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const targetCatalog = (activeGridDB && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeGridDB.toLowerCase()]) || (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
       const tableMeta = (targetCatalog?.tables || []).find(t => (t.name || '').toLowerCase() === (tableName || '').toLowerCase());
       if (!pkCol && tableMeta && Array.isArray(tableMeta.columns)) {
-        const pks = tableMeta.columns.filter(c => c.is_primary_key);
+        const pks = tableMeta.columns.filter(c => c.is_primary_key || c.key === 'PRI');
         if (pks.length === 1) pkCol = pks[0].name;
       }
 
@@ -20032,7 +20143,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
         table.style.minWidth = '';
       }
 
-      const hasCheckbox = Boolean(activeTab && activeTab.isTableViewer);
+      const isTableViewer = Boolean(activeTab && activeTab.isTableViewer);
+      const pkInCols = Boolean(pkCol && cols && cols.some(c => (c.name || '').toLowerCase() === pkCol.toLowerCase()));
+      const hasCheckbox = isTableViewer || Boolean(tableName && pkCol && pkInCols);
 
       // Render Headers (Row 1: Names & Sort, Row 2: Subheader Filters)
       let headerRow1 = '<tr>';
@@ -21362,6 +21475,15 @@ Please analyze what is causing this query to be slow and suggest necessary query
         showNativeAlert('Session is in READ-ONLY mode. Unlock first.', 'Read-Only Mode');
         return;
       }
+      const meta = resolveGridTableMeta();
+      if (!meta.canMutate) {
+        showNativeAlert('Adding draft rows is only available for single-table queries containing a Primary Key.', 'Add Row');
+        return;
+      }
+      if (meta.tableName) activeGridTable = meta.tableName;
+      if (meta.dbName) activeGridDB = meta.dbName;
+      if (meta.pkCol) activeGridPKCol = meta.pkCol;
+
       if (!activeGridTable) {
         showNativeAlert('Please select a table to add records.', 'Add Row');
         return;
@@ -21369,14 +21491,15 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const draft = { data: {} };
       stagedDraftRows.unshift(draft);
       updateStagedEditsUI();
-      renderGridResults(currentColumns, currentResults, activeGridPKCol, activeGridTable);
+      renderGridResults(currentColumns, currentResults, meta.pkCol || activeGridPKCol, meta.tableName || activeGridTable, meta.dbName || activeGridDB);
     }
 
     function removeGridDraftRow(dIdx) {
       if (dIdx >= 0 && dIdx < stagedDraftRows.length) {
         stagedDraftRows.splice(dIdx, 1);
         updateStagedEditsUI();
-        renderGridResults(currentColumns, currentResults, activeGridPKCol, activeGridTable);
+        const meta = resolveGridTableMeta();
+        renderGridResults(currentColumns, currentResults, meta.pkCol || activeGridPKCol, meta.tableName || activeGridTable, meta.dbName || activeGridDB);
       }
     }
 
@@ -21433,41 +21556,37 @@ Please analyze what is causing this query to be slow and suggest necessary query
         showNativeAlert('Session is in READ-ONLY mode. Unlock first.', 'Read-Only Mode');
         return;
       }
-      if (!activeGridTable) {
-        const activeTab = tabs.find(t => t.id === activeTabId);
-        activeGridTable = (activeTab && activeTab.tableName) || '';
-        if (!activeGridTable) {
-          const sql = (activeTab && activeTab.sql) || getEditorSQL();
-          const parsed = extractSingleTableFromSQL(sql);
-          if (parsed && parsed.table) {
-            activeGridTable = parsed.table;
-            if (parsed.database) activeGridDB = parsed.database;
-          }
-        }
+      const meta = resolveGridTableMeta();
+      if (!meta.canMutate) {
+        showNativeAlert('Deletion is only available for single-table queries containing a Primary Key.', 'Delete Blocked');
+        return;
       }
+      if (meta.tableName) activeGridTable = meta.tableName;
+      if (meta.dbName) activeGridDB = meta.dbName;
+      if (meta.pkCol) activeGridPKCol = meta.pkCol;
+
       if (!activeGridTable) return;
 
-      if (!activeGridPKCol && activeGridTable) {
-        const activeTab = tabs.find(t => t.id === activeTabId);
-        const targetCatalog = (activeGridDB && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeGridDB.toLowerCase()]) || (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
-        const tableMeta = (targetCatalog?.tables || []).find(t => (t.name || '').toLowerCase() === activeGridTable.toLowerCase());
-        if (tableMeta && Array.isArray(tableMeta.columns)) {
-          const pks = tableMeta.columns.filter(c => c.is_primary_key);
-          if (pks.length === 1) activeGridPKCol = pks[0].name;
-        }
-      }
-
-      const count = selectedRowIndices.size;
+      const targetIndices = getTargetGridRowIndices();
+      const count = targetIndices.length;
       if (count === 0) return;
 
       const pkIdx = activeGridPKCol ? currentColumns.findIndex(c => (c.name || '').toLowerCase() === activeGridPKCol.toLowerCase()) : -1;
+      if (!meta.isTableViewer && pkIdx === -1) {
+        showNativeAlert('Cannot delete rows: The Primary Key column must be included in your query results.', 'Delete Blocked');
+        return;
+      }
 
       // In Production, require typing challenge
+      const confirmMsg = count > 1
+        ? `Are you sure you want to permanently delete ${count} selected rows from "${activeGridTable}"?`
+        : `Are you sure you want to permanently delete row #${targetIndices[0] + 1} from "${activeGridTable}"?`;
+
       if (activeConnection && activeConnection.environment === 'Production') {
         const ok = await showNativeConfirm(`[PRODUCTION SAFETY GUARD] Confirm permanent deletion of ${count} row(s) from table "${activeGridTable}"?`, 'Production Delete Warning');
         if (!ok) return;
       } else {
-        const ok = await showNativeConfirm(`Are you sure you want to permanently delete ${count} selected row(s) from "${activeGridTable}"?`, 'Delete Rows');
+        const ok = await showNativeConfirm(confirmMsg, 'Delete Rows');
         if (!ok) return;
       }
 
@@ -21481,9 +21600,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
       if (pkIdx !== -1) {
         deletePayload.pk_column = activeGridPKCol;
-        deletePayload.pk_values = Array.from(selectedRowIndices).map(idx => currentResults[idx][pkIdx]);
+        deletePayload.pk_values = targetIndices.map(idx => currentResults[idx][pkIdx]);
       } else {
-        deletePayload.row_criterias = Array.from(selectedRowIndices).map(idx => {
+        deletePayload.row_criterias = targetIndices.map(idx => {
           const rc = {};
           currentColumns.forEach((c, cIdx) => {
             rc[c.name] = currentResults[idx][cIdx];
@@ -21499,7 +21618,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
           body: JSON.stringify(deletePayload)
         });
         if (res.ok) {
-          selectedRowIndices.clear();
+          targetIndices.forEach(idx => selectedRowIndices.delete(idx));
           updateSelectedRowsUI();
           showNativeAlert(`✅ Successfully deleted ${count} row(s)!`, 'Rows Deleted');
           if (activeTab && activeTab.isTableViewer) {
@@ -21699,13 +21818,6 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
       if (td && cIdx >= 0) {
         selectGridCell(td, rIdx, cIdx);
-      } else if (!selectedRowIndices.has(rIdx)) {
-        selectedRowIndices.clear();
-        selectedRowIndices.add(rIdx);
-        document.querySelectorAll('.grid-row-checkbox').forEach(cb => {
-          cb.checked = parseInt(cb.dataset.row, 10) === rIdx;
-        });
-        updateSelectedRowsUI();
       }
 
       const menu = document.getElementById('grid-context-menu');
@@ -21713,9 +21825,56 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
       const activeTab = tabs.find(t => t.id === activeTabId);
       const isTableViewer = Boolean(activeTab && activeTab.isTableViewer);
+      const gridMeta = resolveGridTableMeta();
+      const canMutate = gridMeta.canMutate;
+
       const ctxMutations = document.getElementById('grid-ctx-table-mutations');
       if (ctxMutations) {
-        ctxMutations.classList.toggle('hidden', !isTableViewer);
+        ctxMutations.classList.remove('hidden');
+        const mutButtons = [
+          document.getElementById('grid-ctx-btn-dup-nokey'),
+          document.getElementById('grid-ctx-btn-dup-key'),
+          document.getElementById('grid-ctx-btn-add-draft'),
+          document.getElementById('grid-ctx-btn-delete-row')
+        ];
+        mutButtons.forEach(btn => {
+          if (!btn) return;
+          btn.disabled = !canMutate;
+          if (canMutate) {
+            btn.classList.remove('opacity-40', 'cursor-not-allowed');
+            if (typeof btn.removeAttribute === 'function') btn.removeAttribute('title');
+            btn.title = '';
+          } else {
+            btn.classList.add('opacity-40', 'cursor-not-allowed');
+            const titleMsg = 'Mutations are only available for single-table queries containing a Primary Key';
+            if (typeof btn.setAttribute === 'function') btn.setAttribute('title', titleMsg);
+            btn.title = titleMsg;
+          }
+        });
+      }
+
+      const btnCopyCell = document.getElementById('grid-ctx-btn-copy-cell');
+      if (btnCopyCell) {
+        btnCopyCell.classList.toggle('hidden', cIdx === null || cIdx === undefined || cIdx < 0);
+      }
+
+      const isBatch = selectedRowIndices && selectedRowIndices.size > 0 && selectedRowIndices.has(rIdx);
+      const selCount = isBatch ? selectedRowIndices.size : 1;
+      const delLabel = document.getElementById('grid-ctx-delete-row-label');
+      if (delLabel) {
+        delLabel.textContent = selCount > 1 ? `Delete ${selCount} Selected Rows` : 'Delete Selected Row';
+      }
+      const copyTsvLabel = document.getElementById('grid-ctx-copy-tsv-label');
+      if (copyTsvLabel) {
+        copyTsvLabel.textContent = selCount > 1 ? `Copy ${selCount} Rows as TSV` : 'Copy Row as TSV';
+      }
+      const copyJsonLabel = document.getElementById('grid-ctx-copy-json-label');
+      if (copyJsonLabel) {
+        copyJsonLabel.textContent = selCount > 1 ? `Copy ${selCount} Rows as JSON` : 'Copy Row as JSON';
+      }
+      const copySqlLabel = document.getElementById('grid-ctx-copy-sql-label');
+      if (copySqlLabel) {
+        copySqlLabel.textContent = selCount > 1 ? `Copy ${selCount} Rows as SQL INSERT` : 'Copy Row as SQL INSERT';
       }
 
       const filterSec = document.getElementById('grid-ctx-filter-section');
@@ -21814,25 +21973,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
           }
         }
 
-        let canEditCell = isTableViewer;
-        if (!canEditCell) {
-          let tName = activeGridTable || (activeTab && activeTab.tableName) || '';
-          if (!tName) {
-            const sql = (activeTab && activeTab.sql) || getEditorSQL();
-            const parsed = extractSingleTableFromSQL(sql);
-            if (parsed && parsed.table) tName = parsed.table;
-          }
-          let pkName = activeGridPKCol;
-          if (!pkName && tName) {
-            const tCatalog = (activeGridDB && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeGridDB.toLowerCase()]) || (activeTab && activeTab.database && typeof multiDBCatalogCache === 'object' && multiDBCatalogCache[activeTab.database.toLowerCase()]) || schemaCatalogCache;
-            const tMeta = (tCatalog?.tables || []).find(t => (t.name || '').toLowerCase() === tName.toLowerCase());
-            if (tMeta && Array.isArray(tMeta.columns)) {
-              const pks = tMeta.columns.filter(c => c.is_primary_key);
-              if (pks.length === 1) pkName = pks[0].name;
-            }
-          }
-          canEditCell = Boolean(tName) && Boolean(pkName);
-        }
+        let canEditCell = canMutate;
 
         if (insertSec) insertSec.classList.toggle('hidden', !canEditCell);
         if (colLabel) colLabel.textContent = `(${col.name})`;
@@ -22570,7 +22711,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
     // --- Clipboard Formats: TSV & Markdown Table ---
     function getGridExportRows(selectedOnly = null) {
-      if (selectedOnly === true || (selectedOnly === null && selectedRowIndices.size > 0)) {
+      if (selectedOnly === true && selectedRowIndices && selectedRowIndices.size > 0) {
         return Array.from(selectedRowIndices).map(idx => currentResults[idx]);
       }
       return currentResults || [];
@@ -22593,7 +22734,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
       const ok = await copyTextToClipboard(tsv);
       if (ok) {
-        showNativeAlert(`✅ Copied ${rows.length} row(s) to clipboard as TSV!`, 'Copied TSV');
+        showNativeAlert(`✅ Copied entire grid (${rows.length} rows) to clipboard as TSV!`, 'Copied TSV');
       } else {
         showNativeAlert('Failed to copy to clipboard in this browser context.', 'Clipboard Error');
       }
@@ -22617,10 +22758,196 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
       const ok = await copyTextToClipboard(md);
       if (ok) {
-        showNativeAlert(`✅ Copied ${rows.length} row(s) to clipboard as Markdown!`, 'Copied Markdown');
+        showNativeAlert(`✅ Copied entire grid (${rows.length} rows) to clipboard as Markdown!`, 'Copied Markdown');
       } else {
         showNativeAlert('Failed to copy to clipboard in this browser context.', 'Clipboard Error');
       }
+    }
+
+    function getTargetGridRowIndices() {
+      if (selectedRowIndices && selectedRowIndices.size > 0) {
+        if (activeGridRightClickedRow === null || activeGridRightClickedRow === undefined || selectedRowIndices.has(activeGridRightClickedRow)) {
+          return Array.from(selectedRowIndices).sort((a, b) => a - b);
+        }
+      }
+      if (activeGridRightClickedRow !== null && activeGridRightClickedRow !== undefined && activeGridRightClickedRow >= 0) {
+        return [activeGridRightClickedRow];
+      }
+      if (selectedRowIndices && selectedRowIndices.size > 0) {
+        return Array.from(selectedRowIndices).sort((a, b) => a - b);
+      }
+      return [];
+    }
+
+    async function copyCellValueFromGrid() {
+      const rIdx = activeGridRightClickedRow ?? activeGridSelectedRow;
+      const cIdx = activeGridRightClickedCol ?? activeGridSelectedCol;
+      if (rIdx === null || rIdx === undefined || cIdx === null || cIdx === undefined || rIdx < 0 || cIdx < 0) {
+        showToast('No cell selected to copy', 'warning');
+        return;
+      }
+      const row = currentResults && currentResults[rIdx];
+      if (!row) return;
+
+      const meta = resolveGridTableMeta();
+      const tableName = meta.tableName || activeGridTable || '';
+      const stagedKey = stagedKeyFor(tableName, rIdx, cIdx);
+      const staged = (typeof stagedEdits !== 'undefined' && stagedEdits) ? stagedEdits.get(stagedKey) : null;
+      const val = staged ? staged.newVal : row[cIdx];
+
+      const textToCopy = val === null || val === undefined ? '' : (typeof val === 'object' ? JSON.stringify(val) : String(val));
+      const ok = await copyTextToClipboard(textToCopy);
+      if (ok) {
+        const preview = textToCopy === '' ? '(empty)' : (textToCopy.length > 35 ? textToCopy.slice(0, 32) + '...' : textToCopy);
+        showToast(`Copied cell: ${preview}`);
+      } else {
+        showNativeAlert('Failed to copy cell value to clipboard.', 'Clipboard Error');
+      }
+    }
+
+    async function copySelectedRowsAsTSV() {
+      const rowIndices = getTargetGridRowIndices();
+      if (rowIndices.length === 0 || !currentColumns || currentColumns.length === 0) {
+        showToast('No rows selected to copy', 'warning');
+        return;
+      }
+      const meta = resolveGridTableMeta();
+      const tableName = meta.tableName || activeGridTable || '';
+      const visibleCols = currentColumns.filter(c => !isColumnHidden(c.name, tableName));
+
+      const lines = rowIndices.map(rIdx => {
+        const row = currentResults[rIdx];
+        if (!row) return null;
+        return visibleCols.map(c => {
+          const cIdx = currentColumns.findIndex(col => col.name === c.name);
+          if (cIdx === -1) return '';
+          const stagedKey = stagedKeyFor(tableName, rIdx, cIdx);
+          const staged = (typeof stagedEdits !== 'undefined' && stagedEdits) ? stagedEdits.get(stagedKey) : null;
+          const v = staged ? staged.newVal : row[cIdx];
+          if (v === null || v === undefined) return '';
+          return String(v).replace(/\t/g, ' ').replace(/[\r\n]+/g, ' ');
+        }).join('\t');
+      }).filter(l => l !== null);
+
+      const ok = await copyTextToClipboard(lines.join('\n'));
+      if (ok) {
+        showToast(`Copied ${lines.length} row(s) as TSV`);
+      } else {
+        showNativeAlert('Failed to copy to clipboard.', 'Clipboard Error');
+      }
+    }
+
+    async function copySelectedRowsAsJSON() {
+      const rowIndices = getTargetGridRowIndices();
+      if (rowIndices.length === 0 || !currentColumns || currentColumns.length === 0) {
+        showToast('No rows selected to copy', 'warning');
+        return;
+      }
+      const meta = resolveGridTableMeta();
+      const tableName = meta.tableName || activeGridTable || '';
+      const visibleCols = currentColumns.filter(c => !isColumnHidden(c.name, tableName));
+
+      const records = rowIndices.map(rIdx => {
+        const row = currentResults[rIdx];
+        if (!row) return null;
+        const obj = {};
+        visibleCols.forEach(c => {
+          const cIdx = currentColumns.findIndex(col => col.name === c.name);
+          if (cIdx === -1) return;
+          const stagedKey = stagedKeyFor(tableName, rIdx, cIdx);
+          const staged = (typeof stagedEdits !== 'undefined' && stagedEdits) ? stagedEdits.get(stagedKey) : null;
+          obj[c.name] = staged ? staged.newVal : row[cIdx];
+        });
+        return obj;
+      }).filter(Boolean);
+
+      const payload = records.length === 1 ? records[0] : records;
+      const ok = await copyTextToClipboard(JSON.stringify(payload, null, 2));
+      if (ok) {
+        showToast(`Copied ${records.length} row(s) as JSON`);
+      } else {
+        showNativeAlert('Failed to copy to clipboard.', 'Clipboard Error');
+      }
+    }
+
+    async function copySelectedRowsAsSQL() {
+      const rowIndices = getTargetGridRowIndices();
+      if (rowIndices.length === 0 || !currentColumns || currentColumns.length === 0) {
+        showToast('No rows selected to copy', 'warning');
+        return;
+      }
+      const meta = resolveGridTableMeta();
+      const tableName = meta.tableName || activeGridTable || 'table_name';
+      const visibleCols = currentColumns.filter(c => !isColumnHidden(c.name, tableName));
+      const colList = visibleCols.map(c => quoteIdentifierForDriver(c.name)).join(', ');
+      const quotedTable = quoteIdentifierForDriver(tableName);
+
+      const sqlStatements = rowIndices.map(rIdx => {
+        const row = currentResults[rIdx];
+        if (!row) return null;
+        const vals = visibleCols.map(c => {
+          const cIdx = currentColumns.findIndex(col => col.name === c.name);
+          if (cIdx === -1) return 'NULL';
+          const stagedKey = stagedKeyFor(tableName, rIdx, cIdx);
+          const staged = (typeof stagedEdits !== 'undefined' && stagedEdits) ? stagedEdits.get(stagedKey) : null;
+          const v = staged ? staged.newVal : row[cIdx];
+          if (v === null || v === undefined) return 'NULL';
+          if (typeof v === 'number') return String(v);
+          if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
+          return `'${String(v).replace(/'/g, "''")}'`;
+        }).join(', ');
+        return `INSERT INTO ${quotedTable} (${colList}) VALUES (${vals});`;
+      }).filter(Boolean);
+
+      const ok = await copyTextToClipboard(sqlStatements.join('\n'));
+      if (ok) {
+        showToast(`Copied ${sqlStatements.length} row(s) as SQL INSERT`);
+      } else {
+        showNativeAlert('Failed to copy to clipboard.', 'Clipboard Error');
+      }
+    }
+
+    function duplicateGridRow(withoutKey = true) {
+      if (activeSession && activeSession.read_only) {
+        showNativeAlert('Session is in READ-ONLY mode. Unlock first.', 'Read-Only Mode');
+        return;
+      }
+      const meta = resolveGridTableMeta();
+      if (!meta.canMutate) {
+        showNativeAlert('Duplication is only available for single-table queries containing a Primary Key.', 'Duplicate Row');
+        return;
+      }
+      const targetIndices = getTargetGridRowIndices();
+      if (targetIndices.length === 0) {
+        showToast('No row selected to duplicate', 'warning');
+        return;
+      }
+
+      const pkColName = (meta.pkCol || activeGridPKCol || '').toLowerCase();
+      const newDrafts = targetIndices.map(idx => {
+        const row = currentResults && currentResults[idx];
+        if (!row) return null;
+        const draftData = {};
+        currentColumns.forEach((col, cIdx) => {
+          const isPK = pkColName && (col.name || '').toLowerCase() === pkColName;
+          if (withoutKey && isPK) {
+            // Omit PK value so PostgreSQL / MySQL / SQLite auto-generates key via sequence or auto_increment
+          } else {
+            const stagedKey = stagedKeyFor(meta.tableName || activeGridTable || '', idx, cIdx);
+            const staged = (typeof stagedEdits !== 'undefined' && stagedEdits) ? stagedEdits.get(stagedKey) : null;
+            const val = staged ? staged.newVal : row[cIdx];
+            if (val !== null && val !== undefined) {
+              draftData[col.name] = val;
+            }
+          }
+        });
+        return { data: draftData };
+      }).filter(Boolean);
+
+      stagedDraftRows.unshift(...newDrafts);
+      updateStagedEditsUI();
+      renderGridResults(currentColumns, currentResults, meta.pkCol || activeGridPKCol, meta.tableName || activeGridTable, meta.dbName || activeGridDB);
+      showToast(`${targetIndices.length} row(s) duplicated as draft (${withoutKey ? 'without key' : 'with key'})`);
     }
 
     // --- Database-Level & Table-Level SQL Dump Export & Smart Seed ---
@@ -23597,13 +23924,23 @@ Please analyze what is causing this query to be slow and suggest necessary query
         while (stagedDraftRows.length > 0) {
           const draft = stagedDraftRows[0];
           try {
+            const cleanData = {};
+            const pkLower = (activeGridPKCol || '').toLowerCase();
+            for (const [colName, val] of Object.entries(draft.data || {})) {
+              if (val !== undefined && val !== null) {
+                if (val === '' && pkLower && colName.toLowerCase() === pkLower) {
+                  continue;
+                }
+                cleanData[colName] = val;
+              }
+            }
             const res = await apiFetch(`/api/session/${activeConnection.id}/insert-row`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 database: dbName,
                 table: activeGridTable,
-                data: draft.data
+                data: cleanData
               })
             });
             if (!res.ok) {
@@ -27822,11 +28159,13 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
     // ponytail: unified lightweight toast notification system supporting dialog top-layers and multi-severity styling
     function showToast(message, type = 'info') {
-      if (!message) return;
-      const activeDialog = document.querySelector('dialog[open]');
+      if (!message || typeof document === 'undefined') return;
+      const activeDialog = typeof document.querySelector === 'function' ? document.querySelector('dialog[open]') : null;
       const host = activeDialog || document.body;
+      if (!host || typeof host.querySelector !== 'function' || typeof host.appendChild !== 'function') return;
       let container = host.querySelector('.app-toast-container');
       if (!container) {
+        if (typeof document.createElement !== 'function') return;
         container = document.createElement('div');
         container.className = 'app-toast-container fixed bottom-8 right-6 z-[9999] flex flex-col space-y-2 max-w-sm pointer-events-auto';
         host.appendChild(container);
