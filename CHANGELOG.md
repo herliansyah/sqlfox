@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.14.0] - 2026-11-04
+
 ### Added
 - **Query Result Row Mutations & SQL Export Context Actions (`web/dist/index.html`, `web/embed_test.go`, `scripts/test-query-grid-mutations-and-sql-copy.mjs`)**: Enabled row deletions, draft insertions, and row duplications directly within query result grids for single-table queries with a resolved primary key. Added context menu actions to copy cell values or selected rows as TSV, JSON, and driver-formatted SQL INSERT statements (#129).
 
