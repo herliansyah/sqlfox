@@ -1,5 +1,13 @@
 # SqlFox Visual Showcase & Feature Gallery
 
+<div align="center">
+
+[ 🇬🇧 README (EN) ](../README.md) &nbsp;•&nbsp; [ 🇮🇩 README (ID) ](../README_ID.md) &nbsp;•&nbsp; [ 📖 User Guide (EN) ](USER_GUIDE.md) &nbsp;•&nbsp; [ 📖 Panduan Pengguna (ID) ](USER_GUIDE_ID.md)
+
+</div>
+
+---
+
 Welcome to the comprehensive visual tour of **SqlFox**. All captures below are taken in high-resolution (**2x Retina / HiDPI**) running on an enterprise-scale dataset (**10,000+ orders, 25,000 order items, 2,500 customers, products, and system audit logs**).
 
 ---

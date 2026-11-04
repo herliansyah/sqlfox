@@ -1119,3 +1119,26 @@ _Avoid_: Upload status, git state
 **Notes Bundle**:
 A portable, unencrypted ZIP archive containing human-readable Markdown notes and SQL snippets for offline reading and cross-tool export when GitHub synchronization is not configured.
 _Avoid_: Note dump, export zip
+
+## Desktop Integration & Windowing
+
+**Standalone Native App Mode**:
+The desktop execution model utilizing Chromium/Edge `--app=http://...` argument to run SqlFox in a dedicated, frameless window with native OS taskbar grouping without requiring heavy Electron runtimes.
+_Avoid_: Electron wrapper, webview app, embedded browser
+
+**Desktop Launcher Integration**:
+The OS desktop registration workflow via `sqlfox desktop install` that generates Freedesktop `.desktop` files and 512x512 high-resolution application icons in user configuration directories.
+_Avoid_: Desktop installer, shortcut creator, app bundler
+
+**Query Result Row Mutation**:
+The inline editing capability allowing direct cell modifications, draft insertions, and row deletions on arbitrary `SELECT` query results that resolve to a single table with primary key columns present.
+_Avoid_: Ad-hoc SQL update, editable grid hack
+
+**Submenu Collision Clamping**:
+The responsive context menu layout behavior that groups grid actions into hierarchical submenus and automatically adjusts position away from viewport boundaries to prevent screen overflow.
+_Avoid_: Overflow menu, viewport wrap, auto-flip menu
+
+**Multi-Result Tab Bar**:
+The sub-navigation bar (`#tab-results-bar`) rendering individual result tabs for each executed statement in a multi-query batch with distinct row counts and execution timings.
+_Avoid_: Multi-grid scroll, compound output, batch result window
+

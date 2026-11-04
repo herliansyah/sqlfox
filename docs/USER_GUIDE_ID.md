@@ -20,6 +20,8 @@
    - [Dukungan Mesin Database & Driver](#dukungan-mesin-database--driver)
 2. [Instalasi & Mode Menjalankan Aplikasi](#2-instalasi--mode-menjalankan-aplikasi)
    - [File Binary Standalone (Linux, macOS, Windows)](#file-binary-standalone-linux-macos-windows)
+   - [Mode Jendela Desktop Mandiri & Integrasi Launcher OS](#mode-jendela-desktop-mandiri--integrasi-launcher-os)
+   - [Deployment via Docker & Docker Compose](#deployment-via-docker--docker-compose)
    - [Instalasi via Go Tools](#instalasi-via-go-tools)
    - [Kompilasi Manual dari Source Code](#kompilasi-manual-dari-source-code)
    - [Opsi CLI & Fitur Port Hunting](#opsi-cli--fitur-port-hunting)
@@ -46,6 +48,9 @@
    - [Menu Overflow Tab Bar & Guard Penutupan Draf](#menu-overflow-tab-bar--guard-penutupan-draf)
    - [Isolasi Database Tab & DDL Target Affirmation Guardrails](#isolasi-database-tab--ddl-target-affirmation-guardrails)
    - [Table Designer Relasional & Pembangun Batasan (Constraint Builder)](#table-designer-relasional--pembangun-batasan-constraint-builder)
+   - [Mutasi Baris Langsung pada Hasil Kueri & Tindakan Ekspor Konteks](#mutasi-baris-langsung-pada-hasil-kueri--tindakan-ekspor-konteks)
+   - [Eksekusi Sekuensial Multi-Statement & Tab Multi-Hasil](#eksekusi-sekuensial-multi-statement--tab-multi-hasil)
+   - [Desainer Visual CRUD untuk Views, Routines & Scheduled Events](#desainer-visual-crud-untuk-views-routines--scheduled-events)
 5. [Playbook Operasional DBA & DevOps](#5-playbook-operasional-dba--devops)
    - [AST Safety Guard & Challenge Modal (Pencegah Query Rusak)](#ast-safety-guard--challenge-modal-pencegah-query-rusak)
    - [Estimasi Mutasi Pra-Eksekusi & Tiered Safety Guard](#estimasi-mutasi-pra-eksekusi--tiered-safety-guard)
@@ -62,8 +67,9 @@
    - [Cross-Connection Data Transfer & Keyset Row Sync](#cross-connection-data-transfer--keyset-row-sync)
    - [Deduplikasi Singleflight Koneksi & Lazy Schema Inspection](#deduplikasi-singleflight-koneksi--lazy-schema-inspection)
    - [Pengerasan Keamanan Sistemik & Ketahanan Multi-Engine](#pengerasan-keamanan-sistemik--ketahanan-multi-engine)
-   - [Headless CLI Suite (`run`, `transfer`, `advise`)](#headless-cli-suite-run-transfer-advise)
+   - [Headless CLI Suite (`query`, `transfer`, `job`, `advise`)](#headless-cli-suite-query-transfer-job-advise)
    - [Task Runner Terjadwal Deklaratif Tanpa Daemon](#task-runner-terjadwal-deklaratif-tanpa-daemon)
+   - [Diagnostik Penyimpanan & Kesehatan Database](#diagnostik-penyimpanan--kesehatan-database)
    - [Pengujian Plafon Memori & Profiling `pprof`](#pengujian-plafon-memori--profiling-pprof)
    - [In-App Activity Console & Live Diagnostic Stream](#in-app-activity-console--live-diagnostic-stream)
 6. [Referensi Pintasan Keyboard](#6-referensi-pintasan-keyboard)
@@ -96,6 +102,13 @@ SqlFox dibangun secara khusus bagi para rekayasawan perangkat lunak dan tim DBA 
 | **PostgreSQL** | 9.6 s/d 16+ | Driver native `pgx/v5` dengan pembatalan query `pg_cancel_backend` |
 | **SQLite** | 3.x | Engine murni Go tanpa CGO `modernc.org/sqlite` (lokal) |
 
+<p align="center">
+  <img src="assets/screenshots/01_hero_workspace.png" alt="SqlFox Workspace Modern & Virtual Data Grid" width="95%" />
+</p>
+<p align="center">
+  <i>Ruang kerja SqlFox: Editor SQL CodeMirror, eksekusi multi-tab, dan virtual data grid berkinerja tinggi.</i>
+</p>
+
 ---
 
 ## 2. Instalasi & Mode Menjalankan Aplikasi
@@ -105,15 +118,39 @@ Unduh arsip rilis terbaru di halaman resmi [GitHub Releases](https://github.com/
 
 ```bash
 # Linux amd64 (Download & ekstrak sekali jalan)
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.10.13/sqlfox-v0.10.13-linux-amd64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.15.0/sqlfox-v0.15.0-linux-amd64.tar.gz | tar -xz
 ./sqlfox
 
 # macOS Apple Silicon (ARM64 M1/M2/M3/M4)
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.10.13/sqlfox-v0.10.13-darwin-arm64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.15.0/sqlfox-v0.15.0-darwin-arm64.tar.gz | tar -xz
 ./sqlfox
 ```
 
 Bagi pengguna Windows, unduh file arsip `.zip`, ekstrak berkas `sqlfox.exe`, lalu klik ganda untuk menjalankannya.
+
+### Mode Jendela Desktop Mandiri & Integrasi Launcher OS
+SqlFox menyediakan antarmuka desktop native tanpa beban aplikasi Electron:
+- **Mode `--app` Chromium / Edge**: Saat diluncurkan, SqlFox otomatis mendeteksi Chrome, Chromium, atau Edge yang terpasang di sistem dan membuka jendela desktop mandiri tanpa bingkai browser standar.
+- **Kontrol Mode Jendela via CLI**:
+  - `sqlfox` &rarr; Membuka jendela desktop mandiri secara default.
+  - `sqlfox -browser` &rarr; Memaksa pembukaan tab di browser reguler.
+  - `sqlfox -no-browser` &rarr; Menjalankan daemon background tanpa membuka jendela apapun.
+- **Manajemen Menu Launcher Desktop Linux**:
+  ```bash
+  # Daftarkan SqlFox ke menu aplikasi desktop (~/.local/share/applications/sqlfox.desktop dan ikon resolusi tinggi)
+  ./sqlfox desktop install
+
+  # Periksa status launcher desktop
+  ./sqlfox desktop status
+
+  # Hapus entri launcher desktop
+  ./sqlfox desktop uninstall
+  ```
+- **Penghentian Proses Background yang Bersih**:
+  ```bash
+  # Hentikan instance SqlFox background yang sedang berjalan
+  ./sqlfox stop
+  ```
 
 ### Deployment via Docker & Docker Compose
 SqlFox menyediakan image container multi-arsitektur resmi (`linux/amd64` dan `linux/arm64`) melalui GitHub Container Registry (GHCR):
@@ -361,6 +398,10 @@ SqlFox menyediakan fitur eksplorasi kisi data (*virtual grid*) tingkat lanjut ya
   - **Salin 1-Klik**: Salin seluruh data baris aktif sebagai format JSON yang rapi (`Copy JSON`) atau teks berpemisah tab (`Copy Text`).
   - **Pengeditan Terintegrasi**: Ubah nilai data secara langsung di dalam input atau textarea modal; perubahan ditandai dengan `● Modified` dan terhubung langsung ke pelacak transaksi `stagedEdits` serta bilah simpan (*Save Changes*).
 
+<p align="center">
+  <img src="assets/screenshots/15_vertical_record_inspector.png" alt="SqlFox Inspektur Baris Vertikal & Penampil JSON" width="90%" />
+</p>
+
 ### Bilah Paginasi Bawah Terpadu & Streaming NDJSON
 SqlFox menyatukan kendali navigasi data ke dalam bilah paginasi bawah yang rapi (*sticky bottom bar*) di bawah grid Query Editor maupun Table Viewer:
 - **Navigasi & Loncat Halaman Langsung**:
@@ -389,6 +430,10 @@ Buka melalui menu **📦 DB Tools &rarr; 🗺️ Visual ERD Canvas**:
 - **Fit Viewport**: Menyesuaikan skala dan memusatkan seluruh diagram skema dalam satu klik.
 - **Detail Kartu**: Menampilkan daftar nama kolom, tipe data, serta lencana Primary Key (`🔑`) dan Foreign Key (`🔗`).
 
+<p align="center">
+  <img src="assets/screenshots/11_visual_erd_canvas.png" alt="SqlFox Kanvas Visual ERD Interaktif" width="95%" />
+</p>
+
 ### BYOK AI Copilot & Automated Error Healer
 SqlFox dilengkapi asisten AI dengan arsitektur **Bring-Your-Own-Key (BYOK)**:
 - Mendukung provider terkemuka: **OpenAI**, **Anthropic Claude**, **Google Gemini**, **DeepSeek**, serta model lokal offline **Ollama** (`http://localhost:11434`).
@@ -396,6 +441,10 @@ SqlFox dilengkapi asisten AI dengan arsitektur **Bring-Your-Own-Key (BYOK)**:
 - **Eksekusi SQL 1-Klik**: Setiap blok kode SQL hasil generasi AI dilengkapi tombol `Insert & Run` dan `Replace in Editor`.
 - **Chat Session Forking**: Percakapan dapat dicabangkan (*fork*) menjadi alur baru kapan saja untuk mencoba variasi pertanyaan tanpa kehilangan riwayat lama.
 - **Automated Error Healer**: Jika query Anda mengalami kegagalan di editor, klik tombol **🩺 Heal Error**; AI akan menganalisis pesan galat dari database, membeberkan letak kesalahannya, dan menyajikan query perbaikan yang siap dijalankan.
+
+<p align="center">
+  <img src="assets/screenshots/16_ai_copilot_assistant.png" alt="SqlFox Asisten AI Copilot & Penyetel Kueri" width="95%" />
+</p>
 
 ### Unified Operational Notes Inbox & Pengingat Follow-up
 SqlFox menghadirkan sistem catatan operasional terpadu (*Operational Notes Inbox*) langsung di dalam aplikasi, menjembatani telemetri diagnostik database dengan dokumentasi runbook pengembang:
@@ -488,6 +537,32 @@ SqlFox menyediakan antarmuka Table Designer dan Create Table modern berkecepatan
 - **Engine Validasi Pra-Eksekusi Struktur Tabel**:
   - Mengevaluasi seluruh rancangan tabel secara real-time sebelum pembuatan DDL: mendeteksi nama kolom duplikat, nama kosong, opsi enum kosong, serta panjang tipe data yang tidak valid, menonaktifkan tombol eksekusi DDL hingga seluruh anomali terselesaikan.
 
+<p align="center">
+  <img src="assets/screenshots/12_visual_table_designer.png" alt="SqlFox Desainer Tabel Relasional" width="95%" />
+</p>
+
+### Mutasi Baris Langsung pada Hasil Kueri & Tindakan Ekspor Konteks
+SqlFox memungkinkan penyuntingan langsung gaya spreadsheet dan tindakan penyalinan data pada kueri `SELECT` arbitrer yang memetakan ke tabel tunggal dengan Primary Key:
+- **Penyuntingan Sel Langsung**: Klik ganda pada sel hasil kueri untuk melakukan modifikasi nilai in-place.
+- **Penyisipan Draf Baris**: Buat baris baru langsung di dalam grid hasil kueri melalui toolbar atau menu konteks.
+- **Duplikasi & Hapus Baris**: Gandakan baris terpilih atau tandai baris untuk dihapus dengan proteksi Safety Guard.
+- **Tindakan Ekspor Konteks**: Klik kanan baris terpilih untuk `Copy as TSV`, `Copy as JSON`, atau membuat pernyataan `INSERT INTO` sesuai dialek database.
+- **Pengelompokan Submenu & Penjepit Viewport**: Menu klik kanan dikelompokkan ke dalam submenu bertingkat dengan deteksi tepi viewport untuk mencegah menu terpotong batas layar.
+
+### Eksekusi Sekuensial Multi-Statement & Tab Multi-Hasil
+Untuk eksekusi skrip migrasi dan investigasi SQL panjang:
+- **Jalankan Semua Pernyataan**: Tekan `Ctrl+Alt+Enter` atau `F5` untuk mengeksekusi banyak pernyataan SQL secara berurutan.
+- **Sub-Tab Hasil Terisolasi (`#tab-results-bar`)**: Setiap output perintah SQL dirender pada sub-tab tersendiri lengkap dengan durasi waktu (ms) dan jumlah baris.
+- **Ketahanan Konkurensi SQLite**: Beroperasi pada mode WAL journal dengan timeout 5.000ms untuk mencegah lock contention.
+
+### Desainer Visual CRUD untuk Views, Routines & Scheduled Events
+Kelola objek logika database tanpa menulis DDL berulang:
+- **Dialog Desainer Visual Interaktif**: Editor visual khusus untuk Views, Triggers, Stored Procedures, Functions, dan Scheduled Events.
+- **Integrasi Editor CodeMirror**: Editor SQL bawaan dengan penyorotan sintaks dan tombol handoff **Open in Query Tab** 1-klik.
+- **Grid Parameter Dinamis**: Tambah, ubah, dan susun parameter input/output rutin secara visual.
+- **Pemilih Jadwal Event**: Atur interval eksekusi terjadwal (`EVERY 1 DAY`, `AT ...`) secara intuitif.
+- **Konfirmasi Pra-Eksekusi Dump Database**: Dialog pengaman sebelum menjalankan dump penuh, menampilkan peringatan ukuran data, I/O lock, dan opsi pilihan struktur (DDL) serta data.
+
 ---
 
 ## 5. Playbook Operasional DBA & DevOps
@@ -505,6 +580,10 @@ Sebelum sebuah query dikirimkan ke server basis data, mesin pengurai AST SqlFox 
 - **Sanitasi Komentar & String Literal**: Mengaburkan (*masking*) komentar baris/blok dan teks literal sebelum pengecekan regex, mencegah manipulasi kata kunci destruktif.
 - **Pra-Pemrosesan CTE**: Menanggalkan klausa awalan `WITH ... AS (...)` untuk memeriksa perintah inti DML/DDL di bawah pengawasan Safety Guard.
 - **Penguraian Komentar Tereksekusi MySQL**: Secara otomatis mengurai komentar tereksekusi MySQL (`/*! ... */` dan `/*!NNNNN ... */`) menjadi sintaks SQL polos yang dapat dievaluasi, menutup celah bypass keamanan.
+
+<p align="center">
+  <img src="assets/screenshots/02_safety_guard_destructive.png" alt="SqlFox Challenge Modal Proteksi Query Destruktif" width="90%" />
+</p>
 
 ### Estimasi Mutasi Pra-Eksekusi & Tiered Safety Guard
 Untuk mencegah kehancuran data massal akibat salah ketik klausa `WHERE`, SqlFox menerapkan estimasi baris deterministik pra-eksekusi (ADR 0057):
@@ -538,12 +617,20 @@ Dapat diakses melalui **⚡ Monitor &rarr; 🔒 Lock Contention & Blockers**:
     - **Kill Blocker** (Merah): Menghentikan seluruh koneksi pemblokir seketika untuk meredakan badai lock contention.
   - **Hierarki Sesi yang Terblokir**: Menampilkan rincian sesi downstream yang tertahan lengkap dengan durasi menunggu yang disorot merah/putih (`waiting 45s for lock`), nama user, dan teks query yang terhenti.
 
+<p align="center">
+  <img src="assets/screenshots/05_lock_contention_root_blocker.png" alt="SqlFox Triage Root Blocker Lock Contention" width="90%" />
+</p>
+
 ### Processlist Real-Time & Pembatalan Query Out-of-Band
 Dapat diakses melalui **⚡ Monitor &rarr; ⚡ Processlist**:
 - Menampilkan daftar seluruh thread server, durasi berjalan, host klien, dan status query aktif dalam format tabel yang disegarkan otomatis.
 - Opsi filter untuk menyembunyikan thread tidur (*Sleep*) agar DBA dapat berfokus pada thread yang sedang bekerja.
 - **Pembatalan Out-of-Band**: Tombol **Kill Query** mengirimkan perintah terminasi (`KILL QUERY <id>` pada MySQL atau `SELECT pg_cancel_backend(<pid>)` pada PostgreSQL) melalui koneksi kontrol terpisah, sehingga koneksi utama aplikasi tidak terputus.
 - **Modal Detail Proses**: Inspeksi teks lengkap SQL, user, host, database, state, waktu eksekusi, serta lock dependency dengan salin clipboard 1-klik (didukung fallback cerdas untuk protokol HTTP biasa tanpa SSL).
+
+<p align="center">
+  <img src="assets/screenshots/06_realtime_processlist.png" alt="SqlFox Processlist Real-Time" width="95%" />
+</p>
 
 ### Operasi Batch Processlist, Toolbar 2 Baris & Pemilih Visibilitas Kolom
 Saat terjadi lonjakan lock contention parah atau kebocoran ratusan koneksi menganggur (*idle sleep connections*), menghentikan query atau koneksi satu per satu menjadi tidak praktis. SqlFox menghadirkan manajemen thread tingkat enterprise:
@@ -584,6 +671,10 @@ Dapat diakses melalui **⚡ Monitor &rarr; 🌐 Cluster**:
 - **Pelacak Node Paling Lambat**: Memeriksa seluruh node rekan di dalam kluster secara otomatis untuk mengisolasi node mana yang mengalami kemacetan I/O atau beban berlebih.
 - **Matriks Tri-Metric**: Mengevaluasi latensi jaringan EVS, hambatan disk/InnoDB, dan kapasitas antrean thread *applier worker*.
 
+<p align="center">
+  <img src="assets/screenshots/04_cluster_replication_inspector.png" alt="SqlFox Inspektur Replikasi Cluster" width="95%" />
+</p>
+
 ### Statement Digest Historis & Post-Mortem Deadlock
 Dapat diakses melalui **⚡ Monitor &rarr; ⚡ Processlist** (Segmented Pill Switcher):
 - **Live Threads**: Memantau dan menghentikan query yang sedang berjalan secara out-of-band.
@@ -610,12 +701,20 @@ Dapat diakses melalui **⚡ Monitor &rarr; 📈 Recorder**:
 - **Korelasi Query Lonjakan**: Klik titik lonjakan grafik (*spike*) pada scrubber linimasa untuk melihat daftar query persis yang sedang berjalan pada detik tersebut.
 - **Pengaman Auto-Stop 10 Menit**: Perekam otomatis berhenti setelah 10 menit agar tidak membebani server database atau memenuhi ruang penyimpanan.
 
+<p align="center">
+  <img src="assets/screenshots/03_flight_recorder_telemetry.png" alt="SqlFox Telemetri Flight Recorder" width="95%" />
+</p>
+
 ### Inspektur Server Variables & Advisor Tuning Performa
 Dapat diakses melalui **⚡ Monitor &rarr; ⚙️ Server Variables**:
 - Memeriksa ratusan variabel dan parameter sistem database dengan fitur pencarian dan pengelompokan kategori.
 - **Tuning Advisor**: Menganalisis parameter kunci dan memberikan rekomendasi optimasi:
   - MySQL: Ukuran `innodb_buffer_pool_size`, rasio `max_connections`, dan durabilitas `innodb_flush_log_at_trx_commit`.
   - PostgreSQL: Pengaturan `shared_buffers`, `work_mem`, `maintenance_work_mem`, `effective_cache_size`, `wal_buffers`, `checkpoint_completion_target`, dan `autovacuum`.
+
+<p align="center">
+  <img src="assets/screenshots/14_server_variables_tuning.png" alt="SqlFox Penalaan Server Variables" width="95%" />
+</p>
 
 ### Heuristic Index Advisor & Query Tuner (Aturan ESR)
 1. Tulis atau tempel query `SELECT` yang lambat di Query Editor.
@@ -637,12 +736,29 @@ Dapat diakses melalui **📦 DB Tools &rarr; 🔄 Structure Sync**:
    - Perbedaan relasi Foreign Key
 3. Menghasilkan skrip migrasi DDL berurutan yang aman lengkap dengan pratinjau sebelum dijalankan.
 
+<p align="center">
+  <img src="assets/screenshots/08_structure_sync_schema_diff.png" alt="SqlFox Structure Sync DDL Migration Diff" width="95%" />
+</p>
+
 ### Cross-Connection Data Transfer & Keyset Row Sync
 - **Data Transfer**: Melakukan streaming transfer tabel secara langsung dari satu server database ke server lain melintasi penyedia cloud yang berbeda dengan batas penggunaan memori ketat `<50MB`. Apabila opsi `truncate_target` aktif dan transfer gagal, transaksi dibatalkan (*rollback*) sehingga data tabel target tetap terjaga utuh.
 - **Row-Level Data Sync**: Membandingkan baris data antar dua tabel menggunakan teknik hashing berbasis keyset delta. Mendukung Primary Key tunggal maupun komposit (dipisahkan pemisah unik `\x1f`), memetakan posisi kolom sumber ke target, menormalkan representasi tipe data lintas driver (`syncValueKey`), serta membatasi perbandingan maksimal 10.000 baris guna melindungi memori server.
+- **Smart Seed Exporter (Slicer Topologis Sadar Relasi)**: Memindai ketergantungan foreign key seluruh skema secara otomatis untuk mengekspor DDL lengkap dan sampel data baris, menelusuri seluruh data induk ke atas sehingga impor di lingkungan dev/staging berjalan bersih tanpa error relasi.
+
+<p align="center">
+  <img src="assets/screenshots/09_cross_connection_data_transfer.png" alt="SqlFox Transfer Data Antar-Koneksi Streaming" width="90%" />
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/10_row_level_data_sync.png" alt="SqlFox Sinkronisasi Data Baris Keyset" width="90%" />
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/07_smart_seed_fk_exporter.png" alt="SqlFox Smart Seed FK-Aware Slicer" width="90%" />
+</p>
 
 ### Deduplikasi Singleflight Koneksi & Lazy Schema Inspection
-Untuk menangani fluktuasi jaringan produksi dan rekoneksi konkurensi tinggi tanpa membebani server database (v0.10.13):
+Untuk menangani fluktuasi jaringan produksi dan rekoneksi konkurensi tinggi tanpa membebani server database (v0.15.0):
 - **Deduplikasi Permintaan Singleflight**:
   - Menggunakan `singleflight.Group` pada manajer sesi untuk menyatukan panggilan koneksi bersamaan yang menyasar koneksi yang sama ke dalam satu proses dial fisik tunggal, melenyapkan fenomena *reconnect stampede* saat terjadi pemulihan koneksi massal di browser.
 - **Lazy Schema Inspection**:
@@ -664,21 +780,21 @@ SqlFox menyematkan proteksi keamanan komprehensif dan ketahanan lintas-mesin (AD
 - **Scoping Sesi Sadar Thread (Thread-Safe Scoping)**:
   - Konteks database dan skema aktif pada sesi diproteksi dengan kunci mutual exclusion (`activeDB()`, `activeSchema()`), mencegah timbulnya *data race* saat eksekusi query simultan.
 
-### Headless CLI Suite (`run`, `transfer`, `advise`)
+### Headless CLI Suite (`query`, `transfer`, `job`, `advise`)
 SqlFox menyediakan perintah CLI headless yang sangat cocok untuk skrip otomatisasi bash, cronjob, dan pipeline CI/CD:
 
 ```bash
 # Menjalankan query SQL dan mencetak output JSON atau tabel
-./sqlfox run -conn "my-prod-db" -query "SELECT id, status FROM orders WHERE status = 'pending'" -format json
+./sqlfox query --conn "my-prod-db" --sql "SELECT id, status FROM orders WHERE status = 'pending'" --format json
 
 # Menerima query via STDIN menggunakan DSN langsung (tanpa dependensi vault di server CI/CD)
-echo "SELECT count(*) FROM users;" | ./sqlfox run -dsn "user:pass@tcp(10.0.0.5:3306)/app" -format csv
+echo "SELECT count(*) FROM users;" | ./sqlfox query --dsn "user:pass@tcp(10.0.0.5:3306)/app" --format csv
 
 # Menjalankan transfer data antar-koneksi secara otomatis
 ./sqlfox transfer --from "source-db" --to "backup-db" --tables "orders,order_items" --batch 1000
 
 # Menganalisis rekomendasi indeks untuk query lambat dari terminal
-./sqlfox advise -conn "my-prod-db" -query "SELECT * FROM logs WHERE tenant_id = 4 AND created_at > NOW() - INTERVAL 1 DAY ORDER BY id DESC"
+./sqlfox advise --conn "my-prod-db" --sql "SELECT * FROM logs WHERE tenant_id = 4 AND created_at > NOW() - INTERVAL 1 DAY ORDER BY id DESC"
 ```
 
 ### Task Runner Terjadwal Deklaratif Tanpa Daemon
@@ -686,6 +802,16 @@ Jadwalkan pemeliharaan database rutin, dump telemetri berkala, atau pengecekan k
 - Konfigurasikan tugas menggunakan file deklaratif berformat YAML atau JSON.
 - Dilengkapi mekanisme coba-ulang otomatis (*retry*) dengan *exponential backoff* saat koneksi jaringan terganggu.
 - Mendukung pengalihan keluaran (*streaming output*) ke disk lokal atau webhook pemantau.
+
+### Diagnostik Penyimpanan & Kesehatan Database
+Dapat diakses melalui **⚡ Monitor &rarr; 📊 Diagnostics**:
+- Analisis penggunaan ruang disk fisik (*disk footprint*) per tabel dan per indeks secara real-time.
+- Rasio komparasi data vs indeks dan deteksi overhead fragmentasi tabel (*table bloat*).
+- Rekomendasi penalaan mesin, vacuuming otomatis, dan reklamasi ruang disk.
+
+<p align="center">
+  <img src="assets/screenshots/13_storage_health_diagnostics.png" alt="SqlFox Diagnostik Penyimpanan & Kesehatan Database" width="95%" />
+</p>
 
 ### Pengujian Plafon Memori & Profiling `pprof`
 Untuk membuktikan komitmen efisiensi konsumsi memori `<100MB RAM` pada beban kerja intensif:

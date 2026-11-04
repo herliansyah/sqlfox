@@ -1049,6 +1049,58 @@ flowchart TD
    - Dynamically activates `#tab-bar-overflow-btn` and `#tab-bar-overflow-menu` when tab count exceeds the visible container width.
    - Enforces confirmation guards before closing unsaved non-empty queries or non-query tabs.
 
+---
+
+## 28. Visual Programmability & Object Lifecycle Architecture
+
+1. **Structured Object Dialogs & Parameter Grids (`web/dist/index.html`)**:
+   - Provides native modal designers for Views, Stored Procedures, Functions, Triggers, and Scheduled Events.
+   - Parameter builders serialize typed signatures and return modes without requiring manual DDL concatenation.
+2. **Definer Sanitization & Single-Line Comment Preservation (`web/dist/index.html`)**:
+   - Strips user/host definers using horizontal whitespace collapsing, preserving vertical formatting and preventing inline SQL comments (`-- comment`) from corrupting subsequent statements.
+3. **Multi-Statement Sequential Execution & Multi-Result Tabs (`internal/server/session_manager.go`)**:
+   - Executes multi-statement SQL scripts in topological sequence, returning discrete result sets streamed via `#tab-results-bar` with per-statement timing and row counters.
+4. **Pre-Flight Database Dump Confirmation Guard (`web/dist/index.html`)**:
+   - Intercepts full database dumps with target verification, schema vs data checkboxes, and lock warning banners to prevent unexpected I/O saturation on multi-gigabyte production clusters.
+
+---
+
+## 29. Query Result Mutations & Context Menu Architecture
+
+1. **Single-Table Resolved Primary Key Mutation Engine (`web/dist/index.html`)**:
+   - Evaluates query result sets; if the statement targets a single table and includes all primary key columns in the projection list, cell inline editing, row duplication, draft insertion, and deletion actions are enabled.
+   - Staged mutations link into the global `stagedEdits` transaction tracker and execute via AST Safety Guard.
+2. **Submenu Grouping & Viewport Collision Clamping (`web/dist/index.html`)**:
+   - Hierarchically groups context menu actions into nested submenus (`Quick Filter`, `Insert Value`, `Mutations`, `Copy / Export`).
+   - Dynamically evaluates viewport boundaries and flips menu orientation (leftwards/upwards) when approaching screen edges, preventing overflow clipping.
+
+---
+
+## 30. Standalone Native Desktop Application & OS Launcher Architecture
+
+```mermaid
+flowchart TD
+    CLI["CLI Command (sqlfox)"] --> Mode{"-browser flag set?"}
+    Mode -->|Yes| Browser["Spawn Default OS Browser Tab"]
+    Mode -->|No| Detector{"Chromium / Edge / Chrome Available?"}
+    Detector -->|Found| AppWindow["Spawn Frameless Window (--app=http://...)"]
+    Detector -->|None| Fallback["Fallback to System Browser"]
+    CLI --> Launcher{"sqlfox desktop install"}
+    Launcher --> DesktopFile["Generate ~/.local/share/applications/sqlfox.desktop"]
+    Launcher --> Icon["Install 512x512 PNG to hicolor icon theme"]
+    CLI --> Stop{"sqlfox stop"}
+    Stop --> ReadLock["Read ~/.sqlfox/sqlfox.lock PID"]
+    Stop --> Graceful["Signal Process & Terminate Cleanly"]
+```
+
+1. **Zero-Electron Native Windowing (`cmd/sqlfox/browser*.go`)**:
+   - Employs Chromium/Edge `--app=http://<host>:<port>` argument to provide an isolated, frameless desktop window experience without distributing hundreds of megabytes of bundled browser runtime.
+2. **Cross-Platform Launcher Integration (`cmd/sqlfox/desktop*.go`)**:
+   - `sqlfox desktop install` registers Freedesktop `.desktop` files and 512x512 application icons into standard system directories on Linux.
+3. **Deterministic Instance Locking & Graceful Shutdown (`cmd/sqlfox/instance.go`)**:
+   - Manages PID locks in `~/.sqlfox/sqlfox.lock`, enabling single-instance detection, port hunting, and remote shutdown via `sqlfox stop` or `/api/system/shutdown`.
+
+
 
 
 

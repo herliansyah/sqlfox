@@ -1033,6 +1033,41 @@ Responsive tab navigation and draft protection for power users with many active 
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
+---
+
+## 30. Grouped Grid Context Submenus & Viewport Clamping
+
+Hierarchical submenu grouping prevents context menus from overflowing the viewport on dense screens:
+
+```
+┌───────────────────────────────┐
+│ 🔍 Quick Filter             ▶ ├───────────────────────────────┐
+│ ✍️  Insert Value             ▶ │ = 'active'                    │
+│ 📝 Row Mutations            ▶ │ != 'active'                   │
+│ 📋 Copy / Export            ▶ │ LIKE '%active%'               │
+│ ───────────────────────────── │ IS NULL                       │
+│ 📋 Inspect Record (Form View) │ IS NOT NULL                   │
+└───────────────────────────────┴───────────────────────────────┘
+```
+
+---
+
+## 31. Multi-Statement Execution & Multi-Result Tabs
+
+Sub-navigation bar partitioning outputs for batch SQL runs:
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│ [Result 1 (users: 42 rows, 12ms)] [Result 2 (orders: 15 rows, 8ms)]    │
+├────────────────────────────────────────────────────────────────────────┤
+│ # │ id    │ email                 │ status   │ created_at             │
+├───┼───────┼───────────────────────┼──────────┼────────────────────────┤
+│ 1 │ 1001  │ admin@example.com     │ active   │ 2026-11-01 10:00:00    │
+│ 2 │ 1002  │ user@example.com      │ active   │ 2026-11-01 10:15:00    │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+
 
 
 
