@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -198,4 +199,66 @@ func writeInstanceLock(configDir string, port int, localURL string, bindHost ...
 		return func() {}, err
 	}
 	return func() { removeOwnLock(lockPath) }, nil
+}
+
+// stopExistingInstance terminates a running background SqlFox instance recorded in sqlfox.lock.
+// If the lock file is missing but an instance responds on defaultPort, it attempts graceful shutdown via loopback HTTP API.
+func stopExistingInstance(configDir string, defaultPort int) error {
+	lockPath := filepath.Join(configDir, "sqlfox.lock")
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		if defaultPort > 0 && pingSqlFox(defaultPort) {
+			resp, postErr := http.Post(fmt.Sprintf("http://127.0.0.1:%d/api/system/shutdown", defaultPort), "application/json", nil)
+			if postErr == nil {
+				_ = resp.Body.Close()
+				return nil
+			}
+		}
+		return fmt.Errorf("no running SqlFox instance found (lock file missing)")
+	}
+
+	var info instanceInfo
+	if err := json.Unmarshal(data, &info); err != nil {
+		_ = os.Remove(lockPath)
+		return fmt.Errorf("invalid lock file format; cleared stale lock")
+	}
+
+	if info.PID <= 0 {
+		_ = os.Remove(lockPath)
+		return fmt.Errorf("no valid PID recorded in lock file")
+	}
+
+	// If process is already terminated and port is quiet, clean up stale lock immediately
+	if !isPIDAlive(info.PID) && (info.Port <= 0 || !pingSqlFoxHost(info.Host, info.Port)) {
+		_ = os.Remove(lockPath)
+		return fmt.Errorf("SqlFox (PID %d) was not running; cleared stale lock", info.PID)
+	}
+
+	proc, err := os.FindProcess(info.PID)
+	if err != nil {
+		_ = os.Remove(lockPath)
+		return fmt.Errorf("process with PID %d not found: %w", info.PID, err)
+	}
+
+	if runtime.GOOS == "windows" {
+		_ = exec.Command("taskkill", "/F", "/PID", strconv.Itoa(info.PID)).Run()
+	} else {
+		_ = proc.Signal(syscall.SIGTERM)
+	}
+
+	// Wait up to 2 seconds for clean shutdown
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if !isPIDAlive(info.PID) || (info.Port > 0 && !pingSqlFoxHost(info.Host, info.Port)) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if isPIDAlive(info.PID) {
+		_ = proc.Kill()
+	}
+
+	_ = os.Remove(lockPath)
+	return nil
 }

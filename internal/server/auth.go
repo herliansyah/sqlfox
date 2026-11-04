@@ -337,8 +337,12 @@ func (s *Server) handleGetMasterPassword(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"lan_enabled":     true,
 		"master_password": s.masterPassword,
-	})
+	}
+	if s.lanIP != "" {
+		resp["lan_ip"] = s.lanIP
+	}
+	writeJSON(w, http.StatusOK, resp)
 }

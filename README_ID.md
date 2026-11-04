@@ -136,6 +136,8 @@ Perintah (Commands):
   transfer  Transfer data langsung antar-koneksi database (streaming <50MB RAM)
   job       Jalankan pipeline otomatisasi database deklaratif
   advise    Analisis query SQL untuk rekomendasi indeks ESR dan peringatan bloat
+  stop      Hentikan instance SqlFox yang sedang berjalan di latar belakang
+  desktop   Kelola launcher shortcut aplikasi desktop Linux (install, uninstall, status)
   help      Tampilkan bantuan perintah
 
 Opsi Server:
@@ -144,7 +146,9 @@ Opsi Server:
   -lan               Aktifkan akses jaringan LAN & tablet (bind 0.0.0.0 dan tampilkan Master PIN)
   -pass string       Master password enkripsi vault (atau baca dari ~/.sqlfox/master.key)
   -db string         Lokasi database vault konfigurasi (default: ~/.sqlfox/config.db)
-  -no-browser        Jangan membuka browser secara otomatis saat mulai
+  -app               Buka jendela aplikasi mandiri (native app window via Chromium/Edge) (default true)
+  -browser           Paksa buka di tab browser biasa daripada jendela aplikasi native
+  -no-browser        Jangan membuka browser atau jendela aplikasi secara otomatis saat mulai
   -strict-port       Keluar jika port yang ditentukan sedang terpakai
   -log-level string  Tingkat verbosity log: debug, info, warn, error, silent (default "info")
   -log-file string   Target file untuk menyimpan output log secara persisten

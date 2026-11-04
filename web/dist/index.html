@@ -383,6 +383,7 @@
     <symbol id="icon-x-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></symbol>
     <symbol id="icon-code" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></symbol>
     <symbol id="icon-loader" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line></symbol>
+    <symbol id="icon-power" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></symbol>
   </svg>
 
   <!-- 0. Remote Access Guard Lock Screen -->
@@ -555,6 +556,12 @@
           </button>
         </div>
       </div>
+
+      <!-- Open in Browser button (Native App Mode helper) -->
+      <button id="btn-open-in-browser" onclick="openCurrentInBrowser()" class="h-7 bg-app-card hover:bg-slate-700 text-slate-300 hover:text-sky-300 px-2.5 rounded border border-app-border transition flex items-center space-x-1.5 whitespace-nowrap" title="Open in Standard Web Browser">
+        <svg class="w-3.5 h-3.5 text-sky-400 shrink-0" aria-hidden="true"><use href="#icon-external-link"/></svg>
+        <span class="hidden xl:inline text-xs">Browser</span>
+      </button>
 
       <!-- Settings button: Unified Settings Modal (Connections, Sync, Notes, AI) -->
       <button onclick="openSettingsModal()" class="h-7 bg-app-card hover:bg-slate-700 text-slate-300 px-2.5 rounded border border-app-border transition flex items-center space-x-1 whitespace-nowrap" title="App Settings & Configuration (Ctrl+,)">
@@ -2998,6 +3005,27 @@
           <input type="file" id="import-file" accept=".sqlfox-vault,.json" class="w-full text-slate-400 text-xs">
           <input type="password" id="import-passphrase" placeholder="Enter the export passphrase" class="w-full bg-slate-900 border border-slate-700 p-2 text-white rounded outline-none">
           <button onclick="doImportVault()" class="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 py-1.5 rounded font-bold">Import Connections & Notes</button>
+        </div>
+        <div class="p-3 bg-slate-950 rounded border border-slate-800 space-y-2">
+          <h4 class="font-bold text-slate-200">Desktop App &amp; Daemon Controls</h4>
+          <p class="text-slate-400 text-[11px]">Manage the background daemon, open in full web browser, or copy URL.</p>
+          <div class="flex flex-wrap items-center gap-2 pt-1">
+            <button onclick="openCurrentInBrowser()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-sky-400 font-bold rounded flex items-center space-x-1.5 transition">
+              <svg class="w-3.5 h-3.5" aria-hidden="true"><use href="#icon-external-link"/></svg><span>Open in Web Browser</span>
+            </button>
+            <button onclick="copyCurrentAppURL()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded flex items-center space-x-1.5 transition">
+              <svg class="w-3.5 h-3.5" aria-hidden="true"><use href="#icon-copy"/></svg><span>Copy App URL</span>
+            </button>
+            <button id="btn-copy-tablet-lan" onclick="copyTabletLANURL()" class="hidden px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-amber-300 font-bold rounded flex items-center space-x-1.5 transition" title="Copy Tablet / LAN IP Link">
+              <svg class="w-3.5 h-3.5 text-amber-400" aria-hidden="true"><use href="#icon-external-link"/></svg><span>Copy Tablet LAN URL</span>
+            </button>
+            <button onclick="confirmShutDownServer()" class="px-3 py-1.5 bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-800/80 font-bold rounded flex items-center space-x-1.5 transition">
+              <svg class="w-3.5 h-3.5" aria-hidden="true"><use href="#icon-power"/></svg><span>Shut Down SqlFox</span>
+            </button>
+          </div>
+          <div id="lan-status-hint" class="pt-1.5 text-[11px] text-slate-400">
+            <!-- Dynamic LAN status filled by JS -->
+          </div>
         </div>
       </div>
 
@@ -5840,6 +5868,8 @@
     }
 
     let cachedMasterPIN = '';
+    let cachedLANIP = '';
+    let isLANEnabled = false;
     let masterPINVisible = false;
     let masterPINAutoMaskTimer = null;
 
@@ -5888,6 +5918,8 @@
         const res = await apiFetch('/api/auth/master-key');
         if (res.ok) {
           const data = await res.json();
+          isLANEnabled = !!data.lan_enabled;
+          cachedLANIP = data.lan_ip || '';
           if (data.master_password) {
             cachedMasterPIN = data.master_password;
             masterPINVisible = false;
@@ -5895,9 +5927,41 @@
             const badgeEl = document.getElementById('master-pin-badge');
             if (badgeEl) badgeEl.classList.remove('hidden');
           }
+          renderLANStatusInSettings();
         }
       } catch (err) {
         // Restricted if remote, ignore silently
+      }
+    }
+
+    function renderLANStatusInSettings() {
+      const tabletBtn = document.getElementById('btn-copy-tablet-lan');
+      const lanHint = document.getElementById('lan-status-hint');
+      if (isLANEnabled) {
+        if (tabletBtn) tabletBtn.classList.remove('hidden');
+        if (lanHint) {
+          const port = window.location.port || '80';
+          const ip = cachedLANIP || window.location.hostname;
+          const pinText = cachedMasterPIN ? escapeHtml(cachedMasterPIN) : 'configured';
+          lanHint.innerHTML = `<span class="text-emerald-400 font-semibold">● LAN Access Active:</span> Connect tablet/phone at <span class="font-mono text-amber-200">http://${ip}:${port}</span> (Master PIN: <span class="font-mono text-sky-300 font-bold">${pinText}</span>)`;
+        }
+      } else {
+        if (tabletBtn) tabletBtn.classList.add('hidden');
+        if (lanHint) {
+          lanHint.innerHTML = `<span class="text-slate-400">ℹ️ <b>LAN Access: Disabled (Localhost Only).</b> To allow tablet/remote connections, start with <code class="text-slate-200">--lan</code>, install desktop with <code class="text-slate-200">sqlfox desktop install --lan</code>, or set <code class="text-slate-200">SQLFOX_LAN=1</code> in <code class="text-slate-200">sqlfox.env</code>.</span>`;
+        }
+      }
+    }
+
+    async function copyTabletLANURL() {
+      const port = window.location.port || '80';
+      const ip = cachedLANIP || window.location.hostname;
+      const lanURL = `http://${ip}:${port}`;
+      const ok = await copyTextToClipboard(lanURL);
+      if (ok) {
+        showToast(`Tablet LAN URL copied: ${lanURL} (Master PIN: ${cachedMasterPIN || 'required'})`, 'success');
+      } else {
+        prompt('Tablet / LAN URL:', lanURL);
       }
     }
 
@@ -25779,6 +25843,65 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
     }
 
+    // --- Desktop Native App & Browser Session Helpers ---
+    async function openCurrentInBrowser() {
+      try {
+        const res = await apiFetch('/api/system/open-browser', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: window.location.href })
+        });
+        if (res.ok) {
+          showToast('Opening in default web browser...', 'info');
+          return;
+        }
+      } catch (_) {}
+
+      const win = window.open(window.location.href, '_blank', 'noopener,noreferrer');
+      if (win) {
+        showToast('Opened in web browser tab', 'info');
+      } else {
+        showToast('Popup was blocked; please allow popups or copy URL', 'warning');
+      }
+    }
+
+    async function copyCurrentAppURL() {
+      const url = window.location.href;
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(url);
+          showToast('SqlFox URL copied to clipboard: ' + url, 'success');
+          return;
+        }
+      } catch (_) {}
+      prompt('SqlFox App URL:', url);
+    }
+
+    async function confirmShutDownServer() {
+      if (!confirm('Are you sure you want to shut down the SqlFox server daemon? Any active background jobs and connections will be closed.')) {
+        return;
+      }
+      try {
+        const res = await apiFetch('/api/system/shutdown', { method: 'POST' });
+        if (res.ok) {
+          document.body.innerHTML = `
+            <div class="fixed inset-0 bg-slate-950 flex flex-col items-center justify-center p-6 text-center select-none z-[9999]">
+              <div class="p-8 bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full space-y-4 shadow-2xl">
+                <div class="text-5xl">👋</div>
+                <h2 class="text-xl font-bold text-white tracking-wide">SqlFox Daemon Stopped</h2>
+                <p class="text-xs text-slate-400 leading-relaxed">The server has shut down gracefully. You may safely close this window.</p>
+                <button onclick="window.close()" class="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-lg w-full transition cursor-pointer">Close Window</button>
+              </div>
+            </div>
+          `;
+          return;
+        }
+        showToast('Failed to trigger shutdown', 'error');
+      } catch (err) {
+        showToast('Server disconnected or already stopped', 'info');
+      }
+    }
+
     // --- Unified App Settings Modal (Connections, GitHub Sync, Notes Bundle, AI Copilot) ---
     function openSettingsModal(tab = 'vault') {
       document.getElementById('vault-modal').classList.remove('hidden');
@@ -25831,6 +25954,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
         loadCloudSyncConfig();
       } else if (targetPane === 'pane-vault-ai') {
         initAISettingsForm();
+      } else if (targetPane === 'pane-vault-archive') {
+        renderLANStatusInSettings();
       }
     }
 
@@ -26641,6 +26766,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
         } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
           e.preventDefault();
           toggleLeftSidebar();
+        } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'n') {
+          e.preventDefault();
+          window.open(window.location.href, '_blank');
         } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 't') {
           e.preventDefault();
           addNewQueryTab();
@@ -26827,6 +26955,10 @@ Please analyze what is causing this query to be slow and suggest necessary query
         { name: 'Save Query as Operational Note', shortcut: '', run: () => saveActiveQueryToNotes() },
         { name: 'Open Operational Notes Inbox', shortcut: '', run: () => toggleNotesDrawer(true) },
         { name: 'New Query Tab', shortcut: 'Ctrl+T', run: () => addNewQueryTab() },
+        { name: 'Open New Window', shortcut: 'Ctrl+Shift+N', run: () => window.open(window.location.href, '_blank') },
+        { name: 'Open in Web Browser', shortcut: '', run: () => openCurrentInBrowser() },
+        { name: 'Copy App URL to Clipboard', shortcut: '', run: () => copyCurrentAppURL() },
+        { name: 'Shut Down SqlFox Daemon', shortcut: '', run: () => confirmShutDownServer() },
         { name: 'New Connection', shortcut: '', run: () => openNewConnModal() },
         { name: 'Toggle Read-Only Mode', shortcut: '', run: () => toggleReadOnly() },
         { name: 'Settings & Configuration', shortcut: 'Ctrl+,', run: () => openSettingsModal('vault') },
@@ -26869,6 +27001,10 @@ Please analyze what is causing this query to be slow and suggest necessary query
       else if (name === 'Save Query as Operational Note') saveActiveQueryToNotes();
       else if (name === 'Open Operational Notes Inbox') toggleNotesDrawer(true);
       else if (name === 'New Query Tab') addNewQueryTab();
+      else if (name === 'Open New Window') window.open(window.location.href, '_blank');
+      else if (name === 'Open in Web Browser') openCurrentInBrowser();
+      else if (name === 'Copy App URL to Clipboard') copyCurrentAppURL();
+      else if (name === 'Shut Down SqlFox Daemon') confirmShutDownServer();
       else if (name === 'New Connection') openNewConnModal();
       else if (name === 'Toggle Read-Only Mode') toggleReadOnly();
       else if (name === 'Settings & Configuration') openSettingsModal('vault');

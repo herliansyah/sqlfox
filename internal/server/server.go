@@ -33,10 +33,13 @@ type Server struct {
 	updateAPIURL      string
 	targetExePath     string
 	restartFn         func() error
+	openBrowserFn     func(string) error
+	shutdownFn        func()
 	cloudSyncMu       sync.Mutex
 	cloudSyncRunMu    sync.Mutex // serializes SyncToGitHub runs (manual + debounced)
 	cloudSyncTimer    *time.Timer
 	lanEnabled        bool
+	lanIP             string
 	allowedHosts      []string
 }
 
@@ -216,6 +219,8 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /api/system/update/check", s.handleCheckUpdate)
 	mux.HandleFunc("POST /api/system/update/apply", s.handleApplyUpdate)
 	mux.HandleFunc("GET /api/system/changelog", s.handleGetChangelog)
+	mux.HandleFunc("POST /api/system/open-browser", s.handleOpenBrowser)
+	mux.HandleFunc("POST /api/system/shutdown", s.handleShutdown)
 
 	// Observability & Live Activity Stream
 	mux.HandleFunc("GET /api/logs/stream", s.handleLogsStream)
@@ -276,6 +281,11 @@ func (s *Server) routes() {
 // SetLANEnabled toggles whether the server is configured to accept LAN connections and display Master PIN.
 func (s *Server) SetLANEnabled(enabled bool) {
 	s.lanEnabled = enabled
+}
+
+// SetLANIP configures the detected LAN IP address for client display and remote pairing.
+func (s *Server) SetLANIP(ip string) {
+	s.lanIP = ip
 }
 
 // IsLANEnabled returns whether LAN mode is currently active.

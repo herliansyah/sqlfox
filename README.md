@@ -136,6 +136,8 @@ Commands:
   transfer  Stream cross-connection data transfer between databases
   job       Run declarative database automation pipelines
   advise    Analyze query AST and generate ESR index recommendations
+  stop      Stop a running background SqlFox instance
+  desktop   Manage desktop application launcher (install, uninstall, status)
   help      Display command help
 
 Server Options:
@@ -144,7 +146,9 @@ Server Options:
   -lan               Enable remote LAN and tablet access (binds 0.0.0.0 and prints Master PIN)
   -pass string       Master password for vault encryption (or uses ~/.sqlfox/master.key)
   -db string         Path to config vault database (default: ~/.sqlfox/config.db)
-  -no-browser        Disable automatic browser launch on startup
+  -app               Launch in standalone native window mode using Chrome/Edge/Chromium (default true)
+  -browser           Force launch in standard web browser tab instead of native standalone app window
+  -no-browser        Disable automatic browser or app window launch on startup
   -strict-port       Exit immediately if specified port is occupied
   -log-level string  Log verbosity: debug, info, warn, error, silent (default "info")
   -log-file string   File path for persistent log sink
