@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.17.0] - 2026-11-05
+
 ### Added
 - **Offline Typography Embedding & Monospace Normalization (`web/dist/vendor/fonts/*`, `web/dist/index.html`, `web/embed_test.go`)**: Embedded offline Inter variable and JetBrains Mono fonts in WOFF2 format with `fonts.css` stylesheet, enabling full offline UI rendering and consistent ligatures across CodeMirror SQL editors, auto-complete hints, canvas diagrams, and data grids without external CDN dependencies (#139).
 - **Interactive Visual ERD Canvas Ergonomics & Minimap Navigator (`web/dist/index.html`, `web/embed_test.go`)**: Upgraded the Visual ERD canvas with 60fps rAF batching, diff-based card DOM caching, interactive minimap preview box with touch-pan navigation, pinch-to-zoom multi-touch gestures, keyboard shortcuts (`Esc` to deselect, `F` to fit canvas, `+`/`-` to zoom), dedicated canvas context menu for instant `SELECT` generation and table inspection, schema refresh synchronization, and Mermaid/SVG export (#139).
