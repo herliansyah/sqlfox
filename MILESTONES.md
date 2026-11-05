@@ -226,6 +226,11 @@ v2.4 (Programmability, Native Desktop Window & Advanced Grid Ergonomics)
 ├── [x] 45. Visual Object CRUD Designers, Multi-Statement Execution & Multi-Result Tabs (v0.11 - v0.13)
 ├── [x] 46. Query Result In-Place Mutations & Viewport-Clamped Context Submenus (v0.14)
 └── [x] 47. Standalone Native Desktop App Mode, OS Launcher & Process Management (v0.15.0)
+│
+▼
+v2.5 (Supply-Chain Security, Script Safety & Process Lifecycle)
+├── [x] 48. Supply-Chain Signing, Script Runner Safety & Crypto Hardening (v0.16.0, ADR 0060)
+└── [x] 49. Graceful Self-Update Restart & Port Collision Prevention (v0.16.1)
 ```
 
 ---
@@ -720,13 +725,62 @@ v2.4 (Programmability, Native Desktop Window & Advanced Grid Ergonomics)
 
 ---
 
-### Milestone 45: Supply-Chain Signing & Audit Hardening
+### Milestone 45: Visual Object CRUD Designers, Multi-Statement Execution & Multi-Result Tabs
+- **Goal**: Enable visual lifecycle management for advanced database programmability objects and support multi-statement batch execution with tabbed result navigation.
+- **Deliverables**:
+  - [x] **Visual Object CRUD Designers (`web/dist/index.html`)**: Native modal designers for Views, Stored Procedures, Functions, Triggers, and Scheduled Events with structured parameter grid builders, single-line comment preservation, and definer sanitization.
+  - [x] **Multi-Statement Execution & Multi-Result Tabs (`internal/server/session_manager.go`, `web/dist/index.html`)**: Sequential batch query execution returning individual statement streams partitioned into sub-navigation result tabs (`#tab-results-bar`) with execution timings and row counters (PR #124).
+  - [x] **Fixed-Width Row Gutter (`web/dist/index.html`)**: Aligned numeric line gutters across query results and table data grids for visual tracking and row selection (PR #125).
+  - [x] **Out-of-Band Cancellation Hardening (`internal/server/handlers_query.go`, `internal/driver`)**: Fixed remote access mutex deadlocks during in-flight query cancellation signals (PR #126).
+  - [x] **Documentation & Verification**: Recorded in `CHANGELOG.md`, `ARCHITECTURE.md`, `USER_GUIDE.md`, and unit tests in `internal/server`.
+- **Runnable Verification**: Run `go test -v ./internal/server -run "TestExecuteQuery_MultiStatement"` -> 100% pass.
+
+---
+
+### Milestone 46: Query Result In-Place Mutations & Viewport-Clamped Context Submenus
+- **Goal**: Allow direct grid editing on arbitrary SELECT query results resolving to single tables with primary keys, and prevent context menu viewport clipping.
+- **Deliverables**:
+  - [x] **Query Result In-Place Mutations (`web/dist/index.html`)**: In-cell editing, draft row insertions, and deletions on query results matching single tables with primary key columns present, routing modifications through the AST Safety Guard (PR #129).
+  - [x] **SQL Export Context Actions (`web/dist/index.html`)**: Context menu actions to export selected grid cells or rows as TSV, JSON, and driver-formatted SQL INSERT statements (PR #129).
+  - [x] **Submenu Grouping & Viewport Collision Clamping (`web/dist/index.html`)**: Hierarchical submenu taxonomy (`Quick Filter`, `Insert Value`, `Mutations`, `Copy / Export`) with dynamic boundary evaluation preventing viewport overflow (PR #130).
+  - [x] **Session Read-Only Synchronization (`internal/server/session_manager.go`, `web/dist/index.html`)**: Persist read-only connection overrides across lazy reconnects, reporting status in ping checks to synchronize frontend state (PR #127).
+  - [x] **Documentation & Verification**: Recorded in `CHANGELOG.md`, `ARCHITECTURE.md`, `USER_GUIDE.md`, and integration tests in `web/embed_test.go`.
+- **Runnable Verification**: Run `go test -v ./web -run "TestEmbedStatic"` -> 100% pass.
+
+---
+
+### Milestone 47: Standalone Native Desktop App Mode, OS Launcher & Process Management
+- **Goal**: Deliver a lightweight, zero-Electron standalone native window experience with cross-platform OS desktop integration and clean process management.
+- **Deliverables**:
+  - [x] **Standalone Native App Window (`cmd/sqlfox/browser*.go`)**: Chromium/Edge `--app=http://...` mode delivering a dedicated frameless desktop window across Linux, macOS, and Windows with automatic system browser fallback (PR #131).
+  - [x] **Cross-Platform Launcher Integration (`cmd/sqlfox/desktop*.go`)**: `sqlfox desktop install/uninstall/status` commands generating Freedesktop `.desktop` files and 512x512 application icons in user directories (PR #131).
+  - [x] **CLI Flags & Remote Shutdown (`cmd/sqlfox/main.go`, `cmd/sqlfox/instance.go`, `internal/server/handlers_system.go`)**: Introduced `-app`, `-browser`, and `-no-browser` flags, `sqlfox stop` CLI command, and `/api/system/shutdown` HTTP endpoint (PR #131).
+  - [x] **Showcase Automation Suite (`scripts/capture_complete_showcase.js`, `docs/SCREENSHOTS.md`)**: Playwright automation capturing 16 high-resolution workspace views for release notes and documentation (PR #132).
+  - [x] **Documentation & Verification**: Recorded in `CHANGELOG.md`, `ARCHITECTURE.md`, `docs/SCREENSHOTS.md`, `README.md`, and `USER_GUIDE.md`.
+- **Runnable Verification**: Run `go test -v ./cmd/sqlfox -run "TestDesktopLauncher|TestBrowserLaunch"` -> 100% pass.
+
+---
+
+### Milestone 48: Supply-Chain Signing, Script Runner Safety & Crypto Hardening
 - **Goal**: Resolve a pre-release enterprise security audit (ADR 0060) across the self-update supply chain, the Safe Execution Pipeline, network ingress, at-rest crypto, and test-only code paths.
 - **Deliverables**:
-  - [x] **Script Runner Safety Guard Parity (`internal/server/handlers_dump.go`, `internal/server/session_manager.go`)**: Routed the Large SQL Runner through the AST Safety Guard — destructive statements block the run with `HTTP 409` unless `confirm=true`, and `DROP`/`TRUNCATE` trigger a pre-DDL Smart Tiered Backup (ADR 0060).
-  - [x] **Ed25519 Signed Checksum Manifest (`internal/server/update.go`, `scripts/sign-manifest.go`, `.github/workflows/release.yml`)**: Verified a detached Ed25519 signature over the checksum manifest against a build-time embedded public key before trusting any checksum (fail-closed, legacy fallback when unprovisioned) (ADR 0060).
-  - [x] **Production-Clean Test Flags (`internal/server/auth.go`, `internal/server/update.go`)**: Removed the `testing` package from production and gated the `example.com` and `updateAPIURL` allowances behind test-only flags (ADR 0060).
-  - [x] **LAN-Scoped DNS Rebinding Guard (`internal/server/auth.go`)**: Restricted IP-literal Host headers in LAN mode to the detected LAN IP plus loopback/private/link-local ranges, rejecting public IPs (ADR 0060).
-  - [x] **Keyset Marker & Vault AAD Hardening (`internal/server/handlers_schema.go`, `internal/vault/crypto.go`, `internal/vault/vault.go`)**: Validated `last_key` against NUL/oversize at the trust boundary and bound AES-256-GCM AAD to each vault secret's `(connection, field)` identity (backward compatible) (ADR 0060).
+  - [x] **Script Runner Safety Guard Parity (`internal/server/handlers_dump.go`, `internal/server/session_manager.go`)**: Routed the Large SQL Runner through the AST Safety Guard — destructive statements block the run with `HTTP 409` unless `confirm=true`, and `DROP`/`TRUNCATE` trigger a pre-DDL Smart Tiered Backup (ADR 0060, PR #134).
+  - [x] **Ed25519 Signed Checksum Manifest (`internal/server/update.go`, `scripts/sign-manifest.go`, `.github/workflows/release.yml`)**: Verified a detached Ed25519 signature over the checksum manifest against a build-time embedded public key before trusting any checksum (fail-closed, legacy fallback when unprovisioned) (ADR 0060, PR #134).
+  - [x] **Production-Clean Test Flags (`internal/server/auth.go`, `internal/server/update.go`)**: Removed the `testing` package from production and gated the `example.com` and `updateAPIURL` allowances behind test-only flags (ADR 0060, PR #134).
+  - [x] **LAN-Scoped DNS Rebinding Guard (`internal/server/auth.go`)**: Restricted IP-literal Host headers in LAN mode to the detected LAN IP plus loopback/private/link-local ranges, rejecting public IPs (ADR 0060, PR #134).
+  - [x] **Keyset Marker & Vault AAD Hardening (`internal/server/handlers_schema.go`, `internal/vault/crypto.go`, `internal/vault/vault.go`)**: Validated `last_key` against NUL/oversize at the trust boundary and bound AES-256-GCM AAD to each vault secret's `(connection, field)` identity (backward compatible) (ADR 0060, PR #134).
+  - [x] **Quick-Filter Injection Guard & Session Reaper Decoupling (`internal/server/handlers_schema.go`, `internal/server/session_manager.go`)**: Tokenizer whitelist and parenthesis validator in `ValidateTableFilter`; atomic `inFlight` statement counter on `ActiveSession` preventing active statement rollback during reaping (PR #133).
   - [x] **Documentation & Verification**: Recorded in ADR-0060, `CONTEXT.md`, `ARCHITECTURE.md`, `SECURITY.md`, `docs/playbooks/release-signing-key-provisioning.md`, `USER_GUIDE.md`, and unit tests in `internal/server` and `internal/vault`.
 - **Runnable Verification**: Run `go test -v ./internal/server -run "TestRunSQLScript_SafetyGuardGate|TestVerifyAssetChecksum_Ed25519ManifestSignature|TestDNSRebindingGuardLANHostScoping"` and `go test -v ./internal/vault -run "TestCrypto|TestVault_PasswordCiphertextSwapRejected"` -> 100% pass.
+
+---
+
+### Milestone 49: Graceful Self-Update Restart & Port Collision Prevention
+- **Goal**: Guarantee zero port collisions, clean socket teardown, and transparent UI reconnection during in-app self-updates across POSIX and Windows platforms.
+- **Deliverables**:
+  - [x] **POSIX In-Place Process Replacement (`cmd/sqlfox/restart_posix.go`)**: Replace running binary image via `syscall.Exec` after closing server listener, preserving original PID and avoiding lockfile or port release races (PR #136).
+  - [x] **Windows Graceful Shutdown & Child Spawn (`cmd/sqlfox/restart_windows.go`)**: Release server listener sockets and instance locks cleanly prior to spawning detached updated process (PR #136).
+  - [x] **Spawn Suppression on Restart (`cmd/sqlfox/main.go`, `internal/server/update.go`)**: Automatically append `--no-browser` to restart invocation arguments to prevent unwanted browser tab launches (PR #136).
+  - [x] **Frontend Status Polling (`web/dist/index.html`)**: Added restart polling routine checking `/api/auth/status` with retry backoff before refreshing client workspace (PR #136).
+  - [x] **Documentation & Verification**: Recorded in `CHANGELOG.md`, `ARCHITECTURE.md`, `CONTEXT.md`, `USER_GUIDE.md`, and unit tests in `cmd/sqlfox` and `internal/server`.
+- **Runnable Verification**: Run `go test -v ./cmd/sqlfox -run "TestRestartProcess"` and `go test -v ./internal/server -run "TestSelfUpdate_Restart"` -> 100% pass.

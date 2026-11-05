@@ -118,11 +118,11 @@ Download the latest archive from [GitHub Releases](https://github.com/herliansya
 
 ```bash
 # Linux amd64
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.15.0/sqlfox-v0.15.0-linux-amd64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.16.1/sqlfox-v0.16.1-linux-amd64.tar.gz | tar -xz
 ./sqlfox
 
 # macOS Apple Silicon (ARM64)
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.15.0/sqlfox-v0.15.0-darwin-arm64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.16.1/sqlfox-v0.16.1-darwin-arm64.tar.gz | tar -xz
 ./sqlfox
 ```
 
@@ -887,7 +887,7 @@ Access via clicking **⚡ Activity** in the footer or pressing **`Ctrl + \``**:
 > **Answer**: SqlFox contains a **Global Network Error Boundary**. It retains your query drafts, unsaved editor changes, and staged grid edits in memory while automatically attempting connection recovery with backoff.
 
 #### Q: How can I update SqlFox to the latest release?
-> **Answer**: SqlFox includes an **In-App Self-Update Engine**. Whenever a new release is published on GitHub, an **🚀 Update** badge appears in the bottom status bar. Click it to review the release notes and upgrade the standalone binary in-place with a single click. Updates are verified end-to-end before replacing the binary: the download must come from the official GitHub release, carry a valid Ed25519 signature over its checksum manifest (when the build is signed), and match the signed SHA-256 digest — any failure aborts the update and leaves your current binary untouched.
+> **Answer**: SqlFox includes an **In-App Self-Update Engine**. Whenever a new release is published on GitHub, an **🚀 Update** badge appears in the bottom status bar. Click it to review the release notes and upgrade the standalone binary in-place with a single click. Updates are verified end-to-end before replacing the binary: downloads must match official release assets, verify against an Ed25519-signed checksum manifest (fail-closed), and match the signed SHA-256 digest. Upon replacement, the server restarts gracefully: on POSIX systems, `syscall.Exec` replaces the running process image in-place (preserving the PID and eliminating port collision races), while on Windows sockets and instance locks are cleanly released before child process launch, with the web UI actively polling `/api/auth/status` before reloading.
 
 ---
 

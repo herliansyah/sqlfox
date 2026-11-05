@@ -35,7 +35,7 @@ flowchart TD
         DumpDir["Local Backups (.scratch/backups/)"]
     end
 
-    UI <-->|HTTP REST & SSE Stream| API
+    UI <-->|HTTP REST and SSE Stream| API
     API --> Vault
     API --> Safety
     API --> SessionMgr
@@ -400,20 +400,20 @@ flowchart TD
         Wrapper["#erd-canvas-wrapper (Dot-grid background)"]
         Viewport["#erd-viewport (CSS transform: translate + scale)"]
         SVG["#erd-svg (Cubic Bézier FK Lines & Markers)"]
-        Cards["#erd-cards (Draggable Table Cards & Column Badges)"]
-        SessionStore[("sessionStorage (erd-pos-{sessionId}-{db})")]
+        Cards["#erd-cards (Draggable Table Cards and Column Badges)"]
+        SessionStore[("sessionStorage (Layout Position Cache)")]
     end
 
     subgraph Backend ["Go Server API"]
-        SchemaAPI["GET /api/session/{id}/schema?db={db}"]
+        SchemaAPI["GET /api/session/:id/schema"]
     end
 
     Dialog --> Wrapper
     Wrapper --> Viewport
     Viewport --> SVG
     Viewport --> Cards
-    Cards -.->|Store / Restore Coordinates| SessionStore
-    Dialog -->|Fetch Schema & FK Relations| SchemaAPI
+    Cards -.->|Store or Restore Coordinates| SessionStore
+    Dialog -->|Fetch Schema and FK Relations| SchemaAPI
 ```
 
 1. **SVG & DOM Layer Separation**: Relationship connectors are rendered as SVG `<path>` elements using cubic Bézier curves (`M x1,y1 C cx1,y1 cx2,y2 x2,y2`) behind draggable HTML table cards.
@@ -538,7 +538,7 @@ flowchart TD
 
     subgraph Defenses ["SqlFox Hardening Subsystems"]
         VTree["Content Visibility Virtualization (CSS content-visibility: auto + 150ms Debounce)"]
-        StreamBudget["Bounded Chunk Buffers (<100MB RAM RSS Enforcement)"]
+        StreamBudget["Bounded Chunk Buffers (Under 100MB RAM RSS Enforcement)"]
         ErrBoundary["Global Error Boundary (Exponential Backoff + State Retention)"]
         FastCancel["Fail-Fast Control Channel (3s Timeout + Instant Client Stream Abort)"]
         PprofGuard["Loopback-Guarded pprof (SQLFOX_PPROF=1)"]
@@ -578,21 +578,21 @@ The Index Advisor provides deterministic, zero-dependency index recommendations 
 
 ```mermaid
 flowchart TD
-    SQLQuery["SQL Query (Editor or CLI)"] --> ASTParser["AST & Lexical Predicate Parser"]
-    ASTParser --> ESRClassifier["ESR Categorizer: Equality [E] -> Sort [S] -> Range [R]"]
+    SQLQuery["SQL Query (Editor or CLI)"] --> ASTParser["AST and Lexical Predicate Parser"]
+    ASTParser --> ESRClassifier["ESR Categorizer: Equality (E) to Sort (S) to Range (R)"]
     
     Catalog["Catalog Index Metadata"] --> RedundancyCheck{"Prefix Redundancy Check"}
     ESRClassifier --> RedundancyCheck
     
     RedundancyCheck -->|Left-Prefix Covered| Redundant["Mark Redundant (No DDL needed)"]
-    RedundancyCheck -->|Prefix of Proposed| Consolidate["Suggest Consolidation (Replace/Extend)"]
+    RedundancyCheck -->|Prefix of Proposed| Consolidate["Suggest Consolidation (Replace or Extend)"]
     RedundancyCheck -->|New Candidate| Propose["Synthesize Safe Non-Blocking DDL"]
     
-    Catalog --> BloatCheck{"Secondary Indexes > 5 or Index Size > Data Size?"}
-    BloatCheck -->|Yes| BloatWarn["⚠️ Index Bloat Warning Banner"]
+    Catalog --> BloatCheck{"Secondary Indexes over 5 or Index Size over Data Size?"}
+    BloatCheck -->|Yes| BloatWarn["Index Bloat Warning Banner"]
     BloatCheck -->|No| Healthy["Normal Storage Health"]
     
-    BloatWarn --> Output["Advice Result: DDL + Benefit + Warnings"]
+    BloatWarn --> Output["Advice Result: DDL, Benefit, and Warnings"]
     Healthy --> Output
     Propose --> Output
     Consolidate --> Output
@@ -624,26 +624,26 @@ The In-App Self-Update Engine enables users to check, inspect changelogs, and up
 
 ```mermaid
 flowchart TD
-    UI["Web UI (Header / Footer / Palette)"] -->|GET /api/system/update/check?force=...| Check["Update Checker"]
+    UI["Web UI (Header, Footer, Command Palette)"] -->|GET update check| Check["Update Checker"]
     Check --> Cache{"Cached within 24h?"}
-    Cache -->|Yes & not force| ReturnCache["Return Cached Release Info"]
-    Cache -->|No or force=true| GitHubAPI["GitHub Releases API (releases/latest)"]
-    GitHubAPI --> Matcher["Asset Matcher (OS + Arch + Extension)"]
+    Cache -->|Yes and not forced| ReturnCache["Return Cached Release Info"]
+    Cache -->|No or force refresh| GitHubAPI["GitHub Releases API (releases/latest)"]
+    GitHubAPI --> Matcher["Asset Matcher (OS, Arch, Extension)"]
     Matcher --> ParseSemver["Semver Compare (Latest vs Current)"]
-    ParseSemver --> UpdateModal["Render Update Modal & Changelog"]
+    ParseSemver --> UpdateModal["Render Update Modal and Changelog"]
 
-    UpdateModal -->|User clicks 'Update Now'| Apply["POST /api/system/update/apply"]
-    Apply --> Advertised["Verify URL is github.com official path AND advertised by release metadata"]
-    Advertised --> Download["Stream Platform Archive (.tar.gz / .zip)"]
+    UpdateModal -->|User clicks Update Now| Apply["POST /api/system/update/apply"]
+    Apply --> Advertised["Verify URL is github.com official path and advertised by release metadata"]
+    Advertised --> Download["Stream Platform Archive (.tar.gz or .zip)"]
     Download --> SigVerify["Verify Ed25519 signature over checksum manifest (trust anchor)"]
     SigVerify --> SumVerify["Verify SHA-256 digest against signed manifest"]
     SumVerify --> Extract["Extract Binary to Temp Sibling File (basename-only, bomb-capped)"]
     Extract --> Replace{"OS Platform?"}
-    Replace -->|Linux / macOS| AtomicRename["Atomic os.Rename() + chmod 0755"]
-    Replace -->|Windows| WinRename["Rename running sqlfox.exe -> .old, write new sqlfox.exe"]
+    Replace -->|Linux and macOS| AtomicRename["Atomic os.Rename() + chmod 0755"]
+    Replace -->|Windows| WinRename["Rename running sqlfox.exe to .old, write new sqlfox.exe"]
     AtomicRename --> Restart["Trigger Background Re-exec (os.StartProcess)"]
     WinRename --> Restart
-    Restart --> Reload["Browser 3s Countdown & Auto-Reload"]
+    Restart --> Reload["Browser Countdown and Auto-Reload"]
 ```
 
 1. **GitHub Releases Polling & Rate-Limit Guard**:
@@ -676,6 +676,19 @@ flowchart TD
 
 SqlFox maintains a unified visual brand across all operating systems, browser surfaces, and desktop environments:
 
+```mermaid
+flowchart TD
+    MasterSVG["Master Vector Geometry (docs/assets/logo.svg)"] --> Generator["Icon Generator Script (scripts/generate-icons.py)"]
+    Generator --> MultiRes["4x Supersampling Anti-Aliasing"]
+    MultiRes --> PNGs["PNG Assets: apple-touch-icon, icon-192, icon-512"]
+    MultiRes --> SVGs["Vector SVG: favicon.svg"]
+    MultiRes --> ICOs["Multi-Layer Windows ICO: favicon.ico, icon.ico"]
+    ICOs --> EmbedWindows["COFF Resource Object (cmd/sqlfox/rsrc_windows_*.syso)"]
+    EmbedWindows --> Binary["PE Executable Embedding (sqlfox.exe)"]
+    SVGs --> WebEmbed["Web UI and PWA Manifests (web/dist/assets)"]
+    PNGs --> WebEmbed
+```
+
 1. **Master Vector Geometry**: The canonical front-facing geometric fox head (`docs/assets/logo.svg` and `web/dist/assets/logo.svg`) defines 100% symmetrical polygon facets centered along `x = 256` within a `512x512` viewBox.
 2. **Deterministic Icon Pipeline**: An offline Python generator (`scripts/generate-icons.py`) uses 4x supersampling anti-aliasing to render multi-resolution PNGs (`apple-touch-icon.png`, `icon-192.png`, `icon-512.png`), vector SVGs (`favicon.svg`), and multi-layer ICOs (`favicon.ico`, `icon.ico`).
 3. **Pre-Compiled PE Embedding**: Windows COFF resource objects (`cmd/sqlfox/rsrc_windows_amd64.syso` and `rsrc_windows_arm64.syso`) embed the Brand Mark directly into `sqlfox.exe` during standard Go compilation with zero external CGO or toolchain dependencies.
@@ -704,14 +717,14 @@ SqlFox embeds a production-grade structured logging and request telemetry pipeli
 
 ```mermaid
 flowchart TD
-    Config["CLI Flags / Env Vars / sqlfox.env"] --> Init["logger.Init(Config)"]
+    Config["CLI Flags, Env Vars, sqlfox.env"] --> Init["logger.Init(Config)"]
     
     Init --> SinkRouter{"Sink Configuration"}
     
-    SinkRouter -->|Stderr Only| StderrSink["Console Handler (Text / JSON)"]
-    SinkRouter -->|File Only| FileSink["os.OpenFile (O_CREATE|O_APPEND|O_WRONLY)"]
-    SinkRouter -->|Console + File| TeeSink["Multi-Handler Tee Sink"]
-    SinkRouter -->|Silent / -q| SilentSink["io.Discard (File logging retained if set)"]
+    SinkRouter -->|Stderr Only| StderrSink["Console Handler (Text or JSON)"]
+    SinkRouter -->|File Only| FileSink["os.OpenFile (Append Mode)"]
+    SinkRouter -->|Console and File| TeeSink["Multi-Handler Tee Sink"]
+    SinkRouter -->|Silent Mode| SilentSink["io.Discard (File logging retained)"]
     
     TeeSink --> SlogDefault["slog.SetDefault(Logger)"]
     StderrSink --> SlogDefault
@@ -720,10 +733,10 @@ flowchart TD
     
     Req["HTTP Requests"] --> Middleware["HTTPLogger Middleware"]
     Middleware --> FilterStatic{"Path is Static Asset?"}
-    FilterStatic -->|Yes (.js, .css, .ico, /static)| SkipLog["Skip (No telemetry spam)"]
-    FilterStatic -->|No (/api/*)| MaskAudit{"Is Auth / Connection Payload?"}
-    MaskAudit -->|Yes (/api/auth/unlock, /api/connections)| MaskCreds["Mask Sensitive JSON Bodies"]
-    MaskAudit -->|No| LogTrace["slog.Info('HTTP request', method, path, status, latency)"]
+    FilterStatic -->|Static Assets| SkipLog["Skip static asset telemetry"]
+    FilterStatic -->|API Requests| MaskAudit{"Is Auth or Connection Payload?"}
+    MaskAudit -->|Auth or Connections| MaskCreds["Mask Sensitive JSON Bodies"]
+    MaskAudit -->|Standard API| LogTrace["slog.Info request telemetry"]
 ```
 
 1. **Zero-Dependency `log/slog` Architecture**:
@@ -808,18 +821,18 @@ flowchart TD
     subgraph UI ["Embedded Web UI"]
         InboxDrawer["Notes Inbox Drawer (#notes-inbox-drawer)"]
         ComposerModal["Note Composer Dialog (#note-composer-dialog)"]
-        TableRunbook["Table Viewer [📝 Notes & Runbook]"]
+        TableRunbook["Table Viewer (Notes and Runbook)"]
         AICopilot["AI Copilot (@ Mention Autocomplete)"]
         AudioEngine["Web Audio API (Chime Oscillator)"]
         PollerLoop["Background Reminder Poller (30s setInterval)"]
     end
 
     subgraph API ["Go REST Transport"]
-        NotesAPI["/api/notes (CRUD & Filters)"]
+        NotesAPI["/api/notes (CRUD and Filters)"]
         DueAPI["/api/notes/reminders/due"]
-        SnoozeAPI["/api/notes/{id}/snooze"]
-        ResolveAPI["/api/notes/{id}/resolve"]
-        SchemaBridge["/api/connections/{id}/tables/{table}/notes (Bridge)"]
+        SnoozeAPI["/api/notes/:id/snooze"]
+        ResolveAPI["/api/notes/:id/resolve"]
+        SchemaBridge["/api/connections/:id/tables/:table/notes"]
         AIHandler["/api/ai/chat (Context Injection)"]
     end
 
@@ -828,14 +841,15 @@ flowchart TD
         OpNotesIdx["Indexes: (status, reminder_at), (object_tag)"]
     end
 
-    InboxDrawer <-->|GET / POST / PUT| NotesAPI
-    TableRunbook <-->|GET ?object_tag=...| NotesAPI
+    InboxDrawer <-->|GET, POST, PUT| NotesAPI
+    TableRunbook <-->|GET object_tag| NotesAPI
     TableRunbook -.->|Backward Compatible| SchemaBridge
     PollerLoop -->|GET| DueAPI
     DueAPI -->|Overdue Notes| AudioEngine
-    ComposerModal -->|Snooze / Resolve| SnoozeAPI & ResolveAPI
-    AICopilot -->|Prompt with @note:...| AIHandler
-    AIHandler -->|Extract note ID / title| NotesAPI
+    ComposerModal -->|Snooze| SnoozeAPI
+    ComposerModal -->|Resolve| ResolveAPI
+    AICopilot -->|Prompt with note reference| AIHandler
+    AIHandler -->|Extract note identity| NotesAPI
     NotesAPI <--> OpNotesTable
     DueAPI <--> OpNotesTable
     SnoozeAPI <--> OpNotesTable
@@ -872,13 +886,13 @@ To support rapid client-side autocomplete (`dbname.tablename.colname`) and globa
 
 ```mermaid
 flowchart LR
-    UI["Frontend (🔄 All Button)"] -->|GET /api/session/{id}/active-threads| Probe["Server Load Check (Threads_running)"]
-    Probe -->|Healthy (Threads <= 50)| Exec["Pre-Flight Modal Approval"]
-    Exec -->|GET /api/session/{id}/fast-catalog| API["Go Server (InspectFastCatalog)"]
-    API -->|Bulk Scan tables + columns| DB[(Target DB Instance)]
+    UI["Frontend Refresh All Action"] -->|GET active-threads| Probe["Server Load Check (Threads running)"]
+    Probe -->|Healthy: Threads up to 50| Exec["Pre-Flight Modal Approval"]
+    Exec -->|GET fast-catalog| API["Go Server (InspectFastCatalog)"]
+    API -->|Bulk Scan tables and columns| DB[(Target DB Instance)]
     DB -->|Lightweight Map Result| API
     API -->|Synchronized Catalogs JSON| UI
-    UI -->|Warm Cache| Cache["multiDBCatalogCache & CodeMirror Autocomplete"]
+    UI -->|Warm Cache| Cache["multiDBCatalogCache and CodeMirror Autocomplete"]
 ```
 
 ### 2. Active Thread Safety Probe (`GET /api/session/{id}/active-threads`)
@@ -909,12 +923,12 @@ To handle server lock storms and massive connection leaks where terminating thre
 
 ```mermaid
 flowchart TD
-    UI["Processlist UI (Multi-Select Rows)"] -->|POST /api/session/{id}/batch-kill {pids, action}| Handler["handleBatchKillProcess"]
+    UI["Processlist UI (Multi-Select Rows)"] -->|POST batch-kill with PIDs| Handler["handleBatchKillProcess"]
     Handler --> Guard{"Inspect Immune Threads"}
     Guard -->|Caller PID or System User| Skip["Shield Protected Thread"]
     Guard -->|Safe Target Threads| Engine["Driver.KillProcess(ctx, pid)"]
     Engine --> Audit["RecordAuditLog (source: batch_kill)"]
-    Audit --> Response["HTTP 200 {killed_count, skipped_count}"]
+    Audit --> Response["HTTP 200: killed and skipped counts"]
 ```
 
 1. **Immune Thread Guardrails**:
@@ -942,7 +956,7 @@ flowchart LR
     CheckScope -->|Mismatch| ScopeModal["Schema Scope Mismatch Alert"]
     CheckScope -->|Match| EnvGate{"Environment Tier?"}
     EnvGate -->|Development| OneClick["1-Click Affirmation Dialog"]
-    EnvGate -->|Staging / Production| TypedModal["Typed DB Verification Challenge"]
+    EnvGate -->|Staging or Production| TypedModal["Typed DB Verification Challenge"]
 ```
 
 1. **Tab-Scoped Database Execution**:
@@ -985,21 +999,21 @@ sequenceDiagram
     participant Safety as Safety Guard
     participant DB as Target Database
 
-    User->>Editor: Execute UPDATE / DELETE statement
-    Editor->>Server: POST /api/session/{id}/execute {sql}
+    User->>Editor: Execute UPDATE or DELETE statement
+    Editor->>Server: POST execute statement
     Server->>Safety: InspectQuery(sql, env)
-    Safety->>DB: Pre-flight probe: SELECT COUNT(*) WHERE ... (500ms timeout)
+    Safety->>DB: Pre-flight probe: SELECT COUNT(*) WHERE (500ms timeout)
     DB-->>Safety: Probe Result: estimated_rows
 
-    alt Development & Single-Row PK Mutation
+    alt Development and Single-Row PK Mutation
         Safety-->>Server: Approved (Silent Execution)
     else 1 to 100 Rows Affected
         Safety-->>Server: Requires 1-Click Confirmation
-        Server-->>Editor: 422 Confirmation Needed {estimated_rows}
+        Server-->>Editor: 422 Confirmation Needed (estimated_rows)
         Editor->>User: Display 1-Click Confirmation Dialog
     else Over 100 Rows, Unqualified WHERE, or Staging/Prod
         Safety-->>Server: Requires Typed Challenge
-        Server-->>Editor: 422 Challenge Needed {estimated_rows}
+        Server-->>Editor: 422 Challenge Needed (estimated_rows)
         Editor->>User: Display Challenge Modal (Type table name)
     end
 ```
@@ -1019,16 +1033,16 @@ Engineered for massive datasets with strict memory ceilings:
 
 ```mermaid
 flowchart TD
-    Client["Browser Virtual Data Grid"] -->|POST /api/session/{id}/execute-stream| Endpoint["Query Stream Endpoint"]
+    Client["Browser Virtual Data Grid"] -->|POST execute-stream| Endpoint["Query Stream Endpoint"]
     Endpoint --> Driver["Database Driver (rows.Next)"]
     Driver --> FirstChunk{"First 20 Rows Ready?"}
-    FirstChunk -->|Yes (TTFR < 50ms)| Flush["Immediate Flush Chunk (NDJSON)"]
+    FirstChunk -->|Yes: Fast TTFR under 50ms| Flush["Immediate Flush Chunk (NDJSON)"]
     Flush --> Stream["NDJSON Line-by-Line Stream"]
     Stream --> Reader["Browser ReadableStream + AbortController"]
     Reader --> Buffer["Client Data Buffer (In-Memory)"]
-    Buffer --> DOM["Virtual Row Window (32px uniform, <500 DOM Nodes)"]
-    Buffer --> Drawer["Persistent Cell Inspector Drawer (JSON / Multiline)"]
-    Buffer --> BottomBar["Sticky Bottom Pagination Bar (Page Jump & Sizing)"]
+    Buffer --> DOM["Virtual Row Window (32px uniform, under 500 DOM Nodes)"]
+    Buffer --> Drawer["Persistent Cell Inspector Drawer (JSON and Multiline)"]
+    Buffer --> BottomBar["Sticky Bottom Pagination Bar (Page Jump and Sizing)"]
 ```
 
 1. **Fixed-Height DOM Row Windowing**:
@@ -1131,6 +1145,60 @@ A pre-release enterprise security audit extended ADR 0059 with supply-chain, exe
    - The `last_key` seek marker is rejected if it contains a NUL byte or exceeds 4096 bytes, in addition to dialect-correct escaping (the `QueryStream` interface intentionally stays unchanged).
 6. **Per-Field AAD Binding for Vault Secrets (`internal/vault/crypto.go`, `internal/vault/vault.go`)**:
    - `EncryptWithAAD`/`DecryptWithAAD` bind AES-256-GCM additional authenticated data to each secret's `(connection id, field)` identity, so a relocated ciphertext fails authentication. Legacy nil-AAD values decrypt via fallback and are re-sealed on next save.
+
+---
+
+## 32. In-App Self-Update Process Replacement & Port Lifecycle Architecture
+
+Self-updating an active server daemon on localhost without port collisions or orphaned processes requires deterministic platform-specific lifecycle coordination:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant Web as Web Frontend
+    participant Server as Active SqlFox Daemon
+    participant OS as Operating System Kernel
+    participant Disk as Local Executable File
+
+    User->>Web: Click "Update & Restart"
+    Web->>Server: POST /api/system/update {asset_url}
+    Server->>Server: Download, verify Ed25519 signature & SHA-256 digest
+    Server->>Disk: Atomic executable replacement (.new -> binary)
+    Server-->>Web: 200 OK {status: "restarting"}
+    Web->>Web: Show restart modal & poll /api/auth/status
+
+    alt POSIX (Linux, macOS, BSD)
+        Server->>Server: Close HTTP listener socket
+        Server->>OS: syscall.Exec(binary, [args..., "--no-browser"], environ)
+        Note over OS: Replaces process image in-place (PID preserved, zero port collision)
+    else Windows
+        Server->>Server: Close HTTP listener socket & release instance lock
+        Server->>OS: exec.Command(binary, [args..., "--no-browser"]).Start()
+        Server->>OS: os.Exit(0)
+    end
+
+    loop Frontend Status Polling
+        Web->>Server: GET /api/auth/status
+        Server-->>Web: 200 OK (New version active)
+    end
+    Web->>Web: Smooth workspace reload
+```
+
+1. **POSIX In-Place Process Replacement (`cmd/sqlfox/restart_posix.go`)**:
+   - On Unix-like systems, the server executes `syscall.Exec` replacing the process image within the same process table slot (preserving the original PID).
+   - Because the original PID is retained, existing PID lock files (`~/.sqlfox/sqlfox.lock`) remain continuously valid without file-lock acquire/release race windows.
+   - The HTTP listener is explicitly closed before `syscall.Exec`, releasing TCP socket bindings instantly and guaranteeing zero `EADDRINUSE` port collisions when the new executable initializes its server socket.
+2. **Windows Graceful Shutdown & Child Spawn (`cmd/sqlfox/restart_windows.go`)**:
+   - On Windows, where executable file locking and process replacement semantics differ, the server explicitly closes the HTTP listener and releases the instance lock (`ReleaseLock()`) before spawning the replacement executable via `exec.Command`.
+   - The parent process terminates immediately with code 0, clearing port reservations for the newly spawned child process.
+3. **Browser Tab Spawn Suppression (`--no-browser`)**:
+   - Both restart paths automatically inject the `--no-browser` CLI flag into the replacement argument list.
+   - This prevents the updated instance from launching unwanted default browser tabs while an active user session is already open.
+4. **Client-Side Health Polling & Workspace Reload (`web/dist/index.html`)**:
+   - Upon receiving the `restarting` response, the web interface displays a non-blocking modal overlay and initiates active polling against `/api/auth/status` with linear retry backoff (500ms intervals, up to 30 attempts).
+   - Once the restarted binary returns HTTP 200, the client smoothly refreshes the page, preserving database credentials, tab configurations, and workspace state.
+
 
 
 

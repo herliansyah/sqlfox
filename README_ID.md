@@ -146,7 +146,7 @@ Seluruh tangkapan layar diambil dalam resolusi tinggi (**2x Retina / HiDPI**) de
 
 #### Berkas Binary Siap Pakai (Rekomendasi)
 
-Unduh paket binary versi rilis terbaru (**v0.15.0**) langsung dari [GitHub Releases](https://github.com/herliansyah/sqlfox/releases):
+Unduh paket binary versi rilis terbaru (**v0.16.1**) langsung dari [GitHub Releases](https://github.com/herliansyah/sqlfox/releases):
 
 | Sistem Operasi | Arsitektur CPU | Format Berkas |
 | :--- | :--- | :--- |
@@ -156,13 +156,13 @@ Unduh paket binary versi rilis terbaru (**v0.15.0**) langsung dari [GitHub Relea
 
 **Linux (amd64):**
 ```bash
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.15.0/sqlfox-v0.15.0-linux-amd64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.16.1/sqlfox-v0.16.1-linux-amd64.tar.gz | tar -xz
 ./sqlfox
 ```
 
 **macOS (Apple Silicon):**
 ```bash
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.15.0/sqlfox-v0.15.0-darwin-arm64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.16.1/sqlfox-v0.16.1-darwin-arm64.tar.gz | tar -xz
 ./sqlfox
 ```
 

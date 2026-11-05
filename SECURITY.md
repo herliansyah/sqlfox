@@ -277,3 +277,19 @@ To prevent ciphertext relocation by an actor with raw vault write access:
    - A ciphertext sealed for one field or connection fails authentication if relocated to another, so an attacker who swaps stored ciphertext columns cannot have the value decrypt under a different identity.
 2. **Backward Compatibility & Automatic Migration**:
    - Values sealed before AAD binding (no AAD) still decrypt via a transparent fallback and are automatically re-sealed with AAD upon opening the vault (`OpenVault`), eliminating any indefinite migration window.
+
+---
+
+## 17. In-App Self-Update Process Replacement & Execution Isolation
+
+To prevent process hijacking, socket contention, and race conditions during binary self-updates:
+
+1. **Pre-Replacement Verification Gate**:
+   - Downloaded executable archives are strictly bound to official release metadata, capped by an `io.LimitReader` (256MB), verified against build-time Ed25519 detached signatures, and validated against SHA-256 digests before replacing the executable on disk.
+2. **Deterministic Process Replacement**:
+   - On POSIX platforms, the server replaces its running process image in-place using `syscall.Exec`. This retains the assigned process table slot and PID, preserving file lock ownership without reacquisition races.
+   - Server listener sockets are explicitly closed immediately prior to process execution, guaranteeing that the new process can bind to the authorized port without `EADDRINUSE` failures.
+3. **Privilege & IPC Isolation**:
+   - On Windows platforms, the instance lock is explicitly released and HTTP listeners are cleanly closed before launching the child executable via `exec.Command`.
+   - The `--no-browser` flag is enforced programmatically on all update restart paths, preventing unintentional spawning of external browser processes or URI scheme hijacking during startup.
+
