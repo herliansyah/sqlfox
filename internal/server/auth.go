@@ -10,9 +10,13 @@ import (
 	"net/url"
 	"strings"
 	"sync"
-	"testing"
 	"time"
 )
+
+// allowDefaultTestHost permits Go's httptest default Host ("example.com") through the DNS Rebinding
+// guard. It is false in production builds and is flipped on only by the test harness (auth_test.go's
+// init), so the production ingress guard never links the testing package or accepts example.com.
+var allowDefaultTestHost = false
 
 type ipLockoutRecord struct {
 	failedCount int
@@ -127,11 +131,14 @@ func (s *Server) isHostAllowed(host string) bool {
 		host = h
 	}
 	host = strings.ToLower(strings.TrimSpace(host))
-	if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]" {
+	// Strip IPv6 literal brackets if present without a port (e.g. "[fe80::1]" or "[::1]")
+	// so net.ParseIP and loopback checks accept the bare IP literal.
+	host = strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
 		return true
 	}
 	// ponytail: Go's httptest.NewRequest sets default Host to example.com; accept it strictly under unit tests
-	if testing.Testing() && host == "example.com" {
+	if allowDefaultTestHost && host == "example.com" {
 		return true
 	}
 	for _, ah := range s.allowedHosts {
@@ -141,10 +148,23 @@ func (s *Server) isHostAllowed(host string) bool {
 	}
 	if s.lanEnabled {
 		if ip := net.ParseIP(host); ip != nil {
-			return true
+			return s.isAllowedLANHostIP(ip)
 		}
 	}
 	return false
+}
+
+// isAllowedLANHostIP decides whether an IP-literal Host header is acceptable in LAN mode. It pins to
+// the detected LAN IP when known, and otherwise accepts only loopback and private/link-local ranges
+// (RFC 1918, RFC 4193, link-local). A public IP in the Host header is a DNS-rebinding signal and is
+// rejected: SqlFox is never meant to be reached over a routable public address.
+func (s *Server) isAllowedLANHostIP(ip net.IP) bool {
+	if s.lanIP != "" {
+		if want := net.ParseIP(s.lanIP); want != nil && want.Equal(ip) {
+			return true
+		}
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
 }
 
 // IngressGuardMiddleware enforces DNS Rebinding and Cross-Origin CSRF protections.

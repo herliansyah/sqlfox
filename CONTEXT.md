@@ -165,8 +165,24 @@ The security and validation perimeter in the Virtual Grid that verifies table qu
 _Avoid_: Grid filter validator, where clause sanitization, filter parser
 
 **Release Manifest Verification**:
-The cryptographic supply-chain verification policy requiring matching SHA-256 digests against an official release manifest before in-app self-update binaries can be unpacked or executed.
+The cryptographic supply-chain verification policy for in-app self-update. Before any binary is unpacked or executed, SqlFox verifies a detached Ed25519 signature (`checksums.txt.sig`) over the release checksum manifest against a build-time embedded public key (the trust anchor), then verifies the downloaded archive's SHA-256 digest against that signed manifest. Fail-closed: a missing, malformed, or non-verifying signature or a digest mismatch rejects the update. Unprovisioned builds (no embedded key) fall back to checksum-only verification.
 _Avoid_: Checksum test, hash check, download verify
+
+**Signed Manifest Trust Anchor**:
+The offline Ed25519 keypair whose public half is embedded in the released binary (`manifestSigningPublicKeyB64` via `-ldflags`) and whose private half, held only in CI secrets, signs the checksum manifest during release. It binds an update to a release the signing key actually approved, defending against a tampered or compromised distribution origin, not merely a network MITM. Provisioned via `scripts/sign-manifest.go` (see `docs/playbooks/release-signing-key-provisioning.md`).
+_Avoid_: Code signing cert, GPG key, release key
+
+**Script Runner Safety Gate**:
+The enforcement seam in the Large SQL Runner (`handleRunSQLScript`) that inspects every statement of an uploaded or pasted script through the same AST Safety Guard as the editor. Any statement requiring a typed Challenge blocks the whole run (`HTTP 409`) unless the operator passes `confirm=true`, and each confirmed `DROP`/`TRUNCATE TABLE` triggers a pre-DDL Smart Tiered Backup — closing the Safe Execution Pipeline bypass that previously let scripts run destructive statements unguarded.
+_Avoid_: Script bypass, bulk runner skip, unguarded batch
+
+**Per-Field AAD Binding**:
+The at-rest hardening that seals each Connection Vault secret (password, SSL private key) with AES-256-GCM additional authenticated data bound to its `(connection id, field)` identity (`sqlfox:connection:<id>:password` / `:ssl_key`), so a ciphertext relocated to another field or connection fails authentication. Legacy values sealed without AAD still decrypt via fallback and are re-sealed on their next save.
+_Avoid_: Tagged cipher, field salt, AAD tag
+
+**Release Signing Helper**:
+The CGO-free, stdlib-only offline utility (`scripts/sign-manifest.go`, build-tagged `ignore`) that generates the Ed25519 signing keypair (`-genkey`) and signs the checksum manifest (`-sign`). It is never compiled into the shipped binary.
+_Avoid_: Signer binary, keygen tool, sign script
 
 **Lexical Masking**:
 The token-sanitization phase in the Safety Guard (`maskCommentsAndLiterals`) that blanks out comments (`--`, `#`, `/* ... */`), quoted string literals, and quoted identifiers before keyword regex evaluation, preventing SQL keywords hidden in comments or strings from triggering false positives or concealing destructive clauses.
@@ -810,6 +826,7 @@ _Avoid_: Multiline button labels, squished button shapes, colliding controls
 - **0057**: Pre-Execution Mutation Estimation and Tiered Safety Guard (`docs/adr/0057-pre-execution-mutation-estimation-and-tiered-safety-guard.md`)
 - **0058**: Virtual Data Grid and Micro-Chunk Streaming (`docs/adr/0058-virtual-datagrid-and-micro-chunk-streaming.md`)
 - **0059**: Systemic Security Hardening and Multi-Engine Resilience (`docs/adr/0059-systemic-security-hardening-and-engine-resilience.md`)
+- **0060**: Supply-Chain Signing, Script-Runner Safety Parity, and Vault/Ingress Crypto Hardening (`docs/adr/0060-supply-chain-signing-and-ingress-crypto-hardening.md`)
 
 ## Visual Schema & ERD Canvas
 

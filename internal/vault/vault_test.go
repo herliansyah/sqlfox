@@ -268,3 +268,129 @@ func TestVault_SSLKeyEncryptedAtRest(t *testing.T) {
 		t.Fatalf("round-trip failed: %q %v", got.SSLKey, err)
 	}
 }
+
+// Regression: an actor with raw vault write access must not be able to swap one connection's
+// encrypted password ciphertext into another connection and have it decrypt (AAD field binding).
+func TestVault_PasswordCiphertextSwapRejected(t *testing.T) {
+	v, err := OpenVault(filepath.Join(t.TempDir(), "config.db"), "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	a := &ConnectionRecord{Name: "A", Driver: "mysql", Environment: "Development", Password: "alpha-secret"}
+	b := &ConnectionRecord{Name: "B", Driver: "mysql", Environment: "Development", Password: "bravo-secret"}
+	if err := v.SaveConnection(a); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.SaveConnection(b); err != nil {
+		t.Fatal(err)
+	}
+
+	// Baseline: both decrypt to their own secret.
+	if ga, _ := v.GetConnection(a.ID); ga == nil || ga.Password != "alpha-secret" {
+		t.Fatalf("A password did not round-trip")
+	}
+
+	// Read B's ciphertext and force it into A's row (the swap an attacker with DB access would do).
+	var bCipher string
+	if err := v.db.QueryRow(`SELECT encrypted_password FROM connections WHERE id = ?`, b.ID).Scan(&bCipher); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.db.Exec(`UPDATE connections SET encrypted_password = ? WHERE id = ?`, bCipher, a.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// A's AAD is connection:A:password; B's ciphertext was bound to connection:B:password, so
+	// decryption must fail rather than leak B's secret under A's identity.
+	if _, err := v.GetConnection(a.ID); err == nil {
+		t.Fatal("expected swapped ciphertext to fail decryption, but GetConnection succeeded")
+	}
+}
+
+// Regression: updating a connection from the web modal (which omits SSL fields) must not wipe
+// existing SSL certificates, keys, or use_ssl flag in the database.
+func TestVault_SaveConnectionPreservesSSLOnPartialUpdate(t *testing.T) {
+	v, err := OpenVault(filepath.Join(t.TempDir(), "config.db"), "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	initial := &ConnectionRecord{
+		Name:        "mTLS Conn",
+		Driver:      "mysql",
+		Environment: "Production",
+		UseSSL:      true,
+		SSLCA:       "ca-cert-data",
+		SSLCert:     "client-cert-data",
+		SSLKey:      "client-key-data",
+	}
+	if err := v.SaveConnection(initial); err != nil {
+		t.Fatal(err)
+	}
+
+	// Web UI modal edit: only sends name/port/host, omitting SSL fields
+	partialUpdate := &ConnectionRecord{
+		ID:          initial.ID,
+		Name:        "mTLS Conn Renamed",
+		Driver:      "mysql",
+		Environment: "Production",
+		Host:        "db.internal",
+		Port:        3307,
+	}
+	if err := v.SaveConnection(partialUpdate); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := v.GetConnection(initial.ID)
+	if err != nil {
+		t.Fatalf("GetConnection failed: %v", err)
+	}
+	if !got.UseSSL || got.SSLCA != "ca-cert-data" || got.SSLCert != "client-cert-data" || got.SSLKey != "client-key-data" {
+		t.Fatalf("SSL configuration was wiped by partial update: %+v", got)
+	}
+}
+
+// Regression: legacy secrets sealed with nil AAD (pre-ADR-0060) must be automatically migrated to
+// per-field AAD on OpenVault so they are no longer swap-vulnerable.
+func TestVault_OpenVaultMigratesLegacyAAD(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "config.db")
+	v, err := OpenVault(dbPath, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conn := &ConnectionRecord{Name: "Old", Driver: "mysql", Environment: "Development", Password: "old-secret"}
+	if err := v.SaveConnection(conn); err != nil {
+		t.Fatal(err)
+	}
+
+	// Manually overwrite with a legacy nil-AAD ciphertext to simulate a pre-AAD vault.
+	legacyCipher, err := Encrypt([]byte("old-secret"), v.key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.db.Exec(`UPDATE connections SET encrypted_password = ? WHERE id = ?`, legacyCipher, conn.ID); err != nil {
+		t.Fatal(err)
+	}
+	v.Close()
+
+	// Reopen vault: migrateLegacyAAD must re-seal with bound AAD.
+	v2, err := OpenVault(dbPath, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v2.Close()
+
+	var migratedCipher string
+	if err := v2.db.QueryRow(`SELECT encrypted_password FROM connections WHERE id = ?`, conn.ID).Scan(&migratedCipher); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verifying: decrypting with bound AAD directly (without fallback) must succeed.
+	plain, err := decrypt(migratedCipher, v2.key, connFieldAAD(conn.ID, "password"))
+	if err != nil || string(plain) != "old-secret" {
+		t.Fatalf("expected cipher to be re-sealed with bound AAD, got plain=%q err=%v", plain, err)
+	}
+}

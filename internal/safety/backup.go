@@ -61,7 +61,8 @@ func BackupTable(ctx context.Context, sess driver.Session, backupDir, tableName 
 		return "", false, fmt.Errorf("failed to create backup dir: %w", err)
 	}
 
-	filePath := filepath.Join(backupDir, backupFileName(time.Now().Format("20060102-150405"), tableName))
+	// Sub-second timestamp prevents file collisions/overwrites if multiple DDL ops execute in the same second.
+	filePath := filepath.Join(backupDir, backupFileName(time.Now().Format("20060102-150405.000000"), tableName))
 	f, err := os.Create(filePath)
 	if err != nil {
 		return "", false, fmt.Errorf("failed to create backup file: %w", err)

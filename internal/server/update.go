@@ -6,8 +6,10 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -24,6 +26,25 @@ import (
 	"sync"
 	"time"
 )
+
+// allowUpdateAPIHostAssets lets isAllowedAssetURL accept assets whose host matches s.updateAPIURL.
+// This is required only by the update test harness, which points updateAPIURL at a local mock
+// server. Production builds leave it false, so the updater will only ever download assets from
+// github.com under the official release path — s.updateAPIURL (used for FetchLatestRelease) can
+// never widen the download allowlist outside tests.
+var allowUpdateAPIHostAssets = false
+
+// manifestSigningPublicKeyB64 is the base64-encoded Ed25519 public key that signs the release
+// checksum manifest. It is injected at build time via
+//
+//	-ldflags "-X sqlfox/internal/server.manifestSigningPublicKeyB64=<base64 pubkey>"
+//
+// When set, the self-updater REQUIRES a valid detached Ed25519 signature (checksums.txt.sig) over
+// the checksum manifest before trusting any checksum — this is the supply-chain trust anchor that a
+// same-origin, unsigned checksums.txt alone cannot provide (it defends against a compromised or
+// tampered GitHub release, not merely a network MITM). When empty (unprovisioned builds), the
+// updater falls back to the legacy same-origin checksum behavior so development builds keep working.
+var manifestSigningPublicKeyB64 = ""
 
 // GitHubRelease represents the minimal schema needed from GitHub Releases API.
 type GitHubRelease struct {
@@ -413,9 +434,9 @@ func (s *Server) isAllowedAssetURL(rawURL string) bool {
 		path.Clean(u.Path) == u.Path && strings.HasPrefix(u.Path, "/herliansyah/sqlfox/releases/download/") {
 		return true
 	}
-	if s.updateAPIURL != "" {
+	if allowUpdateAPIHostAssets && s.updateAPIURL != "" {
 		if u, err := url.Parse(s.updateAPIURL); err == nil {
-			if au, err := url.Parse(rawURL); err == nil && au.Host == u.Host {
+			if au, err := url.Parse(rawURL); err == nil && au.Host == u.Host && au.Host != "" {
 				return true
 			}
 		}
@@ -461,6 +482,14 @@ func (s *Server) verifyAssetChecksum(ctx context.Context, assetURL string, archi
 		}
 	}
 
+	// Supply-chain trust anchor: when a signing public key is embedded in this build, the checksum
+	// manifest MUST carry a valid detached Ed25519 signature before any checksum is trusted. This
+	// binds the download to a release the offline signing key actually approved, defeating a
+	// tampered or compromised GitHub release (not just a network MITM). Fail-closed.
+	if err := verifyManifestSignature(ctx, fetchManifest, baseDir, manifestData); err != nil {
+		return err
+	}
+
 	actualHash := sha256.Sum256(archiveBytes)
 	actualHex := hex.EncodeToString(actualHash[:])
 
@@ -483,6 +512,39 @@ func (s *Server) verifyAssetChecksum(ctx context.Context, assetURL string, archi
 		}
 	}
 	return fmt.Errorf("asset %s not found in release checksum manifest", assetName)
+}
+
+// verifyManifestSignature enforces the Ed25519 supply-chain trust anchor. When
+// manifestSigningPublicKeyB64 is empty (unprovisioned/dev build), it is a no-op and the legacy
+// same-origin checksum behavior applies. When a public key is embedded, it fetches the detached
+// signature (checksums.txt.sig, then SHA256SUMS.sig) and requires it to be a valid Ed25519 signature
+// over the exact manifest bytes; any failure is fail-closed.
+func verifyManifestSignature(ctx context.Context, fetch func(string) ([]byte, error), baseDir string, manifestData []byte) error {
+	if manifestSigningPublicKeyB64 == "" {
+		return nil // no trust anchor provisioned in this build
+	}
+	pub, err := base64.StdEncoding.DecodeString(strings.TrimSpace(manifestSigningPublicKeyB64))
+	if err != nil || len(pub) != ed25519.PublicKeySize {
+		return fmt.Errorf("supply chain verification failed: embedded manifest signing key is invalid")
+	}
+
+	sigRaw, err := fetch(baseDir + "/checksums.txt.sig")
+	if err != nil {
+		if sigRaw, err = fetch(baseDir + "/SHA256SUMS.sig"); err != nil {
+			return fmt.Errorf("supply chain verification failed: release manifest signature not found (fail-closed): %w", err)
+		}
+	}
+
+	// The signature file is base64 (possibly with surrounding whitespace/newlines).
+	sig, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(sigRaw)))
+	if err != nil || len(sig) != ed25519.SignatureSize {
+		return fmt.Errorf("supply chain verification failed: malformed manifest signature")
+	}
+
+	if !ed25519.Verify(ed25519.PublicKey(pub), manifestData, sig) {
+		return fmt.Errorf("supply chain verification failed: manifest signature does not verify against the trusted release key")
+	}
+	return nil
 }
 
 // downloadAndExtractBinary downloads the archive from assetURL, verifies the checksum, and extracts the sqlfox binary.

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Self-Update Supply-Chain Signing & Safe Execution Parity (`internal/server/update.go`, `internal/server/handlers_dump.go`, `internal/server/session_manager.go`, `internal/server/auth.go`, `internal/server/handlers_schema.go`, `internal/vault/crypto.go`, `internal/vault/vault.go`, `internal/safety/backup.go`, `scripts/sign-manifest.go`, `.github/workflows/release.yml`, `SECURITY.md`, `docs/adr/0060-supply-chain-signing-and-ingress-crypto-hardening.md`, `docs/playbooks/release-signing-key-provisioning.md`)**: Resolved a pre-release enterprise security audit (ADR 0060). The Large SQL Runner now enforces the AST Safety Guard and pre-DDL Smart Tiered Backup, blocking destructive scripts with HTTP 409 unless `confirm=true`, with a 100MB ingestion limit protecting against memory spikes. In-app self-update now verifies a detached Ed25519 signature over the checksum manifest (`checksums.txt.sig`) against a build-time embedded public key, fail-closed, binding updates to an offline signing key. Tightened the DNS Rebinding guard in LAN mode to loopback/private/link-local IPs (public IPs rejected) and normalized portless IPv6 brackets (`[fe80::1]`). Bound AES-256-GCM additional authenticated data to each vault secret's `(connection, field)` identity with auto-migration of legacy secrets on startup, preserved SSL configurations upon partial connection updates, validated the keyset `last_key` marker against NUL/oversize at the trust boundary, upgraded backup snapshot filenames to sub-second precision, and removed the `testing` package and test-only clauses from production code paths.
+
+### Added
+- **Offline Release Manifest Signer (`scripts/sign-manifest.go`)**: CGO-free, stdlib-only Ed25519 keypair generator and checksum-manifest signer for the self-update trust anchor, wired into the GitHub Actions release workflow. See `docs/playbooks/release-signing-key-provisioning.md`.
+
 ## [v0.15.0] - 2026-11-04
 
 ### Added

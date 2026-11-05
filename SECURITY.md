@@ -153,7 +153,7 @@ To secure loopback communications against malicious websites accessed in local u
 
 1. **Host Header Validation**:
    - Ingress middleware inspects the HTTP `Host` header on all requests.
-   - Only `localhost`, `127.0.0.1`, `[::1]`, and the explicitly bound network host (when `--lan` is specified) are accepted.
+   - Only `localhost`, `127.0.0.1`, `[::1]`, and (when `--lan` is specified) the detected LAN IP plus loopback/private/link-local IP ranges (RFC 1918, RFC 4193, link-local) are accepted. A **public** IP in the `Host` header is treated as a DNS-rebinding signal and rejected even in LAN mode — SqlFox is never meant to be reached over a routable public address.
    - External domains resolving to local loopback (DNS Rebinding attacks) are rejected with `403 Forbidden`.
 2. **Cross-Origin Mutation Guard**:
    - State-altering endpoints (`POST`, `PUT`, `DELETE`, `PATCH`) enforce origin matching when `Origin` or `Referer` headers are supplied, rejecting `Sec-Fetch-Site: cross-site` requests.
@@ -168,10 +168,18 @@ To maintain binary execution integrity during in-app updates:
 
 1. **Strict Origin Enforcement**:
    - Update downloads are restricted strictly to official GitHub release URLs matching `https://github.com/herliansyah/sqlfox/releases/download/*`.
-2. **Fail-Closed SHA-256 Digest Verification**:
-   - The server downloads official release checksum manifests (`checksums.txt` / `SHA256SUMS`).
-   - The downloaded binary archive is verified against the manifest digest with explicit non-empty asset name validation and strict exact filename matching.
+   - Additionally, the requested asset URL must be byte-for-byte one that the official GitHub release metadata advertises, binding the download to a release GitHub actually published.
+2. **Signed Checksum Manifest (Ed25519 Trust Anchor)**:
+   - Releases publish a detached Ed25519 signature (`checksums.txt.sig`) over the checksum manifest, produced offline with a private signing key held only in CI secrets.
+   - The shipped binary embeds the corresponding **public** key at build time (`-ldflags "-X sqlfox/internal/server.manifestSigningPublicKeyB64=<base64 pubkey>"`).
+   - Before trusting any checksum, the updater fetches `checksums.txt.sig` and requires it to be a valid Ed25519 signature over the exact manifest bytes. This is the supply-chain trust anchor: a same-origin, unsigned `checksums.txt` alone only defends against network tampering, whereas the signature defends against a tampered or compromised GitHub release (an attacker who can publish both a malicious binary and a matching checksum still cannot forge the offline signature).
+   - Verification is **fail-closed**: a missing, malformed, or non-verifying signature aborts the update. Builds with no embedded public key (development/unprovisioned) fall back to the legacy same-origin checksum behavior.
+   - The signer is a CGO-free, stdlib-only helper (`scripts/sign-manifest.go`), honoring the CGO-Free Invariant. Provision keys once with `go run scripts/sign-manifest.go -genkey`; store `PRIVATE_KEY` as the `SQLFOX_MANIFEST_SIGNING_KEY` CI secret and `PUBLIC_KEY` as the `SQLFOX_MANIFEST_SIGNING_PUBKEY` repository variable.
+3. **Fail-Closed SHA-256 Digest Verification**:
+   - After the manifest signature is verified, the downloaded binary archive is verified against the manifest digest with explicit non-empty asset name validation, strict exact filename matching, and a constant-time comparison.
    - If checksums do not match or if the manifest is unavailable, the update is rejected and the existing executable remains untouched.
+4. **Safe Extraction**:
+   - Archive extraction selects only the `sqlfox`/`sqlfox.exe` entry by basename (no archive-controlled output paths, defeating zip-slip) and bounds every copy with a size limit to prevent decompression bombs. TLS certificate verification is always enforced on downloads.
 
 ---
 
@@ -244,3 +252,28 @@ To prevent metadata lock exhaustion and denial-of-service during connection spik
    - Schema and table metadata introspection is deferred from initial connection establishment to lazy on-demand retrieval, eliminating heavy metadata locks (`KEY_COLUMN_USAGE`) during initial session connection.
 
 
+
+---
+
+## 15. Script Runner Safety Guard Parity
+
+To close the Safe Execution Pipeline bypass in the Large SQL Runner (uploaded/pasted scripts):
+
+1. **Destructive Statement Gate**:
+   - Before executing any statement, the script runner inspects every statement with the same AST Safety Guard used by the editor.
+   - If any statement requires a typed Challenge (unqualified `DELETE`/`UPDATE`, `DROP`, `TRUNCATE`, `DROP DATABASE`, CREATE/ALTER in Production, or a schema-scope mismatch), the entire run is blocked with `HTTP 409 Conflict` and the offending statements are reported.
+   - The operator proceeds only by explicitly re-running with `?confirm=true`, the power-user acknowledgment mirroring the editor's Challenge Modal.
+2. **Pre-DDL Smart Tiered Backup**:
+   - Before each confirmed `DROP`/`TRUNCATE TABLE`, the runner triggers the same pre-DDL Smart Tiered Backup as the editor (DDL always, data under the 50MB/100k-row threshold). A qualified target outside the active database is skipped (not snapshotted against the wrong database) with a logged warning.
+
+---
+
+## 16. Per-Field AAD Binding for Vault Secrets
+
+To prevent ciphertext relocation by an actor with raw vault write access:
+
+1. **Authenticated Associated Data (AAD)**:
+   - Connection passwords and SSL private keys are sealed with AES-256-GCM AAD bound to their `(connection ID, field)` identity (`sqlfox:connection:<id>:password` / `:ssl_key`).
+   - A ciphertext sealed for one field or connection fails authentication if relocated to another, so an attacker who swaps stored ciphertext columns cannot have the value decrypt under a different identity.
+2. **Backward Compatibility & Automatic Migration**:
+   - Values sealed before AAD binding (no AAD) still decrypt via a transparent fallback and are automatically re-sealed with AAD upon opening the vault (`OpenVault`), eliminating any indefinite migration window.

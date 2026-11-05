@@ -345,9 +345,12 @@ func (s *Server) handleExportSmartSeed(w http.ResponseWriter, r *http.Request) {
 	writeDumpEpilogue(out, sess.DriverName)
 }
 
+// maxScriptPayloadBytes caps in-memory SQL script ingestion to 100 MB to prevent OOM spikes.
+const maxScriptPayloadBytes = 100 * 1024 * 1024
+
 // splitSQLStatements splits a multi-statement SQL script into individual statements (see driver.SplitSQLStatements).
 func splitSQLStatements(reader io.Reader, driverName ...string) []string {
-	content, err := io.ReadAll(reader)
+	content, err := io.ReadAll(io.LimitReader(reader, maxScriptPayloadBytes))
 	if err != nil {
 		return nil
 	}
@@ -373,8 +376,16 @@ func (s *Server) handleRunSQLScript(w http.ResponseWriter, r *http.Request) {
 
 	stopOnError := r.URL.Query().Get("stop_on_error") != "false"
 	targetDB := r.URL.Query().Get("db")
+	// confirm=true is the power-user acknowledgment that the Safety Guard surfaced a destructive
+	// statement and the operator chose to proceed, mirroring ExecuteRequest.Confirmed in the editor.
+	confirmed := r.URL.Query().Get("confirm") == "true"
 
 	var scriptReader io.Reader
+
+	if r.ContentLength > maxScriptPayloadBytes {
+		writeError(w, http.StatusRequestEntityTooLarge, "SQL script exceeds maximum size limit (100MB)")
+		return
+	}
 
 	contentType := r.Header.Get("Content-Type")
 	if strings.HasPrefix(contentType, "multipart/form-data") {
@@ -398,9 +409,34 @@ func (s *Server) handleRunSQLScript(w http.ResponseWriter, r *http.Request) {
 		scriptReader = r.Body
 	}
 
-	statements := splitSQLStatements(scriptReader, sess.DriverName)
+	content, err := io.ReadAll(io.LimitReader(scriptReader, maxScriptPayloadBytes+1))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to read SQL script: "+err.Error())
+		return
+	}
+	if len(content) > maxScriptPayloadBytes {
+		writeError(w, http.StatusRequestEntityTooLarge, "SQL script exceeds maximum size limit (100MB)")
+		return
+	}
+
+	statements := driver.SplitSQLStatements(string(content), sess.DriverName)
 	if len(statements) == 0 {
 		writeError(w, http.StatusBadRequest, "no executable SQL statements found in script")
+		return
+	}
+
+	// Safety Guard pre-pass: the script runner must honor the same destructive-statement gate as the
+	// editor. Each statement is inspected; any CRITICAL operation (DROP/TRUNCATE, unqualified
+	// DELETE/UPDATE, DROP DATABASE, or a schema-scope mismatch) blocks the whole run with HTTP 409
+	// unless the operator passed ?confirm=true. Without this, an uploaded script bypassed the entire
+	// Safe Execution Pipeline (no Challenge Modal, no pre-DDL backup).
+	blockers := sess.InspectScriptStatements(statements, targetDB)
+	if len(blockers) > 0 && !confirmed {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":              "Script contains destructive statements that require confirmation. Re-run with confirm=true to proceed.",
+			"requires_challenge": true,
+			"blockers":           blockers,
+		})
 		return
 	}
 
@@ -422,6 +458,9 @@ func (s *Server) handleRunSQLScript(w http.ResponseWriter, r *http.Request) {
 	errorCount := 0
 
 	for i, stmt := range statements {
+		// Pre-DDL Smart Tiered Backup for destructive schema ops, matching the editor pipeline.
+		sess.BackupBeforeDestructive(ctx, stmt, targetDB)
+
 		start := time.Now()
 		res, err := sess.Session.Exec(ctx, stmt)
 		durationMs := time.Since(start).Milliseconds()

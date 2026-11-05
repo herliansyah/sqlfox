@@ -56,7 +56,10 @@ jobs:
         run: |
           mkdir -p dist/archives
           VERSION="${{ steps.version.outputs.TAG }}"
-          LDFLAGS="-s -w -X main.Version=${VERSION}"
+          # Embed the Ed25519 manifest-signing public key so the self-updater enforces a signed
+          # checksum manifest (supply-chain trust anchor). Non-secret; stored as a repo variable.
+          PUBKEY="${{ vars.SQLFOX_MANIFEST_SIGNING_PUBKEY }}"
+          LDFLAGS="-s -w -X main.Version=${VERSION} -X sqlfox/internal/server.manifestSigningPublicKeyB64=${PUBKEY}"
 
           TARGETS=(
             "linux amd64"
@@ -106,6 +109,23 @@ jobs:
           sha256sum * > checksums.txt
           cat checksums.txt
           cd - > /dev/null
+
+      - name: Sign Checksum Manifest (Ed25519 supply-chain trust anchor)
+        if: ${{ vars.SQLFOX_MANIFEST_SIGNING_PUBKEY != '' }}
+        env:
+          SIGNING_KEY: ${{ secrets.SQLFOX_MANIFEST_SIGNING_KEY }}
+        run: |
+          # Produces dist/archives/checksums.txt.sig (base64 Ed25519 signature over checksums.txt).
+          # The shipped binary verifies this signature against the embedded public key before
+          # trusting any checksum. CGO-free, stdlib-only signer.
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "❌ SQLFOX_MANIFEST_SIGNING_PUBKEY is set but secret SQLFOX_MANIFEST_SIGNING_KEY is missing." >&2
+            echo "   A signed manifest is required when a signing public key is embedded; aborting." >&2
+            exit 1
+          fi
+          go run scripts/sign-manifest.go -sign -key "$SIGNING_KEY" dist/archives/checksums.txt
+          echo "Signed checksum manifest:"
+          ls -la dist/archives/checksums.txt.sig
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

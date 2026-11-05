@@ -21,3 +21,5 @@ Deterministic release workflow when user commands a release:
 4. Confirm target version with human operator (e.g. `patch`, `minor`, `major`, or `vX.Y.Z`).
 5. Execute `./scripts/release.sh <version> --push` to run pre-flight unit tests, commit `chore(release): vX.Y.Z`, create annotated tag, and push to GitHub to trigger multi-OS binary builds.
 
+One-time prerequisite (update signing): to enable the self-update supply-chain trust anchor, the Ed25519 manifest signing keypair must be provisioned once (GitHub secret `SQLFOX_MANIFEST_SIGNING_KEY` + repo variable `SQLFOX_MANIFEST_SIGNING_PUBKEY`). See `docs/playbooks/release-signing-key-provisioning.md`. Until provisioned, releases build and ship with the legacy checksum-only update behavior.
+

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -185,5 +186,32 @@ func TestHandleGetTableRowsWithFilter(t *testing.T) {
 	defer badResp.Body.Close()
 	if badResp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected status 400 Bad Request for malicious filter, got %d", badResp.StatusCode)
+	}
+
+	// 5. Keyset pagination: last_key seeks past the given PK value.
+	ksResp, err := client.Get(ts.URL + "/api/session/" + connRec.ID + "/table/products/rows?limit=10&sort_col=id&sort_dir=ASC&last_key=2")
+	if err != nil || ksResp.StatusCode != http.StatusOK {
+		t.Fatalf("keyset request failed: status=%v err=%v", ksResp, err)
+	}
+	var ksData struct {
+		Rows [][]any `json:"rows"`
+	}
+	json.NewDecoder(ksResp.Body).Decode(&ksData)
+	ksResp.Body.Close()
+	if len(ksData.Rows) != 2 { // ids 3 and 4
+		t.Fatalf("expected 2 rows after last_key=2, got %d", len(ksData.Rows))
+	}
+	if fmt.Sprintf("%v", ksData.Rows[0][0]) != "3" {
+		t.Fatalf("expected first row id=3 after keyset seek, got %v", ksData.Rows[0][0])
+	}
+
+	// 6. last_key containing a NUL byte must be rejected at the trust boundary.
+	nulResp, err := client.Get(ts.URL + "/api/session/" + connRec.ID + "/table/products/rows?sort_col=id&last_key=1%002")
+	if err != nil {
+		t.Fatalf("nul last_key request error: %v", err)
+	}
+	nulResp.Body.Close()
+	if nulResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for NUL last_key, got %d", nulResp.StatusCode)
 	}
 }

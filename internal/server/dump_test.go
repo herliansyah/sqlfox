@@ -175,6 +175,200 @@ INSERT INTO tags (id, name) VALUES (2, 'Sci-Fi');
 	}
 }
 
+// TestRunSQLScript_SafetyGuardGate verifies the Large SQL Runner no longer bypasses the Safety
+// Guard: a script containing a destructive DROP must be blocked (HTTP 409) unless confirm=true, and
+// a confirmed destructive run must leave a pre-DDL backup snapshot behind.
+func TestRunSQLScript_SafetyGuardGate(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "sqlfox-script-guard-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	backupDir := filepath.Join(tempDir, "backups")
+	v, err := vault.OpenVault(filepath.Join(tempDir, "config.db"), "test-master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	srv := NewServer(v, nil, backupDir, "test-master")
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+	client := ts.Client()
+
+	// Production environment so DROP is a hard CRITICAL challenge regardless of row estimates.
+	createPayload := vault.ConnectionRecord{
+		Name:         "Script Guard Test",
+		Environment:  "Production",
+		Driver:       "sqlite",
+		DatabaseName: filepath.Join(tempDir, "target.db"),
+	}
+	body, _ := json.Marshal(createPayload)
+	resp, err := client.Post(ts.URL+"/api/connections", "application/json", bytes.NewReader(body))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("create connection failed: %v", err)
+	}
+	var conn vault.ConnectionRecord
+	_ = json.NewDecoder(resp.Body).Decode(&conn)
+	resp.Body.Close()
+
+	resp, err = client.Post(fmt.Sprintf("%s/api/session/connect/%s", ts.URL, conn.ID), "application/json", nil)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("connect session failed: %v", err)
+	}
+	resp.Body.Close()
+
+	// Production sessions auto-lock to read-only; unlock so we can exercise mutations/DDL.
+	resp, err = client.Post(fmt.Sprintf("%s/api/session/%s/toggle-readonly", ts.URL, conn.ID), "application/json", nil)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("toggle read-only failed: %v", err)
+	}
+	resp.Body.Close()
+	// Seed a table with rows. In Production even CREATE is challenge-gated, so the seed must pass
+	// confirm=true (this also exercises the confirmed path for a non-DROP statement).
+	seedScript := "CREATE TABLE victims (id INTEGER PRIMARY KEY, v TEXT);\nINSERT INTO victims (id, v) VALUES (1, 'a'), (2, 'b');\n"
+	runScript := func(script string, query string) (*http.Response, []byte) {
+		var b bytes.Buffer
+		mw := multipart.NewWriter(&b)
+		part, _ := mw.CreateFormFile("file", "script.sql")
+		_, _ = part.Write([]byte(script))
+		_ = mw.Close()
+		url := fmt.Sprintf("%s/api/session/%s/run-sql-script?stop_on_error=true", ts.URL, conn.ID)
+		if query != "" {
+			url += "&" + query
+		}
+		req, _ := http.NewRequest("POST", url, &b)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		r, e := client.Do(req)
+		if e != nil {
+			t.Fatalf("run-sql-script request failed: %v", e)
+		}
+		data, _ := io.ReadAll(r.Body)
+		r.Body.Close()
+		return r, data
+	}
+
+	if r, data := runScript(seedScript, "confirm=true"); r.StatusCode != http.StatusOK {
+		t.Fatalf("seed script failed: status=%d body=%s", r.StatusCode, data)
+	}
+
+	// 1. Destructive script WITHOUT confirm must be blocked with 409 and must not drop the table.
+	dropScript := "INSERT INTO victims (id, v) VALUES (3, 'c');\nDROP TABLE victims;\n"
+	r, data := runScript(dropScript, "")
+	if r.StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409 for unconfirmed destructive script, got %d: %s", r.StatusCode, data)
+	}
+	var blocked struct {
+		RequiresChallenge bool `json:"requires_challenge"`
+		Blockers          []struct {
+			Operation   string `json:"operation"`
+			TargetTable string `json:"target_table"`
+		} `json:"blockers"`
+	}
+	if err := json.Unmarshal(data, &blocked); err != nil {
+		t.Fatalf("decode block response: %v (%s)", err, data)
+	}
+	if !blocked.RequiresChallenge || len(blocked.Blockers) != 1 || blocked.Blockers[0].Operation != "DROP" {
+		t.Fatalf("expected one DROP blocker, got: %s", data)
+	}
+
+	// The table must still exist and have its original 2 rows (the INSERT before DROP must not have run).
+	resp, err = client.Get(fmt.Sprintf("%s/api/session/%s/table/victims/rows?limit=10", ts.URL, conn.ID))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("victims should still exist after blocked script: status=%d err=%v", resp.StatusCode, err)
+	}
+	var rowsResp struct {
+		Rows [][]any `json:"rows"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&rowsResp)
+	resp.Body.Close()
+	if len(rowsResp.Rows) != 2 {
+		t.Fatalf("expected table untouched (2 rows) after blocked script, got %d", len(rowsResp.Rows))
+	}
+
+	// 2. Same script WITH confirm=true must run and drop the table, leaving a pre-DDL backup.
+	r, data = runScript("DROP TABLE victims;\n", "confirm=true")
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("confirmed destructive script should succeed: status=%d body=%s", r.StatusCode, data)
+	}
+	if !strings.Contains(string(data), `"status":"completed"`) {
+		t.Fatalf("expected completed status, got: %s", data)
+	}
+
+	// A pre-DDL Smart Tiered Backup of victims must exist.
+	entries, _ := os.ReadDir(backupDir)
+	foundBackup := false
+	for _, e := range entries {
+		if strings.Contains(e.Name(), "victims") && strings.HasSuffix(e.Name(), ".sql") {
+			foundBackup = true
+		}
+	}
+	if !foundBackup {
+		t.Fatalf("expected a pre-DDL backup snapshot for 'victims' in %s, entries=%v", backupDir, entries)
+	}
+}
+
+func TestRunSQLScript_PayloadSizeLimit(t *testing.T) {
+	tempDir := t.TempDir()
+	v, err := vault.OpenVault(filepath.Join(tempDir, "config.db"), "testpass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	srv := NewServer(v, nil, filepath.Join(tempDir, "backups"), "testpass")
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+	client := ts.Client()
+
+	conn := vault.ConnectionRecord{
+		Name:         "Limit Test",
+		Environment:  "Development",
+		Driver:       "sqlite",
+		DatabaseName: filepath.Join(tempDir, "limit.db"),
+	}
+	body, _ := json.Marshal(conn)
+	resp, err := client.Post(ts.URL+"/api/connections", "application/json", bytes.NewReader(body))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("create conn: %v", err)
+	}
+	var created vault.ConnectionRecord
+	_ = json.NewDecoder(resp.Body).Decode(&created)
+	resp.Body.Close()
+
+	resp, err = client.Post(fmt.Sprintf("%s/api/session/connect/%s", ts.URL, created.ID), "application/json", nil)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("connect: %v", err)
+	}
+	resp.Body.Close()
+
+	// An oversized raw body (>100MB ContentLength) must be rejected with 413 Payload Too Large.
+	url := fmt.Sprintf("%s/api/session/%s/run-sql-script", ts.URL, created.ID)
+	oversized := io.LimitReader(&repeatReader{b: ' '}, maxScriptPayloadBytes+1)
+	req, _ := http.NewRequest("POST", url, oversized)
+	req.Header.Set("Content-Type", "text/plain")
+	r, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Body.Close()
+	if r.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413 for oversized script, got: %d", r.StatusCode)
+	}
+}
+
+type repeatReader struct {
+	b byte
+}
+
+func (r *repeatReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = r.b
+	}
+	return len(p), nil
+}
+
 func TestSplitSQLStatements_DoubledQuotesAndDollarQuotes(t *testing.T) {
 	script := `
 INSERT INTO logs (msg) VALUES ('Failed; couldn''t connect');
