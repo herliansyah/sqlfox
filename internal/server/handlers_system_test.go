@@ -86,3 +86,25 @@ func TestSystemShutdownHandler(t *testing.T) {
 		t.Fatal("shutdownFn was not invoked within timeout")
 	}
 }
+
+func TestMaskTokenRevealsNothing(t *testing.T) {
+	for _, tok := range []string{"ghp_1234567890abcdef", "short", "ghp_ABCDEF"} {
+		masked := maskToken(tok)
+		if masked == "" {
+			t.Fatalf("expected non-empty mask for non-empty token %q", tok)
+		}
+		for _, r := range tok {
+			if r == '\u2022' {
+				continue
+			}
+			for _, m := range masked {
+				if m == r {
+					t.Errorf("mask %q leaked character %q from token %q", masked, string(r), tok)
+				}
+			}
+		}
+	}
+	if maskToken("") != "" {
+		t.Errorf("empty token must mask to empty string")
+	}
+}
