@@ -501,7 +501,6 @@ func TestActiveSession_CancelQuery_BatchedFallbackDispatch(t *testing.T) {
 	}
 }
 
-
 func TestActiveSession_TransactionLifecycle(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "sqlfox-tx-test-*")
 	if err != nil {

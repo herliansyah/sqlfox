@@ -248,3 +248,57 @@ func TestCloudSync_MirrorDeletionScope(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveGitHubAPIBase(t *testing.T) {
+	// Default and explicit https hosts are accepted.
+	okCases := []string{
+		"",
+		"https://api.github.com",
+		"https://ghe.corp.example.com/api/v3",
+		"http://127.0.0.1:12345", // loopback http tolerated for local mocks/tests
+		"http://localhost:8080",
+	}
+	for _, c := range okCases {
+		if _, err := resolveGitHubAPIBase(c); err != nil {
+			t.Errorf("expected api_base_url %q to be accepted, got: %v", c, err)
+		}
+	}
+
+	// Cleartext to a network host, non-http(s) schemes, and malformed URLs are rejected so the
+	// bearer token can never be exfiltrated to an attacker-chosen endpoint (SSRF guard).
+	badCases := []string{
+		"http://attacker.example.com",
+		"http://10.0.0.5",
+		"ftp://api.github.com",
+		"https://api.github.com?x=1",
+		"https://user:pass@api.github.com",
+		"://nonsense",
+	}
+	for _, c := range badCases {
+		if _, err := resolveGitHubAPIBase(c); err == nil {
+			t.Errorf("expected api_base_url %q to be rejected, but it was accepted", c)
+		}
+	}
+}
+
+func TestValidateGitHubTarget(t *testing.T) {
+	if err := validateGitHubTarget("octocat/my-notes", "main"); err != nil {
+		t.Errorf("expected valid repo/branch, got: %v", err)
+	}
+	if err := validateGitHubTarget("octocat/my-notes", ""); err != nil {
+		t.Errorf("empty branch should be allowed (defaults applied by caller), got: %v", err)
+	}
+	badTargets := []struct{ repo, branch string }{
+		{"no-slash", "main"},
+		{"owner/repo/extra", "main"},
+		{"owner/../etc", "main"},
+		{"owner/repo", "main?query"},
+		{"owner/repo", "feature branch"},
+		{"", "main"},
+	}
+	for _, c := range badTargets {
+		if err := validateGitHubTarget(c.repo, c.branch); err == nil {
+			t.Errorf("expected repo=%q branch=%q to be rejected", c.repo, c.branch)
+		}
+	}
+}

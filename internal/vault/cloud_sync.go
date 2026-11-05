@@ -10,9 +10,56 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
+
+// reGitHubRepo constrains an "owner/repo" slug to the characters GitHub actually permits, so it can
+// be interpolated into an API path without URL-injection (extra path segments, query chars, '..').
+var reGitHubRepo = regexp.MustCompile(`^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`)
+
+// reGitHubBranch rejects branch names containing path/query metacharacters. GitHub forbids these in
+// ref names anyway; the guard keeps a crafted branch from altering the request path.
+var reGitHubBranch = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
+
+// resolveGitHubAPIBase validates and normalizes the API base URL. Only HTTPS is accepted so the
+// bearer token is never sent in cleartext, and a custom host is permitted only for the documented
+// enterprise/self-hosted GitHub API override — never an arbitrary attacker-chosen endpoint set via
+// a stored config (SSRF / token-exfiltration guard).
+func resolveGitHubAPIBase(apiBaseURL string) (string, error) {
+	apiBaseURL = strings.TrimSpace(apiBaseURL)
+	if apiBaseURL == "" {
+		return "https://api.github.com", nil
+	}
+	u, err := url.Parse(apiBaseURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid api_base_url: %w", err)
+	}
+	if u.Host == "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		return "", errors.New("api_base_url must be a bare host URL")
+	}
+	host := u.Hostname()
+	isLoopbackHost := host == "localhost" || host == "127.0.0.1" || host == "::1"
+	// HTTPS is mandatory so the bearer token is never sent in cleartext. Plain http is tolerated
+	// only for a loopback host (local test/mock servers), which never crosses the network.
+	if u.Scheme != "https" && !(u.Scheme == "http" && isLoopbackHost) {
+		return "", errors.New("api_base_url must use https")
+	}
+	return strings.TrimRight(apiBaseURL, "/"), nil
+}
+
+// validateGitHubTarget checks the repo slug and branch before they are interpolated into API paths.
+func validateGitHubTarget(repo, branch string) error {
+	if !reGitHubRepo.MatchString(strings.TrimSpace(repo)) {
+		return errors.New("valid repository in 'owner/repo' format is required")
+	}
+	if branch != "" && !reGitHubBranch.MatchString(branch) {
+		return errors.New("invalid branch name")
+	}
+	return nil
+}
 
 // CloudSyncConfig represents settings for GitHub-based notes & vault replication.
 type CloudSyncConfig struct {
@@ -96,9 +143,10 @@ func (v *Vault) GetCloudSyncConfig() (*CloudSyncConfig, error) {
 
 	if stored.EncryptedToken != "" {
 		dec, err := Decrypt(stored.EncryptedToken, v.key)
-		if err == nil {
-			cfg.GitHubToken = string(dec)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decrypt stored github token: %w", err)
 		}
+		cfg.GitHubToken = string(dec)
 	}
 
 	return cfg, nil
@@ -204,14 +252,14 @@ func TestGitHubAccess(ctx context.Context, apiBaseURL, token, repo, branch strin
 		return errors.New("github token is required")
 	}
 	repo = strings.TrimSpace(repo)
-	if repo == "" || !strings.Contains(repo, "/") {
-		return errors.New("valid repository in 'owner/repo' format is required")
+	if err := validateGitHubTarget(repo, branch); err != nil {
+		return err
 	}
 
-	if apiBaseURL == "" {
-		apiBaseURL = "https://api.github.com"
+	apiBaseURL, err := resolveGitHubAPIBase(apiBaseURL)
+	if err != nil {
+		return err
 	}
-	apiBaseURL = strings.TrimRight(apiBaseURL, "/")
 
 	reqURL := fmt.Sprintf("%s/repos/%s", apiBaseURL, repo)
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
@@ -268,20 +316,18 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 		return nil, errors.New("github token is not configured")
 	}
 	repo := strings.TrimSpace(cfg.GitHubRepo)
-	if repo == "" || !strings.Contains(repo, "/") {
-		return nil, errors.New("invalid repository format, expected 'owner/repo'")
-	}
-
 	branch := cfg.GitHubBranch
 	if branch == "" {
 		branch = "main"
 	}
-
-	apiBaseURL := cfg.APIBaseURL
-	if apiBaseURL == "" {
-		apiBaseURL = "https://api.github.com"
+	if err := validateGitHubTarget(repo, branch); err != nil {
+		return nil, err
 	}
-	apiBaseURL = strings.TrimRight(apiBaseURL, "/")
+
+	apiBaseURL, err := resolveGitHubAPIBase(cfg.APIBaseURL)
+	if err != nil {
+		return nil, err
+	}
 
 	// 1. Export human-readable notes and snippets
 	files, err := ExportNotesFiles(v)

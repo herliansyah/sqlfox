@@ -24,6 +24,10 @@ func TestValidateTableFilter(t *testing.T) {
 		"updated_at > '2026-01-01'",
 		"drop_count = 5", // column name containing keyword substring
 		"alter_status IS NOT NULL",
+		"category NOT IN ('a', 'b')",
+		"age BETWEEN 18 AND 65",
+		"(status = 'active' OR status = 'pending') AND score > 0",
+		"price >= 10.5 AND price <= 99.99",
 	}
 
 	for _, c := range validCases {
@@ -45,6 +49,20 @@ func TestValidateTableFilter(t *testing.T) {
 		"ALTER TABLE users ADD evil INT",
 		"TRUNCATE TABLE users",
 		"GRANT ALL PRIVILEGES ON *.* TO 'root'",
+		// Boolean / subquery / time-based injection the legacy denylist let through:
+		"0 OR (SELECT 1)",
+		"1=1 OR (SELECT password FROM users LIMIT 1) = 'x'",
+		"id = 1 OR EXISTS (SELECT 1 FROM admin)",
+		"id = SLEEP(5)",
+		"0 OR SLEEP(5)",
+		"id = pg_sleep(5)",
+		"id = BENCHMARK(1000000, MD5('a'))",
+		"id = 1 -- comment",
+		"id = 1 # comment",
+		"id = 1 /* block */",
+		"id = 1)) OR ((1=1", // unbalanced parentheses
+		"name = char(0x41)", // function call
+		"id @ 1",            // illegal operator character
 	}
 
 	for _, c := range invalidCases {

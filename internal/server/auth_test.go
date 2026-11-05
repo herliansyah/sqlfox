@@ -423,4 +423,3 @@ func TestDNSRebindingGuardHostCheck(t *testing.T) {
 		t.Errorf("expected attacker domain to be blocked with 403, got: %d", rec4.Code)
 	}
 }
-

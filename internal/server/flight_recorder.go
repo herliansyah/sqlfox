@@ -172,6 +172,9 @@ func (m *FlightRecorderManager) runLoop(ctx context.Context, rec *ActiveRecordin
 	ticker := time.NewTicker(rec.Interval)
 	defer ticker.Stop()
 	defer close(rec.done)
+	// Always release the timeout context's resources on exit, including when the 10-minute
+	// deadline fires on its own (avoids a context/timer leak flagged by go vet lostcancel).
+	defer rec.cancel()
 
 	defer func() {
 		m.mu.Lock()

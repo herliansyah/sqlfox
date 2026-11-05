@@ -91,7 +91,37 @@ type ActiveSession struct {
 	txLastActive    time.Time
 	closed          bool
 	runSeq          uint64
+	inFlight        int // number of Execute/ExecuteStream/Stream calls currently running
 	mu              sync.RWMutex
+}
+
+// beginInFlight marks that a request is actively executing against this session (and any pinned
+// transaction), so the reaper will not roll back its transaction or evict it mid-flight.
+func (s *ActiveSession) beginInFlight() {
+	s.mu.Lock()
+	s.inFlight++
+	s.LastActive = time.Now()
+	s.mu.Unlock()
+}
+
+// endInFlight marks the end of an in-flight request and refreshes transaction activity timestamps
+// so a long statement that just finished does not get immediately reaped.
+func (s *ActiveSession) endInFlight() {
+	s.mu.Lock()
+	if s.inFlight > 0 {
+		s.inFlight--
+	}
+	now := time.Now()
+	s.LastActive = now
+	if s.activeTx != nil {
+		s.txLastActive = now
+	}
+	for _, entry := range s.tabTransactions {
+		if entry != nil && entry.tx != nil {
+			entry.lastActive = now
+		}
+	}
+	s.mu.Unlock()
 }
 
 // Close gracefully releases the session, rolling back any uncommitted transactions to avoid orphaned locks.
@@ -257,6 +287,21 @@ func (s *ActiveSession) SetLatency(ms int64) {
 	s.mu.Lock()
 	s.LatencyMs = ms
 	s.mu.Unlock()
+}
+
+// liveSession returns the driver session for a read-only diagnostic call without holding the
+// session lock across the (blocking) DB round-trip. s.Session is immutable after the session is
+// published, so snapshotting it under a brief lock is race-free; callers must not hold s.mu while
+// invoking the returned session. Returns ErrSessionClosed once Close has run.
+func (s *ActiveSession) liveSession() (driver.Session, error) {
+	s.mu.RLock()
+	sess := s.Session
+	closed := s.closed
+	s.mu.RUnlock()
+	if sess == nil || closed {
+		return nil, driver.ErrSessionClosed
+	}
+	return sess, nil
 }
 
 // MarshalJSON snapshots the exported fields under the lock.
@@ -427,11 +472,23 @@ func (sm *SessionManager) startReaper() {
 		case <-sm.stopReaper:
 			return
 		case <-ticker.C:
-			sm.mu.Lock()
 			now := time.Now()
+
+			// Phase 1: under the locks, snapshot the transactions to roll back and the sessions to
+			// evict, and detach them from the maps. No blocking DB I/O is performed while any lock
+			// is held — rollbacks and Close run in phase 2 after the locks are released.
+			var txToRollback []driver.TxSession
+			var sessToClose []*ActiveSession
+
+			sm.mu.Lock()
 			for id, sess := range sm.sessions {
-				// Rollback idle transactions inactive for 60 seconds to prevent orphan lock contention on DB server
 				sess.mu.Lock()
+				// Never roll back or evict a session with a request actively executing against it:
+				// a long-running statement or stream legitimately holds its transaction past 60s.
+				if sess.inFlight > 0 {
+					sess.mu.Unlock()
+					continue
+				}
 				if sess.tabTransactions != nil {
 					for tabID, entry := range sess.tabTransactions {
 						if entry == nil || entry.tx == nil {
@@ -443,7 +500,7 @@ func (sm *SessionManager) startReaper() {
 							refTime = entry.startedAt
 						}
 						if now.Sub(refTime) > 60*time.Second {
-							_ = entry.tx.Rollback()
+							txToRollback = append(txToRollback, entry.tx)
 							delete(sess.tabTransactions, tabID)
 						}
 					}
@@ -456,18 +513,26 @@ func (sm *SessionManager) startReaper() {
 					refTime = sess.txStartedAt
 				}
 				if sess.activeTx != nil && now.Sub(refTime) > 60*time.Second {
-					_ = sess.activeTx.Rollback()
+					txToRollback = append(txToRollback, sess.activeTx)
 					sess.activeTx = nil
 				}
 				isIdle := now.Sub(sess.LastActive) > 30*time.Minute
 				sess.mu.Unlock()
 
 				if isIdle {
-					_ = sess.Close()
+					sessToClose = append(sessToClose, sess)
 					delete(sm.sessions, id)
 				}
 			}
 			sm.mu.Unlock()
+
+			// Phase 2: blocking teardown without any lock held.
+			for _, tx := range txToRollback {
+				_ = tx.Rollback()
+			}
+			for _, sess := range sessToClose {
+				_ = sess.Close()
+			}
 		}
 	}
 }
@@ -639,10 +704,15 @@ func (sm *SessionManager) GetActiveOrSingleSession(connectionID string) (*Active
 
 func (sm *SessionManager) CloseSession(connectionID string) error {
 	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	if sess, ok := sm.sessions[connectionID]; ok {
+	sess, ok := sm.sessions[connectionID]
+	if ok {
 		delete(sm.sessions, connectionID)
+	}
+	sm.mu.Unlock()
+
+	// Close outside the manager lock: Close performs blocking rollbacks + socket teardown and must
+	// not serialize every other ConnectSession/GetSession for its duration.
+	if ok {
 		return sess.Close()
 	}
 	return nil
@@ -650,17 +720,20 @@ func (sm *SessionManager) CloseSession(connectionID string) error {
 
 func (sm *SessionManager) CloseAll() {
 	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
 	select {
 	case <-sm.stopReaper:
 	default:
 		close(sm.stopReaper)
 	}
-
+	toClose := make([]*ActiveSession, 0, len(sm.sessions))
 	for id, sess := range sm.sessions {
-		_ = sess.Close()
+		toClose = append(toClose, sess)
 		delete(sm.sessions, id)
+	}
+	sm.mu.Unlock()
+
+	for _, sess := range toClose {
+		_ = sess.Close()
 	}
 }
 
@@ -671,9 +744,8 @@ func (sm *SessionManager) CloseAll() {
 // 4. Triggers pre-DDL Smart Tiered Backup on destructive schema operations (DROP, TRUNCATE)
 // 5. Routes to mutation execution or stream execution with the Implicit Safe Limit (1,000 rows).
 func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*ExecuteResponse, error) {
-	s.mu.Lock()
-	s.LastActive = time.Now()
-	s.mu.Unlock()
+	s.beginInFlight()
+	defer s.endInFlight()
 
 	trimmedSQL := strings.TrimSpace(req.SQL)
 	if trimmedSQL == "" {
@@ -1158,9 +1230,8 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 // ExecuteStream streams query results line-by-line as NDJSON (ADR 0058).
 // It delivers an immediate micro-chunk (20 rows) for sub-50ms TTFR, followed by batched chunks.
 func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w io.Writer, flusher http.Flusher) (*ExecuteResponse, error) {
-	s.mu.Lock()
-	s.LastActive = time.Now()
-	s.mu.Unlock()
+	s.beginInFlight()
+	defer s.endInFlight()
 
 	trimmedSQL := strings.TrimSpace(req.SQL)
 	if trimmedSQL == "" {
@@ -2143,46 +2214,38 @@ func (s *ActiveSession) CancelQuery(ctx context.Context, queryID string) error {
 
 // GetProcesslist retrieves active threads and lock wait graph from the active driver.
 func (s *ActiveSession) GetProcesslist(ctx context.Context) (*driver.ProcesslistResult, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if s.Session == nil {
-		return nil, driver.ErrSessionClosed
+	sess, err := s.liveSession()
+	if err != nil {
+		return nil, err
 	}
-	return s.Session.GetProcesslist(ctx)
+	return sess.GetProcesslist(ctx)
 }
 
 // InspectClusterHealth retrieves cluster topology, node synchronization, and bottleneck diagnostics.
 func (s *ActiveSession) InspectClusterHealth(ctx context.Context) (*driver.ClusterHealthReport, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if s.Session == nil {
-		return nil, driver.ErrSessionClosed
+	sess, err := s.liveSession()
+	if err != nil {
+		return nil, err
 	}
-	return s.Session.InspectClusterHealth(ctx)
+	return sess.InspectClusterHealth(ctx)
 }
 
 // InspectServerVariables retrieves server configuration parameters and tuning heuristics.
 func (s *ActiveSession) InspectServerVariables(ctx context.Context) (*driver.ServerVariablesReport, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if s.Session == nil {
-		return nil, driver.ErrSessionClosed
+	sess, err := s.liveSession()
+	if err != nil {
+		return nil, err
 	}
-	return s.Session.InspectServerVariables(ctx)
+	return sess.InspectServerVariables(ctx)
 }
 
 // KillProcess terminates an active query or client connection out-of-band.
 func (s *ActiveSession) KillProcess(ctx context.Context, threadID int64, killConnection bool) error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if s.Session == nil {
-		return driver.ErrSessionClosed
+	sess, err := s.liveSession()
+	if err != nil {
+		return err
 	}
-	return s.Session.KillProcess(ctx, threadID, killConnection)
+	return sess.KillProcess(ctx, threadID, killConnection)
 }
 
 // Stream executes a non-destructive query, returning a chunked RowStream.
@@ -2228,182 +2291,164 @@ func (s *ActiveSession) Stream(ctx context.Context, sql string, maxRows int) (dr
 
 // GetDatabaseDiagnostics returns physical storage and metadata for all databases.
 func (s *ActiveSession) GetDatabaseDiagnostics(ctx context.Context) ([]driver.DatabaseDiagnostics, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.Session == nil {
-		return nil, driver.ErrSessionClosed
+	sess, err := s.liveSession()
+	if err != nil {
+		return nil, err
 	}
-	return s.Session.GetDatabaseDiagnostics(ctx)
+	return sess.GetDatabaseDiagnostics(ctx)
 }
 
 // GetTableDiagnostics returns physical storage and overhead metrics.
 func (s *ActiveSession) GetTableDiagnostics(ctx context.Context, database, table string) ([]driver.TableDiagnostics, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.Session == nil {
-		return nil, driver.ErrSessionClosed
+	sess, err := s.liveSession()
+	if err != nil {
+		return nil, err
 	}
-	return s.Session.GetTableDiagnostics(ctx, database, table)
+	return sess.GetTableDiagnostics(ctx, database, table)
 }
 
 // ExecuteMaintenance runs maintenance actions (OPTIMIZE, ANALYZE, CHECK, VACUUM).
 func (s *ActiveSession) ExecuteMaintenance(ctx context.Context, database string, tables []string, action string) ([]driver.MaintenanceResult, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.Session == nil {
-		return nil, driver.ErrSessionClosed
+	sess, err := s.liveSession()
+	if err != nil {
+		return nil, err
 	}
-	return s.Session.ExecuteMaintenance(ctx, database, tables, action)
+	return sess.ExecuteMaintenance(ctx, database, tables, action)
 }
 
 // GetRedundantIndexes detects duplicate, shadowed, and redundant primary key indexes.
 func (s *ActiveSession) GetRedundantIndexes(ctx context.Context, database, table string) ([]driver.RedundantIndex, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.Session == nil {
-		return nil, driver.ErrSessionClosed
+	sess, err := s.liveSession()
+	if err != nil {
+		return nil, err
 	}
-	return s.Session.GetRedundantIndexes(ctx, database, table)
+	return sess.GetRedundantIndexes(ctx, database, table)
 }
 
 // PeekForeignKeyRow queries parent table for a single row matching a foreign key value.
 func (s *ActiveSession) PeekForeignKeyRow(ctx context.Context, database, table, column string, value any) (*driver.PeekResult, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.Session == nil {
-		return nil, driver.ErrSessionClosed
+	sess, err := s.liveSession()
+	if err != nil {
+		return nil, err
 	}
-	return s.Session.PeekForeignKeyRow(ctx, database, table, column, value)
+	return sess.PeekForeignKeyRow(ctx, database, table, column, value)
 }
 
 // GetUserList lists database users.
 func (s *ActiveSession) GetUserList(ctx context.Context) ([]driver.DatabaseUser, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.Session == nil {
-		return nil, driver.ErrSessionClosed
+	sess, err := s.liveSession()
+	if err != nil {
+		return nil, err
 	}
-	return s.Session.GetUserList(ctx)
+	return sess.GetUserList(ctx)
 }
 
 // GetUserGrants returns active grants for a user account.
 func (s *ActiveSession) GetUserGrants(ctx context.Context, user, host string) ([]string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.Session == nil {
-		return nil, driver.ErrSessionClosed
+	sess, err := s.liveSession()
+	if err != nil {
+		return nil, err
 	}
-	return s.Session.GetUserGrants(ctx, user, host)
+	return sess.GetUserGrants(ctx, user, host)
 }
 
 // SaveUser creates or updates a user account.
 func (s *ActiveSession) SaveUser(ctx context.Context, user, host, password string, isNew bool) error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.Session == nil {
-		return driver.ErrSessionClosed
+	sess, err := s.liveSession()
+	if err != nil {
+		return err
 	}
-	return s.Session.SaveUser(ctx, user, host, password, isNew)
+	return sess.SaveUser(ctx, user, host, password, isNew)
 }
 
 // DropUser removes a user account.
 func (s *ActiveSession) DropUser(ctx context.Context, user, host string) error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.Session == nil {
-		return driver.ErrSessionClosed
+	sess, err := s.liveSession()
+	if err != nil {
+		return err
 	}
-	return s.Session.DropUser(ctx, user, host)
+	return sess.DropUser(ctx, user, host)
 }
 
 // ApplyUserGrants grants privileges to a user.
 func (s *ActiveSession) ApplyUserGrants(ctx context.Context, req driver.UserGrantRequest) error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.Session == nil {
-		return driver.ErrSessionClosed
+	sess, err := s.liveSession()
+	if err != nil {
+		return err
 	}
-	return s.Session.ApplyUserGrants(ctx, req)
+	return sess.ApplyUserGrants(ctx, req)
 }
 
 // SampleFlightMetrics captures performance telemetry and correlated queries from the driver session.
 func (s *ActiveSession) SampleFlightMetrics(ctx context.Context) (*driver.FlightMetricSample, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.Session == nil {
-		return nil, driver.ErrSessionClosed
+	sess, err := s.liveSession()
+	if err != nil {
+		return nil, err
 	}
-	return s.Session.SampleFlightMetrics(ctx)
+	return sess.SampleFlightMetrics(ctx)
 }
 
 // InspectDeadlock delegates deadlock analysis to the driver session.
 func (s *ActiveSession) InspectDeadlock(ctx context.Context) (*driver.DeadlockReport, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.Session == nil {
-		return nil, driver.ErrSessionClosed
+	sess, err := s.liveSession()
+	if err != nil {
+		return nil, err
 	}
-	return s.Session.InspectDeadlock(ctx)
+	return sess.InspectDeadlock(ctx)
 }
 
 // GetStatementDigest delegates statement digest queries to the driver session.
 func (s *ActiveSession) GetStatementDigest(ctx context.Context, limit int) ([]driver.StatementDigestEntry, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.Session == nil {
-		return nil, driver.ErrSessionClosed
+	sess, err := s.liveSession()
+	if err != nil {
+		return nil, err
 	}
-	return s.Session.GetStatementDigest(ctx, limit)
+	return sess.GetStatementDigest(ctx, limit)
 }
 
 // ResetStatementDigest delegates statement digest statistics clearing to the driver session.
 func (s *ActiveSession) ResetStatementDigest(ctx context.Context) error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.Session == nil {
-		return driver.ErrSessionClosed
+	sess, err := s.liveSession()
+	if err != nil {
+		return err
 	}
-	return s.Session.ResetStatementDigest(ctx)
+	return sess.ResetStatementDigest(ctx)
 }
 
 // GetRoutineDDL retrieves the raw CREATE statement for a Stored Procedure or Function.
 func (s *ActiveSession) GetRoutineDDL(ctx context.Context, routineType, name string) (string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.Session == nil {
-		return "", driver.ErrSessionClosed
+	sess, err := s.liveSession()
+	if err != nil {
+		return "", err
 	}
-	return s.Session.GetRoutineDDL(ctx, routineType, name)
+	return sess.GetRoutineDDL(ctx, routineType, name)
 }
 
 // GetEventDDL retrieves the raw CREATE statement for a Scheduled Event.
 func (s *ActiveSession) GetEventDDL(ctx context.Context, name string) (string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.Session == nil {
-		return "", driver.ErrSessionClosed
+	sess, err := s.liveSession()
+	if err != nil {
+		return "", err
 	}
-	return s.Session.GetEventDDL(ctx, name)
+	return sess.GetEventDDL(ctx, name)
 }
 
 // ToggleEventStatus toggles the status of a Scheduled Event.
 func (s *ActiveSession) ToggleEventStatus(ctx context.Context, name string, enable bool) error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.Session == nil {
-		return driver.ErrSessionClosed
+	sess, err := s.liveSession()
+	if err != nil {
+		return err
 	}
-	return s.Session.ToggleEventStatus(ctx, name, enable)
+	return sess.ToggleEventStatus(ctx, name, enable)
 }
 
 // GetTablePartitions retrieves partition telemetry for a table.
 func (s *ActiveSession) GetTablePartitions(ctx context.Context, database, table string) ([]driver.PartitionMetadata, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.Session == nil {
-		return nil, driver.ErrSessionClosed
+	sess, err := s.liveSession()
+	if err != nil {
+		return nil, err
 	}
-	return s.Session.GetTablePartitions(ctx, database, table)
+	return sess.GetTablePartitions(ctx, database, table)
 }
 
 // inspectAllStatements runs the Safety Guard on every statement of a (possibly multi-statement) input,

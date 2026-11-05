@@ -45,10 +45,9 @@ func maskToken(t string) string {
 	if t == "" {
 		return ""
 	}
-	if len(t) <= 8 {
-		return "••••••••"
-	}
-	return t[:4] + "••••••••" + t[len(t)-4:]
+	// Reveal no characters of the real token: surfacing a prefix/suffix leaks entropy for an
+	// attacker who can read the config. A fixed mask still signals "a token is set".
+	return "••••••••"
 }
 
 func (s *Server) handleGetCloudSyncConfig(w http.ResponseWriter, r *http.Request) {
