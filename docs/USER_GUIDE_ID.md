@@ -118,11 +118,11 @@ Unduh arsip rilis terbaru di halaman resmi [GitHub Releases](https://github.com/
 
 ```bash
 # Linux amd64 (Download & ekstrak sekali jalan)
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.15.0/sqlfox-v0.15.0-linux-amd64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.16.1/sqlfox-v0.16.1-linux-amd64.tar.gz | tar -xz
 ./sqlfox
 
 # macOS Apple Silicon (ARM64 M1/M2/M3/M4)
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.15.0/sqlfox-v0.15.0-darwin-arm64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.16.1/sqlfox-v0.16.1-darwin-arm64.tar.gz | tar -xz
 ./sqlfox
 ```
 
@@ -887,7 +887,7 @@ Dapat dibuka dengan mengklik tombol **⚡ Activity** pada status bar bawah atau 
 > **Jawaban**: SqlFox dilindungi fitur **Global Network Error Boundary**. Aplikasi akan tetap mempertahankan draf query editor Anda dan editan tabel yang belum disimpan di memori lokal peramban, sembari mencoba memulihkan koneksi secara otomatis.
 
 #### Q: Bagaimana cara memperbarui SqlFox ke versi rilis terbaru?
-> **Jawaban**: SqlFox dilengkapi fitur **In-App Self-Update**. Setiap kali ada rilis versi baru di GitHub, tombol **🚀 Update** akan muncul di status bar bawah. Klik tombol tersebut untuk membaca catatan rilis changelog dan meng-upgrade binary secara otomatis dengan satu klik tanpa perlu download manual. Setiap update diverifikasi menyeluruh sebelum mengganti binary: unduhan wajib berasal dari rilis resmi GitHub, membawa tanda tangan Ed25519 yang valid atas manifest checksum (bila build ditandatangani), dan cocok dengan digest SHA-256 yang ditandatangani — kegagalan apa pun membatalkan update dan binary Anda saat ini tetap utuh.
+> **Jawaban**: SqlFox dilengkapi fitur **In-App Self-Update**. Setiap kali ada rilis versi baru di GitHub, tombol **🚀 Update** akan muncul di status bar bawah. Klik tombol tersebut untuk membaca catatan rilis changelog dan meng-upgrade binary secara otomatis dengan satu klik tanpa perlu download manual. Setiap update diverifikasi menyeluruh sebelum mengganti binary: unduhan wajib berasal dari rilis resmi GitHub, membawa tanda tangan Ed25519 yang valid atas manifest checksum (fail-closed), dan cocok dengan digest SHA-256. Setelah file diganti, server melakukan restart rapi: pada sistem POSIX, `syscall.Exec` menggantikan process image langsung di memori (menjaga PID tetap sama dan meniadakan konflik port), sedangkan pada Windows socket listener dan instance lock dilepas sebelum proses baru dijalankan, dengan antarmuka web memantau endpoint `/api/auth/status` secara aktif sebelum memuat ulang workspace.
 
 ---
 

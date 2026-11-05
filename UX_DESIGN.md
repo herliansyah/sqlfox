@@ -1065,6 +1065,29 @@ Sub-navigation bar partitioning outputs for batch SQL runs:
 │ 1 │ 1001  │ admin@example.com     │ active   │ 2026-11-01 10:00:00    │
 │ 2 │ 1002  │ user@example.com      │ active   │ 2026-11-01 10:15:00    │
 └────────────────────────────────────────────────────────────────────────┘
+
+---
+
+## 32. Self-Update Restart & Health Polling Overlay
+
+Non-blocking full-screen overlay during in-place executable replacement and daemon reboot:
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                                                                        │
+│                    🔄 RESTARTING SQLFOX SERVER                         │
+│                                                                        │
+│             Upgrading to v0.16.1 in-place...                           │
+│             Replacing process image and reconnecting session.          │
+│                                                                        │
+│                      [ ⣾ Polling /api/auth/status... ]                 │
+│                                                                        │
+│        Please wait. Your open tabs and unsaved drafts are safely       │
+│        preserved in browser local memory.                              │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
 ```
 
 

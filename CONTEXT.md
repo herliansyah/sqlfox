@@ -1159,3 +1159,22 @@ _Avoid_: Overflow menu, viewport wrap, auto-flip menu
 The sub-navigation bar (`#tab-results-bar`) rendering individual result tabs for each executed statement in a multi-query batch with distinct row counts and execution timings.
 _Avoid_: Multi-grid scroll, compound output, batch result window
 
+## Process Lifecycle & Self-Update Orchestration
+
+**In-Place Process Replacement**:
+The POSIX execution mechanism (`syscall.Exec`) replacing the running binary image within the existing process table slot, preserving the original PID and eliminating file lock contention and port binding races during self-updates.
+_Avoid_: Fork-and-kill, daemon respawn, external restarter
+
+**Graceful Listener Teardown**:
+The orderly shutdown sequence closing active HTTP listeners and releasing PID instance locks prior to child process launch on Windows.
+_Avoid_: Forceful process kill, abrupt socket drop, unreleased socket
+
+**Restart Status Polling**:
+The client-side reconnect routine in the web interface actively polling `/api/auth/status` with linear retry backoff after an update before reloading the application workspace.
+_Avoid_: Blind page reload, fixed sleep reload, unhandled reconnect error
+
+**Browser Spawn Suppression**:
+The CLI parameter (`--no-browser`) automatically injected into process restart arguments to prevent unwanted default browser tab launches during in-app updates.
+_Avoid_: Browser re-opener, tab pop, auto-open race
+
+

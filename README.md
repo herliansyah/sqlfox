@@ -146,7 +146,7 @@ All captures are taken in high resolution (**2x Retina / HiDPI**) on an enterpri
 
 #### Standalone Binary (Recommended)
 
-Download the latest pre-compiled static binary (**v0.15.0**) from [GitHub Releases](https://github.com/herliansyah/sqlfox/releases):
+Download the latest pre-compiled static binary (**v0.16.1**) from [GitHub Releases](https://github.com/herliansyah/sqlfox/releases):
 
 | OS | Architecture | Archive Format |
 | :--- | :--- | :--- |
@@ -156,13 +156,13 @@ Download the latest pre-compiled static binary (**v0.15.0**) from [GitHub Releas
 
 **Linux (amd64):**
 ```bash
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.15.0/sqlfox-v0.15.0-linux-amd64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.16.1/sqlfox-v0.16.1-linux-amd64.tar.gz | tar -xz
 ./sqlfox
 ```
 
 **macOS (Apple Silicon):**
 ```bash
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.15.0/sqlfox-v0.15.0-darwin-arm64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.16.1/sqlfox-v0.16.1-darwin-arm64.tar.gz | tar -xz
 ./sqlfox
 ```
 

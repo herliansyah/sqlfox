@@ -58,6 +58,34 @@ Fitur-fitur esensial yang diharapkan oleh developer dan DBA dari sebuah Database
   - Menambahkan metode `PurgeAuditLogs(retentionDays, maxEntries)` pada `internal/vault/audit.go` serta indeks performa `idx_audit_logs_executed`.
   - Dijalankan secara otomatis saat inisialisasi vault database (`OpenVault`) dengan kebijakan retensi 30 hari dan pembatasan batas atas (*ceiling limit*) maksimal 50.000 log terbaru untuk mencegah kebocoran ruang disk (*disk leak*).
 
+### 1.8 Mutasi In-Place Query Grid & Submenu Kontekstual Terkelompok
+* **Status Saat Ini**: **Terimplementasi (v0.14.0 - v0.14.1)**
+* **Detail Implementasi**:
+  - Memungkinkan pengeditan sel langsung, penambahan draf baris, dan penghapusan baris pada hasil query SELECT arbitrer yang merujuk pada tabel tunggal dengan primary key lengkap.
+  - Pengelompokan aksi menu konteks menjadi hierarki submenu (`Quick Filter`, `Insert Value`, `Mutations`, `Copy / Export`) dengan pembatasan batas viewport agar tidak terpotong tepi layar.
+
+### 1.9 Mode Aplikasi Desktop Mandiri & Integrasi Launcher OS
+* **Status Saat Ini**: **Terimplementasi (v0.15.0)**
+* **Detail Implementasi**:
+  - Dukungan mode jendela desktop frameless menggunakan argumen `--app` Chromium/Edge di Linux, macOS, dan Windows tanpa runtime Electron.
+  - Perintah CLI `sqlfox desktop install/uninstall/status` untuk mendaftarkan launcher Freedesktop dan ikon 512x512 ke sistem.
+  - Perintah `sqlfox stop` dan endpoint `/api/system/shutdown` untuk manajemen proses latar belakang.
+
+### 1.10 Verifikasi Tanda Tangan Rantai Pasok Ed25519 & Paritas Safety Guard Script Runner
+* **Status Saat Ini**: **Terimplementasi (v0.16.0, ADR 0060)**
+* **Detail Implementasi**:
+  - Verifikasi berkas manifest checksum rilis via tanda tangan terpisah Ed25519 (`checksums.txt.sig`) menggunakan public key tertanam (fail-closed) sebelum binary diperbarui.
+  - Script runner SQL berukuran besar mewarisi AST Safety Guard dan Smart Tiered Backup pre-DDL, memblokir DDL/DML destruktif tanpa konfirmasi eksplisit (`confirm=true`).
+  - Pengikatan enkripsi AES-256-GCM ke identitas connection dan field (AAD) di Connection Vault untuk mencegah relokasi ciphertext.
+
+### 1.11 Penggantian Proses In-Place (`syscall.Exec`) & Pencegahan Konflik Port Saat Self-Update
+* **Status Saat Ini**: **Terimplementasi (v0.16.1)**
+* **Detail Implementasi**:
+  - Pada sistem POSIX, restart self-update mengeksekusi `syscall.Exec` untuk menimpa citra proses langsung di memori, mempertahankan PID asli serta meniadakan perebutan file lock dan tabrakan port (`EADDRINUSE`).
+  - Pada Windows, listener socket dan lock file dilepas secara bersih sebelum meluncurkan proses anak.
+  - Menyuntikkan flag `--no-browser` otomatis saat restart dan memantau status kesiapan server via polling `/api/auth/status` sebelum memuat ulang antarmuka web.
+
+
 ---
 
 ## 2. Analisis Fitur Bloated & Potensi Perampingan (Over-Engineering Review)
