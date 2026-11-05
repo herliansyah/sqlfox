@@ -42,6 +42,15 @@ func DeriveKey(passphrase string, salt []byte) []byte {
 
 // Encrypt encrypts plaintext bytes with AES-256-GCM and returns a base64 encoded string.
 func Encrypt(plaintext []byte, key []byte) (string, error) {
+	return EncryptWithAAD(plaintext, key, nil)
+}
+
+// EncryptWithAAD encrypts plaintext with AES-256-GCM, binding the given additional authenticated
+// data (AAD) into the tag. The AAD is NOT stored in the ciphertext: the caller must supply the same
+// AAD to decrypt. Binding a stable per-field context (e.g. "connection:<id>:password") prevents an
+// attacker with raw vault write access from swapping one field's ciphertext into another field,
+// because GCM authentication fails when the AAD differs.
+func EncryptWithAAD(plaintext []byte, key []byte, aad []byte) (string, error) {
 	if len(key) != argonKeyLen {
 		return "", fmt.Errorf("invalid key length: expected %d bytes, got %d", argonKeyLen, len(key))
 	}
@@ -62,12 +71,31 @@ func Encrypt(plaintext []byte, key []byte) (string, error) {
 	}
 
 	// Seal appends the ciphertext and tag to nonce
-	ciphertext := gcm.Seal(nonce, nonce, plaintext, nil)
+	ciphertext := gcm.Seal(nonce, nonce, plaintext, aad)
 	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
-// Decrypt decodes a base64 string and decrypts it using AES-256-GCM.
+// Decrypt decodes a base64 string and decrypts it using AES-256-GCM (no AAD).
 func Decrypt(encodedCiphertext string, key []byte) ([]byte, error) {
+	return decrypt(encodedCiphertext, key, nil)
+}
+
+// DecryptWithAAD decrypts a value sealed by EncryptWithAAD. For backward compatibility with vaults
+// written before AAD binding existed, it first tries the supplied AAD and, on authentication
+// failure, retries with no AAD (legacy ciphertext). Such values are re-sealed with AAD on next save.
+func DecryptWithAAD(encodedCiphertext string, key []byte, aad []byte) ([]byte, error) {
+	plaintext, err := decrypt(encodedCiphertext, key, aad)
+	if err == nil {
+		return plaintext, nil
+	}
+	if aad == nil {
+		return nil, err
+	}
+	// Legacy fallback: value predates AAD binding and was sealed with nil AAD.
+	return decrypt(encodedCiphertext, key, nil)
+}
+
+func decrypt(encodedCiphertext string, key []byte, aad []byte) ([]byte, error) {
 	if len(key) != argonKeyLen {
 		return nil, fmt.Errorf("invalid key length: expected %d bytes, got %d", argonKeyLen, len(key))
 	}
@@ -94,7 +122,7 @@ func Decrypt(encodedCiphertext string, key []byte) ([]byte, error) {
 	nonce := data[:gcm.NonceSize()]
 	actualCiphertext := data[gcm.NonceSize():]
 
-	plaintext, err := gcm.Open(nil, nonce, actualCiphertext, nil)
+	plaintext, err := gcm.Open(nil, nonce, actualCiphertext, aad)
 	if err != nil {
 		return nil, ErrDecryptionFailed
 	}

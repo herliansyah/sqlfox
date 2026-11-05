@@ -113,6 +113,8 @@ func OpenVault(dbPath string, masterPassword string) (*Vault, error) {
 		db:  db,
 		key: key,
 	}
+	// ponytail: Re-seal any legacy pre-ADR-0060 secrets with bound AAD so vault cannot be swapped
+	v.migrateLegacyAAD()
 	// ponytail: Purge stale audit logs on vault open to prevent unbounded disk growth
 	_, _ = v.PurgeAuditLogs(30, 50000)
 	return v, nil
@@ -359,7 +361,7 @@ func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 	var err error
 
 	if conn.Password != "" {
-		encPass, err = Encrypt([]byte(conn.Password), v.key)
+		encPass, err = EncryptWithAAD([]byte(conn.Password), v.key, connFieldAAD(conn.ID, "password"))
 		if err != nil {
 			return fmt.Errorf("failed to encrypt password: %w", err)
 		}
@@ -373,19 +375,35 @@ func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 		}
 	}
 
-	// The client private key is a secret like the password; keep values already sealed by this vault.
+	useSSLInt := 0
+	if conn.UseSSL {
+		useSSLInt = 1
+	}
+	sslCA := conn.SSLCA
+	sslCert := conn.SSLCert
 	sslKey := conn.SSLKey
+
+	// ponytail: Preserve existing SSL settings when caller omits them on update (e.g. basic web UI edit modal)
+	if conn.ID != "" && !conn.UseSSL && sslCA == "" && sslCert == "" && sslKey == "" {
+		var exUseSSL int
+		var exCA, exCert, exKey sql.NullString
+		if err := v.db.QueryRow(`SELECT use_ssl, ssl_ca, ssl_cert, ssl_key FROM connections WHERE id = ?`, conn.ID).
+			Scan(&exUseSSL, &exCA, &exCert, &exKey); err == nil {
+			useSSLInt = exUseSSL
+			conn.UseSSL = exUseSSL == 1
+			sslCA = exCA.String
+			sslCert = exCert.String
+			sslKey = exKey.String
+		}
+	}
+
+	// The client private key is a secret like the password; keep values already sealed by this vault.
 	if sslKey != "" && !strings.HasPrefix(sslKey, sealedPrefix) {
-		enc, err := Encrypt([]byte(sslKey), v.key)
+		enc, err := EncryptWithAAD([]byte(sslKey), v.key, connFieldAAD(conn.ID, "ssl_key"))
 		if err != nil {
 			return fmt.Errorf("failed to encrypt ssl key: %w", err)
 		}
 		sslKey = sealedPrefix + enc
-	}
-
-	useSSLInt := 0
-	if conn.UseSSL {
-		useSSLInt = 1
 	}
 
 	query := `
@@ -412,7 +430,7 @@ func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 
 	_, err = v.db.Exec(query,
 		conn.ID, conn.Name, conn.Environment, conn.Driver, conn.Host, conn.Port, conn.DatabaseName, conn.User,
-		encPass, useSSLInt, conn.SSLCA, conn.SSLCert, sslKey,
+		encPass, useSSLInt, sslCA, sslCert, sslKey,
 		conn.CreatedAt, conn.UpdatedAt,
 	)
 	return err
@@ -547,14 +565,14 @@ func scanConnection(s scannable) (*ConnectionRecord, error) {
 
 func (v *Vault) decryptConnection(c *ConnectionRecord) error {
 	if c.EncryptedPassword != "" {
-		dec, err := Decrypt(c.EncryptedPassword, v.key)
+		dec, err := DecryptWithAAD(c.EncryptedPassword, v.key, connFieldAAD(c.ID, "password"))
 		if err != nil {
 			return fmt.Errorf("failed to decrypt password: %w", err)
 		}
 		c.Password = string(dec)
 	}
 	if strings.HasPrefix(c.SSLKey, sealedPrefix) {
-		dec, err := Decrypt(strings.TrimPrefix(c.SSLKey, sealedPrefix), v.key)
+		dec, err := DecryptWithAAD(strings.TrimPrefix(c.SSLKey, sealedPrefix), v.key, connFieldAAD(c.ID, "ssl_key"))
 		if err != nil {
 			return fmt.Errorf("failed to decrypt ssl key: %w", err)
 		}
@@ -565,3 +583,78 @@ func (v *Vault) decryptConnection(c *ConnectionRecord) error {
 
 // sealedPrefix marks ssl_key values encrypted at rest; legacy plaintext rows still load unchanged.
 const sealedPrefix = "enc:v1:"
+
+// connFieldAAD binds a connection secret's ciphertext to its (connection ID, field) identity so it
+// cannot be swapped into another field or connection by an actor with raw vault write access.
+// DecryptWithAAD falls back to no-AAD for values sealed before this binding existed.
+func connFieldAAD(connID, field string) []byte {
+	return []byte("sqlfox:connection:" + connID + ":" + field)
+}
+
+// migrateLegacyAAD transparently re-seals any connection secrets written before per-field AAD
+// binding existed (ADR 0060). Values sealed with nil AAD are decrypted, re-encrypted with their
+// bound AAD ("sqlfox:connection:<id>:<field>"), and updated in-place so no connection remains in
+// the swap-vulnerable nil-AAD format.
+func (v *Vault) migrateLegacyAAD() {
+	rows, err := v.db.Query(`SELECT id, encrypted_password, ssl_key FROM connections WHERE (encrypted_password != '' AND encrypted_password IS NOT NULL) OR (ssl_key != '' AND ssl_key IS NOT NULL)`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	type secretToMigrate struct {
+		id        string
+		newPass   string
+		newSSLKey string
+	}
+	var updates []secretToMigrate
+
+	for rows.Next() {
+		var id string
+		var encPass, sslKey sql.NullString
+		if err := rows.Scan(&id, &encPass, &sslKey); err != nil {
+			continue
+		}
+		var item secretToMigrate
+		item.id = id
+
+		if encPass.Valid && encPass.String != "" {
+			passAAD := connFieldAAD(id, "password")
+			// Try with bound AAD first; if it already verifies, no migration needed.
+			if _, err := decrypt(encPass.String, v.key, passAAD); err != nil {
+				// Failed with AAD; try legacy nil-AAD
+				if plain, err := decrypt(encPass.String, v.key, nil); err == nil {
+					if sealed, err := EncryptWithAAD(plain, v.key, passAAD); err == nil {
+						item.newPass = sealed
+					}
+				}
+			}
+		}
+
+		if sslKey.Valid && strings.HasPrefix(sslKey.String, sealedPrefix) {
+			rawCipher := strings.TrimPrefix(sslKey.String, sealedPrefix)
+			keyAAD := connFieldAAD(id, "ssl_key")
+			if _, err := decrypt(rawCipher, v.key, keyAAD); err != nil {
+				if plain, err := decrypt(rawCipher, v.key, nil); err == nil {
+					if sealed, err := EncryptWithAAD(plain, v.key, keyAAD); err == nil {
+						item.newSSLKey = sealedPrefix + sealed
+					}
+				}
+			}
+		}
+
+		if item.newPass != "" || item.newSSLKey != "" {
+			updates = append(updates, item)
+		}
+	}
+
+	for _, u := range updates {
+		if u.newPass != "" && u.newSSLKey != "" {
+			_, _ = v.db.Exec(`UPDATE connections SET encrypted_password = ?, ssl_key = ? WHERE id = ?`, u.newPass, u.newSSLKey, u.id)
+		} else if u.newPass != "" {
+			_, _ = v.db.Exec(`UPDATE connections SET encrypted_password = ? WHERE id = ?`, u.newPass, u.id)
+		} else if u.newSSLKey != "" {
+			_, _ = v.db.Exec(`UPDATE connections SET ssl_key = ? WHERE id = ?`, u.newSSLKey, u.id)
+		}
+	}
+}
