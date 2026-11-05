@@ -29,7 +29,7 @@ import (
 )
 
 // Version is populated at build time via -ldflags "-X main.Version=..."
-var Version = "v0.16.0"
+var Version = "v0.16.1"
 
 func main() {
 	initConsole()
