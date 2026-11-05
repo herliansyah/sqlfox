@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Graceful Self-Update Restart & Port Collision Prevention (`cmd/sqlfox/main.go`, `cmd/sqlfox/restart_posix.go`, `cmd/sqlfox/restart_windows.go`, `internal/server/update.go`, `internal/server/handlers_system.go`, `web/dist/index.html`)**: Coordinated graceful server shutdown and socket closure prior to process replacement during in-app self-updates. On POSIX systems, replace the process image in-place using `syscall.Exec` to preserve the original PID and eliminate lock file or port binding races. On Windows, release server listeners and instance locks before spawning child processes. Appended `--no-browser` to restart arguments to prevent spurious browser tab spawning, and updated web UI to actively poll `/api/auth/status` before reloading (#136).
+
 ## [v0.16.0] - 2026-11-05
 
 ### Security
