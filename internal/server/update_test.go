@@ -231,16 +231,27 @@ func TestHandleApplyUpdate(t *testing.T) {
 	actualHash := sha256.Sum256(archiveBuf.Bytes())
 	hexHash := hex.EncodeToString(actualHash[:])
 
+	var assetURL string // set once the mock server URL is known
 	mockDownload := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "checksums.txt") {
 			w.Header().Set("Content-Type", "text/plain")
 			w.Write([]byte(fmt.Sprintf("%s  sqlfox-v0.2.0-linux-amd64.tar.gz\n", hexHash)))
 			return
 		}
-		w.Header().Set("Content-Type", "application/gzip")
-		w.Write(archiveBuf.Bytes())
+		if strings.HasSuffix(r.URL.Path, ".tar.gz") || strings.HasSuffix(r.URL.Path, ".zip") {
+			w.Header().Set("Content-Type", "application/gzip")
+			w.Write(archiveBuf.Bytes())
+			return
+		}
+		// Release metadata endpoint (FetchLatestRelease). The trust-anchor check requires the
+		// requested asset_url to be advertised here.
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(fmt.Sprintf(
+			`{"tag_name":"v0.2.0","assets":[{"name":"sqlfox-v0.2.0-linux-amd64.tar.gz","browser_download_url":%q,"size":%d}]}`,
+			assetURL, archiveBuf.Len())))
 	}))
 	defer mockDownload.Close()
+	assetURL = mockDownload.URL + "/sqlfox-v0.2.0-linux-amd64.tar.gz"
 
 	restartChan := make(chan struct{}, 1)
 	srv := &Server{
@@ -289,6 +300,44 @@ func TestHandleApplyUpdate(t *testing.T) {
 	case <-restartChan:
 	case <-time.After(3 * time.Second):
 		t.Errorf("expected restartFn to have been called")
+	}
+}
+
+// TestHandleApplyUpdate_RejectsUnadvertisedAsset verifies the trust-anchor check: a URL that would
+// otherwise pass the host allowlist is rejected when the release metadata does not advertise it.
+func TestHandleApplyUpdate_RejectsUnadvertisedAsset(t *testing.T) {
+	tmpDir := t.TempDir()
+	fakeExe := filepath.Join(tmpDir, "sqlfox")
+	if err := os.WriteFile(fakeExe, []byte("old-binary"), 0755); err != nil {
+		t.Fatalf("failed to write fake executable: %v", err)
+	}
+
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Metadata advertises only the legitimate asset.
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(fmt.Sprintf(
+			`{"tag_name":"v0.2.0","assets":[{"name":"sqlfox-v0.2.0-linux-amd64.tar.gz","browser_download_url":%q}]}`,
+			"http://"+r.Host+"/sqlfox-v0.2.0-linux-amd64.tar.gz")))
+	}))
+	defer mock.Close()
+
+	srv := &Server{updateAPIURL: mock.URL, targetExePath: fakeExe}
+
+	body, _ := json.Marshal(map[string]string{
+		// Same host (passes isAllowedAssetURL) but a different, unadvertised path.
+		"asset_url": mock.URL + "/evil/other-binary.tar.gz",
+		"version":   "v0.2.0",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/system/update/apply", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	srv.handleApplyUpdate(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unadvertised asset, got %d: %s", rr.Code, rr.Body.String())
+	}
+	// The running binary must be untouched.
+	if content, _ := os.ReadFile(fakeExe); string(content) != "old-binary" {
+		t.Errorf("binary was modified despite rejection: %q", string(content))
 	}
 }
 
@@ -355,6 +404,7 @@ func TestRejectMismatchedChecksum(t *testing.T) {
 	_ = tw.Close()
 	_ = gzw.Close()
 
+	var assetURL string
 	mockDownload := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "checksums.txt") {
 			w.Header().Set("Content-Type", "text/plain")
@@ -362,10 +412,19 @@ func TestRejectMismatchedChecksum(t *testing.T) {
 			w.Write([]byte("0000000000000000000000000000000000000000000000000000000000000000  sqlfox-compromised.tar.gz\n"))
 			return
 		}
-		w.Header().Set("Content-Type", "application/gzip")
-		w.Write(archiveBuf.Bytes())
+		if strings.HasSuffix(r.URL.Path, ".tar.gz") {
+			w.Header().Set("Content-Type", "application/gzip")
+			w.Write(archiveBuf.Bytes())
+			return
+		}
+		// Release metadata advertising the (compromised) asset so the flow reaches checksum verification.
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(fmt.Sprintf(
+			`{"tag_name":"v0.2.0","assets":[{"name":"sqlfox-compromised.tar.gz","browser_download_url":%q}]}`,
+			assetURL)))
 	}))
 	defer mockDownload.Close()
+	assetURL = mockDownload.URL + "/sqlfox-compromised.tar.gz"
 
 	srv := &Server{
 		updateAPIURL:  mockDownload.URL,

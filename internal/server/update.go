@@ -73,6 +73,10 @@ var (
 const updateCacheTTL = 24 * time.Hour
 const githubReleasesURL = "https://api.github.com/repos/herliansyah/sqlfox/releases/latest"
 
+// maxExtractedBinarySize caps bytes written during archive extraction and archive download to
+// prevent decompression-bomb disk exhaustion. The release binary is ~18MB; 256MB is ample headroom.
+const maxExtractedBinarySize = 256 << 20
+
 // SetVersion sets the runtime version string of the server.
 func (s *Server) SetVersion(v string) {
 	if v != "" {
@@ -246,6 +250,35 @@ func (s *Server) handleApplyUpdate(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]any{
 			"error": "asset_url rejected: binary downloads must originate strictly from the official SqlFox GitHub release repository",
+		})
+		return
+	}
+
+	// Trust-anchor verification: the asset URL must be one the official GitHub release metadata
+	// actually advertises, not merely any path under the repo. This binds the download to a
+	// release GitHub published, so a caller cannot point the updater at an arbitrary (even
+	// same-repo) object.
+	rel, relErr := FetchLatestRelease(r.Context(), s.updateAPIURL)
+	if relErr != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": fmt.Sprintf("cannot verify release metadata: %v", relErr),
+		})
+		return
+	}
+	advertised := false
+	for _, a := range rel.Assets {
+		if a.BrowserDownloadURL == req.AssetURL {
+			advertised = true
+			break
+		}
+	}
+	if !advertised {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": "asset_url is not advertised by the latest official release metadata",
 		})
 		return
 	}
@@ -471,7 +504,7 @@ func (s *Server) downloadAndExtractBinary(ctx context.Context, assetURL, destPat
 		return fmt.Errorf("download returned HTTP status %s", resp.Status)
 	}
 
-	archiveBytes, err := io.ReadAll(resp.Body)
+	archiveBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxExtractedBinarySize))
 	if err != nil {
 		return fmt.Errorf("failed to read downloaded archive: %w", err)
 	}
@@ -514,7 +547,7 @@ func extractFromTarGzStream(r io.Reader, destPath string) error {
 			}
 			defer outFile.Close()
 
-			if _, err := io.Copy(outFile, tr); err != nil {
+			if _, err := io.Copy(outFile, io.LimitReader(tr, maxExtractedBinarySize)); err != nil {
 				return fmt.Errorf("failed writing extracted binary: %w", err)
 			}
 			return nil
@@ -534,7 +567,7 @@ func extractFromZipStream(r io.Reader, destPath string) error {
 		_ = os.Remove(tmpZip.Name())
 	}()
 
-	if _, err := io.Copy(tmpZip, r); err != nil {
+	if _, err := io.Copy(tmpZip, io.LimitReader(r, maxExtractedBinarySize)); err != nil {
 		return fmt.Errorf("failed writing zip temp file: %w", err)
 	}
 	_ = tmpZip.Close()
@@ -560,7 +593,7 @@ func extractFromZipStream(r io.Reader, destPath string) error {
 			}
 			defer outFile.Close()
 
-			if _, err := io.Copy(outFile, rc); err != nil {
+			if _, err := io.Copy(outFile, io.LimitReader(rc, maxExtractedBinarySize)); err != nil {
 				return fmt.Errorf("failed writing extracted binary: %w", err)
 			}
 			return nil
