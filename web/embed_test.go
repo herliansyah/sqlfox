@@ -348,6 +348,16 @@ func TestERDCanvasPrimaryAndForeignKeyEmbedded(t *testing.T) {
 		"c => c.is_primary_key || c.key === 'PRI'",
 		"erdRenderCards()",
 		"erdRenderLines()",
+		"erdUpdateVisualStates()",
+		"erdOpenTableViewer",
+		"erdOpenTableStructure",
+		"erdContextMenuAction",
+		"erd-context-menu",
+		"erdExportMermaid",
+		"erdExportSVG",
+		"erdFilterTables",
+		"erdZoomStep",
+		"erdRefreshSchema",
 	}
 
 	for _, snippet := range expectedSnippets {
