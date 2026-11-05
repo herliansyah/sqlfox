@@ -135,9 +135,10 @@ All captures are taken in high resolution (**2x Retina / HiDPI**) on an enterpri
 - **Query Result Mutations**: Directly edit cells, insert draft rows, duplicate records, or delete rows on query results with a resolved primary key.
 - **Multi-Statement Execution & Multi-Result Tabs**: Execute complex SQL batches (`Ctrl+Alt+Enter` or `F5`) and review isolated result sub-tabs with per-statement execution times and row counts.
 - **Visual Programmability Designers**: Interactive visual editors for Views, Stored Procedures, Functions, Triggers, and Scheduled Events with embedded CodeMirror syntax editors.
-- **Encrypted Connection Vault**: Database passwords and client SSL keys encrypted at rest via **AES-256-GCM** and **Argon2id**.
-- **Ingress Security**: Default loopback binding (`127.0.0.1`), DNS rebinding protection, and byte-for-byte Same-Origin validation against cross-port CSRF.
+- **Encrypted Connection Vault**: Database passwords and client SSL keys encrypted at rest via **AES-256-GCM** (with per-field authenticated binding) and **Argon2id**.
+- **Ingress Security**: Default loopback binding (`127.0.0.1`), DNS rebinding protection (LAN mode restricted to private/loopback hosts), and byte-for-byte Same-Origin validation against cross-port CSRF.
 - **Remote LAN Mode**: Tablet and remote browser access (`--lan`) guarded by Master PIN authentication and brute-force lockout.
+- **Signed Self-Update**: In-app updates are gated by an official-origin allowlist and verified against an Ed25519-signed checksum manifest (fail-closed) before the binary is replaced.
 
 ---
 

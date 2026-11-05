@@ -293,7 +293,7 @@ When you bind SqlFox to a local network interface or access it over LAN (`http:/
 
 ### AES-256-GCM & Argon2id Vault
 - All connection endpoints, usernames, passwords, and SSL/TLS certificates and private keys are stored in an encrypted SQLite database (`~/.sqlfox/config.db`).
-- Vault records, passwords, and client SSL private keys are encrypted at rest using **AES-256-GCM** authenticated cipher blocks with unique 96-bit initialization vectors and versioned envelopes (`enc:v1:`).
+- Vault records, passwords, and client SSL private keys are encrypted at rest using **AES-256-GCM** authenticated cipher blocks with unique 96-bit initialization vectors and versioned envelopes (`enc:v1:`). Each secret is additionally bound to its connection and field identity (authenticated associated data), so an encrypted value cannot be relocated to another field or connection and still decrypt.
 - Encryption keys are derived using **Argon2id** key derivation function (KDF) parameterized to defend against GPU/ASIC brute-force attacks.
 - Portable Vault Archives (`.sqlfox-vault`) can be exported and imported with password protection for seamless team onboarding or machine migration.
 
@@ -887,7 +887,7 @@ Access via clicking **⚡ Activity** in the footer or pressing **`Ctrl + \``**:
 > **Answer**: SqlFox contains a **Global Network Error Boundary**. It retains your query drafts, unsaved editor changes, and staged grid edits in memory while automatically attempting connection recovery with backoff.
 
 #### Q: How can I update SqlFox to the latest release?
-> **Answer**: SqlFox includes an **In-App Self-Update Engine**. Whenever a new release is published on GitHub, an **🚀 Update** badge appears in the bottom status bar. Click it to review the release notes and upgrade the standalone binary in-place with a single click.
+> **Answer**: SqlFox includes an **In-App Self-Update Engine**. Whenever a new release is published on GitHub, an **🚀 Update** badge appears in the bottom status bar. Click it to review the release notes and upgrade the standalone binary in-place with a single click. Updates are verified end-to-end before replacing the binary: the download must come from the official GitHub release, carry a valid Ed25519 signature over its checksum manifest (when the build is signed), and match the signed SHA-256 digest — any failure aborts the update and leaves your current binary untouched.
 
 ---
 

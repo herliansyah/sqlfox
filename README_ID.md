@@ -135,9 +135,10 @@ Seluruh tangkapan layar diambil dalam resolusi tinggi (**2x Retina / HiDPI**) de
 - **Mutasi Data Langsung pada Hasil Kueri**: Edit sel langsung, buat draf baris baru, duplikasi rekaman, atau hapus baris langsung dari hasil kueri SELECT yang memiliki Primary Key.
 - **Eksekusi Multi-Statement & Tab Multi-Hasil**: Eksekusi batch SQL multi-pernyataan (`Ctrl+Alt+Enter` atau `F5`) dengan sub-tab terisolasi untuk tiap hasil lengkap dengan waktu eksekusi dan jumlah baris.
 - **Desainer Visual Objek Terprogram**: Dialog desainer interaktif untuk Views, Stored Procedures, Functions, Triggers, dan Scheduled Events dengan editor CodeMirror bawaan.
-- **Connection Vault Terenkripsi**: Kata sandi database dan kunci privat SSL dienkripsi saat istirahat (*at rest*) menggunakan **AES-256-GCM** dan KDF **Argon2id**.
-- **Keamanan Akses Ingress**: Pengikatan default pada loopback (`127.0.0.1`), proteksi DNS rebinding, dan validasi Same-Origin bita-demi-bita penangkal CSRF lintas-port.
+- **Connection Vault Terenkripsi**: Kata sandi database dan kunci privat SSL dienkripsi saat istirahat (*at rest*) menggunakan **AES-256-GCM** (dengan pengikatan terautentikasi per-kolom) dan KDF **Argon2id**.
+- **Keamanan Akses Ingress**: Pengikatan default pada loopback (`127.0.0.1`), proteksi DNS rebinding (mode LAN dibatasi hanya ke host privat/loopback), dan validasi Same-Origin bita-demi-bita penangkal CSRF lintas-port.
 - **Akses Jaringan Lokal (LAN)**: Akses multi-perangkat via flag `--lan` yang dilindungi autentikasi Master PIN dan karantina otomatis terhadap brute force.
+- **Self-Update Bertanda Tangan**: Update dalam aplikasi dibatasi allowlist origin resmi dan diverifikasi terhadap manifest checksum bertanda tangan Ed25519 (*fail-closed*) sebelum binary diganti.
 
 ---
 

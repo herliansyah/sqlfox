@@ -240,7 +240,7 @@ v2.4 (Programmability, Native Desktop Window & Advanced Grid Ergonomics)
   - [x] **Column Filter Toolbar**: Quick filter input below every column header in the grid for rapid instant filtering without writing SQL.
   - [x] **Streaming SQL Dump Export**: Backend pipeline generating standard `.sql` dumps containing `CREATE TABLE` and chunked `INSERT INTO` statements (`GET /api/session/{id}/export-dump`).
   - [x] **Referential Slice Exporter (Zero-Config FK-Aware Smart Seed Dump)**: Automatic schema-wide dependency crawler without requiring manual table selection; exports complete DDL + bounded row sample (e.g. 20 rows per table), while recursively resolving and including all upstream referenced parent rows across the entire database's Foreign Key graph (transitive closure) in topological order, guaranteeing clean, error-free restores (`GET /api/session/{id}/export-smart-seed`).
-  - [x] **Large SQL Script Runner**: Streaming executor parsing and dispatching multi-megabyte `.sql` scripts with progress tracking without memory exhaustion (`POST /api/session/{id}/run-sql-script`).
+  - [x] **Large SQL Script Runner**: Streaming executor parsing and dispatching multi-megabyte `.sql` scripts with progress tracking without memory exhaustion (`POST /api/session/{id}/run-sql-script`), gated by the AST Safety Guard — destructive statements block the run with `HTTP 409` unless `confirm=true`, and `DROP`/`TRUNCATE` trigger a pre-DDL backup (ADR 0060).
   - [x] **Clipboard Formats**: Context menu options to `Copy as TSV` (Excel-ready) and `Copy as Markdown Table`.
   - [x] **Documentation & Verification**: Formally recorded in `docs/adr/0027-streaming-sql-dump-referential-slice-seeding-and-grid-crud.md` with unit tests passing 100% in `internal/server/crud_test.go` and `internal/server/dump_test.go`.
 - **Runnable Verification**: Run `go test -v ./internal/server -run "TestCRUD|TestDump"` -> verify 100% pass across CRUD operations and SQL dump pipelines.
@@ -717,3 +717,16 @@ v2.4 (Programmability, Native Desktop Window & Advanced Grid Ergonomics)
   - [x] **Documentation & Verification**: Recorded in `CHANGELOG.md`, `CONTEXT.md`, `ARCHITECTURE.md`, `USER_GUIDE.md`, and frontend verification tests.
 - **Runnable Verification**: Run `go test -v ./internal/server -run "TestSessionManager"` and `go test -v ./web` -> 100% pass.
 
+
+---
+
+### Milestone 45: Supply-Chain Signing & Audit Hardening
+- **Goal**: Resolve a pre-release enterprise security audit (ADR 0060) across the self-update supply chain, the Safe Execution Pipeline, network ingress, at-rest crypto, and test-only code paths.
+- **Deliverables**:
+  - [x] **Script Runner Safety Guard Parity (`internal/server/handlers_dump.go`, `internal/server/session_manager.go`)**: Routed the Large SQL Runner through the AST Safety Guard — destructive statements block the run with `HTTP 409` unless `confirm=true`, and `DROP`/`TRUNCATE` trigger a pre-DDL Smart Tiered Backup (ADR 0060).
+  - [x] **Ed25519 Signed Checksum Manifest (`internal/server/update.go`, `scripts/sign-manifest.go`, `.github/workflows/release.yml`)**: Verified a detached Ed25519 signature over the checksum manifest against a build-time embedded public key before trusting any checksum (fail-closed, legacy fallback when unprovisioned) (ADR 0060).
+  - [x] **Production-Clean Test Flags (`internal/server/auth.go`, `internal/server/update.go`)**: Removed the `testing` package from production and gated the `example.com` and `updateAPIURL` allowances behind test-only flags (ADR 0060).
+  - [x] **LAN-Scoped DNS Rebinding Guard (`internal/server/auth.go`)**: Restricted IP-literal Host headers in LAN mode to the detected LAN IP plus loopback/private/link-local ranges, rejecting public IPs (ADR 0060).
+  - [x] **Keyset Marker & Vault AAD Hardening (`internal/server/handlers_schema.go`, `internal/vault/crypto.go`, `internal/vault/vault.go`)**: Validated `last_key` against NUL/oversize at the trust boundary and bound AES-256-GCM AAD to each vault secret's `(connection, field)` identity (backward compatible) (ADR 0060).
+  - [x] **Documentation & Verification**: Recorded in ADR-0060, `CONTEXT.md`, `ARCHITECTURE.md`, `SECURITY.md`, `docs/playbooks/release-signing-key-provisioning.md`, `USER_GUIDE.md`, and unit tests in `internal/server` and `internal/vault`.
+- **Runnable Verification**: Run `go test -v ./internal/server -run "TestRunSQLScript_SafetyGuardGate|TestVerifyAssetChecksum_Ed25519ManifestSignature|TestDNSRebindingGuardLANHostScoping"` and `go test -v ./internal/vault -run "TestCrypto|TestVault_PasswordCiphertextSwapRejected"` -> 100% pass.

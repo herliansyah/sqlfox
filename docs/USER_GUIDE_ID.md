@@ -293,7 +293,7 @@ Saat Anda menjalankan SqlFox di server jaringan lokal atau mengaksesnya via IP L
 
 ### Enkripsi AES-256-GCM & KDF Argon2id
 - Seluruh host database, port, username, password, sertifikat SSL/TLS, dan *private key* SSL klien tersimpan rapi di basis data SQLite lokal terenkripsi (`~/.sqlfox/config.db`).
-- Setiap catatan kredensial (termasuk password dan *private key* SSL) dienkripsi saat istirahat (*at rest*) menggunakan blok sandi **AES-256-GCM** dengan amplop berversi (`enc:v1:`) dan vektor inisialisasi (IV) 96-bit unik per catatan.
+- Setiap catatan kredensial (termasuk password dan *private key* SSL) dienkripsi saat istirahat (*at rest*) menggunakan blok sandi **AES-256-GCM** dengan amplop berversi (`enc:v1:`) dan vektor inisialisasi (IV) 96-bit unik per catatan. Tiap kredensial juga diikat ke identitas koneksi dan kolomnya (*authenticated associated data*), sehingga nilai terenkripsi tidak bisa dipindahkan ke kolom atau koneksi lain lalu tetap berhasil didekripsi.
 - Kunci derivasi diolah menggunakan algoritma **Argon2id** berstandar keamanan tinggi guna menangkal serangan *brute-force* berbasis kluster GPU.
 - Kredensial dapat diekspor menjadi arsip portabel (`.sqlfox-vault`) berpaspor sandi untuk mempermudah migrasi perangkat kerja atau berbagi profil koneksi tim secara aman.
 
@@ -887,7 +887,7 @@ Dapat dibuka dengan mengklik tombol **⚡ Activity** pada status bar bawah atau 
 > **Jawaban**: SqlFox dilindungi fitur **Global Network Error Boundary**. Aplikasi akan tetap mempertahankan draf query editor Anda dan editan tabel yang belum disimpan di memori lokal peramban, sembari mencoba memulihkan koneksi secara otomatis.
 
 #### Q: Bagaimana cara memperbarui SqlFox ke versi rilis terbaru?
-> **Jawaban**: SqlFox dilengkapi fitur **In-App Self-Update**. Setiap kali ada rilis versi baru di GitHub, tombol **🚀 Update** akan muncul di status bar bawah. Klik tombol tersebut untuk membaca catatan rilis changelog dan meng-upgrade binary secara otomatis dengan satu klik tanpa perlu download manual.
+> **Jawaban**: SqlFox dilengkapi fitur **In-App Self-Update**. Setiap kali ada rilis versi baru di GitHub, tombol **🚀 Update** akan muncul di status bar bawah. Klik tombol tersebut untuk membaca catatan rilis changelog dan meng-upgrade binary secara otomatis dengan satu klik tanpa perlu download manual. Setiap update diverifikasi menyeluruh sebelum mengganti binary: unduhan wajib berasal dari rilis resmi GitHub, membawa tanda tangan Ed25519 yang valid atas manifest checksum (bila build ditandatangani), dan cocok dengan digest SHA-256 yang ditandatangani — kegagalan apa pun membatalkan update dan binary Anda saat ini tetap utuh.
 
 ---
 

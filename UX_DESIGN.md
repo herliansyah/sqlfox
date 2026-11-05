@@ -181,7 +181,7 @@ All browser-blocking popup methods (`window.alert`, `window.confirm`, `window.pr
 - **Notification Dialog (`#app-native-dialog`)**: Asynchronous, non-blocking alert with Esc key support and dark theme styling.
 - **Safety Inspection Dialog (`#safety-inspection-dialog`)**: Dedicated security inspection modal displaying risk badges (`LOW`, `MEDIUM`, `HIGH`), destructive flag, challenge requirement, and query reason.
 - **DDL Review Modal (`#ddl-review-dialog`)**: Pre-execution verification modal showing generated DDL statements before dispatching to the database.
-- **In-App Self-Update Dialog (`#update-dialog`)**: Native modal presenting release metadata, version diffs (`vCurrent` ➔ `vLatest`), rendered Markdown changelogs, animated download/extraction progress states, and 1-click update execution.
+- **In-App Self-Update Dialog (`#update-dialog`)**: Native modal presenting release metadata, version diffs (`vCurrent` ➔ `vLatest`), rendered Markdown changelogs, animated download/extraction progress states, and 1-click update execution. The progress states surface the layered supply-chain checks (official-origin allowlist, Ed25519 manifest signature, SHA-256 digest), and any verification failure is reported inline without touching the running binary.
 
 ---
 

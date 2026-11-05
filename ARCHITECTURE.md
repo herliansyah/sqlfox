@@ -482,7 +482,7 @@ sqlfox/
 │       ├── handlers_query.go       # SQL execution & cancellation with 3s fail-fast pool guard
 │       ├── handlers_schema.go      # Schema tree, DDL, preflight DDL, pushdown filtering
 │       ├── handlers_crud.go        # Table spreadsheet CRUD (insert draft, batch delete)
-│       ├── handlers_dump.go        # Streaming SQL dump export, smart seed exporter, large script runner
+│       ├── handlers_dump.go        # Streaming SQL dump export, smart seed exporter, Safety-Guard-gated large script runner
 │       ├── handlers_sync.go        # Structure sync, cross-connection data transfer, row data sync
 │       ├── handlers_dba.go         # Processlist, cluster health, diagnostics, privilege matrix
 │       ├── handlers_snippets.go    # Snippet management
@@ -633,8 +633,11 @@ flowchart TD
     ParseSemver --> UpdateModal["Render Update Modal & Changelog"]
 
     UpdateModal -->|User clicks 'Update Now'| Apply["POST /api/system/update/apply"]
-    Apply --> Download["Stream Platform Archive (.tar.gz / .zip)"]
-    Download --> Extract["Extract Binary to Temp Sibling File"]
+    Apply --> Advertised["Verify URL is github.com official path AND advertised by release metadata"]
+    Advertised --> Download["Stream Platform Archive (.tar.gz / .zip)"]
+    Download --> SigVerify["Verify Ed25519 signature over checksum manifest (trust anchor)"]
+    SigVerify --> SumVerify["Verify SHA-256 digest against signed manifest"]
+    SumVerify --> Extract["Extract Binary to Temp Sibling File (basename-only, bomb-capped)"]
     Extract --> Replace{"OS Platform?"}
     Replace -->|Linux / macOS| AtomicRename["Atomic os.Rename() + chmod 0755"]
     Replace -->|Windows| WinRename["Rename running sqlfox.exe -> .old, write new sqlfox.exe"]
@@ -650,13 +653,22 @@ flowchart TD
 2. **Platform-Aware Binary Asset Matching**:
    - Target assets are resolved against `runtime.GOOS` and `runtime.GOARCH` (`sqlfox-{TAG}-{GOOS}-{GOARCH}.(tar.gz|zip)`).
    - Zero external compression dependencies: extraction uses stdlib `archive/tar`, `compress/gzip`, and `archive/zip` exclusively.
-3. **Atomic Replacement & Windows Locking Workaround**:
+3. **Layered Supply-Chain Verification (fail-closed, ADR 0060)**:
+   - **Origin allowlist**: the asset URL must be an `https://github.com/herliansyah/sqlfox/releases/download/*` path with no traversal/userinfo/query tricks (`isAllowedAssetURL`).
+   - **Advertised-asset binding**: the URL must be byte-for-byte one the official release metadata advertises, binding the download to a release GitHub actually published.
+   - **Signed manifest trust anchor**: when the binary embeds a public key (`manifestSigningPublicKeyB64`), the detached Ed25519 signature `checksums.txt.sig` must verify over the checksum manifest before any checksum is trusted. Unprovisioned builds fall back to checksum-only.
+   - **SHA-256 digest**: the downloaded archive is matched against the signed manifest with a constant-time comparison.
+   - **Safe extraction**: only the `sqlfox`/`sqlfox.exe` entry is selected by basename (no archive-controlled paths → no zip-slip) and every copy is size-bounded against decompression bombs. TLS verification is always enforced.
+   - Any failure aborts the update and leaves the running executable untouched.
+4. **Atomic Replacement & Windows Locking Workaround**:
    - The new binary is staged in a sibling temporary file in the same directory (`filepath.Dir(exePath)`) to guarantee same-filesystem atomic moves.
    - On Linux/macOS, `os.Rename` replaces the running inode atomically.
    - On Windows, where executing binaries cannot be overwritten in place, the running executable is renamed to `sqlfox.exe.old`, the replacement is moved into place, and cleanup is scheduled.
-4. **Graceful Re-exec Restart**:
+5. **Graceful Re-exec Restart**:
    - Dispatches a background goroutine spawning the updated binary with original command-line arguments via `exec.Command` / `os.StartProcess`.
    - Frontend initiates a 3-second countdown before auto-refreshing to seamlessly reconnect.
+
+> Release-side signing is performed by the CGO-free helper `scripts/sign-manifest.go`, wired into `.github/workflows/release.yml`. Key provisioning: `docs/playbooks/release-signing-key-provisioning.md`.
 
 ---
 
@@ -1035,7 +1047,7 @@ flowchart TD
 ## 27. Systemic Security Hardening & Concurrency Reliability Architecture
 
 1. **Client SSL Private Key Encryption at Rest (`internal/vault`)**:
-   - Encrypts client SSL private keys (`SSLKey`) with AES-256-GCM using versioned envelope markers (`enc:v1:`).
+   - Encrypts client SSL private keys (`SSLKey`) with AES-256-GCM using versioned envelope markers (`enc:v1:`), with additional authenticated data (AAD) bound to each secret's `(connection id, field)` identity to prevent ciphertext relocation (ADR 0060).
 2. **Strict Same-Origin Ingress Guard (`internal/server/auth`)**:
    - Validates that state-mutating HTTP requests contain an `Origin` host matching the request `Host` byte-for-byte, blocking cross-port CSRF from malicious local web servers (e.g. `localhost:3000` targeting `localhost:8080`).
 3. **MySQL Executable Comment Unwrapping (`internal/safety`)**:
@@ -1099,6 +1111,27 @@ flowchart TD
    - `sqlfox desktop install` registers Freedesktop `.desktop` files and 512x512 application icons into standard system directories on Linux.
 3. **Deterministic Instance Locking & Graceful Shutdown (`cmd/sqlfox/instance.go`)**:
    - Manages PID locks in `~/.sqlfox/sqlfox.lock`, enabling single-instance detection, port hunting, and remote shutdown via `sqlfox stop` or `/api/system/shutdown`.
+
+---
+
+## 31. Supply-Chain Signing & Audit Hardening Architecture (ADR 0060)
+
+A pre-release enterprise security audit extended ADR 0059 with supply-chain, execution-safety, ingress, and at-rest hardening:
+
+1. **Ed25519 Signed Checksum Manifest (`internal/server/update.go`, `scripts/sign-manifest.go`)**:
+   - `verifyAssetChecksum` calls `verifyManifestSignature` before trusting any checksum. When a build embeds `manifestSigningPublicKeyB64` (injected via `-ldflags` at release), the detached Ed25519 signature `checksums.txt.sig` must verify over the exact manifest bytes; otherwise the update is rejected (fail-closed). Unprovisioned builds retain checksum-only behavior.
+   - The release workflow signs the manifest with a CI-secret private key via the CGO-free, stdlib-only helper `scripts/sign-manifest.go` (build-tagged `ignore`, never compiled into the binary).
+2. **Script Runner Safety Guard Parity (`internal/server/handlers_dump.go`, `internal/server/session_manager.go`)**:
+   - `handleRunSQLScript` inspects every statement via `ActiveSession.InspectScriptStatements`; any Challenge-requiring statement blocks the run with `HTTP 409` unless `confirm=true`. Each confirmed `DROP`/`TRUNCATE TABLE` triggers a pre-DDL Smart Tiered Backup through `ActiveSession.BackupBeforeDestructive`.
+3. **Production-Clean Test Flags (`internal/server/auth.go`, `internal/server/update.go`)**:
+   - The `testing` package is no longer linked into production; the httptest `example.com` DNS-rebinding bypass is gated behind `allowDefaultTestHost`, and the `updateAPIURL` asset-host allowance behind `allowUpdateAPIHostAssets` — both false in release builds, flipped true only by the test harness's `init`.
+4. **LAN-Scoped DNS Rebinding Guard (`internal/server/auth.go`)**:
+   - `isAllowedLANHostIP` restricts IP-literal `Host` headers in LAN mode to the detected LAN IP plus loopback/RFC 1918/RFC 4193/link-local ranges; routable public IPs are rejected as rebinding signals.
+5. **Keyset Marker Trust-Boundary Validation (`internal/server/handlers_schema.go`)**:
+   - The `last_key` seek marker is rejected if it contains a NUL byte or exceeds 4096 bytes, in addition to dialect-correct escaping (the `QueryStream` interface intentionally stays unchanged).
+6. **Per-Field AAD Binding for Vault Secrets (`internal/vault/crypto.go`, `internal/vault/vault.go`)**:
+   - `EncryptWithAAD`/`DecryptWithAAD` bind AES-256-GCM additional authenticated data to each secret's `(connection id, field)` identity, so a relocated ciphertext fails authentication. Legacy nil-AAD values decrypt via fallback and are re-sealed on next save.
+
 
 
 
