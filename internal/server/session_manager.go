@@ -2513,6 +2513,69 @@ func inspectAllStatements(sql, environment, driverName, scopedDB string) (*safet
 	return gate, allQueries, nil
 }
 
+// ScriptBlocker summarizes a destructive statement in a batch script that the Safety Guard requires
+// the operator to confirm before the script runner will execute it.
+type ScriptBlocker struct {
+	StatementIndex int    `json:"statement_index"`
+	Operation      string `json:"operation"`
+	TargetTable    string `json:"target_table,omitempty"`
+	TargetDatabase string `json:"target_database,omitempty"`
+	Reason         string `json:"reason,omitempty"`
+}
+
+// InspectScriptStatements runs the Safety Guard over each statement of a script and returns the set
+// that demands a typed Challenge (CRITICAL destructive ops or a schema-scope mismatch). An empty
+// result means the script is safe to run without confirmation. This mirrors the editor's gate so the
+// Large SQL Runner cannot bypass the Safe Execution Pipeline.
+func (s *ActiveSession) InspectScriptStatements(statements []string, scopedDB string) []ScriptBlocker {
+	var blockers []ScriptBlocker
+	for i, stmt := range statements {
+		insp := safety.InspectWithScope(stmt, s.Environment, scopedDB)
+		if insp == nil {
+			continue
+		}
+		if insp.RequiresChallenge {
+			blockers = append(blockers, ScriptBlocker{
+				StatementIndex: i + 1,
+				Operation:      insp.Operation,
+				TargetTable:    insp.TargetTable,
+				TargetDatabase: insp.TargetDatabase,
+				Reason:         insp.Reason,
+			})
+		}
+	}
+	return blockers
+}
+
+// BackupBeforeDestructive triggers a pre-DDL Smart Tiered Backup for a single DROP/TRUNCATE TABLE
+// statement, matching the editor's Execute pipeline. It is best-effort: failures are logged, not
+// fatal, so the script run proceeds as the operator confirmed. A qualified target outside the active
+// database is skipped rather than snapshotting a same-named table in the wrong database.
+func (s *ActiveSession) BackupBeforeDestructive(ctx context.Context, stmt, scopedDB string) {
+	if s.backupDir == "" || s.Session == nil {
+		return
+	}
+	insp := safety.InspectWithScope(stmt, s.Environment, scopedDB)
+	if insp == nil {
+		return
+	}
+	tt := strings.ToUpper(insp.TargetType)
+	if (insp.Operation != "DROP" && insp.Operation != "TRUNCATE") || (tt != "" && tt != "TABLE") {
+		return
+	}
+	if insp.TargetTable == "" {
+		return
+	}
+	if insp.TargetDatabase != "" && scopedDB != "" && !strings.EqualFold(insp.TargetDatabase, scopedDB) {
+		slog.Warn("pre_ddl_backup_skipped", "module", "safety", "table", insp.TargetTable,
+			"reason", "target outside active database", "target_db", insp.TargetDatabase, "active_db", scopedDB)
+		return
+	}
+	if _, _, err := safety.BackupTable(ctx, s.Session, s.backupDir, insp.TargetTable, s.DriverName); err != nil {
+		slog.Warn("pre_ddl_backup_failed", "module", "safety", "table", insp.TargetTable, "warning", err.Error())
+	}
+}
+
 func (s *ActiveSession) estimateAffectedRows(ctx context.Context, insp *safety.InspectionResult) {
 	if insp == nil || s.Session == nil {
 		return
