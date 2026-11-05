@@ -1300,8 +1300,18 @@ func EscapeSQLString(s string, driverName string) string {
 		}
 		sb.WriteByte('\'')
 		return sb.String()
+	case "postgres", "postgresql", "pgx", "pg":
+		// Standard SQL doubles single quotes. When standard_conforming_strings is OFF (legacy
+		// servers), a backslash is also an escape, so a value containing '\' must use the explicit
+		// escape-string syntax E'...' with both ' and \ doubled/escaped to stay unambiguous under
+		// either setting.
+		if strings.IndexByte(s, '\\') < 0 {
+			return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+		}
+		r := strings.NewReplacer(`'`, `''`, `\`, `\\`)
+		return "E'" + r.Replace(s) + "'"
 	default:
-		return fmt.Sprintf("'%s'", strings.ReplaceAll(s, "'", "''"))
+		return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 	}
 }
 
