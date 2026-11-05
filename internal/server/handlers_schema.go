@@ -448,8 +448,19 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 		sortDir = "ASC"
 	}
 
-	// Keyset marker if provided
+	// Keyset marker if provided. It is a value from a prior page's key column and is spliced into the
+	// seek predicate as a dialect-escaped literal (QueryStream has no bind-parameter channel), so
+	// reject NUL bytes (not neutralized by non-MySQL escaping) and cap its length at the trust
+	// boundary before it ever reaches EscapeSQLString.
 	lastKey := r.URL.Query().Get("last_key")
+	if strings.IndexByte(lastKey, 0) >= 0 {
+		writeError(w, http.StatusBadRequest, "invalid last_key: NUL bytes are not permitted")
+		return
+	}
+	if len(lastKey) > 4096 {
+		writeError(w, http.StatusBadRequest, "invalid last_key: value too long")
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()

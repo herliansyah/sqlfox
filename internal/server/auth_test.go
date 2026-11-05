@@ -14,6 +14,14 @@ import (
 	"sqlfox/web"
 )
 
+// Enable the httptest default-Host ("example.com") bypass in the DNS Rebinding guard and the
+// updateAPIURL asset-host allowance for the whole server test binary. Production builds leave both
+// flags false, so example.com is never accepted and the updater never downloads outside github.com.
+func init() {
+	allowDefaultTestHost = true
+	allowUpdateAPIHostAssets = true
+}
+
 func TestRemoteAccessGuard(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "sqlfox-auth-test-*")
 	if err != nil {
@@ -421,5 +429,58 @@ func TestDNSRebindingGuardHostCheck(t *testing.T) {
 	handler.ServeHTTP(rec4, req4)
 	if rec4.Code != http.StatusForbidden {
 		t.Errorf("expected attacker domain to be blocked with 403, got: %d", rec4.Code)
+	}
+}
+
+// TestDNSRebindingGuardLANHostScoping verifies that in LAN mode the DNS Rebinding guard accepts only
+// loopback/private IP-literal Host headers (and the pinned LAN IP), while rejecting public IP hosts —
+// a public IP in the Host header is a rebinding signal.
+func TestDNSRebindingGuardLANHostScoping(t *testing.T) {
+	tempDir := t.TempDir()
+	v, err := vault.OpenVault(filepath.Join(tempDir, "config.db"), "testpass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	srv := NewServer(v, nil, filepath.Join(tempDir, "backups"), "testpass")
+
+	// Non-LAN (loopback-only) mode: any non-loopback IP host is rejected.
+	if srv.isHostAllowed("192.168.1.50:8080") {
+		t.Errorf("non-LAN mode should reject private IP host")
+	}
+
+	srv.SetLANEnabled(true)
+	srv.SetLANIP("192.168.1.42")
+
+	allowed := []string{
+		"192.168.1.42:8080", // pinned LAN IP
+		"192.168.1.99:8080", // other RFC1918 private
+		"10.0.0.5:8080",     // RFC1918 private
+		"172.16.3.4:8080",   // RFC1918 private
+		"127.0.0.1:8080",    // loopback
+		"[::1]:8080",        // loopback v6 with port
+		"[::1]",             // loopback v6 without port
+		"169.254.10.10:80",  // link-local
+		"[fe80::1]",         // link-local v6 without port
+		"[fe80::1]:8080",    // link-local v6 with port
+	}
+	for _, h := range allowed {
+		if !srv.isHostAllowed(h) {
+			t.Errorf("LAN mode should allow host %q", h)
+		}
+	}
+
+	rejected := []string{
+		"8.8.8.8:8080",               // public IP (rebinding signal)
+		"203.0.113.5:8080",           // public (TEST-NET-3)
+		"evil.attacker.com",          // public hostname
+		"[2001:4860:4860::8888]:443", // public v6 with port
+		"[2001:4860:4860::8888]",     // public v6 without port
+	}
+	for _, h := range rejected {
+		if srv.isHostAllowed(h) {
+			t.Errorf("LAN mode must reject host %q", h)
+		}
 	}
 }
