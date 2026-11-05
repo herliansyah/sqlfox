@@ -5,7 +5,10 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -465,5 +468,106 @@ func TestIsAllowedAssetURL_RejectsTraversalOutOfOfficialRepo(t *testing.T) {
 		if srv.isAllowedAssetURL(bad) {
 			t.Errorf("untrusted asset URL accepted: %s", bad)
 		}
+	}
+}
+
+// TestIsAllowedAssetURL_ProductionIgnoresUpdateAPIHost proves the updateAPIURL host-match fallback is
+// test-only: with the production flag off, a non-github asset host is rejected even when updateAPIURL
+// points at that host; with the flag on (test harness) it is accepted. This guards against the
+// test-only clause silently re-enabling a non-github download origin in a shipped build.
+func TestIsAllowedAssetURL_ProductionIgnoresUpdateAPIHost(t *testing.T) {
+	srv := &Server{updateAPIURL: "https://mock.internal.test/api"}
+	assetOnAPIHost := "https://mock.internal.test/download/sqlfox-linux-amd64.tar.gz"
+
+	// Save and force production behavior regardless of the package-wide test init.
+	orig := allowUpdateAPIHostAssets
+	defer func() { allowUpdateAPIHostAssets = orig }()
+
+	allowUpdateAPIHostAssets = false
+	if srv.isAllowedAssetURL(assetOnAPIHost) {
+		t.Errorf("production build must reject non-github asset host, even matching updateAPIURL: %s", assetOnAPIHost)
+	}
+	// github.com official path must still pass in production.
+	official := "https://github.com/herliansyah/sqlfox/releases/download/v1.2.3/sqlfox-linux-amd64.tar.gz"
+	if !srv.isAllowedAssetURL(official) {
+		t.Errorf("official github asset must remain allowed in production: %s", official)
+	}
+
+	allowUpdateAPIHostAssets = true
+	if !srv.isAllowedAssetURL(assetOnAPIHost) {
+		t.Errorf("test harness should accept updateAPIURL-host asset when flag is on: %s", assetOnAPIHost)
+	}
+}
+
+// TestVerifyAssetChecksum_Ed25519ManifestSignature verifies the supply-chain trust anchor: when a
+// signing public key is embedded, the checksum manifest must carry a valid detached Ed25519
+// signature; a missing or wrong signature is fail-closed; and an unprovisioned (empty) key keeps the
+// legacy same-origin checksum behavior.
+func TestVerifyAssetChecksum_Ed25519ManifestSignature(t *testing.T) {
+	// Build an archive and its correct manifest.
+	archive := []byte("sqlfox-binary-archive-bytes")
+	sum := sha256.Sum256(archive)
+	manifest := fmt.Sprintf("%s  sqlfox-v1.0.0-linux-amd64.tar.gz\n", hex.EncodeToString(sum[:]))
+
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	goodSig := base64.StdEncoding.EncodeToString(ed25519.Sign(priv, []byte(manifest)))
+	_, otherPriv, _ := ed25519.GenerateKey(nil)
+	badSig := base64.StdEncoding.EncodeToString(ed25519.Sign(otherPriv, []byte(manifest)))
+
+	// serveSig controls what (if anything) the mock returns for the .sig path.
+	var serveSig string
+	var serveSigPresent bool
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "checksums.txt.sig"), strings.HasSuffix(r.URL.Path, "SHA256SUMS.sig"):
+			if !serveSigPresent {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write([]byte(serveSig))
+		case strings.HasSuffix(r.URL.Path, "checksums.txt"):
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write([]byte(manifest))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer mock.Close()
+
+	assetURL := mock.URL + "/sqlfox-v1.0.0-linux-amd64.tar.gz"
+	srv := &Server{}
+
+	// Provision the embedded signing key for the duration of this test.
+	origKey := manifestSigningPublicKeyB64
+	defer func() { manifestSigningPublicKeyB64 = origKey }()
+	manifestSigningPublicKeyB64 = base64.StdEncoding.EncodeToString(pub)
+
+	// 1. Valid signature -> checksum verification succeeds.
+	serveSigPresent, serveSig = true, goodSig
+	if err := srv.verifyAssetChecksum(context.Background(), assetURL, archive); err != nil {
+		t.Fatalf("expected success with valid signature, got: %v", err)
+	}
+
+	// 2. Missing signature -> fail-closed.
+	serveSigPresent = false
+	if err := srv.verifyAssetChecksum(context.Background(), assetURL, archive); err == nil {
+		t.Fatal("expected failure when manifest signature is missing")
+	}
+
+	// 3. Wrong signature (signed by a different key) -> fail-closed.
+	serveSigPresent, serveSig = true, badSig
+	if err := srv.verifyAssetChecksum(context.Background(), assetURL, archive); err == nil {
+		t.Fatal("expected failure when manifest signature does not verify")
+	}
+
+	// 4. Unprovisioned key -> legacy behavior: no signature required, checksum alone suffices.
+	manifestSigningPublicKeyB64 = ""
+	serveSigPresent = false
+	if err := srv.verifyAssetChecksum(context.Background(), assetURL, archive); err != nil {
+		t.Fatalf("unprovisioned build should not require a signature, got: %v", err)
 	}
 }
