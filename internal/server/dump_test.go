@@ -318,6 +318,7 @@ func TestRunSQLScript_PayloadSizeLimit(t *testing.T) {
 	defer v.Close()
 
 	srv := NewServer(v, nil, filepath.Join(tempDir, "backups"), "testpass")
+	defer srv.Close()
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 	client := ts.Client()
