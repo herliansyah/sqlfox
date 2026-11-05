@@ -594,22 +594,141 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// forbiddenFilterRegex detects statement terminators and top-level destructive SQL verbs.
-// ponytail: regex token guard protects server-side filter pushdown at the trust boundary.
-var forbiddenFilterRegex = regexp.MustCompile(`(?i)\b(UNION|INTO\s+(OUTFILE|DUMPFILE)|DROP|DELETE|UPDATE|INSERT|ALTER|TRUNCATE|GRANT|REVOKE|SHUTDOWN)\b`)
+// allowedFilterKeywords is the whitelist of bare keyword tokens permitted in a table quick-filter.
+// Anything outside this set that is not a column identifier, quoted literal, number or operator is
+// rejected. This is a positive grammar guard (allowlist), not a denylist: it blocks subquery
+// injection (SELECT/UNION), time-based probes (SLEEP/pg_sleep/benchmark/waitfor), and any other
+// function call, because those tokens are neither keywords here nor followed-identifier columns.
+var allowedFilterKeywords = map[string]bool{
+	"AND": true, "OR": true, "NOT": true, "IS": true, "NULL": true,
+	"IN": true, "LIKE": true, "ILIKE": true, "BETWEEN": true, "ESCAPE": true,
+	"TRUE": true, "FALSE": true, "DIV": true, "MOD": true,
+}
 
+// reFilterToken lexes one token: a quoted literal ('..' with doubled-quote / backslash escapes),
+// a number, a word (keyword or identifier, optionally db.col), a comparison/arithmetic operator,
+// or a parenthesis/comma. The alternation is ordered so quoted strings are consumed whole.
+var reFilterToken = regexp.MustCompile(
+	`^(?:` +
+		`'(?:[^'\\]|''|\\.)*'` + // single-quoted string literal
+		`|"(?:[^"\\]|""|\\.)*"` + // double-quoted string literal
+		"|`(?:[^`]|``)*`" + // backtick-quoted identifier
+		`|[0-9]+(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?` + // number
+		`|[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*` + // word / qualified identifier
+		`|<=|>=|<>|!=|<|>|=|\+|-|\*|/|%|\(|\)|,` + // operators & grouping
+		`)`)
+
+// reFilterComment matches any SQL comment opener; comments are never valid inside a quick-filter.
+var reFilterComment = regexp.MustCompile(`--|#|/\*`)
+
+// validateTableFilter enforces a positive grammar on the table quick-filter before it is spliced
+// into a server-side WHERE clause. It rejects statement terminators, comments, and any token that
+// is not a column identifier, literal, permitted keyword or comparison operator. A word immediately
+// followed by '(' is a function call and is rejected, which blocks SLEEP()/pg_sleep()/(SELECT ...).
 func validateTableFilter(filter string) error {
 	trimmed := strings.TrimSpace(filter)
 	if trimmed == "" {
 		return nil
 	}
-	if strings.Contains(trimmed, ";") {
+	if strings.ContainsRune(trimmed, ';') {
 		return errors.New("semicolons are not permitted in filter expressions")
 	}
-	if forbiddenFilterRegex.MatchString(trimmed) {
-		return errors.New("filter expression contains forbidden statements or clauses")
+	if strings.ContainsRune(trimmed, 0) {
+		return errors.New("NUL bytes are not permitted in filter expressions")
+	}
+	if reFilterComment.MatchString(trimmed) {
+		return errors.New("comments are not permitted in filter expressions")
+	}
+
+	rest := trimmed
+	depth := 0
+	prevWasValue := false // previous token was an identifier/literal/')' — a '(' after it is a call
+	for {
+		rest = strings.TrimLeft(rest, " \t\r\n")
+		if rest == "" {
+			break
+		}
+		loc := reFilterToken.FindString(rest)
+		if loc == "" {
+			return fmt.Errorf("illegal character in filter expression near %q", truncateForError(rest))
+		}
+		tok := loc
+
+		switch {
+		case tok == "(":
+			if prevWasValue {
+				// identifier/')' directly before '(' means a function call or subquery — forbidden.
+				return errors.New("function calls and subqueries are not permitted in filter expressions")
+			}
+			depth++
+			prevWasValue = false
+		case tok == ")":
+			depth--
+			if depth < 0 {
+				return errors.New("unbalanced parentheses in filter expression")
+			}
+			prevWasValue = true
+		case tok == ",":
+			prevWasValue = false
+		case isFilterOperator(tok):
+			prevWasValue = false
+		case isFilterWord(tok):
+			upper := strings.ToUpper(tok)
+			if allowedFilterKeywords[upper] {
+				// A bare keyword is not itself a value, except NULL/TRUE/FALSE which terminate a term.
+				prevWasValue = upper == "NULL" || upper == "TRUE" || upper == "FALSE"
+			} else if isReservedSQLVerb(upper) {
+				return errors.New("filter expression contains a forbidden SQL keyword")
+			} else {
+				// Treated as a column identifier.
+				prevWasValue = true
+			}
+		default:
+			// Quoted literal or number.
+			prevWasValue = true
+		}
+
+		rest = rest[len(loc):]
+	}
+
+	if depth != 0 {
+		return errors.New("unbalanced parentheses in filter expression")
 	}
 	return nil
+}
+
+func isFilterWord(tok string) bool {
+	c := tok[0]
+	return c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '`' || c == '"'
+}
+
+func isFilterOperator(tok string) bool {
+	switch tok {
+	case "<=", ">=", "<>", "!=", "<", ">", "=", "+", "-", "*", "/", "%":
+		return true
+	}
+	return false
+}
+
+// isReservedSQLVerb blocks statement-leading verbs and set operators that must never appear in a
+// value predicate even without parentheses (e.g. "id = 1 UNION SELECT ...").
+func isReservedSQLVerb(upper string) bool {
+	switch upper {
+	case "SELECT", "UNION", "INTERSECT", "EXCEPT", "INSERT", "UPDATE", "DELETE",
+		"DROP", "ALTER", "TRUNCATE", "CREATE", "GRANT", "REVOKE", "SHUTDOWN",
+		"INTO", "EXEC", "EXECUTE", "CALL", "MERGE", "REPLACE", "LOAD", "HANDLER",
+		"VALUES", "SET", "DECLARE", "WAITFOR", "WITH":
+		return true
+	}
+	return false
+}
+
+func truncateForError(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) > 24 {
+		return s[:24] + "…"
+	}
+	return s
 }
 
 func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
