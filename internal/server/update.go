@@ -405,16 +405,21 @@ func (s *Server) handleApplyUpdate(w http.ResponseWriter, r *http.Request) {
 		NewVersion: req.Version,
 		Restarting: true,
 	})
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
 
 	// Trigger restart
 	if s.restartFn != nil {
 		go func() {
+			time.Sleep(200 * time.Millisecond)
 			_ = s.restartFn()
 		}()
 	} else {
 		go func() {
 			time.Sleep(500 * time.Millisecond)
-			cmd := exec.Command(exePath, os.Args[1:]...)
+			restartArgs := appendNoBrowserArg(os.Args)
+			cmd := exec.Command(exePath, restartArgs[1:]...)
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 			cmd.Stdin = os.Stdin
@@ -423,6 +428,17 @@ func (s *Server) handleApplyUpdate(w http.ResponseWriter, r *http.Request) {
 			}
 		}()
 	}
+}
+
+func appendNoBrowserArg(args []string) []string {
+	for _, a := range args {
+		if a == "--no-browser" || a == "-no-browser" || strings.HasPrefix(a, "--no-browser=") || strings.HasPrefix(a, "-no-browser=") {
+			return args
+		}
+	}
+	res := make([]string, len(args), len(args)+1)
+	copy(res, args)
+	return append(res, "--no-browser")
 }
 
 func (s *Server) isAllowedAssetURL(rawURL string) bool {
