@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.16.2] - 2026-11-05
+
 ### Changed
 - **Architecture, Security, and Roadmap Documentation Synchronization (`ARCHITECTURE.md`, `CONTEXT.md`, `MILESTONES.md`, `SECURITY.md`, `UX_DESIGN.md`, `docs/FUTURE_ROADMAP.md`, `README.md`, `README_ID.md`, `docs/USER_GUIDE.md`, `docs/USER_GUIDE_ID.md`)**: Synchronized repository specifications, domain models, and architecture guides across Milestones 45–49. Documented in-process restart semantics, Ed25519 update manifest verification, AAD secret binding, in-place query result mutations, and viewport collision clamping for submenus (#137).
 
