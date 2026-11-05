@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Offline Typography Embedding & Monospace Normalization (`web/dist/vendor/fonts/*`, `web/dist/index.html`, `web/embed_test.go`)**: Embedded offline Inter variable and JetBrains Mono fonts in WOFF2 format with `fonts.css` stylesheet, enabling full offline UI rendering and consistent ligatures across CodeMirror SQL editors, auto-complete hints, canvas diagrams, and data grids without external CDN dependencies (#139).
+- **Interactive Visual ERD Canvas Ergonomics & Minimap Navigator (`web/dist/index.html`, `web/embed_test.go`)**: Upgraded the Visual ERD canvas with 60fps rAF batching, diff-based card DOM caching, interactive minimap preview box with touch-pan navigation, pinch-to-zoom multi-touch gestures, keyboard shortcuts (`Esc` to deselect, `F` to fit canvas, `+`/`-` to zoom), dedicated canvas context menu for instant `SELECT` generation and table inspection, schema refresh synchronization, and Mermaid/SVG export (#139).
+
+### Changed
+- **Browser Popout Affordance Relocation (`web/dist/index.html`, `web/embed_test.go`)**: Moved the "Open in Browser" action button from the top navigation header to the bottom status bar, with standalone window environment detection so it only displays when running in desktop app window mode (#139).
+
+### Fixed
+- **ERD Relation Connector Path Syntax (`web/dist/index.html`)**: Restored missing `M` move command in SVG relation path definitions to prevent malformed connector curves on complex foreign key schemas (#139).
+
 ## [v0.16.2] - 2026-11-05
 
 ### Changed
