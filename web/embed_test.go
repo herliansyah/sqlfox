@@ -348,6 +348,16 @@ func TestERDCanvasPrimaryAndForeignKeyEmbedded(t *testing.T) {
 		"c => c.is_primary_key || c.key === 'PRI'",
 		"erdRenderCards()",
 		"erdRenderLines()",
+		"erdUpdateVisualStates()",
+		"erdOpenTableViewer",
+		"erdOpenTableStructure",
+		"erdContextMenuAction",
+		"erd-context-menu",
+		"erdExportMermaid",
+		"erdExportSVG",
+		"erdFilterTables",
+		"erdZoomStep",
+		"erdRefreshSchema",
 	}
 
 	for _, snippet := range expectedSnippets {
@@ -2467,6 +2477,106 @@ func TestQueryResultUpdatableAndContextMenuActions(t *testing.T) {
 		if !strings.Contains(content, snippet) {
 			t.Errorf("expected index.html to contain %q, but was missing", snippet)
 		}
+	}
+}
+
+func TestEmbeddedFonts(t *testing.T) {
+	fsys := Assets()
+
+	requiredFiles := []string{
+		"vendor/fonts/fonts.css",
+		"vendor/fonts/inter-latin.woff2",
+		"vendor/fonts/inter-latin-ext.woff2",
+		"vendor/fonts/jetbrains-mono-latin.woff2",
+		"vendor/fonts/jetbrains-mono-latin-ext.woff2",
+		"vendor/fonts/jetbrains-mono-italic-latin.woff2",
+	}
+
+	for _, relPath := range requiredFiles {
+		f, err := fsys.Open(relPath)
+		if err != nil {
+			t.Fatalf("required font asset %q missing in embedded FS: %v", relPath, err)
+		}
+		buf := make([]byte, 64)
+		n, _ := f.Read(buf)
+		_ = f.Close()
+		if n == 0 {
+			t.Errorf("font asset %q is empty", relPath)
+		}
+		if strings.HasSuffix(relPath, ".woff2") {
+			if n < 4 || string(buf[:4]) != "wOF2" {
+				t.Errorf("font asset %q does not contain valid WOFF2 header magic (got %q)", relPath, string(buf[:min(n, 4)]))
+			}
+		}
+	}
+
+	// Verify index.html loads fonts.css
+	idxFile, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html: %v", err)
+	}
+	defer idxFile.Close()
+
+	idxBytes, err := io.ReadAll(idxFile)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	idxContent := string(idxBytes)
+
+	if !strings.Contains(idxContent, `href="/vendor/fonts/fonts.css"`) {
+		t.Error("index.html does not link /vendor/fonts/fonts.css")
+	}
+
+	// Verify typography settings and ERD SVG path integrity
+	if !strings.Contains(idxContent, `font-family: 'Inter'`) {
+		t.Error("index.html body does not specify Inter fallback font-family")
+	}
+	if !strings.Contains(idxContent, `<path d="M${x1},${y1}`) {
+		t.Error("index.html ERD canvas has malformed SVG path: missing 'M' command")
+	}
+}
+
+func TestBrowserPopoutAffordanceInFooter(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html: %v", err)
+	}
+	defer f.Close()
+
+	bytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(bytes)
+
+	// Ensure button is present in footer status bar
+	if !strings.Contains(content, `<footer class=`) {
+		t.Fatal("footer element missing in index.html")
+	}
+	footerPart := content[strings.Index(content, "<footer"):]
+	footerEnd := strings.Index(footerPart, "</footer>")
+	if footerEnd == -1 {
+		t.Fatal("closing footer tag missing")
+	}
+	footerContent := footerPart[:footerEnd]
+
+	if !strings.Contains(footerContent, `id="btn-open-in-browser"`) {
+		t.Error("expected #btn-open-in-browser to be placed inside <footer> status bar")
+	}
+
+	// Ensure header does not contain #btn-open-in-browser
+	headerPart := content[strings.Index(content, "<header"):strings.Index(content, "</header>")]
+	if strings.Contains(headerPart, `id="btn-open-in-browser"`) {
+		t.Error("expected #btn-open-in-browser to be removed from <header>")
+	}
+
+	// Ensure standalone window detection function is defined and called
+	if !strings.Contains(content, "function initBrowserPopoutAffordance()") {
+		t.Error("function initBrowserPopoutAffordance() missing")
+	}
+	if !strings.Contains(content, "initBrowserPopoutAffordance();") {
+		t.Error("initBrowserPopoutAffordance() call missing in initAppWorkspace")
 	}
 }
 
