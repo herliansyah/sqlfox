@@ -357,3 +357,51 @@ func (s *safeBuffer) String() string {
 	defer s.mu.Unlock()
 	return s.buf.String()
 }
+
+func TestAppendNoBrowserArg(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []string
+		expected []string
+	}{
+		{
+			name:     "empty args",
+			input:    []string{"sqlfox"},
+			expected: []string{"sqlfox", "--no-browser"},
+		},
+		{
+			name:     "existing --no-browser",
+			input:    []string{"sqlfox", "-port", "8080", "--no-browser"},
+			expected: []string{"sqlfox", "-port", "8080", "--no-browser"},
+		},
+		{
+			name:     "existing -no-browser",
+			input:    []string{"sqlfox", "-no-browser"},
+			expected: []string{"sqlfox", "-no-browser"},
+		},
+		{
+			name:     "existing -no-browser=true",
+			input:    []string{"sqlfox", "-no-browser=true"},
+			expected: []string{"sqlfox", "-no-browser=true"},
+		},
+		{
+			name:     "other flags preserved",
+			input:    []string{"sqlfox", "-v", "--lan"},
+			expected: []string{"sqlfox", "-v", "--lan", "--no-browser"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res := appendNoBrowserArg(tt.input)
+			if len(res) != len(tt.expected) {
+				t.Fatalf("expected len %d, got %d: %v", len(tt.expected), len(res), res)
+			}
+			for i := range res {
+				if res[i] != tt.expected[i] {
+					t.Errorf("at index %d: expected %q, got %q", i, tt.expected[i], res[i])
+				}
+			}
+		})
+	}
+}

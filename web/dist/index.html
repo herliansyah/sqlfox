@@ -28811,12 +28811,28 @@ Please analyze what is causing this query to be slow and suggest necessary query
           progressBar.classList.add('bg-emerald-500');
         }
 
-        // Countdown and reload
-        let countdown = 3;
-        const interval = setInterval(() => {
-          if (statusLabel) statusLabel.textContent = `Restarted! Reconnecting in ${countdown}s...`;
-          countdown--;
-          if (countdown < 0) {
+        // Countdown and reconnect polling
+        let countdown = 2;
+        let attempts = 0;
+        const interval = setInterval(async () => {
+          if (countdown > 0) {
+            if (statusLabel) statusLabel.textContent = `Restarted! Reconnecting in ${countdown}s...`;
+            countdown--;
+            return;
+          }
+          if (statusLabel) statusLabel.textContent = 'Reconnecting to SqlFox...';
+          attempts++;
+          try {
+            const probe = await fetch('/api/auth/status', { cache: 'no-store' });
+            if (probe.ok) {
+              clearInterval(interval);
+              window.location.reload();
+              return;
+            }
+          } catch (_) {
+            // Server restarting; continue polling
+          }
+          if (attempts > 30) {
             clearInterval(interval);
             window.location.reload();
           }

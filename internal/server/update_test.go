@@ -571,3 +571,30 @@ func TestVerifyAssetChecksum_Ed25519ManifestSignature(t *testing.T) {
 		t.Fatalf("unprovisioned build should not require a signature, got: %v", err)
 	}
 }
+
+func TestSetRestartFnAndNoBrowserArg(t *testing.T) {
+	srv := &Server{}
+	called := false
+	srv.SetRestartFn(func() error {
+		called = true
+		return nil
+	})
+	if srv.restartFn == nil {
+		t.Fatalf("expected restartFn to be set")
+	}
+	_ = srv.restartFn()
+	if !called {
+		t.Errorf("expected restartFn callback to be invoked")
+	}
+
+	args := []string{"sqlfox", "-port", "8080"}
+	updated := appendNoBrowserArg(args)
+	if len(updated) != 4 || updated[3] != "--no-browser" {
+		t.Errorf("expected --no-browser appended, got: %v", updated)
+	}
+
+	alreadySet := []string{"sqlfox", "--no-browser"}
+	if len(appendNoBrowserArg(alreadySet)) != 2 {
+		t.Errorf("expected no duplicate --no-browser, got: %v", appendNoBrowserArg(alreadySet))
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -247,6 +248,8 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 
+	restartChan := make(chan struct{}, 1)
+
 	srv.SetOpenBrowserFn(func(targetURL string) error {
 		return openDefaultBrowser(targetURL)
 	})
@@ -255,6 +258,13 @@ func main() {
 		case quit <- syscall.SIGTERM:
 		default:
 		}
+	})
+	srv.SetRestartFn(func() error {
+		select {
+		case restartChan <- struct{}{}:
+		default:
+		}
+		return nil
 	})
 
 	maxAttempts := 50
@@ -323,10 +333,19 @@ func main() {
 		}()
 	}
 
-	// Graceful shutdown
-	<-quit
+	// Graceful shutdown or restart
+	isRestart := false
+	select {
+	case <-quit:
+	case <-restartChan:
+		isRestart = true
+	}
 
-	fmt.Println("\nShutting down SqlFox gracefully...")
+	if isRestart {
+		fmt.Println("\nRestarting SqlFox for update...")
+	} else {
+		fmt.Println("\nShutting down SqlFox gracefully...")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -337,6 +356,28 @@ func main() {
 	if lockCleanup != nil {
 		lockCleanup()
 	}
+
+	if isRestart {
+		exePath, err := os.Executable()
+		if err == nil {
+			if evalPath, err := filepath.EvalSymlinks(exePath); err == nil {
+				exePath = evalPath
+			}
+		}
+		restartArgs := appendNoBrowserArg(os.Args)
+		if err := restartProcess(exePath, restartArgs); err != nil {
+			// Fallback: spawn background child if restartProcess failed
+			cmd := exec.Command(exePath, restartArgs[1:]...)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			cmd.Stdin = os.Stdin
+			if startErr := cmd.Start(); startErr != nil {
+				fmt.Fprintf(os.Stderr, "Failed to restart SqlFox: %v\n", startErr)
+			}
+		}
+		return
+	}
+
 	fmt.Println("SqlFox stopped.")
 }
 
@@ -481,4 +522,15 @@ func loadEnvFilesFromPaths(paths ...string) {
 			}
 		}
 	}
+}
+
+func appendNoBrowserArg(args []string) []string {
+	for _, a := range args {
+		if a == "--no-browser" || a == "-no-browser" || strings.HasPrefix(a, "--no-browser=") || strings.HasPrefix(a, "-no-browser=") {
+			return args
+		}
+	}
+	res := make([]string, len(args), len(args)+1)
+	copy(res, args)
+	return append(res, "--no-browser")
 }

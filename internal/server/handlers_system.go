@@ -18,6 +18,11 @@ func (s *Server) SetShutdownFn(fn func()) {
 	s.shutdownFn = fn
 }
 
+// SetRestartFn configures the callback invoked when an in-app update triggers a server restart.
+func (s *Server) SetRestartFn(fn func() error) {
+	s.restartFn = fn
+}
+
 // handleOpenBrowser handles POST /api/system/open-browser requests to launch the URL in the system browser.
 func (s *Server) handleOpenBrowser(w http.ResponseWriter, r *http.Request) {
 	if !isLoopback(r.RemoteAddr) {
