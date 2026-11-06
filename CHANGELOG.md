@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Database Creation Modal Teardown & Non-blocking DDL Feedback (`web/dist/index.html`, `web/embed_test.go`)**: Ensured `openDDLReviewModal` reliably clears the execution timer interval and dismisses the dialog in a `finally` block to prevent UI freeze. Replaced intrusive modal alerts on standard DDL execution with non-blocking toasts to avoid stacked dialog conflicts, skipped redundant schema introspection on the previous database during database creation, and delegated database switching directly to `selectDatabase` (#141).
+
 ## [v0.17.1] - 2026-11-06
 
 ### Fixed
