@@ -5755,20 +5755,20 @@
           if (typeof onConfirm === 'function') {
             await onConfirm();
           }
-          dlg.close();
         } finally {
           clearInterval(timerInterval);
           newBtn.disabled = false;
           newBtn.classList.remove('opacity-50', 'cursor-not-allowed');
           newBtn.innerHTML = 'Execute DDL';
           cancelBtns.forEach(b => { b.disabled = false; b.classList.remove('opacity-50', 'cursor-not-allowed'); });
+          dlg.close();
         }
       };
       if (typeof dlg.showModal === 'function') dlg.showModal();
       else dlg.setAttribute('open', '');
     }
 
-    async function executeDDLStatements(ddlSQL, successMessage = 'DDL executed successfully.') {
+    async function executeDDLStatements(ddlSQL, successMessage = 'DDL executed successfully.', skipSchemaRefresh = false) {
       if (!activeConnection) {
         showNativeAlert('No active database connection.', 'Execution Error');
         return false;
@@ -5792,8 +5792,14 @@
           showNativeAlert('DDL execution failed:\n' + (data.error || res.statusText), 'Execution Error');
           return false;
         }
-        showNativeAlert(successMessage + (data.backup_file ? `\n\nBackup snapshot created:\n${data.backup_file}` : '') + (data.backup_warning ? `\n\nWARNING: ${data.backup_warning}` : ''), 'Success');
-        await refreshSchema();
+        if (data.backup_file || data.backup_warning) {
+          showNativeAlert(successMessage + (data.backup_file ? `\n\nBackup snapshot created:\n${data.backup_file}` : '') + (data.backup_warning ? `\n\nWARNING: ${data.backup_warning}` : ''), 'Success');
+        } else {
+          showToast(successMessage, 'success');
+        }
+        if (!skipSchemaRefresh) {
+          await refreshSchema();
+        }
         return true;
       } catch (err) {
         showNativeAlert('Error executing DDL: ' + err.message, 'Execution Error');
@@ -7685,19 +7691,12 @@
       document.getElementById('database-creator-dialog').close();
 
       openDDLReviewModal(sql, async () => {
-        const ok = await executeDDLStatements(sql, `Database "${dbName}" created successfully.`);
+        // ponytail: skip redundant schema refresh on old db and close DDL modal promptly before switching
+        const ok = await executeDDLStatements(sql, `Database "${dbName}" created successfully.`, true);
+        const ddlDlg = document.getElementById('ddl-review-dialog');
+        if (ddlDlg) ddlDlg.close();
         if (ok) {
-          try {
-            await apiFetch(`/api/session/${activeConnection.id}/select-db`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ database: dbName })
-            });
-            await loadSchemaTree(activeConnection.id, dbName);
-          } catch (e) {
-            console.warn('Auto select db failed:', e);
-            await refreshSchema();
-          }
+          await selectDatabase(dbName);
         }
       });
     }
