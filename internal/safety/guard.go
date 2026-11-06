@@ -272,7 +272,7 @@ var (
 	reDelete   = regexp.MustCompile(`(?i)^\s*DELETE\s+FROM\s+([` + "`" + `"'\w\.\-]+)`)
 	reUpdate   = regexp.MustCompile(`(?i)^\s*UPDATE\s+([` + "`" + `"'\w\.\-]+)`)
 	reAlter    = regexp.MustCompile(`(?i)^\s*ALTER\s+TABLE\s+([` + "`" + `"'\w\.\-]+)`)
-	reCreate   = regexp.MustCompile(`(?i)^\s*CREATE\s+(TABLE|VIEW|INDEX|UNIQUE\s+INDEX)\s+(IF\s+NOT\s+EXISTS\s+)?([` + "`" + `"'\w\.\-]+)`)
+	reCreate   = regexp.MustCompile(`(?i)^\s*CREATE\s+(TABLE|DATABASE|SCHEMA|VIEW|INDEX|UNIQUE\s+INDEX)\s+(IF\s+NOT\s+EXISTS\s+)?([` + "`" + `"'\w\.\-]+)`)
 	reWhere    = regexp.MustCompile(`(?i)\bWHERE\b`)
 )
 
@@ -377,7 +377,11 @@ func inspectLexicalFallback(query string, environment string) *InspectionResult 
 	isStaging := strings.EqualFold(environment, "Staging")
 
 	if match := reDrop.FindStringSubmatch(query); len(match) > 3 {
+		targetType := strings.ToUpper(match[1])
 		db, target := extractDBAndTable(match[3])
+		if targetType == "DATABASE" || targetType == "SCHEMA" {
+			db = target
+		}
 		return &InspectionResult{
 			RiskLevel:           RiskCritical,
 			IsDestructive:       true,
@@ -385,7 +389,7 @@ func inspectLexicalFallback(query string, environment string) *InspectionResult 
 			RequiresAffirmation: true,
 			TargetDatabase:      db,
 			TargetTable:         target,
-			TargetType:          strings.ToUpper(match[1]),
+			TargetType:          targetType,
 			Operation:           "DROP",
 			Reason:              fmt.Sprintf("DROP statement will permanently delete '%s'.", target),
 		}
@@ -502,7 +506,11 @@ func inspectLexicalFallback(query string, environment string) *InspectionResult 
 	}
 
 	if match := reCreate.FindStringSubmatch(query); len(match) > 3 {
+		targetType := strings.ToUpper(match[1])
 		db, target := extractDBAndTable(match[3])
+		if targetType == "DATABASE" || targetType == "SCHEMA" {
+			db = target
+		}
 		return &InspectionResult{
 			RiskLevel:           RiskWarning,
 			IsDestructive:       false,
@@ -510,9 +518,9 @@ func inspectLexicalFallback(query string, environment string) *InspectionResult 
 			RequiresAffirmation: true,
 			TargetDatabase:      db,
 			TargetTable:         target,
-			TargetType:          strings.ToUpper(match[1]),
+			TargetType:          targetType,
 			Operation:           "CREATE",
-			Reason:              fmt.Sprintf("CREATE %s will create new schema object '%s'.", strings.ToUpper(match[1]), target),
+			Reason:              fmt.Sprintf("CREATE %s will create new schema object '%s'.", targetType, target),
 		}
 	}
 
@@ -533,12 +541,13 @@ func extractDBAndTable(raw string) (string, string) {
 // InspectWithScope analyzes a query string against the target environment and scoped database.
 func InspectWithScope(query string, environment string, scopedDatabase string) *InspectionResult {
 	res := Inspect(query, environment)
-	if res.TargetDatabase != "" && scopedDatabase != "" && !strings.EqualFold(res.TargetDatabase, scopedDatabase) {
+	isDatabaseTarget := strings.EqualFold(res.TargetType, "DATABASE") || strings.EqualFold(res.TargetType, "SCHEMA")
+	if !isDatabaseTarget && res.TargetDatabase != "" && scopedDatabase != "" && !strings.EqualFold(res.TargetDatabase, scopedDatabase) {
 		res.SchemaScopeMismatch = true
 		res.RiskLevel = RiskDangerous
 		res.RequiresChallenge = true
 		res.Reason = fmt.Sprintf("Schema Scope Mismatch: query explicitly targets database '%s', but active tab is set to '%s'.", res.TargetDatabase, scopedDatabase)
-	} else if res.TargetDatabase == "" && scopedDatabase != "" {
+	} else if res.TargetDatabase == "" && scopedDatabase != "" && !isDatabaseTarget {
 		res.TargetDatabase = scopedDatabase
 	}
 	return res

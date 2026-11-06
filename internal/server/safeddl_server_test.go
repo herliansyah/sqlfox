@@ -202,4 +202,64 @@ func TestSchemaScopeMismatchAndTabDatabaseScope(t *testing.T) {
 	if !insp.RequiresAffirmation {
 		t.Fatalf("expected RequiresAffirmation=true for CREATE TABLE")
 	}
+
+	// 3. CREATE DATABASE does not trigger SchemaScopeMismatch even when active tab is scoped to another DB
+	createDbSQL := "CREATE DATABASE `new_tenant`"
+	createInsp, _, err := inspectAllStatements(createDbSQL, "Development", "sqlite", "tenant_xyz")
+	if err != nil {
+		t.Fatalf("inspectAllStatements failed: %v", err)
+	}
+	if createInsp.SchemaScopeMismatch {
+		t.Fatalf("expected SchemaScopeMismatch=false for CREATE DATABASE, got true")
+	}
+	if createInsp.RequiresChallenge {
+		t.Fatalf("expected RequiresChallenge=false for CREATE DATABASE in Development")
+	}
+	if createInsp.TargetDatabase != "new_tenant" {
+		t.Fatalf("expected TargetDatabase 'new_tenant', got '%s'", createInsp.TargetDatabase)
+	}
+
+	// 4. PostgreSQL CREATE/DROP SCHEMA & DROP DATABASE do not trigger SchemaScopeMismatch
+	pgCreateSchemaSQL := `CREATE SCHEMA IF NOT EXISTS "tenant_orders"`
+	pgCreateInsp, _, err := inspectAllStatements(pgCreateSchemaSQL, "Development", "postgres", "public")
+	if err != nil {
+		t.Fatalf("inspectAllStatements failed: %v", err)
+	}
+	if pgCreateInsp.SchemaScopeMismatch {
+		t.Fatalf("expected SchemaScopeMismatch=false for PostgreSQL CREATE SCHEMA, got true")
+	}
+	if pgCreateInsp.TargetDatabase != "tenant_orders" {
+		t.Fatalf("expected TargetDatabase 'tenant_orders', got '%s'", pgCreateInsp.TargetDatabase)
+	}
+
+	pgDropSchemaSQL := `DROP SCHEMA IF EXISTS "tenant_orders" CASCADE`
+	pgDropInsp, _, err := inspectAllStatements(pgDropSchemaSQL, "Development", "postgres", "public")
+	if err != nil {
+		t.Fatalf("inspectAllStatements failed: %v", err)
+	}
+	if pgDropInsp.SchemaScopeMismatch {
+		t.Fatalf("expected SchemaScopeMismatch=false for PostgreSQL DROP SCHEMA, got true")
+	}
+	if !pgDropInsp.RequiresChallenge {
+		t.Fatalf("expected RequiresChallenge=true for PostgreSQL DROP SCHEMA")
+	}
+	if pgDropInsp.TargetDatabase != "tenant_orders" {
+		t.Fatalf("expected TargetDatabase 'tenant_orders', got '%s'", pgDropInsp.TargetDatabase)
+	}
+
+	// 5. MySQL DROP DATABASE does not trigger SchemaScopeMismatch
+	mysqlDropDbSQL := "DROP DATABASE `legacy_analytics`"
+	mysqlDropInsp, _, err := inspectAllStatements(mysqlDropDbSQL, "Development", "mysql", "current_app")
+	if err != nil {
+		t.Fatalf("inspectAllStatements failed: %v", err)
+	}
+	if mysqlDropInsp.SchemaScopeMismatch {
+		t.Fatalf("expected SchemaScopeMismatch=false for MySQL DROP DATABASE, got true")
+	}
+	if !mysqlDropInsp.RequiresChallenge {
+		t.Fatalf("expected RequiresChallenge=true for MySQL DROP DATABASE")
+	}
+	if mysqlDropInsp.TargetDatabase != "legacy_analytics" {
+		t.Fatalf("expected TargetDatabase 'legacy_analytics', got '%s'", mysqlDropInsp.TargetDatabase)
+	}
 }

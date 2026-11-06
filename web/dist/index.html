@@ -18289,8 +18289,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
           return;
         }
       }
+      const sqlToExecute = pendingDestructiveSQL;
       closeSafetyModal();
-      runActiveQuery(true, typed);
+      runActiveQuery(true, typed, sqlToExecute);
     }
 
     // --- Impact Preview Modal & Visual Execution Tree ---
