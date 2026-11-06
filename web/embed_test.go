@@ -2580,3 +2580,57 @@ func TestBrowserPopoutAffordanceInFooter(t *testing.T) {
 	}
 }
 
+func TestCreateDatabaseAndDDLReviewIntegrity(t *testing.T) {
+	fsys := Assets()
+	f, err := fsys.Open("index.html")
+	if err != nil {
+		t.Fatalf("failed to open index.html: %v", err)
+	}
+	defer f.Close()
+
+	bytes, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("failed to read index.html: %v", err)
+	}
+	content := string(bytes)
+
+	expectedSnippets := []string{
+		"function openDDLReviewModal(sql, onConfirm)",
+		"async function executeDDLStatements(ddlSQL, successMessage = 'DDL executed successfully.', skipSchemaRefresh = false)",
+		"showToast(successMessage, 'success')",
+		"if (!skipSchemaRefresh) {",
+		"await refreshSchema();",
+		"await selectDatabase(dbName);",
+	}
+
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(content, snippet) {
+			t.Errorf("expected index.html to contain %q, but was missing", snippet)
+		}
+	}
+
+	// Verify that openDDLReviewModal cleans up timer and closes dialog in finally block
+	openDDLReviewIdx := strings.Index(content, "function openDDLReviewModal(sql, onConfirm)")
+	if openDDLReviewIdx == -1 {
+		t.Fatal("openDDLReviewModal not found in index.html")
+	}
+	openDDLBody := content[openDDLReviewIdx : openDDLReviewIdx+2500]
+	if !strings.Contains(openDDLBody, "finally {") || !strings.Contains(openDDLBody, "clearInterval(timerInterval);") || !strings.Contains(openDDLBody, "dlg.close();") {
+		t.Errorf("expected openDDLReviewModal to reliably clear timer and close dialog in finally block")
+	}
+
+	// Verify that submitCreateDatabase does not duplicate select-db and refreshSchema
+	submitCreateDBIdx := strings.Index(content, "async function submitCreateDatabase()")
+	if submitCreateDBIdx == -1 {
+		t.Fatal("submitCreateDatabase not found in index.html")
+	}
+	submitCreateDBBody := content[submitCreateDBIdx : submitCreateDBIdx+2000]
+	if !strings.Contains(submitCreateDBBody, "executeDDLStatements(sql, `Database \"${dbName}\" created successfully.`, true)") {
+		t.Errorf("expected submitCreateDatabase to call executeDDLStatements with skipSchemaRefresh=true")
+	}
+	if !strings.Contains(submitCreateDBBody, "await selectDatabase(dbName)") {
+		t.Errorf("expected submitCreateDatabase to switch database via selectDatabase(dbName)")
+	}
+}
+
+
