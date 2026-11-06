@@ -222,6 +222,80 @@ func TestSafetyGuard_InspectWithScope(t *testing.T) {
 	if !unqualifiedRes.RequiresAffirmation {
 		t.Fatalf("expected RequiresAffirmation=true for CREATE TABLE")
 	}
+
+	// 4. CREATE DATABASE / CREATE SCHEMA should not trigger schema scope mismatch when tab has an active database
+	createDbRes := InspectWithScope("CREATE DATABASE `new_db`;", "Development", "active_db")
+	if createDbRes.SchemaScopeMismatch {
+		t.Fatalf("expected no schema scope mismatch for CREATE DATABASE, got: %s", createDbRes.Reason)
+	}
+	if createDbRes.RequiresChallenge {
+		t.Fatalf("expected RequiresChallenge=false for CREATE DATABASE in Development")
+	}
+
+	createDbCharsetRes := InspectWithScope("CREATE DATABASE `new_db` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;", "Development", "active_db")
+	if createDbCharsetRes.SchemaScopeMismatch {
+		t.Fatalf("expected no schema scope mismatch for CREATE DATABASE with charset, got: %s", createDbCharsetRes.Reason)
+	}
+
+	createSchemaRes := InspectWithScope("CREATE SCHEMA `new_schema`;", "Development", "active_db")
+	if createSchemaRes.SchemaScopeMismatch {
+		t.Fatalf("expected no schema scope mismatch for CREATE SCHEMA, got: %s", createSchemaRes.Reason)
+	}
+
+	// 5. In Production, CREATE DATABASE requires challenge, but is not a scope mismatch
+	prodCreateDbRes := InspectWithScope("CREATE DATABASE `prod_db`;", "Production", "active_db")
+	if prodCreateDbRes.SchemaScopeMismatch {
+		t.Fatalf("expected no schema scope mismatch for CREATE DATABASE in Production")
+	}
+	if !prodCreateDbRes.RequiresChallenge {
+		t.Fatalf("expected RequiresChallenge=true for CREATE DATABASE in Production")
+	}
+	if prodCreateDbRes.TargetDatabase != "prod_db" {
+		t.Fatalf("expected TargetDatabase 'prod_db', got '%s'", prodCreateDbRes.TargetDatabase)
+	}
+
+	// 6. DROP DATABASE should not be marked as a schema scope mismatch
+	dropDbRes := InspectWithScope("DROP DATABASE `old_db`;", "Development", "active_db")
+	if dropDbRes.SchemaScopeMismatch {
+		t.Fatalf("expected no schema scope mismatch for DROP DATABASE, got: %s", dropDbRes.Reason)
+	}
+	if !dropDbRes.RequiresChallenge {
+		t.Fatalf("expected RequiresChallenge=true for DROP DATABASE")
+	}
+	if dropDbRes.TargetDatabase != "old_db" {
+		t.Fatalf("expected TargetDatabase 'old_db', got '%s'", dropDbRes.TargetDatabase)
+	}
+
+	// 7. PostgreSQL Dialect: CREATE/DROP SCHEMA with quotes and CASCADE
+	pgCreateSchemaRes := InspectWithScope(`CREATE SCHEMA IF NOT EXISTS "pg_tenant";`, "Development", "active_db")
+	if pgCreateSchemaRes.SchemaScopeMismatch {
+		t.Fatalf("expected no schema scope mismatch for PostgreSQL CREATE SCHEMA, got: %s", pgCreateSchemaRes.Reason)
+	}
+	if pgCreateSchemaRes.TargetDatabase != "pg_tenant" {
+		t.Fatalf("expected TargetDatabase 'pg_tenant', got '%s'", pgCreateSchemaRes.TargetDatabase)
+	}
+
+	pgDropSchemaCascadeRes := InspectWithScope(`DROP SCHEMA IF EXISTS "old_schema" CASCADE;`, "Development", "active_db")
+	if pgDropSchemaCascadeRes.SchemaScopeMismatch {
+		t.Fatalf("expected no schema scope mismatch for PostgreSQL DROP SCHEMA CASCADE, got: %s", pgDropSchemaCascadeRes.Reason)
+	}
+	if !pgDropSchemaCascadeRes.RequiresChallenge {
+		t.Fatalf("expected RequiresChallenge=true for DROP SCHEMA CASCADE")
+	}
+	if pgDropSchemaCascadeRes.TargetDatabase != "old_schema" {
+		t.Fatalf("expected TargetDatabase 'old_schema', got '%s'", pgDropSchemaCascadeRes.TargetDatabase)
+	}
+
+	pgDropDbRes := InspectWithScope(`DROP DATABASE "old_pg_db";`, "Development", "active_db")
+	if pgDropDbRes.SchemaScopeMismatch {
+		t.Fatalf("expected no schema scope mismatch for PostgreSQL DROP DATABASE, got: %s", pgDropDbRes.Reason)
+	}
+	if !pgDropDbRes.RequiresChallenge {
+		t.Fatalf("expected RequiresChallenge=true for PostgreSQL DROP DATABASE")
+	}
+	if pgDropDbRes.TargetDatabase != "old_pg_db" {
+		t.Fatalf("expected TargetDatabase 'old_pg_db', got '%s'", pgDropDbRes.TargetDatabase)
+	}
 }
 
 func TestBackupManager_BackupTable(t *testing.T) {
