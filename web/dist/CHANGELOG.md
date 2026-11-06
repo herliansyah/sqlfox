@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Database & Schema DDL Scope Validation & Safety Challenge Execution (`internal/safety/guard.go`, `internal/safety/guard_test.go`, `internal/server/safeddl_server_test.go`, `web/dist/index.html`)**: Excluded `DATABASE` and `SCHEMA` target types from tab active database scope mismatch checks to prevent false-positive warnings when issuing `CREATE DATABASE`, `CREATE SCHEMA`, `DROP DATABASE`, or `DROP SCHEMA CASCADE` across MySQL and PostgreSQL. Extended lexical fallback parser regex to recognize database and schema creation statements, sanitized quoted identifiers, and preserved `pendingDestructiveSQL` before closing the safety challenge dialog to prevent empty query executions (#140).
+
 ## [v0.17.0] - 2026-11-05
 
 ### Added
