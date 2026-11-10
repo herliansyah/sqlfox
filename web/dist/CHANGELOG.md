@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.18.0] - 2026-11-10
+
 ### Security
 - **Ingress TLS/HTTPS Encryption & Self-Signed Cert Generator (`internal/server/tls.go`, `internal/server/tls_test.go`, `cmd/sqlfox/main.go`, `internal/cli/banner.go`, `internal/cli/banner_test.go`)**: Added TLS listener support (`--tls`, `--tls-cert`, `--tls-key`, `SQLFOX_TLS=1`) with automatic in-memory ECDSA P-256 self-signed certificate generation covering loopback and detected LAN IPs, enabling zero-config transport encryption for remote tablet and LAN access without reverse proxies (ADR 0061).
 - **Safety Guard Multi-Statement AST Pre-Split & Bracket-Quoted Identifiers (`internal/safety/guard.go`, `internal/safety/guard_test.go`, `internal/server/session_manager.go`)**: Pre-split semicolon-delimited SQL batches before AST evaluation to eliminate bypass vectors on chained statements, recognized bracket-quoted identifiers (`[...]`), and queried cached schema row counts before issuing mutation impact probe queries to avoid full-table-scan overhead on production databases (ADR 0061).
