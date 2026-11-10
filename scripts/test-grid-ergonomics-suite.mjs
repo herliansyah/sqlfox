@@ -79,6 +79,8 @@ const domElementStub = (id = '', tagName = 'div') => ({
   getAttribute(k) { return this[k] || null; },
   focus() {},
   blur() {},
+  addEventListener: () => {},
+  removeEventListener: () => {},
   showModal() { this.open = true; },
   close() { this.open = false; }
 });

@@ -488,21 +488,32 @@ sqlfox/
 │       ├── handlers_snippets.go    # Snippet management
 │       ├── handlers_notes.go       # Operational notes inbox, alarms, snooze, resolve REST endpoints
 │       ├── handlers_import.go      # CSV upload & import endpoints
+│       ├── tls.go                   # Self-signed ECDSA P-256 certificate generator & TLS configuration
+│       ├── tls_test.go              # TLS certificate SANs, expiration & lifecycle tests
 │       └── handlers_ai.go          # AI chat & assistance streaming
-├── web/                            # Single-file zero-build SPA embedded into binary
-│   ├── dist/                       # index.html + vendor assets (CodeMirror, Tailwind)
-│   │   ├── vendor/
-│   │   └── index.html              # Content visibility virtualization & global network error boundary
+├── web/                            # Frontend assets & build pipeline
+│   ├── src/                        # Modular frontend source tree
+│   │   ├── index.html              # Core HTML structure & modal shells
+│   │   └── js/                     # 15 domain JavaScript modules (state, grid, tabs, dba, erd, etc.)
+│   ├── dist/                       # Compiled production bundle embedded into binary
+│   │   ├── vendor/                 # Offline dependencies (CodeMirror 6, precompiled Tailwind CSS)
+│   │   └── index.html              # Generated single-file distribution (assembled via build_web.js)
 │   └── embed.go                    # //go:embed dist/*
+├── scripts/
+│   ├── build_web.js                # Web build pipeline (Tailwind compilation, JS assembly & syntax validation)
+│   ├── build_codemirror.js         # esbuild CodeMirror 6 bundle pipeline
+│   ├── codemirror6_entry.js        # CodeMirror 6 bundle entry point with dynamic SQL dialect & dark theme
+│   ├── tailwind.config.js          # Tailwind CSS purge & token configuration
+│   └── release.sh                  # Release automation pipeline (version bump, tests, changelog)
 ├── docs/
-│   ├── adr/                        # Architectural Decision Records (0001 - 0039)
+│   ├── adr/                        # Architectural Decision Records (0001 - 0062)
 │   ├── playbooks/                  # Production operational playbooks (large-scale database management)
 │   └── agents/                     # Agent workflow documentation
 ├── CONTEXT.md                      # Ubiquitous domain language
 ├── ARCHITECTURE.md                 # System architecture (this document)
 ├── SECURITY.md                     # Security & privacy specification
 ├── UX_DESIGN.md                    # Interface wireframes & design tokens
-├── MILESTONES.md                   # Delivery roadmap & milestones (1 - 22)
+├── MILESTONES.md                   # Delivery roadmap & milestones (1 - 50)
 └── go.mod
 ```
 
@@ -1199,7 +1210,101 @@ sequenceDiagram
    - Upon receiving the `restarting` response, the web interface displays a non-blocking modal overlay and initiates active polling against `/api/auth/status` with linear retry backoff (500ms intervals, up to 30 attempts).
    - Once the restarted binary returns HTTP 200, the client smoothly refreshes the page, preserving database credentials, tab configurations, and workspace state.
 
+---
 
+## 33. Ingress TLS Encryption & Modular Frontend Architecture (ADR 0061)
+
+```mermaid
+flowchart LR
+    subgraph Client ["Client Devices"]
+        Desktop["Desktop Browser / App"]
+        Tablet["LAN Tablet / Remote Client"]
+    end
+
+    subgraph Ingress ["Zero-CGO Ingress Transport"]
+        HTTP["HTTP Listener (:8080)"]
+        HTTPS["HTTPS/TLS Listener (:8081)<br/>(Auto ECDSA P-256 / Custom Cert)"]
+    end
+
+    subgraph Core ["Go Embedded Daemon"]
+        Server["internal/server"]
+        Embed["//go:embed dist/*"]
+    end
+
+    subgraph Pipeline ["Frontend Source & Build Pipeline"]
+        SrcHTML["web/src/index.html"]
+        SrcJS["web/src/js/ (15 Domain Modules)"]
+        Tailwind["Precompiled Tailwind CSS (85 KB)"]
+        Build["scripts/build_web.js<br/>(vm.Script Syntax Verification)"]
+        DistHTML["web/dist/index.html"]
+    end
+
+    Desktop --> HTTP
+    Tablet --> HTTPS
+    HTTP --> Server
+    HTTPS --> Server
+    Server --> Embed
+    Embed --> DistHTML
+
+    SrcHTML --> Build
+    SrcJS --> Build
+    Tailwind --> DistHTML
+    Build --> DistHTML
+```
+
+1. **Dual Transport Ingress (`internal/server/tls.go`)**:
+   - SqlFox natively supports both plaintext HTTP and TLS-encrypted HTTPS transports with zero external reverse proxy dependencies.
+   - When `--tls` is specified, an in-memory ECDSA P-256 self-signed certificate is automatically generated with SANs covering `localhost`, `127.0.0.1`, `::1`, and the detected local LAN IP. Custom certificates can be supplied via `--tls-cert` and `--tls-key`.
+2. **Modular Frontend Pipeline (`web/src/` -> `web/dist/`)**:
+   - The embedded user interface is maintained as 15 focused JavaScript domain modules under `web/src/js/` alongside a semantic skeleton in `web/src/index.html`.
+   - The build pipeline (`scripts/build_web.js`) compiles static Tailwind CSS, validates concatenated JavaScript syntax in-memory via Node's `vm.Script`, and produces the optimized single-file distribution at `web/dist/index.html` for single-binary embedding via `//go:embed dist/*`.
+3. **Safety Guard Pre-Splitting & Heuristic Protection (`internal/safety/guard.go`)**:
+   - Multi-statement SQL batches are pre-split into individual statements before AST parsing, preventing chained destructive statements from bypassing inspection.
+   - Unqualified mutation safety probes query cached schema table row counts before issuing expensive `SELECT COUNT(*)` queries against target databases.
+
+---
+
+## 34. CodeMirror 6 Modular Architecture & Dynamic Multi-Dialect SQL Engine (ADR 0062)
+
+```mermaid
+flowchart TD
+    subgraph Editor ["CodeMirror 6 Ecosystem"]
+        View["EditorView (@codemirror/view)"]
+        State["EditorState (@codemirror/state)"]
+        Compartment["Dialect Compartment"]
+        Highlight["High-Contrast Dark Theme<br/>(Tailwind Slate/Sky/Pink Palette)"]
+        Autocomplete["@codemirror/autocomplete<br/>(Schema Catalog & SQL Snippets)"]
+    end
+
+    subgraph Dialects ["Multi-Dialect Lezer Parsers"]
+        MySQL["MySQL Language Parser"]
+        PG["PostgreSQL Language Parser"]
+        SQLite["SQLite Language Parser"]
+    end
+
+    subgraph Adapter ["Backward-Compatible CodeMirror6Adapter"]
+        API["getValue / setValue<br/>getSelection / replaceRange<br/>getCursor / setCursor<br/>markText (Execution Highlight)"]
+    end
+
+    View --> State
+    State --> Compartment
+    State --> Highlight
+    State --> Autocomplete
+    Compartment --> MySQL
+    Compartment --> PG
+    Compartment --> SQLite
+    Adapter --> View
+```
+
+1. **Self-Contained Offline Bundling (`scripts/codemirror6_entry.js`, `scripts/build_codemirror.js`)**:
+   - Compiles `@codemirror/view`, `@codemirror/state`, `@codemirror/commands`, `@codemirror/lang-sql`, and `@codemirror/autocomplete` using `esbuild` into a unified offline asset (`web/dist/vendor/codemirror/codemirror.min.js`, ~422 KB).
+   - Preserves zero external CDN dependencies while shipping full Lezer AST parsing and syntax trees.
+2. **Backward-Compatible Adapter (`CodeMirror6Adapter`)**:
+   - Exposes an API identical to CodeMirror 5 (`getValue`, `setValue`, `getCursor`, `markText`, `on('change')`, etc.) so all 15 frontend modules interact transparently without breaking changes.
+3. **Dynamic Multi-Dialect Switching via Compartments**:
+   - Dynamically reconfigures the editor syntax parser when switching database sessions (`cmEditor.setDialect(conn.driver)`), seamlessly toggling between MySQL, PostgreSQL, and SQLite dialect rules.
+4. **Dark Theme & Autocomplete Parity**:
+   - Integrates with SqlFox's active schema catalog and user snippets, offering instant autocompletion and high-contrast dark theme syntax highlighting.
 
 
 

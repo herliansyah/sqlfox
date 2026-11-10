@@ -83,6 +83,49 @@ func TestBanner_LANMode(t *testing.T) {
 	}
 }
 
+func TestBanner_TLSMode(t *testing.T) {
+	_ = os.Setenv("NO_COLOR", "1")
+	defer os.Unsetenv("NO_COLOR")
+
+	var buf bytes.Buffer
+	cfg := ServerBannerConfig{
+		Version:        "v0.9.0",
+		LocalURL:       "https://localhost:8443",
+		IsLAN:          true,
+		LANIP:          "192.168.1.100",
+		Port:           8443,
+		MasterPassword: "fox-secret-pin",
+		IsTLS:          true,
+		TLSCertInfo:    "Self-Signed ECDSA (HTTPS)",
+	}
+
+	RenderServerBanner(&buf, cfg)
+	out := buf.String()
+
+	if !strings.Contains(out, "https://localhost:8443") {
+		t.Errorf("expected https local URL in banner, got:\n%s", out)
+	}
+	if !strings.Contains(out, "https://192.168.1.100:8443") {
+		t.Errorf("expected https LAN endpoint in banner, got:\n%s", out)
+	}
+	if !strings.Contains(out, "TLS SECURITY") {
+		t.Errorf("expected TLS SECURITY label in banner, got:\n%s", out)
+	}
+
+	// Verify line lengths and box integrity
+	ansiRegex := regexp.MustCompile(`\x1b\[[0-9;]*m`)
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	for i, l := range lines {
+		clean := ansiRegex.ReplaceAllString(l, "")
+		runes := []rune(clean)
+		if strings.HasPrefix(clean, "╔") || strings.HasPrefix(clean, "║") || strings.HasPrefix(clean, "╠") || strings.HasPrefix(clean, "╚") {
+			if len(runes) != 72 {
+				t.Errorf("line %d has length %d runes, expected 72:\n%s", i+1, len(runes), clean)
+			}
+		}
+	}
+}
+
 func TestBanner_HelpHeader(t *testing.T) {
 	_ = os.Setenv("NO_COLOR", "1")
 	defer os.Unsetenv("NO_COLOR")

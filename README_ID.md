@@ -137,7 +137,7 @@ Seluruh tangkapan layar diambil dalam resolusi tinggi (**2x Retina / HiDPI**) de
 - **Desainer Visual Objek Terprogram**: Dialog desainer interaktif untuk Views, Stored Procedures, Functions, Triggers, dan Scheduled Events dengan editor CodeMirror bawaan.
 - **Connection Vault Terenkripsi**: Kata sandi database dan kunci privat SSL dienkripsi saat istirahat (*at rest*) menggunakan **AES-256-GCM** (dengan pengikatan terautentikasi per-kolom) dan KDF **Argon2id**.
 - **Keamanan Akses Ingress**: Pengikatan default pada loopback (`127.0.0.1`), proteksi DNS rebinding (mode LAN dibatasi hanya ke host privat/loopback), dan validasi Same-Origin bita-demi-bita penangkal CSRF lintas-port.
-- **Akses Jaringan Lokal (LAN)**: Akses multi-perangkat via flag `--lan` yang dilindungi autentikasi Master PIN dan karantina otomatis terhadap brute force.
+- **Akses Jaringan Lokal (LAN) & Enkripsi TLS**: Akses multi-perangkat via flag `--lan` yang dilindungi autentikasi Master PIN dan karantina otomatis brute force, didukung enkripsi HTTPS/TLS bawaan (`--tls`, `--tls-cert`, `--tls-key`).
 - **Self-Update Bertanda Tangan**: Update dalam aplikasi dibatasi allowlist origin resmi dan diverifikasi terhadap manifest checksum bertanda tangan Ed25519 (*fail-closed*) sebelum binary diganti.
 
 ---

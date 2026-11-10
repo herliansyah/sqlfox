@@ -60,6 +60,14 @@ _Avoid_: Host filter, domain check, origin gate
 The ingress validation gate strictly enforcing that incoming state-mutating HTTP requests possess an `Origin` matching the target `Host` byte-for-byte, preventing cross-port CSRF execution from other local applications.
 _Avoid_: CORS bypass, cross-port allowance
 
+**Ingress TLS Listener**:
+The zero-CGO HTTPS server configuration (`--tls`, `--tls-cert`, `--tls-key`, `SQLFOX_TLS=1`) terminating TLS directly within the Go runtime, securing LAN and remote browser traffic without requiring external reverse proxies.
+_Avoid_: External proxy, SSL tunnel, HTTPS wrapper
+
+**Ephemeral TLS Certificate**:
+An in-memory self-signed ECDSA P-256 certificate generated automatically on startup with Subject Alternative Names (SANs) covering `localhost`, `127.0.0.1`, `::1`, and the host's detected local network IP when custom certificates are not supplied.
+_Avoid_: Static dummy cert, self-signed pem dump, plaintext fallback
+
 **Strict Connection Mode**:
 A Connection configuration policy that pins an active session strictly to a single target database, rejecting cross-database queries or DDL mutations even when authenticated as a superuser.
 _Avoid_: Locked connection, single DB profile, pinned vault entry
@@ -116,9 +124,17 @@ _Avoid_: Blocking introspection, connect-time full crawl
 The deterministic AST analysis gate that intercepts and evaluates SQL statements prior to execution against the target database, automatically unwrapping MySQL executable comments (`/*! ... */`) to prevent challenge evasion.
 _Avoid_: Linter, query validator, firewall
 
+**Multi-Statement AST Pre-Splitting**:
+The pre-execution safety inspection phase (`inspectMultiStatements`) that segments semicolon-delimited SQL batches into discrete individual statements before AST traversal, ensuring chained destructive statements cannot evade safety challenge gates.
+_Avoid_: Semicolon skip, batch pass, chained bypass
+
 **Destructive Query**:
 A SQL statement capable of permanently altering or removing schema objects or mass row data without explicit targeting (e.g., unqualified DELETE/UPDATE, DROP, TRUNCATE).
 _Avoid_: Bad query, invalid SQL, dangerous command
+
+**Cached Row Count Mutation Risk Probe**:
+A heuristic optimization in pre-execution mutation estimation that queries cached schema table row counts instead of dispatching full-table `SELECT COUNT(*)` queries against unindexed target tables, eliminating production database lock contention and query starvation.
+_Avoid_: Full table scan count, heavy probe, slow count check
 
 **Challenge Modal**:
 A mandatory confirmation dialog requiring explicit typing of target identifiers before executing high-risk operations.
@@ -234,6 +250,10 @@ _Avoid_: API proxy, SaaS key
 The curated, just-in-time subset of database DDL metadata supplied to AI prompts based on active queries or explicit user references.
 _Avoid_: Full schema dump, DB prompt
 
+**Identifier Masking Secure-by-Default**:
+The client-side privacy firewall setting that automatically sanitizes table and column names into synthetic tokens (`tbl_1`, `col_1`) before forwarding schema context to third-party AI models by default (`MaskIdentifiers = true`), requiring an explicit opt-out to reveal plaintext identifiers.
+_Avoid_: Optional masking, opt-in privacy, plaintext-by-default schema
+
 **AI Persona & System Instruction**:
 User-defined behavioral guidelines and response language (e.g. Bahasa Indonesia, concise SQL) injected into Copilot's prompt context.
 _Avoid_: Prompt tweak, bot style
@@ -291,6 +311,14 @@ _Avoid_: AI handler, prompt builder, bot service
 **Query Editor**:
 An integrated code editor supporting SQL syntax highlighting, line numbers, and keyboard shortcuts.
 _Avoid_: Text box, input area, raw textarea
+
+**CodeMirror 6 Modular Architecture**:
+The modern, modular code editor engine powered by `@codemirror/view`, `@codemirror/state`, and `@codemirror/lang-sql`, replacing legacy monolithic CodeMirror 5 with functional transaction pipelines, dynamic dialect compartments, and high-contrast dark theme styling.
+_Avoid_: Legacy CodeMirror, static editor, CM5 addon
+
+**Dynamic Dialect Compartment**:
+A reactive CodeMirror 6 extension compartment that reconfigures SQL syntax parsing and keyword completion rules dynamically when an operator switches database sessions (MySQL, PostgreSQL, SQLite).
+_Avoid_: Static SQL mode, hardcoded dialect, global re-init
 
 **Schema Catalog Cache**:
 An in-memory client-side cache of active database tables, columns, data types, and indexes fetched via session schema introspection.
@@ -766,6 +794,14 @@ _Avoid_: In-process tunnel, custom bastion client
 The design and styling invariant enforcing `white-space: nowrap !important;` and `flex-shrink: 0;` on all interactive buttons, toolbar icons, badge pills, and tab headers, preventing distorted pill dimensions and multi-line label collapse during viewport resizing.
 _Avoid_: Multiline button labels, squished button shapes, colliding controls
 
+**Modular Frontend Pipeline**:
+The build-time assembly process (`scripts/build_web.js`) that decomposes the 30,000+ line web UI into 15 domain JavaScript modules under `web/src/js/`, validates concatenated script syntax in-memory via Node's `vm.Script`, compiles Tailwind CSS statically, and produces `web/dist/index.html` for single-binary embedding.
+_Avoid_: Webpack bloat, massive single-file edit, unvalidated bundle
+
+**Pre-Compiled Static CSS**:
+The ahead-of-time purged Tailwind CSS distribution (`web/dist/vendor/tailwind/tailwind.css`, 85 KB) replacing the runtime Tailwind Play CDN compiler, eliminating browser CPU spikes and Cumulative Layout Shifts (CLS).
+_Avoid_: Runtime Play CDN, dynamic CSS parser, unpurged stylesheet
+
 ## Architectural Decision Records (ADR)
 - **0001**: CGo-Free Pure Go Drivers (`docs/adr/0001-cgo-free-pure-go-drivers.md`)
 - **0002**: Deterministic AST Safety Guard (`docs/adr/0002-deterministic-ast-safety-guard.md`)
@@ -827,6 +863,8 @@ _Avoid_: Multiline button labels, squished button shapes, colliding controls
 - **0058**: Virtual Data Grid and Micro-Chunk Streaming (`docs/adr/0058-virtual-datagrid-and-micro-chunk-streaming.md`)
 - **0059**: Systemic Security Hardening and Multi-Engine Resilience (`docs/adr/0059-systemic-security-hardening-and-engine-resilience.md`)
 - **0060**: Supply-Chain Signing, Script-Runner Safety Parity, and Vault/Ingress Crypto Hardening (`docs/adr/0060-supply-chain-signing-and-ingress-crypto-hardening.md`)
+- **0061**: Modular Frontend Pipeline, Ingress TLS Listener, and Safety Guard Hardening (`docs/adr/0061-modular-frontend-pipeline-tls-listener-and-safety-guard-hardening.md`)
+- **0062**: Upgrade to CodeMirror 6 Modular Architecture and Multi-Dialect SQL Engine (`docs/adr/0062-upgrade-codemirror-6-modular-sql-engine.md`)
 
 ## Visual Schema & ERD Canvas
 

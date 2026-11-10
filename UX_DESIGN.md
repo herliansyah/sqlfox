@@ -1077,7 +1077,7 @@ Non-blocking full-screen overlay during in-place executable replacement and daem
 │                                                                        │
 │                    🔄 RESTARTING SQLFOX SERVER                         │
 │                                                                        │
-│             Upgrading to v0.16.1 in-place...                           │
+│             Upgrading to v0.17.2 in-place...                           │
 │             Replacing process image and reconnecting session.          │
 │                                                                        │
 │                      [ ⣾ Polling /api/auth/status... ]                 │
@@ -1087,6 +1087,73 @@ Non-blocking full-screen overlay during in-place executable replacement and daem
 │                                                                        │
 └────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## 33. CodeMirror 6 Multi-Dialect Editor, Static CSS & Ingress TLS Indicator
+
+### High-Contrast CodeMirror 6 Syntax Palette
+
+CodeMirror 6 replaces legacy CodeMirror 5, utilizing `@codemirror/lang-sql` and dynamic compartments with syntax highlighting tokens integrated into the SqlFox Tailwind dark theme:
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│ [Tab 1: pg_queries.sql ●] [PostgreSQL 🐘]                              │
+├────────────────────────────────────────────────────────────────────────┤
+│ 1 | SELECT u.id, u.email, o.total_amount, o.status                    │
+│ 2 | FROM users u                                                       │
+│ 3 | INNER JOIN orders o ON o.user_id = u.id                           │
+│ 4 | WHERE o.created_at >= '2026-01-01'::timestamp                      │
+│ 5 | ORDER BY o.total_amount DESC                                       │
+│ 6 | LIMIT 50;                                                          │
+│   │                                                                    │
+│   │ Autocomplete Tooltip:                                              │
+│   │ ┌──────────────────────────────────────────────────────────┐       │
+│   │ │ [COL] total_amount   numeric(12,2) - orders              │       │
+│   │ │ [COL] transaction_id uuid - orders                        │       │
+│   │ │ [KW]  TRUE           boolean                             │       │
+│   │ └──────────────────────────────────────────────────────────┘       │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+| Syntax Token | Color Hex | Tailwind Token | Styling Attributes |
+| :--- | :--- | :--- | :--- |
+| **SQL Keywords** (`SELECT`, `FROM`, `JOIN`) | `#f472b6` | `pink-400` | Bold |
+| **Strings & Literals** (`'2026-01-01'`) | `#34d399` | `emerald-400` | Regular |
+| **Numbers & Numeric Constants** (`50`, `12.5`) | `#fbbf24` | `amber-400` | Regular |
+| **Types & Casts** (`timestamp`, `uuid`, `int`) | `#c084fc` | `purple-400` | Regular |
+| **Atoms, Booleans & NULL** (`true`, `false`) | `#fb923c` | `orange-400` | Regular |
+| **Built-in Functions** (`COUNT`, `NOW`, `COALESCE`) | `#38bdf8` | `sky-400` | Regular |
+| **Identifiers, Columns & Tables** (`users`, `id`) | `#7dd3fc` | `sky-300` | Regular |
+| **Comments** (`-- comment`, `/* block */`) | `#64748b` | `slate-500` | Italic |
+| **Bracket Match** (`( ... )`) | `#38bdf8` | `sky-400` | Glowing Cyan Outline |
+
+### AI Copilot Privacy Firewall Default Posture
+
+In the AI Copilot settings modal (`#ai-settings-dialog`), the **Mask Identifiers** toggle is enabled (`[x]`) by default to prevent unintentional transmission of sensitive table and column names to third-party AI APIs:
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│  AI Copilot Configuration                                             │
+├────────────────────────────────────────────────────────────────────────┤
+│  AI Provider: [ Claude 3.5 Sonnet ▼ ]                                  │
+│  API Key:     [ sk-ant-api03-•••••••••••••••••••••••••••••••••••• ]    │
+│                                                                        │
+│  Privacy Firewall:                                                     │
+│  [X] Mask Identifiers (Recommended for production)                     │
+│      Replaces table and column names with synthetic tokens (tbl_1,     │
+│      col_1) before sending context to the AI model.                    │
+│                                                                        │
+│  [ Save Settings ]                                    [ Cancel ]       │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+### Ingress TLS Terminal & Browser Status
+
+When `--tls` or `SQLFOX_TLS=1` is enabled:
+- The terminal startup banner outputs `https://localhost:<port>` with an explicit note regarding the auto-generated ECDSA P-256 certificate.
+- When opening in standard browsers, the secure transport indicator (HTTPS lock icon) is displayed in the address bar.
+
 
 ```
 

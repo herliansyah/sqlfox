@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -8,6 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"sqlfox/internal/server"
 )
 
 func TestSingleInstanceGuard(t *testing.T) {
@@ -144,6 +147,62 @@ func TestThirdPartyServiceOnPortNotDetectedAsSqlFox(t *testing.T) {
 	url, pid, running := checkExistingInstance(tempDir, thirdPartyPort)
 	if running {
 		t.Fatalf("expected running=false for third party application, got true (url=%s, pid=%d)", url, pid)
+	}
+}
+
+func TestSingleInstanceGuard_TLS(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "sqlfox-instance-tls-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	tlsCfg, _, _, err := server.LoadOrCreateTLSConfig("", "", filepath.Join(tempDir, "certs"), []string{"127.0.0.1"})
+	if err != nil {
+		t.Fatalf("failed to create test TLS config: %v", err)
+	}
+
+	listener, err := tls.Listen("tcp", "127.0.0.1:0", tlsCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mockPort := listener.Addr().(*net.TCPAddr).Port
+
+	mockServer := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/auth/status" {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-SqlFox-App", "sqlfox")
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"app":       "sqlfox",
+					"is_remote": false,
+					"unlocked":  true,
+				})
+				return
+			}
+			http.NotFound(w, r)
+		}),
+	}
+	go func() {
+		_ = mockServer.Serve(listener)
+	}()
+	defer mockServer.Close()
+
+	// Write instance lock with https URL
+	mockURL := "https://localhost:12345"
+	cleanup, err := writeInstanceLock(tempDir, mockPort, mockURL)
+	if err != nil {
+		t.Fatalf("failed to write instance lock: %v", err)
+	}
+	defer cleanup()
+
+	// Check existing instance: should successfully probe and detect active TLS SqlFox instance
+	url, pid, running := checkExistingInstance(tempDir, 0)
+	if !running {
+		t.Fatalf("expected running=true for active TLS instance, got false")
+	}
+	if url != mockURL || pid != os.Getpid() {
+		t.Errorf("expected url=%s pid=%d, got url=%s pid=%d", mockURL, os.Getpid(), url, pid)
 	}
 }
 

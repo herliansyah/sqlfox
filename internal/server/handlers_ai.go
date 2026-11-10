@@ -22,7 +22,7 @@ type AIChatRequest struct {
 	APIKey          string      `json:"api_key"`
 	Model           string      `json:"model"`
 	Endpoint        string      `json:"endpoint"`
-	MaskIdentifiers bool        `json:"mask_identifiers"`
+	MaskIdentifiers *bool       `json:"mask_identifiers,omitempty"` // default true (secure-by-default)
 	Language        string      `json:"language,omitempty"`       // "id" (Bahasa Indonesia), "en", "auto"
 	ResponseStyle   string      `json:"response_style,omitempty"` // "concise", "detailed", "normal"
 	CustomPrompt    string      `json:"custom_prompt,omitempty"`  // custom persona / system instructions
@@ -120,7 +120,7 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 		APIKey:           req.APIKey,
 		Model:            req.Model,
 		Endpoint:         req.Endpoint,
-		MaskIdentifiers:  req.MaskIdentifiers,
+		MaskIdentifiers:  req.MaskIdentifiers == nil || *req.MaskIdentifiers,
 		Language:         req.Language,
 		ResponseStyle:    req.ResponseStyle,
 		CustomPrompt:     req.CustomPrompt,

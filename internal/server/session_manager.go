@@ -2580,11 +2580,36 @@ func (s *ActiveSession) estimateAffectedRows(ctx context.Context, insp *safety.I
 	if insp == nil || s.Session == nil {
 		return
 	}
+
+	getCachedRowCount := func(tableName string) (int64, bool) {
+		sc := s.Schema()
+		if sc == nil || tableName == "" {
+			return 0, false
+		}
+		cleanName := strings.Trim(tableName, "`'\"[]")
+		for _, tbl := range sc.Tables {
+			if strings.EqualFold(tbl.Name, cleanName) && tbl.RowCount > 0 {
+				return tbl.RowCount, true
+			}
+		}
+		return 0, false
+	}
+
 	if len(insp.StatementEstimates) > 0 {
 		var total int64
 		allExact := true
 		for i := range insp.StatementEstimates {
 			est := &insp.StatementEstimates[i]
+			// Blast-radius optimization: If this is an unqualified mutation, check cached catalog row count first
+			if !est.HasWhere && est.TargetTable != "" {
+				if rc, ok := getCachedRowCount(est.TargetTable); ok {
+					est.EstimatedRows = &rc
+					est.EstimatedIsExact = false
+					total += rc
+					allExact = false
+					continue
+				}
+			}
 			if est.CountQuery != "" {
 				count, exact := s.runSingleCountEstimate(ctx, est.CountQuery)
 				if count != nil {
@@ -2600,6 +2625,17 @@ func (s *ActiveSession) estimateAffectedRows(ctx context.Context, insp *safety.I
 		insp.EstimatedRows = &total
 		insp.EstimatedIsExact = allExact
 		return
+	}
+
+	// Blast-radius optimization: If this is an unqualified mutation (no WHERE),
+	// check if the catalog already knows the approximate table row count.
+	// This avoids triggering an expensive full-table scan on large production tables!
+	if !insp.HasWhere && insp.TargetTable != "" {
+		if rc, ok := getCachedRowCount(insp.TargetTable); ok {
+			insp.EstimatedRows = &rc
+			insp.EstimatedIsExact = false
+			return
+		}
 	}
 
 	if insp.CountQuery != "" {

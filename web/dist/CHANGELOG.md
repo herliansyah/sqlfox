@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Ingress TLS/HTTPS Encryption & Self-Signed Cert Generator (`internal/server/tls.go`, `internal/server/tls_test.go`, `cmd/sqlfox/main.go`, `internal/cli/banner.go`, `internal/cli/banner_test.go`)**: Added TLS listener support (`--tls`, `--tls-cert`, `--tls-key`, `SQLFOX_TLS=1`) with automatic in-memory ECDSA P-256 self-signed certificate generation covering loopback and detected LAN IPs, enabling zero-config transport encryption for remote tablet and LAN access without reverse proxies (ADR 0061).
+- **Safety Guard Multi-Statement AST Pre-Split & Bracket-Quoted Identifiers (`internal/safety/guard.go`, `internal/safety/guard_test.go`, `internal/server/session_manager.go`)**: Pre-split semicolon-delimited SQL batches before AST evaluation to eliminate bypass vectors on chained statements, recognized bracket-quoted identifiers (`[...]`), and queried cached schema row counts before issuing mutation impact probe queries to avoid full-table-scan overhead on production databases (ADR 0061).
+- **AI Privacy Firewall Secure-by-Default (`internal/server/handlers_ai.go`, `internal/server/ai_chat_schema_test.go`, `web/dist/index.html`)**: Switched `MaskIdentifiers` to a pointer `*bool` defaulting to `true` (secure-by-default) so sensitive table and column names are masked before sending schema metadata to third-party AI models (ADR 0061).
+
+### Changed
+- **CodeMirror 6 Upgrade & Multi-Dialect Lezer Engine (`web/dist/vendor/codemirror/*`, `scripts/codemirror6_entry.js`, `scripts/build_codemirror.js`, `web/src/js/04_editor_tabs.js`, `web/src/js/02_connections.js`, `package.json`)**: Upgraded editor infrastructure from legacy CodeMirror 5 to CodeMirror 6 with modern `@codemirror/view`, `@codemirror/state`, and `@codemirror/lang-sql`. Added automated bundling via esbuild, multi-dialect support (MySQL, PostgreSQL, SQLite) with dynamic switching via compartments on active connection change, high-contrast dark theme styling parity, and native integration between schema catalog autocompletion and `@codemirror/autocomplete` (ADR 0062).
+- **Modular Frontend Architecture & Build Pipeline (`web/src/*`, `web/dist/index.html`, `scripts/build_web.js`, `package.json`, `scripts/release.sh`)**: Decomposed the monolithic 30k-line single-file SPA into structured source files under `web/src/` with 15 domain JavaScript modules, paired with an automated build pipeline that compiles static CSS and verifies syntax via Node's `vm.Script` before generating the embedded `web/dist/index.html` bundle (ADR 0061).
+- **Pre-Compiled Tailwind CSS (`web/dist/vendor/tailwind/tailwind.css`, `scripts/tailwind.config.js`, `scripts/tailwind-input.css`)**: Replaced client-side Tailwind Play CDN runtime (`tailwind.min.js`, 398 KB) with pre-compiled, purged static CSS (85 KB), reducing transfer payload by >78% and eliminating client-side layout shifts (ADR 0061).
+
 ## [v0.17.2] - 2026-11-06
 
 ### Fixed

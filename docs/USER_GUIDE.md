@@ -195,9 +195,11 @@ sqlfox
 ```
 
 ### Build from Source
+Building SqlFox requires Go 1.22+ and Node.js (for asset compilation):
 ```bash
 git clone https://github.com/herliansyah/sqlfox.git
 cd sqlfox
+npm install && npm run build
 go build -o sqlfox ./cmd/sqlfox
 ./sqlfox
 ```
@@ -208,6 +210,12 @@ SqlFox supports intuitive command-line options:
 ```bash
 # Custom port and host binding
 ./sqlfox -port 8080 -host 127.0.0.1
+
+# Enable HTTPS/TLS encryption with auto-generated ECDSA P-256 certificate
+./sqlfox -tls
+
+# Enable HTTPS/TLS with custom certificate and private key
+./sqlfox -tls -tls-cert /path/to/cert.pem -tls-key /path/to/key.pem
 
 # Headless server mode (suppress automatic browser launch)
 ./sqlfox -no-browser
@@ -234,6 +242,9 @@ SQLFOX_PPROF=1 ./sqlfox -port 9090
 | `-port <num>` | `8080` | HTTP listening port (with automatic sequential port hunting) |
 | `-host <ip>` | `127.0.0.1` | Network interface to bind (`0.0.0.0` for LAN with Master PIN guard) |
 | `--lan` | `false` | Enable LAN and tablet access (binds to `0.0.0.0` and reveals Master PIN) |
+| `-tls` | `false` | Enable HTTPS/TLS transport encryption (auto-generates self-signed ECDSA cert if unconfigured) |
+| `-tls-cert <path>` | `""` | Path to custom PEM-encoded TLS certificate file |
+| `-tls-key <path>` | `""` | Path to custom PEM-encoded TLS private key file |
 | `-app` | `true` | Launch in standalone native window mode using Chrome/Edge/Chromium |
 | `-browser` | `false` | Force launch in standard web browser tab instead of native app window |
 | `-no-browser` | `false` | Run headless without spawning the default OS web browser or app window |
@@ -286,6 +297,12 @@ When you bind SqlFox to a local network interface or access it over LAN (`http:/
 2. The user must authenticate using the **Master Password** or the 6-digit **Master PIN** generated in the host server terminal.
 3. This guarantees secure tablet, mobile, or team access across local WiFi without exposing raw credentials.
 4. **Shoulder-Surfing Privacy Guard**: In the desktop interface header, the Master PIN badge masks sensitive digits by default (`fox-••••`). Click the **👁️** toggle icon to temporarily reveal the PIN when pairing secondary devices, keeping credentials private in open office or screen-sharing environments.
+
+### Ingress TLS / HTTPS Transport Encryption
+When running SqlFox with `--lan` for tablet or remote workstation access, encrypt communication end-to-end using pure-Go TLS termination:
+- **Automatic Self-Signed Certificate**: Running `./sqlfox --lan -tls` automatically generates an in-memory ECDSA P-256 certificate with SANs covering `localhost`, `127.0.0.1`, `::1`, and the detected LAN IP. No external reverse proxy (e.g. Nginx, Caddy) or CGO dependencies are needed.
+- **Custom Certificates**: Supply custom PEM-encoded TLS certificates and keys via `./sqlfox --lan -tls -tls-cert /path/to/fullchain.pem -tls-key /path/to/privkey.pem`.
+- **First-Time Connection Note**: Browsers accessing auto-generated certificates will display an untrusted certificate warning on first load. Acknowledge the warning to proceed with encrypted communication.
 
 ---
 
@@ -440,6 +457,7 @@ SqlFox features a **Bring-Your-Own-Key (BYOK)** AI assistant:
 - **Context Injection**: Automatically injects schema information, active table definitions, and engine dialect into prompt context.
 - **1-Click SQL Execution**: SQL suggestions rendered in chat include `Insert & Run` and `Replace in Editor` buttons.
 - **Chat Session Forking**: Fork an active AI discussion at any point into a new branch to explore alternative query strategies without losing previous context.
+- **Identifier Masking (Secure-by-Default)**: Automatically masks sensitive table and column names with synthetic tokens (`tbl_1`, `col_1`) before sending metadata to AI providers, preventing unintentional schema exposure.
 - **Automated Error Healer**: When a query fails in the editor, click **🩺 Heal Error**; the AI diagnoses the syntax/logical error, explains the root cause, and provides the corrected SQL.
 
 <p align="center">
@@ -562,6 +580,12 @@ Manage database programmability without writing tedious boilerplate DDL:
 - **Dynamic Parameter Grids**: Add, remove, and reorder routine input/output parameters visually.
 - **Event Scheduling Selectors**: Configure recurrence intervals (`EVERY 1 DAY`, `AT ...`) visually.
 - **Pre-Flight Full Database Dump Confirmation**: Prompts a safety modal before running full database dumps, displaying target schemas, bandwidth/lock warnings, and granular structure vs data toggles.
+
+### CodeMirror 6 Multi-Dialect SQL Query Editor
+SqlFox incorporates a custom-bundled CodeMirror 6 editor engine built with `@codemirror/view`, `@codemirror/state`, and `@codemirror/lang-sql`:
+- **Dynamic Dialect Switching**: Seamlessly reconfigures syntax parsing and keyword completion compartments when switching between MySQL, PostgreSQL, and SQLite sessions (`cmEditor.setDialect(conn.driver)`).
+- **Contextual Autocomplete**: Integrates directly with `@codemirror/autocomplete` and SqlFox's active schema catalog cache, providing rapid completions for table names, column definitions, aliases (`u.email`), and driver-specific functions.
+- **Dark Theme Palette Parity**: High-contrast syntax tokens matching the Tailwind dark theme (Pink keywords, Emerald literals, Amber numbers, Purple types, Sky built-ins, and glowing Cyan bracket matching).
 
 ---
 

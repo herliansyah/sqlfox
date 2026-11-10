@@ -85,6 +85,19 @@ Fitur-fitur esensial yang diharapkan oleh developer dan DBA dari sebuah Database
   - Pada Windows, listener socket dan lock file dilepas secara bersih sebelum meluncurkan proses anak.
   - Menyuntikkan flag `--no-browser` otomatis saat restart dan memantau status kesiapan server via polling `/api/auth/status` sebelum memuat ulang antarmuka web.
 
+### 1.12 Enkripsi Transport Ingress TLS/HTTPS & Sertifikat Otomatis Ephemeral
+* **Status Saat Ini**: **Terimplementasi (v0.17.2, ADR 0061)**
+* **Detail Implementasi**:
+  - Dukungan listener TLS murni Go (`--tls`, `--tls-cert`, `--tls-key`, `SQLFOX_TLS=1`) tanpa dependensi CGO atau reverse proxy eksternal.
+  - Pembangkitan sertifikat ECDSA P-256 self-signed otomatis langsung di memori dengan Subject Alternative Names (SANs) untuk `localhost`, `127.0.0.1`, `::1`, dan alamat IP LAN lokal terdeteksi.
+  - Terminal banner menampilkan indikator URL HTTPS yang aman saat startup.
+
+### 1.13 Arsitektur Frontend Modular & Peningkatan Engine Editor CodeMirror 6
+* **Status Saat Ini**: **Terimplementasi (v0.17.2, ADR 0061, ADR 0062)**
+* **Detail Implementasi**:
+  - Dekomposisi monolit HTML ke dalam 15 modul JavaScript domain (`web/src/js/`) dan struktur HTML semantik (`web/src/index.html`).
+  - Pipeline build otomatis (`scripts/build_web.js`) yang melakukan kompilasi CSS statis via Tailwind CLI, validasi sintaks script gabungan di memori melalui Node `vm.Script`, dan perakitan ke `web/dist/index.html`.
+  - Migrasi dari CodeMirror 5 ke CodeMirror 6 modern dengan `@codemirror/lang-sql`, *compartment* dialek dinamis (MySQL, PostgreSQL, SQLite), palet tema gelap kontras tinggi, dan integrasi autocompletion skema katalog.
 
 ---
 
@@ -124,12 +137,12 @@ Fitur-fitur yang sudah ada di codebase namun menambah kompleksitas berlebih, mem
 
 ### 2.4 Monolit Frontend Single-File SPA (24.500+ Baris HTML)
 * **File Terkait**:
-  - `web/dist/index.html` (24.544 baris, 1.24 MB)
-* **Analisis**:
-  - Demi menjaga distribusi *single-binary* tanpa node_modules saat runtime, seluruh kode antarmuka (DOM modal, canvas ERD visualizer, chart drawing, CodeMirror setup, table designer, sync engine) disatukan ke dalam satu file HTML raksasa.
-  - Hal ini membuat navigasi kode frontend sulit, memperlambat code review, dan berpotensi menghambat rendering DOM pada mesin dengan spesifikasi rendah.
-* **Rencana Perampingan**:
-  - Pisahkan menjadi modul-modul JS logis di direktori sumber (`web/src/js/`), lalu gunakan bundler ringan (seperti esbuild) saat build time untuk menghasilkan `web/dist/index.html` teroptimasi secara deterministik.
+  - `web/src/` (15 modul domain JS), `scripts/build_web.js`, `web/dist/index.html`
+* **Status Saat Ini**: **Terimplementasi (ADR 0061, ADR 0062)**
+* **Detail Implementasi**:
+  - Kode antarmuka telah didekomposisi dari single-file raksasa menjadi 15 modul JavaScript terfokus di `web/src/js/` dan struktur HTML di `web/src/index.html`.
+  - Build pipeline otomatis (`scripts/build_web.js`) memvalidasi sintaks via Node `vm.Script` dan mengompilasi CSS statis Tailwind (85 KB) menggantikan Play CDN runtime (398 KB), menghilangkan layout shift (CLS) dan merampingkan pemeliharaan kode.
+  - Editor dimodernisasi ke CodeMirror 6 dengan bundling offline via esbuild (`scripts/build_codemirror.js`).
 
 ### 2.5 Operational Notes dengan Web Audio API Alarm & Snooze
 * **File Terkait**:
