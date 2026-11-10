@@ -68,6 +68,14 @@ func Inspect(query string, environment string) *InspectionResult {
 		return &InspectionResult{RiskLevel: RiskNone}
 	}
 
+	// Multi-statement inspection: if query contains multiple SQL statements, inspect every
+	// statement so destructive statements hidden after a benign statement (e.g. "SELECT 1; DROP TABLE users;")
+	// cannot slip through!
+	stmts := driver.SplitSQLStatements(clean, "")
+	if len(stmts) > 1 {
+		return inspectMultiStatements(stmts, environment)
+	}
+
 	// The Vitess parser has no CTE support, so inspect the main statement behind WITH ... AS (...).
 	if main, ok := stripLeadingCTE(clean); ok {
 		return Inspect(main, environment)
@@ -266,13 +274,82 @@ func inspectAST(stmt sqlparser.Statement, environment, query string) *Inspection
 	return &InspectionResult{RiskLevel: RiskNone}
 }
 
+func inspectMultiStatements(stmts []string, environment string) *InspectionResult {
+	var highestRes *InspectionResult
+	var estimates []StatementEstimate
+	hasDestructive := false
+	hasChallenge := false
+	hasAffirmation := false
+
+	for idx, s := range stmts {
+		res := Inspect(s, environment)
+		if res.IsDestructive {
+			hasDestructive = true
+		}
+		if res.RequiresChallenge {
+			hasChallenge = true
+		}
+		if res.RequiresAffirmation {
+			hasAffirmation = true
+		}
+
+		if res.IsDestructive || res.RequiresChallenge || res.RequiresAffirmation {
+			estimates = append(estimates, StatementEstimate{
+				StatementIndex:    idx + 1,
+				SQL:               s,
+				Operation:         res.Operation,
+				TargetTable:       res.TargetTable,
+				TargetDatabase:    res.TargetDatabase,
+				HasWhere:          res.HasWhere,
+				CountQuery:        res.CountQuery,
+				EstimatedRows:     res.EstimatedRows,
+				EstimatedIsExact:  res.EstimatedIsExact,
+				RequiresChallenge: res.RequiresChallenge,
+				Reason:            res.Reason,
+			})
+		}
+
+		if highestRes == nil || riskPrecedence(res.RiskLevel) > riskPrecedence(highestRes.RiskLevel) {
+			highestRes = res
+		}
+	}
+
+	if highestRes == nil {
+		return &InspectionResult{RiskLevel: RiskNone}
+	}
+
+	cloned := *highestRes
+	cloned.IsDestructive = hasDestructive || cloned.IsDestructive
+	cloned.RequiresChallenge = hasChallenge || cloned.RequiresChallenge
+	cloned.RequiresAffirmation = hasAffirmation || cloned.RequiresAffirmation
+	if len(estimates) > 0 {
+		cloned.StatementEstimates = estimates
+	}
+	return &cloned
+}
+
+func riskPrecedence(r RiskLevel) int {
+	switch r {
+	case RiskCritical:
+		return 4
+	case RiskDangerous:
+		return 3
+	case RiskWarning:
+		return 2
+	case RiskNone:
+		return 1
+	default:
+		return 0
+	}
+}
+
 var (
-	reDrop     = regexp.MustCompile(`(?i)^\s*DROP\s+(TABLE|DATABASE|SCHEMA|VIEW|MATERIALIZED\s+VIEW|INDEX|SEQUENCE|FUNCTION|PROCEDURE|TRIGGER|EVENT|TYPE|DOMAIN|EXTENSION)\s+(IF\s+EXISTS\s+)?([` + "`" + `"'\w\.\-]+)`)
-	reTruncate = regexp.MustCompile(`(?i)^\s*TRUNCATE\s+(TABLE\s+)?([` + "`" + `"'\w\.\-]+)`)
-	reDelete   = regexp.MustCompile(`(?i)^\s*DELETE\s+FROM\s+([` + "`" + `"'\w\.\-]+)`)
-	reUpdate   = regexp.MustCompile(`(?i)^\s*UPDATE\s+([` + "`" + `"'\w\.\-]+)`)
-	reAlter    = regexp.MustCompile(`(?i)^\s*ALTER\s+TABLE\s+([` + "`" + `"'\w\.\-]+)`)
-	reCreate   = regexp.MustCompile(`(?i)^\s*CREATE\s+(TABLE|DATABASE|SCHEMA|VIEW|INDEX|UNIQUE\s+INDEX)\s+(IF\s+NOT\s+EXISTS\s+)?([` + "`" + `"'\w\.\-]+)`)
+	reDrop     = regexp.MustCompile(`(?i)^\s*DROP\s+(TABLE|DATABASE|SCHEMA|VIEW|MATERIALIZED\s+VIEW|INDEX|SEQUENCE|FUNCTION|PROCEDURE|TRIGGER|EVENT|TYPE|DOMAIN|EXTENSION)\s+(IF\s+EXISTS\s+)?([` + "`" + `"'\[\]\w\.\-]+)`)
+	reTruncate = regexp.MustCompile(`(?i)^\s*TRUNCATE\s+(TABLE\s+)?([` + "`" + `"'\[\]\w\.\-]+)`)
+	reDelete   = regexp.MustCompile(`(?i)^\s*DELETE\s+FROM\s+([` + "`" + `"'\[\]\w\.\-]+)`)
+	reUpdate   = regexp.MustCompile(`(?i)^\s*UPDATE\s+([` + "`" + `"'\[\]\w\.\-]+)`)
+	reAlter    = regexp.MustCompile(`(?i)^\s*ALTER\s+TABLE\s+([` + "`" + `"'\[\]\w\.\-]+)`)
+	reCreate   = regexp.MustCompile(`(?i)^\s*CREATE\s+(TABLE|DATABASE|SCHEMA|VIEW|INDEX|UNIQUE\s+INDEX)\s+(IF\s+NOT\s+EXISTS\s+)?([` + "`" + `"'\[\]\w\.\-]+)`)
 	reWhere    = regexp.MustCompile(`(?i)\bWHERE\b`)
 )
 
@@ -328,6 +405,16 @@ func maskSQL(q string, mysqlLexing bool) string {
 				}
 				blank(i, stop)
 				i = stop - 1
+			}
+		case b[i] == '[':
+			// SQLite / MS SQL bracket-quoted identifier: [my table]
+			b[i] = ' '
+			for i++; i < len(b); i++ {
+				if b[i] == ']' {
+					b[i] = ' '
+					break
+				}
+				b[i] = ' '
 			}
 		case b[i] == '\'' || b[i] == '"' || b[i] == '`':
 			quote := b[i]
@@ -531,8 +618,8 @@ func extractDBAndTable(raw string) (string, string) {
 	s := strings.TrimSpace(raw)
 	parts := strings.Split(s, ".")
 	if len(parts) >= 2 {
-		db := strings.Trim(parts[len(parts)-2], "`'\"")
-		tbl := strings.Trim(parts[len(parts)-1], "`'\"")
+		db := strings.Trim(parts[len(parts)-2], "`'\"[]")
+		tbl := strings.Trim(parts[len(parts)-1], "`'\"[]")
 		return db, tbl
 	}
 	return "", cleanTableName(raw)
@@ -550,6 +637,13 @@ func InspectWithScope(query string, environment string, scopedDatabase string) *
 	} else if res.TargetDatabase == "" && scopedDatabase != "" && !isDatabaseTarget {
 		res.TargetDatabase = scopedDatabase
 	}
+	if scopedDatabase != "" && !isDatabaseTarget {
+		for i := range res.StatementEstimates {
+			if res.StatementEstimates[i].TargetDatabase == "" {
+				res.StatementEstimates[i].TargetDatabase = scopedDatabase
+			}
+		}
+	}
 	return res
 }
 
@@ -557,7 +651,7 @@ func cleanTableName(raw string) string {
 	s := strings.TrimSpace(raw)
 	parts := strings.Split(s, ".")
 	last := parts[len(parts)-1]
-	return strings.Trim(last, "`'\"")
+	return strings.Trim(last, "`'\"[]")
 }
 
 var reCTEStart = regexp.MustCompile(`(?i)^WITH\b`)

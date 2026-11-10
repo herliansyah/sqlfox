@@ -473,3 +473,55 @@ func TestBackupFileName_StaysInsideBackupDir(t *testing.T) {
 		}
 	}
 }
+
+func TestSafetyGuard_MultiStatementBypass(t *testing.T) {
+	// A harmless SELECT followed by a destructive statement must NOT bypass the safety guard!
+	queries := []string{
+		"SELECT 1; DROP TABLE users;",
+		"SELECT * FROM items WHERE id = 1; DELETE FROM customers;",
+		"SHOW TABLES;\nTRUNCATE TABLE logs;",
+		"UPDATE items SET status = 'active'; DROP TABLE old_items;",
+	}
+
+	for _, q := range queries {
+		res := Inspect(q, "Production")
+		if !res.IsDestructive {
+			t.Errorf("expected multi-statement query %q to be flagged as destructive", q)
+		}
+		if !res.RequiresChallenge {
+			t.Errorf("expected multi-statement query %q to require challenge", q)
+		}
+		if res.RiskLevel != RiskCritical {
+			t.Errorf("expected multi-statement query %q to have RiskCritical, got %v", q, res.RiskLevel)
+		}
+		if len(res.StatementEstimates) == 0 {
+			t.Errorf("expected statement estimates to be populated for multi-statement query %q", q)
+		} else if res.StatementEstimates[0].StatementIndex < 1 {
+			t.Errorf("expected 1-indexed StatementIndex, got %d", res.StatementEstimates[0].StatementIndex)
+		}
+	}
+
+	// Specifically verify second statement has StatementIndex == 2
+	resChained := Inspect("SELECT 1; DROP TABLE users;", "Production")
+	if len(resChained.StatementEstimates) == 0 || resChained.StatementEstimates[0].StatementIndex != 2 {
+		t.Errorf("expected statement index 2 for DROP TABLE, got %+v", resChained.StatementEstimates)
+	}
+}
+
+func TestSafetyGuard_DialectBracketIdentifiers(t *testing.T) {
+	// SQLite / T-SQL bracket identifiers
+	resDrop := Inspect("DROP TABLE [sensitive_orders]", "Production")
+	if !resDrop.IsDestructive || resDrop.TargetTable != "sensitive_orders" {
+		t.Errorf("expected DROP TABLE [sensitive_orders] to target 'sensitive_orders', got table=%q destructive=%v", resDrop.TargetTable, resDrop.IsDestructive)
+	}
+
+	resDelUnqualified := Inspect("DELETE FROM [users]", "Development")
+	if !resDelUnqualified.IsDestructive || resDelUnqualified.HasWhere || resDelUnqualified.TargetTable != "users" {
+		t.Errorf("expected unqualified DELETE FROM [users] to target 'users' with HasWhere=false, got %+v", resDelUnqualified)
+	}
+
+	resDelQualified := Inspect("DELETE FROM [users] WHERE [id] = 1", "Development")
+	if !resDelQualified.HasWhere || resDelQualified.RequiresChallenge {
+		t.Errorf("expected qualified DELETE FROM [users] WHERE [id] = 1 to have HasWhere=true, got %+v", resDelQualified)
+	}
+}

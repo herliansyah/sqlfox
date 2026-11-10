@@ -137,7 +137,7 @@ All captures are taken in high resolution (**2x Retina / HiDPI**) on an enterpri
 - **Visual Programmability Designers**: Interactive visual editors for Views, Stored Procedures, Functions, Triggers, and Scheduled Events with embedded CodeMirror syntax editors.
 - **Encrypted Connection Vault**: Database passwords and client SSL keys encrypted at rest via **AES-256-GCM** (with per-field authenticated binding) and **Argon2id**.
 - **Ingress Security**: Default loopback binding (`127.0.0.1`), DNS rebinding protection (LAN mode restricted to private/loopback hosts), and byte-for-byte Same-Origin validation against cross-port CSRF.
-- **Remote LAN Mode**: Tablet and remote browser access (`--lan`) guarded by Master PIN authentication and brute-force lockout.
+- **Remote LAN Mode & TLS Encryption**: Tablet and remote browser access (`--lan`) guarded by Master PIN authentication and brute-force lockout, with built-in HTTPS/TLS encryption (`--tls`, `--tls-cert`, `--tls-key`).
 - **Signed Self-Update**: In-app updates are gated by an official-origin allowlist and verified against an Ed25519-signed checksum manifest (fail-closed) before the binary is replaced.
 
 ---

@@ -18,6 +18,8 @@ type ServerBannerConfig struct {
 	IsNewPIN       bool
 	VaultPath      string
 	BackupDir      string
+	IsTLS          bool
+	TLSCertInfo    string
 }
 
 // ponytail: check if output is an interactive character terminal and respects NO_COLOR/TERM
@@ -113,21 +115,34 @@ func RenderServerBanner(w io.Writer, cfg ServerBannerConfig) {
 		}
 	}
 
+	proto := "http"
+	if cfg.IsTLS {
+		proto = "https"
+	}
+
 	localDisplay := cfg.LocalURL
 	if localDisplay == "" {
-		localDisplay = fmt.Sprintf("http://localhost:%d", cfg.Port)
+		localDisplay = fmt.Sprintf("%s://localhost:%d", proto, cfg.Port)
 	}
 	renderMeta("LOCAL ENDPOINT", localDisplay, cCyan)
 
 	if cfg.IsLAN {
-		lanDisplay := fmt.Sprintf("http://%s:%d (Tablet / Mobile)", cfg.LANIP, cfg.Port)
+		lanDisplay := fmt.Sprintf("%s://%s:%d (Tablet / Mobile)", proto, cfg.LANIP, cfg.Port)
 		if cfg.LANIP == "" {
-			lanDisplay = fmt.Sprintf("http://0.0.0.0:%d (Tablet / Mobile)", cfg.Port)
+			lanDisplay = fmt.Sprintf("%s://0.0.0.0:%d (Tablet / Mobile)", proto, cfg.Port)
 		}
 		renderMeta("LAN ENDPOINT", lanDisplay, cCyan)
 		renderMeta("MASTER PIN", cfg.MasterPassword, cYellow)
 	} else {
 		renderMeta("LAN ACCESS", "Disabled (run with --lan for tablet/mobile)", cDim)
+	}
+
+	if cfg.IsTLS {
+		certInfo := cfg.TLSCertInfo
+		if certInfo == "" {
+			certInfo = "Self-Signed ECDSA (HTTPS Enabled)"
+		}
+		renderMeta("TLS SECURITY", certInfo, cGreen)
 	}
 
 	vaultDisplay := cfg.VaultPath

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -88,6 +89,9 @@ func main() {
 	portFlag := flag.Int("port", 8080, "Port to listen on (default 8080, with automatic scanning if busy)")
 	hostFlag := flag.String("host", "127.0.0.1", "Host interface to bind (default 127.0.0.1; use --lan or 0.0.0.0 for LAN/Tablet access)")
 	lanFlag := flag.Bool("lan", false, "Enable LAN and tablet access (binds to 0.0.0.0 and displays Master PIN)")
+	tlsFlag := flag.Bool("tls", false, "Enable TLS/HTTPS listener (auto-generates self-signed ECDSA certificate if none provided)")
+	tlsCertFlag := flag.String("tls-cert", "", "Path to custom TLS certificate file (PEM)")
+	tlsKeyFlag := flag.String("tls-key", "", "Path to custom TLS private key file (PEM)")
 	dbFlag := flag.String("db", "", "Path to config vault database (default: ~/.sqlfox/config.db)")
 	passFlag := flag.String("pass", "", "Master password for vault encryption (leave blank to auto-generate or reuse ~/.sqlfox/master.key)")
 	appFlag := flag.Bool("app", true, "Launch in standalone native window mode using Chrome/Edge/Chromium if available")
@@ -279,7 +283,40 @@ func main() {
 		os.Exit(1)
 	}
 
-	localURL := fmt.Sprintf("http://localhost:%d", actualPort)
+	envTLS := os.Getenv("SQLFOX_TLS") == "1" || strings.ToLower(os.Getenv("SQLFOX_TLS")) == "true"
+	tlsCert := *tlsCertFlag
+	if tlsCert == "" {
+		tlsCert = os.Getenv("SQLFOX_TLS_CERT")
+	}
+	tlsKey := *tlsKeyFlag
+	if tlsKey == "" {
+		tlsKey = os.Getenv("SQLFOX_TLS_KEY")
+	}
+	isTLS := *tlsFlag || envTLS || tlsCert != "" || tlsKey != ""
+
+	var tlsConfig *tls.Config
+	if isTLS {
+		certDir := filepath.Join(configDir, "certs")
+		hostnames := []string{"localhost", "127.0.0.1"}
+		if lanIP != "" {
+			hostnames = append(hostnames, lanIP)
+		}
+		if bindHost != "127.0.0.1" && bindHost != "0.0.0.0" && bindHost != "" {
+			hostnames = append(hostnames, bindHost)
+		}
+		cfg, _, _, err := server.LoadOrCreateTLSConfig(tlsCert, tlsKey, certDir, hostnames)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Failed to initialize TLS: %v\n", err)
+			os.Exit(1)
+		}
+		tlsConfig = cfg
+	}
+
+	scheme := "http"
+	if isTLS {
+		scheme = "https"
+	}
+	localURL := fmt.Sprintf("%s://localhost:%d", scheme, actualPort)
 
 	var lockCleanup func()
 	if !*multiFlag && os.Getenv("SQLFOX_MULTI_INSTANCE") != "1" {
@@ -290,10 +327,15 @@ func main() {
 		}
 	}
 
+	if isTLS && tlsConfig != nil {
+		listener = tls.NewListener(listener, tlsConfig)
+	}
+
 	// ponytail: WriteTimeout must remain disabled (0) so persistent SSE streams (/api/logs/stream)
 	// and large streaming database dumps are not abruptly disconnected after 60 seconds.
 	httpServer := &http.Server{
 		Handler:           srv.Router(),
+		TLSConfig:         tlsConfig,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
@@ -305,6 +347,15 @@ func main() {
 	}()
 
 	if !isSilent {
+		tlsInfo := ""
+		if isTLS {
+			if tlsCert != "" {
+				tlsInfo = fmt.Sprintf("Custom (%s)", filepath.Base(tlsCert))
+			} else {
+				tlsInfo = "Self-Signed ECDSA (HTTPS Enabled)"
+			}
+		}
+
 		cli.RenderServerBanner(os.Stdout, cli.ServerBannerConfig{
 			Version:        Version,
 			LocalURL:       localURL,
@@ -315,6 +366,8 @@ func main() {
 			IsNewPIN:       isNewPIN,
 			VaultPath:      dbPath,
 			BackupDir:      backupDir,
+			IsTLS:          isTLS,
+			TLSCertInfo:    tlsInfo,
 		})
 	}
 

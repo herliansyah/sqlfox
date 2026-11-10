@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"os/exec"
+	"strings"
 	"syscall"
 )
 
@@ -24,7 +25,11 @@ var chromiumLinuxCandidates = []string{
 func findChromiumLinux(targetURL string) (string, []string, bool) {
 	for _, name := range chromiumLinuxCandidates {
 		if path, err := exec.LookPath(name); err == nil {
-			return path, []string{"--app=" + targetURL, "--class=SqlFox"}, true
+			args := []string{"--app=" + targetURL, "--class=SqlFox"}
+			if strings.HasPrefix(targetURL, "https://localhost") || strings.HasPrefix(targetURL, "https://127.0.0.1") {
+				args = append(args, "--allow-insecure-localhost")
+			}
+			return path, args, true
 		}
 	}
 	return "", nil, false

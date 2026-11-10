@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -67,7 +68,11 @@ func checkExistingInstance(configDir string, defaultPort int) (string, int, bool
 
 	// 2. Fallback: probe defaultPort directly in case lock file was removed or missing
 	if defaultPort > 0 && pingSqlFox(defaultPort) {
-		return fmt.Sprintf("http://localhost:%d", defaultPort), 0, true
+		scheme := "http"
+		if probeSqlFoxScheme("https", "127.0.0.1", defaultPort) {
+			scheme = "https"
+		}
+		return fmt.Sprintf("%s://localhost:%d", scheme, defaultPort), 0, true
 	}
 
 	return "", 0, false
@@ -129,14 +134,25 @@ func pingSqlFox(port int) bool { return pingSqlFoxHost("", port) }
 
 // pingSqlFoxHost probes the instance on the address it is bound to; wildcard/empty binds are
 // reachable on loopback, but an instance bound to a specific LAN IP is not.
+// Supports both plaintext HTTP and TLS listeners.
 func pingSqlFoxHost(host string, port int) bool {
+	if probeSqlFoxScheme("http", host, port) {
+		return true
+	}
+	return probeSqlFoxScheme("https", host, port)
+}
+
+func probeSqlFoxScheme(scheme, host string, port int) bool {
 	if host == "" || host == "0.0.0.0" || host == "::" || host == "localhost" {
 		host = "127.0.0.1"
 	}
 	client := &http.Client{
 		Timeout: 750 * time.Millisecond,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
 	}
-	url := fmt.Sprintf("http://%s/api/auth/status", net.JoinHostPort(host, strconv.Itoa(port)))
+	url := fmt.Sprintf("%s://%s/api/auth/status", scheme, net.JoinHostPort(host, strconv.Itoa(port)))
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return false
@@ -208,7 +224,17 @@ func stopExistingInstance(configDir string, defaultPort int) error {
 	data, err := os.ReadFile(lockPath)
 	if err != nil {
 		if defaultPort > 0 && pingSqlFox(defaultPort) {
-			resp, postErr := http.Post(fmt.Sprintf("http://127.0.0.1:%d/api/system/shutdown", defaultPort), "application/json", nil)
+			scheme := "http"
+			if probeSqlFoxScheme("https", "127.0.0.1", defaultPort) {
+				scheme = "https"
+			}
+			client := &http.Client{
+				Timeout: 2 * time.Second,
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+				},
+			}
+			resp, postErr := client.Post(fmt.Sprintf("%s://127.0.0.1:%d/api/system/shutdown", scheme, defaultPort), "application/json", nil)
 			if postErr == nil {
 				_ = resp.Body.Close()
 				return nil

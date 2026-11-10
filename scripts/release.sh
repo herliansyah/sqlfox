@@ -174,7 +174,28 @@ if [ -f "cmd/sqlfox/main.go" ]; then
   echo "📝 Updated cmd/sqlfox/main.go Version to ${NEW_VERSION}"
 fi
 
-# 6b. Synchronize version in web/dist/index.html
+# 6b. Synchronize version in web/src/index.html, web/dist/index.html, and package.json
+if [ -f "web/src/index.html" ]; then
+  sed -i -E "s/id=\"footer-version-text\">SqlFox v[^<]*/id=\"footer-version-text\">SqlFox ${NEW_VERSION}/g" web/src/index.html
+  sed -i -E "s/id=\"update-cur-ver\"([^>]*)>v[^<]*/id=\"update-cur-ver\"\1>${NEW_VERSION}/g" web/src/index.html
+  sed -i -E "s/id=\"changelog-current-badge\"([^>]*)>v[^<]*/id=\"changelog-current-badge\"\1>${NEW_VERSION}/g" web/src/index.html
+  echo "📝 Updated web/src/index.html version to ${NEW_VERSION}"
+fi
+
+if [ -f "package.json" ]; then
+  CLEAN_VER="${NEW_VERSION#v}"
+  sed -i -E "s/\"version\": \"[^\"]*\"/\"version\": \"${CLEAN_VER}\"/g" package.json
+  if [ -f "package-lock.json" ]; then
+    sed -i -E "0,/\"version\": \"[^\"]*\"/s//\"version\": \"${CLEAN_VER}\"/" package-lock.json
+  fi
+  echo "📝 Updated package.json and package-lock.json version to ${CLEAN_VER}"
+fi
+
+if [ -f "scripts/build_web.js" ]; then
+  echo "📦 Rebuilding web dist bundle..."
+  node scripts/build_web.js
+fi
+
 if [ -f "web/dist/index.html" ]; then
   sed -i -E "s/id=\"footer-version-text\">SqlFox v[^<]*/id=\"footer-version-text\">SqlFox ${NEW_VERSION}/g" web/dist/index.html
   sed -i -E "s/id=\"update-cur-ver\"([^>]*)>v[^<]*/id=\"update-cur-ver\"\1>${NEW_VERSION}/g" web/dist/index.html
@@ -183,7 +204,7 @@ if [ -f "web/dist/index.html" ]; then
 fi
 
 # 7. Commit & Tag
-git add CHANGELOG.md web/dist/CHANGELOG.md cmd/sqlfox/main.go web/dist/index.html
+git add CHANGELOG.md web/dist/CHANGELOG.md cmd/sqlfox/main.go web/src/index.html web/dist/index.html web/dist/vendor/tailwind/tailwind.css package.json package-lock.json
 git commit -m "chore(release): ${NEW_VERSION}"
 git tag -a "${NEW_VERSION}" -m "Release ${NEW_VERSION} (${RELEASE_DATE})"
 

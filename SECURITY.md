@@ -24,7 +24,7 @@ Security architecture, cryptographic protocols, environment isolation, and AI pr
 
 ### Trust Boundary Rules
 1. **Secure-by-Default Ingress Binding**: The backend web daemon strictly binds to loopback (`127.0.0.1`) on a dynamic port or Unix socket. It never exposes ports to external networks unless the operator explicitly passes `--lan` (or `-host 0.0.0.0`).
-2. **Controlled LAN Access Guard**: When `--lan` is enabled for tablet or remote device management, all non-loopback connections must pass the `Remote Access Guard` requiring Master Password authentication before session access.
+2. **Controlled LAN Access Guard & Ingress TLS**: When `--lan` is enabled for tablet or remote device management, all non-loopback connections must pass the `Remote Access Guard` requiring Master Password authentication before session access. Ingress traffic can be fully encrypted via `--tls` using automated in-memory ECDSA P-256 self-signed certificates or operator-supplied certificates (`--tls-cert` and `--tls-key`).
 3. **Third-Party Egress Control**: Outbound traffic is restricted strictly to configured target database endpoints and chosen AI provider endpoints.
 4. **Flight Recorder Telemetry Safety**: The on-demand Performance Flight Recorder samples only global engine counters (`SHOW GLOBAL STATUS`) and running statement text from `PROCESSLIST`. Zero table row data is recorded. All metrics remain strictly within the local SQLite vault with an automated 24-hour retention purge and a 10-minute auto-stop polling ceiling.
 
@@ -117,7 +117,7 @@ flowchart TD
 ### Privacy Guarantees
 1. **Never Send Table Data**: Query results and row data **NEVER** leave the client. AI only receives table structure (DDL metadata: column names, data types, indexes) necessary for query generation or optimization.
 2. **Selective Just-in-Time Schema**: Instead of dumping the whole database, the firewall extracts table names from the current editor via AST and passes only those specific DDL definitions.
-3. **Client-Side Identifier Masking (Optional)**: In high-compliance environments, users can enable *Identifier Masking*. Column names (`salary`, `patient_id`) are mapped to synthetic tokens (`col_1`, `col_2`) before leaving the machine, and mapped back upon receiving the response.
+3. **Client-Side Identifier Masking (Secure-by-Default)**: Enabled out-of-the-box (`MaskIdentifiers = true`). Table and column names are mapped to synthetic tokens (`col_1`, `col_2`, `tbl_1`) before leaving the machine unless explicitly disabled by the operator, ensuring high compliance and preventing unintentional data leakage.
 4. **Local LLM First-Class Support**: Native integration with Ollama (`http://localhost:11434`) allows air-gapped database management with zero external internet traffic.
 
 ---
@@ -292,4 +292,43 @@ To prevent process hijacking, socket contention, and race conditions during bina
 3. **Privilege & IPC Isolation**:
    - On Windows platforms, the instance lock is explicitly released and HTTP listeners are cleanly closed before launching the child executable via `exec.Command`.
    - The `--no-browser` flag is enforced programmatically on all update restart paths, preventing unintentional spawning of external browser processes or URI scheme hijacking during startup.
+
+---
+
+## 18. Ingress TLS/HTTPS Transport Encryption & Ephemeral Certificate Generation
+
+To protect credentials, session cookies, and query payloads over LAN/remote connections without requiring external proxies:
+
+1. **Native Pure-Go TLS Listener (`internal/server/tls.go`)**:
+   - SqlFox embeds zero-dependency TLS listener support into its HTTP daemon, configured via `--tls`, `--tls-cert`, `--tls-key`, or `SQLFOX_TLS=1`.
+   - When custom certificates are not supplied, SqlFox generates an ephemeral, in-memory ECDSA P-256 certificate on startup with a 365-day validity window.
+2. **Subject Alternative Name (SAN) Scoping**:
+   - The generated certificate includes strict SANs covering `localhost`, `127.0.0.1`, `::1`, and the host's detected local network IP (e.g. `192.168.1.50`).
+   - Private keys and certificates exist exclusively in memory and are never written to disk unencrypted.
+3. **CGO-Free Cross-Platform Parity**:
+   - Cryptographic key generation and TLS termination use Go's standard library `crypto/tls` and `crypto/x509`, keeping cross-compilation 100% CGO-free across all supported platforms.
+
+---
+
+## 19. Safety Guard Multi-Statement AST Pre-Splitting & Bracket Identifiers
+
+To prevent evasion of destructive statement verification in complex or chained SQL scripts:
+
+1. **Multi-Statement AST Pre-Splitting (`inspectMultiStatements`)**:
+   - When an operator submits a batch script with multiple statements separated by semicolons (e.g., `SELECT 1; DROP TABLE users;`), the AST Safety Guard pre-splits the text into individual statements before AST traversal.
+   - Every single statement within the batch is evaluated against destructive operation rules (`DROP`, `TRUNCATE`, unqualified `DELETE`/`UPDATE`, production DDL).
+   - If any sub-statement violates safety criteria, the entire batch is halted and intercepted by the Challenge Modal.
+2. **Bracket-Quoted Identifier Recognition**:
+   - Sanitization and AST evaluation properly recognize bracket-quoted identifiers (`[schema].[table]`), preventing obfuscated table names from bypassing safety rules.
+
+---
+
+## 20. Cached Schema Row Count Protection Against Full-Table-Scan Mutation Probes
+
+To prevent production database lock contention and connection pool exhaustion:
+
+1. **Cached Row Count Heuristics (`internal/server/session_manager.go`)**:
+   - Before executing unqualified mutation queries (`UPDATE` or `DELETE` without `WHERE`), the mutation impact estimator queries the locally cached schema table row counts (`table.Rows`) rather than executing expensive `SELECT COUNT(*)` queries on unindexed tables.
+   - This completely eliminates lock contention and CPU spikes on high-cardinality production tables while accurately estimating mutation risk.
+
 

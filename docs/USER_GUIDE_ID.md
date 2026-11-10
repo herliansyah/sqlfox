@@ -195,9 +195,11 @@ sqlfox
 ```
 
 ### Kompilasi Manual dari Source Code
+Kompilasi SqlFox dari source membutuhkan Go 1.22+ dan Node.js (untuk build aset antarmuka):
 ```bash
 git clone https://github.com/herliansyah/sqlfox.git
 cd sqlfox
+npm install && npm run build
 go build -o sqlfox ./cmd/sqlfox
 ./sqlfox
 ```
@@ -208,6 +210,12 @@ SqlFox menyediakan argumen baris perintah yang fleksibel:
 ```bash
 # Menentukan port dan host binding secara manual
 ./sqlfox -port 8080 -host 127.0.0.1
+
+# Mengaktifkan enkripsi HTTPS/TLS dengan sertifikat otomatis ECDSA P-256
+./sqlfox -tls
+
+# Mengaktifkan HTTPS/TLS dengan sertifikat dan kunci privat kustom
+./sqlfox -tls -tls-cert /path/to/cert.pem -tls-key /path/to/key.pem
 
 # Menjalankan mode headless server (tanpa membuka browser otomatis)
 ./sqlfox -no-browser
@@ -234,6 +242,9 @@ SQLFOX_PPROF=1 ./sqlfox -port 9090
 | `-port <nomor>` | `8080` | Port HTTP (dilengkapi fitur pencarian port berurutan otomatis) |
 | `-host <ip>` | `127.0.0.1` | Alamat IP antarmuka jaringan (`0.0.0.0` untuk akses LAN dengan proteksi PIN) |
 | `--lan` | `false` | Buka akses jaringan LAN & tablet (bind ke `0.0.0.0` dan tampilkan Master PIN) |
+| `-tls` | `false` | Aktifkan enkripsi HTTPS/TLS (otomatis generate sertifikat ECDSA self-signed jika tidak ditentukan) |
+| `-tls-cert <path>`| `""` | Lokasi berkas sertifikat TLS berformat PEM kustom |
+| `-tls-key <path>` | `""` | Lokasi berkas private key TLS berformat PEM kustom |
 | `-log-level <lvl>`| `info` | Tingkat rincian log minimum: `debug`, `info`, `warn`, `error` |
 | `-v`, `-verbose` | `false` | Pintasan cepat untuk `-log-level debug` |
 | `-log-format <fmt>`| `text` | Format log terstruktur: `text` (mudah dibaca manusia) atau `json` |
@@ -286,6 +297,12 @@ Saat Anda menjalankan SqlFox di server jaringan lokal atau mengaksesnya via IP L
 2. Pengguna wajib memasukkan **Master Password** atau **Master PIN** 6 digit yang tercetak di layar terminal induk.
 3. Fitur ini melindungi akses database Anda saat dibuka dari iPad, tablet, atau laptop rekan tim di satu jaringan WiFi tanpa khawatir bocornya kredensial.
 4. **Proteksi Privasi Shoulder-Surfing**: Di header aplikasi desktop, badge Master PIN secara default dimaskir (`fox-••••`). Klik ikon **👁️** untuk mengintip PIN sementara saat menghubungkan tablet, mencegah PIN terlihat orang lain di ruang kerja terbuka (*open space/coffee shop*) atau saat *screen sharing*.
+
+### Enkripsi Transport Ingress TLS / HTTPS
+Saat menjalankan SqlFox dengan opsi `--lan` untuk akses tablet atau workstation jarak jauh, lalu lintas HTTP dapat dienkripsi secara penuh langsung dari runtime Go tanpa reverse proxy eksternal (seperti Nginx atau Caddy):
+- **Sertifikat Self-Signed Otomatis**: Perintah `./sqlfox --lan -tls` secara otomatis membuat sertifikat in-memory ECDSA P-256 dengan SANs yang mencakup `localhost`, `127.0.0.1`, `::1`, dan alamat IP LAN lokal yang terdeteksi.
+- **Sertifikat Kustom**: Gunakan sertifikat dan kunci privat PEM kustom melalui `./sqlfox --lan -tls -tls-cert /path/to/fullchain.pem -tls-key /path/to/privkey.pem`.
+- **Catatan Koneksi Pertama**: Browser yang mengakses sertifikat self-signed otomatis akan menampilkan peringatan keamanan sertifikat pada sambungan pertama kali. Cukup terima sertifikat untuk melanjutkan komunikasi terenkripsi HTTPS.
 
 ---
 
@@ -440,6 +457,7 @@ SqlFox dilengkapi asisten AI dengan arsitektur **Bring-Your-Own-Key (BYOK)**:
 - **Injeksi Konteks Cerdas**: Menyuntikkan struktur tabel aktif dan dialek database secara otomatis ke dalam konteks percakapan.
 - **Eksekusi SQL 1-Klik**: Setiap blok kode SQL hasil generasi AI dilengkapi tombol `Insert & Run` dan `Replace in Editor`.
 - **Chat Session Forking**: Percakapan dapat dicabangkan (*fork*) menjadi alur baru kapan saja untuk mencoba variasi pertanyaan tanpa kehilangan riwayat lama.
+- **Masking Identifiers (Secure-by-Default)**: Otomatis menyamarkan nama tabel dan kolom menjadi token sintetis (`tbl_1`, `col_1`) sebelum dikirimkan ke model AI eksternal untuk menjamin kerahasiaan skema database.
 - **Automated Error Healer**: Jika query Anda mengalami kegagalan di editor, klik tombol **🩺 Heal Error**; AI akan menganalisis pesan galat dari database, membeberkan letak kesalahannya, dan menyajikan query perbaikan yang siap dijalankan.
 
 <p align="center">
@@ -562,6 +580,12 @@ Kelola objek logika database tanpa menulis DDL berulang:
 - **Grid Parameter Dinamis**: Tambah, ubah, dan susun parameter input/output rutin secara visual.
 - **Pemilih Jadwal Event**: Atur interval eksekusi terjadwal (`EVERY 1 DAY`, `AT ...`) secara intuitif.
 - **Konfirmasi Pra-Eksekusi Dump Database**: Dialog pengaman sebelum menjalankan dump penuh, menampilkan peringatan ukuran data, I/O lock, dan opsi pilihan struktur (DDL) serta data.
+
+### Editor Kueri SQL Multi-Dialek CodeMirror 6
+SqlFox menggunakan arsitektur editor CodeMirror 6 modular berbasis `@codemirror/view`, `@codemirror/state`, dan `@codemirror/lang-sql`:
+- **Peralihan Dialek Dinamis**: Mengubah *compartment* parser sintaks dan kata kunci pelengkapan otomatis secara dinamis saat berpindah sesi database antara MySQL, PostgreSQL, dan SQLite (`cmEditor.setDialect(conn.driver)`).
+- **Autocomplete Kontekstual Berbasis Skema**: Terintegrasi langsung dengan `@codemirror/autocomplete` dan cache katalog skema aktif, menyajikan saran instan untuk nama tabel, definisi kolom, alias kueri (`u.email`), serta fungsi spesifik driver.
+- **Palet Tema Gelap Berkontras Tinggi**: Pewarnaan sintaks konsisten dengan tema Tailwind (Keywords merah muda/pink, Literals hijau/emerald, Angka kuning/amber, Tipe data ungu/purple, Built-in biru/sky, dan pencocokan kurung bersinar cyan).
 
 ---
 

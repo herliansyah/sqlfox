@@ -7,11 +7,17 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 func findChromiumDarwin(targetURL string) (string, []string, bool) {
 	home, _ := os.UserHomeDir()
 	appNames := []string{"Google Chrome", "Microsoft Edge", "Brave Browser", "Chromium"}
+
+	appArgs := []string{"--app=" + targetURL}
+	if strings.HasPrefix(targetURL, "https://localhost") || strings.HasPrefix(targetURL, "https://127.0.0.1") {
+		appArgs = append(appArgs, "--allow-insecure-localhost")
+	}
 
 	for _, app := range appNames {
 		sysApp := filepath.Join("/Applications", app+".app")
@@ -21,21 +27,23 @@ func findChromiumDarwin(targetURL string) (string, []string, bool) {
 		for _, appDir := range []string{sysApp, userApp} {
 			innerBin := filepath.Join(appDir, "Contents", "MacOS", app)
 			if _, err := os.Stat(innerBin); err == nil {
-				return innerBin, []string{"--app=" + targetURL}, true
+				return innerBin, appArgs, true
 			}
 		}
 
 		if _, err := os.Stat(sysApp); err == nil {
-			return "open", []string{"-a", sysApp, "--args", "--app=" + targetURL}, true
+			openArgs := append([]string{"-a", sysApp, "--args"}, appArgs...)
+			return "open", openArgs, true
 		}
 		if _, err := os.Stat(userApp); err == nil {
-			return "open", []string{"-a", userApp, "--args", "--app=" + targetURL}, true
+			openArgs := append([]string{"-a", userApp, "--args"}, appArgs...)
+			return "open", openArgs, true
 		}
 	}
 
 	for _, bin := range []string{"google-chrome", "chromium"} {
 		if p, err := exec.LookPath(bin); err == nil {
-			return p, []string{"--app=" + targetURL}, true
+			return p, appArgs, true
 		}
 	}
 

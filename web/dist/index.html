@@ -10,54 +10,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="stylesheet" href="/vendor/fonts/fonts.css">
   <meta name="theme-color" content="#090d16">
-  <script src="/vendor/tailwind/tailwind.min.js"></script>
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            app: {
-              bg: '#090d16',
-              surface: '#0f172a',
-              card: '#1e293b',
-              border: '#334155',
-              accent: '#38bdf8',
-              danger: '#ef4444',
-              warning: '#f59e0b',
-              safe: '#10b981'
-            }
-          },
-          fontFamily: {
-            mono: [
-              'JetBrains Mono',
-              'FiraCode Nerd Font',
-              'Fira Code',
-              'ui-monospace',
-              'SFMono-Regular',
-              'Menlo',
-              'Monaco',
-              'Consolas',
-              'Liberation Mono',
-              'Courier New',
-              'monospace'
-            ],
-            sans: [
-              'Inter',
-              'system-ui',
-              '-apple-system',
-              'BlinkMacSystemFont',
-              'Segoe UI',
-              'Roboto',
-              'Helvetica Neue',
-              'Arial',
-              'sans-serif'
-            ]
-          }
-        }
-      }
-    }
-  </script>
+  <link rel="stylesheet" href="/vendor/tailwind/tailwind.css">
   <link rel="stylesheet" href="/vendor/codemirror/codemirror.min.css">
   <link rel="stylesheet" href="/vendor/codemirror/addon/hint/show-hint.min.css">
   <script src="/vendor/codemirror/codemirror.min.js"></script>
@@ -3228,7 +3181,7 @@
 
           <div class="p-3 bg-slate-950/80 rounded border border-slate-800 space-y-2">
             <label class="flex items-center space-x-2 text-slate-300 cursor-pointer">
-              <input type="checkbox" id="ai-mask-identifiers" class="rounded bg-slate-900 border-slate-700 text-app-accent focus:ring-0">
+              <input type="checkbox" id="ai-mask-identifiers" checked class="rounded bg-slate-900 border-slate-700 text-app-accent focus:ring-0">
               <span class="font-semibold text-white">Privacy Firewall: Mask Schema Identifiers</span>
             </label>
             <p class="text-[11px] text-slate-500">
@@ -5515,6 +5468,8 @@
 
   <script>
 
+// ==================== MODULE: 01_core_state.js ====================
+
     // --- Canonical Vector Icon Helper (ADR 0037 Standardization) ---
     function renderIcon(name, extraClasses = 'w-4 h-4') {
       return `<svg class="${extraClasses} inline-block shrink-0 fill-none stroke-current" aria-hidden="true"><use href="#icon-${name}"/></svg>`;
@@ -5729,14 +5684,14 @@
       document.getElementById('ddl-review-sql').textContent = sql;
       const confirmBtn = document.getElementById('ddl-review-confirm-btn');
       const cancelBtns = dlg.querySelectorAll('button:not(#ddl-review-confirm-btn)');
-      
+
       const newBtn = confirmBtn.cloneNode(true);
       newBtn.disabled = false;
       newBtn.classList.remove('opacity-50', 'cursor-not-allowed');
       newBtn.innerHTML = 'Execute DDL';
       cancelBtns.forEach(b => { b.disabled = false; b.classList.remove('opacity-50', 'cursor-not-allowed'); });
       confirmBtn.parentNode.replaceChild(newBtn, confirmBtn);
-      
+
       newBtn.onclick = async () => {
         // ponytail: prevent duplicate DDL execution clicks and lock UI with timer
         if (newBtn.disabled) return;
@@ -5819,7 +5774,7 @@
         return fallback;
       }
     }
-    let aiConfig = readStoredJSON('sqlfox_ai_config', {"provider":"openai","model":"gpt-4o-mini","apiKey":"","endpoint":"","language":"id","responseStyle":"concise","customPrompt":"","includeSchema":true,"maskIdentifiers":false});
+    let aiConfig = readStoredJSON('sqlfox_ai_config', {"provider":"openai","model":"gpt-4o-mini","apiKey":"","endpoint":"","language":"id","responseStyle":"concise","customPrompt":"","includeSchema":true,"maskIdentifiers":true});
     let currentChatSessionId = null;
     let chatSessions = readStoredJSON('sqlfox_ai_sessions', []);
 
@@ -6113,10 +6068,12 @@
       if (isLANEnabled) {
         if (tabletBtn) tabletBtn.classList.remove('hidden');
         if (lanHint) {
-          const port = window.location.port || '80';
+          const proto = window.location.protocol || 'http:';
+          const defaultPort = proto === 'https:' ? '443' : '80';
+          const port = window.location.port || defaultPort;
           const ip = cachedLANIP || window.location.hostname;
           const pinText = cachedMasterPIN ? escapeHtml(cachedMasterPIN) : 'configured';
-          lanHint.innerHTML = `<span class="text-emerald-400 font-semibold">● LAN Access Active:</span> Connect tablet/phone at <span class="font-mono text-amber-200">http://${ip}:${port}</span> (Master PIN: <span class="font-mono text-sky-300 font-bold">${pinText}</span>)`;
+          lanHint.innerHTML = `<span class="text-emerald-400 font-semibold">● LAN Access Active:</span> Connect tablet/phone at <span class="font-mono text-amber-200">${proto}//${ip}:${port}</span> (Master PIN: <span class="font-mono text-sky-300 font-bold">${pinText}</span>)`;
         }
       } else {
         if (tabletBtn) tabletBtn.classList.add('hidden');
@@ -6127,9 +6084,11 @@
     }
 
     async function copyTabletLANURL() {
-      const port = window.location.port || '80';
+      const proto = window.location.protocol || 'http:';
+      const defaultPort = proto === 'https:' ? '443' : '80';
+      const port = window.location.port || defaultPort;
       const ip = cachedLANIP || window.location.hostname;
-      const lanURL = `http://${ip}:${port}`;
+      const lanURL = `${proto}//${ip}:${port}`;
       const ok = await copyTextToClipboard(lanURL);
       if (ok) {
         showToast(`Tablet LAN URL copied: ${lanURL} (Master PIN: ${cachedMasterPIN || 'required'})`, 'success');
@@ -6228,7 +6187,7 @@
     // ponytail: reload safety guard for in-flight queries and uncommitted staged table edits
     window.addEventListener('beforeunload', (e) => {
       saveTabsState();
-      const stagedCount = (typeof stagedEdits !== 'undefined' ? stagedEdits.size : 0) + 
+      const stagedCount = (typeof stagedEdits !== 'undefined' ? stagedEdits.size : 0) +
                           (typeof stagedDraftRows !== 'undefined' ? stagedDraftRows.length : 0);
       if (isQueryExecuting || stagedCount > 0) {
         e.preventDefault();
@@ -6241,7 +6200,9 @@
       saveTabsState();
     });
 
-    // --- Connections & Session Management ---
+
+// ==================== MODULE: 02_connections.js ====================
+// --- Connections & Session Management ---
     let sessionFilterQuery = '';
     let multiDBCatalogCache = {};
     const sessionCatalogStore = {}; // Map of connId -> { [dbName]: schemaOrCatalog }
@@ -6420,7 +6381,7 @@
 
       let filteredConns = connections;
       if (sessionFilterQuery) {
-        filteredConns = connections.filter(c => 
+        filteredConns = connections.filter(c =>
           c.name.toLowerCase().includes(sessionFilterQuery) ||
           (c.driver || '').toLowerCase().includes(sessionFilterQuery) ||
           (c.environment || '').toLowerCase().includes(sessionFilterQuery)
@@ -6522,6 +6483,9 @@
           saveTabsState();
         }
         activeConnection = conn;
+        if (typeof cmEditor !== 'undefined' && cmEditor && typeof cmEditor.setDialect === 'function') {
+          cmEditor.setDialect(conn.driver);
+        }
         updateTransactionStatusUI(false);
         if (!sessionCatalogStore[conn.id]) {
           sessionCatalogStore[conn.id] = {};
@@ -6540,6 +6504,9 @@
         if (!res.ok) {
           // Safe Reversion: restore previous connection state if handshake failed
           activeConnection = prevConnection;
+          if (typeof cmEditor !== 'undefined' && cmEditor && typeof cmEditor.setDialect === 'function' && prevConnection) {
+            cmEditor.setDialect(prevConnection.driver);
+          }
           renderHeaderConnectionBadge(prevConnection);
           renderConnectionsTree();
           document.getElementById('schema-tree').innerHTML = `<div class="text-app-danger p-2 text-xs">Connection Error:<br><span class="font-mono text-[11px]">${escapeHtml(data.error || 'Connection failed')}</span></div>`;
@@ -6612,8 +6579,8 @@
         </div>`;
       }
       try {
-        const url = targetDB 
-          ? `/api/session/${connId}/schema?db=${encodeURIComponent(targetDB)}` 
+        const url = targetDB
+          ? `/api/session/${connId}/schema?db=${encodeURIComponent(targetDB)}`
           : `/api/session/${connId}/schema`;
         const res = await apiFetch(url);
         if (!res.ok) {
@@ -6668,7 +6635,9 @@
       }
     }
 
-    // --- Schema Tree Filtering & Prefix Index (ADR 0058) ---
+
+// ==================== MODULE: 03_schema.js ====================
+// --- Schema Tree Filtering & Prefix Index (ADR 0058) ---
     let schemaFilterQuery = '';
     let databaseFilterQuery = '';
     let schemaTreeFastIndex = null;
@@ -7968,7 +7937,9 @@
       }
     }
 
-    // --- SQL Autocomplete & CodeMirror Engine ---
+
+// ==================== MODULE: 04_editor_tabs.js ====================
+// --- SQL Autocomplete & CodeMirror Engine ---
     const SQL_KEYWORDS = [
       'SELECT', 'FROM', 'WHERE', 'INSERT INTO', 'UPDATE', 'DELETE FROM',
       'JOIN', 'INNER JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'CROSS JOIN',
@@ -8379,23 +8350,68 @@
           return entry;
         })
       };
+    }
 
+    function cm6SqlCompletionSource(context) {
+      const word = context.matchBefore(/[a-zA-Z0-9_.]*/);
+      if (!word && !context.explicit) return null;
+      if (!context.explicit && (!word || word.text === '' || word.from === word.to)) return null;
+      const fullText = context.state.doc.toString();
+      const cursorIndex = context.pos;
+
+      const res = computeSQLCompletions(fullText, cursorIndex, schemaCatalogCache);
+      if (!res || !res.list || res.list.length === 0) return null;
+
+      const fromPos = res.partial ? context.pos - res.partial.length : (word ? word.to : context.pos);
+      return {
+        from: Math.max(0, fromPos),
+        to: context.pos,
+        options: res.list.map(item => ({
+          label: item.displayText || item.text,
+          displayLabel: item.displayText || item.text,
+          kind: item.kind,
+          badgeClass: item.badgeClass,
+          type: item.kind ? item.kind.toLowerCase() : 'text',
+          detail: item.type || '',
+          boost: (item.score || 0) / 100,
+          apply: (view, completion, fromPos, toPos) => {
+            if (item.kind === 'SNP' && item.snippet && typeof invokeSnippet === 'function') {
+              view.dispatch({
+                changes: { from: fromPos, to: toPos, insert: '' },
+                selection: { anchor: fromPos, head: fromPos }
+              });
+              invokeSnippet(item.snippet);
+            } else {
+              view.dispatch({
+                changes: { from: fromPos, to: toPos, insert: item.text },
+                selection: { anchor: fromPos + item.text.length, head: fromPos + item.text.length }
+              });
+            }
+          }
+        })),
+        filter: false
+      };
     }
 
     function initCodeMirror() {
       const container = document.getElementById('sql-editor-container');
       if (!container || cmEditor || typeof CodeMirror === 'undefined') return;
 
+      const currentDriver = (typeof activeConnection !== 'undefined' && activeConnection && activeConnection.driver) ? activeConnection.driver : 'mysql';
+
       cmEditor = CodeMirror(container, {
         value: (tabs.find(t => t.id === activeTabId) || {}).sql || '',
-        mode: 'text/x-mysql',
+        mode: currentDriver,
         lineNumbers: true,
         matchBrackets: true,
         autoCloseBrackets: true,
         lineWrapping: true,
+        completionSource: cm6SqlCompletionSource,
         extraKeys: {
           'Ctrl-Space': function(cm) {
-            cm.showHint({ hint: sqlContextHint, completeSingle: false });
+            if (typeof cm.showHint === 'function') {
+              cm.showHint({ hint: sqlContextHint, completeSingle: false });
+            }
           },
           'Ctrl-Enter': function() {
             runActiveQuery(false, '', null, null, false);
@@ -8429,13 +8445,8 @@
       window.editorInstance = cmEditor;
 
       cmEditor.on('inputRead', function(cm, change) {
-        if (change.origin === '+input') {
-          const ch = change.text[0];
-          if (/[a-zA-Z0-9_.]/.test(ch)) {
-            if (!cm.state.completionActive) {
-              cm.showHint({ hint: sqlContextHint, completeSingle: false });
-            }
-          }
+        if (typeof cm.showHint === 'function') {
+          cm.showHint({ hint: sqlContextHint, completeSingle: false });
         }
       });
 
@@ -8454,6 +8465,27 @@
         if (curr && curr._lastDirty !== isDirtyNow) {
           curr._lastDirty = isDirtyNow;
           renderTabs();
+        }
+      });
+
+      container.addEventListener('mousedown', function(e) {
+        if (cmEditor && !e.target.closest('.cm-content')) {
+          if (e.target.closest('#notes-tab-preview')) return;
+          const view = cmEditor.view;
+          if (!view || !view.contentDOM) return;
+          const lastLineEl = view.contentDOM.lastElementChild;
+          if (lastLineEl) {
+            const lastLineRect = lastLineEl.getBoundingClientRect();
+            if (e.clientY > lastLineRect.bottom) {
+              e.preventDefault();
+              cmEditor.focus();
+              const endPos = view.state.doc.length;
+              view.dispatch({
+                selection: { anchor: endPos, head: endPos },
+                scrollIntoView: true
+              });
+            }
+          }
         }
       });
     }
@@ -10010,7 +10042,9 @@
       }
     }
 
-    // --- Processlist Manager & Lock Dependency Tree ---
+
+// ==================== MODULE: 05_dba_telemetry.js ====================
+// --- Processlist Manager & Lock Dependency Tree ---
     let processlistData = { current_thread_id: 0, threads: [], locks: [] };
     let statementDigestData = [];
     let deadlockReportData = null;
@@ -10033,7 +10067,7 @@
       const deadlockSec = document.getElementById('pl-deadlock-section');
       const refreshGroup = document.getElementById('pl-refresh-control-group');
 
-      if (threadsBtn) threadsBtn.className = view === 'threads' 
+      if (threadsBtn) threadsBtn.className = view === 'threads'
         ? 'px-2.5 py-1 rounded text-xs bg-slate-800 text-sky-400 font-semibold flex items-center space-x-1.5 transition'
         : 'px-2.5 py-1 rounded text-xs text-slate-400 hover:text-white flex items-center space-x-1.5 transition';
 
@@ -10121,7 +10155,7 @@
         const execs = (item.exec_count || 0).toLocaleString();
         const rowsExam = (item.rows_examined || 0).toLocaleString();
         const rowsSent = (item.rows_sent || 0).toLocaleString();
-        const fullScanBadge = item.full_scan 
+        const fullScanBadge = item.full_scan
           ? `<span class="bg-red-950/60 text-red-400 border border-red-800/80 px-1.5 py-0.5 rounded text-[10px] font-bold">YES</span>`
           : `<span class="text-slate-500 text-[10px]">No</span>`;
 
@@ -10222,7 +10256,7 @@
 
       const txs = deadlockReportData.transactions || [];
       const txCards = txs.map(tx => {
-        const victimBadge = tx.is_victim 
+        const victimBadge = tx.is_victim
           ? `<span class="bg-red-950 text-red-300 border border-red-700 px-2 py-0.5 rounded text-[11px] font-bold inline-flex items-center gap-1">${renderIcon('alert-triangle', 'w-3 h-3 text-red-400')}<span>ROLLED BACK (VICTIM)</span></span>`
           : `<span class="bg-emerald-950 text-emerald-300 border border-emerald-700 px-2 py-0.5 rounded text-[11px] font-bold inline-flex items-center gap-1">${renderIcon('check', 'w-3 h-3 text-emerald-400')}<span>UNBLOCKED (COMMITTED)</span></span>`;
 
@@ -11101,7 +11135,7 @@
                       (opt === '1s' && interval === 1000) ||
                       (opt === '3s' && interval === 3000) ||
                       (opt === '5s' && interval === 5000);
-        btn.className = isCur 
+        btn.className = isCur
           ? 'px-2 py-0.5 rounded text-[11px] bg-slate-800 text-white font-medium'
           : 'px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white';
       });
@@ -12116,7 +12150,7 @@
                       (opt === '1s' && interval === 1000) ||
                       (opt === '3s' && interval === 3000) ||
                       (opt === '5s' && interval === 5000);
-        btn.className = isCur 
+        btn.className = isCur
           ? 'px-2 py-0.5 rounded text-[11px] bg-slate-800 text-white font-medium'
           : 'px-2 py-0.5 rounded text-[11px] text-slate-400 hover:text-white';
       });
@@ -12762,7 +12796,7 @@ What are concrete steps to resolve this bottleneck? Is my.cnf tuning required (s
         const res = await apiFetch(`/api/session/${activeConnection.id}/flight-recorder/status`);
         if (!res.ok) return;
         const data = await res.json();
-        
+
         flightState.isRecording = !!data.is_recording;
         if (data.is_recording) {
           flightState.recordingId = data.recording_id;
@@ -13583,7 +13617,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
             <td class="p-2 text-right text-slate-300 font-mono text-[11px] whitespace-nowrap">${l.duration_ms} ms</td>
             <td class="p-2 text-right text-slate-400 font-mono text-[11px] whitespace-nowrap">${l.rows_affected}</td>
             <td class="p-2 text-center whitespace-nowrap">
-              ${isErr 
+              ${isErr
                 ? `<span class="px-1.5 py-0.5 rounded bg-red-950 text-red-400 border border-red-800 text-[10px]" title="${escapeHtml(l.error)}">ERR</span>`
                 : `<span class="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px]">OK</span>`}
             </td>
@@ -13686,7 +13720,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
       setTableMode('data');
     }
 
-    // --- Table Sub-Tabs & Table Designer ---
+
+// ==================== MODULE: 06_table_designer.js ====================
+// --- Table Sub-Tabs & Table Designer ---
     function setTableMode(mode, refresh = true) {
       activeTableMode = mode;
       const activeTab = tabs.find(t => t.id === activeTabId);
@@ -14987,7 +15023,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
     }
 
-    // --- Operational Notes Inbox, Composer, Reminders & Table Feed Handlers ---
+
+// ==================== MODULE: 07_notes_collaboration.js ====================
+// --- Operational Notes Inbox, Composer, Reminders & Table Feed Handlers ---
     let allOperationalNotes = [];
     let notesInboxFilter = 'inbox'; // 'inbox', 'due', 'pinned', 'resolved', 'all'
     let notesInboxSearch = '';
@@ -15932,7 +15970,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
       setTimeout(checkDueNotesReminders, 3000);
     }
 
-    // --- Create Table Designer Modal Handlers ---
+
+// ==================== MODULE: 08_programmability_designers.js ====================
+// --- Create Table Designer Modal Handlers ---
     function openCreateTableModal() {
       newTableColumns = [
         { name: 'id', type: 'INT', is_primary_key: true, is_nullable: false, default_value: '', extra: 'auto_increment' },
@@ -16179,6 +16219,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
         matchBrackets: true,
         autoCloseBrackets: true,
         lineWrapping: true,
+        completionSource: typeof cm6SqlCompletionSource === 'function' ? cm6SqlCompletionSource : undefined,
         extraKeys: {
           'Ctrl-Space': function(cmInst) {
             if (typeof sqlContextHint === 'function') {
@@ -16319,7 +16360,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
       const dlg = document.getElementById('trigger-designer-dialog');
       dlg.dataset.isEditing = triggerName ? 'true' : 'false';
       dlg.dataset.originalName = triggerName || '';
-      
+
       const tblSelect = document.getElementById('trigger-designer-table');
       if (tblSelect && schemaCatalogCache) {
         const baseTables = (schemaCatalogCache.tables || []).filter(t => t.type !== 'VIEW');
@@ -16873,7 +16914,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
       });
     }
 
-    // --- Cross-Database Schema Search (Ctrl+P / Quick Open) ---
+
+// ==================== MODULE: 09_query_execution.js ====================
+// --- Cross-Database Schema Search (Ctrl+P / Quick Open) ---
     let schemaSearchIndex = [];
     let schemaSearchResults = [];
     let schemaSearchSelectedIndex = 0;
@@ -19090,7 +19133,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
       if (summaryBar) summaryBar.innerHTML = '';
     }
 
-    // --- Data Grid Rendering & Inline Edit ---
+
+// ==================== MODULE: 10_grid_crud.js ====================
+// --- Data Grid Rendering & Inline Edit ---
     let activeEditCell = null; // { td, rIdx, cIdx, pkCol, tableName, originalVal, input, isCommitting }
     let stagedEdits = new Map(); // key: `${tableName}:${rIdx}:${cIdx}`, val: { rIdx, cIdx, db, table, colName, pkCol, pkVal, oldVal, newVal }
     let gridEditMode = localStorage.getItem('sqlfox_grid_edit_mode') || 'staged'; // 'staged' | 'auto'
@@ -22218,7 +22263,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
             filterSec.classList.remove('hidden');
             if (filterParent) filterParent.classList.remove('hidden');
             if (filterColLabel) filterColLabel.textContent = `(${col.name})`;
-            
+
             const tableName = activeGridTable || (activeTab && activeTab.tableName) || '';
             const stagedKey = stagedKeyFor(tableName || '', rIdx, cIdx);
             const staged = (typeof stagedEdits !== 'undefined' && stagedEdits) ? stagedEdits.get(stagedKey) : null;
@@ -22631,8 +22676,8 @@ Please analyze what is causing this query to be slow and suggest necessary query
     }
 
     function openRecordInspectorFromContextMenu() {
-      const rIdx = (typeof activeGridRightClickedRow === 'number' && activeGridRightClickedRow >= 0) 
-        ? activeGridRightClickedRow 
+      const rIdx = (typeof activeGridRightClickedRow === 'number' && activeGridRightClickedRow >= 0)
+        ? activeGridRightClickedRow
         : ((typeof activeGridSelectedRow === 'number' && activeGridSelectedRow >= 0) ? activeGridSelectedRow : 0);
       openRecordInspector(rIdx);
     }
@@ -23416,7 +23461,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
       showToast(`${targetIndices.length} row(s) duplicated as draft (${withoutKey ? 'without key' : 'with key'})`);
     }
 
-    // --- Database-Level & Table-Level SQL Dump Export & Smart Seed ---
+
+// ==================== MODULE: 11_tools_sync.js ====================
+// --- Database-Level & Table-Level SQL Dump Export & Smart Seed ---
     function toggleTopDBToolsMenu(force = null) {
       const menu = document.getElementById('top-db-tools-menu');
       if (!menu) return;
@@ -24497,7 +24544,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
     }
 
-    // --- ReadOnly Mode ---
+
+// ==================== MODULE: 12_ai_copilot.js ====================
+// --- ReadOnly Mode ---
     async function toggleReadOnly() {
       if (!activeConnection) return;
       if (activeConnection.environment === 'Production' && activeSession && activeSession.read_only) {
@@ -24682,7 +24731,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
             api_key: aiConfig.apiKey,
             model: aiConfig.model,
             endpoint: aiConfig.endpoint,
-            mask_identifiers: Boolean(aiConfig.maskIdentifiers),
+            mask_identifiers: aiConfig.maskIdentifiers !== false,
             language: aiConfig.language || 'id',
             response_style: aiConfig.responseStyle || 'concise',
             custom_prompt: aiConfig.customPrompt || '',
@@ -25444,7 +25493,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }
     }
 
-    // --- Modals & Connection Management ---
+
+// ==================== MODULE: 13_app_settings_modals.js ====================
+// --- Modals & Connection Management ---
     function openNewConnModal() {
       document.getElementById('modal-conn-id').value = '';
       document.getElementById('modal-conn-title').textContent = 'Add Database Connection';
@@ -27660,7 +27711,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
           `);
         }
 
-        const healthHtml = recommendations.length > 0 
+        const healthHtml = recommendations.length > 0
           ? `<div class="flex flex-wrap gap-1">${recommendations.join('')}</div>`
           : `<span class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"><span>✓</span><span>Optimal</span></span>`;
 
@@ -28278,7 +28329,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
 
 
 
-    // --- Visual ERD Canvas ---
+
+// ==================== MODULE: 14_erd_canvas.js ====================
+// --- Visual ERD Canvas ---
     // ponytail: performance-first ERD. Cards diffed in-place, lines use cached SVG path elements,
     // drag/pan/zoom run on single rAF loop, touch gestures for mobile.
     // Ceiling: canvas-based rendering would be next level for 500+ tables.
@@ -29384,7 +29437,7 @@ Please analyze what is causing this query to be slow and suggest necessary query
     // Attach touch events to wrapper when dialog opens
     {
       const erdWrapper = document.getElementById('erd-canvas-wrapper');
-      if (erdWrapper) {
+      if (erdWrapper && typeof erdWrapper.addEventListener === 'function') {
         erdWrapper.addEventListener('touchstart', erdOnTouchStart, { passive: false });
         erdWrapper.addEventListener('touchmove', erdOnTouchMove, { passive: false });
         erdWrapper.addEventListener('touchend', erdOnTouchEnd, { passive: true });
@@ -29667,7 +29720,9 @@ Please analyze what is causing this query to be slow and suggest necessary query
       }, 4000);
     }
 
-    // --- Update Engine & Changelog Viewer ---
+
+// ==================== MODULE: 15_system_lifecycle.js ====================
+// --- Update Engine & Changelog Viewer ---
     let latestUpdateInfo = null;
 
     async function checkOrOpenUpdate(userInitiated = false) {

@@ -7,13 +7,19 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 func findChromiumWindows(targetURL string) (string, []string, bool) {
+	appArgs := []string{"--app=" + targetURL}
+	if strings.HasPrefix(targetURL, "https://localhost") || strings.HasPrefix(targetURL, "https://127.0.0.1") {
+		appArgs = append(appArgs, "--allow-insecure-localhost")
+	}
+
 	// 1. Check in system PATH
 	for _, name := range []string{"msedge.exe", "chrome.exe", "brave.exe"} {
 		if p, err := exec.LookPath(name); err == nil {
-			return p, []string{"--app=" + targetURL}, true
+			return p, appArgs, true
 		}
 	}
 
@@ -41,7 +47,7 @@ func findChromiumWindows(targetURL string) (string, []string, bool) {
 
 	for _, p := range candidates {
 		if _, err := os.Stat(p); err == nil {
-			return p, []string{"--app=" + targetURL}, true
+			return p, appArgs, true
 		}
 	}
 

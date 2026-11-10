@@ -114,6 +114,7 @@ func TestServer_AIChat_IncludesRealColumnsWhenFirewallOff(t *testing.T) {
 
 	// 5. Invoke /api/ai/chat with Privacy Firewall OFF, include_schema: true, and Indonesian prompt
 	includeSchema := true
+	maskOff := false
 	aiChatPayload := AIChatRequest{
 		Action:          "chat",
 		Prompt:          "buatkan query untuk menampilkan data pengguna",
@@ -123,7 +124,7 @@ func TestServer_AIChat_IncludesRealColumnsWhenFirewallOff(t *testing.T) {
 		APIKey:          "test-key",
 		Model:           "gpt-4o-mini",
 		Endpoint:        mockAI.URL,
-		MaskIdentifiers: false,
+		MaskIdentifiers: &maskOff,
 		IncludeSchema:   &includeSchema,
 	}
 	aiBody, _ := json.Marshal(aiChatPayload)
@@ -165,5 +166,36 @@ func TestServer_AIChat_IncludesRealColumnsWhenFirewallOff(t *testing.T) {
 
 	if !strings.Contains(sysPromptFallback, "Table `users`") || !strings.Contains(sysPromptFallback, "`username`") {
 		t.Fatalf("expected active session fallback to include users schema, got:\n%s", sysPromptFallback)
+	}
+
+	// 7. Verify secure-by-default behavior: when MaskIdentifiers is omitted (nil), identifiers are masked
+	capturedSystemPrompt = ""
+	aiDefaultPayload := AIChatRequest{
+		Action:        "chat",
+		Prompt:        "optimize query",
+		ConnectionID:  savedConn.ID,
+		Provider:      "openai",
+		APIKey:        "test-key",
+		Model:         "gpt-4o-mini",
+		Endpoint:      mockAI.URL,
+		IncludeSchema: &includeSchema,
+		// MaskIdentifiers is omitted/nil -> should default to true!
+	}
+	defaultBody, _ := json.Marshal(aiDefaultPayload)
+	resp, err = client.Post(ts.URL+"/api/ai/chat", "application/json", bytes.NewReader(defaultBody))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /api/ai/chat default payload failed: %v", err)
+	}
+	resp.Body.Close()
+
+	mu.Lock()
+	maskedPrompt := capturedSystemPrompt
+	mu.Unlock()
+
+	if strings.Contains(maskedPrompt, "Table `users`") {
+		t.Fatalf("expected real table name `users` to be masked by default, got:\n%s", maskedPrompt)
+	}
+	if !strings.Contains(maskedPrompt, "masked_") {
+		t.Fatalf("expected masked identifiers (masked_...) in prompt, got:\n%s", maskedPrompt)
 	}
 }
