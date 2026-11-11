@@ -576,7 +576,7 @@
             <span class="text-[10px] text-slate-400">Keyset delta reconciler (Insert/Update/Delete)</span>
           </button>
           <button onclick="openERDCanvas(); toggleTopDBToolsMenu(false)" class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex flex-col border-t border-slate-800">
-            <span class="font-medium text-indigo-400 flex items-center space-x-1.5"><svg class="w-3.5 h-3.5 text-indigo-400 shrink-0" aria-hidden="true"><use href="#icon-git-branch"/></svg><span>Visual ERD Canvas</span></span>
+            <span class="font-medium text-indigo-400 flex items-center space-x-1.5"><svg class="w-3.5 h-3.5 text-indigo-400 shrink-0" aria-hidden="true"><use href="#icon-layers"/></svg><span>Visual ERD Canvas</span></span>
             <span class="text-[10px] text-slate-400">Interactive ER diagram with FK relationships</span>
           </button>
           <!-- MySQL-only: hidden by default, shown by JS when MySQL session active -->
@@ -993,7 +993,7 @@
               <button type="button" id="btn-col-picker" onclick="toggleColumnPickerDropdown(event)" class="text-slate-300 hover:text-white hover:bg-slate-800 px-2 py-1 rounded border border-slate-700 text-xs transition flex items-center space-x-1" title="Show or hide columns">
                 <svg class="w-3.5 h-3.5 text-sky-400 shrink-0 mr-1" aria-hidden="true"><use href="#icon-columns"/></svg><span>Columns</span>
                 <span id="col-picker-count-badge" class="text-[10px] text-slate-400 font-mono">(0/0)</span>
-                <span class="text-[9px] text-slate-500">▾</span>
+                <svg class="w-2.5 h-2.5 text-slate-400 shrink-0 fill-none stroke-current" aria-hidden="true"><use href="#icon-chevron-down"/></svg>
               </button>
               <div id="col-picker-dropdown" class="hidden absolute right-0 mt-1 z-30 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-2 text-xs text-slate-200 min-w-60 max-h-80 flex flex-col ring-2 ring-black/50">
                 <div class="pb-1.5 mb-1.5 border-b border-slate-800 flex items-center justify-between gap-1.5">
@@ -1542,7 +1542,7 @@
             <button id="pl-toggle-trend-btn" onclick="toggleProcesslistTrendPanel()" class="px-2 py-0.5 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center space-x-1.5 transition text-[11px]" title="Toggle In-Memory Activity Trend Panel">
               <svg class="w-3.5 h-3.5 text-sky-400 shrink-0" aria-hidden="true"><use href="#icon-activity"/></svg>
               <span>Trend</span>
-              <span id="pl-trend-caret" class="text-[10px] text-slate-400">▾</span>
+              <svg id="pl-trend-caret" class="w-2.5 h-2.5 text-slate-400 shrink-0 fill-none stroke-current" aria-hidden="true"><use href="#icon-chevron-down"/></svg>
             </button>
           </div>
         </div>

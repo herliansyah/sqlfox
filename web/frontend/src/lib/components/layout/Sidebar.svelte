@@ -383,7 +383,7 @@
                     name={appState.collapsedSections.tables ? 'chevron-right' : 'chevron-down'}
                     class="w-3 h-3 text-slate-500"
                   />
-                  <Icon name="layers" class="w-3.5 h-3.5 text-sky-400" />
+                  <Icon name="table" class="w-3.5 h-3.5 text-sky-400" />
                   <span>Tables</span>
                 </span>
                 <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 text-slate-400">
@@ -582,7 +582,7 @@
                     name={appState.collapsedSections.routines ? 'chevron-right' : 'chevron-down'}
                     class="w-3 h-3 text-slate-500"
                   />
-                  <Icon name="zap" class="w-3.5 h-3.5 text-amber-400" />
+                  <Icon name="code" class="w-3.5 h-3.5 text-amber-400" />
                   <span>Routines</span>
                 </span>
                 <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 text-slate-400">
@@ -608,7 +608,7 @@
                     title="View definition for {routine.name}"
                   >
                     <div class="flex items-center space-x-2 truncate">
-                      <Icon name="zap" class="w-3.5 h-3.5 text-amber-500 group-hover:text-amber-400 shrink-0 transition-colors" />
+                      <Icon name="code" class="w-3.5 h-3.5 text-amber-500 group-hover:text-amber-400 shrink-0 transition-colors" />
                       <span class="truncate font-mono text-[11.5px]">{routine.name}</span>
                     </div>
                     <span class="text-[9px] text-amber-400 font-mono bg-amber-950/40 px-1 rounded border border-amber-800/40 shrink-0 ml-1">
@@ -634,7 +634,7 @@
                     name={appState.collapsedSections.triggers ? 'chevron-right' : 'chevron-down'}
                     class="w-3 h-3 text-slate-500"
                   />
-                  <Icon name="target" class="w-3.5 h-3.5 text-purple-400" />
+                  <Icon name="zap" class="w-3.5 h-3.5 text-purple-400" />
                   <span>Triggers</span>
                 </span>
                 <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 text-slate-400">
@@ -656,7 +656,7 @@
                 {#each appState.filteredTriggers as trigger (trigger.name)}
                   <div class="w-full text-left px-2 py-1 rounded flex items-center justify-between group hover:bg-[#1e293b]/80 text-slate-300 text-xs transition-colors">
                     <div class="flex items-center space-x-2 truncate">
-                      <Icon name="target" class="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                      <Icon name="zap" class="w-3.5 h-3.5 text-purple-400 shrink-0" />
                       <span class="truncate font-mono text-[11.5px]">{trigger.name}</span>
                     </div>
                     {#if trigger.timing || trigger.event}

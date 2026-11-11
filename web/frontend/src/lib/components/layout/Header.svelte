@@ -12,13 +12,13 @@
   let toolsSearchQuery = $state('');
   let pinAutoMaskTimer: any = null;
 
-  type ToolCategoryKey = 'all' | 'dba' | 'data' | 'schema' | 'security' | 'preferences';
+  type ToolCategoryKey = 'all' | 'dba' | 'schema' | 'security' | 'data' | 'ai' | 'preferences';
   let activeToolsCategory = $state<ToolCategoryKey>('all');
   let selectedToolIndex = $state(0);
 
   interface ToolItem {
     id: string;
-    category: 'dba' | 'data' | 'schema' | 'security' | 'preferences';
+    category: 'dba' | 'schema' | 'security' | 'data' | 'ai' | 'preferences';
     categoryLabel: string;
     name: string;
     desc: string;
@@ -33,14 +33,15 @@
   const toolCategories: { id: ToolCategoryKey; label: string; icon: string; dotColor: string }[] = [
     { id: 'all', label: 'All Tools', icon: 'wrench', dotColor: 'bg-slate-400' },
     { id: 'dba', label: 'DBA & Monitoring', icon: 'cpu', dotColor: 'bg-sky-400' },
-    { id: 'data', label: 'Data Movement & ETL', icon: 'upload', dotColor: 'bg-emerald-400' },
     { id: 'schema', label: 'Schema & Architecture', icon: 'layers', dotColor: 'bg-indigo-400' },
-    { id: 'security', label: 'Security & Governance', icon: 'shield', dotColor: 'bg-purple-400' },
-    { id: 'preferences', label: 'System & Preferences', icon: 'sliders', dotColor: 'bg-slate-400' }
+    { id: 'security', label: 'Security & Access', icon: 'shield', dotColor: 'bg-rose-400' },
+    { id: 'data', label: 'Data Movement & ETL', icon: 'upload', dotColor: 'bg-emerald-400' },
+    { id: 'ai', label: 'AI & Collaboration', icon: 'bot', dotColor: 'bg-purple-400' },
+    { id: 'preferences', label: 'System & Workspace', icon: 'sliders', dotColor: 'bg-slate-400' }
   ];
 
   const allTools: ToolItem[] = [
-    // DBA & Monitoring
+    // 1. DBA & Monitoring (4 items)
     {
       id: 'processlist',
       category: 'dba',
@@ -61,6 +62,8 @@
       desc: 'Tablespace fragmentation, buffer cache hit-ratio & engine metrics',
       icon: 'activity',
       iconColor: 'text-rose-400',
+      badge: 'Metrics',
+      badgeColor: 'bg-rose-950/80 text-rose-300 border-rose-700/60',
       action: () => appState.openDbDiagnosticsModal()
     },
     {
@@ -71,6 +74,8 @@
       desc: 'Real-time daemon log stream, background events & lock monitors',
       icon: 'terminal',
       iconColor: 'text-emerald-400',
+      badge: 'Stream',
+      badgeColor: 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60',
       action: () => (appState.isActivityDrawerOpen = !appState.isActivityDrawerOpen)
     },
     {
@@ -81,10 +86,100 @@
       desc: 'Historical query logs, security events & destructive statement attribution',
       icon: 'clipboard-list',
       iconColor: 'text-amber-400',
+      badge: 'Forensics',
+      badgeColor: 'bg-amber-950/80 text-amber-300 border-amber-700/60',
       action: () => (appState.isAuditDrawerOpen = true)
     },
 
-    // Data Movement & ETL
+    // 2. Schema & Architecture (5 items)
+    {
+      id: 'erd',
+      category: 'schema',
+      categoryLabel: 'Schema & Architecture',
+      name: 'Visual ERD Schema Canvas',
+      desc: 'Interactive entity-relationship diagram with zoom, pan & SVG export',
+      icon: 'layers',
+      iconColor: 'text-indigo-400',
+      badge: 'Visual',
+      badgeColor: 'bg-indigo-950/80 text-indigo-300 border-indigo-700/60',
+      action: () => appState.openErdTab()
+    },
+    {
+      id: 'structure-sync',
+      category: 'schema',
+      categoryLabel: 'Schema & Architecture',
+      name: 'Schema Structure Diff & Sync',
+      desc: 'Compare database catalog structures and generate safe migration DDL',
+      icon: 'git-diff',
+      iconColor: 'text-cyan-400',
+      badge: 'Diff',
+      badgeColor: 'bg-cyan-950/80 text-cyan-300 border-cyan-700/60',
+      action: () => appState.openStructureSyncModal()
+    },
+    {
+      id: 'run-sql',
+      category: 'schema',
+      categoryLabel: 'Schema & Architecture',
+      name: 'Batch SQL Script Runner',
+      desc: 'Stream large multi-statement migration scripts and SQL backup files',
+      icon: 'file-code',
+      iconColor: 'text-amber-400',
+      badge: 'Batch',
+      badgeColor: 'bg-amber-950/80 text-amber-300 border-amber-700/60',
+      action: () => appState.openRunSqlModal()
+    },
+    {
+      id: 'snippets',
+      category: 'schema',
+      categoryLabel: 'Schema & Architecture',
+      name: 'Query Snippets & Templates',
+      desc: 'Curated catalog of reusable parameterized queries and DBA boilerplate',
+      icon: 'bookmark',
+      iconColor: 'text-sky-400',
+      badge: 'Snippets',
+      badgeColor: 'bg-sky-950/80 text-sky-300 border-sky-700/60',
+      action: () => appState.openSnippetsModal()
+    },
+    {
+      id: 'refresh-catalogs',
+      category: 'schema',
+      categoryLabel: 'Schema & Architecture',
+      name: 'Reload Metadata Catalog',
+      desc: 'Purge cache and synchronize schema dictionary across all connections',
+      icon: 'rotate-ccw',
+      iconColor: 'text-teal-400',
+      badge: 'Purge',
+      badgeColor: 'bg-teal-950/80 text-teal-300 border-teal-700/60',
+      action: () => (appState.isRefreshAllOpen = true)
+    },
+
+    // 3. Security & Access (2 items)
+    {
+      id: 'connections',
+      category: 'security',
+      categoryLabel: 'Security & Access',
+      name: 'Connection Profiles Vault',
+      desc: 'Server endpoints, AES-256 encrypted passwords & SSH jump-host tunnels',
+      icon: 'database',
+      iconColor: 'text-sky-400',
+      badge: 'Vault',
+      badgeColor: 'bg-sky-950/80 text-sky-300 border-sky-700/60',
+      action: () => appState.openNewConnectionModal()
+    },
+    {
+      id: 'privilege-matrix',
+      category: 'security',
+      categoryLabel: 'Security & Access',
+      name: 'Users & Privileges Matrix',
+      desc: 'Manage database accounts, roles, host masks & granular GRANT permissions',
+      icon: 'users',
+      iconColor: 'text-purple-400',
+      badge: 'RBAC',
+      badgeColor: 'bg-purple-950/80 text-purple-300 border-purple-700/60',
+      action: () => appState.openPrivilegeMatrixModal()
+    },
+
+    // 4. Data Movement & ETL (5 items)
     {
       id: 'csv-import',
       category: 'data',
@@ -117,6 +212,8 @@
       desc: 'Differential table row comparison and bidirectional reconciliation',
       icon: 'scale',
       iconColor: 'text-teal-400',
+      badge: 'Sync',
+      badgeColor: 'bg-teal-950/80 text-teal-300 border-teal-700/60',
       action: () => (appState.isDataSyncOpen = true)
     },
     {
@@ -125,8 +222,10 @@
       categoryLabel: 'Data Movement & ETL',
       name: 'Cross-Host Data Transfer',
       desc: 'Direct streaming pipeline between disparate database hosts & engines',
-      icon: 'rocket',
+      icon: 'arrow-left-right',
       iconColor: 'text-indigo-400',
+      badge: 'Pipeline',
+      badgeColor: 'bg-indigo-950/80 text-indigo-300 border-indigo-700/60',
       action: () => (appState.isDataTransferOpen = true)
     },
     {
@@ -137,149 +236,85 @@
       desc: 'Generate schema-aware, foreign-key compliant mock test datasets',
       icon: 'sparkles',
       iconColor: 'text-purple-400',
+      badge: 'Mock',
+      badgeColor: 'bg-purple-950/80 text-purple-300 border-purple-700/60',
       action: () => (appState.isMockDataModalOpen = true)
     },
 
-    // Schema & Architecture
-    {
-      id: 'erd',
-      category: 'schema',
-      categoryLabel: 'Schema & Architecture',
-      name: 'Visual ERD Schema Canvas',
-      desc: 'Interactive entity-relationship diagram with zoom, pan & SVG export',
-      icon: 'layers',
-      iconColor: 'text-indigo-400',
-      badge: 'Visual',
-      badgeColor: 'bg-indigo-950/80 text-indigo-300 border-indigo-700/60',
-      action: () => appState.openErdTab()
-    },
-    {
-      id: 'structure-sync',
-      category: 'schema',
-      categoryLabel: 'Schema & Architecture',
-      name: 'Schema Structure Diff & Sync',
-      desc: 'Compare database catalog structures and generate safe migration DDL',
-      icon: 'refresh-cw',
-      iconColor: 'text-cyan-400',
-      action: () => appState.openStructureSyncModal()
-    },
-    {
-      id: 'run-sql',
-      category: 'schema',
-      categoryLabel: 'Schema & Architecture',
-      name: 'Batch SQL Script Runner',
-      desc: 'Stream large multi-statement migration scripts and SQL backup files',
-      icon: 'file-text',
-      iconColor: 'text-amber-400',
-      action: () => appState.openRunSqlModal()
-    },
-    {
-      id: 'snippets',
-      category: 'schema',
-      categoryLabel: 'Schema & Architecture',
-      name: 'Query Snippets & Templates',
-      desc: 'Curated catalog of reusable parameterized queries and DBA boilerplate',
-      icon: 'bookmark',
-      iconColor: 'text-sky-400',
-      action: () => appState.openSnippetsModal()
-    },
-    {
-      id: 'refresh-catalogs',
-      category: 'schema',
-      categoryLabel: 'Schema & Architecture',
-      name: 'Reload Metadata Catalog',
-      desc: 'Purge cache and synchronize schema dictionary across all connections',
-      icon: 'rotate-ccw',
-      iconColor: 'text-amber-400',
-      action: () => (appState.isRefreshAllOpen = true)
-    },
-
-    // Security & Governance
-    {
-      id: 'connections',
-      category: 'security',
-      categoryLabel: 'Security & Governance',
-      name: 'Connection Profiles Vault',
-      desc: 'Server endpoints, AES-256 encrypted passwords & SSH jump-host tunnels',
-      icon: 'database',
-      iconColor: 'text-sky-400',
-      action: () => appState.openNewConnectionModal()
-    },
-    {
-      id: 'privilege-matrix',
-      category: 'security',
-      categoryLabel: 'Security & Governance',
-      name: 'Users & Privileges Matrix',
-      desc: 'Manage database accounts, roles, host masks & granular GRANT permissions',
-      icon: 'shield',
-      iconColor: 'text-purple-400',
-      action: () => appState.openPrivilegeMatrixModal()
-    },
-    {
-      id: 'notes',
-      category: 'security',
-      categoryLabel: 'Security & Governance',
-      name: 'Operational Notes & Runbooks',
-      desc: 'Team knowledge base, table documentation, runbooks & incident logs',
-      icon: 'file-text',
-      iconColor: 'text-amber-400',
-      badge: 'Team',
-      badgeColor: 'bg-amber-950/80 text-amber-300 border-amber-700/60',
-      action: () => (appState.isNotesDrawerOpen = true)
-    },
+    // 5. AI & Collaboration (3 items)
     {
       id: 'copilot',
-      category: 'security',
-      categoryLabel: 'Security & Governance',
+      category: 'ai',
+      categoryLabel: 'AI & Collaboration',
       name: 'SqlFox AI Copilot Assistant',
       desc: 'Natural language query generation, SQL explanation & query optimization',
       icon: 'bot',
       iconColor: 'text-cyan-400',
-      badge: 'AI',
-      badgeColor: 'bg-sky-950/80 text-sky-300 border-sky-700/60',
+      badge: 'Copilot',
+      badgeColor: 'bg-cyan-950/80 text-cyan-300 border-cyan-700/60',
       action: () => (appState.isAiDrawerOpen = true)
     },
-
-    // System & Preferences
     {
-      id: 'settings',
-      category: 'preferences',
-      categoryLabel: 'System & Preferences',
-      name: 'Cloud Sync & Vault Backup',
-      desc: 'GitHub sync repository, vault backups, and cloud migration bundles',
-      icon: 'cloud',
-      iconColor: 'text-sky-400',
-      action: () => (appState.isSettingsModalOpen = true)
+      id: 'notes',
+      category: 'ai',
+      categoryLabel: 'AI & Collaboration',
+      name: 'Operational Runbooks & Notes',
+      desc: 'Team knowledge base, table documentation, runbooks & incident logs',
+      icon: 'book-open',
+      iconColor: 'text-amber-400',
+      badge: 'Runbooks',
+      badgeColor: 'bg-amber-950/80 text-amber-300 border-amber-700/60',
+      action: () => (appState.isNotesDrawerOpen = true)
     },
     {
       id: 'ai-settings',
-      category: 'preferences',
-      categoryLabel: 'System & Preferences',
+      category: 'ai',
+      categoryLabel: 'AI & Collaboration',
       name: 'AI Model & Provider Config',
       desc: 'LLM provider credentials (OpenAI, Claude, Gemini, Ollama) & parameters',
       icon: 'sliders',
       iconColor: 'text-purple-400',
+      badge: 'Config',
+      badgeColor: 'bg-purple-950/80 text-purple-300 border-purple-700/60',
       action: () => (appState.isAiSettingsModalOpen = true)
+    },
+
+    // 6. System & Workspace (3 items)
+    {
+      id: 'settings',
+      category: 'preferences',
+      categoryLabel: 'System & Workspace',
+      name: 'Cloud Sync & Vault Backup',
+      desc: 'GitHub sync repository, vault backups, and cloud migration bundles',
+      icon: 'cloud',
+      iconColor: 'text-sky-400',
+      badge: 'Cloud',
+      badgeColor: 'bg-sky-950/80 text-sky-300 border-sky-700/60',
+      action: () => (appState.isSettingsModalOpen = true)
     },
     {
       id: 'shortcuts',
       category: 'preferences',
-      categoryLabel: 'System & Preferences',
+      categoryLabel: 'System & Workspace',
       name: 'Keyboard Shortcuts Cheatsheet',
       desc: 'Essential hotkeys for rapid navigation, grid editing & SQL execution',
       icon: 'keyboard',
       iconColor: 'text-amber-400',
       shortcut: '?',
+      badge: 'Hotkeys',
+      badgeColor: 'bg-slate-800 text-slate-300 border-slate-700',
       action: () => (appState.isShortcutsModalOpen = true)
     },
     {
       id: 'updates',
       category: 'preferences',
-      categoryLabel: 'System & Preferences',
+      categoryLabel: 'System & Workspace',
       name: 'Check for Software Updates',
       desc: 'Inspect latest release notes, changelog and perform self-update',
-      icon: 'zap',
+      icon: 'arrow-down-circle',
       iconColor: 'text-emerald-400',
+      badge: 'Release',
+      badgeColor: 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60',
       action: () => (appState.isUpdateModalOpen = true)
     }
   ];
@@ -639,7 +674,7 @@
           onclick={() => (showToolsDropdown = false)}
         ></button>
 
-        <div class="absolute right-0 mt-1.5 w-[720px] max-w-[calc(100vw-2rem)] bg-[#0b0f19]/98 border border-slate-700/80 rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in duration-100 text-xs backdrop-blur-2xl ring-1 ring-black/40">
+        <div class="absolute right-0 mt-1.5 w-[760px] max-w-[calc(100vw-2rem)] bg-[#0b0f19]/98 border border-slate-700/80 rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in duration-100 text-xs backdrop-blur-2xl ring-1 ring-black/40">
           <!-- Search Header & Category Tabs -->
           <div class="p-3 border-b border-slate-800/80 bg-slate-900/70 space-y-2.5">
             <div class="relative flex items-center">
@@ -743,11 +778,11 @@
                 </div>
               {/if}
             {:else}
-              <!-- 2-Column Enterprise Overview Layout -->
+              <!-- 2-Column Enterprise Overview Layout (11 Tools Left, 11 Tools Right) -->
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <!-- Left Column (DBA + Security + System) -->
+                <!-- Left Column (DBA & Performance + Schema & Modeling + Security & Access) -->
                 <div class="space-y-4">
-                  <!-- Section 1: DBA & Monitoring -->
+                  <!-- Section 1: DBA & Monitoring (4 tools) -->
                   <div class="space-y-1">
                     <div class="text-[10.5px] font-bold uppercase tracking-wider text-slate-400 px-2.5 py-1 flex items-center justify-between bg-slate-900/50 rounded-lg border border-slate-800/60 mb-1">
                       <span class="flex items-center space-x-2">
@@ -782,14 +817,49 @@
                     {/each}
                   </div>
 
-                  <!-- Section 2: Security & Governance -->
+                  <!-- Section 2: Schema & Architecture (5 tools) -->
                   <div class="space-y-1">
                     <div class="text-[10.5px] font-bold uppercase tracking-wider text-slate-400 px-2.5 py-1 flex items-center justify-between bg-slate-900/50 rounded-lg border border-slate-800/60 mb-1">
                       <span class="flex items-center space-x-2">
-                        <span class="w-2 h-2 rounded-full bg-purple-400 shadow-[0_0_8px_rgba(192,132,252,0.6)]"></span>
-                        <span class="text-slate-200 font-semibold">Security & Governance</span>
+                        <span class="w-2 h-2 rounded-full bg-indigo-400 shadow-[0_0_8px_rgba(129,140,248,0.6)]"></span>
+                        <span class="text-slate-200 font-semibold">Schema & Architecture</span>
                       </span>
-                      <span class="text-[9px] font-mono text-slate-400 bg-slate-800/70 px-1.5 py-0.2 rounded border border-slate-700/50">4 tools</span>
+                      <span class="text-[9px] font-mono text-slate-400 bg-slate-800/70 px-1.5 py-0.2 rounded border border-slate-700/50">5 tools</span>
+                    </div>
+                    {#each allTools.filter((t) => t.category === 'schema') as tool}
+                      <button
+                        type="button"
+                        onclick={() => {
+                          tool.action();
+                          showToolsDropdown = false;
+                        }}
+                        class="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-slate-800/90 text-slate-300 hover:text-white flex items-center space-x-2.5 transition group border border-transparent hover:border-slate-700/60 hover:shadow-sm"
+                      >
+                        <div class="w-7 h-7 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0 group-hover:border-slate-700 group-hover:scale-105 transition">
+                          <Icon name={tool.icon} class="w-3.5 h-3.5 {tool.iconColor}" />
+                        </div>
+                        <div class="min-w-0 flex-1">
+                          <div class="flex items-center justify-between gap-1">
+                            <span class="text-xs font-semibold text-slate-200 group-hover:text-white truncate">{tool.name}</span>
+                            {#if tool.badge}
+                              <span class="text-[8.5px] font-mono px-1.5 py-0.2 rounded border shrink-0 {tool.badgeColor || 'bg-slate-800 text-slate-300 border-slate-700'}">{tool.badge}</span>
+                            {/if}
+                          </div>
+                          <div class="text-[10px] text-slate-400 group-hover:text-slate-300 truncate leading-tight mt-0.5">{tool.desc}</div>
+                        </div>
+                        <Icon name="chevron-right" class="w-3 h-3 text-slate-600 opacity-0 group-hover:opacity-100 group-hover:text-slate-400 transition shrink-0" />
+                      </button>
+                    {/each}
+                  </div>
+
+                  <!-- Section 3: Security & Access (2 tools) -->
+                  <div class="space-y-1">
+                    <div class="text-[10.5px] font-bold uppercase tracking-wider text-slate-400 px-2.5 py-1 flex items-center justify-between bg-slate-900/50 rounded-lg border border-slate-800/60 mb-1">
+                      <span class="flex items-center space-x-2">
+                        <span class="w-2 h-2 rounded-full bg-rose-400 shadow-[0_0_8px_rgba(251,113,133,0.6)]"></span>
+                        <span class="text-slate-200 font-semibold">Security & Access</span>
+                      </span>
+                      <span class="text-[9px] font-mono text-slate-400 bg-slate-800/70 px-1.5 py-0.2 rounded border border-slate-700/50">2 tools</span>
                     </div>
                     {#each allTools.filter((t) => t.category === 'security') as tool}
                       <button
@@ -816,46 +886,11 @@
                       </button>
                     {/each}
                   </div>
-
-                  <!-- Section 3: System & Preferences -->
-                  <div class="space-y-1">
-                    <div class="text-[10.5px] font-bold uppercase tracking-wider text-slate-400 px-2.5 py-1 flex items-center justify-between bg-slate-900/50 rounded-lg border border-slate-800/60 mb-1">
-                      <span class="flex items-center space-x-2">
-                        <span class="w-2 h-2 rounded-full bg-slate-400"></span>
-                        <span class="text-slate-200 font-semibold">System & Preferences</span>
-                      </span>
-                      <span class="text-[9px] font-mono text-slate-400 bg-slate-800/70 px-1.5 py-0.2 rounded border border-slate-700/50">4 tools</span>
-                    </div>
-                    {#each allTools.filter((t) => t.category === 'preferences') as tool}
-                      <button
-                        type="button"
-                        onclick={() => {
-                          tool.action();
-                          showToolsDropdown = false;
-                        }}
-                        class="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-slate-800/90 text-slate-300 hover:text-white flex items-center space-x-2.5 transition group border border-transparent hover:border-slate-700/60 hover:shadow-sm"
-                      >
-                        <div class="w-7 h-7 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0 group-hover:border-slate-700 group-hover:scale-105 transition">
-                          <Icon name={tool.icon} class="w-3.5 h-3.5 {tool.iconColor}" />
-                        </div>
-                        <div class="min-w-0 flex-1">
-                          <div class="flex items-center justify-between gap-1">
-                            <span class="text-xs font-semibold text-slate-200 group-hover:text-white truncate">{tool.name}</span>
-                            {#if tool.shortcut}
-                              <kbd class="text-[9px] font-mono text-slate-400 bg-slate-800 px-1 py-0.2 rounded border border-slate-700 shrink-0">{tool.shortcut}</kbd>
-                            {/if}
-                          </div>
-                          <div class="text-[10px] text-slate-400 group-hover:text-slate-300 truncate leading-tight mt-0.5">{tool.desc}</div>
-                        </div>
-                        <Icon name="chevron-right" class="w-3 h-3 text-slate-600 opacity-0 group-hover:opacity-100 group-hover:text-slate-400 transition shrink-0" />
-                      </button>
-                    {/each}
-                  </div>
                 </div>
 
-                <!-- Right Column (Data Movement + Schema Architecture) -->
+                <!-- Right Column (Data Movement + AI & Collaboration + System & Workspace) -->
                 <div class="space-y-4">
-                  <!-- Section 4: Data Movement & ETL -->
+                  <!-- Section 4: Data Movement & ETL (5 tools) -->
                   <div class="space-y-1">
                     <div class="text-[10.5px] font-bold uppercase tracking-wider text-slate-400 px-2.5 py-1 flex items-center justify-between bg-slate-900/50 rounded-lg border border-slate-800/60 mb-1">
                       <span class="flex items-center space-x-2">
@@ -890,16 +925,16 @@
                     {/each}
                   </div>
 
-                  <!-- Section 5: Schema & Architecture -->
+                  <!-- Section 5: AI & Collaboration (3 tools) -->
                   <div class="space-y-1">
                     <div class="text-[10.5px] font-bold uppercase tracking-wider text-slate-400 px-2.5 py-1 flex items-center justify-between bg-slate-900/50 rounded-lg border border-slate-800/60 mb-1">
                       <span class="flex items-center space-x-2">
-                        <span class="w-2 h-2 rounded-full bg-indigo-400 shadow-[0_0_8px_rgba(129,140,248,0.6)]"></span>
-                        <span class="text-slate-200 font-semibold">Schema & Architecture</span>
+                        <span class="w-2 h-2 rounded-full bg-purple-400 shadow-[0_0_8px_rgba(192,132,252,0.6)]"></span>
+                        <span class="text-slate-200 font-semibold">AI & Collaboration</span>
                       </span>
-                      <span class="text-[9px] font-mono text-slate-400 bg-slate-800/70 px-1.5 py-0.2 rounded border border-slate-700/50">5 tools</span>
+                      <span class="text-[9px] font-mono text-slate-400 bg-slate-800/70 px-1.5 py-0.2 rounded border border-slate-700/50">3 tools</span>
                     </div>
-                    {#each allTools.filter((t) => t.category === 'schema') as tool}
+                    {#each allTools.filter((t) => t.category === 'ai') as tool}
                       <button
                         type="button"
                         onclick={() => {
@@ -916,6 +951,44 @@
                             <span class="text-xs font-semibold text-slate-200 group-hover:text-white truncate">{tool.name}</span>
                             {#if tool.badge}
                               <span class="text-[8.5px] font-mono px-1.5 py-0.2 rounded border shrink-0 {tool.badgeColor || 'bg-slate-800 text-slate-300 border-slate-700'}">{tool.badge}</span>
+                            {/if}
+                          </div>
+                          <div class="text-[10px] text-slate-400 group-hover:text-slate-300 truncate leading-tight mt-0.5">{tool.desc}</div>
+                        </div>
+                        <Icon name="chevron-right" class="w-3 h-3 text-slate-600 opacity-0 group-hover:opacity-100 group-hover:text-slate-400 transition shrink-0" />
+                      </button>
+                    {/each}
+                  </div>
+
+                  <!-- Section 6: System & Workspace (3 tools) -->
+                  <div class="space-y-1">
+                    <div class="text-[10.5px] font-bold uppercase tracking-wider text-slate-400 px-2.5 py-1 flex items-center justify-between bg-slate-900/50 rounded-lg border border-slate-800/60 mb-1">
+                      <span class="flex items-center space-x-2">
+                        <span class="w-2 h-2 rounded-full bg-slate-400"></span>
+                        <span class="text-slate-200 font-semibold">System & Workspace</span>
+                      </span>
+                      <span class="text-[9px] font-mono text-slate-400 bg-slate-800/70 px-1.5 py-0.2 rounded border border-slate-700/50">3 tools</span>
+                    </div>
+                    {#each allTools.filter((t) => t.category === 'preferences') as tool}
+                      <button
+                        type="button"
+                        onclick={() => {
+                          tool.action();
+                          showToolsDropdown = false;
+                        }}
+                        class="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-slate-800/90 text-slate-300 hover:text-white flex items-center space-x-2.5 transition group border border-transparent hover:border-slate-700/60 hover:shadow-sm"
+                      >
+                        <div class="w-7 h-7 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0 group-hover:border-slate-700 group-hover:scale-105 transition">
+                          <Icon name={tool.icon} class="w-3.5 h-3.5 {tool.iconColor}" />
+                        </div>
+                        <div class="min-w-0 flex-1">
+                          <div class="flex items-center justify-between gap-1">
+                            <span class="text-xs font-semibold text-slate-200 group-hover:text-white truncate">{tool.name}</span>
+                            {#if tool.badge}
+                              <span class="text-[8.5px] font-mono px-1.5 py-0.2 rounded border shrink-0 {tool.badgeColor || 'bg-slate-800 text-slate-300 border-slate-700'}">{tool.badge}</span>
+                            {/if}
+                            {#if tool.shortcut}
+                              <kbd class="text-[9px] font-mono text-slate-400 bg-slate-800 px-1 py-0.2 rounded border border-slate-700 shrink-0">{tool.shortcut}</kbd>
                             {/if}
                           </div>
                           <div class="text-[10px] text-slate-400 group-hover:text-slate-300 truncate leading-tight mt-0.5">{tool.desc}</div>

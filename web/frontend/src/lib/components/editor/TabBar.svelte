@@ -200,10 +200,8 @@
             <Icon name="layers" class="w-3.5 h-3.5 {isActive ? 'text-indigo-400' : 'text-slate-500'}" />
           {:else if tab.isTableViewer}
             <Icon name="table" class="w-3.5 h-3.5 {isActive ? 'text-emerald-400' : 'text-slate-500'}" />
-          {:else if tab.title.endsWith('.ddl.sql')}
-            <Icon name="file-code" class="w-3.5 h-3.5 text-sky-400" />
           {:else}
-            <Icon name="zap" class="w-3.5 h-3.5 {isActive ? 'text-amber-400' : 'text-slate-500'}" />
+            <Icon name="file-code" class="w-3.5 h-3.5 {isActive ? 'text-sky-400' : 'text-slate-500'}" />
           {/if}
         </span>
 
@@ -388,10 +386,8 @@
                   <Icon name="layers" class="w-3.5 h-3.5 text-indigo-400" />
                 {:else if tab.isTableViewer}
                   <Icon name="table" class="w-3.5 h-3.5 text-emerald-400" />
-                {:else if tab.title.endsWith('.ddl.sql')}
-                  <Icon name="file-code" class="w-3.5 h-3.5 text-sky-400" />
                 {:else}
-                  <Icon name="zap" class="w-3.5 h-3.5 text-amber-400" />
+                  <Icon name="file-code" class="w-3.5 h-3.5 text-sky-400" />
                 {/if}
               </span>
 
