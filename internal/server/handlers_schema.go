@@ -449,7 +449,13 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sortCol := r.URL.Query().Get("sort_col")
+	if sortCol == "" {
+		sortCol = r.URL.Query().Get("sort")
+	}
 	sortDir := strings.ToUpper(r.URL.Query().Get("sort_dir"))
+	if sortDir == "" {
+		sortDir = strings.ToUpper(r.URL.Query().Get("dir"))
+	}
 	if sortDir != "DESC" {
 		sortDir = "ASC"
 	}

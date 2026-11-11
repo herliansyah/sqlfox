@@ -670,15 +670,6 @@
       {/if}
     </div>
 
-    <!-- Bottom Footer Status -->
-    <div class="border-t border-[#1e293b] p-2.5 flex items-center justify-between text-xs text-slate-400 bg-[#070a14]">
-      <div class="flex items-center space-x-2 font-mono text-[11px] truncate">
-        <span class="w-2 h-2 rounded-full {appState.activeSessionId ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)]' : 'bg-slate-600'}"></span>
-        <span class="truncate font-medium">{appState.activeConnection?.name || 'Ready'}</span>
-      </div>
-      <span class="text-[10px] font-mono text-slate-500 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">Svelte 5</span>
-    </div>
-
     <!-- Table Context Menu -->
     {#if tableContextMenu && tableContextMenu.open}
       <div

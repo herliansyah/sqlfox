@@ -4,7 +4,7 @@ import assert from 'assert';
 
 console.log("--- Starting Query vs Table Toolbar Visibility Test ---");
 
-const html = fs.readFileSync('web/dist/index.html', 'utf8');
+const html = fs.readFileSync(fs.existsSync('web/dist/index.legacy.html') ? 'web/dist/index.legacy.html' : 'web/dist/index.html', 'utf8');
 
 // 1. Verify HTML IDs and initial hidden classes
 assert(html.includes('id="btn-grid-add-row"'), 'btn-grid-add-row must exist');

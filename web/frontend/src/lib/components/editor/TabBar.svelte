@@ -272,6 +272,19 @@
           <Icon name="copy" class="w-3.5 h-3.5 text-sky-400" />
           <span>Duplicate Tab</span>
         </button>
+        <button
+          onclick={() => {
+            const targetTab = appState.tabs.find((t) => t.id === tabContextMenu!.tabId);
+            if (targetTab) {
+              appState.saveQueryToNote(targetTab.sql, targetTab.title);
+            }
+            closeTabMenu();
+          }}
+          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+        >
+          <Icon name="bookmark" class="w-3.5 h-3.5 text-amber-400" />
+          <span>Save as Note</span>
+        </button>
       </div>
 
       <div class="py-1">

@@ -2,6 +2,7 @@
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
   import Icon from '../common/Icon.svelte';
+  import NoteMarkdownView from './NoteMarkdownView.svelte';
 
   interface OperationalNote {
     id: string;
@@ -163,7 +164,7 @@
 </script>
 
 <aside
-  class="fixed top-12 right-0 bottom-6 w-96 bg-[#0b0f19] border-l border-[#1e293b] shadow-2xl z-40 flex flex-col font-sans transition-transform duration-200 select-text"
+  class="fixed top-12 right-0 bottom-7 w-96 bg-[#0b0f19] border-l border-[#1e293b] shadow-2xl z-40 flex flex-col font-sans transition-transform duration-200 select-text"
 >
   <!-- Drawer Header -->
   <div class="h-10 bg-[#0f172a] border-b border-[#1e293b] px-4 flex items-center justify-between flex-shrink-0 select-none">
@@ -296,9 +297,9 @@
             </div>
           </div>
 
-          <p class="text-xs text-slate-300 whitespace-pre-wrap leading-relaxed line-clamp-3">
-            {note.content}
-          </p>
+          <div class="py-1">
+            <NoteMarkdownView content={note.content} onOpenQuery={openQueryInWorksheet} />
+          </div>
 
           {#if note.query_snapshot}
             <div class="p-2 rounded bg-[#070a12] border border-sky-950 flex items-center justify-between text-[11px] font-mono text-sky-300">

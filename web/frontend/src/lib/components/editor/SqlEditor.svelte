@@ -199,6 +199,17 @@
         <span class="text-[9px] text-slate-500 font-mono hidden sm:inline">Ctrl+Shift+F</span>
       </button>
 
+      <!-- Save as Operational Note Button -->
+      <button
+        onclick={() => appState.saveQueryToNote(currentTab?.sql, currentTab?.title)}
+        disabled={currentTab?.isExecuting || !currentTab?.sql}
+        class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-40 text-slate-300 hover:text-white border border-[#334155] text-xs flex items-center space-x-1.5 transition shadow-sm"
+        title="Save Active Query as Operational Note"
+      >
+        <Icon name="bookmark" class="w-3.5 h-3.5 text-amber-400" />
+        <span>Save Note</span>
+      </button>
+
       <div class="h-3.5 w-px bg-slate-800"></div>
 
       <!-- Tab Database Scope Selector Pill (ADR 0055) -->

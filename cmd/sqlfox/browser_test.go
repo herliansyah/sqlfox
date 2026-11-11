@@ -38,7 +38,7 @@ func TestStopExistingInstance(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	// 1. When no lock file exists
-	err = stopExistingInstance(tmpDir, 8080)
+	err = stopExistingInstance(tmpDir, 0)
 	if err == nil {
 		t.Fatal("expected error when stopping non-existent instance, got nil")
 	}

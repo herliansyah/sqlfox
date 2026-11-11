@@ -19,12 +19,14 @@ import type {
 import { api } from '../api/client';
 
 // ponytail: smart wildcard auto-wrap for LIKE/NOT LIKE filter
-export function compileFilterPills(pills: FilterPill[]): string {
+export function compileFilterPills(pills: FilterPill[], driver?: string): string {
   if (!Array.isArray(pills) || pills.length === 0) return '';
+  const isPg = driver === 'postgres' || driver === 'postgresql';
   const clauses: string[] = [];
   for (const p of pills) {
     if (!p || !p.col) continue;
-    const colEscaped = `\`${p.col.replace(/`/g, '``')}\``;
+    const cleanCol = p.col.replace(/^[`"\[]+|[`"\]]+$/g, '');
+    const colEscaped = isPg ? `"${cleanCol.replace(/"/g, '""')}"` : `\`${cleanCol.replace(/`/g, '``')}\``;
     const op = (p.op || '=').toUpperCase();
     if (op === 'IS NULL' || op === 'IS NOT NULL') {
       clauses.push(`${colEscaped} ${op}`);
@@ -143,6 +145,11 @@ export class AppState {
   private reminderTimer: any = null;
   isActivityDrawerOpen = $state<boolean>(false);
   isUpdateModalOpen = $state<boolean>(false);
+  serverLatency = $state<number | null>(null);
+  serverMemoryMb = $state<number | null>(null);
+  serverInfo = $state<{ version?: string; uptime_sec?: number; active_conns?: number } | null>(null);
+  isPingingServer = $state<boolean>(false);
+  appVersion = $state<string>('v0.18.0');
   isMockDataModalOpen = $state<boolean>(false);
   mockDataTableName = $state<string>('');
   isSettingsModalOpen = $state<boolean>(false);
@@ -577,6 +584,11 @@ export class AppState {
       if (!restored && this.tabs.length === 0) {
         this.addTab('Query 1.sql', '');
       }
+
+      if (sess.server_info) {
+        this.serverInfo = sess.server_info;
+      }
+      this.pingActiveSession().catch(() => {});
     } catch (err: any) {
       console.error('Failed to select connection:', err);
       this.connectionError = err.message || 'Failed to connect to database';
@@ -605,6 +617,43 @@ export class AppState {
     } finally {
       this.isLoadingCatalog = false;
     }
+  }
+
+  async pingActiveSession() {
+    if (!this.activeSessionId) return;
+    this.isPingingServer = true;
+    try {
+      const res = await api.pingSession(this.activeSessionId);
+      if (res) {
+        this.serverLatency = res.latency_ms;
+        if (res.memory_mb != null) this.serverMemoryMb = res.memory_mb;
+        if (res.server_info) this.serverInfo = res.server_info;
+        if (typeof res.read_only === 'boolean') this.isReadOnly = res.read_only;
+      }
+    } catch (_) {
+      this.serverLatency = -1;
+    } finally {
+      this.isPingingServer = false;
+    }
+  }
+
+  saveQueryToNote(sqlText?: string, titleHint?: string) {
+    const tab = this.activeTab;
+    const sql = (sqlText ?? tab?.sql ?? '').trim();
+    if (!sql) {
+      this.showToast('Worksheet query is empty. Enter or run a SQL statement first.', 'warning');
+      return;
+    }
+    const cleanTitle = (titleHint || tab?.title || 'Query Snapshot').replace(/\.sql$/i, '').trim() || 'Query Snapshot';
+    this.editingNote = {
+      title: cleanTitle,
+      content: `### Query Snapshot\n\n\`\`\`sql\n${sql}\n\`\`\`\n`,
+      category: 'Analysis',
+      table_name: tab?.tableName || '',
+      query_snapshot: sql,
+      is_pinned: false,
+    };
+    this.isNoteComposerModalOpen = true;
   }
 
   async loadFastCatalogBackground(sessionId: string) {
@@ -875,32 +924,26 @@ export class AppState {
       // Determine active filter clause (appliedFilter or compiled filterPills)
       let filterClause = (tab.appliedFilter || '').trim();
       if (!filterClause && tab.filterPills && tab.filterPills.length > 0) {
-        filterClause = compileFilterPills(tab.filterPills);
+        filterClause = compileFilterPills(tab.filterPills, this.activeConnection?.driver);
       }
 
-      if (filterClause) {
-        let query = `SELECT * FROM ${dbPrefix}\`${tab.tableName}\` WHERE ${filterClause}`;
-        if (tab.sortCol) {
-          query += ` ORDER BY \`${tab.sortCol}\` ${tab.sortDir || 'ASC'}`;
-        }
-        query += ` LIMIT ${limit} OFFSET ${offset};`;
-
-        const res = await api.executeQuery(this.activeSessionId, query, false);
-        tab.activeResult = res;
-      } else if (tab.sortCol) {
-        let query = `SELECT * FROM ${dbPrefix}\`${tab.tableName}\` ORDER BY \`${tab.sortCol}\` ${tab.sortDir || 'ASC'} LIMIT ${limit} OFFSET ${offset};`;
-        const res = await api.executeQuery(this.activeSessionId, query, false);
-        tab.activeResult = res;
-      } else {
-        const res = await api.getTableRows(this.activeSessionId, tab.tableName, limit, offset, db);
-        if (res && res.duration_ms === undefined) {
-          res.duration_ms = Math.round(performance.now() - startTime);
-        }
-        if (res && res.row_count === undefined && res.rows) {
-          res.row_count = res.rows.length;
-        }
-        tab.activeResult = res;
+      const res = await api.getTableRows(
+        this.activeSessionId,
+        tab.tableName,
+        limit,
+        offset,
+        db,
+        filterClause || undefined,
+        tab.sortCol || undefined,
+        tab.sortDir || undefined
+      );
+      if (res && res.duration_ms === undefined) {
+        res.duration_ms = Math.round(performance.now() - startTime);
       }
+      if (res && res.row_count === undefined && res.rows) {
+        res.row_count = res.rows.length;
+      }
+      tab.activeResult = res;
     } catch (err: any) {
       tab.activeResult = {
         columns: [],
@@ -975,15 +1018,29 @@ export class AppState {
   }
 
   closeTab(tabId: string) {
-    if (this.tabs.length <= 1) return;
     const idx = this.tabs.findIndex((t) => t.id === tabId);
-    if (idx !== -1) {
-      this.tabs.splice(idx, 1);
-      if (this.activeTabId === tabId) {
-        this.activeTabId = this.tabs[Math.max(0, idx - 1)].id;
-      }
+    if (idx === -1) return;
+    if (this.tabs.length <= 1) {
+      // Closing last tab resets workspace to fresh Query 1.sql
+      this.tabs = [
+        {
+          id: `tab-${Date.now()}`,
+          title: 'Query 1.sql',
+          sql: '',
+          database: this.currentDatabase || '',
+          isTableViewer: false,
+        },
+      ];
+      this.activeTabId = this.tabs[0].id;
       this.saveTabsState();
+      return;
     }
+    this.tabs.splice(idx, 1);
+    if (this.activeTabId === tabId) {
+      this.activeTabId = this.tabs[Math.max(0, idx - 1)].id;
+    }
+    this.tabs = [...this.tabs];
+    this.saveTabsState();
   }
 
   closeOtherTabs(tabId: string) {
@@ -1461,7 +1518,7 @@ export class AppState {
     tab.filterPills.push({ col: defaultCol, op, val });
     tab.filterMode = 'pills';
     if (val !== '' || op === 'IS NULL' || op === 'IS NOT NULL') {
-      tab.appliedFilter = compileFilterPills(tab.filterPills);
+      tab.appliedFilter = compileFilterPills(tab.filterPills, this.activeConnection?.driver);
       if (tab.isTableViewer) {
         tab.currentPage = 1;
         this.loadTableData(tab);
@@ -1483,7 +1540,7 @@ export class AppState {
     const tab = this.activeTab;
     if (!tab || !tab.filterPills) return;
     tab.filterPills.splice(index, 1);
-    tab.appliedFilter = compileFilterPills(tab.filterPills);
+    tab.appliedFilter = compileFilterPills(tab.filterPills, this.activeConnection?.driver);
     if (tab.isTableViewer) {
       tab.currentPage = 1;
       this.loadTableData(tab);
@@ -1505,7 +1562,7 @@ export class AppState {
       tab.filterRaw = rawVal;
       tab.appliedFilter = rawVal;
     } else {
-      tab.appliedFilter = compileFilterPills(tab.filterPills || []);
+      tab.appliedFilter = compileFilterPills(tab.filterPills || [], this.activeConnection?.driver);
     }
     this.loadTableData(tab);
     this.saveTabsState();

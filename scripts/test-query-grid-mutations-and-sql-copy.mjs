@@ -4,7 +4,7 @@ import assert from 'assert';
 
 console.log("--- Starting Query Grid Mutations & Cross-Database SQL Copy Tests ---");
 
-const html = fs.readFileSync('web/dist/index.html', 'utf8');
+const html = fs.readFileSync(fs.existsSync('web/dist/index.legacy.html') ? 'web/dist/index.legacy.html' : 'web/dist/index.html', 'utf8');
 
 // Extract Javascript from the main application <script> tag
 const lastScriptStart = html.lastIndexOf('<script>');

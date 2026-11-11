@@ -122,10 +122,10 @@
     <div class="relative">
       <button
         onclick={() => (showConnDropdown = !showConnDropdown)}
-        class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700/80 border border-[#334155] flex items-center space-x-2 text-xs text-slate-200 transition shadow-sm"
+        class="h-7 px-2.5 rounded {appState.isProduction ? 'bg-rose-950/40 border-rose-600/60 hover:bg-rose-900/40 shadow-rose-950/30' : 'bg-[#1e293b] hover:bg-slate-700/80 border-[#334155]'} border flex items-center space-x-2 text-xs text-slate-200 transition shadow-sm"
       >
-        <span class="w-2 h-2 rounded-full {appState.activeConnection ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]' : 'bg-slate-500'}"></span>
-        <span class="font-medium text-slate-100">{appState.activeConnection?.name || 'No active connection'}</span>
+        <span class="w-2 h-2 rounded-full {appState.isProduction ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)] animate-pulse' : (appState.activeConnection ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]' : 'bg-slate-500')}"></span>
+        <span class="font-medium {appState.isProduction ? 'text-rose-100 font-semibold' : 'text-slate-100'}">{appState.activeConnection?.name || 'No active connection'}</span>
         {#if appState.activeConnection?.environment}
           <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold border {getEnvBadgeClass(appState.activeConnection.environment)}">
             {appState.activeConnection.environment}
@@ -587,13 +587,6 @@
         >
           <Icon name={showMasterPin ? 'eye-off' : 'eye'} class="w-3 h-3" />
         </button>
-      </div>
-    {/if}
-
-    {#if appState.isProduction}
-      <div class="h-7 px-2.5 rounded bg-rose-950/40 border border-rose-500/50 text-rose-300 flex items-center space-x-1.5 shadow-sm">
-        <span class="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping"></span>
-        <span class="text-[10px] font-bold tracking-wider uppercase">Production</span>
       </div>
     {/if}
 

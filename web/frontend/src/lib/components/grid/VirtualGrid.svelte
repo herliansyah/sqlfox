@@ -388,7 +388,11 @@
     }
     const pkCol = getColName(pkColObj);
     const pkVal = result.rows[selectedRowIndex][allColumns.indexOf(pkCol)];
-    if (confirm(`Delete record with ${pkCol} = ${pkVal}?`)) {
+    const ok = await appState.showNativeConfirm(
+      `Delete record with ${pkCol} = ${pkVal}?`,
+      'Confirm Deletion'
+    );
+    if (ok) {
       await appState.deleteRows(pkCol, [pkVal]);
       selectedRowIndex = null;
     }
@@ -1125,13 +1129,19 @@
 
       <!-- Pagination Controls for Table Viewer -->
       {#if currentTab?.isTableViewer}
-        <div class="flex items-center space-x-2 text-[11px]">
+        {@const estRows = appState.catalog?.tables?.find(t => t.name.toLowerCase() === currentTab?.tableName?.toLowerCase())?.row_count}
+        {@const pageSize = currentTab.pageSize || 50}
+        {@const curPage = currentTab.currentPage || 1}
+        {@const totalPages = typeof estRows === 'number' && estRows > 0 ? Math.max(1, Math.ceil(estRows / pageSize)) : null}
+        <div id="grid-pagination-bar" class="flex items-center space-x-2 text-[11px]">
           <span class="text-slate-500">Page Size:</span>
           <select
-            value={currentTab.pageSize || 50}
+            id="grid-page-size-select"
+            value={pageSize}
             onchange={(e) => {
               if (currentTab) {
                 currentTab.pageSize = Number((e.currentTarget as HTMLSelectElement).value);
+                currentTab.currentPage = 1;
                 appState.loadTableData(currentTab);
               }
             }}
@@ -1145,30 +1155,66 @@
           </select>
 
           <button
+            id="btn-page-first"
             onclick={() => {
-              if (currentTab && (currentTab.currentPage || 1) > 1) {
-                currentTab.currentPage = (currentTab.currentPage || 1) - 1;
+              if (currentTab && curPage > 1) {
+                currentTab.currentPage = 1;
                 appState.loadTableData(currentTab);
               }
             }}
-            disabled={(currentTab?.currentPage || 1) <= 1}
+            disabled={curPage <= 1}
             class="px-2 py-0.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-30 border border-[#334155] text-slate-200"
+            title="First Page"
           >
-            Prev
+            «
           </button>
-          <span class="px-1 text-slate-300">Page {currentTab?.currentPage || 1}</span>
           <button
+            id="btn-page-prev"
+            onclick={() => {
+              if (currentTab && curPage > 1) {
+                currentTab.currentPage = curPage - 1;
+                appState.loadTableData(currentTab);
+              }
+            }}
+            disabled={curPage <= 1}
+            class="px-2 py-0.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-30 border border-[#334155] text-slate-200"
+            title="Previous Page"
+          >
+            ‹
+          </button>
+          <span class="px-1 text-slate-300">
+            Page {curPage}{totalPages ? ` of ${totalPages.toLocaleString()}` : ''}
+          </span>
+          <button
+            id="btn-page-next"
             onclick={() => {
               if (currentTab) {
-                currentTab.currentPage = (currentTab.currentPage || 1) + 1;
+                currentTab.currentPage = curPage + 1;
                 appState.loadTableData(currentTab);
               }
             }}
-            disabled={totalRows < (currentTab?.pageSize || 50)}
+            disabled={totalRows < pageSize || (totalPages !== null && curPage >= totalPages)}
             class="px-2 py-0.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-30 border border-[#334155] text-slate-200"
+            title="Next Page"
           >
-            Next
+            ›
           </button>
+          {#if totalPages !== null}
+            <button
+              id="btn-page-last"
+              onclick={() => {
+                if (currentTab && curPage < totalPages) {
+                  currentTab.currentPage = totalPages;
+                  appState.loadTableData(currentTab);
+                }
+              }}
+              disabled={curPage >= totalPages}
+              class="px-2 py-0.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-30 border border-[#334155] text-slate-200"
+              title="Last Page"
+            >
+              »
+            </button>
+          {/if}
         </div>
       {:else if result && result.rows && (result.rows.length >= 5000 || (currentTab?.streamBatchOffset ?? 0) > 0 || currentTab?.hasMoreStream)}
         <!-- Query Stream 5k Batch Pager (ADR 0058) -->

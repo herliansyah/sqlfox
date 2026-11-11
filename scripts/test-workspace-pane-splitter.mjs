@@ -2,7 +2,7 @@ import fs from 'fs';
 import vm from 'vm';
 import assert from 'assert';
 
-const html = fs.readFileSync('web/dist/index.html', 'utf8');
+const html = fs.readFileSync(fs.existsSync('web/dist/index.legacy.html') ? 'web/dist/index.legacy.html' : 'web/dist/index.html', 'utf8');
 
 // 1. Verify HTML elements
 assert(html.includes('id="workspace-pane-splitter"'), 'workspace-pane-splitter element must exist in HTML');

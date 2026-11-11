@@ -1,6 +1,7 @@
 <script lang="ts">
   import Header from './lib/components/layout/Header.svelte';
   import Sidebar from './lib/components/layout/Sidebar.svelte';
+  import Footer from './lib/components/layout/Footer.svelte';
   import TabBar from './lib/components/editor/TabBar.svelte';
   import SqlEditor from './lib/components/editor/SqlEditor.svelte';
   import VirtualGrid from './lib/components/grid/VirtualGrid.svelte';
@@ -153,9 +154,9 @@
       if (appState.isMockDataModalOpen) appState.isMockDataModalOpen = false;
       if (appState.isSettingsModalOpen) appState.isSettingsModalOpen = false;
       if (appState.jsonCellModal.isOpen) appState.jsonCellModal.isOpen = false;
-      if (appState.isDataTransferModalOpen) appState.isDataTransferModalOpen = false;
-      if (appState.isDataSyncModalOpen) appState.isDataSyncModalOpen = false;
-      if (appState.isRefreshAllModalOpen) appState.isRefreshAllModalOpen = false;
+      if (appState.isDataTransferOpen) appState.isDataTransferOpen = false;
+      if (appState.isDataSyncOpen) appState.isDataSyncOpen = false;
+      if (appState.isRefreshAllOpen) appState.isRefreshAllOpen = false;
       if (appState.isImpactPreviewOpen) appState.isImpactPreviewOpen = false;
       if (appState.isAuditDrawerOpen) appState.isAuditDrawerOpen = false;
       if (appState.ddlReviewModal.isOpen) appState.ddlReviewModal.isOpen = false;
@@ -228,6 +229,9 @@
       </div>
     </main>
   </div>
+
+  <!-- Bottom Application Status Bar -->
+  <Footer />
 
   <!-- Global Modals -->
   <SafetyModal />

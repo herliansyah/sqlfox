@@ -4,7 +4,7 @@ import assert from 'assert';
 
 console.log("--- Running Paging Diagnostics Test ---");
 
-const html = fs.readFileSync('web/dist/index.html', 'utf8');
+const html = fs.readFileSync(fs.existsSync('web/dist/index.legacy.html') ? 'web/dist/index.legacy.html' : 'web/dist/index.html', 'utf8');
 
 // CHECK 1: Initial HTML state of bottom pagination bar must be hidden
 const paginationBarHtmlMatch = html.match(/<div id="grid-pagination-bar"[^>]*class="([^"]*)"/);

@@ -2,6 +2,7 @@
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
   import Icon from '../common/Icon.svelte';
+  import NoteMarkdownView from '../notes/NoteMarkdownView.svelte';
 
   interface Props {
     tableName: string;
@@ -283,7 +284,9 @@
                 </div>
 
                 {#if note.content}
-                  <p class="text-slate-400 text-xs leading-relaxed whitespace-pre-wrap">{note.content}</p>
+                  <div class="py-1">
+                    <NoteMarkdownView content={note.content} />
+                  </div>
                 {/if}
               </div>
             {/each}

@@ -1,7 +1,7 @@
 import fs from 'fs';
 import assert from 'assert';
 
-const html = fs.readFileSync('web/dist/index.html', 'utf8');
+const html = fs.readFileSync(fs.existsSync('web/dist/index.legacy.html') ? 'web/dist/index.legacy.html' : 'web/dist/index.html', 'utf8');
 
 console.log("=== Testing Connection Hover & Export Dropdown Fixes ===");
 

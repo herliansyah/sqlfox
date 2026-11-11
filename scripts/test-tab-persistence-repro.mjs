@@ -2,7 +2,7 @@ import fs from 'fs';
 import vm from 'vm';
 import path from 'path';
 
-const html = fs.readFileSync('web/dist/index.html', 'utf8');
+const html = fs.readFileSync(fs.existsSync('web/dist/index.legacy.html') ? 'web/dist/index.legacy.html' : 'web/dist/index.html', 'utf8');
 
 // 2. Extract Javascript from the main application <script> tag
 const lastScriptStart = html.lastIndexOf('<script>');

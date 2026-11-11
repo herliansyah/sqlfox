@@ -2,7 +2,7 @@ import fs from 'fs';
 import vm from 'vm';
 import assert from 'assert';
 
-const html = fs.readFileSync('web/dist/index.html', 'utf-8');
+const html = fs.readFileSync(fs.existsSync('web/dist/index.legacy.html') ? 'web/dist/index.legacy.html' : 'web/dist/index.html', 'utf-8');
 const scriptMatches = [...html.matchAll(/<script>([\s\S]*?)<\/script>/gi)];
 const mainScript = scriptMatches[scriptMatches.length - 1][1];
 

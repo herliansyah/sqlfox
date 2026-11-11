@@ -200,7 +200,7 @@
 </script>
 
 <aside
-  class="fixed top-12 right-0 bottom-6 w-96 bg-[#0b0f19] border-l border-[#1e293b] shadow-2xl z-40 flex flex-col font-sans transition-transform duration-200 select-text"
+  class="fixed top-12 right-0 bottom-7 w-96 bg-[#0b0f19] border-l border-[#1e293b] shadow-2xl z-40 flex flex-col font-sans transition-transform duration-200 select-text"
 >
   <!-- Drawer Header -->
   <div class="h-10 bg-[#0f172a] border-b border-[#1e293b] px-4 flex items-center justify-between flex-shrink-0 select-none">
@@ -376,5 +376,21 @@
         </button>
       </div>
     </div>
+  </div>
+
+  <!-- AI Copilot Footer Status Bar -->
+  <div class="h-7 px-3 bg-[#050811] border-t border-[#1e293b] flex items-center justify-between text-[10px] text-slate-500 font-mono select-none flex-shrink-0">
+    <div class="flex items-center space-x-1.5">
+      <span class="w-1.5 h-1.5 rounded-full {isLoading ? 'bg-amber-400 animate-ping' : 'bg-emerald-400'}"></span>
+      <span class="text-slate-400">{isLoading ? 'Generating response...' : 'SqlFox Copilot Ready'}</span>
+    </div>
+    <button
+      onclick={() => (appState.isAiSettingsModalOpen = true)}
+      class="hover:text-sky-300 transition flex items-center space-x-1 text-slate-400"
+      title="Configure AI Provider & Model"
+    >
+      <Icon name="sliders" class="w-3 h-3 text-sky-400" />
+      <span>Provider Settings</span>
+    </button>
   </div>
 </aside>

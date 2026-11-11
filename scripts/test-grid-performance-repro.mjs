@@ -4,7 +4,7 @@ import assert from 'assert';
 
 console.log("--- Starting Grid Large Dataset (1000 rows, 40 cols) Performance & Pagination Regression Suite ---");
 
-const html = fs.readFileSync('web/dist/index.html', 'utf8');
+const html = fs.readFileSync(fs.existsSync('web/dist/index.legacy.html') ? 'web/dist/index.legacy.html' : 'web/dist/index.html', 'utf8');
 
 const lastScriptStart = html.lastIndexOf('<script>');
 const lastScriptEnd = html.lastIndexOf('</script>');

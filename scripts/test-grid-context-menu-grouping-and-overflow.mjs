@@ -4,7 +4,7 @@ import assert from 'assert';
 
 console.log("--- Starting Grid Context Menu Grouping & Overflow Resilience Tests ---");
 
-const html = fs.readFileSync('web/dist/index.html', 'utf8');
+const html = fs.readFileSync(fs.existsSync('web/dist/index.legacy.html') ? 'web/dist/index.legacy.html' : 'web/dist/index.html', 'utf8');
 
 // 1. Verify HTML Structure & Submenus exist
 assert(html.includes('id="grid-context-menu"'), 'grid-context-menu must exist');

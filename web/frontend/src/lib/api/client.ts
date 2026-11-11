@@ -95,6 +95,15 @@ class ApiClient {
   }
 
   // Sessions
+  async pingSession(sessionId: string): Promise<{
+    latency_ms: number;
+    memory_mb?: number;
+    server_info?: { version?: string; uptime_sec?: number; active_conns?: number };
+    read_only?: boolean;
+  }> {
+    return this.request(`/session/${sessionId}/ping`, { method: 'POST' });
+  }
+
   async connectSession(connId: string): Promise<{
     id: string;
     connection_id: string;
@@ -132,9 +141,20 @@ class ApiClient {
     return this.request(`/session/${sessionId}/fast-catalog`);
   }
 
-  async getTableRows(sessionId: string, tableName: string, limit = 50, offset = 0, db?: string): Promise<QueryExecutionResult> {
+  async getTableRows(
+    sessionId: string,
+    tableName: string,
+    limit = 50,
+    offset = 0,
+    db?: string,
+    filter?: string,
+    sortCol?: string,
+    sortDir?: string
+  ): Promise<QueryExecutionResult> {
     let url = `/session/${sessionId}/table/${encodeURIComponent(tableName)}/rows?limit=${limit}&offset=${offset}`;
     if (db) url += `&db=${encodeURIComponent(db)}`;
+    if (filter) url += `&filter=${encodeURIComponent(filter)}`;
+    if (sortCol) url += `&sort_col=${encodeURIComponent(sortCol)}&sort_dir=${encodeURIComponent(sortDir || 'ASC')}`;
     return this.request(url);
   }
 

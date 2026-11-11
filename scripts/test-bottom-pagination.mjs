@@ -4,7 +4,7 @@ import assert from 'assert';
 
 console.log("--- Starting Bottom Pagination Bar Comprehensive Test ---");
 
-const html = fs.readFileSync('web/dist/index.html', 'utf8');
+const html = fs.readFileSync(fs.existsSync('web/dist/index.legacy.html') ? 'web/dist/index.legacy.html' : 'web/dist/index.html', 'utf8');
 
 // Verify HTML DOM elements exist
 assert(html.includes('id="grid-pagination-bar"'), 'grid-pagination-bar HTML must exist');

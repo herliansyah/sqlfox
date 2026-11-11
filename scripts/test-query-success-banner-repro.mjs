@@ -2,7 +2,7 @@ import fs from 'fs';
 import vm from 'vm';
 import assert from 'assert';
 
-const html = fs.readFileSync('web/dist/index.html', 'utf8');
+const html = fs.readFileSync(fs.existsSync('web/dist/index.legacy.html') ? 'web/dist/index.legacy.html' : 'web/dist/index.html', 'utf8');
 
 const lastScriptStart = html.lastIndexOf('<script>');
 const lastScriptEnd = html.lastIndexOf('</script>');
