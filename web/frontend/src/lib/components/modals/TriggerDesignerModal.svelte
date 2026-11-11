@@ -30,8 +30,10 @@
   });
 
   let generatedDDL = $derived.by(() => {
-    const isSQLite = appState.activeConnection?.driver === 'sqlite';
-    const quote = isSQLite ? '"' : '`';
+    const driver = appState.activeConnection?.driver;
+    const isSQLite = driver === 'sqlite';
+    const isPostgres = driver === 'postgres';
+    const quote = isSQLite || isPostgres ? '"' : '`';
     const cleanName = triggerName.trim() || 'trg_sample';
     const cleanTable = targetTable.trim() || 'target_table';
     const cleanBody = body.trim().replace(/;+$/, '');

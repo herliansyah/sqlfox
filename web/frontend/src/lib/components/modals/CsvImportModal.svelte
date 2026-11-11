@@ -131,9 +131,21 @@
       }
 
       const totalRows = dataLines.length;
-      const isSQLite = appState.activeConnection?.driver === 'sqlite';
-      const quote = isSQLite ? '"' : '`';
-      const insertKeyword = skipErrors ? (isSQLite ? 'INSERT OR IGNORE' : 'INSERT IGNORE') : 'INSERT';
+      const driver = appState.activeConnection?.driver;
+      const isSQLite = driver === 'sqlite';
+      const isPostgres = driver === 'postgres';
+      const quote = isSQLite || isPostgres ? '"' : '`';
+      let insertKeyword = 'INSERT';
+      if (skipErrors) {
+        if (isSQLite) {
+          insertKeyword = 'INSERT OR IGNORE';
+        } else if (isPostgres) {
+          insertKeyword = 'INSERT';
+        } else {
+          insertKeyword = 'INSERT IGNORE';
+        }
+      }
+      const conflictSuffix = skipErrors && isPostgres ? ' ON CONFLICT DO NOTHING' : '';
 
       const targetColsSql = activePairs.map(([_, tblCol]) => `${quote}${tblCol}${quote}`).join(', ');
 
@@ -161,7 +173,7 @@
           valuesRows.push(`(${valTokens.join(', ')})`);
         }
 
-        const query = `${insertKeyword} INTO ${quote}${targetTable}${quote} (${targetColsSql}) VALUES\n${valuesRows.join(',\n')};`;
+        const query = `${insertKeyword} INTO ${quote}${targetTable}${quote} (${targetColsSql}) VALUES\n${valuesRows.join(',\n')}${conflictSuffix};`;
         await api.executeQuery(appState.activeSessionId, query, false);
 
         insertedCount += chunk.length;

@@ -18,6 +18,54 @@ import type {
 } from '../../types';
 import { api } from '../api/client';
 
+// ponytail: smart wildcard auto-wrap for LIKE/NOT LIKE filter
+export function compileFilterPills(pills: FilterPill[]): string {
+  if (!Array.isArray(pills) || pills.length === 0) return '';
+  const clauses: string[] = [];
+  for (const p of pills) {
+    if (!p || !p.col) continue;
+    const colEscaped = `\`${p.col.replace(/`/g, '``')}\``;
+    const op = (p.op || '=').toUpperCase();
+    if (op === 'IS NULL' || op === 'IS NOT NULL') {
+      clauses.push(`${colEscaped} ${op}`);
+      continue;
+    }
+    const val = String(p.val !== undefined ? p.val : '').trim();
+    if (val === '') continue;
+    if (op === 'IN' || op === 'NOT IN') {
+      if (val.startsWith('(') && val.endsWith(')')) {
+        clauses.push(`${colEscaped} ${op} ${val}`);
+      } else {
+        const items = val.split(',').map((s) => s.trim()).filter(Boolean);
+        const formatted = items
+          .map((item) => {
+            if (!isNaN(Number(item)) && item !== '') return item;
+            return `'${item.replace(/'/g, "''")}'`;
+          })
+          .join(', ');
+        clauses.push(`${colEscaped} ${op} (${formatted})`);
+      }
+    } else if (op === 'LIKE' || op === 'NOT LIKE') {
+      let finalVal = val;
+      if (!val.includes('%') && !val.includes('_')) {
+        finalVal = `%${val}%`;
+      }
+      clauses.push(`${colEscaped} ${op} '${finalVal.replace(/'/g, "''")}'`);
+    } else if (op === 'BETWEEN') {
+      clauses.push(`${colEscaped} BETWEEN ${val}`);
+    } else {
+      const isNum = !isNaN(Number(val)) && val !== '' && !val.includes(' ');
+      if (isNum) {
+        clauses.push(`${colEscaped} ${op} ${val}`);
+      } else {
+        clauses.push(`${colEscaped} ${op} '${val.replace(/'/g, "''")}'`);
+      }
+    }
+  }
+  return clauses.join(' AND ');
+}
+
+
 export interface SafetyChallengeState {
   isOpen: boolean;
   sql: string;
@@ -90,6 +138,9 @@ export class AppState {
   isNotesDrawerOpen = $state<boolean>(false);
   isNoteComposerModalOpen = $state<boolean>(false);
   editingNote = $state<any>(null);
+  dueNotesCount = $state<number>(0);
+  private notifiedReminderIds = new Set<string>();
+  private reminderTimer: any = null;
   isActivityDrawerOpen = $state<boolean>(false);
   isUpdateModalOpen = $state<boolean>(false);
   isMockDataModalOpen = $state<boolean>(false);
@@ -191,6 +242,7 @@ export class AppState {
 
   // Remote Access Guard lock state
   isRemoteLocked = $state<boolean>(false);
+  authStatus = $state<any>(null);
 
   // Derived properties
   activeTab = $derived(this.tabs.find((t) => t.id === this.activeTabId) || this.tabs[0]);
@@ -247,6 +299,17 @@ export class AppState {
       (window as any).__sqlfox_set_remote_locked = (val: boolean) => {
         this.isRemoteLocked = val;
       };
+
+      // ponytail: beforeunload warning guards against inadvertent data loss while queries are running or staged edits exist
+      window.addEventListener('beforeunload', (e) => {
+        const hasRunningQuery = this.tabs.some((t) => t.isExecuting);
+        const hasStagedEdits = Object.keys(this.stagedEdits).length > 0;
+        if (hasRunningQuery || hasStagedEdits) {
+          e.preventDefault();
+          e.returnValue = 'You have unsaved staged edits or running database queries.';
+          return e.returnValue;
+        }
+      });
     }
     this.init();
   }
@@ -270,15 +333,71 @@ export class AppState {
   async init() {
     try {
       const auth = await api.getAuthStatus();
+      this.authStatus = auth;
       if (auth.is_remote && !auth.unlocked) {
         this.isRemoteLocked = true;
-        return;
+      } else {
+        this.isRemoteLocked = false;
+        if (typeof document !== 'undefined') {
+          document.body.classList.remove('vault-locked');
+        }
       }
-      this.isRemoteLocked = false;
-      await this.loadConnections();
+      if (typeof document !== 'undefined') {
+        const serverShell = document.getElementById('remote-lock-modal');
+        if (serverShell) serverShell.classList.add('hidden');
+      }
+      if (!this.isRemoteLocked) {
+        await this.loadConnections();
+        this.startNotesReminderPoller();
+      }
     } catch (err) {
       console.warn('Initial connection load deferred:', err);
     }
+  }
+
+  startNotesReminderPoller() {
+    if (this.reminderTimer) clearInterval(this.reminderTimer);
+    this.reminderTimer = setInterval(() => this.checkDueNotesReminders(), 30000);
+    setTimeout(() => this.checkDueNotesReminders(), 3000);
+  }
+
+  async checkDueNotesReminders() {
+    if (this.isRemoteLocked) return;
+    try {
+      const dueNotes = await api.getDueReminders();
+      if (!Array.isArray(dueNotes)) return;
+      this.dueNotesCount = dueNotes.length;
+
+      dueNotes.forEach((note: any) => {
+        if (!this.notifiedReminderIds.has(note.id)) {
+          this.notifiedReminderIds.add(note.id);
+          this.playReminderChime();
+          this.showToast(`🚨 Reminder Due: ${note.title || 'Untitled Note'}`, 'info');
+        }
+      });
+    } catch (_) {
+      // quiet background poller
+    }
+  }
+
+  playReminderChime() {
+    try {
+      if (typeof window === 'undefined') return;
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+      osc.frequency.setValueAtTime(880, ctx.currentTime + 0.12);
+      gain.gain.setValueAtTime(0.18, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.7);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.7);
+    } catch (_) {}
   }
 
   async unlockRemote(password: string) {
@@ -287,7 +406,16 @@ export class AppState {
       sessionStorage.setItem('sqlfox_remote_token', res.token);
       document.cookie = 'sqlfox_token=' + encodeURIComponent(res.token) + '; path=/; SameSite=Lax';
       this.isRemoteLocked = false;
+      if (typeof document !== 'undefined') {
+        document.body.classList.remove('vault-locked');
+        const serverShell = document.getElementById('remote-lock-modal');
+        if (serverShell) serverShell.classList.add('hidden');
+      }
+      try {
+        this.authStatus = await api.getAuthStatus();
+      } catch (_) {}
       await this.loadConnections();
+      this.startNotesReminderPoller();
       return true;
     }
     return false;
@@ -434,6 +562,12 @@ export class AppState {
       }
 
       this.loadFastCatalogBackground(this.activeSessionId);
+
+      // Restore persisted tabs for this connection
+      const restored = this.restoreTabsState(conn.id);
+      if (!restored && this.tabs.length === 0) {
+        this.addTab('Query 1.sql', '');
+      }
     } catch (err: any) {
       console.error('Failed to select connection:', err);
       this.connectionError = err.message || 'Failed to connect to database';
@@ -532,48 +666,119 @@ export class AppState {
     this.collapsedSections[section] = !this.collapsedSections[section];
   }
 
-  // Tabs Management
+  // Tabs Management & Session Persistence (ADR 0055 & CONTEXT.md)
+  getTabsStorageKey(connId?: string): string {
+    const id = connId || this.activeConnection?.id || (typeof localStorage !== 'undefined' ? localStorage.getItem('sqlfox_last_conn_id') : '');
+    return id ? `sqlfox_tabs_${id}` : 'sqlfox_tabs_default';
+  }
+
+  saveTabsState() {
+    if (typeof window === 'undefined' || !this.activeConnection?.id) return;
+    const key = this.getTabsStorageKey(this.activeConnection.id);
+    const serializable = {
+      activeTabId: this.activeTabId,
+      tabs: this.tabs.map((t) => ({
+        id: t.id,
+        title: t.title,
+        sql: t.sql,
+        database: t.database,
+        isTableViewer: Boolean(t.isTableViewer),
+        tableName: t.tableName,
+        tableMode: t.tableMode,
+        pageSize: t.pageSize || 50,
+        currentPage: t.currentPage || 1,
+        filterPills: t.filterPills || [],
+        filterMode: t.filterMode || 'pills',
+        filterRaw: t.filterRaw || '',
+        appliedFilter: t.appliedFilter || '',
+        hiddenColumns: t.hiddenColumns || [],
+        isProcesslist: Boolean(t.isProcesslist),
+        isErdCanvas: Boolean(t.isErdCanvas),
+      })),
+    };
+    try {
+      localStorage.setItem(key, JSON.stringify(serializable));
+    } catch (e) {
+      console.warn('Failed to save tabs state:', e);
+    }
+  }
+
+  restoreTabsState(connId: string): boolean {
+    if (typeof window === 'undefined' || !connId) return false;
+    const key = this.getTabsStorageKey(connId);
+    const raw = localStorage.getItem(key);
+    if (!raw) return false;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.tabs) && parsed.tabs.length > 0) {
+        this.tabs = parsed.tabs;
+        this.activeTabId = parsed.activeTabId || parsed.tabs[0].id;
+        if (this.activeTab?.isTableViewer && this.activeTab.tableName) {
+          this.loadTableData(this.activeTab);
+        }
+        return true;
+      }
+    } catch (e) {
+      console.warn('Failed to restore tabs state:', e);
+    }
+    return false;
+  }
+
   addTab(title = 'New Query.sql', sql = '') {
     const newId = `tab-${Date.now()}`;
     const newTab: EditorTab = {
       id: newId,
       title,
       sql,
+      database: this.currentDatabase || '',
       isTableViewer: false,
     };
     this.tabs.push(newTab);
     this.activeTabId = newId;
+    this.saveTabsState();
     return newTab;
   }
 
   openTableDataTab(tableName: string, initialMode: TableMode = 'data') {
-    const existing = this.tabs.find((t) => t.isTableViewer && t.tableName === tableName);
+    const currentDb = this.currentDatabase || '';
+    const existing = this.tabs.find((t) => t.isTableViewer && t.tableName === tableName && (!t.database || t.database === currentDb));
     if (existing) {
       existing.tableMode = initialMode;
       this.activeTabId = existing.id;
-      if (initialMode === 'data' && (!existing.activeResult || !existing.activeResult.rows)) {
+      this.tabs = [...this.tabs];
+      if (initialMode === 'data' && (!existing.activeResult || !existing.activeResult.rows || existing.activeResult.rows.length === 0)) {
         this.loadTableData(existing);
       }
+      this.saveTabsState();
       return;
     }
-    const newId = `tab-tbl-${Date.now()}`;
-    const dbPrefix = this.currentDatabase ? `\`${this.currentDatabase}\`.` : '';
+    const newId = `tab-tbl-${currentDb ? currentDb + '-' : ''}${tableName}-${Date.now()}`;
+    const dbPrefix = currentDb ? `\`${currentDb}\`.` : '';
     const newTab: EditorTab = {
       id: newId,
       title: tableName,
-      sql: `SELECT * FROM ${dbPrefix}\`${tableName}\` LIMIT 100;`,
+      sql: `SELECT * FROM ${dbPrefix}\`${tableName}\` LIMIT 50;`,
       isTableViewer: true,
       tableName,
+      database: currentDb,
       tableMode: initialMode,
-      pageSize: 100,
+      pageSize: 50,
       currentPage: 1,
       filterPills: [],
+      filterMode: 'pills',
+      filterRaw: '',
+      appliedFilter: '',
       hiddenColumns: [],
+      isExecuting: initialMode === 'data',
+      activeResult: null,
     };
     this.tabs.push(newTab);
     this.activeTabId = newId;
+    this.tabs = [...this.tabs];
+    this.saveTabsState();
     if (initialMode === 'data') {
-      this.loadTableData(newTab);
+      const liveTab = this.tabs.find((t) => t.id === newId) || newTab;
+      this.loadTableData(liveTab);
     }
   }
 
@@ -597,6 +802,8 @@ export class AppState {
     };
     this.tabs.push(newTab);
     this.activeTabId = newId;
+    this.tabs = [...this.tabs];
+    this.saveTabsState();
   }
 
   openErdTab() {
@@ -615,64 +822,75 @@ export class AppState {
     };
     this.tabs.push(newTab);
     this.activeTabId = newId;
+    this.tabs = [...this.tabs];
+    this.saveTabsState();
   }
 
   setTableMode(tabId: string, mode: TableMode) {
     const tab = this.tabs.find((t) => t.id === tabId);
     if (tab) {
       tab.tableMode = mode;
+      this.tabs = [...this.tabs];
+      this.saveTabsState();
       if (mode === 'data' && (!tab.activeResult || !tab.activeResult.rows?.length)) {
         this.loadTableData(tab);
       }
     }
   }
 
-  async loadTableData(tab: EditorTab) {
-    if (!this.activeSessionId || !tab.tableName) return;
+  async loadTableData(targetTab?: EditorTab) {
+    const tabId = targetTab?.id || this.activeTabId;
+    const tab = this.tabs.find((t) => t.id === tabId) || targetTab || this.activeTab;
+    if (!this.activeSessionId || !tab || !tab.tableName) return;
     tab.isExecuting = true;
+    this.tabs = [...this.tabs];
+    const startTime = performance.now();
     try {
-      const limit = tab.pageSize || 100;
+      const limit = tab.pageSize || 50;
       const offset = ((tab.currentPage || 1) - 1) * limit;
+      const db = tab.database || this.currentDatabase || '';
 
-      // If filter pills are present, construct filtered query
-      let query = '';
-      const dbPrefix = this.currentDatabase ? `\`${this.currentDatabase}\`.` : '';
-      if (tab.filterPills && tab.filterPills.length > 0) {
-        const whereClauses = tab.filterPills.map((p) => {
-          if (p.op === 'IS NULL' || p.op === 'IS NOT NULL') {
-            return `\`${p.col}\` ${p.op}`;
-          }
-          const escapedVal = p.val.replace(/'/g, "''");
-          if (p.op === 'LIKE' || p.op === 'NOT LIKE') {
-            return `\`${p.col}\` ${p.op} '%${escapedVal}%'`;
-          }
-          if (p.op === 'IN' || p.op === 'NOT IN') {
-            return `\`${p.col}\` ${p.op} (${p.val})`;
-          }
-          if (p.op === 'BETWEEN') {
-            return `\`${p.col}\` BETWEEN ${p.val}`;
-          }
-          // numeric check
-          const isNum = !isNaN(Number(p.val)) && p.val.trim() !== '';
-          return isNum ? `\`${p.col}\` ${p.op} ${p.val}` : `\`${p.col}\` ${p.op} '${escapedVal}'`;
-        });
-        query = `SELECT * FROM ${dbPrefix}\`${tab.tableName}\` WHERE ${whereClauses.join(' AND ')} LIMIT ${limit} OFFSET ${offset};`;
+      // Determine active filter clause (appliedFilter or compiled filterPills)
+      let filterClause = (tab.appliedFilter || '').trim();
+      if (!filterClause && tab.filterPills && tab.filterPills.length > 0) {
+        filterClause = compileFilterPills(tab.filterPills);
+      }
+
+      if (filterClause) {
+        let query = `SELECT * FROM ${dbPrefix}\`${tab.tableName}\` WHERE ${filterClause}`;
+        if (tab.sortCol) {
+          query += ` ORDER BY \`${tab.sortCol}\` ${tab.sortDir || 'ASC'}`;
+        }
+        query += ` LIMIT ${limit} OFFSET ${offset};`;
+
+        const res = await api.executeQuery(this.activeSessionId, query, false);
+        tab.activeResult = res;
+      } else if (tab.sortCol) {
+        let query = `SELECT * FROM ${dbPrefix}\`${tab.tableName}\` ORDER BY \`${tab.sortCol}\` ${tab.sortDir || 'ASC'} LIMIT ${limit} OFFSET ${offset};`;
         const res = await api.executeQuery(this.activeSessionId, query, false);
         tab.activeResult = res;
       } else {
-        const res = await api.getTableRows(this.activeSessionId, tab.tableName, limit, offset);
+        const res = await api.getTableRows(this.activeSessionId, tab.tableName, limit, offset, db);
+        if (res && res.duration_ms === undefined) {
+          res.duration_ms = Math.round(performance.now() - startTime);
+        }
+        if (res && res.row_count === undefined && res.rows) {
+          res.row_count = res.rows.length;
+        }
         tab.activeResult = res;
       }
     } catch (err: any) {
       tab.activeResult = {
         columns: [],
         rows: [],
-        duration_ms: 0,
+        duration_ms: Math.round(performance.now() - startTime),
         row_count: 0,
         error: err.message || 'Error loading table data',
       };
     } finally {
       tab.isExecuting = false;
+      this.tabs = [...this.tabs];
+      this.saveTabsState();
     }
   }
 
@@ -688,6 +906,7 @@ export class AppState {
         const res = await api.getTableDDL(this.activeSessionId, tableName);
         if (res && res.ddl) {
           newTab.sql = res.ddl;
+          this.saveTabsState();
         }
       } catch (err: any) {
         newTab.sql = `-- Error fetching DDL: ${err.message || err}`;
@@ -707,6 +926,7 @@ export class AppState {
         const res = await api.getRoutineDDL(this.activeSessionId, routineName, routineType);
         if (res && res.ddl) {
           newTab.sql = res.ddl;
+          this.saveTabsState();
         }
       } catch (err: any) {
         newTab.sql = `-- Error fetching routine definition: ${err.message || err}`;
@@ -721,6 +941,8 @@ export class AppState {
     newTab.isTableViewer = tab.isTableViewer;
     newTab.tableName = tab.tableName;
     newTab.tableMode = tab.tableMode;
+    newTab.database = tab.database;
+    this.saveTabsState();
   }
 
   closeTab(tabId: string) {
@@ -731,12 +953,14 @@ export class AppState {
       if (this.activeTabId === tabId) {
         this.activeTabId = this.tabs[Math.max(0, idx - 1)].id;
       }
+      this.saveTabsState();
     }
   }
 
   closeOtherTabs(tabId: string) {
     this.tabs = this.tabs.filter((t) => t.id === tabId);
     this.activeTabId = tabId;
+    this.saveTabsState();
   }
 
   // Execution
@@ -750,6 +974,7 @@ export class AppState {
     }
 
     tab.isExecuting = true;
+    this.tabs = [...this.tabs];
     const startTime = performance.now();
     try {
       const res = await api.executeQuery(this.activeSessionId, tab.sql, false);
@@ -805,6 +1030,7 @@ export class AppState {
       });
     } finally {
       tab.isExecuting = false;
+      this.tabs = [...this.tabs];
     }
   }
 
@@ -813,6 +1039,7 @@ export class AppState {
     if (!tab || !this.activeSessionId || !stmtSql.trim()) return;
 
     tab.isExecuting = true;
+    this.tabs = [...this.tabs];
     const startTime = performance.now();
     try {
       const res = await api.executeQuery(this.activeSessionId, stmtSql, false);
@@ -855,6 +1082,7 @@ export class AppState {
       };
     } finally {
       tab.isExecuting = false;
+      this.tabs = [...this.tabs];
     }
   }
 
@@ -883,6 +1111,7 @@ export class AppState {
       this.showToast(`Batch paging failed: ${err.message}`, 'error');
     } finally {
       tab.isExecuting = false;
+      this.tabs = [...this.tabs];
     }
   }
 
@@ -1067,6 +1296,7 @@ export class AppState {
       this.showToast(`Explain failed: ${err.message}`, 'error');
     } finally {
       tab.isExecuting = false;
+      this.tabs = [...this.tabs];
     }
   }
 
@@ -1162,33 +1392,114 @@ export class AppState {
     }
   }
 
-  // Filter Pills & Column Picker
-  addFilterPill(col: string, op: FilterPill['op'], val: string) {
+  // Filter Mode & Clause Management
+  setFilterMode(mode: 'pills' | 'raw') {
+    const tab = this.activeTab;
+    if (!tab) return;
+    tab.filterMode = mode;
+    this.tabs = [...this.tabs];
+    this.saveTabsState();
+  }
+
+  setFilterRaw(raw: string) {
+    const tab = this.activeTab;
+    if (!tab) return;
+    tab.filterRaw = raw;
+    this.tabs = [...this.tabs];
+  }
+
+  addFilterPill(col?: string, op: FilterPill['op'] = '=', val: string = '') {
     const tab = this.activeTab;
     if (!tab) return;
     if (!tab.filterPills) tab.filterPills = [];
-    tab.filterPills.push({ col, op, val });
-    if (tab.isTableViewer) {
-      this.loadTableData(tab);
+    const defaultCol =
+      col ||
+      (tab.activeResult?.columns?.[0]
+        ? typeof tab.activeResult.columns[0] === 'string'
+          ? tab.activeResult.columns[0]
+          : tab.activeResult.columns[0].name
+        : 'id');
+    tab.filterPills.push({ col: defaultCol, op, val });
+    tab.filterMode = 'pills';
+    if (val !== '' || op === 'IS NULL' || op === 'IS NOT NULL') {
+      tab.appliedFilter = compileFilterPills(tab.filterPills);
+      if (tab.isTableViewer) {
+        tab.currentPage = 1;
+        this.loadTableData(tab);
+      }
+    } else {
+      this.tabs = [...this.tabs];
     }
+    this.saveTabsState();
+  }
+
+  updateFilterPill(index: number, patch: Partial<FilterPill>) {
+    const tab = this.activeTab;
+    if (!tab || !tab.filterPills || !tab.filterPills[index]) return;
+    Object.assign(tab.filterPills[index], patch);
+    this.tabs = [...this.tabs];
   }
 
   removeFilterPill(index: number) {
     const tab = this.activeTab;
     if (!tab || !tab.filterPills) return;
     tab.filterPills.splice(index, 1);
+    tab.appliedFilter = compileFilterPills(tab.filterPills);
     if (tab.isTableViewer) {
+      tab.currentPage = 1;
       this.loadTableData(tab);
     }
+    this.saveTabsState();
   }
 
   clearFilterPills() {
+    this.clearTableFilter();
+  }
+
+  applyTableFilter() {
+    const tab = this.activeTab;
+    if (!tab || !tab.isTableViewer) return;
+    tab.currentPage = 1;
+    if (tab.filterMode === 'raw') {
+      let rawVal = (tab.filterRaw || '').trim();
+      rawVal = rawVal.replace(/^where\s+/i, '').trim();
+      tab.filterRaw = rawVal;
+      tab.appliedFilter = rawVal;
+    } else {
+      tab.appliedFilter = compileFilterPills(tab.filterPills || []);
+    }
+    this.loadTableData(tab);
+    this.saveTabsState();
+  }
+
+  clearTableFilter() {
     const tab = this.activeTab;
     if (!tab) return;
+    tab.appliedFilter = '';
+    tab.filterRaw = '';
     tab.filterPills = [];
+    tab.currentPage = 1;
     if (tab.isTableViewer) {
       this.loadTableData(tab);
     }
+    this.saveTabsState();
+  }
+
+  handoffTableQueryToEditor() {
+    const tab = this.activeTab;
+    if (!tab || !tab.isTableViewer || !tab.tableName) return;
+    const targetTable = '`' + tab.tableName.replace(/`/g, '``') + '`';
+    let sql = `SELECT * FROM ${targetTable}`;
+    const filter = (tab.appliedFilter || '').trim();
+    if (filter) {
+      sql += `\nWHERE ${filter}`;
+    }
+    if (tab.sortCol) {
+      const escSortCol = '`' + tab.sortCol.replace(/`/g, '``') + '`';
+      sql += `\nORDER BY ${escSortCol} ${tab.sortDir || 'ASC'}`;
+    }
+    sql += `\nLIMIT 50;`;
+    this.addTab(`query_${tab.tableName}.sql`, sql);
   }
 
   toggleColumnHidden(colName: string) {

@@ -16,11 +16,14 @@
   let isStreaming = $state(true);
   let autoScroll = $state(true);
   let containerRef = $state<HTMLDivElement | null>(null);
-  let eventSource = $state<EventSource | null>(null);
+  // ponytail: eventSource must NOT be a $state variable because reading/modifying it inside $effect causes an infinite reconnection loop
+  let eventSource: EventSource | null = null;
+  const seenIds = new Set<string>();
 
   function startLogStream() {
     if (eventSource) {
       eventSource.close();
+      eventSource = null;
     }
 
     try {
@@ -29,11 +32,18 @@
         if (!isStreaming) return;
         try {
           const data = JSON.parse(event.data);
+          const rawId = String(data.id || (Date.now() + Math.random()));
+          if (seenIds.has(rawId)) return;
+          seenIds.add(rawId);
+          if (seenIds.size > 2000) {
+            const first = seenIds.values().next().value;
+            if (first !== undefined) seenIds.delete(first);
+          }
           const entry: LogEntry = {
-            id: String(Date.now()) + Math.random(),
+            id: rawId,
             timestamp: data.timestamp ? new Date(data.timestamp) : new Date(),
-            level: data.level?.toUpperCase() || 'INFO',
-            source: data.source || 'SYSTEM',
+            level: (data.level?.toUpperCase() as any) || 'INFO',
+            source: data.module || data.source || 'SYSTEM',
             message: data.message || event.data,
           };
           logs = [...logs.slice(-500), entry]; // Keep last 500 logs
@@ -50,7 +60,7 @@
       };
 
       eventSource.onerror = () => {
-        // Fallback retry
+        // Fallback retry handled natively by browser EventSource
       };
     } catch (e) {}
   }

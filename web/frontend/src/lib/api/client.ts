@@ -108,8 +108,9 @@ class ApiClient {
     });
   }
 
-  async getTableDDL(connId: string, tableName: string): Promise<{ ddl: string }> {
-    return this.request(`/session/${connId}/ddl/${encodeURIComponent(tableName)}`);
+  async getTableDDL(connId: string, tableName: string, db?: string): Promise<{ ddl: string }> {
+    const qs = db ? `?db=${encodeURIComponent(db)}` : '';
+    return this.request(`/session/${connId}/ddl/${encodeURIComponent(tableName)}${qs}`);
   }
 
   async getRoutineDDL(connId: string, routineName: string, type = 'PROCEDURE'): Promise<{ ddl: string }> {
@@ -120,8 +121,10 @@ class ApiClient {
     return this.request(`/session/${sessionId}/fast-catalog`);
   }
 
-  async getTableRows(sessionId: string, tableName: string, limit = 100, offset = 0): Promise<QueryExecutionResult> {
-    return this.request(`/session/${sessionId}/table/${encodeURIComponent(tableName)}/rows?limit=${limit}&offset=${offset}`);
+  async getTableRows(sessionId: string, tableName: string, limit = 50, offset = 0, db?: string): Promise<QueryExecutionResult> {
+    let url = `/session/${sessionId}/table/${encodeURIComponent(tableName)}/rows?limit=${limit}&offset=${offset}`;
+    if (db) url += `&db=${encodeURIComponent(db)}`;
+    return this.request(url);
   }
 
   async executeQuery(

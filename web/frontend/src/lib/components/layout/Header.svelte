@@ -9,6 +9,12 @@
   let showMasterPin = $state(false);
   let copiedPin = $state(false);
   let connSearchQuery = $state('');
+  let pinAutoMaskTimer: any = null;
+
+  let masterPin = $derived(appState.authStatus?.master_password || 'fox-0304');
+  let isLanAvailable = $derived(
+    Boolean(appState.authStatus?.lan_enabled || appState.authStatus?.is_remote || appState.authStatus?.master_password)
+  );
 
   let filteredConnections = $derived.by(() => {
     const q = connSearchQuery.toLowerCase().trim();
@@ -75,9 +81,20 @@
     }
   }
 
+  function toggleMasterPin() {
+    showMasterPin = !showMasterPin;
+    if (pinAutoMaskTimer) clearTimeout(pinAutoMaskTimer);
+    if (showMasterPin) {
+      pinAutoMaskTimer = setTimeout(() => {
+        showMasterPin = false;
+      }, 10000);
+    }
+  }
+
   function copyMasterPin() {
-    navigator.clipboard.writeText('fox-0304');
+    navigator.clipboard.writeText(masterPin);
     copiedPin = true;
+    appState.showToast('Master PIN copied to clipboard!', 'info');
     setTimeout(() => (copiedPin = false), 2000);
   }
 </script>
@@ -519,12 +536,21 @@
 
     <!-- Operational Notes Drawer Button -->
     <button
+      id="notes-inbox-button"
       onclick={() => (appState.isNotesDrawerOpen = !appState.isNotesDrawerOpen)}
-      class="h-7 px-2 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 hover:text-white border border-[#334155] transition flex items-center space-x-1 shadow-sm {appState.isNotesDrawerOpen ? 'bg-amber-950/40 border-amber-600 text-amber-300' : ''}"
+      class="h-7 px-2 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 hover:text-white border border-[#334155] transition flex items-center space-x-1 shadow-sm relative {appState.isNotesDrawerOpen ? 'bg-amber-950/40 border-amber-600 text-amber-300' : ''}"
       title="Operational Notes"
     >
       <Icon name="file-text" class="w-3.5 h-3.5 text-amber-400" />
       <span class="hidden xl:inline text-xs">Notes</span>
+      {#if appState.dueNotesCount > 0}
+        <span
+          id="notes-inbox-badge"
+          class="ml-1 px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-bold text-[9px] leading-tight animate-pulse"
+        >
+          {appState.dueNotesCount}
+        </span>
+      {/if}
     </button>
 
     <!-- AI Copilot Drawer Button -->
@@ -538,29 +564,31 @@
     </button>
 
     <!-- Master PIN Pill with Copy & Reveal -->
-    <div class="h-7 bg-slate-900 text-sky-400 rounded border border-sky-900/60 font-mono transition inline-flex items-center text-xs overflow-hidden select-none shadow-sm">
-      <button
-        onclick={copyMasterPin}
-        class="h-full px-2 hover:bg-slate-800 text-sky-400 hover:text-sky-300 transition flex items-center space-x-1.5"
-        title="Copy Master PIN for LAN access"
-      >
-        <Icon name="key" class="w-3 h-3 text-sky-400" />
-        <span class="text-[10px] text-slate-400">PIN:</span>
-        <span class="font-bold text-white tracking-widest text-[11px]">
-          {showMasterPin ? 'fox-0304' : '••••••••'}
-        </span>
-        {#if copiedPin}
-          <span class="text-[9px] text-emerald-400 font-sans font-semibold">Copied!</span>
-        {/if}
-      </button>
-      <button
-        onclick={() => (showMasterPin = !showMasterPin)}
-        class="h-full px-1.5 text-slate-400 hover:text-white hover:bg-slate-800 border-l border-sky-900/60 transition flex items-center justify-center"
-        title="Toggle PIN Visibility"
-      >
-        <Icon name={showMasterPin ? 'eye-off' : 'eye'} class="w-3 h-3" />
-      </button>
-    </div>
+    {#if isLanAvailable}
+      <div class="h-7 bg-slate-900 text-sky-400 rounded border border-sky-900/60 font-mono transition inline-flex items-center text-xs overflow-hidden select-none shadow-sm">
+        <button
+          onclick={copyMasterPin}
+          class="h-full px-2 hover:bg-slate-800 text-sky-400 hover:text-sky-300 transition flex items-center space-x-1.5"
+          title="Copy Master PIN for LAN access"
+        >
+          <Icon name="key" class="w-3 h-3 text-sky-400" />
+          <span class="text-[10px] text-slate-400">PIN:</span>
+          <span class="font-bold text-white tracking-widest text-[11px]">
+            {showMasterPin ? masterPin : '••••••••'}
+          </span>
+          {#if copiedPin}
+            <span class="text-[9px] text-emerald-400 font-sans font-semibold">Copied!</span>
+          {/if}
+        </button>
+        <button
+          onclick={toggleMasterPin}
+          class="h-full px-1.5 text-slate-400 hover:text-white hover:bg-slate-800 border-l border-sky-900/60 transition flex items-center justify-center"
+          title="Toggle PIN Visibility (auto-hides in 10s)"
+        >
+          <Icon name={showMasterPin ? 'eye-off' : 'eye'} class="w-3 h-3" />
+        </button>
+      </div>
+    {/if}
 
     {#if appState.isProduction}
       <div class="h-7 px-2.5 rounded bg-rose-950/40 border border-rose-500/50 text-rose-300 flex items-center space-x-1.5 shadow-sm">

@@ -26,7 +26,7 @@
 </script>
 
 {#if appState.isRemoteLocked}
-  <div class="fixed inset-0 z-50 bg-[#020617]/95 backdrop-blur-md flex items-center justify-center p-4 select-none">
+  <div class="fixed inset-0 z-[110] bg-[#020617]/95 backdrop-blur-md flex items-center justify-center p-4 select-none">
     <div class="bg-[#0f172a] border-2 border-sky-400/80 w-full max-w-sm rounded-2xl shadow-[0_0_35px_rgba(56,189,248,0.25)] p-6 space-y-4 text-center animate-in fade-in zoom-in-95 duration-200">
       <!-- Icons -->
       <div class="flex justify-center items-center space-x-2 py-1">
@@ -73,7 +73,7 @@
         </button>
 
         <div class="text-[11px] text-slate-500 pt-1">
-          Default Master PIN: <span class="font-mono text-sky-400 font-semibold select-text">fox-0304</span>
+          Default Master PIN: <span class="font-mono text-sky-400 font-semibold select-text">{appState.authStatus?.master_password || 'fox-0304'}</span>
         </div>
       </form>
     </div>

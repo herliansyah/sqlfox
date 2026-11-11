@@ -23,9 +23,14 @@
   let aiResponse = $state('');
   let isAiLoading = $state(false);
 
+  let saveDebounceTimer: any = null;
   function handleSqlChange(newSql: string) {
     if (currentTab) {
       currentTab.sql = newSql;
+      if (saveDebounceTimer) clearTimeout(saveDebounceTimer);
+      saveDebounceTimer = setTimeout(() => {
+        appState.saveTabsState();
+      }, 500);
     }
   }
 
@@ -301,6 +306,9 @@
           doc: currentTab.sql,
           dialect: appState.activeConnection?.driver,
           schema: editorSchema,
+          tables: appState.catalog?.tables,
+          databases: appState.catalog?.databases,
+          snippets: appState.snippets,
           onExecute: handleExecute,
           onExecuteAtCursor: (stmt) => appState.executeStatementAtCursor(stmt),
           onFormat: handleFormat,

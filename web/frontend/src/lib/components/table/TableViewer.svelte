@@ -29,6 +29,12 @@
     }
   }
 
+  $effect(() => {
+    if (currentTab?.isTableViewer && activeMode === 'data' && !currentTab.activeResult && !currentTab.isExecuting) {
+      appState.loadTableData(currentTab);
+    }
+  });
+
   const subTabs: Array<{ id: TableMode; label: string; icon: string }> = [
     { id: 'data', label: 'Data Grid', icon: 'table' },
     { id: 'structure', label: 'Structure', icon: 'columns' },

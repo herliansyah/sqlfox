@@ -4,7 +4,8 @@ import assert from 'assert';
 
 console.log("--- Starting Grid Ergonomics Suite Test ---");
 
-const html = fs.readFileSync('web/dist/index.html', 'utf8');
+const targetFile = fs.existsSync('web/dist/index.legacy.html') ? 'web/dist/index.legacy.html' : 'web/dist/index.html';
+const html = fs.readFileSync(targetFile, 'utf8');
 
 // 1. Verify HTML DOM elements exist
 assert(html.includes('id="grid-ctx-filter-section"'), 'grid-ctx-filter-section HTML must exist in context menu');

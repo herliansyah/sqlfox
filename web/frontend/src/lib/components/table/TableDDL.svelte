@@ -1,6 +1,7 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
+  import { codemirror } from '../../actions/codemirror';
   import Icon from '../common/Icon.svelte';
 
   interface Props {
@@ -24,7 +25,8 @@
     isLoading = true;
     error = null;
     try {
-      const res = await api.getTableDDL(appState.activeSessionId!, tableName);
+      const db = appState.activeTab?.database || appState.currentDatabase || undefined;
+      const res = await api.getTableDDL(appState.activeSessionId!, tableName, db);
       ddl = res.ddl || '';
     } catch (err: any) {
       error = err.message || 'Failed to fetch table DDL';
@@ -66,7 +68,13 @@
         {error}
       </div>
     {:else}
-      <pre class="whitespace-pre-wrap text-sky-200 leading-relaxed">{ddl}</pre>
+      <div
+        class="h-full w-full overflow-hidden"
+        use:codemirror={{
+          doc: ddl,
+          dialect: appState.activeConnection?.driver,
+        }}
+      ></div>
     {/if}
   </div>
 </div>

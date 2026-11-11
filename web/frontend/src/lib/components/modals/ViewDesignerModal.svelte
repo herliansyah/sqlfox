@@ -26,14 +26,19 @@
   });
 
   let generatedDDL = $derived.by(() => {
-    const isSQLite = appState.activeConnection?.driver === 'sqlite';
-    const quote = isSQLite ? '"' : '`';
+    const driver = appState.activeConnection?.driver;
+    const isSQLite = driver === 'sqlite';
+    const isPostgres = driver === 'postgres';
+    const quote = isSQLite || isPostgres ? '"' : '`';
     const cleanName = viewName.trim() || 'v_sample_view';
     const cleanQuery = selectQuery.trim().replace(/;+$/, '');
 
     let sql = '';
     if (isSQLite) {
       sql = `CREATE VIEW IF NOT EXISTS ${quote}${cleanName}${quote} AS\n${cleanQuery};`;
+    } else if (isPostgres) {
+      let checkPart = checkOption !== 'NONE' ? `\nWITH ${checkOption} CHECK OPTION` : '';
+      sql = `CREATE OR REPLACE VIEW ${quote}${cleanName}${quote} AS\n${cleanQuery}${checkPart};`;
     } else {
       let algoPart = algorithm !== 'UNDEFINED' ? ` ALGORITHM = ${algorithm}` : '';
       let checkPart = checkOption !== 'NONE' ? `\nWITH ${checkOption} CHECK OPTION` : '';

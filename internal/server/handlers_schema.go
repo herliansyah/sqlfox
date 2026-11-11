@@ -220,6 +220,9 @@ func (s *Server) handleGetTableDDL(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	targetDB := r.URL.Query().Get("db")
+	if targetDB == "" && sess.DatabaseName != "" {
+		targetDB = sess.DatabaseName
+	}
 	if targetDB != "" {
 		if err := sess.Session.SelectDatabase(ctx, targetDB); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -364,6 +367,9 @@ func (s *Server) handlePreflightDDL(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	targetDB := r.URL.Query().Get("db")
+	if targetDB == "" && sess.DatabaseName != "" {
+		targetDB = sess.DatabaseName
+	}
 	if targetDB != "" {
 		if err := sess.Session.SelectDatabase(ctx, targetDB); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -466,6 +472,9 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	targetDB := r.URL.Query().Get("db")
+	if targetDB == "" && sess.DatabaseName != "" {
+		targetDB = sess.DatabaseName
+	}
 	if targetDB != "" {
 		if err := sess.Session.SelectDatabase(ctx, targetDB); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())

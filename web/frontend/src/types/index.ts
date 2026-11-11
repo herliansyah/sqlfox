@@ -236,6 +236,7 @@ export interface EditorTab {
   id: string;
   title: string;
   sql: string;
+  database?: string;
   isTableViewer?: boolean;
   tableName?: string;
   tableMode?: TableMode;
@@ -246,6 +247,9 @@ export interface EditorTab {
   activeResult?: QueryExecutionResult | null;
   isExecuting?: boolean;
   filterText?: string;
+  filterMode?: 'pills' | 'raw';
+  filterRaw?: string;
+  appliedFilter?: string;
   filterPills?: FilterPill[];
   hiddenColumns?: string[];
   pageSize?: number;

@@ -12,8 +12,8 @@
   let containerHeight = $state(500);
 
   let currentTab = $derived(appState.activeTab);
-  let result = $derived(currentTab?.activeResult);
-  let isExecuting = $derived(currentTab?.isExecuting);
+  let result = $derived(appState.activeTab?.activeResult);
+  let isExecuting = $derived(Boolean(appState.activeTab?.isExecuting));
 
   // Sorting
   let sortCol = $state<string | null>(null);
@@ -71,6 +71,24 @@
   let visibleColumns = $derived.by(() => {
     if (!result?.columns) return [];
     return result.columns.filter((c) => !hiddenCols.includes(getColName(c)));
+  });
+
+  // ponytail: Precomputed Map lookups replace O(N) array scans during virtual window cell rendering
+  let colIndexMap = $derived.by(() => {
+    const map = new Map<string, number>();
+    allColumns.forEach((c, idx) => map.set(c, idx));
+    return map;
+  });
+
+  let fkMap = $derived.by(() => {
+    const map = new Map<string, any>();
+    if (appState.catalog?.foreign_keys) {
+      for (const fk of appState.catalog.foreign_keys) {
+        const col = fk.column || fk.column_name;
+        if (col) map.set(col, fk);
+      }
+    }
+    return map;
   });
 
   let processedRows = $derived.by(() => {
@@ -636,8 +654,198 @@
     </div>
   </div>
 
-  <!-- Filter Pills Bar (if filters active) -->
-  {#if currentTab?.filterPills && currentTab.filterPills.length > 0}
+  <!-- TablePlus-style Filter Bar (Table Viewer) or Filter Pills Bar -->
+  {#if currentTab?.isTableViewer}
+    <div class="min-h-9 bg-[#0b0f19] border-b border-[#1e293b] px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs select-none shrink-0">
+      <div class="flex flex-wrap items-center gap-2 flex-1 min-w-0">
+        <!-- Mode Toggle: Pills vs WHERE -->
+        <div class="inline-flex rounded border border-[#334155] bg-[#090d16] p-0.5 select-none" role="group">
+          <button
+            type="button"
+            onclick={() => appState.setFilterMode('pills')}
+            class="px-2 py-0.5 text-[11px] font-semibold rounded transition {currentTab.filterMode !== 'raw' ? 'bg-sky-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-white'}"
+            title="Filter by column pills"
+          >
+            Pills
+          </button>
+          <button
+            type="button"
+            onclick={() => appState.setFilterMode('raw')}
+            class="px-2 py-0.5 text-[11px] font-semibold rounded transition {currentTab.filterMode === 'raw' ? 'bg-sky-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-white'}"
+            title="Freeform SQL WHERE expression"
+          >
+            WHERE
+          </button>
+        </div>
+
+        {#if currentTab.filterMode === 'raw'}
+          <!-- Freeform SQL WHERE Expression Input -->
+          <div class="flex-1 flex items-center space-x-1.5 min-w-[260px]">
+            <span class="px-1.5 py-0.5 bg-sky-950 text-sky-400 border border-sky-800 rounded font-mono text-[10px] font-bold tracking-wider select-none shrink-0">
+              WHERE
+            </span>
+            <div class="relative flex-1 flex items-center">
+              <input
+                type="text"
+                value={currentTab.filterRaw || ''}
+                oninput={(e) => appState.setFilterRaw((e.target as HTMLInputElement).value)}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter') appState.applyTableFilter();
+                  if (e.key === 'Escape') {
+                    appState.setFilterRaw('');
+                    (e.target as HTMLInputElement).blur();
+                  }
+                }}
+                placeholder="e.g. status = 'active' AND (views > 100 OR is_featured = 1)"
+                class="w-full bg-[#090d16] text-slate-100 placeholder-slate-500 border border-[#334155] focus:border-sky-400 pl-2.5 pr-7 py-1 rounded outline-none font-mono text-xs ring-1 ring-transparent focus:ring-sky-500/30 transition"
+              />
+              {#if currentTab.filterRaw}
+                <button
+                  type="button"
+                  onclick={() => appState.setFilterRaw('')}
+                  class="absolute right-2 text-slate-500 hover:text-slate-200 text-xs px-1 rounded transition"
+                  title="Clear input (Esc)"
+                >
+                  <Icon name="x" class="w-3 h-3" />
+                </button>
+              {/if}
+            </div>
+            <button
+              type="button"
+              onclick={() => appState.applyTableFilter()}
+              class="px-2.5 py-1 rounded bg-sky-600 hover:bg-sky-500 text-white font-semibold text-[11px] transition shrink-0"
+            >
+              Apply
+            </button>
+          </div>
+        {:else}
+          <!-- Pills Mode: List of condition pills + '+ AND' button -->
+          <div class="flex flex-wrap items-center gap-1.5">
+            {#each currentTab.filterPills || [] as pill, idx}
+              {@const isUnary = pill.op === 'IS NULL' || pill.op === 'IS NOT NULL'}
+              <div class="inline-flex items-center space-x-1 bg-[#090d16] border border-sky-800/80 rounded px-1.5 py-0.5 text-[11px] font-mono shadow-sm">
+                <!-- Column Select -->
+                <select
+                  value={pill.col}
+                  onchange={(e) => {
+                    appState.updateFilterPill(idx, { col: (e.target as HTMLSelectElement).value });
+                  }}
+                  class="bg-transparent text-sky-300 font-bold outline-none cursor-pointer text-[11px] py-0.5 border-none"
+                >
+                  {#each allColumns as col}
+                    <option value={col} class="bg-[#0f172a] text-slate-200">{col}</option>
+                  {/each}
+                </select>
+
+                <!-- Operator Select -->
+                <select
+                  value={pill.op}
+                  onchange={(e) => {
+                    const newOp = (e.target as HTMLSelectElement).value as FilterPill['op'];
+                    appState.updateFilterPill(idx, { op: newOp });
+                  }}
+                  class="bg-transparent text-sky-400 font-semibold outline-none cursor-pointer text-[11px] py-0.5 border-none"
+                >
+                  <option value="=" class="bg-[#0f172a] text-slate-200">=</option>
+                  <option value="!=" class="bg-[#0f172a] text-slate-200">!=</option>
+                  <option value="LIKE" class="bg-[#0f172a] text-slate-200">LIKE</option>
+                  <option value="NOT LIKE" class="bg-[#0f172a] text-slate-200">NOT LIKE</option>
+                  <option value=">" class="bg-[#0f172a] text-slate-200">&gt;</option>
+                  <option value="<" class="bg-[#0f172a] text-slate-200">&lt;</option>
+                  <option value=">=" class="bg-[#0f172a] text-slate-200">&gt;=</option>
+                  <option value="<=" class="bg-[#0f172a] text-slate-200">&lt;=</option>
+                  <option value="IN" class="bg-[#0f172a] text-slate-200">IN</option>
+                  <option value="NOT IN" class="bg-[#0f172a] text-slate-200">NOT IN</option>
+                  <option value="IS NULL" class="bg-[#0f172a] text-slate-200">IS NULL</option>
+                  <option value="IS NOT NULL" class="bg-[#0f172a] text-slate-200">IS NOT NULL</option>
+                </select>
+
+                <!-- Value Input (hidden if IS NULL / IS NOT NULL) -->
+                {#if !isUnary}
+                  <input
+                    type="text"
+                    value={pill.val}
+                    oninput={(e) => {
+                      appState.updateFilterPill(idx, { val: (e.target as HTMLInputElement).value });
+                    }}
+                    onkeydown={(e) => {
+                      if (e.key === 'Enter') appState.applyTableFilter();
+                    }}
+                    placeholder={pill.op === 'LIKE' || pill.op === 'NOT LIKE' ? 'substring or %' : (pill.op === 'IN' || pill.op === 'NOT IN' ? '1, 2, 3' : 'val')}
+                    class="bg-transparent text-slate-100 font-mono text-[11px] outline-none px-1 py-0.5 w-20 focus:w-36 transition-all border-b border-transparent focus:border-sky-400"
+                  />
+                {/if}
+
+                <!-- Remove Pill Button -->
+                <button
+                  type="button"
+                  onclick={() => appState.removeFilterPill(idx)}
+                  class="text-slate-500 hover:text-rose-400 p-0.5 transition"
+                  title="Remove condition"
+                >
+                  <Icon name="x" class="w-3 h-3" />
+                </button>
+              </div>
+            {/each}
+
+            <!-- + AND Button -->
+            <button
+              type="button"
+              onclick={() => appState.addFilterPill()}
+              class="text-xs text-slate-400 hover:text-sky-300 hover:bg-slate-800 px-2 py-0.5 rounded border border-dashed border-slate-700 transition flex items-center space-x-1"
+              title="Add condition (+ AND)"
+            >
+              <Icon name="plus" class="w-3 h-3 text-sky-400" />
+              <span>AND</span>
+            </button>
+
+            {#if currentTab.filterPills && currentTab.filterPills.length > 0}
+              <button
+                type="button"
+                onclick={() => appState.applyTableFilter()}
+                class="px-2 py-0.5 rounded bg-sky-600 hover:bg-sky-500 text-white font-semibold text-[11px] transition"
+              >
+                Apply
+              </button>
+            {/if}
+          </div>
+        {/if}
+
+        <!-- Active Filter Indicator Badge -->
+        {#if currentTab.appliedFilter}
+          <span class="px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-950 text-emerald-300 border border-emerald-700 flex items-center space-x-1" title="Active filter applied">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+            <span>Filtered</span>
+          </span>
+        {/if}
+      </div>
+
+      <!-- Right side: Clear Filter & Open in SQL Tab -->
+      <div class="flex items-center space-x-2 shrink-0">
+        {#if currentTab.appliedFilter || (currentTab.filterPills && currentTab.filterPills.length > 0) || currentTab.filterRaw}
+          <button
+            type="button"
+            onclick={() => appState.clearTableFilter()}
+            class="text-[11px] text-slate-400 hover:text-rose-400 transition underline"
+            title="Clear all filters"
+          >
+            Clear Filter
+          </button>
+        {/if}
+
+        <button
+          type="button"
+          onclick={() => appState.handoffTableQueryToEditor()}
+          class="h-6 px-2 rounded bg-[#1e293b] hover:bg-slate-700 text-sky-400 hover:text-sky-300 border border-[#334155] flex items-center space-x-1 text-[11px] transition font-mono"
+          title="Open filtered query in full SQL Editor"
+        >
+          <Icon name="file-code" class="w-3 h-3" />
+          <span>SQL</span>
+        </button>
+      </div>
+    </div>
+  {:else if currentTab?.filterPills && currentTab.filterPills.length > 0}
+    <!-- Query Tab Filter Pills Bar (if quick filters active from context menu) -->
     <div class="min-h-8 bg-[#090d16] border-b border-[#1e293b] px-3 py-1 flex items-center justify-between gap-2 text-xs">
       <div class="flex flex-wrap items-center gap-1.5">
         <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider flex items-center space-x-1">
@@ -812,12 +1020,12 @@
                 <!-- Cells -->
                 {#each visibleColumns as col}
                   {@const colName = getColName(col)}
-                  {@const cIdx = allColumns.indexOf(colName)}
-                  {@const cellVal = rowItem.data[cIdx]}
+                  {@const cIdx = colIndexMap.get(colName) ?? -1}
+                  {@const cellVal = cIdx >= 0 ? rowItem.data[cIdx] : undefined}
                   {@const formatted = formatCellValue(cellVal)}
-                  {@const isStaged = currentTab?.tableName ? isCellStaged(currentTab.tableName, rowItem.origIdx, cIdx) : false}
+                  {@const isStaged = currentTab?.tableName && cIdx >= 0 ? isCellStaged(currentTab.tableName, rowItem.origIdx, cIdx) : false}
                   {@const isEditingThis = editingCell && editingCell.rIdx === rowItem.origIdx && editingCell.cIdx === cIdx}
-                  {@const fk = getFkInfo(colName)}
+                  {@const fk = fkMap.get(colName)}
 
                   <td
                     onclick={() => (selectedCell = { rIdx: rowItem.origIdx, cIdx })}
@@ -919,7 +1127,7 @@
         <div class="flex items-center space-x-2 text-[11px]">
           <span class="text-slate-500">Page Size:</span>
           <select
-            value={currentTab.pageSize || 100}
+            value={currentTab.pageSize || 50}
             onchange={(e) => {
               if (currentTab) {
                 currentTab.pageSize = Number((e.currentTarget as HTMLSelectElement).value);
@@ -955,7 +1163,7 @@
                 appState.loadTableData(currentTab);
               }
             }}
-            disabled={totalRows < (currentTab?.pageSize || 100)}
+            disabled={totalRows < (currentTab?.pageSize || 50)}
             class="px-2 py-0.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-30 border border-[#334155] text-slate-200"
           >
             Next
