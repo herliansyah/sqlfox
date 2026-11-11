@@ -6,6 +6,9 @@
   let containerWidth = $state(0);
   let showOverflowDropdown = $state(false);
   let overflowSearchQuery = $state('');
+  let overflowBtnRef = $state<HTMLButtonElement | null>(null);
+  let dropdownCoords = $state<{ top: number; left: number }>({ top: 40, left: 0 });
+
   let tabContextMenu = $state<{
     open: boolean;
     x: number;
@@ -88,6 +91,28 @@
     }
   });
 
+  function updateDropdownCoords() {
+    if (!overflowBtnRef) return;
+    const rect = overflowBtnRef.getBoundingClientRect();
+    const dropdownWidth = 288; // w-72 = 18rem = 288px
+    const left = Math.max(10, Math.min(rect.right - dropdownWidth, window.innerWidth - dropdownWidth - 10));
+    dropdownCoords = {
+      top: rect.bottom + 4,
+      left,
+    };
+  }
+
+  function toggleOverflowDropdown(e: MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!showOverflowDropdown) {
+      updateDropdownCoords();
+      showOverflowDropdown = true;
+    } else {
+      showOverflowDropdown = false;
+    }
+  }
+
   function selectOverflowTab(tabId: string) {
     appState.activeTabId = tabId;
     showOverflowDropdown = false;
@@ -127,6 +152,7 @@
 <svelte:window
   onclick={() => {
     closeTabMenu();
+    showOverflowDropdown = false;
   }}
   onkeydown={(e) => {
     if (e.key === 'Escape') {
@@ -134,12 +160,17 @@
       closeTabMenu();
     }
   }}
+  onresize={() => {
+    if (showOverflowDropdown) {
+      updateDropdownCoords();
+    }
+  }}
 />
 
 <div
   bind:clientWidth={containerWidth}
   id="tabs-bar"
-  class="h-9 bg-[#0b0f19] border-b border-[#334155] flex items-center px-2 select-none justify-between overflow-hidden relative"
+  class="h-9 bg-[#0b0f19] border-b border-[#334155] flex items-center px-2 select-none justify-between relative"
 >
   <!-- Visible Tabs Strip (fits strictly within available screen width) -->
   <div id="tabs-container" class="flex items-center min-w-0 flex-1 overflow-hidden gap-1">
@@ -212,117 +243,15 @@
   <div id="tab-overflow-wrapper" class="relative flex items-center pl-1.5 shrink-0 z-20 {overflowTabs.length === 0 ? 'hidden' : ''}">
     <button
       id="tab-overflow-btn"
+      bind:this={overflowBtnRef}
       type="button"
-      onclick={() => (showOverflowDropdown = !showOverflowDropdown)}
-      class="h-6 px-2 rounded bg-slate-800/80 hover:bg-slate-700 text-sky-400 hover:text-white border border-slate-700 flex items-center space-x-1.5 text-xs font-mono transition shadow-sm"
+      onclick={toggleOverflowDropdown}
+      class="h-6 px-2 rounded bg-slate-800/80 hover:bg-slate-700 text-sky-400 hover:text-white border border-slate-700 flex items-center space-x-1.5 text-xs font-mono transition shadow-sm cursor-pointer"
       title="More Tabs ({overflowTabs.length} hidden)"
     >
       <span class="font-bold text-sm leading-none">»</span>
       <span id="tab-overflow-count" class="font-bold text-[11px] text-sky-300">{overflowTabs.length}</span>
     </button>
-
-    {#if showOverflowDropdown}
-      <button
-        tabindex="-1"
-        aria-label="Close"
-        class="fixed inset-0 z-40 bg-transparent cursor-default"
-        onclick={() => (showOverflowDropdown = false)}
-      ></button>
-
-      <div
-        id="tab-overflow-dropdown"
-        class="absolute right-0 top-8 mt-1 w-72 bg-[#0f172a] border border-[#334155] rounded-lg shadow-2xl z-50 divide-y divide-slate-800 text-xs overflow-hidden animate-in fade-in zoom-in-95 duration-100"
-      >
-        <!-- Header -->
-        <div class="px-3 py-2 bg-slate-900/90 flex items-center justify-between">
-          <div class="flex items-center space-x-1.5">
-            <span class="font-bold text-[11px] text-slate-300 uppercase tracking-wider">Hidden Tabs</span>
-            <span class="px-1.5 py-0.5 rounded-full bg-sky-500/20 text-sky-400 font-mono text-[10px] font-semibold">
-              {overflowTabs.length}
-            </span>
-          </div>
-          <span class="text-[10px] text-slate-500">
-            Total {appState.tabs.length} tabs
-          </span>
-        </div>
-
-        <!-- Search input if > 3 overflow tabs -->
-        {#if overflowTabs.length > 3}
-          <div class="p-1.5 bg-[#0b0f19]">
-            <div class="relative flex items-center">
-              <Icon name="search" class="w-3.5 h-3.5 text-slate-500 absolute left-2 pointer-events-none" />
-              <input
-                type="text"
-                bind:value={overflowSearchQuery}
-                placeholder="Filter hidden tabs..."
-                class="w-full bg-[#1e293b]/70 border border-slate-700/80 rounded pl-7 pr-2 py-1 text-[11px] text-slate-200 placeholder-slate-500 focus:outline-none focus:border-sky-500/70"
-              />
-            </div>
-          </div>
-        {/if}
-
-        <!-- Dropdown Tab Items -->
-        <div class="max-h-72 overflow-y-auto divide-y divide-slate-800/40 py-0.5">
-          {#if filteredOverflowTabs.length === 0}
-            <div class="px-3 py-4 text-center text-slate-500 text-xs italic">
-              No matching tabs found
-            </div>
-          {:else}
-            {#each filteredOverflowTabs as tab (tab.id)}
-              <div
-                class="flex items-center justify-between hover:bg-slate-800/80 px-2.5 py-1.5 transition-colors group cursor-pointer"
-                onclick={() => selectOverflowTab(tab.id)}
-                role="button"
-                tabindex="0"
-                onkeydown={(e) => e.key === 'Enter' && selectOverflowTab(tab.id)}
-              >
-                <!-- Tab Icon & Title -->
-                <div class="flex items-center space-x-2 min-w-0 flex-1 pr-2">
-                  <span class="flex items-center shrink-0">
-                    {#if tab.isExecuting}
-                      <Icon name="refresh-cw" class="w-3.5 h-3.5 animate-spin text-sky-400" />
-                    {:else if tab.isProcesslist}
-                      <Icon name="cpu" class="w-3.5 h-3.5 text-sky-400" />
-                    {:else if tab.isErdCanvas}
-                      <Icon name="layers" class="w-3.5 h-3.5 text-indigo-400" />
-                    {:else if tab.isTableViewer}
-                      <Icon name="table" class="w-3.5 h-3.5 text-emerald-400" />
-                    {:else if tab.title.endsWith('.ddl.sql')}
-                      <Icon name="file-code" class="w-3.5 h-3.5 text-sky-400" />
-                    {:else}
-                      <Icon name="zap" class="w-3.5 h-3.5 text-amber-400" />
-                    {/if}
-                  </span>
-
-                  <span class="truncate font-mono text-[11px] text-slate-300 group-hover:text-white" title={tab.title}>
-                    {tab.title}
-                  </span>
-
-                  {#if tab.database}
-                    <span class="shrink-0 px-1 py-0.2 rounded text-[9px] font-mono bg-slate-800 text-amber-400/80 border border-slate-700/60" title="Target Database">
-                      {tab.database}
-                    </span>
-                  {/if}
-                </div>
-
-                <!-- Close Tab Button -->
-                <button
-                  type="button"
-                  onclick={(e) => {
-                    e.stopPropagation();
-                    closeTabFromOverflow(tab.id);
-                  }}
-                  class="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition shrink-0"
-                  title="Close Tab"
-                >
-                  <Icon name="x" class="w-3 h-3" />
-                </button>
-              </div>
-            {/each}
-          {/if}
-        </div>
-      </div>
-    {/if}
   </div>
 
   <!-- Tab Context Menu -->
@@ -330,7 +259,7 @@
     <div
       id="tab-context-menu"
       style="top: {tabContextMenu.y}px; left: {tabContextMenu.x}px;"
-      class="fixed z-50 w-44 bg-[#0f172a] border border-[#334155] rounded-lg shadow-2xl py-1 divide-y divide-slate-800 text-xs select-none"
+      class="fixed z-[110] w-44 bg-[#0f172a] border border-[#334155] rounded-lg shadow-2xl py-1 divide-y divide-slate-800 text-xs select-none"
     >
       <div class="py-1">
         <button
@@ -370,3 +299,115 @@
     </div>
   {/if}
 </div>
+
+<!-- Floating Enterprise Tab Overflow Dropdown Menu (Fixed coordinates, never clipped by parent overflow) -->
+{#if showOverflowDropdown}
+  <!-- Fixed Backdrop to close on outside click -->
+  <div
+    tabindex="-1"
+    role="presentation"
+    class="fixed inset-0 z-[95] bg-transparent cursor-default"
+    onclick={(e) => {
+      e.stopPropagation();
+      showOverflowDropdown = false;
+    }}
+  ></div>
+
+  <div
+    id="tab-overflow-dropdown"
+    style="top: {dropdownCoords.top}px; left: {dropdownCoords.left}px;"
+    class="fixed w-72 bg-[#0f172a] border border-[#334155] rounded-lg shadow-2xl z-[100] divide-y divide-slate-800 text-xs overflow-hidden animate-in fade-in zoom-in-95 duration-100"
+    onclick={(e) => e.stopPropagation()}
+    role="menu"
+    tabindex="-1"
+  >
+    <!-- Header -->
+    <div class="px-3 py-2 bg-slate-900/90 flex items-center justify-between">
+      <div class="flex items-center space-x-1.5">
+        <span class="font-bold text-[11px] text-slate-300 uppercase tracking-wider">Hidden Tabs</span>
+        <span class="px-1.5 py-0.5 rounded-full bg-sky-500/20 text-sky-400 font-mono text-[10px] font-semibold">
+          {overflowTabs.length}
+        </span>
+      </div>
+      <span class="text-[10px] text-slate-500">
+        Total {appState.tabs.length} tabs
+      </span>
+    </div>
+
+    <!-- Search input if > 3 overflow tabs -->
+    {#if overflowTabs.length > 3}
+      <div class="p-1.5 bg-[#0b0f19]">
+        <div class="relative flex items-center">
+          <Icon name="search" class="w-3.5 h-3.5 text-slate-500 absolute left-2 pointer-events-none" />
+          <input
+            type="text"
+            bind:value={overflowSearchQuery}
+            placeholder="Filter hidden tabs..."
+            class="w-full bg-[#1e293b]/70 border border-slate-700/80 rounded pl-7 pr-2 py-1 text-[11px] text-slate-200 placeholder-slate-500 focus:outline-none focus:border-sky-500/70"
+          />
+        </div>
+      </div>
+    {/if}
+
+    <!-- Dropdown Tab Items -->
+    <div class="max-h-72 overflow-y-auto divide-y divide-slate-800/40 py-0.5">
+      {#if filteredOverflowTabs.length === 0}
+        <div class="px-3 py-4 text-center text-slate-500 text-xs italic">
+          No matching tabs found
+        </div>
+      {:else}
+        {#each filteredOverflowTabs as tab (tab.id)}
+          <div
+            class="flex items-center justify-between hover:bg-slate-800/80 px-2.5 py-1.5 transition-colors group cursor-pointer"
+            onclick={() => selectOverflowTab(tab.id)}
+            role="button"
+            tabindex="0"
+            onkeydown={(e) => e.key === 'Enter' && selectOverflowTab(tab.id)}
+          >
+            <!-- Tab Icon & Title -->
+            <div class="flex items-center space-x-2 min-w-0 flex-1 pr-2">
+              <span class="flex items-center shrink-0">
+                {#if tab.isExecuting}
+                  <Icon name="refresh-cw" class="w-3.5 h-3.5 animate-spin text-sky-400" />
+                {:else if tab.isProcesslist}
+                  <Icon name="cpu" class="w-3.5 h-3.5 text-sky-400" />
+                {:else if tab.isErdCanvas}
+                  <Icon name="layers" class="w-3.5 h-3.5 text-indigo-400" />
+                {:else if tab.isTableViewer}
+                  <Icon name="table" class="w-3.5 h-3.5 text-emerald-400" />
+                {:else if tab.title.endsWith('.ddl.sql')}
+                  <Icon name="file-code" class="w-3.5 h-3.5 text-sky-400" />
+                {:else}
+                  <Icon name="zap" class="w-3.5 h-3.5 text-amber-400" />
+                {/if}
+              </span>
+
+              <span class="truncate font-mono text-[11px] text-slate-300 group-hover:text-white" title={tab.title}>
+                {tab.title}
+              </span>
+
+              {#if tab.database}
+                <span class="shrink-0 px-1 py-0.2 rounded text-[9px] font-mono bg-slate-800 text-amber-400/80 border border-slate-700/60" title="Target Database">
+                  {tab.database}
+                </span>
+              {/if}
+            </div>
+
+            <!-- Close Tab Button -->
+            <button
+              type="button"
+              onclick={(e) => {
+                e.stopPropagation();
+                closeTabFromOverflow(tab.id);
+              }}
+              class="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition shrink-0"
+              title="Close Tab"
+            >
+              <Icon name="x" class="w-3 h-3" />
+            </button>
+          </div>
+        {/each}
+      {/if}
+    </div>
+  </div>
+{/if}
