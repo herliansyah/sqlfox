@@ -438,7 +438,7 @@
 <div class="h-full flex flex-col bg-[#090d16] overflow-hidden select-text relative">
   <!-- Multi-Statement Execution Results Tabs -->
   {#if currentTab?.multiResults && currentTab.multiResults.length > 1}
-    <div class="h-8 bg-[#0b0f19] border-b border-[#334155] px-3 flex items-center space-x-1 select-none overflow-x-auto shrink-0">
+    <div class="h-8 bg-[#0b0f19] border-b border-slate-800 px-3 flex items-center space-x-1 select-none overflow-x-auto shrink-0">
       {#each currentTab.multiResults as mRes, mIdx}
         <button
           type="button"
@@ -464,7 +464,7 @@
   {/if}
 
   <!-- Grid Control Toolbar -->
-  <div class="h-9 bg-[#0b0f19] border-b border-[#334155] px-3 flex items-center justify-between text-xs select-none shrink-0 gap-2">
+  <div class="h-9 bg-[#0b0f19] border-b border-slate-800 px-3 flex items-center justify-between text-xs select-none shrink-0 gap-2">
     <!-- Left: CRUD & Staged Actions -->
     <div class="flex items-center space-x-2">
       <!-- In-Place Draft Row Button -->
@@ -538,7 +538,7 @@
       <div class="relative">
         <button
           onclick={(e) => { e.stopPropagation(); showColPicker = !showColPicker; }}
-          class="h-6 px-2 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 border border-[#334155] flex items-center space-x-1 text-[11px] transition"
+          class="h-6 px-2 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 border border-slate-700/80 hover:border-slate-600 flex items-center space-x-1 text-[11px] transition"
           title="Toggle column visibility"
         >
           <Icon name="columns" class="w-3 h-3 text-sky-400" />
@@ -554,13 +554,13 @@
             onclick={() => (showColPicker = false)}
           ></button>
           <div
-            class="absolute right-0 mt-1 w-56 bg-[#0f172a] border border-[#334155] rounded-lg shadow-2xl z-40 p-2 text-xs space-y-2 animate-in fade-in duration-100"
+            class="absolute right-0 mt-1 w-56 bg-[#0f172a] border border-slate-700/90 rounded-lg shadow-2xl z-40 p-2 text-xs space-y-2 animate-in fade-in duration-100"
           >
             <input
               type="text"
               bind:value={colPickerSearch}
               placeholder="Search columns..."
-              class="w-full bg-[#090d16] border border-[#334155] rounded px-2 py-1 text-xs text-slate-100 font-mono focus:outline-none"
+              class="w-full bg-[#090d16] border border-slate-700/80 rounded px-2 py-1 text-xs text-slate-100 font-mono focus:outline-none"
             />
             <div class="flex items-center justify-between text-[10px] text-sky-400 px-1">
               <button onclick={() => appState.showAllColumns()} class="hover:underline">Show All</button>
@@ -574,7 +574,7 @@
                       type="checkbox"
                       checked={!hiddenCols.includes(col)}
                       onchange={() => appState.toggleColumnHidden(col)}
-                      class="rounded bg-[#090d16] border-[#334155] text-sky-500 focus:ring-0"
+                      class="rounded bg-[#090d16] border-slate-700 text-sky-500 focus:ring-0"
                     />
                     <span class="truncate">{col}</span>
                   </label>
@@ -589,7 +589,7 @@
       <div class="relative">
         <button
           onclick={(e) => { e.stopPropagation(); showExportMenu = !showExportMenu; }}
-          class="h-6 px-2 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 border border-[#334155] flex items-center space-x-1 text-[11px] transition"
+          class="h-6 px-2 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 border border-slate-700/80 hover:border-slate-600 flex items-center space-x-1 text-[11px] transition"
           title="Export data"
         >
           <Icon name="share-2" class="w-3 h-3 text-sky-400" />
@@ -605,7 +605,7 @@
             onclick={() => (showExportMenu = false)}
           ></button>
           <div
-            class="absolute right-0 mt-1 w-44 bg-[#0f172a] border border-[#334155] rounded-lg shadow-2xl z-40 py-1 divide-y divide-slate-800 animate-in fade-in duration-100 text-xs"
+            class="absolute right-0 mt-1 w-44 bg-[#0f172a] border border-slate-700/90 rounded-lg shadow-2xl z-40 py-1 divide-y divide-slate-800 animate-in fade-in duration-100 text-xs"
           >
             <button
               onclick={exportCSV}
@@ -639,7 +639,7 @@
           appState.isRecordInspectorOpen = true;
         }}
         disabled={totalRows === 0}
-        class="h-6 px-2 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-40 text-slate-300 border border-[#334155] flex items-center space-x-1 text-[11px] transition"
+        class="h-6 px-2 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-40 text-slate-300 border border-slate-700/80 hover:border-slate-600 flex items-center space-x-1 text-[11px] transition"
         title="Inspect record in vertical form"
       >
         <Icon name="eye" class="w-3 h-3 text-sky-400" />
@@ -649,7 +649,7 @@
       <!-- Cell Drawer Toggle -->
       <button
         onclick={() => (showDetailDrawer = !showDetailDrawer)}
-        class="h-6 px-2 rounded {showDetailDrawer ? 'bg-sky-500/20 text-sky-300 border-sky-500/40' : 'bg-[#1e293b] text-slate-400 hover:text-white'} border border-[#334155] flex items-center space-x-1 text-[11px] transition"
+        class="h-6 px-2 rounded {showDetailDrawer ? 'bg-sky-500/20 text-sky-300 border-sky-500/40' : 'bg-[#1e293b] text-slate-400 hover:text-white'} border border-slate-700/80 hover:border-slate-600 flex items-center space-x-1 text-[11px] transition"
         title="Toggle Cell Drawer"
       >
         <Icon name="sidebar" class="w-3 h-3" />
@@ -660,10 +660,10 @@
 
   <!-- TablePlus-style Filter Bar (Table Viewer) or Filter Pills Bar -->
   {#if currentTab?.isTableViewer}
-    <div class="min-h-9 bg-[#0b0f19] border-b border-[#1e293b] px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs select-none shrink-0">
+    <div class="min-h-9 bg-[#0b0f19] border-b border-slate-800 px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs select-none shrink-0">
       <div class="flex flex-wrap items-center gap-2 flex-1 min-w-0">
         <!-- Mode Toggle: Pills vs WHERE -->
-        <div class="inline-flex rounded border border-[#334155] bg-[#090d16] p-0.5 select-none" role="group">
+        <div class="inline-flex rounded border border-slate-700/80 bg-[#090d16] p-0.5 select-none" role="group">
           <button
             type="button"
             onclick={() => appState.setFilterMode('pills')}

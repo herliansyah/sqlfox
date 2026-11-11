@@ -517,12 +517,12 @@
   }
 </script>
 
-<header class="h-12 bg-[#0f172a] border-b border-[#334155] flex items-center justify-between px-4 z-40 flex-shrink-0 gap-3 select-none">
+<header class="h-12 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between px-4 z-40 flex-shrink-0 gap-3 select-none">
   <!-- Brand, Sidebar Toggle & Active Connection -->
   <div class="flex items-center space-x-3 shrink-0">
     <button
       onclick={() => (appState.sidebarCollapsed = !appState.sidebarCollapsed)}
-      class="h-7 w-7 flex items-center justify-center rounded bg-[#1e293b] hover:bg-slate-700 text-slate-400 hover:text-white border border-[#334155] transition text-xs cursor-pointer shadow-sm"
+      class="h-7 w-7 flex items-center justify-center rounded bg-[#1e293b] hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700/80 hover:border-slate-600 transition text-xs cursor-pointer shadow-sm"
       title="Toggle Sidebar (Ctrl+B)"
     >
       <Icon name="sidebar" class="w-3.5 h-3.5" />
@@ -534,13 +534,13 @@
       <span class="font-bold tracking-wide text-white text-base">Sql<span class="text-sky-400">Fox</span></span>
     </div>
 
-    <div class="h-4 w-px bg-[#334155] mx-1"></div>
+    <div class="h-4 w-px bg-slate-800 mx-1"></div>
 
     <!-- Active Connection Selector Pill -->
     <div class="relative">
       <button
         onclick={() => (showConnDropdown = !showConnDropdown)}
-        class="h-7 px-2.5 rounded {appState.isProduction ? 'bg-rose-950/40 border-rose-600/60 hover:bg-rose-900/40 shadow-rose-950/30' : 'bg-[#1e293b] hover:bg-slate-700/80 border-[#334155]'} border flex items-center space-x-2 text-xs text-slate-200 transition shadow-sm"
+        class="h-7 px-2.5 rounded {appState.isProduction ? 'bg-rose-950/40 border-rose-600/60 hover:bg-rose-900/40 shadow-rose-950/30' : 'bg-[#1e293b] hover:bg-slate-700/80 border-slate-700/80'} border flex items-center space-x-2 text-xs text-slate-200 transition shadow-sm"
       >
         <span class="w-2 h-2 rounded-full {appState.isProduction ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)] animate-pulse' : (appState.activeConnection ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]' : 'bg-slate-500')}"></span>
         <span class="font-medium {appState.isProduction ? 'text-rose-100 font-semibold' : 'text-slate-100'}">{appState.activeConnection?.name || 'No active connection'}</span>
@@ -560,7 +560,7 @@
           onclick={() => (showConnDropdown = false)}
         ></button>
 
-        <div class="absolute left-0 mt-1 w-72 bg-[#0f172a] border border-[#334155] rounded-lg shadow-2xl z-50 py-1 divide-y divide-slate-800 animate-in fade-in zoom-in-95 duration-100">
+        <div class="absolute left-0 mt-1 w-72 bg-[#0f172a] border border-slate-700/90 rounded-lg shadow-2xl z-50 py-1 divide-y divide-slate-800 animate-in fade-in zoom-in-95 duration-100">
           <!-- Search filter for connections -->
           <div class="p-2 border-b border-slate-800">
             <div class="relative flex items-center">
@@ -676,7 +676,7 @@
             onclick={() => (showHeaderDbDropdown = false)}
           ></button>
 
-          <div class="absolute left-0 mt-1 w-60 bg-[#0f172a] border border-[#334155] rounded-lg shadow-2xl z-50 py-1 divide-y divide-slate-800 animate-in fade-in duration-100">
+          <div class="absolute left-0 mt-1 w-60 bg-[#0f172a] border border-slate-700/90 rounded-lg shadow-2xl z-50 py-1 divide-y divide-slate-800 animate-in fade-in duration-100">
             <div class="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
               <span>Switch Database</span>
               <span class="font-mono text-slate-500">{appState.availableDatabases.length} DBs</span>
@@ -707,7 +707,7 @@
   <div class="hidden md:flex items-center space-x-2 shrink-0">
     <button
       onclick={() => (appState.isCommandPaletteOpen = true)}
-      class="h-7 bg-[#1e293b] hover:bg-slate-700 text-slate-300 px-2.5 rounded text-xs flex items-center space-x-1.5 border border-[#334155] transition shadow-sm"
+      class="h-7 bg-[#1e293b] hover:bg-slate-700 text-slate-300 px-2.5 rounded text-xs flex items-center space-x-1.5 border border-slate-700/80 hover:border-slate-600 transition shadow-sm"
     >
       <Icon name="terminal" class="w-3.5 h-3.5 text-sky-400" />
       <span>Command Palette</span>
@@ -730,7 +730,7 @@
         }}
         class="h-7 px-2.5 rounded {showToolsDropdown
           ? 'bg-slate-700 text-white ring-1 ring-sky-500/50'
-          : 'bg-[#1e293b] hover:bg-slate-700 text-slate-300 hover:text-white'} border border-[#334155] flex items-center space-x-1.5 transition shadow-sm font-medium"
+          : 'bg-[#1e293b] hover:bg-slate-700 text-slate-300 hover:text-white'} border border-slate-700/80 hover:border-slate-600 flex items-center space-x-1.5 transition shadow-sm font-medium"
         title="Database Tools & Enterprise Utilities"
       >
         <Icon name="wrench" class="w-3.5 h-3.5 text-sky-400" />
@@ -955,7 +955,7 @@
     <button
       id="notes-inbox-button"
       onclick={() => (appState.isNotesDrawerOpen = !appState.isNotesDrawerOpen)}
-      class="h-7 px-2 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 hover:text-white border border-[#334155] transition flex items-center space-x-1 shadow-sm relative {appState.isNotesDrawerOpen ? 'bg-amber-950/40 border-amber-600 text-amber-300' : ''}"
+      class="h-7 px-2 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 transition flex items-center space-x-1 shadow-sm relative {appState.isNotesDrawerOpen ? 'bg-amber-950/40 border-amber-600 text-amber-300' : ''}"
       title="Operational Notes"
     >
       <Icon name="file-text" class="w-3.5 h-3.5 text-amber-400" />
@@ -973,7 +973,7 @@
     <!-- AI Copilot Drawer Button -->
     <button
       onclick={() => (appState.isAiDrawerOpen = !appState.isAiDrawerOpen)}
-      class="h-7 px-2 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 hover:text-white border border-[#334155] transition flex items-center space-x-1 shadow-sm {appState.isAiDrawerOpen ? 'bg-sky-950/40 border-sky-500 text-sky-300' : ''}"
+      class="h-7 px-2 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 transition flex items-center space-x-1 shadow-sm {appState.isAiDrawerOpen ? 'bg-sky-950/40 border-sky-500 text-sky-300' : ''}"
       title="AI Copilot"
     >
       <Icon name="bot" class="w-3.5 h-3.5 text-sky-400" />
@@ -1009,7 +1009,7 @@
 
     <button
       onclick={() => appState.refreshCatalog()}
-      class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 hover:text-white border border-[#334155] flex items-center space-x-1.5 transition shadow-sm"
+      class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 flex items-center space-x-1.5 transition shadow-sm"
       title="Refresh Schema Catalog"
     >
       <Icon name="refresh-cw" class="w-3.5 h-3.5 {appState.isLoadingCatalog ? 'animate-spin text-sky-400' : 'text-slate-400'}" />

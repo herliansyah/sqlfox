@@ -49,16 +49,16 @@
 </script>
 
 <div class="h-full flex flex-col bg-[#090d16] overflow-hidden select-none">
-  <!-- Sub-Tabs Navigation Bar -->
-  <div class="h-8 bg-[#0b0f19] border-b border-[#334155] px-3 flex items-center justify-between text-xs flex-shrink-0">
+  <!-- Sub-Tabs Navigation Bar (Height h-9: 36px - aligned with TabBar and Sidebar) -->
+  <div class="h-9 bg-[#0b0f19] border-b border-slate-800 px-3 flex items-center justify-between text-xs flex-shrink-0">
     <div class="flex items-center space-x-1">
       {#each subTabs as sub}
         {@const isActive = activeMode === sub.id}
         <button
           onclick={() => setMode(sub.id)}
-          class="px-2.5 py-1 rounded text-xs transition flex items-center space-x-1.5 {
+          class="h-7 px-2.5 rounded text-xs transition flex items-center space-x-1.5 {
             isActive
-              ? 'bg-[#1e293b] text-sky-400 font-bold border border-[#334155] shadow-sm'
+              ? 'bg-[#1e293b] text-sky-400 font-bold border border-slate-700/80 shadow-sm'
               : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
           }"
         >

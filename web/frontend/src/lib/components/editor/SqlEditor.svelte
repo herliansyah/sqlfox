@@ -121,9 +121,9 @@
   }
 </script>
 
-<div class="h-full flex flex-col bg-[#090d16] border-b border-[#334155] relative">
+<div class="h-full flex flex-col bg-[#090d16] relative">
   <!-- Query Editor Toolbar -->
-  <div class="h-9 border-b border-[#1e293b] bg-[#0b0f19] px-3 flex items-center justify-between select-none shrink-0">
+  <div class="h-9 border-b border-slate-800 bg-[#0b0f19] px-3 flex items-center justify-between select-none shrink-0">
     <div class="flex items-center space-x-2">
       <!-- Run Button -->
       <button
@@ -158,7 +158,7 @@
       <button
         onclick={() => appState.explainCurrentTab()}
         disabled={currentTab?.isExecuting}
-        class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 hover:text-white border border-[#334155] text-xs flex items-center space-x-1.5 transition shadow-sm"
+        class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs flex items-center space-x-1.5 transition shadow-sm"
         title="Generate Query Execution Plan (EXPLAIN)"
       >
         <Icon name="activity" class="w-3.5 h-3.5 text-sky-400" />
@@ -168,7 +168,7 @@
       <!-- Pre-Flight Impact Tree Button -->
       <button
         onclick={() => appState.openImpactPreview()}
-        class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 hover:text-white border border-[#334155] text-xs flex items-center space-x-1.5 transition shadow-sm"
+        class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs flex items-center space-x-1.5 transition shadow-sm"
         title="View Pre-Flight Impact Preview & Execution Tree"
       >
         <Icon name="search" class="w-3.5 h-3.5 text-sky-400" />
@@ -180,7 +180,7 @@
         onclick={() => {
           if (currentTab) currentTab.showQueryProfiler = !currentTab.showQueryProfiler;
         }}
-        class="h-7 px-2.5 rounded {currentTab?.showQueryProfiler ? 'bg-sky-950 text-sky-300 border-sky-600' : 'bg-[#1e293b] text-slate-300 hover:text-white'} border border-[#334155] text-xs flex items-center space-x-1.5 transition shadow-sm"
+        class="h-7 px-2.5 rounded {currentTab?.showQueryProfiler ? 'bg-sky-950 text-sky-300 border-sky-600' : 'bg-[#1e293b] text-slate-300 hover:text-white'} border border-slate-700/80 hover:border-slate-600 text-xs flex items-center space-x-1.5 transition shadow-sm"
         title="Toggle Stage Profiler (SHOW PROFILE)"
       >
         <Icon name="clock" class="w-3.5 h-3.5 text-sky-400" />
@@ -191,7 +191,7 @@
       <button
         onclick={handleFormat}
         disabled={currentTab?.isExecuting || !currentTab?.sql}
-        class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-40 text-slate-300 hover:text-white border border-[#334155] text-xs flex items-center space-x-1.5 transition shadow-sm"
+        class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-40 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs flex items-center space-x-1.5 transition shadow-sm"
         title="Format & Beautify SQL (Ctrl+Shift+F)"
       >
         <Icon name="file-text" class="w-3.5 h-3.5 text-emerald-400" />
@@ -203,7 +203,7 @@
       <button
         onclick={() => appState.saveQueryToNote(currentTab?.sql, currentTab?.title)}
         disabled={currentTab?.isExecuting || !currentTab?.sql}
-        class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-40 text-slate-300 hover:text-white border border-[#334155] text-xs flex items-center space-x-1.5 transition shadow-sm"
+        class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-40 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs flex items-center space-x-1.5 transition shadow-sm"
         title="Save Active Query as Operational Note"
       >
         <Icon name="bookmark" class="w-3.5 h-3.5 text-amber-400" />

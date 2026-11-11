@@ -516,8 +516,8 @@
 </script>
 
 <div class="h-full flex flex-col bg-[#090d16] overflow-hidden select-text font-mono text-xs">
-  <!-- Top Navigation & Sub-tabs Bar -->
-  <div class="h-10 bg-[#0b0f19] border-b border-[#334155] px-4 flex items-center justify-between text-xs flex-shrink-0 select-none">
+  <!-- Top Navigation & Sub-tabs Bar (Height h-9: 36px - aligned with TabBar and Sidebar) -->
+  <div class="h-9 bg-[#0b0f19] border-b border-slate-800 px-4 flex items-center justify-between text-xs flex-shrink-0 select-none">
     <div class="flex items-center space-x-4">
       <div class="flex items-center space-x-1.5 font-sans font-bold text-slate-200">
         <Icon name="cpu" class="w-4 h-4 text-sky-400" />
@@ -525,7 +525,7 @@
       </div>
 
       <!-- Sub-Tabs Selector -->
-      <div class="flex items-center space-x-1 bg-[#090d16] p-0.5 rounded-lg border border-[#334155]">
+      <div class="flex items-center space-x-1 bg-[#090d16] p-0.5 rounded-lg border border-slate-700/80">
         <button
           onclick={() => (currentSubTab = 'threads')}
           class="px-2.5 py-1 rounded text-xs font-semibold transition font-sans {currentSubTab === 'threads' ? 'bg-[#1e293b] text-sky-400 shadow-sm' : 'text-slate-400 hover:text-slate-200'}"

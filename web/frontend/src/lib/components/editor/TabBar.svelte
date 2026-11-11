@@ -170,7 +170,7 @@
 <div
   bind:clientWidth={containerWidth}
   id="tabs-bar"
-  class="h-9 bg-[#0b0f19] border-b border-[#334155] flex items-center px-2 select-none justify-between relative"
+  class="h-9 bg-[#0b0f19] border-b border-slate-800 flex items-center px-2 select-none justify-between relative overflow-hidden"
 >
   <!-- Visible Tabs Strip (fits strictly within available screen width) -->
   <div id="tabs-container" class="flex items-center min-w-0 flex-1 overflow-hidden gap-1">
@@ -179,8 +179,8 @@
       <div
         class="group relative flex items-center h-8 px-3 rounded-t border-t border-x text-xs cursor-pointer transition-all max-w-[200px] min-w-[100px] shrink-0 {
           isActive
-            ? 'bg-[#090d16] border-t-2 border-t-sky-400 border-x-[#334155] text-sky-400 font-semibold shadow-sm'
-            : 'bg-slate-900/60 border-transparent text-slate-400 hover:bg-slate-850 hover:text-slate-200'
+            ? 'bg-[#090d16] border-t border-x border-slate-800 text-sky-400 font-semibold shadow-sm'
+            : 'bg-slate-900/60 border-t border-x border-transparent text-slate-400 hover:bg-slate-850 hover:text-slate-200'
         }"
         onclick={() => (appState.activeTabId = tab.id)}
         oncontextmenu={(e) => handleTabContextMenu(e, tab.id)}
@@ -190,6 +190,9 @@
         title={tab.title + (tab.database ? ` (${tab.database})` : '')}
         onkeydown={(e) => e.key === 'Enter' && (appState.activeTabId = tab.id)}
       >
+        {#if isActive}
+          <div class="absolute top-0 left-0 right-0 h-[2px] bg-sky-400 rounded-t pointer-events-none"></div>
+        {/if}
         <!-- Icon Indicator -->
         <span class="mr-2 flex items-center shrink-0">
           {#if tab.isExecuting}
@@ -230,7 +233,7 @@
     <button
       id="add-tab-btn"
       onclick={() => appState.addTab()}
-      class="w-6 h-6 rounded bg-[#1e293b]/60 hover:bg-slate-700 text-slate-400 hover:text-sky-300 border border-slate-750 flex items-center justify-center text-xs ml-1 shrink-0 transition shadow-sm"
+      class="w-6 h-6 rounded bg-[#1e293b]/60 hover:bg-slate-700 text-slate-400 hover:text-sky-300 border border-slate-700/80 flex items-center justify-center text-xs ml-1 shrink-0 transition shadow-sm"
       title="New SQL Query (Ctrl+T)"
     >
       <Icon name="plus" class="w-3.5 h-3.5" />
@@ -244,7 +247,7 @@
       bind:this={overflowBtnRef}
       type="button"
       onclick={toggleOverflowDropdown}
-      class="h-6 px-2 rounded bg-slate-800/80 hover:bg-slate-700 text-sky-400 hover:text-white border border-slate-700 flex items-center space-x-1.5 text-xs font-mono transition shadow-sm cursor-pointer"
+      class="h-6 px-2 rounded bg-slate-800/80 hover:bg-slate-700 text-sky-400 hover:text-white border border-slate-700/80 flex items-center space-x-1.5 text-xs font-mono transition shadow-sm cursor-pointer"
       title="More Tabs ({overflowTabs.length} hidden)"
     >
       <Icon name="chevrons-right" class="w-3.5 h-3.5" />
@@ -257,7 +260,7 @@
     <div
       id="tab-context-menu"
       style="top: {tabContextMenu.y}px; left: {tabContextMenu.x}px;"
-      class="fixed z-[110] w-44 bg-[#0f172a] border border-[#334155] rounded-lg shadow-2xl py-1 divide-y divide-slate-800 text-xs select-none"
+      class="fixed z-[110] w-44 bg-[#0f172a] border border-slate-700/90 rounded-lg shadow-2xl py-1 divide-y divide-slate-800 text-xs select-none"
     >
       <div class="py-1">
         <button

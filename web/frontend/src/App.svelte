@@ -210,15 +210,21 @@
 
           <!-- Draggable Splitter Handle -->
           <div
+            id="workspace-pane-splitter"
             onmousedown={startDrag}
             role="separator"
             tabindex="-1"
             aria-orientation="horizontal"
             aria-valuenow={editorSplitPercent}
             aria-label="Resize query editor"
-            class="h-1 bg-slate-800 hover:bg-sky-500 cursor-row-resize transition-colors z-10 shrink-0 relative flex items-center justify-center group"
+            class="h-[7px] -my-[3px] cursor-row-resize transition-colors z-20 shrink-0 relative flex items-center justify-center group select-none"
           >
-            <div class="w-8 h-1 rounded bg-slate-600 group-hover:bg-sky-400"></div>
+            <!-- Uniform 1px divider line -->
+            <div class="absolute inset-x-0 h-px bg-slate-800 group-hover:bg-sky-500 transition-colors"></div>
+            <!-- Minimalist grab handle pill -->
+            <div class="w-8 h-1 rounded-full bg-slate-700/80 group-hover:bg-sky-400 z-10 transition-colors shadow-sm flex items-center justify-center">
+              <div class="w-3 h-0.5 rounded-full bg-slate-500 group-hover:bg-sky-100"></div>
+            </div>
           </div>
 
           <!-- Bottom Grid Results Pane -->

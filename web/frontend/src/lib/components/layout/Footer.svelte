@@ -61,7 +61,7 @@
   });
 </script>
 
-<footer class="h-7 bg-[#070a13] border-t border-[#1e293b] px-3 flex items-center justify-between text-[11px] text-slate-400 flex-shrink-0 z-30 select-none overflow-x-auto gap-3">
+<footer class="h-7 bg-[#070a13] border-t border-slate-800 px-3 flex items-center justify-between text-[11px] text-slate-400 flex-shrink-0 z-30 select-none overflow-x-auto gap-3">
   <!-- Left: Database Engine & Version, Target Host & DB, Uptime, Latency -->
   <div class="flex items-center space-x-2 shrink-0 truncate">
     {#if appState.activeConnection}

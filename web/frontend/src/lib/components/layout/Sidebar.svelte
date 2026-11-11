@@ -82,34 +82,31 @@
 <svelte:window onclick={closeTableMenu} />
 
 {#if !appState.sidebarCollapsed}
-  <aside class="w-64 border-r border-[#334155] bg-[#090d16] flex flex-col h-full select-none shrink-0 text-slate-300">
-    <!-- Database Switcher Header -->
-    <div class="p-2 border-b border-[#1e293b] bg-[#0b0f19] relative">
-      <div class="text-[10px] uppercase font-bold tracking-wider text-slate-500 mb-1 flex items-center justify-between px-1">
-        <span class="flex items-center space-x-1">
-          <Icon name="database" class="w-3 h-3 text-sky-400" />
-          <span>Active Database</span>
-        </span>
-        {#if appState.availableDatabases.length > 0}
-          <span class="text-[9px] font-mono text-slate-400 bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800">
-            {appState.availableDatabases.length} DBs
-          </span>
-        {/if}
-      </div>
-
+  <aside class="w-64 border-r border-slate-800 bg-[#090d16] flex flex-col h-full select-none shrink-0 text-slate-300">
+    <!-- Database Switcher Header (Height h-9: 36px - perfectly aligned with TabBar) -->
+    <div class="h-9 px-2 border-b border-slate-800 bg-[#0b0f19] flex items-center justify-between relative shrink-0">
       <!-- Database Selector Trigger Button -->
       <button
+        id="sidebar-db-selector-btn"
         onclick={() => (showDbDropdown = !showDbDropdown)}
-        class="w-full bg-[#0f172a] hover:bg-[#1e293b] border border-[#334155] rounded px-2.5 py-1.5 text-xs text-left text-slate-200 flex items-center justify-between transition-colors group shadow-sm"
+        class="w-full h-7 bg-[#0f172a] hover:bg-[#1e293b] border border-slate-700/80 hover:border-slate-600 rounded px-2 text-xs text-left text-slate-200 flex items-center justify-between transition-colors group shadow-sm cursor-pointer"
         title="Click to switch database"
       >
-        <div class="flex items-center space-x-2 truncate">
-          <span class="w-2 h-2 rounded-full {appState.currentDatabase ? 'bg-sky-400 shadow-[0_0_6px_rgba(56,189,248,0.6)]' : 'bg-slate-600'} shrink-0"></span>
-          <span class="font-mono font-semibold text-slate-100 truncate text-[12px]">
+        <div class="flex items-center space-x-1.5 truncate min-w-0">
+          <span class="w-1.5 h-1.5 rounded-full {appState.currentDatabase ? 'bg-sky-400 shadow-[0_0_6px_rgba(56,189,248,0.6)]' : 'bg-slate-600'} shrink-0"></span>
+          <Icon name="database" class="w-3.5 h-3.5 text-sky-400 shrink-0" />
+          <span class="font-mono font-semibold text-slate-100 truncate text-[11.5px]">
             {appState.currentDatabase || 'Select Database...'}
           </span>
         </div>
-        <Icon name="chevron-down" class="w-3.5 h-3.5 text-slate-400 group-hover:text-sky-400 shrink-0 transition-transform {showDbDropdown ? 'rotate-180' : ''}" />
+        <div class="flex items-center space-x-1.5 shrink-0 ml-1">
+          {#if appState.availableDatabases.length > 0}
+            <span class="text-[9px] font-mono text-slate-400 bg-slate-900/90 px-1.5 py-0.2 rounded border border-slate-800">
+              {appState.availableDatabases.length} DBs
+            </span>
+          {/if}
+          <Icon name="chevron-down" class="w-3 h-3 text-slate-400 group-hover:text-sky-400 shrink-0 transition-transform {showDbDropdown ? 'rotate-180' : ''}" />
+        </div>
       </button>
 
       <!-- Database Dropdown Menu -->
@@ -121,7 +118,7 @@
           onclick={() => { showDbDropdown = false; dbFilter = ''; }}
         ></button>
 
-        <div class="absolute left-2 right-2 top-full mt-1 bg-[#0f172a] border border-[#334155] rounded-lg shadow-2xl z-50 py-1 divide-y divide-slate-800 animate-in fade-in duration-100">
+        <div class="absolute left-2 right-2 top-full mt-1 bg-[#0f172a] border border-slate-700/90 rounded-lg shadow-2xl z-50 py-1 divide-y divide-slate-800 animate-in fade-in duration-100">
           <!-- DB Search Filter -->
           <div class="p-1.5">
             <div class="relative flex items-center">
@@ -130,7 +127,7 @@
                 type="text"
                 bind:value={dbFilter}
                 placeholder="Search databases..."
-                class="w-full bg-[#090d16] border border-[#334155] rounded pl-7 pr-5 py-1 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-500 font-mono"
+                class="w-full bg-[#090d16] border border-slate-700/80 rounded pl-7 pr-5 py-1 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-500 font-mono"
               />
               {#if dbFilter}
                 <button
@@ -237,42 +234,47 @@
       {/if}
     </div>
 
-    <!-- View Mode Switcher: Objects vs All Databases -->
-    <div class="px-2 pt-1.5 pb-1 border-b border-[#1e293b] bg-[#0b0f19] flex items-center space-x-1">
-      <button
-        onclick={() => (appState.sidebarViewMode = 'objects')}
-        class="flex-1 py-1 px-2 text-center text-[11px] font-medium rounded transition {appState.sidebarViewMode === 'objects' ? 'bg-[#1e293b] text-sky-400 font-semibold shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'}"
-      >
-        Objects ({appState.filteredTables.length})
-      </button>
-      <button
-        onclick={() => (appState.sidebarViewMode = 'databases')}
-        class="flex-1 py-1 px-2 text-center text-[11px] font-medium rounded transition {appState.sidebarViewMode === 'databases' ? 'bg-[#1e293b] text-sky-400 font-semibold shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'}"
-      >
-        Databases ({appState.availableDatabases.length})
-      </button>
-    </div>
-
-    <!-- Search Filter Header -->
-    <div class="p-2 border-b border-[#1e293b] bg-[#0b0f19]">
-      <div class="relative flex items-center">
-        <Icon name="search" class="w-3.5 h-3.5 text-slate-500 absolute left-2.5 pointer-events-none" />
+    <!-- Search Filter & View Mode Switcher Header (Height h-9: 36px - perfectly aligned with Content Toolbar) -->
+    <div class="h-9 px-2 border-b border-slate-800 bg-[#0b0f19] flex items-center space-x-1.5 relative shrink-0">
+      <!-- Search Filter Input -->
+      <div class="relative flex-1 flex items-center min-w-0">
+        <Icon name="search" class="w-3.5 h-3.5 text-slate-500 absolute left-2 pointer-events-none" />
         <input
           type="text"
           bind:value={appState.schemaFilter}
-          placeholder={appState.sidebarViewMode === 'databases' ? "Filter databases..." : "Filter tables, views..."}
-          class="w-full bg-[#0f172a] border border-[#334155] rounded pl-8 pr-6 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition-all font-mono"
+          placeholder={appState.sidebarViewMode === 'databases' ? "Filter DBs..." : "Filter tables..."}
+          class="w-full h-7 bg-[#0f172a] border border-slate-700/80 rounded pl-7 pr-6 text-[11px] text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition-all font-mono"
         />
         {#if appState.schemaFilter}
           <button
             type="button"
             onclick={() => (appState.schemaFilter = '')}
-            class="absolute right-2 top-2 text-slate-500 hover:text-slate-300 p-0.5 rounded"
+            class="absolute right-1.5 text-slate-400 hover:text-slate-200 p-0.5 rounded transition"
             aria-label="Clear filter"
           >
             <Icon name="x" class="w-3 h-3" />
           </button>
         {/if}
+      </div>
+
+      <!-- Segmented View Mode Switcher -->
+      <div class="inline-flex rounded border border-slate-700/80 bg-[#090d16] p-0.5 shrink-0" role="group">
+        <button
+          type="button"
+          onclick={() => (appState.sidebarViewMode = 'objects')}
+          class="px-2 py-0.5 text-[10px] font-semibold rounded transition {appState.sidebarViewMode === 'objects' ? 'bg-sky-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}"
+          title="Schema Objects ({appState.filteredTables.length})"
+        >
+          Objects
+        </button>
+        <button
+          type="button"
+          onclick={() => (appState.sidebarViewMode = 'databases')}
+          class="px-2 py-0.5 text-[10px] font-semibold rounded transition {appState.sidebarViewMode === 'databases' ? 'bg-sky-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}"
+          title="Available Databases ({appState.availableDatabases.length})"
+        >
+          DBs
+        </button>
       </div>
     </div>
 
