@@ -2,6 +2,7 @@
   import { appState } from '../../stores/appState.svelte';
   import Icon from '../common/Icon.svelte';
 
+  let showOverflowDropdown = $state(false);
   let tabContextMenu = $state<{
     open: boolean;
     x: number;
@@ -47,6 +48,8 @@
           <Icon name="refresh-cw" class="w-3.5 h-3.5 animate-spin text-sky-400" />
         {:else if tab.isProcesslist}
           <Icon name="cpu" class="w-3.5 h-3.5 text-sky-400" />
+        {:else if tab.isErdCanvas}
+          <Icon name="layers" class="w-3.5 h-3.5 {isActive ? 'text-indigo-400' : 'text-slate-500'}" />
         {:else if tab.isTableViewer}
           <Icon name="table" class="w-3.5 h-3.5 {isActive ? 'text-emerald-400' : 'text-slate-500'}" />
         {:else if tab.title.endsWith('.ddl.sql')}
@@ -85,6 +88,63 @@
   >
     <Icon name="plus" class="w-3.5 h-3.5" />
   </button>
+
+  <!-- Tab Bar Overflow Dropdown -->
+  <div class="relative ml-auto flex items-center pr-1 shrink-0">
+    <button
+      type="button"
+      onclick={() => (showOverflowDropdown = !showOverflowDropdown)}
+      class="h-6 px-2 rounded bg-[#1e293b]/60 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700 flex items-center space-x-1 text-xs transition"
+      title="All Open Tabs"
+    >
+      <span class="font-mono text-[10px] text-sky-400">{appState.tabs.length}</span>
+      <Icon name="chevron-down" class="w-3 h-3" />
+    </button>
+
+    {#if showOverflowDropdown}
+      <button
+        tabindex="-1"
+        aria-label="Close"
+        class="fixed inset-0 z-40 bg-transparent cursor-default"
+        onclick={() => (showOverflowDropdown = false)}
+      ></button>
+
+      <div class="absolute right-0 top-7 mt-1 w-64 bg-[#0f172a] border border-[#334155] rounded-lg shadow-2xl z-50 py-1 divide-y divide-slate-800 text-xs animate-in fade-in duration-75">
+        <div class="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between bg-slate-900/60">
+          <span>Open Tabs</span>
+          <span class="font-mono text-sky-400">{appState.tabs.length}</span>
+        </div>
+
+        <div class="max-h-72 overflow-y-auto py-1">
+          {#each appState.tabs as tab}
+            <div class="flex items-center hover:bg-slate-800/80 px-3 py-1.5 transition-colors group {tab.id === appState.activeTabId ? 'bg-sky-500/10' : ''}">
+              <button
+                type="button"
+                onclick={() => {
+                  appState.activeTabId = tab.id;
+                  showOverflowDropdown = false;
+                }}
+                class="flex-1 text-left flex items-center space-x-2 truncate font-mono text-[11px] {tab.id === appState.activeTabId ? 'text-sky-400 font-bold' : 'text-slate-300'}"
+              >
+                <span>{tab.title}</span>
+              </button>
+
+              {#if appState.tabs.length > 1}
+                <button
+                  type="button"
+                  onclick={() => appState.closeTab(tab.id)}
+                  class="p-0.5 opacity-0 group-hover:opacity-100 text-slate-500 hover:text-rose-400 transition"
+                  title="Close Tab"
+                >
+                  ✕
+                </button>
+              {/if}
+            </div>
+          {/each}
+        </div>
+      </div>
+    {/if}
+  </div>
 
   <!-- Tab Context Menu -->
   {#if tabContextMenu && tabContextMenu.open}

@@ -13,7 +13,41 @@
   import InsertRowModal from './lib/components/modals/InsertRowModal.svelte';
   import CommandPaletteModal from './lib/components/modals/CommandPaletteModal.svelte';
   import ShortcutsModal from './lib/components/modals/ShortcutsModal.svelte';
+  import CreateDatabaseModal from './lib/components/modals/CreateDatabaseModal.svelte';
+  import TableCreatorModal from './lib/components/modals/TableCreatorModal.svelte';
+  import RenameTableModal from './lib/components/modals/RenameTableModal.svelte';
+  import DuplicateTableModal from './lib/components/modals/DuplicateTableModal.svelte';
+  import JsonCellModal from './lib/components/modals/JsonCellModal.svelte';
+  import ViewDesignerModal from './lib/components/modals/ViewDesignerModal.svelte';
+  import TriggerDesignerModal from './lib/components/modals/TriggerDesignerModal.svelte';
+  import RoutineDesignerModal from './lib/components/modals/RoutineDesignerModal.svelte';
+  import EventDesignerModal from './lib/components/modals/EventDesignerModal.svelte';
+  import DumpModal from './lib/components/modals/DumpModal.svelte';
+  import StructureSyncModal from './lib/components/modals/StructureSyncModal.svelte';
+  import RunSqlModal from './lib/components/modals/RunSqlModal.svelte';
+  import SnippetsModal from './lib/components/modals/SnippetsModal.svelte';
+  import CsvImportModal from './lib/components/modals/CsvImportModal.svelte';
+  import PrivilegeMatrixModal from './lib/components/modals/PrivilegeMatrixModal.svelte';
+  import DbDiagnosticsModal from './lib/components/modals/DbDiagnosticsModal.svelte';
+  import ErdCanvas from './lib/components/erd/ErdCanvas.svelte';
+  import AiDrawer from './lib/components/ai/AiDrawer.svelte';
+  import AiSettingsModal from './lib/components/modals/AiSettingsModal.svelte';
+  import NotesDrawer from './lib/components/notes/NotesDrawer.svelte';
+  import NoteComposerModal from './lib/components/modals/NoteComposerModal.svelte';
+  import ActivityConsoleDrawer from './lib/components/activity/ActivityConsoleDrawer.svelte';
+  import UpdateModal from './lib/components/modals/UpdateModal.svelte';
+  import MockDataModal from './lib/components/modals/MockDataModal.svelte';
+  import SettingsModal from './lib/components/modals/SettingsModal.svelte';
   import ToastContainer from './lib/components/common/ToastContainer.svelte';
+  import NativeDialogModal from './lib/components/modals/NativeDialogModal.svelte';
+  import ReconnectBanner from './lib/components/common/ReconnectBanner.svelte';
+  import DdlReviewModal from './lib/components/modals/DdlReviewModal.svelte';
+  import RefreshAllModal from './lib/components/modals/RefreshAllModal.svelte';
+  import ImpactPreviewModal from './lib/components/modals/ImpactPreviewModal.svelte';
+  import DataTransferModal from './lib/components/modals/DataTransferModal.svelte';
+  import DataSyncModal from './lib/components/modals/DataSyncModal.svelte';
+  import AuditDrawer from './lib/components/activity/AuditDrawer.svelte';
+  import FkPeekPopover from './lib/components/grid/FkPeekPopover.svelte';
   import { appState } from './lib/stores/appState.svelte';
 
   let editorSplitPercent = $state(45);
@@ -96,6 +130,40 @@
       if (appState.isInsertRowModalOpen) appState.isInsertRowModalOpen = false;
       if (appState.isShortcutsModalOpen) appState.isShortcutsModalOpen = false;
       if (appState.isCreateDbModalOpen) appState.isCreateDbModalOpen = false;
+      if (appState.isTableCreatorOpen) appState.isTableCreatorOpen = false;
+      if (appState.isRenameTableModalOpen) appState.isRenameTableModalOpen = false;
+      if (appState.isDuplicateTableModalOpen) appState.isDuplicateTableModalOpen = false;
+      if (appState.isViewDesignerOpen) appState.isViewDesignerOpen = false;
+      if (appState.isTriggerDesignerOpen) appState.isTriggerDesignerOpen = false;
+      if (appState.isRoutineDesignerOpen) appState.isRoutineDesignerOpen = false;
+      if (appState.isEventDesignerOpen) appState.isEventDesignerOpen = false;
+      if (appState.isDumpModalOpen) appState.isDumpModalOpen = false;
+      if (appState.isStructureSyncModalOpen) appState.isStructureSyncModalOpen = false;
+      if (appState.isRunSqlModalOpen) appState.isRunSqlModalOpen = false;
+      if (appState.isSnippetsModalOpen) appState.isSnippetsModalOpen = false;
+      if (appState.isCsvImportModalOpen) appState.isCsvImportModalOpen = false;
+      if (appState.isPrivilegeMatrixOpen) appState.isPrivilegeMatrixOpen = false;
+      if (appState.isDbDiagnosticsOpen) appState.isDbDiagnosticsOpen = false;
+      if (appState.isAiDrawerOpen) appState.isAiDrawerOpen = false;
+      if (appState.isAiSettingsModalOpen) appState.isAiSettingsModalOpen = false;
+      if (appState.isNotesDrawerOpen) appState.isNotesDrawerOpen = false;
+      if (appState.isNoteComposerModalOpen) appState.isNoteComposerModalOpen = false;
+      if (appState.isActivityDrawerOpen) appState.isActivityDrawerOpen = false;
+      if (appState.isUpdateModalOpen) appState.isUpdateModalOpen = false;
+      if (appState.isMockDataModalOpen) appState.isMockDataModalOpen = false;
+      if (appState.isSettingsModalOpen) appState.isSettingsModalOpen = false;
+      if (appState.jsonCellModal.isOpen) appState.jsonCellModal.isOpen = false;
+      if (appState.isDataTransferModalOpen) appState.isDataTransferModalOpen = false;
+      if (appState.isDataSyncModalOpen) appState.isDataSyncModalOpen = false;
+      if (appState.isRefreshAllModalOpen) appState.isRefreshAllModalOpen = false;
+      if (appState.isImpactPreviewOpen) appState.isImpactPreviewOpen = false;
+      if (appState.isAuditDrawerOpen) appState.isAuditDrawerOpen = false;
+      if (appState.ddlReviewModal.isOpen) appState.ddlReviewModal.isOpen = false;
+      if (appState.fkPeek.isOpen) appState.fkPeek.isOpen = false;
+      if (appState.nativeDialog.isOpen) {
+        if (appState.nativeDialog.resolve) appState.nativeDialog.resolve(false);
+        appState.nativeDialog.isOpen = false;
+      }
     }
   }
 </script>
@@ -122,6 +190,11 @@
           <!-- Processlist / DBA Telemetry Tab -->
           <div class="flex-1 overflow-hidden">
             <ProcesslistView />
+          </div>
+        {:else if appState.activeTab?.isErdCanvas}
+          <!-- ERD Canvas Visual Schema Designer Tab -->
+          <div class="flex-1 overflow-hidden">
+            <ErdCanvas />
           </div>
         {:else if appState.activeTab?.isTableViewer}
           <!-- Dedicated Table Viewer Tab (Data, Structure, Indexes, FK, DDL, Diagnostics) -->
@@ -164,5 +237,44 @@
   <InsertRowModal />
   <CommandPaletteModal />
   <ShortcutsModal />
+  <CreateDatabaseModal />
+  <TableCreatorModal />
+  <RenameTableModal />
+  <DuplicateTableModal />
+  <ViewDesignerModal />
+  <TriggerDesignerModal />
+  <RoutineDesignerModal />
+  <EventDesignerModal />
+  <DumpModal />
+  <StructureSyncModal />
+  <RunSqlModal />
+  <SnippetsModal />
+  <CsvImportModal />
+  <PrivilegeMatrixModal />
+  <DbDiagnosticsModal />
+  <JsonCellModal />
+  <AiSettingsModal />
+  <NoteComposerModal />
+  <UpdateModal />
+  <MockDataModal />
+  <SettingsModal />
+  <NativeDialogModal />
+  <ReconnectBanner />
+  <DdlReviewModal />
+  <RefreshAllModal />
+  <ImpactPreviewModal />
+  <DataTransferModal />
+  <DataSyncModal />
+  <AuditDrawer />
+  <FkPeekPopover />
+
+  {#if appState.isAiDrawerOpen}
+    <AiDrawer />
+  {/if}
+  {#if appState.isNotesDrawerOpen}
+    <NotesDrawer />
+  {/if}
+  <ActivityConsoleDrawer />
+
   <ToastContainer />
 </div>

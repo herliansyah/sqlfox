@@ -234,6 +234,188 @@ class ApiClient {
     });
   }
 
+  async batchKillProcesses(sessionId: string, threadIds: number[], mode: 'query' | 'connection' = 'connection'): Promise<{ killed_count?: number; errors?: string[] }> {
+    return this.request(`/session/${sessionId}/batch-kill`, {
+      method: 'POST',
+      body: JSON.stringify({ thread_ids: threadIds, mode }),
+    });
+  }
+
+  async getDeadlock(sessionId: string): Promise<any> {
+    return this.request(`/session/${sessionId}/diagnostics/deadlock`);
+  }
+
+  async getStatementDigest(sessionId: string, limit = 30): Promise<any> {
+    return this.request(`/session/${sessionId}/diagnostics/statement-digest?limit=${limit}`);
+  }
+
+  async resetStatementDigest(sessionId: string): Promise<any> {
+    return this.request(`/session/${sessionId}/diagnostics/statement-digest/reset`, {
+      method: 'POST',
+    });
+  }
+
+  async getServerVariables(sessionId: string): Promise<any> {
+    return this.request(`/session/${sessionId}/diagnostics/variables`);
+  }
+
+  async getClusterHealth(sessionId: string): Promise<any> {
+    return this.request(`/session/${sessionId}/diagnostics/cluster`);
+  }
+
+  async getDatabaseDiagnostics(sessionId: string): Promise<any> {
+    return this.request(`/session/${sessionId}/diagnostics/databases`);
+  }
+
+  async getRedundantIndexes(sessionId: string): Promise<any> {
+    return this.request(`/session/${sessionId}/diagnostics/redundant-indexes`);
+  }
+
+  async executeMaintenance(sessionId: string, db: string, table: string, operation: 'OPTIMIZE' | 'ANALYZE' | 'CHECK' | 'REPAIR'): Promise<any> {
+    return this.request(`/session/${sessionId}/maintenance`, {
+      method: 'POST',
+      body: JSON.stringify({ database: db, table, operation }),
+    });
+  }
+
+  async listUsers(sessionId: string): Promise<any> {
+    return this.request(`/session/${sessionId}/diagnostics/users`);
+  }
+
+  async getUserGrants(sessionId: string, user: string, host: string): Promise<any> {
+    return this.request(`/session/${sessionId}/diagnostics/grants?user=${encodeURIComponent(user)}&host=${encodeURIComponent(host)}`);
+  }
+
+  // Snippets
+  async listSnippets(): Promise<any[]> {
+    return this.request('/snippets');
+  }
+
+  async saveSnippet(snippet: { id?: string; title: string; description?: string; sql: string; tags?: string[] }): Promise<any> {
+    return this.request('/snippets', {
+      method: 'POST',
+      body: JSON.stringify(snippet),
+    });
+  }
+
+  async deleteSnippet(id: string): Promise<any> {
+    return this.request(`/snippets/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Cloud Sync Settings
+  async getCloudSyncConfig(): Promise<any> {
+    return this.request('/cloud-sync/config');
+  }
+
+  async saveCloudSyncConfig(config: any): Promise<any> {
+    return this.request('/cloud-sync/config', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    });
+  }
+
+  // Session Read-Only Toggle
+  async toggleReadOnly(sessionId: string): Promise<{ read_only: boolean }> {
+    return this.request(`/session/${sessionId}/toggle-readonly`, {
+      method: 'POST',
+    });
+  }
+
+  // Operational Notes
+  async listNotes(): Promise<any[]> {
+    return this.request('/notes');
+  }
+
+  async createNote(note: {
+    title: string;
+    content: string;
+    category?: string;
+    table_name?: string;
+    query_snapshot?: string;
+    reminder_at?: string;
+    is_pinned?: boolean;
+  }): Promise<any> {
+    return this.request('/notes', {
+      method: 'POST',
+      body: JSON.stringify(note),
+    });
+  }
+
+  async getNote(id: string): Promise<any> {
+    return this.request(`/notes/${id}`);
+  }
+
+  async updateNote(id: string, note: any): Promise<any> {
+    return this.request(`/notes/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(note),
+    });
+  }
+
+  async deleteNote(id: string): Promise<any> {
+    return this.request(`/notes/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async snoozeNote(id: string, minutes: number): Promise<any> {
+    return this.request(`/notes/${id}/snooze`, {
+      method: 'POST',
+      body: JSON.stringify({ minutes }),
+    });
+  }
+
+  async resolveNote(id: string): Promise<any> {
+    return this.request(`/notes/${id}/resolve`, {
+      method: 'POST',
+    });
+  }
+
+  async getDueReminders(): Promise<any[]> {
+    return this.request('/notes/reminders/due');
+  }
+
+  async getTableNote(sessionId: string, table: string): Promise<{ content: string; updated_at?: string }> {
+    return this.request(`/session/${sessionId}/notes/${encodeURIComponent(table)}`);
+  }
+
+  async saveTableNote(sessionId: string, table: string, content: string): Promise<any> {
+    return this.request(`/session/${sessionId}/notes/${encodeURIComponent(table)}`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    });
+  }
+
+  // Smart Mock Data Generator
+  async generateMockData(
+    sessionId: string,
+    tableName: string,
+    options: { row_count: number; batch_size?: number; truncate_first?: boolean; locale?: string }
+  ): Promise<any> {
+    return this.request(`/session/${sessionId}/table/${encodeURIComponent(tableName)}/mock-data`, {
+      method: 'POST',
+      body: JSON.stringify(options),
+    });
+  }
+
+  // System Update & Changelog
+  async checkSystemUpdate(force = false): Promise<any> {
+    return this.request(`/system/update/check${force ? '?force=true' : ''}`);
+  }
+
+  async applySystemUpdate(version?: string): Promise<any> {
+    return this.request('/system/update/apply', {
+      method: 'POST',
+      body: JSON.stringify({ version }),
+    });
+  }
+
+  async getSystemChangelog(): Promise<any> {
+    return this.request('/system/changelog');
+  }
+
   // AI Assistant
   async aiChat(
     prompt: string,
@@ -243,6 +425,62 @@ class ApiClient {
     return this.request('/ai/chat', {
       method: 'POST',
       body: JSON.stringify({ prompt, context, dialect }),
+    });
+  }
+
+  // Active Threads & Safety
+  async getActiveThreads(sessionId: string): Promise<{ active_threads: number }> {
+    return this.request(`/session/${sessionId}/active-threads`);
+  }
+
+  // Foreign Key Peek
+  async peekForeignKey(sessionId: string, database: string, table: string, column: string, value: any): Promise<any> {
+    const q = `database=${encodeURIComponent(database)}&table=${encodeURIComponent(table)}&column=${encodeURIComponent(column)}&value=${encodeURIComponent(String(value ?? ''))}`;
+    return this.request(`/session/${sessionId}/peek?${q}`);
+  }
+
+  // Cross-Connection Data Transfer
+  async transferData(payload: {
+    source_connection_id: string;
+    source_database?: string;
+    source_table: string;
+    target_connection_id: string;
+    target_database?: string;
+    target_table?: string;
+    truncate_target?: boolean;
+    batch_size?: number;
+  }): Promise<any> {
+    return this.request('/sync/data/transfer', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  // Row-Level Data Sync
+  async compareDataSync(payload: {
+    source_connection_id: string;
+    source_database?: string;
+    source_table: string;
+    target_connection_id: string;
+    target_database?: string;
+    target_table: string;
+    primary_key?: string;
+  }): Promise<any> {
+    return this.request('/sync/data/compare', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async applyDataSync(payload: {
+    target_connection_id: string;
+    target_database?: string;
+    target_table: string;
+    sync_statements: string[];
+  }): Promise<any> {
+    return this.request('/sync/data/apply', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     });
   }
 }

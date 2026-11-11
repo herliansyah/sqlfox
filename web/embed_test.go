@@ -2,15 +2,30 @@ package web
 
 import (
 	"io"
+	"io/fs"
 	"os/exec"
 	"regexp"
 	"strings"
 	"testing"
 )
 
+func readDistHTML() ([]byte, error) {
+	if b, err := distFS.ReadFile("dist/index.legacy.html"); err == nil {
+		return b, nil
+	}
+	return readDistHTML()
+}
+
+func openTestHTML(fsys fs.FS) (fs.File, error) {
+	if f, err := fsys.Open("index.legacy.html"); err == nil {
+		return f, nil
+	}
+	return openTestHTML(fsys)
+}
+
 func TestTypeColoredGridEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -41,7 +56,7 @@ func TestTypeColoredGridEmbedded(t *testing.T) {
 
 func TestNaturalColumnSizingEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -73,7 +88,7 @@ func TestNaturalColumnSizingEmbedded(t *testing.T) {
 
 func TestSessionTabStatePersistenceEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -108,7 +123,7 @@ func TestSessionTabStatePersistenceEmbedded(t *testing.T) {
 
 func TestTabSessionIsolationEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -136,7 +151,7 @@ func TestTabSessionIsolationEmbedded(t *testing.T) {
 
 func TestAuditSourceAttributionEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -173,7 +188,7 @@ func TestAuditSourceAttributionEmbedded(t *testing.T) {
 
 func TestDatabaseStorageAndHealthInspectorEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -206,7 +221,7 @@ func TestDatabaseStorageAndHealthInspectorEmbedded(t *testing.T) {
 
 func TestCopilotAndDrawerNonPushingOverlayEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -236,7 +251,7 @@ func TestCopilotAndDrawerNonPushingOverlayEmbedded(t *testing.T) {
 
 func TestTabGridDataIsolationEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -265,7 +280,7 @@ func TestTabGridDataIsolationEmbedded(t *testing.T) {
 
 func TestLockContentionAndRootBlockerInspectorEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -304,7 +319,7 @@ func TestLockContentionAndRootBlockerInspectorEmbedded(t *testing.T) {
 
 func TestDocumentationLinkEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -332,7 +347,7 @@ func TestDocumentationLinkEmbedded(t *testing.T) {
 
 func TestERDCanvasPrimaryAndForeignKeyEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -369,7 +384,7 @@ func TestERDCanvasPrimaryAndForeignKeyEmbedded(t *testing.T) {
 
 func TestCrossDatabaseGridTargetSchemaPrecedenceEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -404,7 +419,7 @@ func TestCrossDatabaseGridTargetSchemaPrecedenceEmbedded(t *testing.T) {
 
 func TestProcesslistDOMContainmentEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -443,7 +458,7 @@ func TestProcesslistDOMContainmentEmbedded(t *testing.T) {
 
 func TestDeadlockCardsResponsiveGridEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -471,7 +486,7 @@ func TestDeadlockCardsResponsiveGridEmbedded(t *testing.T) {
 
 func TestTabContextMenuAndCloseGuardEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -513,7 +528,7 @@ func TestTabContextMenuAndCloseGuardEmbedded(t *testing.T) {
 
 func TestMasterPINMaskingAndToggleEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -551,7 +566,7 @@ func TestMasterPINMaskingAndToggleEmbedded(t *testing.T) {
 
 func TestProcessDetailModalAndFooterPillsEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -614,7 +629,7 @@ func TestProcessDetailModalAndFooterPillsEmbedded(t *testing.T) {
 
 func TestNotesInboxDrawerLayoutAndBorderEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -651,7 +666,7 @@ func TestNotesInboxDrawerLayoutAndBorderEmbedded(t *testing.T) {
 
 func TestQuerySnapshotCaptureAndNoteExtractionEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -686,7 +701,7 @@ func TestQuerySnapshotCaptureAndNoteExtractionEmbedded(t *testing.T) {
 
 func TestWorkspacePaneSplitterEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -719,7 +734,7 @@ func TestWorkspacePaneSplitterEmbedded(t *testing.T) {
 
 func TestProcesslistActivityTrendEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -756,7 +771,7 @@ func TestProcesslistActivityTrendEmbedded(t *testing.T) {
 
 func TestUIResilienceAndNonWrappingControls(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html: %v", err)
 	}
@@ -787,7 +802,7 @@ func TestUIResilienceAndNonWrappingControls(t *testing.T) {
 
 func TestHeaderDropdownsNotClippedByOverflow(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -826,7 +841,7 @@ func TestHeaderDropdownsNotClippedByOverflow(t *testing.T) {
 
 func TestProcesslistHeaderAndTrendPanelResilience(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -917,7 +932,7 @@ func regexpMatch(pattern, text string) bool {
 
 func TestGridToolbarDropdownNotClipped(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -939,7 +954,7 @@ func TestGridToolbarDropdownNotClipped(t *testing.T) {
 
 func TestConnectionHoverActionsAndAffordance(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -966,7 +981,7 @@ func TestConnectionHoverActionsAndAffordance(t *testing.T) {
 
 func TestChangelogCheckForUpdatesButtonEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -985,7 +1000,7 @@ func TestChangelogCheckForUpdatesButtonEmbedded(t *testing.T) {
 
 func TestUIGlitchAndResilienceGuards(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1078,7 +1093,7 @@ func TestUIGlitchAndResilienceGuards(t *testing.T) {
 
 func TestComprehensiveUIGlitchGuards(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1256,7 +1271,7 @@ func TestComprehensiveUIGlitchGuards(t *testing.T) {
 
 func TestRemoteAccessLockScreenEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -1291,7 +1306,7 @@ func TestRemoteAccessLockScreenEmbedded(t *testing.T) {
 
 func TestNotesCardMarkdownPreviewEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -1319,7 +1334,7 @@ func TestNotesCardMarkdownPreviewEmbedded(t *testing.T) {
 
 func TestHeaderDropdownsAboveNotesDrawerEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -1346,7 +1361,7 @@ func TestHeaderDropdownsAboveNotesDrawerEmbedded(t *testing.T) {
 
 func TestBrandMarkCanonicalIconConsistency(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html: %v", err)
 	}
@@ -1371,7 +1386,7 @@ func TestBrandMarkCanonicalIconConsistency(t *testing.T) {
 
 func TestCodeMirrorDarkThemeTokensEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html: %v", err)
 	}
@@ -1399,7 +1414,7 @@ func TestCodeMirrorDarkThemeTokensEmbedded(t *testing.T) {
 
 func TestAutoRefreshCountdownAndTopStripeEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html: %v", err)
 	}
@@ -1433,7 +1448,7 @@ func TestAutoRefreshCountdownAndTopStripeEmbedded(t *testing.T) {
 
 func TestProcesslistBatchOperationsEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -1482,7 +1497,7 @@ func TestProcesslistBatchOperationsEmbedded(t *testing.T) {
 
 func TestProcesslistBatchModalScriptIntegrity(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1505,7 +1520,7 @@ func TestProcesslistBatchModalScriptIntegrity(t *testing.T) {
 
 func TestProcesslistActionButtonsAndDeferredRefresh(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1538,7 +1553,7 @@ func TestProcesslistActionButtonsAndDeferredRefresh(t *testing.T) {
 
 func TestProcesslistTwoTierToolbarLayout(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1598,7 +1613,7 @@ func TestProcesslistTwoTierToolbarLayout(t *testing.T) {
 
 func TestProcesslistColumnVisibilityPicker(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1653,7 +1668,7 @@ func TestProcesslistColumnVisibilityPicker(t *testing.T) {
 
 func TestUpdateAndToastIntegration(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html: %v", err)
 	}
@@ -1690,7 +1705,7 @@ func TestUpdateAndToastIntegration(t *testing.T) {
 
 func TestQueryExecutionConcurrencyAndDebounceGuardsEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html: %v", err)
 	}
@@ -1729,7 +1744,7 @@ func TestQueryExecutionConcurrencyAndDebounceGuardsEmbedded(t *testing.T) {
 
 func TestFooterLatencyIntegrity(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -1754,7 +1769,7 @@ func TestFooterLatencyIntegrity(t *testing.T) {
 
 func TestTabDatabaseScopeAndDDLAffirmationEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html: %v", err)
 	}
@@ -1792,7 +1807,7 @@ func TestTabDatabaseScopeAndDDLAffirmationEmbedded(t *testing.T) {
 
 func TestTableDesignerFocusRetentionAndConstraintBuildersEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open embedded index.html: %v", err)
 	}
@@ -1834,7 +1849,7 @@ func TestTableDesignerFocusRetentionAndConstraintBuildersEmbedded(t *testing.T) 
 
 func TestExportDropdownClickAffordanceAndExclusion(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open embedded index.html: %v", err)
 	}
@@ -1862,7 +1877,7 @@ func TestExportDropdownClickAffordanceAndExclusion(t *testing.T) {
 
 func TestExplainQueryToEditorWiring(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open embedded index.html: %v", err)
 	}
@@ -1896,7 +1911,7 @@ func TestExplainQueryToEditorWiring(t *testing.T) {
 
 func TestQuerySuccessBannerEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open embedded index.html: %v", err)
 	}
@@ -1924,7 +1939,7 @@ func TestQuerySuccessBannerEmbedded(t *testing.T) {
 
 func TestPendingBusyStateGuardsAndLoadingEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open embedded index.html: %v", err)
 	}
@@ -1982,7 +1997,8 @@ func TestEmbeddedIndexHTMLJavaScriptSyntax(t *testing.T) {
 
 	cmd := exec.Command(nodePath, "-e", `
 const fs = require('fs');
-const html = fs.readFileSync('dist/index.html', 'utf8');
+const file = fs.existsSync('dist/index.legacy.html') ? 'dist/index.legacy.html' : 'dist/index.html';
+const html = fs.readFileSync(file, 'utf8');
 const lastScriptStart = html.lastIndexOf('<script>');
 const lastScriptEnd = html.lastIndexOf('</script>');
 if (lastScriptStart === -1 || lastScriptEnd === -1) {
@@ -2000,7 +2016,7 @@ new vm.Script(scriptContent, { filename: 'index.html' });
 
 func TestVisualTransactionControlsEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html: %v", err)
 	}
@@ -2030,7 +2046,7 @@ func TestVisualTransactionControlsEmbedded(t *testing.T) {
 
 func TestAutoWakeupAndFetchTimeoutEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html: %v", err)
 	}
@@ -2059,7 +2075,7 @@ func TestAutoWakeupAndFetchTimeoutEmbedded(t *testing.T) {
 
 func TestQueryResultsRowWindowingEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html: %v", err)
 	}
@@ -2089,7 +2105,7 @@ func TestQueryResultsRowWindowingEmbedded(t *testing.T) {
 
 func TestVirtualDataGridAndStreamingEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html: %v", err)
 	}
@@ -2145,7 +2161,7 @@ func TestVirtualDataGridAndStreamingEmbedded(t *testing.T) {
 
 func TestSidebarVisibilityFOUCGuardEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -2172,7 +2188,7 @@ func TestSidebarVisibilityFOUCGuardEmbedded(t *testing.T) {
 
 func TestCopilotErgonomicsEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -2201,7 +2217,7 @@ func TestCopilotErgonomicsEmbedded(t *testing.T) {
 }
 
 func TestViewAndTriggerCodeMirrorIntegrationEmbedded(t *testing.T) {
-	contentBytes, err := distFS.ReadFile("dist/index.html")
+	contentBytes, err := readDistHTML()
 	if err != nil {
 		t.Fatalf("failed to read index.html: %v", err)
 	}
@@ -2229,7 +2245,7 @@ func TestViewAndTriggerCodeMirrorIntegrationEmbedded(t *testing.T) {
 }
 
 func TestRoutineDesignerSuiteEmbedded(t *testing.T) {
-	contentBytes, err := distFS.ReadFile("dist/index.html")
+	contentBytes, err := readDistHTML()
 	if err != nil {
 		t.Fatalf("failed to read index.html: %v", err)
 	}
@@ -2261,7 +2277,7 @@ func TestRoutineDesignerSuiteEmbedded(t *testing.T) {
 }
 
 func TestEventDesignerSuiteEmbedded(t *testing.T) {
-	contentBytes, err := distFS.ReadFile("dist/index.html")
+	contentBytes, err := readDistHTML()
 	if err != nil {
 		t.Fatalf("failed to read index.html: %v", err)
 	}
@@ -2290,7 +2306,7 @@ func TestEventDesignerSuiteEmbedded(t *testing.T) {
 }
 
 func TestMySQLObjectsCRUDHardeningAndSafetyGuards(t *testing.T) {
-	contentBytes, err := distFS.ReadFile("dist/index.html")
+	contentBytes, err := readDistHTML()
 	if err != nil {
 		t.Fatalf("failed to read index.html: %v", err)
 	}
@@ -2323,7 +2339,7 @@ func TestMySQLObjectsCRUDHardeningAndSafetyGuards(t *testing.T) {
 
 func TestDropdownKeyboardNavigationEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -2367,7 +2383,7 @@ func TestDropdownKeyboardNavigationEmbedded(t *testing.T) {
 
 func TestMultiResultSuiteAndBatchPagingEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -2401,7 +2417,7 @@ func TestMultiResultSuiteAndBatchPagingEmbedded(t *testing.T) {
 
 func TestGridRowGutterEmbedded(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -2439,7 +2455,7 @@ func TestGridRowGutterEmbedded(t *testing.T) {
 
 func TestQueryResultUpdatableAndContextMenuActions(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html from embedded FS: %v", err)
 	}
@@ -2511,7 +2527,7 @@ func TestEmbeddedFonts(t *testing.T) {
 	}
 
 	// Verify index.html loads fonts.css
-	idxFile, err := fsys.Open("index.html")
+	idxFile, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html: %v", err)
 	}
@@ -2538,7 +2554,7 @@ func TestEmbeddedFonts(t *testing.T) {
 
 func TestBrowserPopoutAffordanceInFooter(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html: %v", err)
 	}
@@ -2582,7 +2598,7 @@ func TestBrowserPopoutAffordanceInFooter(t *testing.T) {
 
 func TestCreateDatabaseAndDDLReviewIntegrity(t *testing.T) {
 	fsys := Assets()
-	f, err := fsys.Open("index.html")
+	f, err := openTestHTML(fsys)
 	if err != nil {
 		t.Fatalf("failed to open index.html: %v", err)
 	}

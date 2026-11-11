@@ -18,8 +18,87 @@ import { bracketMatching, syntaxHighlighting, defaultHighlightStyle } from '@cod
 export interface CodeMirrorOptions {
   doc: string;
   dialect?: 'mysql' | 'postgres' | 'sqlite';
+  schema?: Record<string, string[]>;
   onExecute?: () => void;
+  onExecuteAtCursor?: (statement: string) => void;
+  onFormat?: () => void;
   onChange?: (val: string) => void;
+}
+
+function getStatementAtPos(text: string, pos: number): string {
+  if (!text.trim()) return '';
+  let inSingle = false;
+  let inDouble = false;
+  let inBacktick = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  let stmtStart = 0;
+  const stmts: { start: number; end: number; text: string }[] = [];
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    const next = i + 1 < text.length ? text[i + 1] : '';
+
+    if (inLineComment) {
+      if (ch === '\n' || ch === '\r') inLineComment = false;
+      continue;
+    }
+    if (inBlockComment) {
+      if (ch === '*' && next === '/') {
+        inBlockComment = false;
+        i++;
+      }
+      continue;
+    }
+    if (inSingle) {
+      if (ch === '\\') { i++; continue; }
+      if (ch === "'") inSingle = false;
+      continue;
+    }
+    if (inDouble) {
+      if (ch === '\\') { i++; continue; }
+      if (ch === '"') inDouble = false;
+      continue;
+    }
+    if (inBacktick) {
+      if (ch === '`') inBacktick = false;
+      continue;
+    }
+
+    if (ch === '-' && next === '-') {
+      inLineComment = true;
+      i++;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      inBlockComment = true;
+      i++;
+      continue;
+    }
+    if (ch === "'") { inSingle = true; continue; }
+    if (ch === '"') { inDouble = true; continue; }
+    if (ch === '`') { inBacktick = true; continue; }
+
+    if (ch === ';') {
+      stmts.push({
+        start: stmtStart,
+        end: i + 1,
+        text: text.slice(stmtStart, i + 1).trim(),
+      });
+      stmtStart = i + 1;
+    }
+  }
+
+  if (stmtStart < text.length) {
+    stmts.push({
+      start: stmtStart,
+      end: text.length,
+      text: text.slice(stmtStart).trim(),
+    });
+  }
+
+  const found = stmts.find((s) => pos >= s.start && pos <= s.end);
+  return found ? found.text : text;
 }
 
 export function codemirror(node: HTMLElement, options: CodeMirrorOptions) {
@@ -34,6 +113,31 @@ export function codemirror(node: HTMLElement, options: CodeMirrorOptions) {
       run: () => {
         if (options.onExecute) {
           options.onExecute();
+          return true;
+        }
+        return false;
+      },
+    },
+    {
+      key: 'Ctrl-Shift-Enter',
+      mac: 'Cmd-Shift-Enter',
+      run: (view) => {
+        if (options.onExecuteAtCursor) {
+          const pos = view.state.selection.main.head;
+          const text = view.state.doc.toString();
+          const stmt = getStatementAtPos(text, pos);
+          options.onExecuteAtCursor(stmt);
+          return true;
+        }
+        return false;
+      },
+    },
+    {
+      key: 'Ctrl-Shift-f',
+      mac: 'Cmd-Shift-f',
+      run: () => {
+        if (options.onFormat) {
+          options.onFormat();
           return true;
         }
         return false;
@@ -67,7 +171,7 @@ export function codemirror(node: HTMLElement, options: CodeMirrorOptions) {
       highlightActiveLine(),
       highlightSelectionMatches(),
       syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-      sql({ dialect: dialectExtension }),
+      sql({ dialect: dialectExtension, schema: options.schema }),
       oneDark,
       runKeymap,
       updateListener,

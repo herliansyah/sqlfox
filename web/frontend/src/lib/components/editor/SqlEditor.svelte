@@ -2,9 +2,20 @@
   import { appState } from '../../stores/appState.svelte';
   import { codemirror } from '../../actions/codemirror';
   import { api } from '../../api/client';
+  import { formatSQL } from '../../utils/sqlFormatter';
   import Icon from '../common/Icon.svelte';
 
   let currentTab = $derived(appState.activeTab);
+
+  let editorSchema = $derived.by(() => {
+    const map: Record<string, string[]> = {};
+    if (appState.catalog?.tables) {
+      for (const t of appState.catalog.tables) {
+        map[t.name] = (t.columns || []).map((c) => (typeof c === 'string' ? c : c.name));
+      }
+    }
+    return map;
+  });
 
   // AI Copilot state
   let showAiAssistant = $state(false);
@@ -20,6 +31,59 @@
 
   function handleExecute() {
     appState.executeCurrentTab();
+  }
+
+  function handleFormat() {
+    if (!currentTab || !currentTab.sql) return;
+    const formatted = formatSQL(currentTab.sql);
+    currentTab.sql = formatted;
+    appState.showToast('Formatted SQL query', 'info');
+  }
+
+  async function handleStartTransaction() {
+    if (!appState.activeSessionId) return;
+    try {
+      const res = await api.executeQuery(appState.activeSessionId, 'START TRANSACTION;', false);
+      if (res.error) {
+        appState.showToast(`Transaction failed to start: ${res.error}`, 'error');
+        return;
+      }
+      appState.isTransactionActive = true;
+      appState.showToast('Transaction started (Uncommitted)', 'info');
+    } catch (err: any) {
+      appState.showToast(`Error: ${err.message}`, 'error');
+    }
+  }
+
+  async function handleCommit() {
+    if (!appState.activeSessionId) return;
+    try {
+      const res = await api.executeQuery(appState.activeSessionId, 'COMMIT;', false);
+      if (res.error) {
+        appState.showToast(`Commit failed: ${res.error}`, 'error');
+        return;
+      }
+      appState.isTransactionActive = false;
+      appState.showToast('Transaction committed successfully', 'success');
+      await appState.refreshCatalog();
+    } catch (err: any) {
+      appState.showToast(`Error: ${err.message}`, 'error');
+    }
+  }
+
+  async function handleRollback() {
+    if (!appState.activeSessionId) return;
+    try {
+      const res = await api.executeQuery(appState.activeSessionId, 'ROLLBACK;', false);
+      if (res.error) {
+        appState.showToast(`Rollback failed: ${res.error}`, 'error');
+        return;
+      }
+      appState.isTransactionActive = false;
+      appState.showToast('Transaction rolled back', 'warning');
+    } catch (err: any) {
+      appState.showToast(`Error: ${err.message}`, 'error');
+    }
   }
 
   async function handleAiSubmit(promptToRun?: string) {
@@ -96,6 +160,63 @@
         <span>Explain</span>
       </button>
 
+      <!-- Pre-Flight Impact Tree Button -->
+      <button
+        onclick={() => {
+          appState.impactPreviewData = currentTab?.explainResult;
+          appState.isImpactPreviewOpen = true;
+        }}
+        class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 hover:text-white border border-[#334155] text-xs flex items-center space-x-1.5 transition shadow-sm"
+        title="View Pre-Flight Impact Preview & Execution Tree"
+      >
+        <span class="text-sky-400">🔍</span>
+        <span>Impact Tree</span>
+      </button>
+
+      <!-- Profiler Toggle Button -->
+      <button
+        onclick={() => {
+          if (currentTab) currentTab.showQueryProfiler = !currentTab.showQueryProfiler;
+        }}
+        class="h-7 px-2.5 rounded {currentTab?.showQueryProfiler ? 'bg-sky-950 text-sky-300 border-sky-600' : 'bg-[#1e293b] text-slate-300 hover:text-white'} border border-[#334155] text-xs flex items-center space-x-1.5 transition shadow-sm"
+        title="Toggle Stage Profiler (SHOW PROFILE)"
+      >
+        <span>⏱️</span>
+        <span>Profiler</span>
+      </button>
+
+      <!-- Format SQL Button -->
+      <button
+        onclick={handleFormat}
+        disabled={currentTab?.isExecuting || !currentTab?.sql}
+        class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-40 text-slate-300 hover:text-white border border-[#334155] text-xs flex items-center space-x-1.5 transition shadow-sm"
+        title="Format & Beautify SQL (Ctrl+Shift+F)"
+      >
+        <Icon name="file-text" class="w-3.5 h-3.5 text-emerald-400" />
+        <span>Format</span>
+        <span class="text-[9px] text-slate-500 font-mono hidden sm:inline">Ctrl+Shift+F</span>
+      </button>
+
+      <div class="h-3.5 w-px bg-slate-800"></div>
+
+      <!-- Tab Database Scope Selector Pill (ADR 0055) -->
+      {#if appState.availableDatabases.length > 0}
+        <div class="flex items-center space-x-1 px-2 py-0.5 rounded bg-slate-900 border border-slate-700/80 text-[11px] font-mono text-slate-300" title="Tab-Specific Database Scope (ADR 0055)">
+          <span class="text-slate-500">scope:</span>
+          <select
+            value={currentTab?.databaseScope || appState.currentDatabase}
+            onchange={(e) => {
+              if (currentTab) currentTab.databaseScope = (e.target as HTMLSelectElement).value;
+            }}
+            class="bg-transparent text-sky-400 font-bold focus:outline-none cursor-pointer text-xs"
+          >
+            {#each appState.availableDatabases as db}
+              <option value={db} class="bg-[#0f172a] text-slate-200">{db}</option>
+            {/each}
+          </select>
+        </div>
+      {/if}
+
       <div class="h-3.5 w-px bg-slate-800"></div>
 
       <!-- Clear Editor Button -->
@@ -107,6 +228,49 @@
         <Icon name="trash-2" class="w-3.5 h-3.5 text-slate-400" />
         <span>Clear</span>
       </button>
+
+      <div class="h-3.5 w-px bg-slate-800"></div>
+
+      <!-- Transaction Controls -->
+      {#if !appState.isTransactionActive}
+        <button
+          onclick={handleStartTransaction}
+          disabled={currentTab?.isExecuting}
+          class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 hover:text-white border border-[#334155] text-xs flex items-center space-x-1.5 transition shadow-sm"
+          title="Start Database Transaction (START TRANSACTION / BEGIN)"
+        >
+          <Icon name="shield" class="w-3.5 h-3.5 text-amber-400" />
+          <span>Begin Tx</span>
+        </button>
+      {:else}
+        <!-- In-flight Transaction Pill -->
+        <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] font-mono animate-pulse">
+          <span class="w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]"></span>
+          <span class="font-bold">TX Active</span>
+        </div>
+
+        <!-- Commit Button -->
+        <button
+          onclick={handleCommit}
+          disabled={currentTab?.isExecuting}
+          class="h-7 px-2.5 rounded bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-700/60 text-emerald-300 text-xs font-semibold flex items-center space-x-1 transition shadow-sm"
+          title="Commit In-Flight Transaction (COMMIT)"
+        >
+          <Icon name="check" class="w-3.5 h-3.5" />
+          <span>Commit</span>
+        </button>
+
+        <!-- Rollback Button -->
+        <button
+          onclick={handleRollback}
+          disabled={currentTab?.isExecuting}
+          class="h-7 px-2.5 rounded bg-rose-950/80 hover:bg-rose-900 border border-rose-700/60 text-rose-300 text-xs font-semibold flex items-center space-x-1 transition shadow-sm"
+          title="Rollback In-Flight Transaction (ROLLBACK)"
+        >
+          <Icon name="rotate-ccw" class="w-3.5 h-3.5" />
+          <span>Rollback</span>
+        </button>
+      {/if}
     </div>
 
     <!-- Right Side: Dialect Indicator & AI Assistant -->
@@ -136,7 +300,10 @@
         use:codemirror={{
           doc: currentTab.sql,
           dialect: appState.activeConnection?.driver,
+          schema: editorSchema,
           onExecute: handleExecute,
+          onExecuteAtCursor: (stmt) => appState.executeStatementAtCursor(stmt),
+          onFormat: handleFormat,
           onChange: handleSqlChange,
         }}
       ></div>

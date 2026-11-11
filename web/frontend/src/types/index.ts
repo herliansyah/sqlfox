@@ -1,7 +1,7 @@
 export type DatabaseDriver = 'mysql' | 'postgres' | 'sqlite';
 export type Environment = 'Development' | 'Staging' | 'Production';
-export type RiskLevel = 'NONE' | 'WARNING' | 'DANGEROUS' | 'CRITICAL';
-export type TableMode = 'data' | 'structure' | 'indexes' | 'foreign-keys' | 'ddl' | 'diagnostics';
+export type RiskLevel = 'NONE' | 'LOW' | 'MEDIUM' | 'WARNING' | 'HIGH' | 'DANGEROUS' | 'CRITICAL';
+export type TableMode = 'data' | 'structure' | 'indexes' | 'foreign-keys' | 'ddl' | 'diagnostics' | 'partitions';
 
 export interface ConnectionProfile {
   id: string;
@@ -119,8 +119,8 @@ export interface StatementEstimate {
 
 export interface InspectionResult {
   risk_level: RiskLevel;
-  is_destructive: boolean;
-  requires_challenge: boolean;
+  is_destructive?: boolean;
+  requires_challenge?: boolean;
   requires_affirmation?: boolean;
   schema_scope_mismatch?: boolean;
   target_database?: string;
@@ -135,6 +135,23 @@ export interface InspectionResult {
   statement_estimates?: StatementEstimate[];
 }
 
+export interface FilterPill {
+  col: string;
+  op: '=' | '!=' | 'LIKE' | 'NOT LIKE' | 'IS NULL' | 'IS NOT NULL' | '>' | '<' | '>=' | '<=' | 'IN' | 'NOT IN' | 'BETWEEN' | 'RAW';
+  val: string;
+}
+
+export interface QueryProfileStage {
+  stage: string;
+  duration_us: number;
+  percentage?: number;
+}
+
+export interface QueryProfile {
+  duration_ms: number;
+  stages: QueryProfileStage[];
+}
+
 export interface QueryExecutionResult {
   columns: (string | ColumnDefinition)[];
   rows: any[][];
@@ -142,14 +159,12 @@ export interface QueryExecutionResult {
   row_count: number;
   affected_rows?: number;
   error?: string;
+  statement?: string;
+  message?: string;
   is_destructive_blocked?: boolean;
   inspection?: InspectionResult;
-}
-
-export interface FilterPill {
-  col: string;
-  op: '=' | '!=' | 'LIKE' | 'NOT LIKE' | 'IS NULL' | 'IS NOT NULL' | '>' | '<' | '>=' | '<=';
-  val: string;
+  results?: QueryExecutionResult[];
+  profile?: QueryProfile;
 }
 
 export interface StagedEdit {
@@ -189,6 +204,34 @@ export interface Toast {
   message: string;
 }
 
+export interface SessionAuditItem {
+  id: string;
+  timestamp: string;
+  sql: string;
+  duration_ms: number;
+  row_count?: number;
+  affected_rows?: number;
+  error?: string;
+  database?: string;
+}
+
+export interface NativeDialogState {
+  isOpen: boolean;
+  type: 'alert' | 'confirm' | 'prompt';
+  title: string;
+  message: string;
+  defaultValue?: string;
+  inputValue?: string;
+  resolve?: (value: any) => void;
+}
+
+export interface DdlReviewState {
+  isOpen: boolean;
+  sql: string;
+  title?: string;
+  onConfirm?: () => Promise<void> | void;
+}
+
 export interface EditorTab {
   id: string;
   title: string;
@@ -211,4 +254,12 @@ export interface EditorTab {
   sortCol?: string | null;
   sortDir?: 'ASC' | 'DESC' | null;
   explainResult?: any;
+  databaseScope?: string;
+  multiResults?: QueryExecutionResult[];
+  activeResultIndex?: number;
+  streamBatchOffset?: number;
+  hasMoreStream?: boolean;
+  stagedDraftRows?: Record<string, any>[];
+  selectedRowIndices?: number[];
+  showQueryProfiler?: boolean;
 }

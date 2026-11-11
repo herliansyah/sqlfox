@@ -9,6 +9,12 @@ import type {
   FilterPill,
   StagedEdit,
   Toast,
+  TriggerMetadata,
+  RoutineMetadata,
+  EventMetadata,
+  NativeDialogState,
+  DdlReviewState,
+  SessionAuditItem,
 } from '../../types';
 import { api } from '../api/client';
 
@@ -58,9 +64,118 @@ export class AppState {
   isCommandPaletteOpen = $state<boolean>(false);
   isShortcutsModalOpen = $state<boolean>(false);
   isCreateDbModalOpen = $state<boolean>(false);
+  isTableCreatorOpen = $state<boolean>(false);
+  isRenameTableModalOpen = $state<boolean>(false);
+  tableToRename = $state<string>('');
+  isDuplicateTableModalOpen = $state<boolean>(false);
+  tableToDuplicate = $state<string>('');
+  isViewDesignerOpen = $state<boolean>(false);
+  viewToEdit = $state<{ name: string; query?: string } | null>(null);
+  isTriggerDesignerOpen = $state<boolean>(false);
+  triggerToEdit = $state<TriggerMetadata | null>(null);
+  isRoutineDesignerOpen = $state<boolean>(false);
+  routineToEdit = $state<RoutineMetadata | null>(null);
+  isEventDesignerOpen = $state<boolean>(false);
+  eventToEdit = $state<EventMetadata | null>(null);
+  isDumpModalOpen = $state<boolean>(false);
+  dumpTargetTable = $state<string>('');
+  isStructureSyncModalOpen = $state<boolean>(false);
+  isRunSqlModalOpen = $state<boolean>(false);
+  isSnippetsModalOpen = $state<boolean>(false);
+  isCsvImportModalOpen = $state<boolean>(false);
+  isPrivilegeMatrixOpen = $state<boolean>(false);
+  isDbDiagnosticsOpen = $state<boolean>(false);
+  isAiDrawerOpen = $state<boolean>(false);
+  isAiSettingsModalOpen = $state<boolean>(false);
+  isNotesDrawerOpen = $state<boolean>(false);
+  isNoteComposerModalOpen = $state<boolean>(false);
+  editingNote = $state<any>(null);
+  isActivityDrawerOpen = $state<boolean>(false);
+  isUpdateModalOpen = $state<boolean>(false);
+  isMockDataModalOpen = $state<boolean>(false);
+  mockDataTableName = $state<string>('');
+  isSettingsModalOpen = $state<boolean>(false);
+  isReadOnly = $state<boolean>(false);
+  isTransactionActive = $state<boolean>(false);
   isRecordInspectorOpen = $state<boolean>(false);
   recordInspectorRowIndex = $state<number>(0);
   isInsertRowModalOpen = $state<boolean>(false);
+  jsonCellModal = $state<{
+    isOpen: boolean;
+    tableName?: string;
+    rowIdx?: number;
+    colIdx?: number;
+    colName: string;
+    value: string;
+    isReadOnly: boolean;
+  }>({
+    isOpen: false,
+    colName: '',
+    value: '',
+    isReadOnly: true,
+  });
+
+  // Native HTML5 dialog state
+  nativeDialog = $state<NativeDialogState>({
+    isOpen: false,
+    type: 'alert',
+    title: '',
+    message: '',
+    defaultValue: '',
+    inputValue: '',
+  });
+
+  // Pre-Execution DDL Review modal state
+  ddlReview = $state<DdlReviewState>({
+    isOpen: false,
+    sql: '',
+    title: 'Pre-Execution DDL Review',
+  });
+
+  // Global Network Error Boundary & Health Watcher
+  isReconnecting = $state<boolean>(false);
+  reconnectCountdown = $state<number>(0);
+  reconnectAttempts = $state<number>(0);
+  private reconnectTimer: any = null;
+
+  // Schema Explorer Prefix Grouping (ADR 0058)
+  prefixGroupingEnabled = $state<boolean>(false);
+
+  // Additional Modals & Telemetry
+  isRefreshAllOpen = $state<boolean>(false);
+  isImpactPreviewOpen = $state<boolean>(false);
+  impactPreviewData = $state<any>(null);
+  isDataTransferOpen = $state<boolean>(false);
+  isDataSyncOpen = $state<boolean>(false);
+  isAuditDrawerOpen = $state<boolean>(false);
+  auditLogs = $state<SessionAuditItem[]>([]);
+
+  // FK Peek Popover state
+  fkPeekState = $state<{
+    isOpen: boolean;
+    x: number;
+    y: number;
+    table: string;
+    col: string;
+    refTable: string;
+    refCol: string;
+    val: any;
+    data: any | null;
+    isLoading: boolean;
+    error: string | null;
+  }>({
+    isOpen: false,
+    x: 0,
+    y: 0,
+    table: '',
+    col: '',
+    refTable: '',
+    refCol: '',
+    val: null,
+    data: null,
+    isLoading: false,
+    error: null,
+  });
 
   // UI state
   sidebarCollapsed = $state<boolean>(false);
@@ -213,6 +328,55 @@ export class AppState {
       this.showToast(`Failed to save connection: ${err.message}`, 'error');
       throw err;
     }
+  }
+
+  openViewDesigner(view: { name: string; query?: string } | null = null) {
+    this.viewToEdit = view;
+    this.isViewDesignerOpen = true;
+  }
+
+  openTriggerDesigner(trigger: TriggerMetadata | null = null) {
+    this.triggerToEdit = trigger;
+    this.isTriggerDesignerOpen = true;
+  }
+
+  openRoutineDesigner(routine: RoutineMetadata | null = null) {
+    this.routineToEdit = routine;
+    this.isRoutineDesignerOpen = true;
+  }
+
+  openEventDesigner(event: EventMetadata | null = null) {
+    this.eventToEdit = event;
+    this.isEventDesignerOpen = true;
+  }
+
+  openDumpModal(tableName = '') {
+    this.dumpTargetTable = tableName;
+    this.isDumpModalOpen = true;
+  }
+
+  openStructureSyncModal() {
+    this.isStructureSyncModalOpen = true;
+  }
+
+  openRunSqlModal() {
+    this.isRunSqlModalOpen = true;
+  }
+
+  openSnippetsModal() {
+    this.isSnippetsModalOpen = true;
+  }
+
+  openCsvImportModal() {
+    this.isCsvImportModalOpen = true;
+  }
+
+  openPrivilegeMatrixModal() {
+    this.isPrivilegeMatrixOpen = true;
+  }
+
+  openDbDiagnosticsModal() {
+    this.isDbDiagnosticsOpen = true;
   }
 
   async deleteConnection(id: string) {
@@ -435,6 +599,24 @@ export class AppState {
     this.activeTabId = newId;
   }
 
+  openErdTab() {
+    const existing = this.tabs.find((t) => t.isErdCanvas);
+    if (existing) {
+      this.activeTabId = existing.id;
+      return;
+    }
+    const newId = `tab-erd-${Date.now()}`;
+    const newTab: EditorTab = {
+      id: newId,
+      title: 'ERD Canvas',
+      sql: '',
+      isErdCanvas: true,
+      isTableViewer: false,
+    };
+    this.tabs.push(newTab);
+    this.activeTabId = newId;
+  }
+
   setTableMode(tabId: string, mode: TableMode) {
     const tab = this.tabs.find((t) => t.id === tabId);
     if (tab) {
@@ -461,7 +643,18 @@ export class AppState {
             return `\`${p.col}\` ${p.op}`;
           }
           const escapedVal = p.val.replace(/'/g, "''");
-          return `\`${p.col}\` ${p.op} '${escapedVal}'`;
+          if (p.op === 'LIKE' || p.op === 'NOT LIKE') {
+            return `\`${p.col}\` ${p.op} '%${escapedVal}%'`;
+          }
+          if (p.op === 'IN' || p.op === 'NOT IN') {
+            return `\`${p.col}\` ${p.op} (${p.val})`;
+          }
+          if (p.op === 'BETWEEN') {
+            return `\`${p.col}\` BETWEEN ${p.val}`;
+          }
+          // numeric check
+          const isNum = !isNaN(Number(p.val)) && p.val.trim() !== '';
+          return isNum ? `\`${p.col}\` ${p.op} ${p.val}` : `\`${p.col}\` ${p.op} '${escapedVal}'`;
         });
         query = `SELECT * FROM ${dbPrefix}\`${tab.tableName}\` WHERE ${whereClauses.join(' AND ')} LIMIT ${limit} OFFSET ${offset};`;
         const res = await api.executeQuery(this.activeSessionId, query, false);
@@ -557,28 +750,299 @@ export class AppState {
     }
 
     tab.isExecuting = true;
+    const startTime = performance.now();
     try {
       const res = await api.executeQuery(this.activeSessionId, tab.sql, false);
+      let finalRes = res;
       if (res.is_destructive_blocked && res.inspection) {
         const confirmed = await this.promptSafetyChallenge(tab.sql, res.inspection);
         if (confirmed) {
-          const secondRun = await api.executeQuery(this.activeSessionId, tab.sql, true);
-          tab.activeResult = secondRun;
+          finalRes = await api.executeQuery(this.activeSessionId, tab.sql, true);
+        } else {
+          return;
         }
+      }
+
+      tab.activeResult = finalRes;
+      if (finalRes.results && finalRes.results.length > 1) {
+        tab.multiResults = finalRes.results;
+        tab.activeResultIndex = 0;
       } else {
-        tab.activeResult = res;
+        tab.multiResults = undefined;
+        tab.activeResultIndex = undefined;
+      }
+
+      // Record to audit log
+      this.auditLogs.unshift({
+        id: 'audit-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+        timestamp: new Date().toLocaleTimeString(),
+        sql: tab.sql,
+        duration_ms: finalRes.duration_ms || Math.round(performance.now() - startTime),
+        row_count: finalRes.row_count,
+        affected_rows: finalRes.affected_rows,
+        database: tab.databaseScope || this.currentDatabase,
+      });
+      if (this.auditLogs.length > 200) {
+        this.auditLogs.pop();
       }
     } catch (err: any) {
+      const errMsg = err.message || 'Execution error';
       tab.activeResult = {
         columns: [],
         rows: [],
-        duration_ms: 0,
+        duration_ms: Math.round(performance.now() - startTime),
         row_count: 0,
-        error: err.message || 'Execution error',
+        error: errMsg,
+      };
+      this.auditLogs.unshift({
+        id: 'audit-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+        timestamp: new Date().toLocaleTimeString(),
+        sql: tab.sql,
+        duration_ms: Math.round(performance.now() - startTime),
+        row_count: 0,
+        error: errMsg,
+        database: tab.databaseScope || this.currentDatabase,
+      });
+    } finally {
+      tab.isExecuting = false;
+    }
+  }
+
+  async executeStatementAtCursor(stmtSql: string) {
+    const tab = this.activeTab;
+    if (!tab || !this.activeSessionId || !stmtSql.trim()) return;
+
+    tab.isExecuting = true;
+    const startTime = performance.now();
+    try {
+      const res = await api.executeQuery(this.activeSessionId, stmtSql, false);
+      let finalRes = res;
+      if (res.is_destructive_blocked && res.inspection) {
+        const confirmed = await this.promptSafetyChallenge(stmtSql, res.inspection);
+        if (confirmed) {
+          finalRes = await api.executeQuery(this.activeSessionId, stmtSql, true);
+        } else {
+          return;
+        }
+      }
+
+      tab.activeResult = finalRes;
+      if (finalRes.results && finalRes.results.length > 1) {
+        tab.multiResults = finalRes.results;
+        tab.activeResultIndex = 0;
+      } else {
+        tab.multiResults = undefined;
+        tab.activeResultIndex = undefined;
+      }
+
+      this.auditLogs.unshift({
+        id: 'audit-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+        timestamp: new Date().toLocaleTimeString(),
+        sql: stmtSql,
+        duration_ms: finalRes.duration_ms || Math.round(performance.now() - startTime),
+        row_count: finalRes.row_count,
+        affected_rows: finalRes.affected_rows,
+        database: tab.databaseScope || this.currentDatabase,
+      });
+    } catch (err: any) {
+      const errMsg = err.message || 'Execution error';
+      tab.activeResult = {
+        columns: [],
+        rows: [],
+        duration_ms: Math.round(performance.now() - startTime),
+        row_count: 0,
+        error: errMsg,
       };
     } finally {
       tab.isExecuting = false;
     }
+  }
+
+  async pageStreamBatch(direction: 'next' | 'prev') {
+    const tab = this.activeTab;
+    if (!tab || !this.activeSessionId || tab.isTableViewer) return;
+    const currentOffset = tab.streamBatchOffset || 0;
+    const batchSize = 5000;
+    let nextOffset = direction === 'next' ? currentOffset + batchSize : Math.max(0, currentOffset - batchSize);
+    tab.streamBatchOffset = nextOffset;
+
+    const baseSql = tab.sql.trim().replace(/;+\s*$/, '');
+    const pagedSql = `SELECT * FROM (\n${baseSql}\n) AS _p LIMIT ${batchSize + 1} OFFSET ${nextOffset};`;
+    tab.isExecuting = true;
+    try {
+      const res = await api.executeQuery(this.activeSessionId, pagedSql, true);
+      const rows = res.rows || [];
+      const hasMore = rows.length > batchSize;
+      tab.hasMoreStream = hasMore;
+      tab.activeResult = {
+        ...res,
+        rows: hasMore ? rows.slice(0, batchSize) : rows,
+        row_count: Math.min(rows.length, batchSize),
+      };
+    } catch (err: any) {
+      this.showToast(`Batch paging failed: ${err.message}`, 'error');
+    } finally {
+      tab.isExecuting = false;
+    }
+  }
+
+  // HTML5 Native Dialog System
+  showNativeAlert(message: string, title = 'SqlFox Notification'): Promise<boolean> {
+    return new Promise((resolve) => {
+      this.nativeDialog = {
+        isOpen: true,
+        type: 'alert',
+        title,
+        message,
+        resolve,
+      };
+    });
+  }
+
+  showNativeConfirm(message: string, title = 'Confirm Action'): Promise<boolean> {
+    return new Promise((resolve) => {
+      this.nativeDialog = {
+        isOpen: true,
+        type: 'confirm',
+        title,
+        message,
+        resolve,
+      };
+    });
+  }
+
+  showNativePrompt(message: string, defaultValue = '', title = 'Input'): Promise<string | null> {
+    return new Promise((resolve) => {
+      this.nativeDialog = {
+        isOpen: true,
+        type: 'prompt',
+        title,
+        message,
+        defaultValue,
+        inputValue: defaultValue,
+        resolve,
+      };
+    });
+  }
+
+  resolveNativeDialog(val: any) {
+    if (this.nativeDialog.resolve) {
+      this.nativeDialog.resolve(val);
+    }
+    this.nativeDialog.isOpen = false;
+  }
+
+  // Pre-Execution DDL Review Modal
+  openDDLReviewModal(sql: string, onConfirm?: () => Promise<void> | void, title = 'Pre-Execution DDL Review') {
+    this.ddlReview = {
+      isOpen: true,
+      sql,
+      title,
+      onConfirm,
+    };
+  }
+
+  closeDDLReviewModal() {
+    this.ddlReview.isOpen = false;
+  }
+
+  // Network Error Boundary & Health Watcher
+  triggerAutoReconnect() {
+    if (this.isReconnecting) return;
+    this.isReconnecting = true;
+    this.reconnectAttempts = 0;
+
+    const scheduleNext = () => {
+      this.reconnectAttempts++;
+      const delaySec = Math.min(Math.pow(2, this.reconnectAttempts - 1), 8);
+      this.reconnectCountdown = delaySec;
+
+      if (this.reconnectTimer) clearInterval(this.reconnectTimer);
+      this.reconnectTimer = setInterval(() => {
+        this.reconnectCountdown--;
+        if (this.reconnectCountdown <= 0) {
+          clearInterval(this.reconnectTimer);
+          this.attemptReconnect(scheduleNext);
+        }
+      }, 1000);
+    };
+
+    scheduleNext();
+  }
+
+  async attemptReconnect(onFail: () => void) {
+    try {
+      const res = await fetch('/api/auth/status', { method: 'GET' });
+      if (res.ok) {
+        this.hideReconnectBanner();
+        this.showToast('Reconnected to daemon', 'success');
+        if (this.activeConnection) {
+          await this.loadConnections();
+        }
+        return;
+      }
+    } catch (_) {}
+    onFail();
+  }
+
+  hideReconnectBanner() {
+    if (this.reconnectTimer) clearInterval(this.reconnectTimer);
+    this.isReconnecting = false;
+    this.reconnectAttempts = 0;
+    this.reconnectCountdown = 0;
+  }
+
+  // Foreign Key Peek
+  async openFkPeek(event: MouseEvent, table: string, col: string, refTable: string, refCol: string, val: any) {
+    if (!this.activeSessionId || !refTable || !refCol) return;
+    const posX = Math.min(window.innerWidth - 420, Math.max(10, event.clientX - 100));
+    const posY = Math.min(window.innerHeight - 300, Math.max(10, event.clientY + 15));
+
+    this.fkPeekState = {
+      isOpen: true,
+      x: posX,
+      y: posY,
+      table,
+      col,
+      refTable,
+      refCol,
+      val,
+      data: null,
+      isLoading: true,
+      error: null,
+    };
+
+    try {
+      const currentDb = this.currentDatabase || '';
+      const res = await api.peekForeignKey(this.activeSessionId, currentDb, refTable, refCol, val);
+      if (res && res.row) {
+        this.fkPeekState.data = res;
+      } else {
+        this.fkPeekState.error = 'No matching record found in parent table';
+      }
+    } catch (err: any) {
+      this.fkPeekState.error = err.message || 'Failed to peek foreign record';
+    } finally {
+      this.fkPeekState.isLoading = false;
+    }
+  }
+
+  closeFkPeek() {
+    this.fkPeekState.isOpen = false;
+  }
+
+  // Export Table SQL Dump
+  exportTableDump(tableName?: string) {
+    if (!this.activeSessionId) return;
+    const tbl = tableName || this.activeTab?.tableName;
+    if (!tbl) {
+      this.openDumpModal();
+      return;
+    }
+    const dbName = this.currentDatabase || '';
+    let url = `/api/session/${this.activeSessionId}/export-dump?schema=true&data=true&table=${encodeURIComponent(tbl)}`;
+    if (dbName) url += `&db=${encodeURIComponent(dbName)}`;
+    window.location.href = url;
   }
 
   async cancelCurrentTab() {
@@ -776,6 +1240,232 @@ export class AppState {
       this.safetyChallenge.resolve(false);
     }
     this.safetyChallenge.isOpen = false;
+  }
+
+  // Schema & Table Manipulation Operations
+  async dropTable(tableName: string) {
+    if (!this.activeSessionId) return;
+    const isPg = this.activeConnection?.driver === 'postgres';
+    const sql = isPg ? `DROP TABLE "${tableName}" CASCADE;` : `DROP TABLE IF EXISTS \`${tableName}\`;`;
+    const confirmed = await this.promptSafetyChallenge(sql, {
+      risk_level: 'CRITICAL',
+      target_table: tableName,
+      reason: `Destructive operation: DROP TABLE will permanently erase table '${tableName}' and all its data.`,
+      estimated_rows: null,
+    });
+    if (!confirmed) return;
+
+    try {
+      const res = await api.executeQuery(this.activeSessionId, sql, true);
+      if (res.error) {
+        this.showToast(`Failed to drop table: ${res.error}`, 'error');
+        return;
+      }
+      this.showToast(`Table '${tableName}' dropped successfully`, 'success');
+      const openTab = this.tabs.find((t) => t.tableName?.toLowerCase() === tableName.toLowerCase());
+      if (openTab) {
+        this.closeTab(openTab.id);
+      }
+      await this.refreshCatalog();
+    } catch (err: any) {
+      this.showToast(`Failed to drop table: ${err.message}`, 'error');
+    }
+  }
+
+  async truncateTable(tableName: string) {
+    if (!this.activeSessionId) return;
+    const isPg = this.activeConnection?.driver === 'postgres';
+    const sql = isPg ? `TRUNCATE TABLE "${tableName}" CASCADE;` : `TRUNCATE TABLE \`${tableName}\`;`;
+    const confirmed = await this.promptSafetyChallenge(sql, {
+      risk_level: 'HIGH',
+      target_table: tableName,
+      reason: `Destructive mutation: TRUNCATE TABLE will delete all records in table '${tableName}'.`,
+      estimated_rows: null,
+    });
+    if (!confirmed) return;
+
+    try {
+      const res = await api.executeQuery(this.activeSessionId, sql, true);
+      if (res.error) {
+        this.showToast(`Failed to truncate table: ${res.error}`, 'error');
+        return;
+      }
+      this.showToast(`Table '${tableName}' truncated`, 'success');
+      const openTab = this.tabs.find((t) => t.tableName?.toLowerCase() === tableName.toLowerCase());
+      if (openTab) {
+        await this.loadTableData(openTab);
+      }
+      await this.refreshCatalog();
+    } catch (err: any) {
+      this.showToast(`Failed to truncate table: ${err.message}`, 'error');
+    }
+  }
+
+  async renameTable(oldName: string, newName: string) {
+    if (!this.activeSessionId) return;
+    const isPg = this.activeConnection?.driver === 'postgres';
+    const sql = isPg
+      ? `ALTER TABLE "${oldName}" RENAME TO "${newName}";`
+      : `RENAME TABLE \`${oldName}\` TO \`${newName}\`;`;
+
+    try {
+      const res = await api.executeQuery(this.activeSessionId, sql, true);
+      if (res.error) {
+        this.showToast(`Failed to rename table: ${res.error}`, 'error');
+        return;
+      }
+      this.showToast(`Table renamed to '${newName}'`, 'success');
+      const openTab = this.tabs.find((t) => t.tableName?.toLowerCase() === oldName.toLowerCase());
+      if (openTab) {
+        openTab.tableName = newName;
+        openTab.title = newName;
+      }
+      await this.refreshCatalog();
+    } catch (err: any) {
+      this.showToast(`Failed to rename table: ${err.message}`, 'error');
+    }
+  }
+
+  async duplicateTable(sourceTable: string, targetTable: string, copyData = true) {
+    if (!this.activeSessionId) return;
+    const driver = this.activeConnection?.driver;
+    try {
+      if (driver === 'postgres') {
+        let sql = `CREATE TABLE "${targetTable}" (LIKE "${sourceTable}" INCLUDING ALL);`;
+        if (copyData) {
+          sql += `\nINSERT INTO "${targetTable}" SELECT * FROM "${sourceTable}";`;
+        }
+        const res = await api.executeQuery(this.activeSessionId, sql, true);
+        if (res.error) throw new Error(res.error);
+      } else if (driver === 'sqlite') {
+        const sql = copyData
+          ? `CREATE TABLE "${targetTable}" AS SELECT * FROM "${sourceTable}";`
+          : `CREATE TABLE "${targetTable}" AS SELECT * FROM "${sourceTable}" WHERE 0 = 1;`;
+        const res = await api.executeQuery(this.activeSessionId, sql, true);
+        if (res.error) throw new Error(res.error);
+      } else {
+        let sql = `CREATE TABLE \`${targetTable}\` LIKE \`${sourceTable}\`;`;
+        if (copyData) {
+          sql += `\nINSERT INTO \`${targetTable}\` SELECT * FROM \`${sourceTable}\`;`;
+        }
+        const res = await api.executeQuery(this.activeSessionId, sql, true);
+        if (res.error) throw new Error(res.error);
+      }
+      this.showToast(`Table '${sourceTable}' duplicated to '${targetTable}'`, 'success');
+      await this.refreshCatalog();
+      this.openTableDataTab(targetTable);
+    } catch (err: any) {
+      this.showToast(`Failed to duplicate table: ${err.message}`, 'error');
+    }
+  }
+
+  async createDatabase(dbName: string, charset = 'utf8mb4', collation = 'utf8mb4_unicode_ci') {
+    if (!this.activeSessionId) return;
+    const isPg = this.activeConnection?.driver === 'postgres';
+    const sql = isPg
+      ? `CREATE DATABASE "${dbName}";`
+      : `CREATE DATABASE \`${dbName}\` CHARACTER SET ${charset} COLLATE ${collation};`;
+
+    try {
+      const res = await api.executeQuery(this.activeSessionId, sql, true);
+      if (res.error) throw new Error(res.error);
+      this.showToast(`Database '${dbName}' created`, 'success');
+      await this.refreshDatabases();
+      await this.selectDatabase(dbName);
+    } catch (err: any) {
+      this.showToast(`Failed to create database: ${err.message}`, 'error');
+      throw err;
+    }
+  }
+
+  async dropDatabase(dbName: string) {
+    if (!this.activeSessionId) return;
+    const isPg = this.activeConnection?.driver === 'postgres';
+    const sql = isPg ? `DROP DATABASE "${dbName}";` : `DROP DATABASE IF EXISTS \`${dbName}\`;`;
+    const confirmed = await this.promptSafetyChallenge(sql, {
+      risk_level: 'CRITICAL',
+      target_table: dbName,
+      reason: `Destructive operation: DROP DATABASE will permanently erase database '${dbName}' and all tables inside it.`,
+      estimated_rows: null,
+    });
+    if (!confirmed) return;
+
+    try {
+      const res = await api.executeQuery(this.activeSessionId, sql, true);
+      if (res.error) throw new Error(res.error);
+      this.showToast(`Database '${dbName}' dropped`, 'success');
+      await this.refreshDatabases();
+      if (this.currentDatabase === dbName && this.availableDatabases.length > 0) {
+        await this.selectDatabase(this.availableDatabases[0]);
+      }
+    } catch (err: any) {
+      this.showToast(`Failed to drop database: ${err.message}`, 'error');
+    }
+  }
+
+  async createTableDirect(ddl: string, tableName: string) {
+    if (!this.activeSessionId) return;
+    try {
+      const res = await api.executeQuery(this.activeSessionId, ddl, true);
+      if (res.error) throw new Error(res.error);
+      this.showToast(`Table '${tableName}' created successfully`, 'success');
+      await this.refreshCatalog();
+      this.openTableDataTab(tableName);
+    } catch (err: any) {
+      this.showToast(`Failed to create table: ${err.message}`, 'error');
+      throw err;
+    }
+  }
+
+  openJsonCellModal(
+    tableName: string | undefined,
+    rowIdx: number | undefined,
+    colIdx: number | undefined,
+    colName: string,
+    value: any,
+    isReadOnly = false
+  ) {
+    let strVal = '';
+    if (value !== null && value !== undefined) {
+      if (typeof value === 'object') {
+        try {
+          strVal = JSON.stringify(value, null, 2);
+        } catch {
+          strVal = String(value);
+        }
+      } else {
+        strVal = String(value);
+      }
+    }
+    this.jsonCellModal = {
+      isOpen: true,
+      tableName,
+      rowIdx,
+      colIdx,
+      colName,
+      value: strVal,
+      isReadOnly,
+    };
+  }
+
+  saveJsonCellValue(newVal: string) {
+    const { tableName, rowIdx, colIdx, colName } = this.jsonCellModal;
+    if (!tableName || rowIdx === undefined || colIdx === undefined) return;
+
+    const tab = this.activeTab;
+    const result = tab?.activeResult;
+    if (!result?.rows || !result.rows[rowIdx]) return;
+
+    const oldVal = result.rows[rowIdx][colIdx];
+    if (newVal !== String(oldVal ?? '')) {
+      const pkColObj = result.columns.find((c: any) => typeof c === 'object' && c.is_primary_key);
+      const pkCol = pkColObj ? (typeof pkColObj === 'string' ? pkColObj : pkColObj.name) : undefined;
+      const pkVal = pkCol ? result.rows[rowIdx][result.columns.findIndex((c: any) => (typeof c === 'string' ? c : c.name) === pkCol)] : undefined;
+
+      this.stageEdit(tableName, rowIdx, colIdx, colName, pkCol, pkVal, oldVal, newVal);
+      result.rows[rowIdx][colIdx] = newVal;
+      this.showToast(`Staged JSON update for '${colName}'`, 'info');
+    }
   }
 }
 

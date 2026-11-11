@@ -36,6 +36,110 @@
       action: () => appState.openProcesslistTab(),
     });
     list.push({
+      id: 'action-erd-canvas',
+      title: 'Open ERD Schema Canvas',
+      subtitle: 'Interactive visual entity-relationship diagrams and schema export',
+      category: 'Actions',
+      icon: 'layers',
+      action: () => appState.openErdTab(),
+    });
+    list.push({
+      id: 'action-create-table',
+      title: 'Create Table Designer',
+      subtitle: 'Visual designer for new database tables and columns',
+      category: 'Actions',
+      icon: 'plus',
+      action: () => (appState.isTableCreatorOpen = true),
+    });
+    list.push({
+      id: 'action-create-view',
+      title: 'Create Database View',
+      subtitle: 'Visual query builder and view DDL designer',
+      category: 'Actions',
+      icon: 'eye',
+      action: () => appState.openViewDesigner(),
+    });
+    list.push({
+      id: 'action-create-trigger',
+      title: 'Create Database Trigger',
+      subtitle: 'Event listener trigger designer for tables',
+      category: 'Actions',
+      icon: 'zap',
+      action: () => appState.openTriggerDesigner(),
+    });
+    list.push({
+      id: 'action-create-routine',
+      title: 'Create Stored Procedure / Function',
+      subtitle: 'Programmability routine designer with parameters',
+      category: 'Actions',
+      icon: 'code',
+      action: () => appState.openRoutineDesigner(),
+    });
+    list.push({
+      id: 'action-create-event',
+      title: 'Create Scheduled Event',
+      subtitle: 'Cron-like scheduled event designer for MySQL/MariaDB',
+      category: 'Actions',
+      icon: 'clock',
+      action: () => appState.openEventDesigner(),
+    });
+    list.push({
+      id: 'action-dump-db',
+      title: 'Export SQL Dump',
+      subtitle: 'Download complete SQL backup of database or table',
+      category: 'Actions',
+      icon: 'download',
+      action: () => appState.openDumpModal(),
+    });
+    list.push({
+      id: 'action-structure-sync',
+      title: 'Structure Synchronization Engine',
+      subtitle: 'Compare schemas between environments and generate ALTER scripts',
+      category: 'Actions',
+      icon: 'refresh-cw',
+      action: () => appState.openStructureSyncModal(),
+    });
+    list.push({
+      id: 'action-run-sql',
+      title: 'Run Large SQL Script File',
+      subtitle: 'Execute multi-statement SQL migration files and dumps',
+      category: 'Actions',
+      icon: 'file-text',
+      action: () => appState.openRunSqlModal(),
+    });
+    list.push({
+      id: 'action-snippets',
+      title: 'Query Snippets & Templates Library',
+      subtitle: 'Reusable parameterized SQL query templates',
+      category: 'Actions',
+      icon: 'bookmark',
+      action: () => appState.openSnippetsModal(),
+    });
+    list.push({
+      id: 'action-csv-import',
+      title: 'Import CSV Records',
+      subtitle: 'Upload delimited CSV file and map columns to table',
+      category: 'Actions',
+      icon: 'upload',
+      action: () => appState.openCsvImportModal(),
+    });
+    list.push({
+      id: 'action-db-diagnostics',
+      title: 'Database Storage & Health Diagnostics',
+      subtitle: 'Inspect table fragmentation and run OPTIMIZE/ANALYZE',
+      category: 'Actions',
+      icon: 'activity',
+      action: () => appState.openDbDiagnosticsModal(),
+    });
+    list.push({
+      id: 'action-privilege-matrix',
+      title: 'Database Users & Privilege Matrix',
+      subtitle: 'Manage DB user permissions and GRANT/REVOKE matrix',
+      category: 'Actions',
+      icon: 'shield',
+      action: () => appState.openPrivilegeMatrixModal(),
+    });
+    list.push({
       id: 'action-new-conn',
       title: 'Manage Database Connections',
       subtitle: 'Add, edit, or test database connections',

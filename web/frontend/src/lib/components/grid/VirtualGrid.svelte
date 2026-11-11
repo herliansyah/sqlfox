@@ -2,6 +2,7 @@
   import { appState } from '../../stores/appState.svelte';
   import type { ColumnDefinition, FilterPill } from '../../../types';
   import Icon from '../common/Icon.svelte';
+  import QueryProfilerPanel from '../editor/QueryProfilerPanel.svelte';
 
   const ROW_HEIGHT = 28;
   const OVERSCAN = 15;
@@ -22,6 +23,9 @@
   let selectedRowIndex = $state<number | null>(null);
   let selectedCell = $state<{ rIdx: number; cIdx: number } | null>(null);
   let editingCell = $state<{ rIdx: number; cIdx: number; tempValue: string } | null>(null);
+
+  // Multi-row selection
+  let selectedRowIndices = $state<number[]>([]);
 
   // Context Menu State
   let contextMenu = $state<{
@@ -167,6 +171,83 @@
     }
   }
 
+  let isAllSelected = $derived(
+    processedRows.length > 0 && selectedRowIndices.length === processedRows.length
+  );
+
+  function toggleSelectAll() {
+    if (isAllSelected) {
+      selectedRowIndices = [];
+    } else {
+      selectedRowIndices = processedRows.map((r) => r.origIdx);
+    }
+  }
+
+  function toggleRowSelection(origIdx: number) {
+    const idx = selectedRowIndices.indexOf(origIdx);
+    if (idx === -1) {
+      selectedRowIndices.push(origIdx);
+    } else {
+      selectedRowIndices.splice(idx, 1);
+    }
+  }
+
+  async function handleBatchDelete() {
+    if (selectedRowIndices.length === 0 || !currentTab?.tableName || !result?.rows) return;
+    const pkColObj = result.columns.find((c) => isColPK(c));
+    const pkCol = pkColObj ? getColName(pkColObj) : undefined;
+    if (!pkCol) {
+      appState.showToast('Batch delete requires a table with a Primary Key', 'error');
+      return;
+    }
+    const pkIdx = allColumns.indexOf(pkCol);
+    const pkVals = selectedRowIndices.map((idx) => result!.rows[idx][pkIdx]);
+    const ok = await appState.showNativeConfirm(
+      `Are you sure you want to delete ${selectedRowIndices.length} selected row(s)?`,
+      'Batch Deletion'
+    );
+    if (!ok) return;
+
+    await appState.deleteRows(pkCol, pkVals);
+    selectedRowIndices = [];
+  }
+
+  function addDraftRow() {
+    if (!currentTab) return;
+    if (!currentTab.stagedDraftRows) currentTab.stagedDraftRows = [];
+    const blank: Record<string, any> = {};
+    allColumns.forEach((c) => {
+      blank[c] = '';
+    });
+    currentTab.stagedDraftRows.unshift(blank);
+    appState.showToast('Draft row added. Enter values to save.', 'info');
+  }
+
+  function removeDraftRow(dIdx: number) {
+    if (!currentTab?.stagedDraftRows) return;
+    currentTab.stagedDraftRows.splice(dIdx, 1);
+  }
+
+  function duplicateRowAsDraft(rIdx: number) {
+    if (!currentTab || !result?.rows || !result.rows[rIdx]) return;
+    if (!currentTab.stagedDraftRows) currentTab.stagedDraftRows = [];
+    const row = result.rows[rIdx];
+    const draft: Record<string, any> = {};
+    allColumns.forEach((colName, cIdx) => {
+      const isPK = result!.columns[cIdx] && isColPK(result!.columns[cIdx]);
+      draft[colName] = isPK ? '' : row[cIdx];
+    });
+    currentTab.stagedDraftRows.unshift(draft);
+    appState.showToast(`Row #${rIdx + 1} duplicated as editable draft`, 'success');
+  }
+
+  function getFkInfo(colName: string) {
+    if (!appState.catalog?.foreign_keys) return null;
+    return appState.catalog.foreign_keys.find(
+      (fk) => (fk.column || fk.column_name) === colName
+    );
+  }
+
   // Inline Editing
   function startCellEdit(origIdx: number, cIdx: number, val: any) {
     editingCell = {
@@ -294,15 +375,97 @@
       selectedRowIndex = null;
     }
   }
+
+  function copyRowAsTSV(rIdx: number) {
+    if (!result?.rows || !result.rows[rIdx] || !result.columns) return;
+    const cols = result.columns.map((c) => getColName(c)).join('\t');
+    const vals = result.rows[rIdx].map((v) => (v === null || v === undefined ? '' : String(v))).join('\t');
+    navigator.clipboard.writeText(`${cols}\n${vals}`);
+    appState.showToast('Copied row as TSV', 'info');
+  }
+
+  function copyRowAsMarkdown(rIdx: number) {
+    if (!result?.rows || !result.rows[rIdx] || !result.columns) return;
+    const colNames = result.columns.map((c) => getColName(c));
+    const header = `| ${colNames.join(' | ')} |`;
+    const separator = `| ${colNames.map(() => '---').join(' | ')} |`;
+    const row = `| ${result.rows[rIdx].map((v) => (v === null ? '*NULL*' : String(v).replace(/\|/g, '\\|'))).join(' | ')} |`;
+    navigator.clipboard.writeText(`${header}\n${separator}\n${row}`);
+    appState.showToast('Copied row as Markdown Table', 'info');
+  }
+
+  function copyRowAsInsertSQL(rIdx: number) {
+    if (!result?.rows || !result.rows[rIdx] || !result.columns) return;
+    const tbl = currentTab?.tableName || 'table_name';
+    const cols = result.columns.map((c) => `\`${getColName(c)}\``).join(', ');
+    const vals = result.rows[rIdx]
+      .map((c) => {
+        if (c === null || c === undefined) return 'NULL';
+        if (typeof c === 'number') return c;
+        return `'${String(c).replace(/'/g, "''")}'`;
+      })
+      .join(', ');
+    const sql = `INSERT INTO \`${tbl}\` (${cols}) VALUES (${vals});`;
+    navigator.clipboard.writeText(sql);
+    appState.showToast('Copied as INSERT SQL statement', 'info');
+  }
 </script>
 
 <svelte:window onclick={closeContextMenu} />
 
 <div class="h-full flex flex-col bg-[#090d16] overflow-hidden select-text relative">
+  <!-- Multi-Statement Execution Results Tabs -->
+  {#if currentTab?.multiResults && currentTab.multiResults.length > 1}
+    <div class="h-8 bg-[#0b0f19] border-b border-[#334155] px-3 flex items-center space-x-1 select-none overflow-x-auto shrink-0">
+      {#each currentTab.multiResults as mRes, mIdx}
+        <button
+          type="button"
+          onclick={() => {
+            if (currentTab) {
+              currentTab.activeResultIndex = mIdx;
+              currentTab.activeResult = mRes;
+            }
+          }}
+          class="px-2.5 py-1 rounded text-xs font-mono font-medium transition {(currentTab.activeResultIndex || 0) === mIdx ? 'bg-sky-500/20 text-sky-300 font-bold border border-sky-500/50' : 'text-slate-400 hover:text-white hover:bg-slate-800'}"
+        >
+          Result {mIdx + 1} ({mRes.row_count ?? mRes.rows?.length ?? 0} rows)
+        </button>
+      {/each}
+    </div>
+  {/if}
+
+  <!-- Profiler Panel Drawer -->
+  {#if currentTab?.showQueryProfiler}
+    <div class="h-48 shrink-0 overflow-hidden">
+      <QueryProfilerPanel />
+    </div>
+  {/if}
+
   <!-- Grid Control Toolbar -->
   <div class="h-9 bg-[#0b0f19] border-b border-[#334155] px-3 flex items-center justify-between text-xs select-none shrink-0 gap-2">
     <!-- Left: CRUD & Staged Actions -->
     <div class="flex items-center space-x-2">
+      <!-- In-Place Draft Row Button -->
+      <button
+        onclick={addDraftRow}
+        class="h-6 px-2.5 rounded bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/40 font-semibold flex items-center space-x-1 transition text-[11px]"
+        title="Add in-place draft row"
+      >
+        <Icon name="plus" class="w-3 h-3 text-sky-400" />
+        <span>+ Draft Row</span>
+      </button>
+
+      {#if selectedRowIndices.length > 0}
+        <button
+          onclick={handleBatchDelete}
+          class="h-6 px-2.5 rounded bg-rose-600 hover:bg-rose-500 text-white font-bold flex items-center space-x-1 transition text-[11px] shadow animate-in fade-in"
+          title="Delete selected rows"
+        >
+          <Icon name="trash-2" class="w-3 h-3" />
+          <span>Delete ({selectedRowIndices.length})</span>
+        </button>
+      {/if}
+
       {#if currentTab?.isTableViewer}
         <button
           onclick={() => (appState.isInsertRowModalOpen = true)}
@@ -531,8 +694,17 @@
         <!-- Sticky Header -->
         <thead class="sticky top-0 z-20 bg-[#0f172a] border-b border-[#334155] shadow-sm select-none">
           <tr>
-            <th class="w-12 px-2.5 py-2 text-center text-[10px] text-slate-500 bg-[#090d16] border-r border-[#1e293b] font-medium sticky left-0 z-30">
-              #
+            <th class="w-16 px-2 py-2 text-center text-[10px] text-slate-500 bg-[#090d16] border-r border-[#1e293b] font-medium sticky left-0 z-30">
+              <div class="flex items-center justify-center space-x-1.5">
+                <input
+                  type="checkbox"
+                  checked={isAllSelected}
+                  onchange={toggleSelectAll}
+                  class="rounded border-slate-700 bg-slate-900 text-sky-500 focus:ring-0"
+                  title="Select all rows"
+                />
+                <span>#</span>
+              </div>
             </th>
             {#each visibleColumns as col}
               {@const colName = getColName(col)}
@@ -565,6 +737,35 @@
 
         <!-- Virtual Rows Body -->
         <tbody>
+          <!-- In-Place Draft Rows -->
+          {#if currentTab?.stagedDraftRows && currentTab.stagedDraftRows.length > 0}
+            {#each currentTab.stagedDraftRows as draft, dIdx}
+              <tr class="bg-sky-950/40 border-b border-sky-800/60 text-sky-200 h-7 font-mono text-xs">
+                <td class="w-16 px-2 py-1 text-center bg-sky-950/80 border-r border-sky-800/60 sticky left-0 z-10">
+                  <button
+                    type="button"
+                    onclick={() => removeDraftRow(dIdx)}
+                    class="text-rose-400 hover:text-rose-200 font-bold text-xs"
+                    title="Discard draft row"
+                  >
+                    ✕
+                  </button>
+                </td>
+                {#each visibleColumns as col}
+                  {@const colName = getColName(col)}
+                  <td class="px-2 py-0.5 border-r border-sky-800/40">
+                    <input
+                      type="text"
+                      bind:value={draft[colName]}
+                      placeholder="draft..."
+                      class="w-full bg-transparent text-sky-100 placeholder-sky-600/60 outline-none text-xs font-mono"
+                    />
+                  </td>
+                {/each}
+              </tr>
+            {/each}
+          {/if}
+
           {#if topSpacerHeight > 0}
             <tr style="height: {topSpacerHeight}px; pointer-events: none;">
               <td colspan={totalCols} style="padding:0; border:0; height:{topSpacerHeight}px;"></td>
@@ -580,10 +781,11 @@
           {:else}
             {#each visibleRows as rowItem (rowItem.origIdx)}
               {@const isRowSelected = selectedRowIndex === rowItem.origIdx}
+              {@const isChecked = selectedRowIndices.includes(rowItem.origIdx)}
               <tr
                 onclick={() => (selectedRowIndex = rowItem.origIdx)}
                 class="border-b border-[#1e293b]/60 transition-colors h-7 {
-                  isRowSelected ? 'bg-sky-500/15' : rowItem.displayIdx % 2 === 1 ? 'bg-slate-900/20' : 'bg-transparent'
+                  isChecked ? 'bg-sky-500/20' : isRowSelected ? 'bg-sky-500/15' : rowItem.displayIdx % 2 === 1 ? 'bg-slate-900/20' : 'bg-transparent'
                 } hover:bg-sky-500/10"
               >
                 <!-- Row Gutter -->
@@ -592,10 +794,19 @@
                     appState.recordInspectorRowIndex = rowItem.origIdx;
                     appState.isRecordInspectorOpen = true;
                   }}
-                  class="w-12 px-2.5 py-1 text-center text-[10px] text-slate-500 bg-[#090d16] border-r border-[#1e293b] select-none font-mono sticky left-0 z-10 cursor-pointer hover:text-sky-400"
+                  class="w-16 px-2 py-1 text-center text-[10px] text-slate-500 bg-[#090d16] border-r border-[#1e293b] select-none font-mono sticky left-0 z-10 cursor-pointer hover:text-sky-400"
                   title="Double-click to open Record Inspector"
                 >
-                  {rowItem.displayIdx + 1}
+                  <div class="flex items-center justify-center space-x-1.5">
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onclick={(e) => e.stopPropagation()}
+                      onchange={() => toggleRowSelection(rowItem.origIdx)}
+                      class="rounded border-slate-700 bg-slate-900 text-sky-500 focus:ring-0"
+                    />
+                    <span>{rowItem.displayIdx + 1}</span>
+                  </div>
                 </td>
 
                 <!-- Cells -->
@@ -606,6 +817,7 @@
                   {@const formatted = formatCellValue(cellVal)}
                   {@const isStaged = currentTab?.tableName ? isCellStaged(currentTab.tableName, rowItem.origIdx, cIdx) : false}
                   {@const isEditingThis = editingCell && editingCell.rIdx === rowItem.origIdx && editingCell.cIdx === cIdx}
+                  {@const fk = getFkInfo(colName)}
 
                   <td
                     onclick={() => (selectedCell = { rIdx: rowItem.origIdx, cIdx })}
@@ -628,7 +840,22 @@
                         class="w-full bg-[#0f172a] text-slate-100 border border-sky-400 px-1 py-0 text-xs font-mono outline-none"
                       />
                     {:else}
-                      <span class="truncate block">{formatted.display}</span>
+                      <div class="flex items-center justify-between group/cell">
+                        <span class="truncate block">{formatted.display}</span>
+                        {#if fk && cellVal !== null && cellVal !== undefined}
+                          <button
+                            type="button"
+                            onclick={(e) => {
+                              e.stopPropagation();
+                              appState.openFkPeek(e, currentTab?.tableName || '', colName, fk.referenced_table, fk.referenced_column, cellVal);
+                            }}
+                            class="opacity-0 group-hover/cell:opacity-100 hover:text-sky-300 text-sky-400 font-bold ml-1 text-[10px]"
+                            title="Peek {fk.referenced_table}.{fk.referenced_column}"
+                          >
+                            🔗
+                          </button>
+                        {/if}
+                      </div>
                     {/if}
                   </td>
                 {/each}
@@ -734,6 +961,29 @@
             Next
           </button>
         </div>
+      {:else if result && result.rows && (result.rows.length >= 5000 || (currentTab?.streamBatchOffset ?? 0) > 0 || currentTab?.hasMoreStream)}
+        <!-- Query Stream 5k Batch Pager (ADR 0058) -->
+        <div class="flex items-center space-x-2 text-[11px]">
+          <span class="px-2 py-0.5 rounded bg-sky-950/80 border border-sky-800 text-sky-300 font-mono text-[10px] font-bold">
+            Batch #{Math.floor((currentTab?.streamBatchOffset || 0) / 5000) + 1} (Offset {(currentTab?.streamBatchOffset || 0).toLocaleString()})
+          </span>
+          <button
+            onclick={() => appState.pageStreamBatch('prev')}
+            disabled={(currentTab?.streamBatchOffset || 0) <= 0 || isExecuting}
+            class="px-2 py-0.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-30 border border-[#334155] text-slate-200 transition"
+            title="Load previous 5,000 records"
+          >
+            Prev 5k
+          </button>
+          <button
+            onclick={() => appState.pageStreamBatch('next')}
+            disabled={(!currentTab?.hasMoreStream && (result.rows?.length || 0) < 5000) || isExecuting}
+            class="px-2 py-0.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-30 border border-[#334155] text-slate-200 transition"
+            title="Load next 5,000 records"
+          >
+            Next 5k
+          </button>
+        </div>
       {:else}
         <div class="text-[11px] text-slate-500">
           Double-click to edit cell • Right-click for quick filters
@@ -751,7 +1001,7 @@
   {#if contextMenu && contextMenu.open}
     <div
       style="top: {contextMenu.y}px; left: {contextMenu.x}px;"
-      class="fixed z-50 w-52 bg-[#0f172a] border border-[#334155] rounded-lg shadow-2xl py-1 divide-y divide-slate-800 text-xs font-sans animate-in fade-in duration-75 select-none"
+      class="fixed z-50 w-56 bg-[#0f172a] border border-[#334155] rounded-lg shadow-2xl py-1 divide-y divide-slate-800 text-xs font-sans animate-in fade-in duration-75 select-none"
     >
       <div class="px-3 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider font-mono truncate">
         Filter: {contextMenu.colName}
@@ -760,37 +1010,96 @@
       <div class="py-1">
         <button
           onclick={() => applyQuickFilter('=')}
-          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+          class="w-full text-left px-3 py-1 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
         >
           <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono font-bold text-sky-400">=</span>
           <span class="truncate">Filter = '{String(contextMenu.cellValue ?? 'NULL')}'</span>
         </button>
         <button
           onclick={() => applyQuickFilter('!=')}
-          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+          class="w-full text-left px-3 py-1 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
         >
           <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono font-bold text-amber-400">!=</span>
           <span class="truncate">Filter != '{String(contextMenu.cellValue ?? 'NULL')}'</span>
         </button>
         {#if contextMenu.cellValue !== null && contextMenu.cellValue !== undefined}
+          <div class="grid grid-cols-4 gap-1 px-3 py-1 border-y border-slate-800/60 my-0.5">
+            <button
+              onclick={() => applyQuickFilter('<')}
+              class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px] font-bold text-center"
+              title="Less than"
+            >&lt;</button>
+            <button
+              onclick={() => applyQuickFilter('<=')}
+              class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px] font-bold text-center"
+              title="Less or equal"
+            >&le;</button>
+            <button
+              onclick={() => applyQuickFilter('>')}
+              class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px] font-bold text-center"
+              title="Greater than"
+            >&gt;</button>
+            <button
+              onclick={() => applyQuickFilter('>=')}
+              class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px] font-bold text-center"
+              title="Greater or equal"
+            >&ge;</button>
+          </div>
           <button
             onclick={() => applyQuickFilter('LIKE')}
-            class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+            class="w-full text-left px-3 py-1 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
           >
             <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono font-bold text-purple-400">%</span>
             <span class="truncate">Filter LIKE '%{String(contextMenu.cellValue)}%'</span>
           </button>
+          <button
+            onclick={() => applyQuickFilter('NOT LIKE')}
+            class="w-full text-left px-3 py-1 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+          >
+            <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono font-bold text-rose-400">!%</span>
+            <span class="truncate">Filter NOT LIKE '%{String(contextMenu.cellValue)}%'</span>
+          </button>
         {/if}
         <button
           onclick={() => applyQuickFilter('IS NULL')}
-          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+          class="w-full text-left px-3 py-1 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
         >
           <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono text-rose-400">∅</span>
           <span>Filter IS NULL</span>
         </button>
+        <button
+          onclick={() => applyQuickFilter('IS NOT NULL')}
+          class="w-full text-left px-3 py-1 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+        >
+          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono text-emerald-400">!∅</span>
+          <span>Filter IS NOT NULL</span>
+        </button>
       </div>
 
       <div class="py-1">
+        {#if currentTab?.tableName}
+          <button
+            onclick={() => {
+              duplicateRowAsDraft(contextMenu!.rIdx);
+              closeContextMenu();
+            }}
+            class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-emerald-300 font-medium"
+          >
+            <Icon name="copy" class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <span>Duplicate Record</span>
+          </button>
+        {/if}
+        <button
+          onclick={() => {
+            const { rIdx, cIdx, colName, cellValue } = contextMenu!;
+            closeContextMenu();
+            appState.openJsonCellModal(currentTab?.tableName, rIdx, cIdx, colName, cellValue, !currentTab?.tableName);
+          }}
+          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+        >
+          <Icon name="code" class="w-3.5 h-3.5 text-purple-400 shrink-0" />
+          <span>Open in JSON Editor</span>
+        </button>
         <button
           onclick={() => {
             appState.recordInspectorRowIndex = contextMenu!.rIdx;
@@ -812,6 +1121,39 @@
         >
           <Icon name="copy" class="w-3.5 h-3.5 text-slate-400 shrink-0" />
           <span>Copy Cell Value</span>
+        </button>
+      </div>
+
+      <div class="py-1">
+        <button
+          onclick={() => {
+            copyRowAsTSV(contextMenu!.rIdx);
+            closeContextMenu();
+          }}
+          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+        >
+          <Icon name="file-text" class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+          <span>Copy Row as TSV</span>
+        </button>
+        <button
+          onclick={() => {
+            copyRowAsMarkdown(contextMenu!.rIdx);
+            closeContextMenu();
+          }}
+          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+        >
+          <Icon name="share-2" class="w-3.5 h-3.5 text-sky-400 shrink-0" />
+          <span>Copy Row as Markdown</span>
+        </button>
+        <button
+          onclick={() => {
+            copyRowAsInsertSQL(contextMenu!.rIdx);
+            closeContextMenu();
+          }}
+          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+        >
+          <Icon name="code" class="w-3.5 h-3.5 text-amber-400 shrink-0" />
+          <span>Copy as INSERT SQL</span>
         </button>
       </div>
     </div>

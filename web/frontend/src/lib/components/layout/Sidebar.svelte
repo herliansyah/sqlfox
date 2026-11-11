@@ -40,6 +40,43 @@
     if (!q) return list;
     return list.filter((db) => db.toLowerCase().includes(q));
   });
+
+  let collapsedPrefixes = $state<Record<string, boolean>>({});
+
+  function togglePrefix(p: string) {
+    collapsedPrefixes[p] = !collapsedPrefixes[p];
+  }
+
+  let prefixTree = $derived.by(() => {
+    if (!appState.prefixGroupingEnabled) return null;
+    const groups: Record<string, typeof appState.filteredTables> = {};
+    const ungrouped: typeof appState.filteredTables = [];
+
+    appState.filteredTables.forEach((t) => {
+      const idx = t.name.indexOf('_');
+      if (idx > 0) {
+        const prefix = t.name.substring(0, idx);
+        if (!groups[prefix]) groups[prefix] = [];
+        groups[prefix].push(t);
+      } else {
+        ungrouped.push(t);
+      }
+    });
+
+    const finalGroups: { prefix: string; tables: typeof appState.filteredTables }[] = [];
+    Object.entries(groups).forEach(([prefix, tbls]) => {
+      if (tbls.length >= 2) {
+        finalGroups.push({ prefix, tables: tbls });
+      } else {
+        ungrouped.push(...tbls);
+      }
+    });
+
+    return {
+      groups: finalGroups.sort((a, b) => a.prefix.localeCompare(b.prefix)),
+      ungrouped: ungrouped.sort((a, b) => a.name.localeCompare(b.name)),
+    };
+  });
 </script>
 
 <svelte:window onclick={closeTableMenu} />
@@ -180,6 +217,20 @@
               {/each}
             {/if}
           </div>
+
+          <!-- Bottom Action: Create Database -->
+          <div class="p-1.5 border-t border-slate-800">
+            <button
+              onclick={() => {
+                showDbDropdown = false;
+                appState.isCreateDbModalOpen = true;
+              }}
+              class="w-full py-1.5 px-3 bg-sky-950/60 hover:bg-sky-900/60 border border-sky-800 text-sky-300 font-semibold rounded text-xs flex items-center justify-center space-x-1.5 transition"
+            >
+              <Icon name="plus" class="w-3.5 h-3.5" />
+              <span>Create New Database</span>
+            </button>
+          </div>
         </div>
       {/if}
     </div>
@@ -305,58 +356,148 @@
         <!-- SECTION: Tables -->
         {#if appState.filteredTables.length > 0}
           <div class="rounded overflow-hidden">
-            <button
-              onclick={() => appState.toggleSection('tables')}
-              class="w-full px-2 py-1 text-[10.5px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between hover:bg-slate-800/50 rounded transition-colors"
-            >
-              <span class="flex items-center space-x-1.5">
-                <Icon
-                  name={appState.collapsedSections.tables ? 'chevron-right' : 'chevron-down'}
-                  class="w-3 h-3 text-slate-500"
-                />
-                <Icon name="layers" class="w-3.5 h-3.5 text-sky-400" />
-                <span>Tables</span>
-              </span>
-              <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 text-slate-400">
-                {appState.filteredTables.length}
-              </span>
-            </button>
+            <div class="flex items-center justify-between hover:bg-slate-800/50 rounded pr-1 group">
+              <button
+                onclick={() => appState.toggleSection('tables')}
+                class="flex-1 px-2 py-1 text-[10.5px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between transition-colors"
+              >
+                <span class="flex items-center space-x-1.5">
+                  <Icon
+                    name={appState.collapsedSections.tables ? 'chevron-right' : 'chevron-down'}
+                    class="w-3 h-3 text-slate-500"
+                  />
+                  <Icon name="layers" class="w-3.5 h-3.5 text-sky-400" />
+                  <span>Tables</span>
+                </span>
+                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 text-slate-400">
+                  {appState.filteredTables.length}
+                </span>
+              </button>
+
+              <div class="flex items-center space-x-0.5">
+                <button
+                  onclick={() => (appState.prefixGroupingEnabled = !appState.prefixGroupingEnabled)}
+                  class="px-1 py-0.5 rounded text-[10px] font-mono transition {appState.prefixGroupingEnabled ? 'text-sky-400 bg-sky-950/60 font-bold border border-sky-800' : 'text-slate-400 hover:text-slate-200'}"
+                  title="Toggle Schema Tree Prefix Grouping (ADR 0058)"
+                >
+                  grp
+                </button>
+                <button
+                  onclick={() => appState.openErdTab()}
+                  class="p-1 text-slate-400 hover:text-indigo-400 hover:bg-indigo-950/40 rounded transition"
+                  title="Open ERD Schema Canvas"
+                >
+                  <Icon name="layers" class="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onclick={() => (appState.isTableCreatorOpen = true)}
+                  class="p-1 text-slate-400 hover:text-sky-300 hover:bg-sky-950/60 rounded transition"
+                  title="Create New Table"
+                >
+                  <Icon name="plus" class="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
 
             {#if !appState.collapsedSections.tables}
               <div class="space-y-0.5 mt-0.5 pl-1">
-                {#each appState.filteredTables as table (table.name)}
-                  <div
-                    role="listitem"
-                    oncontextmenu={(e) => handleTableContextMenu(e, table.name)}
-                    class="flex items-center group rounded hover:bg-[#1e293b]/80 pr-1 transition-colors"
-                  >
-                    <button
-                      onclick={() => appState.openTableDataTab(table.name)}
-                      class="flex-1 text-left px-2 py-1 flex items-center justify-between text-slate-300 group-hover:text-sky-300 text-xs truncate"
-                      title="View data for {table.name} (Right-click for options)"
-                    >
-                      <div class="flex items-center space-x-2 truncate">
-                        <Icon name="table" class="w-3.5 h-3.5 text-slate-500 group-hover:text-sky-400 shrink-0 transition-colors" />
-                        <span class="truncate font-mono text-[11.5px]">{table.name}</span>
-                      </div>
-
-                      {#if (table.row_count !== undefined && table.row_count !== null) || (table.rows_count !== undefined && table.rows_count !== null)}
-                        <span class="text-[10px] text-slate-500 group-hover:text-slate-400 font-mono bg-slate-900/60 px-1.5 py-0.2 rounded border border-slate-800/80 ml-1.5 shrink-0">
-                          {formatCount(table.row_count ?? table.rows_count)}
+                {#if prefixTree}
+                  <!-- Grouped by Prefix (ADR 0058) -->
+                  {#each prefixTree.groups as grp}
+                    <div class="rounded overflow-hidden">
+                      <button
+                        type="button"
+                        onclick={() => togglePrefix(grp.prefix)}
+                        class="w-full px-2 py-1 text-[11px] font-semibold text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 rounded flex items-center justify-between transition"
+                      >
+                        <span class="flex items-center space-x-1.5 truncate">
+                          <span class="text-[9px] text-slate-500 font-mono">{collapsedPrefixes[grp.prefix] ? '▶' : '▼'}</span>
+                          <span class="text-sky-400 font-mono">{grp.prefix}_*</span>
                         </span>
-                      {/if}
-                    </button>
+                        <span class="text-[9px] font-mono text-slate-500 bg-slate-900 px-1 rounded">
+                          {grp.tables.length}
+                        </span>
+                      </button>
 
-                    <!-- Structure / DDL Action Button -->
-                    <button
-                      onclick={() => appState.openTableStructureTab(table.name)}
-                      class="opacity-0 group-hover:opacity-100 p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-opacity"
-                      title="View Table Structure"
+                      {#if !collapsedPrefixes[grp.prefix]}
+                        <div class="pl-3 space-y-0.5 border-l border-slate-800/80 ml-2 my-0.5">
+                          {#each grp.tables as table (table.name)}
+                            <div
+                              role="listitem"
+                              oncontextmenu={(e) => handleTableContextMenu(e, table.name)}
+                              class="flex items-center group rounded hover:bg-[#1e293b]/80 pr-1 transition-colors"
+                            >
+                              <button
+                                onclick={() => appState.openTableDataTab(table.name)}
+                                class="flex-1 text-left px-2 py-1 flex items-center justify-between text-slate-300 group-hover:text-sky-300 text-xs truncate"
+                                title="View data for {table.name} (Right-click for options)"
+                              >
+                                <div class="flex items-center space-x-2 truncate">
+                                  <Icon name="table" class="w-3.5 h-3.5 text-slate-500 group-hover:text-sky-400 shrink-0 transition-colors" />
+                                  <span class="truncate font-mono text-[11.5px]">{table.name}</span>
+                                </div>
+                              </button>
+                            </div>
+                          {/each}
+                        </div>
+                      {/if}
+                    </div>
+                  {/each}
+
+                  {#each prefixTree.ungrouped as table (table.name)}
+                    <div
+                      role="listitem"
+                      oncontextmenu={(e) => handleTableContextMenu(e, table.name)}
+                      class="flex items-center group rounded hover:bg-[#1e293b]/80 pr-1 transition-colors"
                     >
-                      <Icon name="columns" class="w-3 h-3" />
-                    </button>
-                  </div>
-                {/each}
+                      <button
+                        onclick={() => appState.openTableDataTab(table.name)}
+                        class="flex-1 text-left px-2 py-1 flex items-center justify-between text-slate-300 group-hover:text-sky-300 text-xs truncate"
+                        title="View data for {table.name} (Right-click for options)"
+                      >
+                        <div class="flex items-center space-x-2 truncate">
+                          <Icon name="table" class="w-3.5 h-3.5 text-slate-500 group-hover:text-sky-400 shrink-0 transition-colors" />
+                          <span class="truncate font-mono text-[11.5px]">{table.name}</span>
+                        </div>
+                      </button>
+                    </div>
+                  {/each}
+                {:else}
+                  <!-- Flat Table List -->
+                  {#each appState.filteredTables as table (table.name)}
+                    <div
+                      role="listitem"
+                      oncontextmenu={(e) => handleTableContextMenu(e, table.name)}
+                      class="flex items-center group rounded hover:bg-[#1e293b]/80 pr-1 transition-colors"
+                    >
+                      <button
+                        onclick={() => appState.openTableDataTab(table.name)}
+                        class="flex-1 text-left px-2 py-1 flex items-center justify-between text-slate-300 group-hover:text-sky-300 text-xs truncate"
+                        title="View data for {table.name} (Right-click for options)"
+                      >
+                        <div class="flex items-center space-x-2 truncate">
+                          <Icon name="table" class="w-3.5 h-3.5 text-slate-500 group-hover:text-sky-400 shrink-0 transition-colors" />
+                          <span class="truncate font-mono text-[11.5px]">{table.name}</span>
+                        </div>
+
+                        {#if (table.row_count !== undefined && table.row_count !== null) || (table.rows_count !== undefined && table.rows_count !== null)}
+                          <span class="text-[10px] text-slate-500 group-hover:text-slate-400 font-mono bg-slate-900/60 px-1.5 py-0.2 rounded border border-slate-800/80 ml-1.5 shrink-0">
+                            {formatCount(table.row_count ?? table.rows_count)}
+                          </span>
+                        {/if}
+                      </button>
+
+                      <!-- Structure / DDL Action Button -->
+                      <button
+                        onclick={() => appState.openTableStructureTab(table.name)}
+                        class="opacity-0 group-hover:opacity-100 p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-opacity"
+                        title="View Table Structure"
+                      >
+                        <Icon name="columns" class="w-3 h-3" />
+                      </button>
+                    </div>
+                  {/each}
+                {/if}
               </div>
             {/if}
           </div>
@@ -365,22 +506,32 @@
         <!-- SECTION: Views -->
         {#if appState.filteredViews.length > 0}
           <div class="rounded overflow-hidden pt-1">
-            <button
-              onclick={() => appState.toggleSection('views')}
-              class="w-full px-2 py-1 text-[10.5px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between hover:bg-slate-800/50 rounded transition-colors"
-            >
-              <span class="flex items-center space-x-1.5">
-                <Icon
-                  name={appState.collapsedSections.views ? 'chevron-right' : 'chevron-down'}
-                  class="w-3 h-3 text-slate-500"
-                />
-                <Icon name="eye" class="w-3.5 h-3.5 text-emerald-400" />
-                <span>Views</span>
-              </span>
-              <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 text-slate-400">
-                {appState.filteredViews.length}
-              </span>
-            </button>
+            <div class="flex items-center justify-between hover:bg-slate-800/50 rounded pr-1 group">
+              <button
+                onclick={() => appState.toggleSection('views')}
+                class="flex-1 px-2 py-1 text-[10.5px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between transition-colors"
+              >
+                <span class="flex items-center space-x-1.5">
+                  <Icon
+                    name={appState.collapsedSections.views ? 'chevron-right' : 'chevron-down'}
+                    class="w-3 h-3 text-slate-500"
+                  />
+                  <Icon name="eye" class="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Views</span>
+                </span>
+                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 text-slate-400">
+                  {appState.filteredViews.length}
+                </span>
+              </button>
+
+              <button
+                onclick={() => appState.openViewDesigner()}
+                class="p-1 text-slate-400 hover:text-emerald-300 hover:bg-emerald-950/60 rounded transition"
+                title="Create New View"
+              >
+                <Icon name="plus" class="w-3.5 h-3.5" />
+              </button>
+            </div>
 
             {#if !appState.collapsedSections.views}
               <div class="space-y-0.5 mt-0.5 pl-1">
@@ -404,22 +555,32 @@
         <!-- SECTION: Routines & Procedures -->
         {#if appState.filteredRoutines.length > 0}
           <div class="rounded overflow-hidden pt-1">
-            <button
-              onclick={() => appState.toggleSection('routines')}
-              class="w-full px-2 py-1 text-[10.5px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between hover:bg-slate-800/50 rounded transition-colors"
-            >
-              <span class="flex items-center space-x-1.5">
-                <Icon
-                  name={appState.collapsedSections.routines ? 'chevron-right' : 'chevron-down'}
-                  class="w-3 h-3 text-slate-500"
-                />
-                <Icon name="zap" class="w-3.5 h-3.5 text-amber-400" />
-                <span>Routines</span>
-              </span>
-              <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 text-slate-400">
-                {appState.filteredRoutines.length}
-              </span>
-            </button>
+            <div class="flex items-center justify-between hover:bg-slate-800/50 rounded pr-1 group">
+              <button
+                onclick={() => appState.toggleSection('routines')}
+                class="flex-1 px-2 py-1 text-[10.5px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between transition-colors"
+              >
+                <span class="flex items-center space-x-1.5">
+                  <Icon
+                    name={appState.collapsedSections.routines ? 'chevron-right' : 'chevron-down'}
+                    class="w-3 h-3 text-slate-500"
+                  />
+                  <Icon name="zap" class="w-3.5 h-3.5 text-amber-400" />
+                  <span>Routines</span>
+                </span>
+                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 text-slate-400">
+                  {appState.filteredRoutines.length}
+                </span>
+              </button>
+
+              <button
+                onclick={() => appState.openRoutineDesigner()}
+                class="p-1 text-slate-400 hover:text-amber-300 hover:bg-amber-950/60 rounded transition"
+                title="Create Stored Procedure / Function"
+              >
+                <Icon name="plus" class="w-3.5 h-3.5" />
+              </button>
+            </div>
 
             {#if !appState.collapsedSections.routines}
               <div class="space-y-0.5 mt-0.5 pl-1">
@@ -446,22 +607,32 @@
         <!-- SECTION: Triggers -->
         {#if appState.filteredTriggers.length > 0}
           <div class="rounded overflow-hidden pt-1">
-            <button
-              onclick={() => appState.toggleSection('triggers')}
-              class="w-full px-2 py-1 text-[10.5px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between hover:bg-slate-800/50 rounded transition-colors"
-            >
-              <span class="flex items-center space-x-1.5">
-                <Icon
-                  name={appState.collapsedSections.triggers ? 'chevron-right' : 'chevron-down'}
-                  class="w-3 h-3 text-slate-500"
-                />
-                <Icon name="target" class="w-3.5 h-3.5 text-purple-400" />
-                <span>Triggers</span>
-              </span>
-              <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 text-slate-400">
-                {appState.filteredTriggers.length}
-              </span>
-            </button>
+            <div class="flex items-center justify-between hover:bg-slate-800/50 rounded pr-1 group">
+              <button
+                onclick={() => appState.toggleSection('triggers')}
+                class="flex-1 px-2 py-1 text-[10.5px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between transition-colors"
+              >
+                <span class="flex items-center space-x-1.5">
+                  <Icon
+                    name={appState.collapsedSections.triggers ? 'chevron-right' : 'chevron-down'}
+                    class="w-3 h-3 text-slate-500"
+                  />
+                  <Icon name="target" class="w-3.5 h-3.5 text-purple-400" />
+                  <span>Triggers</span>
+                </span>
+                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 text-slate-400">
+                  {appState.filteredTriggers.length}
+                </span>
+              </button>
+
+              <button
+                onclick={() => appState.openTriggerDesigner()}
+                class="p-1 text-slate-400 hover:text-purple-300 hover:bg-purple-950/60 rounded transition"
+                title="Create Database Trigger"
+              >
+                <Icon name="plus" class="w-3.5 h-3.5" />
+              </button>
+            </div>
 
             {#if !appState.collapsedSections.triggers}
               <div class="space-y-0.5 mt-0.5 pl-1">
@@ -534,6 +705,84 @@
           >
             <Icon name="file-code" class="w-3.5 h-3.5 text-purple-400" />
             <span>View CREATE TABLE DDL</span>
+          </button>
+        </div>
+
+        <div class="py-1">
+          <button
+            onclick={() => {
+              appState.exportTableDump(tableContextMenu!.tableName);
+              closeTableMenu();
+            }}
+            class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+          >
+            <Icon name="download" class="w-3.5 h-3.5 text-emerald-400" />
+            <span>Export Table SQL Dump</span>
+          </button>
+          <button
+            onclick={() => {
+              appState.openDumpModal(tableContextMenu!.tableName);
+              closeTableMenu();
+            }}
+            class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+          >
+            <Icon name="download" class="w-3.5 h-3.5 text-sky-400" />
+            <span>Export Table Dump Options...</span>
+          </button>
+          <button
+            onclick={() => {
+              appState.mockDataTableName = tableContextMenu!.tableName;
+              appState.isMockDataModalOpen = true;
+              closeTableMenu();
+            }}
+            class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+          >
+            <Icon name="database" class="w-3.5 h-3.5 text-purple-400" />
+            <span>Generate Mock Data...</span>
+          </button>
+          <button
+            onclick={() => {
+              appState.tableToDuplicate = tableContextMenu!.tableName;
+              appState.isDuplicateTableModalOpen = true;
+              closeTableMenu();
+            }}
+            class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+          >
+            <Icon name="copy" class="w-3.5 h-3.5 text-emerald-400" />
+            <span>Duplicate Table...</span>
+          </button>
+          <button
+            onclick={() => {
+              appState.tableToRename = tableContextMenu!.tableName;
+              appState.isRenameTableModalOpen = true;
+              closeTableMenu();
+            }}
+            class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+          >
+            <Icon name="edit" class="w-3.5 h-3.5 text-sky-400" />
+            <span>Rename Table...</span>
+          </button>
+          <button
+            onclick={() => {
+              const tbl = tableContextMenu!.tableName;
+              closeTableMenu();
+              appState.truncateTable(tbl);
+            }}
+            class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-amber-300"
+          >
+            <Icon name="alert-triangle" class="w-3.5 h-3.5 text-amber-400" />
+            <span>Truncate Table</span>
+          </button>
+          <button
+            onclick={() => {
+              const tbl = tableContextMenu!.tableName;
+              closeTableMenu();
+              appState.dropTable(tbl);
+            }}
+            class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-rose-400"
+          >
+            <Icon name="trash-2" class="w-3.5 h-3.5 text-rose-400" />
+            <span>Drop Table</span>
           </button>
         </div>
 
