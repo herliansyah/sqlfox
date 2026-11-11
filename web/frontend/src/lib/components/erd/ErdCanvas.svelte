@@ -586,7 +586,7 @@
         class="p-1.5 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition"
         title="Zoom Out"
       >
-        <span class="w-3.5 text-center font-bold text-sm leading-none">-</span>
+        <Icon name="minus" class="w-3.5 h-3.5" />
       </button>
 
       <button
