@@ -52,6 +52,10 @@ class ApiClient {
     return this.request('/auth/status');
   }
 
+  async getMasterKey(): Promise<{ lan_enabled: boolean; master_password?: string; lan_ip?: string }> {
+    return this.request('/auth/master-key');
+  }
+
   async unlockVault(password: string): Promise<{ success: boolean; token?: string }> {
     return this.request('/auth/unlock', {
       method: 'POST',
@@ -80,6 +84,13 @@ class ApiClient {
   async testConnection(id: string): Promise<{ success: boolean; version?: string; latency_ms?: number }> {
     return this.request(`/connections/${id}/test`, {
       method: 'POST',
+    });
+  }
+
+  async testTransientConnection(conn: Partial<ConnectionProfile>): Promise<{ success: boolean; version?: string; latency_ms?: number }> {
+    return this.request('/connections/test-transient/test', {
+      method: 'POST',
+      body: JSON.stringify(conn),
     });
   }
 
@@ -217,8 +228,12 @@ class ApiClient {
     return this.request(`/session/${sessionId}/partitions/${encodeURIComponent(tableName)}${q}`);
   }
 
-  async getTableDiagnostics(sessionId: string): Promise<any> {
-    return this.request(`/session/${sessionId}/diagnostics/tables`);
+  async getTableDiagnostics(sessionId: string, database = '', table = ''): Promise<any> {
+    const params = new URLSearchParams();
+    if (database) params.set('database', database);
+    if (table) params.set('table', table);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    return this.request(`/session/${sessionId}/diagnostics/tables${qs}`);
   }
 
   // Processlist & Server Management
@@ -281,12 +296,74 @@ class ApiClient {
     });
   }
 
+  // Performance Flight Recorder
+  async startFlightRecorder(sessionId: string, intervalMs = 1000): Promise<{ recording_id: string; started_at: string }> {
+    return this.request(`/session/${sessionId}/flight-recorder/start`, {
+      method: 'POST',
+      body: JSON.stringify({ interval_ms: intervalMs }),
+    });
+  }
+
+  async stopFlightRecorder(sessionId: string): Promise<any> {
+    return this.request(`/session/${sessionId}/flight-recorder/stop`, {
+      method: 'POST',
+    });
+  }
+
+  async getFlightRecorderStatus(sessionId: string): Promise<any> {
+    return this.request(`/session/${sessionId}/flight-recorder/status`);
+  }
+
+  async listFlightRecorderSessions(sessionId: string): Promise<any[]> {
+    return this.request(`/session/${sessionId}/flight-recorder/sessions`);
+  }
+
+  async getFlightRecorderSession(sessionId: string, recId: string): Promise<any> {
+    return this.request(`/session/${sessionId}/flight-recorder/sessions/${recId}`);
+  }
+
+  async deleteFlightRecorderSession(sessionId: string, recId: string): Promise<any> {
+    return this.request(`/session/${sessionId}/flight-recorder/sessions/${recId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Database Users & Privilege Matrix
   async listUsers(sessionId: string): Promise<any> {
-    return this.request(`/session/${sessionId}/diagnostics/users`);
+    return this.request(`/session/${sessionId}/users`);
   }
 
   async getUserGrants(sessionId: string, user: string, host: string): Promise<any> {
-    return this.request(`/session/${sessionId}/diagnostics/grants?user=${encodeURIComponent(user)}&host=${encodeURIComponent(host)}`);
+    return this.request(`/session/${sessionId}/users/grants?user=${encodeURIComponent(user)}&host=${encodeURIComponent(host)}`);
+  }
+
+  async saveUser(sessionId: string, payload: { user: string; host: string; password?: string; is_new?: boolean }): Promise<any> {
+    return this.request(`/session/${sessionId}/save-user`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteUser(sessionId: string, payload: { user: string; host: string }): Promise<any> {
+    const q = `?user=${encodeURIComponent(payload.user)}&host=${encodeURIComponent(payload.host)}`;
+    return this.request(`/session/${sessionId}/delete-user${q}`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async applyGrants(sessionId: string, payload: {
+    user: string;
+    host: string;
+    scope: string;
+    database?: string;
+    privileges: string[];
+    with_grant?: boolean;
+  }): Promise<any> {
+    return this.request(`/session/${sessionId}/apply-grants`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   }
 
   // Snippets
@@ -485,6 +562,138 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify(payload),
     });
+  }
+  // Structure Synchronization
+  async compareStructure(payload: {
+    source_session_id: string;
+    source_db?: string;
+    target_session_id: string;
+    target_db?: string;
+    include_drops?: boolean;
+  }): Promise<{ diffs: any[] }> {
+    return this.request('/sync/structure/compare', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async applyStructure(payload: {
+    target_session_id: string;
+    target_db?: string;
+    sqls: string[];
+  }): Promise<{ success: boolean; applied_count: number }> {
+    return this.request('/sync/structure/apply', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  // Cloud Sync & Notes Bundle
+  async testCloudSync(token: string, gistId?: string): Promise<{ success: boolean; message?: string }> {
+    return this.request('/cloud-sync/test', {
+      method: 'POST',
+      body: JSON.stringify({ token, gist_id: gistId }),
+    });
+  }
+
+  async runCloudSync(): Promise<{ success: boolean; message?: string }> {
+    return this.request('/cloud-sync/run', {
+      method: 'POST',
+    });
+  }
+
+  async importNotesBundle(bundle: any): Promise<{ success: boolean; imported_count: number }> {
+    return this.request('/notes/bundle/import', {
+      method: 'POST',
+      body: JSON.stringify(bundle),
+    });
+  }
+
+  // Large SQL Script Streaming Runner
+  async runSqlScript(
+    sessionId: string,
+    file: File,
+    options: { stopOnError?: boolean; database?: string; confirm?: boolean },
+    onProgress: (event: any) => void
+  ): Promise<{ status: string; total: number; executed: number; errors: number }> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const token = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('sqlfox_remote_token') : null;
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const params = new URLSearchParams();
+    if (options.stopOnError !== undefined) params.set('stop_on_error', String(options.stopOnError));
+    if (options.database) params.set('db', options.database);
+    if (options.confirm) params.set('confirm', 'true');
+
+    const res = await fetch(`/api/session/${sessionId}/run-sql-script?${params.toString()}`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    if (!res.ok) {
+      let errMsg = `HTTP ${res.status}`;
+      try {
+        const errObj = await res.json();
+        errMsg = errObj.error || errObj.message || errMsg;
+      } catch {
+        const text = await res.text();
+        if (text) errMsg = text;
+      }
+      throw new Error(errMsg);
+    }
+
+    if (!res.body) {
+      return { status: 'completed', total: 0, executed: 0, errors: 0 };
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let streamBuf = '';
+    let total = 0;
+    let executed = 0;
+    let errors = 0;
+    let finalStatus = 'completed';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      streamBuf += decoder.decode(value, { stream: true });
+      const lines = streamBuf.split('\n');
+      streamBuf = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const item = JSON.parse(trimmed);
+          if (item.total) total = item.total;
+          if (item.status === 'ok') executed++;
+          if (item.status === 'error') errors++;
+          onProgress(item);
+        } catch (_) {}
+      }
+    }
+
+    if (streamBuf.trim()) {
+      try {
+        const item = JSON.parse(streamBuf.trim());
+        if (item.total) total = item.total;
+        if (item.status === 'ok') executed++;
+        if (item.status === 'error') errors++;
+        onProgress(item);
+      } catch (_) {}
+    }
+
+    return {
+      status: errors > 0 && options.stopOnError ? 'halted' : finalStatus,
+      total,
+      executed,
+      errors,
+    };
   }
 }
 

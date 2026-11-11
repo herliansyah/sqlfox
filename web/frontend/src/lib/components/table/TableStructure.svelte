@@ -49,7 +49,57 @@
     'FLOAT',
     'DOUBLE',
     'JSON',
+    'ENUM',
+    'SET',
   ];
+
+  // ENUM / SET Builder State
+  let enumTags = $state<string[]>([]);
+  let enumInputVal = $state('');
+  let isEnumOrSet = $derived(
+    formColType.trim().toUpperCase().startsWith('ENUM') ||
+    formColType.trim().toUpperCase().startsWith('SET')
+  );
+
+  function parseEnumTags(typeStr: string): string[] {
+    const match = typeStr.match(/^(?:ENUM|SET)\s*\((.*)\)$/i);
+    if (!match) return [];
+    return match[1]
+      .split(',')
+      .map((s) => s.trim().replace(/^['"]+|['"]+$/g, ''))
+      .filter(Boolean);
+  }
+
+  function handleSelectType(ct: string) {
+    if (ct === 'ENUM') {
+      enumTags = ['active', 'inactive', 'pending'];
+      formColType = "ENUM('active', 'inactive', 'pending')";
+    } else if (ct === 'SET') {
+      enumTags = ['read', 'write', 'admin'];
+      formColType = "SET('read', 'write', 'admin')";
+    } else {
+      formColType = ct;
+      enumTags = [];
+    }
+  }
+
+  function addEnumTag(val: string) {
+    const trimmed = val.trim().replace(/^['"]+|['"]+$/g, '');
+    if (!trimmed || enumTags.includes(trimmed)) return;
+    enumTags = [...enumTags, trimmed];
+    updateEnumColType();
+  }
+
+  function removeEnumTag(idx: number) {
+    enumTags = enumTags.filter((_, i) => i !== idx);
+    updateEnumColType();
+  }
+
+  function updateEnumColType() {
+    const base = formColType.trim().toUpperCase().startsWith('SET') ? 'SET' : 'ENUM';
+    const formatted = enumTags.map((t) => `'${t.replace(/'/g, "''")}'`).join(', ');
+    formColType = `${base}(${formatted})`;
+  }
 
   // Sync staged columns whenever tableMeta changes
   $effect(() => {
@@ -75,6 +125,8 @@
     formColPK = false;
     formColDefault = '';
     formColExtra = '';
+    enumTags = [];
+    enumInputVal = '';
   }
 
   function openAddColumn() {
@@ -92,6 +144,8 @@
     formColPK = !!col.is_primary_key;
     formColDefault = col.default_value !== null && col.default_value !== undefined ? String(col.default_value) : '';
     formColExtra = col.extra || '';
+    enumTags = parseEnumTags(formColType);
+    enumInputVal = '';
     isAddModalOpen = true;
   }
 
@@ -462,13 +516,72 @@
               {#each commonTypes as ct}
                 <button
                   type="button"
-                  onclick={() => (formColType = ct)}
-                  class="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 hover:border-sky-500 text-slate-400 hover:text-sky-300 font-mono text-[10px] transition"
+                  onclick={() => handleSelectType(ct)}
+                  class="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 hover:border-sky-500 text-slate-400 hover:text-sky-300 font-mono text-[10px] transition {ct === 'ENUM' || ct === 'SET' ? 'border-amber-700/60 text-amber-300' : ''}"
                 >
                   {ct}
                 </button>
               {/each}
             </div>
+
+            {#if isEnumOrSet}
+              <!-- Floating ENUM / SET Value Builder Popover -->
+              <div class="p-3 bg-[#050811] border border-amber-500/40 rounded-lg space-y-2.5 animate-in fade-in duration-100">
+                <div class="flex items-center justify-between">
+                  <span class="text-[10px] font-bold text-amber-400 uppercase tracking-wider font-mono">
+                    {formColType.trim().toUpperCase().startsWith('SET') ? 'SET' : 'ENUM'} Option Value Builder
+                  </span>
+                  <span class="text-[10px] text-slate-500 font-mono">{enumTags.length} item(s)</span>
+                </div>
+
+                <!-- Tag list -->
+                <div class="flex flex-wrap gap-1.5 min-h-[32px] p-2 bg-[#090d16] border border-slate-800 rounded">
+                  {#if enumTags.length === 0}
+                    <span class="text-slate-500 italic text-[11px]">No options yet. Type below and press Enter.</span>
+                  {:else}
+                    {#each enumTags as tag, idx}
+                      <span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded bg-amber-950/60 text-amber-200 border border-amber-800/80 font-mono text-[11px]">
+                        <span>'{tag}'</span>
+                        <button
+                          type="button"
+                          onclick={() => removeEnumTag(idx)}
+                          class="text-amber-400 hover:text-rose-400 ml-1 font-bold leading-none"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    {/each}
+                  {/if}
+                </div>
+
+                <!-- Input to add new tag -->
+                <div class="flex items-center space-x-2">
+                  <input
+                    type="text"
+                    bind:value={enumInputVal}
+                    placeholder="Type value and press Enter or comma..."
+                    class="flex-1 bg-[#090d16] border border-slate-700 rounded px-2.5 py-1 text-slate-200 font-mono text-xs focus:outline-none focus:border-amber-500"
+                    onkeydown={(e) => {
+                      if (e.key === 'Enter' || e.key === ',') {
+                        e.preventDefault();
+                        addEnumTag(enumInputVal);
+                        enumInputVal = '';
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onclick={() => {
+                      addEnumTag(enumInputVal);
+                      enumInputVal = '';
+                    }}
+                    class="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-semibold text-[11px] transition"
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+            {/if}
           </div>
         </div>
 

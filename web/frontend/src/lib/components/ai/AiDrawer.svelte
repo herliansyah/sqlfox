@@ -87,7 +87,7 @@
 
     // Gather active workspace context
     const currentTab = appState.activeTab;
-    const activeQuery = currentTab?.query || '';
+    const activeQuery = currentTab?.sql || '';
     const activeTable = currentTab?.tableName || '';
     const dialect = appState.activeConnection?.driver || 'mysql';
 
@@ -156,7 +156,7 @@
 
   function insertIntoWorksheet(sql: string) {
     if (appState.activeTab) {
-      appState.activeTab.query = sql;
+      appState.activeTab.sql = sql;
       appState.showToast('SQL inserted into active worksheet!', 'success');
     } else {
       appState.showToast('Open a worksheet tab first', 'warning');

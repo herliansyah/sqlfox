@@ -77,8 +77,8 @@
   function handleGlobalKeyDown(e: KeyboardEvent) {
     const isCtrl = e.ctrlKey || e.metaKey;
 
-    // Ctrl + Enter: Execute
-    if (isCtrl && e.key === 'Enter') {
+    // Ctrl + Enter: Execute whole script (Shift+Enter is handled by CodeMirror to execute statement at cursor)
+    if (isCtrl && !e.shiftKey && e.key === 'Enter') {
       e.preventDefault();
       appState.executeCurrentTab();
       return;

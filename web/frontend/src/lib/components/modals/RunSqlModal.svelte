@@ -31,57 +31,55 @@
     }
   }
 
-  async function handleStartExecution() {
+  async function handleStartExecution(confirmChallenge = false) {
     if (!selectedFile || !appState.activeSessionId) return;
 
     isRunning = true;
-    logs = [`Reading file ${selectedFile.name}...`];
+    logs = [`Streaming SQL script "${selectedFile.name}" (${(selectedFile.size / 1024).toFixed(1)} KB) to server...`];
+    let successCount = 0;
+    let errorCount = 0;
+
     try {
-      const text = await selectedFile.text();
-      // Split into SQL statements by semicolon at end of line
-      const rawStmts = text
-        .split(/;\s*[\r\n]+/)
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0 && !s.startsWith('--') && !s.startsWith('/*'));
-
-      totalStmts = rawStmts.length;
-      logs.push(`Found ${totalStmts} SQL statements to execute.`);
-
-      let successCount = 0;
-      let errorCount = 0;
-
-      for (let i = 0; i < rawStmts.length; i++) {
-        currentStmtIndex = i + 1;
-        progressPct = Math.round((currentStmtIndex / totalStmts) * 100);
-
-        const stmt = rawStmts[i];
-        try {
-          const res = await api.executeQuery(appState.activeSessionId, stmt + ';', false);
-          if (res.error) {
-            errorCount++;
-            logs.push(`[ERROR #${i + 1}]: ${res.error}`);
-            if (stopOnError) {
-              logs.push('Execution halted due to error (Stop on Error enabled).');
-              break;
-            }
-          } else {
-            successCount++;
+      const res = await api.runSqlScript(
+        appState.activeSessionId,
+        selectedFile,
+        {
+          stopOnError,
+          database: appState.currentDatabase || undefined,
+          confirm: confirmChallenge,
+        },
+        (evt) => {
+          if (evt.total) {
+            totalStmts = evt.total;
           }
-        } catch (err: any) {
-          errorCount++;
-          logs.push(`[ERROR #${i + 1}]: ${err.message}`);
-          if (stopOnError) {
-            logs.push('Execution halted due to exception.');
-            break;
+          if (evt.statement_index) {
+            currentStmtIndex = evt.statement_index;
+            if (totalStmts > 0) {
+              progressPct = Math.round((currentStmtIndex / totalStmts) * 100);
+            }
+          }
+          if (evt.status === 'error') {
+            errorCount++;
+            logs = [...logs, `[ERROR #${evt.statement_index}]: ${evt.error || 'Failed'}`];
+          } else if (evt.sql_preview) {
+            successCount++;
+            logs = [...logs, `[#${evt.statement_index} ${evt.duration_ms}ms]: ${evt.sql_preview}`];
           }
         }
-      }
+      );
 
-      logs.push(`Finished: ${successCount} succeeded, ${errorCount} errors.`);
-      appState.showToast(`Executed ${successCount} statements`, errorCount > 0 ? 'warning' : 'success');
+      logs = [...logs, `Finished: ${successCount} succeeded, ${errorCount} errors. Status: ${res.status || 'completed'}`];
+      appState.showToast(`Script executed: ${successCount} statements succeeded`, errorCount > 0 ? 'warning' : 'success');
       await appState.refreshCatalog();
     } catch (err: any) {
-      logs.push(`Failed to read file: ${err.message}`);
+      if (err.message?.includes('destructive statements') || err.message?.includes('requires_challenge')) {
+        const ok = confirm(`Script contains destructive statements that require confirmation:\n\n${err.message}\n\nDo you want to proceed and execute anyway?`);
+        if (ok) {
+          return handleStartExecution(true);
+        }
+      }
+      logs = [...logs, `[CRITICAL ERROR]: ${err.message}`];
+      appState.showToast(`Execution failed: ${err.message}`, 'error');
     } finally {
       isRunning = false;
     }

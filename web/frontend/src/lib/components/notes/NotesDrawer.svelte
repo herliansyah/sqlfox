@@ -151,12 +151,7 @@
 
   function openQueryInWorksheet(sql?: string) {
     if (!sql) return;
-    const tabId = appState.createTab({
-      title: 'Note Query',
-      type: 'worksheet',
-      query: sql,
-    });
-    appState.setActiveTab(tabId);
+    appState.addTab('Note Query.sql', sql);
     appState.showToast('Query opened in new worksheet tab', 'info');
   }
 

@@ -58,20 +58,11 @@
     isTesting = true;
     syncStatus = null;
     try {
-      const res = await fetch('/api/cloud-sync/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          github_token: githubToken.trim() || undefined,
-          github_repo: githubRepo.trim(),
-        }),
+      const data = await api.testCloudSync({
+        github_token: githubToken.trim() || undefined,
+        github_repo: githubRepo.trim(),
       });
-      const data = await res.json();
-      if (res.ok) {
-        syncStatus = { ok: true, message: data.message || 'GitHub repository connection verified successfully!' };
-      } else {
-        syncStatus = { ok: false, message: data.error || 'GitHub connection test failed' };
-      }
+      syncStatus = { ok: true, message: data.message || 'GitHub repository connection verified successfully!' };
     } catch (err: any) {
       syncStatus = { ok: false, message: `Test error: ${err.message}` };
     } finally {
@@ -82,13 +73,8 @@
   async function runCloudSyncNow() {
     isSyncing = true;
     try {
-      const res = await fetch('/api/cloud-sync/run', { method: 'POST' });
-      const data = await res.json();
-      if (res.ok) {
-        appState.showToast(data.message || 'Cloud Sync push & pull completed!', 'success');
-      } else {
-        appState.showToast(`Sync failed: ${data.error}`, 'error');
-      }
+      const data = await api.runCloudSync();
+      appState.showToast(data.message || 'Cloud Sync push & pull completed!', 'success');
     } catch (err: any) {
       appState.showToast(`Sync execution failed: ${err.message}`, 'error');
     } finally {
@@ -107,18 +93,8 @@
 
     isImporting = true;
     try {
-      const formData = new FormData();
-      formData.append('bundle', file);
-      const res = await fetch('/api/notes/bundle/import', {
-        method: 'POST',
-        body: formData,
-      });
-      const data = await res.json();
-      if (res.ok) {
-        appState.showToast(`Imported ${data.imported_count || 'notes'} successfully!`, 'success');
-      } else {
-        appState.showToast(`Import failed: ${data.error}`, 'error');
-      }
+      const data = await api.importNotesBundle(file);
+      appState.showToast(`Imported ${data.imported_count || 'notes'} successfully!`, 'success');
     } catch (err: any) {
       appState.showToast(`Import error: ${err.message}`, 'error');
     } finally {

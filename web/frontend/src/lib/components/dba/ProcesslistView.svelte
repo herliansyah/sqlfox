@@ -5,7 +5,7 @@
   import Icon from '../common/Icon.svelte';
   import ProcessTrendPanel from './ProcessTrendPanel.svelte';
 
-  type DbaSubTab = 'threads' | 'digest' | 'deadlock' | 'cluster' | 'variables';
+  type DbaSubTab = 'threads' | 'digest' | 'deadlock' | 'cluster' | 'variables' | 'flight-recorder';
   type FilterChip = 'all' | 'active' | 'sleep' | 'locked' | 'slow';
 
   let currentSubTab = $state<DbaSubTab>('threads');
@@ -54,6 +54,19 @@
   let varFilterText = $state('');
   let varCategory = $state('All');
 
+  // Performance Flight Recorder State
+  let isRecording = $state(false);
+  let recordingId = $state<string | null>(null);
+  let recordingStartedAt = $state<Date | null>(null);
+  let recordingSeconds = $state(0);
+  let flightIntervalMs = $state(1000);
+  let flightSessions = $state<any[]>([]);
+  let selectedFlightSessionId = $state<string>('');
+  let flightSessionTicks = $state<any[]>([]);
+  let isFlightLoading = $state(false);
+  let flightTickerTimer: any = null;
+  let flightPollTimer: any = null;
+
   $effect(() => {
     if (appState.activeSessionId) {
       if (currentSubTab === 'threads') {
@@ -66,6 +79,9 @@
         loadClusterReport();
       } else if (currentSubTab === 'variables') {
         loadVariablesReport();
+      } else if (currentSubTab === 'flight-recorder') {
+        checkFlightRecorderStatus();
+        loadFlightSessions();
       }
     }
   });
@@ -162,6 +178,136 @@
     } finally {
       isVariablesLoading = false;
     }
+  }
+
+  // Performance Flight Recorder Handlers
+  async function checkFlightRecorderStatus() {
+    if (!appState.activeSessionId) return;
+    try {
+      const status = await api.getFlightRecorderStatus(appState.activeSessionId);
+      isRecording = !!status.is_recording;
+      if (status.is_recording) {
+        recordingId = status.recording_id;
+        recordingStartedAt = status.started_at ? new Date(status.started_at) : new Date();
+        recordingSeconds = status.duration_seconds || 0;
+        startFlightTimers();
+      } else {
+        stopFlightTimers();
+      }
+    } catch (_) {}
+  }
+
+  function startFlightTimers() {
+    stopFlightTimers();
+    flightTickerTimer = setInterval(() => {
+      recordingSeconds++;
+    }, 1000);
+    flightPollTimer = setInterval(async () => {
+      if (!appState.activeSessionId || !isRecording) return;
+      try {
+        const status = await api.getFlightRecorderStatus(appState.activeSessionId);
+        if (!status.is_recording) {
+          isRecording = false;
+          stopFlightTimers();
+          await loadFlightSessions();
+        }
+      } catch (_) {}
+    }, 3000);
+  }
+
+  function stopFlightTimers() {
+    if (flightTickerTimer) clearInterval(flightTickerTimer);
+    if (flightPollTimer) clearInterval(flightPollTimer);
+    flightTickerTimer = null;
+    flightPollTimer = null;
+  }
+
+  async function toggleFlightRecording() {
+    if (!appState.activeSessionId) return;
+    if (!isRecording) {
+      try {
+        const res = await api.startFlightRecorder(appState.activeSessionId, flightIntervalMs);
+        isRecording = true;
+        recordingId = res.recording_id;
+        recordingStartedAt = new Date();
+        recordingSeconds = 0;
+        startFlightTimers();
+        appState.showToast('Performance Flight Recorder started (10-min safety guard active)', 'info');
+      } catch (err: any) {
+        appState.showToast(`Failed to start flight recorder: ${err.message}`, 'error');
+      }
+    } else {
+      try {
+        await api.stopFlightRecorder(appState.activeSessionId);
+        isRecording = false;
+        stopFlightTimers();
+        appState.showToast('Performance Flight Recorder stopped and saved to session vault', 'success');
+        await loadFlightSessions();
+      } catch (err: any) {
+        appState.showToast(`Failed to stop flight recorder: ${err.message}`, 'error');
+      }
+    }
+  }
+
+  async function loadFlightSessions() {
+    if (!appState.activeSessionId) return;
+    isFlightLoading = true;
+    try {
+      const sessions = await api.listFlightRecorderSessions(appState.activeSessionId);
+      flightSessions = Array.isArray(sessions) ? sessions : [];
+      if (flightSessions.length > 0 && !selectedFlightSessionId && !isRecording) {
+        inspectFlightSession(flightSessions[0].id);
+      }
+    } catch (err: any) {
+      flightSessions = [];
+    } finally {
+      isFlightLoading = false;
+    }
+  }
+
+  async function inspectFlightSession(recId: string) {
+    selectedFlightSessionId = recId;
+    if (!recId || !appState.activeSessionId) {
+      flightSessionTicks = [];
+      return;
+    }
+    isFlightLoading = true;
+    try {
+      const res = await api.getFlightRecorderSession(appState.activeSessionId, recId);
+      flightSessionTicks = res.ticks || [];
+    } catch (err: any) {
+      appState.showToast(`Failed to load session details: ${err.message}`, 'error');
+    } finally {
+      isFlightLoading = false;
+    }
+  }
+
+  async function deleteFlightSession(recId: string) {
+    if (!confirm('Are you sure you want to permanently delete this flight recorder session?')) return;
+    if (!appState.activeSessionId) return;
+    try {
+      await api.deleteFlightRecorderSession(appState.activeSessionId, recId);
+      appState.showToast('Flight recorder session deleted', 'info');
+      if (selectedFlightSessionId === recId) {
+        selectedFlightSessionId = '';
+        flightSessionTicks = [];
+      }
+      await loadFlightSessions();
+    } catch (err: any) {
+      appState.showToast(`Failed to delete session: ${err.message}`, 'error');
+    }
+  }
+
+  function exportFlightSessionJSON() {
+    if (!flightSessionTicks.length && !selectedFlightSessionId) return;
+    const blob = new Blob([JSON.stringify({ session_id: selectedFlightSessionId, ticks: flightSessionTicks }, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `flight-recorder-${selectedFlightSessionId || 'export'}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    appState.showToast('Exported flight recording session JSON', 'success');
   }
 
   async function killSingleThread(id: number) {
@@ -333,6 +479,15 @@
         >
           Server Variables
         </button>
+        <button
+          onclick={() => (currentSubTab = 'flight-recorder')}
+          class="px-2.5 py-1 rounded text-xs font-semibold transition font-sans flex items-center space-x-1.5 {currentSubTab === 'flight-recorder' ? 'bg-[#1e293b] text-sky-400 shadow-sm' : 'text-slate-400 hover:text-slate-200'}"
+        >
+          {#if isRecording}
+            <span class="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
+          {/if}
+          <span>Flight Recorder</span>
+        </button>
       </div>
     </div>
 
@@ -398,6 +553,46 @@
         >
           <Icon name="refresh-cw" class="w-3.5 h-3.5 {isVariablesLoading ? 'animate-spin text-sky-400' : ''}" />
         </button>
+      {:else if currentSubTab === 'flight-recorder'}
+        <div class="flex items-center space-x-2">
+          {#if !isRecording}
+            <div class="flex items-center space-x-1 bg-[#090d16] border border-[#334155] rounded px-2 py-0.5 text-[11px]">
+              <span class="text-slate-400 font-sans">Interval:</span>
+              <select
+                bind:value={flightIntervalMs}
+                class="bg-transparent text-sky-400 font-semibold focus:outline-none"
+              >
+                <option value={500}>500ms</option>
+                <option value={1000}>1s</option>
+                <option value={2000}>2s</option>
+              </select>
+            </div>
+          {/if}
+
+          <button
+            onclick={toggleFlightRecording}
+            class="px-3 py-1 rounded font-bold text-xs font-sans transition flex items-center space-x-1.5 shadow {isRecording ? 'bg-rose-600 hover:bg-rose-500 text-white animate-pulse' : 'bg-emerald-600 hover:bg-emerald-500 text-white'}"
+          >
+            {#if isRecording}
+              <span class="w-2 h-2 rounded-full bg-white"></span>
+              <span>STOP ({Math.floor(recordingSeconds / 60).toString().padStart(2, '0')}:{(recordingSeconds % 60).toString().padStart(2, '0')})</span>
+            {:else}
+              <span class="w-2 h-2 rounded-full bg-rose-400"></span>
+              <span>START REC</span>
+            {/if}
+          </button>
+
+          {#if flightSessionTicks.length > 0}
+            <button
+              onclick={exportFlightSessionJSON}
+              class="px-2.5 py-1 rounded bg-[#090d16] hover:bg-slate-800 border border-[#334155] text-slate-300 text-xs font-sans transition flex items-center space-x-1"
+              title="Export flight recording as JSON"
+            >
+              <Icon name="download" class="w-3.5 h-3.5 text-sky-400" />
+              <span>Export JSON</span>
+            </button>
+          {/if}
+        </div>
       {/if}
     </div>
   </div>
@@ -918,6 +1113,140 @@
             {/if}
           </tbody>
         </table>
+      </div>
+    </div>
+  {:else if currentSubTab === 'flight-recorder'}
+    <!-- Performance Flight Recorder View -->
+    <div class="flex-1 flex flex-col overflow-hidden bg-[#090d16]">
+      <!-- Flight Sessions Bar -->
+      <div class="h-10 bg-[#090d16] border-b border-[#1e293b] px-4 flex items-center justify-between text-xs select-none">
+        <div class="flex items-center space-x-3">
+          <div class="flex items-center space-x-1.5 font-sans">
+            <span class="text-slate-400">Session:</span>
+            <select
+              value={selectedFlightSessionId}
+              onchange={(e) => inspectFlightSession((e.target as HTMLSelectElement).value)}
+              class="bg-[#0f172a] border border-[#334155] rounded px-2.5 py-1 text-slate-200 text-xs focus:outline-none focus:border-sky-500 font-mono"
+            >
+              <option value="">{isRecording ? '🔴 Live In-Progress Recording' : '-- Select Saved Recording --'}</option>
+              {#each flightSessions as s}
+                <option value={s.id}>
+                  {new Date(s.started_at).toLocaleTimeString()} ({s.sample_count || 0} samples, {s.duration_seconds || 0}s)
+                </option>
+              {/each}
+            </select>
+          </div>
+
+          {#if selectedFlightSessionId}
+            <button
+              type="button"
+              onclick={() => deleteFlightSession(selectedFlightSessionId)}
+              class="px-2 py-1 rounded bg-rose-950/60 hover:bg-rose-900 border border-rose-800 text-rose-300 text-xs font-sans transition flex items-center space-x-1"
+              title="Delete this flight session"
+            >
+              <Icon name="trash-2" class="w-3 h-3" />
+              <span>Delete Session</span>
+            </button>
+          {/if}
+        </div>
+
+        <div class="flex items-center space-x-3 font-sans text-[11px] text-slate-400">
+          <span>{flightSessions.length} recorded session(s)</span>
+          {#if isRecording}
+            <span class="px-2 py-0.5 rounded bg-rose-950/80 border border-rose-700 text-rose-300 font-bold flex items-center space-x-1.5">
+              <span class="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
+              <span>RECORDING ACTIVE</span>
+            </span>
+          {/if}
+        </div>
+      </div>
+
+      <!-- Flight Recorder Body -->
+      <div class="flex-1 overflow-auto p-4 space-y-4">
+        {#if isFlightLoading}
+          <div class="p-16 text-center text-slate-500 flex flex-col items-center gap-2 font-sans">
+            <Icon name="refresh-cw" class="w-6 h-6 animate-spin text-sky-400" />
+            <span>Loading flight recorder telemetry ticks...</span>
+          </div>
+        {:else if !isRecording && !selectedFlightSessionId && flightSessions.length === 0}
+          <div class="p-12 text-center bg-[#0b0f19] border border-dashed border-[#1e293b] rounded-2xl flex flex-col items-center justify-center space-y-3 my-12 max-w-lg mx-auto font-sans">
+            <div class="p-3 rounded-full bg-rose-500/10 text-rose-400">
+              <Icon name="activity" class="w-8 h-8" />
+            </div>
+            <div class="space-y-1">
+              <h4 class="font-bold text-slate-200 text-sm">No Flight Recording Sessions Yet</h4>
+              <p class="text-slate-400 text-xs">
+                Performance Flight Recorder samples thread metrics, QPS spikes, and locks every 500ms-2s. Click <strong>START REC</strong> to capture a blackbox recording of database behavior during load tests or incidents.
+              </p>
+            </div>
+            <button
+              type="button"
+              onclick={toggleFlightRecording}
+              class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition flex items-center space-x-1.5 shadow-lg shadow-emerald-950/40"
+            >
+              <Icon name="play" class="w-4 h-4" />
+              <span>Start Performance Recording</span>
+            </button>
+          </div>
+        {:else}
+          <!-- Session Summary Banner -->
+          <div class="grid grid-cols-4 gap-3 font-sans">
+            <div class="p-3 rounded-xl bg-[#0b0f19] border border-[#1e293b]">
+              <span class="text-slate-500 text-[10px] uppercase font-bold block">Status</span>
+              <span class="text-sm font-bold {isRecording ? 'text-rose-400 animate-pulse' : 'text-emerald-400'}">
+                {isRecording ? 'Capturing Live Ticks' : 'Historical Session'}
+              </span>
+            </div>
+            <div class="p-3 rounded-xl bg-[#0b0f19] border border-[#1e293b]">
+              <span class="text-slate-500 text-[10px] uppercase font-bold block">Sampling Frequency</span>
+              <span class="text-sm font-bold text-slate-200 font-mono">{flightIntervalMs} ms</span>
+            </div>
+            <div class="p-3 rounded-xl bg-[#0b0f19] border border-[#1e293b]">
+              <span class="text-slate-500 text-[10px] uppercase font-bold block">Samples Captured</span>
+              <span class="text-sm font-bold text-sky-400 font-mono">{flightSessionTicks.length} ticks</span>
+            </div>
+            <div class="p-3 rounded-xl bg-[#0b0f19] border border-[#1e293b]">
+              <span class="text-slate-500 text-[10px] uppercase font-bold block">Recording Guard</span>
+              <span class="text-sm font-bold text-amber-300 font-mono">10m Max Safety Cap</span>
+            </div>
+          </div>
+
+          <!-- Ticks Samples Table -->
+          <div class="border border-[#1e293b] rounded-xl overflow-hidden bg-[#0b0f19]">
+            <table class="w-full text-left border-collapse text-xs">
+              <thead class="bg-[#0f172a] text-slate-400 text-[11px] font-sans uppercase border-b border-[#1e293b]">
+                <tr>
+                  <th class="py-2.5 px-3">#</th>
+                  <th class="py-2.5 px-3">Timestamp</th>
+                  <th class="py-2.5 px-3 text-right">Active Threads</th>
+                  <th class="py-2.5 px-3 text-right">QPS</th>
+                  <th class="py-2.5 px-3 text-right">Slow Queries</th>
+                  <th class="py-2.5 px-3">Top Active Query</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-[#1e293b] font-mono">
+                {#if flightSessionTicks.length === 0}
+                  <tr>
+                    <td colspan="6" class="p-8 text-center text-slate-500 italic font-sans">
+                      {isRecording ? 'Sampling in progress... ticks will appear shortly.' : 'No tick samples recorded in this session.'}
+                    </td>
+                  </tr>
+                {:else}
+                  {#each flightSessionTicks as tick, idx}
+                    <tr class="hover:bg-slate-800/40 transition">
+                      <td class="py-2 px-3 text-slate-500">{idx + 1}</td>
+                      <td class="py-2 px-3 text-slate-300">{new Date(tick.timestamp || tick.time).toLocaleTimeString()}</td>
+                      <td class="py-2 px-3 text-right text-emerald-400 font-bold">{tick.active_threads ?? tick.threads ?? 0}</td>
+                      <td class="py-2 px-3 text-right text-sky-400">{tick.qps ?? '--'}</td>
+                      <td class="py-2 px-3 text-right {(tick.slow_queries || 0) > 0 ? 'text-amber-400 font-bold' : 'text-slate-500'}">{tick.slow_queries ?? 0}</td>
+                      <td class="py-2 px-3 text-slate-400 truncate max-w-xs">{tick.top_query || tick.query || '-'}</td>
+                    </tr>
+                  {/each}
+                {/if}
+              </tbody>
+            </table>
+          </div>
+        {/if}
       </div>
     </div>
   {/if}

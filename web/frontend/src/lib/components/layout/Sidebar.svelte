@@ -312,17 +312,20 @@
             </div>
           {:else}
             {#each appState.filteredDatabases as db}
-              <button
-                onclick={() => {
-                  appState.selectDatabase(db);
-                  appState.sidebarViewMode = 'objects';
-                }}
-                class="w-full text-left px-2.5 py-1.5 rounded flex items-center justify-between group hover:bg-[#1e293b]/80 text-xs transition-colors {db === appState.currentDatabase ? 'bg-sky-500/10 text-sky-400 font-bold border border-sky-800/40' : 'text-slate-300'}"
+              <div
+                class="w-full text-left px-2.5 py-1 rounded flex items-center justify-between group hover:bg-[#1e293b]/80 text-xs transition-colors {db === appState.currentDatabase ? 'bg-sky-500/10 text-sky-400 font-bold border border-sky-800/40' : 'text-slate-300'}"
               >
-                <div class="flex items-center space-x-2 truncate">
+                <button
+                  type="button"
+                  onclick={() => {
+                    appState.selectDatabase(db);
+                    appState.sidebarViewMode = 'objects';
+                  }}
+                  class="flex-1 flex items-center space-x-2 truncate text-left"
+                >
                   <Icon name="database" class="w-3.5 h-3.5 shrink-0 {db === appState.currentDatabase ? 'text-sky-400' : 'text-slate-500 group-hover:text-sky-400'}" />
                   <span class="truncate font-mono text-[11.5px]">{db}</span>
-                </div>
+                </button>
                 <div class="flex items-center space-x-1.5 shrink-0">
                   {#if appState.databaseTableCounts[db] !== undefined}
                     <span class="text-[10px] text-slate-400 font-mono bg-slate-900/80 px-1.5 py-0.2 rounded border border-slate-800">
@@ -332,8 +335,19 @@
                   {#if db === appState.currentDatabase}
                     <span class="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-sky-950 text-sky-400 border border-sky-800">active</span>
                   {/if}
+                  <button
+                    type="button"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      appState.dropDatabase(db);
+                    }}
+                    class="opacity-0 group-hover:opacity-100 p-1 text-slate-500 hover:text-rose-400 hover:bg-rose-950/50 rounded transition"
+                    title="Drop database '{db}'"
+                  >
+                    <Icon name="trash-2" class="w-3 h-3" />
+                  </button>
                 </div>
-              </button>
+              </div>
             {/each}
           {/if}
         </div>

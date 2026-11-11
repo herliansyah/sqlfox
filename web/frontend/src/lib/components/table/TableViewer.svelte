@@ -9,6 +9,7 @@
   import TableDDL from './TableDDL.svelte';
   import TableDiagnostics from './TableDiagnostics.svelte';
   import TablePartitions from './TablePartitions.svelte';
+  import TableNotes from './TableNotes.svelte';
 
   let currentTab = $derived(appState.activeTab);
   let activeMode = $derived<TableMode>(currentTab?.tableMode || 'data');
@@ -41,6 +42,7 @@
     { id: 'indexes', label: 'Indexes', icon: 'key' },
     { id: 'foreign-keys', label: 'Foreign Keys', icon: 'link' },
     { id: 'ddl', label: 'DDL', icon: 'file-code' },
+    { id: 'notes', label: 'Notes & Runbooks', icon: 'file-text' },
     { id: 'diagnostics', label: 'Diagnostics', icon: 'activity' },
     { id: 'partitions', label: 'Partitions', icon: 'layers' },
   ];
@@ -90,6 +92,8 @@
       <TableForeignKeys {tableMeta} />
     {:else if activeMode === 'ddl'}
       <TableDDL {tableName} />
+    {:else if activeMode === 'notes'}
+      <TableNotes {tableName} />
     {:else if activeMode === 'diagnostics'}
       <TableDiagnostics {tableMeta} />
     {:else if activeMode === 'partitions'}

@@ -167,10 +167,7 @@
 
       <!-- Pre-Flight Impact Tree Button -->
       <button
-        onclick={() => {
-          appState.impactPreviewData = currentTab?.explainResult;
-          appState.isImpactPreviewOpen = true;
-        }}
+        onclick={() => appState.openImpactPreview()}
         class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 hover:text-white border border-[#334155] text-xs flex items-center space-x-1.5 transition shadow-sm"
         title="View Pre-Flight Impact Preview & Execution Tree"
       >

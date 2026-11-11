@@ -334,6 +334,12 @@ export class AppState {
     try {
       const auth = await api.getAuthStatus();
       this.authStatus = auth;
+      try {
+        const keyInfo = await api.getMasterKey();
+        if (keyInfo) {
+          this.authStatus = { ...auth, ...keyInfo };
+        }
+      } catch (_) {}
       if (auth.is_remote && !auth.unlocked) {
         this.isRemoteLocked = true;
       } else {
@@ -412,7 +418,10 @@ export class AppState {
         if (serverShell) serverShell.classList.add('hidden');
       }
       try {
-        this.authStatus = await api.getAuthStatus();
+        const auth = await api.getAuthStatus();
+        let keyInfo = null;
+        try { keyInfo = await api.getMasterKey(); } catch (_) {}
+        this.authStatus = { ...auth, ...(keyInfo || {}) };
       } catch (_) {}
       await this.loadConnections();
       this.startNotesReminderPoller();
@@ -1318,6 +1327,16 @@ export class AppState {
       tab.isExecuting = false;
       this.tabs = [...this.tabs];
     }
+  }
+
+  async openImpactPreview() {
+    const tab = this.activeTab;
+    if (!tab || !this.activeSessionId) return;
+    if (!tab.explainResult && tab.sql) {
+      await this.explainCurrentTab();
+    }
+    this.impactPreviewData = tab.explainResult;
+    this.isImpactPreviewOpen = true;
   }
 
   // Grid Staged Edits & CRUD

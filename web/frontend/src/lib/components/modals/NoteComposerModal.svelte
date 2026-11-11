@@ -24,7 +24,7 @@
   }
 
   function captureQuerySnapshot() {
-    const q = appState.activeTab?.query || '';
+    const q = appState.activeTab?.sql || '';
     if (q.trim()) {
       querySnapshot = q.trim();
       appState.showToast('Current worksheet query captured into note snapshot!', 'info');

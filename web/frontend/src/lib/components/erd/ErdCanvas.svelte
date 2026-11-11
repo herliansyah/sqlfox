@@ -327,20 +327,101 @@
     window.removeEventListener('mouseup', onCardDragUp);
   }
 
+  function escapeXml(unsafe: string): string {
+    return (unsafe || '').replace(/[<>&'"]/g, (c) => {
+      switch (c) {
+        case '<': return '&lt;';
+        case '>': return '&gt;';
+        case '&': return '&amp;';
+        case '\'': return '&apos;';
+        case '"': return '&quot;';
+        default: return c;
+      }
+    });
+  }
+
   // Export functions
   function exportSVG() {
-    const svgEl = containerRef?.querySelector('svg.erd-svg-content');
-    if (!svgEl) return;
-    const serializer = new XMLSerializer();
-    const source = serializer.serializeToString(svgEl);
-    const blob = new Blob([source], { type: 'image/svg+xml;charset=utf-8' });
+    if (tables.length === 0) {
+      appState.showToast('No tables to export', 'warning');
+      return;
+    }
+
+    const CARD_W = 240;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    tables.forEach((t) => {
+      const p = positions[t.name] || { x: 0, y: 0 };
+      const h = 50 + Math.min(15, (t.columns || []).length) * 24;
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x + CARD_W);
+      maxY = Math.max(maxY, p.y + h);
+    });
+
+    const pad = 40;
+    const w = Math.max(800, maxX - minX + pad * 2);
+    const h = Math.max(600, maxY - minY + pad * 2);
+
+    let cardsSvg = '';
+    tables.forEach((t) => {
+      const p = positions[t.name] || { x: 0, y: 0 };
+      const x = p.x - minX + pad;
+      const y = p.y - minY + pad;
+      const cols = (t.columns || []).slice(0, 15);
+      const cardH = 34 + cols.length * 24;
+
+      cardsSvg += `<g transform="translate(${x},${y})">
+        <rect width="${CARD_W}" height="${cardH}" rx="8" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+        <path d="M0,8 a8,8 0 0 1 8,-8 h${CARD_W - 16} a8,8 0 0 1 8,8 v26 h-${CARD_W} z" fill="#1e293b"/>
+        <text x="12" y="22" fill="#38bdf8" font-family="'JetBrains Mono',monospace" font-size="12" font-weight="bold">${escapeXml(t.name)}</text>
+        <text x="${CARD_W - 12}" y="22" text-anchor="end" fill="#64748b" font-family="'JetBrains Mono',monospace" font-size="10">${cols.length}</text>`;
+
+      cols.forEach((c, idx) => {
+        const cy = 34 + idx * 24;
+        const isPK = c.is_primary_key;
+        const isFK = (t.foreign_keys || []).some((fk) => fk.column === c.name);
+        const colColor = isPK ? '#34d399' : isFK ? '#fbbf24' : '#cbd5e1';
+        const prefix = isPK ? '🔑 ' : isFK ? '🔗 ' : '';
+        const typeStr = escapeXml((c.type || '').split('(')[0].toUpperCase());
+
+        cardsSvg += `
+          <line x1="0" y1="${cy}" x2="${CARD_W}" y2="${cy}" stroke="#1e293b" stroke-width="1"/>
+          <text x="12" y="${cy + 16}" fill="${colColor}" font-family="'JetBrains Mono',monospace" font-size="10">${prefix}${escapeXml(c.name)}</text>
+          <text x="${CARD_W - 12}" y="${cy + 16}" text-anchor="end" fill="#64748b" font-family="'JetBrains Mono',monospace" font-size="9">${typeStr}</text>`;
+      });
+
+      cardsSvg += `</g>`;
+    });
+
+    const linesSvg = (lines || [])
+      .map((line) => `<path d="${line.path}" stroke="#f59e0b" stroke-width="2" fill="none" opacity="0.85" marker-end="url(#erd-arrow-export)"/>`)
+      .join('\n');
+
+    const fullSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+      <rect width="${w}" height="${h}" fill="#020617"/>
+      <defs>
+        <marker id="erd-arrow-export" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 z" fill="#f59e0b" opacity="0.85"/>
+        </marker>
+      </defs>
+      <g transform="translate(${-minX + pad},${-minY + pad})">
+        ${linesSvg}
+      </g>
+      ${cardsSvg}
+    </svg>`;
+
+    const blob = new Blob([fullSvg], { type: 'image/svg+xml;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `${appState.currentDatabase || 'database'}_erd.svg`;
     a.click();
     URL.revokeObjectURL(url);
-    appState.showToast('Exported ERD as SVG', 'success');
+    appState.showToast('Exported complete ERD diagram as SVG', 'success');
   }
 
   function exportMermaid() {

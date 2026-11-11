@@ -80,30 +80,35 @@
     isTesting = true;
     testResult = null;
     try {
-      if (connId) {
+      if (connId && !password) {
         const res = await api.testConnection(connId);
         testResult = {
           success: res.success,
           message: res.success ? `Connected successfully (${res.latency_ms ?? 1} ms, ${res.version ?? 'OK'})` : 'Connection failed',
         };
       } else {
-        const temp = await api.saveConnection({
+        const res = await api.testTransientConnection({
+          id: connId || undefined,
           name: name || 'Test Transient',
           driver,
           host,
           port: Number(port),
           user,
           password,
-          database,
-          database_name: database,
+          database: database || '',
+          database_name: database || '',
           environment,
+          use_ssl: sslMode !== 'disabled',
+          ssl_mode: sslMode,
+          ssh_enabled: sshEnabled,
+          ssh_host: sshHost,
+          ssh_port: Number(sshPort),
+          ssh_user: sshUser,
         });
-        const res = await api.testConnection(temp.id);
         testResult = {
           success: res.success,
-          message: res.success ? `Connected successfully (${res.latency_ms ?? 1} ms)` : 'Connection failed',
+          message: res.success ? `Connected successfully (${res.latency_ms ?? 1} ms, ${res.version ?? 'OK'})` : 'Connection failed',
         };
-        connId = temp.id;
       }
     } catch (err: any) {
       testResult = { success: false, message: err.message || 'Connection test failed' };

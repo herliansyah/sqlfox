@@ -756,6 +756,7 @@
                   <option value="<=" class="bg-[#0f172a] text-slate-200">&lt;=</option>
                   <option value="IN" class="bg-[#0f172a] text-slate-200">IN</option>
                   <option value="NOT IN" class="bg-[#0f172a] text-slate-200">NOT IN</option>
+                  <option value="BETWEEN" class="bg-[#0f172a] text-slate-200">BETWEEN</option>
                   <option value="IS NULL" class="bg-[#0f172a] text-slate-200">IS NULL</option>
                   <option value="IS NOT NULL" class="bg-[#0f172a] text-slate-200">IS NOT NULL</option>
                 </select>

@@ -73,24 +73,13 @@
 
     isComparing = true;
     try {
-      // Ensure target session is connected
-      const res = await fetch('/api/sync/structure/compare', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          source_session_id: sourceConnId,
-          source_db: sourceDb,
-          target_session_id: targetConnId,
-          target_db: targetDb,
-          include_drops: includeDrops,
-        }),
+      const data = await api.compareStructure({
+        source_session_id: sourceConnId,
+        source_db: sourceDb,
+        target_session_id: targetConnId,
+        target_db: targetDb,
+        include_drops: includeDrops,
       });
-
-      const data = await res.json();
-      if (!res.ok) {
-        appState.showToast(`Comparison failed: ${data.error || res.statusText}`, 'error');
-        return;
-      }
 
       diffs = (data.diffs || []).map((d: any, idx: number) => ({
         ...d,
@@ -126,23 +115,13 @@
 
     isApplying = true;
     try {
-      const res = await fetch('/api/sync/structure/apply', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          target_session_id: targetConnId,
-          target_db: targetDb,
-          statements: selectedSQLs,
-          confirmed: true,
-          challenge_input: challengeInput.trim(),
-        }),
+      await api.applyStructure({
+        target_session_id: targetConnId,
+        target_db: targetDb,
+        statements: selectedSQLs,
+        confirmed: true,
+        challenge_input: challengeInput.trim(),
       });
-
-      const data = await res.json();
-      if (!res.ok) {
-        appState.showToast(`Migration apply failed: ${data.error || res.statusText}`, 'error');
-        return;
-      }
 
       appState.showToast('Structure migration applied successfully!', 'success');
       appState.isStructureSyncModalOpen = false;
