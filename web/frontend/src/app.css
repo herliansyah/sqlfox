@@ -1,0 +1,74 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #090d16;
+  color: #f1f5f9;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+  user-select: none;
+}
+
+/* Custom Scrollbar for Sleek Dark Theme */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #090d16;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* CodeMirror 6 Styles */
+.cm-editor {
+  height: 100% !important;
+  width: 100% !important;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace !important;
+  font-size: 13.5px !important;
+  line-height: 1.6 !important;
+  background: transparent !important;
+  color: #e0f2fe !important;
+}
+
+.cm-scroller {
+  height: 100% !important;
+  width: 100% !important;
+  overflow: auto !important;
+  font-family: inherit !important;
+}
+
+.cm-content {
+  min-height: 100% !important;
+  box-sizing: border-box !important;
+  caret-color: #38bdf8 !important;
+  padding: 8px 0 !important;
+}
+
+.cm-gutters {
+  background: #090d16 !important;
+  border-right: 1px solid #1e293b !important;
+  color: #475569 !important;
+}
+
+.cm-cursor {
+  border-left: 2px solid #38bdf8 !important;
+}
+
+.cm-selectionBackground, .cm-focused .cm-selectionBackground {
+  background: rgba(56, 189, 248, 0.25) !important;
+}

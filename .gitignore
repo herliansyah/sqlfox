@@ -11,6 +11,8 @@ bin/
 # Node / Frontend
 node_modules/
 web/node_modules/
+web/frontend/node_modules/
+web/dist_svelte/
 
 # Local databases & logs
 *.db

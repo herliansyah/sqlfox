@@ -7,6 +7,8 @@
     "test": "node scripts/test-grid-ergonomics-suite.mjs",
     "build": "node scripts/build_web.js",
     "build:web": "node scripts/build_web.js",
+    "build:svelte": "npm --prefix web/frontend run build && cp -r web/dist_svelte/* web/dist/",
+    "dev:svelte": "npm --prefix web/frontend run dev",
     "build:cm": "node scripts/build_codemirror.js",
     "build:css": "tailwindcss -c scripts/tailwind.config.js -i scripts/tailwind-input.css -o web/dist/vendor/tailwind/tailwind.css -m",
     "watch:css": "tailwindcss -c scripts/tailwind.config.js -i scripts/tailwind-input.css -o web/dist/vendor/tailwind/tailwind.css -w"
