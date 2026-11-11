@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Query Tab Bar Viewport Containment & Enterprise Overflow Dropdown (`web/frontend/src/lib/components/editor/TabBar.svelte`, `web/frontend/src/lib/stores/appState.svelte.ts`)**: Prevented query tabs from exceeding container bounds with `overflow-hidden` on the tab strip. Dynamically derived visible tabs via reactive container width observation (`ResizeObserver`), hid overflowing tabs behind a responsive `»` dropdown menu with count badge, guaranteed active tab visibility via automatic strip swapping, added search filtering and direct tab closing within the overflow popover, and ensured sequential tab naming (`Query N.sql`) to avoid duplicate titles.
+
 ## [v0.18.0] - 2026-11-10
 
 ### Security

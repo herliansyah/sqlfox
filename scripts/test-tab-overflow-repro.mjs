@@ -2,7 +2,8 @@ import fs from 'fs';
 import vm from 'vm';
 import assert from 'assert';
 
-const html = fs.readFileSync('web/dist/index.html', 'utf8');
+const htmlPath = fs.existsSync('web/dist/index.legacy.html') ? 'web/dist/index.legacy.html' : 'web/dist/index.html';
+const html = fs.readFileSync(htmlPath, 'utf8');
 
 // 1. Verify HTML elements exist
 assert(html.includes('id="tab-overflow-wrapper"'), 'tab-overflow-wrapper HTML must exist');

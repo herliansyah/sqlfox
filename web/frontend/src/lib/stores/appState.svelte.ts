@@ -724,11 +724,24 @@ export class AppState {
     return false;
   }
 
-  addTab(title = 'New Query.sql', sql = '') {
+  getNextQueryTabTitle(): string {
+    let maxNum = 0;
+    for (const t of this.tabs) {
+      const m = (t.title || '').match(/^Query\s+(\d+)\.sql$/i);
+      if (m) {
+        const n = parseInt(m[1], 10);
+        if (n > maxNum) maxNum = n;
+      }
+    }
+    return `Query ${maxNum + 1}.sql`;
+  }
+
+  addTab(title?: string, sql = '') {
+    const finalTitle = (!title || title === 'New Query.sql') ? this.getNextQueryTabTitle() : title;
     const newId = `tab-${Date.now()}`;
     const newTab: EditorTab = {
       id: newId,
-      title,
+      title: finalTitle,
       sql,
       database: this.currentDatabase || '',
       isTableViewer: false,
@@ -937,7 +950,14 @@ export class AppState {
   duplicateTab(tabId: string) {
     const tab = this.tabs.find((t) => t.id === tabId);
     if (!tab) return;
-    const newTab = this.addTab(`Copy of ${tab.title}`, tab.sql);
+    const baseTitle = tab.title.replace(/^Copy(?: \(\d+\))? of /, '');
+    let copyNum = 1;
+    let nextTitle = `Copy of ${baseTitle}`;
+    while (this.tabs.some((t) => t.title === nextTitle)) {
+      copyNum++;
+      nextTitle = `Copy (${copyNum}) of ${baseTitle}`;
+    }
+    const newTab = this.addTab(nextTitle, tab.sql);
     newTab.isTableViewer = tab.isTableViewer;
     newTab.tableName = tab.tableName;
     newTab.tableMode = tab.tableMode;
