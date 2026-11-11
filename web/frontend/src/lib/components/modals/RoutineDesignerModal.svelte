@@ -263,10 +263,11 @@
                   <button
                     onclick={() => removeParam(index)}
                     type="button"
-                    class="text-slate-500 hover:text-rose-400 p-1"
+                    class="text-slate-500 hover:text-rose-400 p-1 rounded"
                     title="Remove parameter"
+                    aria-label="Remove parameter"
                   >
-                    ×
+                    <Icon name="x" class="w-3.5 h-3.5" />
                   </button>
                 </div>
               {/each}

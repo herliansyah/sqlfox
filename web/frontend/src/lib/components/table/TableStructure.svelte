@@ -545,9 +545,11 @@
                         <button
                           type="button"
                           onclick={() => removeEnumTag(idx)}
-                          class="text-amber-400 hover:text-rose-400 ml-1 font-bold leading-none"
+                          class="text-amber-400 hover:text-rose-400 ml-1 leading-none p-0.5 rounded"
+                          title="Remove option"
+                          aria-label="Remove option"
                         >
-                          ×
+                          <Icon name="x" class="w-2.5 h-2.5" />
                         </button>
                       </span>
                     {/each}

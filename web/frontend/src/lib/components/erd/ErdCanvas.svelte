@@ -385,7 +385,7 @@
         const isPK = c.is_primary_key;
         const isFK = (t.foreign_keys || []).some((fk) => fk.column === c.name);
         const colColor = isPK ? '#34d399' : isFK ? '#fbbf24' : '#cbd5e1';
-        const prefix = isPK ? '🔑 ' : isFK ? '🔗 ' : '';
+        const prefix = isPK ? '[PK] ' : isFK ? '[FK] ' : '';
         const typeStr = escapeXml((c.type || '').split('(')[0].toUpperCase());
 
         cardsSvg += `
@@ -539,10 +539,12 @@
         />
         {#if searchQuery}
           <button
+            type="button"
             onclick={() => (searchQuery = '')}
-            class="absolute right-1 text-slate-400 hover:text-white text-xs px-1"
+            class="absolute right-1 top-1.5 text-slate-400 hover:text-white p-0.5 rounded"
+            aria-label="Clear search"
           >
-            ×
+            <Icon name="x" class="w-3 h-3" />
           </button>
         {/if}
       </div>
@@ -798,7 +800,10 @@
                 }}
                 class="w-full text-center py-1 text-[10px] text-sky-400 hover:text-sky-300 hover:bg-slate-800/60 font-mono transition"
               >
-                {isExp ? '▲ Collapse' : `▼ +${allCols.length - 12} more columns...`}
+                <span class="inline-flex items-center justify-center space-x-1">
+                  <Icon name={isExp ? 'chevron-up' : 'chevron-down'} class="w-3 h-3" />
+                  <span>{isExp ? 'Collapse' : `+${allCols.length - 12} more columns...`}</span>
+                </span>
               </button>
             {/if}
           </div>

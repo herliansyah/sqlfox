@@ -241,7 +241,7 @@
               class="px-4 py-1.5 rounded text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition shadow flex items-center space-x-1 disabled:opacity-50"
             >
               {#if isApplying}
-                <span class="animate-spin text-xs">⟳</span>
+                <Icon name="loader" class="w-3.5 h-3.5 animate-spin" />
                 <span>Applying...</span>
               {:else}
                 <span>Apply Sync Changes</span>

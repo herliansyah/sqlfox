@@ -134,10 +134,12 @@
               />
               {#if dbFilter}
                 <button
+                  type="button"
                   onclick={() => (dbFilter = '')}
-                  class="absolute right-1.5 text-slate-500 hover:text-slate-300 text-xs"
+                  class="absolute right-1.5 top-1.5 text-slate-500 hover:text-slate-300 p-0.5 rounded"
+                  aria-label="Clear filter"
                 >
-                  ×
+                  <Icon name="x" class="w-3 h-3" />
                 </button>
               {/if}
             </div>
@@ -263,11 +265,12 @@
         />
         {#if appState.schemaFilter}
           <button
+            type="button"
             onclick={() => (appState.schemaFilter = '')}
-            class="absolute right-2 text-slate-500 hover:text-slate-300 text-xs"
+            class="absolute right-2 top-2 text-slate-500 hover:text-slate-300 p-0.5 rounded"
             aria-label="Clear filter"
           >
-            ×
+            <Icon name="x" class="w-3 h-3" />
           </button>
         {/if}
       </div>
@@ -425,7 +428,7 @@
                         class="w-full px-2 py-1 text-[11px] font-semibold text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 rounded flex items-center justify-between transition"
                       >
                         <span class="flex items-center space-x-1.5 truncate">
-                          <span class="text-[9px] text-slate-500 font-mono">{collapsedPrefixes[grp.prefix] ? '▶' : '▼'}</span>
+                          <Icon name={collapsedPrefixes[grp.prefix] ? 'chevron-right' : 'chevron-down'} class="w-3 h-3 text-slate-500 shrink-0" />
                           <span class="text-sky-400 font-mono">{grp.prefix}_*</span>
                         </span>
                         <span class="text-[9px] font-mono text-slate-500 bg-slate-900 px-1 rounded">

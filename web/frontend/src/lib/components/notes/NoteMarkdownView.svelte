@@ -213,9 +213,10 @@
     <button
       type="button"
       onclick={() => (isExpanded = !isExpanded)}
-      class="text-[11px] text-amber-400 hover:text-amber-300 transition flex items-center space-x-1 font-semibold select-none pt-0.5"
+      class="text-[11px] text-amber-400 hover:text-amber-300 transition flex items-center space-x-1.5 font-semibold select-none pt-0.5"
     >
-      <span>{isExpanded ? 'Show less ▲' : `Show full note (${blocks.length} blocks) ▼`}</span>
+      <Icon name={isExpanded ? 'chevron-up' : 'chevron-down'} class="w-3 h-3 shrink-0" />
+      <span>{isExpanded ? 'Show less' : `Show full note (${blocks.length} blocks)`}</span>
     </button>
   {/if}
 </div>

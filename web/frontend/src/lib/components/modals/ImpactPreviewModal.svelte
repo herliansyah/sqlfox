@@ -150,8 +150,8 @@
                 </div>
 
                 {#if idx < planNodes.length - 1}
-                  <div class="flex justify-center -my-1 text-slate-600 text-sm">
-                    ↓
+                  <div class="flex justify-center -my-1 text-slate-500">
+                    <Icon name="arrow-down" class="w-3.5 h-3.5" />
                   </div>
                 {/if}
               {/each}

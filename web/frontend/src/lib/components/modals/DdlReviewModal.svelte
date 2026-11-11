@@ -94,7 +94,7 @@
           class="px-5 py-1.5 rounded text-xs font-bold bg-amber-600 hover:bg-amber-500 text-white transition shadow flex items-center space-x-1.5 disabled:opacity-50"
         >
           {#if isExecuting}
-            <span class="animate-spin text-xs">⟳</span>
+            <Icon name="loader" class="w-3.5 h-3.5 animate-spin" />
             <span>Executing...</span>
           {:else}
             <span>Execute DDL</span>

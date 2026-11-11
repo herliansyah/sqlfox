@@ -249,7 +249,7 @@
       class="h-6 px-2 rounded bg-slate-800/80 hover:bg-slate-700 text-sky-400 hover:text-white border border-slate-700 flex items-center space-x-1.5 text-xs font-mono transition shadow-sm cursor-pointer"
       title="More Tabs ({overflowTabs.length} hidden)"
     >
-      <span class="font-bold text-sm leading-none">»</span>
+      <Icon name="chevrons-right" class="w-3.5 h-3.5" />
       <span id="tab-overflow-count" class="font-bold text-[11px] text-sky-300">{overflowTabs.length}</span>
     </button>
   </div>

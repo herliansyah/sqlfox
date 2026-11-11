@@ -1,5 +1,6 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
+  import Icon from '../common/Icon.svelte';
 
   let profile = $derived(appState.activeTab?.activeResult?.profile);
   let stages = $derived(profile?.stages || []);
@@ -17,7 +18,7 @@
     <!-- Header -->
     <div class="px-4 py-2 bg-slate-900/80 border-b border-slate-800 flex items-center justify-between">
       <div class="flex items-center space-x-2.5">
-        <span class="text-sky-400 font-bold">⏱️</span>
+        <Icon name="clock" class="w-4 h-4 text-sky-400" />
         <span class="text-xs font-semibold text-slate-200">Query Stage Profiler</span>
         <span class="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-sky-950 text-sky-400 border border-sky-800">
           {durationMs.toFixed(2)} ms total

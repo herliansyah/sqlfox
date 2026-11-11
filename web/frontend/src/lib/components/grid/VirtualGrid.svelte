@@ -866,9 +866,11 @@
             {/if}
             <button
               onclick={() => appState.removeFilterPill(idx)}
-              class="text-sky-400 hover:text-white ml-1 p-0.5"
+              class="text-sky-400 hover:text-white ml-1 p-0.5 rounded"
+              title="Remove filter"
+              aria-label="Remove filter"
             >
-              ×
+              <Icon name="x" class="w-2.5 h-2.5" />
             </button>
           </div>
         {/each}
@@ -938,9 +940,7 @@
                     </span>
                   {/if}
                   {#if sortCol === colName}
-                    <span class="text-sky-400 font-bold ml-1">
-                      {sortDir === 'ASC' ? '▲' : '▼'}
-                    </span>
+                    <Icon name={sortDir === 'ASC' ? 'chevron-up' : 'chevron-down'} class="w-3 h-3 text-sky-400 shrink-0 ml-1" />
                   {/if}
                 </div>
               </th>
@@ -1165,10 +1165,10 @@
               }
             }}
             disabled={curPage <= 1}
-            class="px-2 py-0.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-30 border border-[#334155] text-slate-200"
+            class="px-2 py-1 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-30 border border-[#334155] text-slate-200 flex items-center justify-center transition"
             title="First Page"
           >
-            «
+            <Icon name="chevrons-left" class="w-3.5 h-3.5" />
           </button>
           <button
             id="btn-page-prev"
@@ -1179,10 +1179,10 @@
               }
             }}
             disabled={curPage <= 1}
-            class="px-2 py-0.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-30 border border-[#334155] text-slate-200"
+            class="px-2 py-1 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-30 border border-[#334155] text-slate-200 flex items-center justify-center transition"
             title="Previous Page"
           >
-            ‹
+            <Icon name="chevron-left" class="w-3.5 h-3.5" />
           </button>
           <span class="px-1 text-slate-300">
             Page {curPage}{totalPages ? ` of ${totalPages.toLocaleString()}` : ''}
@@ -1196,10 +1196,10 @@
               }
             }}
             disabled={totalRows < pageSize || (totalPages !== null && curPage >= totalPages)}
-            class="px-2 py-0.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-30 border border-[#334155] text-slate-200"
+            class="px-2 py-1 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-30 border border-[#334155] text-slate-200 flex items-center justify-center transition"
             title="Next Page"
           >
-            ›
+            <Icon name="chevron-right" class="w-3.5 h-3.5" />
           </button>
           {#if totalPages !== null}
             <button
@@ -1211,10 +1211,10 @@
                 }
               }}
               disabled={curPage >= totalPages}
-              class="px-2 py-0.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-30 border border-[#334155] text-slate-200"
+              class="px-2 py-1 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-30 border border-[#334155] text-slate-200 flex items-center justify-center transition"
               title="Last Page"
             >
-              »
+              <Icon name="chevrons-right" class="w-3.5 h-3.5" />
             </button>
           {/if}
         </div>

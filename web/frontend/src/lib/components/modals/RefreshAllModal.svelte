@@ -176,7 +176,7 @@
           class="px-5 py-1.5 rounded text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white transition shadow flex items-center space-x-1.5 disabled:opacity-50"
         >
           {#if isRefreshing}
-            <span class="animate-spin text-xs">⟳</span>
+            <Icon name="loader" class="w-3.5 h-3.5 animate-spin" />
             <span>Refreshing...</span>
           {:else}
             <span>Start Refresh All</span>

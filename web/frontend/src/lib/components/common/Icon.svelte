@@ -5,6 +5,8 @@
   }
 
   let { name, class: className = 'w-4 h-4' }: Props = $props();
+
+  let isFilled = $derived(name === 'play' || name === 'pause' || className.includes('fill-'));
 </script>
 
 {#if name === 'brand'}
@@ -12,7 +14,7 @@
     <use href="#sqlfox-brand-mark" />
   </svg>
 {:else}
-  <svg class="{className} inline-block shrink-0 fill-none stroke-current" aria-hidden="true">
+  <svg class="{className} inline-block shrink-0 stroke-current {isFilled ? 'fill-current' : 'fill-none'}" aria-hidden="true">
     <use href="#icon-{name}" />
   </svg>
 {/if}

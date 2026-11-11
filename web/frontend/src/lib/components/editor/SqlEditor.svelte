@@ -183,7 +183,7 @@
         class="h-7 px-2.5 rounded {currentTab?.showQueryProfiler ? 'bg-sky-950 text-sky-300 border-sky-600' : 'bg-[#1e293b] text-slate-300 hover:text-white'} border border-[#334155] text-xs flex items-center space-x-1.5 transition shadow-sm"
         title="Toggle Stage Profiler (SHOW PROFILE)"
       >
-        <span>⏱️</span>
+        <Icon name="clock" class="w-3.5 h-3.5 text-sky-400" />
         <span>Profiler</span>
       </button>
 
