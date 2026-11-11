@@ -1,6 +1,7 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
+  import Icon from '../common/Icon.svelte';
 
   let activeThreads = $state<number>(0);
   let isLoading = $state(false);
@@ -70,7 +71,7 @@
       <!-- Header -->
       <div class="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between bg-slate-900/60">
         <div class="flex items-center space-x-2">
-          <span class="text-sky-400">🔄</span>
+          <Icon name="refresh-cw" class="w-4 h-4 text-sky-400" />
           <h3 class="text-sm font-semibold text-slate-100">
             Refresh All Database Catalogs
           </h3>
@@ -79,9 +80,10 @@
           type="button"
           onclick={handleCancel}
           disabled={isRefreshing}
-          class="text-slate-400 hover:text-slate-200 text-lg leading-none disabled:opacity-50"
+          class="text-slate-400 hover:text-slate-200 p-1 rounded hover:bg-slate-800 transition disabled:opacity-50"
+          aria-label="Close"
         >
-          ✕
+          <Icon name="x" class="w-4 h-4" />
         </button>
       </div>
 
@@ -108,19 +110,22 @@
             </span>
           </div>
 
-          <p class="text-xs {activeThreads < 10
+          <div class="text-xs flex items-start space-x-2 {activeThreads < 10
             ? 'text-emerald-300'
             : activeThreads < 20
               ? 'text-amber-300'
               : 'text-rose-300'}">
             {#if activeThreads < 10}
-              ✓ Safe Condition: Server workload is low. Full catalog synchronization is safe to execute.
+              <Icon name="check-circle" class="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+              <span>Safe Condition: Server workload is low. Full catalog synchronization is safe to execute.</span>
             {:else if activeThreads < 20}
-              ⚠ Elevated Workload Warning: Server is processing active queries. Schema refresh may incur slight dictionary I/O.
+              <Icon name="alert-triangle" class="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <span>Elevated Workload Warning: Server is processing active queries. Schema refresh may incur slight dictionary I/O.</span>
             {:else}
-              🚫 High Workload Alert: High query traffic detected. Refreshing all catalogs concurrently may cause thread queueing.
+              <Icon name="shield-alert" class="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+              <span>High Workload Alert: High query traffic detected. Refreshing all catalogs concurrently may cause thread queueing.</span>
             {/if}
-          </p>
+          </div>
         </div>
 
         {#if activeThreads >= 10}

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
+  import Icon from '../common/Icon.svelte';
 
   function jumpToTable() {
     const refTable = appState.fkPeekState.refTable;
@@ -29,7 +30,7 @@
     <!-- Header -->
     <div class="px-3.5 py-2.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
       <div class="flex items-center space-x-1.5 truncate">
-        <span class="text-sky-400">🔗</span>
+        <Icon name="link" class="w-3.5 h-3.5 text-sky-400 shrink-0" />
         <span class="font-bold text-white truncate">
           {appState.fkPeekState.refTable} ({appState.fkPeekState.refCol} = {String(appState.fkPeekState.val ?? '')})
         </span>
@@ -46,9 +47,10 @@
         <button
           type="button"
           onclick={() => appState.closeFkPeek()}
-          class="text-slate-400 hover:text-white px-1 leading-none text-sm"
+          class="text-slate-400 hover:text-white p-0.5 rounded hover:bg-slate-800 transition"
+          aria-label="Close"
         >
-          ✕
+          <Icon name="x" class="w-3.5 h-3.5" />
         </button>
       </div>
     </div>
@@ -57,7 +59,7 @@
     <div class="p-3 overflow-y-auto flex-1">
       {#if appState.fkPeekState.isLoading}
         <div class="p-4 text-center text-slate-400 flex items-center justify-center space-x-2">
-          <span class="animate-spin text-sky-400">⟳</span>
+          <Icon name="loader" class="w-4 h-4 animate-spin text-sky-400" />
           <span>Fetching referenced record...</span>
         </div>
       {:else if appState.fkPeekState.error}

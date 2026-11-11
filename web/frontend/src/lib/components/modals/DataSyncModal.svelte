@@ -1,6 +1,7 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
+  import Icon from '../common/Icon.svelte';
 
   let sourceConnId = $state('');
   let sourceDb = $state('');
@@ -100,7 +101,7 @@
       <!-- Header -->
       <div class="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between bg-slate-900/60">
         <div class="flex items-center space-x-2">
-          <span class="text-emerald-400">⚖️</span>
+          <Icon name="scale" class="w-4 h-4 text-emerald-400" />
           <h3 class="text-sm font-semibold text-slate-100">
             Row-Level Data Synchronization
           </h3>
@@ -109,9 +110,10 @@
           type="button"
           onclick={handleCancel}
           disabled={isComparing || isApplying}
-          class="text-slate-400 hover:text-slate-200 text-lg leading-none"
+          class="text-slate-400 hover:text-slate-200 p-1 rounded hover:bg-slate-800 transition"
+          aria-label="Close"
         >
-          ✕
+          <Icon name="x" class="w-4 h-4" />
         </button>
       </div>
 

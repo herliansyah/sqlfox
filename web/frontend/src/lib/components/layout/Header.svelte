@@ -9,7 +9,234 @@
   let showMasterPin = $state(false);
   let copiedPin = $state(false);
   let connSearchQuery = $state('');
+  let toolsSearchQuery = $state('');
   let pinAutoMaskTimer: any = null;
+
+  interface ToolItem {
+    id: string;
+    category: 'monitoring' | 'security' | 'preferences' | 'data' | 'schema';
+    categoryLabel: string;
+    name: string;
+    desc: string;
+    icon: string;
+    iconColor: string;
+    shortcut?: string;
+    action: () => void;
+  }
+
+  const allTools: ToolItem[] = [
+    // Monitoring & Diagnostics
+    {
+      id: 'processlist',
+      category: 'monitoring',
+      categoryLabel: 'Monitoring & Diagnostics',
+      name: 'Processlist & Threads',
+      desc: 'Active server connections, queries & kill thread',
+      icon: 'cpu',
+      iconColor: 'text-sky-400',
+      action: () => appState.openProcesslistTab()
+    },
+    {
+      id: 'diagnostics',
+      category: 'monitoring',
+      categoryLabel: 'Monitoring & Diagnostics',
+      name: 'Storage & Diagnostics',
+      desc: 'Tablespace usage, cache hit ratio & engine stats',
+      icon: 'activity',
+      iconColor: 'text-rose-400',
+      action: () => appState.openDbDiagnosticsModal()
+    },
+    {
+      id: 'activity-console',
+      category: 'monitoring',
+      categoryLabel: 'Monitoring & Diagnostics',
+      name: 'Live Activity Console',
+      desc: 'Real-time daemon log streams & background tasks',
+      icon: 'terminal',
+      iconColor: 'text-emerald-400',
+      action: () => (appState.isActivityDrawerOpen = !appState.isActivityDrawerOpen)
+    },
+    {
+      id: 'audit-log',
+      category: 'monitoring',
+      categoryLabel: 'Monitoring & Diagnostics',
+      name: 'Session Audit Trail',
+      desc: 'Execution forensics & full statement history',
+      icon: 'clipboard-list',
+      iconColor: 'text-amber-400',
+      action: () => (appState.isAuditDrawerOpen = true)
+    },
+
+    // Security & Access
+    {
+      id: 'connections',
+      category: 'security',
+      categoryLabel: 'Security & Access',
+      name: 'Connection Manager',
+      desc: 'Database instances, credentials & SSH tunnels',
+      icon: 'database',
+      iconColor: 'text-sky-400',
+      action: () => appState.openNewConnectionModal()
+    },
+    {
+      id: 'privilege-matrix',
+      category: 'security',
+      categoryLabel: 'Security & Access',
+      name: 'User Privilege Matrix',
+      desc: 'RBAC grants, user accounts & access control',
+      icon: 'shield',
+      iconColor: 'text-purple-400',
+      action: () => appState.openPrivilegeMatrixModal()
+    },
+
+    // System & Preferences
+    {
+      id: 'settings',
+      category: 'preferences',
+      categoryLabel: 'System & Preferences',
+      name: 'Global Settings & Vault',
+      desc: 'Preferences, query timeouts & encryption vault',
+      icon: 'sliders',
+      iconColor: 'text-slate-300',
+      action: () => (appState.isSettingsModalOpen = true)
+    },
+    {
+      id: 'shortcuts',
+      category: 'preferences',
+      categoryLabel: 'System & Preferences',
+      name: 'Keyboard Shortcuts',
+      desc: 'Productivity hotkeys reference card',
+      icon: 'keyboard',
+      iconColor: 'text-amber-400',
+      shortcut: '?',
+      action: () => (appState.isShortcutsModalOpen = true)
+    },
+    {
+      id: 'updates',
+      category: 'preferences',
+      categoryLabel: 'System & Preferences',
+      name: 'In-App Releases & Update',
+      desc: 'Version changelog & deterministic self-update',
+      icon: 'zap',
+      iconColor: 'text-amber-400',
+      action: () => (appState.isUpdateModalOpen = true)
+    },
+
+    // Data Pipeline & Migration
+    {
+      id: 'csv-import',
+      category: 'data',
+      categoryLabel: 'Data Pipeline & Migration',
+      name: 'Import CSV Records',
+      desc: 'High-speed streaming CSV/TSV table loader',
+      icon: 'upload',
+      iconColor: 'text-emerald-400',
+      action: () => appState.openCsvImportModal()
+    },
+    {
+      id: 'sql-dump',
+      category: 'data',
+      categoryLabel: 'Data Pipeline & Migration',
+      name: 'Export SQL Dump',
+      desc: 'DDL schema structure and data backup dump',
+      icon: 'download',
+      iconColor: 'text-sky-400',
+      action: () => appState.openDumpModal()
+    },
+    {
+      id: 'data-transfer',
+      category: 'data',
+      categoryLabel: 'Data Pipeline & Migration',
+      name: 'Cross-Connection Transfer',
+      desc: 'Direct table pipeline across database hosts',
+      icon: 'rocket',
+      iconColor: 'text-indigo-400',
+      action: () => (appState.isDataTransferOpen = true)
+    },
+    {
+      id: 'data-sync',
+      category: 'data',
+      categoryLabel: 'Data Pipeline & Migration',
+      name: 'Row-Level Data Sync',
+      desc: 'Diff and synchronize rows via hash checksums',
+      icon: 'scale',
+      iconColor: 'text-teal-400',
+      action: () => (appState.isDataSyncOpen = true)
+    },
+    {
+      id: 'mock-generator',
+      category: 'data',
+      categoryLabel: 'Data Pipeline & Migration',
+      name: 'Smart Mock Generator',
+      desc: 'Synthesize realistic schema-aware test rows',
+      icon: 'database',
+      iconColor: 'text-purple-400',
+      action: () => (appState.isMockDataModalOpen = true)
+    },
+
+    // Schema & Modeling
+    {
+      id: 'erd',
+      category: 'schema',
+      categoryLabel: 'Schema & Modeling',
+      name: 'Visual ERD Canvas',
+      desc: 'Interactive entity-relationship graph & export',
+      icon: 'layers',
+      iconColor: 'text-indigo-400',
+      action: () => appState.openErdTab()
+    },
+    {
+      id: 'structure-sync',
+      category: 'schema',
+      categoryLabel: 'Schema & Modeling',
+      name: 'Structure Synchronization',
+      desc: 'Compare schemas and generate migration DDL',
+      icon: 'refresh-cw',
+      iconColor: 'text-cyan-400',
+      action: () => appState.openStructureSyncModal()
+    },
+    {
+      id: 'run-sql',
+      category: 'schema',
+      categoryLabel: 'Schema & Modeling',
+      name: 'Run Large SQL Script',
+      desc: 'Stream multi-statement scripts without RAM limits',
+      icon: 'file-text',
+      iconColor: 'text-amber-400',
+      action: () => appState.openRunSqlModal()
+    },
+    {
+      id: 'snippets',
+      category: 'schema',
+      categoryLabel: 'Schema & Modeling',
+      name: 'Query Snippets & Templates',
+      desc: 'Reusable SQL templates & quick boilerplate',
+      icon: 'bookmark',
+      iconColor: 'text-sky-400',
+      action: () => appState.openSnippetsModal()
+    },
+    {
+      id: 'refresh-catalogs',
+      category: 'schema',
+      categoryLabel: 'Schema & Modeling',
+      name: 'Refresh All Catalogs',
+      desc: 'Rescan dictionary cache across all schemas',
+      icon: 'refresh-cw',
+      iconColor: 'text-amber-400',
+      action: () => (appState.isRefreshAllOpen = true)
+    }
+  ];
+
+  let filteredTools = $derived.by(() => {
+    const q = toolsSearchQuery.toLowerCase().trim();
+    if (!q) return allTools;
+    return allTools.filter(
+      (t) =>
+        t.name.toLowerCase().includes(q) ||
+        t.desc.toLowerCase().includes(q) ||
+        t.categoryLabel.toLowerCase().includes(q)
+    );
+  });
 
   let masterPin = $derived(appState.authStatus?.master_password || 'fox-0304');
   let isLanAvailable = $derived(
@@ -158,9 +385,10 @@
                   type="button"
                   id="session-search-clear-btn"
                   onclick={() => (connSearchQuery = '')}
-                  class="absolute right-2 text-slate-400 hover:text-slate-200 text-xs"
+                  class="absolute right-2 text-slate-400 hover:text-slate-200 p-0.5 rounded hover:bg-slate-800 transition"
+                  aria-label="Clear connection search"
                 >
-                  ✕
+                  <Icon name="x" class="w-3.5 h-3.5" />
                 </button>
               {/if}
             </div>
@@ -301,12 +529,18 @@
     <!-- DBA Tools Dropdown -->
     <div class="relative">
       <button
-        onclick={() => (showToolsDropdown = !showToolsDropdown)}
-        class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 hover:text-white border border-[#334155] flex items-center space-x-1.5 transition shadow-sm"
+        onclick={() => {
+          showToolsDropdown = !showToolsDropdown;
+          if (showToolsDropdown) toolsSearchQuery = '';
+        }}
+        class="h-7 px-2.5 rounded {showToolsDropdown
+          ? 'bg-slate-700 text-white ring-1 ring-sky-500/50'
+          : 'bg-[#1e293b] hover:bg-slate-700 text-slate-300 hover:text-white'} border border-[#334155] flex items-center space-x-1.5 transition shadow-sm font-medium"
+        title="Database Tools & System Utilities"
       >
-        <Icon name="sliders" class="w-3.5 h-3.5 text-sky-400" />
+        <Icon name="wrench" class="w-3.5 h-3.5 text-sky-400" />
         <span>Tools</span>
-        <Icon name="chevron-down" class="w-3 h-3 text-slate-400" />
+        <Icon name="chevron-down" class="w-3 h-3 text-slate-400 transition-transform {showToolsDropdown ? 'rotate-180' : ''}" />
       </button>
 
       {#if showToolsDropdown}
@@ -317,204 +551,223 @@
           onclick={() => (showToolsDropdown = false)}
         ></button>
 
-        <div class="absolute right-0 mt-1 w-52 bg-[#0f172a] border border-[#334155] rounded-lg shadow-2xl z-50 py-1 divide-y divide-slate-800 animate-in fade-in duration-100 text-xs">
-          <div class="py-1">
-            <button
-              onclick={() => {
-                appState.openProcesslistTab();
-                showToolsDropdown = false;
-              }}
-              class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-            >
-              <Icon name="cpu" class="w-3.5 h-3.5 text-sky-400" />
-              <span>Processlist & Threads</span>
-            </button>
-            <button
-              onclick={() => {
-                appState.openErdTab();
-                showToolsDropdown = false;
-              }}
-              class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-            >
-              <Icon name="layers" class="w-3.5 h-3.5 text-indigo-400" />
-              <span>ERD Schema Canvas</span>
-            </button>
-            <button
-              onclick={() => {
-                appState.openNewConnectionModal();
-                showToolsDropdown = false;
-              }}
-              class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-            >
-              <Icon name="database" class="w-3.5 h-3.5 text-emerald-400" />
-              <span>Connection Manager</span>
-            </button>
+        <div class="absolute right-0 mt-1.5 w-[600px] max-w-[calc(100vw-2rem)] bg-[#0b0f19] border border-slate-700/80 rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in duration-100 text-xs backdrop-blur-xl">
+          <!-- Search Header -->
+          <div class="p-2.5 border-b border-slate-800 bg-slate-900/60 flex items-center justify-between gap-2">
+            <div class="relative flex-1">
+              <Icon name="search" class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2 pointer-events-none" />
+              <input
+                type="text"
+                bind:value={toolsSearchQuery}
+                placeholder="Filter tools by name, utility or category..."
+                class="w-full bg-[#050811] border border-slate-700/80 rounded-lg pl-8 pr-7 py-1 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-500 transition"
+              />
+              {#if toolsSearchQuery}
+                <button
+                  type="button"
+                  onclick={() => (toolsSearchQuery = '')}
+                  class="absolute right-2 top-1.5 text-slate-400 hover:text-slate-200 p-0.5 rounded"
+                  aria-label="Clear filter"
+                >
+                  <Icon name="x" class="w-3 h-3" />
+                </button>
+              {/if}
+            </div>
+            <span class="text-[10px] text-slate-500 font-mono shrink-0 hidden sm:inline">19 Enterprise Tools</span>
           </div>
 
-          <div class="py-1">
-            <button
-              onclick={() => {
-                appState.openDumpModal();
-                showToolsDropdown = false;
-              }}
-              class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-            >
-              <Icon name="download" class="w-3.5 h-3.5 text-sky-400" />
-              <span>Export SQL Dump</span>
-            </button>
-            <button
-              onclick={() => {
-                appState.openStructureSyncModal();
-                showToolsDropdown = false;
-              }}
-              class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-            >
-              <Icon name="refresh-cw" class="w-3.5 h-3.5 text-emerald-400" />
-              <span>Structure Synchronization</span>
-            </button>
-            <button
-              onclick={() => {
-                appState.isDataTransferOpen = true;
-                showToolsDropdown = false;
-              }}
-              class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-            >
-              <span class="text-sky-400 text-xs">🚀</span>
-              <span>Data Transfer (Cross-Conn)</span>
-            </button>
-            <button
-              onclick={() => {
-                appState.isDataSyncOpen = true;
-                showToolsDropdown = false;
-              }}
-              class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-            >
-              <span class="text-emerald-400 text-xs">⚖️</span>
-              <span>Row-Level Data Sync</span>
-            </button>
-            <button
-              onclick={() => {
-                appState.isRefreshAllOpen = true;
-                showToolsDropdown = false;
-              }}
-              class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-            >
-              <span class="text-amber-400 text-xs">🔄</span>
-              <span>Refresh All Catalogs</span>
-            </button>
-            <button
-              onclick={() => {
-                appState.isAuditDrawerOpen = true;
-                showToolsDropdown = false;
-              }}
-              class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-            >
-              <span class="text-sky-400 text-xs">📜</span>
-              <span>Session Audit Log</span>
-            </button>
-            <button
-              onclick={() => {
-                appState.openRunSqlModal();
-                showToolsDropdown = false;
-              }}
-              class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-            >
-              <Icon name="file-text" class="w-3.5 h-3.5 text-amber-400" />
-              <span>Run Large SQL Script</span>
-            </button>
-            <button
-              onclick={() => {
-                appState.openSnippetsModal();
-                showToolsDropdown = false;
-              }}
-              class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-            >
-              <Icon name="bookmark" class="w-3.5 h-3.5 text-sky-400" />
-              <span>Query Snippets & Templates</span>
-            </button>
-            <button
-              onclick={() => {
-                appState.openCsvImportModal();
-                showToolsDropdown = false;
-              }}
-              class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-            >
-              <Icon name="upload" class="w-3.5 h-3.5 text-emerald-400" />
-              <span>Import CSV Records</span>
-            </button>
-            <button
-              onclick={() => {
-                appState.openDbDiagnosticsModal();
-                showToolsDropdown = false;
-              }}
-              class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-            >
-              <Icon name="activity" class="w-3.5 h-3.5 text-rose-400" />
-              <span>Storage & Diagnostics</span>
-            </button>
-            <button
-              onclick={() => {
-                appState.openPrivilegeMatrixModal();
-                showToolsDropdown = false;
-              }}
-              class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-            >
-              <Icon name="shield" class="w-3.5 h-3.5 text-purple-400" />
-              <span>User Privilege Matrix</span>
-            </button>
-            <button
-              onclick={() => {
-                appState.isMockDataModalOpen = true;
-                showToolsDropdown = false;
-              }}
-              class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-            >
-              <Icon name="database" class="w-3.5 h-3.5 text-emerald-400" />
-              <span>Smart Mock Data Generator</span>
-            </button>
-            <button
-              onclick={() => {
-                appState.isUpdateModalOpen = true;
-                showToolsDropdown = false;
-              }}
-              class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-            >
-              <Icon name="zap" class="w-3.5 h-3.5 text-amber-400" />
-              <span>Self-Update & Releases</span>
-            </button>
-            <button
-              onclick={() => {
-                appState.isActivityDrawerOpen = !appState.isActivityDrawerOpen;
-                showToolsDropdown = false;
-              }}
-              class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-            >
-              <Icon name="terminal" class="w-3.5 h-3.5 text-sky-400" />
-              <span>Live Activity Console</span>
-            </button>
+          <!-- Body -->
+          <div class="max-h-[75vh] overflow-y-auto p-3">
+            {#if toolsSearchQuery.trim()}
+              <!-- Filtered List Mode -->
+              {#if filteredTools.length === 0}
+                <div class="py-8 text-center text-slate-500 text-xs">
+                  <Icon name="search" class="w-6 h-6 mx-auto mb-2 text-slate-600 opacity-60" />
+                  No tools found matching "{toolsSearchQuery}"
+                </div>
+              {:else}
+                <div class="space-y-1">
+                  {#each filteredTools as tool}
+                    <button
+                      onclick={() => {
+                        tool.action();
+                        showToolsDropdown = false;
+                      }}
+                      class="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800/90 text-slate-300 hover:text-white flex items-center space-x-3 transition group border border-transparent hover:border-slate-700/60"
+                    >
+                      <div class="w-7 h-7 rounded-md bg-slate-900 border border-slate-700/70 flex items-center justify-center shrink-0 group-hover:border-slate-600 transition">
+                        <Icon name={tool.icon} class="w-3.5 h-3.5 {tool.iconColor}" />
+                      </div>
+                      <div class="min-w-0 flex-1">
+                        <div class="flex items-center justify-between">
+                          <span class="font-medium text-slate-200 group-hover:text-white truncate">{tool.name}</span>
+                          <span class="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-mono ml-2 shrink-0">{tool.categoryLabel}</span>
+                        </div>
+                        <div class="text-[11px] text-slate-400 truncate">{tool.desc}</div>
+                      </div>
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+            {:else}
+              <!-- 2-Column Grouped Layout -->
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <!-- Left Column -->
+                <div class="space-y-3.5">
+                  <!-- Section: Monitoring & Diagnostics -->
+                  <div>
+                    <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2 py-0.5 flex items-center space-x-1.5 mb-1">
+                      <span class="w-1.5 h-1.5 rounded-full bg-sky-400"></span>
+                      <span>Monitoring & Diagnostics</span>
+                    </div>
+                    <div class="space-y-0.5">
+                      {#each allTools.filter((t) => t.category === 'monitoring') as tool}
+                        <button
+                          onclick={() => {
+                            tool.action();
+                            showToolsDropdown = false;
+                          }}
+                          class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800/90 text-slate-300 hover:text-white flex items-center space-x-2.5 transition group border border-transparent hover:border-slate-700/60"
+                        >
+                          <div class="w-6 h-6 rounded bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0 group-hover:border-slate-700">
+                            <Icon name={tool.icon} class="w-3.5 h-3.5 {tool.iconColor}" />
+                          </div>
+                          <div class="min-w-0 flex-1">
+                            <div class="text-xs font-medium text-slate-200 group-hover:text-white truncate">{tool.name}</div>
+                            <div class="text-[10px] text-slate-400 truncate leading-tight">{tool.desc}</div>
+                          </div>
+                        </button>
+                      {/each}
+                    </div>
+                  </div>
+
+                  <!-- Section: Security & Access -->
+                  <div>
+                    <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2 py-0.5 flex items-center space-x-1.5 mb-1">
+                      <span class="w-1.5 h-1.5 rounded-full bg-purple-400"></span>
+                      <span>Security & Access</span>
+                    </div>
+                    <div class="space-y-0.5">
+                      {#each allTools.filter((t) => t.category === 'security') as tool}
+                        <button
+                          onclick={() => {
+                            tool.action();
+                            showToolsDropdown = false;
+                          }}
+                          class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800/90 text-slate-300 hover:text-white flex items-center space-x-2.5 transition group border border-transparent hover:border-slate-700/60"
+                        >
+                          <div class="w-6 h-6 rounded bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0 group-hover:border-slate-700">
+                            <Icon name={tool.icon} class="w-3.5 h-3.5 {tool.iconColor}" />
+                          </div>
+                          <div class="min-w-0 flex-1">
+                            <div class="text-xs font-medium text-slate-200 group-hover:text-white truncate">{tool.name}</div>
+                            <div class="text-[10px] text-slate-400 truncate leading-tight">{tool.desc}</div>
+                          </div>
+                        </button>
+                      {/each}
+                    </div>
+                  </div>
+
+                  <!-- Section: System & Preferences -->
+                  <div>
+                    <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2 py-0.5 flex items-center space-x-1.5 mb-1">
+                      <span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                      <span>System & Preferences</span>
+                    </div>
+                    <div class="space-y-0.5">
+                      {#each allTools.filter((t) => t.category === 'preferences') as tool}
+                        <button
+                          onclick={() => {
+                            tool.action();
+                            showToolsDropdown = false;
+                          }}
+                          class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800/90 text-slate-300 hover:text-white flex items-center space-x-2.5 transition group border border-transparent hover:border-slate-700/60"
+                        >
+                          <div class="w-6 h-6 rounded bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0 group-hover:border-slate-700">
+                            <Icon name={tool.icon} class="w-3.5 h-3.5 {tool.iconColor}" />
+                          </div>
+                          <div class="min-w-0 flex-1">
+                            <div class="flex items-center justify-between">
+                              <span class="text-xs font-medium text-slate-200 group-hover:text-white truncate">{tool.name}</span>
+                              {#if tool.shortcut}
+                                <kbd class="text-[9px] font-mono text-slate-400 bg-slate-800 px-1 py-0.2 rounded border border-slate-700">{tool.shortcut}</kbd>
+                              {/if}
+                            </div>
+                            <div class="text-[10px] text-slate-400 truncate leading-tight">{tool.desc}</div>
+                          </div>
+                        </button>
+                      {/each}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Right Column -->
+                <div class="space-y-3.5">
+                  <!-- Section: Data Pipeline & Migration -->
+                  <div>
+                    <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2 py-0.5 flex items-center space-x-1.5 mb-1">
+                      <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                      <span>Data Pipeline & Transfer</span>
+                    </div>
+                    <div class="space-y-0.5">
+                      {#each allTools.filter((t) => t.category === 'data') as tool}
+                        <button
+                          onclick={() => {
+                            tool.action();
+                            showToolsDropdown = false;
+                          }}
+                          class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800/90 text-slate-300 hover:text-white flex items-center space-x-2.5 transition group border border-transparent hover:border-slate-700/60"
+                        >
+                          <div class="w-6 h-6 rounded bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0 group-hover:border-slate-700">
+                            <Icon name={tool.icon} class="w-3.5 h-3.5 {tool.iconColor}" />
+                          </div>
+                          <div class="min-w-0 flex-1">
+                            <div class="text-xs font-medium text-slate-200 group-hover:text-white truncate">{tool.name}</div>
+                            <div class="text-[10px] text-slate-400 truncate leading-tight">{tool.desc}</div>
+                          </div>
+                        </button>
+                      {/each}
+                    </div>
+                  </div>
+
+                  <!-- Section: Schema & Modeling -->
+                  <div>
+                    <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2 py-0.5 flex items-center space-x-1.5 mb-1">
+                      <span class="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
+                      <span>Schema & Modeling</span>
+                    </div>
+                    <div class="space-y-0.5">
+                      {#each allTools.filter((t) => t.category === 'schema') as tool}
+                        <button
+                          onclick={() => {
+                            tool.action();
+                            showToolsDropdown = false;
+                          }}
+                          class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800/90 text-slate-300 hover:text-white flex items-center space-x-2.5 transition group border border-transparent hover:border-slate-700/60"
+                        >
+                          <div class="w-6 h-6 rounded bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0 group-hover:border-slate-700">
+                            <Icon name={tool.icon} class="w-3.5 h-3.5 {tool.iconColor}" />
+                          </div>
+                          <div class="min-w-0 flex-1">
+                            <div class="text-xs font-medium text-slate-200 group-hover:text-white truncate">{tool.name}</div>
+                            <div class="text-[10px] text-slate-400 truncate leading-tight">{tool.desc}</div>
+                          </div>
+                        </button>
+                      {/each}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            {/if}
           </div>
 
-          <div class="py-1">
-            <button
-              onclick={() => {
-                appState.isSettingsModalOpen = true;
-                showToolsDropdown = false;
-              }}
-              class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-            >
-              <Icon name="sliders" class="w-3.5 h-3.5 text-sky-400" />
-              <span>Global Settings & Sync</span>
-            </button>
-            <button
-              onclick={() => {
-                appState.isShortcutsModalOpen = true;
-                showToolsDropdown = false;
-              }}
-              class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-            >
-              <Icon name="keyboard" class="w-3.5 h-3.5 text-amber-400" />
-              <span>Keyboard Shortcuts (?)</span>
-            </button>
+          <!-- Footer Bar -->
+          <div class="px-3 py-2 bg-slate-900/70 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-500 font-sans">
+            <span class="flex items-center space-x-1.5">
+              <Icon name="brand" class="w-3.5 h-3.5 text-orange-500" />
+              <span>SqlFox Enterprise Database Suite</span>
+            </span>
+            <span class="text-[10px] text-slate-500">Press <kbd class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">Esc</kbd> to dismiss</span>
           </div>
         </div>
       {/if}

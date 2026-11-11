@@ -1,5 +1,6 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
+  import Icon from '../common/Icon.svelte';
 
   let filterQuery = $state('');
 
@@ -38,7 +39,7 @@
       <!-- Header -->
       <div class="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between bg-slate-900/60">
         <div class="flex items-center space-x-2">
-          <span class="text-sky-400 font-bold">📜</span>
+          <Icon name="clipboard-list" class="w-4 h-4 text-sky-400" />
           <h3 class="text-sm font-semibold text-slate-100">
             Session Audit Log ({appState.auditLogs.length})
           </h3>
@@ -55,9 +56,10 @@
           <button
             type="button"
             onclick={() => (appState.isAuditDrawerOpen = false)}
-            class="text-slate-400 hover:text-slate-200 text-lg leading-none ml-2"
+            class="text-slate-400 hover:text-slate-200 p-1 rounded hover:bg-slate-800 transition ml-2"
+            aria-label="Close"
           >
-            ✕
+            <Icon name="x" class="w-4 h-4" />
           </button>
         </div>
       </div>

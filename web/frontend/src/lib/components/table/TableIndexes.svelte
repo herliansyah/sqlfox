@@ -288,7 +288,7 @@
                   ? 'bg-sky-900/40 border-sky-600 text-sky-300'
                   : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'}"
               >
-                <span>{isSelected ? '✓' : '+'}</span>
+                <Icon name={isSelected ? 'check' : 'plus'} class="w-2.5 h-2.5" />
                 <span>{col}</span>
               </button>
             {/each}

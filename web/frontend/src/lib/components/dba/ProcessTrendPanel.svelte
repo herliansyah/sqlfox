@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { ProcesslistThread } from '../../../types';
+  import Icon from '../common/Icon.svelte';
 
   let { threads = [] }: { threads: ProcesslistThread[] } = $props();
 
@@ -98,9 +99,9 @@
       onclick={() => (isOpen = !isOpen)}
       class="flex items-center space-x-2 text-slate-300 hover:text-white font-medium transition"
     >
-      <span class="text-sky-400">📈</span>
+      <Icon name="trending-up" class="w-4 h-4 text-sky-400" />
       <span>Live Process Activity Trend</span>
-      <span class="text-slate-500 font-mono text-[10px]">{isOpen ? '▲ Collapse' : '▼ Expand'}</span>
+      <Icon name={isOpen ? 'chevron-down' : 'chevron-right'} class="w-3.5 h-3.5 text-slate-400" />
     </button>
 
     {#if isOpen}

@@ -171,7 +171,7 @@
         class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 hover:text-white border border-[#334155] text-xs flex items-center space-x-1.5 transition shadow-sm"
         title="View Pre-Flight Impact Preview & Execution Tree"
       >
-        <span class="text-sky-400">🔍</span>
+        <Icon name="search" class="w-3.5 h-3.5 text-sky-400" />
         <span>Impact Tree</span>
       </button>
 

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
+  import Icon from '../common/Icon.svelte';
 
   let activeTab = $state<'tree' | 'raw' | 'advisor'>('tree');
 
@@ -53,7 +54,7 @@
       <!-- Modal Header -->
       <div class="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between bg-slate-900/60">
         <div class="flex items-center space-x-2.5">
-          <span class="text-sky-400 font-bold">🔍</span>
+          <Icon name="search" class="w-4 h-4 text-sky-400" />
           <h3 class="text-sm font-semibold text-slate-100">
             Pre-Flight Query Impact & Execution Plan Tree
           </h3>
@@ -93,9 +94,10 @@
           <button
             type="button"
             onclick={handleClose}
-            class="text-slate-400 hover:text-slate-200 text-lg leading-none ml-2"
+            class="text-slate-400 hover:text-slate-200 p-1 rounded hover:bg-slate-800 transition ml-2"
+            aria-label="Close"
           >
-            ✕
+            <Icon name="x" class="w-4 h-4" />
           </button>
         </div>
       </div>
@@ -161,7 +163,7 @@
             {#if bloatWarnings.length > 0}
               {#each bloatWarnings as bw}
                 <div class="p-3.5 rounded-lg border border-amber-800/80 bg-amber-950/30 text-amber-200 text-xs flex items-start space-x-2.5">
-                  <span class="text-amber-400 font-bold">⚠️</span>
+                  <Icon name="alert-triangle" class="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                   <div>
                     <div class="font-bold text-amber-300">Index Bloat Warning ({bw.table || 'Table'}):</div>
                     <div class="mt-0.5 text-slate-300">{bw.warning || bw.message}</div>

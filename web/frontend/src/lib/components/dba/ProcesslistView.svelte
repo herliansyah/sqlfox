@@ -1205,7 +1205,7 @@
               onchange={(e) => inspectFlightSession((e.target as HTMLSelectElement).value)}
               class="bg-[#0f172a] border border-[#334155] rounded px-2.5 py-1 text-slate-200 text-xs focus:outline-none focus:border-sky-500 font-mono"
             >
-              <option value="">{isRecording ? '🔴 Live In-Progress Recording' : '-- Select Saved Recording --'}</option>
+              <option value="">{isRecording ? '● Live In-Progress Recording' : '-- Select Saved Recording --'}</option>
               {#each flightSessions as s}
                 <option value={s.id}>
                   {formatSessionLabel(s)}

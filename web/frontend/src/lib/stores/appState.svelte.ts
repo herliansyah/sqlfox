@@ -385,7 +385,7 @@ export class AppState {
         if (!this.notifiedReminderIds.has(note.id)) {
           this.notifiedReminderIds.add(note.id);
           this.playReminderChime();
-          this.showToast(`🚨 Reminder Due: ${note.title || 'Untitled Note'}`, 'info');
+          this.showToast(`Reminder Due: ${note.title || 'Untitled Note'}`, 'warning');
         }
       });
     } catch (_) {

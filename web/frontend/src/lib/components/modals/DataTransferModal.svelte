@@ -1,6 +1,7 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
+  import Icon from '../common/Icon.svelte';
 
   let sourceConnId = $state('');
   let sourceDb = $state('');
@@ -73,7 +74,7 @@
       <!-- Header -->
       <div class="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between bg-slate-900/60">
         <div class="flex items-center space-x-2">
-          <span class="text-sky-400">🚀</span>
+          <Icon name="rocket" class="w-4 h-4 text-sky-400" />
           <h3 class="text-sm font-semibold text-slate-100">
             Cross-Connection Data Transfer
           </h3>
@@ -82,9 +83,10 @@
           type="button"
           onclick={handleCancel}
           disabled={isTransferring}
-          class="text-slate-400 hover:text-slate-200 text-lg leading-none"
+          class="text-slate-400 hover:text-slate-200 p-1 rounded hover:bg-slate-800 transition"
+          aria-label="Close"
         >
-          ✕
+          <Icon name="x" class="w-4 h-4" />
         </button>
       </div>
 
@@ -169,13 +171,15 @@
         </div>
 
         {#if transferResult}
-          <div class="p-3 rounded-lg border text-xs {transferResult.success
+          <div class="p-3 rounded-lg border text-xs flex items-center space-x-2 {transferResult.success
             ? 'border-emerald-800 bg-emerald-950/30 text-emerald-300'
             : 'border-rose-800 bg-rose-950/30 text-rose-300'}">
             {#if transferResult.success}
-              ✓ Transfer completed successfully! Total rows transferred: {transferResult.rows_transferred?.toLocaleString() ?? 0}
+              <Icon name="check-circle" class="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>Transfer completed successfully! Total rows transferred: {transferResult.rows_transferred?.toLocaleString() ?? 0}</span>
             {:else}
-              ✕ Transfer failed: {transferResult.error}
+              <Icon name="alert-triangle" class="w-4 h-4 text-rose-400 shrink-0" />
+              <span>Transfer failed: {transferResult.error}</span>
             {/if}
           </div>
         {/if}

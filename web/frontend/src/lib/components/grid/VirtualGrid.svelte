@@ -958,10 +958,11 @@
                   <button
                     type="button"
                     onclick={() => removeDraftRow(dIdx)}
-                    class="text-rose-400 hover:text-rose-200 font-bold text-xs"
+                    class="text-rose-400 hover:text-rose-200 p-0.5 rounded hover:bg-rose-950/50 inline-flex items-center justify-center transition"
                     title="Discard draft row"
+                    aria-label="Discard draft row"
                   >
-                    ✕
+                    <Icon name="x" class="w-3.5 h-3.5" />
                   </button>
                 </td>
                 {#each visibleColumns as col}
@@ -1062,10 +1063,11 @@
                               e.stopPropagation();
                               appState.openFkPeek(e, currentTab?.tableName || '', colName, fk.referenced_table, fk.referenced_column, cellVal);
                             }}
-                            class="opacity-0 group-hover/cell:opacity-100 hover:text-sky-300 text-sky-400 font-bold ml-1 text-[10px]"
+                            class="opacity-0 group-hover/cell:opacity-100 hover:text-sky-300 text-sky-400 p-0.5 rounded hover:bg-slate-800 ml-1 inline-flex items-center"
                             title="Peek {fk.referenced_table}.{fk.referenced_column}"
+                            aria-label="Peek {fk.referenced_table}.{fk.referenced_column}"
                           >
-                            🔗
+                            <Icon name="link" class="w-3 h-3" />
                           </button>
                         {/if}
                       </div>

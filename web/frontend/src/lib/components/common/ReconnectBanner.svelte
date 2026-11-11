@@ -1,5 +1,6 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
+  import Icon from './Icon.svelte';
 
   function manualRetry() {
     appState.attemptReconnect(() => {
@@ -11,7 +12,7 @@
 {#if appState.isReconnecting}
   <div class="fixed top-0 left-0 right-0 z-[120] bg-gradient-to-r from-amber-600 to-rose-600 text-white px-4 py-2 text-xs flex items-center justify-between shadow-lg transition-all animate-bounce-subtle font-sans">
     <div class="flex items-center space-x-2">
-      <span class="animate-spin text-sm">⟳</span>
+      <Icon name="loader" class="w-4 h-4 animate-spin text-white shrink-0" />
       <span class="font-bold">Connection to SqlFox daemon lost!</span>
       <span class="text-amber-100 opacity-90">
         Reconnecting in {appState.reconnectCountdown}s (Attempt #{appState.reconnectAttempts})...
@@ -29,10 +30,11 @@
       <button
         type="button"
         onclick={() => appState.hideReconnectBanner()}
-        class="text-white/70 hover:text-white px-1 text-sm font-bold"
+        class="text-white/70 hover:text-white p-1 rounded hover:bg-white/10 transition"
         title="Dismiss warning"
+        aria-label="Dismiss warning"
       >
-        ✕
+        <Icon name="x" class="w-3.5 h-3.5" />
       </button>
     </div>
   </div>
