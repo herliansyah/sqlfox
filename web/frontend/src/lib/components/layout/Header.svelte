@@ -12,13 +12,13 @@
   let toolsSearchQuery = $state('');
   let pinAutoMaskTimer: any = null;
 
-  type ToolCategoryKey = 'all' | 'dba' | 'schema' | 'security' | 'data' | 'ai' | 'preferences';
+  type ToolCategoryKey = 'all' | 'schema' | 'data' | 'dba' | 'security' | 'ai' | 'preferences';
   let activeToolsCategory = $state<ToolCategoryKey>('all');
   let selectedToolIndex = $state(0);
 
   interface ToolItem {
     id: string;
-    category: 'dba' | 'schema' | 'security' | 'data' | 'ai' | 'preferences';
+    category: 'schema' | 'data' | 'dba' | 'security' | 'ai' | 'preferences';
     categoryLabel: string;
     name: string;
     desc: string;
@@ -30,68 +30,18 @@
     action: () => void;
   }
 
-  const toolCategories: { id: ToolCategoryKey; label: string; icon: string; dotColor: string }[] = [
-    { id: 'all', label: 'All Tools', icon: 'wrench', dotColor: 'bg-slate-400' },
-    { id: 'dba', label: 'DBA & Monitoring', icon: 'cpu', dotColor: 'bg-sky-400' },
-    { id: 'schema', label: 'Schema & Architecture', icon: 'layers', dotColor: 'bg-indigo-400' },
-    { id: 'security', label: 'Security & Access', icon: 'shield', dotColor: 'bg-rose-400' },
-    { id: 'data', label: 'Data Movement & ETL', icon: 'upload', dotColor: 'bg-emerald-400' },
-    { id: 'ai', label: 'AI & Collaboration', icon: 'bot', dotColor: 'bg-purple-400' },
-    { id: 'preferences', label: 'System & Workspace', icon: 'sliders', dotColor: 'bg-slate-400' }
+  const toolCategories: { id: ToolCategoryKey; label: string; icon: string; dotColor: string; description: string }[] = [
+    { id: 'all', label: 'All Tools', icon: 'wrench', dotColor: 'bg-slate-400', description: 'Complete catalog of database management tools' },
+    { id: 'schema', label: 'Schema & Architecture', icon: 'layers', dotColor: 'bg-indigo-400', description: 'Visual ERD, table/view designers, DDL generators & schema diff' },
+    { id: 'data', label: 'Data Movement & ETL', icon: 'upload', dotColor: 'bg-emerald-400', description: 'CSV import, SQL dumps, cross-host transfers & mock generation' },
+    { id: 'dba', label: 'DBA & Performance', icon: 'cpu', dotColor: 'bg-sky-400', description: 'Live threads, query kill, tablespace diagnostics & audit logs' },
+    { id: 'security', label: 'Security & Access', icon: 'shield', dotColor: 'bg-rose-400', description: 'Connection vaults, credentials & RBAC privilege matrix' },
+    { id: 'ai', label: 'Developer & AI', icon: 'bot', dotColor: 'bg-purple-400', description: 'AI Copilot, query snippets, batch runners & team runbooks' },
+    { id: 'preferences', label: 'System & Workspace', icon: 'sliders', dotColor: 'bg-slate-400', description: 'Cloud backups, keyboard shortcuts & self-update engine' }
   ];
 
   const allTools: ToolItem[] = [
-    // 1. DBA & Monitoring (4 items)
-    {
-      id: 'processlist',
-      category: 'dba',
-      categoryLabel: 'DBA & Monitoring',
-      name: 'Processlist & Live Sessions',
-      desc: 'Inspect active client threads, execution times & kill runaway queries',
-      icon: 'cpu',
-      iconColor: 'text-sky-400',
-      badge: 'Live',
-      badgeColor: 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60',
-      action: () => appState.openProcesslistTab()
-    },
-    {
-      id: 'diagnostics',
-      category: 'dba',
-      categoryLabel: 'DBA & Monitoring',
-      name: 'Database Health & Telemetry',
-      desc: 'Tablespace fragmentation, buffer cache hit-ratio & engine metrics',
-      icon: 'activity',
-      iconColor: 'text-rose-400',
-      badge: 'Metrics',
-      badgeColor: 'bg-rose-950/80 text-rose-300 border-rose-700/60',
-      action: () => appState.openDbDiagnosticsModal()
-    },
-    {
-      id: 'activity-console',
-      category: 'dba',
-      categoryLabel: 'DBA & Monitoring',
-      name: 'System Activity Console',
-      desc: 'Real-time daemon log stream, background events & lock monitors',
-      icon: 'terminal',
-      iconColor: 'text-emerald-400',
-      badge: 'Stream',
-      badgeColor: 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60',
-      action: () => (appState.isActivityDrawerOpen = !appState.isActivityDrawerOpen)
-    },
-    {
-      id: 'audit-log',
-      category: 'dba',
-      categoryLabel: 'DBA & Monitoring',
-      name: 'Audit Trail & Mutation Logs',
-      desc: 'Historical query logs, security events & destructive statement attribution',
-      icon: 'clipboard-list',
-      iconColor: 'text-amber-400',
-      badge: 'Forensics',
-      badgeColor: 'bg-amber-950/80 text-amber-300 border-amber-700/60',
-      action: () => (appState.isAuditDrawerOpen = true)
-    },
-
-    // 2. Schema & Architecture (5 items)
+    // 1. Schema & Architecture (9 items)
     {
       id: 'erd',
       category: 'schema',
@@ -109,7 +59,7 @@
       category: 'schema',
       categoryLabel: 'Schema & Architecture',
       name: 'Schema Structure Diff & Sync',
-      desc: 'Compare database catalog structures and generate safe migration DDL',
+      desc: 'Compare database catalog structures across environments and generate migration DDL',
       icon: 'git-diff',
       iconColor: 'text-cyan-400',
       badge: 'Diff',
@@ -117,35 +67,83 @@
       action: () => appState.openStructureSyncModal()
     },
     {
-      id: 'run-sql',
+      id: 'table-creator',
       category: 'schema',
       categoryLabel: 'Schema & Architecture',
-      name: 'Batch SQL Script Runner',
-      desc: 'Stream large multi-statement migration scripts and SQL backup files',
-      icon: 'file-code',
-      iconColor: 'text-amber-400',
-      badge: 'Batch',
-      badgeColor: 'bg-amber-950/80 text-amber-300 border-amber-700/60',
-      action: () => appState.openRunSqlModal()
+      name: 'Table Designer',
+      desc: 'Visual table architect for columns, primary keys, engines, and character sets',
+      icon: 'table',
+      iconColor: 'text-emerald-400',
+      badge: 'Designer',
+      badgeColor: 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60',
+      action: () => (appState.isTableCreatorOpen = true)
     },
     {
-      id: 'snippets',
+      id: 'view-designer',
       category: 'schema',
       categoryLabel: 'Schema & Architecture',
-      name: 'Query Snippets & Templates',
-      desc: 'Curated catalog of reusable parameterized queries and DBA boilerplate',
-      icon: 'bookmark',
+      name: 'View Designer',
+      desc: 'Visual query builder and DDL designer for virtual and materialized database views',
+      icon: 'eye',
+      iconColor: 'text-teal-400',
+      badge: 'Designer',
+      badgeColor: 'bg-teal-950/80 text-teal-300 border-teal-700/60',
+      action: () => appState.openViewDesigner()
+    },
+    {
+      id: 'routine-designer',
+      category: 'schema',
+      categoryLabel: 'Schema & Architecture',
+      name: 'Stored Routine Designer',
+      desc: 'Programmability designer for stored procedures, functions, parameters & return types',
+      icon: 'code',
+      iconColor: 'text-amber-400',
+      badge: 'Designer',
+      badgeColor: 'bg-amber-950/80 text-amber-300 border-amber-700/60',
+      action: () => appState.openRoutineDesigner()
+    },
+    {
+      id: 'trigger-designer',
+      category: 'schema',
+      categoryLabel: 'Schema & Architecture',
+      name: 'Trigger Designer',
+      desc: 'Event-driven triggers configured for BEFORE/AFTER INSERT, UPDATE & DELETE operations',
+      icon: 'zap',
+      iconColor: 'text-purple-400',
+      badge: 'Designer',
+      badgeColor: 'bg-purple-950/80 text-purple-300 border-purple-700/60',
+      action: () => appState.openTriggerDesigner()
+    },
+    {
+      id: 'event-designer',
+      category: 'schema',
+      categoryLabel: 'Schema & Architecture',
+      name: 'Scheduled Event Designer',
+      desc: 'Cron-like scheduled database maintenance tasks and recurring automated queries',
+      icon: 'clock',
       iconColor: 'text-sky-400',
-      badge: 'Snippets',
+      badge: 'Designer',
       badgeColor: 'bg-sky-950/80 text-sky-300 border-sky-700/60',
-      action: () => appState.openSnippetsModal()
+      action: () => appState.openEventDesigner()
+    },
+    {
+      id: 'create-database',
+      category: 'schema',
+      categoryLabel: 'Schema & Architecture',
+      name: 'Create New Database',
+      desc: 'Provision a new database catalog with custom charset, collation, and driver rules',
+      icon: 'database',
+      iconColor: 'text-blue-400',
+      badge: 'Catalog',
+      badgeColor: 'bg-sky-950/80 text-sky-300 border-sky-700/60',
+      action: () => (appState.isCreateDbModalOpen = true)
     },
     {
       id: 'refresh-catalogs',
       category: 'schema',
       categoryLabel: 'Schema & Architecture',
       name: 'Reload Metadata Catalog',
-      desc: 'Purge cache and synchronize schema dictionary across all connections',
+      desc: 'Purge cache and synchronize schema dictionary across all active connections',
       icon: 'rotate-ccw',
       iconColor: 'text-teal-400',
       badge: 'Purge',
@@ -153,33 +151,7 @@
       action: () => (appState.isRefreshAllOpen = true)
     },
 
-    // 3. Security & Access (2 items)
-    {
-      id: 'connections',
-      category: 'security',
-      categoryLabel: 'Security & Access',
-      name: 'Connection Profiles Vault',
-      desc: 'Server endpoints, AES-256 encrypted passwords & SSH jump-host tunnels',
-      icon: 'database',
-      iconColor: 'text-sky-400',
-      badge: 'Vault',
-      badgeColor: 'bg-sky-950/80 text-sky-300 border-sky-700/60',
-      action: () => appState.openNewConnectionModal()
-    },
-    {
-      id: 'privilege-matrix',
-      category: 'security',
-      categoryLabel: 'Security & Access',
-      name: 'Users & Privileges Matrix',
-      desc: 'Manage database accounts, roles, host masks & granular GRANT permissions',
-      icon: 'users',
-      iconColor: 'text-purple-400',
-      badge: 'RBAC',
-      badgeColor: 'bg-purple-950/80 text-purple-300 border-purple-700/60',
-      action: () => appState.openPrivilegeMatrixModal()
-    },
-
-    // 4. Data Movement & ETL (5 items)
+    // 2. Data Movement & ETL (5 items)
     {
       id: 'csv-import',
       category: 'data',
@@ -241,11 +213,87 @@
       action: () => (appState.isMockDataModalOpen = true)
     },
 
-    // 5. AI & Collaboration (3 items)
+    // 3. DBA & Performance (4 items)
+    {
+      id: 'processlist',
+      category: 'dba',
+      categoryLabel: 'DBA & Performance',
+      name: 'Processlist & Live Sessions',
+      desc: 'Inspect active client threads, execution times & kill runaway queries',
+      icon: 'cpu',
+      iconColor: 'text-sky-400',
+      badge: 'Live',
+      badgeColor: 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60',
+      action: () => appState.openProcesslistTab()
+    },
+    {
+      id: 'diagnostics',
+      category: 'dba',
+      categoryLabel: 'DBA & Performance',
+      name: 'Database Health & Telemetry',
+      desc: 'Tablespace fragmentation, buffer cache hit-ratio & engine metrics',
+      icon: 'activity',
+      iconColor: 'text-rose-400',
+      badge: 'Metrics',
+      badgeColor: 'bg-rose-950/80 text-rose-300 border-rose-700/60',
+      action: () => appState.openDbDiagnosticsModal()
+    },
+    {
+      id: 'activity-console',
+      category: 'dba',
+      categoryLabel: 'DBA & Performance',
+      name: 'System Activity Console',
+      desc: 'Real-time daemon log stream, background events & lock monitors',
+      icon: 'terminal',
+      iconColor: 'text-emerald-400',
+      badge: 'Stream',
+      badgeColor: 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60',
+      action: () => (appState.isActivityDrawerOpen = !appState.isActivityDrawerOpen)
+    },
+    {
+      id: 'audit-log',
+      category: 'dba',
+      categoryLabel: 'DBA & Performance',
+      name: 'Audit Trail & Mutation Logs',
+      desc: 'Historical query logs, security events & destructive statement attribution',
+      icon: 'clipboard-list',
+      iconColor: 'text-amber-400',
+      badge: 'Forensics',
+      badgeColor: 'bg-amber-950/80 text-amber-300 border-amber-700/60',
+      action: () => (appState.isAuditDrawerOpen = true)
+    },
+
+    // 4. Security & Access (2 items)
+    {
+      id: 'connections',
+      category: 'security',
+      categoryLabel: 'Security & Access',
+      name: 'Connection Profiles Vault',
+      desc: 'Server endpoints, AES-256 encrypted passwords & SSH jump-host tunnels',
+      icon: 'database',
+      iconColor: 'text-sky-400',
+      badge: 'Vault',
+      badgeColor: 'bg-sky-950/80 text-sky-300 border-sky-700/60',
+      action: () => appState.openNewConnectionModal()
+    },
+    {
+      id: 'privilege-matrix',
+      category: 'security',
+      categoryLabel: 'Security & Access',
+      name: 'Users & Privileges Matrix',
+      desc: 'Manage database accounts, roles, host masks & granular GRANT permissions',
+      icon: 'users',
+      iconColor: 'text-purple-400',
+      badge: 'RBAC',
+      badgeColor: 'bg-purple-950/80 text-purple-300 border-purple-700/60',
+      action: () => appState.openPrivilegeMatrixModal()
+    },
+
+    // 5. Developer & AI Productivity (5 items)
     {
       id: 'copilot',
       category: 'ai',
-      categoryLabel: 'AI & Collaboration',
+      categoryLabel: 'Developer & AI',
       name: 'SqlFox AI Copilot Assistant',
       desc: 'Natural language query generation, SQL explanation & query optimization',
       icon: 'bot',
@@ -255,9 +303,33 @@
       action: () => (appState.isAiDrawerOpen = true)
     },
     {
+      id: 'run-sql',
+      category: 'ai',
+      categoryLabel: 'Developer & AI',
+      name: 'Batch SQL Script Runner',
+      desc: 'Stream large multi-statement migration scripts and SQL backup files',
+      icon: 'file-code',
+      iconColor: 'text-amber-400',
+      badge: 'Batch',
+      badgeColor: 'bg-amber-950/80 text-amber-300 border-amber-700/60',
+      action: () => appState.openRunSqlModal()
+    },
+    {
+      id: 'snippets',
+      category: 'ai',
+      categoryLabel: 'Developer & AI',
+      name: 'Query Snippets & Templates',
+      desc: 'Curated catalog of reusable parameterized queries and DBA boilerplate',
+      icon: 'bookmark',
+      iconColor: 'text-sky-400',
+      badge: 'Snippets',
+      badgeColor: 'bg-sky-950/80 text-sky-300 border-sky-700/60',
+      action: () => appState.openSnippetsModal()
+    },
+    {
       id: 'notes',
       category: 'ai',
-      categoryLabel: 'AI & Collaboration',
+      categoryLabel: 'Developer & AI',
       name: 'Operational Runbooks & Notes',
       desc: 'Team knowledge base, table documentation, runbooks & incident logs',
       icon: 'book-open',
@@ -269,7 +341,7 @@
     {
       id: 'ai-settings',
       category: 'ai',
-      categoryLabel: 'AI & Collaboration',
+      categoryLabel: 'Developer & AI',
       name: 'AI Model & Provider Config',
       desc: 'LLM provider credentials (OpenAI, Claude, Gemini, Ollama) & parameters',
       icon: 'sliders',
@@ -674,35 +746,48 @@
           onclick={() => (showToolsDropdown = false)}
         ></button>
 
-        <div class="absolute right-0 mt-1.5 w-[760px] max-w-[calc(100vw-2rem)] bg-[#0b0f19]/98 border border-slate-700/80 rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in duration-100 text-xs backdrop-blur-2xl ring-1 ring-black/40">
-          <!-- Search Header & Category Tabs -->
-          <div class="p-3 border-b border-slate-800/80 bg-slate-900/70 space-y-2.5">
-            <div class="relative flex items-center">
-              <Icon name="search" class="w-3.5 h-3.5 text-slate-400 absolute left-3 pointer-events-none" />
-              <input
-                type="text"
-                bind:value={toolsSearchQuery}
-                onkeydown={handleToolsKeydown}
-                placeholder="Search tools by name, description, or keyword (↑↓ to navigate, Enter to run)..."
-                class="w-full bg-[#050811] border border-slate-700/80 rounded-lg pl-9 pr-24 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition shadow-inner font-sans"
-              />
-              <div class="absolute right-2.5 flex items-center space-x-1.5 pointer-events-none">
-                {#if toolsSearchQuery}
-                  <button
-                    type="button"
-                    onclick={() => {
-                      toolsSearchQuery = '';
-                      selectedToolIndex = 0;
-                    }}
-                    class="pointer-events-auto text-slate-400 hover:text-slate-200 p-0.5 rounded transition"
-                    aria-label="Clear search"
-                  >
-                    <Icon name="x" class="w-3 h-3" />
-                  </button>
+        <div class="absolute right-0 mt-1.5 w-[840px] max-w-[calc(100vw-2rem)] bg-[#0b0f19]/98 border border-slate-700/80 rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in duration-100 text-xs backdrop-blur-2xl ring-1 ring-black/50 flex flex-col max-h-[82vh]">
+          <!-- Search Header & Active Scope -->
+          <div class="p-3.5 border-b border-slate-800/80 bg-slate-900/80 space-y-2.5 shrink-0">
+            <div class="flex items-center justify-between gap-3">
+              <div class="relative flex-1 flex items-center">
+                <Icon name="search" class="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" />
+                <input
+                  type="text"
+                  bind:value={toolsSearchQuery}
+                  onkeydown={handleToolsKeydown}
+                  placeholder="Search database tools by name, category, or keyword (↑↓ to navigate, Enter to launch)..."
+                  class="w-full bg-[#050811] border border-slate-700/80 rounded-xl pl-9 pr-24 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition shadow-inner font-sans"
+                />
+                <div class="absolute right-3 flex items-center space-x-1.5 pointer-events-none">
+                  {#if toolsSearchQuery}
+                    <button
+                      type="button"
+                      onclick={() => {
+                        toolsSearchQuery = '';
+                        selectedToolIndex = 0;
+                      }}
+                      class="pointer-events-auto text-slate-400 hover:text-slate-200 p-0.5 rounded transition"
+                      aria-label="Clear search"
+                    >
+                      <Icon name="x" class="w-3.5 h-3.5" />
+                    </button>
+                  {/if}
+                  <span class="text-[10px] font-mono text-slate-400 bg-slate-800/90 px-1.5 py-0.5 rounded-md border border-slate-700/60">
+                    {filteredTools.length} {filteredTools.length === 1 ? 'tool' : 'tools'}
+                  </span>
+                </div>
+              </div>
+
+              <!-- Scope Pill -->
+              <div class="hidden sm:flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl bg-slate-950/70 border border-slate-800 text-[11px] font-mono text-slate-300 shrink-0">
+                <span class="w-1.5 h-1.5 rounded-full {appState.activeConnection ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]' : 'bg-slate-500'}"></span>
+                <span class="text-slate-400">Scope:</span>
+                <span class="font-semibold text-slate-200 truncate max-w-[140px]">{appState.activeConnection?.name || 'No Connection'}</span>
+                {#if appState.currentDatabase}
+                  <span class="text-slate-600">/</span>
+                  <span class="text-sky-300 font-bold truncate max-w-[120px]">{appState.currentDatabase}</span>
                 {/if}
-                <span class="text-[10px] font-mono text-slate-400 bg-slate-800/80 px-1.5 py-0.5 rounded border border-slate-700/60">
-                  {filteredTools.length} {filteredTools.length === 1 ? 'tool' : 'tools'}
-                </span>
               </div>
             </div>
 
@@ -717,30 +802,30 @@
                     activeToolsCategory = cat.id;
                     selectedToolIndex = 0;
                   }}
-                  class="px-2.5 py-1 rounded-md transition flex items-center space-x-1.5 whitespace-nowrap font-medium border {isCatActive
-                    ? 'bg-sky-950/80 text-sky-200 border-sky-600/80 shadow-sm'
+                  class="px-2.5 py-1 rounded-lg transition flex items-center space-x-1.5 whitespace-nowrap font-medium border {isCatActive
+                    ? 'bg-sky-950/90 text-sky-200 border-sky-500/70 shadow-sm shadow-sky-950'
                     : 'bg-slate-900/60 text-slate-400 hover:text-slate-200 hover:bg-slate-800/80 border-slate-800/80'}"
                 >
-                  <Icon name={cat.icon} class="w-3 h-3 {isCatActive ? 'text-sky-300' : 'text-slate-500'}" />
+                  <Icon name={cat.icon} class="w-3.5 h-3.5 {isCatActive ? 'text-sky-300' : 'text-slate-500'}" />
                   <span>{cat.label}</span>
-                  <span class="text-[9px] font-mono px-1 py-0.2 rounded bg-slate-800/80 text-slate-400">{catCount}</span>
+                  <span class="text-[9px] font-mono px-1.5 py-0.2 rounded-md {isCatActive ? 'bg-sky-900/80 text-sky-200' : 'bg-slate-800/80 text-slate-400'}">{catCount}</span>
                 </button>
               {/each}
             </div>
           </div>
 
           <!-- Body -->
-          <div class="max-h-[68vh] overflow-y-auto p-3.5">
+          <div class="flex-1 overflow-y-auto p-4 space-y-5">
             {#if toolsSearchQuery.trim() || activeToolsCategory !== 'all'}
-              <!-- Flat Filtered View with Keyboard Navigation -->
+              <!-- Filtered List / Category View with Keyboard Navigation -->
               {#if filteredTools.length === 0}
-                <div class="py-12 text-center text-slate-500 text-xs">
-                  <Icon name="search" class="w-7 h-7 mx-auto mb-2 text-slate-600 opacity-60" />
-                  <div class="text-slate-300 font-medium">No tools found matching "{toolsSearchQuery}"</div>
-                  <div class="text-[11px] text-slate-500 mt-1">Try searching for keywords like "import", "dump", "process", "sync", or "privilege"</div>
+                <div class="py-14 text-center text-slate-500 text-xs">
+                  <Icon name="search" class="w-8 h-8 mx-auto mb-2 text-slate-600 opacity-60" />
+                  <div class="text-slate-200 font-semibold text-sm">No database tools found matching "{toolsSearchQuery}"</div>
+                  <div class="text-[11px] text-slate-400 mt-1">Try keywords like "table", "import", "dump", "process", "diff", or "privilege"</div>
                 </div>
               {:else}
-                <div class="space-y-1">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {#each filteredTools as tool, idx}
                     {@const isHighlighted = selectedToolIndex === idx}
                     <button
@@ -750,270 +835,102 @@
                         tool.action();
                         showToolsDropdown = false;
                       }}
-                      class="w-full text-left px-3 py-2 rounded-xl transition flex items-center space-x-3 group border {isHighlighted
-                        ? 'bg-slate-800/95 border-sky-500/50 shadow-md ring-1 ring-sky-500/20 text-white'
-                        : 'hover:bg-slate-800/60 border-slate-800/40 bg-slate-900/20 text-slate-300'}"
+                      class="text-left p-3 rounded-xl transition-all flex items-start space-x-3 group border {isHighlighted
+                        ? 'bg-slate-800/95 border-sky-500/60 shadow-lg ring-1 ring-sky-500/20 text-white'
+                        : 'bg-slate-900/40 hover:bg-slate-800/70 border-slate-800/70 text-slate-300 hover:border-slate-700/80'}"
                     >
-                      <div class="w-8 h-8 rounded-lg bg-slate-900 border border-slate-700/70 flex items-center justify-center shrink-0 group-hover:border-slate-600 group-hover:shadow transition shadow-inner">
+                      <div class="w-8 h-8 rounded-lg bg-slate-950/80 border border-slate-800 flex items-center justify-center shrink-0 group-hover:border-slate-700 group-hover:scale-105 transition shadow-inner mt-0.5">
                         <Icon name={tool.icon} class="w-4 h-4 {tool.iconColor}" />
                       </div>
                       <div class="min-w-0 flex-1">
-                        <div class="flex items-center justify-between gap-2">
-                          <span class="font-semibold text-slate-200 group-hover:text-white truncate">{tool.name}</span>
-                          <div class="flex items-center space-x-1.5 shrink-0">
+                        <div class="flex items-center justify-between gap-1.5">
+                          <span class="font-semibold text-slate-100 group-hover:text-white truncate">{tool.name}</span>
+                          <div class="flex items-center space-x-1 shrink-0">
                             {#if tool.badge}
                               <span class="text-[9px] font-mono px-1.5 py-0.2 rounded border {tool.badgeColor || 'bg-slate-800 text-slate-300 border-slate-700'}">{tool.badge}</span>
                             {/if}
                             {#if tool.shortcut}
                               <kbd class="text-[9px] font-mono text-slate-400 bg-slate-800 px-1 py-0.2 rounded border border-slate-700">{tool.shortcut}</kbd>
                             {/if}
-                            <span class="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-mono border border-slate-700/50">{tool.categoryLabel}</span>
                           </div>
                         </div>
-                        <div class="text-[11px] text-slate-400 truncate mt-0.5">{tool.desc}</div>
+                        <div class="text-[11px] text-slate-400 group-hover:text-slate-300 leading-snug mt-1 line-clamp-2">{tool.desc}</div>
                       </div>
-                      <Icon name="corner-down-left" class="w-3.5 h-3.5 text-sky-400 {isHighlighted ? 'opacity-100' : 'opacity-0'} transition shrink-0" />
+                      <Icon name="corner-down-left" class="w-3.5 h-3.5 text-sky-400 {isHighlighted ? 'opacity-100' : 'opacity-0'} transition shrink-0 mt-1" />
                     </button>
                   {/each}
                 </div>
               {/if}
             {:else}
-              <!-- 2-Column Enterprise Overview Layout (11 Tools Left, 11 Tools Right) -->
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <!-- Left Column (DBA & Performance + Schema & Modeling + Security & Access) -->
-                <div class="space-y-4">
-                  <!-- Section 1: DBA & Monitoring (4 tools) -->
-                  <div class="space-y-1">
-                    <div class="text-[10.5px] font-bold uppercase tracking-wider text-slate-400 px-2.5 py-1 flex items-center justify-between bg-slate-900/50 rounded-lg border border-slate-800/60 mb-1">
-                      <span class="flex items-center space-x-2">
-                        <span class="w-2 h-2 rounded-full bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.6)]"></span>
-                        <span class="text-slate-200 font-semibold">DBA & Monitoring</span>
+              <!-- Enterprise Grouped View: 6 Canonical Sections in a Clean Structured Layout -->
+              {#each toolCategories.filter((c) => c.id !== 'all') as category}
+                {@const catTools = allTools.filter((t) => t.category === category.id)}
+                {#if catTools.length > 0}
+                  <section class="space-y-2">
+                    <!-- Section Header -->
+                    <div class="px-3 py-1.5 bg-slate-900/60 rounded-xl border border-slate-800/80 flex items-center justify-between">
+                      <div class="flex items-center space-x-2">
+                        <span class="w-2 h-2 rounded-full {category.dotColor} shadow-[0_0_8px_rgba(56,189,248,0.5)]"></span>
+                        <span class="font-bold text-slate-200 uppercase tracking-wider text-[11px]">{category.label}</span>
+                        <span class="text-slate-600 hidden md:inline">•</span>
+                        <span class="text-[11px] text-slate-400 hidden md:inline">{category.description}</span>
+                      </div>
+                      <span class="text-[9.5px] font-mono text-slate-400 bg-slate-800/90 px-2 py-0.5 rounded-md border border-slate-700/60">
+                        {catTools.length} {catTools.length === 1 ? 'tool' : 'tools'}
                       </span>
-                      <span class="text-[9px] font-mono text-slate-400 bg-slate-800/70 px-1.5 py-0.2 rounded border border-slate-700/50">4 tools</span>
                     </div>
-                    {#each allTools.filter((t) => t.category === 'dba') as tool}
-                      <button
-                        type="button"
-                        onclick={() => {
-                          tool.action();
-                          showToolsDropdown = false;
-                        }}
-                        class="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-slate-800/90 text-slate-300 hover:text-white flex items-center space-x-2.5 transition group border border-transparent hover:border-slate-700/60 hover:shadow-sm"
-                      >
-                        <div class="w-7 h-7 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0 group-hover:border-slate-700 group-hover:scale-105 transition">
-                          <Icon name={tool.icon} class="w-3.5 h-3.5 {tool.iconColor}" />
-                        </div>
-                        <div class="min-w-0 flex-1">
-                          <div class="flex items-center justify-between gap-1">
-                            <span class="text-xs font-semibold text-slate-200 group-hover:text-white truncate">{tool.name}</span>
-                            {#if tool.badge}
-                              <span class="text-[8.5px] font-mono px-1.5 py-0.2 rounded border shrink-0 {tool.badgeColor || 'bg-slate-800 text-slate-300 border-slate-700'}">{tool.badge}</span>
-                            {/if}
-                          </div>
-                          <div class="text-[10px] text-slate-400 group-hover:text-slate-300 truncate leading-tight mt-0.5">{tool.desc}</div>
-                        </div>
-                        <Icon name="chevron-right" class="w-3 h-3 text-slate-600 opacity-0 group-hover:opacity-100 group-hover:text-slate-400 transition shrink-0" />
-                      </button>
-                    {/each}
-                  </div>
 
-                  <!-- Section 2: Schema & Architecture (5 tools) -->
-                  <div class="space-y-1">
-                    <div class="text-[10.5px] font-bold uppercase tracking-wider text-slate-400 px-2.5 py-1 flex items-center justify-between bg-slate-900/50 rounded-lg border border-slate-800/60 mb-1">
-                      <span class="flex items-center space-x-2">
-                        <span class="w-2 h-2 rounded-full bg-indigo-400 shadow-[0_0_8px_rgba(129,140,248,0.6)]"></span>
-                        <span class="text-slate-200 font-semibold">Schema & Architecture</span>
-                      </span>
-                      <span class="text-[9px] font-mono text-slate-400 bg-slate-800/70 px-1.5 py-0.2 rounded border border-slate-700/50">5 tools</span>
-                    </div>
-                    {#each allTools.filter((t) => t.category === 'schema') as tool}
-                      <button
-                        type="button"
-                        onclick={() => {
-                          tool.action();
-                          showToolsDropdown = false;
-                        }}
-                        class="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-slate-800/90 text-slate-300 hover:text-white flex items-center space-x-2.5 transition group border border-transparent hover:border-slate-700/60 hover:shadow-sm"
-                      >
-                        <div class="w-7 h-7 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0 group-hover:border-slate-700 group-hover:scale-105 transition">
-                          <Icon name={tool.icon} class="w-3.5 h-3.5 {tool.iconColor}" />
-                        </div>
-                        <div class="min-w-0 flex-1">
-                          <div class="flex items-center justify-between gap-1">
-                            <span class="text-xs font-semibold text-slate-200 group-hover:text-white truncate">{tool.name}</span>
-                            {#if tool.badge}
-                              <span class="text-[8.5px] font-mono px-1.5 py-0.2 rounded border shrink-0 {tool.badgeColor || 'bg-slate-800 text-slate-300 border-slate-700'}">{tool.badge}</span>
-                            {/if}
+                    <!-- Tools Grid for this Category -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      {#each catTools as tool}
+                        <button
+                          type="button"
+                          onclick={() => {
+                            tool.action();
+                            showToolsDropdown = false;
+                          }}
+                          class="text-left p-2.5 rounded-xl bg-slate-900/40 hover:bg-slate-800/80 border border-slate-800/70 hover:border-slate-700 hover:shadow-md transition-all flex items-start space-x-3 group"
+                        >
+                          <div class="w-8 h-8 rounded-lg bg-slate-950/80 border border-slate-800/90 flex items-center justify-center shrink-0 group-hover:border-slate-700 group-hover:scale-105 transition shadow-inner mt-0.5">
+                            <Icon name={tool.icon} class="w-4 h-4 {tool.iconColor}" />
                           </div>
-                          <div class="text-[10px] text-slate-400 group-hover:text-slate-300 truncate leading-tight mt-0.5">{tool.desc}</div>
-                        </div>
-                        <Icon name="chevron-right" class="w-3 h-3 text-slate-600 opacity-0 group-hover:opacity-100 group-hover:text-slate-400 transition shrink-0" />
-                      </button>
-                    {/each}
-                  </div>
-
-                  <!-- Section 3: Security & Access (2 tools) -->
-                  <div class="space-y-1">
-                    <div class="text-[10.5px] font-bold uppercase tracking-wider text-slate-400 px-2.5 py-1 flex items-center justify-between bg-slate-900/50 rounded-lg border border-slate-800/60 mb-1">
-                      <span class="flex items-center space-x-2">
-                        <span class="w-2 h-2 rounded-full bg-rose-400 shadow-[0_0_8px_rgba(251,113,133,0.6)]"></span>
-                        <span class="text-slate-200 font-semibold">Security & Access</span>
-                      </span>
-                      <span class="text-[9px] font-mono text-slate-400 bg-slate-800/70 px-1.5 py-0.2 rounded border border-slate-700/50">2 tools</span>
-                    </div>
-                    {#each allTools.filter((t) => t.category === 'security') as tool}
-                      <button
-                        type="button"
-                        onclick={() => {
-                          tool.action();
-                          showToolsDropdown = false;
-                        }}
-                        class="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-slate-800/90 text-slate-300 hover:text-white flex items-center space-x-2.5 transition group border border-transparent hover:border-slate-700/60 hover:shadow-sm"
-                      >
-                        <div class="w-7 h-7 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0 group-hover:border-slate-700 group-hover:scale-105 transition">
-                          <Icon name={tool.icon} class="w-3.5 h-3.5 {tool.iconColor}" />
-                        </div>
-                        <div class="min-w-0 flex-1">
-                          <div class="flex items-center justify-between gap-1">
-                            <span class="text-xs font-semibold text-slate-200 group-hover:text-white truncate">{tool.name}</span>
-                            {#if tool.badge}
-                              <span class="text-[8.5px] font-mono px-1.5 py-0.2 rounded border shrink-0 {tool.badgeColor || 'bg-slate-800 text-slate-300 border-slate-700'}">{tool.badge}</span>
-                            {/if}
+                          <div class="min-w-0 flex-1">
+                            <div class="flex items-center justify-between gap-1.5">
+                              <span class="font-semibold text-slate-200 group-hover:text-white truncate text-xs">{tool.name}</span>
+                              <div class="flex items-center space-x-1 shrink-0">
+                                {#if tool.badge}
+                                  <span class="text-[8.5px] font-mono px-1.5 py-0.2 rounded border {tool.badgeColor || 'bg-slate-800 text-slate-300 border-slate-700'}">{tool.badge}</span>
+                                {/if}
+                                {#if tool.shortcut}
+                                  <kbd class="text-[9px] font-mono text-slate-400 bg-slate-800 px-1 py-0.2 rounded border border-slate-700">{tool.shortcut}</kbd>
+                                {/if}
+                              </div>
+                            </div>
+                            <div class="text-[10.5px] text-slate-400 group-hover:text-slate-300 leading-snug mt-0.5 line-clamp-1">{tool.desc}</div>
                           </div>
-                          <div class="text-[10px] text-slate-400 group-hover:text-slate-300 truncate leading-tight mt-0.5">{tool.desc}</div>
-                        </div>
-                        <Icon name="chevron-right" class="w-3 h-3 text-slate-600 opacity-0 group-hover:opacity-100 group-hover:text-slate-400 transition shrink-0" />
-                      </button>
-                    {/each}
-                  </div>
-                </div>
-
-                <!-- Right Column (Data Movement + AI & Collaboration + System & Workspace) -->
-                <div class="space-y-4">
-                  <!-- Section 4: Data Movement & ETL (5 tools) -->
-                  <div class="space-y-1">
-                    <div class="text-[10.5px] font-bold uppercase tracking-wider text-slate-400 px-2.5 py-1 flex items-center justify-between bg-slate-900/50 rounded-lg border border-slate-800/60 mb-1">
-                      <span class="flex items-center space-x-2">
-                        <span class="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]"></span>
-                        <span class="text-slate-200 font-semibold">Data Movement & ETL</span>
-                      </span>
-                      <span class="text-[9px] font-mono text-slate-400 bg-slate-800/70 px-1.5 py-0.2 rounded border border-slate-700/50">5 tools</span>
+                          <Icon name="chevron-right" class="w-3.5 h-3.5 text-slate-600 opacity-0 group-hover:opacity-100 group-hover:text-slate-400 transition shrink-0 mt-1" />
+                        </button>
+                      {/each}
                     </div>
-                    {#each allTools.filter((t) => t.category === 'data') as tool}
-                      <button
-                        type="button"
-                        onclick={() => {
-                          tool.action();
-                          showToolsDropdown = false;
-                        }}
-                        class="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-slate-800/90 text-slate-300 hover:text-white flex items-center space-x-2.5 transition group border border-transparent hover:border-slate-700/60 hover:shadow-sm"
-                      >
-                        <div class="w-7 h-7 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0 group-hover:border-slate-700 group-hover:scale-105 transition">
-                          <Icon name={tool.icon} class="w-3.5 h-3.5 {tool.iconColor}" />
-                        </div>
-                        <div class="min-w-0 flex-1">
-                          <div class="flex items-center justify-between gap-1">
-                            <span class="text-xs font-semibold text-slate-200 group-hover:text-white truncate">{tool.name}</span>
-                            {#if tool.badge}
-                              <span class="text-[8.5px] font-mono px-1.5 py-0.2 rounded border shrink-0 {tool.badgeColor || 'bg-slate-800 text-slate-300 border-slate-700'}">{tool.badge}</span>
-                            {/if}
-                          </div>
-                          <div class="text-[10px] text-slate-400 group-hover:text-slate-300 truncate leading-tight mt-0.5">{tool.desc}</div>
-                        </div>
-                        <Icon name="chevron-right" class="w-3 h-3 text-slate-600 opacity-0 group-hover:opacity-100 group-hover:text-slate-400 transition shrink-0" />
-                      </button>
-                    {/each}
-                  </div>
-
-                  <!-- Section 5: AI & Collaboration (3 tools) -->
-                  <div class="space-y-1">
-                    <div class="text-[10.5px] font-bold uppercase tracking-wider text-slate-400 px-2.5 py-1 flex items-center justify-between bg-slate-900/50 rounded-lg border border-slate-800/60 mb-1">
-                      <span class="flex items-center space-x-2">
-                        <span class="w-2 h-2 rounded-full bg-purple-400 shadow-[0_0_8px_rgba(192,132,252,0.6)]"></span>
-                        <span class="text-slate-200 font-semibold">AI & Collaboration</span>
-                      </span>
-                      <span class="text-[9px] font-mono text-slate-400 bg-slate-800/70 px-1.5 py-0.2 rounded border border-slate-700/50">3 tools</span>
-                    </div>
-                    {#each allTools.filter((t) => t.category === 'ai') as tool}
-                      <button
-                        type="button"
-                        onclick={() => {
-                          tool.action();
-                          showToolsDropdown = false;
-                        }}
-                        class="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-slate-800/90 text-slate-300 hover:text-white flex items-center space-x-2.5 transition group border border-transparent hover:border-slate-700/60 hover:shadow-sm"
-                      >
-                        <div class="w-7 h-7 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0 group-hover:border-slate-700 group-hover:scale-105 transition">
-                          <Icon name={tool.icon} class="w-3.5 h-3.5 {tool.iconColor}" />
-                        </div>
-                        <div class="min-w-0 flex-1">
-                          <div class="flex items-center justify-between gap-1">
-                            <span class="text-xs font-semibold text-slate-200 group-hover:text-white truncate">{tool.name}</span>
-                            {#if tool.badge}
-                              <span class="text-[8.5px] font-mono px-1.5 py-0.2 rounded border shrink-0 {tool.badgeColor || 'bg-slate-800 text-slate-300 border-slate-700'}">{tool.badge}</span>
-                            {/if}
-                          </div>
-                          <div class="text-[10px] text-slate-400 group-hover:text-slate-300 truncate leading-tight mt-0.5">{tool.desc}</div>
-                        </div>
-                        <Icon name="chevron-right" class="w-3 h-3 text-slate-600 opacity-0 group-hover:opacity-100 group-hover:text-slate-400 transition shrink-0" />
-                      </button>
-                    {/each}
-                  </div>
-
-                  <!-- Section 6: System & Workspace (3 tools) -->
-                  <div class="space-y-1">
-                    <div class="text-[10.5px] font-bold uppercase tracking-wider text-slate-400 px-2.5 py-1 flex items-center justify-between bg-slate-900/50 rounded-lg border border-slate-800/60 mb-1">
-                      <span class="flex items-center space-x-2">
-                        <span class="w-2 h-2 rounded-full bg-slate-400"></span>
-                        <span class="text-slate-200 font-semibold">System & Workspace</span>
-                      </span>
-                      <span class="text-[9px] font-mono text-slate-400 bg-slate-800/70 px-1.5 py-0.2 rounded border border-slate-700/50">3 tools</span>
-                    </div>
-                    {#each allTools.filter((t) => t.category === 'preferences') as tool}
-                      <button
-                        type="button"
-                        onclick={() => {
-                          tool.action();
-                          showToolsDropdown = false;
-                        }}
-                        class="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-slate-800/90 text-slate-300 hover:text-white flex items-center space-x-2.5 transition group border border-transparent hover:border-slate-700/60 hover:shadow-sm"
-                      >
-                        <div class="w-7 h-7 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0 group-hover:border-slate-700 group-hover:scale-105 transition">
-                          <Icon name={tool.icon} class="w-3.5 h-3.5 {tool.iconColor}" />
-                        </div>
-                        <div class="min-w-0 flex-1">
-                          <div class="flex items-center justify-between gap-1">
-                            <span class="text-xs font-semibold text-slate-200 group-hover:text-white truncate">{tool.name}</span>
-                            {#if tool.badge}
-                              <span class="text-[8.5px] font-mono px-1.5 py-0.2 rounded border shrink-0 {tool.badgeColor || 'bg-slate-800 text-slate-300 border-slate-700'}">{tool.badge}</span>
-                            {/if}
-                            {#if tool.shortcut}
-                              <kbd class="text-[9px] font-mono text-slate-400 bg-slate-800 px-1 py-0.2 rounded border border-slate-700 shrink-0">{tool.shortcut}</kbd>
-                            {/if}
-                          </div>
-                          <div class="text-[10px] text-slate-400 group-hover:text-slate-300 truncate leading-tight mt-0.5">{tool.desc}</div>
-                        </div>
-                        <Icon name="chevron-right" class="w-3 h-3 text-slate-600 opacity-0 group-hover:opacity-100 group-hover:text-slate-400 transition shrink-0" />
-                      </button>
-                    {/each}
-                  </div>
-                </div>
-              </div>
+                  </section>
+                {/if}
+              {/each}
             {/if}
           </div>
 
           <!-- Footer Bar -->
-          <div class="px-4 py-2.5 bg-slate-950/90 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400 font-sans">
+          <div class="px-4 py-2.5 bg-slate-950/95 border-t border-slate-800/90 flex items-center justify-between text-[11px] text-slate-400 font-sans shrink-0">
             <span class="flex items-center space-x-2">
               <Icon name="brand" class="w-4 h-4 text-orange-500" />
-              <span class="font-medium text-slate-300">SqlFox Enterprise Database Suite</span>
+              <span class="font-semibold text-slate-200">SqlFox Enterprise Tools</span>
               <span class="text-slate-600">•</span>
-              <span class="text-[10px] text-slate-400 font-mono">{allTools.length} Managed Utilities</span>
+              <span class="text-[10px] text-slate-400 font-mono">{allTools.length} Standardized Utilities</span>
             </span>
             <div class="flex items-center space-x-3 text-[10px] text-slate-400">
               <span><kbd class="px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700 text-slate-300 font-mono">↑↓</kbd> Navigate</span>
               <span><kbd class="px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700 text-slate-300 font-mono">↵</kbd> Launch</span>
               <span><kbd class="px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700 text-slate-300 font-mono">Esc</kbd> Close</span>
+              <span><kbd class="px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700 text-slate-300 font-mono">Ctrl+K</kbd> Palette</span>
             </div>
           </div>
         </div>

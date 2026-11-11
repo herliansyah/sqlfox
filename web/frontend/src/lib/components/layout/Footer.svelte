@@ -163,7 +163,7 @@
       class="text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 px-1.5 py-0.5 rounded transition cursor-pointer flex items-center space-x-1 font-sans"
       title="View Keyboard Shortcuts (?)"
     >
-      <Icon name="terminal" class="w-3 h-3 text-indigo-400" />
+      <Icon name="keyboard" class="w-3 h-3 text-amber-400" />
       <span class="underline decoration-slate-700 underline-offset-2">Shortcuts</span>
     </button>
 

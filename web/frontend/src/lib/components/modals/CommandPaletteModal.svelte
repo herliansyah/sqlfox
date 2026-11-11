@@ -48,7 +48,7 @@
       title: 'Create Table Designer',
       subtitle: 'Visual designer for new database tables and columns',
       category: 'Actions',
-      icon: 'plus',
+      icon: 'table',
       action: () => (appState.isTableCreatorOpen = true),
     });
     list.push({
@@ -96,7 +96,7 @@
       title: 'Structure Synchronization Engine',
       subtitle: 'Compare schemas between environments and generate ALTER scripts',
       category: 'Actions',
-      icon: 'refresh-cw',
+      icon: 'git-diff',
       action: () => appState.openStructureSyncModal(),
     });
     list.push({
@@ -104,7 +104,7 @@
       title: 'Run Large SQL Script File',
       subtitle: 'Execute multi-statement SQL migration files and dumps',
       category: 'Actions',
-      icon: 'file-text',
+      icon: 'file-code',
       action: () => appState.openRunSqlModal(),
     });
     list.push({
@@ -124,6 +124,30 @@
       action: () => appState.openCsvImportModal(),
     });
     list.push({
+      id: 'action-mock-data',
+      title: 'Synthetic Mock Data Generator',
+      subtitle: 'Generate schema-aware mock test records',
+      category: 'Actions',
+      icon: 'sparkles',
+      action: () => (appState.isMockDataModalOpen = true),
+    });
+    list.push({
+      id: 'action-data-sync',
+      title: 'Row-Level Data Sync & Diff',
+      subtitle: 'Differential table row comparison and bidirectional sync',
+      category: 'Actions',
+      icon: 'scale',
+      action: () => (appState.isDataSyncOpen = true),
+    });
+    list.push({
+      id: 'action-data-transfer',
+      title: 'Cross-Host Data Transfer',
+      subtitle: 'Direct streaming pipeline between database hosts',
+      category: 'Actions',
+      icon: 'arrow-left-right',
+      action: () => (appState.isDataTransferOpen = true),
+    });
+    list.push({
       id: 'action-db-diagnostics',
       title: 'Database Storage & Health Diagnostics',
       subtitle: 'Inspect table fragmentation and run OPTIMIZE/ANALYZE',
@@ -136,8 +160,64 @@
       title: 'Database Users & Privilege Matrix',
       subtitle: 'Manage DB user permissions and GRANT/REVOKE matrix',
       category: 'Actions',
-      icon: 'shield',
+      icon: 'users',
       action: () => appState.openPrivilegeMatrixModal(),
+    });
+    list.push({
+      id: 'action-activity-console',
+      title: 'System Activity Console',
+      subtitle: 'Real-time daemon log stream and lock monitors',
+      category: 'Actions',
+      icon: 'terminal',
+      action: () => (appState.isActivityDrawerOpen = !appState.isActivityDrawerOpen),
+    });
+    list.push({
+      id: 'action-audit-log',
+      title: 'Audit Trail & Mutation Logs',
+      subtitle: 'Historical query logs and statement attribution',
+      category: 'Actions',
+      icon: 'clipboard-list',
+      action: () => (appState.isAuditDrawerOpen = true),
+    });
+    list.push({
+      id: 'action-copilot',
+      title: 'SqlFox AI Copilot Assistant',
+      subtitle: 'Natural language query generation and SQL explanation',
+      category: 'Actions',
+      icon: 'bot',
+      action: () => (appState.isAiDrawerOpen = true),
+    });
+    list.push({
+      id: 'action-notes',
+      title: 'Operational Notes & Runbooks',
+      subtitle: 'Team knowledge base, incident logs and runbooks',
+      category: 'Actions',
+      icon: 'book-open',
+      action: () => (appState.isNotesDrawerOpen = true),
+    });
+    list.push({
+      id: 'action-settings',
+      title: 'Cloud Sync & Vault Backup',
+      subtitle: 'Configure GitHub sync and vault backups',
+      category: 'Actions',
+      icon: 'cloud',
+      action: () => (appState.isSettingsModalOpen = true),
+    });
+    list.push({
+      id: 'action-shortcuts',
+      title: 'Keyboard Shortcuts Cheatsheet',
+      subtitle: 'Quick reference for hotkeys and keybindings',
+      category: 'Actions',
+      icon: 'keyboard',
+      action: () => (appState.isShortcutsModalOpen = true),
+    });
+    list.push({
+      id: 'action-updates',
+      title: 'Check for Software Updates',
+      subtitle: 'Inspect latest releases and changelog',
+      category: 'Actions',
+      icon: 'arrow-down-circle',
+      action: () => (appState.isUpdateModalOpen = true),
     });
     list.push({
       id: 'action-new-conn',

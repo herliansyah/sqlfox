@@ -71,7 +71,7 @@
     <div class="bg-[#0b0f19] border border-[#1e293b] rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col animate-scale-in text-xs font-sans">
       <div class="px-5 py-4 border-b border-[#1e293b] flex items-center justify-between bg-[#0f172a]">
         <div class="flex items-center space-x-2">
-          <Icon name="database" class="w-4 h-4 text-emerald-400" />
+          <Icon name="sparkles" class="w-4 h-4 text-purple-400" />
           <h3 class="font-bold text-slate-100 text-sm">Smart Seed / Mock Data Generator</h3>
         </div>
         <button onclick={() => (appState.isMockDataModalOpen = false)} class="text-slate-400 hover:text-white">
@@ -177,7 +177,7 @@
           disabled={isGenerating || !selectedTable}
           class="px-4 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold transition flex items-center space-x-1.5 shadow-lg shadow-emerald-900/30"
         >
-          <Icon name="database" class="w-3.5 h-3.5 {isGenerating ? 'animate-spin' : ''}" />
+          <Icon name="sparkles" class="w-3.5 h-3.5 {isGenerating ? 'animate-spin' : ''}" />
           <span>{isGenerating ? 'Generating...' : `Generate ${rowCount} Rows`}</span>
         </button>
       </div>

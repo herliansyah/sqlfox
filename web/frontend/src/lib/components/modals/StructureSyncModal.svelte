@@ -149,8 +149,8 @@
       <!-- Dialog Header -->
       <div class="px-5 py-4 bg-[#0f172a] border-b border-[#1e293b] flex items-center justify-between shrink-0">
         <div class="flex items-center space-x-2.5">
-          <div class="p-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
-            <Icon name="refresh-cw" class="w-4 h-4" />
+          <div class="p-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
+            <Icon name="git-diff" class="w-4 h-4" />
           </div>
           <div>
             <h3 id="sync-modal-title" class="font-bold text-sm text-slate-100 font-sans">

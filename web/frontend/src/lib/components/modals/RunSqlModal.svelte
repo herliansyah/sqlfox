@@ -105,7 +105,7 @@
       <div class="px-5 py-4 bg-[#0f172a] border-b border-[#1e293b] flex items-center justify-between shrink-0">
         <div class="flex items-center space-x-2.5">
           <div class="p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400">
-            <Icon name="file-text" class="w-4 h-4" />
+            <Icon name="file-code" class="w-4 h-4" />
           </div>
           <div>
             <h3 id="run-sql-title" class="font-bold text-sm text-slate-100 font-sans">

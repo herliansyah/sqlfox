@@ -6,7 +6,7 @@
 
   let { name, class: className = 'w-4 h-4' }: Props = $props();
 
-  let isFilled = $derived(name === 'play' || name === 'pause' || className.includes('fill-'));
+  let isFilled = $derived(name === 'play' || name === 'pause' || name === 'square' || className.includes('fill-'));
 </script>
 
 {#if name === 'brand'}

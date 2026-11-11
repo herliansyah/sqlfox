@@ -175,7 +175,7 @@
       <!-- Header -->
       <div class="px-5 py-3.5 border-b border-[#334155] bg-[#0b0f19] flex items-center justify-between shrink-0">
         <div class="flex items-center space-x-2.5">
-          <Icon name="layers" class="w-5 h-5 text-sky-400" />
+          <Icon name="table" class="w-5 h-5 text-emerald-400" />
           <h3 class="font-bold text-sm text-slate-100">
             Create Table in <span class="font-mono text-sky-400">{appState.currentDatabase || 'current database'}</span>
           </h3>

@@ -734,7 +734,7 @@
             }}
             class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
           >
-            <Icon name="download" class="w-3.5 h-3.5 text-sky-400" />
+            <Icon name="sliders" class="w-3.5 h-3.5 text-sky-400" />
             <span>Export Table Dump Options...</span>
           </button>
           <button
@@ -745,7 +745,7 @@
             }}
             class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
           >
-            <Icon name="database" class="w-3.5 h-3.5 text-purple-400" />
+            <Icon name="sparkles" class="w-3.5 h-3.5 text-purple-400" />
             <span>Generate Mock Data...</span>
           </button>
           <button
@@ -803,7 +803,7 @@
             }}
             class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
           >
-            <Icon name="copy" class="w-3.5 h-3.5 text-slate-400" />
+            <Icon name="clipboard-list" class="w-3.5 h-3.5 text-slate-400" />
             <span>Copy Table Name</span>
           </button>
         </div>
