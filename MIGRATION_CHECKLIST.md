@@ -80,20 +80,23 @@
 - [x] Refresh All Catalogs dengan Active Threads Safety Guard (`RefreshAllModal.svelte`)
 
 ### 4. Query Worksheet & CodeMirror 6 Engine (`04_editor_tabs.js`, `09_query_execution.js`)
-- [x] CodeMirror 6 Action Modern (`actions/codemirror.ts`)
-- [x] Multi-Dialect Syntax Highlighting (MySQL, PostgreSQL, SQLite)
-- [x] Eksekusi Query via tombol & shortcut `Ctrl+Enter` / `Cmd+Enter`
+- [x] CodeMirror 6 Action Modern (`actions/codemirror.ts`) — shared by worksheet + designer editors
+- [x] Multi-Dialect Syntax Highlighting (MySQL, PostgreSQL, SQLite) via dynamic dialect compartment
+- [x] Eksekusi Query via tombol & shortcut `Ctrl+Enter` / `Cmd+Enter` (selection → statement at cursor)
+- [x] Run All (whole worksheet) via `Ctrl+Alt+Enter` / `F5` dan tombol toolbar
 - [x] In-Flight Query Cancellation button (`cancelCurrentTab`)
-- [x] Draggable Workspace Pane Splitter (Resize tinggi Editor vs Grid)
+- [x] Draggable Workspace Pane Splitter (persistensi + double-click 50:50 reset)
 - [x] Multi-Tab Workspace Manager (`TabBar.svelte`): New Tab (`Ctrl+T`), Close (`Ctrl+W`)
 - [x] Tab Context Menu: Duplicate Tab, Close Other Tabs, Close Tab
-- [x] Explain Plan Drawer (`explainCurrentTab` & visual output)
-- [x] Schema-Aware SQL Autocomplete / IntelliSense (tabel & kolom dari katalog aktif terhubung ke CodeMirror)
+- [x] Explain Plan Drawer (`explainCurrentTab` & visual output, `Ctrl+Shift+Enter`)
+- [x] Schema-Aware SQL Autocomplete / IntelliSense (tabel, kolom, alias, `db.tabel`, `db.tabel.kolom`)
 - [x] Pure Client-Side SQL Formatter (`formatSQL`, tombol toolbar & `Ctrl+Shift+F`)
 - [x] Tab Bar Overflow Dropdown (menu penampung tab berlebih)
-- [x] Tab-Specific Database Scope Pill (ADR 0055: setiap tab bisa target DB beda)
+- [x] Tab-Specific Database Scope Pill (ADR 0055: setiap tab bisa target DB beda, ikut ke eksekusi & suggest)
 - [x] Multi-Statement Execution Splitter & Multi-Result Tabs (Result 1, Result 2, dst.)
-- [x] Execute Statement at Cursor (`Ctrl+Shift+Enter`)
+- [x] Execute Statement at Cursor (`Ctrl+Shift+Enter` → EXPLAIN statement terpilih)
+- [x] Snippet autocomplete (`snip:` prefix) + parameter substitution `{{nama:default}}`
+- [x] Per-tab undo/selection/scroll state saat berpindah tab
 
 ### 5. Deterministic Safety Guard & Transaction Control (`09_query_execution.js`)
 - [x] Deterministic Safety Guard™ Modal (`SafetyModal.svelte`)
@@ -153,10 +156,10 @@
 ### 8. Programmability Object Designers (`08_programmability_designers.js`)
 - [x] Read Definition Routines di Tab Baru (`openRoutineTab`)
 - [x] Table Creator Dialog (`TableCreatorModal.svelte`: desainer visual tabel baru dengan preview DDL real-time & open in editor)
-- [x] View Designer Dialog (`ViewDesignerModal.svelte`: query editor, algorithm, definer, check option, live DDL preview)
-- [x] Trigger Designer Dialog (`TriggerDesignerModal.svelte`: timing BEFORE/AFTER, event INSERT/UPDATE/DELETE, body, live DDL preview)
-- [x] Stored Routine / Procedure Designer (`RoutineDesignerModal.svelte`: parameter IN/OUT/INOUT, return type, deterministic, live DDL preview)
-- [x] Event Scheduler Designer (`EventDesignerModal.svelte`: jadwal EVERY/AT, interval, status ENABLE/DISABLE, on completion preserve, live DDL preview)
+- [x] View Designer Dialog (`ViewDesignerModal.svelte`: CodeMirror query editor, algorithm, check option, live DDL preview)
+- [x] Trigger Designer Dialog (`TriggerDesignerModal.svelte`: timing BEFORE/AFTER, event INSERT/UPDATE/DELETE, CodeMirror body, live DDL preview)
+- [x] Stored Routine / Procedure Designer (`RoutineDesignerModal.svelte`: parameter IN/OUT/INOUT, return type, deterministic, CodeMirror body, live DDL preview)
+- [x] Event Scheduler Designer (`EventDesignerModal.svelte`: jadwal EVERY/AT, interval, status ENABLE/DISABLE, on completion preserve, CodeMirror body, live DDL preview)
 
 ### 9. DBA Telemetry & Monitoring Suite (`05_dba_telemetry.js`)
 - [x] Dedicated Processlist Tab (`ProcesslistView.svelte`)
@@ -200,7 +203,7 @@
 - [x] Shortcuts Discovery Modal (`ShortcutsModal.svelte`: `?`)
 - [x] Global Keyboard Navigation (`Ctrl+Enter`, `Ctrl+K`, `Ctrl+B`, `Ctrl+T`, `Ctrl+W`, `Esc`)
 - [x] Query Snippets Manager (`SnippetsModal.svelte`: pustaka template query dengan variabel dinamis `{{param}}`)
-- [x] Snippet Parameter Prompt Modal (modal parameter dinamis terintegrasi)
+- [x] Snippet Parameter Prompt Modal (modal parameter dinamis terintegrasi, mendukung default `{{param:default}}`)
 - [x] CSV Import & Visual Column Mapping (`CsvImportModal.svelte`: unggah file CSV, deteksi kolom, visual mapper, batch insert)
 - [x] Database Storage & Health Inspector (`DbDiagnosticsModal.svelte`: fragmentasi tabel, engine overview, optimize/analyze)
 - [x] Query Profiler Integration (`QueryProfilerPanel.svelte`: `SHOW PROFILE` stage timing breakdown)

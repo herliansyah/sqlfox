@@ -4,7 +4,9 @@
   "private": true,
   "description": "High-Performance, Single-Binary Database Manager & Headless Automation CLI",
   "scripts": {
-    "test": "node scripts/test-grid-ergonomics-suite.mjs",
+    "test": "node scripts/test-grid-ergonomics-suite.mjs && node scripts/test-svelte-codemirror.mjs",
+    "test:editor": "node scripts/test-svelte-codemirror.mjs",
+    "test:editor:browser": "node scripts/test-svelte-codemirror-browser.mjs",
     "build": "node scripts/build_web.js",
     "build:web": "node scripts/build_web.js",
     "build:svelte": "npm --prefix web/frontend run build && cp -r web/dist_svelte/* web/dist/",

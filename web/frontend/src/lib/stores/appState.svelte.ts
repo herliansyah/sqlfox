@@ -14,9 +14,11 @@ import type {
   EventMetadata,
   NativeDialogState,
   DdlReviewState,
+  QuerySnippet,
   SessionAuditItem,
 } from '../../types';
 import { api } from '../api/client';
+import { substituteSnippetVariables, parseSnippetVariables } from '../utils/snippets';
 
 // ponytail: smart wildcard auto-wrap for LIKE/NOT LIKE filter
 export function compileFilterPills(pills: FilterPill[], driver?: string): string {
@@ -83,7 +85,18 @@ export class AppState {
   currentDatabase = $state<string>('');
   availableDatabases = $state<string[]>([]);
   databaseTableCounts = $state<Record<string, number>>({});
-  catalog = $state<SchemaCatalog | null>(null);
+  catalog = $state.raw<SchemaCatalog | null>(null);
+  // ponytail: catalogs hold large schema graphs (thousands of tables/columns). Deep $state
+  // proxies made every property read go through Svelte's proxy traps, which made typing in
+  // the editor extremely slow. $state.raw keeps them plain objects; we replace the map
+  // wholesale on write so reactivity still fires.
+  catalogs = $state.raw<Record<string, SchemaCatalog>>({});
+  snippets = $state<QuerySnippet[]>([]);
+  snippetsLoaded = false;
+  private catalogRequests = new Map<string, Promise<SchemaCatalog>>();
+  pendingSnippet = $state<{ snippet: QuerySnippet; values: Record<string, string>; insert?: (sql: string) => void } | null>(null);
+  private editorInserter: ((sql: string) => boolean) | null = null;
+  private editorTargetProvider: (() => string | null) | null = null;
   isLoadingCatalog = $state<boolean>(false);
   isConnecting = $state<boolean>(false);
   connectionError = $state<string | null>(null);
@@ -361,6 +374,7 @@ export class AppState {
       }
       if (!this.isRemoteLocked) {
         await this.loadConnections();
+        void this.loadSnippets();
         this.startNotesReminderPoller();
       }
     } catch (err) {
@@ -531,6 +545,8 @@ export class AppState {
         this.activeConnection = null;
         this.activeSessionId = null;
         this.catalog = null;
+        this.catalogs = {};
+        this.catalogRequests.clear();
       }
       await this.loadConnections();
     } catch (err: any) {
@@ -542,21 +558,31 @@ export class AppState {
     this.isConnecting = true;
     this.connectionError = null;
     try {
+      const previousConnectionId = this.activeConnection?.id;
       this.activeConnection = conn;
+      if (previousConnectionId !== conn.id) {
+        this.catalog = null;
+        this.catalogs = {};
+        this.catalogRequests.clear();
+        this.currentDatabase = '';
+      }
       localStorage.setItem('sqlfox_last_conn_id', conn.id);
       const sess = await api.connectSession(conn.id);
       this.activeSessionId = sess.id || sess.connection_id || conn.id;
+      if (sess.schema) {
+        this.setCatalog(sess.schema);
+      }
 
       let dbs = (sess.schema && sess.schema.databases) || [];
       if (!dbs || dbs.length === 0) {
         try {
           const fresh = await api.getSchema(this.activeSessionId, '');
-          if (fresh && fresh.databases && fresh.databases.length > 0) {
-            dbs = fresh.databases;
-            if (fresh.database_name) {
+          if (fresh) {
+            dbs = fresh.databases || [];
+            if (fresh.database_name && !conn.database && !conn.database_name) {
               this.currentDatabase = fresh.database_name;
             }
-            this.catalog = fresh;
+            this.setCatalog(fresh);
           }
         } catch (fetchErr) {
           console.warn('Fallback schema fetch deferred:', fetchErr);
@@ -609,8 +635,8 @@ export class AppState {
       if (schema.database_name) {
         this.currentDatabase = schema.database_name;
       }
-      if (schema.tables && schema.tables.length > 0) {
-        this.catalog = schema;
+      if (schema.tables) {
+        this.setCatalog(schema);
       }
     } catch (err) {
       console.error('Failed to reload databases:', err);
@@ -659,16 +685,137 @@ export class AppState {
   async loadFastCatalogBackground(sessionId: string) {
     try {
       const fastCat = await api.getFastCatalog(sessionId);
-      if (fastCat && typeof fastCat === 'object') {
+      if (fastCat && typeof fastCat === 'object' && this.activeSessionId === sessionId) {
         const counts: Record<string, number> = {};
+        const additions: Record<string, SchemaCatalog> = {};
         for (const [db, tbls] of Object.entries(fastCat)) {
           counts[db] = Array.isArray(tbls) ? tbls.length : 0;
+          if (!this.catalogs[db.toLowerCase()]) {
+            additions[db.toLowerCase()] = {
+              database_name: db,
+              databases: this.availableDatabases,
+              tables: Array.isArray(tbls) ? tbls : [],
+            };
+          }
         }
+        if (Object.keys(additions).length) this.catalogs = { ...this.catalogs, ...additions };
         this.databaseTableCounts = counts;
       }
     } catch (err) {
       console.warn('Fast catalog background load failed:', err);
     }
+  }
+
+  async loadSnippets(force = false): Promise<QuerySnippet[]> {
+    if (this.snippetsLoaded && !force) return this.snippets;
+    try {
+      const response = await api.listSnippets();
+      this.snippets = (Array.isArray(response) ? response : []).map((snippet: any) => ({
+        id: snippet.id,
+        title: snippet.title,
+        description: snippet.description,
+        sql: snippet.sql_content ?? snippet.sql ?? '',
+        tags: Array.isArray(snippet.tags)
+          ? snippet.tags
+          : String(snippet.tags || '').split(',').map((tag: string) => tag.trim()).filter(Boolean),
+      })).filter((snippet: QuerySnippet) => snippet.title && snippet.sql);
+      this.snippetsLoaded = true;
+    } catch (err) {
+      console.warn('Failed to load SQL snippets:', err);
+    }
+    return this.snippets;
+  }
+
+  setEditorInserter(inserter: ((sql: string) => boolean) | null) {
+    this.editorInserter = inserter;
+  }
+
+  setEditorTargetProvider(provider: (() => string | null) | null) {
+    this.editorTargetProvider = provider;
+  }
+
+  /** SQL that the editor would execute: selection, else statement at the caret. */
+  getEditorTargetSql(): string | null {
+    return this.editorTargetProvider?.() ?? null;
+  }
+
+  invokeSnippet(snippet: QuerySnippet) {
+    this.requestSnippetParameters(snippet);
+  }
+
+  requestSnippetParameters(snippet: QuerySnippet, insert?: (sql: string) => void) {
+    const variables = parseSnippetVariables(snippet.sql);
+    if (variables.length === 0) {
+      if (insert) insert(snippet.sql);
+      else this.insertSnippetSQL(snippet.sql, snippet.title);
+      return;
+    }
+    this.pendingSnippet = {
+      snippet,
+      values: Object.fromEntries(variables.map((variable) => [variable.name, variable.defaultValue])),
+      insert,
+    };
+    this.isSnippetsModalOpen = true;
+  }
+
+  setSnippetValue(name: string, value: string) {
+    if (this.pendingSnippet) this.pendingSnippet.values[name] = value;
+  }
+
+  confirmPendingSnippet() {
+    const pending = this.pendingSnippet;
+    if (!pending) return;
+    this.pendingSnippet = null;
+    const sql = substituteSnippetVariables(pending.snippet.sql, pending.values);
+    if (pending.insert) {
+      this.isSnippetsModalOpen = false;
+      pending.insert(sql);
+      return;
+    }
+    this.insertSnippetSQL(sql, pending.snippet.title);
+  }
+
+  insertSnippetSQL(sql: string, title = 'Query') {
+    this.isSnippetsModalOpen = false;
+    const inserted = this.editorInserter?.(sql) || false;
+    if (!inserted) {
+      const tab = this.activeTab;
+      if (tab && !tab.isTableViewer && !tab.isProcesslist && !tab.isErdCanvas) {
+        tab.sql += sql;
+      } else {
+        this.addTab(`${title.replace(/[^a-zA-Z0-9_-]/g, '_')}.sql`, sql);
+      }
+    }
+    this.saveTabsState();
+  }
+
+  cacheCatalog(catalog: SchemaCatalog | null | undefined, fallbackDatabase = '') {
+    const database = catalog?.database_name || fallbackDatabase;
+    if (catalog && database) this.catalogs = { ...this.catalogs, [database.toLowerCase()]: catalog };
+    return catalog;
+  }
+
+  setCatalog(catalog: SchemaCatalog | null) {
+    this.catalog = catalog;
+    if (catalog) this.cacheCatalog(catalog);
+  }
+
+  getSchemaCatalog(sessionId: string, database: string): Promise<SchemaCatalog> {
+    const key = `${sessionId}:${database.toLowerCase()}`;
+    const existing = this.catalogRequests.get(key);
+    if (existing) return existing;
+    const request = api.getSchema(sessionId, database).then((catalog) => {
+      if (this.activeSessionId === sessionId) this.cacheCatalog(catalog, database);
+      return catalog;
+    }).finally(() => this.catalogRequests.delete(key));
+    this.catalogRequests.set(key, request);
+    return request;
+  }
+
+  async ensureEditorCatalog(database: string): Promise<void> {
+    const sessionId = this.activeSessionId;
+    if (!sessionId || !database.trim() || this.catalogs[database.toLowerCase()]) return;
+    await this.getSchemaCatalog(sessionId, database);
   }
 
   async selectDatabase(dbName: string) {
@@ -677,14 +824,14 @@ export class AppState {
     try {
       const schema = await api.selectDatabase(this.activeSessionId, dbName);
       if (schema && (schema.tables || schema.databases)) {
-        this.catalog = schema;
+        this.setCatalog(schema);
         this.currentDatabase = schema.database_name || dbName;
         if (schema.databases && schema.databases.length > 0) {
           this.availableDatabases = schema.databases;
         }
       } else {
         const fetched = await api.getSchema(this.activeSessionId, dbName);
-        this.catalog = fetched;
+        this.setCatalog(fetched);
         this.currentDatabase = fetched.database_name || dbName;
         if (fetched.databases && fetched.databases.length > 0) {
           this.availableDatabases = fetched.databases;
@@ -704,7 +851,7 @@ export class AppState {
     this.isLoadingCatalog = true;
     try {
       const schema = await api.getSchema(this.activeSessionId, this.currentDatabase);
-      this.catalog = schema;
+      this.setCatalog(schema);
       if (schema.database_name) {
         this.currentDatabase = schema.database_name;
       }
@@ -1050,25 +1197,44 @@ export class AppState {
   }
 
   // Execution
-  async executeCurrentTab() {
-    const tab = this.activeTab;
-    if (!tab || !this.activeSessionId) return;
+  async executeTransaction(command: 'START TRANSACTION' | 'COMMIT' | 'ROLLBACK') {
+    if (!this.activeSessionId) return;
+    try {
+      const res = await api.executeQuery(this.activeSessionId, `${command};`, false, this.activeTab?.database || this.currentDatabase);
+      if (res.error) {
+        this.showToast(`${command} failed: ${res.error}`, 'error');
+        return;
+      }
+      this.isTransactionActive = command === 'START TRANSACTION';
+      this.showToast(command === 'START TRANSACTION' ? 'Transaction started (Uncommitted)' : command === 'COMMIT' ? 'Transaction committed successfully' : 'Transaction rolled back', command === 'ROLLBACK' ? 'warning' : 'success');
+      if (command === 'COMMIT') await this.refreshCatalog();
+    } catch (err: any) {
+      this.showToast(`${command} failed: ${err.message}`, 'error');
+    }
+  }
 
-    if (tab.isTableViewer) {
+  async executeCurrentTab(sqlOverride?: string) {
+    const tab = this.activeTab;
+    if (!tab || !this.activeSessionId || tab.isExecuting) return;
+
+    if (tab.isTableViewer && sqlOverride === undefined) {
       await this.loadTableData(tab);
       return;
     }
 
+    const sql = sqlOverride ?? tab.sql;
+    const database = tab.database || this.currentDatabase;
+    if (!sql.trim()) return;
     tab.isExecuting = true;
     this.tabs = [...this.tabs];
     const startTime = performance.now();
     try {
-      const res = await api.executeQuery(this.activeSessionId, tab.sql, false);
+      const res = await api.executeQuery(this.activeSessionId, sql, false, database);
       let finalRes = res;
       if (res.is_destructive_blocked && res.inspection) {
-        const confirmed = await this.promptSafetyChallenge(tab.sql, res.inspection);
+        const confirmed = await this.promptSafetyChallenge(sql, res.inspection);
         if (confirmed) {
-          finalRes = await api.executeQuery(this.activeSessionId, tab.sql, true);
+          finalRes = await api.executeQuery(this.activeSessionId, sql, true, database);
         } else {
           return;
         }
@@ -1087,11 +1253,11 @@ export class AppState {
       this.auditLogs.unshift({
         id: 'audit-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
         timestamp: new Date().toLocaleTimeString(),
-        sql: tab.sql,
+        sql,
         duration_ms: finalRes.duration_ms || Math.round(performance.now() - startTime),
         row_count: finalRes.row_count,
         affected_rows: finalRes.affected_rows,
-        database: tab.databaseScope || this.currentDatabase,
+        database,
       });
       if (this.auditLogs.length > 200) {
         this.auditLogs.pop();
@@ -1112,7 +1278,7 @@ export class AppState {
         duration_ms: Math.round(performance.now() - startTime),
         row_count: 0,
         error: errMsg,
-        database: tab.databaseScope || this.currentDatabase,
+        database,
       });
     } finally {
       tab.isExecuting = false;
@@ -1121,55 +1287,7 @@ export class AppState {
   }
 
   async executeStatementAtCursor(stmtSql: string) {
-    const tab = this.activeTab;
-    if (!tab || !this.activeSessionId || !stmtSql.trim()) return;
-
-    tab.isExecuting = true;
-    this.tabs = [...this.tabs];
-    const startTime = performance.now();
-    try {
-      const res = await api.executeQuery(this.activeSessionId, stmtSql, false);
-      let finalRes = res;
-      if (res.is_destructive_blocked && res.inspection) {
-        const confirmed = await this.promptSafetyChallenge(stmtSql, res.inspection);
-        if (confirmed) {
-          finalRes = await api.executeQuery(this.activeSessionId, stmtSql, true);
-        } else {
-          return;
-        }
-      }
-
-      tab.activeResult = finalRes;
-      if (finalRes.results && finalRes.results.length > 1) {
-        tab.multiResults = finalRes.results;
-        tab.activeResultIndex = 0;
-      } else {
-        tab.multiResults = undefined;
-        tab.activeResultIndex = undefined;
-      }
-
-      this.auditLogs.unshift({
-        id: 'audit-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
-        timestamp: new Date().toLocaleTimeString(),
-        sql: stmtSql,
-        duration_ms: finalRes.duration_ms || Math.round(performance.now() - startTime),
-        row_count: finalRes.row_count,
-        affected_rows: finalRes.affected_rows,
-        database: tab.databaseScope || this.currentDatabase,
-      });
-    } catch (err: any) {
-      const errMsg = err.message || 'Execution error';
-      tab.activeResult = {
-        columns: [],
-        rows: [],
-        duration_ms: Math.round(performance.now() - startTime),
-        row_count: 0,
-        error: errMsg,
-      };
-    } finally {
-      tab.isExecuting = false;
-      this.tabs = [...this.tabs];
-    }
+    return this.executeCurrentTab(stmtSql);
   }
 
   async pageStreamBatch(direction: 'next' | 'prev') {
@@ -1370,12 +1488,14 @@ export class AppState {
     }
   }
 
-  async explainCurrentTab() {
+  async explainCurrentTab(sqlOverride?: string) {
     const tab = this.activeTab;
-    if (!tab || !this.activeSessionId || !tab.sql) return;
+    const sql = sqlOverride ?? tab?.sql ?? '';
+    const database = tab?.database || this.currentDatabase;
+    if (!tab || !this.activeSessionId || !sql.trim() || tab.isExecuting) return;
     tab.isExecuting = true;
     try {
-      const res = await api.explainQuery(this.activeSessionId, tab.sql);
+      const res = await api.explainQuery(this.activeSessionId, sql, database);
       tab.explainResult = res;
       this.showToast('Query plan generated', 'success');
     } catch (err: any) {

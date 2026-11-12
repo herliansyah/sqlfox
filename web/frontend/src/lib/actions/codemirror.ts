@@ -11,84 +11,80 @@ import {
   dropCursor,
   rectangularSelection,
   crosshairCursor,
+  placeholder,
 } from '@codemirror/view';
-import { EditorState, StateEffect, StateField, Compartment, Prec } from '@codemirror/state';
+import { EditorState, EditorSelection, StateEffect, StateField, Compartment, Prec, Annotation } from '@codemirror/state';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
-import { sql, MySQL, PostgreSQL, SQLite, StandardSQL } from '@codemirror/lang-sql';
+import { sql, MySQL, PostgreSQL, SQLite } from '@codemirror/lang-sql';
 import {
   autocompletion,
   completionKeymap,
   closeBrackets,
   closeBracketsKeymap,
+  startCompletion,
+  type Completion,
   type CompletionContext,
   type CompletionResult,
 } from '@codemirror/autocomplete';
-import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
+import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { bracketMatching, syntaxHighlighting, HighlightStyle, indentOnInput } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
+import type { QuerySnippet, SchemaCatalog } from '../../types';
+import { executionTarget, maskSqlForAnalysis, type StatementPos } from '../utils/sqlStatements';
+import { computeSqlCompletions, completionTokenStart, parseQualifiedReference, type CompletionItem } from '../utils/sqlCompletion';
 
 export interface CodeMirrorOptions {
+  id?: string;
   doc: string;
   dialect?: 'mysql' | 'postgres' | 'sqlite';
-  schema?: Record<string, string[]>;
-  tables?: Array<{ name: string; type?: string; columns?: Array<{ name: string; type?: string } | string> }>;
-  databases?: string[];
-  snippets?: Array<{ title: string; sql: string; tags?: string }>;
-  onExecute?: () => void;
-  onExecuteAtCursor?: (statement: string) => void;
-  onFormat?: () => void;
-  onChange?: (val: string) => void;
+  readOnly?: boolean;
+  placeholder?: string;
+  activeDatabase?: string;
+  catalogs?: Record<string, SchemaCatalog>;
+  snippets?: QuerySnippet[];
+  loadCatalog?: (database: string) => Promise<unknown>;
+  quoteIdentifier?: (identifier: string) => string;
+  onExecute?: (sql: string) => void;
+  onExecuteAll?: (sql: string) => void;
+  onExplain?: (sql: string) => void;
+  onFormat?: (target: StatementPos) => void;
+  onSnippet?: (snippet: QuerySnippet, insert: (sql: string) => void) => void;
+  onChange?: (value: string) => void;
+  onReady?: (controller: CodeMirrorController | null) => void;
 }
 
-export interface StatementPos {
-  start: number;
-  end: number;
-  text: string;
+export interface CodeMirrorController {
+  getTarget: () => StatementPos;
+  getDocument: () => string;
+  replaceTarget: (value: string) => boolean;
+  insertAtSelection: (value: string) => boolean;
+  focus: () => void;
+  requestMeasure: () => void;
 }
 
-// ponytail: Flash execution decoration highlights the statement being executed via Ctrl+Enter
+const externalDoc = Annotation.define<boolean>();
 const addFlashEffect = StateEffect.define<{ from: number; to: number }>();
 const clearFlashEffect = StateEffect.define<null>();
 const flashMark = Decoration.mark({ class: 'cm-flash-exec' });
 
 const flashField = StateField.define<DecorationSet>({
-  create() {
-    return Decoration.none;
-  },
+  create: () => Decoration.none,
   update(flashes, tr) {
     flashes = flashes.map(tr.changes);
-    for (const e of tr.effects) {
-      if (e.is(addFlashEffect)) {
-        try {
-          flashes = Decoration.set([flashMark.range(e.value.from, e.value.to)]);
-        } catch (_) {}
-      } else if (e.is(clearFlashEffect)) {
-        flashes = Decoration.none;
-      }
+    for (const effect of tr.effects) {
+      if (effect.is(addFlashEffect)) flashes = Decoration.set([flashMark.range(effect.value.from, effect.value.to)]);
+      else if (effect.is(clearFlashEffect)) flashes = Decoration.none;
     }
     return flashes;
   },
-  provide: (f) => EditorView.decorations.from(f),
+  provide: (field) => EditorView.decorations.from(field),
 });
 
-function flashStatement(view: EditorView, from: number, to: number) {
-  if (from >= to) return;
-  view.dispatch({
-    effects: addFlashEffect.of({ from, to }),
-  });
-  setTimeout(() => {
-    try {
-      view.dispatch({ effects: clearFlashEffect.of(null) });
-    } catch (_) {}
-  }, 350);
-}
-
-// ponytail: High-contrast syntax palette matching SqlFox's signature dark aesthetic
 export const sqlfoxHighlightStyle = HighlightStyle.define([
   { tag: tags.keyword, color: '#f472b6', fontWeight: '600' },
   { tag: tags.string, color: '#34d399' },
-  { tag: tags.number, color: '#fbbf24' },
-  { tag: tags.typeName, color: '#c084fc' },
+  { tag: tags.number, color: '#fbbf24', fontVariantNumeric: 'tabular-nums' },
+  { tag: tags.typeName, color: '#c084fc', fontWeight: '500' },
   { tag: [tags.bool, tags.null, tags.atom], color: '#fb923c' },
   { tag: [tags.function(tags.variableName), tags.standard(tags.variableName)], color: '#38bdf8' },
   { tag: [tags.operator, tags.punctuation], color: '#94a3b8' },
@@ -97,640 +93,363 @@ export const sqlfoxHighlightStyle = HighlightStyle.define([
   { tag: tags.variableName, color: '#7dd3fc' },
 ]);
 
-export const sqlfoxTheme = EditorView.theme(
-  {
-    '&': {
-      height: '100%',
-      width: '100%',
-      backgroundColor: '#090d16',
-      color: '#e0f2fe',
-      fontFamily: "'JetBrains Mono', 'Fira Code', ui-monospace, monospace",
-      fontSize: '13.5px',
-      lineHeight: '1.6',
-      letterSpacing: '0.01em',
-    },
-    '.cm-scroller': {
-      height: '100%',
-      width: '100%',
-      overflow: 'auto',
-      fontFamily: 'inherit',
-    },
-    '.cm-content': {
-      minHeight: '100%',
-      boxSizing: 'border-box',
-      caretColor: '#38bdf8',
-      padding: '8px 0',
-    },
-    '.cm-cursor, .cm-dropCursor': {
-      borderLeftColor: '#38bdf8',
-      borderLeftWidth: '2px',
-    },
-    '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': {
-      backgroundColor: 'rgba(56, 189, 248, 0.25) !important',
-    },
-    '.cm-gutters': {
-      backgroundColor: '#090d16',
-      color: '#475569',
-      borderRight: '1px solid #1e293b',
-    },
-    '.cm-gutterElement': {
-      padding: '0 8px 0 4px',
-    },
-    '.cm-activeLineGutter': {
-      backgroundColor: '#0f172a',
-      color: '#94a3b8',
-    },
-    '.cm-activeLine': {
-      backgroundColor: 'rgba(30, 41, 59, 0.35)',
-    },
-    '&.cm-focused .cm-matchingBracket, .cm-matchingBracket': {
-      color: '#38bdf8 !important',
-      backgroundColor: 'rgba(56, 189, 248, 0.2) !important',
-      outline: '1px solid rgba(56, 189, 248, 0.4) !important',
-      borderRadius: '2px',
-    },
-    '&.cm-focused .cm-nonmatchingBracket, .cm-nonmatchingBracket': {
-      color: '#f87171 !important',
-      backgroundColor: 'rgba(239, 68, 68, 0.2) !important',
-      outline: '1px solid rgba(239, 68, 68, 0.4) !important',
-      borderRadius: '2px',
-    },
-    '.cm-tooltip.cm-tooltip-autocomplete': {
-      backgroundColor: '#090d16 !important',
-      border: '1px solid #1e293b !important',
-      borderRadius: '6px !important',
-      boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.7), 0 8px 10px -6px rgba(0, 0, 0, 0.7) !important',
-      zIndex: '100 !important',
-    },
-    '.cm-tooltip-autocomplete ul': {
-      maxHeight: '240px',
-      padding: '4px',
-      fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-      fontSize: '13px',
-    },
-    '.cm-tooltip-autocomplete ul li': {
-      display: 'flex',
-      alignItems: 'center',
-      padding: '4px 8px',
-      borderRadius: '4px',
-      color: '#cbd5e1',
-      cursor: 'pointer',
-    },
-    '.cm-tooltip-autocomplete ul li[aria-selected]': {
-      backgroundColor: '#1e293b !important',
-      color: '#38bdf8 !important',
-    },
-    '.cm-flash-exec': {
-      backgroundColor: 'rgba(56, 189, 248, 0.35) !important',
-      borderRadius: '2px !important',
-      transition: 'background-color 0.35s ease !important',
-    },
+const monoFont = "'JetBrains Mono', 'FiraCode Nerd Font', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
+export const sqlfoxTheme = EditorView.theme({
+  '&': {
+    height: '100%', width: '100%', backgroundColor: '#090d16', color: '#e0f2fe',
+    fontFamily: monoFont, fontSize: '14px', lineHeight: '1.65', letterSpacing: '0.01em',
   },
-  { dark: true }
-);
+  '.cm-scroller': { height: '100%', width: '100%', overflow: 'auto', fontFamily: 'inherit' },
+  '.cm-content': { minHeight: '100%', boxSizing: 'border-box', caretColor: '#38bdf8', padding: '8px 0' },
+  '.cm-cursor, .cm-dropCursor': { borderLeftColor: '#38bdf8', borderLeftWidth: '2px' },
+  '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': {
+    backgroundColor: 'rgba(56, 189, 248, 0.25) !important',
+  },
+  '.cm-gutters': { backgroundColor: '#090d16', color: '#475569', borderRight: '1px solid #1e293b' },
+  '.cm-gutterElement': { padding: '0 8px 0 4px' },
+  '.cm-activeLineGutter': { backgroundColor: '#0f172a', color: '#94a3b8' },
+  '.cm-activeLine': { backgroundColor: 'rgba(30, 41, 59, 0.35)' },
+  '&.cm-focused .cm-matchingBracket, .cm-matchingBracket': {
+    color: '#38bdf8 !important', backgroundColor: 'rgba(56, 189, 248, 0.2) !important',
+    outline: '1px solid rgba(56, 189, 248, 0.4) !important', borderRadius: '2px',
+  },
+  '&.cm-focused .cm-nonmatchingBracket, .cm-nonmatchingBracket': {
+    color: '#f87171 !important', backgroundColor: 'rgba(239, 68, 68, 0.2) !important',
+    outline: '1px solid rgba(239, 68, 68, 0.4) !important', borderRadius: '2px',
+  },
+  '.cm-tooltip.cm-tooltip-autocomplete': {
+    backgroundColor: '#090d16 !important', border: '1px solid #1e293b !important', borderRadius: '6px !important',
+    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.7), 0 8px 10px -6px rgba(0, 0, 0, 0.7) !important',
+    overflow: 'hidden', zIndex: '100 !important',
+  },
+  '.cm-tooltip-autocomplete ul': { maxHeight: '240px', padding: '4px', fontFamily: monoFont, fontSize: '13px' },
+  '.cm-tooltip-autocomplete ul li': {
+    display: 'flex', alignItems: 'center', padding: '4px 8px', borderRadius: '4px', color: '#cbd5e1', cursor: 'pointer',
+  },
+  '.cm-tooltip-autocomplete ul li[aria-selected]': { backgroundColor: '#1e293b !important', color: '#38bdf8 !important' },
+  '.cm-completionLabel': { color: '#e0f2fe', fontWeight: '500' },
+  '.cm-completionDetail': { marginLeft: 'auto', paddingLeft: '16px', color: '#64748b', fontSize: '11px', fontStyle: 'italic' },
+  '.cm-hint-badge': {
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: '0',
+    fontSize: '9px', lineHeight: '1.2', fontWeight: '700', letterSpacing: '0.05em',
+    padding: '1px 4px', borderRadius: '3px', marginRight: '8px', textTransform: 'uppercase',
+  },
+  '.cm-badge-kw': { backgroundColor: '#334155', color: '#94a3b8' },
+  '.cm-badge-tbl': { backgroundColor: 'rgba(16,185,129,.2)', color: '#34d399' },
+  '.cm-badge-col': { backgroundColor: 'rgba(56,189,248,.2)', color: '#38bdf8' },
+  '.cm-badge-fn': { backgroundColor: 'rgba(245,158,11,.2)', color: '#fbbf24' },
+  '.cm-badge-db': { backgroundColor: 'rgba(168,85,247,.2)', color: '#c084fc' },
+  '.cm-badge-snp': { backgroundColor: 'rgba(236,72,153,.2)', color: '#f472b6' },
+  '.cm-flash-exec': {
+    backgroundColor: 'rgba(56,189,248,.35) !important', borderRadius: '2px !important',
+    transition: 'background-color .35s ease !important',
+  },
+  '.cm-panels': { backgroundColor: '#0f172a', color: '#cbd5e1', borderColor: '#334155' },
+  '.cm-panels.cm-panels-top': { borderBottom: '1px solid #334155' },
+  '.cm-searchMatch': { backgroundColor: 'rgba(251,191,36,.25)', outline: '1px solid rgba(251,191,36,.45)' },
+  '.cm-searchMatch-selected': { backgroundColor: 'rgba(56,189,248,.35)' },
+}, { dark: true });
 
-const SQL_KEYWORDS = [
-  'SELECT', 'FROM', 'WHERE', 'INSERT INTO', 'UPDATE', 'DELETE FROM',
-  'JOIN', 'INNER JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'CROSS JOIN',
-  'ON', 'GROUP BY', 'ORDER BY', 'HAVING', 'LIMIT', 'OFFSET',
-  'UNION ALL', 'UNION', 'DISTINCT', 'AS', 'AND', 'OR', 'NOT',
-  'IN', 'BETWEEN', 'LIKE', 'IS NULL', 'IS NOT NULL', 'EXISTS',
-  'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'CREATE TABLE',
-  'ALTER TABLE', 'DROP TABLE', 'TRUNCATE TABLE', 'INDEX',
-  'PRIMARY KEY', 'FOREIGN KEY', 'SET', 'VALUES', 'ASC', 'DESC',
-  'DEFAULT', 'AUTO_INCREMENT', 'DATABASE', 'SCHEMA', 'SHOW TABLES',
-];
-
-const SQL_FUNCTIONS = [
-  'COUNT()', 'SUM()', 'AVG()', 'MIN()', 'MAX()', 'COALESCE()',
-  'CONCAT()', 'NOW()', 'DATE()', 'IFNULL()', 'LOWER()', 'UPPER()',
-  'SUBSTRING()', 'TRIM()', 'ROUND()', 'LENGTH()', 'CURRENT_TIMESTAMP()',
-];
-
-function getStatementAtPos(text: string, pos: number): StatementPos {
-  if (!text.trim()) return { start: 0, end: 0, text: '' };
-  let inSingle = false;
-  let inDouble = false;
-  let inBacktick = false;
-  let inLineComment = false;
-  let inBlockComment = false;
-  let stmtStart = 0;
-  const stmts: StatementPos[] = [];
-
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    const next = i + 1 < text.length ? text[i + 1] : '';
-
-    if (inLineComment) {
-      if (ch === '\n' || ch === '\r') inLineComment = false;
-      continue;
-    }
-    if (inBlockComment) {
-      if (ch === '*' && next === '/') {
-        inBlockComment = false;
-        i++;
-      }
-      continue;
-    }
-    if (inSingle) {
-      if (ch === '\\') { i++; continue; }
-      if (ch === "'") inSingle = false;
-      continue;
-    }
-    if (inDouble) {
-      if (ch === '\\') { i++; continue; }
-      if (ch === '"') inDouble = false;
-      continue;
-    }
-    if (inBacktick) {
-      if (ch === '`') inBacktick = false;
-      continue;
-    }
-
-    if (ch === '-' && next === '-') {
-      inLineComment = true;
-      i++;
-      continue;
-    }
-    if (ch === '/' && next === '*') {
-      inBlockComment = true;
-      i++;
-      continue;
-    }
-    if (ch === "'") { inSingle = true; continue; }
-    if (ch === '"') { inDouble = true; continue; }
-    if (ch === '`') { inBacktick = true; continue; }
-
-    if (ch === ';') {
-      stmts.push({
-        start: stmtStart,
-        end: i + 1,
-        text: text.slice(stmtStart, i + 1).trim(),
-      });
-      stmtStart = i + 1;
-    }
-  }
-
-  if (stmtStart < text.length) {
-    stmts.push({
-      start: stmtStart,
-      end: text.length,
-      text: text.slice(stmtStart).trim(),
-    });
-  }
-
-  const found = stmts.find((s) => pos >= s.start && pos <= s.end);
-  return found || { start: 0, end: text.length, text: text.trim() };
+function resolveDialect(dialect?: string) {
+  if (dialect === 'postgres') return PostgreSQL;
+  if (dialect === 'sqlite') return SQLite;
+  return MySQL;
 }
 
-// ponytail: Context-aware completion source with dot dereferencing, aliases, and visual badge scoring
-function createSqlCompletionSource(getOpts: () => CodeMirrorOptions) {
-  return (context: CompletionContext): CompletionResult | null => {
-    const word = context.matchBefore(/[a-zA-Z0-9_.]*/);
-    if (!word && !context.explicit) return null;
-    if (!context.explicit && (!word || word.text === '' || word.from === word.to)) return null;
-
-    const fullText = context.state.doc.toString();
-    const cursorIndex = context.pos;
-    const opts = getOpts();
-
-    // Statement-bounded scoping
-    const lastSemi = fullText.lastIndexOf(';', cursorIndex > 0 ? cursorIndex - 1 : 0);
-    const nextSemi = fullText.indexOf(';', cursorIndex);
-    const stmtStart = lastSemi >= 0 ? lastSemi + 1 : 0;
-    const stmtEnd = nextSemi >= 0 ? nextSemi : fullText.length;
-    const stmt = fullText.slice(stmtStart, stmtEnd);
-    const textBeforeCursor = fullText.slice(0, cursorIndex);
-    const textBeforeInStmt = fullText.slice(stmtStart, cursorIndex);
-
-    const availableDatabases = new Set((opts.databases || []).map((d) => d.toLowerCase()));
-
-    // Extract table aliases in active statement: e.g. FROM users u, JOIN orders AS o
-    const aliases: Record<string, string> = {};
-    const aliasRegex = /\b(?:FROM|JOIN)\s+([`"]?[a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)?[`"]?)(?:\s+(?:AS\s+)?([`"]?[a-zA-Z0-9_]+[`"]?))?/gi;
-    let match;
-    while ((match = aliasRegex.exec(stmt)) !== null) {
-      const rawTable = match[1].replace(/[`"]/g, '');
-      const rawAlias = match[2] ? match[2].replace(/[`"]/g, '') : null;
-      if (rawAlias && !/^(WHERE|ON|JOIN|LEFT|RIGHT|INNER|GROUP|ORDER|LIMIT|SET)$/i.test(rawAlias)) {
-        aliases[rawAlias.toLowerCase()] = rawTable;
-      }
-    }
-
-    const lineUpToCursor = textBeforeCursor.slice(textBeforeCursor.lastIndexOf('\n') + 1);
-    const twoDotMatch = lineUpToCursor.match(/([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]*)$/);
-    const oneDotMatch = lineUpToCursor.match(/([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]*)$/);
-    const wordMatch = lineUpToCursor.match(/([a-zA-Z0-9_]+)$/);
-
-    interface Candidate {
-      text: string;
-      displayText?: string;
-      kind: string;
-      badgeClass?: string;
-      type?: string;
-      score: number;
-    }
-
-    let candidates: Candidate[] = [];
-    let partial = '';
-    let fromPos = context.pos;
-
-    // 1. Two dot dereferencing: db.table.column
-    if (twoDotMatch) {
-      const tblPart = twoDotMatch[2].toLowerCase();
-      const colPartial = (twoDotMatch[3] || '').toLowerCase();
-      partial = twoDotMatch[3] || '';
-      fromPos = context.pos - partial.length;
-
-      const matchedTable = (opts.tables || []).find((t) => t.name.toLowerCase() === tblPart);
-      if (matchedTable && matchedTable.columns) {
-        matchedTable.columns.forEach((c) => {
-          const colName = typeof c === 'string' ? c : c.name;
-          const colType = typeof c === 'string' ? '' : c.type || '';
-          const lowerCol = colName.toLowerCase();
-          if (!colPartial || lowerCol.includes(colPartial)) {
-            let score = 60;
-            if (lowerCol === colPartial) score += 100;
-            else if (lowerCol.startsWith(colPartial)) score += 50;
-            candidates.push({
-              text: colName,
-              kind: 'COL',
-              badgeClass: 'cm-badge-col',
-              type: colType,
-              score,
-            });
-          }
-        });
-      }
-    } else if (oneDotMatch) {
-      // 2. Single dot dereferencing: db.table OR table.col OR alias.col
-      const qualifier = oneDotMatch[1];
-      partial = oneDotMatch[2] || '';
-      fromPos = context.pos - partial.length;
-      const lowerQualifier = qualifier.toLowerCase();
-      const lowerPartial = partial.toLowerCase();
-
-      if (availableDatabases.has(lowerQualifier)) {
-        (opts.tables || []).forEach((tbl) => {
-          const lowerTbl = tbl.name.toLowerCase();
-          if (!lowerPartial || lowerTbl.includes(lowerPartial)) {
-            let score = 60;
-            if (lowerTbl === lowerPartial) score += 100;
-            else if (lowerTbl.startsWith(lowerPartial)) score += 50;
-            candidates.push({
-              text: tbl.name,
-              kind: 'TBL',
-              badgeClass: 'cm-badge-tbl',
-              type: tbl.type || 'TABLE',
-              score,
-            });
-          }
-        });
-      } else {
-        const resolved = aliases[lowerQualifier] || qualifier;
-        const matchedTable = (opts.tables || []).find((t) => t.name.toLowerCase() === resolved.toLowerCase());
-        if (matchedTable && matchedTable.columns) {
-          matchedTable.columns.forEach((c) => {
-            const colName = typeof c === 'string' ? c : c.name;
-            const colType = typeof c === 'string' ? '' : c.type || '';
-            const lowerCol = colName.toLowerCase();
-            if (!lowerPartial || lowerCol.includes(lowerPartial)) {
-              let score = 50;
-              if (lowerCol === lowerPartial) score += 100;
-              else if (lowerCol.startsWith(lowerPartial)) score += 50;
-              candidates.push({
-                text: colName,
-                kind: 'COL',
-                badgeClass: 'cm-badge-col',
-                type: colType,
-                score,
-              });
-            }
-          });
-        }
-      }
-    } else {
-      // 3. No dot: Contextual completions based on preceding SQL clause
-      if (wordMatch) {
-        partial = wordMatch[1] || '';
-        fromPos = context.pos - partial.length;
-      }
-      const lowerPartial = partial.toLowerCase();
-
-      const cleanBefore = textBeforeInStmt.replace(/--.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
-      const keywords = [
-        ...cleanBefore.matchAll(
-          /\b(SELECT|FROM|JOIN|LEFT\s+JOIN|RIGHT\s+JOIN|INNER\s+JOIN|WHERE|ON|GROUP\s+BY|ORDER\s+BY|SET|INTO|UPDATE)\b/gi
-        ),
-      ];
-      const clause = keywords.length > 0 ? keywords[keywords.length - 1][1].toUpperCase().replace(/\s+/g, ' ') : '';
-      const isTableClause = /^(FROM|JOIN|LEFT JOIN|RIGHT JOIN|INNER JOIN|INTO|UPDATE)$/.test(clause);
-      const isColumnClause = /^(SELECT|WHERE|ON|GROUP BY|ORDER BY|SET|HAVING)$/.test(clause);
-
-      // Databases suggestion in table clause
-      if (isTableClause && availableDatabases.size > 0) {
-        availableDatabases.forEach((dbName) => {
-          if (!lowerPartial || dbName.includes(lowerPartial)) {
-            let score = 115;
-            if (dbName === lowerPartial) score += 80;
-            else if (dbName.startsWith(lowerPartial)) score += 40;
-            candidates.push({
-              text: dbName,
-              kind: 'DB',
-              badgeClass: 'cm-badge-db',
-              type: 'DATABASE',
-              score,
-            });
-          }
-        });
-      }
-
-      // Tables suggestion
-      (opts.tables || []).forEach((tbl) => {
-        const lowerTbl = tbl.name.toLowerCase();
-        if (!lowerPartial || lowerTbl.includes(lowerPartial)) {
-          let score = 30;
-          if (lowerTbl === lowerPartial) score += 100;
-          else if (lowerTbl.startsWith(lowerPartial)) score += 50;
-          if (isTableClause) score += 120;
-          candidates.push({
-            text: tbl.name,
-            kind: 'TBL',
-            badgeClass: 'cm-badge-tbl',
-            type: tbl.type || 'TABLE',
-            score,
-          });
-        }
-
-        // Columns suggestion
-        if (tbl.columns) {
-          const isMentioned = stmt.toLowerCase().includes(tbl.name.toLowerCase());
-          tbl.columns.forEach((c) => {
-            const colName = typeof c === 'string' ? c : c.name;
-            const colType = typeof c === 'string' ? '' : c.type || '';
-            const lowerCol = colName.toLowerCase();
-            if (!lowerPartial || lowerCol.includes(lowerPartial)) {
-              let score = 20;
-              if (lowerCol === lowerPartial) score += 100;
-              else if (lowerCol.startsWith(lowerPartial)) score += 50;
-              if (isColumnClause) score += 60;
-              if (isMentioned) score += 30;
-              candidates.push({
-                text: colName,
-                kind: 'COL',
-                badgeClass: 'cm-badge-col',
-                type: colType ? `${tbl.name}.${colType}` : tbl.name,
-                score,
-              });
-            }
-          });
-        }
-      });
-
-      // SQL Functions
-      SQL_FUNCTIONS.forEach((fn) => {
-        const baseName = fn.replace('()', '');
-        const lowerFn = baseName.toLowerCase();
-        if (!lowerPartial || lowerFn.includes(lowerPartial)) {
-          let score = 25;
-          if (lowerFn === lowerPartial) score += 100;
-          else if (lowerFn.startsWith(lowerPartial)) score += 40;
-          if (isColumnClause) score += 30;
-          if (isTableClause) score -= 40;
-          candidates.push({
-            text: fn,
-            kind: 'FN',
-            badgeClass: 'cm-badge-fn',
-            type: 'FUNCTION',
-            score,
-          });
-        }
-      });
-
-      // SQL Keywords
-      SQL_KEYWORDS.forEach((kw) => {
-        const lowerKw = kw.toLowerCase();
-        if (!lowerPartial || lowerKw.includes(lowerPartial)) {
-          let score = 10;
-          if (lowerKw === lowerPartial) score += 100;
-          else if (lowerKw.startsWith(lowerPartial)) score += 45;
-          if (!isTableClause && !isColumnClause) score += 30;
-          candidates.push({
-            text: kw,
-            kind: 'KW',
-            badgeClass: 'cm-badge-kw',
-            type: 'KEYWORD',
-            score,
-          });
-        }
-      });
-
-      // Snippets
-      if (opts.snippets && lowerPartial && lowerPartial.length >= 2) {
-        opts.snippets.forEach((s) => {
-          const lowerTitle = (s.title || '').toLowerCase();
-          const lowerTags = (s.tags || '').toLowerCase();
-          if (lowerTitle.includes(lowerPartial) || lowerTags.includes(lowerPartial)) {
-            let score = 35;
-            if (lowerTitle.startsWith(lowerPartial)) score += 55;
-            candidates.push({
-              text: s.sql || s.title,
-              displayText: s.title,
-              kind: 'SNP',
-              badgeClass: 'cm-badge-snp',
-              type: s.tags ? `SNIPPET (${s.tags})` : 'SNIPPET',
-              score,
-            });
-          }
-        });
-      }
-    }
-
-    // Deduplicate and rank candidates
-    const seen = new Set<string>();
-    candidates = candidates.filter((item) => {
-      const key = `${item.kind}:${item.text}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-    candidates.sort((a, b) => b.score - a.score || a.text.localeCompare(b.text));
-
-    if (candidates.length === 0) return null;
-
-    return {
-      from: Math.max(0, fromPos),
-      to: context.pos,
-      options: candidates.slice(0, 50).map((item) => ({
-        label: item.displayText || item.text,
-        displayLabel: item.displayText || item.text,
-        kind: item.kind,
-        badgeClass: item.badgeClass,
-        type: item.kind ? item.kind.toLowerCase() : 'text',
-        detail: item.type || '',
-        boost: (item.score || 0) / 100,
-        apply: (view, completion, from, to) => {
-          view.dispatch({
-            changes: { from, to, insert: item.text },
-            selection: { anchor: from + item.text.length, head: from + item.text.length },
-          });
-        },
-      })),
-      filter: false,
-    };
-  };
+function badge(completion: Completion): HTMLElement | null {
+  const kind = (completion as Completion & { kind?: string }).kind;
+  if (!kind) return null;
+  const element = document.createElement('span');
+  element.className = `cm-hint-badge cm-badge-${kind.toLowerCase()}`;
+  element.textContent = kind;
+  return element;
 }
 
 export function codemirror(node: HTMLElement, options: CodeMirrorOptions) {
-  let currentOptions = { ...options };
+  let currentOptions = options;
+  let currentId = options.id || '__default';
+  let destroyed = false;
+  let flashTimer: ReturnType<typeof setTimeout> | undefined;
+  // ponytail: cache the last known document so the reactive update path never
+  // re-materialises the whole document string on every keystroke.
+  let lastKnownDoc = options.doc || '';
   const dialectCompartment = new Compartment();
+  const readOnlyCompartment = new Compartment();
+  const states = new Map<string, EditorState>();
+  const scrollPositions = new Map<string, number>();
 
-  function resolveDialect(d?: string) {
-    if (d === 'postgres') return PostgreSQL;
-    if (d === 'sqlite') return SQLite;
-    return MySQL;
-  }
-
-  const runKeymap = keymap.of([
-    {
-      key: 'Ctrl-Enter',
-      mac: 'Cmd-Enter',
-      run: (view) => {
-        const text = view.state.doc.toString();
-        const sel = view.state.selection.main;
-        if (!sel.empty) {
-          flashStatement(view, sel.from, sel.to);
-        } else {
-          const stmtPos = getStatementAtPos(text, sel.head);
-          flashStatement(view, stmtPos.start, stmtPos.end);
-        }
-        if (currentOptions.onExecute) {
-          currentOptions.onExecute();
-          return true;
-        }
-        return false;
-      },
-    },
-    {
-      key: 'Ctrl-Shift-Enter',
-      mac: 'Cmd-Shift-Enter',
-      run: (view) => {
-        const pos = view.state.selection.main.head;
-        const text = view.state.doc.toString();
-        const stmtPos = getStatementAtPos(text, pos);
-        flashStatement(view, stmtPos.start, stmtPos.end);
-        if (currentOptions.onExecuteAtCursor) {
-          currentOptions.onExecuteAtCursor(stmtPos.text);
-          return true;
-        }
-        return false;
-      },
-    },
-    {
-      key: 'Ctrl-Shift-f',
-      mac: 'Cmd-Shift-f',
-      run: () => {
-        if (currentOptions.onFormat) {
-          currentOptions.onFormat();
-          return true;
-        }
-        return false;
-      },
-    },
-    ...closeBracketsKeymap,
-    ...defaultKeymap,
-    ...searchKeymap,
-    ...historyKeymap,
-    ...completionKeymap,
-    indentWithTab,
-  ]);
-
-  const updateListener = EditorView.updateListener.of((update) => {
-    if (update.docChanged && currentOptions.onChange) {
-      currentOptions.onChange(update.state.doc.toString());
-    }
-  });
-
-  const autocompletionConfig = {
-    override: [createSqlCompletionSource(() => currentOptions)],
-    defaultKeymap: true,
-    icons: false,
-    addToOptions: [
-      {
-        render(completion: any) {
-          const kind = completion.kind || (completion.type ? completion.type.toUpperCase() : '');
-          if (!kind) return null;
-          const badge = document.createElement('span');
-          const cls = completion.badgeClass || 'cm-badge-' + kind.toLowerCase();
-          badge.className = 'cm-hint-badge ' + cls;
-          badge.textContent = kind;
-          return badge;
-        },
-        position: 10,
-      },
-    ],
+  const flash = (from: number, to: number) => {
+    if (from >= to) return;
+    if (flashTimer) clearTimeout(flashTimer);
+    view.dispatch({ effects: addFlashEffect.of({ from, to }) });
+    flashTimer = setTimeout(() => {
+      if (!destroyed) view.dispatch({ effects: clearFlashEffect.of(null) });
+    }, 350);
   };
 
-  const state = EditorState.create({
-    doc: currentOptions.doc || '',
-    extensions: [
-      lineNumbers(),
-      highlightActiveLineGutter(),
-      highlightSpecialChars(),
-      history(),
-      drawSelection(),
-      dropCursor(),
-      rectangularSelection(),
-      crosshairCursor(),
-      indentOnInput(),
-      bracketMatching(),
-      closeBrackets(),
-      autocompletion(autocompletionConfig),
-      highlightActiveLine(),
-      highlightSelectionMatches(),
-      flashField,
-      syntaxHighlighting(sqlfoxHighlightStyle, { fallback: true }),
-      sqlfoxTheme,
-      dialectCompartment.of(
-        sql({
-          dialect: resolveDialect(currentOptions.dialect),
-          schema: currentOptions.schema,
-        })
-      ),
-      runKeymap,
-      updateListener,
-    ],
+  const target = () => {
+    const selection = view.state.selection.main;
+    return executionTarget(view.state.doc.toString(), selection.from, selection.to, currentOptions.dialect);
+  };
+
+  const replaceRange = (from: number, to: number, value: string) => {
+    const end = from + value.length;
+    view.dispatch({ changes: { from, to, insert: value }, selection: { anchor: end }, scrollIntoView: true });
+  };
+
+  const controller: CodeMirrorController = {
+    getTarget: target,
+    getDocument: () => view.state.doc.toString(),
+    replaceTarget(value) {
+      const range = target();
+      if (!range.text.trim()) return false;
+      replaceRange(range.start, range.end, value);
+      return true;
+    },
+    insertAtSelection(value) {
+      if (destroyed || currentOptions.readOnly) return false;
+      const selection = view.state.selection.main;
+      replaceRange(selection.from, selection.to, value);
+      view.focus();
+      return true;
+    },
+    focus: () => view.focus(),
+    requestMeasure: () => view.requestMeasure(),
+  };
+
+  const runKeymap = Prec.highest(keymap.of([
+    {
+      key: 'Mod-Enter',
+      run: () => {
+        if (!currentOptions.onExecute) return false;
+        const range = target();
+        flash(range.start, range.end);
+        currentOptions.onExecute(range.text);
+        return true;
+      },
+    },
+    {
+      key: 'Mod-Alt-Enter',
+      run: () => {
+        if (!currentOptions.onExecuteAll) return false;
+        const text = view.state.doc.toString();
+        flash(0, text.length);
+        currentOptions.onExecuteAll(text);
+        return true;
+      },
+    },
+    {
+      key: 'F5',
+      run: () => {
+        if (!currentOptions.onExecuteAll) return false;
+        const text = view.state.doc.toString();
+        flash(0, text.length);
+        currentOptions.onExecuteAll(text);
+        return true;
+      },
+    },
+    {
+      key: 'Mod-Shift-Enter',
+      run: () => {
+        if (!currentOptions.onExplain) return false;
+        const range = target();
+        flash(range.start, range.end);
+        currentOptions.onExplain(range.text);
+        return true;
+      },
+    },
+    {
+      key: 'Mod-Shift-f',
+      run: () => {
+        if (!currentOptions.onFormat) return false;
+        currentOptions.onFormat(target());
+        return true;
+      },
+    },
+    { key: 'Ctrl-Space', run: (editor) => { startCompletion(editor); return true; } },
+  ]));
+
+  function toCompletion(item: CompletionItem): Completion {
+    const option: Completion & { kind?: string } = {
+      label: item.label,
+      type: 'text',
+      kind: item.kind,
+      detail: item.detail || '',
+      boost: item.boost,
+      apply: item.apply || item.label,
+    };
+    if (item.kind === 'FN' && item.label.endsWith('()')) {
+      option.apply = (editor, _completion, from, to) => {
+        const end = from + item.label.length;
+        editor.dispatch({ changes: { from, to, insert: item.label }, selection: { anchor: end - 1 }, scrollIntoView: true });
+      };
+    } else if (item.kind === 'KW' && item.label.includes(' ')) {
+      // The completion range already spans the typed phrase, so replace it wholesale.
+      option.apply = (editor, _completion, from, to) => {
+        const end = from + item.label.length;
+        editor.dispatch({ changes: { from, to, insert: item.label }, selection: { anchor: end }, scrollIntoView: true });
+      };
+    } else if (item.snippet) {
+      option.apply = (editor, _completion, from, to) => {
+        const snippet = item.snippet!;
+        const insert = (sql: string) => {
+          const end = from + sql.length;
+          editor.dispatch({ changes: { from, to, insert: sql }, selection: { anchor: end }, scrollIntoView: true });
+        };
+        if (currentOptions.onSnippet) currentOptions.onSnippet(snippet, insert);
+        else insert(snippet.sql);
+      };
+    }
+    return option;
+  }
+
+  async function completionSource(context: CompletionContext): Promise<CompletionResult | null> {
+    const text = context.state.doc.toString();
+    const line = text.slice(text.lastIndexOf('\n', context.pos - 1) + 1, context.pos);
+    const snip = line.match(/(?:^|\s)(snip:[a-zA-Z0-9_]*)$/i);
+    if (snip) {
+      const masked = maskSqlForAnalysis(text, currentOptions.dialect);
+      if (masked.slice(context.pos - snip[1].length, context.pos) !== snip[1]) return null;
+      const query = snip[1].slice(5).toLowerCase();
+      const options = (currentOptions.snippets || [])
+        .filter((snippet) => !query || snippet.title.toLowerCase().includes(query) || snippet.tags.some((tag) => tag.toLowerCase().includes(query)))
+        .map((snippet) => toCompletion({ label: snippet.title, kind: 'SNP', detail: snippet.tags.join(', ') || 'Template', snippet, boost: 20 }));
+      return options.length ? { from: context.pos - snip[1].length, to: context.pos, options, filter: false } : null;
+    }
+
+    let requestedDatabase = '';
+    const compute = () => computeSqlCompletions({
+      text,
+      cursor: context.pos,
+      catalogs: currentOptions.catalogs || {},
+      activeDatabase: currentOptions.activeDatabase,
+      snippets: currentOptions.snippets,
+      dialect: currentOptions.dialect,
+      quoteIdentifier: currentOptions.quoteIdentifier,
+      onDatabaseRequested: (database) => { requestedDatabase = database; },
+    });
+    let items = compute();
+    if (requestedDatabase && currentOptions.loadCatalog) {
+      try { await currentOptions.loadCatalog(requestedDatabase); } catch { /* completion stays empty on request failure */ }
+      if (destroyed || view.state.doc.toString() !== text || view.state.selection.main.head !== context.pos) return null;
+      requestedDatabase = '';
+      items = compute();
+    }
+    if (!items.length) return null;
+    const from = completionTokenStart(text, context.pos);
+    const prefix = text.slice(from, context.pos).toLowerCase();
+    items.sort((a, b) => {
+      const rank = (item: CompletionItem) => (item.boost || 0) * 10
+        + (item.label.toLowerCase() === prefix ? 200 : item.label.toLowerCase().startsWith(prefix) ? 80 : 0);
+      return rank(b) - rank(a) || a.label.localeCompare(b.label);
+    });
+    const qualifiedTrigger = parseQualifiedReference(text, context.pos)?.trailingDot;
+    if (!context.explicit && from === context.pos && !qualifiedTrigger) return null;
+    return { from, to: context.pos, options: items.map(toCompletion), filter: false };
+  }
+
+  const updateListener = EditorView.updateListener.of((update) => {
+    if (!update.docChanged) return;
+    if (update.transactions.some((tr) => tr.annotation(externalDoc))) return;
+    // ponytail: only materialise the document string when the caller actually needs it.
+    const value = update.state.doc.toString();
+    lastKnownDoc = value;
+    currentOptions.onChange?.(value);
   });
 
-  const view = new EditorView({
-    state,
-    parent: node,
+  const clickBelowLastLine = EditorView.domEventHandlers({
+    mousedown(event, editor) {
+      if (event.button !== 0) return false;
+      const lastLine = editor.contentDOM.lastElementChild;
+      if (!lastLine || event.clientY <= lastLine.getBoundingClientRect().bottom + 2) return false;
+      event.preventDefault();
+      editor.focus();
+      editor.dispatch({ selection: { anchor: editor.state.doc.length }, scrollIntoView: true });
+      return true;
+    },
   });
+
+  function makeState(doc: string): EditorState {
+    return EditorState.create({
+      doc,
+      selection: { anchor: doc.length },
+      extensions: [
+        lineNumbers(), highlightActiveLineGutter(), highlightSpecialChars(), history(), drawSelection(), dropCursor(),
+        EditorState.allowMultipleSelections.of(true), rectangularSelection(), crosshairCursor(), indentOnInput(),
+        bracketMatching(), closeBrackets(), highlightActiveLine(), highlightSelectionMatches(), search({ top: true }),
+        EditorView.lineWrapping, flashField, syntaxHighlighting(sqlfoxHighlightStyle, { fallback: true }), sqlfoxTheme,
+        dialectCompartment.of(sql({ dialect: resolveDialect(currentOptions.dialect) })),
+        readOnlyCompartment.of([
+          EditorState.readOnly.of(!!currentOptions.readOnly),
+          EditorView.editable.of(!currentOptions.readOnly),
+        ]),
+        currentOptions.placeholder ? placeholder(currentOptions.placeholder) : [],
+        autocompletion({
+          override: [completionSource], activateOnTyping: true, closeOnBlur: true, maxRenderedOptions: 50,
+          defaultKeymap: true, icons: false, interactionDelay: 0,
+          addToOptions: [{ render: badge, position: 10 }],
+        }),
+        runKeymap,
+        keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...completionKeymap, indentWithTab]),
+        clickBelowLastLine, updateListener,
+      ],
+    });
+  }
+
+  const view = new EditorView({ state: makeState(options.doc || ''), parent: node });
+  currentOptions.onReady?.(controller);
 
   return {
-    update(newOptions: CodeMirrorOptions) {
-      const prevDialect = currentOptions.dialect;
-      const prevSchema = currentOptions.schema;
-      currentOptions = { ...newOptions };
+    update(next: CodeMirrorOptions) {
+      if (destroyed) return;
+      const previousId = currentId;
+      const previousDialect = currentOptions.dialect;
+      const previousReadOnly = currentOptions.readOnly;
+      currentOptions = next;
+      currentId = next.id || '__default';
+      const switched = currentId !== previousId;
 
-      if (newOptions.doc !== view.state.doc.toString()) {
-        view.dispatch({
-          changes: { from: 0, to: view.state.doc.length, insert: newOptions.doc },
-        });
+      if (switched) {
+        states.set(previousId, view.state);
+        scrollPositions.set(previousId, view.scrollDOM.scrollTop);
+        view.setState(states.get(currentId) || makeState(next.doc || ''));
+        view.scrollDOM.scrollTop = scrollPositions.get(currentId) || 0;
+        lastKnownDoc = view.state.doc.toString();
       }
 
-      if (newOptions.dialect !== prevDialect || newOptions.schema !== prevSchema) {
+      // Reconcile the document for both the active tab and restored tabs.
+      if (next.doc !== lastKnownDoc) {
+        const doc = next.doc || '';
+        const selection = view.state.selection;
+        const ranges = selection.ranges.map((range) => EditorSelection.range(
+          Math.min(range.anchor, doc.length),
+          Math.min(range.head, doc.length),
+        ));
         view.dispatch({
-          effects: dialectCompartment.reconfigure(
-            sql({
-              dialect: resolveDialect(newOptions.dialect),
-              schema: newOptions.schema,
-            })
-          ),
+          changes: { from: 0, to: view.state.doc.length, insert: doc },
+          selection: EditorSelection.create(ranges, selection.mainIndex),
+          scrollIntoView: true,
+          annotations: externalDoc.of(true),
         });
+        lastKnownDoc = doc;
       }
+
+      if (switched || next.dialect !== previousDialect) {
+        view.dispatch({ effects: dialectCompartment.reconfigure(sql({ dialect: resolveDialect(next.dialect) })) });
+      }
+      if (switched || !!next.readOnly !== !!previousReadOnly) {
+        view.dispatch({ effects: readOnlyCompartment.reconfigure([
+          EditorState.readOnly.of(!!next.readOnly), EditorView.editable.of(!next.readOnly),
+        ]) });
+      }
+      if (switched) view.requestMeasure();
     },
     destroy() {
+      destroyed = true;
+      if (flashTimer) clearTimeout(flashTimer);
+      currentOptions.onReady?.(null);
+      states.clear();
+      scrollPositions.clear();
       view.destroy();
     },
   };

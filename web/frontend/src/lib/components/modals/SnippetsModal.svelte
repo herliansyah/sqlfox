@@ -2,16 +2,12 @@
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
   import Icon from '../common/Icon.svelte';
+  import type { QuerySnippet } from '../../types';
+  import { parseSnippetVariables } from '../../utils/snippets';
 
-  interface Snippet {
-    id: string;
-    title: string;
-    description?: string;
-    sql: string;
-    tags?: string[];
-  }
+  type Snippet = QuerySnippet;
 
-  let snippets = $state<Snippet[]>([]);
+  let snippets = $derived(appState.snippets);
   let filterText = $state('');
   let isLoading = $state(false);
 
@@ -20,49 +16,29 @@
   let editTagsStr = $state('');
 
   // Param substitution prompt
-  let paramPrompt = $state<{
-    snippet: Snippet;
-    params: { name: string; value: string }[];
-  } | null>(null);
+  let paramPrompt = $derived.by(() => {
+    const pending = appState.pendingSnippet;
+    if (!pending) return null;
+    return {
+      snippet: pending.snippet,
+      params: parseSnippetVariables(pending.snippet.sql).map((variable) => ({
+        name: variable.name,
+        value: pending.values[variable.name] ?? variable.defaultValue,
+      })),
+    };
+  });
 
   $effect(() => {
     if (appState.isSnippetsModalOpen) {
-      loadSnippets();
+      void loadSnippets();
       editingSnippet = null;
-      paramPrompt = null;
     }
   });
 
   async function loadSnippets() {
     isLoading = true;
     try {
-      const res = await api.listSnippets();
-      snippets = Array.isArray(res) ? res : [];
-    } catch (err: any) {
-      // Fallback default templates if endpoint empty
-      snippets = [
-        {
-          id: 'snip-1',
-          title: 'Find Top 10 Slow Queries',
-          description: 'Inspect MySQL performance schema for slowest queries',
-          sql: 'SELECT digest_text, count_star, avg_timer_wait/1000000000 AS avg_latency_ms FROM performance_schema.events_statements_summary_by_digest ORDER BY avg_timer_wait DESC LIMIT 10;',
-          tags: ['performance', 'dba'],
-        },
-        {
-          id: 'snip-2',
-          title: 'Table Fragmentation & Data Size',
-          description: 'Find fragmented tables in active database',
-          sql: 'SELECT table_name, data_length, index_length, data_free FROM information_schema.tables WHERE table_schema = {{database_name}} AND data_free > 0 ORDER BY data_free DESC;',
-          tags: ['storage', 'maintenance'],
-        },
-        {
-          id: 'snip-3',
-          title: 'Filter Records by Date Range',
-          description: 'Parameterized template for filtering rows',
-          sql: 'SELECT * FROM {{table_name}} WHERE created_at BETWEEN {{start_date}} AND {{end_date}} LIMIT 100;',
-          tags: ['template', 'crud'],
-        },
-      ];
+      await appState.loadSnippets(true);
     } finally {
       isLoading = false;
     }
@@ -118,81 +94,31 @@
       editingSnippet = null;
       await loadSnippets();
     } catch (err: any) {
-      // Local fallback
-      if (editingSnippet.id) {
-        const idx = snippets.findIndex((s) => s.id === editingSnippet!.id);
-        if (idx !== -1) snippets[idx] = { ...snippets[idx], ...editingSnippet, tags } as Snippet;
-      } else {
-        snippets.push({
-          id: `snip-${Date.now()}`,
-          title: editingSnippet.title.trim(),
-          description: editingSnippet.description?.trim(),
-          sql: editingSnippet.sql.trim(),
-          tags,
-        });
-      }
-      editingSnippet = null;
-      appState.showToast('Snippet saved locally', 'success');
+      appState.showToast(`Failed to save snippet: ${err.message}`, 'error');
     }
   }
 
   async function handleDeleteSnippet(id: string) {
-    if (!confirm('Are you sure you want to delete this query snippet?')) return;
+    if (!(await appState.showNativeConfirm('Are you sure you want to delete this query snippet?', 'Delete Snippet'))) return;
     try {
       await api.deleteSnippet(id);
       appState.showToast('Snippet deleted', 'info');
       await loadSnippets();
     } catch (err: any) {
-      snippets = snippets.filter((s) => s.id !== id);
-      appState.showToast('Snippet deleted', 'info');
+      appState.showToast(`Failed to delete snippet: ${err.message}`, 'error');
     }
   }
 
   function useSnippet(s: Snippet) {
-    // Detect {{var}} placeholders
-    const matches = Array.from(s.sql.matchAll(/\{\{([a-zA-Z0-9_]+)\}\}/g));
-    const paramNames = Array.from(new Set(matches.map((m) => m[1])));
-
-    if (paramNames.length > 0) {
-      paramPrompt = {
-        snippet: s,
-        params: paramNames.map((name) => {
-          let defaultValue = '';
-          if (name.includes('db') || name.includes('database')) defaultValue = `'${appState.currentDatabase || 'app'}'`;
-          else if (name.includes('table')) defaultValue = appState.filteredTables[0]?.name || 'users';
-          else if (name.includes('date')) defaultValue = `'${new Date().toISOString().slice(0, 10)}'`;
-          return { name, value: defaultValue };
-        }),
-      };
-      return;
-    }
-
-    applySqlToEditor(s.sql, s.title);
+    appState.invokeSnippet(s);
   }
 
   function submitParamPrompt() {
-    if (!paramPrompt) return;
-    let finalSql = paramPrompt.snippet.sql;
-    for (const p of paramPrompt.params) {
-      const regex = new RegExp(`\\{\\{${p.name}\\}\\}`, 'g');
-      finalSql = finalSql.replace(regex, p.value || `/* ${p.name} */`);
-    }
-    applySqlToEditor(finalSql, paramPrompt.snippet.title);
-    paramPrompt = null;
-  }
-
-  function applySqlToEditor(sql: string, title: string) {
-    if (appState.activeTab && !appState.activeTab.isTableViewer && !appState.activeTab.isProcesslist && !appState.activeTab.isErdCanvas) {
-      appState.activeTab.sql = sql;
-      appState.showToast(`Applied snippet: ${title}`, 'success');
-    } else {
-      appState.addTab(`${title.replace(/[^a-zA-Z0-9_-]/g, '_')}.sql`, sql);
-      appState.showToast(`Created worksheet with snippet: ${title}`, 'success');
-    }
-    appState.isSnippetsModalOpen = false;
+    appState.confirmPendingSnippet();
   }
 
   function handleClose() {
+    appState.pendingSnippet = null;
     appState.isSnippetsModalOpen = false;
   }
 </script>
@@ -250,7 +176,9 @@
                   <input
                     id="param-{param.name}"
                     type="text"
-                    bind:value={param.value}
+                    value={param.value}
+                    oninput={(event) => appState.setSnippetValue(param.name, (event.target as HTMLInputElement).value)}
+                    onkeydown={(event) => { if (event.key === 'Enter') { event.preventDefault(); submitParamPrompt(); } }}
                     class="w-full bg-[#090d16] border border-[#334155] focus:border-sky-500 rounded px-3 py-1.5 text-xs text-white font-mono outline-none"
                   />
                 </div>
@@ -260,7 +188,7 @@
 
           <div class="px-5 py-3 bg-[#0f172a] border-t border-[#1e293b] flex items-center justify-end space-x-2 shrink-0 text-xs">
             <button
-              onclick={() => (paramPrompt = null)}
+              onclick={() => (appState.pendingSnippet = null)}
               class="px-3.5 py-1.5 font-semibold text-slate-400 hover:text-white transition"
             >
               Back

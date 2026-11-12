@@ -73,6 +73,7 @@
         use:codemirror={{
           doc: ddl,
           dialect: appState.activeConnection?.driver,
+          readOnly: true,
         }}
       ></div>
     {/if}

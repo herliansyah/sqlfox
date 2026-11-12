@@ -103,7 +103,7 @@
     isExecuting = true;
     try {
       const connId = appState.activeConnection.id;
-      await api.executeQuery(connId, sqlPreview, appState.currentDatabase || undefined);
+      await api.executeQuery(connId, sqlPreview, false, appState.currentDatabase || undefined);
       appState.showToast(`Foreign Key "${fkName.trim()}" created successfully!`, 'success');
       isAddModalOpen = false;
       resetForm();
@@ -133,7 +133,7 @@
 
     try {
       const connId = appState.activeConnection.id;
-      await api.executeQuery(connId, dropSql, appState.currentDatabase || undefined);
+      await api.executeQuery(connId, dropSql, false, appState.currentDatabase || undefined);
       appState.showToast(`Foreign key "${constraintName}" dropped successfully!`, 'info');
 
       // Refresh catalog

@@ -2,6 +2,7 @@
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
   import Icon from '../common/Icon.svelte';
+  import SqlCodeEditor from '../editor/SqlCodeEditor.svelte';
 
   let viewName = $state('');
   let algorithm = $state<'UNDEFINED' | 'MERGE' | 'TEMPTABLE'>('UNDEFINED');
@@ -166,13 +167,13 @@
             <span>SELECT Query Statement *</span>
             <span class="text-[10px] text-slate-500 font-mono">SQL SELECT definition</span>
           </label>
-          <textarea
-            id="view-query"
-            bind:value={selectQuery}
-            rows="5"
-            placeholder="SELECT id, name, created_at FROM users WHERE status = 'active'"
-            class="w-full bg-[#090d16] border border-[#334155] focus:border-emerald-500 rounded p-2.5 text-xs text-slate-100 font-mono outline-none resize-y"
-          ></textarea>
+          <div class="h-36">
+            <SqlCodeEditor
+              id="view-query"
+              bind:value={selectQuery}
+              placeholder="SELECT id, name, created_at FROM users WHERE status = 'active'"
+            />
+          </div>
         </div>
 
         <!-- DDL Preview -->

@@ -2,6 +2,7 @@
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
   import Icon from '../common/Icon.svelte';
+  import SqlCodeEditor from '../editor/SqlCodeEditor.svelte';
 
   let eventName = $state('');
   let scheduleType = $state<'EVERY' | 'AT'>('EVERY');
@@ -225,13 +226,13 @@
             <span>Event Body Statements *</span>
             <span class="text-[10px] text-slate-500 font-mono">DO &lt;statement&gt; or BEGIN ... END</span>
           </label>
-          <textarea
-            id="event-body"
-            bind:value={body}
-            rows="6"
-            placeholder="BEGIN\n  DELETE FROM audit_logs WHERE created_at < DATE_SUB(NOW(), INTERVAL 90 DAY);\nEND"
-            class="w-full bg-[#090d16] border border-[#334155] focus:border-purple-500 rounded p-2.5 text-xs text-slate-100 font-mono outline-none resize-y"
-          ></textarea>
+          <div class="h-44">
+            <SqlCodeEditor
+              id="event-body"
+              bind:value={body}
+              placeholder={'BEGIN\n  DELETE FROM audit_logs WHERE created_at < DATE_SUB(NOW(), INTERVAL 90 DAY);\nEND'}
+            />
+          </div>
         </div>
 
         <!-- DDL Preview -->

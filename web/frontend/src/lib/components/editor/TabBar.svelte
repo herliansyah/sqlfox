@@ -16,6 +16,10 @@
     tabId: string;
   } | null>(null);
 
+  function hasDraft(tab: { sql: string; isTableViewer?: boolean; isProcesslist?: boolean; isErdCanvas?: boolean; isFlightRecorder?: boolean; isVariables?: boolean }): boolean {
+    return !tab.isTableViewer && !tab.isProcesslist && !tab.isErdCanvas && !tab.isFlightRecorder && !tab.isVariables && tab.sql.trim().length > 0;
+  }
+
   // Enterprise tab width estimator: font-mono text-[11px] + padding + icon + close button
   function estimateTabWidth(title: string): number {
     const charWidth = 7.2;
@@ -213,6 +217,10 @@
           {tab.title}
         </span>
 
+        {#if hasDraft(tab)}
+          <span class="ml-1.5 w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" title="SQL draft"></span>
+        {/if}
+
         <!-- Close Action -->
         {#if appState.tabs.length > 1}
           <button
@@ -397,6 +405,10 @@
               <span class="truncate font-mono text-[11px] text-slate-300 group-hover:text-white" title={tab.title}>
                 {tab.title}
               </span>
+
+              {#if hasDraft(tab)}
+                <span class="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" title="SQL draft"></span>
+              {/if}
 
               {#if tab.database}
                 <span class="shrink-0 px-1 py-0.2 rounded text-[9px] font-mono bg-slate-800 text-amber-400/80 border border-slate-700/60" title="Target Database">

@@ -2,6 +2,7 @@
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
   import Icon from '../common/Icon.svelte';
+  import SqlCodeEditor from '../editor/SqlCodeEditor.svelte';
 
   interface RoutineParam {
     mode: 'IN' | 'OUT' | 'INOUT';
@@ -281,13 +282,13 @@
             <span>Routine Body Statements *</span>
             <span class="text-[10px] text-slate-500 font-mono">BEGIN ... END block</span>
           </label>
-          <textarea
-            id="routine-body"
-            bind:value={body}
-            rows="6"
-            placeholder="BEGIN\n  SELECT * FROM users;\nEND"
-            class="w-full bg-[#090d16] border border-[#334155] focus:border-sky-500 rounded p-2.5 text-xs text-slate-100 font-mono outline-none resize-y"
-          ></textarea>
+          <div class="h-44">
+            <SqlCodeEditor
+              id="routine-body"
+              bind:value={body}
+              placeholder={'BEGIN\n  SELECT * FROM users;\nEND'}
+            />
+          </div>
         </div>
 
         <!-- DDL Preview -->

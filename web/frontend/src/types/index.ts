@@ -103,6 +103,14 @@ export interface SchemaCatalog {
   events?: EventMetadata[];
 }
 
+export interface QuerySnippet {
+  id: string;
+  title: string;
+  description?: string;
+  sql: string;
+  tags: string[];
+}
+
 export interface StatementEstimate {
   statement_index: number;
   sql: string;
@@ -258,7 +266,6 @@ export interface EditorTab {
   sortCol?: string | null;
   sortDir?: 'ASC' | 'DESC' | null;
   explainResult?: any;
-  databaseScope?: string;
   multiResults?: QueryExecutionResult[];
   activeResultIndex?: number;
   streamBatchOffset?: number;

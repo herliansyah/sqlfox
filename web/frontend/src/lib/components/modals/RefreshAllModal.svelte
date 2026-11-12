@@ -35,13 +35,14 @@
 
     isRefreshing = true;
     progressPercent = 0;
+    const sessionId = appState.activeSessionId;
     const dbs = appState.availableDatabases.length > 0 ? appState.availableDatabases : [appState.currentDatabase];
 
     for (let i = 0; i < dbs.length; i++) {
       const db = dbs[i];
       currentDbProgress = `Refreshing catalog for '${db}'...`;
       try {
-        await api.getSchema(appState.activeSessionId, db);
+        await appState.getSchemaCatalog(sessionId, db);
       } catch (_) {}
       progressPercent = Math.round(((i + 1) / dbs.length) * 100);
     }

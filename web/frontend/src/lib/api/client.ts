@@ -6,6 +6,7 @@ import type {
   InspectionResult,
   ProcesslistThread,
   TablePartition,
+  QuerySnippet,
 } from '../../types';
 
 class ApiClient {
@@ -161,11 +162,12 @@ class ApiClient {
   async executeQuery(
     sessionId: string,
     sql: string,
-    confirmed = false
+    confirmed = false,
+    database?: string
   ): Promise<QueryExecutionResult> {
     return this.request(`/session/${sessionId}/execute`, {
       method: 'POST',
-      body: JSON.stringify({ sql, confirmed }),
+      body: JSON.stringify({ sql, confirmed, database }),
     });
   }
 
@@ -182,10 +184,10 @@ class ApiClient {
     });
   }
 
-  async explainQuery(sessionId: string, sql: string): Promise<any> {
+  async explainQuery(sessionId: string, sql: string, database?: string): Promise<any> {
     return this.request(`/session/${sessionId}/explain`, {
       method: 'POST',
-      body: JSON.stringify({ sql }),
+      body: JSON.stringify({ sql, database }),
     });
   }
 
@@ -391,10 +393,16 @@ class ApiClient {
     return this.request('/snippets');
   }
 
-  async saveSnippet(snippet: { id?: string; title: string; description?: string; sql: string; tags?: string[] }): Promise<any> {
+  async saveSnippet(snippet: Partial<QuerySnippet> & { title: string; sql: string }): Promise<QuerySnippet> {
     return this.request('/snippets', {
       method: 'POST',
-      body: JSON.stringify(snippet),
+      body: JSON.stringify({
+        id: snippet.id,
+        title: snippet.title,
+        description: snippet.description,
+        sql_content: snippet.sql,
+        tags: (snippet.tags || []).join(', '),
+      }),
     });
   }
 

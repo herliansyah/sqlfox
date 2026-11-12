@@ -50,8 +50,10 @@
   import AuditDrawer from './lib/components/activity/AuditDrawer.svelte';
   import FkPeekPopover from './lib/components/grid/FkPeekPopover.svelte';
   import { appState } from './lib/stores/appState.svelte';
+  import { onDestroy } from 'svelte';
+  import { formatSQL } from './lib/utils/sqlFormatter';
 
-  let editorSplitPercent = $state(45);
+  let editorSplitPercent = $state(Math.max(15, Math.min(85, Number(localStorage.getItem('sqlfox_svelte_editor_split')) || 45)));
   let isDraggingSplitter = $state(false);
 
   function startDrag() {
@@ -73,15 +75,54 @@
     isDraggingSplitter = false;
     window.removeEventListener('mousemove', onDrag);
     window.removeEventListener('mouseup', stopDrag);
+    localStorage.setItem('sqlfox_svelte_editor_split', String(editorSplitPercent));
   }
+
+  function resetSplitter() {
+    editorSplitPercent = 50;
+    localStorage.setItem('sqlfox_svelte_editor_split', '50');
+  }
+
+  onDestroy(stopDrag);
 
   function handleGlobalKeyDown(e: KeyboardEvent) {
     const isCtrl = e.ctrlKey || e.metaKey;
+    const target = e.target as HTMLElement | null;
+    const inCodeMirror = !!target?.closest('.cm-editor');
+    const inTextControl = inCodeMirror || !!target?.closest('input, textarea, [contenteditable="true"]');
+    if (e.defaultPrevented) return;
 
-    // Ctrl + Enter: Execute whole script (Shift+Enter is handled by CodeMirror to execute statement at cursor)
-    if (isCtrl && !e.shiftKey && e.key === 'Enter') {
+    // CodeMirror owns editor shortcuts while focused; never dispatch them twice globally.
+    if (e.key === 'F5' && !inTextControl) {
       e.preventDefault();
       appState.executeCurrentTab();
+      return;
+    }
+    if (isCtrl && e.key === 'Enter' && !inCodeMirror) {
+      e.preventDefault();
+      if (e.altKey) appState.executeCurrentTab();
+      else if (e.shiftKey) appState.explainCurrentTab(appState.getEditorTargetSql() ?? undefined);
+      else appState.executeCurrentTab(appState.getEditorTargetSql() ?? undefined);
+      return;
+    }
+    if (isCtrl && e.shiftKey && e.key.toLowerCase() === 'f' && !inCodeMirror) {
+      e.preventDefault();
+      if (appState.activeTab?.sql) appState.activeTab.sql = formatSQL(appState.activeTab.sql);
+      return;
+    }
+    if (isCtrl && e.shiftKey && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      appState.openSnippetsModal();
+      return;
+    }
+    if (isCtrl && e.shiftKey && e.key.toLowerCase() === 'c' && appState.isTransactionActive) {
+      e.preventDefault();
+      appState.executeTransaction('COMMIT');
+      return;
+    }
+    if (isCtrl && e.shiftKey && e.key.toLowerCase() === 'r' && appState.isTransactionActive) {
+      e.preventDefault();
+      appState.executeTransaction('ROLLBACK');
       return;
     }
 
@@ -116,7 +157,7 @@
     // ?: Shortcuts Modal (when not in an input/textarea)
     if (
       e.key === '?' &&
-      !['INPUT', 'TEXTAREA'].includes((document.activeElement?.tagName || ''))
+      !inTextControl
     ) {
       e.preventDefault();
       appState.isShortcutsModalOpen = !appState.isShortcutsModalOpen;
@@ -141,7 +182,10 @@
       if (appState.isDumpModalOpen) appState.isDumpModalOpen = false;
       if (appState.isStructureSyncModalOpen) appState.isStructureSyncModalOpen = false;
       if (appState.isRunSqlModalOpen) appState.isRunSqlModalOpen = false;
-      if (appState.isSnippetsModalOpen) appState.isSnippetsModalOpen = false;
+      if (appState.isSnippetsModalOpen) {
+        appState.pendingSnippet = null;
+        appState.isSnippetsModalOpen = false;
+      }
       if (appState.isCsvImportModalOpen) appState.isCsvImportModalOpen = false;
       if (appState.isPrivilegeMatrixOpen) appState.isPrivilegeMatrixOpen = false;
       if (appState.isDbDiagnosticsOpen) appState.isDbDiagnosticsOpen = false;
@@ -159,8 +203,8 @@
       if (appState.isRefreshAllOpen) appState.isRefreshAllOpen = false;
       if (appState.isImpactPreviewOpen) appState.isImpactPreviewOpen = false;
       if (appState.isAuditDrawerOpen) appState.isAuditDrawerOpen = false;
-      if (appState.ddlReviewModal.isOpen) appState.ddlReviewModal.isOpen = false;
-      if (appState.fkPeek.isOpen) appState.fkPeek.isOpen = false;
+      if (appState.ddlReview.isOpen) appState.ddlReview.isOpen = false;
+      if (appState.fkPeekState.isOpen) appState.fkPeekState.isOpen = false;
       if (appState.nativeDialog.isOpen) {
         if (appState.nativeDialog.resolve) appState.nativeDialog.resolve(false);
         appState.nativeDialog.isOpen = false;
@@ -212,6 +256,7 @@
           <div
             id="workspace-pane-splitter"
             onmousedown={startDrag}
+            ondblclick={resetSplitter}
             role="separator"
             tabindex="-1"
             aria-orientation="horizontal"

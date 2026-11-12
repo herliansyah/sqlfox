@@ -3,7 +3,15 @@
   import Icon from '../common/Icon.svelte';
 
   const shortcuts = [
-    { key: 'Ctrl + Enter', desc: 'Execute entire SQL script or selected query' },
+    { key: 'Ctrl / Cmd + Enter', desc: 'Execute selected SQL or statement at cursor' },
+    { key: 'Ctrl / Cmd + Alt + Enter / F5', desc: 'Execute all statements in worksheet' },
+    { key: 'Ctrl / Cmd + Shift + Enter', desc: 'Explain selected SQL or statement at cursor' },
+    { key: 'Ctrl / Cmd + Shift + F', desc: 'Format selected SQL or statement at cursor' },
+    { key: 'Ctrl + Space', desc: 'Open schema-aware SQL autocomplete' },
+    { key: 'Ctrl / Cmd + Shift + S', desc: 'Open query snippets' },
+    { key: 'Ctrl / Cmd + Shift + C / R', desc: 'Commit / rollback active transaction' },
+    { key: 'Ctrl / Cmd + F', desc: 'Search inside SQL editor' },
+    { key: 'Ctrl / Cmd + Z / Shift + Z', desc: 'Undo / redo editor change' },
     { key: 'Ctrl + K', desc: 'Open Command Palette' },
     { key: 'Ctrl + B', desc: 'Toggle Sidebar visibility' },
     { key: 'Ctrl + T', desc: 'Open new SQL query tab' },

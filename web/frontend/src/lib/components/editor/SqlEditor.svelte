@@ -4,18 +4,15 @@
   import { api } from '../../api/client';
   import { formatSQL } from '../../utils/sqlFormatter';
   import Icon from '../common/Icon.svelte';
+  import type { CodeMirrorController } from '../../actions/codemirror';
+  import type { QuerySnippet } from '../../types';
+  import { parseSnippetVariables } from '../../utils/snippets';
 
+  // ponytail: only the tab identity drives the editor shell. Binding the editor to
+  // `currentTab.sql` re-rendered the whole component on every keystroke, which was the
+  // main source of input lag; the CodeMirror document is the source of truth instead.
   let currentTab = $derived(appState.activeTab);
-
-  let editorSchema = $derived.by(() => {
-    const map: Record<string, string[]> = {};
-    if (appState.catalog?.tables) {
-      for (const t of appState.catalog.tables) {
-        map[t.name] = (t.columns || []).map((c) => (typeof c === 'string' ? c : c.name));
-      }
-    }
-    return map;
-  });
+  let activeTabId = $derived(appState.activeTab?.id);
 
   // AI Copilot state
   let showAiAssistant = $state(false);
@@ -23,72 +20,92 @@
   let aiResponse = $state('');
   let isAiLoading = $state(false);
 
-  let saveDebounceTimer: any = null;
+  let editor = $state<CodeMirrorController | null>(null);
+  let saveDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+
+  // ponytail: re-measure only when the tab actually changes; typing must not trigger a
+  // full component re-render (that caused visible input lag).
+  $effect(() => {
+    const tabId = currentTab?.id;
+    if (!tabId) return;
+    editor?.requestMeasure();
+  });
+
+  function handleEditorReady(controller: CodeMirrorController | null) {
+    editor = controller;
+    appState.setEditorInserter(controller ? controller.insertAtSelection : null);
+    appState.setEditorTargetProvider(controller ? () => controller.getTarget().text : null);
+  }
+
   function handleSqlChange(newSql: string) {
-    if (currentTab) {
-      currentTab.sql = newSql;
-      if (saveDebounceTimer) clearTimeout(saveDebounceTimer);
-      saveDebounceTimer = setTimeout(() => {
-        appState.saveTabsState();
-      }, 500);
-    }
+    if (!currentTab) return;
+    currentTab.sql = newSql;
+    if (saveDebounceTimer) clearTimeout(saveDebounceTimer);
+    saveDebounceTimer = setTimeout(() => appState.saveTabsState(), 350);
   }
 
   function handleExecute() {
-    appState.executeCurrentTab();
+    if (editor) appState.executeCurrentTab(editor.getTarget().text);
+    else appState.executeCurrentTab();
   }
 
-  function handleFormat() {
-    if (!currentTab || !currentTab.sql) return;
-    const formatted = formatSQL(currentTab.sql);
-    currentTab.sql = formatted;
+  function handleExecuteAll() {
+    appState.executeCurrentTab(editor?.getDocument());
+  }
+
+  function handleExplain() {
+    if (editor) appState.explainCurrentTab(editor.getTarget().text);
+    else appState.explainCurrentTab();
+  }
+
+  function handleFormat(target?: { text: string }) {
+    const sql = target?.text ?? currentTab?.sql ?? '';
+    if (!sql.trim()) return;
+    const formatted = formatSQL(sql);
+    if (target && editor) {
+      editor.replaceTarget(formatted);
+    } else if (currentTab) {
+      currentTab.sql = formatted;
+    }
     appState.showToast('Formatted SQL query', 'info');
   }
 
-  async function handleStartTransaction() {
-    if (!appState.activeSessionId) return;
-    try {
-      const res = await api.executeQuery(appState.activeSessionId, 'START TRANSACTION;', false);
-      if (res.error) {
-        appState.showToast(`Transaction failed to start: ${res.error}`, 'error');
-        return;
-      }
-      appState.isTransactionActive = true;
-      appState.showToast('Transaction started (Uncommitted)', 'info');
-    } catch (err: any) {
-      appState.showToast(`Error: ${err.message}`, 'error');
+  function handleSnippet(snippet: QuerySnippet, insert: (sql: string) => void) {
+    const variables = parseSnippetVariables(snippet.sql);
+    if (variables.length === 0) {
+      insert(snippet.sql);
+      return;
     }
+    appState.requestSnippetParameters(snippet, insert);
+  }
+
+  function quoteIdentifier(name: string): string {
+    const clean = name.replace(/^[`"\[]+|[`"\]]+$/g, '');
+    const needsQuoting = !/^[a-zA-Z_][a-zA-Z0-9_$]*$/.test(clean);
+    if (appState.activeConnection?.driver === 'postgres' || appState.activeConnection?.driver === 'sqlite') {
+      return needsQuoting ? `"${clean.replace(/"/g, '""')}"` : clean;
+    }
+    return needsQuoting ? `\`${clean.replace(/`/g, '``')}\`` : clean;
+  }
+
+  function handleTabScopeChange(event: Event) {
+    if (!currentTab) return;
+    const database = (event.target as HTMLSelectElement).value;
+    currentTab.database = database;
+    void appState.ensureEditorCatalog(database).catch(() => {});
+    appState.saveTabsState();
+  }
+
+  async function handleStartTransaction() {
+    await appState.executeTransaction('START TRANSACTION');
   }
 
   async function handleCommit() {
-    if (!appState.activeSessionId) return;
-    try {
-      const res = await api.executeQuery(appState.activeSessionId, 'COMMIT;', false);
-      if (res.error) {
-        appState.showToast(`Commit failed: ${res.error}`, 'error');
-        return;
-      }
-      appState.isTransactionActive = false;
-      appState.showToast('Transaction committed successfully', 'success');
-      await appState.refreshCatalog();
-    } catch (err: any) {
-      appState.showToast(`Error: ${err.message}`, 'error');
-    }
+    await appState.executeTransaction('COMMIT');
   }
 
   async function handleRollback() {
-    if (!appState.activeSessionId) return;
-    try {
-      const res = await api.executeQuery(appState.activeSessionId, 'ROLLBACK;', false);
-      if (res.error) {
-        appState.showToast(`Rollback failed: ${res.error}`, 'error');
-        return;
-      }
-      appState.isTransactionActive = false;
-      appState.showToast('Transaction rolled back', 'warning');
-    } catch (err: any) {
-      appState.showToast(`Error: ${err.message}`, 'error');
-    }
+    await appState.executeTransaction('ROLLBACK');
   }
 
   async function handleAiSubmit(promptToRun?: string) {
@@ -130,7 +147,7 @@
         onclick={handleExecute}
         disabled={currentTab?.isExecuting}
         class="flex items-center space-x-1.5 px-3 py-1 rounded bg-sky-500 hover:bg-sky-400 disabled:opacity-50 text-slate-950 font-bold text-xs transition shadow-[0_0_12px_rgba(56,189,248,0.35)]"
-        title="Execute Query (Ctrl+Enter)"
+        title="Execute selected SQL or statement at cursor (Ctrl+Enter)"
       >
         {#if currentTab?.isExecuting}
           <Icon name="refresh-cw" class="w-3.5 h-3.5 animate-spin" />
@@ -140,6 +157,17 @@
           <span>Execute</span>
         {/if}
         <span class="text-[9px] text-slate-900/80 bg-sky-400 px-1 py-0.2 rounded font-mono ml-1">Ctrl+Enter</span>
+      </button>
+
+      <!-- Run All Button -->
+      <button
+        onclick={handleExecuteAll}
+        disabled={currentTab?.isExecuting}
+        class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-50 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs flex items-center space-x-1.5 transition shadow-sm"
+        title="Execute All Statements (Ctrl+Alt+Enter / F5)"
+      >
+        <Icon name="play" class="w-3.5 h-3.5 text-emerald-400" />
+        <span>Run All</span>
       </button>
 
       <!-- Cancel Button (visible when query is running) -->
@@ -156,7 +184,7 @@
 
       <!-- Explain Plan Button -->
       <button
-        onclick={() => appState.explainCurrentTab()}
+        onclick={handleExplain}
         disabled={currentTab?.isExecuting}
         class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs flex items-center space-x-1.5 transition shadow-sm"
         title="Generate Query Execution Plan (EXPLAIN)"
@@ -189,7 +217,7 @@
 
       <!-- Format SQL Button -->
       <button
-        onclick={handleFormat}
+        onclick={() => handleFormat(editor?.getTarget())}
         disabled={currentTab?.isExecuting || !currentTab?.sql}
         class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-40 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs flex items-center space-x-1.5 transition shadow-sm"
         title="Format & Beautify SQL (Ctrl+Shift+F)"
@@ -217,10 +245,8 @@
         <div class="flex items-center space-x-1 px-2 py-0.5 rounded bg-slate-900 border border-slate-700/80 text-[11px] font-mono text-slate-300" title="Tab-Specific Database Scope (ADR 0055)">
           <span class="text-slate-500">scope:</span>
           <select
-            value={currentTab?.databaseScope || appState.currentDatabase}
-            onchange={(e) => {
-              if (currentTab) currentTab.databaseScope = (e.target as HTMLSelectElement).value;
-            }}
+            value={currentTab?.database || appState.currentDatabase}
+            onchange={handleTabScopeChange}
             class="bg-transparent text-sky-400 font-bold focus:outline-none cursor-pointer text-xs"
           >
             {#each appState.availableDatabases as db}
@@ -307,23 +333,26 @@
 
   <!-- CodeMirror 6 Editor Container -->
   {#if currentTab}
-    {#key currentTab.id}
-      <div
-        class="flex-1 overflow-hidden"
-        use:codemirror={{
-          doc: currentTab.sql,
-          dialect: appState.activeConnection?.driver,
-          schema: editorSchema,
-          tables: appState.catalog?.tables,
-          databases: appState.catalog?.databases,
-          snippets: appState.snippets,
-          onExecute: handleExecute,
-          onExecuteAtCursor: (stmt) => appState.executeStatementAtCursor(stmt),
-          onFormat: handleFormat,
-          onChange: handleSqlChange,
-        }}
-      ></div>
-    {/key}
+    <div
+      class="flex-1 overflow-hidden"
+      use:codemirror={{
+        id: currentTab.id,
+        doc: currentTab.sql,
+        dialect: appState.activeConnection?.driver,
+        activeDatabase: currentTab.database || appState.currentDatabase,
+        catalogs: appState.catalogs,
+        snippets: appState.snippets,
+        loadCatalog: appState.ensureEditorCatalog.bind(appState),
+        quoteIdentifier,
+        onExecute: handleExecute,
+        onExecuteAll: handleExecuteAll,
+        onExplain: handleExplain,
+        onFormat: handleFormat,
+        onSnippet: handleSnippet,
+        onChange: handleSqlChange,
+        onReady: handleEditorReady,
+      }}
+    ></div>
   {/if}
 
   <!-- Explain Plan Drawer (if active) -->

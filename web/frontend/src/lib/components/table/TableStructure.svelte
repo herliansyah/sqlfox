@@ -308,7 +308,7 @@
         .filter((s) => s.length > 0 && !s.startsWith('--'));
 
       for (const sql of stmts) {
-        await api.executeQuery(connId, sql, appState.currentDatabase || undefined);
+        await api.executeQuery(connId, sql, false, appState.currentDatabase || undefined);
       }
 
       appState.showToast(`Table "${tableMeta?.name}" structure updated successfully!`, 'success');
