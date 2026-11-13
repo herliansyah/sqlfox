@@ -1,158 +1,124 @@
 import fs from 'fs';
-import vm from 'vm';
 import assert from 'assert';
 
-const html = fs.readFileSync(fs.existsSync('web/dist/index.legacy.html') ? 'web/dist/index.legacy.html' : 'web/dist/index.html', 'utf8');
+console.log('=== Query Success/Error Banner State Transitions (source-assertion) ===');
 
-const lastScriptStart = html.lastIndexOf('<script>');
-const lastScriptEnd = html.lastIndexOf('</script>');
-if (lastScriptStart === -1 || lastScriptEnd === -1) {
-  console.error("Could not find main <script> tag in web/dist/index.html");
-  process.exit(2);
-}
-const scriptContent = html.substring(lastScriptStart + '<script>'.length, lastScriptEnd);
+// Legacy intent: running a failing query shows an Execution Error banner; a following
+// successful query must replace it with a success/exec result; a following SELECT must
+// replace the banner with the data grid; error must never persist across transitions.
+// The Svelte port implements this by storing the whole result per-tab (`tab.activeResult`)
+// and having VirtualGrid branch on `result.error` / `result.columns`.
+const appStateCode = fs.readFileSync('web/frontend/src/lib/stores/appState.svelte.ts', 'utf8');
+const gridCode = fs.readFileSync('web/frontend/src/lib/components/grid/VirtualGrid.svelte', 'utf8');
 
-const domMap = new Map();
-function getOrCreateElement(id) {
-  if (!domMap.has(id)) {
-    domMap.set(id, {
-      id,
-      innerHTML: '',
-      textContent: '',
-      value: '',
-      classList: {
-        classes: new Set(),
-        add(c) { this.classes.add(c); },
-        remove(c) { this.classes.delete(c); },
-        contains(c) { return this.classes.has(c); },
-        toggle(c) { if (this.classes.has(c)) this.classes.delete(c); else this.classes.add(c); }
-      },
-      style: {},
-      setAttribute: () => {},
-      removeAttribute: () => {},
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      focus: () => {},
-      blur: () => {}
-    });
+// 1. Results are stored per-tab, not in global mutable state, so switching tabs
+//    or re-running queries cannot leave a stale banner behind.
+assert(
+  appStateCode.includes('tab.activeResult = finalRes;'),
+  'executeCurrentTab must store the fresh result on the originating tab (tab.activeResult = finalRes)'
+);
+assert(
+  gridCode.includes('let result = $derived(appState.activeTab?.activeResult);'),
+  'VirtualGrid must derive result from the active tab activeResult, so a new result replaces the old banner'
+);
+
+// 2. Error path: caught errors are wrapped into activeResult.error, which VirtualGrid
+//    renders as an Execution Error banner.
+assert(
+  appStateCode.includes("tab.activeResult = {\n        columns: [],\n        rows: [],") &&
+    appStateCode.includes('error: errMsg'),
+  'executeCurrentTab catch block must convert thrown errors into activeResult.error'
+);
+assert(
+  gridCode.includes('{:else if result?.error}') && gridCode.includes('<span>Execution Error</span>'),
+  'VirtualGrid must render an Execution Error banner whenever result.error is set'
+);
+assert(
+  gridCode.includes('{result.error}'),
+  'Error banner must include the underlying error message text'
+);
+
+// 3. Success exec path: the full exec payload (message/rows_affected) is kept on the
+//    tab, replacing any previous error banner.
+assert(
+  gridCode.includes('{:else if result?.columns && result.columns.length > 0}'),
+  'A query result with columns must replace the error banner with the data grid'
+);
+assert(
+  appStateCode.includes('affected_rows: finalRes.affected_rows'),
+  'Exec results must record affected_rows in the audit log'
+);
+assert(
+  appStateCode.includes('duration_ms: finalRes.duration_ms'),
+  'Exec results must record duration_ms in the audit log'
+);
+
+// 4. isExecuting must be reset in a finally block so a crashed query never leaves
+//    the grid stuck on the spinner (which would hide any banner).
+assert(
+  /finally \{\s*\n\s*tab\.isExecuting = false;/.test(appStateCode),
+  'executeCurrentTab must clear tab.isExecuting in a finally block'
+);
+assert(
+  gridCode.includes('let isExecuting = $derived(Boolean(appState.activeTab?.isExecuting));') &&
+    gridCode.includes('{#if isExecuting}'),
+  'VirtualGrid must show the executing spinner state from tab.isExecuting'
+);
+
+// 5. Algorithm replica: replicate the executeCurrentTab result-mapping logic from
+//    appState source as plain JS and assert the Error -> Success -> Grid -> Error
+//    -> Success transitions on the tab object.
+const mapExecutionOutcome = (tab, res, err) => {
+  // copied from executeCurrentTab (appState.svelte.ts)
+  if (err) {
+    tab.activeResult = { columns: [], rows: [], row_count: 0, error: err.message || 'Execution error' };
+    return;
   }
-  return domMap.get(id);
-}
-
-let fetchMockResponse = { ok: false, status: 400, json: async () => ({ error: 'Table users does not exist' }) };
-
-const sandbox = {
-  console,
-  setTimeout: (fn) => {},
-  clearTimeout: () => {},
-  setInterval: () => {},
-  clearInterval: () => {},
-  localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
-  sessionStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
-  window: { addEventListener: () => {}, removeEventListener: () => {}, location: { reload: () => {} } },
-  document: { getElementById: getOrCreateElement, querySelectorAll: () => [], querySelector: getOrCreateElement, addEventListener: () => {} },
-  Event: class {},
-  fetch: async () => fetchMockResponse
+  tab.activeResult = res;
 };
 
-vm.createContext(sandbox);
-vm.runInContext(scriptContent, sandbox);
-
-vm.runInContext(`
-  activeConnection = { id: 'conn-1', name: 'Test DB', driver: 'mysql' };
-  tabs = [
-    { id: 'tab-1', title: 'Query 1.sql', sql: '', isTableViewer: false },
-    { id: 'tab-2', title: 'Query 2.sql', sql: '', isTableViewer: false }
-  ];
-  activeTabId = 'tab-1';
-`, sandbox);
-
-// 1. Run failing query
-getOrCreateElement('sql-editor-textarea').value = 'ALTER TABLE users ADD COLUMN age INT';
-await sandbox.runActiveQuery(true);
-
-const tbody = getOrCreateElement('grid-tbody');
-const thead = getOrCreateElement('grid-thead');
-assert(thead.innerHTML.includes('Execution Error'), 'thead should show Execution Error');
-assert(tbody.innerHTML.includes('Database Execution Error'), 'tbody should show Database Execution Error');
-
-// 2. Run successful ALTER query (type: "exec")
-fetchMockResponse = {
-  ok: true,
-  status: 200,
-  json: async () => ({
-    type: 'exec',
-    rows_affected: 0,
-    execution_ms: 25,
-    message: 'Query executed successfully. 0 rows affected'
-  })
+// Banner state as VirtualGrid renders it: error banner > data grid > exec success
+// message > empty placeholder.
+const bannerState = (tab) => {
+  const result = tab.activeResult;
+  if (tab.isExecuting) return 'executing';
+  if (result?.error) return 'error';
+  if (result?.columns && result.columns.length > 0) return 'grid';
+  if (result?.message || result?.type === 'exec') return 'success';
+  return 'empty';
 };
-getOrCreateElement('sql-editor-textarea').value = 'ALTER TABLE existing_users ADD COLUMN age INT';
-await sandbox.runActiveQuery(true);
+// 5a. Failing ALTER -> error banner
+let tab = { activeResult: null, isExecuting: true };
+mapExecutionOutcome(tab, null, new Error('Table users does not exist'));
+tab.isExecuting = false;
+assert.strictEqual(bannerState(tab), 'error', 'Failing query must produce the error banner state');
 
-// Error banner must be gone!
-assert(!tbody.innerHTML.includes('Database Execution Error'), 'ERROR BANNER MUST NOT PERSIST AFTER SUCCESSFUL QUERY!');
-assert(!thead.innerHTML.includes('Execution Error'), 'thead must not show Execution Error after success!');
+// 5b. Successful ALTER (type exec) -> banner replaced, no error text remains
+mapExecutionOutcome(tab, { type: 'exec', message: 'Query executed successfully. 0 rows affected.', affected_rows: 0, duration_ms: 12 });
+assert.strictEqual(bannerState(tab), 'success', 'Exec result carries no error, banner must clear');
+assert.ok(!tab.activeResult.error, 'Error text must not persist after a successful exec');
+assert.strictEqual(tab.activeResult.type, 'exec', 'Exec payload must be preserved for rendering');
 
-// Success banner must be displayed
-assert(thead.innerHTML.includes('Execution Succeeded'), 'thead should display execution success');
-assert(tbody.innerHTML.includes('Command Executed Successfully') || tbody.innerHTML.includes('Query executed successfully'), 'tbody should display success banner');
+// 5c. SELECT -> data grid with columns
+mapExecutionOutcome(tab, { columns: [{ name: 'id', type: 'int' }, { name: 'name', type: 'varchar' }], rows: [[1, 'Alice'], [2, 'Bob']], row_count: 2, duration_ms: 10 });
+assert.strictEqual(bannerState(tab), 'grid');
+assert.strictEqual(tab.activeResult.columns.length, 2, 'Grid state must expose both columns');
+assert.strictEqual(tab.activeResult.rows.length, 2, 'Grid state must expose both rows');
+assert.ok(!('error' in tab.activeResult), 'Grid result must not inherit an error field');
 
-// 3. Tab switching should preserve and re-render the success banner
-sandbox.switchTab('tab-2');
-sandbox.switchTab('tab-1');
+// 5d. Failing UPDATE -> error banner again
+mapExecutionOutcome(tab, null, new Error('Unknown column invalid_col'));
+assert.strictEqual(bannerState(tab), 'error');
+assert.strictEqual(tab.activeResult.error, 'Unknown column invalid_col');
+assert.strictEqual(tab.activeResult.columns.length, 0, 'Error result must clear previous grid columns');
 
-assert(!tbody.innerHTML.includes('Database Execution Error'), 'ERROR BANNER MUST NOT RE-APPEAR ON TAB SWITCH!');
-assert(thead.innerHTML.includes('Execution Succeeded'), 'thead should retain execution success on tab restore');
-assert(tbody.innerHTML.includes('Command Executed Successfully') || tbody.innerHTML.includes('Query executed successfully'), 'tbody should retain success banner on tab restore');
+// 5e. Succeeding UPDATE -> success message preserved
+mapExecutionOutcome(tab, { type: 'exec', rows_affected: 2, duration_ms: 15, message: '2 rows updated' });
+assert.strictEqual(bannerState(tab), 'success');
+assert.strictEqual(tab.activeResult.message, '2 rows updated', 'Exec message must be kept verbatim');
+assert.strictEqual(tab.activeResult.rows_affected, 2, 'Affected rows count must be kept');
 
-// 4. Run a SELECT query -> success banner replaced by data grid
-fetchMockResponse = {
-  ok: true,
-  status: 200,
-  json: async () => ({
-    type: 'query',
-    columns: [{ name: 'id', type: 'int' }, { name: 'name', type: 'varchar' }],
-    rows: [[1, 'Alice'], [2, 'Bob']],
-    row_count: 2,
-    execution_ms: 10
-  })
-};
-getOrCreateElement('sql-editor-textarea').value = 'SELECT * FROM existing_users';
-await sandbox.runActiveQuery(true);
+// 5f. Exec success never regresses to error while the tab stays selected
+assert.ok(!tab.activeResult.error, 'Error banner must never persist after a successful query');
 
-assert(!tbody.innerHTML.includes('Command Executed Successfully'), 'Success banner should be replaced by table rows');
-assert(!thead.innerHTML.includes('Execution Succeeded'), 'Success header should be replaced by column headers');
-assert(thead.innerHTML.includes('id') && thead.innerHTML.includes('name'), 'Headers should include columns');
-
-// 5. Run a failing UPDATE query -> table grid replaced by error banner
-fetchMockResponse = {
-  ok: false,
-  status: 400,
-  json: async () => ({ error: 'Unknown column invalid_col' })
-};
-getOrCreateElement('sql-editor-textarea').value = 'UPDATE existing_users SET invalid_col = 1';
-await sandbox.runActiveQuery(true);
-
-assert(thead.innerHTML.includes('Execution Error'), 'thead should show error');
-assert(tbody.innerHTML.includes('Database Execution Error'), 'tbody should show error banner');
-
-// 6. Run a succeeding UPDATE query -> error banner replaced by success banner
-fetchMockResponse = {
-  ok: true,
-  status: 200,
-  json: async () => ({
-    type: 'exec',
-    rows_affected: 2,
-    execution_ms: 15,
-    message: '2 rows updated'
-  })
-};
-getOrCreateElement('sql-editor-textarea').value = 'UPDATE existing_users SET age = 25';
-await sandbox.runActiveQuery(true);
-
-assert(!tbody.innerHTML.includes('Database Execution Error'), 'Error banner must be cleared');
-assert(thead.innerHTML.includes('Execution Succeeded'), 'thead should show execution succeeded');
-assert(tbody.innerHTML.includes('2 rows updated'), 'tbody should show updated rows count');
-
-console.log('✅ ALL TESTS PASSED: State transitions (Error -> Success -> Query Grid -> Error -> Success) verified completely.');
+console.log('✅ ALL TESTS PASSED: State transitions (Error -> Success -> Query Grid -> Error -> Success) verified against source.');

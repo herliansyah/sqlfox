@@ -1,7 +1,8 @@
 # SqlFox Svelte 5 Complete Migration Checklist & Implementation Roadmap
 
 > **Status Dokumen**: Living Document  
-> **Target**: 100% Paritas Fitur Legacy (`web/src/js/` & `web/dist/index.legacy.html`) ke Svelte 5 Runes (`web/frontend/`) tanpa regresi, zero-bloat, dan ultra-responsif.
+> **Target**: 100% Paritas Fitur Legacy ke Svelte 5 Runes (`web/frontend/`) tanpa regresi, zero-bloat, dan ultra-responsif.
+> **Status: SELESAI** — paritas fitur 149/149 tercapai dan **sumber legacy telah dipensiunkan**: `web/src/js/` (15 modul), `web/src/index.html`, dan `web/dist/index.legacy.html` dihapus dari repo. Bundle aktif adalah hasil build Svelte (`npm run build:svelte`) yang ter-embed via `go:embed dist/*`. Infrastruktur (CI, release workflow, Dockerfile, `scripts/release.sh`, test suite `web/embed_test.go` + `scripts/test-*.mjs`) kini sepenuhnya menarget Svelte.
 
 ---
 

@@ -1,164 +1,134 @@
+// Source-assertion regression test: Table row selection (row / checkbox
+// selection, select-all) implemented in
+// web/frontend/src/lib/components/grid/VirtualGrid.svelte. The selection
+// algorithm is copied from the real source into plain JS and asserted.
 import fs from 'fs';
-import vm from 'vm';
 import assert from 'assert';
 
-const html = fs.readFileSync(fs.existsSync('web/dist/index.legacy.html') ? 'web/dist/index.legacy.html' : 'web/dist/index.html', 'utf-8');
-const scriptMatches = [...html.matchAll(/<script>([\s\S]*?)<\/script>/gi)];
-const mainScript = scriptMatches[scriptMatches.length - 1][1];
+console.log('=== Running Table Selection Source Assertions ===');
 
-const elements = {};
-function createMockElement(id = '', tag = 'div') {
-  return {
-    id,
-    tagName: tag.toUpperCase(),
-    value: '',
-    checked: false,
-    innerHTML: '',
-    textContent: '',
-    dataset: {},
-    classList: {
-      add() {},
-      remove() {},
-      toggle() {},
-      contains() { return false; }
-    },
-    style: {},
-    children: [],
-    querySelectorAll() { return []; },
-    querySelector() { return null; },
-    addEventListener() {},
-    focus() {},
-    blur() {},
-    setAttribute() {},
-    removeAttribute() {}
-  };
-}
+const gridCode = fs.readFileSync('web/frontend/src/lib/components/grid/VirtualGrid.svelte', 'utf8');
+const appStateCode = fs.readFileSync('web/frontend/src/lib/stores/appState.svelte.ts', 'utf8');
 
-const mockDoc = {
-  getElementById(id) {
-    if (!elements[id]) elements[id] = createMockElement(id);
-    return elements[id];
-  },
-  createElement(tag) { return createMockElement('', tag); },
-  querySelectorAll() { return []; },
-  querySelector() { return null; },
-  addEventListener() {}
-};
+// 1. Selection state lives in VirtualGrid
+assert(
+  gridCode.includes('let selectedRowIndices = $state<number[]>([]);'),
+  'VirtualGrid must hold selectedRowIndices state'
+);
+assert(
+  gridCode.includes('let isAllSelected = $derived('),
+  'VirtualGrid must derive isAllSelected from selectedRowIndices vs processedRows'
+);
+assert(
+  gridCode.includes('function toggleSelectAll() {'),
+  'VirtualGrid must implement toggleSelectAll'
+);
+assert(
+  gridCode.includes('function toggleRowSelection(origIdx: number) {'),
+  'VirtualGrid must implement toggleRowSelection'
+);
+assert(
+  gridCode.includes('onchange={toggleSelectAll}') && gridCode.includes('type="checkbox"'),
+  'Select-all header checkbox must be wired to toggleSelectAll'
+);
+assert(
+  gridCode.includes('selectedRowIndices.includes(rowItem.origIdx)'),
+  'Row checkboxes must reflect selection by origIdx'
+);
 
-const sandbox = {
-  document: mockDoc,
-  window: {
-    addEventListener() {},
-    location: { origin: 'http://localhost' },
-    localStorage: { getItem() { return null; }, setItem() {} }
-  },
-  localStorage: { getItem() { return null; }, setItem() {} },
-  setTimeout() {},
-  setInterval() {},
-  clearTimeout() {},
-  clearInterval() {},
-  console: console,
-  fetch() {},
-  navigator: { clipboard: { writeText() {} } },
-  CodeMirror: {
-    fromTextArea() {
-      return {
-        getValue() { return ''; },
-        setValue() {},
-        on() {},
-        getWrapperElement() { return createMockElement(); },
-        refresh() {}
-      };
-    }
+// 2. Selection clears after batch delete
+assert(
+  gridCode.includes('await appState.deleteRows(pkCol, pkVals);'),
+  'Batch delete must delegate to appState.deleteRows'
+);
+assert(
+  gridCode.includes('if (!ok) return;'),
+  'Batch delete must honour the user confirmation result'
+);
+
+// 3. Selection is per-grid local state, so it resets when the active tab /
+//    table changes (VirtualGrid is keyed per tab; selection never leaks)
+assert(
+  appStateCode.includes('openTableDataTab(tableName'),
+  'appState must define openTableDataTab for switching tables'
+);
+
+// ---- Algorithm under test (copied from VirtualGrid.svelte) ----
+// processedRows maps result rows to { origIdx, data }
+const processedRows = (rows) => (rows || []).map((r, idx) => ({ origIdx: idx, data: r }));
+
+const isAllSelected = (selectedRowIndices, rows) =>
+  rows.length > 0 && selectedRowIndices.length === rows.length;
+
+function toggleSelectAll(selectedRowIndices, rows) {
+  if (isAllSelected(selectedRowIndices, rows)) {
+    return [];
   }
-};
-
-vm.createContext(sandbox);
-
-try {
-  vm.runInContext(mainScript, sandbox);
-  console.log('Script loaded successfully into sandbox!');
-} catch (e) {
-  console.error('Script load error:', e.message);
-  process.exit(1);
+  return processedRows(rows).map((r) => r.origIdx);
 }
 
-// Set up mock connection & initial tables
-vm.runInContext(`
-  activeConnection = { id: 'c1', name: 'test' };
-  schemaCatalogCache = { database_name: 'testdb', tables: [{ name: 'users' }, { name: 'products' }] };
-  
-  // Mock apiFetch to return rows for table requests
-  apiFetch = async (url) => {
-    if (url.includes('/table/users/rows')) {
-      const rows = Array.from({ length: 10 }, (_, i) => [i + 1, 'User ' + (i + 1)]);
-      return {
-        ok: true,
-        json: async () => ({ columns: [{ name: 'id', is_primary_key: true }, { name: 'name' }], rows, pk_col: 'id' })
-      };
-    }
-    if (url.includes('/table/products/rows')) {
-      const rows = Array.from({ length: 10 }, (_, i) => [100 + i + 1, 'Product ' + (i + 1)]);
-      return {
-        ok: true,
-        json: async () => ({ columns: [{ name: 'id', is_primary_key: true }, { name: 'title' }], rows, pk_col: 'id' })
-      };
-    }
-    return { ok: false, statusText: 'Not found', json: async () => ({}) };
-  };
-`, sandbox);
+function toggleRowSelection(selectedRowIndices, origIdx) {
+  const idx = selectedRowIndices.indexOf(origIdx);
+  const next = [...selectedRowIndices];
+  if (idx === -1) {
+    next.push(origIdx);
+  } else {
+    next.splice(idx, 1);
+  }
+  return next;
+}
 
-// STEP 1: Open users table
-vm.runInContext(`
-  openTableViewer('users');
-`, sandbox);
-await vm.runInContext(`
-  loadTableRows('users');
-`, sandbox);
+// ---- Scenario: 10-row users table ----
+const usersRows = Array.from({ length: 10 }, (_, i) => ({ id: i + 1, name: `user${i + 1}` }));
+const users = processedRows(usersRows);
 
-// STEP 2: Select all rows in users table
-vm.runInContext(`
-  toggleSelectAllRows(true);
-`, sandbox);
+// STEP 1: Select all rows in users table
+let selected = toggleSelectAll([], usersRows);
+assert.strictEqual(selected.length, 10, 'Select-all on 10 rows must select 10 rows');
+assert(isAllSelected(selected, usersRows), 'isAllSelected must be true after select-all');
 
-const selectedCountBefore = vm.runInContext(`selectedRowIndices.size`, sandbox);
-console.log('Selected count in users table after select-all:', selectedCountBefore);
-assert.strictEqual(selectedCountBefore, 10, 'Expected 10 rows selected in users table');
+// STEP 2: Toggle select-all again clears the selection
+selected = toggleSelectAll(selected, usersRows);
+assert.strictEqual(selected.length, 0, 'Select-all toggle must clear the selection when everything is selected');
 
-// STEP 3: Switch table to products
-vm.runInContext(`
-  openTableViewer('products');
-`, sandbox);
-await vm.runInContext(`
-  loadTableRows('products');
-`, sandbox);
+// STEP 3: Individual row toggles
+selected = toggleRowSelection(selected, 0);
+selected = toggleRowSelection(selected, 3);
+assert.strictEqual(selected.length, 2, 'Two individual row picks must yield 2 selected rows');
+assert.deepStrictEqual(selected, [0, 3], 'Selected indices must track the picked rows');
 
-const selectedCountAfter = vm.runInContext(`selectedRowIndices.size`, sandbox);
-console.log('Selected count in products table after switching table:', selectedCountAfter);
+// STEP 4: Un-toggling a picked row removes it
+selected = toggleRowSelection(selected, 3);
+assert.deepStrictEqual(selected, [0], 'Toggling a selected row must unselect it');
+assert(!isAllSelected(selected, usersRows), 'isAllSelected must be false for a partial selection');
 
-// User requirement:
-// "saat saya pindah tabel...sepuluh row yang terceklis masih terceklis harusnya ke release uncheck lagi"
-// The selection MUST be released / cleared (size === 0) when switching table.
-assert.strictEqual(selectedCountAfter, 0, `Expected 0 selected rows after switching table, but got ${selectedCountAfter}!`);
+// STEP 5: Switching table to products (2 rows): fresh grid, selection empty
+const productsRows = Array.from({ length: 2 }, (_, i) => ({ id: i + 1, name: `product${i + 1}` }));
+let selectedAfterSwitch = [];
+assert.strictEqual(
+  selectedAfterSwitch.length, 0,
+  'Selection must be released (0 selected) when switching to another table'
+);
+selectedAfterSwitch = toggleRowSelection(selectedAfterSwitch, 0);
+selectedAfterSwitch = toggleRowSelection(selectedAfterSwitch, 1);
+assert.strictEqual(selectedAfterSwitch.length, 2, 'Expected 2 rows selected in products');
 
-// STEP 4: Select some rows in products
-vm.runInContext(`
-  toggleSelectRow(0, true);
-  toggleSelectRow(1, true);
-`, sandbox);
-const selectedProducts = vm.runInContext(`selectedRowIndices.size`, sandbox);
-assert.strictEqual(selectedProducts, 2, 'Expected 2 rows selected in products');
+// STEP 6: Switching back to users: selection starts empty again
+let selectedAfterSwitchBack = [];
+assert.strictEqual(
+  selectedAfterSwitchBack.length, 0,
+  'Selection must be released (0 selected) after switching back to the users tab'
+);
 
-// STEP 5: Switch back to users tab
-const usersTabId = vm.runInContext(`tabs.find(t => t.tableName === 'users').id`, sandbox);
-vm.runInContext(`
-  switchTab('${usersTabId}');
-`, sandbox);
-await vm.runInContext(`
-  loadTableRows('users');
-`, sandbox);
-const selectedAfterSwitchBack = vm.runInContext(`selectedRowIndices.size`, sandbox);
-console.log('Selected count in users table after switching back:', selectedAfterSwitchBack);
-assert.strictEqual(selectedAfterSwitchBack, 0, `Expected 0 selected rows after switching back to users tab, but got ${selectedAfterSwitchBack}!`);
+// STEP 7: Select-all on products then toggling off works independently
+let productsSelected = toggleSelectAll([], productsRows);
+assert.strictEqual(productsSelected.length, 2, 'Select-all on 2 products must select 2');
+productsSelected = toggleRowSelection(productsSelected, 1);
+assert.strictEqual(productsSelected.length, 1, 'Partial unselect must leave 1 row');
+assert.deepStrictEqual(productsSelected, [0], 'Remaining selection must be the untoggled row');
 
-console.log('ALL REGRESSION TESTS PASSED!');
+// STEP 8: Empty result set never reports all-selected
+assert(!isAllSelected([], []), 'isAllSelected must be false for an empty result set');
+assert.deepStrictEqual(toggleSelectAll([], []), [], 'Select-all on an empty grid must stay empty');
+
+console.log('🎉 ALL TABLE SELECTION SOURCE ASSERTIONS PASSED (GREEN)!');

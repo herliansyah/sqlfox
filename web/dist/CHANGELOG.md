@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **System Lifecycle Actions in Svelte UI (`web/frontend/src/lib/api/client.ts`, `web/frontend/src/lib/stores/appState.svelte.ts`, `web/frontend/src/lib/components/layout/Header.svelte`, `web/frontend/src/lib/components/modals/CommandPaletteModal.svelte`)**: Added Open in Web Browser (POST `/api/system/open-browser`), Copy App URL, and Shut Down Daemon (POST `/api/system/shutdown`) actions to the header settings menu and the command palette, alongside execute/explain/save-note/AI/readonly palette entries restored from the legacy menu.
+- **Exact Row Count & Grid Edit Modes (`web/frontend/src/lib/stores/appState.svelte.ts`, `web/frontend/src/lib/components/grid/VirtualGrid.svelte`)**: Added request-exact-row-count (per-dialect identifier quoting, `isCountingExact` guard, exact-count pagination totals), a Staged/Auto grid edit-mode segmented control persisted to `localStorage` (`sqlfox_grid_edit_mode`), and auto-commit of staged edits on blur in Auto mode.
+- **Tab Context Menu (`web/frontend/src/lib/components/editor/TabBar.svelte`)**: Restored right-click tab actions — Rename (window.prompt), Duplicate, Close Others, Close Right, Close, and Close All.
+- **Processlist Telemetry Parity (`web/frontend/src/lib/components/dba/ProcesslistView.svelte`)**: Ported root-blocker/waiting row indicators with `border-l-4` accents (no horizontal layout shift), locked mandatory columns, and a persisted column picker (`sqlfox-processlist-hidden-cols`).
+
+### Changed
+- **Test Suite Targets Svelte Bundle (`web/embed_test.go`, `scripts/test-*.mjs`)**: All embedded-UI Go tests and Node regression scripts now verify the Svelte bundle at `web/dist/index.html` and the Svelte sources under `web/frontend/src/`, replacing the retired legacy VM-sandbox harness. Legacy-compatible DOM ids (grid toolbar, export menu, grid context-menu groups, native dialog) preserved for tooling and a11y.
+- **Frontend Build in CI/Release/Docker (`.github/workflows/ci.yml`, `.github/workflows/release.yml`, `Dockerfile`)**: Added explicit Node 20 + `npm ci` + `npm run build:svelte` steps before `go test`/`go build`, with a dedicated `frontend` Docker stage; npm caches enabled via `cache-dependency-path`.
+- **Release Versioning for Svelte (`scripts/release.sh`)**: Version bump now updates `web/frontend/src/lib/stores/appState.svelte.ts` (`appVersion`) and regenerates `web/dist/` via the Svelte build instead of patching retired legacy HTML.
+
+### Removed
+- **Legacy Frontend Source & Build Pipeline (`web/src/js/` (15 modules), `web/src/index.html`, `web/dist/index.legacy.html`, `web/dist/vendor/codemirror/`, legacy Tailwind pipeline, `scripts/build_codemirror.js`)**: Retired the pre-Svelte HTML/JS assembly pipeline (`vm.Script` concatenation, static Tailwind CLI build) — `scripts/build_web.js` is now a thin wrapper around `npm run build:svelte`. Eliminates ~2 MB of dead embedded assets and a duplicated UI source of truth.
+
 ### Fixed
 - **Query Tab Bar Viewport Containment & Enterprise Overflow Dropdown (`web/frontend/src/lib/components/editor/TabBar.svelte`, `web/frontend/src/lib/stores/appState.svelte.ts`)**: Prevented query tabs from exceeding container bounds with `overflow-hidden` on the tab strip. Dynamically derived visible tabs via reactive container width observation (`ResizeObserver`), hid overflowing tabs behind a responsive `»` dropdown menu with count badge, guaranteed active tab visibility via automatic strip swapping, added search filtering and direct tab closing within the overflow popover, and ensured sequential tab naming (`Query N.sql`) to avoid duplicate titles.
 

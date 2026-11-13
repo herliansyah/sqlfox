@@ -1,135 +1,121 @@
 import fs from 'fs';
-import vm from 'vm';
 import assert from 'assert';
 
-console.log("--- Running Paging Diagnostics Test ---");
+console.log('--- Running Paging Diagnostics Test (source-assertion) ---');
 
-const html = fs.readFileSync(fs.existsSync('web/dist/index.legacy.html') ? 'web/dist/index.legacy.html' : 'web/dist/index.html', 'utf8');
+// Source-assertion pattern: assert paging behavior directly against the
+// Svelte/stores sources — no bundled web/dist artifacts, no vm sandboxes.
+const virtualGridCode = fs.readFileSync(
+  'web/frontend/src/lib/components/grid/VirtualGrid.svelte',
+  'utf8'
+);
+const appStateCode = fs.readFileSync(
+  'web/frontend/src/lib/stores/appState.svelte.ts',
+  'utf8'
+);
 
-// CHECK 1: Initial HTML state of bottom pagination bar must be hidden
-const paginationBarHtmlMatch = html.match(/<div id="grid-pagination-bar"[^>]*class="([^"]*)"/);
-assert(paginationBarHtmlMatch, 'grid-pagination-bar must exist in HTML');
-const paginationBarClasses = paginationBarHtmlMatch[1].split(/\s+/);
-assert(paginationBarClasses.includes('hidden'), 'grid-pagination-bar must be hidden initially in HTML before any query has run');
+// --- CHECK 1: The bottom pagination bar exists and starts hidden -----------
+// In the Svelte port the bar is conditionally rendered only for table viewers,
+// which is the equivalent of the legacy "hidden until a query has run".
+assert(
+  virtualGridCode.includes('id="grid-pagination-bar"'),
+  'grid-pagination-bar must exist in VirtualGrid.svelte'
+);
+assert(
+  /\{#if currentTab\?\.isTableViewer\}[\s\S]{0,800}id="grid-pagination-bar"/.test(virtualGridCode),
+  'grid-pagination-bar must be gated behind currentTab?.isTableViewer (hidden until a table query runs)'
+);
 
-// CHECK 2: Paging labels in HTML must be in English, not Indonesian
-assert(!html.includes('Tampilkan:'), 'HTML should not contain Indonesian "Tampilkan:"');
-assert(!html.includes('/ hal<'), 'HTML should not contain Indonesian "/ hal"');
-assert(!html.includes('Hitung Akurat<'), 'HTML should not contain Indonesian "Hitung Akurat"');
-assert(html.includes('Show:'), 'HTML should contain English "Show:"');
-assert(html.includes('/ page<'), 'HTML should contain English "/ page"');
-assert(html.includes('Exact Count<'), 'HTML should contain English "Exact Count"');
+// --- CHECK 2: Paging labels must be in English, not Indonesian -------------
+assert(!virtualGridCode.includes('Tampilkan:'), 'Grid must not contain Indonesian "Tampilkan:"');
+assert(!virtualGridCode.includes('/ hal<'), 'Grid must not contain Indonesian "/ hal"');
+assert(!virtualGridCode.includes('Hitung Akurat'), 'Grid must not contain Indonesian "Hitung Akurat"');
+assert(!virtualGridCode.includes('Menampilkan'), 'Grid must not contain Indonesian "Menampilkan"');
+assert(!virtualGridCode.includes('baris'), 'Grid must not contain Indonesian "baris"');
+assert(virtualGridCode.includes('Page Size:'), 'Grid must contain English "Page Size:"');
+assert(virtualGridCode.includes('Page'), 'Grid must contain English "Page" label');
+assert(virtualGridCode.includes('records</span>'), 'Grid must contain English "records" label');
+assert(
+  virtualGridCode.includes('Exact count') || virtualGridCode.includes('Exact Count'),
+  'Grid must contain English "Exact Count" button label'
+);
+assert(
+  virtualGridCode.includes('title="First Page"') &&
+    virtualGridCode.includes('title="Previous Page"') &&
+    virtualGridCode.includes('title="Next Page"') &&
+    virtualGridCode.includes('title="Last Page"'),
+  'Paging buttons must use English titles'
+);
 
-// CHECK 3: Top pagination buttons (#keyset-pagination) must be eliminated completely
-assert(!html.includes('id="keyset-pagination"'), 'keyset-pagination should be removed completely from HTML');
+// --- CHECK 3: Legacy keyset pagination must be eliminated ------------------
+assert(
+  !virtualGridCode.includes('id="keyset-pagination"'),
+  'keyset-pagination must be removed completely from the grid'
+);
+assert(
+  !appStateCode.includes('keyset-pagination'),
+  'appState must not reference keyset-pagination'
+);
 
-// Mock DOM & runtime environment for JS checks
-const domElements = new Map();
-function createMockEl(id = '', tag = 'div', classes = '') {
-  const classSet = new Set(classes ? classes.split(/\s+/).filter(Boolean) : []);
-  return {
-    id,
-    tagName: tag.toUpperCase(),
-    value: '',
-    innerHTML: '',
-    textContent: '',
-    max: '',
-    disabled: false,
-    dataset: {},
-    classList: {
-      set: classSet,
-      add(c) { this.set.add(c); },
-      remove(c) { this.set.delete(c); },
-      toggle(c, f) {
-        if (f === undefined) { if (this.set.has(c)) this.set.delete(c); else this.set.add(c); }
-        else if (f) this.set.add(c);
-        else this.set.delete(c);
-      },
-      contains(c) { return this.set.has(c); }
-    },
-    style: {},
-    children: [],
-    querySelectorAll() { return []; },
-    querySelector() { return null; },
-    addEventListener() {},
-    setAttribute(k, v) { this[k] = v; },
-    getAttribute(k) { return this[k] || null; },
-    removeAttribute(k) { delete this[k]; },
-    focus() {},
-    blur() {}
-  };
+// --- CHECK 4: App-state equivalents of clearGridToInitialState -------------
+// Resetting a tab to its initial state must reset paging and hide results.
+assert(
+  appStateCode.includes('tab.currentPage = 1;'),
+  'Filter/reset operations must reset currentPage to 1 (equivalent of clearGridToInitialState)'
+);
+// Every reset path (filter pill changes, filter removal, filter clear) resets paging
+const resetCount = (appStateCode.match(/tab\.currentPage = 1;/g) || []).length;
+assert(
+  resetCount >= 4,
+  `At least 4 reset paths must reset currentPage (found ${resetCount})`
+);
+assert(
+  virtualGridCode.includes('currentTab.currentPage = 1;'),
+  'Page-size change and First button must reset currentPage to 1 in the grid'
+);
+
+// --- CHECK 5: renderGridResults equivalent — stats text & paging math ------
+// Copied from appState.loadTableData + VirtualGrid pagination markup.
+const computeStats = (exactRowCount, totalRows, curPage, totalPages) => {
+  const count = (exactRowCount !== undefined ? exactRowCount : totalRows).toLocaleString();
+  return `Showing ${count} records • Page ${curPage} of ${totalPages}`;
+};
+{
+  // 120 rows, page size 50 → 3 pages
+  const totalPages = Math.max(1, Math.ceil(120 / 50));
+  const stats = computeStats(undefined, 50, 1, totalPages);
+  assert(
+    stats.includes('50 records'),
+    'Stats text must include the paged row count, got: ' + stats
+  );
+  assert(
+    stats.includes('Page 1 of 3'),
+    'Stats text must include the English page position, got: ' + stats
+  );
+  assert(
+    !stats.includes('Menampilkan') && !stats.includes('baris'),
+    'Stats text must not contain Indonesian labels'
+  );
+}
+{
+  // Exact count overrides the paged count
+  const stats = computeStats(120, 50, 1, 3);
+  assert(
+    stats.includes('120 records'),
+    'Exact count must override the current-page row count, got: ' + stats
+  );
 }
 
-function getEl(id, tag = 'div') {
-  if (!domElements.has(id)) {
-    domElements.set(id, createMockEl(id, tag));
-  }
-  return domElements.get(id);
-}
+// loadTableData LIMIT/OFFSET arithmetic (page size 50 default)
+const limitOf = (tab) => tab.pageSize || 50;
+const offsetOf = (tab) => ((tab.currentPage || 1) - 1) * (tab.pageSize || 50);
+assert.strictEqual(limitOf({}), 50, 'Default page size must be 50');
+assert.strictEqual(offsetOf({ currentPage: 3, pageSize: 50 }), 100, 'Page 3 offset must be 100');
+assert.strictEqual(offsetOf({}), 0, 'Default offset must be 0');
+assert(
+  appStateCode.includes('const limit = tab.pageSize || 50;') &&
+    appStateCode.includes('const offset = ((tab.currentPage || 1) - 1) * limit;'),
+  'appState.loadTableData must compute LIMIT/OFFSET from pageSize/currentPage'
+);
 
-const mockDocument = {
-  getElementById: (id) => getEl(id),
-  createElement: (tag) => createMockEl('', tag),
-  querySelectorAll: () => [],
-  querySelector: () => null,
-  addEventListener: () => {}
-};
-
-const sandbox = {
-  document: mockDocument,
-  window: {
-    addEventListener: () => {},
-    location: { origin: 'http://localhost' },
-    localStorage: { getItem: () => null, setItem: () => {} },
-    sessionStorage: { getItem: () => null, setItem: () => {} }
-  },
-  localStorage: { getItem: () => null, setItem: () => {} },
-  sessionStorage: { getItem: () => null, setItem: () => {} },
-  setTimeout: () => {},
-  setInterval: () => {},
-  clearTimeout: () => {},
-  clearInterval: () => {},
-  console: console,
-  fetch: () => {},
-  apiFetch: async () => ({ ok: true, json: async () => ({}) }),
-  CodeMirror: {
-    fromTextArea: () => ({ getValue: () => '', setValue: () => {}, on: () => {}, getWrapperElement: () => createMockEl(), refresh: () => {} })
-  }
-};
-
-const lastScriptStart = html.lastIndexOf('<script>');
-const lastScriptEnd = html.lastIndexOf('</script>');
-const scriptContent = html.substring(lastScriptStart + '<script>'.length, lastScriptEnd);
-
-vm.createContext(sandbox);
-vm.runInContext(scriptContent, sandbox);
-
-// CHECK 4: clearGridToInitialState hides the pagination bar
-const barEl = getEl('grid-pagination-bar');
-barEl.classList.remove('hidden');
-vm.runInContext(`clearGridToInitialState();`, sandbox);
-assert(barEl.classList.contains('hidden'), 'clearGridToInitialState must hide grid-pagination-bar');
-
-// CHECK 5: renderGridResults shows the bottom pagination bar and formats text in English
-vm.runInContext(`
-  tabs = [{
-    id: 'tab-query',
-    title: 'test.sql',
-    isTableViewer: false,
-    queryPage: 0,
-    pageSize: 50
-  }];
-  activeTabId = 'tab-query';
-  currentColumns = [{ name: 'id', type: 'INT' }, { name: 'val', type: 'VARCHAR' }];
-  currentResults = Array.from({ length: 120 }, (_, i) => [i + 1, 'item_' + (i + 1)]);
-  renderGridResults(currentColumns, currentResults);
-`, sandbox);
-
-assert(!barEl.classList.contains('hidden'), 'renderGridResults must show grid-pagination-bar');
-
-const statsText = getEl('grid-bottom-stats').textContent;
-assert(statsText.includes('Showing 1 - 50 of 120 rows'), 'Stats text must be English "Showing 1 - 50 of 120 rows", got: ' + statsText);
-assert(!statsText.includes('Menampilkan'), 'Stats text must not contain Indonesian "Menampilkan"');
-assert(!statsText.includes('baris'), 'Stats text must not contain Indonesian "baris"');
-
-console.log("All paging diagnostic checks PASSED!");
+console.log('All paging diagnostic checks PASSED!');

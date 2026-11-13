@@ -1,36 +1,75 @@
 import fs from 'fs';
 import assert from 'assert';
 
-const html = fs.readFileSync(fs.existsSync('web/dist/index.legacy.html') ? 'web/dist/index.legacy.html' : 'web/dist/index.html', 'utf8');
+console.log('=== Testing Connection Hover & Export Dropdown Fixes (source assertions) ===');
+// Source-assertion pattern: assert against the Svelte component sources.
+const virtualGridCode = fs.readFileSync('web/frontend/src/lib/components/grid/VirtualGrid.svelte', 'utf8');
+const headerCode = fs.readFileSync('web/frontend/src/lib/components/layout/Header.svelte', 'utf8');
+const sidebarCode = fs.readFileSync('web/frontend/src/lib/components/layout/Sidebar.svelte', 'utf8');
+const appStateCode = fs.readFileSync('web/frontend/src/lib/stores/appState.svelte.ts', 'utf8');
 
-console.log("=== Testing Connection Hover & Export Dropdown Fixes ===");
+// TEST 1 (legacy 1+2): Grid toolbar must not clip the export dropdown, and the
+// export menu + dropdown container must exist in VirtualGrid.svelte
+assert(
+  !/id="grid-toolbar"[^>]*overflow-x-auto/.test(virtualGridCode),
+  'FAIL: grid-toolbar must not have overflow-x-auto (dropdown clipping)'
+);
+assert(
+  /id="grid-toolbar"[^>]*gap-2/.test(virtualGridCode),
+  'FAIL: grid-toolbar must use gap-based layout with no clipping overflow'
+);
+assert(virtualGridCode.includes('id="export-csv-menu"'), 'FAIL: export-csv-menu must exist');
+assert(virtualGridCode.includes('id="export-csv-dropdown-container"'), 'FAIL: export-csv-dropdown-container must exist');
+assert(
+  /id="export-csv-dropdown-container"[^>]*class="relative"/.test(virtualGridCode),
+  'FAIL: export dropdown container must be position:relative so the menu anchors to it'
+);
+console.log('✅ Test 1 Passed: grid-toolbar does not clip dropdowns; export menu + container exist');
 
-// 1. Grid toolbar overflow check
-assert(!html.includes('id="grid-toolbar" class="h-8 bg-app-surface/40 border-b border-app-border px-3 flex items-center justify-between text-xs text-slate-400 flex-shrink-0 overflow-x-auto'),
-  'FAIL: grid-toolbar must not have overflow-x-auto');
-assert(html.includes('id="grid-toolbar" class="h-8 bg-app-surface/40 border-b border-app-border px-3 flex items-center justify-between text-xs text-slate-400 flex-shrink-0 z-20 gap-3"'),
-  'FAIL: grid-toolbar must have z-20 and non-clipping overflow');
-console.log("✅ Test 1 Passed: grid-toolbar does not clip dropdowns");
+// TEST 2 (legacy 3): Connection tree hover edit button must use opacity-based
+// group-hover reveal, never hidden + group-hover:inline-block
+assert(
+  !/class="hidden group-hover:inline-block[^"]*"[\s\S]{0,200}?title="Edit Connection"/.test(headerCode) &&
+  !/class="hidden group-hover:inline-block[^"]*"[\s\S]{0,200}?title="Edit Connection"/.test(sidebarCode),
+  'FAIL: connection tree edit button must not use hidden group-hover:inline-block'
+);
+assert(
+  headerCode.includes('opacity-0 group-hover:opacity-100') && headerCode.includes('title="Edit Connection"'),
+  'FAIL: header connection tree edit button must use opacity-0 group-hover:opacity-100 transition'
+);
+assert(
+  /opacity-0 group-hover:opacity-100[\s\S]{0,300}?title="Edit Connection"/.test(headerCode),
+  'FAIL: hover-reveal classes must be on the Edit Connection button'
+);
+console.log('✅ Test 2 Passed: connection tree edit button uses opacity-0 group-hover:opacity-100');
 
-// 2. Export CSV dropdown element exists and is styled properly
-assert(html.includes('id="export-csv-menu"'), 'FAIL: export-csv-menu must exist');
-assert(html.includes('id="export-csv-dropdown-container"'), 'FAIL: export-csv-dropdown-container must exist');
-console.log("✅ Test 2 Passed: export dropdown container and menu exist");
+// TEST 3 (legacy 4): Header active-connection badge must open the edit modal on
+// click with a hover edit affordance (no misclickable separate edit btn next to
+// the session switcher)
+assert(
+  !headerCode.includes('session-switcher-edit-btn'),
+  'FAIL: session-switcher-edit-btn must stay removed to avoid misclick with dropdown arrow'
+);
+assert(
+  headerCode.includes('appState.openEditConnectionModal(conn)'),
+  'FAIL: connection entries must open the edit-connection modal via appState.openEditConnectionModal(conn)'
+);
+assert(
+  /appState\.openEditConnectionModal\(conn\)[\s\S]{0,300}?title="Edit Connection"/.test(headerCode),
+  'FAIL: edit affordance must carry the "Edit Connection" title/hover tooltip'
+);
+assert(
+  appStateCode.includes('openEditConnectionModal(conn: ConnectionProfile)'),
+  'FAIL: appState must implement openEditConnectionModal(conn: ConnectionProfile)'
+);
+console.log('✅ Test 3 Passed: header connection rows expose openEditConnectionModal with hover edit affordance');
 
-// 3. Connection tree hover buttons must not use hidden alongside group-hover
-assert(!html.includes('class="hidden group-hover:inline-block hover:text-white px-1 text-xs" title="Edit Connection"'),
-  'FAIL: connection tree edit button must not use hidden group-hover:inline-block');
-assert(html.includes('class="opacity-0 group-hover:opacity-100 hover:text-white px-1 text-xs transition" title="Edit Connection"'),
-  'FAIL: connection tree edit button must use opacity-0 group-hover:opacity-100 transition');
-console.log("✅ Test 3 Passed: connection tree edit button uses opacity-0 group-hover:opacity-100");
+// TEST 4 (legacy 5 continued): the modal itself labels the editing state
+const modalCode = fs.readFileSync('web/frontend/src/lib/components/modals/ConnectionModal.svelte', 'utf8');
+assert(
+  modalCode.includes('Edit Connection: ${name}'),
+  'FAIL: ConnectionModal must show "Edit Connection: <name>" while editing'
+);
+console.log('✅ Test 4 Passed: edit-connection modal renders per-connection edit title');
 
-// 4. Session switcher bar does not have edit button (prevents misclick with dropdown arrow)
-assert(!html.includes('id="session-switcher-edit-btn"'), 'FAIL: session-switcher-edit-btn must be removed to avoid misclick with dropdown arrow');
-console.log("✅ Test 4 Passed: session switcher bar does not have misclickable edit button");
-
-// 5. Header active connection badge has edit button and click affordance
-assert(html.includes("badgeEl.onclick = () => openEditConnModal(conn.id)"), 'FAIL: badgeEl must open edit connection modal on click');
-assert(html.includes("title=\"Edit Connection: ${escapeHtml(conn.name)}\""), 'FAIL: badgeEl must have edit button on hover');
-console.log("✅ Test 5 Passed: header connection badge has hover/click edit affordance");
-
-console.log("\n🎉 ALL TESTS PASSED!");
+console.log('🎉 ALL TESTS PASSED!');

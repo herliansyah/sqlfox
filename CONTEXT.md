@@ -799,7 +799,7 @@ The design and styling invariant enforcing `white-space: nowrap !important;` and
 _Avoid_: Multiline button labels, squished button shapes, colliding controls
 
 **Modular Frontend Pipeline**:
-The build-time assembly process (`scripts/build_web.js`) that decomposes the 30,000+ line web UI into 15 domain JavaScript modules under `web/src/js/`, validates concatenated script syntax in-memory via Node's `vm.Script`, compiles Tailwind CSS statically, and produces `web/dist/index.html` for single-binary embedding.
+The Svelte 5 build pipeline (`scripts/build_web.js` → `npm run build:svelte`) that compiles the `web/frontend/` Svelte runes + TypeScript app with Vite and Tailwind, producing `web/dist/index.html` for single-binary embedding.
 _Avoid_: Webpack bloat, massive single-file edit, unvalidated bundle
 
 **Pre-Compiled Static CSS**:

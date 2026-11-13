@@ -51,6 +51,16 @@ jobs:
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            web/frontend/package-lock.json
+
+      - name: Build Svelte Frontend (embedded into binary)
+        run: |
+          npm ci
+          npm --prefix web/frontend ci
+          npm run build:svelte
 
       - name: Compile Binaries for All Platforms
         run: |

@@ -1,280 +1,86 @@
 import fs from 'fs';
-import vm from 'vm';
 import assert from 'assert';
+// Source-assertion pattern: assert the source wiring of those flows in the Svelte
+// port rather than mocking the network.
+const appStateCode = fs.readFileSync('web/frontend/src/lib/stores/appState.svelte.ts', 'utf8');
+const clientCode = fs.readFileSync('web/frontend/src/lib/api/client.ts', 'utf8');
+const tableViewerCode = fs.readFileSync('web/frontend/src/lib/components/table/TableViewer.svelte', 'utf8');
+const virtualGridCode = fs.readFileSync('web/frontend/src/lib/components/grid/VirtualGrid.svelte', 'utf8');
 
-const html = fs.readFileSync(fs.existsSync('web/dist/index.legacy.html') ? 'web/dist/index.legacy.html' : 'web/dist/index.html', 'utf-8');
-const scriptMatches = [...html.matchAll(/<script>([\s\S]*?)<\/script>/gi)];
-const mainScript = scriptMatches[scriptMatches.length - 1][1];
+// --- TEST 1: client.getTableRows must accept an explicit db parameter and send it
+// as &db=<database> so a cross-db table tab never hits the sidebar's active DB ---
+assert(
+  /getTableRows\(\s*sessionId: string,\s*tableName: string,\s*limit = 50,\s*offset = 0,\s*db\?: string/.test(clientCode),
+  'client.getTableRows must accept a db?: string parameter'
+);
+assert(
+  clientCode.includes('`/session/${sessionId}/table/${encodeURIComponent(tableName)}/rows?limit=${limit}&offset=${offset}`') &&
+  /if \(db\) url \+= `&db=\$\{encodeURIComponent\(db\)\}`;/.test(clientCode),
+  'client.getTableRows must append &db=<encoded database> when a db is given'
+);
+console.log('✅ Test 1 Passed: client.getTableRows scopes row fetches to the requested db');
 
-const elements = {};
-function createMockElement(id = '', tag = 'div') {
-  return {
-    id,
-    tagName: tag.toUpperCase(),
-    value: '',
-    checked: false,
-    innerHTML: '',
-    textContent: '',
-    dataset: {},
-    classList: {
-      add() {},
-      remove() {},
-      toggle() {},
-      contains() { return false; }
-    },
-    style: {},
-    children: [],
-    querySelectorAll() { return []; },
-    querySelector() { return null; },
-    addEventListener() {},
-    focus() {},
-    blur() {},
-    setAttribute() {},
-    removeAttribute() {}
-  };
-}
+// --- TEST 2: appState.loadTableData must use the TAB's database, falling back to
+// the sidebar currentDatabase only when the tab has none ---
+assert(appStateCode.includes('async loadTableData(targetTab?: EditorTab)'), 'appState.loadTableData must exist');
+assert(
+  appStateCode.includes('const db = tab.database || this.currentDatabase || \'\';'),
+  'loadTableData must prefer tab.database over the sidebar currentDatabase'
+);
+assert(
+  /loadTableData[\s\S]{0,1600}?api\.getTableRows\(\s*this\.activeSessionId,\s*tab\.tableName,/.test(appStateCode),
+  'loadTableData must pass the tab-scoped db through api.getTableRows'
+);
+console.log('✅ Test 2 Passed: loadTableData is tab-database scoped (never the wrong sidebar DB)');
 
-const mockDoc = {
-  getElementById(id) {
-    if (!elements[id]) elements[id] = createMockElement(id);
-    return elements[id];
-  },
-  createElement(tag) { return createMockElement('', tag); },
-  querySelectorAll() { return []; },
-  querySelector() { return null; },
-  addEventListener() {}
-};
+// --- TEST 3: Query tabs reload by re-executing their SQL, not by fetching generic
+// /table/<name>/rows from the wrong sidebar DB ---
+assert(
+  appStateCode.includes('if (tab.isTableViewer && sqlOverride === undefined) {') &&
+  appStateCode.includes('await this.loadTableData(tab);'),
+  'executeCurrentTab must only route table-viewer tabs through loadTableData'
+);
+assert(
+  appStateCode.includes('const database = tab.database || this.currentDatabase;'),
+  'executeCurrentTab must execute query tabs with the tab\'s own database'
+);
+assert(
+  /await api\.executeQuery\(this\.activeSessionId, sql, false, database\)/.test(appStateCode),
+  'query tabs must re-run their SQL via api.executeQuery with the tab-scoped database'
+);
+console.log('✅ Test 3 Passed: query-tab reload re-executes SQL in the tab database, never /table/.../rows');
 
-const sandbox = {
-  document: mockDoc,
-  window: {
-    addEventListener() {},
-    location: { origin: 'http://localhost' },
-    localStorage: { getItem() { return null; }, setItem() {} }
-  },
-  localStorage: { getItem() { return null; }, setItem() {} },
-  setTimeout() {},
-  setInterval() {},
-  clearTimeout() {},
-  clearInterval() {},
-  console: console,
-  fetch() {},
-  navigator: { clipboard: { writeText() {} } },
-  CodeMirror: Object.assign(function() {
-    return {
-      getValue() { return sandbox.__cmValue || ''; },
-      setValue(v) { sandbox.__cmValue = v; },
-      getSelection() { return ''; },
-      on() {},
-      getWrapperElement() { return createMockElement(); },
-      refresh() {}
-    };
-  }, {
-    fromTextArea() {
-      return {
-        getValue() { return sandbox.__cmValue || ''; },
-        setValue(v) { sandbox.__cmValue = v; },
-        getSelection() { return ''; },
-        on() {},
-        getWrapperElement() { return createMockElement(); },
-        refresh() {}
-      };
-    }
-  })
-};
+// --- TEST 4: applyGridChanges equivalent (commitStagedEdits) refreshes through the
+// same db-scoped paths ---
+assert(appStateCode.includes('async commitStagedEdits()'), 'appState.commitStagedEdits must exist (legacy applyGridChanges)');
+assert(
+  /commitStagedEdits[\s\S]{0,2000}?api\.cellEdit\(this\.activeSessionId,/.test(appStateCode),
+  'commitStagedEdits must persist staged edits via api.cellEdit'
+);
+assert(
+  appStateCode.includes('if (this.activeTab?.isTableViewer) {') &&
+  /commitStagedEdits[\s\S]{0,2600}?isTableViewer[\s\S]{0,300}?await this\.loadTableData\(this\.activeTab\);[\s\S]{0,200}?await this\.executeCurrentTab\(\);/.test(appStateCode),
+  'commitStagedEdits must reload via loadTableData for table tabs and executeCurrentTab for query tabs'
+);
+assert(
+  virtualGridCode.includes('appState.commitStagedEdits()'),
+  'VirtualGrid Apply button must trigger appState.commitStagedEdits'
+);
+console.log('✅ Test 4 Passed: commitStagedEdits refreshes table tabs via loadTableData, query tabs via executeCurrentTab');
 
-vm.createContext(sandbox);
-
-try {
-  vm.runInContext(mainScript, sandbox);
-  console.log('Script loaded successfully into sandbox!');
-} catch (e) {
-  console.error('Script load error:', e.message);
-  process.exit(1);
-}
-
-// Set up mock connection & sidebar active DB = abc_pulsa
-vm.runInContext(`
-  activeConnection = { id: 'c1', name: 'test_conn', database_name: 'abc_pulsa' };
-  schemaCatalogCache = {
-    database_name: 'abc_pulsa',
-    databases: ['abc_pulsa', 'finance'],
-    tables: [{ name: 'pulsa_trx', columns: [{ name: 'id', is_primary_key: true }] }]
-  };
-  multiDBCatalogCache = {
-    'abc_pulsa': schemaCatalogCache,
-    'finance': {
-      database_name: 'finance',
-      tables: [{ name: 'deposit_transisi', columns: [{ name: 'id', is_primary_key: true }, { name: 'amount' }] }]
-    }
-  };
-
-  fetchedUrls = [];
-  apiFetch = async (url, opts = {}) => {
-    fetchedUrls.push({ url, opts });
-
-    // Execute query endpoint
-    if (url.includes('/execute')) {
-      const body = JSON.parse(opts.body || '{}');
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          type: 'query',
-          columns: [{ name: 'id', is_primary_key: true }, { name: 'amount' }],
-          rows: [[1, 50000], [2, 100000]],
-          row_count: 2,
-          execution_ms: 12
-        })
-      };
-    }
-
-    // Cell edit endpoint
-    if (url.includes('/cell-edit')) {
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({ success: true })
-      };
-    }
-
-    // Table rows endpoint
-    if (url.includes('/table/deposit_transisi/rows')) {
-      // If requested database is abc_pulsa, simulate MySQL Error 1146: Table 'abc_pulsa.deposit_transisi' doesn't exist
-      if (url.includes('db=abc_pulsa')) {
-        return {
-          ok: false,
-          status: 500,
-          statusText: 'Internal Server Error',
-          json: async () => ({ error: "Error 1146: Table 'abc_pulsa.deposit_transisi' doesn't exist" })
-        };
-      }
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          columns: [{ name: 'id', is_primary_key: true }, { name: 'amount' }],
-          rows: [[1, 75000], [2, 100000]],
-          pk_col: 'id'
-        })
-      };
-    }
-
-    return { ok: false, statusText: 'Not found', json: async () => ({}) };
-  };
-
-  showNativeConfirm = async () => true;
-  showNativeAlert = () => {};
-`, sandbox);
-
-// STEP 1: Execute query in Query Tab
-const sqlQuery = 'SELECT * FROM finance.deposit_transisi;';
-sandbox.__cmValue = sqlQuery;
-const ta = mockDoc.getElementById('sql-editor-textarea');
-ta.value = sqlQuery;
-
-await vm.runInContext(`
-  (async () => {
-    // Ensure we are in Query 1 tab (isTableViewer = false)
-    const tab = tabs[0];
-    tab.isTableViewer = false;
-    tab.sql = '${sqlQuery}';
-    activeTabId = tab.id;
-
-    await runActiveQuery();
-  })()
-`, sandbox);
-
-const activeGridTable = vm.runInContext('activeGridTable', sandbox);
-const activeGridDB = vm.runInContext('activeGridDB', sandbox);
-console.log('After runActiveQuery: activeGridTable =', activeGridTable, ', activeGridDB =', activeGridDB);
-
-// STEP 2: Edit cell in grid and stage changes
-vm.runInContext(`
-  stagedEdits.set('deposit_transisi:0:1', {
-    rIdx: 0,
-    cIdx: 1,
-    db: activeGridDB,
-    table: 'deposit_transisi',
-    colName: 'amount',
-    pkCol: 'id',
-    pkVal: 1,
-    oldVal: 50000,
-    newVal: 75000
-  });
-`, sandbox);
-
-// Clear fetchedUrls to specifically observe what applyGridChanges does
-vm.runInContext('fetchedUrls = []', sandbox);
-
-// STEP 3: Apply changes
-await vm.runInContext(`
-  (async () => {
-    await applyGridChanges();
-  })()
-`, sandbox);
-
-const fetchedUrls = vm.runInContext('fetchedUrls', sandbox);
-console.log('URLs fetched during applyGridChanges:');
-fetchedUrls.forEach(u => console.log(' -', u.url));
-
-const tbodyHtml = vm.runInContext('document.getElementById("grid-tbody").innerHTML', sandbox);
-console.log('grid-tbody innerHTML:', tbodyHtml);
-
-// Assertions:
-// 1. applyGridChanges must not fail with "Table 'abc_pulsa.deposit_transisi' doesn't exist"
-assert.ok(!tbodyHtml.includes("Error 1146"), 'Grid should NOT show Error 1146 table not found in abc_pulsa!');
-
-// 2. In a query tab, applyGridChanges should reload the active query or query data, NOT load generic table rows from wrong sidebar DB
-const calledWrongTableRows = fetchedUrls.some(u => u.url.includes('/table/deposit_transisi/rows') && u.url.includes('db=abc_pulsa'));
-console.log('QUERY TAB SCENARIO PASSED!');
-
-// STEP 4: Test Table Viewer tab scenario with cross-database table
-vm.runInContext(`
-  // Open table viewer tab for finance.deposit_transisi
-  const tblTab = {
-    id: 'tab-tbl-finance-deposit_transisi',
-    title: 'deposit_transisi',
-    isTableViewer: true,
-    tableName: 'deposit_transisi',
-    database: 'finance',
-    tableMode: 'data'
-  };
-  tabs.push(tblTab);
-  activeTabId = tblTab.id;
-  activeGridTable = 'deposit_transisi';
-  activeGridDB = 'finance';
-
-  stagedEdits.set('deposit_transisi:0:1', {
-    rIdx: 0,
-    cIdx: 1,
-    db: 'finance',
-    table: 'deposit_transisi',
-    colName: 'amount',
-    pkCol: 'id',
-    pkVal: 1,
-    oldVal: 50000,
-    newVal: 80000
-  });
-
-  fetchedUrls = [];
-`, sandbox);
-
-await vm.runInContext(`
-  (async () => {
-    await applyGridChanges();
-  })()
-`, sandbox);
-
-const tableTabFetchedUrls = vm.runInContext('fetchedUrls', sandbox);
-console.log('URLs fetched during TableViewer applyGridChanges:');
-tableTabFetchedUrls.forEach(u => console.log(' -', u.url));
-
-const calledTableRowsFinance = tableTabFetchedUrls.some(u => u.url.includes('/table/deposit_transisi/rows') && u.url.includes('db=finance'));
-assert.strictEqual(calledTableRowsFinance, true, 'TableViewer applyGridChanges MUST call /table/deposit_transisi/rows with db=finance!');
-
-const calledTableRowsAbcPulsa = tableTabFetchedUrls.some(u => u.url.includes('/table/deposit_transisi/rows') && u.url.includes('db=abc_pulsa'));
-assert.strictEqual(calledTableRowsAbcPulsa, false, 'TableViewer applyGridChanges MUST NOT call /table/deposit_transisi/rows with db=abc_pulsa!');
+// --- TEST 5: TableViewer surfaces cross-db scope and drives the same load path ---
+assert(
+  tableViewerCode.includes('appState.loadTableData(currentTab)'),
+  'TableViewer must (re)load data through appState.loadTableData'
+);
+assert(
+  tableViewerCode.includes('currentTab.database !== appState.currentDatabase'),
+  'TableViewer must show the tab database pill when it differs from the sidebar database (cross-db visibility)'
+);
+assert(
+  virtualGridCode.includes('appState.loadTableData(currentTab)'),
+  'VirtualGrid pagination/filters must reload through appState.loadTableData'
+);
+console.log('✅ Test 5 Passed: TableViewer/VirtualGrid reload through the db-scoped load path');
 
 console.log('ALL REGRESSION TESTS PASSED!');
-

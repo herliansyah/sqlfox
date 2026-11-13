@@ -13,15 +13,16 @@ func readDistHTML() ([]byte, error) {
 	if b, err := distFS.ReadFile("dist/index.legacy.html"); err == nil {
 		return b, nil
 	}
-	return readDistHTML()
+	return distFS.ReadFile("dist/index.html")
 }
 
 func openTestHTML(fsys fs.FS) (fs.File, error) {
 	if f, err := fsys.Open("index.legacy.html"); err == nil {
 		return f, nil
 	}
-	return openTestHTML(fsys)
+	return fsys.Open("index.html")
 }
+
 
 func TestTypeColoredGridEmbedded(t *testing.T) {
 	fsys := Assets()

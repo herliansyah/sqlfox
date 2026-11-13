@@ -1232,10 +1232,9 @@ flowchart LR
     end
 
     subgraph Pipeline ["Frontend Source & Build Pipeline"]
-        SrcHTML["web/src/index.html"]
-        SrcJS["web/src/js/ (15 Domain Modules)"]
-        Tailwind["Precompiled Tailwind CSS (85 KB)"]
-        Build["scripts/build_web.js<br/>(vm.Script Syntax Verification)"]
+        SvelteSrc["web/frontend/ (Svelte 5 Runes + TS)"]
+        Vite["Vite + Tailwind (vite build)"]
+        Build["scripts/build_web.js<br/>(wraps npm run build:svelte)"]
         DistHTML["web/dist/index.html"]
     end
 
@@ -1246,18 +1245,17 @@ flowchart LR
     Server --> Embed
     Embed --> DistHTML
 
-    SrcHTML --> Build
-    SrcJS --> Build
-    Tailwind --> DistHTML
+    SvelteSrc --> Vite
+    Vite --> Build
     Build --> DistHTML
 ```
 
 1. **Dual Transport Ingress (`internal/server/tls.go`)**:
    - SqlFox natively supports both plaintext HTTP and TLS-encrypted HTTPS transports with zero external reverse proxy dependencies.
    - When `--tls` is specified, an in-memory ECDSA P-256 self-signed certificate is automatically generated with SANs covering `localhost`, `127.0.0.1`, `::1`, and the detected local LAN IP. Custom certificates can be supplied via `--tls-cert` and `--tls-key`.
-2. **Modular Frontend Pipeline (`web/src/` -> `web/dist/`)**:
-   - The embedded user interface is maintained as 15 focused JavaScript domain modules under `web/src/js/` alongside a semantic skeleton in `web/src/index.html`.
-   - The build pipeline (`scripts/build_web.js`) compiles static Tailwind CSS, validates concatenated JavaScript syntax in-memory via Node's `vm.Script`, and produces the optimized single-file distribution at `web/dist/index.html` for single-binary embedding via `//go:embed dist/*`.
+2. **Svelte Frontend Pipeline (`web/frontend/` -> `web/dist/`)**:
+   - The embedded user interface is a Svelte 5 application (runes reactivity, TypeScript, Tailwind CSS) under `web/frontend/`.
+   - The build pipeline (`scripts/build_web.js` → `npm run build:svelte`) runs Vite, produces the optimized single-file distribution at `web/dist/index.html` for single-binary embedding via `//go:embed dist/*`.
 3. **Safety Guard Pre-Splitting & Heuristic Protection (`internal/safety/guard.go`)**:
    - Multi-statement SQL batches are pre-split into individual statements before AST parsing, preventing chained destructive statements from bypassing inspection.
    - Unqualified mutation safety probes query cached schema table row counts before issuing expensive `SELECT COUNT(*)` queries against target databases.

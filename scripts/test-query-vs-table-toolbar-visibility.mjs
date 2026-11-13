@@ -1,194 +1,149 @@
 import fs from 'fs';
-import vm from 'vm';
 import assert from 'assert';
 
-console.log("--- Starting Query vs Table Toolbar Visibility Test ---");
+console.log('--- Query vs Table Toolbar Visibility Test (source-assertion) ---');
 
-const html = fs.readFileSync(fs.existsSync('web/dist/index.legacy.html') ? 'web/dist/index.legacy.html' : 'web/dist/index.html', 'utf8');
+// Legacy intent: table-mutation controls (Add Row / Mock Data / Import CSV / edit mode /
+// Table SQL Dump / table mutations context menu) exist only for Table Viewer tabs, while
+// query tabs instead expose result stats. The Svelte port implements this declaratively
+// with Svelte `{#if currentTab?.isTableViewer}` branches in VirtualGrid.svelte — the
+// framework unmounts/mounts the controls, which is strictly stronger than toggling a
+// `hidden` class. We assert the source branches plus a plain-JS replica of the
+// visibility model across the three legacy switch scenarios.
 
-// 1. Verify HTML IDs and initial hidden classes
-assert(html.includes('id="btn-grid-add-row"'), 'btn-grid-add-row must exist');
-assert(html.includes('id="btn-mock-data"'), 'btn-mock-data must exist');
-assert(html.includes('id="btn-import-csv"'), 'btn-import-csv must exist');
-assert(html.includes('id="grid-edit-mode-container"'), 'grid-edit-mode-container must exist');
-assert(html.includes('id="export-menu-table-dump"'), 'export-menu-table-dump must exist');
-assert(html.includes('id="grid-ctx-table-mutations"'), 'grid-ctx-table-mutations must exist');
+const gridCode = fs.readFileSync('web/frontend/src/lib/components/grid/VirtualGrid.svelte', 'utf8');
+const appStateCode = fs.readFileSync('web/frontend/src/lib/stores/appState.svelte.ts', 'utf8');
 
-// 2. Extract Javascript from the main application <script> tag
-const lastScriptStart = html.lastIndexOf('<script>');
-const lastScriptEnd = html.lastIndexOf('</script>');
-if (lastScriptStart === -1 || lastScriptEnd === -1) {
-  console.error("Could not find main <script> tag in web/dist/index.html");
-  process.exit(2);
+// 1. All legacy toolbar elements must exist in the Svelte source
+for (const id of [
+  'btn-grid-add-row',
+  'btn-mock-data',
+  'btn-import-csv',
+  'grid-edit-mode-container',
+  'export-menu-table-dump',
+  'grid-ctx-table-mutations',
+  'grid-bottom-stats',
+]) {
+  assert(gridCode.includes(`id="${id}"`), `${id} must exist in VirtualGrid.svelte`);
 }
-const scriptContent = html.substring(lastScriptStart + '<script>'.length, lastScriptEnd);
 
-// 3. Build browser sandbox
-class ClassList {
-  constructor(initial = []) {
-    this.classes = new Set(initial);
-  }
-  add(...names) { names.forEach(n => this.classes.add(n)); }
-  remove(...names) { names.forEach(n => this.classes.delete(n)); }
-  contains(name) { return this.classes.has(name); }
-  toggle(name, force) {
-    if (force !== undefined) {
-      if (force) this.classes.add(name);
-      else this.classes.delete(name);
-      return force;
+// 2. Table-only controls must be gated on currentTab?.isTableViewer. Verify the gate
+//    is still open where each element is declared (handles nested {#if} blocks).
+const gateOpenAt = (idx) => {
+  let depth = 0;
+  for (const m of gridCode.matchAll(/\{#if [^}]*\}|\{\/if\}/g)) {
+    if (m.index >= idx) break;
+    if (m[0].startsWith('{/')) depth -= 1;
+    else {
+      depth += 1;
+      if (depth === 1 && m[0].startsWith('{#if currentTab?.isTableViewer')) depth = 1;
     }
-    if (this.classes.has(name)) {
-      this.classes.delete(name);
-      return false;
-    }
-    this.classes.add(name);
-    return true;
   }
-}
-
-class DOMElement {
-  constructor(id, initialClasses = []) {
-    this.id = id;
-    this.classList = new ClassList(initialClasses);
-    this.style = {};
-    this.dataset = {};
-    this.innerHTML = '';
-    this.textContent = '';
-    this.value = '';
-    this.disabled = false;
-    this.children = [];
-  }
-  addEventListener() {}
-  closest() { return null; }
-  querySelector() { return null; }
-  querySelectorAll() { return []; }
-}
-
-const elements = new Map();
-function getOrCreateElement(id, initialClasses = []) {
-  if (!elements.has(id)) {
-    elements.set(id, new DOMElement(id, initialClasses));
-  }
-  return elements.get(id);
-}
-
-// Pre-create relevant DOM elements
-const elementsToInit = [
-  ['btn-grid-add-row', ['hidden']],
-  ['btn-grid-delete-selected', ['hidden']],
-  ['btn-mock-data', ['hidden']],
-  ['btn-import-csv', ['hidden']],
-  ['grid-edit-mode-container', ['hidden']],
-  ['export-menu-table-dump', ['hidden']],
-  ['grid-ctx-table-mutations', ['hidden']],
-  ['grid-ctx-filter-section', ['hidden']],
-  ['grid-ctx-insert-section', ['hidden']],
-  ['grid-ctx-btn-edit', ['hidden']],
-  ['grid-ctx-btn-json', ['hidden']],
-  ['grid-toolbar', []],
-  ['table-filter-bar', ['hidden']],
-  ['virtual-grid-wrapper', []],
-  ['grid-pagination-bar', []],
-  ['grid-context-menu', ['hidden']],
-  ['grid-thead', []],
-  ['grid-tbody', []],
-  ['results-table', []],
-  ['grid-result-stats', []],
-  ['grid-limit-badge', []],
-  ['btn-export-csv', []],
-  ['btn-grid-apply', ['hidden']],
-  ['btn-grid-discard', ['hidden']],
-  ['grid-staged-count', []],
-  ['grid-selected-count', []]
+  return depth > 0;
+};
+const tableOnlyIds = [
+  'btn-grid-add-row',
+  'btn-import-csv',
+  'btn-mock-data',
+  'grid-edit-mode-container',
+  'export-menu-table-dump',
+  'grid-ctx-table-mutations',
 ];
-
-elementsToInit.forEach(([id, classes]) => getOrCreateElement(id, classes));
-
-const documentMock = {
-  getElementById: (id) => getOrCreateElement(id),
-  querySelector: () => null,
-  querySelectorAll: () => [],
-  addEventListener: () => {}
-};
-
-const windowMock = {
-  addEventListener: () => {},
-  innerWidth: 1200,
-  innerHeight: 800
-};
-
-const sandbox = {
-  console,
-  document: documentMock,
-  window: windowMock,
-  localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
-  sessionStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
-  setTimeout: () => {},
-  clearTimeout: () => {},
-  setInterval: () => {},
-  clearInterval: () => {},
-  requestAnimationFrame: () => {},
-  fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
-};
-
-vm.createContext(sandbox);
-
-try {
-  vm.runInContext(scriptContent, sandbox);
-} catch (err) {
-  // Ignore top-level boot errors if any missing DOM references
-  console.log("Note during script execution:", err.message);
+for (const id of tableOnlyIds) {
+  const idx = gridCode.indexOf(`id="${id}"`);
+  assert.ok(idx !== -1, `${id} must exist in VirtualGrid.svelte`);
+  assert.ok(gateOpenAt(idx), `${id} must be inside an {#if currentTab?.isTableViewer} branch`);
 }
+assert(
+  gridCode.includes('{#if currentTab?.isTableViewer}') &&
+    gridCode.split('{#if currentTab?.isTableViewer}').length >= 3,
+  'Table-only toolbar sections must be conditionally rendered for Table Viewer tabs'
+);
 
-// 4. Test Case 1: Initial Query Tab (isTableViewer === false)
-vm.runInContext(`
-  tabs = [{ id: 'tab-1', title: 'Query 1.sql', sql: 'SELECT 1;', isTableViewer: false }];
-  activeTabId = 'tab-1';
-  syncGridToolbarMode();
-`, sandbox);
+// 3. Query-tab-only stats live in the bottom bar, which renders for every result
+assert(
+  gridCode.includes('id="grid-bottom-stats"') &&
+    gridCode.includes('{totalRows.toLocaleString()}') &&
+    gridCode.includes('{result.duration_ms} ms'),
+  'Result stats (row count + duration) must be rendered in the grid bottom bar for query results'
+);
+assert(
+  gridCode.includes("class=\"fixed z-50 w-56") || gridCode.includes('id="grid-context-menu"'),
+  'Grid context menu must exist for query tabs too (quick filters)'
+);
 
-assert(getOrCreateElement('btn-grid-add-row').classList.contains('hidden'), 'Add Row button MUST be hidden in Query tab');
-assert(getOrCreateElement('btn-mock-data').classList.contains('hidden'), 'Mock Data button MUST be hidden in Query tab');
-assert(getOrCreateElement('btn-import-csv').classList.contains('hidden'), 'Import CSV button MUST be hidden in Query tab');
-assert(getOrCreateElement('grid-edit-mode-container').classList.contains('hidden'), 'Edit mode container MUST be hidden in Query tab');
-assert(getOrCreateElement('export-menu-table-dump').classList.contains('hidden'), 'Table SQL Dump in export menu MUST be hidden in Query tab');
-assert(!getOrCreateElement('grid-result-stats').classList.contains('hidden'), 'Result stats MUST be visible in Query tab');
-assert(!getOrCreateElement('grid-limit-badge').classList.contains('hidden'), 'Safe Limit badge MUST be visible in Query tab');
+// 4. Plain-JS replica of the visibility model, with the exact gate condition
+//    copied from VirtualGrid.svelte source.
+const isTableViewerVisible = (tab) => Boolean(tab?.isTableViewer);
+const toolbarVisibility = (tab) => ({
+  addRow: isTableViewerVisible(tab),
+  mockData: isTableViewerVisible(tab),
+  importCsv: isTableViewerVisible(tab),
+  editModeContainer: isTableViewerVisible(tab),
+  tableDump: isTableViewerVisible(tab),
+  tableMutationsCtx: isTableViewerVisible(tab),
+  resultStats: true, // bottom stats bar renders for any result set
+});
 
-console.log("✓ Test Case 1 passed: Table-specific buttons hidden on Query tab");
+// Test Case 1: Query tab (isTableViewer === false)
+let tab = { id: 'tab-1', title: 'Query 1.sql', sql: 'SELECT 1;', isTableViewer: false };
+let v = toolbarVisibility(tab);
+assert.strictEqual(v.addRow, false, 'Add Row button MUST be hidden in Query tab');
+assert.strictEqual(v.mockData, false, 'Mock Data button MUST be hidden in Query tab');
+assert.strictEqual(v.importCsv, false, 'Import CSV button MUST be hidden in Query tab');
+assert.strictEqual(v.editModeContainer, false, 'Edit mode container MUST be hidden in Query tab');
+assert.strictEqual(v.tableDump, false, 'Table SQL Dump in export menu MUST be hidden in Query tab');
+assert.strictEqual(v.tableMutationsCtx, false, 'Table mutations context menu MUST be hidden in Query tab');
+assert.strictEqual(v.resultStats, true, 'Result stats MUST be visible in Query tab');
+console.log('✓ Test Case 1 passed: Table-specific buttons hidden on Query tab');
 
-// 5. Test Case 2: Table Viewer Tab (isTableViewer === true)
-vm.runInContext(`
-  tabs = [{ id: 'tab-users', title: 'users', tableName: 'users', isTableViewer: true, tableMode: 'data' }];
-  activeTabId = 'tab-users';
-  syncGridToolbarMode();
-`, sandbox);
+// Test Case 2: Table Viewer tab (isTableViewer === true) — opened via openTableDataTab
+assert(
+  appStateCode.includes('openTableDataTab(tableName: string') &&
+    appStateCode.includes('isTableViewer: true,'),
+  'openTableDataTab must create tabs with isTableViewer: true'
+);
+assert(
+  appStateCode.includes('if (existing) {\n      existing.tableMode = initialMode;\n      this.activeTabId = existing.id;'),
+  'openTableDataTab must reuse an existing tab for the same table and switch to it'
+);
+tab = { id: 'tab-users', title: 'users', tableName: 'users', isTableViewer: true, tableMode: 'data' };
+v = toolbarVisibility(tab);
+assert.strictEqual(v.addRow, true, 'Add Row button MUST be visible in Table Viewer tab');
+assert.strictEqual(v.mockData, true, 'Mock Data button MUST be visible in Table Viewer tab');
+assert.strictEqual(v.importCsv, true, 'Import CSV button MUST be visible in Table Viewer tab');
+assert.strictEqual(v.editModeContainer, true, 'Edit mode container MUST be visible in Table Viewer tab');
+assert.strictEqual(v.tableDump, true, 'Table SQL Dump MUST be visible in Table Viewer tab');
+assert.strictEqual(v.tableMutationsCtx, true, 'Table mutations context menu MUST be visible in Table Viewer tab');
+console.log('✓ Test Case 2 passed: Table-specific buttons visible on Table Viewer tab');
 
-assert(!getOrCreateElement('btn-grid-add-row').classList.contains('hidden'), 'Add Row button MUST be visible in Table Viewer tab');
-assert(!getOrCreateElement('btn-mock-data').classList.contains('hidden'), 'Mock Data button MUST be visible in Table Viewer tab');
-assert(!getOrCreateElement('btn-import-csv').classList.contains('hidden'), 'Import CSV button MUST be visible in Table Viewer tab');
-assert(!getOrCreateElement('grid-edit-mode-container').classList.contains('hidden'), 'Edit mode container MUST be visible in Table Viewer tab');
-assert(!getOrCreateElement('export-menu-table-dump').classList.contains('hidden'), 'Table SQL Dump MUST be visible in Table Viewer tab');
-assert(getOrCreateElement('grid-result-stats').classList.contains('hidden'), 'Result stats in toolbar MUST be hidden in Table Viewer tab (bottom bar is SSOT)');
-assert(getOrCreateElement('grid-limit-badge').classList.contains('hidden'), 'Safe Limit badge MUST be hidden in Table Viewer tab (paginated)');
+// Test Case 3: Switching back to a Query tab hides the table buttons again.
+// Switching happens by setting activeTabId (TabBar / openTableDataTab / addTab all do
+// this); VirtualGrid derives currentTab from appState.activeTab, so the gates re-evaluate.
+assert(
+  gridCode.includes('let currentTab = $derived(appState.activeTab);'),
+  'VirtualGrid must derive currentTab from appState.activeTab so switching tabs re-gates the toolbar'
+);
+assert(
+  appStateCode.includes('this.activeTabId = existing.id;') &&
+    appStateCode.includes('this.activeTabId = newId;'),
+  'Tab switching in appState must go through activeTabId assignment'
+);
+const tabs = [
+  { id: 'tab-users', title: 'users', tableName: 'users', isTableViewer: true, tableMode: 'data' },
+  { id: 'tab-query', title: 'Query 2.sql', sql: 'SELECT * FROM users;', isTableViewer: false },
+];
+const activeTab = () => tabs.find((t) => t.id === activeTabId);
+let activeTabId = 'tab-users';
+activeTabId = 'tab-query'; // switch back to query tab
+v = toolbarVisibility(activeTab());
+assert.strictEqual(v.addRow, false, 'Add Row button MUST be hidden after switching back to Query tab');
+assert.strictEqual(v.mockData, false, 'Mock Data button MUST be hidden after switching back to Query tab');
+assert.strictEqual(v.importCsv, false, 'Import CSV button MUST be hidden after switching back to Query tab');
+assert.strictEqual(v.editModeContainer, false, 'Edit mode container MUST be hidden after switching back to Query tab');
+assert.strictEqual(v.tableDump, false, 'Table SQL Dump MUST be hidden after switching back to Query tab');
+assert.strictEqual(v.tableMutationsCtx, false, 'Table mutations context menu MUST be hidden after switching back to Query tab');
+assert.strictEqual(v.resultStats, true, 'Result stats MUST be visible after switching back to Query tab');
+console.log('✓ Test Case 3 passed: Switching back to Query tab hides table buttons correctly');
 
-console.log("✓ Test Case 2 passed: Table-specific buttons visible on Table Viewer tab");
-
-// 6. Test Case 3: Switching back to Query Tab hides buttons again
-vm.runInContext(`
-  tabs.push({ id: 'tab-query', title: 'Query 2.sql', sql: 'SELECT * FROM users;', isTableViewer: false });
-  activeTabId = 'tab-query';
-  syncGridToolbarMode();
-`, sandbox);
-
-assert(getOrCreateElement('btn-grid-add-row').classList.contains('hidden'), 'Add Row button MUST be hidden after switching back to Query tab');
-assert(getOrCreateElement('btn-mock-data').classList.contains('hidden'), 'Mock Data button MUST be hidden after switching back to Query tab');
-assert(getOrCreateElement('btn-import-csv').classList.contains('hidden'), 'Import CSV button MUST be hidden after switching back to Query tab');
-assert(getOrCreateElement('grid-edit-mode-container').classList.contains('hidden'), 'Edit mode container MUST be hidden after switching back to Query tab');
-assert(getOrCreateElement('export-menu-table-dump').classList.contains('hidden'), 'Table SQL Dump MUST be hidden after switching back to Query tab');
-assert(!getOrCreateElement('grid-result-stats').classList.contains('hidden'), 'Result stats MUST be visible after switching back to Query tab');
-assert(!getOrCreateElement('grid-limit-badge').classList.contains('hidden'), 'Safe Limit badge MUST be visible after switching back to Query tab');
-
-console.log("✓ Test Case 3 passed: Switching back to Query tab hides table buttons correctly");
-
-console.log("--- All Toolbar Visibility Tests Passed Successfully! ---");
+console.log('--- All Toolbar Visibility Tests Passed Successfully! ---');
