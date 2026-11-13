@@ -657,7 +657,9 @@ class ApiClient {
   async applyStructure(payload: {
     target_session_id: string;
     target_db?: string;
-    sqls: string[];
+    statements: string[];
+    confirmed?: boolean;
+    challenge_input?: string;
   }): Promise<{ success: boolean; applied_count: number }> {
     return this.request('/sync/structure/apply', {
       method: 'POST',
@@ -666,10 +668,10 @@ class ApiClient {
   }
 
   // Cloud Sync & Notes Bundle
-  async testCloudSync(token: string, gistId?: string): Promise<{ success: boolean; message?: string }> {
+  async testCloudSync(payload: { github_token?: string; github_repo: string; github_branch?: string }): Promise<{ success: boolean; message?: string }> {
     return this.request('/cloud-sync/test', {
       method: 'POST',
-      body: JSON.stringify({ token, gist_id: gistId }),
+      body: JSON.stringify(payload),
     });
   }
 

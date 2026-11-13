@@ -194,7 +194,7 @@
           Cancel
         </button>
         <button
-          onclick={handleStartExecution}
+          onclick={() => handleStartExecution()}
           disabled={isRunning || !selectedFile}
           type="button"
           class="px-4 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded text-xs font-semibold flex items-center space-x-1.5 transition shadow"

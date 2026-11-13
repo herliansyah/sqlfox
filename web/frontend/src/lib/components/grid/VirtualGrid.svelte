@@ -96,11 +96,12 @@
 
   let fkMap = $derived.by(() => {
     const map = new Map<string, any>();
-    if (appState.catalog?.foreign_keys) {
-      for (const fk of appState.catalog.foreign_keys) {
-        const col = fk.column || fk.column_name;
-        if (col) map.set(col, fk);
-      }
+    const table = appState.catalog?.tables?.find(
+      (t) => t.name.toLowerCase() === (currentTab?.tableName || '').toLowerCase()
+    );
+    for (const fk of table?.foreign_keys || []) {
+      const col = (fk as any).column || (fk as any).column_name;
+      if (col) map.set(col, fk);
     }
     return map;
   });
@@ -283,10 +284,7 @@
   }
 
   function getFkInfo(colName: string) {
-    if (!appState.catalog?.foreign_keys) return null;
-    return appState.catalog.foreign_keys.find(
-      (fk) => (fk.column || fk.column_name) === colName
-    );
+    return fkMap.get(colName) || null;
   }
 
   // Inline Editing
@@ -308,7 +306,7 @@
       // Find PK col
       const pkColObj = result.columns.find((c) => isColPK(c));
       const pkCol = pkColObj ? getColName(pkColObj) : undefined;
-      const pkVal = pkColObj ? result.rows[origIdx][allColumns.indexOf(pkCol)] : undefined;
+      const pkVal = pkCol ? result.rows[origIdx][allColumns.indexOf(pkCol)] : undefined;
 
       appState.stageEdit(currentTab.tableName, origIdx, cIdx, colName, pkCol, pkVal, oldVal, newVal);
       result.rows[origIdx][cIdx] = newVal;

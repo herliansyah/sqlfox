@@ -212,7 +212,7 @@
         list.push({
           key: fkKey,
           srcTable: src.name,
-          srcCol: fk.column,
+          srcCol: fk.column || fk.column_name || '',
           dstTable: fk.referenced_table,
           dstCol: fk.referenced_column,
           path,

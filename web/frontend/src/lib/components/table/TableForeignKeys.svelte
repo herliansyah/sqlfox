@@ -195,7 +195,7 @@
                 <td class="py-2 px-4 text-center">
                   {#if fk.name}
                     <button
-                      onclick={() => dropForeignKey(fk.name)}
+                      onclick={() => dropForeignKey(fk.name!)}
                       class="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition"
                       title="Drop Constraint"
                     >

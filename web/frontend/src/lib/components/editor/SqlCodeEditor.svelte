@@ -1,7 +1,7 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
   import { codemirror } from '../../actions/codemirror';
-  import type { QuerySnippet } from '../../types';
+  import type { QuerySnippet } from '../../../types';
 
   let { value = $bindable(''), placeholder = 'Write SQL…', id = 'sql-editor' }: {
     value?: string;

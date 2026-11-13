@@ -2,7 +2,7 @@
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
   import Icon from '../common/Icon.svelte';
-  import type { QuerySnippet } from '../../types';
+  import type { QuerySnippet } from '../../../types';
   import { parseSnippetVariables } from '../../utils/snippets';
 
   type Snippet = QuerySnippet;
@@ -246,7 +246,7 @@
                 id="snip-sql"
                 bind:value={editingSnippet.sql}
                 rows="6"
-                placeholder="SELECT * FROM table WHERE id = {{id}};"
+                placeholder={"SELECT * FROM table WHERE id = {{id}};"}
                 class="w-full bg-[#090d16] border border-[#334155] focus:border-sky-500 rounded p-2.5 text-xs text-emerald-300 font-mono outline-none resize-y"
               ></textarea>
             </div>

@@ -6,7 +6,7 @@
   import Icon from '../common/Icon.svelte';
   import SearchableSelect from '../common/SearchableSelect.svelte';
   import type { CodeMirrorController } from '../../actions/codemirror';
-  import type { QuerySnippet } from '../../types';
+  import type { QuerySnippet } from '../../../types';
   import { parseSnippetVariables } from '../../utils/snippets';
 
   // ponytail: only the tab identity drives the editor shell. Binding the editor to

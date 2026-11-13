@@ -927,6 +927,17 @@ export class AppState {
     }
   }
 
+  /** Reload the schema catalog, optionally scoped to a connection + database. */
+  async loadCatalog(connId?: string, database?: string) {
+    const sessionId = connId || this.activeSessionId;
+    if (!sessionId) return;
+    const db = (database || this.currentDatabase || '').trim();
+    const schema = await api.getSchema(sessionId, db);
+    if (sessionId === this.activeSessionId) this.setCatalog(schema);
+    else this.cacheCatalog(schema, db);
+    return schema;
+  }
+
   async refreshCatalog() {
     if (!this.activeSessionId) return;
     this.isLoadingCatalog = true;

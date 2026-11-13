@@ -14,6 +14,7 @@ export interface ConnectionProfile {
   database?: string;
   database_name?: string;
   ssl_mode?: string;
+  use_ssl?: boolean;
   environment: Environment;
   read_only?: boolean;
   color?: string;
@@ -26,6 +27,8 @@ export interface ConnectionProfile {
   created_at?: string;
   updated_at?: string;
 }
+
+export type ColumnMetadata = ColumnDefinition;
 
 export interface ColumnDefinition {
   name: string;
@@ -97,6 +100,7 @@ export interface SchemaCatalog {
   database_name: string;
   databases?: string[];
   tables: TableMetadata[];
+  foreign_keys?: ForeignKeyInfo[];
   views?: string[];
   routines?: RoutineMetadata[];
   triggers?: TriggerMetadata[];

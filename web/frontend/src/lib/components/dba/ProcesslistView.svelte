@@ -318,6 +318,7 @@
         // Fetch first tick immediately
         setTimeout(async () => {
           try {
+            if (!appState.activeSessionId) return;
             const st = await api.getFlightRecorderStatus(appState.activeSessionId);
             if (st && Array.isArray(st.recent_ticks)) {
               flightSessionTicks = st.recent_ticks;
@@ -672,12 +673,7 @@
 
   function explainThreadQuery(sql?: string) {
     if (!sql) return;
-    const tabId = appState.createTab({
-      title: 'Explain Plan',
-      type: 'worksheet',
-      query: `EXPLAIN ${sql};`,
-    });
-    appState.setActiveTab(tabId);
+    appState.addTab('Explain Plan', `EXPLAIN ${sql};`);
     appState.executeCurrentTab();
   }
 
@@ -1871,7 +1867,7 @@
               <span class="text-slate-500 text-[10px] uppercase tracking-wide font-sans block truncate">
                 {card.label}
               </span>
-              <span class="text-[13px] font-bold font-mono truncate block {card.tone}" title={card.title || card.value}>
+              <span class="text-[13px] font-bold font-mono truncate block {card.tone}" title={card.value}>
                 {card.value}
               </span>
               {#if card.hint}

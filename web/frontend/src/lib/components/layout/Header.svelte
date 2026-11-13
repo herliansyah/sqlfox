@@ -393,7 +393,7 @@
   <!-- Right Actions: tools menus, session mode, drawers, LAN PIN, refresh -->
   <div class="flex items-center gap-2 text-xs shrink-0">
     <!-- Monitor / DB Tools / Settings menus (legacy layout) -->
-    {#snippet toolMenu(key, label, icon, iconColor, items)}
+    {#snippet toolMenu(key: 'monitor' | 'dbtools' | 'settings', label: string, icon: string, iconColor: string, items: ToolMenuItem[])}
       <div class="relative">
         <button
           onclick={() => (openToolsMenu = openToolsMenu === key ? null : key)}
