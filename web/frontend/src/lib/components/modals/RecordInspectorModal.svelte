@@ -65,7 +65,7 @@
 
 {#if appState.isRecordInspectorOpen && currentRow && result?.columns}
   <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm select-none">
-    <div class="w-full max-w-2xl bg-[#0f172a] border border-[#334155] rounded-xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden">
+    <div id="record-inspector-dialog" role="dialog" aria-modal="true" aria-label="Record inspector" class="w-full max-w-2xl bg-[#0f172a] border border-[#334155] rounded-xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden">
       <!-- Modal Header -->
       <div class="px-5 py-3 border-b border-[#334155] bg-[#0b0f19] flex items-center justify-between">
         <div class="flex items-center space-x-3">
@@ -83,7 +83,7 @@
 
         <!-- Prev / Next Navigation & Close -->
         <div class="flex items-center space-x-2">
-          <div class="flex items-center bg-[#1e293b] rounded border border-[#334155] p-0.5">
+          <div id="record-inspector-pager" class="flex items-center bg-[#1e293b] rounded border border-[#334155] p-0.5">
             <button
               onclick={() => navigate(-1)}
               disabled={rIdx <= 0}
@@ -115,6 +115,7 @@
       <!-- Quick Search inside fields -->
       <div class="px-5 py-2 border-b border-[#1e293b] bg-[#090d16]">
         <input
+          id="record-inspector-search"
           type="text"
           bind:value={searchQuery}
           placeholder="Filter columns in this record..."
@@ -123,7 +124,7 @@
       </div>
 
       <!-- Fields List -->
-      <div class="p-5 overflow-y-auto space-y-3.5 text-xs">
+      <div id="record-inspector-fields" class="p-5 overflow-y-auto space-y-3.5 text-xs">
         {#each result.columns as col, cIdx}
           {@const colName = getColName(col)}
           {@const colType = getColType(col)}

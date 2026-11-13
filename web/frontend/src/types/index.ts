@@ -277,6 +277,10 @@ export interface EditorTab {
   pageSize?: number;
   currentPage?: number;
   totalRows?: number;
+  /** Exact COUNT(*) for the current filter, populated on demand by the pager. */
+  exactRowCount?: number;
+  /** True while an exact COUNT(*) round-trip is in flight. */
+  isCountingExact?: boolean;
   sortCol?: string | null;
   sortDir?: 'ASC' | 'DESC' | null;
   explainResult?: any;

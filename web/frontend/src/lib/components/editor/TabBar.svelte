@@ -324,6 +324,21 @@
     >
       <div class="py-1">
         <button
+          id="tab-ctx-btn-rename"
+          onclick={() => {
+            const target = appState.tabs.find((t) => t.id === tabContextMenu!.tabId);
+            closeTabMenu();
+            if (!target) return;
+            const next = window.prompt('Rename tab', target.title);
+            if (next !== null) appState.renameTab(target.id, next);
+          }}
+          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+        >
+          <Icon name="edit" class="w-3.5 h-3.5 text-slate-400" />
+          <span>Rename Tab</span>
+        </button>
+        <button
+          id="tab-ctx-btn-duplicate"
           onclick={() => {
             appState.duplicateTab(tabContextMenu!.tabId);
             closeTabMenu();
@@ -350,6 +365,7 @@
 
       <div class="py-1">
         <button
+          id="tab-ctx-btn-close-others"
           onclick={() => {
             appState.closeOtherTabs(tabContextMenu!.tabId);
             closeTabMenu();
@@ -360,6 +376,18 @@
           <span>Close Other Tabs</span>
         </button>
         <button
+          id="tab-ctx-btn-close-right"
+          onclick={() => {
+            appState.closeTabsToRight(tabContextMenu!.tabId);
+            closeTabMenu();
+          }}
+          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+        >
+          <Icon name="chevrons-right" class="w-3.5 h-3.5 text-slate-400" />
+          <span>Close Tabs to the Right</span>
+        </button>
+        <button
+          id="tab-ctx-btn-close"
           onclick={() => {
             appState.closeTab(tabContextMenu!.tabId);
             closeTabMenu();
@@ -368,6 +396,17 @@
         >
           <Icon name="trash-2" class="w-3.5 h-3.5 text-rose-400" />
           <span>Close Tab</span>
+        </button>
+        <button
+          id="tab-ctx-btn-close-all"
+          onclick={() => {
+            appState.closeAllTabs();
+            closeTabMenu();
+          }}
+          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-rose-300"
+        >
+          <Icon name="trash-2" class="w-3.5 h-3.5 text-rose-400" />
+          <span>Close All Tabs</span>
         </button>
       </div>
     </div>

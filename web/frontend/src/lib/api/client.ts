@@ -549,6 +549,20 @@ class ApiClient {
     return this.request('/system/changelog');
   }
 
+  // System Lifecycle
+  // Opens a URL in the host machine's default browser (daemon-side). Only meaningful
+  // when the UI is served locally; remote sessions get a fallback popup instead.
+  async openInSystemBrowser(url: string): Promise<{ status?: string }> {
+    return this.request('/system/open-browser', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    });
+  }
+
+  async shutdownDaemon(): Promise<{ status?: string }> {
+    return this.request('/system/shutdown', { method: 'POST' });
+  }
+
   // AI Assistant
   async aiChat(
     prompt: string,

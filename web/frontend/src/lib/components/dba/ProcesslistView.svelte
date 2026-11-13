@@ -22,18 +22,63 @@
   let isLoading = $state(false);
 
   // Column Visibility Management (ADR 0054)
-  let visibleColumns = $state<Record<string, boolean>>({
-    id: true,
-    user: true,
-    host: true,
-    db: true,
-    command: true,
-    time: true,
-    state: true,
-    info: true,
-  });
+  // `id` and `info` are mandatory: hiding them would leave the table with no
+  // meaningful content, and the legacy UI always pinned them visible.
+  const MANDATORY_COLUMNS = ['id', 'info'] as const;
+  const PL_COLUMN_LABELS: Record<string, string> = {
+    id: 'ID',
+    user: 'User',
+    host: 'Host',
+    db: 'Database',
+    command: 'Command',
+    time: 'Time (s)',
+    state: 'State',
+    info: 'SQL / Query Info',
+  };
+  const COLUMN_PREFS_KEY = 'sqlfox-processlist-hidden-cols';
+
+  function loadHiddenColumns(): Record<string, boolean> {
+    const defaults: Record<string, boolean> = {
+      id: true,
+      user: true,
+      host: true,
+      db: true,
+      command: true,
+      time: true,
+      state: true,
+      info: true,
+    };
+    try {
+      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(COLUMN_PREFS_KEY) : null;
+      if (!raw) return defaults;
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return defaults;
+      // Guard against stale/corrupted prefs: only known, optional columns may be hidden.
+      for (const key of parsed) {
+        if (key in defaults && !(MANDATORY_COLUMNS as readonly string[]).includes(key)) {
+          defaults[key] = false;
+        }
+      }
+    } catch {
+      /* ignore malformed prefs */
+    }
+    return defaults;
+  }
+
+  let visibleColumns = $state<Record<string, boolean>>(loadHiddenColumns());
   let showColSelector = $state(false);
   let showTrendPanel = $state(true);
+
+  // Persist only the hidden optional columns, mirroring the legacy storage contract.
+  $effect(() => {
+    if (typeof localStorage === 'undefined') return;
+    const hidden = Object.keys(visibleColumns).filter((k) => !visibleColumns[k]);
+    try {
+      localStorage.setItem(COLUMN_PREFS_KEY, JSON.stringify(hidden));
+    } catch {
+      /* storage may be unavailable (private mode / quota) */
+    }
+  });
 
   // Threads filtering & selection
   let filterText = $state('');
@@ -935,7 +980,7 @@
 
   {#snippet th(key: SortKey, label: string, width: string, align: 'left' | 'right' = 'left')}
     <th
-      class="h-8 px-2 font-semibold {width}"
+      class="h-8 px-2 font-semibold overflow-hidden {width}"
       aria-sort={sortKey === key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
     >
       <button
@@ -1212,14 +1257,31 @@
               <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-1 pb-1 border-b border-slate-800">
                 Visible Columns
               </div>
-              {#each Object.keys(visibleColumns) as colKey}
-                <label class="flex items-center space-x-2 py-1 px-1 rounded hover:bg-slate-800 cursor-pointer text-slate-300 text-[11px]">
-                  <input
-                    type="checkbox"
-                    bind:checked={visibleColumns[colKey]}
-                    class="rounded bg-[#090d16] border-[#334155] text-sky-500 focus:ring-0"
-                  />
-                  <span class="capitalize">{colKey === 'db' ? 'Database' : colKey === 'time' ? 'Time (s)' : colKey === 'info' ? 'Query / Info' : colKey}</span>
+              {#each Object.keys(visibleColumns) as colKey (colKey)}
+                {@const isMandatory = (MANDATORY_COLUMNS as readonly string[]).includes(colKey)}
+                <label
+                  class="flex items-center justify-between py-1 px-1 rounded text-[11px] {isMandatory
+                    ? 'cursor-not-allowed opacity-70'
+                    : 'cursor-pointer hover:bg-slate-800 text-slate-300'}"
+                >
+                  <span class="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      checked={visibleColumns[colKey]}
+                      disabled={isMandatory}
+                      onchange={(e) => {
+                        if (isMandatory) return;
+                        visibleColumns[colKey] = (e.target as HTMLInputElement).checked;
+                      }}
+                      class="rounded bg-[#090d16] border-[#334155] text-sky-500 focus:ring-0"
+                    />
+                    <span class="truncate {visibleColumns[colKey] ? 'text-slate-200' : 'text-slate-500 line-through'}">
+                      {PL_COLUMN_LABELS[colKey] ?? colKey}
+                    </span>
+                  </span>
+                  {#if isMandatory}
+                    <span class="text-[9px] font-bold text-amber-400/90" title="Mandatory column cannot be hidden">LOCKED</span>
+                  {/if}
                 </label>
               {/each}
             </div>
@@ -1244,7 +1306,7 @@
 
         <!-- Threads Table View -->
     <div class="flex-1 overflow-auto">
-      <table class="w-full border-collapse text-left">
+      <table class="w-full min-w-[1120px] border-collapse table-fixed text-left">
         <colgroup>
           <col class="w-9" />
           {#if visibleColumns.id}<col class="w-16" />{/if}
@@ -1255,7 +1317,7 @@
           {#if visibleColumns.time}<col class="w-20" />{/if}
           {#if visibleColumns.state}<col class="w-44" />{/if}
           {#if visibleColumns.info}<col />{/if}
-          <col class="w-14" />
+          <col class="w-[120px]" />
         </colgroup>
 
         <thead
@@ -1280,7 +1342,7 @@
             {#if visibleColumns.state}{@render th('state', 'State', 'w-44')}{/if}
             {#if visibleColumns.info}{@render th('info', 'Query', '')}{/if}
             <th
-              class="h-8 px-2 w-14 text-center font-semibold sticky right-0 bg-[#0f172a] border-l border-slate-800"
+              class="h-8 px-2 w-[120px] text-center font-semibold sticky right-0 bg-[#0f172a] border-l border-slate-800"
             >
               <span class="sr-only">Actions</span>
             </th>
@@ -1307,17 +1369,36 @@
               {@const isSelf = thread.id === currentThreadId}
               {@const isSelected = selectedThreadIds.has(thread.id)}
               {@const isSlow = thread.time >= 5}
-              {@const rowBg = isSelected
-                ? 'bg-rose-950/25 hover:bg-rose-950/35'
+              {@const isRootBlocker = locks.some(
+                (l) => l.is_root_blocker && l.blocking_thread_id === thread.id
+              )}
+              {@const isWaitingOnLock = locks.some((l) => l.waiting_thread_id === thread.id)}
+              {@const rowBg =
+                (isRootBlocker
+                  ? 'bg-red-950/40 hover:bg-red-950/50 border-l-red-500 font-semibold'
+                  : isWaitingOnLock
+                    ? 'bg-amber-950/20 hover:bg-amber-950/30 border-l-amber-600'
+                    : isSelected
+                      ? 'bg-rose-950/25 hover:bg-rose-950/35 border-l-transparent'
+                      : isSelf
+                        ? 'bg-sky-950/20 hover:bg-sky-950/30 border-l-transparent'
+                        : isSlow
+                          ? 'bg-amber-950/20 hover:bg-amber-950/30 border-l-amber-500'
+                          : 'hover:bg-slate-800/40 border-l-transparent')}
+              {@const actionBg = isRootBlocker
+                ? 'bg-[#2a0a0a]'
+                : isWaitingOnLock
+                ? 'bg-[#1f1a0a]'
+                : isSelected
+                ? 'bg-rose-950/25'
                 : isSelf
-                ? 'bg-sky-950/20 hover:bg-sky-950/30'
-                : 'hover:bg-slate-800/40'}
-              {@const actionBg = isSelected ? 'bg-rose-950/25' : isSelf ? 'bg-sky-950/20' : 'bg-[#090d16]'}
+                ? 'bg-sky-950/20'
+                : 'bg-[#090d16]'}
               <tr
-                class="group h-8 cursor-pointer border-b border-slate-800/50 transition-colors {rowBg}"
+                class="group h-8 cursor-pointer border-b border-slate-800/50 border-l-4 transition-colors {rowBg}"
                 onclick={() => (inspectingThread = thread)}
               >
-                <td class="px-2 text-center" onclick={(e) => e.stopPropagation()}>
+                <td class="px-2 text-center overflow-hidden" onclick={(e) => e.stopPropagation()}>
                   {#if !isSelf}
                     <input
                       type="checkbox"
@@ -1329,24 +1410,39 @@
                   {/if}
                 </td>
                 {#if visibleColumns.id}
-                  <td class="px-2 text-right tabular-nums font-bold {isSelf ? 'text-sky-400' : 'text-slate-300'}">
+                  <td class="px-2 text-right whitespace-nowrap overflow-hidden text-ellipsis tabular-nums font-bold {isSelf ? 'text-sky-400' : 'text-slate-300'}">
                     {thread.id}
+                    {#if isRootBlocker}
+                      <span
+                        class="ml-1 rounded bg-rose-600 px-1.5 py-0.5 font-sans text-[9px] font-bold text-white"
+                        title="Root blocker holding locks for other threads"
+                      >
+                        BLOCKER
+                      </span>
+                    {:else if isWaitingOnLock}
+                      <span
+                        class="ml-1 rounded border border-amber-800 bg-amber-950 px-1.5 py-0.5 font-sans text-[9px] font-bold text-amber-300"
+                        title="Thread is waiting on a lock"
+                      >
+                        WAITING
+                      </span>
+                    {/if}
                     {#if isSelf}
                       <span class="ml-1 font-sans text-[9px] font-normal uppercase text-sky-500">you</span>
                     {/if}
                   </td>
                 {/if}
                 {#if visibleColumns.user}
-                  <td class="px-2 text-slate-200 truncate" title={thread.user}>{thread.user || '-'}</td>
+                  <td class="px-2 text-slate-200 truncate overflow-hidden" title={thread.user}>{thread.user || '-'}</td>
                 {/if}
                 {#if visibleColumns.host}
-                  <td class="px-2 text-slate-400 truncate" title={thread.host}>{thread.host || '-'}</td>
+                  <td class="px-2 text-slate-400 truncate overflow-hidden" title={thread.host}>{thread.host || '-'}</td>
                 {/if}
                 {#if visibleColumns.db}
-                  <td class="px-2 text-emerald-400/90 truncate" title={thread.db}>{thread.db || '-'}</td>
+                  <td class="px-2 text-emerald-400/90 truncate overflow-hidden" title={thread.db}>{thread.db || '-'}</td>
                 {/if}
                 {#if visibleColumns.command}
-                  <td class="px-2">
+                  <td class="px-2 overflow-hidden">
                     <span
                       class="inline-block max-w-full truncate rounded border px-1.5 py-0.5 font-sans text-[10px] leading-tight {commandTone(
                         thread.command
@@ -1369,15 +1465,15 @@
                   </td>
                 {/if}
                 {#if visibleColumns.state}
-                  <td class="px-2 truncate text-slate-400" title={thread.state}>{thread.state || '-'}</td>
+                  <td class="px-2 truncate text-slate-400 overflow-hidden" title={thread.state}>{thread.state || '-'}</td>
                 {/if}
                 {#if visibleColumns.info}
-                  <td class="px-2 truncate text-slate-300 group-hover:text-sky-300" title={thread.info}>
+                  <td class="px-2 truncate text-slate-300 group-hover:text-sky-300 overflow-hidden" title={thread.info}>
                     {thread.info || '-'}
                   </td>
                 {/if}
                 <td
-                  class="px-2 text-center sticky right-0 border-l border-slate-800/60 transition-colors {actionBg} group-hover:bg-slate-800/40"
+                  class="px-2 text-center whitespace-nowrap overflow-hidden sticky right-0 border-l border-slate-800/60 transition-colors {actionBg} group-hover:bg-slate-800/40"
                   onclick={(e) => e.stopPropagation()}
                 >
                   {#if !isSelf}

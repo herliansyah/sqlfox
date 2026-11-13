@@ -260,17 +260,26 @@
     currentTab.stagedDraftRows.splice(dIdx, 1);
   }
 
-  function duplicateRowAsDraft(rIdx: number) {
+  /**
+   * Clones a visible row into an editable draft.
+   * @param withoutKey when true, primary-key values are blanked so the database
+   *   can generate a new identity (the safe default); when false the key is
+   *   copied verbatim, which only makes sense for composite/derived keys.
+   */
+  function duplicateRowAsDraft(rIdx: number, withoutKey = true) {
     if (!currentTab || !result?.rows || !result.rows[rIdx]) return;
     if (!currentTab.stagedDraftRows) currentTab.stagedDraftRows = [];
     const row = result.rows[rIdx];
     const draft: Record<string, any> = {};
     allColumns.forEach((colName, cIdx) => {
-      const isPK = result!.columns[cIdx] && isColPK(result!.columns[cIdx]);
-      draft[colName] = isPK ? '' : row[cIdx];
+      const isPK = Boolean(result!.columns[cIdx] && isColPK(result!.columns[cIdx]));
+      draft[colName] = withoutKey && isPK ? '' : row[cIdx];
     });
     currentTab.stagedDraftRows.unshift(draft);
-    appState.showToast(`Row #${rIdx + 1} duplicated as editable draft`, 'success');
+    appState.showToast(
+      `Row #${rIdx + 1} duplicated as editable draft${withoutKey ? ' (key cleared)' : ' (key retained)'}`,
+      'success'
+    );
   }
 
   function getFkInfo(colName: string) {
@@ -478,7 +487,7 @@
   {/if}
 
   <!-- Grid Control Toolbar -->
-  <div class="h-9 bg-[#0b0f19] border-b border-slate-800 px-3 flex items-center justify-between text-xs select-none shrink-0 gap-2">
+  <div id="grid-toolbar" class="h-9 bg-[#0b0f19] border-b border-slate-800 px-3 flex items-center justify-between text-xs select-none shrink-0 gap-2">
     <!-- Left: CRUD & Staged Actions -->
     <div class="flex items-center space-x-2">
       <!-- In-Place Draft Row Button -->
@@ -504,12 +513,33 @@
 
       {#if currentTab?.isTableViewer}
         <button
+          id="btn-grid-add-row"
           onclick={() => (appState.isInsertRowModalOpen = true)}
           class="h-6 px-2.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 font-semibold flex items-center space-x-1.5 transition text-[11px]"
           title="Insert new record"
         >
           <Icon name="plus" class="w-3 h-3 text-emerald-400" />
           <span>Insert Row</span>
+        </button>
+
+        <button
+          id="btn-import-csv"
+          onclick={() => appState.openCsvImportModal()}
+          class="h-6 px-2 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 border border-slate-700/80 flex items-center space-x-1 transition text-[11px]"
+          title="Import records from a CSV file"
+        >
+          <Icon name="upload" class="w-3 h-3 text-indigo-300" />
+          <span>Import CSV</span>
+        </button>
+
+        <button
+          id="btn-mock-data"
+          onclick={() => (appState.isMockDataModalOpen = true)}
+          class="h-6 px-2 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 border border-slate-700/80 flex items-center space-x-1 transition text-[11px]"
+          title="Generate synthetic test records"
+        >
+          <Icon name="sparkles" class="w-3 h-3 text-purple-300" />
+          <span>Mock Data</span>
         </button>
 
         <button
@@ -537,6 +567,36 @@
             <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" title="Active filter applied"></span>
           {/if}
         </button>
+
+        <!-- Edit mode: staged vs auto-commit -->
+        <div
+          id="grid-edit-mode-container"
+          class="flex items-center space-x-1 rounded border border-slate-800 bg-slate-900 px-2 py-0.5 text-[11px]"
+        >
+          <span class="text-[10px] text-slate-400">Edit:</span>
+          <button
+            id="btn-grid-mode-staged"
+            type="button"
+            onclick={() => appState.setGridEditMode('staged')}
+            class="rounded px-1.5 py-0.5 text-[10px] font-medium transition {appState.gridEditMode === 'staged'
+              ? 'bg-sky-500/20 text-sky-300'
+              : 'text-slate-400 hover:text-slate-200'}"
+            title="Manual apply: changes stay staged until you click Apply"
+          >
+            Staged
+          </button>
+          <button
+            id="btn-grid-mode-auto"
+            type="button"
+            onclick={() => appState.setGridEditMode('auto')}
+            class="rounded px-1.5 py-0.5 text-[10px] font-medium transition {appState.gridEditMode === 'auto'
+              ? 'bg-amber-500/20 text-amber-300'
+              : 'text-slate-400 hover:text-slate-200'}"
+            title="Auto-commit: persist directly on blur/Enter"
+          >
+            Auto
+          </button>
+        </div>
       {/if}
 
       <!-- Staged Edits Review Pill -->
@@ -567,12 +627,15 @@
       <!-- Column Picker Dropdown -->
       <div class="relative">
         <button
+          id="btn-col-picker"
           onclick={(e) => { e.stopPropagation(); showColPicker = !showColPicker; }}
           class="h-6 px-2 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 border border-slate-700/80 hover:border-slate-600 flex items-center space-x-1 text-[11px] transition"
           title="Toggle column visibility"
+          aria-expanded={showColPicker}
+          aria-controls="col-picker-dropdown"
         >
           <Icon name="columns" class="w-3 h-3 text-sky-400" />
-          <span>Columns ({visibleColumns.length}/{allColumns.length})</span>
+          <span>Columns (<span id="col-picker-count-badge">{visibleColumns.length}</span>/{allColumns.length})</span>
           <Icon name="chevron-down" class="w-2.5 h-2.5 text-slate-400" />
         </button>
 
@@ -584,9 +647,11 @@
             onclick={() => (showColPicker = false)}
           ></button>
           <div
+            id="col-picker-dropdown"
             class="absolute right-0 mt-1 w-56 bg-[#0f172a] border border-slate-700/90 rounded-lg shadow-2xl z-40 p-2 text-xs space-y-2 animate-in fade-in duration-100"
           >
             <input
+              id="col-picker-search"
               type="text"
               bind:value={colPickerSearch}
               placeholder="Search columns..."
@@ -596,7 +661,7 @@
               <button onclick={() => appState.showAllColumns()} class="hover:underline">Show All</button>
               <button onclick={() => appState.hideAllColumns(allColumns)} class="hover:underline">Hide All</button>
             </div>
-            <div class="max-h-48 overflow-y-auto space-y-1 py-1 divide-y divide-slate-800/40">
+            <div id="col-picker-list" class="max-h-48 overflow-y-auto space-y-1 py-1 divide-y divide-slate-800/40">
               {#each allColumns as col}
                 {#if !colPickerSearch || col.toLowerCase().includes(colPickerSearch.toLowerCase())}
                   <label class="flex items-center space-x-2 py-1 px-1 rounded hover:bg-slate-800 cursor-pointer text-slate-300 font-mono text-[11px]">
@@ -616,7 +681,7 @@
       </div>
 
       <!-- Export Dropdown -->
-      <div class="relative">
+      <div id="export-csv-dropdown-container" class="relative">
         <button
           onclick={(e) => { e.stopPropagation(); showExportMenu = !showExportMenu; }}
           class="h-6 px-2 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 border border-slate-700/80 hover:border-slate-600 flex items-center space-x-1 text-[11px] transition"
@@ -635,6 +700,7 @@
             onclick={() => (showExportMenu = false)}
           ></button>
           <div
+            id="export-csv-menu"
             class="absolute right-0 mt-1 w-44 bg-[#0f172a] border border-slate-700/90 rounded-lg shadow-2xl z-40 py-1 divide-y divide-slate-800 animate-in fade-in duration-100 text-xs"
           >
             <button
@@ -658,6 +724,19 @@
               <Icon name="code" class="w-3.5 h-3.5 text-sky-400" />
               <span>Export as SQL</span>
             </button>
+            {#if currentTab?.isTableViewer && currentTab.tableName}
+              <button
+                id="export-menu-table-dump"
+                onclick={() => {
+                  showExportMenu = false;
+                  appState.exportTableDump(currentTab!.tableName);
+                }}
+                class="flex w-full flex-col items-start px-3 py-1.5 text-left hover:bg-slate-800"
+              >
+                <span class="font-medium text-sky-400">Table SQL Dump</span>
+                <span class="text-[10px] text-slate-400">Export this table's DDL + data (.sql)</span>
+              </button>
+            {/if}
           </div>
         {/if}
       </div>
@@ -1153,12 +1232,28 @@
 
     <!-- Bottom Status & Pagination Bar -->
     <div class="h-8 bg-[#0b0f19] border-t border-[#334155] px-4 flex items-center justify-between text-xs text-slate-400 font-mono select-none shrink-0">
-      <div class="flex items-center space-x-3">
+      <div id="grid-bottom-stats" class="flex items-center space-x-3">
         <span class="flex items-center space-x-1.5">
           <Icon name="table" class="w-3.5 h-3.5 text-sky-400" />
-          <span class="font-bold text-slate-200">{totalRows.toLocaleString()}</span>
-          <span class="text-slate-500">records</span>
+          {#if currentTab?.exactRowCount !== undefined}
+            <span class="font-bold text-emerald-300">{currentTab.exactRowCount.toLocaleString()}</span>
+            <span class="text-slate-500">exact records</span>
+          {:else}
+            <span class="font-bold text-slate-200">{totalRows.toLocaleString()}</span>
+            <span class="text-slate-500">records</span>
+          {/if}
         </span>
+        {#if currentTab?.isTableViewer}
+          <button
+            id="btn-count-accurate"
+            onclick={() => currentTab && appState.requestExactRowCount(currentTab)}
+            disabled={currentTab.isCountingExact}
+            class="px-1.5 py-0.5 rounded border border-[#334155] text-[10px] text-slate-400 hover:text-sky-300 hover:border-sky-700 disabled:opacity-50 transition"
+            title="Run SELECT COUNT(*) for an exact total (ignores the catalog estimate)"
+          >
+            {currentTab.isCountingExact ? 'Counting…' : 'Exact count'}
+          </button>
+        {/if}
         {#if result.duration_ms !== undefined}
           <span class="text-slate-600">•</span>
           <span class="flex items-center space-x-1">
@@ -1170,7 +1265,10 @@
 
       <!-- Pagination Controls for Table Viewer -->
       {#if currentTab?.isTableViewer}
-        {@const estRows = appState.catalog?.tables?.find(t => t.name.toLowerCase() === currentTab?.tableName?.toLowerCase())?.row_count}
+        {@const estRows =
+          currentTab.exactRowCount ??
+          appState.catalog?.tables?.find((t) => t.name.toLowerCase() === currentTab?.tableName?.toLowerCase())
+            ?.row_count}
         {@const pageSize = currentTab.pageSize || 50}
         {@const curPage = currentTab.currentPage || 1}
         {@const totalPages = typeof estRows === 'number' && estRows > 0 ? Math.max(1, Math.ceil(estRows / pageSize)) : null}
@@ -1223,8 +1321,29 @@
           >
             <Icon name="chevron-left" class="w-3.5 h-3.5" />
           </button>
-          <span class="px-1 text-slate-300">
-            Page {curPage}{totalPages ? ` of ${totalPages.toLocaleString()}` : ''}
+          <span class="flex items-center space-x-1 px-1 text-slate-300">
+            <span>Page</span>
+            <!-- Editable page jump: parity with the legacy pager, clamped to the valid range. -->
+            <input
+              id="grid-page-input"
+              type="number"
+              min="1"
+              max={totalPages ?? undefined}
+              value={curPage}
+              onchange={(e) => {
+                const target = Number((e.currentTarget as HTMLInputElement).value);
+                if (!currentTab || !Number.isFinite(target)) return;
+                const clamped = Math.max(1, Math.min(totalPages ?? target, Math.floor(target)));
+                if (clamped === curPage) return;
+                currentTab.currentPage = clamped;
+                appState.loadTableData(currentTab);
+              }}
+              class="w-14 bg-[#090d16] border border-[#334155] rounded px-1 py-0.5 text-right text-slate-200 font-mono focus:outline-none focus:border-sky-500 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              aria-label="Jump to page"
+            />
+            {#if totalPages}
+              <span>of <span id="grid-total-pages">{totalPages.toLocaleString()}</span></span>
+            {/if}
           </span>
           <button
             id="btn-page-next"
@@ -1296,6 +1415,7 @@
   <!-- Cell Context Menu -->
   {#if contextMenu && contextMenu.open}
     <div
+      id="grid-context-menu"
       style="top: {contextMenu.y}px; left: {contextMenu.x}px;"
       class="fixed z-50 w-56 bg-[#0f172a] border border-[#334155] rounded-lg shadow-2xl py-1 divide-y divide-slate-800 text-xs font-sans animate-in fade-in duration-75 select-none"
     >
@@ -1303,7 +1423,9 @@
         Filter: {contextMenu.colName}
       </div>
 
-      <div class="py-1">
+      <div id="grid-ctx-filter-parent" class="py-1">
+        <div id="grid-ctx-filter-submenu">
+          <div id="grid-ctx-filter-options">
         <button
           onclick={() => applyQuickFilter('=')}
           class="w-full text-left px-3 py-1 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
@@ -1372,19 +1494,65 @@
         </button>
       </div>
 
-      <div class="py-1">
+          </div>
+        </div>
+      </div>
+
+      <div id="grid-ctx-mutations-parent" class="py-1">
+        <div id="grid-ctx-table-mutations">
+          <div id="grid-ctx-insert-section">
+            <div id="grid-ctx-insert-options">
         {#if currentTab?.tableName}
           <button
+            id="grid-ctx-btn-dup-nokey"
             onclick={() => {
-              duplicateRowAsDraft(contextMenu!.rIdx);
+              duplicateRowAsDraft(contextMenu!.rIdx, true);
               closeContextMenu();
             }}
             class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-emerald-300 font-medium"
           >
             <Icon name="copy" class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span>Duplicate Record</span>
+            <span>Duplicate Row (Without Key)</span>
+          </button>
+          <button
+            id="grid-ctx-btn-dup-key"
+            onclick={() => {
+              duplicateRowAsDraft(contextMenu!.rIdx, false);
+              closeContextMenu();
+            }}
+            class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-indigo-300 font-medium"
+          >
+            <Icon name="key" class="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+            <span>Duplicate Row (With Key)</span>
+          </button>
+          <button
+            id="grid-ctx-btn-add-draft"
+            onclick={() => {
+              addDraftRow();
+              closeContextMenu();
+            }}
+            class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-emerald-300"
+          >
+            <Icon name="plus" class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <span>Add Row Draft</span>
+          </button>
+          <button
+            id="grid-ctx-btn-delete-row"
+            onclick={() => {
+              handleDeleteCurrentRow();
+              closeContextMenu();
+            }}
+            disabled={selectedRowIndex === null}
+            class="w-full text-left px-3 py-1.5 hover:bg-rose-950/60 disabled:opacity-40 flex items-center space-x-2 text-rose-300"
+          >
+            <Icon name="trash-2" class="w-3.5 h-3.5 text-rose-400 shrink-0" />
+            <span>Delete Selected Row(s)</span>
           </button>
         {/if}
+          </div>
+        </div>
+      </div>
+
         <button
           onclick={() => {
             const { rIdx, cIdx, colName, cellValue } = contextMenu!;
@@ -1420,8 +1588,10 @@
         </button>
       </div>
 
-      <div class="py-1">
+      <div id="grid-ctx-copy-parent" class="py-1">
+        <div id="grid-ctx-copy-submenu">
         <button
+          id="grid-ctx-btn-copy-row-tsv"
           onclick={() => {
             copyRowAsTSV(contextMenu!.rIdx);
             closeContextMenu();
@@ -1432,6 +1602,7 @@
           <span>Copy Row as TSV</span>
         </button>
         <button
+          id="grid-ctx-btn-copy-row-json"
           onclick={() => {
             copyRowAsMarkdown(contextMenu!.rIdx);
             closeContextMenu();
@@ -1442,6 +1613,7 @@
           <span>Copy Row as Markdown</span>
         </button>
         <button
+          id="grid-ctx-btn-copy-row-sql"
           onclick={() => {
             copyRowAsInsertSQL(contextMenu!.rIdx);
             closeContextMenu();

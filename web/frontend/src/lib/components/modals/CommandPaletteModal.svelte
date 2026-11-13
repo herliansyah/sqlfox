@@ -263,6 +263,105 @@
       action: () => appState.refreshCatalog(),
     });
 
+    // Query execution actions
+    list.push({
+      id: 'action-execute-query',
+      title: 'Execute Query',
+      subtitle: 'Execute the statement under the cursor or selection (Ctrl+Enter)',
+      category: 'Actions',
+      icon: 'play',
+      action: () => appState.executeCurrentTab(appState.getEditorTargetSql() ?? undefined),
+    });
+    list.push({
+      id: 'action-execute-all',
+      title: 'Execute All Statements (Full Script)',
+      subtitle: 'Execute every statement in the active worksheet (Ctrl+Alt+Enter / F5)',
+      category: 'Actions',
+      icon: 'play',
+      action: () => appState.executeCurrentTab(),
+    });
+    list.push({
+      id: 'action-explain-query',
+      title: 'Explain Query Plan',
+      subtitle: 'Inspect the optimizer plan for the active statement (Ctrl+Shift+Enter)',
+      category: 'Actions',
+      icon: 'activity',
+      action: () => appState.explainCurrentTab(appState.getEditorTargetSql() ?? undefined),
+    });
+    list.push({
+      id: 'action-save-query-note',
+      title: 'Save Query as Operational Note',
+      subtitle: 'Snapshot the active worksheet query into the notes inbox',
+      category: 'Actions',
+      icon: 'file-text',
+      action: () => appState.saveQueryToNote(),
+    });
+    list.push({
+      id: 'action-open-notes',
+      title: 'Open Operational Notes Inbox',
+      subtitle: 'Team knowledge base, incident logs and runbooks',
+      category: 'Actions',
+      icon: 'book-open',
+      action: () => (appState.isNotesDrawerOpen = true),
+    });
+    list.push({
+      id: 'action-toggle-ai',
+      title: 'Toggle SqlFox AI Copilot',
+      subtitle: 'Natural language query generation and SQL explanation (Ctrl+L)',
+      category: 'Actions',
+      icon: 'bot',
+      action: () => (appState.isAiDrawerOpen = !appState.isAiDrawerOpen),
+    });
+    list.push({
+      id: 'action-ai-settings',
+      title: 'AI Copilot Settings (BYOK)',
+      subtitle: 'Configure provider credentials and model parameters',
+      category: 'Actions',
+      icon: 'bot',
+      action: () => (appState.isAiSettingsModalOpen = true),
+    });
+    list.push({
+      id: 'action-toggle-readonly',
+      title: 'Toggle Read-Only Mode',
+      subtitle: 'Block mutating statements for this session',
+      category: 'Actions',
+      icon: 'shield',
+      action: () => appState.toggleReadOnlyMode(),
+    });
+    list.push({
+      id: 'action-open-browser',
+      title: 'Open in Web Browser',
+      subtitle: 'Open the SqlFox UI in your default browser',
+      category: 'Actions',
+      icon: 'share-2',
+      action: () => appState.openInSystemBrowser(),
+    });
+    list.push({
+      id: 'action-copy-url',
+      title: 'Copy App URL to Clipboard',
+      subtitle: 'Copy the current SqlFox address',
+      category: 'Actions',
+      icon: 'copy',
+      action: () => appState.copyAppUrl(),
+    });
+    list.push({
+      id: 'action-docs',
+      title: 'Open Documentation (GitHub)',
+      subtitle: 'User guide, keyboard reference and architecture notes',
+      category: 'Actions',
+      icon: 'book-open',
+      action: () =>
+        window.open('https://github.com/herliansyah/sqlfox/blob/main/docs/USER_GUIDE.md', '_blank', 'noopener,noreferrer'),
+    });
+    list.push({
+      id: 'action-shutdown',
+      title: 'Shut Down SqlFox Daemon',
+      subtitle: 'Gracefully stop the local server process',
+      category: 'Actions',
+      icon: 'rotate-ccw',
+      action: () => appState.shutdownDaemon(),
+    });
+
     const q = query.toLowerCase().trim();
     if (!q) return list;
     return list.filter(

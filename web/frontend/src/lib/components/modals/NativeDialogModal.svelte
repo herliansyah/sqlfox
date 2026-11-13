@@ -67,8 +67,9 @@
         </p>
 
         {#if appState.nativeDialog.type === 'prompt'}
-          <div>
+          <div id="app-native-dialog-input-container">
             <input
+              id="app-native-dialog-input"
               bind:this={inputEl}
               type="text"
               bind:value={appState.nativeDialog.inputValue}

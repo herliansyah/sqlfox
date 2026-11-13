@@ -110,6 +110,16 @@ export class AppState {
   // Staged Edits for Grid CRUD
   stagedEdits = $state<Record<string, StagedEdit>>({});
 
+  /**
+   * Grid commit strategy. "staged" accumulates cell edits until the user hits
+   * Apply; "auto" persists each edit as soon as the cell loses focus.
+   */
+  gridEditMode = $state<'staged' | 'auto'>(
+    (typeof localStorage !== 'undefined' && localStorage.getItem('sqlfox_grid_edit_mode') === 'auto'
+      ? 'auto'
+      : 'staged') as 'staged' | 'auto'
+  );
+
   // Toasts
   toasts = $state<Toast[]>([]);
 
@@ -701,6 +711,58 @@ export class AppState {
     this.isNoteComposerModalOpen = true;
   }
 
+  // --- System lifecycle actions (surfaced from the command palette) ---
+
+  toggleReadOnlyMode() {
+    this.isReadOnly = !this.isReadOnly;
+    this.showToast(
+      this.isReadOnly
+        ? 'Read-only mode enabled — mutating statements will be blocked'
+        : 'Read-only mode disabled — writes are now allowed',
+      this.isReadOnly ? 'warning' : 'success'
+    );
+  }
+
+  async openInSystemBrowser() {
+    const url = typeof window !== 'undefined' ? window.location.href : '';
+    try {
+      await api.openInSystemBrowser(url);
+      this.showToast('Opening in your default web browser…', 'info');
+      return;
+    } catch {
+      /* Remote sessions and headless daemons cannot open a host browser; fall through. */
+    }
+    const win = typeof window !== 'undefined' ? window.open(url, '_blank', 'noopener,noreferrer') : null;
+    this.showToast(
+      win ? 'Opened in a new browser tab' : 'Popup was blocked — allow popups or copy the URL instead',
+      win ? 'info' : 'warning'
+    );
+  }
+
+  async copyAppUrl() {
+    const url = typeof window !== 'undefined' ? window.location.href : '';
+    try {
+      await navigator.clipboard.writeText(url);
+      this.showToast('SqlFox URL copied to clipboard', 'success');
+    } catch {
+      this.showToast(`Copy failed. URL: ${url}`, 'warning');
+    }
+  }
+
+  async shutdownDaemon() {
+    if (!confirm('Shut down the SqlFox daemon? Active background jobs and database connections will be closed.')) {
+      return;
+    }
+    try {
+      await api.shutdownDaemon();
+      this.showToast('Daemon shutting down gracefully…', 'info');
+    } catch {
+      // A graceful shutdown closes the socket, so a network failure here usually
+      // means the daemon already stopped — report it as success rather than an error.
+      this.showToast('Server disconnected — the daemon has stopped', 'info');
+    }
+  }
+
   async loadFastCatalogBackground(sessionId: string) {
     try {
       const fastCat = await api.getFastCatalog(sessionId);
@@ -1079,6 +1141,55 @@ export class AppState {
     }
   }
 
+  /**
+   * Runs a one-off `SELECT COUNT(*)` for the active table viewer, honouring the
+   * current filter. Pagination totals use the catalog's estimated row_count, so
+   * this is the "accurate count" escape hatch when the estimate drifts.
+   */
+  async requestExactRowCount(targetTab?: EditorTab) {
+    const tabId = targetTab?.id || this.activeTabId;
+    const tab = this.tabs.find((t) => t.id === tabId) || targetTab || this.activeTab;
+    if (!this.activeSessionId || !tab?.isTableViewer || !tab.tableName) return;
+    if (tab.isCountingExact) return;
+
+    // Quote per dialect so identifiers with reserved words or mixed case work.
+    const driver = (this.activeConnection?.driver || '').toLowerCase();
+    const quoted =
+      driver === 'mysql' || driver === 'mariadb'
+        ? '`' + tab.tableName.replace(/`/g, '``') + '`'
+        : '"' + tab.tableName.replace(/"/g, '""') + '"';
+
+    let filterClause = (tab.appliedFilter || '').trim();
+    if (!filterClause && tab.filterPills && tab.filterPills.length > 0) {
+      filterClause = compileFilterPills(tab.filterPills, this.activeConnection?.driver);
+    }
+    const sql = `SELECT COUNT(*) AS total FROM ${quoted}${filterClause ? ` WHERE (${filterClause})` : ''}`;
+
+    tab.isCountingExact = true;
+    this.tabs = [...this.tabs];
+    try {
+      const res = await api.executeQuery(
+        this.activeSessionId,
+        sql,
+        true,
+        tab.database || this.currentDatabase || ''
+      );
+      const raw = res?.rows?.[0]?.[0];
+      const count = Number(raw);
+      if (Number.isFinite(count)) {
+        tab.exactRowCount = count;
+        this.showToast(`Exact row count: ${count.toLocaleString()}`, 'success');
+      } else {
+        this.showToast('Could not determine an exact row count', 'warning');
+      }
+    } catch (err: any) {
+      this.showToast(`Row count failed: ${err?.message ?? err}`, 'error');
+    } finally {
+      tab.isCountingExact = false;
+      this.tabs = [...this.tabs];
+    }
+  }
+
   async loadTableData(targetTab?: EditorTab) {
     const tabId = targetTab?.id || this.activeTabId;
     const tab = this.tabs.find((t) => t.id === tabId) || targetTab || this.activeTab;
@@ -1234,6 +1345,35 @@ export class AppState {
   closeOtherTabs(tabId: string) {
     this.tabs = this.tabs.filter((t) => t.id === tabId);
     this.activeTabId = tabId;
+    this.saveTabsState();
+  }
+
+  closeTabsToRight(tabId: string) {
+    const idx = this.tabs.findIndex((t) => t.id === tabId);
+    if (idx === -1 || idx === this.tabs.length - 1) return;
+    this.tabs = this.tabs.slice(0, idx + 1);
+    // Keep the anchor tab active; the previously active tab may have been closed.
+    this.activeTabId = tabId;
+    this.saveTabsState();
+  }
+
+  closeAllTabs() {
+    // Delegate to closeTab's reset semantics so the workspace never ends up empty.
+    const anchor = this.tabs[0];
+    if (!anchor) return;
+    this.closeOtherTabs(anchor.id);
+  }
+
+  renameTab(tabId: string, nextTitle: string) {
+    const tab = this.tabs.find((t) => t.id === tabId);
+    const title = nextTitle.trim();
+    if (!tab || !title) return;
+    if (this.tabs.some((t) => t.id !== tabId && t.title === title)) {
+      this.showToast(`A tab named "${title}" already exists`, 'warning');
+      return;
+    }
+    tab.title = title;
+    this.tabs = [...this.tabs];
     this.saveTabsState();
   }
 
@@ -1570,6 +1710,25 @@ export class AppState {
       oldVal,
       newVal,
     };
+    // Auto mode persists immediately; staged mode waits for the Apply action.
+    if (this.gridEditMode === 'auto') {
+      void this.commitStagedEdits();
+    }
+  }
+
+  setGridEditMode(mode: 'staged' | 'auto') {
+    this.gridEditMode = mode;
+    try {
+      localStorage.setItem('sqlfox_grid_edit_mode', mode);
+    } catch {
+      /* storage unavailable */
+    }
+    this.showToast(
+      mode === 'auto'
+        ? 'Auto-commit enabled — cell edits save on blur'
+        : 'Staged mode enabled — review before applying',
+      'info'
+    );
   }
 
   discardStagedEdits() {

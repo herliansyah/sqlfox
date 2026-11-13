@@ -54,6 +54,9 @@
     { label: 'AI Model Config', desc: 'Provider credentials and parameters', icon: 'bot', iconColor: 'text-indigo-400', action: () => (appState.isAiSettingsModalOpen = true) },
     { label: 'Keyboard Shortcuts', desc: 'Hotkeys for navigation and execution', icon: 'keyboard', iconColor: 'text-amber-400', action: () => (appState.isShortcutsModalOpen = true) },
     { label: 'Check for Updates', desc: 'Latest release notes and self-update', icon: 'arrow-down-circle', iconColor: 'text-emerald-400', action: () => (appState.isUpdateModalOpen = true) },
+    { label: 'Open in Web Browser', desc: 'Launch this UI in your default browser', icon: 'share-2', iconColor: 'text-sky-400', action: () => appState.openInSystemBrowser() },
+    { label: 'Copy App URL', desc: 'Share this SqlFox address', icon: 'copy', iconColor: 'text-slate-300', action: () => appState.copyAppUrl() },
+    { label: 'Shut Down Daemon', desc: 'Gracefully stop the local server', icon: 'rotate-ccw', iconColor: 'text-rose-400', action: () => appState.shutdownDaemon() },
   ];
 
   let masterPin = $derived(appState.authStatus?.master_password || 'fox-0304');
