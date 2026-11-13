@@ -1687,8 +1687,8 @@
         { name: 'User Accounts & Privilege Matrix', shortcut: '', run: () => openPrivilegeMatrixModal() },
         { name: 'Lock Contention & Root Blocker Analysis', shortcut: '', run: () => openLockInspector() },
         { name: 'Create Database', shortcut: '', run: () => openCreateDatabaseModal() },
-        { name: 'Run Query', shortcut: 'Ctrl+Enter', run: () => runActiveQuery() },
-        { name: 'Run All Statements (Full Script)', shortcut: 'Ctrl+Alt+Enter / F5', run: () => runActiveQuery(false, '', null, null, true) },
+        { name: 'Execute Query', shortcut: 'Ctrl+Enter', run: () => runActiveQuery() },
+        { name: 'Execute All Statements (Full Script)', shortcut: 'Ctrl+Alt+Enter / F5', run: () => runActiveQuery(false, '', null, null, true) },
         { name: 'Explain Query Plan', shortcut: 'Ctrl+Shift+Enter', run: () => explainActiveQuery() },
         { name: 'Save Query as Operational Note', shortcut: '', run: () => saveActiveQueryToNotes() },
         { name: 'Open Operational Notes Inbox', shortcut: '', run: () => toggleNotesDrawer(true) },
@@ -1733,8 +1733,8 @@
       else if (name === 'User Accounts & Privilege Matrix') openPrivilegeMatrixModal();
       else if (name.startsWith('Lock Contention')) openLockInspector();
       else if (name === 'Create Database') openCreateDatabaseModal();
-      else if (name === 'Run Query') runActiveQuery();
-      else if (name === 'Run All Statements (Full Script)') runActiveQuery(false, '', null, null, true);
+      else if (name === 'Execute Query') runActiveQuery();
+      else if (name === 'Execute All Statements (Full Script)') runActiveQuery(false, '', null, null, true);
       else if (name === 'Explain Query Plan') explainActiveQuery();
       else if (name === 'Save Query as Operational Note') saveActiveQueryToNotes();
       else if (name === 'Open Operational Notes Inbox') toggleNotesDrawer(true);

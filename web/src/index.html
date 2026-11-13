@@ -734,12 +734,12 @@
         <!-- Editor Toolbar -->
         <div class="h-8 bg-app-surface/60 border-b border-app-border/60 px-3 flex items-center justify-between text-xs flex-shrink-0 overflow-x-auto gap-3">
           <div class="flex items-center space-x-2 shrink-0">
-            <button id="btn-run-query" onclick="runActiveQuery(false, '', null, null, false)" class="bg-app-safe hover:bg-emerald-600 text-slate-950 font-bold px-3 py-1 rounded flex items-center space-x-1 transition shadow-sm" title="Run Statement under Cursor or Selection (Ctrl+Enter)">
-              <svg class="w-3.5 h-3.5 shrink-0" aria-hidden="true"><use href="#icon-play"/></svg><span>Run</span>
+            <button id="btn-run-query" onclick="runActiveQuery(false, '', null, null, false)" class="bg-app-safe hover:bg-emerald-600 text-slate-950 font-bold px-3 py-1 rounded flex items-center space-x-1 transition shadow-sm" title="Execute Statement under Cursor or Selection (Ctrl+Enter)">
+              <svg class="w-3.5 h-3.5 shrink-0" aria-hidden="true"><use href="#icon-play"/></svg><span>Execute</span>
               <kbd class="text-[10px] opacity-75 font-normal">Ctrl+Enter</kbd>
             </button>
-            <button id="btn-run-all-query" onclick="runActiveQuery(false, '', null, null, true)" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded border border-slate-700 hover:border-sky-500/50 flex items-center space-x-1 transition text-xs" title="Run Entire Script (Ctrl+Alt+Enter)">
-              <svg class="w-3.5 h-3.5 text-sky-400 shrink-0" aria-hidden="true"><use href="#icon-play"/></svg><span>Run All</span>
+            <button id="btn-run-all-query" onclick="runActiveQuery(false, '', null, null, true)" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded border border-slate-700 hover:border-sky-500/50 flex items-center space-x-1 transition text-xs" title="Execute Entire Script (Ctrl+Alt+Enter)">
+              <svg class="w-3.5 h-3.5 text-sky-400 shrink-0" aria-hidden="true"><use href="#icon-play"/></svg><span>Execute All</span>
               <kbd class="text-[10px] opacity-60 font-normal">Ctrl+Alt+Enter</kbd>
             </button>
 
@@ -2602,11 +2602,11 @@
           </h4>
           <div class="bg-slate-950/70 border border-slate-800 rounded-lg p-2.5 space-y-2">
             <div class="flex items-center justify-between py-1 border-b border-slate-900">
-              <span class="text-slate-300">Run Statement under Cursor or Selection</span>
+              <span class="text-slate-300">Execute Statement under Cursor or Selection</span>
               <kbd class="bg-slate-800 px-2 py-0.5 rounded text-[11px] text-slate-300 border border-slate-700 font-mono">Ctrl + Enter</kbd>
             </div>
             <div class="flex items-center justify-between py-1 border-b border-slate-900">
-              <span class="text-slate-300">Run All Statements (Full Script Execution)</span>
+              <span class="text-slate-300">Execute All Statements (Full Script Execution)</span>
               <kbd class="bg-slate-800 px-2 py-0.5 rounded text-[11px] text-slate-300 border border-slate-700 font-mono">Ctrl + Alt + Enter / F5</kbd>
             </div>
             <div class="flex items-center justify-between py-1 border-b border-slate-900">
