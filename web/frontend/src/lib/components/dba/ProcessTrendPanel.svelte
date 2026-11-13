@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import type { ProcesslistThread } from '../../../types';
   import Icon from '../common/Icon.svelte';
 
@@ -123,10 +122,12 @@
     return () => observer.disconnect();
   });
 
-  onMount(() => {
+  // Sample once per fresh processlist fetch. Polling is the only source of new
+  // `threads`, so a paused Processlist freezes the chart instead of shifting
+  // stale samples leftward on a wall-clock timer.
+  $effect(() => {
+    threads;
     sample();
-    const timer = setInterval(sample, 1000);
-    return () => clearInterval(timer);
   });
 </script>
 
