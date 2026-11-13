@@ -1,11 +1,13 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { appState } from '../../stores/appState.svelte';
   import Icon from '../common/Icon.svelte';
 
   let containerWidth = $state(0);
   let showOverflowDropdown = $state(false);
   let overflowSearchQuery = $state('');
+  let overflowActiveIndex = $state(0);
+  let overflowListEl = $state<HTMLDivElement | null>(null);
   let overflowBtnRef = $state<HTMLButtonElement | null>(null);
   let dropdownCoords = $state<{ top: number; left: number }>({ top: 40, left: 0 });
 
@@ -111,8 +113,58 @@
     e.stopPropagation();
     if (!showOverflowDropdown) {
       updateDropdownCoords();
+      overflowActiveIndex = 0;
       showOverflowDropdown = true;
+      // Focus the panel so arrow keys work without an extra click.
+      tick().then(() => document.getElementById('tab-overflow-dropdown')?.focus());
     } else {
+      showOverflowDropdown = false;
+    }
+  }
+
+  $effect(() => {
+    if (overflowActiveIndex >= filteredOverflowTabs.length) {
+      overflowActiveIndex = Math.max(0, filteredOverflowTabs.length - 1);
+    }
+  });
+
+  function scrollOverflowActiveIntoView() {
+    tick().then(() =>
+      overflowListEl?.querySelector('[data-overflow-active="true"]')?.scrollIntoView({ block: 'nearest' })
+    );
+  }
+
+  function handleOverflowKeydown(e: KeyboardEvent) {
+    const count = filteredOverflowTabs.length;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (count) {
+        overflowActiveIndex = (overflowActiveIndex + 1) % count;
+        scrollOverflowActiveIntoView();
+      }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (count) {
+        overflowActiveIndex = (overflowActiveIndex - 1 + count) % count;
+        scrollOverflowActiveIntoView();
+      }
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      overflowActiveIndex = 0;
+      scrollOverflowActiveIntoView();
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      overflowActiveIndex = Math.max(0, count - 1);
+      scrollOverflowActiveIntoView();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const tab = filteredOverflowTabs[overflowActiveIndex];
+      if (tab) selectOverflowTab(tab.id);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      showOverflowDropdown = false;
+      overflowBtnRef?.focus();
+    } else if (e.key === 'Tab') {
       showOverflowDropdown = false;
     }
   }
@@ -342,6 +394,7 @@
     onclick={(e) => e.stopPropagation()}
     role="menu"
     tabindex="-1"
+    onkeydown={handleOverflowKeydown}
   >
     <!-- Header -->
     <div class="px-3 py-2 bg-slate-900/90 flex items-center justify-between">
@@ -364,7 +417,12 @@
           <input
             type="text"
             bind:value={overflowSearchQuery}
-            placeholder="Filter hidden tabs..."
+            oninput={() => (overflowActiveIndex = 0)}
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="tab-overflow-listbox"
+            aria-autocomplete="list"
+            placeholder="Filter hidden tabs... (↑↓ Enter)"
             class="w-full bg-[#1e293b]/70 border border-slate-700/80 rounded pl-7 pr-2 py-1 text-[11px] text-slate-200 placeholder-slate-500 focus:outline-none focus:border-sky-500/70"
           />
         </div>
@@ -372,19 +430,25 @@
     {/if}
 
     <!-- Dropdown Tab Items -->
-    <div class="max-h-72 overflow-y-auto divide-y divide-slate-800/40 py-0.5">
+    <div id="tab-overflow-listbox" bind:this={overflowListEl} role="listbox" class="max-h-72 overflow-y-auto divide-y divide-slate-800/40 py-0.5">
       {#if filteredOverflowTabs.length === 0}
         <div class="px-3 py-4 text-center text-slate-500 text-xs italic">
           No matching tabs found
         </div>
       {:else}
-        {#each filteredOverflowTabs as tab (tab.id)}
+        {#each filteredOverflowTabs as tab, idx (tab.id)}
+          {@const isActiveOverflow = idx === overflowActiveIndex}
           <div
-            class="flex items-center justify-between hover:bg-slate-800/80 px-2.5 py-1.5 transition-colors group cursor-pointer"
+            data-overflow-active={isActiveOverflow}
+            class="flex items-center justify-between px-2.5 py-1.5 transition-colors group cursor-pointer {isActiveOverflow
+              ? 'bg-slate-800/90 ring-1 ring-inset ring-sky-500/40'
+              : 'hover:bg-slate-800/80'}"
+            onmouseenter={() => (overflowActiveIndex = idx)}
             onclick={() => selectOverflowTab(tab.id)}
-            role="button"
-            tabindex="0"
             onkeydown={(e) => e.key === 'Enter' && selectOverflowTab(tab.id)}
+            role="option"
+            aria-selected={tab.id === appState.activeTabId}
+            tabindex="-1"
           >
             <!-- Tab Icon & Title -->
             <div class="flex items-center space-x-2 min-w-0 flex-1 pr-2">

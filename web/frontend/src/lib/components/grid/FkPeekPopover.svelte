@@ -6,7 +6,7 @@
     const refTable = appState.fkPeekState.refTable;
     appState.closeFkPeek();
     if (refTable) {
-      appState.openTableViewer(refTable);
+      appState.openTableDataTab(refTable);
     }
   }
 

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
+  import { api } from '../../api/client';
   import Icon from '../common/Icon.svelte';
 
   let provider = $state<'openai' | 'anthropic' | 'gemini' | 'ollama' | 'custom'>('openai');
@@ -17,15 +18,16 @@
     anthropic: { url: 'https://api.anthropic.com/v1', model: 'claude-3-5-sonnet-20241022' },
     gemini: { url: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-1.5-flash' },
     ollama: { url: 'http://localhost:11434', model: 'llama3.2:latest' },
-    custom: { url: 'http://localhost:8080/v1', model: 'custom-model' },
+    custom: { url: '', model: '' },
   };
 
   function onProviderChange(p: typeof provider) {
     provider = p;
     const preset = presets[p];
     if (preset) {
-      baseUrl = preset.url;
-      modelName = preset.model;
+      // Custom starts blank: keep whatever the operator already typed.
+      if (preset.url) baseUrl = preset.url;
+      if (preset.model) modelName = preset.model;
     }
   }
 
@@ -58,20 +60,16 @@
     isTesting = true;
     testStatus = null;
     try {
-      if (provider === 'ollama') {
-        const res = await fetch(`${baseUrl}/api/tags`);
-        if (res.ok) {
-          const data = await res.json();
-          testStatus = { ok: true, message: `Connected to Ollama! Found ${(data.models || []).length} models.` };
-        } else {
-          testStatus = { ok: false, message: `Ollama returned HTTP ${res.status}` };
-        }
-      } else {
-        // Generic endpoint test
-        testStatus = { ok: true, message: `Configuration looks valid for ${provider.toUpperCase()}` };
-      }
+      // Real round-trip: a fake "looks valid" check is what hid the broken custom provider before.
+      const res = await api.aiChat(
+        'Reply with the single word OK.',
+        '',
+        'SQL',
+        { provider, apiKey, baseUrl, modelName, temperature }
+      );
+      testStatus = { ok: true, message: `Connected. Model replied: "${(res.content || '').slice(0, 60)}"` };
     } catch (err: any) {
-      testStatus = { ok: false, message: `Connection test failed: ${err.message}` };
+      testStatus = { ok: false, message: err.message || 'Request failed' };
     } finally {
       isTesting = false;
     }
@@ -142,7 +140,7 @@
             <input
               type="text"
               bind:value={baseUrl}
-              placeholder="https://api.openai.com/v1"
+              placeholder={provider === 'custom' ? 'https://your-proxy/v1' : 'https://api.openai.com/v1'}
               class="w-full bg-[#050811] border border-[#1e293b] rounded-lg px-3 py-2 text-slate-200 font-mono text-xs focus:outline-none focus:border-sky-500"
             />
           </div>

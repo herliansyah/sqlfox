@@ -9,6 +9,31 @@ import type {
   QuerySnippet,
 } from '../../types';
 
+export interface AiConfig {
+  provider: string;
+  apiKey: string;
+  baseUrl: string;
+  modelName: string;
+  temperature: number;
+}
+
+// Single source for the saved BYOK settings; AiSettingsModal writes the same key.
+export function loadAiConfig(): AiConfig {
+  const defaults: AiConfig = {
+    provider: 'openai',
+    apiKey: '',
+    baseUrl: 'https://api.openai.com/v1',
+    modelName: 'gpt-4o-mini',
+    temperature: 0.3,
+  };
+  try {
+    const saved = JSON.parse(localStorage.getItem('sqlfox_ai_config') || '{}');
+    return { ...defaults, ...saved };
+  } catch {
+    return defaults;
+  }
+}
+
 class ApiClient {
   private baseUrl = '/api';
 
@@ -527,12 +552,22 @@ class ApiClient {
   // AI Assistant
   async aiChat(
     prompt: string,
-    context?: string,
-    dialect = 'mysql'
-  ): Promise<{ response: string; error?: string }> {
+    query = '',
+    dialect = 'mysql',
+    config: AiConfig = loadAiConfig()
+  ): Promise<{ content: string; model?: string }> {
     return this.request('/ai/chat', {
       method: 'POST',
-      body: JSON.stringify({ prompt, context, dialect }),
+      body: JSON.stringify({
+        action: 'chat',
+        prompt,
+        query,
+        dialect,
+        provider: config.provider,
+        api_key: config.apiKey,
+        model: config.modelName,
+        endpoint: config.baseUrl,
+      }),
     });
   }
 

@@ -2489,6 +2489,7 @@ func parseDeadlockTransactionChunk(idx int, chunk string, isVictim bool) driver.
 
 	lines := strings.Split(chunk, "\n")
 	readingQuery := false
+	lockSection := ""
 	var queryLines []string
 
 	for _, line := range lines {
@@ -2546,15 +2547,33 @@ func parseDeadlockTransactionChunk(idx int, chunk string, isVictim bool) driver.
 			}
 		}
 
-		// Lock mode and wait
+		// Lock mode and wait. The header line only names the section; the lock
+		// descriptor on the following line is what the reader needs.
 		if strings.HasPrefix(trimmed, "*** (") && strings.Contains(trimmed, "WAITING FOR THIS LOCK TO BE GRANTED:") {
-			tx.LockWaited = trimmed
+			lockSection = "waited"
+			continue
 		} else if strings.Contains(trimmed, "HOLDS THE LOCK(S):") {
-			tx.LockHeld = trimmed
-		} else if strings.HasPrefix(trimmed, "RECORD LOCKS space id") || strings.HasPrefix(trimmed, "TABLE LOCK table") {
+			lockSection = "held"
+			continue
+		} else if strings.HasPrefix(trimmed, "RECORD LOCKS") || strings.HasPrefix(trimmed, "TABLE LOCK") {
 			if tx.LockMode == "" {
 				tx.LockMode = trimmed
 			}
+			switch lockSection {
+			case "held":
+				if tx.LockHeld == "" {
+					tx.LockHeld = trimmed
+					lockSection = ""
+				}
+			case "waited":
+				if tx.LockWaited == "" {
+					tx.LockWaited = trimmed
+					lockSection = ""
+				}
+			}
+		} else if lockSection != "" && !strings.HasPrefix(trimmed, "***") && trimmed != "" {
+			// Any other line ends the lock descriptor block.
+			lockSection = ""
 		}
 
 		// Query statement capture
@@ -2585,6 +2604,24 @@ func parseDeadlockTransactionChunk(idx int, chunk string, isVictim bool) driver.
 func (s *MySQLSession) GetStatementDigest(ctx context.Context, limit int) ([]driver.StatementDigestEntry, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 25
+	}
+
+	// performance_schema is optional (MariaDB may ship it disabled, sandboxes often
+	// have it OFF). Probe first so we can explain the failure instead of showing a
+	// raw "table doesn't exist" error inside the UI.
+	var psEnabled string
+	_ = s.db.QueryRowContext(ctx,
+		"SELECT IFNULL(@@performance_schema, '0')" ).Scan(&psEnabled)
+	psAvailable := false
+	if psEnabled != "" && psEnabled != "0" {
+		var probe int
+		if err := s.db.QueryRowContext(ctx,
+			"SELECT COUNT(*) FROM performance_schema.events_statements_summary_by_digest").Scan(&probe); err == nil {
+			psAvailable = true
+		}
+	}
+	if !psAvailable {
+		return nil, fmt.Errorf("performance_schema is disabled on this server (or the account lacks SELECT on it). Enable it with performance_schema=ON in my.cnf, then restart MySQL/MariaDB, to collect statement digests")
 	}
 
 	// 1. Try querying sys.statement_analysis (default in MySQL 5.7+ & 8.0)
@@ -2655,7 +2692,7 @@ func (s *MySQLSession) GetStatementDigest(ctx context.Context, limit int) ([]dri
 
 	psRows, psErr := s.db.QueryContext(ctx, psQuery)
 	if psErr != nil {
-		return nil, fmt.Errorf("failed to introspect statement digest (performance_schema may be disabled): %w", psErr)
+		return nil, fmt.Errorf("failed to read performance_schema statement digests: %w", psErr)
 	}
 	defer psRows.Close()
 

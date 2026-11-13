@@ -532,17 +532,59 @@ func (s *SQLiteSession) GetDatabaseDiagnostics(ctx context.Context) ([]driver.Da
 }
 
 func (s *SQLiteSession) GetTableDiagnostics(ctx context.Context, database, table string) ([]driver.TableDiagnostics, error) {
-	var pageSize, pageCount, freelistCount int64
+	var pageSize, freelistCount int64
 	_ = s.db.QueryRowContext(ctx, "PRAGMA page_size").Scan(&pageSize)
-	_ = s.db.QueryRowContext(ctx, "PRAGMA page_count").Scan(&pageCount)
 	_ = s.db.QueryRowContext(ctx, "PRAGMA freelist_count").Scan(&freelistCount)
 
-	totalSize := pageCount * pageSize
 	freeSize := freelistCount * pageSize
 
 	schema, err := s.InspectSchema(ctx, "main")
 	if err != nil {
 		return nil, err
+	}
+
+	// SQLite has no per-table storage counters: derive each table's footprint
+	// from dbstat (when available) and split it into data vs index bytes.
+	perTable := map[string][2]int64{} // name -> {data, index}
+	var dbstatErr error
+	statRows, err := s.db.QueryContext(ctx,
+		`SELECT name, SUM(pgsize) FROM dbstat WHERE aggregate = 1 GROUP BY name`)
+	if err != nil {
+		dbstatErr = err
+	} else {
+		defer statRows.Close()
+		for statRows.Next() {
+			var name string
+			var size int64
+			if err := statRows.Scan(&name, &size); err != nil {
+				dbstatErr = err
+				break
+			}
+			perTable[name] = [2]int64{size, 0}
+		}
+		if err := statRows.Err(); err != nil {
+			dbstatErr = err
+		}
+	}
+
+	// Re-attribute entries that belong to indexes of a known table.
+	if dbstatErr == nil {
+		idxRows, qerr := s.db.QueryContext(ctx,
+			`SELECT name, tbl_name, SUM(pgsize) FROM dbstat WHERE aggregate = 1 AND name IN (SELECT name FROM sqlite_master WHERE type = 'index') GROUP BY name, tbl_name`)
+		if qerr == nil {
+			defer idxRows.Close()
+			for idxRows.Next() {
+				var idxName, tblName string
+				var size int64
+				if err := idxRows.Scan(&idxName, &tblName, &size); err != nil {
+					break
+				}
+				if cur, ok := perTable[tblName]; ok {
+					perTable[tblName] = [2]int64{cur[0], cur[1] + size}
+				}
+				delete(perTable, idxName)
+			}
+		}
 	}
 
 	var results []driver.TableDiagnostics
@@ -561,12 +603,17 @@ func (s *SQLiteSession) GetTableDiagnostics(ctx context.Context, database, table
 			}
 		}
 
+		var dataSize, indexSize int64
+		if sizes, ok := perTable[tbl.Name]; ok && dbstatErr == nil {
+			dataSize, indexSize = sizes[0], sizes[1]
+		}
+
 		results = append(results, driver.TableDiagnostics{
 			Name:          tbl.Name,
 			Engine:        "SQLite",
 			Rows:          rowCount,
-			DataSize:      totalSize,
-			IndexSize:     0,
+			DataSize:      dataSize,
+			IndexSize:     indexSize,
 			OverheadSize:  freeSize,
 			RowFormat:     "Dynamic",
 			Collation:     "BINARY",

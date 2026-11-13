@@ -114,7 +114,7 @@
             <div class="space-y-3">
               {#each planNodes as node, idx}
                 <div class="rounded-xl border p-4 transition w-full shadow-lg {node.isDanger
-                  ? 'border-rose-700/60 bg-gradient-to-r from-rose-950/30 to-slate-900'
+                  ? 'border-rose-700/60 bg-rose-950/30'
                   : 'border-slate-800 bg-[#050811]'}">
                   <div class="flex items-center justify-between border-b border-slate-800 pb-2 mb-2.5">
                     <div class="flex items-center space-x-2">

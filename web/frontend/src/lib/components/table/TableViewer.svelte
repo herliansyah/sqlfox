@@ -68,9 +68,12 @@
       {/each}
     </div>
 
-    <!-- Active Table Name Pill -->
+    <!-- Active Table Name Pill. Database is only shown when this tab is scoped
+         to a database other than the sidebar's active one. -->
     <div class="flex items-center space-x-2 font-mono text-[11px] text-slate-400">
-      <span class="text-slate-500">{appState.currentDatabase} /</span>
+      {#if currentTab?.database && currentTab.database !== appState.currentDatabase}
+        <span class="text-slate-500">{currentTab.database} /</span>
+      {/if}
       <span class="text-sky-300 font-bold">{tableName}</span>
       {#if tableMeta && (tableMeta.row_count !== undefined || tableMeta.rows_count !== undefined)}
         <span class="bg-slate-900 border border-slate-800 text-slate-400 px-1.5 py-0.2 rounded text-[10px]">

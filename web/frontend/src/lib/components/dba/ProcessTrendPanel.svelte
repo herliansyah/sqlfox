@@ -6,88 +6,127 @@
   let { threads = [] }: { threads: ProcesslistThread[] } = $props();
 
   let canvasEl = $state<HTMLCanvasElement | null>(null);
-  let isOpen = $state(false);
+  let isOpen = $state(true);
 
   interface TrendPoint {
     time: number;
     active: number;
-    total: number;
   }
 
-  let history = $state<TrendPoint[]>([]);
+  // Plain array on purpose: a reactive array mutated from the sampler would
+  // retrigger itself and fill the window with one value (a flat line).
+  let history: TrendPoint[] = [];
+  let revision = $state(0);
   let peakActive = $state(0);
   let avgActive = $state(0);
 
-  $effect(() => {
-    // When threads update, push a point
-    const activeCount = threads.filter((t) => t.command !== 'Sleep' && t.command !== 'Daemon').length;
-    const totalCount = threads.length;
-    const now = Date.now();
+  function activeCount() {
+    return threads.filter((t) => t.command !== 'Sleep' && t.command !== 'Daemon').length;
+  }
 
-    history.push({ time: now, active: activeCount, total: totalCount });
-    if (history.length > 60) {
-      history.shift();
-    }
+  function sample() {
+    history.push({ time: Date.now(), active: activeCount() });
+    if (history.length > 60) history.shift();
 
-    // Recalculate metrics
     let max = 0;
     let sum = 0;
-    history.forEach((pt) => {
+    for (const pt of history) {
       if (pt.active > max) max = pt.active;
       sum += pt.active;
-    });
+    }
     peakActive = max;
-    avgActive = history.length > 0 ? parseFloat((sum / history.length).toFixed(1)) : 0;
+    avgActive = history.length ? Math.round((sum / history.length) * 10) / 10 : 0;
+    revision++;
+  }
 
+  $effect(() => {
+    revision;
+    isOpen;
+    canvasEl;
     renderCanvas();
   });
 
   function renderCanvas() {
-    if (!canvasEl || history.length === 0) return;
-    const ctx = canvasEl.getContext('2d');
+    const canvas = canvasEl;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.round(rect.width);
+    const h = Math.round(rect.height);
+    if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+    }
+
+    const ctx = canvas.getContext('2d');
     if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
 
-    const width = canvasEl.width;
-    const height = canvasEl.height;
-    ctx.clearRect(0, 0, width, height);
+    const maxVal = Math.max(4, peakActive + 1);
+    const padTop = 6;
+    const padBottom = 6;
+    const chartH = h - padTop - padBottom;
+    const stepX = w / Math.max(1, history.length - 1);
+    const yFor = (v: number) => padTop + chartH - (v / maxVal) * chartH;
 
-    const maxVal = Math.max(10, peakActive + 2);
-    const stepX = width / Math.max(1, history.length - 1);
-
-    // Grid lines
+    // Crisp horizontal guides at 25 / 50 / 75%.
     ctx.strokeStyle = '#1e293b';
     ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, height / 2);
-    ctx.lineTo(width, height / 2);
-    ctx.stroke();
+    for (const frac of [0.25, 0.5, 0.75]) {
+      const y = Math.round(padTop + chartH * frac) + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(w, y);
+      ctx.stroke();
+    }
 
-    // Line: Active threads
-    ctx.strokeStyle = '#38bdf8';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
+    if (history.length > 1) {
+      const trace = () => {
+        ctx.beginPath();
+        history.forEach((pt, i) => {
+          const x = i * stepX;
+          const y = yFor(pt.active);
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+      };
 
-    history.forEach((pt, i) => {
-      const x = i * stepX;
-      const y = height - (pt.active / maxVal) * (height - 10) - 5;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
+      trace();
+      ctx.lineTo((history.length - 1) * stepX, padTop + chartH);
+      ctx.lineTo(0, padTop + chartH);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(56, 189, 248, 0.08)';
+      ctx.fill();
 
-    // Gradient fill under active threads line
-    ctx.lineTo(width, height);
-    ctx.lineTo(0, height);
-    ctx.closePath();
-    const grad = ctx.createLinearGradient(0, 0, 0, height);
-    grad.addColorStop(0, 'rgba(56, 189, 248, 0.25)');
-    grad.addColorStop(1, 'rgba(56, 189, 248, 0.0)');
-    ctx.fillStyle = grad;
-    ctx.fill();
+      trace();
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 1.5;
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+
+      const last = history[history.length - 1]!;
+      ctx.fillStyle = '#38bdf8';
+      ctx.beginPath();
+      ctx.arc((history.length - 1) * stepX, yFor(last.active), 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
+  $effect(() => {
+    const canvas = canvasEl;
+    if (!canvas) return;
+    const observer = new ResizeObserver(() => renderCanvas());
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  });
+
   onMount(() => {
-    renderCanvas();
+    sample();
+    const timer = setInterval(sample, 1000);
+    return () => clearInterval(timer);
   });
 </script>
 
@@ -108,7 +147,7 @@
       <div class="flex items-center space-x-4 text-[11px] font-mono">
         <div>
           <span class="text-slate-500">Active Now: </span>
-          <span class="text-sky-400 font-bold">{threads.filter((t) => t.command !== 'Sleep').length}</span>
+          <span class="text-sky-400 font-bold">{activeCount()}</span>
         </div>
         <div>
           <span class="text-slate-500">Peak: </span>
@@ -124,13 +163,18 @@
 
   {#if isOpen}
     <div class="px-4 pb-3">
-      <div class="h-24 w-full bg-[#050811] rounded-lg border border-slate-800 p-2 relative overflow-hidden">
-        <canvas
-          bind:this={canvasEl}
-          width="800"
-          height="80"
-          class="w-full h-full block"
-        ></canvas>
+      <div class="h-24 w-full bg-[#050811] rounded-md border border-slate-800 p-2 relative overflow-hidden">
+        <canvas bind:this={canvasEl} class="w-full h-full block"></canvas>
+        {#if revision < 2}
+          <div class="absolute inset-0 flex items-center justify-center text-[10px] font-mono text-slate-500 pointer-events-none">
+            Collecting samples...
+          </div>
+        {/if}
+      </div>
+      <div class="mt-1 flex items-center justify-between text-[10px] font-mono text-slate-600">
+        <span>60s ago</span>
+        <span>Active threads / second</span>
+        <span>now</span>
       </div>
     </div>
   {/if}

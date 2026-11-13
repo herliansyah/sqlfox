@@ -10,7 +10,7 @@
 </script>
 
 {#if appState.isReconnecting}
-  <div class="fixed top-0 left-0 right-0 z-[120] bg-gradient-to-r from-amber-600 to-rose-600 text-white px-4 py-2 text-xs flex items-center justify-between shadow-lg transition-all animate-bounce-subtle font-sans">
+  <div class="fixed top-0 left-0 right-0 z-[120] bg-amber-600 border-b border-amber-300/30 text-white px-4 py-2 text-xs flex items-center justify-between shadow-sm transition-all animate-bounce-subtle font-sans">
     <div class="flex items-center space-x-2">
       <Icon name="loader" class="w-4 h-4 animate-spin text-white shrink-0" />
       <span class="font-bold">Connection to SqlFox daemon lost!</span>

@@ -4,6 +4,7 @@
   import { api } from '../../api/client';
   import { formatSQL } from '../../utils/sqlFormatter';
   import Icon from '../common/Icon.svelte';
+  import SearchableSelect from '../common/SearchableSelect.svelte';
   import type { CodeMirrorController } from '../../actions/codemirror';
   import type { QuerySnippet } from '../../types';
   import { parseSnippetVariables } from '../../utils/snippets';
@@ -88,9 +89,8 @@
     return needsQuoting ? `\`${clean.replace(/`/g, '``')}\`` : clean;
   }
 
-  function handleTabScopeChange(event: Event) {
+  function handleTabScopeChange(database: string) {
     if (!currentTab) return;
-    const database = (event.target as HTMLSelectElement).value;
     currentTab.database = database;
     void appState.ensureEditorCatalog(database).catch(() => {});
     appState.saveTabsState();
@@ -119,7 +119,7 @@
         currentTab?.sql,
         appState.activeConnection?.driver || 'mysql'
       );
-      aiResponse = res.response || res.error || 'No response';
+      aiResponse = res.content || 'No response';
     } catch (err: any) {
       aiResponse = `Error: ${err.message}`;
     } finally {
@@ -242,17 +242,16 @@
 
       <!-- Tab Database Scope Selector Pill (ADR 0055) -->
       {#if appState.availableDatabases.length > 0}
-        <div class="flex items-center space-x-1 px-2 py-0.5 rounded bg-slate-900 border border-slate-700/80 text-[11px] font-mono text-slate-300" title="Tab-Specific Database Scope (ADR 0055)">
-          <span class="text-slate-500">scope:</span>
-          <select
-            value={currentTab?.database || appState.currentDatabase}
+        <div class="relative flex items-center px-2 py-0.5 rounded bg-slate-900 border border-slate-700/80 text-[11px] font-mono text-slate-300" title="Tab-Specific Database Scope (ADR 0055)">
+          <SearchableSelect
+            options={appState.availableDatabases}
+            value={currentTab?.database || appState.currentDatabase || ''}
             onchange={handleTabScopeChange}
-            class="bg-transparent text-sky-400 font-bold focus:outline-none cursor-pointer text-xs"
-          >
-            {#each appState.availableDatabases as db}
-              <option value={db} class="bg-[#0f172a] text-slate-200">{db}</option>
-            {/each}
-          </select>
+            label="scope:"
+            placeholder="Search databases..."
+            panelWidth="w-64"
+            triggerClass="text-sky-400 hover:text-sky-300"
+          />
         </div>
       {/if}
 

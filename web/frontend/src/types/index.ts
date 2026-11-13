@@ -197,6 +197,19 @@ export interface ProcesslistThread {
   info: string;
 }
 
+export interface ProcessLockWait {
+  waiting_thread_id: number;
+  waiting_query?: string;
+  waiting_user?: string;
+  waiting_seconds?: number;
+  blocking_thread_id: number;
+  blocking_query?: string;
+  blocking_user?: string;
+  locked_resource?: string;
+  lock_mode?: string;
+  is_root_blocker?: boolean;
+}
+
 export interface TablePartition {
   name: string;
   method?: string;

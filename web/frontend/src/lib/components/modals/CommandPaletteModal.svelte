@@ -3,6 +3,7 @@
   import Icon from '../common/Icon.svelte';
 
   let searchInput: HTMLInputElement | null = $state(null);
+  let resultsEl: HTMLDivElement | null = $state(null);
   let query = $state('');
   let selectedIndex = $state(0);
 
@@ -18,7 +19,33 @@
   let items = $derived.by<CommandItem[]>(() => {
     const list: CommandItem[] = [];
 
-    // 1. Actions
+    // 1. Tables
+    if (appState.catalog?.tables) {
+      for (const t of appState.catalog.tables) {
+        list.push({
+          id: `tbl-${t.name}`,
+          title: t.name,
+          subtitle: `${t.type} • ${t.columns?.length || 0} columns`,
+          category: 'Tables',
+          icon: 'table',
+          action: () => appState.openTableDataTab(t.name),
+        });
+      }
+    }
+
+    // 2. Databases
+    for (const db of appState.availableDatabases || []) {
+      list.push({
+        id: `db-${db}`,
+        title: db,
+        subtitle: 'Switch active database',
+        category: 'Databases',
+        icon: 'database',
+        action: () => appState.selectDatabase(db),
+      });
+    }
+
+    // 3. Actions
     list.push({
       id: 'action-new-query',
       title: 'New SQL Query Tab',
@@ -236,32 +263,6 @@
       action: () => appState.refreshCatalog(),
     });
 
-    // 2. Tables
-    if (appState.catalog?.tables) {
-      for (const t of appState.catalog.tables) {
-        list.push({
-          id: `tbl-${t.name}`,
-          title: t.name,
-          subtitle: `${t.type} • ${t.columns?.length || 0} columns`,
-          category: 'Tables',
-          icon: 'table',
-          action: () => appState.openTableDataTab(t.name),
-        });
-      }
-    }
-
-    // 3. Databases
-    for (const db of appState.availableDatabases || []) {
-      list.push({
-        id: `db-${db}`,
-        title: db,
-        subtitle: 'Switch active database',
-        category: 'Databases',
-        icon: 'database',
-        action: () => appState.selectDatabase(db),
-      });
-    }
-
     const q = query.toLowerCase().trim();
     if (!q) return list;
     return list.filter(
@@ -277,13 +278,22 @@
     }
   });
 
+  function scrollActiveIntoView() {
+    // Without this, arrow keys walk off-screen once the result list scrolls.
+    requestAnimationFrame(() =>
+      resultsEl?.querySelector('[data-palette-active="true"]')?.scrollIntoView({ block: 'nearest' })
+    );
+  }
+
   function handleKeyDown(e: KeyboardEvent) {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       selectedIndex = Math.min(items.length - 1, selectedIndex + 1);
+      scrollActiveIntoView();
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       selectedIndex = Math.max(0, selectedIndex - 1);
+      scrollActiveIntoView();
     } else if (e.key === 'Enter') {
       e.preventDefault();
       if (items[selectedIndex]) {
@@ -312,7 +322,8 @@
           bind:this={searchInput}
           type="text"
           bind:value={query}
-          placeholder="Type a table name, database, or action..."
+          oninput={() => (selectedIndex = 0)}
+          placeholder="Jump to a table, database, or action..."
           class="flex-1 bg-transparent text-sm text-slate-100 placeholder-slate-500 focus:outline-none font-sans"
         />
         <kbd class="text-[10px] bg-slate-900 border border-slate-700 text-slate-400 px-1.5 py-0.5 rounded font-mono">
@@ -321,7 +332,7 @@
       </div>
 
       <!-- Results list -->
-      <div class="max-h-80 overflow-y-auto p-1 divide-y divide-slate-800/40">
+      <div bind:this={resultsEl} class="max-h-80 overflow-y-auto p-1 divide-y divide-slate-800/40">
         {#if items.length === 0}
           <div class="p-8 text-center text-xs text-slate-500 italic">
             No matching tables or actions found
@@ -329,6 +340,8 @@
         {:else}
           {#each items as item, idx}
             <button
+              data-palette-active={idx === selectedIndex}
+              onmouseenter={() => (selectedIndex = idx)}
               onclick={() => {
                 item.action();
                 appState.isCommandPaletteOpen = false;

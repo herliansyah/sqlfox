@@ -1,16 +1,23 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
-  import type { ProcesslistThread } from '../../../types';
+  import type { ProcesslistThread, ProcessLockWait } from '../../../types';
   import Icon from '../common/Icon.svelte';
   import ProcessTrendPanel from './ProcessTrendPanel.svelte';
+  import FlightTimeline from './FlightTimeline.svelte';
 
   type DbaSubTab = 'threads' | 'digest' | 'deadlock' | 'cluster' | 'variables' | 'flight-recorder';
   type FilterChip = 'all' | 'active' | 'sleep' | 'locked' | 'slow';
 
   let currentSubTab = $state<DbaSubTab>('threads');
+
+  // Header Monitor menu picks the sub-view; this only reacts to that request.
+  $effect(() => {
+    currentSubTab = appState.processlistSubTab as DbaSubTab;
+  });
   let threads = $state<ProcesslistThread[]>([]);
-  let locks = $state<any[]>([]);
+  let locks = $state<ProcessLockWait[]>([]);
+  let showBlockerPanel = $state(false);
   let currentThreadId = $state<number>(0);
   let isLoading = $state(false);
 
@@ -36,9 +43,24 @@
   let intervalTimer: any = null;
   let inspectingThread = $state<ProcesslistThread | null>(null);
 
+  // Sorting: slowest threads first by default, which is what a DBA looks at first.
+  type SortKey = 'id' | 'user' | 'host' | 'db' | 'command' | 'time' | 'state' | 'info';
+  let sortKey = $state<SortKey>('time');
+  let sortDir = $state<'asc' | 'desc'>('desc');
+
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) {
+      sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      sortKey = key;
+      sortDir = key === 'time' || key === 'id' ? 'desc' : 'asc';
+    }
+  }
+
   // Statement Digest State
   let digestRows = $state<any[]>([]);
   let isDigestLoading = $state(false);
+  let digestError = $state('');
 
   // Deadlock State
   let deadlockData = $state<any>(null);
@@ -108,7 +130,7 @@
     try {
       const res = await api.getProcesslist(appState.activeSessionId);
       threads = res.threads || [];
-      locks = res.locks || [];
+      locks = (res.locks || []) as ProcessLockWait[];
       currentThreadId = res.current_thread_id || 0;
     } catch (err: any) {
       appState.showToast(`Failed to load processlist: ${err.message}`, 'error');
@@ -120,11 +142,13 @@
   async function loadStatementDigest() {
     if (!appState.activeSessionId) return;
     isDigestLoading = true;
+    digestError = '';
     try {
       const res = await api.getStatementDigest(appState.activeSessionId, 30);
       digestRows = res.digest || res.statements || (Array.isArray(res) ? res : []);
     } catch (err: any) {
-      appState.showToast(`Failed to load statement digest: ${err.message}`, 'error');
+      digestError = String(err?.message || err).replace(/^Failed to load statement digest:\s*/, '');
+      digestRows = [];
     } finally {
       isDigestLoading = false;
     }
@@ -349,6 +373,26 @@
     return `${s.name || 'Flight Run'} (${timeStr} · ${count} ticks, ${dur}s)`;
   }
 
+  const flightPeak = $derived.by(() => {
+    const t = flightSessionTicks || [];
+    if (t.length === 0) return { maxQps: 0, maxThreads: 0, lockDelta: 0 };
+    let maxQps = 0;
+    let maxThreads = 0;
+    let firstLock: number | null = null;
+    let lastLock = 0;
+    for (const tick of t) {
+      maxQps = Math.max(maxQps, Number(tick.qps ?? 0));
+      maxThreads = Math.max(maxThreads, Number(tick.threads_running ?? tick.active_threads ?? 0));
+      if (firstLock === null && tick.row_lock_waits != null) firstLock = Number(tick.row_lock_waits);
+      if (tick.row_lock_waits != null) lastLock = Number(tick.row_lock_waits);
+    }
+    return {
+      maxQps,
+      maxThreads,
+      lockDelta: Math.max(0, lastLock - (firstLock ?? lastLock)),
+    };
+  });
+
   let activeOrSelectedTick = $derived.by(() => {
     if (selectedTickIndex != null && flightSessionTicks[selectedTickIndex]) {
       return flightSessionTicks[selectedTickIndex];
@@ -415,6 +459,47 @@
     }
   }
 
+  let rootBlockerCount = $derived.by(
+    () => new Set(locks.filter((l) => l.is_root_blocker).map((l) => l.blocking_thread_id)).size
+  );
+
+  function inspectLockThread(lock: ProcessLockWait, side: 'blocking' | 'waiting') {
+    const id = side === 'blocking' ? lock.blocking_thread_id : lock.waiting_thread_id;
+    const existing = threads.find((t) => t.id === id);
+    if (existing) {
+      inspectingThread = existing;
+      return;
+    }
+    inspectingThread = {
+      id,
+      user: (side === 'blocking' ? lock.blocking_user : lock.waiting_user) || 'unknown',
+      host: '',
+      db: '',
+      command: '',
+      time: side === 'blocking' ? 0 : lock.waiting_seconds || 0,
+      state: side === 'blocking' ? `Holding ${lock.lock_mode || 'lock'}` : `Waiting for thread #${lock.blocking_thread_id}`,
+      info: (side === 'blocking' ? lock.blocking_query : lock.waiting_query) || '',
+    };
+  }
+
+  async function killLockThread(id: number, mode: 'query' | 'connection') {
+    if (!appState.activeSessionId) return;
+    if (!confirm(`Kill ${mode} for thread #${id}?`)) return;
+    try {
+      await api.batchKillProcesses(appState.activeSessionId, [id], mode);
+      appState.showToast(`Killed ${mode} for thread #${id}`, 'success');
+      await loadProcesslist(false);
+    } catch (err: any) {
+      appState.showToast(`Failed to kill thread #${id}: ${err.message}`, 'error');
+    }
+  }
+
+  function copyText(text: string | undefined, label: string) {
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    appState.showToast(`${label} copied to clipboard`, 'info');
+  }
+
   let filteredThreads = $derived.by(() => {
     const q = filterText.toLowerCase().trim();
     return threads.filter((t) => {
@@ -446,6 +531,49 @@
       return true;
     });
   });
+
+  let sortedThreads = $derived.by(() => {
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...filteredThreads].sort((a, b) => {
+      const av = a[sortKey];
+      const bv = b[sortKey];
+      if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
+      return (
+        String(av ?? '').localeCompare(String(bv ?? ''), undefined, { numeric: true, sensitivity: 'base' }) * dir
+      );
+    });
+  });
+
+  let chipCounts = $derived.by(() => {
+    let active = 0;
+    let sleep = 0;
+    let locked = 0;
+    let slow = 0;
+    for (const t of threads) {
+      if (t.command === 'Sleep' || t.state === 'Sleep') sleep++;
+      else active++;
+      if (t.time >= 5) slow++;
+      if (
+        (t.state || '').toLowerCase().includes('lock') ||
+        locks.some((l) => l.waiting_thread_id === t.id || l.blocking_thread_id === t.id)
+      )
+        locked++;
+    }
+    return { active, sleep, locked, slow };
+  });
+
+  const stateTone: Record<string, string> = {
+    rose: 'bg-rose-500/10 text-rose-300 border-rose-600/40',
+    amber: 'bg-amber-500/10 text-amber-300 border-amber-600/40',
+    sky: 'bg-sky-500/10 text-sky-300 border-sky-600/40',
+    slate: 'bg-slate-800/60 text-slate-400 border-slate-700/60',
+  };
+
+  function commandTone(command: string) {
+    const c = (command || '').toLowerCase();
+    if (!c || c === 'sleep' || c === 'daemon') return stateTone.slate;
+    return stateTone.sky;
+  }
 
   let allFilteredSelected = $derived.by(() => {
     const selectable = filteredThreads.filter((t) => t.id !== currentThreadId);
@@ -508,57 +636,369 @@
     appState.executeCurrentTab();
   }
 
-  function sendThreadToAI(sql?: string) {
-    if (!sql) return;
-    appState.isAiDrawerOpen = true;
-    appState.showToast('Thread query sent to AI Copilot context', 'info');
+  // ---- Cluster / replication presentation helpers -------------------------
+  // The label must not contradict the banner text underneath it: run both through the same
+  // classifier so a degraded diagnosis can never sit under a green "Healthy" heading.
+  const severityTrue = $derived.by(() => {
+    const report: any = clusterReport;
+    if (!report) return 'ok';
+    const fc = (report.flow_control_paused ?? 0) * 100;
+    const rep: any = report.replication;
+    const nodes: any[] = report.nodes || [];
+    const down =
+      (rep && (rep.io_running === false || rep.sql_running === false)) ||
+      String(report.local_node_state || '').toLowerCase().includes('error') ||
+      String(report.cluster_status || '').toLowerCase().includes('non-primary');
+    const worstQueue = nodes.reduce(
+      (max, n) => Math.max(max, (n.receive_queue ?? 0) + (n.send_queue ?? 0)),
+      0
+    );
+    const checks: any[] = report.tuning_checks || [];
+    if (
+      down ||
+      fc > 5 ||
+      worstQueue > 5000 ||
+      (rep?.seconds_behind_master ?? 0) > 60 ||
+      checks.some((c) => c.status === 'critical')
+    ) {
+      return 'critical';
+    }
+    if (
+      fc > 1 ||
+      worstQueue > 1000 ||
+      (rep?.seconds_behind_master ?? 0) > 5 ||
+      checks.some((c) => c.status === 'warning')
+    ) {
+      return 'warning';
+    }
+    return 'ok';
+  });
+  const severityLabel = $derived(
+    severityTrue === 'critical'
+      ? 'Critical — cluster needs attention'
+      : severityTrue === 'warning'
+        ? 'Warning — degraded replication'
+        : 'Healthy — cluster optimal'
+  );
+
+  const severityTone = $derived(
+    severityTrue === 'critical'
+      ? 'bg-rose-950/40 border-rose-800 text-rose-300'
+      : severityTrue === 'warning'
+        ? 'bg-amber-950/30 border-amber-800 text-amber-300'
+        : 'bg-emerald-950/30 border-emerald-800 text-emerald-300'
+  );
+  const severityIcon = $derived(
+    severityTrue === 'critical'
+      ? 'shield-alert'
+      : severityTrue === 'warning'
+        ? 'alert-triangle'
+        : 'shield-check'
+  );
+
+  const flowControlPct = $derived(
+    Math.max(0, (clusterReport?.flow_control_paused ?? 0) * 100)
+  );
+  const fcTone = $derived(
+    flowControlPct > 5 ? 'text-rose-300 font-bold' : flowControlPct > 1 ? 'text-amber-300' : 'text-emerald-300'
+  );
+  const netLatency = $derived(
+    clusterReport?.tri_metric
+      ? `${clusterReport.tri_metric.network_latency_avg_ms?.toFixed(2) ?? '0'} ms (max ${clusterReport.tri_metric.network_latency_max_ms?.toFixed(2) ?? '0'})`
+      : '—'
+  );
+
+  const clusterCards = $derived([
+    {
+      label: 'Topology',
+      value: fmtTopology(clusterReport?.topology_type),
+      hint: clusterReport?.cluster_name || '',
+      tone: 'text-sky-300',
+    },
+    {
+      label: 'Status',
+      value: clusterReport?.cluster_status || 'standalone',
+      hint: clusterReport?.local_node_state ? `local ${clusterReport.local_node_state}` : '',
+      tone:
+        (clusterReport?.cluster_status || '').toLowerCase() === 'primary' ||
+        !clusterReport?.cluster_status
+          ? 'text-emerald-300'
+          : 'text-rose-300',
+    },
+    {
+      label: 'Members',
+      value: String(clusterReport?.cluster_size || clusterReport?.nodes?.length || 1),
+      hint: clusterReport?.slowest_node ? `slowest ${clusterReport.slowest_node}` : '',
+      tone: 'text-slate-100',
+    },
+    {
+      label: 'Replication',
+      value: clusterReport?.replication
+        ? `${clusterReport.replication.role}${clusterReport.replication.seconds_behind_master !== null && clusterReport.replication.seconds_behind_master !== undefined ? ` · ${clusterReport.replication.seconds_behind_master}s` : ''}`
+        : 'sync (wsrep)',
+      hint: clusterReport?.replication && (!clusterReport.replication.io_running || !clusterReport.replication.sql_running)
+        ? 'thread down'
+        : clusterReport?.replication?.seconds_behind_master != null
+          ? `${clusterReport.replication.seconds_behind_master}s behind source`
+          : 'in sync',
+      tone: clusterReport?.replication && (!clusterReport.replication.io_running || !clusterReport.replication.sql_running)
+        ? 'text-rose-300'
+        : 'text-emerald-300',
+    },
+    {
+      label: 'Flow control',
+      value: `${flowControlPct.toFixed(2)}%`,
+      hint: 'time commits were paused',
+      tone: fcTone,
+    },
+    {
+      label: 'Local node',
+      value: clusterReport?.local_node_address || clusterReport?.local_node_name || '—',
+      hint: clusterReport?.local_node_name || '',
+      tone: 'text-slate-200',
+    },
+  ]);
+
+  function fmtTopology(t?: string): string {
+    if (!t) return 'standalone';
+    const k = t.toLowerCase();
+    if (k === 'galera') return 'Galera / wsrep';
+    if (k === 'replication') return 'Source → Replica';
+    if (k === 'group_replication') return 'Group Replication';
+    return t;
+  }
+
+  function nodeStateTone(state?: string): string {
+    const k = (state || '').toLowerCase();
+    if (k.includes('sync') || k.includes('primary') || k.includes('online')) {
+      return 'bg-emerald-950 text-emerald-300 border-emerald-800';
+    }
+    if (k.includes('donor') || k.includes('join') || k.includes('desync')) {
+      return 'bg-amber-950 text-amber-300 border-amber-800';
+    }
+    if (k.includes('error') || k.includes('non-primary')) {
+      return 'bg-rose-950 text-rose-300 border-rose-800';
+    }
+    return 'bg-slate-800 text-slate-300 border-slate-700';
+  }
+
+  function nodeQueueTotal(node: any): number {
+    return (node?.receive_queue ?? 0) + (node?.send_queue ?? 0);
+  }
+
+  function queueWidth(node: any): number {
+    const total = nodeQueueTotal(node);
+    if (total <= 0) return 2;
+    // 1000+ queued writesets is already a severe backlog.
+    return Math.min(100, Math.max(3, (total / 1000) * 100));
+  }
+
+  function lagTone(seconds?: number | null): string {
+    if (seconds === null || seconds === undefined) return 'text-slate-300';
+    if (seconds > 60) return 'text-rose-300 font-bold';
+    if (seconds > 5) return 'text-amber-300 font-bold';
+    return 'text-emerald-300 font-bold';
+  }
+
+  // Deadlock Inspector helpers -------------------------------------------------
+  function parseLockDescriptor(text: string): { table: string; index: string; mode: string; scope: string } {
+    if (!text) return { table: '', index: '', mode: '', scope: '' };
+    const rec = text.match(/index\s+(\S+)\s+of table\s+`?([\w$]+)`?\.`?([\w$]+)`?/i);
+    if (rec) {
+      const mode = (text.match(/lock_mode\s+([\w-]+)/i) || [])[1] || '';
+      const scope = /locks rec but not gap/i.test(text) ? 'record' : /gap before rec/i.test(text) ? 'gap' : 'record';
+      return { table: `${rec[2]}.${rec[3]}`, index: rec[1], mode: mode.toUpperCase(), scope };
+    }
+    const tbl = text.match(/TABLE LOCK table\s+`?([\w$]+)`?\.`?([\w$]+)`?[^,]*lock mode\s+([\w-]+)/i);
+    if (tbl) return { table: `${tbl[1]}.${tbl[2]}`, index: '', mode: tbl[3].toUpperCase(), scope: 'table' };
+    return { table: '', index: '', mode: '', scope: '' };
+  }
+
+  // What a transaction holds, falling back to the first lock descriptor in its block.
+  function lockHeldInfo(tx: any) {
+    const fromSection = parseLockDescriptor(tx?.lock_held || '');
+    if (fromSection.table) return fromSection;
+    return parseLockDescriptor(tx?.lock_mode || '');
+  }
+
+  // What a transaction is blocked on. Empty when the dump did not carry the descriptor.
+  function lockWaitedInfo(tx: any) {
+    return parseLockDescriptor(tx?.lock_waited || '');
+  }
+
+  function fmtLock(info: { table: string; index: string; mode: string; scope: string }, withMode = true): string {
+    if (!info.table) return 'not captured';
+    const parts = [info.table];
+    if (info.index) parts.push(info.index);
+    if (withMode && info.mode) parts.push(info.mode);
+    if (info.scope) parts.push(info.scope);
+    return parts.join(' · ');
+  }
+
+  // Advice derived from the parsed report, not from guesswork: only mention what the dump proves.
+  function deadlockAdvice(report: any): string[] {
+    const txs: any[] = report?.transactions || [];
+    if (txs.length < 2) return [];
+    const a = txs[0];
+    const b = txs[1];
+    const aHeld = lockHeldInfo(a);
+    const aWaited = lockWaitedInfo(a);
+    const bHeld = lockHeldInfo(b);
+    const bWaited = lockWaitedInfo(b);
+    const tips: string[] = [];
+
+    // A true cycle: each side waits on what the other holds.
+    if (
+      aWaited.table && bHeld.table && aWaited.table === bHeld.table && aWaited.index === bHeld.index &&
+      bWaited.table && aHeld.table && bWaited.table === aHeld.table && bWaited.index === aHeld.index
+    ) {
+      tips.push(
+        `Classic cycle on ${aWaited.table}: each transaction waits for the ${aWaited.index} index entry the other one holds. Both statements touch the same rows in opposite order.`
+      );
+      tips.push('Order the writes the same way on every code path (for example, sort the primary keys before updating a batch).');
+    } else if (aWaited.table && aWaited.table === bWaited.table && aWaited.index === bWaited.index) {
+      tips.push(`Both transactions wait for the same ${aWaited.index} index entry in ${aWaited.table}, so the cycle runs through a single hot row.`);
+    } else if (aWaited.table && bWaited.table) {
+      tips.push(`The two waits land on different objects (${fmtLock(aWaited)} vs ${fmtLock(bWaited)}), so the cycle spans more than one statement.`);
+    }
+
+    const longest = Math.max(a.active_seconds || 0, b.active_seconds || 0);
+    if (longest >= 5) {
+      tips.push(`The older transaction had been open for ${longest}s before the conflict. Commit or roll back earlier instead of holding locks across more work.`);
+    }
+    const victim = txs.find((t) => t.is_victim);
+    if (victim && (victim.undo_log_entries || 0) > 0) {
+      tips.push(`The victim had ${victim.undo_log_entries} undo log entries to roll back, so the deadlock discarded real work, not just a single statement.`);
+    }
+    const scanHint = txs.find((t) => /index\s+PRIMARY/.test(String(t.lock_mode || '')));
+    if (scanHint) {
+      tips.push('One side locked through the PRIMARY key. Narrow the WHERE clause to the exact key range so fewer records get locked.');
+    }
+    tips.push('Retry the rolled-back transaction on error 1213 with backoff, and add a covering index if the conflicting statements still lock more rows than they change.');
+    return tips;
+  }
+
+  function deadlockRawText(report: any): string {
+    return String(report?.raw_section || '').trim();
+  }
+
+  function copyDeadlockReport(report: any) {
+    copyText(deadlockRawText(report) || JSON.stringify(report, null, 2), 'Deadlock report');
+  }
+
+  function sendDeadlockToAI(report: any) {
+    const txs: any[] = report?.transactions || [];
+    const lines = [
+      'Analyse this InnoDB deadlock and explain how to prevent it recurring.',
+      '',
+      `Summary: ${report?.summary || '-'}`,
+      report?.detected_at ? `Detected at: ${report.detected_at}` : '',
+      '',
+    ];
+    txs.forEach((tx, i) => {
+      lines.push(
+        `Transaction ${tx.index ?? i + 1}${tx.is_victim ? ' (rolled back victim)' : ' (committed)'}`,
+        `  thread: ${tx.thread_id || '-'} | user: ${tx.app_user || '-'}@${tx.host || '-'} | active: ${tx.active_seconds ?? '-'}s | undo entries: ${tx.undo_log_entries ?? '-'}`,
+        `  holds: ${fmtLock(lockHeldInfo(tx))}`,
+        `  waits for: ${fmtLock(lockWaitedInfo(tx))}`,
+        `  query: ${tx.query || '-'}`,
+        ''
+      );
+    });
+    const raw = deadlockRawText(report);
+    if (raw) lines.push('Raw InnoDB section:', raw);
+    lines.push('', 'Give the lock cycle, the root cause, and the concrete fix (index, statement order, transaction scope, retry policy).');
+    appState.sendToAi(lines.filter((l) => l !== null).join('\n'), 'Deadlock report');
+  }
+
+  function sendThreadToAI(sql?: string, thread?: ProcesslistThread | null) {
+    const query = (sql || '').trim();
+    if (!query) {
+      appState.showToast('This thread has no active statement to send', 'warning');
+      return;
+    }
+    const ctx = [
+      'Analyse this MySQL thread and its running statement. Explain what it does, why it may be slow or blocking, and propose a concrete fix (index, rewrite, or lock strategy).',
+      '',
+      thread
+        ? `Thread #${thread.id} | user: ${thread.user || '-'} | db: ${thread.db || '-'} | command: ${thread.command || '-'} | time: ${thread.time}s | state: ${thread.state || '-'}`
+        : '',
+      '```sql',
+      query,
+      '```',
+    ]
+      .filter((l, idx) => l !== '' || idx < 2)
+      .join('\n');
+    appState.sendToAi(ctx);
   }
 </script>
 
+  {#snippet th(key: SortKey, label: string, width: string, align: 'left' | 'right' = 'left')}
+    <th
+      class="h-8 px-2 font-semibold {width}"
+      aria-sort={sortKey === key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+    >
+      <button
+        type="button"
+        onclick={() => toggleSort(key)}
+        class="group flex w-full items-center gap-1 transition-colors hover:text-slate-200 {align === 'right'
+          ? 'justify-end'
+          : ''} {sortKey === key ? 'text-sky-300' : ''}"
+      >
+        <span class="truncate">{label}</span>
+        <Icon
+          name={sortKey === key && sortDir === 'desc' ? 'arrow-down' : 'arrow-up'}
+          class="w-3 h-3 shrink-0 {sortKey === key ? 'text-sky-400' : 'text-slate-600 opacity-0 group-hover:opacity-100'}"
+        />
+      </button>
+    </th>
+  {/snippet}
+
+
 <div class="h-full flex flex-col bg-[#090d16] overflow-hidden select-text font-mono text-xs">
   <!-- Top Navigation & Sub-tabs Bar (Height h-9: 36px - aligned with TabBar and Sidebar) -->
-  <div class="h-9 bg-[#0b0f19] border-b border-slate-800 px-4 flex items-center justify-between text-xs flex-shrink-0 select-none">
-    <div class="flex items-center space-x-4">
+  <div class="h-9 bg-[#0b0f19] border-b border-slate-800 px-4 flex items-center justify-between gap-3 text-xs flex-shrink-0 select-none overflow-hidden">
+    <div class="flex items-center space-x-4 min-w-0 flex-1">
       <div class="flex items-center space-x-1.5 font-sans font-bold text-slate-200">
         <Icon name="cpu" class="w-4 h-4 text-sky-400" />
-        <span>DBA Telemetry</span>
+        <span class="shrink-0 whitespace-nowrap">DBA Telemetry</span>
       </div>
 
-      <!-- Sub-Tabs Selector -->
-      <div class="flex items-center space-x-1 bg-[#090d16] p-0.5 rounded-lg border border-slate-700/80">
+      <!-- Sub-Tabs Selector (never collapses: scrolls horizontally when narrow) -->
+      <div class="flex items-center space-x-1 bg-[#090d16] p-0.5 rounded-lg border border-slate-700/80 overflow-x-auto flex-1 min-w-0 whitespace-nowrap" style="scrollbar-width: thin">
         <button
           onclick={() => (currentSubTab = 'threads')}
-          class="px-2.5 py-1 rounded text-xs font-semibold transition font-sans {currentSubTab === 'threads' ? 'bg-[#1e293b] text-sky-400 shadow-sm' : 'text-slate-400 hover:text-slate-200'}"
+          class="px-2.5 py-1 rounded text-xs font-semibold transition font-sans shrink-0 {currentSubTab === 'threads' ? 'bg-[#1e293b] text-sky-400 shadow-sm' : 'text-slate-400 hover:text-slate-200'}"
         >
           Threads ({threads.length})
         </button>
         <button
           onclick={() => (currentSubTab = 'digest')}
-          class="px-2.5 py-1 rounded text-xs font-semibold transition font-sans {currentSubTab === 'digest' ? 'bg-[#1e293b] text-sky-400 shadow-sm' : 'text-slate-400 hover:text-slate-200'}"
+          class="px-2.5 py-1 rounded text-xs font-semibold transition font-sans shrink-0 {currentSubTab === 'digest' ? 'bg-[#1e293b] text-sky-400 shadow-sm' : 'text-slate-400 hover:text-slate-200'}"
         >
           Statement Digest
         </button>
         <button
           onclick={() => (currentSubTab = 'deadlock')}
-          class="px-2.5 py-1 rounded text-xs font-semibold transition font-sans {currentSubTab === 'deadlock' ? 'bg-[#1e293b] text-sky-400 shadow-sm' : 'text-slate-400 hover:text-slate-200'}"
+          class="px-2.5 py-1 rounded text-xs font-semibold transition font-sans shrink-0 {currentSubTab === 'deadlock' ? 'bg-[#1e293b] text-sky-400 shadow-sm' : 'text-slate-400 hover:text-slate-200'}"
         >
           Deadlock Inspector
         </button>
         <button
           onclick={() => (currentSubTab = 'cluster')}
-          class="px-2.5 py-1 rounded text-xs font-semibold transition font-sans {currentSubTab === 'cluster' ? 'bg-[#1e293b] text-sky-400 shadow-sm' : 'text-slate-400 hover:text-slate-200'}"
+          class="px-2.5 py-1 rounded text-xs font-semibold transition font-sans shrink-0 {currentSubTab === 'cluster' ? 'bg-[#1e293b] text-sky-400 shadow-sm' : 'text-slate-400 hover:text-slate-200'}"
         >
           Cluster & Replication
         </button>
         <button
           onclick={() => (currentSubTab = 'variables')}
-          class="px-2.5 py-1 rounded text-xs font-semibold transition font-sans {currentSubTab === 'variables' ? 'bg-[#1e293b] text-sky-400 shadow-sm' : 'text-slate-400 hover:text-slate-200'}"
+          class="px-2.5 py-1 rounded text-xs font-semibold transition font-sans shrink-0 {currentSubTab === 'variables' ? 'bg-[#1e293b] text-sky-400 shadow-sm' : 'text-slate-400 hover:text-slate-200'}"
         >
           Server Variables
         </button>
         <button
           onclick={() => (currentSubTab = 'flight-recorder')}
-          class="px-2.5 py-1 rounded text-xs font-semibold transition font-sans flex items-center space-x-1.5 {currentSubTab === 'flight-recorder' ? 'bg-[#1e293b] text-sky-400 shadow-sm' : 'text-slate-400 hover:text-slate-200'}"
+          class="px-2.5 py-1 rounded text-xs font-semibold transition font-sans shrink-0 flex items-center space-x-1.5 {currentSubTab === 'flight-recorder' ? 'bg-[#1e293b] text-sky-400 shadow-sm' : 'text-slate-400 hover:text-slate-200'}"
         >
           {#if isRecording}
             <span class="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
@@ -688,25 +1128,25 @@
           onclick={() => (activeChip = 'active')}
           class="px-2 py-0.5 rounded transition {activeChip === 'active' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold' : 'text-slate-400 hover:text-slate-200'}"
         >
-          Active
+          Active ({chipCounts.active})
         </button>
         <button
           onclick={() => (activeChip = 'sleep')}
           class="px-2 py-0.5 rounded transition {activeChip === 'sleep' ? 'bg-slate-700 text-slate-200 font-bold' : 'text-slate-400 hover:text-slate-200'}"
         >
-          Sleep
+          Sleep ({chipCounts.sleep})
         </button>
         <button
           onclick={() => (activeChip = 'locked')}
           class="px-2 py-0.5 rounded transition {activeChip === 'locked' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold' : 'text-slate-400 hover:text-slate-200'}"
         >
-          Locked
+          Locked ({chipCounts.locked})
         </button>
         <button
           onclick={() => (activeChip = 'slow')}
           class="px-2 py-0.5 rounded transition {activeChip === 'slow' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 font-bold' : 'text-slate-400 hover:text-slate-200'}"
         >
-          Slow (&gt;5s)
+          Slow ({chipCounts.slow})
         </button>
       </div>
 
@@ -723,6 +1163,20 @@
             </button>
           </div>
         {/if}
+
+        <button
+          onclick={() => (showBlockerPanel = true)}
+          class="h-7 px-2 rounded border text-[11px] font-sans flex items-center space-x-1 transition {locks.length
+            ? 'bg-rose-950/40 border-rose-700/70 text-rose-300 hover:bg-rose-900/50'
+            : 'bg-[#0b0f19] border-[#334155] text-slate-400 hover:text-white'}"
+          title="Open lock contention and root blocker triage"
+        >
+          <Icon name="shield-alert" class="w-3 h-3 {locks.length ? 'text-rose-400' : 'text-slate-500'}" />
+          <span>Blockers{locks.length ? ` (${locks.length})` : ''}</span>
+          {#if rootBlockerCount > 0}
+            <span class="px-1 rounded bg-rose-600 text-white text-[9px] font-bold leading-4">{rootBlockerCount} root</span>
+          {/if}
+        </button>
 
         <button
           onclick={() => (showTrendPanel = !showTrendPanel)}
@@ -788,98 +1242,151 @@
       </div>
     {/if}
 
-    <!-- Threads Table View -->
+        <!-- Threads Table View -->
     <div class="flex-1 overflow-auto">
-      <table class="w-full text-left border-collapse">
-        <thead class="bg-[#0f172a] sticky top-0 z-10 border-b border-[#334155] text-slate-400 text-[11px] uppercase tracking-wider font-sans select-none">
+      <table class="w-full border-collapse text-left">
+        <colgroup>
+          <col class="w-9" />
+          {#if visibleColumns.id}<col class="w-16" />{/if}
+          {#if visibleColumns.user}<col class="w-32" />{/if}
+          {#if visibleColumns.host}<col class="w-40" />{/if}
+          {#if visibleColumns.db}<col class="w-32" />{/if}
+          {#if visibleColumns.command}<col class="w-28" />{/if}
+          {#if visibleColumns.time}<col class="w-20" />{/if}
+          {#if visibleColumns.state}<col class="w-44" />{/if}
+          {#if visibleColumns.info}<col />{/if}
+          <col class="w-14" />
+        </colgroup>
+
+        <thead
+          class="sticky top-0 z-20 bg-[#0f172a] text-[10px] font-sans uppercase tracking-wider text-slate-400 select-none border-b border-slate-700/80 shadow-[0_1px_0_0_rgba(15,23,42,0.9)]"
+        >
           <tr>
-            <th class="py-2 px-3 w-8 text-center">
+            <th class="h-8 px-2 text-center">
               <input
                 type="checkbox"
+                aria-label="Select all threads"
                 checked={allFilteredSelected}
                 onchange={(e) => toggleSelectAll((e.target as HTMLInputElement).checked)}
-                class="rounded border-slate-700 text-sky-500"
+                class="rounded border-slate-600 bg-transparent text-sky-500 focus:ring-0 focus:ring-offset-0 align-middle"
               />
             </th>
-            {#if visibleColumns.id}<th class="py-2 px-3 w-16">ID</th>{/if}
-            {#if visibleColumns.user}<th class="py-2 px-3 w-28">User</th>{/if}
-            {#if visibleColumns.host}<th class="py-2 px-3 w-36">Host</th>{/if}
-            {#if visibleColumns.db}<th class="py-2 px-3 w-28">DB</th>{/if}
-            {#if visibleColumns.command}<th class="py-2 px-3 w-24">Command</th>{/if}
-            {#if visibleColumns.time}<th class="py-2 px-3 w-16 text-right">Time (s)</th>{/if}
-            {#if visibleColumns.state}<th class="py-2 px-3 w-36">State</th>{/if}
-            {#if visibleColumns.info}<th class="py-2 px-3">Info / Query (Click to Inspect)</th>{/if}
-            <th class="py-2 px-3 w-16 text-center">Action</th>
+            {#if visibleColumns.id}{@render th('id', 'ID', 'w-16', 'right')}{/if}
+            {#if visibleColumns.user}{@render th('user', 'User', 'w-32')}{/if}
+            {#if visibleColumns.host}{@render th('host', 'Host', 'w-40')}{/if}
+            {#if visibleColumns.db}{@render th('db', 'DB', 'w-32')}{/if}
+            {#if visibleColumns.command}{@render th('command', 'Command', 'w-28')}{/if}
+            {#if visibleColumns.time}{@render th('time', 'Time', 'w-20', 'right')}{/if}
+            {#if visibleColumns.state}{@render th('state', 'State', 'w-44')}{/if}
+            {#if visibleColumns.info}{@render th('info', 'Query', '')}{/if}
+            <th
+              class="h-8 px-2 w-14 text-center font-semibold sticky right-0 bg-[#0f172a] border-l border-slate-800"
+            >
+              <span class="sr-only">Actions</span>
+            </th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-[#1e293b]/60">
+
+        <tbody class="font-mono text-[11.5px]">
           {#if filteredThreads.length === 0}
             <tr>
-              <td colspan={Object.values(visibleColumns).filter(Boolean).length + 2} class="p-8 text-center text-slate-500">
-                {isLoading ? 'Loading active database threads...' : 'No threads matching the current criteria.'}
+              <td colspan={Object.values(visibleColumns).filter(Boolean).length + 2} class="py-16 text-center">
+                <div class="flex flex-col items-center gap-2 font-sans">
+                  <Icon
+                    name={isLoading ? 'loader' : 'check-circle'}
+                    class="w-6 h-6 {isLoading ? 'animate-spin text-sky-400' : 'text-slate-700'}"
+                  />
+                  <span class="text-slate-500">
+                    {isLoading ? 'Loading threads...' : 'No threads match the current filter'}
+                  </span>
+                </div>
               </td>
             </tr>
           {:else}
-            {#each filteredThreads as thread}
+            {#each sortedThreads as thread (thread.id)}
               {@const isSelf = thread.id === currentThreadId}
               {@const isSelected = selectedThreadIds.has(thread.id)}
+              {@const isSlow = thread.time >= 5}
+              {@const rowBg = isSelected
+                ? 'bg-rose-950/25 hover:bg-rose-950/35'
+                : isSelf
+                ? 'bg-sky-950/20 hover:bg-sky-950/30'
+                : 'hover:bg-slate-800/40'}
+              {@const actionBg = isSelected ? 'bg-rose-950/25' : isSelf ? 'bg-sky-950/20' : 'bg-[#090d16]'}
               <tr
-                class="transition-colors cursor-pointer {isSelected
-                  ? 'bg-rose-950/20'
-                  : isSelf
-                  ? 'bg-sky-950/20'
-                  : 'hover:bg-slate-800/40'}"
+                class="group h-8 cursor-pointer border-b border-slate-800/50 transition-colors {rowBg}"
                 onclick={() => (inspectingThread = thread)}
               >
-                <td class="py-2 px-3 text-center" onclick={(e) => e.stopPropagation()}>
+                <td class="px-2 text-center" onclick={(e) => e.stopPropagation()}>
                   {#if !isSelf}
                     <input
                       type="checkbox"
+                      aria-label="Select thread {thread.id}"
                       checked={isSelected}
                       onchange={() => toggleThreadSelection(thread.id)}
-                      class="rounded border-slate-700 text-rose-500"
+                      class="rounded border-slate-600 bg-transparent text-rose-500 focus:ring-0 focus:ring-offset-0 align-middle"
                     />
                   {/if}
                 </td>
                 {#if visibleColumns.id}
-                  <td class="py-2 px-3 font-mono font-bold {isSelf ? 'text-sky-400' : 'text-slate-300'}">
+                  <td class="px-2 text-right tabular-nums font-bold {isSelf ? 'text-sky-400' : 'text-slate-300'}">
                     {thread.id}
                     {#if isSelf}
-                      <span class="text-[9px] text-sky-500 uppercase ml-1 block font-sans font-normal">(you)</span>
+                      <span class="ml-1 font-sans text-[9px] font-normal uppercase text-sky-500">you</span>
                     {/if}
                   </td>
                 {/if}
                 {#if visibleColumns.user}
-                  <td class="py-2 px-3 text-slate-200">{thread.user || '-'}</td>
+                  <td class="px-2 text-slate-200 truncate" title={thread.user}>{thread.user || '-'}</td>
                 {/if}
                 {#if visibleColumns.host}
-                  <td class="py-2 px-3 text-slate-400 truncate max-w-[140px]" title={thread.host}>{thread.host || '-'}</td>
+                  <td class="px-2 text-slate-400 truncate" title={thread.host}>{thread.host || '-'}</td>
                 {/if}
                 {#if visibleColumns.db}
-                  <td class="py-2 px-3 text-emerald-400">{thread.db || '-'}</td>
+                  <td class="px-2 text-emerald-400/90 truncate" title={thread.db}>{thread.db || '-'}</td>
                 {/if}
                 {#if visibleColumns.command}
-                  <td class="py-2 px-3 text-amber-300">{thread.command || '-'}</td>
+                  <td class="px-2">
+                    <span
+                      class="inline-block max-w-full truncate rounded border px-1.5 py-0.5 font-sans text-[10px] leading-tight {commandTone(
+                        thread.command
+                      )}"
+                    >
+                      {thread.command || '-'}
+                    </span>
+                  </td>
                 {/if}
                 {#if visibleColumns.time}
-                  <td class="py-2 px-3 text-right font-mono {thread.time > 5 ? 'text-rose-400 font-bold' : 'text-slate-300'}">
-                    {thread.time}
+                  <td
+                    class="px-2 text-right tabular-nums {isSlow
+                      ? 'font-bold text-rose-400'
+                      : thread.time >= 1
+                      ? 'text-amber-300'
+                      : 'text-slate-400'}"
+                    title={isSlow ? 'Running longer than 5 seconds' : ''}
+                  >
+                    {thread.time.toFixed(1)}
                   </td>
                 {/if}
                 {#if visibleColumns.state}
-                  <td class="py-2 px-3 text-slate-400 truncate max-w-[140px]" title={thread.state}>{thread.state || '-'}</td>
+                  <td class="px-2 truncate text-slate-400" title={thread.state}>{thread.state || '-'}</td>
                 {/if}
                 {#if visibleColumns.info}
-                  <td class="py-2 px-3 text-slate-200 font-mono text-[11px] truncate max-w-md hover:text-sky-300" title={thread.info}>
+                  <td class="px-2 truncate text-slate-300 group-hover:text-sky-300" title={thread.info}>
                     {thread.info || '-'}
                   </td>
                 {/if}
-                <td class="py-2 px-3 text-center" onclick={(e) => e.stopPropagation()}>
+                <td
+                  class="px-2 text-center sticky right-0 border-l border-slate-800/60 transition-colors {actionBg} group-hover:bg-slate-800/40"
+                  onclick={(e) => e.stopPropagation()}
+                >
                   {#if !isSelf}
                     <button
+                      type="button"
                       onclick={() => killSingleThread(thread.id)}
-                      class="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition"
-                      title="Kill this thread"
+                      class="rounded p-1 text-slate-500 transition hover:bg-rose-950/60 hover:text-rose-400"
+                      title="Kill thread {thread.id}"
+                      aria-label="Kill thread {thread.id}"
                     >
                       <Icon name="trash-2" class="w-3.5 h-3.5" />
                     </button>
@@ -913,10 +1420,31 @@
                 Aggregating slow query digest from performance_schema...
               </td>
             </tr>
+          {:else if digestError}
+            <tr>
+              <td colspan="7" class="p-8">
+                <div class="flex flex-col items-center gap-2 text-center">
+                  <Icon name="alert-triangle" class="w-5 h-5 text-amber-400" />
+                  <p class="text-sm font-semibold text-amber-300">Statement digest unavailable</p>
+                  <p class="text-xs text-slate-400 max-w-2xl font-mono break-words">{digestError}</p>
+                  <button
+                    type="button"
+                    onclick={loadStatementDigest}
+                    class="mt-1 px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold"
+                  >
+                    Retry
+                  </button>
+                </div>
+              </td>
+            </tr>
           {:else if digestRows.length === 0}
             <tr>
-              <td colspan="7" class="p-8 text-center text-slate-500">
-                No slow statement digest statistics recorded yet.
+              <td colspan="7" class="p-8 text-center text-slate-500 space-y-1">
+                <p class="text-sm">No statement digests recorded yet on this server.</p>
+                <p class="text-[11px] text-slate-600">
+                  performance_schema is enabled but has not aggregated any statement yet — run some
+                  traffic, then hit refresh.
+                </p>
               </td>
             </tr>
           {:else}
@@ -938,134 +1466,391 @@
       </table>
     </div>
   {:else if currentSubTab === 'deadlock'}
-    <!-- Deadlock View -->
-    <div class="flex-1 overflow-auto p-4 space-y-4">
+    <!-- Deadlock Inspector -->
+    <div class="flex-1 overflow-auto p-3 space-y-3">
       {#if isDeadlockLoading}
         <div class="p-12 text-center text-slate-400 flex flex-col items-center gap-2">
           <Icon name="refresh-cw" class="w-6 h-6 animate-spin text-sky-400" />
-          <span>Inspecting InnoDB engine status and deadlock logs...</span>
+          <span>Reading SHOW ENGINE INNODB STATUS for the latest deadlock...</span>
         </div>
-      {:else if !deadlockData || !deadlockData.has_deadlock}
-        <div class="bg-emerald-950/30 border border-emerald-800/60 rounded-xl p-6 text-center space-y-2">
-          <div class="inline-flex p-3 bg-emerald-500/10 rounded-full text-emerald-400">
-            <Icon name="check-circle" class="w-8 h-8" />
+      {:else if !deadlockData}
+        <div class="bg-[#0b0f19] border border-[#334155] rounded-xl p-8 text-center space-y-3">
+          <div class="inline-flex p-3 bg-slate-800/60 rounded-full text-slate-400">
+            <Icon name="shield-alert" class="w-7 h-7" />
           </div>
-          <h3 class="text-sm font-bold text-emerald-300 font-sans">No Deadlock Detected</h3>
+          <h3 class="text-sm font-bold text-slate-200 font-sans">Deadlock report not loaded</h3>
           <p class="text-xs text-slate-400 max-w-md mx-auto font-sans">
-            {deadlockData?.summary || 'No deadlocks detected since the database engine was started.'}
+            The engine status was not read for this session yet.
           </p>
+          <button
+            type="button"
+            onclick={loadDeadlock}
+            class="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold font-sans"
+          >
+            Read engine status
+          </button>
+        </div>
+      {:else if !deadlockData.has_deadlock}
+        <div class="bg-[#0b0f19] border border-emerald-800/60 rounded-xl p-6">
+          <div class="flex items-start gap-3">
+            <div class="p-2 bg-emerald-500/10 text-emerald-400 rounded-lg shrink-0">
+              <Icon name="check-circle" class="w-5 h-5" />
+            </div>
+            <div class="min-w-0 space-y-1">
+              <h3 class="text-sm font-bold text-emerald-300 font-sans">No deadlock recorded</h3>
+              <p class="text-xs text-slate-400 font-sans">{deadlockData.summary || 'No deadlocks detected since the database engine was started.'}</p>
+              <p class="text-[11px] text-slate-500 font-sans">
+                MySQL keeps only the <span class="text-slate-400">latest</span> deadlock in the engine status. Older incidents are gone once a new one replaces them.
+              </p>
+            </div>
+          </div>
+          <div class="mt-4 flex items-center gap-2">
+            <button
+              type="button"
+              onclick={loadDeadlock}
+              class="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold font-sans flex items-center gap-1.5"
+            >
+              <Icon name="refresh-cw" class="w-3.5 h-3.5" />
+              <span>Check again</span>
+            </button>
+            <button
+              type="button"
+              onclick={() => sendDeadlockToAI(deadlockData)}
+              class="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold font-sans flex items-center gap-1.5"
+            >
+              <Icon name="bot" class="w-3.5 h-3.5" />
+              <span>Ask AI about lock waits</span>
+            </button>
+          </div>
         </div>
       {:else}
-        <div class="bg-rose-950/40 border border-rose-800 rounded-xl p-4 flex items-center justify-between">
-          <div class="flex items-center space-x-3">
-            <div class="p-2 bg-rose-500/20 text-rose-400 rounded-lg">
-              <Icon name="alert-triangle" class="w-6 h-6" />
+        <!-- Verdict -->
+        <div class="bg-[#0b0f19] border border-rose-800/70 rounded-xl p-3">
+          <div class="flex items-start justify-between gap-3">
+            <div class="flex items-start gap-2.5 min-w-0">
+              <div class="p-1.5 bg-rose-500/15 text-rose-400 rounded-md shrink-0 mt-0.5">
+                <Icon name="alert-triangle" class="w-4 h-4" />
+              </div>
+              <div class="min-w-0">
+                <h3 class="font-bold text-rose-300 font-sans text-sm">
+                  {deadlockData.summary || 'Deadlock detected between concurrent transactions'}
+                </h3>
+                <div class="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] font-mono text-slate-400">
+                  {#if deadlockData.detected_at}
+                    <span><span class="text-slate-500">detected</span> {deadlockData.detected_at}</span>
+                  {/if}
+                  {#if deadlockData.victim_thread_id}
+                    <span><span class="text-slate-500">victim thread</span> <span class="text-rose-300 font-bold">#{deadlockData.victim_thread_id}</span></span>
+                  {/if}
+                  {#if deadlockData.victim_tx_id}
+                    <span><span class="text-slate-500">victim trx</span> {deadlockData.victim_tx_id}</span>
+                  {/if}
+                  <span><span class="text-slate-500">transactions</span> {deadlockData.transactions?.length ?? 0}</span>
+                </div>
+              </div>
             </div>
-            <div>
-              <h3 class="font-bold text-rose-300 font-sans text-sm">
-                {deadlockData.summary || 'Deadlock detected between concurrent transactions'}
-              </h3>
-              {#if deadlockData.detected_at}
-                <p class="text-[11px] text-slate-400 font-mono mt-0.5">Detected At: {deadlockData.detected_at}</p>
-              {/if}
+            <div class="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onclick={() => copyDeadlockReport(deadlockData)}
+                class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[11px] font-sans flex items-center gap-1"
+                title="Copy the raw InnoDB deadlock section"
+              >
+                <Icon name="copy" class="w-3 h-3" />
+                <span>Copy raw</span>
+              </button>
+              <button
+                type="button"
+                onclick={() => sendDeadlockToAI(deadlockData)}
+                class="px-2 py-1 rounded bg-purple-950/60 hover:bg-purple-900/60 border border-purple-800 text-purple-200 text-[11px] font-sans flex items-center gap-1"
+              >
+                <Icon name="bot" class="w-3 h-3" />
+                <span>Send to AI</span>
+              </button>
             </div>
           </div>
         </div>
 
-        {#if deadlockData.transactions && deadlockData.transactions.length > 0}
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {#if (deadlockData.transactions?.length ?? 0) > 0}
+          <!-- Lock conflict matrix: what each transaction holds and what it waits for -->
+          <div class="bg-[#0b0f19] border border-[#334155] rounded-xl overflow-hidden">
+            <div class="px-3 py-2 border-b border-[#1e293b] flex items-center justify-between">
+              <h4 class="text-xs font-bold text-slate-200 font-sans">Lock conflict</h4>
+              <span class="text-[10px] font-sans text-slate-500">who holds what, who waits for what</span>
+            </div>
+            <table class="w-full border-collapse text-left font-mono text-[11px]">
+              <thead class="bg-[#090d16] text-slate-500 font-sans text-[10px] uppercase">
+                <tr>
+                  <th class="py-1.5 px-3">Transaction</th>
+                  <th class="py-1.5 px-3">Holds</th>
+                  <th class="py-1.5 px-3">Waits for</th>
+                  <th class="py-1.5 px-3 text-right">Active</th>
+                  <th class="py-1.5 px-3 text-right">Undo</th>
+                  <th class="py-1.5 px-3">Outcome</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-[#1e293b]/60">
+                {#each deadlockData.transactions as tx, i}
+                  {@const held = lockHeldInfo(tx)}
+                  {@const waited = lockWaitedInfo(tx)}
+                  <tr class={tx.is_victim ? 'bg-rose-950/20' : ''}>
+                    <td class="py-1.5 px-3 whitespace-nowrap">
+                      <span class="text-slate-200 font-bold">Tx {tx.index ?? i + 1}</span>
+                      <span class="text-slate-500"> · thread {tx.thread_id || '-'}</span>
+                    </td>
+                    <td class="py-1.5 px-3 text-slate-300">
+                      <span class="text-sky-300">{fmtLock(held)}</span>
+                    </td>
+                    <td class="py-1.5 px-3 text-slate-300">
+                      <span class={waited.table ? 'text-amber-300' : 'text-slate-500 italic'}>{fmtLock(waited)}</span>
+                    </td>
+                    <td class="py-1.5 px-3 text-right tabular-nums text-slate-300">{tx.active_seconds ?? '-'}s</td>
+                    <td class="py-1.5 px-3 text-right tabular-nums text-slate-300">{tx.undo_log_entries ?? '-'}</td>
+                    <td class="py-1.5 px-3">
+                      <span
+                        class="px-1.5 py-0.5 rounded text-[10px] font-bold font-sans uppercase border {tx.is_victim
+                          ? 'bg-rose-950 text-rose-300 border-rose-800'
+                          : 'bg-emerald-950 text-emerald-300 border-emerald-800'}"
+                      >
+                        {tx.is_victim ? 'rolled back' : 'committed'}
+                      </span>
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Per-transaction detail -->
+          <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">
             {#each deadlockData.transactions as tx, i}
-              <div class="bg-[#0b0f19] border border-[#334155] rounded-xl p-4 space-y-3 shadow-lg">
-                <div class="flex items-center justify-between border-b border-[#1e293b] pb-2">
-                  <span class="font-bold text-xs text-slate-200 font-sans">Transaction {i + 1}</span>
-                  <span class="px-2 py-0.5 rounded text-[10px] font-bold font-sans {tx.rolled_back ? 'bg-rose-950 text-rose-400 border border-rose-800' : 'bg-emerald-950 text-emerald-300 border border-emerald-800'}">
-                    {tx.rolled_back ? 'ROLLED BACK' : 'COMMITTED'}
+              {@const held = lockHeldInfo(tx)}
+              {@const waited = lockWaitedInfo(tx)}
+              <div class="bg-[#0b0f19] border rounded-xl overflow-hidden {tx.is_victim ? 'border-rose-800/70' : 'border-[#334155]'}">
+                <div class="px-3 py-2 border-b border-[#1e293b] flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs font-bold text-slate-200 font-sans">Transaction {tx.index ?? i + 1}</span>
+                    <span class="text-[10px] font-mono text-slate-500 truncate max-w-[10rem]" title={tx.tx_id}>trx {tx.tx_id || '-'}</span>
+                  </div>
+                  <span
+                    class="px-1.5 py-0.5 rounded text-[10px] font-bold font-sans uppercase border {tx.is_victim
+                      ? 'bg-rose-950 text-rose-300 border-rose-800'
+                      : 'bg-emerald-950 text-emerald-300 border-emerald-800'}"
+                  >
+                    {tx.is_victim ? 'victim · rolled back' : 'survivor · committed'}
                   </span>
                 </div>
-                <div class="grid grid-cols-2 gap-2 text-[11px]">
+                <div class="p-3 space-y-3">
+                  <dl class="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px] font-mono">
+                    <div>
+                      <dt class="text-slate-500 text-[10px] uppercase font-sans">Thread</dt>
+                      <dd class="text-slate-200">{tx.thread_id || '-'}</dd>
+                    </div>
+                    <div>
+                      <dt class="text-slate-500 text-[10px] uppercase font-sans">Account</dt>
+                      <dd class="text-slate-200 truncate" title="{tx.app_user || '-'}@{tx.host || '-'}">
+                        {tx.app_user || '-'}<span class="text-slate-500">@</span>{tx.host || '-'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt class="text-slate-500 text-[10px] uppercase font-sans">Active for</dt>
+                      <dd class="text-slate-200">{tx.active_seconds ?? '-'}s</dd>
+                    </div>
+                    <div>
+                      <dt class="text-slate-500 text-[10px] uppercase font-sans">Undo entries</dt>
+                      <dd class="text-slate-200">{tx.undo_log_entries ?? '-'}</dd>
+                    </div>
+                    <div class="col-span-2">
+                      <dt class="text-slate-500 text-[10px] uppercase font-sans">Holds lock</dt>
+                      <dd class="text-sky-300 break-words" title={tx.lock_held || tx.lock_mode}>{fmtLock(held)}</dd>
+                    </div>
+                    <div class="col-span-2">
+                      <dt class="text-slate-500 text-[10px] uppercase font-sans">Waits for lock</dt>
+                      <dd class={waited.table ? 'text-amber-300 break-words' : 'text-slate-500 italic'} title={tx.lock_waited}>
+                        {fmtLock(waited)}
+                      </dd>
+                    </div>
+                  </dl>
+
+                  {#if held.mode || waited.mode}
+                    <div class="flex flex-wrap items-center gap-1.5 text-[10px] font-sans">
+                      {#if held.mode}
+                        <span class="px-1.5 py-0.5 rounded bg-sky-950 text-sky-300 border border-sky-800 uppercase font-bold">holds {held.mode} · {held.scope}</span>
+                      {/if}
+                      {#if waited.mode}
+                        <span class="px-1.5 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800 uppercase font-bold">waits {waited.mode} · {waited.scope}</span>
+                      {/if}
+                    </div>
+                  {/if}
+
                   <div>
-                    <span class="text-slate-500 block">Thread ID:</span>
-                    <span class="text-slate-200 font-bold">{tx.thread_id || '-'}</span>
+                    <div class="flex items-center justify-between mb-1">
+                      <span class="text-slate-500 text-[10px] uppercase font-sans">Statement</span>
+                      <button
+                        type="button"
+                        onclick={() => copyText(tx.query, 'Statement')}
+                        class="text-[10px] text-sky-400 hover:underline font-sans flex items-center gap-1"
+                      >
+                        <Icon name="copy" class="w-3 h-3" />
+                        <span>Copy</span>
+                      </button>
+                    </div>
+                    <pre class="p-2 rounded bg-[#090d16] border border-slate-800 text-[11px] text-sky-300 font-mono overflow-x-auto whitespace-pre-wrap break-words">{tx.query || 'Statement not captured in the engine status.'}</pre>
                   </div>
-                  <div>
-                    <span class="text-slate-500 block">Lock Mode:</span>
-                    <span class="text-amber-400 font-bold">{tx.lock_mode || '-'}</span>
-                  </div>
-                </div>
-                <div>
-                  <span class="text-slate-500 text-[11px] block mb-1">Query Statement:</span>
-                  <pre class="p-2 rounded bg-[#090d16] border border-slate-800 text-[11px] text-sky-300 font-mono overflow-x-auto whitespace-pre-wrap">{tx.query || '-'}</pre>
                 </div>
               </div>
             {/each}
           </div>
+
+          <!-- What the dump proves -->
+          <div class="bg-[#0b0f19] border border-[#334155] rounded-xl p-3">
+            <h4 class="text-xs font-bold text-slate-200 font-sans mb-2 flex items-center gap-1.5">
+              <Icon name="zap" class="w-3.5 h-3.5 text-amber-400" />
+              <span>What to change</span>
+            </h4>
+            <ul class="space-y-1.5">
+              {#each deadlockAdvice(deadlockData) as tip}
+                <li class="flex items-start gap-2 text-[11.5px] text-slate-300 font-sans leading-relaxed">
+                  <span class="mt-1.5 w-1 h-1 rounded-full bg-slate-500 shrink-0"></span>
+                  <span>{tip}</span>
+                </li>
+              {/each}
+            </ul>
+          </div>
+        {:else}
+          <div class="bg-[#0b0f19] border border-amber-800/60 rounded-xl p-4 text-xs text-slate-300 font-sans">
+            The engine reported a deadlock but its transaction detail could not be parsed. Open the raw section below and read the
+            <span class="font-mono text-amber-300">TRANSACTION</span> blocks directly.
+          </div>
+        {/if}
+
+        {#if deadlockRawText(deadlockData)}
+          <details class="bg-[#0b0f19] border border-[#334155] rounded-xl overflow-hidden group">
+            <summary class="px-3 py-2 cursor-pointer text-xs font-bold text-slate-300 font-sans flex items-center gap-1.5 hover:text-white">
+              <Icon name="chevron-right" class="w-3.5 h-3.5 transition-transform group-open:rotate-90" />
+              <span>Raw InnoDB deadlock section</span>
+              <span class="text-[10px] font-mono font-normal text-slate-500">{deadlockRawText(deadlockData).split('\n').length} lines</span>
+            </summary>
+            <pre class="max-h-96 overflow-auto m-0 px-3 pb-3 text-[11px] leading-relaxed text-slate-400 font-mono whitespace-pre">{deadlockRawText(deadlockData)}</pre>
+          </details>
         {/if}
       {/if}
     </div>
   {:else if currentSubTab === 'cluster'}
     <!-- Cluster & Replication Telemetry -->
-    <div class="flex-1 overflow-auto p-4 space-y-4">
+    <div class="flex-1 overflow-auto p-3 space-y-3">
       {#if isClusterLoading}
-        <div class="p-12 text-center text-slate-400 flex flex-col items-center gap-2">
-          <Icon name="refresh-cw" class="w-6 h-6 animate-spin text-sky-400" />
+        <div class="p-6 text-center text-slate-400 flex items-center justify-center gap-2 text-xs">
+          <Icon name="refresh-cw" class="w-4 h-4 animate-spin text-sky-400" />
           <span>Introspecting cluster topology and replication status...</span>
         </div>
       {:else if !clusterReport}
-        <div class="p-8 text-center text-slate-500">
-          No cluster or replication metrics available for this database session.
+        <div class="p-4 flex items-start gap-2.5 rounded-lg bg-[#0b0f19] border border-[#1e293b]">
+          <Icon name="network" class="w-4 h-4 mt-0.5 shrink-0 text-slate-500" />
+          <div class="min-w-0">
+            <p class="text-xs text-slate-300 font-sans">No cluster or replication telemetry for this session.</p>
+            <p class="text-[11px] text-slate-500 font-sans mt-0.5">
+              Needs a MySQL/MariaDB connection (wsrep, replication or performance_schema). SQLite and PostgreSQL sessions report nothing here.
+            </p>
+          </div>
         </div>
       {:else}
-        <!-- Topology Summary Card -->
-        <div class="grid grid-cols-4 gap-3">
-          <div class="p-3 bg-[#0b0f19] border border-[#1e293b] rounded-xl">
-            <span class="text-slate-500 text-[10px] uppercase font-sans block">Topology</span>
-            <span class="text-sm font-bold text-sky-400 capitalize">{clusterReport.topology_type || 'Standalone'}</span>
-          </div>
-          <div class="p-3 bg-[#0b0f19] border border-[#1e293b] rounded-xl">
-            <span class="text-slate-500 text-[10px] uppercase font-sans block">Cluster State</span>
-            <span class="text-sm font-bold text-emerald-400">{clusterReport.cluster_status || 'Primary / Online'}</span>
-          </div>
-          <div class="p-3 bg-[#0b0f19] border border-[#1e293b] rounded-xl">
-            <span class="text-slate-500 text-[10px] uppercase font-sans block">Cluster Size</span>
-            <span class="text-sm font-bold text-slate-200">{clusterReport.cluster_size || 1} node(s)</span>
-          </div>
-          <div class="p-3 bg-[#0b0f19] border border-[#1e293b] rounded-xl">
-            <span class="text-slate-500 text-[10px] uppercase font-sans block">Bottleneck Severity</span>
-            <span class="text-sm font-bold {clusterReport.bottleneck_severity === 'critical' ? 'text-rose-400' : clusterReport.bottleneck_severity === 'warning' ? 'text-amber-400' : 'text-emerald-400'} uppercase">
-              {clusterReport.bottleneck_severity || 'Optimal'}
-            </span>
+        <!-- Verdict banner -->
+        <div
+          class="flex items-start gap-2.5 px-3 py-2.5 rounded-lg border {severityTone} font-sans"
+        >
+          <Icon name={severityIcon} class="w-4 h-4 mt-0.5 shrink-0" />
+          <div class="min-w-0">
+            <p class="text-xs font-bold uppercase tracking-wide">{severityLabel}</p>
+            <p class="text-[11.5px] text-slate-300 leading-snug">
+              {clusterReport.bottleneck_diagnosis || 'Cluster is healthy: no flow-control stalls, replica lag or queue backlog detected.'}
+            </p>
           </div>
         </div>
 
-        <!-- Nodes Table -->
-        {#if clusterReport.nodes && clusterReport.nodes.length > 0}
-          <div class="border border-[#1e293b] rounded-xl overflow-hidden bg-[#0b0f19]">
-            <div class="px-4 py-2 bg-[#0f172a] border-b border-[#334155] font-sans font-bold text-slate-300 text-xs">
-              Cluster Members ({clusterReport.nodes.length})
+        <!-- Topology summary -->
+        <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-2">
+          {#each clusterCards as card}
+            <div class="px-3 py-2 bg-[#0b0f19] border border-[#1e293b] rounded-lg min-w-0">
+              <span class="text-slate-500 text-[10px] uppercase tracking-wide font-sans block truncate">
+                {card.label}
+              </span>
+              <span class="text-[13px] font-bold font-mono truncate block {card.tone}" title={card.title || card.value}>
+                {card.value}
+              </span>
+              {#if card.hint}
+                <span class="text-[10px] text-slate-500 block truncate" title={card.hint}>{card.hint}</span>
+              {/if}
             </div>
-            <table class="w-full text-left border-collapse text-xs">
-              <thead class="bg-[#0b0f19] border-b border-[#1e293b] text-slate-400 text-[11px]">
+          {/each}
+        </div>
+
+        <!-- Members table -->
+        {#if clusterReport.nodes && clusterReport.nodes.length > 0}
+          <div class="border border-[#1e293b] rounded-lg overflow-hidden bg-[#0b0f19]">
+            <div class="px-3 py-2 bg-[#0f172a] border-b border-[#1e293b] flex items-center justify-between">
+              <span class="font-sans font-bold text-slate-300 text-xs">
+                Cluster Members ({clusterReport.nodes.length})
+              </span>
+              <span class="text-[10px] text-slate-500 font-sans">
+                queue depth & flow control per node · culprit node flagged
+              </span>
+            </div>
+            <table class="w-full text-left border-collapse text-[11.5px] font-mono">
+              <thead class="bg-[#0b0f19] border-b border-[#1e293b] text-slate-400 text-[10.5px] uppercase font-sans tracking-wide">
                 <tr>
-                  <th class="py-2 px-3">Node Name</th>
-                  <th class="py-2 px-3">Address</th>
-                  <th class="py-2 px-3">State</th>
-                  <th class="py-2 px-3 text-right">Recv Queue</th>
-                  <th class="py-2 px-3 text-right">Send Queue</th>
-                  <th class="py-2 px-3 text-center">Status</th>
+                  <th class="py-1.5 px-3">Node</th>
+                  <th class="py-1.5 px-3">Address</th>
+                  <th class="py-1.5 px-3">State</th>
+                  <th class="py-1.5 px-3 text-right">Recv Q</th>
+                  <th class="py-1.5 px-3 text-right">Send Q</th>
+                  <th class="py-1.5 px-3 text-right">FC Sent</th>
+                  <th class="py-1.5 px-3 w-24">Queue load</th>
+                  <th class="py-1.5 px-3">Role</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-[#1e293b]/60">
                 {#each clusterReport.nodes as node}
-                  <tr class="hover:bg-slate-800/40">
-                    <td class="py-2 px-3 font-bold text-sky-300">{node.name}</td>
-                    <td class="py-2 px-3 text-slate-400 font-mono">{node.address}</td>
-                    <td class="py-2 px-3 text-emerald-400">{node.state}</td>
-                    <td class="py-2 px-3 text-right text-slate-300">{node.receive_queue}</td>
-                    <td class="py-2 px-3 text-right text-slate-300">{node.send_queue}</td>
-                    <td class="py-2 px-3 text-center">
-                      <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800">
-                        {node.status}
+                  <tr class="hover:bg-slate-800/40 {node.is_culprit ? 'bg-amber-950/20' : ''}">
+                    <td class="py-1.5 px-3 font-bold text-sky-300 truncate max-w-[12rem]" title={node.name}>
+                      {node.name || '(unnamed)'}
+                    </td>
+                    <td class="py-1.5 px-3 text-slate-400">{node.address || '-'}</td>
+                    <td class="py-1.5 px-3">
+                      <span class="px-1.5 py-0.5 rounded text-[10px] font-bold font-sans uppercase border {nodeStateTone(node.state)}">
+                        {node.state || 'unknown'}
                       </span>
+                    </td>
+                    <td class="py-1.5 px-3 text-right {node.receive_queue > 0 ? 'text-amber-400 font-bold' : 'text-slate-300'}">
+                      {node.receive_queue ?? 0}
+                    </td>
+                    <td class="py-1.5 px-3 text-right {node.send_queue > 0 ? 'text-amber-400 font-bold' : 'text-slate-300'}">
+                      {node.send_queue ?? 0}
+                    </td>
+                    <td class="py-1.5 px-3 text-right text-slate-300">{(node.flow_control_sent ?? 0).toLocaleString()}</td>
+                    <td class="py-1.5 px-3">
+                      <div class="flex items-center gap-2">
+                        <div class="h-1.5 flex-1 rounded-full bg-slate-800 overflow-hidden">
+                          {#if nodeQueueTotal(node) > 0}
+                            <div
+                              class="h-full rounded-full {node.is_culprit || nodeQueueTotal(node) > 1000 ? 'bg-amber-500' : 'bg-sky-500'}"
+                              style="width: {queueWidth(node)}%"
+                              title="receive queue {node.receive_queue ?? 0} / send queue {node.send_queue ?? 0}"
+                            ></div>
+                          {/if}
+                        </div>
+                        <span class="text-[10px] font-mono {nodeQueueTotal(node) > 1000 ? 'text-amber-400' : 'text-slate-500'} w-10 text-right">
+                          {nodeQueueTotal(node) > 0 ? nodeQueueTotal(node).toLocaleString() : 'clear'}
+                        </span>
+                      </div>
+                    </td>
+                    <td class="py-1.5 px-3 font-sans space-x-1">
+                      {#if node.is_local}
+                        <span class="px-1.5 py-0.5 rounded bg-sky-950 border border-sky-800 text-sky-300 text-[9.5px] font-bold uppercase">local</span>
+                      {/if}
+                      {#if node.is_culprit}
+                        <span class="px-1.5 py-0.5 rounded bg-amber-950 border border-amber-800 text-amber-300 text-[9.5px] font-bold uppercase" title="This node is throttling the cluster">culprit</span>
+                      {/if}
                     </td>
                   </tr>
                 {/each}
@@ -1074,23 +1859,127 @@
           </div>
         {/if}
 
-        <!-- Tuning Checks -->
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">
+          <!-- Replication (async / source-replica) -->
+          <div class="border border-[#1e293b] rounded-lg overflow-hidden bg-[#0b0f19]">
+            <div class="px-3 py-2 bg-[#0f172a] border-b border-[#1e293b] font-sans font-bold text-slate-300 text-xs flex items-center justify-between">
+              <span>Replication Threads</span>
+              {#if clusterReport.replication}
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase border {clusterReport.replication.role === 'Replica' ? 'bg-sky-950 border-sky-800 text-sky-300' : 'bg-emerald-950 border-emerald-800 text-emerald-300'}">
+                  {clusterReport.replication.role}
+                </span>
+              {/if}
+            </div>
+            {#if clusterReport.replication}
+              <dl class="p-3 grid grid-cols-2 gap-x-3 gap-y-2 text-[11.5px] font-mono">
+                <div>
+                  <dt class="text-slate-500 text-[10px] uppercase font-sans">Source host</dt>
+                  <dd class="text-slate-200 truncate" title={clusterReport.replication.master_host}>
+                    {clusterReport.replication.master_host || '—'}
+                  </dd>
+                </div>
+                <div>
+                  <dt class="text-slate-500 text-[10px] uppercase font-sans">Seconds behind</dt>
+                  <dd class={lagTone(clusterReport.replication.seconds_behind_master)}>
+                    {clusterReport.replication.seconds_behind_master === null || clusterReport.replication.seconds_behind_master === undefined
+                      ? '—'
+                      : `${clusterReport.replication.seconds_behind_master}s`}
+                  </dd>
+                </div>
+                <div>
+                  <dt class="text-slate-500 text-[10px] uppercase font-sans">IO thread</dt>
+                  <dd class="flex items-center gap-1.5">
+                    <span class="w-1.5 h-1.5 rounded-full {clusterReport.replication.io_running ? 'bg-emerald-400' : 'bg-rose-500'}"></span>
+                    <span class={clusterReport.replication.io_running ? 'text-emerald-300' : 'text-rose-300'}>
+                      {clusterReport.replication.io_running ? 'Running' : 'Stopped'}
+                    </span>
+                  </dd>
+                </div>
+                <div>
+                  <dt class="text-slate-500 text-[10px] uppercase font-sans">SQL thread</dt>
+                  <dd class="flex items-center gap-1.5">
+                    <span class="w-1.5 h-1.5 rounded-full {clusterReport.replication.sql_running ? 'bg-emerald-400' : 'bg-rose-500'}"></span>
+                    <span class={clusterReport.replication.sql_running ? 'text-emerald-300' : 'text-rose-300'}>
+                      {clusterReport.replication.sql_running ? 'Running' : 'Stopped'}
+                    </span>
+                  </dd>
+                </div>
+                {#if clusterReport.replication.last_error}
+                  <div class="col-span-2">
+                    <dt class="text-slate-500 text-[10px] uppercase font-sans">Last error</dt>
+                    <dd class="text-rose-300 break-words whitespace-pre-wrap">{clusterReport.replication.last_error}</dd>
+                  </div>
+                {/if}
+              </dl>
+            {:else}
+              <p class="p-3 text-[11.5px] text-slate-500">
+                No asynchronous replication configured on this node — traffic is sychronous via cluster
+                (wsrep) or the node is a standalone instance.
+              </p>
+            {/if}
+          </div>
+
+          <!-- Flow control & durability tri-metric -->
+          <div class="border border-[#1e293b] rounded-lg overflow-hidden bg-[#0b0f19]">
+            <div class="px-3 py-2 bg-[#0f172a] border-b border-[#1e293b] font-sans font-bold text-slate-300 text-xs">
+              Flow Control &amp; Durability
+            </div>
+            <div class="p-3 space-y-2.5">
+              <div>
+                <div class="flex items-center justify-between text-[11px] font-sans">
+                  <span class="text-slate-400">Flow control paused</span>
+                  <span class="font-mono {fcTone}">{flowControlPct}%</span>
+                </div>
+                <div class="mt-1 h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
+                  <div class="h-full {flowControlPct > 5 ? 'bg-rose-500' : flowControlPct > 1 ? 'bg-amber-500' : 'bg-emerald-500'}"
+                       style="width: {Math.min(100, Math.max(0.5, flowControlPct * 10))}%"></div>
+                </div>
+                <p class="text-[10px] text-slate-500 mt-1 font-sans">
+                  {flowControlPct > 5
+                    ? 'Cluster replication is throttling commits — apply threads are the bottleneck.'
+                    : flowControlPct > 1
+                      ? 'Occasional throttling; watch wsrep_slave_threads and per-node disk latency.'
+                      : 'Cluster commits are flowing without throttling.'}
+                </p>
+              </div>
+              <dl class="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11.5px] font-mono">
+                <div class="flex justify-between"><dt class="text-slate-500 font-sans">WS sent</dt><dd class="text-slate-200">{(clusterReport.flow_control_sent ?? 0).toLocaleString()}</dd></div>
+                <div class="flex justify-between"><dt class="text-slate-500 font-sans">WS received</dt><dd class="text-slate-200">{(clusterReport.flow_control_recv ?? 0).toLocaleString()}</dd></div>
+                <div class="flex justify-between"><dt class="text-slate-500 font-sans">Apply threads</dt><dd class="text-slate-200">{clusterReport.tri_metric?.slave_threads ? clusterReport.tri_metric.slave_threads : 'n/a'}</dd></div>
+                <div class="flex justify-between"><dt class="text-slate-500 font-sans">Cert failures</dt><dd class={clusterReport.tri_metric?.cert_failures ? 'text-rose-300' : 'text-slate-200'}>{(clusterReport.tri_metric?.cert_failures ?? 0).toLocaleString()}</dd></div>
+                <div class="flex justify-between"><dt class="text-slate-500 font-sans">BF aborts</dt><dd class={clusterReport.tri_metric?.bf_aborts ? 'text-amber-300' : 'text-slate-200'}>{(clusterReport.tri_metric?.bf_aborts ?? 0).toLocaleString()}</dd></div>
+                <div class="flex justify-between"><dt class="text-slate-500 font-sans">Log waits</dt><dd class={clusterReport.tri_metric?.log_waits ? 'text-amber-300' : 'text-slate-200'}>{(clusterReport.tri_metric?.log_waits ?? 0).toLocaleString()}</dd></div>
+                <div class="flex justify-between"><dt class="text-slate-500 font-sans">FSyncs</dt><dd class="text-slate-200">{(clusterReport.tri_metric?.os_log_fsyncs ?? 0).toLocaleString()}</dd></div>
+                <div class="flex justify-between"><dt class="text-slate-500 font-sans">Net latency avg</dt><dd class="text-slate-200">{netLatency}</dd></div>
+              </dl>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tuning checks -->
         {#if clusterReport.tuning_checks && clusterReport.tuning_checks.length > 0}
           <div class="space-y-2">
-            <span class="font-sans font-bold text-slate-300 text-xs">Cluster Configuration Tuning Checks</span>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <span class="font-sans font-bold text-slate-300 text-xs">
+              Configuration Tuning Checks ({clusterReport.tuning_checks.length})
+            </span>
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-2">
               {#each clusterReport.tuning_checks as chk}
-                <div class="p-3 bg-[#0b0f19] border border-[#1e293b] rounded-xl space-y-1">
-                  <div class="flex items-center justify-between">
-                    <span class="font-mono font-bold text-sky-300 text-xs">{chk.variable}</span>
-                    <span class="px-1.5 py-0.2 rounded text-[10px] font-bold uppercase {chk.status === 'optimal' ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-amber-950 text-amber-300 border border-amber-800'}">
+                <div class="p-2.5 bg-[#0b0f19] border border-[#1e293b] rounded-lg space-y-1">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="font-mono font-bold text-sky-300 text-[11.5px] truncate">{chk.variable}</span>
+                    <span class="px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase shrink-0 border {chk.status === 'optimal' ? 'bg-emerald-950 text-emerald-300 border-emerald-800' : chk.status === 'critical' ? 'bg-rose-950 text-rose-300 border-rose-800' : 'bg-amber-950 text-amber-300 border-amber-800'}">
                       {chk.status}
                     </span>
                   </div>
-                  <div class="text-[11px] text-slate-400">
-                    Current: <strong class="text-slate-200">{chk.current_value}</strong> • Recommended: <strong class="text-emerald-400">{chk.recommended}</strong>
+                  <div class="text-[10.5px] text-slate-400 font-mono">
+                    current <strong class="text-slate-200">{chk.current_value}</strong>
+                    <span class="text-slate-600">→</span>
+                    advised <strong class="text-emerald-400">{chk.recommended}</strong>
                   </div>
-                  <p class="text-[11px] text-slate-500 font-sans">{chk.summary}</p>
+                  <p class="text-[11px] text-slate-500 font-sans leading-snug">{chk.summary}</p>
+                  {#if chk.remediation}
+                    <p class="text-[10.5px] text-slate-600 font-mono truncate" title={chk.remediation}>{chk.remediation}</p>
+                  {/if}
                 </div>
               {/each}
             </div>
@@ -1288,16 +2177,29 @@
               </span>
             </div>
             <div class="p-3 rounded-xl bg-[#0b0f19] border border-[#1e293b]">
-              <span class="text-slate-500 text-[10px] uppercase font-bold block">Lock Waits / Stalls</span>
-              <span class="text-sm font-bold {(activeOrSelectedTick?.row_lock_waits || 0) > 0 ? 'text-amber-400' : 'text-slate-200'} font-mono">
-                {activeOrSelectedTick?.row_lock_waits ?? 0} / {activeOrSelectedTick?.buffer_pool_wait_free ?? 0}
+              <span class="text-slate-500 text-[10px] uppercase font-bold block">Row-lock waits (Δ)</span>
+              <span class="text-sm font-bold {flightPeak.lockDelta > 0 ? 'text-amber-400' : 'text-slate-200'} font-mono">
+                +{flightPeak.lockDelta.toLocaleString()}
               </span>
+              <span class="text-[10px] text-slate-500 font-sans">over session · counter {activeOrSelectedTick?.row_lock_waits ?? 0}</span>
             </div>
             <div class="p-3 rounded-xl bg-[#0b0f19] border border-[#1e293b]">
-              <span class="text-slate-500 text-[10px] uppercase font-bold block">Total Samples</span>
-              <span class="text-sm font-bold text-slate-100 font-mono">{flightSessionTicks.length} ticks</span>
+              <span class="text-slate-500 text-[10px] uppercase font-bold block">Peak load</span>
+              <span class="text-sm font-bold text-slate-100 font-mono">
+                {flightPeak.maxQps} qps peak
+              </span>
+              <span class="text-[10px] text-slate-500 font-sans">
+                {flightPeak.maxThreads} active threads peak · {flightSessionTicks.length} samples
+              </span>
             </div>
           </div>
+
+          <!-- Telemetry Timeline (click a sample to inspect it) -->
+          <FlightTimeline
+            ticks={flightSessionTicks}
+            selectedIndex={selectedTickIndex}
+            onselect={(idx) => (selectedTickIndex = idx)}
+          />
 
           <!-- Ticks Samples Table -->
           <div class="border border-[#1e293b] rounded-xl overflow-hidden bg-[#0b0f19]">
@@ -1314,7 +2216,7 @@
                     <th class="py-2 px-3 text-right w-36">Threads (Run/Conn)</th>
                     <th class="py-2 px-3 text-right w-24">QPS</th>
                     <th class="py-2 px-3 text-right w-24">Row Locks</th>
-                    <th class="py-2 px-3 text-right w-24">Buffer Stalls</th>
+                    <th class="py-2 px-3 text-right w-24" title="Cumulative buffer-pool waits — the delta between samples is what matters">Buffer Wait (cum.)</th>
                     <th class="py-2 px-3">Top Active Query</th>
                   </tr>
                 </thead>
@@ -1495,7 +2397,7 @@
                 <span>Explain Query</span>
               </button>
               <button
-                onclick={() => sendThreadToAI(inspectingThread?.info)}
+                onclick={() => sendThreadToAI(inspectingThread?.info, inspectingThread)}
                 class="text-[11px] text-purple-400 hover:underline flex items-center space-x-1"
               >
                 <Icon name="bot" class="w-3 h-3" />
@@ -1520,6 +2422,180 @@
           onclick={() => (inspectingThread = null)}
           class="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition"
         >
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Lock Contention & Root Blocker Triage -->
+{#if showBlockerPanel}
+  <div
+    class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
+    role="presentation"
+    onclick={(e) => {
+      if (e.target === e.currentTarget) showBlockerPanel = false;
+    }}
+  >
+    <div class="bg-[#0b0f19] border border-[#334155] rounded-xl w-full max-w-4xl max-h-[86vh] shadow-2xl overflow-hidden flex flex-col text-xs font-sans">
+      <div class="px-5 py-3.5 border-b border-[#334155] flex items-center justify-between bg-[#0f172a]">
+        <div class="flex items-center space-x-2.5">
+          <Icon name="shield-alert" class="w-4 h-4 {rootBlockerCount > 0 ? 'text-rose-400' : 'text-slate-400'}" />
+          <div>
+            <h3 class="font-bold text-slate-100 text-sm">Lock Contention &amp; Root Blocker Triage</h3>
+            <p class="text-[11px] text-slate-500 mt-0.5">
+              {rootBlockerCount > 0
+                ? `${rootBlockerCount} root blocker(s) holding transactions`
+                : locks.length > 0
+                  ? `${locks.length} lock wait(s), no root blocker`
+                  : 'No active lock contention'}
+            </p>
+          </div>
+        </div>
+        <div class="flex items-center space-x-2">
+          <span class="px-2 py-0.5 rounded border text-[10px] font-bold {rootBlockerCount > 0
+            ? 'bg-rose-950/60 border-rose-700 text-rose-300'
+            : 'bg-slate-900 border-slate-700 text-slate-400'}">
+            {rootBlockerCount > 0 ? `${rootBlockerCount} ROOT BLOCKER${rootBlockerCount > 1 ? 'S' : ''}` : `${locks.length} LOCK WAITS`}
+          </span>
+          <button onclick={() => (showBlockerPanel = false)} class="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition" title="Close">
+            <Icon name="x" class="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      <div class="flex-1 overflow-y-auto p-4 space-y-3">
+        {#if locks.length === 0}
+          <div class="py-10 text-center space-y-2">
+            <div class="w-10 h-10 mx-auto rounded-full bg-emerald-500/10 border border-emerald-600/30 flex items-center justify-center text-emerald-400">
+              <Icon name="check-circle" class="w-5 h-5" />
+            </div>
+            <div class="font-bold text-slate-200">No Active Lock Contention</div>
+            <div class="text-slate-500 text-[11px]">All threads and transactions are running unobstructed.</div>
+          </div>
+        {:else}
+          {#each locks as lock, idx (idx)}
+            {@const isRoot = !!lock.is_root_blocker}
+            <div class="rounded-lg border {isRoot ? 'border-rose-800 bg-rose-950/25' : 'border-slate-800 bg-[#0f172a]'}">
+              <div class="px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2 border-b {isRoot ? 'border-rose-900/60' : 'border-slate-800'}">
+                <div class="flex flex-wrap items-center gap-2 min-w-0">
+                  {#if isRoot}
+                    <span class="px-1.5 py-0.5 rounded bg-rose-600 text-white text-[10px] font-bold tracking-wide flex items-center space-x-1">
+                      <Icon name="alert-triangle" class="w-3 h-3" />
+                      <span>ROOT BLOCKER</span>
+                    </span>
+                  {:else}
+                    <span class="px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-800/70 text-amber-300 text-[10px] font-bold">
+                      LOCK WAIT
+                    </span>
+                  {/if}
+                  <span class="font-bold text-slate-100">Thread #{lock.blocking_thread_id}</span>
+                  <span class="text-slate-500">{lock.blocking_user || 'unknown'}</span>
+                  <span class="px-1.5 py-0.5 rounded bg-amber-950/50 border border-amber-900/70 text-amber-300 text-[10px] font-mono">
+                    holding {lock.lock_mode || 'LOCK'}
+                  </span>
+                  {#if lock.locked_resource}
+                    <span class="px-1.5 py-0.5 rounded bg-sky-950/50 border border-sky-900/70 text-sky-300 text-[10px] font-mono truncate max-w-[18rem]" title={lock.locked_resource}>
+                      on {lock.locked_resource}
+                    </span>
+                  {/if}
+                </div>
+                <div class="flex items-center space-x-1.5 shrink-0">
+                  <button
+                    onclick={() => inspectLockThread(lock, 'blocking')}
+                    class="px-2 py-1 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300 transition flex items-center space-x-1"
+                  >
+                    <Icon name="search" class="w-3 h-3 text-sky-400" />
+                    <span>Detail</span>
+                  </button>
+                  <button
+                    onclick={() => killLockThread(lock.blocking_thread_id, 'query')}
+                    class="px-2 py-1 rounded border border-amber-700/70 bg-amber-950/50 hover:bg-amber-900/60 text-amber-300 font-semibold transition"
+                  >
+                    Kill Query
+                  </button>
+                  <button
+                    onclick={() => killLockThread(lock.blocking_thread_id, 'connection')}
+                    class="px-2 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white font-bold transition"
+                  >
+                    Kill Blocker
+                  </button>
+                </div>
+              </div>
+
+              <div class="p-3 space-y-2">
+                {#if lock.blocking_query}
+                  <div class="rounded border border-slate-800 overflow-hidden">
+                    <div class="px-2.5 py-1.5 bg-[#090d16] border-b border-slate-800 flex items-center justify-between">
+                      <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Blocking Query</span>
+                      <div class="flex items-center space-x-2">
+                        <button onclick={() => copyText(lock.blocking_query, 'Blocking query')} class="text-[10px] text-slate-400 hover:text-white flex items-center space-x-1">
+                          <Icon name="copy" class="w-3 h-3" />
+                          <span>Copy</span>
+                        </button>
+                        <button onclick={() => inspectLockThread(lock, 'blocking')} class="text-[10px] text-sky-400 hover:text-sky-300 flex items-center space-x-1">
+                          <Icon name="search" class="w-3 h-3" />
+                          <span>Inspect</span>
+                        </button>
+                      </div>
+                    </div>
+                    <pre class="p-2.5 bg-[#050811] text-sky-200 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all max-h-40 overflow-y-auto select-text">{lock.blocking_query}</pre>
+                  </div>
+                {:else}
+                  <div class="px-2.5 py-2 rounded border border-slate-800 bg-[#090d16] text-slate-500 italic flex items-center justify-between">
+                    <span>Idle in transaction: holding locks without a running query.</span>
+                    <button onclick={() => inspectLockThread(lock, 'blocking')} class="text-sky-400 hover:text-sky-300 not-italic text-[10px]">Show detail</button>
+                  </div>
+                {/if}
+
+                <div class="pl-3 border-l-2 border-rose-700/70 flex flex-wrap items-center justify-between gap-2">
+                  <div class="flex flex-wrap items-center gap-1.5 text-[11px]">
+                    <span class="text-rose-300">Blocked:</span>
+                    <span class="font-bold text-slate-100">Thread #{lock.waiting_thread_id}</span>
+                    <span class="text-slate-500">{lock.waiting_user || 'unknown'}</span>
+                    <span class="text-slate-400">waiting</span>
+                    <span class="text-amber-300 font-mono font-bold">{lock.waiting_seconds ?? 0}s</span>
+                    <span class="text-slate-400">for {lock.lock_mode || 'lock'}</span>
+                  </div>
+                  <div class="flex items-center space-x-1.5">
+                    <button
+                      onclick={() => inspectLockThread(lock, 'waiting')}
+                      class="px-2 py-0.5 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300 text-[10px] transition flex items-center space-x-1"
+                    >
+                      <Icon name="search" class="w-3 h-3 text-sky-400" />
+                      <span>Detail</span>
+                    </button>
+                    <button
+                      onclick={() => killLockThread(lock.waiting_thread_id, 'connection')}
+                      class="px-2 py-0.5 rounded border border-rose-800 bg-rose-950/50 hover:bg-rose-900/60 text-rose-300 text-[10px] transition"
+                    >
+                      Kill Waiting #{lock.waiting_thread_id}
+                    </button>
+                  </div>
+                </div>
+
+                {#if lock.waiting_query}
+                  <div class="rounded border border-slate-800 overflow-hidden">
+                    <div class="px-2.5 py-1.5 bg-[#090d16] border-b border-slate-800 flex items-center justify-between">
+                      <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Waiting Query</span>
+                      <button onclick={() => copyText(lock.waiting_query, 'Waiting query')} class="text-[10px] text-slate-400 hover:text-white flex items-center space-x-1">
+                        <Icon name="copy" class="w-3 h-3" />
+                        <span>Copy</span>
+                      </button>
+                    </div>
+                    <pre class="p-2.5 bg-[#050811] text-slate-300 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all max-h-32 overflow-y-auto select-text">{lock.waiting_query}</pre>
+                  </div>
+                {/if}
+              </div>
+            </div>
+          {/each}
+        {/if}
+      </div>
+
+      <div class="px-5 py-2.5 border-t border-[#334155] bg-[#0f172a] flex items-center justify-between text-[10px] text-slate-500 font-mono">
+        <span>Root blockers are blocking threads that are not waiting on another lock.</span>
+        <button onclick={() => (showBlockerPanel = false)} class="px-2.5 py-1 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300 font-sans text-xs transition">
           Close
         </button>
       </div>

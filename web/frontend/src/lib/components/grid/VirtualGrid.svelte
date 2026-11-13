@@ -488,7 +488,7 @@
         title="Add in-place draft row"
       >
         <Icon name="plus" class="w-3 h-3 text-sky-400" />
-        <span>+ Draft Row</span>
+        <span>Draft Row</span>
       </button>
 
       {#if selectedRowIndices.length > 0}

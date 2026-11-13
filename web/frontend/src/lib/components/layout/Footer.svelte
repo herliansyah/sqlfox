@@ -13,7 +13,9 @@
     return `Up ${m}m`;
   }
 
-  // Engine label & styling
+  // Engine label & styling. Status-bar metadata stays neutral: semantic colors
+  // (amber/rose) are reserved for warnings and destructive states.
+  const neutralBadge = 'bg-slate-800/50 border-slate-700/70';
   let engineInfo = $derived.by(() => {
     const driver = appState.activeConnection?.driver?.toLowerCase() || '';
     const ver = appState.serverInfo?.version || '';
@@ -21,27 +23,27 @@
       return {
         label: ver ? `PostgreSQL ${ver}` : 'PostgreSQL',
         color: 'text-indigo-400',
-        badgeBg: 'bg-indigo-950/50 border-indigo-800/60',
+        badgeBg: neutralBadge,
       };
     }
     if (driver.includes('sqlite')) {
       return {
         label: ver ? `SQLite ${ver}` : 'SQLite 3',
         color: 'text-sky-400',
-        badgeBg: 'bg-sky-950/50 border-sky-800/60',
+        badgeBg: neutralBadge,
       };
     }
     if (driver.includes('mysql') || driver.includes('maria')) {
       return {
         label: ver ? `MySQL ${ver}` : 'MySQL',
-        color: 'text-amber-400',
-        badgeBg: 'bg-amber-950/50 border-amber-800/60',
+        color: 'text-cyan-400',
+        badgeBg: neutralBadge,
       };
     }
     return {
       label: ver || 'Database Engine',
       color: 'text-slate-400',
-      badgeBg: 'bg-slate-900 border-slate-800',
+      badgeBg: neutralBadge,
     };
   });
 
@@ -76,13 +78,9 @@
 
       <span class="text-slate-600 select-none">•</span>
 
-      <!-- Host & DB Target -->
-      <span class="font-mono text-slate-300 truncate" title="Host: {appState.activeConnection.host || 'localhost'} | Database: {appState.currentDatabase || 'default'}">
-        <span class="text-slate-400">{appState.activeConnection.host || 'localhost'}{appState.activeConnection.port ? `:${appState.activeConnection.port}` : ''}</span>
-        {#if appState.currentDatabase}
-          <span class="text-slate-500"> / </span>
-          <span class="text-sky-300 font-semibold">{appState.currentDatabase}</span>
-        {/if}
+      <!-- Host Target (database identity lives in the sidebar selector) -->
+      <span class="font-mono text-slate-400 truncate" title="Host: {appState.activeConnection.host || 'localhost'}">
+        {appState.activeConnection.host || 'localhost'}{appState.activeConnection.port ? `:${appState.activeConnection.port}` : ''}
       </span>
 
       <!-- Uptime -->

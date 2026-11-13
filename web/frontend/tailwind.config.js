@@ -21,6 +21,15 @@ export default {
       borderColor: {
         DEFAULT: '#1e293b',
       },
+      // Flat, crisp depth: no colored glows, no heavy drop shadows.
+      boxShadow: {
+        sm: '0 1px 2px 0 rgba(2, 6, 23, 0.55)',
+        DEFAULT: '0 1px 3px 0 rgba(2, 6, 23, 0.6)',
+        md: '0 4px 10px -4px rgba(2, 6, 23, 0.75)',
+        lg: '0 8px 18px -10px rgba(2, 6, 23, 0.8)',
+        xl: '0 12px 24px -14px rgba(2, 6, 23, 0.85)',
+        '2xl': '0 16px 32px -18px rgba(2, 6, 23, 0.9)',
+      },
       fontFamily: {
         mono: [
           'JetBrains Mono',

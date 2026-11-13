@@ -1,7 +1,7 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
   import Icon from '../common/Icon.svelte';
-  import { onDestroy } from 'svelte';
+  import { onDestroy, tick } from 'svelte';
 
   // Resizable sidebar width with persistence
   let sidebarWidth = $state(
@@ -39,6 +39,70 @@
 
   let showDbDropdown = $state(false);
   let dbFilter = $state('');
+  let dbActiveIndex = $state(0);
+  let dbSearchInput = $state<HTMLInputElement | null>(null);
+  let dbMenuList = $state<HTMLDivElement | null>(null);
+
+  $effect(() => {
+    if (dbActiveIndex >= filteredDbList.length) dbActiveIndex = Math.max(0, filteredDbList.length - 1);
+  });
+
+  async function openDbDropdown() {
+    showDbDropdown = true;
+    dbFilter = '';
+    const idx = (appState.availableDatabases || []).indexOf(appState.currentDatabase || '');
+    dbActiveIndex = idx >= 0 ? idx : 0;
+    await tick();
+    dbSearchInput?.focus();
+  }
+
+  function closeDbDropdown(restoreFocus = false) {
+    showDbDropdown = false;
+    dbFilter = '';
+    if (restoreFocus) document.getElementById('sidebar-db-selector-btn')?.focus();
+  }
+
+  function chooseDatabase(db: string) {
+    appState.selectDatabase(db);
+    closeDbDropdown(true);
+  }
+
+  function scrollDbActiveIntoView() {
+    tick().then(() => dbMenuList?.querySelector('[data-db-active="true"]')?.scrollIntoView({ block: 'nearest' }));
+  }
+
+  function handleDbSearchKeydown(e: KeyboardEvent) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (filteredDbList.length) {
+        dbActiveIndex = (dbActiveIndex + 1) % filteredDbList.length;
+        scrollDbActiveIntoView();
+      }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (filteredDbList.length) {
+        dbActiveIndex = (dbActiveIndex - 1 + filteredDbList.length) % filteredDbList.length;
+        scrollDbActiveIntoView();
+      }
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      dbActiveIndex = 0;
+      scrollDbActiveIntoView();
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      dbActiveIndex = Math.max(0, filteredDbList.length - 1);
+      scrollDbActiveIntoView();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const db = filteredDbList[dbActiveIndex];
+      if (db) chooseDatabase(db);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      closeDbDropdown(true);
+    } else if (e.key === 'Tab') {
+      closeDbDropdown();
+    }
+  }
 
   // Table Context Menu
   let tableContextMenu = $state<{
@@ -62,6 +126,16 @@
       y: clampedY,
       tableName,
     };
+  }
+
+
+  function aiTablePrompt(menu: { tableName: string }): string {
+    const db = appState.currentDatabase || 'default';
+    return [
+      `Analyse table \`${db}\`.\`${menu.tableName}\`.`,
+      '',
+      'Review the columns used by its keys and indexes, call out missing or redundant indexes, potential data-type risks, and query patterns that would suffer full scans. Propose concrete DDL.',
+    ].join('\n');
   }
 
   function closeTableMenu() {
@@ -153,9 +227,11 @@
       <button
         id="sidebar-db-selector-btn"
         type="button"
-        onclick={() => (showDbDropdown = !showDbDropdown)}
+        onclick={() => (showDbDropdown ? closeDbDropdown() : openDbDropdown())}
+        aria-haspopup="listbox"
+        aria-expanded={showDbDropdown}
         class="flex-1 h-7 bg-[#0f172a] hover:bg-[#1e293b] border border-slate-700/80 hover:border-slate-600 rounded px-2 text-xs text-left text-slate-200 flex items-center justify-between transition-colors group shadow-sm cursor-pointer min-w-0"
-        title="Click to switch database"
+        title="Switch database (searchable)"
       >
         <div class="flex items-center space-x-1.5 truncate min-w-0">
           <span
@@ -196,7 +272,7 @@
           tabindex="-1"
           aria-label="Close"
           class="fixed inset-0 z-40 bg-transparent cursor-default"
-          onclick={() => { showDbDropdown = false; dbFilter = ''; }}
+          onclick={() => closeDbDropdown()}
         ></button>
 
         <div class="absolute left-2 right-2 top-full mt-1 bg-[#0f172a] border border-slate-700/90 rounded-lg shadow-2xl z-50 py-1 divide-y divide-slate-800 animate-in fade-in duration-100">
@@ -206,8 +282,15 @@
               <Icon name="search" class="w-3 h-3 text-slate-500 absolute left-2 pointer-events-none" />
               <input
                 type="text"
+                bind:this={dbSearchInput}
                 bind:value={dbFilter}
-                placeholder="Search databases..."
+                onkeydown={handleDbSearchKeydown}
+                oninput={() => (dbActiveIndex = 0)}
+                role="combobox"
+                aria-expanded="true"
+                aria-controls="sidebar-db-listbox"
+                aria-autocomplete="list"
+                placeholder="Search databases... (↑↓ Enter)"
                 class="w-full bg-[#090d16] border border-slate-700/80 rounded pl-7 pr-6 py-1 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-500 font-mono"
               />
               {#if dbFilter}
@@ -224,7 +307,7 @@
           </div>
 
           <!-- DB List in Dropdown -->
-          <div class="max-h-56 overflow-y-auto py-1">
+          <div id="sidebar-db-listbox" bind:this={dbMenuList} role="listbox" class="max-h-56 overflow-y-auto py-1">
             {#if appState.isConnecting}
               <div class="p-4 text-center text-xs text-sky-400 flex items-center justify-center space-x-2">
                 <Icon name="refresh-cw" class="w-3.5 h-3.5 animate-spin shrink-0" />
@@ -277,15 +360,18 @@
                 </button>
               </div>
             {:else}
-              {#each filteredDbList as db}
+              {#each filteredDbList as db, idx (db)}
+                {@const isActiveDb = idx === dbActiveIndex}
                 <button
                   type="button"
-                  onclick={() => {
-                    appState.selectDatabase(db);
-                    showDbDropdown = false;
-                    dbFilter = '';
-                  }}
-                  class="w-full text-left px-3 py-1.5 flex items-center justify-between hover:bg-slate-800/80 text-xs transition-colors {db === appState.currentDatabase ? 'bg-sky-500/10 text-sky-400 font-bold' : 'text-slate-300'}"
+                  data-db-active={isActiveDb}
+                  role="option"
+                  aria-selected={db === appState.currentDatabase}
+                  onmouseenter={() => (dbActiveIndex = idx)}
+                  onclick={() => chooseDatabase(db)}
+                  class="w-full text-left px-3 py-1.5 flex items-center justify-between text-xs transition-colors {isActiveDb
+                    ? 'bg-slate-800/90 ring-1 ring-inset ring-sky-500/40'
+                    : 'hover:bg-slate-800/80'} {db === appState.currentDatabase ? 'bg-sky-500/10 text-sky-400 font-bold' : 'text-slate-300'}"
                 >
                   <div class="flex items-center space-x-2 truncate min-w-0">
                     <Icon name="database" class="w-3.5 h-3.5 {db === appState.currentDatabase ? 'text-sky-400' : 'text-slate-500'} shrink-0" />
@@ -898,7 +984,12 @@
             {#if !appState.collapsedSections.triggers}
               <div class="space-y-0.5 mt-0.5 pl-0.5">
                 {#each appState.filteredTriggers as trigger (trigger.name)}
-                  <div class="w-full text-left px-2 py-1 rounded-md flex items-center justify-between group hover:bg-[#1e293b]/80 text-slate-300 text-xs transition-colors">
+                  <button
+                    type="button"
+                    onclick={() => appState.openTriggerTab(trigger)}
+                    title="Open trigger definition in a SQL tab"
+                    class="w-full text-left px-2 py-1 rounded-md flex items-center justify-between group hover:bg-[#1e293b]/80 text-slate-300 text-xs transition-colors"
+                  >
                     <div class="flex items-center space-x-2 truncate min-w-0">
                       <Icon name="zap" class="w-3.5 h-3.5 text-purple-400 shrink-0" />
                       <span class="truncate font-mono text-[11.5px]">{trigger.name}</span>
@@ -908,7 +999,7 @@
                         {trigger.timing} {trigger.event}
                       </span>
                     {/if}
-                  </div>
+                  </button>
                 {/each}
               </div>
             {/if}
@@ -1017,6 +1108,17 @@
           >
             <Icon name="sparkles" class="w-3.5 h-3.5 text-purple-400" />
             <span>Generate Mock Data...</span>
+          </button>
+          <button
+            type="button"
+            onclick={() => {
+              appState.sendToAi(aiTablePrompt(tableContextMenu!), 'Table context sent to AI Copilot');
+              closeTableMenu();
+            }}
+            class="w-full text-left px-3 py-1.5 hover:bg-slate-800/80 flex items-center space-x-2 text-slate-200 transition-colors"
+          >
+            <Icon name="bot" class="w-3.5 h-3.5 text-sky-400" />
+            <span>Send Table to AI Copilot</span>
           </button>
           <button
             type="button"

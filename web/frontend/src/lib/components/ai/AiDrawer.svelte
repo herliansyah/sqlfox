@@ -24,6 +24,13 @@
   let mentionQuery = $state<string | null>(null);
   let mentionIndex = $state(0);
   let messagesContainer = $state<HTMLDivElement | null>(null);
+  let promptEl = $state<HTMLTextAreaElement | null>(null);
+  let isMaximized = $state(localStorage.getItem('sqlfox_ai_drawer_maximized') === 'true');
+
+  function toggleMaximized() {
+    isMaximized = !isMaximized;
+    localStorage.setItem('sqlfox_ai_drawer_maximized', String(isMaximized));
+  }
 
   // Auto-scroll messages to bottom
   $effect(() => {
@@ -107,7 +114,7 @@
       const assistantMsg: ChatMessage = {
         id: String(Date.now() + 1),
         role: 'assistant',
-        content: res.response || 'No response generated.',
+        content: res.content || 'No response generated.',
         timestamp: new Date(),
       };
       messages = [...messages, assistantMsg];
@@ -197,10 +204,26 @@
 
     return parts.length > 0 ? parts : [{ type: 'text', text: content }];
   }
+
+  // "Send to AI" from anywhere in the app lands here as a reviewable draft.
+  $effect(() => {
+    const draft = appState.aiPromptDraft;
+    if (!draft) return;
+    promptInput = appState.consumeAiPromptDraft();
+    queueMicrotask(() => {
+      const el = promptEl;
+      if (!el) return;
+      el.focus();
+      el.selectionStart = el.selectionEnd = el.value.length;
+    });
+  });
 </script>
 
 <aside
-  class="fixed top-12 right-0 bottom-7 w-96 bg-[#0b0f19] border-l border-[#1e293b] shadow-2xl z-40 flex flex-col font-sans transition-transform duration-200 select-text"
+  class="fixed top-12 right-0 bottom-7 bg-[#0b0f19] border-l border-[#1e293b] shadow-2xl z-40 flex flex-col font-sans transition-[width] duration-200 select-text"
+  style="width: {isMaximized
+    ? 'min(56rem, calc(100vw - 1.5rem))'
+    : 'min(24rem, calc(100vw - 1.5rem))'};"
 >
   <!-- Drawer Header -->
   <div class="h-10 bg-[#0f172a] border-b border-[#1e293b] px-4 flex items-center justify-between flex-shrink-0 select-none">
@@ -213,6 +236,13 @@
     </div>
 
     <div class="flex items-center space-x-1">
+      <button
+        onclick={toggleMaximized}
+        class="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition"
+        title={isMaximized ? 'Restore Copilot Width' : 'Maximize Copilot'}
+      >
+        <Icon name={isMaximized ? 'minimize-2' : 'maximize-2'} class="w-3.5 h-3.5" />
+      </button>
       <button
         onclick={() => (appState.isAiSettingsModalOpen = true)}
         class="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition"
@@ -354,6 +384,7 @@
   <div class="p-3 border-t border-[#1e293b] bg-[#070b14] flex-shrink-0">
     <div class="relative bg-[#0b0f19] border border-[#1e293b] focus-within:border-sky-500 rounded-xl overflow-hidden transition shadow-inner">
       <textarea
+        bind:this={promptEl}
         bind:value={promptInput}
         oninput={handleInput}
         onkeydown={handleKeyDown}

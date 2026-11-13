@@ -149,6 +149,8 @@ export class AppState {
   isPrivilegeMatrixOpen = $state<boolean>(false);
   isDbDiagnosticsOpen = $state<boolean>(false);
   isAiDrawerOpen = $state<boolean>(false);
+  /** Prefill text handed to the AI Copilot drawer by "Send to AI" actions. */
+  aiPromptDraft = $state<string>('');
   isAiSettingsModalOpen = $state<boolean>(false);
   isNotesDrawerOpen = $state<boolean>(false);
   isNoteComposerModalOpen = $state<boolean>(false);
@@ -219,6 +221,8 @@ export class AppState {
   isDataTransferOpen = $state<boolean>(false);
   isDataSyncOpen = $state<boolean>(false);
   isAuditDrawerOpen = $state<boolean>(false);
+  // Which DBA sub-view to show next; ProcesslistView applies it on change.
+  processlistSubTab = $state<string>('threads');
   auditLogs = $state<SessionAuditItem[]>([]);
 
   // FK Peek Popover state
@@ -535,6 +539,21 @@ export class AppState {
 
   openDbDiagnosticsModal() {
     this.isDbDiagnosticsOpen = true;
+  }
+
+  /** Opens the AI Copilot drawer and hands it a ready-to-review prompt. */
+  sendToAi(prompt: string, note = 'Context sent to AI Copilot') {
+    if (!prompt || !prompt.trim()) return;
+    this.aiPromptDraft = prompt.trim();
+    this.isAiDrawerOpen = true;
+    if (note) this.showToast(note, 'success');
+  }
+
+  /** Drawer consumes the draft once, so it never re-injects stale text. */
+  consumeAiPromptDraft(): string {
+    const draft = this.aiPromptDraft;
+    this.aiPromptDraft = '';
+    return draft;
   }
 
   async deleteConnection(id: string) {
@@ -955,7 +974,8 @@ export class AppState {
     this.tabs.push(newTab);
     this.activeTabId = newId;
     this.saveTabsState();
-    return newTab;
+    // Return the proxied element, not the raw literal, so later mutations notify.
+    return this.tabs[this.tabs.length - 1];
   }
 
   openTableDataTab(tableName: string, initialMode: TableMode = 'data') {
@@ -1006,7 +1026,8 @@ export class AppState {
     this.openTableDataTab(tableName, 'structure');
   }
 
-  openProcesslistTab() {
+  openProcesslistTab(subTab = 'threads') {
+    this.processlistSubTab = subTab;
     const existing = this.tabs.find((t) => t.isProcesslist);
     if (existing) {
       this.activeTabId = existing.id;
@@ -1115,17 +1136,14 @@ export class AppState {
       return;
     }
     const newTab = this.addTab(`${tableName}.ddl.sql`, `-- Fetching CREATE TABLE for ${tableName}...`);
-    if (this.activeSessionId) {
-      try {
-        const res = await api.getTableDDL(this.activeSessionId, tableName);
-        if (res && res.ddl) {
-          newTab.sql = res.ddl;
-          this.saveTabsState();
-        }
-      } catch (err: any) {
-        newTab.sql = `-- Error fetching DDL: ${err.message || err}`;
-      }
+    if (!this.activeSessionId) return;
+    try {
+      const res = await api.getTableDDL(this.activeSessionId, tableName);
+      if (res && res.ddl) newTab.sql = res.ddl;
+    } catch (err: any) {
+      newTab.sql = `-- Error fetching DDL: ${err.message || err}`;
     }
+    this.saveTabsState();
   }
 
   async openRoutineTab(routineName: string, routineType: 'PROCEDURE' | 'FUNCTION' = 'PROCEDURE') {
@@ -1135,17 +1153,38 @@ export class AppState {
       return;
     }
     const newTab = this.addTab(`${routineName}.sql`, `-- Fetching definition for ${routineType} ${routineName}...`);
-    if (this.activeSessionId) {
-      try {
-        const res = await api.getRoutineDDL(this.activeSessionId, routineName, routineType);
-        if (res && res.ddl) {
-          newTab.sql = res.ddl;
-          this.saveTabsState();
-        }
-      } catch (err: any) {
-        newTab.sql = `-- Error fetching routine definition: ${err.message || err}`;
-      }
+    if (!this.activeSessionId) return;
+    try {
+      const res = await api.getRoutineDDL(this.activeSessionId, routineName, routineType);
+      if (res && res.ddl) newTab.sql = res.ddl;
+    } catch (err: any) {
+      newTab.sql = `-- Error fetching routine definition: ${err.message || err}`;
     }
+    this.saveTabsState();
+  }
+
+  openTriggerTab(trigger: TriggerMetadata) {
+    const title = `${trigger.name}.sql`;
+    const existing = this.tabs.find((t) => t.title === title);
+    if (existing) {
+      this.activeTabId = existing.id;
+      return;
+    }
+    // Triggers expose no DDL endpoint; the catalog already carries the body.
+    const driver = this.activeConnection?.driver?.toLowerCase() || '';
+    const body = trigger.statement.trim().replace(/;\s*$/, '');
+    const create = [
+      `CREATE TRIGGER \`${trigger.name}\` ${trigger.timing} ${trigger.event} ON \`${trigger.table}\` FOR EACH ROW`,
+      `${body};`,
+    ];
+    const ddl = [
+      `-- Trigger ${trigger.name} on ${trigger.table} (${trigger.timing} ${trigger.event})`,
+      ...(driver.includes('mysql') || driver.includes('maria')
+        ? ['DELIMITER ;;', ...create, ';;', 'DELIMITER ;']
+        : create),
+    ].join('\n');
+    this.addTab(title, ddl);
+    this.saveTabsState();
   }
 
   duplicateTab(tabId: string) {
