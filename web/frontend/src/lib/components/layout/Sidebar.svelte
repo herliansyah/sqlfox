@@ -553,9 +553,11 @@
                             <div
                               role="listitem"
                               oncontextmenu={(e) => handleTableContextMenu(e, table.name)}
-                              class="flex items-center group rounded-md pr-1 transition-all text-xs {isActiveTable(table.name)
+                              class="relative flex items-center group rounded-md transition-all text-xs {isActiveTable(table.name)
                                 ? 'bg-sky-500/15 text-sky-200 font-medium border-l-2 border-sky-400 shadow-[inset_0_0_12px_rgba(56,189,248,0.06)]'
-                                : 'text-slate-300 hover:bg-[#1e293b]/70 hover:text-slate-100 border-l-2 border-transparent'}"
+                                : tableContextMenu?.open && tableContextMenu.tableName === table.name
+                                  ? 'bg-[#1e293b] text-slate-100 border-l-2 border-sky-500/60'
+                                  : 'text-slate-300 hover:bg-[#1e293b]/70 hover:text-slate-100 border-l-2 border-transparent'}"
                             >
                               <button
                                 type="button"
@@ -563,7 +565,7 @@
                                 class="flex-1 text-left px-2 py-1 flex items-center justify-between truncate min-w-0"
                                 title="Open {table.name} (Right-click for options)"
                               >
-                                <div class="flex items-center space-x-2 truncate min-w-0">
+                                <div class="flex items-center space-x-2 truncate min-w-0 pr-1">
                                   <Icon
                                     name="table"
                                     class="w-3.5 h-3.5 shrink-0 transition-colors {isActiveTable(table.name) ? 'text-sky-400' : 'text-slate-500 group-hover:text-sky-400'}"
@@ -572,14 +574,20 @@
                                 </div>
 
                                 {#if (table.row_count !== undefined && table.row_count !== null) || (table.rows_count !== undefined && table.rows_count !== null)}
-                                  <span class="text-[9.5px] text-slate-400 font-mono bg-slate-900/80 group-hover:bg-slate-800 px-1.5 py-0.2 rounded border border-slate-800/80 ml-1.5 shrink-0 tabular-nums">
+                                  <span
+                                    class="text-[9.5px] text-slate-400 font-mono bg-slate-900/80 group-hover:bg-slate-800 px-1.5 py-0.2 rounded border border-slate-800/80 ml-1.5 shrink-0 tabular-nums transition-opacity {tableContextMenu?.open && tableContextMenu.tableName === table.name ? 'opacity-0' : 'group-hover:opacity-0'}"
+                                  >
                                     {formatCount(table.row_count ?? table.rows_count)}
                                   </span>
                                 {/if}
                               </button>
 
-                              <!-- Hover action buttons -->
-                              <div class="flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                              <!-- Quick action buttons -->
+                              <div
+                                class="absolute right-1 flex items-center space-x-0.5 rounded transition-all {tableContextMenu?.open && tableContextMenu.tableName === table.name
+                                  ? 'opacity-100 pointer-events-auto bg-[#0f172a]/95 border border-slate-700/80 shadow-sm px-0.5 py-0.5'
+                                  : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/90 hover:bg-[#0f172a] border border-slate-700/60 shadow-sm px-0.5 py-0.5 backdrop-blur-xs'}"
+                              >
                                 <button
                                   type="button"
                                   onclick={(e) => { e.stopPropagation(); appState.openTableStructureTab(table.name); }}
@@ -608,9 +616,11 @@
                     <div
                       role="listitem"
                       oncontextmenu={(e) => handleTableContextMenu(e, table.name)}
-                      class="flex items-center group rounded-md pr-1 transition-all text-xs {isActiveTable(table.name)
+                      class="relative flex items-center group rounded-md transition-all text-xs {isActiveTable(table.name)
                         ? 'bg-sky-500/15 text-sky-200 font-medium border-l-2 border-sky-400 shadow-[inset_0_0_12px_rgba(56,189,248,0.06)]'
-                        : 'text-slate-300 hover:bg-[#1e293b]/70 hover:text-slate-100 border-l-2 border-transparent'}"
+                        : tableContextMenu?.open && tableContextMenu.tableName === table.name
+                          ? 'bg-[#1e293b] text-slate-100 border-l-2 border-sky-500/60'
+                          : 'text-slate-300 hover:bg-[#1e293b]/70 hover:text-slate-100 border-l-2 border-transparent'}"
                     >
                       <button
                         type="button"
@@ -618,7 +628,7 @@
                         class="flex-1 text-left px-2 py-1 flex items-center justify-between truncate min-w-0"
                         title="Open {table.name} (Right-click for options)"
                       >
-                        <div class="flex items-center space-x-2 truncate min-w-0">
+                        <div class="flex items-center space-x-2 truncate min-w-0 pr-1">
                           <Icon
                             name="table"
                             class="w-3.5 h-3.5 shrink-0 transition-colors {isActiveTable(table.name) ? 'text-sky-400' : 'text-slate-500 group-hover:text-sky-400'}"
@@ -627,14 +637,20 @@
                         </div>
 
                         {#if (table.row_count !== undefined && table.row_count !== null) || (table.rows_count !== undefined && table.rows_count !== null)}
-                          <span class="text-[9.5px] text-slate-400 font-mono bg-slate-900/80 group-hover:bg-slate-800 px-1.5 py-0.2 rounded border border-slate-800/80 ml-1.5 shrink-0 tabular-nums">
+                          <span
+                            class="text-[9.5px] text-slate-400 font-mono bg-slate-900/80 group-hover:bg-slate-800 px-1.5 py-0.2 rounded border border-slate-800/80 ml-1.5 shrink-0 tabular-nums transition-opacity {tableContextMenu?.open && tableContextMenu.tableName === table.name ? 'opacity-0' : 'group-hover:opacity-0'}"
+                          >
                             {formatCount(table.row_count ?? table.rows_count)}
                           </span>
                         {/if}
                       </button>
 
-                      <!-- Hover action buttons -->
-                      <div class="flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                      <!-- Quick action buttons -->
+                      <div
+                        class="absolute right-1 flex items-center space-x-0.5 rounded transition-all {tableContextMenu?.open && tableContextMenu.tableName === table.name
+                          ? 'opacity-100 pointer-events-auto bg-[#0f172a]/95 border border-slate-700/80 shadow-sm px-0.5 py-0.5'
+                          : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/90 hover:bg-[#0f172a] border border-slate-700/60 shadow-sm px-0.5 py-0.5 backdrop-blur-xs'}"
+                      >
                         <button
                           type="button"
                           onclick={(e) => { e.stopPropagation(); appState.openTableStructureTab(table.name); }}
@@ -660,9 +676,11 @@
                     <div
                       role="listitem"
                       oncontextmenu={(e) => handleTableContextMenu(e, table.name)}
-                      class="flex items-center group rounded-md pr-1 transition-all text-xs {isActiveTable(table.name)
+                      class="relative flex items-center group rounded-md transition-all text-xs {isActiveTable(table.name)
                         ? 'bg-sky-500/15 text-sky-200 font-medium border-l-2 border-sky-400 shadow-[inset_0_0_12px_rgba(56,189,248,0.06)]'
-                        : 'text-slate-300 hover:bg-[#1e293b]/70 hover:text-slate-100 border-l-2 border-transparent'}"
+                        : tableContextMenu?.open && tableContextMenu.tableName === table.name
+                          ? 'bg-[#1e293b] text-slate-100 border-l-2 border-sky-500/60'
+                          : 'text-slate-300 hover:bg-[#1e293b]/70 hover:text-slate-100 border-l-2 border-transparent'}"
                     >
                       <button
                         type="button"
@@ -670,7 +688,7 @@
                         class="flex-1 text-left px-2 py-1 flex items-center justify-between truncate min-w-0"
                         title="Open {table.name} (Right-click for options)"
                       >
-                        <div class="flex items-center space-x-2 truncate min-w-0">
+                        <div class="flex items-center space-x-2 truncate min-w-0 pr-1">
                           <Icon
                             name="table"
                             class="w-3.5 h-3.5 shrink-0 transition-colors {isActiveTable(table.name) ? 'text-sky-400' : 'text-slate-500 group-hover:text-sky-400'}"
@@ -679,14 +697,20 @@
                         </div>
 
                         {#if (table.row_count !== undefined && table.row_count !== null) || (table.rows_count !== undefined && table.rows_count !== null)}
-                          <span class="text-[9.5px] text-slate-400 font-mono bg-slate-900/80 group-hover:bg-slate-800 px-1.5 py-0.2 rounded border border-slate-800/80 ml-1.5 shrink-0 tabular-nums">
+                          <span
+                            class="text-[9.5px] text-slate-400 font-mono bg-slate-900/80 group-hover:bg-slate-800 px-1.5 py-0.2 rounded border border-slate-800/80 ml-1.5 shrink-0 tabular-nums transition-opacity {tableContextMenu?.open && tableContextMenu.tableName === table.name ? 'opacity-0' : 'group-hover:opacity-0'}"
+                          >
                             {formatCount(table.row_count ?? table.rows_count)}
                           </span>
                         {/if}
                       </button>
 
-                      <!-- Hover action buttons -->
-                      <div class="flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                      <!-- Quick action buttons -->
+                      <div
+                        class="absolute right-1 flex items-center space-x-0.5 rounded transition-all {tableContextMenu?.open && tableContextMenu.tableName === table.name
+                          ? 'opacity-100 pointer-events-auto bg-[#0f172a]/95 border border-slate-700/80 shadow-sm px-0.5 py-0.5'
+                          : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/90 hover:bg-[#0f172a] border border-slate-700/60 shadow-sm px-0.5 py-0.5 backdrop-blur-xs'}"
+                      >
                         <button
                           type="button"
                           onclick={(e) => { e.stopPropagation(); appState.openTableStructureTab(table.name); }}
@@ -748,7 +772,7 @@
               <div class="space-y-0.5 mt-0.5 pl-0.5">
                 {#each appState.filteredViews as view (view.name)}
                   <div
-                    class="flex items-center group rounded-md pr-1 transition-all text-xs {isActiveTable(view.name)
+                    class="relative flex items-center group rounded-md transition-all text-xs {isActiveTable(view.name)
                       ? 'bg-emerald-500/15 text-emerald-200 font-medium border-l-2 border-emerald-400 shadow-[inset_0_0_12px_rgba(52,211,153,0.06)]'
                       : 'text-slate-300 hover:bg-[#1e293b]/70 hover:text-emerald-300 border-l-2 border-transparent'}"
                   >
@@ -758,12 +782,16 @@
                       class="flex-1 text-left px-2 py-1 flex items-center justify-between truncate min-w-0"
                       title="View view {view.name}"
                     >
-                      <div class="flex items-center space-x-2 truncate min-w-0">
+                      <div class="flex items-center space-x-2 truncate min-w-0 pr-1">
                         <Icon name="eye" class="w-3.5 h-3.5 {isActiveTable(view.name) ? 'text-emerald-400' : 'text-emerald-500 group-hover:text-emerald-400'} shrink-0 transition-colors" />
                         <span class="truncate font-mono text-[11.5px]">{view.name}</span>
                       </div>
                     </button>
-                    <div class="flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+
+                    <!-- Quick action buttons -->
+                    <div
+                      class="absolute right-1 flex items-center opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/90 hover:bg-[#0f172a] border border-slate-700/60 shadow-sm px-0.5 py-0.5 rounded transition-opacity backdrop-blur-xs"
+                    >
                       <button
                         type="button"
                         onclick={(e) => { e.stopPropagation(); appState.openTableStructureTab(view.name); }}

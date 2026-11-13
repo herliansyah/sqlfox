@@ -48,6 +48,20 @@
   // Cell Detail Drawer
   let showDetailDrawer = $state(false);
 
+  // Filter Bar Toggle State
+  let isFilterOpen = $derived(Boolean(currentTab?.showFilterBar));
+  let hasActiveFilter = $derived(
+    Boolean(
+      currentTab?.appliedFilter ||
+      (currentTab?.filterPills && currentTab.filterPills.length > 0) ||
+      currentTab?.filterRaw
+    )
+  );
+
+  function toggleFilterBar() {
+    appState.toggleFilterBar();
+  }
+
   function getColName(col: any): string {
     if (!col) return '';
     return typeof col === 'string' ? col : col.name || '';
@@ -507,6 +521,22 @@
           <Icon name="trash-2" class="w-3 h-3 text-rose-400" />
           <span>Delete</span>
         </button>
+
+        <div class="h-4 w-px bg-slate-800 mx-0.5"></div>
+
+        <!-- Filter Bar Toggle Button -->
+        <button
+          type="button"
+          onclick={toggleFilterBar}
+          class="h-6 px-2 rounded {isFilterOpen ? 'bg-sky-500/20 text-sky-300 border-sky-500/40 font-medium' : hasActiveFilter ? 'bg-emerald-950/40 text-emerald-300 border-emerald-600/50 hover:bg-emerald-900/40' : 'bg-[#1e293b] text-slate-300 hover:text-white'} border border-slate-700/80 hover:border-slate-600 flex items-center space-x-1.5 text-[11px] transition"
+          title={hasActiveFilter ? 'Filter active (click to toggle WHERE / Pills bar)' : 'Toggle Filter (WHERE / Pills)'}
+        >
+          <Icon name="filter" class="w-3 h-3 {isFilterOpen ? 'text-sky-400' : hasActiveFilter ? 'text-emerald-400' : 'text-slate-400'}" />
+          <span>Filter</span>
+          {#if hasActiveFilter}
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" title="Active filter applied"></span>
+          {/if}
+        </button>
       {/if}
 
       <!-- Staged Edits Review Pill -->
@@ -659,8 +689,8 @@
   </div>
 
   <!-- TablePlus-style Filter Bar (Table Viewer) or Filter Pills Bar -->
-  {#if currentTab?.isTableViewer}
-    <div class="min-h-9 bg-[#0b0f19] border-b border-slate-800 px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs select-none shrink-0">
+  {#if currentTab?.isTableViewer && isFilterOpen}
+    <div class="min-h-9 bg-[#0b0f19] border-b border-slate-800 px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs select-none shrink-0 animate-in fade-in duration-100">
       <div class="flex flex-wrap items-center gap-2 flex-1 min-w-0">
         <!-- Mode Toggle: Pills vs WHERE -->
         <div class="inline-flex rounded border border-slate-700/80 bg-[#090d16] p-0.5 select-none" role="group">
@@ -846,6 +876,15 @@
         >
           <Icon name="file-code" class="w-3 h-3" />
           <span>SQL</span>
+        </button>
+
+        <button
+          type="button"
+          onclick={toggleFilterBar}
+          class="h-6 w-6 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700/80 hover:border-slate-600 flex items-center justify-center transition"
+          title="Hide filter bar"
+        >
+          <Icon name="x" class="w-3.5 h-3.5" />
         </button>
       </div>
     </div>

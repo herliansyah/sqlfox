@@ -259,6 +259,7 @@ export interface EditorTab {
   filterRaw?: string;
   appliedFilter?: string;
   filterPills?: FilterPill[];
+  showFilterBar?: boolean;
   hiddenColumns?: string[];
   pageSize?: number;
   currentPage?: number;

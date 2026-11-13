@@ -896,6 +896,7 @@ export class AppState {
         filterMode: t.filterMode || 'pills',
         filterRaw: t.filterRaw || '',
         appliedFilter: t.appliedFilter || '',
+        showFilterBar: Boolean(t.showFilterBar),
         hiddenColumns: t.hiddenColumns || [],
         isProcesslist: Boolean(t.isProcesslist),
         isErdCanvas: Boolean(t.isErdCanvas),
@@ -986,6 +987,7 @@ export class AppState {
       filterMode: 'pills',
       filterRaw: '',
       appliedFilter: '',
+      showFilterBar: false,
       hiddenColumns: [],
       isExecuting: initialMode === 'data',
       activeResult: null,
@@ -1624,6 +1626,22 @@ export class AppState {
     this.tabs = [...this.tabs];
   }
 
+  toggleFilterBar(tabId?: string) {
+    const tab = tabId ? this.tabs.find((t) => t.id === tabId) : this.activeTab;
+    if (!tab) return;
+    tab.showFilterBar = !tab.showFilterBar;
+    this.tabs = [...this.tabs];
+    this.saveTabsState();
+  }
+
+  setFilterBarVisible(visible: boolean, tabId?: string) {
+    const tab = tabId ? this.tabs.find((t) => t.id === tabId) : this.activeTab;
+    if (!tab) return;
+    tab.showFilterBar = visible;
+    this.tabs = [...this.tabs];
+    this.saveTabsState();
+  }
+
   addFilterPill(col?: string, op: FilterPill['op'] = '=', val: string = '') {
     const tab = this.activeTab;
     if (!tab) return;
@@ -1637,6 +1655,7 @@ export class AppState {
         : 'id');
     tab.filterPills.push({ col: defaultCol, op, val });
     tab.filterMode = 'pills';
+    tab.showFilterBar = true;
     if (val !== '' || op === 'IS NULL' || op === 'IS NOT NULL') {
       tab.appliedFilter = compileFilterPills(tab.filterPills, this.activeConnection?.driver);
       if (tab.isTableViewer) {
