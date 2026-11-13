@@ -131,7 +131,7 @@
   ></button>
 
   <div
-    class="absolute {align === 'right' ? 'right-0' : 'left-0'} mt-1 {panelWidth} bg-[#0f172a] border border-slate-700/90 rounded-lg shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-100"
+    class="absolute top-full {align === 'right' ? 'right-0' : 'left-0'} mt-1 {panelWidth} bg-[#0f172a] border border-slate-700/90 rounded-lg shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-100"
   >
     <div class="p-2 border-b border-slate-800">
       <div class="relative flex items-center">

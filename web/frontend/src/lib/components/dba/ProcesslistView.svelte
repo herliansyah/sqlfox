@@ -1015,7 +1015,7 @@
           <span class="text-slate-400 font-sans">Refresh:</span>
           <select
             bind:value={refreshInterval}
-            class="bg-transparent text-sky-400 font-semibold focus:outline-none"
+            class="bg-transparent text-sky-400 font-semibold focus:outline-none cursor-pointer [color-scheme:dark] [&>option]:bg-[#0b1220] [&>option]:text-slate-200"
           >
             <option value={0}>Paused</option>
             <option value={1000}>1s</option>
@@ -1077,7 +1077,7 @@
               <span class="text-slate-400 font-sans">Interval:</span>
               <select
                 bind:value={flightIntervalMs}
-                class="bg-transparent text-sky-400 font-semibold focus:outline-none"
+                class="bg-transparent text-sky-400 font-semibold focus:outline-none cursor-pointer [color-scheme:dark] [&>option]:bg-[#0b1220] [&>option]:text-slate-200"
               >
                 <option value={500}>500ms</option>
                 <option value={1000}>1s</option>
@@ -1996,7 +1996,7 @@
           <span class="text-slate-400 font-sans text-xs">Category:</span>
           <select
             bind:value={varCategory}
-            class="bg-[#0b0f19] border border-[#334155] rounded px-2 py-0.5 text-xs text-sky-400 font-semibold focus:outline-none"
+            class="bg-[#0b0f19] border border-[#334155] rounded px-2 py-0.5 text-xs text-sky-400 font-semibold focus:outline-none cursor-pointer [color-scheme:dark] [&>option]:bg-[#0b1220] [&>option]:text-slate-200"
           >
             {#each varCategories as cat}
               <option value={cat}>{cat}</option>
@@ -2092,7 +2092,7 @@
             <select
               value={selectedFlightSessionId}
               onchange={(e) => inspectFlightSession((e.target as HTMLSelectElement).value)}
-              class="bg-[#0f172a] border border-[#334155] rounded px-2.5 py-1 text-slate-200 text-xs focus:outline-none focus:border-sky-500 font-mono"
+              class="bg-[#0f172a] border border-[#334155] rounded px-2.5 py-1 text-slate-200 text-xs focus:outline-none focus:border-sky-500 font-mono cursor-pointer [color-scheme:dark] [&>option]:bg-[#0b1220] [&>option]:text-slate-200"
             >
               <option value="">{isRecording ? '● Live In-Progress Recording' : '-- Select Saved Recording --'}</option>
               {#each flightSessions as s}

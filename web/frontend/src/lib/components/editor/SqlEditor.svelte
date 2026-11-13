@@ -159,7 +159,7 @@
         <span class="text-[9px] text-slate-900/80 bg-sky-400 px-1 py-0.2 rounded font-mono ml-1">Ctrl+Enter</span>
       </button>
 
-      <!-- Run All Button -->
+      <!-- Execute All Button -->
       <button
         onclick={handleExecuteAll}
         disabled={currentTab?.isExecuting}
@@ -167,7 +167,7 @@
         title="Execute All Statements (Ctrl+Alt+Enter / F5)"
       >
         <Icon name="play" class="w-3.5 h-3.5 text-emerald-400" />
-        <span>Run All</span>
+        <span>Execute All</span>
       </button>
 
       <!-- Cancel Button (visible when query is running) -->
