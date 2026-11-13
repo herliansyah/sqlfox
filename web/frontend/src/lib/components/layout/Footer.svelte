@@ -104,13 +104,6 @@
         <span class="{latencyColor} group-hover:underline font-bold">{latencyText}</span>
       </button>
 
-      <!-- Read-Only Badge if active -->
-      {#if appState.isReadOnly}
-        <span class="px-1.5 py-0.2 rounded bg-amber-950/70 text-amber-300 text-[10px] font-bold border border-amber-800/80">
-          READ-ONLY
-        </span>
-      {/if}
-
       <!-- In-flight Transaction indicator -->
       {#if appState.isTransactionActive}
         <span class="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-500/50 flex items-center space-x-1 animate-pulse">
