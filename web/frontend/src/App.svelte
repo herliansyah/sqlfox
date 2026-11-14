@@ -78,6 +78,14 @@
     localStorage.setItem('sqlfox_svelte_editor_split', String(editorSplitPercent));
   }
 
+  // Release window listeners if the component unmounts mid-drag.
+  $effect(() => {
+    return () => {
+      window.removeEventListener('mousemove', onDrag);
+      window.removeEventListener('mouseup', stopDrag);
+    };
+  });
+
   function resetSplitter() {
     editorSplitPercent = 50;
     localStorage.setItem('sqlfox_svelte_editor_split', '50');

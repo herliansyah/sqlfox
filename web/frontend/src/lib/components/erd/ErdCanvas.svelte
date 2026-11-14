@@ -327,6 +327,16 @@
     window.removeEventListener('mouseup', onCardDragUp);
   }
 
+  // Release window listeners if the component unmounts mid-pan/drag.
+  $effect(() => {
+    return () => {
+      window.removeEventListener('mousemove', onPanMove);
+      window.removeEventListener('mouseup', onPanUp);
+      window.removeEventListener('mousemove', onCardDragMove);
+      window.removeEventListener('mouseup', onCardDragUp);
+    };
+  });
+
   function escapeXml(unsafe: string): string {
     return (unsafe || '').replace(/[<>&'"]/g, (c) => {
       switch (c) {

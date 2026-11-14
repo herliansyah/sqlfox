@@ -49,7 +49,14 @@ class ApiClient {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    const res = await fetch(url, { ...options, headers });
+    let res: Response;
+    try {
+      res = await fetch(url, { ...options, headers });
+    } catch (err) {
+      // Network failure (daemon down / LAN drop): surface the reconnect banner.
+      if (typeof window !== 'undefined') (window as any).__sqlfox_trigger_reconnect?.();
+      throw new Error(`Cannot reach SqlFox daemon at ${this.baseUrl.replace(/\/api$/, '')} — is it still running?`);
+    }
     if (!res.ok) {
       if (res.status === 401 && typeof window !== 'undefined' && (window as any).__sqlfox_set_remote_locked) {
         (window as any).__sqlfox_set_remote_locked(true);

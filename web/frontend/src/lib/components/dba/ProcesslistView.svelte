@@ -294,6 +294,14 @@
     }, Math.max(800, flightIntervalMs));
   }
 
+  // Stop all timers if the component unmounts (sub-tab switch or view change).
+  $effect(() => {
+    return () => {
+      stopFlightTimers();
+      if (intervalTimer) clearInterval(intervalTimer);
+    };
+  });
+
   function stopFlightTimers() {
     if (flightTickerTimer) clearInterval(flightTickerTimer);
     if (flightPollTimer) clearInterval(flightPollTimer);

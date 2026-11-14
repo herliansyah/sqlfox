@@ -30,6 +30,14 @@
     localStorage.setItem('sqlfox_sidebar_width', String(sidebarWidth));
   }
 
+  // Release window listeners if the component unmounts mid-resize.
+  $effect(() => {
+    return () => {
+      window.removeEventListener('mousemove', onResize);
+      window.removeEventListener('mouseup', stopResize);
+    };
+  });
+
   function resetWidth() {
     sidebarWidth = 260;
     localStorage.setItem('sqlfox_sidebar_width', '260');

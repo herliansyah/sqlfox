@@ -333,6 +333,7 @@ export class AppState {
       (window as any).__sqlfox_set_remote_locked = (val: boolean) => {
         this.isRemoteLocked = val;
       };
+      (window as any).__sqlfox_trigger_reconnect = () => this.triggerAutoReconnect();
 
       // ponytail: beforeunload warning guards against inadvertent data loss while queries are running or staged edits exist
       window.addEventListener('beforeunload', (e) => {
@@ -1494,7 +1495,7 @@ export class AppState {
     const pagedSql = `SELECT * FROM (\n${baseSql}\n) AS _p LIMIT ${batchSize + 1} OFFSET ${nextOffset};`;
     tab.isExecuting = true;
     try {
-      const res = await api.executeQuery(this.activeSessionId, pagedSql, true);
+      const res = await api.executeQuery(this.activeSessionId, pagedSql, true, tab.database || this.currentDatabase || '');
       const rows = res.rows || [];
       const hasMore = rows.length > batchSize;
       tab.hasMoreStream = hasMore;
@@ -2011,7 +2012,7 @@ export class AppState {
     if (!confirmed) return;
 
     try {
-      const res = await api.executeQuery(this.activeSessionId, sql, true);
+      const res = await api.executeQuery(this.activeSessionId, sql, true, this.currentDatabase || '');
       if (res.error) {
         this.showToast(`Failed to drop table: ${res.error}`, 'error');
         return;
@@ -2040,7 +2041,7 @@ export class AppState {
     if (!confirmed) return;
 
     try {
-      const res = await api.executeQuery(this.activeSessionId, sql, true);
+      const res = await api.executeQuery(this.activeSessionId, sql, true, this.currentDatabase || '');
       if (res.error) {
         this.showToast(`Failed to truncate table: ${res.error}`, 'error');
         return;
@@ -2064,7 +2065,7 @@ export class AppState {
       : `RENAME TABLE \`${oldName}\` TO \`${newName}\`;`;
 
     try {
-      const res = await api.executeQuery(this.activeSessionId, sql, true);
+      const res = await api.executeQuery(this.activeSessionId, sql, true, this.currentDatabase || '');
       if (res.error) {
         this.showToast(`Failed to rename table: ${res.error}`, 'error');
         return;
@@ -2090,20 +2091,20 @@ export class AppState {
         if (copyData) {
           sql += `\nINSERT INTO "${targetTable}" SELECT * FROM "${sourceTable}";`;
         }
-        const res = await api.executeQuery(this.activeSessionId, sql, true);
+        const res = await api.executeQuery(this.activeSessionId, sql, true, this.currentDatabase || '');
         if (res.error) throw new Error(res.error);
       } else if (driver === 'sqlite') {
         const sql = copyData
           ? `CREATE TABLE "${targetTable}" AS SELECT * FROM "${sourceTable}";`
           : `CREATE TABLE "${targetTable}" AS SELECT * FROM "${sourceTable}" WHERE 0 = 1;`;
-        const res = await api.executeQuery(this.activeSessionId, sql, true);
+        const res = await api.executeQuery(this.activeSessionId, sql, true, this.currentDatabase || '');
         if (res.error) throw new Error(res.error);
       } else {
         let sql = `CREATE TABLE \`${targetTable}\` LIKE \`${sourceTable}\`;`;
         if (copyData) {
           sql += `\nINSERT INTO \`${targetTable}\` SELECT * FROM \`${sourceTable}\`;`;
         }
-        const res = await api.executeQuery(this.activeSessionId, sql, true);
+        const res = await api.executeQuery(this.activeSessionId, sql, true, this.currentDatabase || '');
         if (res.error) throw new Error(res.error);
       }
       this.showToast(`Table '${sourceTable}' duplicated to '${targetTable}'`, 'success');
