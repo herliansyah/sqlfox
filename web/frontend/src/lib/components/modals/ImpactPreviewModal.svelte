@@ -11,7 +11,14 @@
   let bloatWarnings = $derived(advisor?.bloat_warnings || []);
 
   let rawRows = $derived(Array.isArray(planData?.rows) ? planData.rows : []);
-  let rawJson = $derived(planData?.raw_json ? JSON.stringify(JSON.parse(planData.raw_json), null, 2) : '');
+  let rawJson = $derived.by(() => {
+    if (!planData?.raw_json) return '';
+    try {
+      return JSON.stringify(JSON.parse(planData.raw_json), null, 2);
+    } catch {
+      return planData.raw_json; // not valid JSON — show as-is
+    }
+  });
 
   // Parse nodes for DAG tree
   let planNodes = $derived.by(() => {

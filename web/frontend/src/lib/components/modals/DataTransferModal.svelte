@@ -14,7 +14,7 @@
   let batchSize = $state(1000);
 
   let isTransferring = $state(false);
-  let transferResult = $state<{ success: boolean; rows_transferred?: number; error?: string } | null>(null);
+  let transferResult = $state<{ success: boolean; total_rows?: number; error?: string } | null>(null);
 
   $effect(() => {
     if (appState.isDataTransferOpen) {
@@ -35,18 +35,19 @@
     isTransferring = true;
     transferResult = null;
     try {
+      const srcSession = (await api.connectSession(sourceConnId)).id || sourceConnId;
+      const tgtSession = (await api.connectSession(targetConnId)).id || targetConnId;
       const res = await api.transferData({
-        source_connection_id: sourceConnId,
-        source_database: sourceDb,
-        source_table: sourceTable,
-        target_connection_id: targetConnId,
-        target_database: targetDb,
-        target_table: targetTable || sourceTable,
+        source_session_id: srcSession,
+        source_db: sourceDb,
+        target_session_id: tgtSession,
+        target_db: targetDb,
+        tables: [targetTable || sourceTable],
         truncate_target: truncateTarget,
         batch_size: batchSize,
       });
-      transferResult = res;
-      appState.showToast(`Transferred ${res.rows_transferred ?? 0} rows successfully!`, 'success');
+      transferResult = { success: !res.has_errors, total_rows: res.total_rows };
+      appState.showToast(res.status || 'Transfer completed!', res.has_errors ? 'warning' : 'success');
     } catch (err: any) {
       transferResult = { success: false, error: err.message || 'Transfer failed' };
       appState.showToast(`Transfer failed: ${err.message}`, 'error');
@@ -176,7 +177,7 @@
             : 'border-rose-800 bg-rose-950/30 text-rose-300'}">
             {#if transferResult.success}
               <Icon name="check-circle" class="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>Transfer completed successfully! Total rows transferred: {transferResult.rows_transferred?.toLocaleString() ?? 0}</span>
+              <span>Transfer completed! Total rows transferred: {transferResult.total_rows?.toLocaleString() ?? 0}</span>
             {:else}
               <Icon name="alert-triangle" class="w-4 h-4 text-rose-400 shrink-0" />
               <span>Transfer failed: {transferResult.error}</span>

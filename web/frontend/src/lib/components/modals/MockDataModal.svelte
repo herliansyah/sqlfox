@@ -5,9 +5,7 @@
 
   let selectedTable = $state('');
   let rowCount = $state(50);
-  let batchSize = $state(50);
   let truncateFirst = $state(false);
-  let locale = $state('en_US');
   let isGenerating = $state(false);
 
   let catalogTables = $derived(
@@ -43,15 +41,16 @@
     isGenerating = true;
     try {
       const connId = appState.activeConnection.id;
+      if (truncateFirst) {
+        await appState.truncateTable(selectedTable);
+      }
       const res = await api.generateMockData(connId, selectedTable, {
-        row_count: rowCount,
-        batch_size: batchSize,
-        truncate_first: truncateFirst,
-        locale,
+        rows: rowCount,
+        database: appState.currentDatabase || undefined,
       });
 
       appState.showToast(
-        res.message || `Successfully generated ${rowCount} realistic mock records in "${selectedTable}"!`,
+        `Generated ${res.inserted ?? rowCount} mock records in "${selectedTable}"`,
         'success'
       );
       appState.isMockDataModalOpen = false;
@@ -114,31 +113,6 @@
             bind:value={rowCount}
             class="w-full bg-[#050811] border border-[#1e293b] rounded-lg px-3 py-2 text-slate-200 font-mono text-xs focus:outline-none focus:border-emerald-500"
           />
-        </div>
-
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-slate-400 text-xs font-medium mb-1">Batch Size</label>
-            <input
-              type="number"
-              min="10"
-              max="500"
-              bind:value={batchSize}
-              class="w-full bg-[#050811] border border-[#1e293b] rounded-lg px-3 py-2 text-slate-200 font-mono text-xs focus:outline-none focus:border-emerald-500"
-            />
-          </div>
-          <div>
-            <label class="block text-slate-400 text-xs font-medium mb-1">Locale Data Presets</label>
-            <select
-              bind:value={locale}
-              class="w-full bg-[#050811] border border-[#1e293b] rounded-lg px-3 py-2 text-slate-200 text-xs focus:outline-none focus:border-emerald-500"
-            >
-              <option value="en_US">English (US)</option>
-              <option value="id_ID">Indonesian (ID)</option>
-              <option value="ja_JP">Japanese (JP)</option>
-              <option value="de_DE">German (DE)</option>
-            </select>
-          </div>
         </div>
 
         {#if activeTableMeta && activeTableMeta.columns}

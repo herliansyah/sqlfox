@@ -1221,6 +1221,8 @@ export class AppState {
     tab.isExecuting = true;
     this.tabs = [...this.tabs];
     const startTime = performance.now();
+    // Guard against out-of-order responses when the user pages/filters rapidly.
+    const token = ((tab as any)._loadToken = ((tab as any)._loadToken || 0) + 1);
     try {
       const limit = tab.pageSize || 50;
       const offset = ((tab.currentPage || 1) - 1) * limit;
@@ -1242,6 +1244,7 @@ export class AppState {
         tab.sortCol || undefined,
         tab.sortDir || undefined
       );
+      if ((tab as any)._loadToken !== token) return; // a newer load superseded this one
       if (res && res.duration_ms === undefined) {
         res.duration_ms = Math.round(performance.now() - startTime);
       }

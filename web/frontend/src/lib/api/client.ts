@@ -532,7 +532,7 @@ class ApiClient {
   async generateMockData(
     sessionId: string,
     tableName: string,
-    options: { row_count: number; batch_size?: number; truncate_first?: boolean; locale?: string }
+    options: { rows: number; database?: string }
   ): Promise<any> {
     return this.request(`/session/${sessionId}/table/${encodeURIComponent(tableName)}/mock-data`, {
       method: 'POST',
@@ -605,30 +605,56 @@ class ApiClient {
 
   // Cross-Connection Data Transfer
   async transferData(payload: {
-    source_connection_id: string;
-    source_database?: string;
-    source_table: string;
-    target_connection_id: string;
-    target_database?: string;
-    target_table?: string;
+    source_session_id: string;
+    source_db?: string;
+    target_session_id: string;
+    target_db?: string;
+    tables: string[];
+    create_tables?: boolean;
     truncate_target?: boolean;
     batch_size?: number;
   }): Promise<any> {
-    return this.request('/sync/data/transfer', {
+    // Backend streams NDJSON progress events; consume them and resolve on "done".
+    const res = await fetch('/api/sync/data/transfer', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
+    if (!res.ok || !res.body) {
+      let msg = `HTTP ${res.status}`;
+      try { msg = (await res.json()).error || msg; } catch { /* ignore */ }
+      throw new Error(msg);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let result: any = { status: 'completed', total_rows: 0, has_errors: false };
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const evt = JSON.parse(trimmed);
+          if (evt.event === 'done') result = evt;
+        } catch { /* skip malformed line */ }
+      }
+    }
+    return result;
   }
 
   // Row-Level Data Sync
   async compareDataSync(payload: {
-    source_connection_id: string;
-    source_database?: string;
-    source_table: string;
-    target_connection_id: string;
-    target_database?: string;
-    target_table: string;
-    primary_key?: string;
+    source_session_id: string;
+    source_db?: string;
+    target_session_id: string;
+    target_db?: string;
+    table: string;
+    delete_missing?: boolean;
   }): Promise<any> {
     return this.request('/sync/data/compare', {
       method: 'POST',
@@ -637,10 +663,13 @@ class ApiClient {
   }
 
   async applyDataSync(payload: {
-    target_connection_id: string;
-    target_database?: string;
-    target_table: string;
-    sync_statements: string[];
+    target_session_id: string;
+    target_db?: string;
+    table: string;
+    columns: string[];
+    operations: Array<{ type: string; pk: any; old_data?: any[]; data?: any[] }>;
+    confirmed?: boolean;
+    challenge_input?: string;
   }): Promise<any> {
     return this.request('/sync/data/apply', {
       method: 'POST',

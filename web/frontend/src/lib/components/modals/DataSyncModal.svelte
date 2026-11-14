@@ -10,16 +10,16 @@
   let targetConnId = $state('');
   let targetDb = $state('');
   let targetTable = $state('');
-  let primaryKey = $state('id');
 
   let isComparing = $state(false);
   let isApplying = $state(false);
 
   let syncDiff = $state<{
-    insert_count?: number;
-    update_count?: number;
-    delete_count?: number;
-    sync_statements?: string[];
+    table?: string;
+    pk_columns?: string[];
+    columns?: string[];
+    summary?: Record<string, number>;
+    operations?: Array<{ type: string; pk: any; old_data?: any[]; data?: any[] }>;
     error?: string;
   } | null>(null);
 
@@ -42,17 +42,17 @@
     isComparing = true;
     syncDiff = null;
     try {
+      const srcSession = (await api.connectSession(sourceConnId)).id || sourceConnId;
+      const tgtSession = (await api.connectSession(targetConnId)).id || targetConnId;
       const res = await api.compareDataSync({
-        source_connection_id: sourceConnId,
-        source_database: sourceDb,
-        source_table: sourceTable,
-        target_connection_id: targetConnId,
-        target_database: targetDb,
-        target_table: targetTable || sourceTable,
-        primary_key: primaryKey,
+        source_session_id: srcSession,
+        source_db: sourceDb,
+        target_session_id: tgtSession,
+        target_db: targetDb,
+        table: targetTable || sourceTable,
       });
       syncDiff = res;
-      appState.showToast('Row checksum comparison completed', 'info');
+      appState.showToast('Row comparison completed', 'info');
     } catch (err: any) {
       syncDiff = { error: err.message || 'Comparison failed' };
       appState.showToast(`Sync comparison failed: ${err.message}`, 'error');
@@ -62,17 +62,19 @@
   }
 
   async function handleApply() {
-    if (!syncDiff?.sync_statements || syncDiff.sync_statements.length === 0) return;
+    if (!syncDiff?.operations || syncDiff.operations.length === 0) return;
 
     isApplying = true;
     try {
+      const tgtSession = (await api.connectSession(targetConnId)).id || targetConnId;
       await api.applyDataSync({
-        target_connection_id: targetConnId,
-        target_database: targetDb,
-        target_table: targetTable || sourceTable,
-        sync_statements: syncDiff.sync_statements,
+        target_session_id: tgtSession,
+        target_db: targetDb,
+        table: targetTable || sourceTable,
+        columns: syncDiff.columns || [],
+        operations: syncDiff.operations,
       });
-      appState.showToast(`Applied ${syncDiff.sync_statements.length} synchronization statements!`, 'success');
+      appState.showToast(`Applied ${syncDiff.operations.length} synchronization operations!`, 'success');
       syncDiff = null;
       appState.isDataSyncOpen = false;
     } catch (err: any) {
@@ -171,37 +173,29 @@
           </div>
         </div>
 
-        <div class="flex items-center space-x-2 text-xs">
-          <label class="text-slate-400">Primary Key Column:</label>
-          <input
-            type="text"
-            bind:value={primaryKey}
-            class="w-28 bg-[#050811] border border-slate-700 rounded px-2.5 py-1 text-slate-100 font-mono"
-          />
-        </div>
-
         {#if syncDiff}
           <div class="p-4 rounded-lg border border-slate-800 bg-[#050811] space-y-3">
             <h4 class="text-xs font-bold text-slate-200">Reconciliation Summary</h4>
             <div class="grid grid-cols-3 gap-2 text-center text-xs">
               <div class="p-2 rounded bg-emerald-950/40 border border-emerald-800/60">
-                <div class="text-emerald-400 font-bold text-lg font-mono">{syncDiff.insert_count ?? 0}</div>
+                <div class="text-emerald-400 font-bold text-lg font-mono">{syncDiff.summary?.insert_count ?? 0}</div>
                 <div class="text-[11px] text-slate-400">Rows to Insert</div>
               </div>
               <div class="p-2 rounded bg-amber-950/40 border border-amber-800/60">
-                <div class="text-amber-400 font-bold text-lg font-mono">{syncDiff.update_count ?? 0}</div>
+                <div class="text-amber-400 font-bold text-lg font-mono">{syncDiff.summary?.update_count ?? 0}</div>
                 <div class="text-[11px] text-slate-400">Rows to Update</div>
               </div>
               <div class="p-2 rounded bg-rose-950/40 border border-rose-800/60">
-                <div class="text-rose-400 font-bold text-lg font-mono">{syncDiff.delete_count ?? 0}</div>
+                <div class="text-rose-400 font-bold text-lg font-mono">{syncDiff.summary?.delete_count ?? 0}</div>
                 <div class="text-[11px] text-slate-400">Rows to Delete</div>
               </div>
             </div>
 
-            {#if syncDiff.sync_statements && syncDiff.sync_statements.length > 0}
+            {#if syncDiff.operations && syncDiff.operations.length > 0}
               <div class="space-y-1">
-                <span class="text-[11px] font-semibold text-slate-400">Generated Sync Script:</span>
-                <pre class="p-3 bg-slate-950 border border-slate-800 rounded text-emerald-400 font-mono text-[11px] max-h-40 overflow-y-auto whitespace-pre-wrap">{syncDiff.sync_statements.join('\n')}</pre>
+                <span class="text-[11px] font-semibold text-slate-400">
+                  {syncDiff.operations.length} operation(s) pending — PK: {syncDiff.pk_columns?.join(', ') || 'auto'}
+                </span>
               </div>
             {:else}
               <div class="text-center p-3 text-xs text-slate-400">
@@ -233,7 +227,7 @@
             Cancel
           </button>
 
-          {#if syncDiff?.sync_statements && syncDiff.sync_statements.length > 0}
+          {#if syncDiff?.operations && syncDiff.operations.length > 0}
             <button
               type="button"
               onclick={handleApply}
