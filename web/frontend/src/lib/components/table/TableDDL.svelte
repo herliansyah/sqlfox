@@ -1,4 +1,5 @@
 <script lang="ts">
+import { copyText } from '../../utils/clipboard';
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
   import { codemirror } from '../../actions/codemirror';
@@ -36,7 +37,7 @@
   }
 
   function copyDDL() {
-    navigator.clipboard.writeText(ddl);
+    copyText(ddl);
     copied = true;
     setTimeout(() => (copied = false), 2000);
   }

@@ -1,4 +1,5 @@
 <script lang="ts">
+import { copyText } from '../../utils/clipboard';
   import { appState } from '../../stores/appState.svelte';
   import Icon from '../common/Icon.svelte';
 
@@ -151,7 +152,7 @@
                     <span class="text-[10px] text-rose-400 italic">NULL</span>
                   {/if}
                   <button
-                    onclick={() => navigator.clipboard.writeText(formatted)}
+                    onclick={() => copyText(formatted)}
                     class="p-1 text-slate-500 hover:text-slate-300"
                     title="Copy value"
                   >

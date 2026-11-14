@@ -1,4 +1,5 @@
 <script lang="ts">
+import { copyText } from '../../utils/clipboard';
   import { tick } from 'svelte';
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
@@ -208,7 +209,7 @@
   }
 
   function copyMasterPin() {
-    navigator.clipboard.writeText(masterPin);
+    copyText(masterPin);
     copiedPin = true;
     appState.showToast('Master PIN copied to clipboard!', 'info');
     setTimeout(() => (copiedPin = false), 2000);

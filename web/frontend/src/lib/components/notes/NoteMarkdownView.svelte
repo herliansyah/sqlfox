@@ -1,4 +1,5 @@
 <script lang="ts">
+import { copyText } from '../../utils/clipboard';
   import { appState } from '../../stores/appState.svelte';
   import Icon from '../common/Icon.svelte';
 
@@ -105,7 +106,7 @@
   );
 
   function copyCode(text: string) {
-    navigator.clipboard.writeText(text);
+    copyText(text);
     appState.showToast('Code copied to clipboard!', 'info');
   }
 

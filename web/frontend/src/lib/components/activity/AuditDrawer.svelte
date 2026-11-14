@@ -1,4 +1,5 @@
 <script lang="ts">
+import { copyText } from '../../utils/clipboard';
   import { appState } from '../../stores/appState.svelte';
   import Icon from '../common/Icon.svelte';
 
@@ -16,7 +17,7 @@
   });
 
   function copySql(sql: string) {
-    navigator.clipboard.writeText(sql);
+    copyText(sql);
     appState.showToast('Query copied to clipboard', 'info');
   }
 

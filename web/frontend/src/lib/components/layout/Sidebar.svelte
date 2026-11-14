@@ -1,4 +1,5 @@
 <script lang="ts">
+import { copyText } from '../../utils/clipboard';
   import { appState } from '../../stores/appState.svelte';
   import Icon from '../common/Icon.svelte';
   import { onDestroy, tick } from 'svelte';
@@ -207,7 +208,7 @@
 
   function copySelectStatement(tableName: string) {
     const sql = `SELECT * FROM \`${tableName}\` LIMIT 100;`;
-    navigator.clipboard.writeText(sql);
+    copyText(sql);
     appState.showToast(`Copied SELECT query for "${tableName}"`, 'info');
   }
 
@@ -1187,7 +1188,7 @@
           <button
             type="button"
             onclick={() => {
-              navigator.clipboard.writeText(tableContextMenu!.tableName);
+              copyText(tableContextMenu!.tableName);
               appState.showToast(`Copied table name "${tableContextMenu!.tableName}"`, 'info');
               closeTableMenu();
             }}

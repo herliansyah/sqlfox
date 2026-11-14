@@ -1,4 +1,5 @@
 <script lang="ts">
+import { copyText } from '../../utils/clipboard';
   import { appState } from '../../stores/appState.svelte';
   import type { ColumnDefinition, FilterPill } from '../../../types';
   import Icon from '../common/Icon.svelte';
@@ -308,7 +309,7 @@
       const pkCol = pkColObj ? getColName(pkColObj) : undefined;
       const pkVal = pkCol ? result.rows[origIdx][allColumns.indexOf(pkCol)] : undefined;
 
-      appState.stageEdit(currentTab.tableName, origIdx, cIdx, colName, pkCol, pkVal, oldVal, newVal);
+      appState.stageEdit(currentTab.tableName, origIdx, cIdx, colName, pkCol, pkVal, oldVal, newVal, currentTab.database || appState.currentDatabase);
       result.rows[origIdx][cIdx] = newVal;
     }
     editingCell = null;
@@ -423,7 +424,7 @@
     if (!result?.rows || !result.rows[rIdx] || !result.columns) return;
     const cols = result.columns.map((c) => getColName(c)).join('\t');
     const vals = result.rows[rIdx].map((v) => (v === null || v === undefined ? '' : String(v))).join('\t');
-    navigator.clipboard.writeText(`${cols}\n${vals}`);
+    copyText(`${cols}\n${vals}`);
     appState.showToast('Copied row as TSV', 'info');
   }
 
@@ -433,7 +434,7 @@
     const header = `| ${colNames.join(' | ')} |`;
     const separator = `| ${colNames.map(() => '---').join(' | ')} |`;
     const row = `| ${result.rows[rIdx].map((v) => (v === null ? '*NULL*' : String(v).replace(/\|/g, '\\|'))).join(' | ')} |`;
-    navigator.clipboard.writeText(`${header}\n${separator}\n${row}`);
+    copyText(`${header}\n${separator}\n${row}`);
     appState.showToast('Copied row as Markdown Table', 'info');
   }
 
@@ -449,7 +450,7 @@
       })
       .join(', ');
     const sql = `INSERT INTO \`${tbl}\` (${cols}) VALUES (${vals});`;
-    navigator.clipboard.writeText(sql);
+    copyText(sql);
     appState.showToast('Copied as INSERT SQL statement', 'info');
   }
 </script>
@@ -1177,7 +1178,7 @@
                             type="button"
                             onclick={(e) => {
                               e.stopPropagation();
-                              appState.openFkPeek(e, currentTab?.tableName || '', colName, fk.referenced_table, fk.referenced_column, cellVal);
+                              appState.openFkPeek(e, currentTab?.tableName || '', colName, fk.referenced_table, fk.referenced_column, cellVal, currentTab?.database);
                             }}
                             class="opacity-0 group-hover/cell:opacity-100 hover:text-sky-300 text-sky-400 p-0.5 rounded hover:bg-slate-800 ml-1 inline-flex items-center"
                             title="Peek {fk.referenced_table}.{fk.referenced_column}"
@@ -1213,7 +1214,7 @@
             Cell Value: <span class="text-sky-400 font-mono">{colName}</span>
           </span>
           <button
-            onclick={() => navigator.clipboard.writeText(String(val ?? ''))}
+            onclick={() => copyText(String(val ?? ''))}
             class="hover:text-white flex items-center space-x-1"
           >
             <Icon name="copy" class="w-3 h-3" />
@@ -1575,7 +1576,7 @@
         </button>
         <button
           onclick={() => {
-            navigator.clipboard.writeText(String(contextMenu!.cellValue ?? ''));
+            copyText(String(contextMenu!.cellValue ?? ''));
             appState.showToast('Copied cell value to clipboard', 'info');
             closeContextMenu();
           }}

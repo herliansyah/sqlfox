@@ -1,4 +1,5 @@
 <script lang="ts">
+import { copyText } from '../../utils/clipboard';
   import { appState } from '../../stores/appState.svelte';
   import type { TableMetadata } from '../../../types';
   import Icon from '../common/Icon.svelte';
@@ -450,7 +451,7 @@
       });
       out += '  }\n';
     });
-    navigator.clipboard.writeText(out);
+    copyText(out);
     appState.showToast('Copied Mermaid ERD syntax to clipboard!', 'success');
   }
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+import { copyText } from '../../utils/clipboard';
   import { appState } from '../../stores/appState.svelte';
   import Icon from '../common/Icon.svelte';
 
@@ -54,7 +55,7 @@
   }
 
   function copyToClipboard() {
-    navigator.clipboard.writeText(rawValue);
+    copyText(rawValue);
     copied = true;
     setTimeout(() => (copied = false), 2000);
     appState.showToast('Copied JSON to clipboard', 'info');

@@ -1,4 +1,5 @@
 <script lang="ts">
+import { copyText } from '../../utils/clipboard';
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
   import type { ProcesslistThread, ProcessLockWait } from '../../../types';
@@ -548,9 +549,9 @@
     }
   }
 
-  function copyText(text: string | undefined, label: string) {
+  function copyWithToast(text: string | undefined, label: string) {
     if (!text) return;
-    navigator.clipboard.writeText(text);
+    copyText(text);
     appState.showToast(`${label} copied to clipboard`, 'info');
   }
 
@@ -932,7 +933,7 @@
   }
 
   function copyDeadlockReport(report: any) {
-    copyText(deadlockRawText(report) || JSON.stringify(report, null, 2), 'Deadlock report');
+    copyWithToast(deadlockRawText(report) || JSON.stringify(report, null, 2), 'Deadlock report');
   }
 
   function sendDeadlockToAI(report: any) {
@@ -1788,7 +1789,7 @@
                       <span class="text-slate-500 text-[10px] uppercase font-sans">Statement</span>
                       <button
                         type="button"
-                        onclick={() => copyText(tx.query, 'Statement')}
+                        onclick={() => copyWithToast(tx.query, 'Statement')}
                         class="text-[10px] text-sky-400 hover:underline font-sans flex items-center gap-1"
                       >
                         <Icon name="copy" class="w-3 h-3" />
@@ -2162,7 +2163,7 @@
                     {#if v.set_global_snippet}
                       <button
                         onclick={() => {
-                          navigator.clipboard.writeText(v.set_global_snippet);
+                          copyText(v.set_global_snippet);
                           appState.showToast('Copied SET GLOBAL statement to clipboard!', 'info');
                         }}
                         class="p-1 rounded text-sky-400 hover:text-white hover:bg-slate-800 transition"
@@ -2402,7 +2403,7 @@
                         <div class="flex items-center space-x-1.5">
                           <button
                             onclick={() => {
-                              navigator.clipboard.writeText(q.info || q.query);
+                              copyText(q.info || q.query);
                               appState.showToast('SQL copied to clipboard!', 'info');
                             }}
                             class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] transition flex items-center space-x-1"
@@ -2481,7 +2482,7 @@
             <div class="flex items-center space-x-2">
               <button
                 onclick={() => {
-                  navigator.clipboard.writeText(inspectingThread?.info || '');
+                  copyText(inspectingThread?.info || '');
                   appState.showToast('Thread SQL copied to clipboard', 'info');
                 }}
                 class="text-[11px] text-sky-400 hover:underline flex items-center space-x-1"
@@ -2630,7 +2631,7 @@
                     <div class="px-2.5 py-1.5 bg-[#090d16] border-b border-slate-800 flex items-center justify-between">
                       <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Blocking Query</span>
                       <div class="flex items-center space-x-2">
-                        <button onclick={() => copyText(lock.blocking_query, 'Blocking query')} class="text-[10px] text-slate-400 hover:text-white flex items-center space-x-1">
+                        <button onclick={() => copyWithToast(lock.blocking_query, 'Blocking query')} class="text-[10px] text-slate-400 hover:text-white flex items-center space-x-1">
                           <Icon name="copy" class="w-3 h-3" />
                           <span>Copy</span>
                         </button>
@@ -2679,7 +2680,7 @@
                   <div class="rounded border border-slate-800 overflow-hidden">
                     <div class="px-2.5 py-1.5 bg-[#090d16] border-b border-slate-800 flex items-center justify-between">
                       <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Waiting Query</span>
-                      <button onclick={() => copyText(lock.waiting_query, 'Waiting query')} class="text-[10px] text-slate-400 hover:text-white flex items-center space-x-1">
+                      <button onclick={() => copyWithToast(lock.waiting_query, 'Waiting query')} class="text-[10px] text-slate-400 hover:text-white flex items-center space-x-1">
                         <Icon name="copy" class="w-3 h-3" />
                         <span>Copy</span>
                       </button>

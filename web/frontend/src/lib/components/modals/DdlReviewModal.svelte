@@ -1,4 +1,5 @@
 <script lang="ts">
+import { copyText } from '../../utils/clipboard';
   import { appState } from '../../stores/appState.svelte';
   import Icon from '../common/Icon.svelte';
 
@@ -25,7 +26,7 @@
   }
 
   function copyDDL() {
-    navigator.clipboard.writeText(appState.ddlReview.sql);
+    copyText(appState.ddlReview.sql);
     appState.showToast('DDL copied to clipboard', 'info');
   }
 </script>

@@ -183,6 +183,7 @@ export interface StagedEdit {
   rIdx: number;
   cIdx: number;
   table: string;
+  database?: string;
   colName: string;
   pkCol?: string;
   pkVal?: any;

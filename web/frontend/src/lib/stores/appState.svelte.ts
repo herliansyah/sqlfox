@@ -18,6 +18,7 @@ import type {
   SessionAuditItem,
 } from '../../types';
 import { api } from '../api/client';
+import { copyText } from '../utils/clipboard';
 import { substituteSnippetVariables, parseSnippetVariables } from '../utils/snippets';
 
 // ponytail: smart wildcard auto-wrap for LIKE/NOT LIKE filter
@@ -37,7 +38,7 @@ export function compileFilterPills(pills: FilterPill[], driver?: string): string
     const val = String(p.val !== undefined ? p.val : '').trim();
     if (val === '') continue;
     if (op === 'IN' || op === 'NOT IN') {
-      if (val.startsWith('(') && val.endsWith(')')) {
+      if (val.startsWith('(') && val.endsWith(')') && !val.includes(';')) {
         clauses.push(`${colEscaped} ${op} ${val}`);
       } else {
         const items = val.split(',').map((s) => s.trim()).filter(Boolean);
@@ -56,7 +57,17 @@ export function compileFilterPills(pills: FilterPill[], driver?: string): string
       }
       clauses.push(`${colEscaped} ${op} '${finalVal.replace(/'/g, "''")}'`);
     } else if (op === 'BETWEEN') {
-      clauses.push(`${colEscaped} BETWEEN ${val}`);
+      // Two literals only — quote any part that is not a plain number to block injection.
+      const parts = val.split(/\s+AND\s+/i).slice(0, 2);
+      const fmt = (part: string) => {
+        const p = part.trim().replace(/^'(.*)'$/s, '$1');
+        return /^-?\d+(\.\d+)?$/.test(p) ? p : `'${p.replace(/'/g, "''")}'`;
+      };
+      if (parts.length === 2) {
+        clauses.push(`${colEscaped} BETWEEN ${fmt(parts[0])} AND ${fmt(parts[1])}`);
+      } else {
+        clauses.push(`${colEscaped} BETWEEN '${val.replace(/'/g, "''")}'`);
+      }
     } else {
       const isNum = !isNaN(Number(val)) && val !== '' && !val.includes(' ');
       if (isNum) {
@@ -439,6 +450,7 @@ export class AppState {
       gain.connect(ctx.destination);
       osc.start();
       osc.stop(ctx.currentTime + 0.7);
+      osc.onended = () => void ctx.close();
     } catch (_) {}
   }
 
@@ -743,7 +755,7 @@ export class AppState {
   async copyAppUrl() {
     const url = typeof window !== 'undefined' ? window.location.href : '';
     try {
-      await navigator.clipboard.writeText(url);
+      await copyText(url);
       this.showToast('SqlFox URL copied to clipboard', 'success');
     } catch {
       this.showToast(`Copy failed. URL: ${url}`, 'warning');
@@ -1505,6 +1517,8 @@ export class AppState {
         row_count: Math.min(rows.length, batchSize),
       };
     } catch (err: any) {
+      tab.streamBatchOffset = currentOffset;
+      tab.hasMoreStream = true;
       this.showToast(`Batch paging failed: ${err.message}`, 'error');
     } finally {
       tab.isExecuting = false;
@@ -1619,7 +1633,7 @@ export class AppState {
   }
 
   // Foreign Key Peek
-  async openFkPeek(event: MouseEvent, table: string, col: string, refTable: string, refCol: string, val: any) {
+  async openFkPeek(event: MouseEvent, table: string, col: string, refTable: string, refCol: string, val: any, database?: string) {
     if (!this.activeSessionId || !refTable || !refCol) return;
     const posX = Math.min(window.innerWidth - 420, Math.max(10, event.clientX - 100));
     const posY = Math.min(window.innerHeight - 300, Math.max(10, event.clientY + 15));
@@ -1639,7 +1653,7 @@ export class AppState {
     };
 
     try {
-      const currentDb = this.currentDatabase || '';
+      const currentDb = database || this.currentDatabase || '';
       const res = await api.peekForeignKey(this.activeSessionId, currentDb, refTable, refCol, val);
       if (res && res.row) {
         this.fkPeekState.data = res;
@@ -1710,12 +1724,13 @@ export class AppState {
   }
 
   // Grid Staged Edits & CRUD
-  stageEdit(table: string, rIdx: number, cIdx: number, colName: string, pkCol: string | undefined, pkVal: any, oldVal: any, newVal: any) {
+  stageEdit(table: string, rIdx: number, cIdx: number, colName: string, pkCol: string | undefined, pkVal: any, oldVal: any, newVal: any, database?: string) {
     const key = `${table}:${rIdx}:${cIdx}`;
     this.stagedEdits[key] = {
       rIdx,
       cIdx,
       table,
+      database: database || this.currentDatabase,
       colName,
       pkCol,
       pkVal,
@@ -1756,7 +1771,7 @@ export class AppState {
     try {
       const tableName = items[0].table;
       const edits = items.map((item) => ({
-        database: this.currentDatabase,
+        database: item.database || this.currentDatabase,
         table: item.table,
         column: item.colName,
         value: item.newVal,

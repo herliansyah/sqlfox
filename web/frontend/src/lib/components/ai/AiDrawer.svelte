@@ -1,4 +1,5 @@
 <script lang="ts">
+import { copyText } from '../../utils/clipboard';
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
   import Icon from '../common/Icon.svelte';
@@ -324,7 +325,7 @@
                     <div class="flex items-center space-x-1.5">
                       <button
                         onclick={() => {
-                          navigator.clipboard.writeText(part.text);
+                          copyText(part.text);
                           appState.showToast('SQL copied to clipboard!', 'info');
                         }}
                         class="hover:text-white"
