@@ -121,8 +121,10 @@
     const a = document.createElement('a');
     a.href = url;
     a.download = `sqlfox-activity-logs-${new Date().toISOString().slice(0, 10)}.txt`;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
     appState.showToast('Activity logs exported successfully!', 'info');
   }
 </script>

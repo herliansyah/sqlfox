@@ -106,7 +106,7 @@
 
     isSubmitting = true;
     try {
-      const res = await api.executeQuery(appState.activeSessionId, generatedDDL, false);
+      const res = await api.executeQuery(appState.activeSessionId, generatedDDL, false, appState.currentDatabase || undefined);
       if (res.error) {
         appState.showToast(`Failed to save routine: ${res.error}`, 'error');
         return;

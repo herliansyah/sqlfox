@@ -40,13 +40,14 @@
 
     isGenerating = true;
     try {
-      const connId = appState.activeConnection.id;
+      const connId = appState.activeSessionId || appState.activeConnection.id;
+      const targetDb = appState.activeTab?.database || appState.currentDatabase || undefined;
       if (truncateFirst) {
-        await appState.truncateTable(selectedTable);
+        await appState.truncateTable(selectedTable, targetDb);
       }
       const res = await api.generateMockData(connId, selectedTable, {
         rows: rowCount,
-        database: appState.currentDatabase || undefined,
+        database: targetDb,
       });
 
       appState.showToast(
@@ -56,7 +57,10 @@
       appState.isMockDataModalOpen = false;
 
       // Reload catalog & refresh data if viewer is open
-      await appState.loadCatalog(connId, appState.currentDatabase || undefined);
+      await appState.loadCatalog(connId, targetDb);
+      if (appState.activeTab?.isTableViewer && appState.activeTab.tableName?.toLowerCase() === selectedTable.toLowerCase()) {
+        await appState.loadTableData(appState.activeTab);
+      }
     } catch (err: any) {
       appState.showToast(`Mock data generation failed: ${err.message}`, 'error');
     } finally {

@@ -36,8 +36,10 @@
   });
 
   let targetTableColumns = $derived.by(() => {
-    if (!targetTable || !appState.catalog?.tables) return [];
-    const tbl = appState.catalog.tables.find((t) => t.name === targetTable);
+    if (!targetTable) return [];
+    const cat = (appState.activeTab?.database && appState.catalogs[appState.activeTab.database.toLowerCase()]) || appState.catalog;
+    if (!cat?.tables) return [];
+    const tbl = cat.tables.find((t) => t.name.toLowerCase() === targetTable.toLowerCase());
     return (tbl?.columns || []).map((c) => c.name);
   });
 
@@ -173,8 +175,9 @@
           valuesRows.push(`(${valTokens.join(', ')})`);
         }
 
+        const targetDb = appState.activeTab?.database || appState.currentDatabase || undefined;
         const query = `${insertKeyword} INTO ${quote}${targetTable}${quote} (${targetColsSql}) VALUES\n${valuesRows.join(',\n')}${conflictSuffix};`;
-        await api.executeQuery(appState.activeSessionId, query, false);
+        await api.executeQuery(appState.activeSessionId, query, false, targetDb);
 
         insertedCount += chunk.length;
         importProgress = Math.min(100, Math.round((insertedCount / totalRows) * 100));
@@ -184,6 +187,9 @@
       appState.showToast(`Imported ${totalRows} rows into ${targetTable}!`, 'success');
       appState.isCsvImportModalOpen = false;
       await appState.refreshCatalog();
+      if (appState.activeTab?.isTableViewer && appState.activeTab.tableName?.toLowerCase() === targetTable.toLowerCase()) {
+        await appState.loadTableData(appState.activeTab);
+      }
     } catch (err: any) {
       appState.showToast(`Import failed: ${err.message}`, 'error');
     } finally {

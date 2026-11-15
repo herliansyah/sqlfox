@@ -73,8 +73,17 @@ import { copyText } from '../../utils/clipboard';
     return col.type || '';
   }
 
+  let activeCatalog = $derived(
+    (currentTab?.database && appState.catalogs[currentTab.database.toLowerCase()]) || appState.catalog
+  );
+
   function isColPK(col: any): boolean {
-    return typeof col === 'object' ? Boolean(col.is_primary_key) : false;
+    if (typeof col === 'object') return Boolean(col.is_primary_key);
+    const table = activeCatalog?.tables?.find(
+      (t) => t.name.toLowerCase() === (currentTab?.tableName || '').toLowerCase()
+    );
+    const colMeta = table?.columns?.find((c) => c.name.toLowerCase() === String(col).toLowerCase());
+    return Boolean(colMeta?.is_primary_key);
   }
 
   let allColumns = $derived<string[]>(
@@ -97,7 +106,7 @@ import { copyText } from '../../utils/clipboard';
 
   let fkMap = $derived.by(() => {
     const map = new Map<string, any>();
-    const table = appState.catalog?.tables?.find(
+    const table = activeCatalog?.tables?.find(
       (t) => t.name.toLowerCase() === (currentTab?.tableName || '').toLowerCase()
     );
     for (const fk of table?.foreign_keys || []) {
@@ -395,8 +404,10 @@ import { copyText } from '../../utils/clipboard';
     const a = document.createElement('a');
     a.href = url;
     a.download = filename;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
     appState.showToast(`Exported ${filename}`, 'success');
   }
 

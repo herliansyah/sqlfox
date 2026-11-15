@@ -33,7 +33,13 @@ import { copyText } from '../../utils/clipboard';
   // Table positions in canvas coordinates
   let positions = $state<Record<string, { x: number; y: number }>>({});
 
-  let tables = $derived<TableMetadata[]>(appState.catalog?.tables || []);
+  let activeCatalog = $derived.by(() => {
+    const db = appState.activeTab?.database?.toLowerCase();
+    if (db && appState.catalogs[db]) return appState.catalogs[db];
+    return appState.catalog;
+  });
+
+  let tables = $derived<TableMetadata[]>(activeCatalog?.tables || []);
 
   // Compute foreign key lines
   interface FKLine {
@@ -429,9 +435,11 @@ import { copyText } from '../../utils/clipboard';
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${appState.currentDatabase || 'database'}_erd.svg`;
+    a.download = `${appState.activeTab?.database || appState.currentDatabase || 'database'}_erd.svg`;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
     appState.showToast('Exported complete ERD diagram as SVG', 'success');
   }
 

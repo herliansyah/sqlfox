@@ -300,7 +300,8 @@
     isExecuting = true;
 
     try {
-      const connId = appState.activeConnection.id;
+      const connId = appState.activeSessionId || appState.activeConnection.id;
+      const targetDb = appState.activeTab?.database || appState.currentDatabase || undefined;
       // Execute statement(s)
       const stmts = reviewDDL
         .split(';')
@@ -308,14 +309,14 @@
         .filter((s) => s.length > 0 && !s.startsWith('--'));
 
       for (const sql of stmts) {
-        await api.executeQuery(connId, sql, false, appState.currentDatabase || undefined);
+        await api.executeQuery(connId, sql, false, targetDb);
       }
 
       appState.showToast(`Table "${tableMeta?.name}" structure updated successfully!`, 'success');
       isReviewModalOpen = false;
 
       // Reload catalog to refresh schema tree and active viewer
-      await appState.loadCatalog(connId, appState.currentDatabase || undefined);
+      await appState.loadCatalog(connId, targetDb);
     } catch (err: any) {
       appState.showToast(`Failed to update structure: ${err.message}`, 'error');
     } finally {

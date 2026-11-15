@@ -481,8 +481,10 @@ import { copyText } from '../../utils/clipboard';
     const a = document.createElement('a');
     a.href = url;
     a.download = `flight-recorder-${selectedFlightSessionId || 'export'}.json`;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
     appState.showToast('Exported flight recording session JSON', 'success');
   }
 

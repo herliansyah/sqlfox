@@ -94,14 +94,15 @@
 
     isExecuting = true;
     try {
-      const connId = appState.activeConnection.id;
-      await api.executeQuery(connId, sqlPreview, false, appState.currentDatabase || undefined);
+      const connId = appState.activeSessionId || appState.activeConnection.id;
+      const targetDb = appState.activeTab?.database || appState.currentDatabase || undefined;
+      await api.executeQuery(connId, sqlPreview, false, targetDb);
       appState.showToast(`Index "${indexName.trim()}" created successfully!`, 'success');
       isAddModalOpen = false;
       resetForm();
 
       // Refresh catalog
-      await appState.loadCatalog(connId, appState.currentDatabase || undefined);
+      await appState.loadCatalog(connId, targetDb);
     } catch (err: any) {
       appState.showToast(`Failed to create index: ${err.message}`, 'error');
     } finally {
@@ -125,12 +126,13 @@
     }
 
     try {
-      const connId = appState.activeConnection.id;
-      await api.executeQuery(connId, dropSql, false, appState.currentDatabase || undefined);
+      const connId = appState.activeSessionId || appState.activeConnection.id;
+      const targetDb = appState.activeTab?.database || appState.currentDatabase || undefined;
+      await api.executeQuery(connId, dropSql, false, targetDb);
       appState.showToast(`Index "${idxName}" dropped successfully!`, 'info');
 
       // Refresh catalog
-      await appState.loadCatalog(connId, appState.currentDatabase || undefined);
+      await appState.loadCatalog(connId, targetDb);
     } catch (err: any) {
       appState.showToast(`Failed to drop index: ${err.message}`, 'error');
     }

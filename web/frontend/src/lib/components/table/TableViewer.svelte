@@ -15,10 +15,13 @@
   let activeMode = $derived<TableMode>(currentTab?.tableMode || 'data');
   let tableName = $derived(currentTab?.tableName || '');
 
+  let activeCatalog = $derived(
+    (currentTab?.database && appState.catalogs[currentTab.database.toLowerCase()]) || appState.catalog
+  );
   let tableMeta = $derived.by(() => {
-    if (!tableName || !appState.catalog?.tables) return null;
+    if (!tableName || !activeCatalog?.tables) return null;
     return (
-      appState.catalog.tables.find(
+      activeCatalog.tables.find(
         (t) => t.name.toLowerCase() === tableName.toLowerCase()
       ) || null
     );

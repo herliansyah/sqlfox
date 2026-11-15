@@ -87,7 +87,7 @@ assert(
   'Copy submenu must support TSV, Markdown (JSON) and INSERT SQL row formats'
 );
 assert(
-  gridCode.includes('navigator.clipboard.writeText'),
+  gridCode.includes('navigator.clipboard.writeText') || gridCode.includes('copyText'),
   'Copy actions must write to the clipboard'
 );
 assert(

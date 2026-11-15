@@ -35,9 +35,10 @@
     isLoading = true;
     loadError = '';
     try {
+      const targetDb = appState.activeTab?.database || appState.currentDatabase || '';
       const res = await api.getTableDiagnostics(
         appState.activeSessionId!,
-        appState.currentDatabase || ''
+        targetDb
       );
       const list: TableDiag[] = (res.tables || (Array.isArray(res) ? res : [])) as TableDiag[];
       tables = list.filter((t) => t && t.name);

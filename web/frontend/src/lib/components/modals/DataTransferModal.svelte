@@ -42,7 +42,7 @@
         source_db: sourceDb,
         target_session_id: tgtSession,
         target_db: targetDb,
-        tables: [targetTable || sourceTable],
+        tables: [sourceTable || targetTable],
         truncate_target: truncateTarget,
         batch_size: batchSize,
       });

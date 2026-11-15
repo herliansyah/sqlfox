@@ -10,7 +10,7 @@
 
   $effect(() => {
     if (appState.isDumpModalOpen) {
-      selectedDb = appState.currentDatabase || '';
+      selectedDb = appState.dumpTargetTable ? (appState.activeTab?.database || appState.currentDatabase || '') : (appState.currentDatabase || '');
       selectedTable = appState.dumpTargetTable || '';
       includeSchema = true;
       includeData = true;

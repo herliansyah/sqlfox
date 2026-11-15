@@ -49,7 +49,7 @@
         source_db: sourceDb,
         target_session_id: tgtSession,
         target_db: targetDb,
-        table: targetTable || sourceTable,
+        table: sourceTable || targetTable,
       });
       syncDiff = res;
       appState.showToast('Row comparison completed', 'info');
@@ -70,7 +70,7 @@
       await api.applyDataSync({
         target_session_id: tgtSession,
         target_db: targetDb,
-        table: targetTable || sourceTable,
+        table: sourceTable || targetTable,
         columns: syncDiff.columns || [],
         operations: syncDiff.operations,
       });

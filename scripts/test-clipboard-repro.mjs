@@ -12,8 +12,8 @@ assert(
   'VirtualGrid.svelte must define copyRowAsTSV(rIdx)'
 );
 assert(
-  /function copyRowAsTSV[\s\S]{0,600}?navigator\.clipboard\.writeText\(`\$\{cols\}\\n\$\{vals\}`\)/.test(virtualGridCode),
-  'copyRowAsTSV must write tab-separated header+values to navigator.clipboard'
+  /function copyRowAsTSV[\s\S]{0,600}?(?:navigator\.clipboard\.writeText|copyText)\(`\$\{cols\}\\n\$\{vals\}`\)/.test(virtualGridCode),
+  'copyRowAsTSV must write tab-separated header+values to navigator.clipboard or copyText'
 );
 assert(
   /function copyRowAsTSV[\s\S]{0,600}?\.join\('\\t'\)/.test(virtualGridCode),
@@ -39,8 +39,8 @@ assert(
   'copyRowAsMarkdown must emit the markdown --- separator row'
 );
 assert(
-  /function copyRowAsMarkdown[\s\S]{0,1200}?navigator\.clipboard\.writeText\(`\$\{header\}\\n\$\{separator\}\\n\$\{row\}`\)/.test(virtualGridCode),
-  'copyRowAsMarkdown must write header/separator/row to navigator.clipboard'
+  /function copyRowAsMarkdown[\s\S]{0,1200}?(?:navigator\.clipboard\.writeText|copyText)\(`\$\{header\}\\n\$\{separator\}\\n\$\{row\}`\)/.test(virtualGridCode),
+  'copyRowAsMarkdown must write header/separator/row to navigator.clipboard or copyText'
 );
 assert(
   /function copyRowAsMarkdown[\s\S]{0,1300}?appState\.showToast\('Copied row as Markdown Table', 'info'\)/.test(virtualGridCode),
@@ -74,8 +74,8 @@ console.log('✅ Test 4 Passed: null-safe cell serialization');
 
 // TEST 5: appState-level clipboard usage remains async-API based (no execCommand fallback needed)
 assert(
-  appStateCode.includes('navigator.clipboard.writeText'),
-  'appState clipboard flows must use navigator.clipboard.writeText'
+  appStateCode.includes('navigator.clipboard.writeText') || appStateCode.includes('copyText'),
+  'appState clipboard flows must use copyText or navigator.clipboard.writeText'
 );
 assert(
   !virtualGridCode.includes('document.execCommand'),

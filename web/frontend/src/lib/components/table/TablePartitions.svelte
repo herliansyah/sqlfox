@@ -24,10 +24,10 @@
   let errorMessage = $state<string | null>(null);
 
   function formatBytes(bytes?: number): string {
-    if (!bytes || bytes === 0) return '0 B';
+    if (!bytes || bytes <= 0 || !Number.isFinite(bytes)) return '0 B';
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1);
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
 
@@ -49,10 +49,12 @@
     errorMessage = null;
 
     try {
+      const connId = appState.activeSessionId || appState.activeConnection.id;
+      const targetDb = appState.activeTab?.database || appState.currentDatabase || '';
       const data = await api.getTablePartitions(
-        appState.activeConnection.id,
+        connId,
         tableName,
-        appState.currentDatabase || undefined
+        targetDb || undefined
       );
       partitions = Array.isArray(data) ? data : [];
     } catch (err: any) {

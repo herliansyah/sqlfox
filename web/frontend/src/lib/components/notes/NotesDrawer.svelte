@@ -41,6 +41,11 @@
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.7);
       osc.connect(gain);
       gain.connect(ctx.destination);
+      osc.onended = () => {
+        try {
+          ctx.close();
+        } catch {}
+      };
       osc.start();
       osc.stop(ctx.currentTime + 0.7);
     } catch (e) {}

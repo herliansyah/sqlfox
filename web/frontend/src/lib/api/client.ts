@@ -660,11 +660,21 @@ class ApiClient {
     batch_size?: number;
   }): Promise<any> {
     // Backend streams NDJSON progress events; consume them and resolve on "done".
-    const res = await fetch('/api/sync/data/transfer', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
+    const token = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('sqlfox_remote_token') : null;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    let res: Response;
+    try {
+      res = await fetch('/api/sync/data/transfer', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+      });
+    } catch (err) {
+      if (typeof window !== 'undefined') (window as any).__sqlfox_trigger_reconnect?.();
+      throw new Error(`Cannot reach SqlFox daemon: ${err instanceof Error ? err.message : String(err)}`);
+    }
     if (!res.ok || !res.body) {
       let msg = `HTTP ${res.status}`;
       try { msg = (await res.json()).error || msg; } catch { /* ignore */ }

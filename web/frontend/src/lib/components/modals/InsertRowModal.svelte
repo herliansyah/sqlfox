@@ -3,15 +3,24 @@
   import Icon from '../common/Icon.svelte';
 
   let currentTab = $derived(appState.activeTab);
+  let activeCatalog = $derived(
+    (currentTab?.database && appState.catalogs[currentTab.database.toLowerCase()]) || appState.catalog
+  );
   let activeTableMeta = $derived.by(() => {
-    if (!currentTab?.tableName || !appState.catalog?.tables) return null;
-    return appState.catalog.tables.find(
+    if (!currentTab?.tableName || !activeCatalog?.tables) return null;
+    return activeCatalog.tables.find(
       (t) => t.name.toLowerCase() === currentTab.tableName!.toLowerCase()
     );
   });
 
   let formData = $state<Record<string, any>>({});
   let isSubmitting = $state(false);
+
+  $effect(() => {
+    if (appState.isInsertRowModalOpen && !activeTableMeta && currentTab?.tableName && appState.activeSessionId) {
+      void appState.loadCatalog(undefined, currentTab.database);
+    }
+  });
 
   $effect(() => {
     if (appState.isInsertRowModalOpen && activeTableMeta) {

@@ -25,13 +25,17 @@
     (tableMeta?.columns || []).map((c: ColumnMetadata) => c.name)
   );
 
+  let activeCatalog = $derived(
+    (appState.activeTab?.database && appState.catalogs[appState.activeTab.database.toLowerCase()]) || appState.catalog
+  );
+
   let catalogTables = $derived(
-    (appState.catalog?.tables || []).map((t) => t.name)
+    (activeCatalog?.tables || []).map((t) => t.name)
   );
 
   let refTableCols = $derived.by(() => {
-    if (!refTable || !appState.catalog?.tables) return [];
-    const t = appState.catalog.tables.find(
+    if (!refTable || !activeCatalog?.tables) return [];
+    const t = activeCatalog.tables.find(
       (tbl) => tbl.name.toLowerCase() === refTable.toLowerCase()
     );
     return t ? t.columns.map((c: ColumnMetadata) => c.name) : [];
@@ -102,14 +106,15 @@
 
     isExecuting = true;
     try {
-      const connId = appState.activeConnection.id;
-      await api.executeQuery(connId, sqlPreview, false, appState.currentDatabase || undefined);
+      const connId = appState.activeSessionId || appState.activeConnection.id;
+      const targetDb = appState.activeTab?.database || appState.currentDatabase || undefined;
+      await api.executeQuery(connId, sqlPreview, false, targetDb);
       appState.showToast(`Foreign Key "${fkName.trim()}" created successfully!`, 'success');
       isAddModalOpen = false;
       resetForm();
 
       // Refresh catalog
-      await appState.loadCatalog(connId, appState.currentDatabase || undefined);
+      await appState.loadCatalog(connId, targetDb);
     } catch (err: any) {
       appState.showToast(`Failed to create foreign key: ${err.message}`, 'error');
     } finally {
@@ -132,12 +137,13 @@
     }
 
     try {
-      const connId = appState.activeConnection.id;
-      await api.executeQuery(connId, dropSql, false, appState.currentDatabase || undefined);
+      const connId = appState.activeSessionId || appState.activeConnection.id;
+      const targetDb = appState.activeTab?.database || appState.currentDatabase || undefined;
+      await api.executeQuery(connId, dropSql, false, targetDb);
       appState.showToast(`Foreign key "${constraintName}" dropped successfully!`, 'info');
 
       // Refresh catalog
-      await appState.loadCatalog(connId, appState.currentDatabase || undefined);
+      await appState.loadCatalog(connId, targetDb);
     } catch (err: any) {
       appState.showToast(`Failed to drop foreign key: ${err.message}`, 'error');
     }

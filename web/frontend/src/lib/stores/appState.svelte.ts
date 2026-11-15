@@ -1146,6 +1146,7 @@ export class AppState {
       sql: '',
       isErdCanvas: true,
       isTableViewer: false,
+      database: this.currentDatabase || '',
     };
     this.tabs.push(newTab);
     this.activeTabId = newId;
@@ -1682,7 +1683,7 @@ export class AppState {
       this.openDumpModal();
       return;
     }
-    const dbName = this.currentDatabase || '';
+    const dbName = this.activeTab?.database || this.currentDatabase || '';
     let url = `/api/session/${this.activeSessionId}/export-dump?schema=true&data=true&table=${encodeURIComponent(tbl)}`;
     if (dbName) url += `&db=${encodeURIComponent(dbName)}`;
     window.location.href = url;
@@ -1773,8 +1774,9 @@ export class AppState {
 
     try {
       const tableName = items[0].table;
+      const targetDb = items[0].database || this.currentDatabase;
       const edits = items.map((item) => ({
-        database: item.database || this.currentDatabase,
+        database: item.database || targetDb,
         table: item.table,
         column: item.colName,
         value: item.newVal,
@@ -1783,7 +1785,7 @@ export class AppState {
       }));
 
       const res = await api.cellEdit(this.activeSessionId, {
-        database: this.currentDatabase,
+        database: targetDb,
         table: tableName,
         edits,
       });
@@ -1808,7 +1810,7 @@ export class AppState {
 
     try {
       await api.insertRow(this.activeSessionId, {
-        database: this.currentDatabase,
+        database: tab.database || this.currentDatabase,
         table: tab.tableName,
         data,
       });
@@ -1826,7 +1828,7 @@ export class AppState {
 
     try {
       await api.deleteRows(this.activeSessionId, {
-        database: this.currentDatabase,
+        database: tab.database || this.currentDatabase,
         table: tab.tableName,
         pk_column: pkCol,
         pk_values: pkValues,
@@ -2017,8 +2019,9 @@ export class AppState {
   }
 
   // Schema & Table Manipulation Operations
-  async dropTable(tableName: string) {
+  async dropTable(tableName: string, database?: string) {
     if (!this.activeSessionId) return;
+    const targetDb = database || this.tabs.find((t) => t.tableName?.toLowerCase() === tableName.toLowerCase())?.database || this.currentDatabase || '';
     const isPg = this.activeConnection?.driver === 'postgres';
     const sql = isPg ? `DROP TABLE "${tableName}" CASCADE;` : `DROP TABLE IF EXISTS \`${tableName}\`;`;
     const confirmed = await this.promptSafetyChallenge(sql, {
@@ -2030,7 +2033,7 @@ export class AppState {
     if (!confirmed) return;
 
     try {
-      const res = await api.executeQuery(this.activeSessionId, sql, true, this.currentDatabase || '');
+      const res = await api.executeQuery(this.activeSessionId, sql, true, targetDb);
       if (res.error) {
         this.showToast(`Failed to drop table: ${res.error}`, 'error');
         return;
@@ -2046,8 +2049,9 @@ export class AppState {
     }
   }
 
-  async truncateTable(tableName: string) {
+  async truncateTable(tableName: string, database?: string) {
     if (!this.activeSessionId) return;
+    const targetDb = database || this.tabs.find((t) => t.tableName?.toLowerCase() === tableName.toLowerCase())?.database || this.currentDatabase || '';
     const isPg = this.activeConnection?.driver === 'postgres';
     const sql = isPg ? `TRUNCATE TABLE "${tableName}" CASCADE;` : `TRUNCATE TABLE \`${tableName}\`;`;
     const confirmed = await this.promptSafetyChallenge(sql, {
@@ -2059,7 +2063,7 @@ export class AppState {
     if (!confirmed) return;
 
     try {
-      const res = await api.executeQuery(this.activeSessionId, sql, true, this.currentDatabase || '');
+      const res = await api.executeQuery(this.activeSessionId, sql, true, targetDb);
       if (res.error) {
         this.showToast(`Failed to truncate table: ${res.error}`, 'error');
         return;
@@ -2075,15 +2079,16 @@ export class AppState {
     }
   }
 
-  async renameTable(oldName: string, newName: string) {
+  async renameTable(oldName: string, newName: string, database?: string) {
     if (!this.activeSessionId) return;
+    const targetDb = database || this.tabs.find((t) => t.tableName?.toLowerCase() === oldName.toLowerCase())?.database || this.currentDatabase || '';
     const isPg = this.activeConnection?.driver === 'postgres';
     const sql = isPg
       ? `ALTER TABLE "${oldName}" RENAME TO "${newName}";`
       : `RENAME TABLE \`${oldName}\` TO \`${newName}\`;`;
 
     try {
-      const res = await api.executeQuery(this.activeSessionId, sql, true, this.currentDatabase || '');
+      const res = await api.executeQuery(this.activeSessionId, sql, true, targetDb);
       if (res.error) {
         this.showToast(`Failed to rename table: ${res.error}`, 'error');
         return;
@@ -2100,8 +2105,9 @@ export class AppState {
     }
   }
 
-  async duplicateTable(sourceTable: string, targetTable: string, copyData = true) {
+  async duplicateTable(sourceTable: string, targetTable: string, copyData = true, database?: string) {
     if (!this.activeSessionId) return;
+    const targetDb = database || this.tabs.find((t) => t.tableName?.toLowerCase() === sourceTable.toLowerCase())?.database || this.currentDatabase || '';
     const driver = this.activeConnection?.driver;
     try {
       if (driver === 'postgres') {
@@ -2109,20 +2115,20 @@ export class AppState {
         if (copyData) {
           sql += `\nINSERT INTO "${targetTable}" SELECT * FROM "${sourceTable}";`;
         }
-        const res = await api.executeQuery(this.activeSessionId, sql, true, this.currentDatabase || '');
+        const res = await api.executeQuery(this.activeSessionId, sql, true, targetDb);
         if (res.error) throw new Error(res.error);
       } else if (driver === 'sqlite') {
         const sql = copyData
           ? `CREATE TABLE "${targetTable}" AS SELECT * FROM "${sourceTable}";`
           : `CREATE TABLE "${targetTable}" AS SELECT * FROM "${sourceTable}" WHERE 0 = 1;`;
-        const res = await api.executeQuery(this.activeSessionId, sql, true, this.currentDatabase || '');
+        const res = await api.executeQuery(this.activeSessionId, sql, true, targetDb);
         if (res.error) throw new Error(res.error);
       } else {
         let sql = `CREATE TABLE \`${targetTable}\` LIKE \`${sourceTable}\`;`;
         if (copyData) {
           sql += `\nINSERT INTO \`${targetTable}\` SELECT * FROM \`${sourceTable}\`;`;
         }
-        const res = await api.executeQuery(this.activeSessionId, sql, true, this.currentDatabase || '');
+        const res = await api.executeQuery(this.activeSessionId, sql, true, targetDb);
         if (res.error) throw new Error(res.error);
       }
       this.showToast(`Table '${sourceTable}' duplicated to '${targetTable}'`, 'success');
@@ -2180,7 +2186,7 @@ export class AppState {
   async createTableDirect(ddl: string, tableName: string) {
     if (!this.activeSessionId) return;
     try {
-      const res = await api.executeQuery(this.activeSessionId, ddl, true);
+      const res = await api.executeQuery(this.activeSessionId, ddl, true, this.currentDatabase || '');
       if (res.error) throw new Error(res.error);
       this.showToast(`Table '${tableName}' created successfully`, 'success');
       await this.refreshCatalog();
@@ -2236,7 +2242,7 @@ export class AppState {
       const pkCol = pkColObj ? (typeof pkColObj === 'string' ? pkColObj : pkColObj.name) : undefined;
       const pkVal = pkCol ? result.rows[rowIdx][result.columns.findIndex((c: any) => (typeof c === 'string' ? c : c.name) === pkCol)] : undefined;
 
-      this.stageEdit(tableName, rowIdx, colIdx, colName, pkCol, pkVal, oldVal, newVal);
+      this.stageEdit(tableName, rowIdx, colIdx, colName, pkCol, pkVal, oldVal, newVal, tab?.database);
       result.rows[rowIdx][colIdx] = newVal;
       this.showToast(`Staged JSON update for '${colName}'`, 'info');
     }
