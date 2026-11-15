@@ -463,9 +463,54 @@ class ApiClient {
     });
   }
 
-  // Operational Notes
+  // Operational Notes — normalize between the UI shape (category/table_name/
+// query_snapshot) and the backend OperationalNote shape (user_tags/object_tags/
+// side_note), which share no field names.
+  private normalizeNote(note: any): any {
+    if (!note || typeof note !== 'object') return note;
+    const userTags: string[] = Array.isArray(note.user_tags) ? note.user_tags : [];
+    const objectTags: string[] = Array.isArray(note.object_tags) ? note.object_tags : [];
+    const category = note.category ?? userTags.find((t) => t.startsWith('#'))?.slice(1) ?? '';
+    const tableName = note.table_name ?? objectTags.find((t) => t.startsWith('db://table/'))?.slice('db://table/'.length) ?? '';
+    return {
+      ...note,
+      category,
+      table_name: tableName,
+      query_snapshot: note.query_snapshot ?? note.side_note ?? '',
+      user_tags: userTags,
+      object_tags: objectTags,
+    };
+  }
+
+  private denormalizeNote(note: any): any {
+    const out: any = {
+      title: note.title,
+      content: note.content,
+      is_pinned: note.is_pinned,
+    };
+    if (note.reminder_at) out.reminder_at = note.reminder_at;
+    const userTags: string[] = Array.isArray(note.user_tags) ? [...note.user_tags] : [];
+    const category = (note.category || '').trim();
+    if (category) {
+      const tag = `#${category}`;
+      if (!userTags.includes(tag)) userTags.push(tag);
+    }
+    if (userTags.length) out.user_tags = userTags;
+    const objectTags: string[] = Array.isArray(note.object_tags) ? [...note.object_tags] : [];
+    const tableName = (note.table_name || '').trim();
+    if (tableName) {
+      const tag = `db://table/${tableName}`;
+      if (!objectTags.includes(tag)) objectTags.push(tag);
+    }
+    if (objectTags.length) out.object_tags = objectTags;
+    if (note.query_snapshot) out.side_note = note.query_snapshot;
+    if (note.id) out.id = note.id;
+    return out;
+  }
+
   async listNotes(): Promise<any[]> {
-    return this.request('/notes');
+    const notes = await this.request<any[]>('/notes');
+    return (Array.isArray(notes) ? notes : []).map((n) => this.normalizeNote(n));
   }
 
   async createNote(note: {
@@ -479,18 +524,18 @@ class ApiClient {
   }): Promise<any> {
     return this.request('/notes', {
       method: 'POST',
-      body: JSON.stringify(note),
+      body: JSON.stringify(this.denormalizeNote(note)),
     });
   }
 
   async getNote(id: string): Promise<any> {
-    return this.request(`/notes/${id}`);
+    return this.normalizeNote(await this.request(`/notes/${id}`));
   }
 
   async updateNote(id: string, note: any): Promise<any> {
     return this.request(`/notes/${id}`, {
       method: 'PUT',
-      body: JSON.stringify(note),
+      body: JSON.stringify(this.denormalizeNote({ ...note, id })),
     });
   }
 

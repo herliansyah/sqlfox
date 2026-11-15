@@ -137,11 +137,12 @@
               </select>
             </div>
             <div>
-              <label class="block text-slate-400 mb-1">Target Table</label>
+              <label class="block text-slate-400 mb-1">Table Name</label>
               <input
                 type="text"
                 bind:value={targetTable}
-                placeholder="Defaults to source table"
+                placeholder="Defaults to active table"
+                title="Table is transferred under the same name on both source and target (backend transfers like-named tables)"
                 class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 focus:outline-none focus:border-emerald-500"
               />
             </div>
