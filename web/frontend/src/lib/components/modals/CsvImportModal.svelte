@@ -70,8 +70,8 @@
         } else if (char === delim) {
           row.push(cur.trim());
           cur = '';
-        } else if (char === '\n' || (char === '\r' && text[i + 1] === '\n')) {
-          if (char === '\r') i++;
+        } else if (char === '\n' || char === '\r') {
+          if (char === '\r' && text[i + 1] === '\n') i++;
           row.push(cur.trim());
           if (row.some((field) => field.length > 0)) {
             rows.push(row);

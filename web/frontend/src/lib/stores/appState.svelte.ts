@@ -1730,7 +1730,18 @@ export class AppState {
   }
 
   // Grid Staged Edits & CRUD
-  stageEdit(table: string, rIdx: number, cIdx: number, colName: string, pkCol: string | undefined, pkVal: any, oldVal: any, newVal: any, database?: string) {
+  stageEdit(
+    table: string,
+    rIdx: number,
+    cIdx: number,
+    colName: string,
+    pkCol: string | undefined,
+    pkVal: any,
+    oldVal: any,
+    newVal: any,
+    database?: string,
+    rowCriteria?: Record<string, any>
+  ) {
     const key = `${table}:${rIdx}:${cIdx}`;
     this.stagedEdits[key] = {
       rIdx,
@@ -1740,6 +1751,7 @@ export class AppState {
       colName,
       pkCol,
       pkVal,
+      rowCriteria,
       oldVal,
       newVal,
     };
@@ -1784,6 +1796,7 @@ export class AppState {
         value: item.newVal,
         pk_column: item.pkCol,
         pk_value: item.pkVal,
+        row_criteria: item.rowCriteria,
       }));
 
       const res = await api.cellEdit(this.activeSessionId, {
@@ -2270,7 +2283,16 @@ export class AppState {
       const pkIdx = pkCol ? result.columns.findIndex((c: any) => (typeof c === 'string' ? c : c.name) === pkCol) : -1;
       const pkVal = pkIdx !== -1 ? result.rows[rowIdx][pkIdx] : undefined;
 
-      this.stageEdit(tableName, rowIdx, colIdx, colName, pkCol || undefined, pkVal, oldVal, newVal, tab?.database);
+      let rowCriteria: Record<string, any> | undefined;
+      if (!pkCol) {
+        rowCriteria = {};
+        result.columns.forEach((c: any, idx: number) => {
+          const colKey = typeof c === 'string' ? c : c.name;
+          rowCriteria![colKey] = result.rows[rowIdx][idx];
+        });
+      }
+
+      this.stageEdit(tableName, rowIdx, colIdx, colName, pkCol || undefined, pkVal, oldVal, newVal, tab?.database, rowCriteria);
       result.rows[rowIdx][colIdx] = newVal;
       this.showToast(`Staged JSON update for '${colName}'`, 'info');
     }

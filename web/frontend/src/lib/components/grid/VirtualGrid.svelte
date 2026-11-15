@@ -19,6 +19,12 @@ import { copyText } from '../../utils/clipboard';
   // Sorting
   let sortCol = $state<string | null>(null);
   let sortDir = $state<'ASC' | 'DESC'>('ASC');
+  let effectiveSortCol = $derived(
+    currentTab?.isTableViewer ? (currentTab.sortCol ?? null) : sortCol
+  );
+  let effectiveSortDir = $derived(
+    currentTab?.isTableViewer ? (currentTab.sortDir ?? 'ASC') : sortDir
+  );
 
   // Selected row / cell & Context Menu
   let selectedRowIndex = $state<number | null>(null);
@@ -120,8 +126,8 @@ import { copyText } from '../../utils/clipboard';
     if (!result?.rows) return [];
     let list = result.rows.map((r, idx) => ({ origIdx: idx, data: r }));
 
-    // Apply sorting if active
-    if (sortCol !== null && result.columns) {
+    // Apply sorting if active (only for ad-hoc queries; TableViewer is sorted server-side)
+    if (!currentTab?.isTableViewer && sortCol !== null && result.columns) {
       const cIdx = allColumns.indexOf(sortCol);
       if (cIdx !== -1) {
         list = [...list].sort((a, b) => {
@@ -166,6 +172,23 @@ import { copyText } from '../../utils/clipboard';
   }
 
   function handleHeaderSort(colName: string) {
+    if (currentTab?.isTableViewer) {
+      if (currentTab.sortCol === colName) {
+        if (currentTab.sortDir === 'ASC') {
+          currentTab.sortDir = 'DESC';
+        } else {
+          currentTab.sortCol = undefined;
+          currentTab.sortDir = undefined;
+        }
+      } else {
+        currentTab.sortCol = colName;
+        currentTab.sortDir = 'ASC';
+      }
+      currentTab.currentPage = 1;
+      void appState.loadTableData(currentTab);
+      return;
+    }
+
     if (sortCol === colName) {
       if (sortDir === 'ASC') {
         sortDir = 'DESC';
@@ -342,7 +365,26 @@ import { copyText } from '../../utils/clipboard';
       const pkCol = pkColObj ? getColName(pkColObj) : undefined;
       const pkVal = pkCol ? result.rows[origIdx][allColumns.indexOf(pkCol)] : undefined;
 
-      appState.stageEdit(currentTab.tableName, origIdx, cIdx, colName, pkCol, pkVal, oldVal, newVal, currentTab.database || appState.currentDatabase);
+      let rowCriteria: Record<string, any> | undefined;
+      if (!pkCol) {
+        rowCriteria = {};
+        allColumns.forEach((col, idx) => {
+          rowCriteria![col] = result!.rows[origIdx][idx];
+        });
+      }
+
+      appState.stageEdit(
+        currentTab.tableName,
+        origIdx,
+        cIdx,
+        colName,
+        pkCol,
+        pkVal,
+        oldVal,
+        newVal,
+        currentTab.database || appState.currentDatabase,
+        rowCriteria
+      );
       result.rows[origIdx][cIdx] = newVal;
     }
     editingCell = null;
@@ -467,6 +509,16 @@ import { copyText } from '../../utils/clipboard';
     const vals = result.rows[rIdx].map((v) => (v === null || v === undefined ? '' : String(v))).join('\t');
     copyText(`${cols}\n${vals}`);
     appState.showToast('Copied row as TSV', 'info');
+  }
+
+  function copyRowAsJSON(rIdx: number) {
+    if (!result?.rows || !result.rows[rIdx] || !result.columns) return;
+    const obj: Record<string, any> = {};
+    result.columns.forEach((c, idx) => {
+      obj[getColName(c)] = result!.rows[rIdx][idx];
+    });
+    copyText(JSON.stringify(obj, null, 2));
+    appState.showToast('Copied row as JSON', 'info');
   }
 
   function copyRowAsMarkdown(rIdx: number) {
@@ -1097,8 +1149,8 @@ import { copyText } from '../../utils/clipboard';
                       {colType}
                     </span>
                   {/if}
-                  {#if sortCol === colName}
-                    <Icon name={sortDir === 'ASC' ? 'chevron-up' : 'chevron-down'} class="w-3 h-3 text-sky-400 shrink-0 ml-1" />
+                  {#if effectiveSortCol === colName}
+                    <Icon name={effectiveSortDir === 'ASC' ? 'chevron-up' : 'chevron-down'} class="w-3 h-3 text-sky-400 shrink-0 ml-1" />
                   {/if}
                 </div>
               </th>
@@ -1629,6 +1681,7 @@ import { copyText } from '../../utils/clipboard';
           <span>Inspect Record</span>
         </button>
         <button
+          id="grid-ctx-btn-copy-cell"
           onclick={() => {
             copyText(String(contextMenu!.cellValue ?? ''));
             appState.showToast('Copied cell value to clipboard', 'info');
@@ -1657,6 +1710,17 @@ import { copyText } from '../../utils/clipboard';
           <button
             id="grid-ctx-btn-copy-row-json"
             onclick={() => {
+              copyRowAsJSON(contextMenu!.rIdx);
+              closeContextMenu();
+            }}
+            class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+          >
+            <Icon name="code" class="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span>Copy Row as JSON</span>
+          </button>
+          <button
+            id="grid-ctx-btn-copy-row-md"
+            onclick={() => {
               copyRowAsMarkdown(contextMenu!.rIdx);
               closeContextMenu();
             }}
@@ -1673,7 +1737,7 @@ import { copyText } from '../../utils/clipboard';
             }}
             class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
           >
-            <Icon name="code" class="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <Icon name="terminal" class="w-3.5 h-3.5 text-purple-400 shrink-0" />
             <span>Copy as INSERT SQL</span>
           </button>
         </div>

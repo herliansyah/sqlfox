@@ -12,6 +12,11 @@ import { copyText } from '../../utils/clipboard';
 
   let currentSubTab = $state<DbaSubTab>('threads');
 
+  function setSubTab(tab: DbaSubTab) {
+    currentSubTab = tab;
+    appState.processlistSubTab = tab;
+  }
+
   // Header Monitor menu picks the sub-view; this only reacts to that request.
   $effect(() => {
     currentSubTab = appState.processlistSubTab as DbaSubTab;
@@ -1019,37 +1024,37 @@ import { copyText } from '../../utils/clipboard';
       <!-- Sub-Tabs Selector (never collapses: scrolls horizontally when narrow) -->
       <div class="flex items-center space-x-1 bg-[#090d16] p-0.5 rounded-lg border border-slate-700/80 overflow-x-auto flex-1 min-w-0 whitespace-nowrap" style="scrollbar-width: thin">
         <button
-          onclick={() => (currentSubTab = 'threads')}
+          onclick={() => setSubTab('threads')}
           class="px-2.5 py-1 rounded text-xs font-semibold transition font-sans shrink-0 {currentSubTab === 'threads' ? 'bg-[#1e293b] text-sky-400 shadow-sm' : 'text-slate-400 hover:text-slate-200'}"
         >
           Threads ({threads.length})
         </button>
         <button
-          onclick={() => (currentSubTab = 'digest')}
+          onclick={() => setSubTab('digest')}
           class="px-2.5 py-1 rounded text-xs font-semibold transition font-sans shrink-0 {currentSubTab === 'digest' ? 'bg-[#1e293b] text-sky-400 shadow-sm' : 'text-slate-400 hover:text-slate-200'}"
         >
           Statement Digest
         </button>
         <button
-          onclick={() => (currentSubTab = 'deadlock')}
+          onclick={() => setSubTab('deadlock')}
           class="px-2.5 py-1 rounded text-xs font-semibold transition font-sans shrink-0 {currentSubTab === 'deadlock' ? 'bg-[#1e293b] text-sky-400 shadow-sm' : 'text-slate-400 hover:text-slate-200'}"
         >
           Deadlock Inspector
         </button>
         <button
-          onclick={() => (currentSubTab = 'cluster')}
+          onclick={() => setSubTab('cluster')}
           class="px-2.5 py-1 rounded text-xs font-semibold transition font-sans shrink-0 {currentSubTab === 'cluster' ? 'bg-[#1e293b] text-sky-400 shadow-sm' : 'text-slate-400 hover:text-slate-200'}"
         >
           Cluster & Replication
         </button>
         <button
-          onclick={() => (currentSubTab = 'variables')}
+          onclick={() => setSubTab('variables')}
           class="px-2.5 py-1 rounded text-xs font-semibold transition font-sans shrink-0 {currentSubTab === 'variables' ? 'bg-[#1e293b] text-sky-400 shadow-sm' : 'text-slate-400 hover:text-slate-200'}"
         >
           Server Variables
         </button>
         <button
-          onclick={() => (currentSubTab = 'flight-recorder')}
+          onclick={() => setSubTab('flight-recorder')}
           class="px-2.5 py-1 rounded text-xs font-semibold transition font-sans shrink-0 flex items-center space-x-1.5 {currentSubTab === 'flight-recorder' ? 'bg-[#1e293b] text-sky-400 shadow-sm' : 'text-slate-400 hover:text-slate-200'}"
         >
           {#if isRecording}

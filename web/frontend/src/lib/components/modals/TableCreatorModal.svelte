@@ -114,6 +114,14 @@
         } else if (col.type === 'VARCHAR') {
           typeDef += '(255)';
         }
+      } else if (isSqlite) {
+        if (col.autoIncrement) {
+          typeDef = 'INTEGER';
+        } else if (col.length) {
+          typeDef += `(${col.length})`;
+        } else if (col.type === 'VARCHAR') {
+          typeDef += '(255)';
+        }
       } else if (col.length) {
         typeDef += `(${col.length})`;
       } else if (col.type === 'VARCHAR') {
@@ -121,17 +129,26 @@
       }
 
       let line = `  ${q(colName)} ${typeDef}`;
-      if (!col.isNullable) {
-        line += ' NOT NULL';
-      } else if (!isPg) {
-        line += ' NULL';
+      // ponytail: SQLite requires inline INTEGER PRIMARY KEY AUTOINCREMENT
+      if (isSqlite && col.isPK && col.autoIncrement) {
+        line += ' PRIMARY KEY AUTOINCREMENT';
+      } else {
+        if (!col.isNullable) {
+          line += ' NOT NULL';
+        } else if (!isPg && !isSqlite) {
+          line += ' NULL';
+        }
+
+        if (!isPg && !isSqlite && col.autoIncrement && (col.type === 'INT' || col.type === 'BIGINT')) {
+          line += ' AUTO_INCREMENT';
+        }
+
+        if (col.isPK) {
+          pks.push(q(colName));
+        }
       }
 
-      if (!isPg && col.autoIncrement && (col.type === 'INT' || col.type === 'BIGINT')) {
-        line += isSqlite ? ' AUTOINCREMENT' : ' AUTO_INCREMENT';
-      }
-
-      if (col.defaultValue && !(isPg && col.autoIncrement)) {
+      if (col.defaultValue && !(isPg && col.autoIncrement) && !(isSqlite && col.autoIncrement)) {
         if (col.defaultValue === 'NULL' || col.defaultValue === 'CURRENT_TIMESTAMP') {
           line += ` DEFAULT ${col.defaultValue}`;
         } else {
@@ -140,9 +157,6 @@
       }
 
       lines.push(line);
-      if (col.isPK) {
-        pks.push(q(colName));
-      }
     });
 
     if (pks.length > 0) {
