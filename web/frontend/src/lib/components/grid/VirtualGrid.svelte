@@ -271,6 +271,30 @@ import { copyText } from '../../utils/clipboard';
     currentTab.stagedDraftRows.splice(dIdx, 1);
   }
 
+  async function saveDraftRow(dIdx: number) {
+    if (!currentTab?.stagedDraftRows || !currentTab.stagedDraftRows[dIdx] || !currentTab.tableName) return;
+    const draft = currentTab.stagedDraftRows[dIdx];
+    const cleaned: Record<string, any> = {};
+    for (const [k, v] of Object.entries(draft)) {
+      if (v !== '' && v !== undefined) {
+        cleaned[k] = v;
+      }
+    }
+    try {
+      await appState.insertRow(cleaned);
+      if (currentTab?.stagedDraftRows) {
+        currentTab.stagedDraftRows.splice(dIdx, 1);
+      }
+    } catch (err: any) {
+      appState.showToast(`Failed to save draft row: ${err.message}`, 'error');
+    }
+  }
+
+  function autoFocus(node: HTMLInputElement) {
+    node.focus();
+    node.select();
+  }
+
   /**
    * Clones a visible row into an editable draft.
    * @param withoutKey when true, primary-key values are blanked so the database
@@ -1082,7 +1106,16 @@ import { copyText } from '../../utils/clipboard';
           {#if currentTab?.stagedDraftRows && currentTab.stagedDraftRows.length > 0}
             {#each currentTab.stagedDraftRows as draft, dIdx}
               <tr class="bg-sky-950/40 border-b border-sky-800/60 text-sky-200 h-7 font-mono text-xs">
-                <td class="w-16 px-2 py-1 text-center bg-sky-950/80 border-r border-sky-800/60 sticky left-0 z-10">
+                <td class="w-16 px-1.5 py-1 text-center bg-sky-950/80 border-r border-sky-800/60 sticky left-0 z-10 flex items-center justify-center space-x-1">
+                  <button
+                    type="button"
+                    onclick={() => saveDraftRow(dIdx)}
+                    class="text-emerald-400 hover:text-emerald-200 p-0.5 rounded hover:bg-emerald-950/50 inline-flex items-center justify-center transition"
+                    title="Save draft row"
+                    aria-label="Save draft row"
+                  >
+                    <Icon name="check" class="w-3.5 h-3.5" />
+                  </button>
                   <button
                     type="button"
                     onclick={() => removeDraftRow(dIdx)}
@@ -1099,6 +1132,9 @@ import { copyText } from '../../utils/clipboard';
                     <input
                       type="text"
                       bind:value={draft[colName]}
+                      onkeydown={(e) => {
+                        if (e.key === 'Enter') saveDraftRow(dIdx);
+                      }}
                       placeholder="draft..."
                       class="w-full bg-transparent text-sky-100 placeholder-sky-600/60 outline-none text-xs font-mono"
                     />
@@ -1172,6 +1208,7 @@ import { copyText } from '../../utils/clipboard';
                   >
                     {#if isEditingThis}
                       <input
+                        use:autoFocus
                         type="text"
                         bind:value={editingCell!.tempValue}
                         onblur={() => commitCellEdit(rowItem.origIdx, cIdx)}
@@ -1277,7 +1314,7 @@ import { copyText } from '../../utils/clipboard';
       {#if currentTab?.isTableViewer}
         {@const estRows =
           currentTab.exactRowCount ??
-          appState.catalog?.tables?.find((t) => t.name.toLowerCase() === currentTab?.tableName?.toLowerCase())
+          activeCatalog?.tables?.find((t) => t.name.toLowerCase() === currentTab?.tableName?.toLowerCase())
             ?.row_count}
         {@const pageSize = currentTab.pageSize || 50}
         {@const curPage = currentTab.currentPage || 1}
@@ -1436,74 +1473,72 @@ import { copyText } from '../../utils/clipboard';
       <div id="grid-ctx-filter-parent" class="py-1">
         <div id="grid-ctx-filter-submenu">
           <div id="grid-ctx-filter-options">
-        <button
-          onclick={() => applyQuickFilter('=')}
-          class="w-full text-left px-3 py-1 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-        >
-          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono font-bold text-sky-400">=</span>
-          <span class="truncate">Filter = '{String(contextMenu.cellValue ?? 'NULL')}'</span>
-        </button>
-        <button
-          onclick={() => applyQuickFilter('!=')}
-          class="w-full text-left px-3 py-1 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-        >
-          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono font-bold text-amber-400">!=</span>
-          <span class="truncate">Filter != '{String(contextMenu.cellValue ?? 'NULL')}'</span>
-        </button>
-        {#if contextMenu.cellValue !== null && contextMenu.cellValue !== undefined}
-          <div class="grid grid-cols-4 gap-1 px-3 py-1 border-y border-slate-800/60 my-0.5">
             <button
-              onclick={() => applyQuickFilter('<')}
-              class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px] font-bold text-center"
-              title="Less than"
-            >&lt;</button>
+              onclick={() => applyQuickFilter('=')}
+              class="w-full text-left px-3 py-1 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+            >
+              <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono font-bold text-sky-400">=</span>
+              <span class="truncate">Filter = '{String(contextMenu.cellValue ?? 'NULL')}'</span>
+            </button>
             <button
-              onclick={() => applyQuickFilter('<=')}
-              class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px] font-bold text-center"
-              title="Less or equal"
-            >&le;</button>
+              onclick={() => applyQuickFilter('!=')}
+              class="w-full text-left px-3 py-1 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+            >
+              <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono font-bold text-amber-400">!=</span>
+              <span class="truncate">Filter != '{String(contextMenu.cellValue ?? 'NULL')}'</span>
+            </button>
+            {#if contextMenu.cellValue !== null && contextMenu.cellValue !== undefined}
+              <div class="grid grid-cols-4 gap-1 px-3 py-1 border-y border-slate-800/60 my-0.5">
+                <button
+                  onclick={() => applyQuickFilter('<')}
+                  class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px] font-bold text-center"
+                  title="Less than"
+                >&lt;</button>
+                <button
+                  onclick={() => applyQuickFilter('<=')}
+                  class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px] font-bold text-center"
+                  title="Less or equal"
+                >&le;</button>
+                <button
+                  onclick={() => applyQuickFilter('>')}
+                  class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px] font-bold text-center"
+                  title="Greater than"
+                >&gt;</button>
+                <button
+                  onclick={() => applyQuickFilter('>=')}
+                  class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px] font-bold text-center"
+                  title="Greater or equal"
+                >&ge;</button>
+              </div>
+              <button
+                onclick={() => applyQuickFilter('LIKE')}
+                class="w-full text-left px-3 py-1 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+              >
+                <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono font-bold text-purple-400">%</span>
+                <span class="truncate">Filter LIKE '%{String(contextMenu.cellValue)}%'</span>
+              </button>
+              <button
+                onclick={() => applyQuickFilter('NOT LIKE')}
+                class="w-full text-left px-3 py-1 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+              >
+                <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono font-bold text-rose-400">!%</span>
+                <span class="truncate">Filter NOT LIKE '%{String(contextMenu.cellValue)}%'</span>
+              </button>
+            {/if}
             <button
-              onclick={() => applyQuickFilter('>')}
-              class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px] font-bold text-center"
-              title="Greater than"
-            >&gt;</button>
+              onclick={() => applyQuickFilter('IS NULL')}
+              class="w-full text-left px-3 py-1 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+            >
+              <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono text-rose-400">∅</span>
+              <span>Filter IS NULL</span>
+            </button>
             <button
-              onclick={() => applyQuickFilter('>=')}
-              class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px] font-bold text-center"
-              title="Greater or equal"
-            >&ge;</button>
-          </div>
-          <button
-            onclick={() => applyQuickFilter('LIKE')}
-            class="w-full text-left px-3 py-1 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-          >
-            <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono font-bold text-purple-400">%</span>
-            <span class="truncate">Filter LIKE '%{String(contextMenu.cellValue)}%'</span>
-          </button>
-          <button
-            onclick={() => applyQuickFilter('NOT LIKE')}
-            class="w-full text-left px-3 py-1 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-          >
-            <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono font-bold text-rose-400">!%</span>
-            <span class="truncate">Filter NOT LIKE '%{String(contextMenu.cellValue)}%'</span>
-          </button>
-        {/if}
-        <button
-          onclick={() => applyQuickFilter('IS NULL')}
-          class="w-full text-left px-3 py-1 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-        >
-          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono text-rose-400">∅</span>
-          <span>Filter IS NULL</span>
-        </button>
-        <button
-          onclick={() => applyQuickFilter('IS NOT NULL')}
-          class="w-full text-left px-3 py-1 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-        >
-          <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono text-emerald-400">!∅</span>
-          <span>Filter IS NOT NULL</span>
-        </button>
-      </div>
-
+              onclick={() => applyQuickFilter('IS NOT NULL')}
+              class="w-full text-left px-3 py-1 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+            >
+              <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono text-emerald-400">!∅</span>
+              <span>Filter IS NOT NULL</span>
+            </button>
           </div>
         </div>
       </div>
@@ -1512,57 +1547,59 @@ import { copyText } from '../../utils/clipboard';
         <div id="grid-ctx-table-mutations">
           <div id="grid-ctx-insert-section">
             <div id="grid-ctx-insert-options">
-        {#if currentTab?.tableName}
-          <button
-            id="grid-ctx-btn-dup-nokey"
-            onclick={() => {
-              duplicateRowAsDraft(contextMenu!.rIdx, true);
-              closeContextMenu();
-            }}
-            class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-emerald-300 font-medium"
-          >
-            <Icon name="copy" class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span>Duplicate Row (Without Key)</span>
-          </button>
-          <button
-            id="grid-ctx-btn-dup-key"
-            onclick={() => {
-              duplicateRowAsDraft(contextMenu!.rIdx, false);
-              closeContextMenu();
-            }}
-            class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-indigo-300 font-medium"
-          >
-            <Icon name="key" class="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-            <span>Duplicate Row (With Key)</span>
-          </button>
-          <button
-            id="grid-ctx-btn-add-draft"
-            onclick={() => {
-              addDraftRow();
-              closeContextMenu();
-            }}
-            class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-emerald-300"
-          >
-            <Icon name="plus" class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span>Add Row Draft</span>
-          </button>
-          <button
-            id="grid-ctx-btn-delete-row"
-            onclick={() => {
-              handleDeleteCurrentRow();
-              closeContextMenu();
-            }}
-            disabled={selectedRowIndex === null}
-            class="w-full text-left px-3 py-1.5 hover:bg-rose-950/60 disabled:opacity-40 flex items-center space-x-2 text-rose-300"
-          >
-            <Icon name="trash-2" class="w-3.5 h-3.5 text-rose-400 shrink-0" />
-            <span>Delete Selected Row(s)</span>
-          </button>
-        {/if}
+              {#if currentTab?.tableName}
+                <button
+                  id="grid-ctx-btn-dup-nokey"
+                  onclick={() => {
+                    duplicateRowAsDraft(contextMenu!.rIdx, true);
+                    closeContextMenu();
+                  }}
+                  class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-emerald-300 font-medium"
+                >
+                  <Icon name="copy" class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span>Duplicate Row (Without Key)</span>
+                </button>
+                <button
+                  id="grid-ctx-btn-dup-key"
+                  onclick={() => {
+                    duplicateRowAsDraft(contextMenu!.rIdx, false);
+                    closeContextMenu();
+                  }}
+                  class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-indigo-300 font-medium"
+                >
+                  <Icon name="key" class="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                  <span>Duplicate Row (With Key)</span>
+                </button>
+                <button
+                  id="grid-ctx-btn-add-draft"
+                  onclick={() => {
+                    addDraftRow();
+                    closeContextMenu();
+                  }}
+                  class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-emerald-300"
+                >
+                  <Icon name="plus" class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span>Add Row Draft</span>
+                </button>
+                <button
+                  id="grid-ctx-btn-delete-row"
+                  onclick={() => {
+                    handleDeleteCurrentRow();
+                    closeContextMenu();
+                  }}
+                  disabled={selectedRowIndex === null}
+                  class="w-full text-left px-3 py-1.5 hover:bg-rose-950/60 disabled:opacity-40 flex items-center space-x-2 text-rose-300"
+                >
+                  <Icon name="trash-2" class="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                  <span>Delete Selected Row(s)</span>
+                </button>
+              {/if}
+            </div>
           </div>
         </div>
       </div>
 
+      <div class="py-1">
         <button
           onclick={() => {
             const { rIdx, cIdx, colName, cellValue } = contextMenu!;
@@ -1600,39 +1637,40 @@ import { copyText } from '../../utils/clipboard';
 
       <div id="grid-ctx-copy-parent" class="py-1">
         <div id="grid-ctx-copy-submenu">
-        <button
-          id="grid-ctx-btn-copy-row-tsv"
-          onclick={() => {
-            copyRowAsTSV(contextMenu!.rIdx);
-            closeContextMenu();
-          }}
-          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-        >
-          <Icon name="file-text" class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-          <span>Copy Row as TSV</span>
-        </button>
-        <button
-          id="grid-ctx-btn-copy-row-json"
-          onclick={() => {
-            copyRowAsMarkdown(contextMenu!.rIdx);
-            closeContextMenu();
-          }}
-          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-        >
-          <Icon name="share-2" class="w-3.5 h-3.5 text-sky-400 shrink-0" />
-          <span>Copy Row as Markdown</span>
-        </button>
-        <button
-          id="grid-ctx-btn-copy-row-sql"
-          onclick={() => {
-            copyRowAsInsertSQL(contextMenu!.rIdx);
-            closeContextMenu();
-          }}
-          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-        >
-          <Icon name="code" class="w-3.5 h-3.5 text-amber-400 shrink-0" />
-          <span>Copy as INSERT SQL</span>
-        </button>
+          <button
+            id="grid-ctx-btn-copy-row-tsv"
+            onclick={() => {
+              copyRowAsTSV(contextMenu!.rIdx);
+              closeContextMenu();
+            }}
+            class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+          >
+            <Icon name="file-text" class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <span>Copy Row as TSV</span>
+          </button>
+          <button
+            id="grid-ctx-btn-copy-row-json"
+            onclick={() => {
+              copyRowAsMarkdown(contextMenu!.rIdx);
+              closeContextMenu();
+            }}
+            class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+          >
+            <Icon name="share-2" class="w-3.5 h-3.5 text-sky-400 shrink-0" />
+            <span>Copy Row as Markdown</span>
+          </button>
+          <button
+            id="grid-ctx-btn-copy-row-sql"
+            onclick={() => {
+              copyRowAsInsertSQL(contextMenu!.rIdx);
+              closeContextMenu();
+            }}
+            class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+          >
+            <Icon name="code" class="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span>Copy as INSERT SQL</span>
+          </button>
+        </div>
       </div>
     </div>
   {/if}

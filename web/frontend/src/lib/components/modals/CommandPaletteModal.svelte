@@ -20,8 +20,11 @@
     const list: CommandItem[] = [];
 
     // 1. Tables
-    if (appState.catalog?.tables) {
-      for (const t of appState.catalog.tables) {
+    const activeCatalog = (appState.activeTab?.database && appState.catalogs[appState.activeTab.database.toLowerCase()]) ||
+      (appState.currentDatabase && appState.catalogs[appState.currentDatabase.toLowerCase()]) ||
+      appState.catalog;
+    if (activeCatalog?.tables) {
+      for (const t of activeCatalog.tables) {
         list.push({
           id: `tbl-${t.name}`,
           title: t.name,

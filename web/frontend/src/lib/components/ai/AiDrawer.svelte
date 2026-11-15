@@ -42,11 +42,17 @@ import { copyText } from '../../utils/clipboard';
     }
   });
 
+  let activeCatalog = $derived(
+    (appState.activeTab?.database && appState.catalogs[appState.activeTab.database.toLowerCase()]) ||
+    (appState.currentDatabase && appState.catalogs[appState.currentDatabase.toLowerCase()]) ||
+    appState.catalog
+  );
+
   // Autocomplete matching tables for @mention
   let matchingTables = $derived.by(() => {
-    if (mentionQuery === null || !appState.catalog?.tables) return [];
+    if (mentionQuery === null || !activeCatalog?.tables) return [];
     const q = mentionQuery.toLowerCase();
-    return appState.catalog.tables
+    return activeCatalog.tables
       .filter((t) => t.name.toLowerCase().includes(q))
       .slice(0, 5);
   });
@@ -100,8 +106,8 @@ import { copyText } from '../../utils/clipboard';
     const dialect = appState.activeConnection?.driver || 'mysql';
 
     let schemaContext = `Database Dialect: ${dialect}\nCurrent Database: ${appState.currentDatabase || 'default'}\n`;
-    if (activeTable && appState.catalog?.tables) {
-      const t = appState.catalog.tables.find((tbl) => tbl.name.toLowerCase() === activeTable.toLowerCase());
+    if (activeTable && activeCatalog?.tables) {
+      const t = activeCatalog.tables.find((tbl) => tbl.name.toLowerCase() === activeTable.toLowerCase());
       if (t) {
         schemaContext += `Active Table: ${t.name}\nColumns: ${t.columns.map((c) => `${c.name} (${c.type})`).join(', ')}\n`;
       }

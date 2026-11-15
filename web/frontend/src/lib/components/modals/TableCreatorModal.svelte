@@ -94,30 +94,44 @@
 
   let generatedDDL = $derived.by(() => {
     const tbl = tableName.trim() || 'new_table';
+    const driver = appState.activeConnection?.driver || 'mysql';
+    const isPg = driver === 'postgres' || driver === 'postgresql';
+    const isSqlite = driver === 'sqlite';
+    const q = (s: string) => (isPg || isSqlite ? `"${s}"` : `\`${s}\``);
+
     const lines: string[] = [];
     const pks: string[] = [];
 
     columns.forEach((col) => {
       const colName = col.name.trim() || 'unnamed';
       let typeDef = col.type;
-      if (col.length) {
+
+      if (isPg) {
+        if (col.autoIncrement && (col.type === 'INT' || col.type === 'BIGINT')) {
+          typeDef = col.type === 'BIGINT' ? 'BIGSERIAL' : 'SERIAL';
+        } else if (col.length) {
+          typeDef += `(${col.length})`;
+        } else if (col.type === 'VARCHAR') {
+          typeDef += '(255)';
+        }
+      } else if (col.length) {
         typeDef += `(${col.length})`;
       } else if (col.type === 'VARCHAR') {
         typeDef += '(255)';
       }
 
-      let line = `  \`${colName}\` ${typeDef}`;
+      let line = `  ${q(colName)} ${typeDef}`;
       if (!col.isNullable) {
         line += ' NOT NULL';
-      } else {
+      } else if (!isPg) {
         line += ' NULL';
       }
 
-      if (col.autoIncrement && (col.type === 'INT' || col.type === 'BIGINT')) {
-        line += ' AUTO_INCREMENT';
+      if (!isPg && col.autoIncrement && (col.type === 'INT' || col.type === 'BIGINT')) {
+        line += isSqlite ? ' AUTOINCREMENT' : ' AUTO_INCREMENT';
       }
 
-      if (col.defaultValue) {
+      if (col.defaultValue && !(isPg && col.autoIncrement)) {
         if (col.defaultValue === 'NULL' || col.defaultValue === 'CURRENT_TIMESTAMP') {
           line += ` DEFAULT ${col.defaultValue}`;
         } else {
@@ -127,7 +141,7 @@
 
       lines.push(line);
       if (col.isPK) {
-        pks.push(`\`${colName}\``);
+        pks.push(q(colName));
       }
     });
 
@@ -135,8 +149,10 @@
       lines.push(`  PRIMARY KEY (${pks.join(', ')})`);
     }
 
-    let ddl = `CREATE TABLE \`${tbl}\` (\n${lines.join(',\n')}\n) ENGINE=${engine} DEFAULT CHARSET=utf8mb4;`;
-    return ddl;
+    if (isPg || isSqlite) {
+      return `CREATE TABLE ${q(tbl)} (\n${lines.join(',\n')}\n);`;
+    }
+    return `CREATE TABLE ${q(tbl)} (\n${lines.join(',\n')}\n) ENGINE=${engine} DEFAULT CHARSET=utf8mb4;`;
   });
 
   async function handleCreateDirect() {

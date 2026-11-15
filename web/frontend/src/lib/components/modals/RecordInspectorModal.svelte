@@ -12,6 +12,10 @@ import { copyText } from '../../utils/clipboard';
   let editedFields = $state<Record<string, any>>({});
   let searchQuery = $state('');
 
+  let activeCatalog = $derived(
+    (currentTab?.database && appState.catalogs[currentTab.database.toLowerCase()]) || appState.catalog
+  );
+
   function getColName(c: any): string {
     return typeof c === 'string' ? c : c.name || '';
   }
@@ -21,7 +25,13 @@ import { copyText } from '../../utils/clipboard';
   }
 
   function isColPK(c: any): boolean {
-    return typeof c === 'object' ? Boolean(c.is_primary_key) : false;
+    if (typeof c === 'object' && c.is_primary_key !== undefined) return Boolean(c.is_primary_key);
+    const table = activeCatalog?.tables?.find(
+      (t) => t.name.toLowerCase() === (currentTab?.tableName || '').toLowerCase()
+    );
+    const colName = getColName(c);
+    const colMeta = table?.columns?.find((cm) => cm.name.toLowerCase() === colName.toLowerCase());
+    return Boolean(colMeta?.is_primary_key);
   }
 
   $effect(() => {
@@ -35,17 +45,18 @@ import { copyText } from '../../utils/clipboard';
   }
 
   function saveField(colName: string, cIdx: number) {
-    if (!currentTab?.tableName || !currentRow) return;
+    if (!currentTab?.tableName || !currentRow || !result?.columns) return;
     const newVal = editedFields[colName];
     const oldVal = currentRow[cIdx];
     if (newVal === undefined || newVal === oldVal) return;
 
     // Resolve PK column and value
-    const pkColObj = result?.columns.find((c) => isColPK(c));
+    const pkColObj = result.columns.find((c) => isColPK(c));
     const pkCol = pkColObj ? getColName(pkColObj) : undefined;
-    const pkVal = pkColObj ? currentRow[result!.columns.indexOf(pkColObj)] : undefined;
+    const pkColIdx = pkCol ? result.columns.findIndex((c) => getColName(c) === pkCol) : -1;
+    const pkVal = pkColIdx !== -1 ? currentRow[pkColIdx] : undefined;
 
-    appState.stageEdit(currentTab.tableName, rIdx, cIdx, colName, pkCol, pkVal, oldVal, newVal);
+    appState.stageEdit(currentTab.tableName, rIdx, cIdx, colName, pkCol, pkVal, oldVal, newVal, currentTab.database || appState.currentDatabase);
     currentRow[cIdx] = newVal;
     appState.showToast(`Staged change for ${colName}`, 'info');
   }

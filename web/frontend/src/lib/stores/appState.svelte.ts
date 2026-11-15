@@ -2234,15 +2234,24 @@ export class AppState {
 
     const tab = this.activeTab;
     const result = tab?.activeResult;
-    if (!result?.rows || !result.rows[rowIdx]) return;
+    if (!result?.rows || !result.rows[rowIdx] || !result.columns) return;
 
     const oldVal = result.rows[rowIdx][colIdx];
     if (newVal !== String(oldVal ?? '')) {
+      const catalog = (tab?.database && this.catalogs[tab.database.toLowerCase()]) || this.catalog;
+      const table = catalog?.tables?.find((t) => t.name.toLowerCase() === tableName.toLowerCase());
+      let pkCol = '';
       const pkColObj = result.columns.find((c: any) => typeof c === 'object' && c.is_primary_key);
-      const pkCol = pkColObj ? (typeof pkColObj === 'string' ? pkColObj : pkColObj.name) : undefined;
-      const pkVal = pkCol ? result.rows[rowIdx][result.columns.findIndex((c: any) => (typeof c === 'string' ? c : c.name) === pkCol)] : undefined;
+      if (pkColObj) {
+        pkCol = typeof pkColObj === 'string' ? pkColObj : pkColObj.name;
+      } else if (table?.columns) {
+        const pkMeta = table.columns.find((c) => c.is_primary_key);
+        if (pkMeta) pkCol = pkMeta.name;
+      }
+      const pkIdx = pkCol ? result.columns.findIndex((c: any) => (typeof c === 'string' ? c : c.name) === pkCol) : -1;
+      const pkVal = pkIdx !== -1 ? result.rows[rowIdx][pkIdx] : undefined;
 
-      this.stageEdit(tableName, rowIdx, colIdx, colName, pkCol, pkVal, oldVal, newVal, tab?.database);
+      this.stageEdit(tableName, rowIdx, colIdx, colName, pkCol || undefined, pkVal, oldVal, newVal, tab?.database);
       result.rows[rowIdx][colIdx] = newVal;
       this.showToast(`Staged JSON update for '${colName}'`, 'info');
     }

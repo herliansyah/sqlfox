@@ -8,13 +8,19 @@
   let truncateFirst = $state(false);
   let isGenerating = $state(false);
 
+  let activeCatalog = $derived(
+    (appState.activeTab?.database && appState.catalogs[appState.activeTab.database.toLowerCase()]) ||
+    (appState.currentDatabase && appState.catalogs[appState.currentDatabase.toLowerCase()]) ||
+    appState.catalog
+  );
+
   let catalogTables = $derived(
-    (appState.catalog?.tables || []).map((t) => t.name)
+    (activeCatalog?.tables || []).map((t) => t.name)
   );
 
   let activeTableMeta = $derived.by(() => {
-    if (!selectedTable || !appState.catalog?.tables) return null;
-    return appState.catalog.tables.find(
+    if (!selectedTable || !activeCatalog?.tables) return null;
+    return activeCatalog.tables.find(
       (t) => t.name.toLowerCase() === selectedTable.toLowerCase()
     );
   });
