@@ -78,7 +78,7 @@
     if (!tableMeta || !appState.activeConnection) return '';
     const driver = appState.activeConnection.driver;
     const isSQLite = driver === 'sqlite';
-    const isPostgres = driver === 'postgres';
+    const isPostgres = driver === 'postgres' || driver === 'postgresql';
     const q = (s: string) => (isSQLite || isPostgres ? `"${s}"` : `\`${s}\``);
 
     const name = fkName.trim() || 'fk_name';
@@ -128,7 +128,7 @@
     if (!confirmed) return;
 
     const driver = appState.activeConnection.driver;
-    const isPostgres = driver === 'postgres';
+    const isPostgres = driver === 'postgres' || driver === 'postgresql';
     const q = (s: string) => (isPostgres ? `"${s}"` : `\`${s}\``);
 
     let dropSql = `ALTER TABLE ${q(tableMeta.name)} DROP FOREIGN KEY ${q(constraintName)};`;

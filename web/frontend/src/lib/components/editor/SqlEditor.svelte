@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import { appState } from '../../stores/appState.svelte';
   import { codemirror } from '../../actions/codemirror';
   import { api } from '../../api/client';
@@ -80,10 +81,15 @@
     appState.requestSnippetParameters(snippet, insert);
   }
 
+  onDestroy(() => {
+    if (saveDebounceTimer) clearTimeout(saveDebounceTimer);
+  });
+
   function quoteIdentifier(name: string): string {
     const clean = name.replace(/^[`"\[]+|[`"\]]+$/g, '');
     const needsQuoting = !/^[a-zA-Z_][a-zA-Z0-9_$]*$/.test(clean);
-    if (appState.activeConnection?.driver === 'postgres' || appState.activeConnection?.driver === 'sqlite') {
+    const driver = appState.activeConnection?.driver;
+    if (driver === 'postgres' || driver === 'postgresql' || driver === 'sqlite') {
       return needsQuoting ? `"${clean.replace(/"/g, '""')}"` : clean;
     }
     return needsQuoting ? `\`${clean.replace(/`/g, '``')}\`` : clean;

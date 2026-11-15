@@ -43,29 +43,58 @@
     return (tbl?.columns || []).map((c) => c.name);
   });
 
-  function parseCsvLine(line: string, delim: string): string[] {
-    const result: string[] = [];
+  function parseCsvRows(text: string, delim: string): string[][] {
+    const rows: string[][] = [];
+    let row: string[] = [];
     let cur = '';
     let inQuotes = false;
+    let quoteChar = '';
 
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i];
-      if (char === '"' || char === "'") {
-        if (inQuotes && line[i + 1] === char) {
-          cur += char;
-          i++;
+    for (let i = 0; i < text.length; i++) {
+      const char = text[i];
+      if (inQuotes) {
+        if (char === quoteChar) {
+          if (i + 1 < text.length && text[i + 1] === quoteChar) {
+            cur += quoteChar;
+            i++;
+          } else {
+            inQuotes = false;
+          }
         } else {
-          inQuotes = !inQuotes;
+          cur += char;
         }
-      } else if (char === delim && !inQuotes) {
-        result.push(cur.trim());
-        cur = '';
       } else {
-        cur += char;
+        if (char === '"' || char === "'") {
+          inQuotes = true;
+          quoteChar = char;
+        } else if (char === delim) {
+          row.push(cur.trim());
+          cur = '';
+        } else if (char === '\n' || (char === '\r' && text[i + 1] === '\n')) {
+          if (char === '\r') i++;
+          row.push(cur.trim());
+          if (row.some((field) => field.length > 0)) {
+            rows.push(row);
+          }
+          row = [];
+          cur = '';
+        } else {
+          cur += char;
+        }
       }
     }
-    result.push(cur.trim());
-    return result;
+    if (cur.length > 0 || row.length > 0) {
+      row.push(cur.trim());
+      if (row.some((field) => field.length > 0)) {
+        rows.push(row);
+      }
+    }
+    return rows;
+  }
+
+  function parseCsvLine(line: string, delim: string): string[] {
+    const rows = parseCsvRows(line, delim);
+    return rows[0] || [];
   }
 
   async function handleFileSelect(e: Event) {
@@ -80,16 +109,16 @@
     if (!selectedFile) return;
     try {
       const text = await selectedFile.text();
-      const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-      if (lines.length === 0) return;
+      const allRows = parseCsvRows(text, delimiter);
+      if (allRows.length === 0) return;
 
-      const firstLineCols = parseCsvLine(lines[0], delimiter);
+      const firstRow = allRows[0];
       if (hasHeader) {
-        csvHeaders = firstLineCols;
-        csvPreviewRows = lines.slice(1, 6).map((l) => parseCsvLine(l, delimiter));
+        csvHeaders = firstRow;
+        csvPreviewRows = allRows.slice(1, 6);
       } else {
-        csvHeaders = firstLineCols.map((_, i) => `Col_${i + 1}`);
-        csvPreviewRows = lines.slice(0, 5).map((l) => parseCsvLine(l, delimiter));
+        csvHeaders = firstRow.map((_, i) => `Col_${i + 1}`);
+        csvPreviewRows = allRows.slice(0, 5);
       }
 
       // Auto-map matching columns
@@ -123,19 +152,19 @@
 
     try {
       const text = await selectedFile.text();
-      const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-      const dataLines = hasHeader ? lines.slice(1) : lines;
+      const allRows = parseCsvRows(text, delimiter);
+      const dataRows = hasHeader ? allRows.slice(1) : allRows;
 
-      if (dataLines.length === 0) {
+      if (dataRows.length === 0) {
         appState.showToast('CSV file contains no records to import', 'warning');
         isImporting = false;
         return;
       }
 
-      const totalRows = dataLines.length;
+      const totalRows = dataRows.length;
       const driver = appState.activeConnection?.driver;
       const isSQLite = driver === 'sqlite';
-      const isPostgres = driver === 'postgres';
+      const isPostgres = driver === 'postgres' || driver === 'postgresql';
       const quote = isSQLite || isPostgres ? '"' : '`';
       let insertKeyword = 'INSERT';
       if (skipErrors) {
@@ -154,12 +183,11 @@
       const batchSize = 100;
       let insertedCount = 0;
 
-      for (let i = 0; i < dataLines.length; i += batchSize) {
-        const chunk = dataLines.slice(i, i + batchSize);
+      for (let i = 0; i < dataRows.length; i += batchSize) {
+        const chunk = dataRows.slice(i, i + batchSize);
         const valuesRows: string[] = [];
 
-        for (const line of chunk) {
-          const cells = parseCsvLine(line, delimiter);
+        for (const cells of chunk) {
           const valTokens: string[] = [];
 
           for (const [csvCol, _] of activePairs) {

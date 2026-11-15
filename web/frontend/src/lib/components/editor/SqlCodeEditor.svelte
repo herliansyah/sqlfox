@@ -10,7 +10,8 @@
   } = $props();
 
   function quoteIdentifier(name: string): string {
-    if (appState.activeConnection?.driver === 'postgres' || appState.activeConnection?.driver === 'sqlite') {
+    const driver = appState.activeConnection?.driver;
+    if (driver === 'postgres' || driver === 'postgresql' || driver === 'sqlite') {
       return `"${name.replace(/"/g, '""')}"`;
     }
     return `\`${name.replace(/`/g, '``')}\``;

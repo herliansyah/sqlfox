@@ -29,14 +29,14 @@ import {
 import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { bracketMatching, syntaxHighlighting, HighlightStyle, indentOnInput } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
-import type { QuerySnippet, SchemaCatalog } from '../../types';
+import type { DatabaseDriver, QuerySnippet, SchemaCatalog } from '../../types';
 import { executionTarget, maskSqlForAnalysis, type StatementPos } from '../utils/sqlStatements';
 import { computeSqlCompletions, completionTokenStart, parseQualifiedReference, type CompletionItem } from '../utils/sqlCompletion';
 
 export interface CodeMirrorOptions {
   id?: string;
   doc: string;
-  dialect?: 'mysql' | 'postgres' | 'sqlite';
+  dialect?: DatabaseDriver;
   readOnly?: boolean;
   placeholder?: string;
   activeDatabase?: string;
@@ -151,7 +151,7 @@ export const sqlfoxTheme = EditorView.theme({
 }, { dark: true });
 
 function resolveDialect(dialect?: string) {
-  if (dialect === 'postgres') return PostgreSQL;
+  if (dialect === 'postgres' || dialect === 'postgresql') return PostgreSQL;
   if (dialect === 'sqlite') return SQLite;
   return MySQL;
 }

@@ -1409,7 +1409,9 @@ export class AppState {
   async executeTransaction(command: 'START TRANSACTION' | 'COMMIT' | 'ROLLBACK') {
     if (!this.activeSessionId) return;
     try {
-      const res = await api.executeQuery(this.activeSessionId, `${command};`, false, this.activeTab?.database || this.currentDatabase);
+      const isSqlite = this.activeConnection?.driver === 'sqlite';
+      const sqlCmd = isSqlite && command === 'START TRANSACTION' ? 'BEGIN TRANSACTION' : command;
+      const res = await api.executeQuery(this.activeSessionId, `${sqlCmd};`, false, this.activeTab?.database || this.currentDatabase);
       if (res.error) {
         this.showToast(`${command} failed: ${res.error}`, 'error');
         return;
@@ -2022,8 +2024,14 @@ export class AppState {
   async dropTable(tableName: string, database?: string) {
     if (!this.activeSessionId) return;
     const targetDb = database || this.tabs.find((t) => t.tableName?.toLowerCase() === tableName.toLowerCase())?.database || this.currentDatabase || '';
-    const isPg = this.activeConnection?.driver === 'postgres';
-    const sql = isPg ? `DROP TABLE "${tableName}" CASCADE;` : `DROP TABLE IF EXISTS \`${tableName}\`;`;
+    const driver = this.activeConnection?.driver;
+    const isPg = driver === 'postgres' || driver === 'postgresql';
+    const isSqlite = driver === 'sqlite';
+    const sql = isPg
+      ? `DROP TABLE "${tableName}" CASCADE;`
+      : isSqlite
+      ? `DROP TABLE IF EXISTS "${tableName}";`
+      : `DROP TABLE IF EXISTS \`${tableName}\`;`;
     const confirmed = await this.promptSafetyChallenge(sql, {
       risk_level: 'CRITICAL',
       target_table: tableName,
@@ -2052,8 +2060,14 @@ export class AppState {
   async truncateTable(tableName: string, database?: string) {
     if (!this.activeSessionId) return;
     const targetDb = database || this.tabs.find((t) => t.tableName?.toLowerCase() === tableName.toLowerCase())?.database || this.currentDatabase || '';
-    const isPg = this.activeConnection?.driver === 'postgres';
-    const sql = isPg ? `TRUNCATE TABLE "${tableName}" CASCADE;` : `TRUNCATE TABLE \`${tableName}\`;`;
+    const driver = this.activeConnection?.driver;
+    const isPg = driver === 'postgres' || driver === 'postgresql';
+    const isSqlite = driver === 'sqlite';
+    const sql = isPg
+      ? `TRUNCATE TABLE "${tableName}" CASCADE;`
+      : isSqlite
+      ? `DELETE FROM "${tableName}";`
+      : `TRUNCATE TABLE \`${tableName}\`;`;
     const confirmed = await this.promptSafetyChallenge(sql, {
       risk_level: 'HIGH',
       target_table: tableName,
@@ -2082,8 +2096,10 @@ export class AppState {
   async renameTable(oldName: string, newName: string, database?: string) {
     if (!this.activeSessionId) return;
     const targetDb = database || this.tabs.find((t) => t.tableName?.toLowerCase() === oldName.toLowerCase())?.database || this.currentDatabase || '';
-    const isPg = this.activeConnection?.driver === 'postgres';
-    const sql = isPg
+    const driver = this.activeConnection?.driver;
+    const isPg = driver === 'postgres' || driver === 'postgresql';
+    const isSqlite = driver === 'sqlite';
+    const sql = isPg || isSqlite
       ? `ALTER TABLE "${oldName}" RENAME TO "${newName}";`
       : `RENAME TABLE \`${oldName}\` TO \`${newName}\`;`;
 
@@ -2109,8 +2125,9 @@ export class AppState {
     if (!this.activeSessionId) return;
     const targetDb = database || this.tabs.find((t) => t.tableName?.toLowerCase() === sourceTable.toLowerCase())?.database || this.currentDatabase || '';
     const driver = this.activeConnection?.driver;
+    const isPg = driver === 'postgres' || driver === 'postgresql';
     try {
-      if (driver === 'postgres') {
+      if (isPg) {
         let sql = `CREATE TABLE "${targetTable}" (LIKE "${sourceTable}" INCLUDING ALL);`;
         if (copyData) {
           sql += `\nINSERT INTO "${targetTable}" SELECT * FROM "${sourceTable}";`;
@@ -2141,7 +2158,8 @@ export class AppState {
 
   async createDatabase(dbName: string, charset = 'utf8mb4', collation = 'utf8mb4_unicode_ci') {
     if (!this.activeSessionId) return;
-    const isPg = this.activeConnection?.driver === 'postgres';
+    const driver = this.activeConnection?.driver;
+    const isPg = driver === 'postgres' || driver === 'postgresql';
     const sql = isPg
       ? `CREATE DATABASE "${dbName}";`
       : `CREATE DATABASE \`${dbName}\` CHARACTER SET ${charset} COLLATE ${collation};`;
@@ -2160,7 +2178,8 @@ export class AppState {
 
   async dropDatabase(dbName: string) {
     if (!this.activeSessionId) return;
-    const isPg = this.activeConnection?.driver === 'postgres';
+    const driver = this.activeConnection?.driver;
+    const isPg = driver === 'postgres' || driver === 'postgresql';
     const sql = isPg ? `DROP DATABASE "${dbName}";` : `DROP DATABASE IF EXISTS \`${dbName}\`;`;
     const confirmed = await this.promptSafetyChallenge(sql, {
       risk_level: 'CRITICAL',

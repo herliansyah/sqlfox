@@ -60,7 +60,7 @@
     if (!tableMeta || !appState.activeConnection) return '';
     const driver = appState.activeConnection.driver;
     const isSQLite = driver === 'sqlite';
-    const isPostgres = driver === 'postgres';
+    const isPostgres = driver === 'postgres' || driver === 'postgresql';
     const q = (s: string) => (isSQLite || isPostgres ? `"${s}"` : `\`${s}\``);
 
     const name = indexName.trim() || 'idx_name';
@@ -117,7 +117,7 @@
 
     const driver = appState.activeConnection.driver;
     const isSQLite = driver === 'sqlite';
-    const isPostgres = driver === 'postgres';
+    const isPostgres = driver === 'postgres' || driver === 'postgresql';
     const q = (s: string) => (isSQLite || isPostgres ? `"${s}"` : `\`${s}\``);
 
     let dropSql = `DROP INDEX ${q(idxName)} ON ${q(tableMeta.name)};`;

@@ -1,4 +1,4 @@
-export type DatabaseDriver = 'mysql' | 'postgres' | 'sqlite';
+export type DatabaseDriver = 'mysql' | 'postgres' | 'sqlite' | 'postgresql';
 export type Environment = 'Development' | 'Staging' | 'Production';
 export type RiskLevel = 'NONE' | 'LOW' | 'MEDIUM' | 'WARNING' | 'HIGH' | 'DANGEROUS' | 'CRITICAL';
 export type TableMode = 'data' | 'structure' | 'indexes' | 'foreign-keys' | 'ddl' | 'diagnostics' | 'partitions' | 'notes';

@@ -55,7 +55,7 @@
   let generatedDDL = $derived.by(() => {
     const driver = appState.activeConnection?.driver;
     const isSQLite = driver === 'sqlite';
-    const isPostgres = driver === 'postgres';
+    const isPostgres = driver === 'postgres' || driver === 'postgresql';
     const quote = isSQLite || isPostgres ? '"' : '`';
     const cleanName = routineName.trim() || (routineType === 'FUNCTION' ? 'fn_sample' : 'sp_sample');
     const cleanBody = body.trim().replace(/;+$/, '');

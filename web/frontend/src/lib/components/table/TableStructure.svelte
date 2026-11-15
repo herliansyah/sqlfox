@@ -219,11 +219,21 @@
     appState.showToast('All staged structural modifications discarded', 'info');
   }
 
+  function formatDefaultValue(val?: string | null): string {
+    if (!val) return '';
+    const trimmed = val.trim();
+    if (!trimmed) return '';
+    if (trimmed.toUpperCase() === 'NULL' || trimmed.toUpperCase() === 'CURRENT_TIMESTAMP' || /^-?\d+(\.\d+)?$/.test(trimmed) || /^[A-Z_]+\(.*\)$/i.test(trimmed)) {
+      return `DEFAULT ${trimmed}`;
+    }
+    return `DEFAULT '${trimmed.replace(/'/g, "''")}'`;
+  }
+
   function generateAlterDDL(): string {
     if (!tableMeta || !appState.activeConnection) return '';
     const driver = appState.activeConnection.driver;
     const isSQLite = driver === 'sqlite';
-    const isPostgres = driver === 'postgres';
+    const isPostgres = driver === 'postgres' || driver === 'postgresql';
     const tableName = tableMeta.name;
 
     const q = (name: string) => (isSQLite || isPostgres ? `"${name}"` : `\`${name}\``);
@@ -241,7 +251,7 @@
       .filter((c) => c._isNew && !c._deleted)
       .forEach((c) => {
         const nullClause = c.is_nullable ? 'NULL' : 'NOT NULL';
-        const dfltClause = c.default_value ? `DEFAULT '${c.default_value}'` : '';
+        const dfltClause = formatDefaultValue(c.default_value);
         const extraClause = c.extra || '';
         statements.push(
           `ALTER TABLE ${q(tableName)} ADD COLUMN ${q(c.name)} ${c.type} ${nullClause} ${dfltClause} ${extraClause};`.replace(/\s+/g, ' ').trim()
@@ -253,7 +263,7 @@
       .filter((c) => c._modified && !c._isNew && !c._deleted)
       .forEach((c) => {
         const nullClause = c.is_nullable ? 'NULL' : 'NOT NULL';
-        const dfltClause = c.default_value ? `DEFAULT '${c.default_value}'` : '';
+        const dfltClause = formatDefaultValue(c.default_value);
         const extraClause = c.extra || '';
 
         if (isSQLite) {

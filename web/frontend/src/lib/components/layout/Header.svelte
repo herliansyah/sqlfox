@@ -1,6 +1,6 @@
 <script lang="ts">
 import { copyText } from '../../utils/clipboard';
-  import { tick } from 'svelte';
+  import { tick, onDestroy } from 'svelte';
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
   import Icon from '../common/Icon.svelte';
@@ -214,6 +214,10 @@ import { copyText } from '../../utils/clipboard';
     appState.showToast('Master PIN copied to clipboard!', 'info');
     setTimeout(() => (copiedPin = false), 2000);
   }
+
+  onDestroy(() => {
+    if (pinAutoMaskTimer) clearTimeout(pinAutoMaskTimer);
+  });
 </script>
 
 <header class="h-12 bg-[#0f172a] border-b border-slate-800 flex items-center gap-3 px-4 z-40 flex-shrink-0 select-none">

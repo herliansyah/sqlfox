@@ -409,14 +409,20 @@ import { copyText } from '../../utils/clipboard';
   function exportSQL() {
     if (!result?.rows || !result?.columns) return;
     const tbl = currentTab?.tableName || 'exported_table';
-    const cols = result.columns.map((c) => `\`${getColName(c)}\``).join(', ');
+    const driver = appState.activeConnection?.driver;
+    const isPg = driver === 'postgres' || driver === 'postgresql';
+    const isSqlite = driver === 'sqlite';
+    const q = (s: string) => (isPg || isSqlite ? `"${s}"` : `\`${s}\``);
+
+    const cols = result.columns.map((c) => q(getColName(c))).join(', ');
     const inserts = result.rows.map((row) => {
       const vals = row.map((c) => {
         if (c === null || c === undefined) return 'NULL';
         if (typeof c === 'number') return c;
+        if (typeof c === 'boolean') return c ? (isPg ? 'TRUE' : '1') : (isPg ? 'FALSE' : '0');
         return `'${String(c).replace(/'/g, "''")}'`;
       }).join(', ');
-      return `INSERT INTO \`${tbl}\` (${cols}) VALUES (${vals});`;
+      return `INSERT INTO ${q(tbl)} (${cols}) VALUES (${vals});`;
     });
     downloadFile(inserts.join('\n'), `${tbl}.sql`, 'text/plain');
     showExportMenu = false;

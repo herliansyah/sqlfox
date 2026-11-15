@@ -39,7 +39,7 @@
   let generatedDDL = $derived.by(() => {
     const name = dbName.trim() || 'new_database';
     const driver = appState.activeConnection?.driver;
-    if (driver === 'postgres') {
+    if (driver === 'postgres' || driver === 'postgresql') {
       return `CREATE DATABASE "${name}";`;
     }
     return `CREATE DATABASE \`${name}\`\n  CHARACTER SET ${charset}\n  COLLATE ${collation};`;

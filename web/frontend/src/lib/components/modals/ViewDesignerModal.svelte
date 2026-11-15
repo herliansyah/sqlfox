@@ -29,7 +29,7 @@
   let generatedDDL = $derived.by(() => {
     const driver = appState.activeConnection?.driver;
     const isSQLite = driver === 'sqlite';
-    const isPostgres = driver === 'postgres';
+    const isPostgres = driver === 'postgres' || driver === 'postgresql';
     const quote = isSQLite || isPostgres ? '"' : '`';
     const cleanName = viewName.trim() || 'v_sample_view';
     const cleanQuery = selectQuery.trim().replace(/;+$/, '');

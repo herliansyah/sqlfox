@@ -34,7 +34,7 @@
   }
 
   $effect(() => {
-    if (currentTab?.isTableViewer && activeMode === 'data' && !currentTab.activeResult && !currentTab.isExecuting) {
+    if (appState.activeSessionId && currentTab?.isTableViewer && activeMode === 'data' && !currentTab.activeResult && !currentTab.isExecuting) {
       appState.loadTableData(currentTab);
     }
   });

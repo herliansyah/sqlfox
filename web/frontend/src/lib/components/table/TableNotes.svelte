@@ -8,7 +8,7 @@
     tableName: string;
   }
 
-  const { tableName }: Props = $props();
+  let { tableName }: Props = $props();
 
   interface NoteItem {
     id: string;

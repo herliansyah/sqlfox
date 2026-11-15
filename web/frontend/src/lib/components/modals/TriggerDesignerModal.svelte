@@ -33,7 +33,7 @@
   let generatedDDL = $derived.by(() => {
     const driver = appState.activeConnection?.driver;
     const isSQLite = driver === 'sqlite';
-    const isPostgres = driver === 'postgres';
+    const isPostgres = driver === 'postgres' || driver === 'postgresql';
     const quote = isSQLite || isPostgres ? '"' : '`';
     const cleanName = triggerName.trim() || 'trg_sample';
     const cleanTable = targetTable.trim() || 'target_table';

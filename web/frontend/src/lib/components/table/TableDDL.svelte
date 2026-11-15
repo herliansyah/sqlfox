@@ -12,7 +12,7 @@ import { copyText } from '../../utils/clipboard';
   let { tableName }: Props = $props();
 
   let ddl = $state<string>('');
-  let isLoading = $state<boolean>(true);
+  let isLoading = $state<boolean>(false);
   let error = $state<string | null>(null);
   let copied = $state<boolean>(false);
 

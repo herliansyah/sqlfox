@@ -51,7 +51,7 @@ export interface CompletionRequest {
   catalogs: Record<string, SchemaCatalog>;
   activeDatabase?: string;
   snippets?: QuerySnippet[];
-  dialect?: 'mysql' | 'postgres' | 'sqlite';
+  dialect?: 'mysql' | 'postgres' | 'sqlite' | 'postgresql';
   quoteIdentifier?: (identifier: string) => string;
   onDatabaseRequested?: (database: string) => void;
 }
@@ -240,7 +240,8 @@ function tokenStart(text: string, cursor: number): number {
 export function computeSqlCompletions(request: CompletionRequest): CompletionItem[] {
   const { text, cursor, catalogs } = request;
   if (!text || cursor < 0 || cursor > text.length) return [];
-  const dialect = request.dialect || 'generic';
+  const rawDialect = request.dialect;
+  const dialect = (rawDialect === 'postgresql' ? 'postgres' : rawDialect) || 'generic';
   if (!isCodePosition(text, cursor, dialect)) return [];
   const masked = maskSqlForAnalysis(text, dialect);
   // In a comment or quoted value, analysis retains whitespace but no typed word.

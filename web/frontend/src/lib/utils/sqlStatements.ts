@@ -4,15 +4,16 @@ export interface StatementPos {
   text: string;
 }
 
-export type SqlDialect = 'mysql' | 'postgres' | 'sqlite' | 'generic';
+export type SqlDialect = 'mysql' | 'postgres' | 'sqlite' | 'postgresql' | 'generic';
 
 function dialectRules(dialect: SqlDialect) {
+  const isPg = dialect === 'postgres' || dialect === 'postgresql';
   return {
     hashComments: dialect === 'mysql' || dialect === 'generic',
-    dollarQuotes: dialect === 'postgres' || dialect === 'generic',
+    dollarQuotes: isPg || dialect === 'generic',
     backslashEscapes: dialect === 'mysql' || dialect === 'generic',
     bracketQuotes: dialect === 'sqlite' || dialect === 'generic',
-    backtickQuotes: dialect !== 'postgres',
+    backtickQuotes: !isPg,
   };
 }
 

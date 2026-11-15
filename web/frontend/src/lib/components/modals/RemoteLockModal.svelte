@@ -6,6 +6,10 @@
   let errorMessage = $state('');
   let isUnlocking = $state(false);
 
+  function autoFocus(node: HTMLInputElement) {
+    node.focus();
+  }
+
   async function handleUnlock(e: Event) {
     e.preventDefault();
     if (!password) return;
@@ -46,7 +50,7 @@
           <input
             type="password"
             bind:value={password}
-            autofocus
+            use:autoFocus
             required
             placeholder="Enter Master Password / PIN"
             class="w-full bg-[#090d16] border border-slate-700 focus:border-sky-400 p-2.5 rounded-lg text-white text-center text-sm outline-none font-mono transition shadow-inner"
