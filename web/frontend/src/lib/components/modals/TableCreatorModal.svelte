@@ -18,32 +18,39 @@
   let columns = $state<TableColDraft[]>([]);
   let isSubmitting = $state(false);
 
+  let wasOpen = false;
+
   $effect(() => {
     if (appState.isTableCreatorOpen) {
-      tableName = '';
-      engine = 'InnoDB';
-      comment = '';
-      columns = [
-        {
-          name: 'id',
-          type: 'INT',
-          length: '',
-          isPK: true,
-          isNullable: false,
-          autoIncrement: true,
-          defaultValue: '',
-        },
-        {
-          name: 'created_at',
-          type: 'TIMESTAMP',
-          length: '',
-          isPK: false,
-          isNullable: false,
-          autoIncrement: false,
-          defaultValue: 'CURRENT_TIMESTAMP',
-        },
-      ];
-      isSubmitting = false;
+      if (!wasOpen) {
+        tableName = '';
+        engine = 'InnoDB';
+        comment = '';
+        columns = [
+          {
+            name: 'id',
+            type: 'INT',
+            length: '',
+            isPK: true,
+            isNullable: false,
+            autoIncrement: true,
+            defaultValue: '',
+          },
+          {
+            name: 'created_at',
+            type: 'TIMESTAMP',
+            length: '',
+            isPK: false,
+            isNullable: false,
+            autoIncrement: false,
+            defaultValue: 'CURRENT_TIMESTAMP',
+          },
+        ];
+        isSubmitting = false;
+        wasOpen = true;
+      }
+    } else {
+      wasOpen = false;
     }
   });
 

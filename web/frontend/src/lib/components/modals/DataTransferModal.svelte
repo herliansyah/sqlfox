@@ -16,13 +16,20 @@
   let isTransferring = $state(false);
   let transferResult = $state<{ success: boolean; total_rows?: number; error?: string } | null>(null);
 
+  let wasOpen = false;
+
   $effect(() => {
     if (appState.isDataTransferOpen) {
-      sourceConnId = appState.activeConnection?.id || '';
-      sourceDb = appState.currentDatabase || '';
-      sourceTable = appState.activeTab?.tableName || '';
-      targetTable = sourceTable;
-      transferResult = null;
+      if (!wasOpen) {
+        sourceConnId = appState.activeConnection?.id || '';
+        sourceDb = appState.currentDatabase || '';
+        sourceTable = appState.activeTab?.tableName || '';
+        targetTable = sourceTable;
+        transferResult = null;
+        wasOpen = true;
+      }
+    } else {
+      wasOpen = false;
     }
   });
 

@@ -5,10 +5,17 @@
   let newName = $state('');
   let isSubmitting = $state(false);
 
+  let wasOpen = false;
+
   $effect(() => {
     if (appState.isRenameTableModalOpen) {
-      newName = appState.tableToRename || '';
-      isSubmitting = false;
+      if (!wasOpen) {
+        newName = appState.tableToRename || '';
+        isSubmitting = false;
+        wasOpen = true;
+      }
+    } else {
+      wasOpen = false;
     }
   });
 

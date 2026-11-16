@@ -56,7 +56,27 @@ import { copyText } from '../../utils/clipboard';
     const pkColIdx = pkCol ? result.columns.findIndex((c) => getColName(c) === pkCol) : -1;
     const pkVal = pkColIdx !== -1 ? currentRow[pkColIdx] : undefined;
 
-    appState.stageEdit(currentTab.tableName, rIdx, cIdx, colName, pkCol, pkVal, oldVal, newVal, currentTab.database || appState.currentDatabase);
+    let rowCriteria: Record<string, any> | undefined;
+    if (!pkCol) {
+      rowCriteria = {};
+      result.columns.forEach((c: any, idx: number) => {
+        const colKey = getColName(c);
+        rowCriteria![colKey] = currentRow[idx];
+      });
+    }
+
+    appState.stageEdit(
+      currentTab.tableName,
+      rIdx,
+      cIdx,
+      colName,
+      pkCol,
+      pkVal,
+      oldVal,
+      newVal,
+      currentTab.database || appState.currentDatabase,
+      rowCriteria
+    );
     currentRow[cIdx] = newVal;
     appState.showToast(`Staged change for ${colName}`, 'info');
   }

@@ -11,22 +11,29 @@
   let body = $state('BEGIN\n  -- Trigger logic here\nEND;');
   let isSubmitting = $state(false);
 
+  let wasOpen = false;
+
   $effect(() => {
     if (appState.isTriggerDesignerOpen) {
-      if (appState.triggerToEdit) {
-        triggerName = appState.triggerToEdit.name;
-        targetTable = appState.triggerToEdit.table;
-        timing = (appState.triggerToEdit.timing as any) || 'BEFORE';
-        event = (appState.triggerToEdit.event as any) || 'INSERT';
-        body = appState.triggerToEdit.statement || 'BEGIN\n  -- Trigger logic here\nEND;';
-      } else {
-        triggerName = '';
-        targetTable = appState.filteredTables[0]?.name || '';
-        timing = 'BEFORE';
-        event = 'INSERT';
-        body = 'BEGIN\n  -- Trigger logic here\nEND;';
+      if (!wasOpen) {
+        if (appState.triggerToEdit) {
+          triggerName = appState.triggerToEdit.name;
+          targetTable = appState.triggerToEdit.table;
+          timing = (appState.triggerToEdit.timing as any) || 'BEFORE';
+          event = (appState.triggerToEdit.event as any) || 'INSERT';
+          body = appState.triggerToEdit.statement || 'BEGIN\n  -- Trigger logic here\nEND;';
+        } else {
+          triggerName = '';
+          targetTable = appState.filteredTables[0]?.name || '';
+          timing = 'BEFORE';
+          event = 'INSERT';
+          body = 'BEGIN\n  -- Trigger logic here\nEND;';
+        }
+        isSubmitting = false;
+        wasOpen = true;
       }
-      isSubmitting = false;
+    } else {
+      wasOpen = false;
     }
   });
 

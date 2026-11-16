@@ -8,13 +8,20 @@
   let includeData = $state(true);
   let isExporting = $state(false);
 
+  let wasOpen = false;
+
   $effect(() => {
     if (appState.isDumpModalOpen) {
-      selectedDb = appState.dumpTargetTable ? (appState.activeTab?.database || appState.currentDatabase || '') : (appState.currentDatabase || '');
-      selectedTable = appState.dumpTargetTable || '';
-      includeSchema = true;
-      includeData = true;
-      isExporting = false;
+      if (!wasOpen) {
+        selectedDb = appState.dumpTargetTable ? (appState.activeTab?.database || appState.currentDatabase || '') : (appState.currentDatabase || '');
+        selectedTable = appState.dumpTargetTable || '';
+        includeSchema = true;
+        includeData = true;
+        isExporting = false;
+        wasOpen = true;
+      }
+    } else {
+      wasOpen = false;
     }
   });
 

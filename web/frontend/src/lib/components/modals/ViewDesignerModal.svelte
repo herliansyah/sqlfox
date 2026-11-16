@@ -10,19 +10,26 @@
   let selectQuery = $state('SELECT * FROM ');
   let isSubmitting = $state(false);
 
+  let wasOpen = false;
+
   $effect(() => {
     if (appState.isViewDesignerOpen) {
-      if (appState.viewToEdit) {
-        viewName = appState.viewToEdit.name;
-        selectQuery = appState.viewToEdit.query || 'SELECT * FROM ';
-      } else {
-        viewName = '';
-        algorithm = 'UNDEFINED';
-        checkOption = 'NONE';
-        const firstTable = appState.filteredTables[0]?.name || 'my_table';
-        selectQuery = `SELECT id, created_at FROM \`${firstTable}\` WHERE 1=1;`;
+      if (!wasOpen) {
+        if (appState.viewToEdit) {
+          viewName = appState.viewToEdit.name;
+          selectQuery = appState.viewToEdit.query || 'SELECT * FROM ';
+        } else {
+          viewName = '';
+          algorithm = 'UNDEFINED';
+          checkOption = 'NONE';
+          const firstTable = appState.filteredTables[0]?.name || 'my_table';
+          selectQuery = `SELECT id, created_at FROM \`${firstTable}\` WHERE 1=1;`;
+        }
+        isSubmitting = false;
+        wasOpen = true;
       }
-      isSubmitting = false;
+    } else {
+      wasOpen = false;
     }
   });
 

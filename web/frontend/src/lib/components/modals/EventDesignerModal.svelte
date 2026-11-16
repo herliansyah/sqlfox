@@ -14,23 +14,30 @@
   let body = $state('BEGIN\n  -- Scheduled event actions\n  DELETE FROM sessions WHERE expires_at < NOW();\nEND');
   let isSubmitting = $state(false);
 
+  let wasOpen = false;
+
   $effect(() => {
     if (appState.isEventDesignerOpen) {
-      if (appState.eventToEdit) {
-        eventName = appState.eventToEdit.name;
-        status = (appState.eventToEdit.status as any) || 'ENABLE';
-        body = appState.eventToEdit.definition || 'BEGIN\n  -- Scheduled event actions\nEND';
-      } else {
-        eventName = '';
-        scheduleType = 'EVERY';
-        everyQty = '1';
-        everyUnit = 'DAY';
-        atTime = 'CURRENT_TIMESTAMP + INTERVAL 1 HOUR';
-        status = 'ENABLE';
-        preserve = true;
-        body = 'BEGIN\n  -- Scheduled event actions\n  DELETE FROM sessions WHERE expires_at < NOW();\nEND';
+      if (!wasOpen) {
+        if (appState.eventToEdit) {
+          eventName = appState.eventToEdit.name;
+          status = (appState.eventToEdit.status as any) || 'ENABLE';
+          body = appState.eventToEdit.definition || 'BEGIN\n  -- Scheduled event actions\nEND';
+        } else {
+          eventName = '';
+          scheduleType = 'EVERY';
+          everyQty = '1';
+          everyUnit = 'DAY';
+          atTime = 'CURRENT_TIMESTAMP + INTERVAL 1 HOUR';
+          status = 'ENABLE';
+          preserve = true;
+          body = 'BEGIN\n  -- Scheduled event actions\n  DELETE FROM sessions WHERE expires_at < NOW();\nEND';
+        }
+        isSubmitting = false;
+        wasOpen = true;
       }
-      isSubmitting = false;
+    } else {
+      wasOpen = false;
     }
   });
 

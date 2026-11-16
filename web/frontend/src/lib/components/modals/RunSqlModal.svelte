@@ -11,15 +11,22 @@
   let totalStmts = $state(0);
   let logs = $state<string[]>([]);
 
+  let wasOpen = false;
+
   $effect(() => {
     if (appState.isRunSqlModalOpen) {
-      selectedFile = null;
-      stopOnError = true;
-      isRunning = false;
-      progressPct = 0;
-      currentStmtIndex = 0;
-      totalStmts = 0;
-      logs = [];
+      if (!wasOpen) {
+        selectedFile = null;
+        stopOnError = true;
+        isRunning = false;
+        progressPct = 0;
+        currentStmtIndex = 0;
+        totalStmts = 0;
+        logs = [];
+        wasOpen = true;
+      }
+    } else {
+      wasOpen = false;
     }
   });
 

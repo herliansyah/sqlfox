@@ -1,4 +1,5 @@
 <script lang="ts">
+import { SvelteSet } from 'svelte/reactivity';
 import { copyText } from '../../utils/clipboard';
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
@@ -89,7 +90,7 @@ import { copyText } from '../../utils/clipboard';
   // Threads filtering & selection
   let filterText = $state('');
   let activeChip = $state<FilterChip>('all');
-  let selectedThreadIds = $state<Set<number>>(new Set());
+  let selectedThreadIds = new SvelteSet<number>();
   let refreshInterval = $state<number>(0); // 0 = pause, 1000, 2000, 5000
   let intervalTimer: any = null;
   let inspectingThread = $state<ProcesslistThread | null>(null);

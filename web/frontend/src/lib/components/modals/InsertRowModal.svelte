@@ -22,17 +22,24 @@
     }
   });
 
+  let wasOpen = false;
+
   $effect(() => {
     if (appState.isInsertRowModalOpen && activeTableMeta) {
-      const initial: Record<string, any> = {};
-      activeTableMeta.columns.forEach((col) => {
-        if (!col.is_primary_key && col.default_value !== undefined && col.default_value !== null) {
-          initial[col.name] = col.default_value;
-        } else {
-          initial[col.name] = '';
-        }
-      });
-      formData = initial;
+      if (!wasOpen) {
+        const initial: Record<string, any> = {};
+        activeTableMeta.columns.forEach((col) => {
+          if (!col.is_primary_key && col.default_value !== undefined && col.default_value !== null) {
+            initial[col.name] = col.default_value;
+          } else {
+            initial[col.name] = '';
+          }
+        });
+        formData = initial;
+        wasOpen = true;
+      }
+    } else if (!appState.isInsertRowModalOpen) {
+      wasOpen = false;
     }
   });
 

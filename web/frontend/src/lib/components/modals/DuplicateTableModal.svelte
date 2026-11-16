@@ -6,11 +6,18 @@
   let copyData = $state(true);
   let isSubmitting = $state(false);
 
+  let wasOpen = false;
+
   $effect(() => {
     if (appState.isDuplicateTableModalOpen) {
-      targetTableName = `${appState.tableToDuplicate}_copy`;
-      copyData = true;
-      isSubmitting = false;
+      if (!wasOpen) {
+        targetTableName = `${appState.tableToDuplicate}_copy`;
+        copyData = true;
+        isSubmitting = false;
+        wasOpen = true;
+      }
+    } else {
+      wasOpen = false;
     }
   });
 

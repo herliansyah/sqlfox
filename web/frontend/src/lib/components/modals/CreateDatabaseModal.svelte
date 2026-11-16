@@ -21,12 +21,19 @@
 
   let availableCollations = $derived(charsetCollations[charset] || ['utf8mb4_unicode_ci']);
 
+  let wasOpen = false;
+
   $effect(() => {
     if (appState.isCreateDbModalOpen) {
-      dbName = '';
-      charset = 'utf8mb4';
-      collation = 'utf8mb4_unicode_ci';
-      isSubmitting = false;
+      if (!wasOpen) {
+        dbName = '';
+        charset = 'utf8mb4';
+        collation = 'utf8mb4_unicode_ci';
+        isSubmitting = false;
+        wasOpen = true;
+      }
+    } else {
+      wasOpen = false;
     }
   });
 

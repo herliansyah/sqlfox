@@ -1386,10 +1386,17 @@ export class AppState {
   }
 
   closeAllTabs() {
-    // Delegate to closeTab's reset semantics so the workspace never ends up empty.
-    const anchor = this.tabs[0];
-    if (!anchor) return;
-    this.closeOtherTabs(anchor.id);
+    this.tabs = [
+      {
+        id: `tab-${Date.now()}`,
+        title: 'Query 1.sql',
+        sql: '',
+        database: this.currentDatabase || '',
+        isTableViewer: false,
+      },
+    ];
+    this.activeTabId = this.tabs[0].id;
+    this.saveTabsState();
   }
 
   renameTab(tabId: string, nextTitle: string) {
@@ -1783,8 +1790,9 @@ export class AppState {
 
   async commitStagedEdits() {
     if (!this.activeSessionId) return;
-    const items = Object.values(this.stagedEdits);
-    if (items.length === 0) return;
+    const committedEntries = Object.entries(this.stagedEdits);
+    if (committedEntries.length === 0) return;
+    const items = committedEntries.map(([, item]) => item);
 
     try {
       const tableName = items[0].table;
@@ -1806,7 +1814,9 @@ export class AppState {
       });
 
       this.showToast(`Saved ${res.rows_affected ?? items.length} change(s) successfully`, 'success');
-      this.stagedEdits = {};
+      for (const [k] of committedEntries) {
+        delete this.stagedEdits[k];
+      }
 
       // Refresh data
       if (this.activeTab?.isTableViewer) {

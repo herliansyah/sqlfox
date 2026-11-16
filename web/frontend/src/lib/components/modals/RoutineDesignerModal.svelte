@@ -18,25 +18,32 @@
   let body = $state('BEGIN\n  -- Routine body statements\nEND');
   let isSubmitting = $state(false);
 
+  let wasOpen = false;
+
   $effect(() => {
     if (appState.isRoutineDesignerOpen) {
-      if (appState.routineToEdit) {
-        routineName = appState.routineToEdit.name;
-        routineType = (appState.routineToEdit.type as any) === 'FUNCTION' ? 'FUNCTION' : 'PROCEDURE';
-        returnType = appState.routineToEdit.data_type || 'INT';
-        body = appState.routineToEdit.definition || 'BEGIN\n  -- Routine body statements\nEND';
-        params = [];
-      } else {
-        routineName = '';
-        routineType = 'PROCEDURE';
-        returnType = 'INT';
-        isDeterministic = true;
-        params = [
-          { mode: 'IN', name: 'p_id', type: 'INT' },
-        ];
-        body = 'BEGIN\n  -- Statements\nEND';
+      if (!wasOpen) {
+        if (appState.routineToEdit) {
+          routineName = appState.routineToEdit.name;
+          routineType = (appState.routineToEdit.type as any) === 'FUNCTION' ? 'FUNCTION' : 'PROCEDURE';
+          returnType = appState.routineToEdit.data_type || 'INT';
+          body = appState.routineToEdit.definition || 'BEGIN\n  -- Routine body statements\nEND';
+          params = [];
+        } else {
+          routineName = '';
+          routineType = 'PROCEDURE';
+          returnType = 'INT';
+          isDeterministic = true;
+          params = [
+            { mode: 'IN', name: 'p_id', type: 'INT' },
+          ];
+          body = 'BEGIN\n  -- Statements\nEND';
+        }
+        isSubmitting = false;
+        wasOpen = true;
       }
-      isSubmitting = false;
+    } else {
+      wasOpen = false;
     }
   });
 

@@ -28,10 +28,17 @@
     };
   });
 
+  let wasOpen = false;
+
   $effect(() => {
     if (appState.isSnippetsModalOpen) {
-      void loadSnippets();
-      editingSnippet = null;
+      if (!wasOpen) {
+        void loadSnippets();
+        editingSnippet = null;
+        wasOpen = true;
+      }
+    } else {
+      wasOpen = false;
     }
   });
 

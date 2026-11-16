@@ -380,6 +380,12 @@
     }
   });
 
+  $effect(() => {
+    if (selectedIndex >= items.length) {
+      selectedIndex = Math.max(0, items.length - 1);
+    }
+  });
+
   function scrollActiveIntoView() {
     // Without this, arrow keys walk off-screen once the result list scrolls.
     requestAnimationFrame(() =>

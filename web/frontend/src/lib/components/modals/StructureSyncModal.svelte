@@ -30,17 +30,24 @@
   let viewMode = $state<'list' | 'script'>('list');
   let challengeInput = $state('');
 
+  let wasOpen = false;
+
   $effect(() => {
     if (appState.isStructureSyncModalOpen) {
-      sourceConnId = appState.activeConnection?.id || '';
-      sourceDb = appState.currentDatabase || '';
-      targetConnId = '';
-      targetDb = '';
-      includeDrops = false;
-      diffs = [];
-      hasCompared = false;
-      viewMode = 'list';
-      challengeInput = '';
+      if (!wasOpen) {
+        sourceConnId = appState.activeConnection?.id || '';
+        sourceDb = appState.currentDatabase || '';
+        targetConnId = '';
+        targetDb = '';
+        includeDrops = false;
+        diffs = [];
+        hasCompared = false;
+        viewMode = 'list';
+        challengeInput = '';
+        wasOpen = true;
+      }
+    } else {
+      wasOpen = false;
     }
   });
 

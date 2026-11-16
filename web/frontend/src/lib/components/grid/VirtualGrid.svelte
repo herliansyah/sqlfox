@@ -34,6 +34,17 @@ import { copyText } from '../../utils/clipboard';
   // Multi-row selection
   let selectedRowIndices = $state<number[]>([]);
 
+  // Reset selection and editing states when active tab or result set changes
+  $effect(() => {
+    const _tabId = currentTab?.id;
+    const _res = result;
+    selectedRowIndices = [];
+    selectedRowIndex = null;
+    selectedCell = null;
+    editingCell = null;
+    contextMenu = null;
+  });
+
   // Context Menu State
   let contextMenu = $state<{
     open: boolean;
@@ -267,9 +278,11 @@ import { copyText } from '../../utils/clipboard';
       return;
     }
     const pkIdx = allColumns.indexOf(pkCol);
-    const pkVals = selectedRowIndices.map((idx) => result!.rows[idx][pkIdx]);
+    const validIndices = selectedRowIndices.filter((idx) => result!.rows && result!.rows[idx] !== undefined);
+    if (validIndices.length === 0) return;
+    const pkVals = validIndices.map((idx) => result!.rows[idx][pkIdx]);
     const ok = await appState.showNativeConfirm(
-      `Are you sure you want to delete ${selectedRowIndices.length} selected row(s)?`,
+      `Are you sure you want to delete ${validIndices.length} selected row(s)?`,
       'Batch Deletion'
     );
     if (!ok) return;

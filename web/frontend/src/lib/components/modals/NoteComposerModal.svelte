@@ -33,25 +33,32 @@
     }
   }
 
+  let wasOpen = false;
+
   $effect(() => {
     if (appState.isNoteComposerModalOpen) {
-      if (editingNote) {
-        title = editingNote.title || '';
-        content = editingNote.content || '';
-        category = editingNote.category || 'General';
-        tableName = editingNote.table_name || '';
-        querySnapshot = editingNote.query_snapshot || '';
-        reminderAt = editingNote.reminder_at ? editingNote.reminder_at.slice(0, 16) : '';
-        isPinned = !!editingNote.is_pinned;
-      } else {
-        title = '';
-        content = '';
-        category = 'General';
-        tableName = appState.activeTab?.tableName || '';
-        querySnapshot = '';
-        reminderAt = '';
-        isPinned = false;
+      if (!wasOpen) {
+        if (editingNote) {
+          title = editingNote.title || '';
+          content = editingNote.content || '';
+          category = editingNote.category || 'General';
+          tableName = editingNote.table_name || '';
+          querySnapshot = editingNote.query_snapshot || '';
+          reminderAt = editingNote.reminder_at ? editingNote.reminder_at.slice(0, 16) : '';
+          isPinned = !!editingNote.is_pinned;
+        } else {
+          title = '';
+          content = '';
+          category = 'General';
+          tableName = appState.activeTab?.tableName || '';
+          querySnapshot = '';
+          reminderAt = '';
+          isPinned = false;
+        }
+        wasOpen = true;
       }
+    } else {
+      wasOpen = false;
     }
   });
 

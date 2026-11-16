@@ -23,13 +23,20 @@
     error?: string;
   } | null>(null);
 
+  let wasOpen = false;
+
   $effect(() => {
     if (appState.isDataSyncOpen) {
-      sourceConnId = appState.activeConnection?.id || '';
-      sourceDb = appState.currentDatabase || '';
-      sourceTable = appState.activeTab?.tableName || '';
-      targetTable = sourceTable;
-      syncDiff = null;
+      if (!wasOpen) {
+        sourceConnId = appState.activeConnection?.id || '';
+        sourceDb = appState.currentDatabase || '';
+        sourceTable = appState.activeTab?.tableName || '';
+        targetTable = sourceTable;
+        syncDiff = null;
+        wasOpen = true;
+      }
+    } else {
+      wasOpen = false;
     }
   });
 

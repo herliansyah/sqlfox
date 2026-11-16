@@ -25,11 +25,18 @@
     );
   });
 
+  let wasOpen = false;
+
   $effect(() => {
     if (appState.isMockDataModalOpen) {
-      selectedTable = appState.mockDataTableName || appState.activeTab?.tableName || catalogTables[0] || '';
-      rowCount = 50;
-      truncateFirst = false;
+      if (!wasOpen) {
+        selectedTable = appState.mockDataTableName || appState.activeTab?.tableName || catalogTables[0] || '';
+        rowCount = 50;
+        truncateFirst = false;
+        wasOpen = true;
+      }
+    } else {
+      wasOpen = false;
     }
   });
 

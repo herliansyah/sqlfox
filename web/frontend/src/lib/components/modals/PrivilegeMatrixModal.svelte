@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { SvelteSet } from 'svelte/reactivity';
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
   import Icon from '../common/Icon.svelte';
@@ -50,13 +51,19 @@
 
   const ALL_PRIVS = Object.values(PRIV_GROUPS).flat();
 
-  let selectedPrivileges = $state<Set<string>>(new Set());
+  let selectedPrivileges = new SvelteSet<string>();
   let targetDbScope = $state<'current' | 'all'>('current');
   let withGrantOption = $state(false);
+  let wasOpen = false;
 
   $effect(() => {
     if (appState.isPrivilegeMatrixOpen && appState.activeSessionId) {
-      loadUsers();
+      if (!wasOpen) {
+        wasOpen = true;
+        loadUsers();
+      }
+    } else {
+      wasOpen = false;
     }
   });
 
