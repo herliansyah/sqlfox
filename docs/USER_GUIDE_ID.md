@@ -58,7 +58,6 @@
    - [Inspeksi Lock Contention Pra-Eksekusi & Root Blocker Tree](#inspeksi-lock-contention-pra-eksekusi--root-blocker-tree)
    - [Processlist Real-Time & Pembatalan Query Out-of-Band](#processlist-real-time--pembatalan-query-out-of-band)
    - [Operasi Batch Processlist, Toolbar 2 Baris & Pemilih Visibilitas Kolom](#operasi-batch-processlist-toolbar-2-baris--pemilih-visibilitas-kolom)
-   - [Panel Tren Aktivitas Query (Processlist Concurrency Trend)](#panel-tren-aktivitas-query-processlist-concurrency-trend)
    - [Inspektur Cluster & Replikasi (PXC / Galera / Replika MySQL)](#inspektur-cluster--replikasi-pxc--galera--replika-mysql)
    - [Performance Flight Recorder (Telemetri Quad-Metric)](#performance-flight-recorder-telemetri-quad-metric)
    - [Inspektur Server Variables & Advisor Tuning Performa](#inspektur-server-variables--advisor-tuning-performa)
@@ -671,16 +670,6 @@ Saat terjadi lonjakan lock contention parah atau kebocoran ratusan koneksi menga
   - Klik tombol **Columns (N/Total)** di toolbar Processlist untuk mengatur kolom mana saja yang ingin ditampilkan (`ID`, `User`, `Host`, `DB`, `Command`, `Time`, `State`, `Info`, `Memory`, `Locks`).
   - Kolom esensial diagnosa (`ID`, `User`, `Time`, `Info`) dilengkapi kunci permanen agar tidak tersembunyi tanpa sengaja.
   - Konfigurasi kolom disimpan secara persisten di `localStorage`.
-
-### Panel Tren Aktivitas Query (Processlist Concurrency Trend)
-Dapat diakses melalui **⚡ Monitor &rarr; ⚡ Processlist** (Klik tombol **📈 Activity Trend**):
-- **Telemetri Konkurensi Real-Time**: Merender grafik deret waktu (*time-series*) bergulir 60 titik secara efisien di kanvas HTML5 Canvas native tanpa beban komputasi tambahan di sisi database.
-- **Visualisasi Dua Metrik**:
-  - Garis biru langit (*Sky blue*) dengan arsiran gradien halus menggambarkan kueri yang sedang dieksekusi aktif (`Command != 'Sleep'`).
-  - Garis putus-putus abu-abu (*Slate*) menggambarkan total seluruh thread klien yang tersambung.
-- **Indikator Metrik Cepat**: Menampilkan statistik operasional langsung (`Running Now`, `Total Threads`, `Peak Concurrency`, dan `60s Avg Running`).
-- **Eskalasi ke Flight Recorder**: Tombol 1-klik **Escalate to Flight Recorder** untuk langsung mengaktifkan perekaman diagnostik resolusi tinggi per 1 detik saat terjadi lonjakan query mencurigakan.
-- **Desain Kolapsibel**: Tombol buka/tutup panel dengan status tersimpan otomatis di `localStorage` (`sqlfox_pl_trend_open`).
 
 ### Inspektur Cluster & Replikasi (PXC / Galera / MySQL 8.4+ / PostgreSQL)
 Dapat diakses melalui **⚡ Monitor &rarr; 🌐 Cluster**:

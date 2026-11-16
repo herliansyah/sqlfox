@@ -1,6 +1,7 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
+  import { quoteSqlIdentifier } from '../../utils/sqlStatements';
   import Icon from '../common/Icon.svelte';
   import SqlCodeEditor from '../editor/SqlCodeEditor.svelte';
 
@@ -61,16 +62,15 @@
 
   let generatedDDL = $derived.by(() => {
     const driver = appState.activeConnection?.driver;
-    const isSQLite = driver === 'sqlite';
     const isPostgres = driver === 'postgres' || driver === 'postgresql';
-    const quote = isSQLite || isPostgres ? '"' : '`';
     const cleanName = routineName.trim() || (routineType === 'FUNCTION' ? 'fn_sample' : 'sp_sample');
+    const qName = quoteSqlIdentifier(cleanName, driver);
     const cleanBody = body.trim().replace(/;+$/, '');
 
     const paramStr = params
       .filter((p) => p.name.trim())
       .map((p) => {
-        const pName = `${quote}${p.name.trim()}${quote}`;
+        const pName = quoteSqlIdentifier(p.name.trim(), driver);
         if (routineType === 'FUNCTION') {
           return `${pName} ${p.type.trim()}`;
         }
@@ -78,14 +78,13 @@
       })
       .join(', ');
 
+    const createKw = isPostgres ? 'CREATE OR REPLACE' : 'CREATE';
     let header = routineType === 'FUNCTION'
-      ? `CREATE FUNCTION ${quote}${cleanName}${quote}(${paramStr}) RETURNS ${returnType.trim() || 'INT'}`
-      : `CREATE PROCEDURE ${quote}${cleanName}${quote}(${paramStr})`;
+      ? `${createKw} FUNCTION ${qName}(${paramStr}) RETURNS ${returnType.trim() || 'INT'}`
+      : `${createKw} PROCEDURE ${qName}(${paramStr})`;
 
-    if (isDeterministic) {
-      header += ' DETERMINISTIC';
-    } else {
-      header += ' NOT DETERMINISTIC';
+    if (!isPostgres) {
+      header += isDeterministic ? ' DETERMINISTIC' : ' NOT DETERMINISTIC';
     }
 
     return `${header}\n${cleanBody};`;

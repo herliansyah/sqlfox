@@ -146,7 +146,7 @@
 
 <div class="h-full flex flex-col bg-[#090d16] relative">
   <!-- Query Editor Toolbar -->
-  <div class="h-9 border-b border-slate-800 bg-[#0b0f19] px-3 flex items-center justify-between select-none shrink-0">
+  <div class="h-9 border-b border-slate-800 bg-[#0b0f19] px-3 flex items-center justify-between gap-2 overflow-x-auto select-none shrink-0">
     <div class="flex items-center space-x-2">
       <!-- Run Button -->
       <button

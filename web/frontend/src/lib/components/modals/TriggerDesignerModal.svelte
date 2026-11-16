@@ -1,6 +1,7 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
+  import { quoteSqlIdentifier } from '../../utils/sqlStatements';
   import Icon from '../common/Icon.svelte';
   import SqlCodeEditor from '../editor/SqlCodeEditor.svelte';
 
@@ -40,19 +41,14 @@
   let generatedDDL = $derived.by(() => {
     const driver = appState.activeConnection?.driver;
     const isSQLite = driver === 'sqlite';
-    const isPostgres = driver === 'postgres' || driver === 'postgresql';
-    const quote = isSQLite || isPostgres ? '"' : '`';
-    const cleanName = triggerName.trim() || 'trg_sample';
-    const cleanTable = targetTable.trim() || 'target_table';
+    const qName = quoteSqlIdentifier(triggerName.trim() || 'trg_sample', driver);
+    const qTable = quoteSqlIdentifier(targetTable.trim() || 'target_table', driver);
     const cleanBody = body.trim().replace(/;+$/, '');
 
-    let sql = '';
     if (isSQLite) {
-      sql = `CREATE TRIGGER ${quote}${cleanName}${quote} ${timing} ${event} ON ${quote}${cleanTable}${quote}\n${cleanBody};`;
-    } else {
-      sql = `CREATE TRIGGER ${quote}${cleanName}${quote} ${timing} ${event} ON ${quote}${cleanTable}${quote} FOR EACH ROW\n${cleanBody};`;
+      return `CREATE TRIGGER ${qName} ${timing} ${event} ON ${qTable}\n${cleanBody};`;
     }
-    return sql;
+    return `CREATE TRIGGER ${qName} ${timing} ${event} ON ${qTable} FOR EACH ROW\n${cleanBody};`;
   });
 
   function openInEditor() {

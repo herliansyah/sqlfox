@@ -381,6 +381,7 @@ type ProcesslistResult struct {
 	CurrentThreadID int64         `json:"current_thread_id"`
 	Threads         []ProcessItem `json:"threads"`
 	Locks           []LockWait    `json:"locks"`
+	Questions       int64         `json:"questions,omitempty"`
 }
 
 // DatabaseDiagnostics contains aggregated storage and metadata for a database schema.

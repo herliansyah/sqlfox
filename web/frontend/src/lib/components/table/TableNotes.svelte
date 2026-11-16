@@ -34,19 +34,24 @@
   });
 
   async function loadNotes() {
+    const targetTable = tableName;
     isLoading = true;
     try {
       const res = await api.listNotes();
+      if (tableName !== targetTable) return;
       const allNotes = Array.isArray(res) ? res : [];
       notes = allNotes.filter(
         (n: NoteItem) =>
-          n.table_name?.toLowerCase() === tableName.toLowerCase() ||
-          n.content?.toLowerCase().includes(tableName.toLowerCase())
+          n.table_name?.toLowerCase() === targetTable.toLowerCase() ||
+          n.content?.toLowerCase().includes(targetTable.toLowerCase())
       );
     } catch (err: any) {
+      if (tableName !== targetTable) return;
       notes = [];
     } finally {
-      isLoading = false;
+      if (tableName === targetTable) {
+        isLoading = false;
+      }
     }
   }
 

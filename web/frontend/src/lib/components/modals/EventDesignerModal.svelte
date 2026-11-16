@@ -1,6 +1,7 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
+  import { quoteSqlIdentifier } from '../../utils/sqlStatements';
   import Icon from '../common/Icon.svelte';
   import SqlCodeEditor from '../editor/SqlCodeEditor.svelte';
 
@@ -42,19 +43,19 @@
   });
 
   let generatedDDL = $derived.by(() => {
-    const isSQLite = appState.activeConnection?.driver === 'sqlite';
-    const quote = isSQLite ? '"' : '`';
     const cleanName = eventName.trim() || 'evt_daily_cleanup';
     const cleanBody = body.trim().replace(/;+$/, '');
+    const qName = quoteSqlIdentifier(cleanName, appState.activeConnection?.driver);
+    const verb = appState.eventToEdit ? 'ALTER EVENT' : 'CREATE EVENT';
 
     let scheduleStr = scheduleType === 'EVERY'
-      ? `EVERY ${everyQty.trim() || '1'} ${everyUnit}`
+      ? `EVERY ${String(everyQty ?? '').trim() || '1'} ${everyUnit}`
       : `AT ${atTime.trim()}`;
 
     let preserveStr = preserve ? ' ON COMPLETION PRESERVE' : '';
     let statusStr = ` ${status}`;
 
-    return `CREATE EVENT ${quote}${cleanName}${quote}\nON SCHEDULE ${scheduleStr}${preserveStr}${statusStr}\nDO\n${cleanBody};`;
+    return `${verb} ${qName}\nON SCHEDULE ${scheduleStr}${preserveStr}${statusStr}\nDO\n${cleanBody};`;
   });
 
   function openInEditor() {

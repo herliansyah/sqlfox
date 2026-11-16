@@ -255,7 +255,7 @@
         </button>
       </div>
     {:else}
-      {#each filteredNotes as note}
+      {#each filteredNotes as note (note.id)}
         <div
           class="p-3 rounded-xl border bg-[#0e1424] transition shadow-md hover:border-slate-700 flex flex-col space-y-2 {note.is_pinned
             ? 'border-amber-500/50 shadow-amber-950/20'
@@ -335,10 +335,12 @@
             </div>
 
             {#if note.reminder_at}
-              {@const isDue = new Date(note.reminder_at) <= new Date()}
+              {@const reminderDate = new Date(note.reminder_at)}
+              {#if !isNaN(reminderDate.getTime())}
+              {@const isDue = reminderDate <= new Date()}
               <div class="flex items-center space-x-1 {isDue ? 'text-rose-400 font-semibold' : 'text-slate-400'}">
                 <Icon name="clock" class="w-3 h-3" />
-                <span>{new Date(note.reminder_at).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                <span>{reminderDate.toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                 {#if isDue}
                   <button
                     onclick={() => snoozeNote(note, 15)}
@@ -349,6 +351,7 @@
                   </button>
                 {/if}
               </div>
+              {/if}
             {/if}
           </div>
         </div>

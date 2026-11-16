@@ -1001,10 +1001,14 @@ func (s *PostgresSession) GetProcesslist(ctx context.Context) (*driver.Processli
 		}
 	}
 
+	var questions int64
+	_ = s.db.QueryRowContext(ctx, "SELECT COALESCE(sum(xact_commit + xact_rollback), 0) FROM pg_stat_database WHERE datname = current_database()").Scan(&questions)
+
 	return &driver.ProcesslistResult{
 		CurrentThreadID: currentPID,
 		Threads:         threads,
 		Locks:           locks,
+		Questions:       questions,
 	}, nil
 }
 

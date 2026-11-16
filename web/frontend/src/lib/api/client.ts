@@ -295,6 +295,7 @@ class ApiClient {
     current_thread_id: number;
     threads: ProcesslistThread[];
     locks?: any[];
+    questions?: number;
   }> {
     return this.request(`/session/${sessionId}/processlist`);
   }

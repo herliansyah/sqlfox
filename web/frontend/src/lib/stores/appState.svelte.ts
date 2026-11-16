@@ -20,6 +20,7 @@ import type {
 import { api } from '../api/client';
 import { copyText } from '../utils/clipboard';
 import { substituteSnippetVariables, parseSnippetVariables } from '../utils/snippets';
+import { quoteSqlIdentifier } from '../utils/sqlStatements';
 
 // ponytail: smart wildcard auto-wrap for LIKE/NOT LIKE filter
 export function compileFilterPills(pills: FilterPill[], driver?: string): string {
@@ -1078,11 +1079,12 @@ export class AppState {
       return;
     }
     const newId = `tab-tbl-${currentDb ? currentDb + '-' : ''}${tableName}-${Date.now()}`;
-    const dbPrefix = currentDb ? `\`${currentDb}\`.` : '';
+    const driver = this.activeConnection?.driver;
+    const dbPrefix = currentDb ? `${quoteSqlIdentifier(currentDb, driver)}.` : '';
     const newTab: EditorTab = {
       id: newId,
       title: tableName,
-      sql: `SELECT * FROM ${dbPrefix}\`${tableName}\` LIMIT 50;`,
+      sql: `SELECT * FROM ${dbPrefix}${quoteSqlIdentifier(tableName, driver)} LIMIT 50;`,
       isTableViewer: true,
       tableName,
       database: currentDb,
@@ -1254,6 +1256,7 @@ export class AppState {
       }
       tab.activeResult = res;
     } catch (err: any) {
+      if ((tab as any)._loadToken !== token) return;
       tab.activeResult = {
         columns: [],
         rows: [],
@@ -1262,9 +1265,11 @@ export class AppState {
         error: err.message || 'Error loading table data',
       };
     } finally {
-      tab.isExecuting = false;
-      this.tabs = [...this.tabs];
-      this.saveTabsState();
+      if ((tab as any)._loadToken === token) {
+        tab.isExecuting = false;
+        this.tabs = [...this.tabs];
+        this.saveTabsState();
+      }
     }
   }
 
@@ -1492,7 +1497,7 @@ export class AppState {
       this.auditLogs.unshift({
         id: 'audit-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
         timestamp: new Date().toLocaleTimeString(),
-        sql: tab.sql,
+        sql,
         duration_ms: Math.round(performance.now() - startTime),
         row_count: 0,
         error: errMsg,
@@ -1630,6 +1635,10 @@ export class AppState {
         this.hideReconnectBanner();
         this.showToast('Reconnected to daemon', 'success');
         if (this.activeConnection) {
+          try {
+            await this.selectConnection(this.activeConnection);
+          } catch (_) {}
+        } else {
           await this.loadConnections();
         }
         return;
@@ -1792,31 +1801,44 @@ export class AppState {
     if (!this.activeSessionId) return;
     const committedEntries = Object.entries(this.stagedEdits);
     if (committedEntries.length === 0) return;
-    const items = committedEntries.map(([, item]) => item);
+
+    const groups = new Map<string, { table: string; database?: string; entries: Array<[string, StagedEdit]> }>();
+    for (const entry of committedEntries) {
+      const item = entry[1];
+      const targetDb = item.database || this.currentDatabase;
+      const key = `${targetDb || ''}::${item.table}`;
+      let group = groups.get(key);
+      if (!group) {
+        group = { table: item.table, database: targetDb, entries: [] };
+        groups.set(key, group);
+      }
+      group.entries.push(entry);
+    }
 
     try {
-      const tableName = items[0].table;
-      const targetDb = items[0].database || this.currentDatabase;
-      const edits = items.map((item) => ({
-        database: item.database || targetDb,
-        table: item.table,
-        column: item.colName,
-        value: item.newVal,
-        pk_column: item.pkCol,
-        pk_value: item.pkVal,
-        row_criteria: item.rowCriteria,
-      }));
-
-      const res = await api.cellEdit(this.activeSessionId, {
-        database: targetDb,
-        table: tableName,
-        edits,
-      });
-
-      this.showToast(`Saved ${res.rows_affected ?? items.length} change(s) successfully`, 'success');
-      for (const [k] of committedEntries) {
-        delete this.stagedEdits[k];
+      let totalAffected = 0;
+      for (const group of groups.values()) {
+        const edits = group.entries.map(([, item]) => ({
+          database: item.database || group.database,
+          table: item.table,
+          column: item.colName,
+          value: item.newVal,
+          pk_column: item.pkCol,
+          pk_value: item.pkVal,
+          row_criteria: item.rowCriteria,
+        }));
+        const res = await api.cellEdit(this.activeSessionId, {
+          database: group.database,
+          table: group.table,
+          edits,
+        });
+        totalAffected += res.rows_affected ?? group.entries.length;
+        for (const [k] of group.entries) {
+          delete this.stagedEdits[k];
+        }
       }
+
+      this.showToast(`Saved ${totalAffected} change(s) successfully`, 'success');
 
       // Refresh data
       if (this.activeTab?.isTableViewer) {
@@ -1978,14 +2000,15 @@ export class AppState {
   handoffTableQueryToEditor() {
     const tab = this.activeTab;
     if (!tab || !tab.isTableViewer || !tab.tableName) return;
-    const targetTable = '`' + tab.tableName.replace(/`/g, '``') + '`';
+    const driver = this.activeConnection?.driver;
+    const targetTable = quoteSqlIdentifier(tab.tableName, driver);
     let sql = `SELECT * FROM ${targetTable}`;
     const filter = (tab.appliedFilter || '').trim();
     if (filter) {
       sql += `\nWHERE ${filter}`;
     }
     if (tab.sortCol) {
-      const escSortCol = '`' + tab.sortCol.replace(/`/g, '``') + '`';
+      const escSortCol = quoteSqlIdentifier(tab.sortCol, driver);
       sql += `\nORDER BY ${escSortCol} ${tab.sortDir || 'ASC'}`;
     }
     sql += `\nLIMIT 50;`;
@@ -2050,11 +2073,12 @@ export class AppState {
     const driver = this.activeConnection?.driver;
     const isPg = driver === 'postgres' || driver === 'postgresql';
     const isSqlite = driver === 'sqlite';
+    const qTable = quoteSqlIdentifier(tableName, driver);
     const sql = isPg
-      ? `DROP TABLE "${tableName}" CASCADE;`
+      ? `DROP TABLE ${qTable} CASCADE;`
       : isSqlite
-      ? `DROP TABLE IF EXISTS "${tableName}";`
-      : `DROP TABLE IF EXISTS \`${tableName}\`;`;
+      ? `DROP TABLE IF EXISTS ${qTable};`
+      : `DROP TABLE IF EXISTS ${qTable};`;
     const confirmed = await this.promptSafetyChallenge(sql, {
       risk_level: 'CRITICAL',
       target_table: tableName,
@@ -2086,11 +2110,12 @@ export class AppState {
     const driver = this.activeConnection?.driver;
     const isPg = driver === 'postgres' || driver === 'postgresql';
     const isSqlite = driver === 'sqlite';
+    const qTable = quoteSqlIdentifier(tableName, driver);
     const sql = isPg
-      ? `TRUNCATE TABLE "${tableName}" CASCADE;`
+      ? `TRUNCATE TABLE ${qTable} CASCADE;`
       : isSqlite
-      ? `DELETE FROM "${tableName}";`
-      : `TRUNCATE TABLE \`${tableName}\`;`;
+      ? `DELETE FROM ${qTable};`
+      : `TRUNCATE TABLE ${qTable};`;
     const confirmed = await this.promptSafetyChallenge(sql, {
       risk_level: 'HIGH',
       target_table: tableName,
@@ -2122,9 +2147,11 @@ export class AppState {
     const driver = this.activeConnection?.driver;
     const isPg = driver === 'postgres' || driver === 'postgresql';
     const isSqlite = driver === 'sqlite';
+    const qOld = quoteSqlIdentifier(oldName, driver);
+    const qNew = quoteSqlIdentifier(newName, driver);
     const sql = isPg || isSqlite
-      ? `ALTER TABLE "${oldName}" RENAME TO "${newName}";`
-      : `RENAME TABLE \`${oldName}\` TO \`${newName}\`;`;
+      ? `ALTER TABLE ${qOld} RENAME TO ${qNew};`
+      : `RENAME TABLE ${qOld} TO ${qNew};`;
 
     try {
       const res = await api.executeQuery(this.activeSessionId, sql, true, targetDb);
@@ -2149,24 +2176,26 @@ export class AppState {
     const targetDb = database || this.tabs.find((t) => t.tableName?.toLowerCase() === sourceTable.toLowerCase())?.database || this.currentDatabase || '';
     const driver = this.activeConnection?.driver;
     const isPg = driver === 'postgres' || driver === 'postgresql';
+    const qSource = quoteSqlIdentifier(sourceTable, driver);
+    const qTarget = quoteSqlIdentifier(targetTable, driver);
     try {
       if (isPg) {
-        let sql = `CREATE TABLE "${targetTable}" (LIKE "${sourceTable}" INCLUDING ALL);`;
+        let sql = `CREATE TABLE ${qTarget} (LIKE ${qSource} INCLUDING ALL);`;
         if (copyData) {
-          sql += `\nINSERT INTO "${targetTable}" SELECT * FROM "${sourceTable}";`;
+          sql += `\nINSERT INTO ${qTarget} SELECT * FROM ${qSource};`;
         }
         const res = await api.executeQuery(this.activeSessionId, sql, true, targetDb);
         if (res.error) throw new Error(res.error);
       } else if (driver === 'sqlite') {
         const sql = copyData
-          ? `CREATE TABLE "${targetTable}" AS SELECT * FROM "${sourceTable}";`
-          : `CREATE TABLE "${targetTable}" AS SELECT * FROM "${sourceTable}" WHERE 0 = 1;`;
+          ? `CREATE TABLE ${qTarget} AS SELECT * FROM ${qSource};`
+          : `CREATE TABLE ${qTarget} AS SELECT * FROM ${qSource} WHERE 0 = 1;`;
         const res = await api.executeQuery(this.activeSessionId, sql, true, targetDb);
         if (res.error) throw new Error(res.error);
       } else {
-        let sql = `CREATE TABLE \`${targetTable}\` LIKE \`${sourceTable}\`;`;
+        let sql = `CREATE TABLE ${qTarget} LIKE ${qSource};`;
         if (copyData) {
-          sql += `\nINSERT INTO \`${targetTable}\` SELECT * FROM \`${sourceTable}\`;`;
+          sql += `\nINSERT INTO ${qTarget} SELECT * FROM ${qSource};`;
         }
         const res = await api.executeQuery(this.activeSessionId, sql, true, targetDb);
         if (res.error) throw new Error(res.error);
@@ -2183,9 +2212,10 @@ export class AppState {
     if (!this.activeSessionId) return;
     const driver = this.activeConnection?.driver;
     const isPg = driver === 'postgres' || driver === 'postgresql';
+    const qDb = quoteSqlIdentifier(dbName, driver);
     const sql = isPg
-      ? `CREATE DATABASE "${dbName}";`
-      : `CREATE DATABASE \`${dbName}\` CHARACTER SET ${charset} COLLATE ${collation};`;
+      ? `CREATE DATABASE ${qDb};`
+      : `CREATE DATABASE ${qDb} CHARACTER SET ${charset} COLLATE ${collation};`;
 
     try {
       const res = await api.executeQuery(this.activeSessionId, sql, true);
@@ -2203,7 +2233,8 @@ export class AppState {
     if (!this.activeSessionId) return;
     const driver = this.activeConnection?.driver;
     const isPg = driver === 'postgres' || driver === 'postgresql';
-    const sql = isPg ? `DROP DATABASE "${dbName}";` : `DROP DATABASE IF EXISTS \`${dbName}\`;`;
+    const qDb = quoteSqlIdentifier(dbName, driver);
+    const sql = isPg ? `DROP DATABASE ${qDb};` : `DROP DATABASE IF EXISTS ${qDb};`;
     const confirmed = await this.promptSafetyChallenge(sql, {
       risk_level: 'CRITICAL',
       target_table: dbName,

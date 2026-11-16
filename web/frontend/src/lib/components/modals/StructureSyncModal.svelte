@@ -80,10 +80,12 @@
 
     isComparing = true;
     try {
+      const srcSession = (await api.connectSession(sourceConnId)).id || sourceConnId;
+      const tgtSession = (await api.connectSession(targetConnId)).id || targetConnId;
       const data = await api.compareStructure({
-        source_session_id: sourceConnId,
+        source_session_id: srcSession,
         source_db: sourceDb,
-        target_session_id: targetConnId,
+        target_session_id: tgtSession,
         target_db: targetDb,
         include_drops: includeDrops,
       });
@@ -122,8 +124,9 @@
 
     isApplying = true;
     try {
+      const tgtSession = (await api.connectSession(targetConnId)).id || targetConnId;
       await api.applyStructure({
-        target_session_id: targetConnId,
+        target_session_id: tgtSession,
         target_db: targetDb,
         statements: selectedSQLs,
         confirmed: true,

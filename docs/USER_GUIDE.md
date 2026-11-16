@@ -58,7 +58,6 @@
    - [Pre-Flight Lock Contention & Root Blocker Tree](#pre-flight-lock-contention--root-blocker-tree)
    - [Real-Time Processlist & Out-of-Band Cancellation](#real-time-processlist--out-of-band-cancellation)
    - [Processlist Batch Operations, Two-Tier Toolbar & Column Visibility](#processlist-batch-operations-two-tier-toolbar--column-visibility)
-   - [Process Activity Trend Panel](#process-activity-trend-panel)
    - [Cluster & Replication Inspector (PXC / Galera / Replica)](#cluster--replication-inspector-pxc--galera--replica)
    - [Performance Flight Recorder (Quad-Metric Telemetry)](#performance-flight-recorder-quad-metric-telemetry)
    - [Server Variables Inspector & Tuning Advisor](#server-variables-inspector--tuning-advisor)
@@ -671,16 +670,6 @@ During severe lock storms or when rogue applications leak hundreds of idle conne
   - Click **Columns (N/Total)** in the Processlist toolbar to toggle displayed fields (`ID`, `User`, `Host`, `DB`, `Command`, `Time`, `State`, `Info`, `Memory`, `Locks`).
   - Essential session identifiers (`ID`, `User`, `Time`, `Info`) have sticky locks to maintain diagnostic visibility.
   - Layout settings persist in `localStorage` across restarts.
-
-### Process Activity Trend Panel
-Access via **⚡ Monitor &rarr; ⚡ Processlist** (Click **📈 Activity Trend** button):
-- **Live Concurrency Telemetry**: Renders an ephemeral rolling 60-point time-series chart directly on native HTML5 Canvas without backend polling overhead.
-- **Dual Metric Visualizer**:
-  - Sky blue solid line with soft gradient fill representing active executing query concurrency (`Command != 'Sleep'`).
-  - Slate dashed secondary line representing total connected client threads.
-- **Real-Time KPIs**: Dynamic metric pills detailing `Running Now`, `Total Threads`, `Peak Concurrency`, and `60s Avg Running`.
-- **Flight Recorder Escalation**: 1-click **Escalate to Flight Recorder** shortcut to immediately trigger deep 1-second interval forensic recording when query concurrency spikes.
-- **Collapsible Ergonomics**: Toggle button with state preserved in `localStorage` (`sqlfox_pl_trend_open`).
 
 ### Cluster & Replication Inspector (PXC / Galera / MySQL 8.4+ / PostgreSQL)
 Access via **⚡ Monitor &rarr; 🌐 Cluster**:

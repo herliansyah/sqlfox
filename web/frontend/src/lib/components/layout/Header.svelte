@@ -208,15 +208,19 @@ import { copyText } from '../../utils/clipboard';
     }
   }
 
+  let copiedPinTimer: ReturnType<typeof setTimeout> | null = null;
+
   function copyMasterPin() {
     copyText(masterPin);
     copiedPin = true;
     appState.showToast('Master PIN copied to clipboard!', 'info');
-    setTimeout(() => (copiedPin = false), 2000);
+    if (copiedPinTimer) clearTimeout(copiedPinTimer);
+    copiedPinTimer = setTimeout(() => (copiedPin = false), 2000);
   }
 
   onDestroy(() => {
     if (pinAutoMaskTimer) clearTimeout(pinAutoMaskTimer);
+    if (copiedPinTimer) clearTimeout(copiedPinTimer);
   });
 </script>
 

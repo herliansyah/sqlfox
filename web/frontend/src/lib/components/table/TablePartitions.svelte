@@ -45,23 +45,28 @@
 
   async function loadPartitions() {
     if (!appState.activeConnection || !tableName) return;
+    const targetTable = tableName;
+    const connId = appState.activeSessionId || appState.activeConnection.id;
     isLoading = true;
     errorMessage = null;
 
     try {
-      const connId = appState.activeSessionId || appState.activeConnection.id;
       const targetDb = appState.activeTab?.database || appState.currentDatabase || '';
       const data = await api.getTablePartitions(
         connId,
-        tableName,
+        targetTable,
         targetDb || undefined
       );
+      if (tableName !== targetTable || (appState.activeSessionId || appState.activeConnection?.id) !== connId) return;
       partitions = Array.isArray(data) ? data : [];
     } catch (err: any) {
+      if (tableName !== targetTable) return;
       errorMessage = err.message || 'Failed to load partition metadata';
       partitions = [];
     } finally {
-      isLoading = false;
+      if (tableName === targetTable) {
+        isLoading = false;
+      }
     }
   }
 

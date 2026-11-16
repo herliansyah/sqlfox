@@ -55,11 +55,19 @@
   let targetDbScope = $state<'current' | 'all'>('current');
   let withGrantOption = $state(false);
   let wasOpen = false;
+  let grantRequestToken = 0;
 
   $effect(() => {
     if (appState.isPrivilegeMatrixOpen && appState.activeSessionId) {
       if (!wasOpen) {
         wasOpen = true;
+        selectedUser = null;
+        isCreatingNew = false;
+        users = [];
+        grantsRaw = [];
+        selectedPrivileges.clear();
+        withGrantOption = false;
+        grantRequestToken++;
         loadUsers();
       }
     } else {
@@ -87,9 +95,11 @@
     selectedUser = u;
     selectedPrivileges.clear();
     withGrantOption = false;
+    const token = ++grantRequestToken;
 
     try {
       const res = await api.getUserGrants(appState.activeSessionId!, u.user, u.host);
+      if (token !== grantRequestToken) return;
       grantsRaw = res.grants || [];
 
       // Parse active privs
@@ -105,6 +115,7 @@
       }
       withGrantOption = grantText.includes('WITH GRANT OPTION');
     } catch (err: any) {
+      if (token !== grantRequestToken) return;
       grantsRaw = [`Error inspecting grants: ${err.message}`];
     }
   }

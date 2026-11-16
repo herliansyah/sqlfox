@@ -23,16 +23,23 @@ import { copyText } from '../../utils/clipboard';
   });
 
   async function loadDDL() {
+    const targetTable = tableName;
+    const sessionId = appState.activeSessionId;
+    if (!targetTable || !sessionId) return;
     isLoading = true;
     error = null;
     try {
       const db = appState.activeTab?.database || appState.currentDatabase || undefined;
-      const res = await api.getTableDDL(appState.activeSessionId!, tableName, db);
+      const res = await api.getTableDDL(sessionId, targetTable, db);
+      if (tableName !== targetTable || appState.activeSessionId !== sessionId) return;
       ddl = res.ddl || '';
     } catch (err: any) {
+      if (tableName !== targetTable || appState.activeSessionId !== sessionId) return;
       error = err.message || 'Failed to fetch table DDL';
     } finally {
-      isLoading = false;
+      if (tableName === targetTable && appState.activeSessionId === sessionId) {
+        isLoading = false;
+      }
     }
   }
 

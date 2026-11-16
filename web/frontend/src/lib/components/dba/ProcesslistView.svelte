@@ -5,7 +5,6 @@ import { copyText } from '../../utils/clipboard';
   import { api } from '../../api/client';
   import type { ProcesslistThread, ProcessLockWait } from '../../../types';
   import Icon from '../common/Icon.svelte';
-  import ProcessTrendPanel from './ProcessTrendPanel.svelte';
   import FlightTimeline from './FlightTimeline.svelte';
 
   type DbaSubTab = 'threads' | 'digest' | 'deadlock' | 'cluster' | 'variables' | 'flight-recorder';
@@ -74,7 +73,7 @@ import { copyText } from '../../utils/clipboard';
 
   let visibleColumns = $state<Record<string, boolean>>(loadHiddenColumns());
   let showColSelector = $state(false);
-  let showTrendPanel = $state(true);
+  let totalQuestions = $state<number>(0);
 
   // Persist only the hidden optional columns, mirroring the legacy storage contract.
   $effect(() => {
@@ -177,14 +176,18 @@ import { copyText } from '../../utils/clipboard';
   });
 
   async function loadProcesslist(showSpinner = true) {
-    if (!appState.activeSessionId) return;
+    const sessionId = appState.activeSessionId;
+    if (!sessionId) return;
     if (showSpinner) isLoading = true;
     try {
-      const res = await api.getProcesslist(appState.activeSessionId);
+      const res = await api.getProcesslist(sessionId);
+      if (appState.activeSessionId !== sessionId) return;
       threads = res.threads || [];
       locks = (res.locks || []) as ProcessLockWait[];
       currentThreadId = res.current_thread_id || 0;
+      totalQuestions = res.questions || 0;
     } catch (err: any) {
+      if (appState.activeSessionId !== sessionId) return;
       appState.showToast(`Failed to load processlist: ${err.message}`, 'error');
     } finally {
       if (showSpinner) isLoading = false;
@@ -331,10 +334,12 @@ import { copyText } from '../../utils/clipboard';
         startFlightTimers();
         appState.showToast('Performance Flight Recorder started (10-min safety guard active)', 'info');
         // Fetch first tick immediately
+        const sessionId = appState.activeSessionId;
         setTimeout(async () => {
           try {
-            if (!appState.activeSessionId) return;
-            const st = await api.getFlightRecorderStatus(appState.activeSessionId);
+            if (!isRecording || selectedFlightSessionId || appState.activeSessionId !== sessionId) return;
+            const st = await api.getFlightRecorderStatus(sessionId);
+            if (!isRecording || selectedFlightSessionId || appState.activeSessionId !== sessionId) return;
             if (st && Array.isArray(st.recent_ticks)) {
               flightSessionTicks = st.recent_ticks;
             }
@@ -496,8 +501,10 @@ import { copyText } from '../../utils/clipboard';
 
   async function killSingleThread(id: number) {
     if (!confirm(`Are you sure you want to kill thread ID ${id}?`)) return;
+    const sessionId = appState.activeSessionId;
+    if (!sessionId) return;
     try {
-      await api.killProcess(appState.activeSessionId!, id);
+      await api.killProcess(sessionId, id);
       appState.showToast(`Killed thread ${id}`, 'success');
       selectedThreadIds.delete(id);
       if (inspectingThread?.id === id) inspectingThread = null;
@@ -511,9 +518,11 @@ import { copyText } from '../../utils/clipboard';
     const ids = Array.from(selectedThreadIds);
     if (ids.length === 0) return;
     if (!confirm(`Kill ${ids.length} selected database thread(s)?`)) return;
+    const sessionId = appState.activeSessionId;
+    if (!sessionId) return;
 
     try {
-      const res = await api.batchKillProcesses(appState.activeSessionId!, ids, 'connection');
+      const res = await api.batchKillProcesses(sessionId, ids, 'connection');
       appState.showToast(`Killed ${res.killed_count || ids.length} threads`, 'success');
       selectedThreadIds.clear();
       await loadProcesslist(false);
@@ -1236,15 +1245,6 @@ import { copyText } from '../../utils/clipboard';
           {/if}
         </button>
 
-        <button
-          onclick={() => (showTrendPanel = !showTrendPanel)}
-          class="h-7 px-2 rounded border border-[#334155] text-[11px] font-sans flex items-center space-x-1 transition {showTrendPanel ? 'bg-sky-500/20 text-sky-300 border-sky-500/40' : 'bg-[#0b0f19] text-slate-400 hover:text-white'}"
-          title="Toggle telemetry trend chart"
-        >
-          <Icon name="activity" class="w-3 h-3 text-sky-400" />
-          <span>Trend</span>
-        </button>
-
         <!-- Column Visibility Dropdown (ADR 0054) -->
         <div class="relative">
           <button
@@ -1309,13 +1309,6 @@ import { copyText } from '../../utils/clipboard';
         />
       </div>
     </div>
-
-    <!-- Active Threads Telemetry Trend (ADR 0054) -->
-    {#if showTrendPanel}
-      <div class="border-b border-[#1e293b] shrink-0 bg-[#070b12]">
-        <ProcessTrendPanel {threads} />
-      </div>
-    {/if}
 
         <!-- Threads Table View -->
     <div class="flex-1 overflow-auto">

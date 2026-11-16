@@ -33,6 +33,14 @@
     }
   }
 
+  function toLocalDatetimeInput(iso?: string): string {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
   let wasOpen = false;
 
   $effect(() => {
@@ -44,7 +52,7 @@
           category = editingNote.category || 'General';
           tableName = editingNote.table_name || '';
           querySnapshot = editingNote.query_snapshot || '';
-          reminderAt = editingNote.reminder_at ? editingNote.reminder_at.slice(0, 16) : '';
+          reminderAt = toLocalDatetimeInput(editingNote.reminder_at);
           isPinned = !!editingNote.is_pinned;
         } else {
           title = '';

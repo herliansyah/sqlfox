@@ -32,7 +32,7 @@
         if (!isStreaming) return;
         try {
           const data = JSON.parse(event.data);
-          const rawId = String(data.id || (Date.now() + Math.random()));
+          const rawId = String(data.id ?? (Date.now() + Math.random()));
           if (seenIds.has(rawId)) return;
           seenIds.add(rawId);
           if (seenIds.size > 2000) {
@@ -83,9 +83,10 @@
 
   $effect(() => {
     if (autoScroll && logs.length && containerRef) {
-      setTimeout(() => {
+      const t = setTimeout(() => {
         containerRef?.scrollTo({ top: containerRef.scrollHeight, behavior: 'smooth' });
       }, 50);
+      return () => clearTimeout(t);
     }
   });
 

@@ -27,6 +27,7 @@ import { copyText } from '../../utils/clipboard';
   let messagesContainer = $state<HTMLDivElement | null>(null);
   let promptEl = $state<HTMLTextAreaElement | null>(null);
   let isMaximized = $state(localStorage.getItem('sqlfox_ai_drawer_maximized') === 'true');
+  let chatRequestToken = 0;
 
   function toggleMaximized() {
     isMaximized = !isMaximized;
@@ -36,9 +37,10 @@ import { copyText } from '../../utils/clipboard';
   // Auto-scroll messages to bottom
   $effect(() => {
     if (messages.length && messagesContainer) {
-      setTimeout(() => {
+      const t = setTimeout(() => {
         messagesContainer?.scrollTo({ top: messagesContainer.scrollHeight, behavior: 'smooth' });
       }, 50);
+      return () => clearTimeout(t);
     }
   });
 
@@ -116,8 +118,10 @@ import { copyText } from '../../utils/clipboard';
       schemaContext += `Active Query:\n${activeQuery}\n`;
     }
 
+    const token = ++chatRequestToken;
     try {
       const res = await api.aiChat(text, schemaContext, dialect);
+      if (token !== chatRequestToken) return;
       const assistantMsg: ChatMessage = {
         id: String(Date.now() + 1),
         role: 'assistant',
@@ -126,6 +130,7 @@ import { copyText } from '../../utils/clipboard';
       };
       messages = [...messages, assistantMsg];
     } catch (err: any) {
+      if (token !== chatRequestToken) return;
       const errMsg: ChatMessage = {
         id: String(Date.now() + 1),
         role: 'assistant',
@@ -134,7 +139,9 @@ import { copyText } from '../../utils/clipboard';
       };
       messages = [...messages, errMsg];
     } finally {
-      isLoading = false;
+      if (token === chatRequestToken) {
+        isLoading = false;
+      }
     }
   }
 
@@ -178,6 +185,8 @@ import { copyText } from '../../utils/clipboard';
   }
 
   function clearChat() {
+    chatRequestToken++;
+    isLoading = false;
     messages = [
       {
         id: 'init',

@@ -186,7 +186,7 @@ function catalogColumnItems(
   const index = getCatalogIndex(catalog);
   if (!index) return [];
   const items: CompletionItem[] = [];
-  // Binary search the sorted column list for the first match, then scan forward.
+  // Binary search the sorted column list for prefix matches first, then scan for substring matches.
   let low = 0;
   let high = index.columns.length;
   while (low < high) {
@@ -194,17 +194,21 @@ function catalogColumnItems(
     if (index.columns[mid].lower < lower) low = mid + 1;
     else high = mid;
   }
-  for (let i = low; i < index.columns.length; i++) {
+  const seen = new Set<string>();
+  for (let i = low; i < index.columns.length && budget.remaining > 0; i++) {
     const column = index.columns[i];
-    if (!column.lower.includes(lower)) {
-      // Sorted order means prefix matches are contiguous; substring matches can appear later,
-      // so keep scanning but only while the budget allows.
-      if (budget.remaining <= 0) break;
-      continue;
-    }
-    if (budget.remaining <= 0) break;
+    if (!column.lower.startsWith(lower)) break;
+    seen.add(column.label);
     items.push({ label: column.label, kind: 'COL', detail: column.type, apply: quote(column.label), boost });
     budget.remaining--;
+  }
+  if (lower.length > 0 && budget.remaining > 0) {
+    for (let i = 0; i < index.columns.length && budget.remaining > 0; i++) {
+      const column = index.columns[i];
+      if (seen.has(column.label) || !column.lower.includes(lower)) continue;
+      items.push({ label: column.label, kind: 'COL', detail: column.type, apply: quote(column.label), boost });
+      budget.remaining--;
+    }
   }
   return items;
 }
@@ -260,7 +264,9 @@ export function computeSqlCompletions(request: CompletionRequest): CompletionIte
     || [...splitSqlStatements(text, dialect)].reverse().find((s) => cursor >= s.start)
     || { start: 0, end: text.length, text };
   const analyzedStatement = maskSqlForAnalysis(statement.text, dialect);
-  const before = analyzedStatement.slice(0, Math.max(0, cursor - statement.start));
+  const fullClauseMasked = maskSqlForAnalysis(text, dialect, true);
+  const before = masked.slice(statement.start, cursor);
+  const beforeForClause = fullClauseMasked.slice(statement.start, cursor);
   const relations = relationsIn(statement.text, analyzedStatement);
   const relationCatalog = (database?: string) => {
     if (!database) return activeCatalog;
@@ -307,10 +313,16 @@ export function computeSqlCompletions(request: CompletionRequest): CompletionIte
     }
   };
 
-  const clause = before.trimStart().match(/^([a-z]+)/i)?.[1]?.toUpperCase() || '';
-  const inFrom = /\b(FROM|JOIN|UPDATE|INTO)\s+[a-zA-Z0-9_$"`\[\].\s]*$/i.test(before);
-  const tableVerb = new Set(['ALTER', 'DROP', 'TRUNCATE', 'DESCRIBE']).has(clause);
-  const inDatabaseContext = /^(?:\s*)(?:USE|DROP\s+(?:DATABASE|SCHEMA)|CREATE\s+(?:DATABASE|SCHEMA)|ALTER\s+(?:DATABASE|SCHEMA))\s+[a-zA-Z0-9_$]*$/i.test(before);
+  const identPart = '(?:"[^"]*"|`[^`]*`|\\[[^\\]]*\\]|[a-zA-Z0-9_$]+)';
+  const inFrom = new RegExp(
+    String.raw`\b(?:FROM|JOIN|UPDATE|INTO)\s+(?:${identPart}\s*,\s*)*(?:${identPart}\s*\.\s*)?(?:${identPart})?$`,
+    'i',
+  ).test(beforeForClause);
+  const tableVerb = new RegExp(
+    String.raw`^\s*(?:(?:ALTER|DROP|TRUNCATE)\s+(?:TABLE|VIEW)|DESCRIBE|DESC)\s+(?:${identPart}\s*\.\s*)?(?:${identPart})?$`,
+    'i',
+  ).test(beforeForClause);
+  const inDatabaseContext = /^(?:\s*)(?:USE|DROP\s+(?:DATABASE|SCHEMA)|CREATE\s+(?:DATABASE|SCHEMA)|ALTER\s+(?:DATABASE|SCHEMA))\s+[a-zA-Z0-9_$]*$/i.test(beforeForClause);
   const keywordExclusions: Record<string, string[]> = {
     postgres: ['AUTO_INCREMENT', 'SHOW TABLES', 'SHOW DATABASES', 'SHOW SCHEMAS', 'ON DUPLICATE KEY UPDATE', 'UPSERT', 'PRAGMA', 'ATTACH DATABASE', 'DETACH DATABASE'],
     mysql: ['ILIKE', 'GENERATED ALWAYS AS IDENTITY', 'NULLS FIRST', 'NULLS LAST', 'FETCH FIRST'],
@@ -387,8 +399,15 @@ export function computeSqlCompletions(request: CompletionRequest): CompletionIte
   // ponytail: cap the popup payload like the legacy engine, but rank first so the most
   // relevant candidates survive the cut instead of whichever keyword happened to be first.
   if (options.length > MAX_CANDIDATES) {
-    const rank = (item: CompletionItem) => (item.boost || 0)
-      + (item.kind === 'COL' ? 12 : item.kind === 'TBL' ? 10 : item.kind === 'SNP' ? 6 : 0);
+    const rank = (item: CompletionItem) => {
+      const itemLower = item.label.toLowerCase();
+      const matchScore = lower
+        ? (itemLower === lower ? 200 : itemLower.startsWith(lower) ? 80 : 0)
+        : 0;
+      return matchScore
+        + (item.boost || 0)
+        + (item.kind === 'COL' ? 12 : item.kind === 'TBL' ? 10 : item.kind === 'SNP' ? 6 : 0);
+    };
     options.sort((a, b) => rank(b) - rank(a) || a.label.localeCompare(b.label));
     return options.slice(0, MAX_CANDIDATES);
   }
@@ -398,11 +417,12 @@ export function computeSqlCompletions(request: CompletionRequest): CompletionIte
 export function completionTokenStart(text: string, cursor: number): number {
   let start = cursor;
   while (start > 0 && /[a-zA-Z0-9_$]/.test(text[start - 1])) start--;
-  // Multi-word keywords (LEFT JOIN, GROUP BY, ...) must replace the whole typed phrase.
-  const phrase = text.slice(0, cursor).match(/\b([a-zA-Z]+(?:\s+[a-zA-Z]+)*)$/);
-  if (phrase && phrase[1].split(/\s+/).length > 1) {
-    const candidate = phrase[1].split(/\s+/)[0].toUpperCase();
-    if (SQL_KEYWORDS.some((keyword) => keyword.startsWith(`${candidate} `))) {
+  // Multi-word keywords (LEFT JOIN, GROUP BY, ...) must replace the whole typed phrase,
+  // but only when the typed words actually form a prefix of a multi-word keyword.
+  const phrase = text.slice(0, cursor).match(/\b([a-zA-Z]+(?:\s+[a-zA-Z]+){1,2})$/);
+  if (phrase) {
+    const normalized = phrase[1].replace(/\s+/g, ' ').toUpperCase();
+    if (SQL_KEYWORDS.some((keyword) => keyword.includes(' ') && keyword.startsWith(normalized))) {
       start = cursor - phrase[1].length;
     }
   }

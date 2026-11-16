@@ -71,15 +71,16 @@
     if (refTable && refTableCols.length > 0 && !refTableCols.includes(refCol)) {
       refCol = refTableCols[0] || '';
     }
-    autoGenerateFKName();
+    if (!fkName.trim()) {
+      autoGenerateFKName();
+    }
   });
 
   let sqlPreview = $derived.by(() => {
     if (!tableMeta || !appState.activeConnection) return '';
     const driver = appState.activeConnection.driver;
     const isSQLite = driver === 'sqlite';
-    const isPostgres = driver === 'postgres' || driver === 'postgresql';
-    const q = (s: string) => (isSQLite || isPostgres ? `"${s}"` : `\`${s}\``);
+    const q = (s: string) => (isSQLite || driver === 'postgres' || driver === 'postgresql' ? `"${s.replace(/"/g, '""')}"` : `\`${s.replace(/`/g, '``')}\``);
 
     const name = fkName.trim() || 'fk_name';
     const sCol = sourceCol || 'column';
@@ -95,6 +96,10 @@
 
   async function createForeignKey() {
     if (!appState.activeConnection || !tableMeta) return;
+    if (appState.activeConnection.driver === 'sqlite') {
+      appState.showToast('SQLite foreign keys must be declared during CREATE TABLE.', 'warning');
+      return;
+    }
     if (!sourceCol || !refTable || !refCol) {
       appState.showToast('Please select source column, referenced table, and referenced column', 'warning');
       return;
@@ -124,12 +129,16 @@
 
   async function dropForeignKey(constraintName: string) {
     if (!appState.activeConnection || !tableMeta) return;
+    const driver = appState.activeConnection.driver;
+    if (driver === 'sqlite') {
+      appState.showToast('SQLite does not support dropping foreign keys via ALTER TABLE.', 'warning');
+      return;
+    }
     const confirmed = confirm(`Are you sure you want to drop foreign key constraint "${constraintName}" from table "${tableMeta.name}"?`);
     if (!confirmed) return;
 
-    const driver = appState.activeConnection.driver;
     const isPostgres = driver === 'postgres' || driver === 'postgresql';
-    const q = (s: string) => (isPostgres ? `"${s}"` : `\`${s}\``);
+    const q = (s: string) => (isPostgres ? `"${s.replace(/"/g, '""')}"` : `\`${s.replace(/`/g, '``')}\``);
 
     let dropSql = `ALTER TABLE ${q(tableMeta.name)} DROP FOREIGN KEY ${q(constraintName)};`;
     if (isPostgres) {

@@ -127,14 +127,22 @@ import { copyText } from '../../utils/clipboard';
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
 
-    // `code`
-    escaped = escaped.replace(/`([^`]+)`/g, '<code class="px-1 py-0.2 rounded bg-[#050811] border border-slate-700/60 text-sky-300 font-mono text-[10.5px]">$1</code>');
+    // Protect inline `code` spans before bold/italic replacements so `*` inside code never pairs across spans.
+    const codeSpans: string[] = [];
+    escaped = escaped.replace(/`([^`]+)`/g, (_, code) => {
+      const idx = codeSpans.length;
+      codeSpans.push(`<code class="px-1 py-0.2 rounded bg-[#050811] border border-slate-700/60 text-sky-300 font-mono text-[10.5px]">${code}</code>`);
+      return `\u0000CODE${idx}\u0000`;
+    });
 
     // **bold**
     escaped = escaped.replace(/\*\*([^*]+)\*\*/g, '<strong class="font-bold text-slate-100">$1</strong>');
 
     // *italic*
     escaped = escaped.replace(/\*([^*]+)\*/g, '<em class="italic text-slate-300">$1</em>');
+
+    // Restore inline `code` spans
+    escaped = escaped.replace(/\u0000CODE(\d+)\u0000/g, (_, idx) => codeSpans[Number(idx)] ?? '');
 
     return escaped;
   }

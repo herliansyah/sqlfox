@@ -101,9 +101,10 @@
     if (!appState.activeSessionId) return;
     maintenanceStatus = `Running ${op} on ${tableName}...`;
     try {
+      const targetDb = appState.activeTab?.database || appState.currentDatabase || '';
       await api.executeMaintenance(
         appState.activeSessionId,
-        appState.currentDatabase || '',
+        targetDb,
         tableName,
         op
       );

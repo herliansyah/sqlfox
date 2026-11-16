@@ -77,7 +77,7 @@
       await api.applyDataSync({
         target_session_id: tgtSession,
         target_db: targetDb,
-        table: sourceTable || targetTable,
+        table: targetTable.trim() || sourceTable,
         columns: syncDiff.columns || [],
         operations: syncDiff.operations,
       });
@@ -181,35 +181,41 @@
         </div>
 
         {#if syncDiff}
-          <div class="p-4 rounded-lg border border-slate-800 bg-[#050811] space-y-3">
-            <h4 class="text-xs font-bold text-slate-200">Reconciliation Summary</h4>
-            <div class="grid grid-cols-3 gap-2 text-center text-xs">
-              <div class="p-2 rounded bg-emerald-950/40 border border-emerald-800/60">
-                <div class="text-emerald-400 font-bold text-lg font-mono">{syncDiff.summary?.insert_count ?? 0}</div>
-                <div class="text-[11px] text-slate-400">Rows to Insert</div>
-              </div>
-              <div class="p-2 rounded bg-amber-950/40 border border-amber-800/60">
-                <div class="text-amber-400 font-bold text-lg font-mono">{syncDiff.summary?.update_count ?? 0}</div>
-                <div class="text-[11px] text-slate-400">Rows to Update</div>
-              </div>
-              <div class="p-2 rounded bg-rose-950/40 border border-rose-800/60">
-                <div class="text-rose-400 font-bold text-lg font-mono">{syncDiff.summary?.delete_count ?? 0}</div>
-                <div class="text-[11px] text-slate-400">Rows to Delete</div>
-              </div>
+          {#if syncDiff.error}
+            <div class="p-4 rounded-lg border border-rose-500/40 bg-rose-950/30 text-xs text-rose-300">
+              {syncDiff.error}
             </div>
+          {:else}
+            <div class="p-4 rounded-lg border border-slate-800 bg-[#050811] space-y-3">
+              <h4 class="text-xs font-bold text-slate-200">Reconciliation Summary</h4>
+              <div class="grid grid-cols-3 gap-2 text-center text-xs">
+                <div class="p-2 rounded bg-emerald-950/40 border border-emerald-800/60">
+                  <div class="text-emerald-400 font-bold text-lg font-mono">{syncDiff.summary?.insert_count ?? 0}</div>
+                  <div class="text-[11px] text-slate-400">Rows to Insert</div>
+                </div>
+                <div class="p-2 rounded bg-amber-950/40 border border-amber-800/60">
+                  <div class="text-amber-400 font-bold text-lg font-mono">{syncDiff.summary?.update_count ?? 0}</div>
+                  <div class="text-[11px] text-slate-400">Rows to Update</div>
+                </div>
+                <div class="p-2 rounded bg-rose-950/40 border border-rose-800/60">
+                  <div class="text-rose-400 font-bold text-lg font-mono">{syncDiff.summary?.delete_count ?? 0}</div>
+                  <div class="text-[11px] text-slate-400">Rows to Delete</div>
+                </div>
+              </div>
 
-            {#if syncDiff.operations && syncDiff.operations.length > 0}
-              <div class="space-y-1">
-                <span class="text-[11px] font-semibold text-slate-400">
-                  {syncDiff.operations.length} operation(s) pending — PK: {syncDiff.pk_columns?.join(', ') || 'auto'}
-                </span>
-              </div>
-            {:else}
-              <div class="text-center p-3 text-xs text-slate-400">
-                Both tables are already in complete synchronization. No modifications needed.
-              </div>
-            {/if}
-          </div>
+              {#if syncDiff.operations && syncDiff.operations.length > 0}
+                <div class="space-y-1">
+                  <span class="text-[11px] font-semibold text-slate-400">
+                    {syncDiff.operations.length} operation(s) pending — PK: {syncDiff.pk_columns?.join(', ') || 'auto'}
+                  </span>
+                </div>
+              {:else}
+                <div class="text-center p-3 text-xs text-slate-400">
+                  Both tables are already in complete synchronization. No modifications needed.
+                </div>
+              {/if}
+            </div>
+          {/if}
         {/if}
       </div>
 

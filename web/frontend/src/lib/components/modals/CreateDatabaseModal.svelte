@@ -112,7 +112,7 @@
           <span class="text-[10px] text-slate-500">Only letters, numbers, underscores, and dashes.</span>
         </div>
 
-        {#if appState.activeConnection?.driver !== 'postgres'}
+        {#if appState.activeConnection?.driver !== 'postgres' && appState.activeConnection?.driver !== 'postgresql' && appState.activeConnection?.driver !== 'sqlite'}
           <!-- Charset & Collation -->
           <div class="grid grid-cols-2 gap-3">
             <div class="space-y-1.5">

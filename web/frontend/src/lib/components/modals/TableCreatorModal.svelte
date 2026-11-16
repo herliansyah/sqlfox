@@ -1,5 +1,6 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
+  import { quoteSqlIdentifier } from '../../utils/sqlStatements';
   import Icon from '../common/Icon.svelte';
 
   interface TableColDraft {
@@ -104,7 +105,7 @@
     const driver = appState.activeConnection?.driver || 'mysql';
     const isPg = driver === 'postgres' || driver === 'postgresql';
     const isSqlite = driver === 'sqlite';
-    const q = (s: string) => (isPg || isSqlite ? `"${s}"` : `\`${s}\``);
+    const q = (s: string) => quoteSqlIdentifier(s, driver);
 
     const lines: string[] = [];
     const pks: string[] = [];
@@ -354,7 +355,7 @@
                         disabled={columns.length <= 1}
                         class="text-slate-500 hover:text-rose-400 disabled:opacity-20 p-1"
                       >
-                        \u00d7
+                        &times;
                       </button>
                     </td>
                   </tr>

@@ -88,9 +88,9 @@
     const activeIdx = appState.tabs.findIndex((t) => t.id === activeId);
     if (activeIdx >= vCount) {
       untrack(() => {
-        // Bring active tab into the visible slot (vCount - 1)
+        // Move active tab to index 0 so it is guaranteed visible without width-oscillation.
         const [activeTab] = appState.tabs.splice(activeIdx, 1);
-        appState.tabs.splice(vCount - 1, 0, activeTab);
+        appState.tabs.unshift(activeTab);
         appState.tabs = [...appState.tabs];
         appState.saveTabsState();
       });
@@ -186,8 +186,8 @@
     e.preventDefault();
     tabContextMenu = {
       open: true,
-      x: e.clientX,
-      y: e.clientY,
+      x: Math.min(e.clientX, window.innerWidth - 200),
+      y: Math.min(e.clientY, window.innerHeight - 220),
       tabId,
     };
   }

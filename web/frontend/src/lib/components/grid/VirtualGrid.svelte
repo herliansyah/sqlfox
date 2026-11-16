@@ -1,5 +1,6 @@
 <script lang="ts">
 import { copyText } from '../../utils/clipboard';
+  import { quoteSqlIdentifier, formatSqlLiteral } from '../../utils/sqlStatements';
   import { appState } from '../../stores/appState.svelte';
   import type { ColumnDefinition, FilterPill } from '../../../types';
   import Icon from '../common/Icon.svelte';
@@ -34,15 +35,30 @@ import { copyText } from '../../utils/clipboard';
   // Multi-row selection
   let selectedRowIndices = $state<number[]>([]);
 
-  // Reset selection and editing states when active tab or result set changes
+  // Reset selection, scroll, and editing states when active tab or result set changes
   $effect(() => {
     const _tabId = currentTab?.id;
     const _res = result;
+    scrollTop = 0;
+    if (containerRef) containerRef.scrollTop = 0;
     selectedRowIndices = [];
     selectedRowIndex = null;
     selectedCell = null;
     editingCell = null;
     contextMenu = null;
+  });
+
+  // Keep containerHeight synced with viewport/splitter resizes before any scroll event.
+  $effect(() => {
+    const el = containerRef;
+    if (!el) return;
+    containerHeight = el.clientHeight || 500;
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => {
+      containerHeight = el.clientHeight || 500;
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
   });
 
   // Context Menu State
@@ -109,17 +125,18 @@ import { copyText } from '../../utils/clipboard';
 
   let hiddenCols = $derived<string[]>(currentTab?.hiddenColumns || []);
 
-  let visibleColumns = $derived.by(() => {
-    if (!result?.columns) return [];
-    return result.columns.filter((c) => !hiddenCols.includes(getColName(c)));
+  let visibleColumnEntries = $derived.by(() => {
+    if (!result?.columns) return [] as Array<{ col: string | ColumnDefinition; origIdx: number }>;
+    const entries: Array<{ col: string | ColumnDefinition; origIdx: number }> = [];
+    result.columns.forEach((col, origIdx) => {
+      if (!hiddenCols.includes(getColName(col))) {
+        entries.push({ col, origIdx });
+      }
+    });
+    return entries;
   });
 
-  // ponytail: Precomputed Map lookups replace O(N) array scans during virtual window cell rendering
-  let colIndexMap = $derived.by(() => {
-    const map = new Map<string, number>();
-    allColumns.forEach((c, idx) => map.set(c, idx));
-    return map;
-  });
+  let visibleColumns = $derived(visibleColumnEntries.map((e) => e.col));
 
   let fkMap = $derived.by(() => {
     const map = new Map<string, any>();
@@ -372,7 +389,8 @@ import { copyText } from '../../utils/clipboard';
     const oldVal = result.rows[origIdx][cIdx];
     const newVal = editingCell.tempValue;
 
-    if (newVal !== (oldVal === null ? '' : String(oldVal))) {
+    const oldStr = oldVal === null || oldVal === undefined ? '' : String(oldVal);
+    if (newVal !== oldStr) {
       // Find PK col
       const pkColObj = result.columns.find((c) => isColPK(c));
       const pkCol = pkColObj ? getColName(pkColObj) : undefined;
@@ -466,16 +484,13 @@ import { copyText } from '../../utils/clipboard';
     const tbl = currentTab?.tableName || 'exported_table';
     const driver = appState.activeConnection?.driver;
     const isPg = driver === 'postgres' || driver === 'postgresql';
-    const isSqlite = driver === 'sqlite';
-    const q = (s: string) => (isPg || isSqlite ? `"${s}"` : `\`${s}\``);
+    const q = (s: string) => quoteSqlIdentifier(s, driver);
 
     const cols = result.columns.map((c) => q(getColName(c))).join(', ');
     const inserts = result.rows.map((row) => {
       const vals = row.map((c) => {
-        if (c === null || c === undefined) return 'NULL';
-        if (typeof c === 'number') return c;
         if (typeof c === 'boolean') return c ? (isPg ? 'TRUE' : '1') : (isPg ? 'FALSE' : '0');
-        return `'${String(c).replace(/'/g, "''")}'`;
+        return formatSqlLiteral(c);
       }).join(', ');
       return `INSERT INTO ${q(tbl)} (${cols}) VALUES (${vals});`;
     });
@@ -497,22 +512,22 @@ import { copyText } from '../../utils/clipboard';
   }
 
   // Delete Row
-  async function handleDeleteCurrentRow() {
-    if (selectedRowIndex === null || !currentTab?.tableName || !result?.rows) return;
+  async function handleDeleteCurrentRow(targetIdx: number | null = selectedRowIndex) {
+    if (targetIdx === null || !currentTab?.tableName || !result?.rows?.[targetIdx]) return;
     const pkColObj = result.columns.find((c) => isColPK(c));
     if (!pkColObj) {
       appState.showToast('Table does not have a primary key for deletion', 'warning');
       return;
     }
     const pkCol = getColName(pkColObj);
-    const pkVal = result.rows[selectedRowIndex][allColumns.indexOf(pkCol)];
+    const pkVal = result.rows[targetIdx][allColumns.indexOf(pkCol)];
     const ok = await appState.showNativeConfirm(
       `Delete record with ${pkCol} = ${pkVal}?`,
       'Confirm Deletion'
     );
     if (ok) {
       await appState.deleteRows(pkCol, [pkVal]);
-      selectedRowIndex = null;
+      if (selectedRowIndex === targetIdx) selectedRowIndex = null;
     }
   }
 
@@ -547,15 +562,17 @@ import { copyText } from '../../utils/clipboard';
   function copyRowAsInsertSQL(rIdx: number) {
     if (!result?.rows || !result.rows[rIdx] || !result.columns) return;
     const tbl = currentTab?.tableName || 'table_name';
-    const cols = result.columns.map((c) => `\`${getColName(c)}\``).join(', ');
+    const driver = appState.activeConnection?.driver;
+    const isPg = driver === 'postgres' || driver === 'postgresql';
+    const q = (s: string) => quoteSqlIdentifier(s, driver);
+    const cols = result.columns.map((c) => q(getColName(c))).join(', ');
     const vals = result.rows[rIdx]
       .map((c) => {
-        if (c === null || c === undefined) return 'NULL';
-        if (typeof c === 'number') return c;
-        return `'${String(c).replace(/'/g, "''")}'`;
+        if (typeof c === 'boolean') return c ? (isPg ? 'TRUE' : '1') : (isPg ? 'FALSE' : '0');
+        return formatSqlLiteral(c);
       })
       .join(', ');
-    const sql = `INSERT INTO \`${tbl}\` (${cols}) VALUES (${vals});`;
+    const sql = `INSERT INTO ${q(tbl)} (${cols}) VALUES (${vals});`;
     copyText(sql);
     appState.showToast('Copied as INSERT SQL statement', 'info');
   }
@@ -648,7 +665,7 @@ import { copyText } from '../../utils/clipboard';
         </button>
 
         <button
-          onclick={handleDeleteCurrentRow}
+          onclick={() => handleDeleteCurrentRow()}
           disabled={selectedRowIndex === null}
           class="h-6 px-2 rounded bg-rose-500/10 hover:bg-rose-500/20 disabled:opacity-40 text-rose-300 border border-rose-500/30 flex items-center space-x-1 transition text-[11px]"
           title="Delete selected row"
@@ -1259,9 +1276,8 @@ import { copyText } from '../../utils/clipboard';
                 </td>
 
                 <!-- Cells -->
-                {#each visibleColumns as col}
+                {#each visibleColumnEntries as { col, origIdx: cIdx } (cIdx)}
                   {@const colName = getColName(col)}
-                  {@const cIdx = colIndexMap.get(colName) ?? -1}
                   {@const cellVal = cIdx >= 0 ? rowItem.data[cIdx] : undefined}
                   {@const formatted = formatCellValue(cellVal)}
                   {@const isStaged = currentTab?.tableName && cIdx >= 0 ? isCellStaged(currentTab.tableName, rowItem.origIdx, cIdx) : false}
@@ -1655,11 +1671,10 @@ import { copyText } from '../../utils/clipboard';
                 <button
                   id="grid-ctx-btn-delete-row"
                   onclick={() => {
-                    handleDeleteCurrentRow();
+                    handleDeleteCurrentRow(contextMenu!.rIdx);
                     closeContextMenu();
                   }}
-                  disabled={selectedRowIndex === null}
-                  class="w-full text-left px-3 py-1.5 hover:bg-rose-950/60 disabled:opacity-40 flex items-center space-x-2 text-rose-300"
+                  class="w-full text-left px-3 py-1.5 hover:bg-rose-950/60 flex items-center space-x-2 text-rose-300"
                 >
                   <Icon name="trash-2" class="w-3.5 h-3.5 text-rose-400 shrink-0" />
                   <span>Delete Selected Row(s)</span>

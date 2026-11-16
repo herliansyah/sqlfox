@@ -1186,10 +1186,15 @@ func (s *MySQLSession) GetProcesslist(ctx context.Context) (*driver.ProcesslistR
 		locks = []driver.LockWait{}
 	}
 
+	var questions int64
+	var qName string
+	_ = s.db.QueryRowContext(ctx, "SHOW GLOBAL STATUS LIKE 'Questions'").Scan(&qName, &questions)
+
 	return &driver.ProcesslistResult{
 		CurrentThreadID: currentThreadID,
 		Threads:         threads,
 		Locks:           locks,
+		Questions:       questions,
 	}, nil
 }
 

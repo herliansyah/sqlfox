@@ -37,7 +37,7 @@
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed.provider) provider = parsed.provider;
-        if (parsed.apiKey) apiKey = parsed.apiKey;
+        apiKey = parsed.apiKey ?? '';
         if (parsed.baseUrl) baseUrl = parsed.baseUrl;
         if (parsed.modelName) modelName = parsed.modelName;
         if (parsed.temperature !== undefined) temperature = parsed.temperature;
@@ -75,9 +75,16 @@
     }
   }
 
+  let wasOpen = false;
   $effect(() => {
     if (appState.isAiSettingsModalOpen) {
-      loadSavedConfig();
+      if (!wasOpen) {
+        wasOpen = true;
+        testStatus = null;
+        loadSavedConfig();
+      }
+    } else {
+      wasOpen = false;
     }
   });
 </script>

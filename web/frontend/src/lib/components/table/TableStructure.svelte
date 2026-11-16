@@ -1,6 +1,7 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
+  import { splitSqlStatements, maskSqlForAnalysis } from '../../utils/sqlStatements';
   import type { TableMetadata, ColumnMetadata } from '../../../types';
   import Icon from '../common/Icon.svelte';
 
@@ -103,6 +104,9 @@
 
   // Sync staged columns whenever tableMeta changes
   $effect(() => {
+    isAddModalOpen = false;
+    isReviewModalOpen = false;
+    editingIndex = null;
     if (tableMeta && tableMeta.columns) {
       stagedColumns = tableMeta.columns.map((c) => ({
         ...c,
@@ -278,6 +282,11 @@
           } else {
             statements.push(`ALTER TABLE ${q(tableName)} ALTER COLUMN ${q(c.name)} SET NOT NULL;`);
           }
+          if (dfltClause) {
+            statements.push(`ALTER TABLE ${q(tableName)} ALTER COLUMN ${q(c.name)} SET ${dfltClause};`);
+          } else {
+            statements.push(`ALTER TABLE ${q(tableName)} ALTER COLUMN ${q(c.name)} DROP DEFAULT;`);
+          }
         } else {
           // MySQL
           if (c._oldName && c._oldName !== c.name) {
@@ -313,10 +322,10 @@
       const connId = appState.activeSessionId || appState.activeConnection.id;
       const targetDb = appState.activeTab?.database || appState.currentDatabase || undefined;
       // Execute statement(s)
-      const stmts = reviewDDL
-        .split(';')
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0 && !s.startsWith('--'));
+      const dialect = appState.activeConnection?.driver || 'generic';
+      const stmts = splitSqlStatements(reviewDDL, dialect)
+        .filter((s) => maskSqlForAnalysis(s.text, dialect).replace(/;/g, '').trim().length > 0)
+        .map((s) => s.text);
 
       for (const sql of stmts) {
         await api.executeQuery(connId, sql, false, targetDb);

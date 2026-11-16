@@ -1,6 +1,7 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
+  import { quoteSqlIdentifier } from '../../utils/sqlStatements';
   import Icon from '../common/Icon.svelte';
 
   let targetTable = $state('');
@@ -165,7 +166,6 @@
       const driver = appState.activeConnection?.driver;
       const isSQLite = driver === 'sqlite';
       const isPostgres = driver === 'postgres' || driver === 'postgresql';
-      const quote = isSQLite || isPostgres ? '"' : '`';
       let insertKeyword = 'INSERT';
       if (skipErrors) {
         if (isSQLite) {
@@ -178,12 +178,17 @@
       }
       const conflictSuffix = skipErrors && isPostgres ? ' ON CONFLICT DO NOTHING' : '';
 
-      const targetColsSql = activePairs.map(([_, tblCol]) => `${quote}${tblCol}${quote}`).join(', ');
+      const targetColsSql = activePairs.map(([_, tblCol]) => quoteSqlIdentifier(tblCol, driver)).join(', ');
+      const quotedTargetTable = quoteSqlIdentifier(targetTable, driver);
 
       const batchSize = 100;
       let insertedCount = 0;
 
       for (let i = 0; i < dataRows.length; i += batchSize) {
+        if (!appState.isCsvImportModalOpen) {
+          appState.showToast(`Import cancelled after ${insertedCount} rows`, 'warning');
+          return;
+        }
         const chunk = dataRows.slice(i, i + batchSize);
         const valuesRows: string[] = [];
 
@@ -204,7 +209,7 @@
         }
 
         const targetDb = appState.activeTab?.database || appState.currentDatabase || undefined;
-        const query = `${insertKeyword} INTO ${quote}${targetTable}${quote} (${targetColsSql}) VALUES\n${valuesRows.join(',\n')}${conflictSuffix};`;
+        const query = `${insertKeyword} INTO ${quotedTargetTable} (${targetColsSql}) VALUES\n${valuesRows.join(',\n')}${conflictSuffix};`;
         await api.executeQuery(appState.activeSessionId, query, false, targetDb);
 
         insertedCount += chunk.length;
@@ -255,7 +260,8 @@
         </div>
         <button
           onclick={handleClose}
-          class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition"
+          disabled={isImporting}
+          class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition disabled:opacity-40"
           aria-label="Close"
         >
           <Icon name="x" class="w-4 h-4" />
@@ -290,7 +296,7 @@
             >
               <option value=",">Comma (,)</option>
               <option value=";">Semicolon (;)</option>
-              <option value="\t">Tab (\t)</option>
+              <option value={'\t'}>Tab (\t)</option>
               <option value="|">Pipe (|)</option>
             </select>
           </div>

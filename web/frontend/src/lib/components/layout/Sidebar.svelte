@@ -1,5 +1,6 @@
 <script lang="ts">
 import { copyText } from '../../utils/clipboard';
+  import { quoteSqlIdentifier } from '../../utils/sqlStatements';
   import { appState } from '../../stores/appState.svelte';
   import Icon from '../common/Icon.svelte';
   import { onDestroy, tick } from 'svelte';
@@ -207,7 +208,8 @@ import { copyText } from '../../utils/clipboard';
   };
 
   function copySelectStatement(tableName: string) {
-    const sql = `SELECT * FROM \`${tableName}\` LIMIT 100;`;
+    const qTable = quoteSqlIdentifier(tableName, appState.activeConnection?.driver);
+    const sql = `SELECT * FROM ${qTable} LIMIT 100;`;
     copyText(sql);
     appState.showToast(`Copied SELECT query for "${tableName}"`, 'info');
   }

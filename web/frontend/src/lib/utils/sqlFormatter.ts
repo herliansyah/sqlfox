@@ -49,7 +49,7 @@ const STANDARD_SQL_KEYWORDS = [
 ];
 
 interface Token {
-  type: 'word' | 'string' | 'symbol';
+  type: 'word' | 'string' | 'comment' | 'symbol';
   value: string;
 }
 
@@ -60,39 +60,87 @@ export function formatSQL(sql: string): string {
 
   const tokens: Token[] = [];
   let current = '';
-  let inString = false;
-  let stringChar = '';
+
+  const flushWord = () => {
+    if (current.trim()) {
+      tokens.push({ type: 'word', value: current.trim() });
+    }
+    current = '';
+  };
 
   for (let i = 0; i < trimmed.length; i++) {
     const char = trimmed[i];
-    if (inString) {
-      current += char;
-      if (char === stringChar && trimmed[i - 1] !== '\\') {
-        inString = false;
-        tokens.push({ type: 'string', value: current });
-        current = '';
+    const next = trimmed[i + 1] || '';
+
+    // Line comments (-- or #)
+    if ((char === '-' && next === '-') || char === '#') {
+      flushWord();
+      let end = trimmed.indexOf('\n', i);
+      if (end === -1) end = trimmed.length;
+      tokens.push({ type: 'comment', value: trimmed.slice(i, end).trimEnd() });
+      i = end;
+      continue;
+    }
+
+    // Block comments (/* ... */)
+    if (char === '/' && next === '*') {
+      flushWord();
+      const closeIdx = trimmed.indexOf('*/', i + 2);
+      const end = closeIdx === -1 ? trimmed.length : closeIdx + 2;
+      tokens.push({ type: 'comment', value: trimmed.slice(i, end) });
+      i = end - 1;
+      continue;
+    }
+
+    // PostgreSQL dollar-quoted strings ($tag$...$tag$)
+    if (char === '$') {
+      const tag = trimmed.slice(i).match(/^\$[a-zA-Z0-9_]*\$/)?.[0];
+      if (tag) {
+        flushWord();
+        const closeIdx = trimmed.indexOf(tag, i + tag.length);
+        const end = closeIdx === -1 ? trimmed.length : closeIdx + tag.length;
+        tokens.push({ type: 'string', value: trimmed.slice(i, end) });
+        i = end - 1;
+        continue;
       }
-    } else if (char === "'" || char === '"' || char === '`') {
-      if (current.trim()) tokens.push({ type: 'word', value: current.trim() });
-      current = char;
-      inString = true;
-      stringChar = char;
-    } else if (char === '(' || char === ')' || char === ',' || char === ';') {
-      if (current.trim()) tokens.push({ type: 'word', value: current.trim() });
+    }
+
+    // Quoted strings and identifiers ('...', "...", `...`)
+    if (char === "'" || char === '"' || char === '`') {
+      flushWord();
+      const quoteChar = char;
+      let literal = quoteChar;
+      i++;
+      while (i < trimmed.length) {
+        const c = trimmed[i];
+        literal += c;
+        if ((quoteChar === "'" || quoteChar === '"') && c === '\\' && i + 1 < trimmed.length) {
+          i++;
+          literal += trimmed[i];
+        } else if (c === quoteChar) {
+          if (trimmed[i + 1] === quoteChar) {
+            i++;
+            literal += trimmed[i];
+          } else {
+            break;
+          }
+        }
+        i++;
+      }
+      tokens.push({ type: 'string', value: literal });
+      continue;
+    }
+
+    if (char === '(' || char === ')' || char === ',' || char === ';') {
+      flushWord();
       tokens.push({ type: 'symbol', value: char });
-      current = '';
     } else if (/\s/.test(char)) {
-      if (current.trim()) {
-        tokens.push({ type: 'word', value: current.trim() });
-        current = '';
-      }
+      flushWord();
     } else {
       current += char;
     }
   }
-  if (current.trim()) {
-    tokens.push({ type: inString ? 'string' : 'word', value: current.trim() });
-  }
+  flushWord();
 
   let result = '';
   let indentLevel = 0;
@@ -102,6 +150,11 @@ export function formatSQL(sql: string): string {
     const t = tokens[i];
     if (t.type === 'string') {
       result += t.value + ' ';
+      continue;
+    }
+    if (t.type === 'comment') {
+      if (result.trim() && !result.endsWith('\n')) result += '\n';
+      result += getIndent() + t.value + '\n';
       continue;
     }
 

@@ -6,13 +6,29 @@ export interface StatementPos {
 
 export type SqlDialect = 'mysql' | 'postgres' | 'sqlite' | 'postgresql' | 'generic';
 
+export function quoteSqlIdentifier(name: string, driver?: string): string {
+  const d = (driver || '').toLowerCase();
+  if (d === 'postgres' || d === 'postgresql' || d === 'sqlite') {
+    return `"${name.replace(/"/g, '""')}"`;
+  }
+  return `\`${name.replace(/`/g, '``')}\``;
+}
+
+export function formatSqlLiteral(val: unknown): string {
+  if (val === null || val === undefined) return 'NULL';
+  if (typeof val === 'number') return Number.isFinite(val) ? String(val) : 'NULL';
+  if (typeof val === 'boolean') return val ? 'TRUE' : 'FALSE';
+  if (typeof val === 'object') return `'${JSON.stringify(val).replace(/'/g, "''")}'`;
+  return `'${String(val).replace(/'/g, "''")}'`;
+}
+
 function dialectRules(dialect: SqlDialect) {
   const isPg = dialect === 'postgres' || dialect === 'postgresql';
   return {
     hashComments: dialect === 'mysql' || dialect === 'generic',
     dollarQuotes: isPg || dialect === 'generic',
     backslashEscapes: dialect === 'mysql' || dialect === 'generic',
-    bracketQuotes: dialect === 'sqlite' || dialect === 'generic',
+    bracketQuotes: dialect === 'sqlite',
     backtickQuotes: !isPg,
   };
 }
@@ -29,6 +45,7 @@ export function splitSqlStatements(text: string, dialect: SqlDialect = 'generic'
   const rules = dialectRules(dialect);
   const statements: StatementPos[] = [];
   let quote = '';
+  let escapeString = false;
   let lineComment = false;
   let blockComment = false;
   let dollarTag = '';
@@ -57,11 +74,11 @@ export function splitSqlStatements(text: string, dialect: SqlDialect = 'generic'
       continue;
     }
     if (quote) {
-      if (rules.backslashEscapes && (quote === "'" || quote === '"') && ch === '\\') {
+      if ((rules.backslashEscapes || escapeString) && (quote === "'" || quote === '"') && ch === '\\') {
         i++;
       } else if (ch === quote) {
         if (next === quote && quote !== ']') i++;
-        else quote = '';
+        else { quote = ''; escapeString = false; }
       }
       continue;
     }
@@ -72,8 +89,13 @@ export function splitSqlStatements(text: string, dialect: SqlDialect = 'generic'
     } else if (ch === '/' && next === '*') {
       blockComment = true;
       i++;
+    } else if ((ch === 'e' || ch === 'E') && next === "'" && !/[a-zA-Z0-9_$]/.test(text[i - 1] || '')) {
+      quote = "'";
+      escapeString = true;
+      i++;
     } else if (ch === "'" || ch === '"' || (ch === '`' && rules.backtickQuotes) || (ch === '[' && rules.bracketQuotes)) {
       quote = ch === '[' ? ']' : ch;
+      escapeString = false;
     } else if (ch === '$' && rules.dollarQuotes) {
       const tag = text.slice(i).match(/^\$[a-zA-Z0-9_]*\$/)?.[0];
       if (tag) {
@@ -91,10 +113,11 @@ export function splitSqlStatements(text: string, dialect: SqlDialect = 'generic'
 }
 
 /** Remove comments and literals for clause detection / empty-statement checks. */
-export function maskSqlForAnalysis(text: string, dialect: SqlDialect = 'generic'): string {
+export function maskSqlForAnalysis(text: string, dialect: SqlDialect = 'generic', keepIdentifiers = false): string {
   let result = '';
   const rules = dialectRules(dialect);
   let quote = '';
+  let escapeString = false;
   let lineComment = false;
   let blockComment = false;
   let dollarTag = '';
@@ -127,12 +150,21 @@ export function maskSqlForAnalysis(text: string, dialect: SqlDialect = 'generic'
       continue;
     }
     if (quote) {
-      keep(ch);
-      if (rules.backslashEscapes && (quote === "'" || quote === '"') && ch === '\\' && next) {
-        keep(next); i++;
+      if (keepIdentifiers && (quote === '`' || quote === '"' || quote === ']')) {
+        result += ch === '\n' || ch === '\r' ? ch : '_';
+      } else {
+        keep(ch);
+      }
+      if ((rules.backslashEscapes || escapeString) && (quote === "'" || quote === '"') && ch === '\\' && next) {
+        if (keepIdentifiers && quote === '"') result += '_';
+        else keep(next);
+        i++;
       } else if (ch === quote) {
-        if (next === quote && quote !== ']') { keep(next); i++; }
-        else quote = '';
+        if (next === quote && quote !== ']') {
+          if (keepIdentifiers && (quote === '`' || quote === '"')) result += '_';
+          else keep(next);
+          i++;
+        } else { quote = ''; escapeString = false; }
       }
       continue;
     }
@@ -143,9 +175,15 @@ export function maskSqlForAnalysis(text: string, dialect: SqlDialect = 'generic'
     } else if (ch === '/' && next === '*') {
       blockComment = true;
       keep(); keep(); i++;
+    } else if ((ch === 'e' || ch === 'E') && next === "'" && !/[a-zA-Z0-9_$]/.test(text[i - 1] || '')) {
+      quote = "'";
+      escapeString = true;
+      keep(); keep(); i++;
     } else if (ch === "'" || ch === '"' || (ch === '`' && rules.backtickQuotes) || (ch === '[' && rules.bracketQuotes)) {
       quote = ch === '[' ? ']' : ch;
-      keep();
+      escapeString = false;
+      if (keepIdentifiers && (quote === '`' || quote === '"' || quote === ']')) result += '_';
+      else keep();
     } else if (ch === '$' && rules.dollarQuotes) {
       const tag = text.slice(i).match(/^\$[a-zA-Z0-9_]*\$/)?.[0];
       if (tag) {
@@ -162,6 +200,7 @@ export function maskSqlForAnalysis(text: string, dialect: SqlDialect = 'generic'
 export function isCodePosition(text: string, cursor: number, dialect: SqlDialect = 'generic'): boolean {
   const rules = dialectRules(dialect);
   let quote = '';
+  let escapeString = false;
   let lineComment = false;
   let blockComment = false;
   let dollarTag = '';
@@ -183,10 +222,10 @@ export function isCodePosition(text: string, cursor: number, dialect: SqlDialect
       continue;
     }
     if (quote) {
-      if (rules.backslashEscapes && (quote === "'" || quote === '"') && ch === '\\') { i++; continue; }
+      if ((rules.backslashEscapes || escapeString) && (quote === "'" || quote === '"') && ch === '\\') { i++; continue; }
       if (ch === quote) {
         if (next === quote && quote !== ']') i++;
-        else quote = '';
+        else { quote = ''; escapeString = false; }
       }
       continue;
     }
@@ -197,8 +236,13 @@ export function isCodePosition(text: string, cursor: number, dialect: SqlDialect
     } else if (ch === '/' && next === '*') {
       blockComment = true;
       i++;
+    } else if ((ch === 'e' || ch === 'E') && next === "'" && !/[a-zA-Z0-9_$]/.test(text[i - 1] || '')) {
+      quote = "'";
+      escapeString = true;
+      i++;
     } else if (ch === "'" || ch === '"' || (ch === '`' && rules.backtickQuotes) || (ch === '[' && rules.bracketQuotes)) {
       quote = ch === '[' ? ']' : ch;
+      escapeString = false;
     } else if (ch === '$' && rules.dollarQuotes) {
       const tag = text.slice(i).match(/^\$[a-zA-Z0-9_]*\$/)?.[0];
       if (tag) { dollarTag = tag; i += tag.length - 1; }

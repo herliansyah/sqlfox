@@ -1,6 +1,7 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
+  import { quoteSqlIdentifier } from '../../utils/sqlStatements';
   import Icon from '../common/Icon.svelte';
   import SqlCodeEditor from '../editor/SqlCodeEditor.svelte';
 
@@ -23,7 +24,8 @@
           algorithm = 'UNDEFINED';
           checkOption = 'NONE';
           const firstTable = appState.filteredTables[0]?.name || 'my_table';
-          selectQuery = `SELECT id, created_at FROM \`${firstTable}\` WHERE 1=1;`;
+          const qTbl = quoteSqlIdentifier(firstTable, appState.activeConnection?.driver);
+          selectQuery = `SELECT id, created_at FROM ${qTbl} WHERE 1=1;`;
         }
         isSubmitting = false;
         wasOpen = true;
@@ -37,20 +39,20 @@
     const driver = appState.activeConnection?.driver;
     const isSQLite = driver === 'sqlite';
     const isPostgres = driver === 'postgres' || driver === 'postgresql';
-    const quote = isSQLite || isPostgres ? '"' : '`';
     const cleanName = viewName.trim() || 'v_sample_view';
+    const qName = quoteSqlIdentifier(cleanName, driver);
     const cleanQuery = selectQuery.trim().replace(/;+$/, '');
 
     let sql = '';
     if (isSQLite) {
-      sql = `CREATE VIEW IF NOT EXISTS ${quote}${cleanName}${quote} AS\n${cleanQuery};`;
+      sql = `CREATE VIEW IF NOT EXISTS ${qName} AS\n${cleanQuery};`;
     } else if (isPostgres) {
       let checkPart = checkOption !== 'NONE' ? `\nWITH ${checkOption} CHECK OPTION` : '';
-      sql = `CREATE OR REPLACE VIEW ${quote}${cleanName}${quote} AS\n${cleanQuery}${checkPart};`;
+      sql = `CREATE OR REPLACE VIEW ${qName} AS\n${cleanQuery}${checkPart};`;
     } else {
       let algoPart = algorithm !== 'UNDEFINED' ? ` ALGORITHM = ${algorithm}` : '';
       let checkPart = checkOption !== 'NONE' ? `\nWITH ${checkOption} CHECK OPTION` : '';
-      sql = `CREATE OR REPLACE${algoPart} VIEW ${quote}${cleanName}${quote} AS\n${cleanQuery}${checkPart};`;
+      sql = `CREATE OR REPLACE${algoPart} VIEW ${qName} AS\n${cleanQuery}${checkPart};`;
     }
     return sql;
   });

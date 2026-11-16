@@ -3,6 +3,7 @@ import { copyText } from '../../utils/clipboard';
   import { appState } from '../../stores/appState.svelte';
   import type { TableMetadata } from '../../../types';
   import Icon from '../common/Icon.svelte';
+  import { untrack } from 'svelte';
 
   const CARD_WIDTH = 220;
   const HEADER_HEIGHT = 38;
@@ -60,13 +61,13 @@ import { copyText } from '../../utils/clipboard';
   $effect(() => {
     // Initialize or load positions when catalog tables change
     if (tables.length > 0) {
-      loadOrAutoLayoutPositions();
+      untrack(() => loadOrAutoLayoutPositions());
     }
   });
 
   function loadOrAutoLayoutPositions() {
     const connId = appState.activeConnection?.id || 'default';
-    const db = appState.currentDatabase || 'default';
+    const db = appState.activeTab?.database || appState.currentDatabase || 'default';
     const storageKey = `sqlfox_erd_${connId}_${db}`;
     try {
       const saved = localStorage.getItem(storageKey);
@@ -84,7 +85,7 @@ import { copyText } from '../../utils/clipboard';
 
   function savePositions() {
     const connId = appState.activeConnection?.id || 'default';
-    const db = appState.currentDatabase || 'default';
+    const db = appState.activeTab?.database || appState.currentDatabase || 'default';
     const storageKey = `sqlfox_erd_${connId}_${db}`;
     try {
       localStorage.setItem(storageKey, JSON.stringify(positions));
@@ -364,7 +365,7 @@ import { copyText } from '../../utils/clipboard';
       return;
     }
 
-    const CARD_W = 240;
+    const CARD_W = CARD_WIDTH;
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
@@ -806,7 +807,7 @@ import { copyText } from '../../utils/clipboard';
                   <span class="truncate">{col.name}</span>
                 </div>
                 <span class="text-[9px] text-slate-500 font-mono ml-1 uppercase shrink-0">
-                  {col.type.split('(')[0]}
+                  {(col.type || '').split('(')[0]}
                 </span>
               </div>
             {/each}

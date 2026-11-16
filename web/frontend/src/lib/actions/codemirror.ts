@@ -175,8 +175,10 @@ export function codemirror(node: HTMLElement, options: CodeMirrorOptions) {
   let lastKnownDoc = options.doc || '';
   const dialectCompartment = new Compartment();
   const readOnlyCompartment = new Compartment();
+  const placeholderCompartment = new Compartment();
   const states = new Map<string, EditorState>();
   const scrollPositions = new Map<string, number>();
+  const MAX_CACHED_STATES = 30;
 
   const flash = (from: number, to: number) => {
     if (from >= to) return;
@@ -383,7 +385,7 @@ export function codemirror(node: HTMLElement, options: CodeMirrorOptions) {
           EditorState.readOnly.of(!!currentOptions.readOnly),
           EditorView.editable.of(!currentOptions.readOnly),
         ]),
-        currentOptions.placeholder ? placeholder(currentOptions.placeholder) : [],
+        placeholderCompartment.of(currentOptions.placeholder ? placeholder(currentOptions.placeholder) : []),
         autocompletion({
           override: [completionSource], activateOnTyping: true, closeOnBlur: true, maxRenderedOptions: 50,
           defaultKeymap: true, icons: false, interactionDelay: 0,
@@ -405,21 +407,29 @@ export function codemirror(node: HTMLElement, options: CodeMirrorOptions) {
       const previousId = currentId;
       const previousDialect = currentOptions.dialect;
       const previousReadOnly = currentOptions.readOnly;
+      const previousPlaceholder = currentOptions.placeholder;
       currentOptions = next;
       currentId = next.id || '__default';
       const switched = currentId !== previousId;
 
       if (switched) {
+        states.delete(previousId);
         states.set(previousId, view.state);
         scrollPositions.set(previousId, view.scrollDOM.scrollTop);
+        while (states.size > MAX_CACHED_STATES) {
+          const oldest = states.keys().next().value;
+          if (oldest === undefined) break;
+          states.delete(oldest);
+          scrollPositions.delete(oldest);
+        }
         view.setState(states.get(currentId) || makeState(next.doc || ''));
-        view.scrollDOM.scrollTop = scrollPositions.get(currentId) || 0;
         lastKnownDoc = view.state.doc.toString();
       }
 
       // Reconcile the document for both the active tab and restored tabs.
-      if (next.doc !== lastKnownDoc) {
-        const doc = next.doc || '';
+      const nextDoc = next.doc || '';
+      if (nextDoc !== lastKnownDoc) {
+        const doc = nextDoc;
         const selection = view.state.selection;
         const ranges = selection.ranges.map((range) => EditorSelection.range(
           Math.min(range.anchor, doc.length),
@@ -442,7 +452,16 @@ export function codemirror(node: HTMLElement, options: CodeMirrorOptions) {
           EditorState.readOnly.of(!!next.readOnly), EditorView.editable.of(!next.readOnly),
         ]) });
       }
-      if (switched) view.requestMeasure();
+      if (switched || next.placeholder !== previousPlaceholder) {
+        view.dispatch({ effects: placeholderCompartment.reconfigure(next.placeholder ? placeholder(next.placeholder) : []) });
+      }
+      if (switched) {
+        view.requestMeasure();
+        const savedScroll = scrollPositions.get(currentId) || 0;
+        requestAnimationFrame(() => {
+          if (!destroyed) view.scrollDOM.scrollTop = savedScroll;
+        });
+      }
     },
     destroy() {
       destroyed = true;

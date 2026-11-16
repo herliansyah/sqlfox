@@ -173,7 +173,6 @@
 - [x] Processlist Quick Filter Chips (ADR 0052: All, Active, Sleep, Locked, Slow >5s)
 - [x] Processlist Column Visibility Management (ADR 0054)
 - [x] Thread Detail Modal (`ThreadDetailModal`: format SQL, copy SQL/JSON, EXPLAIN query, kirim ke AI)
-- [x] Process Activity Trend Panel (`ProcessTrendPanel.svelte`: grafik rolling buffer QPS, koneksi aktif, thread over time)
 - [x] Cluster & Replication Inspector (Primary/Replica topology, Seconds_Behind_Master, GTID)
 - [x] Server Variables Inspector & Tuning Advisor (inspeksi global variables, live edit, tuning recommendation)
 - [x] Performance Flight Recorder & Statement Digest (Statement Digest sub-tab: top slow queries, latency, reset digest)

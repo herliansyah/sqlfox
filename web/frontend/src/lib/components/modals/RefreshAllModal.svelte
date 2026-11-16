@@ -12,6 +12,7 @@
 
   $effect(() => {
     if (appState.isRefreshAllOpen && appState.activeSessionId) {
+      acknowledged = false;
       loadThreadHealth();
     }
   });
@@ -35,22 +36,27 @@
 
     isRefreshing = true;
     progressPercent = 0;
-    const sessionId = appState.activeSessionId;
-    const dbs = appState.availableDatabases.length > 0 ? appState.availableDatabases : [appState.currentDatabase];
+    try {
+      const sessionId = appState.activeSessionId;
+      const dbs = appState.availableDatabases.length > 0 ? appState.availableDatabases : [appState.currentDatabase];
 
-    for (let i = 0; i < dbs.length; i++) {
-      const db = dbs[i];
-      currentDbProgress = `Refreshing catalog for '${db}'...`;
-      try {
-        await appState.getSchemaCatalog(sessionId, db);
-      } catch (_) {}
-      progressPercent = Math.round(((i + 1) / dbs.length) * 100);
+      for (let i = 0; i < dbs.length; i++) {
+        const db = dbs[i];
+        currentDbProgress = `Refreshing catalog for '${db}'...`;
+        try {
+          await appState.getSchemaCatalog(sessionId, db);
+        } catch (_) {}
+        progressPercent = Math.round(((i + 1) / dbs.length) * 100);
+      }
+
+      await appState.refreshCatalog();
+      appState.showToast(`Successfully refreshed catalogs for all ${dbs.length} databases`, 'success');
+      appState.isRefreshAllOpen = false;
+    } catch (err: any) {
+      appState.showToast(`Refresh failed: ${err?.message ?? err}`, 'error');
+    } finally {
+      isRefreshing = false;
     }
-
-    await appState.refreshCatalog();
-    appState.showToast(`Successfully refreshed catalogs for all ${dbs.length} databases`, 'success');
-    isRefreshing = false;
-    appState.isRefreshAllOpen = false;
   }
 
   function handleCancel() {

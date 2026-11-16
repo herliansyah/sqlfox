@@ -195,6 +195,7 @@ import { copyText } from '../../utils/clipboard';
               {#if formatted.length > 80 || formatted.includes('\n')}
                 <textarea
                   rows="3"
+                  readonly={!currentTab?.tableName}
                   value={editedFields[colName] !== undefined ? editedFields[colName] : formatted}
                   oninput={(e) => handleFieldChange(colName, (e.currentTarget as HTMLTextAreaElement).value)}
                   onblur={() => saveField(colName, cIdx)}
@@ -204,21 +205,24 @@ import { copyText } from '../../utils/clipboard';
                 <div class="flex items-center space-x-2">
                   <input
                     type="text"
+                    readonly={!currentTab?.tableName}
                     value={editedFields[colName] !== undefined ? editedFields[colName] : formatted}
                     oninput={(e) => handleFieldChange(colName, (e.currentTarget as HTMLInputElement).value)}
                     onblur={() => saveField(colName, cIdx)}
                     class="flex-1 bg-[#0f172a] border border-[#334155] rounded px-2.5 py-1 text-xs font-mono text-slate-100 focus:outline-none focus:border-sky-500"
                   />
-                  <button
-                    type="button"
-                    onclick={() => {
-                      handleFieldChange(colName, null);
-                      saveField(colName, cIdx);
-                    }}
-                    class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-rose-300 rounded text-[10px] font-mono border border-slate-700"
-                  >
-                    NULL
-                  </button>
+                  {#if currentTab?.tableName}
+                    <button
+                      type="button"
+                      onclick={() => {
+                        handleFieldChange(colName, null);
+                        saveField(colName, cIdx);
+                      }}
+                      class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-rose-300 rounded text-[10px] font-mono border border-slate-700"
+                    >
+                      NULL
+                    </button>
+                  {/if}
                 </div>
               {/if}
             </div>

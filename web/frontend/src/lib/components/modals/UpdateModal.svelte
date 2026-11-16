@@ -74,14 +74,21 @@
     }
   }
 
+  let wasOpen = false;
   $effect(() => {
     if (appState.isUpdateModalOpen) {
-      checkUpdate(false);
+      if (!wasOpen) {
+        wasOpen = true;
+        activeTab = 'update';
+        checkUpdate(false);
+      }
+    } else {
+      wasOpen = false;
     }
   });
 
   $effect(() => {
-    if (activeTab === 'changelog') {
+    if (appState.isUpdateModalOpen && activeTab === 'changelog') {
       loadChangelog();
     }
   });
