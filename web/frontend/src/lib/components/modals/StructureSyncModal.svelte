@@ -51,9 +51,47 @@
     }
   });
 
+  let srcDatabases = $state<string[]>([]);
+  let tgtDatabases = $state<string[]>([]);
+  let applyErrors = $state<string[]>([]);
+
+  async function loadConnDatabases(connId: string, side: 'src' | 'tgt') {
+    if (!connId) return;
+    try {
+      const sess = await api.connectSession(connId);
+      const dbs = sess.schema?.databases || [];
+      if (side === 'src') {
+        srcDatabases = dbs;
+        if (!sourceDb && sess.current_database) sourceDb = sess.current_database;
+      } else {
+        tgtDatabases = dbs;
+        if (!targetDb && sess.current_database) targetDb = sess.current_database;
+      }
+    } catch {
+      /* ignore transient fetch failure */
+    }
+  }
+
+  $effect(() => {
+    if (appState.isStructureSyncModalOpen && sourceConnId) {
+      loadConnDatabases(sourceConnId, 'src');
+    }
+  });
+
+  $effect(() => {
+    if (appState.isStructureSyncModalOpen && targetConnId) {
+      loadConnDatabases(targetConnId, 'tgt');
+    }
+  });
+
   let targetConn = $derived(appState.connections.find((c) => c.id === targetConnId));
   let isTargetProduction = $derived(targetConn?.environment === 'Production');
   let challengeTarget = $derived(targetDb || targetConn?.name || 'MIGRATE');
+  let isChallengeSatisfied = $derived.by(() => {
+    if (!isTargetProduction) return true;
+    const val = challengeInput.trim().toUpperCase();
+    return val === 'MIGRATE' || val === challengeTarget.trim().toUpperCase();
+  });
 
   let selectedCount = $derived(diffs.filter((d) => d.selected).length);
 
@@ -79,6 +117,7 @@
     }
 
     isComparing = true;
+    applyErrors = [];
     try {
       const srcSession = (await api.connectSession(sourceConnId)).id || sourceConnId;
       const tgtSession = (await api.connectSession(targetConnId)).id || targetConnId;
@@ -115,17 +154,24 @@
       return;
     }
 
-    if (isTargetProduction && challengeInput.trim() !== challengeTarget) {
-      appState.showToast(`Please type "${challengeTarget}" to confirm production migration`, 'error');
+    if (isTargetProduction && !isChallengeSatisfied) {
+      appState.showToast(`Please type "${challengeTarget}" or "MIGRATE" to confirm production migration`, 'error');
       return;
     }
 
-    if (!confirm(`Apply ${selectedSQLs.length} schema change(s) to target database?`)) return;
+    if (!isTargetProduction) {
+      const ok = await appState.showNativeConfirm(
+        `Apply ${selectedSQLs.length} schema change(s) to target database "${targetDb || targetConn?.name || targetConnId}"?`,
+        'Confirm Structure Migration'
+      );
+      if (!ok) return;
+    }
 
     isApplying = true;
+    applyErrors = [];
     try {
       const tgtSession = (await api.connectSession(targetConnId)).id || targetConnId;
-      await api.applyStructure({
+      const res = await api.applyStructure({
         target_session_id: tgtSession,
         target_db: targetDb,
         statements: selectedSQLs,
@@ -133,7 +179,21 @@
         challenge_input: challengeInput.trim(),
       });
 
-      appState.showToast('Structure migration applied successfully!', 'success');
+      if (res.blocked && res.requires_confirm) {
+        appState.showToast(res.message || 'Production confirmation challenge required', 'warning');
+        return;
+      }
+
+      if (res.errors && res.errors.length > 0) {
+        applyErrors = res.errors;
+        appState.showToast(
+          `Structure migration finished with errors: ${res.executed ?? 0} applied, ${res.errors.length} failed`,
+          'warning'
+        );
+        return;
+      }
+
+      appState.showToast(`Structure migration applied ${res.executed ?? selectedSQLs.length} change(s)!`, 'success');
       appState.isStructureSyncModalOpen = false;
       await appState.refreshCatalog();
     } catch (err: any) {
@@ -204,13 +264,25 @@
             </div>
             <div>
               <label for="sync-src-db" class="text-[11px] text-slate-400 block mb-0.5">Database Name</label>
-              <input
-                id="sync-src-db"
-                type="text"
-                bind:value={sourceDb}
-                placeholder="Database"
-                class="w-full bg-[#090d16] border border-[#334155] rounded px-2 py-1 text-xs text-white font-mono outline-none"
-              />
+              {#if srcDatabases.length > 0}
+                <select
+                  id="sync-src-db"
+                  bind:value={sourceDb}
+                  class="w-full bg-[#090d16] border border-[#334155] rounded px-2 py-1 text-xs text-white font-mono outline-none"
+                >
+                  {#each srcDatabases as db}
+                    <option value={db}>{db}</option>
+                  {/each}
+                </select>
+              {:else}
+                <input
+                  id="sync-src-db"
+                  type="text"
+                  bind:value={sourceDb}
+                  placeholder="Database"
+                  class="w-full bg-[#090d16] border border-[#334155] rounded px-2 py-1 text-xs text-white font-mono outline-none"
+                />
+              {/if}
             </div>
           </div>
         </div>
@@ -243,13 +315,25 @@
             </div>
             <div>
               <label for="sync-tgt-db" class="text-[11px] text-slate-400 block mb-0.5">Database Name</label>
-              <input
-                id="sync-tgt-db"
-                type="text"
-                bind:value={targetDb}
-                placeholder="Target DB"
-                class="w-full bg-[#090d16] border border-[#334155] rounded px-2 py-1 text-xs text-white font-mono outline-none"
-              />
+              {#if tgtDatabases.length > 0}
+                <select
+                  id="sync-tgt-db"
+                  bind:value={targetDb}
+                  class="w-full bg-[#090d16] border border-[#334155] rounded px-2 py-1 text-xs text-white font-mono outline-none"
+                >
+                  {#each tgtDatabases as db}
+                    <option value={db}>{db}</option>
+                  {/each}
+                </select>
+              {:else}
+                <input
+                  id="sync-tgt-db"
+                  type="text"
+                  bind:value={targetDb}
+                  placeholder="Target DB"
+                  class="w-full bg-[#090d16] border border-[#334155] rounded px-2 py-1 text-xs text-white font-mono outline-none"
+                />
+              {/if}
             </div>
           </div>
         </div>
@@ -290,15 +374,17 @@
           </div>
         {:else}
           <!-- Sub-Tabs: List vs Script -->
-          <div class="h-8 bg-[#090d16] border-b border-[#1e293b] px-4 flex items-center justify-between text-xs font-sans">
+          <div class="h-9 bg-[#090d16] border-b border-[#1e293b] px-4 flex items-center justify-between text-xs font-sans">
             <div class="flex items-center space-x-2">
               <button
+                type="button"
                 onclick={() => (viewMode = 'list')}
                 class="px-2.5 py-1 rounded font-semibold transition {viewMode === 'list' ? 'bg-[#1e293b] text-emerald-400' : 'text-slate-400 hover:text-white'}"
               >
                 Differences ({diffs.length})
               </button>
               <button
+                type="button"
                 onclick={() => (viewMode = 'script')}
                 class="px-2.5 py-1 rounded font-semibold transition {viewMode === 'script' ? 'bg-[#1e293b] text-emerald-400' : 'text-slate-400 hover:text-white'}"
               >
@@ -306,9 +392,27 @@
               </button>
             </div>
 
-            <span class="text-slate-400 font-mono text-[11px]">
-              {selectedCount} of {diffs.length} statements selected
-            </span>
+            <div class="flex items-center space-x-2">
+              {#if diffs.length > 0}
+                <button
+                  type="button"
+                  onclick={() => toggleAllDiffs(true)}
+                  class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-sky-400 text-[11px] font-semibold"
+                >
+                  Select All
+                </button>
+                <button
+                  type="button"
+                  onclick={() => toggleAllDiffs(false)}
+                  class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold"
+                >
+                  Deselect All
+                </button>
+              {/if}
+              <span class="text-slate-400 font-mono text-[11px]">
+                {selectedCount} of {diffs.length} selected
+              </span>
+            </div>
           </div>
 
           <!-- Body -->
@@ -326,7 +430,7 @@
                       />
                     </th>
                     <th class="py-2 px-3">Object</th>
-                    <th class="py-2 px-3">Action</th>
+                    <th class="py-2 px-3 w-28">Action</th>
                     <th class="py-2 px-3">Source Definition</th>
                     <th class="py-2 px-3">Target Definition</th>
                   </tr>
@@ -340,7 +444,7 @@
                     </tr>
                   {:else}
                     {#each diffs as diff (diff.id)}
-                      <tr class="hover:bg-slate-800/40 transition-colors">
+                      <tr class="hover:bg-slate-800/40 transition-colors align-top">
                         <td class="py-2 px-3 text-center">
                           <input
                             type="checkbox"
@@ -348,7 +452,7 @@
                             class="rounded bg-slate-900 border-slate-700 text-emerald-500 focus:ring-0"
                           />
                         </td>
-                        <td class="py-2 px-3 font-bold text-white">
+                        <td class="py-2 px-3 font-bold text-white whitespace-nowrap">
                           {diff.column ? `${diff.table}.${diff.column}` : diff.index ? `${diff.table}.${diff.index}` : diff.table}
                         </td>
                         <td class="py-2 px-3">
@@ -362,10 +466,10 @@
                             {diff.action}
                           </span>
                         </td>
-                        <td class="py-2 px-3 text-sky-300 max-w-xs truncate" title={diff.source_def}>
+                        <td class="py-2 px-3 text-sky-300 max-w-sm whitespace-pre-wrap break-all">
                           {diff.source_def || '-'}
                         </td>
-                        <td class="py-2 px-3 text-slate-400 max-w-xs truncate" title={diff.target_def}>
+                        <td class="py-2 px-3 text-slate-400 max-w-sm whitespace-pre-wrap break-all">
                           {diff.target_def || '-'}
                         </td>
                       </tr>
@@ -378,26 +482,34 @@
                 <textarea
                   readonly
                   value={migrationScript}
-                  class="flex-1 w-full bg-[#090d16] border border-[#1e293b] rounded-lg p-3 text-xs font-mono text-emerald-300 outline-none resize-none"
+                  class="flex-1 w-full min-h-[220px] bg-[#090d16] border border-[#1e293b] rounded-lg p-3 text-xs font-mono text-emerald-300 outline-none resize-none"
                   placeholder="No statements selected"
                 ></textarea>
               </div>
             {/if}
           </div>
         {/if}
+
+        {#if applyErrors.length > 0}
+          <div class="mx-4 mb-3 p-3 rounded-lg bg-rose-950/35 border border-rose-800 text-[11px] font-mono text-rose-300 max-h-28 overflow-y-auto space-y-0.5">
+            {#each applyErrors as err}
+              <div>{err}</div>
+            {/each}
+          </div>
+        {/if}
       </div>
 
       <!-- Footer & Production Challenge -->
-      <div class="px-5 py-3 bg-[#0f172a] border-t border-[#1e293b] flex items-center justify-between shrink-0 font-sans">
+      <div class="px-5 py-3 bg-[#0f172a] border-t border-[#1e293b] flex items-center justify-between flex-wrap gap-2 shrink-0 font-sans">
         <div>
           {#if isTargetProduction && selectedCount > 0}
             <div class="flex items-center space-x-2 text-xs">
-              <span class="text-rose-400 font-bold">Type "{challengeTarget}" to confirm:</span>
+              <span class="text-rose-400 font-bold">Type "{challengeTarget}" or "MIGRATE" to confirm:</span>
               <input
                 type="text"
                 bind:value={challengeInput}
                 placeholder={challengeTarget}
-                class="bg-[#090d16] border border-rose-800/80 rounded px-2 py-1 text-xs text-white font-mono outline-none focus:border-rose-500 w-36"
+                class="bg-[#090d16] border border-rose-800/80 rounded px-2 py-1 text-xs text-white font-mono outline-none focus:border-rose-500 w-40"
               />
             </div>
           {/if}
@@ -413,7 +525,7 @@
           </button>
           <button
             onclick={handleApply}
-            disabled={isApplying || selectedCount === 0 || (isTargetProduction && challengeInput.trim() !== challengeTarget)}
+            disabled={isApplying || selectedCount === 0 || (isTargetProduction && !isChallengeSatisfied)}
             type="button"
             class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded text-xs font-semibold flex items-center space-x-1.5 transition shadow-lg shadow-emerald-950/40"
           >

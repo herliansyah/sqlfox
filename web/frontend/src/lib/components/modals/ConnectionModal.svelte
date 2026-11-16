@@ -71,45 +71,44 @@
     driver = d;
     if (d === 'postgres' && port === 3306) port = 5432;
     if (d === 'mysql' && port === 5432) port = 3306;
-    if (d === 'sqlite') {
+    if (d === 'sqlite' && !host.trim()) {
       host = './data.db';
     }
   }
 
   async function handleTest() {
+    if (!host.trim()) {
+      testResult = { success: false, message: driver === 'sqlite' ? 'SQLite database path is required' : 'Host / Server IP is required' };
+      return;
+    }
     isTesting = true;
     testResult = null;
     try {
-      if (connId && !password) {
-        const res = await api.testConnection(connId);
-        testResult = {
-          success: res.success,
-          message: res.success ? `Connected successfully (${res.latency_ms ?? 1} ms, ${res.version ?? 'OK'})` : 'Connection failed',
-        };
-      } else {
-        const res = await api.testTransientConnection({
-          id: connId || undefined,
-          name: name || 'Test Transient',
-          driver,
-          host,
-          port: Number(port),
-          user,
-          password,
-          database: database || '',
-          database_name: database || '',
-          environment,
-          use_ssl: sslMode !== 'disabled',
-          ssl_mode: sslMode,
-          ssh_enabled: sshEnabled,
-          ssh_host: sshHost,
-          ssh_port: Number(sshPort),
-          ssh_user: sshUser,
-        });
-        testResult = {
-          success: res.success,
-          message: res.success ? `Connected successfully (${res.latency_ms ?? 1} ms, ${res.version ?? 'OK'})` : 'Connection failed',
-        };
-      }
+      const targetDb = driver === 'sqlite' ? host.trim() : database.trim();
+      const res: any = await api.testTransientConnection({
+        id: connId || undefined,
+        name: name.trim() || 'Test Transient',
+        driver,
+        host: host.trim(),
+        port: Number(port),
+        user: user.trim(),
+        ...(password ? { password } : {}),
+        database: targetDb,
+        database_name: targetDb,
+        environment,
+        use_ssl: sslMode !== 'disabled',
+        ssl_mode: sslMode,
+        ssh_enabled: sshEnabled,
+        ssh_host: sshHost.trim(),
+        ssh_port: Number(sshPort),
+        ssh_user: sshUser.trim(),
+      });
+      testResult = {
+        success: !!res.success,
+        message: res.success
+          ? `Connected successfully (${res.latency_ms ?? 1} ms, ${res.version ?? res.server ?? 'OK'})`
+          : res.error || 'Connection failed',
+      };
     } catch (err: any) {
       testResult = { success: false, message: err.message || 'Connection test failed' };
     } finally {
@@ -119,6 +118,7 @@
 
   async function handleSubmit(e: Event) {
     e.preventDefault();
+    const targetDb = driver === 'sqlite' ? host.trim() : database.trim();
     const payload: Partial<ConnectionProfile> = {
       id: connId || undefined,
       name: name.trim() || `${driver.toUpperCase()} on ${host}`,
@@ -127,9 +127,10 @@
       host: host.trim(),
       port: Number(port),
       user: user.trim(),
-      database: database.trim(),
-      database_name: database.trim(),
+      database: targetDb,
+      database_name: targetDb,
       read_only: readOnly,
+      use_ssl: sslMode !== 'disabled',
       ssl_mode: sslMode,
       ssh_enabled: sshEnabled,
       ssh_host: sshHost.trim(),
@@ -144,7 +145,7 @@
 
   async function handleDelete() {
     if (!connId) return;
-    if (confirm(`Are you sure you want to delete connection "${name}"?`)) {
+    if (await appState.showNativeConfirm(`Are you sure you want to delete connection "${name}"?`, 'Delete Connection')) {
       await appState.deleteConnection(connId);
       appState.isConnectionModalOpen = false;
     }

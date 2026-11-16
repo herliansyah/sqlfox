@@ -1,152 +1,146 @@
 <script lang="ts">
-  import { appState } from '../../stores/appState.svelte';
+  import { SvelteSet } from 'svelte/reactivity';
+  import { appState, type ActivityLogEntry } from '../../stores/appState.svelte';
   import Icon from '../common/Icon.svelte';
 
-  interface LogEntry {
-    id: string;
-    timestamp: Date;
-    level: 'INFO' | 'WARN' | 'ERROR';
-    source: string;
-    message: string;
-  }
-
-  let logs = $state<LogEntry[]>([]);
-  let filterLevel = $state<'ALL' | 'INFO' | 'WARN' | 'ERROR'>('ALL');
+  // Stream lifecycle owns its EventSource inside appState.svelte.ts (never declare `eventSource` with $state)
+  // so SSE events with `data.module` stay buffered across open/close toggles.
+  let filterLevel = $state<'ALL' | 'DEBUG' | 'INFO' | 'WARN' | 'ERROR'>('ALL');
   let searchQuery = $state('');
-  let isStreaming = $state(true);
   let autoScroll = $state(true);
   let containerRef = $state<HTMLDivElement | null>(null);
-  // ponytail: eventSource must NOT be a $state variable because reading/modifying it inside $effect causes an infinite reconnection loop
-  let eventSource: EventSource | null = null;
-  const seenIds = new Set<string>();
-
-  function startLogStream() {
-    if (eventSource) {
-      eventSource.close();
-      eventSource = null;
-    }
-
-    try {
-      eventSource = new EventSource('/api/logs/stream');
-      eventSource.onmessage = (event) => {
-        if (!isStreaming) return;
-        try {
-          const data = JSON.parse(event.data);
-          const rawId = String(data.id ?? (Date.now() + Math.random()));
-          if (seenIds.has(rawId)) return;
-          seenIds.add(rawId);
-          if (seenIds.size > 2000) {
-            const first = seenIds.values().next().value;
-            if (first !== undefined) seenIds.delete(first);
-          }
-          const entry: LogEntry = {
-            id: rawId,
-            timestamp: data.timestamp ? new Date(data.timestamp) : new Date(),
-            level: (data.level?.toUpperCase() as any) || 'INFO',
-            source: data.module || data.source || 'SYSTEM',
-            message: data.message || event.data,
-          };
-          logs = [...logs.slice(-500), entry]; // Keep last 500 logs
-        } catch (e) {
-          const entry: LogEntry = {
-            id: String(Date.now()) + Math.random(),
-            timestamp: new Date(),
-            level: 'INFO',
-            source: 'SYSTEM',
-            message: event.data,
-          };
-          logs = [...logs.slice(-500), entry];
-        }
-      };
-
-      eventSource.onerror = () => {
-        // Fallback retry handled natively by browser EventSource
-      };
-    } catch (e) {}
-  }
-
-  function stopLogStream() {
-    if (eventSource) {
-      eventSource.close();
-      eventSource = null;
-    }
-  }
+  let expandedJsonIds = new SvelteSet<string>();
 
   $effect(() => {
     if (appState.isActivityDrawerOpen) {
-      startLogStream();
-    } else {
-      stopLogStream();
+      appState.unreadActivityErrors = 0;
     }
-    return () => stopLogStream();
   });
 
   $effect(() => {
-    if (autoScroll && logs.length && containerRef) {
+    if (appState.isActivityDrawerOpen && autoScroll && appState.activityLogs.length && containerRef) {
       const t = setTimeout(() => {
         containerRef?.scrollTo({ top: containerRef.scrollHeight, behavior: 'smooth' });
-      }, 50);
+      }, 40);
       return () => clearTimeout(t);
     }
   });
 
+  function normLevel(level: string): 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' {
+    const up = (level || 'INFO').toUpperCase();
+    if (up === 'WARNING') return 'WARN';
+    if (up === 'DEBUG' || up === 'WARN' || up === 'ERROR') return up;
+    return 'INFO';
+  }
+
   let filteredLogs = $derived.by(() => {
-    let list = logs;
+    let list = appState.activityLogs;
     if (filterLevel !== 'ALL') {
-      list = list.filter((l) => l.level === filterLevel);
+      list = list.filter((l) => normLevel(l.level) === filterLevel);
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      list = list.filter(
-        (l) =>
+      list = list.filter((l) => {
+        const mod = l.module || (l as any).data?.module || '';
+        const attrsStr = l.attrs ? JSON.stringify(l.attrs).toLowerCase() : '';
+        return (
           l.message.toLowerCase().includes(q) ||
-          l.source.toLowerCase().includes(q)
-      );
+          mod.toLowerCase().includes(q) ||
+          attrsStr.includes(q)
+        );
+      });
     }
     return list;
   });
 
-  function clearLogs() {
-    logs = [];
+  function togglePause() {
+    appState.isActivityPaused = !appState.isActivityPaused;
+    appState.activityStatus = appState.isActivityPaused ? 'paused' : 'live';
   }
 
-  function exportLogs() {
-    const content = filteredLogs
-      .map(
-        (l) =>
-          `[${l.timestamp.toISOString()}] [${l.level}] [${l.source}]: ${l.message}`
-      )
-      .join('\n');
-    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  function clearLogs() {
+    appState.activityLogs = [];
+    appState.unreadActivityErrors = 0;
+    expandedJsonIds.clear();
+  }
+
+  function toggleExpandJson(id: string) {
+    if (expandedJsonIds.has(id)) expandedJsonIds.delete(id);
+    else expandedJsonIds.add(id);
+  }
+
+  function downloadFile(content: string, filename: string, mime: string) {
+    const blob = new Blob([content], { type: mime });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `sqlfox-activity-logs-${new Date().toISOString().slice(0, 10)}.txt`;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    appState.showToast('Activity logs exported successfully!', 'info');
+    appState.showToast(`Exported ${filename}`, 'info');
+  }
+
+  function exportLogsText() {
+    const content = filteredLogs
+      .map(
+        (l) =>
+          `[${l.timeMs || l.time}] [${l.level}] [${l.module}]: ${l.message}${l.attrs ? ' ' + JSON.stringify(l.attrs) : ''}`
+      )
+      .join('\n');
+    downloadFile(content, `sqlfox-activity-${new Date().toISOString().slice(0, 10)}.log`, 'text/plain;charset=utf-8');
+  }
+
+  function exportLogsJson() {
+    downloadFile(
+      JSON.stringify(filteredLogs, null, 2),
+      `sqlfox-activity-${new Date().toISOString().slice(0, 10)}.json`,
+      'application/json;charset=utf-8'
+    );
+  }
+
+  function formatInlineMeta(entry: ActivityLogEntry): string {
+    if (!entry.attrs || typeof entry.attrs !== 'object') return '';
+    const keys = Object.keys(entry.attrs).slice(0, 3);
+    if (keys.length === 0) return '';
+    return keys
+      .map((k) => {
+        const v = entry.attrs![k];
+        const s = typeof v === 'string' ? v : JSON.stringify(v);
+        return `${k}=${s.length > 36 ? s.slice(0, 33) + '...' : s}`;
+      })
+      .join(' · ');
   }
 </script>
 
 {#if appState.isActivityDrawerOpen}
   <aside
-    class="fixed bottom-6 left-0 right-0 h-64 bg-[#090d16] border-t border-[#1e293b] shadow-2xl z-40 flex flex-col font-mono text-xs select-text animate-slide-up"
+    class="fixed bottom-6 left-0 right-0 h-72 bg-[#090d16] border-t border-[#1e293b] shadow-2xl z-40 flex flex-col font-mono text-xs select-text animate-slide-up"
   >
     <!-- Console Toolbar -->
     <div class="h-9 bg-[#0b0f19] border-b border-[#1e293b] px-4 flex items-center justify-between flex-shrink-0 select-none font-sans">
       <div class="flex items-center space-x-2">
         <Icon name="terminal" class="w-4 h-4 text-emerald-400" />
         <span class="font-bold text-slate-100 text-xs">Live Activity Console</span>
-        <span class="w-2 h-2 rounded-full {isStreaming ? 'bg-emerald-500 animate-pulse' : 'bg-slate-600'}"></span>
-        <span class="text-slate-500 font-mono text-[10px]">({filteredLogs.length} events)</span>
+        <span
+          class="px-1.5 py-0.2 rounded-full text-[9.5px] font-bold uppercase border flex items-center space-x-1 {appState.activityStatus === 'live'
+            ? 'bg-emerald-950/60 border-emerald-800 text-emerald-300'
+            : appState.activityStatus === 'reconnecting'
+              ? 'bg-amber-950/60 border-amber-800 text-amber-300'
+              : 'bg-slate-800 border-slate-700 text-slate-400'}"
+        >
+          <span class="w-1.5 h-1.5 rounded-full {appState.activityStatus === 'live' ? 'bg-emerald-400 animate-pulse' : appState.activityStatus === 'reconnecting' ? 'bg-amber-400 animate-ping' : 'bg-slate-500'}"></span>
+          <span>{appState.activityStatus}</span>
+        </span>
+        <span class="text-slate-500 font-mono text-[10px]">({filteredLogs.length} / {appState.activityLogs.length})</span>
       </div>
 
       <div class="flex items-center space-x-2 text-xs">
         <div class="flex items-center space-x-1">
-          {#each ['ALL', 'INFO', 'WARN', 'ERROR'] as lvl}
+          {#each ['ALL', 'DEBUG', 'INFO', 'WARN', 'ERROR'] as lvl}
             <button
+              type="button"
               onclick={() => (filterLevel = lvl as any)}
               class="px-2 py-0.5 rounded text-[10px] font-mono font-bold transition {filterLevel === lvl
                 ? 'bg-slate-800 text-sky-300 border border-slate-700'
@@ -160,19 +154,21 @@
         <input
           type="text"
           bind:value={searchQuery}
-          placeholder="Filter logs..."
-          class="bg-[#050811] border border-[#1e293b] rounded px-2 py-0.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none w-36"
+          placeholder="Filter message, module, attrs..."
+          class="bg-[#050811] border border-[#1e293b] rounded px-2 py-0.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-sky-500 w-44"
         />
 
         <button
-          onclick={() => (isStreaming = !isStreaming)}
+          type="button"
+          onclick={togglePause}
           class="p-1 rounded text-slate-400 hover:text-white transition"
-          title={isStreaming ? 'Pause streaming' : 'Resume streaming'}
+          title={appState.isActivityPaused ? 'Resume streaming' : 'Pause streaming'}
         >
-          <Icon name={isStreaming ? 'pause' : 'play'} class="w-3.5 h-3.5 {isStreaming ? 'text-emerald-400' : 'text-slate-500'}" />
+          <Icon name={appState.isActivityPaused ? 'play' : 'pause'} class="w-3.5 h-3.5 {!appState.isActivityPaused ? 'text-emerald-400' : 'text-amber-400'}" />
         </button>
 
         <button
+          type="button"
           onclick={() => (autoScroll = !autoScroll)}
           class="p-1 rounded text-slate-400 hover:text-white transition"
           title={autoScroll ? 'Auto-scroll ON' : 'Auto-scroll OFF'}
@@ -181,14 +177,25 @@
         </button>
 
         <button
-          onclick={exportLogs}
-          class="p-1 rounded text-slate-400 hover:text-white transition"
-          title="Export logs to file"
+          type="button"
+          onclick={exportLogsText}
+          class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-mono border border-slate-700 transition"
+          title="Export logs as .log"
         >
-          <Icon name="download" class="w-3.5 h-3.5" />
+          .log
         </button>
 
         <button
+          type="button"
+          onclick={exportLogsJson}
+          class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-mono border border-slate-700 transition"
+          title="Export logs as .json"
+        >
+          .json
+        </button>
+
+        <button
+          type="button"
           onclick={clearLogs}
           class="p-1 rounded text-slate-400 hover:text-white transition"
           title="Clear console"
@@ -197,6 +204,7 @@
         </button>
 
         <button
+          type="button"
           onclick={() => (appState.isActivityDrawerOpen = false)}
           class="p-1 rounded text-slate-400 hover:text-white transition"
           title="Close console"
@@ -206,34 +214,74 @@
       </div>
     </div>
 
-    <!-- Logs Stream Viewport -->
-    <div
-      bind:this={containerRef}
-      class="flex-1 overflow-y-auto p-3 space-y-1 bg-[#050811] font-mono text-[11px] leading-relaxed"
-    >
+    <!-- Structured Logs Table -->
+    <div bind:this={containerRef} class="flex-1 overflow-auto bg-[#050811]">
       {#if filteredLogs.length === 0}
         <div class="p-8 text-center text-slate-600 select-none">
-          Live stream active. Waiting for database queries, errors or background synchronization events...
+          Live stream active. Waiting for database queries, errors or telemetry events...
         </div>
       {:else}
-        {#each filteredLogs as log}
-          <div class="flex items-start space-x-2 py-0.5 hover:bg-slate-900/40 px-1 rounded">
-            <span class="text-slate-600 select-none shrink-0 text-[10px]">
-              {log.timestamp.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-            </span>
-            <span
-              class="px-1 py-0.2 rounded text-[9px] font-bold select-none shrink-0 {log.level === 'ERROR'
-                ? 'bg-rose-950 text-rose-300 border border-rose-800'
-                : log.level === 'WARN'
-                ? 'bg-amber-950 text-amber-300 border border-amber-800'
-                : 'bg-sky-950 text-sky-300 border border-sky-800'}"
-            >
-              {log.level}
-            </span>
-            <span class="text-slate-500 font-bold select-none shrink-0">[{log.source}]</span>
-            <span class="text-slate-300 break-all">{log.message}</span>
-          </div>
-        {/each}
+        <table class="w-full text-left border-collapse font-mono text-[11px]">
+          <thead class="sticky top-0 bg-[#0b0f19] border-b border-slate-800 text-[10px] text-slate-500 uppercase font-sans select-none">
+            <tr>
+              <th class="py-1 px-2.5 w-24">Time</th>
+              <th class="py-1 px-2 w-16">Level</th>
+              <th class="py-1 px-2 w-24">Module</th>
+              <th class="py-1 px-2">Activity &amp; Metadata</th>
+              <th class="py-1 px-2 w-16 text-right">Attrs</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-900/80">
+            {#each filteredLogs as log (log.id)}
+              {@const lvl = normLevel(log.level)}
+              {@const meta = formatInlineMeta(log)}
+              {@const isOpen = expandedJsonIds.has(log.id)}
+              <tr class="hover:bg-slate-900/40 align-top">
+                <td class="py-1 px-2.5 text-slate-500 whitespace-nowrap select-none text-[10px]">{log.timeMs || log.time}</td>
+                <td class="py-1 px-2 whitespace-nowrap select-none">
+                  <span
+                    class="px-1.5 py-0.2 rounded text-[9px] font-bold border {lvl === 'ERROR'
+                      ? 'bg-rose-950 text-rose-300 border-rose-800'
+                      : lvl === 'WARN'
+                      ? 'bg-amber-950 text-amber-300 border-amber-800'
+                      : lvl === 'DEBUG'
+                      ? 'bg-slate-800 text-slate-400 border-slate-700'
+                      : 'bg-sky-950 text-sky-300 border-sky-800'}"
+                  >
+                    {lvl}
+                  </span>
+                </td>
+                <td class="py-1 px-2 whitespace-nowrap select-none">
+                  <span class="px-1.5 py-0.2 rounded bg-slate-900 border border-slate-800 text-slate-400 text-[10px]">
+                    {log.module}
+                  </span>
+                </td>
+                <td class="py-1 px-2 text-slate-300 break-words">
+                  <span>{log.message}</span>
+                  {#if meta}
+                    <span class="ml-2 text-[10px] text-slate-500">{meta}</span>
+                  {/if}
+                  {#if isOpen && log.attrs}
+                    <pre class="mt-1 p-2 rounded bg-[#0b0f19] border border-slate-800 text-[10.5px] text-sky-200 overflow-x-auto whitespace-pre-wrap">{JSON.stringify(log.attrs, null, 2)}</pre>
+                  {/if}
+                </td>
+                <td class="py-1 px-2 text-right whitespace-nowrap">
+                  {#if log.attrs && Object.keys(log.attrs).length > 0}
+                    <button
+                      type="button"
+                      onclick={() => toggleExpandJson(log.id)}
+                      class="px-1.5 py-0.2 rounded border text-[9.5px] {isOpen
+                        ? 'bg-sky-950 border-sky-700 text-sky-300'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'}"
+                    >
+                      {'{ JSON }'}
+                    </button>
+                  {/if}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
       {/if}
     </div>
   </aside>

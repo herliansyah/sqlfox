@@ -32,25 +32,30 @@
 
   async function handleProceed() {
     if (isRefreshing || !appState.activeSessionId) return;
+    if (activeThreads > 20) return;
     if (activeThreads >= 10 && !acknowledged) return;
 
     isRefreshing = true;
-    progressPercent = 0;
+    progressPercent = 20;
     try {
       const sessionId = appState.activeSessionId;
-      const dbs = appState.availableDatabases.length > 0 ? appState.availableDatabases : [appState.currentDatabase];
+      currentDbProgress = 'Fetching fast metadata catalog across all databases...';
+      const fastCat = await api.getFastCatalog(sessionId);
+      progressPercent = 65;
 
-      for (let i = 0; i < dbs.length; i++) {
-        const db = dbs[i];
-        currentDbProgress = `Refreshing catalog for '${db}'...`;
-        try {
-          await appState.getSchemaCatalog(sessionId, db);
-        } catch (_) {}
-        progressPercent = Math.round(((i + 1) / dbs.length) * 100);
-      }
-
+      const dbKeys = Object.keys(fastCat || {});
+      currentDbProgress = `Synchronizing active database '${appState.currentDatabase || 'default'}' full catalog...`;
       await appState.refreshCatalog();
-      appState.showToast(`Successfully refreshed catalogs for all ${dbs.length} databases`, 'success');
+      progressPercent = 100;
+
+      const stamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const nextStamps = { ...appState.catalogTimestamps };
+      for (const db of dbKeys) {
+        nextStamps[db.toLowerCase()] = stamp;
+      }
+      appState.catalogTimestamps = nextStamps;
+
+      appState.showToast(`Successfully refreshed fast catalogs (${dbKeys.length || appState.availableDatabases.length} database(s))`, 'success');
       appState.isRefreshAllOpen = false;
     } catch (err: any) {
       appState.showToast(`Refresh failed: ${err?.message ?? err}`, 'error');
@@ -127,15 +132,25 @@
               <span>Safe Condition: Server workload is low. Full catalog synchronization is safe to execute.</span>
             {:else if activeThreads < 20}
               <Icon name="alert-triangle" class="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-              <span>Elevated Workload Warning: Server is processing active queries. Schema refresh may incur slight dictionary I/O.</span>
+              <span>Elevated Workload Warning: Server is processing active queries (10–20 threads). Schema refresh may incur slight dictionary I/O.</span>
             {:else}
               <Icon name="shield-alert" class="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-              <span>High Workload Alert: High query traffic detected. Refreshing all catalogs concurrently may cause thread queueing.</span>
+              <span>High Workload Guard Triggered (&gt; 20 active threads): Global catalog refresh is temporarily blocked to protect server stability. Wait for workload to settle.</span>
             {/if}
           </div>
         </div>
 
-        {#if activeThreads >= 10}
+        <div class="p-3.5 rounded-lg bg-[#050811] border border-slate-800/80 text-[11px] text-slate-400 space-y-1">
+          <div class="font-semibold text-slate-300 flex items-center space-x-1.5">
+            <Icon name="info" class="w-3.5 h-3.5 text-sky-400 shrink-0" />
+            <span>Why is this feature useful?</span>
+          </div>
+          <p class="leading-relaxed">
+            Pre-warms SqlFox's lightweight table/database catalog cache across every database on this connection in a single query, powering instant cross-database autocomplete, <kbd class="font-mono text-sky-300">Ctrl+P</kbd> Schema Search, and fast database switching.
+          </p>
+        </div>
+
+        {#if activeThreads >= 10 && activeThreads <= 20}
           <div class="flex items-start space-x-2 pt-1">
             <input
               id="refresh-all-ack"
@@ -179,8 +194,8 @@
         <button
           type="button"
           onclick={handleProceed}
-          disabled={isRefreshing || (activeThreads >= 10 && !acknowledged)}
-          class="px-5 py-1.5 rounded text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white transition shadow flex items-center space-x-1.5 disabled:opacity-50"
+          disabled={isRefreshing || isLoading || activeThreads > 20 || (activeThreads >= 10 && !acknowledged)}
+          class="px-5 py-1.5 rounded text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white transition shadow flex items-center space-x-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {#if isRefreshing}
             <Icon name="loader" class="w-3.5 h-3.5 animate-spin" />

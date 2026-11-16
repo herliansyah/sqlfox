@@ -1,6 +1,7 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
-  import { codemirror } from '../../actions/codemirror';
+  import { codemirror, type CodeMirrorController } from '../../actions/codemirror';
+  import { formatSQL } from '../../utils/sqlFormatter';
   import type { QuerySnippet } from '../../../types';
 
   let { value = $bindable(''), placeholder = 'Write SQL…', id = 'sql-editor' }: {
@@ -8,6 +9,8 @@
     placeholder?: string;
     id?: string;
   } = $props();
+
+  let editorController: CodeMirrorController | null = null;
 
   function quoteIdentifier(name: string): string {
     const driver = appState.activeConnection?.driver;
@@ -31,7 +34,16 @@
     loadCatalog: appState.ensureEditorCatalog.bind(appState),
     quoteIdentifier,
     placeholder,
+    onReady: (c) => (editorController = c),
     onChange: (next) => (value = next),
+    onFormat: (target) => {
+      const formatted = formatSQL(target.text);
+      if (formatted && editorController) {
+        editorController.replaceTarget(formatted);
+      } else {
+        value = formatSQL(value);
+      }
+    },
     onSnippet: (snippet: QuerySnippet, insert: (sql: string) => void) => {
       appState.requestSnippetParameters(snippet, insert);
     },

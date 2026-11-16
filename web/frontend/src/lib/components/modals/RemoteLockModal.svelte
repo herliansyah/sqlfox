@@ -77,7 +77,7 @@
         </button>
 
         <div class="text-[11px] text-slate-500 pt-1">
-          Default Master PIN: <span class="font-mono text-sky-400 font-semibold select-text">{appState.authStatus?.master_password || 'fox-0304'}</span>
+          Check the SqlFox host terminal output for your active session PIN.
         </div>
       </form>
     </div>

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
+  import { quoteSqlIdentifier } from '../../utils/sqlStatements';
   import type { TableMetadata, ColumnMetadata } from '../../../types';
   import Icon from '../common/Icon.svelte';
 
@@ -15,35 +16,57 @@
 
   // Form State
   let fkName = $state('');
+  let isCustomName = $state(false);
   let sourceCol = $state('');
   let refTable = $state('');
   let refCol = $state('');
   let onDelete = $state<'CASCADE' | 'SET NULL' | 'RESTRICT' | 'NO ACTION'>('RESTRICT');
   let onUpdate = $state<'CASCADE' | 'SET NULL' | 'RESTRICT' | 'NO ACTION'>('RESTRICT');
 
-  let currentTableCols = $derived(
-    (tableMeta?.columns || []).map((c: ColumnMetadata) => c.name)
-  );
+  let currentTableCols = $derived(tableMeta?.columns || []);
 
   let activeCatalog = $derived(
     (appState.activeTab?.database && appState.catalogs[appState.activeTab.database.toLowerCase()]) || appState.catalog
   );
 
-  let catalogTables = $derived(
-    (activeCatalog?.tables || []).map((t) => t.name)
+  let catalogTables = $derived((activeCatalog?.tables || []).map((t) => t.name));
+
+  let refTableMeta = $derived(
+    activeCatalog?.tables?.find((tbl) => tbl.name.toLowerCase() === refTable.toLowerCase()) || null
   );
 
-  let refTableCols = $derived.by(() => {
-    if (!refTable || !activeCatalog?.tables) return [];
-    const t = activeCatalog.tables.find(
-      (tbl) => tbl.name.toLowerCase() === refTable.toLowerCase()
-    );
-    return t ? t.columns.map((c: ColumnMetadata) => c.name) : [];
+  let refTableCols = $derived<ColumnMetadata[]>(refTableMeta?.columns || []);
+
+  let typeCompatibilityWarning = $derived.by(() => {
+    const srcMeta = currentTableCols.find((c) => c.name === sourceCol);
+    const dstMeta = refTableCols.find((c) => c.name === refCol);
+    if (!srcMeta || !dstMeta) return '';
+    const norm = (t: string) => t.toLowerCase().replace(/\s+/g, ' ').trim();
+    const s = norm(srcMeta.type || '');
+    const d = norm(dstMeta.type || '');
+    if (!s || !d) return '';
+    if (s !== d) {
+      const sBase = s.replace(/\(.*\)/, '').trim();
+      const dBase = d.replace(/\(.*\)/, '').trim();
+      const sUnsigned = s.includes('unsigned');
+      const dUnsigned = d.includes('unsigned');
+      if (sBase !== dBase || sUnsigned !== dUnsigned) {
+        return `Errno 150 risk: column type mismatch (${srcMeta.name}: ${srcMeta.type} vs ${dstMeta.name}: ${dstMeta.type})`;
+      }
+      return `Warning: length/width differs (${srcMeta.name}: ${srcMeta.type} vs ${dstMeta.name}: ${dstMeta.type})`;
+    }
+    return '';
   });
 
+  function preferredRefColumn(cols: ColumnMetadata[]): string {
+    const pk = cols.find((c) => c.is_primary_key);
+    return pk?.name || cols[0]?.name || '';
+  }
+
   function resetForm() {
+    isCustomName = false;
     fkName = '';
-    sourceCol = currentTableCols[0] || '';
+    sourceCol = currentTableCols[0]?.name || '';
     refTable = catalogTables.find((t) => t !== tableMeta?.name) || '';
     refCol = '';
     onDelete = 'RESTRICT';
@@ -53,25 +76,24 @@
   function openAddFK() {
     resetForm();
     if (refTable) {
-      const firstCol = refTableCols[0];
-      if (firstCol) refCol = firstCol;
+      refCol = preferredRefColumn(refTableCols);
     }
     autoGenerateFKName();
     isAddModalOpen = true;
   }
 
   function autoGenerateFKName() {
-    if (!tableMeta) return;
+    if (!tableMeta || isCustomName) return;
     const s = sourceCol || 'col';
     const r = refTable || 'ref';
     fkName = `fk_${tableMeta.name}_${s}_${r}`;
   }
 
   $effect(() => {
-    if (refTable && refTableCols.length > 0 && !refTableCols.includes(refCol)) {
-      refCol = refTableCols[0] || '';
+    if (refTable && refTableCols.length > 0 && !refTableCols.some((c) => c.name === refCol)) {
+      refCol = preferredRefColumn(refTableCols);
     }
-    if (!fkName.trim()) {
+    if (!fkName.trim() && !isCustomName) {
       autoGenerateFKName();
     }
   });
@@ -80,7 +102,7 @@
     if (!tableMeta || !appState.activeConnection) return '';
     const driver = appState.activeConnection.driver;
     const isSQLite = driver === 'sqlite';
-    const q = (s: string) => (isSQLite || driver === 'postgres' || driver === 'postgresql' ? `"${s.replace(/"/g, '""')}"` : `\`${s.replace(/`/g, '``')}\``);
+    const q = (s: string) => quoteSqlIdentifier(s, driver);
 
     const name = fkName.trim() || 'fk_name';
     const sCol = sourceCol || 'column';
@@ -94,8 +116,12 @@
     return `ALTER TABLE ${q(tableMeta.name)} ADD CONSTRAINT ${q(name)} FOREIGN KEY (${q(sCol)}) REFERENCES ${q(rTable)} (${q(rCol)}) ON DELETE ${onDelete} ON UPDATE ${onUpdate};`;
   });
 
-  async function createForeignKey() {
+  function createForeignKey() {
     if (!appState.activeConnection || !tableMeta) return;
+    if (appState.isReadOnly) {
+      appState.showToast('Session is Read-Only', 'warning');
+      return;
+    }
     if (appState.activeConnection.driver === 'sqlite') {
       appState.showToast('SQLite foreign keys must be declared during CREATE TABLE.', 'warning');
       return;
@@ -109,53 +135,65 @@
       return;
     }
 
-    isExecuting = true;
-    try {
-      const connId = appState.activeSessionId || appState.activeConnection.id;
-      const targetDb = appState.activeTab?.database || appState.currentDatabase || undefined;
-      await api.executeQuery(connId, sqlPreview, false, targetDb);
-      appState.showToast(`Foreign Key "${fkName.trim()}" created successfully!`, 'success');
-      isAddModalOpen = false;
-      resetForm();
+    const connId = appState.activeSessionId || appState.activeConnection.id;
+    const targetDb = appState.activeTab?.database || appState.currentDatabase || undefined;
+    const sql = sqlPreview;
 
-      // Refresh catalog
-      await appState.loadCatalog(connId, targetDb);
-    } catch (err: any) {
-      appState.showToast(`Failed to create foreign key: ${err.message}`, 'error');
-    } finally {
-      isExecuting = false;
-    }
+    appState.openDDLReviewModal(
+      sql,
+      async () => {
+        isExecuting = true;
+        try {
+          await api.executeQuery(connId, sql, { confirmed: true, database: targetDb });
+          appState.showToast(`Foreign Key "${fkName.trim()}" created successfully!`, 'success');
+          isAddModalOpen = false;
+          resetForm();
+          await appState.loadCatalog(connId, targetDb);
+        } finally {
+          isExecuting = false;
+        }
+      },
+      `Add Foreign Key: ${fkName.trim()}`,
+      { tableName: tableMeta.name, database: targetDb }
+    );
   }
 
   async function dropForeignKey(constraintName: string) {
     if (!appState.activeConnection || !tableMeta) return;
+    if (appState.isReadOnly) {
+      appState.showToast('Session is Read-Only', 'warning');
+      return;
+    }
     const driver = appState.activeConnection.driver;
     if (driver === 'sqlite') {
       appState.showToast('SQLite does not support dropping foreign keys via ALTER TABLE.', 'warning');
       return;
     }
-    const confirmed = confirm(`Are you sure you want to drop foreign key constraint "${constraintName}" from table "${tableMeta.name}"?`);
+    const confirmed = await appState.showNativeConfirm(
+      `Drop foreign key constraint "${constraintName}" from table "${tableMeta.name}"?`,
+      'Drop Foreign Key'
+    );
     if (!confirmed) return;
 
     const isPostgres = driver === 'postgres' || driver === 'postgresql';
-    const q = (s: string) => (isPostgres ? `"${s.replace(/"/g, '""')}"` : `\`${s.replace(/`/g, '``')}\``);
+    const q = (s: string) => quoteSqlIdentifier(s, driver);
+    const dropSql = isPostgres
+      ? `ALTER TABLE ${q(tableMeta.name)} DROP CONSTRAINT ${q(constraintName)};`
+      : `ALTER TABLE ${q(tableMeta.name)} DROP FOREIGN KEY ${q(constraintName)};`;
 
-    let dropSql = `ALTER TABLE ${q(tableMeta.name)} DROP FOREIGN KEY ${q(constraintName)};`;
-    if (isPostgres) {
-      dropSql = `ALTER TABLE ${q(tableMeta.name)} DROP CONSTRAINT ${q(constraintName)};`;
-    }
+    const connId = appState.activeSessionId || appState.activeConnection.id;
+    const targetDb = appState.activeTab?.database || appState.currentDatabase || undefined;
 
-    try {
-      const connId = appState.activeSessionId || appState.activeConnection.id;
-      const targetDb = appState.activeTab?.database || appState.currentDatabase || undefined;
-      await api.executeQuery(connId, dropSql, false, targetDb);
-      appState.showToast(`Foreign key "${constraintName}" dropped successfully!`, 'info');
-
-      // Refresh catalog
-      await appState.loadCatalog(connId, targetDb);
-    } catch (err: any) {
-      appState.showToast(`Failed to drop foreign key: ${err.message}`, 'error');
-    }
+    appState.openDDLReviewModal(
+      dropSql,
+      async () => {
+        await api.executeQuery(connId, dropSql, { confirmed: true, database: targetDb });
+        appState.showToast(`Foreign key "${constraintName}" dropped successfully!`, 'info');
+        await appState.loadCatalog(connId, targetDb);
+      },
+      `Drop Foreign Key: ${constraintName}`,
+      { tableName: tableMeta.name, database: targetDb }
+    );
   }
 </script>
 
@@ -256,7 +294,7 @@
             class="w-full bg-[#050811] border border-[#1e293b] rounded-lg px-3 py-2 text-slate-200 text-xs focus:outline-none focus:border-sky-500"
           >
             {#each currentTableCols as c}
-              <option value={c}>{c}</option>
+              <option value={c.name}>{c.name} ({c.type})</option>
             {/each}
           </select>
         </div>
@@ -266,7 +304,10 @@
             <label class="block text-slate-400 text-xs font-medium mb-1">Referenced Table *</label>
             <select
               bind:value={refTable}
-              onchange={autoGenerateFKName}
+              onchange={() => {
+                refCol = preferredRefColumn(refTableCols);
+                autoGenerateFKName();
+              }}
               class="w-full bg-[#050811] border border-[#1e293b] rounded-lg px-3 py-2 text-slate-200 text-xs focus:outline-none focus:border-sky-500"
             >
               {#each catalogTables as t}
@@ -281,11 +322,18 @@
               class="w-full bg-[#050811] border border-[#1e293b] rounded-lg px-3 py-2 text-slate-200 text-xs focus:outline-none focus:border-sky-500"
             >
               {#each refTableCols as c}
-                <option value={c}>{c}</option>
+                <option value={c.name}>{c.name} ({c.type}){c.is_primary_key ? ' [PK]' : ''}</option>
               {/each}
             </select>
           </div>
         </div>
+
+        {#if typeCompatibilityWarning}
+          <div class="p-2.5 rounded-lg bg-amber-950/50 border border-amber-800/70 text-amber-200 text-[11px] flex items-start space-x-2">
+            <Icon name="alert-triangle" class="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+            <span>{typeCompatibilityWarning}</span>
+          </div>
+        {/if}
 
         <div class="grid grid-cols-2 gap-3">
           <div>
@@ -319,6 +367,7 @@
           <input
             type="text"
             bind:value={fkName}
+            oninput={() => (isCustomName = true)}
             placeholder="e.g. fk_orders_user_id"
             class="w-full bg-[#050811] border border-[#1e293b] rounded-lg px-3 py-2 text-slate-200 font-mono text-xs focus:outline-none focus:border-sky-500"
           />
@@ -344,7 +393,7 @@
           class="px-4 py-1.5 rounded bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white text-xs font-semibold transition flex items-center space-x-1.5 shadow-lg shadow-sky-900/30"
         >
           <Icon name="check" class="w-3.5 h-3.5 {isExecuting ? 'animate-spin' : ''}" />
-          <span>{isExecuting ? 'Creating...' : 'Create Foreign Key'}</span>
+          <span>{isExecuting ? 'Applying...' : 'Review & Create FK'}</span>
         </button>
       </div>
     </div>

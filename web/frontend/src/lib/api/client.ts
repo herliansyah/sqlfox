@@ -7,7 +7,10 @@ import type {
   ProcesslistThread,
   TablePartition,
   QuerySnippet,
+  OperationalNote,
 } from '../../types';
+
+export type { OperationalNote };
 
 export interface AiConfig {
   provider: string;
@@ -15,9 +18,15 @@ export interface AiConfig {
   baseUrl: string;
   modelName: string;
   temperature: number;
+  language: 'auto' | 'en' | 'id';
+  responseStyle: 'normal' | 'concise' | 'detailed';
+  customPrompt: string;
+  includeSchema: boolean;
+  maskIdentifiers: boolean;
 }
 
 // Single source for the saved BYOK settings; AiSettingsModal writes the same key.
+// Supports seamless migration from legacy { endpoint, model } keys.
 export function loadAiConfig(): AiConfig {
   const defaults: AiConfig = {
     provider: 'openai',
@@ -25,67 +34,152 @@ export function loadAiConfig(): AiConfig {
     baseUrl: 'https://api.openai.com/v1',
     modelName: 'gpt-4o-mini',
     temperature: 0.3,
+    language: 'auto',
+    responseStyle: 'normal',
+    customPrompt: '',
+    includeSchema: true,
+    maskIdentifiers: true,
   };
   try {
     const saved = JSON.parse(localStorage.getItem('sqlfox_ai_config') || '{}');
-    return { ...defaults, ...saved };
+    return {
+      ...defaults,
+      ...saved,
+      baseUrl: saved.baseUrl || saved.endpoint || defaults.baseUrl,
+      modelName: saved.modelName || saved.model || defaults.modelName,
+      apiKey: saved.apiKey ?? saved.api_key ?? defaults.apiKey,
+      language: saved.language || defaults.language,
+      responseStyle: saved.responseStyle || saved.response_style || defaults.responseStyle,
+      customPrompt: saved.customPrompt ?? saved.custom_prompt ?? defaults.customPrompt,
+      includeSchema: saved.includeSchema ?? saved.include_schema ?? defaults.includeSchema,
+      maskIdentifiers: saved.maskIdentifiers ?? saved.mask_identifiers ?? defaults.maskIdentifiers,
+      temperature: typeof saved.temperature === 'number' ? saved.temperature : defaults.temperature,
+    };
   } catch {
     return defaults;
   }
 }
 
+export class HttpStatusError extends Error {
+  status: number;
+  data: any;
+  constructor(status: number, message: string, data?: any) {
+    super(message);
+    this.status = status;
+    this.data = data;
+  }
+}
+
+export interface ExecuteQueryOptions {
+  confirmed?: boolean;
+  challengeInput?: string;
+  database?: string;
+  profile?: boolean;
+  limit?: number;
+  tabId?: string;
+  queryId?: string;
+  bypassMutationConfirm?: boolean;
+  signal?: AbortSignal;
+}
+
+export interface StreamEventHandlers {
+  onBlocked?: (inspection: InspectionResult) => void;
+  onMeta?: (meta: {
+    result_index?: number;
+    columns: any[];
+    tx_active?: boolean;
+    target_table?: string;
+    database?: string;
+    sql?: string;
+  }) => void;
+  onChunk?: (chunk: { result_index?: number; rows: any[][] }) => void;
+  onStatementDone?: (info: { result_index?: number; sql?: string; row_count?: number; execution_ms?: number }) => void;
+  onExec?: (execRes: QueryExecutionResult & { result_index?: number }) => void;
+  onStatementError?: (err: { result_index?: number; sql?: string; error: string }) => void;
+  onDone?: (done: {
+    row_count?: number;
+    execution_ms?: number;
+    has_more?: boolean;
+    tx_active?: boolean;
+    profile?: any;
+    total_results?: number;
+  }) => void;
+}
+
 class ApiClient {
   private baseUrl = '/api';
 
-  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const url = `${this.baseUrl}${endpoint}`;
+  private getAuthHeaders(extra: Record<string, string> = {}, includeJsonContentType = true): Record<string, string> {
     const token = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('sqlfox_remote_token') : null;
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...((options.headers as Record<string, string>) || {}),
-    };
-
+    const headers: Record<string, string> = {};
+    if (includeJsonContentType) {
+      headers['Content-Type'] = 'application/json';
+    }
+    Object.assign(headers, extra);
     if (token && !headers['Authorization']) {
       headers['Authorization'] = `Bearer ${token}`;
+    }
+    return headers;
+  }
+
+  private async handleNonOkResponse(res: Response): Promise<never> {
+    if (res.status === 401 && typeof window !== 'undefined' && (window as any).__sqlfox_set_remote_locked) {
+      (window as any).__sqlfox_set_remote_locked(true);
+    }
+    let errorMsg = `HTTP Error ${res.status}`;
+    let parsedData: any = null;
+    try {
+      parsedData = await res.json();
+      if (parsedData?.error) errorMsg = parsedData.error;
+      else if (parsedData?.reason) errorMsg = parsedData.reason;
+      else if (parsedData?.message) errorMsg = parsedData.message;
+    } catch {
+      if (res.statusText) errorMsg = res.statusText;
+    }
+    if (res.status === 403 && /read[- ]?only/i.test(errorMsg) && typeof window !== 'undefined') {
+      (window as any).__sqlfox_sync_readonly?.(true);
+    }
+    throw new HttpStatusError(res.status, errorMsg, parsedData);
+  }
+
+  private async request<T>(
+    endpoint: string,
+    options: RequestInit & { timeoutMs?: number | null } = {}
+  ): Promise<T> {
+    const url = endpoint.startsWith('/api') ? endpoint : `${this.baseUrl}${endpoint}`;
+    const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+    const headers = this.getAuthHeaders((options.headers as Record<string, string>) || {}, !isFormData);
+
+    const { timeoutMs = 15000, ...fetchOpts } = options;
+    let signal = fetchOpts.signal;
+    if (!signal && timeoutMs && timeoutMs > 0 && typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal) {
+      signal = AbortSignal.timeout(timeoutMs);
     }
 
     let res: Response;
     try {
-      res = await fetch(url, { ...options, headers });
-    } catch (err) {
+      res = await fetch(url, { ...fetchOpts, headers, signal });
+    } catch (err: any) {
+      if (err?.name === 'AbortError' || err?.name === 'TimeoutError') {
+        throw err;
+      }
       // Network failure (daemon down / LAN drop): surface the reconnect banner.
       if (typeof window !== 'undefined') (window as any).__sqlfox_trigger_reconnect?.();
       throw new Error(`Cannot reach SqlFox daemon at ${this.baseUrl.replace(/\/api$/, '')} — is it still running?`);
     }
     if (!res.ok) {
-      if (res.status === 401 && typeof window !== 'undefined' && (window as any).__sqlfox_set_remote_locked) {
-        (window as any).__sqlfox_set_remote_locked(true);
-      }
-      let errorMsg = `HTTP Error ${res.status}`;
-      try {
-        const data = await res.json();
-        if (data && data.error) {
-          errorMsg = data.error;
-        } else if (data && data.reason) {
-          errorMsg = data.reason;
-        } else if (data && data.message) {
-          errorMsg = data.message;
-        }
-      } catch {
-        if (res.statusText) errorMsg = res.statusText;
-      }
-      throw new Error(errorMsg);
+      await this.handleNonOkResponse(res);
     }
 
     return res.json() as Promise<T>;
   }
 
   // Auth / Vault
-  async getAuthStatus(): Promise<{ is_remote: boolean; unlocked: boolean; version?: string }> {
+  async getAuthStatus(): Promise<{ is_remote: boolean; unlocked: boolean; version?: string; lan_enabled?: boolean }> {
     return this.request('/auth/status');
   }
 
-  async getMasterKey(): Promise<{ lan_enabled: boolean; master_password?: string; lan_ip?: string }> {
+  async getMasterKey(): Promise<{ lan_enabled: boolean; master_password?: string; lan_ip?: string; port?: number | string }> {
     return this.request('/auth/master-key');
   }
 
@@ -93,6 +187,24 @@ class ApiClient {
     return this.request('/auth/unlock', {
       method: 'POST',
       body: JSON.stringify({ password }),
+    });
+  }
+
+  async exportVault(exportPassphrase: string): Promise<Blob> {
+    const headers = this.getAuthHeaders({}, true);
+    const res = await fetch(`${this.baseUrl}/vault/export`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ export_passphrase: exportPassphrase }),
+    });
+    if (!res.ok) await this.handleNonOkResponse(res);
+    return res.blob();
+  }
+
+  async importVault(exportPassphrase: string, archive: unknown): Promise<{ imported_count: number; message?: string }> {
+    return this.request('/vault/import', {
+      method: 'POST',
+      body: JSON.stringify({ export_passphrase: exportPassphrase, archive }),
     });
   }
 
@@ -114,13 +226,13 @@ class ApiClient {
     });
   }
 
-  async testConnection(id: string): Promise<{ success: boolean; version?: string; latency_ms?: number }> {
+  async testConnection(id: string): Promise<{ success: boolean; version?: string; latency_ms?: number; error?: string; server?: any }> {
     return this.request(`/connections/${id}/test`, {
       method: 'POST',
     });
   }
 
-  async testTransientConnection(conn: Partial<ConnectionProfile>): Promise<{ success: boolean; version?: string; latency_ms?: number }> {
+  async testTransientConnection(conn: Partial<ConnectionProfile>): Promise<{ success: boolean; version?: string; latency_ms?: number; error?: string; server?: any }> {
     return this.request('/connections/test-transient/test', {
       method: 'POST',
       body: JSON.stringify(conn),
@@ -146,18 +258,27 @@ class ApiClient {
   }> {
     return this.request(`/session/connect/${connId}`, {
       method: 'POST',
+      timeoutMs: 30000,
     });
   }
 
   async getSchema(connId: string, dbName = ''): Promise<SchemaCatalog> {
     const query = dbName ? `?db=${encodeURIComponent(dbName)}` : '';
-    return this.request(`/session/${connId}/schema${query}`);
+    return this.request(`/session/${connId}/schema${query}`, { timeoutMs: 30000 });
+  }
+
+  async refreshSchema(connId: string): Promise<SchemaCatalog> {
+    return this.request(`/session/${connId}/refresh-schema`, {
+      method: 'POST',
+      timeoutMs: 30000,
+    });
   }
 
   async selectDatabase(connId: string, database: string): Promise<SchemaCatalog> {
     return this.request(`/session/${connId}/select-db`, {
       method: 'POST',
       body: JSON.stringify({ database }),
+      timeoutMs: 30000,
     });
   }
 
@@ -170,8 +291,34 @@ class ApiClient {
     return this.request(`/session/${connId}/ddl/routine/${encodeURIComponent(routineName)}?type=${encodeURIComponent(type)}`);
   }
 
+  async getEventDDL(connId: string, eventName: string): Promise<{ name: string; ddl: string }> {
+    return this.request(`/session/${connId}/ddl/event/${encodeURIComponent(eventName)}`);
+  }
+
+  async toggleEvent(connId: string, eventName: string, enable: boolean): Promise<{ success: boolean }> {
+    return this.request(`/session/${connId}/event/${encodeURIComponent(eventName)}/toggle`, {
+      method: 'POST',
+      body: JSON.stringify({ enable }),
+    });
+  }
+
+  async preflightDDL(connId: string, tableName: string, db = '', alterClause = ''): Promise<{
+    table: string;
+    database: string;
+    active_locks: any[];
+    relationships: any[];
+    osc_ghost: string;
+    osc_pt: string;
+  }> {
+    const params = new URLSearchParams();
+    if (db) params.set('db', db);
+    if (alterClause) params.set('alter', alterClause);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    return this.request(`/session/${connId}/preflight-ddl/${encodeURIComponent(tableName)}${qs}`);
+  }
+
   async getFastCatalog(sessionId: string): Promise<Record<string, TableMetadata[]>> {
-    return this.request(`/session/${sessionId}/fast-catalog`);
+    return this.request(`/session/${sessionId}/fast-catalog`, { timeoutMs: 30000 });
   }
 
   async getTableRows(
@@ -188,38 +335,234 @@ class ApiClient {
     if (db) url += `&db=${encodeURIComponent(db)}`;
     if (filter) url += `&filter=${encodeURIComponent(filter)}`;
     if (sortCol) url += `&sort_col=${encodeURIComponent(sortCol)}&sort_dir=${encodeURIComponent(sortDir || 'ASC')}`;
-    return this.request(url);
+    const res = await this.request<QueryExecutionResult>(url, { timeoutMs: 30000 });
+    return this.normalizeExecResult(res);
+  }
+
+  private normalizeExecResult(res: QueryExecutionResult): QueryExecutionResult {
+    if (!res || typeof res !== 'object') return res;
+    const duration = res.duration_ms ?? res.execution_ms ?? 0;
+    const affected = res.affected_rows ?? res.rows_affected;
+    const out: QueryExecutionResult = {
+      ...res,
+      duration_ms: duration,
+      execution_ms: res.execution_ms ?? duration,
+      affected_rows: affected,
+      rows_affected: res.rows_affected ?? affected,
+      is_destructive_blocked: Boolean(res.is_destructive_blocked || res.blocked),
+    };
+    if (Array.isArray(out.results)) {
+      out.results = out.results.map((r) => this.normalizeExecResult(r));
+    }
+    return out;
   }
 
   async executeQuery(
     sessionId: string,
     sql: string,
-    confirmed = false,
-    database?: string
+    confirmedOrOpts: boolean | ExecuteQueryOptions = false,
+    databaseArg?: string
   ): Promise<QueryExecutionResult> {
-    return this.request(`/session/${sessionId}/execute`, {
-      method: 'POST',
-      body: JSON.stringify({ sql, confirmed, database }),
-    });
+    const opts: ExecuteQueryOptions =
+      typeof confirmedOrOpts === 'object'
+        ? confirmedOrOpts
+        : { confirmed: confirmedOrOpts, database: databaseArg };
+
+    const headers = this.getAuthHeaders({}, true);
+    let res: Response;
+    try {
+      res = await fetch(`${this.baseUrl}/session/${sessionId}/execute`, {
+        method: 'POST',
+        headers,
+        signal: opts.signal,
+        body: JSON.stringify({
+          sql,
+          confirmed: Boolean(opts.confirmed),
+          challenge_input: opts.challengeInput || '',
+          database: opts.database,
+          profile: Boolean(opts.profile),
+          limit: opts.limit,
+          tab_id: opts.tabId,
+          query_id: opts.queryId,
+          bypass_mutation_confirm: Boolean(opts.bypassMutationConfirm),
+        }),
+      });
+    } catch (err: any) {
+      if (err?.name === 'AbortError') throw err;
+      if (typeof window !== 'undefined') (window as any).__sqlfox_trigger_reconnect?.();
+      throw new Error(`Cannot reach SqlFox daemon — is it still running?`);
+    }
+
+    if (res.status === 422) {
+      const data = await res.json();
+      return this.normalizeExecResult({
+        columns: [],
+        rows: [],
+        duration_ms: 0,
+        row_count: 0,
+        blocked: true,
+        is_destructive_blocked: true,
+        inspection: data?.inspection,
+      });
+    }
+    if (!res.ok) {
+      await this.handleNonOkResponse(res);
+    }
+    const json = await res.json();
+    return this.normalizeExecResult(json);
   }
 
-  async cancelQuery(sessionId: string): Promise<{ success: boolean }> {
+  async executeQueryStream(
+    sessionId: string,
+    sql: string,
+    opts: ExecuteQueryOptions,
+    handlers: StreamEventHandlers
+  ): Promise<void> {
+    const headers = this.getAuthHeaders({}, true);
+    let res: Response;
+    try {
+      res = await fetch(`${this.baseUrl}/session/${sessionId}/execute-stream`, {
+        method: 'POST',
+        headers,
+        signal: opts.signal,
+        body: JSON.stringify({
+          sql,
+          confirmed: Boolean(opts.confirmed),
+          challenge_input: opts.challengeInput || '',
+          database: opts.database,
+          profile: Boolean(opts.profile),
+          limit: opts.limit ?? 5000,
+          tab_id: opts.tabId || '',
+          query_id: opts.queryId || 'active',
+          bypass_mutation_confirm: Boolean(opts.bypassMutationConfirm),
+        }),
+      });
+    } catch (err: any) {
+      if (err?.name === 'AbortError') throw err;
+      if (typeof window !== 'undefined') (window as any).__sqlfox_trigger_reconnect?.();
+      throw new Error(`Cannot reach SqlFox daemon — is it still running?`);
+    }
+
+    if (res.status === 422) {
+      const data = await res.json();
+      if (data?.inspection) {
+        handlers.onBlocked?.(data.inspection);
+        return;
+      }
+      throw new HttpStatusError(422, data?.error || 'Execution blocked by Safety Guard', data);
+    }
+
+    if (!res.ok) {
+      await this.handleNonOkResponse(res);
+    }
+
+    if (!res.body) {
+      throw new Error('Streaming response body unavailable');
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let sawTerminalOrExec = false;
+
+    const processLine = (line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      let evt: any;
+      try {
+        evt = JSON.parse(trimmed);
+      } catch {
+        return;
+      }
+      if (!evt || typeof evt !== 'object') return;
+
+      if (evt.blocked && evt.inspection) {
+        sawTerminalOrExec = true;
+        handlers.onBlocked?.(evt.inspection);
+        return;
+      }
+      switch (evt.type) {
+        case 'meta':
+          handlers.onMeta?.(evt);
+          break;
+        case 'chunk':
+          handlers.onChunk?.(evt);
+          break;
+        case 'statement_done':
+          handlers.onStatementDone?.(evt);
+          break;
+        case 'exec':
+        case 'batch':
+        case 'query':
+          sawTerminalOrExec = true;
+          handlers.onExec?.(this.normalizeExecResult(evt));
+          break;
+        case 'error':
+          sawTerminalOrExec = true;
+          handlers.onStatementError?.(evt);
+          break;
+        case 'done':
+          sawTerminalOrExec = true;
+          handlers.onDone?.(evt);
+          break;
+      }
+    };
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop() || '';
+        for (const line of lines) {
+          processLine(line);
+        }
+      }
+      if (buf.trim()) {
+        processLine(buf);
+      }
+      if (!sawTerminalOrExec) {
+        throw new Error('Query stream ended unexpectedly before completion (premature EOF).');
+      }
+    } finally {
+      try {
+        await reader.cancel();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  async cancelQuery(sessionId: string, queryId = 'active'): Promise<{ success?: boolean; status?: string }> {
     return this.request(`/session/${sessionId}/cancel`, {
       method: 'POST',
+      body: JSON.stringify({ query_id: queryId }),
+      timeoutMs: 5000,
     });
   }
 
-  async inspectQuery(sessionId: string, sql: string): Promise<InspectionResult> {
+  async inspectQuery(sessionId: string, sql: string, database?: string): Promise<InspectionResult> {
     return this.request(`/session/${sessionId}/inspect`, {
       method: 'POST',
-      body: JSON.stringify({ sql }),
+      body: JSON.stringify({ sql, database }),
     });
   }
 
-  async explainQuery(sessionId: string, sql: string, database?: string): Promise<any> {
+  async explainQuery(sessionId: string, sql: string, database?: string, signal?: AbortSignal): Promise<any> {
     return this.request(`/session/${sessionId}/explain`, {
       method: 'POST',
       body: JSON.stringify({ sql, database }),
+      signal,
+      timeoutMs: 30000,
+    });
+  }
+
+  async adviseQuery(sessionId: string, sql: string, database?: string): Promise<any> {
+    return this.request(`/session/${sessionId}/advise`, {
+      method: 'POST',
+      body: JSON.stringify({ sql, database }),
+      timeoutMs: 30000,
     });
   }
 
@@ -276,6 +619,35 @@ class ApiClient {
     });
   }
 
+  // CSV Server-Side Streaming Import
+  async importCsvFormData(
+    sessionId: string,
+    tableName: string,
+    file: File,
+    options: {
+      database?: string;
+      delimiter?: string;
+      emptyAsNull?: boolean;
+      skipErrors?: boolean;
+      mapping?: Record<string, string>;
+    }
+  ): Promise<{ inserted: number; failed?: number; errors?: string[]; message?: string }> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('delimiter', options.delimiter || 'auto');
+    formData.append('empty_as_null', String(options.emptyAsNull !== false));
+    formData.append('skip_errors', String(Boolean(options.skipErrors)));
+    if (options.mapping) {
+      formData.append('mapping', JSON.stringify(options.mapping));
+    }
+    const qs = options.database ? `?db=${encodeURIComponent(options.database)}` : '';
+    return this.request(`/session/${sessionId}/table/${encodeURIComponent(tableName)}/import-csv${qs}`, {
+      method: 'POST',
+      body: formData,
+      timeoutMs: null,
+    });
+  }
+
   // Table Partitions & Diagnostics
   async getTablePartitions(sessionId: string, tableName: string, db = ''): Promise<TablePartition[]> {
     const q = db ? `?db=${encodeURIComponent(db)}` : '';
@@ -290,6 +662,32 @@ class ApiClient {
     return this.request(`/session/${sessionId}/diagnostics/tables${qs}`);
   }
 
+  async getDatabaseDiagnostics(sessionId: string): Promise<any> {
+    return this.request(`/session/${sessionId}/diagnostics/databases`);
+  }
+
+  async getRedundantIndexes(sessionId: string, database = '', table = ''): Promise<any> {
+    const params = new URLSearchParams();
+    if (database) params.set('database', database);
+    if (table) params.set('table', table);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    return this.request(`/session/${sessionId}/diagnostics/redundant-indexes${qs}`);
+  }
+
+  async executeMaintenance(
+    sessionId: string,
+    db: string,
+    tables: string | string[],
+    action: 'OPTIMIZE' | 'ANALYZE' | 'CHECK' | 'VACUUM' | 'REPAIR'
+  ): Promise<any> {
+    const tableList = Array.isArray(tables) ? tables : [tables];
+    return this.request(`/session/${sessionId}/maintenance`, {
+      method: 'POST',
+      body: JSON.stringify({ database: db, tables: tableList, action }),
+      timeoutMs: 60000,
+    });
+  }
+
   // Processlist & Server Management
   async getProcesslist(sessionId: string): Promise<{
     current_thread_id: number;
@@ -300,14 +698,18 @@ class ApiClient {
     return this.request(`/session/${sessionId}/processlist`);
   }
 
-  async killProcess(sessionId: string, threadId: number): Promise<{ success: boolean }> {
+  async killProcess(sessionId: string, threadId: number, mode: 'query' | 'connection' = 'query'): Promise<{ success: boolean }> {
     return this.request(`/session/${sessionId}/kill`, {
       method: 'POST',
-      body: JSON.stringify({ thread_id: threadId }),
+      body: JSON.stringify({ thread_id: threadId, mode }),
     });
   }
 
-  async batchKillProcesses(sessionId: string, threadIds: number[], mode: 'query' | 'connection' = 'connection'): Promise<{ killed_count?: number; errors?: string[] }> {
+  async batchKillProcesses(
+    sessionId: string,
+    threadIds: number[],
+    mode: 'query' | 'connection' = 'connection'
+  ): Promise<{ total: number; success_count: number; failed_count: number; mode: string; results?: Array<{ thread_id: number; success: boolean; error?: string }> }> {
     return this.request(`/session/${sessionId}/batch-kill`, {
       method: 'POST',
       body: JSON.stringify({ thread_ids: threadIds, mode }),
@@ -336,18 +738,23 @@ class ApiClient {
     return this.request(`/session/${sessionId}/diagnostics/cluster`);
   }
 
-  async getDatabaseDiagnostics(sessionId: string): Promise<any> {
-    return this.request(`/session/${sessionId}/diagnostics/databases`);
+  // Audit Logs
+  async getAuditLogs(
+    sessionId: string,
+    params: { limit?: number; offset?: number; search?: string; source?: string } = {}
+  ): Promise<{ logs: any[]; total: number; limit: number; offset: number }> {
+    const qs = new URLSearchParams();
+    if (params.limit) qs.set('limit', String(params.limit));
+    if (params.offset !== undefined) qs.set('offset', String(params.offset));
+    if (params.search) qs.set('search', params.search);
+    if (params.source) qs.set('source', params.source);
+    const q = qs.toString() ? `?${qs.toString()}` : '';
+    return this.request(`/session/${sessionId}/audit-logs${q}`);
   }
 
-  async getRedundantIndexes(sessionId: string): Promise<any> {
-    return this.request(`/session/${sessionId}/diagnostics/redundant-indexes`);
-  }
-
-  async executeMaintenance(sessionId: string, db: string, table: string, operation: 'OPTIMIZE' | 'ANALYZE' | 'CHECK' | 'REPAIR'): Promise<any> {
-    return this.request(`/session/${sessionId}/maintenance`, {
-      method: 'POST',
-      body: JSON.stringify({ database: db, table, operation }),
+  async clearAuditLogs(sessionId: string): Promise<{ success: boolean }> {
+    return this.request(`/session/${sessionId}/audit-logs`, {
+      method: 'DELETE',
     });
   }
 
@@ -457,6 +864,10 @@ class ApiClient {
     });
   }
 
+  async getCloudSyncStatus(): Promise<any> {
+    return this.request('/cloud-sync/status');
+  }
+
   // Session Read-Only Toggle
   async toggleReadOnly(sessionId: string): Promise<{ read_only: boolean }> {
     return this.request(`/session/${sessionId}/toggle-readonly`, {
@@ -464,20 +875,36 @@ class ApiClient {
     });
   }
 
-  // Operational Notes — normalize between the UI shape (category/table_name/
-// query_snapshot) and the backend OperationalNote shape (user_tags/object_tags/
-// side_note), which share no field names.
-  private normalizeNote(note: any): any {
+  // Operational Notes — normalize between UI conveniences and backend OperationalNote fields
+  // (`status`, `side_note`, `object_tags`, `user_tags`), preserving all fields losslessly.
+  private normalizeNote(note: any): OperationalNote {
     if (!note || typeof note !== 'object') return note;
     const userTags: string[] = Array.isArray(note.user_tags) ? note.user_tags : [];
     const objectTags: string[] = Array.isArray(note.object_tags) ? note.object_tags : [];
     const category = note.category ?? userTags.find((t) => t.startsWith('#'))?.slice(1) ?? '';
-    const tableName = note.table_name ?? objectTags.find((t) => t.startsWith('db://table/'))?.slice('db://table/'.length) ?? '';
+    let tableName = note.table_name ?? '';
+    if (!tableName) {
+      const legacyTag = objectTags.find((t) => t.startsWith('db://'));
+      if (legacyTag) {
+        if (legacyTag.startsWith('db://table/')) {
+          tableName = legacyTag.slice('db://table/'.length);
+        } else {
+          const parts = legacyTag.slice('db://'.length).split('/');
+          tableName = parts[parts.length - 1] || '';
+        }
+      }
+    }
+    const status = note.status || (note.is_resolved ? 'resolved' : 'inbox');
+    // Extract fenced SQL block if content includes one (for quick Open Query convenience)
+    const sqlMatch = typeof note.content === 'string' ? note.content.match(/```sql\s*\n([\s\S]*?)```/i) : null;
     return {
       ...note,
+      status,
+      is_resolved: status === 'resolved',
+      side_note: note.side_note ?? '',
       category,
       table_name: tableName,
-      query_snapshot: note.query_snapshot ?? note.side_note ?? '',
+      query_snapshot: note.query_snapshot ?? (sqlMatch ? sqlMatch[1].trim() : ''),
       user_tags: userTags,
       object_tags: objectTags,
     };
@@ -485,59 +912,75 @@ class ApiClient {
 
   private denormalizeNote(note: any): any {
     const out: any = {
-      title: note.title,
-      content: note.content,
-      is_pinned: note.is_pinned,
+      title: note.title ?? 'Untitled Note',
+      content: note.content ?? '',
+      side_note: note.side_note ?? '',
+      status: note.status || (note.is_resolved ? 'resolved' : 'inbox'),
+      is_pinned: Boolean(note.is_pinned),
     };
+    if (note.captured_at) out.captured_at = note.captured_at;
     if (note.reminder_at) out.reminder_at = note.reminder_at;
+
     const userTags: string[] = Array.isArray(note.user_tags) ? [...note.user_tags] : [];
     const category = (note.category || '').trim();
     if (category) {
-      const tag = `#${category}`;
+      const tag = category.startsWith('#') ? category : `#${category}`;
       if (!userTags.includes(tag)) userTags.push(tag);
     }
-    if (userTags.length) out.user_tags = userTags;
+    out.user_tags = userTags;
+
     const objectTags: string[] = Array.isArray(note.object_tags) ? [...note.object_tags] : [];
     const tableName = (note.table_name || '').trim();
-    if (tableName) {
-      const tag = `db://table/${tableName}`;
-      if (!objectTags.includes(tag)) objectTags.push(tag);
+    if (tableName && !objectTags.some((t) => t === `db://table/${tableName}` || t.endsWith(`/${tableName}`))) {
+      objectTags.push(`db://table/${tableName}`);
     }
-    if (objectTags.length) out.object_tags = objectTags;
-    if (note.query_snapshot) out.side_note = note.query_snapshot;
+    out.object_tags = objectTags;
+
     if (note.id) out.id = note.id;
     return out;
   }
 
-  async listNotes(): Promise<any[]> {
-    const notes = await this.request<any[]>('/notes');
+  async listNotes(filter?: { status?: string; object_tag?: string; user_tag?: string; q?: string; is_pinned?: boolean }): Promise<OperationalNote[]> {
+    const params = new URLSearchParams();
+    if (filter?.status) params.set('status', filter.status);
+    if (filter?.object_tag) params.set('object_tag', filter.object_tag);
+    if (filter?.user_tag) params.set('user_tag', filter.user_tag);
+    if (filter?.q) params.set('q', filter.q);
+    if (filter?.is_pinned !== undefined) params.set('is_pinned', String(filter.is_pinned));
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    const notes = await this.request<any[]>(`/notes${qs}`);
     return (Array.isArray(notes) ? notes : []).map((n) => this.normalizeNote(n));
   }
 
   async createNote(note: {
     title: string;
     content: string;
+    side_note?: string;
+    status?: string;
     category?: string;
     table_name?: string;
-    query_snapshot?: string;
-    reminder_at?: string;
+    object_tags?: string[];
+    user_tags?: string[];
+    reminder_at?: string | null;
     is_pinned?: boolean;
-  }): Promise<any> {
-    return this.request('/notes', {
+  }): Promise<OperationalNote> {
+    const res = await this.request('/notes', {
       method: 'POST',
       body: JSON.stringify(this.denormalizeNote(note)),
     });
+    return this.normalizeNote(res);
   }
 
-  async getNote(id: string): Promise<any> {
+  async getNote(id: string): Promise<OperationalNote> {
     return this.normalizeNote(await this.request(`/notes/${id}`));
   }
 
-  async updateNote(id: string, note: any): Promise<any> {
-    return this.request(`/notes/${id}`, {
+  async updateNote(id: string, note: any): Promise<OperationalNote> {
+    const res = await this.request(`/notes/${id}`, {
       method: 'PUT',
       body: JSON.stringify(this.denormalizeNote({ ...note, id })),
     });
+    return this.normalizeNote(res);
   }
 
   async deleteNote(id: string): Promise<any> {
@@ -560,7 +1003,8 @@ class ApiClient {
   }
 
   async getDueReminders(): Promise<any[]> {
-    return this.request('/notes/reminders/due');
+    const res = await this.request<any[]>('/notes/reminders/due');
+    return (Array.isArray(res) ? res : []).map((n) => this.normalizeNote(n));
   }
 
   async getTableNote(sessionId: string, table: string): Promise<{ content: string; updated_at?: string }> {
@@ -583,18 +1027,29 @@ class ApiClient {
     return this.request(`/session/${sessionId}/table/${encodeURIComponent(tableName)}/mock-data`, {
       method: 'POST',
       body: JSON.stringify(options),
+      timeoutMs: 60000,
     });
+  }
+
+  // Smart Seed SQL Export URL
+  exportSmartSeedUrl(sessionId: string, options: { limit?: number; includeDDL?: boolean; db?: string } = {}): string {
+    const params = new URLSearchParams();
+    params.set('limit', String(options.limit || 20));
+    params.set('ddl', String(options.includeDDL !== false));
+    if (options.db) params.set('db', options.db);
+    return `/api/session/${sessionId}/export-smart-seed?${params.toString()}`;
   }
 
   // System Update & Changelog
   async checkSystemUpdate(force = false): Promise<any> {
-    return this.request(`/system/update/check${force ? '?force=true' : ''}`);
+    return this.request(`/system/update/check${force ? '?force=true' : ''}`, { timeoutMs: 20000 });
   }
 
-  async applySystemUpdate(version?: string): Promise<any> {
+  async applySystemUpdate(assetUrl: string, version?: string): Promise<any> {
     return this.request('/system/update/apply', {
       method: 'POST',
-      body: JSON.stringify({ version }),
+      body: JSON.stringify({ asset_url: assetUrl, version }),
+      timeoutMs: null,
     });
   }
 
@@ -603,39 +1058,65 @@ class ApiClient {
   }
 
   // System Lifecycle
-  // Opens a URL in the host machine's default browser (daemon-side). Only meaningful
-  // when the UI is served locally; remote sessions get a fallback popup instead.
-  async openInSystemBrowser(url: string): Promise<{ status?: string }> {
+  async openInSystemBrowser(url: string): Promise<{ ok?: boolean; status?: string }> {
     return this.request('/system/open-browser', {
       method: 'POST',
       body: JSON.stringify({ url }),
     });
   }
 
-  async shutdownDaemon(): Promise<{ status?: string }> {
-    return this.request('/system/shutdown', { method: 'POST' });
+  async shutdownDaemon(): Promise<{ ok?: boolean; status?: string }> {
+    return this.request('/system/shutdown', { method: 'POST', timeoutMs: 5000 });
   }
 
   // AI Assistant
   async aiChat(
-    prompt: string,
-    query = '',
-    dialect = 'mysql',
-    config: AiConfig = loadAiConfig()
+    promptOrOpts: string | {
+      action?: 'chat' | 'explain_query' | 'explain_plan' | 'optimize' | 'nl_to_sql' | 'fix_query';
+      prompt: string;
+      query?: string;
+      plan?: string;
+      error_message?: string;
+      connection_id?: string;
+      config?: AiConfig;
+    },
+    queryArg = '',
+    _dialectArg = 'mysql',
+    configArg: AiConfig = loadAiConfig()
   ): Promise<{ content: string; model?: string }> {
+    const opts =
+      typeof promptOrOpts === 'string'
+        ? { action: 'chat' as const, prompt: promptOrOpts, query: queryArg, config: configArg }
+        : promptOrOpts;
+    const cfg = opts.config || loadAiConfig();
+
     return this.request('/ai/chat', {
       method: 'POST',
+      timeoutMs: 65000,
       body: JSON.stringify({
-        action: 'chat',
-        prompt,
-        query,
-        dialect,
-        provider: config.provider,
-        api_key: config.apiKey,
-        model: config.modelName,
-        endpoint: config.baseUrl,
+        action: opts.action || 'chat',
+        prompt: opts.prompt,
+        query: opts.query || '',
+        plan: opts.plan || '',
+        error_message: opts.error_message || '',
+        connection_id: opts.connection_id || '',
+        provider: cfg.provider,
+        api_key: cfg.apiKey,
+        model: cfg.modelName,
+        endpoint: cfg.baseUrl,
+        mask_identifiers: cfg.maskIdentifiers,
+        language: cfg.language,
+        response_style: cfg.responseStyle,
+        custom_prompt: cfg.customPrompt,
+        include_schema: cfg.includeSchema,
+        temperature: cfg.temperature,
       }),
     });
+  }
+
+  async checkOllama(endpoint = ''): Promise<{ available: boolean }> {
+    const qs = endpoint ? `?endpoint=${encodeURIComponent(endpoint)}` : '';
+    return this.request(`/ai/ollama-check${qs}`, { timeoutMs: 5000 });
   }
 
   // Active Threads & Safety
@@ -650,21 +1131,20 @@ class ApiClient {
   }
 
   // Cross-Connection Data Transfer
-  async transferData(payload: {
-    source_session_id: string;
-    source_db?: string;
-    target_session_id: string;
-    target_db?: string;
-    tables: string[];
-    create_tables?: boolean;
-    truncate_target?: boolean;
-    batch_size?: number;
-  }): Promise<any> {
-    // Backend streams NDJSON progress events; consume them and resolve on "done".
-    const token = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('sqlfox_remote_token') : null;
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-
+  async transferData(
+    payload: {
+      source_session_id: string;
+      source_db?: string;
+      target_session_id: string;
+      target_db?: string;
+      tables: string[];
+      create_tables?: boolean;
+      truncate_target?: boolean;
+      batch_size?: number;
+    },
+    onProgress?: (evt: any) => void
+  ): Promise<any> {
+    const headers = this.getAuthHeaders({}, true);
     let res: Response;
     try {
       res = await fetch('/api/sync/data/transfer', {
@@ -676,15 +1156,28 @@ class ApiClient {
       if (typeof window !== 'undefined') (window as any).__sqlfox_trigger_reconnect?.();
       throw new Error(`Cannot reach SqlFox daemon: ${err instanceof Error ? err.message : String(err)}`);
     }
-    if (!res.ok || !res.body) {
-      let msg = `HTTP ${res.status}`;
-      try { msg = (await res.json()).error || msg; } catch { /* ignore */ }
-      throw new Error(msg);
+    if (!res.ok) {
+      await this.handleNonOkResponse(res);
+    }
+    if (!res.body) {
+      throw new Error('Streaming response body is empty');
     }
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
-    let result: any = { status: 'completed', total_rows: 0, has_errors: false };
+    let result: any = { status: 'completed', total_rows: 0, has_errors: false, errors: [] as string[] };
+    const tableErrors: string[] = [];
+
+    const handleEvt = (evt: any) => {
+      onProgress?.(evt);
+      if (evt.event === 'table_error' && evt.error) {
+        tableErrors.push(`${evt.table || 'table'}: ${evt.error}`);
+      }
+      if (evt.event === 'done') {
+        result = { ...evt, errors: tableErrors };
+      }
+    };
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -695,10 +1188,16 @@ class ApiClient {
         const trimmed = line.trim();
         if (!trimmed) continue;
         try {
-          const evt = JSON.parse(trimmed);
-          if (evt.event === 'done') result = evt;
-        } catch { /* skip malformed line */ }
+          handleEvt(JSON.parse(trimmed));
+        } catch { /* ignore malformed */ }
       }
+    }
+    if (buf.trim()) {
+      try { handleEvt(JSON.parse(buf.trim())); } catch { /* ignore */ }
+    }
+    if (tableErrors.length > 0 && !result.error) {
+      result.has_errors = true;
+      result.error = tableErrors.join('; ');
     }
     return result;
   }
@@ -715,6 +1214,7 @@ class ApiClient {
     return this.request('/sync/data/compare', {
       method: 'POST',
       body: JSON.stringify(payload),
+      timeoutMs: 60000,
     });
   }
 
@@ -730,8 +1230,10 @@ class ApiClient {
     return this.request('/sync/data/apply', {
       method: 'POST',
       body: JSON.stringify(payload),
+      timeoutMs: 60000,
     });
   }
+
   // Structure Synchronization
   async compareStructure(payload: {
     source_session_id: string;
@@ -743,6 +1245,7 @@ class ApiClient {
     return this.request('/sync/structure/compare', {
       method: 'POST',
       body: JSON.stringify(payload),
+      timeoutMs: 60000,
     });
   }
 
@@ -752,10 +1255,11 @@ class ApiClient {
     statements: string[];
     confirmed?: boolean;
     challenge_input?: string;
-  }): Promise<{ success: boolean; applied_count: number }> {
+  }): Promise<{ success: boolean; executed: number; errors?: string[]; blocked?: boolean; requires_confirm?: boolean; message?: string }> {
     return this.request('/sync/structure/apply', {
       method: 'POST',
       body: JSON.stringify(payload),
+      timeoutMs: 60000,
     });
   }
 
@@ -770,13 +1274,17 @@ class ApiClient {
   async runCloudSync(): Promise<{ success: boolean; message?: string }> {
     return this.request('/cloud-sync/run', {
       method: 'POST',
+      timeoutMs: 60000,
     });
   }
 
-  async importNotesBundle(bundle: any): Promise<{ success: boolean; imported_count: number }> {
+  async importNotesBundle(bundle: File): Promise<{ status?: string; imported_count: number; message?: string }> {
+    const formData = new FormData();
+    formData.append('bundle', bundle);
     return this.request('/notes/bundle/import', {
       method: 'POST',
-      body: JSON.stringify(bundle),
+      body: formData,
+      timeoutMs: 60000,
     });
   }
 
@@ -790,10 +1298,7 @@ class ApiClient {
     const formData = new FormData();
     formData.append('file', file);
 
-    const token = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('sqlfox_remote_token') : null;
-    const headers: Record<string, string> = {};
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-
+    const headers = this.getAuthHeaders({}, false);
     const params = new URLSearchParams();
     if (options.stopOnError !== undefined) params.set('stop_on_error', String(options.stopOnError));
     if (options.database) params.set('db', options.database);
@@ -806,15 +1311,7 @@ class ApiClient {
     });
 
     if (!res.ok) {
-      let errMsg = `HTTP ${res.status}`;
-      try {
-        const errObj = await res.json();
-        errMsg = errObj.error || errObj.message || errMsg;
-      } catch {
-        const text = await res.text();
-        if (text) errMsg = text;
-      }
-      throw new Error(errMsg);
+      await this.handleNonOkResponse(res);
     }
 
     if (!res.body) {
@@ -829,6 +1326,16 @@ class ApiClient {
     let errors = 0;
     let finalStatus = 'completed';
 
+    const processItem = (item: any) => {
+      if (item.total) total = item.total;
+      if (item.status === 'ok') executed++;
+      if (item.status === 'error') errors++;
+      if (item.executed_statements !== undefined) executed = item.executed_statements;
+      if (item.error_count !== undefined) errors = item.error_count;
+      if (item.status === 'halted' || item.status === 'completed') finalStatus = item.status;
+      onProgress(item);
+    };
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -840,23 +1347,15 @@ class ApiClient {
         const trimmed = line.trim();
         if (!trimmed) continue;
         try {
-          const item = JSON.parse(trimmed);
-          if (item.total) total = item.total;
-          if (item.status === 'ok') executed++;
-          if (item.status === 'error') errors++;
-          onProgress(item);
-        } catch (_) {}
+          processItem(JSON.parse(trimmed));
+        } catch { /* ignore */ }
       }
     }
 
     if (streamBuf.trim()) {
       try {
-        const item = JSON.parse(streamBuf.trim());
-        if (item.total) total = item.total;
-        if (item.status === 'ok') executed++;
-        if (item.status === 'error') errors++;
-        onProgress(item);
-      } catch (_) {}
+        processItem(JSON.parse(streamBuf.trim()));
+      } catch { /* ignore */ }
     }
 
     return {

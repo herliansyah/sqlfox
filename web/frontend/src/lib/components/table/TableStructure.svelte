@@ -1,7 +1,18 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
-  import { splitSqlStatements, maskSqlForAnalysis } from '../../utils/sqlStatements';
+  import { splitSqlStatements, maskSqlForAnalysis, quoteSqlIdentifier } from '../../utils/sqlStatements';
+  import {
+    STANDARD_DATA_TYPES,
+    isLengthlessType,
+    defaultLengthForType,
+    parseColumnType,
+    formatColumnType,
+    DEFAULT_PRESETS,
+    validateTableColumns,
+    parseEnumValues,
+    formatEnumLength,
+  } from '../../utils/dataTypes';
   import type { TableMetadata, ColumnMetadata } from '../../../types';
   import Icon from '../common/Icon.svelte';
 
@@ -14,14 +25,12 @@
     _modified?: boolean;
     _deleted?: boolean;
     _oldName?: string;
+    _oldEnumTags?: string[];
   }
 
   let { tableMeta }: Props = $props();
 
   let isAddModalOpen = $state(false);
-  let isReviewModalOpen = $state(false);
-  let isExecuting = $state(false);
-  let reviewDDL = $state('');
 
   // Staged columns working copy
   let stagedColumns = $state<StagedColumn[]>([]);
@@ -30,29 +39,12 @@
   let editingIndex = $state<number | null>(null);
   let formColName = $state('');
   let formColType = $state('VARCHAR(255)');
+  let formBaseType = $state('VARCHAR');
+  let formLength = $state('255');
   let formColNullable = $state(true);
   let formColPK = $state(false);
   let formColDefault = $state('');
   let formColExtra = $state('');
-
-  const commonTypes = [
-    'INT',
-    'BIGINT',
-    'VARCHAR(255)',
-    'VARCHAR(100)',
-    'TEXT',
-    'LONGTEXT',
-    'BOOLEAN',
-    'DATETIME',
-    'TIMESTAMP',
-    'DATE',
-    'DECIMAL(10,2)',
-    'FLOAT',
-    'DOUBLE',
-    'JSON',
-    'ENUM',
-    'SET',
-  ];
 
   // ENUM / SET Builder State
   let enumTags = $state<string[]>([]);
@@ -62,32 +54,63 @@
     formColType.trim().toUpperCase().startsWith('SET')
   );
 
-  function parseEnumTags(typeStr: string): string[] {
-    const match = typeStr.match(/^(?:ENUM|SET)\s*\((.*)\)$/i);
-    if (!match) return [];
-    return match[1]
-      .split(',')
-      .map((s) => s.trim().replace(/^['"]+|['"]+$/g, ''))
-      .filter(Boolean);
+  let removedEnumTagsWarning = $derived.by(() => {
+    if (editingIndex === null || !isEnumOrSet) return '';
+    const orig = stagedColumns[editingIndex]?._oldEnumTags || [];
+    if (orig.length === 0) return '';
+    const dropped = orig.filter((t) => !enumTags.includes(t));
+    return dropped.length > 0
+      ? `Warning: Removing ENUM/SET option(s) (${dropped.join(', ')}) may truncate existing rows containing those values.`
+      : '';
+  });
+
+  function syncFormTypeFromParts(base: string, len: string) {
+    formBaseType = base;
+    formLength = len;
+    if (base === 'ENUM' || base === 'SET') {
+      const inner = formatEnumLength(enumTags);
+      formColType = inner ? `${base}(${inner})` : base;
+    } else {
+      formColType = formatColumnType(base, len);
+    }
   }
 
-  function handleSelectType(ct: string) {
-    if (ct === 'ENUM') {
-      enumTags = ['active', 'inactive', 'pending'];
-      formColType = "ENUM('active', 'inactive', 'pending')";
-    } else if (ct === 'SET') {
-      enumTags = ['read', 'write', 'admin'];
-      formColType = "SET('read', 'write', 'admin')";
+  function handleSelectTypeGroup(newBase: string) {
+    const clean = newBase.toUpperCase();
+    if (clean === 'ENUM' || clean === 'SET') {
+      if (enumTags.length === 0) enumTags = ['active', 'inactive', 'pending'];
+      const len = formatEnumLength(enumTags);
+      syncFormTypeFromParts(clean, len);
+      return;
+    }
+    enumTags = [];
+    const len = isLengthlessType(clean) ? '' : defaultLengthForType(clean);
+    syncFormTypeFromParts(clean, len);
+  }
+
+  function handleRawTypeInput(val: string) {
+    formColType = val;
+    const parsed = parseColumnType(val);
+    formBaseType = parsed.baseType;
+    formLength = parsed.length;
+    if (parsed.baseType === 'ENUM' || parsed.baseType === 'SET') {
+      enumTags = parseEnumValues(val);
     } else {
-      formColType = ct;
       enumTags = [];
     }
   }
 
-  function addEnumTag(val: string) {
-    const trimmed = val.trim().replace(/^['"]+|['"]+$/g, '');
-    if (!trimmed || enumTags.includes(trimmed)) return;
-    enumTags = [...enumTags, trimmed];
+  function addEnumTags(rawInput: string) {
+    const parts = rawInput
+      .split(/[\n,]+/)
+      .map((s) => s.trim().replace(/^['"]+|['"]+$/g, ''))
+      .filter(Boolean);
+    if (parts.length === 0) return;
+    const next = [...enumTags];
+    for (const p of parts) {
+      if (!next.includes(p)) next.push(p);
+    }
+    enumTags = next;
     updateEnumColType();
   }
 
@@ -98,19 +121,21 @@
 
   function updateEnumColType() {
     const base = formColType.trim().toUpperCase().startsWith('SET') ? 'SET' : 'ENUM';
-    const formatted = enumTags.map((t) => `'${t.replace(/'/g, "''")}'`).join(', ');
+    const formatted = formatEnumLength(enumTags);
+    formBaseType = base;
+    formLength = formatted;
     formColType = `${base}(${formatted})`;
   }
 
   // Sync staged columns whenever tableMeta changes
   $effect(() => {
     isAddModalOpen = false;
-    isReviewModalOpen = false;
     editingIndex = null;
     if (tableMeta && tableMeta.columns) {
       stagedColumns = tableMeta.columns.map((c) => ({
         ...c,
         _oldName: c.name,
+        _oldEnumTags: parseEnumValues(c.type || ''),
       }));
     } else {
       stagedColumns = [];
@@ -125,6 +150,8 @@
     editingIndex = null;
     formColName = '';
     formColType = 'VARCHAR(255)';
+    formBaseType = 'VARCHAR';
+    formLength = '255';
     formColNullable = true;
     formColPK = false;
     formColDefault = '';
@@ -144,11 +171,14 @@
     editingIndex = index;
     formColName = col.name;
     formColType = col.type || 'VARCHAR(255)';
+    const parsed = parseColumnType(formColType);
+    formBaseType = parsed.baseType;
+    formLength = parsed.length;
     formColNullable = !!col.is_nullable;
     formColPK = !!col.is_primary_key;
     formColDefault = col.default_value !== null && col.default_value !== undefined ? String(col.default_value) : '';
     formColExtra = col.extra || '';
-    enumTags = parseEnumTags(formColType);
+    enumTags = parseEnumValues(formColType);
     enumInputVal = '';
     isAddModalOpen = true;
   }
@@ -159,8 +189,16 @@
       return;
     }
 
+    const colErr = validateTableColumns(
+      [{ name: formColName.trim(), type: formColType.trim(), is_primary_key: formColPK }],
+      appState.activeConnection?.driver
+    );
+    if (colErr) {
+      appState.showToast(colErr, 'warning');
+      return;
+    }
+
     if (editingIndex === null) {
-      // Add new column
       stagedColumns = [
         ...stagedColumns,
         {
@@ -175,7 +213,6 @@
       ];
       appState.showToast(`Column "${formColName.trim()}" staged for addition`, 'info');
     } else {
-      // Edit existing column
       stagedColumns = stagedColumns.map((c, i) => {
         if (i === editingIndex) {
           return {
@@ -203,10 +240,8 @@
     if (!col) return;
 
     if (col._isNew) {
-      // Completely remove newly added unsaved column
       stagedColumns = stagedColumns.filter((_, i) => i !== index);
     } else {
-      // Toggle delete mark
       stagedColumns = stagedColumns.map((c, i) =>
         i === index ? { ...c, _deleted: !c._deleted } : c
       );
@@ -218,6 +253,7 @@
       stagedColumns = tableMeta.columns.map((c) => ({
         ...c,
         _oldName: c.name,
+        _oldEnumTags: parseEnumValues(c.type || ''),
       }));
     }
     appState.showToast('All staged structural modifications discarded', 'info');
@@ -227,9 +263,17 @@
     if (!val) return '';
     const trimmed = val.trim();
     if (!trimmed) return '';
-    if (trimmed.toUpperCase() === 'NULL' || trimmed.toUpperCase() === 'CURRENT_TIMESTAMP' || /^-?\d+(\.\d+)?$/.test(trimmed) || /^[A-Z_]+\(.*\)$/i.test(trimmed)) {
+    if (
+      trimmed.toUpperCase() === 'NULL' ||
+      trimmed.toUpperCase() === 'CURRENT_TIMESTAMP' ||
+      trimmed.toUpperCase() === 'TRUE' ||
+      trimmed.toUpperCase() === 'FALSE' ||
+      /^-?\d+(\.\d+)?$/.test(trimmed) ||
+      /^[A-Z_]+\(.*\)$/i.test(trimmed)
+    ) {
       return `DEFAULT ${trimmed}`;
     }
+    if (trimmed === "''") return "DEFAULT ''";
     return `DEFAULT '${trimmed.replace(/'/g, "''")}'`;
   }
 
@@ -240,7 +284,7 @@
     const isPostgres = driver === 'postgres' || driver === 'postgresql';
     const tableName = tableMeta.name;
 
-    const q = (name: string) => (isSQLite || isPostgres ? `"${name}"` : `\`${name}\``);
+    const q = (name: string) => quoteSqlIdentifier(name, driver);
     const statements: string[] = [];
 
     // 1. Dropped columns
@@ -288,7 +332,6 @@
             statements.push(`ALTER TABLE ${q(tableName)} ALTER COLUMN ${q(c.name)} DROP DEFAULT;`);
           }
         } else {
-          // MySQL
           if (c._oldName && c._oldName !== c.name) {
             statements.push(
               `ALTER TABLE ${q(tableName)} CHANGE COLUMN ${q(c._oldName)} ${q(c.name)} ${c.type} ${nullClause} ${dfltClause} ${extraClause};`.replace(/\s+/g, ' ').trim()
@@ -301,46 +344,68 @@
         }
       });
 
+    // 4. Primary Key changes (DROP PRIMARY KEY / ADD PRIMARY KEY)
+    const origPKCols = (tableMeta.columns || []).filter((c) => c.is_primary_key).map((c) => c.name);
+    const nextPKCols = stagedColumns.filter((c) => !c._deleted && c.is_primary_key).map((c) => c.name);
+    if (!isSQLite && JSON.stringify(origPKCols) !== JSON.stringify(nextPKCols)) {
+      if (isPostgres) {
+        if (origPKCols.length > 0) {
+          statements.push(`ALTER TABLE ${q(tableName)} DROP CONSTRAINT ${q(`${tableName}_pkey`)};`);
+        }
+        if (nextPKCols.length > 0) {
+          statements.push(`ALTER TABLE ${q(tableName)} ADD PRIMARY KEY (${nextPKCols.map(q).join(', ')});`);
+        }
+      } else {
+        const pkParts: string[] = [];
+        if (origPKCols.length > 0) pkParts.push('DROP PRIMARY KEY');
+        if (nextPKCols.length > 0) pkParts.push(`ADD PRIMARY KEY (${nextPKCols.map(q).join(', ')})`);
+        if (pkParts.length > 0) {
+          statements.push(`ALTER TABLE ${q(tableName)} ${pkParts.join(', ')};`);
+        }
+      }
+    }
+
     return statements.join('\n');
   }
 
   function handleReviewAndApply() {
+    if (!tableMeta || !appState.activeConnection) return;
+    if (appState.isReadOnly) {
+      appState.showToast('Session is Read-Only', 'warning');
+      return;
+    }
+    const activeCols = stagedColumns.filter((c) => !c._deleted);
+    const valErr = validateTableColumns(activeCols, appState.activeConnection.driver);
+    if (valErr) {
+      appState.showToast(valErr, 'warning');
+      return;
+    }
+
     const ddl = generateAlterDDL();
     if (!ddl.trim()) {
       appState.showToast('No structural modifications detected to apply.', 'warning');
       return;
     }
-    reviewDDL = ddl;
-    isReviewModalOpen = true;
-  }
 
-  async function executeAlterDDL() {
-    if (!appState.activeConnection || !reviewDDL.trim()) return;
-    isExecuting = true;
+    const connId = appState.activeSessionId || appState.activeConnection.id;
+    const targetDb = appState.activeTab?.database || appState.currentDatabase || undefined;
+    const dialect = appState.activeConnection.driver || 'generic';
+    const stmts = splitSqlStatements(ddl, dialect)
+      .filter((s) => maskSqlForAnalysis(s.text, dialect).replace(/;/g, '').trim().length > 0)
+      .map((s) => s.text);
 
-    try {
-      const connId = appState.activeSessionId || appState.activeConnection.id;
-      const targetDb = appState.activeTab?.database || appState.currentDatabase || undefined;
-      // Execute statement(s)
-      const dialect = appState.activeConnection?.driver || 'generic';
-      const stmts = splitSqlStatements(reviewDDL, dialect)
-        .filter((s) => maskSqlForAnalysis(s.text, dialect).replace(/;/g, '').trim().length > 0)
-        .map((s) => s.text);
-
-      for (const sql of stmts) {
-        await api.executeQuery(connId, sql, false, targetDb);
-      }
-
-      appState.showToast(`Table "${tableMeta?.name}" structure updated successfully!`, 'success');
-      isReviewModalOpen = false;
-
-      // Reload catalog to refresh schema tree and active viewer
-      await appState.loadCatalog(connId, targetDb);
-    } catch (err: any) {
-      appState.showToast(`Failed to update structure: ${err.message}`, 'error');
-    } finally {
-      isExecuting = false;
-    }
+    appState.openDDLReviewModal(
+      ddl,
+      async () => {
+        for (const sql of stmts) {
+          await api.executeQuery(connId, sql, { confirmed: true, database: targetDb });
+        }
+        appState.showToast(`Table "${tableMeta?.name}" structure updated successfully!`, 'success');
+        await appState.loadCatalog(connId, targetDb);
+      },
+      `Alter Table Structure: ${tableMeta.name}`,
+      { tableName: tableMeta.name, database: targetDb, confirmLabel: 'Apply ALTER TABLE' }
+    );
   }
 </script>
 
@@ -525,24 +590,38 @@
 
         <div>
           <label class="block text-slate-400 text-xs font-medium mb-1">Data Type *</label>
-          <div class="space-y-1.5">
+          <div class="space-y-2">
+            <div class="grid grid-cols-3 gap-2">
+              <select
+                value={formBaseType}
+                onchange={(e) => handleSelectTypeGroup((e.currentTarget as HTMLSelectElement).value)}
+                class="col-span-2 bg-[#050811] border border-[#1e293b] rounded-lg px-2.5 py-2 text-slate-200 font-mono text-xs focus:outline-none focus:border-sky-500"
+              >
+                {#each STANDARD_DATA_TYPES as group}
+                  <optgroup label={group.group}>
+                    {#each group.types as t}
+                      <option value={t}>{t}</option>
+                    {/each}
+                  </optgroup>
+                {/each}
+              </select>
+              <input
+                type="text"
+                value={formLength}
+                disabled={isLengthlessType(formBaseType) || isEnumOrSet}
+                oninput={(e) => syncFormTypeFromParts(formBaseType, (e.currentTarget as HTMLInputElement).value)}
+                placeholder={isLengthlessType(formBaseType) ? 'N/A' : 'Len'}
+                class="bg-[#050811] border border-[#1e293b] rounded-lg px-2.5 py-2 text-slate-200 font-mono text-xs focus:outline-none focus:border-sky-500 disabled:opacity-40"
+              />
+            </div>
+
             <input
               type="text"
-              bind:value={formColType}
-              placeholder="e.g. VARCHAR(255), INT, JSON"
-              class="w-full bg-[#050811] border border-[#1e293b] rounded-lg px-3 py-2 text-slate-200 font-mono text-xs focus:outline-none focus:border-sky-500"
+              value={formColType}
+              oninput={(e) => handleRawTypeInput((e.currentTarget as HTMLInputElement).value)}
+              placeholder="e.g. VARCHAR(255), INT UNSIGNED, ENUM('a','b')"
+              class="w-full bg-[#050811] border border-[#1e293b] rounded-lg px-3 py-1.5 text-sky-300 font-mono text-xs focus:outline-none focus:border-sky-500"
             />
-            <div class="flex flex-wrap gap-1">
-              {#each commonTypes as ct}
-                <button
-                  type="button"
-                  onclick={() => handleSelectType(ct)}
-                  class="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 hover:border-sky-500 text-slate-400 hover:text-sky-300 font-mono text-[10px] transition {ct === 'ENUM' || ct === 'SET' ? 'border-amber-700/60 text-amber-300' : ''}"
-                >
-                  {ct}
-                </button>
-              {/each}
-            </div>
 
             {#if isEnumOrSet}
               <!-- Floating ENUM / SET Value Builder Popover -->
@@ -554,10 +633,16 @@
                   <span class="text-[10px] text-slate-500 font-mono">{enumTags.length} item(s)</span>
                 </div>
 
+                {#if removedEnumTagsWarning}
+                  <div class="p-2 rounded bg-rose-950/50 border border-rose-800/70 text-[10.5px] text-rose-300">
+                    {removedEnumTagsWarning}
+                  </div>
+                {/if}
+
                 <!-- Tag list -->
                 <div class="flex flex-wrap gap-1.5 min-h-[32px] p-2 bg-[#090d16] border border-slate-800 rounded">
                   {#if enumTags.length === 0}
-                    <span class="text-slate-500 italic text-[11px]">No options yet. Type below and press Enter.</span>
+                    <span class="text-slate-500 italic text-[11px]">No options yet. Paste comma/newline list or type below.</span>
                   {:else}
                     {#each enumTags as tag, idx}
                       <span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded bg-amber-950/60 text-amber-200 border border-amber-800/80 font-mono text-[11px]">
@@ -576,17 +661,17 @@
                   {/if}
                 </div>
 
-                <!-- Input to add new tag -->
+                <!-- Input to add or bulk-paste comma/newline tags -->
                 <div class="flex items-center space-x-2">
                   <input
                     type="text"
                     bind:value={enumInputVal}
-                    placeholder="Type value and press Enter or comma..."
+                    placeholder="Type value or paste comma/newline list..."
                     class="flex-1 bg-[#090d16] border border-slate-700 rounded px-2.5 py-1 text-slate-200 font-mono text-xs focus:outline-none focus:border-amber-500"
                     onkeydown={(e) => {
                       if (e.key === 'Enter' || e.key === ',') {
                         e.preventDefault();
-                        addEnumTag(enumInputVal);
+                        addEnumTags(enumInputVal);
                         enumInputVal = '';
                       }
                     }}
@@ -594,7 +679,7 @@
                   <button
                     type="button"
                     onclick={() => {
-                      addEnumTag(enumInputVal);
+                      addEnumTags(enumInputVal);
                       enumInputVal = '';
                     }}
                     class="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-semibold text-[11px] transition"
@@ -626,6 +711,17 @@
             placeholder="e.g. 0, active, CURRENT_TIMESTAMP"
             class="w-full bg-[#050811] border border-[#1e293b] rounded-lg px-3 py-2 text-slate-200 font-mono text-xs focus:outline-none focus:border-sky-500"
           />
+          <div class="flex flex-wrap gap-1 mt-1.5">
+            {#each DEFAULT_PRESETS as preset}
+              <button
+                type="button"
+                onclick={() => (formColDefault = preset.value)}
+                class="px-1.5 py-0.5 rounded bg-slate-900 hover:bg-slate-800 border border-slate-800 text-[10px] font-mono text-slate-400 hover:text-sky-300 transition"
+              >
+                {preset.label}
+              </button>
+            {/each}
+          </div>
         </div>
 
         <div>
@@ -654,51 +750,6 @@
         >
           {editingIndex === null ? 'Add Column' : 'Update Column'}
         </button>
-      </div>
-    </div>
-  </div>
-{/if}
-
-<!-- DDL Review & Apply Modal -->
-{#if isReviewModalOpen}
-  <div class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-    <div class="bg-[#0b0f19] border border-sky-500/40 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col animate-scale-in font-sans">
-      <div class="px-5 py-4 border-b border-[#1e293b] flex items-center justify-between bg-[#0f172a]">
-        <div class="flex items-center space-x-2">
-          <Icon name="terminal" class="w-4 h-4 text-emerald-400" />
-          <h3 class="font-bold text-slate-100 text-sm">Review Generated ALTER TABLE DDL</h3>
-        </div>
-        <button onclick={() => (isReviewModalOpen = false)} class="text-slate-400 hover:text-white">
-          <Icon name="x" class="w-4 h-4" />
-        </button>
-      </div>
-
-      <div class="p-5 space-y-3">
-        <p class="text-xs text-slate-400">
-          The following DDL statements will be executed against <strong class="text-sky-300">{tableMeta?.name}</strong>:
-        </p>
-        <pre class="p-3 bg-[#050811] border border-[#1e293b] rounded-lg text-emerald-300 font-mono text-xs overflow-x-auto whitespace-pre-wrap">{reviewDDL}</pre>
-      </div>
-
-      <div class="px-5 py-3 border-t border-[#1e293b] flex items-center justify-between bg-[#0f172a]">
-        <span class="text-slate-500 text-xs">Verify carefully before applying.</span>
-        <div class="flex items-center space-x-2">
-          <button
-            onclick={() => (isReviewModalOpen = false)}
-            disabled={isExecuting}
-            class="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition"
-          >
-            Cancel
-          </button>
-          <button
-            onclick={executeAlterDDL}
-            disabled={isExecuting}
-            class="px-4 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition flex items-center space-x-1.5 shadow-lg shadow-emerald-900/30"
-          >
-            <Icon name="zap" class="w-3.5 h-3.5 {isExecuting ? 'animate-spin' : ''}" />
-            <span>{isExecuting ? 'Executing...' : 'Apply Modifications'}</span>
-          </button>
-        </div>
       </div>
     </div>
   </div>

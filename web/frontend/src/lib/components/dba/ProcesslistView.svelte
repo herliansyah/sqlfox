@@ -1,14 +1,16 @@
 <script lang="ts">
-import { SvelteSet } from 'svelte/reactivity';
-import { copyText } from '../../utils/clipboard';
+  import { SvelteSet } from 'svelte/reactivity';
+  import { copyText } from '../../utils/clipboard';
+  import { formatSQL } from '../../utils/sqlFormatter';
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
   import type { ProcesslistThread, ProcessLockWait } from '../../../types';
   import Icon from '../common/Icon.svelte';
   import FlightTimeline from './FlightTimeline.svelte';
+  import ProcessTrendPanel, { type TrendSample } from './ProcessTrendPanel.svelte';
 
   type DbaSubTab = 'threads' | 'digest' | 'deadlock' | 'cluster' | 'variables' | 'flight-recorder';
-  type FilterChip = 'all' | 'active' | 'sleep' | 'locked' | 'slow';
+  type FilterChip = 'all' | 'active' | 'sleep' | 'locked' | 'slow' | 'idle60';
 
   let currentSubTab = $state<DbaSubTab>('threads');
 
@@ -28,10 +30,9 @@ import { copyText } from '../../utils/clipboard';
   let isLoading = $state(false);
 
   // Column Visibility Management (ADR 0054)
-  // `id` and `info` are mandatory: hiding them would leave the table with no
-  // meaningful content, and the legacy UI always pinned them visible.
   const MANDATORY_COLUMNS = ['id', 'info'] as const;
   const PL_COLUMN_LABELS: Record<string, string> = {
+    rowNum: '#',
     id: 'ID',
     user: 'User',
     host: 'Host',
@@ -40,11 +41,13 @@ import { copyText } from '../../utils/clipboard';
     time: 'Time (s)',
     state: 'State',
     info: 'SQL / Query Info',
+    actions: 'Actions',
   };
   const COLUMN_PREFS_KEY = 'sqlfox-processlist-hidden-cols';
 
-  function loadHiddenColumns(): Record<string, boolean> {
-    const defaults: Record<string, boolean> = {
+  function defaultColumnVisibility(): Record<string, boolean> {
+    return {
+      rowNum: true,
       id: true,
       user: true,
       host: true,
@@ -53,13 +56,17 @@ import { copyText } from '../../utils/clipboard';
       time: true,
       state: true,
       info: true,
+      actions: true,
     };
+  }
+
+  function loadHiddenColumns(): Record<string, boolean> {
+    const defaults = defaultColumnVisibility();
     try {
       const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(COLUMN_PREFS_KEY) : null;
       if (!raw) return defaults;
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return defaults;
-      // Guard against stale/corrupted prefs: only known, optional columns may be hidden.
       for (const key of parsed) {
         if (key in defaults && !(MANDATORY_COLUMNS as readonly string[]).includes(key)) {
           defaults[key] = false;
@@ -75,7 +82,17 @@ import { copyText } from '../../utils/clipboard';
   let showColSelector = $state(false);
   let totalQuestions = $state<number>(0);
 
-  // Persist only the hidden optional columns, mirroring the legacy storage contract.
+  function showAllColumns() {
+    visibleColumns = defaultColumnVisibility();
+  }
+
+  function resetColumnPreferences() {
+    visibleColumns = defaultColumnVisibility();
+    if (typeof localStorage !== 'undefined') {
+      try { localStorage.removeItem(COLUMN_PREFS_KEY); } catch { /* ignore */ }
+    }
+  }
+
   $effect(() => {
     if (typeof localStorage === 'undefined') return;
     const hidden = Object.keys(visibleColumns).filter((k) => !visibleColumns[k]);
@@ -86,13 +103,44 @@ import { copyText } from '../../utils/clipboard';
     }
   });
 
-  // Threads filtering & selection
+  // Threads filtering, selection, polling, trend & menus
   let filterText = $state('');
   let activeChip = $state<FilterChip>('all');
+  let hideSleep = $state(false);
+  let hideSystem = $state(false);
+  let slowThreshold = $state(5);
   let selectedThreadIds = new SvelteSet<number>();
-  let refreshInterval = $state<number>(0); // 0 = pause, 1000, 2000, 5000
+  let refreshInterval = $state<number>(0); // 0 = pause, 1000, 3000, 5000
   let intervalTimer: any = null;
+  let countdownTimer: any = null;
+  let nextPollAt = $state<number>(0);
+  let pollProgressPct = $state<number>(0);
+  let isDocHidden = $state<boolean>(typeof document !== 'undefined' ? document.hidden : false);
   let inspectingThread = $state<ProcesslistThread | null>(null);
+  let formatInspectSql = $state(false);
+  let openRowMenuId = $state<number | null>(null);
+
+  // Rolling 60-sample activity trend panel state
+  let trendOpen = $state<boolean>(
+    typeof localStorage !== 'undefined' && localStorage.getItem('sqlfox_pl_trend_open') === 'true'
+  );
+  let trendHistory = $state<TrendSample[]>([]);
+  let prevQuestions: number | null = null;
+  let prevQuestionsAt = 0;
+
+  function toggleTrendPanel() {
+    trendOpen = !trendOpen;
+    if (typeof localStorage !== 'undefined') {
+      try { localStorage.setItem('sqlfox_pl_trend_open', trendOpen ? 'true' : 'false'); } catch { /* ignore */ }
+    }
+  }
+
+  // Batch Kill Safety Challenge Modal state
+  let showBatchKillModal = $state(false);
+  let batchKillMode = $state<'query' | 'connection'>('connection');
+  let batchKillTargetIds = $state<number[]>([]);
+  let batchKillChallengeInput = $state('');
+  let isBatchKilling = $state(false);
 
   // Sorting: slowest threads first by default, which is what a DBA looks at first.
   type SortKey = 'id' | 'user' | 'host' | 'db' | 'command' | 'time' | 'state' | 'info';
@@ -108,6 +156,16 @@ import { copyText } from '../../utils/clipboard';
     }
   }
 
+  function isSystemThread(t: ProcesslistThread): boolean {
+    const u = (t.user || '').toLowerCase();
+    const cmd = (t.command || '').toLowerCase();
+    return u === 'system user' || u === 'event_scheduler' || cmd === 'binlog dump' || cmd === 'binlog dump gtid';
+  }
+
+  function isProductionConn(): boolean {
+    return (appState.activeConnection?.environment || '').toLowerCase() === 'production';
+  }
+
   // Statement Digest State
   let digestRows = $state<any[]>([]);
   let isDigestLoading = $state(false);
@@ -120,12 +178,23 @@ import { copyText } from '../../utils/clipboard';
   // Cluster State
   let clusterReport = $state<any>(null);
   let isClusterLoading = $state(false);
+  let clusterPollInterval = $state<number>(0); // 0 = paused, 5000, 10000, 30000
+  let clusterPollTimer: any = null;
+  let clusterUpdatedAt = $state<string>('');
 
   // Variables State
   let variablesReport = $state<any>(null);
   let isVariablesLoading = $state(false);
   let varFilterText = $state('');
   let varCategory = $state('All');
+  let showCuratedOnly = $state(false);
+  let varSeverityFilter = $state<'all' | 'critical' | 'warning' | 'optimal'>('all');
+  let expandedVars = new SvelteSet<string>();
+
+  function toggleVarExpand(name: string) {
+    if (expandedVars.has(name)) expandedVars.delete(name);
+    else expandedVars.add(name);
+  }
 
   // Performance Flight Recorder State
   let isRecording = $state(false);
@@ -140,6 +209,15 @@ import { copyText } from '../../utils/clipboard';
   let isFlightLoading = $state(false);
   let flightTickerTimer: any = null;
   let flightPollTimer: any = null;
+
+  $effect(() => {
+    if (typeof document === 'undefined') return;
+    const onVis = () => {
+      isDocHidden = document.hidden;
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  });
 
   $effect(() => {
     if (appState.activeSessionId) {
@@ -165,13 +243,42 @@ import { copyText } from '../../utils/clipboard';
       clearInterval(intervalTimer);
       intervalTimer = null;
     }
-    if (refreshInterval > 0 && currentSubTab === 'threads') {
+    if (countdownTimer) {
+      clearInterval(countdownTimer);
+      countdownTimer = null;
+    }
+    if (refreshInterval > 0 && currentSubTab === 'threads' && !isDocHidden) {
+      nextPollAt = Date.now() + refreshInterval;
+      pollProgressPct = 100;
       intervalTimer = setInterval(() => {
+        nextPollAt = Date.now() + refreshInterval;
         loadProcesslist(false);
       }, refreshInterval);
+      countdownTimer = setInterval(() => {
+        const rem = Math.max(0, nextPollAt - Date.now());
+        pollProgressPct = Math.min(100, Math.max(0, (rem / refreshInterval) * 100));
+      }, 100);
+    } else {
+      pollProgressPct = 0;
     }
     return () => {
       if (intervalTimer) clearInterval(intervalTimer);
+      if (countdownTimer) clearInterval(countdownTimer);
+    };
+  });
+
+  $effect(() => {
+    if (clusterPollTimer) {
+      clearInterval(clusterPollTimer);
+      clusterPollTimer = null;
+    }
+    if (clusterPollInterval > 0 && currentSubTab === 'cluster' && !isDocHidden) {
+      clusterPollTimer = setInterval(() => {
+        loadClusterReport();
+      }, clusterPollInterval);
+    }
+    return () => {
+      if (clusterPollTimer) clearInterval(clusterPollTimer);
     };
   });
 
@@ -182,10 +289,31 @@ import { copyText } from '../../utils/clipboard';
     try {
       const res = await api.getProcesslist(sessionId);
       if (appState.activeSessionId !== sessionId) return;
-      threads = res.threads || [];
-      locks = (res.locks || []) as ProcessLockWait[];
+      const list = res.threads || [];
+      const lockList = (res.locks || []) as ProcessLockWait[];
+      threads = list;
+      locks = lockList;
       currentThreadId = res.current_thread_id || 0;
       totalQuestions = res.questions || 0;
+
+      // Sync global header DBA badges
+      appState.dbaBlockersCount = lockList.length;
+      appState.dbaSlowQueriesCount = list.filter(
+        (t) => t.command !== 'Sleep' && t.state !== 'Sleep' && t.time >= slowThreshold
+      ).length;
+
+      // Update rolling 60-sample activity trend telemetry
+      const now = Date.now();
+      const running = list.filter((t) => t.command !== 'Sleep' && t.state !== 'Sleep').length;
+      let qps = 0;
+      if (prevQuestions !== null && prevQuestionsAt > 0 && totalQuestions >= prevQuestions) {
+        const elapsedSec = (now - prevQuestionsAt) / 1000;
+        if (elapsedSec > 0.1) qps = (totalQuestions - prevQuestions) / elapsedSec;
+      }
+      prevQuestions = totalQuestions;
+      prevQuestionsAt = now;
+      const next = [...trendHistory, { ts: now, running, total: list.length, qps }];
+      trendHistory = next.length > 60 ? next.slice(next.length - 60) : next;
     } catch (err: any) {
       if (appState.activeSessionId !== sessionId) return;
       appState.showToast(`Failed to load processlist: ${err.message}`, 'error');
@@ -210,8 +338,11 @@ import { copyText } from '../../utils/clipboard';
   }
 
   async function handleResetDigest() {
-    if (!confirm('Are you sure you want to reset statement digest performance statistics?')) return;
-    if (!appState.activeSessionId) return;
+    const ok = await appState.showNativeConfirm(
+      'Are you sure you want to reset statement digest performance statistics?',
+      'Reset Statement Digest'
+    );
+    if (!ok || !appState.activeSessionId) return;
     try {
       await api.resetStatementDigest(appState.activeSessionId);
       appState.showToast('Reset statement digest stats', 'success');
@@ -240,6 +371,16 @@ import { copyText } from '../../utils/clipboard';
     try {
       const res = await api.getClusterHealth(appState.activeSessionId);
       clusterReport = res;
+      clusterUpdatedAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      // Sync global cluster badge when telemetry reports cluster/replication
+      if (res && (res.topology_type !== 'standalone' || res.replication || (res.nodes && res.nodes.length > 0))) {
+        const sev = String(res.bottleneck_severity || 'ok').toLowerCase();
+        appState.dbaClusterStatus = sev === 'critical' ? 'critical' : sev === 'warning' ? 'warn' : 'ok';
+        appState.dbaClusterLabel = sev === 'critical' ? 'CRIT' : sev === 'warning' ? 'WARN' : 'OK';
+      } else {
+        appState.dbaClusterStatus = null;
+        appState.dbaClusterLabel = '';
+      }
     } catch (err: any) {
       clusterReport = null;
     } finally {
@@ -266,15 +407,18 @@ import { copyText } from '../../utils/clipboard';
     try {
       const status = await api.getFlightRecorderStatus(appState.activeSessionId);
       isRecording = !!status.is_recording;
+      appState.flightRecordingActive = isRecording;
       if (status.is_recording) {
         recordingId = status.recording_id;
         recordingStartedAt = status.started_at ? new Date(status.started_at) : new Date();
         recordingSeconds = status.duration_seconds || 0;
+        appState.flightRecordingRemainingSec = Math.max(0, 600 - recordingSeconds);
         if (!selectedFlightSessionId && Array.isArray(status.recent_ticks)) {
           flightSessionTicks = status.recent_ticks;
         }
         startFlightTimers();
       } else {
+        appState.flightRecordingRemainingSec = 0;
         stopFlightTimers();
       }
     } catch (_) {}
@@ -284,24 +428,29 @@ import { copyText } from '../../utils/clipboard';
     stopFlightTimers();
     flightTickerTimer = setInterval(() => {
       recordingSeconds++;
+      appState.flightRecordingRemainingSec = Math.max(0, 600 - recordingSeconds);
     }, 1000);
-    // Poll every 1000ms for real-time telemetry streaming
+    // Poll every >= 1000ms for real-time telemetry streaming
     flightPollTimer = setInterval(async () => {
       if (!appState.activeSessionId || !isRecording) return;
       try {
         const status = await api.getFlightRecorderStatus(appState.activeSessionId);
         if (!status.is_recording) {
           isRecording = false;
+          appState.flightRecordingActive = false;
+          appState.flightRecordingRemainingSec = 0;
           stopFlightTimers();
           await loadFlightSessions();
         } else {
           recordingSeconds = status.duration_seconds || recordingSeconds;
+          appState.flightRecordingActive = true;
+          appState.flightRecordingRemainingSec = Math.max(0, 600 - recordingSeconds);
           if (!selectedFlightSessionId && Array.isArray(status.recent_ticks)) {
             flightSessionTicks = status.recent_ticks;
           }
         }
       } catch (_) {}
-    }, Math.max(800, flightIntervalMs));
+    }, Math.max(1000, flightIntervalMs));
   }
 
   // Stop all timers if the component unmounts (sub-tab switch or view change).
@@ -309,6 +458,8 @@ import { copyText } from '../../utils/clipboard';
     return () => {
       stopFlightTimers();
       if (intervalTimer) clearInterval(intervalTimer);
+      if (countdownTimer) clearInterval(countdownTimer);
+      if (clusterPollTimer) clearInterval(clusterPollTimer);
     };
   });
 
@@ -323,17 +474,19 @@ import { copyText } from '../../utils/clipboard';
     if (!appState.activeSessionId) return;
     if (!isRecording) {
       try {
-        const res = await api.startFlightRecorder(appState.activeSessionId, flightIntervalMs);
+        const interval = Math.max(1000, flightIntervalMs);
+        const res = await api.startFlightRecorder(appState.activeSessionId, interval);
         isRecording = true;
+        appState.flightRecordingActive = true;
         recordingId = res.recording_id;
         recordingStartedAt = new Date();
         recordingSeconds = 0;
+        appState.flightRecordingRemainingSec = 600;
         selectedFlightSessionId = ''; // Enter live recording mode
         flightSessionTicks = [];
         selectedTickIndex = null;
         startFlightTimers();
         appState.showToast('Performance Flight Recorder started (10-min safety guard active)', 'info');
-        // Fetch first tick immediately
         const sessionId = appState.activeSessionId;
         setTimeout(async () => {
           try {
@@ -352,6 +505,8 @@ import { copyText } from '../../utils/clipboard';
       try {
         const finished = await api.stopFlightRecorder(appState.activeSessionId);
         isRecording = false;
+        appState.flightRecordingActive = false;
+        appState.flightRecordingRemainingSec = 0;
         stopFlightTimers();
         appState.showToast('Performance Flight Recorder stopped and saved to session vault', 'success');
         await loadFlightSessions();
@@ -441,21 +596,26 @@ import { copyText } from '../../utils/clipboard';
 
   const flightPeak = $derived.by(() => {
     const t = flightSessionTicks || [];
-    if (t.length === 0) return { maxQps: 0, maxThreads: 0, lockDelta: 0 };
+    if (t.length === 0) return { maxQps: 0, maxThreads: 0, lockDelta: 0, bufferDelta: 0 };
     let maxQps = 0;
     let maxThreads = 0;
     let firstLock: number | null = null;
     let lastLock = 0;
+    let firstBuf: number | null = null;
+    let lastBuf = 0;
     for (const tick of t) {
       maxQps = Math.max(maxQps, Number(tick.qps ?? 0));
       maxThreads = Math.max(maxThreads, Number(tick.threads_running ?? tick.active_threads ?? 0));
       if (firstLock === null && tick.row_lock_waits != null) firstLock = Number(tick.row_lock_waits);
       if (tick.row_lock_waits != null) lastLock = Number(tick.row_lock_waits);
+      if (firstBuf === null && tick.buffer_pool_wait_free != null) firstBuf = Number(tick.buffer_pool_wait_free);
+      if (tick.buffer_pool_wait_free != null) lastBuf = Number(tick.buffer_pool_wait_free);
     }
     return {
       maxQps,
       maxThreads,
       lockDelta: Math.max(0, lastLock - (firstLock ?? lastLock)),
+      bufferDelta: Math.max(0, lastBuf - (firstBuf ?? lastBuf)),
     };
   });
 
@@ -470,8 +630,11 @@ import { copyText } from '../../utils/clipboard';
   });
 
   async function deleteFlightSession(recId: string) {
-    if (!confirm('Are you sure you want to permanently delete this flight recorder session?')) return;
-    if (!appState.activeSessionId) return;
+    const ok = await appState.showNativeConfirm(
+      'Are you sure you want to permanently delete this flight recorder session?',
+      'Delete Flight Recording'
+    );
+    if (!ok || !appState.activeSessionId) return;
     try {
       await api.deleteFlightRecorderSession(appState.activeSessionId, recId);
       appState.showToast('Flight recorder session deleted', 'info');
@@ -487,11 +650,21 @@ import { copyText } from '../../utils/clipboard';
 
   function exportFlightSessionJSON() {
     if (!flightSessionTicks.length && !selectedFlightSessionId) return;
-    const blob = new Blob([JSON.stringify({ session_id: selectedFlightSessionId, ticks: flightSessionTicks }, null, 2)], { type: 'application/json' });
+    const sessionMeta = flightSessions.find((s) => s.id === selectedFlightSessionId) || null;
+    const payload = {
+      exported_at: new Date().toISOString(),
+      connection: appState.activeConnection?.name || '',
+      session_id: selectedFlightSessionId || recordingId || 'live',
+      session: sessionMeta,
+      peak_summary: flightPeak,
+      tick_count: flightSessionTicks.length,
+      ticks: flightSessionTicks,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `flight-recorder-${selectedFlightSessionId || 'export'}.json`;
+    a.download = `flight-recorder-${selectedFlightSessionId || 'live'}-${Date.now()}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -499,36 +672,124 @@ import { copyText } from '../../utils/clipboard';
     appState.showToast('Exported flight recording session JSON', 'success');
   }
 
-  async function killSingleThread(id: number) {
-    if (!confirm(`Are you sure you want to kill thread ID ${id}?`)) return;
+  async function killSingleThread(id: number, mode: 'query' | 'connection' = 'query') {
+    const thread = threads.find((t) => t.id === id);
+    if (thread && isSystemThread(thread)) {
+      appState.showToast('System daemon thread is protected from termination', 'warning');
+      return;
+    }
+    if (mode === 'connection' && id === currentThreadId) {
+      appState.showToast('Cannot kill your own active session connection', 'warning');
+      return;
+    }
+    const modeLabel = mode === 'connection' ? 'KILL CONNECTION' : 'KILL QUERY';
+    const ok = await appState.showNativeConfirm(
+      `Execute ${modeLabel} on thread #${id}${thread?.user ? ` (${thread.user}@${thread.host})` : ''}?`,
+      `Confirm ${modeLabel}`
+    );
+    if (!ok) return;
     const sessionId = appState.activeSessionId;
     if (!sessionId) return;
     try {
-      await api.killProcess(sessionId, id);
-      appState.showToast(`Killed thread ${id}`, 'success');
-      selectedThreadIds.delete(id);
-      if (inspectingThread?.id === id) inspectingThread = null;
+      await api.killProcess(sessionId, id, mode);
+      appState.showToast(`${modeLabel} succeeded for thread #${id}`, 'success');
+      if (mode === 'connection') {
+        selectedThreadIds.delete(id);
+        if (inspectingThread?.id === id) inspectingThread = null;
+      }
       await loadProcesslist(false);
     } catch (err: any) {
       appState.showToast(`Failed to kill thread: ${err.message}`, 'error');
     }
   }
 
-  async function handleBatchKill() {
-    const ids = Array.from(selectedThreadIds);
-    if (ids.length === 0) return;
-    if (!confirm(`Kill ${ids.length} selected database thread(s)?`)) return;
-    const sessionId = appState.activeSessionId;
-    if (!sessionId) return;
+  function openBatchKillModal(mode: 'query' | 'connection') {
+    const validIds = Array.from(selectedThreadIds).filter((id) => {
+      const t = threads.find((x) => x.id === id);
+      if (t && isSystemThread(t)) return false;
+      if (mode === 'connection' && id === currentThreadId) return false;
+      return true;
+    });
+    if (validIds.length === 0) {
+      appState.showToast('No eligible non-system threads selected', 'warning');
+      return;
+    }
+    batchKillMode = mode;
+    batchKillTargetIds = validIds;
+    batchKillChallengeInput = '';
+    showBatchKillModal = true;
+  }
 
+  function removeBatchKillTarget(id: number) {
+    batchKillTargetIds = batchKillTargetIds.filter((x) => x !== id);
+    selectedThreadIds.delete(id);
+    if (batchKillTargetIds.length === 0) showBatchKillModal = false;
+  }
+
+  let needsBatchChallenge = $derived(isProductionConn() || batchKillTargetIds.length > 5);
+  let batchChallengeValid = $derived(
+    !needsBatchChallenge || batchKillChallengeInput.trim().toUpperCase() === 'KILL'
+  );
+
+  async function executeBatchKill() {
+    if (!appState.activeSessionId || batchKillTargetIds.length === 0 || !batchChallengeValid) return;
+    isBatchKilling = true;
     try {
-      const res = await api.batchKillProcesses(sessionId, ids, 'connection');
-      appState.showToast(`Killed ${res.killed_count || ids.length} threads`, 'success');
+      const res = await api.batchKillProcesses(appState.activeSessionId, batchKillTargetIds, batchKillMode);
+      const okCount = res.success_count ?? 0;
+      const failCount = res.failed_count ?? 0;
+      if (failCount > 0) {
+        const firstErr = res.results?.find((r) => !r.success)?.error || '';
+        appState.showToast(
+          `Batch ${batchKillMode}: ${okCount} terminated, ${failCount} failed${firstErr ? ` (${firstErr})` : ''}`,
+          okCount > 0 ? 'warning' : 'error'
+        );
+      } else {
+        appState.showToast(
+          `Batch ${batchKillMode === 'connection' ? 'KILL CONNECTION' : 'KILL QUERY'}: ${okCount} thread(s) terminated`,
+          'success'
+        );
+      }
+      showBatchKillModal = false;
       selectedThreadIds.clear();
       await loadProcesslist(false);
     } catch (err: any) {
       appState.showToast(`Batch kill failed: ${err.message}`, 'error');
+    } finally {
+      isBatchKilling = false;
     }
+  }
+
+  function copySelectedThreadIds() {
+    const ids = Array.from(selectedThreadIds).join(', ');
+    if (!ids) return;
+    copyText(ids);
+    appState.showToast(`Copied ${selectedThreadIds.size} thread ID(s) to clipboard`, 'info');
+  }
+
+  function exportSelectedThreadsJSON() {
+    const rows = threads.filter((t) => selectedThreadIds.has(t.id));
+    if (rows.length === 0) return;
+    const blob = new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `processlist-threads-${Date.now()}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    appState.showToast(`Exported ${rows.length} thread(s) to JSON`, 'success');
+  }
+
+  function saveSelectedThreadsToNotes() {
+    const rows = threads.filter((t) => selectedThreadIds.has(t.id));
+    if (rows.length === 0) return;
+    const body = rows
+      .map(
+        (t) =>
+          `### Thread #${t.id} (${t.user}@${t.host} · db=${t.db || '-'} · ${t.time}s)\nState: ${t.state || '-'}\n\`\`\`sql\n${t.info || '-- Idle'}\n\`\`\``
+      )
+      .join('\n\n');
+    appState.saveQueryToNote(body, `Processlist Snapshot (${rows.length} threads)`);
   }
 
   let rootBlockerCount = $derived.by(
@@ -556,10 +817,19 @@ import { copyText } from '../../utils/clipboard';
 
   async function killLockThread(id: number, mode: 'query' | 'connection') {
     if (!appState.activeSessionId) return;
-    if (!confirm(`Kill ${mode} for thread #${id}?`)) return;
+    const ok = await appState.showNativeConfirm(
+      `Execute KILL ${mode.toUpperCase()} for thread #${id}?`,
+      'Terminate Lock Contention Thread'
+    );
+    if (!ok) return;
     try {
-      await api.batchKillProcesses(appState.activeSessionId, [id], mode);
-      appState.showToast(`Killed ${mode} for thread #${id}`, 'success');
+      const res = await api.batchKillProcesses(appState.activeSessionId, [id], mode);
+      if ((res.failed_count ?? 0) > 0 && (res.success_count ?? 0) === 0) {
+        const msg = res.results?.[0]?.error || 'Kill denied';
+        appState.showToast(`Failed to kill thread #${id}: ${msg}`, 'error');
+      } else {
+        appState.showToast(`Killed ${mode} for thread #${id}`, 'success');
+      }
       await loadProcesslist(false);
     } catch (err: any) {
       appState.showToast(`Failed to kill thread #${id}: ${err.message}`, 'error');
@@ -575,6 +845,9 @@ import { copyText } from '../../utils/clipboard';
   let filteredThreads = $derived.by(() => {
     const q = filterText.toLowerCase().trim();
     return threads.filter((t) => {
+      if (hideSleep && (t.command === 'Sleep' || t.state === 'Sleep')) return false;
+      if (hideSystem && isSystemThread(t)) return false;
+
       if (q) {
         const match =
           t.user?.toLowerCase().includes(q) ||
@@ -591,13 +864,15 @@ import { copyText } from '../../utils/clipboard';
         if (t.command === 'Sleep' || t.state === 'Sleep') return false;
       } else if (activeChip === 'sleep') {
         if (t.command !== 'Sleep' && t.state !== 'Sleep') return false;
+      } else if (activeChip === 'idle60') {
+        if ((t.command !== 'Sleep' && t.state !== 'Sleep') || t.time < 60) return false;
       } else if (activeChip === 'locked') {
         const isLocked =
           (t.state && t.state.toLowerCase().includes('lock')) ||
           locks.some((l) => l.waiting_thread_id === t.id || l.blocking_thread_id === t.id);
         if (!isLocked) return false;
       } else if (activeChip === 'slow') {
-        if (t.time < 5) return false;
+        if (t.command === 'Sleep' || t.state === 'Sleep' || t.time < slowThreshold) return false;
       }
 
       return true;
@@ -621,17 +896,23 @@ import { copyText } from '../../utils/clipboard';
     let sleep = 0;
     let locked = 0;
     let slow = 0;
+    let idle60 = 0;
     for (const t of threads) {
-      if (t.command === 'Sleep' || t.state === 'Sleep') sleep++;
-      else active++;
-      if (t.time >= 5) slow++;
+      const sleeping = t.command === 'Sleep' || t.state === 'Sleep';
+      if (sleeping) {
+        sleep++;
+        if (t.time >= 60) idle60++;
+      } else {
+        active++;
+        if (t.time >= slowThreshold) slow++;
+      }
       if (
         (t.state || '').toLowerCase().includes('lock') ||
         locks.some((l) => l.waiting_thread_id === t.id || l.blocking_thread_id === t.id)
       )
         locked++;
     }
-    return { active, sleep, locked, slow };
+    return { active, sleep, locked, slow, idle60 };
   });
 
   const stateTone: Record<string, string> = {
@@ -648,13 +929,13 @@ import { copyText } from '../../utils/clipboard';
   }
 
   let allFilteredSelected = $derived.by(() => {
-    const selectable = filteredThreads.filter((t) => t.id !== currentThreadId);
+    const selectable = filteredThreads.filter((t) => t.id !== currentThreadId && !isSystemThread(t));
     if (selectable.length === 0) return false;
     return selectable.every((t) => selectedThreadIds.has(t.id));
   });
 
   function toggleSelectAll(checked: boolean) {
-    const selectable = filteredThreads.filter((t) => t.id !== currentThreadId);
+    const selectable = filteredThreads.filter((t) => t.id !== currentThreadId && !isSystemThread(t));
     if (checked) {
       selectable.forEach((t) => selectedThreadIds.add(t.id));
     } else {
@@ -670,11 +951,21 @@ import { copyText } from '../../utils/clipboard';
     }
   }
 
+  let curatedVarCount = $derived.by(
+    () => (variablesReport?.variables || []).filter((v: any) => v.is_curated).length
+  );
+
   let filteredVariables = $derived.by(() => {
     if (!variablesReport?.variables) return [];
     let list = variablesReport.variables;
+    if (showCuratedOnly) {
+      list = list.filter((v: any) => v.is_curated);
+    }
     if (varCategory !== 'All') {
       list = list.filter((v: any) => v.category === varCategory);
+    }
+    if (varSeverityFilter !== 'all') {
+      list = list.filter((v: any) => (v.severity || 'info') === varSeverityFilter);
     }
     if (varFilterText.trim()) {
       const q = varFilterText.toLowerCase();
@@ -698,9 +989,64 @@ import { copyText } from '../../utils/clipboard';
   });
 
   function explainThreadQuery(sql?: string) {
-    if (!sql) return;
-    appState.addTab('Explain Plan', `EXPLAIN ${sql};`);
-    appState.executeCurrentTab();
+    const q = (sql || '').trim();
+    if (!q) return;
+    appState.addTab('Explain.sql', q);
+    appState.explainCurrentTab(q, true);
+  }
+
+  function openSqlInEditor(sql?: string, title = 'Query.sql') {
+    const q = (sql || '').trim();
+    if (!q) return;
+    appState.addTab(title, q);
+  }
+
+  function switchSessionToNode(addr?: string) {
+    if (!addr) return;
+    const parts = addr.split(':');
+    const host = parts[0] || '';
+    const port = parts[1] ? parseInt(parts[1], 10) : 3306;
+    const match = appState.connections.find(
+      (c) => c.host === host && Number(c.port || 3306) === port
+    );
+    if (match) {
+      appState.selectConnection(match);
+      appState.showToast(`Switched session to node ${host}:${port}`, 'success');
+      return;
+    }
+    const base = appState.activeConnection;
+    appState.connectionToEdit = {
+      id: '',
+      name: `${base?.name || 'Cluster'} (${host})`,
+      driver: base?.driver || 'mysql',
+      environment: base?.environment || 'Development',
+      host,
+      port,
+      user: base?.user || 'root',
+      database: base?.database || base?.database_name || '',
+    } as any;
+    appState.isConnectionModalOpen = true;
+    appState.showToast(`Pre-filled node ${host}:${port}. Enter credentials and Connect.`, 'info');
+  }
+
+  function sendClusterToAI() {
+    if (!clusterReport) return;
+    const prompt = [
+      'Analyse this MySQL cluster & replication telemetry report and recommend prioritized remediation steps:',
+      '',
+      `Topology: ${fmtTopology(clusterReport.topology_type)} | Status: ${clusterReport.cluster_status || 'standalone'} | Size: ${clusterReport.cluster_size || 1}`,
+      `Severity: ${severityLabel}`,
+      `Flow Control Paused: ${flowControlPct.toFixed(2)}% | Diagnosis: ${clusterReport.bottleneck_diagnosis || '-'}`,
+      clusterReport.replication
+        ? `Replication: ${clusterReport.replication.role} | Seconds behind: ${clusterReport.replication.seconds_behind_master ?? 'n/a'} | IO: ${clusterReport.replication.io_running} | SQL: ${clusterReport.replication.sql_running}`
+        : '',
+      clusterReport.tuning_checks?.length
+        ? `Tuning Checks:\n${clusterReport.tuning_checks.map((c: any) => `- ${c.variable}: current=${c.current_value}, advised=${c.recommended} (${c.status}) — ${c.summary}`).join('\n')}`
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    appState.sendToAi(prompt, 'Cluster & Replication Report');
   }
 
   // ---- Cluster / replication presentation helpers -------------------------
@@ -1076,8 +1422,19 @@ import { copyText } from '../../utils/clipboard';
     </div>
 
     <!-- Right Controls for Active SubTab -->
-    <div class="flex items-center space-x-3">
+    <div class="flex items-center space-x-2 shrink-0">
       {#if currentSubTab === 'threads'}
+        <button
+          type="button"
+          onclick={toggleTrendPanel}
+          class="px-2 py-1 rounded border text-[11px] font-sans flex items-center space-x-1 transition {trendOpen ? 'bg-sky-950/70 border-sky-700 text-sky-300' : 'bg-[#090d16] border-[#334155] text-slate-300 hover:text-white'}"
+          title="Toggle live Activity Trend chart (persisted)"
+        >
+          <Icon name="trending-up" class="w-3.5 h-3.5 text-sky-400" />
+          <span>Trend</span>
+          <Icon name={trendOpen ? 'chevron-up' : 'chevron-down'} class="w-3 h-3 text-slate-400" />
+        </button>
+
         <div class="flex items-center space-x-1.5 bg-[#090d16] border border-[#334155] rounded px-2 py-1 text-[11px]">
           <span class="text-slate-400 font-sans">Refresh:</span>
           <select
@@ -1086,12 +1443,16 @@ import { copyText } from '../../utils/clipboard';
           >
             <option value={0}>Paused</option>
             <option value={1000}>1s</option>
-            <option value={2000}>2s</option>
+            <option value={3000}>3s</option>
             <option value={5000}>5s</option>
           </select>
+          {#if isDocHidden && refreshInterval > 0}
+            <span class="text-[10px] text-amber-400 font-sans" title="Polling auto-paused while browser tab is inactive">(paused)</span>
+          {/if}
         </div>
 
         <button
+          type="button"
           onclick={() => loadProcesslist(true)}
           class="p-1.5 text-slate-400 hover:text-white rounded hover:bg-slate-800 transition"
           title="Refresh thread list"
@@ -1100,6 +1461,7 @@ import { copyText } from '../../utils/clipboard';
         </button>
       {:else if currentSubTab === 'digest'}
         <button
+          type="button"
           onclick={handleResetDigest}
           class="px-2.5 py-1 rounded bg-rose-950/60 hover:bg-rose-900 border border-rose-800 text-rose-300 text-xs font-semibold transition flex items-center space-x-1 font-sans"
         >
@@ -1107,6 +1469,7 @@ import { copyText } from '../../utils/clipboard';
           <span>Reset Stats</span>
         </button>
         <button
+          type="button"
           onclick={loadStatementDigest}
           class="p-1.5 text-slate-400 hover:text-white rounded hover:bg-slate-800 transition"
           title="Refresh statement digest"
@@ -1115,6 +1478,7 @@ import { copyText } from '../../utils/clipboard';
         </button>
       {:else if currentSubTab === 'deadlock'}
         <button
+          type="button"
           onclick={loadDeadlock}
           class="p-1.5 text-slate-400 hover:text-white rounded hover:bg-slate-800 transition"
           title="Refresh deadlock report"
@@ -1122,7 +1486,33 @@ import { copyText } from '../../utils/clipboard';
           <Icon name="refresh-cw" class="w-3.5 h-3.5 {isDeadlockLoading ? 'animate-spin text-sky-400' : ''}" />
         </button>
       {:else if currentSubTab === 'cluster'}
+        {#if clusterUpdatedAt}
+          <span class="hidden md:inline text-[10px] text-slate-500 font-mono">Updated: {clusterUpdatedAt}</span>
+        {/if}
+        <div class="flex items-center space-x-1.5 bg-[#090d16] border border-[#334155] rounded px-2 py-1 text-[11px]">
+          <span class="text-slate-400 font-sans">Poll:</span>
+          <select
+            bind:value={clusterPollInterval}
+            class="bg-transparent text-sky-400 font-semibold focus:outline-none cursor-pointer [color-scheme:dark] [&>option]:bg-[#0b1220] [&>option]:text-slate-200"
+          >
+            <option value={0}>Paused</option>
+            <option value={5000}>5s</option>
+            <option value={10000}>10s</option>
+            <option value={30000}>30s</option>
+          </select>
+        </div>
+        {#if clusterReport}
+          <button
+            type="button"
+            onclick={sendClusterToAI}
+            class="px-2 py-1 rounded bg-purple-950/60 hover:bg-purple-900 border border-purple-800 text-purple-300 text-[11px] font-sans font-semibold flex items-center space-x-1 transition"
+          >
+            <Icon name="bot" class="w-3 h-3" />
+            <span>Ask Copilot</span>
+          </button>
+        {/if}
         <button
+          type="button"
           onclick={loadClusterReport}
           class="p-1.5 text-slate-400 hover:text-white rounded hover:bg-slate-800 transition"
           title="Refresh cluster telemetry"
@@ -1131,6 +1521,7 @@ import { copyText } from '../../utils/clipboard';
         </button>
       {:else if currentSubTab === 'variables'}
         <button
+          type="button"
           onclick={loadVariablesReport}
           class="p-1.5 text-slate-400 hover:text-white rounded hover:bg-slate-800 transition"
           title="Refresh server variables"
@@ -1146,20 +1537,22 @@ import { copyText } from '../../utils/clipboard';
                 bind:value={flightIntervalMs}
                 class="bg-transparent text-sky-400 font-semibold focus:outline-none cursor-pointer [color-scheme:dark] [&>option]:bg-[#0b1220] [&>option]:text-slate-200"
               >
-                <option value={500}>500ms</option>
                 <option value={1000}>1s</option>
                 <option value={2000}>2s</option>
+                <option value={5000}>5s</option>
               </select>
             </div>
           {/if}
 
           <button
+            type="button"
             onclick={toggleFlightRecording}
             class="px-3 py-1 rounded font-bold text-xs font-sans transition flex items-center space-x-1.5 shadow {isRecording ? 'bg-rose-600 hover:bg-rose-500 text-white animate-pulse' : 'bg-emerald-600 hover:bg-emerald-500 text-white'}"
           >
             {#if isRecording}
+              {@const rem = Math.max(0, 600 - recordingSeconds)}
               <span class="w-2 h-2 rounded-full bg-white"></span>
-              <span>STOP ({Math.floor(recordingSeconds / 60).toString().padStart(2, '0')}:{(recordingSeconds % 60).toString().padStart(2, '0')})</span>
+              <span>STOP ({Math.floor(recordingSeconds / 60).toString().padStart(2, '0')}:{(recordingSeconds % 60).toString().padStart(2, '0')} · {Math.floor(rem / 60)}:{(rem % 60).toString().padStart(2, '0')} left)</span>
             {:else}
               <span class="w-2 h-2 rounded-full bg-rose-400"></span>
               <span>START REC</span>
@@ -1168,6 +1561,7 @@ import { copyText } from '../../utils/clipboard';
 
           {#if flightSessionTicks.length > 0}
             <button
+              type="button"
               onclick={exportFlightSessionJSON}
               class="px-2.5 py-1 rounded bg-[#090d16] hover:bg-slate-800 border border-[#334155] text-slate-300 text-xs font-sans transition flex items-center space-x-1"
               title="Export flight recording as JSON"
@@ -1181,324 +1575,543 @@ import { copyText } from '../../utils/clipboard';
     </div>
   </div>
 
+  {#if currentSubTab === 'threads' && refreshInterval > 0 && !isDocHidden}
+    <div class="h-0.5 w-full bg-slate-900 overflow-hidden shrink-0">
+      <div class="h-full bg-sky-500/80 transition-[width] duration-100 ease-linear" style="width: {pollProgressPct}%"></div>
+    </div>
+  {/if}
+
   <!-- Content for Threads SubTab -->
   {#if currentSubTab === 'threads'}
-    <div class="h-9 bg-[#090d16] border-b border-[#1e293b] px-4 flex items-center justify-between text-xs select-none">
-      <div class="flex items-center space-x-1 font-sans text-[11px]">
-        <button
-          onclick={() => (activeChip = 'all')}
-          class="px-2 py-0.5 rounded transition {activeChip === 'all' ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40 font-bold' : 'text-slate-400 hover:text-slate-200'}"
-        >
-          All ({threads.length})
-        </button>
-        <button
-          onclick={() => (activeChip = 'active')}
-          class="px-2 py-0.5 rounded transition {activeChip === 'active' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold' : 'text-slate-400 hover:text-slate-200'}"
-        >
-          Active ({chipCounts.active})
-        </button>
-        <button
-          onclick={() => (activeChip = 'sleep')}
-          class="px-2 py-0.5 rounded transition {activeChip === 'sleep' ? 'bg-slate-700 text-slate-200 font-bold' : 'text-slate-400 hover:text-slate-200'}"
-        >
-          Sleep ({chipCounts.sleep})
-        </button>
-        <button
-          onclick={() => (activeChip = 'locked')}
-          class="px-2 py-0.5 rounded transition {activeChip === 'locked' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold' : 'text-slate-400 hover:text-slate-200'}"
-        >
-          Locked ({chipCounts.locked})
-        </button>
-        <button
-          onclick={() => (activeChip = 'slow')}
-          class="px-2 py-0.5 rounded transition {activeChip === 'slow' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 font-bold' : 'text-slate-400 hover:text-slate-200'}"
-        >
-          Slow ({chipCounts.slow})
-        </button>
-      </div>
+    <div class="relative flex-1 flex flex-col overflow-hidden">
+      <ProcessTrendPanel
+        history={trendHistory}
+        open={trendOpen}
+        onToggle={toggleTrendPanel}
+        onEscalate={() => setSubTab('flight-recorder')}
+      />
 
-      <div class="flex items-center space-x-2">
-        {#if selectedThreadIds.size > 0}
-          <div class="flex items-center space-x-2 bg-rose-950/40 border border-rose-800/80 px-2 py-0.5 rounded text-[11px] animate-in fade-in">
-            <span class="text-rose-300 font-semibold">{selectedThreadIds.size} selected</span>
-            <button
-              onclick={handleBatchKill}
-              class="px-2 py-0.5 rounded bg-rose-600 hover:bg-rose-500 text-white font-bold transition flex items-center space-x-1"
-            >
-              <Icon name="trash-2" class="w-3 h-3" />
-              <span>Kill Selected</span>
-            </button>
-          </div>
-        {/if}
-
-        <button
-          onclick={() => (showBlockerPanel = true)}
-          class="h-7 px-2 rounded border text-[11px] font-sans flex items-center space-x-1 transition {locks.length
-            ? 'bg-rose-950/40 border-rose-700/70 text-rose-300 hover:bg-rose-900/50'
-            : 'bg-[#0b0f19] border-[#334155] text-slate-400 hover:text-white'}"
-          title="Open lock contention and root blocker triage"
-        >
-          <Icon name="shield-alert" class="w-3 h-3 {locks.length ? 'text-rose-400' : 'text-slate-500'}" />
-          <span>Blockers{locks.length ? ` (${locks.length})` : ''}</span>
-          {#if rootBlockerCount > 0}
-            <span class="px-1 rounded bg-rose-600 text-white text-[9px] font-bold leading-4">{rootBlockerCount} root</span>
-          {/if}
-        </button>
-
-        <!-- Column Visibility Dropdown (ADR 0054) -->
-        <div class="relative">
+      <div class="min-h-9 py-1 bg-[#090d16] border-b border-[#1e293b] px-4 flex items-center justify-between flex-wrap gap-2 text-xs select-none">
+        <div class="flex items-center space-x-1 font-sans text-[11px] flex-wrap gap-y-1">
           <button
-            onclick={(e) => { e.stopPropagation(); showColSelector = !showColSelector; }}
-            class="h-7 px-2 rounded bg-[#0b0f19] border border-[#334155] text-slate-300 hover:text-white text-[11px] font-sans flex items-center space-x-1 transition"
-            title="Manage column visibility"
+            type="button"
+            onclick={() => (activeChip = 'all')}
+            class="px-2 py-0.5 rounded transition {activeChip === 'all' ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40 font-bold' : 'text-slate-400 hover:text-slate-200'}"
           >
-            <Icon name="columns" class="w-3 h-3 text-sky-400" />
-            <span>Columns</span>
-            <Icon name="chevron-down" class="w-2.5 h-2.5 text-slate-400" />
+            All ({threads.length})
           </button>
-
-          {#if showColSelector}
-            <button
-              tabindex="-1"
-              aria-label="Close"
-              class="fixed inset-0 z-30 bg-transparent cursor-default"
-              onclick={() => (showColSelector = false)}
-            ></button>
-            <div
-              class="absolute right-0 mt-1 w-44 bg-[#0f172a] border border-[#334155] rounded-lg shadow-2xl z-40 p-2 text-xs font-sans space-y-1 animate-in fade-in duration-100"
-            >
-              <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-1 pb-1 border-b border-slate-800">
-                Visible Columns
-              </div>
-              {#each Object.keys(visibleColumns) as colKey (colKey)}
-                {@const isMandatory = (MANDATORY_COLUMNS as readonly string[]).includes(colKey)}
-                <label
-                  class="flex items-center justify-between py-1 px-1 rounded text-[11px] {isMandatory
-                    ? 'cursor-not-allowed opacity-70'
-                    : 'cursor-pointer hover:bg-slate-800 text-slate-300'}"
-                >
-                  <span class="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      checked={visibleColumns[colKey]}
-                      disabled={isMandatory}
-                      onchange={(e) => {
-                        if (isMandatory) return;
-                        visibleColumns[colKey] = (e.target as HTMLInputElement).checked;
-                      }}
-                      class="rounded bg-[#090d16] border-[#334155] text-sky-500 focus:ring-0"
-                    />
-                    <span class="truncate {visibleColumns[colKey] ? 'text-slate-200' : 'text-slate-500 line-through'}">
-                      {PL_COLUMN_LABELS[colKey] ?? colKey}
-                    </span>
-                  </span>
-                  {#if isMandatory}
-                    <span class="text-[9px] font-bold text-amber-400/90" title="Mandatory column cannot be hidden">LOCKED</span>
-                  {/if}
-                </label>
-              {/each}
-            </div>
-          {/if}
+          <button
+            type="button"
+            onclick={() => (activeChip = 'active')}
+            class="px-2 py-0.5 rounded transition {activeChip === 'active' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold' : 'text-slate-400 hover:text-slate-200'}"
+          >
+            Active ({chipCounts.active})
+          </button>
+          <button
+            type="button"
+            onclick={() => (activeChip = 'sleep')}
+            class="px-2 py-0.5 rounded transition {activeChip === 'sleep' ? 'bg-slate-700 text-slate-200 font-bold' : 'text-slate-400 hover:text-slate-200'}"
+          >
+            Sleep ({chipCounts.sleep})
+          </button>
+          <button
+            type="button"
+            onclick={() => (activeChip = 'idle60')}
+            class="px-2 py-0.5 rounded transition {activeChip === 'idle60' ? 'bg-amber-900/50 text-amber-200 border border-amber-600/50 font-bold' : 'text-slate-400 hover:text-slate-200'}"
+            title="Idle connections sleeping >= 60 seconds"
+          >
+            Sleep ≥ 60s ({chipCounts.idle60})
+          </button>
+          <button
+            type="button"
+            onclick={() => (activeChip = 'locked')}
+            class="px-2 py-0.5 rounded transition {activeChip === 'locked' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold' : 'text-slate-400 hover:text-slate-200'}"
+          >
+            Locked ({chipCounts.locked})
+          </button>
+          <button
+            type="button"
+            onclick={() => (activeChip = 'slow')}
+            class="px-2 py-0.5 rounded transition {activeChip === 'slow' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 font-bold' : 'text-slate-400 hover:text-slate-200'}"
+          >
+            Slow ≥{slowThreshold}s ({chipCounts.slow})
+          </button>
         </div>
 
-        <input
-          type="text"
-          bind:value={filterText}
-          placeholder="Filter thread list..."
-          class="bg-[#0b0f19] border border-[#334155] rounded px-2.5 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-sky-500 w-44 font-sans"
-        />
-      </div>
-    </div>
-
-        <!-- Threads Table View -->
-    <div class="flex-1 overflow-auto">
-      <table class="w-full min-w-[1120px] border-collapse table-fixed text-left">
-        <colgroup>
-          <col class="w-9" />
-          {#if visibleColumns.id}<col class="w-16" />{/if}
-          {#if visibleColumns.user}<col class="w-32" />{/if}
-          {#if visibleColumns.host}<col class="w-40" />{/if}
-          {#if visibleColumns.db}<col class="w-32" />{/if}
-          {#if visibleColumns.command}<col class="w-28" />{/if}
-          {#if visibleColumns.time}<col class="w-20" />{/if}
-          {#if visibleColumns.state}<col class="w-44" />{/if}
-          {#if visibleColumns.info}<col />{/if}
-          <col class="w-[120px]" />
-        </colgroup>
-
-        <thead
-          class="sticky top-0 z-20 bg-[#0f172a] text-[10px] font-sans uppercase tracking-wider text-slate-400 select-none border-b border-slate-700/80 shadow-[0_1px_0_0_rgba(15,23,42,0.9)]"
-        >
-          <tr>
-            <th class="h-8 px-2 text-center">
-              <input
-                type="checkbox"
-                aria-label="Select all threads"
-                checked={allFilteredSelected}
-                onchange={(e) => toggleSelectAll((e.target as HTMLInputElement).checked)}
-                class="rounded border-slate-600 bg-transparent text-sky-500 focus:ring-0 focus:ring-offset-0 align-middle"
-              />
-            </th>
-            {#if visibleColumns.id}{@render th('id', 'ID', 'w-16', 'right')}{/if}
-            {#if visibleColumns.user}{@render th('user', 'User', 'w-32')}{/if}
-            {#if visibleColumns.host}{@render th('host', 'Host', 'w-40')}{/if}
-            {#if visibleColumns.db}{@render th('db', 'DB', 'w-32')}{/if}
-            {#if visibleColumns.command}{@render th('command', 'Command', 'w-28')}{/if}
-            {#if visibleColumns.time}{@render th('time', 'Time', 'w-20', 'right')}{/if}
-            {#if visibleColumns.state}{@render th('state', 'State', 'w-44')}{/if}
-            {#if visibleColumns.info}{@render th('info', 'Query', '')}{/if}
-            <th
-              class="h-8 px-2 w-[120px] text-center font-semibold sticky right-0 bg-[#0f172a] border-l border-slate-800"
+        <div class="flex items-center space-x-2 flex-wrap gap-y-1">
+          <label class="flex items-center space-x-1 text-[11px] font-sans text-slate-400 hover:text-slate-200 cursor-pointer">
+            <input type="checkbox" bind:checked={hideSleep} class="rounded bg-[#090d16] border-[#334155] text-sky-500 focus:ring-0" />
+            <span>Hide Sleep</span>
+          </label>
+          <label class="flex items-center space-x-1 text-[11px] font-sans text-slate-400 hover:text-slate-200 cursor-pointer">
+            <input type="checkbox" bind:checked={hideSystem} class="rounded bg-[#090d16] border-[#334155] text-sky-500 focus:ring-0" />
+            <span>Hide Sys</span>
+          </label>
+          <label class="flex items-center space-x-1 text-[11px] font-sans text-slate-400">
+            <span>Slow &gt;</span>
+            <select
+              bind:value={slowThreshold}
+              class="h-6 bg-[#0b0f19] border border-[#334155] rounded px-1.5 text-[11px] text-amber-300 font-mono focus:outline-none [color-scheme:dark] [&>option]:bg-[#0b1220]"
             >
-              <span class="sr-only">Actions</span>
-            </th>
-          </tr>
-        </thead>
+              <option value={1}>1s</option>
+              <option value={3}>3s</option>
+              <option value={5}>5s</option>
+              <option value={10}>10s</option>
+              <option value={30}>30s</option>
+              <option value={60}>60s</option>
+            </select>
+          </label>
 
-        <tbody class="font-mono text-[11.5px]">
-          {#if filteredThreads.length === 0}
-            <tr>
-              <td colspan={Object.values(visibleColumns).filter(Boolean).length + 2} class="py-16 text-center">
-                <div class="flex flex-col items-center gap-2 font-sans">
-                  <Icon
-                    name={isLoading ? 'loader' : 'check-circle'}
-                    class="w-6 h-6 {isLoading ? 'animate-spin text-sky-400' : 'text-slate-700'}"
-                  />
-                  <span class="text-slate-500">
-                    {isLoading ? 'Loading threads...' : 'No threads match the current filter'}
-                  </span>
-                </div>
-              </td>
-            </tr>
-          {:else}
-            {#each sortedThreads as thread (thread.id)}
-              {@const isSelf = thread.id === currentThreadId}
-              {@const isSelected = selectedThreadIds.has(thread.id)}
-              {@const isSlow = thread.time >= 5}
-              {@const isRootBlocker = locks.some(
-                (l) => l.is_root_blocker && l.blocking_thread_id === thread.id
-              )}
-              {@const isWaitingOnLock = locks.some((l) => l.waiting_thread_id === thread.id)}
-              {@const rowBg =
-                (isRootBlocker
-                  ? 'bg-red-950/40 hover:bg-red-950/50 border-l-red-500 font-semibold'
-                  : isWaitingOnLock
-                    ? 'bg-amber-950/20 hover:bg-amber-950/30 border-l-amber-600'
-                    : isSelected
-                      ? 'bg-rose-950/25 hover:bg-rose-950/35 border-l-transparent'
-                      : isSelf
-                        ? 'bg-sky-950/20 hover:bg-sky-950/30 border-l-transparent'
-                        : isSlow
-                          ? 'bg-amber-950/20 hover:bg-amber-950/30 border-l-amber-500'
-                          : 'hover:bg-slate-800/40 border-l-transparent')}
-              {@const actionBg = isRootBlocker
-                ? 'bg-[#2a0a0a]'
-                : isWaitingOnLock
-                ? 'bg-[#1f1a0a]'
-                : isSelected
-                ? 'bg-rose-950/25'
-                : isSelf
-                ? 'bg-sky-950/20'
-                : 'bg-[#090d16]'}
-              <tr
-                class="group h-8 cursor-pointer border-b border-slate-800/50 border-l-4 transition-colors {rowBg}"
-                onclick={() => (inspectingThread = thread)}
+          <button
+            type="button"
+            onclick={() => (showBlockerPanel = true)}
+            class="h-7 px-2 rounded border text-[11px] font-sans flex items-center space-x-1 transition {locks.length
+              ? 'bg-rose-950/40 border-rose-700/70 text-rose-300 hover:bg-rose-900/50'
+              : 'bg-[#0b0f19] border-[#334155] text-slate-400 hover:text-white'}"
+            title="Open lock contention and root blocker triage"
+          >
+            <Icon name="shield-alert" class="w-3 h-3 {locks.length ? 'text-rose-400' : 'text-slate-500'}" />
+            <span>Blockers{locks.length ? ` (${locks.length})` : ''}</span>
+            {#if rootBlockerCount > 0}
+              <span class="px-1 rounded bg-rose-600 text-white text-[9px] font-bold leading-4">{rootBlockerCount} root</span>
+            {/if}
+          </button>
+
+          <!-- Column Visibility Dropdown (ADR 0054) -->
+          <div class="relative">
+            <button
+              type="button"
+              onclick={(e) => { e.stopPropagation(); showColSelector = !showColSelector; }}
+              class="h-7 px-2 rounded bg-[#0b0f19] border border-[#334155] text-slate-300 hover:text-white text-[11px] font-sans flex items-center space-x-1 transition"
+              title="Manage column visibility"
+            >
+              <Icon name="columns" class="w-3 h-3 text-sky-400" />
+              <span>Columns</span>
+              <Icon name="chevron-down" class="w-2.5 h-2.5 text-slate-400" />
+            </button>
+
+            {#if showColSelector}
+              <button
+                type="button"
+                tabindex="-1"
+                aria-label="Close"
+                class="fixed inset-0 z-30 bg-transparent cursor-default"
+                onclick={() => (showColSelector = false)}
+              ></button>
+              <div
+                class="absolute right-0 mt-1 w-48 bg-[#0f172a] border border-[#334155] rounded-lg shadow-2xl z-40 p-2 text-xs font-sans space-y-1 animate-in fade-in duration-100"
               >
-                <td class="px-2 text-center overflow-hidden" onclick={(e) => e.stopPropagation()}>
-                  {#if !isSelf}
-                    <input
-                      type="checkbox"
-                      aria-label="Select thread {thread.id}"
-                      checked={isSelected}
-                      onchange={() => toggleThreadSelection(thread.id)}
-                      class="rounded border-slate-600 bg-transparent text-rose-500 focus:ring-0 focus:ring-offset-0 align-middle"
-                    />
-                  {/if}
-                </td>
-                {#if visibleColumns.id}
-                  <td class="px-2 text-right whitespace-nowrap overflow-hidden text-ellipsis tabular-nums font-bold {isSelf ? 'text-sky-400' : 'text-slate-300'}">
-                    {thread.id}
-                    {#if isRootBlocker}
-                      <span
-                        class="ml-1 rounded bg-rose-600 px-1.5 py-0.5 font-sans text-[9px] font-bold text-white"
-                        title="Root blocker holding locks for other threads"
-                      >
-                        BLOCKER
-                      </span>
-                    {:else if isWaitingOnLock}
-                      <span
-                        class="ml-1 rounded border border-amber-800 bg-amber-950 px-1.5 py-0.5 font-sans text-[9px] font-bold text-amber-300"
-                        title="Thread is waiting on a lock"
-                      >
-                        WAITING
-                      </span>
-                    {/if}
-                    {#if isSelf}
-                      <span class="ml-1 font-sans text-[9px] font-normal uppercase text-sky-500">you</span>
-                    {/if}
-                  </td>
-                {/if}
-                {#if visibleColumns.user}
-                  <td class="px-2 text-slate-200 truncate overflow-hidden" title={thread.user}>{thread.user || '-'}</td>
-                {/if}
-                {#if visibleColumns.host}
-                  <td class="px-2 text-slate-400 truncate overflow-hidden" title={thread.host}>{thread.host || '-'}</td>
-                {/if}
-                {#if visibleColumns.db}
-                  <td class="px-2 text-emerald-400/90 truncate overflow-hidden" title={thread.db}>{thread.db || '-'}</td>
-                {/if}
-                {#if visibleColumns.command}
-                  <td class="px-2 overflow-hidden">
-                    <span
-                      class="inline-block max-w-full truncate rounded border px-1.5 py-0.5 font-sans text-[10px] leading-tight {commandTone(
-                        thread.command
-                      )}"
-                    >
-                      {thread.command || '-'}
-                    </span>
-                  </td>
-                {/if}
-                {#if visibleColumns.time}
-                  <td
-                    class="px-2 text-right tabular-nums {isSlow
-                      ? 'font-bold text-rose-400'
-                      : thread.time >= 1
-                      ? 'text-amber-300'
-                      : 'text-slate-400'}"
-                    title={isSlow ? 'Running longer than 5 seconds' : ''}
+                <div class="flex items-center justify-between px-1 pb-1 border-b border-slate-800">
+                  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Visible Columns</span>
+                  <div class="flex items-center space-x-1.5 text-[10px]">
+                    <button type="button" onclick={showAllColumns} class="text-sky-400 hover:underline">Show All</button>
+                    <button type="button" onclick={resetColumnPreferences} class="text-slate-400 hover:text-white">Reset</button>
+                  </div>
+                </div>
+                {#each Object.keys(visibleColumns) as colKey (colKey)}
+                  {@const isMandatory = (MANDATORY_COLUMNS as readonly string[]).includes(colKey)}
+                  <label
+                    class="flex items-center justify-between py-1 px-1 rounded text-[11px] {isMandatory
+                      ? 'cursor-not-allowed opacity-70'
+                      : 'cursor-pointer hover:bg-slate-800 text-slate-300'}"
                   >
-                    {thread.time.toFixed(1)}
-                  </td>
-                {/if}
-                {#if visibleColumns.state}
-                  <td class="px-2 truncate text-slate-400 overflow-hidden" title={thread.state}>{thread.state || '-'}</td>
-                {/if}
-                {#if visibleColumns.info}
-                  <td class="px-2 truncate text-slate-300 group-hover:text-sky-300 overflow-hidden" title={thread.info}>
-                    {thread.info || '-'}
-                  </td>
-                {/if}
-                <td
-                  class="px-2 text-center whitespace-nowrap overflow-hidden sticky right-0 border-l border-slate-800/60 transition-colors {actionBg} group-hover:bg-slate-800/40"
-                  onclick={(e) => e.stopPropagation()}
+                    <span class="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        checked={visibleColumns[colKey]}
+                        disabled={isMandatory}
+                        onchange={(e) => {
+                          if (isMandatory) return;
+                          visibleColumns[colKey] = (e.target as HTMLInputElement).checked;
+                        }}
+                        class="rounded bg-[#090d16] border-[#334155] text-sky-500 focus:ring-0"
+                      />
+                      <span class="truncate {visibleColumns[colKey] ? 'text-slate-200' : 'text-slate-500 line-through'}">
+                        {PL_COLUMN_LABELS[colKey] ?? colKey}
+                      </span>
+                    </span>
+                    {#if isMandatory}
+                      <span class="text-[9px] font-bold text-amber-400/90" title="Mandatory column cannot be hidden">LOCKED</span>
+                    {/if}
+                  </label>
+                {/each}
+              </div>
+            {/if}
+          </div>
+
+          <input
+            type="text"
+            bind:value={filterText}
+            placeholder="Filter thread list..."
+            class="bg-[#0b0f19] border border-[#334155] rounded px-2.5 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-sky-500 w-44 font-sans"
+          />
+        </div>
+      </div>
+
+      <!-- Threads Table View -->
+      <div class="flex-1 overflow-auto pb-16">
+        <table class="w-full min-w-[1120px] border-collapse table-fixed text-left">
+          <colgroup>
+            <col class="w-9" />
+            {#if visibleColumns.rowNum}<col class="w-10" />{/if}
+            {#if visibleColumns.id}<col class="w-24" />{/if}
+            {#if visibleColumns.user}<col class="w-32" />{/if}
+            {#if visibleColumns.host}<col class="w-40" />{/if}
+            {#if visibleColumns.db}<col class="w-28" />{/if}
+            {#if visibleColumns.command}<col class="w-28" />{/if}
+            {#if visibleColumns.time}<col class="w-24" />{/if}
+            {#if visibleColumns.state}<col class="w-40" />{/if}
+            {#if visibleColumns.info}<col />{/if}
+            {#if visibleColumns.actions}<col class="w-[104px]" />{/if}
+          </colgroup>
+
+          <thead
+            class="sticky top-0 z-20 bg-[#0f172a] text-[10px] font-sans uppercase tracking-wider text-slate-400 select-none border-b border-slate-700/80 shadow-[0_1px_0_0_rgba(15,23,42,0.9)]"
+          >
+            <tr>
+              <th class="h-8 px-2 text-center">
+                <input
+                  type="checkbox"
+                  aria-label="Select all threads"
+                  checked={allFilteredSelected}
+                  onchange={(e) => toggleSelectAll((e.target as HTMLInputElement).checked)}
+                  class="rounded border-slate-600 bg-transparent text-sky-500 focus:ring-0 focus:ring-offset-0 align-middle"
+                />
+              </th>
+              {#if visibleColumns.rowNum}
+                <th class="h-8 px-2 text-right font-semibold w-10">#</th>
+              {/if}
+              {#if visibleColumns.id}{@render th('id', 'ID', 'w-24', 'right')}{/if}
+              {#if visibleColumns.user}{@render th('user', 'User', 'w-32')}{/if}
+              {#if visibleColumns.host}{@render th('host', 'Host', 'w-40')}{/if}
+              {#if visibleColumns.db}{@render th('db', 'DB', 'w-28')}{/if}
+              {#if visibleColumns.command}{@render th('command', 'Command', 'w-28')}{/if}
+              {#if visibleColumns.time}{@render th('time', 'Time', 'w-24', 'right')}{/if}
+              {#if visibleColumns.state}{@render th('state', 'State', 'w-40')}{/if}
+              {#if visibleColumns.info}{@render th('info', 'Query', '')}{/if}
+              {#if visibleColumns.actions}
+                <th
+                  class="h-8 px-2 w-[104px] text-center font-semibold sticky right-0 bg-[#0f172a] border-l border-slate-800"
                 >
-                  {#if !isSelf}
-                    <button
-                      type="button"
-                      onclick={() => killSingleThread(thread.id)}
-                      class="rounded p-1 text-slate-500 transition hover:bg-rose-950/60 hover:text-rose-400"
-                      title="Kill thread {thread.id}"
-                      aria-label="Kill thread {thread.id}"
-                    >
-                      <Icon name="trash-2" class="w-3.5 h-3.5" />
-                    </button>
-                  {/if}
+                  Actions
+                </th>
+              {/if}
+            </tr>
+          </thead>
+
+          <tbody class="font-mono text-[11.5px]">
+            {#if filteredThreads.length === 0}
+              <tr>
+                <td colspan={Object.values(visibleColumns).filter(Boolean).length + 2} class="py-16 text-center">
+                  <div class="flex flex-col items-center gap-2 font-sans">
+                    <Icon
+                      name={isLoading ? 'loader' : 'check-circle'}
+                      class="w-6 h-6 {isLoading ? 'animate-spin text-sky-400' : 'text-slate-700'}"
+                    />
+                    <span class="text-slate-500">
+                      {isLoading ? 'Loading threads...' : 'No threads match the current filter'}
+                    </span>
+                  </div>
                 </td>
               </tr>
-            {/each}
-          {/if}
-        </tbody>
-      </table>
+            {:else}
+              {#each sortedThreads as thread, rowIdx (thread.id)}
+                {@const isSelf = thread.id === currentThreadId}
+                {@const isSys = isSystemThread(thread)}
+                {@const isSleeping = thread.command === 'Sleep' || thread.state === 'Sleep'}
+                {@const isSelected = selectedThreadIds.has(thread.id)}
+                {@const isCriticalSlow = !isSleeping && thread.time >= 30}
+                {@const isSlow = !isSleeping && thread.time >= slowThreshold}
+                {@const isIdle60 = isSleeping && thread.time >= 60}
+                {@const isRootBlocker = locks.some(
+                  (l) => l.is_root_blocker && l.blocking_thread_id === thread.id
+                )}
+                {@const isWaitingOnLock = locks.some((l) => l.waiting_thread_id === thread.id)}
+                {@const rowBg =
+                  (isRootBlocker
+                    ? 'bg-red-950/40 hover:bg-red-950/50 border-l-red-500 font-semibold'
+                    : isWaitingOnLock
+                      ? 'bg-amber-950/20 hover:bg-amber-950/30 border-l-amber-600'
+                      : isSelected
+                        ? 'bg-rose-950/25 hover:bg-rose-950/35 border-l-transparent'
+                        : isSelf
+                          ? 'bg-sky-950/20 hover:bg-sky-950/30 border-l-transparent'
+                          : isCriticalSlow
+                            ? 'bg-rose-950/25 hover:bg-rose-950/35 border-l-rose-500'
+                            : isSlow
+                              ? 'bg-amber-950/20 hover:bg-amber-950/30 border-l-amber-500'
+                              : 'hover:bg-slate-800/40 border-l-transparent')}
+                {@const actionBg = isRootBlocker
+                  ? 'bg-[#2a0a0a]'
+                  : isWaitingOnLock
+                  ? 'bg-[#1f1a0a]'
+                  : isSelected
+                  ? 'bg-rose-950/25'
+                  : isSelf
+                  ? 'bg-sky-950/20'
+                  : 'bg-[#090d16]'}
+                <tr
+                  class="group h-8 cursor-pointer border-b border-slate-800/50 border-l-4 transition-colors {rowBg}"
+                  onclick={() => { inspectingThread = thread; formatInspectSql = false; }}
+                >
+                  <td class="px-2 text-center overflow-hidden" onclick={(e) => e.stopPropagation()}>
+                    {#if !isSelf && !isSys}
+                      <input
+                        type="checkbox"
+                        aria-label="Select thread {thread.id}"
+                        checked={isSelected}
+                        onchange={() => toggleThreadSelection(thread.id)}
+                        class="rounded border-slate-600 bg-transparent text-rose-500 focus:ring-0 focus:ring-offset-0 align-middle"
+                      />
+                    {/if}
+                  </td>
+                  {#if visibleColumns.rowNum}
+                    <td class="px-2 text-right text-slate-500 text-[10px] tabular-nums">{rowIdx + 1}</td>
+                  {/if}
+                  {#if visibleColumns.id}
+                    <td class="px-2 text-right whitespace-nowrap overflow-hidden text-ellipsis tabular-nums font-bold {isSelf ? 'text-sky-400' : 'text-slate-300'}">
+                      {thread.id}
+                      {#if isRootBlocker}
+                        <span
+                          class="ml-1 rounded bg-rose-600 px-1 py-0.5 font-sans text-[9px] font-bold text-white"
+                          title="Root blocker holding locks for other threads"
+                        >
+                          BLOCKER
+                        </span>
+                      {:else if isWaitingOnLock}
+                        <span
+                          class="ml-1 rounded border border-amber-800 bg-amber-950 px-1 py-0.5 font-sans text-[9px] font-bold text-amber-300"
+                          title="Thread is waiting on a lock"
+                        >
+                          WAITING
+                        </span>
+                      {/if}
+                      {#if isSelf}
+                        <span class="ml-1 font-sans text-[9px] font-normal uppercase text-sky-500">you</span>
+                      {/if}
+                    </td>
+                  {/if}
+                  {#if visibleColumns.user}
+                    <td class="px-2 text-slate-200 truncate overflow-hidden" title={thread.user}>
+                      {thread.user || '-'}
+                      {#if isSys}
+                        <span class="ml-1 px-1 rounded bg-sky-950/70 border border-sky-800 text-sky-300 text-[9px] font-sans font-bold uppercase" title="Protected system daemon thread">Sys</span>
+                      {/if}
+                    </td>
+                  {/if}
+                  {#if visibleColumns.host}
+                    <td class="px-2 text-slate-400 truncate overflow-hidden" title={thread.host}>{thread.host || '-'}</td>
+                  {/if}
+                  {#if visibleColumns.db}
+                    <td class="px-2 text-emerald-400/90 truncate overflow-hidden" title={thread.db}>{thread.db || '-'}</td>
+                  {/if}
+                  {#if visibleColumns.command}
+                    <td class="px-2 overflow-hidden">
+                      <span
+                        class="inline-block max-w-full truncate rounded border px-1.5 py-0.5 font-sans text-[10px] leading-tight {commandTone(
+                          thread.command
+                        )}"
+                      >
+                        {thread.command || '-'}
+                      </span>
+                    </td>
+                  {/if}
+                  {#if visibleColumns.time}
+                    <td
+                      class="px-2 text-right tabular-nums whitespace-nowrap {isCriticalSlow
+                        ? 'font-bold text-rose-400'
+                        : isSlow
+                        ? 'font-bold text-amber-300'
+                        : isIdle60
+                        ? 'text-amber-400/90'
+                        : thread.time >= 1
+                        ? 'text-slate-300'
+                        : 'text-slate-500'}"
+                      title={isCriticalSlow ? 'Critical slow query >= 30s' : isSlow ? `Slow query >= ${slowThreshold}s` : isIdle60 ? 'Idle connection >= 60s' : ''}
+                    >
+                      {thread.time.toFixed(1)}{isIdle60 ? 's 💤' : ''}
+                    </td>
+                  {/if}
+                  {#if visibleColumns.state}
+                    <td class="px-2 truncate text-slate-400 overflow-hidden" title={thread.state}>{thread.state || '-'}</td>
+                  {/if}
+                  {#if visibleColumns.info}
+                    <td class="px-2 truncate text-slate-300 group-hover:text-sky-300 overflow-hidden" title={thread.info}>
+                      {thread.info || '-'}
+                    </td>
+                  {/if}
+                  {#if visibleColumns.actions}
+                    <td
+                      class="px-1.5 text-center whitespace-nowrap sticky right-0 border-l border-slate-800/60 transition-colors {actionBg} group-hover:bg-slate-800/40"
+                      onclick={(e) => e.stopPropagation()}
+                    >
+                      <div class="inline-flex items-center space-x-1 relative">
+                        <button
+                          type="button"
+                          disabled={isSys}
+                          onclick={() => killSingleThread(thread.id, 'query')}
+                          class="rounded p-1 text-amber-400/80 hover:bg-amber-950/60 hover:text-amber-300 disabled:opacity-25 disabled:cursor-not-allowed transition"
+                          title={isSys ? 'Protected system thread' : 'Kill running query (KILL QUERY)'}
+                          aria-label="Kill query on thread {thread.id}"
+                        >
+                          <Icon name="square" class="w-3 h-3" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isSelf || isSys}
+                          onclick={() => killSingleThread(thread.id, 'connection')}
+                          class="rounded p-1 text-rose-400/80 hover:bg-rose-950/60 hover:text-rose-300 disabled:opacity-25 disabled:cursor-not-allowed transition"
+                          title={isSelf ? 'Cannot kill own active connection' : isSys ? 'Protected system thread' : 'Terminate client connection (KILL)'}
+                          aria-label="Kill connection {thread.id}"
+                        >
+                          <Icon name="x-circle" class="w-3 h-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onclick={(e) => {
+                            e.stopPropagation();
+                            openRowMenuId = openRowMenuId === thread.id ? null : thread.id;
+                          }}
+                          class="rounded p-1 text-slate-400 hover:bg-slate-700 hover:text-white transition"
+                          title="More thread actions"
+                          aria-label="Thread {thread.id} menu"
+                        >
+                          <Icon name="more-vertical" class="w-3 h-3" />
+                        </button>
+
+                        {#if openRowMenuId === thread.id}
+                          <button
+                            type="button"
+                            tabindex="-1"
+                            aria-label="Close thread menu"
+                            class="fixed inset-0 z-30 bg-transparent cursor-default"
+                            onclick={() => (openRowMenuId = null)}
+                          ></button>
+                          <div
+                            class="absolute right-0 top-7 w-48 bg-[#0f172a] border border-slate-700 rounded-lg shadow-2xl z-40 py-1 text-left font-sans text-[11px] text-slate-200"
+                          >
+                            <button
+                              type="button"
+                              onclick={() => { inspectingThread = thread; formatInspectSql = false; openRowMenuId = null; }}
+                              class="w-full px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2"
+                            >
+                              <Icon name="eye" class="w-3 h-3 text-sky-400" /><span>Inspect Thread</span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!thread.info}
+                              onclick={() => { copyWithToast(thread.info, 'SQL'); openRowMenuId = null; }}
+                              class="w-full px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 disabled:opacity-40"
+                            >
+                              <Icon name="copy" class="w-3 h-3 text-slate-400" /><span>Copy SQL</span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!thread.info}
+                              onclick={() => { openSqlInEditor(thread.info, `Thread_${thread.id}.sql`); openRowMenuId = null; }}
+                              class="w-full px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 disabled:opacity-40"
+                            >
+                              <Icon name="file-code" class="w-3 h-3 text-emerald-400" /><span>Open in Editor</span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!thread.info}
+                              onclick={() => { explainThreadQuery(thread.info); openRowMenuId = null; }}
+                              class="w-full px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 disabled:opacity-40"
+                            >
+                              <Icon name="play" class="w-3 h-3 text-amber-400" /><span>Explain Query</span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!thread.info}
+                              onclick={() => { sendThreadToAI(thread.info, thread); openRowMenuId = null; }}
+                              class="w-full px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 disabled:opacity-40"
+                            >
+                              <Icon name="bot" class="w-3 h-3 text-purple-400" /><span>Ask Copilot</span>
+                            </button>
+                            <div class="my-1 border-t border-slate-800"></div>
+                            <button
+                              type="button"
+                              disabled={isSys}
+                              onclick={() => { openRowMenuId = null; killSingleThread(thread.id, 'query'); }}
+                              class="w-full px-3 py-1.5 hover:bg-amber-950/60 text-amber-300 flex items-center space-x-2 disabled:opacity-35"
+                            >
+                              <Icon name="square" class="w-3 h-3" /><span>Kill Query (KILL QUERY)</span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isSelf || isSys}
+                              onclick={() => { openRowMenuId = null; killSingleThread(thread.id, 'connection'); }}
+                              class="w-full px-3 py-1.5 hover:bg-rose-950/60 text-rose-300 flex items-center space-x-2 disabled:opacity-35"
+                            >
+                              <Icon name="x-circle" class="w-3 h-3" /><span>Kill Connection (KILL)</span>
+                            </button>
+                          </div>
+                        {/if}
+                      </div>
+                    </td>
+                  {/if}
+                </tr>
+              {/each}
+            {/if}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Floating Batch Action Dock -->
+      {#if selectedThreadIds.size > 0}
+        <div
+          class="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 bg-slate-900/95 border border-slate-700 shadow-2xl rounded-full px-3.5 py-2 flex items-center space-x-2 backdrop-blur text-xs font-sans select-none"
+        >
+          <span class="px-2.5 py-0.5 rounded-full bg-sky-950 text-sky-300 font-mono text-[11px] font-bold border border-sky-800">
+            {selectedThreadIds.size} selected
+          </span>
+          <button
+            type="button"
+            onclick={() => openBatchKillModal('query')}
+            class="px-2.5 py-1 rounded-full bg-amber-950 hover:bg-amber-900 text-amber-200 border border-amber-700/80 text-[11px] font-semibold transition flex items-center space-x-1"
+          >
+            <Icon name="square" class="w-3 h-3" />
+            <span>Kill Query ({selectedThreadIds.size})</span>
+          </button>
+          <button
+            type="button"
+            onclick={() => openBatchKillModal('connection')}
+            class="px-2.5 py-1 rounded-full bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-bold transition flex items-center space-x-1 shadow"
+          >
+            <Icon name="x-circle" class="w-3 h-3" />
+            <span>Kill Conn ({selectedThreadIds.size})</span>
+          </button>
+          <button
+            type="button"
+            onclick={copySelectedThreadIds}
+            class="px-2 py-1 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] transition"
+          >
+            Copy IDs
+          </button>
+          <button
+            type="button"
+            onclick={exportSelectedThreadsJSON}
+            class="px-2 py-1 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] transition"
+          >
+            Export JSON
+          </button>
+          <button
+            type="button"
+            onclick={saveSelectedThreadsToNotes}
+            class="px-2 py-1 rounded-full bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 text-[11px] transition"
+          >
+            Save to Notes
+          </button>
+          <button
+            type="button"
+            onclick={() => selectedThreadIds.clear()}
+            class="px-2 py-1 rounded-full text-slate-400 hover:text-white text-[11px] transition"
+          >
+            Clear
+          </button>
+        </div>
+      {/if}
     </div>
   {:else if currentSubTab === 'digest'}
     <!-- Statement Digest View -->
@@ -1506,25 +2119,29 @@ import { copyText } from '../../utils/clipboard';
       <table class="w-full text-left border-collapse">
         <thead class="bg-[#0f172a] sticky top-0 z-10 border-b border-[#334155] text-slate-400 text-[11px] uppercase tracking-wider font-sans select-none">
           <tr>
-            <th class="py-2 px-3 w-32">Database</th>
+            <th class="py-2 px-3 w-12 text-right">#</th>
             <th class="py-2 px-3">Normalized Statement</th>
-            <th class="py-2 px-3 w-24 text-right">Exec Count</th>
-            <th class="py-2 px-3 w-28 text-right">Total Latency</th>
-            <th class="py-2 px-3 w-28 text-right">Avg Latency</th>
-            <th class="py-2 px-3 w-28 text-right">Max Latency</th>
-            <th class="py-2 px-3 w-28 text-right">Rows Examined</th>
+            <th class="py-2 px-3 w-20 text-center">Scan</th>
+            <th class="py-2 px-3 w-20 text-right">Exec</th>
+            <th class="py-2 px-3 w-24 text-right">Total (ms)</th>
+            <th class="py-2 px-3 w-24 text-right">Avg (ms)</th>
+            <th class="py-2 px-3 w-24 text-right">Max (ms)</th>
+            <th class="py-2 px-3 w-24 text-right">Lock (ms)</th>
+            <th class="py-2 px-3 w-24 text-right">Rows Sent</th>
+            <th class="py-2 px-3 w-24 text-right">Examined</th>
+            <th class="py-2 px-3 w-28 text-center">Actions</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-[#1e293b]/60">
           {#if isDigestLoading}
             <tr>
-              <td colspan="7" class="p-8 text-center text-slate-500">
+              <td colspan="11" class="p-8 text-center text-slate-500">
                 Aggregating slow query digest from performance_schema...
               </td>
             </tr>
           {:else if digestError}
             <tr>
-              <td colspan="7" class="p-8">
+              <td colspan="11" class="p-8">
                 <div class="flex flex-col items-center gap-2 text-center">
                   <Icon name="alert-triangle" class="w-5 h-5 text-amber-400" />
                   <p class="text-sm font-semibold text-amber-300">Statement digest unavailable</p>
@@ -1541,7 +2158,7 @@ import { copyText } from '../../utils/clipboard';
             </tr>
           {:else if digestRows.length === 0}
             <tr>
-              <td colspan="7" class="p-8 text-center text-slate-500 space-y-1">
+              <td colspan="11" class="p-8 text-center text-slate-500 space-y-1">
                 <p class="text-sm">No statement digests recorded yet on this server.</p>
                 <p class="text-[11px] text-slate-600">
                   performance_schema is enabled but has not aggregated any statement yet — run some
@@ -1550,17 +2167,49 @@ import { copyText } from '../../utils/clipboard';
               </td>
             </tr>
           {:else}
-            {#each digestRows as row}
+            {#each digestRows as row, dIdx}
+              {@const stmt = row.query || row.digest_text || '-'}
+              {@const totalMs = row.total_latency_ms ?? row.sum_timer_wait ?? row.total_time}
+              {@const avgMs = row.avg_latency_ms ?? row.avg_timer_wait ?? row.avg_latency}
+              {@const maxMs = row.max_latency_ms ?? row.max_timer_wait ?? row.max_latency}
+              {@const lockMs = row.lock_time_ms ?? 0}
               <tr class="hover:bg-slate-800/40 transition-colors">
-                <td class="py-2 px-3 text-emerald-400 font-semibold">{row.schema_name || row.db || '-'}</td>
-                <td class="py-2 px-3 text-slate-200 font-mono text-[11px] truncate max-w-md" title={row.digest_text || row.query}>
-                  {row.digest_text || row.query || '-'}
+                <td class="py-2 px-3 text-right text-slate-500 tabular-nums">{dIdx + 1}</td>
+                <td class="py-2 px-3 text-slate-200 font-mono text-[11px] truncate max-w-md" title={stmt}>
+                  {stmt}
                 </td>
-                <td class="py-2 px-3 text-right font-bold text-sky-300">{row.count_star || row.exec_count || 0}</td>
-                <td class="py-2 px-3 text-right text-slate-300">{row.sum_timer_wait || row.total_time || '-'}</td>
-                <td class="py-2 px-3 text-right font-semibold text-amber-300">{row.avg_timer_wait || row.avg_latency || '-'}</td>
-                <td class="py-2 px-3 text-right font-bold text-rose-400">{row.max_timer_wait || row.max_latency || '-'}</td>
-                <td class="py-2 px-3 text-right text-slate-400">{row.sum_rows_examined || row.rows_examined || 0}</td>
+                <td class="py-2 px-3 text-center">
+                  {#if row.full_scan}
+                    <span class="px-1.5 py-0.5 rounded bg-rose-950/70 border border-rose-800 text-rose-300 text-[9.5px] font-sans font-bold uppercase" title="Full table scan / no index used ({row.no_index_used ?? 0}x)">FULL SCAN</span>
+                  {:else}
+                    <span class="text-[10px] text-emerald-400 font-sans">Indexed</span>
+                  {/if}
+                </td>
+                <td class="py-2 px-3 text-right font-bold text-sky-300 tabular-nums">{(row.exec_count ?? row.count_star ?? 0).toLocaleString()}</td>
+                <td class="py-2 px-3 text-right text-slate-300 tabular-nums">{typeof totalMs === 'number' ? totalMs.toFixed(1) : (totalMs ?? '-')}</td>
+                <td class="py-2 px-3 text-right font-semibold text-amber-300 tabular-nums">{typeof avgMs === 'number' ? avgMs.toFixed(2) : (avgMs ?? '-')}</td>
+                <td class="py-2 px-3 text-right font-bold text-rose-400 tabular-nums">{typeof maxMs === 'number' ? maxMs.toFixed(1) : (maxMs ?? '-')}</td>
+                <td class="py-2 px-3 text-right text-slate-400 tabular-nums">{typeof lockMs === 'number' ? lockMs.toFixed(1) : '-'}</td>
+                <td class="py-2 px-3 text-right text-emerald-300/90 tabular-nums">{(row.rows_sent ?? 0).toLocaleString()}</td>
+                <td class="py-2 px-3 text-right text-slate-400 tabular-nums">{(row.rows_examined ?? row.sum_rows_examined ?? 0).toLocaleString()}</td>
+                <td class="py-2 px-3 text-center whitespace-nowrap">
+                  <div class="inline-flex items-center space-x-1 font-sans">
+                    <button
+                      type="button"
+                      onclick={() => copyWithToast(stmt, 'Digest SQL')}
+                      class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] border border-slate-700"
+                    >
+                      Copy
+                    </button>
+                    <button
+                      type="button"
+                      onclick={() => openSqlInEditor(stmt, `Digest_${dIdx + 1}.sql`)}
+                      class="px-1.5 py-0.5 rounded bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-[10px]"
+                    >
+                      Editor
+                    </button>
+                  </div>
+                </td>
               </tr>
             {/each}
           {/if}
@@ -1788,14 +2437,26 @@ import { copyText } from '../../utils/clipboard';
                   <div>
                     <div class="flex items-center justify-between mb-1">
                       <span class="text-slate-500 text-[10px] uppercase font-sans">Statement</span>
-                      <button
-                        type="button"
-                        onclick={() => copyWithToast(tx.query, 'Statement')}
-                        class="text-[10px] text-sky-400 hover:underline font-sans flex items-center gap-1"
-                      >
-                        <Icon name="copy" class="w-3 h-3" />
-                        <span>Copy</span>
-                      </button>
+                      <div class="flex items-center space-x-2">
+                        <button
+                          type="button"
+                          onclick={() => copyWithToast(tx.query, 'Statement')}
+                          class="text-[10px] text-sky-400 hover:underline font-sans flex items-center gap-1"
+                        >
+                          <Icon name="copy" class="w-3 h-3" />
+                          <span>Copy</span>
+                        </button>
+                        {#if tx.query}
+                          <button
+                            type="button"
+                            onclick={() => openSqlInEditor(tx.query, `Deadlock_Tx${tx.index ?? 1}.sql`)}
+                            class="text-[10px] text-emerald-400 hover:underline font-sans flex items-center gap-1"
+                          >
+                            <Icon name="file-code" class="w-3 h-3" />
+                            <span>Open in Editor</span>
+                          </button>
+                        {/if}
+                      </div>
                     </div>
                     <pre class="p-2 rounded bg-[#090d16] border border-slate-800 text-[11px] text-sky-300 font-mono overflow-x-auto whitespace-pre-wrap break-words">{tx.query || 'Statement not captured in the engine status.'}</pre>
                   </div>
@@ -1909,31 +2570,36 @@ import { copyText } from '../../utils/clipboard';
                   <th class="py-1.5 px-3 text-right">FC Sent</th>
                   <th class="py-1.5 px-3 w-24">Queue load</th>
                   <th class="py-1.5 px-3">Role</th>
+                  <th class="py-1.5 px-3 text-right">Action</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-[#1e293b]/60">
                 {#each clusterReport.nodes as node}
-                  <tr class="hover:bg-slate-800/40 {node.is_culprit ? 'bg-amber-950/20' : ''}">
+                  {@const isUnreachable = String(node.status || '').toLowerCase() === 'unreachable'}
+                  <tr class="hover:bg-slate-800/40 {node.is_culprit ? 'bg-amber-950/20' : ''} {isUnreachable ? 'opacity-75' : ''}">
                     <td class="py-1.5 px-3 font-bold text-sky-300 truncate max-w-[12rem]" title={node.name}>
                       {node.name || '(unnamed)'}
                     </td>
                     <td class="py-1.5 px-3 text-slate-400">{node.address || '-'}</td>
                     <td class="py-1.5 px-3">
-                      <span class="px-1.5 py-0.5 rounded text-[10px] font-bold font-sans uppercase border {nodeStateTone(node.state)}">
-                        {node.state || 'unknown'}
+                      <span class="px-1.5 py-0.5 rounded text-[10px] font-bold font-sans uppercase border {isUnreachable ? 'bg-slate-800 text-slate-400 border-slate-700' : nodeStateTone(node.state)}">
+                        {isUnreachable ? 'unreachable' : (node.state || 'unknown')}
                       </span>
+                      {#if isUnreachable && node.message}
+                        <span class="block text-[9.5px] text-slate-500 font-sans truncate max-w-[10rem]" title={node.message}>{node.message}</span>
+                      {/if}
                     </td>
                     <td class="py-1.5 px-3 text-right {node.receive_queue > 0 ? 'text-amber-400 font-bold' : 'text-slate-300'}">
-                      {node.receive_queue ?? 0}
+                      {isUnreachable ? '—' : (node.receive_queue ?? 0)}
                     </td>
                     <td class="py-1.5 px-3 text-right {node.send_queue > 0 ? 'text-amber-400 font-bold' : 'text-slate-300'}">
-                      {node.send_queue ?? 0}
+                      {isUnreachable ? '—' : (node.send_queue ?? 0)}
                     </td>
-                    <td class="py-1.5 px-3 text-right text-slate-300">{(node.flow_control_sent ?? 0).toLocaleString()}</td>
+                    <td class="py-1.5 px-3 text-right text-slate-300">{isUnreachable ? '—' : (node.flow_control_sent ?? 0).toLocaleString()}</td>
                     <td class="py-1.5 px-3">
                       <div class="flex items-center gap-2">
                         <div class="h-1.5 flex-1 rounded-full bg-slate-800 overflow-hidden">
-                          {#if nodeQueueTotal(node) > 0}
+                          {#if !isUnreachable && nodeQueueTotal(node) > 0}
                             <div
                               class="h-full rounded-full {node.is_culprit || nodeQueueTotal(node) > 1000 ? 'bg-amber-500' : 'bg-sky-500'}"
                               style="width: {queueWidth(node)}%"
@@ -1942,7 +2608,7 @@ import { copyText } from '../../utils/clipboard';
                           {/if}
                         </div>
                         <span class="text-[10px] font-mono {nodeQueueTotal(node) > 1000 ? 'text-amber-400' : 'text-slate-500'} w-10 text-right">
-                          {nodeQueueTotal(node) > 0 ? nodeQueueTotal(node).toLocaleString() : 'clear'}
+                          {isUnreachable ? 'locked' : nodeQueueTotal(node) > 0 ? nodeQueueTotal(node).toLocaleString() : 'clear'}
                         </span>
                       </div>
                     </td>
@@ -1952,6 +2618,25 @@ import { copyText } from '../../utils/clipboard';
                       {/if}
                       {#if node.is_culprit}
                         <span class="px-1.5 py-0.5 rounded bg-amber-950 border border-amber-800 text-amber-300 text-[9.5px] font-bold uppercase" title="This node is throttling the cluster">culprit</span>
+                      {/if}
+                    </td>
+                    <td class="py-1.5 px-3 text-right font-sans">
+                      {#if node.is_local}
+                        <button
+                          type="button"
+                          onclick={() => setSubTab('threads')}
+                          class="px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 text-[10px] font-semibold transition"
+                        >
+                          Inspect Processlist
+                        </button>
+                      {:else if node.address}
+                        <button
+                          type="button"
+                          onclick={() => switchSessionToNode(node.address)}
+                          class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-[10px] font-medium transition"
+                        >
+                          Switch Session
+                        </button>
                       {/if}
                     </td>
                   </tr>
@@ -2024,13 +2709,13 @@ import { copyText } from '../../utils/clipboard';
           <!-- Flow control & durability tri-metric -->
           <div class="border border-[#1e293b] rounded-lg overflow-hidden bg-[#0b0f19]">
             <div class="px-3 py-2 bg-[#0f172a] border-b border-[#1e293b] font-sans font-bold text-slate-300 text-xs">
-              Flow Control &amp; Durability
+              Flow Control &amp; Durability Tri-Metric
             </div>
             <div class="p-3 space-y-2.5">
               <div>
                 <div class="flex items-center justify-between text-[11px] font-sans">
                   <span class="text-slate-400">Flow control paused</span>
-                  <span class="font-mono {fcTone}">{flowControlPct}%</span>
+                  <span class="font-mono {fcTone}">{flowControlPct.toFixed(2)}%</span>
                 </div>
                 <div class="mt-1 h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
                   <div class="h-full {flowControlPct > 5 ? 'bg-rose-500' : flowControlPct > 1 ? 'bg-amber-500' : 'bg-emerald-500'}"
@@ -2048,11 +2733,19 @@ import { copyText } from '../../utils/clipboard';
                 <div class="flex justify-between"><dt class="text-slate-500 font-sans">WS sent</dt><dd class="text-slate-200">{(clusterReport.flow_control_sent ?? 0).toLocaleString()}</dd></div>
                 <div class="flex justify-between"><dt class="text-slate-500 font-sans">WS received</dt><dd class="text-slate-200">{(clusterReport.flow_control_recv ?? 0).toLocaleString()}</dd></div>
                 <div class="flex justify-between"><dt class="text-slate-500 font-sans">Apply threads</dt><dd class="text-slate-200">{clusterReport.tri_metric?.slave_threads ? clusterReport.tri_metric.slave_threads : 'n/a'}</dd></div>
+                <div class="flex justify-between"><dt class="text-slate-500 font-sans">Buffer waits</dt><dd class={clusterReport.tri_metric?.buffer_pool_wait_free ? 'text-amber-300 font-bold' : 'text-slate-200'}>{(clusterReport.tri_metric?.buffer_pool_wait_free ?? 0).toLocaleString()}</dd></div>
                 <div class="flex justify-between"><dt class="text-slate-500 font-sans">Cert failures</dt><dd class={clusterReport.tri_metric?.cert_failures ? 'text-rose-300' : 'text-slate-200'}>{(clusterReport.tri_metric?.cert_failures ?? 0).toLocaleString()}</dd></div>
                 <div class="flex justify-between"><dt class="text-slate-500 font-sans">BF aborts</dt><dd class={clusterReport.tri_metric?.bf_aborts ? 'text-amber-300' : 'text-slate-200'}>{(clusterReport.tri_metric?.bf_aborts ?? 0).toLocaleString()}</dd></div>
                 <div class="flex justify-between"><dt class="text-slate-500 font-sans">Log waits</dt><dd class={clusterReport.tri_metric?.log_waits ? 'text-amber-300' : 'text-slate-200'}>{(clusterReport.tri_metric?.log_waits ?? 0).toLocaleString()}</dd></div>
                 <div class="flex justify-between"><dt class="text-slate-500 font-sans">FSyncs</dt><dd class="text-slate-200">{(clusterReport.tri_metric?.os_log_fsyncs ?? 0).toLocaleString()}</dd></div>
-                <div class="flex justify-between"><dt class="text-slate-500 font-sans">Net latency avg</dt><dd class="text-slate-200">{netLatency}</dd></div>
+                <div class="col-span-2 flex justify-between border-t border-slate-800/70 pt-1">
+                  <dt class="text-slate-500 font-sans">Net latency (min / avg / max)</dt>
+                  <dd class="text-slate-200">
+                    {clusterReport.tri_metric
+                      ? `${(clusterReport.tri_metric.network_latency_min_ms ?? 0).toFixed(2)} / ${(clusterReport.tri_metric.network_latency_avg_ms ?? 0).toFixed(2)} / ${(clusterReport.tri_metric.network_latency_max_ms ?? 0).toFixed(2)} ms`
+                      : netLatency}
+                  </dd>
+                </div>
               </dl>
             </div>
           </div>
@@ -2066,7 +2759,7 @@ import { copyText } from '../../utils/clipboard';
             </span>
             <div class="grid grid-cols-1 xl:grid-cols-2 gap-2">
               {#each clusterReport.tuning_checks as chk}
-                <div class="p-2.5 bg-[#0b0f19] border border-[#1e293b] rounded-lg space-y-1">
+                <div class="p-3 bg-[#0b0f19] border border-[#1e293b] rounded-lg space-y-1.5">
                   <div class="flex items-center justify-between gap-2">
                     <span class="font-mono font-bold text-sky-300 text-[11.5px] truncate">{chk.variable}</span>
                     <span class="px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase shrink-0 border {chk.status === 'optimal' ? 'bg-emerald-950 text-emerald-300 border-emerald-800' : chk.status === 'critical' ? 'bg-rose-950 text-rose-300 border-rose-800' : 'bg-amber-950 text-amber-300 border-amber-800'}">
@@ -2078,10 +2771,35 @@ import { copyText } from '../../utils/clipboard';
                     <span class="text-slate-600">→</span>
                     advised <strong class="text-emerald-400">{chk.recommended}</strong>
                   </div>
-                  <p class="text-[11px] text-slate-500 font-sans leading-snug">{chk.summary}</p>
-                  {#if chk.remediation}
-                    <p class="text-[10.5px] text-slate-600 font-mono truncate" title={chk.remediation}>{chk.remediation}</p>
+                  <p class="text-[11px] text-slate-400 font-sans leading-snug">{chk.summary}</p>
+                  {#if chk.trade_off}
+                    <div class="text-[10.5px] text-amber-300/90 font-sans italic flex items-start gap-1.5">
+                      <Icon name="scale" class="w-3 h-3 shrink-0 mt-0.5 text-slate-400" />
+                      <span>Trade-off: {chk.trade_off}</span>
+                    </div>
                   {/if}
+                  {#if chk.remediation}
+                    <p class="text-[10.5px] text-slate-400 bg-slate-950 border border-slate-800 rounded px-2 py-1 font-mono break-all">{chk.remediation}</p>
+                  {/if}
+                  <div class="flex items-center justify-end space-x-2 pt-1 font-sans">
+                    {#if chk.remediation}
+                      <button
+                        type="button"
+                        onclick={() => copyWithToast(chk.remediation, 'Remediation snippet')}
+                        class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] border border-slate-700 transition"
+                      >
+                        Copy Fix
+                      </button>
+                    {/if}
+                    <button
+                      type="button"
+                      onclick={() => appState.sendToAi(`Explain cluster parameter "${chk.variable}" (current="${chk.current_value}", recommended="${chk.recommended}", status="${chk.status}"). ${chk.summary || ''}\nTrade-off: ${chk.trade_off || 'N/A'}\nRemediation: ${chk.remediation || 'N/A'}`, `Cluster Tuning: ${chk.variable}`)}
+                      class="px-2 py-0.5 rounded bg-purple-950/70 hover:bg-purple-900 text-purple-300 text-[10px] border border-purple-800 transition flex items-center space-x-1"
+                    >
+                      <Icon name="sparkles" class="w-2.5 h-2.5" />
+                      <span>Ask Copilot</span>
+                    </button>
+                  </div>
                 </div>
               {/each}
             </div>
@@ -2093,8 +2811,20 @@ import { copyText } from '../../utils/clipboard';
     <!-- Server Variables View -->
     <div class="flex-1 flex flex-col overflow-hidden">
       <!-- Variables Filter Bar -->
-      <div class="h-9 bg-[#090d16] border-b border-[#1e293b] px-4 flex items-center justify-between text-xs select-none">
-        <div class="flex items-center space-x-2">
+      <div class="min-h-9 py-1.5 bg-[#090d16] border-b border-[#1e293b] px-4 flex items-center justify-between flex-wrap gap-2 text-xs select-none">
+        <div class="flex items-center space-x-2 flex-wrap gap-y-1">
+          <button
+            type="button"
+            onclick={() => (showCuratedOnly = !showCuratedOnly)}
+            class="px-2 py-0.5 rounded border text-[11px] font-sans font-semibold flex items-center space-x-1 transition {showCuratedOnly
+              ? 'bg-amber-950/70 border-amber-600 text-amber-300'
+              : 'bg-[#0b0f19] border-[#334155] text-slate-300 hover:text-white'}"
+            title="Show curated performance tuning variables only"
+          >
+            <Icon name="star" class="w-3 h-3 text-amber-400" />
+            <span>Curated ({curatedVarCount})</span>
+          </button>
+
           <span class="text-slate-400 font-sans text-xs">Category:</span>
           <select
             bind:value={varCategory}
@@ -2103,6 +2833,17 @@ import { copyText } from '../../utils/clipboard';
             {#each varCategories as cat}
               <option value={cat}>{cat}</option>
             {/each}
+          </select>
+
+          <select
+            bind:value={varSeverityFilter}
+            class="bg-[#0b0f19] border border-[#334155] rounded px-2 py-0.5 text-xs text-slate-300 focus:outline-none cursor-pointer [color-scheme:dark] [&>option]:bg-[#0b1220]"
+            aria-label="Filter variables by severity"
+          >
+            <option value="all">All Severities</option>
+            <option value="critical">Critical</option>
+            <option value="warning">Warning</option>
+            <option value="optimal">Optimal</option>
           </select>
         </div>
 
@@ -2118,33 +2859,53 @@ import { copyText } from '../../utils/clipboard';
         <table class="w-full text-left border-collapse text-xs">
           <thead class="bg-[#0f172a] sticky top-0 z-10 border-b border-[#334155] text-slate-400 text-[11px] uppercase tracking-wider font-sans select-none">
             <tr>
+              <th class="py-2 px-3 w-7"></th>
               <th class="py-2 px-3 w-64">Variable Name</th>
-              <th class="py-2 px-3 w-48">Value</th>
+              <th class="py-2 px-3 w-44">Value</th>
               <th class="py-2 px-3 w-28">Category</th>
+              <th class="py-2 px-3 w-20 text-center">Severity</th>
               <th class="py-2 px-3 w-20 text-center">Dynamic</th>
               <th class="py-2 px-3">Tuning Recommendation</th>
-              <th class="py-2 px-3 w-20 text-center">Snippet</th>
+              <th class="py-2 px-3 w-24 text-center">Actions</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-[#1e293b]/60">
             {#if isVariablesLoading}
               <tr>
-                <td colspan="6" class="p-8 text-center text-slate-500">
+                <td colspan="8" class="p-8 text-center text-slate-500">
                   Inspecting server variables...
                 </td>
               </tr>
             {:else if filteredVariables.length === 0}
               <tr>
-                <td colspan="6" class="p-8 text-center text-slate-500">
+                <td colspan="8" class="p-8 text-center text-slate-500">
                   No server variables match your filter.
                 </td>
               </tr>
             {:else}
-              {#each filteredVariables as v}
-                <tr class="hover:bg-slate-800/40">
-                  <td class="py-2 px-3 font-mono font-bold text-sky-300">{v.name}</td>
-                  <td class="py-2 px-3 font-mono text-slate-200 truncate max-w-[200px]" title={String(v.value)}>{v.value}</td>
+              {#each filteredVariables as v (v.name)}
+                {@const isExpanded = expandedVars.has(v.name)}
+                {@const sev = String(v.severity || 'info').toLowerCase()}
+                <tr
+                  class="hover:bg-slate-800/40 cursor-pointer transition-colors"
+                  onclick={() => toggleVarExpand(v.name)}
+                >
+                  <td class="py-2 px-3 text-slate-500">
+                    <Icon name={isExpanded ? 'chevron-down' : 'chevron-right'} class="w-3.5 h-3.5" />
+                  </td>
+                  <td class="py-2 px-3 font-mono font-bold text-sky-300">
+                    {v.name}
+                    {#if v.is_curated}
+                      <span class="ml-1 text-amber-400" title="Curated tuning knob">★</span>
+                    {/if}
+                  </td>
+                  <td class="py-2 px-3 font-mono text-slate-200 truncate max-w-[180px]" title={String(v.value)}>{v.value}</td>
                   <td class="py-2 px-3 text-slate-400">{v.category || 'General'}</td>
+                  <td class="py-2 px-3 text-center font-sans">
+                    <span class="px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase border {sev === 'critical' ? 'bg-rose-950 text-rose-300 border-rose-800' : sev === 'warning' ? 'bg-amber-950 text-amber-300 border-amber-800' : sev === 'optimal' ? 'bg-emerald-950 text-emerald-300 border-emerald-800' : 'bg-slate-800 text-slate-400 border-slate-700'}">
+                      {sev}
+                    </span>
+                  </td>
                   <td class="py-2 px-3 text-center">
                     {#if v.is_dynamic}
                       <span class="px-1.5 py-0.2 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] font-bold">YES</span>
@@ -2155,28 +2916,79 @@ import { copyText } from '../../utils/clipboard';
                   <td class="py-2 px-3 text-slate-400 text-[11px] font-sans">
                     {#if v.recommendation || v.suggested_value}
                       <span class="text-amber-300 font-semibold">{v.suggested_value ? `Suggested: ${v.suggested_value}` : ''}</span>
-                      <span class="text-slate-400 block">{v.recommendation || v.description}</span>
+                      <span class="text-slate-400 block truncate max-w-md">{v.recommendation || v.description}</span>
                     {:else}
-                      <span class="text-slate-600">-</span>
+                      <span class="text-slate-600">{v.description || '-'}</span>
                     {/if}
                   </td>
-                  <td class="py-2 px-3 text-center">
-                    {#if v.set_global_snippet}
+                  <td class="py-2 px-3 text-center whitespace-nowrap" onclick={(e) => e.stopPropagation()}>
+                    <div class="inline-flex items-center space-x-1">
+                      {#if v.set_global_snippet}
+                        <button
+                          type="button"
+                          onclick={() => copyWithToast(v.set_global_snippet, 'SET GLOBAL statement')}
+                          class="p-1 rounded text-sky-400 hover:text-white hover:bg-slate-800 transition"
+                          title="Copy SET GLOBAL snippet"
+                        >
+                          <Icon name="copy" class="w-3.5 h-3.5" />
+                        </button>
+                      {/if}
                       <button
-                        onclick={() => {
-                          copyText(v.set_global_snippet);
-                          appState.showToast('Copied SET GLOBAL statement to clipboard!', 'info');
-                        }}
-                        class="p-1 rounded text-sky-400 hover:text-white hover:bg-slate-800 transition"
-                        title="Copy SET GLOBAL snippet"
+                        type="button"
+                        onclick={() => appState.sendToAi(`Explain server variable "${v.name}" (current value="${v.value}", scope="${v.scope || 'Global'}", dynamic=${!!v.is_dynamic}). ${v.description || ''} ${v.recommendation || ''}`, `Variable: ${v.name}`)}
+                        class="p-1 rounded text-purple-400 hover:text-purple-200 hover:bg-slate-800 transition"
+                        title="Ask Copilot about this variable"
                       >
-                        <Icon name="copy" class="w-3.5 h-3.5" />
+                        <Icon name="bot" class="w-3.5 h-3.5" />
                       </button>
-                    {:else}
-                      <span class="text-slate-600">-</span>
-                    {/if}
+                    </div>
                   </td>
                 </tr>
+                {#if isExpanded}
+                  <tr class="bg-[#060913]">
+                    <td colspan="8" class="px-6 py-3 border-t border-slate-800/70">
+                      <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-[11px] font-sans">
+                        <div>
+                          <span class="text-[10px] uppercase text-slate-500 font-bold block">Scope &amp; Description</span>
+                          <span class="text-sky-300 font-mono text-[10.5px] block mb-1">Scope: {v.scope || 'Global'}</span>
+                          <p class="text-slate-300 leading-relaxed">{v.description || 'No description available.'}</p>
+                        </div>
+                        <div>
+                          <span class="text-[10px] uppercase text-slate-500 font-bold block">Impact if Too Low</span>
+                          <p class="text-amber-200/90 leading-relaxed">{v.impact_low || '—'}</p>
+                        </div>
+                        <div>
+                          <span class="text-[10px] uppercase text-slate-500 font-bold block">Impact if Too High</span>
+                          <p class="text-rose-200/90 leading-relaxed">{v.impact_high || '—'}</p>
+                        </div>
+                      </div>
+                      {#if v.my_cnf_snippet || v.set_global_snippet}
+                        <div class="mt-2.5 pt-2 border-t border-slate-800/70 flex flex-wrap items-center gap-2">
+                          {#if v.my_cnf_snippet}
+                            <button
+                              type="button"
+                              onclick={() => copyWithToast(v.my_cnf_snippet, 'my.cnf directive')}
+                              class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-mono text-[10.5px] flex items-center space-x-1"
+                            >
+                              <Icon name="copy" class="w-3 h-3 text-emerald-400" />
+                              <span>Copy my.cnf: {v.my_cnf_snippet}</span>
+                            </button>
+                          {/if}
+                          {#if v.set_global_snippet}
+                            <button
+                              type="button"
+                              onclick={() => copyWithToast(v.set_global_snippet, 'SET GLOBAL statement')}
+                              class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-sky-200 border border-slate-700 font-mono text-[10.5px] flex items-center space-x-1"
+                            >
+                              <Icon name="copy" class="w-3 h-3 text-sky-400" />
+                              <span>Copy SQL: {v.set_global_snippet}</span>
+                            </button>
+                          {/if}
+                        </div>
+                      {/if}
+                    </td>
+                  </tr>
+                {/if}
               {/each}
             {/if}
           </tbody>
@@ -2244,7 +3056,7 @@ import { copyText } from '../../utils/clipboard';
             <div class="space-y-1">
               <h4 class="font-bold text-slate-200 text-sm">No Flight Recording Sessions Yet</h4>
               <p class="text-slate-400 text-xs">
-                Performance Flight Recorder captures a blackbox audit of database telemetry (threads, QPS, row locks, buffer stalls, active SQL) sampled every 500ms-2s. Click <strong>START REC</strong> to capture real-time behavior during load tests or incidents.
+                Performance Flight Recorder captures a blackbox audit of database telemetry (threads, QPS, row locks, buffer stalls, active SQL) sampled every 1s-5s. Click <strong>START REC</strong> to capture real-time behavior during load tests or incidents.
               </p>
             </div>
             <button
@@ -2258,7 +3070,7 @@ import { copyText } from '../../utils/clipboard';
           </div>
         {:else}
           <!-- Session Summary Banner -->
-          <div class="grid grid-cols-2 md:grid-cols-5 gap-3 font-sans text-xs">
+          <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 font-sans text-xs">
             <div class="p-3 rounded-xl bg-[#0b0f19] border border-[#1e293b]">
               <span class="text-slate-500 text-[10px] uppercase font-bold block">Status</span>
               <span class="text-sm font-bold {isRecording ? 'text-rose-400 animate-pulse' : 'text-emerald-400'}">
@@ -2283,15 +3095,22 @@ import { copyText } from '../../utils/clipboard';
               <span class="text-sm font-bold {flightPeak.lockDelta > 0 ? 'text-amber-400' : 'text-slate-200'} font-mono">
                 +{flightPeak.lockDelta.toLocaleString()}
               </span>
-              <span class="text-[10px] text-slate-500 font-sans">over session · counter {activeOrSelectedTick?.row_lock_waits ?? 0}</span>
+              <span class="text-[10px] text-slate-500 font-sans block">counter {activeOrSelectedTick?.row_lock_waits ?? 0}</span>
+            </div>
+            <div class="p-3 rounded-xl bg-[#0b0f19] border border-[#1e293b]">
+              <span class="text-slate-500 text-[10px] uppercase font-bold block">Buffer Pool Waits</span>
+              <span class="text-sm font-bold {flightPeak.bufferDelta > 0 ? 'text-purple-400' : 'text-slate-200'} font-mono">
+                +{flightPeak.bufferDelta.toLocaleString()}
+              </span>
+              <span class="text-[10px] text-slate-500 font-sans block">counter {activeOrSelectedTick?.buffer_pool_wait_free ?? 0}</span>
             </div>
             <div class="p-3 rounded-xl bg-[#0b0f19] border border-[#1e293b]">
               <span class="text-slate-500 text-[10px] uppercase font-bold block">Peak load</span>
               <span class="text-sm font-bold text-slate-100 font-mono">
                 {flightPeak.maxQps} qps peak
               </span>
-              <span class="text-[10px] text-slate-500 font-sans">
-                {flightPeak.maxThreads} active threads peak · {flightSessionTicks.length} samples
+              <span class="text-[10px] text-slate-500 font-sans block">
+                {flightPeak.maxThreads} active threads · {flightSessionTicks.length} samples
               </span>
             </div>
           </div>
@@ -2391,20 +3210,23 @@ import { copyText } from '../../utils/clipboard';
                   </div>
                 {:else}
                   {#each queries as q, qIdx}
+                    {@const qSql = q.info || q.query || ''}
+                    {@const tid = q.thread_id ?? q.id}
                     <div class="p-2.5 rounded-lg border border-slate-800 bg-[#050811] space-y-1.5 font-sans">
-                      <div class="flex items-center justify-between text-[11px]">
-                        <div class="flex items-center space-x-2 font-mono">
+                      <div class="flex items-center justify-between text-[11px] flex-wrap gap-2">
+                        <div class="flex items-center space-x-2 font-mono flex-wrap">
                           <span class="text-slate-500">#{qIdx + 1}</span>
-                          {#if q.id}<span class="text-slate-400">ID: {q.id}</span>{/if}
+                          {#if tid}<span class="text-slate-400">Thread: #{tid}</span>{/if}
                           {#if q.user}<span class="text-slate-400">User: {q.user}</span>{/if}
                           {#if q.db}<span class="text-sky-400 font-bold">DB: {q.db}</span>{/if}
                           {#if q.state}<span class="text-amber-400">State: {q.state}</span>{/if}
                           {#if q.time != null}<span class="text-slate-500 font-semibold">{q.time}s</span>{/if}
                         </div>
-                        <div class="flex items-center space-x-1.5">
+                        <div class="flex items-center space-x-1.5 flex-wrap">
                           <button
+                            type="button"
                             onclick={() => {
-                              copyText(q.info || q.query);
+                              copyText(qSql);
                               appState.showToast('SQL copied to clipboard!', 'info');
                             }}
                             class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] transition flex items-center space-x-1"
@@ -2414,18 +3236,38 @@ import { copyText } from '../../utils/clipboard';
                             <span>Copy</span>
                           </button>
                           <button
+                            type="button"
                             onclick={() => {
-                              appState.addTab('Flight Query.sql', q.info || q.query);
+                              appState.addTab('Flight Query.sql', qSql);
                               appState.showToast('SQL inserted into worksheet!', 'success');
                             }}
                             class="px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 text-[10px] transition flex items-center space-x-1"
                             title="Open Query in Worksheet"
                           >
-                            <Icon name="play" class="w-2.5 h-2.5" />
+                            <Icon name="file-code" class="w-2.5 h-2.5" />
                             <span>Worksheet</span>
                           </button>
                           <button
-                            onclick={() => appState.saveQueryToNote(q.info || q.query, `Forensic Query (${formatTickTime(activeOrSelectedTick)})`)}
+                            type="button"
+                            onclick={() => explainThreadQuery(qSql)}
+                            class="px-2 py-0.5 rounded bg-emerald-950 hover:bg-emerald-900 border border-emerald-800 text-emerald-300 text-[10px] transition flex items-center space-x-1"
+                            title="Explain Query Execution Plan"
+                          >
+                            <Icon name="play" class="w-2.5 h-2.5" />
+                            <span>Explain</span>
+                          </button>
+                          <button
+                            type="button"
+                            onclick={() => sendThreadToAI(qSql, { id: tid || 0, user: q.user || '', host: q.host || '', db: q.db || '', command: q.command || 'Query', time: q.time || 0, state: q.state || '', info: qSql })}
+                            class="px-2 py-0.5 rounded bg-purple-950 hover:bg-purple-900 border border-purple-800 text-purple-300 text-[10px] transition flex items-center space-x-1"
+                            title="Ask AI Copilot"
+                          >
+                            <Icon name="bot" class="w-2.5 h-2.5" />
+                            <span>Ask Copilot</span>
+                          </button>
+                          <button
+                            type="button"
+                            onclick={() => appState.saveQueryToNote(qSql, `Forensic Query (${formatTickTime(activeOrSelectedTick)})`)}
                             class="px-2 py-0.5 rounded bg-amber-950 hover:bg-amber-900 border border-amber-800 text-amber-300 text-[10px] transition flex items-center space-x-1"
                             title="Save Query to Operational Notes"
                           >
@@ -2434,7 +3276,7 @@ import { copyText } from '../../utils/clipboard';
                           </button>
                         </div>
                       </div>
-                      <pre class="p-2 rounded bg-[#090d16] border border-slate-900 text-sky-200 font-mono text-[11px] overflow-x-auto whitespace-pre-wrap select-text">{q.info || q.query}</pre>
+                      <pre class="p-2 rounded bg-[#090d16] border border-slate-900 text-sky-200 font-mono text-[11px] overflow-x-auto whitespace-pre-wrap select-text">{qSql}</pre>
                     </div>
                   {/each}
                 {/if}
@@ -2449,83 +3291,297 @@ import { copyText } from '../../utils/clipboard';
 
 <!-- Thread Detail Modal -->
 {#if inspectingThread}
+  {@const t = inspectingThread}
+  {@const isSelfInspect = t.id === currentThreadId}
+  {@const isSysInspect = isSystemThread(t)}
+  {@const blockingLocks = locks.filter((l) => l.blocking_thread_id === t.id)}
+  {@const waitingLocks = locks.filter((l) => l.waiting_thread_id === t.id)}
+  {@const formattedSql = formatInspectSql && t.info ? formatSQL(t.info) : (t.info || '(No active query statement)')}
   <div class="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-    <div class="bg-[#0b0f19] border border-[#1e293b] rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col animate-scale-in text-xs font-sans">
+    <div class="bg-[#0b0f19] border border-[#1e293b] rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col animate-scale-in text-xs font-sans">
       <div class="px-5 py-4 border-b border-[#1e293b] flex items-center justify-between bg-[#0f172a]">
         <div class="flex items-center space-x-2">
           <Icon name="cpu" class="w-4 h-4 text-sky-400" />
-          <h3 class="font-bold text-slate-100 text-sm">Thread Inspector (ID: {inspectingThread.id})</h3>
+          <h3 class="font-bold text-slate-100 text-sm">Thread Inspector (ID: {t.id})</h3>
+          {#if isSelfInspect}
+            <span class="px-1.5 py-0.5 rounded bg-sky-950 text-sky-300 border border-sky-800 text-[10px] font-bold">CURRENT SESSION</span>
+          {:else if isSysInspect}
+            <span class="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 text-[10px] font-bold">SYSTEM DAEMON</span>
+          {/if}
         </div>
-        <button onclick={() => (inspectingThread = null)} class="text-slate-400 hover:text-white">
+        <button onclick={() => (inspectingThread = null)} class="text-slate-400 hover:text-white" aria-label="Close thread inspector">
           <Icon name="x" class="w-4 h-4" />
         </button>
       </div>
 
-      <div class="p-5 space-y-4">
-        <div class="grid grid-cols-3 gap-3">
+      <div class="p-5 space-y-4 overflow-y-auto max-h-[75vh]">
+        <!-- 6-card telemetry metadata -->
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
           <div class="p-2.5 bg-[#050811] border border-[#1e293b] rounded-lg">
             <span class="text-slate-500 text-[10px] uppercase block">User @ Host</span>
-            <span class="font-bold text-slate-200 truncate block">{inspectingThread.user}@{inspectingThread.host}</span>
+            <span class="font-bold text-slate-200 truncate block font-mono" title="{t.user}@{t.host}">{t.user || '-'}@{t.host || '-'}</span>
           </div>
           <div class="p-2.5 bg-[#050811] border border-[#1e293b] rounded-lg">
             <span class="text-slate-500 text-[10px] uppercase block">Database</span>
-            <span class="font-bold text-emerald-400 truncate block">{inspectingThread.db || '-'}</span>
+            <span class="font-bold text-emerald-400 truncate block font-mono">{t.db || '-'}</span>
           </div>
           <div class="p-2.5 bg-[#050811] border border-[#1e293b] rounded-lg">
             <span class="text-slate-500 text-[10px] uppercase block">Execution Time</span>
-            <span class="font-bold {inspectingThread.time > 5 ? 'text-rose-400' : 'text-slate-200'}">{inspectingThread.time} sec</span>
+            <span class="font-bold font-mono {t.time >= 30 ? 'text-rose-400' : t.time >= slowThreshold ? 'text-amber-300' : 'text-slate-200'}">{t.time} sec</span>
+          </div>
+          <div class="p-2.5 bg-[#050811] border border-[#1e293b] rounded-lg">
+            <span class="text-slate-500 text-[10px] uppercase block">Command</span>
+            <span class="font-bold text-sky-300 font-mono">{t.command || '-'}</span>
+          </div>
+          <div class="p-2.5 bg-[#050811] border border-[#1e293b] rounded-lg">
+            <span class="text-slate-500 text-[10px] uppercase block">Thread State</span>
+            <span class="font-bold text-slate-200 truncate block" title={t.state}>{t.state || '-'}</span>
+          </div>
+          <div class="p-2.5 bg-[#050811] border border-[#1e293b] rounded-lg">
+            <span class="text-slate-500 text-[10px] uppercase block">Lock Role</span>
+            <span class="font-bold {blockingLocks.length > 0 ? 'text-rose-400' : waitingLocks.length > 0 ? 'text-amber-300' : 'text-slate-400'}">
+              {blockingLocks.length > 0
+                ? `Blocking ${blockingLocks.length} thread(s)`
+                : waitingLocks.length > 0
+                  ? `Waiting on #${waitingLocks[0]?.blocking_thread_id}`
+                  : 'Unblocked'}
+            </span>
           </div>
         </div>
 
+        <!-- Lock Waiter / Blocker Banner -->
+        {#if blockingLocks.length > 0 || waitingLocks.length > 0}
+          <div class="p-3 rounded-xl border text-[11px] space-y-1.5 {blockingLocks.length > 0 ? 'bg-rose-950/35 border-rose-800/70 text-rose-200' : 'bg-amber-950/35 border-amber-800/70 text-amber-200'}">
+            {#if blockingLocks.length > 0}
+              <div class="font-bold flex items-center space-x-1.5">
+                <Icon name="shield-alert" class="w-3.5 h-3.5 text-rose-400" />
+                <span>Root/Lock Blocker: holding {blockingLocks[0]?.lock_mode || 'lock'}{blockingLocks[0]?.locked_resource ? ` on ${blockingLocks[0].locked_resource}` : ''}</span>
+              </div>
+              <div class="text-[10.5px] text-rose-300/90 font-mono">
+                Blocked threads: {blockingLocks.map((l) => `#${l.waiting_thread_id} (${l.waiting_seconds ?? 0}s)`).join(', ')}
+              </div>
+            {/if}
+            {#if waitingLocks.length > 0}
+              <div class="font-bold flex items-center space-x-1.5">
+                <Icon name="clock" class="w-3.5 h-3.5 text-amber-400" />
+                <span>Lock Waiter: blocked by Thread #{waitingLocks[0]?.blocking_thread_id} ({waitingLocks[0]?.waiting_seconds ?? 0}s on {waitingLocks[0]?.lock_mode || 'lock'})</span>
+              </div>
+            {/if}
+          </div>
+        {/if}
+
         <div>
-          <div class="flex items-center justify-between mb-1.5">
+          <div class="flex items-center justify-between mb-1.5 flex-wrap gap-2">
             <span class="text-slate-400 text-xs font-medium">SQL Statement</span>
-            <div class="flex items-center space-x-2">
+            <div class="flex items-center space-x-2 flex-wrap">
+              {#if t.info}
+                <button
+                  type="button"
+                  onclick={() => (formatInspectSql = !formatInspectSql)}
+                  class="text-[11px] {formatInspectSql ? 'text-sky-300 font-semibold' : 'text-slate-400 hover:text-white'} flex items-center space-x-1"
+                >
+                  <Icon name="code" class="w-3 h-3" />
+                  <span>{formatInspectSql ? 'Raw SQL' : 'Format SQL'}</span>
+                </button>
+              {/if}
               <button
-                onclick={() => {
-                  copyText(inspectingThread?.info || '');
-                  appState.showToast('Thread SQL copied to clipboard', 'info');
-                }}
+                type="button"
+                onclick={() => copyWithToast(t.info || '', 'Thread SQL')}
                 class="text-[11px] text-sky-400 hover:underline flex items-center space-x-1"
               >
                 <Icon name="copy" class="w-3 h-3" />
                 <span>Copy SQL</span>
               </button>
               <button
-                onclick={() => explainThreadQuery(inspectingThread?.info)}
-                class="text-[11px] text-emerald-400 hover:underline flex items-center space-x-1"
+                type="button"
+                onclick={() => copyWithToast(JSON.stringify(t, null, 2), 'Thread JSON')}
+                class="text-[11px] text-slate-300 hover:underline flex items-center space-x-1"
               >
-                <Icon name="play" class="w-3 h-3" />
-                <span>Explain Query</span>
+                <Icon name="copy" class="w-3 h-3" />
+                <span>Copy JSON</span>
               </button>
-              <button
-                onclick={() => sendThreadToAI(inspectingThread?.info, inspectingThread)}
-                class="text-[11px] text-purple-400 hover:underline flex items-center space-x-1"
-              >
-                <Icon name="bot" class="w-3 h-3" />
-                <span>Send to AI</span>
-              </button>
+              {#if t.info}
+                <button
+                  type="button"
+                  onclick={() => { openSqlInEditor(t.info, `Thread_${t.id}.sql`); inspectingThread = null; }}
+                  class="text-[11px] text-cyan-400 hover:underline flex items-center space-x-1"
+                >
+                  <Icon name="file-code" class="w-3 h-3" />
+                  <span>To Tab</span>
+                </button>
+                <button
+                  type="button"
+                  onclick={() => appState.saveQueryToNote(t.info, `Thread #${t.id} (${t.user})`)}
+                  class="text-[11px] text-amber-400 hover:underline flex items-center space-x-1"
+                >
+                  <Icon name="bookmark" class="w-3 h-3" />
+                  <span>Save to Notes</span>
+                </button>
+                <button
+                  type="button"
+                  onclick={() => explainThreadQuery(t.info)}
+                  class="text-[11px] text-emerald-400 hover:underline flex items-center space-x-1"
+                >
+                  <Icon name="play" class="w-3 h-3" />
+                  <span>Explain</span>
+                </button>
+                <button
+                  type="button"
+                  onclick={() => sendThreadToAI(t.info, t)}
+                  class="text-[11px] text-purple-400 hover:underline flex items-center space-x-1"
+                >
+                  <Icon name="bot" class="w-3 h-3" />
+                  <span>Ask AI</span>
+                </button>
+              {/if}
             </div>
           </div>
-          <pre class="p-3 bg-[#050811] border border-[#1e293b] rounded-xl text-sky-300 font-mono text-xs overflow-x-auto whitespace-pre-wrap max-h-48">{inspectingThread.info || '(No active query statement)'}</pre>
+          <pre class="p-3 bg-[#050811] border border-[#1e293b] rounded-xl text-sky-300 font-mono text-xs overflow-x-auto whitespace-pre-wrap max-h-56">{formattedSql}</pre>
         </div>
       </div>
 
       <div class="px-5 py-3 border-t border-[#1e293b] flex items-center justify-between bg-[#0f172a]">
-        <button
-          onclick={() => killSingleThread(inspectingThread!.id)}
-          class="px-3.5 py-1.5 rounded bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition flex items-center space-x-1.5 shadow-lg shadow-rose-950/30"
-        >
-          <Icon name="trash-2" class="w-3.5 h-3.5" />
-          <span>Kill Thread</span>
-        </button>
+        <div class="flex items-center space-x-2">
+          <button
+            type="button"
+            disabled={isSysInspect}
+            onclick={() => killSingleThread(t.id, 'query')}
+            class="px-3 py-1.5 rounded bg-amber-950 hover:bg-amber-900 border border-amber-800 text-amber-200 text-xs font-bold transition flex items-center space-x-1.5 disabled:opacity-35 disabled:cursor-not-allowed"
+          >
+            <Icon name="square" class="w-3.5 h-3.5" />
+            <span>Kill Query</span>
+          </button>
+          <button
+            type="button"
+            disabled={isSelfInspect || isSysInspect}
+            onclick={() => killSingleThread(t.id, 'connection')}
+            class="px-3.5 py-1.5 rounded bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition flex items-center space-x-1.5 shadow-lg shadow-rose-950/30 disabled:opacity-35 disabled:cursor-not-allowed"
+          >
+            <Icon name="x-circle" class="w-3.5 h-3.5" />
+            <span>Kill Connection</span>
+          </button>
+        </div>
 
         <button
+          type="button"
           onclick={() => (inspectingThread = null)}
           class="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition"
         >
           Close
         </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Batch Kill Safety Challenge Modal -->
+{#if showBatchKillModal}
+  <div class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-[#0b0f19] border border-slate-700 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col text-xs font-sans">
+      <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-[#0f172a]">
+        <div class="flex items-center space-x-2.5">
+          <Icon name={batchKillMode === 'connection' ? 'x-circle' : 'square'} class="w-5 h-5 text-rose-400" />
+          <div>
+            <h3 class="font-bold text-slate-100 text-sm flex items-center space-x-2">
+              <span>Confirm Batch {batchKillMode === 'connection' ? 'KILL CONNECTION' : 'KILL QUERY'}</span>
+              <span class="px-2 py-0.5 rounded bg-rose-950 text-rose-300 text-[11px] font-mono border border-rose-800">
+                {batchKillTargetIds.length} Threads
+              </span>
+            </h3>
+            <p class="text-[11px] text-slate-400">
+              {batchKillMode === 'connection'
+                ? 'Disconnecting client connections terminates sessions immediately and rolls back uncommitted work.'
+                : 'Cancelling running queries aborts active statements while keeping client connections open.'}
+            </p>
+          </div>
+        </div>
+        <button type="button" onclick={() => (showBatchKillModal = false)} class="text-slate-400 hover:text-white" aria-label="Close">
+          <Icon name="x" class="w-4 h-4" />
+        </button>
+      </div>
+
+      <div class="p-5 space-y-4">
+        <div class="max-h-56 overflow-y-auto bg-[#050811] border border-slate-800 rounded-xl divide-y divide-slate-800/70 p-2 font-mono text-[11px]">
+          {#each batchKillTargetIds as id (id)}
+            {@const bt = threads.find((x) => x.id === id)}
+            <div class="py-1.5 px-2 flex items-center justify-between gap-2 hover:bg-slate-900/60 rounded">
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center space-x-1.5">
+                  <span class="font-bold text-sky-400">#{id}</span>
+                  {#if bt}
+                    <span class="text-slate-300 font-semibold">{bt.user}@{bt.host}</span>
+                    <span class="text-slate-500">({bt.db || '-'})</span>
+                    <span class="px-1 rounded bg-slate-800 text-slate-300 text-[10px]">{bt.command}</span>
+                  {/if}
+                </div>
+                {#if bt}
+                  <div class="text-[10px] text-slate-400 truncate mt-0.5" title={bt.info || ''}>
+                    {bt.info || (bt.command === 'Sleep' ? 'Idle connection (Sleep)' : '-')}
+                  </div>
+                {/if}
+              </div>
+              <div class="flex items-center space-x-2 shrink-0">
+                {#if bt}
+                  <span class="font-bold {bt.time >= 30 ? 'text-rose-400' : bt.time >= 5 ? 'text-amber-400' : 'text-slate-300'}">
+                    {bt.time}s
+                  </span>
+                {/if}
+                <button
+                  type="button"
+                  onclick={() => removeBatchKillTarget(id)}
+                  class="text-slate-500 hover:text-rose-400 p-1 rounded hover:bg-slate-800"
+                  title="Remove thread #{id} from batch"
+                >
+                  <Icon name="x" class="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          {/each}
+        </div>
+
+        {#if needsBatchChallenge}
+          <div class="p-3.5 bg-rose-950/40 border border-rose-800/80 rounded-xl space-y-2">
+            <div class="font-bold text-rose-300 flex items-center space-x-1.5">
+              <Icon name="shield-alert" class="w-4 h-4 text-rose-400" />
+              <span>
+                {isProductionConn()
+                  ? 'Production Environment Safety Guardrail'
+                  : `Large Batch Safety Guardrail (${batchKillTargetIds.length} threads)`}
+              </span>
+            </div>
+            <p class="text-[11px] text-slate-300">
+              Type <strong class="text-white font-mono bg-rose-900/60 px-1.5 py-0.5 rounded border border-rose-700/80">KILL</strong> below to unlock batch execution:
+            </p>
+            <input
+              type="text"
+              bind:value={batchKillChallengeInput}
+              placeholder="Type KILL here..."
+              class="w-full bg-slate-900 border border-rose-700/80 px-3 py-1.5 rounded text-white font-mono text-xs outline-none focus:border-rose-500 uppercase tracking-widest"
+            />
+          </div>
+        {/if}
+      </div>
+
+      <div class="px-5 py-3 border-t border-slate-800 flex items-center justify-between bg-[#0f172a]">
+        <span class="text-[11px] text-slate-500">Recorded in Session Audit Log.</span>
+        <div class="flex items-center space-x-2">
+          <button
+            type="button"
+            onclick={() => (showBatchKillModal = false)}
+            class="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={!batchChallengeValid || isBatchKilling}
+            onclick={executeBatchKill}
+            class="px-3.5 py-1.5 rounded bg-rose-600 hover:bg-rose-500 text-white font-bold transition flex items-center space-x-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Icon name="zap" class="w-3.5 h-3.5" />
+            <span>{isBatchKilling ? 'Executing...' : `Execute ${batchKillMode === 'connection' ? 'KILL CONNECTION' : 'KILL QUERY'}`}</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>

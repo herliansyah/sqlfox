@@ -27,6 +27,7 @@ type AIChatRequest struct {
 	ResponseStyle   string      `json:"response_style,omitempty"` // "concise", "detailed", "normal"
 	CustomPrompt    string      `json:"custom_prompt,omitempty"`  // custom persona / system instructions
 	IncludeSchema   *bool       `json:"include_schema,omitempty"` // default true
+	Temperature     float32     `json:"temperature,omitempty"`
 }
 
 func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
@@ -125,6 +126,7 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 		ResponseStyle:    req.ResponseStyle,
 		CustomPrompt:     req.CustomPrompt,
 		IncludeSchema:    includeSchema,
+		Temperature:      req.Temperature,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

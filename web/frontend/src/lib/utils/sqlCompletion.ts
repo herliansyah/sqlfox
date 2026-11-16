@@ -160,6 +160,7 @@ function columnItems(
   boost = 0,
   filter?: (label: string) => boolean,
   budget?: CandidateBudget,
+  includeTableName = false,
 ): CompletionItem[] {
   const table = getTable(catalog, tableName);
   if (!table) return [];
@@ -169,7 +170,8 @@ function columnItems(
     if (filter && !filter(name)) continue;
     if (budget && budget.remaining <= 0) break;
     const type = typeof column === 'string' ? '' : column.type || '';
-    items.push({ label: name, kind: 'COL', detail: type, apply: quote(name), boost });
+    const detail = includeTableName ? (type ? `${table.name}.${type}` : table.name) : type;
+    items.push({ label: name, kind: 'COL', detail, apply: quote(name), boost });
     if (budget) budget.remaining--;
   }
   return items;
@@ -199,14 +201,16 @@ function catalogColumnItems(
     const column = index.columns[i];
     if (!column.lower.startsWith(lower)) break;
     seen.add(column.label);
-    items.push({ label: column.label, kind: 'COL', detail: column.type, apply: quote(column.label), boost });
+    const detail = column.type ? `${column.table}.${column.type}` : column.table;
+    items.push({ label: column.label, kind: 'COL', detail, apply: quote(column.label), boost });
     budget.remaining--;
   }
   if (lower.length > 0 && budget.remaining > 0) {
     for (let i = 0; i < index.columns.length && budget.remaining > 0; i++) {
       const column = index.columns[i];
       if (seen.has(column.label) || !column.lower.includes(lower)) continue;
-      items.push({ label: column.label, kind: 'COL', detail: column.type, apply: quote(column.label), boost });
+      const detail = column.type ? `${column.table}.${column.type}` : column.table;
+      items.push({ label: column.label, kind: 'COL', detail, apply: quote(column.label), boost });
       budget.remaining--;
     }
   }
@@ -359,7 +363,7 @@ export function computeSqlCompletions(request: CompletionRequest): CompletionIte
       const catalog = relationCatalog(relation.database);
       const key = `${relation.database || request.activeDatabase}:${relation.table}`.toLowerCase();
       if (!seenTables.has(key)) {
-        add(columnItems(catalog, relation.table, quote, 18, matches, budget));
+        add(columnItems(catalog, relation.table, quote, 18, matches, budget, true));
         seenTables.add(key);
       }
       if (relation.alias) unique.set(`COL:${relation.alias.toLowerCase()}`, { label: relation.alias, kind: 'COL', detail: `Alias → ${relation.table}`, boost: 19 });
@@ -372,13 +376,15 @@ export function computeSqlCompletions(request: CompletionRequest): CompletionIte
       } else {
         for (const table of activeCatalog?.tables || []) {
           if (budget.remaining <= 0) break;
-          add(columnItems(activeCatalog, table.name, quote, 3, matches, budget));
+          add(columnItems(activeCatalog, table.name, quote, 3, matches, budget, true));
         }
       }
     }
-    for (const snippet of request.snippets || []) {
-      if (matches(snippet.title)) {
-        unique.set(`SNP:${snippet.id}`, { label: snippet.title, kind: 'SNP', detail: snippet.tags?.join(', ') || 'Template', snippet, boost: -4 });
+    if (lower.length >= 2) {
+      for (const snippet of request.snippets || []) {
+        if (matches(snippet.title)) {
+          unique.set(`SNP:${snippet.id}`, { label: snippet.title, kind: 'SNP', detail: snippet.tags?.join(', ') || 'Template', snippet, boost: -4 });
+        }
       }
     }
   }

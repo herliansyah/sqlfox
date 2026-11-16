@@ -82,3 +82,52 @@ test('parses MySQL tabular EXPLAIN rows', () => {
   assert.equal(parsed.nodes[1].isDanger, false);
   assert.equal(parsed.nodes[1].key, 'PRIMARY');
 });
+
+test('parses MySQL EXPLAIN FORMAT=JSON query_block when tabular rows are absent', () => {
+  const plan = {
+    raw_json: JSON.stringify({
+      query_block: {
+        select_id: 1,
+        ordering_operation: {
+          using_filesort: true,
+          nested_loop: [
+            {
+              table: {
+                table_name: 'orders',
+                access_type: 'ALL',
+                rows_examined_per_scan: 1200,
+                filtered: '10.00',
+                attached_condition: 'orders.status = "paid"',
+                cost_info: { read_cost: '142.50' },
+              },
+            },
+            {
+              table: {
+                table_name: 'users',
+                access_type: 'eq_ref',
+                key: 'PRIMARY',
+                rows_examined_per_scan: 1,
+                filtered: '100.00',
+                using_index: true,
+                cost_info: { read_cost: '0.25' },
+              },
+            },
+          ],
+        },
+      },
+    }),
+    rows: [],
+  };
+
+  const parsed = parseExplainPlan(plan);
+  assert.equal(parsed.dialectHint, 'mysql');
+  assert.equal(parsed.nodes.length, 2);
+  assert.equal(parsed.nodes[0].table, 'orders');
+  assert.equal(parsed.nodes[0].isDanger, true);
+  assert.equal(parsed.nodes[0].hasFilesort, true);
+  assert.equal(parsed.nodes[0].readCost, '142.50');
+  assert.equal(parsed.nodes[0].filterExpr, 'orders.status = "paid"');
+  assert.equal(parsed.nodes[1].table, 'users');
+  assert.equal(parsed.nodes[1].key, 'PRIMARY');
+  assert.equal(parsed.nodes[1].isCoveringIndex, true);
+});

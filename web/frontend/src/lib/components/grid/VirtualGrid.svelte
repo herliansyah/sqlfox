@@ -1,5 +1,8 @@
 <script lang="ts">
-import { copyText } from '../../utils/clipboard';
+  import { onMount, onDestroy, tick } from 'svelte';
+  import { copyText } from '../../utils/clipboard';
+  import { api } from '../../api/client';
+  import { parseEnumValues } from '../../utils/dataTypes';
   import { quoteSqlIdentifier, formatSqlLiteral } from '../../utils/sqlStatements';
   import { appState } from '../../stores/appState.svelte';
   import type { ColumnDefinition, FilterPill } from '../../../types';
@@ -16,6 +19,8 @@ import { copyText } from '../../utils/clipboard';
   let currentTab = $derived(appState.activeTab);
   let result = $derived(appState.activeTab?.activeResult);
   let isExecuting = $derived(Boolean(appState.activeTab?.isExecuting));
+  let effectiveTable = $derived(currentTab?.tableName || currentTab?.detectedTableName || '');
+  let canEdit = $derived(Boolean(effectiveTable && !appState.isReadOnly));
 
   // Sorting
   let sortCol = $state<string | null>(null);
@@ -31,9 +36,80 @@ import { copyText } from '../../utils/clipboard';
   let selectedRowIndex = $state<number | null>(null);
   let selectedCell = $state<{ rIdx: number; cIdx: number } | null>(null);
   let editingCell = $state<{ rIdx: number; cIdx: number; tempValue: string } | null>(null);
+  let flashedCells = $state<Record<string, boolean>>({});
+  let detailPrettyJson = $state(false);
+
+  // FK datalist suggestions cache: `${refTable}.${refCol}` -> string[]
+  let fkDatalistCache = $state<Record<string, string[]>>({});
+  let fkDatalistLoading = new Set<string>();
 
   // Multi-row selection
   let selectedRowIndices = $state<number[]>([]);
+
+  function flashCell(rIdx: number, cIdx: number) {
+    const key = `${rIdx}:${cIdx}`;
+    flashedCells = { ...flashedCells, [key]: true };
+    setTimeout(() => {
+      const next = { ...flashedCells };
+      delete next[key];
+      flashedCells = next;
+    }, 900);
+  }
+
+  async function ensureFkSuggestions(fk: { referenced_table: string; referenced_column: string }) {
+    if (!appState.activeSessionId || !fk?.referenced_table || !fk?.referenced_column) return;
+    const cacheKey = `${fk.referenced_table}.${fk.referenced_column}`;
+    if (fkDatalistCache[cacheKey] || fkDatalistLoading.has(cacheKey)) return;
+    fkDatalistLoading.add(cacheKey);
+    try {
+      const res = await api.getTableRows(
+        appState.activeSessionId,
+        fk.referenced_table,
+        100,
+        0,
+        currentTab?.database || appState.currentDatabase || undefined
+      );
+      const colNames = (res.columns || []).map((c: any) => (typeof c === 'string' ? c : c.name || ''));
+      const cIdx = colNames.findIndex((n) => n.toLowerCase() === fk.referenced_column.toLowerCase());
+      if (cIdx !== -1 && Array.isArray(res.rows)) {
+        const vals = Array.from(
+          new Set(
+            res.rows
+              .map((row) => row[cIdx])
+              .filter((v) => v !== null && v !== undefined)
+              .map((v) => String(v))
+          )
+        );
+        fkDatalistCache = { ...fkDatalistCache, [cacheKey]: vals };
+      }
+    } catch {
+      // Ignore silent datalist fetch failures
+    } finally {
+      fkDatalistLoading.delete(cacheKey);
+    }
+  }
+
+  // Focus filter handler via Ctrl+F inside TableViewer
+  function handleFocusTableFilterEvent() {
+    if (!currentTab?.isTableViewer) return;
+    if (!currentTab.showFilterBar) {
+      appState.toggleFilterBar();
+    }
+    tick().then(() => {
+      const el =
+        document.getElementById('table-filter-raw-input') ||
+        document.querySelector<HTMLInputElement>('#grid-filter-pill-val-0') ||
+        document.querySelector<HTMLInputElement>('.col-filter-input');
+      el?.focus();
+    });
+  }
+
+  onMount(() => {
+    window.addEventListener('sqlfox:focus-table-filter', handleFocusTableFilterEvent);
+  });
+  onDestroy(() => {
+    window.removeEventListener('sqlfox:focus-table-filter', handleFocusTableFilterEvent);
+  });
 
   // Reset selection, scroll, and editing states when active tab or result set changes
   $effect(() => {
@@ -46,6 +122,7 @@ import { copyText } from '../../utils/clipboard';
     selectedCell = null;
     editingCell = null;
     contextMenu = null;
+    detailPrettyJson = false;
   });
 
   // Keep containerHeight synced with viewport/splitter resizes before any scroll event.
@@ -110,18 +187,44 @@ import { copyText } from '../../utils/clipboard';
     (currentTab?.database && appState.catalogs[currentTab.database.toLowerCase()]) || appState.catalog
   );
 
+  let tableMeta = $derived.by(() => {
+    if (!effectiveTable || !activeCatalog?.tables) return null;
+    return activeCatalog.tables.find(
+      (t) => t.name.toLowerCase() === effectiveTable.toLowerCase()
+    ) || null;
+  });
+
   function isColPK(col: any): boolean {
-    if (typeof col === 'object') return Boolean(col.is_primary_key);
-    const table = activeCatalog?.tables?.find(
-      (t) => t.name.toLowerCase() === (currentTab?.tableName || '').toLowerCase()
-    );
-    const colMeta = table?.columns?.find((c) => c.name.toLowerCase() === String(col).toLowerCase());
+    if (typeof col === 'object' && col.is_primary_key !== undefined) return Boolean(col.is_primary_key);
+    const colName = getColName(col);
+    const colMeta = tableMeta?.columns?.find((c) => c.name.toLowerCase() === colName.toLowerCase());
     return Boolean(colMeta?.is_primary_key);
+  }
+
+  function resolveColType(col: any): string {
+    const direct = getColType(col);
+    if (direct) return direct;
+    const colName = getColName(col);
+    const colMeta = tableMeta?.columns?.find((c) => c.name.toLowerCase() === colName.toLowerCase());
+    return colMeta?.type || '';
+  }
+
+  function isColNullable(col: any): boolean {
+    if (typeof col === 'object' && col.is_nullable !== undefined) return Boolean(col.is_nullable);
+    const colName = getColName(col);
+    const colMeta = tableMeta?.columns?.find((c) => c.name.toLowerCase() === colName.toLowerCase());
+    return colMeta ? Boolean(colMeta.is_nullable) : true;
   }
 
   let allColumns = $derived<string[]>(
     result?.columns ? result.columns.map((c) => getColName(c)) : []
   );
+
+  let colIndexMap = $derived.by(() => {
+    const map = new Map<string, number>();
+    allColumns.forEach((name, idx) => map.set(name, idx));
+    return map;
+  });
 
   let hiddenCols = $derived<string[]>(currentTab?.hiddenColumns || []);
 
@@ -140,23 +243,129 @@ import { copyText } from '../../utils/clipboard';
 
   let fkMap = $derived.by(() => {
     const map = new Map<string, any>();
-    const table = activeCatalog?.tables?.find(
-      (t) => t.name.toLowerCase() === (currentTab?.tableName || '').toLowerCase()
-    );
-    for (const fk of table?.foreign_keys || []) {
+    for (const fk of tableMeta?.foreign_keys || []) {
       const col = (fk as any).column || (fk as any).column_name;
       if (col) map.set(col, fk);
     }
     return map;
   });
 
+  function matchesFilterCondition(cellVal: any, expr: string): boolean {
+    const q = expr.trim();
+    if (!q) return true;
+    const upper = q.toUpperCase();
+    if (upper === 'NULL' || upper === 'IS NULL') return cellVal === null || cellVal === undefined;
+    if (upper === '!NULL' || upper === 'IS NOT NULL') return cellVal !== null && cellVal !== undefined;
+    if (cellVal === null || cellVal === undefined) return false;
+    const str = typeof cellVal === 'object' ? JSON.stringify(cellVal) : String(cellVal);
+    if (q.startsWith('>=')) {
+      const n = Number(q.slice(2).trim());
+      return Number.isFinite(n) ? Number(cellVal) >= n : str >= q.slice(2).trim();
+    }
+    if (q.startsWith('<=')) {
+      const n = Number(q.slice(2).trim());
+      return Number.isFinite(n) ? Number(cellVal) <= n : str <= q.slice(2).trim();
+    }
+    if (q.startsWith('!=') || q.startsWith('<>')) {
+      return str.toLowerCase() !== q.slice(2).trim().toLowerCase();
+    }
+    if (q.startsWith('=')) {
+      return str.toLowerCase() === q.slice(1).trim().toLowerCase();
+    }
+    if (q.startsWith('>')) {
+      const n = Number(q.slice(1).trim());
+      return Number.isFinite(n) ? Number(cellVal) > n : str > q.slice(1).trim();
+    }
+    if (q.startsWith('<')) {
+      const n = Number(q.slice(1).trim());
+      return Number.isFinite(n) ? Number(cellVal) < n : str < q.slice(1).trim();
+    }
+    return str.toLowerCase().includes(q.toLowerCase());
+  }
+
+  function matchesFilterPill(cellVal: any, pill: FilterPill): boolean {
+    if (pill.op === 'IS NULL') return cellVal === null || cellVal === undefined;
+    if (pill.op === 'IS NOT NULL') return cellVal !== null && cellVal !== undefined;
+    if (cellVal === null || cellVal === undefined) return false;
+    const str = typeof cellVal === 'object' ? JSON.stringify(cellVal) : String(cellVal);
+    const valStr = String(pill.val ?? '');
+    switch (pill.op) {
+      case '=':
+        return str === valStr;
+      case '!=':
+        return str !== valStr;
+      case 'LIKE': {
+        const needle = valStr.replace(/%/g, '').toLowerCase();
+        return str.toLowerCase().includes(needle);
+      }
+      case 'NOT LIKE': {
+        const needle = valStr.replace(/%/g, '').toLowerCase();
+        return !str.toLowerCase().includes(needle);
+      }
+      case '>':
+      case '<':
+      case '>=':
+      case '<=': {
+        const a = Number(cellVal);
+        const b = Number(valStr);
+        const cmp = Number.isFinite(a) && Number.isFinite(b) ? a - b : str.localeCompare(valStr);
+        if (pill.op === '>') return cmp > 0;
+        if (pill.op === '<') return cmp < 0;
+        if (pill.op === '>=') return cmp >= 0;
+        return cmp <= 0;
+      }
+      case 'IN': {
+        const parts = valStr.split(',').map((s) => s.trim().replace(/^['"]|['"]$/g, ''));
+        return parts.includes(str);
+      }
+      case 'NOT IN': {
+        const parts = valStr.split(',').map((s) => s.trim().replace(/^['"]|['"]$/g, ''));
+        return !parts.includes(str);
+      }
+      case 'BETWEEN': {
+        const parts = valStr.split(/\s+AND\s+|,/i).map((s) => s.trim());
+        if (parts.length < 2) return true;
+        return str >= parts[0] && str <= parts[1];
+      }
+      default:
+        return true;
+    }
+  }
+
   let processedRows = $derived.by(() => {
     if (!result?.rows) return [];
     let list = result.rows.map((r, idx) => ({ origIdx: idx, data: r }));
 
+    // Client-side per-column header filters (query tabs & quick scan on TableViewer)
+    const qFilters = currentTab?.queryFilters;
+    if (qFilters) {
+      const activePairs = Object.entries(qFilters).filter(([, expr]) => expr && expr.trim().length > 0);
+      if (activePairs.length > 0) {
+        list = list.filter((item) =>
+          activePairs.every(([colName, expr]) => {
+            const cIdx = colIndexMap.get(colName);
+            if (cIdx === undefined) return true;
+            return matchesFilterCondition(item.data[cIdx], expr);
+          })
+        );
+      }
+    }
+
+    // Client-side pill filtering for non-TableViewer query result sets
+    if (!currentTab?.isTableViewer && currentTab?.filterPills && currentTab.filterPills.length > 0) {
+      const pills = currentTab.filterPills;
+      list = list.filter((item) =>
+        pills.every((pill) => {
+          const cIdx = colIndexMap.get(pill.col);
+          if (cIdx === undefined) return true;
+          return matchesFilterPill(item.data[cIdx], pill);
+        })
+      );
+    }
+
     // Apply sorting if active (only for ad-hoc queries; TableViewer is sorted server-side)
     if (!currentTab?.isTableViewer && sortCol !== null && result.columns) {
-      const cIdx = allColumns.indexOf(sortCol);
+      const cIdx = colIndexMap.get(sortCol) ?? -1;
       if (cIdx !== -1) {
         list = [...list].sort((a, b) => {
           const valA = a.data[cIdx];
@@ -286,37 +495,59 @@ import { copyText } from '../../utils/clipboard';
     }
   }
 
+  function setQueryColumnFilter(colName: string, expr: string) {
+    if (!currentTab) return;
+    currentTab.queryFilters = { ...(currentTab.queryFilters || {}), [colName]: expr };
+  }
+
   async function handleBatchDelete() {
-    if (selectedRowIndices.length === 0 || !currentTab?.tableName || !result?.rows) return;
-    const pkColObj = result.columns.find((c) => isColPK(c));
-    const pkCol = pkColObj ? getColName(pkColObj) : undefined;
-    if (!pkCol) {
-      appState.showToast('Batch delete requires a table with a Primary Key', 'error');
+    if (selectedRowIndices.length === 0 || !effectiveTable || !result?.rows) return;
+    if (appState.isReadOnly) {
+      appState.showToast('Read-only mode is active — delete blocked', 'warning');
       return;
     }
-    const pkIdx = allColumns.indexOf(pkCol);
     const validIndices = selectedRowIndices.filter((idx) => result!.rows && result!.rows[idx] !== undefined);
     if (validIndices.length === 0) return;
-    const pkVals = validIndices.map((idx) => result!.rows[idx][pkIdx]);
+
+    const pkColObj = result.columns.find((c) => isColPK(c));
+    const pkCol = pkColObj ? getColName(pkColObj) : undefined;
+
     const ok = await appState.showNativeConfirm(
       `Are you sure you want to delete ${validIndices.length} selected row(s)?`,
       'Batch Deletion'
     );
     if (!ok) return;
 
-    await appState.deleteRows(pkCol, pkVals);
+    if (pkCol) {
+      const pkIdx = colIndexMap.get(pkCol) ?? -1;
+      const pkVals = validIndices.map((idx) => result!.rows[idx][pkIdx]);
+      await appState.deleteRows(pkCol, pkVals);
+    } else {
+      const criterias = validIndices.map((idx) => {
+        const crit: Record<string, any> = {};
+        allColumns.forEach((col, cIdx) => {
+          crit[col] = result!.rows[idx][cIdx];
+        });
+        return crit;
+      });
+      await appState.deleteRowsByCriteria(criterias);
+    }
     selectedRowIndices = [];
   }
 
   function addDraftRow() {
     if (!currentTab) return;
+    if (!canEdit) {
+      appState.showToast(appState.isReadOnly ? 'Read-only mode is active' : 'Draft rows require a single target table', 'warning');
+      return;
+    }
     if (!currentTab.stagedDraftRows) currentTab.stagedDraftRows = [];
     const blank: Record<string, any> = {};
     allColumns.forEach((c) => {
       blank[c] = '';
     });
     currentTab.stagedDraftRows.unshift(blank);
-    appState.showToast('Draft row added. Enter values to save.', 'info');
+    appState.showToast('Draft row added. Enter values or Save All staged edits.', 'info');
   }
 
   function removeDraftRow(dIdx: number) {
@@ -325,7 +556,7 @@ import { copyText } from '../../utils/clipboard';
   }
 
   async function saveDraftRow(dIdx: number) {
-    if (!currentTab?.stagedDraftRows || !currentTab.stagedDraftRows[dIdx] || !currentTab.tableName) return;
+    if (!canEdit || !currentTab?.stagedDraftRows || !currentTab.stagedDraftRows[dIdx] || !effectiveTable) return;
     const draft = currentTab.stagedDraftRows[dIdx];
     const cleaned: Record<string, any> = {};
     for (const [k, v] of Object.entries(draft)) {
@@ -343,19 +574,19 @@ import { copyText } from '../../utils/clipboard';
     }
   }
 
-  function autoFocus(node: HTMLInputElement) {
+  function autoFocus(node: HTMLElement) {
     node.focus();
-    node.select();
+    if (node instanceof HTMLInputElement) node.select();
   }
 
   /**
    * Clones a visible row into an editable draft.
-   * @param withoutKey when true, primary-key values are blanked so the database
-   *   can generate a new identity (the safe default); when false the key is
-   *   copied verbatim, which only makes sense for composite/derived keys.
    */
   function duplicateRowAsDraft(rIdx: number, withoutKey = true) {
-    if (!currentTab || !result?.rows || !result.rows[rIdx]) return;
+    if (!canEdit || !currentTab || !result?.rows || !result.rows[rIdx]) {
+      if (appState.isReadOnly) appState.showToast('Read-only mode is active', 'warning');
+      return;
+    }
     if (!currentTab.stagedDraftRows) currentTab.stagedDraftRows = [];
     const row = result.rows[rIdx];
     const draft: Record<string, any> = {};
@@ -370,31 +601,109 @@ import { copyText } from '../../utils/clipboard';
     );
   }
 
-  function getFkInfo(colName: string) {
-    return fkMap.get(colName) || null;
+  function duplicateMultipleRows(indices: number[]) {
+    if (!canEdit) return;
+    indices.forEach((idx) => duplicateRowAsDraft(idx, true));
   }
 
-  // Inline Editing
-  function startCellEdit(origIdx: number, cIdx: number, val: any) {
+  function validateCellValue(val: string, colType: string): string | null {
+    if (!val) return null;
+    const t = colType.toLowerCase();
+    if (/^(tinyint|smallint|mediumint|int|integer|bigint|serial)/.test(t) && !t.includes('tinyint(1)')) {
+      if (!/^-?\d+$/.test(val.trim())) return `Expected integer for ${colType}`;
+    } else if (/^(decimal|numeric|float|double|real)/.test(t)) {
+      if (!Number.isFinite(Number(val.trim()))) return `Expected numeric value for ${colType}`;
+    } else if (t.includes('json')) {
+      try {
+        JSON.parse(val);
+      } catch {
+        return `Invalid JSON syntax for ${colType}`;
+      }
+    } else if (t === 'date') {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(val.trim())) return 'Expected date format YYYY-MM-DD';
+    } else if (t === 'time') {
+      if (!/^\d{2}:\d{2}(:\d{2})?$/.test(val.trim())) return 'Expected time format HH:MM or HH:MM:SS';
+    } else if (t.startsWith('datetime') || t.startsWith('timestamp')) {
+      if (!/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?/.test(val.trim())) {
+        return 'Expected format YYYY-MM-DD HH:MM:SS';
+      }
+    }
+    return null;
+  }
+
+  function stepActiveDatePart(delta: number) {
+    if (!editingCell) return;
+    const val = editingCell.tempValue.trim();
+    const match = val.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+    if (!match) return;
+    let y = Number(match[1]);
+    let m = Number(match[2]);
+    let d = Number(match[3]);
+    let hh = match[4] !== undefined ? Number(match[4]) : null;
+    let mm = match[5] !== undefined ? Number(match[5]) : null;
+    let ss = match[6] !== undefined ? Number(match[6]) : 0;
+
+    const inputEl = document.getElementById('grid-inline-editor') as HTMLInputElement | null;
+    const pos = inputEl?.selectionStart ?? val.length;
+
+    const daysInMonth = (yr: number, mo: number) => new Date(yr, mo, 0).getDate();
+
+    if (pos <= 4) {
+      y = Math.max(1970, Math.min(2099, y + delta));
+    } else if (pos <= 7) {
+      m += delta;
+      if (m > 12) { m = 1; y++; }
+      if (m < 1) { m = 12; y = Math.max(1970, y - 1); }
+    } else if (pos <= 10 || hh === null) {
+      d += delta;
+      const maxD = daysInMonth(y, m);
+      if (d > maxD) d = 1;
+      if (d < 1) d = maxD;
+    } else if (pos <= 13) {
+      hh = (hh + delta + 24) % 24;
+    } else if (pos <= 16) {
+      mm = ((mm ?? 0) + delta + 60) % 60;
+    } else {
+      ss = (ss + delta + 60) % 60;
+    }
+    d = Math.min(d, daysInMonth(y, m));
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const datePart = `${y}-${pad(m)}-${pad(d)}`;
+    editingCell.tempValue = hh !== null ? `${datePart} ${pad(hh)}:${pad(mm ?? 0)}:${pad(ss)}` : datePart;
+  }
+
+  function applyEditPreset(preset: 'NULL' | 'EMPTY' | 'NOW' | 'DATE' | 'UUID', origIdx: number, cIdx: number) {
+    if (!canEdit || !effectiveTable || !result?.rows) return;
+    let next: any = '';
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    const time = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+    if (preset === 'NULL') next = null;
+    else if (preset === 'EMPTY') next = '';
+    else if (preset === 'DATE') next = today;
+    else if (preset === 'NOW') next = `${today} ${time}`;
+    else if (preset === 'UUID') {
+      next = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : '00000000-0000-4000-8000-000000000000';
+    }
     editingCell = {
       rIdx: origIdx,
       cIdx,
-      tempValue: val === null || val === undefined ? '' : String(val),
+      tempValue: next === null ? '' : String(next),
     };
+    commitDirectCellValue(origIdx, cIdx, next);
   }
 
-  function commitCellEdit(origIdx: number, cIdx: number) {
-    if (!editingCell || !currentTab?.tableName || !result?.rows) return;
+  function commitDirectCellValue(origIdx: number, cIdx: number, newVal: any) {
+    if (!canEdit || !effectiveTable || !result?.rows) return;
     const colName = allColumns[cIdx];
     const oldVal = result.rows[origIdx][cIdx];
-    const newVal = editingCell.tempValue;
-
-    const oldStr = oldVal === null || oldVal === undefined ? '' : String(oldVal);
-    if (newVal !== oldStr) {
-      // Find PK col
+    if (newVal !== oldVal) {
       const pkColObj = result.columns.find((c) => isColPK(c));
       const pkCol = pkColObj ? getColName(pkColObj) : undefined;
-      const pkVal = pkCol ? result.rows[origIdx][allColumns.indexOf(pkCol)] : undefined;
+      const pkVal = pkCol ? result.rows[origIdx][colIndexMap.get(pkCol) ?? -1] : undefined;
 
       let rowCriteria: Record<string, any> | undefined;
       if (!pkCol) {
@@ -405,7 +714,7 @@ import { copyText } from '../../utils/clipboard';
       }
 
       appState.stageEdit(
-        currentTab.tableName,
+        effectiveTable,
         origIdx,
         cIdx,
         colName,
@@ -413,10 +722,51 @@ import { copyText } from '../../utils/clipboard';
         pkVal,
         oldVal,
         newVal,
-        currentTab.database || appState.currentDatabase,
+        currentTab?.database || appState.currentDatabase,
         rowCriteria
       );
       result.rows[origIdx][cIdx] = newVal;
+      flashCell(origIdx, cIdx);
+    }
+    editingCell = null;
+  }
+
+  // Inline Editing
+  function startCellEdit(origIdx: number, cIdx: number, val: any) {
+    if (!canEdit) {
+      if (appState.isReadOnly) {
+        appState.showToast('Session is in Read-Only mode — editing disabled', 'warning');
+      } else {
+        appState.showToast('Inline editing requires a single target table', 'info');
+      }
+      return;
+    }
+    const colName = allColumns[cIdx];
+    const fk = fkMap.get(colName);
+    if (fk) void ensureFkSuggestions(fk);
+    editingCell = {
+      rIdx: origIdx,
+      cIdx,
+      tempValue: val === null || val === undefined ? '' : typeof val === 'object' ? JSON.stringify(val) : String(val),
+    };
+  }
+
+  function commitCellEdit(origIdx: number, cIdx: number) {
+    if (!editingCell || !canEdit || !effectiveTable || !result?.rows) return;
+    const colDef = result.columns[cIdx];
+    const colType = resolveColType(colDef);
+    const oldVal = result.rows[origIdx][cIdx];
+    const newVal = editingCell.tempValue;
+
+    const oldStr = oldVal === null || oldVal === undefined ? '' : typeof oldVal === 'object' ? JSON.stringify(oldVal) : String(oldVal);
+    if (newVal !== oldStr) {
+      const errMsg = validateCellValue(newVal, colType);
+      if (errMsg) {
+        appState.showToast(errMsg, 'error');
+        return;
+      }
+      commitDirectCellValue(origIdx, cIdx, newVal);
+      return;
     }
     editingCell = null;
   }
@@ -452,16 +802,149 @@ import { copyText } from '../../utils/clipboard';
     closeContextMenu();
   }
 
-  // Export functions
+  // Excel-safe CSV export with UTF-8 BOM & leading zero protection
   function exportCSV() {
     if (!result?.rows || !result?.columns) return;
-    const headers = result.columns.map((c) => `"${getColName(c)}"`).join(',');
+    const headers = result.columns.map((c) => `"${getColName(c).replace(/"/g, '""')}"`).join(',');
     const rows = result.rows.map((row) =>
-      row.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(',')
+      row
+        .map((cell) => {
+          if (cell === null || cell === undefined) return '""';
+          const str = typeof cell === 'object' ? JSON.stringify(cell) : String(cell);
+          if (/^0\d+$/.test(str)) {
+            return `"=""${str.replace(/"/g, '""')}"""`;
+          }
+          return `"${str.replace(/"/g, '""')}"`;
+        })
+        .join(',')
     );
-    const csv = [headers, ...rows].join('\n');
-    downloadFile(csv, `${currentTab?.tableName || 'query_export'}.csv`, 'text/csv');
+    const csv = '\uFEFF' + [headers, ...rows].join('\n');
+    downloadFile(csv, `${effectiveTable || 'query_export'}.csv`, 'text/csv;charset=utf-8');
     showExportMenu = false;
+  }
+
+  function copyGridAsTSV() {
+    if (!result?.rows || !result?.columns) return;
+    const cols = visibleColumns.map((c) => getColName(c)).join('\t');
+    const lines = processedRows.map((item) =>
+      visibleColumnEntries
+        .map(({ origIdx: cIdx }) => {
+          const v = item.data[cIdx];
+          if (v === null || v === undefined) return '';
+          return typeof v === 'object' ? JSON.stringify(v) : String(v);
+        })
+        .join('\t')
+    );
+    copyText([cols, ...lines].join('\n'));
+    showExportMenu = false;
+    appState.showToast(`Copied ${processedRows.length} rows as TSV`, 'success');
+  }
+
+  function copyGridAsMarkdown() {
+    if (!result?.rows || !result?.columns) return;
+    const names = visibleColumns.map((c) => getColName(c));
+    const header = `| ${names.join(' | ')} |`;
+    const sep = `| ${names.map(() => '---').join(' | ')} |`;
+    const lines = processedRows.map((item) =>
+      `| ${visibleColumnEntries
+        .map(({ origIdx: cIdx }) => {
+          const v = item.data[cIdx];
+          if (v === null || v === undefined) return '*NULL*';
+          const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
+          return s.replace(/\|/g, '\\|').replace(/\n/g, ' ');
+        })
+        .join(' | ')} |`
+    );
+    copyText([header, sep, ...lines].join('\n'));
+    showExportMenu = false;
+    appState.showToast(`Copied ${processedRows.length} rows as Markdown Table`, 'success');
+  }
+
+  function formatRowCell(v: any): string {
+    if (v === null || v === undefined) return '';
+    return typeof v === 'object' ? JSON.stringify(v) : String(v);
+  }
+
+  function formatSqlRowInsert(row: any[], cols: string[], tbl: string, driver?: string): string {
+    const isPg = driver === 'postgres' || driver === 'postgresql';
+    const q = (s: string) => quoteSqlIdentifier(s, driver);
+    const qCols = cols.map((c) => q(c)).join(', ');
+    const vals = row
+      .map((c) => (typeof c === 'boolean' ? (c ? (isPg ? 'TRUE' : '1') : (isPg ? 'FALSE' : '0')) : formatSqlLiteral(c)))
+      .join(', ');
+    return `INSERT INTO ${q(tbl)} (${qCols}) VALUES (${vals});`;
+  }
+
+  function copyRowAsTSV(rIdx: number) {
+    if (!result?.rows || !result.rows[rIdx] || !result.columns) return;
+    const cols = result.columns.map((c) => getColName(c)).join('\t');
+    const vals = result.rows[rIdx].map((v) => (v === null || v === undefined ? '' : formatRowCell(v))).join('\t');
+    copyText(`${cols}\n${vals}`);
+    appState.showToast('Copied row as TSV', 'info');
+  }
+
+  function copyRowAsJSON(rIdx: number) {
+    if (!result?.rows || !result.rows[rIdx] || !result.columns) return;
+    const obj: Record<string, any> = {};
+    result.columns.forEach((c, idx) => {
+      obj[getColName(c)] = result!.rows[rIdx][idx];
+    });
+    copyText(JSON.stringify(obj, null, 2));
+    appState.showToast('Copied row as JSON', 'info');
+  }
+
+  function copyRowAsMarkdown(rIdx: number) {
+    if (!result?.rows || !result.rows[rIdx] || !result.columns) return;
+    const colNames = result.columns.map((c) => getColName(c));
+    const header = `| ${colNames.join(' | ')} |`;
+    const separator = `| ${colNames.map(() => '---').join(' | ')} |`;
+    const row = `| ${result.rows[rIdx].map((v) => (v === null ? '*NULL*' : formatRowCell(v).replace(/\|/g, '\\|'))).join(' | ')} |`;
+    copyText(`${header}\n${separator}\n${row}`);
+    appState.showToast('Copied row as Markdown Table', 'info');
+  }
+
+  function copyRowAsInsertSQL(rIdx: number) {
+    if (!result?.rows || !result.rows[rIdx] || !result.columns) return;
+    const tbl = effectiveTable || 'table_name';
+    const cols = result.columns.map((c) => getColName(c));
+    copyText(formatSqlRowInsert(result.rows[rIdx], cols, tbl, appState.activeConnection?.driver));
+    appState.showToast('Copied as INSERT SQL statement', 'info');
+  }
+
+  function copySelectedRows(format: 'tsv' | 'json' | 'md' | 'sql') {
+    if (!result?.rows || !result?.columns) return;
+    const indices = selectedRowIndices.length > 0 ? selectedRowIndices : contextMenu ? [contextMenu.rIdx] : [];
+    if (indices.length === 0) return;
+    if (indices.length === 1) {
+      const rIdx = indices[0];
+      if (format === 'tsv') copyRowAsTSV(rIdx);
+      else if (format === 'json') copyRowAsJSON(rIdx);
+      else if (format === 'md') copyRowAsMarkdown(rIdx);
+      else copyRowAsInsertSQL(rIdx);
+      return;
+    }
+    const cols = result.columns.map((c) => getColName(c));
+    if (format === 'tsv') {
+      const lines = indices.map((rIdx) => result!.rows[rIdx].map(formatRowCell).join('\t'));
+      copyText(`${cols.join('\t')}\n${lines.join('\n')}`);
+    } else if (format === 'json') {
+      const objs = indices.map((rIdx) => {
+        const obj: Record<string, any> = {};
+        cols.forEach((col, i) => (obj[col] = result!.rows[rIdx][i]));
+        return obj;
+      });
+      copyText(JSON.stringify(objs, null, 2));
+    } else if (format === 'md') {
+      const header = `| ${cols.join(' | ')} |`;
+      const sep = `| ${cols.map(() => '---').join(' | ')} |`;
+      const lines = indices.map((rIdx) => `| ${result!.rows[rIdx].map((v) => (v === null ? '*NULL*' : formatRowCell(v).replace(/\|/g, '\\|'))).join(' | ')} |`);
+      copyText(`${header}\n${sep}\n${lines.join('\n')}`);
+    } else {
+      const tbl = effectiveTable || 'table_name';
+      const lines = indices.map((rIdx) => formatSqlRowInsert(result!.rows[rIdx], cols, tbl, appState.activeConnection?.driver));
+      copyText(lines.join('\n'));
+    }
+    appState.showToast(`Copied ${indices.length} row(s) as ${format.toUpperCase()}`, 'info');
   }
 
   function exportJSON() {
@@ -511,70 +994,127 @@ import { copyText } from '../../utils/clipboard';
     appState.showToast(`Exported ${filename}`, 'success');
   }
 
-  // Delete Row
+  // Delete Row (supports PK-less criteria fallback)
   async function handleDeleteCurrentRow(targetIdx: number | null = selectedRowIndex) {
-    if (targetIdx === null || !currentTab?.tableName || !result?.rows?.[targetIdx]) return;
-    const pkColObj = result.columns.find((c) => isColPK(c));
-    if (!pkColObj) {
-      appState.showToast('Table does not have a primary key for deletion', 'warning');
+    if (targetIdx === null || !effectiveTable || !result?.rows?.[targetIdx]) return;
+    if (appState.isReadOnly) {
+      appState.showToast('Read-only mode is active — delete blocked', 'warning');
       return;
     }
-    const pkCol = getColName(pkColObj);
-    const pkVal = result.rows[targetIdx][allColumns.indexOf(pkCol)];
-    const ok = await appState.showNativeConfirm(
-      `Delete record with ${pkCol} = ${pkVal}?`,
-      'Confirm Deletion'
-    );
-    if (ok) {
-      await appState.deleteRows(pkCol, [pkVal]);
-      if (selectedRowIndex === targetIdx) selectedRowIndex = null;
+    const pkColObj = result.columns.find((c) => isColPK(c));
+    if (pkColObj) {
+      const pkCol = getColName(pkColObj);
+      const pkVal = result.rows[targetIdx][colIndexMap.get(pkCol) ?? -1];
+      const ok = await appState.showNativeConfirm(
+        `Delete record with ${pkCol} = ${pkVal}?`,
+        'Confirm Deletion'
+      );
+      if (ok) {
+        await appState.deleteRows(pkCol, [pkVal]);
+        if (selectedRowIndex === targetIdx) selectedRowIndex = null;
+      }
+    } else {
+      const crit: Record<string, any> = {};
+      allColumns.forEach((col, cIdx) => {
+        crit[col] = result!.rows[targetIdx][cIdx];
+      });
+      const ok = await appState.showNativeConfirm(
+        `Delete row #${targetIdx + 1} from ${effectiveTable} by matching all columns?`,
+        'Confirm Deletion (No PK)'
+      );
+      if (ok) {
+        await appState.deleteRowsByCriteria([crit]);
+        if (selectedRowIndex === targetIdx) selectedRowIndex = null;
+      }
     }
   }
 
-  function copyRowAsTSV(rIdx: number) {
-    if (!result?.rows || !result.rows[rIdx] || !result.columns) return;
-    const cols = result.columns.map((c) => getColName(c)).join('\t');
-    const vals = result.rows[rIdx].map((v) => (v === null || v === undefined ? '' : String(v))).join('\t');
-    copyText(`${cols}\n${vals}`);
-    appState.showToast('Copied row as TSV', 'info');
+  function advanceActiveCell(dRow: number, dCol: number) {
+    if (processedRows.length === 0 || visibleColumnEntries.length === 0) return;
+    const curDisplayIdx = selectedCell
+      ? Math.max(0, processedRows.findIndex((r) => r.origIdx === selectedCell!.rIdx))
+      : 0;
+    const curVisColIdx = selectedCell
+      ? Math.max(0, visibleColumnEntries.findIndex((e) => e.origIdx === selectedCell!.cIdx))
+      : 0;
+
+    let nextDisplayIdx = Math.max(0, Math.min(processedRows.length - 1, curDisplayIdx + dRow));
+    let nextVisColIdx = curVisColIdx + dCol;
+    if (nextVisColIdx >= visibleColumnEntries.length) {
+      nextVisColIdx = 0;
+      nextDisplayIdx = Math.min(processedRows.length - 1, nextDisplayIdx + 1);
+    } else if (nextVisColIdx < 0) {
+      nextVisColIdx = visibleColumnEntries.length - 1;
+      nextDisplayIdx = Math.max(0, nextDisplayIdx - 1);
+    }
+
+    const row = processedRows[nextDisplayIdx];
+    const colEntry = visibleColumnEntries[nextVisColIdx];
+    if (!row || !colEntry) return;
+    selectedCell = { rIdx: row.origIdx, cIdx: colEntry.origIdx };
+    selectedRowIndex = row.origIdx;
+
+    if (containerRef) {
+      const y = nextDisplayIdx * ROW_HEIGHT;
+      if (y < containerRef.scrollTop) containerRef.scrollTop = y;
+      else if (y + ROW_HEIGHT > containerRef.scrollTop + containerRef.clientHeight - 60) {
+        containerRef.scrollTop = y + ROW_HEIGHT - containerRef.clientHeight + 60;
+      }
+    }
   }
 
-  function copyRowAsJSON(rIdx: number) {
-    if (!result?.rows || !result.rows[rIdx] || !result.columns) return;
-    const obj: Record<string, any> = {};
-    result.columns.forEach((c, idx) => {
-      obj[getColName(c)] = result!.rows[rIdx][idx];
-    });
-    copyText(JSON.stringify(obj, null, 2));
-    appState.showToast('Copied row as JSON', 'info');
-  }
+  function handleGridKeydown(e: KeyboardEvent) {
+    if (editingCell) return;
+    const target = e.target as HTMLElement | null;
+    if (target && target.closest('input, textarea, select')) return;
 
-  function copyRowAsMarkdown(rIdx: number) {
-    if (!result?.rows || !result.rows[rIdx] || !result.columns) return;
-    const colNames = result.columns.map((c) => getColName(c));
-    const header = `| ${colNames.join(' | ')} |`;
-    const separator = `| ${colNames.map(() => '---').join(' | ')} |`;
-    const row = `| ${result.rows[rIdx].map((v) => (v === null ? '*NULL*' : String(v).replace(/\|/g, '\\|'))).join(' | ')} |`;
-    copyText(`${header}\n${separator}\n${row}`);
-    appState.showToast('Copied row as Markdown Table', 'info');
-  }
+    const isCtrl = e.ctrlKey || e.metaKey;
+    if (isCtrl && e.shiftKey && e.key.toLowerCase() === 'n') {
+      e.preventDefault();
+      addDraftRow();
+      return;
+    }
+    if (isCtrl && e.shiftKey && e.key.toLowerCase() === 'e') {
+      e.preventDefault();
+      if (totalRows > 0) {
+        appState.recordInspectorRowIndex = selectedRowIndex ?? 0;
+        appState.isRecordInspectorOpen = true;
+      }
+      return;
+    }
+    if (isCtrl && e.shiftKey && e.key.toLowerCase() === 'd') {
+      e.preventDefault();
+      if (selectedRowIndex !== null) duplicateRowAsDraft(selectedRowIndex, true);
+      return;
+    }
+    if (isCtrl && e.shiftKey && e.key.toLowerCase() === 't') {
+      e.preventDefault();
+      showDetailDrawer = !showDetailDrawer;
+      return;
+    }
 
-  function copyRowAsInsertSQL(rIdx: number) {
-    if (!result?.rows || !result.rows[rIdx] || !result.columns) return;
-    const tbl = currentTab?.tableName || 'table_name';
-    const driver = appState.activeConnection?.driver;
-    const isPg = driver === 'postgres' || driver === 'postgresql';
-    const q = (s: string) => quoteSqlIdentifier(s, driver);
-    const cols = result.columns.map((c) => q(getColName(c))).join(', ');
-    const vals = result.rows[rIdx]
-      .map((c) => {
-        if (typeof c === 'boolean') return c ? (isPg ? 'TRUE' : '1') : (isPg ? 'FALSE' : '0');
-        return formatSqlLiteral(c);
-      })
-      .join(', ');
-    const sql = `INSERT INTO ${q(tbl)} (${cols}) VALUES (${vals});`;
-    copyText(sql);
-    appState.showToast('Copied as INSERT SQL statement', 'info');
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      advanceActiveCell(1, 0);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      advanceActiveCell(-1, 0);
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      advanceActiveCell(0, 1);
+    } else if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      advanceActiveCell(0, -1);
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      advanceActiveCell(0, e.shiftKey ? -1 : 1);
+    } else if (e.key === ' ' && selectedRowIndex !== null) {
+      e.preventDefault();
+      toggleRowSelection(selectedRowIndex);
+    } else if ((e.key === 'Enter' || e.key === 'F2') && selectedCell && result?.rows?.[selectedCell.rIdx]) {
+      e.preventDefault();
+      startCellEdit(selectedCell.rIdx, selectedCell.cIdx, result.rows[selectedCell.rIdx][selectedCell.cIdx]);
+    }
   }
 </script>
 
@@ -583,21 +1123,47 @@ import { copyText } from '../../utils/clipboard';
 <div class="h-full flex flex-col bg-[#090d16] overflow-hidden select-text relative">
   <!-- Multi-Statement Execution Results Tabs -->
   {#if currentTab?.multiResults && currentTab.multiResults.length > 1}
-    <div class="h-8 bg-[#0b0f19] border-b border-slate-800 px-3 flex items-center space-x-1 select-none overflow-x-auto shrink-0">
-      {#each currentTab.multiResults as mRes, mIdx}
+    <div class="h-8 bg-[#0b0f19] border-b border-slate-800 px-3 flex items-center justify-between gap-2 select-none shrink-0">
+      <div class="flex items-center space-x-1 overflow-x-auto min-w-0">
+        {#each currentTab.multiResults as mRes, mIdx}
+          {@const isCmd = !mRes.columns || mRes.columns.length === 0}
+          {@const countVal = isCmd ? (mRes.rows_affected ?? mRes.affected_rows ?? 0) : (mRes.row_count ?? mRes.rows?.length ?? 0)}
+          <button
+            type="button"
+            onclick={() => {
+              if (currentTab) {
+                currentTab.activeResultIndex = mIdx;
+                currentTab.activeResult = mRes;
+              }
+            }}
+            class="px-2.5 py-1 rounded text-xs font-mono font-medium transition flex items-center space-x-1.5 shrink-0 {(currentTab.activeResultIndex || 0) === mIdx ? 'bg-sky-500/20 text-sky-300 font-bold border border-sky-500/50' : 'text-slate-400 hover:text-white hover:bg-slate-800'}"
+          >
+            <span class="w-1.5 h-1.5 rounded-full shrink-0 {mRes.error ? 'bg-rose-400' : isCmd ? 'bg-emerald-400' : 'bg-sky-400'}"></span>
+            <span>
+              Result {mIdx + 1} ({mRes.error ? 'err' : isCmd ? `${countVal} affected` : `${countVal} rows`})
+            </span>
+            {#if mRes.truncated || mRes.capped_at}
+              <span class="px-1 py-0.2 rounded bg-amber-950/70 border border-amber-800/70 text-[9px] text-amber-300" title="Capped at {mRes.capped_at || '5k'} rows">
+                Capped
+              </span>
+            {/if}
+          </button>
+        {/each}
+      </div>
+      {#if result}
         <button
           type="button"
           onclick={() => {
-            if (currentTab) {
-              currentTab.activeResultIndex = mIdx;
-              currentTab.activeResult = mRes;
-            }
+            const tab = appState.addTab(`Result ${(currentTab.activeResultIndex || 0) + 1}`, currentTab.sql || '');
+            tab.activeResult = JSON.parse(JSON.stringify(result));
+            appState.saveTabsState();
           }}
-          class="px-2.5 py-1 rounded text-xs font-mono font-medium transition {(currentTab.activeResultIndex || 0) === mIdx ? 'bg-sky-500/20 text-sky-300 font-bold border border-sky-500/50' : 'text-slate-400 hover:text-white hover:bg-slate-800'}"
+          class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[10px] font-mono shrink-0 transition"
+          title="Open active result set in a dedicated tab"
         >
-          Result {mIdx + 1} ({mRes.row_count ?? mRes.rows?.length ?? 0} rows)
+          Open in New Tab
         </button>
-      {/each}
+      {/if}
     </div>
   {/if}
 
@@ -656,7 +1222,7 @@ import { copyText } from '../../utils/clipboard';
 
         <button
           id="btn-mock-data"
-          onclick={() => (appState.isMockDataModalOpen = true)}
+          onclick={() => appState.openMockDataModal(effectiveTable)}
           class="h-6 px-2 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 border border-slate-700/80 flex items-center space-x-1 transition text-[11px]"
           title="Generate synthetic test records"
         >
@@ -689,11 +1255,12 @@ import { copyText } from '../../utils/clipboard';
             <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" title="Active filter applied"></span>
           {/if}
         </button>
+      {/if}
 
-        <!-- Edit mode: staged vs auto-commit -->
+      {#if currentTab?.isTableViewer || canEdit}
         <div
           id="grid-edit-mode-container"
-          class="flex items-center space-x-1 rounded border border-slate-800 bg-slate-900 px-2 py-0.5 text-[11px]"
+          class="flex items-center space-x-1.5 rounded border border-slate-800 bg-slate-900 px-2 py-0.5 text-[11px]"
         >
           <span class="text-[10px] text-slate-400">Edit:</span>
           <button
@@ -718,6 +1285,15 @@ import { copyText } from '../../utils/clipboard';
           >
             Auto
           </button>
+          <label class="flex items-center space-x-1 pl-1.5 border-l border-slate-700/80 text-[10px] text-slate-400 cursor-pointer" title="Require confirmation prompt before saving edits">
+            <input
+              type="checkbox"
+              checked={appState.gridConfirmSave}
+              onchange={(e) => appState.setGridConfirmSave((e.currentTarget as HTMLInputElement).checked)}
+              class="rounded border-slate-700 bg-slate-950 text-sky-500 focus:ring-0"
+            />
+            <span>Confirm Save</span>
+          </label>
         </div>
       {/if}
 
@@ -846,6 +1422,20 @@ import { copyText } from '../../utils/clipboard';
               <Icon name="code" class="w-3.5 h-3.5 text-sky-400" />
               <span>Export as SQL</span>
             </button>
+            <button
+              onclick={copyGridAsTSV}
+              class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+            >
+              <Icon name="copy" class="w-3.5 h-3.5 text-emerald-300" />
+              <span>Copy Grid as TSV</span>
+            </button>
+            <button
+              onclick={copyGridAsMarkdown}
+              class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+            >
+              <Icon name="copy" class="w-3.5 h-3.5 text-purple-300" />
+              <span>Copy Grid as Markdown</span>
+            </button>
             {#if currentTab?.isTableViewer && currentTab.tableName}
               <button
                 id="export-menu-table-dump"
@@ -921,6 +1511,7 @@ import { copyText } from '../../utils/clipboard';
             </span>
             <div class="relative flex-1 flex items-center">
               <input
+                id="table-filter-raw-input"
                 type="text"
                 value={currentTab.filterRaw || ''}
                 oninput={(e) => appState.setFilterRaw((e.target as HTMLInputElement).value)}
@@ -999,6 +1590,7 @@ import { copyText } from '../../utils/clipboard';
                 <!-- Value Input (hidden if IS NULL / IS NOT NULL) -->
                 {#if !isUnary}
                   <input
+                    id="grid-filter-pill-val-{idx}"
                     type="text"
                     value={pill.val}
                     oninput={(e) => {
@@ -1132,21 +1724,76 @@ import { copyText } from '../../utils/clipboard';
       <span class="text-xs text-slate-300 font-mono">Executing query on {appState.currentDatabase}...</span>
     </div>
   {:else if result?.error}
-    <div class="p-6 m-4 bg-rose-950/20 border border-rose-500/40 rounded-xl max-w-3xl shadow-xl overflow-y-auto">
-      <div class="flex items-center space-x-2 text-rose-400 font-bold text-sm mb-2.5">
-        <Icon name="alert-triangle" class="w-4 h-4 text-rose-400" />
-        <span>Execution Error</span>
+    <div class="p-6 m-4 bg-rose-950/20 border border-rose-500/40 rounded-xl max-w-3xl shadow-xl overflow-y-auto space-y-3">
+      <div class="flex items-center justify-between gap-2">
+        <div class="flex items-center space-x-2 text-rose-400 font-bold text-sm">
+          <Icon name="alert-triangle" class="w-4 h-4 text-rose-400" />
+          <span>Execution Error</span>
+        </div>
+        <button
+          type="button"
+          onclick={() => appState.fixQueryWithAI(currentTab?.sql || '', result!.error || '')}
+          class="px-3 py-1 rounded bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs flex items-center space-x-1.5 transition shadow"
+        >
+          <Icon name="sparkles" class="w-3.5 h-3.5" />
+          <span>Fix with AI</span>
+        </button>
       </div>
       <pre class="text-xs font-mono text-rose-200 bg-rose-950/50 p-3.5 rounded-lg border border-rose-900/60 overflow-x-auto whitespace-pre-wrap leading-relaxed">{result.error}</pre>
+    </div>
+  {:else if result && (!result.columns || result.columns.length === 0) && (result.type === 'exec' || result.type === 'command' || result.rows_affected !== undefined || result.affected_rows !== undefined || result.message || result.backup_file)}
+    {@const affected = result.rows_affected ?? result.affected_rows ?? 0}
+    {@const execMs = result.execution_ms ?? result.duration_ms}
+    <div class="p-6 m-4 bg-emerald-950/20 border border-emerald-500/40 rounded-xl max-w-2xl shadow-xl space-y-3">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center space-x-2 text-emerald-300 font-bold text-sm">
+          <Icon name="check-circle" class="w-4 h-4 text-emerald-400" />
+          <span>Command Executed Successfully</span>
+        </div>
+        {#if execMs !== undefined}
+          <span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 font-mono text-[11px] text-slate-300">
+            {execMs} ms
+          </span>
+        {/if}
+      </div>
+      <div class="flex flex-wrap items-center gap-2 text-xs font-mono">
+        <span class="px-2.5 py-1 rounded bg-emerald-950 border border-emerald-800 text-emerald-300 font-bold">
+          {affected} row(s) affected
+        </span>
+        {#if result.message}
+          <span class="text-slate-300">{result.message}</span>
+        {/if}
+      </div>
+      {#if result.backup_file}
+        <div class="p-3 rounded-lg bg-[#090d16] border border-sky-800/60 text-xs space-y-1">
+          <div class="font-semibold text-sky-300 flex items-center space-x-1.5">
+            <Icon name="shield-check" class="w-3.5 h-3.5 text-sky-400" />
+            <span>Pre-Mutation Snapshot Saved</span>
+          </div>
+          <div class="font-mono text-[11px] text-slate-300 break-all">{result.backup_file}</div>
+          {#if result.backup_data_included !== undefined}
+            <div class="text-[10.5px] text-slate-400">
+              Data included: {result.backup_data_included ? 'Yes' : 'Schema / Metadata only'}
+            </div>
+          {/if}
+        </div>
+      {/if}
+      {#if result.backup_warning}
+        <div class="p-2.5 rounded-lg bg-amber-950/40 border border-amber-800/60 text-amber-300 text-xs">
+          Backup Warning: {result.backup_warning}
+        </div>
+      {/if}
     </div>
   {:else if result?.columns && result.columns.length > 0}
     <div
       bind:this={containerRef}
       onscroll={onScroll}
-      class="flex-1 overflow-auto relative border-t border-[#1e293b]"
+      onkeydown={handleGridKeydown}
+      tabindex="0"
+      class="flex-1 overflow-auto relative border-t border-[#1e293b] outline-none"
     >
-      <table class="border-collapse text-xs font-mono w-full text-left min-w-full">
-        <!-- Sticky Header -->
+      <table id="results-table" class="border-collapse text-left font-mono text-xs w-auto">
+        <!-- Sticky Header + Per-Column Header Quick Filter Row -->
         <thead class="sticky top-0 z-20 bg-[#0f172a] border-b border-[#334155] shadow-sm select-none">
           <tr>
             <th class="w-16 px-2 py-2 text-center text-[10px] text-slate-500 bg-[#090d16] border-r border-[#1e293b] font-medium sticky left-0 z-30">
@@ -1163,7 +1810,7 @@ import { copyText } from '../../utils/clipboard';
             </th>
             {#each visibleColumns as col}
               {@const colName = getColName(col)}
-              {@const colType = getColType(col)}
+              {@const colType = resolveColType(col)}
               {@const isPK = isColPK(col)}
               <th
                 onclick={() => handleHeaderSort(colName)}
@@ -1181,6 +1828,56 @@ import { copyText } from '../../utils/clipboard';
                   {/if}
                   {#if effectiveSortCol === colName}
                     <Icon name={effectiveSortDir === 'ASC' ? 'chevron-up' : 'chevron-down'} class="w-3 h-3 text-sky-400 shrink-0 ml-1" />
+                  {/if}
+                </div>
+              </th>
+            {/each}
+          </tr>
+          <!-- Second Header Row: Per-Column Quick Filter Inputs -->
+          <tr class="bg-[#090d16]/95 border-b border-[#1e293b]">
+            <th class="px-1 py-1 text-center bg-[#090d16] border-r border-[#1e293b] sticky left-0 z-30">
+              {#if currentTab?.queryFilters && Object.values(currentTab.queryFilters).some((v) => v?.trim())}
+                <button
+                  type="button"
+                  onclick={() => { if (currentTab) currentTab.queryFilters = {}; }}
+                  class="text-[9px] text-rose-400 hover:text-rose-200 font-mono"
+                  title="Clear all header filters"
+                >
+                  Clear
+                </button>
+              {:else}
+                <Icon name="filter" class="w-2.5 h-2.5 text-slate-600 mx-auto" />
+              {/if}
+            </th>
+            {#each visibleColumns as col}
+              {@const colName = getColName(col)}
+              {@const qVal = currentTab?.queryFilters?.[colName] || ''}
+              <th class="px-1.5 py-1 border-r border-[#1e293b] font-normal">
+                <div class="relative flex items-center">
+                  <input
+                    type="text"
+                    value={qVal}
+                    oninput={(e) => setQueryColumnFilter(colName, (e.currentTarget as HTMLInputElement).value)}
+                    onkeydown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === 'Escape') setQueryColumnFilter(colName, '');
+                      if (e.key === 'Enter' && currentTab?.isTableViewer && qVal.trim()) {
+                        appState.addFilterPill(colName, 'LIKE', qVal.trim());
+                        appState.applyTableFilter();
+                      }
+                    }}
+                    placeholder="Filter (=, >, NULL)..."
+                    class="col-filter-input w-full min-w-[75px] bg-[#0f172a] border border-slate-800 focus:border-sky-500 rounded px-1.5 py-0.5 pr-4 text-[10px] font-mono text-slate-200 placeholder-slate-600 outline-none"
+                  />
+                  {#if qVal}
+                    <button
+                      type="button"
+                      onclick={() => setQueryColumnFilter(colName, '')}
+                      class="absolute right-1 text-slate-500 hover:text-slate-200"
+                      title="Clear column filter"
+                    >
+                      <Icon name="x" class="w-2.5 h-2.5" />
+                    </button>
                   {/if}
                 </div>
               </th>
@@ -1278,50 +1975,184 @@ import { copyText } from '../../utils/clipboard';
                 <!-- Cells -->
                 {#each visibleColumnEntries as { col, origIdx: cIdx } (cIdx)}
                   {@const colName = getColName(col)}
+                  {@const colType = resolveColType(col)}
+                  {@const nullable = isColNullable(col)}
                   {@const cellVal = cIdx >= 0 ? rowItem.data[cIdx] : undefined}
                   {@const formatted = formatCellValue(cellVal)}
-                  {@const isStaged = currentTab?.tableName && cIdx >= 0 ? isCellStaged(currentTab.tableName, rowItem.origIdx, cIdx) : false}
+                  {@const isStaged = effectiveTable && cIdx >= 0 ? isCellStaged(effectiveTable, rowItem.origIdx, cIdx) : false}
+                  {@const isFlashed = Boolean(flashedCells[`${rowItem.origIdx}:${cIdx}`])}
+                  {@const isCellSelected = selectedCell?.rIdx === rowItem.origIdx && selectedCell?.cIdx === cIdx}
                   {@const isEditingThis = editingCell && editingCell.rIdx === rowItem.origIdx && editingCell.cIdx === cIdx}
                   {@const fk = fkMap.get(colName)}
+                  {@const tLow = colType.toLowerCase()}
+                  {@const enumVals = parseEnumValues(colType)}
+                  {@const isBool = tLow === 'bool' || tLow === 'boolean' || tLow === 'tinyint(1)'}
+                  {@const isDateLike = !tLow.includes('year') && (tLow.includes('date') || tLow.includes('time'))}
+                  {@const fkListId = fk ? `fk-datalist-${rowItem.origIdx}-${cIdx}` : undefined}
+                  {@const fkOpts = fk ? fkDatalistCache[`${fk.referenced_table}.${fk.referenced_column}`] || [] : []}
+                  {@const isJsonLike = formatted.type === 'json' || tLow.includes('json')}
 
                   <td
                     onclick={() => (selectedCell = { rIdx: rowItem.origIdx, cIdx })}
                     ondblclick={() => startCellEdit(rowItem.origIdx, cIdx, cellVal)}
                     oncontextmenu={(e) => handleCellContextMenu(e, rowItem.origIdx, cIdx, cellVal)}
-                    class="px-3 py-1 border-r border-[#1e293b]/40 whitespace-nowrap max-w-sm truncate {getCellClass(formatted.type)} cursor-cell hover:bg-sky-900/30 transition-colors relative {
-                      isStaged ? 'bg-amber-950/40 text-amber-200 font-semibold ring-1 ring-amber-500' : ''
+                    class="px-3 py-1 border-r border-[#1e293b]/40 whitespace-nowrap max-w-sm {isEditingThis ? 'overflow-visible z-30' : 'truncate'} {getCellClass(formatted.type)} cursor-cell hover:bg-sky-900/30 transition-colors relative {
+                      isStaged ? 'bg-amber-950/40 text-amber-200 font-semibold ring-1 ring-amber-500' : isFlashed ? 'bg-emerald-950/60 ring-1 ring-emerald-400' : isCellSelected ? 'ring-1 ring-inset ring-sky-400/80' : ''
                     }"
-                    title="{formatted.display} (Double-click to edit, right-click for filters)"
+                    title="{formatted.display}{canEdit ? ' (Double-click to edit, right-click for filters)' : ''}"
                   >
                     {#if isEditingThis}
-                      <input
-                        use:autoFocus
-                        type="text"
-                        bind:value={editingCell!.tempValue}
-                        onblur={() => commitCellEdit(rowItem.origIdx, cIdx)}
-                        onkeydown={(e) => {
-                          if (e.key === 'Enter') commitCellEdit(rowItem.origIdx, cIdx);
-                          if (e.key === 'Escape') editingCell = null;
-                        }}
-                        class="w-full bg-[#0f172a] text-slate-100 border border-sky-400 px-1 py-0 text-xs font-mono outline-none"
-                      />
+                      <div class="relative flex items-center space-x-1 min-w-[140px]">
+                        {#if isBool}
+                          <select
+                            use:autoFocus
+                            value={editingCell!.tempValue}
+                            onchange={(e) => {
+                              const v = (e.currentTarget as HTMLSelectElement).value;
+                              commitDirectCellValue(rowItem.origIdx, cIdx, v === '__NULL__' ? null : v === '1');
+                            }}
+                            onblur={() => (editingCell = null)}
+                            class="w-full bg-[#0f172a] text-slate-100 border border-sky-400 px-1 py-0 text-xs font-mono outline-none"
+                          >
+                            <option value="1">TRUE (1)</option>
+                            <option value="0">FALSE (0)</option>
+                            {#if nullable}
+                              <option value="__NULL__">NULL</option>
+                            {/if}
+                          </select>
+                        {:else if enumVals.length > 0}
+                          <select
+                            use:autoFocus
+                            value={editingCell!.tempValue}
+                            onchange={(e) => {
+                              const v = (e.currentTarget as HTMLSelectElement).value;
+                              commitDirectCellValue(rowItem.origIdx, cIdx, v === '__NULL__' ? null : v);
+                            }}
+                            onblur={() => (editingCell = null)}
+                            class="w-full bg-[#0f172a] text-slate-100 border border-sky-400 px-1 py-0 text-xs font-mono outline-none"
+                          >
+                            {#each enumVals as ev}
+                              <option value={ev}>{ev}</option>
+                            {/each}
+                            {#if nullable}
+                              <option value="__NULL__">NULL</option>
+                            {/if}
+                          </select>
+                        {:else}
+                          <input
+                            id="grid-inline-editor"
+                            use:autoFocus
+                            type="text"
+                            list={fkListId}
+                            bind:value={editingCell!.tempValue}
+                            onblur={() => commitCellEdit(rowItem.origIdx, cIdx)}
+                            onkeydown={(e) => {
+                              if (isDateLike && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+                                e.preventDefault();
+                                stepActiveDatePart(e.key === 'ArrowUp' ? 1 : -1);
+                                return;
+                              }
+                              if (e.key === 'Tab') {
+                                e.preventDefault();
+                                commitCellEdit(rowItem.origIdx, cIdx);
+                                advanceActiveCell(0, e.shiftKey ? -1 : 1);
+                                return;
+                              }
+                              if (e.key === 'Enter') commitCellEdit(rowItem.origIdx, cIdx);
+                              if (e.key === 'Escape') editingCell = null;
+                            }}
+                            class="w-full bg-[#0f172a] text-slate-100 border border-sky-400 px-1 py-0 text-xs font-mono outline-none"
+                          />
+                          {#if fkListId && fkOpts.length > 0}
+                            <datalist id={fkListId}>
+                              {#each fkOpts as opt}
+                                <option value={opt}></option>
+                              {/each}
+                            </datalist>
+                          {/if}
+                          {#if isDateLike}
+                            <div class="flex items-center space-x-0.5 shrink-0">
+                              <button
+                                type="button"
+                                onmousedown={(e) => e.preventDefault()}
+                                onclick={() => stepActiveDatePart(1)}
+                                class="px-1 bg-slate-800 hover:bg-slate-700 text-sky-300 text-[9px] rounded border border-slate-700"
+                                title="Increment segment (↑)"
+                              >▲</button>
+                              <button
+                                type="button"
+                                onmousedown={(e) => e.preventDefault()}
+                                onclick={() => stepActiveDatePart(-1)}
+                                class="px-1 bg-slate-800 hover:bg-slate-700 text-sky-300 text-[9px] rounded border border-slate-700"
+                                title="Decrement segment (↓)"
+                              >▼</button>
+                            </div>
+                          {/if}
+                        {/if}
+                      </div>
+                      <!-- Inline Editor Presets Strip -->
+                      <!-- svelte-ignore a11y_no_static_element_interactions -->
+                      <div
+                        onmousedown={(e) => e.preventDefault()}
+                        class="absolute left-0 top-full mt-0.5 z-40 flex items-center space-x-1 bg-[#0b0f19] border border-slate-700 rounded px-1.5 py-0.5 shadow-xl text-[9.5px] font-mono"
+                      >
+                        {#if nullable}
+                          <button type="button" onclick={() => applyEditPreset('NULL', rowItem.origIdx, cIdx)} class="px-1 py-0.2 rounded bg-rose-950/70 hover:bg-rose-900 text-rose-300 border border-rose-800">NULL</button>
+                        {/if}
+                        <button type="button" onclick={() => applyEditPreset('EMPTY', rowItem.origIdx, cIdx)} class="px-1 py-0.2 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700">''</button>
+                        {#if isDateLike}
+                          <button type="button" onclick={() => applyEditPreset('NOW', rowItem.origIdx, cIdx)} class="px-1 py-0.2 rounded bg-sky-950/70 hover:bg-sky-900 text-sky-300 border border-sky-800">NOW</button>
+                          <button type="button" onclick={() => applyEditPreset('DATE', rowItem.origIdx, cIdx)} class="px-1 py-0.2 rounded bg-sky-950/70 hover:bg-sky-900 text-sky-300 border border-sky-800">DATE</button>
+                        {/if}
+                        {#if tLow.includes('uuid') || tLow.includes('char(36)') || tLow.includes('varchar')}
+                          <button type="button" onclick={() => applyEditPreset('UUID', rowItem.origIdx, cIdx)} class="px-1 py-0.2 rounded bg-purple-950/70 hover:bg-purple-900 text-purple-300 border border-purple-800">UUID</button>
+                        {/if}
+                      </div>
                     {:else}
                       <div class="flex items-center justify-between group/cell">
                         <span class="truncate block">{formatted.display}</span>
-                        {#if fk && cellVal !== null && cellVal !== undefined}
-                          <button
-                            type="button"
-                            onclick={(e) => {
-                              e.stopPropagation();
-                              appState.openFkPeek(e, currentTab?.tableName || '', colName, fk.referenced_table, fk.referenced_column, cellVal, currentTab?.database);
-                            }}
-                            class="opacity-0 group-hover/cell:opacity-100 hover:text-sky-300 text-sky-400 p-0.5 rounded hover:bg-slate-800 ml-1 inline-flex items-center"
-                            title="Peek {fk.referenced_table}.{fk.referenced_column}"
-                            aria-label="Peek {fk.referenced_table}.{fk.referenced_column}"
-                          >
-                            <Icon name="link" class="w-3 h-3" />
-                          </button>
-                        {/if}
+                        <div class="flex items-center space-x-0.5 shrink-0 ml-1">
+                          {#if fk && cellVal !== null && cellVal !== undefined}
+                            <button
+                              type="button"
+                              onclick={(e) => {
+                                e.stopPropagation();
+                                appState.openFkPeek(e, effectiveTable, colName, fk.referenced_table, fk.referenced_column, cellVal, currentTab?.database);
+                              }}
+                              class="opacity-0 group-hover/cell:opacity-100 hover:text-sky-300 text-sky-400 p-0.5 rounded hover:bg-slate-800 inline-flex items-center"
+                              title="Peek {fk.referenced_table}.{fk.referenced_column}"
+                              aria-label="Peek {fk.referenced_table}.{fk.referenced_column}"
+                            >
+                              <Icon name="link" class="w-3 h-3" />
+                            </button>
+                          {/if}
+                          {#if isJsonLike}
+                            <button
+                              type="button"
+                              onclick={(e) => {
+                                e.stopPropagation();
+                                appState.openJsonCellModal(effectiveTable || undefined, rowItem.origIdx, cIdx, colName, cellVal, !canEdit);
+                              }}
+                              class="opacity-0 group-hover/cell:opacity-100 hover:text-purple-300 text-purple-400 px-1 rounded hover:bg-slate-800 text-[9px] font-mono"
+                              title="Inspect / Edit JSON"
+                            >
+                              {'{ }'}
+                            </button>
+                          {/if}
+                          {#if canEdit}
+                            <button
+                              type="button"
+                              onclick={(e) => {
+                                e.stopPropagation();
+                                startCellEdit(rowItem.origIdx, cIdx, cellVal);
+                              }}
+                              class="opacity-0 group-hover/cell:opacity-100 hover:text-sky-300 text-slate-400 p-0.5 rounded hover:bg-slate-800 inline-flex items-center"
+                              title="Edit Cell"
+                            >
+                              <Icon name="edit" class="w-2.5 h-2.5" />
+                            </button>
+                          {/if}
+                        </div>
                       </div>
                     {/if}
                   </td>
@@ -1342,24 +2173,55 @@ import { copyText } from '../../utils/clipboard';
     <!-- Cell Details Drawer (expandable) -->
     {#if showDetailDrawer && selectedCell && result?.rows[selectedCell.rIdx]}
       {@const val = result.rows[selectedCell.rIdx][selectedCell.cIdx]}
+      {@const colObj = result.columns[selectedCell.cIdx]}
       {@const colName = allColumns[selectedCell.cIdx]}
-      <div class="h-32 bg-[#0b0f19] border-t border-[#334155] flex flex-col p-2.5 z-20 shrink-0">
-        <div class="flex items-center justify-between text-[11px] text-slate-400 mb-1 select-none">
-          <span class="font-bold text-slate-200">
-            Cell Value: <span class="text-sky-400 font-mono">{colName}</span>
-          </span>
-          <button
-            onclick={() => copyText(String(val ?? ''))}
-            class="hover:text-white flex items-center space-x-1"
-          >
-            <Icon name="copy" class="w-3 h-3" />
-            <span>Copy</span>
-          </button>
+      {@const colType = resolveColType(colObj)}
+      {@const safeValStr = val === null ? 'NULL' : typeof val === 'object' ? JSON.stringify(val, null, 2) : (() => {
+        const s = String(val ?? '');
+        if (detailPrettyJson) {
+          try { return JSON.stringify(JSON.parse(s), null, 2); } catch { return s; }
+        }
+        return s;
+      })()}
+      <div class="h-36 bg-[#0b0f19] border-t border-[#334155] flex flex-col p-2.5 z-20 shrink-0">
+        <div class="flex items-center justify-between text-[11px] text-slate-400 mb-1.5 select-none">
+          <div class="flex items-center space-x-2">
+            <span class="font-bold text-slate-200">
+              Cell: <span class="text-sky-400 font-mono">{colName}</span>
+            </span>
+            {#if colType}
+              <span class="px-1.5 py-0.2 rounded bg-slate-900 border border-slate-800 font-mono text-[9.5px] uppercase text-slate-400">
+                {colType}
+              </span>
+            {/if}
+            <span class="text-[10px] font-mono text-slate-500">Row #{selectedCell.rIdx + 1}</span>
+          </div>
+          <div class="flex items-center space-x-2">
+            <button
+              type="button"
+              onclick={() => (detailPrettyJson = !detailPrettyJson)}
+              class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[10px] {detailPrettyJson ? 'text-purple-300 border-purple-700' : 'text-slate-300'}"
+            >
+              {detailPrettyJson ? 'Raw' : 'Format JSON'}
+            </button>
+            <button
+              type="button"
+              onclick={() => {
+                const rawCopy = val === null || val === undefined ? '' : typeof val === 'object' ? JSON.stringify(val, null, 2) : String(val);
+                copyText(rawCopy);
+                appState.showToast('Copied cell value', 'info');
+              }}
+              class="hover:text-white flex items-center space-x-1"
+            >
+              <Icon name="copy" class="w-3 h-3" />
+              <span>Copy</span>
+            </button>
+          </div>
         </div>
         <textarea
           readonly
           class="flex-1 bg-[#090d16] border border-[#1e293b] rounded p-2 text-xs font-mono text-slate-200 resize-none outline-none"
-          value={typeof val === 'object' ? JSON.stringify(val, null, 2) : String(val ?? 'NULL')}
+          value={safeValStr}
         ></textarea>
       </div>
     {/if}
@@ -1420,6 +2282,7 @@ import { copyText } from '../../utils/clipboard';
             }}
             class="bg-[#090d16] border border-[#334155] rounded px-1.5 py-0.5 text-slate-200 focus:outline-none"
           >
+            <option value={25}>25</option>
             <option value={50}>50</option>
             <option value={100}>100</option>
             <option value={250}>250</option>
@@ -1464,6 +2327,12 @@ import { copyText } from '../../utils/clipboard';
               min="1"
               max={totalPages ?? undefined}
               value={curPage}
+              onkeydown={(e) => {
+                if (e.key === 'Escape') {
+                  (e.currentTarget as HTMLInputElement).value = String(curPage);
+                  (e.currentTarget as HTMLInputElement).blur();
+                }
+              }}
               onchange={(e) => {
                 const target = Number((e.currentTarget as HTMLInputElement).value);
                 if (!currentTab || !Number.isFinite(target)) return;
@@ -1477,6 +2346,8 @@ import { copyText } from '../../utils/clipboard';
             />
             {#if totalPages}
               <span>of <span id="grid-total-pages">{totalPages.toLocaleString()}</span></span>
+            {:else if totalRows >= pageSize}
+              <span class="text-slate-400">({curPage}+)</span>
             {/if}
           </span>
           <button
@@ -1511,10 +2382,11 @@ import { copyText } from '../../utils/clipboard';
           {/if}
         </div>
       {:else if result && result.rows && (result.rows.length >= 5000 || (currentTab?.streamBatchOffset ?? 0) > 0 || currentTab?.hasMoreStream)}
+        {@const streamOff = currentTab?.streamBatchOffset || 0}
         <!-- Query Stream 5k Batch Pager (ADR 0058) -->
         <div class="flex items-center space-x-2 text-[11px]">
           <span class="px-2 py-0.5 rounded bg-sky-950/80 border border-sky-800 text-sky-300 font-mono text-[10px] font-bold">
-            Batch #{Math.floor((currentTab?.streamBatchOffset || 0) / 5000) + 1} (Offset {(currentTab?.streamBatchOffset || 0).toLocaleString()})
+            Batch #{Math.floor(streamOff / 5000) + 1} (Rows {(streamOff + 1).toLocaleString()}–{(streamOff + totalRows).toLocaleString()})
           </span>
           <button
             onclick={() => appState.pageStreamBatch('prev')}
@@ -1634,17 +2506,43 @@ import { copyText } from '../../utils/clipboard';
         <div id="grid-ctx-table-mutations">
           <div id="grid-ctx-insert-section">
             <div id="grid-ctx-insert-options">
-              {#if currentTab?.tableName}
+              {#if canEdit}
+                <button
+                  onclick={() => {
+                    const { rIdx, cIdx, cellValue } = contextMenu!;
+                    closeContextMenu();
+                    startCellEdit(rIdx, cIdx, cellValue);
+                  }}
+                  class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-sky-300 font-medium"
+                >
+                  <Icon name="edit" class="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                  <span>Edit Cell (Inline)</span>
+                </button>
+                <div class="px-3 py-1 border-y border-slate-800/60 flex items-center justify-between gap-1 text-[10px] font-mono">
+                  <span class="text-slate-500">⚡ Insert:</span>
+                  <div class="flex items-center gap-1">
+                    <button onclick={() => { const { rIdx, cIdx } = contextMenu!; closeContextMenu(); applyEditPreset('NULL', rIdx, cIdx); }} class="px-1 rounded bg-slate-800 hover:bg-slate-700 text-rose-300">NULL</button>
+                    <button onclick={() => { const { rIdx, cIdx } = contextMenu!; closeContextMenu(); applyEditPreset('NOW', rIdx, cIdx); }} class="px-1 rounded bg-slate-800 hover:bg-slate-700 text-sky-300">NOW</button>
+                    <button onclick={() => { const { rIdx, cIdx } = contextMenu!; closeContextMenu(); applyEditPreset('DATE', rIdx, cIdx); }} class="px-1 rounded bg-slate-800 hover:bg-slate-700 text-emerald-300">TODAY</button>
+                    <button onclick={() => { const { rIdx, cIdx } = contextMenu!; closeContextMenu(); applyEditPreset('UUID', rIdx, cIdx); }} class="px-1 rounded bg-slate-800 hover:bg-slate-700 text-purple-300">UUID</button>
+                  </div>
+                </div>
                 <button
                   id="grid-ctx-btn-dup-nokey"
                   onclick={() => {
-                    duplicateRowAsDraft(contextMenu!.rIdx, true);
-                    closeContextMenu();
+                    if (selectedRowIndices.length > 1) {
+                      const indices = [...selectedRowIndices];
+                      closeContextMenu();
+                      duplicateMultipleRows(indices);
+                    } else {
+                      duplicateRowAsDraft(contextMenu!.rIdx, true);
+                      closeContextMenu();
+                    }
                   }}
                   class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-emerald-300 font-medium"
                 >
                   <Icon name="copy" class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                  <span>Duplicate Row (Without Key)</span>
+                  <span>{selectedRowIndices.length > 1 ? `Duplicate ${selectedRowIndices.length} Rows` : 'Duplicate Row (Without Key)'}</span>
                 </button>
                 <button
                   id="grid-ctx-btn-dup-key"
@@ -1671,13 +2569,19 @@ import { copyText } from '../../utils/clipboard';
                 <button
                   id="grid-ctx-btn-delete-row"
                   onclick={() => {
-                    handleDeleteCurrentRow(contextMenu!.rIdx);
-                    closeContextMenu();
+                    if (selectedRowIndices.length > 1) {
+                      closeContextMenu();
+                      handleBatchDelete();
+                    } else {
+                      selectedRowIndex = contextMenu!.rIdx;
+                      handleDeleteCurrentRow();
+                      closeContextMenu();
+                    }
                   }}
                   class="w-full text-left px-3 py-1.5 hover:bg-rose-950/60 flex items-center space-x-2 text-rose-300"
                 >
                   <Icon name="trash-2" class="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                  <span>Delete Selected Row(s)</span>
+                  <span>{selectedRowIndices.length > 1 ? `Delete ${selectedRowIndices.length} Selected Rows` : 'Delete Selected Row(s)'}</span>
                 </button>
               {/if}
             </div>
@@ -1690,7 +2594,7 @@ import { copyText } from '../../utils/clipboard';
           onclick={() => {
             const { rIdx, cIdx, colName, cellValue } = contextMenu!;
             closeContextMenu();
-            appState.openJsonCellModal(currentTab?.tableName, rIdx, cIdx, colName, cellValue, !currentTab?.tableName);
+            appState.openJsonCellModal(effectiveTable || undefined, rIdx, cIdx, colName, cellValue, !canEdit);
           }}
           class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
         >
@@ -1711,7 +2615,8 @@ import { copyText } from '../../utils/clipboard';
         <button
           id="grid-ctx-btn-copy-cell"
           onclick={() => {
-            copyText(String(contextMenu!.cellValue ?? ''));
+            const cv = contextMenu!.cellValue;
+            copyText(cv === null || cv === undefined ? '' : typeof cv === 'object' ? JSON.stringify(cv, null, 2) : String(cv));
             appState.showToast('Copied cell value to clipboard', 'info');
             closeContextMenu();
           }}
@@ -1727,46 +2632,66 @@ import { copyText } from '../../utils/clipboard';
           <button
             id="grid-ctx-btn-copy-row-tsv"
             onclick={() => {
-              copyRowAsTSV(contextMenu!.rIdx);
+              if (selectedRowIndices.length > 1) copySelectedRows('tsv');
+              else copyRowAsTSV(contextMenu!.rIdx);
               closeContextMenu();
             }}
             class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
           >
             <Icon name="file-text" class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span>Copy Row as TSV</span>
+            {#if selectedRowIndices.length > 1}
+              <span>Copy {selectedRowIndices.length} Rows as TSV</span>
+            {:else}
+              <span>Copy Row as TSV</span>
+            {/if}
           </button>
           <button
             id="grid-ctx-btn-copy-row-json"
             onclick={() => {
-              copyRowAsJSON(contextMenu!.rIdx);
+              if (selectedRowIndices.length > 1) copySelectedRows('json');
+              else copyRowAsJSON(contextMenu!.rIdx);
               closeContextMenu();
             }}
             class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
           >
             <Icon name="code" class="w-3.5 h-3.5 text-amber-400 shrink-0" />
-            <span>Copy Row as JSON</span>
+            {#if selectedRowIndices.length > 1}
+              <span>Copy {selectedRowIndices.length} Rows as JSON</span>
+            {:else}
+              <span>Copy Row as JSON</span>
+            {/if}
           </button>
           <button
             id="grid-ctx-btn-copy-row-md"
             onclick={() => {
-              copyRowAsMarkdown(contextMenu!.rIdx);
+              if (selectedRowIndices.length > 1) copySelectedRows('md');
+              else copyRowAsMarkdown(contextMenu!.rIdx);
               closeContextMenu();
             }}
             class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
           >
             <Icon name="share-2" class="w-3.5 h-3.5 text-sky-400 shrink-0" />
-            <span>Copy Row as Markdown</span>
+            {#if selectedRowIndices.length > 1}
+              <span>Copy {selectedRowIndices.length} Rows as Markdown</span>
+            {:else}
+              <span>Copy Row as Markdown</span>
+            {/if}
           </button>
           <button
             id="grid-ctx-btn-copy-row-sql"
             onclick={() => {
-              copyRowAsInsertSQL(contextMenu!.rIdx);
+              if (selectedRowIndices.length > 1) copySelectedRows('sql');
+              else copyRowAsInsertSQL(contextMenu!.rIdx);
               closeContextMenu();
             }}
             class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
           >
             <Icon name="terminal" class="w-3.5 h-3.5 text-purple-400 shrink-0" />
-            <span>Copy as INSERT SQL</span>
+            {#if selectedRowIndices.length > 1}
+              <span>Copy {selectedRowIndices.length} Rows as INSERT SQL</span>
+            {:else}
+              <span>Copy as INSERT SQL</span>
+            {/if}
           </button>
         </div>
       </div>

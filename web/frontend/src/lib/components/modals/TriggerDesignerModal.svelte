@@ -1,29 +1,36 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
-  import { quoteSqlIdentifier } from '../../utils/sqlStatements';
+  import { quoteSqlIdentifier, stripDefiner } from '../../utils/sqlStatements';
   import Icon from '../common/Icon.svelte';
   import SqlCodeEditor from '../editor/SqlCodeEditor.svelte';
 
   let triggerName = $state('');
+  let origName = $state<string | null>(null);
   let targetTable = $state('');
   let timing = $state<'BEFORE' | 'AFTER'>('BEFORE');
   let event = $state<'INSERT' | 'UPDATE' | 'DELETE'>('INSERT');
   let body = $state('BEGIN\n  -- Trigger logic here\nEND;');
   let isSubmitting = $state(false);
 
+  let driver = $derived(appState.activeConnection?.driver?.toLowerCase() || 'mysql');
+  let isSQLite = $derived(driver === 'sqlite');
+  let isPostgres = $derived(driver === 'postgres' || driver === 'postgresql');
+
   let wasOpen = false;
 
   $effect(() => {
     if (appState.isTriggerDesignerOpen) {
       if (!wasOpen) {
-        if (appState.triggerToEdit) {
+        if (appState.triggerToEdit?.name) {
+          origName = appState.triggerToEdit.name;
           triggerName = appState.triggerToEdit.name;
           targetTable = appState.triggerToEdit.table;
-          timing = (appState.triggerToEdit.timing as any) || 'BEFORE';
-          event = (appState.triggerToEdit.event as any) || 'INSERT';
-          body = appState.triggerToEdit.statement || 'BEGIN\n  -- Trigger logic here\nEND;';
+          timing = (appState.triggerToEdit.timing?.toUpperCase() as any) || 'BEFORE';
+          event = (appState.triggerToEdit.event?.toUpperCase() as any) || 'INSERT';
+          body = stripDefiner(appState.triggerToEdit.statement || 'BEGIN\n  -- Trigger logic here\nEND;');
         } else {
+          origName = null;
           triggerName = '';
           targetTable = appState.filteredTables[0]?.name || '';
           timing = 'BEFORE';
@@ -39,24 +46,29 @@
   });
 
   let generatedDDL = $derived.by(() => {
-    const driver = appState.activeConnection?.driver;
-    const isSQLite = driver === 'sqlite';
     const qName = quoteSqlIdentifier(triggerName.trim() || 'trg_sample', driver);
     const qTable = quoteSqlIdentifier(targetTable.trim() || 'target_table', driver);
     const cleanBody = body.trim().replace(/;+$/, '');
+    const dropLine = origName
+      ? isPostgres
+        ? `DROP TRIGGER IF EXISTS ${quoteSqlIdentifier(origName, driver)} ON ${qTable};\n`
+        : `DROP TRIGGER IF EXISTS ${quoteSqlIdentifier(origName, driver)};\n`
+      : '';
 
     if (isSQLite) {
-      return `CREATE TRIGGER ${qName} ${timing} ${event} ON ${qTable}\n${cleanBody};`;
+      return `${dropLine}CREATE TRIGGER ${qName} ${timing} ${event} ON ${qTable}\n${cleanBody};`;
     }
-    return `CREATE TRIGGER ${qName} ${timing} ${event} ON ${qTable} FOR EACH ROW\n${cleanBody};`;
+    return `${dropLine}CREATE TRIGGER ${qName} ${timing} ${event} ON ${qTable} FOR EACH ROW\n${cleanBody};`;
   });
 
   function openInEditor() {
-    appState.addTab(`create_trigger_${triggerName.trim() || 'trg'}.sql`, generatedDDL);
+    const isMysql = !isSQLite && !isPostgres;
+    const sqlText = isMysql ? `DELIMITER ;;\n${generatedDDL.replace(/;$/, ';;')}\nDELIMITER ;` : generatedDDL;
+    appState.addTab(`trigger_${triggerName.trim() || 'trg'}.sql`, sqlText);
     appState.isTriggerDesignerOpen = false;
   }
 
-  async function handleCreate() {
+  function handleCreate() {
     if (!triggerName.trim()) {
       appState.showToast('Trigger name is required', 'error');
       return;
@@ -69,23 +81,31 @@
       appState.showToast('Trigger body statements are required', 'error');
       return;
     }
+    if (appState.isReadOnly) {
+      appState.showToast('Session is Read-Only', 'warning');
+      return;
+    }
     if (!appState.activeSessionId) return;
 
-    isSubmitting = true;
-    try {
-      const res = await api.executeQuery(appState.activeSessionId, generatedDDL, false, appState.currentDatabase || undefined);
-      if (res.error) {
-        appState.showToast(`Failed to save trigger: ${res.error}`, 'error');
-        return;
-      }
-      appState.showToast(`Trigger "${triggerName.trim()}" created successfully`, 'success');
-      appState.isTriggerDesignerOpen = false;
-      await appState.refreshCatalog();
-    } catch (err: any) {
-      appState.showToast(`Error: ${err.message}`, 'error');
-    } finally {
-      isSubmitting = false;
-    }
+    const ddl = generatedDDL;
+    const db = appState.currentDatabase || undefined;
+    appState.openDDLReviewModal(
+      ddl,
+      async () => {
+        isSubmitting = true;
+        try {
+          const res = await api.executeQuery(appState.activeSessionId!, ddl, { confirmed: true, database: db });
+          if (res.error) throw new Error(res.error);
+          appState.showToast(`Trigger "${triggerName.trim()}" saved successfully`, 'success');
+          appState.isTriggerDesignerOpen = false;
+          await appState.refreshCatalog();
+        } finally {
+          isSubmitting = false;
+        }
+      },
+      `${origName ? 'Update Trigger' : 'Create Trigger'}: ${triggerName.trim()}`,
+      { tableName: targetTable.trim(), database: db }
+    );
   }
 
   function handleClose() {
@@ -237,7 +257,7 @@
               <span>Saving...</span>
             {:else}
               <Icon name="check" class="w-3.5 h-3.5" />
-              <span>Create Trigger</span>
+              <span>{origName ? 'Review & Update Trigger' : 'Review & Create Trigger'}</span>
             {/if}
           </button>
         </div>

@@ -44,6 +44,7 @@ type AssistRequest struct {
 	ResponseStyle    string                   `json:"response_style,omitempty"` // "concise", "detailed", "normal"
 	CustomPrompt     string                   `json:"custom_prompt,omitempty"`  // custom persona / system instructions
 	IncludeSchema    bool                     `json:"include_schema"`
+	Temperature      float32                  `json:"temperature,omitempty"`
 }
 
 // AssemblePrompts compiles the system prompt (incorporating Schema Context Window,
@@ -151,5 +152,6 @@ func Assist(ctx context.Context, req AssistRequest) (*CompletionResponse, error)
 	return client.Complete(ctx, CompletionRequest{
 		SystemPrompt: systemPrompt,
 		UserPrompt:   userPrompt,
+		Temperature:  req.Temperature,
 	})
 }

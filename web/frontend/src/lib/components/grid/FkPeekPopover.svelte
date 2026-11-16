@@ -16,9 +16,15 @@
       appState.closeFkPeek();
     }
   }
+  function handleKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape' && appState.fkPeekState.isOpen) {
+      e.stopPropagation();
+      appState.closeFkPeek();
+    }
+  }
 </script>
 
-<svelte:window onclick={handleOutsideClick} />
+<svelte:window onclick={handleOutsideClick} onkeydown={handleKeydown} />
 
 {#if appState.fkPeekState.isOpen}
   <div
@@ -67,8 +73,11 @@
           {appState.fkPeekState.error}
         </div>
       {:else if appState.fkPeekState.data?.row}
+        {@const rowObj = appState.fkPeekState.data.row}
+        {@const orderedCols = appState.fkPeekState.data.columns?.length ? appState.fkPeekState.data.columns : Object.keys(rowObj)}
         <div class="divide-y divide-slate-800/80">
-          {#each Object.entries(appState.fkPeekState.data.row) as [col, val]}
+          {#each orderedCols as col}
+            {@const val = rowObj[col]}
             <div class="py-1.5 flex items-start justify-between space-x-2">
               <span class="font-semibold text-slate-400 font-mono text-[11px] truncate">{col}:</span>
               <span class="font-mono text-slate-200 text-[11px] text-right truncate select-all">

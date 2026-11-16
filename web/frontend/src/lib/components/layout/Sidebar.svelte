@@ -1,6 +1,8 @@
 <script lang="ts">
-import { copyText } from '../../utils/clipboard';
+  import { api } from '../../api/client';
+  import { copyText } from '../../utils/clipboard';
   import { quoteSqlIdentifier } from '../../utils/sqlStatements';
+  import type { TriggerMetadata } from '../../../types';
   import { appState } from '../../stores/appState.svelte';
   import Icon from '../common/Icon.svelte';
   import { onDestroy, tick } from 'svelte';
@@ -223,6 +225,83 @@ import { copyText } from '../../utils/clipboard';
       closeTableMenu();
     }
   }
+
+  function handleSchemaSearchKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      appState.schemaFilter = '';
+      (e.currentTarget as HTMLInputElement).blur();
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      const firstBtn = document.querySelector<HTMLButtonElement>('#sidebar-object-tree .schema-tree-item');
+      if (firstBtn) {
+        e.preventDefault();
+        firstBtn.focus();
+      }
+      return;
+    }
+    if (e.key === 'Enter') {
+      if (appState.sidebarViewMode === 'databases') {
+        const firstDb = appState.filteredDatabases[0];
+        if (firstDb) {
+          e.preventDefault();
+          appState.selectDatabase(firstDb);
+          appState.sidebarViewMode = 'objects';
+        }
+        return;
+      }
+      if (appState.filteredTables[0]) {
+        e.preventDefault();
+        appState.openTableDataTab(appState.filteredTables[0].name);
+      } else if (appState.filteredViews[0]) {
+        e.preventDefault();
+        appState.openTableDataTab(appState.filteredViews[0].name);
+      } else if (appState.filteredProcedures[0]) {
+        e.preventDefault();
+        appState.openRoutineTab(appState.filteredProcedures[0].name, 'PROCEDURE');
+      } else if (appState.filteredFunctions[0]) {
+        e.preventDefault();
+        appState.openRoutineTab(appState.filteredFunctions[0].name, 'FUNCTION');
+      } else if (appState.filteredTriggers[0]) {
+        e.preventDefault();
+        appState.openTriggerTab(appState.filteredTriggers[0]);
+      } else if (appState.filteredEvents[0]) {
+        e.preventDefault();
+        appState.openEventDDLTab(appState.filteredEvents[0].name);
+      }
+    }
+  }
+
+  async function inspectDdlModal(
+    kind: 'table' | 'view' | 'procedure' | 'function' | 'trigger' | 'event',
+    name: string,
+    triggerObj?: TriggerMetadata
+  ) {
+    if (kind === 'trigger' && triggerObj) {
+      const body = triggerObj.statement.trim().replace(/;\s*$/, '');
+      const ddl = `CREATE TRIGGER \`${triggerObj.name}\` ${triggerObj.timing} ${triggerObj.event} ON \`${triggerObj.table}\` FOR EACH ROW\n${body};`;
+      appState.openDdlViewModal(`TRIGGER: ${triggerObj.name}`, ddl);
+      return;
+    }
+    const sid = appState.activeSessionId;
+    if (!sid) return;
+    try {
+      let ddl = '';
+      if (kind === 'procedure') {
+        ddl = (await api.getRoutineDDL(sid, name, 'PROCEDURE')).ddl;
+      } else if (kind === 'function') {
+        ddl = (await api.getRoutineDDL(sid, name, 'FUNCTION')).ddl;
+      } else if (kind === 'event') {
+        ddl = (await api.getEventDDL(sid, name)).ddl;
+      } else {
+        ddl = (await api.getTableDDL(sid, name)).ddl;
+      }
+      appState.openDdlViewModal(`${kind.toUpperCase()}: ${name}`, ddl || '-- No DDL returned');
+    } catch (err: any) {
+      appState.showToast(`Failed to load DDL for ${name}: ${err.message || err}`, 'error');
+    }
+  }
 </script>
 
 <svelte:window onclick={closeTableMenu} onkeydown={handleKeydown} />
@@ -266,16 +345,36 @@ import { copyText } from '../../utils/clipboard';
         </div>
       </button>
 
-      <!-- Quick Reload Schema Button -->
-      <button
-        type="button"
-        onclick={() => appState.refreshDatabases()}
-        disabled={appState.isLoadingCatalog}
-        class="h-7 w-7 flex items-center justify-center rounded bg-[#0f172a] hover:bg-[#1e293b] border border-slate-700/80 hover:border-slate-600 text-slate-400 hover:text-sky-300 transition-colors shadow-sm cursor-pointer shrink-0 disabled:opacity-50"
-        title="Refresh schema and database list"
-      >
-        <Icon name="refresh-cw" class="w-3.5 h-3.5 {appState.isLoadingCatalog ? 'animate-spin text-sky-400' : ''}" />
-      </button>
+      <!-- Quick Reload Schema & Refresh All Buttons -->
+      <div class="flex items-center space-x-1 shrink-0">
+        {#if appState.currentDatabase && appState.catalogTimestamps[appState.currentDatabase.toLowerCase()]}
+          <span
+            id="schema-cache-badge"
+            class="text-[9px] font-mono text-amber-400/90 bg-amber-950/40 border border-amber-800/40 px-1 py-0.5 rounded shrink-0"
+            title="Cached schema loaded at {appState.catalogTimestamps[appState.currentDatabase.toLowerCase()]}"
+          >
+            ⚡{appState.catalogTimestamps[appState.currentDatabase.toLowerCase()]}
+          </span>
+        {/if}
+        <button
+          type="button"
+          onclick={() => appState.refreshCatalog()}
+          disabled={appState.isLoadingCatalog}
+          class="h-7 w-7 flex items-center justify-center rounded bg-[#0f172a] hover:bg-[#1e293b] border border-slate-700/80 hover:border-slate-600 text-slate-400 hover:text-sky-300 transition-colors shadow-sm cursor-pointer shrink-0 disabled:opacity-50"
+          title="Refresh active database schema"
+        >
+          <Icon name="refresh-cw" class="w-3.5 h-3.5 {appState.isLoadingCatalog ? 'animate-spin text-sky-400' : ''}" />
+        </button>
+        <button
+          type="button"
+          onclick={() => (appState.isRefreshAllOpen = true)}
+          disabled={!appState.activeSessionId}
+          class="h-7 px-1.5 flex items-center justify-center rounded bg-[#0f172a] hover:bg-[#1e293b] border border-slate-700/80 hover:border-slate-600 text-[10px] font-mono font-semibold text-slate-400 hover:text-sky-300 transition-colors shadow-sm cursor-pointer shrink-0 disabled:opacity-40"
+          title="Refresh All Catalogs (Pre-warm autocomplete & fast cache)"
+        >
+          All
+        </button>
+      </div>
 
       <!-- Database Dropdown Menu -->
       {#if showDbDropdown}
@@ -373,32 +472,51 @@ import { copyText } from '../../utils/clipboard';
             {:else}
               {#each filteredDbList as db, idx (db)}
                 {@const isActiveDb = idx === dbActiveIndex}
-                <button
-                  type="button"
+                {@const stamp = appState.catalogTimestamps[db.toLowerCase()]}
+                <div
                   data-db-active={isActiveDb}
                   role="option"
                   aria-selected={db === appState.currentDatabase}
                   onmouseenter={() => (dbActiveIndex = idx)}
-                  onclick={() => chooseDatabase(db)}
-                  class="w-full text-left px-3 py-1.5 flex items-center justify-between text-xs transition-colors {isActiveDb
+                  class="w-full px-2 py-1 flex items-center justify-between text-xs transition-colors group/dbrow {isActiveDb
                     ? 'bg-slate-800/90 ring-1 ring-inset ring-sky-500/40'
                     : 'hover:bg-slate-800/80'} {db === appState.currentDatabase ? 'bg-sky-500/10 text-sky-400 font-bold' : 'text-slate-300'}"
                 >
-                  <div class="flex items-center space-x-2 truncate min-w-0">
+                  <button
+                    type="button"
+                    onclick={() => chooseDatabase(db)}
+                    class="flex-1 flex items-center space-x-2 truncate min-w-0 text-left py-0.5"
+                  >
                     <Icon name="database" class="w-3.5 h-3.5 {db === appState.currentDatabase ? 'text-sky-400' : 'text-slate-500'} shrink-0" />
                     <span class="truncate font-mono">{db}</span>
-                  </div>
-                  <div class="flex items-center space-x-1.5 shrink-0 ml-1">
+                  </button>
+                  <div class="flex items-center space-x-1 shrink-0 ml-1">
+                    {#if stamp}
+                      <span class="text-[9px] text-amber-400/90 font-mono bg-amber-950/30 px-1 py-0.2 rounded border border-amber-800/30" title="Cached at {stamp}">
+                        ⚡{stamp}
+                      </span>
+                    {/if}
                     {#if appState.databaseTableCounts[db] !== undefined}
                       <span class="text-[9px] text-slate-400 font-mono bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800">
                         {appState.databaseTableCounts[db]} tbls
                       </span>
                     {/if}
+                    <button
+                      type="button"
+                      onclick={(e) => {
+                        e.stopPropagation();
+                        appState.refreshSingleDatabase(db);
+                      }}
+                      class="p-1 rounded text-slate-500 hover:text-sky-300 hover:bg-slate-700/60 opacity-0 group-hover/dbrow:opacity-100 focus:opacity-100 transition"
+                      title="Refresh catalog for {db}"
+                    >
+                      <Icon name="refresh-cw" class="w-3 h-3" />
+                    </button>
                     {#if db === appState.currentDatabase}
                       <Icon name="check" class="w-3.5 h-3.5 text-sky-400 shrink-0" />
                     {/if}
                   </div>
-                </button>
+                </div>
               {/each}
             {/if}
           </div>
@@ -427,9 +545,11 @@ import { copyText } from '../../utils/clipboard';
       <div class="relative flex-1 flex items-center min-w-0">
         <Icon name="search" class="w-3.5 h-3.5 text-slate-500 absolute left-2 pointer-events-none" />
         <input
+          id="schema-search-input"
           type="text"
           bind:value={appState.schemaFilter}
-          placeholder={appState.sidebarViewMode === 'databases' ? 'Filter DBs...' : 'Filter schema...'}
+          onkeydown={handleSchemaSearchKeydown}
+          placeholder={appState.sidebarViewMode === 'databases' ? 'Filter DBs... (/)' : 'Filter schema... (/)'}
           class="w-full h-7 bg-[#0f172a] border border-slate-700/80 rounded pl-7 pr-6 text-[11px] text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition-all font-mono"
         />
         {#if appState.schemaFilter}
@@ -466,7 +586,7 @@ import { copyText } from '../../utils/clipboard';
     </div>
 
     <!-- Content: Databases List Mode OR Schema Objects Mode -->
-    <div class="flex-1 overflow-y-auto p-1.5 space-y-1">
+    <div id="sidebar-object-tree" class="flex-1 overflow-y-auto p-1.5 space-y-1">
       {#if appState.isLoadingCatalog}
         <div class="p-8 text-center text-xs text-slate-400 flex flex-col items-center gap-2">
           <Icon name="refresh-cw" class="w-5 h-5 animate-spin text-sky-400" />
@@ -478,7 +598,17 @@ import { copyText } from '../../utils/clipboard';
         <div class="space-y-0.5">
           <div class="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center justify-between">
             <span>Available Databases</span>
-            <span class="font-mono text-slate-400 bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800">{appState.filteredDatabases.length}</span>
+            <div class="flex items-center space-x-1">
+              <span class="font-mono text-slate-400 bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800">{appState.filteredDatabases.length}</span>
+              <button
+                type="button"
+                onclick={() => (appState.isCreateDbModalOpen = true)}
+                class="p-0.5 text-slate-400 hover:text-sky-300 hover:bg-sky-950/60 rounded transition"
+                title="Create New Database"
+              >
+                <Icon name="plus" class="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
 
           {#if appState.availableDatabases.length === 0}
@@ -520,7 +650,12 @@ import { copyText } from '../../utils/clipboard';
                   <Icon name="database" class="w-3.5 h-3.5 shrink-0 {db === appState.currentDatabase ? 'text-sky-400' : 'text-slate-500 group-hover:text-sky-400'}" />
                   <span class="truncate font-mono text-[11.5px]">{db}</span>
                 </button>
-                <div class="flex items-center space-x-1.5 shrink-0 ml-1">
+                <div class="flex items-center space-x-1 shrink-0 ml-1">
+                  {#if appState.catalogTimestamps[db.toLowerCase()]}
+                    <span class="text-[9px] text-amber-400/90 font-mono bg-amber-950/30 px-1 py-0.2 rounded border border-amber-800/30">
+                      ⚡{appState.catalogTimestamps[db.toLowerCase()]}
+                    </span>
+                  {/if}
                   {#if appState.databaseTableCounts[db] !== undefined}
                     <span class="text-[10px] text-slate-400 font-mono bg-slate-900/80 px-1.5 py-0.2 rounded border border-slate-800">
                       {appState.databaseTableCounts[db]} tbls
@@ -529,6 +664,17 @@ import { copyText } from '../../utils/clipboard';
                   {#if db === appState.currentDatabase}
                     <span class="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-sky-950 text-sky-400 border border-sky-800">active</span>
                   {/if}
+                  <button
+                    type="button"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      appState.refreshSingleDatabase(db);
+                    }}
+                    class="opacity-0 group-hover:opacity-100 p-1 text-slate-500 hover:text-sky-300 hover:bg-slate-800 rounded transition"
+                    title="Refresh catalog for '{db}'"
+                  >
+                    <Icon name="refresh-cw" class="w-3 h-3" />
+                  </button>
                   <button
                     type="button"
                     onclick={(e) => {
@@ -545,35 +691,63 @@ import { copyText } from '../../utils/clipboard';
             {/each}
           {/if}
         </div>
-      {:else if !appState.catalog || (!appState.catalog.tables?.length && !appState.catalog.routines?.length && !appState.catalog.triggers?.length)}
+      {:else if !appState.catalog}
         <div class="p-8 text-center text-xs text-slate-500 flex flex-col items-center gap-3">
           <Icon name="database" class="w-8 h-8 text-slate-600" />
           <div class="space-y-1">
-            <span class="font-medium text-slate-300 block">Database "{appState.currentDatabase || 'None'}" has no tables</span>
-            <span class="text-[11px] text-slate-500 block">Select another database or create a new table</span>
+            <span class="font-medium text-slate-300 block">Database "{appState.currentDatabase || 'None'}" has no catalog loaded</span>
+            <span class="text-[11px] text-slate-500 block">Select a database or refresh schema</span>
           </div>
-          <div class="flex flex-col gap-2 w-full pt-1">
+          <button
+            type="button"
+            onclick={() => (appState.sidebarViewMode = 'databases')}
+            class="w-full px-3 py-1.5 bg-[#0f172a] hover:bg-slate-800 text-slate-300 border border-slate-700 rounded text-xs font-medium transition flex items-center justify-center space-x-1.5 shadow-sm"
+          >
+            <Icon name="database" class="w-3.5 h-3.5 text-sky-400" />
+            <span>Browse All {appState.availableDatabases.length} Databases</span>
+          </button>
+        </div>
+      {:else}
+        {@const totalTables = appState.catalog.tables?.length || 0}
+        {@const totalViews = appState.catalog.views?.length || 0}
+        {@const totalTriggers = appState.catalog.triggers?.length || 0}
+        {@const totalEvents = appState.catalog.events?.length || 0}
+        {@const driverLower = appState.activeConnection?.driver?.toLowerCase() || ''}
+        {@const supportsEvents = !driverLower || driverLower.includes('mysql') || driverLower.includes('maria')}
+        {@const hasFilteredMatch =
+          appState.filteredTables.length > 0 ||
+          appState.filteredViews.length > 0 ||
+          appState.filteredProcedures.length > 0 ||
+          appState.filteredFunctions.length > 0 ||
+          appState.filteredTriggers.length > 0 ||
+          appState.filteredEvents.length > 0}
+
+        {#if appState.schemaFilter && !hasFilteredMatch}
+          <div class="p-6 text-center text-xs text-slate-500 space-y-1.5">
+            <p class="italic">No schema objects matching "{appState.schemaFilter}"</p>
+            <button
+              type="button"
+              onclick={() => (appState.schemaFilter = '')}
+              class="text-sky-400 hover:underline text-xs"
+            >
+              Clear filter
+            </button>
+          </div>
+        {:else if !appState.schemaFilter && totalTables === 0 && totalViews === 0 && !appState.catalog.routines?.length && totalTriggers === 0 && totalEvents === 0}
+          <div class="mx-1 mb-1 px-2.5 py-2 rounded border border-slate-800/80 bg-[#0f172a]/70 text-[11px] text-slate-400 flex items-center justify-between gap-2">
+            <span class="truncate">Database is empty</span>
             <button
               type="button"
               onclick={() => (appState.isTableCreatorOpen = true)}
-              class="w-full px-3 py-1.5 bg-sky-950/80 hover:bg-sky-900 border border-sky-800 text-sky-300 rounded text-xs font-semibold transition flex items-center justify-center space-x-1.5 shadow-sm"
+              class="px-2 py-0.5 bg-sky-950/80 hover:bg-sky-900 border border-sky-800 text-sky-300 rounded text-[10px] font-semibold shrink-0 transition"
             >
-              <Icon name="plus" class="w-3.5 h-3.5" />
-              <span>Create New Table</span>
-            </button>
-            <button
-              type="button"
-              onclick={() => (appState.sidebarViewMode = 'databases')}
-              class="w-full px-3 py-1.5 bg-[#0f172a] hover:bg-slate-800 text-slate-300 border border-slate-700 rounded text-xs font-medium transition flex items-center justify-center space-x-1.5 shadow-sm"
-            >
-              <Icon name="database" class="w-3.5 h-3.5 text-sky-400" />
-              <span>Browse All {appState.availableDatabases.length} Databases</span>
+              + Create Table
             </button>
           </div>
-        </div>
-      {:else}
+        {/if}
+
         <!-- SECTION: Tables -->
-        {#if appState.filteredTables.length > 0}
+        {#if appState.filteredTables.length > 0 || !appState.schemaFilter}
           <div class="rounded overflow-hidden">
             <div class="flex items-center justify-between hover:bg-slate-800/50 rounded pr-1 group">
               <button
@@ -590,7 +764,11 @@ import { copyText } from '../../utils/clipboard';
                   <span class="truncate">Tables</span>
                 </span>
                 <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
-                  {appState.filteredTables.length}
+                  {#if appState.schemaFilter && totalTables > 0}
+                    {appState.filteredTables.length}/{totalTables}
+                  {:else}
+                    {appState.filteredTables.length}
+                  {/if}
                 </span>
               </button>
 
@@ -722,7 +900,7 @@ import { copyText } from '../../utils/clipboard';
                       <button
                         type="button"
                         onclick={() => appState.openTableDataTab(table.name)}
-                        class="flex-1 text-left px-2 py-1 flex items-center justify-between truncate min-w-0"
+                        class="schema-tree-item flex-1 text-left px-2 py-1 flex items-center justify-between truncate min-w-0"
                         title="Open {table.name} (Right-click for options)"
                       >
                         <div class="flex items-center space-x-2 truncate min-w-0 pr-1">
@@ -782,7 +960,7 @@ import { copyText } from '../../utils/clipboard';
                       <button
                         type="button"
                         onclick={() => appState.openTableDataTab(table.name)}
-                        class="flex-1 text-left px-2 py-1 flex items-center justify-between truncate min-w-0"
+                        class="schema-tree-item flex-1 text-left px-2 py-1 flex items-center justify-between truncate min-w-0"
                         title="Open {table.name} (Right-click for options)"
                       >
                         <div class="flex items-center space-x-2 truncate min-w-0 pr-1">
@@ -834,7 +1012,7 @@ import { copyText } from '../../utils/clipboard';
         {/if}
 
         <!-- SECTION: Views -->
-        {#if appState.filteredViews.length > 0}
+        {#if appState.filteredViews.length > 0 || !appState.schemaFilter}
           <div class="rounded overflow-hidden pt-1">
             <div class="flex items-center justify-between hover:bg-slate-800/50 rounded pr-1 group">
               <button
@@ -876,8 +1054,8 @@ import { copyText } from '../../utils/clipboard';
                     <button
                       type="button"
                       onclick={() => appState.openTableDataTab(view.name)}
-                      class="flex-1 text-left px-2 py-1 flex items-center justify-between truncate min-w-0"
-                      title="View view {view.name}"
+                      class="schema-tree-item flex-1 text-left px-2 py-1 flex items-center justify-between truncate min-w-0"
+                      title="Browse view {view.name}"
                     >
                       <div class="flex items-center space-x-2 truncate min-w-0 pr-1">
                         <Icon name="eye" class="w-3.5 h-3.5 {isActiveTable(view.name) ? 'text-emerald-400' : 'text-emerald-500 group-hover:text-emerald-400'} shrink-0 transition-colors" />
@@ -887,15 +1065,39 @@ import { copyText } from '../../utils/clipboard';
 
                     <!-- Quick action buttons -->
                     <div
-                      class="absolute right-1 flex items-center opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/90 hover:bg-[#0f172a] border border-slate-700/60 shadow-sm px-0.5 py-0.5 rounded transition-opacity backdrop-blur-xs"
+                      class="absolute right-1 flex items-center space-x-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/95 border border-slate-700/60 shadow-sm px-0.5 py-0.5 rounded transition-opacity backdrop-blur-xs"
                     >
                       <button
                         type="button"
                         onclick={(e) => { e.stopPropagation(); appState.openTableStructureTab(view.name); }}
                         class="p-1 hover:bg-slate-700/80 rounded text-slate-400 hover:text-emerald-300 transition"
-                        title="View View Structure"
+                        title="View Structure"
                       >
                         <Icon name="columns" class="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onclick={(e) => { e.stopPropagation(); inspectDdlModal('view', view.name); }}
+                        class="p-1 hover:bg-slate-700/80 rounded text-slate-400 hover:text-sky-300 transition"
+                        title="View DDL"
+                      >
+                        <Icon name="file-code" class="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onclick={(e) => { e.stopPropagation(); appState.openViewDesigner({ name: view.name, query: view.definition }); }}
+                        class="p-1 hover:bg-slate-700/80 rounded text-slate-400 hover:text-amber-300 transition"
+                        title="Edit View"
+                      >
+                        <Icon name="edit" class="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onclick={(e) => { e.stopPropagation(); appState.dropView(view.name); }}
+                        class="p-1 hover:bg-rose-950/70 rounded text-slate-400 hover:text-rose-400 transition"
+                        title="Drop View"
+                      >
+                        <Icon name="trash-2" class="w-3 h-3" />
                       </button>
                     </div>
                   </div>
@@ -905,55 +1107,180 @@ import { copyText } from '../../utils/clipboard';
           </div>
         {/if}
 
-        <!-- SECTION: Routines & Procedures -->
-        {#if appState.filteredRoutines.length > 0}
+        <!-- SECTION: Stored Procedures -->
+        {#if appState.filteredProcedures.length > 0 || !appState.schemaFilter}
           <div class="rounded overflow-hidden pt-1">
             <div class="flex items-center justify-between hover:bg-slate-800/50 rounded pr-1 group">
               <button
                 type="button"
-                onclick={() => appState.toggleSection('routines')}
+                onclick={() => appState.toggleSection('procedures')}
                 class="flex-1 px-2 py-1 text-[10.5px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between transition-colors min-w-0"
               >
                 <span class="flex items-center space-x-1.5 truncate">
                   <Icon
-                    name={appState.collapsedSections.routines ? 'chevron-right' : 'chevron-down'}
+                    name={appState.collapsedSections.procedures ? 'chevron-right' : 'chevron-down'}
                     class="w-3 h-3 text-slate-500 shrink-0"
                   />
-                  <Icon name="code" class="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span class="truncate">Routines</span>
+                  <Icon name="terminal" class="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span class="truncate">Procedures</span>
                 </span>
                 <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
-                  {appState.filteredRoutines.length}
+                  {appState.filteredProcedures.length}
                 </span>
               </button>
 
               <button
                 type="button"
-                onclick={() => appState.openRoutineDesigner()}
+                onclick={() => appState.openRoutineDesigner({ name: '', type: 'PROCEDURE', definition: '' })}
                 class="p-1 text-slate-400 hover:text-amber-300 hover:bg-amber-950/60 rounded transition shrink-0"
-                title="Create Stored Procedure / Function"
+                title="Create Stored Procedure"
               >
                 <Icon name="plus" class="w-3.5 h-3.5" />
               </button>
             </div>
 
-            {#if !appState.collapsedSections.routines}
+            {#if !appState.collapsedSections.procedures}
               <div class="space-y-0.5 mt-0.5 pl-0.5">
-                {#each appState.filteredRoutines as routine (routine.name)}
-                  <button
-                    type="button"
-                    onclick={() => appState.openRoutineTab(routine.name, (routine.type as any) || 'PROCEDURE')}
-                    class="w-full text-left px-2 py-1 rounded-md flex items-center justify-between group hover:bg-[#1e293b]/80 text-slate-300 hover:text-amber-300 text-xs transition-colors"
-                    title="View definition for {routine.name}"
-                  >
-                    <div class="flex items-center space-x-2 truncate min-w-0">
-                      <Icon name="code" class="w-3.5 h-3.5 text-amber-500 group-hover:text-amber-400 shrink-0 transition-colors" />
-                      <span class="truncate font-mono text-[11.5px]">{routine.name}</span>
+                {#each appState.filteredProcedures as proc (proc.name)}
+                  <div class="relative flex items-center group rounded-md text-xs text-slate-300 hover:bg-[#1e293b]/80 hover:text-amber-300 transition-colors">
+                    <button
+                      type="button"
+                      onclick={() => appState.openRoutineTab(proc.name, 'PROCEDURE')}
+                      class="schema-tree-item flex-1 text-left px-2 py-1 flex items-center justify-between truncate min-w-0"
+                      title="Open procedure {proc.name} DDL in editor"
+                    >
+                      <div class="flex items-center space-x-2 truncate min-w-0">
+                        <Icon name="code" class="w-3.5 h-3.5 text-amber-500 group-hover:text-amber-400 shrink-0 transition-colors" />
+                        <span class="truncate font-mono text-[11.5px]">{proc.name}</span>
+                      </div>
+                    </button>
+                    <div
+                      class="absolute right-1 flex items-center space-x-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/95 border border-slate-700/60 shadow-sm px-0.5 py-0.5 rounded transition-opacity backdrop-blur-xs"
+                    >
+                      <button
+                        type="button"
+                        onclick={(e) => { e.stopPropagation(); inspectDdlModal('procedure', proc.name); }}
+                        class="p-1 hover:bg-slate-700/80 rounded text-slate-400 hover:text-sky-300 transition"
+                        title="View DDL"
+                      >
+                        <Icon name="file-code" class="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onclick={(e) => { e.stopPropagation(); appState.openRoutineCaller(proc); }}
+                        class="p-1 hover:bg-slate-700/80 rounded text-slate-400 hover:text-emerald-300 transition"
+                        title="Call in Editor"
+                      >
+                        <Icon name="play" class="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onclick={(e) => { e.stopPropagation(); appState.openRoutineDesigner(proc); }}
+                        class="p-1 hover:bg-slate-700/80 rounded text-slate-400 hover:text-amber-300 transition"
+                        title="Edit Procedure"
+                      >
+                        <Icon name="edit" class="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onclick={(e) => { e.stopPropagation(); appState.dropRoutine(proc.name, 'PROCEDURE'); }}
+                        class="p-1 hover:bg-rose-950/70 rounded text-slate-400 hover:text-rose-400 transition"
+                        title="Drop Procedure"
+                      >
+                        <Icon name="trash-2" class="w-3 h-3" />
+                      </button>
                     </div>
-                    <span class="text-[9px] text-amber-400 font-mono bg-amber-950/40 px-1 rounded border border-amber-800/40 shrink-0 ml-1">
-                      {routine.type || 'PROC'}
-                    </span>
-                  </button>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/if}
+
+        <!-- SECTION: Functions -->
+        {#if appState.filteredFunctions.length > 0 || !appState.schemaFilter}
+          <div class="rounded overflow-hidden pt-1">
+            <div class="flex items-center justify-between hover:bg-slate-800/50 rounded pr-1 group">
+              <button
+                type="button"
+                onclick={() => appState.toggleSection('functions')}
+                class="flex-1 px-2 py-1 text-[10.5px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between transition-colors min-w-0"
+              >
+                <span class="flex items-center space-x-1.5 truncate">
+                  <Icon
+                    name={appState.collapsedSections.functions ? 'chevron-right' : 'chevron-down'}
+                    class="w-3 h-3 text-slate-500 shrink-0"
+                  />
+                  <Icon name="code" class="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <span class="truncate">Functions</span>
+                </span>
+                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
+                  {appState.filteredFunctions.length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onclick={() => appState.openRoutineDesigner({ name: '', type: 'FUNCTION', definition: '' })}
+                class="p-1 text-slate-400 hover:text-cyan-300 hover:bg-cyan-950/60 rounded transition shrink-0"
+                title="Create Stored Function"
+              >
+                <Icon name="plus" class="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {#if !appState.collapsedSections.functions}
+              <div class="space-y-0.5 mt-0.5 pl-0.5">
+                {#each appState.filteredFunctions as fn (fn.name)}
+                  <div class="relative flex items-center group rounded-md text-xs text-slate-300 hover:bg-[#1e293b]/80 hover:text-cyan-300 transition-colors">
+                    <button
+                      type="button"
+                      onclick={() => appState.openRoutineTab(fn.name, 'FUNCTION')}
+                      class="schema-tree-item flex-1 text-left px-2 py-1 flex items-center justify-between truncate min-w-0"
+                      title="Open function {fn.name} DDL in editor"
+                    >
+                      <div class="flex items-center space-x-2 truncate min-w-0">
+                        <Icon name="code" class="w-3.5 h-3.5 text-cyan-500 group-hover:text-cyan-400 shrink-0 transition-colors" />
+                        <span class="truncate font-mono text-[11.5px]">{fn.name}</span>
+                      </div>
+                    </button>
+                    <div
+                      class="absolute right-1 flex items-center space-x-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/95 border border-slate-700/60 shadow-sm px-0.5 py-0.5 rounded transition-opacity backdrop-blur-xs"
+                    >
+                      <button
+                        type="button"
+                        onclick={(e) => { e.stopPropagation(); inspectDdlModal('function', fn.name); }}
+                        class="p-1 hover:bg-slate-700/80 rounded text-slate-400 hover:text-sky-300 transition"
+                        title="View DDL"
+                      >
+                        <Icon name="file-code" class="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onclick={(e) => { e.stopPropagation(); appState.openRoutineCaller(fn); }}
+                        class="p-1 hover:bg-slate-700/80 rounded text-slate-400 hover:text-emerald-300 transition"
+                        title="Call in Editor"
+                      >
+                        <Icon name="play" class="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onclick={(e) => { e.stopPropagation(); appState.openRoutineDesigner(fn); }}
+                        class="p-1 hover:bg-slate-700/80 rounded text-slate-400 hover:text-amber-300 transition"
+                        title="Edit Function"
+                      >
+                        <Icon name="edit" class="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onclick={(e) => { e.stopPropagation(); appState.dropRoutine(fn.name, 'FUNCTION'); }}
+                        class="p-1 hover:bg-rose-950/70 rounded text-slate-400 hover:text-rose-400 transition"
+                        title="Drop Function"
+                      >
+                        <Icon name="trash-2" class="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
                 {/each}
               </div>
             {/if}
@@ -961,7 +1288,7 @@ import { copyText } from '../../utils/clipboard';
         {/if}
 
         <!-- SECTION: Triggers -->
-        {#if appState.filteredTriggers.length > 0}
+        {#if appState.filteredTriggers.length > 0 || !appState.schemaFilter}
           <div class="rounded overflow-hidden pt-1">
             <div class="flex items-center justify-between hover:bg-slate-800/50 rounded pr-1 group">
               <button
@@ -995,22 +1322,153 @@ import { copyText } from '../../utils/clipboard';
             {#if !appState.collapsedSections.triggers}
               <div class="space-y-0.5 mt-0.5 pl-0.5">
                 {#each appState.filteredTriggers as trigger (trigger.name)}
-                  <button
-                    type="button"
-                    onclick={() => appState.openTriggerTab(trigger)}
-                    title="Open trigger definition in a SQL tab"
-                    class="w-full text-left px-2 py-1 rounded-md flex items-center justify-between group hover:bg-[#1e293b]/80 text-slate-300 text-xs transition-colors"
-                  >
-                    <div class="flex items-center space-x-2 truncate min-w-0">
-                      <Icon name="zap" class="w-3.5 h-3.5 text-purple-400 shrink-0" />
-                      <span class="truncate font-mono text-[11.5px]">{trigger.name}</span>
+                  <div class="relative flex items-center group rounded-md text-xs text-slate-300 hover:bg-[#1e293b]/80 hover:text-purple-200 transition-colors">
+                    <button
+                      type="button"
+                      onclick={() => appState.openTriggerTab(trigger)}
+                      title="Open trigger definition in a SQL tab"
+                      class="schema-tree-item flex-1 text-left px-2 py-1 flex items-center justify-between truncate min-w-0"
+                    >
+                      <div class="flex items-center space-x-2 truncate min-w-0">
+                        <Icon name="zap" class="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                        <span class="truncate font-mono text-[11.5px]">{trigger.name}</span>
+                      </div>
+                      {#if trigger.timing || trigger.event}
+                        <span class="text-[9px] text-purple-400 font-mono bg-purple-950/40 px-1 rounded border border-purple-800/40 shrink-0 ml-1 group-hover:opacity-0 transition-opacity">
+                          {trigger.timing} {trigger.event}
+                        </span>
+                      {/if}
+                    </button>
+                    <div
+                      class="absolute right-1 flex items-center space-x-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/95 border border-slate-700/60 shadow-sm px-0.5 py-0.5 rounded transition-opacity backdrop-blur-xs"
+                    >
+                      <button
+                        type="button"
+                        onclick={(e) => { e.stopPropagation(); inspectDdlModal('trigger', trigger.name, trigger); }}
+                        class="p-1 hover:bg-slate-700/80 rounded text-slate-400 hover:text-sky-300 transition"
+                        title="View DDL"
+                      >
+                        <Icon name="file-code" class="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onclick={(e) => { e.stopPropagation(); appState.openTriggerDesigner(trigger); }}
+                        class="p-1 hover:bg-slate-700/80 rounded text-slate-400 hover:text-amber-300 transition"
+                        title="Edit Trigger"
+                      >
+                        <Icon name="edit" class="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onclick={(e) => { e.stopPropagation(); appState.dropTrigger(trigger.name, trigger.table); }}
+                        class="p-1 hover:bg-rose-950/70 rounded text-slate-400 hover:text-rose-400 transition"
+                        title="Drop Trigger"
+                      >
+                        <Icon name="trash-2" class="w-3 h-3" />
+                      </button>
                     </div>
-                    {#if trigger.timing || trigger.event}
-                      <span class="text-[9px] text-purple-400 font-mono bg-purple-950/40 px-1 rounded border border-purple-800/40 shrink-0 ml-1">
-                        {trigger.timing} {trigger.event}
-                      </span>
-                    {/if}
-                  </button>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/if}
+
+        <!-- SECTION: Scheduled Events -->
+        {#if (supportsEvents || appState.filteredEvents.length > 0) && (appState.filteredEvents.length > 0 || !appState.schemaFilter)}
+          <div class="rounded overflow-hidden pt-1">
+            <div class="flex items-center justify-between hover:bg-slate-800/50 rounded pr-1 group">
+              <button
+                type="button"
+                onclick={() => appState.toggleSection('events')}
+                class="flex-1 px-2 py-1 text-[10.5px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between transition-colors min-w-0"
+              >
+                <span class="flex items-center space-x-1.5 truncate">
+                  <Icon
+                    name={appState.collapsedSections.events ? 'chevron-right' : 'chevron-down'}
+                    class="w-3 h-3 text-slate-500 shrink-0"
+                  />
+                  <Icon name="clock" class="w-3.5 h-3.5 text-pink-400 shrink-0" />
+                  <span class="truncate">Events</span>
+                </span>
+                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
+                  {appState.filteredEvents.length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onclick={() => appState.openEventDesigner()}
+                class="p-1 text-slate-400 hover:text-pink-300 hover:bg-pink-950/60 rounded transition shrink-0"
+                title="Create Scheduled Event"
+              >
+                <Icon name="plus" class="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {#if !appState.collapsedSections.events}
+              <div class="space-y-0.5 mt-0.5 pl-0.5">
+                {#each appState.filteredEvents as ev (ev.name)}
+                  {@const isEnabled = (ev.status || '').toUpperCase().includes('ENABLED')}
+                  {@const evSched = ev.interval || ev.schedule || ''}
+                  <div class="relative flex items-center group rounded-md text-xs text-slate-300 hover:bg-[#1e293b]/80 hover:text-pink-200 transition-colors">
+                    <button
+                      type="button"
+                      onclick={() => appState.openEventDDLTab(ev.name)}
+                      title="Event {ev.name} ({ev.status || 'UNKNOWN'} — {evSched})"
+                      class="schema-tree-item flex-1 text-left px-2 py-1 flex items-center justify-between truncate min-w-0"
+                    >
+                      <div class="flex items-center space-x-2 truncate min-w-0">
+                        <span
+                          class="w-1.5 h-1.5 rounded-full shrink-0 {isEnabled ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.7)]' : 'bg-slate-500'}"
+                          title={ev.status || 'DISABLED'}
+                        ></span>
+                        <Icon name="clock" class="w-3.5 h-3.5 text-pink-400 shrink-0" />
+                        <span class="truncate font-mono text-[11.5px]">{ev.name}</span>
+                      </div>
+                      {#if evSched}
+                        <span class="text-[9px] text-pink-300 font-mono bg-pink-950/40 px-1 rounded border border-pink-800/40 shrink-0 ml-1 max-w-[76px] truncate group-hover:opacity-0 transition-opacity">
+                          {evSched}
+                        </span>
+                      {/if}
+                    </button>
+                    <div
+                      class="absolute right-1 flex items-center space-x-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/95 border border-slate-700/60 shadow-sm px-0.5 py-0.5 rounded transition-opacity backdrop-blur-xs"
+                    >
+                      <button
+                        type="button"
+                        onclick={(e) => { e.stopPropagation(); inspectDdlModal('event', ev.name); }}
+                        class="p-1 hover:bg-slate-700/80 rounded text-slate-400 hover:text-sky-300 transition"
+                        title="View DDL"
+                      >
+                        <Icon name="file-code" class="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onclick={(e) => { e.stopPropagation(); appState.toggleEventStatus(ev); }}
+                        class="p-1 hover:bg-slate-700/80 rounded text-slate-400 hover:text-emerald-300 transition"
+                        title={isEnabled ? 'Disable Event' : 'Enable Event'}
+                      >
+                        <Icon name={isEnabled ? 'pause' : 'play'} class="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onclick={(e) => { e.stopPropagation(); appState.openEventDesigner(ev); }}
+                        class="p-1 hover:bg-slate-700/80 rounded text-slate-400 hover:text-amber-300 transition"
+                        title="Edit Event"
+                      >
+                        <Icon name="edit" class="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onclick={(e) => { e.stopPropagation(); appState.dropEvent(ev.name); }}
+                        class="p-1 hover:bg-rose-950/70 rounded text-slate-400 hover:text-rose-400 transition"
+                        title="Drop Event"
+                      >
+                        <Icon name="trash-2" class="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
                 {/each}
               </div>
             {/if}
@@ -1081,7 +1539,19 @@ import { copyText } from '../../utils/clipboard';
             class="w-full text-left px-3 py-1.5 hover:bg-slate-800/80 flex items-center space-x-2 text-slate-200 transition-colors"
           >
             <Icon name="file-code" class="w-3.5 h-3.5 text-purple-400" />
-            <span>View CREATE TABLE DDL</span>
+            <span>Open CREATE TABLE in Tab</span>
+          </button>
+          <button
+            type="button"
+            onclick={() => {
+              const tbl = tableContextMenu!.tableName;
+              closeTableMenu();
+              inspectDdlModal('table', tbl);
+            }}
+            class="w-full text-left px-3 py-1.5 hover:bg-slate-800/80 flex items-center space-x-2 text-slate-200 transition-colors"
+          >
+            <Icon name="eye" class="w-3.5 h-3.5 text-sky-400" />
+            <span>View DDL (Modal)</span>
           </button>
         </div>
 
@@ -1112,9 +1582,9 @@ import { copyText } from '../../utils/clipboard';
           <button
             type="button"
             onclick={() => {
-              appState.mockDataTableName = tableContextMenu!.tableName;
-              appState.isMockDataModalOpen = true;
+              const tbl = tableContextMenu!.tableName;
               closeTableMenu();
+              appState.openMockDataModal(tbl);
             }}
             class="w-full text-left px-3 py-1.5 hover:bg-slate-800/80 flex items-center space-x-2 text-slate-200 transition-colors"
           >

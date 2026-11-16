@@ -11,6 +11,7 @@
     id: string;
     title: string;
     subtitle?: string;
+    shortcut?: string;
     category: 'Tables' | 'Databases' | 'Actions';
     icon: string;
     action: () => void;
@@ -141,6 +142,7 @@
       id: 'action-snippets',
       title: 'Query Snippets & Templates Library',
       subtitle: 'Reusable parameterized SQL query templates',
+      shortcut: 'Ctrl+Shift+S',
       category: 'Actions',
       icon: 'bookmark',
       action: () => appState.openSnippetsModal(),
@@ -197,6 +199,7 @@
       id: 'action-activity-console',
       title: 'System Activity Console',
       subtitle: 'Real-time daemon log stream and lock monitors',
+      shortcut: 'Ctrl+`',
       category: 'Actions',
       icon: 'terminal',
       action: () => (appState.isActivityDrawerOpen = !appState.isActivityDrawerOpen),
@@ -213,9 +216,10 @@
       id: 'action-copilot',
       title: 'SqlFox AI Copilot Assistant',
       subtitle: 'Natural language query generation and SQL explanation',
+      shortcut: 'Ctrl+L',
       category: 'Actions',
       icon: 'bot',
-      action: () => (appState.isAiDrawerOpen = true),
+      action: () => appState.toggleAiDrawer(true),
     });
     list.push({
       id: 'action-notes',
@@ -227,8 +231,9 @@
     });
     list.push({
       id: 'action-settings',
-      title: 'Cloud Sync & Vault Backup',
-      subtitle: 'Configure GitHub sync and vault backups',
+      title: 'Settings, Cloud Sync & Vault Backup',
+      subtitle: 'Configure GitHub sync, encrypted vault, and LAN security',
+      shortcut: 'Ctrl+,',
       category: 'Actions',
       icon: 'cloud',
       action: () => (appState.isSettingsModalOpen = true),
@@ -237,6 +242,7 @@
       id: 'action-shortcuts',
       title: 'Keyboard Shortcuts Cheatsheet',
       subtitle: 'Quick reference for hotkeys and keybindings',
+      shortcut: 'F1',
       category: 'Actions',
       icon: 'keyboard',
       action: () => (appState.isShortcutsModalOpen = true),
@@ -264,6 +270,47 @@
       category: 'Actions',
       icon: 'refresh-cw',
       action: () => appState.refreshCatalog(),
+    });
+    list.push({
+      id: 'action-refresh-all',
+      title: 'Refresh All Catalogs',
+      subtitle: 'Pre-warm fast metadata cache across all server databases',
+      category: 'Actions',
+      icon: 'refresh-cw',
+      action: () => (appState.isRefreshAllOpen = true),
+    });
+    list.push({
+      id: 'action-schema-search',
+      title: 'Schema Search (Cross-Database Finder)',
+      subtitle: 'Jump across tables, views, columns, and routines',
+      shortcut: 'Ctrl+P',
+      category: 'Actions',
+      icon: 'search',
+      action: () => (appState.isSchemaSearchOpen = true),
+    });
+    list.push({
+      id: 'action-lock-inspector',
+      title: 'Lock Contention & Blockers',
+      subtitle: 'Inspect blocking chains and kill blocker transactions',
+      category: 'Actions',
+      icon: 'shield-alert',
+      action: () => (appState.isLockInspectorOpen = true),
+    });
+    list.push({
+      id: 'action-statement-digest',
+      title: 'Statement Digest & Slow Query Profiler',
+      subtitle: 'Top normalized SQL patterns by total & avg latency',
+      category: 'Actions',
+      icon: 'trending-up',
+      action: () => appState.openProcesslistTab('digest'),
+    });
+    list.push({
+      id: 'action-smart-seed',
+      title: 'Export Smart Seed',
+      subtitle: 'Generate dependency-ordered sample INSERT dataset',
+      category: 'Actions',
+      icon: 'package',
+      action: () => (appState.isSmartSeedModalOpen = true),
     });
 
     // Query execution actions
@@ -333,11 +380,12 @@
     });
     list.push({
       id: 'action-open-browser',
-      title: 'Open in Web Browser',
-      subtitle: 'Open the SqlFox UI in your default browser',
+      title: 'Open New Window / Browser Tab',
+      subtitle: 'Open another SqlFox workspace window',
+      shortcut: 'Ctrl+Shift+N',
       category: 'Actions',
       icon: 'share-2',
-      action: () => appState.openInSystemBrowser(),
+      action: () => window.open(window.location.href, '_blank', 'noopener,noreferrer'),
     });
     list.push({
       id: 'action-copy-url',
@@ -468,9 +516,16 @@
                 </div>
               </div>
 
-              <span class="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-slate-900 border border-slate-800 text-slate-400 shrink-0 ml-2">
-                {item.category}
-              </span>
+              <div class="flex items-center space-x-2 shrink-0 ml-2">
+                {#if item.shortcut}
+                  <kbd class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#090d16] border border-slate-700 text-sky-400">
+                    {item.shortcut}
+                  </kbd>
+                {/if}
+                <span class="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-slate-900 border border-slate-800 text-slate-400">
+                  {item.category}
+                </span>
+              </div>
             </button>
           {/each}
         {/if}

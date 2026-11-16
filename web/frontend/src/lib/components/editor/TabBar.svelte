@@ -4,6 +4,8 @@
   import Icon from '../common/Icon.svelte';
 
   let containerWidth = $state(0);
+  let tabsContainerEl = $state<HTMLDivElement | null>(null);
+  let measuredTabWidths = $state<Record<string, number>>({});
   let showOverflowDropdown = $state(false);
   let overflowSearchQuery = $state('');
   let overflowActiveIndex = $state(0);
@@ -18,41 +20,68 @@
     tabId: string;
   } | null>(null);
 
-  function hasDraft(tab: { sql: string; isTableViewer?: boolean; isProcesslist?: boolean; isErdCanvas?: boolean; isFlightRecorder?: boolean; isVariables?: boolean }): boolean {
-    return !tab.isTableViewer && !tab.isProcesslist && !tab.isErdCanvas && !tab.isFlightRecorder && !tab.isVariables && tab.sql.trim().length > 0;
+  function isSingletonTab(tab: { isTableViewer?: boolean; isProcesslist?: boolean; isErdCanvas?: boolean; isCluster?: boolean; isVariables?: boolean; isFlightRecorder?: boolean }): boolean {
+    return !!(tab.isTableViewer || tab.isProcesslist || tab.isErdCanvas || tab.isCluster || tab.isVariables || tab.isFlightRecorder);
   }
 
-  // Enterprise tab width estimator: font-mono text-[11px] + padding + icon + close button
+  function hasDraft(tab: { sql: string; isTableViewer?: boolean; isProcesslist?: boolean; isErdCanvas?: boolean; isFlightRecorder?: boolean; isVariables?: boolean; isCluster?: boolean; isNote?: boolean }): boolean {
+    return !tab.isTableViewer && !tab.isProcesslist && !tab.isErdCanvas && !tab.isFlightRecorder && !tab.isVariables && !tab.isCluster && !tab.isNote && tab.sql.trim().length > 0;
+  }
+
   function estimateTabWidth(title: string): number {
     const charWidth = 7.2;
-    const chromeWidth = 64; // icon + close button + padding
+    const chromeWidth = 64;
     return Math.max(105, Math.min(200, Math.round(title.length * charWidth + chromeWidth)));
   }
 
-  // Calculate how many tabs fit in the visible tab strip without spilling off-screen
+  function tabWidthFor(tab: { id: string; title: string }): number {
+    return measuredTabWidths[tab.id] || estimateTabWidth(tab.title);
+  }
+
+  // Measure real rendered DOM tab widths whenever visible tabs or container width changes.
+  $effect(() => {
+    void containerWidth;
+    void appState.tabs.length;
+    tick().then(() => {
+      if (!tabsContainerEl) return;
+      const next: Record<string, number> = {};
+      let changed = false;
+      for (const el of tabsContainerEl.querySelectorAll<HTMLElement>('[data-tab-id]')) {
+        const id = el.dataset.tabId;
+        if (!id) continue;
+        const w = el.offsetWidth;
+        if (w > 0) {
+          next[id] = w;
+          if (measuredTabWidths[id] !== w) changed = true;
+        }
+      }
+      if (changed) {
+        measuredTabWidths = { ...measuredTabWidths, ...next };
+      }
+    });
+  });
+
   let visibleCount = $derived.by(() => {
     if (containerWidth <= 0 || appState.tabs.length <= 1) return appState.tabs.length;
 
     const addBtnWidth = 32;
-    const overflowBtnWidth = 72; // width for overflow button (» count)
+    const overflowBtnWidth = 72;
     const gap = 4;
     const safetyMargin = 16;
 
-    // Check if ALL tabs fit comfortably without overflow button
     let totalAll = 0;
     for (const tab of appState.tabs) {
-      totalAll += estimateTabWidth(tab.title) + gap;
+      totalAll += tabWidthFor(tab) + gap;
     }
     if (totalAll + addBtnWidth + safetyMargin <= containerWidth) {
       return appState.tabs.length;
     }
 
-    // When tabs exceed container width, reserve space for the overflow dropdown button
     const availableWidth = containerWidth - addBtnWidth - overflowBtnWidth - safetyMargin;
     let accumulated = 0;
     let count = 0;
     for (let i = 0; i < appState.tabs.length; i++) {
-      const tabW = estimateTabWidth(appState.tabs[i].title) + gap;
+      const tabW = tabWidthFor(appState.tabs[i]) + gap;
       if (accumulated + tabW <= availableWidth) {
         accumulated += tabW;
         count++;
@@ -63,11 +92,9 @@
     return Math.max(1, count);
   });
 
-  // Split tabs into visible and overflow subsets
   let visibleTabs = $derived(appState.tabs.slice(0, visibleCount));
   let overflowTabs = $derived(appState.tabs.slice(visibleCount));
 
-  // Search filter inside overflow dropdown
   let filteredOverflowTabs = $derived.by(() => {
     const q = overflowSearchQuery.trim().toLowerCase();
     if (!q) return overflowTabs;
@@ -79,7 +106,7 @@
     );
   });
 
-  // Enterprise Best Practice: Active tab is GUARANTEED to be in the visible tab strip!
+  // Place overflowing active tab at the last visible slot so earlier tabs stay anchored.
   $effect(() => {
     const vCount = visibleCount;
     const activeId = appState.activeTabId;
@@ -88,9 +115,9 @@
     const activeIdx = appState.tabs.findIndex((t) => t.id === activeId);
     if (activeIdx >= vCount) {
       untrack(() => {
-        // Move active tab to index 0 so it is guaranteed visible without width-oscillation.
         const [activeTab] = appState.tabs.splice(activeIdx, 1);
-        appState.tabs.unshift(activeTab);
+        const targetSlot = Math.max(0, vCount - 1);
+        appState.tabs.splice(targetSlot, 0, activeTab);
         appState.tabs = [...appState.tabs];
         appState.saveTabsState();
       });
@@ -229,10 +256,11 @@
   class="h-9 bg-[#0b0f19] border-b border-slate-800 flex items-center px-2 select-none justify-between relative overflow-hidden"
 >
   <!-- Visible Tabs Strip (fits strictly within available screen width) -->
-  <div id="tabs-container" class="flex items-center min-w-0 flex-1 overflow-hidden gap-1">
+  <div id="tabs-container" bind:this={tabsContainerEl} class="flex items-center min-w-0 flex-1 overflow-hidden gap-1">
     {#each visibleTabs as tab (tab.id)}
       {@const isActive = tab.id === appState.activeTabId}
       <div
+        data-tab-id={tab.id}
         class="group relative flex items-center h-8 px-3 rounded-t border-t border-x text-xs cursor-pointer transition-all max-w-[200px] min-w-[100px] shrink-0 {
           isActive
             ? 'bg-[#090d16] border-t border-x border-slate-800 text-sky-400 font-semibold shadow-sm'
@@ -251,14 +279,16 @@
         {/if}
         <!-- Icon Indicator -->
         <span class="mr-2 flex items-center shrink-0">
-          {#if tab.isExecuting}
+          {#if tab.isExecuting || tab.isStreaming || tab.isExplaining}
             <Icon name="refresh-cw" class="w-3.5 h-3.5 animate-spin text-sky-400" />
-          {:else if tab.isProcesslist}
+          {:else if tab.isProcesslist || tab.isCluster || tab.isVariables || tab.isFlightRecorder}
             <Icon name="cpu" class="w-3.5 h-3.5 text-sky-400" />
           {:else if tab.isErdCanvas}
             <Icon name="layers" class="w-3.5 h-3.5 {isActive ? 'text-indigo-400' : 'text-slate-500'}" />
           {:else if tab.isTableViewer}
             <Icon name="table" class="w-3.5 h-3.5 {isActive ? 'text-emerald-400' : 'text-slate-500'}" />
+          {:else if tab.isNote}
+            <Icon name="file-text" class="w-3.5 h-3.5 {isActive ? 'text-amber-400' : 'text-slate-500'}" />
           {:else}
             <Icon name="file-code" class="w-3.5 h-3.5 {isActive ? 'text-sky-400' : 'text-slate-500'}" />
           {/if}
@@ -269,7 +299,9 @@
           {tab.title}
         </span>
 
-        {#if hasDraft(tab)}
+        {#if tab.txActive}
+          <span class="ml-1.5 w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" title="Transaction active in this tab"></span>
+        {:else if hasDraft(tab)}
           <span class="ml-1.5 w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" title="SQL draft"></span>
         {/if}
 
@@ -317,6 +349,8 @@
 
   <!-- Tab Context Menu -->
   {#if tabContextMenu && tabContextMenu.open}
+    {@const ctxTab = appState.tabs.find((t) => t.id === tabContextMenu!.tabId)}
+    {@const singleton = ctxTab ? isSingletonTab(ctxTab) : false}
     <div
       id="tab-context-menu"
       style="top: {tabContextMenu.y}px; left: {tabContextMenu.x}px;"
@@ -325,11 +359,11 @@
       <div class="py-1">
         <button
           id="tab-ctx-btn-rename"
-          onclick={() => {
+          onclick={async () => {
             const target = appState.tabs.find((t) => t.id === tabContextMenu!.tabId);
             closeTabMenu();
             if (!target) return;
-            const next = window.prompt('Rename tab', target.title);
+            const next = await appState.showNativePrompt('Enter a new name for this tab:', 'Rename Tab', target.title);
             if (next !== null) appState.renameTab(target.id, next);
           }}
           class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
@@ -339,24 +373,26 @@
         </button>
         <button
           id="tab-ctx-btn-duplicate"
+          disabled={singleton}
           onclick={() => {
-            appState.duplicateTab(tabContextMenu!.tabId);
+            if (!singleton) appState.duplicateTab(tabContextMenu!.tabId);
             closeTabMenu();
           }}
-          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center space-x-2 text-slate-200"
         >
           <Icon name="copy" class="w-3.5 h-3.5 text-sky-400" />
           <span>Duplicate Tab</span>
         </button>
         <button
+          disabled={singleton}
           onclick={() => {
             const targetTab = appState.tabs.find((t) => t.id === tabContextMenu!.tabId);
-            if (targetTab) {
+            if (targetTab && !singleton) {
               appState.saveQueryToNote(targetTab.sql, targetTab.title);
             }
             closeTabMenu();
           }}
-          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center space-x-2 text-slate-200"
         >
           <Icon name="bookmark" class="w-3.5 h-3.5 text-amber-400" />
           <span>Save as Note</span>
@@ -492,14 +528,16 @@
             <!-- Tab Icon & Title -->
             <div class="flex items-center space-x-2 min-w-0 flex-1 pr-2">
               <span class="flex items-center shrink-0">
-                {#if tab.isExecuting}
+                {#if tab.isExecuting || tab.isStreaming || tab.isExplaining}
                   <Icon name="refresh-cw" class="w-3.5 h-3.5 animate-spin text-sky-400" />
-                {:else if tab.isProcesslist}
+                {:else if tab.isProcesslist || tab.isCluster || tab.isVariables || tab.isFlightRecorder}
                   <Icon name="cpu" class="w-3.5 h-3.5 text-sky-400" />
                 {:else if tab.isErdCanvas}
                   <Icon name="layers" class="w-3.5 h-3.5 text-indigo-400" />
                 {:else if tab.isTableViewer}
                   <Icon name="table" class="w-3.5 h-3.5 text-emerald-400" />
+                {:else if tab.isNote}
+                  <Icon name="file-text" class="w-3.5 h-3.5 text-amber-400" />
                 {:else}
                   <Icon name="file-code" class="w-3.5 h-3.5 text-sky-400" />
                 {/if}
@@ -509,7 +547,9 @@
                 {tab.title}
               </span>
 
-              {#if hasDraft(tab)}
+              {#if tab.txActive}
+                <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" title="Transaction active"></span>
+              {:else if hasDraft(tab)}
                 <span class="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" title="SQL draft"></span>
               {/if}
 

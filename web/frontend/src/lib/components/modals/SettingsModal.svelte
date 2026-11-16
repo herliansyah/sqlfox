@@ -1,6 +1,7 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
+  import { copyText } from '../../utils/clipboard';
   import Icon from '../common/Icon.svelte';
 
   type SettingsTab = 'sync' | 'bundle' | 'security';
@@ -17,22 +18,47 @@
   let isTesting = $state(false);
   let isSyncing = $state(false);
   let syncStatus = $state<{ ok: boolean; message: string } | null>(null);
+  let remoteSyncInfo = $state<any>(null);
 
   // Notes Bundle Import State
   let importFileInput = $state<HTMLInputElement | null>(null);
   let isImporting = $state(false);
 
+  // Encrypted Vault Export/Import State
+  let vaultPassphrase = $state('');
+  let isExportingVault = $state(false);
+  let isImportingVault = $state(false);
+  let vaultImportInput = $state<HTMLInputElement | null>(null);
+  let masterKeyInfo = $state<{ lan_enabled: boolean; master_password?: string; lan_ip?: string; port?: number | string } | null>(null);
+
+  let tabletLanUrl = $derived.by(() => {
+    const ip = masterKeyInfo?.lan_ip;
+    const port = masterKeyInfo?.port || window.location.port;
+    if (ip) return `http://${ip}${port ? `:${port}` : ''}`;
+    return window.location.origin;
+  });
+
   async function loadSyncConfig() {
     try {
-      const cfg = await api.getCloudSyncConfig();
-      if (cfg) {
-        syncEnabled = !!cfg.enabled;
-        githubRepo = cfg.github_repo || '';
-        githubBranch = cfg.github_branch || 'main';
-        pathPrefix = cfg.path_prefix || 'sqlfox-vault/';
-        includeVault = cfg.include_vault_backup !== false;
+      const [cfg, statusRes, keyRes] = await Promise.allSettled([
+        api.getCloudSyncConfig(),
+        api.getCloudSyncStatus(),
+        api.getMasterKey(),
+      ]);
+      if (cfg.status === 'fulfilled' && cfg.value) {
+        syncEnabled = !!cfg.value.enabled;
+        githubRepo = cfg.value.github_repo || '';
+        githubBranch = cfg.value.github_branch || 'main';
+        pathPrefix = cfg.value.path_prefix || 'sqlfox-vault/';
+        includeVault = cfg.value.include_vault_backup !== false;
       }
-    } catch (e) {}
+      if (statusRes.status === 'fulfilled') {
+        remoteSyncInfo = statusRes.value;
+      }
+      if (keyRes.status === 'fulfilled') {
+        masterKeyInfo = keyRes.value;
+      }
+    } catch (_) {}
   }
 
   async function saveSyncConfig() {
@@ -61,6 +87,7 @@
       const data = await api.testCloudSync({
         github_token: githubToken.trim() || undefined,
         github_repo: githubRepo.trim(),
+        github_branch: githubBranch.trim() || 'main',
       });
       syncStatus = { ok: true, message: data.message || 'GitHub repository connection verified successfully!' };
     } catch (err: any) {
@@ -75,10 +102,61 @@
     try {
       const data = await api.runCloudSync();
       appState.showToast(data.message || 'Cloud Sync push & pull completed!', 'success');
+      try {
+        remoteSyncInfo = await api.getCloudSyncStatus();
+      } catch (_) {}
     } catch (err: any) {
       appState.showToast(`Sync execution failed: ${err.message}`, 'error');
     } finally {
       isSyncing = false;
+    }
+  }
+
+  async function handleExportVault() {
+    const pass = vaultPassphrase.trim();
+    if (pass.length < 4) {
+      appState.showToast('Enter an encryption passphrase (at least 4 characters) to export vault', 'warning');
+      return;
+    }
+    isExportingVault = true;
+    try {
+      const blob = await api.exportVault(pass);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'sqlfox-connections.sqlfox-vault';
+      a.click();
+      URL.revokeObjectURL(url);
+      appState.showToast('Encrypted vault exported (.sqlfox-vault)', 'success');
+    } catch (err: any) {
+      appState.showToast(`Vault export failed: ${err.message}`, 'error');
+    } finally {
+      isExportingVault = false;
+    }
+  }
+
+  async function handleImportVaultFile(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    const pass = vaultPassphrase.trim();
+    if (!pass) {
+      appState.showToast('Enter the vault decryption passphrase before selecting the .sqlfox-vault file', 'warning');
+      input.value = '';
+      return;
+    }
+    isImportingVault = true;
+    try {
+      const text = await file.text();
+      const archive = JSON.parse(text);
+      const res = await api.importVault(pass, archive);
+      await appState.loadConnections();
+      appState.showToast(`Imported ${res.imported_count} connection(s) into vault`, 'success');
+    } catch (err: any) {
+      appState.showToast(`Vault import failed: ${err.message}`, 'error');
+    } finally {
+      isImportingVault = false;
+      if (vaultImportInput) vaultImportInput.value = '';
     }
   }
 
@@ -198,7 +276,29 @@
                 class="w-full bg-[#050811] border border-[#1e293b] rounded-lg px-3 py-2 text-slate-200 font-mono text-xs focus:outline-none focus:border-sky-500"
               />
             </div>
+
+            <label class="flex items-center space-x-2 p-2.5 rounded-xl bg-slate-900/40 border border-slate-800/80 cursor-pointer">
+              <input type="checkbox" bind:checked={includeVault} class="rounded border-slate-700 text-sky-500" />
+              <div>
+                <span class="text-slate-200 font-semibold text-xs block">Include Encrypted Vault Backup</span>
+                <span class="text-slate-400 text-[10.5px]">Back up encrypted connection credentials alongside notes &amp; snippets</span>
+              </div>
+            </label>
           </div>
+
+          {#if remoteSyncInfo}
+            <div class="p-3 rounded-xl bg-[#050811] border border-[#1e293b] flex items-center justify-between text-[11px]">
+              <div class="space-y-0.5">
+                <div class="font-semibold text-slate-300">Cloud Sync Status</div>
+                <div class="text-slate-400 font-mono">
+                  {remoteSyncInfo.last_sync_at ? `Last synced: ${new Date(remoteSyncInfo.last_sync_at).toLocaleString()}` : remoteSyncInfo.status || (syncEnabled ? 'Configured & ready' : 'Sync disabled')}
+                </div>
+              </div>
+              <span class="px-2 py-0.5 rounded font-mono text-[10px] {remoteSyncInfo.last_error ? 'bg-rose-950 text-rose-300 border border-rose-800' : syncEnabled ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-slate-900 text-slate-400 border border-slate-800'}">
+                {remoteSyncInfo.last_error ? 'Error' : syncEnabled ? 'Active' : 'Off'}
+              </span>
+            </div>
+          {/if}
 
           {#if syncStatus}
             <div class="p-3 rounded-xl border text-xs flex items-center space-x-2 {syncStatus.ok ? 'bg-emerald-950/40 border-emerald-800 text-emerald-300' : 'bg-rose-950/40 border-rose-800 text-rose-300'}">
@@ -232,26 +332,26 @@
             <div class="p-4 rounded-xl bg-[#050811] border border-[#1e293b] flex items-center justify-between">
               <div>
                 <h4 class="font-bold text-slate-200 text-xs">Export Operational Notes Bundle</h4>
-                <p class="text-slate-400 text-[11px] mt-0.5">Download an offline JSON bundle of all team operational notes, snapshots & reminders.</p>
+                <p class="text-slate-400 text-[11px] mt-0.5">Download a ZIP bundle containing team operational notes, Markdown snapshots &amp; reminders.</p>
               </div>
               <button
                 onclick={exportNotesBundle}
                 class="px-3.5 py-1.5 rounded bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs transition flex items-center space-x-1.5 shadow-md shadow-amber-950/30 shrink-0 ml-3"
               >
                 <Icon name="download" class="w-3.5 h-3.5" />
-                <span>Export Bundle</span>
+                <span>Export .ZIP</span>
               </button>
             </div>
 
             <div class="p-4 rounded-xl bg-[#050811] border border-[#1e293b] flex items-center justify-between">
               <div>
                 <h4 class="font-bold text-slate-200 text-xs">Import Operational Notes Bundle</h4>
-                <p class="text-slate-400 text-[11px] mt-0.5">Restore notes from a previously exported SqlFox notes bundle file.</p>
+                <p class="text-slate-400 text-[11px] mt-0.5">Restore notes from a previously exported SqlFox <code class="font-mono text-amber-300">.zip</code> bundle archive.</p>
               </div>
               <div>
                 <input
                   type="file"
-                  accept=".json"
+                  accept=".zip,application/zip"
                   bind:this={importFileInput}
                   onchange={handleImportFile}
                   class="hidden"
@@ -262,20 +362,103 @@
                   class="px-3.5 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs transition flex items-center space-x-1.5 border border-[#334155] shrink-0 ml-3"
                 >
                   <Icon name="upload" class="w-3.5 h-3.5" />
-                  <span>{isImporting ? 'Importing...' : 'Upload File'}</span>
+                  <span>{isImporting ? 'Importing...' : 'Upload Bundle'}</span>
                 </button>
               </div>
             </div>
           </div>
         {:else if currentTab === 'security'}
           <div class="space-y-4">
-            <div class="p-4 rounded-xl bg-[#050811] border border-[#1e293b] space-y-2">
-              <span class="text-slate-400 font-medium text-xs block">Remote LAN Master PIN</span>
-              <p class="text-slate-400 text-xs leading-relaxed">
-                When SqlFox is accessed from another computer on the local network (LAN) or behind a reverse proxy, the client must authenticate with the Master PIN before any database commands can be issued.
+            <!-- Encrypted Vault Export / Import -->
+            <div class="p-4 rounded-xl bg-[#050811] border border-[#1e293b] space-y-3">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h4 class="font-bold text-slate-200 text-xs">Encrypted Connection Vault (.sqlfox-vault)</h4>
+                  <p class="text-slate-400 text-[11px] mt-0.5">Export or restore encrypted database credentials using a portable passphrase.</p>
+                </div>
+                <Icon name="shield-check" class="w-4 h-4 text-emerald-400 shrink-0" />
+              </div>
+
+              <input
+                type="password"
+                bind:value={vaultPassphrase}
+                placeholder="Enter export / import encryption passphrase..."
+                class="w-full bg-[#090d16] border border-[#1e293b] rounded-lg px-3 py-1.5 text-slate-200 font-mono text-xs focus:outline-none focus:border-emerald-500"
+              />
+
+              <div class="flex items-center justify-end space-x-2">
+                <input
+                  type="file"
+                  accept=".sqlfox-vault,.json"
+                  bind:this={vaultImportInput}
+                  onchange={handleImportVaultFile}
+                  class="hidden"
+                />
+                <button
+                  type="button"
+                  onclick={() => vaultImportInput?.click()}
+                  disabled={isImportingVault}
+                  class="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 border border-[#334155] text-slate-200 text-xs font-semibold transition flex items-center space-x-1.5"
+                >
+                  <Icon name="upload" class="w-3.5 h-3.5" />
+                  <span>{isImportingVault ? 'Importing...' : 'Import Vault'}</span>
+                </button>
+                <button
+                  type="button"
+                  onclick={handleExportVault}
+                  disabled={isExportingVault}
+                  class="px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition flex items-center space-x-1.5"
+                >
+                  <Icon name="download" class="w-3.5 h-3.5" />
+                  <span>{isExportingVault ? 'Exporting...' : 'Export Vault'}</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Live LAN & Master PIN Card -->
+            <div class="p-4 rounded-xl bg-[#050811] border border-[#1e293b] space-y-2.5">
+              <div class="flex items-center justify-between">
+                <span class="text-slate-200 font-bold text-xs">Remote LAN Access &amp; Master PIN</span>
+                <span class="px-2 py-0.5 rounded font-mono text-[10px] {masterKeyInfo?.lan_enabled || appState.authStatus?.lan_enabled ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-slate-900 text-slate-400 border border-slate-800'}">
+                  {masterKeyInfo?.lan_enabled || appState.authStatus?.lan_enabled ? 'LAN Listener Active' : 'Localhost Only'}
+                </span>
+              </div>
+              <p class="text-slate-400 text-[11px] leading-relaxed">
+                Remote browsers or tablets on your LAN must authenticate with the runtime Master PIN before executing commands.
               </p>
-              <div class="p-2.5 rounded bg-slate-900 border border-slate-800 font-mono text-emerald-400 text-sm font-bold tracking-widest inline-block">
-                fox-0304
+
+              <div class="flex flex-wrap items-center gap-2 pt-1">
+                {#if masterKeyInfo?.master_password || appState.authStatus?.master_password}
+                  {@const pin = masterKeyInfo?.master_password || appState.authStatus?.master_password}
+                  <div class="px-2.5 py-1 rounded bg-slate-900 border border-slate-800 font-mono text-emerald-400 text-xs font-bold tracking-widest">
+                    PIN: {pin}
+                  </div>
+                  <button
+                    type="button"
+                    onclick={() => {
+                      copyText(pin);
+                      appState.showToast('Master PIN copied to clipboard', 'success');
+                    }}
+                    class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-[11px] font-medium transition flex items-center space-x-1"
+                  >
+                    <Icon name="copy" class="w-3 h-3" />
+                    <span>Copy PIN</span>
+                  </button>
+                {:else}
+                  <span class="text-[11px] text-slate-500 italic">Master PIN is printed in the local terminal startup banner on localhost.</span>
+                {/if}
+
+                <button
+                  type="button"
+                  onclick={() => {
+                    copyText(tabletLanUrl);
+                    appState.showToast(`Copied Tablet/LAN URL: ${tabletLanUrl}`, 'success');
+                  }}
+                  class="px-2.5 py-1 rounded bg-sky-950/70 hover:bg-sky-900 border border-sky-800 text-sky-300 text-[11px] font-medium transition flex items-center space-x-1 ml-auto"
+                >
+                  <Icon name="link" class="w-3 h-3" />
+                  <span>Copy LAN URL</span>
+                </button>
               </div>
             </div>
           </div>

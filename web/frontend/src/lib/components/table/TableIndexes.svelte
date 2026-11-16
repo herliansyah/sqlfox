@@ -1,7 +1,8 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
-  import type { TableMetadata, ColumnMetadata } from '../../../types';
+  import { quoteSqlIdentifier } from '../../utils/sqlStatements';
+  import type { TableMetadata, ColumnMetadata, IndexInfo } from '../../../types';
   import Icon from '../common/Icon.svelte';
 
   interface Props {
@@ -12,24 +13,48 @@
 
   let isAddModalOpen = $state(false);
   let isExecuting = $state(false);
+  let editingOriginalName = $state<string | null>(null);
+  let isCustomName = $state(false);
 
   // Index Form
   let indexName = $state('');
   let indexType = $state<'INDEX' | 'UNIQUE' | 'FULLTEXT' | 'SPATIAL'>('INDEX');
   let selectedCols = $state<string[]>([]);
 
-  let availableCols = $derived(
-    (tableMeta?.columns || []).map((c: ColumnMetadata) => c.name)
-  );
+  let driver = $derived(appState.activeConnection?.driver?.toLowerCase() || 'mysql');
+  let isPostgres = $derived(driver === 'postgres' || driver === 'postgresql');
+  let isSQLite = $derived(driver === 'sqlite');
+  let isMysql = $derived(!isPostgres && !isSQLite);
+
+  let availableCols = $derived(tableMeta?.columns || []);
 
   function resetForm() {
     indexName = '';
     indexType = 'INDEX';
     selectedCols = [];
+    editingOriginalName = null;
+    isCustomName = false;
   }
 
   function openAddIndex() {
     resetForm();
+    isAddModalOpen = true;
+  }
+
+  function openEditIndex(idx: IndexInfo) {
+    editingOriginalName = idx.name;
+    isCustomName = true;
+    indexName = idx.name;
+    const rawType = (idx.type || '').toUpperCase();
+    if (idx.is_unique || rawType.includes('UNIQUE')) indexType = 'UNIQUE';
+    else if (rawType.includes('FULLTEXT')) indexType = 'FULLTEXT';
+    else if (rawType.includes('SPATIAL')) indexType = 'SPATIAL';
+    else indexType = 'INDEX';
+    selectedCols = Array.isArray(idx.columns)
+      ? [...idx.columns]
+      : typeof idx.columns === 'string'
+      ? (idx.columns as string).split(',').map((s) => s.trim()).filter(Boolean)
+      : [];
     isAddModalOpen = true;
   }
 
@@ -43,7 +68,7 @@
   }
 
   function autoGenerateIndexName() {
-    if (!tableMeta) return;
+    if (!tableMeta || isCustomName) return;
     const prefix =
       indexType === 'UNIQUE'
         ? 'uniq'
@@ -56,20 +81,24 @@
     indexName = `${prefix}_${tableMeta.name}_${colSlug}`;
   }
 
+  function buildDropSql(idxName: string): string {
+    if (!tableMeta) return '';
+    const q = (s: string) => quoteSqlIdentifier(s, driver);
+    return isPostgres || isSQLite
+      ? `DROP INDEX IF EXISTS ${q(idxName)};`
+      : `DROP INDEX ${q(idxName)} ON ${q(tableMeta.name)};`;
+  }
+
   let sqlPreview = $derived.by(() => {
     if (!tableMeta || !appState.activeConnection) return '';
-    const driver = appState.activeConnection.driver;
-    const isSQLite = driver === 'sqlite';
-    const isPostgres = driver === 'postgres' || driver === 'postgresql';
-    const q = (s: string) => (isSQLite || isPostgres ? `"${s.replace(/"/g, '""')}"` : `\`${s.replace(/`/g, '``')}\``);
-
+    const q = (s: string) => quoteSqlIdentifier(s, driver);
     const name = indexName.trim() || 'idx_name';
     const typeClause =
       indexType === 'UNIQUE'
         ? 'UNIQUE '
-        : indexType === 'FULLTEXT'
+        : isMysql && indexType === 'FULLTEXT'
         ? 'FULLTEXT '
-        : indexType === 'SPATIAL'
+        : isMysql && indexType === 'SPATIAL'
         ? 'SPATIAL '
         : '';
 
@@ -78,11 +107,19 @@
     }
 
     const colsFormatted = selectedCols.map((c) => q(c)).join(', ');
-    return `CREATE ${typeClause}INDEX ${q(name)} ON ${q(tableMeta.name)} (${colsFormatted});`;
+    const createSql = `CREATE ${typeClause}INDEX ${q(name)} ON ${q(tableMeta.name)} (${colsFormatted});`;
+    if (editingOriginalName) {
+      return `${buildDropSql(editingOriginalName)}\n${createSql}`;
+    }
+    return createSql;
   });
 
-  async function createIndex() {
+  function createOrUpdateIndex() {
     if (!appState.activeConnection || !tableMeta) return;
+    if (appState.isReadOnly) {
+      appState.showToast('Session is Read-Only', 'warning');
+      return;
+    }
     if (selectedCols.length === 0) {
       appState.showToast('Please select at least one column for the index', 'warning');
       return;
@@ -92,50 +129,56 @@
       return;
     }
 
-    isExecuting = true;
-    try {
-      const connId = appState.activeSessionId || appState.activeConnection.id;
-      const targetDb = appState.activeTab?.database || appState.currentDatabase || undefined;
-      await api.executeQuery(connId, sqlPreview, false, targetDb);
-      appState.showToast(`Index "${indexName.trim()}" created successfully!`, 'success');
-      isAddModalOpen = false;
-      resetForm();
+    const connId = appState.activeSessionId || appState.activeConnection.id;
+    const targetDb = appState.activeTab?.database || appState.currentDatabase || undefined;
+    const sql = sqlPreview;
+    const label = editingOriginalName ? `Alter Index: ${indexName.trim()}` : `Create Index: ${indexName.trim()}`;
 
-      // Refresh catalog
-      await appState.loadCatalog(connId, targetDb);
-    } catch (err: any) {
-      appState.showToast(`Failed to create index: ${err.message}`, 'error');
-    } finally {
-      isExecuting = false;
-    }
+    appState.openDDLReviewModal(
+      sql,
+      async () => {
+        isExecuting = true;
+        try {
+          await api.executeQuery(connId, sql, { confirmed: true, database: targetDb });
+          appState.showToast(`Index "${indexName.trim()}" applied successfully!`, 'success');
+          isAddModalOpen = false;
+          resetForm();
+          await appState.loadCatalog(connId, targetDb);
+        } finally {
+          isExecuting = false;
+        }
+      },
+      label,
+      { tableName: tableMeta.name, database: targetDb }
+    );
   }
 
   async function dropIndex(idxName: string) {
     if (!appState.activeConnection || !tableMeta) return;
-    const confirmed = confirm(`Are you sure you want to drop index "${idxName}" from table "${tableMeta.name}"?`);
+    if (appState.isReadOnly) {
+      appState.showToast('Session is Read-Only', 'warning');
+      return;
+    }
+    const confirmed = await appState.showNativeConfirm(
+      `Drop index "${idxName}" from table "${tableMeta.name}"?`,
+      'Drop Index'
+    );
     if (!confirmed) return;
 
-    const driver = appState.activeConnection.driver;
-    const isSQLite = driver === 'sqlite';
-    const isPostgres = driver === 'postgres' || driver === 'postgresql';
-    const q = (s: string) => (isSQLite || isPostgres ? `"${s.replace(/"/g, '""')}"` : `\`${s.replace(/`/g, '``')}\``);
+    const dropSql = buildDropSql(idxName);
+    const connId = appState.activeSessionId || appState.activeConnection.id;
+    const targetDb = appState.activeTab?.database || appState.currentDatabase || undefined;
 
-    let dropSql = `DROP INDEX ${q(idxName)} ON ${q(tableMeta.name)};`;
-    if (isPostgres || isSQLite) {
-      dropSql = `DROP INDEX ${q(idxName)};`;
-    }
-
-    try {
-      const connId = appState.activeSessionId || appState.activeConnection.id;
-      const targetDb = appState.activeTab?.database || appState.currentDatabase || undefined;
-      await api.executeQuery(connId, dropSql, false, targetDb);
-      appState.showToast(`Index "${idxName}" dropped successfully!`, 'info');
-
-      // Refresh catalog
-      await appState.loadCatalog(connId, targetDb);
-    } catch (err: any) {
-      appState.showToast(`Failed to drop index: ${err.message}`, 'error');
-    }
+    appState.openDDLReviewModal(
+      dropSql,
+      async () => {
+        await api.executeQuery(connId, dropSql, { confirmed: true, database: targetDb });
+        appState.showToast(`Index "${idxName}" dropped successfully!`, 'info');
+        await appState.loadCatalog(connId, targetDb);
+      },
+      `Drop Index: ${idxName}`,
+      { tableName: tableMeta.name, database: targetDb }
+    );
   }
 </script>
 
@@ -202,13 +245,22 @@
                 <td class="py-2 px-4 text-slate-400">{idx.type || 'BTREE'}</td>
                 <td class="py-2 px-4 text-center">
                   {#if !isPK}
-                    <button
-                      onclick={() => dropIndex(idx.name)}
-                      class="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition"
-                      title="Drop Index"
-                    >
-                      <Icon name="trash-2" class="w-3.5 h-3.5" />
-                    </button>
+                    <div class="inline-flex items-center space-x-1">
+                      <button
+                        onclick={() => openEditIndex(idx)}
+                        class="p-1 rounded text-slate-400 hover:text-sky-300 hover:bg-slate-800 transition"
+                        title="Edit Index (Drop & Recreate)"
+                      >
+                        <Icon name="edit" class="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onclick={() => dropIndex(idx.name)}
+                        class="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition"
+                        title="Drop Index"
+                      >
+                        <Icon name="trash-2" class="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   {:else}
                     <span class="text-slate-600 text-[10px] font-sans">PK</span>
                   {/if}
@@ -233,7 +285,9 @@
       <div class="px-5 py-4 border-b border-[#1e293b] flex items-center justify-between bg-[#0f172a]">
         <div class="flex items-center space-x-2">
           <Icon name="key" class="w-4 h-4 text-sky-400" />
-          <h3 class="font-bold text-slate-100 text-sm">Add New Table Index</h3>
+          <h3 class="font-bold text-slate-100 text-sm">
+            {editingOriginalName ? `Edit Index: ${editingOriginalName}` : 'Add New Table Index'}
+          </h3>
         </div>
         <button onclick={() => (isAddModalOpen = false)} class="text-slate-400 hover:text-white">
           <Icon name="x" class="w-4 h-4" />
@@ -245,13 +299,16 @@
           <label class="block text-slate-400 text-xs font-medium mb-1">Index Type *</label>
           <div class="grid grid-cols-4 gap-2">
             {#each ['INDEX', 'UNIQUE', 'FULLTEXT', 'SPATIAL'] as t}
+              {@const disabledType = !isMysql && (t === 'FULLTEXT' || t === 'SPATIAL')}
               <button
                 type="button"
+                disabled={disabledType}
                 onclick={() => {
                   indexType = t as any;
                   autoGenerateIndexName();
                 }}
-                class="py-1.5 px-2 rounded-lg border text-xs font-medium transition text-center {indexType === t
+                title={disabledType ? 'MySQL/MariaDB only' : ''}
+                class="py-1.5 px-2 rounded-lg border text-xs font-medium transition text-center disabled:opacity-35 disabled:cursor-not-allowed {indexType === t
                   ? 'bg-sky-600/30 border-sky-500 text-sky-200'
                   : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'}"
               >
@@ -279,19 +336,22 @@
             {/if}
           </div>
 
-          <!-- Available Column Badges -->
+          <!-- Available Column Badges with Types -->
           <div class="flex flex-wrap gap-1 mt-2">
-            {#each availableCols as col}
-              {@const isSelected = selectedCols.includes(col)}
+            {#each availableCols as colMeta}
+              {@const isSelected = selectedCols.includes(colMeta.name)}
               <button
                 type="button"
-                onclick={() => toggleColumn(col)}
+                onclick={() => toggleColumn(colMeta.name)}
                 class="px-2 py-0.5 rounded font-mono text-[11px] transition border flex items-center space-x-1 {isSelected
                   ? 'bg-sky-900/40 border-sky-600 text-sky-300'
                   : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'}"
               >
                 <Icon name={isSelected ? 'check' : 'plus'} class="w-2.5 h-2.5" />
-                <span>{col}</span>
+                <span>{colMeta.name}</span>
+                {#if colMeta.type}
+                  <span class="text-[9px] text-slate-500 uppercase">({colMeta.type})</span>
+                {/if}
               </button>
             {/each}
           </div>
@@ -302,6 +362,7 @@
           <input
             type="text"
             bind:value={indexName}
+            oninput={() => (isCustomName = true)}
             placeholder="e.g. idx_users_email"
             class="w-full bg-[#050811] border border-[#1e293b] rounded-lg px-3 py-2 text-slate-200 font-mono text-xs focus:outline-none focus:border-sky-500"
           />
@@ -322,12 +383,12 @@
           Cancel
         </button>
         <button
-          onclick={createIndex}
+          onclick={createOrUpdateIndex}
           disabled={isExecuting || selectedCols.length === 0}
           class="px-4 py-1.5 rounded bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white text-xs font-semibold transition flex items-center space-x-1.5 shadow-lg shadow-sky-900/30"
         >
           <Icon name="check" class="w-3.5 h-3.5 {isExecuting ? 'animate-spin' : ''}" />
-          <span>{isExecuting ? 'Creating...' : 'Create Index'}</span>
+          <span>{isExecuting ? 'Applying...' : editingOriginalName ? 'Review & Alter Index' : 'Review & Create Index'}</span>
         </button>
       </div>
     </div>

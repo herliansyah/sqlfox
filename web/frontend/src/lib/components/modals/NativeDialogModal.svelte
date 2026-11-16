@@ -1,5 +1,6 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
+  import Icon from '../common/Icon.svelte';
 
   let inputEl = $state<HTMLInputElement | null>(null);
 
@@ -55,9 +56,12 @@
     >
       <!-- Dialog Header -->
       <div class="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
-        <h3 id="dialog-title" class="text-sm font-semibold text-slate-200">
-          {appState.nativeDialog.title || 'SqlFox Notification'}
-        </h3>
+        <div class="flex items-center space-x-2">
+          <Icon name="brand" class="w-4 h-4 shrink-0" />
+          <h3 id="dialog-title" class="text-sm font-semibold text-slate-200">
+            {appState.nativeDialog.title || 'SqlFox Notification'}
+          </h3>
+        </div>
       </div>
 
       <!-- Dialog Body -->
@@ -73,7 +77,7 @@
               bind:this={inputEl}
               type="text"
               bind:value={appState.nativeDialog.inputValue}
-              class="w-full bg-[#050811] border border-slate-700 rounded px-3 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+              class="w-full bg-[#050811] border border-slate-700 rounded px-3 py-1.5 text-xs font-mono text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
             />
           </div>
         {/if}

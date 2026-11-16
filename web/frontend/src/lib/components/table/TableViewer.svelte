@@ -83,6 +83,19 @@
           {(tableMeta.row_count ?? tableMeta.rows_count ?? 0).toLocaleString()} rows
         </span>
       {/if}
+      {#if tableName}
+        <button
+          id="btn-drop-active-table"
+          type="button"
+          onclick={() => appState.dropTable(tableName)}
+          disabled={appState.isReadOnly}
+          class="px-2 py-0.5 rounded bg-rose-950/60 hover:bg-rose-900 disabled:opacity-40 border border-rose-800/80 text-rose-300 text-[10.5px] font-sans font-semibold flex items-center space-x-1 transition"
+          title="Drop table '{tableName}'"
+        >
+          <Icon name="trash-2" class="w-3 h-3" />
+          <span>Drop Table</span>
+        </button>
+      {/if}
     </div>
   </div>
 

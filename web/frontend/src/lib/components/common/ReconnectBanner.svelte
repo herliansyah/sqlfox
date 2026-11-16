@@ -38,4 +38,12 @@
       </button>
     </div>
   </div>
+{:else if appState.isConnectionRestored}
+  <div class="fixed top-0 left-0 right-0 z-[120] bg-emerald-600 border-b border-emerald-300/30 text-white px-4 py-2 text-xs flex items-center justify-between shadow-sm transition-all font-sans">
+    <div class="flex items-center space-x-2">
+      <Icon name="check" class="w-4 h-4 text-white shrink-0" />
+      <span class="font-bold">Connection restored!</span>
+      <span class="text-emerald-100 opacity-90">Session synchronized with SqlFox daemon.</span>
+    </div>
+  </div>
 {/if}

@@ -315,7 +315,12 @@ export function codemirror(node: HTMLElement, options: CodeMirrorOptions) {
       const query = snip[1].slice(5).toLowerCase();
       const options = (currentOptions.snippets || [])
         .filter((snippet) => !query || snippet.title.toLowerCase().includes(query) || snippet.tags.some((tag) => tag.toLowerCase().includes(query)))
-        .map((snippet) => toCompletion({ label: snippet.title, kind: 'SNP', detail: snippet.tags.join(', ') || 'Template', snippet, boost: 20 }));
+        .map((snippet) => {
+          const titleLower = snippet.title.toLowerCase();
+          const boost = !query ? 20 : titleLower.startsWith(query) ? 250 : 50;
+          return toCompletion({ label: snippet.title, kind: 'SNP', detail: snippet.tags.join(', ') || 'Template', snippet, boost });
+        })
+        .sort((a, b) => (b.boost || 0) - (a.boost || 0) || a.label.localeCompare(b.label));
       return options.length ? { from: context.pos - snip[1].length, to: context.pos, options, filter: false } : null;
     }
 

@@ -1,15 +1,19 @@
 <script lang="ts">
-import { copyText } from '../../utils/clipboard';
+  import { copyText } from '../../utils/clipboard';
+  import { quoteSqlIdentifier } from '../../utils/sqlStatements';
+  import { api } from '../../api/client';
   import { appState } from '../../stores/appState.svelte';
   import type { TableMetadata } from '../../../types';
   import Icon from '../common/Icon.svelte';
   import { untrack } from 'svelte';
 
-  const CARD_WIDTH = 220;
+  const CARD_WIDTH = 224;
   const HEADER_HEIGHT = 38;
   const ROW_HEIGHT = 24;
+  const MAX_COL_PREVIEW = 12;
 
   let containerRef: HTMLDivElement | null = $state(null);
+  let searchEl: HTMLInputElement | null = $state(null);
   let scale = $state(1);
   let panX = $state(50);
   let panY = $state(50);
@@ -17,22 +21,28 @@ import { copyText } from '../../utils/clipboard';
   let startPanX = 0;
   let startPanY = 0;
 
-  // Search filter
-  let searchQuery = $state('');
+  // Touch pan & pinch state
+  let touchMode: 'none' | 'pan' | 'drag' | 'pinch' = 'none';
+  let touchStartDist = 0;
+  let touchStartScale = 1;
+  let touchMidX = 0;
+  let touchMidY = 0;
 
-  // Dragging a specific card
+  let searchQuery = $state('');
   let draggingTable = $state<string | null>(null);
   let dragOffset = { x: 0, y: 0 };
 
-  // Hovered / selected table or FK
   let selectedTable = $state<string | null>(null);
   let hoveredFK = $state<string | null>(null);
+  let contextMenu = $state<{ tableName: string; x: number; y: number } | null>(null);
 
-  // Expanded tables set (tables with >12 columns)
   let expandedTables = $state<Record<string, boolean>>({});
-
-  // Table positions in canvas coordinates
   let positions = $state<Record<string, { x: number; y: number }>>({});
+  let isRefreshing = $state(false);
+
+  let minimapCanvasRef: HTMLCanvasElement | null = $state(null);
+  let isDraggingMinimap = false;
+  let minimapTransform = { minX: 0, minY: 0, pad: 40, s: 1 };
 
   let activeCatalog = $derived.by(() => {
     const db = appState.activeTab?.database?.toLowerCase();
@@ -42,7 +52,24 @@ import { copyText } from '../../utils/clipboard';
 
   let tables = $derived<TableMetadata[]>(activeCatalog?.tables || []);
 
-  // Compute foreign key lines
+  // Tables directly connected via FK to the currently selected table
+  let connectedTables = $derived.by(() => {
+    const set = new Set<string>();
+    if (!selectedTable) return set;
+    const selLow = selectedTable.toLowerCase();
+    for (const src of tables) {
+      for (const fk of src.foreign_keys || []) {
+        const dstLow = (fk.referenced_table || '').toLowerCase();
+        if (src.name.toLowerCase() === selLow && fk.referenced_table) {
+          set.add(fk.referenced_table);
+        } else if (dstLow === selLow) {
+          set.add(src.name);
+        }
+      }
+    }
+    return set;
+  });
+
   interface FKLine {
     key: string;
     srcTable: string;
@@ -59,52 +86,105 @@ import { copyText } from '../../utils/clipboard';
   }
 
   $effect(() => {
-    // Initialize or load positions when catalog tables change
     if (tables.length > 0) {
       untrack(() => loadOrAutoLayoutPositions());
     }
   });
 
-  function loadOrAutoLayoutPositions() {
+  function storageKeyForErd(): string {
     const connId = appState.activeConnection?.id || 'default';
     const db = appState.activeTab?.database || appState.currentDatabase || 'default';
-    const storageKey = `sqlfox_erd_${connId}_${db}`;
+    return `sqlfox_erd_${connId}_${db}`;
+  }
+
+  function looksCorruptOrStacked(posMap: Record<string, { x: number; y: number }>): boolean {
+    const present = tables.map((t) => posMap[t.name]).filter(Boolean);
+    if (present.length < 4) return false;
+    const uniqueX = new Set(present.map((p) => Math.round(p!.x / 20)));
+    const uniquePairs = new Set(present.map((p) => `${Math.round(p!.x)},${Math.round(p!.y)}`));
+    if (uniquePairs.size <= Math.max(1, Math.floor(present.length / 3))) return true;
+    // Detect collapsed vertical single-column stack with many tables
+    if (uniqueX.size === 1 && present.length >= 6) return true;
+    return false;
+  }
+
+  function loadOrAutoLayoutPositions() {
+    const key = storageKeyForErd();
+    const connId = appState.activeConnection?.id || 'default';
+    const db = appState.activeTab?.database || appState.currentDatabase || 'default';
+    let loaded: Record<string, { x: number; y: number }> | null = null;
+
     try {
-      const saved = localStorage.getItem(storageKey);
+      const saved = localStorage.getItem(key);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed && typeof parsed === 'object') {
-          positions = parsed;
-          return;
+        if (parsed && typeof parsed === 'object') loaded = parsed;
+      } else {
+        // Migrate legacy sessionStorage keys (`erd-pos-...`) if present
+        const legacyKeys = [`erd-pos-${connId}-${db}`, `erd-pos-${db}`];
+        for (const lk of legacyKeys) {
+          const legacyRaw = sessionStorage.getItem(lk);
+          if (legacyRaw) {
+            const parsed = JSON.parse(legacyRaw);
+            if (parsed && typeof parsed === 'object') {
+              loaded = parsed;
+              localStorage.setItem(key, JSON.stringify(parsed));
+              sessionStorage.removeItem(lk);
+              break;
+            }
+          }
         }
       }
-    } catch (_) {}
+    } catch { /* ignore storage errors */ }
+
+    if (loaded && !looksCorruptOrStacked(loaded)) {
+      // Place any newly discovered tables next to existing layout without stacking at 0,0
+      const copy: Record<string, { x: number; y: number }> = { ...loaded };
+      let maxX = 60;
+      for (const p of Object.values(copy)) {
+        if (p && typeof p.x === 'number') maxX = Math.max(maxX, p.x + CARD_WIDTH + 60);
+      }
+      let extraY = 60;
+      let added = false;
+      for (const t of tables) {
+        if (!copy[t.name]) {
+          copy[t.name] = { x: maxX, y: extraY };
+          extraY += getCardHeight(t) + 40;
+          if (extraY > 1400) {
+            extraY = 60;
+            maxX += CARD_WIDTH + 60;
+          }
+          added = true;
+        }
+      }
+      positions = copy;
+      if (added) savePositions();
+      return;
+    }
 
     autoLayout();
   }
 
   function savePositions() {
-    const connId = appState.activeConnection?.id || 'default';
-    const db = appState.activeTab?.database || appState.currentDatabase || 'default';
-    const storageKey = `sqlfox_erd_${connId}_${db}`;
     try {
-      localStorage.setItem(storageKey, JSON.stringify(positions));
-    } catch (_) {}
+      localStorage.setItem(storageKeyForErd(), JSON.stringify(positions));
+    } catch { /* ignore */ }
   }
 
   export function autoLayout() {
     if (tables.length === 0) return;
-    const ROW_GAP = 50;
-    const COL_GAP = 80;
+    const ROW_GAP = 46;
+    const COL_GAP = 76;
+    const MAX_COL_HEIGHT = 1350;
 
-    // Topological depth layout
+    // Topological depth layout based on FK references
     const depth: Record<string, number> = {};
     tables.forEach((t) => (depth[t.name] = 0));
 
-    for (let pass = 0; pass < 3; pass++) {
+    for (let pass = 0; pass < 4; pass++) {
       tables.forEach((t) => {
         (t.foreign_keys || []).forEach((fk) => {
-          const ref = fk.referenced_table;
+          const ref = tables.find((rt) => rt.name.toLowerCase() === (fk.referenced_table || '').toLowerCase())?.name || fk.referenced_table;
           if (depth[ref] !== undefined && depth[t.name] <= depth[ref]) {
             depth[t.name] = depth[ref] + 1;
           }
@@ -126,12 +206,16 @@ import { copyText } from '../../utils/clipboard';
       .sort((a, b) => a - b);
 
     layerIndices.forEach((layerIdx) => {
-      const tbls = layers[layerIdx];
+      const tbls = layers[layerIdx] || [];
       let curY = 60;
       tbls.forEach((t) => {
+        const cardH = getCardHeight(t);
+        if (curY > 60 && curY + cardH > MAX_COL_HEIGHT) {
+          // Wrap overflowing layer into the next sub-column so tall schemas stay compact
+          curX += CARD_WIDTH + COL_GAP;
+          curY = 60;
+        }
         newPos[t.name] = { x: curX, y: curY };
-        const colCount = Math.min(expandedTables[t.name] ? 100 : 12, (t.columns || []).length);
-        const cardH = HEADER_HEIGHT + colCount * ROW_HEIGHT + 20;
         curY += cardH + ROW_GAP;
       });
       curX += CARD_WIDTH + COL_GAP;
@@ -143,8 +227,8 @@ import { copyText } from '../../utils/clipboard';
 
   function getCardHeight(t: TableMetadata): number {
     const isExp = Boolean(expandedTables[t.name]);
-    const colCount = Math.min(isExp ? 100 : 12, (t.columns || []).length);
-    const hasMore = (t.columns || []).length > 12;
+    const colCount = Math.min(isExp ? 100 : MAX_COL_PREVIEW, (t.columns || []).length);
+    const hasMore = (t.columns || []).length > MAX_COL_PREVIEW;
     return HEADER_HEIGHT + colCount * ROW_HEIGHT + (hasMore ? 26 : 8);
   }
 
@@ -156,23 +240,23 @@ import { copyText } from '../../utils/clipboard';
       (src.foreign_keys || []).forEach((fk) => {
         const sp = positions[src.name];
         const dst = tables.find(
-          (t) => t.name.toLowerCase() === fk.referenced_table.toLowerCase()
+          (t) => t.name.toLowerCase() === (fk.referenced_table || '').toLowerCase()
         );
         const dp = dst ? positions[dst.name] : positions[fk.referenced_table];
         if (!sp || !dp) return;
 
-        const fkKey = `${src.name}.${fk.column}->${fk.referenced_table}.${fk.referenced_column}`;
+        const fkCol = fk.column || fk.column_name || '';
+        const fkKey = `${src.name}.${fkCol}->${fk.referenced_table}.${fk.referenced_column}`;
         const isSelected = Boolean(
           sel && (src.name === sel || (dst?.name || fk.referenced_table) === sel)
         );
         const isHovered = hoveredFK === fkKey;
         const isDimmed = Boolean(sel && !isSelected);
 
-        // Calculate Y offsets based on column indices
         const srcCols = src.columns || [];
-        const srcIdx = srcCols.findIndex((c) => c.name === fk.column);
+        const srcIdx = srcCols.findIndex((c) => c.name === fkCol);
         const isSrcExp = Boolean(expandedTables[src.name]);
-        const srcLimit = isSrcExp ? srcCols.length : 12;
+        const srcLimit = isSrcExp ? srcCols.length : MAX_COL_PREVIEW;
         const y1 =
           sp.y +
           HEADER_HEIGHT +
@@ -181,7 +265,7 @@ import { copyText } from '../../utils/clipboard';
         const dstCols = dst?.columns || [];
         const dstIdx = dstCols.findIndex((c) => c.name === fk.referenced_column);
         const isDstExp = dst ? Boolean(expandedTables[dst.name]) : false;
-        const dstLimit = isDstExp ? dstCols.length : 12;
+        const dstLimit = isDstExp ? dstCols.length : MAX_COL_PREVIEW;
         const y2 =
           dp.y +
           HEADER_HEIGHT +
@@ -220,13 +304,13 @@ import { copyText } from '../../utils/clipboard';
         list.push({
           key: fkKey,
           srcTable: src.name,
-          srcCol: fk.column || fk.column_name || '',
+          srcCol: fkCol,
           dstTable: fk.referenced_table,
           dstCol: fk.referenced_column,
           path,
           midX: (x1 + x2) / 2,
           midY: (y1 + y2) / 2,
-          label: `${fk.column} → ${fk.referenced_column}`,
+          label: `${fkCol} → ${fk.referenced_column}`,
           isSelected,
           isHovered,
           isDimmed,
@@ -239,7 +323,9 @@ import { copyText } from '../../utils/clipboard';
 
   // Pan & Zoom controls
   function handleMouseDown(e: MouseEvent) {
-    if ((e.target as HTMLElement).closest('.erd-card, .erd-btn, input, button')) return;
+    if (e.button !== 0) return;
+    contextMenu = null;
+    if ((e.target as HTMLElement).closest('.erd-card, .erd-btn, .erd-minimap, .erd-menu, input, button')) return;
     isPanning = true;
     startPanX = e.clientX - panX;
     startPanY = e.clientY - panY;
@@ -259,24 +345,28 @@ import { copyText } from '../../utils/clipboard';
     window.removeEventListener('mouseup', onPanUp);
   }
 
+  function zoomTowardPoint(newScale: number, viewX: number, viewY: number) {
+    const clamped = Math.min(2.5, Math.max(0.25, newScale));
+    panX = viewX - (viewX - panX) * (clamped / scale);
+    panY = viewY - (viewY - panY) * (clamped / scale);
+    scale = clamped;
+  }
+
   function handleWheel(e: WheelEvent) {
     e.preventDefault();
     const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
-    const newScale = Math.min(2.5, Math.max(0.25, scale * zoomFactor));
-
-    // Zoom towards cursor
     if (containerRef) {
       const rect = containerRef.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
-      panX = mouseX - (mouseX - panX) * (newScale / scale);
-      panY = mouseY - (mouseY - panY) * (newScale / scale);
+      zoomTowardPoint(scale * zoomFactor, e.clientX - rect.left, e.clientY - rect.top);
+    } else {
+      scale = Math.min(2.5, Math.max(0.25, scale * zoomFactor));
     }
-    scale = newScale;
   }
 
   function zoomStep(delta: number) {
-    scale = Math.min(2.5, Math.max(0.25, scale + delta));
+    const cx = (containerRef?.clientWidth || 800) / 2;
+    const cy = (containerRef?.clientHeight || 600) / 2;
+    zoomTowardPoint(scale + delta, cx, cy);
   }
 
   function resetZoom() {
@@ -298,18 +388,34 @@ import { copyText } from '../../utils/clipboard';
 
     const w = containerRef.clientWidth || 800;
     const h = containerRef.clientHeight || 600;
-    const contentW = maxX - minX + 100;
-    const contentH = maxY - minY + 100;
+    const pad = 60;
+    const contentW = Math.max(100, maxX - minX + pad * 2);
+    const contentH = Math.max(100, maxY - minY + pad * 2);
 
-    const newScale = Math.min(1.2, Math.max(0.3, Math.min(w / contentW, h / contentH)));
+    const newScale = Math.min(1.2, Math.max(0.25, Math.min(w / contentW, h / contentH)));
     scale = newScale;
-    panX = (w - contentW * newScale) / 2 - minX * newScale + 50;
-    panY = (h - contentH * newScale) / 2 - minY * newScale + 50;
+    panX = (w - contentW * newScale) / 2 - (minX - pad) * newScale;
+    panY = (h - contentH * newScale) / 2 - (minY - pad) * newScale;
   }
 
-  // Card dragging
+  function focusTable(tableName: string) {
+    selectedTable = tableName;
+    const p = positions[tableName];
+    const t = tables.find((tbl) => tbl.name === tableName);
+    if (!p || !t || !containerRef) return;
+    const w = containerRef.clientWidth || 800;
+    const h = containerRef.clientHeight || 600;
+    const cx = p.x + CARD_WIDTH / 2;
+    const cy = p.y + getCardHeight(t) / 2;
+    panX = w / 2 - cx * scale;
+    panY = h / 2 - cy * scale;
+  }
+
+  // Card dragging (clamped >= 0)
   function startCardDrag(e: MouseEvent, tableName: string) {
+    if (e.button !== 0) return;
     e.stopPropagation();
+    contextMenu = null;
     draggingTable = tableName;
     const pos = positions[tableName] || { x: 0, y: 0 };
     dragOffset = {
@@ -323,8 +429,8 @@ import { copyText } from '../../utils/clipboard';
   function onCardDragMove(e: MouseEvent) {
     if (!draggingTable) return;
     positions[draggingTable] = {
-      x: Math.round(e.clientX / scale - dragOffset.x),
-      y: Math.round(e.clientY / scale - dragOffset.y),
+      x: Math.max(0, Math.round(e.clientX / scale - dragOffset.x)),
+      y: Math.max(0, Math.round(e.clientY / scale - dragOffset.y)),
     };
   }
 
@@ -333,6 +439,98 @@ import { copyText } from '../../utils/clipboard';
     savePositions();
     window.removeEventListener('mousemove', onCardDragMove);
     window.removeEventListener('mouseup', onCardDragUp);
+  }
+
+  // Touch gestures (1-finger pan or card drag, 2-finger pinch zoom)
+  function handleTouchStart(e: TouchEvent) {
+    if ((e.target as HTMLElement).closest('.erd-btn, .erd-minimap, .erd-menu, input, button')) return;
+    if (e.touches.length === 2) {
+      touchMode = 'pinch';
+      const [a, b] = [e.touches[0]!, e.touches[1]!];
+      touchStartDist = Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
+      touchStartScale = scale;
+      const rect = containerRef?.getBoundingClientRect();
+      touchMidX = (a.clientX + b.clientX) / 2 - (rect?.left || 0);
+      touchMidY = (a.clientY + b.clientY) / 2 - (rect?.top || 0);
+      return;
+    }
+    if (e.touches.length === 1) {
+      const t = e.touches[0]!;
+      const cardEl = (e.target as HTMLElement).closest('[data-erd-card]') as HTMLElement | null;
+      if (cardEl?.dataset.erdCard) {
+        const tbl = cardEl.dataset.erdCard;
+        touchMode = 'drag';
+        draggingTable = tbl;
+        const pos = positions[tbl] || { x: 0, y: 0 };
+        dragOffset = { x: t.clientX / scale - pos.x, y: t.clientY / scale - pos.y };
+      } else {
+        touchMode = 'pan';
+        startPanX = t.clientX - panX;
+        startPanY = t.clientY - panY;
+      }
+    }
+  }
+
+  function handleTouchMove(e: TouchEvent) {
+    if (touchMode === 'none') return;
+    e.preventDefault();
+    if (touchMode === 'pinch' && e.touches.length === 2) {
+      const [a, b] = [e.touches[0]!, e.touches[1]!];
+      const dist = Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
+      if (touchStartDist > 0) {
+        zoomTowardPoint(touchStartScale * (dist / touchStartDist), touchMidX, touchMidY);
+      }
+    } else if (touchMode === 'pan' && e.touches.length === 1) {
+      const t = e.touches[0]!;
+      panX = t.clientX - startPanX;
+      panY = t.clientY - startPanY;
+    } else if (touchMode === 'drag' && draggingTable && e.touches.length === 1) {
+      const t = e.touches[0]!;
+      positions[draggingTable] = {
+        x: Math.max(0, Math.round(t.clientX / scale - dragOffset.x)),
+        y: Math.max(0, Math.round(t.clientY / scale - dragOffset.y)),
+      };
+    }
+  }
+
+  function handleTouchEnd() {
+    if (touchMode === 'drag' && draggingTable) {
+      draggingTable = null;
+      savePositions();
+    }
+    touchMode = 'none';
+  }
+
+  // Minimap click / drag navigation
+  function panViewportFromMinimap(clientX: number, clientY: number) {
+    if (!minimapCanvasRef || !containerRef) return;
+    const rect = minimapCanvasRef.getBoundingClientRect();
+    const mx = clientX - rect.left;
+    const my = clientY - rect.top;
+    const { minX, minY, pad, s } = minimapTransform;
+    if (s <= 0) return;
+    const worldX = mx / s + minX - pad;
+    const worldY = my / s + minY - pad;
+    const vw = containerRef.clientWidth || 800;
+    const vh = containerRef.clientHeight || 600;
+    panX = vw / 2 - worldX * scale;
+    panY = vh / 2 - worldY * scale;
+  }
+
+  function handleMinimapMouseDown(e: MouseEvent) {
+    e.stopPropagation();
+    isDraggingMinimap = true;
+    panViewportFromMinimap(e.clientX, e.clientY);
+    const onMove = (ev: MouseEvent) => {
+      if (isDraggingMinimap) panViewportFromMinimap(ev.clientX, ev.clientY);
+    };
+    const onUp = () => {
+      isDraggingMinimap = false;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
   }
 
   // Release window listeners if the component unmounts mid-pan/drag.
@@ -344,6 +542,130 @@ import { copyText } from '../../utils/clipboard';
       window.removeEventListener('mouseup', onCardDragUp);
     };
   });
+
+  // Keyboard navigation shortcuts for ERD
+  $effect(() => {
+    if (typeof window === 'undefined') return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const inInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable);
+      if (inInput) return;
+      if (e.key === 'Escape') {
+        if (contextMenu) contextMenu = null;
+        else if (selectedTable) selectedTable = null;
+        else if (searchQuery) searchQuery = '';
+      } else if (e.key === 'f' || e.key === 'F') {
+        e.preventDefault();
+        fitAll();
+      } else if (e.key === '+' || e.key === '=') {
+        e.preventDefault();
+        zoomStep(0.15);
+      } else if (e.key === '-' || e.key === '_') {
+        e.preventDefault();
+        zoomStep(-0.15);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  });
+
+  function openContextMenu(e: MouseEvent, tableName: string) {
+    e.preventDefault();
+    e.stopPropagation();
+    selectedTable = tableName;
+    if (!containerRef) return;
+    const rect = containerRef.getBoundingClientRect();
+    contextMenu = {
+      tableName,
+      x: Math.min(rect.width - 240, Math.max(8, e.clientX - rect.left)),
+      y: Math.min(rect.height - 220, Math.max(8, e.clientY - rect.top)),
+    };
+  }
+
+  function generateLeftJoinSQL(tableName: string) {
+    contextMenu = null;
+    const t = tables.find((x) => x.name === tableName);
+    if (!t) return;
+    const driver = appState.activeConnection?.driver || 'mysql';
+    const q = (id: string) => quoteSqlIdentifier(id, driver);
+
+    const usedAliases = new Set<string>(['t0']);
+    const joins: string[] = [];
+    const selectCols: string[] = [`t0.*`];
+    let aliasIdx = 1;
+
+    // Outgoing FKs
+    for (const fk of t.foreign_keys || []) {
+      const col = fk.column || fk.column_name || '';
+      const alias = `j${aliasIdx++}`;
+      usedAliases.add(alias);
+      joins.push(
+        `LEFT JOIN ${q(fk.referenced_table)} AS ${alias} ON t0.${q(col)} = ${alias}.${q(fk.referenced_column)}`
+      );
+    }
+
+    // Incoming FKs referencing this table
+    for (const other of tables) {
+      if (other.name === t.name) continue;
+      for (const fk of other.foreign_keys || []) {
+        if ((fk.referenced_table || '').toLowerCase() === t.name.toLowerCase()) {
+          const col = fk.column || fk.column_name || '';
+          const alias = `j${aliasIdx++}`;
+          usedAliases.add(alias);
+          joins.push(
+            `LEFT JOIN ${q(other.name)} AS ${alias} ON t0.${q(fk.referenced_column)} = ${alias}.${q(col)}`
+          );
+        }
+      }
+    }
+
+    const sql = [
+      `SELECT ${selectCols.join(', ')}`,
+      `FROM ${q(t.name)} AS t0`,
+      ...joins,
+      `LIMIT 100;`,
+    ].join('\n');
+
+    appState.addTab(`join_${t.name}.sql`, sql);
+    appState.showToast(
+      joins.length > 0 ? `Generated LEFT JOIN query (${joins.length} joins)` : `Generated SELECT template for ${t.name}`,
+      'success'
+    );
+  }
+
+  async function viewTableDdlModal(tableName: string) {
+    contextMenu = null;
+    if (!appState.activeSessionId) return;
+    try {
+      const res = await api.getTableDDL(appState.activeSessionId, tableName);
+      appState.openDdlViewModal(`TABLE DDL: ${tableName}`, res?.ddl || `-- No DDL returned for ${tableName}`);
+    } catch (err: any) {
+      appState.showToast(`Failed to load DDL: ${err.message}`, 'error');
+    }
+  }
+
+  function askAiAboutTable(tableName: string) {
+    contextMenu = null;
+    const t = tables.find((x) => x.name === tableName);
+    if (!t) return;
+    const cols = (t.columns || []).map((c) => `- ${c.name} (${c.type}${c.is_primary_key ? ', PK' : ''})`).join('\n');
+    const fks = (t.foreign_keys || []).map((fk) => `- ${fk.column || fk.column_name} -> ${fk.referenced_table}.${fk.referenced_column}`).join('\n');
+    appState.sendToAi(
+      `Analyze table \`${t.name}\` schema, relationships, and suggest useful indexes or query patterns:\n\nColumns:\n${cols}\n${fks ? `\nForeign Keys:\n${fks}` : ''}`,
+      `Table ${t.name} sent to AI`
+    );
+  }
+
+  async function handleRefreshCanvas() {
+    isRefreshing = true;
+    try {
+      await appState.refreshCatalog();
+      loadOrAutoLayoutPositions();
+      appState.showToast('Schema catalog refreshed', 'info');
+    } finally {
+      isRefreshing = false;
+    }
+  }
 
   function escapeXml(unsafe: string): string {
     return (unsafe || '').replace(/[<>&'"]/g, (c) => {
@@ -366,14 +688,11 @@ import { copyText } from '../../utils/clipboard';
     }
 
     const CARD_W = CARD_WIDTH;
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
 
     tables.forEach((t) => {
       const p = positions[t.name] || { x: 0, y: 0 };
-      const h = 50 + Math.min(15, (t.columns || []).length) * 24;
+      const h = getCardHeight(t);
       minX = Math.min(minX, p.x);
       minY = Math.min(minY, p.y);
       maxX = Math.max(maxX, p.x + CARD_W);
@@ -389,19 +708,22 @@ import { copyText } from '../../utils/clipboard';
       const p = positions[t.name] || { x: 0, y: 0 };
       const x = p.x - minX + pad;
       const y = p.y - minY + pad;
-      const cols = (t.columns || []).slice(0, 15);
-      const cardH = 34 + cols.length * 24;
+      const allCols = t.columns || [];
+      const limit = expandedTables[t.name] ? allCols.length : MAX_COL_PREVIEW;
+      const cols = allCols.slice(0, limit);
+      const hasMore = allCols.length > limit;
+      const cardH = HEADER_HEIGHT + cols.length * ROW_HEIGHT + (hasMore ? 24 : 8);
 
       cardsSvg += `<g transform="translate(${x},${y})">
         <rect width="${CARD_W}" height="${cardH}" rx="8" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-        <path d="M0,8 a8,8 0 0 1 8,-8 h${CARD_W - 16} a8,8 0 0 1 8,8 v26 h-${CARD_W} z" fill="#1e293b"/>
-        <text x="12" y="22" fill="#38bdf8" font-family="'JetBrains Mono',monospace" font-size="12" font-weight="bold">${escapeXml(t.name)}</text>
-        <text x="${CARD_W - 12}" y="22" text-anchor="end" fill="#64748b" font-family="'JetBrains Mono',monospace" font-size="10">${cols.length}</text>`;
+        <path d="M0,8 a8,8 0 0 1 8,-8 h${CARD_W - 16} a8,8 0 0 1 8,8 v30 h-${CARD_W} z" fill="#1e293b"/>
+        <text x="12" y="23" fill="#38bdf8" font-family="'JetBrains Mono',monospace" font-size="12" font-weight="bold">${escapeXml(t.name)}</text>
+        <text x="${CARD_W - 12}" y="23" text-anchor="end" fill="#64748b" font-family="'JetBrains Mono',monospace" font-size="10">${allCols.length}</text>`;
 
       cols.forEach((c, idx) => {
-        const cy = 34 + idx * 24;
+        const cy = HEADER_HEIGHT + idx * ROW_HEIGHT;
         const isPK = c.is_primary_key;
-        const isFK = (t.foreign_keys || []).some((fk) => fk.column === c.name);
+        const isFK = (t.foreign_keys || []).some((fk) => (fk.column || fk.column_name) === c.name);
         const colColor = isPK ? '#34d399' : isFK ? '#fbbf24' : '#cbd5e1';
         const prefix = isPK ? '[PK] ' : isFK ? '[FK] ' : '';
         const typeStr = escapeXml((c.type || '').split('(')[0].toUpperCase());
@@ -411,6 +733,11 @@ import { copyText } from '../../utils/clipboard';
           <text x="12" y="${cy + 16}" fill="${colColor}" font-family="'JetBrains Mono',monospace" font-size="10">${prefix}${escapeXml(c.name)}</text>
           <text x="${CARD_W - 12}" y="${cy + 16}" text-anchor="end" fill="#64748b" font-family="'JetBrains Mono',monospace" font-size="9">${typeStr}</text>`;
       });
+
+      if (hasMore) {
+        const fy = HEADER_HEIGHT + cols.length * ROW_HEIGHT + 15;
+        cardsSvg += `<text x="${CARD_W / 2}" y="${fy}" text-anchor="middle" fill="#38bdf8" font-family="'JetBrains Mono',monospace" font-size="9">+${allCols.length - cols.length} more columns</text>`;
+      }
 
       cardsSvg += `</g>`;
     });
@@ -444,27 +771,35 @@ import { copyText } from '../../utils/clipboard';
     appState.showToast('Exported complete ERD diagram as SVG', 'success');
   }
 
+  function safeMermaidId(name: string): string {
+    const s = String(name || 'entity').replace(/[^a-zA-Z0-9_]/g, '_');
+    return /^[a-zA-Z_]/.test(s) ? s : `t_${s}`;
+  }
+
   function exportMermaid() {
     let out = 'erDiagram\n';
     tables.forEach((src) => {
       (src.foreign_keys || []).forEach((fk) => {
-        out += `  ${src.name} }o--|| ${fk.referenced_table} : "${fk.column} -> ${fk.referenced_column}"\n`;
+        const fkCol = fk.column || fk.column_name || '';
+        const cleanLabel = `${fkCol}_to_${fk.referenced_column}`.replace(/["<>#]/g, '');
+        out += `  ${safeMermaidId(src.name)} }o--|| ${safeMermaidId(fk.referenced_table)} : "${cleanLabel}"\n`;
       });
     });
     tables.forEach((t) => {
-      out += `  ${t.name} {\n`;
+      const fkSet = new Set((t.foreign_keys || []).map((fk) => (fk.column || fk.column_name || '').toLowerCase()));
+      out += `  ${safeMermaidId(t.name)} {\n`;
       (t.columns || []).forEach((c) => {
-        const typeClean = (c.type || 'varchar').replace(/[(), ]/g, '_');
-        const pk = c.is_primary_key ? 'PK' : '';
-        out += `    ${typeClean} ${c.name} ${pk}\n`;
+        const typeClean = (c.type || 'varchar').replace(/[^a-zA-Z0-9_]/g, '_');
+        const isPK = Boolean(c.is_primary_key);
+        const isFK = fkSet.has((c.name || '').toLowerCase());
+        const keys = isPK && isFK ? 'PK,FK' : isPK ? 'PK' : isFK ? 'FK' : '';
+        out += `    ${typeClean} ${safeMermaidId(c.name)}${keys ? ' ' + keys : ''}\n`;
       });
       out += '  }\n';
     });
     copyText(out);
     appState.showToast('Copied Mermaid ERD syntax to clipboard!', 'success');
   }
-
-  let minimapCanvasRef: HTMLCanvasElement | null = $state(null);
 
   function renderMinimap() {
     if (!minimapCanvasRef || tables.length === 0) return;
@@ -488,6 +823,7 @@ import { copyText } from '../../utils/clipboard';
     const worldW = Math.max(100, maxX - minX + pad * 2);
     const worldH = Math.max(100, maxY - minY + pad * 2);
     const s = Math.min(cw / worldW, ch / worldH);
+    minimapTransform = { minX, minY, pad, s };
 
     tables.forEach((t) => {
       const p = positions[t.name] || { x: 0, y: 0 };
@@ -496,7 +832,12 @@ import { copyText } from '../../utils/clipboard';
       const ry = (p.y - minY + pad) * s;
       const rw = CARD_WIDTH * s;
       const rh = h * s;
-      ctx.fillStyle = t.name === selectedTable ? '#38bdf8' : '#334155';
+      ctx.fillStyle =
+        t.name === selectedTable
+          ? '#38bdf8'
+          : connectedTables.has(t.name)
+            ? '#f59e0b'
+            : '#334155';
       ctx.fillRect(rx, ry, Math.max(2, rw), Math.max(2, rh));
     });
 
@@ -506,18 +847,18 @@ import { copyText } from '../../utils/clipboard';
       const vx = (-panX / scale - minX + pad) * s;
       const vy = (-panY / scale - minY + pad) * s;
       ctx.strokeStyle = '#38bdf8';
-      ctx.lineWidth = 1;
+      ctx.lineWidth = 1.2;
       ctx.strokeRect(vx, vy, vw * s, vh * s);
     }
   }
 
   $effect(() => {
-    // Re-render minimap reactively
     const _pos = positions;
     const _s = scale;
     const _px = panX;
     const _py = panY;
     const _sel = selectedTable;
+    const _conn = connectedTables;
     if (minimapCanvasRef) {
       renderMinimap();
     }
@@ -528,13 +869,16 @@ import { copyText } from '../../utils/clipboard';
   bind:this={containerRef}
   onmousedown={handleMouseDown}
   onwheel={handleWheel}
+  ontouchstart={handleTouchStart}
+  ontouchmove={handleTouchMove}
+  ontouchend={handleTouchEnd}
   role="region"
   aria-label="ERD Canvas"
   class="h-full w-full bg-[#070b14] relative overflow-hidden select-none cursor-grab active:cursor-grabbing"
   style="background-image: radial-gradient(#1e293b 1px, transparent 1px); background-size: {Math.max(12, Math.round(24 * scale))}px {Math.max(12, Math.round(24 * scale))}px; background-position: {panX}px {panY}px;"
 >
   <!-- Top Floating Toolbar -->
-  <div class="absolute top-3 left-3 right-3 z-30 flex items-center justify-between pointer-events-none">
+  <div class="absolute top-3 left-3 right-3 z-30 flex items-center justify-between gap-2 flex-wrap pointer-events-none">
     <!-- Left: Title, Stats & Filter -->
     <div class="flex items-center space-x-2 bg-[#0f172a]/90 backdrop-blur-md border border-[#334155] rounded-lg p-1.5 shadow-2xl pointer-events-auto">
       <div class="flex items-center space-x-1.5 px-2 text-xs font-semibold text-slate-200">
@@ -542,20 +886,30 @@ import { copyText } from '../../utils/clipboard';
         <span>ERD Canvas:</span>
         <span class="font-mono text-sky-400">{appState.currentDatabase || 'None'}</span>
         <span class="text-slate-500 font-mono text-[11px]">
-          ({tables.length} tables • {lines.length} FKs)
+          ({tables.length} tables · {lines.length} FKs)
         </span>
       </div>
 
       <div class="h-4 w-px bg-slate-700"></div>
 
-      <!-- Search Filter -->
+      <!-- Search Filter (Enter jumps to match) -->
       <div class="relative flex items-center">
         <Icon name="search" class="w-3 h-3 text-slate-500 absolute left-2 pointer-events-none" />
         <input
+          bind:this={searchEl}
           type="text"
           bind:value={searchQuery}
-          placeholder="Filter tables..."
-          class="bg-[#090d16] border border-slate-700 focus:border-sky-500 rounded pl-7 pr-4 py-1 text-xs text-slate-200 font-mono outline-none w-36 sm:w-48"
+          onkeydown={(e) => {
+            if (e.key === 'Enter' && searchQuery.trim()) {
+              const first = tables.find((t) => t.name.toLowerCase().includes(searchQuery.trim().toLowerCase()));
+              if (first) focusTable(first.name);
+            } else if (e.key === 'Escape') {
+              searchQuery = '';
+              searchEl?.blur();
+            }
+          }}
+          placeholder="Filter tables (Enter to focus)..."
+          class="bg-[#090d16] border border-slate-700 focus:border-sky-500 rounded pl-7 pr-6 py-1 text-xs text-slate-200 font-mono outline-none w-40 sm:w-52"
         />
         {#if searchQuery}
           <button
@@ -570,9 +924,30 @@ import { copyText } from '../../utils/clipboard';
       </div>
     </div>
 
-    <!-- Right: Zoom & Export Controls -->
-    <div class="flex items-center space-x-1.5 bg-[#0f172a]/90 backdrop-blur-md border border-[#334155] rounded-lg p-1.5 shadow-2xl pointer-events-auto">
+    <!-- Right: Canvas Tools & Export Controls -->
+    <div class="flex items-center space-x-1.5 bg-[#0f172a]/90 backdrop-blur-md border border-[#334155] rounded-lg p-1.5 shadow-2xl pointer-events-auto flex-wrap">
       <button
+        type="button"
+        onclick={() => (appState.isTableCreatorOpen = true)}
+        class="px-2.5 py-1 bg-emerald-600/90 hover:bg-emerald-500 text-white font-semibold rounded text-xs flex items-center space-x-1 transition"
+        title="Create New Table"
+      >
+        <Icon name="plus" class="w-3.5 h-3.5" />
+        <span>New Table</span>
+      </button>
+
+      <button
+        type="button"
+        onclick={handleRefreshCanvas}
+        disabled={isRefreshing}
+        class="p-1.5 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition"
+        title="Refresh Schema Catalog"
+      >
+        <Icon name="refresh-cw" class="w-3.5 h-3.5 {isRefreshing ? 'animate-spin text-sky-400' : ''}" />
+      </button>
+
+      <button
+        type="button"
         onclick={autoLayout}
         class="px-2.5 py-1 bg-[#1e293b] hover:bg-slate-700 border border-slate-700 text-slate-200 rounded text-xs flex items-center space-x-1 transition"
         title="Auto-arrange tables by foreign key depth"
@@ -582,17 +957,19 @@ import { copyText } from '../../utils/clipboard';
       </button>
 
       <button
+        type="button"
         onclick={fitAll}
         class="p-1.5 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition"
-        title="Fit All Tables into View"
+        title="Fit All Tables into View (Shortcut: F)"
       >
         <Icon name="maximize" class="w-3.5 h-3.5" />
       </button>
 
       <button
+        type="button"
         onclick={() => zoomStep(0.15)}
         class="p-1.5 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition"
-        title="Zoom In"
+        title="Zoom In (+)"
       >
         <Icon name="plus" class="w-3.5 h-3.5" />
       </button>
@@ -602,25 +979,28 @@ import { copyText } from '../../utils/clipboard';
       </span>
 
       <button
+        type="button"
         onclick={() => zoomStep(-0.15)}
         class="p-1.5 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition"
-        title="Zoom Out"
+        title="Zoom Out (-)"
       >
         <Icon name="minus" class="w-3.5 h-3.5" />
       </button>
 
       <button
+        type="button"
         onclick={resetZoom}
         class="p-1.5 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition text-xs"
         title="Reset Zoom to 100%"
       >
-        <Icon name="refresh-cw" class="w-3.5 h-3.5 text-slate-400" />
+        <Icon name="rotate-ccw" class="w-3.5 h-3.5 text-slate-400" />
       </button>
 
       <div class="h-4 w-px bg-slate-700"></div>
 
       <!-- Export Buttons -->
       <button
+        type="button"
         onclick={exportSVG}
         class="px-2 py-1 bg-sky-950/60 hover:bg-sky-900/60 border border-sky-800 text-sky-300 font-semibold rounded text-xs flex items-center space-x-1 transition"
         title="Download diagram as SVG vector image"
@@ -630,6 +1010,7 @@ import { copyText } from '../../utils/clipboard';
       </button>
 
       <button
+        type="button"
         onclick={exportMermaid}
         class="px-2 py-1 bg-[#1e293b] hover:bg-slate-700 border border-slate-700 text-slate-200 rounded text-xs flex items-center space-x-1 transition"
         title="Copy Mermaid.js ERD diagram syntax to clipboard"
@@ -674,7 +1055,6 @@ import { copyText } from '../../utils/clipboard';
 
       {#each lines as line (line.key)}
         <g class="pointer-events-auto">
-          <!-- Hitarea for easier hover -->
           <path
             d={line.path}
             stroke="transparent"
@@ -685,7 +1065,6 @@ import { copyText } from '../../utils/clipboard';
             onmouseleave={() => (hoveredFK = null)}
             onclick={() => (selectedTable = line.srcTable)}
           />
-          <!-- Visible Path -->
           <path
             d={line.path}
             stroke={line.isHovered || line.isSelected ? '#38bdf8' : '#f59e0b'}
@@ -694,7 +1073,6 @@ import { copyText } from '../../utils/clipboard';
             fill="none"
             marker-end={line.isHovered || line.isSelected ? 'url(#erd-arrow-active)' : 'url(#erd-arrow)'}
           />
-          <!-- Badge on Midpoint -->
           {#if !line.isDimmed}
             <g
               transform="translate({line.midX}, {line.midY})"
@@ -735,36 +1113,48 @@ import { copyText } from '../../utils/clipboard';
         {@const pos = positions[table.name] || { x: 60, y: 60 }}
         {@const isExp = Boolean(expandedTables[table.name])}
         {@const isSelected = selectedTable === table.name}
+        {@const isConnected = !isSelected && connectedTables.has(table.name)}
         {@const isMatched = !searchQuery || table.name.toLowerCase().includes(searchQuery.toLowerCase())}
+        {@const isDimmed = (Boolean(selectedTable) && !isSelected && !isConnected) || !isMatched}
         {@const allCols = table.columns || []}
-        {@const visibleCols = isExp ? allCols : allCols.slice(0, 12)}
-        {@const hasMore = allCols.length > 12}
-        {@const fkCols = new Set((table.foreign_keys || []).map((fk) => fk.column))}
+        {@const visibleCols = isExp ? allCols : allCols.slice(0, MAX_COL_PREVIEW)}
+        {@const hasMore = allCols.length > MAX_COL_PREVIEW}
+        {@const fkCols = new Set((table.foreign_keys || []).map((fk) => fk.column || fk.column_name))}
 
         <div
-          class="erd-card absolute rounded-xl shadow-2xl border transition-shadow pointer-events-auto bg-[#0b0f19] select-none {isSelected
+          data-erd-card={table.name}
+          class="erd-card absolute rounded-xl shadow-2xl border transition-all pointer-events-auto bg-[#0b0f19] select-none {isSelected
             ? 'border-sky-400 ring-2 ring-sky-400/40 shadow-[0_0_25px_rgba(56,189,248,0.3)] z-30'
-            : isMatched
-            ? 'border-[#334155] hover:border-slate-500 z-10'
-            : 'border-slate-800 opacity-25 z-0'}"
+            : isConnected
+            ? 'erd-connected border-amber-400/90 ring-1 ring-amber-400/35 shadow-[0_0_20px_rgba(245,158,11,0.25)] z-20'
+            : isDimmed
+            ? 'erd-dimmed border-slate-800 opacity-25 z-0'
+            : 'border-[#334155] hover:border-slate-500 z-10'}"
           style="left: {pos.x}px; top: {pos.y}px; width: {CARD_WIDTH}px;"
           onclick={() => (selectedTable = isSelected ? null : table.name)}
+          ondblclick={() => appState.openTableDataTab(table.name)}
+          oncontextmenu={(e) => openContextMenu(e, table.name)}
           role="article"
         >
           <!-- Card Header (Drag Handle) -->
           <div
             onmousedown={(e) => startCardDrag(e, table.name)}
-            class="h-[38px] px-3 bg-[#0f172a] rounded-t-xl border-b border-[#1e293b] flex items-center justify-between cursor-grab active:cursor-grabbing group"
+            class="h-[38px] px-2.5 bg-[#0f172a] rounded-t-xl border-b border-[#1e293b] flex items-center justify-between cursor-grab active:cursor-grabbing group gap-1"
+            title="Drag to move · Double-click to open data · Right-click for actions"
           >
-            <div class="flex items-center space-x-1.5 truncate">
-              <Icon name="table" class="w-3.5 h-3.5 text-sky-400 shrink-0" />
+            <div class="flex items-center space-x-1.5 min-w-0 flex-1">
+              <Icon name="table" class="w-3.5 h-3.5 {isConnected ? 'text-amber-400' : 'text-sky-400'} shrink-0" />
               <span class="font-mono text-xs font-bold text-slate-100 truncate" title={table.name}>
                 {table.name}
               </span>
+              <span class="px-1 rounded bg-slate-800/90 text-[9px] font-mono text-slate-400 shrink-0">
+                {allCols.length}
+              </span>
             </div>
 
-            <div class="flex items-center space-x-1 shrink-0 ml-1">
+            <div class="flex items-center space-x-0.5 shrink-0">
               <button
+                type="button"
                 onclick={(e) => {
                   e.stopPropagation();
                   appState.openTableDataTab(table.name);
@@ -775,6 +1165,7 @@ import { copyText } from '../../utils/clipboard';
                 <Icon name="eye" class="w-3 h-3" />
               </button>
               <button
+                type="button"
                 onclick={(e) => {
                   e.stopPropagation();
                   appState.openTableStructureTab(table.name);
@@ -783,6 +1174,14 @@ import { copyText } from '../../utils/clipboard';
                 title="View Table Structure"
               >
                 <Icon name="columns" class="w-3 h-3" />
+              </button>
+              <button
+                type="button"
+                onclick={(e) => openContextMenu(e, table.name)}
+                class="p-1 hover:bg-slate-700 text-slate-400 hover:text-white rounded transition"
+                title="Card Actions Menu"
+              >
+                <Icon name="more-vertical" class="w-3 h-3" />
               </button>
             </div>
           </div>
@@ -814,6 +1213,7 @@ import { copyText } from '../../utils/clipboard';
 
             {#if hasMore}
               <button
+                type="button"
                 onclick={(e) => {
                   e.stopPropagation();
                   expandedTables[table.name] = !expandedTables[table.name];
@@ -822,7 +1222,7 @@ import { copyText } from '../../utils/clipboard';
               >
                 <span class="inline-flex items-center justify-center space-x-1">
                   <Icon name={isExp ? 'chevron-up' : 'chevron-down'} class="w-3 h-3" />
-                  <span>{isExp ? 'Collapse' : `+${allCols.length - 12} more columns...`}</span>
+                  <span>{isExp ? 'Collapse' : `+${allCols.length - MAX_COL_PREVIEW} more columns...`}</span>
                 </span>
               </button>
             {/if}
@@ -832,17 +1232,89 @@ import { copyText } from '../../utils/clipboard';
     </div>
   </div>
 
-  <!-- Minimap in bottom right -->
-  <div class="absolute bottom-4 right-4 z-20 bg-[#0f172a]/85 backdrop-blur-md border border-[#334155] rounded-lg p-1.5 shadow-2xl pointer-events-none hidden sm:block">
+  <!-- Card Context Menu -->
+  {#if contextMenu}
+    <div class="fixed inset-0 z-40" role="presentation" onclick={() => (contextMenu = null)}></div>
+    <div
+      class="erd-menu absolute z-50 w-60 bg-[#0f172a] border border-slate-700 rounded-xl shadow-2xl py-1.5 text-xs font-sans text-slate-200 overflow-hidden"
+      style="left: {contextMenu.x}px; top: {contextMenu.y}px;"
+    >
+      <div class="px-3 py-1 border-b border-slate-800 text-[10.5px] font-mono font-bold text-sky-400 truncate">
+        {contextMenu.tableName}
+      </div>
+      <button
+        type="button"
+        onclick={() => { const t = contextMenu!.tableName; contextMenu = null; appState.openTableDataTab(t); }}
+        class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2"
+      >
+        <Icon name="eye" class="w-3.5 h-3.5 text-emerald-400" />
+        <span>Open Data Grid</span>
+      </button>
+      <button
+        type="button"
+        onclick={() => { const t = contextMenu!.tableName; contextMenu = null; appState.openTableStructureTab(t); }}
+        class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2"
+      >
+        <Icon name="columns" class="w-3.5 h-3.5 text-sky-400" />
+        <span>View / Edit Structure</span>
+      </button>
+      <button
+        type="button"
+        onclick={() => generateLeftJoinSQL(contextMenu!.tableName)}
+        class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-amber-300"
+      >
+        <Icon name="file-code" class="w-3.5 h-3.5 text-amber-400" />
+        <span>Generate SELECT SQL (LEFT JOIN)</span>
+      </button>
+      <button
+        type="button"
+        onclick={() => viewTableDdlModal(contextMenu!.tableName)}
+        class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2"
+      >
+        <Icon name="code" class="w-3.5 h-3.5 text-cyan-400" />
+        <span>View DDL (Modal)</span>
+      </button>
+      <button
+        type="button"
+        onclick={() => askAiAboutTable(contextMenu!.tableName)}
+        class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-purple-300"
+      >
+        <Icon name="bot" class="w-3.5 h-3.5 text-purple-400" />
+        <span>Ask AI About Schema</span>
+      </button>
+      <div class="my-1 border-t border-slate-800"></div>
+      <button
+        type="button"
+        onclick={() => { copyText(contextMenu!.tableName); appState.showToast('Copied table name', 'info'); contextMenu = null; }}
+        class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-400"
+      >
+        <Icon name="copy" class="w-3.5 h-3.5" />
+        <span>Copy Table Name</span>
+      </button>
+    </div>
+  {/if}
+
+  <!-- Interactive Minimap in bottom right -->
+  <div class="erd-minimap absolute bottom-4 right-4 z-20 bg-[#0f172a]/90 backdrop-blur-md border border-[#334155] rounded-lg p-1.5 shadow-2xl hidden sm:block">
     <div class="text-[9px] font-mono font-semibold text-slate-400 mb-1 px-1 flex items-center justify-between">
-      <span>MINIMAP</span>
+      <span>MINIMAP (Click/Drag)</span>
       <span class="text-sky-400">{Math.round(scale * 100)}%</span>
     </div>
     <canvas
       bind:this={minimapCanvasRef}
-      width="160"
-      height="100"
-      class="rounded bg-[#070b14] border border-slate-800"
+      width="168"
+      height="104"
+      onmousedown={handleMinimapMouseDown}
+      ontouchstart={(e) => {
+        e.stopPropagation();
+        if (e.touches[0]) panViewportFromMinimap(e.touches[0].clientX, e.touches[0].clientY);
+      }}
+      ontouchmove={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.touches[0]) panViewportFromMinimap(e.touches[0].clientX, e.touches[0].clientY);
+      }}
+      class="rounded bg-[#070b14] border border-slate-800 cursor-crosshair block"
     ></canvas>
   </div>
 </div>

@@ -1,6 +1,13 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
   import { quoteSqlIdentifier } from '../../utils/sqlStatements';
+  import {
+    STANDARD_DATA_TYPES,
+    isLengthlessType,
+    defaultLengthForType,
+    DEFAULT_PRESETS,
+    validateTableColumns,
+  } from '../../utils/dataTypes';
   import Icon from '../common/Icon.svelte';
 
   interface TableColDraft {
@@ -18,6 +25,10 @@
   let comment = $state('');
   let columns = $state<TableColDraft[]>([]);
   let isSubmitting = $state(false);
+
+  let driver = $derived(appState.activeConnection?.driver?.toLowerCase() || 'mysql');
+  let isPg = $derived(driver === 'postgres' || driver === 'postgresql');
+  let isSqlite = $derived(driver === 'sqlite');
 
   let wasOpen = false;
 
@@ -55,20 +66,13 @@
     }
   });
 
-  const availableTypes = [
-    'INT',
-    'BIGINT',
-    'VARCHAR',
-    'TEXT',
-    'LONGTEXT',
-    'DATETIME',
-    'TIMESTAMP',
-    'BOOLEAN',
-    'DECIMAL',
-    'JSON',
-    'ENUM',
-    'BLOB',
-  ];
+  function handleColTypeChange(idx: number, newType: string) {
+    const col = columns[idx];
+    if (!col) return;
+    col.type = newType;
+    col.length = isLengthlessType(newType) ? '' : defaultLengthForType(newType);
+    if (newType !== 'INT' && newType !== 'BIGINT') col.autoIncrement = false;
+  }
 
   function addColumn() {
     columns.push({
@@ -102,9 +106,6 @@
 
   let generatedDDL = $derived.by(() => {
     const tbl = tableName.trim() || 'new_table';
-    const driver = appState.activeConnection?.driver || 'mysql';
-    const isPg = driver === 'postgres' || driver === 'postgresql';
-    const isSqlite = driver === 'sqlite';
     const q = (s: string) => quoteSqlIdentifier(s, driver);
 
     const lines: string[] = [];
@@ -117,20 +118,20 @@
       if (isPg) {
         if (col.autoIncrement && (col.type === 'INT' || col.type === 'BIGINT')) {
           typeDef = col.type === 'BIGINT' ? 'BIGSERIAL' : 'SERIAL';
-        } else if (col.length) {
+        } else if (col.length && !isLengthlessType(col.type)) {
           typeDef += `(${col.length})`;
         } else if (col.type === 'VARCHAR') {
           typeDef += '(255)';
         }
       } else if (isSqlite) {
-        if (col.autoIncrement) {
+        if (col.autoIncrement && col.isPK) {
           typeDef = 'INTEGER';
-        } else if (col.length) {
+        } else if (col.length && !isLengthlessType(col.type)) {
           typeDef += `(${col.length})`;
         } else if (col.type === 'VARCHAR') {
           typeDef += '(255)';
         }
-      } else if (col.length) {
+      } else if (col.length && !isLengthlessType(col.type)) {
         typeDef += `(${col.length})`;
       } else if (col.type === 'VARCHAR') {
         typeDef += '(255)';
@@ -157,10 +158,19 @@
       }
 
       if (col.defaultValue && !(isPg && col.autoIncrement) && !(isSqlite && col.autoIncrement)) {
-        if (col.defaultValue === 'NULL' || col.defaultValue === 'CURRENT_TIMESTAMP') {
-          line += ` DEFAULT ${col.defaultValue}`;
+        const dv = col.defaultValue.trim();
+        if (
+          dv.toUpperCase() === 'NULL' ||
+          dv.toUpperCase() === 'CURRENT_TIMESTAMP' ||
+          dv.toUpperCase() === 'TRUE' ||
+          dv.toUpperCase() === 'FALSE' ||
+          /^-?\d+(\.\d+)?$/.test(dv)
+        ) {
+          line += ` DEFAULT ${dv}`;
+        } else if (dv === "''") {
+          line += " DEFAULT ''";
         } else {
-          line += ` DEFAULT '${col.defaultValue.replace(/'/g, "''")}'`;
+          line += ` DEFAULT '${dv.replace(/'/g, "''")}'`;
         }
       }
 
@@ -174,18 +184,44 @@
     if (isPg || isSqlite) {
       return `CREATE TABLE ${q(tbl)} (\n${lines.join(',\n')}\n);`;
     }
-    return `CREATE TABLE ${q(tbl)} (\n${lines.join(',\n')}\n) ENGINE=${engine} DEFAULT CHARSET=utf8mb4;`;
+    const commentClause = comment.trim() ? ` COMMENT='${comment.trim().replace(/'/g, "''")}'` : '';
+    return `CREATE TABLE ${q(tbl)} (\n${lines.join(',\n')}\n) ENGINE=${engine} DEFAULT CHARSET=utf8mb4${commentClause};`;
   });
 
-  async function handleCreateDirect() {
-    if (!tableName.trim()) return;
-    isSubmitting = true;
-    try {
-      await appState.createTableDirect(generatedDDL, tableName.trim());
-      appState.isTableCreatorOpen = false;
-    } finally {
-      isSubmitting = false;
+  function handleCreateDirect() {
+    if (!tableName.trim()) {
+      appState.showToast('Table name is required', 'warning');
+      return;
     }
+    if (appState.isReadOnly) {
+      appState.showToast('Session is Read-Only', 'warning');
+      return;
+    }
+    const err = validateTableColumns(
+      columns.map((c) => ({ name: c.name, type: c.type, baseType: c.type, length: c.length, is_primary_key: c.isPK })),
+      driver
+    );
+    if (err) {
+      appState.showToast(err, 'warning');
+      return;
+    }
+
+    const tbl = tableName.trim();
+    const ddl = generatedDDL;
+    appState.openDDLReviewModal(
+      ddl,
+      async () => {
+        isSubmitting = true;
+        try {
+          await appState.createTableDirect(ddl, tbl);
+          appState.isTableCreatorOpen = false;
+        } finally {
+          isSubmitting = false;
+        }
+      },
+      `Create Table: ${tbl}`,
+      { tableName: tbl, database: appState.currentDatabase || undefined }
+    );
   }
 
   function handleOpenInEditor() {
@@ -228,8 +264,8 @@
 
       <!-- Content -->
       <div class="p-5 flex-1 overflow-y-auto space-y-4 text-xs font-sans">
-        <!-- Table Name & Engine -->
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <!-- Table Name, Engine & Comment -->
+        <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
           <div class="sm:col-span-2 space-y-1">
             <label for="new-table-name" class="block font-semibold text-slate-300">
               Table Name <span class="text-rose-400">*</span>
@@ -243,18 +279,30 @@
               class="w-full bg-[#090d16] border border-[#334155] focus:border-sky-500 rounded px-3 py-1.5 text-slate-100 font-mono text-xs outline-none transition"
             />
           </div>
-          <div class="space-y-1">
-            <label for="new-table-engine" class="block font-semibold text-slate-300">Storage Engine</label>
-            <select
-              id="new-table-engine"
-              bind:value={engine}
-              class="w-full bg-[#090d16] border border-[#334155] focus:border-sky-500 rounded px-2.5 py-1.5 text-slate-100 font-mono text-xs outline-none"
-            >
-              <option value="InnoDB">InnoDB (Standard ACID)</option>
-              <option value="MyISAM">MyISAM</option>
-              <option value="MEMORY">MEMORY</option>
-            </select>
-          </div>
+          {#if !isPg && !isSqlite}
+            <div class="space-y-1">
+              <label for="new-table-engine" class="block font-semibold text-slate-300">Storage Engine</label>
+              <select
+                id="new-table-engine"
+                bind:value={engine}
+                class="w-full bg-[#090d16] border border-[#334155] focus:border-sky-500 rounded px-2.5 py-1.5 text-slate-100 font-mono text-xs outline-none"
+              >
+                <option value="InnoDB">InnoDB (Standard ACID)</option>
+                <option value="MyISAM">MyISAM</option>
+                <option value="MEMORY">MEMORY</option>
+              </select>
+            </div>
+            <div class="space-y-1">
+              <label for="new-table-comment" class="block font-semibold text-slate-300">Table Comment</label>
+              <input
+                id="new-table-comment"
+                type="text"
+                placeholder="Optional description..."
+                bind:value={comment}
+                class="w-full bg-[#090d16] border border-[#334155] focus:border-sky-500 rounded px-3 py-1.5 text-slate-100 text-xs outline-none transition"
+              />
+            </div>
+          {/if}
         </div>
 
         <!-- Columns Designer Table -->
@@ -308,11 +356,16 @@
                     </td>
                     <td class="p-1.5">
                       <select
-                        bind:value={col.type}
+                        value={col.type}
+                        onchange={(e) => handleColTypeChange(idx, (e.currentTarget as HTMLSelectElement).value)}
                         class="w-full bg-[#0f172a] border border-[#334155] rounded px-1.5 py-1 text-sky-300 text-xs outline-none"
                       >
-                        {#each availableTypes as t}
-                          <option value={t}>{t}</option>
+                        {#each STANDARD_DATA_TYPES as group}
+                          <optgroup label={group.group}>
+                            {#each group.types as t}
+                              <option value={t}>{t}</option>
+                            {/each}
+                          </optgroup>
                         {/each}
                       </select>
                     </td>
@@ -320,8 +373,9 @@
                       <input
                         type="text"
                         bind:value={col.length}
-                        placeholder={col.type === 'VARCHAR' ? '255' : ''}
-                        class="w-full bg-[#0f172a] border border-[#334155] rounded px-1.5 py-1 text-slate-100 text-xs outline-none focus:border-sky-500"
+                        disabled={isLengthlessType(col.type)}
+                        placeholder={col.type === 'ENUM' || col.type === 'SET' ? "'a','b'" : isLengthlessType(col.type) ? '—' : defaultLengthForType(col.type)}
+                        class="w-full bg-[#0f172a] border border-[#334155] rounded px-1.5 py-1 text-slate-100 text-xs outline-none focus:border-sky-500 disabled:opacity-40"
                       />
                     </td>
                     <td class="p-1.5 text-center">
@@ -343,6 +397,7 @@
                     <td class="p-1.5">
                       <input
                         type="text"
+                        list="creator-default-presets"
                         bind:value={col.defaultValue}
                         placeholder="NULL / CURRENT_TIMESTAMP"
                         class="w-full bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-slate-100 text-xs outline-none focus:border-sky-500"
@@ -362,6 +417,13 @@
                 {/each}
               </tbody>
             </table>
+            <datalist id="creator-default-presets">
+              {#each DEFAULT_PRESETS as p}
+                {#if p.value}
+                  <option value={p.value}>{p.label}</option>
+                {/if}
+              {/each}
+            </datalist>
           </div>
         </div>
 

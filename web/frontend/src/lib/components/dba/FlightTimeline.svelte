@@ -16,11 +16,15 @@
   let width = $state(0);
   let height = 132;
 
-  const PAD = { left: 6, right: 6, top: 8, bottom: 18 };
+  let hoverIndex: number | null = $state(null);
+  let hoverClientX = $state(0);
+
+  const PAD = { left: 38, right: 8, top: 10, bottom: 18 };
   const LANES = [
     { key: 'qps', label: 'QPS', color: '#38bdf8' },
     { key: 'threads_running', label: 'Active threads', color: '#34d399' },
     { key: 'threads_connected', label: 'Connections', color: '#818cf8' },
+    { key: 'row_lock_waits', label: 'Row Lock Waits', color: '#fbbf24' },
   ];
 
   const points = $derived(
@@ -29,8 +33,16 @@
       qps: Number(t?.qps ?? 0),
       threads_running: Number(t?.threads_running ?? t?.active_threads ?? 0),
       threads_connected: Number(t?.threads_connected ?? 0),
+      row_lock_waits: Number(t?.row_lock_waits ?? t?.locks_waiting ?? 0),
+      sampled_at: t?.sampled_at ?? '',
       ts: t?.sampled_at ? new Date(t.sampled_at) : null,
     }))
+  );
+
+  const hoveredPoint = $derived(
+    hoverIndex != null && hoverIndex >= 0 && hoverIndex < points.length
+      ? points[hoverIndex]
+      : null
   );
 
   $effect(() => {
@@ -52,9 +64,10 @@
   }
 
   $effect(() => {
-    // Dependencies: data, size, selection.
+    // Dependencies: data, size, selection, hover.
     const data = points;
     const sel = selectedIndex;
+    const hov = hoverIndex;
     const w = width;
     const el = canvas;
     if (!el || w <= 0) return;
@@ -74,15 +87,26 @@
     const plotH = height - PAD.top - PAD.bottom;
     const n = data.length;
 
-    // Horizontal grid
+    // Horizontal grid & primary Y-axis scale ticks (QPS)
+    const primaryMax = seriesMax('qps');
+    const formatTick = (val: number) =>
+      val >= 1000 ? `${(val / 1000).toFixed(1)}k` : String(Math.round(val));
     ctx.strokeStyle = 'rgba(148,163,184,0.12)';
     ctx.lineWidth = 1;
+    ctx.fillStyle = 'rgba(148,163,184,0.7)';
+    ctx.font = '9px ui-monospace, monospace';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
     for (let g = 0; g <= 4; g++) {
       const y = PAD.top + (plotH / 4) * g;
       ctx.beginPath();
       ctx.moveTo(PAD.left, Math.round(y) + 0.5);
       ctx.lineTo(PAD.left + plotW, Math.round(y) + 0.5);
       ctx.stroke();
+      if (g === 0 || g === 2 || g === 4) {
+        const val = primaryMax * (1 - g / 4);
+        ctx.fillText(formatTick(val), PAD.left - 5, y);
+      }
     }
 
     const xFor = (i: number) => (n <= 1 ? PAD.left + plotW / 2 : PAD.left + (plotW * i) / (n - 1));
@@ -112,6 +136,29 @@
         ctx.arc(xFor(n - 1), y, 2.2, 0, Math.PI * 2);
         ctx.fill();
       }
+
+      if (hov != null && hov >= 0 && hov < n) {
+        const hp = data[hov]!;
+        const v = Number((hp as any)[lane.key]) || 0;
+        const y = PAD.top + plotH - (v / max) * plotH;
+        ctx.fillStyle = lane.color;
+        ctx.beginPath();
+        ctx.arc(xFor(hov), y, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Hover crosshair
+    if (hov != null && hov >= 0 && hov < n && hov !== sel) {
+      const x = xFor(hov);
+      ctx.strokeStyle = 'rgba(226,232,240,0.4)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2, 2]);
+      ctx.beginPath();
+      ctx.moveTo(Math.round(x) + 0.5, PAD.top);
+      ctx.lineTo(Math.round(x) + 0.5, PAD.top + plotH);
+      ctx.stroke();
+      ctx.setLineDash([]);
     }
 
     // Selection marker
@@ -153,21 +200,36 @@
     }
   });
 
-  function pick(e: MouseEvent) {
-    if (!onselect || points.length === 0) return;
+  function indexAtMouse(e: MouseEvent): number | null {
+    if (points.length === 0) return null;
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const plotW = Math.max(1, rect.width - PAD.left - PAD.right);
     const rel = Math.min(plotW, Math.max(0, e.clientX - rect.left - PAD.left));
     const idx =
       points.length <= 1 ? 0 : Math.round((rel / plotW) * (points.length - 1));
-    onselect(Math.max(0, Math.min(points.length - 1, idx)));
+    hoverClientX = Math.max(PAD.left, Math.min(rect.width - PAD.right, e.clientX - rect.left));
+    return Math.max(0, Math.min(points.length - 1, idx));
+  }
+
+  function pick(e: MouseEvent) {
+    if (!onselect || points.length === 0) return;
+    const idx = indexAtMouse(e);
+    if (idx != null) onselect(idx);
+  }
+
+  function handleMouseMove(e: MouseEvent) {
+    hoverIndex = indexAtMouse(e);
+  }
+
+  function handleMouseLeave() {
+    hoverIndex = null;
   }
 </script>
 
 <div class="border border-[#1e293b] rounded-lg bg-[#0b0f19] overflow-hidden">
-  <div class="px-3 py-2 bg-[#0f172a] border-b border-[#1e293b] flex items-center justify-between">
-    <span class="font-sans font-bold text-slate-300 text-xs">Telemetry Timeline</span>
-    <div class="flex items-center gap-3">
+  <div class="px-3 py-2 bg-[#0f172a] border-b border-[#1e293b] flex items-center justify-between flex-wrap gap-2">
+    <span class="font-sans font-bold text-slate-300 text-xs">Telemetry Timeline <span class="text-[10px] font-normal text-slate-500">(Y: QPS scale)</span></span>
+    <div class="flex items-center gap-3 flex-wrap">
       {#each LANES as lane}
         <span class="flex items-center gap-1 text-[10px] font-sans text-slate-400">
           <span class="w-2 h-2 rounded-sm" style="background:{lane.color}"></span>{lane.label}
@@ -183,6 +245,8 @@
     tabindex="0"
     aria-label="Recorded telemetry timeline, click to inspect a sample"
     onclick={pick}
+    onmousemove={handleMouseMove}
+    onmouseleave={handleMouseLeave}
     onkeydown={(e) => {
       if (!onselect || points.length === 0) return;
       const cur = selectedIndex ?? points.length - 1;
@@ -191,5 +255,29 @@
     }}
   >
     <canvas bind:this={canvas} aria-hidden="true"></canvas>
+    {#if hoveredPoint}
+      <div
+        class="pointer-events-none absolute top-2 z-10 bg-slate-950/95 border border-slate-700/80 rounded-md px-2.5 py-1.5 shadow-xl text-[10px] font-mono whitespace-nowrap"
+        style="left: {Math.min(Math.max(8, hoverClientX + 10), Math.max(8, width - 175))}px;"
+      >
+        <div class="text-slate-300 font-bold mb-1">
+          {hoveredPoint.ts && !isNaN(hoveredPoint.ts.getTime())
+            ? hoveredPoint.ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+            : `#${hoveredPoint.i + 1}`}
+        </div>
+        <div class="flex items-center justify-between gap-3 text-sky-400">
+          <span>QPS</span><span>{hoveredPoint.qps.toFixed(1)}</span>
+        </div>
+        <div class="flex items-center justify-between gap-3 text-emerald-400">
+          <span>Active Threads</span><span>{hoveredPoint.threads_running}</span>
+        </div>
+        <div class="flex items-center justify-between gap-3 text-indigo-400">
+          <span>Connections</span><span>{hoveredPoint.threads_connected}</span>
+        </div>
+        <div class="flex items-center justify-between gap-3 text-amber-400">
+          <span>Row Lock Waits</span><span>{hoveredPoint.row_lock_waits}</span>
+        </div>
+      </div>
+    {/if}
   </div>
 </div>

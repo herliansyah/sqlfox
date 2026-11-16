@@ -16,10 +16,15 @@
   let isSaving = $state(false);
   let grantsRaw = $state<string[]>([]);
 
-  // Account creation state
+  // Account creation / password update state
   let newUsername = $state('');
   let newHost = $state('%');
   let newPassword = $state('');
+  let editPassword = $state('');
+  let editPasswordConfirm = $state('');
+  let rightTab = $state<'grants' | 'password'>('grants');
+
+  let isPG = $derived(Boolean(appState.activeConnection?.driver?.toLowerCase().includes('postgres')));
 
   const PRIV_GROUPS: Record<string, string[]> = {
     Data: ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'FILE'],
@@ -92,6 +97,9 @@
 
   async function selectUser(u: DbUser) {
     isCreatingNew = false;
+    rightTab = 'grants';
+    editPassword = '';
+    editPasswordConfirm = '';
     selectedUser = u;
     selectedPrivileges.clear();
     withGrantOption = false;
@@ -122,10 +130,10 @@
 
   function startNewUser() {
     isCreatingNew = true;
+    rightTab = 'grants';
     selectedUser = null;
     newUsername = '';
-    const isPG = appState.activeConnection?.driver?.toLowerCase().includes('postgres');
-    newHost = isPG ? 'N/A' : '%';
+    newHost = isPG ? 'N/A (pg_hba.conf)' : '%';
     newPassword = '';
     selectedPrivileges.clear();
     withGrantOption = false;
@@ -144,12 +152,17 @@
     selectedPrivileges.clear();
     if (preset === 'all') {
       ALL_PRIVS.forEach((p) => selectedPrivileges.add(p));
+      withGrantOption = true;
     } else if (preset === 'readonly') {
       ['SELECT', 'SHOW VIEW'].forEach((p) => selectedPrivileges.add(p));
+      withGrantOption = false;
     } else if (preset === 'readwrite') {
-      ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE VIEW', 'SHOW VIEW'].forEach((p) =>
+      ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'INDEX', 'CREATE VIEW', 'SHOW VIEW', 'EXECUTE'].forEach((p) =>
         selectedPrivileges.add(p)
       );
+      withGrantOption = false;
+    } else {
+      withGrantOption = false;
     }
   }
 
@@ -160,20 +173,20 @@
       return;
     }
 
+    const hostVal = isPG ? '%' : (newHost.trim() || '%');
     isSaving = true;
     try {
       await api.saveUser(appState.activeSessionId, {
         user: newUsername.trim(),
-        host: newHost.trim() || '%',
+        host: hostVal,
         password: newPassword,
         is_new: true,
       });
 
       appState.showToast(`User '${newUsername}' created successfully`, 'success');
-      const createdUser = { user: newUsername.trim(), host: newHost.trim() || '%' };
+      const createdUser = { user: newUsername.trim(), host: hostVal };
 
-      // Apply initial privileges if selected
-      if (selectedPrivileges.size > 0) {
+      if (selectedPrivileges.size > 0 || withGrantOption) {
         await api.applyGrants(appState.activeSessionId, {
           user: createdUser.user,
           host: createdUser.host,
@@ -193,11 +206,42 @@
     }
   }
 
-  async function handleDeleteUser() {
+  async function handleChangePassword() {
     if (!selectedUser || !appState.activeSessionId) return;
-    if (!confirm(`Are you sure you want to permanently drop user '${selectedUser.user}'@'${selectedUser.host}'?`)) {
+    if (!editPassword) {
+      appState.showToast('Enter a new password first', 'warning');
       return;
     }
+    if (editPasswordConfirm && editPassword !== editPasswordConfirm) {
+      appState.showToast('Passwords do not match', 'warning');
+      return;
+    }
+    isSaving = true;
+    try {
+      await api.saveUser(appState.activeSessionId, {
+        user: selectedUser.user,
+        host: selectedUser.host,
+        password: editPassword,
+        is_new: false,
+      });
+      appState.showToast(`Password updated for '${selectedUser.user}'`, 'success');
+      editPassword = '';
+      editPasswordConfirm = '';
+      rightTab = 'grants';
+    } catch (err: any) {
+      appState.showToast(`Failed to update password: ${err.message}`, 'error');
+    } finally {
+      isSaving = false;
+    }
+  }
+
+  async function handleDeleteUser() {
+    if (!selectedUser || !appState.activeSessionId) return;
+    const confirmed = await appState.showNativeConfirm(
+      `Are you sure you want to permanently drop user '${selectedUser.user}'@'${selectedUser.host}'?`,
+      'Drop Database User'
+    );
+    if (!confirmed) return;
 
     isSaving = true;
     try {
@@ -329,13 +373,22 @@
                   />
                 </div>
                 <div>
-                  <label for="new-host" class="block text-[11px] text-slate-400 mb-1">Host Origin</label>
+                  <div class="flex items-center justify-between mb-1">
+                    <label for="new-host" class="text-[11px] text-slate-400">Host Origin</label>
+                    {#if !isPG}
+                      <div class="flex items-center space-x-1">
+                        <button type="button" onclick={() => (newHost = '%')} class="px-1.5 py-0.2 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-mono text-sky-300">%</button>
+                        <button type="button" onclick={() => (newHost = 'localhost')} class="px-1.5 py-0.2 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-mono text-sky-300">localhost</button>
+                      </div>
+                    {/if}
+                  </div>
                   <input
                     id="new-host"
                     type="text"
+                    disabled={isPG}
                     bind:value={newHost}
                     placeholder="%"
-                    class="w-full bg-[#090d16] border border-[#334155] rounded px-2.5 py-1.5 text-white font-mono text-xs focus:border-purple-500 outline-none"
+                    class="w-full bg-[#090d16] border border-[#334155] rounded px-2.5 py-1.5 text-white font-mono text-xs focus:border-purple-500 outline-none disabled:opacity-50"
                   />
                 </div>
                 <div>
@@ -351,16 +404,33 @@
               </div>
             </div>
           {:else if selectedUser}
-            <!-- Selected User Details -->
-            <div class="flex items-center justify-between bg-[#0f172a] p-3 rounded-lg border border-[#1e293b]">
+            <!-- Selected User Details & Sub-Tab Switcher -->
+            <div class="flex flex-wrap items-center justify-between gap-2 bg-[#0f172a] p-3 rounded-lg border border-[#1e293b]">
               <div>
                 <span class="text-[10px] text-slate-500 uppercase font-bold tracking-wider block">Selected User</span>
                 <span class="font-bold text-slate-100 font-mono text-sm">
-                  '{selectedUser.user}'@'{selectedUser.host}'
+                  '{selectedUser.user}'{!isPG ? `@'${selectedUser.host}'` : ''}
                 </span>
               </div>
 
               <div class="flex items-center space-x-2">
+                <div class="inline-flex rounded border border-slate-700 bg-[#090d16] p-0.5 text-[11px]">
+                  <button
+                    type="button"
+                    onclick={() => (rightTab = 'grants')}
+                    class="px-2.5 py-1 rounded font-semibold transition {rightTab === 'grants' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
+                  >
+                    Privileges
+                  </button>
+                  <button
+                    type="button"
+                    onclick={() => (rightTab = 'password')}
+                    class="px-2.5 py-1 rounded font-semibold transition {rightTab === 'password' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
+                  >
+                    Change Password
+                  </button>
+                </div>
+
                 <button
                   onclick={handleDeleteUser}
                   class="px-2.5 py-1 text-xs text-red-400 hover:text-red-300 hover:bg-red-950/40 border border-red-900/40 rounded transition flex items-center space-x-1"
@@ -371,6 +441,47 @@
               </div>
             </div>
           {/if}
+
+          {#if !isCreatingNew && selectedUser && rightTab === 'password'}
+            <div class="bg-[#0f172a] p-4 rounded-lg border border-[#1e293b] space-y-3">
+              <h4 class="font-bold text-slate-200 text-xs flex items-center space-x-2">
+                <Icon name="key" class="w-3.5 h-3.5 text-amber-400" />
+                <span>Update Password for '{selectedUser.user}'</span>
+              </h4>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label for="edit-password" class="block text-[11px] text-slate-400 mb-1">New Password *</label>
+                  <input
+                    id="edit-password"
+                    type="password"
+                    bind:value={editPassword}
+                    placeholder="Enter new password"
+                    class="w-full bg-[#090d16] border border-[#334155] rounded px-2.5 py-1.5 text-white font-mono text-xs focus:border-purple-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label for="edit-password-confirm" class="block text-[11px] text-slate-400 mb-1">Confirm Password</label>
+                  <input
+                    id="edit-password-confirm"
+                    type="password"
+                    bind:value={editPasswordConfirm}
+                    placeholder="Repeat new password"
+                    class="w-full bg-[#090d16] border border-[#334155] rounded px-2.5 py-1.5 text-white font-mono text-xs focus:border-purple-500 outline-none"
+                  />
+                </div>
+              </div>
+              <div class="flex justify-end">
+                <button
+                  type="button"
+                  onclick={handleChangePassword}
+                  disabled={isSaving || !editPassword}
+                  class="px-4 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded text-xs font-semibold transition"
+                >
+                  {isSaving ? 'Saving...' : 'Update Password'}
+                </button>
+              </div>
+            </div>
+          {:else}
 
           <!-- Scope & Presets Bar -->
           <div class="flex flex-wrap items-center justify-between gap-2 bg-[#0d1322] p-2.5 rounded-lg border border-[#1e293b]">
@@ -462,6 +573,7 @@
               </span>
               <pre class="p-2.5 rounded bg-[#090d16] border border-slate-800 text-[11px] text-slate-400 font-mono overflow-x-auto whitespace-pre-wrap max-h-24 select-text">{grantsRaw.join('\n')}</pre>
             </div>
+          {/if}
           {/if}
         </div>
       </div>

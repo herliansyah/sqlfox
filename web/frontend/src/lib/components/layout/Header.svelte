@@ -1,8 +1,8 @@
 <script lang="ts">
-import { copyText } from '../../utils/clipboard';
+  import { copyText } from '../../utils/clipboard';
   import { tick, onDestroy } from 'svelte';
   import { appState } from '../../stores/appState.svelte';
-  import { api } from '../../api/client';
+  import type { ConnectionProfile } from '../../../types';
   import Icon from '../common/Icon.svelte';
 
   let showConnDropdown = $state(false);
@@ -19,40 +19,180 @@ import { copyText } from '../../utils/clipboard';
     desc: string;
     icon: string;
     iconColor: string;
+    badge?: string | number;
+    badgeClass?: string;
+    hidden?: boolean;
     action: () => void;
   }
 
   let openToolsMenu = $state<'monitor' | 'dbtools' | 'settings' | null>(null);
 
-  // One neutral style for every header action so heights, padding, borders and hover stay aligned.
   const navBtn =
     'h-7 px-2 rounded-md bg-[#1e293b] border border-slate-700/80 text-slate-300 hover:bg-slate-700 hover:text-white hover:border-slate-600 transition shadow-sm flex items-center gap-1.5';
   const navIconBtn = navBtn + ' w-7 justify-center px-0';
   const navDivider = 'w-px h-4 bg-slate-800 shrink-0';
 
-  const monitorItems: ToolMenuItem[] = [
-    { label: 'Processlist', desc: 'Live threads, slow queries and kill', icon: 'cpu', iconColor: 'text-sky-400', action: () => appState.openProcesslistTab('threads') },
-    { label: 'Deadlock Inspector', desc: 'Blocking chains and deadlock victims', icon: 'shield-alert', iconColor: 'text-rose-400', action: () => appState.openProcesslistTab('deadlock') },
-    { label: 'Cluster & Replication', desc: 'Replication lag and node state', icon: 'network', iconColor: 'text-emerald-400', action: () => appState.openProcesslistTab('cluster') },
-    { label: 'Server Variables', desc: 'Runtime parameters and tuning hints', icon: 'sliders', iconColor: 'text-cyan-400', action: () => appState.openProcesslistTab('variables') },
-    { label: 'Flight Recorder', desc: 'Record performance telemetry over time', icon: 'disc', iconColor: 'text-rose-400', action: () => appState.openProcesslistTab('flight-recorder') },
-    { label: 'Storage & Health', desc: 'Table footprints and health advisor', icon: 'hard-drive', iconColor: 'text-amber-400', action: () => appState.openDbDiagnosticsModal() },
-    { label: 'Audit Log', desc: 'Session query history and execution log', icon: 'clipboard-list', iconColor: 'text-purple-400', action: () => (appState.isAuditDrawerOpen = true) },
-  ];
+  let isSqlite = $derived((appState.activeConnection?.driver || '').toLowerCase() === 'sqlite');
+  let hasConn = $derived(Boolean(appState.activeConnection));
 
-  const dbToolItems: ToolMenuItem[] = [
-    { label: 'Dump Entire Database', desc: 'Export all tables DDL + INSERTs (.sql)', icon: 'download', iconColor: 'text-sky-400', action: () => appState.openDumpModal() },
-    { label: 'Run Large SQL Script', desc: 'Stream and execute multi-megabyte .sql', icon: 'file-code', iconColor: 'text-indigo-400', action: () => appState.openRunSqlModal() },
-    { label: 'Structure Sync (Schema Diff)', desc: 'Compare schemas and generate migration DDL', icon: 'git-diff', iconColor: 'text-emerald-400', action: () => appState.openStructureSyncModal() },
-    { label: 'Cross-Connection Transfer', desc: 'Stream copy tables between sessions', icon: 'arrow-left-right', iconColor: 'text-cyan-400', action: () => (appState.isDataTransferOpen = true) },
-    { label: 'Row-Level Data Sync', desc: 'Keyset delta reconciler (insert/update/delete)', icon: 'refresh-cw', iconColor: 'text-purple-400', action: () => (appState.isDataSyncOpen = true) },
-    { label: 'Visual ERD Canvas', desc: 'Interactive ER diagram with FK relations', icon: 'layers', iconColor: 'text-indigo-400', action: () => appState.openErdTab() },
-    { label: 'Users & Privileges', desc: 'MySQL accounts and permission matrix', icon: 'users', iconColor: 'text-rose-400', action: () => appState.openPrivilegeMatrixModal() },
-  ];
+  let monitorItems = $derived<ToolMenuItem[]>([
+    {
+      label: 'Processlist',
+      desc: 'Live threads, slow queries and kill',
+      icon: 'cpu',
+      iconColor: 'text-sky-400',
+      badge: appState.dbaSlowQueriesCount > 0 ? `${appState.dbaSlowQueriesCount} slow` : undefined,
+      badgeClass: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
+      hidden: !hasConn || isSqlite,
+      action: () => appState.openProcesslistTab('threads'),
+    },
+    {
+      label: 'Lock Contention & Blockers',
+      desc: 'Blocking chains and root lock holders',
+      icon: 'lock',
+      iconColor: 'text-amber-400',
+      badge: appState.dbaBlockersCount > 0 ? appState.dbaBlockersCount : undefined,
+      badgeClass: 'bg-rose-500 text-white',
+      hidden: !hasConn || isSqlite,
+      action: () => (appState.isLockInspectorOpen = true),
+    },
+    {
+      label: 'Statement Digest',
+      desc: 'Top slow normalized queries & latency',
+      icon: 'trending-up',
+      iconColor: 'text-cyan-400',
+      hidden: !hasConn || isSqlite,
+      action: () => appState.openProcesslistTab('digest'),
+    },
+    {
+      label: 'Deadlock Inspector',
+      desc: 'InnoDB deadlock post-mortem & lock matrix',
+      icon: 'shield-alert',
+      iconColor: 'text-rose-400',
+      hidden: !hasConn || isSqlite,
+      action: () => appState.openProcesslistTab('deadlock'),
+    },
+    {
+      label: 'Cluster & Replication',
+      desc: 'Replication lag and node state',
+      icon: 'network',
+      iconColor: 'text-emerald-400',
+      badge: appState.dbaClusterLabel || undefined,
+      badgeClass:
+        appState.dbaClusterStatus === 'critical'
+          ? 'bg-rose-500/20 text-rose-300 border-rose-500/50'
+          : appState.dbaClusterStatus === 'warn'
+            ? 'bg-amber-500/20 text-amber-300 border-amber-500/50'
+            : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50',
+      hidden: !hasConn || isSqlite,
+      action: () => appState.openProcesslistTab('cluster'),
+    },
+    {
+      label: 'Server Variables',
+      desc: 'Runtime parameters and tuning hints',
+      icon: 'sliders',
+      iconColor: 'text-cyan-400',
+      hidden: !hasConn || isSqlite,
+      action: () => appState.openProcesslistTab('variables'),
+    },
+    {
+      label: 'Flight Recorder',
+      desc: 'Record performance telemetry over time',
+      icon: 'disc',
+      iconColor: 'text-rose-400',
+      badge: appState.flightRecordingActive ? 'REC' : undefined,
+      badgeClass: 'bg-rose-500 text-white animate-pulse',
+      hidden: !hasConn || isSqlite,
+      action: () => appState.openProcesslistTab('flight-recorder'),
+    },
+    {
+      label: 'Storage & Health',
+      desc: 'Database & table footprints and health advisor',
+      icon: 'hard-drive',
+      iconColor: 'text-amber-400',
+      hidden: !hasConn,
+      action: () => appState.openDbDiagnosticsModal(),
+    },
+    {
+      label: 'Audit Log',
+      desc: 'Persistent session query & mutation history',
+      icon: 'clipboard-list',
+      iconColor: 'text-purple-400',
+      hidden: !hasConn,
+      action: () => (appState.isAuditDrawerOpen = true),
+    },
+  ].filter((item) => !item.hidden));
+
+  let dbToolItems = $derived<ToolMenuItem[]>([
+    {
+      label: 'Cross-DB Schema Search (Ctrl+P)',
+      desc: 'Jump to tables, views and columns across DBs',
+      icon: 'search',
+      iconColor: 'text-sky-400',
+      action: () => (appState.isSchemaSearchOpen = true),
+    },
+    {
+      label: 'Dump Entire Database',
+      desc: 'Export selected tables DDL + INSERTs (.sql)',
+      icon: 'download',
+      iconColor: 'text-sky-400',
+      action: () => appState.openDumpModal(),
+    },
+    {
+      label: 'Export Smart Seed (FK-Aware)',
+      desc: 'Topologically ordered bounded test dataset',
+      icon: 'sparkles',
+      iconColor: 'text-emerald-400',
+      action: () => (appState.isSmartSeedModalOpen = true),
+    },
+    {
+      label: 'Run Large SQL Script',
+      desc: 'Stream and execute multi-megabyte .sql',
+      icon: 'file-code',
+      iconColor: 'text-indigo-400',
+      action: () => appState.openRunSqlModal(),
+    },
+    {
+      label: 'Structure Sync (Schema Diff)',
+      desc: 'Compare schemas and generate migration DDL',
+      icon: 'git-diff',
+      iconColor: 'text-emerald-400',
+      action: () => appState.openStructureSyncModal(),
+    },
+    {
+      label: 'Cross-Connection Transfer',
+      desc: 'Stream copy tables between sessions',
+      icon: 'arrow-left-right',
+      iconColor: 'text-cyan-400',
+      action: () => (appState.isDataTransferOpen = true),
+    },
+    {
+      label: 'Row-Level Data Sync',
+      desc: 'Keyset delta reconciler (insert/update/delete)',
+      icon: 'refresh-cw',
+      iconColor: 'text-purple-400',
+      action: () => (appState.isDataSyncOpen = true),
+    },
+    {
+      label: 'Visual ERD Canvas',
+      desc: 'Interactive ER diagram with FK relations',
+      icon: 'layers',
+      iconColor: 'text-indigo-400',
+      action: () => appState.openErdTab(),
+    },
+    {
+      label: 'Users & Privileges',
+      desc: 'Database accounts and permission matrix',
+      icon: 'users',
+      iconColor: 'text-rose-400',
+      hidden: !hasConn || isSqlite,
+      action: () => appState.openPrivilegeMatrixModal(),
+    },
+  ].filter((item) => !item.hidden));
 
   const settingsItems: ToolMenuItem[] = [
-    { label: 'Settings', desc: 'Connections, sync, notes and AI', icon: 'settings', iconColor: 'text-cyan-400', action: () => (appState.isSettingsModalOpen = true) },
-    { label: 'AI Model Config', desc: 'Provider credentials and parameters', icon: 'bot', iconColor: 'text-indigo-400', action: () => (appState.isAiSettingsModalOpen = true) },
+    { label: 'Settings', desc: 'Vault backup, cloud sync, notes and LAN PIN', icon: 'settings', iconColor: 'text-cyan-400', action: () => (appState.isSettingsModalOpen = true) },
+    { label: 'AI Model Config', desc: 'Provider credentials, privacy firewall and prompt', icon: 'bot', iconColor: 'text-indigo-400', action: () => (appState.isAiSettingsModalOpen = true) },
     { label: 'Keyboard Shortcuts', desc: 'Hotkeys for navigation and execution', icon: 'keyboard', iconColor: 'text-amber-400', action: () => (appState.isShortcutsModalOpen = true) },
     { label: 'Check for Updates', desc: 'Latest release notes and self-update', icon: 'arrow-down-circle', iconColor: 'text-emerald-400', action: () => (appState.isUpdateModalOpen = true) },
     { label: 'Open in Web Browser', desc: 'Launch this UI in your default browser', icon: 'share-2', iconColor: 'text-sky-400', action: () => appState.openInSystemBrowser() },
@@ -60,9 +200,9 @@ import { copyText } from '../../utils/clipboard';
     { label: 'Shut Down Daemon', desc: 'Gracefully stop the local server', icon: 'rotate-ccw', iconColor: 'text-rose-400', action: () => appState.shutdownDaemon() },
   ];
 
-  let masterPin = $derived(appState.authStatus?.master_password || 'fox-0304');
+  let masterPin = $derived(appState.authStatus?.master_password || '');
   let isLanAvailable = $derived(
-    Boolean(appState.authStatus?.lan_enabled || appState.authStatus?.is_remote || appState.authStatus?.master_password)
+    Boolean(masterPin && (appState.authStatus?.lan_enabled || !appState.authStatus?.is_remote))
   );
 
   let filteredConnections = $derived.by(() => {
@@ -90,7 +230,6 @@ import { copyText } from '../../utils/clipboard';
     return groups.filter((g) => g.items.length > 0);
   });
 
-  // Flatten in display order so arrow keys follow what the user sees.
   let orderedConnections = $derived(groupedConnections.flatMap((g) => g.items));
 
   $effect(() => {
@@ -120,9 +259,19 @@ import { copyText } from '../../utils/clipboard';
     );
   }
 
-  function chooseConnection(conn: (typeof appState.connections)[number]) {
+  function chooseConnection(conn: ConnectionProfile) {
     appState.selectConnection(conn);
     closeConnDropdown();
+  }
+
+  async function handleDeleteConnection(e: MouseEvent, conn: ConnectionProfile) {
+    e.stopPropagation();
+    const ok = await appState.showNativeConfirm(
+      `Delete connection profile "${conn.name}"? This cannot be undone.`,
+      'Delete Connection'
+    );
+    if (!ok) return;
+    await appState.deleteConnection(conn.id);
   }
 
   function handleConnSearchKeydown(e: KeyboardEvent) {
@@ -158,24 +307,6 @@ import { copyText } from '../../utils/clipboard';
     }
   }
 
-  async function handleToggleReadOnly() {
-    if (!appState.activeConnection) return;
-    if (appState.activeConnection.environment === 'Production' && appState.isReadOnly) {
-      const ok = confirm('Switch to Read-Write mode for this Production session? Data modification operations (INSERT/UPDATE/DELETE/DDL) will be permitted.');
-      if (!ok) return;
-    }
-    try {
-      const res = await api.toggleReadOnly(appState.activeConnection.id);
-      appState.isReadOnly = res.read_only;
-      appState.showToast(
-        res.read_only ? 'Read-only mode enabled: modifications blocked' : 'Write mode active: modifications allowed',
-        'info'
-      );
-    } catch (err: any) {
-      appState.showToast(`Failed to toggle read-only: ${err.message}`, 'error');
-    }
-  }
-
   function getEnvBadgeClass(env: string) {
     switch (env) {
       case 'Production':
@@ -190,6 +321,7 @@ import { copyText } from '../../utils/clipboard';
   function getDriverName(driver?: string) {
     switch (driver) {
       case 'postgres':
+      case 'postgresql':
         return 'PostgreSQL';
       case 'sqlite':
         return 'SQLite';
@@ -211,6 +343,7 @@ import { copyText } from '../../utils/clipboard';
   let copiedPinTimer: ReturnType<typeof setTimeout> | null = null;
 
   function copyMasterPin() {
+    if (!masterPin) return;
     copyText(masterPin);
     copiedPin = true;
     appState.showToast('Master PIN copied to clipboard!', 'info');
@@ -228,7 +361,7 @@ import { copyText } from '../../utils/clipboard';
   <!-- Brand, Sidebar Toggle & Active Connection -->
   <div class="flex items-center gap-2 shrink-0 min-w-0">
     <button
-      onclick={() => (appState.sidebarCollapsed = !appState.sidebarCollapsed)}
+      onclick={() => appState.toggleSidebarCollapsed()}
       class="{navIconBtn} text-slate-400"
       title="Toggle Sidebar (Ctrl+B)"
     >
@@ -243,17 +376,20 @@ import { copyText } from '../../utils/clipboard';
 
     <div class={navDivider}></div>
 
-    <!-- Active Connection Selector Pill -->
-    <div class="relative">
+    <!-- Active Connection Selector & Quick Edit Pill -->
+    <div class="relative flex items-center gap-1">
       <button
         id="session-switcher-btn"
         onclick={() => (showConnDropdown ? closeConnDropdown() : openConnDropdown())}
         aria-haspopup="listbox"
         aria-expanded={showConnDropdown}
         class="h-7 px-2 rounded-md {appState.isProduction ? 'bg-rose-950/40 border-rose-600/60 hover:bg-rose-900/40 shadow-rose-950/30' : 'bg-[#1e293b] hover:bg-slate-700/80 border-slate-700/80'} border flex items-center gap-2 text-xs text-slate-200 transition shadow-sm max-w-[18rem]"
+        title={appState.activeConnection ? `${getDriverName(appState.activeConnection.driver)} • ${appState.activeConnection.host || 'localhost'}` : 'Select connection'}
       >
-        <span class="w-2 h-2 rounded-full {appState.isProduction ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)] animate-pulse' : (appState.activeConnection ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]' : 'bg-slate-500')}"></span>
-        <span class="font-medium truncate {appState.isProduction ? 'text-rose-100 font-semibold' : 'text-slate-100'}">{appState.activeConnection?.name || 'No active connection'}</span>
+        <span class="w-2 h-2 rounded-full {appState.isConnecting ? 'bg-amber-400 animate-ping' : appState.isProduction ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)] animate-pulse' : (appState.activeConnection ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]' : 'bg-slate-500')}"></span>
+        <span class="font-medium truncate {appState.isProduction ? 'text-rose-100 font-semibold' : 'text-slate-100'}">
+          {appState.isConnecting ? 'Connecting...' : (appState.activeConnection?.name || 'No active connection')}
+        </span>
         {#if appState.activeConnection?.environment}
           <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold border {getEnvBadgeClass(appState.activeConnection.environment)}">
             {appState.activeConnection.environment}
@@ -261,6 +397,17 @@ import { copyText } from '../../utils/clipboard';
         {/if}
         <Icon name="chevron-down" class="w-3 h-3 text-slate-400" />
       </button>
+
+      {#if appState.activeConnection}
+        <button
+          id="btn-active-conn-badge"
+          onclick={() => appState.openEditConnectionModal(appState.activeConnection!)}
+          class="{navIconBtn} text-slate-400 hover:text-sky-300"
+          title="Edit active connection settings"
+        >
+          <Icon name="edit" class="w-3 h-3" />
+        </button>
+      {/if}
 
       {#if showConnDropdown}
         <button
@@ -271,11 +418,10 @@ import { copyText } from '../../utils/clipboard';
         ></button>
 
         <div
-          class="absolute left-0 mt-1 w-72 bg-[#0f172a] border border-slate-700/90 rounded-lg shadow-2xl z-50 py-1 divide-y divide-slate-800 animate-in fade-in zoom-in-95 duration-100"
+          class="absolute left-0 top-full mt-1 w-80 bg-[#0f172a] border border-slate-700/90 rounded-lg shadow-2xl z-50 py-1 divide-y divide-slate-800 animate-in fade-in zoom-in-95 duration-100"
           role="dialog"
           aria-label="Switch connection"
         >
-          <!-- Search filter for connections -->
           <div class="p-2 border-b border-slate-800">
             <div class="relative flex items-center">
               <input
@@ -307,7 +453,20 @@ import { copyText } from '../../utils/clipboard';
           </div>
 
           <div id="session-listbox" bind:this={connMenuList} role="listbox" class="max-h-72 overflow-y-auto py-1">
-            {#if groupedConnections.length === 0}
+            {#if appState.connections.length === 0}
+              <div class="p-4 text-center space-y-2">
+                <p class="text-xs text-slate-500">No saved connections yet.</p>
+                <button
+                  onclick={() => {
+                    closeConnDropdown();
+                    appState.openNewConnectionModal();
+                  }}
+                  class="px-3 py-1 rounded bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold"
+                >
+                  + Create one
+                </button>
+              </div>
+            {:else if groupedConnections.length === 0}
               <div class="p-3 text-center text-xs text-slate-500">No matching connections</div>
             {:else}
               {#each groupedConnections as group}
@@ -347,7 +506,7 @@ import { copyText } from '../../utils/clipboard';
                       </div>
                     </button>
 
-                    <div class="flex items-center space-x-1.5 shrink-0 ml-1">
+                    <div class="flex items-center space-x-1 shrink-0 ml-1">
                       <button
                         onclick={(e) => {
                           e.stopPropagation();
@@ -359,6 +518,13 @@ import { copyText } from '../../utils/clipboard';
                       >
                         <Icon name="edit" class="w-3 h-3" />
                       </button>
+                      <button
+                        onclick={(e) => handleDeleteConnection(e, conn)}
+                        class="p-1 opacity-0 group-hover:opacity-100 hover:bg-rose-950/70 text-slate-400 hover:text-rose-400 rounded"
+                        title="Delete Connection"
+                      >
+                        <Icon name="trash-2" class="w-3 h-3" />
+                      </button>
                     </div>
                   </div>
                 {/each}
@@ -366,7 +532,6 @@ import { copyText } from '../../utils/clipboard';
             {/if}
           </div>
 
-          <!-- Bottom Action: Add Connection -->
           <div class="p-1.5">
             <button
               onclick={() => {
@@ -383,10 +548,10 @@ import { copyText } from '../../utils/clipboard';
       {/if}
     </div>
 
-    <!-- Read-Only / Write-Allowed Lock Pill (grouped with connection & environment context) -->
+    <!-- Read-Only / Write-Allowed Lock Pill -->
     {#if appState.activeConnection}
       <button
-        onclick={handleToggleReadOnly}
+        onclick={() => appState.toggleReadOnlyMode()}
         class="h-7 px-2 rounded-md font-medium transition border flex items-center gap-1.5 shrink-0 {appState.isReadOnly
           ? 'bg-rose-950/60 border-rose-700 text-rose-300 hover:bg-rose-900/60'
           : 'bg-emerald-950/60 border-emerald-700 text-emerald-300 hover:bg-emerald-900/60'}"
@@ -398,12 +563,12 @@ import { copyText } from '../../utils/clipboard';
     {/if}
   </div>
 
-  <!-- Center: command palette trigger, styled as a search field -->
-  <div class="hidden md:flex flex-1 justify-center min-w-0 px-2">
+  <!-- Center: Command Palette + Quick Schema Search -->
+  <div class="hidden md:flex flex-1 justify-center items-center gap-1.5 min-w-0 px-2">
     <button
       onclick={() => (appState.isCommandPaletteOpen = true)}
       class="h-7 w-full max-w-md px-2.5 rounded-md bg-[#0b0f19] border border-slate-700/80 hover:border-slate-600 hover:bg-[#1e293b] text-slate-400 hover:text-slate-200 transition shadow-sm flex items-center justify-between gap-3"
-      title="Search tables, databases and actions"
+      title="Search tables, databases and actions (Ctrl+K)"
     >
       <span class="flex items-center gap-1.5 text-xs truncate">
         <Icon name="search" class="w-3.5 h-3.5 text-slate-500" />
@@ -411,19 +576,51 @@ import { copyText } from '../../utils/clipboard';
       </span>
       <kbd class="shrink-0 text-[9px] font-mono bg-slate-800/80 border border-slate-700 px-1 py-0.5 rounded text-slate-400">Ctrl K</kbd>
     </button>
+    <button
+      onclick={() => (appState.isSchemaSearchOpen = true)}
+      class="{navBtn} text-xs shrink-0"
+      title="Cross-Database Table & Column Search (Ctrl+P)"
+    >
+      <Icon name="columns" class="w-3.5 h-3.5 text-sky-400" />
+      <kbd class="text-[9px] font-mono text-slate-400">Ctrl P</kbd>
+    </button>
   </div>
 
-  <!-- Right Actions: tools menus, session mode, drawers, LAN PIN, refresh -->
+  <!-- Right Actions: tools menus, live DBA indicators, drawers, LAN PIN -->
   <div class="flex items-center gap-2 text-xs shrink-0">
-    <!-- Monitor / DB Tools / Settings menus (legacy layout) -->
     {#snippet toolMenu(key: 'monitor' | 'dbtools' | 'settings', label: string, icon: string, iconColor: string, items: ToolMenuItem[])}
       <div class="relative">
         <button
           onclick={() => (openToolsMenu = openToolsMenu === key ? null : key)}
-          class="{navBtn} font-medium {openToolsMenu === key ? 'bg-slate-700 text-white border-sky-600/60 ring-1 ring-sky-500/40' : ''}"
+          class="{navBtn} relative font-medium {openToolsMenu === key ? 'bg-slate-700 text-white border-sky-600/60 ring-1 ring-sky-500/40' : ''}"
         >
           <Icon name={icon} class="w-3.5 h-3.5 {iconColor}" />
           <span class="hidden lg:inline">{label}</span>
+          {#if key === 'monitor'}
+            {#if appState.dbaBlockersCount > 0}
+              <span id="monitor-alert-dot" class="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
+            {/if}
+            {#if appState.flightRecordingActive}
+              <span id="monitor-rec-dot" class="w-2 h-2 rounded-full bg-rose-400 animate-pulse" title="Flight Recorder Active"></span>
+            {/if}
+            {#if appState.dbaSlowQueriesCount > 0}
+              <span id="processlist-slow-badge" class="px-1 rounded text-[9px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                {appState.dbaSlowQueriesCount}
+              </span>
+            {/if}
+            {#if appState.dbaClusterLabel}
+              <span
+                id="cluster-status-badge"
+                class="hidden xl:inline px-1 rounded text-[9px] font-mono font-bold border {appState.dbaClusterStatus === 'critical'
+                  ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                  : appState.dbaClusterStatus === 'warn'
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                    : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'}"
+              >
+                {appState.dbaClusterLabel}
+              </span>
+            {/if}
+          {/if}
           <Icon name="chevron-down" class="hidden lg:inline w-3 h-3 text-slate-400 transition-transform {openToolsMenu === key ? 'rotate-180' : ''}" />
         </button>
 
@@ -435,7 +632,7 @@ import { copyText } from '../../utils/clipboard';
             onclick={() => (openToolsMenu = null)}
           ></button>
           <div
-            class="absolute right-0 mt-1.5 w-64 max-w-[calc(100vw-2rem)] bg-[#0b0f19] border border-slate-700 rounded-lg shadow-lg z-50 overflow-hidden py-1 text-xs"
+            class="absolute right-0 mt-1.5 w-72 max-w-[calc(100vw-2rem)] bg-[#0b0f19] border border-slate-700 rounded-lg shadow-lg z-50 overflow-hidden py-1 text-xs"
             role="menu"
             aria-label={label}
           >
@@ -449,9 +646,16 @@ import { copyText } from '../../utils/clipboard';
                 }}
                 class="w-full text-left px-3 py-1.5 hover:bg-slate-800/70 flex flex-col gap-0.5"
               >
-                <span class="flex items-center space-x-1.5 font-medium {item.iconColor}">
-                  <Icon name={item.icon} class="w-3.5 h-3.5" />
-                  <span>{item.label}</span>
+                <span class="flex items-center justify-between gap-2 w-full">
+                  <span class="flex items-center space-x-1.5 font-medium {item.iconColor}">
+                    <Icon name={item.icon} class="w-3.5 h-3.5" />
+                    <span>{item.label}</span>
+                  </span>
+                  {#if item.badge !== undefined}
+                    <span class="px-1.5 py-0.2 rounded text-[9px] font-bold border {item.badgeClass || 'bg-slate-800 text-slate-300 border-slate-700'}">
+                      {item.badge}
+                    </span>
+                  {/if}
                 </span>
                 <span class="text-[10px] text-slate-400 pl-5">{item.desc}</span>
               </button>
@@ -466,6 +670,18 @@ import { copyText } from '../../utils/clipboard';
       {@render toolMenu('dbtools', 'DB Tools', 'wrench', 'text-sky-400', dbToolItems)}
       {@render toolMenu('settings', 'Settings', 'settings', 'text-cyan-400', settingsItems)}
     </div>
+
+    {#if appState.flightRecordingActive}
+      <button
+        id="flight-recorder-timer-badge"
+        onclick={() => appState.openProcesslistTab('flight-recorder')}
+        class="h-7 px-2 rounded-md bg-rose-950/70 border border-rose-600/60 text-rose-300 text-[10px] font-mono font-bold flex items-center gap-1.5 animate-pulse"
+        title="Flight Recorder active — click to open timeline"
+      >
+        <span id="flight-recorder-rec-dot" class="w-2 h-2 rounded-full bg-rose-500"></span>
+        <span>REC {appState.flightRecordingRemainingSec > 0 ? `${appState.flightRecordingRemainingSec}s` : ''}</span>
+      </button>
+    {/if}
 
     <div class={navDivider}></div>
 
@@ -490,16 +706,16 @@ import { copyText } from '../../utils/clipboard';
       </button>
 
       <button
-        onclick={() => (appState.isAiDrawerOpen = !appState.isAiDrawerOpen)}
+        onclick={() => appState.toggleAiDrawer()}
         class="{navBtn} {appState.isAiDrawerOpen ? 'bg-sky-950/40 border-sky-500 text-sky-300' : ''}"
-        title="AI Copilot"
+        title="AI Copilot (Ctrl+L)"
       >
         <Icon name="bot" class="w-3.5 h-3.5 text-sky-400" />
         <span class="hidden xl:inline">AI Copilot</span>
       </button>
     </div>
 
-    <!-- LAN access PIN -->
+    <!-- LAN access PIN (shown only when locally permitted) -->
     {#if isLanAvailable}
       <div class={navDivider}></div>
       <div class="h-7 bg-slate-900 rounded-md border border-slate-700/80 font-mono inline-flex items-center overflow-hidden select-none shadow-sm">

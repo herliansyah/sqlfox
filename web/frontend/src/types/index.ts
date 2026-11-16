@@ -66,6 +66,7 @@ export interface TableMetadata {
   rows_count?: number;
   data_length?: number;
   comment?: string;
+  definition?: string;
   columns: ColumnDefinition[];
   primary_key?: string[];
   foreign_keys?: ForeignKeyInfo[];
@@ -91,6 +92,7 @@ export interface EventMetadata {
   name: string;
   status: string;
   interval?: string;
+  schedule?: string;
   starts_at?: string;
   ends_at?: string;
   definition?: string;
@@ -145,6 +147,22 @@ export interface InspectionResult {
   count_query?: string;
   estimated_rows?: number | null;
   statement_estimates?: StatementEstimate[];
+  table_locks?: Array<{
+    table?: string;
+    lock_type?: string;
+    holder_thread?: number;
+    state?: string;
+    info?: string;
+  }>;
+  relationships?: Array<{
+    constraint_name?: string;
+    table?: string;
+    column?: string;
+    referenced_table?: string;
+    referenced_column?: string;
+    on_delete?: string;
+    on_update?: string;
+  }>;
 }
 
 export interface FilterPill {
@@ -165,15 +183,27 @@ export interface QueryProfile {
 }
 
 export interface QueryExecutionResult {
+  sql?: string;
+  type?: 'query' | 'exec' | 'command' | 'batch';
   columns: (string | ColumnDefinition)[];
   rows: any[][];
   duration_ms: number;
+  execution_ms?: number;
   row_count: number;
   affected_rows?: number;
+  rows_affected?: number;
+  last_insert_id?: number;
   error?: string;
   statement?: string;
   message?: string;
+  backup_file?: string;
+  backup_warning?: string;
+  backup_data_included?: boolean;
+  tx_active?: boolean;
+  blocked?: boolean;
   is_destructive_blocked?: boolean;
+  capped_at?: number;
+  truncated?: boolean;
   inspection?: InspectionResult;
   results?: QueryExecutionResult[];
   profile?: QueryProfile;
@@ -219,25 +249,41 @@ export interface ProcessLockWait {
 export interface TablePartition {
   name: string;
   method?: string;
+  expression?: string;
+  description?: string;
+  table_rows?: number;
   rows?: number;
   data_length?: number;
   index_length?: number;
   comment?: string;
 }
 
+export interface ToastAction {
+  label: string;
+  variant?: 'primary' | 'secondary' | 'danger';
+  onClick: () => void | Promise<void>;
+}
+
 export interface Toast {
   id: string;
   type: 'info' | 'success' | 'warning' | 'error';
   message: string;
+  durationMs?: number;
+  actions?: ToastAction[];
 }
 
 export interface SessionAuditItem {
   id: string;
   timestamp: string;
+  executed_at?: string;
   sql: string;
   duration_ms: number;
+  execution_ms?: number;
   row_count?: number;
   affected_rows?: number;
+  rows_affected?: number;
+  source?: string;
+  status?: string;
   error?: string;
   database?: string;
 }
@@ -256,6 +302,9 @@ export interface DdlReviewState {
   isOpen: boolean;
   sql: string;
   title?: string;
+  confirmLabel?: string;
+  tableName?: string;
+  database?: string;
   onConfirm?: () => Promise<void> | void;
 }
 
@@ -268,16 +317,31 @@ export interface EditorTab {
   tableName?: string;
   tableMode?: TableMode;
   isProcesslist?: boolean;
+  isCluster?: boolean;
   isFlightRecorder?: boolean;
   isErdCanvas?: boolean;
   isVariables?: boolean;
+  isNote?: boolean;
+  noteMode?: 'edit' | 'preview';
   activeResult?: QueryExecutionResult | null;
   isExecuting?: boolean;
+  isExplaining?: boolean;
+  isStreaming?: boolean;
+  executionStartedAt?: number;
+  executionElapsedMs?: number;
+  statusText?: string;
+  detectedTableName?: string;
+  detectedTableDatabase?: string;
+  txActive?: boolean;
+  baseStreamSQL?: string;
   filterText?: string;
   filterMode?: 'pills' | 'raw';
   filterRaw?: string;
   appliedFilter?: string;
   filterPills?: FilterPill[];
+  queryFilters?: Record<string, string>;
+  queryPage?: number;
+  queryPageSize?: number;
   showFilterBar?: boolean;
   hiddenColumns?: string[];
   pageSize?: number;
@@ -298,4 +362,23 @@ export interface EditorTab {
   stagedDraftRows?: Record<string, any>[];
   selectedRowIndices?: number[];
   showQueryProfiler?: boolean;
+}
+
+export interface OperationalNote {
+  id: string;
+  title: string;
+  content: string;
+  side_note?: string;
+  status?: string;
+  is_resolved?: boolean;
+  is_pinned?: boolean;
+  category?: string;
+  table_name?: string;
+  query_snapshot?: string;
+  user_tags?: string[];
+  object_tags?: string[];
+  captured_at?: string;
+  reminder_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
 }

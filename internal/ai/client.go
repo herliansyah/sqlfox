@@ -135,6 +135,9 @@ func (c *AIClient) completeOpenAICompatible(ctx context.Context, req CompletionR
 		},
 		"stream": false,
 	}
+	if req.Temperature > 0 {
+		payload["temperature"] = req.Temperature
+	}
 
 	jsonBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -241,6 +244,9 @@ func (c *AIClient) completeAnthropic(ctx context.Context, req CompletionRequest)
 			{"role": "user", "content": req.UserPrompt},
 		},
 	}
+	if req.Temperature > 0 {
+		payload["temperature"] = req.Temperature
+	}
 
 	jsonBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -312,6 +318,11 @@ func (c *AIClient) completeGemini(ctx context.Context, req CompletionRequest) (*
 				},
 			},
 		},
+	}
+	if req.Temperature > 0 {
+		payload["generationConfig"] = map[string]any{
+			"temperature": req.Temperature,
+		}
 	}
 
 	jsonBytes, err := json.Marshal(payload)

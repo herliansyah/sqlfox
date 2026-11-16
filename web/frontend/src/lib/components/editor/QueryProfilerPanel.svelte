@@ -5,6 +5,7 @@
   let profile = $derived(appState.activeTab?.activeResult?.profile);
   let stages = $derived(profile?.stages || []);
   let durationMs = $derived(profile?.duration_ms || 0);
+  let isSqlite = $derived(appState.activeConnection?.driver?.toLowerCase() === 'sqlite');
 
   function closePanel() {
     if (appState.activeTab) {
@@ -37,8 +38,17 @@
     <!-- Table -->
     <div class="flex-1 overflow-y-auto">
       {#if stages.length === 0}
-        <div class="p-8 text-center text-slate-500 text-xs">
-          No detailed stage profile available for this query dialect. (MySQL/MariaDB supported).
+        <div class="p-8 text-center text-slate-400 text-xs space-y-1.5">
+          {#if isSqlite}
+            <p class="font-semibold text-amber-300">SQLite Bytecode Profiler Notice</p>
+            <p class="text-slate-500 max-w-md mx-auto">
+              SQLite does not support MySQL-style <code class="font-mono text-slate-300">SHOW PROFILE</code> stage timings. Use <strong class="text-sky-400">Explain (Ctrl+Shift+Enter)</strong> to inspect SQLite <code class="font-mono text-slate-300">EXPLAIN QUERY PLAN</code> scan opcodes.
+            </p>
+          {:else}
+            <p class="text-slate-500">
+              No detailed stage profile available for this query. Enable <strong class="text-amber-300">Profile: ON</strong> before executing queries on MySQL / MariaDB.
+            </p>
+          {/if}
         </div>
       {:else}
         <table class="w-full text-left text-xs">

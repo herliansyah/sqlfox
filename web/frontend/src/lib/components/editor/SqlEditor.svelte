@@ -127,11 +127,11 @@
       <!-- 1. Execution & Target Database Scope -->
       <button
         onclick={handleExecute}
-        disabled={currentTab?.isExecuting}
+        disabled={currentTab?.isExecuting || currentTab?.isStreaming || currentTab?.isExplaining}
         class="h-7 flex items-center space-x-1.5 px-3 rounded bg-sky-500 hover:bg-sky-400 disabled:opacity-50 text-slate-950 font-bold text-xs transition shadow-[0_0_12px_rgba(56,189,248,0.35)]"
         title="Execute selected SQL or statement at cursor (Ctrl+Enter)"
       >
-        {#if currentTab?.isExecuting}
+        {#if currentTab?.isExecuting || currentTab?.isStreaming}
           <Icon name="refresh-cw" class="w-3.5 h-3.5 animate-spin" />
           <span>Running...</span>
         {:else}
@@ -143,7 +143,7 @@
 
       <button
         onclick={handleExecuteAll}
-        disabled={currentTab?.isExecuting}
+        disabled={currentTab?.isExecuting || currentTab?.isStreaming || currentTab?.isExplaining}
         class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-50 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs flex items-center space-x-1.5 transition shadow-sm"
         title="Execute All Statements (Ctrl+Alt+Enter / F5)"
       >
@@ -151,14 +151,14 @@
         <span>Execute All</span>
       </button>
 
-      {#if currentTab?.isExecuting}
+      {#if currentTab?.isExecuting || currentTab?.isStreaming || currentTab?.isExplaining}
         <button
           onclick={() => appState.cancelCurrentTab()}
           class="h-7 px-2.5 rounded bg-rose-950/80 hover:bg-rose-900 border border-rose-800 text-rose-300 text-xs font-semibold flex items-center space-x-1 transition"
-          title="Cancel running query"
+          title="Cancel running query (Esc)"
         >
           <Icon name="x" class="w-3.5 h-3.5" />
-          <span>Cancel</span>
+          <span>Cancel (Esc)</span>
         </button>
       {/if}
 
@@ -181,12 +181,31 @@
       <!-- 2. Query Analysis -->
       <button
         onclick={handleExplain}
-        disabled={currentTab?.isExecuting}
-        class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs flex items-center space-x-1.5 transition shadow-sm"
+        disabled={currentTab?.isExecuting || currentTab?.isExplaining}
+        class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-50 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs flex items-center space-x-1.5 transition shadow-sm"
         title="Execution Plan & Index Advisor (Ctrl+Shift+Enter)"
       >
-        <Icon name="activity" class="w-3.5 h-3.5 text-sky-400" />
-        <span>Explain</span>
+        <Icon name={currentTab?.isExplaining ? 'refresh-cw' : 'activity'} class="w-3.5 h-3.5 text-sky-400 {currentTab?.isExplaining ? 'animate-spin' : ''}" />
+        <span>{currentTab?.isExplaining ? 'Explaining...' : 'Explain'}</span>
+      </button>
+
+      <button
+        onclick={() => appState.inspectCurrentTab(editor?.getTarget().text)}
+        disabled={currentTab?.isExecuting || currentTab?.isExplaining}
+        class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-50 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs flex items-center space-x-1.5 transition shadow-sm"
+        title="Run Safety Guard AST Inspection before execution"
+      >
+        <Icon name="shield-check" class="w-3.5 h-3.5 text-emerald-400" />
+        <span>Safety Check</span>
+      </button>
+
+      <button
+        onclick={() => (appState.enableQueryProfiling = !appState.enableQueryProfiling)}
+        class="h-7 px-2.5 rounded {appState.enableQueryProfiling ? 'bg-amber-950/70 text-amber-300 border-amber-600/70' : 'bg-[#1e293b] text-slate-300 hover:text-white border-slate-700/80 hover:border-slate-600'} border text-xs flex items-center space-x-1.5 transition shadow-sm"
+        title="Attach SHOW PROFILE stage telemetry to queries (MySQL/MariaDB)"
+      >
+        <Icon name="zap" class="w-3.5 h-3.5 {appState.enableQueryProfiling ? 'text-amber-400' : 'text-slate-400'}" />
+        <span>Profile: {appState.enableQueryProfiling ? 'ON' : 'OFF'}</span>
       </button>
 
       <button
@@ -194,7 +213,7 @@
           if (currentTab) currentTab.showQueryProfiler = !currentTab.showQueryProfiler;
         }}
         class="h-7 px-2.5 rounded {currentTab?.showQueryProfiler ? 'bg-sky-950 text-sky-300 border-sky-600' : 'bg-[#1e293b] text-slate-300 hover:text-white'} border border-slate-700/80 hover:border-slate-600 text-xs flex items-center space-x-1.5 transition shadow-sm"
-        title="Toggle Stage Profiler (SHOW PROFILE)"
+        title="Toggle Stage Profiler Drawer"
       >
         <Icon name="clock" class="w-3.5 h-3.5 text-sky-400" />
         <span>Profiler</span>
@@ -283,8 +302,13 @@
       </button>
     </div>
 
-    <!-- Right Side: Send to Global AI Sidebar -->
+    <!-- Right Side: Live Status & Send to Global AI Sidebar -->
     <div class="flex items-center space-x-2 shrink-0">
+      {#if currentTab?.statusText}
+        <span class="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-900 border border-slate-800 {currentTab.isExecuting || currentTab.isStreaming ? 'text-sky-300' : 'text-slate-400'}">
+          {currentTab.statusText}
+        </span>
+      {/if}
       <button
         onclick={handleSendToAi}
         class="h-7 px-2.5 rounded {appState.isAiDrawerOpen ? 'bg-purple-950/60 text-purple-300 border-purple-500/60' : 'bg-[#1e293b] text-slate-300 hover:text-white border-[#334155]'} border text-xs flex items-center space-x-1.5 transition shadow-sm"

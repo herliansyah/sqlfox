@@ -1,6 +1,6 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
-  import { api } from '../../api/client';
+  import { api, type OperationalNote } from '../../api/client';
   import Icon from '../common/Icon.svelte';
   import NoteMarkdownView from '../notes/NoteMarkdownView.svelte';
 
@@ -10,48 +10,85 @@
 
   let { tableName }: Props = $props();
 
-  interface NoteItem {
-    id: string;
-    title: string;
-    content: string;
-    category?: string;
-    table_name?: string;
-    query_snapshot?: string;
-    reminder_at?: string;
-    is_pinned?: boolean;
-    is_resolved?: boolean;
-    created_at?: string;
-    updated_at?: string;
+  let notes = $state<OperationalNote[]>([]);
+  let isLoading = $state(false);
+  let quickTitle = $state('');
+  let quickContent = $state('');
+  let isSavingQuick = $state(false);
+
+  function tableScopeTags(tbl: string): string[] {
+    const connId = appState.activeConnection?.id || '';
+    const db = appState.activeTab?.database || appState.currentDatabase || 'db';
+    const tags = [`db://table/${tbl}`];
+    if (connId) tags.unshift(`db://${connId}/${db}/${tbl}`);
+    return tags;
   }
 
-  let notes = $state<NoteItem[]>([]);
-  let isLoading = $state(false);
+  async function loadNotes() {
+    const targetTable = tableName;
+    if (!targetTable) return;
+    isLoading = true;
+    try {
+      const scopes = tableScopeTags(targetTable);
+      // Fetch notes scoped by strict object_tag uri matches + filter fallback to table_name/object_tags
+      const allNotes = await api.listNotes();
+      if (tableName !== targetTable) return;
+      const tLow = targetTable.toLowerCase();
+      notes = (Array.isArray(allNotes) ? allNotes : []).filter((n) => {
+        const oTags = (n.object_tags || []).map((t) => t.toLowerCase());
+        const exactScopeMatch = scopes.some((s) => oTags.includes(s.toLowerCase()));
+        const tableTagMatch = oTags.some((t) => t === `db://table/${tLow}` || t.endsWith(`/${tLow}`));
+        return exactScopeMatch || tableTagMatch || n.table_name?.toLowerCase() === tLow;
+      });
+    } catch {
+      if (tableName === targetTable) notes = [];
+    } finally {
+      if (tableName === targetTable) isLoading = false;
+    }
+  }
 
   $effect(() => {
-    if (tableName) {
+    const tbl = tableName;
+    const rev = appState.notesRevision;
+    if (tbl) {
+      void rev;
       loadNotes();
     }
   });
 
-  async function loadNotes() {
-    const targetTable = tableName;
-    isLoading = true;
-    try {
-      const res = await api.listNotes();
-      if (tableName !== targetTable) return;
-      const allNotes = Array.isArray(res) ? res : [];
-      notes = allNotes.filter(
-        (n: NoteItem) =>
-          n.table_name?.toLowerCase() === targetTable.toLowerCase() ||
-          n.content?.toLowerCase().includes(targetTable.toLowerCase())
-      );
-    } catch (err: any) {
-      if (tableName !== targetTable) return;
-      notes = [];
-    } finally {
-      if (tableName === targetTable) {
-        isLoading = false;
+  $effect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = () => {
+      if (quickTitle.trim() || quickContent.trim()) {
+        saveQuickTableNote();
       }
+    };
+    window.addEventListener('sqlfox:save-table-notes', handler);
+    return () => window.removeEventListener('sqlfox:save-table-notes', handler);
+  });
+
+  async function saveQuickTableNote() {
+    if (!quickTitle.trim() && !quickContent.trim()) return;
+    isSavingQuick = true;
+    try {
+      const scopes = tableScopeTags(tableName);
+      await api.createNote({
+        title: quickTitle.trim() || `Note: ${tableName}`,
+        content: quickContent.trim(),
+        category: 'General',
+        table_name: tableName,
+        object_tags: [scopes[0]!],
+        user_tags: ['#table-note'],
+      });
+      quickTitle = '';
+      quickContent = '';
+      appState.notesRevision++;
+      appState.checkDueNotesReminders();
+      appState.showToast(`Saved note for ${tableName}`, 'success');
+    } catch (err: any) {
+      appState.showToast(`Failed to save table note: ${err.message}`, 'error');
+    } finally {
+      isSavingQuick = false;
     }
   }
 
@@ -59,40 +96,49 @@
   let regularNotes = $derived(notes.filter((n) => !n.is_pinned));
 
   function createRunbook() {
+    const scopes = tableScopeTags(tableName);
     appState.editingNote = {
       title: `Runbook & Rules: ${tableName}`,
       content: `### Business Rules for \`${tableName}\`\n\n- Primary Key strategy:\n- Cascade deletion policies:\n- Common queries & indexes:\n`,
       category: 'Runbook',
       table_name: tableName,
+      object_tags: [scopes[0]!],
+      user_tags: ['#Runbook'],
       is_pinned: true,
     };
     appState.isNoteComposerModalOpen = true;
   }
 
   function createIncidentNote() {
+    const scopes = tableScopeTags(tableName);
     appState.editingNote = {
       title: `Incident: ${tableName}`,
       content: '',
       category: 'Incident',
       table_name: tableName,
+      object_tags: [scopes[0]!],
+      user_tags: ['#Incident'],
       is_pinned: false,
     };
     appState.isNoteComposerModalOpen = true;
   }
 
-  function editNote(n: NoteItem) {
+  function editNote(n: OperationalNote) {
     appState.editingNote = { ...n };
     appState.isNoteComposerModalOpen = true;
   }
 
-  async function toggleResolve(n: NoteItem) {
+  async function toggleResolve(n: OperationalNote) {
     try {
       if (!n.is_resolved) {
         await api.resolveNote(n.id);
         appState.showToast(`Note "${n.title}" resolved`, 'info');
       } else {
-        await api.updateNote(n.id, { is_resolved: false });
+        await api.updateNote(n.id, { ...n, status: 'inbox', is_resolved: false });
+        appState.showToast(`Note "${n.title}" reopened`, 'info');
       }
+      appState.notesRevision++;
+      appState.checkDueNotesReminders();
       await loadNotes();
     } catch (err: any) {
       appState.showToast(`Failed: ${err.message}`, 'error');
@@ -107,20 +153,20 @@
 
 <div class="h-full flex flex-col bg-[#090d16] overflow-y-auto p-5 select-none font-sans text-xs">
   <!-- Header Bar -->
-  <div class="flex items-center justify-between pb-4 mb-5 border-b border-[#1e293b] shrink-0">
+  <div class="flex items-center justify-between pb-4 mb-4 border-b border-[#1e293b] shrink-0">
     <div class="flex items-center space-x-2.5">
       <div class="p-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400">
         <Icon name="file-text" class="w-4 h-4" />
       </div>
       <div>
         <h3 class="font-bold text-slate-100 text-sm flex items-center space-x-2">
-          <span>Table Runbooks & Operational Notes</span>
+          <span>Table Runbooks &amp; Operational Notes</span>
           <span class="px-2 py-0.5 rounded-full bg-slate-900 border border-slate-800 text-[10px] text-slate-400 font-mono">
             {notes.length} note(s)
           </span>
         </h3>
         <p class="text-[11px] text-slate-400">
-          Persistent institutional knowledge, incident logs, and SQL snapshots for <code class="font-mono text-sky-400">{tableName}</code>
+          Persistent institutional knowledge, incident logs, and SQL snapshots scoped to <code class="font-mono text-sky-400">{tableName}</code>
         </p>
       </div>
     </div>
@@ -153,6 +199,33 @@
     </div>
   </div>
 
+  <!-- Inline Quick Table Note Editor (Ctrl+S supported) -->
+  <div data-table-notes-editor class="mb-5 p-3 rounded-xl bg-[#0b0f19] border border-[#1e293b] space-y-2 max-w-4xl mx-auto w-full shrink-0">
+    <div class="flex items-center justify-between gap-2">
+      <input
+        type="text"
+        bind:value={quickTitle}
+        placeholder="Quick note title for {tableName}..."
+        class="flex-1 bg-[#050811] border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+      />
+      <button
+        type="button"
+        onclick={saveQuickTableNote}
+        disabled={isSavingQuick || (!quickTitle.trim() && !quickContent.trim())}
+        class="px-3 py-1.5 rounded bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-white font-semibold text-[11px] transition flex items-center space-x-1"
+      >
+        <Icon name="check" class="w-3 h-3" />
+        <span>{isSavingQuick ? 'Saving...' : 'Save Note (Ctrl+S)'}</span>
+      </button>
+    </div>
+    <textarea
+      bind:value={quickContent}
+      rows="2"
+      placeholder="Jot down Markdown note or SQL snippet for {tableName}..."
+      class="w-full bg-[#050811] border border-slate-800 rounded px-2.5 py-1.5 text-xs font-mono text-slate-200 focus:outline-none focus:border-amber-500 resize-y"
+    ></textarea>
+  </div>
+
   {#if isLoading}
     <div class="p-16 text-center text-slate-500 flex flex-col items-center gap-2">
       <Icon name="refresh-cw" class="w-6 h-6 animate-spin text-amber-400" />
@@ -179,13 +252,13 @@
       </button>
     </div>
   {:else}
-    <div class="space-y-5 max-w-4xl mx-auto w-full">
+    <div class="space-y-5 max-w-4xl mx-auto w-full select-text">
       <!-- Pinned Runbooks Section -->
       {#if pinnedRunbooks.length > 0}
         <div class="space-y-3">
           <div class="text-[11px] font-bold text-amber-400 uppercase tracking-wider flex items-center space-x-1.5">
             <Icon name="pin" class="w-3.5 h-3.5" />
-            <span>Pinned Runbooks & Business Rules</span>
+            <span>Pinned Runbooks &amp; Business Rules</span>
           </div>
 
           <div class="grid gap-3">
@@ -199,6 +272,9 @@
                         {note.category || 'Runbook'}
                       </span>
                     </h4>
+                    {#if note.side_note}
+                      <p class="text-[11px] text-amber-300/80 italic">{note.side_note}</p>
+                    {/if}
                     <span class="text-[10px] text-slate-500 font-mono">
                       Updated {new Date(note.updated_at || note.created_at || '').toLocaleString()}
                     </span>
@@ -227,8 +303,8 @@
                   </div>
                 </div>
 
-                <div class="text-slate-300 text-xs leading-relaxed whitespace-pre-wrap font-sans bg-[#050811] p-3 rounded-lg border border-[#1e293b]">
-                  {note.content}
+                <div class="bg-[#050811] p-3 rounded-lg border border-[#1e293b]">
+                  <NoteMarkdownView content={note.content} collapsible={false} onOpenQuery={openQueryInEditor} />
                 </div>
 
                 {#if note.query_snapshot}
@@ -248,7 +324,7 @@
         <div class="space-y-3">
           <div class="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center space-x-1.5">
             <Icon name="file-text" class="w-3.5 h-3.5" />
-            <span>Incident Notes & Logs</span>
+            <span>Incident Notes &amp; Logs</span>
           </div>
 
           <div class="grid gap-2.5">
@@ -264,6 +340,9 @@
                         </span>
                       {/if}
                     </h4>
+                    {#if note.side_note}
+                      <p class="text-[10.5px] text-amber-300/80 italic">{note.side_note}</p>
+                    {/if}
                     <span class="text-[10px] text-slate-500 font-mono">
                       {new Date(note.created_at || '').toLocaleDateString()}
                     </span>
@@ -290,7 +369,7 @@
 
                 {#if note.content}
                   <div class="py-1">
-                    <NoteMarkdownView content={note.content} />
+                    <NoteMarkdownView content={note.content} onOpenQuery={openQueryInEditor} />
                   </div>
                 {/if}
               </div>

@@ -9,6 +9,21 @@ import { copyText } from '../../utils/clipboard';
   let copied = $state(false);
 
   let cell = $derived(appState.jsonCellModal);
+  let readOnlyMode = $derived(Boolean(cell.isReadOnly || appState.isReadOnly));
+
+  let byteSize = $derived(new Blob([rawValue || '']).size);
+  let lineCount = $derived(rawValue ? rawValue.split('\n').length : 0);
+  let structureSummary = $derived.by(() => {
+    if (!rawValue.trim()) return 'Empty';
+    try {
+      const parsed = JSON.parse(rawValue);
+      if (Array.isArray(parsed)) return `Array (${parsed.length} items)`;
+      if (parsed !== null && typeof parsed === 'object') return `Object (${Object.keys(parsed).length} keys)`;
+      return typeof parsed;
+    } catch {
+      return 'Invalid JSON';
+    }
+  });
 
   $effect(() => {
     if (cell.isOpen) {
@@ -61,11 +76,17 @@ import { copyText } from '../../utils/clipboard';
     appState.showToast('Copied JSON to clipboard', 'info');
   }
 
-  function handleSave() {
+  async function handleSave() {
+    if (readOnlyMode) {
+      appState.showToast('Read-only mode is active', 'warning');
+      return;
+    }
     if (isValidJson === false) {
-      if (!confirm('JSON syntax appears invalid. Do you want to save anyway?')) {
-        return;
-      }
+      const ok = await appState.showNativeConfirm(
+        'JSON syntax appears invalid. Do you want to stage and save anyway?',
+        'Invalid JSON Confirmation'
+      );
+      if (!ok) return;
     }
     appState.saveJsonCellValue(rawValue);
     appState.jsonCellModal.isOpen = false;
@@ -123,18 +144,23 @@ import { copyText } from '../../utils/clipboard';
         <div class="flex items-center space-x-1.5">
           <button
             onclick={formatJson}
-            class="h-6 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-200 border border-[#334155] flex items-center space-x-1 text-[11px] transition"
+            disabled={readOnlyMode}
+            class="h-6 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-40 text-slate-200 border border-[#334155] flex items-center space-x-1 text-[11px] transition"
             title="Prettify JSON with 2-space indentation"
           >
             <span>Format</span>
           </button>
           <button
             onclick={minifyJson}
-            class="h-6 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-200 border border-[#334155] flex items-center space-x-1 text-[11px] transition"
+            disabled={readOnlyMode}
+            class="h-6 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-40 text-slate-200 border border-[#334155] flex items-center space-x-1 text-[11px] transition"
             title="Minify JSON into single line"
           >
             <span>Minify</span>
           </button>
+          <span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-[10px] font-mono text-slate-400">
+            {structureSummary} • {byteSize.toLocaleString()} B • {lineCount} lines
+          </span>
         </div>
 
         <button
@@ -150,6 +176,7 @@ import { copyText } from '../../utils/clipboard';
       <div class="flex-1 overflow-hidden p-3 bg-[#090d16] flex flex-col relative">
         <textarea
           bind:value={rawValue}
+          readonly={readOnlyMode}
           oninput={(e) => validateJson((e.target as HTMLTextAreaElement).value)}
           placeholder="Paste or enter JSON payload..."
           spellcheck="false"
@@ -173,7 +200,7 @@ import { copyText } from '../../utils/clipboard';
           Cancel
         </button>
 
-        {#if !cell.isReadOnly}
+        {#if !readOnlyMode}
           <button
             type="button"
             onclick={handleSave}

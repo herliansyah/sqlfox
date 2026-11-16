@@ -1,15 +1,17 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
   import Icon from '../common/Icon.svelte';
   import type { QuerySnippet } from '../../../types';
-  import { parseSnippetVariables } from '../../utils/snippets';
+  import { parseSnippetVariables, substituteSnippetVariables } from '../../utils/snippets';
 
   type Snippet = QuerySnippet;
 
   let snippets = $derived(appState.snippets);
   let filterText = $state('');
   let isLoading = $state(false);
+  let firstParamInput = $state<HTMLInputElement | null>(null);
 
   // Editor mode: null = browse, 'new' = creating, or Snippet = editing
   let editingSnippet = $state<Partial<Snippet> | null>(null);
@@ -19,13 +21,25 @@
   let paramPrompt = $derived.by(() => {
     const pending = appState.pendingSnippet;
     if (!pending) return null;
+    const vars = parseSnippetVariables(pending.snippet.sql);
     return {
       snippet: pending.snippet,
-      params: parseSnippetVariables(pending.snippet.sql).map((variable) => ({
+      previewSql: substituteSnippetVariables(pending.snippet.sql, pending.values),
+      params: vars.map((variable) => ({
         name: variable.name,
+        defaultValue: variable.defaultValue,
         value: pending.values[variable.name] ?? variable.defaultValue,
       })),
     };
+  });
+
+  $effect(() => {
+    if (paramPrompt && appState.isSnippetsModalOpen) {
+      tick().then(() => {
+        firstParamInput?.focus();
+        firstParamInput?.select();
+      });
+    }
   });
 
   let wasOpen = false;
@@ -168,28 +182,55 @@
           <!-- Parameter Fill-in Form -->
           <div class="p-5 space-y-4 flex-1 overflow-y-auto">
             <div class="bg-sky-950/40 border border-sky-800/60 p-3 rounded-lg text-xs space-y-1">
-              <span class="font-bold text-sky-300 block">Configure Template Parameters</span>
+              <div class="flex items-center justify-between">
+                <span class="font-bold text-sky-300">Configure Template Parameters</span>
+                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-sky-900/60 text-sky-300 border border-sky-700/50">
+                  {paramPrompt.params.length} param{paramPrompt.params.length === 1 ? '' : 's'}
+                </span>
+              </div>
               <p class="text-slate-400 text-[11px]">
                 Fill in the values for the template placeholders in "{paramPrompt.snippet.title}":
               </p>
             </div>
 
             <div class="space-y-3">
-              {#each paramPrompt.params as param}
+              {#each paramPrompt.params as param, idx}
                 <div class="space-y-1">
-                  <label for="param-{param.name}" class="text-xs font-mono font-semibold text-sky-400">
-                    {`{{${param.name}}}`}
-                  </label>
-                  <input
-                    id="param-{param.name}"
-                    type="text"
-                    value={param.value}
-                    oninput={(event) => appState.setSnippetValue(param.name, (event.target as HTMLInputElement).value)}
-                    onkeydown={(event) => { if (event.key === 'Enter') { event.preventDefault(); submitParamPrompt(); } }}
-                    class="w-full bg-[#090d16] border border-[#334155] focus:border-sky-500 rounded px-3 py-1.5 text-xs text-white font-mono outline-none"
-                  />
+                  <div class="flex items-center justify-between">
+                    <label for="param-{param.name}" class="text-xs font-mono font-semibold text-sky-400">
+                      {`{{${param.name}}}`}
+                    </label>
+                    {#if param.defaultValue}
+                      <span class="text-[10px] font-mono text-slate-500">default: {param.defaultValue}</span>
+                    {/if}
+                  </div>
+                  {#if idx === 0}
+                    <input
+                      bind:this={firstParamInput}
+                      id="param-{param.name}"
+                      type="text"
+                      value={param.value}
+                      oninput={(event) => appState.setSnippetValue(param.name, (event.target as HTMLInputElement).value)}
+                      onkeydown={(event) => { if (event.key === 'Enter') { event.preventDefault(); submitParamPrompt(); } }}
+                      class="w-full bg-[#090d16] border border-[#334155] focus:border-sky-500 rounded px-3 py-1.5 text-xs text-white font-mono outline-none"
+                    />
+                  {:else}
+                    <input
+                      id="param-{param.name}"
+                      type="text"
+                      value={param.value}
+                      oninput={(event) => appState.setSnippetValue(param.name, (event.target as HTMLInputElement).value)}
+                      onkeydown={(event) => { if (event.key === 'Enter') { event.preventDefault(); submitParamPrompt(); } }}
+                      class="w-full bg-[#090d16] border border-[#334155] focus:border-sky-500 rounded px-3 py-1.5 text-xs text-white font-mono outline-none"
+                    />
+                  {/if}
                 </div>
               {/each}
+            </div>
+
+            <div class="space-y-1">
+              <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Live Substituted SQL Preview</span>
+              <pre class="p-2.5 rounded bg-[#050811] border border-slate-800 text-[11px] text-emerald-300 font-mono overflow-x-auto whitespace-pre-wrap max-h-36">{paramPrompt.previewSql}</pre>
             </div>
           </div>
 
@@ -276,24 +317,35 @@
           </div>
         {:else}
           <!-- Browse Snippets Mode -->
-          <div class="p-3 bg-[#090d16] border-b border-[#1e293b] flex items-center justify-between gap-3">
-            <div class="relative flex-1">
-              <Icon name="search" class="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2.5 pointer-events-none" />
-              <input
-                type="text"
-                bind:value={filterText}
-                placeholder="Search snippets by name, tag, or SQL..."
-                class="w-full bg-[#0b0f19] border border-[#334155] focus:border-sky-500 rounded pl-8 pr-4 py-1.5 text-xs text-slate-200 placeholder-slate-500 outline-none"
-              />
-            </div>
+          <div class="p-3 bg-[#090d16] border-b border-[#1e293b] space-y-1.5">
+            <div class="flex items-center justify-between gap-3">
+              <div class="relative flex-1">
+                <Icon name="search" class="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2.5 pointer-events-none" />
+                <input
+                  type="text"
+                  bind:value={filterText}
+                  onkeydown={(e) => {
+                    if (e.key === 'Escape' && filterText) {
+                      e.stopPropagation();
+                      filterText = '';
+                    }
+                  }}
+                  placeholder="Search snippets by name, tag, or SQL... (Esc to clear)"
+                  class="w-full bg-[#0b0f19] border border-[#334155] focus:border-sky-500 rounded pl-8 pr-4 py-1.5 text-xs text-slate-200 placeholder-slate-500 outline-none"
+                />
+              </div>
 
-            <button
-              onclick={startCreateSnippet}
-              class="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded text-xs font-semibold flex items-center space-x-1.5 transition shadow shrink-0"
-            >
-              <Icon name="plus" class="w-3.5 h-3.5" />
-              <span>New Snippet</span>
-            </button>
+              <button
+                onclick={startCreateSnippet}
+                class="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded text-xs font-semibold flex items-center space-x-1.5 transition shadow shrink-0"
+              >
+                <Icon name="plus" class="w-3.5 h-3.5" />
+                <span>New Snippet</span>
+              </button>
+            </div>
+            <p class="text-[10.5px] text-slate-500">
+              Tip: Type <code class="font-mono text-sky-400">snip:</code> directly inside any SQL editor to trigger inline snippet autocomplete.
+            </p>
           </div>
 
           <div class="flex-1 overflow-y-auto p-4 space-y-3">
@@ -303,12 +355,20 @@
               </div>
             {:else}
               {#each filteredSnippets as s (s.id)}
+                {@const varCount = parseSnippetVariables(s.sql).length}
                 <div class="bg-[#0f172a] border border-[#1e293b] hover:border-slate-600 rounded-xl p-3.5 space-y-2.5 transition group">
                   <div class="flex items-center justify-between">
                     <div>
-                      <h4 class="font-bold text-xs text-slate-100 group-hover:text-sky-300 transition-colors">
-                        {s.title}
-                      </h4>
+                      <div class="flex items-center space-x-2">
+                        <h4 class="font-bold text-xs text-slate-100 group-hover:text-sky-300 transition-colors">
+                          {s.title}
+                        </h4>
+                        {#if varCount > 0}
+                          <span class="px-1.5 py-0.2 rounded bg-sky-950/60 border border-sky-800/60 text-sky-300 font-mono text-[9.5px]">
+                            {varCount} param(s)
+                          </span>
+                        {/if}
+                      </div>
                       {#if s.description}
                         <p class="text-[11px] text-slate-400 mt-0.5">{s.description}</p>
                       {/if}

@@ -10,18 +10,28 @@
   let includeSchema = $state(true);
   let includeData = $state(true);
 
+  let isLoadingTables = $state(false);
+  let isExporting = $state(false);
+  let wasOpen = false;
+
   async function handleDbChange(db: string) {
     selectedDb = db;
     selectedTables = [];
-    if (db && db !== appState.currentDatabase) {
-      await appState.selectDatabase(db);
+    if (appState.activeSessionId && db && !appState.catalogs[db.toLowerCase()]) {
+      isLoadingTables = true;
+      try {
+        await appState.loadCatalog(appState.activeSessionId, db);
+      } finally {
+        isLoadingTables = false;
+      }
     }
   }
-  let isExporting = $state(false);
 
-  let wasOpen = false;
-
-  let allCatalogTables = $derived(appState.catalog?.tables ?? []);
+  let allCatalogTables = $derived(
+    (selectedDb && appState.catalogs[selectedDb.toLowerCase()]?.tables) ||
+    appState.catalog?.tables ||
+    []
+  );
   let visibleTables = $derived.by(() => {
     const q = tableFilter.trim().toLowerCase();
     if (!q) return allCatalogTables;
@@ -297,6 +307,20 @@
             </div>
           </label>
         </div>
+
+        {#if scopeMode === 'all' && includeData && allCatalogTables.length >= 25}
+          <div class="p-3 rounded-lg bg-amber-950/35 border border-amber-800/70 text-[11px] text-amber-200 flex items-start space-x-2">
+            <Icon name="alert-triangle" class="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <div>
+              <span class="font-bold block">Large Schema Notice ({allCatalogTables.length} tables)</span>
+              <span class="text-amber-300/90">
+                Full-database dumps with data on large schemas can generate large files or increase read load. Consider
+                <button type="button" onclick={() => (scopeMode = 'selected')} class="underline font-semibold text-amber-100 hover:text-white">selecting specific tables</button>
+                or using <strong>Smart Seed Export</strong> for relational subsets.
+              </span>
+            </div>
+          </div>
+        {/if}
       </div>
 
       <!-- Dialog Footer -->

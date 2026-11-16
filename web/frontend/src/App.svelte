@@ -49,8 +49,16 @@
   import DataSyncModal from './lib/components/modals/DataSyncModal.svelte';
   import AuditDrawer from './lib/components/activity/AuditDrawer.svelte';
   import FkPeekPopover from './lib/components/grid/FkPeekPopover.svelte';
+  import SchemaSearchModal from './lib/components/modals/SchemaSearchModal.svelte';
+  import DdlViewModal from './lib/components/modals/DdlViewModal.svelte';
+  import SafetyInspectionModal from './lib/components/modals/SafetyInspectionModal.svelte';
+  import LockInspectorModal from './lib/components/modals/LockInspectorModal.svelte';
+  import SmartSeedModal from './lib/components/modals/SmartSeedModal.svelte';
+  import NoteMarkdownView from './lib/components/notes/NoteMarkdownView.svelte';
+  import Icon from './lib/components/common/Icon.svelte';
+  import { copyText } from './lib/utils/clipboard';
   import { appState } from './lib/stores/appState.svelte';
-  import { onDestroy } from 'svelte';
+  import { onDestroy, tick } from 'svelte';
   import { formatSQL } from './lib/utils/sqlFormatter';
 
   let editorSplitPercent = $state(Math.max(15, Math.min(85, Number(localStorage.getItem('sqlfox_svelte_editor_split')) || 45)));
@@ -100,6 +108,12 @@
     const inTextControl = inCodeMirror || !!target?.closest('input, textarea, [contenteditable="true"]');
     if (e.defaultPrevented) return;
 
+    if (isCtrl && e.key.toLowerCase() === 's' && target?.closest('[data-table-notes-editor]')) {
+      e.preventDefault();
+      window.dispatchEvent(new CustomEvent('sqlfox:save-table-notes'));
+      return;
+    }
+
     // CodeMirror owns editor shortcuts while focused; never dispatch them twice globally.
     if (e.key === 'F5' && !inTextControl) {
       e.preventDefault();
@@ -115,7 +129,10 @@
     }
     if (isCtrl && e.shiftKey && e.key.toLowerCase() === 'f' && !inCodeMirror) {
       e.preventDefault();
-      if (appState.activeTab?.sql) appState.activeTab.sql = formatSQL(appState.activeTab.sql);
+      if (appState.activeTab?.sql) {
+        appState.activeTab.sql = formatSQL(appState.activeTab.sql);
+        appState.showToast('Formatted SQL worksheet', 'info');
+      }
       return;
     }
     if (isCtrl && e.shiftKey && e.key.toLowerCase() === 's') {
@@ -141,10 +158,52 @@
       return;
     }
 
+    // Ctrl + P: Cross-DB Schema Search
+    if (isCtrl && !e.shiftKey && e.key.toLowerCase() === 'p') {
+      e.preventDefault();
+      appState.isSchemaSearchOpen = !appState.isSchemaSearchOpen;
+      return;
+    }
+
+    // Ctrl + L: Toggle AI Copilot Drawer
+    if (isCtrl && !e.shiftKey && e.key.toLowerCase() === 'l') {
+      e.preventDefault();
+      appState.toggleAiDrawer();
+      return;
+    }
+
+    // Ctrl + `: Toggle Activity Console
+    if (isCtrl && (e.code === 'Backquote' || e.key === '`')) {
+      e.preventDefault();
+      appState.toggleActivityDrawer();
+      return;
+    }
+
+    // Ctrl + ,: Global Settings Modal
+    if (isCtrl && e.key === ',') {
+      e.preventDefault();
+      appState.isSettingsModalOpen = !appState.isSettingsModalOpen;
+      return;
+    }
+
+    // Ctrl + Shift + N: Open New Workspace Window
+    if (isCtrl && e.shiftKey && e.key.toLowerCase() === 'n') {
+      e.preventDefault();
+      window.open(window.location.href, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
+    // Ctrl + F in Table Viewer: Focus table filter bar
+    if (isCtrl && !e.shiftKey && e.key.toLowerCase() === 'f' && appState.activeTab?.isTableViewer && !inCodeMirror) {
+      e.preventDefault();
+      window.dispatchEvent(new CustomEvent('sqlfox:focus-table-filter'));
+      return;
+    }
+
     // Ctrl + B: Toggle Sidebar
     if (isCtrl && e.key.toLowerCase() === 'b') {
       e.preventDefault();
-      appState.sidebarCollapsed = !appState.sidebarCollapsed;
+      appState.toggleSidebar();
       return;
     }
 
@@ -162,19 +221,94 @@
       return;
     }
 
-    // ?: Shortcuts Modal (when not in an input/textarea)
-    if (
-      e.key === '?' &&
-      !inTextControl
-    ) {
+    // /: Focus Sidebar Schema Filter
+    if (e.key === '/' && !isCtrl && !e.altKey && !inTextControl) {
+      e.preventDefault();
+      if (appState.sidebarCollapsed) appState.toggleSidebar(false);
+      tick().then(() => document.getElementById('schema-search-input')?.focus());
+      return;
+    }
+
+    // F1 or ?: Shortcuts Modal
+    if (e.key === 'F1' || (e.key === '?' && !inTextControl)) {
       e.preventDefault();
       appState.isShortcutsModalOpen = !appState.isShortcutsModalOpen;
       return;
     }
 
-    // Escape: Close all open modals
+    // Escape: Resolve active safety/native dialog or close modals / cancel query
     if (e.key === 'Escape') {
+      if (appState.nativeDialog.isOpen) {
+        if (appState.nativeDialog.resolve) {
+          appState.nativeDialog.resolve(appState.nativeDialog.type === 'prompt' ? null : false);
+        }
+        appState.nativeDialog.isOpen = false;
+        return;
+      }
+      if (appState.safetyChallenge.isOpen) {
+        appState.cancelSafetyChallenge();
+        return;
+      }
+
+      const anyOverlayOpen =
+        appState.isCommandPaletteOpen ||
+        appState.isSchemaSearchOpen ||
+        appState.isSmartSeedModalOpen ||
+        appState.isLockInspectorOpen ||
+        appState.ddlViewModal.isOpen ||
+        appState.safetyInspectionModal.isOpen ||
+        appState.isConnectionModalOpen ||
+        appState.isRecordInspectorOpen ||
+        appState.isInsertRowModalOpen ||
+        appState.isShortcutsModalOpen ||
+        appState.isCreateDbModalOpen ||
+        appState.isTableCreatorOpen ||
+        appState.isRenameTableModalOpen ||
+        appState.isDuplicateTableModalOpen ||
+        appState.isViewDesignerOpen ||
+        appState.isTriggerDesignerOpen ||
+        appState.isRoutineDesignerOpen ||
+        appState.isEventDesignerOpen ||
+        appState.isDumpModalOpen ||
+        appState.isStructureSyncModalOpen ||
+        appState.isRunSqlModalOpen ||
+        appState.isSnippetsModalOpen ||
+        appState.isCsvImportModalOpen ||
+        appState.isPrivilegeMatrixOpen ||
+        appState.isDbDiagnosticsOpen ||
+        appState.isAiDrawerOpen ||
+        appState.isAiSettingsModalOpen ||
+        appState.isNotesDrawerOpen ||
+        appState.isNoteComposerModalOpen ||
+        appState.isActivityDrawerOpen ||
+        appState.isUpdateModalOpen ||
+        appState.isMockDataModalOpen ||
+        appState.isSettingsModalOpen ||
+        appState.jsonCellModal.isOpen ||
+        appState.isDataTransferOpen ||
+        appState.isDataSyncOpen ||
+        appState.isRefreshAllOpen ||
+        appState.isImpactPreviewOpen ||
+        appState.isAuditDrawerOpen ||
+        appState.ddlReview.isOpen ||
+        appState.fkPeekState.isOpen;
+
+      if (!anyOverlayOpen && appState.activeTab?.showQueryProfiler) {
+        appState.activeTab.showQueryProfiler = false;
+        return;
+      }
+
+      if (!anyOverlayOpen && (appState.activeTab?.isExecuting || appState.activeTab?.isExplaining || appState.activeTab?.isStreaming)) {
+        appState.cancelCurrentTab();
+        return;
+      }
+
       if (appState.isCommandPaletteOpen) appState.isCommandPaletteOpen = false;
+      if (appState.isSchemaSearchOpen) appState.isSchemaSearchOpen = false;
+      if (appState.isSmartSeedModalOpen) appState.isSmartSeedModalOpen = false;
+      if (appState.isLockInspectorOpen) appState.isLockInspectorOpen = false;
+      if (appState.ddlViewModal.isOpen) appState.ddlViewModal.isOpen = false;
+      if (appState.safetyInspectionModal.isOpen) appState.safetyInspectionModal.isOpen = false;
       if (appState.isConnectionModalOpen) appState.isConnectionModalOpen = false;
       if (appState.isRecordInspectorOpen) appState.isRecordInspectorOpen = false;
       if (appState.isInsertRowModalOpen) appState.isInsertRowModalOpen = false;
@@ -197,13 +331,13 @@
       if (appState.isCsvImportModalOpen) appState.isCsvImportModalOpen = false;
       if (appState.isPrivilegeMatrixOpen) appState.isPrivilegeMatrixOpen = false;
       if (appState.isDbDiagnosticsOpen) appState.isDbDiagnosticsOpen = false;
-      if (appState.isAiDrawerOpen) appState.isAiDrawerOpen = false;
+      if (appState.isAiDrawerOpen) appState.toggleAiDrawer(false);
       if (appState.isAiSettingsModalOpen) appState.isAiSettingsModalOpen = false;
       if (appState.isNotesDrawerOpen) appState.isNotesDrawerOpen = false;
       if (appState.isNoteComposerModalOpen) appState.isNoteComposerModalOpen = false;
       if (appState.isActivityDrawerOpen) appState.isActivityDrawerOpen = false;
       if (appState.isUpdateModalOpen) appState.isUpdateModalOpen = false;
-      if (appState.isMockDataModalOpen) appState.isMockDataModalOpen = false;
+      if (appState.isMockDataModalOpen) appState.closeMockDataModal();
       if (appState.isSettingsModalOpen) appState.isSettingsModalOpen = false;
       if (appState.jsonCellModal.isOpen) appState.jsonCellModal.isOpen = false;
       if (appState.isDataTransferOpen) appState.isDataTransferOpen = false;
@@ -213,10 +347,6 @@
       if (appState.isAuditDrawerOpen) appState.isAuditDrawerOpen = false;
       if (appState.ddlReview.isOpen) appState.ddlReview.isOpen = false;
       if (appState.fkPeekState.isOpen) appState.fkPeekState.isOpen = false;
-      if (appState.nativeDialog.isOpen) {
-        if (appState.nativeDialog.resolve) appState.nativeDialog.resolve(false);
-        appState.nativeDialog.isOpen = false;
-      }
     }
   }
 </script>
@@ -239,7 +369,7 @@
 
       <!-- Active Tab Content Area -->
       <div class="flex-1 flex flex-col overflow-hidden relative">
-        {#if appState.activeTab?.isProcesslist}
+        {#if appState.activeTab?.isProcesslist || appState.activeTab?.isCluster || appState.activeTab?.isVariables || appState.activeTab?.isFlightRecorder}
           <!-- Processlist / DBA Telemetry Tab -->
           <div class="flex-1 overflow-hidden">
             <ProcesslistView />
@@ -248,6 +378,91 @@
           <!-- ERD Canvas Visual Schema Designer Tab -->
           <div class="flex-1 overflow-hidden">
             <ErdCanvas />
+          </div>
+        {:else if appState.activeTab?.isNote}
+          <!-- Dedicated Markdown Notes Tab -->
+          {@const noteTab = appState.activeTab}
+          {@const mode = noteTab.noteMode || 'edit'}
+          <div class="flex-1 flex flex-col overflow-hidden bg-[#090d16]">
+            <div class="h-10 px-4 border-b border-slate-800 bg-[#0f172a] flex items-center justify-between shrink-0 text-xs">
+              <div class="flex items-center space-x-2">
+                <Icon name="file-text" class="w-4 h-4 text-amber-400" />
+                <span class="font-bold text-slate-200 font-mono">{noteTab.title}</span>
+                <div class="inline-flex rounded border border-slate-700 bg-[#090d16] p-0.5 ml-2">
+                  <button
+                    type="button"
+                    onclick={() => (noteTab.noteMode = 'edit')}
+                    class="px-2 py-0.5 rounded text-[11px] font-semibold transition {mode === 'edit' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-slate-200'}"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onclick={() => (noteTab.noteMode = 'preview')}
+                    class="px-2 py-0.5 rounded text-[11px] font-semibold transition {mode === 'preview' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-slate-200'}"
+                  >
+                    Preview
+                  </button>
+                </div>
+              </div>
+              <div class="flex items-center space-x-1.5">
+                <button
+                  type="button"
+                  onclick={() => {
+                    copyText(noteTab.sql || '');
+                    appState.showToast('Copied Markdown note to clipboard', 'info');
+                  }}
+                  class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center space-x-1 transition"
+                >
+                  <Icon name="copy" class="w-3 h-3" />
+                  <span>Copy MD</span>
+                </button>
+                <button
+                  type="button"
+                  onclick={() => {
+                    const blob = new Blob([noteTab.sql || ''], { type: 'text/markdown;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = noteTab.title.endsWith('.md') ? noteTab.title : `${noteTab.title}.md`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                  class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center space-x-1 transition"
+                >
+                  <Icon name="download" class="w-3 h-3" />
+                  <span>Export .md</span>
+                </button>
+                <button
+                  type="button"
+                  onclick={() => appState.saveQueryToNote()}
+                  class="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-semibold flex items-center space-x-1 transition"
+                >
+                  <Icon name="bookmark" class="w-3 h-3" />
+                  <span>Save to Notes</span>
+                </button>
+              </div>
+            </div>
+            <div class="flex-1 overflow-y-auto p-5 select-text">
+              {#if mode === 'preview'}
+                <div class="max-w-3xl mx-auto bg-[#0b0f19] border border-slate-800 rounded-xl p-5">
+                  <NoteMarkdownView
+                    content={noteTab.sql || '_Empty Markdown note — switch to Edit to start writing._'}
+                    onOpenQuery={(sql) => appState.addTab('Query.sql', sql)}
+                  />
+                </div>
+              {:else}
+                <textarea
+                  value={noteTab.sql}
+                  oninput={(e) => {
+                    noteTab.sql = (e.currentTarget as HTMLTextAreaElement).value;
+                    appState.saveTabsState();
+                  }}
+                  placeholder="# Operational Note&#10;&#10;Write Markdown runbooks, SQL snippets, or incident timelines..."
+                  class="w-full h-full min-h-[360px] bg-[#0b0f19] border border-slate-800 focus:border-amber-500/60 rounded-xl p-4 font-mono text-xs text-slate-200 leading-relaxed outline-none resize-none"
+                ></textarea>
+              {/if}
+            </div>
           </div>
         {:else if appState.activeTab?.isTableViewer}
           <!-- Dedicated Table Viewer Tab (Data, Structure, Indexes, FK, DDL, Diagnostics) -->
@@ -331,14 +546,33 @@
   <DataSyncModal />
   <AuditDrawer />
   <FkPeekPopover />
+  <SchemaSearchModal />
+  <DdlViewModal />
+  <SafetyInspectionModal />
+  <LockInspectorModal />
+  <SmartSeedModal />
 
-  {#if appState.isAiDrawerOpen}
+  <div class:hidden={!appState.isAiDrawerOpen}>
     <AiDrawer />
-  {/if}
+  </div>
   {#if appState.isNotesDrawerOpen}
     <NotesDrawer />
   {/if}
   <ActivityConsoleDrawer />
+
+  {#if appState.isDaemonStopped}
+    <div class="fixed inset-0 z-[200] bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-6 text-center select-none">
+      <div class="max-w-md bg-[#0f172a] border border-slate-700 rounded-2xl p-6 shadow-2xl space-y-3">
+        <div class="w-12 h-12 rounded-full bg-rose-950 border border-rose-800 text-rose-400 flex items-center justify-center mx-auto">
+          <Icon name="square" class="w-5 h-5" />
+        </div>
+        <h2 class="text-base font-bold text-slate-100">SqlFox Daemon Stopped</h2>
+        <p class="text-xs text-slate-400 leading-relaxed">
+          The local SqlFox server process has shut down gracefully. It is safe to close this browser tab or restart the binary to reconnect.
+        </p>
+      </div>
+    </div>
+  {/if}
 
   <ToastContainer />
 </div>

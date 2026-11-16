@@ -1,48 +1,86 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
-  import { quoteSqlIdentifier } from '../../utils/sqlStatements';
   import Icon from '../common/Icon.svelte';
 
   let targetTable = $state('');
-  let delimiter = $state(',');
+  let delimiter = $state('auto');
   let hasHeader = $state(true);
   let emptyAsNull = $state(true);
-  let skipErrors = $state(true);
+  let skipErrors = $state(false);
 
   let selectedFile: File | null = $state(null);
   let csvHeaders = $state<string[]>([]);
   let csvPreviewRows = $state<string[][]>([]);
+  let detectedDelim = $state(',');
   let columnMappings = $state<Record<string, string>>({}); // csvCol -> tableCol
 
   let isImporting = $state(false);
-  let importProgress = $state(0);
   let importStatusMsg = $state('');
+  let importErrors = $state<string[]>([]);
 
+  let isPostgres = $derived(
+    appState.activeConnection?.driver === 'postgres' ||
+      appState.activeConnection?.driver === 'postgresql'
+  );
+  let isSQLite = $derived(appState.activeConnection?.driver === 'sqlite');
+
+  let wasOpen = false;
   $effect(() => {
     if (appState.isCsvImportModalOpen) {
-      targetTable = appState.activeTab?.tableName || appState.filteredTables[0]?.name || '';
-      delimiter = ',';
-      hasHeader = true;
-      emptyAsNull = true;
-      skipErrors = true;
-      selectedFile = null;
-      csvHeaders = [];
-      csvPreviewRows = [];
-      columnMappings = {};
-      isImporting = false;
-      importProgress = 0;
-      importStatusMsg = '';
+      if (!wasOpen) {
+        targetTable = appState.activeTab?.tableName || appState.filteredTables[0]?.name || '';
+        delimiter = 'auto';
+        hasHeader = true;
+        emptyAsNull = true;
+        skipErrors = false;
+        selectedFile = null;
+        csvHeaders = [];
+        csvPreviewRows = [];
+        detectedDelim = ',';
+        columnMappings = {};
+        isImporting = false;
+        importStatusMsg = '';
+        importErrors = [];
+        wasOpen = true;
+      }
+    } else {
+      wasOpen = false;
     }
   });
 
+  let activeCatalog = $derived(
+    (appState.activeTab?.database && appState.catalogs[appState.activeTab.database.toLowerCase()]) ||
+      (appState.currentDatabase && appState.catalogs[appState.currentDatabase.toLowerCase()]) ||
+      appState.catalog
+  );
+
   let targetTableColumns = $derived.by(() => {
-    if (!targetTable) return [];
-    const cat = (appState.activeTab?.database && appState.catalogs[appState.activeTab.database.toLowerCase()]) || appState.catalog;
-    if (!cat?.tables) return [];
-    const tbl = cat.tables.find((t) => t.name.toLowerCase() === targetTable.toLowerCase());
-    return (tbl?.columns || []).map((c) => c.name);
+    if (!targetTable || !activeCatalog?.tables) return [];
+    const tbl = activeCatalog.tables.find((t) => t.name.toLowerCase() === targetTable.toLowerCase());
+    return tbl?.columns || [];
   });
+
+  function detectDelimiter(sample: string): string {
+    const firstLines = sample.split(/\r?\n/).filter((l) => l.trim().length > 0).slice(0, 5);
+    if (firstLines.length === 0) return ',';
+    const candidates = [',', ';', '\t', '|'];
+    let best = ',';
+    let bestScore = -1;
+    for (const c of candidates) {
+      const counts = firstLines.map((l) => l.split(c).length);
+      const minC = Math.min(...counts);
+      const maxC = Math.max(...counts);
+      if (minC > 1) {
+        const consistency = minC === maxC ? minC * 10 : minC;
+        if (consistency > bestScore) {
+          bestScore = consistency;
+          best = c;
+        }
+      }
+    }
+    return best;
+  }
 
   function parseCsvRows(text: string, delim: string): string[][] {
     const rows: string[][] = [];
@@ -93,15 +131,12 @@
     return rows;
   }
 
-  function parseCsvLine(line: string, delim: string): string[] {
-    const rows = parseCsvRows(line, delim);
-    return rows[0] || [];
-  }
-
   async function handleFileSelect(e: Event) {
     const input = e.target as HTMLInputElement;
     if (input.files && input.files[0]) {
       selectedFile = input.files[0];
+      importStatusMsg = '';
+      importErrors = [];
       await parseFilePreview();
     }
   }
@@ -109,11 +144,14 @@
   async function parseFilePreview() {
     if (!selectedFile) return;
     try {
-      const text = await selectedFile.text();
-      const allRows = parseCsvRows(text, delimiter);
+      // Only slice the first 64KB for preview so large CSV files do not stall the browser UI
+      const sampleText = await selectedFile.slice(0, 65536).text();
+      const effectiveDelim = delimiter === 'auto' ? detectDelimiter(sampleText) : delimiter;
+      detectedDelim = effectiveDelim;
+      const allRows = parseCsvRows(sampleText, effectiveDelim);
       if (allRows.length === 0) return;
 
-      const firstRow = allRows[0];
+      const firstRow = allRows[0]!;
       if (hasHeader) {
         csvHeaders = firstRow;
         csvPreviewRows = allRows.slice(1, 6);
@@ -127,103 +165,65 @@
       csvHeaders.forEach((h) => {
         const cleanH = h.toLowerCase().replace(/[^a-z0-9_]/g, '');
         const matched = targetTableColumns.find(
-          (c) => c.toLowerCase().replace(/[^a-z0-9_]/g, '') === cleanH
+          (c) => c.name.toLowerCase().replace(/[^a-z0-9_]/g, '') === cleanH
         );
-        mapping[h] = matched || '';
+        mapping[h] = matched ? matched.name : '';
       });
       columnMappings = mapping;
     } catch (err: any) {
-      appState.showToast(`Failed to parse CSV: ${err.message}`, 'error');
+      appState.showToast(`Failed to preview CSV: ${err.message}`, 'error');
     }
   }
 
   async function handleImport() {
     if (!selectedFile || !targetTable || !appState.activeSessionId) return;
 
-    // Check which columns are mapped
     const activePairs = Object.entries(columnMappings).filter(([_, tblCol]) => Boolean(tblCol));
     if (activePairs.length === 0) {
       appState.showToast('Please map at least one CSV column to a table column', 'error');
       return;
     }
 
+    const mappingObj: Record<string, string> = {};
+    for (const [csvCol, tblCol] of activePairs) {
+      mappingObj[csvCol] = tblCol;
+    }
+
     isImporting = true;
-    importProgress = 0;
-    importStatusMsg = 'Reading full CSV file...';
+    importErrors = [];
+    importStatusMsg = `Streaming "${selectedFile.name}" to server importer...`;
 
     try {
-      const text = await selectedFile.text();
-      const allRows = parseCsvRows(text, delimiter);
-      const dataRows = hasHeader ? allRows.slice(1) : allRows;
+      const targetDb = appState.activeTab?.database || appState.currentDatabase || undefined;
+      const res = await api.importCsvFormData(appState.activeSessionId, targetTable, selectedFile, {
+        database: targetDb,
+        delimiter: delimiter === 'auto' ? detectedDelim : delimiter,
+        emptyAsNull,
+        skipErrors,
+        mapping: mappingObj,
+      });
 
-      if (dataRows.length === 0) {
-        appState.showToast('CSV file contains no records to import', 'warning');
-        isImporting = false;
-        return;
-      }
+      const inserted = res.inserted ?? 0;
+      const failed = res.failed ?? 0;
+      importErrors = Array.isArray(res.errors) ? res.errors : [];
+      importStatusMsg = `Imported ${inserted.toLocaleString()} rows${failed > 0 ? ` (${failed} failed/skipped)` : ''}.`;
 
-      const totalRows = dataRows.length;
-      const driver = appState.activeConnection?.driver;
-      const isSQLite = driver === 'sqlite';
-      const isPostgres = driver === 'postgres' || driver === 'postgresql';
-      let insertKeyword = 'INSERT';
-      if (skipErrors) {
-        if (isSQLite) {
-          insertKeyword = 'INSERT OR IGNORE';
-        } else if (isPostgres) {
-          insertKeyword = 'INSERT';
-        } else {
-          insertKeyword = 'INSERT IGNORE';
-        }
-      }
-      const conflictSuffix = skipErrors && isPostgres ? ' ON CONFLICT DO NOTHING' : '';
-
-      const targetColsSql = activePairs.map(([_, tblCol]) => quoteSqlIdentifier(tblCol, driver)).join(', ');
-      const quotedTargetTable = quoteSqlIdentifier(targetTable, driver);
-
-      const batchSize = 100;
-      let insertedCount = 0;
-
-      for (let i = 0; i < dataRows.length; i += batchSize) {
-        if (!appState.isCsvImportModalOpen) {
-          appState.showToast(`Import cancelled after ${insertedCount} rows`, 'warning');
-          return;
-        }
-        const chunk = dataRows.slice(i, i + batchSize);
-        const valuesRows: string[] = [];
-
-        for (const cells of chunk) {
-          const valTokens: string[] = [];
-
-          for (const [csvCol, _] of activePairs) {
-            const colIdx = csvHeaders.indexOf(csvCol);
-            const val = colIdx >= 0 && colIdx < cells.length ? cells[colIdx] : '';
-
-            if (emptyAsNull && (val === '' || val.toUpperCase() === 'NULL')) {
-              valTokens.push('NULL');
-            } else {
-              valTokens.push(`'${val.replace(/'/g, "''")}'`);
-            }
-          }
-          valuesRows.push(`(${valTokens.join(', ')})`);
-        }
-
-        const targetDb = appState.activeTab?.database || appState.currentDatabase || undefined;
-        const query = `${insertKeyword} INTO ${quotedTargetTable} (${targetColsSql}) VALUES\n${valuesRows.join(',\n')}${conflictSuffix};`;
-        await api.executeQuery(appState.activeSessionId, query, false, targetDb);
-
-        insertedCount += chunk.length;
-        importProgress = Math.min(100, Math.round((insertedCount / totalRows) * 100));
-        importStatusMsg = `Imported ${insertedCount} of ${totalRows} rows (${importProgress}%)...`;
-      }
-
-      appState.showToast(`Imported ${totalRows} rows into ${targetTable}!`, 'success');
-      appState.isCsvImportModalOpen = false;
+      appState.showToast(
+        `CSV import complete: ${inserted.toLocaleString()} row(s) inserted into "${targetTable}"`,
+        failed > 0 ? 'warning' : 'success'
+      );
       await appState.refreshCatalog();
-      if (appState.activeTab?.isTableViewer && appState.activeTab.tableName?.toLowerCase() === targetTable.toLowerCase()) {
+      if (
+        appState.activeTab?.isTableViewer &&
+        appState.activeTab.tableName?.toLowerCase() === targetTable.toLowerCase()
+      ) {
         await appState.loadTableData(appState.activeTab);
       }
+      if (failed === 0) {
+        appState.isCsvImportModalOpen = false;
+      }
     } catch (err: any) {
+      importStatusMsg = `Import failed: ${err.message}`;
       appState.showToast(`Import failed: ${err.message}`, 'error');
     } finally {
       isImporting = false;
@@ -231,6 +231,7 @@
   }
 
   function handleClose() {
+    if (isImporting) return;
     appState.isCsvImportModalOpen = false;
   }
 </script>
@@ -251,14 +252,15 @@
           </div>
           <div>
             <h3 id="csv-modal-title" class="font-bold text-sm text-slate-100">
-              CSV Import & Visual Column Mapper
+              CSV Import &amp; Visual Column Mapper
             </h3>
             <p class="text-[11px] text-slate-400">
-              Upload delimited files (CSV, TSV) and map fields into database tables
+              Stream delimited files (CSV, TSV) via server importer into database tables
             </p>
           </div>
         </div>
         <button
+          type="button"
           onclick={handleClose}
           disabled={isImporting}
           class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition disabled:opacity-40"
@@ -294,6 +296,7 @@
               onchange={parseFilePreview}
               class="w-full bg-[#090d16] border border-[#334155] focus:border-emerald-500 rounded px-2.5 py-1.5 text-xs text-white font-mono outline-none"
             >
+              <option value="auto">Auto-Detect ({detectedDelim === '\t' ? 'Tab' : detectedDelim})</option>
               <option value=",">Comma (,)</option>
               <option value=";">Semicolon (;)</option>
               <option value={'\t'}>Tab (\t)</option>
@@ -340,7 +343,9 @@
               bind:checked={skipErrors}
               class="rounded bg-slate-900 border-slate-700 text-emerald-500 focus:ring-0"
             />
-            <span>Skip duplicate key errors (INSERT IGNORE)</span>
+            <span>
+              Skip duplicate/constraint errors ({isPostgres ? 'ON CONFLICT DO NOTHING' : isSQLite ? 'INSERT OR IGNORE' : 'INSERT IGNORE'})
+            </span>
           </label>
         </div>
 
@@ -354,18 +359,21 @@
               </span>
             </div>
 
-            <div class="max-h-48 overflow-y-auto border border-[#1e293b] rounded-lg">
+            <div class="max-h-52 overflow-y-auto border border-[#1e293b] rounded-lg">
               <table class="w-full text-left border-collapse text-xs">
                 <thead class="bg-[#0f172a] border-b border-[#334155] text-slate-400 text-[10.5px] uppercase tracking-wider sticky top-0">
                   <tr>
                     <th class="py-1.5 px-3">CSV Column Header</th>
+                    <th class="py-1.5 px-3">Sample Value</th>
                     <th class="py-1.5 px-3">Target Table Column</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-[#1e293b]/60 font-mono text-[11px]">
-                  {#each csvHeaders as header}
+                  {#each csvHeaders as header, idx}
+                    {@const sampleVal = csvPreviewRows[0]?.[idx] ?? ''}
                     <tr class="hover:bg-slate-800/30">
                       <td class="py-1.5 px-3 font-semibold text-sky-300">{header}</td>
+                      <td class="py-1.5 px-3 text-slate-400 truncate max-w-[160px]" title={sampleVal}>{sampleVal || '(empty)'}</td>
                       <td class="py-1.5 px-3">
                         <select
                           bind:value={columnMappings[header]}
@@ -373,7 +381,7 @@
                         >
                           <option value="">(Skip / Do Not Import)</option>
                           {#each targetTableColumns as col}
-                            <option value={col}>{col}</option>
+                            <option value={col.name}>{col.name} ({col.type})</option>
                           {/each}
                         </select>
                       </td>
@@ -387,7 +395,7 @@
           <!-- Preview Table -->
           {#if csvPreviewRows.length > 0}
             <div class="space-y-1">
-              <span class="font-bold text-slate-300 block">Row Preview (First 5 Rows)</span>
+              <span class="font-bold text-slate-300 block">Row Preview (First {csvPreviewRows.length} Rows from 64KB Sample)</span>
               <div class="overflow-x-auto border border-[#1e293b] rounded-lg max-h-32">
                 <table class="w-full text-left border-collapse text-[11px] font-mono">
                   <thead class="bg-[#0f172a] text-slate-400 sticky top-0">
@@ -412,19 +420,22 @@
           {/if}
         {/if}
 
-        <!-- Progress (during import) -->
-        {#if isImporting}
+        <!-- Status & Errors -->
+        {#if importStatusMsg}
           <div class="space-y-1.5 bg-[#090d16] border border-[#1e293b] p-3 rounded-lg">
             <div class="flex items-center justify-between text-[11px] font-mono">
-              <span class="text-slate-300">{importStatusMsg}</span>
-              <span class="text-emerald-400 font-bold">{importProgress}%</span>
+              <span class="text-slate-200">{importStatusMsg}</span>
+              {#if isImporting}
+                <Icon name="refresh-cw" class="w-3.5 h-3.5 text-emerald-400 animate-spin" />
+              {/if}
             </div>
-            <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
-              <div
-                class="bg-emerald-500 h-2 transition-all duration-150"
-                style="width: {importProgress}%;"
-              ></div>
-            </div>
+            {#if importErrors.length > 0}
+              <div class="max-h-24 overflow-y-auto text-[10.5px] font-mono text-rose-300 bg-rose-950/30 border border-rose-900/50 rounded p-2 space-y-0.5">
+                {#each importErrors.slice(0, 20) as err}
+                  <div>{err}</div>
+                {/each}
+              </div>
+            {/if}
           </div>
         {/if}
       </div>
@@ -433,8 +444,9 @@
       <div class="px-5 py-3 bg-[#0f172a] border-t border-[#1e293b] flex items-center justify-end space-x-2 shrink-0">
         <button
           onclick={handleClose}
+          disabled={isImporting}
           type="button"
-          class="px-3.5 py-1.5 text-xs font-semibold text-slate-400 hover:text-white transition"
+          class="px-3.5 py-1.5 text-xs font-semibold text-slate-400 hover:text-white transition disabled:opacity-40"
         >
           Cancel
         </button>

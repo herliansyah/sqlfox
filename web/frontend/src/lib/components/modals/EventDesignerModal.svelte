@@ -1,30 +1,86 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
-  import { quoteSqlIdentifier } from '../../utils/sqlStatements';
+  import { quoteSqlIdentifier, stripDefiner } from '../../utils/sqlStatements';
   import Icon from '../common/Icon.svelte';
   import SqlCodeEditor from '../editor/SqlCodeEditor.svelte';
 
   let eventName = $state('');
+  let origName = $state<string | null>(null);
   let scheduleType = $state<'EVERY' | 'AT'>('EVERY');
   let everyQty = $state('1');
   let everyUnit = $state<'DAY' | 'HOUR' | 'MINUTE' | 'SECOND' | 'WEEK' | 'MONTH' | 'YEAR'>('DAY');
+  let startsAt = $state('');
+  let endsAt = $state('');
   let atTime = $state('CURRENT_TIMESTAMP + INTERVAL 1 HOUR');
   let status = $state<'ENABLE' | 'DISABLE' | 'DISABLE ON SLAVE'>('ENABLE');
   let preserve = $state(true);
   let body = $state('BEGIN\n  -- Scheduled event actions\n  DELETE FROM sessions WHERE expires_at < NOW();\nEND');
   let isSubmitting = $state(false);
+  let isLoadingDdl = $state(false);
 
   let wasOpen = false;
+
+  function parseEventDDL(raw: string) {
+    const clean = stripDefiner(raw);
+    const everyMatch = clean.match(/\bON\s+SCHEDULE\s+EVERY\s+(\d+)\s+(SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR)\b/i);
+    const atMatch = clean.match(/\bON\s+SCHEDULE\s+AT\s+(.+?)(?=\s+(?:ON\s+COMPLETION|ENABLE|DISABLE|DO)\b)/is);
+    if (everyMatch) {
+      scheduleType = 'EVERY';
+      everyQty = everyMatch[1];
+      everyUnit = everyMatch[2].toUpperCase() as any;
+    } else if (atMatch) {
+      scheduleType = 'AT';
+      atTime = atMatch[1].trim();
+    }
+    const startsM = clean.match(/\bSTARTS\s+'([^']+)'/i);
+    startsAt = startsM ? startsM[1] : '';
+    const endsM = clean.match(/\bENDS\s+'([^']+)'/i);
+    endsAt = endsM ? endsM[1] : '';
+
+    preserve = !/\bON\s+COMPLETION\s+NOT\s+PRESERVE\b/i.test(clean);
+
+    if (/\bDISABLE\s+ON\s+SLAVE\b/i.test(clean)) status = 'DISABLE ON SLAVE';
+    else if (/\bDISABLE\b/i.test(clean)) status = 'DISABLE';
+    else status = 'ENABLE';
+
+    const doMatch = clean.match(/\bDO\s+([\s\S]+)$/i);
+    if (doMatch) {
+      body = doMatch[1].replace(/;+\s*$/, '').trim();
+    }
+  }
+
+  async function hydrateFromServer(name: string, fallbackDef?: string) {
+    if (!appState.activeSessionId) return;
+    isLoadingDdl = true;
+    try {
+      const res = await api.getEventDDL(appState.activeSessionId, name);
+      if (res?.ddl) {
+        parseEventDDL(res.ddl);
+        return;
+      }
+      if (fallbackDef) body = stripDefiner(fallbackDef);
+    } catch {
+      if (fallbackDef) body = stripDefiner(fallbackDef);
+    } finally {
+      isLoadingDdl = false;
+    }
+  }
 
   $effect(() => {
     if (appState.isEventDesignerOpen) {
       if (!wasOpen) {
-        if (appState.eventToEdit) {
+        startsAt = '';
+        endsAt = '';
+        if (appState.eventToEdit?.name) {
+          origName = appState.eventToEdit.name;
           eventName = appState.eventToEdit.name;
-          status = (appState.eventToEdit.status as any) || 'ENABLE';
-          body = appState.eventToEdit.definition || 'BEGIN\n  -- Scheduled event actions\nEND';
+          const st = (appState.eventToEdit.status || '').toUpperCase();
+          status = st.includes('SLAVE') ? 'DISABLE ON SLAVE' : st.includes('DISABLE') ? 'DISABLE' : 'ENABLE';
+          body = appState.eventToEdit.definition || '-- Loading event DDL...';
+          void hydrateFromServer(appState.eventToEdit.name, appState.eventToEdit.definition);
         } else {
+          origName = null;
           eventName = '';
           scheduleType = 'EVERY';
           everyQty = '1';
@@ -45,25 +101,33 @@
   let generatedDDL = $derived.by(() => {
     const cleanName = eventName.trim() || 'evt_daily_cleanup';
     const cleanBody = body.trim().replace(/;+$/, '');
-    const qName = quoteSqlIdentifier(cleanName, appState.activeConnection?.driver);
-    const verb = appState.eventToEdit ? 'ALTER EVENT' : 'CREATE EVENT';
+    const driver = appState.activeConnection?.driver;
+    const qName = quoteSqlIdentifier(cleanName, driver);
+    const renamed = Boolean(origName && origName !== cleanName);
+    const verb = origName && !renamed ? 'ALTER EVENT' : 'CREATE EVENT';
+    const dropPrefix = renamed && origName ? `DROP EVENT IF EXISTS ${quoteSqlIdentifier(origName, driver)};\n` : '';
 
-    let scheduleStr = scheduleType === 'EVERY'
-      ? `EVERY ${String(everyQty ?? '').trim() || '1'} ${everyUnit}`
-      : `AT ${atTime.trim()}`;
+    let scheduleStr = '';
+    if (scheduleType === 'EVERY') {
+      scheduleStr = `EVERY ${String(everyQty ?? '').trim() || '1'} ${everyUnit}`;
+      if (startsAt.trim()) scheduleStr += ` STARTS '${startsAt.trim().replace(/'/g, "''")}'`;
+      if (endsAt.trim()) scheduleStr += ` ENDS '${endsAt.trim().replace(/'/g, "''")}'`;
+    } else {
+      scheduleStr = `AT ${atTime.trim()}`;
+    }
 
-    let preserveStr = preserve ? ' ON COMPLETION PRESERVE' : '';
-    let statusStr = ` ${status}`;
+    const preserveStr = preserve ? ' ON COMPLETION PRESERVE' : ' ON COMPLETION NOT PRESERVE';
+    const statusStr = ` ${status}`;
 
-    return `${verb} ${qName}\nON SCHEDULE ${scheduleStr}${preserveStr}${statusStr}\nDO\n${cleanBody};`;
+    return `${dropPrefix}${verb} ${qName}\nON SCHEDULE ${scheduleStr}${preserveStr}${statusStr}\nDO\n${cleanBody};`;
   });
 
   function openInEditor() {
-    appState.addTab(`create_event_${eventName.trim() || 'event'}.sql`, generatedDDL);
+    appState.addTab(`event_${eventName.trim() || 'evt'}.sql`, `DELIMITER ;;\n${generatedDDL.replace(/;$/, ';;')}\nDELIMITER ;`);
     appState.isEventDesignerOpen = false;
   }
 
-  async function handleCreate() {
+  function handleCreate() {
     if (!eventName.trim()) {
       appState.showToast('Event name is required', 'error');
       return;
@@ -72,23 +136,31 @@
       appState.showToast('Event body statements are required', 'error');
       return;
     }
+    if (appState.isReadOnly) {
+      appState.showToast('Session is Read-Only', 'warning');
+      return;
+    }
     if (!appState.activeSessionId) return;
 
-    isSubmitting = true;
-    try {
-      const res = await api.executeQuery(appState.activeSessionId, generatedDDL, false, appState.currentDatabase || undefined);
-      if (res.error) {
-        appState.showToast(`Failed to save event: ${res.error}`, 'error');
-        return;
-      }
-      appState.showToast(`Event "${eventName.trim()}" created successfully`, 'success');
-      appState.isEventDesignerOpen = false;
-      await appState.refreshCatalog();
-    } catch (err: any) {
-      appState.showToast(`Error: ${err.message}`, 'error');
-    } finally {
-      isSubmitting = false;
-    }
+    const ddl = generatedDDL;
+    const db = appState.currentDatabase || undefined;
+    appState.openDDLReviewModal(
+      ddl,
+      async () => {
+        isSubmitting = true;
+        try {
+          const res = await api.executeQuery(appState.activeSessionId!, ddl, { confirmed: true, database: db });
+          if (res.error) throw new Error(res.error);
+          appState.showToast(`Event "${eventName.trim()}" saved successfully`, 'success');
+          appState.isEventDesignerOpen = false;
+          await appState.refreshCatalog();
+        } finally {
+          isSubmitting = false;
+        }
+      },
+      `${origName ? 'Update Event' : 'Create Event'}: ${eventName.trim()}`,
+      { database: db }
+    );
   }
 
   function handleClose() {
@@ -183,26 +255,50 @@
           </div>
 
           {#if scheduleType === 'EVERY'}
-            <div class="flex items-center space-x-2 pt-1">
-              <span class="text-xs text-slate-400">Every</span>
-              <input
-                type="number"
-                min="1"
-                bind:value={everyQty}
-                class="w-20 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white font-mono outline-none focus:border-purple-500"
-              />
-              <select
-                bind:value={everyUnit}
-                class="bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs text-slate-200 font-mono outline-none focus:border-purple-500"
-              >
-                <option value="DAY">DAY</option>
-                <option value="HOUR">HOUR</option>
-                <option value="MINUTE">MINUTE</option>
-                <option value="SECOND">SECOND</option>
-                <option value="WEEK">WEEK</option>
-                <option value="MONTH">MONTH</option>
-                <option value="YEAR">YEAR</option>
-              </select>
+            <div class="space-y-2 pt-1">
+              <div class="flex items-center space-x-2">
+                <span class="text-xs text-slate-400">Every</span>
+                <input
+                  type="number"
+                  min="1"
+                  bind:value={everyQty}
+                  class="w-20 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white font-mono outline-none focus:border-purple-500"
+                />
+                <select
+                  bind:value={everyUnit}
+                  class="bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs text-slate-200 font-mono outline-none focus:border-purple-500"
+                >
+                  <option value="DAY">DAY</option>
+                  <option value="HOUR">HOUR</option>
+                  <option value="MINUTE">MINUTE</option>
+                  <option value="SECOND">SECOND</option>
+                  <option value="WEEK">WEEK</option>
+                  <option value="MONTH">MONTH</option>
+                  <option value="YEAR">YEAR</option>
+                </select>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <div>
+                  <label for="event-starts" class="block text-[10.5px] text-slate-400 mb-0.5">STARTS (optional)</label>
+                  <input
+                    id="event-starts"
+                    type="text"
+                    bind:value={startsAt}
+                    placeholder="e.g. 2026-01-01 00:00:00"
+                    class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs text-white font-mono outline-none focus:border-purple-500"
+                  />
+                </div>
+                <div>
+                  <label for="event-ends" class="block text-[10.5px] text-slate-400 mb-0.5">ENDS (optional)</label>
+                  <input
+                    id="event-ends"
+                    type="text"
+                    bind:value={endsAt}
+                    placeholder="e.g. 2027-01-01 00:00:00"
+                    class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs text-white font-mono outline-none focus:border-purple-500"
+                  />
+                </div>
+              </div>
             </div>
           {:else}
             <div class="pt-1">
@@ -232,7 +328,7 @@
         <div class="space-y-1">
           <label for="event-body" class="text-xs font-semibold text-slate-300 flex items-center justify-between">
             <span>Event Body Statements *</span>
-            <span class="text-[10px] text-slate-500 font-mono">DO &lt;statement&gt; or BEGIN ... END</span>
+            <span class="text-[10px] text-slate-500 font-mono">{isLoadingDdl ? 'Loading server DDL...' : 'DO <statement> or BEGIN ... END'}</span>
           </label>
           <div class="h-44">
             <SqlCodeEditor
@@ -283,7 +379,7 @@
               <span>Saving...</span>
             {:else}
               <Icon name="check" class="w-3.5 h-3.5" />
-              <span>Create Event</span>
+              <span>{origName ? 'Review & Update Event' : 'Review & Create Event'}</span>
             {/if}
           </button>
         </div>

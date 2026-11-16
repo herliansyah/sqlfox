@@ -1,30 +1,68 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
-  import { quoteSqlIdentifier } from '../../utils/sqlStatements';
+  import { quoteSqlIdentifier, stripDefiner } from '../../utils/sqlStatements';
   import Icon from '../common/Icon.svelte';
   import SqlCodeEditor from '../editor/SqlCodeEditor.svelte';
 
   let viewName = $state('');
+  let origName = $state<string | null>(null);
   let algorithm = $state<'UNDEFINED' | 'MERGE' | 'TEMPTABLE'>('UNDEFINED');
   let checkOption = $state<'NONE' | 'CASCADED' | 'LOCAL'>('NONE');
   let selectQuery = $state('SELECT * FROM ');
   let isSubmitting = $state(false);
+  let isLoadingDdl = $state(false);
+
+  let driver = $derived(appState.activeConnection?.driver?.toLowerCase() || 'mysql');
+  let isSQLite = $derived(driver === 'sqlite');
+  let isPostgres = $derived(driver === 'postgres' || driver === 'postgresql');
 
   let wasOpen = false;
+
+  async function hydrateFromServer(name: string, fallbackQuery?: string) {
+    if (!appState.activeSessionId) return;
+    isLoadingDdl = true;
+    try {
+      const res = await api.getTableDDL(appState.activeSessionId, name, appState.currentDatabase || undefined);
+      const clean = stripDefiner(res?.ddl || '');
+      if (clean) {
+        const algoMatch = clean.match(/\bALGORITHM\s*=\s*(UNDEFINED|MERGE|TEMPTABLE)\b/i);
+        if (algoMatch) algorithm = algoMatch[1].toUpperCase() as any;
+
+        const checkMatch = clean.match(/\bWITH\s+(CASCADED|LOCAL)\s+CHECK\s+OPTION\b/i);
+        checkOption = checkMatch ? (checkMatch[1].toUpperCase() as any) : 'NONE';
+
+        const asIdx = clean.search(/\bAS\s+(?:SELECT|WITH|\()/i);
+        if (asIdx !== -1) {
+          let body = clean.slice(asIdx).replace(/^AS\s+/i, '').trim();
+          body = body.replace(/\bWITH\s+(?:CASCADED|LOCAL)?\s*CHECK\s+OPTION\s*;?\s*$/i, '').trim();
+          selectQuery = body;
+          return;
+        }
+      }
+      if (fallbackQuery) selectQuery = fallbackQuery;
+    } catch {
+      if (fallbackQuery) selectQuery = fallbackQuery;
+    } finally {
+      isLoadingDdl = false;
+    }
+  }
 
   $effect(() => {
     if (appState.isViewDesignerOpen) {
       if (!wasOpen) {
-        if (appState.viewToEdit) {
+        algorithm = 'UNDEFINED';
+        checkOption = 'NONE';
+        if (appState.viewToEdit?.name) {
+          origName = appState.viewToEdit.name;
           viewName = appState.viewToEdit.name;
-          selectQuery = appState.viewToEdit.query || 'SELECT * FROM ';
+          selectQuery = appState.viewToEdit.query || '-- Loading view definition...';
+          void hydrateFromServer(appState.viewToEdit.name, appState.viewToEdit.query);
         } else {
+          origName = null;
           viewName = '';
-          algorithm = 'UNDEFINED';
-          checkOption = 'NONE';
           const firstTable = appState.filteredTables[0]?.name || 'my_table';
-          const qTbl = quoteSqlIdentifier(firstTable, appState.activeConnection?.driver);
+          const qTbl = quoteSqlIdentifier(firstTable, driver);
           selectQuery = `SELECT id, created_at FROM ${qTbl} WHERE 1=1;`;
         }
         isSubmitting = false;
@@ -36,33 +74,31 @@
   });
 
   let generatedDDL = $derived.by(() => {
-    const driver = appState.activeConnection?.driver;
-    const isSQLite = driver === 'sqlite';
-    const isPostgres = driver === 'postgres' || driver === 'postgresql';
     const cleanName = viewName.trim() || 'v_sample_view';
     const qName = quoteSqlIdentifier(cleanName, driver);
     const cleanQuery = selectQuery.trim().replace(/;+$/, '');
+    const renamed = Boolean(origName && origName !== cleanName);
+    const dropPrefix = renamed && origName ? `DROP VIEW IF EXISTS ${quoteSqlIdentifier(origName, driver)};\n` : '';
 
-    let sql = '';
     if (isSQLite) {
-      sql = `CREATE VIEW IF NOT EXISTS ${qName} AS\n${cleanQuery};`;
-    } else if (isPostgres) {
-      let checkPart = checkOption !== 'NONE' ? `\nWITH ${checkOption} CHECK OPTION` : '';
-      sql = `CREATE OR REPLACE VIEW ${qName} AS\n${cleanQuery}${checkPart};`;
-    } else {
-      let algoPart = algorithm !== 'UNDEFINED' ? ` ALGORITHM = ${algorithm}` : '';
-      let checkPart = checkOption !== 'NONE' ? `\nWITH ${checkOption} CHECK OPTION` : '';
-      sql = `CREATE OR REPLACE${algoPart} VIEW ${qName} AS\n${cleanQuery}${checkPart};`;
+      const sqliteDrop = origName ? `DROP VIEW IF EXISTS ${quoteSqlIdentifier(origName, driver)};\n` : '';
+      return `${sqliteDrop}CREATE VIEW IF NOT EXISTS ${qName} AS\n${cleanQuery};`;
     }
-    return sql;
+    if (isPostgres) {
+      const checkPart = checkOption !== 'NONE' ? `\nWITH ${checkOption} CHECK OPTION` : '';
+      return `${dropPrefix}CREATE OR REPLACE VIEW ${qName} AS\n${cleanQuery}${checkPart};`;
+    }
+    const algoPart = algorithm !== 'UNDEFINED' ? ` ALGORITHM = ${algorithm}` : '';
+    const checkPart = checkOption !== 'NONE' ? `\nWITH ${checkOption} CHECK OPTION` : '';
+    return `${dropPrefix}CREATE OR REPLACE${algoPart} VIEW ${qName} AS\n${cleanQuery}${checkPart};`;
   });
 
   function openInEditor() {
-    appState.addTab(`create_view_${viewName.trim() || 'view'}.sql`, generatedDDL);
+    appState.addTab(`view_${viewName.trim() || 'sample'}.sql`, generatedDDL);
     appState.isViewDesignerOpen = false;
   }
 
-  async function handleCreate() {
+  function handleCreate() {
     if (!viewName.trim()) {
       appState.showToast('View name is required', 'error');
       return;
@@ -71,23 +107,31 @@
       appState.showToast('SELECT query statement is required', 'error');
       return;
     }
+    if (appState.isReadOnly) {
+      appState.showToast('Session is Read-Only', 'warning');
+      return;
+    }
     if (!appState.activeSessionId) return;
 
-    isSubmitting = true;
-    try {
-      const res = await api.executeQuery(appState.activeSessionId, generatedDDL, false, appState.currentDatabase || undefined);
-      if (res.error) {
-        appState.showToast(`Failed to save view: ${res.error}`, 'error');
-        return;
-      }
-      appState.showToast(`View "${viewName.trim()}" created successfully`, 'success');
-      appState.isViewDesignerOpen = false;
-      await appState.refreshCatalog();
-    } catch (err: any) {
-      appState.showToast(`Error: ${err.message}`, 'error');
-    } finally {
-      isSubmitting = false;
-    }
+    const ddl = generatedDDL;
+    const db = appState.currentDatabase || undefined;
+    appState.openDDLReviewModal(
+      ddl,
+      async () => {
+        isSubmitting = true;
+        try {
+          const res = await api.executeQuery(appState.activeSessionId!, ddl, { confirmed: true, database: db });
+          if (res.error) throw new Error(res.error);
+          appState.showToast(`View "${viewName.trim()}" saved successfully`, 'success');
+          appState.isViewDesignerOpen = false;
+          await appState.refreshCatalog();
+        } finally {
+          isSubmitting = false;
+        }
+      },
+      `${origName ? 'Update View' : 'Create View'}: ${viewName.trim()}`,
+      { database: db }
+    );
   }
 
   function handleClose() {
@@ -142,39 +186,43 @@
             />
           </div>
 
-          <div class="space-y-1">
-            <label for="view-algorithm" class="text-xs font-semibold text-slate-300">Algorithm</label>
-            <select
-              id="view-algorithm"
-              bind:value={algorithm}
-              class="w-full bg-[#090d16] border border-[#334155] focus:border-emerald-500 rounded px-2.5 py-1.5 text-xs text-slate-200 font-mono outline-none"
-            >
-              <option value="UNDEFINED">UNDEFINED (Default)</option>
-              <option value="MERGE">MERGE</option>
-              <option value="TEMPTABLE">TEMPTABLE</option>
-            </select>
-          </div>
+          {#if !isSQLite && !isPostgres}
+            <div class="space-y-1">
+              <label for="view-algorithm" class="text-xs font-semibold text-slate-300">Algorithm</label>
+              <select
+                id="view-algorithm"
+                bind:value={algorithm}
+                class="w-full bg-[#090d16] border border-[#334155] focus:border-emerald-500 rounded px-2.5 py-1.5 text-xs text-slate-200 font-mono outline-none"
+              >
+                <option value="UNDEFINED">UNDEFINED (Default)</option>
+                <option value="MERGE">MERGE</option>
+                <option value="TEMPTABLE">TEMPTABLE</option>
+              </select>
+            </div>
+          {/if}
         </div>
 
-        <!-- Check Option -->
-        <div class="space-y-1">
-          <label for="view-check" class="text-xs font-semibold text-slate-300">WITH CHECK OPTION</label>
-          <select
-            id="view-check"
-            bind:value={checkOption}
-            class="w-full bg-[#090d16] border border-[#334155] focus:border-emerald-500 rounded px-2.5 py-1.5 text-xs text-slate-200 font-mono outline-none"
-          >
-            <option value="NONE">None</option>
-            <option value="CASCADED">CASCADED</option>
-            <option value="LOCAL">LOCAL</option>
-          </select>
-        </div>
+        {#if !isSQLite}
+          <!-- Check Option -->
+          <div class="space-y-1">
+            <label for="view-check" class="text-xs font-semibold text-slate-300">WITH CHECK OPTION</label>
+            <select
+              id="view-check"
+              bind:value={checkOption}
+              class="w-full bg-[#090d16] border border-[#334155] focus:border-emerald-500 rounded px-2.5 py-1.5 text-xs text-slate-200 font-mono outline-none"
+            >
+              <option value="NONE">None</option>
+              <option value="CASCADED">CASCADED</option>
+              <option value="LOCAL">LOCAL</option>
+            </select>
+          </div>
+        {/if}
 
         <!-- SELECT Query Statement -->
         <div class="space-y-1">
           <label for="view-query" class="text-xs font-semibold text-slate-300 flex items-center justify-between">
             <span>SELECT Query Statement *</span>
-            <span class="text-[10px] text-slate-500 font-mono">SQL SELECT definition</span>
+            <span class="text-[10px] text-slate-500 font-mono">{isLoadingDdl ? 'Fetching DDL from server...' : 'SQL SELECT definition'}</span>
           </label>
           <div class="h-36">
             <SqlCodeEditor
@@ -225,7 +273,7 @@
               <span>Saving...</span>
             {:else}
               <Icon name="check" class="w-3.5 h-3.5" />
-              <span>Create View</span>
+              <span>{origName ? 'Review & Update View' : 'Review & Create View'}</span>
             {/if}
           </button>
         </div>

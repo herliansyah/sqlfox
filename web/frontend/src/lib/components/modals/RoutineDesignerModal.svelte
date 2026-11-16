@@ -1,7 +1,7 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
-  import { quoteSqlIdentifier } from '../../utils/sqlStatements';
+  import { quoteSqlIdentifier, stripDefiner, splitTopLevelList } from '../../utils/sqlStatements';
   import Icon from '../common/Icon.svelte';
   import SqlCodeEditor from '../editor/SqlCodeEditor.svelte';
 
@@ -12,33 +12,114 @@
   }
 
   let routineName = $state('');
+  let origName = $state<string | null>(null);
   let routineType = $state<'PROCEDURE' | 'FUNCTION'>('PROCEDURE');
   let returnType = $state('INT');
   let isDeterministic = $state(true);
   let params = $state<RoutineParam[]>([]);
   let body = $state('BEGIN\n  -- Routine body statements\nEND');
   let isSubmitting = $state(false);
+  let isLoadingDdl = $state(false);
+
+  let driver = $derived(appState.activeConnection?.driver?.toLowerCase() || 'mysql');
+  let isPostgres = $derived(driver === 'postgres' || driver === 'postgresql');
 
   let wasOpen = false;
+
+  function parseRoutineDDL(raw: string, fallbackType: 'PROCEDURE' | 'FUNCTION') {
+    const clean = stripDefiner(raw);
+    const headerMatch = clean.match(/\bCREATE\s+(?:OR\s+REPLACE\s+)?(PROCEDURE|FUNCTION)\s+(?:`[^`]+`|"[^"]+"|\S+)\s*\(([\s\S]*)/i);
+    if (!headerMatch) return;
+
+    routineType = headerMatch[1].toUpperCase() === 'FUNCTION' ? 'FUNCTION' : fallbackType;
+    const afterParen = headerMatch[2];
+    let depth = 1;
+    let q = '';
+    let closeIdx = -1;
+    for (let i = 0; i < afterParen.length; i++) {
+      const ch = afterParen[i];
+      if (q) {
+        if (ch === '\\' && i + 1 < afterParen.length) { i++; continue; }
+        if (ch === q) q = '';
+        continue;
+      }
+      if (ch === "'" || ch === '"' || ch === '`') { q = ch; continue; }
+      if (ch === '(') depth++;
+      else if (ch === ')') {
+        depth--;
+        if (depth === 0) { closeIdx = i; break; }
+      }
+    }
+    if (closeIdx === -1) return;
+
+    const paramSection = afterParen.slice(0, closeIdx).trim();
+    const rest = afterParen.slice(closeIdx + 1).trim();
+
+    params = splitTopLevelList(paramSection).map((pStr) => {
+      const m = pStr.match(/^(?:(INOUT|IN|OUT)\s+)?(`[^`]+`|"[^"]+"|\S+)\s+(.+)$/i);
+      if (m) {
+        return {
+          mode: (m[1]?.toUpperCase() as any) || 'IN',
+          name: m[2].replace(/^[`"]|[`"]$/g, ''),
+          type: m[3].trim(),
+        };
+      }
+      return { mode: 'IN', name: pStr, type: 'VARCHAR(255)' };
+    });
+
+    if (routineType === 'FUNCTION') {
+      const retMatch = rest.match(/\bRETURNS\s+([^\n]+?)(?:\s+(?:NOT\s+DETERMINISTIC|DETERMINISTIC|NO\s+SQL|READS\s+SQL|COMMENT|BEGIN|AS|LANGUAGE|RETURN)\b|$)/i);
+      if (retMatch) returnType = retMatch[1].trim();
+    }
+    if (/\bNOT\s+DETERMINISTIC\b/i.test(rest)) isDeterministic = false;
+    else if (/\bDETERMINISTIC\b/i.test(rest)) isDeterministic = true;
+
+    const beginIdx = rest.search(/\bBEGIN\b/i);
+    if (beginIdx !== -1) {
+      body = rest.slice(beginIdx).trim();
+    } else {
+      const retBodyIdx = rest.search(/\bRETURN\b/i);
+      if (retBodyIdx !== -1) body = rest.slice(retBodyIdx).trim();
+    }
+  }
+
+  async function hydrateFromServer(name: string, rType: 'PROCEDURE' | 'FUNCTION', fallbackDef?: string) {
+    if (!appState.activeSessionId) return;
+    isLoadingDdl = true;
+    try {
+      const res = await api.getRoutineDDL(appState.activeSessionId, name, rType);
+      if (res?.ddl) {
+        parseRoutineDDL(res.ddl, rType);
+        return;
+      }
+      if (fallbackDef) body = stripDefiner(fallbackDef);
+    } catch {
+      if (fallbackDef) body = stripDefiner(fallbackDef);
+    } finally {
+      isLoadingDdl = false;
+    }
+  }
 
   $effect(() => {
     if (appState.isRoutineDesignerOpen) {
       if (!wasOpen) {
-        if (appState.routineToEdit) {
-          routineName = appState.routineToEdit.name;
-          routineType = (appState.routineToEdit.type as any) === 'FUNCTION' ? 'FUNCTION' : 'PROCEDURE';
-          returnType = appState.routineToEdit.data_type || 'INT';
-          body = appState.routineToEdit.definition || 'BEGIN\n  -- Routine body statements\nEND';
+        const edit = appState.routineToEdit;
+        if (edit && edit.name) {
+          origName = edit.name;
+          routineName = edit.name;
+          routineType = (edit.type as any)?.toUpperCase() === 'FUNCTION' ? 'FUNCTION' : 'PROCEDURE';
+          returnType = edit.data_type || 'INT';
+          body = edit.definition || '-- Loading routine DDL...';
           params = [];
+          void hydrateFromServer(edit.name, routineType, edit.definition);
         } else {
+          origName = null;
           routineName = '';
-          routineType = 'PROCEDURE';
+          routineType = (edit?.type as any)?.toUpperCase() === 'FUNCTION' ? 'FUNCTION' : 'PROCEDURE';
           returnType = 'INT';
           isDeterministic = true;
-          params = [
-            { mode: 'IN', name: 'p_id', type: 'INT' },
-          ];
-          body = 'BEGIN\n  -- Statements\nEND';
+          params = [{ mode: 'IN', name: 'p_id', type: 'INT' }];
+          body = routineType === 'FUNCTION' ? 'BEGIN\n  RETURN 0;\nEND' : 'BEGIN\n  -- Statements\nEND';
         }
         isSubmitting = false;
         wasOpen = true;
@@ -61,8 +142,6 @@
   }
 
   let generatedDDL = $derived.by(() => {
-    const driver = appState.activeConnection?.driver;
-    const isPostgres = driver === 'postgres' || driver === 'postgresql';
     const cleanName = routineName.trim() || (routineType === 'FUNCTION' ? 'fn_sample' : 'sp_sample');
     const qName = quoteSqlIdentifier(cleanName, driver);
     const cleanBody = body.trim().replace(/;+$/, '');
@@ -71,8 +150,8 @@
       .filter((p) => p.name.trim())
       .map((p) => {
         const pName = quoteSqlIdentifier(p.name.trim(), driver);
-        if (routineType === 'FUNCTION') {
-          return `${pName} ${p.type.trim()}`;
+        if (routineType === 'FUNCTION' || isPostgres) {
+          return routineType === 'FUNCTION' ? `${pName} ${p.type.trim()}` : `${p.mode} ${pName} ${p.type.trim()}`;
         }
         return `${p.mode} ${pName} ${p.type.trim()}`;
       })
@@ -83,19 +162,29 @@
       ? `${createKw} FUNCTION ${qName}(${paramStr}) RETURNS ${returnType.trim() || 'INT'}`
       : `${createKw} PROCEDURE ${qName}(${paramStr})`;
 
-    if (!isPostgres) {
+    if (!isPostgres && routineType === 'FUNCTION') {
       header += isDeterministic ? ' DETERMINISTIC' : ' NOT DETERMINISTIC';
     }
 
-    return `${header}\n${cleanBody};`;
+    const dropPrefix =
+      !isPostgres && origName
+        ? `DROP ${routineType} IF EXISTS ${quoteSqlIdentifier(origName, driver)};\n`
+        : isPostgres && origName && origName !== cleanName
+        ? `DROP ${routineType} IF EXISTS ${quoteSqlIdentifier(origName, driver)};\n`
+        : '';
+
+    return `${dropPrefix}${header}\n${cleanBody};`;
   });
 
   function openInEditor() {
-    appState.addTab(`create_${routineType.toLowerCase()}_${routineName.trim() || 'routine'}.sql`, generatedDDL);
+    const sqlText = isPostgres
+      ? generatedDDL
+      : `DELIMITER ;;\n${generatedDDL.replace(/;$/, ';;')}\nDELIMITER ;`;
+    appState.addTab(`${routineName.trim() || 'routine'}.sql`, sqlText);
     appState.isRoutineDesignerOpen = false;
   }
 
-  async function handleCreate() {
+  function handleCreate() {
     if (!routineName.trim()) {
       appState.showToast('Routine name is required', 'error');
       return;
@@ -108,23 +197,31 @@
       appState.showToast('Routine body statements are required', 'error');
       return;
     }
+    if (appState.isReadOnly) {
+      appState.showToast('Session is Read-Only', 'warning');
+      return;
+    }
     if (!appState.activeSessionId) return;
 
-    isSubmitting = true;
-    try {
-      const res = await api.executeQuery(appState.activeSessionId, generatedDDL, false, appState.currentDatabase || undefined);
-      if (res.error) {
-        appState.showToast(`Failed to save routine: ${res.error}`, 'error');
-        return;
-      }
-      appState.showToast(`${routineType === 'FUNCTION' ? 'Function' : 'Procedure'} "${routineName.trim()}" created successfully`, 'success');
-      appState.isRoutineDesignerOpen = false;
-      await appState.refreshCatalog();
-    } catch (err: any) {
-      appState.showToast(`Error: ${err.message}`, 'error');
-    } finally {
-      isSubmitting = false;
-    }
+    const ddl = generatedDDL;
+    const db = appState.currentDatabase || undefined;
+    appState.openDDLReviewModal(
+      ddl,
+      async () => {
+        isSubmitting = true;
+        try {
+          const res = await api.executeQuery(appState.activeSessionId!, ddl, { confirmed: true, database: db });
+          if (res.error) throw new Error(res.error);
+          appState.showToast(`${routineType === 'FUNCTION' ? 'Function' : 'Procedure'} "${routineName.trim()}" saved successfully`, 'success');
+          appState.isRoutineDesignerOpen = false;
+          await appState.refreshCatalog();
+        } finally {
+          isSubmitting = false;
+        }
+      },
+      `${origName ? 'Update' : 'Create'} ${routineType}: ${routineName.trim()}`,
+      { database: db }
+    );
   }
 
   function handleClose() {
@@ -148,7 +245,7 @@
           </div>
           <div>
             <h3 id="routine-designer-title" class="font-bold text-sm text-slate-100 font-sans">
-              {appState.routineToEdit ? `Edit Routine "${appState.routineToEdit.name}"` : `Create Stored ${routineType === 'FUNCTION' ? 'Function' : 'Procedure'}`}
+              {origName ? `Edit Routine "${origName}"` : `Create Stored ${routineType === 'FUNCTION' ? 'Function' : 'Procedure'}`}
             </h3>
             <p class="text-[11px] text-slate-400">
               Visual designer for database procedures, functions, parameters, and return types
@@ -286,7 +383,7 @@
         <div class="space-y-1">
           <label for="routine-body" class="text-xs font-semibold text-slate-300 flex items-center justify-between">
             <span>Routine Body Statements *</span>
-            <span class="text-[10px] text-slate-500 font-mono">BEGIN ... END block</span>
+            <span class="text-[10px] text-slate-500 font-mono">{isLoadingDdl ? 'Loading server DDL...' : 'BEGIN ... END block'}</span>
           </label>
           <div class="h-44">
             <SqlCodeEditor
@@ -337,7 +434,7 @@
               <span>Saving...</span>
             {:else}
               <Icon name="check" class="w-3.5 h-3.5" />
-              <span>Create {routineType === 'FUNCTION' ? 'Function' : 'Procedure'}</span>
+              <span>{origName ? `Review & Update` : `Review & Create`}</span>
             {/if}
           </button>
         </div>
