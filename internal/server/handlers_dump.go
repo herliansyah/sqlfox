@@ -28,9 +28,31 @@ func (s *Server) handleExportDump(w http.ResponseWriter, r *http.Request) {
 	}
 
 	targetDB := r.URL.Query().Get("db")
-	targetTable := r.URL.Query().Get("table")
 	includeSchema := r.URL.Query().Get("schema") != "false"
 	includeData := r.URL.Query().Get("data") != "false"
+
+	// Collect requested tables from repeated ?table=a&table=b and/or comma-separated ?tables=a,b.
+	var requestedTables []string
+	seenReq := make(map[string]bool)
+	addReq := func(name string) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return
+		}
+		key := strings.ToLower(name)
+		if !seenReq[key] {
+			seenReq[key] = true
+			requestedTables = append(requestedTables, name)
+		}
+	}
+	for _, t := range r.URL.Query()["table"] {
+		addReq(t)
+	}
+	if rawList := r.URL.Query().Get("tables"); rawList != "" {
+		for _, t := range strings.Split(rawList, ",") {
+			addReq(t)
+		}
+	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
 	defer cancel()
@@ -49,17 +71,22 @@ func (s *Server) handleExportDump(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var tablesToDump []driver.TableMetadata
-	if targetTable != "" {
+	if len(requestedTables) > 0 {
+		byLowerName := make(map[string]driver.TableMetadata, len(schema.Tables))
 		for _, t := range schema.Tables {
-			if strings.EqualFold(t.Name, targetTable) {
-				tablesToDump = append(tablesToDump, t)
-				break
+			byLowerName[strings.ToLower(t.Name)] = t
+		}
+		selected := make([]driver.TableMetadata, 0, len(requestedTables))
+		for _, req := range requestedTables {
+			t, ok := byLowerName[strings.ToLower(req)]
+			if !ok {
+				writeError(w, http.StatusNotFound, fmt.Sprintf("table not found: %s", req))
+				return
 			}
+			selected = append(selected, t)
 		}
-		if len(tablesToDump) == 0 {
-			writeError(w, http.StatusNotFound, "table not found")
-			return
-		}
+		// Keep FK parents before children and views last within the selected subset.
+		tablesToDump = viewsLast(driver.TopologicalSortTables(selected))
 	} else {
 		// FK parents before children and views last, so the dump restores without a FK-check toggle (PostgreSQL).
 		tablesToDump = viewsLast(driver.TopologicalSortTables(schema.Tables))
@@ -74,8 +101,10 @@ func (s *Server) handleExportDump(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fileName := fmt.Sprintf("%s_dump.sql", dbName)
-	if targetTable != "" {
-		fileName = fmt.Sprintf("%s_%s_dump.sql", dbName, targetTable)
+	if len(requestedTables) == 1 {
+		fileName = fmt.Sprintf("%s_%s_dump.sql", dbName, tablesToDump[0].Name)
+	} else if len(requestedTables) > 1 {
+		fileName = fmt.Sprintf("%s_%d_tables_dump.sql", dbName, len(tablesToDump))
 	}
 
 	w.Header().Set("Content-Type", "text/sql; charset=utf-8")

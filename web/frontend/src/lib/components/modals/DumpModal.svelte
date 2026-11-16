@@ -1,20 +1,45 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
   import Icon from '../common/Icon.svelte';
+  import SearchableSelect from '../common/SearchableSelect.svelte';
 
   let selectedDb = $state('');
-  let selectedTable = $state('');
+  let scopeMode = $state<'all' | 'selected'>('all');
+  let selectedTables = $state<string[]>([]);
+  let tableFilter = $state('');
   let includeSchema = $state(true);
   let includeData = $state(true);
+
+  async function handleDbChange(db: string) {
+    selectedDb = db;
+    selectedTables = [];
+    if (db && db !== appState.currentDatabase) {
+      await appState.selectDatabase(db);
+    }
+  }
   let isExporting = $state(false);
 
   let wasOpen = false;
+
+  let allCatalogTables = $derived(appState.catalog?.tables ?? []);
+  let visibleTables = $derived.by(() => {
+    const q = tableFilter.trim().toLowerCase();
+    if (!q) return allCatalogTables;
+    return allCatalogTables.filter((t) => t.name.toLowerCase().includes(q));
+  });
 
   $effect(() => {
     if (appState.isDumpModalOpen) {
       if (!wasOpen) {
         selectedDb = appState.dumpTargetTable ? (appState.activeTab?.database || appState.currentDatabase || '') : (appState.currentDatabase || '');
-        selectedTable = appState.dumpTargetTable || '';
+        if (appState.dumpTargetTable) {
+          scopeMode = 'selected';
+          selectedTables = [appState.dumpTargetTable];
+        } else {
+          scopeMode = 'all';
+          selectedTables = [];
+        }
+        tableFilter = '';
         includeSchema = true;
         includeData = true;
         isExporting = false;
@@ -25,9 +50,31 @@
     }
   });
 
+  function toggleTable(name: string) {
+    if (selectedTables.includes(name)) {
+      selectedTables = selectedTables.filter((t) => t !== name);
+    } else {
+      selectedTables = [...selectedTables, name];
+    }
+  }
+
+  function selectAllVisible() {
+    const merged = new Set(selectedTables);
+    for (const t of visibleTables) merged.add(t.name);
+    selectedTables = Array.from(merged);
+  }
+
+  function clearSelectedTables() {
+    selectedTables = [];
+  }
+
   function handleExport() {
     if (!includeSchema && !includeData) {
       appState.showToast('Please select at least Table Structure or Table Data', 'error');
+      return;
+    }
+    if (scopeMode === 'selected' && selectedTables.length === 0) {
+      appState.showToast('Please select at least one table to export', 'error');
       return;
     }
     if (!appState.activeSessionId) return;
@@ -36,17 +83,28 @@
     if (selectedDb) {
       url += `&db=${encodeURIComponent(selectedDb)}`;
     }
-    if (selectedTable) {
-      url += `&table=${encodeURIComponent(selectedTable)}`;
+    if (scopeMode === 'selected') {
+      for (const tbl of selectedTables) {
+        url += `&table=${encodeURIComponent(tbl)}`;
+      }
     }
 
     isExporting = true;
     appState.showToast('Starting SQL dump stream download...', 'info');
 
+    const baseName = selectedDb || 'dump';
+    let downloadName = `${baseName}.sql`;
+    if (scopeMode === 'selected') {
+      downloadName =
+        selectedTables.length === 1
+          ? `${baseName}_${selectedTables[0]}.sql`
+          : `${baseName}_${selectedTables.length}_tables.sql`;
+    }
+
     // Trigger browser download via invisible link
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${selectedDb || 'dump'}${selectedTable ? `_${selectedTable}` : ''}.sql`;
+    a.download = downloadName;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -98,31 +156,115 @@
       <div class="p-5 space-y-4 text-xs font-sans">
         <!-- Target Database -->
         <div class="space-y-1">
-          <label for="dump-db-select" class="font-semibold text-slate-300">Target Database</label>
-          <select
-            id="dump-db-select"
-            bind:value={selectedDb}
-            class="w-full bg-[#090d16] border border-[#334155] focus:border-sky-500 rounded px-2.5 py-1.5 text-xs text-slate-200 font-mono outline-none"
-          >
-            {#each appState.availableDatabases as db}
-              <option value={db}>{db}</option>
-            {/each}
-          </select>
+          <span class="font-semibold text-slate-300 block">Target Database</span>
+          <SearchableSelect
+            options={appState.availableDatabases}
+            value={selectedDb}
+            onchange={handleDbChange}
+            placeholder="Filter databases..."
+            title="Select target database"
+            panelWidth="w-full"
+            triggerClass="w-full justify-between !bg-[#090d16] !border-[#334155] !py-1.5 !px-2.5 !text-xs !font-mono"
+          />
         </div>
 
         <!-- Target Scope / Table -->
-        <div class="space-y-1">
-          <label for="dump-tbl-select" class="font-semibold text-slate-300">Export Scope</label>
-          <select
-            id="dump-tbl-select"
-            bind:value={selectedTable}
-            class="w-full bg-[#090d16] border border-[#334155] focus:border-sky-500 rounded px-2.5 py-1.5 text-xs text-slate-200 font-mono outline-none"
-          >
-            <option value="">Entire Database (All Tables & Views)</option>
-            {#each appState.filteredTables as tbl}
-              <option value={tbl.name}>Single Table: {tbl.name}</option>
-            {/each}
-          </select>
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="font-semibold text-slate-300">Export Scope</span>
+            {#if scopeMode === 'selected'}
+              <span class="text-[11px] font-mono text-sky-400">
+                {selectedTables.length} selected
+              </span>
+            {/if}
+          </div>
+
+          <div class="grid grid-cols-2 gap-1.5 bg-[#090d16] p-1 rounded-lg border border-[#1e293b]">
+            <button
+              type="button"
+              onclick={() => (scopeMode = 'all')}
+              class="px-2.5 py-1.5 rounded text-xs font-semibold transition {scopeMode === 'all'
+                ? 'bg-sky-600/20 text-sky-300 border border-sky-500/40'
+                : 'text-slate-400 hover:text-slate-200 border border-transparent'}"
+            >
+              Entire Database
+            </button>
+            <button
+              type="button"
+              onclick={() => (scopeMode = 'selected')}
+              class="px-2.5 py-1.5 rounded text-xs font-semibold transition {scopeMode === 'selected'
+                ? 'bg-sky-600/20 text-sky-300 border border-sky-500/40'
+                : 'text-slate-400 hover:text-slate-200 border border-transparent'}"
+            >
+              Select Tables ({allCatalogTables.length})
+            </button>
+          </div>
+
+          {#if scopeMode === 'selected'}
+            <div class="bg-[#090d16] border border-[#1e293b] rounded-lg p-2.5 space-y-2">
+              <div class="flex items-center space-x-2">
+                <div class="relative flex-1">
+                  <input
+                    type="text"
+                    bind:value={tableFilter}
+                    placeholder="Filter tables..."
+                    class="w-full bg-[#0b0f19] border border-[#334155] focus:border-sky-500 rounded px-2.5 py-1 text-xs text-slate-200 font-mono outline-none pr-6"
+                  />
+                  {#if tableFilter}
+                    <button
+                      type="button"
+                      onclick={() => (tableFilter = '')}
+                      class="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-[11px]"
+                      aria-label="Clear table filter"
+                    >
+                      ✕
+                    </button>
+                  {/if}
+                </div>
+                <button
+                  type="button"
+                  onclick={selectAllVisible}
+                  class="px-2 py-1 text-[11px] font-semibold text-sky-400 hover:text-sky-300 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/20 rounded transition shrink-0"
+                >
+                  Select All
+                </button>
+                <button
+                  type="button"
+                  onclick={clearSelectedTables}
+                  class="px-2 py-1 text-[11px] font-semibold text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded transition shrink-0"
+                >
+                  Clear
+                </button>
+              </div>
+
+              <div class="max-h-44 overflow-y-auto space-y-0.5 pr-1">
+                {#if visibleTables.length === 0}
+                  <p class="text-[11px] text-slate-500 text-center py-3">
+                    No matching tables found
+                  </p>
+                {:else}
+                  {#each visibleTables as tbl (tbl.name)}
+                    <label class="flex items-center justify-between px-2 py-1 rounded hover:bg-slate-800/60 cursor-pointer select-none">
+                      <span class="flex items-center space-x-2 min-w-0">
+                        <input
+                          type="checkbox"
+                          checked={selectedTables.includes(tbl.name)}
+                          onchange={() => toggleTable(tbl.name)}
+                          class="rounded bg-slate-900 border-slate-700 text-sky-500 focus:ring-0 shrink-0"
+                        />
+                        <span class="font-mono text-xs text-slate-200 truncate">{tbl.name}</span>
+                      </span>
+                      {#if tbl.type === 'VIEW'}
+                        <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-300 border border-purple-500/20 shrink-0 ml-2">
+                          VIEW
+                        </span>
+                      {/if}
+                    </label>
+                  {/each}
+                {/if}
+              </div>
+            </div>
+          {/if}
         </div>
 
         <!-- Dump Options -->
@@ -168,7 +310,7 @@
         </button>
         <button
           onclick={handleExport}
-          disabled={isExporting || (!includeSchema && !includeData)}
+          disabled={isExporting || (!includeSchema && !includeData) || (scopeMode === 'selected' && selectedTables.length === 0)}
           type="button"
           class="px-4 py-1.5 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white rounded text-xs font-semibold flex items-center space-x-1.5 transition shadow-lg shadow-sky-950/40"
         >

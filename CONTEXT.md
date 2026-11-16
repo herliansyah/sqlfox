@@ -547,6 +547,10 @@ _Avoid_: CSV loader, import script, raw insert loop
 The schema dump generation sequence that topologically arranges SQL tables before SQL views (`viewsLast`), ensuring dumped schemas restore without missing-relation errors, paired with object-accurate `DROP VIEW IF EXISTS` statements.
 _Avoid_: Unordered export, raw table dump
 
+**Selective Table Dump**:
+An on-demand SQL export mode extending the View-Ordered Dump Pipeline to stream a user-selected subset of tables (across MySQL, PostgreSQL, and SQLite) into a single combined `.sql` file with per-table consistency and strict subset topological ordering.
+_Avoid_: Table backup, backup vault, multi-zip dump
+
 ## Data Synchronization & Table Operations
 
 **Data Transfer**:

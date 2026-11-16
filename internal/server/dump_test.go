@@ -111,6 +111,47 @@ CREATE VIEW a_titles AS SELECT title FROM books;
 		t.Fatalf("expected reverse-dependency DROPs before CREATEs, got:\n%s", dumpContent)
 	}
 
+	// 4b. Selective Table Dump: multi-table (?table=books&table=authors) excludes unselected views/tables and preserves FK order.
+	resp, err = client.Get(fmt.Sprintf("%s/api/session/%s/export-dump?schema=true&data=true&table=books&table=authors", ts.URL, conn.ID))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("selective multi-table export-dump failed: status=%d, err=%v", resp.StatusCode, err)
+	}
+	selBytes, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatalf("read selective dump body failed: %v", err)
+	}
+	selContent := string(selBytes)
+	if !strings.Contains(selContent, "CREATE TABLE authors") || !strings.Contains(selContent, "CREATE TABLE books") {
+		t.Fatalf("expected both selected tables in dump, got:\n%s", selContent)
+	}
+	if strings.Contains(selContent, "a_titles") {
+		t.Fatalf("expected unselected view a_titles to be excluded, got:\n%s", selContent)
+	}
+	if strings.Index(selContent, "CREATE TABLE authors") > strings.Index(selContent, "CREATE TABLE books") {
+		t.Fatalf("expected FK parent authors before child books in selective dump, got:\n%s", selContent)
+	}
+
+	// 4c. Selective Table Dump: ?tables=authors excludes books, and unknown table returns 404.
+	resp, err = client.Get(fmt.Sprintf("%s/api/session/%s/export-dump?schema=true&data=false&tables=authors", ts.URL, conn.ID))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("selective single-table export-dump failed: status=%d, err=%v", resp.StatusCode, err)
+	}
+	singleBytes, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(singleBytes), "CREATE TABLE authors") || strings.Contains(string(singleBytes), "books") {
+		t.Fatalf("expected only authors in dump, got:\n%s", string(singleBytes))
+	}
+
+	resp, err = client.Get(fmt.Sprintf("%s/api/session/%s/export-dump?table=authors&table=nonexistent_tbl", ts.URL, conn.ID))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 for unknown table in selective dump, got %d", resp.StatusCode)
+	}
+
 	// 5. Test GET /api/session/{id}/export-smart-seed?limit=2&ddl=true
 	resp, err = client.Get(fmt.Sprintf("%s/api/session/%s/export-smart-seed?limit=2&ddl=true", ts.URL, conn.ID))
 	if err != nil || resp.StatusCode != http.StatusOK {
