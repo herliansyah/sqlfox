@@ -30,6 +30,7 @@
   let open = $state(false);
   let query = $state('');
   let activeIndex = $state(0);
+  let panelStyle = $state('');
   let triggerEl = $state<HTMLButtonElement | null>(null);
   let searchEl = $state<HTMLInputElement | null>(null);
   let listEl = $state<HTMLDivElement | null>(null);
@@ -44,7 +45,21 @@
     if (activeIndex >= filtered.length) activeIndex = Math.max(0, filtered.length - 1);
   });
 
+  function updatePanelPosition() {
+    if (!triggerEl) return;
+    const rect = triggerEl.getBoundingClientRect();
+    const top = Math.min(rect.bottom + 4, window.innerHeight - 16);
+    if (align === 'right') {
+      const right = Math.max(8, window.innerWidth - rect.right);
+      panelStyle = `top: ${top}px; right: ${right}px;`;
+    } else {
+      const left = Math.max(8, Math.min(rect.left, window.innerWidth - 272));
+      panelStyle = `top: ${top}px; left: ${left}px;`;
+    }
+  }
+
   async function openMenu() {
+    updatePanelPosition();
     open = true;
     query = '';
     const idx = options.indexOf(value);
@@ -122,16 +137,19 @@
   <Icon name="chevron-down" class="w-3 h-3 text-slate-500 shrink-0" />
 </button>
 
+<svelte:window onresize={() => { if (open) updatePanelPosition(); }} />
+
 {#if open}
   <button
     tabindex="-1"
     aria-label="Close"
-    class="fixed inset-0 z-40 bg-transparent cursor-default"
+    class="fixed inset-0 z-[110] bg-transparent cursor-default"
     onclick={() => closeMenu()}
   ></button>
 
   <div
-    class="absolute top-full {align === 'right' ? 'right-0' : 'left-0'} mt-1 {panelWidth} bg-[#0f172a] border border-slate-700/90 rounded-lg shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-100"
+    style={panelStyle}
+    class="fixed {panelWidth} bg-[#0f172a] border border-slate-700/90 rounded-lg shadow-2xl z-[120] overflow-hidden animate-in fade-in zoom-in-95 duration-100"
   >
     <div class="p-2 border-b border-slate-800">
       <div class="relative flex items-center">

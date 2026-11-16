@@ -290,6 +290,7 @@ export interface EditorTab {
   sortCol?: string | null;
   sortDir?: 'ASC' | 'DESC' | null;
   explainResult?: any;
+  explainSql?: string;
   multiResults?: QueryExecutionResult[];
   activeResultIndex?: number;
   streamBatchOffset?: number;

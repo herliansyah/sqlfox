@@ -382,6 +382,20 @@ import { copyText } from '../../utils/clipboard';
         </div>
       {/if}
     </div>
+
+    <!-- Read-Only / Write-Allowed Lock Pill (grouped with connection & environment context) -->
+    {#if appState.activeConnection}
+      <button
+        onclick={handleToggleReadOnly}
+        class="h-7 px-2 rounded-md font-medium transition border flex items-center gap-1.5 shrink-0 {appState.isReadOnly
+          ? 'bg-rose-950/60 border-rose-700 text-rose-300 hover:bg-rose-900/60'
+          : 'bg-emerald-950/60 border-emerald-700 text-emerald-300 hover:bg-emerald-900/60'}"
+        title={appState.isReadOnly ? 'Read-Only mode active — click to allow writes' : 'Write mode active — click to lock into read-only mode'}
+      >
+        <Icon name={appState.isReadOnly ? 'lock' : 'unlock'} class="w-3 h-3 {appState.isReadOnly ? 'text-rose-400' : 'text-emerald-400'}" />
+        <span class="hidden xl:inline text-[11px] font-semibold">{appState.isReadOnly ? 'Read-Only' : 'Write Allowed'}</span>
+      </button>
+    {/if}
   </div>
 
   <!-- Center: command palette trigger, styled as a search field -->
@@ -452,22 +466,6 @@ import { copyText } from '../../utils/clipboard';
       {@render toolMenu('dbtools', 'DB Tools', 'wrench', 'text-sky-400', dbToolItems)}
       {@render toolMenu('settings', 'Settings', 'settings', 'text-cyan-400', settingsItems)}
     </div>
-
-    <div class={navDivider}></div>
-
-    <!-- Read-Only / Write-Allowed Lock Pill -->
-    {#if appState.activeConnection}
-      <button
-        onclick={handleToggleReadOnly}
-        class="h-7 px-2 rounded-md font-medium transition border flex items-center gap-1.5 {appState.isReadOnly
-          ? 'bg-rose-950/60 border-rose-700 text-rose-300 hover:bg-rose-900/60'
-          : 'bg-emerald-950/60 border-emerald-700 text-emerald-300 hover:bg-emerald-900/60'}"
-        title={appState.isReadOnly ? 'Click to enable write permissions' : 'Click to lock into read-only mode'}
-      >
-        <Icon name={appState.isReadOnly ? 'lock' : 'unlock'} class="w-3 h-3 {appState.isReadOnly ? 'text-rose-400' : 'text-emerald-400'}" />
-        <span class="hidden xl:inline text-[11px] font-semibold">{appState.isReadOnly ? 'Read-Only' : 'Write Allowed'}</span>
-      </button>
-    {/if}
 
     <div class={navDivider}></div>
 

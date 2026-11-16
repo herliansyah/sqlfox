@@ -240,6 +240,7 @@ export class AppState {
   isRefreshAllOpen = $state<boolean>(false);
   isImpactPreviewOpen = $state<boolean>(false);
   impactPreviewData = $state<any>(null);
+  impactPreviewSql = $state<string>('');
   isDataTransferOpen = $state<boolean>(false);
   isDataSyncOpen = $state<boolean>(false);
   isAuditDrawerOpen = $state<boolean>(false);
@@ -1717,16 +1718,29 @@ export class AppState {
     }
   }
 
-  async explainCurrentTab(sqlOverride?: string) {
+  async explainCurrentTab(sqlOverride?: string, openModal = true) {
     const tab = this.activeTab;
+    const sessionId = this.activeSessionId;
     const sql = sqlOverride ?? tab?.sql ?? '';
     const database = tab?.database || this.currentDatabase;
-    if (!tab || !this.activeSessionId || !sql.trim() || tab.isExecuting) return;
+    if (!tab || !sessionId || !sql.trim() || tab.isExecuting) return;
     tab.isExecuting = true;
+    if (tab.explainSql !== sql) {
+      tab.explainResult = null;
+      tab.explainSql = undefined;
+    }
     try {
-      const res = await api.explainQuery(this.activeSessionId, sql, database);
+      const res = await api.explainQuery(sessionId, sql, database);
+      if (this.activeSessionId !== sessionId) return;
       tab.explainResult = res;
-      this.showToast('Query plan generated', 'success');
+      tab.explainSql = sql;
+      if (openModal) {
+        this.impactPreviewData = res;
+        this.impactPreviewSql = sql;
+        this.isImpactPreviewOpen = true;
+      } else {
+        this.showToast('Query plan generated', 'success');
+      }
     } catch (err: any) {
       this.showToast(`Explain failed: ${err.message}`, 'error');
     } finally {
@@ -1738,10 +1752,17 @@ export class AppState {
   async openImpactPreview() {
     const tab = this.activeTab;
     if (!tab || !this.activeSessionId) return;
-    if (!tab.explainResult && tab.sql) {
-      await this.explainCurrentTab();
+    const targetSql = this.getEditorTargetSql() ?? tab.sql ?? '';
+    if (!targetSql.trim()) {
+      this.showToast('No SQL statement to explain', 'info');
+      return;
     }
+    if (!tab.explainResult || tab.explainSql !== targetSql) {
+      await this.explainCurrentTab(targetSql, false);
+    }
+    if (!tab.explainResult) return;
     this.impactPreviewData = tab.explainResult;
+    this.impactPreviewSql = targetSql;
     this.isImpactPreviewOpen = true;
   }
 
