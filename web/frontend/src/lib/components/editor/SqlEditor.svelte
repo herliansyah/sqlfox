@@ -254,6 +254,15 @@
       </button>
 
       <button
+        onclick={() => appState.openSnippetsModal()}
+        class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs flex items-center space-x-1.5 transition shadow-sm"
+        title="Query Snippets & Templates Library (Ctrl+Shift+S)"
+      >
+        <Icon name="code" class="w-3.5 h-3.5 text-sky-400" />
+        <span>Snippets</span>
+      </button>
+
+      <button
         onclick={() => appState.saveQueryToNote(currentTab?.sql, currentTab?.title)}
         disabled={currentTab?.isExecuting || !currentTab?.sql}
         class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-40 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs flex items-center space-x-1.5 transition shadow-sm"
