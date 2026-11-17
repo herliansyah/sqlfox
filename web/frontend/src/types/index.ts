@@ -339,7 +339,6 @@ export interface EditorTab {
   filterRaw?: string;
   appliedFilter?: string;
   filterPills?: FilterPill[];
-  queryFilters?: Record<string, string>;
   queryPage?: number;
   queryPageSize?: number;
   showFilterBar?: boolean;

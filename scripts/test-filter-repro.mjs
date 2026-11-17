@@ -367,4 +367,21 @@ console.log('\n--- TEST 9: Postgres dialect quoting ---');
 assert.strictEqual(compileFilterPills([{ col: 'name', op: '=', val: 'Alice' }], 'postgres'),
   `"name" = 'Alice'`, 'Postgres driver must double-quote identifiers');
 
-console.log('\n🎉 ALL TABLE FILTER SOURCE-ASSERTION TESTS PASSED (GREEN)!');
+// ---------------------------------------------------------------------------
+// TEST 10: Unified Filter Button & Bar (no per-column header filter inputs)
+// ---------------------------------------------------------------------------
+console.log('\n--- TEST 10: Unified Filter Button & Bar ---');
+assert(
+  !gridCode.includes('col-filter-input'),
+  'VirtualGrid must not render per-column header filter textboxes (.col-filter-input)'
+);
+assert(
+  gridCode.includes('id="btn-grid-filter"'),
+  'VirtualGrid must render unified Filter toggle button (#btn-grid-filter)'
+);
+assert(
+  gridCode.includes("if (String(pill.val ?? '').trim() === '') return true;"),
+  'matchesFilterPill must ignore empty pill values until user enters criteria'
+);
+
+console.log('\n🎉 ALL TABLE FILTER SOURCE-ASSERTION TESTS PASSED (GREEN)!')

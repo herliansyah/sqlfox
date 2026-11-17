@@ -1385,7 +1385,6 @@ export class AppState {
         filterMode: t.filterMode || 'pills',
         filterRaw: t.filterRaw || '',
         appliedFilter: t.appliedFilter || '',
-        queryFilters: t.queryFilters || {},
         queryPage: t.queryPage || 1,
         queryPageSize: t.queryPageSize || 100,
         showFilterBar: Boolean(t.showFilterBar),
@@ -1768,7 +1767,6 @@ export class AppState {
     newTab.filterPills = tab.filterPills ? JSON.parse(JSON.stringify(tab.filterPills)) : undefined;
     newTab.filterRaw = tab.filterRaw;
     newTab.appliedFilter = tab.appliedFilter;
-    newTab.queryFilters = tab.queryFilters ? { ...tab.queryFilters } : undefined;
     newTab.sortCol = tab.sortCol;
     newTab.sortDir = tab.sortDir;
     if (newTab.isTableViewer && newTab.tableName) {
@@ -1996,7 +1994,6 @@ export class AppState {
     tab.hasMoreStream = false;
     tab.baseStreamSQL = sql;
     tab.queryPage = 1;
-    tab.queryFilters = {};
     this.tabs = [...this.tabs];
 
     const timer = setInterval(() => {

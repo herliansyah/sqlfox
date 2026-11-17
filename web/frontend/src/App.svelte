@@ -193,8 +193,14 @@
       return;
     }
 
-    // Ctrl + F in Table Viewer: Focus table filter bar
-    if (isCtrl && !e.shiftKey && e.key.toLowerCase() === 'f' && appState.activeTab?.isTableViewer && !inCodeMirror) {
+    // Ctrl + F outside CodeMirror: Focus grid filter bar
+    if (
+      isCtrl &&
+      !e.shiftKey &&
+      e.key.toLowerCase() === 'f' &&
+      !inCodeMirror &&
+      (appState.activeTab?.isTableViewer || (appState.activeTab?.activeResult?.columns?.length ?? 0) > 0)
+    ) {
       e.preventDefault();
       window.dispatchEvent(new CustomEvent('sqlfox:focus-table-filter'));
       return;

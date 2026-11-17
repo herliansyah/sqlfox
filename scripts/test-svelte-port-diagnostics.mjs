@@ -108,14 +108,14 @@ assert(
   'VirtualGrid must bind isExecuting directly to appState.activeTab to avoid stale loading spinner'
 );
 
-// --- Check 7: Table Viewer Filter Bar Toggle (Default Hidden) ---
+// --- Check 7: Grid Filter Bar Toggle (Default Hidden) ---
 assert(
   virtualGridCode.includes('isFilterOpen') && virtualGridCode.includes('toggleFilterBar'),
   'VirtualGrid must implement isFilterOpen and toggleFilterBar'
 );
 assert(
-  virtualGridCode.includes('currentTab?.isTableViewer && isFilterOpen'),
-  'VirtualGrid must toggle Table Viewer filter bar with isFilterOpen'
+  virtualGridCode.includes('{#if isFilterOpen &&'),
+  'VirtualGrid must toggle filter bar with isFilterOpen'
 );
 assert(
   appStateCode.includes('showFilterBar: false'),

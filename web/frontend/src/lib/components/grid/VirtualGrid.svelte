@@ -89,17 +89,22 @@
     }
   }
 
-  // Focus filter handler via Ctrl+F inside TableViewer
+  // Focus filter handler via Ctrl+F inside grid
   function handleFocusTableFilterEvent() {
-    if (!currentTab?.isTableViewer) return;
+    if (!currentTab) return;
     if (!currentTab.showFilterBar) {
       appState.toggleFilterBar();
+    }
+    if (
+      (!currentTab.isTableViewer || currentTab.filterMode !== 'raw') &&
+      (!currentTab.filterPills || currentTab.filterPills.length === 0)
+    ) {
+      appState.addFilterPill();
     }
     tick().then(() => {
       const el =
         document.getElementById('table-filter-raw-input') ||
-        document.querySelector<HTMLInputElement>('#grid-filter-pill-val-0') ||
-        document.querySelector<HTMLInputElement>('.col-filter-input');
+        document.querySelector<HTMLInputElement>('#grid-filter-pill-val-0');
       el?.focus();
     });
   }
@@ -161,16 +166,36 @@
 
   // Filter Bar Toggle State
   let isFilterOpen = $derived(Boolean(currentTab?.showFilterBar));
-  let hasActiveFilter = $derived(
+  let hasFilterEntries = $derived(
     Boolean(
       currentTab?.appliedFilter ||
       (currentTab?.filterPills && currentTab.filterPills.length > 0) ||
       currentTab?.filterRaw
     )
   );
+  let hasActiveFilter = $derived(
+    Boolean(
+      currentTab?.isTableViewer
+        ? currentTab?.appliedFilter ||
+            (currentTab?.filterPills && currentTab.filterPills.length > 0) ||
+            currentTab?.filterRaw
+        : currentTab?.filterPills?.some(
+            (p) => p.op === 'IS NULL' || p.op === 'IS NOT NULL' || String(p.val ?? '').trim() !== ''
+          )
+    )
+  );
 
   function toggleFilterBar() {
+    const opening = !isFilterOpen;
     appState.toggleFilterBar();
+    if (
+      opening &&
+      currentTab &&
+      (!currentTab.isTableViewer || currentTab.filterMode !== 'raw') &&
+      (!currentTab.filterPills || currentTab.filterPills.length === 0)
+    ) {
+      appState.addFilterPill();
+    }
   }
 
   function getColName(col: any): string {
@@ -250,42 +275,10 @@
     return map;
   });
 
-  function matchesFilterCondition(cellVal: any, expr: string): boolean {
-    const q = expr.trim();
-    if (!q) return true;
-    const upper = q.toUpperCase();
-    if (upper === 'NULL' || upper === 'IS NULL') return cellVal === null || cellVal === undefined;
-    if (upper === '!NULL' || upper === 'IS NOT NULL') return cellVal !== null && cellVal !== undefined;
-    if (cellVal === null || cellVal === undefined) return false;
-    const str = typeof cellVal === 'object' ? JSON.stringify(cellVal) : String(cellVal);
-    if (q.startsWith('>=')) {
-      const n = Number(q.slice(2).trim());
-      return Number.isFinite(n) ? Number(cellVal) >= n : str >= q.slice(2).trim();
-    }
-    if (q.startsWith('<=')) {
-      const n = Number(q.slice(2).trim());
-      return Number.isFinite(n) ? Number(cellVal) <= n : str <= q.slice(2).trim();
-    }
-    if (q.startsWith('!=') || q.startsWith('<>')) {
-      return str.toLowerCase() !== q.slice(2).trim().toLowerCase();
-    }
-    if (q.startsWith('=')) {
-      return str.toLowerCase() === q.slice(1).trim().toLowerCase();
-    }
-    if (q.startsWith('>')) {
-      const n = Number(q.slice(1).trim());
-      return Number.isFinite(n) ? Number(cellVal) > n : str > q.slice(1).trim();
-    }
-    if (q.startsWith('<')) {
-      const n = Number(q.slice(1).trim());
-      return Number.isFinite(n) ? Number(cellVal) < n : str < q.slice(1).trim();
-    }
-    return str.toLowerCase().includes(q.toLowerCase());
-  }
-
   function matchesFilterPill(cellVal: any, pill: FilterPill): boolean {
     if (pill.op === 'IS NULL') return cellVal === null || cellVal === undefined;
     if (pill.op === 'IS NOT NULL') return cellVal !== null && cellVal !== undefined;
+    if (String(pill.val ?? '').trim() === '') return true;
     if (cellVal === null || cellVal === undefined) return false;
     const str = typeof cellVal === 'object' ? JSON.stringify(cellVal) : String(cellVal);
     const valStr = String(pill.val ?? '');
@@ -335,21 +328,6 @@
   let processedRows = $derived.by(() => {
     if (!result?.rows) return [];
     let list = result.rows.map((r, idx) => ({ origIdx: idx, data: r }));
-
-    // Client-side per-column header filters (query tabs & quick scan on TableViewer)
-    const qFilters = currentTab?.queryFilters;
-    if (qFilters) {
-      const activePairs = Object.entries(qFilters).filter(([, expr]) => expr && expr.trim().length > 0);
-      if (activePairs.length > 0) {
-        list = list.filter((item) =>
-          activePairs.every(([colName, expr]) => {
-            const cIdx = colIndexMap.get(colName);
-            if (cIdx === undefined) return true;
-            return matchesFilterCondition(item.data[cIdx], expr);
-          })
-        );
-      }
-    }
 
     // Client-side pill filtering for non-TableViewer query result sets
     if (!currentTab?.isTableViewer && currentTab?.filterPills && currentTab.filterPills.length > 0) {
@@ -493,11 +471,6 @@
     } else {
       selectedRowIndices.splice(idx, 1);
     }
-  }
-
-  function setQueryColumnFilter(colName: string, expr: string) {
-    if (!currentTab) return;
-    currentTab.queryFilters = { ...(currentTab.queryFilters || {}), [colName]: expr };
   }
 
   async function handleBatchDelete() {
@@ -1239,15 +1212,26 @@
           <Icon name="trash-2" class="w-3 h-3 text-rose-400" />
           <span>Delete</span>
         </button>
+      {/if}
 
-        <div class="h-4 w-px bg-slate-800 mx-0.5"></div>
+      {#if currentTab?.isTableViewer || (result?.columns && result.columns.length > 0)}
+        {#if currentTab?.isTableViewer}
+          <div class="h-4 w-px bg-slate-800 mx-0.5"></div>
+        {/if}
 
         <!-- Filter Bar Toggle Button -->
         <button
+          id="btn-grid-filter"
           type="button"
           onclick={toggleFilterBar}
           class="h-6 px-2 rounded {isFilterOpen ? 'bg-sky-500/20 text-sky-300 border-sky-500/40 font-medium' : hasActiveFilter ? 'bg-emerald-950/40 text-emerald-300 border-emerald-600/50 hover:bg-emerald-900/40' : 'bg-[#1e293b] text-slate-300 hover:text-white'} border border-slate-700/80 hover:border-slate-600 flex items-center space-x-1.5 text-[11px] transition"
-          title={hasActiveFilter ? 'Filter active (click to toggle WHERE / Pills bar)' : 'Toggle Filter (WHERE / Pills)'}
+          title={hasActiveFilter
+            ? currentTab?.isTableViewer
+              ? 'Filter active (click to toggle WHERE / Pills bar)'
+              : 'Filter active (click to toggle Filter Pills bar)'
+            : currentTab?.isTableViewer
+              ? 'Toggle Filter (WHERE / Pills)'
+              : 'Toggle Filter (Pills)'}
         >
           <Icon name="filter" class="w-3 h-3 {isFilterOpen ? 'text-sky-400' : hasActiveFilter ? 'text-emerald-400' : 'text-slate-400'}" />
           <span>Filter</span>
@@ -1479,31 +1463,37 @@
     </div>
   </div>
 
-  <!-- TablePlus-style Filter Bar (Table Viewer) or Filter Pills Bar -->
-  {#if currentTab?.isTableViewer && isFilterOpen}
+  <!-- TablePlus-style Filter Bar (Table Viewer: Pills / WHERE; Query Tab: Client-side Pills) -->
+  {#if isFilterOpen && (currentTab?.isTableViewer || (result?.columns && result.columns.length > 0))}
     <div class="min-h-9 bg-[#0b0f19] border-b border-slate-800 px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs select-none shrink-0 animate-in fade-in duration-100">
       <div class="flex flex-wrap items-center gap-2 flex-1 min-w-0">
-        <!-- Mode Toggle: Pills vs WHERE -->
-        <div class="inline-flex rounded border border-slate-700/80 bg-[#090d16] p-0.5 select-none" role="group">
-          <button
-            type="button"
-            onclick={() => appState.setFilterMode('pills')}
-            class="px-2 py-0.5 text-[11px] font-semibold rounded transition {currentTab.filterMode !== 'raw' ? 'bg-sky-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-white'}"
-            title="Filter by column pills"
-          >
-            Pills
-          </button>
-          <button
-            type="button"
-            onclick={() => appState.setFilterMode('raw')}
-            class="px-2 py-0.5 text-[11px] font-semibold rounded transition {currentTab.filterMode === 'raw' ? 'bg-sky-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-white'}"
-            title="Freeform SQL WHERE expression"
-          >
-            WHERE
-          </button>
-        </div>
+        {#if currentTab?.isTableViewer}
+          <!-- Mode Toggle: Pills vs WHERE -->
+          <div class="inline-flex rounded border border-slate-700/80 bg-[#090d16] p-0.5 select-none" role="group">
+            <button
+              type="button"
+              onclick={() => appState.setFilterMode('pills')}
+              class="px-2 py-0.5 text-[11px] font-semibold rounded transition {currentTab.filterMode !== 'raw' ? 'bg-sky-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-white'}"
+              title="Filter by column pills"
+            >
+              Pills
+            </button>
+            <button
+              type="button"
+              onclick={() => appState.setFilterMode('raw')}
+              class="px-2 py-0.5 text-[11px] font-semibold rounded transition {currentTab.filterMode === 'raw' ? 'bg-sky-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-white'}"
+              title="Freeform SQL WHERE expression"
+            >
+              WHERE
+            </button>
+          </div>
+        {:else}
+          <span class="px-1.5 py-0.5 bg-sky-950/80 text-sky-400 border border-sky-800/80 rounded font-mono text-[10px] font-bold tracking-wider select-none shrink-0">
+            FILTER
+          </span>
+        {/if}
 
-        {#if currentTab.filterMode === 'raw'}
+        {#if currentTab?.isTableViewer && currentTab.filterMode === 'raw'}
           <!-- Freeform SQL WHERE Expression Input -->
           <div class="flex-1 flex items-center space-x-1.5 min-w-[260px]">
             <span class="px-1.5 py-0.5 bg-sky-950 text-sky-400 border border-sky-800 rounded font-mono text-[10px] font-bold tracking-wider select-none shrink-0">
@@ -1547,7 +1537,7 @@
         {:else}
           <!-- Pills Mode: List of condition pills + '+ AND' button -->
           <div class="flex flex-wrap items-center gap-1.5">
-            {#each currentTab.filterPills || [] as pill, idx}
+            {#each currentTab?.filterPills || [] as pill, idx}
               {@const isUnary = pill.op === 'IS NULL' || pill.op === 'IS NOT NULL'}
               <div class="inline-flex items-center space-x-1 bg-[#090d16] border border-sky-800/80 rounded px-1.5 py-0.5 text-[11px] font-mono shadow-sm">
                 <!-- Column Select -->
@@ -1597,7 +1587,7 @@
                       appState.updateFilterPill(idx, { val: (e.target as HTMLInputElement).value });
                     }}
                     onkeydown={(e) => {
-                      if (e.key === 'Enter') appState.applyTableFilter();
+                      if (e.key === 'Enter' && currentTab?.isTableViewer) appState.applyTableFilter();
                     }}
                     placeholder={pill.op === 'LIKE' || pill.op === 'NOT LIKE' ? 'substring or %' : (pill.op === 'IN' || pill.op === 'NOT IN' ? '1, 2, 3' : 'val')}
                     class="bg-transparent text-slate-100 font-mono text-[11px] outline-none px-1 py-0.5 w-20 focus:w-36 transition-all border-b border-transparent focus:border-sky-400"
@@ -1627,7 +1617,7 @@
               <span>AND</span>
             </button>
 
-            {#if currentTab.filterPills && currentTab.filterPills.length > 0}
+            {#if currentTab?.isTableViewer && currentTab.filterPills && currentTab.filterPills.length > 0}
               <button
                 type="button"
                 onclick={() => appState.applyTableFilter()}
@@ -1640,7 +1630,7 @@
         {/if}
 
         <!-- Active Filter Indicator Badge -->
-        {#if currentTab.appliedFilter}
+        {#if currentTab?.isTableViewer ? currentTab.appliedFilter : hasActiveFilter}
           <span class="px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-950 text-emerald-300 border border-emerald-700 flex items-center space-x-1" title="Active filter applied">
             <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
             <span>Filtered</span>
@@ -1650,7 +1640,7 @@
 
       <!-- Right side: Clear Filter & Open in SQL Tab -->
       <div class="flex items-center space-x-2 shrink-0">
-        {#if currentTab.appliedFilter || (currentTab.filterPills && currentTab.filterPills.length > 0) || currentTab.filterRaw}
+        {#if hasFilterEntries}
           <button
             type="button"
             onclick={() => appState.clearTableFilter()}
@@ -1661,15 +1651,17 @@
           </button>
         {/if}
 
-        <button
-          type="button"
-          onclick={() => appState.handoffTableQueryToEditor()}
-          class="h-6 px-2 rounded bg-[#1e293b] hover:bg-slate-700 text-sky-400 hover:text-sky-300 border border-[#334155] flex items-center space-x-1 text-[11px] transition font-mono"
-          title="Open filtered query in full SQL Editor"
-        >
-          <Icon name="file-code" class="w-3 h-3" />
-          <span>SQL</span>
-        </button>
+        {#if currentTab?.isTableViewer}
+          <button
+            type="button"
+            onclick={() => appState.handoffTableQueryToEditor()}
+            class="h-6 px-2 rounded bg-[#1e293b] hover:bg-slate-700 text-sky-400 hover:text-sky-300 border border-[#334155] flex items-center space-x-1 text-[11px] transition font-mono"
+            title="Open filtered query in full SQL Editor"
+          >
+            <Icon name="file-code" class="w-3 h-3" />
+            <span>SQL</span>
+          </button>
+        {/if}
 
         <button
           type="button"
@@ -1680,40 +1672,6 @@
           <Icon name="x" class="w-3.5 h-3.5" />
         </button>
       </div>
-    </div>
-  {:else if currentTab?.filterPills && currentTab.filterPills.length > 0}
-    <!-- Query Tab Filter Pills Bar (if quick filters active from context menu) -->
-    <div class="min-h-8 bg-[#090d16] border-b border-[#1e293b] px-3 py-1 flex items-center justify-between gap-2 text-xs">
-      <div class="flex flex-wrap items-center gap-1.5">
-        <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider flex items-center space-x-1">
-          <Icon name="filter" class="w-3 h-3 text-sky-400" />
-          <span>Filters:</span>
-        </span>
-        {#each currentTab.filterPills as pill, idx}
-          <div class="inline-flex items-center space-x-1 bg-sky-950/60 border border-sky-800/60 text-sky-300 px-2 py-0.5 rounded text-[11px] font-mono">
-            <span class="font-bold">{pill.col}</span>
-            <span class="text-sky-400 font-semibold">{pill.op}</span>
-            {#if pill.op !== 'IS NULL' && pill.op !== 'IS NOT NULL'}
-              <span class="text-slate-100">'{pill.val}'</span>
-            {/if}
-            <button
-              onclick={() => appState.removeFilterPill(idx)}
-              class="text-sky-400 hover:text-white ml-1 p-0.5 rounded"
-              title="Remove filter"
-              aria-label="Remove filter"
-            >
-              <Icon name="x" class="w-2.5 h-2.5" />
-            </button>
-          </div>
-        {/each}
-      </div>
-
-      <button
-        onclick={() => appState.clearFilterPills()}
-        class="text-[11px] text-slate-400 hover:text-rose-400 transition underline shrink-0"
-      >
-        Clear All
-      </button>
     </div>
   {/if}
 
@@ -1793,7 +1751,7 @@
       class="flex-1 overflow-auto relative border-t border-[#1e293b] outline-none"
     >
       <table id="results-table" class="border-collapse text-left font-mono text-xs w-auto">
-        <!-- Sticky Header + Per-Column Header Quick Filter Row -->
+        <!-- Sticky Header -->
         <thead class="sticky top-0 z-20 bg-[#0f172a] border-b border-[#334155] shadow-sm select-none">
           <tr>
             <th class="w-16 px-2 py-2 text-center text-[10px] text-slate-500 bg-[#090d16] border-r border-[#1e293b] font-medium sticky left-0 z-30">
@@ -1828,56 +1786,6 @@
                   {/if}
                   {#if effectiveSortCol === colName}
                     <Icon name={effectiveSortDir === 'ASC' ? 'chevron-up' : 'chevron-down'} class="w-3 h-3 text-sky-400 shrink-0 ml-1" />
-                  {/if}
-                </div>
-              </th>
-            {/each}
-          </tr>
-          <!-- Second Header Row: Per-Column Quick Filter Inputs -->
-          <tr class="bg-[#090d16]/95 border-b border-[#1e293b]">
-            <th class="px-1 py-1 text-center bg-[#090d16] border-r border-[#1e293b] sticky left-0 z-30">
-              {#if currentTab?.queryFilters && Object.values(currentTab.queryFilters).some((v) => v?.trim())}
-                <button
-                  type="button"
-                  onclick={() => { if (currentTab) currentTab.queryFilters = {}; }}
-                  class="text-[9px] text-rose-400 hover:text-rose-200 font-mono"
-                  title="Clear all header filters"
-                >
-                  Clear
-                </button>
-              {:else}
-                <Icon name="filter" class="w-2.5 h-2.5 text-slate-600 mx-auto" />
-              {/if}
-            </th>
-            {#each visibleColumns as col}
-              {@const colName = getColName(col)}
-              {@const qVal = currentTab?.queryFilters?.[colName] || ''}
-              <th class="px-1.5 py-1 border-r border-[#1e293b] font-normal">
-                <div class="relative flex items-center">
-                  <input
-                    type="text"
-                    value={qVal}
-                    oninput={(e) => setQueryColumnFilter(colName, (e.currentTarget as HTMLInputElement).value)}
-                    onkeydown={(e) => {
-                      e.stopPropagation();
-                      if (e.key === 'Escape') setQueryColumnFilter(colName, '');
-                      if (e.key === 'Enter' && currentTab?.isTableViewer && qVal.trim()) {
-                        appState.addFilterPill(colName, 'LIKE', qVal.trim());
-                        appState.applyTableFilter();
-                      }
-                    }}
-                    placeholder="Filter (=, >, NULL)..."
-                    class="col-filter-input w-full min-w-[75px] bg-[#0f172a] border border-slate-800 focus:border-sky-500 rounded px-1.5 py-0.5 pr-4 text-[10px] font-mono text-slate-200 placeholder-slate-600 outline-none"
-                  />
-                  {#if qVal}
-                    <button
-                      type="button"
-                      onclick={() => setQueryColumnFilter(colName, '')}
-                      class="absolute right-1 text-slate-500 hover:text-slate-200"
-                      title="Clear column filter"
-                    >
-                      <Icon name="x" class="w-2.5 h-2.5" />
-                    </button>
                   {/if}
                 </div>
               </th>
