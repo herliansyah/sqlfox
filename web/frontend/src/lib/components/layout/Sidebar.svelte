@@ -50,6 +50,7 @@
   onDestroy(stopResize);
 
   let showDbDropdown = $state(false);
+  let showDbActionsMenu = $state(false);
   let dbFilter = $state('');
   let dbActiveIndex = $state(0);
   let dbSearchInput = $state<HTMLInputElement | null>(null);
@@ -60,6 +61,7 @@
   });
 
   async function openDbDropdown() {
+    showDbActionsMenu = false;
     showDbDropdown = true;
     dbFilter = '';
     const idx = (appState.availableDatabases || []).indexOf(appState.currentDatabase || '');
@@ -222,6 +224,9 @@
         showDbDropdown = false;
         dbFilter = '';
       }
+      if (showDbActionsMenu) {
+        showDbActionsMenu = false;
+      }
       closeTableMenu();
     }
   }
@@ -345,35 +350,102 @@
         </div>
       </button>
 
-      <!-- Quick Reload Schema & Refresh All Buttons -->
-      <div class="flex items-center space-x-1 shrink-0">
-        {#if appState.currentDatabase && appState.catalogTimestamps[appState.currentDatabase.toLowerCase()]}
-          <span
-            id="schema-cache-badge"
-            class="text-[9px] font-mono text-amber-400/90 bg-amber-950/40 border border-amber-800/40 px-1 py-0.5 rounded shrink-0"
-            title="Cached schema loaded at {appState.catalogTimestamps[appState.currentDatabase.toLowerCase()]}"
+      <!-- Single 3-Dots Menu for Schema & Database Actions -->
+      <div class="relative shrink-0">
+        <button
+          id="sidebar-db-actions-btn"
+          type="button"
+          onclick={() => {
+            showDbDropdown = false;
+            showDbActionsMenu = !showDbActionsMenu;
+          }}
+          aria-haspopup="menu"
+          aria-expanded={showDbActionsMenu}
+          class="h-7 w-7 flex items-center justify-center rounded bg-[#0f172a] hover:bg-[#1e293b] border border-slate-700/80 hover:border-slate-600 text-slate-400 hover:text-sky-300 transition-colors shadow-sm cursor-pointer"
+          title="Schema & database actions"
+        >
+          <Icon
+            name={appState.isLoadingCatalog ? 'refresh-cw' : 'more-vertical'}
+            class="w-3.5 h-3.5 {appState.isLoadingCatalog ? 'animate-spin text-sky-400' : ''}"
+          />
+        </button>
+
+        {#if showDbActionsMenu}
+          <button
+            tabindex="-1"
+            aria-label="Close"
+            class="fixed inset-0 z-40 bg-transparent cursor-default"
+            onclick={() => (showDbActionsMenu = false)}
+          ></button>
+
+          <div
+            role="menu"
+            aria-label="Schema and database actions"
+            class="absolute right-0 top-full mt-1 w-56 bg-[#0f172a] border border-slate-700/90 rounded-lg shadow-2xl z-50 py-1 text-xs divide-y divide-slate-800/80 animate-in fade-in duration-100"
           >
-            ⚡{appState.catalogTimestamps[appState.currentDatabase.toLowerCase()]}
-          </span>
+            {#if appState.currentDatabase && appState.catalogTimestamps[appState.currentDatabase.toLowerCase()]}
+              {@const activeStamp = appState.catalogTimestamps[appState.currentDatabase.toLowerCase()]}
+              <div
+                id="schema-cache-badge"
+                class="px-3 py-1.5 flex items-center justify-between text-[11px] text-slate-400"
+                title="Cached schema loaded at {activeStamp}"
+              >
+                <span class="inline-flex items-center gap-1.5 text-amber-400/90 font-medium">
+                  <Icon name="zap" class="w-3 h-3 shrink-0" />
+                  <span>Schema cache</span>
+                </span>
+                <span class="font-mono text-[10px] text-amber-300 bg-amber-950/40 border border-amber-800/40 px-1.5 py-0.5 rounded">
+                  {activeStamp}
+                </span>
+              </div>
+            {/if}
+
+            <div class="py-1">
+              <button
+                type="button"
+                role="menuitem"
+                disabled={appState.isLoadingCatalog || !appState.currentDatabase}
+                onclick={() => {
+                  showDbActionsMenu = false;
+                  appState.refreshCatalog();
+                }}
+                class="w-full text-left px-3 py-1.5 hover:bg-slate-800/80 disabled:opacity-40 flex items-center gap-2 text-slate-200 transition-colors"
+              >
+                <Icon name="refresh-cw" class="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                <span>Refresh Active Schema</span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={!appState.activeSessionId}
+                onclick={() => {
+                  showDbActionsMenu = false;
+                  appState.isRefreshAllOpen = true;
+                }}
+                class="w-full text-left px-3 py-1.5 hover:bg-slate-800/80 disabled:opacity-40 flex items-center gap-2 text-slate-200 transition-colors"
+              >
+                <Icon name="zap" class="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>Refresh All Catalogs...</span>
+              </button>
+            </div>
+
+            <div class="py-1">
+              <button
+                type="button"
+                role="menuitem"
+                disabled={!appState.activeSessionId}
+                onclick={() => {
+                  showDbActionsMenu = false;
+                  appState.isCreateDbModalOpen = true;
+                }}
+                class="w-full text-left px-3 py-1.5 hover:bg-slate-800/80 disabled:opacity-40 flex items-center gap-2 text-slate-200 transition-colors"
+              >
+                <Icon name="plus" class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span>Create New Database...</span>
+              </button>
+            </div>
+          </div>
         {/if}
-        <button
-          type="button"
-          onclick={() => appState.refreshCatalog()}
-          disabled={appState.isLoadingCatalog}
-          class="h-7 w-7 flex items-center justify-center rounded bg-[#0f172a] hover:bg-[#1e293b] border border-slate-700/80 hover:border-slate-600 text-slate-400 hover:text-sky-300 transition-colors shadow-sm cursor-pointer shrink-0 disabled:opacity-50"
-          title="Refresh active database schema"
-        >
-          <Icon name="refresh-cw" class="w-3.5 h-3.5 {appState.isLoadingCatalog ? 'animate-spin text-sky-400' : ''}" />
-        </button>
-        <button
-          type="button"
-          onclick={() => (appState.isRefreshAllOpen = true)}
-          disabled={!appState.activeSessionId}
-          class="h-7 px-1.5 flex items-center justify-center rounded bg-[#0f172a] hover:bg-[#1e293b] border border-slate-700/80 hover:border-slate-600 text-[10px] font-mono font-semibold text-slate-400 hover:text-sky-300 transition-colors shadow-sm cursor-pointer shrink-0 disabled:opacity-40"
-          title="Refresh All Catalogs (Pre-warm autocomplete & fast cache)"
-        >
-          All
-        </button>
       </div>
 
       <!-- Database Dropdown Menu -->
@@ -478,7 +550,7 @@
                   role="option"
                   aria-selected={db === appState.currentDatabase}
                   onmouseenter={() => (dbActiveIndex = idx)}
-                  class="w-full px-2 py-1 flex items-center justify-between text-xs transition-colors group/dbrow {isActiveDb
+                  class="relative w-full px-2 py-1 flex items-center justify-between text-xs transition-colors group/dbrow {isActiveDb
                     ? 'bg-slate-800/90 ring-1 ring-inset ring-sky-500/40'
                     : 'hover:bg-slate-800/80'} {db === appState.currentDatabase ? 'bg-sky-500/10 text-sky-400 font-bold' : 'text-slate-300'}"
                 >
@@ -490,10 +562,11 @@
                     <Icon name="database" class="w-3.5 h-3.5 {db === appState.currentDatabase ? 'text-sky-400' : 'text-slate-500'} shrink-0" />
                     <span class="truncate font-mono">{db}</span>
                   </button>
-                  <div class="flex items-center space-x-1 shrink-0 ml-1">
+                  <div class="flex items-center space-x-1 shrink-0 ml-1.5 transition-opacity group-hover/dbrow:opacity-0">
                     {#if stamp}
-                      <span class="text-[9px] text-amber-400/90 font-mono bg-amber-950/30 px-1 py-0.2 rounded border border-amber-800/30" title="Cached at {stamp}">
-                        ⚡{stamp}
+                      <span class="inline-flex items-center gap-1 text-[9px] text-amber-400/90 font-mono bg-amber-950/30 px-1.5 py-0.5 rounded border border-amber-800/30" title="Cached at {stamp}">
+                        <Icon name="zap" class="w-2.5 h-2.5 shrink-0" />
+                        <span>{stamp}</span>
                       </span>
                     {/if}
                     {#if appState.databaseTableCounts[db] !== undefined}
@@ -501,20 +574,22 @@
                         {appState.databaseTableCounts[db]} tbls
                       </span>
                     {/if}
+                    {#if db === appState.currentDatabase}
+                      <Icon name="check" class="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                    {/if}
+                  </div>
+                  <div class="absolute right-1.5 flex items-center space-x-0.5 rounded opacity-0 pointer-events-none group-hover/dbrow:opacity-100 group-hover/dbrow:pointer-events-auto bg-[#0f172a]/90 hover:bg-[#0f172a] border border-slate-700/60 shadow-sm px-0.5 py-0.5 transition-all">
                     <button
                       type="button"
                       onclick={(e) => {
                         e.stopPropagation();
                         appState.refreshSingleDatabase(db);
                       }}
-                      class="p-1 rounded text-slate-500 hover:text-sky-300 hover:bg-slate-700/60 opacity-0 group-hover/dbrow:opacity-100 focus:opacity-100 transition"
+                      class="p-1 rounded text-slate-400 hover:text-sky-300 hover:bg-slate-700/80 transition"
                       title="Refresh catalog for {db}"
                     >
                       <Icon name="refresh-cw" class="w-3 h-3" />
                     </button>
-                    {#if db === appState.currentDatabase}
-                      <Icon name="check" class="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                    {/if}
                   </div>
                 </div>
               {/each}
@@ -636,8 +711,9 @@
             </div>
           {:else}
             {#each appState.filteredDatabases as db}
+              {@const stamp = appState.catalogTimestamps[db.toLowerCase()]}
               <div
-                class="w-full text-left px-2.5 py-1 rounded-md flex items-center justify-between group hover:bg-[#1e293b]/80 text-xs transition-colors {db === appState.currentDatabase ? 'bg-sky-500/10 text-sky-300 font-bold border border-sky-800/40 shadow-[inset_0_0_10px_rgba(56,189,248,0.06)]' : 'text-slate-300'}"
+                class="relative w-full text-left px-2 py-1 rounded-md flex items-center justify-between group hover:bg-[#1e293b]/80 text-xs transition-colors {db === appState.currentDatabase ? 'bg-sky-500/10 text-sky-300 font-bold border-l-2 border-sky-400 shadow-[inset_0_0_12px_rgba(56,189,248,0.06)]' : 'text-slate-300 border-l-2 border-transparent'}"
               >
                 <button
                   type="button"
@@ -645,15 +721,16 @@
                     appState.selectDatabase(db);
                     appState.sidebarViewMode = 'objects';
                   }}
-                  class="flex-1 flex items-center space-x-2 truncate text-left min-w-0"
+                  class="flex-1 flex items-center space-x-2 truncate text-left min-w-0 pr-1"
                 >
                   <Icon name="database" class="w-3.5 h-3.5 shrink-0 {db === appState.currentDatabase ? 'text-sky-400' : 'text-slate-500 group-hover:text-sky-400'}" />
                   <span class="truncate font-mono text-[11.5px]">{db}</span>
                 </button>
-                <div class="flex items-center space-x-1 shrink-0 ml-1">
-                  {#if appState.catalogTimestamps[db.toLowerCase()]}
-                    <span class="text-[9px] text-amber-400/90 font-mono bg-amber-950/30 px-1 py-0.2 rounded border border-amber-800/30">
-                      ⚡{appState.catalogTimestamps[db.toLowerCase()]}
+                <div class="flex items-center space-x-1 shrink-0 ml-1.5 transition-opacity group-hover:opacity-0">
+                  {#if stamp}
+                    <span class="inline-flex items-center gap-1 text-[9px] text-amber-400/90 font-mono bg-amber-950/30 px-1.5 py-0.5 rounded border border-amber-800/30" title="Cached at {stamp}">
+                      <Icon name="zap" class="w-2.5 h-2.5 shrink-0" />
+                      <span>{stamp}</span>
                     </span>
                   {/if}
                   {#if appState.databaseTableCounts[db] !== undefined}
@@ -664,13 +741,19 @@
                   {#if db === appState.currentDatabase}
                     <span class="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-sky-950 text-sky-400 border border-sky-800">active</span>
                   {/if}
+                </div>
+
+                <!-- Quick action buttons (overlay on hover, matching Objects mode) -->
+                <div
+                  class="absolute right-1 flex items-center space-x-0.5 rounded transition-all opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/90 hover:bg-[#0f172a] border border-slate-700/60 shadow-sm px-0.5 py-0.5 backdrop-blur-xs"
+                >
                   <button
                     type="button"
                     onclick={(e) => {
                       e.stopPropagation();
                       appState.refreshSingleDatabase(db);
                     }}
-                    class="opacity-0 group-hover:opacity-100 p-1 text-slate-500 hover:text-sky-300 hover:bg-slate-800 rounded transition"
+                    class="p-1 text-slate-400 hover:text-sky-300 hover:bg-slate-700/80 rounded transition"
                     title="Refresh catalog for '{db}'"
                   >
                     <Icon name="refresh-cw" class="w-3 h-3" />
@@ -681,7 +764,7 @@
                       e.stopPropagation();
                       appState.dropDatabase(db);
                     }}
-                    class="opacity-0 group-hover:opacity-100 p-1 text-slate-500 hover:text-rose-400 hover:bg-rose-950/50 rounded transition"
+                    class="p-1 text-slate-400 hover:text-rose-400 hover:bg-rose-950/60 rounded transition"
                     title="Drop database '{db}'"
                   >
                     <Icon name="trash-2" class="w-3 h-3" />

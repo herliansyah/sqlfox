@@ -112,9 +112,6 @@
   let selectedThreadIds = new SvelteSet<number>();
   let refreshInterval = $state<number>(0); // 0 = pause, 1000, 3000, 5000
   let intervalTimer: any = null;
-  let countdownTimer: any = null;
-  let nextPollAt = $state<number>(0);
-  let pollProgressPct = $state<number>(0);
   let isDocHidden = $state<boolean>(typeof document !== 'undefined' ? document.hidden : false);
   let inspectingThread = $state<ProcesslistThread | null>(null);
   let formatInspectSql = $state(false);
@@ -243,27 +240,13 @@
       clearInterval(intervalTimer);
       intervalTimer = null;
     }
-    if (countdownTimer) {
-      clearInterval(countdownTimer);
-      countdownTimer = null;
-    }
     if (refreshInterval > 0 && currentSubTab === 'threads' && !isDocHidden) {
-      nextPollAt = Date.now() + refreshInterval;
-      pollProgressPct = 100;
       intervalTimer = setInterval(() => {
-        nextPollAt = Date.now() + refreshInterval;
         loadProcesslist(false);
       }, refreshInterval);
-      countdownTimer = setInterval(() => {
-        const rem = Math.max(0, nextPollAt - Date.now());
-        pollProgressPct = Math.min(100, Math.max(0, (rem / refreshInterval) * 100));
-      }, 100);
-    } else {
-      pollProgressPct = 0;
     }
     return () => {
       if (intervalTimer) clearInterval(intervalTimer);
-      if (countdownTimer) clearInterval(countdownTimer);
     };
   });
 
@@ -458,7 +441,6 @@
     return () => {
       stopFlightTimers();
       if (intervalTimer) clearInterval(intervalTimer);
-      if (countdownTimer) clearInterval(countdownTimer);
       if (clusterPollTimer) clearInterval(clusterPollTimer);
     };
   });
@@ -1574,12 +1556,6 @@
       {/if}
     </div>
   </div>
-
-  {#if currentSubTab === 'threads' && refreshInterval > 0 && !isDocHidden}
-    <div class="h-0.5 w-full bg-slate-900 overflow-hidden shrink-0">
-      <div class="h-full bg-sky-500/80 transition-[width] duration-100 ease-linear" style="width: {pollProgressPct}%"></div>
-    </div>
-  {/if}
 
   <!-- Content for Threads SubTab -->
   {#if currentSubTab === 'threads'}

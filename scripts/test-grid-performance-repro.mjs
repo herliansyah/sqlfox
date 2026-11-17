@@ -44,9 +44,8 @@ assert(
   'VirtualGrid must display the total page count'
 );
 assert(
-  virtualGridCode.includes('id="btn-count-accurate"') &&
-    appStateCode.includes('requestExactRowCount'),
-  'Bottom bar must offer an Exact Count action backed by appState.requestExactRowCount'
+  !virtualGridCode.includes('id="btn-count-accurate"'),
+  'Bottom bar must not render removed Exact count button'
 );
 
 // --- 2. Page size default is 50 --------------------------------------------
@@ -120,7 +119,7 @@ assert(
 // The bottom bar renders "<count> records" plus the paged "Page x of y" label;
 // assert the English labels exist and the Indonesian legacy labels do not.
 assert(
-  virtualGridCode.includes('records</span>') && virtualGridCode.includes('exact records'),
+  virtualGridCode.includes('records</span>'),
   'Bottom stats must render the record count with the English "records" label'
 );
 assert(

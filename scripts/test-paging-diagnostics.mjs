@@ -35,10 +35,7 @@ assert(!virtualGridCode.includes('baris'), 'Grid must not contain Indonesian "ba
 assert(virtualGridCode.includes('Page Size:'), 'Grid must contain English "Page Size:"');
 assert(virtualGridCode.includes('Page'), 'Grid must contain English "Page" label');
 assert(virtualGridCode.includes('records</span>'), 'Grid must contain English "records" label');
-assert(
-  virtualGridCode.includes('Exact count') || virtualGridCode.includes('Exact Count'),
-  'Grid must contain English "Exact Count" button label'
-);
+assert(!virtualGridCode.includes('id="btn-count-accurate"'), 'Grid must not contain removed Exact count button');
 assert(
   virtualGridCode.includes('title="First Page"') &&
     virtualGridCode.includes('title="Previous Page"') &&

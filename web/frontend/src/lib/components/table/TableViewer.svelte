@@ -79,8 +79,11 @@
       {/if}
       <span class="text-sky-300 font-bold">{tableName}</span>
       {#if tableMeta && (tableMeta.row_count !== undefined || tableMeta.rows_count !== undefined)}
-        <span class="bg-slate-900 border border-slate-800 text-slate-400 px-1.5 py-0.2 rounded text-[10px]">
-          {(tableMeta.row_count ?? tableMeta.rows_count ?? 0).toLocaleString()} rows
+        <span
+          class="bg-slate-900 border border-slate-800 text-slate-400 px-1.5 py-0.2 rounded text-[10px]"
+          title="Estimated row count from catalog statistics"
+        >
+          ~{(tableMeta.row_count ?? tableMeta.rows_count ?? 0).toLocaleString()} rows
         </span>
       {/if}
       {#if tableName}

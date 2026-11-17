@@ -1605,55 +1605,6 @@ export class AppState {
     }
   }
 
-  /**
-   * Runs a one-off `SELECT COUNT(*)` for the active table viewer, honouring the
-   * current filter. Pagination totals use the catalog's estimated row_count, so
-   * this is the "accurate count" escape hatch when the estimate drifts.
-   */
-  async requestExactRowCount(targetTab?: EditorTab) {
-    const tabId = targetTab?.id || this.activeTabId;
-    const tab = this.tabs.find((t) => t.id === tabId) || targetTab || this.activeTab;
-    if (!this.activeSessionId || !tab?.isTableViewer || !tab.tableName) return;
-    if (tab.isCountingExact) return;
-
-    // Quote per dialect so identifiers with reserved words or mixed case work.
-    const driver = (this.activeConnection?.driver || '').toLowerCase();
-    const quoted =
-      driver === 'mysql' || driver === 'mariadb'
-        ? '`' + tab.tableName.replace(/`/g, '``') + '`'
-        : '"' + tab.tableName.replace(/"/g, '""') + '"';
-
-    let filterClause = (tab.appliedFilter || '').trim();
-    if (!filterClause && tab.filterPills && tab.filterPills.length > 0) {
-      filterClause = compileFilterPills(tab.filterPills, this.activeConnection?.driver);
-    }
-    const sql = `SELECT COUNT(*) AS total FROM ${quoted}${filterClause ? ` WHERE (${filterClause})` : ''}`;
-
-    tab.isCountingExact = true;
-    this.tabs = [...this.tabs];
-    try {
-      const res = await api.executeQuery(
-        this.activeSessionId,
-        sql,
-        true,
-        tab.database || this.currentDatabase || ''
-      );
-      const raw = res?.rows?.[0]?.[0];
-      const count = Number(raw);
-      if (Number.isFinite(count)) {
-        tab.exactRowCount = count;
-        this.showToast(`Exact row count: ${count.toLocaleString()}`, 'success');
-      } else {
-        this.showToast('Could not determine an exact row count', 'warning');
-      }
-    } catch (err: any) {
-      this.showToast(`Row count failed: ${err?.message ?? err}`, 'error');
-    } finally {
-      tab.isCountingExact = false;
-      this.tabs = [...this.tabs];
-    }
-  }
-
   async loadTableData(targetTab?: EditorTab) {
     const tabId = targetTab?.id || this.activeTabId;
     const tab = this.tabs.find((t) => t.id === tabId) || targetTab || this.activeTab;

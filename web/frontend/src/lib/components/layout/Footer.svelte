@@ -53,7 +53,6 @@
     return 'Mem: --';
   });
 
-  let activeDbLabel = $derived(appState.activeTab?.database || appState.currentDatabase || '');
   let isStandaloneMode = $derived(
     typeof window !== 'undefined' &&
       (window.matchMedia?.('(display-mode: standalone)').matches || (window.navigator as any)?.standalone || window.outerHeight - window.innerHeight < 80)
@@ -74,8 +73,8 @@
 
       <span class="text-slate-600 select-none">•</span>
 
-      <span class="font-mono text-slate-400 truncate" title="Target Host & Database">
-        {appState.activeConnection.host || 'localhost'}{appState.activeConnection.port ? `:${appState.activeConnection.port}` : ''}{activeDbLabel ? ` / ${activeDbLabel}` : ''}
+      <span class="font-mono text-slate-400 truncate" title="Target Host">
+        {appState.activeConnection.host || 'localhost'}{appState.activeConnection.port ? `:${appState.activeConnection.port}` : ''}
       </span>
 
       {#if appState.serverInfo?.uptime_sec}

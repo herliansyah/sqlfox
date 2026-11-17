@@ -14,7 +14,6 @@ const has = (needle) => virtualGridCode.includes(needle);
 for (const id of [
   'grid-pagination-bar',
   'grid-bottom-stats',
-  'btn-count-accurate',
   'grid-page-size-select',
   'btn-page-first',
   'btn-page-prev',
@@ -27,11 +26,10 @@ for (const id of [
 }
 console.log('✅ Test 1 Passed: all pagination bar ids exist in VirtualGrid.svelte');
 
-// TEST 2: Stats bar — records count + exact-count affordance
+// TEST 2: Stats bar — records count
 assert(has('grid-bottom-stats') && has('records'), 'grid-bottom-stats must render record counts');
-assert(has("appState.requestExactRowCount(currentTab)"), '#btn-count-accurate must trigger appState.requestExactRowCount');
-assert(appStateCode.includes('async requestExactRowCount'), 'appState must implement requestExactRowCount for exact counts');
-console.log('✅ Test 2 Passed: bottom stats bar wires exact row counting through appState');
+assert(!has('btn-count-accurate'), 'btn-count-accurate must be removed from VirtualGrid.svelte');
+console.log('✅ Test 2 Passed: bottom stats bar renders record counts without exact-count button');
 
 // TEST 3: Page size select resets to page 1 and reloads table data
 assert(has("id=\"grid-page-size-select\"") && has('currentTab.currentPage = 1;'), 'page-size change must reset currentPage to 1');

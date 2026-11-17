@@ -2231,25 +2231,9 @@
       <div id="grid-bottom-stats" class="flex items-center space-x-3">
         <span class="flex items-center space-x-1.5">
           <Icon name="table" class="w-3.5 h-3.5 text-sky-400" />
-          {#if currentTab?.exactRowCount !== undefined}
-            <span class="font-bold text-emerald-300">{currentTab.exactRowCount.toLocaleString()}</span>
-            <span class="text-slate-500">exact records</span>
-          {:else}
-            <span class="font-bold text-slate-200">{totalRows.toLocaleString()}</span>
-            <span class="text-slate-500">records</span>
-          {/if}
+          <span class="font-bold text-slate-200">{totalRows.toLocaleString()}</span>
+          <span class="text-slate-500">records</span>
         </span>
-        {#if currentTab?.isTableViewer}
-          <button
-            id="btn-count-accurate"
-            onclick={() => currentTab && appState.requestExactRowCount(currentTab)}
-            disabled={currentTab.isCountingExact}
-            class="px-1.5 py-0.5 rounded border border-[#334155] text-[10px] text-slate-400 hover:text-sky-300 hover:border-sky-700 disabled:opacity-50 transition"
-            title="Run SELECT COUNT(*) for an exact total (ignores the catalog estimate)"
-          >
-            {currentTab.isCountingExact ? 'Counting…' : 'Exact count'}
-          </button>
-        {/if}
         {#if result.duration_ms !== undefined}
           <span class="text-slate-600">•</span>
           <span class="flex items-center space-x-1">
@@ -2262,7 +2246,6 @@
       <!-- Pagination Controls for Table Viewer -->
       {#if currentTab?.isTableViewer}
         {@const estRows =
-          currentTab.exactRowCount ??
           activeCatalog?.tables?.find((t) => t.name.toLowerCase() === currentTab?.tableName?.toLowerCase())
             ?.row_count}
         {@const pageSize = currentTab.pageSize || 50}

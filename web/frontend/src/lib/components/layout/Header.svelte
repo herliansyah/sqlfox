@@ -310,7 +310,7 @@
   function getEnvBadgeClass(env: string) {
     switch (env) {
       case 'Production':
-        return 'bg-rose-500/20 text-rose-300 border-rose-500/40 animate-pulse';
+        return 'bg-rose-500/20 text-rose-300 border-rose-500/40';
       case 'Staging':
         return 'bg-amber-500/20 text-amber-300 border-amber-500/40';
       default:
@@ -386,7 +386,7 @@
         class="h-7 px-2 rounded-md {appState.isProduction ? 'bg-rose-950/40 border-rose-600/60 hover:bg-rose-900/40 shadow-rose-950/30' : 'bg-[#1e293b] hover:bg-slate-700/80 border-slate-700/80'} border flex items-center gap-2 text-xs text-slate-200 transition shadow-sm max-w-[18rem]"
         title={appState.activeConnection ? `${getDriverName(appState.activeConnection.driver)} • ${appState.activeConnection.host || 'localhost'}` : 'Select connection'}
       >
-        <span class="w-2 h-2 rounded-full {appState.isConnecting ? 'bg-amber-400 animate-ping' : appState.isProduction ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)] animate-pulse' : (appState.activeConnection ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]' : 'bg-slate-500')}"></span>
+        <span class="w-2 h-2 rounded-full {appState.isConnecting ? 'bg-amber-400 animate-ping' : appState.isProduction ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)]' : (appState.activeConnection ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]' : 'bg-slate-500')}"></span>
         <span class="font-medium truncate {appState.isProduction ? 'text-rose-100 font-semibold' : 'text-slate-100'}">
           {appState.isConnecting ? 'Connecting...' : (appState.activeConnection?.name || 'No active connection')}
         </span>
@@ -397,17 +397,6 @@
         {/if}
         <Icon name="chevron-down" class="w-3 h-3 text-slate-400" />
       </button>
-
-      {#if appState.activeConnection}
-        <button
-          id="btn-active-conn-badge"
-          onclick={() => appState.openEditConnectionModal(appState.activeConnection!)}
-          class="{navIconBtn} text-slate-400 hover:text-sky-300"
-          title="Edit active connection settings"
-        >
-          <Icon name="edit" class="w-3 h-3" />
-        </button>
-      {/if}
 
       {#if showConnDropdown}
         <button
@@ -513,7 +502,7 @@
                           closeConnDropdown();
                           appState.openEditConnectionModal(conn);
                         }}
-                        class="p-1 opacity-0 group-hover:opacity-100 hover:bg-slate-700 text-slate-400 hover:text-white rounded"
+                        class="p-1 hover:bg-slate-700 text-slate-400 hover:text-white rounded transition-opacity {conn.id === appState.activeConnection?.id ? 'opacity-70 hover:opacity-100' : 'opacity-0 group-hover:opacity-100 focus:opacity-100'}"
                         title="Edit Connection"
                       >
                         <Icon name="edit" class="w-3 h-3" />
