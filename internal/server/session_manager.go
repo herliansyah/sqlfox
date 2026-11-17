@@ -85,10 +85,7 @@ type ActiveSession struct {
 	vault           *vault.Vault
 	sessionMgr      *SessionManager
 	runningQueries  map[string]context.CancelFunc
-	activeTx        driver.TxSession
 	tabTransactions map[string]*activeTxInfo
-	txStartedAt     time.Time
-	txLastActive    time.Time
 	closed          bool
 	runSeq          uint64
 	inFlight        int // number of Execute/ExecuteStream/Stream calls currently running
@@ -113,9 +110,6 @@ func (s *ActiveSession) endInFlight() {
 	}
 	now := time.Now()
 	s.LastActive = now
-	if s.activeTx != nil {
-		s.txLastActive = now
-	}
 	for _, entry := range s.tabTransactions {
 		if entry != nil && entry.tx != nil {
 			entry.lastActive = now
@@ -138,10 +132,6 @@ func (s *ActiveSession) Close() error {
 		}
 		s.tabTransactions = nil
 	}
-	if s.activeTx != nil {
-		_ = s.activeTx.Rollback()
-		s.activeTx = nil
-	}
 	// Keep s.Session set: in-flight requests holding this *ActiveSession then get a clean
 	// "database is closed" error from the driver instead of a nil-pointer panic.
 	sess := s.Session
@@ -155,24 +145,28 @@ func (s *ActiveSession) Close() error {
 	return nil
 }
 
+func normalizeTabID(tabID string) string {
+	if tabID == "" {
+		return "default"
+	}
+	return tabID
+}
+
 func (s *ActiveSession) getTx(tabID string) driver.TxSession {
+	key := normalizeTabID(tabID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	now := time.Now()
-	if tabID != "" && s.tabTransactions != nil {
-		if entry, ok := s.tabTransactions[tabID]; ok && entry != nil && entry.tx != nil {
-			entry.lastActive = now
+	if s.tabTransactions != nil {
+		if entry, ok := s.tabTransactions[key]; ok && entry != nil && entry.tx != nil {
+			entry.lastActive = time.Now()
 			return entry.tx
 		}
-	}
-	if s.activeTx != nil {
-		s.txLastActive = now
-		return s.activeTx
 	}
 	return nil
 }
 
 func (s *ActiveSession) setTx(tabID string, tx driver.TxSession) {
+	key := normalizeTabID(tabID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()
@@ -180,53 +174,39 @@ func (s *ActiveSession) setTx(tabID string, tx driver.TxSession) {
 		s.tabTransactions = make(map[string]*activeTxInfo)
 	}
 	if tx != nil {
-		s.tabTransactions[tabID] = &activeTxInfo{
+		s.tabTransactions[key] = &activeTxInfo{
 			tx:         tx,
 			startedAt:  now,
 			lastActive: now,
 		}
-		if tabID == "" || tabID == "default" {
-			s.activeTx = tx
-			s.txStartedAt = now
-			s.txLastActive = now
-		}
 	} else {
-		delete(s.tabTransactions, tabID)
-		if tabID == "" || tabID == "default" || len(s.tabTransactions) == 0 {
-			s.activeTx = nil
-		}
+		delete(s.tabTransactions, key)
 	}
 }
 
 func (s *ActiveSession) clearTx(tabID string) driver.TxSession {
+	key := normalizeTabID(tabID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var tx driver.TxSession
-	if tabID != "" && s.tabTransactions != nil {
-		if entry, ok := s.tabTransactions[tabID]; ok && entry != nil {
-			tx = entry.tx
-			delete(s.tabTransactions, tabID)
+	if s.tabTransactions != nil {
+		if entry, ok := s.tabTransactions[key]; ok && entry != nil {
+			delete(s.tabTransactions, key)
+			return entry.tx
 		}
 	}
-	if tx == nil && s.activeTx != nil {
-		tx = s.activeTx
-		s.activeTx = nil
-	}
-	if len(s.tabTransactions) == 0 {
-		s.activeTx = nil
-	}
-	return tx
+	return nil
 }
 
 func (s *ActiveSession) hasActiveTx(tabID string) bool {
+	key := normalizeTabID(tabID)
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if tabID != "" && s.tabTransactions != nil {
-		if entry, ok := s.tabTransactions[tabID]; ok && entry != nil && entry.tx != nil {
+	if s.tabTransactions != nil {
+		if entry, ok := s.tabTransactions[key]; ok && entry != nil && entry.tx != nil {
 			return true
 		}
 	}
-	return s.activeTx != nil
+	return false
 }
 
 // Mutable session state is read and written by concurrent requests, so it goes through s.mu.
@@ -337,9 +317,20 @@ type sqlExecer interface {
 // all-or-nothing: finish(nil) commits, finish(err) rolls back and returns err.
 func (s *ActiveSession) gridWriter(ctx context.Context) (sqlExecer, func(error) error, error) {
 	s.mu.Lock()
-	tx := s.activeTx
-	if tx != nil {
-		s.txLastActive = time.Now()
+	var tx driver.TxSession
+	if s.tabTransactions != nil {
+		if entry, ok := s.tabTransactions["default"]; ok && entry != nil && entry.tx != nil {
+			tx = entry.tx
+			entry.lastActive = time.Now()
+		} else if s.DriverName == "sqlite" {
+			for _, entry := range s.tabTransactions {
+				if entry != nil && entry.tx != nil {
+					tx = entry.tx
+					entry.lastActive = time.Now()
+					break
+				}
+			}
+		}
 	}
 	sess := s.Session
 	s.mu.Unlock()
@@ -504,17 +495,6 @@ func (sm *SessionManager) startReaper() {
 							delete(sess.tabTransactions, tabID)
 						}
 					}
-					if len(sess.tabTransactions) == 0 {
-						sess.activeTx = nil
-					}
-				}
-				refTime := sess.txLastActive
-				if refTime.IsZero() {
-					refTime = sess.txStartedAt
-				}
-				if sess.activeTx != nil && now.Sub(refTime) > 60*time.Second {
-					txToRollback = append(txToRollback, sess.activeTx)
-					sess.activeTx = nil
 				}
 				isIdle := now.Sub(sess.LastActive) > 30*time.Minute
 				sess.mu.Unlock()
@@ -1241,6 +1221,34 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 	cleanSQL := driver.StripLeadingComments(trimmedSQL)
 	cleanUpper := strings.TrimRight(strings.ToUpper(cleanSQL), "; \t\r\n")
 	isSelect := driver.IsQueryStatement(trimmedSQL)
+	allStmtsQuery := isSelect
+	if isSelect {
+		for _, st := range driver.SplitSQLStatements(trimmedSQL, s.DriverName) {
+			if !driver.IsQueryStatement(st) {
+				allStmtsQuery = false
+				break
+			}
+		}
+	}
+
+	// Non-SELECT queries (mutations/DDL/transactions) and mixed batches such as "SELECT 1; DROP TABLE t"
+	// run synchronously through Execute (which owns safety inspection, row estimation, and pre-DDL backup)
+	// and emit a single NDJSON line, avoiding duplicate estimation/inspection work.
+	if !isSelect || !allStmtsQuery {
+		resp, execErr := s.Execute(ctx, req)
+		if execErr != nil {
+			return nil, execErr
+		}
+		if resp != nil && resp.Blocked {
+			return resp, nil
+		}
+		enc := json.NewEncoder(w)
+		_ = enc.Encode(resp)
+		if flusher != nil {
+			flusher.Flush()
+		}
+		return nil, nil
+	}
 
 	if strings.HasPrefix(cleanUpper, "USE ") {
 		dbTarget := strings.TrimSpace(cleanSQL[4:])
@@ -1744,10 +1752,9 @@ func (s *ActiveSession) executeMulti(
 				}
 				return nil, fmt.Errorf("statement %d (%s) failed: %w", i+1, previewStmt(stmtTrimmed), streamErr)
 			}
-			defer stream.Close()
-
 			cols := stream.Columns()
 			var allRows [][]any
+			var readErr error
 			for len(allRows) < limit {
 				chunk, err := stream.NextChunk(200)
 				if len(chunk) > 0 {
@@ -1755,10 +1762,14 @@ func (s *ActiveSession) executeMulti(
 				}
 				if err != nil {
 					if err != io.EOF {
-						return nil, fmt.Errorf("statement %d reading rows failed: %w", i+1, err)
+						readErr = err
 					}
 					break
 				}
+			}
+			_ = stream.Close()
+			if readErr != nil {
+				return nil, fmt.Errorf("statement %d reading rows failed: %w", i+1, readErr)
 			}
 			qRes := &ExecuteResponse{
 				SQL:         stmtTrimmed,

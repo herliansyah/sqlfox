@@ -653,14 +653,14 @@ func TestActiveSession_TransactionLifecycle(t *testing.T) {
 	if err != nil || !strings.Contains(bResReadOnly.Message, "Transaction started") {
 		t.Fatalf("expected START TRANSACTION READ ONLY to start transaction, got: %v", err)
 	}
-	if sess.activeTx == nil {
+	if !sess.hasActiveTx("") {
 		t.Fatal("expected activeTx to be pinned")
 	}
 	_, err = sess.Execute(ctx, ExecuteRequest{SQL: "END;"})
 	if err != nil {
 		t.Fatalf("expected END to commit transaction, got: %v", err)
 	}
-	if sess.activeTx != nil {
+	if sess.hasActiveTx("") {
 		t.Fatal("expected activeTx to be cleared after END")
 	}
 
@@ -671,7 +671,7 @@ func TestActiveSession_TransactionLifecycle(t *testing.T) {
 	})
 	// Close session without committing
 	_ = sess.Close()
-	if sess.activeTx != nil {
+	if sess.hasActiveTx("") {
 		t.Fatal("expected activeTx to be cleared on Close()")
 	}
 }

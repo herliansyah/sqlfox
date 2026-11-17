@@ -9,7 +9,7 @@ import (
 	"math"
 	"net/http"
 	"regexp"
-	"runtime"
+	"runtime/metrics"
 	"strconv"
 	"strings"
 	"time"
@@ -55,9 +55,13 @@ func (s *Server) handlePingSession(w http.ResponseWriter, r *http.Request) {
 	}
 	sess.SetLatency(latency.Milliseconds())
 
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	allocMB := math.Round(float64(m.Alloc)/1024/1024*10) / 10
+	memSample := []metrics.Sample{{Name: "/memory/classes/heap/objects:bytes"}}
+	metrics.Read(memSample)
+	var heapBytes uint64
+	if memSample[0].Value.Kind() == metrics.KindUint64 {
+		heapBytes = memSample[0].Value.Uint64()
+	}
+	allocMB := math.Round(float64(heapBytes)/1024/1024*10) / 10
 	info, _ := sess.Session.ServerInfo(ctx)
 	if info != nil {
 		sess.SetInfo(info)
@@ -636,8 +640,8 @@ var allowedFilterKeywords = map[string]bool{
 // or a parenthesis/comma. The alternation is ordered so quoted strings are consumed whole.
 var reFilterToken = regexp.MustCompile(
 	`^(?:` +
-		`'(?:[^'\\]|''|\\.)*'` + // single-quoted string literal
-		`|"(?:[^"\\]|""|\\.)*"` + // double-quoted string literal
+		`'(?:[^'\\]|'')*'` + // single-quoted string literal (no backslash escapes; dialect-safe)
+		`|"(?:[^"\\]|"")*"` + // double-quoted identifier/literal (no backslash escapes; dialect-safe)
 		"|`(?:[^`]|``)*`" + // backtick-quoted identifier
 		`|[0-9]+(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?` + // number
 		`|[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*` + // word / qualified identifier
@@ -1015,14 +1019,12 @@ func (s *Server) handleSaveTableNote(w http.ResponseWriter, r *http.Request) {
 		_ = s.vault.CreateOperationalNote(newOpNote)
 	}
 
-	// Also maintain legacy table note for full compatibility
 	note := &vault.TableNote{
 		ConnectionID: connID,
 		DatabaseName: dbName,
 		TableName:    tableName,
 		Content:      req.Content,
 	}
-	_ = s.vault.SaveTableNote(note)
 
 	s.notifyCloudSyncChange()
 	writeJSON(w, http.StatusOK, note)

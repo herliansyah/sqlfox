@@ -40,6 +40,12 @@ func (d *SQLiteDriver) Connect(ctx context.Context, cfg driver.Config) (driver.S
 		return nil, fmt.Errorf("failed to open sqlite database: %w", err)
 	}
 
+	isMemory := strings.Contains(dsn, ":memory:") || strings.Contains(dsn, "mode=memory")
+	if isMemory {
+		// In-memory SQLite databases are per-connection unless pinned to a single pooled connection.
+		db.SetMaxOpenConns(1)
+	}
+
 	// Test connection
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
@@ -47,7 +53,7 @@ func (d *SQLiteDriver) Connect(ctx context.Context, cfg driver.Config) (driver.S
 	}
 
 	// Enable WAL mode (Write-Ahead Logging) and busy timeout for concurrent read/write resilience
-	if !strings.Contains(dsn, ":memory:") && !strings.Contains(dsn, "mode=memory") {
+	if !isMemory {
 		var mode string
 		_ = db.QueryRowContext(ctx, "PRAGMA journal_mode = WAL;").Scan(&mode)
 	}
@@ -786,6 +792,9 @@ func (s *SQLiteSession) ExecSafeDDL(ctx context.Context, ddl string, lockTimeout
 	defer conn.Close()
 
 	_, _ = conn.ExecContext(ctx, fmt.Sprintf("PRAGMA busy_timeout = %d", lockTimeoutSec*1000))
+	defer func() {
+		_, _ = conn.ExecContext(context.Background(), "PRAGMA busy_timeout = 5000;")
+	}()
 
 	start := time.Now()
 	res, err := conn.ExecContext(ctx, ddl)

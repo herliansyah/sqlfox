@@ -64,6 +64,8 @@ func TestValidateTableFilter(t *testing.T) {
 		"id = 1)) OR ((1=1", // unbalanced parentheses
 		"name = char(0x41)", // function call
 		"id @ 1",            // illegal operator character
+		`name = 'a\' OR pg_sleep(5) IS NULL OR \'1\'=\'1'`,
+		`name = "a\" OR 1=1"`,
 	}
 
 	for _, c := range invalidCases {

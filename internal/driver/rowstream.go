@@ -34,8 +34,9 @@ func (r *SQLRowStream) NextChunk(batchSize int) ([][]any, error) {
 		// A non-positive size would return (nil, nil) forever and spin callers that loop until EOF.
 		batchSize = 1
 	}
-	var chunk [][]any
+	chunk := make([][]any, 0, batchSize)
 	count := len(r.cols)
+	valuePtrs := make([]any, count)
 
 	for len(chunk) < batchSize {
 		if !r.rows.Next() {
@@ -49,7 +50,6 @@ func (r *SQLRowStream) NextChunk(batchSize int) ([][]any, error) {
 		}
 
 		row := make([]any, count)
-		valuePtrs := make([]any, count)
 		for i := range row {
 			valuePtrs[i] = &row[i]
 		}

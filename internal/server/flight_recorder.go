@@ -38,6 +38,22 @@ type FlightRecorderManager struct {
 	mu         sync.Mutex
 }
 
+// StopAll cancels every active flight recording during server shutdown.
+func (m *FlightRecorderManager) StopAll() {
+	m.mu.Lock()
+	recordings := make([]*ActiveRecording, 0, len(m.active))
+	for k, rec := range m.active {
+		recordings = append(recordings, rec)
+		delete(m.active, k)
+	}
+	m.mu.Unlock()
+	for _, rec := range recordings {
+		if rec != nil && rec.cancel != nil {
+			rec.cancel()
+		}
+	}
+}
+
 // NewFlightRecorderManager creates a manager and triggers a background 24h purge.
 func NewFlightRecorderManager(v *vault.Vault, sm *SessionManager) *FlightRecorderManager {
 	mgr := &FlightRecorderManager{
