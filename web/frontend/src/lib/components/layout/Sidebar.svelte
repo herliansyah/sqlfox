@@ -247,15 +247,6 @@
       return;
     }
     if (e.key === 'Enter') {
-      if (appState.sidebarViewMode === 'databases') {
-        const firstDb = appState.filteredDatabases[0];
-        if (firstDb) {
-          e.preventDefault();
-          appState.selectDatabase(firstDb);
-          appState.sidebarViewMode = 'objects';
-        }
-        return;
-      }
       if (appState.filteredTables[0]) {
         e.preventDefault();
         appState.openTableDataTab(appState.filteredTables[0].name);
@@ -420,6 +411,19 @@
                 disabled={!appState.activeSessionId}
                 onclick={() => {
                   showDbActionsMenu = false;
+                  appState.refreshDatabases();
+                }}
+                class="w-full text-left px-3 py-1.5 hover:bg-slate-800/80 disabled:opacity-40 flex items-center gap-2 text-slate-200 transition-colors"
+              >
+                <Icon name="database" class="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                <span>Reload Database List</span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={!appState.activeSessionId}
+                onclick={() => {
+                  showDbActionsMenu = false;
                   appState.isRefreshAllOpen = true;
                 }}
                 class="w-full text-left px-3 py-1.5 hover:bg-slate-800/80 disabled:opacity-40 flex items-center gap-2 text-slate-200 transition-colors"
@@ -442,6 +446,20 @@
               >
                 <Icon name="plus" class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                 <span>Create New Database...</span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={!appState.activeSessionId || !appState.currentDatabase}
+                onclick={() => {
+                  const target = appState.currentDatabase;
+                  showDbActionsMenu = false;
+                  if (target) appState.dropDatabase(target);
+                }}
+                class="w-full text-left px-3 py-1.5 hover:bg-rose-950/60 disabled:opacity-40 flex items-center gap-2 text-rose-400 transition-colors"
+              >
+                <Icon name="trash-2" class="w-3.5 h-3.5 shrink-0" />
+                <span>Drop Active Database...</span>
               </button>
             </div>
           </div>
@@ -590,6 +608,18 @@
                     >
                       <Icon name="refresh-cw" class="w-3 h-3" />
                     </button>
+                    <button
+                      type="button"
+                      onclick={(e) => {
+                        e.stopPropagation();
+                        closeDbDropdown();
+                        appState.dropDatabase(db);
+                      }}
+                      class="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-rose-950/60 transition"
+                      title="Drop database '{db}'"
+                    >
+                      <Icon name="trash-2" class="w-3 h-3" />
+                    </button>
                   </div>
                 </div>
               {/each}
@@ -614,8 +644,8 @@
       {/if}
     </div>
 
-    <!-- Search Filter & View Mode Switcher Header (Height h-9: 36px - aligned with Content Toolbar) -->
-    <div class="h-9 px-2 border-b border-slate-800 bg-[#0b0f19] flex items-center space-x-1.5 relative shrink-0">
+    <!-- Schema Filter Header (Height h-9: 36px - aligned with Content Toolbar) -->
+    <div class="h-9 px-2 border-b border-slate-800 bg-[#0b0f19] flex items-center relative shrink-0">
       <!-- Search Filter Input -->
       <div class="relative flex-1 flex items-center min-w-0">
         <Icon name="search" class="w-3.5 h-3.5 text-slate-500 absolute left-2 pointer-events-none" />
@@ -624,7 +654,7 @@
           type="text"
           bind:value={appState.schemaFilter}
           onkeydown={handleSchemaSearchKeydown}
-          placeholder={appState.sidebarViewMode === 'databases' ? 'Filter DBs... (/)' : 'Filter schema... (/)'}
+          placeholder="Filter schema... (/)"
           class="w-full h-7 bg-[#0f172a] border border-slate-700/80 rounded pl-7 pr-6 text-[11px] text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition-all font-mono"
         />
         {#if appState.schemaFilter}
@@ -638,141 +668,15 @@
           </button>
         {/if}
       </div>
-
-      <!-- Segmented View Mode Switcher -->
-      <div class="inline-flex rounded border border-slate-700/80 bg-[#090d16] p-0.5 shrink-0" role="group">
-        <button
-          type="button"
-          onclick={() => (appState.sidebarViewMode = 'objects')}
-          class="px-2 py-0.5 text-[10px] font-semibold rounded transition {appState.sidebarViewMode === 'objects' ? 'bg-sky-500 text-slate-950 font-bold shadow-sm' : 'text-slate-400 hover:text-slate-200'}"
-          title="Schema Objects ({appState.filteredTables.length})"
-        >
-          Objects
-        </button>
-        <button
-          type="button"
-          onclick={() => (appState.sidebarViewMode = 'databases')}
-          class="px-2 py-0.5 text-[10px] font-semibold rounded transition {appState.sidebarViewMode === 'databases' ? 'bg-sky-500 text-slate-950 font-bold shadow-sm' : 'text-slate-400 hover:text-slate-200'}"
-          title="Available Databases ({appState.availableDatabases.length})"
-        >
-          DBs
-        </button>
-      </div>
     </div>
 
-    <!-- Content: Databases List Mode OR Schema Objects Mode -->
+    <!-- Content: Schema Objects Mode -->
     <div id="sidebar-object-tree" class="flex-1 overflow-y-auto p-1.5 space-y-1">
       {#if appState.isLoadingCatalog}
         <div class="p-8 text-center text-xs text-slate-400 flex flex-col items-center gap-2">
           <Icon name="refresh-cw" class="w-5 h-5 animate-spin text-sky-400" />
           <span class="font-medium text-slate-300">Loading catalog...</span>
           <span class="text-[10px] text-slate-500 font-mono truncate max-w-full px-2">{appState.currentDatabase}</span>
-        </div>
-      {:else if appState.sidebarViewMode === 'databases'}
-        <!-- ALL DATABASES VIEW -->
-        <div class="space-y-0.5">
-          <div class="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center justify-between">
-            <span>Available Databases</span>
-            <div class="flex items-center space-x-1">
-              <span class="font-mono text-slate-400 bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800">{appState.filteredDatabases.length}</span>
-              <button
-                type="button"
-                onclick={() => (appState.isCreateDbModalOpen = true)}
-                class="p-0.5 text-slate-400 hover:text-sky-300 hover:bg-sky-950/60 rounded transition"
-                title="Create New Database"
-              >
-                <Icon name="plus" class="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-
-          {#if appState.availableDatabases.length === 0}
-            <div class="p-6 text-center text-xs text-slate-500 space-y-2">
-              <p class="italic">No databases found for this connection</p>
-              <button
-                type="button"
-                onclick={() => appState.refreshDatabases()}
-                class="px-2.5 py-1 bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-400 rounded text-xs font-semibold transition inline-flex items-center space-x-1"
-              >
-                <Icon name="refresh-cw" class="w-3 h-3 shrink-0" />
-                <span>Reload Databases</span>
-              </button>
-            </div>
-          {:else if appState.filteredDatabases.length === 0}
-            <div class="p-6 text-center text-xs text-slate-500 space-y-1">
-              <p class="italic">No databases matching "{appState.schemaFilter}"</p>
-              <button
-                type="button"
-                onclick={() => (appState.schemaFilter = '')}
-                class="text-sky-400 hover:underline text-xs"
-              >
-                Clear filter
-              </button>
-            </div>
-          {:else}
-            {#each appState.filteredDatabases as db}
-              {@const stamp = appState.catalogTimestamps[db.toLowerCase()]}
-              <div
-                class="relative w-full text-left px-2 py-1 rounded-md flex items-center justify-between group hover:bg-[#1e293b]/80 text-xs transition-colors {db === appState.currentDatabase ? 'bg-sky-500/10 text-sky-300 font-bold border-l-2 border-sky-400 shadow-[inset_0_0_12px_rgba(56,189,248,0.06)]' : 'text-slate-300 border-l-2 border-transparent'}"
-              >
-                <button
-                  type="button"
-                  onclick={() => {
-                    appState.selectDatabase(db);
-                    appState.sidebarViewMode = 'objects';
-                  }}
-                  class="flex-1 flex items-center space-x-2 truncate text-left min-w-0 pr-1"
-                >
-                  <Icon name="database" class="w-3.5 h-3.5 shrink-0 {db === appState.currentDatabase ? 'text-sky-400' : 'text-slate-500 group-hover:text-sky-400'}" />
-                  <span class="truncate font-mono text-[11.5px]">{db}</span>
-                </button>
-                <div class="flex items-center space-x-1 shrink-0 ml-1.5 transition-opacity group-hover:opacity-0">
-                  {#if stamp}
-                    <span class="inline-flex items-center gap-1 text-[9px] text-amber-400/90 font-mono bg-amber-950/30 px-1.5 py-0.5 rounded border border-amber-800/30" title="Cached at {stamp}">
-                      <Icon name="zap" class="w-2.5 h-2.5 shrink-0" />
-                      <span>{stamp}</span>
-                    </span>
-                  {/if}
-                  {#if appState.databaseTableCounts[db] !== undefined}
-                    <span class="text-[10px] text-slate-400 font-mono bg-slate-900/80 px-1.5 py-0.2 rounded border border-slate-800">
-                      {appState.databaseTableCounts[db]} tbls
-                    </span>
-                  {/if}
-                  {#if db === appState.currentDatabase}
-                    <span class="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-sky-950 text-sky-400 border border-sky-800">active</span>
-                  {/if}
-                </div>
-
-                <!-- Quick action buttons (overlay on hover, matching Objects mode) -->
-                <div
-                  class="absolute right-1 flex items-center space-x-0.5 rounded transition-all opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/90 hover:bg-[#0f172a] border border-slate-700/60 shadow-sm px-0.5 py-0.5 backdrop-blur-xs"
-                >
-                  <button
-                    type="button"
-                    onclick={(e) => {
-                      e.stopPropagation();
-                      appState.refreshSingleDatabase(db);
-                    }}
-                    class="p-1 text-slate-400 hover:text-sky-300 hover:bg-slate-700/80 rounded transition"
-                    title="Refresh catalog for '{db}'"
-                  >
-                    <Icon name="refresh-cw" class="w-3 h-3" />
-                  </button>
-                  <button
-                    type="button"
-                    onclick={(e) => {
-                      e.stopPropagation();
-                      appState.dropDatabase(db);
-                    }}
-                    class="p-1 text-slate-400 hover:text-rose-400 hover:bg-rose-950/60 rounded transition"
-                    title="Drop database '{db}'"
-                  >
-                    <Icon name="trash-2" class="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-            {/each}
-          {/if}
         </div>
       {:else if !appState.catalog}
         <div class="p-8 text-center text-xs text-slate-500 flex flex-col items-center gap-3">
@@ -783,7 +687,7 @@
           </div>
           <button
             type="button"
-            onclick={() => (appState.sidebarViewMode = 'databases')}
+            onclick={() => openDbDropdown()}
             class="w-full px-3 py-1.5 bg-[#0f172a] hover:bg-slate-800 text-slate-300 border border-slate-700 rounded text-xs font-medium transition flex items-center justify-center space-x-1.5 shadow-sm"
           >
             <Icon name="database" class="w-3.5 h-3.5 text-sky-400" />

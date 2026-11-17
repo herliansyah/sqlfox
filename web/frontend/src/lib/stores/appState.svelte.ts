@@ -337,7 +337,6 @@ export class AppState {
   sidebarCollapsed = $state<boolean>(
     typeof localStorage !== 'undefined' && localStorage.getItem('sqlfox_left_sidebar_visible') === 'false'
   );
-  sidebarViewMode = $state<'objects' | 'databases'>('objects');
   activeSidebarTab = $state<'schema' | 'connections' | 'history'>('schema');
   schemaFilter = $state<string>('');
   collapsedSections = $state<Record<string, boolean>>((() => {
@@ -407,13 +406,6 @@ export class AppState {
     const query = this.schemaFilter.toLowerCase().trim();
     if (!query) return this.catalog.events;
     return this.catalog.events.filter((ev) => ev.name.toLowerCase().includes(query));
-  });
-
-  filteredDatabases = $derived.by(() => {
-    const list = this.availableDatabases || [];
-    const query = this.schemaFilter.toLowerCase().trim();
-    if (!query) return list;
-    return list.filter((db) => db.toLowerCase().includes(query));
   });
 
   totalObjectsCount = $derived.by(() => {
