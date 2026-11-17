@@ -2,6 +2,7 @@ package ai
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"sqlfox/internal/driver"
@@ -17,9 +18,16 @@ func tableMatchesQuery(tblName, queryUpper string) bool {
 // For standard-sized schemas (<= 30 tables), it includes all tables so AI has complete context
 // regardless of query wording, Indonesian terms, or join relationships.
 // ponytail: Pure stateless function replacing single-method Firewall wrapper.
+// BuildSchemaPrompt generates a schema metadata summary, optionally masking identifiers.
 func BuildSchemaPrompt(schema *driver.SchemaMetadata, referencedQuery string, maskIdentifiers bool) string {
+	prompt, _ := BuildSchemaPromptWithMap(schema, referencedQuery, maskIdentifiers)
+	return prompt
+}
+
+// BuildSchemaPromptWithMap generates a schema metadata summary and returns the real->masked identifier map.
+func BuildSchemaPromptWithMap(schema *driver.SchemaMetadata, referencedQuery string, maskIdentifiers bool) (string, map[string]string) {
 	if schema == nil || len(schema.Tables) == 0 {
-		return "No database schema metadata available."
+		return "No database schema metadata available.", nil
 	}
 
 	queryUpper := strings.ToUpper(referencedQuery)
@@ -118,5 +126,33 @@ func BuildSchemaPrompt(schema *driver.SchemaMetadata, referencedQuery string, ma
 		sb.WriteString(fmt.Sprintf("Other Tables in Database (columns omitted for brevity):\n%s\n\n", strings.Join(names, ", ")))
 	}
 
-	return sb.String()
+	return sb.String(), mapping
+}
+
+// MaskIdentifiersInText replaces real schema identifiers in free text (SQL, plans, errors)
+// using the mapping produced by BuildSchemaPromptWithMap, longest keys first.
+func MaskIdentifiersInText(text string, mapping map[string]string) string {
+	if text == "" || len(mapping) == 0 {
+		return text
+	}
+	keys := make([]string, 0, len(mapping))
+	for k := range mapping {
+		if k != "" {
+			keys = append(keys, k)
+		}
+	}
+	// Sort longest-first so e.g. user_accounts is replaced before user.
+	for i := 0; i < len(keys); i++ {
+		for j := i + 1; j < len(keys); j++ {
+			if len(keys[j]) > len(keys[i]) {
+				keys[i], keys[j] = keys[j], keys[i]
+			}
+		}
+	}
+	out := text
+	for _, k := range keys {
+		re := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(k) + `\b`)
+		out = re.ReplaceAllString(out, mapping[k])
+	}
+	return out
 }

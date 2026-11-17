@@ -983,6 +983,81 @@ func ExplainTarget(stmts []string) (string, error) {
 	return s, nil
 }
 
+var reCTEMutationVerb = regexp.MustCompile(`(?i)\b(?:INSERT|UPDATE|DELETE|MERGE|DROP|ALTER|TRUNCATE|CREATE)\b`)
+
+// stripSQLCommentsAndLiterals replaces string/quoted literals and comments with spaces
+// so keyword checks cannot be tricked by literals or bypassed by inline comments like DELETE/*x*/FROM.
+func stripSQLCommentsAndLiterals(sql string) string {
+	var b strings.Builder
+	b.Grow(len(sql))
+	n := len(sql)
+	for i := 0; i < n; i++ {
+		c := sql[i]
+		if c == '\'' || c == '"' || c == '`' {
+			quote := c
+			b.WriteByte(' ')
+			i++
+			for i < n {
+				if sql[i] == '\\' && quote != '`' && i+1 < n {
+					i += 2
+					continue
+				}
+				if sql[i] == quote {
+					if i+1 < n && sql[i+1] == quote {
+						i += 2
+						continue
+					}
+					break
+				}
+				i++
+			}
+			continue
+		}
+		if c == '$' {
+			j := i + 1
+			for j < n && (sql[j] == '_' || (sql[j] >= 'a' && sql[j] <= 'z') || (sql[j] >= 'A' && sql[j] <= 'Z') || (sql[j] >= '0' && sql[j] <= '9')) {
+				j++
+			}
+			if j < n && sql[j] == '$' && (j == i+1 || !(sql[i+1] >= '0' && sql[i+1] <= '9')) {
+				tag := sql[i : j+1]
+				b.WriteByte(' ')
+				end := strings.Index(sql[j+1:], tag)
+				if end >= 0 {
+					i = j + 1 + end + len(tag) - 1
+				} else {
+					i = n - 1
+				}
+				continue
+			}
+		}
+		if c == '-' && i+1 < n && sql[i+1] == '-' {
+			b.WriteByte(' ')
+			for i < n && sql[i] != '\n' {
+				i++
+			}
+			continue
+		}
+		if c == '#' {
+			b.WriteByte(' ')
+			for i < n && sql[i] != '\n' {
+				i++
+			}
+			continue
+		}
+		if c == '/' && i+1 < n && sql[i+1] == '*' {
+			b.WriteByte(' ')
+			i += 2
+			for i+1 < n && !(sql[i] == '*' && sql[i+1] == '/') {
+				i++
+			}
+			i++
+			continue
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
 // IsQueryStatement reports whether a SQL statement returns rows (SELECT, SHOW, DESC, EXPLAIN, WITH, PRAGMA, VALUES, TABLE, etc.).
 func IsQueryStatement(sql string) bool {
 	clean := StripLeadingComments(sql)
@@ -1001,8 +1076,9 @@ func IsQueryStatement(sql string) bool {
 		strings.HasPrefix(upper, "REPAIR TABLE") {
 		return true
 	}
-	if strings.HasPrefix(upper, "WITH") && !strings.Contains(upper, "INSERT ") && !strings.Contains(upper, "UPDATE ") && !strings.Contains(upper, "DELETE ") {
-		return true
+	if strings.HasPrefix(upper, "WITH") {
+		stripped := stripSQLCommentsAndLiterals(clean)
+		return !reCTEMutationVerb.MatchString(stripped)
 	}
 	return false
 }

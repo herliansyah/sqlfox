@@ -76,9 +76,10 @@ func Inspect(query string, environment string) *InspectionResult {
 		return inspectMultiStatements(stmts, environment)
 	}
 
-	// The Vitess parser has no CTE support, so inspect the main statement behind WITH ... AS (...).
-	if main, ok := stripLeadingCTE(clean); ok {
-		return Inspect(main, environment)
+	// The Vitess parser has no CTE support, so inspect both CTE sub-bodies (for data-modifying CTEs)
+	// and the main statement behind WITH ... AS (...).
+	if cteStmts, ok := extractCTEStatements(clean); ok {
+		return inspectMultiStatements(cteStmts, environment)
 	}
 
 	// Try AST parsing first (Vitess parser)
@@ -98,8 +99,7 @@ func inspectAST(stmt sqlparser.Statement, environment, query string) *Inspection
 	switch node := stmt.(type) {
 	case *sqlparser.Delete:
 		tableName := sqlparser.String(node.TableExprs)
-		targetTbl := cleanTableName(tableName)
-		db, _ := extractDBAndTable(tableName)
+		db, targetTbl := extractTargetFromTableExprs(node.TableExprs, tableName)
 		if node.Where == nil || !hasWhereOutsideLiterals(query) {
 			return &InspectionResult{
 				RiskLevel:         RiskCritical,
@@ -139,8 +139,7 @@ func inspectAST(stmt sqlparser.Statement, environment, query string) *Inspection
 
 	case *sqlparser.Update:
 		tableName := sqlparser.String(node.TableExprs)
-		targetTbl := cleanTableName(tableName)
-		db, _ := extractDBAndTable(tableName)
+		db, targetTbl := extractTargetFromTableExprs(node.TableExprs, tableName)
 		if node.Where == nil || !hasWhereOutsideLiterals(query) {
 			return &InspectionResult{
 				RiskLevel:         RiskCritical,
@@ -240,6 +239,40 @@ func inspectAST(stmt sqlparser.Statement, environment, query string) *Inspection
 				Operation:           "ALTER",
 				Reason:              fmt.Sprintf("ALTER TABLE modifies schema structure on '%s'.", tableName),
 			}
+		case "rename":
+			return &InspectionResult{
+				RiskLevel:           RiskDangerous,
+				IsDestructive:       true,
+				RequiresChallenge:   isProd,
+				RequiresAffirmation: true,
+				TargetDatabase:      qualifier,
+				TargetTable:         tableName,
+				TargetType:          "TABLE",
+				Operation:           "RENAME",
+				Reason:              fmt.Sprintf("RENAME TABLE modifies schema object '%s'.", tableName),
+			}
+		}
+
+	case *sqlparser.Insert:
+		if strings.EqualFold(node.Action, sqlparser.ReplaceStr) {
+			qualifier := node.Table.Qualifier.String()
+			tableName := node.Table.Name.String()
+			res := &InspectionResult{
+				IsDestructive:  true,
+				TargetDatabase: qualifier,
+				TargetTable:    tableName,
+				TargetType:     "TABLE",
+				Operation:      "REPLACE",
+			}
+			if isProd || isStaging {
+				res.RiskLevel = RiskWarning
+				res.RequiresAffirmation = true
+				res.Reason = fmt.Sprintf("REPLACE INTO on %s environment targeting table '%s' (deletes and re-inserts conflicting rows).", strings.ToUpper(environment), tableName)
+			} else {
+				res.RiskLevel = RiskNone
+				res.Reason = fmt.Sprintf("REPLACE INTO targeting table '%s'.", tableName)
+			}
+			return res
 		}
 
 	case *sqlparser.DBDDL:
@@ -343,12 +376,25 @@ func riskPrecedence(r RiskLevel) int {
 	}
 }
 
+func extractTargetFromTableExprs(exprs sqlparser.TableExprs, fallbackRaw string) (string, string) {
+	if len(exprs) > 0 {
+		if aliased, ok := exprs[0].(*sqlparser.AliasedTableExpr); ok {
+			if tn, ok := aliased.Expr.(sqlparser.TableName); ok {
+				return tn.Qualifier.String(), tn.Name.String()
+			}
+		}
+	}
+	return extractDBAndTable(fallbackRaw)
+}
+
 var (
 	reDrop     = regexp.MustCompile(`(?i)^\s*DROP\s+(TABLE|DATABASE|SCHEMA|VIEW|MATERIALIZED\s+VIEW|INDEX|SEQUENCE|FUNCTION|PROCEDURE|TRIGGER|EVENT|TYPE|DOMAIN|EXTENSION)\s+(IF\s+EXISTS\s+)?([` + "`" + `"'\[\]\w\.\-]+)`)
-	reTruncate = regexp.MustCompile(`(?i)^\s*TRUNCATE\s+(TABLE\s+)?([` + "`" + `"'\[\]\w\.\-]+)`)
-	reDelete   = regexp.MustCompile(`(?i)^\s*DELETE\s+FROM\s+([` + "`" + `"'\[\]\w\.\-]+)`)
-	reUpdate   = regexp.MustCompile(`(?i)^\s*UPDATE\s+([` + "`" + `"'\[\]\w\.\-]+)`)
-	reAlter    = regexp.MustCompile(`(?i)^\s*ALTER\s+TABLE\s+([` + "`" + `"'\[\]\w\.\-]+)`)
+	reTruncate = regexp.MustCompile(`(?i)^\s*TRUNCATE\s+(TABLE\s+)?(?:ONLY\s+)?([` + "`" + `"'\[\]\w\.\-]+)`)
+	reDelete   = regexp.MustCompile(`(?i)^\s*DELETE\s+FROM\s+(?:ONLY\s+)?([` + "`" + `"'\[\]\w\.\-]+)`)
+	reUpdate   = regexp.MustCompile(`(?i)^\s*UPDATE\s+(?:ONLY\s+)?([` + "`" + `"'\[\]\w\.\-]+)`)
+	reAlter    = regexp.MustCompile(`(?i)^\s*ALTER\s+TABLE\s+(?:ONLY\s+)?([` + "`" + `"'\[\]\w\.\-]+)`)
+	reRename   = regexp.MustCompile(`(?i)^\s*RENAME\s+TABLE\s+([` + "`" + `"'\[\]\w\.\-]+)`)
+	reReplace  = regexp.MustCompile(`(?i)^\s*REPLACE\s+(?:INTO\s+)?([` + "`" + `"'\[\]\w\.\-]+)`)
 	reCreate   = regexp.MustCompile(`(?i)^\s*CREATE\s+(TABLE|DATABASE|SCHEMA|VIEW|INDEX|UNIQUE\s+INDEX)\s+(IF\s+NOT\s+EXISTS\s+)?([` + "`" + `"'\[\]\w\.\-]+)`)
 	reWhere    = regexp.MustCompile(`(?i)\bWHERE\b`)
 )
@@ -455,10 +501,55 @@ func buildLexicalCountQuery(table, query string) string {
 	return fmt.Sprintf("SELECT COUNT(*) FROM %s %s", table, clause)
 }
 
-func inspectLexicalFallback(query string, environment string) *InspectionResult {
-	if main, ok := stripLeadingCTE(query); ok {
-		return inspectLexicalFallback(main, environment)
+// collapseInlineComments replaces SQL comments outside quotes with spaces so keyword
+// regexes cannot be bypassed via inline comments such as DELETE/*x*/FROM.
+func collapseInlineComments(q string) string {
+	b := []byte(q)
+	for i := 0; i < len(b); i++ {
+		c := b[i]
+		if c == '\'' || c == '"' || c == '`' {
+			quote := c
+			for i++; i < len(b); i++ {
+				if b[i] == '\\' && quote != '`' && i+1 < len(b) {
+					i++
+					continue
+				}
+				if b[i] == quote {
+					break
+				}
+			}
+			continue
+		}
+		if (c == '-' && i+1 < len(b) && b[i+1] == '-') || c == '#' {
+			for ; i < len(b) && b[i] != '\n'; i++ {
+				b[i] = ' '
+			}
+			continue
+		}
+		if c == '/' && i+1 < len(b) && b[i+1] == '*' {
+			b[i], b[i+1] = ' ', ' '
+			i += 2
+			for i < len(b) {
+				if b[i] == '*' && i+1 < len(b) && b[i+1] == '/' {
+					b[i], b[i+1] = ' ', ' '
+					i++
+					break
+				}
+				b[i] = ' '
+				i++
+			}
+		}
 	}
+	return string(b)
+}
+
+func inspectLexicalFallback(query string, environment string) *InspectionResult {
+	if cteStmts, ok := extractCTEStatements(query); ok {
+		return inspectMultiStatements(cteStmts, environment)
+	}
+
+	origQuery := query
+	query = collapseInlineComments(query)
 
 	isProd := strings.EqualFold(environment, "Production")
 	isStaging := strings.EqualFold(environment, "Staging")
@@ -499,7 +590,7 @@ func inspectLexicalFallback(query string, environment string) *InspectionResult 
 
 	if match := reDelete.FindStringSubmatch(query); len(match) > 1 {
 		db, target := extractDBAndTable(match[1])
-		hasWhere := hasWhereOutsideLiterals(query)
+		hasWhere := hasWhereOutsideLiterals(origQuery)
 		cleanTable := match[1]
 		if !hasWhere {
 			return &InspectionResult{
@@ -513,7 +604,7 @@ func inspectLexicalFallback(query string, environment string) *InspectionResult 
 				CountQuery:        fmt.Sprintf("SELECT COUNT(*) FROM %s", cleanTable),
 			}
 		}
-		countQ := buildLexicalCountQuery(cleanTable, query)
+		countQ := buildLexicalCountQuery(cleanTable, origQuery)
 		res := &InspectionResult{
 			IsDestructive:  true,
 			HasWhere:       true,
@@ -539,7 +630,7 @@ func inspectLexicalFallback(query string, environment string) *InspectionResult 
 
 	if match := reUpdate.FindStringSubmatch(query); len(match) > 1 {
 		db, target := extractDBAndTable(match[1])
-		hasWhere := hasWhereOutsideLiterals(query)
+		hasWhere := hasWhereOutsideLiterals(origQuery)
 		cleanTable := match[1]
 		if !hasWhere {
 			return &InspectionResult{
@@ -553,7 +644,7 @@ func inspectLexicalFallback(query string, environment string) *InspectionResult 
 				CountQuery:        fmt.Sprintf("SELECT COUNT(*) FROM %s", cleanTable),
 			}
 		}
-		countQ := buildLexicalCountQuery(cleanTable, query)
+		countQ := buildLexicalCountQuery(cleanTable, origQuery)
 		res := &InspectionResult{
 			IsDestructive:  true,
 			HasWhere:       true,
@@ -590,6 +681,41 @@ func inspectLexicalFallback(query string, environment string) *InspectionResult 
 			Operation:           "ALTER",
 			Reason:              fmt.Sprintf("ALTER TABLE modifies schema structure on '%s'.", target),
 		}
+	}
+
+	if match := reRename.FindStringSubmatch(query); len(match) > 1 {
+		db, target := extractDBAndTable(match[1])
+		return &InspectionResult{
+			RiskLevel:           RiskDangerous,
+			IsDestructive:       true,
+			RequiresChallenge:   isProd,
+			RequiresAffirmation: true,
+			TargetDatabase:      db,
+			TargetTable:         target,
+			TargetType:          "TABLE",
+			Operation:           "RENAME",
+			Reason:              fmt.Sprintf("RENAME TABLE modifies schema object '%s'.", target),
+		}
+	}
+
+	if match := reReplace.FindStringSubmatch(query); len(match) > 1 {
+		db, target := extractDBAndTable(match[1])
+		res := &InspectionResult{
+			IsDestructive:  true,
+			TargetDatabase: db,
+			TargetTable:    target,
+			TargetType:     "TABLE",
+			Operation:      "REPLACE",
+		}
+		if isProd || isStaging {
+			res.RiskLevel = RiskWarning
+			res.RequiresAffirmation = true
+			res.Reason = fmt.Sprintf("REPLACE INTO on %s environment targeting '%s'.", strings.ToUpper(environment), target)
+		} else {
+			res.RiskLevel = RiskNone
+			res.Reason = fmt.Sprintf("REPLACE INTO targeting '%s'.", target)
+		}
+		return res
 	}
 
 	if match := reCreate.FindStringSubmatch(query); len(match) > 3 {
@@ -656,14 +782,17 @@ func cleanTableName(raw string) string {
 
 var reCTEStart = regexp.MustCompile(`(?i)^WITH\b`)
 
-// stripLeadingCTE returns the main statement following a WITH clause, i.e. the first
-// SELECT/INSERT/UPDATE/DELETE/MERGE keyword found outside parentheses and quotes.
-func stripLeadingCTE(q string) (string, bool) {
+// extractCTEStatements extracts each top-level CTE body `( ... )` and the main statement
+// following a WITH clause so data-modifying CTEs (e.g. WITH d AS (DELETE FROM t) SELECT * FROM d)
+// are inspected alongside the outer statement.
+func extractCTEStatements(q string) ([]string, bool) {
 	if !reCTEStart.MatchString(q) {
-		return "", false
+		return nil, false
 	}
 	depth := 0
 	var quote byte
+	var bodyStart int
+	var stmts []string
 	n := len(q)
 	for i := 4; i < n; i++ {
 		c := q[i]
@@ -677,6 +806,22 @@ func stripLeadingCTE(q string) (string, bool) {
 				quote = 0
 			}
 			continue
+		}
+
+		// PostgreSQL dollar quote ($$...$$ or $tag$...$tag$)
+		if c == '$' {
+			j := i + 1
+			for j < n && isIdentByte(q[j]) {
+				j++
+			}
+			if j < n && q[j] == '$' && (j == i+1 || !(q[i+1] >= '0' && q[i+1] <= '9')) {
+				tag := q[i : j+1]
+				if end := strings.Index(q[j+1:], tag); end >= 0 {
+					i = j + 1 + end + len(tag) - 1
+					continue
+				}
+				return nil, false
+			}
 		}
 
 		// Single-line comment (-- or #)
@@ -701,10 +846,17 @@ func stripLeadingCTE(q string) (string, bool) {
 		case '\'', '"', '`':
 			quote = c
 		case '(':
+			if depth == 0 {
+				bodyStart = i + 1
+			}
 			depth++
 		case ')':
 			if depth > 0 {
 				depth--
+				if depth == 0 && bodyStart > 0 && i > bodyStart {
+					stmts = append(stmts, q[bodyStart:i])
+					bodyStart = 0
+				}
 			}
 		default:
 			if depth != 0 || !isIdentByte(c) || isIdentByte(q[i-1]) {
@@ -716,12 +868,13 @@ func stripLeadingCTE(q string) (string, bool) {
 			}
 			switch strings.ToUpper(q[i:j]) {
 			case "SELECT", "INSERT", "UPDATE", "DELETE", "MERGE":
-				return q[i:], true
+				stmts = append(stmts, q[i:])
+				return stmts, true
 			}
 			i = j - 1
 		}
 	}
-	return "", false
+	return nil, false
 }
 
 func isIdentByte(c byte) bool {
