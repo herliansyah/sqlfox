@@ -2318,7 +2318,7 @@
         {@const estRows =
           activeCatalog?.tables?.find((t) => t.name.toLowerCase() === currentTab?.tableName?.toLowerCase())
             ?.row_count}
-        {@const pageSize = currentTab.pageSize || 50}
+        {@const pageSize = currentTab.pageSize || 25}
         {@const curPage = currentTab.currentPage || 1}
         {@const totalPages = typeof estRows === 'number' && estRows > 0 ? Math.max(1, Math.ceil(estRows / pageSize)) : null}
         <div id="grid-pagination-bar" class="flex items-center space-x-2 text-[11px]">

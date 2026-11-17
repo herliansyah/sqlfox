@@ -1395,7 +1395,7 @@ export class AppState {
         isTableViewer: Boolean(t.isTableViewer),
         tableName: t.tableName,
         tableMode: t.tableMode,
-        pageSize: t.pageSize || 50,
+        pageSize: t.pageSize || 25,
         currentPage: t.currentPage || 1,
         sortCol: t.sortCol || null,
         sortDir: t.sortDir || null,
@@ -1511,12 +1511,12 @@ export class AppState {
     const newTab: EditorTab = {
       id: newId,
       title: tableName,
-      sql: `SELECT * FROM ${dbPrefix}${quoteSqlIdentifier(tableName, driver)} LIMIT 50;`,
+      sql: `SELECT * FROM ${dbPrefix}${quoteSqlIdentifier(tableName, driver)} LIMIT 25;`,
       isTableViewer: true,
       tableName,
       database: currentDb,
       tableMode: initialMode,
-      pageSize: 50,
+      pageSize: 25,
       currentPage: 1,
       filterPills: [],
       filterMode: 'pills',
@@ -1590,8 +1590,14 @@ export class AppState {
   }
 
   openErdTab() {
+    const targetDb = this.currentDatabase || '';
     const existing = this.tabs.find((t) => t.isErdCanvas);
     if (existing) {
+      if (existing.database !== targetDb) {
+        existing.database = targetDb;
+        this.tabs = [...this.tabs];
+        this.saveTabsState();
+      }
       this.activeTabId = existing.id;
       return;
     }
@@ -1602,7 +1608,7 @@ export class AppState {
       sql: '',
       isErdCanvas: true,
       isTableViewer: false,
-      database: this.currentDatabase || '',
+      database: targetDb,
     };
     this.tabs.push(newTab);
     this.activeTabId = newId;
@@ -1632,7 +1638,7 @@ export class AppState {
     // Guard against out-of-order responses when the user pages/filters rapidly.
     const token = ((tab as any)._loadToken = ((tab as any)._loadToken || 0) + 1);
     try {
-      const limit = tab.pageSize || 50;
+      const limit = tab.pageSize || 25;
       const offset = ((tab.currentPage || 1) - 1) * limit;
       const db = tab.database || this.currentDatabase || '';
 

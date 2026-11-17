@@ -21,6 +21,9 @@
   let isPanning = $state(false);
   let startPanX = 0;
   let startPanY = 0;
+  let panOriginX = 0;
+  let panOriginY = 0;
+  let panMoved = false;
 
   // Touch pan & pinch state
   let touchMode: 'none' | 'pan' | 'drag' | 'pinch' = 'none';
@@ -328,6 +331,9 @@
     contextMenu = null;
     if ((e.target as HTMLElement).closest('.erd-card, .erd-btn, .erd-minimap, .erd-menu, input, button')) return;
     isPanning = true;
+    panOriginX = e.clientX;
+    panOriginY = e.clientY;
+    panMoved = false;
     startPanX = e.clientX - panX;
     startPanY = e.clientY - panY;
     window.addEventListener('mousemove', onPanMove);
@@ -336,12 +342,18 @@
 
   function onPanMove(e: MouseEvent) {
     if (!isPanning) return;
+    if (!panMoved && Math.hypot(e.clientX - panOriginX, e.clientY - panOriginY) > 4) {
+      panMoved = true;
+    }
     panX = e.clientX - startPanX;
     panY = e.clientY - startPanY;
   }
 
   function onPanUp() {
     isPanning = false;
+    if (!panMoved) {
+      selectedTable = null;
+    }
     window.removeEventListener('mousemove', onPanMove);
     window.removeEventListener('mouseup', onPanUp);
   }
@@ -883,7 +895,7 @@
       <div class="flex items-center space-x-1.5 px-2 text-xs font-semibold text-slate-200">
         <Icon name="layers" class="w-4 h-4 text-sky-400" />
         <span>ERD Canvas:</span>
-        <span class="font-mono text-sky-400">{appState.currentDatabase || 'None'}</span>
+        <span class="font-mono text-sky-400">{appState.activeTab?.database || appState.currentDatabase || 'None'}</span>
         <span class="text-slate-500 font-mono text-[11px]">
           ({tables.length} tables · {lines.length} FKs)
         </span>
@@ -1122,7 +1134,7 @@
 
         <div
           data-erd-card={table.name}
-          class="erd-card absolute rounded-xl shadow-2xl border transition-all pointer-events-auto bg-[#0b0f19] select-none {isSelected
+          class="erd-card absolute rounded-xl shadow-2xl border transition-colors pointer-events-auto bg-[#0b0f19] select-none {isSelected
             ? 'border-sky-400 ring-2 ring-sky-400/40 shadow-[0_0_25px_rgba(56,189,248,0.3)] z-30'
             : isConnected
             ? 'erd-connected border-amber-400/90 ring-1 ring-amber-400/35 shadow-[0_0_20px_rgba(245,158,11,0.25)] z-20'

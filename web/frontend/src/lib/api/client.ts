@@ -324,7 +324,7 @@ class ApiClient {
   async getTableRows(
     sessionId: string,
     tableName: string,
-    limit = 50,
+    limit = 25,
     offset = 0,
     db?: string,
     filter?: string,
