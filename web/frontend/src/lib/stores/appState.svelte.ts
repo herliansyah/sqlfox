@@ -351,7 +351,9 @@ export class AppState {
   })());
 
   // Remote Access Guard lock state
-  isRemoteLocked = $state<boolean>(false);
+  isRemoteLocked = $state<boolean>(
+    typeof document !== 'undefined' && document.body.classList.contains('vault-locked')
+  );
   authStatus = $state<any>(null);
 
   // Derived properties

@@ -89,6 +89,7 @@
   onDestroy(stopDrag);
 
   function handleGlobalKeyDown(e: KeyboardEvent) {
+    if (appState.isRemoteLocked) return;
     const isCtrl = e.ctrlKey || e.metaKey;
     const target = e.target as HTMLElement | null;
     const inCodeMirror = !!target?.closest('.cm-editor');
@@ -346,7 +347,10 @@
 
 <svelte:window onkeydown={handleGlobalKeyDown} />
 
-<div class="h-screen w-screen flex flex-col bg-[#090d16] text-slate-100 overflow-hidden font-sans select-none">
+<div
+  class="h-screen w-screen flex flex-col bg-[#090d16] text-slate-100 overflow-hidden font-sans select-none"
+  class:hidden={appState.isRemoteLocked}
+>
   <!-- Top Application Header -->
   <Header />
 
@@ -507,7 +511,6 @@
 
   <!-- Global Modals -->
   <SafetyModal />
-  <RemoteLockModal />
   <ConnectionModal />
   <RecordInspectorModal />
   <InsertRowModal />
@@ -615,3 +618,5 @@
 
   <ToastContainer />
 </div>
+
+<RemoteLockModal />
