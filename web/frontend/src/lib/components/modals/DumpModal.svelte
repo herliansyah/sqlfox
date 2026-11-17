@@ -153,13 +153,26 @@
             </p>
           </div>
         </div>
-        <button
-          onclick={handleClose}
-          class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition"
-          aria-label="Close"
-        >
-          <Icon name="x" class="w-4 h-4" />
-        </button>
+        <div class="flex items-center space-x-2">
+          <button
+            type="button"
+            onclick={() => {
+              appState.isDumpModalOpen = false;
+              appState.isSmartSeedModalOpen = true;
+            }}
+            class="px-2.5 py-1 rounded-md bg-emerald-950/60 hover:bg-emerald-900/70 border border-emerald-700/50 text-emerald-300 text-[11px] font-semibold transition"
+            title="Switch to Smart Seed (Relational Subset)"
+          >
+            Smart Seed →
+          </button>
+          <button
+            onclick={handleClose}
+            class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition"
+            aria-label="Close"
+          >
+            <Icon name="x" class="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       <!-- Dialog Body -->

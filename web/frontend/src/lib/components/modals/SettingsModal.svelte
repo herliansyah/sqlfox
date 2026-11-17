@@ -3,10 +3,13 @@
   import { api } from '../../api/client';
   import { copyText } from '../../utils/clipboard';
   import Icon from '../common/Icon.svelte';
+  import AiSettingsPanel from './AiSettingsPanel.svelte';
 
-  type SettingsTab = 'sync' | 'bundle' | 'security';
+  type SettingsTab = 'sync' | 'ai' | 'bundle' | 'security';
 
   let currentTab = $state<SettingsTab>('sync');
+  let aiPanel = $state<AiSettingsPanel | null>(null);
+  let isAiTesting = $state(false);
 
   // Cloud Sync State
   let syncEnabled = $state(false);
@@ -211,6 +214,13 @@
           GitHub Cloud Sync
         </button>
         <button
+          onclick={() => (currentTab = 'ai')}
+          class="px-3 py-1.5 font-medium transition border-b-2 flex items-center space-x-1 {currentTab === 'ai' ? 'border-sky-400 text-sky-300 font-bold' : 'border-transparent text-slate-400 hover:text-slate-200'}"
+        >
+          <Icon name="bot" class="w-3 h-3 text-sky-400" />
+          <span>AI Copilot</span>
+        </button>
+        <button
           onclick={() => (currentTab = 'bundle')}
           class="px-3 py-1.5 font-medium transition border-b-2 {currentTab === 'bundle' ? 'border-amber-400 text-amber-300 font-bold' : 'border-transparent text-slate-400 hover:text-slate-200'}"
         >
@@ -226,7 +236,13 @@
 
       <!-- Content Panes -->
       <div class="p-5 space-y-4 max-h-[460px] overflow-y-auto">
-        {#if currentTab === 'sync'}
+        {#if currentTab === 'ai'}
+          <AiSettingsPanel
+            bind:this={aiPanel}
+            active={appState.isSettingsModalOpen && currentTab === 'ai'}
+            bind:isTesting={isAiTesting}
+          />
+        {:else if currentTab === 'sync'}
           <label class="flex items-center space-x-2 p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 cursor-pointer">
             <input type="checkbox" bind:checked={syncEnabled} class="rounded border-slate-700 text-sky-500" />
             <div>
@@ -467,7 +483,19 @@
 
       <!-- Footer -->
       <div class="px-5 py-3 border-t border-[#1e293b] flex items-center justify-between bg-[#0f172a]">
-        <span class="text-slate-500 text-xs">SqlFox Single-Binary Database Suite</span>
+        {#if currentTab === 'ai'}
+          <button
+            type="button"
+            onclick={() => aiPanel?.testConnection()}
+            disabled={isAiTesting}
+            class="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition flex items-center space-x-1.5"
+          >
+            <Icon name="activity" class="w-3.5 h-3.5 {isAiTesting ? 'animate-spin text-sky-400' : ''}" />
+            <span>{isAiTesting ? 'Testing...' : 'Test Connection'}</span>
+          </button>
+        {:else}
+          <span class="text-slate-500 text-xs">SqlFox Single-Binary Database Suite</span>
+        {/if}
         <div class="flex items-center space-x-2">
           <button
             onclick={() => (appState.isSettingsModalOpen = false)}
@@ -481,6 +509,14 @@
               class="px-4 py-1.5 rounded bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold transition"
             >
               Save Configuration
+            </button>
+          {:else if currentTab === 'ai'}
+            <button
+              type="button"
+              onclick={() => aiPanel?.saveConfig()}
+              class="px-4 py-1.5 rounded bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold transition"
+            >
+              Save Settings
             </button>
           {/if}
         </div>

@@ -9,7 +9,8 @@
     "test:editor:browser": "node scripts/test-svelte-codemirror-browser.mjs",
     "build": "node scripts/build_web.js",
     "build:web": "node scripts/build_web.js",
-    "build:svelte": "npm --prefix web/frontend run build && cp -r web/dist_svelte/* web/dist/",
+    "build:svelte": "npm --prefix web/frontend run build && rm -rf web/dist/assets && cp -r web/dist_svelte/* web/dist/",
+    "build:all": "npm run build:svelte && go build -o sqlfox ./cmd/sqlfox",
     "dev:svelte": "npm --prefix web/frontend run dev"
   },
   "dependencies": {

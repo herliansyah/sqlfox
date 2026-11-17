@@ -14,6 +14,34 @@
   let cloudConnected = $state<boolean | null>(null);
   let isSyncingCloud = $state(false);
 
+  const WIDTH_KEY = 'sqlfox_notes_width';
+  const MAXIMIZED_KEY = 'sqlfox_notes_drawer_maximized';
+  let savedWidth = Number(localStorage.getItem(WIDTH_KEY) || '480');
+  let drawerWidth = $state(Number.isFinite(savedWidth) ? Math.min(920, Math.max(340, savedWidth)) : 480);
+  let isMaximized = $state(localStorage.getItem(MAXIMIZED_KEY) === 'true');
+  let isResizing = $state(false);
+
+  function toggleMaximized() {
+    isMaximized = !isMaximized;
+    localStorage.setItem(MAXIMIZED_KEY, String(isMaximized));
+  }
+
+  function startResize(e: MouseEvent) {
+    e.preventDefault();
+    isResizing = true;
+    const onMove = (ev: MouseEvent) => {
+      drawerWidth = Math.min(960, Math.max(340, window.innerWidth - ev.clientX));
+    };
+    const onUp = () => {
+      isResizing = false;
+      localStorage.setItem(WIDTH_KEY, String(drawerWidth));
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
+
   let activeTableName = $derived(appState.activeTab?.tableName || '');
 
   async function loadNotes() {
@@ -266,10 +294,22 @@
 </script>
 
 <aside
-  class="fixed top-12 right-0 bottom-7 w-full max-w-[540px] bg-[#0b0f19] border-l border-[#1e293b] shadow-2xl z-40 flex flex-col font-sans transition-transform duration-200 select-text"
+  class="fixed top-12 right-0 bottom-7 bg-[#0b0f19] border-l border-[#1e293b] shadow-2xl z-40 flex flex-col font-sans select-text {isResizing ? '' : 'transition-[width] duration-150'}"
+  style="width: {isMaximized
+    ? 'min(58rem, calc(100vw - 1.5rem))'
+    : `min(${drawerWidth}px, calc(100vw - 1.5rem))`};"
 >
+  <!-- Left-Edge Resizer Handle -->
+  <div
+    role="separator"
+    aria-orientation="vertical"
+    aria-label="Resize Operational Notes drawer"
+    onmousedown={startResize}
+    class="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-amber-500/40 transition z-50"
+  ></div>
+
   <!-- Drawer Header -->
-  <div class="h-10 bg-[#0f172a] border-b border-[#1e293b] px-4 flex items-center justify-between flex-shrink-0 select-none gap-2">
+  <div class="h-10 bg-[#0f172a] border-b border-[#1e293b] px-3.5 flex items-center justify-between flex-shrink-0 select-none gap-2">
     <div class="flex items-center space-x-2 min-w-0">
       <Icon name="file-text" class="w-4 h-4 text-amber-400 shrink-0" />
       <span class="font-bold text-slate-100 text-xs truncate">Operational Notes</span>
@@ -281,14 +321,14 @@
       {/if}
     </div>
 
-    <div class="flex items-center space-x-1.5 shrink-0">
+    <div class="flex items-center space-x-1 shrink-0">
       <button
         type="button"
         onclick={syncCloudNow}
         disabled={isSyncingCloud}
-        class="px-2 py-0.5 rounded border text-[10.5px] flex items-center space-x-1 transition {cloudConnected
+        class="px-2 py-1 rounded border text-[11px] leading-none flex items-center space-x-1 transition {cloudConnected
           ? 'bg-emerald-950/50 border-emerald-800 text-emerald-300 hover:bg-emerald-900/60'
-          : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'}"
+          : 'bg-slate-800/80 border-slate-700 text-slate-300 hover:text-white hover:bg-slate-800'}"
         title={cloudConnected ? 'Run Cloud Sync Backup' : 'Configure Cloud Sync in Settings'}
       >
         <Icon name={isSyncingCloud ? 'refresh-cw' : 'cloud'} class="w-3 h-3 {isSyncingCloud ? 'animate-spin' : ''}" />
@@ -296,20 +336,28 @@
       </button>
       <button
         type="button"
+        onclick={() => openComposer()}
+        class="px-2 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-medium text-[11px] leading-none transition flex items-center space-x-1 shadow-sm"
+      >
+        <Icon name="plus" class="w-3 h-3" />
+        <span>New Note</span>
+      </button>
+      <button
+        type="button"
         onclick={exportAllMarkdown}
         disabled={filteredNotes.length === 0}
-        class="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition disabled:opacity-40"
+        class="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition disabled:opacity-40 disabled:pointer-events-none"
         title="Export visible notes as .md"
       >
         <Icon name="download" class="w-3.5 h-3.5" />
       </button>
       <button
         type="button"
-        onclick={() => openComposer()}
-        class="px-2 py-0.5 rounded bg-amber-600 hover:bg-amber-500 text-white font-medium text-xs transition flex items-center space-x-1 shadow-sm"
+        onclick={toggleMaximized}
+        class="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition"
+        title={isMaximized ? 'Restore Notes Width' : 'Maximize Notes'}
       >
-        <Icon name="plus" class="w-3 h-3" />
-        <span>New Note</span>
+        <Icon name={isMaximized ? 'minimize-2' : 'maximize-2'} class="w-3.5 h-3.5" />
       </button>
       <button
         type="button"

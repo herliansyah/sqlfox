@@ -1,6 +1,7 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
   import Icon from '../common/Icon.svelte';
+  import { viewportFit } from '../../actions/viewportFit';
 
   function jumpToTable() {
     const refTable = appState.fkPeekState.refTable;
@@ -29,6 +30,7 @@
 {#if appState.fkPeekState.isOpen}
   <div
     id="fk-peek-popover-box"
+    use:viewportFit={{ x: appState.fkPeekState.x, y: appState.fkPeekState.y }}
     style="left: {appState.fkPeekState.x}px; top: {appState.fkPeekState.y}px;"
     class="fixed z-[90] w-80 max-h-96 bg-[#0f172a] border border-sky-500/50 rounded-xl shadow-2xl flex flex-col overflow-hidden text-slate-100 text-xs animate-fade-in"
     role="dialog"

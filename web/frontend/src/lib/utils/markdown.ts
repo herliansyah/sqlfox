@@ -22,7 +22,7 @@ export function splitMarkdownSegments(raw: string): MarkdownSegment[] {
   if (!raw) return [];
   const text = String(raw);
   const parts: MarkdownSegment[] = [];
-  const fenceRegex = /```([a-zA-Z0-9_-]*)\r?\n([\s\S]*?)```/g;
+  const fenceRegex = /```([a-zA-Z0-9_-]*)[ \t]*\r?\n([\s\S]*?)```/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = fenceRegex.exec(text)) !== null) {
@@ -43,13 +43,26 @@ export function splitMarkdownSegments(raw: string): MarkdownSegment[] {
 }
 
 function renderInlineMarkdown(escapedText: string): string {
-  return escapedText
-    .replace(/`([^`\n]+)`/g, '<code class="px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700/70 text-sky-300 font-mono text-[11px]">$1</code>')
+  // Protect inline code and links before emphasis passes so underscores/asterisks inside them aren't mangled.
+  const tokens: string[] = [];
+  const hold = (html: string) => {
+    const idx = tokens.push(html) - 1;
+    return `\u0000MD${idx}\u0000`;
+  };
+
+  let out = escapedText
+    .replace(/`([^`\n]+)`/g, (_m, code) =>
+      hold(`<code class="px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700/70 text-sky-300 font-mono text-[11px]">${code}</code>`)
+    )
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_m, label, url) =>
+      hold(`<a href="${url}" target="_blank" rel="noopener noreferrer" class="text-sky-400 hover:text-sky-300 underline">${label}</a>`)
+    )
     .replace(/\*\*([^*]+)\*\*/g, '<strong class="font-semibold text-slate-100">$1</strong>')
     .replace(/__([^_]+)__/g, '<strong class="font-semibold text-slate-100">$1</strong>')
     .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em class="italic text-slate-300">$2</em>')
-    .replace(/(^|[^_])_([^_\n]+)_/g, '$1<em class="italic text-slate-300">$2</em>')
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-sky-400 hover:text-sky-300 underline">$1</a>');
+    .replace(/(^|[^_])_([^_\n]+)_/g, '$1<em class="italic text-slate-300">$2</em>');
+
+  return out.replace(/\u0000MD(\d+)\u0000/g, (_m, idx) => tokens[Number(idx)] ?? '');
 }
 
 export function renderMarkdownBlockHtml(raw: string): string {

@@ -518,9 +518,7 @@
   <!-- Drawer Header -->
   <div class="h-10 bg-[#0f172a] border-b border-[#1e293b] px-3.5 flex items-center justify-between flex-shrink-0 select-none gap-2">
     <div class="flex items-center space-x-2 min-w-0">
-      <div class="p-1 rounded bg-sky-950 border border-sky-800 text-sky-400 shrink-0">
-        <Icon name="bot" class="w-3.5 h-3.5" />
-      </div>
+      <Icon name="bot" class="w-4 h-4 text-sky-400 shrink-0" />
       <span class="font-bold text-slate-100 text-xs shrink-0">AI Copilot</span>
       <button
         id="ai-provider-badge"
@@ -695,11 +693,17 @@
 
         <div
           class="max-w-[94%] rounded-xl px-3 py-2 text-xs leading-relaxed {isUser
-            ? 'bg-sky-600 text-white rounded-tr-none shadow-md'
+            ? 'bg-[#16233b] border border-sky-700/50 text-slate-100 rounded-tr-none shadow-md space-y-1.5'
             : 'bg-[#131b2e] border border-[#1e293b] text-slate-200 rounded-tl-none shadow-md space-y-2'}"
         >
           {#if isUser}
-            <div class="whitespace-pre-wrap">{msg.content}</div>
+            {#each splitMarkdownSegments(msg.content) as seg}
+              {#if seg.type === 'code'}
+                <pre class="my-1 p-2 rounded-lg bg-[#0b1220] border border-sky-900/50 text-sky-200 font-mono text-[11px] overflow-x-auto whitespace-pre-wrap">{seg.content}</pre>
+              {:else}
+                <div>{@html renderMarkdownBlockHtml(seg.content)}</div>
+              {/if}
+            {/each}
           {:else}
             {#each splitMarkdownSegments(msg.content) as seg}
               {#if seg.type === 'code'}
@@ -763,7 +767,7 @@
                 </button>
                 <button
                   type="button"
-                  onclick={() => appState.saveQueryToNote(msg.content, `AI Copilot Note (${formatTime(msg.timestamp)})`)}
+                  onclick={() => appState.saveMarkdownToNote(msg.content, `AI Copilot Note (${formatTime(msg.timestamp)})`, { category: 'AI Copilot', userTags: ['#ai-copilot'] })}
                   class="hover:text-amber-300 flex items-center space-x-1"
                 >
                   <Icon name="bookmark" class="w-2.5 h-2.5" /><span>Save to Notes</span>

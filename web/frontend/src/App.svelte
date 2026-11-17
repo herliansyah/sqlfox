@@ -6,7 +6,6 @@
   import SqlEditor from './lib/components/editor/SqlEditor.svelte';
   import VirtualGrid from './lib/components/grid/VirtualGrid.svelte';
   import TableViewer from './lib/components/table/TableViewer.svelte';
-  import ProcesslistView from './lib/components/dba/ProcesslistView.svelte';
   import SafetyModal from './lib/components/modals/SafetyModal.svelte';
   import RemoteLockModal from './lib/components/modals/RemoteLockModal.svelte';
   import ConnectionModal from './lib/components/modals/ConnectionModal.svelte';
@@ -23,21 +22,13 @@
   import TriggerDesignerModal from './lib/components/modals/TriggerDesignerModal.svelte';
   import RoutineDesignerModal from './lib/components/modals/RoutineDesignerModal.svelte';
   import EventDesignerModal from './lib/components/modals/EventDesignerModal.svelte';
-  import DumpModal from './lib/components/modals/DumpModal.svelte';
-  import StructureSyncModal from './lib/components/modals/StructureSyncModal.svelte';
   import RunSqlModal from './lib/components/modals/RunSqlModal.svelte';
   import SnippetsModal from './lib/components/modals/SnippetsModal.svelte';
-  import CsvImportModal from './lib/components/modals/CsvImportModal.svelte';
-  import PrivilegeMatrixModal from './lib/components/modals/PrivilegeMatrixModal.svelte';
-  import DbDiagnosticsModal from './lib/components/modals/DbDiagnosticsModal.svelte';
-  import ErdCanvas from './lib/components/erd/ErdCanvas.svelte';
   import AiDrawer from './lib/components/ai/AiDrawer.svelte';
   import AiSettingsModal from './lib/components/modals/AiSettingsModal.svelte';
-  import NotesDrawer from './lib/components/notes/NotesDrawer.svelte';
   import NoteComposerModal from './lib/components/modals/NoteComposerModal.svelte';
   import ActivityConsoleDrawer from './lib/components/activity/ActivityConsoleDrawer.svelte';
   import UpdateModal from './lib/components/modals/UpdateModal.svelte';
-  import MockDataModal from './lib/components/modals/MockDataModal.svelte';
   import SettingsModal from './lib/components/modals/SettingsModal.svelte';
   import ToastContainer from './lib/components/common/ToastContainer.svelte';
   import NativeDialogModal from './lib/components/modals/NativeDialogModal.svelte';
@@ -45,15 +36,11 @@
   import DdlReviewModal from './lib/components/modals/DdlReviewModal.svelte';
   import RefreshAllModal from './lib/components/modals/RefreshAllModal.svelte';
   import ImpactPreviewModal from './lib/components/modals/ImpactPreviewModal.svelte';
-  import DataTransferModal from './lib/components/modals/DataTransferModal.svelte';
-  import DataSyncModal from './lib/components/modals/DataSyncModal.svelte';
-  import AuditDrawer from './lib/components/activity/AuditDrawer.svelte';
   import FkPeekPopover from './lib/components/grid/FkPeekPopover.svelte';
   import SchemaSearchModal from './lib/components/modals/SchemaSearchModal.svelte';
   import DdlViewModal from './lib/components/modals/DdlViewModal.svelte';
   import SafetyInspectionModal from './lib/components/modals/SafetyInspectionModal.svelte';
   import LockInspectorModal from './lib/components/modals/LockInspectorModal.svelte';
-  import SmartSeedModal from './lib/components/modals/SmartSeedModal.svelte';
   import NoteMarkdownView from './lib/components/notes/NoteMarkdownView.svelte';
   import Icon from './lib/components/common/Icon.svelte';
   import { copyText } from './lib/utils/clipboard';
@@ -378,12 +365,16 @@
         {#if appState.activeTab?.isProcesslist || appState.activeTab?.isCluster || appState.activeTab?.isVariables || appState.activeTab?.isFlightRecorder}
           <!-- Processlist / DBA Telemetry Tab -->
           <div class="flex-1 overflow-hidden">
-            <ProcesslistView />
+            {#await import('./lib/components/dba/ProcesslistView.svelte') then { default: ProcesslistView }}
+              <ProcesslistView />
+            {/await}
           </div>
         {:else if appState.activeTab?.isErdCanvas}
           <!-- ERD Canvas Visual Schema Designer Tab -->
           <div class="flex-1 overflow-hidden">
-            <ErdCanvas />
+            {#await import('./lib/components/erd/ErdCanvas.svelte') then { default: ErdCanvas }}
+              <ErdCanvas />
+            {/await}
           </div>
         {:else if appState.activeTab?.isNote}
           <!-- Dedicated Markdown Notes Tab -->
@@ -530,39 +521,81 @@
   <TriggerDesignerModal />
   <RoutineDesignerModal />
   <EventDesignerModal />
-  <DumpModal />
-  <StructureSyncModal />
+  {#if appState.isDumpModalOpen}
+    {#await import('./lib/components/modals/DumpModal.svelte') then { default: DumpModal }}
+      <DumpModal />
+    {/await}
+  {/if}
+  {#if appState.isStructureSyncModalOpen}
+    {#await import('./lib/components/modals/StructureSyncModal.svelte') then { default: StructureSyncModal }}
+      <StructureSyncModal />
+    {/await}
+  {/if}
   <RunSqlModal />
   <SnippetsModal />
-  <CsvImportModal />
-  <PrivilegeMatrixModal />
-  <DbDiagnosticsModal />
+  {#if appState.isCsvImportModalOpen}
+    {#await import('./lib/components/modals/CsvImportModal.svelte') then { default: CsvImportModal }}
+      <CsvImportModal />
+    {/await}
+  {/if}
+  {#if appState.isPrivilegeMatrixOpen}
+    {#await import('./lib/components/modals/PrivilegeMatrixModal.svelte') then { default: PrivilegeMatrixModal }}
+      <PrivilegeMatrixModal />
+    {/await}
+  {/if}
+  {#if appState.isDbDiagnosticsOpen}
+    {#await import('./lib/components/modals/DbDiagnosticsModal.svelte') then { default: DbDiagnosticsModal }}
+      <DbDiagnosticsModal />
+    {/await}
+  {/if}
   <JsonCellModal />
   <AiSettingsModal />
   <NoteComposerModal />
   <UpdateModal />
-  <MockDataModal />
+  {#if appState.isMockDataModalOpen}
+    {#await import('./lib/components/modals/MockDataModal.svelte') then { default: MockDataModal }}
+      <MockDataModal />
+    {/await}
+  {/if}
   <SettingsModal />
   <NativeDialogModal />
   <ReconnectBanner />
   <DdlReviewModal />
   <RefreshAllModal />
   <ImpactPreviewModal />
-  <DataTransferModal />
-  <DataSyncModal />
-  <AuditDrawer />
+  {#if appState.isDataTransferOpen}
+    {#await import('./lib/components/modals/DataTransferModal.svelte') then { default: DataTransferModal }}
+      <DataTransferModal />
+    {/await}
+  {/if}
+  {#if appState.isDataSyncOpen}
+    {#await import('./lib/components/modals/DataSyncModal.svelte') then { default: DataSyncModal }}
+      <DataSyncModal />
+    {/await}
+  {/if}
+  {#if appState.isAuditDrawerOpen}
+    {#await import('./lib/components/activity/AuditDrawer.svelte') then { default: AuditDrawer }}
+      <AuditDrawer />
+    {/await}
+  {/if}
   <FkPeekPopover />
   <SchemaSearchModal />
   <DdlViewModal />
   <SafetyInspectionModal />
   <LockInspectorModal />
-  <SmartSeedModal />
+  {#if appState.isSmartSeedModalOpen}
+    {#await import('./lib/components/modals/SmartSeedModal.svelte') then { default: SmartSeedModal }}
+      <SmartSeedModal />
+    {/await}
+  {/if}
 
   <div class:hidden={!appState.isAiDrawerOpen}>
     <AiDrawer />
   </div>
   {#if appState.isNotesDrawerOpen}
-    <NotesDrawer />
+    {#await import('./lib/components/notes/NotesDrawer.svelte') then { default: NotesDrawer }}
+      <NotesDrawer />
+    {/await}
   {/if}
   <ActivityConsoleDrawer />
 

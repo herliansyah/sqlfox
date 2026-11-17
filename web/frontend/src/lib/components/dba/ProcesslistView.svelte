@@ -8,6 +8,7 @@
   import Icon from '../common/Icon.svelte';
   import FlightTimeline from './FlightTimeline.svelte';
   import ProcessTrendPanel, { type TrendSample } from './ProcessTrendPanel.svelte';
+  import { viewportFit } from '../../actions/viewportFit';
 
   type DbaSubTab = 'threads' | 'digest' | 'deadlock' | 'cluster' | 'variables' | 'flight-recorder';
   type FilterChip = 'all' | 'active' | 'sleep' | 'locked' | 'slow' | 'idle60';
@@ -106,8 +107,8 @@
   // Threads filtering, selection, polling, trend & menus
   let filterText = $state('');
   let activeChip = $state<FilterChip>('all');
-  let hideSleep = $state(false);
-  let hideSystem = $state(false);
+  let hideSleep = $state(true);
+  let hideSystem = $state(true);
   let slowThreshold = $state(5);
   let selectedThreadIds = new SvelteSet<number>();
   let refreshInterval = $state<number>(0); // 0 = pause, 1000, 3000, 5000
@@ -116,6 +117,7 @@
   let inspectingThread = $state<ProcesslistThread | null>(null);
   let formatInspectSql = $state(false);
   let openRowMenuId = $state<number | null>(null);
+  let openRowMenuAnchor = $state<HTMLElement | null>(null);
 
   // Rolling 60-sample activity trend panel state
   let trendOpen = $state<boolean>(
@@ -771,7 +773,10 @@
           `### Thread #${t.id} (${t.user}@${t.host} · db=${t.db || '-'} · ${t.time}s)\nState: ${t.state || '-'}\n\`\`\`sql\n${t.info || '-- Idle'}\n\`\`\``
       )
       .join('\n\n');
-    appState.saveQueryToNote(body, `Processlist Snapshot (${rows.length} threads)`);
+    appState.saveMarkdownToNote(body, `Processlist Snapshot (${rows.length} threads)`, {
+      category: 'Diagnostics',
+      userTags: ['#processlist'],
+    });
   }
 
   let rootBlockerCount = $derived.by(
@@ -1675,6 +1680,7 @@
                 onclick={() => (showColSelector = false)}
               ></button>
               <div
+                use:viewportFit
                 class="absolute right-0 mt-1 w-48 bg-[#0f172a] border border-[#334155] rounded-lg shadow-2xl z-40 p-2 text-xs font-sans space-y-1 animate-in fade-in duration-100"
               >
                 <div class="flex items-center justify-between px-1 pb-1 border-b border-slate-800">
@@ -1918,7 +1924,7 @@
                   {/if}
                   {#if visibleColumns.actions}
                     <td
-                      class="px-1.5 text-center whitespace-nowrap sticky right-0 border-l border-slate-800/60 transition-colors {actionBg} group-hover:bg-slate-800/40"
+                      class="px-1.5 text-center whitespace-nowrap sticky right-0 border-l border-slate-800/60 transition-colors {actionBg} group-hover:bg-slate-800/40 {openRowMenuId === thread.id ? 'z-30' : ''}"
                       onclick={(e) => e.stopPropagation()}
                     >
                       <div class="inline-flex items-center space-x-1 relative">
@@ -1946,7 +1952,13 @@
                           type="button"
                           onclick={(e) => {
                             e.stopPropagation();
-                            openRowMenuId = openRowMenuId === thread.id ? null : thread.id;
+                            if (openRowMenuId === thread.id) {
+                              openRowMenuId = null;
+                              openRowMenuAnchor = null;
+                            } else {
+                              openRowMenuAnchor = e.currentTarget as HTMLElement;
+                              openRowMenuId = thread.id;
+                            }
                           }}
                           class="rounded p-1 text-slate-400 hover:bg-slate-700 hover:text-white transition"
                           title="More thread actions"
@@ -1960,68 +1972,78 @@
                             type="button"
                             tabindex="-1"
                             aria-label="Close thread menu"
-                            class="fixed inset-0 z-30 bg-transparent cursor-default"
-                            onclick={() => (openRowMenuId = null)}
+                            class="fixed inset-0 z-40 bg-transparent cursor-default"
+                            onclick={() => { openRowMenuId = null; openRowMenuAnchor = null; }}
                           ></button>
                           <div
-                            class="absolute right-0 top-7 w-48 bg-[#0f172a] border border-slate-700 rounded-lg shadow-2xl z-40 py-1 text-left font-sans text-[11px] text-slate-200"
+                            use:viewportFit={{ anchor: openRowMenuAnchor, align: 'right' }}
+                            class="fixed w-56 bg-[#0f172a] border border-slate-700 rounded-lg shadow-2xl z-50 py-1 divide-y divide-slate-800 text-left font-sans text-[11px] text-slate-200"
                           >
-                            <button
-                              type="button"
-                              onclick={() => { inspectingThread = thread; formatInspectSql = false; openRowMenuId = null; }}
-                              class="w-full px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2"
-                            >
-                              <Icon name="eye" class="w-3 h-3 text-sky-400" /><span>Inspect Thread</span>
-                            </button>
-                            <button
-                              type="button"
-                              disabled={!thread.info}
-                              onclick={() => { copyWithToast(thread.info, 'SQL'); openRowMenuId = null; }}
-                              class="w-full px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 disabled:opacity-40"
-                            >
-                              <Icon name="copy" class="w-3 h-3 text-slate-400" /><span>Copy SQL</span>
-                            </button>
-                            <button
-                              type="button"
-                              disabled={!thread.info}
-                              onclick={() => { openSqlInEditor(thread.info, `Thread_${thread.id}.sql`); openRowMenuId = null; }}
-                              class="w-full px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 disabled:opacity-40"
-                            >
-                              <Icon name="file-code" class="w-3 h-3 text-emerald-400" /><span>Open in Editor</span>
-                            </button>
-                            <button
-                              type="button"
-                              disabled={!thread.info}
-                              onclick={() => { explainThreadQuery(thread.info); openRowMenuId = null; }}
-                              class="w-full px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 disabled:opacity-40"
-                            >
-                              <Icon name="play" class="w-3 h-3 text-amber-400" /><span>Explain Query</span>
-                            </button>
-                            <button
-                              type="button"
-                              disabled={!thread.info}
-                              onclick={() => { sendThreadToAI(thread.info, thread); openRowMenuId = null; }}
-                              class="w-full px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 disabled:opacity-40"
-                            >
-                              <Icon name="bot" class="w-3 h-3 text-purple-400" /><span>Ask Copilot</span>
-                            </button>
-                            <div class="my-1 border-t border-slate-800"></div>
-                            <button
-                              type="button"
-                              disabled={isSys}
-                              onclick={() => { openRowMenuId = null; killSingleThread(thread.id, 'query'); }}
-                              class="w-full px-3 py-1.5 hover:bg-amber-950/60 text-amber-300 flex items-center space-x-2 disabled:opacity-35"
-                            >
-                              <Icon name="square" class="w-3 h-3" /><span>Kill Query (KILL QUERY)</span>
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isSelf || isSys}
-                              onclick={() => { openRowMenuId = null; killSingleThread(thread.id, 'connection'); }}
-                              class="w-full px-3 py-1.5 hover:bg-rose-950/60 text-rose-300 flex items-center space-x-2 disabled:opacity-35"
-                            >
-                              <Icon name="x-circle" class="w-3 h-3" /><span>Kill Connection (KILL)</span>
-                            </button>
+                            <div class="py-0.5">
+                              <button
+                                type="button"
+                                onclick={() => { inspectingThread = thread; formatInspectSql = false; openRowMenuId = null; openRowMenuAnchor = null; }}
+                                class="w-full px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2"
+                              >
+                                <Icon name="eye" class="w-3 h-3 text-sky-400" /><span>Inspect Thread</span>
+                              </button>
+                            </div>
+                            <div class="px-2.5 py-1.5 space-y-1">
+                              <div class="text-[9.5px] font-bold uppercase tracking-wider text-slate-500">SQL Actions</div>
+                              <div class="grid grid-cols-2 gap-1 text-[10px]">
+                                <button
+                                  type="button"
+                                  disabled={!thread.info}
+                                  onclick={() => { copyWithToast(thread.info, 'SQL'); openRowMenuId = null; openRowMenuAnchor = null; }}
+                                  class="px-2 py-1 rounded bg-slate-800/80 hover:bg-slate-700 flex items-center gap-1.5 disabled:opacity-40"
+                                >
+                                  <Icon name="copy" class="w-3 h-3 text-slate-400" /><span>Copy SQL</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={!thread.info}
+                                  onclick={() => { openSqlInEditor(thread.info, `Thread_${thread.id}.sql`); openRowMenuId = null; openRowMenuAnchor = null; }}
+                                  class="px-2 py-1 rounded bg-slate-800/80 hover:bg-slate-700 flex items-center gap-1.5 disabled:opacity-40"
+                                >
+                                  <Icon name="file-code" class="w-3 h-3 text-emerald-400" /><span>Editor</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={!thread.info}
+                                  onclick={() => { explainThreadQuery(thread.info); openRowMenuId = null; openRowMenuAnchor = null; }}
+                                  class="px-2 py-1 rounded bg-slate-800/80 hover:bg-slate-700 flex items-center gap-1.5 disabled:opacity-40"
+                                >
+                                  <Icon name="play" class="w-3 h-3 text-amber-400" /><span>Explain</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={!thread.info}
+                                  onclick={() => { sendThreadToAI(thread.info, thread); openRowMenuId = null; openRowMenuAnchor = null; }}
+                                  class="px-2 py-1 rounded bg-slate-800/80 hover:bg-slate-700 flex items-center gap-1.5 disabled:opacity-40"
+                                >
+                                  <Icon name="bot" class="w-3 h-3 text-purple-400" /><span>Ask AI</span>
+                                </button>
+                              </div>
+                            </div>
+                            <div class="px-2.5 py-1.5 flex items-center justify-between gap-1.5">
+                              <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Kill</span>
+                              <div class="flex items-center gap-1 text-[10px]">
+                                <button
+                                  type="button"
+                                  disabled={isSys}
+                                  onclick={() => { openRowMenuId = null; openRowMenuAnchor = null; killSingleThread(thread.id, 'query'); }}
+                                  class="px-2 py-0.5 rounded bg-amber-950/60 hover:bg-amber-900/70 text-amber-300 font-medium disabled:opacity-35"
+                                  title="Kill Query (KILL QUERY)"
+                                >Query</button>
+                                <button
+                                  type="button"
+                                  disabled={isSelf || isSys}
+                                  onclick={() => { openRowMenuId = null; openRowMenuAnchor = null; killSingleThread(thread.id, 'connection'); }}
+                                  class="px-2 py-0.5 rounded bg-rose-950/60 hover:bg-rose-900/70 text-rose-300 font-medium disabled:opacity-35"
+                                  title="Kill Connection (KILL)"
+                                >Connection</button>
+                              </div>
+                            </div>
                           </div>
                         {/if}
                       </div>

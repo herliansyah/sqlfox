@@ -285,6 +285,20 @@ const computeWindow = (scrollTop, containerHeight, totalRows) => {
   assert.strictEqual(startIndex, 85, 'Scrolling must advance the virtual window start');
 }
 
+// Regression: VirtualGrid cell rendering must use rowItem.displayIdx, never an undefined vIdx
+assert(
+  virtualGridCode.includes('{@const dispRowIdx = rowItem.displayIdx}'),
+  'VirtualGrid must derive dispRowIdx from rowItem.displayIdx'
+);
+assert(
+  !/\bvIdx\b/.test(virtualGridCode),
+  'VirtualGrid must not reference undefined vIdx'
+);
+assert(
+  !appStateCode.includes('(tab.isNote && this.isTabDirty(tab))'),
+  'closeTab must confirm for all dirty tabs, not only note tabs'
+);
+
 console.log('✓ Column picker source assertions passed!');
 console.log('✓ Record inspector source assertions passed!');
 console.log('✓ Quick-filter source assertions passed!');

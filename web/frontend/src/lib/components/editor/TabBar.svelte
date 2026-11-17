@@ -2,6 +2,7 @@
   import { tick, untrack } from 'svelte';
   import { appState } from '../../stores/appState.svelte';
   import Icon from '../common/Icon.svelte';
+  import { viewportFit } from '../../actions/viewportFit';
 
   let containerWidth = $state(0);
   let tabsContainerEl = $state<HTMLDivElement | null>(null);
@@ -92,8 +93,26 @@
     return Math.max(1, count);
   });
 
-  let visibleTabs = $derived(appState.tabs.slice(0, visibleCount));
-  let overflowTabs = $derived(appState.tabs.slice(visibleCount));
+  let tabPartition = $derived.by(() => {
+    const vCount = visibleCount;
+    const all = appState.tabs;
+    if (vCount <= 0 || all.length <= vCount) {
+      return { visible: all, overflow: [] as typeof all };
+    }
+    const activeIdx = appState.activeTabId ? all.findIndex((t) => t.id === appState.activeTabId) : -1;
+    if (activeIdx >= vCount) {
+      const visible = [...all.slice(0, vCount - 1), all[activeIdx]];
+      const overflow = [...all.slice(vCount - 1, activeIdx), ...all.slice(activeIdx + 1)];
+      return { visible, overflow };
+    }
+    return {
+      visible: all.slice(0, vCount),
+      overflow: all.slice(vCount),
+    };
+  });
+
+  let visibleTabs = $derived(tabPartition.visible);
+  let overflowTabs = $derived(tabPartition.overflow);
 
   let filteredOverflowTabs = $derived.by(() => {
     const q = overflowSearchQuery.trim().toLowerCase();
@@ -104,24 +123,6 @@
         (t.database && t.database.toLowerCase().includes(q)) ||
         (t.tableName && t.tableName.toLowerCase().includes(q))
     );
-  });
-
-  // Place overflowing active tab at the last visible slot so earlier tabs stay anchored.
-  $effect(() => {
-    const vCount = visibleCount;
-    const activeId = appState.activeTabId;
-    if (!activeId || vCount <= 0 || appState.tabs.length <= vCount) return;
-
-    const activeIdx = appState.tabs.findIndex((t) => t.id === activeId);
-    if (activeIdx >= vCount) {
-      untrack(() => {
-        const [activeTab] = appState.tabs.splice(activeIdx, 1);
-        const targetSlot = Math.max(0, vCount - 1);
-        appState.tabs.splice(targetSlot, 0, activeTab);
-        appState.tabs = [...appState.tabs];
-        appState.saveTabsState();
-      });
-    }
   });
 
   function updateDropdownCoords() {
@@ -353,8 +354,9 @@
     {@const singleton = ctxTab ? isSingletonTab(ctxTab) : false}
     <div
       id="tab-context-menu"
+      use:viewportFit={{ x: tabContextMenu.x, y: tabContextMenu.y }}
       style="top: {tabContextMenu.y}px; left: {tabContextMenu.x}px;"
-      class="fixed z-[110] w-44 bg-[#0f172a] border border-slate-700/90 rounded-lg shadow-2xl py-1 divide-y divide-slate-800 text-xs select-none"
+      class="fixed z-[110] w-48 bg-[#0f172a] border border-slate-700/90 rounded-lg shadow-2xl py-1 divide-y divide-slate-800 text-xs select-none"
     >
       <div class="py-1">
         <button
@@ -399,51 +401,42 @@
         </button>
       </div>
 
-      <div class="py-1">
-        <button
-          id="tab-ctx-btn-close-others"
-          onclick={() => {
-            appState.closeOtherTabs(tabContextMenu!.tabId);
-            closeTabMenu();
-          }}
-          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-        >
-          <Icon name="x" class="w-3.5 h-3.5 text-amber-400" />
-          <span>Close Other Tabs</span>
-        </button>
-        <button
-          id="tab-ctx-btn-close-right"
-          onclick={() => {
-            appState.closeTabsToRight(tabContextMenu!.tabId);
-            closeTabMenu();
-          }}
-          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-        >
-          <Icon name="chevrons-right" class="w-3.5 h-3.5 text-slate-400" />
-          <span>Close Tabs to the Right</span>
-        </button>
-        <button
-          id="tab-ctx-btn-close"
-          onclick={() => {
-            appState.closeTab(tabContextMenu!.tabId);
-            closeTabMenu();
-          }}
-          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-        >
-          <Icon name="trash-2" class="w-3.5 h-3.5 text-rose-400" />
-          <span>Close Tab</span>
-        </button>
-        <button
-          id="tab-ctx-btn-close-all"
-          onclick={() => {
-            appState.closeAllTabs();
-            closeTabMenu();
-          }}
-          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-rose-300"
-        >
-          <Icon name="trash-2" class="w-3.5 h-3.5 text-rose-400" />
-          <span>Close All Tabs</span>
-        </button>
+      <div class="px-2.5 py-1.5 space-y-1">
+        <div class="text-[9.5px] font-bold uppercase tracking-wider text-slate-500">Close Tabs</div>
+        <div class="grid grid-cols-2 gap-1 text-[10px]">
+          <button
+            id="tab-ctx-btn-close"
+            onclick={() => {
+              appState.closeTab(tabContextMenu!.tabId);
+              closeTabMenu();
+            }}
+            class="px-2 py-1 rounded bg-slate-800/80 hover:bg-slate-700 text-slate-200 text-left"
+          >Close</button>
+          <button
+            id="tab-ctx-btn-close-others"
+            onclick={() => {
+              appState.closeOtherTabs(tabContextMenu!.tabId);
+              closeTabMenu();
+            }}
+            class="px-2 py-1 rounded bg-slate-800/80 hover:bg-slate-700 text-amber-300 text-left"
+          >Others</button>
+          <button
+            id="tab-ctx-btn-close-right"
+            onclick={() => {
+              appState.closeTabsToRight(tabContextMenu!.tabId);
+              closeTabMenu();
+            }}
+            class="px-2 py-1 rounded bg-slate-800/80 hover:bg-slate-700 text-slate-300 text-left"
+          >To Right</button>
+          <button
+            id="tab-ctx-btn-close-all"
+            onclick={() => {
+              appState.closeAllTabs();
+              closeTabMenu();
+            }}
+            class="px-2 py-1 rounded bg-rose-950/60 hover:bg-rose-900/70 text-rose-300 text-left"
+          >Close All</button>
+        </div>
       </div>
     </div>
   {/if}

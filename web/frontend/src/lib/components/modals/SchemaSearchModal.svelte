@@ -20,6 +20,7 @@
   let listEl = $state<HTMLDivElement | null>(null);
 
   let allEntries = $derived.by((): SearchEntry[] => {
+    if (!appState.isSchemaSearchOpen) return [];
     const out: SearchEntry[] = [];
     const seen = new Set<string>();
     const driver = appState.activeConnection?.driver;

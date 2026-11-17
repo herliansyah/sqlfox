@@ -6,6 +6,7 @@
   import { appState } from '../../stores/appState.svelte';
   import Icon from '../common/Icon.svelte';
   import { onDestroy, tick } from 'svelte';
+  import { viewportFit } from '../../actions/viewportFit';
 
   // Resizable sidebar width with persistence
   let sidebarWidth = $state(
@@ -129,15 +130,10 @@
   function handleTableContextMenu(e: MouseEvent, tableName: string) {
     e.preventDefault();
     e.stopPropagation();
-    const menuWidth = 224;
-    const menuHeight = 380;
-    const clampedX = Math.max(10, Math.min(e.clientX, window.innerWidth - menuWidth - 10));
-    const clampedY = Math.max(10, Math.min(e.clientY, window.innerHeight - menuHeight - 10));
-
     tableContextMenu = {
       open: true,
-      x: clampedX,
-      y: clampedY,
+      x: e.clientX,
+      y: e.clientY,
       tableName,
     };
   }
@@ -372,6 +368,7 @@
           <div
             role="menu"
             aria-label="Schema and database actions"
+            use:viewportFit
             class="absolute right-0 top-full mt-1 w-56 bg-[#0f172a] border border-slate-700/90 rounded-lg shadow-2xl z-50 py-1 text-xs divide-y divide-slate-800/80 animate-in fade-in duration-100"
           >
             {#if appState.currentDatabase && appState.catalogTimestamps[appState.currentDatabase.toLowerCase()]}
@@ -1482,8 +1479,9 @@
     <!-- Table Context Menu -->
     {#if tableContextMenu && tableContextMenu.open}
       <div
+        use:viewportFit={{ x: tableContextMenu.x, y: tableContextMenu.y }}
         style="top: {tableContextMenu.y}px; left: {tableContextMenu.x}px;"
-        class="fixed z-50 w-56 bg-[#0f172a] border border-[#334155] rounded-lg shadow-2xl py-1 divide-y divide-slate-800 text-xs font-sans animate-in fade-in duration-75 select-none"
+        class="fixed z-50 w-60 bg-[#0f172a] border border-[#334155] rounded-lg shadow-2xl py-1 divide-y divide-slate-800 text-xs font-sans animate-in fade-in duration-75 select-none"
       >
         <!-- Table Header in Menu -->
         <div class="px-3 py-1.5 flex items-center space-x-2 bg-slate-900/60">
@@ -1517,55 +1515,63 @@
             <Icon name="columns" class="w-3.5 h-3.5 text-sky-400" />
             <span>View Structure</span>
           </button>
-          <button
-            type="button"
-            onclick={() => {
-              appState.openTableDDLTab(tableContextMenu!.tableName);
-              closeTableMenu();
-            }}
-            class="w-full text-left px-3 py-1.5 hover:bg-slate-800/80 flex items-center space-x-2 text-slate-200 transition-colors"
-          >
-            <Icon name="file-code" class="w-3.5 h-3.5 text-purple-400" />
-            <span>Open CREATE TABLE in Tab</span>
-          </button>
-          <button
-            type="button"
-            onclick={() => {
-              const tbl = tableContextMenu!.tableName;
-              closeTableMenu();
-              inspectDdlModal('table', tbl);
-            }}
-            class="w-full text-left px-3 py-1.5 hover:bg-slate-800/80 flex items-center space-x-2 text-slate-200 transition-colors"
-          >
-            <Icon name="eye" class="w-3.5 h-3.5 text-sky-400" />
-            <span>View DDL (Modal)</span>
-          </button>
+          <div class="px-3 py-1 flex items-center justify-between gap-1.5">
+            <span class="text-[11px] text-slate-400 flex items-center gap-1.5">
+              <Icon name="file-code" class="w-3.5 h-3.5 text-purple-400" />
+              <span>DDL</span>
+            </span>
+            <div class="flex items-center gap-1 text-[10px]">
+              <button
+                type="button"
+                onclick={() => {
+                  appState.openTableDDLTab(tableContextMenu!.tableName);
+                  closeTableMenu();
+                }}
+                class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-purple-300 font-medium transition-colors"
+                title="Open CREATE TABLE in Tab"
+              >Tab</button>
+              <button
+                type="button"
+                onclick={() => {
+                  const tbl = tableContextMenu!.tableName;
+                  closeTableMenu();
+                  inspectDdlModal('table', tbl);
+                }}
+                class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-sky-300 font-medium transition-colors"
+                title="View DDL in Modal"
+              >Modal</button>
+            </div>
+          </div>
         </div>
 
-        <!-- Section 2: Management & Export -->
+        <!-- Section 2: Tools & Export -->
         <div class="py-1">
-          <button
-            type="button"
-            onclick={() => {
-              appState.exportTableDump(tableContextMenu!.tableName);
-              closeTableMenu();
-            }}
-            class="w-full text-left px-3 py-1.5 hover:bg-slate-800/80 flex items-center space-x-2 text-slate-200 transition-colors"
-          >
-            <Icon name="download" class="w-3.5 h-3.5 text-emerald-400" />
-            <span>Export Table SQL Dump</span>
-          </button>
-          <button
-            type="button"
-            onclick={() => {
-              appState.openDumpModal(tableContextMenu!.tableName);
-              closeTableMenu();
-            }}
-            class="w-full text-left px-3 py-1.5 hover:bg-slate-800/80 flex items-center space-x-2 text-slate-200 transition-colors"
-          >
-            <Icon name="sliders" class="w-3.5 h-3.5 text-sky-400" />
-            <span>Export Dump Options...</span>
-          </button>
+          <div class="px-3 py-1 flex items-center justify-between gap-1.5">
+            <span class="text-[11px] text-slate-400 flex items-center gap-1.5">
+              <Icon name="download" class="w-3.5 h-3.5 text-emerald-400" />
+              <span>SQL Dump</span>
+            </span>
+            <div class="flex items-center gap-1 text-[10px]">
+              <button
+                type="button"
+                onclick={() => {
+                  appState.exportTableDump(tableContextMenu!.tableName);
+                  closeTableMenu();
+                }}
+                class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-emerald-300 font-medium transition-colors"
+                title="Export Table SQL Dump"
+              >Quick</button>
+              <button
+                type="button"
+                onclick={() => {
+                  appState.openDumpModal(tableContextMenu!.tableName);
+                  closeTableMenu();
+                }}
+                class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-sky-300 font-medium transition-colors"
+                title="Export Dump Options..."
+              >Options...</button>
+            </div>
+          </div>
           <button
             type="button"
             onclick={() => {
@@ -1589,85 +1595,87 @@
             <Icon name="bot" class="w-3.5 h-3.5 text-sky-400" />
             <span>Send Table to AI Copilot</span>
           </button>
-          <button
-            type="button"
-            onclick={() => {
-              appState.tableToDuplicate = tableContextMenu!.tableName;
-              appState.isDuplicateTableModalOpen = true;
-              closeTableMenu();
-            }}
-            class="w-full text-left px-3 py-1.5 hover:bg-slate-800/80 flex items-center space-x-2 text-slate-200 transition-colors"
-          >
-            <Icon name="copy" class="w-3.5 h-3.5 text-emerald-400" />
-            <span>Duplicate Table...</span>
-          </button>
-          <button
-            type="button"
-            onclick={() => {
-              appState.tableToRename = tableContextMenu!.tableName;
-              appState.isRenameTableModalOpen = true;
-              closeTableMenu();
-            }}
-            class="w-full text-left px-3 py-1.5 hover:bg-slate-800/80 flex items-center space-x-2 text-slate-200 transition-colors"
-          >
-            <Icon name="edit" class="w-3.5 h-3.5 text-sky-400" />
-            <span>Rename Table...</span>
-          </button>
+          <div class="px-3 py-1 flex items-center justify-between gap-1.5">
+            <span class="text-[11px] text-slate-400 flex items-center gap-1.5">
+              <Icon name="copy" class="w-3.5 h-3.5 text-emerald-400" />
+              <span>Manage</span>
+            </span>
+            <div class="flex items-center gap-1 text-[10px]">
+              <button
+                type="button"
+                onclick={() => {
+                  appState.tableToDuplicate = tableContextMenu!.tableName;
+                  appState.isDuplicateTableModalOpen = true;
+                  closeTableMenu();
+                }}
+                class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-emerald-300 font-medium transition-colors"
+              >Duplicate...</button>
+              <button
+                type="button"
+                onclick={() => {
+                  appState.tableToRename = tableContextMenu!.tableName;
+                  appState.isRenameTableModalOpen = true;
+                  closeTableMenu();
+                }}
+                class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-sky-300 font-medium transition-colors"
+              >Rename...</button>
+            </div>
+          </div>
         </div>
 
-        <!-- Section 3: Destructive Actions -->
-        <div class="py-1">
-          <button
-            type="button"
-            onclick={() => {
-              const tbl = tableContextMenu!.tableName;
-              closeTableMenu();
-              appState.truncateTable(tbl);
-            }}
-            class="w-full text-left px-3 py-1.5 hover:bg-amber-950/40 flex items-center space-x-2 text-amber-300 transition-colors"
-          >
-            <Icon name="alert-triangle" class="w-3.5 h-3.5 text-amber-400" />
-            <span>Truncate Table</span>
-          </button>
-          <button
-            type="button"
-            onclick={() => {
-              const tbl = tableContextMenu!.tableName;
-              closeTableMenu();
-              appState.dropTable(tbl);
-            }}
-            class="w-full text-left px-3 py-1.5 hover:bg-rose-950/40 flex items-center space-x-2 text-rose-400 transition-colors"
-          >
-            <Icon name="trash-2" class="w-3.5 h-3.5 text-rose-400" />
-            <span>Drop Table</span>
-          </button>
-        </div>
-
-        <!-- Section 4: Copy Actions -->
-        <div class="py-1">
-          <button
-            type="button"
-            onclick={() => {
-              copyText(tableContextMenu!.tableName);
-              appState.showToast(`Copied table name "${tableContextMenu!.tableName}"`, 'info');
-              closeTableMenu();
-            }}
-            class="w-full text-left px-3 py-1.5 hover:bg-slate-800/80 flex items-center space-x-2 text-slate-200 transition-colors"
-          >
-            <Icon name="clipboard-list" class="w-3.5 h-3.5 text-slate-400" />
-            <span>Copy Table Name</span>
-          </button>
-          <button
-            type="button"
-            onclick={() => {
-              copySelectStatement(tableContextMenu!.tableName);
-              closeTableMenu();
-            }}
-            class="w-full text-left px-3 py-1.5 hover:bg-slate-800/80 flex items-center space-x-2 text-slate-200 transition-colors"
-          >
-            <Icon name="code" class="w-3.5 h-3.5 text-sky-400" />
-            <span>Copy SELECT 100 Query</span>
-          </button>
+        <!-- Section 3: Copy & Destructive Actions -->
+        <div class="py-1 space-y-0.5">
+          <div class="px-3 py-1 flex items-center justify-between gap-1.5">
+            <span class="text-[11px] text-slate-400 flex items-center gap-1.5">
+              <Icon name="clipboard-list" class="w-3.5 h-3.5 text-slate-400" />
+              <span>Copy</span>
+            </span>
+            <div class="flex items-center gap-1 text-[10px]">
+              <button
+                type="button"
+                onclick={() => {
+                  copyText(tableContextMenu!.tableName);
+                  appState.showToast(`Copied table name "${tableContextMenu!.tableName}"`, 'info');
+                  closeTableMenu();
+                }}
+                class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium transition-colors"
+              >Name</button>
+              <button
+                type="button"
+                onclick={() => {
+                  copySelectStatement(tableContextMenu!.tableName);
+                  closeTableMenu();
+                }}
+                class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-sky-300 font-medium transition-colors"
+              >SELECT 100</button>
+            </div>
+          </div>
+          <div class="px-3 py-1 flex items-center justify-between gap-1.5">
+            <span class="text-[11px] text-rose-400/90 flex items-center gap-1.5">
+              <Icon name="alert-triangle" class="w-3.5 h-3.5 text-amber-400" />
+              <span>Danger</span>
+            </span>
+            <div class="flex items-center gap-1 text-[10px]">
+              <button
+                type="button"
+                onclick={() => {
+                  const tbl = tableContextMenu!.tableName;
+                  closeTableMenu();
+                  appState.truncateTable(tbl);
+                }}
+                class="px-2 py-0.5 rounded bg-amber-950/60 hover:bg-amber-900/70 text-amber-300 font-medium transition-colors"
+              >Truncate</button>
+              <button
+                type="button"
+                onclick={() => {
+                  const tbl = tableContextMenu!.tableName;
+                  closeTableMenu();
+                  appState.dropTable(tbl);
+                }}
+                class="px-2 py-0.5 rounded bg-rose-950/60 hover:bg-rose-900/70 text-rose-300 font-medium transition-colors"
+              >Drop</button>
+            </div>
+          </div>
         </div>
       </div>
     {/if}

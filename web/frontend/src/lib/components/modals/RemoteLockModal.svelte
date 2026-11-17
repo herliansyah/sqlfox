@@ -76,8 +76,8 @@
           {/if}
         </button>
 
-        <div class="text-[11px] text-slate-500 pt-1">
-          Check the SqlFox host terminal output for your active session PIN.
+        <div class="text-[11px] text-slate-500 pt-1 whitespace-nowrap">
+          Check host terminal for your session PIN.
         </div>
       </form>
     </div>

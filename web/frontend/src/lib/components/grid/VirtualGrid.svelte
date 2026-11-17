@@ -8,6 +8,7 @@
   import type { ColumnDefinition, FilterPill } from '../../../types';
   import Icon from '../common/Icon.svelte';
   import QueryProfilerPanel from '../editor/QueryProfilerPanel.svelte';
+  import { viewportFit } from '../../actions/viewportFit';
 
   const ROW_HEIGHT = 28;
   const OVERSCAN = 15;
@@ -35,6 +36,10 @@
   // Selected row / cell & Context Menu
   let selectedRowIndex = $state<number | null>(null);
   let selectedCell = $state<{ rIdx: number; cIdx: number } | null>(null);
+  let rangeAnchor = $state<{ dispRow: number; visCol: number } | null>(null);
+  let rangeEnd = $state<{ dispRow: number; visCol: number } | null>(null);
+  let localSearchQuery = $state('');
+  let localSearchInputEl = $state<HTMLInputElement | null>(null);
   let editingCell = $state<{ rIdx: number; cIdx: number; tempValue: string } | null>(null);
   let flashedCells = $state<Record<string, boolean>>({});
   let detailPrettyJson = $state(false);
@@ -338,6 +343,14 @@
           if (cIdx === undefined) return true;
           return matchesFilterPill(item.data[cIdx], pill);
         })
+      );
+    }
+
+    // Local result search filter (Ctrl+F in grid)
+    const sq = localSearchQuery.trim().toLowerCase();
+    if (sq) {
+      list = list.filter((item) =>
+        item.data.some((cellVal: any) => cellVal !== null && cellVal !== undefined && String(cellVal).toLowerCase().includes(sq))
       );
     }
 
@@ -744,8 +757,9 @@
     editingCell = null;
   }
 
-  function isCellStaged(table: string, rIdx: number, cIdx: number): boolean {
-    return Boolean(appState.stagedEdits[`${table}:${rIdx}:${cIdx}`]);
+  function isCellStaged(table: string, rowObj: any[] | undefined, rIdx: number, cIdx: number): boolean {
+    const uid = rowObj ? appState.getRowUid(rowObj) : rIdx;
+    return Boolean(appState.stagedEdits[`${table}:${uid}:${cIdx}`]);
   }
 
   // Context Menu
@@ -753,8 +767,8 @@
     e.preventDefault();
     contextMenu = {
       open: true,
-      x: Math.min(window.innerWidth - 200, e.clientX),
-      y: Math.min(window.innerHeight - 240, e.clientY),
+      x: e.clientX,
+      y: e.clientY,
       rIdx: origIdx,
       cIdx,
       colName: allColumns[cIdx],
@@ -1025,6 +1039,8 @@
     const colEntry = visibleColumnEntries[nextVisColIdx];
     if (!row || !colEntry) return;
     selectedCell = { rIdx: row.origIdx, cIdx: colEntry.origIdx };
+    rangeAnchor = { dispRow: nextDisplayIdx, visCol: nextVisColIdx };
+    rangeEnd = { dispRow: nextDisplayIdx, visCol: nextVisColIdx };
     selectedRowIndex = row.origIdx;
 
     if (containerRef) {
@@ -1033,6 +1049,88 @@
       else if (y + ROW_HEIGHT > containerRef.scrollTop + containerRef.clientHeight - 60) {
         containerRef.scrollTop = y + ROW_HEIGHT - containerRef.clientHeight + 60;
       }
+    }
+  }
+
+  let selectedRangeBounds = $derived.by(() => {
+    if (!rangeAnchor || !rangeEnd) return null;
+    return {
+      rMin: Math.min(rangeAnchor.dispRow, rangeEnd.dispRow),
+      rMax: Math.max(rangeAnchor.dispRow, rangeEnd.dispRow),
+      cMin: Math.min(rangeAnchor.visCol, rangeEnd.visCol),
+      cMax: Math.max(rangeAnchor.visCol, rangeEnd.visCol),
+    };
+  });
+
+  let rangeStats = $derived.by(() => {
+    const b = selectedRangeBounds;
+    if (!b) return null;
+    const cellCount = (b.rMax - b.rMin + 1) * (b.cMax - b.cMin + 1);
+    if (cellCount <= 1) return null;
+    let numCount = 0;
+    let sum = 0;
+    let min = Infinity;
+    let max = -Infinity;
+    // Cap scan at 5,000 cells for instant UI feedback
+    let scanned = 0;
+    for (let r = b.rMin; r <= b.rMax && scanned < 5000; r++) {
+      const row = processedRows[r];
+      if (!row) continue;
+      for (let c = b.cMin; c <= b.cMax && scanned < 5000; c++) {
+        scanned++;
+        const colEntry = visibleColumnEntries[c];
+        if (!colEntry) continue;
+        const val = row.data[colEntry.origIdx];
+        if (val !== null && val !== undefined && val !== '' && typeof val !== 'boolean') {
+          const n = typeof val === 'number' ? val : Number(val);
+          if (Number.isFinite(n)) {
+            numCount++;
+            sum += n;
+            if (n < min) min = n;
+            if (n > max) max = n;
+          }
+        }
+      }
+    }
+    return {
+      cellCount,
+      numCount,
+      sum,
+      avg: numCount > 0 ? sum / numCount : 0,
+      min: numCount > 0 ? min : 0,
+      max: numCount > 0 ? max : 0,
+    };
+  });
+
+  function isCellInRange(dispRow: number, visCol: number): boolean {
+    const b = selectedRangeBounds;
+    if (!b) return false;
+    return dispRow >= b.rMin && dispRow <= b.rMax && visCol >= b.cMin && visCol <= b.cMax;
+  }
+
+  function copySelectedRangeTSV() {
+    const b = selectedRangeBounds;
+    if (b) {
+      const lines: string[] = [];
+      for (let r = b.rMin; r <= b.rMax; r++) {
+        const row = processedRows[r];
+        if (!row) continue;
+        const vals: string[] = [];
+        for (let c = b.cMin; c <= b.cMax; c++) {
+          const colEntry = visibleColumnEntries[c];
+          const v = colEntry ? row.data[colEntry.origIdx] : '';
+          vals.push(v === null || v === undefined ? '' : String(v));
+        }
+        lines.push(vals.join('\t'));
+      }
+      copyText(lines.join('\n'));
+      appState.showToast(`Copied ${lines.length}×${b.cMax - b.cMin + 1} cell(s) as TSV`, 'success');
+      return;
+    }
+    if (selectedCell && result?.rows?.[selectedCell.rIdx]) {
+      const v = result.rows[selectedCell.rIdx][selectedCell.cIdx];
+      copyText(v === null || v === undefined ? '' : String(v));
+      appState.showToast('Copied cell value', 'success');
     }
   }
 
@@ -1046,6 +1144,20 @@
       e.preventDefault();
       addDraftRow();
       return;
+    }
+    if (isCtrl && e.key.toLowerCase() === 'f') {
+      e.preventDefault();
+      localSearchInputEl?.focus();
+      localSearchInputEl?.select();
+      return;
+    }
+    if (isCtrl && !e.shiftKey && e.key.toLowerCase() === 'c') {
+      const selText = window.getSelection()?.toString();
+      if (!selText && (selectedRangeBounds || selectedCell)) {
+        e.preventDefault();
+        copySelectedRangeTSV();
+        return;
+      }
     }
     if (isCtrl && e.shiftKey && e.key.toLowerCase() === 'e') {
       e.preventDefault();
@@ -1304,8 +1416,45 @@
       {/if}
     </div>
 
-    <!-- Right: Column Picker, Export & Inspect -->
+    <!-- Right: Range Stats, Local Search, Column Picker, Export & Inspect -->
     <div class="flex items-center space-x-2">
+      {#if rangeStats}
+        <div
+          class="hidden xl:flex items-center space-x-2 px-2 py-0.5 rounded bg-sky-950/60 border border-sky-700/50 text-[10px] font-mono text-sky-200"
+          title="Selection summary (Shift+Click range, Ctrl+C to copy TSV)"
+        >
+          <span>{rangeStats.cellCount} cells</span>
+          {#if rangeStats.numCount > 0}
+            <span class="text-slate-500">|</span>
+            <span>Sum: <strong class="text-emerald-300">{Number(rangeStats.sum.toFixed(4))}</strong></span>
+            <span>Avg: <strong class="text-sky-300">{Number(rangeStats.avg.toFixed(4))}</strong></span>
+            <span>Min: {Number(rangeStats.min.toFixed(4))}</span>
+            <span>Max: {Number(rangeStats.max.toFixed(4))}</span>
+          {/if}
+        </div>
+      {/if}
+
+      <div class="relative flex items-center">
+        <Icon name="search" class="w-3 h-3 text-slate-500 absolute left-2 pointer-events-none" />
+        <input
+          bind:this={localSearchInputEl}
+          type="text"
+          bind:value={localSearchQuery}
+          placeholder="Filter results (Ctrl+F)..."
+          class="h-6 w-36 focus:w-48 transition-all pl-6 pr-5 rounded bg-[#090d16] border border-slate-700/80 focus:border-sky-500/70 text-[11px] text-slate-200 placeholder:text-slate-500 outline-none"
+        />
+        {#if localSearchQuery}
+          <button
+            onclick={() => (localSearchQuery = '')}
+            class="absolute right-1.5 text-slate-500 hover:text-slate-200"
+            title="Clear result filter"
+            aria-label="Clear result filter"
+          >
+            <Icon name="x" class="w-3 h-3" />
+          </button>
+        {/if}
+      </div>
+
       <!-- Column Picker Dropdown -->
       <div class="relative">
         <button
@@ -1330,6 +1479,7 @@
           ></button>
           <div
             id="col-picker-dropdown"
+            use:viewportFit
             class="absolute right-0 mt-1 w-56 bg-[#0f172a] border border-slate-700/90 rounded-lg shadow-2xl z-40 p-2 text-xs space-y-2 animate-in fade-in duration-100"
           >
             <input
@@ -1383,6 +1533,7 @@
           ></button>
           <div
             id="export-csv-menu"
+            use:viewportFit
             class="absolute right-0 mt-1 w-44 bg-[#0f172a] border border-slate-700/90 rounded-lg shadow-2xl z-40 py-1 divide-y divide-slate-800 animate-in fade-in duration-100 text-xs"
           >
             <button
@@ -1881,15 +2032,17 @@
                 </td>
 
                 <!-- Cells -->
-                {#each visibleColumnEntries as { col, origIdx: cIdx } (cIdx)}
+                {#each visibleColumnEntries as { col, origIdx: cIdx }, visColIdx (cIdx)}
+                  {@const dispRowIdx = rowItem.displayIdx}
                   {@const colName = getColName(col)}
                   {@const colType = resolveColType(col)}
                   {@const nullable = isColNullable(col)}
                   {@const cellVal = cIdx >= 0 ? rowItem.data[cIdx] : undefined}
                   {@const formatted = formatCellValue(cellVal)}
-                  {@const isStaged = effectiveTable && cIdx >= 0 ? isCellStaged(effectiveTable, rowItem.origIdx, cIdx) : false}
+                  {@const isStaged = effectiveTable && cIdx >= 0 ? isCellStaged(effectiveTable, rowItem.data, rowItem.origIdx, cIdx) : false}
                   {@const isFlashed = Boolean(flashedCells[`${rowItem.origIdx}:${cIdx}`])}
                   {@const isCellSelected = selectedCell?.rIdx === rowItem.origIdx && selectedCell?.cIdx === cIdx}
+                  {@const inRange = isCellInRange(dispRowIdx, visColIdx)}
                   {@const isEditingThis = editingCell && editingCell.rIdx === rowItem.origIdx && editingCell.cIdx === cIdx}
                   {@const fk = fkMap.get(colName)}
                   {@const tLow = colType.toLowerCase()}
@@ -1901,11 +2054,20 @@
                   {@const isJsonLike = formatted.type === 'json' || tLow.includes('json')}
 
                   <td
-                    onclick={() => (selectedCell = { rIdx: rowItem.origIdx, cIdx })}
+                    onclick={(e) => {
+                      selectedCell = { rIdx: rowItem.origIdx, cIdx };
+                      selectedRowIndex = rowItem.origIdx;
+                      if (e.shiftKey && rangeAnchor) {
+                        rangeEnd = { dispRow: dispRowIdx, visCol: visColIdx };
+                      } else {
+                        rangeAnchor = { dispRow: dispRowIdx, visCol: visColIdx };
+                        rangeEnd = { dispRow: dispRowIdx, visCol: visColIdx };
+                      }
+                    }}
                     ondblclick={() => startCellEdit(rowItem.origIdx, cIdx, cellVal)}
                     oncontextmenu={(e) => handleCellContextMenu(e, rowItem.origIdx, cIdx, cellVal)}
                     class="px-3 py-1 border-r border-[#1e293b]/40 whitespace-nowrap max-w-sm {isEditingThis ? 'overflow-visible z-30' : 'truncate'} {getCellClass(formatted.type)} cursor-cell hover:bg-sky-900/30 transition-colors relative {
-                      isStaged ? 'bg-amber-950/40 text-amber-200 font-semibold ring-1 ring-amber-500' : isFlashed ? 'bg-emerald-950/60 ring-1 ring-emerald-400' : isCellSelected ? 'ring-1 ring-inset ring-sky-400/80' : ''
+                      isStaged ? 'bg-amber-950/40 text-amber-200 font-semibold ring-1 ring-amber-500' : isFlashed ? 'bg-emerald-950/60 ring-1 ring-emerald-400' : isCellSelected ? 'ring-1 ring-inset ring-sky-400/80 bg-sky-900/20' : inRange ? 'bg-sky-900/25' : ''
                     }"
                     title="{formatted.display}{canEdit ? ' (Double-click to edit, right-click for filters)' : ''}"
                   >
@@ -2313,8 +2475,9 @@
   {#if contextMenu && contextMenu.open}
     <div
       id="grid-context-menu"
+      use:viewportFit={{ x: contextMenu.x, y: contextMenu.y }}
       style="top: {contextMenu.y}px; left: {contextMenu.x}px;"
-      class="fixed z-50 w-56 bg-[#0f172a] border border-[#334155] rounded-lg shadow-2xl py-1 divide-y divide-slate-800 text-xs font-sans animate-in fade-in duration-75 select-none"
+      class="fixed z-50 w-60 bg-[#0f172a] border border-[#334155] rounded-lg shadow-2xl py-1 divide-y divide-slate-800 text-xs font-sans animate-in fade-in duration-75 select-none"
     >
       <div class="px-3 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider font-mono truncate">
         Filter: {contextMenu.colName}
@@ -2322,73 +2485,68 @@
 
       <div id="grid-ctx-filter-parent" class="py-1">
         <div id="grid-ctx-filter-submenu">
-          <div id="grid-ctx-filter-options">
+          <div id="grid-ctx-filter-options" class="space-y-0.5">
             <button
               onclick={() => applyQuickFilter('=')}
               class="w-full text-left px-3 py-1 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
             >
-              <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono font-bold text-sky-400">=</span>
+              <span class="w-4 text-center flex-shrink-0 font-mono font-bold text-sky-400">=</span>
               <span class="truncate">Filter = '{String(contextMenu.cellValue ?? 'NULL')}'</span>
             </button>
             <button
               onclick={() => applyQuickFilter('!=')}
               class="w-full text-left px-3 py-1 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
             >
-              <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono font-bold text-amber-400">!=</span>
+              <span class="w-4 text-center flex-shrink-0 font-mono font-bold text-amber-400">!=</span>
               <span class="truncate">Filter != '{String(contextMenu.cellValue ?? 'NULL')}'</span>
             </button>
             {#if contextMenu.cellValue !== null && contextMenu.cellValue !== undefined}
-              <div class="grid grid-cols-4 gap-1 px-3 py-1 border-y border-slate-800/60 my-0.5">
+              <div class="grid grid-cols-6 gap-1 px-3 py-1">
                 <button
                   onclick={() => applyQuickFilter('<')}
-                  class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px] font-bold text-center"
+                  class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[10px] font-bold text-center"
                   title="Less than"
                 >&lt;</button>
                 <button
                   onclick={() => applyQuickFilter('<=')}
-                  class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px] font-bold text-center"
+                  class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[10px] font-bold text-center"
                   title="Less or equal"
                 >&le;</button>
                 <button
                   onclick={() => applyQuickFilter('>')}
-                  class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px] font-bold text-center"
+                  class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[10px] font-bold text-center"
                   title="Greater than"
                 >&gt;</button>
                 <button
                   onclick={() => applyQuickFilter('>=')}
-                  class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px] font-bold text-center"
+                  class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[10px] font-bold text-center"
                   title="Greater or equal"
                 >&ge;</button>
+                <button
+                  onclick={() => applyQuickFilter('LIKE')}
+                  class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-purple-300 font-mono text-[10px] font-bold text-center"
+                  title="Filter LIKE '%{String(contextMenu.cellValue)}%'"
+                >%</button>
+                <button
+                  onclick={() => applyQuickFilter('NOT LIKE')}
+                  class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-rose-300 font-mono text-[10px] font-bold text-center"
+                  title="Filter NOT LIKE '%{String(contextMenu.cellValue)}%'"
+                >!%</button>
               </div>
-              <button
-                onclick={() => applyQuickFilter('LIKE')}
-                class="w-full text-left px-3 py-1 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-              >
-                <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono font-bold text-purple-400">%</span>
-                <span class="truncate">Filter LIKE '%{String(contextMenu.cellValue)}%'</span>
-              </button>
-              <button
-                onclick={() => applyQuickFilter('NOT LIKE')}
-                class="w-full text-left px-3 py-1 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-              >
-                <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono font-bold text-rose-400">!%</span>
-                <span class="truncate">Filter NOT LIKE '%{String(contextMenu.cellValue)}%'</span>
-              </button>
             {/if}
-            <button
-              onclick={() => applyQuickFilter('IS NULL')}
-              class="w-full text-left px-3 py-1 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-            >
-              <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono text-rose-400">∅</span>
-              <span>Filter IS NULL</span>
-            </button>
-            <button
-              onclick={() => applyQuickFilter('IS NOT NULL')}
-              class="w-full text-left px-3 py-1 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-            >
-              <span class="w-5 text-center flex-shrink-0 inline-flex items-center justify-center font-mono text-emerald-400">!∅</span>
-              <span>Filter IS NOT NULL</span>
-            </button>
+            <div class="px-3 py-1 flex items-center justify-between gap-1.5">
+              <span class="text-[10px] text-slate-500">Null check</span>
+              <div class="flex items-center gap-1 text-[10px] font-mono">
+                <button
+                  onclick={() => applyQuickFilter('IS NULL')}
+                  class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-rose-300 font-medium"
+                >IS NULL</button>
+                <button
+                  onclick={() => applyQuickFilter('IS NOT NULL')}
+                  class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-emerald-300 font-medium"
+                >NOT NULL</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -2418,34 +2576,47 @@
                     <button onclick={() => { const { rIdx, cIdx } = contextMenu!; closeContextMenu(); applyEditPreset('UUID', rIdx, cIdx); }} class="px-1 rounded bg-slate-800 hover:bg-slate-700 text-purple-300">UUID</button>
                   </div>
                 </div>
-                <button
-                  id="grid-ctx-btn-dup-nokey"
-                  onclick={() => {
-                    if (selectedRowIndices.length > 1) {
+                {#if selectedRowIndices.length > 1}
+                  <button
+                    id="grid-ctx-btn-dup-nokey"
+                    onclick={() => {
                       const indices = [...selectedRowIndices];
                       closeContextMenu();
                       duplicateMultipleRows(indices);
-                    } else {
-                      duplicateRowAsDraft(contextMenu!.rIdx, true);
-                      closeContextMenu();
-                    }
-                  }}
-                  class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-emerald-300 font-medium"
-                >
-                  <Icon name="copy" class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                  <span>{selectedRowIndices.length > 1 ? `Duplicate ${selectedRowIndices.length} Rows` : 'Duplicate Row (Without Key)'}</span>
-                </button>
-                <button
-                  id="grid-ctx-btn-dup-key"
-                  onclick={() => {
-                    duplicateRowAsDraft(contextMenu!.rIdx, false);
-                    closeContextMenu();
-                  }}
-                  class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-indigo-300 font-medium"
-                >
-                  <Icon name="key" class="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                  <span>Duplicate Row (With Key)</span>
-                </button>
+                    }}
+                    class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-emerald-300 font-medium"
+                  >
+                    <Icon name="copy" class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span>Duplicate {selectedRowIndices.length} Rows</span>
+                  </button>
+                {:else}
+                  <div class="px-3 py-1 flex items-center justify-between gap-1.5">
+                    <span class="text-[11px] text-slate-400 flex items-center gap-1.5">
+                      <Icon name="copy" class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span>Duplicate</span>
+                    </span>
+                    <div class="flex items-center gap-1 text-[10px]">
+                      <button
+                        id="grid-ctx-btn-dup-nokey"
+                        onclick={() => {
+                          duplicateRowAsDraft(contextMenu!.rIdx, true);
+                          closeContextMenu();
+                        }}
+                        class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-emerald-300 font-medium"
+                        title="Duplicate Row (Without Key)"
+                      >No Key</button>
+                      <button
+                        id="grid-ctx-btn-dup-key"
+                        onclick={() => {
+                          duplicateRowAsDraft(contextMenu!.rIdx, false);
+                          closeContextMenu();
+                        }}
+                        class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 font-medium"
+                        title="Duplicate Row (With Key)"
+                      >With Key</button>
+                    </div>
+                  </div>
+                {/if}
                 <button
                   id="grid-ctx-btn-add-draft"
                   onclick={() => {
@@ -2519,71 +2690,52 @@
       </div>
 
       <div id="grid-ctx-copy-parent" class="py-1">
-        <div id="grid-ctx-copy-submenu">
-          <button
-            id="grid-ctx-btn-copy-row-tsv"
-            onclick={() => {
-              if (selectedRowIndices.length > 1) copySelectedRows('tsv');
-              else copyRowAsTSV(contextMenu!.rIdx);
-              closeContextMenu();
-            }}
-            class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-          >
-            <Icon name="file-text" class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            {#if selectedRowIndices.length > 1}
-              <span>Copy {selectedRowIndices.length} Rows as TSV</span>
-            {:else}
-              <span>Copy Row as TSV</span>
-            {/if}
-          </button>
-          <button
-            id="grid-ctx-btn-copy-row-json"
-            onclick={() => {
-              if (selectedRowIndices.length > 1) copySelectedRows('json');
-              else copyRowAsJSON(contextMenu!.rIdx);
-              closeContextMenu();
-            }}
-            class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-          >
-            <Icon name="code" class="w-3.5 h-3.5 text-amber-400 shrink-0" />
-            {#if selectedRowIndices.length > 1}
-              <span>Copy {selectedRowIndices.length} Rows as JSON</span>
-            {:else}
-              <span>Copy Row as JSON</span>
-            {/if}
-          </button>
-          <button
-            id="grid-ctx-btn-copy-row-md"
-            onclick={() => {
-              if (selectedRowIndices.length > 1) copySelectedRows('md');
-              else copyRowAsMarkdown(contextMenu!.rIdx);
-              closeContextMenu();
-            }}
-            class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-          >
-            <Icon name="share-2" class="w-3.5 h-3.5 text-sky-400 shrink-0" />
-            {#if selectedRowIndices.length > 1}
-              <span>Copy {selectedRowIndices.length} Rows as Markdown</span>
-            {:else}
-              <span>Copy Row as Markdown</span>
-            {/if}
-          </button>
-          <button
-            id="grid-ctx-btn-copy-row-sql"
-            onclick={() => {
-              if (selectedRowIndices.length > 1) copySelectedRows('sql');
-              else copyRowAsInsertSQL(contextMenu!.rIdx);
-              closeContextMenu();
-            }}
-            class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-          >
-            <Icon name="terminal" class="w-3.5 h-3.5 text-purple-400 shrink-0" />
-            {#if selectedRowIndices.length > 1}
-              <span>Copy {selectedRowIndices.length} Rows as INSERT SQL</span>
-            {:else}
-              <span>Copy as INSERT SQL</span>
-            {/if}
-          </button>
+        <div id="grid-ctx-copy-submenu" class="px-3 py-1 flex items-center justify-between gap-1.5">
+          <span class="text-[11px] text-slate-400 shrink-0">
+            {selectedRowIndices.length > 1 ? `Copy ${selectedRowIndices.length}` : 'Copy Row'}
+          </span>
+          <div class="flex items-center gap-1 text-[10px] font-mono">
+            <button
+              id="grid-ctx-btn-copy-row-tsv"
+              onclick={() => {
+                if (selectedRowIndices.length > 1) copySelectedRows('tsv');
+                else copyRowAsTSV(contextMenu!.rIdx);
+                closeContextMenu();
+              }}
+              class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-emerald-300 font-medium"
+              title="Copy as TSV"
+            >TSV</button>
+            <button
+              id="grid-ctx-btn-copy-row-json"
+              onclick={() => {
+                if (selectedRowIndices.length > 1) copySelectedRows('json');
+                else copyRowAsJSON(contextMenu!.rIdx);
+                closeContextMenu();
+              }}
+              class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-amber-300 font-medium"
+              title="Copy as JSON"
+            >JSON</button>
+            <button
+              id="grid-ctx-btn-copy-row-md"
+              onclick={() => {
+                if (selectedRowIndices.length > 1) copySelectedRows('md');
+                else copyRowAsMarkdown(contextMenu!.rIdx);
+                closeContextMenu();
+              }}
+              class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-sky-300 font-medium"
+              title="Copy as Markdown"
+            >MD</button>
+            <button
+              id="grid-ctx-btn-copy-row-sql"
+              onclick={() => {
+                if (selectedRowIndices.length > 1) copySelectedRows('sql');
+                else copyRowAsInsertSQL(contextMenu!.rIdx);
+                closeContextMenu();
+              }}
+              class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-purple-300 font-medium"
+              title="Copy as INSERT SQL"
+            >SQL</button>
+          </div>
         </div>
       </div>
     </div>

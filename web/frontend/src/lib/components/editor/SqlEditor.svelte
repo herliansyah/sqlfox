@@ -2,6 +2,7 @@
   import { onDestroy } from 'svelte';
   import { appState } from '../../stores/appState.svelte';
   import { codemirror } from '../../actions/codemirror';
+  import { viewportFit } from '../../actions/viewportFit';
   import { formatSQL } from '../../utils/sqlFormatter';
   import Icon from '../common/Icon.svelte';
   import SearchableSelect from '../common/SearchableSelect.svelte';
@@ -17,6 +18,13 @@
 
   let editor = $state<CodeMirrorController | null>(null);
   let saveDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+  let showRunMenu = $state(false);
+  let showMoreMenu = $state(false);
+  const limitChoices = [
+    { label: '1k', value: 1000 },
+    { label: '5k', value: 5000 },
+    { label: '25k', value: 25000 },
+  ];
 
   // ponytail: re-measure only when the tab actually changes; typing must not trigger a
   // full component re-render (that caused visible input lag).
@@ -120,36 +128,66 @@
   }
 </script>
 
-<div class="h-full flex flex-col bg-[#090d16] relative">
-  <!-- Query Editor Toolbar -->
-  <div class="h-9 border-b border-slate-800 bg-[#0b0f19] px-3 flex items-center justify-between gap-2 overflow-x-auto select-none shrink-0">
-    <div class="flex items-center space-x-2 shrink-0">
-      <!-- 1. Execution & Target Database Scope -->
-      <button
-        onclick={handleExecute}
-        disabled={currentTab?.isExecuting || currentTab?.isStreaming || currentTab?.isExplaining}
-        class="h-7 flex items-center space-x-1.5 px-3 rounded bg-sky-500 hover:bg-sky-400 disabled:opacity-50 text-slate-950 font-bold text-xs transition shadow-[0_0_12px_rgba(56,189,248,0.35)]"
-        title="Execute selected SQL or statement at cursor (Ctrl+Enter)"
-      >
-        {#if currentTab?.isExecuting || currentTab?.isStreaming}
-          <Icon name="refresh-cw" class="w-3.5 h-3.5 animate-spin" />
-          <span>Running...</span>
-        {:else}
-          <Icon name="play" class="w-3.5 h-3.5 fill-current" />
-          <span>Execute</span>
-        {/if}
-        <span class="text-[9px] text-slate-900/80 bg-sky-400 px-1 py-0.2 rounded font-mono ml-1">Ctrl+Enter</span>
-      </button>
+<svelte:window
+  onclick={() => {
+    showRunMenu = false;
+    showMoreMenu = false;
+  }}
+/>
 
-      <button
-        onclick={handleExecuteAll}
-        disabled={currentTab?.isExecuting || currentTab?.isStreaming || currentTab?.isExplaining}
-        class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-50 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs flex items-center space-x-1.5 transition shadow-sm"
-        title="Execute All Statements (Ctrl+Alt+Enter / F5)"
-      >
-        <Icon name="play" class="w-3.5 h-3.5 text-emerald-400" />
-        <span>Execute All</span>
-      </button>
+<div class="h-full flex flex-col bg-[#090d16] relative">
+  <!-- Query Editor Toolbar (Progressive Disclosure) -->
+  <div class="h-9 border-b border-slate-800 bg-[#0b0f19] px-3 flex items-center justify-between gap-2 select-none shrink-0 relative z-30">
+    <div class="flex items-center space-x-1.5 shrink-0">
+      <!-- 1. Split Execute Button + Target Database Scope -->
+      <div class="relative flex items-center" onclick={(e) => e.stopPropagation()} onkeydown={() => {}} role="presentation">
+        <button
+          onclick={handleExecute}
+          disabled={currentTab?.isExecuting || currentTab?.isStreaming || currentTab?.isExplaining}
+          class="h-7 flex items-center space-x-1.5 px-2.5 rounded-l bg-sky-500 hover:bg-sky-400 disabled:opacity-50 text-slate-950 font-bold text-xs transition shadow-[0_0_12px_rgba(56,189,248,0.35)]"
+          title="Execute selected SQL or statement at cursor (Ctrl+Enter)"
+        >
+          {#if currentTab?.isExecuting || currentTab?.isStreaming}
+            <Icon name="refresh-cw" class="w-3.5 h-3.5 animate-spin" />
+            <span>Running...</span>
+          {:else}
+            <Icon name="play" class="w-3.5 h-3.5 fill-current" />
+            <span>Run</span>
+          {/if}
+          <span class="hidden lg:inline text-[9px] text-slate-900/80 bg-sky-400 px-1 rounded font-mono">Ctrl+↵</span>
+        </button>
+        <button
+          onclick={() => {
+            showRunMenu = !showRunMenu;
+            showMoreMenu = false;
+          }}
+          disabled={currentTab?.isExecuting || currentTab?.isStreaming || currentTab?.isExplaining}
+          class="h-7 px-1.5 rounded-r bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-slate-950 border-l border-sky-700/50 flex items-center transition"
+          title="Execution Options"
+          aria-label="Execution Options"
+        >
+          <Icon name="chevron-down" class="w-3 h-3" />
+        </button>
+
+        {#if showRunMenu}
+          <div use:viewportFit class="absolute left-0 top-full mt-1 w-52 bg-[#0f172a] border border-slate-700 rounded-lg shadow-2xl py-1 z-50 text-xs">
+            <button
+              onclick={() => { showRunMenu = false; handleExecute(); }}
+              class="w-full px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 flex items-center justify-between"
+            >
+              <span>Run Statement</span>
+              <kbd class="text-[10px] font-mono text-slate-400">Ctrl+Enter</kbd>
+            </button>
+            <button
+              onclick={() => { showRunMenu = false; handleExecuteAll(); }}
+              class="w-full px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 flex items-center justify-between"
+            >
+              <span>Run All Statements</span>
+              <kbd class="text-[10px] font-mono text-slate-400">F5</kbd>
+            </button>
+          </div>
+        {/if}
+      </div>
 
       {#if currentTab?.isExecuting || currentTab?.isStreaming || currentTab?.isExplaining}
         <button
@@ -158,7 +196,7 @@
           title="Cancel running query (Esc)"
         >
           <Icon name="x" class="w-3.5 h-3.5" />
-          <span>Cancel (Esc)</span>
+          <span>Cancel</span>
         </button>
       {/if}
 
@@ -176,9 +214,28 @@
         </div>
       {/if}
 
+      <!-- Per-Tab Query Row Limit Selector -->
+      {#if currentTab}
+        <label class="h-7 flex items-center space-x-1 px-2 rounded bg-slate-900 border border-slate-700/80 text-[11px] text-slate-400" title="Max rows streamed for this tab">
+          <span class="hidden sm:inline">Limit:</span>
+          <select
+            value={(currentTab as any).queryLimit ?? 5000}
+            onchange={(e) => {
+              (currentTab as any).queryLimit = Number((e.currentTarget as HTMLSelectElement).value);
+              appState.saveTabsState();
+            }}
+            class="bg-transparent text-sky-400 font-mono text-[11px] outline-none cursor-pointer"
+          >
+            {#each limitChoices as opt}
+              <option value={opt.value} class="bg-[#0f172a] text-slate-200">{opt.label}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
+
       <div class="h-3.5 w-px bg-slate-800"></div>
 
-      <!-- 2. Query Analysis -->
+      <!-- 2. Primary Analysis & Format -->
       <button
         onclick={handleExplain}
         disabled={currentTab?.isExecuting || currentTab?.isExplaining}
@@ -190,33 +247,13 @@
       </button>
 
       <button
-        onclick={() => appState.inspectCurrentTab(editor?.getTarget().text)}
-        disabled={currentTab?.isExecuting || currentTab?.isExplaining}
-        class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-50 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs flex items-center space-x-1.5 transition shadow-sm"
-        title="Run Safety Guard AST Inspection before execution"
+        onclick={() => handleFormat(editor?.getTarget())}
+        disabled={currentTab?.isExecuting || !currentTab?.sql}
+        class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-40 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs flex items-center space-x-1.5 transition shadow-sm"
+        title="Format & Beautify SQL (Ctrl+Shift+F)"
       >
-        <Icon name="shield-check" class="w-3.5 h-3.5 text-emerald-400" />
-        <span>Safety Check</span>
-      </button>
-
-      <button
-        onclick={() => (appState.enableQueryProfiling = !appState.enableQueryProfiling)}
-        class="h-7 px-2.5 rounded {appState.enableQueryProfiling ? 'bg-amber-950/70 text-amber-300 border-amber-600/70' : 'bg-[#1e293b] text-slate-300 hover:text-white border-slate-700/80 hover:border-slate-600'} border text-xs flex items-center space-x-1.5 transition shadow-sm"
-        title="Attach SHOW PROFILE stage telemetry to queries (MySQL/MariaDB)"
-      >
-        <Icon name="zap" class="w-3.5 h-3.5 {appState.enableQueryProfiling ? 'text-amber-400' : 'text-slate-400'}" />
-        <span>Profile: {appState.enableQueryProfiling ? 'ON' : 'OFF'}</span>
-      </button>
-
-      <button
-        onclick={() => {
-          if (currentTab) currentTab.showQueryProfiler = !currentTab.showQueryProfiler;
-        }}
-        class="h-7 px-2.5 rounded {currentTab?.showQueryProfiler ? 'bg-sky-950 text-sky-300 border-sky-600' : 'bg-[#1e293b] text-slate-300 hover:text-white'} border border-slate-700/80 hover:border-slate-600 text-xs flex items-center space-x-1.5 transition shadow-sm"
-        title="Toggle Stage Profiler Drawer"
-      >
-        <Icon name="clock" class="w-3.5 h-3.5 text-sky-400" />
-        <span>Profiler</span>
+        <Icon name="file-text" class="w-3.5 h-3.5 text-emerald-400" />
+        <span class="hidden sm:inline">Format</span>
       </button>
 
       <div class="h-3.5 w-px bg-slate-800"></div>
@@ -259,47 +296,80 @@
         </button>
       {/if}
 
-      <div class="h-3.5 w-px bg-slate-800"></div>
+      <!-- 4. Overflow Secondary Actions Menu -->
+      <div class="relative" onclick={(e) => e.stopPropagation()} onkeydown={() => {}} role="presentation">
+        <button
+          onclick={() => {
+            showMoreMenu = !showMoreMenu;
+            showRunMenu = false;
+          }}
+          class="h-7 px-2 rounded {showMoreMenu ? 'bg-slate-700 text-white border-sky-500/50' : 'bg-[#1e293b] hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700/80'} border text-xs flex items-center space-x-1 transition shadow-sm"
+          title="More editor tools (Safety Check, Snippets, Profiler, Notes)"
+          aria-label="More editor tools"
+        >
+          <span class="font-mono font-bold tracking-widest leading-none">⋯</span>
+        </button>
 
-      <!-- 4. Editor Utilities -->
-      <button
-        onclick={() => handleFormat(editor?.getTarget())}
-        disabled={currentTab?.isExecuting || !currentTab?.sql}
-        class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-40 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs flex items-center space-x-1.5 transition shadow-sm"
-        title="Format & Beautify SQL (Ctrl+Shift+F)"
-      >
-        <Icon name="file-text" class="w-3.5 h-3.5 text-emerald-400" />
-        <span>Format</span>
-      </button>
-
-      <button
-        onclick={() => appState.openSnippetsModal()}
-        class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs flex items-center space-x-1.5 transition shadow-sm"
-        title="Query Snippets & Templates Library (Ctrl+Shift+S)"
-      >
-        <Icon name="code" class="w-3.5 h-3.5 text-sky-400" />
-        <span>Snippets</span>
-      </button>
-
-      <button
-        onclick={() => appState.saveQueryToNote(currentTab?.sql, currentTab?.title)}
-        disabled={currentTab?.isExecuting || !currentTab?.sql}
-        class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-40 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs flex items-center space-x-1.5 transition shadow-sm"
-        title="Save Active Query as Operational Note"
-      >
-        <Icon name="bookmark" class="w-3.5 h-3.5 text-amber-400" />
-        <span>Save Note</span>
-      </button>
-
-      <button
-        onclick={() => handleSqlChange('')}
-        disabled={!currentTab?.sql}
-        class="h-7 px-2.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-40 text-slate-300 hover:text-white border border-[#334155] text-xs flex items-center space-x-1 transition shadow-sm"
-        title="Clear SQL Editor"
-      >
-        <Icon name="trash-2" class="w-3.5 h-3.5 text-slate-400" />
-        <span>Clear</span>
-      </button>
+        {#if showMoreMenu}
+          <div use:viewportFit class="absolute left-0 top-full mt-1 w-56 bg-[#0f172a] border border-slate-700 rounded-lg shadow-2xl py-1 z-50 text-xs divide-y divide-slate-800/70">
+            <div class="py-1">
+              <button
+                onclick={() => { showMoreMenu = false; appState.inspectCurrentTab(editor?.getTarget().text); }}
+                disabled={currentTab?.isExecuting || currentTab?.isExplaining}
+                class="w-full px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 disabled:opacity-40 flex items-center space-x-2"
+              >
+                <Icon name="shield-check" class="w-3.5 h-3.5 text-emerald-400" />
+                <span>Safety Guard Check</span>
+              </button>
+              <button
+                onclick={() => { appState.enableQueryProfiling = !appState.enableQueryProfiling; showMoreMenu = false; }}
+                class="w-full px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 flex items-center justify-between"
+              >
+                <span class="flex items-center space-x-2">
+                  <Icon name="zap" class="w-3.5 h-3.5 {appState.enableQueryProfiling ? 'text-amber-400' : 'text-slate-400'}" />
+                  <span>Query Profiling</span>
+                </span>
+                <span class="text-[10px] font-mono {appState.enableQueryProfiling ? 'text-amber-300' : 'text-slate-500'}">{appState.enableQueryProfiling ? 'ON' : 'OFF'}</span>
+              </button>
+              <button
+                onclick={() => { if (currentTab) currentTab.showQueryProfiler = !currentTab.showQueryProfiler; showMoreMenu = false; }}
+                class="w-full px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 flex items-center space-x-2"
+              >
+                <Icon name="clock" class="w-3.5 h-3.5 text-sky-400" />
+                <span>Toggle Stage Profiler</span>
+              </button>
+            </div>
+            <div class="py-1">
+              <button
+                onclick={() => { showMoreMenu = false; appState.openSnippetsModal(); }}
+                class="w-full px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 flex items-center justify-between"
+              >
+                <span class="flex items-center space-x-2">
+                  <Icon name="code" class="w-3.5 h-3.5 text-sky-400" />
+                  <span>Snippets Library</span>
+                </span>
+                <kbd class="text-[10px] font-mono text-slate-500">Ctrl+Shift+S</kbd>
+              </button>
+              <button
+                onclick={() => { showMoreMenu = false; appState.saveQueryToNote(currentTab?.sql, currentTab?.title); }}
+                disabled={currentTab?.isExecuting || !currentTab?.sql}
+                class="w-full px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 disabled:opacity-40 flex items-center space-x-2"
+              >
+                <Icon name="bookmark" class="w-3.5 h-3.5 text-amber-400" />
+                <span>Save as Operational Note</span>
+              </button>
+              <button
+                onclick={() => { showMoreMenu = false; handleSqlChange(''); }}
+                disabled={!currentTab?.sql}
+                class="w-full px-3 py-1.5 text-left text-rose-300 hover:bg-slate-800 disabled:opacity-40 flex items-center space-x-2"
+              >
+                <Icon name="trash-2" class="w-3.5 h-3.5" />
+                <span>Clear Editor</span>
+              </button>
+            </div>
+          </div>
+        {/if}
+      </div>
     </div>
 
     <!-- Right Side: Live Status & Send to Global AI Sidebar -->

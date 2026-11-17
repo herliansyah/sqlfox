@@ -18,11 +18,10 @@
 
   // SSH & SSL
   let showAdvanced = $state(false);
-  let sslMode = $state('disabled');
-  let sshEnabled = $state(false);
-  let sshHost = $state('');
-  let sshPort = $state(22);
-  let sshUser = $state('');
+  let useSSL = $state(false);
+  let sslCA = $state('');
+  let sslCert = $state('');
+  let sslKey = $state('');
 
   let isTesting = $state(false);
   let testResult = $state<{ success: boolean; message: string } | null>(null);
@@ -42,11 +41,10 @@
         password = '';
         database = c.database || c.database_name || '';
         readOnly = !!c.read_only;
-        sslMode = c.ssl_mode || 'disabled';
-        sshEnabled = !!c.ssh_enabled;
-        sshHost = c.ssh_host || '';
-        sshPort = c.ssh_port || 22;
-        sshUser = c.ssh_user || '';
+        useSSL = !!c.use_ssl;
+        sslCA = c.ssl_ca || '';
+        sslCert = c.ssl_cert || '';
+        sslKey = c.ssl_key || '';
       } else {
         connId = '';
         name = 'New Connection';
@@ -58,11 +56,10 @@
         password = '';
         database = '';
         readOnly = false;
-        sslMode = 'disabled';
-        sshEnabled = false;
-        sshHost = '';
-        sshPort = 22;
-        sshUser = '';
+        useSSL = false;
+        sslCA = '';
+        sslCert = '';
+        sslKey = '';
       }
     }
   });
@@ -96,12 +93,10 @@
         database: targetDb,
         database_name: targetDb,
         environment,
-        use_ssl: sslMode !== 'disabled',
-        ssl_mode: sslMode,
-        ssh_enabled: sshEnabled,
-        ssh_host: sshHost.trim(),
-        ssh_port: Number(sshPort),
-        ssh_user: sshUser.trim(),
+        use_ssl: useSSL,
+        ssl_ca: sslCA.trim(),
+        ssl_cert: sslCert.trim(),
+        ssl_key: sslKey.trim(),
       });
       testResult = {
         success: !!res.success,
@@ -130,12 +125,10 @@
       database: targetDb,
       database_name: targetDb,
       read_only: readOnly,
-      use_ssl: sslMode !== 'disabled',
-      ssl_mode: sslMode,
-      ssh_enabled: sshEnabled,
-      ssh_host: sshHost.trim(),
-      ssh_port: Number(sshPort),
-      ssh_user: sshUser.trim(),
+      use_ssl: useSSL,
+      ssl_ca: sslCA.trim(),
+      ssl_cert: sslCert.trim(),
+      ssl_key: sslKey.trim(),
     };
     if (password) {
       payload.password = password;
@@ -305,67 +298,53 @@
               class="text-xs text-sky-400 hover:text-sky-300 flex items-center space-x-1 font-semibold"
             >
               <Icon name={showAdvanced ? 'chevron-down' : 'chevron-right'} class="w-3.5 h-3.5" />
-              <span>Advanced: SSL Mode & SSH Tunnel</span>
+              <span>Advanced: TLS / SSL Certificates</span>
             </button>
 
             {#if showAdvanced}
               <div class="mt-3 p-3 bg-[#090d16] rounded-lg border border-[#1e293b] space-y-3">
-                <!-- SSL Mode -->
-                <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                  SSL Mode
-                  <select
-                    bind:value={sslMode}
-                    class="w-full mt-1 bg-[#0f172a] border border-[#334155] rounded px-2.5 py-1 text-xs text-slate-200"
-                  >
-                    <option value="disabled">Disabled</option>
-                    <option value="require">Require (Encrypted)</option>
-                    <option value="verify-ca">Verify CA</option>
-                    <option value="verify-full">Verify Full</option>
-                  </select>
+                <label class="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    bind:checked={useSSL}
+                    class="rounded bg-[#0f172a] border-[#334155] text-sky-500 focus:ring-0"
+                  />
+                  <span class="text-xs text-slate-200 font-semibold">Enable TLS / SSL Encryption</span>
                 </label>
 
-                <!-- SSH Tunnel -->
-                <div class="space-y-2">
-                  <label class="flex items-center space-x-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      bind:checked={sshEnabled}
-                      class="rounded bg-[#0f172a] border-[#334155] text-sky-500 focus:ring-0"
-                    />
-                    <span class="text-xs text-slate-200 font-semibold">Enable SSH Tunnel (Bastion Host)</span>
-                  </label>
-
-                  {#if sshEnabled}
-                    <div class="grid grid-cols-3 gap-2 pt-1">
-                      <label class="col-span-2 block text-[10px] text-slate-400">
-                        SSH Host
+                {#if useSSL}
+                  <div class="space-y-2 pt-1">
+                    <label class="block text-[10px] text-slate-400">
+                      CA Certificate Path (optional)
+                      <input
+                        type="text"
+                        bind:value={sslCA}
+                        placeholder="/path/to/ca.pem"
+                        class="w-full mt-0.5 bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-xs text-slate-100 font-mono"
+                      />
+                    </label>
+                    <div class="grid grid-cols-2 gap-2">
+                      <label class="block text-[10px] text-slate-400">
+                        Client Cert Path (mTLS)
                         <input
                           type="text"
-                          bind:value={sshHost}
-                          placeholder="bastion.example.com"
+                          bind:value={sslCert}
+                          placeholder="/path/to/client-cert.pem"
                           class="w-full mt-0.5 bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-xs text-slate-100 font-mono"
                         />
                       </label>
                       <label class="block text-[10px] text-slate-400">
-                        SSH Port
+                        Client Key Path (mTLS)
                         <input
-                          type="number"
-                          bind:value={sshPort}
+                          type="text"
+                          bind:value={sslKey}
+                          placeholder="/path/to/client-key.pem"
                           class="w-full mt-0.5 bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-xs text-slate-100 font-mono"
                         />
                       </label>
                     </div>
-                    <label class="block text-[10px] text-slate-400">
-                      SSH User
-                      <input
-                        type="text"
-                        bind:value={sshUser}
-                        placeholder="ubuntu"
-                        class="w-full mt-0.5 bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-xs text-slate-100 font-mono"
-                      />
-                    </label>
-                  {/if}
-                </div>
+                  </div>
+                {/if}
               </div>
             {/if}
           </div>

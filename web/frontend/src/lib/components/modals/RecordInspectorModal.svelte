@@ -85,7 +85,8 @@
     delete editedFields[colName];
     editedFields = { ...editedFields };
     if (effectiveTable && currentRow) {
-      const key = `${effectiveTable}:${rIdx}:${cIdx}`;
+      const uid = appState.getRowUid(currentRow);
+      const key = `${effectiveTable}:${uid}:${cIdx}`;
       const staged = appState.stagedEdits[key];
       if (staged) {
         currentRow[cIdx] = staged.oldVal;
@@ -273,7 +274,7 @@
           {@const val = currentRow[cIdx]}
           {@const formatted = formatValue(val)}
           {@const fk = fkMap.get(colName.toLowerCase())}
-          {@const isStaged = Boolean(effectiveTable && appState.stagedEdits[`${effectiveTable}:${rIdx}:${cIdx}`])}
+          {@const isStaged = Boolean(effectiveTable && currentRow && appState.stagedEdits[`${effectiveTable}:${appState.getRowUid(currentRow)}:${cIdx}`])}
           {@const isDraftDirty = editedFields[colName] !== undefined && editedFields[colName] !== val}
           {@const isDirty = isStaged || isDraftDirty}
           {@const q = searchQuery.toLowerCase().trim()}

@@ -4,6 +4,7 @@
   import { appState } from '../../stores/appState.svelte';
   import type { ConnectionProfile } from '../../../types';
   import Icon from '../common/Icon.svelte';
+  import { viewportFit } from '../../actions/viewportFit';
 
   let showConnDropdown = $state(false);
   let showMasterPin = $state(false);
@@ -407,6 +408,7 @@
         ></button>
 
         <div
+          use:viewportFit
           class="absolute left-0 top-full mt-1 w-80 bg-[#0f172a] border border-slate-700/90 rounded-lg shadow-2xl z-50 py-1 divide-y divide-slate-800 animate-in fade-in zoom-in-95 duration-100"
           role="dialog"
           aria-label="Switch connection"
@@ -552,26 +554,18 @@
     {/if}
   </div>
 
-  <!-- Center: Command Palette + Quick Schema Search -->
-  <div class="hidden md:flex flex-1 justify-center items-center gap-1.5 min-w-0 px-2">
+  <!-- Center: Unified Omnibar (Ctrl+K) -->
+  <div class="hidden md:flex flex-1 justify-center items-center min-w-0 px-2">
     <button
       onclick={() => (appState.isCommandPaletteOpen = true)}
       class="h-7 w-full max-w-md px-2.5 rounded-md bg-[#0b0f19] border border-slate-700/80 hover:border-slate-600 hover:bg-[#1e293b] text-slate-400 hover:text-slate-200 transition shadow-sm flex items-center justify-between gap-3"
-      title="Search tables, databases and actions (Ctrl+K)"
+      title="Search tables, #columns, databases and actions (Ctrl+K / Ctrl+P)"
     >
       <span class="flex items-center gap-1.5 text-xs truncate">
         <Icon name="search" class="w-3.5 h-3.5 text-slate-500" />
-        <span class="truncate">Search tables, databases, actions...</span>
+        <span class="truncate">Search tables, #columns, databases, actions...</span>
       </span>
       <kbd class="shrink-0 text-[9px] font-mono bg-slate-800/80 border border-slate-700 px-1 py-0.5 rounded text-slate-400">Ctrl K</kbd>
-    </button>
-    <button
-      onclick={() => (appState.isSchemaSearchOpen = true)}
-      class="{navBtn} text-xs shrink-0"
-      title="Cross-Database Table & Column Search (Ctrl+P)"
-    >
-      <Icon name="columns" class="w-3.5 h-3.5 text-sky-400" />
-      <kbd class="text-[9px] font-mono text-slate-400">Ctrl P</kbd>
     </button>
   </div>
 
@@ -621,6 +615,7 @@
             onclick={() => (openToolsMenu = null)}
           ></button>
           <div
+            use:viewportFit
             class="absolute right-0 mt-1.5 w-72 max-w-[calc(100vw-2rem)] bg-[#0b0f19] border border-slate-700 rounded-lg shadow-lg z-50 overflow-hidden py-1 text-xs"
             role="menu"
             aria-label={label}

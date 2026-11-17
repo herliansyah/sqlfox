@@ -186,15 +186,29 @@
             Cross-Connection Data Transfer
           </h3>
         </div>
-        <button
-          type="button"
-          onclick={handleCancel}
-          disabled={isTransferring}
-          class="text-slate-400 hover:text-slate-200 p-1 rounded hover:bg-slate-800 transition"
-          aria-label="Close"
-        >
-          <Icon name="x" class="w-4 h-4" />
-        </button>
+        <div class="flex items-center space-x-2">
+          <button
+            type="button"
+            onclick={() => {
+              appState.isDataTransferOpen = false;
+              appState.isDataSyncOpen = true;
+            }}
+            disabled={isTransferring}
+            class="px-2.5 py-1 rounded-md bg-sky-950/60 hover:bg-sky-900/70 border border-sky-700/50 text-sky-300 text-[11px] font-semibold transition disabled:opacity-40"
+            title="Switch to Data Compare & Sync"
+          >
+            Compare &amp; Sync →
+          </button>
+          <button
+            type="button"
+            onclick={handleCancel}
+            disabled={isTransferring}
+            class="text-slate-400 hover:text-slate-200 p-1 rounded hover:bg-slate-800 transition"
+            aria-label="Close"
+          >
+            <Icon name="x" class="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       <!-- Body -->

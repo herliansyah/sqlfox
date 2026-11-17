@@ -413,7 +413,41 @@
       action: () => appState.shutdownDaemon(),
     });
 
-    const q = query.toLowerCase().trim();
+    const rawQ = query.toLowerCase().trim();
+    const isColumnMode = rawQ.startsWith('#');
+    const q = isColumnMode ? rawQ.slice(1).trim() : rawQ;
+
+    if (isColumnMode || q.length >= 2) {
+      let colMatches = 0;
+      for (const [dbKey, tables] of Object.entries(appState.catalogs || {})) {
+        for (const t of tables || []) {
+          for (const c of t.columns || []) {
+            if (!q || c.name.toLowerCase().includes(q) || t.name.toLowerCase().includes(q)) {
+              list.push({
+                id: `col-${dbKey}-${t.name}-${c.name}`,
+                title: `${t.name}.${c.name}`,
+                subtitle: `${c.type}${c.is_primary_key ? ' • PK' : ''} (${dbKey})`,
+                category: 'Columns',
+                icon: 'columns',
+                action: () => appState.openTableTab(t.name),
+              });
+              colMatches++;
+              if (colMatches >= 25) break;
+            }
+          }
+          if (colMatches >= 25) break;
+        }
+        if (colMatches >= 25) break;
+      }
+    }
+
+    if (isColumnMode) {
+      const schemaItems = list.filter((item) => item.category === 'Columns' || item.category === 'Tables');
+      return q
+        ? schemaItems.filter((item) => item.title.toLowerCase().includes(q) || item.subtitle?.toLowerCase().includes(q))
+        : schemaItems.slice(0, 40);
+    }
+
     if (!q) return list;
     return list.filter(
       (item) => item.title.toLowerCase().includes(q) || item.subtitle?.toLowerCase().includes(q)

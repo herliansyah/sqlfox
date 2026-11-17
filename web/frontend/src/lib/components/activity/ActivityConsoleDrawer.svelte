@@ -33,6 +33,18 @@
     return 'INFO';
   }
 
+  const logSearchCache = new WeakMap<object, string>();
+  function getLogSearchText(l: any): string {
+    let cached = logSearchCache.get(l);
+    if (cached === undefined) {
+      const mod = l.module || l.data?.module || '';
+      const attrsStr = l.attrs ? JSON.stringify(l.attrs).toLowerCase() : '';
+      cached = `${(l.message || '').toLowerCase()} ${mod.toLowerCase()} ${attrsStr}`;
+      logSearchCache.set(l, cached);
+    }
+    return cached;
+  }
+
   let filteredLogs = $derived.by(() => {
     let list = appState.activityLogs;
     if (filterLevel !== 'ALL') {
@@ -40,15 +52,7 @@
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      list = list.filter((l) => {
-        const mod = l.module || (l as any).data?.module || '';
-        const attrsStr = l.attrs ? JSON.stringify(l.attrs).toLowerCase() : '';
-        return (
-          l.message.toLowerCase().includes(q) ||
-          mod.toLowerCase().includes(q) ||
-          attrsStr.includes(q)
-        );
-      });
+      list = list.filter((l) => getLogSearchText(l).includes(q));
     }
     return list;
   });

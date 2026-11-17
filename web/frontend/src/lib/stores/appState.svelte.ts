@@ -612,10 +612,6 @@ export class AppState {
           document.body.classList.remove('vault-locked');
         }
       }
-      if (typeof document !== 'undefined') {
-        const serverShell = document.getElementById('remote-lock-modal');
-        if (serverShell) serverShell.classList.add('hidden');
-      }
       if (!this.isRemoteLocked) {
         this.initActivityStream();
         await this.loadConnections();
@@ -625,6 +621,11 @@ export class AppState {
       }
     } catch (err) {
       console.warn('Initial connection load deferred:', err);
+    } finally {
+      if (typeof document !== 'undefined') {
+        const serverShell = document.getElementById('remote-lock-modal');
+        if (serverShell) serverShell.classList.add('hidden');
+      }
     }
   }
 
@@ -1013,6 +1014,31 @@ export class AppState {
     }
   }
 
+  private openNoteDraft(
+    title: string,
+    content: string,
+    opts?: { category?: string; userTags?: string[] }
+  ) {
+    const tab = this.activeTab;
+    const tableName = tab?.tableName || tab?.detectedTableName || '';
+    const dbName = tab?.database || this.currentDatabase || 'db';
+    const objectTags = tableName && this.activeConnection?.id
+      ? [`db://${this.activeConnection.id}/${dbName}/${tableName}`]
+      : [];
+    this.editingNote = {
+      title: title.trim() || 'Query Snapshot',
+      content,
+      side_note: '',
+      status: 'inbox',
+      category: opts?.category || 'Optimization',
+      user_tags: opts?.userTags || ['#query'],
+      object_tags: objectTags,
+      table_name: tableName,
+      is_pinned: false,
+    };
+    this.isNoteComposerModalOpen = true;
+  }
+
   saveQueryToNote(sqlText?: string, titleHint?: string) {
     const tab = this.activeTab;
     const sql = (sqlText ?? tab?.sql ?? '').trim();
@@ -1021,23 +1047,21 @@ export class AppState {
       return;
     }
     const cleanTitle = (titleHint || tab?.title || 'Query Snapshot').replace(/\.sql$/i, '').trim() || 'Query Snapshot';
-    const tableName = tab?.tableName || tab?.detectedTableName || '';
-    const dbName = tab?.database || this.currentDatabase || 'db';
-    const objectTags = tableName && this.activeConnection?.id
-      ? [`db://${this.activeConnection.id}/${dbName}/${tableName}`]
-      : [];
-    this.editingNote = {
-      title: cleanTitle,
-      content: `### Query Snapshot\n\n\`\`\`sql\n${sql}\n\`\`\`\n`,
-      side_note: '',
-      status: 'inbox',
-      category: 'Optimization',
-      user_tags: ['#query'],
-      object_tags: objectTags,
-      table_name: tableName,
-      is_pinned: false,
-    };
-    this.isNoteComposerModalOpen = true;
+    this.openNoteDraft(cleanTitle, `### Query Snapshot\n\n\`\`\`sql\n${sql}\n\`\`\`\n`);
+  }
+
+  saveMarkdownToNote(
+    markdownText: string,
+    titleHint?: string,
+    opts?: { category?: string; userTags?: string[] }
+  ) {
+    const content = (markdownText ?? '').trim();
+    if (!content) {
+      this.showToast('Note content is empty.', 'warning');
+      return;
+    }
+    const cleanTitle = (titleHint || 'AI Copilot Note').replace(/\.md$/i, '').trim() || 'AI Copilot Note';
+    this.openNoteDraft(cleanTitle, content, opts);
   }
 
   // --- System lifecycle actions (surfaced from the command palette & header) ---
@@ -1773,12 +1797,18 @@ export class AppState {
     if (idx === -1) return;
     const tab = this.tabs[idx];
 
-    if (!force && (tab.isExecuting || tab.txActive || (tab.isNote && this.isTabDirty(tab)))) {
+    const hasDrafts =
+      (tab.stagedDraftRows?.length || 0) > 0 ||
+      Boolean(tab.tableName && Object.values(this.stagedEdits).some((e) => e.table === tab.tableName));
+
+    if (!force && (tab.isExecuting || tab.txActive || this.isTabDirty(tab) || hasDrafts)) {
       const reason = tab.txActive
         ? `Tab "${tab.title}" has an ACTIVE UNCOMMITTED TRANSACTION. Closing it will ROLLBACK uncommitted changes. Continue?`
         : tab.isExecuting
         ? `Tab "${tab.title}" has a query currently executing. Cancel execution and close?`
-        : `Close note tab "${tab.title}"?`;
+        : hasDrafts
+        ? `Tab "${tab.title}" has unsaved staged table edits. Discard changes and close?`
+        : `Tab "${tab.title}" has unsaved ${tab.isNote ? 'note' : 'SQL'} content. Close anyway?`;
       const ok = await this.showNativeConfirm(reason, 'Close Tab');
       if (!ok) return;
       if (tab.txActive && this.activeSessionId) {
@@ -1814,10 +1844,10 @@ export class AppState {
 
   async closeOtherTabs(tabId: string) {
     const others = this.tabs.filter((t) => t.id !== tabId);
-    const hasRisk = others.some((t) => t.txActive || t.isExecuting);
+    const hasRisk = others.some((t) => t.txActive || t.isExecuting || this.isTabDirty(t) || (t.stagedDraftRows?.length || 0) > 0);
     if (hasRisk) {
       const ok = await this.showNativeConfirm(
-        'One or more other tabs have active transactions or running queries. Close them anyway?',
+        'One or more other tabs have unsaved content, active transactions, or running queries. Close them anyway?',
         'Close Other Tabs'
       );
       if (!ok) return;
@@ -1936,6 +1966,51 @@ export class AppState {
     };
   }
 
+  private extractSqlParams(sql: string): string[] {
+    // Strip strings, quoted identifiers, dollar quotes, and comments so literals like '10:30' or ::int are ignored.
+    const masked = sql
+      .replace(/'(?:''|\\.|[^'\\])*'/g, ' ')
+      .replace(/"(?:""|\\.|[^"\\])*"/g, ' ')
+      .replace(/`(?:``|[^`])*`/g, ' ')
+      .replace(/\$[A-Za-z_]*\$[\s\S]*?\$[A-Za-z_]*\$/g, ' ')
+      .replace(/--[^\n]*/g, ' ')
+      .replace(/\/\*[\s\S]*?\*\//g, ' ');
+    const found = new Set<string>();
+    const re = /(?:^|[^:@A-Za-z0-9_])(:[A-Za-z_][A-Za-z0-9_]*|@[A-Za-z_][A-Za-z0-9_]*|\$[1-9][0-9]*)\b/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(masked)) !== null) {
+      found.add(m[1]);
+    }
+    return Array.from(found);
+  }
+
+  private formatParamValue(raw: string): string {
+    const trimmed = raw.trim();
+    if (/^(null|true|false)$/i.test(trimmed)) return trimmed.toUpperCase();
+    if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) return trimmed;
+    return `'${raw.replace(/'/g, "''")}'`;
+  }
+
+  private async promptAndBindSqlParams(sql: string): Promise<string | null> {
+    const params = this.extractSqlParams(sql);
+    if (params.length === 0) return sql;
+    const values = new Map<string, string>();
+    for (const p of params) {
+      const val = await this.showNativePrompt(
+        `Enter value for parameter ${p} (numbers, NULL/TRUE/FALSE unquoted; text auto-quoted):`,
+        '',
+        `Bind Parameter (${p})`
+      );
+      if (val === null) return null;
+      values.set(p, this.formatParamValue(val));
+    }
+    // Replace outside strings/comments using a single-pass tokenizer
+    return sql.replace(
+      /('(?:''|\\.|[^'\\])*'|"(?:""|\\.|[^"\\])*"|`(?:``|[^`])*`|--[^\n]*|\/\*[\s\S]*?\*\/|::[A-Za-z_][A-Za-z0-9_]*|@@[A-Za-z_][A-Za-z0-9_]*|(?::[A-Za-z_][A-Za-z0-9_]*|@[A-Za-z_][A-Za-z0-9_]*|\$[1-9][0-9]*)\b)/g,
+      (tok) => values.get(tok) ?? tok
+    );
+  }
+
   async executeCurrentTab(sqlOverride?: string) {
     const tab = this.activeTab;
     if (!tab || !this.activeSessionId || tab.isExecuting) return;
@@ -1945,8 +2020,12 @@ export class AppState {
       return;
     }
 
-    const sql = (sqlOverride ?? tab.sql ?? '').trim();
+    let sql = (sqlOverride ?? tab.sql ?? '').trim();
     if (!sql) return;
+
+    const boundSql = await this.promptAndBindSqlParams(sql);
+    if (boundSql === null) return;
+    sql = boundSql;
 
     // Sync USE <database> statements bidirectionally with active tab DB scope
     const useMatch = sql.match(/^(?:\/\*[\s\S]*?\*\/\s*|--[^\n]*\n\s*)*USE\s+[`"]?([^`";\s]+)[`"]?\s*;?\s*$/i);
@@ -2012,6 +2091,37 @@ export class AppState {
       const statementResults: QueryExecutionResult[] = [];
       let singleResult: QueryExecutionResult | null = null;
       let multiMode = false;
+      let rafId: number | null = null;
+      const effectiveLimit = (tab as any).queryLimit > 0 ? (tab as any).queryLimit : 5000;
+
+      const flushChunkUI = () => {
+        rafId = null;
+        if (multiMode) {
+          tab.multiResults = [...statementResults];
+          const activeIdx = tab.activeResultIndex ?? 0;
+          if (statementResults[activeIdx]) {
+            tab.activeResult = { ...statementResults[activeIdx] };
+          }
+        } else if (singleResult) {
+          tab.activeResult = { ...singleResult };
+        }
+      };
+
+      const scheduleChunkFlush = () => {
+        if (rafId !== null) return;
+        if (typeof requestAnimationFrame === 'function') {
+          rafId = requestAnimationFrame(flushChunkUI);
+        } else {
+          flushChunkUI();
+        }
+      };
+
+      const cancelScheduledFlush = () => {
+        if (rafId !== null && typeof cancelAnimationFrame === 'function') {
+          cancelAnimationFrame(rafId);
+          rafId = null;
+        }
+      };
 
       const ensureStmtResult = (idx: number): QueryExecutionResult => {
         if (!statementResults[idx]) {
@@ -2034,7 +2144,7 @@ export class AppState {
             challengeInput: challengeStr,
             database,
             profile: this.enableQueryProfiling,
-            limit: 5000,
+            limit: effectiveLimit,
             tabId: tab.id,
             queryId,
             signal: controller.signal,
@@ -2093,30 +2203,28 @@ export class AppState {
                 const r = ensureStmtResult(idx);
                 if (r.rows.length < MAX_CLIENT_ROWS) {
                   const room = MAX_CLIENT_ROWS - r.rows.length;
-                  r.rows = [...r.rows, ...incoming.slice(0, room)];
+                  r.rows.push(...incoming.slice(0, room));
                   r.row_count = r.rows.length;
                 }
-                tab.multiResults = [...statementResults];
-                if ((tab.activeResultIndex ?? 0) === idx) {
-                  tab.activeResult = { ...r };
-                }
+                scheduleChunkFlush();
               } else if (singleResult) {
                 if (singleResult.rows.length < MAX_CLIENT_ROWS) {
                   const room = MAX_CLIENT_ROWS - singleResult.rows.length;
-                  singleResult.rows = [...singleResult.rows, ...incoming.slice(0, room)];
+                  singleResult.rows.push(...incoming.slice(0, room));
                   singleResult.row_count = singleResult.rows.length;
                 }
-                tab.activeResult = { ...singleResult };
+                scheduleChunkFlush();
               }
             },
             onStatementDone: (info) => {
+              cancelScheduledFlush();
               if (info.result_index !== undefined) {
                 const r = ensureStmtResult(info.result_index);
                 r.execution_ms = info.execution_ms;
                 r.duration_ms = info.execution_ms ?? r.duration_ms;
                 r.row_count = info.row_count ?? r.rows.length;
                 r.sql = info.sql || r.sql;
-                if ((info.row_count ?? r.rows.length) >= 5000) r.capped_at = 5000;
+                if ((info.row_count ?? r.rows.length) >= effectiveLimit) r.capped_at = effectiveLimit;
                 tab.multiResults = [...statementResults];
                 if ((tab.activeResultIndex ?? 0) === info.result_index) {
                   tab.activeResult = { ...r };
@@ -2176,6 +2284,7 @@ export class AppState {
               }
             },
             onDone: (done) => {
+              cancelScheduledFlush();
               if (typeof done.tx_active === 'boolean') tab.txActive = done.tx_active;
               const elapsed = done.execution_ms ?? Math.round(performance.now() - (tab.executionStartedAt || performance.now()));
               if (singleResult) {
@@ -2186,7 +2295,7 @@ export class AppState {
                 singleResult.tx_active = done.tx_active;
                 if (done.has_more && !hasExplicitSQLLimit(sql)) {
                   tab.hasMoreStream = true;
-                  singleResult.capped_at = 5000;
+                  singleResult.capped_at = effectiveLimit;
                 }
                 tab.activeResult = { ...singleResult };
               } else if (multiMode && statementResults.length > 0) {
