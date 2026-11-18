@@ -2149,7 +2149,7 @@ export class AppState {
               if (meta.target_table && !tab.detectedTableName) {
                 tab.detectedTableName = meta.target_table;
               }
-              if (meta.database) {
+              if (meta.database && !tab.detectedTableDatabase) {
                 tab.detectedTableDatabase = meta.database;
               }
               if (typeof meta.tx_active === 'boolean') tab.txActive = meta.tx_active;
@@ -2903,7 +2903,7 @@ export class AppState {
           }
           try {
             await api.insertRow(this.activeSessionId, {
-              database: tab?.database || tab?.detectedTableDatabase || this.currentDatabase,
+              database: tab?.detectedTableDatabase || tab?.database || this.currentDatabase,
               table: draftTable,
               data: cleanPayload,
             });
@@ -2943,7 +2943,7 @@ export class AppState {
 
     try {
       await api.insertRow(this.activeSessionId, {
-        database: tab?.database || tab?.detectedTableDatabase || this.currentDatabase,
+        database: tab?.detectedTableDatabase || tab?.database || this.currentDatabase,
         table: targetTable,
         data,
       });
@@ -2968,7 +2968,7 @@ export class AppState {
 
     try {
       await api.deleteRows(this.activeSessionId, {
-        database: tab?.database || tab?.detectedTableDatabase || this.currentDatabase,
+        database: tab?.detectedTableDatabase || tab?.database || this.currentDatabase,
         table: targetTable,
         pk_column: pkCol,
         pk_values: pkValues,
@@ -2993,7 +2993,7 @@ export class AppState {
 
     try {
       await api.deleteRows(this.activeSessionId, {
-        database: tab?.database || tab?.detectedTableDatabase || this.currentDatabase,
+        database: tab?.detectedTableDatabase || tab?.database || this.currentDatabase,
         table: targetTable,
         row_criterias: rowCriterias,
       });
@@ -3587,9 +3587,10 @@ export class AppState {
     const result = tab?.activeResult;
     if (!result?.rows || !result.rows[rowIdx] || !result.columns) return;
 
+    const effectiveDb = tab?.detectedTableDatabase || tab?.database || this.currentDatabase;
     const oldVal = result.rows[rowIdx][colIdx];
     if (newVal !== String(oldVal ?? '')) {
-      const catalog = (tab?.database && this.catalogs[tab.database.toLowerCase()]) || this.catalog;
+      const catalog = (effectiveDb && this.catalogs[effectiveDb.toLowerCase()]) || this.catalog;
       const table = catalog?.tables?.find((t) => t.name.toLowerCase() === tableName.toLowerCase());
       let pkCol = '';
       const pkColObj = result.columns.find((c: any) => typeof c === 'object' && c.is_primary_key);
@@ -3611,7 +3612,7 @@ export class AppState {
         });
       }
 
-      this.stageEdit(tableName, rowIdx, colIdx, colName, pkCol || undefined, pkVal, oldVal, newVal, tab?.database, rowCriteria);
+      this.stageEdit(tableName, rowIdx, colIdx, colName, pkCol || undefined, pkVal, oldVal, newVal, effectiveDb, rowCriteria);
       result.rows[rowIdx][colIdx] = newVal;
       this.showToast(`Staged JSON update for '${colName}'`, 'info');
     }

@@ -21,6 +21,7 @@
   let result = $derived(appState.activeTab?.activeResult);
   let isExecuting = $derived(Boolean(appState.activeTab?.isExecuting));
   let effectiveTable = $derived(currentTab?.tableName || currentTab?.detectedTableName || '');
+  let effectiveDatabase = $derived(currentTab?.detectedTableDatabase || currentTab?.database || appState.currentDatabase);
   let canEdit = $derived(Boolean(effectiveTable && !appState.isReadOnly));
 
   // Sorting
@@ -72,7 +73,7 @@
         fk.referenced_table,
         100,
         0,
-        currentTab?.database || appState.currentDatabase || undefined
+        effectiveDatabase || undefined
       );
       const colNames = (res.columns || []).map((c: any) => (typeof c === 'string' ? c : c.name || ''));
       const cIdx = colNames.findIndex((n) => n.toLowerCase() === fk.referenced_column.toLowerCase());
@@ -214,7 +215,7 @@
   }
 
   let activeCatalog = $derived(
-    (currentTab?.database && appState.catalogs[currentTab.database.toLowerCase()]) || appState.catalog
+    (effectiveDatabase && appState.catalogs[effectiveDatabase.toLowerCase()]) || appState.catalog
   );
 
   let tableMeta = $derived.by(() => {
@@ -708,7 +709,7 @@
         pkVal,
         oldVal,
         newVal,
-        currentTab?.database || appState.currentDatabase,
+        effectiveDatabase,
         rowCriteria
       );
       result.rows[origIdx][cIdx] = newVal;
@@ -2187,7 +2188,7 @@
                               type="button"
                               onclick={(e) => {
                                 e.stopPropagation();
-                                appState.openFkPeek(e, effectiveTable, colName, fk.referenced_table, fk.referenced_column, cellVal, currentTab?.database);
+                                appState.openFkPeek(e, effectiveTable, colName, fk.referenced_table, fk.referenced_column, cellVal, effectiveDatabase);
                               }}
                               class="opacity-0 group-hover/cell:opacity-100 hover:text-sky-300 text-sky-400 p-0.5 rounded hover:bg-slate-800 inline-flex items-center"
                               title="Peek {fk.referenced_table}.{fk.referenced_column}"

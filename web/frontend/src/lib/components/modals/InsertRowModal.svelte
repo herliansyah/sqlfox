@@ -4,8 +4,9 @@
   import Icon from '../common/Icon.svelte';
 
   let currentTab = $derived(appState.activeTab);
+  let effectiveDatabase = $derived(currentTab?.detectedTableDatabase || currentTab?.database);
   let activeCatalog = $derived(
-    (currentTab?.database && appState.catalogs[currentTab.database.toLowerCase()]) || appState.catalog
+    (effectiveDatabase && appState.catalogs[effectiveDatabase.toLowerCase()]) || appState.catalog
   );
   let activeTableMeta = $derived.by(() => {
     if (!currentTab?.tableName || !activeCatalog?.tables) return null;
@@ -21,7 +22,7 @@
 
   $effect(() => {
     if (appState.isInsertRowModalOpen && !activeTableMeta && currentTab?.tableName && appState.activeSessionId) {
-      void appState.loadCatalog(undefined, currentTab.database);
+      void appState.loadCatalog(undefined, effectiveDatabase);
     }
   });
 

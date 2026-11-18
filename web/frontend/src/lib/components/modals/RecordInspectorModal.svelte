@@ -10,6 +10,7 @@
   let rIdx = $derived(appState.recordInspectorRowIndex);
   let currentRow = $derived(result?.rows && result.rows[rIdx] ? result.rows[rIdx] : null);
   let effectiveTable = $derived(currentTab?.tableName || currentTab?.detectedTableName || '');
+  let effectiveDatabase = $derived(currentTab?.detectedTableDatabase || currentTab?.database || appState.currentDatabase);
   let canEdit = $derived(Boolean(effectiveTable && !appState.isReadOnly));
 
   let editedFields = $state<Record<string, any>>({});
@@ -17,7 +18,7 @@
   let filterMode = $state<'all' | 'non-null' | 'modified'>('all');
 
   let activeCatalog = $derived(
-    (currentTab?.database && appState.catalogs[currentTab.database.toLowerCase()]) || appState.catalog
+    (effectiveDatabase && appState.catalogs[effectiveDatabase.toLowerCase()]) || appState.catalog
   );
 
   let tableMeta = $derived(
@@ -170,7 +171,7 @@
       pkVal,
       oldVal,
       newVal,
-      currentTab?.database || appState.currentDatabase,
+      effectiveDatabase,
       rowCriteria
     );
     currentRow[cIdx] = newVal;
@@ -605,7 +606,7 @@
                             fk.ref_table || fk.referenced_table,
                             fk.ref_col || fk.referenced_column,
                             activeVal,
-                            currentTab?.database
+                            effectiveDatabase
                           )}
                         class="h-7 px-2 rounded-md bg-sky-950/60 hover:bg-sky-900/80 border border-sky-800/70 text-sky-300 text-[11px] font-mono inline-flex items-center gap-1 transition"
                         title="Peek referenced row in {fk.ref_table || fk.referenced_table}"
