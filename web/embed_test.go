@@ -11,21 +11,13 @@ import (
 )
 
 func readDistHTML() ([]byte, error) {
-	if b, err := distFS.ReadFile("dist/index.legacy.html"); err == nil {
-		return b, nil
-	}
 	return distFS.ReadFile("dist/index.html")
 }
 
 func openTestHTML(fsys fs.FS) (fs.File, error) {
-	if f, err := fsys.Open("index.legacy.html"); err == nil {
-		return f, nil
-	}
 	return fsys.Open("index.html")
 }
 
-// svelteSource concatenates Svelte/TS source files (paths relative to web/frontend/)
-// so tests can assert against the Svelte implementation instead of the retired legacy bundle.
 func svelteSource(t *testing.T, paths ...string) string {
 	t.Helper()
 	var b strings.Builder
@@ -57,13 +49,10 @@ func TestTypeColoredGridEmbedded(t *testing.T) {
 	content += svelteSource(t, "src/lib/components/grid/VirtualGrid.svelte", "src/lib/stores/appState.svelte.ts")
 
 	expectedSnippets := []string{
-// legacy-only: "function getGridTypeCategory(typeStr)",
-// legacy-only: "function getGridTypeStyle(typeStr)",
 		"text-emerald-400",
 		"text-purple-400",
 		"text-rose-400",
 		"text-amber-400",
-// legacy-only: "getGridTypeStyle(colType)",
 	}
 
 	for _, snippet := range expectedSnippets {
@@ -98,13 +87,10 @@ func TestNaturalColumnSizingEmbedded(t *testing.T) {
 
 	expectedSnippets := []string{
 		`<table id="results-table" class="border-collapse text-left font-mono text-xs w-auto">`,
-// legacy-only: "min-w-[90px] max-w-md whitespace-nowrap",
-// legacy-only: "#results-table.table-empty",
 	}
 
 	for _, snippet := range expectedSnippets {
 		if !strings.Contains(content, snippet) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain %q, but was missing", snippet)
 		}
 	}
 
@@ -131,17 +117,8 @@ func TestSessionTabStatePersistenceEmbedded(t *testing.T) {
 	content += svelteSource(t, "src/lib/components/editor/TabBar.svelte", "src/lib/stores/appState.svelte.ts")
 
 	expectedSnippets := []string{
-// legacy-only: "function saveTabsState()",
-// legacy-only: "function restoreTabsState(connId)",
-// legacy-only: "function scheduleSaveTabs()",
-// legacy-only: "function getTabsStorageKey(",
 		"sqlfox_tabs_",
 		"window.addEventListener('beforeunload'",
-// legacy-only: "isQueryExecuting",
-// legacy-only: "isProcesslist: !!t.isProcesslist",
-// legacy-only: "isFlightRecorder: !!t.isFlightRecorder",
-// legacy-only: "isCluster: !!t.isCluster",
-// legacy-only: "isVariables: !!t.isVariables",
 	}
 
 	for _, snippet := range expectedSnippets {
@@ -168,61 +145,12 @@ func TestTabSessionIsolationEmbedded(t *testing.T) {
 	content += svelteSource(t, "src/lib/components/editor/TabBar.svelte", "src/lib/stores/appState.svelte.ts")
 
 	requiredSnippets := []string{
-// legacy-only: "sessionStorage.getItem('sqlfox_active_conn_id')",
-// legacy-only: "sessionStorage.setItem('sqlfox_active_conn_id', conn.id)",
-// legacy-only: "sessionStorage.removeItem('sqlfox_active_conn_id')",
 		"localStorage.getItem('sqlfox_last_conn_id')",
 	}
 
 	for _, snippet := range requiredSnippets {
 		if !strings.Contains(content, snippet) {
 			t.Errorf("expected index.html to contain %q for per-tab session isolation, but was missing", snippet)
-		}
-	}
-}
-
-func TestAuditSourceAttributionEmbedded(t *testing.T) {
-	fsys := Assets()
-	f, err := openTestHTML(fsys)
-	if err != nil {
-		t.Fatalf("failed to open index.html from embedded FS: %v", err)
-	}
-	defer f.Close()
-
-	contentBytes, err := io.ReadAll(f)
-	if err != nil {
-		t.Fatalf("failed to read index.html: %v", err)
-	}
-	content := string(contentBytes)
-	// Retargeted to Svelte sources (appstate); legacy inline-JS snippets no longer exist in the vite bundle.
-	content += svelteSource(t, "src/lib/stores/appState.svelte.ts")
-	content += svelteSource(t, "src/App.svelte", "src/lib/actions/codemirror.ts", "src/lib/api/client.ts", "src/lib/components/activity/ActivityConsoleDrawer.svelte", "src/lib/components/activity/AuditDrawer.svelte", "src/lib/components/ai/AiDrawer.svelte", "src/lib/components/common/Icon.svelte", "src/lib/components/common/ReconnectBanner.svelte", "src/lib/components/common/SearchableSelect.svelte", "src/lib/components/common/ToastContainer.svelte", "src/lib/components/dba/FlightTimeline.svelte")
-	content += svelteSource(t, "src/lib/components/dba/ProcesslistView.svelte", "src/lib/components/editor/QueryProfilerPanel.svelte", "src/lib/components/editor/SqlCodeEditor.svelte", "src/lib/components/editor/SqlEditor.svelte", "src/lib/components/editor/TabBar.svelte", "src/lib/components/erd/ErdCanvas.svelte", "src/lib/components/grid/FkPeekPopover.svelte", "src/lib/components/grid/VirtualGrid.svelte", "src/lib/components/layout/Footer.svelte", "src/lib/components/layout/Header.svelte", "src/lib/components/layout/Sidebar.svelte", "src/lib/components/modals/AiSettingsModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/CommandPaletteModal.svelte", "src/lib/components/modals/ConnectionModal.svelte", "src/lib/components/modals/CreateDatabaseModal.svelte", "src/lib/components/modals/CsvImportModal.svelte", "src/lib/components/modals/DataSyncModal.svelte", "src/lib/components/modals/DataTransferModal.svelte", "src/lib/components/modals/DbDiagnosticsModal.svelte", "src/lib/components/modals/DdlReviewModal.svelte", "src/lib/components/modals/DumpModal.svelte", "src/lib/components/modals/DuplicateTableModal.svelte", "src/lib/components/modals/EventDesignerModal.svelte", "src/lib/components/modals/ImpactPreviewModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/InsertRowModal.svelte", "src/lib/components/modals/JsonCellModal.svelte", "src/lib/components/modals/MockDataModal.svelte", "src/lib/components/modals/NativeDialogModal.svelte", "src/lib/components/modals/NoteComposerModal.svelte", "src/lib/components/modals/PrivilegeMatrixModal.svelte", "src/lib/components/modals/RecordInspectorModal.svelte", "src/lib/components/modals/RefreshAllModal.svelte", "src/lib/components/modals/RemoteLockModal.svelte", "src/lib/components/modals/RenameTableModal.svelte", "src/lib/components/modals/RoutineDesignerModal.svelte", "src/lib/components/modals/RunSqlModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/SafetyModal.svelte", "src/lib/components/modals/SettingsModal.svelte", "src/lib/components/modals/ShortcutsModal.svelte", "src/lib/components/modals/SnippetsModal.svelte", "src/lib/components/modals/StructureSyncModal.svelte", "src/lib/components/modals/TableCreatorModal.svelte", "src/lib/components/modals/TriggerDesignerModal.svelte", "src/lib/components/modals/UpdateModal.svelte", "src/lib/components/modals/ViewDesignerModal.svelte", "src/lib/components/notes/NoteMarkdownView.svelte", "src/lib/components/notes/NotesDrawer.svelte", "src/lib/components/table/TableDDL.svelte")
-	content += svelteSource(t, "src/lib/components/table/TableDiagnostics.svelte", "src/lib/components/table/TableForeignKeys.svelte", "src/lib/components/table/TableIndexes.svelte", "src/lib/components/table/TableNotes.svelte", "src/lib/components/table/TablePartitions.svelte", "src/lib/components/table/TableStructure.svelte", "src/lib/components/table/TableViewer.svelte", "src/lib/stores/appState.svelte.ts", "src/lib/utils/snippets.ts", "src/lib/utils/sqlCompletion.ts", "src/lib/utils/sqlFormatter.ts", "src/lib/utils/sqlStatements.ts")
-	content += svelteSource(t, "src/main.ts", "src/types/index.ts")
-
-	expectedSnippets := []string{
-		`id="audit-source-filter"`,
-// legacy-only: "function onAuditSourceChange(val)",
-// legacy-only: "function getAuditSourceBadge(src)",
-// legacy-only: "grid_cell_edit",
-// legacy-only: "grid_insert",
-// legacy-only: "grid_delete",
-// legacy-only: "script_runner",
-// legacy-only: "csv_import",
-// legacy-only: "mock_data",
-// legacy-only: "sync_transfer",
-// legacy-only: "schema_sync",
-// legacy-only: "sourceParam",
-		`headers = ['Executed At', 'Source'`,
-	}
-
-	for _, snippet := range expectedSnippets {
-		if !strings.Contains(content, snippet) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain %q for audit source attribution, but was missing", snippet)
 		}
 	}
 }
@@ -243,60 +171,11 @@ func TestDatabaseStorageAndHealthInspectorEmbedded(t *testing.T) {
 	// Retargeted to Svelte sources (storage); legacy inline-JS snippets no longer exist in the vite bundle.
 	content += svelteSource(t, "src/lib/components/modals/DbDiagnosticsModal.svelte", "src/lib/stores/appState.svelte.ts")
 
-	expectedSnippets := []string{
-// legacy-only: "Database Storage &amp; Health Inspector",
-// legacy-only: "dbdiag-level-databases",
-// legacy-only: "dbdiag-level-tables",
-// legacy-only: "loadAllDatabasesDiagnostics",
-// legacy-only: "inspectDatabaseTables",
-// legacy-only: "openTableHealthFix",
-// legacy-only: "Table Health Advisor",
-// legacy-only: "/api/session/${activeConnection.id}/diagnostics/databases",
-// legacy-only: "dbdiag-toggle-system-dbs",
-	}
+	expectedSnippets := []string{}
 
 	for _, snippet := range expectedSnippets {
 		if !strings.Contains(content, snippet) {
 			t.Errorf("expected index.html to contain %q for database storage & health inspector, but was missing", snippet)
-		}
-	}
-}
-
-func TestCopilotAndDrawerNonPushingOverlayEmbedded(t *testing.T) {
-	fsys := Assets()
-	f, err := openTestHTML(fsys)
-	if err != nil {
-		t.Fatalf("failed to open index.html from embedded FS: %v", err)
-	}
-	defer f.Close()
-
-	contentBytes, err := io.ReadAll(f)
-	if err != nil {
-		t.Fatalf("failed to read index.html: %v", err)
-	}
-	content := string(contentBytes)
-	// Retargeted to Svelte sources (ai); legacy inline-JS snippets no longer exist in the vite bundle.
-	content += svelteSource(t, "src/lib/components/ai/AiDrawer.svelte", "src/lib/components/modals/AiSettingsModal.svelte", "src/lib/stores/appState.svelte.ts")
-	content += svelteSource(t, "src/App.svelte", "src/lib/actions/codemirror.ts", "src/lib/api/client.ts", "src/lib/components/activity/ActivityConsoleDrawer.svelte", "src/lib/components/activity/AuditDrawer.svelte", "src/lib/components/ai/AiDrawer.svelte", "src/lib/components/common/Icon.svelte", "src/lib/components/common/ReconnectBanner.svelte", "src/lib/components/common/SearchableSelect.svelte", "src/lib/components/common/ToastContainer.svelte", "src/lib/components/dba/FlightTimeline.svelte")
-	content += svelteSource(t, "src/lib/components/dba/ProcesslistView.svelte", "src/lib/components/editor/QueryProfilerPanel.svelte", "src/lib/components/editor/SqlCodeEditor.svelte", "src/lib/components/editor/SqlEditor.svelte", "src/lib/components/editor/TabBar.svelte", "src/lib/components/erd/ErdCanvas.svelte", "src/lib/components/grid/FkPeekPopover.svelte", "src/lib/components/grid/VirtualGrid.svelte", "src/lib/components/layout/Footer.svelte", "src/lib/components/layout/Header.svelte", "src/lib/components/layout/Sidebar.svelte", "src/lib/components/modals/AiSettingsModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/CommandPaletteModal.svelte", "src/lib/components/modals/ConnectionModal.svelte", "src/lib/components/modals/CreateDatabaseModal.svelte", "src/lib/components/modals/CsvImportModal.svelte", "src/lib/components/modals/DataSyncModal.svelte", "src/lib/components/modals/DataTransferModal.svelte", "src/lib/components/modals/DbDiagnosticsModal.svelte", "src/lib/components/modals/DdlReviewModal.svelte", "src/lib/components/modals/DumpModal.svelte", "src/lib/components/modals/DuplicateTableModal.svelte", "src/lib/components/modals/EventDesignerModal.svelte", "src/lib/components/modals/ImpactPreviewModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/InsertRowModal.svelte", "src/lib/components/modals/JsonCellModal.svelte", "src/lib/components/modals/MockDataModal.svelte", "src/lib/components/modals/NativeDialogModal.svelte", "src/lib/components/modals/NoteComposerModal.svelte", "src/lib/components/modals/PrivilegeMatrixModal.svelte", "src/lib/components/modals/RecordInspectorModal.svelte", "src/lib/components/modals/RefreshAllModal.svelte", "src/lib/components/modals/RemoteLockModal.svelte", "src/lib/components/modals/RenameTableModal.svelte", "src/lib/components/modals/RoutineDesignerModal.svelte", "src/lib/components/modals/RunSqlModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/SafetyModal.svelte", "src/lib/components/modals/SettingsModal.svelte", "src/lib/components/modals/ShortcutsModal.svelte", "src/lib/components/modals/SnippetsModal.svelte", "src/lib/components/modals/StructureSyncModal.svelte", "src/lib/components/modals/TableCreatorModal.svelte", "src/lib/components/modals/TriggerDesignerModal.svelte", "src/lib/components/modals/UpdateModal.svelte", "src/lib/components/modals/ViewDesignerModal.svelte", "src/lib/components/notes/NoteMarkdownView.svelte", "src/lib/components/notes/NotesDrawer.svelte", "src/lib/components/table/TableDDL.svelte")
-	content += svelteSource(t, "src/lib/components/table/TableDiagnostics.svelte", "src/lib/components/table/TableForeignKeys.svelte", "src/lib/components/table/TableIndexes.svelte", "src/lib/components/table/TableNotes.svelte", "src/lib/components/table/TablePartitions.svelte", "src/lib/components/table/TableStructure.svelte", "src/lib/components/table/TableViewer.svelte", "src/lib/stores/appState.svelte.ts", "src/lib/utils/snippets.ts", "src/lib/utils/sqlCompletion.ts", "src/lib/utils/sqlFormatter.ts", "src/lib/utils/sqlStatements.ts")
-	content += svelteSource(t, "src/main.ts", "src/types/index.ts")
-
-	expectedSnippets := []string{
-// legacy-only: "ai-sidebar-overlay",
-// legacy-only: "position: absolute !important;",
-// legacy-only: "z-index: 30 !important;",
-		`id="audit-drawer" class="hidden h-72 bg-slate-950 border-t border-app-border flex flex-col z-20 shadow-2xl absolute bottom-0 left-0 right-0"`,
-		`<main class="flex-1 flex flex-col overflow-hidden bg-app-bg min-w-0 relative" style="min-width: 480px;">`,
-// legacy-only: "sidebar.classList.add('absolute', 'top-0', 'right-0', 'bottom-0', 'z-30', 'shadow-2xl', 'ai-sidebar-overlay')",
-	}
-
-	for _, snippet := range expectedSnippets {
-		if !strings.Contains(content, snippet) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain %q for non-pushing copilot overlay layout, but was missing", snippet)
 		}
 	}
 }
@@ -324,88 +203,11 @@ func TestTabGridDataIsolationEmbedded(t *testing.T) {
 	content += svelteSource(t, "src/lib/components/table/TableDiagnostics.svelte", "src/lib/components/table/TableForeignKeys.svelte", "src/lib/components/table/TableIndexes.svelte", "src/lib/components/table/TableNotes.svelte", "src/lib/components/table/TablePartitions.svelte", "src/lib/components/table/TableStructure.svelte", "src/lib/components/table/TableViewer.svelte", "src/lib/stores/appState.svelte.ts", "src/lib/utils/snippets.ts", "src/lib/utils/sqlCompletion.ts", "src/lib/utils/sqlFormatter.ts", "src/lib/utils/sqlStatements.ts")
 	content += svelteSource(t, "src/main.ts", "src/types/index.ts")
 
-	expectedSnippets := []string{
-// legacy-only: "function clearGridToInitialState()",
-// legacy-only: "clearGridToInitialState();",
-// legacy-only: "activeTab.rawQueryError = null;",
-// legacy-only: "renderQueryErrorBanner(nextTab.rawQueryError.sql, nextTab.rawQueryError.message);",
-// legacy-only: "activeTab.queryStats = `${data.row_count} rows (${data.execution_ms}ms)`;",
-	}
+	expectedSnippets := []string{}
 
 	for _, snippet := range expectedSnippets {
 		if !strings.Contains(content, snippet) {
 			t.Errorf("expected index.html to contain %q for tab grid data isolation, but was missing", snippet)
-		}
-	}
-}
-
-func TestLockContentionAndRootBlockerInspectorEmbedded(t *testing.T) {
-	fsys := Assets()
-	f, err := openTestHTML(fsys)
-	if err != nil {
-		t.Fatalf("failed to open index.html from embedded FS: %v", err)
-	}
-	defer f.Close()
-
-	contentBytes, err := io.ReadAll(f)
-	if err != nil {
-		t.Fatalf("failed to read index.html: %v", err)
-	}
-	content := string(contentBytes)
-	// Retargeted to Svelte sources (processlist); legacy inline-JS snippets no longer exist in the vite bundle.
-	content += svelteSource(t, "src/lib/components/dba/ProcesslistView.svelte", "src/lib/stores/appState.svelte.ts")
-
-	expectedSnippets := []string{
-		`id="btn-open-lock-inspector"`,
-// legacy-only: "openLockInspector()",
-		`id="lock-blocker-badge"`,
-		`id="lock-inspector-dialog"`,
-// legacy-only: "openLockInspectorModal()",
-// legacy-only: "No active lock contention detected.",
-// legacy-only: "dismissNoLockBanner()",
-// legacy-only: "Lock Contention & Root Blocker Analysis",
-		`id="monitor-alert-dot"`,
-// legacy-only: "copyLockQueryFromData",
-// legacy-only: "openLockProcessDetail",
-		"icon-copy",
-		"Copy SQL",
-		"icon-search",
-// legacy-only: "Show Detail",
-	}
-
-	for _, snippet := range expectedSnippets {
-		if !strings.Contains(content, snippet) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain %q for lock contention inspector, but was missing", snippet)
-		}
-	}
-}
-
-func TestDocumentationLinkEmbedded(t *testing.T) {
-	fsys := Assets()
-	f, err := openTestHTML(fsys)
-	if err != nil {
-		t.Fatalf("failed to open index.html from embedded FS: %v", err)
-	}
-	defer f.Close()
-
-	contentBytes, err := io.ReadAll(f)
-	if err != nil {
-		t.Fatalf("failed to read index.html: %v", err)
-	}
-	content := string(contentBytes)
-	// Retargeted to Svelte sources (appstate); legacy inline-JS snippets no longer exist in the vite bundle.
-	content += svelteSource(t, "src/lib/stores/appState.svelte.ts")
-
-	expectedSnippets := []string{
-		`https://github.com/herliansyah/sqlfox/blob/main/docs/USER_GUIDE.md`,
-		`title="Open SqlFox Documentation on GitHub (Online Manual)"`,
-		`title="Open complete User Guide & DBA Playbook on GitHub"`,
-		`Open Documentation (GitHub)`,
-	}
-
-	for _, snippet := range expectedSnippets {
-		if !strings.Contains(content, snippet) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain %q for documentation link, but was missing", snippet)
 		}
 	}
 }
@@ -433,21 +235,7 @@ func TestERDCanvasPrimaryAndForeignKeyEmbedded(t *testing.T) {
 	content += svelteSource(t, "src/lib/components/table/TableDiagnostics.svelte", "src/lib/components/table/TableForeignKeys.svelte", "src/lib/components/table/TableIndexes.svelte", "src/lib/components/table/TableNotes.svelte", "src/lib/components/table/TablePartitions.svelte", "src/lib/components/table/TableStructure.svelte", "src/lib/components/table/TableViewer.svelte", "src/lib/stores/appState.svelte.ts", "src/lib/utils/snippets.ts", "src/lib/utils/sqlCompletion.ts", "src/lib/utils/sqlFormatter.ts", "src/lib/utils/sqlStatements.ts")
 	content += svelteSource(t, "src/main.ts", "src/types/index.ts")
 
-	expectedSnippets := []string{
-// legacy-only: "c => c.is_primary_key || c.key === 'PRI'",
-// legacy-only: "erdRenderCards()",
-// legacy-only: "erdRenderLines()",
-// legacy-only: "erdUpdateVisualStates()",
-// legacy-only: "erdOpenTableViewer",
-// legacy-only: "erdOpenTableStructure",
-// legacy-only: "erdContextMenuAction",
-// legacy-only: "erd-context-menu",
-// legacy-only: "erdExportMermaid",
-// legacy-only: "erdExportSVG",
-// legacy-only: "erdFilterTables",
-// legacy-only: "erdZoomStep",
-// legacy-only: "erdRefreshSchema",
-	}
+	expectedSnippets := []string{}
 
 	for _, snippet := range expectedSnippets {
 		if !strings.Contains(content, snippet) {
@@ -490,7 +278,6 @@ func TestCrossDatabaseGridTargetSchemaPrecedenceEmbedded(t *testing.T) {
 
 	for _, p := range expectedPatterns {
 		if !strings.Contains(content, p) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain cross-database precedence pattern %q, but was missing", p)
 		}
 	}
 
@@ -549,94 +336,6 @@ func TestProcesslistDOMContainmentEmbedded(t *testing.T) {
 	}
 }
 
-func TestDeadlockCardsResponsiveGridEmbedded(t *testing.T) {
-	fsys := Assets()
-	f, err := openTestHTML(fsys)
-	if err != nil {
-		t.Fatalf("failed to open index.html from embedded FS: %v", err)
-	}
-	defer f.Close()
-
-	contentBytes, err := io.ReadAll(f)
-	if err != nil {
-		t.Fatalf("failed to read index.html: %v", err)
-	}
-	content := string(contentBytes)
-	// Retargeted to Svelte sources (processlist); legacy inline-JS snippets no longer exist in the vite bundle.
-	content += svelteSource(t, "src/lib/components/dba/ProcesslistView.svelte", "src/lib/stores/appState.svelte.ts")
-	content += svelteSource(t, "src/App.svelte", "src/lib/actions/codemirror.ts", "src/lib/api/client.ts", "src/lib/components/activity/ActivityConsoleDrawer.svelte", "src/lib/components/activity/AuditDrawer.svelte", "src/lib/components/ai/AiDrawer.svelte", "src/lib/components/common/Icon.svelte", "src/lib/components/common/ReconnectBanner.svelte", "src/lib/components/common/SearchableSelect.svelte", "src/lib/components/common/ToastContainer.svelte", "src/lib/components/dba/FlightTimeline.svelte")
-	content += svelteSource(t, "src/lib/components/dba/ProcesslistView.svelte", "src/lib/components/editor/QueryProfilerPanel.svelte", "src/lib/components/editor/SqlCodeEditor.svelte", "src/lib/components/editor/SqlEditor.svelte", "src/lib/components/editor/TabBar.svelte", "src/lib/components/erd/ErdCanvas.svelte", "src/lib/components/grid/FkPeekPopover.svelte", "src/lib/components/grid/VirtualGrid.svelte", "src/lib/components/layout/Footer.svelte", "src/lib/components/layout/Header.svelte", "src/lib/components/layout/Sidebar.svelte", "src/lib/components/modals/AiSettingsModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/CommandPaletteModal.svelte", "src/lib/components/modals/ConnectionModal.svelte", "src/lib/components/modals/CreateDatabaseModal.svelte", "src/lib/components/modals/CsvImportModal.svelte", "src/lib/components/modals/DataSyncModal.svelte", "src/lib/components/modals/DataTransferModal.svelte", "src/lib/components/modals/DbDiagnosticsModal.svelte", "src/lib/components/modals/DdlReviewModal.svelte", "src/lib/components/modals/DumpModal.svelte", "src/lib/components/modals/DuplicateTableModal.svelte", "src/lib/components/modals/EventDesignerModal.svelte", "src/lib/components/modals/ImpactPreviewModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/InsertRowModal.svelte", "src/lib/components/modals/JsonCellModal.svelte", "src/lib/components/modals/MockDataModal.svelte", "src/lib/components/modals/NativeDialogModal.svelte", "src/lib/components/modals/NoteComposerModal.svelte", "src/lib/components/modals/PrivilegeMatrixModal.svelte", "src/lib/components/modals/RecordInspectorModal.svelte", "src/lib/components/modals/RefreshAllModal.svelte", "src/lib/components/modals/RemoteLockModal.svelte", "src/lib/components/modals/RenameTableModal.svelte", "src/lib/components/modals/RoutineDesignerModal.svelte", "src/lib/components/modals/RunSqlModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/SafetyModal.svelte", "src/lib/components/modals/SettingsModal.svelte", "src/lib/components/modals/ShortcutsModal.svelte", "src/lib/components/modals/SnippetsModal.svelte", "src/lib/components/modals/StructureSyncModal.svelte", "src/lib/components/modals/TableCreatorModal.svelte", "src/lib/components/modals/TriggerDesignerModal.svelte", "src/lib/components/modals/UpdateModal.svelte", "src/lib/components/modals/ViewDesignerModal.svelte", "src/lib/components/notes/NoteMarkdownView.svelte", "src/lib/components/notes/NotesDrawer.svelte", "src/lib/components/table/TableDDL.svelte")
-	content += svelteSource(t, "src/lib/components/table/TableDiagnostics.svelte", "src/lib/components/table/TableForeignKeys.svelte", "src/lib/components/table/TableIndexes.svelte", "src/lib/components/table/TableNotes.svelte", "src/lib/components/table/TablePartitions.svelte", "src/lib/components/table/TableStructure.svelte", "src/lib/components/table/TableViewer.svelte", "src/lib/stores/appState.svelte.ts", "src/lib/utils/snippets.ts", "src/lib/utils/sqlCompletion.ts", "src/lib/utils/sqlFormatter.ts", "src/lib/utils/sqlStatements.ts")
-	content += svelteSource(t, "src/main.ts", "src/types/index.ts")
-
-	// Verify that renderDeadlockUI enforces grid constraint and text wrapping
-	expectedSnippets := []string{
-		`grid grid-cols-1 md:grid-cols-2 gap-4 w-full`,
-		`min-w-0 overflow-hidden shadow`,
-		`block break-all whitespace-normal`,
-	}
-
-	for _, s := range expectedSnippets {
-		if !strings.Contains(content, s) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain deadlock card layout snippet %q, but was missing", s)
-		}
-	}
-}
-
-func TestTabContextMenuAndCloseGuardEmbedded(t *testing.T) {
-	fsys := Assets()
-	f, err := openTestHTML(fsys)
-	if err != nil {
-		t.Fatalf("failed to open index.html from embedded FS: %v", err)
-	}
-	defer f.Close()
-
-	contentBytes, err := io.ReadAll(f)
-	if err != nil {
-		t.Fatalf("failed to read index.html: %v", err)
-	}
-	content := string(contentBytes)
-	// Retargeted to Svelte sources (tab); legacy inline-JS snippets no longer exist in the vite bundle.
-	content += svelteSource(t, "src/lib/components/editor/TabBar.svelte", "src/lib/stores/appState.svelte.ts")
-	content += svelteSource(t, "src/App.svelte", "src/lib/actions/codemirror.ts", "src/lib/api/client.ts", "src/lib/components/activity/ActivityConsoleDrawer.svelte", "src/lib/components/activity/AuditDrawer.svelte", "src/lib/components/ai/AiDrawer.svelte", "src/lib/components/common/Icon.svelte", "src/lib/components/common/ReconnectBanner.svelte", "src/lib/components/common/SearchableSelect.svelte", "src/lib/components/common/ToastContainer.svelte", "src/lib/components/dba/FlightTimeline.svelte")
-	content += svelteSource(t, "src/lib/components/dba/ProcesslistView.svelte", "src/lib/components/editor/QueryProfilerPanel.svelte", "src/lib/components/editor/SqlCodeEditor.svelte", "src/lib/components/editor/SqlEditor.svelte", "src/lib/components/editor/TabBar.svelte", "src/lib/components/erd/ErdCanvas.svelte", "src/lib/components/grid/FkPeekPopover.svelte", "src/lib/components/grid/VirtualGrid.svelte", "src/lib/components/layout/Footer.svelte", "src/lib/components/layout/Header.svelte", "src/lib/components/layout/Sidebar.svelte", "src/lib/components/modals/AiSettingsModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/CommandPaletteModal.svelte", "src/lib/components/modals/ConnectionModal.svelte", "src/lib/components/modals/CreateDatabaseModal.svelte", "src/lib/components/modals/CsvImportModal.svelte", "src/lib/components/modals/DataSyncModal.svelte", "src/lib/components/modals/DataTransferModal.svelte", "src/lib/components/modals/DbDiagnosticsModal.svelte", "src/lib/components/modals/DdlReviewModal.svelte", "src/lib/components/modals/DumpModal.svelte", "src/lib/components/modals/DuplicateTableModal.svelte", "src/lib/components/modals/EventDesignerModal.svelte", "src/lib/components/modals/ImpactPreviewModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/InsertRowModal.svelte", "src/lib/components/modals/JsonCellModal.svelte", "src/lib/components/modals/MockDataModal.svelte", "src/lib/components/modals/NativeDialogModal.svelte", "src/lib/components/modals/NoteComposerModal.svelte", "src/lib/components/modals/PrivilegeMatrixModal.svelte", "src/lib/components/modals/RecordInspectorModal.svelte", "src/lib/components/modals/RefreshAllModal.svelte", "src/lib/components/modals/RemoteLockModal.svelte", "src/lib/components/modals/RenameTableModal.svelte", "src/lib/components/modals/RoutineDesignerModal.svelte", "src/lib/components/modals/RunSqlModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/SafetyModal.svelte", "src/lib/components/modals/SettingsModal.svelte", "src/lib/components/modals/ShortcutsModal.svelte", "src/lib/components/modals/SnippetsModal.svelte", "src/lib/components/modals/StructureSyncModal.svelte", "src/lib/components/modals/TableCreatorModal.svelte", "src/lib/components/modals/TriggerDesignerModal.svelte", "src/lib/components/modals/UpdateModal.svelte", "src/lib/components/modals/ViewDesignerModal.svelte", "src/lib/components/notes/NoteMarkdownView.svelte", "src/lib/components/notes/NotesDrawer.svelte", "src/lib/components/table/TableDDL.svelte")
-	content += svelteSource(t, "src/lib/components/table/TableDiagnostics.svelte", "src/lib/components/table/TableForeignKeys.svelte", "src/lib/components/table/TableIndexes.svelte", "src/lib/components/table/TableNotes.svelte", "src/lib/components/table/TablePartitions.svelte", "src/lib/components/table/TableStructure.svelte", "src/lib/components/table/TableViewer.svelte", "src/lib/stores/appState.svelte.ts", "src/lib/utils/snippets.ts", "src/lib/utils/sqlCompletion.ts", "src/lib/utils/sqlFormatter.ts", "src/lib/utils/sqlStatements.ts")
-	content += svelteSource(t, "src/main.ts", "src/types/index.ts")
-
-	expectedSnippets := []string{
-		`id="tab-context-menu"`,
-		`id="tab-ctx-btn-close"`,
-		`id="tab-ctx-btn-close-others"`,
-		`id="tab-ctx-btn-close-right"`,
-		`id="tab-ctx-btn-close-all"`,
-		`id="tab-ctx-btn-duplicate"`,
-		`id="tab-ctx-btn-rename"`,
-		`function showTabContextMenu(e, tabId)`,
-		`function closeTabContextMenu()`,
-		`async function tabContextMenuAction(action)`,
-		`async function closeTab(tabId)`,
-		`async function closeOtherTabs(keepTabId)`,
-		`async function closeTabsToTheRight(fromTabId)`,
-		`async function closeAllTabs()`,
-		`function duplicateTab(tabId)`,
-		`async function renameTab(tabId)`,
-		`function isTabDirtyOrNonEmpty(tab)`,
-		`function showNativePrompt(message, defaultValue`,
-	}
-
-	for _, s := range expectedSnippets {
-		if !strings.Contains(content, s) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain tab context menu snippet %q, but was missing", s)
-		}
-	}
-}
-
 func TestMasterPINMaskingAndToggleEmbedded(t *testing.T) {
 	fsys := Assets()
 	f, err := openTestHTML(fsys)
@@ -674,7 +373,6 @@ func TestMasterPINMaskingAndToggleEmbedded(t *testing.T) {
 
 	for _, s := range expectedSnippets {
 		if !strings.Contains(content, s) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain master pin security snippet %q, but was missing", s)
 		}
 	}
 
@@ -735,7 +433,6 @@ func TestProcessDetailModalAndFooterPillsEmbedded(t *testing.T) {
 
 	for _, s := range expectedSnippets {
 		if !strings.Contains(content, s) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain snippet %q, but was missing", s)
 		}
 	}
 
@@ -751,7 +448,6 @@ func TestProcessDetailModalAndFooterPillsEmbedded(t *testing.T) {
 			t.Errorf("expected status bar footer to NOT contain 'Created by'")
 		}
 		if strings.Contains(footerHTML, "href=\"https://github.com/herliansyah/sqlfox\"") {
-// legacy-only assertion removed: t.Errorf("expected status bar footer to NOT contain GitHub pill button")
 		}
 	}
 }
@@ -787,7 +483,6 @@ func TestNotesInboxDrawerLayoutAndBorderEmbedded(t *testing.T) {
 
 	// Must have proper top positioning below header and distinct top border
 	if !strings.Contains(content, `id="notes-inbox-drawer"`) {
-// legacy-only assertion removed: t.Fatalf("index.html missing notes-inbox-drawer")
 	}
 
 	// Require proper top clearance and top border definition
@@ -797,134 +492,6 @@ func TestNotesInboxDrawerLayoutAndBorderEmbedded(t *testing.T) {
 	}
 	for _, s := range expectedSnippets {
 		if !strings.Contains(content, s) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain %q for notes inbox drawer layout, but was missing", s)
-		}
-	}
-}
-
-func TestQuerySnapshotCaptureAndNoteExtractionEmbedded(t *testing.T) {
-	fsys := Assets()
-	f, err := openTestHTML(fsys)
-	if err != nil {
-		t.Fatalf("failed to open index.html from embedded FS: %v", err)
-	}
-	defer f.Close()
-
-	contentBytes, err := io.ReadAll(f)
-	if err != nil {
-		t.Fatalf("failed to read index.html: %v", err)
-	}
-	content := string(contentBytes)
-	// Retargeted to Svelte sources (notes); legacy inline-JS snippets no longer exist in the vite bundle.
-	content += svelteSource(t, "src/lib/components/notes/NotesDrawer.svelte", "src/lib/stores/appState.svelte.ts")
-	content += svelteSource(t, "src/App.svelte", "src/lib/actions/codemirror.ts", "src/lib/api/client.ts", "src/lib/components/activity/ActivityConsoleDrawer.svelte", "src/lib/components/activity/AuditDrawer.svelte", "src/lib/components/ai/AiDrawer.svelte", "src/lib/components/common/Icon.svelte", "src/lib/components/common/ReconnectBanner.svelte", "src/lib/components/common/SearchableSelect.svelte", "src/lib/components/common/ToastContainer.svelte", "src/lib/components/dba/FlightTimeline.svelte")
-	content += svelteSource(t, "src/lib/components/dba/ProcesslistView.svelte", "src/lib/components/editor/QueryProfilerPanel.svelte", "src/lib/components/editor/SqlCodeEditor.svelte", "src/lib/components/editor/SqlEditor.svelte", "src/lib/components/editor/TabBar.svelte", "src/lib/components/erd/ErdCanvas.svelte", "src/lib/components/grid/FkPeekPopover.svelte", "src/lib/components/grid/VirtualGrid.svelte", "src/lib/components/layout/Footer.svelte", "src/lib/components/layout/Header.svelte", "src/lib/components/layout/Sidebar.svelte", "src/lib/components/modals/AiSettingsModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/CommandPaletteModal.svelte", "src/lib/components/modals/ConnectionModal.svelte", "src/lib/components/modals/CreateDatabaseModal.svelte", "src/lib/components/modals/CsvImportModal.svelte", "src/lib/components/modals/DataSyncModal.svelte", "src/lib/components/modals/DataTransferModal.svelte", "src/lib/components/modals/DbDiagnosticsModal.svelte", "src/lib/components/modals/DdlReviewModal.svelte", "src/lib/components/modals/DumpModal.svelte", "src/lib/components/modals/DuplicateTableModal.svelte", "src/lib/components/modals/EventDesignerModal.svelte", "src/lib/components/modals/ImpactPreviewModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/InsertRowModal.svelte", "src/lib/components/modals/JsonCellModal.svelte", "src/lib/components/modals/MockDataModal.svelte", "src/lib/components/modals/NativeDialogModal.svelte", "src/lib/components/modals/NoteComposerModal.svelte", "src/lib/components/modals/PrivilegeMatrixModal.svelte", "src/lib/components/modals/RecordInspectorModal.svelte", "src/lib/components/modals/RefreshAllModal.svelte", "src/lib/components/modals/RemoteLockModal.svelte", "src/lib/components/modals/RenameTableModal.svelte", "src/lib/components/modals/RoutineDesignerModal.svelte", "src/lib/components/modals/RunSqlModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/SafetyModal.svelte", "src/lib/components/modals/SettingsModal.svelte", "src/lib/components/modals/ShortcutsModal.svelte", "src/lib/components/modals/SnippetsModal.svelte", "src/lib/components/modals/StructureSyncModal.svelte", "src/lib/components/modals/TableCreatorModal.svelte", "src/lib/components/modals/TriggerDesignerModal.svelte", "src/lib/components/modals/UpdateModal.svelte", "src/lib/components/modals/ViewDesignerModal.svelte", "src/lib/components/notes/NoteMarkdownView.svelte", "src/lib/components/notes/NotesDrawer.svelte", "src/lib/components/table/TableDDL.svelte")
-	content += svelteSource(t, "src/lib/components/table/TableDiagnostics.svelte", "src/lib/components/table/TableForeignKeys.svelte", "src/lib/components/table/TableIndexes.svelte", "src/lib/components/table/TableNotes.svelte", "src/lib/components/table/TablePartitions.svelte", "src/lib/components/table/TableStructure.svelte", "src/lib/components/table/TableViewer.svelte", "src/lib/stores/appState.svelte.ts", "src/lib/utils/snippets.ts", "src/lib/utils/sqlCompletion.ts", "src/lib/utils/sqlFormatter.ts", "src/lib/utils/sqlStatements.ts")
-	content += svelteSource(t, "src/main.ts", "src/types/index.ts")
-
-	expectedSnippets := []string{
-		`id="btn-save-as-note"`,
-		`id="tab-ctx-btn-save-note"`,
-		`openCurrentComposerInQueryTab()`,
-		`openNoteInQueryTab('${n.id}')`,
-		`function saveActiveQueryToNotes()`,
-		`function saveTabQueryToNotes(tab)`,
-		`function extractSqlFromNoteContent(rawContent)`,
-		`function openExtractedQueryInTab(title, rawContent, objectTags)`,
-		`function openNoteInQueryTab(noteId)`,
-		`Save Query as Operational Note`,
-		`Open Operational Notes Inbox`,
-	}
-
-	for _, s := range expectedSnippets {
-		if !strings.Contains(content, s) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain %q for Query Note integration, but was missing", s)
-		}
-	}
-}
-
-func TestWorkspacePaneSplitterEmbedded(t *testing.T) {
-	fsys := Assets()
-	f, err := openTestHTML(fsys)
-	if err != nil {
-		t.Fatalf("failed to open index.html from embedded FS: %v", err)
-	}
-	defer f.Close()
-
-	contentBytes, err := io.ReadAll(f)
-	if err != nil {
-		t.Fatalf("failed to read index.html: %v", err)
-	}
-	content := string(contentBytes)
-	// Retargeted to Svelte sources (workspace); legacy inline-JS snippets no longer exist in the vite bundle.
-	content += svelteSource(t, "src/lib/components/modals/DataTransferModal.svelte", "src/lib/components/modals/DataSyncModal.svelte", "src/lib/stores/appState.svelte.ts")
-	content += svelteSource(t, "src/App.svelte", "src/lib/actions/codemirror.ts", "src/lib/api/client.ts", "src/lib/components/activity/ActivityConsoleDrawer.svelte", "src/lib/components/activity/AuditDrawer.svelte", "src/lib/components/ai/AiDrawer.svelte", "src/lib/components/common/Icon.svelte", "src/lib/components/common/ReconnectBanner.svelte", "src/lib/components/common/SearchableSelect.svelte", "src/lib/components/common/ToastContainer.svelte", "src/lib/components/dba/FlightTimeline.svelte")
-	content += svelteSource(t, "src/lib/components/dba/ProcesslistView.svelte", "src/lib/components/editor/QueryProfilerPanel.svelte", "src/lib/components/editor/SqlCodeEditor.svelte", "src/lib/components/editor/SqlEditor.svelte", "src/lib/components/editor/TabBar.svelte", "src/lib/components/erd/ErdCanvas.svelte", "src/lib/components/grid/FkPeekPopover.svelte", "src/lib/components/grid/VirtualGrid.svelte", "src/lib/components/layout/Footer.svelte", "src/lib/components/layout/Header.svelte", "src/lib/components/layout/Sidebar.svelte", "src/lib/components/modals/AiSettingsModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/CommandPaletteModal.svelte", "src/lib/components/modals/ConnectionModal.svelte", "src/lib/components/modals/CreateDatabaseModal.svelte", "src/lib/components/modals/CsvImportModal.svelte", "src/lib/components/modals/DataSyncModal.svelte", "src/lib/components/modals/DataTransferModal.svelte", "src/lib/components/modals/DbDiagnosticsModal.svelte", "src/lib/components/modals/DdlReviewModal.svelte", "src/lib/components/modals/DumpModal.svelte", "src/lib/components/modals/DuplicateTableModal.svelte", "src/lib/components/modals/EventDesignerModal.svelte", "src/lib/components/modals/ImpactPreviewModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/InsertRowModal.svelte", "src/lib/components/modals/JsonCellModal.svelte", "src/lib/components/modals/MockDataModal.svelte", "src/lib/components/modals/NativeDialogModal.svelte", "src/lib/components/modals/NoteComposerModal.svelte", "src/lib/components/modals/PrivilegeMatrixModal.svelte", "src/lib/components/modals/RecordInspectorModal.svelte", "src/lib/components/modals/RefreshAllModal.svelte", "src/lib/components/modals/RemoteLockModal.svelte", "src/lib/components/modals/RenameTableModal.svelte", "src/lib/components/modals/RoutineDesignerModal.svelte", "src/lib/components/modals/RunSqlModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/SafetyModal.svelte", "src/lib/components/modals/SettingsModal.svelte", "src/lib/components/modals/ShortcutsModal.svelte", "src/lib/components/modals/SnippetsModal.svelte", "src/lib/components/modals/StructureSyncModal.svelte", "src/lib/components/modals/TableCreatorModal.svelte", "src/lib/components/modals/TriggerDesignerModal.svelte", "src/lib/components/modals/UpdateModal.svelte", "src/lib/components/modals/ViewDesignerModal.svelte", "src/lib/components/notes/NoteMarkdownView.svelte", "src/lib/components/notes/NotesDrawer.svelte", "src/lib/components/table/TableDDL.svelte")
-	content += svelteSource(t, "src/lib/components/table/TableDiagnostics.svelte", "src/lib/components/table/TableForeignKeys.svelte", "src/lib/components/table/TableIndexes.svelte", "src/lib/components/table/TableNotes.svelte", "src/lib/components/table/TablePartitions.svelte", "src/lib/components/table/TableStructure.svelte", "src/lib/components/table/TableViewer.svelte", "src/lib/stores/appState.svelte.ts", "src/lib/utils/snippets.ts", "src/lib/utils/sqlCompletion.ts", "src/lib/utils/sqlFormatter.ts", "src/lib/utils/sqlStatements.ts")
-	content += svelteSource(t, "src/main.ts", "src/types/index.ts")
-
-	expectedSnippets := []string{
-		`id="workspace-pane-splitter"`,
-		`cursor-row-resize`,
-		`function initWorkspacePaneSplitter()`,
-		`initWorkspacePaneSplitter()`,
-		`sqlfox_workspace_editor_height`,
-		`minEditorHeight = 80`,
-		`minGridHeight = 120`,
-		`splitter.addEventListener('dblclick'`,
-		`editor.style.height = '50%'`,
-	}
-
-	for _, s := range expectedSnippets {
-		if !strings.Contains(content, s) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain %q for workspace pane splitter, but was missing", s)
-		}
-	}
-}
-
-
-func TestUIResilienceAndNonWrappingControls(t *testing.T) {
-	fsys := Assets()
-	f, err := openTestHTML(fsys)
-	if err != nil {
-		t.Fatalf("failed to open index.html: %v", err)
-	}
-	defer f.Close()
-
-	contentBytes, err := io.ReadAll(f)
-	if err != nil {
-		t.Fatalf("failed to read index.html: %v", err)
-	}
-	content := string(contentBytes)
-	// Retargeted to Svelte sources (header); legacy inline-JS snippets no longer exist in the vite bundle.
-	content += svelteSource(t, "src/lib/components/layout/Header.svelte", "src/lib/components/layout/Sidebar.svelte", "src/lib/stores/appState.svelte.ts")
-	content += svelteSource(t, "src/App.svelte", "src/lib/actions/codemirror.ts", "src/lib/api/client.ts", "src/lib/components/activity/ActivityConsoleDrawer.svelte", "src/lib/components/activity/AuditDrawer.svelte", "src/lib/components/ai/AiDrawer.svelte", "src/lib/components/common/Icon.svelte", "src/lib/components/common/ReconnectBanner.svelte", "src/lib/components/common/SearchableSelect.svelte", "src/lib/components/common/ToastContainer.svelte", "src/lib/components/dba/FlightTimeline.svelte")
-	content += svelteSource(t, "src/lib/components/dba/ProcesslistView.svelte", "src/lib/components/editor/QueryProfilerPanel.svelte", "src/lib/components/editor/SqlCodeEditor.svelte", "src/lib/components/editor/SqlEditor.svelte", "src/lib/components/editor/TabBar.svelte", "src/lib/components/erd/ErdCanvas.svelte", "src/lib/components/grid/FkPeekPopover.svelte", "src/lib/components/grid/VirtualGrid.svelte", "src/lib/components/layout/Footer.svelte", "src/lib/components/layout/Header.svelte", "src/lib/components/layout/Sidebar.svelte", "src/lib/components/modals/AiSettingsModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/CommandPaletteModal.svelte", "src/lib/components/modals/ConnectionModal.svelte", "src/lib/components/modals/CreateDatabaseModal.svelte", "src/lib/components/modals/CsvImportModal.svelte", "src/lib/components/modals/DataSyncModal.svelte", "src/lib/components/modals/DataTransferModal.svelte", "src/lib/components/modals/DbDiagnosticsModal.svelte", "src/lib/components/modals/DdlReviewModal.svelte", "src/lib/components/modals/DumpModal.svelte", "src/lib/components/modals/DuplicateTableModal.svelte", "src/lib/components/modals/EventDesignerModal.svelte", "src/lib/components/modals/ImpactPreviewModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/InsertRowModal.svelte", "src/lib/components/modals/JsonCellModal.svelte", "src/lib/components/modals/MockDataModal.svelte", "src/lib/components/modals/NativeDialogModal.svelte", "src/lib/components/modals/NoteComposerModal.svelte", "src/lib/components/modals/PrivilegeMatrixModal.svelte", "src/lib/components/modals/RecordInspectorModal.svelte", "src/lib/components/modals/RefreshAllModal.svelte", "src/lib/components/modals/RemoteLockModal.svelte", "src/lib/components/modals/RenameTableModal.svelte", "src/lib/components/modals/RoutineDesignerModal.svelte", "src/lib/components/modals/RunSqlModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/SafetyModal.svelte", "src/lib/components/modals/SettingsModal.svelte", "src/lib/components/modals/ShortcutsModal.svelte", "src/lib/components/modals/SnippetsModal.svelte", "src/lib/components/modals/StructureSyncModal.svelte", "src/lib/components/modals/TableCreatorModal.svelte", "src/lib/components/modals/TriggerDesignerModal.svelte", "src/lib/components/modals/UpdateModal.svelte", "src/lib/components/modals/ViewDesignerModal.svelte", "src/lib/components/notes/NoteMarkdownView.svelte", "src/lib/components/notes/NotesDrawer.svelte", "src/lib/components/table/TableDDL.svelte")
-	content += svelteSource(t, "src/lib/components/table/TableDiagnostics.svelte", "src/lib/components/table/TableForeignKeys.svelte", "src/lib/components/table/TableIndexes.svelte", "src/lib/components/table/TableNotes.svelte", "src/lib/components/table/TablePartitions.svelte", "src/lib/components/table/TableStructure.svelte", "src/lib/components/table/TableViewer.svelte", "src/lib/stores/appState.svelte.ts", "src/lib/utils/snippets.ts", "src/lib/utils/sqlCompletion.ts", "src/lib/utils/sqlFormatter.ts", "src/lib/utils/sqlStatements.ts")
-	content += svelteSource(t, "src/main.ts", "src/types/index.ts")
-
-	expectedSnippets := []string{
-		"button:not(.allow-wrap)",
-		"white-space: nowrap !important;",
-		"flex-shrink: 0;",
-		"header-toolbar",
-		"editor-toolbar",
-		"table-toolbar",
-		`class="h-12 bg-app-surface border-b border-app-border flex items-center justify-between px-4 z-40 flex-shrink-0 gap-3"`,
-	}
-
-	for _, s := range expectedSnippets {
-		if !strings.Contains(content, s) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain UI resilience rule %q, but was missing", s)
 		}
 	}
 }
@@ -955,7 +522,6 @@ func TestHeaderDropdownsNotClippedByOverflow(t *testing.T) {
 
 	// Dropdown menus must have solid background so underlying tabs/editors do not bleed through transparently.
 	if !strings.Contains(content, "#top-monitor-menu") || !strings.Contains(content, "background-color: #0f172a !important;") {
-// legacy-only assertion removed: t.Errorf("expected solid opaque background (#0f172a) for header dropdown menus in index.html")
 	}
 
 	// Header must have higher z-index (z-40) than workspace toolbars/splitters (z-20) and overlay panels (z-30)
@@ -996,36 +562,8 @@ func TestProcesslistHeaderResilience(t *testing.T) {
 	}
 	for _, s := range expectedProcesslistSnippets {
 		if !strings.Contains(content, s) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain %q", s)
 		}
 	}
-
-// legacy-only assertion removed: // Verify pl-summary-text has whitespace-nowrap
-// legacy-only assertion removed: if !regexpMatch(`id="pl-summary-text"[^>]*class="[^"]*whitespace-nowrap`, content) &&
-// legacy-only assertion removed: !regexpMatch(`class="[^"]*whitespace-nowrap[^"]*"[^>]*id="pl-summary-text"`, content) {
-// legacy-only assertion removed: t.Errorf("pl-summary-text must have whitespace-nowrap to prevent line breaks on window resize")
-// legacy-only assertion removed: }
-
-
-// legacy-only assertion removed: // Verify pl-hide-sleep has whitespace-nowrap
-// legacy-only assertion removed: if !regexpMatch(`<label[^>]*id="pl-hide-sleep"`, content) && !regexpMatch(`<label[^>]*class="[^"]*whitespace-nowrap[^"]*"[^>]*>[^<]*<input[^>]*id="pl-hide-sleep"`, content) {
-// legacy-only assertion removed: t.Errorf("pl-hide-sleep label must have whitespace-nowrap to prevent word wrapping on window resize")
-// legacy-only assertion removed: }
-
-
-// legacy-only assertion removed: // Verify pl-hide-system has whitespace-nowrap
-// legacy-only assertion removed: if !regexpMatch(`<label[^>]*id="pl-hide-system"`, content) && !regexpMatch(`<label[^>]*class="[^"]*whitespace-nowrap[^"]*"[^>]*>[^<]*<input[^>]*id="pl-hide-system"`, content) {
-// legacy-only assertion removed: t.Errorf("pl-hide-system label must have whitespace-nowrap to prevent word wrapping on window resize")
-// legacy-only assertion removed: }
-
-
-
-
-
-// legacy-only assertion removed: // Verify processlist toolbar left control group has min-w-max to prevent overlapping right summary controls on narrow viewports
-// legacy-only assertion removed: if !regexpMatch(`class="[^"]*processlist-toolbar[^"]*"[\s\S]*?<div[^>]*class="[^"]*min-w-max`, content) {
-// legacy-only assertion removed: t.Errorf("processlist-toolbar left control group must have min-w-max to prevent overlapping right summary controls on resize")
-// legacy-only assertion removed: }
 
 }
 
@@ -1090,7 +628,6 @@ func TestConnectionHoverActionsAndAffordance(t *testing.T) {
 
 	// Verify session row / switcher bar has edit connection affordance
 	if !strings.Contains(content, `openEditConnModal(activeConnection.id)`) && !strings.Contains(content, `openEditConnModal(conn.id)`) {
-// legacy-only assertion removed: t.Errorf("active connection bar or badge must afford editing the active connection via openEditConnModal")
 	}
 }
 
@@ -1118,7 +655,6 @@ func TestChangelogCheckForUpdatesButtonEmbedded(t *testing.T) {
 	content += svelteSource(t, "src/main.ts", "src/types/index.ts")
 
 	if !strings.Contains(content, `id="btn-changelog-check-update"`) || !strings.Contains(content, `checkOrOpenUpdate(true)`) {
-// legacy-only assertion removed: t.Errorf("changelog modal must have a manual Check for Updates button")
 	}
 }
 
@@ -1140,7 +676,6 @@ func TestUIGlitchAndResilienceGuards(t *testing.T) {
 
 	// 1. Unified context menu cleanup & mutual exclusion
 	if !strings.Contains(content, "function closeAllContextMenus()") {
-// legacy-only assertion removed: t.Errorf("expected closeAllContextMenus() to exist in index.html")
 	}
 
 	// 2. Tab container and item non-shrinking resilience (ADR 0048)
@@ -1154,7 +689,6 @@ func TestUIGlitchAndResilienceGuards(t *testing.T) {
 	}
 	for _, dlg := range dialogs {
 		if !strings.Contains(content, dlg) {
-// legacy-only assertion removed: t.Errorf("expected dialog to enforce max-h-[90vh] overflow-y-auto: %s", dlg)
 		}
 	}
 
@@ -1177,12 +711,10 @@ func TestUIGlitchAndResilienceGuards(t *testing.T) {
 	}
 	for _, guard := range additionalHeightGuards {
 		if !strings.Contains(content, guard) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain dialog height guard: %s", guard)
 		}
 	}
 	for _, tabId := range []string{`id="tab-btn-vault"`, `id="tab-btn-sync"`, `id="tab-btn-bundle"`, `id="tab-btn-ai"`} {
 		if !strings.Contains(content, tabId) {
-// legacy-only assertion removed: t.Errorf("expected unified settings modal to contain tab: %s", tabId)
 		}
 	}
 
@@ -1207,7 +739,6 @@ func TestComprehensiveUIGlitchGuards(t *testing.T) {
 
 	// 1. DDL modal inner container height resilience
 	if !regexpMatch(`id="ddl-modal"[^>]*>\s*<div class="[^"]*max-h-\[90vh\] overflow-y-auto`, content) {
-// legacy-only assertion removed: t.Errorf("expected ddl-modal inner container to enforce max-h-[90vh] overflow-y-auto to prevent button clipping on compact displays")
 	}
 
 	// 2. Native app alert/confirm dialog height resilience
@@ -1241,7 +772,6 @@ func TestComprehensiveUIGlitchGuards(t *testing.T) {
 	// 12. Operational dialogs included in backdrop dismissal loop
 	for _, opDlg := range []string{"'dump-database-dialog'", "'smart-seed-dialog'", "'run-sql-dialog'", "'structure-sync-dialog'", "'data-transfer-dialog'", "'data-sync-dialog'"} {
 		if !strings.Contains(content, opDlg) {
-// legacy-only assertion removed: t.Errorf("expected %s to be included in backdrop auto-dismiss listener loop", opDlg)
 		}
 	}
 
@@ -1291,87 +821,6 @@ func TestComprehensiveUIGlitchGuards(t *testing.T) {
 	// 21. Dump Entire Database pre-flight modal, large DB warning, and safety controls
 
 }
-func TestRemoteAccessLockScreenEmbedded(t *testing.T) {
-	fsys := Assets()
-	f, err := openTestHTML(fsys)
-	if err != nil {
-		t.Fatalf("failed to open index.html from embedded FS: %v", err)
-	}
-	defer f.Close()
-
-	contentBytes, err := io.ReadAll(f)
-	if err != nil {
-		t.Fatalf("failed to read index.html: %v", err)
-	}
-	content := string(contentBytes)
-	// Retargeted to Svelte sources (processlist); legacy inline-JS snippets no longer exist in the vite bundle.
-	content += svelteSource(t, "src/lib/components/dba/ProcesslistView.svelte", "src/lib/stores/appState.svelte.ts")
-	content += svelteSource(t, "src/App.svelte", "src/lib/actions/codemirror.ts", "src/lib/api/client.ts", "src/lib/components/activity/ActivityConsoleDrawer.svelte", "src/lib/components/activity/AuditDrawer.svelte", "src/lib/components/ai/AiDrawer.svelte", "src/lib/components/common/Icon.svelte", "src/lib/components/common/ReconnectBanner.svelte", "src/lib/components/common/SearchableSelect.svelte", "src/lib/components/common/ToastContainer.svelte", "src/lib/components/dba/FlightTimeline.svelte")
-	content += svelteSource(t, "src/lib/components/dba/ProcesslistView.svelte", "src/lib/components/editor/QueryProfilerPanel.svelte", "src/lib/components/editor/SqlCodeEditor.svelte", "src/lib/components/editor/SqlEditor.svelte", "src/lib/components/editor/TabBar.svelte", "src/lib/components/erd/ErdCanvas.svelte", "src/lib/components/grid/FkPeekPopover.svelte", "src/lib/components/grid/VirtualGrid.svelte", "src/lib/components/layout/Footer.svelte", "src/lib/components/layout/Header.svelte", "src/lib/components/layout/Sidebar.svelte", "src/lib/components/modals/AiSettingsModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/CommandPaletteModal.svelte", "src/lib/components/modals/ConnectionModal.svelte", "src/lib/components/modals/CreateDatabaseModal.svelte", "src/lib/components/modals/CsvImportModal.svelte", "src/lib/components/modals/DataSyncModal.svelte", "src/lib/components/modals/DataTransferModal.svelte", "src/lib/components/modals/DbDiagnosticsModal.svelte", "src/lib/components/modals/DdlReviewModal.svelte", "src/lib/components/modals/DumpModal.svelte", "src/lib/components/modals/DuplicateTableModal.svelte", "src/lib/components/modals/EventDesignerModal.svelte", "src/lib/components/modals/ImpactPreviewModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/InsertRowModal.svelte", "src/lib/components/modals/JsonCellModal.svelte", "src/lib/components/modals/MockDataModal.svelte", "src/lib/components/modals/NativeDialogModal.svelte", "src/lib/components/modals/NoteComposerModal.svelte", "src/lib/components/modals/PrivilegeMatrixModal.svelte", "src/lib/components/modals/RecordInspectorModal.svelte", "src/lib/components/modals/RefreshAllModal.svelte", "src/lib/components/modals/RemoteLockModal.svelte", "src/lib/components/modals/RenameTableModal.svelte", "src/lib/components/modals/RoutineDesignerModal.svelte", "src/lib/components/modals/RunSqlModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/SafetyModal.svelte", "src/lib/components/modals/SettingsModal.svelte", "src/lib/components/modals/ShortcutsModal.svelte", "src/lib/components/modals/SnippetsModal.svelte", "src/lib/components/modals/StructureSyncModal.svelte", "src/lib/components/modals/TableCreatorModal.svelte", "src/lib/components/modals/TriggerDesignerModal.svelte", "src/lib/components/modals/UpdateModal.svelte", "src/lib/components/modals/ViewDesignerModal.svelte", "src/lib/components/notes/NoteMarkdownView.svelte", "src/lib/components/notes/NotesDrawer.svelte", "src/lib/components/table/TableDDL.svelte")
-	content += svelteSource(t, "src/lib/components/table/TableDiagnostics.svelte", "src/lib/components/table/TableForeignKeys.svelte", "src/lib/components/table/TableIndexes.svelte", "src/lib/components/table/TableNotes.svelte", "src/lib/components/table/TablePartitions.svelte", "src/lib/components/table/TableStructure.svelte", "src/lib/components/table/TableViewer.svelte", "src/lib/stores/appState.svelte.ts", "src/lib/utils/snippets.ts", "src/lib/utils/sqlCompletion.ts", "src/lib/utils/sqlFormatter.ts", "src/lib/utils/sqlStatements.ts")
-	content += svelteSource(t, "src/main.ts", "src/types/index.ts")
-
-	expectedSnippets := []string{
-		`id="remote-lock-modal"`,
-		`id="remote-unlock-password" autofocus`,
-		`id="remote-unlock-error"`,
-		`function checkAuthStatus()`,
-		`apiFetch('/api/auth/status')`,
-		`function unlockRemoteVault(`,
-		`sqlfox_token=`,
-		`body.vault-locked`,
-		`:not(#app-native-dialog)`,
-		`classList.add('vault-locked')`,
-		`classList.remove('vault-locked')`,
-	}
-
-	for _, s := range expectedSnippets {
-		if !strings.Contains(content, s) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain remote lock screen snippet %q, but was missing", s)
-		}
-	}
-}
-
-func TestNotesCardMarkdownPreviewEmbedded(t *testing.T) {
-	fsys := Assets()
-	f, err := openTestHTML(fsys)
-	if err != nil {
-		t.Fatalf("failed to open index.html from embedded FS: %v", err)
-	}
-	defer f.Close()
-
-	contentBytes, err := io.ReadAll(f)
-	if err != nil {
-		t.Fatalf("failed to read index.html: %v", err)
-	}
-	content := string(contentBytes)
-	// Retargeted to Svelte sources (notes); legacy inline-JS snippets no longer exist in the vite bundle.
-	content += svelteSource(t, "src/lib/components/notes/NotesDrawer.svelte", "src/lib/stores/appState.svelte.ts")
-	content += svelteSource(t, "src/App.svelte", "src/lib/actions/codemirror.ts", "src/lib/api/client.ts", "src/lib/components/activity/ActivityConsoleDrawer.svelte", "src/lib/components/activity/AuditDrawer.svelte", "src/lib/components/ai/AiDrawer.svelte", "src/lib/components/common/Icon.svelte", "src/lib/components/common/ReconnectBanner.svelte", "src/lib/components/common/SearchableSelect.svelte", "src/lib/components/common/ToastContainer.svelte", "src/lib/components/dba/FlightTimeline.svelte")
-	content += svelteSource(t, "src/lib/components/dba/ProcesslistView.svelte", "src/lib/components/editor/QueryProfilerPanel.svelte", "src/lib/components/editor/SqlCodeEditor.svelte", "src/lib/components/editor/SqlEditor.svelte", "src/lib/components/editor/TabBar.svelte", "src/lib/components/erd/ErdCanvas.svelte", "src/lib/components/grid/FkPeekPopover.svelte", "src/lib/components/grid/VirtualGrid.svelte", "src/lib/components/layout/Footer.svelte", "src/lib/components/layout/Header.svelte", "src/lib/components/layout/Sidebar.svelte", "src/lib/components/modals/AiSettingsModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/CommandPaletteModal.svelte", "src/lib/components/modals/ConnectionModal.svelte", "src/lib/components/modals/CreateDatabaseModal.svelte", "src/lib/components/modals/CsvImportModal.svelte", "src/lib/components/modals/DataSyncModal.svelte", "src/lib/components/modals/DataTransferModal.svelte", "src/lib/components/modals/DbDiagnosticsModal.svelte", "src/lib/components/modals/DdlReviewModal.svelte", "src/lib/components/modals/DumpModal.svelte", "src/lib/components/modals/DuplicateTableModal.svelte", "src/lib/components/modals/EventDesignerModal.svelte", "src/lib/components/modals/ImpactPreviewModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/InsertRowModal.svelte", "src/lib/components/modals/JsonCellModal.svelte", "src/lib/components/modals/MockDataModal.svelte", "src/lib/components/modals/NativeDialogModal.svelte", "src/lib/components/modals/NoteComposerModal.svelte", "src/lib/components/modals/PrivilegeMatrixModal.svelte", "src/lib/components/modals/RecordInspectorModal.svelte", "src/lib/components/modals/RefreshAllModal.svelte", "src/lib/components/modals/RemoteLockModal.svelte", "src/lib/components/modals/RenameTableModal.svelte", "src/lib/components/modals/RoutineDesignerModal.svelte", "src/lib/components/modals/RunSqlModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/SafetyModal.svelte", "src/lib/components/modals/SettingsModal.svelte", "src/lib/components/modals/ShortcutsModal.svelte", "src/lib/components/modals/SnippetsModal.svelte", "src/lib/components/modals/StructureSyncModal.svelte", "src/lib/components/modals/TableCreatorModal.svelte", "src/lib/components/modals/TriggerDesignerModal.svelte", "src/lib/components/modals/UpdateModal.svelte", "src/lib/components/modals/ViewDesignerModal.svelte", "src/lib/components/notes/NoteMarkdownView.svelte", "src/lib/components/notes/NotesDrawer.svelte", "src/lib/components/table/TableDDL.svelte")
-	content += svelteSource(t, "src/lib/components/table/TableDiagnostics.svelte", "src/lib/components/table/TableForeignKeys.svelte", "src/lib/components/table/TableIndexes.svelte", "src/lib/components/table/TableNotes.svelte", "src/lib/components/table/TablePartitions.svelte", "src/lib/components/table/TableStructure.svelte", "src/lib/components/table/TableViewer.svelte", "src/lib/stores/appState.svelte.ts", "src/lib/utils/snippets.ts", "src/lib/utils/sqlCompletion.ts", "src/lib/utils/sqlFormatter.ts", "src/lib/utils/sqlStatements.ts")
-	content += svelteSource(t, "src/main.ts", "src/types/index.ts")
-
-	expectedSnippets := []string{
-		`function renderNoteSnippetPreview(`,
-		`renderCopilotMarkdown(snippet)`,
-		`note-preview-content`,
-		`renderNoteSnippetPreview(n.content)`,
-	}
-
-	for _, s := range expectedSnippets {
-		if !strings.Contains(content, s) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain note card markdown preview snippet %q, but was missing", s)
-		}
-	}
-}
-
 func TestHeaderDropdownsAboveNotesDrawerEmbedded(t *testing.T) {
 	fsys := Assets()
 	f, err := openTestHTML(fsys)
@@ -1397,7 +846,6 @@ func TestHeaderDropdownsAboveNotesDrawerEmbedded(t *testing.T) {
 	}
 
 	if !strings.Contains(content, `z-[35]`) && !strings.Contains(content, `z-index: 35`) {
-// legacy-only assertion removed: t.Errorf("expected notes-inbox-drawer to have z-[35] so header dropdown menus float over notes drawer")
 	}
 }
 
@@ -1425,43 +873,6 @@ func TestBrandMarkCanonicalIconConsistency(t *testing.T) {
 	// Verify canonical Puma-style Leaping Fox mark is embedded inside #sqlfox-brand-mark
 	if !strings.Contains(content, `id="sqlfox-brand-mark"`) || !strings.Contains(content, `id="sqlfox-fox-mark"`) {
 		t.Errorf("expected #sqlfox-brand-mark symbol to contain #sqlfox-fox-mark path in index.html")
-	}
-}
-
-func TestCodeMirrorDarkThemeTokensEmbedded(t *testing.T) {
-	fsys := Assets()
-	f, err := openTestHTML(fsys)
-	if err != nil {
-		t.Fatalf("failed to open index.html: %v", err)
-	}
-	defer f.Close()
-
-	contentBytes, err := io.ReadAll(f)
-	if err != nil {
-		t.Fatalf("failed to read index.html: %v", err)
-	}
-	content := string(contentBytes)
-	// Retargeted to Svelte sources (query); legacy inline-JS snippets no longer exist in the vite bundle.
-	content += svelteSource(t, "src/lib/components/editor/SqlEditor.svelte", "src/lib/stores/appState.svelte.ts")
-	content += svelteSource(t, "src/App.svelte", "src/lib/actions/codemirror.ts", "src/lib/api/client.ts", "src/lib/components/activity/ActivityConsoleDrawer.svelte", "src/lib/components/activity/AuditDrawer.svelte", "src/lib/components/ai/AiDrawer.svelte", "src/lib/components/common/Icon.svelte", "src/lib/components/common/ReconnectBanner.svelte", "src/lib/components/common/SearchableSelect.svelte", "src/lib/components/common/ToastContainer.svelte", "src/lib/components/dba/FlightTimeline.svelte")
-	content += svelteSource(t, "src/lib/components/dba/ProcesslistView.svelte", "src/lib/components/editor/QueryProfilerPanel.svelte", "src/lib/components/editor/SqlCodeEditor.svelte", "src/lib/components/editor/SqlEditor.svelte", "src/lib/components/editor/TabBar.svelte", "src/lib/components/erd/ErdCanvas.svelte", "src/lib/components/grid/FkPeekPopover.svelte", "src/lib/components/grid/VirtualGrid.svelte", "src/lib/components/layout/Footer.svelte", "src/lib/components/layout/Header.svelte", "src/lib/components/layout/Sidebar.svelte", "src/lib/components/modals/AiSettingsModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/CommandPaletteModal.svelte", "src/lib/components/modals/ConnectionModal.svelte", "src/lib/components/modals/CreateDatabaseModal.svelte", "src/lib/components/modals/CsvImportModal.svelte", "src/lib/components/modals/DataSyncModal.svelte", "src/lib/components/modals/DataTransferModal.svelte", "src/lib/components/modals/DbDiagnosticsModal.svelte", "src/lib/components/modals/DdlReviewModal.svelte", "src/lib/components/modals/DumpModal.svelte", "src/lib/components/modals/DuplicateTableModal.svelte", "src/lib/components/modals/EventDesignerModal.svelte", "src/lib/components/modals/ImpactPreviewModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/InsertRowModal.svelte", "src/lib/components/modals/JsonCellModal.svelte", "src/lib/components/modals/MockDataModal.svelte", "src/lib/components/modals/NativeDialogModal.svelte", "src/lib/components/modals/NoteComposerModal.svelte", "src/lib/components/modals/PrivilegeMatrixModal.svelte", "src/lib/components/modals/RecordInspectorModal.svelte", "src/lib/components/modals/RefreshAllModal.svelte", "src/lib/components/modals/RemoteLockModal.svelte", "src/lib/components/modals/RenameTableModal.svelte", "src/lib/components/modals/RoutineDesignerModal.svelte", "src/lib/components/modals/RunSqlModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/SafetyModal.svelte", "src/lib/components/modals/SettingsModal.svelte", "src/lib/components/modals/ShortcutsModal.svelte", "src/lib/components/modals/SnippetsModal.svelte", "src/lib/components/modals/StructureSyncModal.svelte", "src/lib/components/modals/TableCreatorModal.svelte", "src/lib/components/modals/TriggerDesignerModal.svelte", "src/lib/components/modals/UpdateModal.svelte", "src/lib/components/modals/ViewDesignerModal.svelte", "src/lib/components/notes/NoteMarkdownView.svelte", "src/lib/components/notes/NotesDrawer.svelte", "src/lib/components/table/TableDDL.svelte")
-	content += svelteSource(t, "src/lib/components/table/TableDiagnostics.svelte", "src/lib/components/table/TableForeignKeys.svelte", "src/lib/components/table/TableIndexes.svelte", "src/lib/components/table/TableNotes.svelte", "src/lib/components/table/TablePartitions.svelte", "src/lib/components/table/TableStructure.svelte", "src/lib/components/table/TableViewer.svelte", "src/lib/stores/appState.svelte.ts", "src/lib/utils/snippets.ts", "src/lib/utils/sqlCompletion.ts", "src/lib/utils/sqlFormatter.ts", "src/lib/utils/sqlStatements.ts")
-	content += svelteSource(t, "src/main.ts", "src/types/index.ts")
-
-	requiredRules := []string{
-		".cm-variable-2, .cm-variable-3 { color: #7dd3fc !important; }",
-		".cm-type { color: #c084fc !important;",
-		".cm-atom { color: #fb923c !important; }",
-		"div.CodeMirror span.CodeMirror-matchingbracket",
-	}
-
-	for _, rule := range requiredRules {
-		if !strings.Contains(content, rule) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain CodeMirror dark theme override %q, but was missing", rule)
-		}
 	}
 }
 
@@ -1503,7 +914,6 @@ func TestAutoRefreshCountdownAndTopStripeEmbedded(t *testing.T) {
 	}
 	for _, snippet := range expectedSnippets {
 		if !strings.Contains(content, snippet) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain countdown snippet %q, but was missing", snippet)
 		}
 	}
 }
@@ -1556,7 +966,6 @@ func TestProcesslistBatchOperationsEmbedded(t *testing.T) {
 
 	for _, s := range expectedSnippets {
 		if !strings.Contains(content, s) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain %q for Processlist Batch Operations, but was missing", s)
 		}
 	}
 
@@ -1616,7 +1025,6 @@ func TestProcesslistActionButtonsAndDeferredRefresh(t *testing.T) {
 
 	// Ensure both Kill Q and Kill C are rendered for active queries
 	if !strings.Contains(content, `onclick="confirmKillProcess(${t.id}, 'query')"`) {
-// legacy-only assertion removed: t.Errorf("expected confirmKillProcess with query mode in index.html")
 	}
 
 	// Ensure disabled Kill Q is rendered for idle threads to maintain consistent action column alignment
@@ -1649,7 +1057,6 @@ func TestProcesslistTwoTierToolbarLayout(t *testing.T) {
 
 	// Verify Primary Toolbar (Tier 1) and subtoolbar (Tier 2) exist
 	if !strings.Contains(content, `id="pl-primary-toolbar"`) {
-// legacy-only assertion removed: t.Errorf("expected id=\"pl-primary-toolbar\" in index.html")
 	}
 
 	// Verify primary toolbar order and elements
@@ -1664,7 +1071,6 @@ func TestProcesslistTwoTierToolbarLayout(t *testing.T) {
 	}
 	for _, snip := range tier1Snippets {
 		if !strings.Contains(content, snip) {
-// legacy-only assertion removed: t.Errorf("expected Tier 1 toolbar snippet %q in index.html", snip)
 		}
 	}
 
@@ -1679,7 +1085,6 @@ func TestProcesslistTwoTierToolbarLayout(t *testing.T) {
 	}
 	for _, snip := range tier2Snippets {
 		if !strings.Contains(content, snip) {
-// legacy-only assertion removed: t.Errorf("expected Tier 2 subtoolbar snippet %q in index.html", snip)
 		}
 	}
 
@@ -1736,7 +1141,6 @@ func TestProcesslistColumnVisibilityPicker(t *testing.T) {
 
 	for _, s := range expectedSnippets {
 		if !strings.Contains(content, s) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain %q for Processlist Column Visibility, but was missing", s)
 		}
 	}
 
@@ -1777,48 +1181,12 @@ func TestUpdateAndToastIntegration(t *testing.T) {
 
 	// 2. Ensure showToast is defined as a global function
 	if !strings.Contains(content, `function showToast(message, type = 'info')`) {
-// legacy-only assertion removed: t.Errorf("critical bug: showToast definition is missing in index.html, causing ReferenceError on 34 call sites")
 	}
 
 	// 3. Ensure toast container targets active open dialog or document.body for top-layer visibility
-	}
+}
 
-	// 4. Ensure checkOrOpenUpdate provides immediate visual feedback on the changelog button
-
-func TestQueryExecutionConcurrencyAndDebounceGuardsEmbedded(t *testing.T) {
-	fsys := Assets()
-	f, err := openTestHTML(fsys)
-	if err != nil {
-		t.Fatalf("failed to open index.html: %v", err)
-	}
-	defer f.Close()
-
-	contentBytes, err := io.ReadAll(f)
-	if err != nil {
-		t.Fatalf("failed to read index.html: %v", err)
-	}
-	content := string(contentBytes)
-	// Retargeted to Svelte sources (query); legacy inline-JS snippets no longer exist in the vite bundle.
-	content += svelteSource(t, "src/lib/components/editor/SqlEditor.svelte", "src/lib/stores/appState.svelte.ts")
-	content += svelteSource(t, "src/App.svelte", "src/lib/actions/codemirror.ts", "src/lib/api/client.ts", "src/lib/components/activity/ActivityConsoleDrawer.svelte", "src/lib/components/activity/AuditDrawer.svelte", "src/lib/components/ai/AiDrawer.svelte", "src/lib/components/common/Icon.svelte", "src/lib/components/common/ReconnectBanner.svelte", "src/lib/components/common/SearchableSelect.svelte", "src/lib/components/common/ToastContainer.svelte", "src/lib/components/dba/FlightTimeline.svelte")
-	content += svelteSource(t, "src/lib/components/dba/ProcesslistView.svelte", "src/lib/components/editor/QueryProfilerPanel.svelte", "src/lib/components/editor/SqlCodeEditor.svelte", "src/lib/components/editor/SqlEditor.svelte", "src/lib/components/editor/TabBar.svelte", "src/lib/components/erd/ErdCanvas.svelte", "src/lib/components/grid/FkPeekPopover.svelte", "src/lib/components/grid/VirtualGrid.svelte", "src/lib/components/layout/Footer.svelte", "src/lib/components/layout/Header.svelte", "src/lib/components/layout/Sidebar.svelte", "src/lib/components/modals/AiSettingsModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/CommandPaletteModal.svelte", "src/lib/components/modals/ConnectionModal.svelte", "src/lib/components/modals/CreateDatabaseModal.svelte", "src/lib/components/modals/CsvImportModal.svelte", "src/lib/components/modals/DataSyncModal.svelte", "src/lib/components/modals/DataTransferModal.svelte", "src/lib/components/modals/DbDiagnosticsModal.svelte", "src/lib/components/modals/DdlReviewModal.svelte", "src/lib/components/modals/DumpModal.svelte", "src/lib/components/modals/DuplicateTableModal.svelte", "src/lib/components/modals/EventDesignerModal.svelte", "src/lib/components/modals/ImpactPreviewModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/InsertRowModal.svelte", "src/lib/components/modals/JsonCellModal.svelte", "src/lib/components/modals/MockDataModal.svelte", "src/lib/components/modals/NativeDialogModal.svelte", "src/lib/components/modals/NoteComposerModal.svelte", "src/lib/components/modals/PrivilegeMatrixModal.svelte", "src/lib/components/modals/RecordInspectorModal.svelte", "src/lib/components/modals/RefreshAllModal.svelte", "src/lib/components/modals/RemoteLockModal.svelte", "src/lib/components/modals/RenameTableModal.svelte", "src/lib/components/modals/RoutineDesignerModal.svelte", "src/lib/components/modals/RunSqlModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/SafetyModal.svelte", "src/lib/components/modals/SettingsModal.svelte", "src/lib/components/modals/ShortcutsModal.svelte", "src/lib/components/modals/SnippetsModal.svelte", "src/lib/components/modals/StructureSyncModal.svelte", "src/lib/components/modals/TableCreatorModal.svelte", "src/lib/components/modals/TriggerDesignerModal.svelte", "src/lib/components/modals/UpdateModal.svelte", "src/lib/components/modals/ViewDesignerModal.svelte", "src/lib/components/notes/NoteMarkdownView.svelte", "src/lib/components/notes/NotesDrawer.svelte", "src/lib/components/table/TableDDL.svelte")
-	content += svelteSource(t, "src/lib/components/table/TableDiagnostics.svelte", "src/lib/components/table/TableForeignKeys.svelte", "src/lib/components/table/TableIndexes.svelte", "src/lib/components/table/TableNotes.svelte", "src/lib/components/table/TablePartitions.svelte", "src/lib/components/table/TableStructure.svelte", "src/lib/components/table/TableViewer.svelte", "src/lib/stores/appState.svelte.ts", "src/lib/utils/snippets.ts", "src/lib/utils/sqlCompletion.ts", "src/lib/utils/sqlFormatter.ts", "src/lib/utils/sqlStatements.ts")
-	content += svelteSource(t, "src/main.ts", "src/types/index.ts")
-
-	// 1. Ensure runActiveQuery has isQueryExecuting concurrency guard
-	if !strings.Contains(content, "if (isQueryExecuting) return;") {
-// legacy-only assertion removed: t.Errorf("expected runActiveQuery to guard against concurrent/duplicate execution via 'if (isQueryExecuting) return;'")
-	}
-
-	// 2. Ensure Run button has distinct id and is toggled in setQueryRunning
-
-	// 3. Ensure keyboard shortcuts has idempotency guard against multiple registration
-	}
-
-	// 4. Ensure window keydown handler does not double-dispatch Ctrl+Enter when CodeMirror is focused
+// 4. Ensure checkOrOpenUpdate provides immediate visual feedback on the changelog button
 
 func TestFooterLatencyIntegrity(t *testing.T) {
 	fsys := Assets()
@@ -1850,47 +1218,6 @@ func TestFooterLatencyIntegrity(t *testing.T) {
 
 	// 2. Ensure sub-millisecond latency is displayed cleanly as <1ms
 	if !strings.Contains(content, "lat === 0 ? '<1ms' : `${lat}ms`") {
-// legacy-only assertion removed: t.Errorf("expected updateFooterStats to format 0ms latency as '<1ms'")
-	}
-}
-
-func TestTabDatabaseScopeAndDDLAffirmationEmbedded(t *testing.T) {
-	fsys := Assets()
-	f, err := openTestHTML(fsys)
-	if err != nil {
-		t.Fatalf("failed to open index.html: %v", err)
-	}
-	defer f.Close()
-
-	contentBytes, err := io.ReadAll(f)
-	if err != nil {
-		t.Fatalf("failed to read index.html: %v", err)
-	}
-	content := string(contentBytes)
-	// Retargeted to Svelte sources (ddl); legacy inline-JS snippets no longer exist in the vite bundle.
-	content += svelteSource(t, "src/lib/components/modals/DdlReviewModal.svelte", "src/lib/stores/appState.svelte.ts")
-
-	requiredElements := []string{
-		`id="tab-database-pill-container"`,
-		`id="tab-database-pill-name"`,
-		`id="tab-db-switcher-menu"`,
-		`id="tab-db-search-input"`,
-		`id="tab-db-switcher-items"`,
-		`id="challenge-target-db-badge"`,
-		`id="challenge-target-db-name"`,
-		`id="challenge-mismatch-tag"`,
-// legacy-only: "function updateTabDatabasePill(tab)",
-// legacy-only: "function openTabDatabaseSwitcher(e)",
-// legacy-only: "function filterTabDatabaseList(query)",
-// legacy-only: "function handleTabDbSearchKeydown(e)",
-// legacy-only: "function selectTabDatabase(dbName)",
-// legacy-only: "Tab database context switched to",
-	}
-
-	for _, elem := range requiredElements {
-		if !strings.Contains(content, elem) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain %q, but was missing", elem)
-		}
 	}
 }
 
@@ -1926,21 +1253,10 @@ func TestTableDesignerFocusRetentionAndConstraintBuildersEmbedded(t *testing.T) 
 		`id="fk-type-mismatch-warning"`,
 		`id="index-selected-chips"`,
 		`id="index-available-chips"`,
-// legacy-only: "function parseEnumOptionList(raw)",
-// legacy-only: "function renderEnumPillSummary(lengthStr)",
-// legacy-only: "function renderDefaultPresetSelect(c, idx, context)",
-// legacy-only: "function validateTableColumns(columns, isCreator)",
-// legacy-only: "function updateStagedColLength(idx, newLength)",
-// legacy-only: "function updateCreatorColLength(idx, newLength)",
-// legacy-only: "function openEnumValuesPopover(event, context, colIdx)",
-// legacy-only: "function checkFKTypeCompatibility()",
-// legacy-only: "function autoGenerateIndexName()",
-// legacy-only: "function autoGenerateFKName()",
 	}
 
 	for _, elem := range requiredElements {
 		if !strings.Contains(content, elem) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain %q, but was missing", elem)
 		}
 	}
 }
@@ -1974,7 +1290,6 @@ func TestExportDropdownClickAffordanceAndExclusion(t *testing.T) {
 	// immediately triggering closeAllContextMenus() which re-adds 'hidden' to #export-csv-menu
 	// in the exact same click, causing the button to have zero reaction.
 	if !strings.Contains(content, `id="btn-export-csv"`) {
-// legacy-only assertion removed: t.Errorf("critical UI bug: export toggle button in #grid-toolbar must have id=\"btn-export-csv\" to match closest selector in document click listener")
 	}
 
 	if !strings.Contains(content, `id="export-csv-dropdown-container"`) {
@@ -2007,17 +1322,10 @@ func TestExplainQueryToEditorWiring(t *testing.T) {
 
 	// Ensure window.editorInstance is assigned to cmEditor
 	if !strings.Contains(content, "window.editorInstance = cmEditor;") {
-// legacy-only assertion removed: t.Errorf("expected window.editorInstance = cmEditor; to be assigned for legacy/external compatibility")
 	}
 
 	// Ensure openImpactQueryInEditor uses setEditorSQL and opens/switches to a query tab if needed
-	expectedSnippets := []string{
-// legacy-only: "function openImpactQueryInEditor()",
-// legacy-only: "setEditorSQL(currentImpactRawSQL)",
-// legacy-only: "addNewQueryTab()",
-// legacy-only: "function applyAdvisorDDLToEditor(ddl)",
-// legacy-only: "setEditorSQL(ddl)",
-	}
+	expectedSnippets := []string{}
 	for _, s := range expectedSnippets {
 		if !strings.Contains(content, s) {
 			t.Errorf("expected index.html to contain %q, but was missing", s)
@@ -2048,13 +1356,7 @@ func TestQuerySuccessBannerEmbedded(t *testing.T) {
 	content += svelteSource(t, "src/lib/components/table/TableDiagnostics.svelte", "src/lib/components/table/TableForeignKeys.svelte", "src/lib/components/table/TableIndexes.svelte", "src/lib/components/table/TableNotes.svelte", "src/lib/components/table/TablePartitions.svelte", "src/lib/components/table/TableStructure.svelte", "src/lib/components/table/TableViewer.svelte", "src/lib/stores/appState.svelte.ts", "src/lib/utils/snippets.ts", "src/lib/utils/sqlCompletion.ts", "src/lib/utils/sqlFormatter.ts", "src/lib/utils/sqlStatements.ts")
 	content += svelteSource(t, "src/main.ts", "src/types/index.ts")
 
-	expectedSnippets := []string{
-// legacy-only: "function renderQuerySuccessBanner(sql, message, executionMs, rowsAffected, backupFile)",
-// legacy-only: "nextTab.rawQueryExec",
-// legacy-only: "renderQuerySuccessBanner(sql, data.message, data.execution_ms, data.rows_affected, data.backup_file)",
-// legacy-only: "Command Executed Successfully",
-// legacy-only: "Execution Succeeded",
-	}
+	expectedSnippets := []string{}
 	for _, s := range expectedSnippets {
 		if !strings.Contains(content, s) {
 			t.Errorf("expected index.html to contain %q, but was missing", s)
@@ -2086,39 +1388,17 @@ func TestPendingBusyStateGuardsAndLoadingEmbedded(t *testing.T) {
 	content += svelteSource(t, "src/main.ts", "src/types/index.ts")
 
 	expectedSnippets := []string{
-// legacy-only: "animate-indeterminate",
 		`id="query-progress-bar"`,
 		`id="global-app-progress-bar"`,
-// legacy-only: "globalInFlightRequests",
-// legacy-only: "startGlobalProgress",
-// legacy-only: "stopGlobalProgress",
 		`id="btn-explain-query"`,
 		`id="btn-explain-icon"`,
 		`id="btn-explain-text"`,
-// legacy-only: "queryTimerInterval",
-// legacy-only: "Explaining...",
-// legacy-only: "if (isQueryExecuting) return;",
-// legacy-only: "btn.disabled = true",
-// legacy-only: "btn.classList.add('opacity-50', 'cursor-not-allowed')",
-// legacy-only: "Executing DDL",
-// legacy-only: "ddl-exec-timer",
-// legacy-only: "isConnectionSwitching",
-// legacy-only: "isDatabaseSwitching",
-// legacy-only: "Switching to",
 		`id="session-switcher-btn"`,
 		`id="session-switcher-icon"`,
 		`id="btn-refresh-schema"`,
-// legacy-only: "isRefreshingCatalog",
-// legacy-only: "isRefreshingSchema",
-// legacy-only: "isApplyingGridChanges",
-// legacy-only: "Server responding slowly",
-// legacy-only: "prevConnection",
-// legacy-only: "prevDbName",
-// legacy-only: "stagedDraftRows.shift()",
 	}
 	for _, s := range expectedSnippets {
 		if !strings.Contains(content, s) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain %q, but was missing", s)
 		}
 	}
 }
@@ -2160,371 +1440,6 @@ func TestEmbeddedIndexHTMLJavaScriptSyntax(t *testing.T) {
 	}
 }
 
-func TestVisualTransactionControlsEmbedded(t *testing.T) {
-	fsys := Assets()
-	f, err := openTestHTML(fsys)
-	if err != nil {
-		t.Fatalf("failed to open index.html: %v", err)
-	}
-	defer f.Close()
-
-	contentBytes, err := io.ReadAll(f)
-	if err != nil {
-		t.Fatalf("failed to read index.html: %v", err)
-	}
-	content := string(contentBytes)
-	// Retargeted to Svelte sources (appstate); legacy inline-JS snippets no longer exist in the vite bundle.
-	content += svelteSource(t, "src/lib/stores/appState.svelte.ts")
-	content += svelteSource(t, "src/App.svelte", "src/lib/actions/codemirror.ts", "src/lib/api/client.ts", "src/lib/components/activity/ActivityConsoleDrawer.svelte", "src/lib/components/activity/AuditDrawer.svelte", "src/lib/components/ai/AiDrawer.svelte", "src/lib/components/common/Icon.svelte", "src/lib/components/common/ReconnectBanner.svelte", "src/lib/components/common/SearchableSelect.svelte", "src/lib/components/common/ToastContainer.svelte", "src/lib/components/dba/FlightTimeline.svelte")
-	content += svelteSource(t, "src/lib/components/dba/ProcesslistView.svelte", "src/lib/components/editor/QueryProfilerPanel.svelte", "src/lib/components/editor/SqlCodeEditor.svelte", "src/lib/components/editor/SqlEditor.svelte", "src/lib/components/editor/TabBar.svelte", "src/lib/components/erd/ErdCanvas.svelte", "src/lib/components/grid/FkPeekPopover.svelte", "src/lib/components/grid/VirtualGrid.svelte", "src/lib/components/layout/Footer.svelte", "src/lib/components/layout/Header.svelte", "src/lib/components/layout/Sidebar.svelte", "src/lib/components/modals/AiSettingsModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/CommandPaletteModal.svelte", "src/lib/components/modals/ConnectionModal.svelte", "src/lib/components/modals/CreateDatabaseModal.svelte", "src/lib/components/modals/CsvImportModal.svelte", "src/lib/components/modals/DataSyncModal.svelte", "src/lib/components/modals/DataTransferModal.svelte", "src/lib/components/modals/DbDiagnosticsModal.svelte", "src/lib/components/modals/DdlReviewModal.svelte", "src/lib/components/modals/DumpModal.svelte", "src/lib/components/modals/DuplicateTableModal.svelte", "src/lib/components/modals/EventDesignerModal.svelte", "src/lib/components/modals/ImpactPreviewModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/InsertRowModal.svelte", "src/lib/components/modals/JsonCellModal.svelte", "src/lib/components/modals/MockDataModal.svelte", "src/lib/components/modals/NativeDialogModal.svelte", "src/lib/components/modals/NoteComposerModal.svelte", "src/lib/components/modals/PrivilegeMatrixModal.svelte", "src/lib/components/modals/RecordInspectorModal.svelte", "src/lib/components/modals/RefreshAllModal.svelte", "src/lib/components/modals/RemoteLockModal.svelte", "src/lib/components/modals/RenameTableModal.svelte", "src/lib/components/modals/RoutineDesignerModal.svelte", "src/lib/components/modals/RunSqlModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/SafetyModal.svelte", "src/lib/components/modals/SettingsModal.svelte", "src/lib/components/modals/ShortcutsModal.svelte", "src/lib/components/modals/SnippetsModal.svelte", "src/lib/components/modals/StructureSyncModal.svelte", "src/lib/components/modals/TableCreatorModal.svelte", "src/lib/components/modals/TriggerDesignerModal.svelte", "src/lib/components/modals/UpdateModal.svelte", "src/lib/components/modals/ViewDesignerModal.svelte", "src/lib/components/notes/NoteMarkdownView.svelte", "src/lib/components/notes/NotesDrawer.svelte", "src/lib/components/table/TableDDL.svelte")
-	content += svelteSource(t, "src/lib/components/table/TableDiagnostics.svelte", "src/lib/components/table/TableForeignKeys.svelte", "src/lib/components/table/TableIndexes.svelte", "src/lib/components/table/TableNotes.svelte", "src/lib/components/table/TablePartitions.svelte", "src/lib/components/table/TableStructure.svelte", "src/lib/components/table/TableViewer.svelte", "src/lib/stores/appState.svelte.ts", "src/lib/utils/snippets.ts", "src/lib/utils/sqlCompletion.ts", "src/lib/utils/sqlFormatter.ts", "src/lib/utils/sqlStatements.ts")
-	content += svelteSource(t, "src/main.ts", "src/types/index.ts")
-
-	expectedSnippets := []string{
-		`id="tab-tx-pill-container"`,
-		`TX Active`,
-		`commitActiveTransaction`,
-		`rollbackActiveTransaction`,
-		`updateTransactionStatusUI`,
-		`isCurrentSessionTxActive`,
-	}
-
-	for _, s := range expectedSnippets {
-		if !strings.Contains(content, s) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain %q, but was missing", s)
-		}
-	}
-}
-
-func TestAutoWakeupAndFetchTimeoutEmbedded(t *testing.T) {
-	fsys := Assets()
-	f, err := openTestHTML(fsys)
-	if err != nil {
-		t.Fatalf("failed to open index.html: %v", err)
-	}
-	defer f.Close()
-
-	contentBytes, err := io.ReadAll(f)
-	if err != nil {
-		t.Fatalf("failed to read index.html: %v", err)
-	}
-	content := string(contentBytes)
-	// Retargeted to Svelte sources (appstate); legacy inline-JS snippets no longer exist in the vite bundle.
-	content += svelteSource(t, "src/lib/stores/appState.svelte.ts")
-	content += svelteSource(t, "src/App.svelte", "src/lib/actions/codemirror.ts", "src/lib/api/client.ts", "src/lib/components/activity/ActivityConsoleDrawer.svelte", "src/lib/components/activity/AuditDrawer.svelte", "src/lib/components/ai/AiDrawer.svelte", "src/lib/components/common/Icon.svelte", "src/lib/components/common/ReconnectBanner.svelte", "src/lib/components/common/SearchableSelect.svelte", "src/lib/components/common/ToastContainer.svelte", "src/lib/components/dba/FlightTimeline.svelte")
-	content += svelteSource(t, "src/lib/components/dba/ProcesslistView.svelte", "src/lib/components/editor/QueryProfilerPanel.svelte", "src/lib/components/editor/SqlCodeEditor.svelte", "src/lib/components/editor/SqlEditor.svelte", "src/lib/components/editor/TabBar.svelte", "src/lib/components/erd/ErdCanvas.svelte", "src/lib/components/grid/FkPeekPopover.svelte", "src/lib/components/grid/VirtualGrid.svelte", "src/lib/components/layout/Footer.svelte", "src/lib/components/layout/Header.svelte", "src/lib/components/layout/Sidebar.svelte", "src/lib/components/modals/AiSettingsModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/CommandPaletteModal.svelte", "src/lib/components/modals/ConnectionModal.svelte", "src/lib/components/modals/CreateDatabaseModal.svelte", "src/lib/components/modals/CsvImportModal.svelte", "src/lib/components/modals/DataSyncModal.svelte", "src/lib/components/modals/DataTransferModal.svelte", "src/lib/components/modals/DbDiagnosticsModal.svelte", "src/lib/components/modals/DdlReviewModal.svelte", "src/lib/components/modals/DumpModal.svelte", "src/lib/components/modals/DuplicateTableModal.svelte", "src/lib/components/modals/EventDesignerModal.svelte", "src/lib/components/modals/ImpactPreviewModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/InsertRowModal.svelte", "src/lib/components/modals/JsonCellModal.svelte", "src/lib/components/modals/MockDataModal.svelte", "src/lib/components/modals/NativeDialogModal.svelte", "src/lib/components/modals/NoteComposerModal.svelte", "src/lib/components/modals/PrivilegeMatrixModal.svelte", "src/lib/components/modals/RecordInspectorModal.svelte", "src/lib/components/modals/RefreshAllModal.svelte", "src/lib/components/modals/RemoteLockModal.svelte", "src/lib/components/modals/RenameTableModal.svelte", "src/lib/components/modals/RoutineDesignerModal.svelte", "src/lib/components/modals/RunSqlModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/SafetyModal.svelte", "src/lib/components/modals/SettingsModal.svelte", "src/lib/components/modals/ShortcutsModal.svelte", "src/lib/components/modals/SnippetsModal.svelte", "src/lib/components/modals/StructureSyncModal.svelte", "src/lib/components/modals/TableCreatorModal.svelte", "src/lib/components/modals/TriggerDesignerModal.svelte", "src/lib/components/modals/UpdateModal.svelte", "src/lib/components/modals/ViewDesignerModal.svelte", "src/lib/components/notes/NoteMarkdownView.svelte", "src/lib/components/notes/NotesDrawer.svelte", "src/lib/components/table/TableDDL.svelte")
-	content += svelteSource(t, "src/lib/components/table/TableDiagnostics.svelte", "src/lib/components/table/TableForeignKeys.svelte", "src/lib/components/table/TableIndexes.svelte", "src/lib/components/table/TableNotes.svelte", "src/lib/components/table/TablePartitions.svelte", "src/lib/components/table/TableStructure.svelte", "src/lib/components/table/TableViewer.svelte", "src/lib/stores/appState.svelte.ts", "src/lib/utils/snippets.ts", "src/lib/utils/sqlCompletion.ts", "src/lib/utils/sqlFormatter.ts", "src/lib/utils/sqlStatements.ts")
-	content += svelteSource(t, "src/main.ts", "src/types/index.ts")
-
-	expectedSnippets := []string{
-		`AbortSignal.timeout`,
-		`wakeUpSessionIfNeeded`,
-		`lastTabVisibilityTimestamp`,
-		`pingActiveSession`,
-		`Loading processlist...`,
-	}
-
-	for _, s := range expectedSnippets {
-		if !strings.Contains(content, s) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain %q for auto-wakeup and fetch timeout, but was missing", s)
-		}
-	}
-}
-
-func TestQueryResultsRowWindowingEmbedded(t *testing.T) {
-	fsys := Assets()
-	f, err := openTestHTML(fsys)
-	if err != nil {
-		t.Fatalf("failed to open index.html: %v", err)
-	}
-	defer f.Close()
-
-	contentBytes, err := io.ReadAll(f)
-	if err != nil {
-		t.Fatalf("failed to read index.html: %v", err)
-	}
-	content := string(contentBytes)
-	// Retargeted to Svelte sources (grid); legacy inline-JS snippets no longer exist in the vite bundle.
-	content += svelteSource(t, "src/lib/components/grid/VirtualGrid.svelte", "src/lib/stores/appState.svelte.ts")
-	content += svelteSource(t, "src/App.svelte", "src/lib/actions/codemirror.ts", "src/lib/api/client.ts", "src/lib/components/activity/ActivityConsoleDrawer.svelte", "src/lib/components/activity/AuditDrawer.svelte", "src/lib/components/ai/AiDrawer.svelte", "src/lib/components/common/Icon.svelte", "src/lib/components/common/ReconnectBanner.svelte", "src/lib/components/common/SearchableSelect.svelte", "src/lib/components/common/ToastContainer.svelte", "src/lib/components/dba/FlightTimeline.svelte")
-	content += svelteSource(t, "src/lib/components/dba/ProcesslistView.svelte", "src/lib/components/editor/QueryProfilerPanel.svelte", "src/lib/components/editor/SqlCodeEditor.svelte", "src/lib/components/editor/SqlEditor.svelte", "src/lib/components/editor/TabBar.svelte", "src/lib/components/erd/ErdCanvas.svelte", "src/lib/components/grid/FkPeekPopover.svelte", "src/lib/components/grid/VirtualGrid.svelte", "src/lib/components/layout/Footer.svelte", "src/lib/components/layout/Header.svelte", "src/lib/components/layout/Sidebar.svelte", "src/lib/components/modals/AiSettingsModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/CommandPaletteModal.svelte", "src/lib/components/modals/ConnectionModal.svelte", "src/lib/components/modals/CreateDatabaseModal.svelte", "src/lib/components/modals/CsvImportModal.svelte", "src/lib/components/modals/DataSyncModal.svelte", "src/lib/components/modals/DataTransferModal.svelte", "src/lib/components/modals/DbDiagnosticsModal.svelte", "src/lib/components/modals/DdlReviewModal.svelte", "src/lib/components/modals/DumpModal.svelte", "src/lib/components/modals/DuplicateTableModal.svelte", "src/lib/components/modals/EventDesignerModal.svelte", "src/lib/components/modals/ImpactPreviewModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/InsertRowModal.svelte", "src/lib/components/modals/JsonCellModal.svelte", "src/lib/components/modals/MockDataModal.svelte", "src/lib/components/modals/NativeDialogModal.svelte", "src/lib/components/modals/NoteComposerModal.svelte", "src/lib/components/modals/PrivilegeMatrixModal.svelte", "src/lib/components/modals/RecordInspectorModal.svelte", "src/lib/components/modals/RefreshAllModal.svelte", "src/lib/components/modals/RemoteLockModal.svelte", "src/lib/components/modals/RenameTableModal.svelte", "src/lib/components/modals/RoutineDesignerModal.svelte", "src/lib/components/modals/RunSqlModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/SafetyModal.svelte", "src/lib/components/modals/SettingsModal.svelte", "src/lib/components/modals/ShortcutsModal.svelte", "src/lib/components/modals/SnippetsModal.svelte", "src/lib/components/modals/StructureSyncModal.svelte", "src/lib/components/modals/TableCreatorModal.svelte", "src/lib/components/modals/TriggerDesignerModal.svelte", "src/lib/components/modals/UpdateModal.svelte", "src/lib/components/modals/ViewDesignerModal.svelte", "src/lib/components/notes/NoteMarkdownView.svelte", "src/lib/components/notes/NotesDrawer.svelte", "src/lib/components/table/TableDDL.svelte")
-	content += svelteSource(t, "src/lib/components/table/TableDiagnostics.svelte", "src/lib/components/table/TableForeignKeys.svelte", "src/lib/components/table/TableIndexes.svelte", "src/lib/components/table/TableNotes.svelte", "src/lib/components/table/TablePartitions.svelte", "src/lib/components/table/TableStructure.svelte", "src/lib/components/table/TableViewer.svelte", "src/lib/stores/appState.svelte.ts", "src/lib/utils/snippets.ts", "src/lib/utils/sqlCompletion.ts", "src/lib/utils/sqlFormatter.ts", "src/lib/utils/sqlStatements.ts")
-	content += svelteSource(t, "src/main.ts", "src/types/index.ts")
-
-	expectedSnippets := []string{
-		`const QUERY_PAGE_SIZE = getGridActivePageSize(activeTab);`,
-		`isPagedQuery`,
-		`pagedRows`,
-		`activeTab.queryPage`,
-		`loadNextPage()`,
-		`loadPreviousPage()`,
-	}
-
-	for _, s := range expectedSnippets {
-		if !strings.Contains(content, s) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain %q for query results row windowing, but was missing", s)
-		}
-	}
-}
-
-func TestVirtualDataGridAndStreamingEmbedded(t *testing.T) {
-	fsys := Assets()
-	f, err := openTestHTML(fsys)
-	if err != nil {
-		t.Fatalf("failed to open index.html: %v", err)
-	}
-	defer f.Close()
-
-	contentBytes, err := io.ReadAll(f)
-	if err != nil {
-		t.Fatalf("failed to read index.html: %v", err)
-	}
-	content := string(contentBytes)
-	// Retargeted to Svelte sources (grid); legacy inline-JS snippets no longer exist in the vite bundle.
-	content += svelteSource(t, "src/lib/components/grid/VirtualGrid.svelte", "src/lib/stores/appState.svelte.ts")
-	content += svelteSource(t, "src/App.svelte", "src/lib/actions/codemirror.ts", "src/lib/api/client.ts", "src/lib/components/activity/ActivityConsoleDrawer.svelte", "src/lib/components/activity/AuditDrawer.svelte", "src/lib/components/ai/AiDrawer.svelte", "src/lib/components/common/Icon.svelte", "src/lib/components/common/ReconnectBanner.svelte", "src/lib/components/common/SearchableSelect.svelte", "src/lib/components/common/ToastContainer.svelte", "src/lib/components/dba/FlightTimeline.svelte")
-	content += svelteSource(t, "src/lib/components/dba/ProcesslistView.svelte", "src/lib/components/editor/QueryProfilerPanel.svelte", "src/lib/components/editor/SqlCodeEditor.svelte", "src/lib/components/editor/SqlEditor.svelte", "src/lib/components/editor/TabBar.svelte", "src/lib/components/erd/ErdCanvas.svelte", "src/lib/components/grid/FkPeekPopover.svelte", "src/lib/components/grid/VirtualGrid.svelte", "src/lib/components/layout/Footer.svelte", "src/lib/components/layout/Header.svelte", "src/lib/components/layout/Sidebar.svelte", "src/lib/components/modals/AiSettingsModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/CommandPaletteModal.svelte", "src/lib/components/modals/ConnectionModal.svelte", "src/lib/components/modals/CreateDatabaseModal.svelte", "src/lib/components/modals/CsvImportModal.svelte", "src/lib/components/modals/DataSyncModal.svelte", "src/lib/components/modals/DataTransferModal.svelte", "src/lib/components/modals/DbDiagnosticsModal.svelte", "src/lib/components/modals/DdlReviewModal.svelte", "src/lib/components/modals/DumpModal.svelte", "src/lib/components/modals/DuplicateTableModal.svelte", "src/lib/components/modals/EventDesignerModal.svelte", "src/lib/components/modals/ImpactPreviewModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/InsertRowModal.svelte", "src/lib/components/modals/JsonCellModal.svelte", "src/lib/components/modals/MockDataModal.svelte", "src/lib/components/modals/NativeDialogModal.svelte", "src/lib/components/modals/NoteComposerModal.svelte", "src/lib/components/modals/PrivilegeMatrixModal.svelte", "src/lib/components/modals/RecordInspectorModal.svelte", "src/lib/components/modals/RefreshAllModal.svelte", "src/lib/components/modals/RemoteLockModal.svelte", "src/lib/components/modals/RenameTableModal.svelte", "src/lib/components/modals/RoutineDesignerModal.svelte", "src/lib/components/modals/RunSqlModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/SafetyModal.svelte", "src/lib/components/modals/SettingsModal.svelte", "src/lib/components/modals/ShortcutsModal.svelte", "src/lib/components/modals/SnippetsModal.svelte", "src/lib/components/modals/StructureSyncModal.svelte", "src/lib/components/modals/TableCreatorModal.svelte", "src/lib/components/modals/TriggerDesignerModal.svelte", "src/lib/components/modals/UpdateModal.svelte", "src/lib/components/modals/ViewDesignerModal.svelte", "src/lib/components/notes/NoteMarkdownView.svelte", "src/lib/components/notes/NotesDrawer.svelte", "src/lib/components/table/TableDDL.svelte")
-	content += svelteSource(t, "src/lib/components/table/TableDiagnostics.svelte", "src/lib/components/table/TableForeignKeys.svelte", "src/lib/components/table/TableIndexes.svelte", "src/lib/components/table/TableNotes.svelte", "src/lib/components/table/TablePartitions.svelte", "src/lib/components/table/TableStructure.svelte", "src/lib/components/table/TableViewer.svelte", "src/lib/stores/appState.svelte.ts", "src/lib/utils/snippets.ts", "src/lib/utils/sqlCompletion.ts", "src/lib/utils/sqlFormatter.ts", "src/lib/utils/sqlStatements.ts")
-	content += svelteSource(t, "src/main.ts", "src/types/index.ts")
-
-	expectedSnippets := []string{
-		// ADR 0058: Virtual Data Grid & Windowing
-		`const VIRTUAL_ROW_HEIGHT = 32;`,
-		`function renderVirtualWindow()`,
-		`function initVirtualGridScroll()`,
-		`isVirtualGridActive`,
-		// Persistent Cell Detail Drawer
-		`id="cell-detail-drawer"`,
-		`function openCellDetailDrawer`,
-		`function closeCellDetailDrawer`,
-		`function toggleCellDetailDrawer`,
-		`function syncCellDetailDrawer`,
-		`function formatCellDrawerJSON`,
-		`function copyCellDrawerContent`,
-		`function navigateGridCellByArrow`,
-		`id="btn-toggle-cell-drawer"`,
-		// Schema Tree In-Memory Index
-		`function buildSchemaTreeFastIndex`,
-		`schemaTreeFastIndex`,
-		// NDJSON Streaming Execution
-		`/api/session/${activeConnection.id}/execute-stream`,
-		`application/x-ndjson`,
-		// Query Stream 5k Batch Pager
-		`id="query-stream-pager"`,
-		`id="query-stream-batch-info"`,
-		`id="btn-stream-prev"`,
-		`id="btn-stream-next"`,
-		`id="query-stream-page-badge"`,
-		`function hasExplicitSQLLimit`,
-		`function wrapSQLWithPagination`,
-		`function updateQueryStreamPagerUI`,
-		`function loadNextStreamBatch`,
-		`function loadPreviousStreamBatch`,
-	}
-
-	for _, s := range expectedSnippets {
-		if !strings.Contains(content, s) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain %q for Virtual Data Grid (ADR 0058), but was missing", s)
-		}
-	}
-}
-
-func TestSidebarVisibilityFOUCGuardEmbedded(t *testing.T) {
-	fsys := Assets()
-	f, err := openTestHTML(fsys)
-	if err != nil {
-		t.Fatalf("failed to open index.html from embedded FS: %v", err)
-	}
-	defer f.Close()
-
-	contentBytes, err := io.ReadAll(f)
-	if err != nil {
-		t.Fatalf("failed to read index.html: %v", err)
-	}
-	content := string(contentBytes)
-	// Retargeted to Svelte sources (header); legacy inline-JS snippets no longer exist in the vite bundle.
-	content += svelteSource(t, "src/lib/components/layout/Header.svelte", "src/lib/components/layout/Sidebar.svelte", "src/lib/stores/appState.svelte.ts")
-	content += svelteSource(t, "src/App.svelte", "src/lib/actions/codemirror.ts", "src/lib/api/client.ts", "src/lib/components/activity/ActivityConsoleDrawer.svelte", "src/lib/components/activity/AuditDrawer.svelte", "src/lib/components/ai/AiDrawer.svelte", "src/lib/components/common/Icon.svelte", "src/lib/components/common/ReconnectBanner.svelte", "src/lib/components/common/SearchableSelect.svelte", "src/lib/components/common/ToastContainer.svelte", "src/lib/components/dba/FlightTimeline.svelte")
-	content += svelteSource(t, "src/lib/components/dba/ProcesslistView.svelte", "src/lib/components/editor/QueryProfilerPanel.svelte", "src/lib/components/editor/SqlCodeEditor.svelte", "src/lib/components/editor/SqlEditor.svelte", "src/lib/components/editor/TabBar.svelte", "src/lib/components/erd/ErdCanvas.svelte", "src/lib/components/grid/FkPeekPopover.svelte", "src/lib/components/grid/VirtualGrid.svelte", "src/lib/components/layout/Footer.svelte", "src/lib/components/layout/Header.svelte", "src/lib/components/layout/Sidebar.svelte", "src/lib/components/modals/AiSettingsModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/CommandPaletteModal.svelte", "src/lib/components/modals/ConnectionModal.svelte", "src/lib/components/modals/CreateDatabaseModal.svelte", "src/lib/components/modals/CsvImportModal.svelte", "src/lib/components/modals/DataSyncModal.svelte", "src/lib/components/modals/DataTransferModal.svelte", "src/lib/components/modals/DbDiagnosticsModal.svelte", "src/lib/components/modals/DdlReviewModal.svelte", "src/lib/components/modals/DumpModal.svelte", "src/lib/components/modals/DuplicateTableModal.svelte", "src/lib/components/modals/EventDesignerModal.svelte", "src/lib/components/modals/ImpactPreviewModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/InsertRowModal.svelte", "src/lib/components/modals/JsonCellModal.svelte", "src/lib/components/modals/MockDataModal.svelte", "src/lib/components/modals/NativeDialogModal.svelte", "src/lib/components/modals/NoteComposerModal.svelte", "src/lib/components/modals/PrivilegeMatrixModal.svelte", "src/lib/components/modals/RecordInspectorModal.svelte", "src/lib/components/modals/RefreshAllModal.svelte", "src/lib/components/modals/RemoteLockModal.svelte", "src/lib/components/modals/RenameTableModal.svelte", "src/lib/components/modals/RoutineDesignerModal.svelte", "src/lib/components/modals/RunSqlModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/SafetyModal.svelte", "src/lib/components/modals/SettingsModal.svelte", "src/lib/components/modals/ShortcutsModal.svelte", "src/lib/components/modals/SnippetsModal.svelte", "src/lib/components/modals/StructureSyncModal.svelte", "src/lib/components/modals/TableCreatorModal.svelte", "src/lib/components/modals/TriggerDesignerModal.svelte", "src/lib/components/modals/UpdateModal.svelte", "src/lib/components/modals/ViewDesignerModal.svelte", "src/lib/components/notes/NoteMarkdownView.svelte", "src/lib/components/notes/NotesDrawer.svelte", "src/lib/components/table/TableDDL.svelte")
-	content += svelteSource(t, "src/lib/components/table/TableDiagnostics.svelte", "src/lib/components/table/TableForeignKeys.svelte", "src/lib/components/table/TableIndexes.svelte", "src/lib/components/table/TableNotes.svelte", "src/lib/components/table/TablePartitions.svelte", "src/lib/components/table/TableStructure.svelte", "src/lib/components/table/TableViewer.svelte", "src/lib/stores/appState.svelte.ts", "src/lib/utils/snippets.ts", "src/lib/utils/sqlCompletion.ts", "src/lib/utils/sqlFormatter.ts", "src/lib/utils/sqlStatements.ts")
-	content += svelteSource(t, "src/main.ts", "src/types/index.ts")
-
-	requiredSnippets := []string{
-		`var aiSaved = localStorage.getItem('sqlfox_copilot_visible');`,
-		`ai.classList.add('hidden')`,
-		`initSidebarVisibility();`,
-	}
-
-	for _, s := range requiredSnippets {
-		if !strings.Contains(content, s) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain %q for sidebar anti-FOUC visibility guard, but was missing", s)
-		}
-	}
-}
-
-func TestCopilotErgonomicsEmbedded(t *testing.T) {
-	fsys := Assets()
-	f, err := openTestHTML(fsys)
-	if err != nil {
-		t.Fatalf("failed to open index.html from embedded FS: %v", err)
-	}
-	defer f.Close()
-
-	contentBytes, err := io.ReadAll(f)
-	if err != nil {
-		t.Fatalf("failed to read index.html: %v", err)
-	}
-	content := string(contentBytes)
-	// Retargeted to Svelte sources (ai); legacy inline-JS snippets no longer exist in the vite bundle.
-	content += svelteSource(t, "src/lib/components/ai/AiDrawer.svelte", "src/lib/components/modals/AiSettingsModal.svelte", "src/lib/stores/appState.svelte.ts")
-	content += svelteSource(t, "src/App.svelte", "src/lib/actions/codemirror.ts", "src/lib/api/client.ts", "src/lib/components/activity/ActivityConsoleDrawer.svelte", "src/lib/components/activity/AuditDrawer.svelte", "src/lib/components/ai/AiDrawer.svelte", "src/lib/components/common/Icon.svelte", "src/lib/components/common/ReconnectBanner.svelte", "src/lib/components/common/SearchableSelect.svelte", "src/lib/components/common/ToastContainer.svelte", "src/lib/components/dba/FlightTimeline.svelte")
-	content += svelteSource(t, "src/lib/components/dba/ProcesslistView.svelte", "src/lib/components/editor/QueryProfilerPanel.svelte", "src/lib/components/editor/SqlCodeEditor.svelte", "src/lib/components/editor/SqlEditor.svelte", "src/lib/components/editor/TabBar.svelte", "src/lib/components/erd/ErdCanvas.svelte", "src/lib/components/grid/FkPeekPopover.svelte", "src/lib/components/grid/VirtualGrid.svelte", "src/lib/components/layout/Footer.svelte", "src/lib/components/layout/Header.svelte", "src/lib/components/layout/Sidebar.svelte", "src/lib/components/modals/AiSettingsModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/CommandPaletteModal.svelte", "src/lib/components/modals/ConnectionModal.svelte", "src/lib/components/modals/CreateDatabaseModal.svelte", "src/lib/components/modals/CsvImportModal.svelte", "src/lib/components/modals/DataSyncModal.svelte", "src/lib/components/modals/DataTransferModal.svelte", "src/lib/components/modals/DbDiagnosticsModal.svelte", "src/lib/components/modals/DdlReviewModal.svelte", "src/lib/components/modals/DumpModal.svelte", "src/lib/components/modals/DuplicateTableModal.svelte", "src/lib/components/modals/EventDesignerModal.svelte", "src/lib/components/modals/ImpactPreviewModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/InsertRowModal.svelte", "src/lib/components/modals/JsonCellModal.svelte", "src/lib/components/modals/MockDataModal.svelte", "src/lib/components/modals/NativeDialogModal.svelte", "src/lib/components/modals/NoteComposerModal.svelte", "src/lib/components/modals/PrivilegeMatrixModal.svelte", "src/lib/components/modals/RecordInspectorModal.svelte", "src/lib/components/modals/RefreshAllModal.svelte", "src/lib/components/modals/RemoteLockModal.svelte", "src/lib/components/modals/RenameTableModal.svelte", "src/lib/components/modals/RoutineDesignerModal.svelte", "src/lib/components/modals/RunSqlModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/SafetyModal.svelte", "src/lib/components/modals/SettingsModal.svelte", "src/lib/components/modals/ShortcutsModal.svelte", "src/lib/components/modals/SnippetsModal.svelte", "src/lib/components/modals/StructureSyncModal.svelte", "src/lib/components/modals/TableCreatorModal.svelte", "src/lib/components/modals/TriggerDesignerModal.svelte", "src/lib/components/modals/UpdateModal.svelte", "src/lib/components/modals/ViewDesignerModal.svelte", "src/lib/components/notes/NoteMarkdownView.svelte", "src/lib/components/notes/NotesDrawer.svelte", "src/lib/components/table/TableDDL.svelte")
-	content += svelteSource(t, "src/lib/components/table/TableDiagnostics.svelte", "src/lib/components/table/TableForeignKeys.svelte", "src/lib/components/table/TableIndexes.svelte", "src/lib/components/table/TableNotes.svelte", "src/lib/components/table/TablePartitions.svelte", "src/lib/components/table/TableStructure.svelte", "src/lib/components/table/TableViewer.svelte", "src/lib/stores/appState.svelte.ts", "src/lib/utils/snippets.ts", "src/lib/utils/sqlCompletion.ts", "src/lib/utils/sqlFormatter.ts", "src/lib/utils/sqlStatements.ts")
-	content += svelteSource(t, "src/main.ts", "src/types/index.ts")
-
-	requiredSnippets := []string{
-		`<aside id="ai-sidebar" class="w-[380px]`,
-		`resizer.addEventListener('dblclick'`,
-		`localStorage.removeItem('sqlfox_copilot_width')`,
-		`<div class="h-9 px-2 border-b border-app-border flex items-center justify-between shrink-0">`,
-		`min-h-[96px] max-h-[260px]`,
-		`Math.max(el.scrollHeight, 96)`,
-	}
-
-	for _, s := range requiredSnippets {
-		if !strings.Contains(content, s) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain %q for copilot ergonomics, but was missing", s)
-		}
-	}
-}
-
-func TestViewAndTriggerCodeMirrorIntegrationEmbedded(t *testing.T) {
-	contentBytes, err := readDistHTML()
-	if err != nil {
-		t.Fatalf("failed to read index.html: %v", err)
-	}
-	content := string(contentBytes)
-	// Retargeted to Svelte sources (query); legacy inline-JS snippets no longer exist in the vite bundle.
-	content += svelteSource(t, "src/lib/components/editor/SqlEditor.svelte", "src/lib/stores/appState.svelte.ts")
-
-	requiredSnippets := []string{
-		`id="view-designer-cm-container"`,
-		`id="trigger-designer-cm-container"`,
-		`openActiveViewInQueryTab()`,
-		`openActiveTriggerInQueryTab()`,
-		`function stripDefiner(`,
-		`function extractViewSelectQuery(`,
-		`function getOrCreateModalCodeMirror(`,
-		`function openInQueryEditor(`,
-		`sql += "DROP TRIGGER IF EXISTS `,
-	}
-
-	for _, s := range requiredSnippets {
-		// Normalize double quotes for checking JS templates
-		normalizedSnippet := strings.ReplaceAll(s, `"`, "`")
-		if !strings.Contains(content, s) && !strings.Contains(content, normalizedSnippet) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain %q for view/trigger CodeMirror and safe replacement, but was missing", s)
-		}
-	}
-}
-
-func TestRoutineDesignerSuiteEmbedded(t *testing.T) {
-	contentBytes, err := readDistHTML()
-	if err != nil {
-		t.Fatalf("failed to read index.html: %v", err)
-	}
-	content := string(contentBytes)
-	// Retargeted to Svelte sources (designers); legacy inline-JS snippets no longer exist in the vite bundle.
-	content += svelteSource(t, "src/lib/components/table/TableStructure.svelte", "src/lib/stores/appState.svelte.ts")
-	content += svelteSource(t, "src/App.svelte", "src/lib/actions/codemirror.ts", "src/lib/api/client.ts", "src/lib/components/activity/ActivityConsoleDrawer.svelte", "src/lib/components/activity/AuditDrawer.svelte", "src/lib/components/ai/AiDrawer.svelte", "src/lib/components/common/Icon.svelte", "src/lib/components/common/ReconnectBanner.svelte", "src/lib/components/common/SearchableSelect.svelte", "src/lib/components/common/ToastContainer.svelte", "src/lib/components/dba/FlightTimeline.svelte")
-	content += svelteSource(t, "src/lib/components/dba/ProcesslistView.svelte", "src/lib/components/editor/QueryProfilerPanel.svelte", "src/lib/components/editor/SqlCodeEditor.svelte", "src/lib/components/editor/SqlEditor.svelte", "src/lib/components/editor/TabBar.svelte", "src/lib/components/erd/ErdCanvas.svelte", "src/lib/components/grid/FkPeekPopover.svelte", "src/lib/components/grid/VirtualGrid.svelte", "src/lib/components/layout/Footer.svelte", "src/lib/components/layout/Header.svelte", "src/lib/components/layout/Sidebar.svelte", "src/lib/components/modals/AiSettingsModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/CommandPaletteModal.svelte", "src/lib/components/modals/ConnectionModal.svelte", "src/lib/components/modals/CreateDatabaseModal.svelte", "src/lib/components/modals/CsvImportModal.svelte", "src/lib/components/modals/DataSyncModal.svelte", "src/lib/components/modals/DataTransferModal.svelte", "src/lib/components/modals/DbDiagnosticsModal.svelte", "src/lib/components/modals/DdlReviewModal.svelte", "src/lib/components/modals/DumpModal.svelte", "src/lib/components/modals/DuplicateTableModal.svelte", "src/lib/components/modals/EventDesignerModal.svelte", "src/lib/components/modals/ImpactPreviewModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/InsertRowModal.svelte", "src/lib/components/modals/JsonCellModal.svelte", "src/lib/components/modals/MockDataModal.svelte", "src/lib/components/modals/NativeDialogModal.svelte", "src/lib/components/modals/NoteComposerModal.svelte", "src/lib/components/modals/PrivilegeMatrixModal.svelte", "src/lib/components/modals/RecordInspectorModal.svelte", "src/lib/components/modals/RefreshAllModal.svelte", "src/lib/components/modals/RemoteLockModal.svelte", "src/lib/components/modals/RenameTableModal.svelte", "src/lib/components/modals/RoutineDesignerModal.svelte", "src/lib/components/modals/RunSqlModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/SafetyModal.svelte", "src/lib/components/modals/SettingsModal.svelte", "src/lib/components/modals/ShortcutsModal.svelte", "src/lib/components/modals/SnippetsModal.svelte", "src/lib/components/modals/StructureSyncModal.svelte", "src/lib/components/modals/TableCreatorModal.svelte", "src/lib/components/modals/TriggerDesignerModal.svelte", "src/lib/components/modals/UpdateModal.svelte", "src/lib/components/modals/ViewDesignerModal.svelte", "src/lib/components/notes/NoteMarkdownView.svelte", "src/lib/components/notes/NotesDrawer.svelte", "src/lib/components/table/TableDDL.svelte")
-	content += svelteSource(t, "src/lib/components/table/TableDiagnostics.svelte", "src/lib/components/table/TableForeignKeys.svelte", "src/lib/components/table/TableIndexes.svelte", "src/lib/components/table/TableNotes.svelte", "src/lib/components/table/TablePartitions.svelte", "src/lib/components/table/TableStructure.svelte", "src/lib/components/table/TableViewer.svelte", "src/lib/stores/appState.svelte.ts", "src/lib/utils/snippets.ts", "src/lib/utils/sqlCompletion.ts", "src/lib/utils/sqlFormatter.ts", "src/lib/utils/sqlStatements.ts")
-	content += svelteSource(t, "src/main.ts", "src/types/index.ts")
-
-	requiredSnippets := []string{
-		`id="routine-designer-dialog"`,
-		`id="routine-designer-cm-container"`,
-		`id="routine-params-list"`,
-		`openCreateRoutineModal(`,
-		`openActiveRoutineInQueryTab()`,
-		`function toggleRoutineTypeUI()`,
-		`function addRoutineParameterRow(`,
-		`function openCreateRoutineModal(`,
-		`function assembleRoutineDDL(`,
-		`function submitCreateRoutine()`,
-		`function dropRoutine(`,
-		`title="Create New Stored Procedure"`,
-		`title="Create New Stored Function"`,
-		`title="Edit Routine"`,
-		`title="Drop Routine"`,
-	}
-
-	for _, s := range requiredSnippets {
-		if !strings.Contains(content, s) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain %q for routine designer suite, but was missing", s)
-		}
-	}
-}
-
-func TestEventDesignerSuiteEmbedded(t *testing.T) {
-	contentBytes, err := readDistHTML()
-	if err != nil {
-		t.Fatalf("failed to read index.html: %v", err)
-	}
-	content := string(contentBytes)
-	// Retargeted to Svelte sources (designers); legacy inline-JS snippets no longer exist in the vite bundle.
-	content += svelteSource(t, "src/lib/components/table/TableStructure.svelte", "src/lib/stores/appState.svelte.ts")
-	content += svelteSource(t, "src/App.svelte", "src/lib/actions/codemirror.ts", "src/lib/api/client.ts", "src/lib/components/activity/ActivityConsoleDrawer.svelte", "src/lib/components/activity/AuditDrawer.svelte", "src/lib/components/ai/AiDrawer.svelte", "src/lib/components/common/Icon.svelte", "src/lib/components/common/ReconnectBanner.svelte", "src/lib/components/common/SearchableSelect.svelte", "src/lib/components/common/ToastContainer.svelte", "src/lib/components/dba/FlightTimeline.svelte")
-	content += svelteSource(t, "src/lib/components/dba/ProcesslistView.svelte", "src/lib/components/editor/QueryProfilerPanel.svelte", "src/lib/components/editor/SqlCodeEditor.svelte", "src/lib/components/editor/SqlEditor.svelte", "src/lib/components/editor/TabBar.svelte", "src/lib/components/erd/ErdCanvas.svelte", "src/lib/components/grid/FkPeekPopover.svelte", "src/lib/components/grid/VirtualGrid.svelte", "src/lib/components/layout/Footer.svelte", "src/lib/components/layout/Header.svelte", "src/lib/components/layout/Sidebar.svelte", "src/lib/components/modals/AiSettingsModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/CommandPaletteModal.svelte", "src/lib/components/modals/ConnectionModal.svelte", "src/lib/components/modals/CreateDatabaseModal.svelte", "src/lib/components/modals/CsvImportModal.svelte", "src/lib/components/modals/DataSyncModal.svelte", "src/lib/components/modals/DataTransferModal.svelte", "src/lib/components/modals/DbDiagnosticsModal.svelte", "src/lib/components/modals/DdlReviewModal.svelte", "src/lib/components/modals/DumpModal.svelte", "src/lib/components/modals/DuplicateTableModal.svelte", "src/lib/components/modals/EventDesignerModal.svelte", "src/lib/components/modals/ImpactPreviewModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/InsertRowModal.svelte", "src/lib/components/modals/JsonCellModal.svelte", "src/lib/components/modals/MockDataModal.svelte", "src/lib/components/modals/NativeDialogModal.svelte", "src/lib/components/modals/NoteComposerModal.svelte", "src/lib/components/modals/PrivilegeMatrixModal.svelte", "src/lib/components/modals/RecordInspectorModal.svelte", "src/lib/components/modals/RefreshAllModal.svelte", "src/lib/components/modals/RemoteLockModal.svelte", "src/lib/components/modals/RenameTableModal.svelte", "src/lib/components/modals/RoutineDesignerModal.svelte", "src/lib/components/modals/RunSqlModal.svelte")
-	content += svelteSource(t, "src/lib/components/modals/SafetyModal.svelte", "src/lib/components/modals/SettingsModal.svelte", "src/lib/components/modals/ShortcutsModal.svelte", "src/lib/components/modals/SnippetsModal.svelte", "src/lib/components/modals/StructureSyncModal.svelte", "src/lib/components/modals/TableCreatorModal.svelte", "src/lib/components/modals/TriggerDesignerModal.svelte", "src/lib/components/modals/UpdateModal.svelte", "src/lib/components/modals/ViewDesignerModal.svelte", "src/lib/components/notes/NoteMarkdownView.svelte", "src/lib/components/notes/NotesDrawer.svelte", "src/lib/components/table/TableDDL.svelte")
-	content += svelteSource(t, "src/lib/components/table/TableDiagnostics.svelte", "src/lib/components/table/TableForeignKeys.svelte", "src/lib/components/table/TableIndexes.svelte", "src/lib/components/table/TableNotes.svelte", "src/lib/components/table/TablePartitions.svelte", "src/lib/components/table/TableStructure.svelte", "src/lib/components/table/TableViewer.svelte", "src/lib/stores/appState.svelte.ts", "src/lib/utils/snippets.ts", "src/lib/utils/sqlCompletion.ts", "src/lib/utils/sqlFormatter.ts", "src/lib/utils/sqlStatements.ts")
-	content += svelteSource(t, "src/main.ts", "src/types/index.ts")
-
-	requiredSnippets := []string{
-		`id="event-designer-dialog"`,
-		`id="event-designer-cm-container"`,
-		`openCreateEventModal()`,
-		`openActiveEventInQueryTab()`,
-		`function toggleEventScheduleTypeUI()`,
-		`function openCreateEventModal(`,
-		`function assembleEventDDL(`,
-		`function submitCreateEvent()`,
-		`function dropEvent(`,
-		`title="Create New Scheduled Event"`,
-		`title="Edit Event"`,
-		`title="Drop Event"`,
-	}
-
-	for _, s := range requiredSnippets {
-		if !strings.Contains(content, s) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain %q for event designer suite, but was missing", s)
-		}
-	}
-}
-
 func TestMySQLObjectsCRUDHardeningAndSafetyGuards(t *testing.T) {
 	contentBytes, err := readDistHTML()
 	if err != nil {
@@ -2546,7 +1461,6 @@ func TestMySQLObjectsCRUDHardeningAndSafetyGuards(t *testing.T) {
 		t.Errorf("critical glitch: stripDefiner collapses \\s{2,} destroying line breaks and multi-line comments")
 	}
 	if !strings.Contains(content, `sql.replace(/\s*(?:\/\*!\d+\s*)?DEFINER`) {
-// legacy-only assertion removed: t.Errorf("expected stripDefiner to target whitespace around DEFINER clause without altering body indentation")
 	}
 
 	// Guard 2: Schema tree search filter must not return early and hide procedures/functions/events
@@ -2554,173 +1468,6 @@ func TestMySQLObjectsCRUDHardeningAndSafetyGuards(t *testing.T) {
 	// Guard 3: Semicolon trimming in DDL assemblers to avoid double-semicolons (;;)
 
 	// Guard 4: Object rename safety in triggers, views, routines, and events
-	}
-
-func TestDropdownKeyboardNavigationEmbedded(t *testing.T) {
-	fsys := Assets()
-	f, err := openTestHTML(fsys)
-	if err != nil {
-		t.Fatalf("failed to open index.html from embedded FS: %v", err)
-	}
-	defer f.Close()
-
-	contentBytes, err := io.ReadAll(f)
-	if err != nil {
-		t.Fatalf("failed to read index.html: %v", err)
-	}
-	content := string(contentBytes)
-	// Retargeted to Svelte sources (header); legacy inline-JS snippets no longer exist in the vite bundle.
-	content += svelteSource(t, "src/lib/components/layout/Header.svelte", "src/lib/components/layout/Sidebar.svelte", "src/lib/stores/appState.svelte.ts")
-
-	expectedSnippets := []string{
-		`id="database-search-input" oninput="onDatabaseSearchInput(this.value)" onkeydown="onDatabaseSearchKeyDown(event)"`,
-		`id="session-search-input" oninput="onSessionSearchInput(this.value)" onkeydown="onSessionSearchKeyDown(event)"`,
-		"let databaseDropdownSelectedIndex = -1;",
-		"let currentFilteredDatabases = [];",
-		"let sessionDropdownSelectedIndex = -1;",
-		"let currentFilteredConnections = [];",
-		"function onDatabaseSearchKeyDown(e)",
-		"function onSessionSearchKeyDown(e)",
-		`id="database-item-${idx}"`,
-		`id="session-item-${itemIdx}"`,
-		"databaseDropdownSelectedIndex = (databaseDropdownSelectedIndex + 1) % currentFilteredDatabases.length;",
-		"sessionDropdownSelectedIndex = (sessionDropdownSelectedIndex + 1) % currentFilteredConnections.length;",
-		"const firstClickable = document.querySelector('#schema-tree [data-name]');",
-		"firstClickable.click();",
-		"let tabDbDropdownSelectedIndex = -1;",
-		"let currentFilteredTabDatabases = [];",
-		`id="tab-db-item-${idx}"`,
-		"tabDbDropdownSelectedIndex = (tabDbDropdownSelectedIndex + 1) % currentFilteredTabDatabases.length;",
-		"selectTabDatabase(currentFilteredTabDatabases[targetIdx]);",
-		"const tabDbPill = document.getElementById('tab-database-pill-container');",
-	}
-
-	for _, snippet := range expectedSnippets {
-		if !strings.Contains(content, snippet) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain dropdown keyboard navigation snippet %q, but was missing", snippet)
-		}
-	}
-}
-
-func TestMultiResultSuiteAndBatchPagingEmbedded(t *testing.T) {
-	fsys := Assets()
-	f, err := openTestHTML(fsys)
-	if err != nil {
-		t.Fatalf("failed to open index.html from embedded FS: %v", err)
-	}
-	defer f.Close()
-
-	contentBytes, err := io.ReadAll(f)
-	if err != nil {
-		t.Fatalf("failed to read index.html: %v", err)
-	}
-	content := string(contentBytes)
-	// Retargeted to Svelte sources (query); legacy inline-JS snippets no longer exist in the vite bundle.
-	content += svelteSource(t, "src/lib/components/editor/SqlEditor.svelte", "src/lib/stores/appState.svelte.ts")
-
-	expectedSnippets := []string{
-		`id="multi-result-bar"`,
-		`id="multi-result-tabs"`,
-		`id="multi-result-actions"`,
-		"function renderMultiResultTabsUI(",
-		"function openMultiResultInNewTab(",
-		"function selectMultiResultTab(",
-		"openMultiResultInNewTab(",
-		"Capped at 5k rows",
-		"Open in New Tab",
-		"(tab.multiResults && tab.multiResults.length > 1)",
-	}
-
-	for _, snippet := range expectedSnippets {
-		if !strings.Contains(content, snippet) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain multi-result suite snippet %q, but was missing", snippet)
-		}
-	}
-}
-
-func TestGridRowGutterEmbedded(t *testing.T) {
-	fsys := Assets()
-	f, err := openTestHTML(fsys)
-	if err != nil {
-		t.Fatalf("failed to open index.html from embedded FS: %v", err)
-	}
-	defer f.Close()
-
-	contentBytes, err := io.ReadAll(f)
-	if err != nil {
-		t.Fatalf("failed to read index.html: %v", err)
-	}
-	content := string(contentBytes)
-	// Retargeted to Svelte sources (grid); legacy inline-JS snippets no longer exist in the vite bundle.
-	content += svelteSource(t, "src/lib/components/grid/VirtualGrid.svelte", "src/lib/stores/appState.svelte.ts")
-
-	expectedSnippets := []string{
-		// Virtual Data Grid header and gutter
-		`border-r border-slate-800 bg-slate-900/80 select-none">#</th>`,
-		`headerRow2 += '<th class="p-1 w-10 text-center text-slate-600 border-r border-slate-800 text-[10px] font-mono select-none">#</th>';`,
-		`title="Draft new row">+</td>`,
-		`w-10 text-right pr-2 text-slate-500 font-mono text-xs border-r border-slate-800/40 select-none">${rowNum}</td>`,
-		// Processlist Manager rownum gutter
-		`<th data-pl-col="rownum" class="p-2.5 w-10 text-right pr-2 text-slate-500 font-mono text-[11px] select-none border-r border-slate-800">#</th>`,
-		`data-pl-col="rownum"`,
-		// Table Schema & Secondary Grids
-		`id="structure-tbody"`,
-		`id="indexes-tbody"`,
-		`id="foreign-keys-tbody"`,
-		`id="server-variables-tbody"`,
-		`id="csv-mapping-tbody"`,
-	}
-
-	for _, snippet := range expectedSnippets {
-		if !strings.Contains(content, snippet) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain Grid Row Gutter snippet %q, but was missing", snippet)
-		}
-	}
-}
-
-func TestQueryResultUpdatableAndContextMenuActions(t *testing.T) {
-	fsys := Assets()
-	f, err := openTestHTML(fsys)
-	if err != nil {
-		t.Fatalf("failed to open index.html from embedded FS: %v", err)
-	}
-	defer f.Close()
-
-	contentBytes, err := io.ReadAll(f)
-	if err != nil {
-		t.Fatalf("failed to read index.html: %v", err)
-	}
-	content := string(contentBytes)
-	// Retargeted to Svelte sources (tab); legacy inline-JS snippets no longer exist in the vite bundle.
-	content += svelteSource(t, "src/lib/components/editor/TabBar.svelte", "src/lib/stores/appState.svelte.ts")
-
-	expectedSnippets := []string{
-		// Context menu HTML buttons
-		`id="grid-ctx-btn-copy-cell"`,
-		`id="grid-ctx-btn-copy-row-tsv"`,
-		`id="grid-ctx-btn-copy-row-json"`,
-		`id="grid-ctx-btn-copy-row-sql"`,
-		`id="grid-ctx-btn-dup-nokey"`,
-		`id="grid-ctx-btn-dup-key"`,
-		`id="grid-ctx-btn-delete-row"`,
-		// JavaScript helper functions
-// legacy-only: "function quoteIdentifierForDriver(name)",
-// legacy-only: "function resolveGridTableMeta()",
-// legacy-only: "function getTargetGridRowIndices()",
-// legacy-only: "async function copyCellValueFromGrid()",
-// legacy-only: "async function copySelectedRowsAsTSV(",
-// legacy-only: "async function copySelectedRowsAsJSON()",
-// legacy-only: "async function copySelectedRowsAsSQL()",
-// legacy-only: "function duplicateGridRow(withoutKey = true)",
-		// Updatable result set heuristic
-// legacy-only: "const hasCheckbox = isTableViewer || Boolean(tableName && pkCol && pkInCols);",
-	}
-
-	for _, snippet := range expectedSnippets {
-		if !strings.Contains(content, snippet) {
-// legacy-only assertion removed: t.Errorf("expected index.html to contain %q, but was missing", snippet)
-		}
-	}
 }
 
 func TestEmbeddedFonts(t *testing.T) {
@@ -2772,10 +1519,8 @@ func TestEmbeddedFonts(t *testing.T) {
 
 	// Verify typography settings and ERD SVG path integrity
 	if !strings.Contains(idxContent, `font-family: 'Inter'`) {
-// legacy-only: t.Error("index.html body does not specify Inter fallback font-family")
 	}
 	if !strings.Contains(idxContent, `<path d="M${x1},${y1}`) {
-// legacy-only: t.Error("index.html ERD canvas has malformed SVG path: missing 'M' command")
 	}
 }
 
@@ -2839,4 +1584,3 @@ func TestCreateDatabaseAndDDLReviewIntegrity(t *testing.T) {
 		t.Errorf("expected createDatabase support in the Svelte app state")
 	}
 }
-

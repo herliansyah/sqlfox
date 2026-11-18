@@ -507,11 +507,6 @@ export class AppState {
     } catch { /* ignore */ }
   }
 
-  openActivityDrawer() {
-    this.isActivityDrawerOpen = true;
-    this.unreadActivityErrors = 0;
-  }
-
   toggleActivityDrawer() {
     this.isActivityDrawerOpen = !this.isActivityDrawerOpen;
     if (this.isActivityDrawerOpen) {
@@ -694,23 +689,6 @@ export class AppState {
     } catch (_) {
       // quiet background poller
     }
-  }
-
-  showQuickCaptureToast(title: string, note: any) {
-    const id = this.showToast(`Saved "${title}" to Operational Notes`, 'success', {
-      durationMs: 7000,
-      actions: [
-        {
-          label: 'Edit / Set Alarm',
-          variant: 'primary',
-          onClick: () => {
-            this.editingNote = note;
-            this.isNoteComposerModalOpen = true;
-            this.removeToast(id);
-          },
-        },
-      ],
-    });
   }
 
   playReminderChime() {
@@ -1578,33 +1556,6 @@ export class AppState {
     this.saveTabsState();
   }
 
-  openNoteTab(title = 'Notes.md', content = '') {
-    const existing = this.tabs.find((t) => t.isNote && t.title === title);
-    if (existing) {
-      if (content && !existing.sql.includes(content.trim())) {
-        existing.sql = existing.sql ? `${existing.sql.trimEnd()}\n\n${content}` : content;
-      }
-      this.activeTabId = existing.id;
-      this.tabs = [...this.tabs];
-      this.saveTabsState();
-      return existing;
-    }
-    const newId = `tab-note-${Date.now()}`;
-    const newTab: EditorTab = {
-      id: newId,
-      title,
-      sql: content,
-      isNote: true,
-      noteMode: 'edit',
-      isTableViewer: false,
-    };
-    this.tabs.push(newTab);
-    this.activeTabId = newId;
-    this.tabs = [...this.tabs];
-    this.saveTabsState();
-    return this.tabs[this.tabs.length - 1];
-  }
-
   openErdTab() {
     const targetDb = this.currentDatabase || '';
     const existing = this.tabs.find((t) => t.isErdCanvas);
@@ -2441,10 +2392,6 @@ export class AppState {
     }
   }
 
-  async executeStatementAtCursor(stmtSql: string) {
-    return this.executeCurrentTab(stmtSql);
-  }
-
   async pageStreamBatch(direction: 'next' | 'prev') {
     const tab = this.activeTab;
     if (!tab || !this.activeSessionId || tab.isTableViewer || tab.isExecuting) return;
@@ -2773,23 +2720,6 @@ export class AppState {
     }
   }
 
-  async openImpactPreview() {
-    const tab = this.activeTab;
-    if (!tab || !this.activeSessionId) return;
-    const targetSql = this.getEditorTargetSql() ?? tab.sql ?? '';
-    if (!targetSql.trim()) {
-      this.showToast('No SQL statement to explain', 'info');
-      return;
-    }
-    if (!tab.explainResult || tab.explainSql !== targetSql) {
-      await this.explainCurrentTab(targetSql, false);
-    }
-    if (!tab.explainResult) return;
-    this.impactPreviewData = tab.explainResult;
-    this.impactPreviewSql = targetSql;
-    this.isImpactPreviewOpen = true;
-  }
-
   getRowUid(row: any): number {
     if (!row || typeof row !== 'object') return -1;
     let uid = this.gridRowUids.get(row);
@@ -3087,14 +3017,6 @@ export class AppState {
     this.saveTabsState();
   }
 
-  setFilterBarVisible(visible: boolean, tabId?: string) {
-    const tab = tabId ? this.tabs.find((t) => t.id === tabId) : this.activeTab;
-    if (!tab) return;
-    tab.showFilterBar = visible;
-    this.tabs = [...this.tabs];
-    this.saveTabsState();
-  }
-
   addFilterPill(col?: string, op: FilterPill['op'] = '=', val: string = '') {
     const tab = this.activeTab;
     if (!tab) return;
@@ -3138,10 +3060,6 @@ export class AppState {
       this.loadTableData(tab);
     }
     this.saveTabsState();
-  }
-
-  clearFilterPills() {
-    this.clearTableFilter();
   }
 
   applyTableFilter() {
