@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.19.0] - 2026-11-18
+
 ### Added
 - **System Lifecycle Actions in Svelte UI (`web/frontend/src/lib/api/client.ts`, `web/frontend/src/lib/stores/appState.svelte.ts`, `web/frontend/src/lib/components/layout/Header.svelte`, `web/frontend/src/lib/components/modals/CommandPaletteModal.svelte`)**: Added Open in Web Browser (POST `/api/system/open-browser`), Copy App URL, and Shut Down Daemon (POST `/api/system/shutdown`) actions to the header settings menu and the command palette, alongside execute/explain/save-note/AI/readonly palette entries restored from the legacy menu.
 - **Exact Row Count & Grid Edit Modes (`web/frontend/src/lib/stores/appState.svelte.ts`, `web/frontend/src/lib/components/grid/VirtualGrid.svelte`)**: Added request-exact-row-count (per-dialect identifier quoting, `isCountingExact` guard, exact-count pagination totals), a Staged/Auto grid edit-mode segmented control persisted to `localStorage` (`sqlfox_grid_edit_mode`), and auto-commit of staged edits on blur in Auto mode.
