@@ -3287,6 +3287,8 @@
   {/if}
 </div>
 
+<svelte:window onkeydown={(e) => { if (e.key === 'Escape' && inspectingThread) inspectingThread = null; }} />
+
 <!-- Thread Detail Modal -->
 {#if inspectingThread}
   {@const t = inspectingThread}
@@ -3294,115 +3296,279 @@
   {@const isSysInspect = isSystemThread(t)}
   {@const blockingLocks = locks.filter((l) => l.blocking_thread_id === t.id)}
   {@const waitingLocks = locks.filter((l) => l.waiting_thread_id === t.id)}
-  {@const formattedSql = formatInspectSql && t.info ? formatSQL(t.info) : (t.info || '(No active query statement)')}
-  <div class="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
-    <div class="bg-[#0b0f19] border border-[#1e293b] rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col animate-scale-in text-xs font-sans">
-      <div class="px-5 py-4 border-b border-[#1e293b] flex items-center justify-between bg-[#0f172a]">
-        <div class="flex items-center space-x-2">
-          <Icon name="cpu" class="w-4 h-4 text-sky-400" />
-          <h3 class="font-bold text-slate-100 text-sm">Thread Inspector (ID: {t.id})</h3>
-          {#if isSelfInspect}
-            <span class="px-1.5 py-0.5 rounded bg-sky-950 text-sky-300 border border-sky-800 text-[10px] font-bold">CURRENT SESSION</span>
-          {:else if isSysInspect}
-            <span class="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 text-[10px] font-bold">SYSTEM DAEMON</span>
-          {/if}
+  {@const isBlocking = blockingLocks.length > 0}
+  {@const isWaiting = waitingLocks.length > 0}
+  {@const isCritical = isBlocking || t.time >= 30}
+  {@const isWarning = !isCritical && (isWaiting || t.time >= slowThreshold)}
+  {@const isIdle = !t.info && t.command === 'Sleep'}
+  {@const formattedSql = formatInspectSql && t.info ? formatSQL(t.info) : t.info}
+  {@const accentBarClass = isCritical
+    ? 'from-rose-500 via-rose-400 to-amber-500'
+    : isWarning
+      ? 'from-amber-500 via-amber-400 to-orange-400'
+      : isIdle
+        ? 'from-slate-600 via-slate-500 to-slate-600'
+        : 'from-sky-500 via-cyan-400 to-emerald-400'}
+  {@const iconWrapClass = isCritical
+    ? 'bg-rose-500/15 border-rose-500/30 text-rose-400'
+    : isWarning
+      ? 'bg-amber-500/15 border-amber-500/30 text-amber-400'
+      : isIdle
+        ? 'bg-slate-800/80 border-slate-700/80 text-slate-400'
+        : 'bg-sky-500/15 border-sky-500/30 text-sky-400'}
+  <div
+    role="dialog"
+    aria-modal="true"
+    aria-label="Thread Inspector"
+    tabindex="-1"
+    onclick={(e) => { if (e.target === e.currentTarget) inspectingThread = null; }}
+    onkeydown={(e) => { if (e.key === 'Escape') inspectingThread = null; }}
+    class="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
+  >
+    <div class="bg-[#0b0f19] border border-slate-800 rounded-2xl w-full max-w-3xl shadow-2xl shadow-black/60 overflow-hidden flex flex-col animate-scale-in text-xs font-sans">
+      <!-- Top status accent hairline -->
+      <div class="h-0.5 w-full bg-gradient-to-r {accentBarClass}"></div>
+
+      <!-- Header -->
+      <div class="px-5 py-4 border-b border-slate-800/90 flex items-start justify-between gap-4 bg-gradient-to-b from-slate-900/90 to-[#0b0f19]">
+        <div class="flex items-start gap-3 min-w-0">
+          <div class="w-9 h-9 rounded-xl border flex items-center justify-center shrink-0 {iconWrapClass}">
+            <Icon name={isBlocking ? 'shield-alert' : isWaiting ? 'clock' : 'cpu'} class="w-4 h-4" />
+          </div>
+          <div class="min-w-0">
+            <div class="flex items-center flex-wrap gap-2">
+              <h3 class="font-bold text-slate-100 text-sm tracking-tight">Thread Inspector</h3>
+              <span class="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-700/80 text-sky-300 font-mono text-[11px] font-semibold">
+                #{t.id}
+              </span>
+              {#if isSelfInspect}
+                <span class="px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/30 text-[10px] font-semibold tracking-wide">
+                  CURRENT SESSION
+                </span>
+              {/if}
+              {#if isSysInspect}
+                <span class="px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 text-[10px] font-semibold tracking-wide">
+                  SYSTEM DAEMON
+                </span>
+              {/if}
+              {#if isBlocking}
+                <span class="px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/35 text-[10px] font-semibold tracking-wide">
+                  BLOCKING {blockingLocks.length}
+                </span>
+              {:else if isWaiting}
+                <span class="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/35 text-[10px] font-semibold tracking-wide">
+                  WAITING LOCK
+                </span>
+              {:else if t.time >= 30}
+                <span class="px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/35 text-[10px] font-semibold tracking-wide">
+                  LONG RUNNING
+                </span>
+              {:else if t.time >= slowThreshold}
+                <span class="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/35 text-[10px] font-semibold tracking-wide">
+                  SLOW
+                </span>
+              {:else if isIdle}
+                <span class="px-2 py-0.5 rounded-full bg-slate-800/90 text-slate-400 border border-slate-700/80 text-[10px] font-semibold tracking-wide">
+                  IDLE
+                </span>
+              {:else}
+                <span class="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[10px] font-semibold tracking-wide">
+                  ACTIVE
+                </span>
+              {/if}
+            </div>
+            <p class="text-[11px] text-slate-400 mt-1 truncate font-mono">
+              {t.user || 'unknown'}@{t.host || 'unknown'}
+              <span class="text-slate-600 mx-1.5">•</span>
+              <span class={t.db ? 'text-emerald-400/90' : 'text-slate-500 italic'}>{t.db || 'no database'}</span>
+            </p>
+          </div>
         </div>
-        <button onclick={() => (inspectingThread = null)} class="text-slate-400 hover:text-white" aria-label="Close thread inspector">
+        <button
+          type="button"
+          onclick={() => (inspectingThread = null)}
+          class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/80 transition shrink-0"
+          aria-label="Close thread inspector"
+        >
           <Icon name="x" class="w-4 h-4" />
         </button>
       </div>
 
+      <!-- Body -->
       <div class="p-5 space-y-4 overflow-y-auto max-h-[75vh]">
-        <!-- 6-card telemetry metadata -->
+        <!-- Telemetry Grid -->
         <div class="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-          <div class="p-2.5 bg-[#050811] border border-[#1e293b] rounded-lg">
-            <span class="text-slate-500 text-[10px] uppercase block">User @ Host</span>
-            <span class="font-bold text-slate-200 truncate block font-mono" title="{t.user}@{t.host}">{t.user || '-'}@{t.host || '-'}</span>
+          <div class="p-3 bg-slate-950/75 border border-slate-800/90 hover:border-slate-700/80 rounded-xl transition">
+            <div class="flex items-center gap-1.5 text-slate-500 text-[10px] font-semibold uppercase tracking-wider mb-1">
+              <Icon name="user" class="w-3 h-3 text-slate-500" />
+              <span>User @ Host</span>
+            </div>
+            <div class="font-mono text-[11.5px] truncate" title="{t.user}@{t.host}">
+              <span class="font-semibold text-slate-100">{t.user || '-'}</span><span class="text-slate-500">@{t.host || '-'}</span>
+            </div>
           </div>
-          <div class="p-2.5 bg-[#050811] border border-[#1e293b] rounded-lg">
-            <span class="text-slate-500 text-[10px] uppercase block">Database</span>
-            <span class="font-bold text-emerald-400 truncate block font-mono">{t.db || '-'}</span>
+
+          <div class="p-3 bg-slate-950/75 border border-slate-800/90 hover:border-slate-700/80 rounded-xl transition">
+            <div class="flex items-center gap-1.5 text-slate-500 text-[10px] font-semibold uppercase tracking-wider mb-1">
+              <Icon name="database" class="w-3 h-3 text-slate-500" />
+              <span>Database</span>
+            </div>
+            <div class="font-mono text-[11.5px] font-semibold truncate {t.db ? 'text-emerald-400' : 'text-slate-500 italic'}" title={t.db || 'None'}>
+              {t.db || 'None'}
+            </div>
           </div>
-          <div class="p-2.5 bg-[#050811] border border-[#1e293b] rounded-lg">
-            <span class="text-slate-500 text-[10px] uppercase block">Execution Time</span>
-            <span class="font-bold font-mono {t.time >= 30 ? 'text-rose-400' : t.time >= slowThreshold ? 'text-amber-300' : 'text-slate-200'}">{t.time} sec</span>
+
+          <div class="p-3 bg-slate-950/75 border border-slate-800/90 hover:border-slate-700/80 rounded-xl transition">
+            <div class="flex items-center gap-1.5 text-slate-500 text-[10px] font-semibold uppercase tracking-wider mb-1">
+              <Icon name="clock" class="w-3 h-3 text-slate-500" />
+              <span>Execution Time</span>
+            </div>
+            <div class="flex items-center gap-1.5 font-mono text-[12px] font-bold {t.time >= 30 ? 'text-rose-400' : t.time >= slowThreshold ? 'text-amber-300' : 'text-slate-100'}">
+              <span class="w-1.5 h-1.5 rounded-full {t.time >= 30 ? 'bg-rose-400' : t.time >= slowThreshold ? 'bg-amber-400' : 'bg-emerald-400'}"></span>
+              <span>{t.time}s</span>
+            </div>
           </div>
-          <div class="p-2.5 bg-[#050811] border border-[#1e293b] rounded-lg">
-            <span class="text-slate-500 text-[10px] uppercase block">Command</span>
-            <span class="font-bold text-sky-300 font-mono">{t.command || '-'}</span>
+
+          <div class="p-3 bg-slate-950/75 border border-slate-800/90 hover:border-slate-700/80 rounded-xl transition">
+            <div class="flex items-center gap-1.5 text-slate-500 text-[10px] font-semibold uppercase tracking-wider mb-1">
+              <Icon name="terminal" class="w-3 h-3 text-slate-500" />
+              <span>Command</span>
+            </div>
+            <span class="inline-flex items-center px-1.5 py-0.5 rounded bg-sky-500/10 border border-sky-500/20 text-sky-300 font-mono text-[11px] font-semibold">
+              {t.command || '-'}
+            </span>
           </div>
-          <div class="p-2.5 bg-[#050811] border border-[#1e293b] rounded-lg">
-            <span class="text-slate-500 text-[10px] uppercase block">Thread State</span>
-            <span class="font-bold text-slate-200 truncate block" title={t.state}>{t.state || '-'}</span>
+
+          <div class="p-3 bg-slate-950/75 border border-slate-800/90 hover:border-slate-700/80 rounded-xl transition">
+            <div class="flex items-center gap-1.5 text-slate-500 text-[10px] font-semibold uppercase tracking-wider mb-1">
+              <Icon name="activity" class="w-3 h-3 text-slate-500" />
+              <span>Thread State</span>
+            </div>
+            <div class="text-[11.5px] font-medium truncate {t.state ? 'text-slate-200' : 'text-slate-500 italic'}" title={t.state || 'None'}>
+              {t.state || 'None'}
+            </div>
           </div>
-          <div class="p-2.5 bg-[#050811] border border-[#1e293b] rounded-lg">
-            <span class="text-slate-500 text-[10px] uppercase block">Lock Role</span>
-            <span class="font-bold {blockingLocks.length > 0 ? 'text-rose-400' : waitingLocks.length > 0 ? 'text-amber-300' : 'text-slate-400'}">
-              {blockingLocks.length > 0
-                ? `Blocking ${blockingLocks.length} thread(s)`
-                : waitingLocks.length > 0
+
+          <div class="p-3 bg-slate-950/75 border border-slate-800/90 hover:border-slate-700/80 rounded-xl transition">
+            <div class="flex items-center gap-1.5 text-slate-500 text-[10px] font-semibold uppercase tracking-wider mb-1">
+              <Icon name={isBlocking || isWaiting ? 'lock' : 'unlock'} class="w-3 h-3 text-slate-500" />
+              <span>Lock Role</span>
+            </div>
+            <div class="text-[11.5px] font-semibold truncate {isBlocking ? 'text-rose-400' : isWaiting ? 'text-amber-300' : 'text-slate-400'}">
+              {isBlocking
+                ? `Blocking ${blockingLocks.length} thread${blockingLocks.length > 1 ? 's' : ''}`
+                : isWaiting
                   ? `Waiting on #${waitingLocks[0]?.blocking_thread_id}`
                   : 'Unblocked'}
-            </span>
+            </div>
           </div>
         </div>
 
         <!-- Lock Waiter / Blocker Banner -->
-        {#if blockingLocks.length > 0 || waitingLocks.length > 0}
-          <div class="p-3 rounded-xl border text-[11px] space-y-1.5 {blockingLocks.length > 0 ? 'bg-rose-950/35 border-rose-800/70 text-rose-200' : 'bg-amber-950/35 border-amber-800/70 text-amber-200'}">
-            {#if blockingLocks.length > 0}
-              <div class="font-bold flex items-center space-x-1.5">
-                <Icon name="shield-alert" class="w-3.5 h-3.5 text-rose-400" />
-                <span>Root/Lock Blocker: holding {blockingLocks[0]?.lock_mode || 'lock'}{blockingLocks[0]?.locked_resource ? ` on ${blockingLocks[0].locked_resource}` : ''}</span>
+        {#if isBlocking || isWaiting}
+          <div class="p-3.5 rounded-xl border text-[11px] space-y-2.5 {isBlocking ? 'bg-rose-950/25 border-rose-500/35 text-rose-100' : 'bg-amber-950/25 border-amber-500/35 text-amber-100'}">
+            {#if isBlocking}
+              <div class="flex items-center justify-between flex-wrap gap-2">
+                <div class="font-semibold flex items-center gap-2">
+                  <Icon name="shield-alert" class="w-4 h-4 text-rose-400 shrink-0" />
+                  <span>Holding <span class="font-mono text-rose-300">{blockingLocks[0]?.lock_mode || 'lock'}</span>{blockingLocks[0]?.locked_resource ? ` on ${blockingLocks[0].locked_resource}` : ''}</span>
+                </div>
+                <span class="px-1.5 py-0.5 rounded bg-rose-500/20 border border-rose-500/30 text-rose-300 text-[10px] font-bold uppercase tracking-wide">
+                  Root Blocker
+                </span>
               </div>
-              <div class="text-[10.5px] text-rose-300/90 font-mono">
-                Blocked threads: {blockingLocks.map((l) => `#${l.waiting_thread_id} (${l.waiting_seconds ?? 0}s)`).join(', ')}
+              <div class="flex items-center flex-wrap gap-1.5">
+                <span class="text-[10.5px] text-rose-300/80 mr-1">Blocked threads:</span>
+                {#each blockingLocks as lock (lock.waiting_thread_id)}
+                  {@const targetThread = threads.find((x) => x.id === lock.waiting_thread_id)}
+                  <button
+                    type="button"
+                    disabled={!targetThread}
+                    onclick={() => { if (targetThread) { inspectingThread = targetThread; formatInspectSql = false; } }}
+                    title={targetThread ? `Inspect blocked thread #${lock.waiting_thread_id}` : `Thread #${lock.waiting_thread_id} is no longer in list`}
+                    class="px-2 py-0.5 rounded-md bg-rose-950/60 border border-rose-500/30 text-rose-200 font-mono text-[10.5px] transition {targetThread ? 'hover:bg-rose-900/70 hover:border-rose-400/60 cursor-pointer' : 'opacity-65 cursor-default'}"
+                  >
+                    #{lock.waiting_thread_id} · {lock.waiting_seconds ?? 0}s
+                  </button>
+                {/each}
               </div>
             {/if}
-            {#if waitingLocks.length > 0}
-              <div class="font-bold flex items-center space-x-1.5">
-                <Icon name="clock" class="w-3.5 h-3.5 text-amber-400" />
-                <span>Lock Waiter: blocked by Thread #{waitingLocks[0]?.blocking_thread_id} ({waitingLocks[0]?.waiting_seconds ?? 0}s on {waitingLocks[0]?.lock_mode || 'lock'})</span>
+            {#if isWaiting}
+              {@const blockerId = waitingLocks[0]?.blocking_thread_id}
+              {@const blockerThread = threads.find((x) => x.id === blockerId)}
+              <div class="flex items-center justify-between flex-wrap gap-2">
+                <div class="font-semibold flex items-center gap-2">
+                  <Icon name="clock" class="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>
+                    Blocked by
+                    <button
+                      type="button"
+                      disabled={!blockerThread}
+                      onclick={() => { if (blockerThread) { inspectingThread = blockerThread; formatInspectSql = false; } }}
+                      title={blockerThread ? `Inspect blocker thread #${blockerId}` : `Thread #${blockerId} is no longer in list`}
+                      class="mx-1 px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-200 font-mono transition {blockerThread ? 'hover:bg-amber-500/30 cursor-pointer' : 'opacity-70 cursor-default'}"
+                    >
+                      #{blockerId}
+                    </button>
+                    for <span class="font-mono text-amber-300">{waitingLocks[0]?.waiting_seconds ?? 0}s</span> on <span class="font-mono text-amber-300">{waitingLocks[0]?.lock_mode || 'lock'}</span>
+                  </span>
+                </div>
+                <span class="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/30 text-amber-300 text-[10px] font-bold uppercase tracking-wide">
+                  Lock Waiter
+                </span>
               </div>
             {/if}
           </div>
         {/if}
 
-        <div>
-          <div class="flex items-center justify-between mb-1.5 flex-wrap gap-2">
-            <span class="text-slate-400 text-xs font-medium">SQL Statement</span>
-            <div class="flex items-center space-x-2 flex-wrap">
+        <!-- SQL Statement Panel -->
+        <div class="rounded-xl border border-slate-800/90 bg-slate-950/80 overflow-hidden">
+          <div class="px-3.5 py-2.5 bg-slate-900/70 border-b border-slate-800/90 flex items-center justify-between flex-wrap gap-2">
+            <div class="flex items-center gap-2">
+              <Icon name="code" class="w-3.5 h-3.5 text-sky-400" />
+              <span class="text-slate-200 text-xs font-semibold">SQL Statement</span>
+              {#if t.info}
+                <span class="px-1.5 py-0.5 rounded bg-slate-800/90 text-slate-400 font-mono text-[10px]">
+                  {t.info.length} chars
+                </span>
+              {/if}
+            </div>
+
+            <div class="flex items-center flex-wrap gap-1.5">
               {#if t.info}
                 <button
                   type="button"
                   onclick={() => (formatInspectSql = !formatInspectSql)}
-                  class="text-[11px] {formatInspectSql ? 'text-sky-300 font-semibold' : 'text-slate-400 hover:text-white'} flex items-center space-x-1"
+                  class="px-2 py-1 rounded-md border text-[11px] font-medium transition flex items-center gap-1 {formatInspectSql ? 'bg-sky-500/15 border-sky-500/40 text-sky-300' : 'bg-slate-900/80 border-slate-700/80 text-slate-300 hover:text-white hover:border-slate-600'}"
                 >
                   <Icon name="code" class="w-3 h-3" />
-                  <span>{formatInspectSql ? 'Raw SQL' : 'Format SQL'}</span>
+                  <span>{formatInspectSql ? 'Raw' : 'Format'}</span>
                 </button>
               {/if}
               <button
                 type="button"
                 onclick={() => copyWithToast(t.info || '', 'Thread SQL')}
-                class="text-[11px] text-sky-400 hover:underline flex items-center space-x-1"
+                disabled={!t.info}
+                class="px-2 py-1 rounded-md bg-slate-900/80 border border-slate-700/80 text-[11px] font-medium text-slate-300 hover:text-white hover:border-slate-600 transition flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                <Icon name="copy" class="w-3 h-3" />
+                <Icon name="copy" class="w-3 h-3 text-sky-400" />
                 <span>Copy SQL</span>
               </button>
               <button
                 type="button"
                 onclick={() => copyWithToast(JSON.stringify(t, null, 2), 'Thread JSON')}
-                class="text-[11px] text-slate-300 hover:underline flex items-center space-x-1"
+                class="px-2 py-1 rounded-md bg-slate-900/80 border border-slate-700/80 text-[11px] font-medium text-slate-300 hover:text-white hover:border-slate-600 transition flex items-center gap-1"
               >
-                <Icon name="copy" class="w-3 h-3" />
+                <Icon name="copy" class="w-3 h-3 text-slate-400" />
                 <span>Copy JSON</span>
               </button>
+
               {#if t.info}
+                <span class="w-px h-4 bg-slate-800 mx-0.5 hidden sm:inline-block"></span>
                 <button
                   type="button"
                   onclick={() => { openSqlInEditor(t.info, `Thread_${t.id}.sql`); inspectingThread = null; }}
-                  class="text-[11px] text-cyan-400 hover:underline flex items-center space-x-1"
+                  class="px-2 py-1 rounded-md bg-cyan-500/10 border border-cyan-500/25 text-[11px] font-medium text-cyan-300 hover:bg-cyan-500/20 transition flex items-center gap-1"
                 >
                   <Icon name="file-code" class="w-3 h-3" />
                   <span>To Tab</span>
@@ -3410,15 +3576,15 @@
                 <button
                   type="button"
                   onclick={() => appState.saveQueryToNote(t.info, `Thread #${t.id} (${t.user})`)}
-                  class="text-[11px] text-amber-400 hover:underline flex items-center space-x-1"
+                  class="px-2 py-1 rounded-md bg-amber-500/10 border border-amber-500/25 text-[11px] font-medium text-amber-300 hover:bg-amber-500/20 transition flex items-center gap-1"
                 >
                   <Icon name="bookmark" class="w-3 h-3" />
-                  <span>Save to Notes</span>
+                  <span>Note</span>
                 </button>
                 <button
                   type="button"
                   onclick={() => explainThreadQuery(t.info)}
-                  class="text-[11px] text-emerald-400 hover:underline flex items-center space-x-1"
+                  class="px-2 py-1 rounded-md bg-emerald-500/10 border border-emerald-500/25 text-[11px] font-medium text-emerald-300 hover:bg-emerald-500/20 transition flex items-center gap-1"
                 >
                   <Icon name="play" class="w-3 h-3" />
                   <span>Explain</span>
@@ -3426,7 +3592,7 @@
                 <button
                   type="button"
                   onclick={() => sendThreadToAI(t.info, t)}
-                  class="text-[11px] text-purple-400 hover:underline flex items-center space-x-1"
+                  class="px-2 py-1 rounded-md bg-purple-500/10 border border-purple-500/25 text-[11px] font-medium text-purple-300 hover:bg-purple-500/20 transition flex items-center gap-1"
                 >
                   <Icon name="bot" class="w-3 h-3" />
                   <span>Ask AI</span>
@@ -3434,17 +3600,26 @@
               {/if}
             </div>
           </div>
-          <pre class="p-3 bg-[#050811] border border-[#1e293b] rounded-xl text-sky-300 font-mono text-xs overflow-x-auto whitespace-pre-wrap max-h-56">{formattedSql}</pre>
+
+          {#if formattedSql}
+            <pre class="p-4 text-sky-200/95 font-mono text-[12px] leading-relaxed overflow-auto whitespace-pre-wrap break-words max-h-60 selection:bg-sky-500/30">{formattedSql}</pre>
+          {:else}
+            <div class="p-6 text-center text-slate-500 italic text-xs flex flex-col items-center gap-1.5">
+              <Icon name="terminal" class="w-4 h-4 text-slate-600" />
+              <span>No active query statement ({t.command || 'idle'})</span>
+            </div>
+          {/if}
         </div>
       </div>
 
-      <div class="px-5 py-3 border-t border-[#1e293b] flex items-center justify-between bg-[#0f172a]">
-        <div class="flex items-center space-x-2">
+      <!-- Footer -->
+      <div class="px-5 py-3.5 border-t border-slate-800/90 flex items-center justify-between flex-wrap gap-3 bg-slate-900/70">
+        <div class="flex items-center flex-wrap gap-2">
           <button
             type="button"
             disabled={isSysInspect}
             onclick={() => killSingleThread(t.id, 'query')}
-            class="px-3 py-1.5 rounded bg-amber-950 hover:bg-amber-900 border border-amber-800 text-amber-200 text-xs font-bold transition flex items-center space-x-1.5 disabled:opacity-35 disabled:cursor-not-allowed"
+            class="px-3 py-1.5 rounded-lg bg-amber-950/70 hover:bg-amber-900/80 border border-amber-700/70 text-amber-200 text-xs font-semibold transition flex items-center gap-1.5 disabled:opacity-35 disabled:cursor-not-allowed"
           >
             <Icon name="square" class="w-3.5 h-3.5" />
             <span>Kill Query</span>
@@ -3453,19 +3628,25 @@
             type="button"
             disabled={isSelfInspect || isSysInspect}
             onclick={() => killSingleThread(t.id, 'connection')}
-            class="px-3.5 py-1.5 rounded bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition flex items-center space-x-1.5 shadow-lg shadow-rose-950/30 disabled:opacity-35 disabled:cursor-not-allowed"
+            class="px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition flex items-center gap-1.5 shadow-lg shadow-rose-950/40 disabled:opacity-35 disabled:cursor-not-allowed"
           >
             <Icon name="x-circle" class="w-3.5 h-3.5" />
             <span>Kill Connection</span>
           </button>
+          {#if isSysInspect}
+            <span class="text-[11px] text-slate-500 ml-1">System daemon protected</span>
+          {:else if isSelfInspect}
+            <span class="text-[11px] text-slate-500 ml-1">Current session cannot be disconnected</span>
+          {/if}
         </div>
 
         <button
           type="button"
           onclick={() => (inspectingThread = null)}
-          class="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition"
+          class="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700/80 text-slate-200 text-xs font-medium transition flex items-center gap-2"
         >
-          Close
+          <span>Close</span>
+          <kbd class="px-1.5 py-0.5 rounded bg-slate-900 text-slate-400 font-mono text-[10px] border border-slate-700/80">Esc</kbd>
         </button>
       </div>
     </div>
