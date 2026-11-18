@@ -498,7 +498,7 @@
 
 {#if appState.isCommandPaletteOpen}
   <div
-    class="fixed inset-0 z-50 flex items-start justify-center pt-24 p-4 bg-black/75 backdrop-blur-sm select-none"
+    class="fixed inset-0 z-50 flex items-start justify-center pt-24 p-4 bg-black/75 select-none"
     onclick={(e) => e.target === e.currentTarget && (appState.isCommandPaletteOpen = false)}
     role="dialog"
     tabindex="-1"

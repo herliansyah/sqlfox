@@ -142,7 +142,7 @@
 </script>
 
 {#if appState.isUpdateModalOpen}
-  <div class="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+  <div class="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
     <div class="bg-[#0b0f19] border border-[#1e293b] rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col animate-scale-in text-xs font-sans max-h-[88vh]">
       <!-- Header -->
       <div class="px-5 py-3.5 border-b border-[#1e293b] flex items-center justify-between bg-[#0f172a]">

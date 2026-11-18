@@ -92,7 +92,7 @@
 
 {#if appState.isImpactPreviewOpen}
   <div
-    class="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 backdrop-blur-sm p-3 sm:p-5 animate-fade-in"
+    class="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-3 sm:p-5 animate-fade-in"
     role="presentation"
   >
     <div

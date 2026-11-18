@@ -603,7 +603,7 @@
   <ActivityConsoleDrawer />
 
   {#if appState.isDaemonStopped}
-    <div class="fixed inset-0 z-[200] bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-6 text-center select-none">
+    <div class="fixed inset-0 z-[200] bg-slate-950/95 flex items-center justify-center p-6 text-center select-none">
       <div class="max-w-md bg-[#0f172a] border border-slate-700 rounded-2xl p-6 shadow-2xl space-y-3">
         <div class="w-12 h-12 rounded-full bg-rose-950 border border-rose-800 text-rose-400 flex items-center justify-center mx-auto">
           <Icon name="square" class="w-5 h-5" />

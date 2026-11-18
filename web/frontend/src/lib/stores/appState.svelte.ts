@@ -1348,17 +1348,21 @@ export class AppState {
     }
   }
 
-  async refreshCatalog() {
+  async refreshCatalog(database?: string) {
     if (!this.activeSessionId) return;
+    const targetDb = (database ?? this.currentDatabase ?? '').trim();
     this.isLoadingCatalog = true;
     try {
-      const schema = await api.refreshSchema(this.activeSessionId);
-      this.setCatalog(schema);
-      if (schema.database_name) {
-        this.currentDatabase = schema.database_name;
-      }
-      if (schema.databases && schema.databases.length > 0) {
-        this.availableDatabases = schema.databases;
+      const schema = await api.refreshSchema(this.activeSessionId, targetDb);
+      this.cacheCatalog(schema, targetDb);
+      if (!targetDb || targetDb.toLowerCase() === (this.currentDatabase || '').toLowerCase()) {
+        this.setCatalog(schema);
+        if (schema.database_name) {
+          this.currentDatabase = schema.database_name;
+        }
+        if (schema.databases && schema.databases.length > 0) {
+          this.availableDatabases = schema.databases;
+        }
       }
       this.showToast('Schema refreshed', 'info');
     } catch (err: any) {
@@ -1367,6 +1371,18 @@ export class AppState {
     } finally {
       this.isLoadingCatalog = false;
     }
+  }
+
+  invalidateTableViewers(database?: string, tableName?: string) {
+    const dbNorm = (database || this.currentDatabase || '').trim().toLowerCase();
+    const tblNorm = (tableName || '').trim().toLowerCase();
+    this.tabs = this.tabs.map((t) => {
+      if (!t.isTableViewer || t.isExecuting) return t;
+      const tabDb = (t.database || this.currentDatabase || '').trim().toLowerCase();
+      if (dbNorm && tabDb && tabDb !== dbNorm) return t;
+      if (tblNorm && (t.tableName || '').trim().toLowerCase() !== tblNorm) return t;
+      return { ...t, activeResult: null };
+    });
   }
 
   toggleSection(section: string) {
@@ -2076,7 +2092,7 @@ export class AppState {
     this.tabs = [...this.tabs];
 
     const timer = setInterval(() => {
-      if (tab.executionStartedAt) {
+      if (tab.executionStartedAt && !this.safetyChallenge.isOpen) {
         tab.executionElapsedMs = Math.round(performance.now() - tab.executionStartedAt);
         const sec = (tab.executionElapsedMs / 1000).toFixed(1);
         const rowCount = tab.activeResult?.rows?.length || 0;
@@ -2358,9 +2374,11 @@ export class AppState {
       const elapsedMs = finalRes?.duration_ms || Math.round(performance.now() - (tab.executionStartedAt || performance.now()));
       tab.statusText = finalRes?.error ? 'Error' : 'Ready';
 
-      // Refresh catalog on DDL mutations
-      if (!finalRes?.error && /^\s*(?:CREATE|ALTER|DROP|RENAME|TRUNCATE)\b/i.test(sql)) {
-        void this.refreshCatalog();
+      // Refresh catalog on DDL mutations (strip leading comments and check multi-statement batches)
+      const strippedSql = sql.replace(/--[^\n]*\n|\/\*[\s\S]*?\*\//g, ' ');
+      if (!finalRes?.error && /(?:^|;)\s*(?:CREATE|ALTER|DROP|RENAME|TRUNCATE)\b/i.test(strippedSql)) {
+        this.invalidateTableViewers(database);
+        void this.refreshCatalog(database);
       }
 
       // Notify if user switched to another tab while query ran in background
@@ -3215,7 +3233,7 @@ export class AppState {
   }
 
   // Safety Challenge
-  private promptSafetyChallenge(sql: string, inspection: InspectionResult): Promise<{ confirmed: boolean; challengeInput: string }> {
+  promptSafetyChallenge(sql: string, inspection: InspectionResult): Promise<{ confirmed: boolean; challengeInput: string }> {
     return new Promise((resolve) => {
       this.safetyChallenge = {
         isOpen: true,
@@ -3226,6 +3244,35 @@ export class AppState {
         resolve,
       };
     });
+  }
+
+  /**
+   * Execute a DDL statement with Safety Guard challenge handling and error checking.
+   * Returns false if the user cancelled the Safety Guard challenge.
+   */
+  async executeDDL(sql: string, database?: string, connId?: string): Promise<boolean> {
+    const sessionId = connId || this.activeSessionId;
+    if (!sessionId) throw new Error('No active database session');
+    let res = await api.executeQuery(sessionId, sql, { confirmed: true, database });
+    if (res.blocked && res.inspection) {
+      const decision = await this.promptSafetyChallenge(sql, res.inspection);
+      if (!decision.confirmed) {
+        this.showToast('Cancelled by Safety Guard', 'info');
+        return false;
+      }
+      res = await api.executeQuery(sessionId, sql, {
+        confirmed: true,
+        challengeInput: decision.challengeInput,
+        database,
+      });
+    }
+    if (res.blocked) {
+      throw new Error(res.inspection?.reason || 'Execution blocked by Safety Guard (challenge confirmation required).');
+    }
+    if (res.error) {
+      throw new Error(res.error);
+    }
+    return true;
   }
 
   confirmSafetyChallenge(challengeInput = '') {
@@ -3347,15 +3394,14 @@ export class AppState {
       : `RENAME TABLE ${qOld} TO ${qNew};`;
 
     this.openDDLReviewModal(sql, async () => {
-      const res = await api.executeQuery(this.activeSessionId!, sql, { confirmed: true, database: targetDb });
-      if (res.error) throw new Error(res.error);
+      if (!(await this.executeDDL(sql, targetDb))) return;
       this.showToast(`Table renamed to '${newName}'`, 'success');
       const openTab = this.tabs.find((t) => t.tableName?.toLowerCase() === oldName.toLowerCase());
       if (openTab) {
         openTab.tableName = newName;
         openTab.title = newName;
       }
-      await this.refreshCatalog();
+      await this.refreshCatalog(targetDb);
     }, `Rename Table: ${oldName} → ${newName}`);
   }
 
@@ -3380,10 +3426,9 @@ export class AppState {
     }
 
     this.openDDLReviewModal(sql, async () => {
-      const res = await api.executeQuery(this.activeSessionId!, sql, { confirmed: true, database: targetDb });
-      if (res.error) throw new Error(res.error);
+      if (!(await this.executeDDL(sql, targetDb))) return;
       this.showToast(`Table '${sourceTable}' duplicated to '${targetTable}'`, 'success');
-      await this.refreshCatalog();
+      await this.refreshCatalog(targetDb);
       this.openTableDataTab(targetTable);
     }, `Duplicate Table: ${sourceTable} → ${targetTable}`);
   }
@@ -3401,8 +3446,7 @@ export class AppState {
     sql += ';';
 
     this.openDDLReviewModal(sql, async () => {
-      const res = await api.executeQuery(this.activeSessionId!, sql, { confirmed: true });
-      if (res.error) throw new Error(res.error);
+      if (!(await this.executeDDL(sql))) return;
       this.showToast(`Database '${dbName}' created`, 'success');
       await this.refreshDatabases();
       await this.selectDatabase(dbName);
@@ -3448,8 +3492,7 @@ export class AppState {
     const qView = quoteSqlIdentifier(viewName, driver);
     const sql = `DROP VIEW IF EXISTS ${qView};`;
     this.openDDLReviewModal(sql, async () => {
-      const res = await api.executeQuery(this.activeSessionId!, sql, { confirmed: true, database: this.currentDatabase });
-      if (res.error) throw new Error(res.error);
+      if (!(await this.executeDDL(sql, this.currentDatabase))) return;
       this.showToast(`View '${viewName}' dropped`, 'success');
       await this.refreshCatalog();
     }, `Drop View: ${viewName}`);
@@ -3461,8 +3504,7 @@ export class AppState {
     const qName = quoteSqlIdentifier(name, driver);
     const sql = `DROP ${routineType} IF EXISTS ${qName};`;
     this.openDDLReviewModal(sql, async () => {
-      const res = await api.executeQuery(this.activeSessionId!, sql, { confirmed: true, database: this.currentDatabase });
-      if (res.error) throw new Error(res.error);
+      if (!(await this.executeDDL(sql, this.currentDatabase))) return;
       this.showToast(`${routineType} '${name}' dropped`, 'success');
       await this.refreshCatalog();
     }, `Drop ${routineType}: ${name}`);
@@ -3477,8 +3519,7 @@ export class AppState {
       ? `DROP TRIGGER IF EXISTS ${qName} ON ${quoteSqlIdentifier(tableName, driver)};`
       : `DROP TRIGGER IF EXISTS ${qName};`;
     this.openDDLReviewModal(sql, async () => {
-      const res = await api.executeQuery(this.activeSessionId!, sql, { confirmed: true, database: this.currentDatabase });
-      if (res.error) throw new Error(res.error);
+      if (!(await this.executeDDL(sql, this.currentDatabase))) return;
       this.showToast(`Trigger '${name}' dropped`, 'success');
       await this.refreshCatalog();
     }, `Drop Trigger: ${name}`);
@@ -3489,8 +3530,7 @@ export class AppState {
     const qName = quoteSqlIdentifier(name, this.activeConnection?.driver);
     const sql = `DROP EVENT IF EXISTS ${qName};`;
     this.openDDLReviewModal(sql, async () => {
-      const res = await api.executeQuery(this.activeSessionId!, sql, { confirmed: true, database: this.currentDatabase });
-      if (res.error) throw new Error(res.error);
+      if (!(await this.executeDDL(sql, this.currentDatabase))) return;
       this.showToast(`Event '${name}' dropped`, 'success');
       await this.refreshCatalog();
     }, `Drop Event: ${name}`);
@@ -3563,8 +3603,7 @@ export class AppState {
   async createTableDirect(ddl: string, tableName: string) {
     if (!this.activeSessionId) return;
     try {
-      const res = await api.executeQuery(this.activeSessionId, ddl, { confirmed: true, database: this.currentDatabase || '' });
-      if (res.error) throw new Error(res.error);
+      if (!(await this.executeDDL(ddl, this.currentDatabase || ''))) return;
       this.showToast(`Table '${tableName}' created successfully`, 'success');
       await this.refreshCatalog();
       this.openTableDataTab(tableName);

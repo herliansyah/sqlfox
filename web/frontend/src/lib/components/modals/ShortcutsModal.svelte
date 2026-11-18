@@ -44,7 +44,7 @@
 
 {#if appState.isShortcutsModalOpen}
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm select-none"
+    class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 select-none"
     role="dialog"
     tabindex="-1"
     aria-modal="true"

@@ -142,7 +142,7 @@
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
   <div
     id="schema-search-modal"
-    class="fixed inset-0 z-[95] flex items-start justify-center pt-[10vh] bg-black/70 backdrop-blur-sm p-4"
+    class="fixed inset-0 z-[95] flex items-start justify-center pt-[10vh] bg-black/70 p-4"
     onclick={(e) => e.target === e.currentTarget && (appState.isSchemaSearchOpen = false)}
   >
     <div class="bg-[#0f172a] border border-slate-700 w-full max-w-2xl rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[75vh] animate-in fade-in zoom-in-95 duration-100">

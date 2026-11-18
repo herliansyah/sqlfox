@@ -39,8 +39,8 @@
 </script>
 
 {#if challenge.isOpen}
-  <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 select-none">
-    <div class="bg-[#0f172a] border-2 {isDevAffirmation ? 'border-amber-500' : 'border-red-500'} rounded-xl shadow-2xl max-w-lg w-full overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-150">
+  <div class="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 p-4 select-none">
+    <div style="contain: layout style paint;" class="bg-[#0f172a] border-2 {isDevAffirmation ? 'border-amber-500' : 'border-red-500'} rounded-xl shadow-2xl max-w-lg w-full overflow-hidden flex flex-col">
       <!-- Modal Header -->
       <div class="{isDevAffirmation ? 'bg-amber-950/60 border-amber-500/40' : 'bg-red-950/60 border-red-500/40'} border-b px-5 py-3.5 flex items-center justify-between gap-2">
         <div class="flex items-center space-x-2 {isDevAffirmation ? 'text-amber-300' : 'text-red-400'} font-bold text-sm tracking-wide">
@@ -55,7 +55,7 @@
         </div>
         <div class="flex items-center gap-1.5 shrink-0">
           {#if isSchemaMismatch}
-            <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500 text-slate-950 uppercase animate-pulse">
+            <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500 text-slate-950 uppercase">
               Schema Mismatch
             </span>
           {/if}
@@ -139,8 +139,11 @@
               type="text"
               bind:value={typedAffirmation}
               placeholder={challengeTarget}
-              class="w-full bg-[#090d16] border border-slate-700 focus:border-red-500 rounded px-3 py-2 text-slate-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-red-500 transition-colors"
-              onkeydown={(e) => e.key === 'Enter' && handleConfirm()}
+              class="w-full bg-[#090d16] border border-slate-700 focus:border-red-500 rounded px-3 py-2 text-slate-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-red-500"
+              onkeydown={(e) => {
+                if (e.key !== 'Escape') e.stopPropagation();
+                if (e.key === 'Enter') handleConfirm();
+              }}
             />
           </div>
         {/if}

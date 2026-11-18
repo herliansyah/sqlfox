@@ -30,7 +30,7 @@
 </script>
 
 {#if appState.isRemoteLocked}
-  <div class="fixed inset-0 z-[110] bg-[#020617]/95 backdrop-blur-md flex items-center justify-center p-4 select-none">
+  <div class="fixed inset-0 z-[110] bg-[#020617]/95 flex items-center justify-center p-4 select-none">
     <div class="bg-[#0f172a] border-2 border-sky-400/80 w-full max-w-sm rounded-2xl shadow-[0_0_35px_rgba(56,189,248,0.25)] p-6 space-y-4 text-center animate-in fade-in zoom-in-95 duration-200">
       <!-- Icons -->
       <div class="flex justify-center items-center space-x-2 py-1">

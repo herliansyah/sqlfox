@@ -72,7 +72,7 @@
 
 {#if appState.isRefreshAllOpen}
   <div
-    class="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in"
+    class="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 animate-fade-in"
     role="presentation"
   >
     <div

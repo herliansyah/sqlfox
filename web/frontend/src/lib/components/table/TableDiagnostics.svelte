@@ -81,9 +81,9 @@
     appState.openDDLReviewModal(
       item.drop_sql,
       async () => {
-        await api.executeQuery(appState.activeSessionId!, item.drop_sql, { confirmed: true, database: db });
+        if (!(await appState.executeDDL(item.drop_sql, db))) return;
         appState.showToast(`Dropped redundant index ${item.redundant_index}`, 'info');
-        await appState.loadCatalog(appState.activeSessionId!, db);
+        await appState.refreshCatalog(db);
         await loadTableHealth(tableMeta!.name);
       },
       `Drop Redundant Index: ${item.redundant_index}`,

@@ -24,7 +24,7 @@
 {#if modal.isOpen && insp}
   <div
     id="safety-inspection-dialog"
-    class="fixed inset-0 z-[95] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4"
+    class="fixed inset-0 z-[95] flex items-center justify-center bg-black/75 p-4"
   >
     <div class="bg-[#0f172a] border border-slate-700 w-full max-w-xl rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
       <div class="px-5 py-3.5 border-b border-slate-800 bg-slate-900/60 flex items-center justify-between">

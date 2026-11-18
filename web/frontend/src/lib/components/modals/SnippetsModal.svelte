@@ -145,7 +145,7 @@
 </script>
 
 {#if appState.isSnippetsModalOpen}
-  <div class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 font-sans">
+  <div class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 font-sans">
     <div
       role="dialog"
       aria-modal="true"

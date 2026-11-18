@@ -233,7 +233,7 @@
 
 {#if appState.isAuditDrawerOpen}
   <div
-    class="fixed inset-0 z-[100] flex justify-end bg-black/50 backdrop-blur-sm animate-fade-in"
+    class="fixed inset-0 z-[100] flex justify-end bg-black/50 animate-fade-in"
     role="presentation"
   >
     <div

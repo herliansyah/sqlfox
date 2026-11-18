@@ -149,11 +149,10 @@
       async () => {
         isSubmitting = true;
         try {
-          const res = await api.executeQuery(appState.activeSessionId!, ddl, { confirmed: true, database: db });
-          if (res.error) throw new Error(res.error);
+          if (!(await appState.executeDDL(ddl, db))) return;
           appState.showToast(`Event "${eventName.trim()}" saved successfully`, 'success');
           appState.isEventDesignerOpen = false;
-          await appState.refreshCatalog();
+          await appState.refreshCatalog(db);
         } finally {
           isSubmitting = false;
         }
@@ -169,7 +168,7 @@
 </script>
 
 {#if appState.isEventDesignerOpen}
-  <div class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+  <div class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
     <div
       role="dialog"
       aria-modal="true"

@@ -39,7 +39,7 @@
 
 {#if appState.isDuplicateTableModalOpen}
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm select-none"
+    class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 select-none"
     role="dialog"
     aria-modal="true"
   >

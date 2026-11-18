@@ -267,8 +267,9 @@ class ApiClient {
     return this.request(`/session/${connId}/schema${query}`, { timeoutMs: 30000 });
   }
 
-  async refreshSchema(connId: string): Promise<SchemaCatalog> {
-    return this.request(`/session/${connId}/refresh-schema`, {
+  async refreshSchema(connId: string, dbName = ''): Promise<SchemaCatalog> {
+    const query = dbName ? `?db=${encodeURIComponent(dbName)}` : '';
+    return this.request(`/session/${connId}/refresh-schema${query}`, {
       method: 'POST',
       timeoutMs: 30000,
     });

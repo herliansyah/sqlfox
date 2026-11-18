@@ -8,7 +8,7 @@
 </script>
 
 {#if appState.isAiSettingsModalOpen}
-  <div class="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+  <div class="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
     <div class="bg-[#0b0f19] border border-[#1e293b] rounded-2xl w-full max-w-xl max-h-[90vh] shadow-2xl overflow-hidden flex flex-col animate-scale-in text-xs font-sans">
       <div class="px-5 py-4 border-b border-[#1e293b] flex items-center justify-between bg-[#0f172a] shrink-0">
         <div class="flex items-center space-x-2">

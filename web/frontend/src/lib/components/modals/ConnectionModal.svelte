@@ -146,7 +146,7 @@
 </script>
 
 {#if appState.isConnectionModalOpen}
-  <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm select-none">
+  <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 select-none">
     <div class="w-full max-w-lg bg-[#0f172a] border border-[#334155] rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
       <!-- Header -->
       <div class="px-5 py-3.5 border-b border-[#334155] flex items-center justify-between bg-[#0b0f19]">

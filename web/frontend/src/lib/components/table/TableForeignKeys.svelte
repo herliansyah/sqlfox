@@ -144,11 +144,11 @@
       async () => {
         isExecuting = true;
         try {
-          await api.executeQuery(connId, sql, { confirmed: true, database: targetDb });
+          if (!(await appState.executeDDL(sql, targetDb, connId))) return;
           appState.showToast(`Foreign Key "${fkName.trim()}" created successfully!`, 'success');
           isAddModalOpen = false;
           resetForm();
-          await appState.loadCatalog(connId, targetDb);
+          await appState.refreshCatalog(targetDb);
         } finally {
           isExecuting = false;
         }
@@ -187,9 +187,9 @@
     appState.openDDLReviewModal(
       dropSql,
       async () => {
-        await api.executeQuery(connId, dropSql, { confirmed: true, database: targetDb });
+        if (!(await appState.executeDDL(dropSql, targetDb, connId))) return;
         appState.showToast(`Foreign key "${constraintName}" dropped successfully!`, 'info');
-        await appState.loadCatalog(connId, targetDb);
+        await appState.refreshCatalog(targetDb);
       },
       `Drop Foreign Key: ${constraintName}`,
       { tableName: tableMeta.name, database: targetDb }
@@ -273,7 +273,7 @@
 
 <!-- Add Foreign Key Modal -->
 {#if isAddModalOpen}
-  <div class="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+  <div class="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
     <div class="bg-[#0b0f19] border border-[#1e293b] rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col animate-scale-in text-xs font-sans">
       <div class="px-5 py-4 border-b border-[#1e293b] flex items-center justify-between bg-[#0f172a]">
         <div class="flex items-center space-x-2">

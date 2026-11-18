@@ -39,8 +39,10 @@
     elapsedSec = 0;
     const started = performance.now();
     const timer = setInterval(() => {
-      elapsedSec = (performance.now() - started) / 1000;
-    }, 100);
+      if (!appState.safetyChallenge.isOpen) {
+        elapsedSec = (performance.now() - started) / 1000;
+      }
+    }, 200);
     try {
       if (appState.ddlReview.onConfirm) {
         await appState.ddlReview.onConfirm();
@@ -67,7 +69,7 @@
 
 {#if appState.ddlReview.isOpen}
   <div
-    class="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in"
+    class="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4 animate-fade-in"
     role="presentation"
   >
     <div
