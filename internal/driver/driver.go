@@ -534,12 +534,13 @@ type TableMetadata struct {
 }
 
 type ColumnMetadata struct {
-	Name         string `json:"name"`
-	Type         string `json:"type"`
-	IsNullable   bool   `json:"is_nullable"`
-	IsPrimaryKey bool   `json:"is_primary_key"`
-	DefaultValue string `json:"default_value"`
-	Extra        string `json:"extra"` // auto_increment, etc.
+	Name         string   `json:"name"`
+	Type         string   `json:"type"`
+	IsNullable   bool     `json:"is_nullable"`
+	IsPrimaryKey bool     `json:"is_primary_key"`
+	DefaultValue string   `json:"default_value"`
+	Extra        string   `json:"extra"` // auto_increment, etc.
+	EnumValues   []string `json:"enum_values,omitempty"`
 }
 
 type IndexMetadata struct {

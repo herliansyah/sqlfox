@@ -164,8 +164,262 @@ export function parseEnumValues(typeStr: string): string[] {
   return values;
 }
 
+import type { ColumnDefinition, SchemaCatalog, TableMetadata } from '../../types';
+
 export function formatEnumLength(values: string[]): string {
   return values
     .map((v) => `'${v.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`)
     .join(',');
+}
+
+export function findTableMeta(
+  tableName: string | null | undefined,
+  catalog: SchemaCatalog | null | undefined
+): TableMetadata | null {
+  if (!tableName || !catalog?.tables) return null;
+  const target = tableName.toLowerCase();
+  const shortTarget = target.includes('.') ? target.split('.').pop()! : target;
+  return (
+    catalog.tables.find((t) => {
+      const tn = t.name.toLowerCase();
+      return tn === target || tn === shortTarget;
+    }) || null
+  );
+}
+
+export function getColDisplayName(col: any): string {
+  if (!col) return '';
+  return typeof col === 'string' ? col : col.name || '';
+}
+
+export function findColumnMeta(
+  col: any,
+  tableMeta: TableMetadata | null | undefined
+): ColumnDefinition | undefined {
+  const colName = getColDisplayName(col);
+  if (!colName || !tableMeta?.columns) return undefined;
+  const lower = colName.toLowerCase();
+  return tableMeta.columns.find((c) => c.name.toLowerCase() === lower);
+}
+
+export function resolveColumnType(
+  col: any,
+  tableMeta: TableMetadata | null | undefined
+): string {
+  const meta = findColumnMeta(col, tableMeta);
+  if (meta?.type) return meta.type;
+  if (col && typeof col === 'object' && col.type) return String(col.type);
+  return '';
+}
+
+export function resolveColumnNullable(
+  col: any,
+  tableMeta: TableMetadata | null | undefined
+): boolean {
+  const meta = findColumnMeta(col, tableMeta);
+  if (meta && meta.is_nullable !== undefined) return Boolean(meta.is_nullable);
+  if (col && typeof col === 'object') {
+    if (col.is_nullable !== undefined) return Boolean(col.is_nullable);
+    if (col.nullable !== undefined) return Boolean(col.nullable);
+  }
+  return true;
+}
+
+export function resolveEnumValues(
+  col: any,
+  tableMeta: TableMetadata | null | undefined
+): string[] {
+  const meta = findColumnMeta(col, tableMeta);
+  if (meta?.enum_values && meta.enum_values.length > 0) {
+    return meta.enum_values;
+  }
+  return parseEnumValues(resolveColumnType(col, tableMeta));
+}
+
+export interface ColumnTypeKind {
+  isBool: boolean;
+  isEnum: boolean;
+  isSet: boolean;
+  isDate: boolean;
+  isTime: boolean;
+  isDateTime: boolean;
+  isInt: boolean;
+  isUnsigned: boolean;
+  isDecimal: boolean;
+  isJson: boolean;
+  isUuid: boolean;
+  isString: boolean;
+  maxLength: number | null;
+}
+
+export function classifyColumnType(colType: string, enumVals: string[] = []): ColumnTypeKind {
+  const tLow = (colType || '').trim().toLowerCase();
+  const isBool = tLow === 'bool' || tLow === 'boolean' || tLow === 'tinyint(1)' || tLow === 'bit(1)';
+  const isSet = /^set\s*\(/i.test(tLow);
+  const isEnum = enumVals.length > 0 && !isSet;
+  const isDate = tLow === 'date';
+  const isTime =
+    tLow === 'time' ||
+    /^time\(\d+\)$/.test(tLow) ||
+    tLow === 'timetz' ||
+    tLow.startsWith('time with') ||
+    tLow.startsWith('time without');
+  const isDateTime =
+    tLow.startsWith('datetime') ||
+    tLow.startsWith('timestamp') ||
+    tLow === 'timestamptz';
+  const isInt =
+    !isBool &&
+    /^(tinyint|smallint|mediumint|int|integer|bigint|serial|bigserial|smallserial|int2|int4|int8)\b/.test(tLow);
+  const isUnsigned = tLow.includes('unsigned');
+  const isDecimal = /^(decimal|numeric|float|double|real|float4|float8|double precision)\b/.test(tLow);
+  const isJson = tLow.includes('json');
+  const isUuid = tLow === 'uuid';
+  const isString = /^(varchar|char|text|tinytext|mediumtext|longtext|character varying|character|nvarchar|nchar|bpchar)\b/.test(
+    tLow
+  );
+  let maxLength: number | null = null;
+  if (isString) {
+    const m = tLow.match(/\((\d+)\)/);
+    if (m) maxLength = Number(m[1]);
+  }
+  return {
+    isBool,
+    isEnum,
+    isSet,
+    isDate,
+    isTime,
+    isDateTime,
+    isInt,
+    isUnsigned,
+    isDecimal,
+    isJson,
+    isUuid,
+    isString,
+    maxLength,
+  };
+}
+
+function isValidCalendarDate(y: number, m: number, d: number): boolean {
+  if (m < 1 || m > 12 || d < 1) return false;
+  const maxDays = new Date(y, m, 0).getDate();
+  return d <= maxDays;
+}
+
+function isValidClockTime(hh: number, mm: number, ss: number): boolean {
+  return hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59 && ss >= 0 && ss <= 59;
+}
+
+export function validateCellValue(
+  val: any,
+  col: any,
+  tableMeta: TableMetadata | null | undefined
+): string | null {
+  const colName = getColDisplayName(col) || 'column';
+  const nullable = resolveColumnNullable(col, tableMeta);
+
+  if (val === null || val === undefined) {
+    return nullable ? null : `Column '${colName}' cannot be NULL.`;
+  }
+
+  const colType = resolveColumnType(col, tableMeta);
+  const enumVals = resolveEnumValues(col, tableMeta);
+  const kind = classifyColumnType(colType, enumVals);
+  const str = typeof val === 'object' ? JSON.stringify(val) : String(val);
+  const trimmed = str.trim();
+
+  if (kind.isEnum) {
+    if (!enumVals.includes(str)) {
+      return `Invalid value '${str}' for ${colName}. Allowed: ${enumVals.join(', ')}`;
+    }
+    return null;
+  }
+
+  if (kind.isSet) {
+    if (str !== '') {
+      const parts = str.split(',');
+      const invalid = parts.find((p) => !enumVals.includes(p));
+      if (invalid !== undefined) {
+        return `Invalid SET option '${invalid}' for ${colName}. Allowed: ${enumVals.join(', ')}`;
+      }
+    }
+    return null;
+  }
+
+  if (kind.isBool) {
+    if (typeof val === 'boolean') return null;
+    if (!['0', '1', 'true', 'false'].includes(trimmed.toLowerCase())) {
+      return `Expected boolean (TRUE/FALSE) for '${colName}'.`;
+    }
+    return null;
+  }
+
+  if (kind.isDate) {
+    const m = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m || !isValidCalendarDate(Number(m[1]), Number(m[2]), Number(m[3]))) {
+      return `Expected valid date (YYYY-MM-DD) for '${colName}'.`;
+    }
+    return null;
+  }
+
+  if (kind.isTime) {
+    const m = trimmed.match(/^(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?$/);
+    if (!m || !isValidClockTime(Number(m[1]), Number(m[2]), Number(m[3] ?? '0'))) {
+      return `Expected valid time (HH:MM or HH:MM:SS) for '${colName}'.`;
+    }
+    return null;
+  }
+
+  if (kind.isDateTime) {
+    const m = trimmed.match(
+      /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?$/i
+    );
+    if (
+      !m ||
+      !isValidCalendarDate(Number(m[1]), Number(m[2]), Number(m[3])) ||
+      !isValidClockTime(Number(m[4]), Number(m[5]), Number(m[6] ?? '0'))
+    ) {
+      return `Expected valid datetime (YYYY-MM-DD HH:MM:SS) for '${colName}'.`;
+    }
+    return null;
+  }
+
+  if (kind.isInt) {
+    if (!/^-?\d+$/.test(trimmed)) {
+      return `Expected integer for '${colName}' (${colType}).`;
+    }
+    if (kind.isUnsigned && trimmed.startsWith('-')) {
+      return `Column '${colName}' (${colType}) cannot be negative.`;
+    }
+    return null;
+  }
+
+  if (kind.isDecimal) {
+    if (trimmed === '' || !Number.isFinite(Number(trimmed))) {
+      return `Expected numeric value for '${colName}' (${colType}).`;
+    }
+    return null;
+  }
+
+  if (kind.isJson) {
+    try {
+      JSON.parse(str);
+    } catch {
+      return `Invalid JSON syntax for '${colName}'.`;
+    }
+    return null;
+  }
+
+  if (kind.isUuid) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed)) {
+      return `Expected valid UUID for '${colName}'.`;
+    }
+    return null;
+  }
+
+  if (kind.maxLength !== null && str.length > kind.maxLength) {
+    return `Value for '${colName}' exceeds maximum length (${kind.maxLength}).`;
+  }
+
+  return null;
 }

@@ -498,10 +498,16 @@ func (s *PostgresSession) inspectSchemaFiltered(ctx context.Context, schemaName,
 		       pg_catalog.format_type(a.atttypid, a.atttypmod) as data_type,
 		       NOT a.attnotnull as is_nullable,
 		       COALESCE(pg_catalog.pg_get_expr(ad.adbin, ad.adrelid), '') as default_value,
-		       COALESCE(i.indisprimary, false) as is_pk
+		       COALESCE(i.indisprimary, false) as is_pk,
+		       CASE WHEN t.typtype = 'e' THEN COALESCE((
+		           SELECT string_agg(e.enumlabel, E'\x1f' ORDER BY e.enumsortorder)
+		           FROM pg_catalog.pg_enum e
+		           WHERE e.enumtypid = a.atttypid
+		       ), '') ELSE '' END as enum_values
 		FROM pg_catalog.pg_attribute a
 		JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
 		JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+		JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
 		LEFT JOIN pg_catalog.pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
 		LEFT JOIN pg_catalog.pg_index i ON i.indrelid = c.oid AND a.attnum = ANY(i.indkey) AND i.indisprimary
 		WHERE n.nspname = $1 AND c.relkind IN ('r', 'v', 'm') AND a.attnum > 0 AND NOT a.attisdropped
@@ -510,13 +516,17 @@ func (s *PostgresSession) inspectSchemaFiltered(ctx context.Context, schemaName,
 	`, schemaName, onlyTable)
 	if err == nil {
 		for colRows.Next() {
-			var tbl, col, dataType, defaultVal string
+			var tbl, col, dataType, defaultVal, enumRaw string
 			var isNullable, isPK bool
-			if err := colRows.Scan(&tbl, &col, &dataType, &isNullable, &defaultVal, &isPK); err == nil {
+			if err := colRows.Scan(&tbl, &col, &dataType, &isNullable, &defaultVal, &isPK, &enumRaw); err == nil {
 				if t, ok := tablesMap[tbl]; ok {
 					extra := ""
 					if strings.Contains(strings.ToLower(defaultVal), "nextval(") {
 						extra = "auto_increment"
+					}
+					var enumVals []string
+					if enumRaw != "" {
+						enumVals = strings.Split(enumRaw, "\x1f")
 					}
 					t.Columns = append(t.Columns, driver.ColumnMetadata{
 						Name:         col,
@@ -525,6 +535,7 @@ func (s *PostgresSession) inspectSchemaFiltered(ctx context.Context, schemaName,
 						IsPrimaryKey: isPK,
 						DefaultValue: defaultVal,
 						Extra:        extra,
+						EnumValues:   enumVals,
 					})
 				}
 			}

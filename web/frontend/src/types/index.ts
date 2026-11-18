@@ -38,6 +38,7 @@ export interface ColumnDefinition {
   default_value?: string | null;
   comment?: string;
   extra?: string;
+  enum_values?: string[];
 }
 
 export interface ForeignKeyInfo {

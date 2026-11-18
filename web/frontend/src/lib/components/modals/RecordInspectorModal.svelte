@@ -1,6 +1,13 @@
 <script lang="ts">
   import { copyText } from '../../utils/clipboard';
-  import { parseEnumValues } from '../../utils/dataTypes';
+  import {
+    classifyColumnType,
+    findTableMeta,
+    resolveColumnNullable,
+    resolveColumnType,
+    resolveEnumValues,
+    validateCellValue,
+  } from '../../utils/dataTypes';
   import { appState } from '../../stores/appState.svelte';
   import Icon from '../common/Icon.svelte';
 
@@ -21,9 +28,7 @@
     (effectiveDatabase && appState.catalogs[effectiveDatabase.toLowerCase()]) || appState.catalog
   );
 
-  let tableMeta = $derived(
-    activeCatalog?.tables?.find((t) => t.name.toLowerCase() === effectiveTable.toLowerCase()) || null
-  );
+  let tableMeta = $derived(findTableMeta(effectiveTable, activeCatalog));
 
   let fkMap = $derived.by(() => {
     const map = new Map<string, any>();
@@ -39,10 +44,7 @@
   }
 
   function getColType(c: any): string {
-    if (typeof c === 'object' && c.type) return String(c.type);
-    const name = getColName(c);
-    const meta = tableMeta?.columns?.find((cm) => cm.name.toLowerCase() === name.toLowerCase());
-    return meta?.type || '';
+    return resolveColumnType(c, tableMeta);
   }
 
   function isBooleanType(colType: string): boolean {
@@ -147,6 +149,13 @@
     const newVal = editedFields[colName];
     const oldVal = currentRow[cIdx];
     if (newVal === undefined || newVal === oldVal) return;
+
+    const colDef = result.columns[cIdx];
+    const errMsg = validateCellValue(newVal, colDef, tableMeta);
+    if (errMsg) {
+      appState.showToast(errMsg, 'error');
+      return;
+    }
 
     const pkColObj = result.columns.find((c) => isColPK(c));
     const pkCol = pkColObj ? getColName(pkColObj) : undefined;
@@ -466,11 +475,13 @@
         {:else}
           {#each visibleColumns as { col, cIdx, colName, colType, val, dirty } (cIdx)}
             {@const isPK = isColPK(col)}
+            {@const nullable = resolveColumnNullable(col, tableMeta)}
             {@const fk = fkMap.get(colName.toLowerCase())}
             {@const activeVal = editedFields[colName] !== undefined ? editedFields[colName] : val}
             {@const formatted = formatValue(activeVal)}
             {@const isNullVal = activeVal === null || activeVal === undefined}
-            {@const enumVals = canEdit ? parseEnumValues(colType) : []}
+            {@const enumVals = canEdit ? resolveEnumValues(col, tableMeta) : []}
+            {@const kind = classifyColumnType(colType, enumVals)}
             {@const isJson = isJsonType(colType, activeVal)}
             {@const isLong = formatted.length > 72 || formatted.includes('\n')}
 
@@ -520,8 +531,9 @@
                 <div class="flex items-start gap-1.5">
                   <div class="flex-1 min-w-0">
                     {#if isBooleanType(colType) && canEdit}
+                      {@const boolOpts = nullable ? [{ label: 'TRUE', v: true }, { label: 'FALSE', v: false }, { label: 'NULL', v: null }] : [{ label: 'TRUE', v: true }, { label: 'FALSE', v: false }]}
                       <div class="inline-flex items-center rounded-lg bg-[#090d16] border border-slate-700/80 p-0.5">
-                        {#each [{ label: 'TRUE', v: true }, { label: 'FALSE', v: false }, { label: 'NULL', v: null }] as opt}
+                        {#each boolOpts as opt}
                           {@const isSelected =
                             activeVal === opt.v ||
                             (opt.v === true && activeVal === 1) ||
@@ -542,17 +554,22 @@
                           </button>
                         {/each}
                       </div>
-                    {:else if enumVals.length > 0 && canEdit}
+                    {:else if kind.isEnum && canEdit}
                       <select
-                        value={isNullVal ? '__NULL__' : String(activeVal)}
+                        value={isNullVal ? (nullable ? '__NULL__' : '') : String(activeVal)}
                         onchange={(e) => {
                           const v = (e.currentTarget as HTMLSelectElement).value;
+                          if (v === '__NULL__' && !nullable) return;
                           handleFieldChange(colName, v === '__NULL__' ? null : v);
                           saveField(colName, cIdx);
                         }}
                         class="w-full h-8 bg-[#090d16] border border-slate-700/80 rounded-lg px-2.5 text-xs font-mono text-slate-100 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500/30 transition"
                       >
-                        <option value="__NULL__">NULL</option>
+                        {#if nullable}
+                          <option value="__NULL__">NULL</option>
+                        {:else if isNullVal || !enumVals.includes(String(activeVal))}
+                          <option value="" disabled>Select value...</option>
+                        {/if}
                         {#if !isNullVal && !enumVals.includes(String(activeVal))}
                           <option value={String(activeVal)}>{String(activeVal)}</option>
                         {/if}
@@ -560,6 +577,35 @@
                           <option value={ev}>{ev}</option>
                         {/each}
                       </select>
+                    {:else if kind.isDate && canEdit}
+                      <input
+                        type="date"
+                        value={isNullVal ? '' : formatted}
+                        oninput={(e) => handleFieldChange(colName, (e.currentTarget as HTMLInputElement).value)}
+                        onblur={() => saveField(colName, cIdx)}
+                        onkeydown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            saveField(colName, cIdx);
+                          }
+                        }}
+                        class="w-full h-8 bg-[#090d16] border border-slate-700/80 rounded-lg px-2.5 text-xs font-mono text-slate-100 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500/30 transition [color-scheme:dark]"
+                      />
+                    {:else if kind.isTime && canEdit}
+                      <input
+                        type="time"
+                        step="1"
+                        value={isNullVal ? '' : formatted}
+                        oninput={(e) => handleFieldChange(colName, (e.currentTarget as HTMLInputElement).value)}
+                        onblur={() => saveField(colName, cIdx)}
+                        onkeydown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            saveField(colName, cIdx);
+                          }
+                        }}
+                        class="w-full h-8 bg-[#090d16] border border-slate-700/80 rounded-lg px-2.5 text-xs font-mono text-slate-100 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500/30 transition [color-scheme:dark]"
+                      />
                     {:else if isLong || isJson}
                       <textarea
                         rows={Math.min(8, Math.max(3, formatted.split('\n').length))}
@@ -635,7 +681,7 @@
                       </button>
                     {/if}
 
-                    {#if canEdit && !isBooleanType(colType) && !isNullVal}
+                    {#if canEdit && nullable && !isBooleanType(colType) && !isNullVal}
                       <button
                         type="button"
                         onclick={() => {

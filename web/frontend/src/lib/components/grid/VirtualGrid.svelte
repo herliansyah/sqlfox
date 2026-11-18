@@ -2,7 +2,14 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { copyText } from '../../utils/clipboard';
   import { api } from '../../api/client';
-  import { parseEnumValues } from '../../utils/dataTypes';
+  import {
+    classifyColumnType,
+    findTableMeta,
+    resolveColumnNullable,
+    resolveColumnType,
+    resolveEnumValues,
+    validateCellValue as validateCellAgainstSchema,
+  } from '../../utils/dataTypes';
   import { quoteSqlIdentifier, formatSqlLiteral } from '../../utils/sqlStatements';
   import { appState } from '../../stores/appState.svelte';
   import type { ColumnDefinition, FilterPill } from '../../../types';
@@ -218,12 +225,7 @@
     (effectiveDatabase && appState.catalogs[effectiveDatabase.toLowerCase()]) || appState.catalog
   );
 
-  let tableMeta = $derived.by(() => {
-    if (!effectiveTable || !activeCatalog?.tables) return null;
-    return activeCatalog.tables.find(
-      (t) => t.name.toLowerCase() === effectiveTable.toLowerCase()
-    ) || null;
-  });
+  let tableMeta = $derived.by(() => findTableMeta(effectiveTable, activeCatalog));
 
   function isColPK(col: any): boolean {
     if (typeof col === 'object' && col.is_primary_key !== undefined) return Boolean(col.is_primary_key);
@@ -233,18 +235,11 @@
   }
 
   function resolveColType(col: any): string {
-    const direct = getColType(col);
-    if (direct) return direct;
-    const colName = getColName(col);
-    const colMeta = tableMeta?.columns?.find((c) => c.name.toLowerCase() === colName.toLowerCase());
-    return colMeta?.type || '';
+    return resolveColumnType(col, tableMeta);
   }
 
   function isColNullable(col: any): boolean {
-    if (typeof col === 'object' && col.is_nullable !== undefined) return Boolean(col.is_nullable);
-    const colName = getColName(col);
-    const colMeta = tableMeta?.columns?.find((c) => c.name.toLowerCase() === colName.toLowerCase());
-    return colMeta ? Boolean(colMeta.is_nullable) : true;
+    return resolveColumnNullable(col, tableMeta);
   }
 
   let allColumns = $derived<string[]>(
@@ -548,7 +543,14 @@
     const cleaned: Record<string, any> = {};
     for (const [k, v] of Object.entries(draft)) {
       if (v !== '' && v !== undefined) {
-        cleaned[k] = v;
+        const colObj = result?.columns?.find((c) => getColName(c).toLowerCase() === k.toLowerCase()) ?? k;
+        const valToCheck = v === '__NULL__' ? null : v;
+        const err = validateCellAgainstSchema(valToCheck, colObj, tableMeta);
+        if (err) {
+          appState.showToast(err, 'error');
+          return;
+        }
+        cleaned[k] = valToCheck;
       }
     }
     try {
@@ -591,31 +593,6 @@
   function duplicateMultipleRows(indices: number[]) {
     if (!canEdit) return;
     indices.forEach((idx) => duplicateRowAsDraft(idx, true));
-  }
-
-  function validateCellValue(val: string, colType: string): string | null {
-    if (!val) return null;
-    const t = colType.toLowerCase();
-    if (/^(tinyint|smallint|mediumint|int|integer|bigint|serial)/.test(t) && !t.includes('tinyint(1)')) {
-      if (!/^-?\d+$/.test(val.trim())) return `Expected integer for ${colType}`;
-    } else if (/^(decimal|numeric|float|double|real)/.test(t)) {
-      if (!Number.isFinite(Number(val.trim()))) return `Expected numeric value for ${colType}`;
-    } else if (t.includes('json')) {
-      try {
-        JSON.parse(val);
-      } catch {
-        return `Invalid JSON syntax for ${colType}`;
-      }
-    } else if (t === 'date') {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(val.trim())) return 'Expected date format YYYY-MM-DD';
-    } else if (t === 'time') {
-      if (!/^\d{2}:\d{2}(:\d{2})?$/.test(val.trim())) return 'Expected time format HH:MM or HH:MM:SS';
-    } else if (t.startsWith('datetime') || t.startsWith('timestamp')) {
-      if (!/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?/.test(val.trim())) {
-        return 'Expected format YYYY-MM-DD HH:MM:SS';
-      }
-    }
-    return null;
   }
 
   function stepActiveDatePart(delta: number) {
@@ -661,6 +638,7 @@
 
   function applyEditPreset(preset: 'NULL' | 'EMPTY' | 'NOW' | 'DATE' | 'UUID', origIdx: number, cIdx: number) {
     if (!canEdit || !effectiveTable || !result?.rows) return;
+    const colDef = result.columns[cIdx];
     let next: any = '';
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
@@ -674,6 +652,11 @@
       next = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
         ? crypto.randomUUID()
         : '00000000-0000-4000-8000-000000000000';
+    }
+    const errMsg = validateCellAgainstSchema(next, colDef, tableMeta);
+    if (errMsg) {
+      appState.showToast(errMsg, 'error');
+      return;
     }
     editingCell = {
       rIdx: origIdx,
@@ -741,13 +724,12 @@
   function commitCellEdit(origIdx: number, cIdx: number) {
     if (!editingCell || !canEdit || !effectiveTable || !result?.rows) return;
     const colDef = result.columns[cIdx];
-    const colType = resolveColType(colDef);
     const oldVal = result.rows[origIdx][cIdx];
     const newVal = editingCell.tempValue;
 
     const oldStr = oldVal === null || oldVal === undefined ? '' : typeof oldVal === 'object' ? JSON.stringify(oldVal) : String(oldVal);
     if (newVal !== oldStr) {
-      const errMsg = validateCellValue(newVal, colType);
+      const errMsg = validateCellAgainstSchema(newVal, colDef, tableMeta);
       if (errMsg) {
         appState.showToast(errMsg, 'error');
         return;
@@ -1973,16 +1955,68 @@
                 </td>
                 {#each visibleColumns as col}
                   {@const colName = getColName(col)}
+                  {@const colType = resolveColType(col)}
+                  {@const nullable = isColNullable(col)}
+                  {@const enumVals = resolveEnumValues(col, tableMeta)}
+                  {@const kind = classifyColumnType(colType, enumVals)}
                   <td class="px-2 py-0.5 border-r border-sky-800/40">
-                    <input
-                      type="text"
-                      bind:value={draft[colName]}
-                      onkeydown={(e) => {
-                        if (e.key === 'Enter') saveDraftRow(dIdx);
-                      }}
-                      placeholder="draft..."
-                      class="w-full bg-transparent text-sky-100 placeholder-sky-600/60 outline-none text-xs font-mono"
-                    />
+                    {#if kind.isBool}
+                      <select
+                        bind:value={draft[colName]}
+                        class="w-full bg-[#090d16] text-sky-100 outline-none text-xs font-mono rounded px-1 py-0.5 border border-sky-800/60"
+                      >
+                        <option value="">(default)</option>
+                        <option value="1">TRUE (1)</option>
+                        <option value="0">FALSE (0)</option>
+                        {#if nullable}
+                          <option value="__NULL__">NULL</option>
+                        {/if}
+                      </select>
+                    {:else if kind.isEnum}
+                      <select
+                        bind:value={draft[colName]}
+                        class="w-full bg-[#090d16] text-sky-100 outline-none text-xs font-mono rounded px-1 py-0.5 border border-sky-800/60"
+                      >
+                        <option value="">(default)</option>
+                        {#each enumVals as ev}
+                          <option value={ev}>{ev}</option>
+                        {/each}
+                        {#if nullable}
+                          <option value="__NULL__">NULL</option>
+                        {/if}
+                      </select>
+                    {:else if kind.isDate}
+                      <input
+                        type="date"
+                        bind:value={draft[colName]}
+                        onkeydown={(e) => {
+                          if (e.key === 'Enter') saveDraftRow(dIdx);
+                        }}
+                        class="w-full bg-transparent text-sky-100 outline-none text-xs font-mono [color-scheme:dark]"
+                      />
+                    {:else if kind.isTime}
+                      <input
+                        type="time"
+                        step="1"
+                        bind:value={draft[colName]}
+                        onkeydown={(e) => {
+                          if (e.key === 'Enter') saveDraftRow(dIdx);
+                        }}
+                        class="w-full bg-transparent text-sky-100 outline-none text-xs font-mono [color-scheme:dark]"
+                      />
+                    {:else}
+                      <input
+                        type="text"
+                        inputmode={kind.isInt ? 'numeric' : kind.isDecimal ? 'decimal' : undefined}
+                        maxlength={kind.maxLength ?? undefined}
+                        bind:value={draft[colName]}
+                        onkeydown={(e) => {
+                          if (e.key === 'Enter') saveDraftRow(dIdx);
+                        }}
+                        placeholder="draft..."
+                        class="w-full bg-transparent text-sky-100 placeholder-sky-600/60 outline-none text-xs font-mono"
+                      />
+                    {/if}
                   </td>
                 {/each}
               </tr>
@@ -2046,13 +2080,15 @@
                   {@const inRange = isCellInRange(dispRowIdx, visColIdx)}
                   {@const isEditingThis = editingCell && editingCell.rIdx === rowItem.origIdx && editingCell.cIdx === cIdx}
                   {@const fk = fkMap.get(colName)}
-                  {@const tLow = colType.toLowerCase()}
-                  {@const enumVals = parseEnumValues(colType)}
-                  {@const isBool = tLow === 'bool' || tLow === 'boolean' || tLow === 'tinyint(1)'}
-                  {@const isDateLike = !tLow.includes('year') && (tLow.includes('date') || tLow.includes('time'))}
+                  {@const enumVals = resolveEnumValues(col, tableMeta)}
+                  {@const kind = classifyColumnType(colType, enumVals)}
+                  {@const isBool = kind.isBool}
+                  {@const isDateLike = kind.isDateTime}
                   {@const fkListId = fk ? `fk-datalist-${rowItem.origIdx}-${cIdx}` : undefined}
                   {@const fkOpts = fk ? fkDatalistCache[`${fk.referenced_table}.${fk.referenced_column}`] || [] : []}
-                  {@const isJsonLike = formatted.type === 'json' || tLow.includes('json')}
+                  {@const isJsonLike = formatted.type === 'json' || kind.isJson}
+                  {@const showUuidPreset = kind.isUuid || (kind.isString && (!kind.maxLength || kind.maxLength >= 36))}
+                  {@const hasAnyPreset = nullable || kind.isString || kind.isDateTime || kind.isDate || showUuidPreset}
 
                   <td
                     onclick={(e) => {
@@ -2075,33 +2111,49 @@
                     {#if isEditingThis}
                       <div class="relative flex items-center space-x-1 min-w-[140px]">
                         {#if isBool}
+                          {@const boolSelectVal = cellVal === null || cellVal === undefined ? (nullable ? '__NULL__' : '') : (cellVal === true || cellVal === 1 || String(cellVal).toLowerCase() === 'true' || String(cellVal) === '1' ? '1' : '0')}
                           <select
                             use:autoFocus
-                            value={editingCell!.tempValue}
+                            value={boolSelectVal}
                             onchange={(e) => {
                               const v = (e.currentTarget as HTMLSelectElement).value;
+                              if (v === '__NULL__' && !nullable) return;
                               commitDirectCellValue(rowItem.origIdx, cIdx, v === '__NULL__' ? null : v === '1');
+                            }}
+                            onkeydown={(e) => {
+                              if (e.key === 'Escape') editingCell = null;
                             }}
                             onblur={() => (editingCell = null)}
                             class="w-full bg-[#0f172a] text-slate-100 border border-sky-400 px-1 py-0 text-xs font-mono outline-none"
                           >
+                            {#if !nullable && boolSelectVal === ''}
+                              <option value="" disabled>Select...</option>
+                            {/if}
                             <option value="1">TRUE (1)</option>
                             <option value="0">FALSE (0)</option>
                             {#if nullable}
                               <option value="__NULL__">NULL</option>
                             {/if}
                           </select>
-                        {:else if enumVals.length > 0}
+                        {:else if kind.isEnum}
+                          {@const enumSelectVal = cellVal === null || cellVal === undefined ? (nullable ? '__NULL__' : '') : String(cellVal)}
                           <select
                             use:autoFocus
-                            value={editingCell!.tempValue}
+                            value={enumSelectVal}
                             onchange={(e) => {
                               const v = (e.currentTarget as HTMLSelectElement).value;
+                              if (v === '__NULL__' && !nullable) return;
                               commitDirectCellValue(rowItem.origIdx, cIdx, v === '__NULL__' ? null : v);
+                            }}
+                            onkeydown={(e) => {
+                              if (e.key === 'Escape') editingCell = null;
                             }}
                             onblur={() => (editingCell = null)}
                             class="w-full bg-[#0f172a] text-slate-100 border border-sky-400 px-1 py-0 text-xs font-mono outline-none"
                           >
+                            {#if !nullable && (!enumSelectVal || !enumVals.includes(enumSelectVal))}
+                              <option value="" disabled>Select...</option>
+                            {/if}
                             {#each enumVals as ev}
                               <option value={ev}>{ev}</option>
                             {/each}
@@ -2109,11 +2161,52 @@
                               <option value="__NULL__">NULL</option>
                             {/if}
                           </select>
+                        {:else if kind.isDate}
+                          <input
+                            id="grid-inline-editor"
+                            use:autoFocus
+                            type="date"
+                            bind:value={editingCell!.tempValue}
+                            onblur={() => commitCellEdit(rowItem.origIdx, cIdx)}
+                            onkeydown={(e) => {
+                              if (e.key === 'Tab') {
+                                e.preventDefault();
+                                commitCellEdit(rowItem.origIdx, cIdx);
+                                advanceActiveCell(0, e.shiftKey ? -1 : 1);
+                                return;
+                              }
+                              if (e.key === 'Enter') commitCellEdit(rowItem.origIdx, cIdx);
+                              if (e.key === 'Escape') editingCell = null;
+                            }}
+                            class="w-full bg-[#0f172a] text-slate-100 border border-sky-400 px-1 py-0 text-xs font-mono outline-none [color-scheme:dark]"
+                          />
+                        {:else if kind.isTime}
+                          <input
+                            id="grid-inline-editor"
+                            use:autoFocus
+                            type="time"
+                            step="1"
+                            bind:value={editingCell!.tempValue}
+                            onblur={() => commitCellEdit(rowItem.origIdx, cIdx)}
+                            onkeydown={(e) => {
+                              if (e.key === 'Tab') {
+                                e.preventDefault();
+                                commitCellEdit(rowItem.origIdx, cIdx);
+                                advanceActiveCell(0, e.shiftKey ? -1 : 1);
+                                return;
+                              }
+                              if (e.key === 'Enter') commitCellEdit(rowItem.origIdx, cIdx);
+                              if (e.key === 'Escape') editingCell = null;
+                            }}
+                            class="w-full bg-[#0f172a] text-slate-100 border border-sky-400 px-1 py-0 text-xs font-mono outline-none [color-scheme:dark]"
+                          />
                         {:else}
                           <input
                             id="grid-inline-editor"
                             use:autoFocus
                             type="text"
+                            inputmode={kind.isInt ? 'numeric' : kind.isDecimal ? 'decimal' : undefined}
+                            maxlength={kind.maxLength ?? undefined}
                             list={fkListId}
                             bind:value={editingCell!.tempValue}
                             onblur={() => commitCellEdit(rowItem.origIdx, cIdx)}
@@ -2162,23 +2255,29 @@
                         {/if}
                       </div>
                       <!-- Inline Editor Presets Strip -->
-                      <!-- svelte-ignore a11y_no_static_element_interactions -->
-                      <div
-                        onmousedown={(e) => e.preventDefault()}
-                        class="absolute left-0 top-full mt-0.5 z-40 flex items-center space-x-1 bg-[#0b0f19] border border-slate-700 rounded px-1.5 py-0.5 shadow-xl text-[9.5px] font-mono"
-                      >
-                        {#if nullable}
-                          <button type="button" onclick={() => applyEditPreset('NULL', rowItem.origIdx, cIdx)} class="px-1 py-0.2 rounded bg-rose-950/70 hover:bg-rose-900 text-rose-300 border border-rose-800">NULL</button>
-                        {/if}
-                        <button type="button" onclick={() => applyEditPreset('EMPTY', rowItem.origIdx, cIdx)} class="px-1 py-0.2 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700">''</button>
-                        {#if isDateLike}
-                          <button type="button" onclick={() => applyEditPreset('NOW', rowItem.origIdx, cIdx)} class="px-1 py-0.2 rounded bg-sky-950/70 hover:bg-sky-900 text-sky-300 border border-sky-800">NOW</button>
-                          <button type="button" onclick={() => applyEditPreset('DATE', rowItem.origIdx, cIdx)} class="px-1 py-0.2 rounded bg-sky-950/70 hover:bg-sky-900 text-sky-300 border border-sky-800">DATE</button>
-                        {/if}
-                        {#if tLow.includes('uuid') || tLow.includes('char(36)') || tLow.includes('varchar')}
-                          <button type="button" onclick={() => applyEditPreset('UUID', rowItem.origIdx, cIdx)} class="px-1 py-0.2 rounded bg-purple-950/70 hover:bg-purple-900 text-purple-300 border border-purple-800">UUID</button>
-                        {/if}
-                      </div>
+                      {#if hasAnyPreset}
+                        <!-- svelte-ignore a11y_no_static_element_interactions -->
+                        <div
+                          onmousedown={(e) => e.preventDefault()}
+                          class="absolute left-0 top-full mt-0.5 z-40 flex items-center space-x-1 bg-[#0b0f19] border border-slate-700 rounded px-1.5 py-0.5 shadow-xl text-[9.5px] font-mono"
+                        >
+                          {#if nullable}
+                            <button type="button" onclick={() => applyEditPreset('NULL', rowItem.origIdx, cIdx)} class="px-1 py-0.2 rounded bg-rose-950/70 hover:bg-rose-900 text-rose-300 border border-rose-800">NULL</button>
+                          {/if}
+                          {#if kind.isString}
+                            <button type="button" onclick={() => applyEditPreset('EMPTY', rowItem.origIdx, cIdx)} class="px-1 py-0.2 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700">''</button>
+                          {/if}
+                          {#if kind.isDateTime}
+                            <button type="button" onclick={() => applyEditPreset('NOW', rowItem.origIdx, cIdx)} class="px-1 py-0.2 rounded bg-sky-950/70 hover:bg-sky-900 text-sky-300 border border-sky-800">NOW</button>
+                          {/if}
+                          {#if kind.isDate || kind.isDateTime}
+                            <button type="button" onclick={() => applyEditPreset('DATE', rowItem.origIdx, cIdx)} class="px-1 py-0.2 rounded bg-sky-950/70 hover:bg-sky-900 text-sky-300 border border-sky-800">DATE</button>
+                          {/if}
+                          {#if showUuidPreset}
+                            <button type="button" onclick={() => applyEditPreset('UUID', rowItem.origIdx, cIdx)} class="px-1 py-0.2 rounded bg-purple-950/70 hover:bg-purple-900 text-purple-300 border border-purple-800">UUID</button>
+                          {/if}
+                        </div>
+                      {/if}
                     {:else}
                       <div class="flex items-center justify-between group/cell">
                         <span class="truncate block">{formatted.display}</span>
@@ -2557,6 +2656,12 @@
           <div id="grid-ctx-insert-section">
             <div id="grid-ctx-insert-options">
               {#if canEdit}
+                {@const ctxColDef = result?.columns?.[contextMenu.cIdx]}
+                {@const ctxNullable = ctxColDef ? isColNullable(ctxColDef) : true}
+                {@const ctxEnumVals = ctxColDef ? resolveEnumValues(ctxColDef, tableMeta) : []}
+                {@const ctxKind = classifyColumnType(ctxColDef ? resolveColType(ctxColDef) : '', ctxEnumVals)}
+                {@const ctxShowUuid = ctxKind.isUuid || (ctxKind.isString && (!ctxKind.maxLength || ctxKind.maxLength >= 36))}
+                {@const ctxHasPresets = ctxNullable || ctxKind.isDateTime || ctxKind.isDate || ctxShowUuid}
                 <button
                   onclick={() => {
                     const { rIdx, cIdx, cellValue } = contextMenu!;
@@ -2568,15 +2673,25 @@
                   <Icon name="edit" class="w-3.5 h-3.5 text-sky-400 shrink-0" />
                   <span>Edit Cell (Inline)</span>
                 </button>
-                <div class="px-3 py-1 border-y border-slate-800/60 flex items-center justify-between gap-1 text-[10px] font-mono">
-                  <span class="text-slate-500">⚡ Insert:</span>
-                  <div class="flex items-center gap-1">
-                    <button onclick={() => { const { rIdx, cIdx } = contextMenu!; closeContextMenu(); applyEditPreset('NULL', rIdx, cIdx); }} class="px-1 rounded bg-slate-800 hover:bg-slate-700 text-rose-300">NULL</button>
-                    <button onclick={() => { const { rIdx, cIdx } = contextMenu!; closeContextMenu(); applyEditPreset('NOW', rIdx, cIdx); }} class="px-1 rounded bg-slate-800 hover:bg-slate-700 text-sky-300">NOW</button>
-                    <button onclick={() => { const { rIdx, cIdx } = contextMenu!; closeContextMenu(); applyEditPreset('DATE', rIdx, cIdx); }} class="px-1 rounded bg-slate-800 hover:bg-slate-700 text-emerald-300">TODAY</button>
-                    <button onclick={() => { const { rIdx, cIdx } = contextMenu!; closeContextMenu(); applyEditPreset('UUID', rIdx, cIdx); }} class="px-1 rounded bg-slate-800 hover:bg-slate-700 text-purple-300">UUID</button>
+                {#if ctxHasPresets}
+                  <div class="px-3 py-1 border-y border-slate-800/60 flex items-center justify-between gap-1 text-[10px] font-mono">
+                    <span class="text-slate-500">⚡ Insert:</span>
+                    <div class="flex items-center gap-1">
+                      {#if ctxNullable}
+                        <button onclick={() => { const { rIdx, cIdx } = contextMenu!; closeContextMenu(); applyEditPreset('NULL', rIdx, cIdx); }} class="px-1 rounded bg-slate-800 hover:bg-slate-700 text-rose-300">NULL</button>
+                      {/if}
+                      {#if ctxKind.isDateTime}
+                        <button onclick={() => { const { rIdx, cIdx } = contextMenu!; closeContextMenu(); applyEditPreset('NOW', rIdx, cIdx); }} class="px-1 rounded bg-slate-800 hover:bg-slate-700 text-sky-300">NOW</button>
+                      {/if}
+                      {#if ctxKind.isDate || ctxKind.isDateTime}
+                        <button onclick={() => { const { rIdx, cIdx } = contextMenu!; closeContextMenu(); applyEditPreset('DATE', rIdx, cIdx); }} class="px-1 rounded bg-slate-800 hover:bg-slate-700 text-emerald-300">TODAY</button>
+                      {/if}
+                      {#if ctxShowUuid}
+                        <button onclick={() => { const { rIdx, cIdx } = contextMenu!; closeContextMenu(); applyEditPreset('UUID', rIdx, cIdx); }} class="px-1 rounded bg-slate-800 hover:bg-slate-700 text-purple-300">UUID</button>
+                      {/if}
+                    </div>
                   </div>
-                </div>
+                {/if}
                 {#if selectedRowIndices.length > 1}
                   <button
                     id="grid-ctx-btn-dup-nokey"

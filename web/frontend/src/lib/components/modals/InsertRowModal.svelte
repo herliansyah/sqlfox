@@ -1,6 +1,6 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
-  import { parseEnumValues } from '../../utils/dataTypes';
+  import { resolveEnumValues } from '../../utils/dataTypes';
   import Icon from '../common/Icon.svelte';
 
   let currentTab = $derived(appState.activeTab);
@@ -107,7 +107,7 @@
         {#if activeTableMeta}
           {#each activeTableMeta.columns as col}
             {@const tLow = (col.type || '').toLowerCase()}
-            {@const enumVals = parseEnumValues(col.type || '')}
+            {@const enumVals = resolveEnumValues(col, activeTableMeta)}
             {@const isBool = tLow === 'bool' || tLow === 'boolean' || tLow === 'tinyint(1)'}
             {@const isLong = tLow.includes('text') || tLow.includes('json')}
             {@const isNum = /(int|decimal|numeric|float|double|real|serial)/.test(tLow) && !isBool}
