@@ -114,14 +114,6 @@
       hidden: !hasConn,
       action: () => appState.openDbDiagnosticsModal(),
     },
-    {
-      label: 'Audit Log',
-      desc: 'Persistent session query & mutation history',
-      icon: 'clipboard-list',
-      iconColor: 'text-purple-400',
-      hidden: !hasConn,
-      action: () => (appState.isAuditDrawerOpen = true),
-    },
   ].filter((item) => !item.hidden));
 
   let dbToolItems = $derived<ToolMenuItem[]>([

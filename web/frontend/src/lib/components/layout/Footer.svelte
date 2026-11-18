@@ -108,12 +108,14 @@
     {/if}
   </div>
 
-  <!-- Right: Activity Console, Memory, Browser Popout, Update Pill, Docs, Shortcuts, Version -->
+  <!-- Right: Activity Console, Audit Log, Memory, Browser Popout, Update Pill, Docs, Shortcuts, Version -->
   <div class="flex items-center space-x-2 font-mono shrink-0">
     <!-- Live Activity Console Button -->
     <button
       onclick={() => appState.toggleActivityDrawer()}
-      class="text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 px-1.5 py-0.5 rounded transition cursor-pointer flex items-center space-x-1.5 select-none"
+      class="px-1.5 py-0.5 rounded transition cursor-pointer flex items-center space-x-1.5 select-none {appState.isActivityDrawerOpen
+        ? 'bg-slate-800 text-slate-100'
+        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'}"
       title="Toggle Live Activity Console (Ctrl+`)"
     >
       <span
@@ -135,6 +137,21 @@
         </span>
       {/if}
     </button>
+
+    {#if appState.activeConnection}
+      <!-- Session Audit Log Button -->
+      <button
+        id="footer-audit-btn"
+        onclick={() => appState.toggleAuditDrawer()}
+        class="px-1.5 py-0.5 rounded transition cursor-pointer flex items-center space-x-1 select-none {appState.isAuditDrawerOpen
+          ? 'bg-slate-800 text-sky-300'
+          : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'}"
+        title="Toggle Session Audit Log"
+      >
+        <Icon name="clipboard-list" class="w-3 h-3 {appState.isAuditDrawerOpen ? 'text-sky-400' : 'text-purple-400'}" />
+        <span class="font-sans">Audit</span>
+      </button>
+    {/if}
 
     <!-- Memory Readout -->
     <span class="text-slate-400 px-1.5 py-0.5 rounded hover:bg-slate-800/60 transition cursor-default select-none hidden sm:inline" title="Server / Client Heap Allocation">

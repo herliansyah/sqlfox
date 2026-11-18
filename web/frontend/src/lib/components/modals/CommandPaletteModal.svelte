@@ -202,7 +202,7 @@
       shortcut: 'Ctrl+`',
       category: 'Actions',
       icon: 'terminal',
-      action: () => (appState.isActivityDrawerOpen = !appState.isActivityDrawerOpen),
+      action: () => appState.toggleActivityDrawer(),
     });
     list.push({
       id: 'action-audit-log',
@@ -210,7 +210,7 @@
       subtitle: 'Historical query logs and statement attribution',
       category: 'Actions',
       icon: 'clipboard-list',
-      action: () => (appState.isAuditDrawerOpen = true),
+      action: () => appState.toggleAuditDrawer(true),
     });
     list.push({
       id: 'action-copilot',

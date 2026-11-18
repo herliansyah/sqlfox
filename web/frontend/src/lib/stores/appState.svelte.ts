@@ -523,7 +523,16 @@ export class AppState {
   toggleActivityDrawer() {
     this.isActivityDrawerOpen = !this.isActivityDrawerOpen;
     if (this.isActivityDrawerOpen) {
+      this.isAuditDrawerOpen = false;
       this.unreadActivityErrors = 0;
+    }
+  }
+
+  toggleAuditDrawer(open?: boolean) {
+    const next = open ?? !this.isAuditDrawerOpen;
+    this.isAuditDrawerOpen = next;
+    if (next) {
+      this.isActivityDrawerOpen = false;
     }
   }
 
