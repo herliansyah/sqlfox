@@ -28,6 +28,21 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            web/frontend/package-lock.json
+
+      - name: Build Svelte Frontend
+        run: |
+          npm ci
+          npm --prefix web/frontend ci
+          npm run build:svelte
+
       - name: Run Tests
         run: go test -v ./...
 

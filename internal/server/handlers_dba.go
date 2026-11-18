@@ -503,6 +503,16 @@ func (s *Server) handleGetUserGrants(w http.ResponseWriter, r *http.Request) {
 	user := r.URL.Query().Get("user")
 	host := r.URL.Query().Get("host")
 	if user == "" || host == "" {
+		var req struct {
+			User string `json:"user"`
+			Host string `json:"host"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
+			user = req.User
+			host = req.Host
+		}
+	}
+	if user == "" || host == "" {
 		writeError(w, http.StatusBadRequest, "user and host query parameters are required")
 		return
 	}
@@ -565,6 +575,16 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 
 	user := r.URL.Query().Get("user")
 	host := r.URL.Query().Get("host")
+	if user == "" || host == "" {
+		var req struct {
+			User string `json:"user"`
+			Host string `json:"host"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
+			user = req.User
+			host = req.Host
+		}
+	}
 	if user == "" || host == "" {
 		writeError(w, http.StatusBadRequest, "user and host query parameters are required")
 		return

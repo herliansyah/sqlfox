@@ -95,8 +95,8 @@ Fitur-fitur esensial yang diharapkan oleh developer dan DBA dari sebuah Database
 ### 1.13 Arsitektur Frontend Modular & Peningkatan Engine Editor CodeMirror 6
 * **Status Saat Ini**: **Terimplementasi (v0.17.2, ADR 0061, ADR 0062)**
 * **Detail Implementasi**:
-  - Dekomposisi monolit HTML ke dalam 15 modul JavaScript domain (`web/src/js/`) dan struktur HTML semantik (`web/src/index.html`).
-  - Pipeline build otomatis (`scripts/build_web.js`) yang melakukan kompilasi CSS statis via Tailwind CLI, validasi sintaks script gabungan di memori melalui Node `vm.Script`, dan perakitan ke `web/dist/index.html`.
+  - Port penuh UI ke Svelte 5 Runes + TypeScript di `web/frontend/` (menggantikan 15 modul JavaScript domain legacy di `web/src/js/`).
+  - Pipeline build otomatis (`scripts/build_web.js` → `npm run build:svelte`) yang menjalankan Vite + Tailwind dan menghasilkan bundle ke `web/dist/index.html`.
   - Migrasi dari CodeMirror 5 ke CodeMirror 6 modern dengan `@codemirror/lang-sql`, *compartment* dialek dinamis (MySQL, PostgreSQL, SQLite), palet tema gelap kontras tinggi, dan integrasi autocompletion skema katalog.
 
 ---
@@ -140,8 +140,8 @@ Fitur-fitur yang sudah ada di codebase namun menambah kompleksitas berlebih, mem
   - `web/src/` (15 modul domain JS), `scripts/build_web.js`, `web/dist/index.html`
 * **Status Saat Ini**: **Terimplementasi (ADR 0061, ADR 0062)**
 * **Detail Implementasi**:
-  - Kode antarmuka telah didekomposisi dari single-file raksasa menjadi 15 modul JavaScript terfokus di `web/src/js/` dan struktur HTML di `web/src/index.html`.
-  - Build pipeline otomatis (`scripts/build_web.js`) memvalidasi sintaks via Node `vm.Script` dan mengompilasi CSS statis Tailwind (85 KB) menggantikan Play CDN runtime (398 KB), menghilangkan layout shift (CLS) dan merampingkan pemeliharaan kode.
+  - Kode antarmuka telah dimigrasikan sepenuhnya ke aplikasi Svelte 5 di `web/frontend/` (runes reactivity, TypeScript, Tailwind), menggantikan monolit HTML/JS legacy.
+  - Build pipeline otomatis (`scripts/build_web.js` → `npm run build:svelte`) menjalankan Vite + Tailwind, menghilangkan layout shift (CLS) dan merampingkan pemeliharaan kode.
   - Editor dimodernisasi ke CodeMirror 6 dengan bundling offline via esbuild (`scripts/build_codemirror.js`).
 
 ### 2.5 Operational Notes dengan Web Audio API Alarm & Snooze

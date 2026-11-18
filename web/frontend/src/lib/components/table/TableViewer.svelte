@@ -1,0 +1,125 @@
+<script lang="ts">
+  import { appState } from '../../stores/appState.svelte';
+  import type { TableMode } from '../../../types';
+  import Icon from '../common/Icon.svelte';
+  import VirtualGrid from '../grid/VirtualGrid.svelte';
+  import TableStructure from './TableStructure.svelte';
+  import TableIndexes from './TableIndexes.svelte';
+  import TableForeignKeys from './TableForeignKeys.svelte';
+  import TableDDL from './TableDDL.svelte';
+  import TableDiagnostics from './TableDiagnostics.svelte';
+  import TablePartitions from './TablePartitions.svelte';
+  import TableNotes from './TableNotes.svelte';
+
+  let currentTab = $derived(appState.activeTab);
+  let activeMode = $derived<TableMode>(currentTab?.tableMode || 'data');
+  let tableName = $derived(currentTab?.tableName || '');
+
+  let activeCatalog = $derived(
+    (currentTab?.database && appState.catalogs[currentTab.database.toLowerCase()]) || appState.catalog
+  );
+  let tableMeta = $derived.by(() => {
+    if (!tableName || !activeCatalog?.tables) return null;
+    return (
+      activeCatalog.tables.find(
+        (t) => t.name.toLowerCase() === tableName.toLowerCase()
+      ) || null
+    );
+  });
+
+  function setMode(mode: TableMode) {
+    if (currentTab) {
+      appState.setTableMode(currentTab.id, mode);
+    }
+  }
+
+  $effect(() => {
+    if (appState.activeSessionId && currentTab?.isTableViewer && activeMode === 'data' && !currentTab.activeResult && !currentTab.isExecuting) {
+      appState.loadTableData(currentTab);
+    }
+  });
+
+  const subTabs: Array<{ id: TableMode; label: string; icon: string }> = [
+    { id: 'data', label: 'Data Grid', icon: 'table' },
+    { id: 'structure', label: 'Structure', icon: 'columns' },
+    { id: 'indexes', label: 'Indexes', icon: 'key' },
+    { id: 'foreign-keys', label: 'Foreign Keys', icon: 'link' },
+    { id: 'ddl', label: 'DDL', icon: 'file-code' },
+    { id: 'notes', label: 'Notes & Runbooks', icon: 'file-text' },
+    { id: 'diagnostics', label: 'Diagnostics', icon: 'activity' },
+    { id: 'partitions', label: 'Partitions', icon: 'layers' },
+  ];
+</script>
+
+<div class="h-full flex flex-col bg-[#090d16] overflow-hidden select-none">
+  <!-- Sub-Tabs Navigation Bar (Height h-9: 36px - aligned with TabBar and Sidebar) -->
+  <div class="h-9 bg-[#0b0f19] border-b border-slate-800 px-3 flex items-center justify-between text-xs flex-shrink-0">
+    <div class="flex items-center space-x-1">
+      {#each subTabs as sub}
+        {@const isActive = activeMode === sub.id}
+        <button
+          onclick={() => setMode(sub.id)}
+          class="h-7 px-2.5 rounded text-xs transition flex items-center space-x-1.5 {
+            isActive
+              ? 'bg-[#1e293b] text-sky-400 font-bold border border-slate-700/80 shadow-sm'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+          }"
+        >
+          <Icon name={sub.icon} class="w-3.5 h-3.5 {isActive ? 'text-sky-400' : 'text-slate-500'}" />
+          <span>{sub.label}</span>
+        </button>
+      {/each}
+    </div>
+
+    <!-- Active Table Name Pill. Database is only shown when this tab is scoped
+         to a database other than the sidebar's active one. -->
+    <div class="flex items-center space-x-2 font-mono text-[11px] text-slate-400">
+      {#if currentTab?.database && currentTab.database !== appState.currentDatabase}
+        <span class="text-slate-500">{currentTab.database} /</span>
+      {/if}
+      <span class="text-sky-300 font-bold">{tableName}</span>
+      {#if tableMeta && (tableMeta.row_count !== undefined || tableMeta.rows_count !== undefined)}
+        <span
+          class="bg-slate-900 border border-slate-800 text-slate-400 px-1.5 py-0.2 rounded text-[10px]"
+          title="Estimated row count from catalog statistics"
+        >
+          ~{(tableMeta.row_count ?? tableMeta.rows_count ?? 0).toLocaleString()} rows
+        </span>
+      {/if}
+      {#if tableName}
+        <button
+          id="btn-drop-active-table"
+          type="button"
+          onclick={() => appState.dropTable(tableName)}
+          disabled={appState.isReadOnly}
+          class="px-2 py-0.5 rounded bg-rose-950/60 hover:bg-rose-900 disabled:opacity-40 border border-rose-800/80 text-rose-300 text-[10.5px] font-sans font-semibold flex items-center space-x-1 transition"
+          title="Drop table '{tableName}'"
+        >
+          <Icon name="trash-2" class="w-3 h-3" />
+          <span>Drop Table</span>
+        </button>
+      {/if}
+    </div>
+  </div>
+
+  <!-- Content Pane -->
+  <div class="flex-1 overflow-hidden relative">
+    {#if activeMode === 'data'}
+      <VirtualGrid />
+    {:else if activeMode === 'structure'}
+      <TableStructure {tableMeta} />
+    {:else if activeMode === 'indexes'}
+      <TableIndexes {tableMeta} />
+    {:else if activeMode === 'foreign-keys'}
+      <TableForeignKeys {tableMeta} />
+    {:else if activeMode === 'ddl'}
+      <TableDDL {tableName} />
+    {:else if activeMode === 'notes'}
+      <TableNotes {tableName} />
+    {:else if activeMode === 'diagnostics'}
+      <TableDiagnostics {tableMeta} />
+    {:else if activeMode === 'partitions'}
+      <TablePartitions {tableName} />
+    {/if}
+  </div>
+</div>

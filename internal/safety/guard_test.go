@@ -525,3 +525,49 @@ func TestSafetyGuard_DialectBracketIdentifiers(t *testing.T) {
 		t.Errorf("expected qualified DELETE FROM [users] WHERE [id] = 1 to have HasWhere=true, got %+v", resDelQualified)
 	}
 }
+
+func TestSafetyGuard_HardeningEdgeCases(t *testing.T) {
+	// 1. Data-modifying CTE must be flagged as destructive, not bypassed by trailing SELECT.
+	resCTE := Inspect("WITH deleted AS (DELETE FROM users RETURNING *) SELECT * FROM deleted", "Production")
+	if resCTE.RiskLevel != RiskCritical || !resCTE.IsDestructive || resCTE.TargetTable != "users" {
+		t.Errorf("expected data-modifying CTE to be RiskCritical targeting 'users', got %+v", resCTE)
+	}
+	if driver.IsQueryStatement("WITH deleted AS (DELETE\nFROM users) SELECT * FROM deleted") {
+		t.Errorf("IsQueryStatement must return false for data-modifying CTE with newline")
+	}
+	if !driver.IsQueryStatement("WITH t AS (SELECT 'DELETE FROM' AS label) SELECT * FROM t") {
+		t.Errorf("IsQueryStatement must return true for benign CTE containing 'DELETE FROM' inside string literal")
+	}
+
+	// 2. RENAME TABLE and REPLACE INTO
+	resRename := Inspect("RENAME TABLE users TO users_old", "Production")
+	if !resRename.IsDestructive || resRename.Operation != "RENAME" || resRename.TargetTable != "users" {
+		t.Errorf("expected RENAME TABLE to be destructive RENAME on 'users', got %+v", resRename)
+	}
+	resReplace := Inspect("REPLACE INTO users (id, name) VALUES (1, 'a')", "Production")
+	if !resReplace.IsDestructive || !resReplace.RequiresAffirmation || resReplace.Operation != "REPLACE" {
+		t.Errorf("expected REPLACE INTO on Production to require affirmation, got %+v", resReplace)
+	}
+
+	// 3. PostgreSQL ONLY keyword & inline comments between keywords
+	resOnly := Inspect("DELETE FROM ONLY users", "Production")
+	if resOnly.RiskLevel != RiskCritical || resOnly.TargetTable != "users" {
+		t.Errorf("expected DELETE FROM ONLY users to be RiskCritical on 'users', got %+v", resOnly)
+	}
+	resComment := Inspect("DELETE/*bypass*/FROM users", "Production")
+	if resComment.RiskLevel != RiskCritical || resComment.TargetTable != "users" {
+		t.Errorf("expected DELETE/*bypass*/FROM users to be RiskCritical on 'users', got %+v", resComment)
+	}
+
+	// 4. Aliased DELETE/UPDATE must preserve clean TargetTable (not "users as u")
+	resAlias := Inspect("DELETE u FROM users u", "Production")
+	_ = resAlias
+	resAliasStd := Inspect("DELETE FROM users u", "Production")
+	if resAliasStd.TargetTable != "users" {
+		t.Errorf("expected aliased DELETE FROM users u to have TargetTable='users', got %q", resAliasStd.TargetTable)
+	}
+	resUpdateAlias := Inspect("UPDATE users AS u SET active = 0", "Production")
+	if resUpdateAlias.TargetTable != "users" {
+		t.Errorf("expected aliased UPDATE users AS u to have TargetTable='users', got %q", resUpdateAlias.TargetTable)
+	}
+}

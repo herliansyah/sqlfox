@@ -44,6 +44,7 @@ type AssistRequest struct {
 	ResponseStyle    string                   `json:"response_style,omitempty"` // "concise", "detailed", "normal"
 	CustomPrompt     string                   `json:"custom_prompt,omitempty"`  // custom persona / system instructions
 	IncludeSchema    bool                     `json:"include_schema"`
+	Temperature      float32                  `json:"temperature,omitempty"`
 }
 
 // AssemblePrompts compiles the system prompt (incorporating Schema Context Window,
@@ -55,8 +56,9 @@ func AssemblePrompts(req AssistRequest) (systemPrompt string, userPrompt string)
 	}
 
 	var schemaPrompt string
+	var identMap map[string]string
 	if req.IncludeSchema && req.Schema != nil {
-		schemaPrompt = BuildSchemaPrompt(req.Schema, req.Query+" "+req.Prompt+" "+req.ErrorMessage, req.MaskIdentifiers)
+		schemaPrompt, identMap = BuildSchemaPromptWithMap(req.Schema, req.Query+" "+req.Prompt+" "+req.ErrorMessage, req.MaskIdentifiers)
 
 		// Table Notes Injection: check if any referenced tables have table notes.
 		// Notes are free text naming real tables/columns, so they are withheld when masking is on.
@@ -76,8 +78,8 @@ func AssemblePrompts(req AssistRequest) (systemPrompt string, userPrompt string)
 
 	systemPrompt = BaseSystemPrompt(dialect, schemaPrompt)
 
-	// Operational Notes Injection: check if any notes are referenced or mentioned
-	if len(req.OperationalNotes) > 0 {
+	// Operational Notes Injection: withheld when masking is on since notes contain free-text table/column names.
+	if len(req.OperationalNotes) > 0 && !req.MaskIdentifiers {
 		var noteEntries []string
 		for _, on := range req.OperationalNotes {
 			entry := fmt.Sprintf("### Operational Note: %s\n- **Captured Content / Snapshot:**\n%s", on.Title, on.Content)
@@ -113,20 +115,32 @@ func AssemblePrompts(req AssistRequest) (systemPrompt string, userPrompt string)
 		systemPrompt += "\nCustom System Instructions:\n" + req.CustomPrompt + "\n"
 	}
 
+	// Apply identifier masking to user-supplied SQL, plan, and error text when MaskIdentifiers is enabled.
+	queryText := req.Query
+	planText := req.Plan
+	errText := req.ErrorMessage
+	promptText := req.Prompt
+	if req.MaskIdentifiers && len(identMap) > 0 {
+		queryText = MaskIdentifiersInText(queryText, identMap)
+		planText = MaskIdentifiersInText(planText, identMap)
+		errText = MaskIdentifiersInText(errText, identMap)
+		promptText = MaskIdentifiersInText(promptText, identMap)
+	}
+
 	// User prompt routing
 	switch req.Action {
 	case "explain_query":
-		userPrompt = BuildExplainQueryPrompt(req.Query)
+		userPrompt = BuildExplainQueryPrompt(queryText)
 	case "explain_plan":
-		userPrompt = BuildExplainPlanPrompt(req.Query, req.Plan)
+		userPrompt = BuildExplainPlanPrompt(queryText, planText)
 	case "optimize":
-		userPrompt = BuildOptimizeQueryPrompt(req.Query, req.Plan)
+		userPrompt = BuildOptimizeQueryPrompt(queryText, planText)
 	case "nl_to_sql":
-		userPrompt = BuildNLToSQLPrompt(req.Prompt)
+		userPrompt = BuildNLToSQLPrompt(promptText)
 	case "fix_query":
-		userPrompt = BuildDebugErrorPrompt(req.Query, req.ErrorMessage)
+		userPrompt = BuildDebugErrorPrompt(queryText, errText)
 	default:
-		userPrompt = req.Prompt
+		userPrompt = promptText
 	}
 
 	return systemPrompt, userPrompt
@@ -151,5 +165,6 @@ func Assist(ctx context.Context, req AssistRequest) (*CompletionResponse, error)
 	return client.Complete(ctx, CompletionRequest{
 		SystemPrompt: systemPrompt,
 		UserPrompt:   userPrompt,
+		Temperature:  req.Temperature,
 	})
 }

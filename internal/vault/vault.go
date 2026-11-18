@@ -69,6 +69,8 @@ func OpenVault(dbPath string, masterPassword string) (*Vault, error) {
 		return nil, fmt.Errorf("failed to open vault db: %w", err)
 	}
 
+	_, _ = db.Exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;")
+
 	if err := initSchema(db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to init schema: %w", err)

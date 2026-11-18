@@ -1,0 +1,573 @@
+<script lang="ts">
+  import { tick, untrack } from 'svelte';
+  import { appState } from '../../stores/appState.svelte';
+  import Icon from '../common/Icon.svelte';
+  import { viewportFit } from '../../actions/viewportFit';
+
+  let containerWidth = $state(0);
+  let tabsContainerEl = $state<HTMLDivElement | null>(null);
+  let measuredTabWidths = $state<Record<string, number>>({});
+  let showOverflowDropdown = $state(false);
+  let overflowSearchQuery = $state('');
+  let overflowActiveIndex = $state(0);
+  let overflowListEl = $state<HTMLDivElement | null>(null);
+  let overflowBtnRef = $state<HTMLButtonElement | null>(null);
+  let dropdownCoords = $state<{ top: number; left: number }>({ top: 40, left: 0 });
+
+  let tabContextMenu = $state<{
+    open: boolean;
+    x: number;
+    y: number;
+    tabId: string;
+  } | null>(null);
+
+  function isSingletonTab(tab: { isTableViewer?: boolean; isProcesslist?: boolean; isErdCanvas?: boolean; isCluster?: boolean; isVariables?: boolean; isFlightRecorder?: boolean }): boolean {
+    return !!(tab.isTableViewer || tab.isProcesslist || tab.isErdCanvas || tab.isCluster || tab.isVariables || tab.isFlightRecorder);
+  }
+
+  function hasDraft(tab: { sql: string; isTableViewer?: boolean; isProcesslist?: boolean; isErdCanvas?: boolean; isFlightRecorder?: boolean; isVariables?: boolean; isCluster?: boolean; isNote?: boolean }): boolean {
+    return !tab.isTableViewer && !tab.isProcesslist && !tab.isErdCanvas && !tab.isFlightRecorder && !tab.isVariables && !tab.isCluster && !tab.isNote && tab.sql.trim().length > 0;
+  }
+
+  function estimateTabWidth(title: string): number {
+    const charWidth = 7.2;
+    const chromeWidth = 64;
+    return Math.max(105, Math.min(200, Math.round(title.length * charWidth + chromeWidth)));
+  }
+
+  function tabWidthFor(tab: { id: string; title: string }): number {
+    return measuredTabWidths[tab.id] || estimateTabWidth(tab.title);
+  }
+
+  // Measure real rendered DOM tab widths whenever visible tabs or container width changes.
+  $effect(() => {
+    void containerWidth;
+    void appState.tabs.length;
+    tick().then(() => {
+      if (!tabsContainerEl) return;
+      const next: Record<string, number> = {};
+      let changed = false;
+      for (const el of tabsContainerEl.querySelectorAll<HTMLElement>('[data-tab-id]')) {
+        const id = el.dataset.tabId;
+        if (!id) continue;
+        const w = el.offsetWidth;
+        if (w > 0) {
+          next[id] = w;
+          if (measuredTabWidths[id] !== w) changed = true;
+        }
+      }
+      if (changed) {
+        measuredTabWidths = { ...measuredTabWidths, ...next };
+      }
+    });
+  });
+
+  let visibleCount = $derived.by(() => {
+    if (containerWidth <= 0 || appState.tabs.length <= 1) return appState.tabs.length;
+
+    const addBtnWidth = 32;
+    const overflowBtnWidth = 72;
+    const gap = 4;
+    const safetyMargin = 16;
+
+    let totalAll = 0;
+    for (const tab of appState.tabs) {
+      totalAll += tabWidthFor(tab) + gap;
+    }
+    if (totalAll + addBtnWidth + safetyMargin <= containerWidth) {
+      return appState.tabs.length;
+    }
+
+    const availableWidth = containerWidth - addBtnWidth - overflowBtnWidth - safetyMargin;
+    let accumulated = 0;
+    let count = 0;
+    for (let i = 0; i < appState.tabs.length; i++) {
+      const tabW = tabWidthFor(appState.tabs[i]) + gap;
+      if (accumulated + tabW <= availableWidth) {
+        accumulated += tabW;
+        count++;
+      } else {
+        break;
+      }
+    }
+    return Math.max(1, count);
+  });
+
+  let tabPartition = $derived.by(() => {
+    const vCount = visibleCount;
+    const all = appState.tabs;
+    if (vCount <= 0 || all.length <= vCount) {
+      return { visible: all, overflow: [] as typeof all };
+    }
+    const activeIdx = appState.activeTabId ? all.findIndex((t) => t.id === appState.activeTabId) : -1;
+    if (activeIdx >= vCount) {
+      const visible = [...all.slice(0, vCount - 1), all[activeIdx]];
+      const overflow = [...all.slice(vCount - 1, activeIdx), ...all.slice(activeIdx + 1)];
+      return { visible, overflow };
+    }
+    return {
+      visible: all.slice(0, vCount),
+      overflow: all.slice(vCount),
+    };
+  });
+
+  let visibleTabs = $derived(tabPartition.visible);
+  let overflowTabs = $derived(tabPartition.overflow);
+
+  let filteredOverflowTabs = $derived.by(() => {
+    const q = overflowSearchQuery.trim().toLowerCase();
+    if (!q) return overflowTabs;
+    return overflowTabs.filter(
+      (t) =>
+        t.title.toLowerCase().includes(q) ||
+        (t.database && t.database.toLowerCase().includes(q)) ||
+        (t.tableName && t.tableName.toLowerCase().includes(q))
+    );
+  });
+
+  function updateDropdownCoords() {
+    if (!overflowBtnRef) return;
+    const rect = overflowBtnRef.getBoundingClientRect();
+    const dropdownWidth = 288; // w-72 = 18rem = 288px
+    const left = Math.max(10, Math.min(rect.right - dropdownWidth, window.innerWidth - dropdownWidth - 10));
+    dropdownCoords = {
+      top: rect.bottom + 4,
+      left,
+    };
+  }
+
+  function toggleOverflowDropdown(e: MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!showOverflowDropdown) {
+      updateDropdownCoords();
+      overflowActiveIndex = 0;
+      showOverflowDropdown = true;
+      // Focus the panel so arrow keys work without an extra click.
+      tick().then(() => document.getElementById('tab-overflow-dropdown')?.focus());
+    } else {
+      showOverflowDropdown = false;
+    }
+  }
+
+  $effect(() => {
+    if (overflowActiveIndex >= filteredOverflowTabs.length) {
+      overflowActiveIndex = Math.max(0, filteredOverflowTabs.length - 1);
+    }
+  });
+
+  function scrollOverflowActiveIntoView() {
+    tick().then(() =>
+      overflowListEl?.querySelector('[data-overflow-active="true"]')?.scrollIntoView({ block: 'nearest' })
+    );
+  }
+
+  function handleOverflowKeydown(e: KeyboardEvent) {
+    const count = filteredOverflowTabs.length;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (count) {
+        overflowActiveIndex = (overflowActiveIndex + 1) % count;
+        scrollOverflowActiveIntoView();
+      }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (count) {
+        overflowActiveIndex = (overflowActiveIndex - 1 + count) % count;
+        scrollOverflowActiveIntoView();
+      }
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      overflowActiveIndex = 0;
+      scrollOverflowActiveIntoView();
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      overflowActiveIndex = Math.max(0, count - 1);
+      scrollOverflowActiveIntoView();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const tab = filteredOverflowTabs[overflowActiveIndex];
+      if (tab) selectOverflowTab(tab.id);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      showOverflowDropdown = false;
+      overflowBtnRef?.focus();
+    } else if (e.key === 'Tab') {
+      showOverflowDropdown = false;
+    }
+  }
+
+  function selectOverflowTab(tabId: string) {
+    appState.activeTabId = tabId;
+    showOverflowDropdown = false;
+    overflowSearchQuery = '';
+  }
+
+  function closeTabFromOverflow(tabId: string) {
+    appState.closeTab(tabId);
+    if (appState.tabs.length <= visibleCount) {
+      showOverflowDropdown = false;
+    }
+  }
+
+  function handleTabContextMenu(e: MouseEvent, tabId: string) {
+    e.preventDefault();
+    tabContextMenu = {
+      open: true,
+      x: Math.min(e.clientX, window.innerWidth - 200),
+      y: Math.min(e.clientY, window.innerHeight - 220),
+      tabId,
+    };
+  }
+
+  function closeTabMenu() {
+    if (tabContextMenu) tabContextMenu.open = false;
+  }
+
+  function handleMiddleClick(e: MouseEvent, tabId: string) {
+    if (e.button === 1) {
+      // Middle click to close tab
+      e.preventDefault();
+      appState.closeTab(tabId);
+    }
+  }
+</script>
+
+<svelte:window
+  onclick={() => {
+    closeTabMenu();
+    showOverflowDropdown = false;
+  }}
+  onkeydown={(e) => {
+    if (e.key === 'Escape') {
+      showOverflowDropdown = false;
+      closeTabMenu();
+    }
+  }}
+  onresize={() => {
+    if (showOverflowDropdown) {
+      updateDropdownCoords();
+    }
+  }}
+/>
+
+<div
+  bind:clientWidth={containerWidth}
+  id="tabs-bar"
+  class="h-9 bg-[#0b0f19] border-b border-slate-800 flex items-center px-2 select-none justify-between relative overflow-hidden"
+>
+  <!-- Visible Tabs Strip (fits strictly within available screen width) -->
+  <div id="tabs-container" bind:this={tabsContainerEl} class="flex items-center min-w-0 flex-1 overflow-hidden gap-1">
+    {#each visibleTabs as tab (tab.id)}
+      {@const isActive = tab.id === appState.activeTabId}
+      <div
+        data-tab-id={tab.id}
+        class="group relative flex items-center h-8 px-3 rounded-t border-t border-x text-xs cursor-pointer transition-all max-w-[200px] min-w-[100px] shrink-0 {
+          isActive
+            ? 'bg-[#090d16] border-t border-x border-slate-800 text-sky-400 font-semibold shadow-sm'
+            : 'bg-slate-900/60 border-t border-x border-transparent text-slate-400 hover:bg-slate-850 hover:text-slate-200'
+        }"
+        onclick={() => (appState.activeTabId = tab.id)}
+        oncontextmenu={(e) => handleTabContextMenu(e, tab.id)}
+        onmouseup={(e) => handleMiddleClick(e, tab.id)}
+        role="tab"
+        tabindex="0"
+        title={tab.title + (tab.database ? ` (${tab.database})` : '')}
+        onkeydown={(e) => e.key === 'Enter' && (appState.activeTabId = tab.id)}
+      >
+        {#if isActive}
+          <div class="absolute top-0 left-0 right-0 h-[2px] bg-sky-400 rounded-t pointer-events-none"></div>
+        {/if}
+        <!-- Icon Indicator -->
+        <span class="mr-2 flex items-center shrink-0">
+          {#if tab.isExecuting || tab.isStreaming || tab.isExplaining}
+            <Icon name="refresh-cw" class="w-3.5 h-3.5 animate-spin text-sky-400" />
+          {:else if tab.isProcesslist || tab.isCluster || tab.isVariables || tab.isFlightRecorder}
+            <Icon name="cpu" class="w-3.5 h-3.5 text-sky-400" />
+          {:else if tab.isErdCanvas}
+            <Icon name="layers" class="w-3.5 h-3.5 {isActive ? 'text-indigo-400' : 'text-slate-500'}" />
+          {:else if tab.isTableViewer}
+            <Icon name="table" class="w-3.5 h-3.5 {isActive ? 'text-emerald-400' : 'text-slate-500'}" />
+          {:else if tab.isNote}
+            <Icon name="file-text" class="w-3.5 h-3.5 {isActive ? 'text-amber-400' : 'text-slate-500'}" />
+          {:else}
+            <Icon name="file-code" class="w-3.5 h-3.5 {isActive ? 'text-sky-400' : 'text-slate-500'}" />
+          {/if}
+        </span>
+
+        <!-- Title in Monospace -->
+        <span class="truncate font-mono text-[11px] {isActive ? 'text-slate-100' : 'text-slate-400'}">
+          {tab.title}
+        </span>
+
+        {#if tab.txActive}
+          <span class="ml-1.5 w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" title="Transaction active in this tab"></span>
+        {:else if hasDraft(tab)}
+          <span class="ml-1.5 w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" title="SQL draft"></span>
+        {/if}
+
+        <!-- Close Action -->
+        {#if appState.tabs.length > 1}
+          <button
+            onclick={(e) => {
+              e.stopPropagation();
+              appState.closeTab(tab.id);
+            }}
+            class="ml-2 w-4 h-4 rounded hover:bg-slate-700/80 flex items-center justify-center opacity-0 group-hover:opacity-100 text-slate-400 hover:text-white transition"
+            title="Close tab (Ctrl+W)"
+          >
+            <Icon name="x" class="w-3 h-3" />
+          </button>
+        {/if}
+      </div>
+    {/each}
+
+    <!-- Add New Tab Button -->
+    <button
+      id="add-tab-btn"
+      onclick={() => appState.addTab()}
+      class="w-6 h-6 rounded bg-[#1e293b]/60 hover:bg-slate-700 text-slate-400 hover:text-sky-300 border border-slate-700/80 flex items-center justify-center text-xs ml-1 shrink-0 transition shadow-sm"
+      title="New SQL Query (Ctrl+T)"
+    >
+      <Icon name="plus" class="w-3.5 h-3.5" />
+    </button>
+  </div>
+
+  <!-- Tab Overflow Dropdown Menu Trigger (Enterprise Pattern) -->
+  <div id="tab-overflow-wrapper" class="relative flex items-center pl-1.5 shrink-0 z-20 {overflowTabs.length === 0 ? 'hidden' : ''}">
+    <button
+      id="tab-overflow-btn"
+      bind:this={overflowBtnRef}
+      type="button"
+      onclick={toggleOverflowDropdown}
+      class="h-6 px-2 rounded bg-slate-800/80 hover:bg-slate-700 text-sky-400 hover:text-white border border-slate-700/80 flex items-center space-x-1.5 text-xs font-mono transition shadow-sm cursor-pointer"
+      title="More Tabs ({overflowTabs.length} hidden)"
+    >
+      <Icon name="chevrons-right" class="w-3.5 h-3.5" />
+      <span id="tab-overflow-count" class="font-bold text-[11px] text-sky-300">{overflowTabs.length}</span>
+    </button>
+  </div>
+
+  <!-- Tab Context Menu -->
+  {#if tabContextMenu && tabContextMenu.open}
+    {@const ctxTab = appState.tabs.find((t) => t.id === tabContextMenu!.tabId)}
+    {@const singleton = ctxTab ? isSingletonTab(ctxTab) : false}
+    <div
+      id="tab-context-menu"
+      use:viewportFit={{ x: tabContextMenu.x, y: tabContextMenu.y }}
+      style="top: {tabContextMenu.y}px; left: {tabContextMenu.x}px;"
+      class="fixed z-[110] w-48 bg-[#0f172a] border border-slate-700/90 rounded-lg shadow-2xl py-1 divide-y divide-slate-800 text-xs select-none"
+    >
+      <div class="py-1">
+        <button
+          id="tab-ctx-btn-rename"
+          onclick={async () => {
+            const target = appState.tabs.find((t) => t.id === tabContextMenu!.tabId);
+            closeTabMenu();
+            if (!target) return;
+            const next = await appState.showNativePrompt('Enter a new name for this tab:', 'Rename Tab', target.title);
+            if (next !== null) appState.renameTab(target.id, next);
+          }}
+          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
+        >
+          <Icon name="edit" class="w-3.5 h-3.5 text-slate-400" />
+          <span>Rename Tab</span>
+        </button>
+        <button
+          id="tab-ctx-btn-duplicate"
+          disabled={singleton}
+          onclick={() => {
+            if (!singleton) appState.duplicateTab(tabContextMenu!.tabId);
+            closeTabMenu();
+          }}
+          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center space-x-2 text-slate-200"
+        >
+          <Icon name="copy" class="w-3.5 h-3.5 text-sky-400" />
+          <span>Duplicate Tab</span>
+        </button>
+        <button
+          disabled={singleton}
+          onclick={() => {
+            const targetTab = appState.tabs.find((t) => t.id === tabContextMenu!.tabId);
+            if (targetTab && !singleton) {
+              appState.saveQueryToNote(targetTab.sql, targetTab.title);
+            }
+            closeTabMenu();
+          }}
+          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center space-x-2 text-slate-200"
+        >
+          <Icon name="bookmark" class="w-3.5 h-3.5 text-amber-400" />
+          <span>Save as Note</span>
+        </button>
+      </div>
+
+      <div class="px-2.5 py-1.5 space-y-1">
+        <div class="text-[9.5px] font-bold uppercase tracking-wider text-slate-500">Close Tabs</div>
+        <div class="grid grid-cols-2 gap-1 text-[10px]">
+          <button
+            id="tab-ctx-btn-close"
+            onclick={() => {
+              appState.closeTab(tabContextMenu!.tabId);
+              closeTabMenu();
+            }}
+            class="px-2 py-1 rounded bg-slate-800/80 hover:bg-slate-700 text-slate-200 text-left"
+          >Close</button>
+          <button
+            id="tab-ctx-btn-close-others"
+            onclick={() => {
+              appState.closeOtherTabs(tabContextMenu!.tabId);
+              closeTabMenu();
+            }}
+            class="px-2 py-1 rounded bg-slate-800/80 hover:bg-slate-700 text-amber-300 text-left"
+          >Others</button>
+          <button
+            id="tab-ctx-btn-close-right"
+            onclick={() => {
+              appState.closeTabsToRight(tabContextMenu!.tabId);
+              closeTabMenu();
+            }}
+            class="px-2 py-1 rounded bg-slate-800/80 hover:bg-slate-700 text-slate-300 text-left"
+          >To Right</button>
+          <button
+            id="tab-ctx-btn-close-all"
+            onclick={() => {
+              appState.closeAllTabs();
+              closeTabMenu();
+            }}
+            class="px-2 py-1 rounded bg-rose-950/60 hover:bg-rose-900/70 text-rose-300 text-left"
+          >Close All</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+</div>
+
+<!-- Floating Enterprise Tab Overflow Dropdown Menu (Fixed coordinates, never clipped by parent overflow) -->
+{#if showOverflowDropdown}
+  <!-- Fixed Backdrop to close on outside click -->
+  <div
+    tabindex="-1"
+    role="presentation"
+    class="fixed inset-0 z-[95] bg-transparent cursor-default"
+    onclick={(e) => {
+      e.stopPropagation();
+      showOverflowDropdown = false;
+    }}
+  ></div>
+
+  <div
+    id="tab-overflow-dropdown"
+    style="top: {dropdownCoords.top}px; left: {dropdownCoords.left}px;"
+    class="fixed w-72 bg-[#0f172a] border border-[#334155] rounded-lg shadow-2xl z-[100] divide-y divide-slate-800 text-xs overflow-hidden animate-in fade-in zoom-in-95 duration-100"
+    onclick={(e) => e.stopPropagation()}
+    role="menu"
+    tabindex="-1"
+    onkeydown={handleOverflowKeydown}
+  >
+    <!-- Header -->
+    <div class="px-3 py-2 bg-slate-900/90 flex items-center justify-between">
+      <div class="flex items-center space-x-1.5">
+        <span class="font-bold text-[11px] text-slate-300 uppercase tracking-wider">Hidden Tabs</span>
+        <span class="px-1.5 py-0.5 rounded-full bg-sky-500/20 text-sky-400 font-mono text-[10px] font-semibold">
+          {overflowTabs.length}
+        </span>
+      </div>
+      <span class="text-[10px] text-slate-500">
+        Total {appState.tabs.length} tabs
+      </span>
+    </div>
+
+    <!-- Search input if > 3 overflow tabs -->
+    {#if overflowTabs.length > 3}
+      <div class="p-1.5 bg-[#0b0f19]">
+        <div class="relative flex items-center">
+          <Icon name="search" class="w-3.5 h-3.5 text-slate-500 absolute left-2 pointer-events-none" />
+          <input
+            type="text"
+            bind:value={overflowSearchQuery}
+            oninput={() => (overflowActiveIndex = 0)}
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="tab-overflow-listbox"
+            aria-autocomplete="list"
+            placeholder="Filter hidden tabs... (↑↓ Enter)"
+            class="w-full bg-[#1e293b]/70 border border-slate-700/80 rounded pl-7 pr-2 py-1 text-[11px] text-slate-200 placeholder-slate-500 focus:outline-none focus:border-sky-500/70"
+          />
+        </div>
+      </div>
+    {/if}
+
+    <!-- Dropdown Tab Items -->
+    <div id="tab-overflow-listbox" bind:this={overflowListEl} role="listbox" class="max-h-72 overflow-y-auto divide-y divide-slate-800/40 py-0.5">
+      {#if filteredOverflowTabs.length === 0}
+        <div class="px-3 py-4 text-center text-slate-500 text-xs italic">
+          No matching tabs found
+        </div>
+      {:else}
+        {#each filteredOverflowTabs as tab, idx (tab.id)}
+          {@const isActiveOverflow = idx === overflowActiveIndex}
+          <div
+            data-overflow-active={isActiveOverflow}
+            class="flex items-center justify-between px-2.5 py-1.5 transition-colors group cursor-pointer {isActiveOverflow
+              ? 'bg-slate-800/90 ring-1 ring-inset ring-sky-500/40'
+              : 'hover:bg-slate-800/80'}"
+            onmouseenter={() => (overflowActiveIndex = idx)}
+            onclick={() => selectOverflowTab(tab.id)}
+            onkeydown={(e) => e.key === 'Enter' && selectOverflowTab(tab.id)}
+            role="option"
+            aria-selected={tab.id === appState.activeTabId}
+            tabindex="-1"
+          >
+            <!-- Tab Icon & Title -->
+            <div class="flex items-center space-x-2 min-w-0 flex-1 pr-2">
+              <span class="flex items-center shrink-0">
+                {#if tab.isExecuting || tab.isStreaming || tab.isExplaining}
+                  <Icon name="refresh-cw" class="w-3.5 h-3.5 animate-spin text-sky-400" />
+                {:else if tab.isProcesslist || tab.isCluster || tab.isVariables || tab.isFlightRecorder}
+                  <Icon name="cpu" class="w-3.5 h-3.5 text-sky-400" />
+                {:else if tab.isErdCanvas}
+                  <Icon name="layers" class="w-3.5 h-3.5 text-indigo-400" />
+                {:else if tab.isTableViewer}
+                  <Icon name="table" class="w-3.5 h-3.5 text-emerald-400" />
+                {:else if tab.isNote}
+                  <Icon name="file-text" class="w-3.5 h-3.5 text-amber-400" />
+                {:else}
+                  <Icon name="file-code" class="w-3.5 h-3.5 text-sky-400" />
+                {/if}
+              </span>
+
+              <span class="truncate font-mono text-[11px] text-slate-300 group-hover:text-white" title={tab.title}>
+                {tab.title}
+              </span>
+
+              {#if tab.txActive}
+                <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" title="Transaction active"></span>
+              {:else if hasDraft(tab)}
+                <span class="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" title="SQL draft"></span>
+              {/if}
+
+              {#if tab.database}
+                <span class="shrink-0 px-1 py-0.2 rounded text-[9px] font-mono bg-slate-800 text-amber-400/80 border border-slate-700/60" title="Target Database">
+                  {tab.database}
+                </span>
+              {/if}
+            </div>
+
+            <!-- Close Tab Button -->
+            <button
+              type="button"
+              onclick={(e) => {
+                e.stopPropagation();
+                closeTabFromOverflow(tab.id);
+              }}
+              class="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition shrink-0"
+              title="Close Tab"
+            >
+              <Icon name="x" class="w-3 h-3" />
+            </button>
+          </div>
+        {/each}
+      {/if}
+    </div>
+  </div>
+{/if}

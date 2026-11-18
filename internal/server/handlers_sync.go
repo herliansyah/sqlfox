@@ -548,6 +548,10 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 
 	var grandTotalRows int64
 	var hasErrors bool
+	var cachedSrcSchema *driver.SchemaMetadata
+	if req.CreateTables && !strings.EqualFold(srcDriver, tgtDriver) {
+		cachedSrcSchema, _ = srcSess.Session.InspectSchema(ctx, req.SourceDB)
+	}
 
 	for _, tbl := range req.Tables {
 		sendEvent(map[string]any{
@@ -562,13 +566,11 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 			var ddlErr error
 
 			// If cross-driver, construct target-compatible DDL from schema inspection
-			if !strings.EqualFold(srcDriver, tgtDriver) {
-				if srcSchema, err := srcSess.Session.InspectSchema(ctx, req.SourceDB); err == nil {
-					for _, t := range srcSchema.Tables {
-						if strings.EqualFold(t.Name, tbl) {
-							ddl = buildCreateTableDDL(t, srcDriver, tgtDriver)
-							break
-						}
+			if cachedSrcSchema != nil {
+				for _, t := range cachedSrcSchema.Tables {
+					if strings.EqualFold(t.Name, tbl) {
+						ddl = buildCreateTableDDL(t, srcDriver, tgtDriver)
+						break
 					}
 				}
 			}

@@ -4,12 +4,14 @@
   "private": true,
   "description": "High-Performance, Single-Binary Database Manager & Headless Automation CLI",
   "scripts": {
-    "test": "node scripts/test-grid-ergonomics-suite.mjs",
+    "test": "node scripts/test-grid-ergonomics-suite.mjs && node scripts/test-svelte-codemirror.mjs",
+    "test:editor": "node scripts/test-svelte-codemirror.mjs",
+    "test:editor:browser": "node scripts/test-svelte-codemirror-browser.mjs",
     "build": "node scripts/build_web.js",
     "build:web": "node scripts/build_web.js",
-    "build:cm": "node scripts/build_codemirror.js",
-    "build:css": "tailwindcss -c scripts/tailwind.config.js -i scripts/tailwind-input.css -o web/dist/vendor/tailwind/tailwind.css -m",
-    "watch:css": "tailwindcss -c scripts/tailwind.config.js -i scripts/tailwind-input.css -o web/dist/vendor/tailwind/tailwind.css -w"
+    "build:svelte": "npm --prefix web/frontend run build && rm -rf web/dist/assets && cp -r web/dist_svelte/* web/dist/",
+    "build:all": "npm run build:svelte && go build -o sqlfox ./cmd/sqlfox",
+    "dev:svelte": "npm --prefix web/frontend run dev"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.4",

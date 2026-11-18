@@ -47,9 +47,10 @@ func NewAIClient(cfg ClientConfig) *AIClient {
 			cfg.Endpoint = "http://localhost:11434/v1/chat/completions"
 		}
 	} else {
-		// ponytail: normalize custom proxy endpoints (9router, LiteLLM, vLLM, etc.)
+		// ponytail: normalize OpenAI-compatible proxy endpoints (custom, 9router, LiteLLM, vLLM).
+		// Anthropic and Gemini build their own request paths, so their base URLs stay untouched.
 		ep := strings.TrimRight(strings.TrimSpace(cfg.Endpoint), "/")
-		if (cfg.Provider == ProviderOpenAI || cfg.Provider == ProviderOllama || cfg.Provider == "") &&
+		if cfg.Provider != ProviderAnthropic && cfg.Provider != ProviderGemini &&
 			!strings.HasSuffix(ep, "/chat/completions") && !strings.HasSuffix(ep, "/messages") {
 			if strings.HasSuffix(ep, "/v1") {
 				ep += "/chat/completions"
@@ -60,7 +61,7 @@ func NewAIClient(cfg ClientConfig) *AIClient {
 		cfg.Endpoint = ep
 	}
 
-	if cfg.Model == "" {
+		if cfg.Model == "" {
 		switch cfg.Provider {
 		case ProviderOpenAI:
 			cfg.Model = "gpt-4o-mini"
@@ -133,6 +134,9 @@ func (c *AIClient) completeOpenAICompatible(ctx context.Context, req CompletionR
 			{"role": "user", "content": req.UserPrompt},
 		},
 		"stream": false,
+	}
+	if req.Temperature > 0 {
+		payload["temperature"] = req.Temperature
 	}
 
 	jsonBytes, err := json.Marshal(payload)
@@ -240,6 +244,9 @@ func (c *AIClient) completeAnthropic(ctx context.Context, req CompletionRequest)
 			{"role": "user", "content": req.UserPrompt},
 		},
 	}
+	if req.Temperature > 0 {
+		payload["temperature"] = req.Temperature
+	}
 
 	jsonBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -311,6 +318,11 @@ func (c *AIClient) completeGemini(ctx context.Context, req CompletionRequest) (*
 				},
 			},
 		},
+	}
+	if req.Temperature > 0 {
+		payload["generationConfig"] = map[string]any{
+			"temperature": req.Temperature,
+		}
 	}
 
 	jsonBytes, err := json.Marshal(payload)

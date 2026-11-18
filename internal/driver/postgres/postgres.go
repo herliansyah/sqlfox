@@ -96,6 +96,12 @@ func (d *PostgresDriver) Connect(ctx context.Context, cfg driver.Config) (driver
 	}, nil
 }
 
+type pgConnState struct {
+	mu         sync.Mutex
+	lastSchema string
+	pid        int
+}
+
 // PostgresSession represents an active connection to a PostgreSQL database.
 type PostgresSession struct {
 	db            *sql.DB
@@ -104,6 +110,24 @@ type PostgresSession struct {
 	currentSchema string
 	mu            sync.Mutex
 	queryPids     map[string]int
+	connStates    sync.Map // driver.Conn -> *pgConnState
+}
+
+func (s *PostgresSession) getConnState(conn *sql.Conn) *pgConnState {
+	var key any
+	_ = conn.Raw(func(dc any) error {
+		key = dc
+		return nil
+	})
+	if key == nil {
+		return nil
+	}
+	if v, ok := s.connStates.Load(key); ok {
+		return v.(*pgConnState)
+	}
+	st := &pgConnState{}
+	actual, _ := s.connStates.LoadOrStore(key, st)
+	return actual.(*pgConnState)
 }
 
 func (s *PostgresSession) Ping(ctx context.Context) (time.Duration, error) {
@@ -114,18 +138,17 @@ func (s *PostgresSession) Ping(ctx context.Context) (time.Duration, error) {
 
 func (s *PostgresSession) ServerInfo(ctx context.Context) (*driver.ServerInfo, error) {
 	var version string
-	if err := s.db.QueryRowContext(ctx, "SELECT version()").Scan(&version); err != nil {
+	var uptimeSec int64
+	var activeConns, activeThreads int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT version(),
+		       COALESCE(EXTRACT(EPOCH FROM (now() - pg_postmaster_start_time()))::bigint, 0),
+		       (SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()),
+		       (SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND pid <> pg_backend_pid())
+	`).Scan(&version, &uptimeSec, &activeConns, &activeThreads)
+	if err != nil {
 		return nil, err
 	}
-
-	var activeConns int
-	_ = s.db.QueryRowContext(ctx, "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()").Scan(&activeConns)
-
-	var activeThreads int
-	_ = s.db.QueryRowContext(ctx, "SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND pid <> pg_backend_pid()").Scan(&activeThreads)
-
-	var uptimeSec int64
-	_ = s.db.QueryRowContext(ctx, "SELECT COALESCE(EXTRACT(EPOCH FROM (now() - pg_postmaster_start_time()))::bigint, 0)").Scan(&uptimeSec)
 
 	return &driver.ServerInfo{
 		Version:       version,
@@ -159,11 +182,26 @@ func (s *PostgresSession) activeSchema() string {
 
 func (s *PostgresSession) applyActiveSchema(ctx context.Context, conn *sql.Conn) error {
 	schema := s.activeSchema()
-	if schema != "" {
-		// A failed SET must abort the statement; otherwise unqualified names resolve in the default schema.
-		if _, err := conn.ExecContext(ctx, fmt.Sprintf("SET search_path = %s", quoteIdentifier(schema))); err != nil {
-			return fmt.Errorf("failed to switch PostgreSQL schema to %s: %w", schema, err)
+	if schema == "" {
+		return nil
+	}
+	st := s.getConnState(conn)
+	if st != nil {
+		st.mu.Lock()
+		if st.lastSchema == schema {
+			st.mu.Unlock()
+			return nil
 		}
+		st.mu.Unlock()
+	}
+	// A failed SET must abort the statement; otherwise unqualified names resolve in the default schema.
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf("SET search_path = %s", quoteIdentifier(schema))); err != nil {
+		return fmt.Errorf("failed to switch PostgreSQL schema to %s: %w", schema, err)
+	}
+	if st != nil {
+		st.mu.Lock()
+		st.lastSchema = schema
+		st.mu.Unlock()
 	}
 	return nil
 }
@@ -183,7 +221,20 @@ func (s *PostgresSession) QueryStream(ctx context.Context, querySQL string, limi
 	queryID := driver.QueryIDFromContext(ctx)
 	if queryID != "" {
 		var pid int
-		_ = conn.QueryRowContext(ctx, "SELECT pg_backend_pid()").Scan(&pid)
+		st := s.getConnState(conn)
+		if st != nil {
+			st.mu.Lock()
+			pid = st.pid
+			st.mu.Unlock()
+		}
+		if pid == 0 {
+			_ = conn.QueryRowContext(ctx, "SELECT pg_backend_pid()").Scan(&pid)
+			if st != nil && pid > 0 {
+				st.mu.Lock()
+				st.pid = pid
+				st.mu.Unlock()
+			}
+		}
 		if pid > 0 {
 			s.mu.Lock()
 			s.queryPids[queryID] = pid
@@ -367,6 +418,10 @@ func (s *PostgresSession) BeginTx(ctx context.Context) (driver.TxSession, error)
 }
 
 func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) (*driver.SchemaMetadata, error) {
+	return s.inspectSchemaFiltered(ctx, schemaName, "")
+}
+
+func (s *PostgresSession) inspectSchemaFiltered(ctx context.Context, schemaName, onlyTable string) (*driver.SchemaMetadata, error) {
 	if schemaName == "" || schemaName == s.cfg.DatabaseName {
 		schemaName = s.activeSchema()
 	}
@@ -374,25 +429,27 @@ func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) 
 		schemaName = "public"
 	}
 
-	// 1. Fetch all user-defined schemas in the active physical database
-	// ponytail: Close each result set immediately to prevent holding 7 concurrent connections and deadlocking sql.DB pool.
-	schemaRows, err := s.db.QueryContext(ctx, `
-		SELECT nspname FROM pg_catalog.pg_namespace
-		WHERE nspname NOT LIKE 'pg_%' AND nspname != 'information_schema'
-		ORDER BY nspname;
-	`)
 	var allSchemas []string
-	if err == nil {
-		for schemaRows.Next() {
-			var sch string
-			if err := schemaRows.Scan(&sch); err == nil {
-				allSchemas = append(allSchemas, sch)
+	if onlyTable == "" {
+		// 1. Fetch all user-defined schemas in the active physical database
+		// ponytail: Close each result set immediately to prevent holding 7 concurrent connections and deadlocking sql.DB pool.
+		schemaRows, err := s.db.QueryContext(ctx, `
+			SELECT nspname FROM pg_catalog.pg_namespace
+			WHERE nspname NOT LIKE 'pg_%' AND nspname != 'information_schema'
+			ORDER BY nspname;
+		`)
+		if err == nil {
+			for schemaRows.Next() {
+				var sch string
+				if err := schemaRows.Scan(&sch); err == nil {
+					allSchemas = append(allSchemas, sch)
+				}
 			}
+			schemaRows.Close()
 		}
-		schemaRows.Close()
-	}
-	if len(allSchemas) == 0 {
-		allSchemas = []string{schemaName}
+		if len(allSchemas) == 0 {
+			allSchemas = []string{schemaName}
+		}
 	}
 
 	// 2. Fetch tables and views in current schema
@@ -403,8 +460,9 @@ func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) 
 		FROM pg_catalog.pg_class c
 		JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
 		WHERE n.nspname = $1 AND c.relkind IN ('r', 'v', 'm')
+		  AND ($2 = '' OR LOWER(c.relname) = LOWER($2))
 		ORDER BY c.relname;
-	`, schemaName)
+	`, schemaName, onlyTable)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch tables for schema %s: %w", schemaName, err)
 	}
@@ -440,24 +498,35 @@ func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) 
 		       pg_catalog.format_type(a.atttypid, a.atttypmod) as data_type,
 		       NOT a.attnotnull as is_nullable,
 		       COALESCE(pg_catalog.pg_get_expr(ad.adbin, ad.adrelid), '') as default_value,
-		       COALESCE(i.indisprimary, false) as is_pk
+		       COALESCE(i.indisprimary, false) as is_pk,
+		       CASE WHEN t.typtype = 'e' THEN COALESCE((
+		           SELECT string_agg(e.enumlabel, E'\x1f' ORDER BY e.enumsortorder)
+		           FROM pg_catalog.pg_enum e
+		           WHERE e.enumtypid = a.atttypid
+		       ), '') ELSE '' END as enum_values
 		FROM pg_catalog.pg_attribute a
 		JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
 		JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+		JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
 		LEFT JOIN pg_catalog.pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
 		LEFT JOIN pg_catalog.pg_index i ON i.indrelid = c.oid AND a.attnum = ANY(i.indkey) AND i.indisprimary
 		WHERE n.nspname = $1 AND c.relkind IN ('r', 'v', 'm') AND a.attnum > 0 AND NOT a.attisdropped
+		  AND ($2 = '' OR LOWER(c.relname) = LOWER($2))
 		ORDER BY c.relname, a.attnum;
-	`, schemaName)
+	`, schemaName, onlyTable)
 	if err == nil {
 		for colRows.Next() {
-			var tbl, col, dataType, defaultVal string
+			var tbl, col, dataType, defaultVal, enumRaw string
 			var isNullable, isPK bool
-			if err := colRows.Scan(&tbl, &col, &dataType, &isNullable, &defaultVal, &isPK); err == nil {
+			if err := colRows.Scan(&tbl, &col, &dataType, &isNullable, &defaultVal, &isPK, &enumRaw); err == nil {
 				if t, ok := tablesMap[tbl]; ok {
 					extra := ""
 					if strings.Contains(strings.ToLower(defaultVal), "nextval(") {
 						extra = "auto_increment"
+					}
+					var enumVals []string
+					if enumRaw != "" {
+						enumVals = strings.Split(enumRaw, "\x1f")
 					}
 					t.Columns = append(t.Columns, driver.ColumnMetadata{
 						Name:         col,
@@ -466,6 +535,7 @@ func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) 
 						IsPrimaryKey: isPK,
 						DefaultValue: defaultVal,
 						Extra:        extra,
+						EnumValues:   enumVals,
 					})
 				}
 			}
@@ -486,8 +556,9 @@ func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) 
 		JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
 		JOIN pg_catalog.pg_am am ON am.oid = i.relam
 		WHERE n.nspname = $1
+		  AND ($2 = '' OR LOWER(c.relname) = LOWER($2))
 		ORDER BY c.relname, i.relname;
-	`, schemaName)
+	`, schemaName, onlyTable)
 	if err == nil {
 		for idxRows.Next() {
 			var tbl, idxName, indexDef, indexType string
@@ -526,8 +597,9 @@ func (s *PostgresSession) InspectSchema(ctx context.Context, schemaName string) 
 		JOIN pg_catalog.pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum
 		JOIN pg_catalog.pg_attribute af ON af.attrelid = con.confrelid AND af.attnum = k.fattnum
 		WHERE con.contype = 'f' AND n.nspname = $1
+		  AND ($2 = '' OR LOWER(c.relname) = LOWER($2))
 		ORDER BY con.conname, k.pos;
-	`, schemaName)
+	`, schemaName, onlyTable)
 	if err == nil {
 		for fkRows.Next() {
 			var fkName, tbl, col, refTbl, refCol, onDel, onUpd string
@@ -697,7 +769,10 @@ func (s *PostgresSession) InspectFastCatalog(ctx context.Context) (map[string][]
 
 func (s *PostgresSession) GetTableDDL(ctx context.Context, tableName string) (string, error) {
 	schemaName := s.activeSchema()
-	schema, err := s.InspectSchema(ctx, schemaName)
+	if ddl, err := s.viewDDL(ctx, schemaName, tableName); err == nil {
+		return ddl, nil
+	}
+	schema, err := s.inspectSchemaFiltered(ctx, schemaName, tableName)
 	if err != nil {
 		return "", err
 	}
@@ -1001,10 +1076,14 @@ func (s *PostgresSession) GetProcesslist(ctx context.Context) (*driver.Processli
 		}
 	}
 
+	var questions int64
+	_ = s.db.QueryRowContext(ctx, "SELECT COALESCE(sum(xact_commit + xact_rollback), 0) FROM pg_stat_database WHERE datname = current_database()").Scan(&questions)
+
 	return &driver.ProcesslistResult{
 		CurrentThreadID: currentPID,
 		Threads:         threads,
 		Locks:           locks,
+		Questions:       questions,
 	}, nil
 }
 
@@ -1590,10 +1669,13 @@ func (s *PostgresSession) InspectClusterHealth(ctx context.Context) (*driver.Clu
 
 func (s *PostgresSession) SampleFlightMetrics(ctx context.Context) (*driver.FlightMetricSample, error) {
 	var activeConns, activeThreads, questions, rowLockWaits int64
-	_ = s.db.QueryRowContext(ctx, "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()").Scan(&activeConns)
-	_ = s.db.QueryRowContext(ctx, "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND state = 'active'").Scan(&activeThreads)
-	_ = s.db.QueryRowContext(ctx, "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'").Scan(&rowLockWaits)
-	_ = s.db.QueryRowContext(ctx, "SELECT COALESCE(sum(xact_commit + xact_rollback), 0) FROM pg_stat_database WHERE datname = current_database()").Scan(&questions)
+	_ = s.db.QueryRowContext(ctx, `
+		SELECT
+			(SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()),
+			(SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND state = 'active'),
+			(SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'),
+			(SELECT COALESCE(sum(xact_commit + xact_rollback), 0) FROM pg_stat_database WHERE datname = current_database())
+	`).Scan(&activeConns, &activeThreads, &rowLockWaits, &questions)
 
 	// Fetch active queries
 	// ponytail: Filter out empty queries/daemon tasks and order by duration descending.
@@ -1700,19 +1782,65 @@ func quoteIdentifier(id string) string {
 
 func extractColumnsFromIndexDef(def string) []string {
 	openIdx := strings.Index(def, "(")
-	closeIdx := strings.LastIndex(def, ")")
-	if openIdx == -1 || closeIdx == -1 || closeIdx <= openIdx {
+	if openIdx == -1 {
+		return []string{}
+	}
+	// Walk forward from the opening '(' to find its matching ')' so trailing clauses
+	// such as WHERE (...) in partial indexes are not included.
+	depth := 0
+	closeIdx := -1
+	inQuote := false
+	for i := openIdx; i < len(def); i++ {
+		c := def[i]
+		if c == '"' {
+			inQuote = !inQuote
+			continue
+		}
+		if inQuote {
+			continue
+		}
+		if c == '(' {
+			depth++
+		} else if c == ')' {
+			depth--
+			if depth == 0 {
+				closeIdx = i
+				break
+			}
+		}
+	}
+	if closeIdx == -1 || closeIdx <= openIdx {
 		return []string{}
 	}
 	raw := def[openIdx+1 : closeIdx]
-	parts := strings.Split(raw, ",")
 	var cols []string
-	for _, p := range parts {
-		c := strings.TrimSpace(p)
+	start := 0
+	depth = 0
+	inQuote = false
+	for i := 0; i <= len(raw); i++ {
+		if i < len(raw) {
+			c := raw[i]
+			if c == '"' {
+				inQuote = !inQuote
+				continue
+			}
+			if !inQuote {
+				if c == '(' {
+					depth++
+				} else if c == ')' && depth > 0 {
+					depth--
+				}
+			}
+			if c != ',' || depth > 0 || inQuote {
+				continue
+			}
+		}
+		c := strings.TrimSpace(raw[start:i])
 		c = strings.Trim(c, `" `)
 		if c != "" {
 			cols = append(cols, c)
 		}
+		start = i + 1
 	}
 	return cols
 }

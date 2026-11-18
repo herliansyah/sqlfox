@@ -72,11 +72,23 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 		tlsParam = tlsName
 	}
 
-	// 2. Assemble DSN (net.JoinHostPort handles IPv6 literals safely)
+	// 2. Assemble DSN safely via gomysql.Config.FormatDSN() (prevents parameter injection via user/password/db)
 	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
-	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&tls=%s&timeout=10s&readTimeout=60s&writeTimeout=30s&multiStatements=true",
-		cfg.User, cfg.Password, addr, cfg.DatabaseName, tlsParam,
-	)
+	mc := gomysql.NewConfig()
+	mc.User = cfg.User
+	mc.Passwd = cfg.Password
+	mc.Net = "tcp"
+	mc.Addr = addr
+	mc.DBName = cfg.DatabaseName
+	mc.Loc = time.Local
+	mc.ParseTime = true
+	mc.MultiStatements = true
+	mc.Timeout = 10 * time.Second
+	mc.ReadTimeout = 60 * time.Second
+	mc.WriteTimeout = 30 * time.Second
+	mc.TLSConfig = tlsParam
+	mc.Params = map[string]string{"charset": "utf8mb4"}
+	dsn := mc.FormatDSN()
 
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
@@ -122,6 +134,12 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 	}, nil
 }
 
+type mysqlConnState struct {
+	mu       sync.Mutex
+	lastDB   string
+	threadID int64
+}
+
 type MySQLSession struct {
 	db           *sql.DB
 	cfg          driver.Config
@@ -129,7 +147,25 @@ type MySQLSession struct {
 	tlsKey       string
 	mu           sync.Mutex
 	queryThreads map[string]int64
+	connStates   sync.Map // driver.Conn -> *mysqlConnState
 	pfsEnabled   bool
+}
+
+func (s *MySQLSession) getConnState(conn *sql.Conn) *mysqlConnState {
+	var key any
+	_ = conn.Raw(func(dc any) error {
+		key = dc
+		return nil
+	})
+	if key == nil {
+		return nil
+	}
+	if v, ok := s.connStates.Load(key); ok {
+		return v.(*mysqlConnState)
+	}
+	st := &mysqlConnState{}
+	actual, _ := s.connStates.LoadOrStore(key, st)
+	return actual.(*mysqlConnState)
 }
 
 func (s *MySQLSession) Ping(ctx context.Context) (time.Duration, error) {
@@ -147,9 +183,22 @@ func (s *MySQLSession) ServerInfo(ctx context.Context) (*driver.ServerInfo, erro
 	var uptimeSec int64
 	var activeConns int
 	var activeThreads int
-	_ = s.db.QueryRowContext(ctx, "SHOW STATUS LIKE 'Uptime'").Scan(new(string), &uptimeSec)
-	_ = s.db.QueryRowContext(ctx, "SHOW STATUS LIKE 'Threads_connected'").Scan(new(string), &activeConns)
-	_ = s.db.QueryRowContext(ctx, "SHOW STATUS LIKE 'Threads_running'").Scan(new(string), &activeThreads)
+	if rows, err := s.db.QueryContext(ctx, "SHOW GLOBAL STATUS WHERE Variable_name IN ('Uptime', 'Threads_connected', 'Threads_running')"); err == nil {
+		for rows.Next() {
+			var k, v string
+			if err := rows.Scan(&k, &v); err == nil {
+				switch k {
+				case "Uptime":
+					uptimeSec, _ = strconv.ParseInt(v, 10, 64)
+				case "Threads_connected":
+					activeConns, _ = strconv.Atoi(v)
+				case "Threads_running":
+					activeThreads, _ = strconv.Atoi(v)
+				}
+			}
+		}
+		rows.Close()
+	}
 
 	return &driver.ServerInfo{
 		Version:       version,
@@ -175,7 +224,20 @@ func (s *MySQLSession) QueryStream(ctx context.Context, querySQL string, limit i
 	queryID := driver.QueryIDFromContext(ctx)
 	if queryID != "" {
 		var threadID int64
-		_ = conn.QueryRowContext(ctx, "SELECT CONNECTION_ID()").Scan(&threadID)
+		st := s.getConnState(conn)
+		if st != nil {
+			st.mu.Lock()
+			threadID = st.threadID
+			st.mu.Unlock()
+		}
+		if threadID == 0 {
+			_ = conn.QueryRowContext(ctx, "SELECT CONNECTION_ID()").Scan(&threadID)
+			if st != nil && threadID > 0 {
+				st.mu.Lock()
+				st.threadID = threadID
+				st.mu.Unlock()
+			}
+		}
 		if threadID > 0 {
 			s.mu.Lock()
 			s.queryThreads[queryID] = threadID
@@ -235,11 +297,26 @@ func (s *MySQLSession) activeDB() string {
 
 func (s *MySQLSession) applyActiveDatabase(ctx context.Context, conn *sql.Conn) error {
 	dbName := s.activeDB()
-	if dbName != "" {
-		// A failed USE must abort the statement; otherwise it runs against the conn's previous database.
-		if _, err := conn.ExecContext(ctx, fmt.Sprintf("USE `%s`", strings.ReplaceAll(dbName, "`", "``"))); err != nil {
-			return fmt.Errorf("failed to select database %s: %w", dbName, err)
+	if dbName == "" {
+		return nil
+	}
+	st := s.getConnState(conn)
+	if st != nil {
+		st.mu.Lock()
+		if st.lastDB == dbName {
+			st.mu.Unlock()
+			return nil
 		}
+		st.mu.Unlock()
+	}
+	// A failed USE must abort the statement; otherwise it runs against the conn's previous database.
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf("USE `%s`", strings.ReplaceAll(dbName, "`", "``"))); err != nil {
+		return fmt.Errorf("failed to select database %s: %w", dbName, err)
+	}
+	if st != nil {
+		st.mu.Lock()
+		st.lastDB = dbName
+		st.mu.Unlock()
 	}
 	return nil
 }
@@ -1186,10 +1263,15 @@ func (s *MySQLSession) GetProcesslist(ctx context.Context) (*driver.ProcesslistR
 		locks = []driver.LockWait{}
 	}
 
+	var questions int64
+	var qName string
+	_ = s.db.QueryRowContext(ctx, "SHOW GLOBAL STATUS LIKE 'Questions'").Scan(&qName, &questions)
+
 	return &driver.ProcesslistResult{
 		CurrentThreadID: currentThreadID,
 		Threads:         threads,
 		Locks:           locks,
+		Questions:       questions,
 	}, nil
 }
 
@@ -2489,6 +2571,7 @@ func parseDeadlockTransactionChunk(idx int, chunk string, isVictim bool) driver.
 
 	lines := strings.Split(chunk, "\n")
 	readingQuery := false
+	lockSection := ""
 	var queryLines []string
 
 	for _, line := range lines {
@@ -2546,15 +2629,33 @@ func parseDeadlockTransactionChunk(idx int, chunk string, isVictim bool) driver.
 			}
 		}
 
-		// Lock mode and wait
+		// Lock mode and wait. The header line only names the section; the lock
+		// descriptor on the following line is what the reader needs.
 		if strings.HasPrefix(trimmed, "*** (") && strings.Contains(trimmed, "WAITING FOR THIS LOCK TO BE GRANTED:") {
-			tx.LockWaited = trimmed
+			lockSection = "waited"
+			continue
 		} else if strings.Contains(trimmed, "HOLDS THE LOCK(S):") {
-			tx.LockHeld = trimmed
-		} else if strings.HasPrefix(trimmed, "RECORD LOCKS space id") || strings.HasPrefix(trimmed, "TABLE LOCK table") {
+			lockSection = "held"
+			continue
+		} else if strings.HasPrefix(trimmed, "RECORD LOCKS") || strings.HasPrefix(trimmed, "TABLE LOCK") {
 			if tx.LockMode == "" {
 				tx.LockMode = trimmed
 			}
+			switch lockSection {
+			case "held":
+				if tx.LockHeld == "" {
+					tx.LockHeld = trimmed
+					lockSection = ""
+				}
+			case "waited":
+				if tx.LockWaited == "" {
+					tx.LockWaited = trimmed
+					lockSection = ""
+				}
+			}
+		} else if lockSection != "" && !strings.HasPrefix(trimmed, "***") && trimmed != "" {
+			// Any other line ends the lock descriptor block.
+			lockSection = ""
 		}
 
 		// Query statement capture
@@ -2585,6 +2686,24 @@ func parseDeadlockTransactionChunk(idx int, chunk string, isVictim bool) driver.
 func (s *MySQLSession) GetStatementDigest(ctx context.Context, limit int) ([]driver.StatementDigestEntry, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 25
+	}
+
+	// performance_schema is optional (MariaDB may ship it disabled, sandboxes often
+	// have it OFF). Probe first so we can explain the failure instead of showing a
+	// raw "table doesn't exist" error inside the UI.
+	var psEnabled string
+	_ = s.db.QueryRowContext(ctx,
+		"SELECT IFNULL(@@performance_schema, '0')" ).Scan(&psEnabled)
+	psAvailable := false
+	if psEnabled != "" && psEnabled != "0" {
+		var probe int
+		if err := s.db.QueryRowContext(ctx,
+			"SELECT COUNT(*) FROM performance_schema.events_statements_summary_by_digest").Scan(&probe); err == nil {
+			psAvailable = true
+		}
+	}
+	if !psAvailable {
+		return nil, fmt.Errorf("performance_schema is disabled on this server (or the account lacks SELECT on it). Enable it with performance_schema=ON in my.cnf, then restart MySQL/MariaDB, to collect statement digests")
 	}
 
 	// 1. Try querying sys.statement_analysis (default in MySQL 5.7+ & 8.0)
@@ -2655,7 +2774,7 @@ func (s *MySQLSession) GetStatementDigest(ctx context.Context, limit int) ([]dri
 
 	psRows, psErr := s.db.QueryContext(ctx, psQuery)
 	if psErr != nil {
-		return nil, fmt.Errorf("failed to introspect statement digest (performance_schema may be disabled): %w", psErr)
+		return nil, fmt.Errorf("failed to read performance_schema statement digests: %w", psErr)
 	}
 	defer psRows.Close()
 
@@ -2697,9 +2816,17 @@ func (s *MySQLSession) GetRoutineDDL(ctx context.Context, routineType, name stri
 	if upperType != "FUNCTION" {
 		upperType = "PROCEDURE"
 	}
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+	if err := s.applyActiveDatabase(ctx, conn); err != nil {
+		return "", err
+	}
 	query := fmt.Sprintf("SHOW CREATE %s `%s`", upperType, strings.ReplaceAll(name, "`", "``"))
 	var rName, sqlMode, createStmt, charSet, coll, dbColl string
-	row := s.db.QueryRowContext(ctx, query)
+	row := conn.QueryRowContext(ctx, query)
 	// SHOW CREATE PROCEDURE returns 6 columns: Procedure, sql_mode, Create Procedure, character_set_client, collation_connection, Database Collation
 	if err := row.Scan(&rName, &sqlMode, &createStmt, &charSet, &coll, &dbColl); err != nil {
 		return "", fmt.Errorf("failed to get %s DDL: %w", upperType, err)
@@ -2709,9 +2836,17 @@ func (s *MySQLSession) GetRoutineDDL(ctx context.Context, routineType, name stri
 
 // GetEventDDL returns the raw CREATE statement for a Scheduled Event.
 func (s *MySQLSession) GetEventDDL(ctx context.Context, name string) (string, error) {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+	if err := s.applyActiveDatabase(ctx, conn); err != nil {
+		return "", err
+	}
 	query := fmt.Sprintf("SHOW CREATE EVENT `%s`", strings.ReplaceAll(name, "`", "``"))
 	var eName, sqlMode, tz, createStmt, charSet, coll, dbColl string
-	row := s.db.QueryRowContext(ctx, query)
+	row := conn.QueryRowContext(ctx, query)
 	if err := row.Scan(&eName, &sqlMode, &tz, &createStmt, &charSet, &coll, &dbColl); err != nil {
 		return "", fmt.Errorf("failed to get EVENT DDL: %w", err)
 	}
@@ -2724,9 +2859,16 @@ func (s *MySQLSession) ToggleEventStatus(ctx context.Context, name string, enabl
 	if enable {
 		status = "ENABLE"
 	}
-	query := fmt.Sprintf("ALTER EVENT `%s` %s", strings.ReplaceAll(name, "`", "``"), status)
-	_, err := s.db.ExecContext(ctx, query)
+	conn, err := s.db.Conn(ctx)
 	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if err := s.applyActiveDatabase(ctx, conn); err != nil {
+		return err
+	}
+	query := fmt.Sprintf("ALTER EVENT `%s` %s", strings.ReplaceAll(name, "`", "``"), status)
+	if _, err := conn.ExecContext(ctx, query); err != nil {
 		return fmt.Errorf("failed to %s event %s: %w", status, name, err)
 	}
 	return nil

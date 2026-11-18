@@ -193,9 +193,10 @@ docker compose up -d
 # Install via Go toolchain
 go install github.com/herliansyah/sqlfox/cmd/sqlfox@latest
 
-# Or build from source
+# Or build from source (frontend is embedded from web/dist, built by npm)
 git clone https://github.com/herliansyah/sqlfox.git
 cd sqlfox
+npm ci && npm --prefix web/frontend ci && npm run build:svelte
 go build -o sqlfox ./cmd/sqlfox
 ```
 

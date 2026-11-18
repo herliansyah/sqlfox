@@ -313,7 +313,7 @@ An integrated code editor supporting SQL syntax highlighting, line numbers, and 
 _Avoid_: Text box, input area, raw textarea
 
 **CodeMirror 6 Modular Architecture**:
-The modern, modular code editor engine powered by `@codemirror/view`, `@codemirror/state`, and `@codemirror/lang-sql`, replacing legacy monolithic CodeMirror 5 with functional transaction pipelines, dynamic dialect compartments, and high-contrast dark theme styling.
+The modern, modular code editor engine powered by `@codemirror/view`, `@codemirror/state`, and `@codemirror/lang-sql`, replacing legacy monolithic CodeMirror 5 with functional transaction pipelines, dynamic dialect compartments, and high-contrast dark theme styling. Per-tab editor state (document, selection, history, scroll) is preserved when switching worksheets.
 _Avoid_: Legacy CodeMirror, static editor, CM5 addon
 
 **Dynamic Dialect Compartment**:
@@ -337,12 +337,16 @@ A status badge in the schema header displaying the last synchronization time of 
 _Avoid_: Cache clock, sync tag, schema age
 
 **Context-Aware Completion Provider**:
-An AST-lite SQL tokenizer and suggestion engine that dynamically filters completion candidates based on caret position (e.g. table names after `FROM`/`JOIN`, columns after `SELECT`/`WHERE`, and alias resolution `alias.column`).
+A dialect-aware SQL suggestion engine (`lib/utils/sqlCompletion.ts`) that filters completion candidates based on caret position within the active statement (tables after `FROM`/`JOIN`, columns of referenced tables, alias resolution `alias.column`, database tables after `db.`, and columns after `db.table.`). Cross-database catalogs are loaded lazily per qualified database and never leak objects from the active database.
 _Avoid_: Word predictor, auto-suggester, flat matcher
 
 **Completion Item**:
-A ranked suggestion candidate with display label, kind badge (`[KW]`, `[TBL]`, `[COL]`, `[FN]`), and replacement text.
+A ranked suggestion candidate with display label, kind badge (`[KW]`, `[TBL]`, `[COL]`, `[FN]`, `[DB]`, `[SNP]`), type detail, and replacement text.
 _Avoid_: Autocomplete option, hint token
+
+**Statement Execution Target**:
+The precise SQL unit dispatched to the server for one execution: the editor selection when present, otherwise the statement surrounding the caret. `Ctrl/Cmd+Enter` executes this target while `Ctrl/Cmd+Alt+Enter` and `F5` execute the whole worksheet.
+_Avoid_: Whole script execution, cursor-less run
 
 **Session Tab State Persistence**:
 A client-side storage mechanism bound per Connection (`sqlfox_tabs_<conn_id>`) that continuously synchronizes open Query Editor tabs, SQL draft buffers, active tab focus, and Table Viewer metadata across page reloads.
@@ -542,6 +546,10 @@ _Avoid_: CSV loader, import script, raw insert loop
 **View-Ordered Dump Pipeline**:
 The schema dump generation sequence that topologically arranges SQL tables before SQL views (`viewsLast`), ensuring dumped schemas restore without missing-relation errors, paired with object-accurate `DROP VIEW IF EXISTS` statements.
 _Avoid_: Unordered export, raw table dump
+
+**Selective Table Dump**:
+An on-demand SQL export mode extending the View-Ordered Dump Pipeline to stream a user-selected subset of tables (across MySQL, PostgreSQL, and SQLite) into a single combined `.sql` file with per-table consistency and strict subset topological ordering.
+_Avoid_: Table backup, backup vault, multi-zip dump
 
 ## Data Synchronization & Table Operations
 
@@ -795,7 +803,7 @@ The design and styling invariant enforcing `white-space: nowrap !important;` and
 _Avoid_: Multiline button labels, squished button shapes, colliding controls
 
 **Modular Frontend Pipeline**:
-The build-time assembly process (`scripts/build_web.js`) that decomposes the 30,000+ line web UI into 15 domain JavaScript modules under `web/src/js/`, validates concatenated script syntax in-memory via Node's `vm.Script`, compiles Tailwind CSS statically, and produces `web/dist/index.html` for single-binary embedding.
+The Svelte 5 build pipeline (`scripts/build_web.js` → `npm run build:svelte`) that compiles the `web/frontend/` Svelte runes + TypeScript app with Vite and Tailwind, producing `web/dist/index.html` for single-binary embedding.
 _Avoid_: Webpack bloat, massive single-file edit, unvalidated bundle
 
 **Pre-Compiled Static CSS**:

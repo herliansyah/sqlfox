@@ -1,6 +1,7 @@
 package mysql
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -98,5 +99,18 @@ Trx id counter 1003
 	}
 	if rep.VictimThreadID != 12 {
 		t.Errorf("expected VictimThreadID 12, got %d", rep.VictimThreadID)
+	}
+
+	// Held/waited must carry the lock descriptor, not the "*** (n) ..." section header.
+	for _, tx := range rep.Transactions {
+		if !strings.HasPrefix(tx.LockHeld, "RECORD LOCKS") || !strings.Contains(tx.LockHeld, "index PRIMARY") {
+			t.Errorf("tx %d: expected held lock descriptor, got %q", tx.Index, tx.LockHeld)
+		}
+		if !strings.HasPrefix(tx.LockWaited, "RECORD LOCKS") || !strings.Contains(tx.LockWaited, "waiting") {
+			t.Errorf("tx %d: expected waited lock descriptor, got %q", tx.Index, tx.LockWaited)
+		}
+		if tx.LockMode != tx.LockHeld {
+			t.Errorf("tx %d: expected LockMode to be the first descriptor, got %q", tx.Index, tx.LockMode)
+		}
 	}
 }

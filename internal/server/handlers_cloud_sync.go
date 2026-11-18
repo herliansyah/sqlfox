@@ -286,17 +286,27 @@ func (s *Server) handleImportNotesBundle(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		defer file.Close()
-		data, err := io.ReadAll(file)
+		const maxBundleBytes = 50 << 20
+		data, err := io.ReadAll(io.LimitReader(file, maxBundleBytes+1))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to read upload file: "+err.Error())
+			return
+		}
+		if len(data) > maxBundleBytes {
+			writeError(w, http.StatusRequestEntityTooLarge, "bundle exceeds maximum allowed size (50 MB)")
 			return
 		}
 		zipData = data
 	} else {
 		// Raw binary body
-		data, err := io.ReadAll(r.Body)
+		const maxBundleBytes = 50 << 20
+		data, err := io.ReadAll(io.LimitReader(r.Body, maxBundleBytes+1))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to read request body: "+err.Error())
+			return
+		}
+		if len(data) > maxBundleBytes {
+			writeError(w, http.StatusRequestEntityTooLarge, "bundle exceeds maximum allowed size (50 MB)")
 			return
 		}
 		zipData = data

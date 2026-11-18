@@ -88,6 +88,9 @@ func ImportNotesBundle(v *Vault, zipData []byte) (int, error) {
 	}
 
 	importedCount := 0
+	const maxEntryBytes int64 = 10 << 20   // 10 MB per archive entry
+	const maxTotalBytes int64 = 64 << 20   // 64 MB total decompressed cap
+	var totalExtracted int64
 
 	for _, f := range zr.File {
 		if f.FileInfo().IsDir() {
@@ -99,10 +102,17 @@ func ImportNotesBundle(v *Vault, zipData []byte) (int, error) {
 		if err != nil {
 			return importedCount, fmt.Errorf("failed to read %s: %w", cleanPath, err)
 		}
-		contentBytes, err := io.ReadAll(rc)
+		contentBytes, err := io.ReadAll(io.LimitReader(rc, maxEntryBytes+1))
 		rc.Close()
 		if err != nil {
 			return importedCount, fmt.Errorf("failed to read content of %s: %w", cleanPath, err)
+		}
+		if int64(len(contentBytes)) > maxEntryBytes {
+			return importedCount, fmt.Errorf("archive entry %s exceeds 10 MB limit", cleanPath)
+		}
+		totalExtracted += int64(len(contentBytes))
+		if totalExtracted > maxTotalBytes {
+			return importedCount, fmt.Errorf("archive total extracted size exceeds 64 MB limit")
 		}
 
 		parts := strings.Split(cleanPath, "/")

@@ -1,5 +1,19 @@
 # syntax=docker/dockerfile:1
 
+# Stage 0: Build the Svelte frontend bundle (embedded via go:embed)
+FROM node:20-alpine AS frontend
+
+WORKDIR /web
+COPY package.json package-lock.json ./
+COPY web/frontend/package.json web/frontend/package-lock.json ./web/frontend/
+RUN npm ci && npm --prefix web/frontend ci
+
+COPY web/frontend/ web/frontend/
+COPY scripts/ scripts/
+COPY tailwind.config.* postcss.config.* ./ 2>/dev/null || true
+COPY web/ web/
+RUN npm run build:svelte
+
 # Stage 1: Build the static pure-Go binary
 FROM golang:alpine AS builder
 
@@ -11,6 +25,9 @@ RUN go mod download
 
 # Copy source tree
 COPY . .
+
+# Overlay prebuilt frontend bundle (go:embed dist/*)
+COPY --from=frontend /web/web/dist/ /src/web/dist/
 
 # Build statically-linked single binary
 ARG VERSION=dev

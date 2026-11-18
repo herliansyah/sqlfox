@@ -20,6 +20,10 @@ Following an in-depth architectural and code critique of SqlFox, four systemic a
 ## Decisions
 
 ### 1. Modular Frontend Source Tree & Validation Pipeline
+> **Superseded (Svelte 5 migration)**: `web/src/` has been retired. The frontend now lives in
+> `web/frontend/` (Svelte 5 runes + TypeScript) built via `scripts/build_web.js` → `npm run build:svelte`
+> (Vite + Tailwind). See the migration notes in `MIGRATION_CHECKLIST.md`.
+
 - Decompose `web/dist/index.html` into a structured source tree under `web/src/`:
   - `web/src/index.html`: Clean HTML structure, semantic layout, and dialog shells with an injection anchor `<!-- @INJECT:SCRIPTS -->`.
   - `web/src/js/`: 15 domain JavaScript modules (`01_core_state.js` through `15_system_lifecycle.js`).

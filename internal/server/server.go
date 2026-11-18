@@ -300,6 +300,17 @@ func (s *Server) SetAllowedHosts(hosts []string) {
 
 // Close gracefully shuts down all active database sessions and background managers.
 func (s *Server) Close() {
+	s.cloudSyncMu.Lock()
+	if s.cloudSyncTimer != nil {
+		s.cloudSyncTimer.Stop()
+		s.cloudSyncTimer = nil
+	}
+	s.cloudSyncMu.Unlock()
+
+	if s.flightRecorderMgr != nil {
+		s.flightRecorderMgr.StopAll()
+	}
+
 	if s.sessionMgr != nil {
 		s.sessionMgr.CloseAll()
 	}
