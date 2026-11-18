@@ -324,23 +324,22 @@
     <div class="flex items-center space-x-1 shrink-0">
       <button
         type="button"
-        onclick={syncCloudNow}
-        disabled={isSyncingCloud}
-        class="px-2 py-1 rounded border text-[11px] leading-none flex items-center space-x-1 transition {cloudConnected
-          ? 'bg-emerald-950/50 border-emerald-800 text-emerald-300 hover:bg-emerald-900/60'
-          : 'bg-slate-800/80 border-slate-700 text-slate-300 hover:text-white hover:bg-slate-800'}"
-        title={cloudConnected ? 'Run Cloud Sync Backup' : 'Configure Cloud Sync in Settings'}
+        onclick={() => openComposer()}
+        class="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition"
+        title="New Note"
       >
-        <Icon name={isSyncingCloud ? 'refresh-cw' : 'cloud'} class="w-3 h-3 {isSyncingCloud ? 'animate-spin' : ''}" />
-        <span>{cloudConnected ? 'Sync' : 'Cloud'}</span>
+        <Icon name="plus" class="w-3.5 h-3.5" />
       </button>
       <button
         type="button"
-        onclick={() => openComposer()}
-        class="px-2 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-medium text-[11px] leading-none transition flex items-center space-x-1 shadow-sm"
+        onclick={syncCloudNow}
+        disabled={isSyncingCloud}
+        class="p-1 rounded transition {cloudConnected
+          ? 'text-emerald-400 hover:text-emerald-300 hover:bg-slate-800'
+          : 'text-slate-400 hover:text-white hover:bg-slate-800'}"
+        title={cloudConnected ? 'Run Cloud Sync Backup' : 'Configure Cloud Sync in Settings'}
       >
-        <Icon name="plus" class="w-3 h-3" />
-        <span>New Note</span>
+        <Icon name={isSyncingCloud ? 'refresh-cw' : 'cloud'} class="w-3.5 h-3.5 {isSyncingCloud ? 'animate-spin' : ''}" />
       </button>
       <button
         type="button"

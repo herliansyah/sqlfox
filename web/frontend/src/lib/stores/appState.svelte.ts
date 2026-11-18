@@ -502,9 +502,22 @@ export class AppState {
 
   toggleAiDrawer(open?: boolean) {
     this.isAiDrawerOpen = open !== undefined ? open : !this.isAiDrawerOpen;
+    if (this.isAiDrawerOpen) {
+      this.isNotesDrawerOpen = false;
+    }
     try {
       localStorage.setItem('sqlfox_copilot_visible', String(this.isAiDrawerOpen));
     } catch { /* ignore */ }
+  }
+
+  toggleNotesDrawer(open?: boolean) {
+    this.isNotesDrawerOpen = open !== undefined ? open : !this.isNotesDrawerOpen;
+    if (this.isNotesDrawerOpen) {
+      this.isAiDrawerOpen = false;
+      try {
+        localStorage.setItem('sqlfox_copilot_visible', 'false');
+      } catch { /* ignore */ }
+    }
   }
 
   toggleActivityDrawer() {

@@ -118,7 +118,7 @@
   function handleSendToAi() {
     const sql = (editor?.getTarget().text || currentTab?.sql || '').trim();
     if (!sql) {
-      appState.isAiDrawerOpen = true;
+      appState.toggleAiDrawer(true);
       return;
     }
     appState.sendToAi(

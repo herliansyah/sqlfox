@@ -84,8 +84,8 @@
   let messagesContainer = $state<HTMLDivElement | null>(null);
   let promptEl = $state<HTMLTextAreaElement | null>(null);
 
-  let savedWidth = Number(localStorage.getItem(WIDTH_KEY) || '420');
-  let drawerWidth = $state(Number.isFinite(savedWidth) ? Math.min(920, Math.max(340, savedWidth)) : 420);
+  let savedWidth = Number(localStorage.getItem(WIDTH_KEY) || '480');
+  let drawerWidth = $state(Number.isFinite(savedWidth) ? Math.min(920, Math.max(340, savedWidth)) : 480);
   let isMaximized = $state(localStorage.getItem('sqlfox_ai_drawer_maximized') === 'true');
   let isResizing = $state(false);
   let chatRequestToken = 0;

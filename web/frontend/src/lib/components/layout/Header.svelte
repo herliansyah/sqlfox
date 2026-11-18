@@ -673,7 +673,7 @@
     <div class="flex items-center gap-1">
       <button
         id="notes-inbox-button"
-        onclick={() => (appState.isNotesDrawerOpen = !appState.isNotesDrawerOpen)}
+        onclick={() => appState.toggleNotesDrawer()}
         class="{navBtn} relative {appState.isNotesDrawerOpen ? 'bg-amber-950/40 border-amber-600 text-amber-300' : ''}"
         title="Operational Notes"
       >

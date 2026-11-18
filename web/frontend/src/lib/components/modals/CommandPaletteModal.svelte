@@ -227,7 +227,7 @@
       subtitle: 'Team knowledge base, incident logs and runbooks',
       category: 'Actions',
       icon: 'book-open',
-      action: () => (appState.isNotesDrawerOpen = true),
+      action: () => appState.toggleNotesDrawer(true),
     });
     list.push({
       id: 'action-settings',
@@ -352,7 +352,7 @@
       subtitle: 'Team knowledge base, incident logs and runbooks',
       category: 'Actions',
       icon: 'book-open',
-      action: () => (appState.isNotesDrawerOpen = true),
+      action: () => appState.toggleNotesDrawer(true),
     });
     list.push({
       id: 'action-toggle-ai',
@@ -360,7 +360,7 @@
       subtitle: 'Natural language query generation and SQL explanation (Ctrl+L)',
       category: 'Actions',
       icon: 'bot',
-      action: () => (appState.isAiDrawerOpen = !appState.isAiDrawerOpen),
+      action: () => appState.toggleAiDrawer(),
     });
     list.push({
       id: 'action-ai-settings',
