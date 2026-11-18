@@ -12,7 +12,7 @@
     title: string;
     subtitle?: string;
     shortcut?: string;
-    category: 'Tables' | 'Databases' | 'Actions';
+    category: 'Tables' | 'Databases' | 'Actions' | 'Columns';
     icon: string;
     action: () => void;
   }
@@ -419,8 +419,8 @@
 
     if (isColumnMode || q.length >= 2) {
       let colMatches = 0;
-      for (const [dbKey, tables] of Object.entries(appState.catalogs || {})) {
-        for (const t of tables || []) {
+      for (const [dbKey, cat] of Object.entries(appState.catalogs || {})) {
+        for (const t of cat?.tables || []) {
           for (const c of t.columns || []) {
             if (!q || c.name.toLowerCase().includes(q) || t.name.toLowerCase().includes(q)) {
               list.push({
@@ -429,7 +429,7 @@
                 subtitle: `${c.type}${c.is_primary_key ? ' • PK' : ''} (${dbKey})`,
                 category: 'Columns',
                 icon: 'columns',
-                action: () => appState.openTableTab(t.name),
+                action: () => appState.openTableDataTab(t.name),
               });
               colMatches++;
               if (colMatches >= 25) break;
