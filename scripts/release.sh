@@ -176,7 +176,7 @@ fi
 
 # 6b. Synchronize version in the Svelte frontend, web/dist, and package.json
 if [ -f "web/frontend/src/lib/stores/appState.svelte.ts" ]; then
-  sed -i -E "s/appVersion = \\$state<string>\('v[^']*'\);/appVersion = \\$state<string>('${NEW_VERSION}');/" web/frontend/src/lib/stores/appState.svelte.ts
+  sed -i -E "s/appVersion = \\\$state<string>\('v[^']*'\);/appVersion = \\\$state<string>('${NEW_VERSION}');/" web/frontend/src/lib/stores/appState.svelte.ts
   echo "📝 Updated web/frontend appState version to ${NEW_VERSION}"
 fi
 
