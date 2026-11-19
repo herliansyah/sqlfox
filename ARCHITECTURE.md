@@ -8,12 +8,13 @@ SqlFox is designed as a **single-binary local application** with an embedded rea
 
 ```mermaid
 flowchart TD
-    subgraph UI ["Embedded Frontend (CodeMirror 5 + Vanilla JS Single-File SPA)"]
-        UI_Editor["Query Editor (CodeMirror 5)"]
-        UI_Grid["Data Grid (Plain DOM + Keyset Pagination)"]
+    subgraph UI ["Embedded Frontend (Svelte 5 Runes + CodeMirror 6 SPA)"]
+        UI_Editor["Query Editor (CodeMirror 6)"]
+        UI_Grid["Virtual Data Grid (DOM Windowing + Keyset Pagination)"]
         UI_Tree["Schema Explorer Tree"]
         UI_Guard["Safety Challenge Modal"]
         UI_AI["AI Assistant Panel"]
+        UI_ERD["Interactive Visual ERD Canvas"]
     end
 
     subgraph GoCore ["Go Core Backend (Go 1.22+)"]
