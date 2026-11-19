@@ -1732,11 +1732,11 @@
 
       <!-- Threads Table View -->
       <div class="flex-1 overflow-auto pb-16">
-        <table class="w-full min-w-[1120px] border-collapse table-fixed text-left">
+        <table class="w-full min-w-[1150px] border-collapse table-fixed text-left">
           <colgroup>
             <col class="w-9" />
             {#if visibleColumns.rowNum}<col class="w-10" />{/if}
-            {#if visibleColumns.id}<col class="w-24" />{/if}
+            {#if visibleColumns.id}<col class="w-32" />{/if}
             {#if visibleColumns.user}<col class="w-32" />{/if}
             {#if visibleColumns.host}<col class="w-40" />{/if}
             {#if visibleColumns.db}<col class="w-28" />{/if}
@@ -1763,7 +1763,7 @@
               {#if visibleColumns.rowNum}
                 <th class="h-8 px-2 text-right font-semibold w-10">#</th>
               {/if}
-              {#if visibleColumns.id}{@render th('id', 'ID', 'w-24', 'right')}{/if}
+              {#if visibleColumns.id}{@render th('id', 'ID', 'w-32', 'right')}{/if}
               {#if visibleColumns.user}{@render th('user', 'User', 'w-32')}{/if}
               {#if visibleColumns.host}{@render th('host', 'Host', 'w-40')}{/if}
               {#if visibleColumns.db}{@render th('db', 'DB', 'w-28')}{/if}
@@ -1851,26 +1851,35 @@
                     <td class="px-2 text-right text-slate-500 text-[10px] tabular-nums">{rowIdx + 1}</td>
                   {/if}
                   {#if visibleColumns.id}
-                    <td class="px-2 text-right whitespace-nowrap overflow-hidden text-ellipsis tabular-nums font-bold {isSelf ? 'text-sky-400' : 'text-slate-300'}">
-                      {thread.id}
-                      {#if isRootBlocker}
-                        <span
-                          class="ml-1 rounded bg-rose-600 px-1 py-0.5 font-sans text-[9px] font-bold text-white"
-                          title="Root blocker holding locks for other threads"
-                        >
-                          BLOCKER
-                        </span>
-                      {:else if isWaitingOnLock}
-                        <span
-                          class="ml-1 rounded border border-amber-800 bg-amber-950 px-1 py-0.5 font-sans text-[9px] font-bold text-amber-300"
-                          title="Thread is waiting on a lock"
-                        >
-                          WAITING
-                        </span>
-                      {/if}
-                      {#if isSelf}
-                        <span class="ml-1 font-sans text-[9px] font-normal uppercase text-sky-500">you</span>
-                      {/if}
+                    <td class="px-2 font-mono tabular-nums font-bold {isSelf ? 'text-sky-400' : 'text-slate-300'}">
+                      <div class="flex items-center justify-between gap-1 overflow-hidden">
+                        <div class="flex items-center gap-1 shrink-0">
+                          {#if isRootBlocker}
+                            <span
+                              class="rounded bg-rose-600 px-1 py-0.5 font-sans text-[9px] font-bold tracking-tight text-white shadow-xs"
+                              title="Root blocker holding locks for other threads"
+                            >
+                              BLOCK
+                            </span>
+                          {:else if isWaitingOnLock}
+                            <span
+                              class="rounded border border-amber-700/60 bg-amber-950/80 px-1 py-0.5 font-sans text-[9px] font-bold tracking-tight text-amber-300"
+                              title="Thread is waiting on a lock"
+                            >
+                              WAIT
+                            </span>
+                          {/if}
+                          {#if isSelf}
+                            <span
+                              class="rounded border border-sky-800/60 bg-sky-950/80 px-1 py-0.5 font-sans text-[9px] font-bold tracking-tight text-sky-300 uppercase"
+                              title="Your current active session"
+                            >
+                              YOU
+                            </span>
+                          {/if}
+                        </div>
+                        <span class="truncate text-right ml-auto">{thread.id}</span>
+                      </div>
                     </td>
                   {/if}
                   {#if visibleColumns.user}
