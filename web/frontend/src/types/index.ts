@@ -65,6 +65,7 @@ export interface TableMetadata {
   type: string; // 'BASE TABLE' | 'VIEW' | 'TABLE' | 'view'
   row_count?: number;
   rows_count?: number;
+  row_count_exact?: boolean;
   data_length?: number;
   comment?: string;
   definition?: string;
@@ -205,6 +206,8 @@ export interface QueryExecutionResult {
   is_destructive_blocked?: boolean;
   capped_at?: number;
   truncated?: boolean;
+  total_rows?: number;
+  is_exact?: boolean;
   inspection?: InspectionResult;
   results?: QueryExecutionResult[];
   profile?: QueryProfile;

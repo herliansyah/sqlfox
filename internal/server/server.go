@@ -119,6 +119,7 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /api/session/{id}/partitions/{table}", s.handleGetTablePartitions)
 	mux.HandleFunc("GET /api/session/{id}/preflight-ddl/{table}", s.handlePreflightDDL)
 	mux.HandleFunc("GET /api/session/{id}/table/{table}/rows", s.handleGetTableRows)
+	mux.HandleFunc("GET /api/session/{id}/table/{table}/count", s.handleGetTableCount)
 	mux.HandleFunc("GET /api/session/{id}/notes/{table}", s.handleGetTableNote)
 	mux.HandleFunc("POST /api/session/{id}/notes/{table}", s.handleSaveTableNote)
 	mux.HandleFunc("POST /api/session/{id}/table/{table}/mock-data", s.handleGenerateMockData)

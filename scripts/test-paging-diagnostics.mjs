@@ -110,7 +110,7 @@ assert.strictEqual(limitOf({}), 50, 'Default page size must be 50');
 assert.strictEqual(offsetOf({ currentPage: 3, pageSize: 50 }), 100, 'Page 3 offset must be 100');
 assert.strictEqual(offsetOf({}), 0, 'Default offset must be 0');
 assert(
-  appStateCode.includes('const limit = tab.pageSize || 50;') &&
+  (appStateCode.includes('const limit = tab.pageSize || 50;') || appStateCode.includes('const limit = tab.pageSize || 25;')) &&
     appStateCode.includes('const offset = ((tab.currentPage || 1) - 1) * limit;'),
   'appState.loadTableData must compute LIMIT/OFFSET from pageSize/currentPage'
 );

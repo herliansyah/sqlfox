@@ -227,6 +227,17 @@
 
   let tableMeta = $derived.by(() => findTableMeta(effectiveTable, activeCatalog));
 
+  let tableEffectiveTotal = $derived.by(() => {
+    if (typeof result?.total_rows === 'number') {
+      return result.total_rows;
+    }
+    return tableMeta?.row_count ?? tableMeta?.rows_count;
+  });
+
+  let tableTotalIsExact = $derived.by(() => {
+    return Boolean(result?.is_exact || tableMeta?.row_count_exact);
+  });
+
   function isColPK(col: any): boolean {
     if (typeof col === 'object' && col.is_primary_key !== undefined) return Boolean(col.is_primary_key);
     const colName = getColName(col);
@@ -2401,8 +2412,19 @@
       <div id="grid-bottom-stats" class="flex items-center space-x-3">
         <span class="flex items-center space-x-1.5">
           <Icon name="table" class="w-3.5 h-3.5 text-sky-400" />
-          <span class="font-bold text-slate-200">{totalRows.toLocaleString()}</span>
-          <span class="text-slate-500">records</span>
+          {#if currentTab?.isTableViewer && tableEffectiveTotal !== undefined && tableEffectiveTotal !== null}
+            {@const curPage = currentTab.currentPage || 1}
+            {@const pageSize = currentTab.pageSize || 25}
+            <span class="font-bold text-slate-200">
+              {totalRows > 0 ? `${((curPage - 1) * pageSize + 1).toLocaleString()}–${((curPage - 1) * pageSize + totalRows).toLocaleString()}` : '0'}
+            </span>
+            <span class="text-slate-500">
+              of {tableTotalIsExact ? '' : '~'}{tableEffectiveTotal.toLocaleString()} records
+            </span>
+          {:else}
+            <span class="font-bold text-slate-200">{totalRows.toLocaleString()}</span>
+            <span class="text-slate-500">records</span>
+          {/if}
         </span>
         {#if result.duration_ms !== undefined}
           <span class="text-slate-600">•</span>
@@ -2415,12 +2437,9 @@
 
       <!-- Pagination Controls for Table Viewer -->
       {#if currentTab?.isTableViewer}
-        {@const estRows =
-          activeCatalog?.tables?.find((t) => t.name.toLowerCase() === currentTab?.tableName?.toLowerCase())
-            ?.row_count}
         {@const pageSize = currentTab.pageSize || 25}
         {@const curPage = currentTab.currentPage || 1}
-        {@const totalPages = typeof estRows === 'number' && estRows > 0 ? Math.max(1, Math.ceil(estRows / pageSize)) : null}
+        {@const totalPages = typeof tableEffectiveTotal === 'number' && tableEffectiveTotal >= 0 ? Math.max(1, Math.ceil(tableEffectiveTotal / pageSize)) : null}
         <div id="grid-pagination-bar" class="flex items-center space-x-2 text-[11px]">
           <span class="text-slate-500">Page Size:</span>
           <select
@@ -2478,7 +2497,7 @@
               id="grid-page-input"
               type="number"
               min="1"
-              max={totalPages ?? undefined}
+              max={tableTotalIsExact ? (totalPages ?? undefined) : undefined}
               value={curPage}
               onkeydown={(e) => {
                 if (e.key === 'Escape') {
@@ -2489,7 +2508,7 @@
               onchange={(e) => {
                 const target = Number((e.currentTarget as HTMLInputElement).value);
                 if (!currentTab || !Number.isFinite(target)) return;
-                const clamped = Math.max(1, Math.min(totalPages ?? target, Math.floor(target)));
+                const clamped = Math.max(1, tableTotalIsExact && totalPages !== null ? Math.min(totalPages, Math.floor(target)) : Math.floor(target));
                 if (clamped === curPage) return;
                 currentTab.currentPage = clamped;
                 appState.loadTableData(currentTab);
@@ -2498,7 +2517,7 @@
               aria-label="Jump to page"
             />
             {#if totalPages}
-              <span>of <span id="grid-total-pages">{totalPages.toLocaleString()}</span></span>
+              <span>of <span id="grid-total-pages">{tableTotalIsExact ? '' : '~'}{totalPages.toLocaleString()}</span></span>
             {:else if totalRows >= pageSize}
               <span class="text-slate-400">({curPage}+)</span>
             {/if}
@@ -2511,7 +2530,7 @@
                 appState.loadTableData(currentTab);
               }
             }}
-            disabled={totalRows < pageSize || (totalPages !== null && curPage >= totalPages)}
+            disabled={totalRows < pageSize || (tableTotalIsExact && totalPages !== null && curPage >= totalPages)}
             class="px-2 py-1 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-30 border border-[#334155] text-slate-200 flex items-center justify-center transition"
             title="Next Page"
           >
@@ -2526,7 +2545,7 @@
                   appState.loadTableData(currentTab);
                 }
               }}
-              disabled={curPage >= totalPages}
+              disabled={tableTotalIsExact ? curPage >= totalPages : totalRows < pageSize}
               class="px-2 py-1 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-30 border border-[#334155] text-slate-200 flex items-center justify-center transition"
               title="Last Page"
             >

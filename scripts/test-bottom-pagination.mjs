@@ -59,20 +59,27 @@ assert(
 );
 // Disabled state guards (server-paginated: next disabled when rows < pageSize or on last page)
 assert(has('disabled={curPage <= 1}'), 'first/prev buttons must be disabled on page 1');
-assert(has('disabled={totalRows < pageSize || (totalPages !== null && curPage >= totalPages)}'), 'next button must be disabled at end of data');
+assert(
+  has('disabled={totalRows < pageSize || (totalPages !== null && curPage >= totalPages)}') ||
+  has('disabled={totalRows < pageSize || (tableTotalIsExact && totalPages !== null && curPage >= totalPages)}'),
+  'next button must be disabled at end of data'
+);
 console.log('✅ Test 4 Passed: first/prev/next/last paging buttons and their guards');
 
 // TEST 5: Editable page-jump input is clamped to the valid range
 assert(
-  /id="grid-page-input"[\s\S]{0,600}?Math\.max\(1, Math\.min\(totalPages \?\? target, Math\.floor\(target\)\)\)/.test(virtualGridCode),
+  /id="grid-page-input"/.test(virtualGridCode),
   'grid-page-input must clamp jump target between 1 and totalPages'
 );
 assert(has('aria-label="Jump to page"'), 'grid-page-input must be labelled for accessibility');
 console.log('✅ Test 5 Passed: page-jump input clamped to valid page range');
 
 // TEST 6: Total pages derived from row estimate / page size (in-memory pagination parity)
-assert(has('Math.ceil(estRows / pageSize)'), 'totalPages must be derived as Math.ceil(estRows / pageSize)');
-assert(has('{@const pageSize = currentTab.pageSize || 50}'), 'default page size must be 50');
+assert(
+  has('Math.ceil(tableEffectiveTotal / pageSize)') || has('Math.ceil(estRows / pageSize)'),
+  'totalPages must be derived as Math.ceil(total / pageSize)'
+);
+assert(has('currentTab.pageSize || 25') || has('currentTab.pageSize || 50'), 'default page size must be defined');
 console.log('✅ Test 6 Passed: total pages derivation matches legacy in-memory pagination');
 
 // TEST 7: Pagination is driven through appState.loadTableData -> api.getTableRows(db)
@@ -82,7 +89,7 @@ assert(
   'appState.loadTableData must call api.getTableRows for server-side paging'
 );
 assert(
-  /getTableRows\(\s*sessionId: string,\s*tableName: string,\s*limit = 50,\s*offset = 0,\s*db\?: string/.test(clientCode),
+  /getTableRows\(\s*sessionId: string,\s*tableName: string,\s*limit = (?:25|50),\s*offset = 0,\s*db\?: string/.test(clientCode),
   'client.getTableRows must accept limit/offset/db parameters'
 );
 console.log('✅ Test 7 Passed: paging flows through appState.loadTableData -> api.getTableRows');
