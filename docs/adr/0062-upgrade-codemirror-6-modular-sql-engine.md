@@ -11,6 +11,8 @@ SqlFox previously utilized CodeMirror 5 (v5.65.18) with legacy mode scripts and 
 
 ## Decisions
 
+> **Superseded (Svelte 5 migration - ADR 0063)**: In v0.19.0, CodeMirror 6 was integrated directly into Svelte 5 via `web/frontend/src/lib/actions/codemirror.ts` with direct npm imports from `@codemirror/*` bundled by Vite. The standalone `scripts/build_codemirror.js` and `web/dist/vendor/codemirror/` bundle have been retired in favor of direct module imports.
+
 ### 1. CodeMirror 6 Bundling & Build Pipeline
 - Introduce `scripts/codemirror6_entry.js` and `scripts/build_codemirror.js` leveraging `esbuild` to compile a unified, minified, self-contained bundle (`web/dist/vendor/codemirror/codemirror.min.js`, ~422 KB).
 - Maintain zero external CDN dependencies, embedding static assets directly into the Go binary via `//go:embed dist/*`.

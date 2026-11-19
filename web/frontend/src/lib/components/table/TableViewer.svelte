@@ -79,12 +79,15 @@
       {/if}
       <span class="text-sky-300 font-bold">{tableName}</span>
       {#if tableMeta && (tableMeta.row_count !== undefined || tableMeta.rows_count !== undefined)}
-        <span
-          class="bg-slate-900 border border-slate-800 text-slate-400 px-1.5 py-0.2 rounded text-[10px]"
-          title="Estimated row count from catalog statistics"
+        <button
+          id="btn-table-row-count-pill"
+          type="button"
+          onclick={() => appState.refreshTableExactCount(tableName)}
+          class="bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-slate-200 px-1.5 py-0.2 rounded text-[10px] transition cursor-pointer flex items-center space-x-1"
+          title={tableMeta.row_count_exact ? 'Exact row count (click to recount)' : 'Estimated row count from catalog statistics (click to calculate exact count)'}
         >
-          ~{(tableMeta.row_count ?? tableMeta.rows_count ?? 0).toLocaleString()} rows
-        </span>
+          <span>{tableMeta.row_count_exact ? '' : '~'}{(tableMeta.row_count ?? tableMeta.rows_count ?? 0).toLocaleString()} rows</span>
+        </button>
       {/if}
       {#if tableName}
         <button

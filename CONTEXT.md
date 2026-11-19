@@ -873,6 +873,7 @@ _Avoid_: Runtime Play CDN, dynamic CSS parser, unpurged stylesheet
 - **0060**: Supply-Chain Signing, Script-Runner Safety Parity, and Vault/Ingress Crypto Hardening (`docs/adr/0060-supply-chain-signing-and-ingress-crypto-hardening.md`)
 - **0061**: Modular Frontend Pipeline, Ingress TLS Listener, and Safety Guard Hardening (`docs/adr/0061-modular-frontend-pipeline-tls-listener-and-safety-guard-hardening.md`)
 - **0062**: Upgrade to CodeMirror 6 Modular Architecture and Multi-Dialect SQL Engine (`docs/adr/0062-upgrade-codemirror-6-modular-sql-engine.md`)
+- **0063**: Complete Svelte 5 Runes Frontend Migration and Legacy Pipeline Retirement (`docs/adr/0063-complete-svelte-5-runes-frontend-migration-and-legacy-retirement.md`)
 
 ## Visual Schema & ERD Canvas
 
@@ -1222,5 +1223,36 @@ _Avoid_: Blind page reload, fixed sleep reload, unhandled reconnect error
 **Browser Spawn Suppression**:
 The CLI parameter (`--no-browser`) automatically injected into process restart arguments to prevent unwanted default browser tab launches during in-app updates.
 _Avoid_: Browser re-opener, tab pop, auto-open race
+
+## Svelte 5 Architecture & Workspace Ergonomics
+
+**Svelte 5 Runes Architecture**:
+The component-driven frontend architecture under `web/frontend/` leveraging Svelte 5 runes (`$state`, `$derived`, `$effect`) and TypeScript, providing granular reactivity and compiled-away runtime overhead to preserve the strict < 100MB RAM ceiling and single-binary embedding model.
+_Avoid_: Legacy procedural JavaScript, single-file HTML monolith, React/Vue wrapper
+
+**Tab Bar Viewport Containment**:
+The responsive tab bar layout algorithm in `TabBar.svelte` that continuously computes available horizontal container width via `ResizeObserver`, rendering only tabs that fit without clipping and tucking excess tabs into an overflow dropdown menu.
+_Avoid_: Tab bar wrap, horizontal scrolling tab collision, hidden tab loss
+
+**Tab Overflow Menu**:
+The secondary dropdown affordance (`»`) displaying hidden query tabs with an overflow count badge, instantaneous tab title search filtering, and 1-click tab closing without having to bring the tab into focus first.
+_Avoid_: Tab dropdown, hidden tabs list, overflow drawer
+
+**Tab Context Menu**:
+The right-click contextual menu on query tabs providing instant single-click operations: Rename, Duplicate, Close Others, Close Right, Close, and Close All.
+_Avoid_: Tab menu hack, browser right click
+
+**Grid Edit Mode (Staged vs. Auto)**:
+The segmented control in the Virtual Data Grid toolbar toggling between `Staged` mode (accumulating cell edits in an in-memory draft map for manual review and batch application) and `Auto` mode (automatically staging and committing mutations on cell blur), persisted to `localStorage` (`sqlfox_grid_edit_mode`).
+_Avoid_: Auto-save toggle, edit switch, grid mode flag
+
+**Exact Row Count**:
+The on-demand query affordance in the table grid pagination bar that explicitly computes `SELECT COUNT(*)` with driver-specific identifier quoting, safely decoupled from fast catalog estimation to avoid table scan locks on multi-million row production datasets.
+_Avoid_: Full count, total row counter, table counter
+
+**System Daemon Lifecycle Actions**:
+The native Go daemon control endpoints (`/api/system/open-browser`, `/api/system/shutdown`) accessible from the workspace header and Command Palette, enabling controlled browser window launches and clean daemon shutdown without terminal intervention.
+_Avoid_: App exit button, server killer, process stopper
+
 
 

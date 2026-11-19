@@ -198,7 +198,7 @@ Kompilasi SqlFox dari source membutuhkan Go 1.22+ dan Node.js (untuk build aset 
 ```bash
 git clone https://github.com/herliansyah/sqlfox.git
 cd sqlfox
-npm install && npm run build
+npm ci && npm --prefix web/frontend ci && npm run build:svelte
 go build -o sqlfox ./cmd/sqlfox
 ./sqlfox
 ```
@@ -372,6 +372,8 @@ Sistem pagination konvensional `OFFSET 1000000` memaksa server memindai dan memb
 
 ### Spreadsheet CRUD & Pengeditan Sel Langsung (Inline)
 - **Klik ganda sel mana saja** untuk mengedit nilai baris selayaknya aplikasi spreadsheet modern.
+- **Mode Pengeditan (Staged vs. Auto)**: Pilih antara mode **Staged** (perubahan dikumpulkan dalam memori dengan indikator titik untuk ditinjau dan diterapkan bersama) atau mode **Auto** (perubahan langsung dicomit saat sel kehilangan fokus / blur), preferensi tersimpan di `localStorage`.
+- **Hitung Jumlah Baris Presisi (`[🔢 Calculate Exact]`)**: Pada tabel besar dengan estimasi baris cepat, klik tombol Calculate Exact pada bilah navigasi bawah untuk menjalankan kalkulasi `COUNT(*)` presisi dengan kutipan identifier otomatis sesuai dialek DB.
 - **Indikator Perubahan**: Sel yang diubah akan disorot warna hijau zamrud (*emerald*) dengan lencana penghitung perubahan (*staged changes*).
 - **Review & Apply**: Klik tombol **Review Changes** untuk meninjau sintaks `UPDATE` yang dihasilkan sebelum dieksekusi ke database.
 - **+ Add Row**: Tambahkan draf baris baru di bagian bawah tabel, isi nilainya, lalu terapkan secara massal dalam satu transaksi.

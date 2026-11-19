@@ -340,6 +340,21 @@ class ApiClient {
     return this.normalizeExecResult(res);
   }
 
+  async getTableCount(
+    sessionId: string,
+    tableName: string,
+    db?: string,
+    filter?: string
+  ): Promise<{ table: string; count: number; duration_ms: number }> {
+    let url = `/session/${sessionId}/table/${encodeURIComponent(tableName)}/count`;
+    const params = new URLSearchParams();
+    if (db) params.set('db', db);
+    if (filter) params.set('filter', filter);
+    const qs = params.toString();
+    if (qs) url += `?${qs}`;
+    return this.request(url, { timeoutMs: 30000 });
+  }
+
   private normalizeExecResult(res: QueryExecutionResult): QueryExecutionResult {
     if (!res || typeof res !== 'object') return res;
     const duration = res.duration_ms ?? res.execution_ms ?? 0;
@@ -351,6 +366,8 @@ class ApiClient {
       affected_rows: affected,
       rows_affected: res.rows_affected ?? affected,
       is_destructive_blocked: Boolean(res.is_destructive_blocked || res.blocked),
+      total_rows: (res as any).total_rows,
+      is_exact: (res as any).is_exact,
     };
     if (Array.isArray(out.results)) {
       out.results = out.results.map((r) => this.normalizeExecResult(r));

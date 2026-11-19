@@ -492,21 +492,28 @@ sqlfox/
 │       ├── tls_test.go              # TLS certificate SANs, expiration & lifecycle tests
 │       └── handlers_ai.go          # AI chat & assistance streaming
 ├── web/                            # Frontend assets & build pipeline
-│   ├── src/                        # Modular frontend source tree
-│   │   ├── index.html              # Core HTML structure & modal shells
-│   │   └── js/                     # 15 domain JavaScript modules (state, grid, tabs, dba, erd, etc.)
-│   ├── dist/                       # Compiled production bundle embedded into binary
-│   │   ├── vendor/                 # Offline dependencies (CodeMirror 6, precompiled Tailwind CSS)
-│   │   └── index.html              # Generated single-file distribution (assembled via build_web.js)
-│   └── embed.go                    # //go:embed dist/*
+│   ├── frontend/                   # Modern Svelte 5 application (TypeScript, Vite, Tailwind CSS)
+│   │   ├── src/
+│   │   │   ├── lib/actions/        # Svelte actions (codemirror.ts, viewportFit.ts)
+│   │   │   ├── lib/api/            # REST & SSE client (client.ts)
+│   │   │   ├── lib/components/     # Modular domain components (activity, ai, dba, editor, erd, grid, layout, modals, notes, table)
+│   │   │   ├── lib/stores/         # Reactive runes state (appState.svelte.ts)
+│   │   │   └── lib/utils/          # Helpers (explainPlan, sqlCompletion, sqlFormatter, sqlStatements, clipboard)
+│   │   ├── package.json            # Frontend Vite & Svelte 5 dependencies
+│   │   └── vite.config.ts          # Vite build config with base: './' and dist_svelte output
+│   ├── dist/                       # Compiled production bundle embedded into binary (go:embed dist/*)
+│   │   ├── assets/                 # Vite hashed CSS & JS bundles
+│   │   ├── vendor/fonts/           # Embedded offline fonts (Inter, JetBrains Mono)
+│   │   └── index.html              # Embedded SPA entry point
+│   └── embed.go                    # Go embed directive (//go:embed dist/*)
 ├── scripts/
-│   ├── build_web.js                # Web build pipeline (Tailwind compilation, JS assembly & syntax validation)
-│   ├── build_codemirror.js         # esbuild CodeMirror 6 bundle pipeline
-│   ├── codemirror6_entry.js        # CodeMirror 6 bundle entry point with dynamic SQL dialect & dark theme
-│   ├── tailwind.config.js          # Tailwind CSS purge & token configuration
-│   └── release.sh                  # Release automation pipeline (version bump, tests, changelog)
+│   ├── build_web.js                # Build wrapper executing npm run build:svelte and syncing companion assets
+│   ├── release.sh                  # Release automation pipeline (version bump in appState, tests, changelog)
+│   ├── sign-manifest.go            # Ed25519 checksum manifest signing helper
+│   ├── generate-icons.py           # Cross-platform icon generator
+│   └── test-*.mjs                  # Node regression test suites for Svelte components & CodeMirror
 ├── docs/
-│   ├── adr/                        # Architectural Decision Records (0001 - 0062)
+│   ├── adr/                        # Architectural Decision Records (0001 - 0063)
 │   ├── playbooks/                  # Production operational playbooks (large-scale database management)
 │   └── agents/                     # Agent workflow documentation
 ├── CONTEXT.md                      # Ubiquitous domain language
@@ -1294,15 +1301,66 @@ flowchart TD
     Adapter --> View
 ```
 
-1. **Self-Contained Offline Bundling (`scripts/codemirror6_entry.js`, `scripts/build_codemirror.js`)**:
-   - Compiles `@codemirror/view`, `@codemirror/state`, `@codemirror/commands`, `@codemirror/lang-sql`, and `@codemirror/autocomplete` using `esbuild` into a unified offline asset (`web/dist/vendor/codemirror/codemirror.min.js`, ~422 KB).
-   - Preserves zero external CDN dependencies while shipping full Lezer AST parsing and syntax trees.
-2. **Backward-Compatible Adapter (`CodeMirror6Adapter`)**:
-   - Exposes an API identical to CodeMirror 5 (`getValue`, `setValue`, `getCursor`, `markText`, `on('change')`, etc.) so all 15 frontend modules interact transparently without breaking changes.
+1. **Native Svelte 5 Action Integration (`web/frontend/src/lib/actions/codemirror.ts`)**:
+   - Directly imports `@codemirror/view`, `@codemirror/state`, `@codemirror/commands`, `@codemirror/lang-sql`, `@codemirror/search`, and `@codemirror/autocomplete` from npm and bundles them via Vite, eliminating standalone esbuild wrappers (`scripts/build_codemirror.js`).
+   - Implemented as a Svelte action `use:codemirror={options}` with clean DOM lifecycle hooks (`destroy`, `update`).
+2. **Backward-Compatible Editor Interface**:
+   - Exposes standard editor operations (`getValue`, `setValue`, `getCursor`, `markText`, `focus`) wired into `appState.svelte.ts` and `SqlCodeEditor.svelte`.
 3. **Dynamic Multi-Dialect Switching via Compartments**:
-   - Dynamically reconfigures the editor syntax parser when switching database sessions (`cmEditor.setDialect(conn.driver)`), seamlessly toggling between MySQL, PostgreSQL, and SQLite dialect rules.
+   - Dynamically reconfigures the editor syntax parser when switching database sessions (`setDialect(conn.driver)`), seamlessly toggling between MySQL, PostgreSQL, and SQLite dialect rules.
 4. **Dark Theme & Autocomplete Parity**:
    - Integrates with SqlFox's active schema catalog and user snippets, offering instant autocompletion and high-contrast dark theme syntax highlighting.
+
+---
+
+## 35. Svelte 5 Runes Architecture, Tab Viewport Containment & Lifecycle Ergonomics (ADR 0063)
+
+```mermaid
+flowchart TD
+    subgraph UI ["Svelte 5 Workspace (web/frontend/)"]
+        App["App.svelte"]
+        Header["Header.svelte<br/>(System Lifecycle, Env, PIN)"]
+        Sidebar["Sidebar.svelte<br/>(Schema Explorer, Dual View)"]
+        TabBar["TabBar.svelte<br/>(ResizeObserver & Overflow '»')"]
+        Editor["SqlEditor.svelte<br/>(use:codemirror)"]
+        Grid["VirtualGrid.svelte<br/>(Staged/Auto Mode, Exact Count)"]
+    end
+
+    subgraph State ["Reactive Runes Store (appState.svelte.ts)"]
+        Runes["$state, $derived, $effect"]
+        Tabs["Reactive Tabs & Active Database Scope"]
+        GridState["Staged Edits Map & Auto-Commit"]
+        Schema["Fast Catalog & Metadata Cache"]
+    end
+
+    subgraph Backend ["Go Daemon REST & SSE Endpoints"]
+        SystemAPI["/api/system/open-browser<br/>/api/system/shutdown"]
+        QueryAPI["/api/query & /api/table/rows"]
+        LogsAPI["/api/logs/stream (SSE)"]
+    end
+
+    App --> Header & Sidebar & TabBar & Editor & Grid
+    Header & Sidebar & TabBar & Editor & Grid <--> State
+    State <--> Backend
+```
+
+1. **Svelte 5 Runes Reactive Architecture (`web/frontend/src/lib/stores/appState.svelte.ts`)**:
+   - Fully replaces the legacy procedural JavaScript architecture (15 modules in `web/src/js/`) with Svelte 5 Runes (`$state`, `$derived`, `$effect`).
+   - Centralizes connections, sessions, catalog trees, query tabs, grid mutations, operational notes, and background telemetry in strongly-typed reactive stores while maintaining strict zero-runtime bloat and the < 100MB RAM ceiling.
+2. **Query Tab Bar Viewport Containment & Overflow Management (`TabBar.svelte`)**:
+   - Observes container width dynamically using `ResizeObserver`, calculating exactly how many tabs fit within horizontal screen bounds.
+   - Hides overflowing tabs behind a responsive `»` overflow dropdown menu displaying an overflow count badge.
+   - Automatically swaps active background tabs into the visible strip upon selection, guaranteeing that the working tab is always in view.
+   - Provides instant search filtering and direct tab closing within the overflow popover, and generates sequential tab titles (`Query N.sql`) without name collisions.
+   - Restores full right-click tab actions: Rename (prompt), Duplicate, Close Others, Close Right, Close, and Close All.
+3. **Data Grid Edit Modes & Exact Row Counting (`VirtualGrid.svelte`)**:
+   - **Staged vs. Auto Edit Modes**: Operators toggle between `Staged` (draft changes accumulated in memory for manual review and batch apply) and `Auto` (immediate background commit on cell blur), persisted to `localStorage` (`sqlfox_grid_edit_mode`).
+   - **Exact Row Count**: Provides an on-demand calculation button querying precise `COUNT(*)` with per-dialect identifier quoting (`"table"` vs `` `table` ``), cleanly isolated from fast catalog metadata to prevent accidental table scan stalls on massive production tables.
+4. **Daemon System Lifecycle Actions (`Header.svelte`, `CommandPaletteModal.svelte`)**:
+   - **Open in Browser** (`POST /api/system/open-browser`): Opens the application URL in the operator's default web browser from standalone window mode.
+   - **Copy App URL**: Copies the active daemon HTTP/HTTPS network endpoint with Master PIN credentials for swift multi-device pairing.
+   - **Shut Down Daemon** (`POST /api/system/shutdown`): Gracefully stops the background Go daemon, releases locks and sockets, and displays a clean exit overlay.
+
 
 
 

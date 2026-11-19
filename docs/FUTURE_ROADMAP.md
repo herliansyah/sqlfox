@@ -86,18 +86,18 @@ Fitur-fitur esensial yang diharapkan oleh developer dan DBA dari sebuah Database
   - Menyuntikkan flag `--no-browser` otomatis saat restart dan memantau status kesiapan server via polling `/api/auth/status` sebelum memuat ulang antarmuka web.
 
 ### 1.12 Enkripsi Transport Ingress TLS/HTTPS & Sertifikat Otomatis Ephemeral
-* **Status Saat Ini**: **Terimplementasi (v0.17.2, ADR 0061)**
+* **Status Saat Ini**: **Terimplementasi (v0.18.0, ADR 0061)**
 * **Detail Implementasi**:
   - Dukungan listener TLS murni Go (`--tls`, `--tls-cert`, `--tls-key`, `SQLFOX_TLS=1`) tanpa dependensi CGO atau reverse proxy eksternal.
   - Pembangkitan sertifikat ECDSA P-256 self-signed otomatis langsung di memori dengan Subject Alternative Names (SANs) untuk `localhost`, `127.0.0.1`, `::1`, dan alamat IP LAN lokal terdeteksi.
   - Terminal banner menampilkan indikator URL HTTPS yang aman saat startup.
 
-### 1.13 Arsitektur Frontend Modular & Peningkatan Engine Editor CodeMirror 6
-* **Status Saat Ini**: **Terimplementasi (v0.17.2, ADR 0061, ADR 0062)**
+### 1.13 Arsitektur Frontend Svelte 5 & Peningkatan Engine Editor CodeMirror 6
+* **Status Saat Ini**: **Terimplementasi (v0.19.0, ADR 0061, ADR 0062, ADR 0063, PR #143)**
 * **Detail Implementasi**:
-  - Port penuh UI ke Svelte 5 Runes + TypeScript di `web/frontend/` (menggantikan 15 modul JavaScript domain legacy di `web/src/js/`).
+  - Port penuh 149 fitur UI ke Svelte 5 Runes (`$state`, `$derived`, `$effect`) + TypeScript di `web/frontend/`, memensiunkan seluruh 15 modul JavaScript domain legacy di `web/src/js/`.
   - Pipeline build otomatis (`scripts/build_web.js` → `npm run build:svelte`) yang menjalankan Vite + Tailwind dan menghasilkan bundle ke `web/dist/index.html`.
-  - Migrasi dari CodeMirror 5 ke CodeMirror 6 modern dengan `@codemirror/lang-sql`, *compartment* dialek dinamis (MySQL, PostgreSQL, SQLite), palet tema gelap kontras tinggi, dan integrasi autocompletion skema katalog.
+  - Integrasi CodeMirror 6 modern langsung via Svelte action (`web/frontend/src/lib/actions/codemirror.ts`) dengan `@codemirror/lang-sql`, *compartment* dialek dinamis (MySQL, PostgreSQL, SQLite), palet tema gelap kontras tinggi, dan autocompletion skema katalog.
 
 ---
 
@@ -137,12 +137,13 @@ Fitur-fitur yang sudah ada di codebase namun menambah kompleksitas berlebih, mem
 
 ### 2.4 Monolit Frontend Single-File SPA (24.500+ Baris HTML)
 * **File Terkait**:
-  - `web/src/` (15 modul domain JS), `scripts/build_web.js`, `web/dist/index.html`
-* **Status Saat Ini**: **Terimplementasi (ADR 0061, ADR 0062)**
+  - `web/frontend/` (aplikasi Svelte 5 Runes + Vite + TS), `scripts/build_web.js`, `web/dist/index.html`
+* **Status Saat Ini**: **Terimplementasi & Dipensiunkan (v0.19.0, ADR 0061, ADR 0062, ADR 0063, PR #143)**
 * **Detail Implementasi**:
   - Kode antarmuka telah dimigrasikan sepenuhnya ke aplikasi Svelte 5 di `web/frontend/` (runes reactivity, TypeScript, Tailwind), menggantikan monolit HTML/JS legacy.
-  - Build pipeline otomatis (`scripts/build_web.js` → `npm run build:svelte`) menjalankan Vite + Tailwind, menghilangkan layout shift (CLS) dan merampingkan pemeliharaan kode.
-  - Editor dimodernisasi ke CodeMirror 6 dengan bundling offline via esbuild (`scripts/build_codemirror.js`).
+  - Sumber legacy `web/src/` (15 modul JS), `web/src/index.html`, dan `web/dist/index.legacy.html` telah dihapus sepenuhnya dari repo.
+  - Build pipeline otomatis (`scripts/build_web.js` → `npm run build:svelte`) menjalankan Vite + Tailwind, menghasilkan bundle embedded tunggal ke `web/dist/index.html`.
+  - Editor dimodernisasi ke CodeMirror 6 dengan integrasi langsung via Svelte action (`codemirror.ts`), mengeliminasi skrip bundling terpisah `scripts/build_codemirror.js`.
 
 ### 2.5 Operational Notes dengan Web Audio API Alarm & Snooze
 * **File Terkait**:

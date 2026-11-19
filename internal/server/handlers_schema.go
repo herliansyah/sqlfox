@@ -440,8 +440,12 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 
 	limit := 50
 	if l := r.URL.Query().Get("limit"); l != "" {
-		if val, err := strconv.Atoi(l); err == nil && val > 0 && val <= 500 {
-			limit = val
+		if val, err := strconv.Atoi(l); err == nil && val > 0 {
+			if val > 1000 {
+				limit = 1000
+			} else {
+				limit = val
+			}
 		}
 	}
 
@@ -614,15 +618,131 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 		chunk = [][]any{}
 	}
 
+	var totalRows *int64
+	var isExact bool
+
+	// Optimization: If we queried from offset 0 (no keyset seek) and chunk returned fewer rows than limit,
+	// then the exact total rows is known without querying SELECT COUNT(*).
+	if lastKey == "" && len(chunk) < limit {
+		cnt := int64(offset + len(chunk))
+		totalRows = &cnt
+		isExact = true
+	} else {
+		// Run a quick SELECT COUNT(*) with a 1-second timeout
+		countCtx, countCancel := context.WithTimeout(r.Context(), 1*time.Second)
+		defer countCancel()
+
+		countSQL := fmt.Sprintf("SELECT COUNT(*) FROM %s", targetTable)
+		if whereClause != "" {
+			countSQL = fmt.Sprintf("SELECT COUNT(*) FROM %s %s", targetTable, whereClause)
+		}
+
+		cStream, cErr := sess.Session.QueryStream(countCtx, countSQL, 1)
+		if cErr == nil {
+			cChunk, nErr := cStream.NextChunk(1)
+			_ = cStream.Close()
+			if nErr == nil && len(cChunk) > 0 && len(cChunk[0]) > 0 {
+				if parsed, ok := parseCountValue(cChunk[0][0]); ok {
+					totalRows = &parsed
+					isExact = true
+				}
+			}
+		}
+
+		// Fallback: If fast count failed/timed out and there is no where clause, use table estimate
+		if totalRows == nil && whereClause == "" {
+			if est, err := sess.Session.GetTableEstimate(countCtx, tableName); err == nil && est != nil && est.RowCount > 0 {
+				totalRows = &est.RowCount
+				isExact = false
+			}
+		}
+	}
+
+	res := map[string]any{
+		"columns":  cols,
+		"rows":     chunk,
+		"limit":    limit,
+		"offset":   offset,
+		"pk_col":   pkCol,
+		"filter":   filter,
+		"is_exact": isExact,
+	}
+	if totalRows != nil {
+		res["total_rows"] = *totalRows
+	}
+
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (s *Server) handleGetTableCount(w http.ResponseWriter, r *http.Request) {
+	connID := r.PathValue("id")
+	tableName := r.PathValue("table")
+
+	sess, err := s.sessionMgr.GetSession(connID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	targetDB := r.URL.Query().Get("db")
+	if targetDB == "" && sess.DatabaseName != "" {
+		targetDB = sess.DatabaseName
+	}
+	if targetDB != "" {
+		if err := sess.Session.SelectDatabase(ctx, targetDB); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
+	filter := strings.TrimSpace(r.URL.Query().Get("filter"))
+	if err := validateTableFilter(filter); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid filter: "+err.Error())
+		return
+	}
+
+	targetTable := quoteIdent(tableName, sess.DriverName)
+	if targetDB != "" && sess.DriverName != "sqlite" {
+		targetTable = quoteIdent(targetDB, sess.DriverName) + "." + targetTable
+	}
+
+	countSQL := fmt.Sprintf("SELECT COUNT(*) FROM %s", targetTable)
+	if filter != "" {
+		countSQL = fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE (%s)", targetTable, filter)
+	}
+
+	start := time.Now()
+	stream, err := sess.Session.QueryStream(ctx, countSQL, 1)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "count failed: "+err.Error())
+		return
+	}
+	defer stream.Close()
+
+	chunk, err := stream.NextChunk(1)
+	if err != nil && err != io.EOF {
+		writeError(w, http.StatusBadRequest, "count failed: "+err.Error())
+		return
+	}
+
+	var count int64
+	if len(chunk) > 0 && len(chunk[0]) > 0 {
+		if c, ok := parseCountValue(chunk[0][0]); ok {
+			count = c
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"columns": cols,
-		"rows":    chunk,
-		"limit":   limit,
-		"offset":  offset,
-		"pk_col":  pkCol,
-		"filter":  filter,
+		"table":       tableName,
+		"count":       count,
+		"duration_ms": time.Since(start).Milliseconds(),
 	})
 }
+
+
 
 // allowedFilterKeywords is the whitelist of bare keyword tokens permitted in a table quick-filter.
 // Anything outside this set that is not a column identifier, quoted literal, number or operator is

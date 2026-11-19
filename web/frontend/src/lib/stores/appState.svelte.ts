@@ -1655,6 +1655,26 @@ export class AppState {
         res.row_count = res.rows.length;
       }
       tab.activeResult = res;
+
+      // Synchronize exact/effective row count back into the table catalog
+      if (res && typeof (res as any).total_rows === 'number') {
+        const cat = (db && this.catalogs[db.toLowerCase()]) || this.catalog;
+        const tbl = cat?.tables?.find((t) => t.name.toLowerCase() === tab.tableName!.toLowerCase());
+        if (tbl) {
+          if (res.is_exact) {
+            tbl.row_count = (res as any).total_rows;
+            tbl.rows_count = (res as any).total_rows;
+            tbl.row_count_exact = true;
+          } else if (tbl.row_count === undefined || tbl.row_count === 0) {
+            tbl.row_count = (res as any).total_rows;
+            tbl.rows_count = (res as any).total_rows;
+          }
+          this.catalog = { ...this.catalog };
+          if (db && this.catalogs[db.toLowerCase()]) {
+            this.catalogs[db.toLowerCase()] = { ...this.catalogs[db.toLowerCase()] };
+          }
+        }
+      }
     } catch (err: any) {
       if ((tab as any)._loadToken !== token) return;
       tab.activeResult = {
@@ -1670,6 +1690,40 @@ export class AppState {
         this.tabs = [...this.tabs];
         this.saveTabsState();
       }
+    }
+  }
+
+  async refreshTableExactCount(tableName: string) {
+    if (!this.activeSessionId || !tableName) return;
+    const tab = this.tabs.find((t) => t.isTableViewer && t.tableName?.toLowerCase() === tableName.toLowerCase()) || this.activeTab;
+    const db = tab?.database || this.currentDatabase || '';
+    let filterClause = (tab?.appliedFilter || '').trim();
+    if (!filterClause && tab?.filterPills && tab.filterPills.length > 0) {
+      filterClause = compileFilterPills(tab.filterPills, this.activeConnection?.driver);
+    }
+    try {
+      const res = await api.getTableCount(this.activeSessionId, tableName, db, filterClause || undefined);
+      if (res && typeof res.count === 'number') {
+        const cat = (db && this.catalogs[db.toLowerCase()]) || this.catalog;
+        const tbl = cat?.tables?.find((t) => t.name.toLowerCase() === tableName.toLowerCase());
+        if (tbl) {
+          tbl.row_count = res.count;
+          tbl.rows_count = res.count;
+          tbl.row_count_exact = true;
+          this.catalog = { ...this.catalog };
+          if (db && this.catalogs[db.toLowerCase()]) {
+            this.catalogs[db.toLowerCase()] = { ...this.catalogs[db.toLowerCase()] };
+          }
+        }
+        if (tab && tab.activeResult) {
+          tab.activeResult.total_rows = res.count;
+          tab.activeResult.is_exact = true;
+          this.tabs = [...this.tabs];
+        }
+        this.showToast(`Exact count: ${res.count.toLocaleString()} rows (${res.duration_ms} ms)`, 'info');
+      }
+    } catch (err: any) {
+      this.showToast(`Failed to calculate exact row count: ${err.message || err}`, 'error');
     }
   }
 
