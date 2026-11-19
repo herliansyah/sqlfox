@@ -198,7 +198,7 @@ Building SqlFox requires Go 1.22+ and Node.js (for asset compilation):
 ```bash
 git clone https://github.com/herliansyah/sqlfox.git
 cd sqlfox
-npm install && npm run build
+npm ci && npm --prefix web/frontend ci && npm run build:svelte
 go build -o sqlfox ./cmd/sqlfox
 ./sqlfox
 ```
@@ -372,6 +372,8 @@ Traditional `OFFSET 1000000` pagination forces database engines to scan and disc
 
 ### Spreadsheet CRUD & Inline Cell Editing
 - **Double-click any cell** to edit values directly inside the table grid.
+- **Edit Modes (Staged vs. Auto)**: Toggle between **Staged** mode (accumulates changes in memory with dot indicators for manual review and batch apply) and **Auto** mode (commits edits automatically on cell blur), persisted in `localStorage`.
+- **Exact Row Count (`[🔢 Calculate Exact]`)**: For large tables where initial row counts are estimated via fast catalog metadata, click the Calculate Exact button in the bottom pagination bar to execute an on-demand driver-quoted `COUNT(*)` query.
 - **Cell Highlighting**: Staged cell changes are highlighted in emerald with a change counter pill.
 - **Review & Apply**: Click **Review Changes** to inspect the generated `UPDATE` statements before submitting.
 - **+ Add Row**: Draft new rows at the bottom of the table, populate columns, and submit in a single transactional batch.

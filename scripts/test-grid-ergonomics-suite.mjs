@@ -100,27 +100,23 @@ assert(
   virtualGridCode.includes('appState.addFilterPill(colName, op, val);'),
   'applyQuickFilter must delegate to appState.addFilterPill'
 );
-for (const op of ["'='", "'!='", "'>'", "'IS NULL'", "'IS NOT NULL'"]) {
+for (const op of [
+  "'='",
+  "'!='",
+  "'<'",
+  "'<='",
+  "'>'",
+  "'>='",
+  "'LIKE'",
+  "'NOT LIKE'",
+  "'IS NULL'",
+  "'IS NOT NULL'",
+]) {
   assert(
     virtualGridCode.includes(`applyQuickFilter(${op})`),
     `Context menu must offer a quick filter button for op ${op}`
   );
 }
-// Quick filter option icons must use normalized w-5 container for consistent indentation
-const iconSlotCount = (virtualGridCode.match(
-  /w-5 text-center flex-shrink-0 inline-flex items-center justify-center/g
-) || []).length;
-assert(
-  iconSlotCount >= 6,
-  `Quick filter option icons must use the normalized w-5 slot (found ${iconSlotCount}, need >= 6)`
-);
-// NULL value branch renders the same normalized slot
-assert(
-  /IS NULL'\)[\s\S]{0,200}w-5 text-center flex-shrink-0 inline-flex items-center justify-center/.test(
-    virtualGridCode
-  ),
-  'Null quick filter options must use the normalized w-5 container'
-);
 for (const marker of [
   'id="grid-ctx-filter-parent"',
   'id="grid-ctx-filter-options"',

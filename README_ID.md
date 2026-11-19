@@ -193,9 +193,10 @@ docker compose up -d
 # Instalasi menggunakan Go toolchain
 go install github.com/herliansyah/sqlfox/cmd/sqlfox@latest
 
-# Kompilasi langsung dari source code
+# Kompilasi langsung dari source code (frontend ter-embed dari web/dist, dibuild via npm)
 git clone https://github.com/herliansyah/sqlfox.git
 cd sqlfox
+npm ci && npm --prefix web/frontend ci && npm run build:svelte
 go build -o sqlfox ./cmd/sqlfox
 ```
 

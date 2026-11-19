@@ -1154,6 +1154,96 @@ When `--tls` or `SQLFOX_TLS=1` is enabled:
 - The terminal startup banner outputs `https://localhost:<port>` with an explicit note regarding the auto-generated ECDSA P-256 certificate.
 - When opening in standard browsers, the secure transport indicator (HTTPS lock icon) is displayed in the address bar.
 
+---
+
+## 34. Svelte 5 Workspace Ergonomics: Tab Bar Viewport Containment, Grid Edit Modes & Daemon Lifecycle Controls
+
+### Query Tab Bar Viewport Containment & Overflow Dropdown (`TabBar.svelte`)
+
+When operators open numerous query worksheets, the tab strip prevents horizontal viewport breakage by measuring available width using `ResizeObserver`. Overflowing tabs are tucked into a responsive `»` dropdown menu with an item count badge and live search:
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│ [Query 1.sql ✕] [Query 2.sql ✕] [users (Table) ✕] [orders ✕] [ » 6 ▼ ] [ + ]          │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+                                                               │
+                                                               ▼
+                                        ┌──────────────────────────────────────┐
+                                        │ 🔍 Filter 6 hidden tabs...           │
+                                        ├──────────────────────────────────────┤
+                                        │ Query 5.sql (analytics)            ✕ │
+                                        │ Query 6.sql (migration)            ✕ │
+                                        │ Query 7.sql (audit_log)            ✕ │
+                                        │ customers (Table)                  ✕ │
+                                        │ products (Table)                   ✕ │
+                                        │ transactions (Table)               ✕ │
+                                        └──────────────────────────────────────┘
+```
+
+- **Active Tab Guarantee**: Clicking any hidden tab in the dropdown automatically swaps it into the visible strip.
+- **Direct Tab Close**: Tabs can be closed directly from the dropdown via the inline `✕` button.
+- **Sequential Tab Naming**: New tabs automatically increment (`Query 1.sql`, `Query 2.sql`, ...) without duplicate title collisions.
+
+### Query Tab Context Menu (Right-Click)
+
+Right-clicking any tab pill surfaces immediate workflow actions without cluttering the primary header:
+
+```
+┌────────────────────────────────┐
+│ ✏️ Rename Tab...                │
+│ 📋 Duplicate Tab               │
+├────────────────────────────────┤
+│ ✕ Close Tab                    │
+│ 🚫 Close Others                │
+│ ➡️ Close Tabs to the Right      │
+│ 🛑 Close All Tabs              │
+└────────────────────────────────┘
+```
+
+### Data Grid Edit Modes (Staged vs. Auto) & Exact Row Count (`VirtualGrid.svelte`)
+
+The Virtual Data Grid toolbar features a segmented control allowing operators to choose between safe staged batch commits and fluid instant edits, alongside an on-demand exact row calculation:
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│ [Mode: (Staged) | Auto]  [🔍 Filter...]  [# Cols ▼]  [💾 Commit (2)]  [⟲ Discard]      │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│ # │ id   │ email                │ status   │ created_at           │ updated_at         │
+├───┼──────┼──────────────────────┼──────────┼──────────────────────┼────────────────────┤
+│ 1 │ 1001 │ alice@example.com    │ active   │ 2026-01-15 08:30:00  │ 2026-02-01 10:00:00│
+│ 2 │ 1002 │ bob@example.com  [●] │ pending  │ 2026-01-16 09:15:00  │ 2026-02-01 10:00:00│
+└───┴──────┴──────────────────────┴──────────┴──────────────────────┴────────────────────┘
+│ Rows 1-50 of ~100,000 (Estimate) [🔢 Calculate Exact]          Page [ 1 ] of 2,000 >  │
+```
+
+- **Staged Mode (Default)**: Cell modifications are staged in-memory (`stagedEdits` map) with colored dot indicators (`[●]`). The operator explicitly clicks `Commit` to review and execute DDL/DML.
+- **Auto Mode**: Cell modifications are immediately committed upon cell blur, providing a spreadsheet-like experience for rapid ad-hoc corrections. Preference is stored in `localStorage` (`sqlfox_grid_edit_mode`).
+- **Exact Row Count (`[🔢 Calculate Exact]`)**: Issues an on-demand `SELECT COUNT(*)` with driver-aware identifier quoting (`"table"` / `` `table` ``), updating total row counts and exact pagination bounds without blocking fast catalog loads.
+
+### Header Daemon System Lifecycle Actions (`Header.svelte`)
+
+The workspace header settings dropdown (`⚙️`) integrates daemon process management:
+
+```
+┌──────────────────────────────────────────────┐
+│  SqlFox v0.19.0 (64-bit Linux)               │
+├──────────────────────────────────────────────┤
+│  🌐 Open in Web Browser                      │
+│  🔗 Copy App URL (with PIN)                  │
+├──────────────────────────────────────────────┤
+│  ⚙️ Preferences & Settings...     Ctrl+,     │
+│  ⌨️ Keyboard Shortcuts           ?          │
+│  📖 Documentation                           │
+│  📜 Release Notes & Changelog                │
+├──────────────────────────────────────────────┤
+│  🛑 Shut Down Daemon                         │
+└──────────────────────────────────────────────┘
+```
+
+- **Open in Web Browser**: Triggers `POST /api/system/open-browser` to launch the current session URL in the system's default browser.
+- **Shut Down Daemon**: Triggers `POST /api/system/shutdown`, releasing all database connection pools, socket listeners, and PID instance locks cleanly before shutting down the Go process.
+
+
 
 ```
 
