@@ -303,11 +303,11 @@
   function getEnvBadgeClass(env: string) {
     switch (env) {
       case 'Production':
-        return 'bg-rose-500/20 text-rose-300 border-rose-500/40';
+        return 'bg-rose-500/15 text-rose-300 border-rose-500/30';
       case 'Staging':
-        return 'bg-amber-500/20 text-amber-300 border-amber-500/40';
+        return 'bg-amber-500/15 text-amber-300 border-amber-500/30';
       default:
-        return 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
+        return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
     }
   }
 
@@ -376,15 +376,15 @@
         onclick={() => (showConnDropdown ? closeConnDropdown() : openConnDropdown())}
         aria-haspopup="listbox"
         aria-expanded={showConnDropdown}
-        class="h-7 px-2 rounded-md {appState.isProduction ? 'bg-rose-950/40 border-rose-600/60 hover:bg-rose-900/40 shadow-rose-950/30' : 'bg-[#1e293b] hover:bg-slate-700/80 border-slate-700/80'} border flex items-center gap-2 text-xs text-slate-200 transition shadow-sm max-w-[18rem]"
+        class="h-7 px-2 rounded-md bg-[#1e293b] hover:bg-slate-700/80 border-slate-700/80 border flex items-center gap-2 text-xs text-slate-200 transition shadow-sm max-w-[18rem]"
         title={appState.activeConnection ? `${getDriverName(appState.activeConnection.driver)} • ${appState.activeConnection.host || 'localhost'}` : 'Select connection'}
       >
-        <span class="w-2 h-2 rounded-full {appState.isConnecting ? 'bg-amber-400 animate-ping' : appState.isProduction ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)]' : (appState.activeConnection ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]' : 'bg-slate-500')}"></span>
-        <span class="font-medium truncate {appState.isProduction ? 'text-rose-100 font-semibold' : 'text-slate-100'}">
+        <span class="w-2 h-2 rounded-full {appState.isConnecting ? 'bg-amber-400 animate-ping' : appState.isProduction ? 'bg-rose-500' : (appState.activeConnection ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]' : 'bg-slate-500')}"></span>
+        <span class="font-medium truncate text-slate-100">
           {appState.isConnecting ? 'Connecting...' : (appState.activeConnection?.name || 'No active connection')}
         </span>
         {#if appState.activeConnection?.environment}
-          <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold border {getEnvBadgeClass(appState.activeConnection.environment)}">
+          <span class="px-1.5 py-0.5 rounded text-[10px] font-medium border {getEnvBadgeClass(appState.activeConnection.environment)}">
             {appState.activeConnection.environment}
           </span>
         {/if}
@@ -536,11 +536,20 @@
       <button
         onclick={() => appState.toggleReadOnlyMode()}
         class="h-7 px-2 rounded-md font-medium transition border flex items-center gap-1.5 shrink-0 {appState.isReadOnly
-          ? 'bg-rose-950/60 border-rose-700 text-rose-300 hover:bg-rose-900/60'
-          : 'bg-emerald-950/60 border-emerald-700 text-emerald-300 hover:bg-emerald-900/60'}"
-        title={appState.isReadOnly ? 'Read-Only mode active — click to allow writes' : 'Write mode active — click to lock into read-only mode'}
+          ? 'bg-slate-800/80 border-slate-700 text-slate-300 hover:bg-slate-700/80 hover:text-slate-100'
+          : (appState.isProduction
+            ? 'bg-amber-950/50 border-amber-600/60 text-amber-200 hover:bg-amber-900/50'
+            : 'bg-emerald-950/40 border-emerald-700/60 text-emerald-300 hover:bg-emerald-900/40')}"
+        title={appState.isReadOnly
+          ? 'Read-Only mode active — click to allow writes'
+          : (appState.isProduction ? 'Write mode active on PRODUCTION — click to lock into read-only mode' : 'Write mode active — click to lock into read-only mode')}
       >
-        <Icon name={appState.isReadOnly ? 'lock' : 'unlock'} class="w-3 h-3 {appState.isReadOnly ? 'text-rose-400' : 'text-emerald-400'}" />
+        <Icon
+          name={appState.isReadOnly ? 'lock' : 'unlock'}
+          class="w-3 h-3 {appState.isReadOnly
+            ? 'text-slate-400'
+            : (appState.isProduction ? 'text-amber-400' : 'text-emerald-400')}"
+        />
         <span class="hidden xl:inline text-[11px] font-semibold">{appState.isReadOnly ? 'Read-Only' : 'Write Allowed'}</span>
       </button>
     {/if}
