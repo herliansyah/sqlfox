@@ -10,7 +10,6 @@ RUN npm ci && npm --prefix web/frontend ci
 
 COPY web/frontend/ web/frontend/
 COPY scripts/ scripts/
-COPY tailwind.config.* postcss.config.* ./ 2>/dev/null || true
 COPY web/ web/
 RUN npm run build:svelte
 
