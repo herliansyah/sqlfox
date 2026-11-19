@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -63,11 +64,16 @@ func TestHandleGetTableRows_Limit1000AndExactCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create table: %v", err)
 	}
+	var sb strings.Builder
+	sb.WriteString("INSERT INTO items VALUES ")
 	for i := 1; i <= 101; i++ {
-		_, err = sess.Session.Exec(ctx, fmt.Sprintf("INSERT INTO items VALUES (%d, 'item_%d')", i, i))
-		if err != nil {
-			t.Fatalf("failed to insert row %d: %v", i, err)
+		if i > 1 {
+			sb.WriteString(",")
 		}
+		sb.WriteString(fmt.Sprintf("(%d, 'item_%d')", i, i))
+	}
+	if _, err := sess.Session.Exec(ctx, sb.String()); err != nil {
+		t.Fatalf("failed to insert rows: %v", err)
 	}
 
 	// 1. Request with limit=1000: must return all 101 rows and total_rows=101, is_exact=true
