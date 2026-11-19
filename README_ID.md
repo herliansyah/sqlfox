@@ -11,6 +11,7 @@
 
 [![GitHub Release](https://img.shields.io/github/v/release/herliansyah/sqlfox?style=flat-square&color=FF6B35&logo=github)](https://github.com/herliansyah/sqlfox/releases)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/herliansyah/sqlfox?style=flat-square&color=00ADD8&logo=go)](https://golang.org)
+[![Frontend](https://img.shields.io/badge/frontend-Svelte%205-FF3E00?style=flat-square&logo=svelte)](ARCHITECTURE.md)
 [![Batas Memori](https://img.shields.io/badge/memori-%3C%20100MB%20RAM-success?style=flat-square&color=10B981)](ARCHITECTURE.md)
 [![Bebas Electron](https://img.shields.io/badge/runtime-Bebas%20Electron%20%7C%20Tanpa%20CGO-blue?style=flat-square&color=3B82F6)](ARCHITECTURE.md)
 [![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-4B5563?style=flat-square&logo=linux)](https://github.com/herliansyah/sqlfox/releases)
@@ -30,7 +31,7 @@
 
 Sebagian besar aplikasi database modern berbasis Electron yang lambat dan memakan ratusan megabyte RAM sebelum koneksi terbentuk, atau hanya berupa CLI terminal tanpa kenyamanan visual. **SqlFox menyatukan keunggulan keduanya**:
 
-- ⚡ **Ringan & Secepat Kilat**: Berkas binary tunggal (*single static binary*) dengan driver Go murni (`CGO_ENABLED=0`). Start dalam **< 1 detik** dan beroperasi ketat di bawah plafon **< 100MB RAM** bahkan pada skema besar dengan 1.000+ tabel.
+- ⚡ **Ringan & Secepat Kilat (Pure Go + Svelte 5)**: Berkas binary tunggal (*single static binary*) dengan driver Go murni (`CGO_ENABLED=0`) dan antarmuka reaktif Svelte 5 tersemat. Start dalam **< 1 detik** dan beroperasi ketat di bawah plafon **< 100MB RAM** bahkan pada skema besar dengan 1.000+ tabel.
 - 🛡️ **Safety Guard™ Deterministik**: Mencegat operasi destruktif (`DROP TABLE`, `UPDATE`/`DELETE` tanpa `WHERE`) via analisis sintaks AST dan estimasi dampak baris sebelum menyentuh database produksi.
 - 🖥️ **Aplikasi Desktop Mandiri & Web**: Terbuka otomatis sebagai jendela aplikasi desktop frameless menggunakan mode `--app` Chromium/Edge, di tab browser standar, atau sebagai daemon latar belakang.
 - 🤖 **AI Copilot Sadar Privasi (BYOK)**: Rekomendasi indeks komposit ESR dan optimasi kueri menggunakan API key pribadi (Claude, OpenAI, Gemini, DeepSeek, atau Ollama lokal) dengan **garansi nol kebocoran data baris**.
@@ -260,7 +261,13 @@ sqlfox stop
 
 ---
 
-### 🏗️ Arsitektur Sistem
+### 🏗️ Arsitektur Sistem & Tech Stack
+
+SqlFox memadukan backend konkurensi tinggi Go dengan frontend Svelte 5 ultra-ringan yang dikompilasi dan disematkan langsung ke dalam satu binary executable:
+
+- **Go 1.22+ Core Engine**: Tanpa dependensi eksternal, driver database Go murni (PostgreSQL, MySQL, SQLite), penganalisis AST SQL deterministik, connection vault (Argon2id + AES-256-GCM), serta automasi headless CLI.
+- **Svelte 5 Workspace**: Arsitektur reaktif Runes (`$state`, `$derived`, `$effect`), virtual grid DOM-windowed (60fps pada 10.000+ baris), canvas ERD visual interaktif, dan editor SQL CodeMirror 6 dengan pergantian dialek otomatis.
+- **Distribusi Desktop Bebas Electron**: Menyematkan hasil build Svelte via `//go:embed` Go dan memanfaatkan runtime Chromium/Edge bawaan OS via mode `--app` untuk pengalaman desktop mandiri tanpa beban ratusan megabyte dari Electron.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐

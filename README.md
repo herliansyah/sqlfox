@@ -11,6 +11,7 @@
 
 [![GitHub Release](https://img.shields.io/github/v/release/herliansyah/sqlfox?style=flat-square&color=FF6B35&logo=github)](https://github.com/herliansyah/sqlfox/releases)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/herliansyah/sqlfox?style=flat-square&color=00ADD8&logo=go)](https://golang.org)
+[![Frontend](https://img.shields.io/badge/frontend-Svelte%205-FF3E00?style=flat-square&logo=svelte)](ARCHITECTURE.md)
 [![Memory Ceiling](https://img.shields.io/badge/memory-%3C%20100MB%20RAM-success?style=flat-square&color=10B981)](ARCHITECTURE.md)
 [![Zero Electron](https://img.shields.io/badge/runtime-Zero%20Electron%20%7C%20CGO--Free-blue?style=flat-square&color=3B82F6)](ARCHITECTURE.md)
 [![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-4B5563?style=flat-square&logo=linux)](https://github.com/herliansyah/sqlfox/releases)
@@ -30,7 +31,7 @@
 
 Most modern database tools are either bulky Electron apps consuming hundreds of megabytes of RAM before connecting, or terminal-only clients lacking intuitive visual ergonomics. **SqlFox delivers the best of both worlds**:
 
-- ⚡ **Lightweight & Blazing Fast**: Single static binary compiled with pure-Go drivers (`CGO_ENABLED=0`). Boots in under **1 second** and operates strictly within a **< 100MB RAM** ceiling even with 1,000+ tables.
+- ⚡ **Lightweight & Blazing Fast (Pure Go + Svelte 5)**: Single static binary compiled with pure-Go drivers (`CGO_ENABLED=0`) and an embedded reactive Svelte 5 workspace. Boots in under **1 second** and operates strictly within a **< 100MB RAM** ceiling even with 1,000+ tables.
 - 🛡️ **Deterministic Safety Guard™**: Pre-execution AST inspection and row mutation estimation intercepts accidental `DROP TABLE` or `UPDATE`/`DELETE` without `WHERE` before they hit production.
 - 🖥️ **Native App Window & Web Workspace**: Launches automatically in a clean frameless native desktop window via Chromium/Edge `--app` mode, in a browser tab, or as a background daemon.
 - 🤖 **Private AI Copilot (BYOK)**: Schema-aware query optimization and index advice powered by your own API key (Claude, OpenAI, Gemini, DeepSeek, or local Ollama) with **zero row data leakage**.
@@ -260,7 +261,13 @@ sqlfox stop
 
 ---
 
-### 🏗️ Architecture
+### 🏗️ Architecture & Tech Stack
+
+SqlFox pairs a high-concurrency Go backend with an ultra-lean Svelte 5 frontend compiled and embedded directly into a single static binary:
+
+- **Go 1.22+ Core Engine**: Zero external dependencies, pure-Go database drivers (PostgreSQL, MySQL, SQLite), deterministic SQL AST analyzer, connection vault (Argon2id + AES-256-GCM), and headless CLI automation.
+- **Svelte 5 Workspace**: Reactive runes (`$state`, `$derived`, `$effect`), DOM-windowed virtual grid (60fps on 10,000+ rows), interactive SVG ERD canvas, and CodeMirror 6 SQL editor with dialect auto-switching.
+- **Zero-Electron Desktop Delivery**: Embeds the Svelte build via Go's `//go:embed` and leverages the host's existing Chromium/Edge runtime via `--app` mode for a frameless native desktop experience without hundreds of megabytes of Electron overhead.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
