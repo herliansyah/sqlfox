@@ -1,6 +1,7 @@
 import { mount } from 'svelte';
 import './app.css';
 import App from './App.svelte';
+import { appState } from './lib/stores/appState.svelte';
 
 const app = mount(App, {
   target: document.getElementById('app')!,
@@ -12,4 +13,9 @@ if (serverShell) {
   serverShell.classList.add('hidden');
 }
 
+if (typeof window !== 'undefined') {
+  (window as any).appState = appState;
+}
+
 export default app;
+
