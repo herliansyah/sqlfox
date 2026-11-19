@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Dockerfile Frontend Build COPY Syntax (`Dockerfile`)**: Removed obsolete shell fallback `COPY` line for retired legacy `tailwind.config.*` / `postcss.config.*` files in the frontend Docker build stage, preventing build failures on standard Docker engines (#145).
+
+### Changed
+- **Go and Svelte 5 Architecture Documentation (`README.md`, `README_ID.md`, `ARCHITECTURE.md`)**: Added Svelte 5 badges, emphasized pure-Go and Svelte 5 architecture in the core value proposition, documented tech stack synergy in both English and Indonesian READMEs, and updated the high-level architecture diagram in ARCHITECTURE.md to reflect Svelte 5 Runes and CodeMirror 6 (#146).
+
 ## [v0.19.1] - 2026-11-19
 
 ### Fixed
