@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.19.1] - 2026-11-19
+
 ### Fixed
 - **Table Query Pagination Limits & Accurate Row Counts (`internal/server/handlers_schema.go`, `internal/server/server.go`, `internal/server/table_rows_count_test.go`, `web/frontend/src/lib/components/grid/VirtualGrid.svelte`, `web/frontend/src/lib/components/table/TableViewer.svelte`, `web/frontend/src/lib/stores/appState.svelte.ts`)**: Supported requested table query limits up to 1000 instead of clamping at 500, ensured exact row counts are calculated for chunks smaller than the limit with a fast query fallback for full chunks, added an interactive count refresh badge and dedicated endpoint (`/api/schema/table/rows/count`) to recalculate exact row counts on demand, and prevented VirtualGrid pagination from locking prematurely when catalog estimates diverge from actual table records (#144).
 

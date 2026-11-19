@@ -216,7 +216,7 @@ export class AppState {
   serverMemoryMb = $state<number | null>(null);
   serverInfo = $state<{ version?: string; uptime_sec?: number; active_conns?: number } | null>(null);
   isPingingServer = $state<boolean>(false);
-  appVersion = $state<string>('v0.19.0');
+  appVersion = $state<string>('v0.19.1');
   isMockDataModalOpen = $state<boolean>(false);
   mockDataTableName = $state<string>('');
   isSettingsModalOpen = $state<boolean>(false);
