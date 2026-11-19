@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Processlist Thread Status Truncation & Header Status Badges (`web/frontend/src/lib/components/dba/ProcesslistView.svelte`, `web/frontend/src/lib/components/layout/Header.svelte`)**: Widened the processlist thread ID column to `w-32` using a flex layout with compact micro-pills (`BLOCK`, `WAIT`, `YOU`) on the left and right-aligned tabular thread IDs to prevent status badge truncation. Refined header connection styling by neutralizing the button background, softening the production badge to a muted ruby tone without aggressive neon glow, restyling read-only status into calm slate with a lock icon, and displaying cautionary amber accents for write-allowed states only in production environments (#147).
+
 ## [v0.19.2] - 2026-11-19
 
 ### Fixed
