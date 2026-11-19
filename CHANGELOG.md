@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.19.2] - 2026-11-19
+
 ### Fixed
 - **Dockerfile Frontend Build COPY Syntax (`Dockerfile`)**: Removed obsolete shell fallback `COPY` line for retired legacy `tailwind.config.*` / `postcss.config.*` files in the frontend Docker build stage, preventing build failures on standard Docker engines (#145).
 
