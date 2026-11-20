@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.19.5] - 2026-11-20
+
 ### Fixed
 - **Query Execution Limit Honor & Stream Pagination Truncation (`internal/server/session_manager.go`, `internal/server/session_execution_test.go`, `web/frontend/src/lib/components/grid/VirtualGrid.svelte`, `web/frontend/src/lib/stores/appState.svelte.ts`)**: Resolved a hardcoded 1,000-row limit in `ActiveSession.Execute` so custom execution limits up to 100,000 rows are honored, preventing pagination truncation when paging through stream batch offsets. Made the VirtualGrid batch pagination controls dynamic according to the selected query limit, and added regression test `TestActiveSession_ExecuteCustomLimit` (#149).
 
