@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -925,3 +926,71 @@ func TestActiveSession_TabScopedTransactions(t *testing.T) {
 		t.Fatalf("expected 1 row, got %d", t2Select.RowCount)
 	}
 }
+
+func TestActiveSession_ExecuteCustomLimit(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "sqlfox-limit-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	dbPath := filepath.Join(tempDir, "test.db")
+	dbSession, err := driver.Connect(context.Background(), driver.Config{
+		Driver:       "sqlite",
+		DatabaseName: dbPath,
+	})
+	if err != nil {
+		t.Fatalf("driver.Connect failed: %v", err)
+	}
+	defer dbSession.Close()
+
+	sess := &ActiveSession{
+		ID:          "conn-limit-1",
+		Environment: "Development",
+		DriverName:  "sqlite",
+		ReadOnly:    false,
+		Session:     dbSession,
+	}
+
+	ctx := context.Background()
+	_, err = sess.Execute(ctx, ExecuteRequest{
+		SQL: "CREATE TABLE tblpenjualan (id INTEGER PRIMARY KEY, note TEXT);",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Insert 2000 rows
+	_, _ = sess.Execute(ctx, ExecuteRequest{SQL: "BEGIN TRANSACTION;"})
+	for i := 1; i <= 2000; i++ {
+		_, _ = sess.Execute(ctx, ExecuteRequest{
+			SQL: fmt.Sprintf("INSERT INTO tblpenjualan VALUES (%d, 'sale %d');", i, i),
+		})
+	}
+	_, _ = sess.Execute(ctx, ExecuteRequest{SQL: "COMMIT;"})
+
+	// When Limit is specified as 1500, Execute must respect it and return 1500 rows, not 1000.
+	res, err := sess.Execute(ctx, ExecuteRequest{
+		SQL:   "SELECT * FROM tblpenjualan ORDER BY id ASC;",
+		Limit: 1500,
+	})
+	if err != nil {
+		t.Fatalf("Execute with Limit 1500 failed: %v", err)
+	}
+	if len(res.Rows) != 1500 {
+		t.Fatalf("expected 1500 rows when Limit=1500, but got %d rows (hardcoded 1000 limit bug)", len(res.Rows))
+	}
+
+	// When Limit <= 0, Execute must fallback to default 1000 rows.
+	resDefault, err := sess.Execute(ctx, ExecuteRequest{
+		SQL:   "SELECT * FROM tblpenjualan ORDER BY id ASC;",
+		Limit: 0,
+	})
+	if err != nil {
+		t.Fatalf("Execute with default limit failed: %v", err)
+	}
+	if len(resDefault.Rows) != 1000 {
+		t.Fatalf("expected default 1000 rows, got %d", len(resDefault.Rows))
+	}
+}
+
