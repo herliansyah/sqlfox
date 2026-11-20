@@ -21,6 +21,7 @@
   let showRunMenu = $state(false);
   let showMoreMenu = $state(false);
   const limitChoices = [
+    { label: '500', value: 500 },
     { label: '1k', value: 1000 },
     { label: '5k', value: 5000 },
     { label: '25k', value: 25000 },
@@ -219,7 +220,7 @@
         <label class="h-7 flex items-center space-x-1 px-2 rounded bg-slate-900 border border-slate-700/80 text-[11px] text-slate-400" title="Max rows streamed for this tab">
           <span class="hidden sm:inline">Limit:</span>
           <select
-            value={(currentTab as any).queryLimit ?? 5000}
+            value={(currentTab as any).queryLimit ?? 1000}
             onchange={(e) => {
               (currentTab as any).queryLimit = Number((e.currentTarget as HTMLSelectElement).value);
               appState.saveTabsState();

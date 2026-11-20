@@ -2424,6 +2424,22 @@
           {:else}
             <span class="font-bold text-slate-200">{totalRows.toLocaleString()}</span>
             <span class="text-slate-500">records</span>
+            {#if currentTab?.manualTotalRows !== undefined && currentTab?.manualTotalRows !== null}
+              <span class="text-slate-600">•</span>
+              <span class="text-slate-400">Total:</span>
+              <span class="font-bold text-emerald-400">{currentTab.manualTotalRows.toLocaleString()}</span>
+              <span class="text-slate-500">records</span>
+            {:else if !currentTab?.isTableViewer && (totalRows > 0 || currentTab?.hasMoreStream)}
+              <button
+                onclick={() => appState.countQueryTotal(currentTab)}
+                disabled={currentTab?.isCountingTotal || isExecuting}
+                class="ml-1.5 px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-[10px] text-sky-400 hover:text-sky-300 border border-slate-700/80 transition flex items-center space-x-1"
+                title="Calculate exact total rows for this query via SELECT COUNT(*)"
+              >
+                <Icon name={currentTab?.isCountingTotal ? 'refresh-cw' : 'hash'} class="w-3 h-3 {currentTab?.isCountingTotal ? 'animate-spin text-sky-300' : ''}" />
+                <span>{currentTab?.isCountingTotal ? 'Counting...' : 'Count Total'}</span>
+              </button>
+            {/if}
           {/if}
         </span>
         {#if result.duration_ms !== undefined}
@@ -2553,28 +2569,30 @@
             </button>
           {/if}
         </div>
-      {:else if result && result.rows && (result.rows.length >= 5000 || (currentTab?.streamBatchOffset ?? 0) > 0 || currentTab?.hasMoreStream)}
+      {:else if result && result.rows && (result.rows.length >= (currentTab?.queryLimit || 1000) || (currentTab?.streamBatchOffset ?? 0) > 0 || currentTab?.hasMoreStream)}
         {@const streamOff = currentTab?.streamBatchOffset || 0}
-        <!-- Query Stream 5k Batch Pager (ADR 0058) -->
+        {@const batchLimit = currentTab?.queryLimit || 1000}
+        {@const batchLabel = batchLimit >= 1000 ? `${batchLimit / 1000}k` : `${batchLimit}`}
+        <!-- Query Stream Dynamic Batch Pager (ADR 0058) -->
         <div class="flex items-center space-x-2 text-[11px]">
           <span class="px-2 py-0.5 rounded bg-sky-950/80 border border-sky-800 text-sky-300 font-mono text-[10px] font-bold">
-            Batch #{Math.floor(streamOff / 5000) + 1} (Rows {(streamOff + 1).toLocaleString()}–{(streamOff + totalRows).toLocaleString()})
+            Batch #{Math.floor(streamOff / batchLimit) + 1} (Rows {(streamOff + 1).toLocaleString()}–{(streamOff + totalRows).toLocaleString()})
           </span>
           <button
             onclick={() => appState.pageStreamBatch('prev')}
             disabled={(currentTab?.streamBatchOffset || 0) <= 0 || isExecuting}
             class="px-2 py-0.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-30 border border-[#334155] text-slate-200 transition"
-            title="Load previous 5,000 records"
+            title={`Load previous ${batchLabel} records`}
           >
-            Prev 5k
+            Prev {batchLabel}
           </button>
           <button
             onclick={() => appState.pageStreamBatch('next')}
-            disabled={(!currentTab?.hasMoreStream && (result.rows?.length || 0) < 5000) || isExecuting}
+            disabled={(!currentTab?.hasMoreStream && (result.rows?.length || 0) < batchLimit) || isExecuting}
             class="px-2 py-0.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-30 border border-[#334155] text-slate-200 transition"
-            title="Load next 5,000 records"
+            title={`Load next ${batchLabel} records`}
           >
-            Next 5k
+            Next {batchLabel}
           </button>
         </div>
       {:else}

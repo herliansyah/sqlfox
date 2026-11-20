@@ -361,6 +361,8 @@ export interface EditorTab {
   stagedDraftRows?: Record<string, any>[];
   selectedRowIndices?: number[];
   showQueryProfiler?: boolean;
+  manualTotalRows?: number | null;
+  isCountingTotal?: boolean;
 }
 
 export interface OperationalNote {

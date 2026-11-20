@@ -2116,6 +2116,8 @@ export class AppState {
     tab.hasMoreStream = false;
     tab.baseStreamSQL = sql;
     tab.queryPage = 1;
+    tab.manualTotalRows = null;
+    tab.isCountingTotal = false;
     this.tabs = [...this.tabs];
 
     const timer = setInterval(() => {
@@ -2143,7 +2145,7 @@ export class AppState {
       let singleResult: QueryExecutionResult | null = null;
       let multiMode = false;
       let rafId: number | null = null;
-      const effectiveLimit = (tab as any).queryLimit > 0 ? (tab as any).queryLimit : 5000;
+      const effectiveLimit = (tab as any).queryLimit > 0 ? (tab as any).queryLimit : 1000;
 
       const flushChunkUI = () => {
         rafId = null;
@@ -2472,7 +2474,7 @@ export class AppState {
     const tab = this.activeTab;
     if (!tab || !this.activeSessionId || tab.isTableViewer || tab.isExecuting) return;
     const currentOffset = tab.streamBatchOffset || 0;
-    const batchSize = 5000;
+    const batchSize = (tab as any).queryLimit > 0 ? (tab as any).queryLimit : 1000;
     const nextOffset = direction === 'next' ? currentOffset + batchSize : Math.max(0, currentOffset - batchSize);
     const rawBase = (tab.baseStreamSQL || tab.sql || '').trim();
     if (!rawBase) return;
@@ -2506,6 +2508,44 @@ export class AppState {
       this.showToast(`Batch paging failed: ${err.message}`, 'error');
     } finally {
       tab.isExecuting = false;
+      this.tabs = [...this.tabs];
+    }
+  }
+
+  /**
+   * Runs an explicit on-demand COUNT(*) for the current query tab without
+   * triggering full scans on regular query executions.
+   */
+  async countQueryTotal(tab?: TabItem) {
+    const t = tab || this.activeTab;
+    if (!t || !this.activeSessionId || t.isTableViewer || t.isCountingTotal) return;
+    const rawBase = (t.baseStreamSQL || t.sql || '').trim();
+    if (!rawBase) return;
+
+    const clean = rawBase.replace(/;+\s*$/, '');
+    const countSql = `SELECT COUNT(*) AS _total_count FROM (\n${clean}\n) AS _sf_count;`;
+
+    t.isCountingTotal = true;
+    this.tabs = [...this.tabs];
+
+    try {
+      const res = await api.executeQuery(this.activeSessionId, countSql, {
+        confirmed: true,
+        database: t.database || this.currentDatabase || '',
+        limit: 1,
+        tabId: t.id,
+      });
+      if (res.rows && res.rows.length > 0 && res.rows[0].length > 0) {
+        const val = Number(res.rows[0][0]);
+        if (!isNaN(val)) {
+          t.manualTotalRows = val;
+          this.showToast(`Total records: ${val.toLocaleString()}`, 'info');
+        }
+      }
+    } catch (err: any) {
+      this.showToast(`Count failed: ${err.message}`, 'error');
+    } finally {
+      t.isCountingTotal = false;
       this.tabs = [...this.tabs];
     }
   }

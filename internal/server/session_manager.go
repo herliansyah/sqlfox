@@ -1072,6 +1072,13 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		return s.executeMulti(execCtx, req, stmts, inspection, targetDB, start, currentTx, collectProfile)
 	}
 
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 1000
+	} else if limit > 100000 {
+		limit = 100000
+	}
+
 	if currentTx != nil {
 		if !isSelect {
 			execRes, err := currentTx.Exec(execCtx, trimmedSQL)
@@ -1098,7 +1105,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 			}, nil
 		}
 
-		stream, err := currentTx.QueryStream(execCtx, trimmedSQL, 1000)
+		stream, err := currentTx.QueryStream(execCtx, trimmedSQL, limit)
 		if err != nil {
 			execErr = err
 			return nil, err
@@ -1107,7 +1114,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 
 		cols := stream.Columns()
 		var allRows [][]any
-		for len(allRows) < 1000 {
+		for len(allRows) < limit {
 			chunk, err := stream.NextChunk(200)
 			if len(chunk) > 0 {
 				allRows = append(allRows, chunk...)
@@ -1170,8 +1177,8 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		}, nil
 	}
 
-	// Select stream execution with implicit safe limit (1,000 rows)
-	stream, err := s.Session.QueryStream(execCtx, trimmedSQL, 1000)
+	// Select stream execution with implicit safe limit
+	stream, err := s.Session.QueryStream(execCtx, trimmedSQL, limit)
 	if err != nil {
 		execErr = err
 		return nil, err
@@ -1181,7 +1188,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	cols := stream.Columns()
 	var allRows [][]any
 
-	for len(allRows) < 1000 {
+	for len(allRows) < limit {
 		chunk, err := stream.NextChunk(200)
 		if len(chunk) > 0 {
 			allRows = append(allRows, chunk...)
