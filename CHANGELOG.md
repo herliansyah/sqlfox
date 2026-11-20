@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.19.4] - 2026-11-20
+
 ### Changed
 - **Canonical Go Module Path (`go.mod`, internal imports, workflows)**: Migrated Go module path to canonical repository URL `github.com/herliansyah/sqlfox` across all internal packages and build workflows (#148).
 - **CI Test Coverage & Codecov Reporting (`.github/workflows/ci.yml`, `README.md`, `README_ID.md`)**: Configured automatic test coverage profile generation and Codecov upload in GitHub Actions CI, and added pkg.go.dev and codecov badges (#148).
