@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/driver"
 )
 
 // Config specifies what to generate.

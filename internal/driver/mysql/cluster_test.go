@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"testing"
 
-	"sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/driver"
 )
 
 func TestDiagnoseClusterBottleneck(t *testing.T) {

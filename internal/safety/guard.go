@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/driver"
 
 	"github.com/xwb1989/sqlparser"
 )

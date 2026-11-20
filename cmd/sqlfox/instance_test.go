@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"sqlfox/internal/server"
+	"github.com/herliansyah/sqlfox/internal/server"
 )
 
 func TestSingleInstanceGuard(t *testing.T) {

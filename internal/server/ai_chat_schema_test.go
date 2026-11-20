@@ -13,7 +13,7 @@ import (
 	"sync"
 	"testing"
 
-	"sqlfox/internal/vault"
+	"github.com/herliansyah/sqlfox/internal/vault"
 )
 
 func TestServer_AIChat_IncludesRealColumnsWhenFirewallOff(t *testing.T) {

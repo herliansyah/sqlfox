@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"sqlfox/internal/driver"
-	_ "sqlfox/internal/driver/mysql"
-	_ "sqlfox/internal/driver/postgres"
-	_ "sqlfox/internal/driver/sqlite"
+	"github.com/herliansyah/sqlfox/internal/driver"
+	_ "github.com/herliansyah/sqlfox/internal/driver/mysql"
+	_ "github.com/herliansyah/sqlfox/internal/driver/postgres"
+	_ "github.com/herliansyah/sqlfox/internal/driver/sqlite"
 
 	_ "modernc.org/sqlite"
 )

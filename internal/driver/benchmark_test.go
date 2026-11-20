@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/driver"
 )
 
 // GenerateSyntheticSchema builds an in-memory SchemaMetadata simulating an enterprise catalog.

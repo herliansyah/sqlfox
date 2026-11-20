@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"sqlfox/internal/vault"
+	"github.com/herliansyah/sqlfox/internal/vault"
 )
 
 // TestReconnectStampede_ConcurrentGetSession asserts that when an evicted session

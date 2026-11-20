@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"sqlfox/internal/mock"
+	"github.com/herliansyah/sqlfox/internal/mock"
 )
 
 func (s *Server) handleGenerateMockData(w http.ResponseWriter, r *http.Request) {

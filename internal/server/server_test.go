@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"sqlfox/internal/driver"
-	"sqlfox/internal/vault"
-	"sqlfox/web"
+	"github.com/herliansyah/sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/vault"
+	"github.com/herliansyah/sqlfox/web"
 )
 
 func TestServer_API_Lifecycle(t *testing.T) {

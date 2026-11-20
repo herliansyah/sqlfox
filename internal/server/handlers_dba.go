@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/driver"
 )
 
 func (s *Server) handleGetProcesslist(w http.ResponseWriter, r *http.Request) {

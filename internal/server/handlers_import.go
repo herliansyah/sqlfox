@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"sqlfox/internal/dataimport"
+	"github.com/herliansyah/sqlfox/internal/dataimport"
 )
 
 // SniffCSVDelimiter delegates to dataimport.SniffDelimiter.

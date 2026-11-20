@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"sqlfox/internal/vault"
+	"github.com/herliansyah/sqlfox/internal/vault"
 )
 
 type cloudSyncConfigResponse struct {

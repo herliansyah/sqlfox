@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"sqlfox/internal/driver"
-	"sqlfox/internal/vault"
+	"github.com/herliansyah/sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/vault"
 )
 
 func (s *Server) handleConnectSession(w http.ResponseWriter, r *http.Request) {

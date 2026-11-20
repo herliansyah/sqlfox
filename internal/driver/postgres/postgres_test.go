@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/driver"
 )
 
 func TestPostgresDriverRegistration(t *testing.T) {

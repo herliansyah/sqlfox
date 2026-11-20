@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"sqlfox/internal/vault"
+	"github.com/herliansyah/sqlfox/internal/vault"
 )
 
 func (s *Server) handleListSnippets(w http.ResponseWriter, r *http.Request) {

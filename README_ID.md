@@ -18,6 +18,8 @@
 [![Arsitektur](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-6366F1?style=flat-square)](https://github.com/herliansyah/sqlfox/releases)
 [![Lisensi: MIT](https://img.shields.io/badge/License-MIT-F59E0B?style=flat-square)](https://opensource.org/licenses/MIT)
 [![CI](https://img.shields.io/github/actions/workflow/status/herliansyah/sqlfox/ci.yml?branch=master&label=CI&style=flat-square&logo=githubactions)](https://github.com/herliansyah/sqlfox/actions)
+[![Go Reference](https://pkg.go.dev/badge/github.com/herliansyah/sqlfox.svg)](https://pkg.go.dev/github.com/herliansyah/sqlfox)
+[![codecov](https://codecov.io/gh/herliansyah/sqlfox/graph/badge.svg)](https://codecov.io/gh/herliansyah/sqlfox)
 
 <br />
 

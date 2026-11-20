@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/driver"
 
 	_ "modernc.org/sqlite"
 )

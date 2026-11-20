@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"sqlfox/internal/driver"
-	_ "sqlfox/internal/driver/sqlite"
+	"github.com/herliansyah/sqlfox/internal/driver"
+	_ "github.com/herliansyah/sqlfox/internal/driver/sqlite"
 )
 
 // Self-check: covers generateValue type dispatch and basic topology helpers.

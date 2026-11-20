@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"sqlfox/internal/logger"
+	"github.com/herliansyah/sqlfox/internal/logger"
 )
 
 func TestLogsStreamSSE(t *testing.T) {

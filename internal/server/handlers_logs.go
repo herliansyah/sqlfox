@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"sqlfox/internal/logger"
+	"github.com/herliansyah/sqlfox/internal/logger"
 )
 
 // handleLogsStream provides an SSE (Server-Sent Events) live log telemetry stream.

@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"sqlfox/internal/advisor"
-	"sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/advisor"
+	"github.com/herliansyah/sqlfox/internal/driver"
 
 	gomysql "github.com/go-sql-driver/mysql"
 )

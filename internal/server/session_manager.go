@@ -15,9 +15,9 @@ import (
 	"sync"
 	"time"
 
-	"sqlfox/internal/driver"
-	"sqlfox/internal/safety"
-	"sqlfox/internal/vault"
+	"github.com/herliansyah/sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/safety"
+	"github.com/herliansyah/sqlfox/internal/vault"
 )
 
 var (

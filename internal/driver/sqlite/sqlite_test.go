@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/driver"
 )
 
 func TestSQLiteDriver_Lifecycle(t *testing.T) {

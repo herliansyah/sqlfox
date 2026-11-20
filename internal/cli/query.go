@@ -12,8 +12,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"sqlfox/internal/driver"
-	"sqlfox/internal/safety"
+	"github.com/herliansyah/sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/safety"
 )
 
 // RunQuery executes SQL statements against the target database and writes formatted results to stdout.

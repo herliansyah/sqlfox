@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"sqlfox/internal/driver"
-	"sqlfox/internal/vault"
+	"github.com/herliansyah/sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/vault"
 )
 
 func TestActiveSession_SafeExecutionPipeline(t *testing.T) {

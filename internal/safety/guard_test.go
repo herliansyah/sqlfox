@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"sqlfox/internal/driver"
-	_ "sqlfox/internal/driver/sqlite"
+	"github.com/herliansyah/sqlfox/internal/driver"
+	_ "github.com/herliansyah/sqlfox/internal/driver/sqlite"
 )
 
 func TestSafetyGuard_Inspect(t *testing.T) {

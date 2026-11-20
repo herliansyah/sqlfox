@@ -44,7 +44,20 @@ jobs:
           npm run build:svelte
 
       - name: Run Tests
+        if: matrix.os != 'ubuntu-latest'
         run: go test -v ./...
+
+      - name: Run Tests with Coverage
+        if: matrix.os == 'ubuntu-latest'
+        run: go test -v -coverprofile=coverage.txt -covermode=atomic ./...
+
+      - name: Upload Coverage to Codecov
+        if: matrix.os == 'ubuntu-latest'
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.txt
+          fail_ci_if_error: false
 
       - name: Build Binary
         run: go build -v ./cmd/sqlfox

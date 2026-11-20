@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"sqlfox/internal/vault"
+	"github.com/herliansyah/sqlfox/internal/vault"
 )
 
 func TestServer_DumpAndSmartSeedAndScriptRunner(t *testing.T) {

@@ -69,7 +69,7 @@ jobs:
           # Embed the Ed25519 manifest-signing public key so the self-updater enforces a signed
           # checksum manifest (supply-chain trust anchor). Non-secret; stored as a repo variable.
           PUBKEY="${{ vars.SQLFOX_MANIFEST_SIGNING_PUBKEY }}"
-          LDFLAGS="-s -w -X main.Version=${VERSION} -X sqlfox/internal/server.manifestSigningPublicKeyB64=${PUBKEY}"
+          LDFLAGS="-s -w -X main.Version=${VERSION} -X github.com/herliansyah/sqlfox/internal/server.manifestSigningPublicKeyB64=${PUBKEY}"
 
           TARGETS=(
             "linux amd64"
