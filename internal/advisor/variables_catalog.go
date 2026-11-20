@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/driver"
 )
 
 // VariableRule contains curated metadata and evaluation heuristics for a database configuration parameter.

@@ -18,15 +18,15 @@ import (
 	"syscall"
 	"time"
 
-	"sqlfox/internal/cli"
-	"sqlfox/internal/logger"
-	"sqlfox/internal/server"
-	"sqlfox/internal/vault"
-	"sqlfox/web"
+	"github.com/herliansyah/sqlfox/internal/cli"
+	"github.com/herliansyah/sqlfox/internal/logger"
+	"github.com/herliansyah/sqlfox/internal/server"
+	"github.com/herliansyah/sqlfox/internal/vault"
+	"github.com/herliansyah/sqlfox/web"
 
-	_ "sqlfox/internal/driver/mysql"
-	_ "sqlfox/internal/driver/postgres"
-	_ "sqlfox/internal/driver/sqlite"
+	_ "github.com/herliansyah/sqlfox/internal/driver/mysql"
+	_ "github.com/herliansyah/sqlfox/internal/driver/postgres"
+	_ "github.com/herliansyah/sqlfox/internal/driver/sqlite"
 )
 
 // Version is populated at build time via -ldflags "-X main.Version=..."

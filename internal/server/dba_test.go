@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"sqlfox/internal/vault"
+	"github.com/herliansyah/sqlfox/internal/vault"
 )
 
 func TestDBAOperationsAndAuditLog(t *testing.T) {

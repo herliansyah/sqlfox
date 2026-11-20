@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sqlfox/internal/vault"
-	_ "sqlfox/internal/driver/sqlite"
+	"github.com/herliansyah/sqlfox/internal/vault"
+	_ "github.com/herliansyah/sqlfox/internal/driver/sqlite"
 )
 
 func main() {

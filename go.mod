@@ -1,4 +1,4 @@
-module sqlfox
+module github.com/herliansyah/sqlfox
 
 go 1.26.0
 

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/driver"
 )
 
 func TestAdvise_ESRRuleOrdering(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/driver"
 )
 
 // Recommendation represents a structured index suggestion.

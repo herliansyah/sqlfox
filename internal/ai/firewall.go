@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/driver"
 )
 
 // ponytail: Heuristic table match: direct substring or singular stem match.

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"sqlfox/internal/ai"
-	"sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/ai"
+	"github.com/herliansyah/sqlfox/internal/driver"
 )
 
 type AIChatRequest struct {

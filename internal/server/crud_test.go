@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"sqlfox/internal/driver"
-	"sqlfox/internal/vault"
+	"github.com/herliansyah/sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/vault"
 )
 
 func TestServer_InsertRowAndBatchDelete(t *testing.T) {

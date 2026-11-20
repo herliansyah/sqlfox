@@ -9,13 +9,13 @@ import (
 	"sync"
 	"time"
 
-	"sqlfox/internal/driver"
-	"sqlfox/internal/logger"
-	"sqlfox/internal/vault"
+	"github.com/herliansyah/sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/logger"
+	"github.com/herliansyah/sqlfox/internal/vault"
 
-	_ "sqlfox/internal/driver/mysql"
-	_ "sqlfox/internal/driver/postgres"
-	_ "sqlfox/internal/driver/sqlite"
+	_ "github.com/herliansyah/sqlfox/internal/driver/mysql"
+	_ "github.com/herliansyah/sqlfox/internal/driver/postgres"
+	_ "github.com/herliansyah/sqlfox/internal/driver/sqlite"
 )
 
 // Server coordinates HTTP API routing and embedded web frontend delivery.

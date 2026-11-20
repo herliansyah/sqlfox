@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"sqlfox/internal/vault"
-	"sqlfox/web"
+	"github.com/herliansyah/sqlfox/internal/vault"
+	"github.com/herliansyah/sqlfox/web"
 )
 
 // Enable the httptest default-Host ("example.com") bypass in the DNS Rebinding guard and the

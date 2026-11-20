@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/driver"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )

@@ -11,13 +11,13 @@ import (
 	"strconv"
 	"strings"
 
-	"sqlfox/internal/driver"
-	"sqlfox/internal/vault"
+	"github.com/herliansyah/sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/vault"
 
 	gomysql "github.com/go-sql-driver/mysql"
-	_ "sqlfox/internal/driver/mysql"
-	_ "sqlfox/internal/driver/postgres"
-	_ "sqlfox/internal/driver/sqlite"
+	_ "github.com/herliansyah/sqlfox/internal/driver/mysql"
+	_ "github.com/herliansyah/sqlfox/internal/driver/postgres"
+	_ "github.com/herliansyah/sqlfox/internal/driver/sqlite"
 )
 
 // PrintHelp writes the CLI command help to the provided writer.

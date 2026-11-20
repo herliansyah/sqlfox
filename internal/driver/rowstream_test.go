@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	_ "modernc.org/sqlite"
-	"sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/driver"
 )
 
 func TestSQLRowStream(t *testing.T) {

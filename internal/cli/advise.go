@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"sqlfox/internal/advisor"
-	"sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/advisor"
+	"github.com/herliansyah/sqlfox/internal/driver"
 )
 
 // RunAdvise executes the 'sqlfox advise' command.

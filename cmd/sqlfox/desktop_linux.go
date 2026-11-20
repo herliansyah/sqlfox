@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"sqlfox/web"
+	"github.com/herliansyah/sqlfox/web"
 )
 
 func handleDesktopCommand(args []string) int {

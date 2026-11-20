@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"sqlfox/internal/vault"
+	"github.com/herliansyah/sqlfox/internal/vault"
 )
 
 func TestCloudSync_ServerIntegration(t *testing.T) {

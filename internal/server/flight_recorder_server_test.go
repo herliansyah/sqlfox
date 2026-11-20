@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"sqlfox/internal/vault"
+	"github.com/herliansyah/sqlfox/internal/vault"
 )
 
 func TestFlightRecorderAPIE2E(t *testing.T) {

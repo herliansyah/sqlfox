@@ -14,7 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/driver"
 )
 
 // ----------------------------------------------------------------------------

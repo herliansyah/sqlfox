@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"sqlfox/internal/driver"
-	"sqlfox/internal/logger"
-	"sqlfox/internal/vault"
+	"github.com/herliansyah/sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/logger"
+	"github.com/herliansyah/sqlfox/internal/vault"
 )
 
 type dummyFlusher struct {

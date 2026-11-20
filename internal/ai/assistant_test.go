@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/driver"
 )
 
 func TestAssistant_AssemblePrompts(t *testing.T) {

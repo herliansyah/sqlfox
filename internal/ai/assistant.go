@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/driver"
 )
 
 // TableNoteSummary carries table documentation for context window injection.

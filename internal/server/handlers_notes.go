@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"sqlfox/internal/vault"
+	"github.com/herliansyah/sqlfox/internal/vault"
 )
 
 // handleListOperationalNotes lists operational notes with optional filtering.

@@ -16,7 +16,7 @@
 //
 // The running binary embeds the public key via:
 //
-//	-ldflags "-X sqlfox/internal/server.manifestSigningPublicKeyB64=<PUBLIC_KEY>"
+//	-ldflags "-X github.com/herliansyah/sqlfox/internal/server.manifestSigningPublicKeyB64=<PUBLIC_KEY>"
 //
 // and then REQUIRES checksums.txt.sig to verify before trusting any checksum.
 package main

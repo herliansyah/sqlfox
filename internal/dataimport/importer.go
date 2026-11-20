@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/driver"
 )
 
 // ImportOptions defines configuration for the CSV Ingestion Engine.

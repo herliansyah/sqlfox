@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/driver"
 )
 
 type InsertRowRequest struct {

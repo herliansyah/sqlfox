@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/driver"
 )
 
 // JobSpec defines the declarative schema for scheduled database automation jobs.

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"sqlfox/internal/advisor"
-	"sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/advisor"
+	"github.com/herliansyah/sqlfox/internal/driver"
 )
 
 func TestCLI_AdviseStaticQuery(t *testing.T) {

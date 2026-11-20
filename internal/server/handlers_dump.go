@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/driver"
 )
 
 // formatSQLValue formats a Go value into a valid SQL literal for dumps and inserts.

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"sqlfox/internal/vault"
+	"github.com/herliansyah/sqlfox/internal/vault"
 )
 
 // ActiveRecording represents an in-flight recording session.
