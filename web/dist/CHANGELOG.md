@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.19.6] - 2026-11-23
+
 ### Added
 - **Rotating Diagnostic Disk Logs & UI Log Viewer (`internal/logger/logger.go`, `internal/server/handlers_logs.go`, `web/frontend/src/lib/components/activity/ActivityConsoleDrawer.svelte`, `cmd/sqlfox/main.go`)**: Persisted server activity, runtime panics, and uncaught client-side frontend errors to a size-bounded rotating log file (`<configDir>/logs/sqlfox.log`, 5 MB per file with 3 backups) so diagnostics survive daemon restarts and browser crashes. Added `GET /api/logs/file` and `POST /api/logs/client` endpoints, and introduced live Disk Log viewing, search filtering, and one-click log clipboard copying to the Activity Console drawer (#150).
 

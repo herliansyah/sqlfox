@@ -1,6 +1,6 @@
 {
   "name": "sqlfox",
-  "version": "0.19.5",
+  "version": "0.19.6",
   "private": true,
   "description": "High-Performance, Single-Binary Database Manager & Headless Automation CLI",
   "scripts": {
