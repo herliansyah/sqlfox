@@ -1,7 +1,9 @@
 package logger
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -11,6 +13,228 @@ import (
 	"sync"
 	"time"
 )
+
+const (
+	// DefaultMaxFileBytes caps each diagnostic log file at 5 MB before rotation.
+	DefaultMaxFileBytes int64 = 5 * 1024 * 1024
+	// DefaultMaxBackups retains 3 rotated backups (up to ~20 MB total footprint).
+	DefaultMaxBackups = 3
+)
+
+var (
+	activeLogFileMu sync.RWMutex
+	activeLogFile   string
+)
+
+// ActiveLogFile returns the path of the currently configured persistent log file, if any.
+func ActiveLogFile() string {
+	activeLogFileMu.RLock()
+	defer activeLogFileMu.RUnlock()
+	return activeLogFile
+}
+
+// SetActiveLogFile records the active persistent log file path.
+func SetActiveLogFile(path string) {
+	activeLogFileMu.Lock()
+	activeLogFile = path
+	activeLogFileMu.Unlock()
+}
+
+// RotatingFileWriter is a thread-safe size-bounded log file writer using pure Go stdlib.
+// ponytail: Replaces external log-rotation dependencies (e.g. lumberjack) with a ~60-line stdlib writer.
+type RotatingFileWriter struct {
+	mu         sync.Mutex
+	path       string
+	maxBytes   int64
+	maxBackups int
+	file       *os.File
+	size       int64
+}
+
+// NewRotatingFileWriter opens or creates path and rotates it when size exceeds maxBytes.
+func NewRotatingFileWriter(path string, maxBytes int64, maxBackups int) (*RotatingFileWriter, error) {
+	if maxBytes <= 0 {
+		maxBytes = DefaultMaxFileBytes
+	}
+	if maxBackups < 0 {
+		maxBackups = 0
+	}
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return nil, err
+		}
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		return nil, err
+	}
+	var size int64
+	if info, statErr := f.Stat(); statErr == nil {
+		size = info.Size()
+	}
+	return &RotatingFileWriter{
+		path:       path,
+		maxBytes:   maxBytes,
+		maxBackups: maxBackups,
+		file:       f,
+		size:       size,
+	}, nil
+}
+
+func (w *RotatingFileWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.file == nil {
+		return 0, os.ErrClosed
+	}
+	if w.size > 0 && w.size+int64(len(p)) > w.maxBytes {
+		if err := w.rotateLocked(); err != nil {
+			return 0, err
+		}
+	}
+	n, err := w.file.Write(p)
+	w.size += int64(n)
+	return n, err
+}
+
+func (w *RotatingFileWriter) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.file == nil {
+		return nil
+	}
+	err := w.file.Close()
+	w.file = nil
+	return err
+}
+
+func (w *RotatingFileWriter) rotateLocked() error {
+	if w.file != nil {
+		_ = w.file.Close()
+		w.file = nil
+	}
+	if w.maxBackups > 0 {
+		oldest := fmt.Sprintf("%s.%d", w.path, w.maxBackups)
+		_ = os.Remove(oldest)
+		for i := w.maxBackups - 1; i >= 1; i-- {
+			src := fmt.Sprintf("%s.%d", w.path, i)
+			dst := fmt.Sprintf("%s.%d", w.path, i+1)
+			if _, err := os.Stat(src); err == nil {
+				_ = os.Rename(src, dst)
+			}
+		}
+		_ = os.Rename(w.path, w.path+".1")
+	} else {
+		_ = os.Remove(w.path)
+	}
+	f, err := os.OpenFile(w.path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		return err
+	}
+	w.file = f
+	w.size = 0
+	return nil
+}
+
+// LogTailResult holds persistent log lines and file metadata for diagnostic inspection.
+type LogTailResult struct {
+	Path         string   `json:"path"`
+	SizeBytes    int64    `json:"size_bytes"`
+	RotatedCount int      `json:"rotated_count"`
+	Lines        []string `json:"lines"`
+}
+
+// ReadLogTail reads up to maxLines from the tail of filePath (bounded by maxBytes),
+// spilling back into filePath.1 when the active file has fewer than maxLines lines.
+func ReadLogTail(filePath string, maxBytes int64, maxLines int) (*LogTailResult, error) {
+	if maxBytes <= 0 {
+		maxBytes = 256 * 1024
+	}
+	if maxLines <= 0 {
+		maxLines = 500
+	}
+	res := &LogTailResult{
+		Path:  filePath,
+		Lines: []string{},
+	}
+	if filePath == "" {
+		return res, nil
+	}
+	info, err := os.Stat(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return res, nil
+		}
+		return nil, err
+	}
+	res.SizeBytes = info.Size()
+	for i := 1; i <= DefaultMaxBackups; i++ {
+		if _, rErr := os.Stat(fmt.Sprintf("%s.%d", filePath, i)); rErr == nil {
+			res.RotatedCount++
+		}
+	}
+
+	lines, err := readFileTailLines(filePath, maxBytes, maxLines)
+	if err != nil {
+		return nil, err
+	}
+	if len(lines) < maxLines {
+		backupPath := filePath + ".1"
+		if _, bErr := os.Stat(backupPath); bErr == nil {
+			need := maxLines - len(lines)
+			if prevLines, pErr := readFileTailLines(backupPath, maxBytes, need); pErr == nil && len(prevLines) > 0 {
+				lines = append(prevLines, lines...)
+			}
+		}
+	}
+	res.Lines = lines
+	return res, nil
+}
+
+func readFileTailLines(path string, maxBytes int64, maxLines int) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	size := info.Size()
+	if size == 0 {
+		return nil, nil
+	}
+	offset := int64(0)
+	if size > maxBytes {
+		offset = size - maxBytes
+	}
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return nil, err
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, err
+	}
+	if offset > 0 {
+		if idx := bytes.IndexByte(data, '\n'); idx >= 0 {
+			data = data[idx+1:]
+		}
+	}
+	rawLines := strings.Split(strings.TrimRight(string(data), "\r\n"), "\n")
+	var out []string
+	for _, l := range rawLines {
+		l = strings.TrimRight(l, "\r")
+		if l != "" {
+			out = append(out, l)
+		}
+	}
+	if len(out) > maxLines {
+		out = out[len(out)-maxLines:]
+	}
+	return out, nil
+}
 
 // Event represents a structured diagnostic event emitted to live streams.
 type Event struct {
@@ -218,10 +442,12 @@ func (h *broadcastHandler) WithGroup(name string) slog.Handler {
 
 // Config configures the Diagnostic Logger.
 type Config struct {
-	Level    string // "debug", "info", "warn", "error", "silent"
-	Format   string // "text", "json"
-	FilePath string // optional file path for log sink
-	Silent   bool   // suppress console output
+	Level        string // "debug", "info", "warn", "error", "silent"
+	Format       string // "text", "json"
+	FilePath     string // optional file path for log sink
+	Silent       bool   // suppress console output
+	MaxSizeBytes int64  // optional max bytes per log file before rotation (default 5MB)
+	MaxBackups   int    // optional rotated backup files to retain (default 3; -1 = 0 backups)
 }
 
 // Result holds the configured logger and any file closer.
@@ -261,15 +487,25 @@ func Setup(cfg Config) (*Result, error) {
 	var writers []io.Writer
 
 	if cfg.FilePath != "" {
-		if dir := filepath.Dir(cfg.FilePath); dir != "" && dir != "." {
-			_ = os.MkdirAll(dir, 0755)
+		maxBytes := cfg.MaxSizeBytes
+		if maxBytes <= 0 {
+			maxBytes = DefaultMaxFileBytes
 		}
-		f, err := os.OpenFile(cfg.FilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		maxBackups := cfg.MaxBackups
+		if maxBackups == 0 {
+			maxBackups = DefaultMaxBackups
+		} else if maxBackups < 0 {
+			maxBackups = 0
+		}
+		rw, err := NewRotatingFileWriter(cfg.FilePath, maxBytes, maxBackups)
 		if err != nil {
 			return nil, err
 		}
-		fileWriter = f
-		writers = append(writers, f)
+		SetActiveLogFile(cfg.FilePath)
+		fileWriter = rw
+		writers = append(writers, rw)
+	} else {
+		SetActiveLogFile("")
 	}
 
 	// Console sink: if not silent, output to stderr

@@ -248,3 +248,39 @@ func TestDefaultBroadcasterConcurrent(t *testing.T) {
 	}
 }
 
+func TestRotatingFileWriterAndReadLogTail(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "logs", "sqlfox.log")
+
+	w, err := NewRotatingFileWriter(logPath, 60, 2)
+	if err != nil {
+		t.Fatalf("NewRotatingFileWriter failed: %v", err)
+	}
+	defer w.Close()
+
+	for i := 0; i < 6; i++ {
+		line := strings.Repeat("a", 25) + string(rune('0'+i)) + "\n"
+		if _, err := w.Write([]byte(line)); err != nil {
+			t.Fatalf("Write %d failed: %v", i, err)
+		}
+	}
+
+	if _, err := os.Stat(logPath + ".1"); err != nil {
+		t.Fatalf("expected rotated backup .1: %v", err)
+	}
+	if _, err := os.Stat(logPath + ".3"); err == nil {
+		t.Fatalf("expected at most 2 backups, but .3 exists")
+	}
+
+	tail, err := ReadLogTail(logPath, 4096, 5)
+	if err != nil {
+		t.Fatalf("ReadLogTail failed: %v", err)
+	}
+	if tail.RotatedCount != 2 {
+		t.Fatalf("expected 2 rotated backups, got %d", tail.RotatedCount)
+	}
+	if len(tail.Lines) != 4 {
+		t.Fatalf("expected 4 tail lines (2 active + 2 from .1), got %d: %v", len(tail.Lines), tail.Lines)
+	}
+}
+

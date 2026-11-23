@@ -1383,6 +1383,23 @@ class ApiClient {
       errors,
     };
   }
+
+  // Diagnostic Logs (Persistent Rotating Log File & Client Telemetry)
+  async getLogFile(tail = 500): Promise<{ path: string; size_bytes: number; rotated_count: number; lines: string[] }> {
+    return this.request(`/logs/file?tail=${encodeURIComponent(String(tail))}`);
+  }
+
+  reportClientLog(payload: { level: string; module: string; message: string; stack?: string }) {
+    try {
+      const headers = this.getAuthHeaders({}, true);
+      void fetch('/api/logs/client', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+        keepalive: true,
+      }).catch(() => {});
+    } catch { /* ignore telemetry errors */ }
+  }
 }
 
 export const api = new ApiClient();
