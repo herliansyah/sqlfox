@@ -302,3 +302,84 @@ func TestValidateGitHubTarget(t *testing.T) {
 		}
 	}
 }
+
+func TestCloudSync_EmptyRepositoryAutoInit(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "sqlfox-empty-repo-test-*")
+	if err != nil {
+		t.Fatalf("temp dir creation failed: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dbPath := filepath.Join(tmpDir, "vault.db")
+	v, err := OpenVault(dbPath, "master-pin-123")
+	if err != nil {
+		t.Fatalf("OpenVault failed: %v", err)
+	}
+	defer v.Close()
+
+	var branchOmittedInAutoInit bool
+	mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		switch {
+		case path == "/repos/octocat/empty-repo/git/ref/heads/main" && r.Method == "GET":
+			// 409 Conflict ("Git Repository is empty.") indicates empty repo without any commits
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"message":"Git Repository is empty.","status":"409"}`))
+		case path == "/repos/octocat/empty-repo/contents/README.md" && r.Method == "PUT":
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if _, hasBranch := body["branch"]; !hasBranch {
+				branchOmittedInAutoInit = true
+			}
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"commit": map[string]any{"sha": "init-sha-001"},
+			})
+		case path == "/repos/octocat/empty-repo/git/refs" && r.Method == "POST":
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ref": "refs/heads/main"})
+		case path == "/repos/octocat/empty-repo/git/commits/init-sha-001":
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]any{"tree": map[string]any{"sha": "tree-001"}})
+		case path == "/repos/octocat/empty-repo/git/trees/tree-001":
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]any{"tree": []any{}})
+		case path == "/repos/octocat/empty-repo/git/blobs":
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{"sha": "blob-1"})
+		case path == "/repos/octocat/empty-repo/git/trees":
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{"sha": "tree-002"})
+		case path == "/repos/octocat/empty-repo/git/commits":
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{"sha": "commit-002"})
+		case path == "/repos/octocat/empty-repo/git/refs/heads/main" && r.Method == "PATCH":
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]any{"object": map[string]any{"sha": "commit-002"}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer mockGH.Close()
+
+	cfg := &CloudSyncConfig{
+		Enabled:            true,
+		GitHubToken:        "ghp_test_token",
+		GitHubRepo:         "octocat/empty-repo",
+		GitHubBranch:       "main",
+		APIBaseURL:         mockGH.URL,
+		IncludeVaultBackup: false,
+	}
+
+	res, err := SyncToGitHub(context.Background(), v, cfg, "master-pin-123")
+	if err != nil {
+		t.Fatalf("SyncToGitHub on empty repo failed: %v", err)
+	}
+
+	if !branchOmittedInAutoInit {
+		t.Errorf("expected branch parameter to be omitted in initial commit payload to prevent 409 Conflict")
+	}
+	if res.CommitSHA != "commit-002" {
+		t.Errorf("expected commit-002, got %s", res.CommitSHA)
+	}
+}

@@ -53,6 +53,17 @@ func TestCloudSync_ServerIntegration(t *testing.T) {
 		t.Errorf("expected initial enabled false")
 	}
 
+	// 1b. Test POST /api/cloud-sync/run fails before token is configured
+	runUnconfiguredReq := newLocalRequest("POST", "/api/cloud-sync/run", nil)
+	wRunUnconfigured := httptest.NewRecorder()
+	srv.Router().ServeHTTP(wRunUnconfigured, runUnconfiguredReq)
+	if wRunUnconfigured.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 when token unconfigured, got %d", wRunUnconfigured.Code)
+	}
+	if !bytes.Contains(wRunUnconfigured.Body.Bytes(), []byte("GitHub token not configured")) {
+		t.Fatalf("expected 'GitHub token not configured' error, got %s", wRunUnconfigured.Body.String())
+	}
+
 	// 2. Test Mock GitHub Server
 	mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
