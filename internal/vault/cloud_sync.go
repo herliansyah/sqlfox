@@ -307,7 +307,8 @@ func isSyncManagedPath(p, prefix string) bool {
 	return p == vaultBackupFile ||
 		strings.HasPrefix(p, "notes/") ||
 		strings.HasPrefix(p, "table-notes/") ||
-		strings.HasPrefix(p, "snippets/")
+		strings.HasPrefix(p, "snippets/") ||
+		strings.HasPrefix(p, "ai-profiles/")
 }
 
 // SyncToGitHub executes the full atomic synchronization of notes, snippets, and encrypted vault archive.

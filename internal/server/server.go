@@ -217,6 +217,12 @@ func (s *Server) routes() {
 	// AI Assistant endpoints
 	mux.HandleFunc("POST /api/ai/chat", s.handleAIChat)
 	mux.HandleFunc("GET /api/ai/ollama-check", s.handleAIOllamaCheck)
+	mux.HandleFunc("GET /api/ai/profiles", s.handleListAIProfiles)
+	mux.HandleFunc("POST /api/ai/profiles", s.handleCreateAIProfile)
+	mux.HandleFunc("GET /api/ai/profiles/{id}", s.handleGetAIProfile)
+	mux.HandleFunc("PUT /api/ai/profiles/{id}", s.handleUpdateAIProfile)
+	mux.HandleFunc("DELETE /api/ai/profiles/{id}", s.handleDeleteAIProfile)
+	mux.HandleFunc("POST /api/ai/profiles/{id}/active", s.handleSetActiveAIProfile)
 
 	// System / Update Engine endpoints
 	mux.HandleFunc("GET /api/system/update/check", s.handleCheckUpdate)

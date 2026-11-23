@@ -348,7 +348,7 @@ SqlFox menyatukan seluruh konfigurasi ruang kerja dan preferensi sistem ke dalam
   1. **`🔐 Connections`**: Kelola profil berkas brankas terenkripsi (*Connection Vault*), modifikasi kredensial koneksi, uji latensi ping TCP, dan konfigurasi sertifikat SSL/TLS.
   2. **`☁️ GitHub Sync`**: Konfigurasi GitHub Personal Access Token (PAT) dan path repositori untuk sinkronisasi otomatis snippet query dan skema DDL ke repositori Git jarak jauh.
   3. **`📦 Notes Bundle`**: Ekspor dan impor arsip bundel catatan operasional terenkripsi (`.sqlfox-vault`), memudahkan pembagian playbook antaranggota tim atau backup offline.
-  4. **`🤖 AI Copilot`**: Pengaturan mandiri kredensial BYOK API Key (OpenAI, Claude, Gemini, DeepSeek, atau Ollama lokal), konfigurasi model AI, temperatur, dan prompt sistem kustom. Terintegrasi mulus dari drawer Notes maupun sidebar Copilot.
+  4. **`🤖 AI Copilot`**: Pengaturan Multi-Profile mandiri kredensial BYOK (OpenAI, Claude, Gemini, DeepSeek, atau Ollama lokal) dengan enkripsi Vault AES-256-GCM. Dilengkapi fitur CRUD profil lengkap, pemilihan profil aktif instan, dan sinkronisasi aman ke repositori GitHub. Terintegrasi mulus dari drawer Notes maupun sidebar Copilot.
 
 ---
 
@@ -453,7 +453,10 @@ Buka melalui menu **📦 DB Tools &rarr; 🗺️ Visual ERD Canvas**:
 </p>
 
 ### BYOK AI Copilot & Automated Error Healer
-SqlFox dilengkapi asisten AI dengan arsitektur **Bring-Your-Own-Key (BYOK)**:
+SqlFox dilengkapi asisten AI dengan arsitektur **Bring-Your-Own-Key (BYOK)** yang fleksibel dan mendukung banyak profil (**Multi-Profile AI**):
+- **Manajemen Profil Ganda & CRUD Lengkap**: Buat dan simpan berbagai profil AI mandiri (misal: *Claude 3.5 Sonnet untuk Analisis Kompleks*, *GPT-4o Mini untuk Auto-complete Ringan*, dan *Ollama Lokal untuk Kueri Offline*). Setiap profil memiliki API key terenkripsi, parameter model, temperatur, dan prompt sistem sendiri.
+- **Quick-Switch di Header Copilot**: Beralih antar model/profil secara instan melalui dropdown pemilih profil langsung di bilah atas laci AI Copilot tanpa harus membuka jendela pengaturan.
+- **Sinkronisasi Aman ke GitHub (Zero-Leak)**: Konfigurasi profil AI disinkronkan ke repositori GitHub (`ai-profiles/*.json`) dengan kredensial API key yang diredact secara otomatis, sementara salinan kunci rahasia utuh dienkripsi dalam arsip cadangan Vault (`.sqlfox-vault`).
 - Mendukung provider terkemuka: **OpenAI**, **Anthropic Claude**, **Google Gemini**, **DeepSeek**, serta model lokal offline **Ollama** (`http://localhost:11434`).
 - **Injeksi Konteks Cerdas**: Menyuntikkan struktur tabel aktif dan dialek database secara otomatis ke dalam konteks percakapan.
 - **Eksekusi SQL 1-Klik**: Setiap blok kode SQL hasil generasi AI dilengkapi tombol `Insert & Run` dan `Replace in Editor`.

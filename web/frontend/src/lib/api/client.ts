@@ -12,6 +12,26 @@ import type {
 
 export type { OperationalNote };
 
+export interface AIProfile {
+  id: string;
+  name: string;
+  provider: 'openai' | 'anthropic' | 'gemini' | 'ollama' | 'custom';
+  api_key?: string;
+  encrypted_api_key?: string;
+  has_api_key?: boolean;
+  base_url: string;
+  model_name: string;
+  temperature: number;
+  language: 'auto' | 'en' | 'id';
+  response_style: 'normal' | 'concise' | 'detailed';
+  custom_prompt: string;
+  include_schema: boolean;
+  mask_identifiers: boolean;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface AiConfig {
   provider: string;
   apiKey: string;
@@ -57,6 +77,36 @@ export function loadAiConfig(): AiConfig {
     };
   } catch {
     return defaults;
+  }
+}
+
+export async function syncOrMigrateLegacyAiConfig(): Promise<void> {
+  if (typeof window === 'undefined') return;
+  const legacyRaw = localStorage.getItem('sqlfox_ai_config');
+  if (!legacyRaw) return;
+  try {
+    const legacy = JSON.parse(legacyRaw);
+    if (legacy && (legacy.apiKey || legacy.modelName || legacy.provider)) {
+      const profiles = await api.listAiProfiles();
+      const active = profiles.find((p) => p.is_active) || profiles[0];
+      if (active) {
+        await api.updateAiProfile(active.id, {
+          provider: legacy.provider || active.provider,
+          api_key: legacy.apiKey || undefined,
+          base_url: legacy.baseUrl || active.base_url,
+          model_name: legacy.modelName || active.model_name,
+          temperature: typeof legacy.temperature === 'number' ? legacy.temperature : active.temperature,
+          language: legacy.language || active.language,
+          response_style: legacy.responseStyle || active.response_style,
+          custom_prompt: legacy.customPrompt !== undefined ? legacy.customPrompt : active.custom_prompt,
+          include_schema: legacy.includeSchema !== undefined ? legacy.includeSchema : active.include_schema,
+          mask_identifiers: legacy.maskIdentifiers !== undefined ? legacy.maskIdentifiers : active.mask_identifiers,
+        });
+      }
+    }
+    localStorage.removeItem('sqlfox_ai_config');
+  } catch (e) {
+    console.warn('Failed to migrate legacy AI config:', e);
   }
 }
 
@@ -1091,6 +1141,7 @@ class ApiClient {
   async aiChat(
     promptOrOpts: string | {
       action?: 'chat' | 'explain_query' | 'explain_plan' | 'optimize' | 'nl_to_sql' | 'fix_query';
+      profile_id?: string;
       prompt: string;
       query?: string;
       plan?: string;
@@ -1113,6 +1164,7 @@ class ApiClient {
       timeoutMs: 65000,
       body: JSON.stringify({
         action: opts.action || 'chat',
+        profile_id: opts.profile_id || '',
         prompt: opts.prompt,
         query: opts.query || '',
         plan: opts.plan || '',
@@ -1129,6 +1181,40 @@ class ApiClient {
         include_schema: cfg.includeSchema,
         temperature: cfg.temperature,
       }),
+    });
+  }
+
+  async listAiProfiles(): Promise<AIProfile[]> {
+    return this.request('/ai/profiles');
+  }
+
+  async getAiProfile(id: string): Promise<AIProfile> {
+    return this.request(`/ai/profiles/${encodeURIComponent(id)}`);
+  }
+
+  async createAiProfile(profile: Partial<AIProfile>): Promise<AIProfile> {
+    return this.request('/ai/profiles', {
+      method: 'POST',
+      body: JSON.stringify(profile),
+    });
+  }
+
+  async updateAiProfile(id: string, profile: Partial<AIProfile>): Promise<AIProfile> {
+    return this.request(`/ai/profiles/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(profile),
+    });
+  }
+
+  async deleteAiProfile(id: string): Promise<{ status: string }> {
+    return this.request(`/ai/profiles/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async setActiveAiProfile(id: string): Promise<{ status: string; active_id: string }> {
+    return this.request(`/ai/profiles/${encodeURIComponent(id)}/active`, {
+      method: 'POST',
     });
   }
 

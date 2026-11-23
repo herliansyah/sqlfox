@@ -20,6 +20,7 @@ type ExportPayload struct {
 	Snippets         []*Snippet          `json:"snippets,omitempty"`
 	TableNotes       []*TableNote        `json:"table_notes,omitempty"`
 	OperationalNotes []*OperationalNote  `json:"operational_notes,omitempty"`
+	AIProfiles       []*AIProfile        `json:"ai_profiles,omitempty"`
 }
 
 // ExportVault packages all stored connections, snippets, and table notes into an encrypted archive using the provided export passphrase.
@@ -61,11 +62,23 @@ func ExportVault(v *Vault, exportPassphrase string) ([]byte, error) {
 		return nil, err
 	}
 
+	// 5. Fetch all AI profiles with decrypted API keys
+	var fullAIProfiles []*AIProfile
+	aiProfiles, err := v.ListAIProfiles()
+	if err == nil {
+		for _, p := range aiProfiles {
+			if full, err := v.GetAIProfile(p.ID); err == nil {
+				fullAIProfiles = append(fullAIProfiles, full)
+			}
+		}
+	}
+
 	payload := ExportPayload{
 		Connections:      fullConnections,
 		Snippets:         snippets,
 		TableNotes:       tableNotes,
 		OperationalNotes: opNotes,
+		AIProfiles:       fullAIProfiles,
 	}
 
 	plainJSON, err := json.Marshal(payload)
@@ -118,7 +131,7 @@ func ImportVault(v *Vault, archiveJSON []byte, exportPassphrase string) (int, er
 	}
 
 	var payload ExportPayload
-	if err := json.Unmarshal(plainJSON, &payload); err == nil && (len(payload.Connections) > 0 || len(payload.Snippets) > 0 || len(payload.TableNotes) > 0 || len(payload.OperationalNotes) > 0) {
+	if err := json.Unmarshal(plainJSON, &payload); err == nil && (len(payload.Connections) > 0 || len(payload.Snippets) > 0 || len(payload.TableNotes) > 0 || len(payload.OperationalNotes) > 0 || len(payload.AIProfiles) > 0) {
 		// New structured envelope
 		count := 0
 		for _, conn := range payload.Connections {
@@ -141,6 +154,15 @@ func ImportVault(v *Vault, archiveJSON []byte, exportPassphrase string) (int, er
 			if err := v.CreateOperationalNote(opNote); err != nil {
 				return count, fmt.Errorf("failed to import operational note '%s': %w", opNote.Title, err)
 			}
+		}
+		for _, p := range payload.AIProfiles {
+			// Preserve local secret if imported API key is empty
+			if p.APIKey == "" {
+				if ex, err := v.GetAIProfile(p.ID); err == nil && ex.APIKey != "" {
+					p.APIKey = ex.APIKey
+				}
+			}
+			_ = v.SaveAIProfile(p)
 		}
 		return count, nil
 	}
