@@ -610,6 +610,26 @@ export class AppState {
     }
   }
 
+  private clientTelemetryInstalled = false;
+
+  installClientErrorTelemetry() {
+    if (this.clientTelemetryInstalled || typeof window === 'undefined') return;
+    this.clientTelemetryInstalled = true;
+
+    window.addEventListener('error', (evt) => {
+      const msg = evt.message || 'Uncaught frontend error';
+      const stack = evt.error?.stack || (evt.filename ? `${evt.filename}:${evt.lineno}:${evt.colno}` : '');
+      api.reportClientLog({ level: 'error', module: 'frontend', message: msg, stack });
+    });
+
+    window.addEventListener('unhandledrejection', (evt) => {
+      const reason = evt.reason;
+      const msg = reason instanceof Error ? reason.message : String(reason || 'Unhandled promise rejection');
+      const stack = reason instanceof Error ? reason.stack || '' : '';
+      api.reportClientLog({ level: 'error', module: 'frontend', message: `UnhandledRejection: ${msg}`, stack });
+    });
+  }
+
   async init() {
     try {
       const auth = await api.getAuthStatus();
@@ -632,6 +652,7 @@ export class AppState {
         }
       }
       if (!this.isRemoteLocked) {
+        this.installClientErrorTelemetry();
         this.initActivityStream();
         await this.loadConnections();
         void this.loadSnippets();

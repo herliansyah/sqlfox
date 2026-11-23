@@ -3,7 +3,11 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/herliansyah/sqlfox/internal/logger"
 )
@@ -58,4 +62,61 @@ func (s *Server) handleLogsStream(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+// handleGetLogFile returns the tail of the persistent rotating diagnostic log file on disk.
+func (s *Server) handleGetLogFile(w http.ResponseWriter, r *http.Request) {
+	tail := 500
+	if raw := r.URL.Query().Get("tail"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			if n > 2000 {
+				n = 2000
+			}
+			tail = n
+		}
+	}
+
+	res, err := logger.ReadLogTail(logger.ActiveLogFile(), 256*1024, tail)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read diagnostic log file: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// handleClientLog persists uncaught frontend errors and telemetry warnings into the server log file.
+func (s *Server) handleClientLog(w http.ResponseWriter, r *http.Request) {
+	body := io.LimitReader(r.Body, 8*1024)
+	var req struct {
+		Level   string `json:"level"`
+		Module  string `json:"module"`
+		Message string `json:"message"`
+		Stack   string `json:"stack"`
+	}
+	if err := json.NewDecoder(body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid client log payload")
+		return
+	}
+	msg := strings.TrimSpace(req.Message)
+	if msg == "" {
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		return
+	}
+	mod := strings.TrimSpace(req.Module)
+	if mod == "" {
+		mod = "frontend"
+	}
+	lvl, _ := logger.LevelFromString(req.Level)
+	if lvl < slog.LevelInfo {
+		lvl = slog.LevelInfo
+	}
+	attrs := []any{"module", mod, "source", "frontend"}
+	if st := strings.TrimSpace(req.Stack); st != "" {
+		if len(st) > 2048 {
+			st = st[:2048]
+		}
+		attrs = append(attrs, "stack", st)
+	}
+	slog.Log(r.Context(), lvl, msg, attrs...)
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

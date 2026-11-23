@@ -139,15 +139,31 @@ func main() {
 		format = "text"
 	}
 
+	// Resolve config path first so persistent diagnostic logs default to <configDir>/logs/sqlfox.log
+	dbPath := *dbFlag
+	if dbPath == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			home = "."
+		}
+		dbPath = filepath.Join(home, ".sqlfox", "config.db")
+	}
+
+	configDir := filepath.Dir(dbPath)
+	backupDir := filepath.Join(configDir, "backups")
+
 	logFile := *logFileFlag
 	if logFile == "" {
 		logFile = os.Getenv("SQLFOX_LOG_FILE")
+	}
+	if logFile == "" && !strings.EqualFold(level, "silent") && !strings.EqualFold(level, "quiet") {
+		logFile = filepath.Join(configDir, "logs", "sqlfox.log")
 	}
 
 	isSilent := *silentFlag || *quietFlag
 
 	// ponytail: Console logging to terminal is opt-in (active when -v, -verbose, -log-level, or SQLFOX_LOG_LEVEL is set).
-	// Default interactive desktop server keeps terminal focused on clean banner while broadcaster still logs to Activity Console.
+	// Default interactive desktop server keeps terminal focused on clean banner while persistent file + broadcaster still capture diagnostics.
 	hasExplicitLogLevel := *logLevelFlag != "" || os.Getenv("SQLFOX_LOG_LEVEL") != "" || *verboseFlag || *verboseLongFlag
 	consoleSilent := isSilent || !hasExplicitLogLevel
 
@@ -164,19 +180,6 @@ func main() {
 	if logRes.Closer != nil {
 		defer logRes.Closer.Close()
 	}
-
-	// Resolve config path
-	dbPath := *dbFlag
-	if dbPath == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			home = "."
-		}
-		dbPath = filepath.Join(home, ".sqlfox", "config.db")
-	}
-
-	configDir := filepath.Dir(dbPath)
-	backupDir := filepath.Join(configDir, "backups")
 
 	// Single-Instance Guard: prevent duplicate instances and unneeded port hunting
 	if !*multiFlag && os.Getenv("SQLFOX_MULTI_INSTANCE") != "1" {

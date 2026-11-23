@@ -2,9 +2,11 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -225,6 +227,8 @@ func (s *Server) routes() {
 
 	// Observability & Live Activity Stream
 	mux.HandleFunc("GET /api/logs/stream", s.handleLogsStream)
+	mux.HandleFunc("GET /api/logs/file", s.handleGetLogFile)
+	mux.HandleFunc("POST /api/logs/client", s.handleClientLog)
 
 	// Profiling endpoints (conditional on SQLFOX_PPROF=1)
 	s.registerPprof(mux)
@@ -329,6 +333,13 @@ func recoverer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rvr := recover(); rvr != nil && rvr != http.ErrAbortHandler {
+				slog.Error("http_panic_recovered",
+					"module", "http",
+					"method", r.Method,
+					"path", r.URL.Path,
+					"panic", fmt.Sprint(rvr),
+					"stack", string(debug.Stack()),
+				)
 				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			}
 		}()
