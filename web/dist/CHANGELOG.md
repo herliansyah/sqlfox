@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.19.7] - 2026-11-23
+
 ### Fixed
 - **Cloud Sync Unconfigured Token UX & Empty Repository 409 Conflict (`internal/vault/cloud_sync.go`, `internal/vault/cloud_sync_test.go`, `internal/server/handlers_cloud_sync.go`, `web/frontend/src/lib/components/modals/SettingsModal.svelte`)**: Resolved an unconfigured token UX trap by auto-saving sync settings before triggering sync, displaying a configured token badge with status placeholder when saved in vault, handling HTTP 409 Conflict when querying branch refs on bare/empty repositories, and omitting the branch parameter on initial commit to permit automatic GitHub repository initialization (#151).
 
