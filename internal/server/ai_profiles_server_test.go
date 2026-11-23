@@ -18,6 +18,9 @@ func setupTestServerWithVault(t *testing.T) (*Server, *vault.Vault) {
 	if err != nil {
 		t.Fatalf("OpenVault failed: %v", err)
 	}
+	t.Cleanup(func() {
+		_ = v.Close()
+	})
 
 	sessionMgr := NewSessionManager(v, tmpDir)
 	srv := &Server{
