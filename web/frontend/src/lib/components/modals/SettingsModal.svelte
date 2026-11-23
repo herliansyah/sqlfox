@@ -14,6 +14,7 @@
   // Cloud Sync State
   let syncEnabled = $state(false);
   let githubToken = $state('');
+  let hasSavedToken = $state(false);
   let githubRepo = $state('');
   let githubBranch = $state('main');
   let pathPrefix = $state('sqlfox-vault/');
@@ -50,6 +51,7 @@
       ]);
       if (cfg.status === 'fulfilled' && cfg.value) {
         syncEnabled = !!cfg.value.enabled;
+        hasSavedToken = !!cfg.value.has_token;
         githubRepo = cfg.value.github_repo || '';
         githubBranch = cfg.value.github_branch || 'main';
         pathPrefix = cfg.value.path_prefix || 'sqlfox-vault/';
@@ -64,7 +66,7 @@
     } catch (_) {}
   }
 
-  async function saveSyncConfig() {
+  async function saveSyncConfig(silent = false): Promise<boolean> {
     try {
       const payload: any = {
         enabled: syncEnabled,
@@ -77,9 +79,16 @@
         payload.github_token = githubToken.trim();
       }
       await api.saveCloudSyncConfig(payload);
-      appState.showToast('Cloud Sync settings saved successfully!', 'success');
+      if (githubToken.trim()) {
+        hasSavedToken = true;
+      }
+      if (!silent) {
+        appState.showToast('Cloud Sync settings saved successfully!', 'success');
+      }
+      return true;
     } catch (err: any) {
       appState.showToast(`Failed to save cloud sync: ${err.message}`, 'error');
+      return false;
     }
   }
 
@@ -101,8 +110,23 @@
   }
 
   async function runCloudSyncNow() {
+    if (!githubRepo.trim()) {
+      appState.showToast('Please specify a GitHub repository (owner/repo)', 'warning');
+      return;
+    }
+    if (!githubToken.trim() && !hasSavedToken) {
+      appState.showToast('Please enter a GitHub Personal Access Token (PAT)', 'warning');
+      return;
+    }
+    if (!syncEnabled) {
+      syncEnabled = true;
+    }
     isSyncing = true;
     try {
+      // Auto-save form if fields are modified or token provided before triggering sync
+      const saved = await saveSyncConfig(true);
+      if (!saved) return;
+
       const data = await api.runCloudSync();
       appState.showToast(data.message || 'Cloud Sync push & pull completed!', 'success');
       try {
@@ -253,13 +277,28 @@
 
           <div class="space-y-3">
             <div>
-              <label class="block text-slate-400 text-xs font-medium mb-1">GitHub Personal Access Token (PAT) *</label>
+              <div class="flex items-center justify-between mb-1">
+                <label class="block text-slate-400 text-xs font-medium">GitHub Personal Access Token (PAT) *</label>
+                {#if hasSavedToken}
+                  <span class="inline-flex items-center space-x-1 text-[10.5px] text-emerald-400 font-mono bg-emerald-950/60 border border-emerald-800/70 px-2 py-0.5 rounded">
+                    <Icon name="check-circle" class="w-3 h-3 text-emerald-400" />
+                    <span>Configured in vault</span>
+                  </span>
+                {/if}
+              </div>
               <input
                 type="password"
                 bind:value={githubToken}
-                placeholder="ghp_xxxxxxxxxxxxxxxxxxxx (needs repo scope)"
+                placeholder={hasSavedToken ? '•••••••••••• (Leave blank to keep existing token)' : 'ghp_xxxxxxxxxxxxxxxxxxxx (needs repo scope)'}
                 class="w-full bg-[#050811] border border-[#1e293b] rounded-lg px-3 py-2 text-slate-200 font-mono text-xs focus:outline-none focus:border-sky-500"
               />
+              <p class="text-[10px] text-slate-500 mt-1">
+                {#if hasSavedToken && !githubToken}
+                  An encrypted token is currently configured in your vault. Enter a new token only if you wish to overwrite it.
+                {:else}
+                  Classic PAT requires <code class="text-sky-300 font-mono">repo</code> scope. Fine-grained PAT requires Read &amp; Write to Contents.
+                {/if}
+              </p>
             </div>
 
             <div class="grid grid-cols-2 gap-3">
@@ -335,7 +374,7 @@
 
             <button
               onclick={runCloudSyncNow}
-              disabled={isSyncing || !syncEnabled}
+              disabled={isSyncing || !githubRepo.trim() || (!githubToken.trim() && !hasSavedToken)}
               class="px-3.5 py-1.5 rounded bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white text-xs font-semibold transition flex items-center space-x-1.5 shadow-md shadow-sky-950/30"
             >
               <Icon name="refresh-cw" class="w-3.5 h-3.5 {isSyncing ? 'animate-spin' : ''}" />
@@ -505,7 +544,7 @@
           </button>
           {#if currentTab === 'sync'}
             <button
-              onclick={saveSyncConfig}
+              onclick={() => saveSyncConfig(false)}
               class="px-4 py-1.5 rounded bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold transition"
             >
               Save Configuration

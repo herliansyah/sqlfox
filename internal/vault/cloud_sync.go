@@ -378,8 +378,9 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 	defer refResp.Body.Close()
 
 	var latestCommitSHA string
-	if refResp.StatusCode == http.StatusNotFound {
-		// Empty repository: create initial commit with README.md
+	if refResp.StatusCode == http.StatusNotFound || refResp.StatusCode == http.StatusConflict {
+		// Empty repository (GitHub returns HTTP 409 Conflict "Git Repository is empty." on bare repos)
+		// or branch does not exist yet (HTTP 404 Not Found): create initial commit with README.md.
 		initCommitSHA, initErr := createInitialCommit(ctx, client, apiBaseURL, repo, branch, cfg.GitHubToken)
 		if initErr != nil {
 			return nil, fmt.Errorf("repository branch %s not found and auto-init failed: %w", branch, initErr)
@@ -648,10 +649,11 @@ func createGitHubBlob(ctx context.Context, client *http.Client, apiBaseURL, repo
 func createInitialCommit(ctx context.Context, client *http.Client, apiBaseURL, repo, branch, token string) (string, error) {
 	readmeURL := fmt.Sprintf("%s/repos/%s/contents/README.md", apiBaseURL, repo)
 	readmeContent := base64.StdEncoding.EncodeToString([]byte("# SqlFox Notes\nSynchronized with SqlFox.\n"))
+	// Omitting "branch" is required by GitHub when initializing a 0-commit empty repository.
+	// Providing a branch parameter on an empty repository causes GitHub to reject with HTTP 409 Conflict: "Git Repository is empty".
 	body, _ := json.Marshal(map[string]any{
 		"message": "Initial commit from SqlFox",
 		"content": readmeContent,
-		"branch":  branch,
 	})
 
 	req, err := http.NewRequestWithContext(ctx, "PUT", readmeURL, bytes.NewReader(body))
@@ -679,7 +681,32 @@ func createInitialCommit(ctx context.Context, client *http.Client, apiBaseURL, r
 	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
 		return "", err
 	}
-	return res.Commit.SHA, nil
+
+	initSHA := res.Commit.SHA
+	if initSHA == "" {
+		return "", errors.New("empty commit sha received from auto-init")
+	}
+
+	// Ensure the configured target branch exists pointing to this initial commit.
+	// (e.g. if GitHub's default branch was "master" but user configured "main", or a custom branch name).
+	if branch != "" {
+		createRefURL := fmt.Sprintf("%s/repos/%s/git/refs", apiBaseURL, repo)
+		refBody, _ := json.Marshal(map[string]any{
+			"ref": "refs/heads/" + branch,
+			"sha": initSHA,
+		})
+		refReq, err := http.NewRequestWithContext(ctx, "POST", createRefURL, bytes.NewReader(refBody))
+		if err == nil {
+			setGitHubHeaders(refReq, token)
+			refResp, err := client.Do(refReq)
+			if err == nil {
+				refResp.Body.Close()
+				// HTTP 201 Created = branch ref created; HTTP 422 Unprocessable = already exists (default branch). Both are fine.
+			}
+		}
+	}
+
+	return initSHA, nil
 }
 
 func setGitHubHeaders(req *http.Request, token string) {

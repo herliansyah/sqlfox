@@ -190,11 +190,11 @@ func (s *Server) handleRunCloudSync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if cfg.GitHubToken == "" {
-		writeError(w, http.StatusBadRequest, "GitHub token not configured")
+		writeError(w, http.StatusBadRequest, "GitHub token not configured. Please save your Personal Access Token in Settings first.")
 		return
 	}
 	if cfg.GitHubRepo == "" {
-		writeError(w, http.StatusBadRequest, "GitHub repository not configured")
+		writeError(w, http.StatusBadRequest, "GitHub repository not configured. Please specify a repository in Settings first.")
 		return
 	}
 
