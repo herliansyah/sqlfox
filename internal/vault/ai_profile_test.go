@@ -13,6 +13,7 @@ func TestAIProfilesCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenVault failed: %v", err)
 	}
+	defer v.Close()
 
 	// Should have seeded default profile
 	list, err := v.ListAIProfiles()
@@ -106,6 +107,7 @@ func TestAIProfilesCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenVault 2 failed: %v", err)
 	}
+	defer v2.Close()
 
 	count, err := ImportVault(v2, archiveBytes, "backup-password")
 	if err != nil {
