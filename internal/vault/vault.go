@@ -227,6 +227,26 @@ func initSchema(db *sql.DB) error {
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_flight_recorder_ticks ON flight_recorder_ticks(recording_id, tick_index ASC);
+
+	CREATE TABLE IF NOT EXISTS ai_profiles (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		provider TEXT NOT NULL,
+		encrypted_api_key TEXT DEFAULT '',
+		base_url TEXT DEFAULT '',
+		model_name TEXT NOT NULL,
+		temperature REAL DEFAULT 0.3,
+		language TEXT DEFAULT 'auto',
+		response_style TEXT DEFAULT 'normal',
+		custom_prompt TEXT DEFAULT '',
+		include_schema INTEGER DEFAULT 1,
+		mask_identifiers INTEGER DEFAULT 1,
+		is_active INTEGER DEFAULT 0,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_ai_profiles_active ON ai_profiles(is_active DESC, updated_at DESC);
 	`
 	if _, err := db.Exec(query); err != nil {
 		return err
@@ -234,7 +254,10 @@ func initSchema(db *sql.DB) error {
 	// ponytail: Idempotent column addition for existing vault databases
 	_, _ = db.Exec("ALTER TABLE audit_logs ADD COLUMN source TEXT NOT NULL DEFAULT 'editor'")
 	_, _ = db.Exec("CREATE INDEX IF NOT EXISTS idx_audit_logs_source ON audit_logs(session_id, source)")
-	return seedDefaultSnippets(db)
+	if err := seedDefaultSnippets(db); err != nil {
+		return err
+	}
+	return seedDefaultAIProfile(db)
 }
 
 func seedDefaultSnippets(db *sql.DB) error {

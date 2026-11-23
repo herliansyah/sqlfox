@@ -348,7 +348,7 @@ SqlFox consolidates all workspace and service configurations into a clean, unifi
   1. **`🔐 Connections`**: Manage encrypted Connection Vault profiles, edit credentials, test TCP connectivity, and configure SSL/TLS encryption.
   2. **`☁️ GitHub Sync`**: Configure GitHub personal access tokens (PAT) and repository paths to synchronize SQL snippets and schema definitions automatically with remote Git repos.
   3. **`📦 Notes Bundle`**: Export and import encrypted operational notes packages (`.sqlfox-vault`), enabling portable team sharing and offline backup runbooks.
-  4. **`🤖 AI Copilot`**: Set BYOK API keys (OpenAI, Claude, Gemini, DeepSeek, or local Ollama), configure model parameters, temperature, and custom system prompt overrides. Seamlessly delegated from Copilot headers and Notes drawers.
+  4. **`🤖 AI Copilot`**: Multi-Profile BYOK AI Copilot manager with AES-256-GCM Vault encryption. Configure multiple AI profiles (OpenAI, Claude, Gemini, DeepSeek, or local Ollama), set active profiles, and securely synchronize profiles to GitHub. Seamlessly delegated from Copilot headers and Notes drawers.
 
 ---
 
@@ -453,7 +453,10 @@ Navigate to **📦 DB Tools &rarr; 🗺️ Visual ERD Canvas**:
 </p>
 
 ### BYOK AI Copilot & Automated Error Healer
-SqlFox features a **Bring-Your-Own-Key (BYOK)** AI assistant:
+SqlFox features a **Bring-Your-Own-Key (BYOK)** AI assistant with complete **Multi-Profile Management**:
+- **Full CRUD Profile Management**: Create and maintain multiple independent AI profiles (e.g. *Claude 3.5 Sonnet for Deep Reasoning*, *GPT-4o Mini for Fast Summaries*, and *Local Ollama for Zero-Leak Offline Development*). Each profile maintains its own encrypted API key, model parameters, temperature, language, response style, and system prompt.
+- **Header Quick Switcher**: Switch the active Copilot profile directly from the top header of the AI drawer without opening the settings modal.
+- **Zero-Leak GitHub Cloud Sync**: Synchronize declarative AI profile definitions to GitHub repositories (`ai-profiles/*.json`) with API keys automatically redacted, while preserving full encrypted secrets in the Vault backup archive (`.sqlfox-vault`).
 - Supported Providers: **OpenAI**, **Anthropic Claude**, **Google Gemini**, **DeepSeek**, and local **Ollama** (`http://localhost:11434`).
 - **Context Injection**: Automatically injects schema information, active table definitions, and engine dialect into prompt context.
 - **1-Click SQL Execution**: SQL suggestions rendered in chat include `Insert & Run` and `Replace in Editor` buttons.

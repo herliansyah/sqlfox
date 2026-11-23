@@ -2,7 +2,7 @@
   import { copyText } from '../../utils/clipboard';
   import { splitMarkdownSegments, renderMarkdownBlockHtml } from '../../utils/markdown';
   import { appState } from '../../stores/appState.svelte';
-  import { api, loadAiConfig, type AiConfig } from '../../api/client';
+  import { api, loadAiConfig, syncOrMigrateLegacyAiConfig, type AiConfig, type AIProfile } from '../../api/client';
   import Icon from '../common/Icon.svelte';
 
   interface ChatMessage {
@@ -71,8 +71,10 @@
   );
   let messages = $derived(activeSession?.messages || []);
 
+  let aiProfiles = $state<AIProfile[]>([]);
+  let activeProfile = $state<AIProfile | null>(null);
   let aiConfig = $state<AiConfig>(loadAiConfig());
-  let includeSchemaOverride = $state<boolean>(aiConfig.includeSchema !== false);
+  let includeSchemaOverride = $state<boolean>(true);
   let showPrivacyInfo = $state(false);
   let showHistoryPopover = $state(false);
 
@@ -91,17 +93,43 @@
   let chatRequestToken = 0;
 
   let providerLabel = $derived.by(() => {
+    if (activeProfile?.name) return activeProfile.name;
     const p = aiConfig.provider || 'openai';
     const name =
       p === 'anthropic' ? 'Claude' : p === 'gemini' ? 'Gemini' : p === 'ollama' ? 'Ollama' : p === 'custom' ? 'Custom' : 'OpenAI';
     return aiConfig.modelName ? `${name}: ${aiConfig.modelName}` : name;
   });
 
+  async function refreshProfiles() {
+    try {
+      await syncOrMigrateLegacyAiConfig();
+      const list = await api.listAiProfiles();
+      aiProfiles = Array.isArray(list) ? list : [];
+      activeProfile = aiProfiles.find((p) => p.is_active) || aiProfiles[0] || null;
+      if (activeProfile) {
+        aiConfig = {
+          provider: activeProfile.provider,
+          apiKey: '',
+          baseUrl: activeProfile.base_url,
+          modelName: activeProfile.model_name,
+          temperature: activeProfile.temperature,
+          language: activeProfile.language,
+          responseStyle: activeProfile.response_style,
+          customPrompt: activeProfile.custom_prompt,
+          includeSchema: activeProfile.include_schema,
+          maskIdentifiers: activeProfile.mask_identifiers,
+        };
+        includeSchemaOverride = activeProfile.include_schema !== false;
+      }
+    } catch {
+      aiConfig = loadAiConfig();
+    }
+  }
+
   $effect(() => {
     if (typeof window === 'undefined') return;
     const reload = () => {
-      aiConfig = loadAiConfig();
-      includeSchemaOverride = aiConfig.includeSchema !== false;
+      refreshProfiles();
     };
     window.addEventListener('sqlfox:ai-config-updated', reload);
     return () => window.removeEventListener('sqlfox:ai-config-updated', reload);
@@ -109,7 +137,7 @@
 
   $effect(() => {
     if (appState.isAiDrawerOpen) {
-      aiConfig = loadAiConfig();
+      refreshProfiles();
       api.listNotes().then((list) => {
         cachedNotes = Array.isArray(list) ? list : [];
       }).catch(() => {});
@@ -310,6 +338,7 @@
     try {
       const res = await api.aiChat({
         action: opts.action || 'chat',
+        profile_id: activeProfile?.id || undefined,
         prompt: text,
         query: activeSql,
         plan: opts.plan || (currentTab?.explainResult ? JSON.stringify(currentTab.explainResult) : ''),
@@ -517,18 +546,45 @@
 
   <!-- Drawer Header -->
   <div class="h-10 bg-[#0f172a] border-b border-[#1e293b] px-3.5 flex items-center justify-between flex-shrink-0 select-none gap-2">
-    <div class="flex items-center space-x-2 min-w-0">
+    <div class="flex items-center space-x-2 min-w-0 flex-1">
       <Icon name="bot" class="w-4 h-4 text-sky-400 shrink-0" />
-      <span class="font-bold text-slate-100 text-xs shrink-0">AI Copilot</span>
-      <button
-        id="ai-provider-badge"
-        type="button"
-        onclick={() => (appState.isAiSettingsModalOpen = true)}
-        class="text-[10px] text-sky-400 hover:underline font-mono truncate max-w-[140px]"
-        title="Click to configure AI provider & model"
-      >
-        {providerLabel}
-      </button>
+      <span class="font-bold text-slate-100 text-xs shrink-0 hidden sm:inline">Copilot</span>
+      {#if aiProfiles.length > 0}
+        <select
+          value={activeProfile?.id || ''}
+          onchange={async (e) => {
+            const targetId = e.currentTarget.value;
+            if (targetId && targetId !== activeProfile?.id) {
+              try {
+                await api.setActiveAiProfile(targetId);
+                window.dispatchEvent(new CustomEvent('sqlfox:ai-config-updated'));
+                await refreshProfiles();
+                appState.showToast(`Switched active AI profile: ${activeProfile?.name || 'selected'}`, 'info');
+              } catch (err: any) {
+                appState.showToast(`Failed to switch profile: ${err.message}`, 'error');
+              }
+            }
+          }}
+          class="bg-[#050811] border border-slate-700 hover:border-sky-500 rounded px-1.5 py-0.5 text-[11px] font-medium text-sky-300 max-w-[170px] truncate focus:outline-none cursor-pointer"
+          title="Active AI Copilot Profile (Click to switch)"
+        >
+          {#each aiProfiles as p}
+            <option value={p.id}>
+              {p.name}
+            </option>
+          {/each}
+        </select>
+      {:else}
+        <button
+          id="ai-provider-badge"
+          type="button"
+          onclick={() => (appState.isAiSettingsModalOpen = true)}
+          class="text-[10px] text-sky-400 hover:underline font-mono truncate max-w-[140px]"
+          title="Click to configure AI provider & model"
+        >
+          {providerLabel}
+        </button>
+      {/if}
     </div>
 
     <div class="flex items-center space-x-1 relative shrink-0">

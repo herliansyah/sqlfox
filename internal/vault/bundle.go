@@ -3,6 +3,7 @@ package vault
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
@@ -46,6 +47,22 @@ func ExportNotesFiles(v *Vault) (map[string][]byte, error) {
 		slug := slugify(s.Title)
 		filename := fmt.Sprintf("snippets/%s-%s.sql", s.ID, slug)
 		files[filename] = formatSnippetSQL(s)
+	}
+
+	// 4. Gather AI Profiles (declarative, with api_key redacted for git safety)
+	aiProfiles, err := v.ListAIProfiles()
+	if err == nil {
+		for _, p := range aiProfiles {
+			slug := slugify(p.Name)
+			filename := fmt.Sprintf("ai-profiles/%s-%s.json", p.ID, slug)
+			// Clone and redact secrets
+			redacted := *p
+			redacted.APIKey = ""
+			redacted.EncryptedAPIKey = ""
+			if b, err := json.MarshalIndent(redacted, "", "  "); err == nil {
+				files[filename] = b
+			}
+		}
 	}
 
 	return files, nil

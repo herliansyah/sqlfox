@@ -9,10 +9,12 @@ import (
 
 	"github.com/herliansyah/sqlfox/internal/ai"
 	"github.com/herliansyah/sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/vault"
 )
 
 type AIChatRequest struct {
 	Action          string      `json:"action"` // explain_query, explain_plan, optimize, nl_to_sql, chat, fix_query
+	ProfileID       string      `json:"profile_id,omitempty"`
 	Query           string      `json:"query"`
 	Plan            string      `json:"plan"`
 	Prompt          string      `json:"prompt"`
@@ -35,6 +37,48 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request: "+err.Error())
 		return
+	}
+
+	if s.vault != nil {
+		var profile *vault.AIProfile
+		var err error
+		if req.ProfileID != "" {
+			profile, err = s.vault.GetAIProfile(req.ProfileID)
+		} else if req.APIKey == "" || req.Provider == "" {
+			profile, err = s.vault.GetActiveAIProfile()
+		}
+		if err == nil && profile != nil {
+			if req.Provider == "" {
+				req.Provider = ai.Provider(profile.Provider)
+			}
+			if req.APIKey == "" {
+				req.APIKey = profile.APIKey
+			}
+			if req.Model == "" {
+				req.Model = profile.ModelName
+			}
+			if req.Endpoint == "" {
+				req.Endpoint = profile.BaseURL
+			}
+			if req.Temperature == 0 && profile.Temperature != 0 {
+				req.Temperature = profile.Temperature
+			}
+			if req.Language == "" {
+				req.Language = profile.Language
+			}
+			if req.ResponseStyle == "" {
+				req.ResponseStyle = profile.ResponseStyle
+			}
+			if req.CustomPrompt == "" {
+				req.CustomPrompt = profile.CustomPrompt
+			}
+			if req.IncludeSchema == nil {
+				req.IncludeSchema = &profile.IncludeSchema
+			}
+			if req.MaskIdentifiers == nil {
+				req.MaskIdentifiers = &profile.MaskIdentifiers
+			}
+		}
 	}
 
 	dialect := "SQL"
@@ -145,4 +189,145 @@ func (s *Server) handleAIOllamaCheck(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{
 		"available": available,
 	})
+}
+
+func (s *Server) handleListAIProfiles(w http.ResponseWriter, r *http.Request) {
+	if s.vault == nil {
+		writeJSON(w, http.StatusOK, []*vault.AIProfile{})
+		return
+	}
+	list, err := s.vault.ListAIProfiles()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list AI profiles: "+err.Error())
+		return
+	}
+	if list == nil {
+		list = []*vault.AIProfile{}
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (s *Server) handleGetAIProfile(w http.ResponseWriter, r *http.Request) {
+	if s.vault == nil {
+		writeError(w, http.StatusInternalServerError, "vault not initialized")
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "profile id is required")
+		return
+	}
+	p, err := s.vault.GetAIProfile(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+func (s *Server) handleCreateAIProfile(w http.ResponseWriter, r *http.Request) {
+	if s.vault == nil {
+		writeError(w, http.StatusInternalServerError, "vault not initialized")
+		return
+	}
+	var p vault.AIProfile
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+	p.Name = strings.TrimSpace(p.Name)
+	if p.Name == "" {
+		writeError(w, http.StatusBadRequest, "profile name is required")
+		return
+	}
+	if p.Provider == "" {
+		p.Provider = "openai"
+	}
+	p.ModelName = strings.TrimSpace(p.ModelName)
+	if p.ModelName == "" {
+		writeError(w, http.StatusBadRequest, "model name is required")
+		return
+	}
+
+	if err := s.vault.SaveAIProfile(&p); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save AI profile: "+err.Error())
+		return
+	}
+
+	s.notifyCloudSyncChange()
+	writeJSON(w, http.StatusOK, p)
+}
+
+func (s *Server) handleUpdateAIProfile(w http.ResponseWriter, r *http.Request) {
+	if s.vault == nil {
+		writeError(w, http.StatusInternalServerError, "vault not initialized")
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "profile id is required")
+		return
+	}
+	var p vault.AIProfile
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+	p.ID = id
+	p.Name = strings.TrimSpace(p.Name)
+	if p.Name == "" {
+		writeError(w, http.StatusBadRequest, "profile name is required")
+		return
+	}
+	p.ModelName = strings.TrimSpace(p.ModelName)
+	if p.ModelName == "" {
+		writeError(w, http.StatusBadRequest, "model name is required")
+		return
+	}
+
+	if err := s.vault.SaveAIProfile(&p); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update AI profile: "+err.Error())
+		return
+	}
+
+	s.notifyCloudSyncChange()
+	writeJSON(w, http.StatusOK, p)
+}
+
+func (s *Server) handleDeleteAIProfile(w http.ResponseWriter, r *http.Request) {
+	if s.vault == nil {
+		writeError(w, http.StatusInternalServerError, "vault not initialized")
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "profile id is required")
+		return
+	}
+	if err := s.vault.DeleteAIProfile(id); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	s.notifyCloudSyncChange()
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted", "id": id})
+}
+
+func (s *Server) handleSetActiveAIProfile(w http.ResponseWriter, r *http.Request) {
+	if s.vault == nil {
+		writeError(w, http.StatusInternalServerError, "vault not initialized")
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "profile id is required")
+		return
+	}
+	if err := s.vault.SetActiveAIProfile(id); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	s.notifyCloudSyncChange()
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "active_id": id})
 }

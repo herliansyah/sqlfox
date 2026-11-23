@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Multi-Profile AI Copilot & SQLite Vault Storage (`internal/vault/ai_profiles.go`, `internal/vault/ai_profile_test.go`, `internal/vault/vault.go`)**: Added a dedicated `ai_profiles` table to the SQLite vault with envelope encryption for API keys (AES-256-GCM with AAD), seeded default profiles, and full CRUD operations (`CreateAIProfile`, `UpdateAIProfile`, `DeleteAIProfile`, `ListAIProfiles`, `GetAIProfile`, `GetActiveAIProfile`, `SetActiveAIProfile`) with last-remaining profile deletion safeguards (#152).
+- **AI Profiles REST Endpoints & Active Context Resolution (`internal/server/handlers_ai.go`, `internal/server/server.go`, `internal/server/ai_profiles_server_test.go`)**: Introduced `/api/ai/profiles` REST endpoints supporting listing, single-profile retrieval with decrypted credentials for editing, creation, updates, deletion, and atomic activation. Enhanced `handleAIChat` to automatically resolve credentials and options from the active vault profile or explicit `profile_id` (#152).
+- **Copilot Header Quick Switcher & Multi-Profile Settings Manager (`web/frontend/src/lib/components/ai/AiDrawer.svelte`, `web/frontend/src/lib/components/modals/AiSettingsPanel.svelte`, `web/frontend/src/lib/api/client.ts`)**: Added an interactive active profile dropdown directly in the AI Copilot drawer header for 1-click model switching, implemented full multi-profile CRUD management in the AI settings panel, and added seamless transparent migration from legacy browser `localStorage` configurations into Vault storage (#152).
+- **Hybrid Zero-Leak GitHub Cloud Sync for AI Profiles (`internal/vault/cloud_sync.go`, `internal/vault/bundle.go`, `internal/vault/export.go`)**: Synchronized human-readable, declarative AI profile definitions to GitHub repositories under `ai-profiles/<id>-<slug>.json` with API keys automatically redacted, while retaining full encrypted keys in the portable master-passphrase vault backup archive (`.sqlfox-vault`) (#152).
+- **Architecture Decision Record 0064 (`docs/adr/0064-multi-profile-ai-copilot-and-github-vault-sync.md`)**: Documented the architectural rationale, schema design, security invariants, dual-entry UI ergonomics, and secret protection policies for multi-profile AI Copilot and GitHub synchronization (#152).
+
 ## [v0.19.7] - 2026-11-23
 
 ### Fixed
