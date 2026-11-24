@@ -49,9 +49,8 @@ flowchart LR
 
 ### Cryptographic Parameters
 - **KDF**: Argon2id (`time=3`, `memory=64MB`, `threads=4`).
-- **Cipher**: `AES-256-GCM` with 96-bit random IV per record.
-- **OS Keychain Integration**: If enabled by the user, the Master Key is stored in the operating system's native keychain (`github.com/zalando/go-keyring`) across macOS Keychain, Windows Credential Manager, or Linux Secret Service (via Freedesktop D-Bus).
-- **Graceful Fallback**: If headless Linux or a container environment lacks a Secret Service daemon, SqlFox prompts for the Master Password upon startup.
+- **Cipher**: `AES-256-GCM` with 96-bit random IV per record and per-field AAD binding.
+- **Local Key Material**: The vault key is derived from the Master PIN/Password (auto-generated into a `0600` local `master.key` file or supplied via `SQLFOX_MASTER_KEY` / `--master-key`).
 
 ### Vault Migration (`.sqlfox-vault`)
 - Exporting connections generates an encrypted `.sqlfox-vault` JSON envelope.
@@ -59,9 +58,9 @@ flowchart LR
 - Private keys and passwords never leave the machine in plaintext.
 
 ### Master PIN Entropy & Remote Lockout Policy
-- **PIN Entropy**: Auto-generated Master PINs employ `fox-[a-z0-9]{6}` (>2.17 billion combinations), replacing legacy 4-digit PINs.
-- **Brute-Force Rate Limiting**: The `Remote Access Guard` tracks consecutive failed unlock attempts per remote IP address.
-- **10-Minute Quarantine**: Reaching 5 consecutive failed attempts immediately triggers a 10-minute lockout (`429 Too Many Requests`), completely neutralizing brute-force dictionary attacks.
+- **PIN Entropy**: Auto-generated Master PINs employ `fox-[a-z0-9]{10}` (~51.7 bits of CSPRNG entropy via rejection sampling), replacing legacy 4-digit PINs.
+- **Brute-Force Rate Limiting**: The `Remote Access Guard` tracks consecutive failed unlock attempts per remote IP address (trusting proxy forwarding headers only from explicitly configured `-trusted-proxies`), re-checking lockout state after Argon2id concurrency gating.
+- **10-Minute Quarantine**: Reaching 5 consecutive failed attempts immediately triggers a 10-minute lockout (`429 Too Many Requests`), and failed pairing-code attempts burn the active pairing code after 5 failures.
 
 ---
 
@@ -79,11 +78,10 @@ Every connection is tagged with an **Environment** that governs Safety Guard str
 | **Max Auto Limit** | 5,000 | 1,000 | 500 (Strict) |
 
 ### Read-Only Enforcement
-When Read-Only mode is toggled for a connection, SqlFox executes:
-```sql
-SET SESSION TRANSACTION READ ONLY;
-```
-Any accidental write query is rejected at the database engine level, in addition to the client-side Safety Guard block.
+When Read-Only mode is active for a session, SqlFox enforces read-only execution at both the application layer (blocking mutation endpoints and non-query statements) and the database-engine layer via `ReadOnlySession.QueryStreamReadOnly`:
+- **MySQL / PostgreSQL**: Executes statements inside an explicit read-only transaction (`sql.TxOptions{ReadOnly: true}`).
+- **SQLite**: Pins a connection and executes with `PRAGMA query_only = ON` (reset before returning the connection to the pool).
+Any accidental write query (including writes hidden inside CTEs or stored functions) is rejected at the database engine level, in addition to the Safety Guard block.
 
 ---
 
@@ -128,7 +126,7 @@ To balance developer observability under massive enterprise workloads with stric
 
 1. **Disabled by Default**: Runtime profiling endpoints (`/debug/pprof/*`) are completely unmounted by default in desktop and server runtimes.
 2. **Explicit Opt-In via Environment Variable**: Endpoints are mounted conditionally strictly when `SQLFOX_PPROF=1` is exported in the host process environment.
-3. **Loopback Client Enforcement**: Even when enabled, every incoming request to `/debug/pprof/*` is verified against `isLoopback(RemoteAddr)`. Non-loopback IP addresses (e.g. tablet clients or LAN peers connecting via Remote Access Guard) are rejected with `403 Forbidden`. This completely prevents heap snapshots, stack traces, or internal memory structures from leaking across the network.
+3. **Direct Loopback Enforcement**: Even when enabled, every incoming request to `/debug/pprof/*` (as well as `/api/system/shutdown` and `/api/system/update/apply`) is verified against direct loopback (`isLoopback(RemoteAddr)` with no proxy forwarding headers). Remote or reverse-proxied requests are rejected with `403 Forbidden`. This prevents heap snapshots, stack traces, or privileged host controls from being exposed across the network.
 
 ---
 

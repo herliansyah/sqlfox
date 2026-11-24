@@ -1,10 +1,15 @@
 .git
 .github
 .scratch
+node_modules
+web/frontend/node_modules
+sqlfox
+sqlfox.exe
 dist
 bin
 *.log
 *.tar.gz
 *.zip
 coverage.out
+coverage.txt
 docs/assets/banner-mockup.png

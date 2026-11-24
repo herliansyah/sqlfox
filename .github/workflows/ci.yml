@@ -31,7 +31,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: |
             package-lock.json
@@ -110,10 +110,15 @@ jobs:
           SQLFOX_TEST_MYSQL_HOST: "127.0.0.1"
           SQLFOX_TEST_MYSQL_USER: "root"
           SQLFOX_TEST_MYSQL_PASSWORD: "root"
+          SQLFOX_TEST_MYSQL_PASS: "root"
           SQLFOX_TEST_MYSQL_DB: "sqlfox_test"
           SQLFOX_TEST_PG_ENABLE: "1"
           SQLFOX_TEST_PG_HOST: "127.0.0.1"
           SQLFOX_TEST_PG_USER: "postgres"
           SQLFOX_TEST_PG_PASSWORD: "postgres"
           SQLFOX_TEST_PG_DB: "sqlfox_test"
+          SQLFOX_TEST_POSTGRES_HOST: "127.0.0.1"
+          SQLFOX_TEST_POSTGRES_USER: "postgres"
+          SQLFOX_TEST_POSTGRES_PASS: "postgres"
+          SQLFOX_TEST_POSTGRES_DB: "sqlfox_test"
         run: go test -v -tags=integration ./internal/driver/...

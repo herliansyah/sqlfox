@@ -4,12 +4,12 @@
   "private": true,
   "description": "High-Performance, Single-Binary Database Manager & Headless Automation CLI",
   "scripts": {
-    "test": "npm --prefix web/frontend run typecheck && node scripts/run-ts-tests.mjs web/frontend/src/lib/stores/tableFilters.test.ts web/frontend/src/lib/stores/ddlActions.test.ts && node scripts/test-grid-ergonomics-suite.mjs && node scripts/test-svelte-codemirror.mjs && node web/frontend/src/lib/utils/filterCompiler.test.mjs",
+    "test": "npm --prefix web/frontend run typecheck && node scripts/run-ts-tests.mjs web/frontend/src/lib/stores/tableFilters.test.ts web/frontend/src/lib/stores/ddlActions.test.ts web/frontend/src/lib/utils/explainPlan.test.ts web/frontend/src/lib/utils/filterCompiler.test.mjs && node scripts/test-grid-ergonomics-suite.mjs && node scripts/test-svelte-codemirror.mjs",
     "test:editor": "node scripts/test-svelte-codemirror.mjs",
     "test:editor:browser": "node scripts/test-svelte-codemirror-browser.mjs",
     "build": "node scripts/build_web.js",
     "build:web": "node scripts/build_web.js",
-    "build:svelte": "rm -rf web/dist/assets && npm --prefix web/frontend run build",
+    "build:svelte": "node -e \"require('fs').rmSync('web/dist/assets',{recursive:true,force:true})\" && npm --prefix web/frontend run build",
     "build:all": "npm run build:svelte && go build -o sqlfox ./cmd/sqlfox",
     "dev:svelte": "npm --prefix web/frontend run dev"
   }

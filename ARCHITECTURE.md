@@ -17,7 +17,7 @@ flowchart TD
         UI_ERD["Interactive Visual ERD Canvas"]
     end
 
-    subgraph GoCore ["Go Core Backend (Go 1.22+)"]
+    subgraph GoCore ["Go Core Backend (Go 1.26+)"]
         API["HTTP REST & SSE API (Go net/http stdlib)"]
         Vault["Connection Vault (Argon2id + AES-GCM)"]
         Safety["Safety Guard Engine (Deterministic AST)"]
@@ -56,10 +56,10 @@ The following sequence details how arbitrary SQL queries flow from the editor th
 sequenceDiagram
     autonumber
     actor User
-    participant Editor as CodeMirror 5 (Query Editor)
+    participant Editor as CodeMirror 6 (Query Editor)
     participant Server as Go API Server
     participant Guard as Safety Guard (AST)
-    participant Driver as DB Driver (MySQL/SQLite)
+    participant Driver as DB Driver (MySQL/PostgreSQL/SQLite)
     participant Target as Target Database
     participant Grid as Virtual Data Grid
 
@@ -81,14 +81,14 @@ sequenceDiagram
     Driver->>Target: Execute SQL statement
     Target-->>Driver: MySQL Result Buffer / Wire stream
 
-    Server-->>Grid: WS Frame: Columns Metadata
+    Server-->>Grid: NDJSON Frame: Columns Metadata
     loop Chunked Row Streaming (Batch 100 rows)
         Driver->>Target: rows.Next()
         Driver-->>Server: Chunk [100 records]
-        Server-->>Grid: WS Frame: Data Chunk
+        Server-->>Grid: NDJSON Frame: Data Chunk
         Grid->>Grid: Append to virtual scroll buffer
     end
-    Server-->>Grid: WS Frame: Stream Complete (duration, row_count)
+    Server-->>Grid: NDJSON Frame: Stream Complete (duration, row_count)
 ```
 
 ---

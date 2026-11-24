@@ -3,7 +3,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-const esbuildBin = resolve('web/frontend/node_modules/.bin/esbuild');
+const esbuildBin = resolve(
+  'web/frontend/node_modules/.bin',
+  process.platform === 'win32' ? 'esbuild.cmd' : 'esbuild'
+);
 const testFiles = process.argv.slice(2);
 if (testFiles.length === 0) {
   console.error('Usage: node scripts/run-ts-tests.mjs <test-file.ts>...');
@@ -20,7 +23,7 @@ try {
       '--platform=node',
       '--format=esm',
       `--outfile=${outFile}`,
-    ], { stdio: 'inherit' });
+    ], { stdio: 'inherit', shell: process.platform === 'win32' });
     return outFile;
   });
   execFileSync(process.execPath, ['--test', ...outFiles], { stdio: 'inherit' });
