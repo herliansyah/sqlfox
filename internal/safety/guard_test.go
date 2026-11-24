@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/herliansyah/sqlfox/internal/driver"
@@ -326,7 +327,7 @@ func TestBackupManager_BackupTable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	backupPath, dataIncluded, err := BackupTable(ctx, sess, filepath.Join(tempDir, "backups"), "items")
+	backupPath, dataIncluded, err := BackupTable(ctx, sess, filepath.Join(tempDir, "backups"), "items", "sqlite")
 	if err != nil {
 		t.Fatalf("BackupTable failed: %v", err)
 	}
@@ -342,6 +343,13 @@ func TestBackupManager_BackupTable(t *testing.T) {
 
 	if len(content) == 0 {
 		t.Fatal("expected non-empty backup content")
+	}
+	contentStr := string(content)
+	if !strings.Contains(contentStr, "BEGIN TRANSACTION;") || !strings.Contains(contentStr, "COMMIT;") {
+		t.Fatalf("expected transactional boundary in backup, got: %s", contentStr)
+	}
+	if !strings.Contains(contentStr, "Keyboard") || !strings.Contains(contentStr, "Mouse") {
+		t.Fatalf("expected row data in backup, got: %s", contentStr)
 	}
 }
 
