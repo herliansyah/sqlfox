@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/herliansyah/sqlfox/internal/driver"
-	"regexp"
-	"strings"
 )
 
 func (s *PostgresSession) GetUserList(ctx context.Context) ([]driver.DatabaseUser, error) {
@@ -82,11 +80,12 @@ func (s *PostgresSession) GetUserGrants(ctx context.Context, user, host string) 
 
 func (s *PostgresSession) SaveUser(ctx context.Context, user, host, password string, isNew bool) error {
 	quoted := quoteIdentifier(user)
+	escapedPwd := driver.EscapeSQLString(password, "postgres")
 	var cmd string
 	if isNew {
-		cmd = fmt.Sprintf("CREATE USER %s WITH PASSWORD '%s'", quoted, strings.ReplaceAll(password, "'", "''"))
+		cmd = fmt.Sprintf("CREATE USER %s WITH PASSWORD %s", quoted, escapedPwd)
 	} else if password != "" {
-		cmd = fmt.Sprintf("ALTER USER %s WITH PASSWORD '%s'", quoted, strings.ReplaceAll(password, "'", "''"))
+		cmd = fmt.Sprintf("ALTER USER %s WITH PASSWORD %s", quoted, escapedPwd)
 	} else {
 		return nil
 	}
@@ -99,13 +98,10 @@ func (s *PostgresSession) DropUser(ctx context.Context, user, host string) error
 	return err
 }
 
-// rePrivilegeName allows only bare privilege keywords (e.g. "CONNECT", "TEMPORARY").
-var rePrivilegeName = regexp.MustCompile(`^[A-Za-z]+( [A-Za-z]+)*$`)
-
 func (s *PostgresSession) ApplyUserGrants(ctx context.Context, req driver.UserGrantRequest) error {
 	quotedUser := quoteIdentifier(req.User)
 	for _, priv := range req.Privileges {
-		if !rePrivilegeName.MatchString(priv) {
+		if !driver.ValidPrivilegeName(priv) {
 			return fmt.Errorf("invalid privilege name: %q", priv)
 		}
 		cmd := fmt.Sprintf("GRANT %s ON DATABASE %s TO %s", priv, quoteIdentifier(s.cfg.DatabaseName), quotedUser)

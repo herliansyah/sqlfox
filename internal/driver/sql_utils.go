@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 )
@@ -748,4 +750,74 @@ func TopologicalSortTables(tables []TableMetadata) []TableMetadata {
 		}
 	}
 	return result
+}
+
+var reValidPrivilegeName = regexp.MustCompile(`^[A-Za-z]+( [A-Za-z]+)*$`)
+
+// ValidPrivilegeName reports whether priv contains only bare SQL privilege keywords.
+func ValidPrivilegeName(priv string) bool {
+	return reValidPrivilegeName.MatchString(priv)
+}
+
+// ColumnsFromTypes converts database/sql ColumnType metadata into driver.ColumnDefinition slices.
+func ColumnsFromTypes(colTypes []*sql.ColumnType) []ColumnDefinition {
+	cols := make([]ColumnDefinition, len(colTypes))
+	for i, ct := range colTypes {
+		nullable, _ := ct.Nullable()
+		cols[i] = ColumnDefinition{
+			Name:     ct.Name(),
+			Type:     ct.DatabaseTypeName(),
+			Nullable: nullable,
+		}
+	}
+	return cols
+}
+
+// ConnStateMap stores per-driver.Conn state with a bounded capacity so recycled pool
+// connections do not accumulate unboundedly over long-running sessions.
+type ConnStateMap[T any] struct {
+	mu      sync.Mutex
+	maxSize int
+	entries map[any]*T
+}
+
+// NewConnStateMap returns a bounded ConnStateMap. Default capacity is 64 when maxSize <= 0.
+func NewConnStateMap[T any](maxSize int) *ConnStateMap[T] {
+	if maxSize <= 0 {
+		maxSize = 64
+	}
+	return &ConnStateMap[T]{
+		maxSize: maxSize,
+		entries: make(map[any]*T),
+	}
+}
+
+// Get returns the state associated with conn's underlying driver.Conn, creating it if absent.
+func (m *ConnStateMap[T]) Get(conn *sql.Conn) *T {
+	if conn == nil {
+		return nil
+	}
+	var key any
+	_ = conn.Raw(func(dc any) error {
+		key = dc
+		return nil
+	})
+	if key == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.entries == nil {
+		m.entries = make(map[any]*T)
+	}
+	if st, ok := m.entries[key]; ok {
+		return st
+	}
+	// Evict stale entries when exceeding bounded pool capacity.
+	if len(m.entries) >= m.maxSize {
+		clear(m.entries)
+	}
+	st := new(T)
+	m.entries[key] = st
+	return st
 }

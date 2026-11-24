@@ -119,15 +119,7 @@ func (s *SQLiteSession) QueryStream(ctx context.Context, querySQL string, limit 
 			cleanup()
 			return nil, err
 		}
-		cols := make([]driver.ColumnDefinition, len(colTypes))
-		for i, ct := range colTypes {
-			nullable, _ := ct.Nullable()
-			cols[i] = driver.ColumnDefinition{
-				Name:     ct.Name(),
-				Type:     ct.DatabaseTypeName(),
-				Nullable: nullable,
-			}
-		}
+		cols := driver.ColumnsFromTypes(colTypes)
 		return driver.NewSQLRowStream(rows, cols, cleanup), nil
 	}
 
@@ -142,15 +134,7 @@ func (s *SQLiteSession) QueryStream(ctx context.Context, querySQL string, limit 
 		return nil, err
 	}
 
-	cols := make([]driver.ColumnDefinition, len(colTypes))
-	for i, ct := range colTypes {
-		nullable, _ := ct.Nullable()
-		cols[i] = driver.ColumnDefinition{
-			Name:     ct.Name(),
-			Type:     ct.DatabaseTypeName(),
-			Nullable: nullable,
-		}
-	}
+	cols := driver.ColumnsFromTypes(colTypes)
 
 	return driver.NewSQLRowStream(rows, cols), nil
 }
@@ -219,15 +203,7 @@ func (t *sqliteTx) QueryStream(ctx context.Context, querySQL string, limit int) 
 		return nil, err
 	}
 
-	cols := make([]driver.ColumnDefinition, len(colTypes))
-	for i, ct := range colTypes {
-		nullable, _ := ct.Nullable()
-		cols[i] = driver.ColumnDefinition{
-			Name:     ct.Name(),
-			Type:     ct.DatabaseTypeName(),
-			Nullable: nullable,
-		}
-	}
+	cols := driver.ColumnsFromTypes(colTypes)
 
 	return driver.NewSQLRowStream(rows, cols), nil
 }

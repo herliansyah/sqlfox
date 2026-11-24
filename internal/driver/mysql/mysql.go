@@ -46,7 +46,9 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 				caCert = []byte(cfg.SSLCA) // Direct string content fallback
 			}
 			caCertPool := x509.NewCertPool()
-			caCertPool.AppendCertsFromPEM(caCert)
+			if !caCertPool.AppendCertsFromPEM(caCert) {
+				return nil, fmt.Errorf("failed to parse MySQL SSL CA certificate PEM")
+			}
 			tlsConfig.RootCAs = caCertPool
 		}
 
@@ -55,9 +57,10 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 			if err != nil {
 				cert, err = tls.X509KeyPair([]byte(cfg.SSLCert), []byte(cfg.SSLKey))
 			}
-			if err == nil {
-				tlsConfig.Certificates = []tls.Certificate{cert}
+			if err != nil {
+				return nil, fmt.Errorf("failed to load MySQL SSL client certificate/key: %w", err)
 			}
+			tlsConfig.Certificates = []tls.Certificate{cert}
 		}
 
 		tlsName := fmt.Sprintf("custom-tls-%d", time.Now().UnixNano())
@@ -143,25 +146,12 @@ type MySQLSession struct {
 	tlsKey       string
 	mu           sync.Mutex
 	queryThreads map[string]int64
-	connStates   sync.Map // driver.Conn -> *mysqlConnState
+	connStates   driver.ConnStateMap[mysqlConnState]
 	pfsEnabled   bool
 }
 
 func (s *MySQLSession) getConnState(conn *sql.Conn) *mysqlConnState {
-	var key any
-	_ = conn.Raw(func(dc any) error {
-		key = dc
-		return nil
-	})
-	if key == nil {
-		return nil
-	}
-	if v, ok := s.connStates.Load(key); ok {
-		return v.(*mysqlConnState)
-	}
-	st := &mysqlConnState{}
-	actual, _ := s.connStates.LoadOrStore(key, st)
-	return actual.(*mysqlConnState)
+	return s.connStates.Get(conn)
 }
 
 func (s *MySQLSession) Ping(ctx context.Context) (time.Duration, error) {
@@ -264,15 +254,7 @@ func (s *MySQLSession) QueryStream(ctx context.Context, querySQL string, limit i
 		return nil, cErr
 	}
 
-	cols := make([]driver.ColumnDefinition, len(colTypes))
-	for i, ct := range colTypes {
-		nullable, _ := ct.Nullable()
-		cols[i] = driver.ColumnDefinition{
-			Name:     ct.Name(),
-			Type:     ct.DatabaseTypeName(),
-			Nullable: nullable,
-		}
-	}
+	cols := driver.ColumnsFromTypes(colTypes)
 	cleanup := func() {
 		if queryID != "" {
 			s.mu.Lock()
@@ -418,15 +400,7 @@ func (t *mysqlTx) QueryStream(ctx context.Context, querySQL string, limit int) (
 		return nil, err
 	}
 
-	cols := make([]driver.ColumnDefinition, len(colTypes))
-	for i, ct := range colTypes {
-		nullable, _ := ct.Nullable()
-		cols[i] = driver.ColumnDefinition{
-			Name:     ct.Name(),
-			Type:     ct.DatabaseTypeName(),
-			Nullable: nullable,
-		}
-	}
+	cols := driver.ColumnsFromTypes(colTypes)
 
 	return driver.NewSQLRowStream(rows, cols), nil
 }

@@ -107,24 +107,11 @@ type PostgresSession struct {
 	currentSchema string
 	mu            sync.Mutex
 	queryPids     map[string]int
-	connStates    sync.Map // driver.Conn -> *pgConnState
+	connStates    driver.ConnStateMap[pgConnState]
 }
 
 func (s *PostgresSession) getConnState(conn *sql.Conn) *pgConnState {
-	var key any
-	_ = conn.Raw(func(dc any) error {
-		key = dc
-		return nil
-	})
-	if key == nil {
-		return nil
-	}
-	if v, ok := s.connStates.Load(key); ok {
-		return v.(*pgConnState)
-	}
-	st := &pgConnState{}
-	actual, _ := s.connStates.LoadOrStore(key, st)
-	return actual.(*pgConnState)
+	return s.connStates.Get(conn)
 }
 
 func (s *PostgresSession) Ping(ctx context.Context) (time.Duration, error) {
@@ -262,15 +249,7 @@ func (s *PostgresSession) QueryStream(ctx context.Context, querySQL string, limi
 		return nil, cErr
 	}
 
-	cols := make([]driver.ColumnDefinition, len(colTypes))
-	for i, ct := range colTypes {
-		nullable, _ := ct.Nullable()
-		cols[i] = driver.ColumnDefinition{
-			Name:     ct.Name(),
-			Type:     ct.DatabaseTypeName(),
-			Nullable: nullable,
-		}
-	}
+	cols := driver.ColumnsFromTypes(colTypes)
 	cleanup := func() {
 		if queryID != "" {
 			s.mu.Lock()
@@ -384,15 +363,7 @@ func (t *postgresTx) QueryStream(ctx context.Context, querySQL string, limit int
 		return nil, err
 	}
 
-	cols := make([]driver.ColumnDefinition, len(colTypes))
-	for i, ct := range colTypes {
-		nullable, _ := ct.Nullable()
-		cols[i] = driver.ColumnDefinition{
-			Name:     ct.Name(),
-			Type:     ct.DatabaseTypeName(),
-			Nullable: nullable,
-		}
-	}
+	cols := driver.ColumnsFromTypes(colTypes)
 
 	return driver.NewSQLRowStream(rows, cols), nil
 }

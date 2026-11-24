@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/herliansyah/sqlfox/internal/driver"
-	"regexp"
 	"strings"
 )
 
@@ -80,14 +79,11 @@ func (s *MySQLSession) DropUser(ctx context.Context, user, host string) error {
 	return nil
 }
 
-// rePrivilegeName allows only bare privilege keywords (e.g. "SELECT", "CREATE TEMPORARY TABLES").
-var rePrivilegeName = regexp.MustCompile(`^[A-Za-z]+( [A-Za-z]+)*$`)
-
 func (s *MySQLSession) ApplyUserGrants(ctx context.Context, req driver.UserGrantRequest) error {
 	uEsc := driver.EscapeSQLString(req.User, "mysql")
 	hEsc := driver.EscapeSQLString(req.Host, "mysql")
 	for _, p := range req.Privileges {
-		if !rePrivilegeName.MatchString(p) {
+		if !driver.ValidPrivilegeName(p) {
 			return fmt.Errorf("invalid privilege name: %q", p)
 		}
 	}
