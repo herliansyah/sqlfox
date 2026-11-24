@@ -139,7 +139,15 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filter := strings.TrimSpace(r.URL.Query().Get("filter"))
-	if err := validateTableFilter(filter); err != nil {
+	structuredFilters := strings.TrimSpace(r.URL.Query().Get("filters"))
+	if structuredFilters != "" {
+		compiled, err := buildStructuredFilterClause(structuredFilters, sess.DriverName)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid structured filters: "+err.Error())
+			return
+		}
+		filter = compiled
+	} else if err := validateTableFilter(filter); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid filter: "+err.Error())
 		return
 	}
@@ -287,7 +295,15 @@ func (s *Server) handleGetTableCount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filter := strings.TrimSpace(r.URL.Query().Get("filter"))
-	if err := validateTableFilter(filter); err != nil {
+	structuredFilters := strings.TrimSpace(r.URL.Query().Get("filters"))
+	if structuredFilters != "" {
+		compiled, err := buildStructuredFilterClause(structuredFilters, sess.DriverName)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid structured filters: "+err.Error())
+			return
+		}
+		filter = compiled
+	} else if err := validateTableFilter(filter); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid filter: "+err.Error())
 		return
 	}
@@ -356,6 +372,64 @@ var reFilterToken = regexp.MustCompile(
 
 // reFilterComment matches any SQL comment opener; comments are never valid inside a quick-filter.
 var reFilterComment = regexp.MustCompile(`--|#|/\*`)
+
+// structuredFilterPill mirrors a typed frontend filter pill so pill-based filters never
+// rely on raw SQL string splicing from the client.
+type structuredFilterPill struct {
+	Column   string `json:"column"`
+	Operator string `json:"operator"`
+	Value    string `json:"value"`
+}
+
+// buildStructuredFilterClause compiles a JSON array of structured filter pills into a
+// strictly quoted, dialect-escaped WHERE predicate without accepting raw SQL expressions.
+func buildStructuredFilterClause(rawJSON, driverName string) (string, error) {
+	var pills []structuredFilterPill
+	if err := json.Unmarshal([]byte(rawJSON), &pills); err != nil {
+		return "", fmt.Errorf("malformed filter JSON: %w", err)
+	}
+	if len(pills) == 0 {
+		return "", nil
+	}
+	var parts []string
+	for _, p := range pills {
+		col := strings.TrimSpace(p.Column)
+		if col == "" || strings.ContainsRune(col, 0) {
+			return "", errors.New("filter column name is required")
+		}
+		qCol := driver.QuoteIdentifier(col, driverName)
+		op := strings.ToUpper(strings.TrimSpace(p.Operator))
+		switch op {
+		case "IS NULL", "IS NOT NULL":
+			parts = append(parts, fmt.Sprintf("%s %s", qCol, op))
+		case "=", "!=", "<>", "<", "<=", ">", ">=", "LIKE", "NOT LIKE":
+			if strings.ContainsRune(p.Value, 0) {
+				return "", errors.New("NUL bytes are not permitted in filter values")
+			}
+			parts = append(parts, fmt.Sprintf("%s %s %s", qCol, op, driver.EscapeSQLString(p.Value, driverName)))
+		case "IN", "NOT IN":
+			rawItems := strings.Split(p.Value, ",")
+			var quoted []string
+			for _, item := range rawItems {
+				trimmed := strings.TrimSpace(item)
+				if trimmed == "" {
+					continue
+				}
+				if strings.ContainsRune(trimmed, 0) {
+					return "", errors.New("NUL bytes are not permitted in filter values")
+				}
+				quoted = append(quoted, driver.EscapeSQLString(trimmed, driverName))
+			}
+			if len(quoted) == 0 {
+				return "", fmt.Errorf("%s operator requires at least one value", op)
+			}
+			parts = append(parts, fmt.Sprintf("%s %s (%s)", qCol, op, strings.Join(quoted, ", ")))
+		default:
+			return "", fmt.Errorf("unsupported filter operator %q", p.Operator)
+		}
+	}
+	return strings.Join(parts, " AND "), nil
+}
 
 // validateTableFilter enforces a positive grammar on the table quick-filter before it is spliced
 // into a server-side WHERE clause. It rejects statement terminators, comments, and any token that
@@ -734,7 +808,10 @@ func (s *Server) handleSaveTableNote(w http.ResponseWriter, r *http.Request) {
 		if req.SideNote != "" {
 			existingNote.SideNote = req.SideNote
 		}
-		_ = s.vault.UpdateOperationalNote(existingNote)
+		if err := s.vault.UpdateOperationalNote(existingNote); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update table note: "+err.Error())
+			return
+		}
 	} else {
 		newOpNote := &vault.OperationalNote{
 			Title:      "Runbook: " + tableName,
@@ -746,7 +823,10 @@ func (s *Server) handleSaveTableNote(w http.ResponseWriter, r *http.Request) {
 			ObjectTags: []string{targetTag},
 			UserTags:   []string{"#runbook"},
 		}
-		_ = s.vault.CreateOperationalNote(newOpNote)
+		if err := s.vault.CreateOperationalNote(newOpNote); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to create table note: "+err.Error())
+			return
+		}
 	}
 
 	note := &vault.TableNote{

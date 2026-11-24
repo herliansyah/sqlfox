@@ -277,7 +277,7 @@ func TestMasterKeyLANExclusivity(t *testing.T) {
 		t.Fatalf("master_password should be omitted when lan_enabled is false")
 	}
 
-	// 2. In LAN mode: lan_enabled is true, master_password is provided
+	// 2. In LAN mode: lan_enabled is true, ephemeral pairing_code is provided (never plaintext master_password)
 	srv.SetLANEnabled(true)
 	recLAN := httptest.NewRecorder()
 	srv.Router().ServeHTTP(recLAN, reqDefault)
@@ -290,8 +290,32 @@ func TestMasterKeyLANExclusivity(t *testing.T) {
 	if resLAN["lan_enabled"] != true {
 		t.Fatalf("expected lan_enabled: true, got: %+v", resLAN)
 	}
-	if resLAN["master_password"] != "pin-123456" {
-		t.Fatalf("expected pin-123456, got: %v", resLAN["master_password"])
+	if _, hasPlaintext := resLAN["master_password"]; hasPlaintext {
+		t.Fatalf("master_password must never be exposed over HTTP")
+	}
+	pairingCode, _ := resLAN["pairing_code"].(string)
+	if len(pairingCode) != 8 {
+		t.Fatalf("expected 8-digit pairing_code, got: %q", pairingCode)
+	}
+
+	// 3. Ephemeral pairing_code unlocks once and is burned immediately (single-use)
+	unlockBody := `{"password":"` + pairingCode + `"}`
+	reqUnlock1 := httptest.NewRequest("POST", "/api/auth/unlock", strings.NewReader(unlockBody))
+	reqUnlock1.Host = "127.0.0.1:8080"
+	reqUnlock1.RemoteAddr = "192.168.1.50:54321"
+	recUnlock1 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(recUnlock1, reqUnlock1)
+	if recUnlock1.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on first pairing_code unlock, got: %d %s", recUnlock1.Code, recUnlock1.Body.String())
+	}
+
+	reqUnlock2 := httptest.NewRequest("POST", "/api/auth/unlock", strings.NewReader(unlockBody))
+	reqUnlock2.Host = "127.0.0.1:8080"
+	reqUnlock2.RemoteAddr = "192.168.1.50:54321"
+	recUnlock2 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(recUnlock2, reqUnlock2)
+	if recUnlock2.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized on second pairing_code reuse, got: %d", recUnlock2.Code)
 	}
 }
 

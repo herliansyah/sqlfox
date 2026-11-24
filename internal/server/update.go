@@ -37,7 +37,7 @@ var allowUpdateAPIHostAssets = false
 // manifestSigningPublicKeyB64 is the base64-encoded Ed25519 public key that signs the release
 // checksum manifest. It is injected at build time via
 //
-//	-ldflags "-X sqlfox/internal/server.manifestSigningPublicKeyB64=<base64 pubkey>"
+//	-ldflags "-X github.com/herliansyah/sqlfox/internal/server.manifestSigningPublicKeyB64=<base64 pubkey>"
 //
 // When set, the self-updater REQUIRES a valid detached Ed25519 signature (checksums.txt.sig) over
 // the checksum manifest before trusting any checksum — this is the supply-chain trust anchor that a

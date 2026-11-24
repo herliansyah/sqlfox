@@ -78,6 +78,10 @@ func NewAIClient(cfg ClientConfig) *AIClient {
 		cfg: cfg,
 		httpClient: &http.Client{
 			Timeout: 45 * time.Second,
+			// Prevent SSRF via 3xx redirect to internal/metadata endpoints.
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 		},
 	}
 }

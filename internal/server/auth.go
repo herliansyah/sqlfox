@@ -2,9 +2,11 @@ package server
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net"
 	"net/http"
 	"net/url"
@@ -24,12 +26,14 @@ type ipLockoutRecord struct {
 	lockedUntil time.Time
 }
 
-// AuthManager manages authentication tokens and remote access verification.
+// AuthManager manages authentication tokens, ephemeral LAN pairing codes, and remote access verification.
 type AuthManager struct {
-	tokens    map[string]time.Time
-	lockouts  map[string]*ipLockoutRecord
-	argon2Sem chan struct{}
-	mu        sync.RWMutex
+	tokens           map[string]time.Time
+	lockouts         map[string]*ipLockoutRecord
+	pairingCode      string
+	pairingExpiresAt time.Time
+	argon2Sem        chan struct{}
+	mu               sync.RWMutex
 }
 
 func NewAuthManager() *AuthManager {
@@ -127,6 +131,54 @@ func (a *AuthManager) RecordSuccessfulAttempt(ip string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	delete(a.lockouts, ip)
+}
+
+const pairingCodeTTL = 5 * time.Minute
+
+// GeneratePairingCode issues a short-lived, single-use 8-digit LAN pairing code so the
+// vault's master password is never exposed over HTTP.
+func (a *AuthManager) GeneratePairingCode() (string, time.Time) {
+	var b strings.Builder
+	for i := 0; i < 8; i++ {
+		n, err := rand.Int(rand.Reader, big.NewInt(10))
+		if err != nil {
+			b.WriteByte('0')
+			continue
+		}
+		b.WriteByte(byte('0' + n.Int64()))
+	}
+	code := b.String()
+	exp := time.Now().Add(pairingCodeTTL)
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.pairingCode = code
+	a.pairingExpiresAt = exp
+	return code, exp
+}
+
+// ConsumePairingCode validates and invalidates the active ephemeral LAN pairing code.
+func (a *AuthManager) ConsumePairingCode(candidate string) bool {
+	if candidate == "" {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.pairingCode == "" || time.Now().After(a.pairingExpiresAt) {
+		a.pairingCode = ""
+		a.pairingExpiresAt = time.Time{}
+		return false
+	}
+	if len(candidate) != len(a.pairingCode) {
+		return false
+	}
+	if subtle.ConstantTimeCompare([]byte(candidate), []byte(a.pairingCode)) != 1 {
+		return false
+	}
+	// Single-use: burn immediately on success.
+	a.pairingCode = ""
+	a.pairingExpiresAt = time.Time{}
+	return true
 }
 
 func (s *Server) isHostAllowed(host string) bool {
@@ -413,7 +465,11 @@ func (s *Server) handleAuthUnlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !s.vault.ValidateMasterPassword(req.Password) {
+	valid := s.vault.ValidateMasterPassword(req.Password)
+	if !valid && s.lanEnabled {
+		valid = s.authMgr.ConsumePairingCode(req.Password)
+	}
+	if !valid {
 		locked, remaining := s.authMgr.RecordFailedAttempt(clientIP)
 		if locked {
 			w.Header().Set("Content-Type", "application/json")
@@ -461,9 +517,11 @@ func (s *Server) handleGetMasterPassword(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	code, exp := s.authMgr.GeneratePairingCode()
 	resp := map[string]any{
-		"lan_enabled":     true,
-		"master_password": s.masterPassword,
+		"lan_enabled":            true,
+		"pairing_code":           code,
+		"pairing_expires_in_sec": int(time.Until(exp).Seconds()),
 	}
 	if s.lanIP != "" {
 		resp["lan_ip"] = s.lanIP

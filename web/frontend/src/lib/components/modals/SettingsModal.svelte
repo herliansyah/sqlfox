@@ -33,7 +33,7 @@
   let isExportingVault = $state(false);
   let isImportingVault = $state(false);
   let vaultImportInput = $state<HTMLInputElement | null>(null);
-  let masterKeyInfo = $state<{ lan_enabled: boolean; master_password?: string; lan_ip?: string; port?: number | string } | null>(null);
+  let masterKeyInfo = $state<{ lan_enabled: boolean; pairing_code?: string; pairing_expires_in_sec?: number; lan_ip?: string; port?: number | string } | null>(null);
 
   let tabletLanUrl = $derived.by(() => {
     const ip = masterKeyInfo?.lan_ip;
@@ -483,21 +483,21 @@
               </p>
 
               <div class="flex flex-wrap items-center gap-2 pt-1">
-                {#if masterKeyInfo?.master_password || appState.authStatus?.master_password}
-                  {@const pin = masterKeyInfo?.master_password || appState.authStatus?.master_password}
+                {#if masterKeyInfo?.pairing_code || appState.authStatus?.pairing_code}
+                  {@const pin = masterKeyInfo?.pairing_code || appState.authStatus?.pairing_code || ''}
                   <div class="px-2.5 py-1 rounded bg-slate-900 border border-slate-800 font-mono text-emerald-400 text-xs font-bold tracking-widest">
-                    PIN: {pin}
+                    PAIRING CODE (1x, 5m): {pin}
                   </div>
                   <button
                     type="button"
                     onclick={() => {
                       copyText(pin);
-                      appState.showToast('Master PIN copied to clipboard', 'success');
+                      appState.showToast('One-time Pairing Code copied to clipboard', 'success');
                     }}
                     class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-[11px] font-medium transition flex items-center space-x-1"
                   >
                     <Icon name="copy" class="w-3 h-3" />
-                    <span>Copy PIN</span>
+                    <span>Copy Code</span>
                   </button>
                 {:else}
                   <span class="text-[11px] text-slate-500 italic">Master PIN is printed in the local terminal startup banner on localhost.</span>

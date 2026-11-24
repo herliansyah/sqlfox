@@ -61,7 +61,7 @@ class ApiClient extends ApiHttpBase {
     return this.request('/auth/status');
   }
 
-  async getMasterKey(): Promise<{ lan_enabled: boolean; master_password?: string; lan_ip?: string; port?: number | string }> {
+  async getMasterKey(): Promise<{ lan_enabled: boolean; pairing_code?: string; pairing_expires_in_sec?: number; lan_ip?: string; port?: number | string }> {
     return this.request('/auth/master-key');
   }
 
@@ -212,11 +212,16 @@ class ApiClient extends ApiHttpBase {
     db?: string,
     filter?: string,
     sortCol?: string,
-    sortDir?: string
+    sortDir?: string,
+    structuredFilters?: Array<{ column: string; operator: string; value: string }>
   ): Promise<QueryExecutionResult> {
     let url = `/session/${sessionId}/table/${encodeURIComponent(tableName)}/rows?limit=${limit}&offset=${offset}`;
     if (db) url += `&db=${encodeURIComponent(db)}`;
-    if (filter) url += `&filter=${encodeURIComponent(filter)}`;
+    if (structuredFilters && structuredFilters.length > 0) {
+      url += `&filters=${encodeURIComponent(JSON.stringify(structuredFilters))}`;
+    } else if (filter) {
+      url += `&filter=${encodeURIComponent(filter)}`;
+    }
     if (sortCol) url += `&sort_col=${encodeURIComponent(sortCol)}&sort_dir=${encodeURIComponent(sortDir || 'ASC')}`;
     const res = await this.request<QueryExecutionResult>(url, { timeoutMs: 30000 });
     return this.normalizeExecResult(res);
@@ -226,12 +231,17 @@ class ApiClient extends ApiHttpBase {
     sessionId: string,
     tableName: string,
     db?: string,
-    filter?: string
+    filter?: string,
+    structuredFilters?: Array<{ column: string; operator: string; value: string }>
   ): Promise<{ table: string; count: number; duration_ms: number }> {
     let url = `/session/${sessionId}/table/${encodeURIComponent(tableName)}/count`;
     const params = new URLSearchParams();
     if (db) params.set('db', db);
-    if (filter) params.set('filter', filter);
+    if (structuredFilters && structuredFilters.length > 0) {
+      params.set('filters', JSON.stringify(structuredFilters));
+    } else if (filter) {
+      params.set('filter', filter);
+    }
     const qs = params.toString();
     if (qs) url += `?${qs}`;
     return this.request(url, { timeoutMs: 30000 });

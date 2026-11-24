@@ -75,6 +75,29 @@ func TestValidateTableFilter(t *testing.T) {
 	}
 }
 
+func TestBuildStructuredFilterClause(t *testing.T) {
+	clause, err := buildStructuredFilterClause(`[
+		{"column":"status","operator":"=","value":"active' OR '1'='1"},
+		{"column":"age","operator":">=","value":"18"},
+		{"column":"deleted_at","operator":"IS NULL","value":""},
+		{"column":"role","operator":"IN","value":"admin, editor"}
+	]`, "postgres")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := `"status" = 'active'' OR ''1''=''1' AND "age" >= '18' AND "deleted_at" IS NULL AND "role" IN ('admin', 'editor')`
+	if clause != want {
+		t.Fatalf("got %q, want %q", clause, want)
+	}
+
+	if _, err := buildStructuredFilterClause(`[{"column":"id","operator":"UNION SELECT","value":"1"}]`, "mysql"); err == nil {
+		t.Fatal("expected unsupported operator to fail")
+	}
+	if _, err := buildStructuredFilterClause(`[{"column":"id","operator":"IN","value":"  "}]`, "sqlite"); err == nil {
+		t.Fatal("expected empty IN list to fail")
+	}
+}
+
 func TestHandleGetTableRowsWithFilter(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "sqlfox-filter-test-*")
 	if err != nil {

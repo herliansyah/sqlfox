@@ -3,7 +3,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -11,6 +15,63 @@ import (
 	"github.com/herliansyah/sqlfox/internal/driver"
 	"github.com/herliansyah/sqlfox/internal/vault"
 )
+
+// validateAIEndpoint enforces SSRF boundaries on user-supplied AI endpoints.
+// Cloud metadata IPs/hosts are always blocked; private/loopback IPs are blocked unless
+// the provider is local Ollama and the request originates from localhost.
+func validateAIEndpoint(raw string, provider ai.Provider, isRemote bool) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid AI endpoint URL: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return errors.New("AI endpoint must use http or https scheme")
+	}
+	host := strings.ToLower(strings.TrimSpace(u.Hostname()))
+	if host == "" {
+		return errors.New("AI endpoint host is required")
+	}
+	if host == "metadata.google.internal" || host == "169.254.169.254" || host == "100.100.100.200" {
+		return errors.New("AI endpoint targets a blocked metadata host")
+	}
+
+	allowLoopback := !isRemote
+	allowPrivate := provider == ai.ProviderOllama && !isRemote
+	checkIP := func(ip net.IP) error {
+		if ip == nil {
+			return nil
+		}
+		if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+			return errors.New("AI endpoint targets a blocked link-local or unspecified IP")
+		}
+		if ip.IsLoopback() && !allowLoopback {
+			return errors.New("AI endpoint targets a loopback IP")
+		}
+		if ip.IsPrivate() && !allowPrivate {
+			return errors.New("AI endpoint targets a private IP")
+		}
+		return nil
+	}
+
+	if ip := net.ParseIP(host); ip != nil {
+		return checkIP(ip)
+	}
+	if !allowLoopback && (host == "localhost" || strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".local")) {
+		return errors.New("AI endpoint targets a local hostname")
+	}
+	if ips, err := net.LookupIP(host); err == nil {
+		for _, ip := range ips {
+			if err := checkIP(ip); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
 
 type AIChatRequest struct {
 	Action          string      `json:"action"` // explain_query, explain_plan, optimize, nl_to_sql, chat, fix_query
@@ -79,6 +140,11 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 				req.MaskIdentifiers = &profile.MaskIdentifiers
 			}
 		}
+	}
+
+	if err := validateAIEndpoint(req.Endpoint, req.Provider, s.IsRemoteRequest(r)); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	dialect := "SQL"
@@ -182,6 +248,10 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAIOllamaCheck(w http.ResponseWriter, r *http.Request) {
 	endpoint := r.URL.Query().Get("endpoint")
+	if err := validateAIEndpoint(endpoint, ai.ProviderOllama, s.IsRemoteRequest(r)); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
 
@@ -249,6 +319,11 @@ func (s *Server) handleCreateAIProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := validateAIEndpoint(p.BaseURL, ai.Provider(p.Provider), s.IsRemoteRequest(r)); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	if err := s.vault.SaveAIProfile(&p); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save AI profile: "+err.Error())
 		return
@@ -282,6 +357,11 @@ func (s *Server) handleUpdateAIProfile(w http.ResponseWriter, r *http.Request) {
 	p.ModelName = strings.TrimSpace(p.ModelName)
 	if p.ModelName == "" {
 		writeError(w, http.StatusBadRequest, "model name is required")
+		return
+	}
+
+	if err := validateAIEndpoint(p.BaseURL, ai.Provider(p.Provider), s.IsRemoteRequest(r)); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 

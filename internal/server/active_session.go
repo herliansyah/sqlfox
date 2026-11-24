@@ -47,6 +47,8 @@ type ActiveSession struct {
 	closed          bool
 	runSeq          uint64
 	inFlight        int // number of Execute/ExecuteStream/Stream calls currently running
+	auditWg         sync.WaitGroup
+	dbSwitchMu      sync.Mutex
 	mu              sync.RWMutex
 }
 
@@ -96,6 +98,8 @@ func (s *ActiveSession) Close() error {
 	alreadyClosed := s.closed
 	s.closed = true
 	s.mu.Unlock()
+
+	s.auditWg.Wait()
 
 	if sess != nil && !alreadyClosed {
 		return sess.Close()
@@ -330,17 +334,25 @@ func rejectIfReadOnly(w http.ResponseWriter, sess *ActiveSession) bool {
 	return false
 }
 
-// UseDatabase selects the active database context if a non-empty name is provided.
-// ponytail: Inlined check eliminates repeated if db != "" { sess.Session.SelectDatabase(...) } boilerplate.
+// UseDatabase selects the active database context if a non-empty name is provided,
+// serializing driver-level database switches on the shared session.
 func (s *ActiveSession) UseDatabase(ctx context.Context, dbName string) error {
-	if dbName != "" && s.Session != nil {
-		return s.Session.SelectDatabase(ctx, dbName)
+	if dbName == "" || s.Session == nil {
+		return nil
 	}
+	s.dbSwitchMu.Lock()
+	defer s.dbSwitchMu.Unlock()
+	if err := s.Session.SelectDatabase(ctx, dbName); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.DatabaseName = dbName
+	s.mu.Unlock()
 	return nil
 }
 
 // RecordAudit asynchronously records an executed SQL statement or data mutation into the vault audit log.
-// ponytail: Non-blocking fire-and-forget goroutine ensures zero impact on query execution latency.
+// WaitGroup-tracked goroutines ensure zero impact on query latency while preventing lost writes on Close().
 func (s *ActiveSession) RecordAudit(querySQL, source string, durationMs, rowsAffected int64, execErr error, executedAt ...time.Time) {
 	if s == nil || s.vault == nil || strings.TrimSpace(querySQL) == "" {
 		return
@@ -357,18 +369,31 @@ func (s *ActiveSession) RecordAudit(querySQL, source string, durationMs, rowsAff
 		t = executedAt[0]
 	}
 	cleanSQL := strings.TrimSpace(querySQL)
-	go func() {
-		_ = s.vault.RecordAuditLog(&vault.AuditLogRecord{
-			SessionID:    s.ID,
-			ConnectionID: s.ConnectionID,
-			QuerySQL:     cleanSQL,
-			Source:       source,
-			DurationMs:   durationMs,
-			RowsAffected: rowsAffected,
-			Error:        errStr,
-			ExecutedAt:   t,
-		})
-	}()
+
+	s.mu.RLock()
+	closed := s.closed
+	if !closed {
+		s.auditWg.Add(1)
+	}
+	s.mu.RUnlock()
+
+	if !closed {
+		go func() {
+			defer s.auditWg.Done()
+			if err := s.vault.RecordAuditLog(&vault.AuditLogRecord{
+				SessionID:    s.ID,
+				ConnectionID: s.ConnectionID,
+				QuerySQL:     cleanSQL,
+				Source:       source,
+				DurationMs:   durationMs,
+				RowsAffected: rowsAffected,
+				Error:        errStr,
+				ExecutedAt:   t,
+			}); err != nil {
+				slog.Warn("audit_log_write_failed", "module", "audit", "error", err.Error())
+			}
+		}()
+	}
 
 	// ponytail: Emits structured telemetry event for live Activity Console
 	if execErr != nil {

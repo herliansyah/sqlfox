@@ -193,7 +193,7 @@
     { label: 'Shut Down Daemon', desc: 'Gracefully stop the local server', icon: 'rotate-ccw', iconColor: 'text-rose-400', action: () => appState.shutdownDaemon() },
   ];
 
-  let masterPin = $derived(appState.authStatus?.master_password || '');
+  let masterPin = $derived(appState.authStatus?.pairing_code || '');
   let isLanAvailable = $derived(
     Boolean(masterPin && (appState.authStatus?.lan_enabled || !appState.authStatus?.is_remote))
   );

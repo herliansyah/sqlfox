@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/herliansyah/sqlfox/internal/ai"
 	"github.com/herliansyah/sqlfox/internal/vault"
 )
 
@@ -111,5 +112,43 @@ func TestAIProfilesServerEndpoints(t *testing.T) {
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 when deleting only profile, got %d", w.Code)
+	}
+}
+
+func TestValidateAIEndpoint(t *testing.T) {
+	// Valid public & local endpoints
+	validCases := []struct {
+		url      string
+		provider ai.Provider
+		isRemote bool
+	}{
+		{"", ai.ProviderOpenAI, true},
+		{"https://api.openai.com/v1", ai.ProviderOpenAI, true},
+		{"http://localhost:11434", ai.ProviderOllama, false},
+		{"http://127.0.0.1:4000/v1", ai.ProviderOpenAI, false},
+	}
+	for _, tc := range validCases {
+		if err := validateAIEndpoint(tc.url, tc.provider, tc.isRemote); err != nil {
+			t.Errorf("expected endpoint %q (provider=%s, remote=%v) to be valid, got: %v", tc.url, tc.provider, tc.isRemote, err)
+		}
+	}
+
+	// Blocked SSRF targets
+	blockedCases := []struct {
+		url      string
+		provider ai.Provider
+		isRemote bool
+	}{
+		{"http://169.254.169.254/latest/meta-data/", ai.ProviderOpenAI, false},
+		{"http://metadata.google.internal/computeMetadata/v1/", ai.ProviderOllama, false},
+		{"file:///etc/passwd", ai.ProviderOpenAI, false},
+		{"http://127.0.0.1:8080/api/connections", ai.ProviderOpenAI, true},
+		{"http://localhost:11434", ai.ProviderOllama, true},
+		{"http://192.168.1.10:8080", ai.ProviderOpenAI, false},
+	}
+	for _, tc := range blockedCases {
+		if err := validateAIEndpoint(tc.url, tc.provider, tc.isRemote); err == nil {
+			t.Errorf("expected endpoint %q (provider=%s, remote=%v) to be blocked", tc.url, tc.provider, tc.isRemote)
+		}
 	}
 }
