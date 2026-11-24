@@ -3098,6 +3098,54 @@ export class AppState {
     }
   }
 
+  closeTopOverlay(): boolean {
+    if (this.isCommandPaletteOpen) { this.isCommandPaletteOpen = false; return true; }
+    if (this.isSchemaSearchOpen) { this.isSchemaSearchOpen = false; return true; }
+    if (this.isSmartSeedModalOpen) { this.isSmartSeedModalOpen = false; return true; }
+    if (this.isLockInspectorOpen) { this.isLockInspectorOpen = false; return true; }
+    if (this.ddlViewModal.isOpen) { this.ddlViewModal.isOpen = false; return true; }
+    if (this.safetyInspectionModal.isOpen) { this.safetyInspectionModal.isOpen = false; return true; }
+    if (this.isConnectionModalOpen) { this.isConnectionModalOpen = false; return true; }
+    if (this.isRecordInspectorOpen) { this.isRecordInspectorOpen = false; return true; }
+    if (this.isInsertRowModalOpen) { this.isInsertRowModalOpen = false; return true; }
+    if (this.isShortcutsModalOpen) { this.isShortcutsModalOpen = false; return true; }
+    if (this.isCreateDbModalOpen) { this.isCreateDbModalOpen = false; return true; }
+    if (this.isTableCreatorOpen) { this.isTableCreatorOpen = false; return true; }
+    if (this.isRenameTableModalOpen) { this.isRenameTableModalOpen = false; return true; }
+    if (this.isDuplicateTableModalOpen) { this.isDuplicateTableModalOpen = false; return true; }
+    if (this.isViewDesignerOpen) { this.isViewDesignerOpen = false; return true; }
+    if (this.isTriggerDesignerOpen) { this.isTriggerDesignerOpen = false; return true; }
+    if (this.isRoutineDesignerOpen) { this.isRoutineDesignerOpen = false; return true; }
+    if (this.isEventDesignerOpen) { this.isEventDesignerOpen = false; return true; }
+    if (this.isDumpModalOpen) { this.isDumpModalOpen = false; return true; }
+    if (this.isStructureSyncModalOpen) { this.isStructureSyncModalOpen = false; return true; }
+    if (this.isRunSqlModalOpen) { this.isRunSqlModalOpen = false; return true; }
+    if (this.isSnippetsModalOpen) {
+      this.pendingSnippet = null;
+      this.isSnippetsModalOpen = false;
+      return true;
+    }
+    if (this.isCsvImportModalOpen) { this.isCsvImportModalOpen = false; return true; }
+    if (this.isPrivilegeMatrixOpen) { this.isPrivilegeMatrixOpen = false; return true; }
+    if (this.isDbDiagnosticsOpen) { this.isDbDiagnosticsOpen = false; return true; }
+    if (this.isAiSettingsModalOpen) { this.isAiSettingsModalOpen = false; return true; }
+    if (this.isNoteComposerModalOpen) { this.isNoteComposerModalOpen = false; return true; }
+    if (this.isUpdateModalOpen) { this.isUpdateModalOpen = false; return true; }
+    if (this.isMockDataModalOpen) { this.closeMockDataModal(); return true; }
+    if (this.isSettingsModalOpen) { this.isSettingsModalOpen = false; return true; }
+    if (this.jsonCellModal.isOpen) { this.jsonCellModal.isOpen = false; return true; }
+    if (this.isDataTransferOpen) { this.isDataTransferOpen = false; return true; }
+    if (this.isDataSyncOpen) { this.isDataSyncOpen = false; return true; }
+    if (this.isRefreshAllOpen) { this.isRefreshAllOpen = false; return true; }
+    if (this.isImpactPreviewOpen) { this.isImpactPreviewOpen = false; return true; }
+    if (this.ddlReview.isOpen) { this.ddlReview.isOpen = false; return true; }
+    if (this.fkPeekState.isOpen) { this.fkPeekState.isOpen = false; return true; }
+    if (this.isAiDrawerOpen) { this.toggleAiDrawer(false); return true; }
+    if (this.isNotesDrawerOpen) { this.isNotesDrawerOpen = false; return true; }
+    if (this.isActivityDrawerOpen) { this.isActivityDrawerOpen = false; return true; }
+    if (this.isAuditDrawerOpen) { this.isAuditDrawerOpen = false; return true; }
+    return false;
+  }
 
   // Filter Mode & Clause Management
   setFilterMode(mode: 'pills' | 'raw') {

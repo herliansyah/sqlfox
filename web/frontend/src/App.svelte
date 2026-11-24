@@ -244,103 +244,19 @@
         return;
       }
 
-      const anyOverlayOpen =
-        appState.isCommandPaletteOpen ||
-        appState.isSchemaSearchOpen ||
-        appState.isSmartSeedModalOpen ||
-        appState.isLockInspectorOpen ||
-        appState.ddlViewModal.isOpen ||
-        appState.safetyInspectionModal.isOpen ||
-        appState.isConnectionModalOpen ||
-        appState.isRecordInspectorOpen ||
-        appState.isInsertRowModalOpen ||
-        appState.isShortcutsModalOpen ||
-        appState.isCreateDbModalOpen ||
-        appState.isTableCreatorOpen ||
-        appState.isRenameTableModalOpen ||
-        appState.isDuplicateTableModalOpen ||
-        appState.isViewDesignerOpen ||
-        appState.isTriggerDesignerOpen ||
-        appState.isRoutineDesignerOpen ||
-        appState.isEventDesignerOpen ||
-        appState.isDumpModalOpen ||
-        appState.isStructureSyncModalOpen ||
-        appState.isRunSqlModalOpen ||
-        appState.isSnippetsModalOpen ||
-        appState.isCsvImportModalOpen ||
-        appState.isPrivilegeMatrixOpen ||
-        appState.isDbDiagnosticsOpen ||
-        appState.isAiDrawerOpen ||
-        appState.isAiSettingsModalOpen ||
-        appState.isNotesDrawerOpen ||
-        appState.isNoteComposerModalOpen ||
-        appState.isActivityDrawerOpen ||
-        appState.isUpdateModalOpen ||
-        appState.isMockDataModalOpen ||
-        appState.isSettingsModalOpen ||
-        appState.jsonCellModal.isOpen ||
-        appState.isDataTransferOpen ||
-        appState.isDataSyncOpen ||
-        appState.isRefreshAllOpen ||
-        appState.isImpactPreviewOpen ||
-        appState.isAuditDrawerOpen ||
-        appState.ddlReview.isOpen ||
-        appState.fkPeekState.isOpen;
+      if (appState.closeTopOverlay()) {
+        return;
+      }
 
-      if (!anyOverlayOpen && appState.activeTab?.showQueryProfiler) {
+      if (appState.activeTab?.showQueryProfiler) {
         appState.activeTab.showQueryProfiler = false;
         return;
       }
 
-      if (!anyOverlayOpen && (appState.activeTab?.isExecuting || appState.activeTab?.isExplaining || appState.activeTab?.isStreaming)) {
+      if (appState.activeTab?.isExecuting || appState.activeTab?.isExplaining || appState.activeTab?.isStreaming) {
         appState.cancelCurrentTab();
         return;
       }
-
-      if (appState.isCommandPaletteOpen) appState.isCommandPaletteOpen = false;
-      if (appState.isSchemaSearchOpen) appState.isSchemaSearchOpen = false;
-      if (appState.isSmartSeedModalOpen) appState.isSmartSeedModalOpen = false;
-      if (appState.isLockInspectorOpen) appState.isLockInspectorOpen = false;
-      if (appState.ddlViewModal.isOpen) appState.ddlViewModal.isOpen = false;
-      if (appState.safetyInspectionModal.isOpen) appState.safetyInspectionModal.isOpen = false;
-      if (appState.isConnectionModalOpen) appState.isConnectionModalOpen = false;
-      if (appState.isRecordInspectorOpen) appState.isRecordInspectorOpen = false;
-      if (appState.isInsertRowModalOpen) appState.isInsertRowModalOpen = false;
-      if (appState.isShortcutsModalOpen) appState.isShortcutsModalOpen = false;
-      if (appState.isCreateDbModalOpen) appState.isCreateDbModalOpen = false;
-      if (appState.isTableCreatorOpen) appState.isTableCreatorOpen = false;
-      if (appState.isRenameTableModalOpen) appState.isRenameTableModalOpen = false;
-      if (appState.isDuplicateTableModalOpen) appState.isDuplicateTableModalOpen = false;
-      if (appState.isViewDesignerOpen) appState.isViewDesignerOpen = false;
-      if (appState.isTriggerDesignerOpen) appState.isTriggerDesignerOpen = false;
-      if (appState.isRoutineDesignerOpen) appState.isRoutineDesignerOpen = false;
-      if (appState.isEventDesignerOpen) appState.isEventDesignerOpen = false;
-      if (appState.isDumpModalOpen) appState.isDumpModalOpen = false;
-      if (appState.isStructureSyncModalOpen) appState.isStructureSyncModalOpen = false;
-      if (appState.isRunSqlModalOpen) appState.isRunSqlModalOpen = false;
-      if (appState.isSnippetsModalOpen) {
-        appState.pendingSnippet = null;
-        appState.isSnippetsModalOpen = false;
-      }
-      if (appState.isCsvImportModalOpen) appState.isCsvImportModalOpen = false;
-      if (appState.isPrivilegeMatrixOpen) appState.isPrivilegeMatrixOpen = false;
-      if (appState.isDbDiagnosticsOpen) appState.isDbDiagnosticsOpen = false;
-      if (appState.isAiDrawerOpen) appState.toggleAiDrawer(false);
-      if (appState.isAiSettingsModalOpen) appState.isAiSettingsModalOpen = false;
-      if (appState.isNotesDrawerOpen) appState.isNotesDrawerOpen = false;
-      if (appState.isNoteComposerModalOpen) appState.isNoteComposerModalOpen = false;
-      if (appState.isActivityDrawerOpen) appState.isActivityDrawerOpen = false;
-      if (appState.isUpdateModalOpen) appState.isUpdateModalOpen = false;
-      if (appState.isMockDataModalOpen) appState.closeMockDataModal();
-      if (appState.isSettingsModalOpen) appState.isSettingsModalOpen = false;
-      if (appState.jsonCellModal.isOpen) appState.jsonCellModal.isOpen = false;
-      if (appState.isDataTransferOpen) appState.isDataTransferOpen = false;
-      if (appState.isDataSyncOpen) appState.isDataSyncOpen = false;
-      if (appState.isRefreshAllOpen) appState.isRefreshAllOpen = false;
-      if (appState.isImpactPreviewOpen) appState.isImpactPreviewOpen = false;
-      if (appState.isAuditDrawerOpen) appState.isAuditDrawerOpen = false;
-      if (appState.ddlReview.isOpen) appState.ddlReview.isOpen = false;
-      if (appState.fkPeekState.isOpen) appState.fkPeekState.isOpen = false;
     }
   }
 </script>
