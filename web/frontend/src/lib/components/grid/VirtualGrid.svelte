@@ -11,6 +11,15 @@
     validateCellValue as validateCellAgainstSchema,
   } from '../../utils/dataTypes';
   import { quoteSqlIdentifier, formatSqlLiteral } from '../../utils/sqlStatements';
+  import {
+    formatCellValue,
+    getCellClass,
+    formatRowCell,
+    formatSqlRowInsert,
+    buildCSVExport,
+    buildTSVExport,
+    buildMarkdownExport,
+  } from './gridFormatters';
   import { appState } from '../../stores/appState.svelte';
   import type { ColumnDefinition, FilterPill } from '../../../types';
   import Icon from '../common/Icon.svelte';
@@ -437,41 +446,6 @@
     }
   }
 
-  function formatCellValue(val: any): { display: string; type: string } {
-    if (val === null || val === undefined) {
-      return { display: 'NULL', type: 'null' };
-    }
-    if (typeof val === 'boolean') {
-      return { display: val ? 'TRUE' : 'FALSE', type: 'boolean' };
-    }
-    if (typeof val === 'number') {
-      return { display: val.toLocaleString(), type: 'number' };
-    }
-    if (typeof val === 'object') {
-      try {
-        return { display: JSON.stringify(val), type: 'json' };
-      } catch {
-        return { display: String(val), type: 'text' };
-      }
-    }
-    return { display: String(val), type: 'text' };
-  }
-
-  function getCellClass(type: string) {
-    switch (type) {
-      case 'null':
-        return 'text-rose-400/80 italic font-medium';
-      case 'number':
-        return 'text-amber-300 font-mono text-right';
-      case 'boolean':
-        return 'text-emerald-400 font-semibold';
-      case 'json':
-        return 'text-purple-300 font-mono';
-      default:
-        return 'text-slate-200 font-mono';
-    }
-  }
-
   let isAllSelected = $derived(
     processedRows.length > 0 && selectedRowIndices.length === processedRows.length
   );
@@ -807,74 +781,33 @@
   // Excel-safe CSV export with UTF-8 BOM & leading zero protection
   function exportCSV() {
     if (!result?.rows || !result?.columns) return;
-    const headers = result.columns.map((c) => `"${getColName(c).replace(/"/g, '""')}"`).join(',');
-    const rows = result.rows.map((row) =>
-      row
-        .map((cell) => {
-          if (cell === null || cell === undefined) return '""';
-          const str = typeof cell === 'object' ? JSON.stringify(cell) : String(cell);
-          if (/^0\d+$/.test(str)) {
-            return `"=""${str.replace(/"/g, '""')}"""`;
-          }
-          return `"${str.replace(/"/g, '""')}"`;
-        })
-        .join(',')
-    );
-    const csv = '\uFEFF' + [headers, ...rows].join('\n');
+    const csv = buildCSVExport(result.columns.map((c) => getColName(c)), result.rows);
     downloadFile(csv, `${effectiveTable || 'query_export'}.csv`, 'text/csv;charset=utf-8');
     showExportMenu = false;
   }
 
   function copyGridAsTSV() {
     if (!result?.rows || !result?.columns) return;
-    const cols = visibleColumns.map((c) => getColName(c)).join('\t');
-    const lines = processedRows.map((item) =>
-      visibleColumnEntries
-        .map(({ origIdx: cIdx }) => {
-          const v = item.data[cIdx];
-          if (v === null || v === undefined) return '';
-          return typeof v === 'object' ? JSON.stringify(v) : String(v);
-        })
-        .join('\t')
+    const text = buildTSVExport(
+      visibleColumns.map((c) => getColName(c)),
+      processedRows.map((item) => item.data),
+      visibleColumnEntries.map((e) => e.origIdx)
     );
-    copyText([cols, ...lines].join('\n'));
+    copyText(text);
     showExportMenu = false;
     appState.showToast(`Copied ${processedRows.length} rows as TSV`, 'success');
   }
 
   function copyGridAsMarkdown() {
     if (!result?.rows || !result?.columns) return;
-    const names = visibleColumns.map((c) => getColName(c));
-    const header = `| ${names.join(' | ')} |`;
-    const sep = `| ${names.map(() => '---').join(' | ')} |`;
-    const lines = processedRows.map((item) =>
-      `| ${visibleColumnEntries
-        .map(({ origIdx: cIdx }) => {
-          const v = item.data[cIdx];
-          if (v === null || v === undefined) return '*NULL*';
-          const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
-          return s.replace(/\|/g, '\\|').replace(/\n/g, ' ');
-        })
-        .join(' | ')} |`
+    const text = buildMarkdownExport(
+      visibleColumns.map((c) => getColName(c)),
+      processedRows.map((item) => item.data),
+      visibleColumnEntries.map((e) => e.origIdx)
     );
-    copyText([header, sep, ...lines].join('\n'));
+    copyText(text);
     showExportMenu = false;
     appState.showToast(`Copied ${processedRows.length} rows as Markdown Table`, 'success');
-  }
-
-  function formatRowCell(v: any): string {
-    if (v === null || v === undefined) return '';
-    return typeof v === 'object' ? JSON.stringify(v) : String(v);
-  }
-
-  function formatSqlRowInsert(row: any[], cols: string[], tbl: string, driver?: string): string {
-    const isPg = driver === 'postgres' || driver === 'postgresql';
-    const q = (s: string) => quoteSqlIdentifier(s, driver);
-    const qCols = cols.map((c) => q(c)).join(', ');
-    const vals = row
-      .map((c) => (typeof c === 'boolean' ? (c ? (isPg ? 'TRUE' : '1') : (isPg ? 'FALSE' : '0')) : formatSqlLiteral(c)))
-      .join(', ');
-    return `INSERT INTO ${q(tbl)} (${qCols}) VALUES (${vals});`;
   }
 
   function copyRowAsTSV(rIdx: number) {

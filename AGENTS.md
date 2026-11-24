@@ -14,7 +14,7 @@ Single-context (`CONTEXT.md` + `docs/adr/`). See `docs/agents/domain.md`.
 
 ### Build & run
 
-`web/embed.go` embeds `web/dist/` (whereas Vite outputs to `web/dist_svelte/`). Whenever `web/frontend/` changes, always run `npm run build:svelte` (or `npm run build:all`) from the repo root before running or rebuilding `./sqlfox`.
+`web/embed.go` embeds `web/dist/`, and Vite outputs directly to `web/dist/`. Whenever `web/frontend/` changes, always run `npm run build:svelte` (or `npm run build:all`) from the repo root before running or rebuilding `./sqlfox`.
 
 ### Release routine
 

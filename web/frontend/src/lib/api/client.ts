@@ -9,76 +9,20 @@ import type {
   QuerySnippet,
   OperationalNote,
 } from '../../types';
+import {
+  ApiHttpBase,
+  HttpStatusError,
+  loadAiConfig,
+  normalizeExecResult,
+  type AIProfile,
+  type AiConfig,
+  type ExecuteQueryOptions,
+  type StreamEventHandlers,
+} from './http';
+import { streamExecuteQuery } from './streamQuery';
 
-export type { OperationalNote };
-
-export interface AIProfile {
-  id: string;
-  name: string;
-  provider: 'openai' | 'anthropic' | 'gemini' | 'ollama' | 'custom';
-  api_key?: string;
-  encrypted_api_key?: string;
-  has_api_key?: boolean;
-  base_url: string;
-  model_name: string;
-  temperature: number;
-  language: 'auto' | 'en' | 'id';
-  response_style: 'normal' | 'concise' | 'detailed';
-  custom_prompt: string;
-  include_schema: boolean;
-  mask_identifiers: boolean;
-  is_active: boolean;
-  created_at?: string;
-  updated_at?: string;
-}
-
-export interface AiConfig {
-  provider: string;
-  apiKey: string;
-  baseUrl: string;
-  modelName: string;
-  temperature: number;
-  language: 'auto' | 'en' | 'id';
-  responseStyle: 'normal' | 'concise' | 'detailed';
-  customPrompt: string;
-  includeSchema: boolean;
-  maskIdentifiers: boolean;
-}
-
-// Single source for the saved BYOK settings; AiSettingsModal writes the same key.
-// Supports seamless migration from legacy { endpoint, model } keys.
-export function loadAiConfig(): AiConfig {
-  const defaults: AiConfig = {
-    provider: 'openai',
-    apiKey: '',
-    baseUrl: 'https://api.openai.com/v1',
-    modelName: 'gpt-4o-mini',
-    temperature: 0.3,
-    language: 'auto',
-    responseStyle: 'normal',
-    customPrompt: '',
-    includeSchema: true,
-    maskIdentifiers: true,
-  };
-  try {
-    const saved = JSON.parse(localStorage.getItem('sqlfox_ai_config') || '{}');
-    return {
-      ...defaults,
-      ...saved,
-      baseUrl: saved.baseUrl || saved.endpoint || defaults.baseUrl,
-      modelName: saved.modelName || saved.model || defaults.modelName,
-      apiKey: saved.apiKey ?? saved.api_key ?? defaults.apiKey,
-      language: saved.language || defaults.language,
-      responseStyle: saved.responseStyle || saved.response_style || defaults.responseStyle,
-      customPrompt: saved.customPrompt ?? saved.custom_prompt ?? defaults.customPrompt,
-      includeSchema: saved.includeSchema ?? saved.include_schema ?? defaults.includeSchema,
-      maskIdentifiers: saved.maskIdentifiers ?? saved.mask_identifiers ?? defaults.maskIdentifiers,
-      temperature: typeof saved.temperature === 'number' ? saved.temperature : defaults.temperature,
-    };
-  } catch {
-    return defaults;
-  }
-}
+export type { OperationalNote, AIProfile, AiConfig, ExecuteQueryOptions, StreamEventHandlers };
+export { HttpStatusError, loadAiConfig };
 
 export async function syncOrMigrateLegacyAiConfig(): Promise<void> {
   if (typeof window === 'undefined') return;
@@ -110,115 +54,7 @@ export async function syncOrMigrateLegacyAiConfig(): Promise<void> {
   }
 }
 
-export class HttpStatusError extends Error {
-  status: number;
-  data: any;
-  constructor(status: number, message: string, data?: any) {
-    super(message);
-    this.status = status;
-    this.data = data;
-  }
-}
-
-export interface ExecuteQueryOptions {
-  confirmed?: boolean;
-  challengeInput?: string;
-  database?: string;
-  profile?: boolean;
-  limit?: number;
-  tabId?: string;
-  queryId?: string;
-  bypassMutationConfirm?: boolean;
-  signal?: AbortSignal;
-}
-
-export interface StreamEventHandlers {
-  onBlocked?: (inspection: InspectionResult) => void;
-  onMeta?: (meta: {
-    result_index?: number;
-    columns: any[];
-    tx_active?: boolean;
-    target_table?: string;
-    database?: string;
-    sql?: string;
-  }) => void;
-  onChunk?: (chunk: { result_index?: number; rows: any[][] }) => void;
-  onStatementDone?: (info: { result_index?: number; sql?: string; row_count?: number; execution_ms?: number }) => void;
-  onExec?: (execRes: QueryExecutionResult & { result_index?: number }) => void;
-  onStatementError?: (err: { result_index?: number; sql?: string; error: string }) => void;
-  onDone?: (done: {
-    row_count?: number;
-    execution_ms?: number;
-    has_more?: boolean;
-    tx_active?: boolean;
-    profile?: any;
-    total_results?: number;
-  }) => void;
-}
-
-class ApiClient {
-  private baseUrl = '/api';
-
-  private getAuthHeaders(extra: Record<string, string> = {}, includeJsonContentType = true): Record<string, string> {
-    const headers: Record<string, string> = {};
-    if (includeJsonContentType) {
-      headers['Content-Type'] = 'application/json';
-    }
-    Object.assign(headers, extra);
-    return headers;
-  }
-
-  private async handleNonOkResponse(res: Response): Promise<never> {
-    if (res.status === 401 && typeof window !== 'undefined' && (window as any).__sqlfox_set_remote_locked) {
-      (window as any).__sqlfox_set_remote_locked(true);
-    }
-    let errorMsg = `HTTP Error ${res.status}`;
-    let parsedData: any = null;
-    try {
-      parsedData = await res.json();
-      if (parsedData?.error) errorMsg = parsedData.error;
-      else if (parsedData?.reason) errorMsg = parsedData.reason;
-      else if (parsedData?.message) errorMsg = parsedData.message;
-    } catch {
-      if (res.statusText) errorMsg = res.statusText;
-    }
-    if (res.status === 403 && /read[- ]?only/i.test(errorMsg) && typeof window !== 'undefined') {
-      (window as any).__sqlfox_sync_readonly?.(true);
-    }
-    throw new HttpStatusError(res.status, errorMsg, parsedData);
-  }
-
-  private async request<T>(
-    endpoint: string,
-    options: RequestInit & { timeoutMs?: number | null } = {}
-  ): Promise<T> {
-    const url = endpoint.startsWith('/api') ? endpoint : `${this.baseUrl}${endpoint}`;
-    const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
-    const headers = this.getAuthHeaders((options.headers as Record<string, string>) || {}, !isFormData);
-
-    const { timeoutMs = 15000, ...fetchOpts } = options;
-    let signal = fetchOpts.signal;
-    if (!signal && timeoutMs && timeoutMs > 0 && typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal) {
-      signal = AbortSignal.timeout(timeoutMs);
-    }
-
-    let res: Response;
-    try {
-      res = await fetch(url, { ...fetchOpts, headers, signal });
-    } catch (err: any) {
-      if (err?.name === 'AbortError' || err?.name === 'TimeoutError') {
-        throw err;
-      }
-      // Network failure (daemon down / LAN drop): surface the reconnect banner.
-      if (typeof window !== 'undefined') (window as any).__sqlfox_trigger_reconnect?.();
-      throw new Error(`Cannot reach SqlFox daemon at ${this.baseUrl.replace(/\/api$/, '')} — is it still running?`);
-    }
-    if (!res.ok) {
-      await this.handleNonOkResponse(res);
-    }
-
-    return res.json() as Promise<T>;
-  }
+class ApiClient extends ApiHttpBase {
 
   // Auth / Vault
   async getAuthStatus(): Promise<{ is_remote: boolean; unlocked: boolean; version?: string; lan_enabled?: boolean }> {
@@ -402,23 +238,7 @@ class ApiClient {
   }
 
   private normalizeExecResult(res: QueryExecutionResult): QueryExecutionResult {
-    if (!res || typeof res !== 'object') return res;
-    const duration = res.duration_ms ?? res.execution_ms ?? 0;
-    const affected = res.affected_rows ?? res.rows_affected;
-    const out: QueryExecutionResult = {
-      ...res,
-      duration_ms: duration,
-      execution_ms: res.execution_ms ?? duration,
-      affected_rows: affected,
-      rows_affected: res.rows_affected ?? affected,
-      is_destructive_blocked: Boolean(res.is_destructive_blocked || res.blocked),
-      total_rows: (res as any).total_rows,
-      is_exact: (res as any).is_exact,
-    };
-    if (Array.isArray(out.results)) {
-      out.results = out.results.map((r) => this.normalizeExecResult(r));
-    }
-    return out;
+    return normalizeExecResult(res);
   }
 
   async executeQuery(
@@ -482,120 +302,17 @@ class ApiClient {
     opts: ExecuteQueryOptions,
     handlers: StreamEventHandlers
   ): Promise<void> {
-    const headers = this.getAuthHeaders({}, true);
-    let res: Response;
-    try {
-      res = await fetch(`${this.baseUrl}/session/${sessionId}/execute-stream`, {
-        method: 'POST',
-        headers,
-        signal: opts.signal,
-        body: JSON.stringify({
-          sql,
-          confirmed: Boolean(opts.confirmed),
-          challenge_input: opts.challengeInput || '',
-          database: opts.database,
-          profile: Boolean(opts.profile),
-          limit: opts.limit ?? 5000,
-          tab_id: opts.tabId || '',
-          query_id: opts.queryId || 'active',
-          bypass_mutation_confirm: Boolean(opts.bypassMutationConfirm),
-        }),
-      });
-    } catch (err: any) {
-      if (err?.name === 'AbortError') throw err;
-      if (typeof window !== 'undefined') (window as any).__sqlfox_trigger_reconnect?.();
-      throw new Error(`Cannot reach SqlFox daemon — is it still running?`);
-    }
-
-    if (res.status === 422) {
-      const data = await res.json();
-      if (data?.inspection) {
-        handlers.onBlocked?.(data.inspection);
-        return;
-      }
-      throw new HttpStatusError(422, data?.error || 'Execution blocked by Safety Guard', data);
-    }
-
-    if (!res.ok) {
-      await this.handleNonOkResponse(res);
-    }
-
-    if (!res.body) {
-      throw new Error('Streaming response body unavailable');
-    }
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = '';
-    let sawTerminalOrExec = false;
-
-    const processLine = (line: string) => {
-      const trimmed = line.trim();
-      if (!trimmed) return;
-      let evt: any;
-      try {
-        evt = JSON.parse(trimmed);
-      } catch {
-        return;
-      }
-      if (!evt || typeof evt !== 'object') return;
-
-      if (evt.blocked && evt.inspection) {
-        sawTerminalOrExec = true;
-        handlers.onBlocked?.(evt.inspection);
-        return;
-      }
-      switch (evt.type) {
-        case 'meta':
-          handlers.onMeta?.(evt);
-          break;
-        case 'chunk':
-          handlers.onChunk?.(evt);
-          break;
-        case 'statement_done':
-          handlers.onStatementDone?.(evt);
-          break;
-        case 'exec':
-        case 'batch':
-        case 'query':
-          sawTerminalOrExec = true;
-          handlers.onExec?.(this.normalizeExecResult(evt));
-          break;
-        case 'error':
-          sawTerminalOrExec = true;
-          handlers.onStatementError?.(evt);
-          break;
-        case 'done':
-          sawTerminalOrExec = true;
-          handlers.onDone?.(evt);
-          break;
-      }
-    };
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split('\n');
-        buf = lines.pop() || '';
-        for (const line of lines) {
-          processLine(line);
-        }
-      }
-      if (buf.trim()) {
-        processLine(buf);
-      }
-      if (!sawTerminalOrExec) {
-        throw new Error('Query stream ended unexpectedly before completion (premature EOF).');
-      }
-    } finally {
-      try {
-        await reader.cancel();
-      } catch {
-        /* ignore */
-      }
-    }
+    return streamExecuteQuery(
+      {
+        baseUrl: this.baseUrl,
+        getAuthHeaders: (extra, includeJson) => this.getAuthHeaders(extra, includeJson),
+        handleNonOkResponse: (res) => this.handleNonOkResponse(res),
+      },
+      sessionId,
+      sql,
+      opts,
+      handlers
+    );
   }
 
   async cancelQuery(sessionId: string, queryId = 'active'): Promise<{ success?: boolean; status?: string }> {

@@ -30,6 +30,15 @@ import {
 
 import { compileFilterPills } from '../utils/filterCompiler';
 export { compileFilterPills };
+import { resolveTabsStorageKey, persistTabsToStorage, loadTabsFromStorage } from './tabStorage';
+import {
+  buildDropTableSQL,
+  buildTruncateTableSQL,
+  buildRenameTableSQL,
+  buildDuplicateTableSQL,
+  buildCreateDatabaseSQL,
+  buildDropDatabaseSQL,
+} from './ddlActions';
 
 
 export interface SafetyChallengeState {
@@ -1356,82 +1365,27 @@ export class AppState {
 
   // Tabs Management & Session Persistence (ADR 0055 & CONTEXT.md)
   getTabsStorageKey(connId?: string): string {
-    const id = connId || this.activeConnection?.id || (typeof localStorage !== 'undefined' ? localStorage.getItem('sqlfox_last_conn_id') : '');
-    return id ? `sqlfox_tabs_${id}` : 'sqlfox_tabs_default';
+    return resolveTabsStorageKey(connId || this.activeConnection?.id);
   }
 
   saveTabsState() {
-    if (typeof window === 'undefined' || !this.activeConnection?.id) return;
-    const key = this.getTabsStorageKey(this.activeConnection.id);
-    const serializable = {
-      activeTabId: this.activeTabId,
-      tabs: this.tabs.map((t) => ({
-        id: t.id,
-        title: t.title,
-        sql: t.sql,
-        database: t.database,
-        isTableViewer: Boolean(t.isTableViewer),
-        tableName: t.tableName,
-        tableMode: t.tableMode,
-        pageSize: t.pageSize || 25,
-        currentPage: t.currentPage || 1,
-        sortCol: t.sortCol || null,
-        sortDir: t.sortDir || null,
-        filterPills: t.filterPills || [],
-        filterMode: t.filterMode || 'pills',
-        filterRaw: t.filterRaw || '',
-        appliedFilter: t.appliedFilter || '',
-        queryPage: t.queryPage || 1,
-        queryPageSize: t.queryPageSize || 100,
-        showFilterBar: Boolean(t.showFilterBar),
-        hiddenColumns: t.hiddenColumns || [],
-        isProcesslist: Boolean(t.isProcesslist),
-        isCluster: Boolean(t.isCluster),
-        isFlightRecorder: Boolean(t.isFlightRecorder),
-        isVariables: Boolean(t.isVariables),
-        isErdCanvas: Boolean(t.isErdCanvas),
-        isNote: Boolean(t.isNote),
-        noteMode: t.noteMode || 'edit',
-      })),
-    };
-    try {
-      localStorage.setItem(key, JSON.stringify(serializable));
-    } catch (e) {
-      console.warn('Failed to save tabs state:', e);
-    }
+    if (!this.activeConnection?.id) return;
+    persistTabsToStorage(this.getTabsStorageKey(this.activeConnection.id), this.activeTabId, this.tabs);
   }
 
   restoreTabsState(connId: string): boolean {
-    if (typeof window === 'undefined' || !connId) return false;
-    const key = this.getTabsStorageKey(connId);
-    const raw = localStorage.getItem(key);
-    if (!raw) return false;
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed && Array.isArray(parsed.tabs) && parsed.tabs.length > 0) {
-        const isSqlite = (this.activeConnection?.driver || '').toLowerCase() === 'sqlite';
-        const filteredTabs = isSqlite
-          ? parsed.tabs.filter((t: EditorTab) => !t.isProcesslist && !t.isCluster && !t.isVariables)
-          : parsed.tabs;
-        this.tabs = filteredTabs.length > 0
-          ? filteredTabs
-          : [{ id: `tab-${Date.now()}`, title: 'Query 1.sql', sql: '', isTableViewer: false }];
-        this.activeTabId = parsed.activeTabId || parsed.tabs[0].id;
-        if (!this.tabs.some((t) => t.id === this.activeTabId)) {
-          this.activeTabId = this.tabs[0].id;
-        }
-        if (this.activeTab?.isCluster) this.processlistSubTab = 'cluster';
-        else if (this.activeTab?.isVariables) this.processlistSubTab = 'variables';
-        else if (this.activeTab?.isFlightRecorder) this.processlistSubTab = 'flight-recorder';
-        if (this.activeTab?.isTableViewer && this.activeTab.tableName) {
-          this.loadTableData(this.activeTab);
-        }
-        return true;
-      }
-    } catch (e) {
-      console.warn('Failed to restore tabs state:', e);
+    if (!connId) return false;
+    const restored = loadTabsFromStorage(this.getTabsStorageKey(connId), this.activeConnection?.driver);
+    if (!restored) return false;
+    this.tabs = restored.tabs;
+    this.activeTabId = restored.activeTabId;
+    if (this.activeTab?.isCluster) this.processlistSubTab = 'cluster';
+    else if (this.activeTab?.isVariables) this.processlistSubTab = 'variables';
+    else if (this.activeTab?.isFlightRecorder) this.processlistSubTab = 'flight-recorder';
+    if (this.activeTab?.isTableViewer && this.activeTab.tableName) {
+      this.loadTableData(this.activeTab);
     }
-    return false;
+    return true;
   }
 
   getNextQueryTabTitle(): string {
@@ -3369,10 +3323,7 @@ export class AppState {
       return;
     }
     const targetDb = database || this.tabs.find((t) => t.tableName?.toLowerCase() === tableName.toLowerCase())?.database || this.currentDatabase || '';
-    const driver = this.activeConnection?.driver;
-    const isPg = driver === 'postgres' || driver === 'postgresql';
-    const qTable = quoteSqlIdentifier(tableName, driver);
-    const sql = isPg ? `DROP TABLE ${qTable} CASCADE;` : `DROP TABLE IF EXISTS ${qTable};`;
+    const sql = buildDropTableSQL(tableName, this.activeConnection?.driver);
     const decision = await this.promptSafetyChallenge(sql, {
       risk_level: 'CRITICAL',
       requires_challenge: true,
@@ -3412,15 +3363,7 @@ export class AppState {
       return;
     }
     const targetDb = database || this.tabs.find((t) => t.tableName?.toLowerCase() === tableName.toLowerCase())?.database || this.currentDatabase || '';
-    const driver = this.activeConnection?.driver;
-    const isPg = driver === 'postgres' || driver === 'postgresql';
-    const isSqlite = driver === 'sqlite';
-    const qTable = quoteSqlIdentifier(tableName, driver);
-    const sql = isPg
-      ? `TRUNCATE TABLE ${qTable} CASCADE;`
-      : isSqlite
-      ? `DELETE FROM ${qTable};`
-      : `TRUNCATE TABLE ${qTable};`;
+    const sql = buildTruncateTableSQL(tableName, this.activeConnection?.driver);
     const decision = await this.promptSafetyChallenge(sql, {
       risk_level: 'HIGH',
       requires_challenge: true,
@@ -3456,14 +3399,7 @@ export class AppState {
   async renameTable(oldName: string, newName: string, database?: string) {
     if (!this.activeSessionId) return;
     const targetDb = database || this.tabs.find((t) => t.tableName?.toLowerCase() === oldName.toLowerCase())?.database || this.currentDatabase || '';
-    const driver = this.activeConnection?.driver;
-    const isPg = driver === 'postgres' || driver === 'postgresql';
-    const isSqlite = driver === 'sqlite';
-    const qOld = quoteSqlIdentifier(oldName, driver);
-    const qNew = quoteSqlIdentifier(newName, driver);
-    const sql = isPg || isSqlite
-      ? `ALTER TABLE ${qOld} RENAME TO ${qNew};`
-      : `RENAME TABLE ${qOld} TO ${qNew};`;
+    const sql = buildRenameTableSQL(oldName, newName, this.activeConnection?.driver);
 
     this.openDDLReviewModal(sql, async () => {
       if (!(await this.executeDDL(sql, targetDb))) return;
@@ -3480,22 +3416,7 @@ export class AppState {
   async duplicateTable(sourceTable: string, targetTable: string, copyData = true, database?: string) {
     if (!this.activeSessionId) return;
     const targetDb = database || this.tabs.find((t) => t.tableName?.toLowerCase() === sourceTable.toLowerCase())?.database || this.currentDatabase || '';
-    const driver = this.activeConnection?.driver;
-    const isPg = driver === 'postgres' || driver === 'postgresql';
-    const qSource = quoteSqlIdentifier(sourceTable, driver);
-    const qTarget = quoteSqlIdentifier(targetTable, driver);
-    let sql = '';
-    if (isPg) {
-      sql = `CREATE TABLE ${qTarget} (LIKE ${qSource} INCLUDING ALL);`;
-      if (copyData) sql += `\nINSERT INTO ${qTarget} SELECT * FROM ${qSource};`;
-    } else if (driver === 'sqlite') {
-      sql = copyData
-        ? `CREATE TABLE ${qTarget} AS SELECT * FROM ${qSource};`
-        : `CREATE TABLE ${qTarget} AS SELECT * FROM ${qSource} WHERE 0 = 1;`;
-    } else {
-      sql = `CREATE TABLE ${qTarget} LIKE ${qSource};`;
-      if (copyData) sql += `\nINSERT INTO ${qTarget} SELECT * FROM ${qSource};`;
-    }
+    const sql = buildDuplicateTableSQL(sourceTable, targetTable, copyData, this.activeConnection?.driver);
 
     this.openDDLReviewModal(sql, async () => {
       if (!(await this.executeDDL(sql, targetDb))) return;
@@ -3507,15 +3428,7 @@ export class AppState {
 
   async createDatabase(dbName: string, charset = '', collation = '') {
     if (!this.activeSessionId) return;
-    const driver = this.activeConnection?.driver;
-    const isPg = driver === 'postgres' || driver === 'postgresql';
-    const qDb = quoteSqlIdentifier(dbName, driver);
-    let sql = `CREATE DATABASE ${qDb}`;
-    if (!isPg && charset) {
-      sql += ` CHARACTER SET ${charset}`;
-      if (collation) sql += ` COLLATE ${collation}`;
-    }
-    sql += ';';
+    const sql = buildCreateDatabaseSQL(dbName, charset, collation, this.activeConnection?.driver);
 
     this.openDDLReviewModal(sql, async () => {
       if (!(await this.executeDDL(sql))) return;
@@ -3527,10 +3440,7 @@ export class AppState {
 
   async dropDatabase(dbName: string) {
     if (!this.activeSessionId) return;
-    const driver = this.activeConnection?.driver;
-    const isPg = driver === 'postgres' || driver === 'postgresql';
-    const qDb = quoteSqlIdentifier(dbName, driver);
-    const sql = isPg ? `DROP DATABASE ${qDb};` : `DROP DATABASE IF EXISTS ${qDb};`;
+    const sql = buildDropDatabaseSQL(dbName, this.activeConnection?.driver);
     const decision = await this.promptSafetyChallenge(sql, {
       risk_level: 'CRITICAL',
       requires_challenge: true,
