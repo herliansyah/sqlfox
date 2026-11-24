@@ -502,8 +502,7 @@
     const validIndices = selectedRowIndices.filter((idx) => result!.rows && result!.rows[idx] !== undefined);
     if (validIndices.length === 0) return;
 
-    const pkColObj = result.columns.find((c) => isColPK(c));
-    const pkCol = pkColObj ? getColName(pkColObj) : undefined;
+    const pkCols = result.columns.filter((c) => isColPK(c)).map((c) => getColName(c));
 
     const ok = await appState.showNativeConfirm(
       `Are you sure you want to delete ${validIndices.length} selected row(s)?`,
@@ -511,10 +510,20 @@
     );
     if (!ok) return;
 
-    if (pkCol) {
+    if (pkCols.length === 1) {
+      const pkCol = pkCols[0];
       const pkIdx = colIndexMap.get(pkCol) ?? -1;
       const pkVals = validIndices.map((idx) => result!.rows[idx][pkIdx]);
       await appState.deleteRows(pkCol, pkVals);
+    } else if (pkCols.length > 1) {
+      const pkRows = validIndices.map((idx) => {
+        const rowMap: Record<string, any> = {};
+        for (const col of pkCols) {
+          rowMap[col] = result!.rows[idx][colIndexMap.get(col) ?? -1];
+        }
+        return rowMap;
+      });
+      await appState.deleteRowsByCompositePK(pkRows);
     } else {
       const criterias = validIndices.map((idx) => {
         const crit: Record<string, any> = {};
@@ -682,12 +691,23 @@
     const colName = allColumns[cIdx];
     const oldVal = result.rows[origIdx][cIdx];
     if (newVal !== oldVal) {
-      const pkColObj = result.columns.find((c) => isColPK(c));
-      const pkCol = pkColObj ? getColName(pkColObj) : undefined;
-      const pkVal = pkCol ? result.rows[origIdx][colIndexMap.get(pkCol) ?? -1] : undefined;
+      const pkCols = result.columns.filter((c) => isColPK(c)).map((c) => getColName(c));
+      let pkCol: string | undefined;
+      let pkVal: any;
+      let pkValues: Record<string, any> | undefined;
+
+      if (pkCols.length === 1) {
+        pkCol = pkCols[0];
+        pkVal = result.rows[origIdx][colIndexMap.get(pkCol) ?? -1];
+      } else if (pkCols.length > 1) {
+        pkValues = {};
+        for (const col of pkCols) {
+          pkValues[col] = result.rows[origIdx][colIndexMap.get(col) ?? -1];
+        }
+      }
 
       let rowCriteria: Record<string, any> | undefined;
-      if (!pkCol) {
+      if (pkCols.length === 0) {
         rowCriteria = {};
         allColumns.forEach((col, idx) => {
           rowCriteria![col] = result!.rows[origIdx][idx];
@@ -704,7 +724,8 @@
         oldVal,
         newVal,
         effectiveDatabase,
-        rowCriteria
+        rowCriteria,
+        pkValues
       );
       result.rows[origIdx][cIdx] = newVal;
       flashCell(origIdx, cIdx);
@@ -975,16 +996,16 @@
     appState.showToast(`Exported ${filename}`, 'success');
   }
 
-  // Delete Row (supports PK-less criteria fallback)
+  // Delete Row (supports composite PK and PK-less criteria fallback)
   async function handleDeleteCurrentRow(targetIdx: number | null = selectedRowIndex) {
     if (targetIdx === null || !effectiveTable || !result?.rows?.[targetIdx]) return;
     if (appState.isReadOnly) {
       appState.showToast('Read-only mode is active — delete blocked', 'warning');
       return;
     }
-    const pkColObj = result.columns.find((c) => isColPK(c));
-    if (pkColObj) {
-      const pkCol = getColName(pkColObj);
+    const pkCols = result.columns.filter((c) => isColPK(c)).map((c) => getColName(c));
+    if (pkCols.length === 1) {
+      const pkCol = pkCols[0];
       const pkVal = result.rows[targetIdx][colIndexMap.get(pkCol) ?? -1];
       const ok = await appState.showNativeConfirm(
         `Delete record with ${pkCol} = ${pkVal}?`,
@@ -992,6 +1013,22 @@
       );
       if (ok) {
         await appState.deleteRows(pkCol, [pkVal]);
+        if (selectedRowIndex === targetIdx) selectedRowIndex = null;
+      }
+    } else if (pkCols.length > 1) {
+      const pkMap: Record<string, any> = {};
+      const pkDesc: string[] = [];
+      for (const col of pkCols) {
+        const val = result.rows[targetIdx][colIndexMap.get(col) ?? -1];
+        pkMap[col] = val;
+        pkDesc.push(`${col}=${val}`);
+      }
+      const ok = await appState.showNativeConfirm(
+        `Delete record with composite PK (${pkDesc.join(', ')})?`,
+        'Confirm Deletion'
+      );
+      if (ok) {
+        await appState.deleteRowsByCompositePK([pkMap]);
         if (selectedRowIndex === targetIdx) selectedRowIndex = null;
       }
     } else {

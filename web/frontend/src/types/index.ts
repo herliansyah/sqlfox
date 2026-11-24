@@ -221,6 +221,7 @@ export interface StagedEdit {
   colName: string;
   pkCol?: string;
   pkVal?: any;
+  pkValues?: Record<string, any>;
   rowCriteria?: Record<string, any>;
   oldVal: any;
   newVal: any;

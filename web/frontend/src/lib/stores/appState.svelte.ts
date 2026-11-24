@@ -2819,7 +2819,8 @@ export class AppState {
     oldVal: any,
     newVal: any,
     database?: string,
-    rowCriteria?: Record<string, any>
+    rowCriteria?: Record<string, any>,
+    pkValues?: Record<string, any>
   ) {
     if (this.isReadOnly) {
       this.showToast('Read-only mode is active — cell edit blocked', 'warning');
@@ -2836,6 +2837,7 @@ export class AppState {
       colName,
       pkCol,
       pkVal,
+      pkValues,
       rowCriteria,
       oldVal,
       newVal,
@@ -2942,6 +2944,7 @@ export class AppState {
           value: item.newVal,
           pk_column: item.pkCol,
           pk_value: item.pkVal,
+          pk_values: item.pkValues,
           row_criteria: item.rowCriteria,
         }));
         const res = await api.cellEdit(this.activeSessionId, {
@@ -3070,6 +3073,31 @@ export class AppState {
       this.showToast(`Failed to delete row(s): ${err.message}`, 'error');
     }
   }
+
+  async deleteRowsByCompositePK(pkRows: Record<string, any>[]) {
+    const tab = this.activeTab;
+    const targetTable = tab?.tableName || tab?.detectedTableName;
+    if (!this.activeSessionId || !targetTable || !pkRows.length) return;
+    if (this.isReadOnly) {
+      this.showToast('Read-only mode is active — delete blocked', 'warning');
+      return;
+    }
+
+    try {
+      await api.deleteRows(this.activeSessionId, {
+        database: tab?.detectedTableDatabase || tab?.database || this.currentDatabase,
+        table: targetTable,
+        pk_rows: pkRows,
+      });
+      this.showToast(`Deleted ${pkRows.length} row(s)`, 'success');
+      this.auditRefreshToken++;
+      if (tab?.isTableViewer) await this.loadTableData(tab);
+      else await this.executeCurrentTab();
+    } catch (err: any) {
+      this.showToast(`Failed to delete row(s): ${err.message}`, 'error');
+    }
+  }
+
 
   // Filter Mode & Clause Management
   setFilterMode(mode: 'pills' | 'raw') {

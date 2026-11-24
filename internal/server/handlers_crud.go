@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ type DeleteRowsRequest struct {
 	Table        string           `json:"table"`
 	PKColumn     string           `json:"pk_column"`
 	PKValues     []any            `json:"pk_values"`
+	PKRows       []map[string]any `json:"pk_rows,omitempty"` // For composite PKs: [{ "order_id": 1, "product_id": 2 }]
 	RowCriterias []map[string]any `json:"row_criterias,omitempty"`
 }
 
@@ -118,8 +120,8 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Table == "" || ((req.PKColumn == "" || len(req.PKValues) == 0) && len(req.RowCriterias) == 0) {
-		writeError(w, http.StatusBadRequest, "table and either (pk_column + pk_values) or row_criterias are required")
+	if req.Table == "" || ((req.PKColumn == "" || len(req.PKValues) == 0) && len(req.PKRows) == 0 && len(req.RowCriterias) == 0) {
+		writeError(w, http.StatusBadRequest, "table and either (pk_column + pk_values), pk_rows, or row_criterias are required")
 		return
 	}
 
@@ -139,7 +141,54 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 	var totalAffected int64
 	var execMs int64
 
-	if req.PKColumn != "" && len(req.PKValues) > 0 {
+	if len(req.PKRows) > 0 {
+		start := time.Now()
+		exec, finish, err := sess.gridWriter(ctx)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "delete failed: "+err.Error())
+			return
+		}
+		for _, pkMap := range req.PKRows {
+			var whereParts []string
+			var auditWhereParts []string
+			var args []any
+			pIdx := 1
+			keys := make([]string, 0, len(pkMap))
+			for k := range pkMap {
+				keys = append(keys, k)
+			}
+			slices.Sort(keys)
+			for _, k := range keys {
+				val := pkMap[k]
+				pCrit := driver.Placeholder(sess.DriverName, pIdx)
+				pIdx++
+				args = append(args, val)
+				whereParts = append(whereParts, fmt.Sprintf("%s = %s", quoteIdent(k, sess.DriverName), pCrit))
+				auditWhereParts = append(auditWhereParts, fmt.Sprintf("%s = %s", quoteIdent(k, sess.DriverName), driver.FormatSQLValueForDriver(val, sess.DriverName)))
+			}
+			delSQL := fmt.Sprintf("DELETE FROM %s WHERE %s", targetTable, strings.Join(whereParts, " AND "))
+			auditSQL := fmt.Sprintf("DELETE FROM %s WHERE %s", targetTable, strings.Join(auditWhereParts, " AND "))
+			rowStart := time.Now()
+			res, err := exec.Exec(ctx, delSQL, args...)
+			rowDur := time.Since(rowStart).Milliseconds()
+			var rowAffected int64
+			if res != nil {
+				rowAffected = res.RowsAffected
+				totalAffected += res.RowsAffected
+			}
+			sess.RecordAudit(auditSQL, "grid_delete", rowDur, rowAffected, err, rowStart)
+			if err != nil {
+				_ = finish(err)
+				writeError(w, http.StatusInternalServerError, "delete failed: "+err.Error())
+				return
+			}
+		}
+		if err := finish(nil); err != nil {
+			writeError(w, http.StatusInternalServerError, "delete failed: "+err.Error())
+			return
+		}
+		execMs = time.Since(start).Milliseconds()
+	} else if req.PKColumn != "" && len(req.PKValues) > 0 {
 		targetPK := quoteIdent(req.PKColumn, sess.DriverName)
 		placeholders := make([]string, len(req.PKValues))
 		args := make([]any, len(req.PKValues))

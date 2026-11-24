@@ -643,6 +643,7 @@ class ApiClient {
         value: any;
         pk_column?: string;
         pk_value?: any;
+        pk_values?: Record<string, any>;
         row_criteria?: Record<string, any>;
       }>;
     }
@@ -674,6 +675,7 @@ class ApiClient {
       table: string;
       pk_column?: string;
       pk_values?: any[];
+      pk_rows?: Record<string, any>[];
       row_criterias?: Record<string, any>[];
     }
   ): Promise<{ success: boolean; rows_affected: number }> {
