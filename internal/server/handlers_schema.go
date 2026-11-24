@@ -265,8 +265,12 @@ func (s *Server) handleGetRoutineDDL(w http.ResponseWriter, r *http.Request) {
 
 	ddl, err := sess.GetRoutineDDL(ctx, routineType, routineName)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to fetch routine DDL: "+err.Error())
-		return
+		if errors.Is(err, driver.ErrFeatureNotSupported) {
+			ddl = "-- Stored Routines not supported on this engine"
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to fetch routine DDL: "+err.Error())
+			return
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{
@@ -291,8 +295,12 @@ func (s *Server) handleGetEventDDL(w http.ResponseWriter, r *http.Request) {
 
 	ddl, err := sess.GetEventDDL(ctx, eventName)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to fetch event DDL: "+err.Error())
-		return
+		if errors.Is(err, driver.ErrFeatureNotSupported) {
+			ddl = "-- Scheduled Events not supported on this engine"
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to fetch event DDL: "+err.Error())
+			return
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{
@@ -326,6 +334,10 @@ func (s *Server) handleToggleEvent(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if err := sess.ToggleEventStatus(ctx, eventName, req.Enable); err != nil {
+		if errors.Is(err, driver.ErrFeatureNotSupported) {
+			writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to toggle event: "+err.Error())
 		return
 	}
@@ -350,6 +362,10 @@ func (s *Server) handleGetTablePartitions(w http.ResponseWriter, r *http.Request
 
 	partitions, err := sess.GetTablePartitions(ctx, database, tableName)
 	if err != nil {
+		if errors.Is(err, driver.ErrFeatureNotSupported) {
+			writeJSON(w, http.StatusOK, []driver.PartitionMetadata{})
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to fetch partitions: "+err.Error())
 		return
 	}
@@ -381,8 +397,13 @@ func (s *Server) handlePreflightDDL(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	locks, err := sess.Session.InspectTableLocks(ctx, targetDB, tableName)
-	if err != nil {
+	var locks []driver.TableLockInfo
+	if dp, ok := sess.Session.(driver.DiagnosticsProvider); ok {
+		if l, lErr := dp.InspectTableLocks(ctx, targetDB, tableName); lErr == nil {
+			locks = l
+		}
+	}
+	if locks == nil {
 		locks = []driver.TableLockInfo{}
 	}
 

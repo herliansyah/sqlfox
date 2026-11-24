@@ -2204,14 +2204,6 @@ func (s *PostgresSession) GetRoutineDDL(ctx context.Context, routineType, name s
 	return ddl + ";", nil
 }
 
-func (s *PostgresSession) GetEventDDL(ctx context.Context, name string) (string, error) {
-	return "-- Scheduled Events not supported natively in PostgreSQL (use pg_cron or external scheduler)", nil
-}
-
-func (s *PostgresSession) ToggleEventStatus(ctx context.Context, name string, enable bool) error {
-	return errors.New("scheduled events not supported on PostgreSQL")
-}
-
 func (s *PostgresSession) GetTablePartitions(ctx context.Context, database, table string) ([]driver.PartitionMetadata, error) {
 	return []driver.PartitionMetadata{}, nil
 }

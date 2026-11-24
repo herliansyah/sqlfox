@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -84,6 +85,13 @@ func (s *Server) handleGetDeadlock(w http.ResponseWriter, r *http.Request) {
 
 	report, err := sess.InspectDeadlock(ctx)
 	if err != nil {
+		if errors.Is(err, driver.ErrFeatureNotSupported) {
+			writeJSON(w, http.StatusOK, &driver.DeadlockReport{
+				HasDeadlock: false,
+				Summary:     "Deadlock inspection is not supported on this database engine.",
+			})
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to inspect deadlock: "+err.Error())
 		return
 	}
@@ -111,6 +119,10 @@ func (s *Server) handleGetStatementDigest(w http.ResponseWriter, r *http.Request
 
 	digest, err := sess.GetStatementDigest(ctx, limit)
 	if err != nil {
+		if errors.Is(err, driver.ErrFeatureNotSupported) {
+			writeJSON(w, http.StatusOK, []driver.StatementDigestEntry{})
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to get statement digest: "+err.Error())
 		return
 	}
@@ -133,6 +145,10 @@ func (s *Server) handleResetStatementDigest(w http.ResponseWriter, r *http.Reque
 	defer cancel()
 
 	if err := sess.ResetStatementDigest(ctx); err != nil {
+		if errors.Is(err, driver.ErrFeatureNotSupported) {
+			writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to reset statement digest: "+err.Error())
 		return
 	}

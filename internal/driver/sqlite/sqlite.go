@@ -3,7 +3,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -756,26 +755,6 @@ func (s *SQLiteSession) PeekForeignKeyRow(ctx context.Context, database, table, 
 	}, nil
 }
 
-func (s *SQLiteSession) GetUserList(ctx context.Context) ([]driver.DatabaseUser, error) {
-	return []driver.DatabaseUser{}, errors.New("user privilege management is not supported on SQLite")
-}
-
-func (s *SQLiteSession) GetUserGrants(ctx context.Context, user, host string) ([]string, error) {
-	return nil, errors.New("user privilege management is not supported on SQLite")
-}
-
-func (s *SQLiteSession) SaveUser(ctx context.Context, user, host, password string, isNew bool) error {
-	return errors.New("user privilege management is not supported on SQLite")
-}
-
-func (s *SQLiteSession) DropUser(ctx context.Context, user, host string) error {
-	return errors.New("user privilege management is not supported on SQLite")
-}
-
-func (s *SQLiteSession) ApplyUserGrants(ctx context.Context, req driver.UserGrantRequest) error {
-	return errors.New("user privilege management is not supported on SQLite")
-}
-
 func (s *SQLiteSession) InspectTableLocks(ctx context.Context, database, table string) ([]driver.TableLockInfo, error) {
 	// In-process SQLite does not maintain an external metadata lock wait table.
 	return []driver.TableLockInfo{}, nil
@@ -929,35 +908,4 @@ func (s *SQLiteSession) InspectServerVariables(ctx context.Context) (*driver.Ser
 
 func quoteIdentifier(id string) string {
 	return driver.QuoteIdentifier(id, "sqlite")
-}
-
-func (s *SQLiteSession) InspectDeadlock(ctx context.Context) (*driver.DeadlockReport, error) {
-	return &driver.DeadlockReport{
-		HasDeadlock: false,
-		Summary:     "SQLite operates with database file-level locking and busy timeouts; deadlocks do not apply.",
-	}, nil
-}
-
-func (s *SQLiteSession) GetStatementDigest(ctx context.Context, limit int) ([]driver.StatementDigestEntry, error) {
-	return []driver.StatementDigestEntry{}, nil
-}
-
-func (s *SQLiteSession) ResetStatementDigest(ctx context.Context) error {
-	return nil
-}
-
-func (s *SQLiteSession) GetRoutineDDL(ctx context.Context, routineType, name string) (string, error) {
-	return "-- Stored Routines not supported in SQLite", nil
-}
-
-func (s *SQLiteSession) GetEventDDL(ctx context.Context, name string) (string, error) {
-	return "-- Scheduled Events not supported in SQLite", nil
-}
-
-func (s *SQLiteSession) ToggleEventStatus(ctx context.Context, name string, enable bool) error {
-	return nil
-}
-
-func (s *SQLiteSession) GetTablePartitions(ctx context.Context, database, table string) ([]driver.PartitionMetadata, error) {
-	return []driver.PartitionMetadata{}, nil
 }

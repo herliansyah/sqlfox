@@ -107,8 +107,12 @@ func TestSQLiteSession_ExecSafeDDL(t *testing.T) {
 		t.Fatalf("CREATE TABLE failed: %v", err)
 	}
 
-	// Execute safe DDL with fail-fast timeout
-	res, err := sess.ExecSafeDDL(ctx, "ALTER TABLE items ADD COLUMN price REAL", 2)
+	// Execute safe DDL with fail-fast timeout via SafeDDLExecutor capability
+	safeExec, ok := sess.(driver.SafeDDLExecutor)
+	if !ok {
+		t.Fatalf("expected SQLite session to implement driver.SafeDDLExecutor")
+	}
+	res, err := safeExec.ExecSafeDDL(ctx, "ALTER TABLE items ADD COLUMN price REAL", 2)
 	if err != nil {
 		t.Fatalf("ExecSafeDDL failed: %v", err)
 	}
