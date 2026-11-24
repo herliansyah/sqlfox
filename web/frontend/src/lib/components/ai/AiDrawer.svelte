@@ -55,8 +55,9 @@
     return [createWelcomeSession()];
   }
 
-  let sessions = $state<ChatSession[]>(loadSessions());
-  let currentSessionId = $state<string>(sessions[0]?.id || '');
+  const initialSessions = loadSessions();
+  let sessions = $state<ChatSession[]>(initialSessions);
+  let currentSessionId = $state<string>(initialSessions[0]?.id || '');
 
   function persistSessions(next: ChatSession[]) {
     const capped = next.slice(0, 30);
@@ -538,6 +539,7 @@
   <!-- Left-Edge Resizer Handle -->
   <div
     role="separator"
+    tabindex="-1"
     aria-orientation="vertical"
     aria-label="Resize AI Copilot drawer"
     onmousedown={startResize}

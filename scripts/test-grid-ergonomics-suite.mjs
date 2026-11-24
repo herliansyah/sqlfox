@@ -5,10 +5,10 @@ console.log('--- Starting Grid Ergonomics Suite Test (source-assertion) ---');
 
 // Source-assertion pattern: read the actual Svelte/stores sources and assert
 // the behaviors live there — no bundled web/dist artifacts, no vm sandboxes.
-const virtualGridCode = fs.readFileSync(
-  'web/frontend/src/lib/components/grid/VirtualGrid.svelte',
-  'utf8'
-);
+const virtualGridCode =
+  fs.readFileSync('web/frontend/src/lib/components/grid/VirtualGrid.svelte', 'utf8') +
+  '\n' +
+  fs.readFileSync('web/frontend/src/lib/components/grid/GridContextMenu.svelte', 'utf8');
 const inspectorCode = fs.readFileSync(
   'web/frontend/src/lib/components/modals/RecordInspectorModal.svelte',
   'utf8'

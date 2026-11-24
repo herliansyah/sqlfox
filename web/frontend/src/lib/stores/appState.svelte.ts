@@ -31,6 +31,7 @@ import {
 import { compileFilterPills } from '../utils/filterCompiler';
 export { compileFilterPills };
 import { resolveTabsStorageKey, persistTabsToStorage, loadTabsFromStorage } from './tabStorage';
+import { parseActivityLogPayload, playAudioReminderChime } from './activityStream';
 import {
   buildDropTableSQL,
   buildTruncateTableSQL,
@@ -508,29 +509,11 @@ export class AppState {
 
       es.onmessage = (e) => {
         if (this.isActivityPaused) return;
-        try {
-          const data = JSON.parse(e.data);
-          const now = data.time ? new Date(data.time) : new Date();
-          const hh = String(now.getHours()).padStart(2, '0');
-          const mm = String(now.getMinutes()).padStart(2, '0');
-          const ss = String(now.getSeconds()).padStart(2, '0');
-          const ms = String(now.getMilliseconds()).padStart(3, '0');
-          const level = String(data.level || 'INFO').toUpperCase();
-          const entry: ActivityLogEntry = {
-            id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-            time: `${hh}:${mm}:${ss}`,
-            timeMs: `${hh}:${mm}:${ss}.${ms}`,
-            level,
-            module: String(data.module || 'core'),
-            message: String(data.msg || data.message || e.data),
-            attrs: data.attrs || undefined,
-          };
-          this.activityLogs = [...this.activityLogs.slice(-999), entry];
-          if (!this.isActivityDrawerOpen && (level === 'ERROR' || level === 'WARN' || level === 'WARNING')) {
-            this.unreadActivityErrors++;
-          }
-        } catch {
-          /* ignore unparseable log line */
+        const entry = parseActivityLogPayload(e.data);
+        if (!entry) return;
+        this.activityLogs = [...this.activityLogs.slice(-999), entry];
+        if (!this.isActivityDrawerOpen && (entry.level === 'ERROR' || entry.level === 'WARN' || entry.level === 'WARNING')) {
+          this.unreadActivityErrors++;
         }
       };
 
@@ -687,24 +670,7 @@ export class AppState {
   }
 
   playReminderChime() {
-    try {
-      if (typeof window === 'undefined') return;
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioCtx) return;
-      const ctx = new AudioCtx();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(587.33, ctx.currentTime);
-      osc.frequency.setValueAtTime(880, ctx.currentTime + 0.12);
-      gain.gain.setValueAtTime(0.18, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.7);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.7);
-      osc.onended = () => void ctx.close();
-    } catch (_) {}
+    playAudioReminderChime();
   }
 
   async unlockRemote(password: string) {
@@ -1585,7 +1551,9 @@ export class AppState {
             tbl.row_count = (res as any).total_rows;
             tbl.rows_count = (res as any).total_rows;
           }
-          this.catalog = { ...this.catalog };
+          if (this.catalog) {
+            this.catalog = { ...this.catalog };
+          }
           if (db && this.catalogs[db.toLowerCase()]) {
             this.catalogs[db.toLowerCase()] = { ...this.catalogs[db.toLowerCase()] };
           }
@@ -1626,7 +1594,9 @@ export class AppState {
           tbl.row_count = res.count;
           tbl.rows_count = res.count;
           tbl.row_count_exact = true;
-          this.catalog = { ...this.catalog };
+          if (this.catalog) {
+            this.catalog = { ...this.catalog };
+          }
           if (db && this.catalogs[db.toLowerCase()]) {
             this.catalogs[db.toLowerCase()] = { ...this.catalogs[db.toLowerCase()] };
           }
@@ -2432,7 +2402,7 @@ export class AppState {
    * Runs an explicit on-demand COUNT(*) for the current query tab without
    * triggering full scans on regular query executions.
    */
-  async countQueryTotal(tab?: TabItem) {
+  async countQueryTotal(tab?: EditorTab) {
     const t = tab || this.activeTab;
     if (!t || !this.activeSessionId || t.isTableViewer || t.isCountingTotal) return;
     const rawBase = (t.baseStreamSQL || t.sql || '').trim();

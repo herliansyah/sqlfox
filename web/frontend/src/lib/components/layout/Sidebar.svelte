@@ -563,6 +563,7 @@
                 <div
                   data-db-active={isActiveDb}
                   role="option"
+                  tabindex="-1"
                   aria-selected={db === appState.currentDatabase}
                   onmouseenter={() => (dbActiveIndex = idx)}
                   class="relative w-full px-2 py-1 flex items-center justify-between text-xs transition-colors group/dbrow {isActiveDb
