@@ -46,6 +46,7 @@ type Server struct {
 	lanEnabled        bool
 	lanIP             string
 	behindProxy       bool
+	trustedProxies    []string
 	allowedHosts      []string
 }
 
@@ -286,8 +287,8 @@ func (s *Server) routes() {
 		})
 	}
 
-	// ponytail: stdlib panic recoverer, logger, and ingress + remote access guards replace chi router & middleware
-	baseHandler := recoverer(s.IngressGuardMiddleware(s.RemoteAccessGuardMiddleware(mux)))
+	// ponytail: stdlib panic recoverer, logger, security headers, and ingress + remote access guards replace chi router & middleware
+	baseHandler := recoverer(SecurityHeadersMiddleware(s.IngressGuardMiddleware(s.RemoteAccessGuardMiddleware(mux))))
 	s.mu.Lock()
 	s.baseHandler = baseHandler
 	if s.logger != nil {
@@ -319,11 +320,28 @@ func (s *Server) SetAllowedHosts(hosts []string) {
 }
 
 // SetBehindProxy configures whether the server is operating behind a reverse proxy (e.g. Nginx, Caddy),
-// enabling secure parsing of X-Forwarded-For and X-Real-IP headers instead of trusting loopback RemoteAddr.
+// enabling secure parsing of X-Forwarded-For and X-Real-IP headers from trusted proxies.
 func (s *Server) SetBehindProxy(enabled bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.behindProxy = enabled
+}
+
+// SetTrustedProxies configures additional proxy IPs or CIDRs trusted to supply forwarding headers.
+func (s *Server) SetTrustedProxies(proxies []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.trustedProxies = append([]string(nil), proxies...)
+}
+
+// SecurityHeadersMiddleware attaches baseline browser hardening headers to all responses.
+func SecurityHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Close gracefully shuts down all active database sessions and background managers.

@@ -142,16 +142,27 @@ func pingSqlFoxHost(host string, port int) bool {
 	return probeSqlFoxScheme("https", host, port)
 }
 
+// localProbeHTTPClient returns an HTTP client for probing a local SqlFox instance.
+// Loopback self-signed certificates are permitted only for 127.0.0.1/::1 probes.
+func localProbeHTTPClient(host string, timeout time.Duration) *http.Client {
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	isLocal := ip != nil && ip.IsLoopback()
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				MinVersion:         tls.VersionTLS12,
+				InsecureSkipVerify: isLocal, // #nosec G402 -- strictly restricted to loopback self-signed daemon probes
+			},
+		},
+	}
+}
+
 func probeSqlFoxScheme(scheme, host string, port int) bool {
 	if host == "" || host == "0.0.0.0" || host == "::" || host == "localhost" {
 		host = "127.0.0.1"
 	}
-	client := &http.Client{
-		Timeout: 750 * time.Millisecond,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-	}
+	client := localProbeHTTPClient(host, 750*time.Millisecond)
 	url := fmt.Sprintf("%s://%s/api/auth/status", scheme, net.JoinHostPort(host, strconv.Itoa(port)))
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
@@ -228,12 +239,7 @@ func stopExistingInstance(configDir string, defaultPort int) error {
 			if probeSqlFoxScheme("https", "127.0.0.1", defaultPort) {
 				scheme = "https"
 			}
-			client := &http.Client{
-				Timeout: 2 * time.Second,
-				Transport: &http.Transport{
-					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-				},
-			}
+			client := localProbeHTTPClient("127.0.0.1", 2*time.Second)
 			resp, postErr := client.Post(fmt.Sprintf("%s://127.0.0.1:%d/api/system/shutdown", scheme, defaultPort), "application/json", nil)
 			if postErr == nil {
 				_ = resp.Body.Close()

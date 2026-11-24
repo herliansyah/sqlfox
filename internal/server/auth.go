@@ -227,20 +227,71 @@ func isLoopback(remoteAddr string) bool {
 	return ip.IsLoopback()
 }
 
-// GetClientIP extracts the effective client IP, respecting trusted proxy headers when behindProxy is enabled.
+// isTrustedProxyIP reports whether ip is a trusted reverse proxy allowed to supply forwarding headers.
+func (s *Server) isTrustedProxyIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
+		return true
+	}
+	s.mu.Lock()
+	proxies := s.trustedProxies
+	s.mu.Unlock()
+	for _, entry := range proxies {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if _, cidr, err := net.ParseCIDR(entry); err == nil {
+			if cidr.Contains(ip) {
+				return true
+			}
+			continue
+		}
+		if tip := net.ParseIP(entry); tip != nil && tip.Equal(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// GetClientIP extracts the effective client IP, respecting forwarding headers only when
+// behindProxy is enabled AND the direct TCP peer (r.RemoteAddr) is a trusted proxy.
+// X-Forwarded-For is parsed from right to left to prevent client-supplied left-edge spoofing.
 func (s *Server) GetClientIP(r *http.Request) string {
+	remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		remoteHost = r.RemoteAddr
+	}
+	remoteIP := net.ParseIP(remoteHost)
+
 	s.mu.Lock()
 	proxyEnabled := s.behindProxy
 	s.mu.Unlock()
 
-	if proxyEnabled || os.Getenv("SQLFOX_BEHIND_PROXY") == "1" || strings.ToLower(os.Getenv("SQLFOX_BEHIND_PROXY")) == "true" {
+	if !proxyEnabled {
+		envVal := strings.ToLower(strings.TrimSpace(os.Getenv("SQLFOX_BEHIND_PROXY")))
+		proxyEnabled = envVal == "1" || envVal == "true"
+	}
+
+	if proxyEnabled && s.isTrustedProxyIP(remoteIP) {
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 			parts := strings.Split(xff, ",")
-			if len(parts) > 0 {
-				clientIP := strings.TrimSpace(parts[0])
-				if ip := net.ParseIP(clientIP); ip != nil {
-					return clientIP
+			var fallbackTrusted string
+			for i := len(parts) - 1; i >= 0; i-- {
+				candidate := strings.TrimSpace(parts[i])
+				ip := net.ParseIP(candidate)
+				if ip == nil {
+					continue
 				}
+				if !s.isTrustedProxyIP(ip) {
+					return candidate
+				}
+				fallbackTrusted = candidate
+			}
+			if fallbackTrusted != "" {
+				return fallbackTrusted
 			}
 		}
 		if xri := r.Header.Get("X-Real-IP"); xri != "" {
@@ -251,11 +302,7 @@ func (s *Server) GetClientIP(r *http.Request) string {
 		}
 	}
 
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	return host
+	return remoteHost
 }
 
 // IsRemoteRequest reports whether a request originates from a non-loopback host,

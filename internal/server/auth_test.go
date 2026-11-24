@@ -577,3 +577,51 @@ func TestBehindProxy_RemoteGuardProtection(t *testing.T) {
 		t.Fatalf("expected 403 Forbidden when accessing master key from remote IP even with token, got %d", recMasterAuth.Code)
 	}
 }
+
+func TestBehindProxy_AntiSpoofing(t *testing.T) {
+	tempDir := t.TempDir()
+	v, err := vault.OpenVault(filepath.Join(tempDir, "config.db"), "pin-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	srv := NewServer(v, nil, filepath.Join(tempDir, "backups"), "pin-secret")
+	srv.SetBehindProxy(true)
+	srv.SetLANEnabled(true)
+	handler := srv.Router()
+
+	// 1. Left-edge X-Forwarded-For spoofing: attacker sends "127.0.0.1", proxy appends "203.0.113.195".
+	// Must resolve to 203.0.113.195 (rightmost untrusted IP) and block with 401.
+	reqSpoofXFF := httptest.NewRequest("GET", "/api/connections", nil)
+	reqSpoofXFF.RemoteAddr = "127.0.0.1:45678"
+	reqSpoofXFF.Header.Set("X-Forwarded-For", "127.0.0.1, 203.0.113.195")
+	recSpoofXFF := httptest.NewRecorder()
+	handler.ServeHTTP(recSpoofXFF, reqSpoofXFF)
+	if recSpoofXFF.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for left-edge X-Forwarded-For spoof, got %d", recSpoofXFF.Code)
+	}
+
+	// 2. Direct untrusted peer claiming X-Forwarded-For: 127.0.0.1 -> RemoteAddr is public, so
+	// forwarding headers must be ignored completely and request blocked with 401.
+	reqUntrustedPeer := httptest.NewRequest("GET", "/api/auth/master-key", nil)
+	reqUntrustedPeer.RemoteAddr = "203.0.113.99:54321"
+	reqUntrustedPeer.Header.Set("X-Forwarded-For", "127.0.0.1")
+	reqUntrustedPeer.Header.Set("X-Real-IP", "127.0.0.1")
+	recUntrustedPeer := httptest.NewRecorder()
+	handler.ServeHTTP(recUntrustedPeer, reqUntrustedPeer)
+	if recUntrustedPeer.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for untrusted peer spoofing X-Forwarded-For, got %d", recUntrustedPeer.Code)
+	}
+
+	// 3. Baseline security headers must be present.
+	if got := recSpoofXFF.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("expected X-Content-Type-Options=nosniff, got %q", got)
+	}
+	if got := recSpoofXFF.Header().Get("X-Frame-Options"); got != "DENY" {
+		t.Fatalf("expected X-Frame-Options=DENY, got %q", got)
+	}
+	if got := recSpoofXFF.Header().Get("Referrer-Policy"); got != "no-referrer" {
+		t.Fatalf("expected Referrer-Policy=no-referrer, got %q", got)
+	}
+}
