@@ -139,9 +139,9 @@
 </script>
 
 {#if appState.isSchemaSearchOpen}
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
   <div
     id="schema-search-modal"
+    role="presentation"
     class="fixed inset-0 z-[95] flex items-start justify-center pt-[10vh] bg-black/70 p-4"
     onclick={(e) => e.target === e.currentTarget && (appState.isSchemaSearchOpen = false)}
   >
@@ -176,6 +176,9 @@
         {:else}
           {#each results as item, i (item.kind + ':' + item.label)}
             <div
+              role="option"
+              tabindex="-1"
+              aria-selected={i === activeIndex}
               data-active={i === activeIndex}
               onmouseenter={() => (activeIndex = i)}
               class="px-3.5 py-2 flex items-center justify-between gap-2 text-xs transition-colors {i === activeIndex

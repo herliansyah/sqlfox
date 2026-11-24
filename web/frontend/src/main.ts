@@ -13,7 +13,7 @@ if (serverShell) {
   serverShell.classList.add('hidden');
 }
 
-if (typeof window !== 'undefined') {
+if (typeof window !== 'undefined' && (import.meta as any).env?.DEV) {
   (window as any).appState = appState;
 }
 

@@ -210,8 +210,9 @@
       <div class="p-5 space-y-3.5 overflow-y-auto flex-1">
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label class="block text-slate-400 text-xs font-medium mb-1">Title *</label>
+            <label for="note-title" class="block text-slate-400 text-xs font-medium mb-1">Title *</label>
             <input
+              id="note-title"
               type="text"
               bind:value={title}
               placeholder="e.g. Migration follow-up, Index required on orders"
@@ -219,8 +220,9 @@
             />
           </div>
           <div>
-            <label class="block text-slate-400 text-xs font-medium mb-1">Subtitle / Side Note</label>
+            <label for="note-side-note" class="block text-slate-400 text-xs font-medium mb-1">Subtitle / Side Note</label>
             <input
+              id="note-side-note"
               type="text"
               bind:value={sideNote}
               placeholder="Short summary or runbook subtitle..."
@@ -231,8 +233,9 @@
 
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block text-slate-400 text-xs font-medium mb-1">Primary Category</label>
+            <label for="note-category" class="block text-slate-400 text-xs font-medium mb-1">Primary Category</label>
             <select
+              id="note-category"
               bind:value={category}
               class="w-full bg-[#050811] border border-[#1e293b] rounded-lg px-3 py-2 text-slate-200 text-xs focus:outline-none focus:border-amber-500"
             >
@@ -244,12 +247,13 @@
 
           <div>
             <div class="flex items-center justify-between mb-1">
-              <label class="text-slate-400 text-xs font-medium">Linked Table</label>
+              <label for="note-linked-table" class="text-slate-400 text-xs font-medium">Linked Table</label>
               <button type="button" onclick={tagActiveTable} class="text-[10px] text-sky-400 hover:underline">
                 + Tag Active Table
               </button>
             </div>
             <input
+              id="note-linked-table"
               type="text"
               bind:value={tableName}
               placeholder="e.g. orders, users"
@@ -353,7 +357,7 @@
         <!-- Reminder Due Date -->
         <div>
           <div class="flex items-center justify-between mb-1 flex-wrap gap-1">
-            <label class="text-slate-400 text-xs font-medium">Follow-up Reminder Date &amp; Time</label>
+            <label for="note-reminder-at" class="text-slate-400 text-xs font-medium">Follow-up Reminder Date &amp; Time</label>
             <div class="flex items-center space-x-1">
               <button type="button" onclick={() => setQuickMinutes(15)} class="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-[10px] text-slate-400 hover:text-amber-300">+15m</button>
               <button type="button" onclick={() => setQuickMinutes(60)} class="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-[10px] text-slate-400 hover:text-amber-300">+1h</button>
@@ -364,6 +368,7 @@
             </div>
           </div>
           <input
+            id="note-reminder-at"
             type="datetime-local"
             bind:value={reminderAt}
             class="w-full bg-[#050811] border border-[#1e293b] rounded-lg px-3 py-2 text-slate-200 text-xs focus:outline-none focus:border-amber-500"

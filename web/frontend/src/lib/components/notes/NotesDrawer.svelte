@@ -26,21 +26,32 @@
     localStorage.setItem(MAXIMIZED_KEY, String(isMaximized));
   }
 
+  let activeResizeCleanup: (() => void) | null = null;
+
   function startResize(e: MouseEvent) {
     e.preventDefault();
+    activeResizeCleanup?.();
     isResizing = true;
     const onMove = (ev: MouseEvent) => {
       drawerWidth = Math.min(960, Math.max(340, window.innerWidth - ev.clientX));
     };
-    const onUp = () => {
+    const cleanup = () => {
       isResizing = false;
       localStorage.setItem(WIDTH_KEY, String(drawerWidth));
       window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('mouseup', cleanup);
+      activeResizeCleanup = null;
     };
+    activeResizeCleanup = cleanup;
     window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    window.addEventListener('mouseup', cleanup);
   }
+
+  $effect(() => {
+    return () => {
+      activeResizeCleanup?.();
+    };
+  });
 
   let activeTableName = $derived(appState.activeTab?.tableName || '');
 
@@ -300,13 +311,13 @@
     : `min(${drawerWidth}px, calc(100vw - 1.5rem))`};"
 >
   <!-- Left-Edge Resizer Handle -->
-  <div
-    role="separator"
-    aria-orientation="vertical"
+  <button
+    type="button"
+    tabindex="-1"
     aria-label="Resize Operational Notes drawer"
     onmousedown={startResize}
-    class="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-amber-500/40 transition z-50"
-  ></div>
+    class="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-amber-500/40 transition z-50 border-0 p-0 bg-transparent"
+  ></button>
 
   <!-- Drawer Header -->
   <div class="h-10 bg-[#0f172a] border-b border-[#1e293b] px-3.5 flex items-center justify-between flex-shrink-0 select-none gap-2">

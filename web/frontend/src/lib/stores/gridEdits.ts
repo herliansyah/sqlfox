@@ -83,8 +83,8 @@ export async function commitStagedEditsAction(ctx: GridEditsContext): Promise<vo
         const d = draftRows[i];
         const cleanPayload: Record<string, any> = {};
         for (const [k, v] of Object.entries(d)) {
-          if (!k.startsWith('__') && v !== undefined) {
-            cleanPayload[k] = v;
+          if (!k.startsWith('__') && v !== '' && v !== undefined) {
+            cleanPayload[k] = v === '__NULL__' ? null : v;
           }
         }
         try {
@@ -120,13 +120,13 @@ export async function commitStagedEditsAction(ctx: GridEditsContext): Promise<vo
 export async function insertRowAction(
   ctx: GridEditsContext,
   data: Record<string, any>
-): Promise<void> {
+): Promise<boolean> {
   const tab = ctx.activeTab;
   const targetTable = tab?.tableName || tab?.detectedTableName;
-  if (!ctx.activeSessionId || !targetTable) return;
+  if (!ctx.activeSessionId || !targetTable) return false;
   if (ctx.isReadOnly) {
     ctx.showToast('Read-only mode is active — insert blocked', 'warning');
-    return;
+    return false;
   }
 
   try {
@@ -140,8 +140,10 @@ export async function insertRowAction(
     ctx.auditRefreshToken++;
     if (tab?.isTableViewer) await ctx.loadTableData(tab);
     else await ctx.executeCurrentTab();
+    return true;
   } catch (err: any) {
     ctx.showToast(`Failed to insert row: ${err.message}`, 'error');
+    return false;
   }
 }
 

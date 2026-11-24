@@ -278,7 +278,7 @@
           <div class="space-y-3">
             <div>
               <div class="flex items-center justify-between mb-1">
-                <label class="block text-slate-400 text-xs font-medium">GitHub Personal Access Token (PAT) *</label>
+                <label for="sync-github-token" class="block text-slate-400 text-xs font-medium">GitHub Personal Access Token (PAT) *</label>
                 {#if hasSavedToken}
                   <span class="inline-flex items-center space-x-1 text-[10.5px] text-emerald-400 font-mono bg-emerald-950/60 border border-emerald-800/70 px-2 py-0.5 rounded">
                     <Icon name="check-circle" class="w-3 h-3 text-emerald-400" />
@@ -287,6 +287,7 @@
                 {/if}
               </div>
               <input
+                id="sync-github-token"
                 type="password"
                 bind:value={githubToken}
                 placeholder={hasSavedToken ? '•••••••••••• (Leave blank to keep existing token)' : 'ghp_xxxxxxxxxxxxxxxxxxxx (needs repo scope)'}
@@ -303,8 +304,9 @@
 
             <div class="grid grid-cols-2 gap-3">
               <div>
-                <label class="block text-slate-400 text-xs font-medium mb-1">Repository (owner/repo) *</label>
+                <label for="sync-github-repo" class="block text-slate-400 text-xs font-medium mb-1">Repository (owner/repo) *</label>
                 <input
+                  id="sync-github-repo"
                   type="text"
                   bind:value={githubRepo}
                   placeholder="e.g. yourname/sqlfox-vault"
@@ -312,8 +314,9 @@
                 />
               </div>
               <div>
-                <label class="block text-slate-400 text-xs font-medium mb-1">Branch</label>
+                <label for="sync-github-branch" class="block text-slate-400 text-xs font-medium mb-1">Branch</label>
                 <input
+                  id="sync-github-branch"
                   type="text"
                   bind:value={githubBranch}
                   placeholder="main"
@@ -323,8 +326,9 @@
             </div>
 
             <div>
-              <label class="block text-slate-400 text-xs font-medium mb-1">Repository Path Prefix</label>
+              <label for="sync-path-prefix" class="block text-slate-400 text-xs font-medium mb-1">Repository Path Prefix</label>
               <input
+                id="sync-path-prefix"
                 type="text"
                 bind:value={pathPrefix}
                 placeholder="sqlfox-vault/"

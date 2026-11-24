@@ -892,7 +892,7 @@
   ontouchstart={handleTouchStart}
   ontouchmove={handleTouchMove}
   ontouchend={handleTouchEnd}
-  role="region"
+  role="presentation"
   aria-label="ERD Canvas"
   class="h-full w-full bg-[#070b14] relative overflow-hidden select-none cursor-grab active:cursor-grabbing"
   style="background-image: radial-gradient(#1e293b 1px, transparent 1px); background-size: {Math.max(12, Math.round(24 * scale))}px {Math.max(12, Math.round(24 * scale))}px; background-position: {panX}px {panY}px;"
@@ -1080,10 +1080,14 @@
             stroke="transparent"
             stroke-width="16"
             fill="none"
+            role="button"
+            tabindex="0"
+            aria-label="Highlight relationship {line.label}"
             class="cursor-pointer"
             onmouseenter={() => (hoveredFK = line.key)}
             onmouseleave={() => (hoveredFK = null)}
             onclick={() => (selectedTable = line.srcTable)}
+            onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectedTable = line.srcTable; } }}
           />
           <path
             d={line.path}
@@ -1096,10 +1100,14 @@
           {#if !line.isDimmed}
             <g
               transform="translate({line.midX}, {line.midY})"
+              role="button"
+              tabindex="0"
+              aria-label="Relationship {line.label}"
               class="cursor-pointer select-none"
               onmouseenter={() => (hoveredFK = line.key)}
               onmouseleave={() => (hoveredFK = null)}
               onclick={() => (selectedTable = line.srcTable)}
+              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectedTable = line.srcTable; } }}
             >
               <rect
                 x={-Math.max(50, line.label.length * 3.5 + 8)}
@@ -1153,11 +1161,19 @@
           style="left: {pos.x}px; top: {pos.y}px; width: {CARD_WIDTH}px;"
           onclick={() => (selectedTable = isSelected ? null : table.name)}
           ondblclick={() => appState.openTableDataTab(table.name)}
+          onkeydown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              selectedTable = isSelected ? null : table.name;
+            }
+          }}
           oncontextmenu={(e) => openContextMenu(e, table.name)}
-          role="article"
+          role="button"
+          tabindex="0"
         >
           <!-- Card Header (Drag Handle) -->
           <div
+            role="presentation"
             onmousedown={(e) => startCardDrag(e, table.name)}
             class="h-[38px] px-2.5 bg-[#0f172a] rounded-t-xl border-b border-[#1e293b] flex items-center justify-between cursor-grab active:cursor-grabbing group gap-1"
             title="Drag to move · Double-click to open data · Right-click for actions"

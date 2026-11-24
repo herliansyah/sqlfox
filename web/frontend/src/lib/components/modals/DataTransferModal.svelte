@@ -218,8 +218,9 @@
           <div class="p-3.5 rounded-lg border border-slate-800 bg-[#050811] space-y-2.5">
             <h4 class="text-xs font-semibold text-sky-400 uppercase tracking-wide">Source Configuration</h4>
             <div>
-              <label class="block text-slate-400 mb-1">Source Connection *</label>
+              <label for="dt-src-conn" class="block text-slate-400 mb-1">Source Connection *</label>
               <select
+                id="dt-src-conn"
                 bind:value={sourceConnId}
                 onchange={() => { sourceDb = ''; selectedTables = []; loadSourceMetadata(sourceConnId, ''); }}
                 class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 focus:outline-none focus:border-sky-500"
@@ -230,9 +231,10 @@
               </select>
             </div>
             <div>
-              <label class="block text-slate-400 mb-1">Source Database</label>
+              <label for="dt-src-db" class="block text-slate-400 mb-1">Source Database</label>
               {#if srcDatabases.length > 0}
                 <select
+                  id="dt-src-db"
                   bind:value={sourceDb}
                   onchange={() => loadSourceMetadata(sourceConnId, sourceDb)}
                   class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono focus:outline-none focus:border-sky-500"
@@ -243,6 +245,7 @@
                 </select>
               {:else}
                 <input
+                  id="dt-src-db"
                   type="text"
                   bind:value={sourceDb}
                   placeholder="Optional / Default schema"
@@ -256,8 +259,9 @@
           <div class="p-3.5 rounded-lg border border-slate-800 bg-[#050811] space-y-2.5">
             <h4 class="text-xs font-semibold text-emerald-400 uppercase tracking-wide">Target Configuration</h4>
             <div>
-              <label class="block text-slate-400 mb-1">Target Connection *</label>
+              <label for="dt-tgt-conn" class="block text-slate-400 mb-1">Target Connection *</label>
               <select
+                id="dt-tgt-conn"
                 bind:value={targetConnId}
                 onchange={() => { targetDb = ''; loadTargetMetadata(targetConnId); }}
                 class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 focus:outline-none focus:border-emerald-500"
@@ -269,9 +273,10 @@
               </select>
             </div>
             <div>
-              <label class="block text-slate-400 mb-1">Target Database</label>
+              <label for="dt-tgt-db" class="block text-slate-400 mb-1">Target Database</label>
               {#if tgtDatabases.length > 0}
                 <select
+                  id="dt-tgt-db"
                   bind:value={targetDb}
                   class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono focus:outline-none focus:border-emerald-500"
                 >
@@ -281,6 +286,7 @@
                 </select>
               {:else}
                 <input
+                  id="dt-tgt-db"
                   type="text"
                   bind:value={targetDb}
                   placeholder="Target DB"

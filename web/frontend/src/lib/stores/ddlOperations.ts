@@ -86,11 +86,11 @@ export async function truncateTableAction(
   ctx: DdlOperationsContext,
   tableName: string,
   database?: string
-) {
-  if (!ctx.activeSessionId) return;
+): Promise<boolean> {
+  if (!ctx.activeSessionId) return false;
   if (ctx.isReadOnly) {
     ctx.showToast('Read-only mode is active — TRUNCATE TABLE blocked', 'warning');
-    return;
+    return false;
   }
   const targetDb =
     database ||
@@ -107,7 +107,7 @@ export async function truncateTableAction(
     reason: `Destructive mutation: TRUNCATE TABLE will delete all records in table '${tableName}'.`,
     estimated_rows: null,
   });
-  if (!decision.confirmed) return;
+  if (!decision.confirmed) return false;
 
   try {
     const res = await api.executeQuery(ctx.activeSessionId, sql, {
@@ -117,7 +117,7 @@ export async function truncateTableAction(
     });
     if (res.error) {
       ctx.showToast(`Failed to truncate table: ${res.error}`, 'error');
-      return;
+      return false;
     }
     ctx.showToast(`Table '${tableName}' truncated`, 'success');
     const openTab = ctx.tabs.find((t) => t.tableName?.toLowerCase() === tableName.toLowerCase());
@@ -125,8 +125,10 @@ export async function truncateTableAction(
       await ctx.loadTableData(openTab);
     }
     await ctx.refreshCatalog();
+    return true;
   } catch (err: any) {
     ctx.showToast(`Failed to truncate table: ${err.message}`, 'error');
+    return false;
   }
 }
 

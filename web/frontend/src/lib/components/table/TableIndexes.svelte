@@ -296,7 +296,7 @@
 
       <div class="p-5 space-y-4">
         <div>
-          <label class="block text-slate-400 text-xs font-medium mb-1">Index Type *</label>
+          <span class="block text-slate-400 text-xs font-medium mb-1">Index Type *</span>
           <div class="grid grid-cols-4 gap-2">
             {#each ['INDEX', 'UNIQUE', 'FULLTEXT', 'SPATIAL'] as t}
               {@const disabledType = !isMysql && (t === 'FULLTEXT' || t === 'SPATIAL')}
@@ -319,7 +319,7 @@
         </div>
 
         <div>
-          <label class="block text-slate-400 text-xs font-medium mb-1">Select Column(s) in Order *</label>
+          <span class="block text-slate-400 text-xs font-medium mb-1">Select Column(s) in Order *</span>
           <div class="flex flex-wrap gap-1.5 p-2 bg-[#050811] border border-[#1e293b] rounded-lg min-h-[50px] items-center">
             {#if selectedCols.length === 0}
               <span class="text-slate-600 text-xs italic">Click column tags below to add them to this index...</span>
@@ -358,8 +358,9 @@
         </div>
 
         <div>
-          <label class="block text-slate-400 text-xs font-medium mb-1">Index Name *</label>
+          <label for="ti-index-name" class="block text-slate-400 text-xs font-medium mb-1">Index Name *</label>
           <input
+            id="ti-index-name"
             type="text"
             bind:value={indexName}
             oninput={() => (isCustomName = true)}
@@ -369,7 +370,7 @@
         </div>
 
         <div>
-          <label class="block text-slate-400 text-xs font-medium mb-1">Generated DDL Preview</label>
+          <span class="block text-slate-400 text-xs font-medium mb-1">Generated DDL Preview</span>
           <pre class="p-3 bg-[#050811] border border-[#1e293b] rounded-lg text-emerald-300 font-mono text-xs overflow-x-auto whitespace-pre-wrap">{sqlPreview}</pre>
         </div>
       </div>

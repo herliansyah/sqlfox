@@ -49,6 +49,12 @@
       }
       wasOpen = false;
     }
+    return () => {
+      if (elapsedTimer) {
+        clearInterval(elapsedTimer);
+        elapsedTimer = null;
+      }
+    };
   });
 
   function handleClose() {
@@ -91,7 +97,12 @@
       const connId = appState.activeSessionId || appState.activeConnection.id;
       const targetDb = appState.activeTab?.database || appState.currentDatabase || undefined;
       if (truncateFirst) {
-        await appState.truncateTable(selectedTable, targetDb);
+        const truncated = await appState.truncateTable(selectedTable, targetDb);
+        if (!truncated) {
+          statusError = true;
+          statusMessage = 'Truncate cancelled or failed; mock data generation aborted.';
+          return;
+        }
       }
       const res = await api.generateMockData(connId, selectedTable, {
         rows: clampedRows,
@@ -140,8 +151,9 @@
 
       <div class="p-5 space-y-4 overflow-y-auto flex-1">
         <div>
-          <label class="block text-slate-400 text-xs font-medium mb-1">Target Table *</label>
+          <label for="mock-target-table" class="block text-slate-400 text-xs font-medium mb-1">Target Table *</label>
           <select
+            id="mock-target-table"
             bind:value={selectedTable}
             class="w-full bg-[#050811] border border-[#1e293b] rounded-lg px-3 py-2 text-slate-200 font-mono text-xs focus:outline-none focus:border-emerald-500"
           >
@@ -153,7 +165,7 @@
 
         <div>
           <div class="flex items-center justify-between mb-1">
-            <label class="text-slate-400 text-xs font-medium">Rows to Generate (max 5,000)</label>
+            <label for="mock-row-count" class="text-slate-400 text-xs font-medium">Rows to Generate (max 5,000)</label>
             <div class="flex items-center space-x-1">
               {#each [25, 50, 100, 500, 1000, 5000] as cnt}
                 <button
@@ -167,6 +179,7 @@
             </div>
           </div>
           <input
+            id="mock-row-count"
             type="number"
             min="1"
             max="5000"

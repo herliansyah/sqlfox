@@ -422,8 +422,9 @@
 
   <!-- Profile Name -->
   <div>
-    <label class="block text-slate-400 text-xs font-medium mb-1">Profile Name *</label>
+    <label for="ai-profile-name" class="block text-slate-400 text-xs font-medium mb-1">Profile Name *</label>
     <input
+      id="ai-profile-name"
       type="text"
       bind:value={profileName}
       placeholder="e.g. OpenAI GPT-4o Mini or Claude Coding"
@@ -433,7 +434,7 @@
 
   <!-- Provider Selector -->
   <div>
-    <label class="block text-slate-400 text-xs font-medium mb-1.5">AI Provider</label>
+    <span class="block text-slate-400 text-xs font-medium mb-1.5">AI Provider</span>
     <div class="grid grid-cols-5 gap-1.5">
       {#each ['openai', 'anthropic', 'gemini', 'ollama', 'custom'] as p}
         <button
@@ -452,7 +453,7 @@
   <!-- API Key with Vault Protection Indicator -->
   <div>
     <div class="flex items-center justify-between mb-1">
-      <label class="text-slate-400 text-xs font-medium">
+      <label for="ai-api-key" class="text-slate-400 text-xs font-medium">
         API Key {provider === 'ollama' ? '(Not required for local Ollama)' : '*'}
       </label>
       {#if hasSavedKey && !apiKey}
@@ -464,6 +465,7 @@
     </div>
     <div class="relative">
       <input
+        id="ai-api-key"
         type={showKey ? 'text' : 'password'}
         bind:value={apiKey}
         placeholder={hasSavedKey ? '•••••••••••••••• (Encrypted in Vault, leave blank to keep)' : (provider === 'ollama' ? 'Local Ollama requires no key' : 'sk-...')}
@@ -484,7 +486,7 @@
   <div class="grid grid-cols-2 gap-3">
     <div>
       <div class="flex items-center justify-between mb-1">
-        <label class="text-slate-400 text-xs font-medium">Base Endpoint URL</label>
+        <label for="ai-base-url" class="text-slate-400 text-xs font-medium">Base Endpoint URL</label>
         {#if provider === 'ollama'}
           <button
             type="button"
@@ -498,6 +500,7 @@
         {/if}
       </div>
       <input
+        id="ai-base-url"
         type="text"
         bind:value={baseUrl}
         placeholder={provider === 'custom' ? 'https://your-proxy/v1' : 'https://api.openai.com/v1'}
@@ -505,8 +508,9 @@
       />
     </div>
     <div>
-      <label class="block text-slate-400 text-xs font-medium mb-1">Model Identifier *</label>
+      <label for="ai-model-name" class="block text-slate-400 text-xs font-medium mb-1">Model Identifier *</label>
       <input
+        id="ai-model-name"
         type="text"
         bind:value={modelName}
         placeholder="e.g. gpt-4o-mini"
@@ -535,8 +539,9 @@
   <!-- Language & Response Style -->
   <div class="grid grid-cols-2 gap-3">
     <div>
-      <label class="block text-slate-400 text-xs font-medium mb-1">Response Language</label>
+      <label for="ai-language" class="block text-slate-400 text-xs font-medium mb-1">Response Language</label>
       <select
+        id="ai-language"
         bind:value={language}
         class="w-full bg-[#050811] border border-[#1e293b] rounded-lg px-3 py-2 text-slate-200 text-xs focus:outline-none focus:border-sky-500"
       >
@@ -546,8 +551,9 @@
       </select>
     </div>
     <div>
-      <label class="block text-slate-400 text-xs font-medium mb-1">Response Style</label>
+      <label for="ai-response-style" class="block text-slate-400 text-xs font-medium mb-1">Response Style</label>
       <select
+        id="ai-response-style"
         bind:value={responseStyle}
         class="w-full bg-[#050811] border border-[#1e293b] rounded-lg px-3 py-2 text-slate-200 text-xs focus:outline-none focus:border-sky-500"
       >
@@ -559,8 +565,9 @@
   </div>
 
   <div>
-    <label class="block text-slate-400 text-xs font-medium mb-1">Custom System Instructions (Optional)</label>
+    <label for="ai-custom-prompt" class="block text-slate-400 text-xs font-medium mb-1">Custom System Instructions (Optional)</label>
     <textarea
+      id="ai-custom-prompt"
       bind:value={customPrompt}
       rows="2"
       placeholder="e.g. Always prefer CTEs over subqueries, prioritize indexing..."
@@ -570,10 +577,11 @@
 
   <div>
     <div class="flex items-center justify-between mb-1">
-      <label class="text-slate-400 text-xs font-medium">Temperature: {temperature}</label>
+      <label for="ai-temperature" class="text-slate-400 text-xs font-medium">Temperature: {temperature}</label>
       <span class="text-slate-500 text-[10px]">Deterministic (0.0) ↔ Creative (1.0)</span>
     </div>
     <input
+      id="ai-temperature"
       type="range"
       min="0"
       max="1"

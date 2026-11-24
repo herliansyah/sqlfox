@@ -68,6 +68,7 @@
 
   // Multi-row selection
   let selectedRowIndices = $state<number[]>([]);
+  let selectedRowSet = $derived(new Set(selectedRowIndices));
 
   function flashCell(rIdx: number, cIdx: number) {
     const key = `${rIdx}:${cIdx}`;
@@ -139,10 +140,15 @@
     window.removeEventListener('sqlfox:focus-table-filter', handleFocusTableFilterEvent);
   });
 
-  // Reset selection, scroll, and editing states when active tab or result set changes
+  // Reset selection, scroll, and editing states when active tab or a new query run starts
+  // (NOT on every streaming chunk flush, which would yank the user back to row 0).
   $effect(() => {
     const _tabId = currentTab?.id;
-    const _res = result;
+    const _runId = currentTab?.resultRunId;
+    const _resIdx = currentTab?.activeResultIndex;
+    void _tabId;
+    void _runId;
+    void _resIdx;
     scrollTop = 0;
     if (containerRef) containerRef.scrollTop = 0;
     selectedRowIndices = [];
@@ -379,8 +385,20 @@
     }
   }
 
+  let hasClientRowTransform = $derived(
+    Boolean(
+      (!currentTab?.isTableViewer && currentTab?.filterPills && currentTab.filterPills.length > 0) ||
+      localSearchQuery.trim() !== '' ||
+      (!currentTab?.isTableViewer && sortCol !== null)
+    )
+  );
+
   let processedRows = $derived.by(() => {
     if (!result?.rows) return [];
+    if (!hasClientRowTransform) {
+      // Fast path: avoid O(N) remapping on every streaming chunk when no client-side filter/sort is active.
+      return null;
+    }
     let list = result.rows.map((r, idx) => ({ origIdx: idx, data: r }));
 
     // Client-side pill filtering for non-TableViewer query result sets
@@ -425,7 +443,7 @@
     return list;
   });
 
-  let totalRows = $derived(processedRows.length);
+  let totalRows = $derived(processedRows ? processedRows.length : (result?.rows?.length ?? 0));
   let totalCols = $derived(visibleColumns.length + 1);
 
   let startIndex = $derived(Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN));
@@ -435,17 +453,25 @@
   let bottomSpacerHeight = $derived(Math.max(0, (totalRows - endIndex) * ROW_HEIGHT));
 
   let visibleRows = $derived.by(() => {
-    return processedRows.slice(startIndex, endIndex).map((item, idx) => ({
-      displayIdx: startIndex + idx,
-      origIdx: item.origIdx,
-      data: item.data,
-    }));
+    if (processedRows) {
+      return processedRows.slice(startIndex, endIndex).map((item, idx) => ({
+        displayIdx: startIndex + idx,
+        origIdx: item.origIdx,
+        data: item.data,
+      }));
+    }
+    const raw = result?.rows;
+    if (!raw) return [];
+    const out: Array<{ displayIdx: number; origIdx: number; data: any[] }> = [];
+    for (let i = startIndex; i < endIndex && i < raw.length; i++) {
+      out.push({ displayIdx: i, origIdx: i, data: raw[i] });
+    }
+    return out;
   });
 
   function onScroll(e: Event) {
     const target = e.currentTarget as HTMLDivElement;
     scrollTop = target.scrollTop;
-    containerHeight = target.clientHeight || 500;
   }
 
   function handleHeaderSort(colName: string) {
@@ -480,14 +506,16 @@
   }
 
   let isAllSelected = $derived(
-    processedRows.length > 0 && selectedRowIndices.length === processedRows.length
+    totalRows > 0 && selectedRowIndices.length === totalRows
   );
 
   function toggleSelectAll() {
     if (isAllSelected) {
       selectedRowIndices = [];
-    } else {
+    } else if (processedRows) {
       selectedRowIndices = processedRows.map((r) => r.origIdx);
+    } else {
+      selectedRowIndices = Array.from({ length: totalRows }, (_, i) => i);
     }
   }
 
@@ -581,8 +609,8 @@
       }
     }
     try {
-      await appState.insertRow(cleaned);
-      if (currentTab?.stagedDraftRows) {
+      const ok = await appState.insertRow(cleaned);
+      if (ok && currentTab?.stagedDraftRows) {
         currentTab.stagedDraftRows.splice(dIdx, 1);
       }
     } catch (err: any) {
@@ -821,26 +849,28 @@
 
   function copyGridAsTSV() {
     if (!result?.rows || !result?.columns) return;
+    const rowsData = processedRows ? processedRows.map((item) => item.data) : result.rows;
     const text = buildTSVExport(
       visibleColumns.map((c) => getColName(c)),
-      processedRows.map((item) => item.data),
+      rowsData,
       visibleColumnEntries.map((e) => e.origIdx)
     );
     copyText(text);
     showExportMenu = false;
-    appState.showToast(`Copied ${processedRows.length} rows as TSV`, 'success');
+    appState.showToast(`Copied ${rowsData.length} rows as TSV`, 'success');
   }
 
   function copyGridAsMarkdown() {
     if (!result?.rows || !result?.columns) return;
+    const rowsData = processedRows ? processedRows.map((item) => item.data) : result.rows;
     const text = buildMarkdownExport(
       visibleColumns.map((c) => getColName(c)),
-      processedRows.map((item) => item.data),
+      rowsData,
       visibleColumnEntries.map((e) => e.origIdx)
     );
     copyText(text);
     showExportMenu = false;
-    appState.showToast(`Copied ${processedRows.length} rows as Markdown Table`, 'success');
+    appState.showToast(`Copied ${rowsData.length} rows as Markdown Table`, 'success');
   }
 
   function copyRowAsTSV(rIdx: number) {
@@ -1013,26 +1043,34 @@
     }
   }
 
+  function getDisplayRow(dispIdx: number): { origIdx: number; data: any[] } | undefined {
+    if (processedRows) return processedRows[dispIdx];
+    const data = result?.rows?.[dispIdx];
+    return data !== undefined ? { origIdx: dispIdx, data } : undefined;
+  }
+
   function advanceActiveCell(dRow: number, dCol: number) {
-    if (processedRows.length === 0 || visibleColumnEntries.length === 0) return;
+    if (totalRows === 0 || visibleColumnEntries.length === 0) return;
     const curDisplayIdx = selectedCell
-      ? Math.max(0, processedRows.findIndex((r) => r.origIdx === selectedCell!.rIdx))
+      ? processedRows
+        ? Math.max(0, processedRows.findIndex((r) => r.origIdx === selectedCell!.rIdx))
+        : Math.max(0, Math.min(totalRows - 1, selectedCell.rIdx))
       : 0;
     const curVisColIdx = selectedCell
       ? Math.max(0, visibleColumnEntries.findIndex((e) => e.origIdx === selectedCell!.cIdx))
       : 0;
 
-    let nextDisplayIdx = Math.max(0, Math.min(processedRows.length - 1, curDisplayIdx + dRow));
+    let nextDisplayIdx = Math.max(0, Math.min(totalRows - 1, curDisplayIdx + dRow));
     let nextVisColIdx = curVisColIdx + dCol;
     if (nextVisColIdx >= visibleColumnEntries.length) {
       nextVisColIdx = 0;
-      nextDisplayIdx = Math.min(processedRows.length - 1, nextDisplayIdx + 1);
+      nextDisplayIdx = Math.min(totalRows - 1, nextDisplayIdx + 1);
     } else if (nextVisColIdx < 0) {
       nextVisColIdx = visibleColumnEntries.length - 1;
       nextDisplayIdx = Math.max(0, nextDisplayIdx - 1);
     }
 
-    const row = processedRows[nextDisplayIdx];
+    const row = getDisplayRow(nextDisplayIdx);
     const colEntry = visibleColumnEntries[nextVisColIdx];
     if (!row || !colEntry) return;
     selectedCell = { rIdx: row.origIdx, cIdx: colEntry.origIdx };
@@ -1071,7 +1109,7 @@
     // Cap scan at 5,000 cells for instant UI feedback
     let scanned = 0;
     for (let r = b.rMin; r <= b.rMax && scanned < 5000; r++) {
-      const row = processedRows[r];
+      const row = getDisplayRow(r);
       if (!row) continue;
       for (let c = b.cMin; c <= b.cMax && scanned < 5000; c++) {
         scanned++;
@@ -1110,7 +1148,7 @@
     if (b) {
       const lines: string[] = [];
       for (let r = b.rMin; r <= b.rMax; r++) {
-        const row = processedRows[r];
+        const row = getDisplayRow(r);
         if (!row) continue;
         const vals: string[] = [];
         for (let c = b.cMin; c <= b.cMax; c++) {
@@ -2045,7 +2083,7 @@
             </tr>
           {/if}
 
-          {#if processedRows.length === 0}
+          {#if totalRows === 0}
             <tr>
               <td colspan={totalCols} class="p-12 text-center text-slate-500 italic text-xs">
                 Zero records returned.
@@ -2054,7 +2092,7 @@
           {:else}
             {#each visibleRows as rowItem (rowItem.origIdx)}
               {@const isRowSelected = selectedRowIndex === rowItem.origIdx}
-              {@const isChecked = selectedRowIndices.includes(rowItem.origIdx)}
+              {@const isChecked = selectedRowSet.has(rowItem.origIdx)}
               <tr
                 onclick={() => (selectedRowIndex = rowItem.origIdx)}
                 class="border-b border-[#1e293b]/60 transition-colors h-7 {

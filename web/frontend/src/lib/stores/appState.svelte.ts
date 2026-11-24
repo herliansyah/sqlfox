@@ -1629,6 +1629,7 @@ export class AppState {
       if (res && res.row_count === undefined && res.rows) {
         res.row_count = res.rows.length;
       }
+      tab.resultRunId = (tab.resultRunId ?? 0) + 1;
       tab.activeResult = res;
 
       // Synchronize exact/effective row count back into the table catalog immutably
@@ -1879,6 +1880,21 @@ export class AppState {
     this.saveTabsState();
   }
 
+  private async rollbackTabsTransactions(tabs: EditorTab[]) {
+    if (!this.activeSessionId) return;
+    for (const t of tabs) {
+      if (t.txActive) {
+        try {
+          await api.executeQuery(this.activeSessionId, 'ROLLBACK;', {
+            confirmed: true,
+            database: t.database || this.currentDatabase,
+            tabId: t.id,
+          });
+        } catch { /* ignore */ }
+      }
+    }
+  }
+
   async closeOtherTabs(tabId: string) {
     const others = this.tabs.filter((t) => t.id !== tabId);
     const hasRisk = others.some((t) => t.txActive || t.isExecuting || this.isTabDirty(t) || (t.stagedDraftRows?.length || 0) > 0);
@@ -1889,6 +1905,7 @@ export class AppState {
       );
       if (!ok) return;
     }
+    await this.rollbackTabsTransactions(others);
     for (const t of others) this.cleanupTabResources(t);
     this.tabs = this.tabs.filter((t) => t.id === tabId);
     this.activeTabId = tabId;
@@ -1906,6 +1923,7 @@ export class AppState {
       );
       if (!ok) return;
     }
+    await this.rollbackTabsTransactions(toClose);
     for (const t of toClose) this.cleanupTabResources(t);
     this.tabs = this.tabs.slice(0, idx + 1);
     if (!this.tabs.some((t) => t.id === this.activeTabId)) {
@@ -1922,6 +1940,7 @@ export class AppState {
       );
       if (!ok) return;
     }
+    await this.rollbackTabsTransactions(this.tabs);
     for (const t of this.tabs) this.cleanupTabResources(t);
     this.tabs = [
       {
@@ -2097,6 +2116,7 @@ export class AppState {
     tab.isStreaming = true;
     tab.executionStartedAt = performance.now();
     tab.executionElapsedMs = 0;
+    tab.resultRunId = (tab.resultRunId ?? 0) + 1;
     tab.statusText = 'Executing...';
     tab.streamBatchOffset = 0;
     tab.hasMoreStream = false;
@@ -2853,7 +2873,9 @@ export class AppState {
     const rowObj = this.activeTab?.activeResult?.rows?.[rIdx];
     const uid = rowObj ? this.getRowUid(rowObj) : rIdx;
     const key = `${table}:${uid}:${cIdx}`;
+    const existing = this.stagedEdits[key];
     this.stagedEdits[key] = {
+      tabId: this.activeTab?.id,
       rIdx,
       cIdx,
       table,
@@ -2863,7 +2885,7 @@ export class AppState {
       pkVal,
       pkValues,
       rowCriteria,
-      oldVal,
+      oldVal: existing ? existing.oldVal : oldVal,
       newVal,
     };
     // Auto mode persists immediately (optionally after confirmation); staged mode waits for Apply.
@@ -2914,20 +2936,25 @@ export class AppState {
   }
 
   discardStagedEdits() {
+    const activeTabId = this.activeTab?.id;
     const rows = this.activeTab?.activeResult?.rows;
-    if (Array.isArray(rows)) {
-      for (const item of Object.values(this.stagedEdits)) {
-        if (rows[item.rIdx] && item.cIdx < rows[item.rIdx].length) {
+    const remaining: Record<string, StagedEdit> = {};
+    for (const [key, item] of Object.entries(this.stagedEdits)) {
+      const belongsToActiveTab = !item.tabId || item.tabId === activeTabId;
+      if (belongsToActiveTab) {
+        if (Array.isArray(rows) && rows[item.rIdx] && item.cIdx < rows[item.rIdx].length) {
           rows[item.rIdx][item.cIdx] = item.oldVal;
         }
+      } else {
+        remaining[key] = item;
       }
     }
     if (this.activeTab?.stagedDraftRows?.length) {
       this.activeTab.stagedDraftRows = [];
     }
-    this.stagedEdits = {};
+    this.stagedEdits = remaining;
     this.tabs = [...this.tabs];
-    this.showToast('Discarded all staged changes', 'info');
+    this.showToast('Discarded staged changes for active tab', 'info');
   }
 
   private gridEditsContext(): GridEditsContext {
@@ -2961,8 +2988,8 @@ export class AppState {
     await commitStagedEditsAction(this.gridEditsContext());
   }
 
-  async insertRow(data: Record<string, any>) {
-    await insertRowAction(this.gridEditsContext(), data);
+  async insertRow(data: Record<string, any>): Promise<boolean> {
+    return await insertRowAction(this.gridEditsContext(), data);
   }
 
   async deleteRows(pkCol: string, pkValues: any[]) {
@@ -3200,8 +3227,8 @@ export class AppState {
     await dropTableAction(this.ddlOperationsContext(), tableName, database);
   }
 
-  async truncateTable(tableName: string, database?: string) {
-    await truncateTableAction(this.ddlOperationsContext(), tableName, database);
+  async truncateTable(tableName: string, database?: string): Promise<boolean> {
+    return await truncateTableAction(this.ddlOperationsContext(), tableName, database);
   }
 
   async renameTable(oldName: string, newName: string, database?: string) {
@@ -3343,27 +3370,39 @@ export class AppState {
     if (newVal !== String(oldVal ?? '')) {
       const catalog = (effectiveDb && this.catalogs[effectiveDb.toLowerCase()]) || this.catalog;
       const table = catalog?.tables?.find((t) => t.name.toLowerCase() === tableName.toLowerCase());
-      let pkCol = '';
-      const pkColObj = result.columns.find((c: any) => typeof c === 'object' && c.is_primary_key);
-      if (pkColObj) {
-        pkCol = typeof pkColObj === 'string' ? pkColObj : pkColObj.name;
-      } else if (table?.columns) {
-        const pkMeta = table.columns.find((c) => c.is_primary_key);
-        if (pkMeta) pkCol = pkMeta.name;
+      const getColName = (c: any) => (typeof c === 'string' ? c : c.name || '');
+      const isColPK = (c: any) => {
+        if (typeof c === 'object' && c.is_primary_key !== undefined) return Boolean(c.is_primary_key);
+        const name = getColName(c);
+        return Boolean(table?.columns?.find((cm) => cm.name.toLowerCase() === name.toLowerCase())?.is_primary_key);
+      };
+
+      const pkCols = result.columns.filter((c: any) => isColPK(c)).map((c: any) => getColName(c));
+      let pkCol: string | undefined;
+      let pkVal: any;
+      let pkValues: Record<string, any> | undefined;
+
+      if (pkCols.length === 1) {
+        pkCol = pkCols[0];
+        const pkIdx = result.columns.findIndex((c: any) => getColName(c) === pkCol);
+        pkVal = pkIdx !== -1 ? result.rows[rowIdx][pkIdx] : undefined;
+      } else if (pkCols.length > 1) {
+        pkValues = {};
+        for (const col of pkCols) {
+          const idx = result.columns.findIndex((c: any) => getColName(c) === col);
+          pkValues[col] = idx !== -1 ? result.rows[rowIdx][idx] : undefined;
+        }
       }
-      const pkIdx = pkCol ? result.columns.findIndex((c: any) => (typeof c === 'string' ? c : c.name) === pkCol) : -1;
-      const pkVal = pkIdx !== -1 ? result.rows[rowIdx][pkIdx] : undefined;
 
       let rowCriteria: Record<string, any> | undefined;
-      if (!pkCol) {
+      if (pkCols.length === 0) {
         rowCriteria = {};
         result.columns.forEach((c: any, idx: number) => {
-          const colKey = typeof c === 'string' ? c : c.name;
-          rowCriteria![colKey] = result.rows[rowIdx][idx];
+          rowCriteria![getColName(c)] = result.rows[rowIdx][idx];
         });
       }
 
-      this.stageEdit(tableName, rowIdx, colIdx, colName, pkCol || undefined, pkVal, oldVal, newVal, effectiveDb, rowCriteria);
+      this.stageEdit(tableName, rowIdx, colIdx, colName, pkCol, pkVal, oldVal, newVal, effectiveDb, rowCriteria, pkValues);
       result.rows[rowIdx][colIdx] = newVal;
       this.showToast(`Staged JSON update for '${colName}'`, 'info');
     }

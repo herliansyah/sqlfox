@@ -50,20 +50,20 @@ export function formatSqlRowInsert(row: any[], cols: string[], tbl: string, driv
   return `INSERT INTO ${q(tbl)} (${qCols}) VALUES (${vals});`;
 }
 
+function sanitizeCSVCell(cell: any): string {
+  if (cell === null || cell === undefined) return '""';
+  const str = typeof cell === 'object' ? JSON.stringify(cell) : String(cell);
+  // Neutralize spreadsheet formula injection (=, +, -, @, tab, CR) on non-numeric strings
+  // and preserve leading-zero identifiers (ZIP codes, phone numbers) without formula syntax.
+  if (typeof cell !== 'number' && (/^[=+\-@\t\r]/.test(str) || /^0\d+$/.test(str))) {
+    return `"'${str.replace(/"/g, '""')}"`;
+  }
+  return `"${str.replace(/"/g, '""')}"`;
+}
+
 export function buildCSVExport(columnNames: string[], rows: any[][]): string {
-  const headers = columnNames.map((name) => `"${name.replace(/"/g, '""')}"`).join(',');
-  const body = rows.map((row) =>
-    row
-      .map((cell) => {
-        if (cell === null || cell === undefined) return '""';
-        const str = typeof cell === 'object' ? JSON.stringify(cell) : String(cell);
-        if (/^0\d+$/.test(str)) {
-          return `"=""${str.replace(/"/g, '""')}"""`;
-        }
-        return `"${str.replace(/"/g, '""')}"`;
-      })
-      .join(',')
-  );
+  const headers = columnNames.map((name) => sanitizeCSVCell(name)).join(',');
+  const body = rows.map((row) => row.map((cell) => sanitizeCSVCell(cell)).join(','));
   return '\uFEFF' + [headers, ...body].join('\n');
 }
 

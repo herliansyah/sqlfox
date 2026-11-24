@@ -157,13 +157,25 @@
       return;
     }
 
-    const pkColObj = result.columns.find((c) => isColPK(c));
-    const pkCol = pkColObj ? getColName(pkColObj) : undefined;
-    const pkColIdx = pkCol ? result.columns.findIndex((c) => getColName(c) === pkCol) : -1;
-    const pkVal = pkColIdx !== -1 ? currentRow[pkColIdx] : undefined;
+    const pkCols = result.columns.filter((c) => isColPK(c)).map((c) => getColName(c));
+    let pkCol: string | undefined;
+    let pkVal: any;
+    let pkValues: Record<string, any> | undefined;
+
+    if (pkCols.length === 1) {
+      pkCol = pkCols[0];
+      const pkColIdx = result.columns.findIndex((c) => getColName(c) === pkCol);
+      pkVal = pkColIdx !== -1 ? currentRow[pkColIdx] : undefined;
+    } else if (pkCols.length > 1) {
+      pkValues = {};
+      for (const col of pkCols) {
+        const idx = result.columns.findIndex((c) => getColName(c) === col);
+        pkValues[col] = idx !== -1 ? currentRow[idx] : undefined;
+      }
+    }
 
     let rowCriteria: Record<string, any> | undefined;
-    if (!pkCol) {
+    if (pkCols.length === 0) {
       rowCriteria = {};
       result.columns.forEach((c: any, idx: number) => {
         const colKey = getColName(c);
@@ -181,7 +193,8 @@
       oldVal,
       newVal,
       effectiveDatabase,
-      rowCriteria
+      rowCriteria,
+      pkValues
     );
     currentRow[cIdx] = newVal;
     delete editedFields[colName];

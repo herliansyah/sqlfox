@@ -1,5 +1,11 @@
 import type { FilterPill } from '../../types';
 
+const STRICT_NUMBER_RE = /^-?(0|[1-9]\d*)(\.\d+)?$/;
+
+function isStrictNumericLiteral(val: string): boolean {
+  return STRICT_NUMBER_RE.test(val);
+}
+
 /**
  * Compiles structured UI filter pills into a driver-aware SQL WHERE predicate.
  * All literal values (including IN/NOT IN lists and BETWEEN bounds) are quoted
@@ -31,7 +37,7 @@ export function compileFilterPills(pills: FilterPill[], driver?: string): string
       const items = inner.split(',').map((s) => s.trim()).filter(Boolean);
       const formatted = items
         .map((item) => {
-          if (/^-?\d+(\.\d+)?$/.test(item)) return item;
+          if (isStrictNumericLiteral(item)) return item;
           const unquoted = item.replace(/^'(.*)'$/s, '$1');
           return `'${unquoted.replace(/'/g, "''")}'`;
         })
@@ -46,16 +52,15 @@ export function compileFilterPills(pills: FilterPill[], driver?: string): string
       const parts = val.split(/\s+AND\s+/i).slice(0, 2);
       const fmt = (part: string) => {
         const pStr = part.trim().replace(/^'(.*)'$/s, '$1');
-        return /^-?\d+(\.\d+)?$/.test(pStr) ? pStr : `'${pStr.replace(/'/g, "''")}'`;
+        return isStrictNumericLiteral(pStr) ? pStr : `'${pStr.replace(/'/g, "''")}'`;
       };
-      if (parts.length === 2) {
+      if (parts.length === 2 && parts[0].trim() !== '' && parts[1].trim() !== '') {
         clauses.push(`${colEscaped} BETWEEN ${fmt(parts[0])} AND ${fmt(parts[1])}`);
-      } else {
-        clauses.push(`${colEscaped} BETWEEN '${val.replace(/'/g, "''")}'`);
+      } else if (parts[0] && parts[0].trim() !== '') {
+        clauses.push(`${colEscaped} >= ${fmt(parts[0])}`);
       }
     } else {
-      const isNum = !isNaN(Number(val)) && val !== '' && !val.includes(' ');
-      if (isNum) {
+      if (isStrictNumericLiteral(val)) {
         clauses.push(`${colEscaped} ${op} ${val}`);
       } else {
         clauses.push(`${colEscaped} ${op} '${val.replace(/'/g, "''")}'`);

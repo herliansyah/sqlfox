@@ -217,6 +217,7 @@ export interface QueryExecutionResult {
 }
 
 export interface StagedEdit {
+  tabId?: string;
   rIdx: number;
   cIdx: number;
   table: string;
@@ -332,6 +333,7 @@ export interface EditorTab {
   isNote?: boolean;
   noteMode?: 'edit' | 'preview';
   activeResult?: QueryExecutionResult | null;
+  resultRunId?: number;
   isExecuting?: boolean;
   isExplaining?: boolean;
   isStreaming?: boolean;

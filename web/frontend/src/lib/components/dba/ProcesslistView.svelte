@@ -351,11 +351,16 @@
     }
   }
 
+  let isPollingCluster = false;
+
   async function loadClusterReport() {
-    if (!appState.activeSessionId) return;
+    const sessionId = appState.activeSessionId;
+    if (!sessionId || isPollingCluster) return;
+    isPollingCluster = true;
     isClusterLoading = true;
     try {
-      const res = await api.getClusterHealth(appState.activeSessionId);
+      const res = await api.getClusterHealth(sessionId);
+      if (appState.activeSessionId !== sessionId) return;
       clusterReport = res;
       clusterUpdatedAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       // Sync global cluster badge when telemetry reports cluster/replication
@@ -368,8 +373,10 @@
         appState.dbaClusterLabel = '';
       }
     } catch (err: any) {
+      if (appState.activeSessionId !== sessionId) return;
       clusterReport = null;
     } finally {
+      isPollingCluster = false;
       isClusterLoading = false;
     }
   }
@@ -410,6 +417,8 @@
     } catch (_) {}
   }
 
+  let isPollingFlight = false;
+
   function startFlightTimers() {
     stopFlightTimers();
     flightTickerTimer = setInterval(() => {
@@ -418,9 +427,12 @@
     }, 1000);
     // Poll every >= 1000ms for real-time telemetry streaming
     flightPollTimer = setInterval(async () => {
-      if (!appState.activeSessionId || !isRecording) return;
+      const sessionId = appState.activeSessionId;
+      if (!sessionId || !isRecording || isPollingFlight) return;
+      isPollingFlight = true;
       try {
-        const status = await api.getFlightRecorderStatus(appState.activeSessionId);
+        const status = await api.getFlightRecorderStatus(sessionId);
+        if (appState.activeSessionId !== sessionId) return;
         if (!status.is_recording) {
           isRecording = false;
           appState.flightRecordingActive = false;
@@ -435,7 +447,10 @@
             flightSessionTicks = status.recent_ticks;
           }
         }
-      } catch (_) {}
+      } catch (_) {
+      } finally {
+        isPollingFlight = false;
+      }
     }, Math.max(1000, flightIntervalMs));
   }
 
