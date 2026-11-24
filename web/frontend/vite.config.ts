@@ -26,9 +26,18 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: '../dist_svelte',
-    emptyOutDir: true,
+    outDir: '../dist',
+    emptyOutDir: false,
     sourcemap: false,
     chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('@codemirror/') || id.includes('@lezer/')) {
+            return 'codemirror';
+          }
+        },
+      },
+    },
   },
 });
