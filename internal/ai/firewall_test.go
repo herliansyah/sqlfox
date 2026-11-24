@@ -197,3 +197,20 @@ func TestFirewall_MaskingCoversEveryIdentifier(t *testing.T) {
 		t.Fatalf("table notes leaked while masking is enabled")
 	}
 }
+
+func TestFirewall_Unmasking(t *testing.T) {
+	mapping := map[string]string{
+		"users":         "masked_1",
+		"email":         "masked_2",
+		"user_accounts": "masked_3",
+		"id":            "masked_4",
+	}
+
+	aiResponse := "You can optimize this with: SELECT masked_2 FROM masked_1 WHERE masked_4 = 10; Also check masked_3."
+	unmasked := UnmaskIdentifiersInText(aiResponse, mapping)
+
+	expected := "You can optimize this with: SELECT email FROM users WHERE id = 10; Also check user_accounts."
+	if unmasked != expected {
+		t.Fatalf("expected:\n%s\ngot:\n%s", expected, unmasked)
+	}
+}
