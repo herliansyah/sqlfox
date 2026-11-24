@@ -129,6 +129,7 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 		dsn:          dsn,
 		tlsKey:       tlsKey,
 		queryThreads: make(map[string]int64),
+		connStates:   *driver.NewConnStateMap[mysqlConnState](64),
 		pfsEnabled:   pfsEnabled,
 	}, nil
 }
@@ -661,6 +662,75 @@ func (s *MySQLSession) QueryRaw(ctx context.Context, sql string, args ...any) ([
 		result = append(result, vals)
 	}
 	return result, rows.Err()
+}
+
+// ExecScriptConn pins a single physical MySQL connection for the duration of a multi-statement
+// script so SET FOREIGN_KEY_CHECKS, SET SQL_MODE, and BEGIN/COMMIT execute on the same session,
+// and restores FOREIGN_KEY_CHECKS=1 before releasing the connection back to the pool.
+func (s *MySQLSession) ExecScriptConn(ctx context.Context, fn func(exec func(context.Context, string) (*driver.ExecResult, error)) error) error {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		restoreCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_, _ = conn.ExecContext(restoreCtx, "SET FOREIGN_KEY_CHECKS = 1")
+		cancel()
+		_ = conn.Close()
+	}()
+	if err := s.applyActiveDatabase(ctx, conn); err != nil {
+		return err
+	}
+	return fn(func(c context.Context, q string) (*driver.ExecResult, error) {
+		start := time.Now()
+		res, err := conn.ExecContext(c, q)
+		if err != nil {
+			return nil, err
+		}
+		rowsAff, _ := res.RowsAffected()
+		lastID, _ := res.LastInsertId()
+		return &driver.ExecResult{
+			RowsAffected: rowsAff,
+			LastInsertID: lastID,
+			ExecutionMs:  time.Since(start).Milliseconds(),
+			Message:      fmt.Sprintf("Query OK, %d rows affected", rowsAff),
+		}, nil
+	})
+}
+
+// QueryStreamReadOnly enforces MySQL engine-level READ ONLY transaction mode for read-only sessions.
+func (s *MySQLSession) QueryStreamReadOnly(ctx context.Context, sqlStr string, limit int) (driver.RowStream, error) {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.applyActiveDatabase(ctx, conn); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	tx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	querySQL := driver.ApplyLimitClause(sqlStr, limit)
+	rows, err := tx.QueryContext(ctx, querySQL)
+	if err != nil {
+		_ = tx.Rollback()
+		_ = conn.Close()
+		return nil, err
+	}
+	colTypes, err := rows.ColumnTypes()
+	if err != nil {
+		_ = rows.Close()
+		_ = tx.Rollback()
+		_ = conn.Close()
+		return nil, err
+	}
+	return driver.NewSQLRowStream(rows, driver.ColumnsFromTypes(colTypes), func() {
+		_ = tx.Rollback()
+		_ = conn.Close()
+	}), nil
 }
 
 // InspectServerVariables introspects all server variables and correlates them with tuning rules.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	gomysql "github.com/go-sql-driver/mysql"
 	"github.com/herliansyah/sqlfox/internal/advisor"
 	"github.com/herliansyah/sqlfox/internal/driver"
 	"strconv"
@@ -230,10 +231,25 @@ func (s *MySQLSession) probePeerNode(parentCtx context.Context, hostPort, origAd
 	ctx, cancel := context.WithTimeout(parentCtx, 1500*time.Millisecond)
 	defer cancel()
 
-	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&timeout=1200ms&readTimeout=1200ms",
-		s.cfg.User, s.cfg.Password, hostPort, s.activeDB(),
-	)
-	peerDB, err := sql.Open("mysql", dsn)
+	mc := gomysql.NewConfig()
+	mc.User = s.cfg.User
+	mc.Passwd = s.cfg.Password
+	mc.Net = "tcp"
+	mc.Addr = hostPort
+	mc.DBName = s.activeDB()
+	mc.Timeout = 1200 * time.Millisecond
+	mc.ReadTimeout = 1200 * time.Millisecond
+	mc.Params = map[string]string{"charset": "utf8mb4"}
+	if s.cfg.UseSSL {
+		if s.tlsKey != "" {
+			mc.TLSConfig = s.tlsKey
+		} else {
+			mc.TLSConfig = "true"
+		}
+	} else {
+		mc.TLSConfig = "false"
+	}
+	peerDB, err := sql.Open("mysql", mc.FormatDSN())
 	if err != nil {
 		return driver.ClusterNodeInfo{
 			Address: origAddr,
@@ -462,13 +478,31 @@ func (s *MySQLSession) inspectStandardReplicationOrStandalone(ctx context.Contex
 		}
 	}
 
-	// Check if this instance is a Source / Master with binary logging enabled
-	// ponytail: Dual-syntax probe: SHOW BINARY LOG STATUS (MySQL 8.4+) fallback to SHOW MASTER STATUS (MySQL 5.7/8.0)
+	// Check if this instance is a Source / Master with binary logging enabled.
+	// Scan dynamically by column count so MySQL 8.4+ (5 cols), MySQL 5.7/8.0 (5 cols),
+	// and MariaDB (4 cols) all parse cleanly without silently failing Scan.
 	var binlogFile string
 	var binlogPos int64
-	bErr := s.db.QueryRowContext(ctx, "SHOW BINARY LOG STATUS").Scan(&binlogFile, &binlogPos, new(string), new(string), new(string))
-	if bErr != nil {
-		_ = s.db.QueryRowContext(ctx, "SHOW MASTER STATUS").Scan(&binlogFile, &binlogPos, new(string), new(string), new(string))
+	scanBinlogStatus := func(q string) bool {
+		rows, err := s.db.QueryContext(ctx, q)
+		if err != nil {
+			return false
+		}
+		defer rows.Close()
+		cols, err := rows.Columns()
+		if err != nil || len(cols) < 2 || !rows.Next() {
+			return false
+		}
+		vals := make([]any, len(cols))
+		vals[0] = &binlogFile
+		vals[1] = &binlogPos
+		for i := 2; i < len(cols); i++ {
+			vals[i] = new(sql.RawBytes)
+		}
+		return rows.Scan(vals...) == nil && binlogFile != ""
+	}
+	if !scanBinlogStatus("SHOW BINARY LOG STATUS") {
+		_ = scanBinlogStatus("SHOW MASTER STATUS")
 	}
 	if binlogFile != "" {
 		diagnosis := "Replication Source: binary logging active"

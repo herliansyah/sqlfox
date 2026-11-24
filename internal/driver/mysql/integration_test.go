@@ -22,7 +22,7 @@ func TestMySQLIntegrationLifecycle(t *testing.T) {
 	defer cancel()
 
 	// Expect standard DSN or host/port/user/pass via Connect; parse minimal env for CI.
-	sess, err := drv.Connect(ctx, driver.ConnectionConfig{
+	sess, err := drv.Connect(ctx, driver.Config{
 		Driver:       "mysql",
 		Host:         envOr("SQLFOX_TEST_MYSQL_HOST", "127.0.0.1"),
 		Port:         3306,

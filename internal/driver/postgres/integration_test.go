@@ -20,7 +20,7 @@ func TestPostgresIntegrationLifecycle(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	sess, err := drv.Connect(ctx, driver.ConnectionConfig{
+	sess, err := drv.Connect(ctx, driver.Config{
 		Driver:       "postgres",
 		Host:         envOr("SQLFOX_TEST_PG_HOST", "127.0.0.1"),
 		Port:         5432,

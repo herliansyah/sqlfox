@@ -41,7 +41,11 @@ func TestExtractColumnsFromIndexDef(t *testing.T) {
 		},
 		{
 			def:      `CREATE UNIQUE INDEX idx_orders_cust_date ON orders USING btree ("customer_id", "order_date" DESC)`,
-			expected: []string{"customer_id", `order_date" DESC`},
+			expected: []string{"customer_id", `"order_date" DESC`},
+		},
+		{
+			def:      `CREATE INDEX idx_users_lower_email ON users USING btree (lower(email)) WHERE (deleted_at IS NULL)`,
+			expected: []string{"lower(email)"},
 		},
 		{
 			def:      "invalid definition",
@@ -52,7 +56,12 @@ func TestExtractColumnsFromIndexDef(t *testing.T) {
 	for _, tt := range tests {
 		cols := extractColumnsFromIndexDef(tt.def)
 		if len(cols) != len(tt.expected) {
-			t.Errorf("def %q: expected %d cols, got %d (%v)", tt.def, len(tt.expected), len(cols), cols)
+			t.Fatalf("def %q: expected %d cols, got %d (%v)", tt.def, len(tt.expected), len(cols), cols)
+		}
+		for i := range tt.expected {
+			if cols[i] != tt.expected[i] {
+				t.Errorf("def %q col[%d]: expected %q, got %q", tt.def, i, tt.expected[i], cols[i])
+			}
 		}
 	}
 }
@@ -140,13 +149,17 @@ func TestPostgresRoutineSignatureParsing(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		base := c.inputName
-		if idx := strings.Index(c.inputName, "("); idx > 0 {
-			base = strings.TrimSpace(c.inputName[:idx])
+		if base := parseRoutineBaseName(c.inputName); base != c.baseName {
+			t.Errorf("parseRoutineBaseName(%q) = %q, want %q", c.inputName, base, c.baseName)
 		}
-		if base != c.baseName {
-			t.Errorf("input %s: expected base %s, got %s", c.inputName, c.baseName, base)
-		}
+	}
+}
+
+func TestExtractPGPlanRows(t *testing.T) {
+	raw := `[{"Plan":{"Node Type":"Seq Scan","Relation Name":"users","Plan Rows":150000,"Actual Rows":0}}]`
+	rows := extractPGPlanRows(raw)
+	if len(rows) != 1 || rows[0].Rows != 150000 || rows[0].Table != "users" {
+		t.Fatalf("unexpected plan rows: %+v", rows)
 	}
 }
 

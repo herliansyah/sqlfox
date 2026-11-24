@@ -428,6 +428,12 @@ func InspectTableRelationships(schema *SchemaMetadata, table string) []TableRela
 	return rels
 }
 
+// shellSingleQuote safely quotes a string for POSIX shells using single quotes so
+// $(...), backticks, and $VAR expansions are never evaluated when copy-pasted.
+func shellSingleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 // GenerateOSCCommand formats a production-ready Online Schema Change command.
 func GenerateOSCCommand(tool, host string, port int, user, database, table, alterClause string) string {
 	if port <= 0 {
@@ -448,14 +454,14 @@ func GenerateOSCCommand(tool, host string, port int, user, database, table, alte
 	}
 
 	if strings.EqualFold(tool, "pt-osc") || strings.EqualFold(tool, "pt-online-schema-change") {
-		return fmt.Sprintf("pt-online-schema-change \\\n  --host=%q \\\n  --port=%d \\\n  --user=%q \\\n  --ask-pass \\\n  --alter=%q \\\n  D=%q,t=%q \\\n  --chunk-size=1000 \\\n  --max-load=\"Threads_running=30\" \\\n  --critical-load=\"Threads_running=60\" \\\n  --execute",
-			host, port, user, cleanAlter, database, table,
+		return fmt.Sprintf("pt-online-schema-change \\\n  --host=%s \\\n  --port=%d \\\n  --user=%s \\\n  --ask-pass \\\n  --alter=%s \\\n  %s \\\n  --chunk-size=1000 \\\n  --max-load='Threads_running=30' \\\n  --critical-load='Threads_running=60' \\\n  --execute",
+			shellSingleQuote(host), port, shellSingleQuote(user), shellSingleQuote(cleanAlter), shellSingleQuote(fmt.Sprintf("D=%s,t=%s", database, table)),
 		)
 	}
 
 	// Default: gh-ost
-	return fmt.Sprintf("gh-ost \\\n  --host=%q \\\n  --port=%d \\\n  --user=%q \\\n  --ask-pass \\\n  --database=%q \\\n  --table=%q \\\n  --alter=%q \\\n  --chunk-size=1000 \\\n  --max-load=\"Threads_running=30\" \\\n  --critical-load=\"Threads_running=60\" \\\n  --allow-on-master \\\n  --execute",
-		host, port, user, database, table, cleanAlter,
+	return fmt.Sprintf("gh-ost \\\n  --host=%s \\\n  --port=%d \\\n  --user=%s \\\n  --ask-pass \\\n  --database=%s \\\n  --table=%s \\\n  --alter=%s \\\n  --chunk-size=1000 \\\n  --max-load='Threads_running=30' \\\n  --critical-load='Threads_running=60' \\\n  --allow-on-master \\\n  --execute",
+		shellSingleQuote(host), port, shellSingleQuote(user), shellSingleQuote(database), shellSingleQuote(table), shellSingleQuote(cleanAlter),
 	)
 }
 

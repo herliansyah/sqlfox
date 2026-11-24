@@ -90,6 +90,7 @@ func (d *PostgresDriver) Connect(ctx context.Context, cfg driver.Config) (driver
 		dsn:           u.String(),
 		currentSchema: "public",
 		queryPids:     make(map[string]int),
+		connStates:    *driver.NewConnStateMap[pgConnState](64),
 	}, nil
 }
 
@@ -148,6 +149,23 @@ func (s *PostgresSession) SelectDatabase(ctx context.Context, schemaName string)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// PostgreSQL physical database name != schema name. If caller passed the physical
+	// database name (e.g. default session.DatabaseName), verify whether a schema with
+	// that name actually exists; if not, keep/fall back to activeSchema ("public").
+	if schemaName == s.cfg.DatabaseName && schemaName != "public" {
+		var exists bool
+		_ = s.db.QueryRowContext(ctx,
+			"SELECT EXISTS(SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = $1)", schemaName,
+		).Scan(&exists)
+		if !exists {
+			if s.currentSchema != "" {
+				schemaName = s.currentSchema
+			} else {
+				schemaName = "public"
+			}
+		}
+	}
 
 	quoted := quoteIdentifier(schemaName)
 	if _, err := s.db.ExecContext(ctx, fmt.Sprintf("SET search_path = %s", quoted)); err != nil {
@@ -606,6 +624,67 @@ func (s *PostgresSession) QueryRaw(ctx context.Context, sql string, args ...any)
 		result = append(result, vals)
 	}
 	return result, rows.Err()
+}
+
+// ExecScriptConn pins a single physical PostgreSQL connection for a multi-statement script
+// so session settings and BEGIN/COMMIT blocks execute on the same backend.
+func (s *PostgresSession) ExecScriptConn(ctx context.Context, fn func(exec func(context.Context, string) (*driver.ExecResult, error)) error) error {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if err := s.applyActiveSchema(ctx, conn); err != nil {
+		return err
+	}
+	return fn(func(c context.Context, q string) (*driver.ExecResult, error) {
+		start := time.Now()
+		res, err := conn.ExecContext(c, q)
+		if err != nil {
+			return nil, err
+		}
+		rowsAff, _ := res.RowsAffected()
+		return &driver.ExecResult{
+			RowsAffected: rowsAff,
+			ExecutionMs:  time.Since(start).Milliseconds(),
+			Message:      fmt.Sprintf("Query OK, %d rows affected", rowsAff),
+		}, nil
+	})
+}
+
+// QueryStreamReadOnly enforces PostgreSQL engine-level READ ONLY transaction mode.
+func (s *PostgresSession) QueryStreamReadOnly(ctx context.Context, sqlStr string, limit int) (driver.RowStream, error) {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.applyActiveSchema(ctx, conn); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	tx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	querySQL := driver.ApplyLimitClause(sqlStr, limit)
+	rows, err := tx.QueryContext(ctx, querySQL)
+	if err != nil {
+		_ = tx.Rollback()
+		_ = conn.Close()
+		return nil, err
+	}
+	colTypes, err := rows.ColumnTypes()
+	if err != nil {
+		_ = rows.Close()
+		_ = tx.Rollback()
+		_ = conn.Close()
+		return nil, err
+	}
+	return driver.NewSQLRowStream(rows, driver.ColumnsFromTypes(colTypes), func() {
+		_ = tx.Rollback()
+		_ = conn.Close()
+	}), nil
 }
 
 func quoteIdentifier(id string) string {

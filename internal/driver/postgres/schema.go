@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"github.com/herliansyah/sqlfox/internal/driver"
 	"strings"
@@ -51,7 +52,7 @@ func (s *PostgresSession) inspectSchemaFiltered(ctx context.Context, schemaName,
 		       COALESCE(c.reltuples::bigint, 0) as row_count
 		FROM pg_catalog.pg_class c
 		JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-		WHERE n.nspname = $1 AND c.relkind IN ('r', 'v', 'm')
+		WHERE n.nspname = $1 AND c.relkind IN ('r', 'v', 'm', 'p')
 		  AND ($2 = '' OR LOWER(c.relname) = LOWER($2))
 		ORDER BY c.relname;
 	`, schemaName, onlyTable)
@@ -102,7 +103,7 @@ func (s *PostgresSession) inspectSchemaFiltered(ctx context.Context, schemaName,
 		JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
 		LEFT JOIN pg_catalog.pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
 		LEFT JOIN pg_catalog.pg_index i ON i.indrelid = c.oid AND a.attnum = ANY(i.indkey) AND i.indisprimary
-		WHERE n.nspname = $1 AND c.relkind IN ('r', 'v', 'm') AND a.attnum > 0 AND NOT a.attisdropped
+		WHERE n.nspname = $1 AND c.relkind IN ('r', 'v', 'm', 'p') AND a.attnum > 0 AND NOT a.attisdropped
 		  AND ($2 = '' OR LOWER(c.relname) = LOWER($2))
 		ORDER BY c.relname, a.attnum;
 	`, schemaName, onlyTable)
@@ -460,7 +461,7 @@ func (s *PostgresSession) Explain(ctx context.Context, querySQL string) (*driver
 		if err := inReadOnlyTx(func(tx *sql.Tx) error {
 			return tx.QueryRowContext(ctx, analyzeFmt+cleaned).Scan(&rawJSON)
 		}); err == nil {
-			return &driver.ExplainPlan{RawJSON: rawJSON, Rows: []driver.ExplainRow{}}, nil
+			return &driver.ExplainPlan{RawJSON: rawJSON, Rows: extractPGPlanRows(rawJSON)}, nil
 		}
 	}
 
@@ -468,7 +469,7 @@ func (s *PostgresSession) Explain(ctx context.Context, querySQL string) (*driver
 	if err := inReadOnlyTx(func(tx *sql.Tx) error {
 		return tx.QueryRowContext(ctx, "EXPLAIN (FORMAT JSON) "+cleaned).Scan(&rawJSON)
 	}); err == nil {
-		return &driver.ExplainPlan{RawJSON: rawJSON, Rows: []driver.ExplainRow{}}, nil
+		return &driver.ExplainPlan{RawJSON: rawJSON, Rows: extractPGPlanRows(rawJSON)}, nil
 	}
 
 	// Tier 3: Text EXPLAIN fallback (ancient PG or unusual syntax)
@@ -625,13 +626,46 @@ func extractColumnsFromIndexDef(def string) []string {
 			}
 		}
 		c := strings.TrimSpace(raw[start:i])
-		c = strings.Trim(c, `" `)
+		// Only strip surrounding double quotes when the entire entry is a single quoted identifier;
+		// preserve expressions like lower(email) or modifiers like "order_date" DESC intact.
+		if len(c) >= 2 && c[0] == '"' && c[len(c)-1] == '"' && strings.Count(c, `"`) == 2 {
+			c = c[1 : len(c)-1]
+		}
 		if c != "" {
 			cols = append(cols, c)
 		}
 		start = i + 1
 	}
 	return cols
+}
+
+func extractPGPlanRows(rawJSON string) []driver.ExplainRow {
+	var parsed []struct {
+		Plan struct {
+			NodeType     string  `json:"Node Type"`
+			RelationName string  `json:"Relation Name"`
+			PlanRows     float64 `json:"Plan Rows"`
+			ActualRows   float64 `json:"Actual Rows"`
+		} `json:"Plan"`
+	}
+	if err := json.Unmarshal([]byte(rawJSON), &parsed); err != nil || len(parsed) == 0 {
+		return []driver.ExplainRow{}
+	}
+	p := parsed[0].Plan
+	est := int64(p.PlanRows)
+	if p.ActualRows > 0 {
+		est = int64(p.ActualRows)
+	}
+	return []driver.ExplainRow{{
+		ID:    1,
+		Table: p.RelationName,
+		Type:  p.NodeType,
+		Rows:  est,
+	}}
+}
+
+func isSimplePGColumnIdent(s string) bool {
+	return s != "" && !strings.ContainsAny(s, " ()\t\n\"")
 }
 
 func generatePostgresCreateDDL(schema string, tbl driver.TableMetadata) string {
@@ -732,7 +766,12 @@ func generatePostgresCreateDDL(schema string, tbl driver.TableMetadata) string {
 		}
 		var quotedCols []string
 		for _, c := range idx.Columns {
-			quotedCols = append(quotedCols, quoteIdentifier(c))
+			if isSimplePGColumnIdent(c) {
+				quotedCols = append(quotedCols, quoteIdentifier(c))
+			} else {
+				// Expression or ordered index item (e.g. lower(email), "created_at" DESC).
+				quotedCols = append(quotedCols, c)
+			}
 		}
 		if len(quotedCols) > 0 {
 			sb.WriteString(fmt.Sprintf("\nCREATE %sINDEX %s ON %s.%s (%s);",
@@ -750,12 +789,17 @@ func generatePostgresCreateDDL(schema string, tbl driver.TableMetadata) string {
 
 // InspectServerVariables introspects all PostgreSQL settings from pg_settings and applies curated DBA tuning rules.
 
-func (s *PostgresSession) GetRoutineDDL(ctx context.Context, routineType, name string) (string, error) {
-	// Parse base function name if signature was included e.g. "calc_tax(numeric, integer)"
+func parseRoutineBaseName(name string) string {
 	baseName := name
 	if idx := strings.Index(name, "("); idx > 0 {
 		baseName = strings.TrimSpace(name[:idx])
 	}
+	return baseName
+}
+
+func (s *PostgresSession) GetRoutineDDL(ctx context.Context, routineType, name string) (string, error) {
+	// Parse base function name if signature was included e.g. "calc_tax(numeric, integer)"
+	baseName := parseRoutineBaseName(name)
 	var ddl string
 	err := s.db.QueryRowContext(ctx, `
 		SELECT pg_catalog.pg_get_functiondef(p.oid)

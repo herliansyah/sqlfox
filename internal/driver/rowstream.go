@@ -2,13 +2,82 @@ package driver
 
 import (
 	"database/sql"
+	"encoding/hex"
 	"io"
+	"strconv"
+	"strings"
 )
+
+const (
+	maxSafeJSInt int64  = 9007199254740991 // 2^53 - 1
+	minSafeJSInt int64  = -9007199254740991
+	maxSafeJSU64 uint64 = 9007199254740991
+)
+
+// isBinaryDBType reports whether a database column type carries opaque binary bytes
+// that must remain []byte rather than being coerced to a UTF-8 Go string.
+func isBinaryDBType(dbType string) bool {
+	up := strings.ToUpper(strings.TrimSpace(dbType))
+	if up == "" {
+		return false
+	}
+	return strings.Contains(up, "BLOB") ||
+		strings.Contains(up, "BYTEA") ||
+		strings.Contains(up, "BINARY")
+}
+
+// FormatValueForJSON makes a scanned cell value safe for JavaScript JSON.parse consumers:
+//   - 64-bit integers outside IEEE-754's exact integer range ±(2^53-1) are stringified
+//     so Snowflake/BIGINT IDs are never silently rounded in the browser.
+//   - Raw binary []byte values are rendered as 0x<HEX> strings instead of opaque base64.
+func FormatValueForJSON(val any) any {
+	switch v := val.(type) {
+	case int64:
+		if v > maxSafeJSInt || v < minSafeJSInt {
+			return strconv.FormatInt(v, 10)
+		}
+		return v
+	case uint64:
+		if v > maxSafeJSU64 {
+			return strconv.FormatUint(v, 10)
+		}
+		return v
+	case []byte:
+		return "0x" + strings.ToUpper(hex.EncodeToString(v))
+	default:
+		return val
+	}
+}
+
+// FormatRowForJSON returns a JSON-safe copy/normalized slice for a single row.
+func FormatRowForJSON(row []any) []any {
+	if len(row) == 0 {
+		return row
+	}
+	out := make([]any, len(row))
+	for i, v := range row {
+		out[i] = FormatValueForJSON(v)
+	}
+	return out
+}
+
+// FormatRowsForJSON normalizes a batch of rows for browser JSON serialization.
+func FormatRowsForJSON(rows [][]any) [][]any {
+	if len(rows) == 0 {
+		return rows
+	}
+	out := make([][]any, len(rows))
+	for i, r := range rows {
+		out[i] = FormatRowForJSON(r)
+	}
+	return out
+}
 
 // SQLRowStream provides canonical chunked row streaming across all standard SQL drivers.
 type SQLRowStream struct {
 	rows    *sql.Rows
 	cols    []ColumnDefinition
+	isBin   []bool
 	cleanup func()
 }
 
@@ -18,9 +87,14 @@ func NewSQLRowStream(rows *sql.Rows, cols []ColumnDefinition, cleanup ...func())
 	if len(cleanup) > 0 {
 		cl = cleanup[0]
 	}
+	isBin := make([]bool, len(cols))
+	for i, c := range cols {
+		isBin[i] = isBinaryDBType(c.Type)
+	}
 	return &SQLRowStream{
 		rows:    rows,
 		cols:    cols,
+		isBin:   isBin,
 		cleanup: cl,
 	}
 }
@@ -58,10 +132,17 @@ func (r *SQLRowStream) NextChunk(batchSize int) ([][]any, error) {
 			return nil, err
 		}
 
-		// Convert raw []byte to string in-place for JSON safety
+		// Preserve raw []byte on explicitly binary columns (BLOB/BYTEA/BINARY) so dumps
+		// and cross-database transfers stay lossless; coerce text/decimal []byte to string.
 		for i, val := range row {
 			if b, ok := val.([]byte); ok {
-				row[i] = string(b)
+				if i < len(r.isBin) && r.isBin[i] {
+					cp := make([]byte, len(b))
+					copy(cp, b)
+					row[i] = cp
+				} else {
+					row[i] = string(b)
+				}
 			}
 		}
 		chunk = append(chunk, row)

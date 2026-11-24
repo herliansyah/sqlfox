@@ -34,21 +34,50 @@ func (d *SQLiteDriver) Connect(ctx context.Context, cfg driver.Config) (driver.S
 		return nil, fmt.Errorf("sqlite database path cannot be empty")
 	}
 
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open sqlite database: %w", err)
+	isMemory := strings.Contains(dsn, ":memory:") || strings.Contains(dsn, "mode=memory")
+	openDSN := dsn
+	if !isMemory && !strings.Contains(strings.ToLower(dsn), "_pragma=busy_timeout") {
+		if strings.Contains(dsn, "?") {
+			openDSN = dsn + "&_pragma=busy_timeout(5000)"
+		} else {
+			openDSN = dsn + "?_pragma=busy_timeout(5000)"
+		}
 	}
 
-	isMemory := strings.Contains(dsn, ":memory:") || strings.Contains(dsn, "mode=memory")
+	db, err := sql.Open("sqlite", openDSN)
+	if err != nil {
+		db, err = sql.Open("sqlite", dsn)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open sqlite database: %w", err)
+		}
+	}
+
 	if isMemory {
 		// In-memory SQLite databases are per-connection unless pinned to a single pooled connection.
 		db.SetMaxOpenConns(1)
+	} else {
+		// Bound pool size and ensure every opened connection inherits busy_timeout via DSN pragma.
+		db.SetMaxOpenConns(4)
+		db.SetMaxIdleConns(2)
 	}
 
 	// Test connection
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("failed to ping sqlite database: %w", err)
+		// Fallback to raw DSN if path contained special URI characters.
+		if openDSN != dsn {
+			db, err = sql.Open("sqlite", dsn)
+			if err != nil {
+				return nil, fmt.Errorf("failed to open sqlite database: %w", err)
+			}
+			db.SetMaxOpenConns(1)
+			if pingErr := db.PingContext(ctx); pingErr != nil {
+				db.Close()
+				return nil, fmt.Errorf("failed to ping sqlite database: %w", pingErr)
+			}
+		} else {
+			return nil, fmt.Errorf("failed to ping sqlite database: %w", err)
+		}
 	}
 
 	// Enable WAL mode (Write-Ahead Logging) and busy timeout for concurrent read/write resilience
@@ -880,6 +909,67 @@ func (s *SQLiteSession) InspectServerVariables(ctx context.Context) (*driver.Ser
 		CuratedCount: 0,
 		Variables:    vars,
 	}, nil
+}
+
+// ExecScriptConn pins a single physical SQLite connection for a multi-statement script
+// so PRAGMA foreign_keys and BEGIN/COMMIT blocks execute on the same connection.
+func (s *SQLiteSession) ExecScriptConn(ctx context.Context, fn func(exec func(context.Context, string) (*driver.ExecResult, error)) error) error {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		restoreCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_, _ = conn.ExecContext(restoreCtx, "PRAGMA foreign_keys = ON;")
+		cancel()
+		_ = conn.Close()
+	}()
+	return fn(func(c context.Context, q string) (*driver.ExecResult, error) {
+		start := time.Now()
+		res, err := conn.ExecContext(c, q)
+		if err != nil {
+			return nil, err
+		}
+		rowsAff, _ := res.RowsAffected()
+		lastID, _ := res.LastInsertId()
+		return &driver.ExecResult{
+			RowsAffected: rowsAff,
+			LastInsertID: lastID,
+			ExecutionMs:  time.Since(start).Milliseconds(),
+			Message:      fmt.Sprintf("Query OK, %d rows affected", rowsAff),
+		}, nil
+	})
+}
+
+// QueryStreamReadOnly enforces SQLite engine-level PRAGMA query_only = ON on a pinned connection.
+func (s *SQLiteSession) QueryStreamReadOnly(ctx context.Context, sqlStr string, limit int) (driver.RowStream, error) {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := conn.ExecContext(ctx, "PRAGMA query_only = ON;"); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	restore := func() {
+		restoreCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_, _ = conn.ExecContext(restoreCtx, "PRAGMA query_only = OFF;")
+		cancel()
+		_ = conn.Close()
+	}
+	querySQL := driver.ApplyLimitClause(sqlStr, limit)
+	rows, err := conn.QueryContext(ctx, querySQL)
+	if err != nil {
+		restore()
+		return nil, err
+	}
+	colTypes, err := rows.ColumnTypes()
+	if err != nil {
+		_ = rows.Close()
+		restore()
+		return nil, err
+	}
+	return driver.NewSQLRowStream(rows, driver.ColumnsFromTypes(colTypes), restore), nil
 }
 
 func quoteIdentifier(id string) string {

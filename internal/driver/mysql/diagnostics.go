@@ -56,29 +56,37 @@ func (s *MySQLSession) GetProcesslist(ctx context.Context) (*driver.ProcesslistR
 		}
 	}
 
-	// Fallback to SHOW FULL PROCESSLIST if still empty or restricted
+	// Fallback to SHOW FULL PROCESSLIST if still empty or restricted.
+	// Scan dynamically so MariaDB's 9-column output (extra Progress column) works too.
 	if len(threads) == 0 {
 		fallbackRows, fErr := s.db.QueryContext(ctx, "SHOW FULL PROCESSLIST")
 		if fErr != nil {
 			return nil, fmt.Errorf("failed to fetch processlist: %w", fErr)
 		}
 		defer fallbackRows.Close()
+		colNames, _ := fallbackRows.Columns()
 		for fallbackRows.Next() {
 			var id sql.NullInt64
 			var user, host, command sql.NullString
 			var db, state, info sql.NullString
 			var timeVal sql.NullInt64
-			if err := fallbackRows.Scan(&id, &user, &host, &db, &command, &timeVal, &state, &info); err == nil {
-				threads = append(threads, driver.ProcessItem{
-					ID:      id.Int64,
-					User:    user.String,
-					Host:    host.String,
-					DB:      db.String,
-					Command: command.String,
-					Time:    timeVal.Int64,
-					State:   state.String,
-					Info:    info.String,
-				})
+			dest := []any{&id, &user, &host, &db, &command, &timeVal, &state, &info}
+			for len(dest) < len(colNames) {
+				dest = append(dest, new(sql.RawBytes))
+			}
+			if len(colNames) >= 8 {
+				if err := fallbackRows.Scan(dest[:len(colNames)]...); err == nil {
+					threads = append(threads, driver.ProcessItem{
+						ID:      id.Int64,
+						User:    user.String,
+						Host:    host.String,
+						DB:      db.String,
+						Command: command.String,
+						Time:    timeVal.Int64,
+						State:   state.String,
+						Info:    info.String,
+					})
+				}
 			}
 		}
 	}

@@ -637,7 +637,7 @@ func (s *PostgresSession) GetStatementDigest(ctx context.Context, limit int) ([]
 			rows,
 			rows as rows_examined,
 			0 as rows_affected,
-			false as no_index_used,
+			0 as no_index_used,
 			'' as first_seen,
 			'' as last_seen,
 			queryid::text as digest
@@ -659,7 +659,7 @@ func (s *PostgresSession) GetStatementDigest(ctx context.Context, limit int) ([]
 				rows,
 				rows as rows_examined,
 				0 as rows_affected,
-				false as no_index_used,
+				0 as no_index_used,
 				'' as first_seen,
 				'' as last_seen,
 				queryid::text as digest

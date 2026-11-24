@@ -86,6 +86,19 @@ type Session interface {
 	io.Closer
 }
 
+// ScriptSession is an optional capability that executes a multi-statement script on a single
+// pinned physical connection so session-scoped commands (SET FOREIGN_KEY_CHECKS, BEGIN/COMMIT,
+// PRAGMA foreign_keys) apply consistently and never pollute other pooled connections.
+type ScriptSession interface {
+	ExecScriptConn(ctx context.Context, fn func(exec func(context.Context, string) (*ExecResult, error)) error) error
+}
+
+// ReadOnlySession is an optional capability that enforces database-engine read-only execution
+// (e.g., READ ONLY transaction in MySQL/PostgreSQL, PRAGMA query_only=ON in SQLite).
+type ReadOnlySession interface {
+	QueryStreamReadOnly(ctx context.Context, sql string, limit int) (RowStream, error)
+}
+
 // ProcessManager is an optional capability for drivers that support active thread/process inspection and termination.
 type ProcessManager interface {
 	GetProcesslist(ctx context.Context) (*ProcesslistResult, error)

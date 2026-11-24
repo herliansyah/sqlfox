@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
@@ -39,10 +40,7 @@ var (
 
 // maskNonTopLevel blanks comments, quoted literals/identifiers and everything inside parentheses
 // (byte offsets preserved), so keyword scans only see the outermost statement: a LIMIT inside a
-// subquery, string or comment must not count as the statement's own LIMIT.
-// ponytail: backslash is treated as an escape inside quotes (MySQL); a PostgreSQL literal ending in
-// a backslash can desync the mask, in which case the cap may be skipped or the query rejected by
-// the server — never silently widened.
+// subquery, string, dollar-quote or comment must not count as the statement's own LIMIT.
 func maskNonTopLevel(q string) string {
 	b := []byte(q)
 	depth := 0
@@ -52,28 +50,86 @@ func maskNonTopLevel(q string) string {
 			for ; i < len(b) && b[i] != '\n'; i++ {
 				b[i] = ' '
 			}
-		case b[i] == '/' && i+1 < len(b) && b[i+1] == '*':
-			end := strings.Index(q[i+2:], "*/")
-			stop := len(b)
-			if end >= 0 {
-				stop = i + 2 + end + 2
-			}
-			for ; i < stop; i++ {
+		case b[i] == '#':
+			for ; i < len(b) && b[i] != '\n'; i++ {
 				b[i] = ' '
 			}
+		case b[i] == '/' && i+1 < len(b) && b[i+1] == '*':
+			if i+2 < len(b) && b[i+2] == '!' {
+				// MySQL executable comment: blank the /*!NNNNN wrapper, keep the body visible.
+				b[i], b[i+1], b[i+2] = ' ', ' ', ' '
+				j := i + 3
+				for j < len(b) && b[j] >= '0' && b[j] <= '9' {
+					b[j] = ' '
+					j++
+				}
+				i = j - 1
+				continue
+			}
+			// Support nested /* /* */ */ block comments (PostgreSQL).
+			cDepth := 1
+			b[i], b[i+1] = ' ', ' '
+			i += 2
+			for i < len(b) && cDepth > 0 {
+				if b[i] == '/' && i+1 < len(b) && b[i+1] == '*' {
+					cDepth++
+					b[i], b[i+1] = ' ', ' '
+					i += 2
+					continue
+				}
+				if b[i] == '*' && i+1 < len(b) && b[i+1] == '/' {
+					cDepth--
+					b[i], b[i+1] = ' ', ' '
+					i += 2
+					continue
+				}
+				b[i] = ' '
+				i++
+			}
 			i--
+		case b[i] == '*' && i+1 < len(b) && b[i+1] == '/':
+			// Trailing closer from an unwrapped /*! ... */ comment.
+			b[i], b[i+1] = ' ', ' '
+			i++
+		case b[i] == '$':
+			// PostgreSQL dollar-quoted string $$...$$ or $tag$...$tag$.
+			j := i + 1
+			for j < len(b) && (b[j] == '_' || (b[j] >= 'a' && b[j] <= 'z') || (b[j] >= 'A' && b[j] <= 'Z') || (j > i+1 && b[j] >= '0' && b[j] <= '9')) {
+				j++
+			}
+			if j < len(b) && b[j] == '$' && (i == 0 || !(b[i-1] == '_' || b[i-1] == '$' || (b[i-1] >= 'a' && b[i-1] <= 'z') || (b[i-1] >= 'A' && b[i-1] <= 'Z') || (b[i-1] >= '0' && b[i-1] <= '9'))) {
+				tag := q[i : j+1]
+				end := strings.Index(q[j+1:], tag)
+				stop := len(b)
+				if end >= 0 {
+					stop = j + 1 + end + len(tag)
+				}
+				for ; i < stop; i++ {
+					b[i] = ' '
+				}
+				i--
+				continue
+			}
+			if depth > 0 {
+				b[i] = ' '
+			}
 		case b[i] == '\'' || b[i] == '"' || b[i] == '`':
 			quote := b[i]
 			b[i] = ' '
 			for i++; i < len(b); i++ {
-				if b[i] == '\\' && quote != '`' && i+1 < len(b) {
+				if b[i] == quote {
+					if i+1 < len(b) && b[i+1] == quote {
+						b[i], b[i+1] = ' ', ' '
+						i++
+						continue
+					}
+					b[i] = ' '
+					break
+				}
+				if b[i] == '\\' && quote == '\'' && i+1 < len(b) && b[i+1] != '\'' {
 					b[i], b[i+1] = ' ', ' '
 					i++
 					continue
-				}
-				if b[i] == quote {
-					b[i] = ' '
-					break
 				}
 				b[i] = ' '
 			}
@@ -100,17 +156,18 @@ func HasLimitClause(sql string) bool {
 	return reLimitClause.MatchString(maskNonTopLevel(sql))
 }
 
-// ApplyLimitClause adds a LIMIT to SELECT queries that have no outermost limit and limit > 0.
-// It strips leading comments before detecting the SELECT keyword and puts LIMIT on its own line so
-// trailing single-line comments cannot swallow it. A locking clause (FOR UPDATE, LOCK IN SHARE MODE)
-// must follow LIMIT, so LIMIT is inserted before it; SELECT ... INTO is left untouched.
+// ApplyLimitClause adds a LIMIT to SELECT (and read-only WITH ... SELECT / parenthesized SELECT)
+// queries that have no outermost limit and limit > 0.
 func ApplyLimitClause(querySQL string, limit int) string {
 	if limit <= 0 {
 		return querySQL
 	}
 	trimmed := strings.TrimSpace(querySQL)
 	cleanUpper := strings.ToUpper(StripLeadingComments(trimmed))
-	if !strings.HasPrefix(cleanUpper, "SELECT") || HasLimitClause(trimmed) {
+	isCapable := strings.HasPrefix(cleanUpper, "SELECT") ||
+		(strings.HasPrefix(cleanUpper, "WITH") && IsQueryStatement(trimmed)) ||
+		(strings.HasPrefix(cleanUpper, "(") && IsQueryStatement(trimmed))
+	if !isCapable || HasLimitClause(trimmed) {
 		return querySQL
 	}
 	// Drop a trailing terminator followed only by comments/whitespace (e.g. "SELECT 1; -- note")
@@ -128,6 +185,7 @@ func ApplyLimitClause(querySQL string, limit int) string {
 }
 
 // StripLeadingComments removes leading whitespace and SQL comments (-- , #, and /* ... */).
+// Tracks nested block comments (PostgreSQL) and unwraps MySQL /*! ... */ executable comments.
 func StripLeadingComments(sql string) string {
 	s := strings.TrimSpace(sql)
 	for {
@@ -148,23 +206,136 @@ func StripLeadingComments(sql string) string {
 			continue
 		}
 		if strings.HasPrefix(s, "/*") {
-			idx := strings.Index(s, "*/")
-			if idx == -1 {
-				return ""
-			}
 			// MySQL executes /*! ... */ and /*!NNNNN ... */ bodies, so unwrap them instead of
 			// discarding; otherwise callers (e.g. the Safety Guard) would miss the real statement.
 			if strings.HasPrefix(s, "/*!") {
-				body := strings.TrimLeft(s[3:idx], "0123456789")
-				s = strings.TrimSpace(body + " " + s[idx+2:])
+				idx := strings.Index(s[3:], "*/")
+				if idx == -1 {
+					body := strings.TrimLeft(s[3:], "0123456789")
+					s = strings.TrimSpace(body)
+					continue
+				}
+				body := strings.TrimLeft(s[3:3+idx], "0123456789")
+				s = strings.TrimSpace(body + " " + s[3+idx+2:])
 				continue
 			}
-			s = strings.TrimSpace(s[idx+2:])
+			// Track nested block comment depth (valid in PostgreSQL: /* /* */ */).
+			depth := 1
+			i := 2
+			for i < len(s) && depth > 0 {
+				if s[i] == '/' && i+1 < len(s) && s[i+1] == '*' {
+					depth++
+					i += 2
+					continue
+				}
+				if s[i] == '*' && i+1 < len(s) && s[i+1] == '/' {
+					depth--
+					i += 2
+					continue
+				}
+				i++
+			}
+			if depth > 0 {
+				return ""
+			}
+			s = strings.TrimSpace(s[i:])
 			continue
 		}
 		break
 	}
 	return s
+}
+
+// UnwrapMySQLExecutableComments removes /*!NNNNN and matching */ wrappers outside string literals
+// so downstream lexers, splitters, and safety guards see the exact SQL MySQL will execute.
+func UnwrapMySQLExecutableComments(sql string) string {
+	if !strings.Contains(sql, "/*!") {
+		return sql
+	}
+	var b strings.Builder
+	b.Grow(len(sql))
+	n := len(sql)
+	execDepth := 0
+	for i := 0; i < n; i++ {
+		c := sql[i]
+		if c == '\'' || c == '"' || c == '`' {
+			quote := c
+			b.WriteByte(c)
+			i++
+			for i < n {
+				b.WriteByte(sql[i])
+				if sql[i] == '\\' && quote != '`' && i+1 < n {
+					i++
+					b.WriteByte(sql[i])
+					i++
+					continue
+				}
+				if sql[i] == quote {
+					if i+1 < n && sql[i+1] == quote {
+						i++
+						b.WriteByte(sql[i])
+						i++
+						continue
+					}
+					break
+				}
+				i++
+			}
+			continue
+		}
+		if c == '-' && i+1 < n && sql[i+1] == '-' {
+			for i < n && sql[i] != '\n' {
+				b.WriteByte(sql[i])
+				i++
+			}
+			if i < n {
+				b.WriteByte(sql[i])
+			}
+			continue
+		}
+		if c == '#' {
+			for i < n && sql[i] != '\n' {
+				b.WriteByte(sql[i])
+				i++
+			}
+			if i < n {
+				b.WriteByte(sql[i])
+			}
+			continue
+		}
+		if c == '/' && i+2 < n && sql[i+1] == '*' && sql[i+2] == '!' {
+			execDepth++
+			b.WriteByte(' ')
+			i += 3
+			for i < n && sql[i] >= '0' && sql[i] <= '9' {
+				i++
+			}
+			i--
+			continue
+		}
+		if execDepth > 0 && c == '*' && i+1 < n && sql[i+1] == '/' {
+			execDepth--
+			b.WriteByte(' ')
+			i++
+			continue
+		}
+		if c == '/' && i+1 < n && sql[i+1] == '*' {
+			b.WriteString("/*")
+			i += 2
+			for i < n {
+				if sql[i] == '*' && i+1 < n && sql[i+1] == '/' {
+					b.WriteString("*/")
+					i++
+					break
+				}
+				b.WriteByte(sql[i])
+				i++
+			}
+			continue
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
 }
 
 // ErrExplainTarget is returned when SQL cannot be explained without risking its execution.
@@ -173,16 +344,18 @@ var ErrExplainTarget = errors.New("explain requires exactly one statement withou
 var reExplainPrefix = regexp.MustCompile(`(?is)^EXPLAIN(\s+QUERY\s+PLAN)?\s+`)
 
 // ExplainTarget validates the statements of an Explain request and returns the bare statement to plan.
-// stmts must come from a quote-aware splitter. Multiple statements are rejected because drivers that
-// accept multi-statement text would execute everything after the first one, and EXPLAIN ANALYZE /
-// EXPLAIN (options) are rejected because ANALYZE executes the statement.
 func ExplainTarget(stmts []string) (string, error) {
 	if len(stmts) != 1 {
 		return "", ErrExplainTarget
 	}
+	// Reject hidden multi-statements smuggled inside MySQL /*! ... ; ... */ executable comments.
+	if len(splitDefaultDelimiter(UnwrapMySQLExecutableComments(stmts[0]), true)) != 1 {
+		return "", ErrExplainTarget
+	}
 	s := strings.TrimRight(strings.TrimSpace(StripLeadingComments(stmts[0])), "; \t\r\n")
 	if loc := reExplainPrefix.FindStringIndex(s); loc != nil {
-		s = strings.TrimSpace(s[loc[1]:])
+		// Strip comments again after EXPLAIN so "EXPLAIN /*x*/ ANALYZE ..." cannot bypass the check.
+		s = strings.TrimSpace(StripLeadingComments(s[loc[1]:]))
 		up := strings.ToUpper(s)
 		if strings.HasPrefix(up, "ANALYZE") || strings.HasPrefix(up, "ANALYSE") || strings.HasPrefix(up, "(") || strings.HasPrefix(up, "FORMAT") {
 			return "", ErrExplainTarget
@@ -194,11 +367,16 @@ func ExplainTarget(stmts []string) (string, error) {
 	return s, nil
 }
 
-var reCTEMutationVerb = regexp.MustCompile(`(?i)\b(?:INSERT|UPDATE|DELETE|MERGE|DROP|ALTER|TRUNCATE|CREATE)\b`)
+var (
+	reCTEMutationVerb = regexp.MustCompile(`(?i)\b(?:INSERT|UPDATE|DELETE|MERGE|DROP|ALTER|TRUNCATE|CREATE)\b`)
+	reSelectIntoFile  = regexp.MustCompile(`(?i)\bINTO\s+(?:OUTFILE|DUMPFILE)\b`)
+)
 
 // stripSQLCommentsAndLiterals replaces string/quoted literals and comments with spaces
 // so keyword checks cannot be tricked by literals or bypassed by inline comments like DELETE/*x*/FROM.
-func stripSQLCommentsAndLiterals(sql string) string {
+// When mysqlEscapes is false, PostgreSQL standard_conforming_strings is honored ('\' ends the literal).
+func stripSQLCommentsAndLiterals(sql string, mysqlEscapes bool) string {
+	sql = UnwrapMySQLExecutableComments(sql)
 	var b strings.Builder
 	b.Grow(len(sql))
 	n := len(sql)
@@ -209,7 +387,7 @@ func stripSQLCommentsAndLiterals(sql string) string {
 			b.WriteByte(' ')
 			i++
 			for i < n {
-				if sql[i] == '\\' && quote != '`' && i+1 < n {
+				if mysqlEscapes && sql[i] == '\\' && quote != '`' && i+1 < n {
 					i += 2
 					continue
 				}
@@ -226,10 +404,10 @@ func stripSQLCommentsAndLiterals(sql string) string {
 		}
 		if c == '$' {
 			j := i + 1
-			for j < n && (sql[j] == '_' || (sql[j] >= 'a' && sql[j] <= 'z') || (sql[j] >= 'A' && sql[j] <= 'Z') || (sql[j] >= '0' && sql[j] <= '9')) {
+			for j < n && (sql[j] == '_' || (sql[j] >= 'a' && sql[j] <= 'z') || (sql[j] >= 'A' && sql[j] <= 'Z') || (j > i+1 && sql[j] >= '0' && sql[j] <= '9')) {
 				j++
 			}
-			if j < n && sql[j] == '$' && (j == i+1 || !(sql[i+1] >= '0' && sql[i+1] <= '9')) {
+			if j < n && sql[j] == '$' && (i == 0 || !(sql[i-1] == '_' || sql[i-1] == '$' || (sql[i-1] >= 'a' && sql[i-1] <= 'z') || (sql[i-1] >= 'A' && sql[i-1] <= 'Z') || (sql[i-1] >= '0' && sql[i-1] <= '9'))) {
 				tag := sql[i : j+1]
 				b.WriteByte(' ')
 				end := strings.Index(sql[j+1:], tag)
@@ -257,11 +435,22 @@ func stripSQLCommentsAndLiterals(sql string) string {
 		}
 		if c == '/' && i+1 < n && sql[i+1] == '*' {
 			b.WriteByte(' ')
+			depth := 1
 			i += 2
-			for i+1 < n && !(sql[i] == '*' && sql[i+1] == '/') {
+			for i < n && depth > 0 {
+				if sql[i] == '/' && i+1 < n && sql[i+1] == '*' {
+					depth++
+					i += 2
+					continue
+				}
+				if sql[i] == '*' && i+1 < n && sql[i+1] == '/' {
+					depth--
+					i += 2
+					continue
+				}
 				i++
 			}
-			i++
+			i--
 			continue
 		}
 		b.WriteByte(c)
@@ -269,16 +458,33 @@ func stripSQLCommentsAndLiterals(sql string) string {
 	return b.String()
 }
 
-// IsQueryStatement reports whether a SQL statement returns rows (SELECT, SHOW, DESC, EXPLAIN, WITH, PRAGMA, VALUES, TABLE, etc.).
+// IsQueryStatement reports whether a SQL statement is a pure read-only query that returns rows.
+// Rejects SELECT ... INTO OUTFILE/DUMPFILE, mutating PRAGMA (=), hidden multi-statements in /*! ... */,
+// and data-modifying CTEs under both MySQL and PostgreSQL string-escaping rules.
 func IsQueryStatement(sql string) bool {
+	// Reject hidden multi-statement smuggling via MySQL /*! ... ; ... */ executable comments.
+	if strings.Contains(sql, "/*!") && len(splitDefaultDelimiter(UnwrapMySQLExecutableComments(sql), true)) > 1 {
+		return false
+	}
 	clean := StripLeadingComments(sql)
 	clean = strings.TrimLeft(clean, "(\t\r\n ")
 	upper := strings.ToUpper(clean)
-	if strings.HasPrefix(upper, "SELECT") ||
-		strings.HasPrefix(upper, "SHOW") ||
+	if strings.HasPrefix(upper, "SELECT") {
+		if reSelectIntoFile.MatchString(stripSQLCommentsAndLiterals(clean, true)) ||
+			reSelectIntoFile.MatchString(stripSQLCommentsAndLiterals(clean, false)) {
+			return false
+		}
+		return true
+	}
+	if strings.HasPrefix(upper, "PRAGMA") {
+		// Only read-only PRAGMAs (no assignment '=') may be classified as query statements.
+		// Mutating PRAGMAs like "PRAGMA writable_schema = ON" must never bypass read-only mode.
+		stripped := stripSQLCommentsAndLiterals(clean, false)
+		return !strings.Contains(stripped, "=")
+	}
+	if strings.HasPrefix(upper, "SHOW") ||
 		strings.HasPrefix(upper, "DESC") ||
 		strings.HasPrefix(upper, "EXPLAIN") ||
-		strings.HasPrefix(upper, "PRAGMA") ||
 		strings.HasPrefix(upper, "VALUES") ||
 		strings.HasPrefix(upper, "TABLE") ||
 		strings.HasPrefix(upper, "CHECK TABLE") ||
@@ -288,8 +494,18 @@ func IsQueryStatement(sql string) bool {
 		return true
 	}
 	if strings.HasPrefix(upper, "WITH") {
-		stripped := stripSQLCommentsAndLiterals(clean)
-		return !reCTEMutationVerb.MatchString(stripped)
+		// Fail closed across both MySQL (\-escaped) and PostgreSQL (standard_conforming_strings) lexers.
+		if reCTEMutationVerb.MatchString(stripSQLCommentsAndLiterals(clean, false)) {
+			return false
+		}
+		if reCTEMutationVerb.MatchString(stripSQLCommentsAndLiterals(clean, true)) {
+			return false
+		}
+		if reSelectIntoFile.MatchString(stripSQLCommentsAndLiterals(clean, false)) ||
+			reSelectIntoFile.MatchString(stripSQLCommentsAndLiterals(clean, true)) {
+			return false
+		}
+		return true
 	}
 	return false
 }
@@ -329,7 +545,8 @@ func splitDefaultDelimiter(content string, isMySQL bool) []string {
 	var statements []string
 	var current strings.Builder
 	inSingleQuote, inDoubleQuote, inBacktick := false, false, false
-	inLineComment, inBlockComment := false, false
+	inLineComment := false
+	blockCommentDepth := 0
 	dollarTag := "" // non-empty while inside a dollar-quoted body
 
 	runes := []rune(content)
@@ -368,10 +585,16 @@ func splitDefaultDelimiter(content string, isMySQL bool) []string {
 			}
 			continue
 		}
-		if inBlockComment {
+		if blockCommentDepth > 0 {
 			current.WriteRune(r)
+			if !isMySQL && r == '/' && i+1 < n && runes[i+1] == '*' {
+				blockCommentDepth++
+				current.WriteRune('*')
+				i++
+				continue
+			}
 			if r == '*' && i+1 < n && runes[i+1] == '/' {
-				inBlockComment = false
+				blockCommentDepth--
 				current.WriteRune('/')
 				i++
 			}
@@ -401,7 +624,14 @@ func splitDefaultDelimiter(content string, isMySQL bool) []string {
 				continue
 			}
 			if r == '/' && i+1 < n && runes[i+1] == '*' {
-				inBlockComment = true
+				// In MySQL, /*! ... */ is executable SQL: do NOT treat it as an opaque comment
+				// that hides semicolons (e.g., "SELECT 1 /*!50000 ; DROP TABLE users */").
+				if isMySQL && i+2 < n && runes[i+2] == '!' {
+					current.WriteString("/*!")
+					i += 2
+					continue
+				}
+				blockCommentDepth = 1
 				current.WriteString("/*")
 				i++
 				continue
@@ -577,7 +807,9 @@ func EscapeSQLString(s string, driverName string) string {
 			case '\\':
 				sb.WriteString(`\\`)
 			case '\'':
-				sb.WriteString(`\'`)
+				// Double single-quote works identically under both default MySQL sql_mode
+				// and NO_BACKSLASH_ESCAPES (ANSI mode), preventing quote-escape SQLi.
+				sb.WriteString(`''`)
 			case '"':
 				sb.WriteString(`\"`)
 			case '\032':
@@ -629,6 +861,13 @@ func FormatSQLValueForDriver(val any, driverName string) string {
 		return strconv.FormatFloat(v, 'f', -1, 64)
 	case json.Number:
 		return v.String()
+	case time.Time:
+		switch strings.ToLower(driverName) {
+		case "postgres", "postgresql", "pgx", "pg":
+			return EscapeSQLString(v.Format(time.RFC3339Nano), driverName)
+		default:
+			return EscapeSQLString(v.Format("2006-01-02 15:04:05.999999"), driverName)
+		}
 	case []byte:
 		return hexLiteral(v, driverName)
 	case string:
@@ -643,10 +882,10 @@ func FormatSQLValueForDriver(val any, driverName string) string {
 	}
 }
 
-// hexLiteral renders raw bytes as a dialect-correct binary literal (PostgreSQL X” is a bit string, not bytea).
+// hexLiteral renders raw bytes as a dialect-correct binary literal (PostgreSQL X'' is a bit string, not bytea).
 func hexLiteral(b []byte, driverName string) string {
 	switch strings.ToLower(driverName) {
-	case "postgres", "postgresql", "pgx":
+	case "postgres", "postgresql", "pgx", "pg":
 		return fmt.Sprintf("'\\x%x'::bytea", b)
 	default:
 		return fmt.Sprintf("X'%X'", b)
@@ -807,6 +1046,9 @@ func (m *ConnStateMap[T]) Get(conn *sql.Conn) *T {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.maxSize <= 0 {
+		m.maxSize = 64
+	}
 	if m.entries == nil {
 		m.entries = make(map[any]*T)
 	}
