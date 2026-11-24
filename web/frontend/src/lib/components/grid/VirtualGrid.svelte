@@ -2585,8 +2585,8 @@
   {#if contextMenu && contextMenu.open}
     <GridContextMenu
       {contextMenu}
-      {result}
-      {tableMeta}
+      result={result ?? null}
+      tableMeta={tableMeta ?? undefined}
       effectiveTable={effectiveTable || ''}
       {canEdit}
       {selectedRowIndices}

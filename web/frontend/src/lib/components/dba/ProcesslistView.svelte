@@ -896,43 +896,6 @@
     }
   }
 
-  let curatedVarCount = $derived.by(
-    () => (variablesReport?.variables || []).filter((v: any) => v.is_curated).length
-  );
-
-  let filteredVariables = $derived.by(() => {
-    if (!variablesReport?.variables) return [];
-    let list = variablesReport.variables;
-    if (showCuratedOnly) {
-      list = list.filter((v: any) => v.is_curated);
-    }
-    if (varCategory !== 'All') {
-      list = list.filter((v: any) => v.category === varCategory);
-    }
-    if (varSeverityFilter !== 'all') {
-      list = list.filter((v: any) => (v.severity || 'info') === varSeverityFilter);
-    }
-    if (varFilterText.trim()) {
-      const q = varFilterText.toLowerCase();
-      list = list.filter(
-        (v: any) =>
-          v.name.toLowerCase().includes(q) ||
-          String(v.value).toLowerCase().includes(q) ||
-          (v.description && v.description.toLowerCase().includes(q))
-      );
-    }
-    return list;
-  });
-
-  let varCategories = $derived.by(() => {
-    if (!variablesReport?.variables) return ['All'];
-    const cats = new Set<string>(['All']);
-    variablesReport.variables.forEach((v: any) => {
-      if (v.category) cats.add(v.category);
-    });
-    return Array.from(cats);
-  });
-
   function explainThreadQuery(sql?: string) {
     const q = (sql || '').trim();
     if (!q) return;
@@ -1784,17 +1747,17 @@
       {/if}
     </div>
   {:else if currentSubTab === 'digest'}
-  {:else if currentSubTab === 'digest'}
-    <DigestPanel {digestRows} {isDigestLoading} {digestError} onOpenSqlInEditor={openSqlInEditor} />
+    <DigestPanel {digestRows} {isDigestLoading} {digestError} onOpenSqlInEditor={openSqlInEditor} onRetry={loadStatementDigest} />
   {:else if currentSubTab === 'deadlock'}
-    <DeadlockPanel {deadlockData} {isDeadlockLoading} onOpenSqlInEditor={openSqlInEditor} />
+    <DeadlockPanel {deadlockData} {isDeadlockLoading} onOpenSqlInEditor={openSqlInEditor} onRetry={loadDeadlock} />
   {:else if currentSubTab === 'cluster'}
-    <ClusterHealthPanel bind:this={clusterPanelRef} {clusterReport} {isClusterLoading} onSwitchNode={switchSessionToNode} />
+    <ClusterHealthPanel bind:this={clusterPanelRef} {clusterReport} {isClusterLoading} onSwitchNode={switchSessionToNode} onViewThreads={() => setSubTab('threads')} />
   {:else if currentSubTab === 'variables'}
     <ServerVariablesPanel {variablesReport} {isVariablesLoading} />
   {:else if currentSubTab === 'flight-recorder'}
     <FlightRecorderPanel
       {isRecording}
+      {recordingSeconds}
       {flightSessions}
       {selectedFlightSessionId}
       {flightSessionTicks}
@@ -1802,10 +1765,12 @@
       {isFlightLoading}
       {flightPeak}
       {activeOrSelectedTick}
+      onToggleRecording={toggleFlightRecording}
       onInspectSession={inspectFlightSession}
       onDeleteSession={deleteFlightSession}
       onOpenSqlInEditor={openSqlInEditor}
       onExplainQuery={explainThreadQuery}
+      onSendThreadToAI={sendThreadToAI}
     />
   {/if}
 </div>

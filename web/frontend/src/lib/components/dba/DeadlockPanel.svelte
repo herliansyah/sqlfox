@@ -7,10 +7,12 @@
     deadlockData = null,
     isDeadlockLoading = false,
     onOpenSqlInEditor,
+    onRetry,
   }: {
     deadlockData: any;
     isDeadlockLoading: boolean;
     onOpenSqlInEditor: (sql?: string, title?: string) => void;
+    onRetry?: () => void;
   } = $props();
 
   function copyWithToast(text: string | undefined, label: string) {
@@ -152,7 +154,7 @@
           </p>
           <button
             type="button"
-            onclick={loadDeadlock}
+            onclick={() => onRetry?.()}
             class="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold font-sans"
           >
             Read engine status
@@ -175,7 +177,7 @@
           <div class="mt-4 flex items-center gap-2">
             <button
               type="button"
-              onclick={loadDeadlock}
+              onclick={() => onRetry?.()}
               class="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold font-sans flex items-center gap-1.5"
             >
               <Icon name="refresh-cw" class="w-3.5 h-3.5" />

@@ -1,16 +1,25 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
+  import { copyText } from '../../utils/clipboard';
   import Icon from '../common/Icon.svelte';
 
   let {
     clusterReport = null,
     isClusterLoading = false,
     onSwitchNode,
+    onViewThreads,
   }: {
     clusterReport: any;
     isClusterLoading: boolean;
     onSwitchNode: (addr?: string) => void;
+    onViewThreads?: () => void;
   } = $props();
+
+  function copyWithToast(text: string | undefined, label: string) {
+    if (!text) return;
+    copyText(text);
+    appState.showToast(`Copied ${label} to clipboard`, 'success');
+  }
 
   export function sendClusterToAI() {
     if (!clusterReport) return;
@@ -324,7 +333,7 @@
                       {#if node.is_local}
                         <button
                           type="button"
-                          onclick={() => setSubTab('threads')}
+                          onclick={() => onViewThreads?.()}
                           class="px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 text-[10px] font-semibold transition"
                         >
                           Inspect Processlist

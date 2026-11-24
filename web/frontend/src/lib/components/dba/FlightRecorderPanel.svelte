@@ -1,10 +1,12 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
+  import { copyText } from '../../utils/clipboard';
   import Icon from '../common/Icon.svelte';
   import FlightTimeline from './FlightTimeline.svelte';
 
   let {
     isRecording = false,
+    recordingSeconds = 0,
     flightSessions = [],
     selectedFlightSessionId = '',
     flightSessionTicks = [],
@@ -12,12 +14,15 @@
     isFlightLoading = false,
     flightPeak,
     activeOrSelectedTick = null,
+    onToggleRecording,
     onInspectSession,
     onDeleteSession,
     onOpenSqlInEditor,
     onExplainQuery,
+    onSendThreadToAI,
   }: {
     isRecording: boolean;
+    recordingSeconds?: number;
     flightSessions: any[];
     selectedFlightSessionId: string;
     flightSessionTicks: any[];
@@ -25,10 +30,12 @@
     isFlightLoading: boolean;
     flightPeak: { maxQps: number; maxThreads: number; lockDelta: number; bufferDelta: number };
     activeOrSelectedTick: any;
+    onToggleRecording?: () => void;
     onInspectSession: (recId: string) => void;
     onDeleteSession: (recId: string) => void;
     onOpenSqlInEditor: (sql?: string, title?: string) => void;
     onExplainQuery: (sql?: string) => void;
+    onSendThreadToAI?: (sql: string, thread: any) => void;
   } = $props();
 
   function formatTickTime(tick: any): string {
@@ -140,7 +147,7 @@
             </div>
             <button
               type="button"
-              onclick={toggleFlightRecording}
+              onclick={() => onToggleRecording?.()}
               class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition flex items-center space-x-1.5 shadow-lg shadow-emerald-950/40"
             >
               <Icon name="play" class="w-4 h-4" />
@@ -337,7 +344,7 @@
                           </button>
                           <button
                             type="button"
-                            onclick={() => sendThreadToAI(qSql, { id: tid || 0, user: q.user || '', host: q.host || '', db: q.db || '', command: q.command || 'Query', time: q.time || 0, state: q.state || '', info: qSql })}
+                            onclick={() => onSendThreadToAI?.(qSql, { id: tid || 0, user: q.user || '', host: q.host || '', db: q.db || '', command: q.command || 'Query', time: q.time || 0, state: q.state || '', info: qSql })}
                             class="px-2 py-0.5 rounded bg-purple-950 hover:bg-purple-900 border border-purple-800 text-purple-300 text-[10px] transition flex items-center space-x-1"
                             title="Ask AI Copilot"
                           >

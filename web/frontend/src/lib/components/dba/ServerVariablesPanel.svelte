@@ -28,6 +28,43 @@
     copyText(text);
     appState.showToast(`Copied ${label} to clipboard`, 'success');
   }
+
+  let curatedVarCount = $derived.by(
+    () => (variablesReport?.variables || []).filter((v: any) => v.is_curated).length
+  );
+
+  let filteredVariables = $derived.by(() => {
+    if (!variablesReport?.variables) return [];
+    let list = variablesReport.variables;
+    if (showCuratedOnly) {
+      list = list.filter((v: any) => v.is_curated);
+    }
+    if (varCategory !== 'All') {
+      list = list.filter((v: any) => v.category === varCategory);
+    }
+    if (varSeverityFilter !== 'all') {
+      list = list.filter((v: any) => (v.severity || 'info') === varSeverityFilter);
+    }
+    if (varFilterText.trim()) {
+      const q = varFilterText.toLowerCase();
+      list = list.filter(
+        (v: any) =>
+          v.name.toLowerCase().includes(q) ||
+          String(v.value).toLowerCase().includes(q) ||
+          (v.description && v.description.toLowerCase().includes(q))
+      );
+    }
+    return list;
+  });
+
+  let varCategories = $derived.by(() => {
+    if (!variablesReport?.variables) return ['All'];
+    const cats = new Set<string>(['All']);
+    variablesReport.variables.forEach((v: any) => {
+      if (v.category) cats.add(v.category);
+    });
+    return Array.from(cats);
+  });
 </script>
 
     <!-- Server Variables View -->

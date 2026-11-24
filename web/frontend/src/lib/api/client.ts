@@ -19,7 +19,7 @@ import {
   type ExecuteQueryOptions,
   type StreamEventHandlers,
 } from './http';
-import { streamExecuteQuery } from './streamQuery';
+import { streamExecuteQuery, streamDataTransfer, streamRunSqlScript } from './streamQuery';
 
 export type { OperationalNote, AIProfile, AiConfig, ExecuteQueryOptions, StreamEventHandlers };
 export { HttpStatusError, loadAiConfig };
@@ -963,62 +963,15 @@ class ApiClient extends ApiHttpBase {
     },
     onProgress?: (evt: any) => void
   ): Promise<any> {
-    const headers = this.getAuthHeaders({}, true);
-    let res: Response;
-    try {
-      res = await fetch('/api/sync/data/transfer', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(payload),
-      });
-    } catch (err) {
-      if (typeof window !== 'undefined') (window as any).__sqlfox_trigger_reconnect?.();
-      throw new Error(`Cannot reach SqlFox daemon: ${err instanceof Error ? err.message : String(err)}`);
-    }
-    if (!res.ok) {
-      await this.handleNonOkResponse(res);
-    }
-    if (!res.body) {
-      throw new Error('Streaming response body is empty');
-    }
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = '';
-    let result: any = { status: 'completed', total_rows: 0, has_errors: false, errors: [] as string[] };
-    const tableErrors: string[] = [];
-
-    const handleEvt = (evt: any) => {
-      onProgress?.(evt);
-      if (evt.event === 'table_error' && evt.error) {
-        tableErrors.push(`${evt.table || 'table'}: ${evt.error}`);
-      }
-      if (evt.event === 'done') {
-        result = { ...evt, errors: tableErrors };
-      }
-    };
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const lines = buf.split('\n');
-      buf = lines.pop() || '';
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        try {
-          handleEvt(JSON.parse(trimmed));
-        } catch { /* ignore malformed */ }
-      }
-    }
-    if (buf.trim()) {
-      try { handleEvt(JSON.parse(buf.trim())); } catch { /* ignore */ }
-    }
-    if (tableErrors.length > 0 && !result.error) {
-      result.has_errors = true;
-      result.error = tableErrors.join('; ');
-    }
-    return result;
+    return streamDataTransfer(
+      {
+        baseUrl: this.baseUrl,
+        getAuthHeaders: (extra, includeJson) => this.getAuthHeaders(extra, includeJson),
+        handleNonOkResponse: (res) => this.handleNonOkResponse(res),
+      },
+      payload,
+      onProgress
+    );
   }
 
   // Row-Level Data Sync
@@ -1114,75 +1067,17 @@ class ApiClient extends ApiHttpBase {
     options: { stopOnError?: boolean; database?: string; confirm?: boolean },
     onProgress: (event: any) => void
   ): Promise<{ status: string; total: number; executed: number; errors: number }> {
-    const formData = new FormData();
-    formData.append('file', file);
-
-    const headers = this.getAuthHeaders({}, false);
-    const params = new URLSearchParams();
-    if (options.stopOnError !== undefined) params.set('stop_on_error', String(options.stopOnError));
-    if (options.database) params.set('db', options.database);
-    if (options.confirm) params.set('confirm', 'true');
-
-    const res = await fetch(`/api/session/${sessionId}/run-sql-script?${params.toString()}`, {
-      method: 'POST',
-      headers,
-      body: formData,
-    });
-
-    if (!res.ok) {
-      await this.handleNonOkResponse(res);
-    }
-
-    if (!res.body) {
-      return { status: 'completed', total: 0, executed: 0, errors: 0 };
-    }
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let streamBuf = '';
-    let total = 0;
-    let executed = 0;
-    let errors = 0;
-    let finalStatus = 'completed';
-
-    const processItem = (item: any) => {
-      if (item.total) total = item.total;
-      if (item.status === 'ok') executed++;
-      if (item.status === 'error') errors++;
-      if (item.executed_statements !== undefined) executed = item.executed_statements;
-      if (item.error_count !== undefined) errors = item.error_count;
-      if (item.status === 'halted' || item.status === 'completed') finalStatus = item.status;
-      onProgress(item);
-    };
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      streamBuf += decoder.decode(value, { stream: true });
-      const lines = streamBuf.split('\n');
-      streamBuf = lines.pop() || '';
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        try {
-          processItem(JSON.parse(trimmed));
-        } catch { /* ignore */ }
-      }
-    }
-
-    if (streamBuf.trim()) {
-      try {
-        processItem(JSON.parse(streamBuf.trim()));
-      } catch { /* ignore */ }
-    }
-
-    return {
-      status: errors > 0 && options.stopOnError ? 'halted' : finalStatus,
-      total,
-      executed,
-      errors,
-    };
+    return streamRunSqlScript(
+      {
+        baseUrl: this.baseUrl,
+        getAuthHeaders: (extra, includeJson) => this.getAuthHeaders(extra, includeJson),
+        handleNonOkResponse: (res) => this.handleNonOkResponse(res),
+      },
+      sessionId,
+      file,
+      options,
+      onProgress
+    );
   }
 
   // Diagnostic Logs (Persistent Rotating Log File & Client Telemetry)

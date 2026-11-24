@@ -836,7 +836,7 @@
                                 {#if (table.row_count !== undefined && table.row_count !== null) || (table.rows_count !== undefined && table.rows_count !== null)}
                                   <span
                                     class="text-[9.5px] text-slate-400 font-mono bg-slate-900/80 group-hover:bg-slate-800 px-1.5 py-0.2 rounded border border-slate-800/80 ml-1.5 shrink-0 tabular-nums transition-opacity {tableContextMenu?.open && tableContextMenu.tableName === table.name ? 'opacity-0' : 'group-hover:opacity-0'}"
-                                    title="{table.row_count_exact ? 'Exact rows' : 'Estimated rows'}: {(table.row_count ?? table.rows_count).toLocaleString()}"
+                                    title="{table.row_count_exact ? 'Exact rows' : 'Estimated rows'}: {(table.row_count ?? table.rows_count ?? 0).toLocaleString()}"
                                   >
                                     {table.row_count_exact ? '' : '~'}{formatCount(table.row_count ?? table.rows_count)}
                                   </span>
@@ -900,7 +900,7 @@
                         {#if (table.row_count !== undefined && table.row_count !== null) || (table.rows_count !== undefined && table.rows_count !== null)}
                           <span
                             class="text-[9.5px] text-slate-400 font-mono bg-slate-900/80 group-hover:bg-slate-800 px-1.5 py-0.2 rounded border border-slate-800/80 ml-1.5 shrink-0 tabular-nums transition-opacity {tableContextMenu?.open && tableContextMenu.tableName === table.name ? 'opacity-0' : 'group-hover:opacity-0'}"
-                            title="{table.row_count_exact ? 'Exact rows' : 'Estimated rows'}: {(table.row_count ?? table.rows_count).toLocaleString()}"
+                            title="{table.row_count_exact ? 'Exact rows' : 'Estimated rows'}: {(table.row_count ?? table.rows_count ?? 0).toLocaleString()}"
                           >
                             {table.row_count_exact ? '' : '~'}{formatCount(table.row_count ?? table.rows_count)}
                           </span>
@@ -961,7 +961,7 @@
                         {#if (table.row_count !== undefined && table.row_count !== null) || (table.rows_count !== undefined && table.rows_count !== null)}
                           <span
                             class="text-[9.5px] text-slate-400 font-mono bg-slate-900/80 group-hover:bg-slate-800 px-1.5 py-0.2 rounded border border-slate-800/80 ml-1.5 shrink-0 tabular-nums transition-opacity {tableContextMenu?.open && tableContextMenu.tableName === table.name ? 'opacity-0' : 'group-hover:opacity-0'}"
-                            title="{table.row_count_exact ? 'Exact rows' : 'Estimated rows'}: {(table.row_count ?? table.rows_count).toLocaleString()}"
+                            title="{table.row_count_exact ? 'Exact rows' : 'Estimated rows'}: {(table.row_count ?? table.rows_count ?? 0).toLocaleString()}"
                           >
                             {table.row_count_exact ? '' : '~'}{formatCount(table.row_count ?? table.rows_count)}
                           </span>

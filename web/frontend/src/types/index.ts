@@ -15,6 +15,9 @@ export interface ConnectionProfile {
   database_name?: string;
   ssl_mode?: string;
   use_ssl?: boolean;
+  ssl_ca?: string;
+  ssl_cert?: string;
+  ssl_key?: string;
   environment: Environment;
   read_only?: boolean;
   color?: string;
@@ -332,6 +335,7 @@ export interface EditorTab {
   isExecuting?: boolean;
   isExplaining?: boolean;
   isStreaming?: boolean;
+  queryLimit?: number;
   executionStartedAt?: number;
   executionElapsedMs?: number;
   statusText?: string;
