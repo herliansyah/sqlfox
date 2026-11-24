@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -226,6 +227,51 @@ func isLoopback(remoteAddr string) bool {
 	return ip.IsLoopback()
 }
 
+// GetClientIP extracts the effective client IP, respecting trusted proxy headers when behindProxy is enabled.
+func (s *Server) GetClientIP(r *http.Request) string {
+	s.mu.Lock()
+	proxyEnabled := s.behindProxy
+	s.mu.Unlock()
+
+	if proxyEnabled || os.Getenv("SQLFOX_BEHIND_PROXY") == "1" || strings.ToLower(os.Getenv("SQLFOX_BEHIND_PROXY")) == "true" {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			parts := strings.Split(xff, ",")
+			if len(parts) > 0 {
+				clientIP := strings.TrimSpace(parts[0])
+				if ip := net.ParseIP(clientIP); ip != nil {
+					return clientIP
+				}
+			}
+		}
+		if xri := r.Header.Get("X-Real-IP"); xri != "" {
+			clientIP := strings.TrimSpace(xri)
+			if ip := net.ParseIP(clientIP); ip != nil {
+				return clientIP
+			}
+		}
+	}
+
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	return host
+}
+
+// IsRemoteRequest reports whether a request originates from a non-loopback host,
+// accurately inspecting reverse proxy headers when behind-proxy mode is active.
+func (s *Server) IsRemoteRequest(r *http.Request) bool {
+	clientIP := s.GetClientIP(r)
+	ip := net.ParseIP(clientIP)
+	if ip == nil {
+		if clientIP == "localhost" {
+			return false
+		}
+		return true
+	}
+	return !ip.IsLoopback()
+}
+
 // RemoteAccessGuardMiddleware intercepts requests from non-localhost IPs.
 func (s *Server) RemoteAccessGuardMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -236,8 +282,8 @@ func (s *Server) RemoteAccessGuardMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Loopback (localhost) is granted immediate access
-		if isLoopback(r.RemoteAddr) {
+		// Loopback (localhost) is granted immediate access if not a remote request behind proxy
+		if !s.IsRemoteRequest(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -270,7 +316,7 @@ func extractToken(r *http.Request) string {
 }
 
 func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
-	isRemote := !isLoopback(r.RemoteAddr)
+	isRemote := s.IsRemoteRequest(r)
 	unlocked := false
 
 	if !isRemote {
@@ -290,10 +336,7 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAuthUnlock(w http.ResponseWriter, r *http.Request) {
-	clientIP, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		clientIP = r.RemoteAddr
-	}
+	clientIP := s.GetClientIP(r)
 
 	if locked, remaining := s.authMgr.IsLocked(clientIP); locked {
 		w.Header().Set("Content-Type", "application/json")
@@ -359,7 +402,7 @@ func (s *Server) handleAuthUnlock(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetMasterPassword(w http.ResponseWriter, r *http.Request) {
-	if !isLoopback(r.RemoteAddr) {
+	if s.IsRemoteRequest(r) {
 		writeError(w, http.StatusForbidden, "Master password inspection is only allowed from localhost.")
 		return
 	}

@@ -89,6 +89,7 @@ func main() {
 	portFlag := flag.Int("port", 8080, "Port to listen on (default 8080, with automatic scanning if busy)")
 	hostFlag := flag.String("host", "127.0.0.1", "Host interface to bind (default 127.0.0.1; use --lan or 0.0.0.0 for LAN/Tablet access)")
 	lanFlag := flag.Bool("lan", false, "Enable LAN and tablet access (binds to 0.0.0.0 and displays Master PIN)")
+	behindProxyFlag := flag.Bool("behind-proxy", false, "Enable reverse proxy trust mode (inspects X-Forwarded-For and X-Real-IP headers)")
 	tlsFlag := flag.Bool("tls", false, "Enable TLS/HTTPS listener (auto-generates self-signed ECDSA certificate if none provided)")
 	tlsCertFlag := flag.String("tls-cert", "", "Path to custom TLS certificate file (PEM)")
 	tlsKeyFlag := flag.String("tls-key", "", "Path to custom TLS private key file (PEM)")
@@ -251,6 +252,8 @@ func main() {
 	srv.SetLogger(logRes.Logger)
 	srv.SetLANEnabled(isLAN)
 	srv.SetLANIP(lanIP)
+	isBehindProxy := *behindProxyFlag || os.Getenv("SQLFOX_BEHIND_PROXY") == "1" || strings.ToLower(os.Getenv("SQLFOX_BEHIND_PROXY")) == "true"
+	srv.SetBehindProxy(isBehindProxy)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)

@@ -516,3 +516,64 @@ func TestQueryTokenRejected(t *testing.T) {
 		t.Fatalf("expected 200 OK for Bearer token, got: %d", recAuth.Code)
 	}
 }
+
+func TestBehindProxy_RemoteGuardProtection(t *testing.T) {
+	tempDir := t.TempDir()
+	v, err := vault.OpenVault(filepath.Join(tempDir, "config.db"), "pin-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	srv := NewServer(v, nil, filepath.Join(tempDir, "backups"), "pin-secret")
+	srv.SetBehindProxy(true)
+	srv.SetLANEnabled(true)
+	handler := srv.Router()
+
+	// 1. Request arriving at 127.0.0.1 (reverse proxy), but X-Forwarded-For is a public IP
+	req := httptest.NewRequest("GET", "/api/connections", nil)
+	req.RemoteAddr = "127.0.0.1:45678"
+	req.Header.Set("X-Forwarded-For", "203.0.113.195, 127.0.0.1")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized for remote IP forwarded by reverse proxy, got %d", rec.Code)
+	}
+
+	// 2. Request for master password arriving from remote IP via proxy without token -> 401 Unauthorized
+	reqMaster := httptest.NewRequest("GET", "/api/auth/master-key", nil)
+	reqMaster.RemoteAddr = "127.0.0.1:45678"
+	reqMaster.Header.Set("X-Forwarded-For", "203.0.113.195")
+	recMaster := httptest.NewRecorder()
+	handler.ServeHTTP(recMaster, reqMaster)
+
+	if recMaster.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized when accessing master key from remote IP without token, got %d", recMaster.Code)
+	}
+
+	// 3. Authenticated request with Bearer token should succeed through proxy for standard API
+	token := srv.authMgr.GenerateToken()
+	reqAuth := httptest.NewRequest("GET", "/api/connections", nil)
+	reqAuth.RemoteAddr = "127.0.0.1:45678"
+	reqAuth.Header.Set("X-Forwarded-For", "203.0.113.195")
+	reqAuth.Header.Set("Authorization", "Bearer "+token)
+	recAuth := httptest.NewRecorder()
+	handler.ServeHTTP(recAuth, reqAuth)
+
+	if recAuth.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for authenticated proxy request, got %d", recAuth.Code)
+	}
+
+	// 4. Authenticated request from remote IP for master key -> MUST still be 403 Forbidden
+	reqMasterAuth := httptest.NewRequest("GET", "/api/auth/master-key", nil)
+	reqMasterAuth.RemoteAddr = "127.0.0.1:45678"
+	reqMasterAuth.Header.Set("X-Forwarded-For", "203.0.113.195")
+	reqMasterAuth.Header.Set("Authorization", "Bearer "+token)
+	recMasterAuth := httptest.NewRecorder()
+	handler.ServeHTTP(recMasterAuth, reqMasterAuth)
+
+	if recMasterAuth.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden when accessing master key from remote IP even with token, got %d", recMasterAuth.Code)
+	}
+}
