@@ -131,10 +131,17 @@ func ResolveTarget(ctx context.Context, target string, driverOverride string, va
 	configDir := filepath.Dir(vaultPath)
 	masterPass := pass
 	if masterPass == "" {
+		if envPass := os.Getenv("SQLFOX_PASS"); envPass != "" {
+			masterPass = envPass
+		} else if envPass := os.Getenv("SQLFOX_MASTER_KEY"); envPass != "" {
+			masterPass = envPass
+		}
+	}
+	if masterPass == "" {
 		// Attempt to read from ~/.sqlfox/master.key
 		keyPath := filepath.Join(configDir, "master.key")
-		if keyBytes, err := os.ReadFile(keyPath); err == nil {
-			masterPass = strings.TrimSpace(string(keyBytes))
+		if saved, err := vault.ReadMasterKeyFile(keyPath); err == nil {
+			masterPass = saved
 		}
 	}
 

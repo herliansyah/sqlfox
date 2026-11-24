@@ -446,18 +446,18 @@ func resolveMasterPassword(flagPass string, configDir string) (string, bool, err
 		return flagPass, false, nil
 	}
 
-	// 2. Environment variable SQLFOX_PASS
+	// 2. Environment variable SQLFOX_PASS or SQLFOX_MASTER_KEY
 	if envPass := os.Getenv("SQLFOX_PASS"); envPass != "" {
+		return envPass, false, nil
+	}
+	if envPass := os.Getenv("SQLFOX_MASTER_KEY"); envPass != "" {
 		return envPass, false, nil
 	}
 
 	// 3. Saved master.key file
 	keyFile := filepath.Join(configDir, "master.key")
-	if data, err := os.ReadFile(keyFile); err == nil {
-		saved := strings.TrimSpace(string(data))
-		if saved != "" {
-			return saved, false, nil
-		}
+	if saved, err := vault.ReadMasterKeyFile(keyFile); err == nil && saved != "" {
+		return saved, false, nil
 	}
 
 	// 4. Generate friendly PIN

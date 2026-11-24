@@ -2,6 +2,9 @@ package vault
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -88,5 +91,30 @@ func TestCrypto_LegacyNoAADFallback(t *testing.T) {
 	got, err := DecryptWithAAD(legacyCT, key, []byte("sqlfox:connection:xyz:password"))
 	if err != nil || !bytes.Equal(got, secret) {
 		t.Fatalf("legacy fallback decrypt failed: got=%q err=%v", got, err)
+	}
+}
+
+func TestReadMasterKeyFile_TightensPermissions(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "master.key")
+	if err := os.WriteFile(keyPath, []byte("  fox-abc123 \n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ReadMasterKeyFile(keyPath)
+	if err != nil {
+		t.Fatalf("ReadMasterKeyFile failed: %v", err)
+	}
+	if got != "fox-abc123" {
+		t.Fatalf("expected trimmed key 'fox-abc123', got %q", got)
+	}
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(keyPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if perm := info.Mode().Perm(); perm != 0600 {
+			t.Fatalf("expected master.key permissions tightened to 0600, got %04o", perm)
+		}
 	}
 }

@@ -8,6 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"os"
+	"runtime"
+	"strings"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -128,4 +132,25 @@ func decrypt(encodedCiphertext string, key []byte, aad []byte) ([]byte, error) {
 	}
 
 	return plaintext, nil
+}
+
+// ReadMasterKeyFile reads a local master.key file and enforces strict 0600 permissions on Unix
+// so other local users cannot read the vault passphrase.
+func ReadMasterKeyFile(keyPath string) (string, error) {
+	if runtime.GOOS != "windows" {
+		if info, err := os.Stat(keyPath); err == nil {
+			if perm := info.Mode().Perm(); perm&0077 != 0 {
+				slog.Warn("master.key had overly permissive file mode; tightening to 0600",
+					"path", keyPath,
+					"mode", fmt.Sprintf("%04o", perm),
+				)
+				_ = os.Chmod(keyPath, 0600)
+			}
+		}
+	}
+	data, err := os.ReadFile(keyPath)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
 }
