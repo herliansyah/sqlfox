@@ -74,8 +74,8 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	targetDB := r.URL.Query().Get("db")
-	if targetDB == "" && sess.DatabaseName != "" {
-		targetDB = sess.DatabaseName
+	if targetDB == "" {
+		targetDB = sess.GetDatabaseName()
 	}
 	if targetDB != "" {
 		if err := sess.UseDatabase(ctx, targetDB); err != nil {
@@ -287,8 +287,8 @@ func (s *Server) handleGetTableCount(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	targetDB := r.URL.Query().Get("db")
-	if targetDB == "" && sess.DatabaseName != "" {
-		targetDB = sess.DatabaseName
+	if targetDB == "" {
+		targetDB = sess.GetDatabaseName()
 	}
 	if targetDB != "" {
 		if err := sess.UseDatabase(ctx, targetDB); err != nil {
@@ -357,7 +357,7 @@ func (s *Server) handleGetTableCount(w http.ResponseWriter, r *http.Request) {
 var allowedFilterKeywords = map[string]bool{
 	"AND": true, "OR": true, "NOT": true, "IS": true, "NULL": true,
 	"IN": true, "LIKE": true, "ILIKE": true, "BETWEEN": true, "ESCAPE": true,
-	"TRUE": true, "FALSE": true, "DIV": true, "MOD": true,
+	"TRUE": true, "FALSE": true,
 }
 
 // reFilterToken lexes one token: a quoted literal ('..' with doubled-quote / backslash escapes),
@@ -512,7 +512,7 @@ func validateTableFilter(filter string) error {
 
 func isFilterWord(tok string) bool {
 	c := tok[0]
-	return c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '`' || c == '"'
+	return c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 }
 
 func isFilterOperator(tok string) bool {
@@ -523,14 +523,17 @@ func isFilterOperator(tok string) bool {
 	return false
 }
 
-// isReservedSQLVerb blocks statement-leading verbs and set operators that must never appear in a
-// value predicate even without parentheses (e.g. "id = 1 UNION SELECT ...").
+// isReservedSQLVerb blocks statement-leading verbs, set operators, and side-effecting or
+// information-disclosure functions/keywords (e.g. CURRENT_USER, CASE, REGEXP).
 func isReservedSQLVerb(upper string) bool {
 	switch upper {
 	case "SELECT", "UNION", "INTERSECT", "EXCEPT", "INSERT", "UPDATE", "DELETE",
 		"DROP", "ALTER", "TRUNCATE", "CREATE", "GRANT", "REVOKE", "SHUTDOWN",
 		"INTO", "EXEC", "EXECUTE", "CALL", "MERGE", "REPLACE", "LOAD", "HANDLER",
-		"VALUES", "SET", "DECLARE", "WAITFOR", "WITH":
+		"VALUES", "SET", "DECLARE", "WAITFOR", "WITH",
+		"CASE", "WHEN", "THEN", "ELSE", "END", "REGEXP", "RLIKE", "SIMILAR",
+		"CURRENT_USER", "SESSION_USER", "SYSTEM_USER", "CURRENT_DATABASE",
+		"CURRENT_ROLE", "CURRENT_SCHEMA", "CURRENT_CATALOG", "USER":
 		return true
 	}
 	return false
@@ -625,7 +628,7 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 			db = req.Database
 		}
 		if db != "" && sess.DriverName != "sqlite" {
-			if !isPgDriver(sess.DriverName) || !strings.EqualFold(db, sess.DatabaseName) || strings.EqualFold(db, "public") {
+			if !isPgDriver(sess.DriverName) || !strings.EqualFold(db, sess.GetDatabaseName()) || strings.EqualFold(db, "public") {
 				tableRef = fmt.Sprintf("%s.%s", quoteIdent(db), quoteIdent(item.Table))
 			}
 		}

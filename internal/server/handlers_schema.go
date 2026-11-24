@@ -217,8 +217,8 @@ func (s *Server) handleGetTableDDL(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	targetDB := r.URL.Query().Get("db")
-	if targetDB == "" && sess.DatabaseName != "" {
-		targetDB = sess.DatabaseName
+	if targetDB == "" {
+		targetDB = sess.GetDatabaseName()
 	}
 	if targetDB != "" {
 		if err := sess.Session.SelectDatabase(ctx, targetDB); err != nil {
@@ -380,8 +380,8 @@ func (s *Server) handlePreflightDDL(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	targetDB := r.URL.Query().Get("db")
-	if targetDB == "" && sess.DatabaseName != "" {
-		targetDB = sess.DatabaseName
+	if targetDB == "" {
+		targetDB = sess.GetDatabaseName()
 	}
 	if targetDB != "" {
 		if err := sess.Session.SelectDatabase(ctx, targetDB); err != nil {

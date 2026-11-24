@@ -59,6 +59,11 @@ func DetectRedundantIndexes(dialect, database string, tables []TableMetadata) []
 					continue
 				}
 
+				// Never compare indexes of different access methods (e.g., FULLTEXT/GIN/HASH vs BTREE).
+				if idxA.Type != "" && idxB.Type != "" && !strings.EqualFold(idxA.Type, idxB.Type) {
+					continue
+				}
+
 				// Check exact duplicate: same columns in same order
 				if isSameColumns(idxA.Columns, idxB.Columns) {
 					// Always keep the UNIQUE one; among equals, drop the lexically greater name.

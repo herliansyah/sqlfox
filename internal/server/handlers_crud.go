@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -102,7 +103,7 @@ func (s *Server) handleInsertRow(w http.ResponseWriter, r *http.Request) {
 
 	targetTable := quoteIdent(req.Table, sess.DriverName)
 	if req.Database != "" && sess.DriverName != "sqlite" {
-		if !isPgDriver(sess.DriverName) || !strings.EqualFold(req.Database, sess.DatabaseName) || strings.EqualFold(req.Database, "public") {
+		if !isPgDriver(sess.DriverName) || !strings.EqualFold(req.Database, sess.GetDatabaseName()) || strings.EqualFold(req.Database, "public") {
 			targetTable = quoteIdent(req.Database, sess.DriverName) + "." + targetTable
 		}
 	}
@@ -191,7 +192,7 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 
 	targetTable := quoteIdent(req.Table, sess.DriverName)
 	if req.Database != "" && sess.DriverName != "sqlite" {
-		if !isPgDriver(sess.DriverName) || !strings.EqualFold(req.Database, sess.DatabaseName) || strings.EqualFold(req.Database, "public") {
+		if !isPgDriver(sess.DriverName) || !strings.EqualFold(req.Database, sess.GetDatabaseName()) || strings.EqualFold(req.Database, "public") {
 			targetTable = quoteIdent(req.Database, sess.DriverName) + "." + targetTable
 		}
 	}
@@ -214,7 +215,17 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "delete failed: "+err.Error())
 			return
 		}
+		pkCols := tablePrimaryKeyColumns(ctx, sess, req.Database, req.Table)
 		for _, pkMap := range req.PKRows {
+			if len(pkCols) > 0 {
+				for _, pk := range pkCols {
+					if _, ok := pkMap[pk]; !ok {
+						_ = finish(errors.New("pk_rows must include all primary key columns"))
+						writeError(w, http.StatusBadRequest, fmt.Sprintf("table %q requires primary key column %q in pk_rows", req.Table, pk))
+						return
+					}
+				}
+			}
 			var whereParts []string
 			var auditWhereParts []string
 			var args []any
@@ -308,6 +319,7 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 			var args []any
 			pIdx := 1
 			for cName, cVal := range rc {
+				cVal = normalizeJSONParam(cVal)
 				if cVal == nil {
 					whereParts = append(whereParts, fmt.Sprintf("%s IS NULL", quoteIdent(cName, sess.DriverName)))
 					auditWhereParts = append(auditWhereParts, fmt.Sprintf("%s IS NULL", quoteIdent(cName, sess.DriverName)))
@@ -353,13 +365,13 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 // so editing/deleting one of several identical rows in a PK-less table never touches its duplicates.
 // MySQL supports UPDATE/DELETE ... LIMIT 1; SQLite and Postgres need a physical row-id subquery.
 func singleRowWhere(driverName, tableRef, where string) string {
-	switch driverName {
-	case "mysql":
+	switch strings.ToLower(driverName) {
+	case "mysql", "mariadb":
 		return where + " LIMIT 1"
-	case "sqlite":
+	case "sqlite", "sqlite3":
 		// PK-less tables are never WITHOUT ROWID, so rowid always exists here.
 		return fmt.Sprintf("rowid IN (SELECT rowid FROM %s WHERE %s LIMIT 1)", tableRef, where)
-	case "postgres":
+	case "postgres", "postgresql", "pg", "pgx":
 		// tableoid keeps ctid unique across partitions of a partitioned table.
 		return fmt.Sprintf("(tableoid, ctid) IN (SELECT tableoid, ctid FROM %s WHERE %s LIMIT 1)", tableRef, where)
 	}

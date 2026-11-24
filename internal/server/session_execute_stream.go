@@ -63,7 +63,7 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 	}
 
 	if req.Database != "" && s.Session != nil {
-		if err := s.Session.SelectDatabase(ctx, req.Database); err != nil {
+		if err := s.UseDatabase(ctx, req.Database); err != nil {
 			return nil, err
 		}
 	}
@@ -74,7 +74,7 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 		targetDB = s.Schema().DatabaseName
 	}
 	if targetDB == "" {
-		targetDB = s.DatabaseName
+		targetDB = s.GetDatabaseName()
 	}
 	inspection, allQueries, err := inspectAllStatements(trimmedSQL, s.Environment, s.DriverName, targetDB)
 	if err != nil {
@@ -85,111 +85,11 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 	if s.IsReadOnly() && (!isSelect || !allQueries || inspection.IsDestructive) {
 		return nil, ErrReadOnlySession
 	}
-
-	// 3. Pre-Execution Row Estimation & Tiered Affirmation Gate (ADR 0057)
-	isDev := strings.EqualFold(s.Environment, "Development")
-	isMutation := inspection.Operation == "DELETE" || inspection.Operation == "UPDATE" || len(inspection.StatementEstimates) > 0
-	canBypass := isDev && req.BypassMutationConfirm && !inspection.RequiresChallenge
-
-	if isMutation && !canBypass {
-		// Re-derived on confirmed requests too, so a client cannot skip the typed challenge by sending confirmed=true first.
-		s.estimateAffectedRows(ctx, inspection)
-
-		anyMissingWhere := false
-		anyOverThreshold := false
-		if len(inspection.StatementEstimates) > 0 {
-			for _, est := range inspection.StatementEstimates {
-				if !est.HasWhere {
-					anyMissingWhere = true
-				}
-				if est.EstimatedRows != nil && *est.EstimatedRows > 100 {
-					anyOverThreshold = true
-				}
-			}
-		} else {
-			if !inspection.HasWhere {
-				anyMissingWhere = true
-			}
-			if inspection.EstimatedRows != nil && *inspection.EstimatedRows > 100 {
-				anyOverThreshold = true
-			}
-		}
-
-		if isDev {
-			if len(inspection.StatementEstimates) == 0 && inspection.HasWhere && inspection.EstimatedRows != nil && *inspection.EstimatedRows == 1 {
-				inspection.RequiresAffirmation = false
-				inspection.RequiresChallenge = false
-			} else {
-				if anyOverThreshold || anyMissingWhere {
-					inspection.RequiresChallenge = true
-				} else {
-					inspection.RequiresAffirmation = true
-				}
-			}
-		} else {
-			if anyOverThreshold || anyMissingWhere {
-				inspection.RequiresChallenge = true
-			} else {
-				inspection.RequiresAffirmation = true
-			}
-		}
-	}
-
-	requiresGate := inspection.RequiresChallenge || (isMutation && !canBypass && inspection.RequiresAffirmation) || (!isDev && inspection.RequiresAffirmation)
-	if requiresGate && !req.Confirmed {
-		if inspection.TargetTable != "" && s.Session != nil {
-			if dp, ok := s.Session.(driver.DiagnosticsProvider); ok {
-				if locks, err := dp.InspectTableLocks(ctx, req.Database, inspection.TargetTable); err == nil {
-					inspection.TableLocks = locks
-				}
-			}
-			schema := s.Schema()
-			if schema == nil || (req.Database != "" && schema.DatabaseName != req.Database) {
-				if sSc, sErr := s.Session.InspectSchema(ctx, req.Database); sErr == nil {
-					schema = sSc
-					s.SetSchema(sSc)
-				}
-			}
-			if schema != nil {
-				inspection.Relationships = driver.InspectTableRelationships(schema, inspection.TargetTable)
-			}
-		}
+	if inspection.RequiresChallenge && !req.Confirmed {
 		return &ExecuteResponse{
 			Blocked:    true,
 			Inspection: inspection,
 		}, nil
-	}
-
-	// Challenge typed table name validation
-	if inspection.RequiresChallenge && req.Confirmed && inspection.TargetTable != "" {
-		expected := inspection.TargetTable
-		typed := strings.TrimSpace(req.ChallengeInput)
-		if typed == "" {
-			// Confirmed without a typed challenge (the requirement escalated since the preview, e.g. the
-			// row estimate grew past the threshold): ask again instead of failing the request.
-			return &ExecuteResponse{Blocked: true, Inspection: inspection}, nil
-		}
-		if !strings.EqualFold(typed, expected) && !strings.EqualFold(typed, inspection.TargetDatabase) {
-			return nil, fmt.Errorf("Challenge confirmation failed: expected '%s', got '%s'", expected, req.ChallengeInput)
-		}
-	}
-
-	// Non-SELECT queries (mutations/DDL/transactions) and mixed batches such as "SELECT 1; DROP TABLE t"
-	// run synchronously through Execute (which owns the pre-DDL backup) and output a single NDJSON line.
-	if !isSelect || !allQueries {
-		resp, execErr := s.Execute(ctx, req)
-		if execErr != nil {
-			return nil, execErr
-		}
-		if resp != nil && resp.Blocked {
-			return resp, nil
-		}
-		enc := json.NewEncoder(w)
-		_ = enc.Encode(resp)
-		if flusher != nil {
-			flusher.Flush()
-		}
-		return nil, nil
 	}
 
 	start := time.Now()

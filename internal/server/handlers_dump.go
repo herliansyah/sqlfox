@@ -580,6 +580,31 @@ func (s *Server) handleRunSQLScript(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if len(blockers) > 0 && confirmed && strings.EqualFold(sess.Environment, "Production") {
+		if typed := strings.TrimSpace(r.URL.Query().Get("challenge_input")); typed != "" {
+			expectedDB := targetDB
+			if expectedDB == "" {
+				expectedDB = sess.GetDatabaseName()
+			}
+			matched := strings.EqualFold(typed, expectedDB) || strings.EqualFold(typed, sess.Name)
+			if !matched {
+				for _, b := range blockers {
+					if b.TargetTable != "" && strings.EqualFold(typed, b.TargetTable) {
+						matched = true
+						break
+					}
+				}
+			}
+			if !matched {
+				writeJSON(w, http.StatusConflict, map[string]any{
+					"error":              fmt.Sprintf("Production script challenge_input did not match '%s'.", expectedDB),
+					"requires_challenge": true,
+					"blockers":           blockers,
+				})
+				return
+			}
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	flusher, _ := w.(http.Flusher)

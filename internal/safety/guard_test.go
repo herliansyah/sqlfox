@@ -642,3 +642,52 @@ func TestSafetyGuard_HardeningEdgeCases(t *testing.T) {
 		t.Errorf("expected multi-table TRUNCATE TABLE a, b to report 'a, b', got %+v", res)
 	}
 }
+
+func TestSafetyGuard_AuditHardening(t *testing.T) {
+	// 1. PostgreSQL EXPLAIN ANALYSE synonym
+	if res := Inspect("EXPLAIN ANALYSE DELETE FROM users", "Production"); res.RiskLevel != RiskCritical || !res.IsDestructive {
+		t.Errorf("expected EXPLAIN ANALYSE DELETE to be RiskCritical, got %+v", res)
+	}
+	if driver.IsQueryStatement("EXPLAIN ANALYSE DELETE FROM users") {
+		t.Errorf("IsQueryStatement must return false for EXPLAIN ANALYSE DELETE")
+	}
+
+	// 2. Data-modifying CTEs with TABLE, VALUES, or parenthesized outer SELECT
+	for _, q := range []string{
+		"WITH d AS (DELETE FROM users) TABLE d",
+		"WITH d AS (DELETE FROM users) VALUES (1)",
+		"WITH d AS (DELETE FROM users) (SELECT * FROM d)",
+	} {
+		if res := Inspect(q, "Production"); res.RiskLevel != RiskCritical || !res.IsDestructive || res.TargetTable != "users" {
+			t.Errorf("expected %q to be RiskCritical on 'users', got %+v", q, res)
+		}
+	}
+
+	// 3. Function-form mutating PRAGMAs & SELECT ... INTO new_table
+	if driver.IsQueryStatement("PRAGMA writable_schema(1)") {
+		t.Errorf("IsQueryStatement must reject mutating function-form PRAGMA")
+	}
+	if !driver.IsQueryStatement("PRAGMA table_info(users)") {
+		t.Errorf("IsQueryStatement must allow read-only PRAGMA table_info(users)")
+	}
+	if res := Inspect("PRAGMA writable_schema(1)", "Production"); !res.IsDestructive || !res.RequiresChallenge {
+		t.Errorf("expected PRAGMA writable_schema(1) in Production to require challenge, got %+v", res)
+	}
+	if driver.IsQueryStatement("SELECT * INTO new_users FROM users") {
+		t.Errorf("IsQueryStatement must reject SELECT ... INTO table")
+	}
+
+	// 4. Privileged ALTER / CREATE / administrative verbs
+	for _, q := range []string{
+		"ALTER SYSTEM SET archive_command = 'evil'",
+		"ALTER USER bob SUPERUSER",
+		"CREATE FUNCTION evil() RETURNS void AS $$ $$ LANGUAGE sql",
+		"SHUTDOWN",
+		"FLUSH TABLES WITH READ LOCK",
+		"SET GLOBAL max_connections = 1",
+	} {
+		if res := Inspect(q, "Production"); !res.IsDestructive || !res.RequiresChallenge {
+			t.Errorf("expected %q in Production to be destructive + require challenge, got %+v", q, res)
+		}
+	}
+}

@@ -89,10 +89,11 @@ func (s *ActiveSession) Close() error {
 		return nil
 	}
 	s.mu.Lock()
+	var txsToRollback []driver.TxSession
 	if s.tabTransactions != nil {
 		for _, entry := range s.tabTransactions {
 			if entry != nil && entry.tx != nil {
-				_ = entry.tx.Rollback()
+				txsToRollback = append(txsToRollback, entry.tx)
 			}
 		}
 		s.tabTransactions = nil
@@ -103,6 +104,10 @@ func (s *ActiveSession) Close() error {
 	alreadyClosed := s.closed
 	s.closed = true
 	s.mu.Unlock()
+
+	for _, tx := range txsToRollback {
+		_ = tx.Rollback()
+	}
 
 	s.auditWg.Wait()
 
@@ -337,6 +342,16 @@ func rejectIfReadOnly(w http.ResponseWriter, sess *ActiveSession) bool {
 		return true
 	}
 	return false
+}
+
+// GetDatabaseName returns the current active database name in a thread-safe manner.
+func (s *ActiveSession) GetDatabaseName() string {
+	if s == nil {
+		return ""
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.DatabaseName
 }
 
 // UseDatabase selects the active database context if a non-empty name is provided,

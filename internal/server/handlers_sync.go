@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/herliansyah/sqlfox/internal/driver"
+	"github.com/herliansyah/sqlfox/internal/safety"
 	"net/http"
 	"strings"
 	"time"
@@ -410,13 +411,37 @@ func (s *Server) handleSyncStructureApply(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Production safety check
-	if strings.EqualFold(tgtSess.Environment, "production") {
+	var parsedStmts []string
+	var needsChallenge bool
+	var challengeReason string
+	for _, rawStmt := range req.Statements {
+		for _, stmt := range driver.SplitSQLStatements(rawStmt, tgtSess.DriverName) {
+			stmt = strings.TrimSpace(stmt)
+			if stmt == "" {
+				continue
+			}
+			parsedStmts = append(parsedStmts, stmt)
+			insp := safety.InspectWithScope(stmt, tgtSess.Environment, req.TargetDB)
+			if insp != nil && insp.RequiresChallenge {
+				needsChallenge = true
+				if challengeReason == "" {
+					challengeReason = insp.Reason
+				}
+			}
+		}
+	}
+
+	// Safety Guard & Production confirmation check
+	if strings.EqualFold(tgtSess.Environment, "production") || needsChallenge {
 		if !req.Confirmed {
+			msg := "Target is a Production database. Confirmation challenge required."
+			if challengeReason != "" && !strings.EqualFold(tgtSess.Environment, "production") {
+				msg = challengeReason
+			}
 			writeJSON(w, http.StatusOK, map[string]any{
 				"blocked":          true,
 				"requires_confirm": true,
-				"message":          "Target is a Production database. Confirmation challenge required.",
+				"message":          msg,
 			})
 			return
 		}
@@ -444,11 +469,7 @@ func (s *Server) handleSyncStructureApply(w http.ResponseWriter, r *http.Request
 	var executedCount int
 	var errors []string
 
-	for _, stmt := range req.Statements {
-		stmt = strings.TrimSpace(stmt)
-		if stmt == "" || strings.HasPrefix(stmt, "--") {
-			continue
-		}
+	for _, stmt := range parsedStmts {
 		// Pre-DDL Smart Tiered Backup for destructive schema operations.
 		tgtSess.BackupBeforeDestructive(ctx, stmt, req.TargetDB)
 

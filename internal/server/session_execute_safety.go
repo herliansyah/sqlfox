@@ -42,7 +42,10 @@ func inspectAllStatements(sql, environment, driverName, scopedDB string) (*safet
 			if gate != nil && gate.RequiresChallenge && (gate.Operation == "DROP" || insp.Operation == "DROP" || gate.Operation == "TRUNCATE" || insp.Operation == "TRUNCATE") {
 				return nil, false, errors.New("multiple destructive statements require confirmation: run them one at a time")
 			}
-			gate = insp
+			// Preserve an existing TargetTable challenge rather than letting a tableless statement (e.g. DO $$...$$) overwrite it.
+			if gate == nil || !gate.RequiresChallenge || gate.TargetTable == "" || insp.TargetTable != "" {
+				gate = insp
+			}
 		} else if insp.IsDestructive && firstDestructive == nil {
 			firstDestructive = insp
 		} else if insp.RequiresAffirmation && gate == nil {
@@ -221,8 +224,10 @@ func (s *ActiveSession) runSingleCountEstimate(ctx context.Context, countSQL str
 		}
 	}
 
-	// Fallback to EXPLAIN
-	plan, expErr := s.Session.Explain(countCtx, countSQL)
+	// Fallback to EXPLAIN using a fresh bounded context derived from ctx (countCtx has already expired).
+	expCtx, expCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer expCancel()
+	plan, expErr := s.Session.Explain(expCtx, countSQL)
 	if expErr == nil && plan != nil && len(plan.Rows) > 0 {
 		if plan.Rows[0].Rows > 0 {
 			est := plan.Rows[0].Rows

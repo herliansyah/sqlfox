@@ -35,7 +35,7 @@ func (s *Server) handleInspectQuery(w http.ResponseWriter, r *http.Request) {
 		targetDB = sess.Schema().DatabaseName
 	}
 	if targetDB == "" {
-		targetDB = sess.DatabaseName
+		targetDB = sess.GetDatabaseName()
 	}
 	res, _, err := inspectAllStatements(req.SQL, sess.Environment, sess.DriverName, targetDB)
 	if err != nil {

@@ -240,6 +240,17 @@ func inspectTokensMode(query string, environment string, mysqlEscapes bool) *Ins
 					Suggestion:        "Use SqlFox Export Dump instead of VACUUM INTO.",
 				}
 			}
+			if tok.kind == tokWord && tok.upper == "FULL" {
+				return &InspectionResult{
+					RiskLevel:           RiskDangerous,
+					IsDestructive:       true,
+					RequiresChallenge:   isProd,
+					RequiresAffirmation: isProd || isStaging,
+					Operation:           "VACUUM",
+					Reason:              "VACUUM FULL acquires an ACCESS EXCLUSIVE table lock and rewrites the entire table.",
+					Suggestion:          "Avoid VACUUM FULL on active production tables during peak traffic.",
+				}
+			}
 		}
 		return &InspectionResult{RiskLevel: RiskNone}
 	case "LOAD":
@@ -261,20 +272,83 @@ func inspectTokensMode(query string, environment string, mysqlEscapes bool) *Ins
 			Suggestion:        "Verify target account and privilege scope before applying.",
 		}
 	case "PRAGMA":
-		// Mutating PRAGMAs contain '=' (e.g. PRAGMA writable_schema = ON).
-		for _, tok := range tokens[1:] {
-			if tok.raw == "=" {
+		// Mutating PRAGMAs contain '=' (e.g. PRAGMA writable_schema = ON) or call non-readonly
+		// function-form PRAGMAs like PRAGMA writable_schema(1) / PRAGMA query_only(0).
+		isMutatingPragma := false
+		for i := 1; i < len(tokens); i++ {
+			if tokens[i].raw == "=" {
+				isMutatingPragma = true
+				break
+			}
+			if tokens[i].kind == tokWord && i+1 < len(tokens) && tokens[i+1].kind == tokLParen {
+				switch strings.ToLower(tokens[i].unquoted) {
+				case "table_info", "table_xinfo", "index_list", "index_info", "index_xinfo",
+					"foreign_key_list", "database_list", "collation_list", "compile_options",
+					"function_list", "module_list", "pragma_list", "integrity_check",
+					"quick_check", "foreign_key_check", "data_version", "schema_version",
+					"user_version", "application_id", "encoding", "page_count", "page_size", "freelist_count":
+				default:
+					isMutatingPragma = true
+				}
+				break
+			}
+		}
+		if isMutatingPragma {
+			return &InspectionResult{
+				RiskLevel:         RiskDangerous,
+				IsDestructive:     true,
+				RequiresChallenge: isProd,
+				Operation:         "PRAGMA",
+				Reason:            "Mutating PRAGMA alters database engine configuration or schema safety.",
+				Suggestion:        "Verify the PRAGMA setting before executing.",
+			}
+		}
+		return &InspectionResult{RiskLevel: RiskNone}
+	case "INSERT":
+		for i := 1; i < len(tokens); i++ {
+			if tokens[i].kind == tokWord && (tokens[i].upper == "DUPLICATE" || tokens[i].upper == "CONFLICT") {
 				return &InspectionResult{
-					RiskLevel:         RiskDangerous,
-					IsDestructive:     true,
-					RequiresChallenge: isProd,
-					Operation:         "PRAGMA",
-					Reason:            "Mutating PRAGMA alters database engine configuration or schema safety.",
-					Suggestion:        "Verify the PRAGMA setting before executing.",
+					RiskLevel:           RiskWarning,
+					IsDestructive:       true,
+					RequiresAffirmation: isProd || isStaging,
+					Operation:           "INSERT",
+					Reason:              "Upsert (INSERT ... ON DUPLICATE/CONFLICT) may overwrite existing rows.",
 				}
 			}
 		}
 		return &InspectionResult{RiskLevel: RiskNone}
+	case "SET":
+		for _, tok := range tokens[1:] {
+			if tok.kind == tokWord && (tok.upper == "GLOBAL" || tok.upper == "PERSIST" || tok.upper == "PERSIST_ONLY" || tok.upper == "ROLE" || tok.upper == "AUTHORIZATION" || tok.upper == "PASSWORD") {
+				return &InspectionResult{
+					RiskLevel:           RiskDangerous,
+					IsDestructive:       true,
+					RequiresChallenge:   isProd,
+					RequiresAffirmation: true,
+					Operation:           "SET",
+					Reason:              fmt.Sprintf("SET %s modifies server-wide configuration, role, or credentials.", tok.upper),
+				}
+			}
+		}
+		return &InspectionResult{RiskLevel: RiskNone}
+	case "SHUTDOWN", "KILL", "FLUSH", "LOCK", "RESET", "PURGE", "STOP", "HANDLER", "PREPARE", "REASSIGN", "DISCARD", "REINDEX", "CLUSTER":
+		return &InspectionResult{
+			RiskLevel:           RiskDangerous,
+			IsDestructive:       true,
+			RequiresChallenge:   true,
+			RequiresAffirmation: true,
+			Operation:           tokens[0].upper,
+			Reason:              fmt.Sprintf("%s performs a high-impact administrative or locking operation.", tokens[0].upper),
+		}
+	case "OPTIMIZE", "REPAIR":
+		return &InspectionResult{
+			RiskLevel:           RiskWarning,
+			IsDestructive:       true,
+			RequiresChallenge:   isProd,
+			RequiresAffirmation: isProd || isStaging,
+			Operation:           tokens[0].upper,
+			Reason:              fmt.Sprintf("%s TABLE may acquire heavy table locks and rewrite storage.", tokens[0].upper),
+		}
 	case "SELECT":
 		for i := 1; i+1 < len(tokens); i++ {
 			if tokens[i].kind == tokWord && tokens[i].upper == "INTO" &&
@@ -288,6 +362,16 @@ func inspectTokensMode(query string, environment string, mysqlEscapes bool) *Ins
 					Reason:              fmt.Sprintf("SELECT ... INTO %s writes directly to the database server filesystem.", tokens[i+1].upper),
 					Suggestion:          "Use SqlFox client-side CSV/SQL export instead.",
 				}
+			}
+		}
+		if _, _, hasTopInto := findTopLevelKeyword(tokens, 1, "INTO"); hasTopInto {
+			return &InspectionResult{
+				RiskLevel:           RiskWarning,
+				IsDestructive:       true,
+				RequiresChallenge:   isProd,
+				RequiresAffirmation: isProd || isStaging,
+				Operation:           "SELECT",
+				Reason:              "SELECT ... INTO creates a new table from query results.",
 			}
 		}
 		return &InspectionResult{RiskLevel: RiskNone}
@@ -330,7 +414,7 @@ func inspectExplain(tokens []sqlToken, query string, environment string) *Inspec
 					depth++
 				} else if tokens[idx].kind == tokRParen {
 					depth--
-				} else if tokens[idx].kind == tokWord && tokens[idx].upper == "ANALYZE" {
+				} else if tokens[idx].kind == tokWord && (tokens[idx].upper == "ANALYZE" || tokens[idx].upper == "ANALYSE") {
 					hasAnalyze = true
 				}
 				idx++
@@ -341,7 +425,7 @@ func inspectExplain(tokens []sqlToken, query string, environment string) *Inspec
 			break
 		}
 		switch tok.upper {
-		case "ANALYZE":
+		case "ANALYZE", "ANALYSE":
 			hasAnalyze = true
 			idx++
 		case "VERBOSE", "COSTS", "SETTINGS", "BUFFERS", "WAL", "TIMING", "SUMMARY",
@@ -526,8 +610,8 @@ func inspectDelete(tokens []sqlToken, query, environment string, isProd, isStagi
 			RiskLevel:         RiskDangerous,
 			IsDestructive:     true,
 			RequiresChallenge: true,
-			Operation:         "DELETE",
-			Reason:            "DELETE statement with unparsed target requires confirmation (fail-closed).",
+			Operation:         "UPDATE",
+			Reason:            "UPDATE statement with unparsed target requires confirmation (fail-closed).",
 		}
 	}
 
@@ -597,8 +681,8 @@ func inspectUpdate(tokens []sqlToken, query, environment string, isProd, isStagi
 			RiskLevel:         RiskDangerous,
 			IsDestructive:     true,
 			RequiresChallenge: true,
-			Operation:         "DELETE",
-			Reason:            "DELETE statement with unparsed target requires confirmation (fail-closed).",
+			Operation:         "UPDATE",
+			Reason:            "UPDATE statement with unparsed target requires confirmation (fail-closed).",
 		}
 	}
 
@@ -650,8 +734,58 @@ func inspectUpdate(tokens []sqlToken, query, environment string, isProd, isStagi
 
 func inspectAlter(tokens []sqlToken, isProd bool) *InspectionResult {
 	idx := 1
-	if idx >= len(tokens) || tokens[idx].kind != tokWord || tokens[idx].upper != "TABLE" {
-		return &InspectionResult{RiskLevel: RiskNone}
+	if idx >= len(tokens) || tokens[idx].kind != tokWord {
+		return &InspectionResult{
+			RiskLevel:         RiskDangerous,
+			IsDestructive:     true,
+			RequiresChallenge: true,
+			Operation:         "ALTER",
+			Reason:            "Unparsed ALTER statement requires confirmation (fail-closed).",
+		}
+	}
+	objType := tokens[idx].upper
+	if objType == "SYSTEM" {
+		return &InspectionResult{
+			RiskLevel:           RiskCritical,
+			IsDestructive:       true,
+			RequiresChallenge:   true,
+			RequiresAffirmation: true,
+			TargetType:          "SYSTEM",
+			Operation:           "ALTER",
+			Reason:              "ALTER SYSTEM modifies global database server configuration.",
+		}
+	}
+	if objType != "TABLE" {
+		switch objType {
+		case "USER", "ROLE", "DATABASE", "SCHEMA", "FUNCTION", "PROCEDURE", "TRIGGER", "VIEW", "EVENT", "POLICY", "INDEX", "SEQUENCE", "TYPE", "DOMAIN", "EXTENSION", "TABLESPACE":
+			idx++
+			if idx+1 < len(tokens) && tokens[idx].kind == tokWord && tokens[idx].upper == "IF" && tokens[idx+1].kind == tokWord && tokens[idx+1].upper == "EXISTS" {
+				idx += 2
+			}
+			db, target, _, _ := parseQualifiedTarget(tokens, idx)
+			if objType == "DATABASE" || objType == "SCHEMA" {
+				db = target
+			}
+			return &InspectionResult{
+				RiskLevel:           RiskDangerous,
+				IsDestructive:       true,
+				RequiresChallenge:   isProd || objType == "USER" || objType == "ROLE",
+				RequiresAffirmation: true,
+				TargetDatabase:      db,
+				TargetTable:         target,
+				TargetType:          objType,
+				Operation:           "ALTER",
+				Reason:              fmt.Sprintf("ALTER %s modifies database object or privileges.", objType),
+			}
+		default:
+			return &InspectionResult{
+				RiskLevel:         RiskDangerous,
+				IsDestructive:     true,
+				RequiresChallenge: isProd,
+				Operation:         "ALTER",
+				Reason:            fmt.Sprintf("ALTER %s modifies database configuration or schema.", objType),
+			}
+		}
 	}
 	idx++
 	if idx+1 < len(tokens) && tokens[idx].kind == tokWord && tokens[idx].upper == "IF" &&
@@ -663,7 +797,13 @@ func inspectAlter(tokens []sqlToken, isProd bool) *InspectionResult {
 	}
 	db, target, _, _ := parseQualifiedTarget(tokens, idx)
 	if target == "" {
-		return &InspectionResult{RiskLevel: RiskNone}
+		return &InspectionResult{
+			RiskLevel:         RiskDangerous,
+			IsDestructive:     true,
+			RequiresChallenge: true,
+			Operation:         "ALTER",
+			Reason:            "Unparsed ALTER TABLE target requires confirmation (fail-closed).",
+		}
 	}
 	return &InspectionResult{
 		RiskLevel:           RiskDangerous,
@@ -680,12 +820,38 @@ func inspectAlter(tokens []sqlToken, isProd bool) *InspectionResult {
 
 func inspectRename(tokens []sqlToken, isProd bool) *InspectionResult {
 	idx := 1
-	if idx >= len(tokens) || tokens[idx].kind != tokWord || tokens[idx].upper != "TABLE" {
+	if idx >= len(tokens) || tokens[idx].kind != tokWord {
+		return &InspectionResult{
+			RiskLevel:         RiskDangerous,
+			IsDestructive:     true,
+			RequiresChallenge: true,
+			Operation:         "RENAME",
+			Reason:            "Unparsed RENAME statement requires confirmation (fail-closed).",
+		}
+	}
+	if tokens[idx].upper == "USER" {
+		return &InspectionResult{
+			RiskLevel:           RiskDangerous,
+			IsDestructive:       true,
+			RequiresChallenge:   true,
+			RequiresAffirmation: true,
+			TargetType:          "USER",
+			Operation:           "RENAME",
+			Reason:              "RENAME USER modifies database user accounts.",
+		}
+	}
+	if tokens[idx].upper != "TABLE" {
 		return &InspectionResult{RiskLevel: RiskNone}
 	}
 	db, target, _, _ := parseQualifiedTarget(tokens, idx+1)
 	if target == "" {
-		return &InspectionResult{RiskLevel: RiskNone}
+		return &InspectionResult{
+			RiskLevel:         RiskDangerous,
+			IsDestructive:     true,
+			RequiresChallenge: true,
+			Operation:         "RENAME",
+			Reason:            "Unparsed RENAME TABLE target requires confirmation (fail-closed).",
+		}
 	}
 	return &InspectionResult{
 		RiskLevel:           RiskDangerous,
@@ -740,23 +906,40 @@ func inspectCreate(tokens []sqlToken, isProd bool) *InspectionResult {
 	}
 	for idx < len(tokens) && tokens[idx].kind == tokWord {
 		switch tokens[idx].upper {
-		case "TEMPORARY", "TEMP", "UNIQUE":
+		case "TEMPORARY", "TEMP", "UNIQUE", "UNLOGGED", "FULLTEXT", "SPATIAL":
 			idx++
 			continue
 		}
 		break
 	}
+	// Skip MySQL DEFINER = user@host before VIEW/FUNCTION/PROCEDURE/TRIGGER/EVENT.
+	if idx < len(tokens) && tokens[idx].kind == tokWord && tokens[idx].upper == "DEFINER" {
+		for idx < len(tokens) {
+			if tokens[idx].kind == tokWord {
+				switch tokens[idx].upper {
+				case "VIEW", "FUNCTION", "PROCEDURE", "TRIGGER", "EVENT":
+					goto foundCreateTarget
+				}
+			}
+			idx++
+		}
+	}
+foundCreateTarget:
 	if idx >= len(tokens) || tokens[idx].kind != tokWord {
 		return &InspectionResult{RiskLevel: RiskNone}
 	}
 
 	targetType := tokens[idx].upper
+	isPrivilegedCreate := false
 	if targetType == "MATERIALIZED" && idx+1 < len(tokens) && tokens[idx+1].kind == tokWord && tokens[idx+1].upper == "VIEW" {
 		targetType = "MATERIALIZED VIEW"
 		idx += 2
 	} else {
 		switch targetType {
 		case "TABLE", "DATABASE", "SCHEMA", "VIEW", "INDEX":
+			idx++
+		case "FUNCTION", "PROCEDURE", "TRIGGER", "EVENT", "USER", "ROLE", "EXTENSION", "SERVER", "FOREIGN", "RULE", "POLICY":
+			isPrivilegedCreate = true
 			idx++
 		default:
 			return &InspectionResult{RiskLevel: RiskNone}
@@ -779,9 +962,13 @@ func inspectCreate(tokens []sqlToken, isProd bool) *InspectionResult {
 	if targetType == "DATABASE" || targetType == "SCHEMA" {
 		db = target
 	}
+	risk := RiskWarning
+	if isPrivilegedCreate {
+		risk = RiskDangerous
+	}
 	return &InspectionResult{
-		RiskLevel:           RiskWarning,
-		IsDestructive:       false,
+		RiskLevel:           risk,
+		IsDestructive:       isPrivilegedCreate,
 		RequiresChallenge:   isProd,
 		RequiresAffirmation: true,
 		TargetDatabase:      db,
@@ -907,7 +1094,9 @@ func InspectWithScope(query string, environment string, scopedDatabase string) *
 	isDatabaseTarget := strings.EqualFold(res.TargetType, "DATABASE") || strings.EqualFold(res.TargetType, "SCHEMA")
 	if !isDatabaseTarget && res.TargetDatabase != "" && scopedDatabase != "" && !strings.EqualFold(res.TargetDatabase, scopedDatabase) {
 		res.SchemaScopeMismatch = true
-		res.RiskLevel = RiskDangerous
+		if riskPrecedence(RiskDangerous) > riskPrecedence(res.RiskLevel) {
+			res.RiskLevel = RiskDangerous
+		}
 		res.RequiresChallenge = true
 		res.Reason = fmt.Sprintf("Schema Scope Mismatch: query explicitly targets database '%s', but active tab is set to '%s'.", res.TargetDatabase, scopedDatabase)
 	} else if res.TargetDatabase == "" && scopedDatabase != "" && !isDatabaseTarget {
@@ -939,12 +1128,18 @@ func extractCTEStatementsMode(q string, mysqlEscapes bool) ([]string, bool) {
 	depth := 0
 	bodyStart := -1
 	var stmts []string
+	sawCTEBody := false
 
 	for i := 1; i < len(tokens); i++ {
 		tok := tokens[i]
 		switch tok.kind {
 		case tokLParen:
 			if depth == 0 {
+				if sawCTEBody && i > 0 && tokens[i-1].kind == tokRParen {
+					// Outer parenthesized main query: WITH d AS (...) (SELECT * FROM d)
+					stmts = append(stmts, q[tok.start:])
+					return stmts, true
+				}
 				bodyStart = tok.end
 			}
 			depth++
@@ -954,12 +1149,13 @@ func extractCTEStatementsMode(q string, mysqlEscapes bool) ([]string, bool) {
 				if depth == 0 && bodyStart >= 0 && tok.start > bodyStart {
 					stmts = append(stmts, q[bodyStart:tok.start])
 					bodyStart = -1
+					sawCTEBody = true
 				}
 			}
 		case tokWord:
 			if depth == 0 {
 				switch tok.upper {
-				case "SELECT", "INSERT", "UPDATE", "DELETE", "MERGE":
+				case "SELECT", "INSERT", "UPDATE", "DELETE", "MERGE", "TABLE", "VALUES":
 					stmts = append(stmts, q[tok.start:])
 					return stmts, true
 				}

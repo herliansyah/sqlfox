@@ -16,8 +16,11 @@ import (
 )
 
 func QuoteIdentifier(name, driverName string) string {
+	name = strings.ReplaceAll(name, "\x00", "")
 	name = strings.Trim(name, "`\"")
-	if strings.EqualFold(driverName, "sqlite") || strings.EqualFold(driverName, "postgres") || strings.EqualFold(driverName, "postgresql") || strings.EqualFold(driverName, "pg") {
+	if strings.EqualFold(driverName, "sqlite") || strings.EqualFold(driverName, "sqlite3") ||
+		strings.EqualFold(driverName, "postgres") || strings.EqualFold(driverName, "postgresql") ||
+		strings.EqualFold(driverName, "pg") || strings.EqualFold(driverName, "pgx") {
 		return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 	}
 	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
@@ -368,9 +371,21 @@ func ExplainTarget(stmts []string) (string, error) {
 }
 
 var (
-	reCTEMutationVerb = regexp.MustCompile(`(?i)\b(?:INSERT|UPDATE|DELETE|MERGE|DROP|ALTER|TRUNCATE|CREATE)\b`)
-	reSelectIntoFile  = regexp.MustCompile(`(?i)\bINTO\s+(?:OUTFILE|DUMPFILE)\b`)
+	reCTEMutationVerb     = regexp.MustCompile(`(?i)\b(?:INSERT|UPDATE|DELETE|MERGE|DROP|ALTER|TRUNCATE|CREATE)\b`)
+	reSelectIntoFile      = regexp.MustCompile(`(?i)\bINTO\s+(?:OUTFILE|DUMPFILE)\b`)
+	reSelectIntoTopLevel  = regexp.MustCompile(`(?i)\bINTO\b`)
+	reExplainAnalyzeToken = regexp.MustCompile(`(?i)\bANALY[ZS]E\b`)
+	rePragmaCallName      = regexp.MustCompile(`(?is)^PRAGMA\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(`)
 )
+
+var readOnlySQLitePragmas = map[string]bool{
+	"table_info": true, "table_xinfo": true, "index_list": true, "index_info": true, "index_xinfo": true,
+	"foreign_key_list": true, "database_list": true, "collation_list": true, "compile_options": true,
+	"function_list": true, "module_list": true, "pragma_list": true, "integrity_check": true,
+	"quick_check": true, "foreign_key_check": true, "data_version": true, "schema_version": true,
+	"user_version": true, "application_id": true, "encoding": true, "page_count": true,
+	"page_size": true, "freelist_count": true,
+}
 
 // stripSQLCommentsAndLiterals replaces string/quoted literals and comments with spaces
 // so keyword checks cannot be tricked by literals or bypassed by inline comments like DELETE/*x*/FROM.
@@ -474,23 +489,40 @@ func IsQueryStatement(sql string) bool {
 			reSelectIntoFile.MatchString(stripSQLCommentsAndLiterals(clean, false)) {
 			return false
 		}
+		// Reject SELECT ... INTO <new_table> (PostgreSQL table creation via SELECT INTO).
+		if reSelectIntoTopLevel.MatchString(maskNonTopLevel(clean)) {
+			return false
+		}
 		return true
 	}
 	if strings.HasPrefix(upper, "PRAGMA") {
-		// Only read-only PRAGMAs (no assignment '=') may be classified as query statements.
-		// Mutating PRAGMAs like "PRAGMA writable_schema = ON" must never bypass read-only mode.
+		// Only read-only PRAGMAs (no assignment '=' and no mutating function-call PRAGMA)
+		// may be classified as query statements.
 		stripped := stripSQLCommentsAndLiterals(clean, false)
-		return !strings.Contains(stripped, "=")
+		if strings.Contains(stripped, "=") {
+			return false
+		}
+		if m := rePragmaCallName.FindStringSubmatch(strings.TrimSpace(stripped)); len(m) == 2 {
+			return readOnlySQLitePragmas[strings.ToLower(m[1])]
+		}
+		return true
+	}
+	if strings.HasPrefix(upper, "EXPLAIN") {
+		stripped := stripSQLCommentsAndLiterals(clean, false)
+		if reExplainAnalyzeToken.MatchString(stripped) {
+			// EXPLAIN ANALYZE / ANALYSE actually executes the inner statement; fail closed if
+			// any mutation/DDL verb appears or if the inner statement cannot be proven read-only.
+			if reCTEMutationVerb.MatchString(stripped) || reCTEMutationVerb.MatchString(stripSQLCommentsAndLiterals(clean, true)) {
+				return false
+			}
+		}
+		return true
 	}
 	if strings.HasPrefix(upper, "SHOW") ||
 		strings.HasPrefix(upper, "DESC") ||
-		strings.HasPrefix(upper, "EXPLAIN") ||
 		strings.HasPrefix(upper, "VALUES") ||
 		strings.HasPrefix(upper, "TABLE") ||
-		strings.HasPrefix(upper, "CHECK TABLE") ||
-		strings.HasPrefix(upper, "ANALYZE TABLE") ||
-		strings.HasPrefix(upper, "OPTIMIZE TABLE") ||
-		strings.HasPrefix(upper, "REPAIR TABLE") {
+		strings.HasPrefix(upper, "CHECK TABLE") {
 		return true
 	}
 	if strings.HasPrefix(upper, "WITH") {

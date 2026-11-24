@@ -83,7 +83,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		targetDB = s.Schema().DatabaseName
 	}
 	if targetDB == "" {
-		targetDB = s.DatabaseName
+		targetDB = s.GetDatabaseName()
 	}
 	inspection, allQueries, err := inspectAllStatements(trimmedSQL, s.Environment, s.DriverName, targetDB)
 	if err != nil {
@@ -95,8 +95,10 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		return nil, ErrReadOnlySession
 	}
 
-	// Switch active database only after Read-Only and Safety Guard checks pass.
-	if strings.HasPrefix(cleanUpper, "USE ") {
+	stmts := splitSQLStatements(strings.NewReader(trimmedSQL), s.DriverName)
+
+	// Switch active database only after Read-Only and Safety Guard checks pass, and only for single-statement USE.
+	if len(stmts) <= 1 && strings.HasPrefix(cleanUpper, "USE ") {
 		dbTarget := strings.TrimSpace(cleanSQL[4:])
 		dbTarget = strings.Trim(strings.TrimRight(dbTarget, "; \t\r\n"), "`'\"")
 		if dbTarget != "" {
@@ -187,16 +189,27 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		}, nil
 	}
 
-	// Challenge typed table name validation (required on RequiresChallenge when not a 1-click Dev affirmation)
-	if inspection.RequiresChallenge && req.Confirmed && inspection.TargetTable != "" {
+	// Challenge typed confirmation validation (required on RequiresChallenge even when TargetTable is empty)
+	if inspection.RequiresChallenge && req.Confirmed {
 		expected := inspection.TargetTable
+		if expected == "" {
+			expected = inspection.TargetDatabase
+		}
+		if expected == "" {
+			expected = inspection.Operation
+		}
+		if expected == "" {
+			expected = "CONFIRM"
+		}
 		typed := strings.TrimSpace(req.ChallengeInput)
 		if typed == "" {
 			// Confirmed without a typed challenge (the requirement escalated since the preview, e.g. the
 			// row estimate grew past the threshold): ask again instead of failing the request.
 			return &ExecuteResponse{Blocked: true, Inspection: inspection}, nil
 		}
-		if !strings.EqualFold(typed, expected) && !strings.EqualFold(typed, inspection.TargetDatabase) {
+		if !strings.EqualFold(typed, expected) &&
+			(inspection.TargetDatabase == "" || !strings.EqualFold(typed, inspection.TargetDatabase)) &&
+			(inspection.Operation == "" || !strings.EqualFold(typed, inspection.Operation)) {
 			return nil, fmt.Errorf("Challenge confirmation failed: expected '%s', got '%s'", expected, req.ChallengeInput)
 		}
 	}
@@ -324,15 +337,15 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		}
 	}
 
-	// Intercept explicit transaction statements to ensure connection pinning and prevent orphaned locks
+	// Intercept explicit single-statement transaction commands to ensure connection pinning and prevent orphaned locks
 	cleanUpper = strings.TrimRight(strings.ToUpper(cleanSQL), "; \t\r\n")
-	isTxBegin := cleanUpper == "BEGIN" || cleanUpper == "START TRANSACTION" || cleanUpper == "BEGIN WORK" || cleanUpper == "BEGIN TRANSACTION" ||
+	isTxBegin := len(stmts) <= 1 && (cleanUpper == "BEGIN" || cleanUpper == "START TRANSACTION" || cleanUpper == "BEGIN WORK" || cleanUpper == "BEGIN TRANSACTION" ||
 		strings.HasPrefix(cleanUpper, "START TRANSACTION ") ||
 		strings.HasPrefix(cleanUpper, "BEGIN TRANSACTION ") ||
 		strings.HasPrefix(cleanUpper, "BEGIN WORK ") ||
-		(strings.HasPrefix(cleanUpper, "BEGIN ") && (strings.Contains(cleanUpper, "DEFERRED") || strings.Contains(cleanUpper, "IMMEDIATE") || strings.Contains(cleanUpper, "EXCLUSIVE") || strings.Contains(cleanUpper, "READ ONLY") || strings.Contains(cleanUpper, "READ WRITE") || strings.Contains(cleanUpper, "ISOLATION LEVEL")))
-	isTxCommit := cleanUpper == "COMMIT" || cleanUpper == "COMMIT WORK" || cleanUpper == "COMMIT TRANSACTION" || cleanUpper == "END" || cleanUpper == "END WORK" || cleanUpper == "END TRANSACTION"
-	isTxRollback := cleanUpper == "ROLLBACK" || cleanUpper == "ROLLBACK WORK" || cleanUpper == "ROLLBACK TRANSACTION" || cleanUpper == "ABORT" || cleanUpper == "ABORT WORK" || cleanUpper == "ABORT TRANSACTION"
+		(strings.HasPrefix(cleanUpper, "BEGIN ") && (strings.Contains(cleanUpper, "DEFERRED") || strings.Contains(cleanUpper, "IMMEDIATE") || strings.Contains(cleanUpper, "EXCLUSIVE") || strings.Contains(cleanUpper, "READ ONLY") || strings.Contains(cleanUpper, "READ WRITE") || strings.Contains(cleanUpper, "ISOLATION LEVEL"))))
+	isTxCommit := len(stmts) <= 1 && (cleanUpper == "COMMIT" || cleanUpper == "COMMIT WORK" || cleanUpper == "COMMIT TRANSACTION" || cleanUpper == "END" || cleanUpper == "END WORK" || cleanUpper == "END TRANSACTION")
+	isTxRollback := len(stmts) <= 1 && (cleanUpper == "ROLLBACK" || cleanUpper == "ROLLBACK WORK" || cleanUpper == "ROLLBACK TRANSACTION" || cleanUpper == "ABORT" || cleanUpper == "ABORT WORK" || cleanUpper == "ABORT TRANSACTION")
 
 	if isTxBegin {
 		tx, _, _ := s.getTxStatus(req.TabID)
@@ -433,7 +446,6 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		return nil, fmt.Errorf("transaction in this tab was aborted: %s. You must issue ROLLBACK before running new statements", reason)
 	}
 
-	stmts := splitSQLStatements(strings.NewReader(trimmedSQL), s.DriverName)
 	if len(stmts) > 1 {
 		return s.executeMulti(execCtx, req, stmts, inspection, targetDB, start, currentTx, collectProfile)
 	}
@@ -606,7 +618,7 @@ func (s *ActiveSession) Stream(ctx context.Context, sql string, maxRows int) (dr
 		targetDB = s.Schema().DatabaseName
 	}
 	if targetDB == "" {
-		targetDB = s.DatabaseName
+		targetDB = s.GetDatabaseName()
 	}
 	inspection, allQueries, err := inspectAllStatements(trimmedSQL, s.Environment, s.DriverName, targetDB)
 	if err != nil {
@@ -626,7 +638,17 @@ func (s *ActiveSession) Stream(ctx context.Context, sql string, maxRows int) (dr
 		maxRows = 100000
 	}
 
-	return s.Session.QueryStream(ctx, trimmedSQL, maxRows)
+	return s.queryStreamSafe(ctx, trimmedSQL, maxRows)
+}
+
+// queryStreamSafe enforces ReadOnlySession.QueryStreamReadOnly whenever the session is locked in Read-Only mode.
+func (s *ActiveSession) queryStreamSafe(ctx context.Context, sql string, limit int) (driver.RowStream, error) {
+	if s.IsReadOnly() {
+		if roSess, ok := s.Session.(driver.ReadOnlySession); ok {
+			return roSess.QueryStreamReadOnly(ctx, sql, limit)
+		}
+	}
+	return s.Session.QueryStream(ctx, sql, limit)
 }
 
 // challenge is rejected, since one typed confirmation and one pre-DDL backup can only cover one target.

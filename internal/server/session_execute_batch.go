@@ -153,7 +153,7 @@ func (s *ActiveSession) executeMulti(
 				if s.Session == nil {
 					return nil, errors.New("no active database session")
 				}
-				stream, streamErr = s.Session.QueryStream(ctx, stmtTrimmed, limit)
+				stream, streamErr = s.queryStreamSafe(ctx, stmtTrimmed, limit)
 			}
 			if streamErr != nil {
 				if s.vault != nil {
@@ -432,7 +432,7 @@ func (s *ActiveSession) executeStreamMulti(
 				if s.Session == nil {
 					return nil, errors.New("no active database session")
 				}
-				stream, err = s.Session.QueryStream(ctx, stmtTrimmed, limit+1)
+				stream, err = s.queryStreamSafe(ctx, stmtTrimmed, limit+1)
 			}
 			if err != nil {
 				_ = enc.Encode(map[string]any{"type": "error", "result_index": i, "sql": stmtTrimmed, "error": err.Error()})

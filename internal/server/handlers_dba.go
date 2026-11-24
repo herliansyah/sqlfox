@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/herliansyah/sqlfox/internal/driver"
@@ -156,6 +157,27 @@ func (s *Server) handleResetStatementDigest(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
+func findImmunePIDs(ctx context.Context, sess *ActiveSession) (map[int64]string, error) {
+	immunePIDs := make(map[int64]string)
+	pl, pErr := sess.GetProcesslist(ctx)
+	if pErr != nil || pl == nil {
+		msg := "cannot verify immune threads: processlist unavailable"
+		if pErr != nil {
+			msg += ": " + pErr.Error()
+		}
+		return nil, errors.New(msg)
+	}
+	if pl.CurrentThreadID > 0 {
+		immunePIDs[pl.CurrentThreadID] = "own active connection (self)"
+	}
+	for _, th := range pl.Threads {
+		if th.User == "system user" || th.User == "event_scheduler" || th.Command == "Binlog Dump" {
+			immunePIDs[th.ID] = fmt.Sprintf("system process (%s)", th.User)
+		}
+	}
+	return immunePIDs, nil
+}
+
 func (s *Server) handleKillProcess(w http.ResponseWriter, r *http.Request) {
 	connID := r.PathValue("id")
 	sess, err := s.sessionMgr.GetSession(connID)
@@ -178,6 +200,18 @@ func (s *Server) handleKillProcess(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
+
+	if !strings.EqualFold(sess.DriverName, "sqlite") && !strings.EqualFold(sess.DriverName, "sqlite3") {
+		immunePIDs, immErr := findImmunePIDs(ctx, sess)
+		if immErr != nil {
+			writeError(w, http.StatusServiceUnavailable, immErr.Error())
+			return
+		}
+		if reason, isImmune := immunePIDs[req.ThreadID]; isImmune {
+			writeError(w, http.StatusForbidden, "cannot terminate immune thread: "+reason)
+			return
+		}
+	}
 
 	killConn := req.Mode == "connection"
 	if err := sess.KillProcess(ctx, req.ThreadID, killConn); err != nil {
@@ -223,24 +257,11 @@ func (s *Server) handleBatchKillProcess(w http.ResponseWriter, r *http.Request) 
 	defer cancel()
 
 	// ponytail: detect immune threads (self connection and critical system processes) to enforce safety guardrails at backend layer
-	immunePIDs := make(map[int64]string)
-	pl, pErr := sess.GetProcesslist(ctx)
-	if pErr != nil || pl == nil {
+	immunePIDs, immErr := findImmunePIDs(ctx, sess)
+	if immErr != nil {
 		// Fail closed: without the processlist we cannot tell which threads are immune.
-		msg := "cannot verify immune threads: processlist unavailable"
-		if pErr != nil {
-			msg += ": " + pErr.Error()
-		}
-		writeError(w, http.StatusServiceUnavailable, msg)
+		writeError(w, http.StatusServiceUnavailable, immErr.Error())
 		return
-	}
-	if pl.CurrentThreadID > 0 {
-		immunePIDs[pl.CurrentThreadID] = "own active connection (self)"
-	}
-	for _, th := range pl.Threads {
-		if th.User == "system user" || th.User == "event_scheduler" || th.Command == "Binlog Dump" {
-			immunePIDs[th.ID] = fmt.Sprintf("system process (%s)", th.User)
-		}
 	}
 
 	killConn := req.Mode == "connection"
@@ -426,7 +447,9 @@ func (s *Server) handleExecuteMaintenance(w http.ResponseWriter, r *http.Request
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
+	start := time.Now()
 	result, err := sess.ExecuteMaintenance(ctx, req.Database, req.Tables, req.Action)
+	sess.RecordAudit(fmt.Sprintf("%s TABLE %s", strings.ToUpper(req.Action), strings.Join(req.Tables, ", ")), "dba_maintenance", time.Since(start).Milliseconds(), int64(len(req.Tables)), err, start)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to execute maintenance: "+err.Error())
 		return
@@ -570,7 +593,10 @@ func (s *Server) handleSaveUser(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	if err := sess.SaveUser(ctx, req.User, req.Host, req.Password, req.IsNew); err != nil {
+	start := time.Now()
+	err = sess.SaveUser(ctx, req.User, req.Host, req.Password, req.IsNew)
+	sess.RecordAudit(fmt.Sprintf("SAVE USER '%s'@'%s'", req.User, req.Host), "user_admin", time.Since(start).Milliseconds(), 0, err, start)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -609,7 +635,10 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	if err := sess.DropUser(ctx, user, host); err != nil {
+	start := time.Now()
+	err = sess.DropUser(ctx, user, host)
+	sess.RecordAudit(fmt.Sprintf("DROP USER '%s'@'%s'", user, host), "user_admin", time.Since(start).Milliseconds(), 0, err, start)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -637,7 +666,10 @@ func (s *Server) handleApplyUserGrants(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	if err := sess.ApplyUserGrants(ctx, req); err != nil {
+	start := time.Now()
+	err = sess.ApplyUserGrants(ctx, req)
+	sess.RecordAudit(fmt.Sprintf("APPLY GRANTS '%s'@'%s'", req.User, req.Host), "user_admin", time.Since(start).Milliseconds(), 0, err, start)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
