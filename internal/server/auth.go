@@ -25,15 +25,17 @@ type ipLockoutRecord struct {
 
 // AuthManager manages authentication tokens and remote access verification.
 type AuthManager struct {
-	tokens   map[string]time.Time
-	lockouts map[string]*ipLockoutRecord
-	mu       sync.RWMutex
+	tokens    map[string]time.Time
+	lockouts  map[string]*ipLockoutRecord
+	argon2Sem chan struct{}
+	mu        sync.RWMutex
 }
 
 func NewAuthManager() *AuthManager {
 	return &AuthManager{
-		tokens:   make(map[string]time.Time),
-		lockouts: make(map[string]*ipLockoutRecord),
+		tokens:    make(map[string]time.Time),
+		lockouts:  make(map[string]*ipLockoutRecord),
+		argon2Sem: make(chan struct{}, 4),
 	}
 }
 
@@ -264,7 +266,7 @@ func extractToken(r *http.Request) string {
 	if cookie, err := r.Cookie("sqlfox_token"); err == nil {
 		return cookie.Value
 	}
-	return r.URL.Query().Get("token")
+	return ""
 }
 
 func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
@@ -310,6 +312,17 @@ func (s *Server) handleAuthUnlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Bound concurrent Argon2id derivations (64 MB each) to prevent OOM DoS under parallel unlock floods.
+	select {
+	case s.authMgr.argon2Sem <- struct{}{}:
+		defer func() { <-s.authMgr.argon2Sem }()
+	case <-r.Context().Done():
+		return
+	case <-time.After(2 * time.Second):
+		writeError(w, http.StatusServiceUnavailable, "Authentication service busy, please retry.")
+		return
+	}
+
 	if !s.vault.ValidateMasterPassword(req.Password) {
 		locked, remaining := s.authMgr.RecordFailedAttempt(clientIP)
 		if locked {
@@ -334,6 +347,7 @@ func (s *Server) handleAuthUnlock(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		Expires:  time.Now().Add(24 * time.Hour),
 		HttpOnly: true,
+		Secure:   r.TLS != nil,
 		SameSite: http.SameSiteLaxMode,
 	})
 

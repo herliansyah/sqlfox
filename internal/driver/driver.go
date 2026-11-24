@@ -17,8 +17,9 @@ import (
 )
 
 var (
-	ErrUnsupportedDriver = errors.New("unsupported database driver")
-	ErrSessionClosed     = errors.New("database session is closed")
+	ErrUnsupportedDriver   = errors.New("unsupported database driver")
+	ErrSessionClosed       = errors.New("database session is closed")
+	ErrFeatureNotSupported = errors.New("feature not supported by this database driver")
 )
 
 // Driver manages database connection dialing.
@@ -41,7 +42,9 @@ type Config struct {
 	SSLKey       string
 }
 
-// Session represents an active connection to a target database.
+// Session represents an active connection to a target database with core query, schema,
+// and transaction capabilities. Optional engine-specific features (processlist, cluster health,
+// user management, etc.) are exposed via dedicated capability interfaces below.
 type Session interface {
 	// QueryStream executes a query and returns a chunked row stream.
 	QueryStream(ctx context.Context, sql string, limit int) (RowStream, error)
@@ -61,18 +64,6 @@ type Session interface {
 	// GetTableDDL returns the raw CREATE TABLE statement.
 	GetTableDDL(ctx context.Context, tableName string) (string, error)
 
-	// GetRoutineDDL returns the raw CREATE PROCEDURE/FUNCTION statement.
-	GetRoutineDDL(ctx context.Context, routineType, name string) (string, error)
-
-	// GetEventDDL returns the raw CREATE EVENT statement.
-	GetEventDDL(ctx context.Context, name string) (string, error)
-
-	// ToggleEventStatus toggles MySQL scheduled event ENABLE / DISABLE.
-	ToggleEventStatus(ctx context.Context, name string, enable bool) error
-
-	// GetTablePartitions returns partition telemetry for a table.
-	GetTablePartitions(ctx context.Context, database, table string) ([]PartitionMetadata, error)
-
 	// GetTableEstimate returns estimated row count and byte size.
 	GetTableEstimate(ctx context.Context, tableName string) (*TableEstimate, error)
 
@@ -88,65 +79,8 @@ type Session interface {
 	// ServerInfo returns database version and active threads.
 	ServerInfo(ctx context.Context) (*ServerInfo, error)
 
-	// GetProcesslist retrieves active threads and lock wait relationships.
-	GetProcesslist(ctx context.Context) (*ProcesslistResult, error)
-
-	// KillProcess interrupts a query or connection out-of-band.
-	KillProcess(ctx context.Context, threadID int64, killConnection bool) error
-
-	// GetDatabaseDiagnostics returns physical storage and metadata for all databases in the session.
-	GetDatabaseDiagnostics(ctx context.Context) ([]DatabaseDiagnostics, error)
-
-	// GetTableDiagnostics returns physical storage and fragmentation overhead.
-	GetTableDiagnostics(ctx context.Context, database, table string) ([]TableDiagnostics, error)
-
-	// ExecuteMaintenance executes table maintenance operations.
-	ExecuteMaintenance(ctx context.Context, database string, tables []string, action string) ([]MaintenanceResult, error)
-
-	// GetRedundantIndexes identifies shadowed or duplicate indexes.
-	GetRedundantIndexes(ctx context.Context, database, table string) ([]RedundantIndex, error)
-
 	// PeekForeignKeyRow queries parent table for a single row matching a foreign key value.
 	PeekForeignKeyRow(ctx context.Context, database, table, column string, value any) (*PeekResult, error)
-
-	// GetUserList lists server user accounts.
-	GetUserList(ctx context.Context) ([]DatabaseUser, error)
-
-	// GetUserGrants returns active grants for a user account.
-	GetUserGrants(ctx context.Context, user, host string) ([]string, error)
-
-	// SaveUser creates or updates a user account with optional password change.
-	SaveUser(ctx context.Context, user, host, password string, isNew bool) error
-
-	// DropUser removes a user account.
-	DropUser(ctx context.Context, user, host string) error
-
-	// ApplyUserGrants grants privileges to a user.
-	ApplyUserGrants(ctx context.Context, req UserGrantRequest) error
-
-	// InspectTableLocks returns active transactions and lock holders touching a specific table.
-	InspectTableLocks(ctx context.Context, database, table string) ([]TableLockInfo, error)
-
-	// ExecSafeDDL executes a DDL statement on a dedicated connection with a strict session lock timeout.
-	ExecSafeDDL(ctx context.Context, sql string, lockTimeoutSec int) (*ExecResult, error)
-
-	// InspectClusterHealth returns cluster topology, synchronization health, and bottleneck diagnostics.
-	InspectClusterHealth(ctx context.Context) (*ClusterHealthReport, error)
-
-	// InspectServerVariables introspects server configuration parameters and evaluates tuning heuristics.
-	InspectServerVariables(ctx context.Context) (*ServerVariablesReport, error)
-
-	// SampleFlightMetrics captures an on-demand performance telemetry slice with correlated active queries.
-	SampleFlightMetrics(ctx context.Context) (*FlightMetricSample, error)
-
-	// InspectDeadlock parses latest detected InnoDB deadlock from engine status.
-	InspectDeadlock(ctx context.Context) (*DeadlockReport, error)
-
-	// GetStatementDigest retrieves aggregated top SQL query statistics from sys/performance_schema.
-	GetStatementDigest(ctx context.Context, limit int) ([]StatementDigestEntry, error)
-
-	// ResetStatementDigest clears collected performance_schema statement statistics.
-	ResetStatementDigest(ctx context.Context) error
 
 	// ExecRaw executes a raw SQL statement bypassing the Safety Guard. For internal server use only.
 	ExecRaw(ctx context.Context, sql string, args ...any) (int64, error)
@@ -158,6 +92,69 @@ type Session interface {
 	BeginTx(ctx context.Context) (TxSession, error)
 
 	io.Closer
+}
+
+// ProcessManager is an optional capability for drivers that support active thread/process inspection and termination.
+type ProcessManager interface {
+	GetProcesslist(ctx context.Context) (*ProcesslistResult, error)
+	KillProcess(ctx context.Context, threadID int64, killConnection bool) error
+}
+
+// ClusterInspector is an optional capability for cluster topology, server variables, and flight telemetry.
+type ClusterInspector interface {
+	InspectClusterHealth(ctx context.Context) (*ClusterHealthReport, error)
+	InspectServerVariables(ctx context.Context) (*ServerVariablesReport, error)
+	SampleFlightMetrics(ctx context.Context) (*FlightMetricSample, error)
+}
+
+// DeadlockInspector is an optional capability for engine deadlock diagnostics (e.g. InnoDB).
+type DeadlockInspector interface {
+	InspectDeadlock(ctx context.Context) (*DeadlockReport, error)
+}
+
+// StatementDigestProvider is an optional capability for aggregated SQL digest telemetry.
+type StatementDigestProvider interface {
+	GetStatementDigest(ctx context.Context, limit int) ([]StatementDigestEntry, error)
+	ResetStatementDigest(ctx context.Context) error
+}
+
+// DiagnosticsProvider is an optional capability for storage diagnostics, maintenance, and lock inspection.
+type DiagnosticsProvider interface {
+	GetDatabaseDiagnostics(ctx context.Context) ([]DatabaseDiagnostics, error)
+	GetTableDiagnostics(ctx context.Context, database, table string) ([]TableDiagnostics, error)
+	ExecuteMaintenance(ctx context.Context, database string, tables []string, action string) ([]MaintenanceResult, error)
+	GetRedundantIndexes(ctx context.Context, database, table string) ([]RedundantIndex, error)
+	InspectTableLocks(ctx context.Context, database, table string) ([]TableLockInfo, error)
+}
+
+// PartitionInspector is an optional capability for table partition telemetry.
+type PartitionInspector interface {
+	GetTablePartitions(ctx context.Context, database, table string) ([]PartitionMetadata, error)
+}
+
+// UserManager is an optional capability for database user and privilege management.
+type UserManager interface {
+	GetUserList(ctx context.Context) ([]DatabaseUser, error)
+	GetUserGrants(ctx context.Context, user, host string) ([]string, error)
+	SaveUser(ctx context.Context, user, host, password string, isNew bool) error
+	DropUser(ctx context.Context, user, host string) error
+	ApplyUserGrants(ctx context.Context, req UserGrantRequest) error
+}
+
+// RoutineInspector is an optional capability for stored procedure/function DDL inspection.
+type RoutineInspector interface {
+	GetRoutineDDL(ctx context.Context, routineType, name string) (string, error)
+}
+
+// EventManager is an optional capability for scheduled event DDL and status management.
+type EventManager interface {
+	GetEventDDL(ctx context.Context, name string) (string, error)
+	ToggleEventStatus(ctx context.Context, name string, enable bool) error
+}
+
+// SafeDDLExecutor is an optional capability for executing DDL with session-level lock timeouts.
+type SafeDDLExecutor interface {
+	ExecSafeDDL(ctx context.Context, sql string, lockTimeoutSec int) (*ExecResult, error)
 }
 
 // TxSession represents a database transaction bound to a dedicated connection.

@@ -158,8 +158,12 @@ func TestSQLiteDriver_Lifecycle(t *testing.T) {
 		t.Fatalf("Explain failed: %v", err)
 	}
 
-	// 7. InspectClusterHealth (Graceful standalone degradation)
-	report, err := sess.InspectClusterHealth(ctx)
+	// 7. InspectClusterHealth (Graceful standalone degradation via ClusterInspector capability)
+	ci, ok := sess.(driver.ClusterInspector)
+	if !ok {
+		t.Fatalf("expected SQLite session to implement driver.ClusterInspector")
+	}
+	report, err := ci.InspectClusterHealth(ctx)
 	if err != nil {
 		t.Fatalf("InspectClusterHealth failed: %v", err)
 	}
