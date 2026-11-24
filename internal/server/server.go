@@ -287,8 +287,8 @@ func (s *Server) routes() {
 		})
 	}
 
-	// ponytail: stdlib panic recoverer, logger, security headers, and ingress + remote access guards replace chi router & middleware
-	baseHandler := recoverer(SecurityHeadersMiddleware(s.IngressGuardMiddleware(s.RemoteAccessGuardMiddleware(mux))))
+	// ponytail: stdlib panic recoverer, logger, body size guard, security headers, and ingress + remote access guards replace chi router & middleware
+	baseHandler := recoverer(RequestBodyLimitMiddleware(SecurityHeadersMiddleware(s.IngressGuardMiddleware(s.RemoteAccessGuardMiddleware(mux)))))
 	s.mu.Lock()
 	s.baseHandler = baseHandler
 	if s.logger != nil {
@@ -340,6 +340,38 @@ func SecurityHeadersMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// RequestBodyLimitMiddleware bounds incoming request bodies to prevent memory-exhaustion DoS.
+func RequestBodyLimitMiddleware(next http.Handler) http.Handler {
+	const (
+		authLimit    int64 = 64 << 10   // 64 KB for unauthenticated unlock payloads
+		defaultLimit int64 = 10 << 20   // 10 MB for standard JSON/API requests
+		importLimit  int64 = 100 << 20  // 100 MB for CSV/vault/bundle imports
+	)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil && r.ContentLength != 0 {
+			p := r.URL.Path
+			if strings.HasSuffix(p, "/run-sql-script") {
+				// handleRunSQLScript enforces its own maxScriptPayloadBytes limit with 413 handling.
+				next.ServeHTTP(w, r)
+				return
+			}
+			limit := defaultLimit
+			switch {
+			case p == "/api/auth/unlock":
+				limit = authLimit
+			case strings.HasSuffix(p, "/import-csv") || p == "/api/vault/import" || p == "/api/notes/bundle/import":
+				limit = importLimit
+			}
+			if r.ContentLength > limit {
+				writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("request body exceeds maximum allowed size (%d bytes)", limit))
+				return
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
+		}
 		next.ServeHTTP(w, r)
 	})
 }

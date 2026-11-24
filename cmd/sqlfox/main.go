@@ -322,6 +322,9 @@ func main() {
 	if isTLS {
 		scheme = "https"
 	}
+	if !isTLS && (*lanFlag || bindHost == "0.0.0.0" || bindHost == "::") && !isSilent {
+		fmt.Fprintln(os.Stderr, "⚠️  SECURITY WARNING: LAN access is running over plaintext HTTP. Pass --tls to encrypt LAN traffic, Master PIN, and bearer tokens.")
+	}
 	localURL := fmt.Sprintf("%s://localhost:%d", scheme, actualPort)
 
 	var lockCleanup func()

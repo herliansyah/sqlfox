@@ -624,4 +624,14 @@ func TestBehindProxy_AntiSpoofing(t *testing.T) {
 	if got := recSpoofXFF.Header().Get("Referrer-Policy"); got != "no-referrer" {
 		t.Fatalf("expected Referrer-Policy=no-referrer, got %q", got)
 	}
+
+	// 4. RequestBodyLimitMiddleware rejects oversized /api/auth/unlock payloads (> 64 KB) with 413.
+	oversized := `{"password":"` + strings.Repeat("a", 70*1024) + `"}`
+	reqLarge := httptest.NewRequest("POST", "/api/auth/unlock", strings.NewReader(oversized))
+	reqLarge.RemoteAddr = "192.168.1.50:55555"
+	recLarge := httptest.NewRecorder()
+	handler.ServeHTTP(recLarge, reqLarge)
+	if recLarge.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413 Request Entity Too Large for oversized unlock payload, got %d", recLarge.Code)
+	}
 }
