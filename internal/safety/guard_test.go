@@ -178,6 +178,46 @@ func TestSafetyGuard_Inspect(t *testing.T) {
 			expectedChallenge: false,
 			expectedTable:     "orders",
 		},
+		{
+			name:              "Commented-out WHERE on DELETE is still Critical",
+			query:             "DELETE FROM users -- WHERE id = 1",
+			env:               "Development",
+			expectedRisk:      RiskCritical,
+			expectedChallenge: true,
+			expectedTable:     "users",
+		},
+		{
+			name:              "Inline comment between DELETE and FROM",
+			query:             "DELETE /* bypass */ FROM users;",
+			env:               "Development",
+			expectedRisk:      RiskCritical,
+			expectedChallenge: true,
+			expectedTable:     "users",
+		},
+		{
+			name:              "PostgreSQL TRUNCATE ONLY CASCADE",
+			query:             "TRUNCATE TABLE ONLY analytics.events CASCADE;",
+			env:               "Production",
+			expectedRisk:      RiskCritical,
+			expectedChallenge: true,
+			expectedTable:     "events",
+		},
+		{
+			name:              "PostgreSQL DROP MATERIALIZED VIEW",
+			query:             "DROP MATERIALIZED VIEW IF EXISTS reporting.daily_sales CASCADE;",
+			env:               "Production",
+			expectedRisk:      RiskCritical,
+			expectedChallenge: true,
+			expectedTable:     "daily_sales",
+		},
+		{
+			name:              "MERGE in Production requires affirmation",
+			query:             "MERGE INTO target_tbl USING src_tbl ON target_tbl.id = src_tbl.id WHEN MATCHED THEN DELETE;",
+			env:               "Production",
+			expectedRisk:      RiskWarning,
+			expectedChallenge: false,
+			expectedTable:     "target_tbl",
+		},
 	}
 
 	for _, tc := range tests {
@@ -400,14 +440,14 @@ func TestSafetyGuard_PreExecutionCountQuery(t *testing.T) {
 			env:              "Development",
 			expectedOp:       "DELETE",
 			expectedHasWhere: true,
-			expectedCount:    "SELECT COUNT(*) FROM users where id = 10",
+			expectedCount:    "SELECT COUNT(*) FROM users WHERE id = 10",
 		},
 		{
 			query:            "UPDATE accounts SET balance = 100 WHERE status = 'active'",
 			env:              "Production",
 			expectedOp:       "UPDATE",
 			expectedHasWhere: true,
-			expectedCount:    "SELECT COUNT(*) FROM accounts where `status` = 'active'",
+			expectedCount:    "SELECT COUNT(*) FROM accounts WHERE status = 'active'",
 		},
 		{
 			query:            "DELETE FROM orders RETURNING *",
