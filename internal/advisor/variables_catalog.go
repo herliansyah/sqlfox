@@ -35,9 +35,12 @@ var MySQLCuratedRules = map[string]VariableRule{
 		ImpactHigh:       "Mode 2 (interleaved) does not guarantee gapless auto-inc IDs for multi-row INSERTs, but provides maximum concurrency.",
 		Recommendation:   "Must be set to 2 (interleaved) for Galera Cluster. Non-cluster environments typically use 1 or 2.",
 		DefaultSuggested: "2",
-		Evaluate: func(val string, _ map[string]string) (string, string, string) {
+		Evaluate: func(val string, allVars map[string]string) (string, string, string) {
 			if val == "2" {
 				return "optimal", "2", "Interleaved lock mode is optimal for Galera clusters and high-concurrency writes."
+			}
+			if !strings.EqualFold(allVars["wsrep_on"], "ON") {
+				return "info", val, "Mode 1 (consecutive) is standard for standalone MySQL; switch to 2 only if joining a Galera cluster or needing interleaved bulk inserts."
 			}
 			return "critical", "2", "innodb_autoinc_lock_mode is not 2. In Galera clusters, modes 0 and 1 cause severe deadlocks and certification stalls."
 		},
@@ -52,9 +55,12 @@ var MySQLCuratedRules = map[string]VariableRule{
 		ImpactHigh:       "ROW format increases binlog disk space and network bandwidth, but guarantees exact row byte matching across all replicas.",
 		Recommendation:   "Must be ROW for Galera/PXC and modern GTID replication.",
 		DefaultSuggested: "ROW",
-		Evaluate: func(val string, _ map[string]string) (string, string, string) {
+		Evaluate: func(val string, allVars map[string]string) (string, string, string) {
 			if strings.EqualFold(val, "ROW") {
 				return "optimal", "ROW", "ROW format guarantees deterministic replica state and is required for Galera."
+			}
+			if !strings.EqualFold(allVars["wsrep_on"], "ON") {
+				return "warning", "ROW", fmt.Sprintf("binlog_format is %s. ROW is recommended for modern replication safety.", val)
 			}
 			return "critical", "ROW", fmt.Sprintf("binlog_format is %s. Galera cluster requires ROW format; STATEMENT or MIXED will cause desynchronization.", val)
 		},

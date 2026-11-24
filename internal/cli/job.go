@@ -606,7 +606,16 @@ func executeQueryTask(ctx context.Context, task JobTask, vaultPath, pass string,
 		defer closeOut()
 	}
 
-	return RunQuery(args, outWriter, stderr, stdin)
+	taskCtx := ctx
+	if task.Timeout != "" {
+		if dur, err := time.ParseDuration(task.Timeout); err == nil && dur > 0 {
+			var cancel context.CancelFunc
+			taskCtx, cancel = context.WithTimeout(ctx, dur)
+			defer cancel()
+		}
+	}
+
+	return RunQueryContext(taskCtx, args, outWriter, stderr, stdin)
 }
 
 func executeTransferTask(ctx context.Context, task JobTask, vaultPath, pass string, stdout, stderr io.Writer, stdin io.Reader) int {
@@ -640,7 +649,16 @@ func executeTransferTask(ctx context.Context, task JobTask, vaultPath, pass stri
 		args = append(args, "--pass", pass)
 	}
 
-	return RunTransfer(args, stdout, stderr, stdin)
+	taskCtx := ctx
+	if task.Timeout != "" {
+		if dur, err := time.ParseDuration(task.Timeout); err == nil && dur > 0 {
+			var cancel context.CancelFunc
+			taskCtx, cancel = context.WithTimeout(ctx, dur)
+			defer cancel()
+		}
+	}
+
+	return RunTransferContext(taskCtx, args, stdout, stderr, stdin)
 }
 
 // InterpolatePathTokens replaces {DATE}, {DATETIME}, and {TIMESTAMP} with formatted values.

@@ -97,6 +97,15 @@ func AdviseWithExplain(query string, dialect string, tables map[string]driver.Ta
 		}
 
 		tblMeta, hasMeta := tables[tblName]
+		if !hasMeta {
+			for k, v := range tables {
+				if strings.EqualFold(k, tblName) {
+					tblMeta = v
+					hasMeta = true
+					break
+				}
+			}
+		}
 
 		// 1. Check for Index Bloat on this table
 		if hasMeta {
@@ -233,21 +242,26 @@ func checkRedundancy(rec *Recommendation, existingIndexes []driver.IndexMetadata
 	}
 }
 
-// EvaluateIndexBloat checks if a table exceeds recommended index count (>5) or storage ratio (>1.0).
+// EvaluateIndexBloat checks if a table exceeds recommended secondary index count (>5).
 func EvaluateIndexBloat(tableName string, meta driver.TableMetadata) BloatInfo {
-	idxCount := len(meta.Indexes)
+	secondaryCount := 0
+	for _, idx := range meta.Indexes {
+		if strings.EqualFold(idx.Name, "PRIMARY") || strings.HasSuffix(strings.ToLower(idx.Name), "_pkey") {
+			continue
+		}
+		secondaryCount++
+	}
 	info := BloatInfo{
 		Table:      tableName,
-		IndexCount: idxCount,
+		IndexCount: secondaryCount,
 	}
 
-	// Check index count threshold (> 5 secondary indexes)
-	// Note: We count non-primary indexes if known, or total indexes
-	isCountBloated := idxCount > 5
+	// Check secondary index count threshold (> 5 secondary indexes)
+	isCountBloated := secondaryCount > 5
 
 	if isCountBloated {
 		info.IsBloated = true
-		info.Warning = fmt.Sprintf("Table '%s' currently has %d indexes (Index Bloat). Adding more indexes increases storage consumption and degrades INSERT/UPDATE throughput. Review existing indexes before creating new ones.", tableName, idxCount)
+		info.Warning = fmt.Sprintf("Table '%s' currently has %d secondary indexes (Index Bloat). Adding more indexes increases storage consumption and degrades INSERT/UPDATE throughput. Review existing indexes before creating new ones.", tableName, secondaryCount)
 	}
 
 	return info
@@ -316,20 +330,25 @@ func GenerateSafeIndexDDL(dialect, table, indexName string, cols []string, meta 
 		// PostgreSQL: CREATE INDEX CONCURRENTLY IF NOT EXISTS (PG 9.5+)
 		quotedCols := make([]string, len(cols))
 		for i, c := range cols {
-			quotedCols[i] = fmt.Sprintf("%q", c)
+			quotedCols[i] = driver.QuoteIdentifier(c, "postgres")
 		}
+		qIdx := driver.QuoteIdentifier(indexName, "postgres")
+		qTbl := driver.QuoteIdentifier(table, "postgres")
 		if supportsPostgresIfNotExists(d) {
-			return fmt.Sprintf("CREATE INDEX CONCURRENTLY IF NOT EXISTS %q ON %q (%s);", indexName, table, strings.Join(quotedCols, ", "))
+			return fmt.Sprintf("CREATE INDEX CONCURRENTLY IF NOT EXISTS %s ON %s (%s);", qIdx, qTbl, strings.Join(quotedCols, ", "))
 		}
-		return fmt.Sprintf("CREATE INDEX CONCURRENTLY %q ON %q (%s);", indexName, table, strings.Join(quotedCols, ", "))
+		return fmt.Sprintf("CREATE INDEX CONCURRENTLY %s ON %s (%s);", qIdx, qTbl, strings.Join(quotedCols, ", "))
 
 	case strings.Contains(d, "sqlite"):
 		// SQLite: CREATE INDEX IF NOT EXISTS (Exclusive write lock)
 		quotedCols := make([]string, len(cols))
 		for i, c := range cols {
-			quotedCols[i] = fmt.Sprintf("%q", c)
+			quotedCols[i] = driver.QuoteIdentifier(c, "sqlite")
 		}
-		return fmt.Sprintf("CREATE INDEX IF NOT EXISTS %q ON %q (%s);", indexName, table, strings.Join(quotedCols, ", "))
+		return fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s (%s);",
+			driver.QuoteIdentifier(indexName, "sqlite"),
+			driver.QuoteIdentifier(table, "sqlite"),
+			strings.Join(quotedCols, ", "))
 
 	default:
 		// MySQL (5.7 & 8.0) / MariaDB: ALTER TABLE tbl ADD INDEX idx (...) [, ALGORITHM=INPLACE, LOCK=NONE];
@@ -341,20 +360,23 @@ func GenerateSafeIndexDDL(dialect, table, indexName string, cols []string, meta 
 		quotedCols := make([]string, len(cols))
 		for i, c := range cols {
 			colType := colTypeMap[strings.ToLower(c)]
+			qCol := driver.QuoteIdentifier(c, "mysql")
 			// ponytail: heuristic check: TEXT or BLOB columns require key prefix length in MySQL (Error 1170)
 			if strings.Contains(colType, "text") || strings.Contains(colType, "blob") {
-				quotedCols[i] = fmt.Sprintf("`%s`(191)", c)
+				quotedCols[i] = fmt.Sprintf("%s(191)", qCol)
 			} else {
-				quotedCols[i] = fmt.Sprintf("`%s`", c)
+				quotedCols[i] = qCol
 			}
 		}
 
+		qTbl := driver.QuoteIdentifier(table, "mysql")
+		qIdx := driver.QuoteIdentifier(indexName, "mysql")
 		if supportsMySQLOnlineDDL(d) {
-			return fmt.Sprintf("ALTER TABLE `%s` ADD INDEX `%s` (%s), ALGORITHM=INPLACE, LOCK=NONE;",
-				table, indexName, strings.Join(quotedCols, ", "))
+			return fmt.Sprintf("ALTER TABLE %s ADD INDEX %s (%s), ALGORITHM=INPLACE, LOCK=NONE;",
+				qTbl, qIdx, strings.Join(quotedCols, ", "))
 		}
-		return fmt.Sprintf("ALTER TABLE `%s` ADD INDEX `%s` (%s);",
-			table, indexName, strings.Join(quotedCols, ", "))
+		return fmt.Sprintf("ALTER TABLE %s ADD INDEX %s (%s);",
+			qTbl, qIdx, strings.Join(quotedCols, ", "))
 	}
 }
 

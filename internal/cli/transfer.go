@@ -13,6 +13,11 @@ import (
 
 // RunTransfer executes cross-connection streaming data transfer between databases.
 func RunTransfer(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
+	return RunTransferContext(context.Background(), args, stdout, stderr, stdin)
+}
+
+// RunTransferContext executes cross-connection transfer honoring the caller's context/timeout.
+func RunTransferContext(ctx context.Context, args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 	fs := flag.NewFlagSet("transfer", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
@@ -50,7 +55,9 @@ func RunTransfer(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 		return 1
 	}
 
-	ctx := context.Background()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	// 1. Resolve source and target
 	fromTarget, err := ResolveTarget(ctx, *fromFlag, *fromDriverFlag, *vaultDbFlag, *passFlag)

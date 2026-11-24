@@ -133,7 +133,14 @@ func Generate(ctx context.Context, sess driver.Session, cfg Config) (*Result, er
 	}
 	colList := strings.Join(colNames, ", ")
 
-	const batchSize = 200
+	maxParams := 65535
+	if isSQLite {
+		maxParams = 32766
+	}
+	batchSize := 200
+	if len(insertCols) > 0 && batchSize*len(insertCols) > maxParams {
+		batchSize = max(1, maxParams/len(insertCols))
+	}
 
 	// One transaction wrapping all batches for this table pinned to a dedicated connection.
 	tx, err := sess.BeginTx(ctx)
@@ -152,8 +159,12 @@ func Generate(ctx context.Context, sess driver.Session, cfg Config) (*Result, er
 		if _, err := tx.ExecRaw(ctx, "SET FOREIGN_KEY_CHECKS=0"); err != nil {
 			return nil, fmt.Errorf("disable FK checks: %w", err)
 		}
-		// Restore before the connection returns to the pool (runs before Rollback on error paths).
-		defer tx.ExecRaw(ctx, "SET FOREIGN_KEY_CHECKS=1") //nolint:errcheck
+		// Restore with an uncancellable context so a cancelled request never leaks FOREIGN_KEY_CHECKS=0.
+		defer func() {
+			restoreCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			_, _ = tx.ExecRaw(restoreCtx, "SET FOREIGN_KEY_CHECKS=1")
+		}()
 	}
 
 	totalInserted := 0
@@ -233,7 +244,7 @@ func Generate(ctx context.Context, sess driver.Session, cfg Config) (*Result, er
 	}
 
 	return &Result{
-		Inserted:   cfg.Rows,
+		Inserted:   totalInserted,
 		DurationMs: time.Since(start).Milliseconds(),
 	}, nil
 }
@@ -268,7 +279,9 @@ func generateValue(col driver.ColumnMetadata, fkPool map[string][]any, isSelfRef
 	}
 
 	switch {
-	case tp == "tinyint(1)" || tp == "bool" || tp == "boolean":
+	case tp == "bool" || tp == "boolean":
+		return r.Intn(2) == 1
+	case tp == "tinyint(1)":
 		return r.Intn(2)
 	case strings.HasPrefix(tp, "tinyint"):
 		return r.Intn(128)
@@ -298,8 +311,8 @@ func generateValue(col driver.ColumnMetadata, fkPool map[string][]any, isSelfRef
 		return fmt.Sprintf("2024-%02d-%02d %02d:%02d:00", r.Intn(12)+1, r.Intn(28)+1, r.Intn(24), r.Intn(60))
 	case strings.HasPrefix(tp, "json"):
 		return fmt.Sprintf(`{"mock":true,"id":%d}`, r.Intn(9999)+1)
-	case tp == "blob" || tp == "binary" || tp == "bytea" || strings.HasPrefix(tp, "varbinary"):
-		return "0xDEADBEEF"
+	case tp == "blob" || tp == "binary" || tp == "bytea" || strings.HasPrefix(tp, "varbinary") || strings.HasPrefix(tp, "binary("):
+		return []byte{0xDE, 0xAD, 0xBE, 0xEF}
 	case strings.HasPrefix(tp, "enum"):
 		matches := enumRegex.FindAllStringSubmatch(tp, -1)
 		if len(matches) > 0 {

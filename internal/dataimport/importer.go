@@ -65,9 +65,13 @@ func Import(ctx context.Context, sess driver.Session, tableName string, r io.Rea
 		return nil, fmt.Errorf("table name is required")
 	}
 
-	// 1. Read initial prefix (up to 4096 bytes) for delimiter sniffing and BOM stripping
+	// 1. Read full initial prefix (up to 4096 bytes) for delimiter sniffing and BOM stripping.
+	// Using io.ReadFull avoids short-read splits on chunked HTTP streams.
 	prefix := make([]byte, 4096)
-	n, _ := r.Read(prefix)
+	n, readErr := io.ReadFull(r, prefix)
+	if readErr != nil && readErr != io.EOF && readErr != io.ErrUnexpectedEOF {
+		return nil, fmt.Errorf("failed to read CSV stream: %w", readErr)
+	}
 	prefix = prefix[:n]
 
 	// Strip UTF-8 BOM if present
@@ -136,8 +140,8 @@ func Import(ctx context.Context, sess driver.Session, tableName string, r io.Rea
 	batchLimit := 100
 	if len(activeCols) > 9 {
 		batchLimit = 900 / len(activeCols)
-		if batchLimit < 10 {
-			batchLimit = 10
+		if batchLimit < 1 {
+			batchLimit = 1
 		}
 	}
 
@@ -159,8 +163,11 @@ func Import(ctx context.Context, sess driver.Session, tableName string, r io.Rea
 		}()
 		target = tx
 		commit = func() error {
+			if err := tx.Commit(); err != nil {
+				return err
+			}
 			committed = true
-			return tx.Commit()
+			return nil
 		}
 	}
 
