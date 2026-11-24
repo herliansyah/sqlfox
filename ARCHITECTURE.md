@@ -460,7 +460,7 @@ sqlfox/
 │   │   │   └── postgres_test.go
 │   │   └── sqlite/                 # modernc.org/sqlite CGo-free pure-Go driver with FK inspection
 │   ├── mock/                       # FK-aware synthetic mock data generator
-│   │   ├── generator.go            # Relational closure, topological sort, FK pool sampling
+│   │   ├── mock.go                 # Relational closure, topological sort, FK pool sampling
 │   │   └── generator_test.go
 │   ├── safety/                     # Safety Guard engine
 │   │   ├── guard.go                # AST inspection & destructive operation detection with DDL guards
@@ -501,7 +501,7 @@ sqlfox/
 │   │   │   ├── lib/stores/         # Reactive runes state (appState.svelte.ts)
 │   │   │   └── lib/utils/          # Helpers (explainPlan, sqlCompletion, sqlFormatter, sqlStatements, clipboard)
 │   │   ├── package.json            # Frontend Vite & Svelte 5 dependencies
-│   │   └── vite.config.ts          # Vite build config with base: './' and dist_svelte output
+│   │   └── vite.config.ts          # Vite build config outputting to ../dist
 │   ├── dist/                       # Compiled production bundle embedded into binary (go:embed dist/*)
 │   │   ├── assets/                 # Vite hashed CSS & JS bundles
 │   │   ├── vendor/fonts/           # Embedded offline fonts (Inter, JetBrains Mono)
@@ -573,7 +573,7 @@ flowchart TD
 1. **Synthetic Schema Benchmark Suite (`internal/driver/benchmark_test.go`)**:
    - Tiered regression harness testing 100 tables / 5,000 columns in standard unit tests (<200ms) and 1,000 tables / 50,000 columns with FK cycles in `BenchmarkLargeSchema` (~25ms/op, 2 allocs/op).
    - `BenchmarkMemoryCeilingStreaming` verifies that streaming 1,000,000 rows through chunked buffers strictly preserves the <100MB RAM budget.
-2. **Browser-Native Content Visibility Virtualization (`web/dist/index.html`)**:
+2. **Browser-Native Content Visibility Virtualization (`web/frontend/src/`)**:
    - Table and view elements utilize native CSS `content-visibility: auto; contain-intrinsic-size: 0 28px;` to skip layout and paint phases for off-screen objects.
    - Schema search input (`filterSchemaTree`) is wrapped in a 150ms debounce timer to prevent DOM churn on rapid typing.
 3. **Loopback-Guarded pprof Profiling (`internal/server/pprof.go`)**:
@@ -582,7 +582,7 @@ flowchart TD
 4. **Fail-Fast Control Channel (`internal/driver/`, `internal/server/handlers_query.go`)**:
    - Out-of-band cancellation (`KILL QUERY` / `pg_cancel_backend`) executes with a strict 3-second context timeout.
    - If target connection slots are saturated, client-side RowStream reading aborts immediately, and the API returns `504 Gateway Timeout` with clear pool exhaustion diagnostics.
-5. **Global Web UI Error Boundary (`web/dist/index.html`)**:
+5. **Global Web UI Error Boundary (`web/frontend/src/`)**:
    - Captures network and server drop events during API fetches and displays a non-blocking floating banner (`#global-reconnect-banner`).
    - Automatically polls `/api/auth/status` using exponential backoff (1s, 2s, 4s, 8s) and recovers seamlessly while preserving active editor tabs, unsaved queries, and staged grid edits.
 6. **Ponytail Zero-Regression Pruning**:
@@ -618,7 +618,7 @@ flowchart TD
 ```
 
 1. **Deterministic ESR Sequencing Engine**:
-   - `internal/advisor/parser.go` maps predicates to tables using Vitess `sqlparser` with lexical fallback.
+   - `internal/advisor/parser.go` maps predicates to tables using a pure-Go lexical SQL tokenizer.
    - Equality predicates (`=`, `<=>`, `IS NULL`, and JOIN conditions) are placed first to narrow candidate rows immediately.
    - Sort and group columns (`ORDER BY`, `GROUP BY`) are placed second to allow the storage engine (InnoDB / Postgres B-Tree) to traverse the index without filesort overhead.
    - Range predicates (`>`, `<`, `BETWEEN`, `LIKE 'prefix%'`) are placed last, as B-Tree scans cannot utilize index columns following an inequality.
@@ -1090,7 +1090,7 @@ flowchart TD
 5. **Singleflight Connection Deduplication & Lazy Schema Inspection (`internal/server/session_manager`)**:
    - Uses `singleflight.Group` to coalesce concurrent connection requests for the same connection ID into a single physical connection routine, preventing reconnect stampedes.
    - Defers heavy schema and catalog introspection to lazy on-demand requests, preventing metadata lock contention during connect.
-6. **Tab Bar Overflow Dropdown & Enhanced Close Guard (`web/dist/index.html`)**:
+6. **Tab Bar Overflow Dropdown & Enhanced Close Guard (`web/frontend/src/`)**:
    - Dynamically activates `#tab-bar-overflow-btn` and `#tab-bar-overflow-menu` when tab count exceeds the visible container width.
    - Enforces confirmation guards before closing unsaved non-empty queries or non-query tabs.
 
@@ -1098,24 +1098,24 @@ flowchart TD
 
 ## 28. Visual Programmability & Object Lifecycle Architecture
 
-1. **Structured Object Dialogs & Parameter Grids (`web/dist/index.html`)**:
+1. **Structured Object Dialogs & Parameter Grids (`web/frontend/src/`)**:
    - Provides native modal designers for Views, Stored Procedures, Functions, Triggers, and Scheduled Events.
    - Parameter builders serialize typed signatures and return modes without requiring manual DDL concatenation.
-2. **Definer Sanitization & Single-Line Comment Preservation (`web/dist/index.html`)**:
+2. **Definer Sanitization & Single-Line Comment Preservation (`web/frontend/src/`)**:
    - Strips user/host definers using horizontal whitespace collapsing, preserving vertical formatting and preventing inline SQL comments (`-- comment`) from corrupting subsequent statements.
 3. **Multi-Statement Sequential Execution & Multi-Result Tabs (`internal/server/session_manager.go`)**:
    - Executes multi-statement SQL scripts in topological sequence, returning discrete result sets streamed via `#tab-results-bar` with per-statement timing and row counters.
-4. **Pre-Flight Database Dump Confirmation Guard (`web/dist/index.html`)**:
+4. **Pre-Flight Database Dump Confirmation Guard (`web/frontend/src/`)**:
    - Intercepts full database dumps with target verification, schema vs data checkboxes, and lock warning banners to prevent unexpected I/O saturation on multi-gigabyte production clusters.
 
 ---
 
 ## 29. Query Result Mutations & Context Menu Architecture
 
-1. **Single-Table Resolved Primary Key Mutation Engine (`web/dist/index.html`)**:
+1. **Single-Table Resolved Primary Key Mutation Engine (`web/frontend/src/`)**:
    - Evaluates query result sets; if the statement targets a single table and includes all primary key columns in the projection list, cell inline editing, row duplication, draft insertion, and deletion actions are enabled.
    - Staged mutations link into the global `stagedEdits` transaction tracker and execute via AST Safety Guard.
-2. **Submenu Grouping & Viewport Collision Clamping (`web/dist/index.html`)**:
+2. **Submenu Grouping & Viewport Collision Clamping (`web/frontend/src/`)**:
    - Hierarchically groups context menu actions into nested submenus (`Quick Filter`, `Insert Value`, `Mutations`, `Copy / Export`).
    - Dynamically evaluates viewport boundaries and flips menu orientation (leftwards/upwards) when approaching screen edges, preventing overflow clipping.
 
@@ -1214,7 +1214,7 @@ sequenceDiagram
 3. **Browser Tab Spawn Suppression (`--no-browser`)**:
    - Both restart paths automatically inject the `--no-browser` CLI flag into the replacement argument list.
    - This prevents the updated instance from launching unwanted default browser tabs while an active user session is already open.
-4. **Client-Side Health Polling & Workspace Reload (`web/dist/index.html`)**:
+4. **Client-Side Health Polling & Workspace Reload (`web/frontend/src/`)**:
    - Upon receiving the `restarting` response, the web interface displays a non-blocking modal overlay and initiates active polling against `/api/auth/status` with linear retry backoff (500ms intervals, up to 30 attempts).
    - Once the restarted binary returns HTTP 200, the client smoothly refreshes the page, preserving database credentials, tab configurations, and workspace state.
 

@@ -66,9 +66,9 @@ fi
 
 # 2. Run test suite
 if [ "$SKIP_TESTS" = false ]; then
-  echo "🧪 Running unit test suite (go test ./...)..."
-  if ! go test ./...; then
-    echo "❌ Unit tests failed! Aborting release."
+  echo "🧪 Running Go race test suite (go test -race ./...) and frontend checks (npm test)..."
+  if ! go test -race ./... || ! npm test; then
+    echo "❌ Tests failed! Aborting release."
     exit 1
   fi
   echo "✅ All unit tests passed."
