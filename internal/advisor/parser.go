@@ -218,6 +218,18 @@ parsedVerb:
 		tableMap[t] = &PredicateAnalysis{Table: t}
 	}
 
+	// Walk JOIN ... ON predicates between FROM/JOIN and WHERE/GROUP/ORDER
+	if fromIdx := findTopKeyword(tokens, startIdx+1, "FROM"); fromIdx >= 0 {
+		fromEnd := findClauseEnd(tokens, fromIdx+1, "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "RETURNING", "FOR")
+		for j := fromIdx + 1; j < fromEnd; j++ {
+			if tokens[j].kind == advWord && tokens[j].upper == "ON" {
+				onEnd := findClauseEnd(tokens, j+1, "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "CROSS", "NATURAL", "STRAIGHT_JOIN", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT")
+				parseJoinOnTokens(tokens[j+1:onEnd], tableMap, aliasToTable, tables[0])
+				j = onEnd - 1
+			}
+		}
+	}
+
 	// Walk WHERE clause predicates
 	if whereIdx := findTopKeyword(tokens, startIdx+1, "WHERE"); whereIdx >= 0 {
 		endIdx := findClauseEnd(tokens, whereIdx+1, "GROUP", "ORDER", "HAVING", "LIMIT", "RETURNING", "FOR")
@@ -390,20 +402,45 @@ func parseColRef(tokens []advToken, idx int, aliasToTable map[string]string, def
 	return tokens[idx].unquoted, defaultTable, idx + 1
 }
 
-func parseWhereTokens(tokens []advToken, tableMap map[string]*PredicateAnalysis, aliasToTable map[string]string, defaultTable string) {
-	depth := 0
+func parseJoinOnTokens(tokens []advToken, tableMap map[string]*PredicateAnalysis, aliasToTable map[string]string, defaultTable string) {
 	for i := 0; i < len(tokens); i++ {
-		if tokens[i].kind == advLParen {
-			depth++
+		if tokens[i].kind == advLParen || tokens[i].kind == advRParen {
 			continue
 		}
-		if tokens[i].kind == advRParen {
-			if depth > 0 {
-				depth--
+		col, tbl, afterCol := parseColRef(tokens, i, aliasToTable, defaultTable)
+		if col == "" || afterCol >= len(tokens) {
+			continue
+		}
+		if tokens[afterCol].kind == advOp && (tokens[afterCol].upper == "=" || tokens[afterCol].upper == "<=>") {
+			if ana, ok := tableMap[tbl]; ok {
+				if !containsStr(ana.EqualityCols, col) {
+					ana.EqualityCols = append(ana.EqualityCols, col)
+				}
+				if !containsStr(ana.ReferencedCols, col) {
+					ana.ReferencedCols = append(ana.ReferencedCols, col)
+				}
 			}
-			continue
+			// Also capture the right-hand side column if it's a join column (e.g. a.id = b.a_id)
+			if rCol, rTbl, afterR := parseColRef(tokens, afterCol+1, aliasToTable, defaultTable); rCol != "" && rTbl != "" {
+				if rAna, ok := tableMap[rTbl]; ok {
+					if !containsStr(rAna.EqualityCols, rCol) {
+						rAna.EqualityCols = append(rAna.EqualityCols, rCol)
+					}
+					if !containsStr(rAna.ReferencedCols, rCol) {
+						rAna.ReferencedCols = append(rAna.ReferencedCols, rCol)
+					}
+				}
+				i = afterR - 1
+				continue
+			}
+			i = afterCol
 		}
-		if depth != 0 {
+	}
+}
+
+func parseWhereTokens(tokens []advToken, tableMap map[string]*PredicateAnalysis, aliasToTable map[string]string, defaultTable string) {
+	for i := 0; i < len(tokens); i++ {
+		if tokens[i].kind == advLParen || tokens[i].kind == advRParen {
 			continue
 		}
 
@@ -414,6 +451,9 @@ func parseWhereTokens(tokens []advToken, tableMap map[string]*PredicateAnalysis,
 		ana, ok := tableMap[tbl]
 		if !ok {
 			continue
+		}
+		if !containsStr(ana.ReferencedCols, col) {
+			ana.ReferencedCols = append(ana.ReferencedCols, col)
 		}
 
 		opTok := tokens[afterCol]

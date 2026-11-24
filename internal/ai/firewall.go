@@ -139,6 +139,20 @@ func BuildSchemaPromptWithMap(schema *driver.SchemaMetadata, referencedQuery str
 	return sb.String(), mapping
 }
 
+var sqlKeywordsToPreserve = map[string]bool{
+	"SELECT": true, "FROM": true, "WHERE": true, "ORDER": true, "GROUP": true, "BY": true,
+	"HAVING": true, "LIMIT": true, "OFFSET": true, "JOIN": true, "INNER": true, "LEFT": true,
+	"RIGHT": true, "FULL": true, "OUTER": true, "CROSS": true, "ON": true, "AS": true,
+	"AND": true, "OR": true, "NOT": true, "NULL": true, "IS": true, "IN": true, "LIKE": true,
+	"ILIKE": true, "BETWEEN": true, "EXISTS": true, "CASE": true, "WHEN": true, "THEN": true,
+	"ELSE": true, "END": true, "DISTINCT": true, "UNION": true, "ALL": true, "ASC": true,
+	"DESC": true, "COUNT": true, "SUM": true, "AVG": true, "MIN": true, "MAX": true,
+	"INSERT": true, "INTO": true, "VALUES": true, "UPDATE": true, "SET": true, "DELETE": true,
+	"CREATE": true, "ALTER": true, "DROP": true, "TABLE": true, "INDEX": true, "VIEW": true,
+	"KEY": true, "PRIMARY": true, "FOREIGN": true, "REFERENCES": true, "DEFAULT": true,
+	"WITH": true, "EXPLAIN": true, "ANALYZE": true,
+}
+
 // MaskIdentifiersInText replaces real schema identifiers in free text (SQL, plans, errors)
 // using the mapping produced by BuildSchemaPromptWithMap, longest keys first in a single pass.
 func MaskIdentifiersInText(text string, mapping map[string]string) string {
@@ -167,9 +181,19 @@ func MaskIdentifiersInText(text string, mapping map[string]string) string {
 	for i, k := range keys {
 		quoted[i] = regexp.QuoteMeta(k)
 	}
-	re := regexp.MustCompile(`(?i)\b(?:` + strings.Join(quoted, "|") + `)\b`)
+	// Match quoted (`ident` or "ident") or bare word identifiers; never mask unquoted SQL keywords.
+	re := regexp.MustCompile("(?i)(?:`|\")?(?:\\b(?:" + strings.Join(quoted, "|") + ")\\b)(?:`|\")?")
 	return re.ReplaceAllStringFunc(text, func(match string) string {
-		if repl, ok := lowerLookup[strings.ToLower(match)]; ok {
+		isQuoted := (strings.HasPrefix(match, "`") && strings.HasSuffix(match, "`")) ||
+			(strings.HasPrefix(match, `"`) && strings.HasSuffix(match, `"`))
+		bare := strings.Trim(match, "`\"")
+		if !isQuoted && sqlKeywordsToPreserve[strings.ToUpper(bare)] {
+			return match
+		}
+		if repl, ok := lowerLookup[strings.ToLower(bare)]; ok {
+			if isQuoted {
+				return match[:1] + repl + match[len(match)-1:]
+			}
 			return repl
 		}
 		return match

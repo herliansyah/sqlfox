@@ -62,16 +62,20 @@ func AssemblePromptsWithMap(req AssistRequest) (systemPrompt string, userPrompt 
 	}
 
 	var schemaPrompt string
-	if req.IncludeSchema && req.Schema != nil {
-		schemaPrompt, identMap = BuildSchemaPromptWithMap(req.Schema, req.Query+" "+req.Prompt+" "+req.ErrorMessage, req.MaskIdentifiers)
+	if req.Schema != nil {
+		if req.IncludeSchema {
+			schemaPrompt, identMap = BuildSchemaPromptWithMap(req.Schema, req.Query+" "+req.Prompt+" "+req.ErrorMessage, req.MaskIdentifiers)
+		} else if req.MaskIdentifiers {
+			_, identMap = BuildSchemaPromptWithMap(req.Schema, req.Query+" "+req.Prompt+" "+req.ErrorMessage, true)
+		}
 
 		// Table Notes Injection: check if any referenced tables have table notes.
 		// Notes are free text naming real tables/columns, so they are withheld when masking is on.
-		if len(req.TableNotes) > 0 && !req.MaskIdentifiers {
+		if req.IncludeSchema && len(req.TableNotes) > 0 && !req.MaskIdentifiers {
 			queryAndPrompt := strings.ToLower(req.Query + " " + req.Prompt + " " + req.ErrorMessage)
 			var relevantNotes []string
 			for _, n := range req.TableNotes {
-				if n.Content != "" && (queryAndPrompt == "  " || strings.Contains(queryAndPrompt, strings.ToLower(n.TableName))) {
+				if n.Content != "" && (strings.TrimSpace(queryAndPrompt) == "" || strings.Contains(queryAndPrompt, strings.ToLower(n.TableName))) {
 					relevantNotes = append(relevantNotes, fmt.Sprintf("Table `%s` Notes & Business Rules:\n%s", n.TableName, n.Content))
 				}
 			}

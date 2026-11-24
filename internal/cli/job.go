@@ -852,6 +852,7 @@ func writeTableDump(ctx context.Context, sess driver.Session, drvName, dbName st
 		out.printf("\n")
 	}
 
+	sampledKeys := make(map[string]map[string][]any)
 	for _, tbl := range tables {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -872,7 +873,38 @@ func writeTableDump(ctx context.Context, sess driver.Session, drvName, dbName st
 
 		querySQL := fmt.Sprintf("SELECT * FROM %s", quoteIdent(tbl.Name))
 		if isSmartSeed && limit > 0 {
-			querySQL = fmt.Sprintf("SELECT * FROM %s LIMIT %d", quoteIdent(tbl.Name), limit)
+			var whereParts []string
+			emptyParent := false
+			for _, fk := range tbl.ForeignKeys {
+				if strings.EqualFold(fk.ReferencedTable, tbl.Name) {
+					continue // skip self-referential FK in initial slice
+				}
+				parentCols, hasParent := sampledKeys[strings.ToLower(fk.ReferencedTable)]
+				if !hasParent {
+					continue
+				}
+				vals := parentCols[strings.ToLower(fk.ReferencedColumn)]
+				if len(vals) == 0 {
+					emptyParent = true
+					break
+				}
+				var lits []string
+				for _, v := range vals {
+					if v != nil {
+						lits = append(lits, driver.FormatSQLValueForDriver(v, drvName))
+					}
+				}
+				if len(lits) > 0 {
+					whereParts = append(whereParts, fmt.Sprintf("%s IN (%s)", quoteIdent(fk.Column), strings.Join(lits, ", ")))
+				}
+			}
+			if emptyParent {
+				querySQL = fmt.Sprintf("SELECT * FROM %s WHERE 1=0", quoteIdent(tbl.Name))
+			} else if len(whereParts) > 0 {
+				querySQL = fmt.Sprintf("SELECT * FROM %s WHERE %s LIMIT %d", quoteIdent(tbl.Name), strings.Join(whereParts, " AND "), limit)
+			} else {
+				querySQL = fmt.Sprintf("SELECT * FROM %s LIMIT %d", quoteIdent(tbl.Name), limit)
+			}
 		}
 
 		streamLimit := 0
@@ -891,12 +923,30 @@ func writeTableDump(ctx context.Context, sess driver.Session, drvName, dbName st
 		}
 		colHeader := strings.Join(colNames, ", ")
 
+		if isSmartSeed {
+			tblKey := strings.ToLower(tbl.Name)
+			if sampledKeys[tblKey] == nil {
+				sampledKeys[tblKey] = make(map[string][]any)
+			}
+		}
+
 		written := 0
 		for {
 			chunk, err := stream.NextChunk(chunkBatch)
 			if len(chunk) > 0 {
 				var valRows []string
 				for _, row := range chunk {
+					if isSmartSeed {
+						tblKey := strings.ToLower(tbl.Name)
+						for idx, c := range cols {
+							if idx < len(row) && row[idx] != nil {
+								ck := strings.ToLower(c.Name)
+								if len(sampledKeys[tblKey][ck]) < limit {
+									sampledKeys[tblKey][ck] = append(sampledKeys[tblKey][ck], row[idx])
+								}
+							}
+						}
+					}
 					var rowVals []string
 					for _, val := range row {
 						rowVals = append(rowVals, driver.FormatSQLValueForDriver(val, drvName))
