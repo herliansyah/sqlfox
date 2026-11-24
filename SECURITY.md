@@ -75,7 +75,7 @@ Every connection is tagged with an **Environment** that governs Safety Guard str
 | **Unqualified `DELETE`/`UPDATE`** | Warning Banner | Warning + Confirm | **Blocked** (Hard Challenge Modal) |
 | **`DROP TABLE` / `TRUNCATE`** | Confirmation Click | Challenge Modal | **Challenge Modal + Auto-Backup** |
 | **Full Table Scan Alert (>100k rows)** | Toast notice | Toast notice | Modal Warning before running |
-| **Max Auto Limit** | 5,000 | 1,000 | 500 (Strict) |
+| **Max Auto Limit** | 1,000 buffered / 5,000 streaming | 1,000 buffered / 5,000 streaming | 1,000 buffered / 5,000 streaming |
 
 ### Read-Only Enforcement
 When Read-Only mode is active for a session, SqlFox enforces read-only execution at both the application layer (blocking mutation endpoints and non-query statements) and the database-engine layer via `ReadOnlySession.QueryStreamReadOnly`:
@@ -169,7 +169,7 @@ To maintain binary execution integrity during in-app updates:
    - Additionally, the requested asset URL must be byte-for-byte one that the official GitHub release metadata advertises, binding the download to a release GitHub actually published.
 2. **Signed Checksum Manifest (Ed25519 Trust Anchor)**:
    - Releases publish a detached Ed25519 signature (`checksums.txt.sig`) over the checksum manifest, produced offline with a private signing key held only in CI secrets.
-   - The shipped binary embeds the corresponding **public** key at build time (`-ldflags "-X sqlfox/internal/server.manifestSigningPublicKeyB64=<base64 pubkey>"`).
+   - The shipped binary embeds the corresponding **public** key at build time (`-ldflags "-X github.com/herliansyah/sqlfox/internal/server.manifestSigningPublicKeyB64=<base64 pubkey>"`).
    - Before trusting any checksum, the updater fetches `checksums.txt.sig` and requires it to be a valid Ed25519 signature over the exact manifest bytes. This is the supply-chain trust anchor: a same-origin, unsigned `checksums.txt` alone only defends against network tampering, whereas the signature defends against a tampered or compromised GitHub release (an attacker who can publish both a malicious binary and a matching checksum still cannot forge the offline signature).
    - Verification is **fail-closed**: a missing, malformed, or non-verifying signature aborts the update. Builds with no embedded public key (development/unprovisioned) fall back to the legacy same-origin checksum behavior.
    - The signer is a CGO-free, stdlib-only helper (`scripts/sign-manifest.go`), honoring the CGO-Free Invariant. Provision keys once with `go run scripts/sign-manifest.go -genkey`; store `PRIVATE_KEY` as the `SQLFOX_MANIFEST_SIGNING_KEY` CI secret and `PUBLIC_KEY` as the `SQLFOX_MANIFEST_SIGNING_PUBKEY` repository variable.

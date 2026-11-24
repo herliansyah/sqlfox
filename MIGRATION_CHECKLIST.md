@@ -48,7 +48,7 @@
 - [x] Hapus Profil Koneksi dengan konfirmasi
 - [x] Test Connection action (`handleTest` dengan latensi round-trip)
 - [x] Multi-driver preset: MySQL (3306), PostgreSQL (5432), SQLite (`./data.db`)
-- [x] Parameter SSH Tunneling (SSH Host, Port, User)
+- [ ] Parameter SSH Tunneling (SSH Host, Port, User) — *removed per ADR 0020 (native SSH/platform tunnels)*
 - [x] Mode SSL/TLS Encryption (`disabled`, `require`, `verify-ca`, `verify-full`)
 - [x] Opsi Read-Only Connection (isolasi hanya query SELECT)
 - [x] Filter pencarian cepat di dropdown koneksi header

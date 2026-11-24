@@ -149,7 +149,7 @@ All captures are taken in high resolution (**2x Retina / HiDPI**) on an enterpri
 
 #### Standalone Binary (Recommended)
 
-Download the latest pre-compiled static binary (**v0.16.1**) from [GitHub Releases](https://github.com/herliansyah/sqlfox/releases):
+Download the latest pre-compiled static binary (**v0.19.8**) from [GitHub Releases](https://github.com/herliansyah/sqlfox/releases):
 
 | OS | Architecture | Archive Format |
 | :--- | :--- | :--- |
@@ -267,7 +267,7 @@ sqlfox stop
 
 SqlFox pairs a high-concurrency Go backend with an ultra-lean Svelte 5 frontend compiled and embedded directly into a single static binary:
 
-- **Go 1.22+ Core Engine**: Zero external dependencies, pure-Go database drivers (PostgreSQL, MySQL, SQLite), deterministic SQL AST analyzer, connection vault (Argon2id + AES-256-GCM), and headless CLI automation.
+- **Go 1.26+ Core Engine**: Zero external dependencies, pure-Go database drivers (PostgreSQL, MySQL, SQLite), deterministic SQL token guard, connection vault (Argon2id + AES-256-GCM), and headless CLI automation.
 - **Svelte 5 Workspace**: Reactive runes (`$state`, `$derived`, `$effect`), DOM-windowed virtual grid (60fps on 10,000+ rows), interactive SVG ERD canvas, and CodeMirror 6 SQL editor with dialect auto-switching.
 - **Zero-Electron Desktop Delivery**: Embeds the Svelte build via Go's `//go:embed` and leverages the host's existing Chromium/Edge runtime via `--app` mode for a frameless native desktop experience without hundreds of megabytes of Electron overhead.
 

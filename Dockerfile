@@ -8,13 +8,12 @@ COPY package.json package-lock.json ./
 COPY web/frontend/package.json web/frontend/package-lock.json ./web/frontend/
 RUN npm ci && npm --prefix web/frontend ci
 
-COPY web/frontend/ web/frontend/
-COPY scripts/ scripts/
 COPY web/ web/
-RUN npm run build:svelte
+COPY CHANGELOG.md ./
+RUN npm run build:svelte && cp CHANGELOG.md web/dist/CHANGELOG.md
 
 # Stage 1: Build the static pure-Go binary
-FROM golang:alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 WORKDIR /src
 
