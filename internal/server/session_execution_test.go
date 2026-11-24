@@ -1098,4 +1098,3 @@ func TestActiveSession_AbortedTransactionIntegrity(t *testing.T) {
 		t.Fatalf("expected COMMIT rejection on aborted transaction, got: %v", err)
 	}
 }
-

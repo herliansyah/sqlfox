@@ -25,10 +25,10 @@ type AIChatRequest struct {
 	Model           string      `json:"model"`
 	Endpoint        string      `json:"endpoint"`
 	MaskIdentifiers *bool       `json:"mask_identifiers,omitempty"` // default true (secure-by-default)
-	Language        string      `json:"language,omitempty"`       // "id" (Bahasa Indonesia), "en", "auto"
-	ResponseStyle   string      `json:"response_style,omitempty"` // "concise", "detailed", "normal"
-	CustomPrompt    string      `json:"custom_prompt,omitempty"`  // custom persona / system instructions
-	IncludeSchema   *bool       `json:"include_schema,omitempty"` // default true
+	Language        string      `json:"language,omitempty"`         // "id" (Bahasa Indonesia), "en", "auto"
+	ResponseStyle   string      `json:"response_style,omitempty"`   // "concise", "detailed", "normal"
+	CustomPrompt    string      `json:"custom_prompt,omitempty"`    // custom persona / system instructions
+	IncludeSchema   *bool       `json:"include_schema,omitempty"`   // default true
 	Temperature     float32     `json:"temperature,omitempty"`
 }
 

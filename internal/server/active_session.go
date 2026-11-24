@@ -390,7 +390,6 @@ func (s *ActiveSession) RecordAudit(querySQL, source string, durationMs, rowsAff
 	}
 }
 
-
 // CancelQuery attempts to interrupt a running query by queryID.
 // registerQuery records cancel under a unique run key derived from the client's query ID.
 func (s *ActiveSession) registerQuery(queryID string, cancel context.CancelFunc) string {

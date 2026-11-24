@@ -320,4 +320,3 @@ func (sm *SessionManager) CloseAll() {
 		_ = sess.Close()
 	}
 }
-
