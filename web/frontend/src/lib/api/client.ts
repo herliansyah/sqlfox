@@ -160,15 +160,11 @@ class ApiClient {
   private baseUrl = '/api';
 
   private getAuthHeaders(extra: Record<string, string> = {}, includeJsonContentType = true): Record<string, string> {
-    const token = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('sqlfox_remote_token') : null;
     const headers: Record<string, string> = {};
     if (includeJsonContentType) {
       headers['Content-Type'] = 'application/json';
     }
     Object.assign(headers, extra);
-    if (token && !headers['Authorization']) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
     return headers;
   }
 

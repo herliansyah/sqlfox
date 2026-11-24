@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -22,6 +23,8 @@ import (
 
 // Server coordinates HTTP API routing and embedded web frontend delivery.
 type Server struct {
+	mu                sync.Mutex
+	baseHandler       http.Handler
 	handler           http.Handler
 	vault             *vault.Vault
 	backupDir         string
@@ -66,6 +69,8 @@ func NewServer(v *vault.Vault, assets fs.FS, backupDir string, masterPassword st
 }
 
 func (s *Server) Router() http.Handler {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.handler
 }
 
@@ -269,7 +274,7 @@ func (s *Server) routes() {
 					if err == nil {
 						// ponytail: unhide remote-lock-modal and mark body vault-locked so streaming / Ctrl+F5 suppresses inner UI
 						modified := strings.Replace(string(content), `<body class="`, `<body class="vault-locked `, 1)
-						modified = strings.Replace(modified, `id="remote-lock-modal" class="fixed inset-0 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 z-[100] hidden"`, `id="remote-lock-modal" class="fixed inset-0 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 z-[100]"`, 1)
+						modified = reRemoteLockHidden.ReplaceAllString(modified, `$1$2`)
 						w.Header().Set("Content-Type", "text/html; charset=utf-8")
 						_, _ = w.Write([]byte(modified))
 						return
@@ -282,11 +287,14 @@ func (s *Server) routes() {
 
 	// ponytail: stdlib panic recoverer, logger, and ingress + remote access guards replace chi router & middleware
 	baseHandler := recoverer(s.IngressGuardMiddleware(s.RemoteAccessGuardMiddleware(mux)))
+	s.mu.Lock()
+	s.baseHandler = baseHandler
 	if s.logger != nil {
-		s.handler = logger.HTTPMiddleware(s.logger)(baseHandler)
+		s.handler = logger.HTTPMiddleware(s.logger)(s.baseHandler)
 	} else {
-		s.handler = baseHandler
+		s.handler = s.baseHandler
 	}
+	s.mu.Unlock()
 }
 
 // SetLANEnabled toggles whether the server is configured to accept LAN connections and display Master PIN.
@@ -329,9 +337,15 @@ func (s *Server) Close() {
 
 // SetLogger attaches the Diagnostic Logger and wraps HTTP routing with logging telemetry.
 func (s *Server) SetLogger(l *slog.Logger) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.logger = l
-	if s.handler != nil {
-		s.handler = logger.HTTPMiddleware(l)(s.handler)
+	if s.baseHandler != nil {
+		if l != nil {
+			s.handler = logger.HTTPMiddleware(l)(s.baseHandler)
+		} else {
+			s.handler = s.baseHandler
+		}
 	}
 }
 
@@ -362,6 +376,8 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
 }
+
+var reRemoteLockHidden = regexp.MustCompile(`(id="remote-lock-modal"[^>]*?)\s+hidden([^>]*?>)`)
 
 // quoteIdent formats an identifier safely with driver-aware quotes.
 func quoteIdent(name, driverName string) string {

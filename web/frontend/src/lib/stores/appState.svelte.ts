@@ -28,64 +28,8 @@ import {
   wrapPagedSQL,
 } from '../utils/sqlStatements';
 
-// ponytail: smart wildcard auto-wrap for LIKE/NOT LIKE filter
-export function compileFilterPills(pills: FilterPill[], driver?: string): string {
-  if (!Array.isArray(pills) || pills.length === 0) return '';
-  const isPg = driver === 'postgres' || driver === 'postgresql';
-  const clauses: string[] = [];
-  for (const p of pills) {
-    if (!p || !p.col) continue;
-    const cleanCol = p.col.replace(/^[`"\[]+|[`"\]]+$/g, '');
-    const colEscaped = isPg ? `"${cleanCol.replace(/"/g, '""')}"` : `\`${cleanCol.replace(/`/g, '``')}\``;
-    const op = (p.op || '=').toUpperCase();
-    if (op === 'IS NULL' || op === 'IS NOT NULL') {
-      clauses.push(`${colEscaped} ${op}`);
-      continue;
-    }
-    const val = String(p.val !== undefined ? p.val : '').trim();
-    if (val === '') continue;
-    if (op === 'IN' || op === 'NOT IN') {
-      if (val.startsWith('(') && val.endsWith(')') && !val.includes(';')) {
-        clauses.push(`${colEscaped} ${op} ${val}`);
-      } else {
-        const items = val.split(',').map((s) => s.trim()).filter(Boolean);
-        const formatted = items
-          .map((item) => {
-            if (!isNaN(Number(item)) && item !== '') return item;
-            return `'${item.replace(/'/g, "''")}'`;
-          })
-          .join(', ');
-        clauses.push(`${colEscaped} ${op} (${formatted})`);
-      }
-    } else if (op === 'LIKE' || op === 'NOT LIKE') {
-      let finalVal = val;
-      if (!val.includes('%') && !val.includes('_')) {
-        finalVal = `%${val}%`;
-      }
-      clauses.push(`${colEscaped} ${op} '${finalVal.replace(/'/g, "''")}'`);
-    } else if (op === 'BETWEEN') {
-      // Two literals only — quote any part that is not a plain number to block injection.
-      const parts = val.split(/\s+AND\s+/i).slice(0, 2);
-      const fmt = (part: string) => {
-        const p = part.trim().replace(/^'(.*)'$/s, '$1');
-        return /^-?\d+(\.\d+)?$/.test(p) ? p : `'${p.replace(/'/g, "''")}'`;
-      };
-      if (parts.length === 2) {
-        clauses.push(`${colEscaped} BETWEEN ${fmt(parts[0])} AND ${fmt(parts[1])}`);
-      } else {
-        clauses.push(`${colEscaped} BETWEEN '${val.replace(/'/g, "''")}'`);
-      }
-    } else {
-      const isNum = !isNaN(Number(val)) && val !== '' && !val.includes(' ');
-      if (isNum) {
-        clauses.push(`${colEscaped} ${op} ${val}`);
-      } else {
-        clauses.push(`${colEscaped} ${op} '${val.replace(/'/g, "''")}'`);
-      }
-    }
-  }
-  return clauses.join(' AND ');
-}
+import { compileFilterPills } from '../utils/filterCompiler';
+export { compileFilterPills };
 
 
 export interface SafetyChallengeState {
@@ -545,9 +489,8 @@ export class AppState {
         this.activityEventSource.close();
         this.activityEventSource = null;
       }
-      const token = sessionStorage.getItem('sqlfox_remote_token');
-      const url = token ? `/api/logs/stream?token=${encodeURIComponent(token)}` : '/api/logs/stream';
-      const es = new EventSource(url);
+      // Same-origin EventSource automatically transmits the HttpOnly sqlfox_token cookie.
+      const es = new EventSource('/api/logs/stream');
       this.activityEventSource = es;
 
       es.onopen = () => {
@@ -757,9 +700,7 @@ export class AppState {
 
   async unlockRemote(password: string) {
     const res = await api.unlockVault(password);
-    if (res && res.token) {
-      sessionStorage.setItem('sqlfox_remote_token', res.token);
-      document.cookie = 'sqlfox_token=' + encodeURIComponent(res.token) + '; path=/; SameSite=Lax';
+    if (res && res.success) {
       this.isRemoteLocked = false;
       if (typeof document !== 'undefined') {
         document.body.classList.remove('vault-locked');

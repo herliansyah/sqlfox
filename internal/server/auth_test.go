@@ -484,3 +484,35 @@ func TestDNSRebindingGuardLANHostScoping(t *testing.T) {
 		}
 	}
 }
+
+func TestQueryTokenRejected(t *testing.T) {
+	tempDir := t.TempDir()
+	v, err := vault.OpenVault(filepath.Join(tempDir, "config.db"), "pin-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	srv := NewServer(v, nil, filepath.Join(tempDir, "backups"), "pin-secret")
+	token := srv.authMgr.GenerateToken()
+	handler := srv.Router()
+
+	// Token in URL query string must NOT authenticate remote requests
+	req := httptest.NewRequest("GET", "/api/connections?token="+token, nil)
+	req.RemoteAddr = "192.168.1.50:55555"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized for query-string token, got: %d", rec.Code)
+	}
+
+	// Same token in Authorization Bearer header must succeed
+	reqAuth := httptest.NewRequest("GET", "/api/connections", nil)
+	reqAuth.RemoteAddr = "192.168.1.50:55555"
+	reqAuth.Header.Set("Authorization", "Bearer "+token)
+	recAuth := httptest.NewRecorder()
+	handler.ServeHTTP(recAuth, reqAuth)
+	if recAuth.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for Bearer token, got: %d", recAuth.Code)
+	}
+}
