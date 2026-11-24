@@ -355,7 +355,10 @@ type broadcastHandler struct {
 }
 
 func (h *broadcastHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	return true
+	if h.primary != nil {
+		return h.primary.Enabled(ctx, level)
+	}
+	return level >= slog.LevelInfo
 }
 
 func (h *broadcastHandler) Handle(ctx context.Context, r slog.Record) error {
@@ -582,6 +585,10 @@ func (w *statusWriter) Flush() {
 	}
 }
 
+func (w *statusWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
 // HTTPMiddleware logs incoming HTTP requests with credential masking and static asset filtering.
 func HTTPMiddleware(l *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -606,12 +613,10 @@ func HTTPMiddleware(l *slog.Logger) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Credential masking: sensitive endpoints do not log raw parameters
+			// Credential masking: sensitive endpoints do not log raw parameters.
+			// Never trust raw X-Forwarded-For blindly in logs (spoofable when not behind a trusted proxy).
 			isAuth := strings.HasPrefix(path, "/api/auth/")
 			clientIP := r.RemoteAddr
-			if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-				clientIP = forwarded
-			}
 
 			level := slog.LevelDebug
 			if sw.status >= 500 {

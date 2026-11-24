@@ -228,6 +228,8 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 	limit := req.Limit
 	if limit <= 0 {
 		limit = 5000
+	} else if limit > 100000 {
+		limit = 100000
 	}
 
 	if req.Profile && s.Session != nil && s.DriverName == "mysql" {
@@ -252,7 +254,15 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 		if s.Session == nil {
 			return nil, errors.New("no active database session")
 		}
-		stream, streamErr = s.Session.QueryStream(execCtx, trimmedSQL, limit+1)
+		if s.IsReadOnly() {
+			if roSess, ok := s.Session.(driver.ReadOnlySession); ok {
+				stream, streamErr = roSess.QueryStreamReadOnly(execCtx, trimmedSQL, limit+1)
+			} else {
+				stream, streamErr = s.Session.QueryStream(execCtx, trimmedSQL, limit+1)
+			}
+		} else {
+			stream, streamErr = s.Session.QueryStream(execCtx, trimmedSQL, limit+1)
+		}
 	}
 	if streamErr != nil {
 		return nil, streamErr
@@ -283,7 +293,7 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 		totalRows += len(firstChunk)
 		if encErr := enc.Encode(map[string]any{
 			"type": "chunk",
-			"rows": firstChunk,
+			"rows": driver.FormatRowsForJSON(firstChunk),
 		}); encErr != nil {
 			streamErr = encErr
 			return nil, encErr
@@ -316,7 +326,7 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 			totalRows += len(chunk)
 			if encErr := enc.Encode(map[string]any{
 				"type": "chunk",
-				"rows": chunk,
+				"rows": driver.FormatRowsForJSON(chunk),
 			}); encErr != nil {
 				streamErr = encErr
 				return nil, encErr

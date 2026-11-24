@@ -71,6 +71,7 @@ func TestSystemShutdownHandler(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/system/shutdown", nil)
+	req.RemoteAddr = "127.0.0.1:54321"
 	w := httptest.NewRecorder()
 
 	s.handleShutdown(w, req)

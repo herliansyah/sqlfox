@@ -61,17 +61,22 @@ func (s *ActiveSession) beginInFlight() {
 	s.mu.Unlock()
 }
 
-// endInFlight marks the end of an in-flight request and refreshes transaction activity timestamps
-// so a long statement that just finished does not get immediately reaped.
+// endInFlight marks the end of an in-flight request without refreshing unrelated tab transactions.
 func (s *ActiveSession) endInFlight() {
+	s.endInFlightTab("")
+}
+
+// endInFlightTab marks the end of an in-flight request and refreshes only the specified tab's
+// transaction activity timestamp so activity in Tab B never keeps an abandoned transaction in Tab A alive.
+func (s *ActiveSession) endInFlightTab(tabID string) {
 	s.mu.Lock()
 	if s.inFlight > 0 {
 		s.inFlight--
 	}
 	now := time.Now()
 	s.LastActive = now
-	for _, entry := range s.tabTransactions {
-		if entry != nil && entry.tx != nil {
+	if tabID != "" && s.tabTransactions != nil {
+		if entry, ok := s.tabTransactions[tabID]; ok && entry != nil && entry.tx != nil {
 			entry.lastActive = now
 		}
 	}

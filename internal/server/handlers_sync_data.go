@@ -41,6 +41,26 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Production safety guard: require explicit confirmation challenge before writing or truncating Production.
+	if strings.EqualFold(tgtSess.Environment, "production") {
+		if !req.Confirmed {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"blocked":          true,
+				"requires_confirm": true,
+				"message":          "Target is a Production database. Confirmation challenge required before data transfer.",
+			})
+			return
+		}
+		expectedChallenge := req.TargetDB
+		if expectedChallenge == "" {
+			expectedChallenge = tgtSess.Name
+		}
+		if !strings.EqualFold(strings.TrimSpace(req.ChallengeInput), expectedChallenge) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("Challenge confirmation failed: expected '%s', got '%s'", expectedChallenge, req.ChallengeInput))
+			return
+		}
+	}
+
 	batchSize := req.BatchSize
 	if batchSize <= 0 {
 		batchSize = 500
@@ -54,6 +74,11 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "streaming unsupported by server")
 		return
 	}
+
+	srcSess.beginInFlight()
+	defer srcSess.endInFlight()
+	tgtSess.beginInFlight()
+	defer tgtSess.endInFlight()
 
 	if err := srcSess.UseDatabase(r.Context(), req.SourceDB); err != nil {
 		writeError(w, http.StatusBadRequest, "source: "+err.Error())
@@ -83,12 +108,35 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 
 	var grandTotalRows int64
 	var hasErrors bool
-	var cachedSrcSchema *driver.SchemaMetadata
-	if req.CreateTables && !strings.EqualFold(srcDriver, tgtDriver) {
-		cachedSrcSchema, _ = srcSess.Session.InspectSchema(ctx, req.SourceDB)
+	cachedSrcSchema, _ := srcSess.Session.InspectSchema(ctx, req.SourceDB)
+
+	// Order tables topologically by FK dependencies (parents before children) when schema is known.
+	orderedTables := req.Tables
+	if cachedSrcSchema != nil && len(req.Tables) > 1 {
+		byLower := make(map[string]driver.TableMetadata, len(cachedSrcSchema.Tables))
+		for _, t := range cachedSrcSchema.Tables {
+			byLower[strings.ToLower(t.Name)] = t
+		}
+		var subset []driver.TableMetadata
+		var extras []string
+		for _, name := range req.Tables {
+			if tm, ok := byLower[strings.ToLower(name)]; ok {
+				subset = append(subset, tm)
+			} else {
+				extras = append(extras, name)
+			}
+		}
+		if len(subset) > 0 {
+			sorted := driver.TopologicalSortTables(subset)
+			orderedTables = make([]string, 0, len(sorted)+len(extras))
+			for _, t := range sorted {
+				orderedTables = append(orderedTables, t.Name)
+			}
+			orderedTables = append(orderedTables, extras...)
+		}
 	}
 
-	for _, tbl := range req.Tables {
+	for _, tbl := range orderedTables {
 		sendEvent(map[string]any{
 			"event":  "table_start",
 			"table":  tbl,
@@ -101,7 +149,7 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 			var ddlErr error
 
 			// If cross-driver, construct target-compatible DDL from schema inspection
-			if cachedSrcSchema != nil {
+			if cachedSrcSchema != nil && !strings.EqualFold(srcDriver, tgtDriver) {
 				for _, t := range cachedSrcSchema.Tables {
 					if strings.EqualFold(t.Name, tbl) {
 						ddl = buildCreateTableDDL(t, srcDriver, tgtDriver)
@@ -116,7 +164,16 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 			}
 
 			if ddlErr == nil && ddl != "" {
-				_, _ = tgtSess.Session.Exec(ctx, ddl)
+				if _, execErr := tgtSess.Session.Exec(ctx, ddl); execErr != nil {
+					lowerErr := strings.ToLower(execErr.Error())
+					if !strings.Contains(lowerErr, "already exists") {
+						sendEvent(map[string]any{
+							"event": "table_warning",
+							"table": tbl,
+							"error": "create table DDL warning: " + execErr.Error(),
+						})
+					}
+				}
 			}
 		}
 

@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -261,6 +262,11 @@ func (s *Server) handleCheckUpdate(w http.ResponseWriter, r *http.Request) {
 
 // handleApplyUpdate handles POST /api/system/update/apply
 func (s *Server) handleApplyUpdate(w http.ResponseWriter, r *http.Request) {
+	if !isLoopback(r.RemoteAddr) || s.IsRemoteRequest(r) || hasForwardingHeaders(r) {
+		writeError(w, http.StatusForbidden, "Applying updates is only permitted from direct local machine sessions")
+		return
+	}
+
 	var req struct {
 		AssetURL string `json:"asset_url"`
 		Version  string `json:"version"`
@@ -281,9 +287,8 @@ func (s *Server) handleApplyUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Trust-anchor verification: the asset URL must be one the official GitHub release metadata
-	// actually advertises, not merely any path under the repo. This binds the download to a
-	// release GitHub published, so a caller cannot point the updater at an arbitrary (even
-	// same-repo) object.
+	// actually advertises AND must match the current runtime OS/architecture so an attacker
+	// cannot brick the daemon with another platform's binary.
 	rel, relErr := FetchLatestRelease(r.Context(), s.updateAPIURL)
 	if relErr != nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -293,18 +298,12 @@ func (s *Server) handleApplyUpdate(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	advertised := false
-	for _, a := range rel.Assets {
-		if a.BrowserDownloadURL == req.AssetURL {
-			advertised = true
-			break
-		}
-	}
-	if !advertised {
+	matched := findMatchingAsset(rel.Assets, runtime.GOOS, runtime.GOARCH)
+	if matched == nil || matched.BrowserDownloadURL != req.AssetURL {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]any{
-			"error": "asset_url is not advertised by the latest official release metadata",
+			"error": fmt.Sprintf("asset_url does not match the advertised release asset for %s/%s", runtime.GOOS, runtime.GOARCH),
 		})
 		return
 	}
@@ -483,7 +482,10 @@ func (s *Server) verifyAssetChecksum(ctx context.Context, assetURL string, archi
 			return nil, err
 		}
 		req.Header.Set("User-Agent", "SqlFox-Update-Engine")
-		client := &http.Client{Timeout: 15 * time.Second}
+		client := &http.Client{
+			Timeout:       15 * time.Second,
+			CheckRedirect: guardUpdateRedirect,
+		}
 		resp, err := client.Do(req)
 		if err != nil {
 			return nil, err
@@ -568,6 +570,17 @@ func verifyManifestSignature(ctx context.Context, fetch func(string) ([]byte, er
 	return nil
 }
 
+// guardUpdateRedirect blocks protocol downgrade (https -> http) during release asset downloads.
+func guardUpdateRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if len(via) > 0 && via[0].URL.Scheme == "https" && req.URL.Scheme != "https" {
+		return errors.New("refusing https to http redirect downgrade during update")
+	}
+	return nil
+}
+
 // downloadAndExtractBinary downloads the archive from assetURL, verifies the checksum, and extracts the sqlfox binary.
 func (s *Server) downloadAndExtractBinary(ctx context.Context, assetURL, destPath string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, assetURL, nil)
@@ -576,7 +589,10 @@ func (s *Server) downloadAndExtractBinary(ctx context.Context, assetURL, destPat
 	}
 	req.Header.Set("User-Agent", "SqlFox-Update-Engine")
 
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := &http.Client{
+		Timeout:       60 * time.Second,
+		CheckRedirect: guardUpdateRedirect,
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to download release asset: %w", err)
@@ -623,8 +639,8 @@ func extractFromTarGzStream(r io.Reader, destPath string) error {
 		}
 
 		baseName := filepath.Base(header.Name)
-		if baseName == "sqlfox" || baseName == "sqlfox.exe" {
-			outFile, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+		if header.Typeflag == tar.TypeReg && (baseName == "sqlfox" || baseName == "sqlfox.exe") {
+			outFile, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0755)
 			if err != nil {
 				return fmt.Errorf("cannot create destination binary: %w", err)
 			}
@@ -670,7 +686,7 @@ func extractFromZipStream(r io.Reader, destPath string) error {
 			}
 			defer rc.Close()
 
-			outFile, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+			outFile, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0755)
 			if err != nil {
 				return fmt.Errorf("cannot create destination binary: %w", err)
 			}

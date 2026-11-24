@@ -121,8 +121,8 @@ func TestGenerateFriendlyPINEntropy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generateFriendlyPIN error: %v", err)
 	}
-	if len(pin1) != 10 || len(pin2) != 10 {
-		t.Fatalf("expected 10 characters (fox- + 6 chars), got %q and %q", pin1, pin2)
+	if len(pin1) != 14 || len(pin2) != 14 {
+		t.Fatalf("expected 14 characters (fox- + 10 chars), got %q and %q", pin1, pin2)
 	}
 	if pin1[:4] != "fox-" || pin2[:4] != "fox-" {
 		t.Fatalf("expected 'fox-' prefix, got %q and %q", pin1, pin2)

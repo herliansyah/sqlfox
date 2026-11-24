@@ -31,11 +31,19 @@ func (s *Server) SetRestartFn(fn func() error) {
 	s.restartFn = fn
 }
 
+// hasForwardingHeaders returns true if the request carries any reverse-proxy forwarding header,
+// preventing loopback-only host endpoints from being reached through a local reverse proxy.
+func hasForwardingHeaders(r *http.Request) bool {
+	return r.Header.Get("X-Forwarded-For") != "" ||
+		r.Header.Get("X-Real-IP") != "" ||
+		r.Header.Get("Forwarded") != ""
+}
+
 // handleOpenBrowser handles POST /api/system/open-browser requests to launch the URL in the system browser.
 func (s *Server) handleOpenBrowser(w http.ResponseWriter, r *http.Request) {
-	if !isLoopback(r.RemoteAddr) {
+	if !isLoopback(r.RemoteAddr) || s.IsRemoteRequest(r) || hasForwardingHeaders(r) {
 		writeJSON(w, http.StatusForbidden, map[string]any{
-			"error": "Opening host desktop browser is only permitted from local machine sessions",
+			"error": "Opening host desktop browser is only permitted from direct local machine sessions",
 		})
 		return
 	}
@@ -78,6 +86,10 @@ func (s *Server) handleOpenBrowser(w http.ResponseWriter, r *http.Request) {
 
 // handleShutdown handles POST /api/system/shutdown requests to gracefully terminate the SqlFox daemon.
 func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
+	if !isLoopback(r.RemoteAddr) || s.IsRemoteRequest(r) || hasForwardingHeaders(r) {
+		writeError(w, http.StatusForbidden, "Shutdown is only permitted from direct local machine sessions")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
 		"message": "SqlFox server is shutting down gracefully...",

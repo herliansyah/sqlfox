@@ -16,9 +16,14 @@ import (
 	"github.com/herliansyah/sqlfox/internal/vault"
 )
 
+var cgnatRange = func() *net.IPNet {
+	_, cidr, _ := net.ParseCIDR("100.64.0.0/10")
+	return cidr
+}()
+
 // validateAIEndpoint enforces SSRF boundaries on user-supplied AI endpoints.
-// Cloud metadata IPs/hosts are always blocked; private/loopback IPs are blocked unless
-// the provider is local Ollama and the request originates from localhost.
+// Cloud metadata IPs/hosts and CGNAT (100.64.0.0/10) are always blocked; private/loopback
+// IPs are blocked unless the provider is local Ollama and the request originates from localhost.
 func validateAIEndpoint(raw string, provider ai.Provider, isRemote bool) error {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -31,7 +36,7 @@ func validateAIEndpoint(raw string, provider ai.Provider, isRemote bool) error {
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return errors.New("AI endpoint must use http or https scheme")
 	}
-	host := strings.ToLower(strings.TrimSpace(u.Hostname()))
+	host := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(u.Hostname())), ".")
 	if host == "" {
 		return errors.New("AI endpoint host is required")
 	}
@@ -45,8 +50,14 @@ func validateAIEndpoint(raw string, provider ai.Provider, isRemote bool) error {
 		if ip == nil {
 			return nil
 		}
+		if ip4 := ip.To4(); ip4 != nil {
+			ip = ip4
+		}
 		if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
 			return errors.New("AI endpoint targets a blocked link-local or unspecified IP")
+		}
+		if cgnatRange != nil && cgnatRange.Contains(ip) {
+			return errors.New("AI endpoint targets a blocked CGNAT/metadata IP range")
 		}
 		if ip.IsLoopback() && !allowLoopback {
 			return errors.New("AI endpoint targets a loopback IP")
@@ -58,19 +69,43 @@ func validateAIEndpoint(raw string, provider ai.Provider, isRemote bool) error {
 	}
 
 	if ip := net.ParseIP(host); ip != nil {
-		return checkIP(ip)
+		if err := checkIP(ip); err != nil {
+			return err
+		}
+		if u.Scheme == "http" && provider != ai.ProviderOllama && !ip.IsLoopback() {
+			return errors.New("cloud AI endpoints must use https")
+		}
+		return nil
 	}
 	if !allowLoopback && (host == "localhost" || strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".local")) {
 		return errors.New("AI endpoint targets a local hostname")
 	}
-	if ips, err := net.LookupIP(host); err == nil {
-		for _, ip := range ips {
-			if err := checkIP(ip); err != nil {
-				return err
-			}
+	if u.Scheme == "http" && provider != ai.ProviderOllama && host != "localhost" {
+		return errors.New("cloud AI endpoints must use https")
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		// Fail closed when DNS resolution fails (unless running offline unit tests with loopback).
+		return fmt.Errorf("AI endpoint host resolution failed: %w", err)
+	}
+	for _, ip := range ips {
+		if err := checkIP(ip); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// sanitizeAIProfileForResponse strips secret key material before sending an AI profile over HTTP.
+func sanitizeAIProfileForResponse(p *vault.AIProfile) *vault.AIProfile {
+	if p == nil {
+		return nil
+	}
+	cp := *p
+	cp.HasAPIKey = cp.HasAPIKey || cp.APIKey != "" || cp.EncryptedAPIKey != ""
+	cp.APIKey = ""
+	cp.EncryptedAPIKey = ""
+	return &cp
 }
 
 type AIChatRequest struct {
@@ -109,6 +144,13 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 			profile, err = s.vault.GetActiveAIProfile()
 		}
 		if err == nil && profile != nil {
+			// Prevent stored API key exfiltration: if the request relies on the vault's stored APIKey,
+			// reject any caller-supplied endpoint override that differs from the saved profile's BaseURL.
+			if req.APIKey == "" && profile.APIKey != "" && req.Endpoint != "" &&
+				!strings.EqualFold(strings.TrimRight(strings.TrimSpace(req.Endpoint), "/"), strings.TrimRight(strings.TrimSpace(profile.BaseURL), "/")) {
+				writeError(w, http.StatusBadRequest, "cannot override endpoint when using a stored AI profile API key")
+				return
+			}
 			if req.Provider == "" {
 				req.Provider = ai.Provider(profile.Provider)
 			}
@@ -292,7 +334,7 @@ func (s *Server) handleGetAIProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, p)
+	writeJSON(w, http.StatusOK, sanitizeAIProfileForResponse(p))
 }
 
 func (s *Server) handleCreateAIProfile(w http.ResponseWriter, r *http.Request) {
@@ -330,7 +372,7 @@ func (s *Server) handleCreateAIProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.notifyCloudSyncChange()
-	writeJSON(w, http.StatusOK, p)
+	writeJSON(w, http.StatusOK, sanitizeAIProfileForResponse(&p))
 }
 
 func (s *Server) handleUpdateAIProfile(w http.ResponseWriter, r *http.Request) {
@@ -371,7 +413,7 @@ func (s *Server) handleUpdateAIProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.notifyCloudSyncChange()
-	writeJSON(w, http.StatusOK, p)
+	writeJSON(w, http.StatusOK, sanitizeAIProfileForResponse(&p))
 }
 
 func (s *Server) handleDeleteAIProfile(w http.ResponseWriter, r *http.Request) {

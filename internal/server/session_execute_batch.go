@@ -29,6 +29,8 @@ func (s *ActiveSession) executeMulti(
 	limit := req.Limit
 	if limit <= 0 {
 		limit = 1000
+	} else if limit > 100000 {
+		limit = 100000
 	}
 
 	for i, stmt := range stmts {
@@ -79,6 +81,10 @@ func (s *ActiveSession) executeMulti(
 		}
 
 		if isTxCommit {
+			_, wasAborted, abortReason := s.getTxStatus(req.TabID)
+			if wasAborted {
+				return nil, fmt.Errorf("cannot COMMIT: transaction in this tab was aborted (%s). Issue ROLLBACK to clear the aborted state", abortReason)
+			}
 			tx := s.clearTx(req.TabID)
 			currentTx = nil
 			if tx == nil {
@@ -328,6 +334,10 @@ func (s *ActiveSession) executeStreamMulti(
 		}
 
 		if isTxCommit {
+			_, wasAborted, abortReason := s.getTxStatus(req.TabID)
+			if wasAborted {
+				return nil, fmt.Errorf("cannot COMMIT: transaction in this tab was aborted (%s). Issue ROLLBACK to clear the aborted state", abortReason)
+			}
 			tx := s.clearTx(req.TabID)
 			currentTx = nil
 			if tx == nil {

@@ -60,7 +60,7 @@ type ExecuteResponse struct {
 // 5. Routes to mutation execution or stream execution with the Implicit Safe Limit (1,000 rows).
 func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*ExecuteResponse, error) {
 	s.beginInFlight()
-	defer s.endInFlight()
+	defer s.endInFlightTab(req.TabID)
 
 	trimmedSQL := strings.TrimSpace(req.SQL)
 	if trimmedSQL == "" {
@@ -71,16 +71,8 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	cleanUpper := strings.TrimRight(strings.ToUpper(cleanSQL), "; \t\r\n")
 	isSelect := driver.IsQueryStatement(trimmedSQL)
 
-	if strings.HasPrefix(cleanUpper, "USE ") {
-		dbTarget := strings.TrimSpace(cleanSQL[4:])
-		dbTarget = strings.Trim(strings.TrimRight(dbTarget, "; \t\r\n"), "`'\"")
-		if dbTarget != "" {
-			_ = s.UseDatabase(ctx, dbTarget)
-		}
-	}
-
 	if req.Database != "" && s.Session != nil {
-		if err := s.Session.SelectDatabase(ctx, req.Database); err != nil {
+		if err := s.UseDatabase(ctx, req.Database); err != nil {
 			return nil, err
 		}
 	}
@@ -101,6 +93,21 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	// 2. Read-Only Enforcement: blocks all destructive operations or any mutation when locked
 	if s.IsReadOnly() && (!isSelect || !allQueries || inspection.IsDestructive) {
 		return nil, ErrReadOnlySession
+	}
+
+	// Switch active database only after Read-Only and Safety Guard checks pass.
+	if strings.HasPrefix(cleanUpper, "USE ") {
+		dbTarget := strings.TrimSpace(cleanSQL[4:])
+		dbTarget = strings.Trim(strings.TrimRight(dbTarget, "; \t\r\n"), "`'\"")
+		if dbTarget != "" {
+			if err := s.UseDatabase(ctx, dbTarget); err != nil {
+				return nil, err
+			}
+			return &ExecuteResponse{
+				Type:    "exec",
+				Message: fmt.Sprintf("Database changed to %s", dbTarget),
+			}, nil
+		}
 	}
 
 	// 3. Pre-Execution Row Estimation & Tiered Affirmation Gate (ADR 0057)
@@ -460,6 +467,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 				BackupDataIncluded: backupDataIncluded,
 				BackupWarning:      backupWarning,
 				Profile:            collectProfile(),
+				TxActive:           true,
 				Inspection:         inspection,
 			}, nil
 		}
@@ -491,7 +499,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		return &ExecuteResponse{
 			Type:        "query",
 			Columns:     cols,
-			Rows:        allRows,
+			Rows:        driver.FormatRowsForJSON(allRows),
 			RowCount:    len(allRows),
 			ExecutionMs: time.Since(start).Milliseconds(),
 			Profile:     collectProfile(),
@@ -532,8 +540,18 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		}, nil
 	}
 
-	// Select stream execution with implicit safe limit
-	stream, err := s.Session.QueryStream(execCtx, trimmedSQL, limit)
+	// Select stream execution with implicit safe limit.
+	// Enforce DB-engine read-only mode when session is locked in Read-Only mode.
+	var stream driver.RowStream
+	if s.IsReadOnly() {
+		if roSess, ok := s.Session.(driver.ReadOnlySession); ok {
+			stream, err = roSess.QueryStreamReadOnly(execCtx, trimmedSQL, limit)
+		} else {
+			stream, err = s.Session.QueryStream(execCtx, trimmedSQL, limit)
+		}
+	} else {
+		stream, err = s.Session.QueryStream(execCtx, trimmedSQL, limit)
+	}
 	if err != nil {
 		execErr = err
 		return nil, err
@@ -561,7 +579,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	return &ExecuteResponse{
 		Type:        "query",
 		Columns:     cols,
-		Rows:        allRows,
+		Rows:        driver.FormatRowsForJSON(allRows),
 		RowCount:    len(allRows),
 		ExecutionMs: time.Since(start).Milliseconds(),
 		Profile:     collectProfile(),

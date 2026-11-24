@@ -86,8 +86,11 @@ func TestAIProfilesServerEndpoints(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&fetched); err != nil {
 		t.Fatalf("failed to decode profile: %v", err)
 	}
-	if fetched.APIKey != "sk-test-deepseek-key" {
-		t.Fatalf("expected decrypted key in single get, got %s", fetched.APIKey)
+	if fetched.APIKey != "" {
+		t.Fatalf("expected API key to be redacted in single get, got %q", fetched.APIKey)
+	}
+	if !fetched.HasAPIKey {
+		t.Fatalf("expected HasAPIKey=true in single get")
 	}
 
 	// 4. POST /api/ai/profiles/{id}/active

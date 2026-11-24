@@ -100,7 +100,16 @@ func BuildSchemaPromptWithMap(schema *driver.SchemaMetadata, referencedQuery str
 			if col.IsNullable {
 				nullStr = " NULL"
 			}
-			sb.WriteString(fmt.Sprintf("    - `%s` %s%s%s\n", ident(col.Name), col.Type, nullStr, pkStr))
+			colType := col.Type
+			if maskIdentifiers {
+				upperType := strings.ToUpper(strings.TrimSpace(colType))
+				if strings.HasPrefix(upperType, "ENUM(") {
+					colType = "ENUM([MASKED])"
+				} else if strings.HasPrefix(upperType, "SET(") {
+					colType = "SET([MASKED])"
+				}
+			}
+			sb.WriteString(fmt.Sprintf("    - `%s` %s%s%s\n", ident(col.Name), colType, nullStr, pkStr))
 		}
 		if len(tbl.Indexes) > 0 {
 			sb.WriteString("  Indexes:\n")

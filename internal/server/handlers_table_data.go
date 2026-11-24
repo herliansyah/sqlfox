@@ -245,18 +245,21 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Fallback: If fast count failed/timed out and there is no where clause, use table estimate
+		// Fallback: If fast count failed/timed out and there is no where clause, use table estimate.
+		// Use a fresh context derived from r.Context() rather than the already-expired countCtx.
 		if totalRows == nil && whereClause == "" {
-			if est, err := sess.Session.GetTableEstimate(countCtx, tableName); err == nil && est != nil && est.RowCount > 0 {
+			estCtx, estCancel := context.WithTimeout(r.Context(), 2*time.Second)
+			if est, err := sess.Session.GetTableEstimate(estCtx, tableName); err == nil && est != nil && est.RowCount > 0 {
 				totalRows = &est.RowCount
 				isExact = false
 			}
+			estCancel()
 		}
 	}
 
 	res := map[string]any{
 		"columns":  cols,
-		"rows":     chunk,
+		"rows":     driver.FormatRowsForJSON(chunk),
 		"limit":    limit,
 		"offset":   offset,
 		"pk_col":   pkCol,
@@ -577,7 +580,9 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 		Edits       []CellEditItem `json:"edits"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	dec := json.NewDecoder(r.Body)
+	dec.UseNumber()
+	if err := dec.Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid cell edit payload: "+err.Error())
 		return
 	}
@@ -620,7 +625,19 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 			db = req.Database
 		}
 		if db != "" && sess.DriverName != "sqlite" {
-			tableRef = fmt.Sprintf("%s.%s", quoteIdent(db), quoteIdent(item.Table))
+			if !isPgDriver(sess.DriverName) || !strings.EqualFold(db, sess.DatabaseName) || strings.EqualFold(db, "public") {
+				tableRef = fmt.Sprintf("%s.%s", quoteIdent(db), quoteIdent(item.Table))
+			}
+		}
+
+		// Composite-PK safety guard: reject single-PK updates on tables that have multiple primary key columns,
+		// preventing accidental mass-overwrites when a client sends only the first PK column.
+		if len(item.PKValues) == 0 && item.PKColumn != "" && len(item.RowCriteria) == 0 {
+			if pkCols := tablePrimaryKeyColumns(ctx, sess, db, item.Table); len(pkCols) > 1 {
+				_ = finish(errors.New("composite primary key requires pk_values"))
+				writeError(w, http.StatusBadRequest, fmt.Sprintf("table %q has a composite primary key (%s); pk_values with all primary key columns is required", item.Table, strings.Join(pkCols, ", ")))
+				return
+			}
 		}
 
 		var updateSQL string
@@ -629,8 +646,9 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 		pIdx := 1
 		pVal := driver.Placeholder(sess.DriverName, pIdx)
 		pIdx++
-		args = append(args, item.Value)
-		valLiteral := driver.FormatSQLValueForDriver(item.Value, sess.DriverName)
+		normVal := normalizeJSONParam(item.Value)
+		args = append(args, normVal)
+		valLiteral := driver.FormatSQLValueForDriver(normVal, sess.DriverName)
 
 		if len(item.PKValues) > 0 && len(item.RowCriteria) == 0 {
 			var pkWheres []string
@@ -641,7 +659,7 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 			}
 			slices.Sort(keys)
 			for _, k := range keys {
-				val := item.PKValues[k]
+				val := normalizeJSONParam(item.PKValues[k])
 				pPK := driver.Placeholder(sess.DriverName, pIdx)
 				pIdx++
 				args = append(args, val)
@@ -654,10 +672,11 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 			auditSQL = fmt.Sprintf("UPDATE %s SET %s = %s WHERE %s",
 				tableRef, quoteIdent(item.Column), valLiteral, strings.Join(pkAuditWheres, " AND "))
 		} else if item.PKColumn != "" && item.PKValue != nil && len(item.RowCriteria) == 0 {
+			normPK := normalizeJSONParam(item.PKValue)
 			pPK := driver.Placeholder(sess.DriverName, pIdx)
 			pIdx++
-			args = append(args, item.PKValue)
-			pkLiteral := driver.FormatSQLValueForDriver(item.PKValue, sess.DriverName)
+			args = append(args, normPK)
+			pkLiteral := driver.FormatSQLValueForDriver(normPK, sess.DriverName)
 			updateSQL = fmt.Sprintf("UPDATE %s SET %s = %s WHERE %s = %s",
 				tableRef, quoteIdent(item.Column), pVal, quoteIdent(item.PKColumn), pPK)
 			auditSQL = fmt.Sprintf("UPDATE %s SET %s = %s WHERE %s = %s",
@@ -666,6 +685,7 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 			var whereParts []string
 			var auditWhereParts []string
 			for cName, cVal := range item.RowCriteria {
+				cVal = normalizeJSONParam(cVal)
 				if cVal == nil {
 					whereParts = append(whereParts, fmt.Sprintf("%s IS NULL", quoteIdent(cName)))
 					auditWhereParts = append(auditWhereParts, fmt.Sprintf("%s IS NULL", quoteIdent(cName)))

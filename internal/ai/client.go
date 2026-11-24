@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -78,6 +80,9 @@ func NewAIClient(cfg ClientConfig) *AIClient {
 		cfg: cfg,
 		httpClient: &http.Client{
 			Timeout: 45 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+			},
 			// Prevent SSRF via 3xx redirect to internal/metadata endpoints.
 			CheckRedirect: func(*http.Request, []*http.Request) error {
 				return http.ErrUseLastResponse
@@ -91,13 +96,19 @@ func DetectOllama(ctx context.Context, endpoint string) bool {
 	if endpoint == "" {
 		endpoint = "http://localhost:11434"
 	}
-	url := strings.TrimSuffix(endpoint, "/") + "/api/tags"
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	targetURL := strings.TrimSuffix(endpoint, "/") + "/api/tags"
+	req, err := http.NewRequestWithContext(ctx, "GET", targetURL, nil)
 	if err != nil {
 		return false
 	}
 
-	client := http.Client{Timeout: 1500 * time.Millisecond}
+	client := http.Client{
+		Timeout: 1500 * time.Millisecond,
+		// Never follow redirects during health checks (prevents redirect-based SSRF).
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return false
@@ -308,7 +319,7 @@ func (c *AIClient) completeGemini(ctx context.Context, req CompletionRequest) (*
 	// The key travels in the x-goog-api-key header, never the URL: *url.Error messages (DNS, TLS,
 	// timeout failures) embed the full request URL and would leak a ?key= parameter to logs/UI.
 	endpoint := fmt.Sprintf("%s/models/%s:generateContent",
-		strings.TrimSuffix(c.cfg.Endpoint, "/"), c.cfg.Model)
+		strings.TrimSuffix(c.cfg.Endpoint, "/"), url.PathEscape(c.cfg.Model))
 
 	payload := map[string]any{
 		"system_instruction": map[string]any{

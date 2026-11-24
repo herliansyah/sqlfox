@@ -33,6 +33,7 @@ import (
 var Version = "v0.19.8"
 
 func main() {
+	cli.Version = Version
 	initConsole()
 	loadEnvFiles()
 
@@ -90,6 +91,8 @@ func main() {
 	hostFlag := flag.String("host", "127.0.0.1", "Host interface to bind (default 127.0.0.1; use --lan or 0.0.0.0 for LAN/Tablet access)")
 	lanFlag := flag.Bool("lan", false, "Enable LAN and tablet access (binds to 0.0.0.0 and displays Master PIN)")
 	behindProxyFlag := flag.Bool("behind-proxy", false, "Enable reverse proxy trust mode (inspects X-Forwarded-For and X-Real-IP headers)")
+	trustedProxiesFlag := flag.String("trusted-proxies", "", "Comma-separated trusted proxy IPs or CIDRs (or SQLFOX_TRUSTED_PROXIES)")
+	allowedHostsFlag := flag.String("allowed-hosts", "", "Comma-separated allowed Host headers for reverse proxies (or SQLFOX_ALLOWED_HOSTS)")
 	tlsFlag := flag.Bool("tls", false, "Enable TLS/HTTPS listener (auto-generates self-signed ECDSA certificate if none provided)")
 	tlsCertFlag := flag.String("tls-cert", "", "Path to custom TLS certificate file (PEM)")
 	tlsKeyFlag := flag.String("tls-key", "", "Path to custom TLS private key file (PEM)")
@@ -254,6 +257,34 @@ func main() {
 	srv.SetLANIP(lanIP)
 	isBehindProxy := *behindProxyFlag || os.Getenv("SQLFOX_BEHIND_PROXY") == "1" || strings.ToLower(os.Getenv("SQLFOX_BEHIND_PROXY")) == "true"
 	srv.SetBehindProxy(isBehindProxy)
+
+	trustedRaw := *trustedProxiesFlag
+	if trustedRaw == "" {
+		trustedRaw = os.Getenv("SQLFOX_TRUSTED_PROXIES")
+	}
+	if trustedRaw != "" {
+		var proxies []string
+		for _, p := range strings.Split(trustedRaw, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				proxies = append(proxies, p)
+			}
+		}
+		srv.SetTrustedProxies(proxies)
+	}
+
+	allowedRaw := *allowedHostsFlag
+	if allowedRaw == "" {
+		allowedRaw = os.Getenv("SQLFOX_ALLOWED_HOSTS")
+	}
+	if allowedRaw != "" {
+		var hosts []string
+		for _, h := range strings.Split(allowedRaw, ",") {
+			if h = strings.TrimSpace(h); h != "" {
+				hosts = append(hosts, h)
+			}
+		}
+		srv.SetAllowedHosts(hosts)
+	}
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
@@ -463,27 +494,37 @@ func resolveMasterPassword(flagPass string, configDir string) (string, bool, err
 		return saved, false, nil
 	}
 
-	// 4. Generate friendly PIN
+	// 4. Generate cryptographically strong PIN with rejection sampling (no modulo bias, no hardcoded fallback).
 	pin, err := generateFriendlyPIN()
 	if err != nil {
-		return "fox-1234", true, nil
+		return "", false, fmt.Errorf("failed to generate master PIN: %w", err)
 	}
 
-	_ = os.MkdirAll(configDir, 0700)
-	_ = os.WriteFile(keyFile, []byte(pin), 0600)
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		return "", false, fmt.Errorf("failed to create config directory %s: %w", configDir, err)
+	}
+	if err := os.WriteFile(keyFile, []byte(pin), 0600); err != nil {
+		return "", false, fmt.Errorf("failed to persist master.key to %s: %w", keyFile, err)
+	}
 	return pin, true, nil
 }
 
 func generateFriendlyPIN() (string, error) {
 	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
-	b := make([]byte, 6)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
+	const maxValid = 256 - (256 % len(charset)) // rejection threshold eliminates modulo bias
+	out := make([]byte, 10)
+	buf := make([]byte, 1)
+	for i := 0; i < len(out); {
+		if _, err := rand.Read(buf); err != nil {
+			return "", err
+		}
+		if int(buf[0]) >= maxValid {
+			continue
+		}
+		out[i] = charset[int(buf[0])%len(charset)]
+		i++
 	}
-	for i := range b {
-		b[i] = charset[int(b[i])%len(charset)]
-	}
-	return "fox-" + string(b), nil
+	return "fox-" + string(out), nil
 }
 
 // tryListen checks if port is free on loopback interfaces before binding.
@@ -542,23 +583,21 @@ func getLocalNetworkIP() string {
 	return ""
 }
 
-// loadEnvFiles loads environment variables from .env or sqlfox.env if present.
-// ponytail: Lightweight zero-dependency env loader allows Windows double-click configuration.
+// loadEnvFiles loads environment variables from trusted user config paths (~/.sqlfox/)
+// and executable directory. Untrusted CWD .env files are intentionally NOT auto-loaded
+// so running sqlfox inside a cloned repo cannot inject SQLFOX_LAN or SQLFOX_MASTER_KEY.
 func loadEnvFiles() {
 	var candidates []string
 
-	// Next to executable
-	if exe, err := os.Executable(); err == nil {
-		exeDir := filepath.Dir(exe)
-		candidates = append(candidates, filepath.Join(exeDir, "sqlfox.env"), filepath.Join(exeDir, ".env"))
-	}
-
-	// In current working directory
-	candidates = append(candidates, "sqlfox.env", ".env")
-
-	// In ~/.sqlfox/
+	// In ~/.sqlfox/ (highest priority trusted user config)
 	if home, err := os.UserHomeDir(); err == nil {
 		candidates = append(candidates, filepath.Join(home, ".sqlfox", "sqlfox.env"), filepath.Join(home, ".sqlfox", ".env"))
+	}
+
+	// Next to executable (portable Windows bundle config)
+	if exe, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exe)
+		candidates = append(candidates, filepath.Join(exeDir, "sqlfox.env"))
 	}
 
 	loadEnvFilesFromPaths(candidates...)

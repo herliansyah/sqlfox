@@ -19,6 +19,13 @@ func (s *Server) handleListConnections(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []*vault.ConnectionRecord{}
 	}
+	// Never expose raw or sealed SSL private keys in connection list responses.
+	for _, c := range list {
+		if c != nil {
+			c.Password = ""
+			c.SSLKey = ""
+		}
+	}
 	writeJSON(w, http.StatusOK, list)
 }
 
@@ -46,6 +53,7 @@ func (s *Server) handleSaveConnection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	conn.Password = ""
+	conn.SSLKey = ""
 	writeJSON(w, http.StatusOK, conn)
 }
 

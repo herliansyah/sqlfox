@@ -23,17 +23,19 @@ var allowDefaultTestHost = false
 
 type ipLockoutRecord struct {
 	failedCount int
+	lastAttempt time.Time
 	lockedUntil time.Time
 }
 
 // AuthManager manages authentication tokens, ephemeral LAN pairing codes, and remote access verification.
 type AuthManager struct {
-	tokens           map[string]time.Time
-	lockouts         map[string]*ipLockoutRecord
-	pairingCode      string
-	pairingExpiresAt time.Time
-	argon2Sem        chan struct{}
-	mu               sync.RWMutex
+	tokens             map[string]time.Time
+	lockouts           map[string]*ipLockoutRecord
+	pairingCode        string
+	pairingExpiresAt   time.Time
+	pairingFailedCount int
+	argon2Sem          chan struct{}
+	mu                 sync.RWMutex
 }
 
 func NewAuthManager() *AuthManager {
@@ -55,6 +57,11 @@ func (a *AuthManager) purgeExpiredLocked() {
 	}
 	for ip, rec := range a.lockouts {
 		if !rec.lockedUntil.IsZero() && now.After(rec.lockedUntil) {
+			delete(a.lockouts, ip)
+			continue
+		}
+		// Evict non-locked entries after 15 minutes of inactivity to prevent unbounded RAM growth.
+		if rec.lockedUntil.IsZero() && !rec.lastAttempt.IsZero() && now.Sub(rec.lastAttempt) > 15*time.Minute {
 			delete(a.lockouts, ip)
 		}
 	}
@@ -113,14 +120,16 @@ func (a *AuthManager) RecordFailedAttempt(ip string) (locked bool, remaining tim
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.purgeExpiredLocked()
+	now := time.Now()
 	rec, ok := a.lockouts[ip]
-	if !ok || (!rec.lockedUntil.IsZero() && time.Now().After(rec.lockedUntil)) {
+	if !ok || (!rec.lockedUntil.IsZero() && now.After(rec.lockedUntil)) {
 		rec = &ipLockoutRecord{}
 		a.lockouts[ip] = rec
 	}
+	rec.lastAttempt = now
 	rec.failedCount++
 	if rec.failedCount >= 5 {
-		rec.lockedUntil = time.Now().Add(10 * time.Minute)
+		rec.lockedUntil = now.Add(10 * time.Minute)
 		return true, 10 * time.Minute
 	}
 	return false, 0
@@ -142,8 +151,7 @@ func (a *AuthManager) GeneratePairingCode() (string, time.Time) {
 	for i := 0; i < 8; i++ {
 		n, err := rand.Int(rand.Reader, big.NewInt(10))
 		if err != nil {
-			b.WriteByte('0')
-			continue
+			panic("crypto/rand unavailable for pairing code generation: " + err.Error())
 		}
 		b.WriteByte(byte('0' + n.Int64()))
 	}
@@ -154,10 +162,12 @@ func (a *AuthManager) GeneratePairingCode() (string, time.Time) {
 	defer a.mu.Unlock()
 	a.pairingCode = code
 	a.pairingExpiresAt = exp
+	a.pairingFailedCount = 0
 	return code, exp
 }
 
 // ConsumePairingCode validates and invalidates the active ephemeral LAN pairing code.
+// Burns the code globally after 5 failed attempts to defeat distributed/spoofed brute force.
 func (a *AuthManager) ConsumePairingCode(candidate string) bool {
 	if candidate == "" {
 		return false
@@ -167,17 +177,22 @@ func (a *AuthManager) ConsumePairingCode(candidate string) bool {
 	if a.pairingCode == "" || time.Now().After(a.pairingExpiresAt) {
 		a.pairingCode = ""
 		a.pairingExpiresAt = time.Time{}
+		a.pairingFailedCount = 0
 		return false
 	}
-	if len(candidate) != len(a.pairingCode) {
-		return false
-	}
-	if subtle.ConstantTimeCompare([]byte(candidate), []byte(a.pairingCode)) != 1 {
+	if len(candidate) != len(a.pairingCode) || subtle.ConstantTimeCompare([]byte(candidate), []byte(a.pairingCode)) != 1 {
+		a.pairingFailedCount++
+		if a.pairingFailedCount >= 5 {
+			a.pairingCode = ""
+			a.pairingExpiresAt = time.Time{}
+			a.pairingFailedCount = 0
+		}
 		return false
 	}
 	// Single-use: burn immediately on success.
 	a.pairingCode = ""
 	a.pairingExpiresAt = time.Time{}
+	a.pairingFailedCount = 0
 	return true
 }
 
@@ -293,11 +308,13 @@ func isLoopback(remoteAddr string) bool {
 }
 
 // isTrustedProxyIP reports whether ip is a trusted reverse proxy allowed to supply forwarding headers.
+// Only loopback and explicitly configured trustedProxies IPs/CIDRs are trusted (never blanket RFC 1918),
+// preventing sibling LAN/VPC/container peers from spoofing X-Forwarded-For to bypass lockout.
 func (s *Server) isTrustedProxyIP(ip net.IP) bool {
 	if ip == nil {
 		return false
 	}
-	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
+	if ip.IsLoopback() {
 		return true
 	}
 	s.mu.Lock()
@@ -390,7 +407,7 @@ func (s *Server) IsRemoteRequest(r *http.Request) bool {
 	}
 
 	if proxyEnabled && s.isTrustedProxyIP(remoteIP) {
-		if r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Real-IP") != "" {
+		if r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Real-IP") != "" || r.Header.Get("Forwarded") != "" {
 			return true
 		}
 	}
@@ -500,9 +517,24 @@ func (s *Server) handleAuthUnlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Re-check lockout after acquiring argon2Sem to close parallel unlock race at failedCount == 4.
+	if locked, remaining := s.authMgr.IsLocked(clientIP); locked {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": fmt.Sprintf("Too many failed attempts. Locked out for %d minutes.", int(remaining.Minutes())+1),
+		})
+		return
+	}
+
 	s.mu.Lock()
 	lanEnabled := s.lanEnabled
+	behindProxy := s.behindProxy
 	s.mu.Unlock()
+	if !behindProxy {
+		envVal := strings.ToLower(strings.TrimSpace(os.Getenv("SQLFOX_BEHIND_PROXY")))
+		behindProxy = envVal == "1" || envVal == "true"
+	}
 
 	valid := s.vault.ValidateMasterPassword(req.Password)
 	if !valid && lanEnabled {
@@ -526,13 +558,24 @@ func (s *Server) handleAuthUnlock(w http.ResponseWriter, r *http.Request) {
 
 	token := s.authMgr.GenerateToken()
 
+	isSecureConn := r.TLS != nil
+	if !isSecureConn && behindProxy {
+		remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			remoteHost = r.RemoteAddr
+		}
+		if s.isTrustedProxyIP(net.ParseIP(remoteHost)) && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+			isSecureConn = true
+		}
+	}
+
 	http.SetCookie(w, &http.Cookie{
 		Name:     "sqlfox_token",
 		Value:    token,
 		Path:     "/",
 		Expires:  time.Now().Add(24 * time.Hour),
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
+		Secure:   isSecureConn,
 		SameSite: http.SameSiteLaxMode,
 	})
 

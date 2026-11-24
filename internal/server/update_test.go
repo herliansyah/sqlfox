@@ -273,6 +273,7 @@ func TestHandleApplyUpdate(t *testing.T) {
 	bodyBytes, _ := json.Marshal(body)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/system/update/apply", bytes.NewReader(bodyBytes))
+	req.RemoteAddr = "127.0.0.1:54321"
 	rr := httptest.NewRecorder()
 
 	srv.handleApplyUpdate(rr, req)
@@ -332,6 +333,7 @@ func TestHandleApplyUpdate_RejectsUnadvertisedAsset(t *testing.T) {
 		"version":   "v0.2.0",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/system/update/apply", bytes.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:54321"
 	rr := httptest.NewRecorder()
 	srv.handleApplyUpdate(rr, req)
 
@@ -384,6 +386,7 @@ func TestRejectUntrustedUpdateOrigin(t *testing.T) {
 	}
 	bodyBytes, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPost, "/api/system/update/apply", bytes.NewReader(bodyBytes))
+	req.RemoteAddr = "127.0.0.1:54321"
 	rr := httptest.NewRecorder()
 
 	srv.handleApplyUpdate(rr, req)
@@ -407,12 +410,13 @@ func TestRejectMismatchedChecksum(t *testing.T) {
 	_ = tw.Close()
 	_ = gzw.Close()
 
+	assetName := fmt.Sprintf("sqlfox-v0.2.0-%s-%s.tar.gz", runtime.GOOS, runtime.GOARCH)
 	var assetURL string
 	mockDownload := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "checksums.txt") {
 			w.Header().Set("Content-Type", "text/plain")
 			// Provide completely wrong hash
-			w.Write([]byte("0000000000000000000000000000000000000000000000000000000000000000  sqlfox-compromised.tar.gz\n"))
+			w.Write([]byte("0000000000000000000000000000000000000000000000000000000000000000  " + assetName + "\n"))
 			return
 		}
 		if strings.HasSuffix(r.URL.Path, ".tar.gz") {
@@ -423,11 +427,11 @@ func TestRejectMismatchedChecksum(t *testing.T) {
 		// Release metadata advertising the (compromised) asset so the flow reaches checksum verification.
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(fmt.Sprintf(
-			`{"tag_name":"v0.2.0","assets":[{"name":"sqlfox-compromised.tar.gz","browser_download_url":%q}]}`,
-			assetURL)))
+			`{"tag_name":"v0.2.0","assets":[{"name":%q,"browser_download_url":%q}]}`,
+			assetName, assetURL)))
 	}))
 	defer mockDownload.Close()
-	assetURL = mockDownload.URL + "/sqlfox-compromised.tar.gz"
+	assetURL = mockDownload.URL + "/" + assetName
 
 	srv := &Server{
 		updateAPIURL:  mockDownload.URL,
@@ -435,11 +439,12 @@ func TestRejectMismatchedChecksum(t *testing.T) {
 	}
 
 	body := map[string]string{
-		"asset_url": mockDownload.URL + "/sqlfox-compromised.tar.gz",
+		"asset_url": assetURL,
 		"version":   "v0.2.0",
 	}
 	bodyBytes, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPost, "/api/system/update/apply", bytes.NewReader(bodyBytes))
+	req.RemoteAddr = "127.0.0.1:54321"
 	rr := httptest.NewRecorder()
 
 	srv.handleApplyUpdate(rr, req)

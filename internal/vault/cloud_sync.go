@@ -274,7 +274,12 @@ func TestGitHubAccess(ctx context.Context, apiBaseURL, token, repo, branch strin
 	}
 	setGitHubHeaders(req, token)
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := &http.Client{
+		Timeout: 15 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to connect to github: %w", err)
@@ -291,7 +296,7 @@ func TestGitHubAccess(ctx context.Context, apiBaseURL, token, repo, branch strin
 		return errors.New("github api access forbidden or rate limit reached")
 	}
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 		return fmt.Errorf("github api returned status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -368,7 +373,30 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 		files = prefixedFiles
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	// Refuse pushing vault backup secrets or notes to a public GitHub repository.
+	if cfg.IncludeVaultBackup && !strings.HasPrefix(apiBaseURL, "http://127.0.0.1") && !strings.HasPrefix(apiBaseURL, "http://localhost") && !strings.HasPrefix(apiBaseURL, "http://[::1]") {
+		repoReq, rErr := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/repos/%s", apiBaseURL, repo), nil)
+		if rErr == nil {
+			setGitHubHeaders(repoReq, cfg.GitHubToken)
+			if repoResp, doErr := client.Do(repoReq); doErr == nil {
+				var repoMeta struct {
+					Private *bool `json:"private"`
+				}
+				_ = json.NewDecoder(io.LimitReader(repoResp.Body, 64<<10)).Decode(&repoMeta)
+				repoResp.Body.Close()
+				if repoResp.StatusCode == http.StatusOK && repoMeta.Private != nil && !*repoMeta.Private {
+					return nil, errors.New("refusing to sync vault backup to a PUBLIC GitHub repository; make the repository private or disable IncludeVaultBackup")
+				}
+			}
+		}
+	}
 
 	// 4. Get the latest commit SHA of the target branch
 	refURL := fmt.Sprintf("%s/repos/%s/git/ref/heads/%s", apiBaseURL, repo, branch)

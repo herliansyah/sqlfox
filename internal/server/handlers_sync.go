@@ -59,6 +59,8 @@ type SyncDataTransferRequest struct {
 	CreateTables    bool     `json:"create_tables"`
 	TruncateTarget  bool     `json:"truncate_target"`
 	BatchSize       int      `json:"batch_size"`
+	Confirmed       bool     `json:"confirmed"`
+	ChallengeInput  string   `json:"challenge_input"`
 }
 
 type SyncDataCompareRequest struct {
@@ -422,14 +424,17 @@ func (s *Server) handleSyncStructureApply(w http.ResponseWriter, r *http.Request
 		if expectedChallenge == "" {
 			expectedChallenge = tgtSess.Name
 		}
-		if !strings.EqualFold(strings.TrimSpace(req.ChallengeInput), expectedChallenge) && !strings.EqualFold(strings.TrimSpace(req.ChallengeInput), "MIGRATE") {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("Challenge confirmation failed: expected '%s' or 'MIGRATE', got '%s'", expectedChallenge, req.ChallengeInput))
+		if !strings.EqualFold(strings.TrimSpace(req.ChallengeInput), expectedChallenge) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("Challenge confirmation failed: expected '%s', got '%s'", expectedChallenge, req.ChallengeInput))
 			return
 		}
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
+
+	tgtSess.beginInFlight()
+	defer tgtSess.endInFlight()
 
 	if err := tgtSess.UseDatabase(ctx, req.TargetDB); err != nil {
 		writeError(w, http.StatusBadRequest, "target: "+err.Error())
@@ -444,6 +449,9 @@ func (s *Server) handleSyncStructureApply(w http.ResponseWriter, r *http.Request
 		if stmt == "" || strings.HasPrefix(stmt, "--") {
 			continue
 		}
+		// Pre-DDL Smart Tiered Backup for destructive schema operations.
+		tgtSess.BackupBeforeDestructive(ctx, stmt, req.TargetDB)
+
 		start := time.Now()
 		res, err := tgtSess.Session.Exec(ctx, stmt)
 		dur := time.Since(start).Milliseconds()
