@@ -50,13 +50,18 @@ type AssistRequest struct {
 // AssemblePrompts compiles the system prompt (incorporating Schema Context Window,
 // Table Knowledge Notes, AI Persona, and Firewall masking) and user prompt.
 func AssemblePrompts(req AssistRequest) (systemPrompt string, userPrompt string) {
+	sys, user, _ := AssemblePromptsWithMap(req)
+	return sys, user
+}
+
+// AssemblePromptsWithMap compiles the system prompt and user prompt, and preserves the identifier map for response unmasking.
+func AssemblePromptsWithMap(req AssistRequest) (systemPrompt string, userPrompt string, identMap map[string]string) {
 	dialect := req.Dialect
 	if dialect == "" {
 		dialect = "SQL"
 	}
 
 	var schemaPrompt string
-	var identMap map[string]string
 	if req.IncludeSchema && req.Schema != nil {
 		schemaPrompt, identMap = BuildSchemaPromptWithMap(req.Schema, req.Query+" "+req.Prompt+" "+req.ErrorMessage, req.MaskIdentifiers)
 
@@ -143,12 +148,12 @@ func AssemblePrompts(req AssistRequest) (systemPrompt string, userPrompt string)
 		userPrompt = promptText
 	}
 
-	return systemPrompt, userPrompt
+	return systemPrompt, userPrompt, identMap
 }
 
-// Assist orchestrates prompt compilation and execution through the appropriate AI provider.
+// Assist orchestrates prompt compilation, AI execution, and response unmasking.
 func Assist(ctx context.Context, req AssistRequest) (*CompletionResponse, error) {
-	systemPrompt, userPrompt := AssemblePrompts(req)
+	systemPrompt, userPrompt, identMap := AssemblePromptsWithMap(req)
 
 	provider := req.Provider
 	if provider == "" {
@@ -162,9 +167,19 @@ func Assist(ctx context.Context, req AssistRequest) (*CompletionResponse, error)
 		Endpoint: req.Endpoint,
 	})
 
-	return client.Complete(ctx, CompletionRequest{
+	resp, err := client.Complete(ctx, CompletionRequest{
 		SystemPrompt: systemPrompt,
 		UserPrompt:   userPrompt,
 		Temperature:  req.Temperature,
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	// De-anonymize / unmask AI response so user receives executable SQL matching real schema
+	if req.MaskIdentifiers && len(identMap) > 0 && resp != nil {
+		resp.Content = UnmaskIdentifiersInText(resp.Content, identMap)
+	}
+
+	return resp, nil
 }

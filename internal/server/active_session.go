@@ -16,9 +16,11 @@ import (
 )
 
 type activeTxInfo struct {
-	tx         driver.TxSession
-	startedAt  time.Time
-	lastActive time.Time
+	tx          driver.TxSession
+	startedAt   time.Time
+	lastActive  time.Time
+	aborted     bool
+	abortReason string
 }
 
 // ActiveSession holds an active database connection session and its cached metadata.
@@ -108,17 +110,27 @@ func normalizeTabID(tabID string) string {
 	return tabID
 }
 
-func (s *ActiveSession) getTx(tabID string) driver.TxSession {
+func (s *ActiveSession) getTxStatus(tabID string) (tx driver.TxSession, aborted bool, reason string) {
 	key := normalizeTabID(tabID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.tabTransactions != nil {
-		if entry, ok := s.tabTransactions[key]; ok && entry != nil && entry.tx != nil {
-			entry.lastActive = time.Now()
-			return entry.tx
+		if entry, ok := s.tabTransactions[key]; ok && entry != nil {
+			if entry.aborted {
+				return nil, true, entry.abortReason
+			}
+			if entry.tx != nil {
+				entry.lastActive = time.Now()
+				return entry.tx, false, ""
+			}
 		}
 	}
-	return nil
+	return nil, false, ""
+}
+
+func (s *ActiveSession) getTx(tabID string) driver.TxSession {
+	tx, _, _ := s.getTxStatus(tabID)
+	return tx
 }
 
 func (s *ActiveSession) setTx(tabID string, tx driver.TxSession) {
@@ -158,7 +170,7 @@ func (s *ActiveSession) hasActiveTx(tabID string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.tabTransactions != nil {
-		if entry, ok := s.tabTransactions[key]; ok && entry != nil && entry.tx != nil {
+		if entry, ok := s.tabTransactions[key]; ok && entry != nil && entry.tx != nil && !entry.aborted {
 			return true
 		}
 	}

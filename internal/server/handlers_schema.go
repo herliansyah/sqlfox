@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"regexp"
 	"runtime/metrics"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -922,6 +923,7 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 		Value       any            `json:"value"`
 		PKColumn    string         `json:"pk_column"`
 		PKValue     any            `json:"pk_value"`
+		PKValues    map[string]any `json:"pk_values,omitempty"` // For composite primary keys
 		RowCriteria map[string]any `json:"row_criteria,omitempty"`
 	}
 
@@ -932,6 +934,7 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 		Value       any            `json:"value"`
 		PKColumn    string         `json:"pk_column"`
 		PKValue     any            `json:"pk_value"`
+		PKValues    map[string]any `json:"pk_values,omitempty"`
 		RowCriteria map[string]any `json:"row_criteria,omitempty"`
 		Edits       []CellEditItem `json:"edits"`
 	}
@@ -944,7 +947,7 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 	var items []CellEditItem
 	if len(req.Edits) > 0 {
 		items = req.Edits
-	} else if req.Table != "" && req.Column != "" && ((req.PKColumn != "" && req.PKValue != nil) || len(req.RowCriteria) > 0) {
+	} else if req.Table != "" && req.Column != "" && ((req.PKColumn != "" && req.PKValue != nil) || len(req.PKValues) > 0 || len(req.RowCriteria) > 0) {
 		items = append(items, CellEditItem{
 			Database:    req.Database,
 			Table:       req.Table,
@@ -952,10 +955,11 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 			Value:       req.Value,
 			PKColumn:    req.PKColumn,
 			PKValue:     req.PKValue,
+			PKValues:    req.PKValues,
 			RowCriteria: req.RowCriteria,
 		})
 	} else {
-		writeError(w, http.StatusBadRequest, "table, column, and either pk_column/pk_value or row_criteria are required")
+		writeError(w, http.StatusBadRequest, "table, column, and either pk_column/pk_value, pk_values, or row_criteria are required")
 		return
 	}
 
@@ -990,7 +994,28 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 		args = append(args, item.Value)
 		valLiteral := driver.FormatSQLValueForDriver(item.Value, sess.DriverName)
 
-		if item.PKColumn != "" && item.PKValue != nil && len(item.RowCriteria) == 0 {
+		if len(item.PKValues) > 0 && len(item.RowCriteria) == 0 {
+			var pkWheres []string
+			var pkAuditWheres []string
+			keys := make([]string, 0, len(item.PKValues))
+			for k := range item.PKValues {
+				keys = append(keys, k)
+			}
+			slices.Sort(keys)
+			for _, k := range keys {
+				val := item.PKValues[k]
+				pPK := driver.Placeholder(sess.DriverName, pIdx)
+				pIdx++
+				args = append(args, val)
+				pkLiteral := driver.FormatSQLValueForDriver(val, sess.DriverName)
+				pkWheres = append(pkWheres, fmt.Sprintf("%s = %s", quoteIdent(k), pPK))
+				pkAuditWheres = append(pkAuditWheres, fmt.Sprintf("%s = %s", quoteIdent(k), pkLiteral))
+			}
+			updateSQL = fmt.Sprintf("UPDATE %s SET %s = %s WHERE %s",
+				tableRef, quoteIdent(item.Column), pVal, strings.Join(pkWheres, " AND "))
+			auditSQL = fmt.Sprintf("UPDATE %s SET %s = %s WHERE %s",
+				tableRef, quoteIdent(item.Column), valLiteral, strings.Join(pkAuditWheres, " AND "))
+		} else if item.PKColumn != "" && item.PKValue != nil && len(item.RowCriteria) == 0 {
 			pPK := driver.Placeholder(sess.DriverName, pIdx)
 			pIdx++
 			args = append(args, item.PKValue)

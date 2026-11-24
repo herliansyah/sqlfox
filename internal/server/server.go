@@ -45,6 +45,7 @@ type Server struct {
 	cloudSyncTimer    *time.Timer
 	lanEnabled        bool
 	lanIP             string
+	behindProxy       bool
 	allowedHosts      []string
 }
 
@@ -266,7 +267,7 @@ func (s *Server) routes() {
 			}
 			if path == "index.html" {
 				w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-				isRemote := !isLoopback(req.RemoteAddr)
+				isRemote := s.IsRemoteRequest(req)
 				token := extractToken(req)
 				unlocked := !isRemote || s.authMgr.ValidateToken(token)
 				if isRemote && !unlocked {
@@ -315,6 +316,14 @@ func (s *Server) IsLANEnabled() bool {
 // SetAllowedHosts sets explicit hostnames or IPs accepted by the DNS Rebinding Guard.
 func (s *Server) SetAllowedHosts(hosts []string) {
 	s.allowedHosts = hosts
+}
+
+// SetBehindProxy configures whether the server is operating behind a reverse proxy (e.g. Nginx, Caddy),
+// enabling secure parsing of X-Forwarded-For and X-Real-IP headers instead of trusting loopback RemoteAddr.
+func (s *Server) SetBehindProxy(enabled bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.behindProxy = enabled
 }
 
 // Close gracefully shuts down all active database sessions and background managers.

@@ -397,3 +397,110 @@ func TestServer_CellEditAndCriteriaDelete_ParameterizedSecurity(t *testing.T) {
 		t.Fatalf("expected 1 remaining row, got %d", len(resData.Rows))
 	}
 }
+
+func TestCRUD_CompositePrimaryKeySupport(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultDB := filepath.Join(tempDir, "config.db")
+	v, err := vault.OpenVault(vaultDB, "test-master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	targetDB := filepath.Join(tempDir, "composite_pk.db")
+
+	srv := NewServer(v, nil, filepath.Join(tempDir, "backups"), "test-master")
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	client := ts.Client()
+
+	createPayload := vault.ConnectionRecord{
+		Name:         "composite-test",
+		Environment:  "Development",
+		Driver:       "sqlite",
+		DatabaseName: targetDB,
+	}
+	body, _ := json.Marshal(createPayload)
+	resp, err := client.Post(ts.URL+"/api/connections", "application/json", bytes.NewReader(body))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("failed to create connection: %v", err)
+	}
+	var savedConn vault.ConnectionRecord
+	_ = json.NewDecoder(resp.Body).Decode(&savedConn)
+	resp.Body.Close()
+
+	// Connect session
+	resp, err = client.Post(fmt.Sprintf("%s/api/session/connect/%s", ts.URL, savedConn.ID), "application/json", nil)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("connect failed: %v", err)
+	}
+	resp.Body.Close()
+
+	sess, err := srv.sessionMgr.GetSession(savedConn.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = sess.Session.Exec(context.Background(), `
+		CREATE TABLE order_items (
+			order_id INT,
+			product_id INT,
+			quantity INT,
+			PRIMARY KEY (order_id, product_id)
+		);
+		INSERT INTO order_items VALUES (101, 1, 10), (101, 2, 20), (102, 1, 30);
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Edit cell on composite PK table: update quantity for (order_id=101, product_id=1)
+	editPayload := map[string]any{
+		"table":  "order_items",
+		"column": "quantity",
+		"value":  99,
+		"pk_values": map[string]any{
+			"order_id":   101,
+			"product_id": 1,
+		},
+	}
+	b, _ := json.Marshal(editPayload)
+	resp, err = client.Post(fmt.Sprintf("%s/api/session/%s/cell-edit", ts.URL, savedConn.ID), "application/json", bytes.NewReader(b))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("cell-edit on composite PK table failed: %v", err)
+	}
+	resp.Body.Close()
+
+	// Verify (101, 1) is 99, and (101, 2) is UNTOUCHED (still 20)
+	rows, err := sess.Session.QueryRaw(context.Background(), "SELECT quantity FROM order_items WHERE order_id = 101 AND product_id = 2")
+	if err != nil || len(rows) == 0 {
+		t.Fatalf("query failed: %v", err)
+	}
+	if fmt.Sprintf("%v", rows[0][0]) != "20" {
+		t.Fatalf("composite PK corruption detected: sibling item quantity was changed to %v instead of remaining 20", rows[0][0])
+	}
+
+	// 2. Delete single row using composite PK: delete (order_id=101, product_id=2)
+	delPayload := map[string]any{
+		"table": "order_items",
+		"pk_rows": []map[string]any{
+			{"order_id": 101, "product_id": 2},
+		},
+	}
+	b, _ = json.Marshal(delPayload)
+	resp, err = client.Post(fmt.Sprintf("%s/api/session/%s/delete-rows", ts.URL, savedConn.ID), "application/json", bytes.NewReader(b))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("delete-rows on composite PK table failed: %v", err)
+	}
+	resp.Body.Close()
+
+	// Verify only (101, 2) was deleted; (101, 1) and (102, 1) must remain
+	countRows, err := sess.Session.QueryRaw(context.Background(), "SELECT COUNT(*) FROM order_items")
+	if err != nil || len(countRows) == 0 {
+		t.Fatalf("count query failed: %v", err)
+	}
+	if fmt.Sprintf("%v", countRows[0][0]) != "2" {
+		t.Fatalf("expected 2 remaining rows after deleting 1 composite item, got %v", countRows[0][0])
+	}
+}

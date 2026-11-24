@@ -72,7 +72,18 @@ func (sm *SessionManager) startReaper() {
 				}
 				if sess.tabTransactions != nil {
 					for tabID, entry := range sess.tabTransactions {
-						if entry == nil || entry.tx == nil {
+						if entry == nil {
+							delete(sess.tabTransactions, tabID)
+							continue
+						}
+						if entry.aborted {
+							// If already aborted for > 5 mins, clean up memory
+							if now.Sub(entry.lastActive) > 5*time.Minute {
+								delete(sess.tabTransactions, tabID)
+							}
+							continue
+						}
+						if entry.tx == nil {
 							delete(sess.tabTransactions, tabID)
 							continue
 						}
@@ -82,7 +93,10 @@ func (sm *SessionManager) startReaper() {
 						}
 						if now.Sub(refTime) > 60*time.Second {
 							txToRollback = append(txToRollback, entry.tx)
-							delete(sess.tabTransactions, tabID)
+							entry.tx = nil
+							entry.aborted = true
+							entry.lastActive = now
+							entry.abortReason = "transaction timed out after 60s idle and was automatically rolled back to prevent orphaned database locks"
 						}
 					}
 				}

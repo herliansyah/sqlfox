@@ -332,15 +332,19 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	isTxRollback := cleanUpper == "ROLLBACK" || cleanUpper == "ROLLBACK WORK" || cleanUpper == "ROLLBACK TRANSACTION" || cleanUpper == "ABORT" || cleanUpper == "ABORT WORK" || cleanUpper == "ABORT TRANSACTION"
 
 	if isTxBegin {
-		if s.hasActiveTx(req.TabID) {
+		tx, _, _ := s.getTxStatus(req.TabID)
+		if tx != nil {
 			return nil, fmt.Errorf("a transaction is already active in this tab; please COMMIT or ROLLBACK first")
 		}
+		// Clear any previous aborted state upon starting a fresh transaction
+		s.clearTx(req.TabID)
+
 		// ponytail: Use non-cancelled background context so transaction persists across subsequent HTTP requests
-		tx, err := s.Session.BeginTx(context.Background())
+		newTx, err := s.Session.BeginTx(context.Background())
 		if err != nil {
 			return nil, fmt.Errorf("failed to begin transaction: %w", err)
 		}
-		s.setTx(req.TabID, tx)
+		s.setTx(req.TabID, newTx)
 
 		return &ExecuteResponse{
 			Type:        "exec",
@@ -351,7 +355,11 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	}
 
 	if isTxCommit {
-		tx := s.clearTx(req.TabID)
+		tx, aborted, reason := s.getTxStatus(req.TabID)
+		if aborted {
+			s.clearTx(req.TabID)
+			return nil, fmt.Errorf("transaction in this tab was aborted: %s; COMMIT cannot be applied", reason)
+		}
 
 		if tx == nil {
 			_, err := s.Session.Exec(execCtx, trimmedSQL)
@@ -366,6 +374,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 			}, nil
 		}
 
+		s.clearTx(req.TabID)
 		if err := tx.Commit(); err != nil {
 			return nil, fmt.Errorf("failed to commit transaction: %w", err)
 		}
@@ -378,7 +387,17 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	}
 
 	if isTxRollback {
-		tx := s.clearTx(req.TabID)
+		tx, aborted, reason := s.getTxStatus(req.TabID)
+		s.clearTx(req.TabID)
+
+		if aborted {
+			return &ExecuteResponse{
+				Type:        "exec",
+				Message:     fmt.Sprintf("Transaction was already rolled back: %s. Tab transaction state is now cleared.", reason),
+				ExecutionMs: time.Since(start).Milliseconds(),
+				TxActive:    false,
+			}, nil
+		}
 
 		if tx == nil {
 			_, err := s.Session.Exec(execCtx, trimmedSQL)
@@ -405,8 +424,11 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	}
 
 	// 5. Route to Exec vs QueryStream
-	// If transaction is active, execute strictly on pinned transaction connection
-	currentTx := s.getTx(req.TabID)
+	// If transaction was aborted by timeout reaper, block all subsequent queries until user runs ROLLBACK
+	currentTx, aborted, reason := s.getTxStatus(req.TabID)
+	if aborted {
+		return nil, fmt.Errorf("transaction in this tab was aborted: %s. You must issue ROLLBACK before running new statements", reason)
+	}
 
 	stmts := splitSQLStatements(strings.NewReader(trimmedSQL), s.DriverName)
 	if len(stmts) > 1 {
@@ -774,7 +796,10 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 		_, _ = s.Session.Exec(execCtx, "SET profiling = 1")
 	}
 
-	currentTx := s.getTx(req.TabID)
+	currentTx, streamAborted, streamReason := s.getTxStatus(req.TabID)
+	if streamAborted {
+		return nil, fmt.Errorf("transaction in this tab was aborted: %s. You must issue ROLLBACK before running new statements", streamReason)
+	}
 
 	stmts := splitSQLStatements(strings.NewReader(trimmedSQL), s.DriverName)
 	if len(stmts) > 1 {

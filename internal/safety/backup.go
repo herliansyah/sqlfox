@@ -111,27 +111,43 @@ func BackupTable(ctx context.Context, sess driver.Session, backupDir, tableName 
 	}
 	colsStr := strings.Join(colNames, ", ")
 
+	// ponytail: wrap data snapshot in dialect transaction and batch rows into multi-row INSERTs for fast, atomic restore
+	switch drv {
+	case "mysql":
+		write("START TRANSACTION;\n\n")
+	default:
+		write("BEGIN TRANSACTION;\n\n")
+	}
+
 	rows := 0
+	const batchSize = 100
 	for writeErr == nil {
-		chunk, err := stream.NextChunk(200)
-		for _, row := range chunk {
-			if rows >= maxDataBackupRows {
-				return finish(false, fmt.Errorf("table has more than %d rows; data snapshot truncated", maxDataBackupRows))
+		chunk, err := stream.NextChunk(batchSize)
+		if len(chunk) > 0 {
+			var valueRows []string
+			for _, row := range chunk {
+				if rows >= maxDataBackupRows {
+					write("\nCOMMIT;\n")
+					return finish(false, fmt.Errorf("table has more than %d rows; data snapshot truncated", maxDataBackupRows))
+				}
+				vals := make([]string, len(row))
+				for i, v := range row {
+					vals[i] = driver.FormatSQLValueForDriver(v, drv)
+				}
+				valueRows = append(valueRows, "  ("+strings.Join(vals, ", ")+")")
+				rows++
 			}
-			vals := make([]string, len(row))
-			for i, v := range row {
-				vals[i] = driver.FormatSQLValueForDriver(v, drv)
-			}
-			write(fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s);\n",
-				driver.QuoteIdentifier(tableName, drv), colsStr, strings.Join(vals, ", ")))
-			rows++
+			write(fmt.Sprintf("INSERT INTO %s (%s) VALUES\n%s;\n",
+				driver.QuoteIdentifier(tableName, drv), colsStr, strings.Join(valueRows, ",\n")))
 		}
 		if err == io.EOF || (err == nil && len(chunk) == 0) {
 			break
 		}
 		if err != nil {
+			write("\nROLLBACK;\n")
 			return finish(false, fmt.Errorf("read rows: %w", err))
 		}
 	}
+	write("\nCOMMIT;\n")
 	return finish(true, nil)
 }

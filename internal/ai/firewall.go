@@ -156,3 +156,34 @@ func MaskIdentifiersInText(text string, mapping map[string]string) string {
 	}
 	return out
 }
+
+// UnmaskIdentifiersInText replaces masked identifiers (e.g. masked_1, masked_2)
+// back to their original schema identifiers using the provided mapping.
+func UnmaskIdentifiersInText(text string, mapping map[string]string) string {
+	if text == "" || len(mapping) == 0 {
+		return text
+	}
+	// Invert mapping: masked -> real
+	reverse := make(map[string]string, len(mapping))
+	maskedKeys := make([]string, 0, len(mapping))
+	for realName, maskedName := range mapping {
+		if maskedName != "" && realName != "" {
+			reverse[maskedName] = realName
+			maskedKeys = append(maskedKeys, maskedName)
+		}
+	}
+	// Sort longest first so e.g. masked_10 is replaced before masked_1
+	for i := 0; i < len(maskedKeys); i++ {
+		for j := i + 1; j < len(maskedKeys); j++ {
+			if len(maskedKeys[j]) > len(maskedKeys[i]) {
+				maskedKeys[i], maskedKeys[j] = maskedKeys[j], maskedKeys[i]
+			}
+		}
+	}
+	out := text
+	for _, m := range maskedKeys {
+		re := regexp.MustCompile(`\b` + regexp.QuoteMeta(m) + `\b`)
+		out = re.ReplaceAllString(out, reverse[m])
+	}
+	return out
+}

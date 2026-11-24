@@ -994,3 +994,108 @@ func TestActiveSession_ExecuteCustomLimit(t *testing.T) {
 	}
 }
 
+func TestActiveSession_AbortedTransactionIntegrity(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test_tx_abort.db")
+	backupDir := filepath.Join(tempDir, "backups")
+
+	dbSession, err := driver.Connect(context.Background(), driver.Config{
+		Driver:       "sqlite",
+		DatabaseName: dbPath,
+	})
+	if err != nil {
+		t.Fatalf("driver.Connect failed: %v", err)
+	}
+	defer dbSession.Close()
+
+	sess := &ActiveSession{
+		ID:          "conn-tx-test",
+		Environment: "Development",
+		DriverName:  "sqlite",
+		ReadOnly:    false,
+		Session:     dbSession,
+		backupDir:   backupDir,
+	}
+
+	ctx := context.Background()
+	_, err = sess.Execute(ctx, ExecuteRequest{
+		SQL: "CREATE TABLE accounts (id INT PRIMARY KEY, balance INT); INSERT INTO accounts VALUES (1, 1000);",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tabID := "tab-tx-test"
+
+	// 1. Begin transaction in tab
+	beginRes, err := sess.Execute(ctx, ExecuteRequest{
+		SQL:   "BEGIN;",
+		TabID: tabID,
+	})
+	if err != nil || !beginRes.TxActive {
+		t.Fatalf("expected active transaction, got err=%v, res=%+v", err, beginRes)
+	}
+
+	// 2. Simulate reaper aborting the idle transaction
+	sess.mu.Lock()
+	entry := sess.tabTransactions[tabID]
+	if entry != nil && entry.tx != nil {
+		_ = entry.tx.Rollback()
+		entry.tx = nil
+		entry.aborted = true
+		entry.abortReason = "transaction timed out after 60s idle and was automatically rolled back"
+	}
+	sess.mu.Unlock()
+
+	// 3. User attempts to execute UPDATE on aborted transaction tab -> MUST FAIL, not fall back to auto-commit!
+	_, err = sess.Execute(ctx, ExecuteRequest{
+		SQL:   "UPDATE accounts SET balance = 500 WHERE id = 1;",
+		TabID: tabID,
+	})
+	if err == nil || !strings.Contains(err.Error(), "transaction in this tab was aborted") {
+		t.Fatalf("expected transaction aborted error blocking auto-commit mutation, got: %v", err)
+	}
+
+	// 4. User issues ROLLBACK -> MUST SUCCEED and clear aborted tab state
+	rbRes, err := sess.Execute(ctx, ExecuteRequest{
+		SQL:   "ROLLBACK;",
+		TabID: tabID,
+	})
+	if err != nil {
+		t.Fatalf("ROLLBACK should succeed to clear aborted state, got err: %v", err)
+	}
+	if !strings.Contains(rbRes.Message, "Transaction was already rolled back") {
+		t.Fatalf("expected clear message in ROLLBACK response, got: %s", rbRes.Message)
+	}
+
+	// 5. Balance must still be 1000 (never modified by the rejected UPDATE)
+	checkRes, err := sess.Execute(ctx, ExecuteRequest{
+		SQL:   "SELECT balance FROM accounts WHERE id = 1;",
+		TabID: tabID,
+	})
+	if err != nil {
+		t.Fatalf("SELECT after rollback failed: %v", err)
+	}
+	if len(checkRes.Rows) == 0 || fmt.Sprintf("%v", checkRes.Rows[0][0]) != "1000" {
+		t.Fatalf("expected balance=1000 unharmed, got: %+v", checkRes.Rows)
+	}
+
+	// 6. Test COMMIT rejection on another aborted tab
+	tabID2 := "tab-tx-test-commit"
+	_, _ = sess.Execute(ctx, ExecuteRequest{SQL: "BEGIN;", TabID: tabID2})
+	sess.mu.Lock()
+	entry2 := sess.tabTransactions[tabID2]
+	if entry2 != nil && entry2.tx != nil {
+		_ = entry2.tx.Rollback()
+		entry2.tx = nil
+		entry2.aborted = true
+		entry2.abortReason = "timeout"
+	}
+	sess.mu.Unlock()
+
+	_, err = sess.Execute(ctx, ExecuteRequest{SQL: "COMMIT;", TabID: tabID2})
+	if err == nil || !strings.Contains(err.Error(), "transaction in this tab was aborted") {
+		t.Fatalf("expected COMMIT rejection on aborted transaction, got: %v", err)
+	}
+}
+

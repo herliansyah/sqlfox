@@ -2819,7 +2819,8 @@ export class AppState {
     oldVal: any,
     newVal: any,
     database?: string,
-    rowCriteria?: Record<string, any>
+    rowCriteria?: Record<string, any>,
+    pkValues?: Record<string, any>
   ) {
     if (this.isReadOnly) {
       this.showToast('Read-only mode is active — cell edit blocked', 'warning');
@@ -2836,6 +2837,7 @@ export class AppState {
       colName,
       pkCol,
       pkVal,
+      pkValues,
       rowCriteria,
       oldVal,
       newVal,
@@ -2942,6 +2944,7 @@ export class AppState {
           value: item.newVal,
           pk_column: item.pkCol,
           pk_value: item.pkVal,
+          pk_values: item.pkValues,
           row_criteria: item.rowCriteria,
         }));
         const res = await api.cellEdit(this.activeSessionId, {
@@ -3069,6 +3072,79 @@ export class AppState {
     } catch (err: any) {
       this.showToast(`Failed to delete row(s): ${err.message}`, 'error');
     }
+  }
+
+  async deleteRowsByCompositePK(pkRows: Record<string, any>[]) {
+    const tab = this.activeTab;
+    const targetTable = tab?.tableName || tab?.detectedTableName;
+    if (!this.activeSessionId || !targetTable || !pkRows.length) return;
+    if (this.isReadOnly) {
+      this.showToast('Read-only mode is active — delete blocked', 'warning');
+      return;
+    }
+
+    try {
+      await api.deleteRows(this.activeSessionId, {
+        database: tab?.detectedTableDatabase || tab?.database || this.currentDatabase,
+        table: targetTable,
+        pk_rows: pkRows,
+      });
+      this.showToast(`Deleted ${pkRows.length} row(s)`, 'success');
+      this.auditRefreshToken++;
+      if (tab?.isTableViewer) await this.loadTableData(tab);
+      else await this.executeCurrentTab();
+    } catch (err: any) {
+      this.showToast(`Failed to delete row(s): ${err.message}`, 'error');
+    }
+  }
+
+  closeTopOverlay(): boolean {
+    if (this.isCommandPaletteOpen) { this.isCommandPaletteOpen = false; return true; }
+    if (this.isSchemaSearchOpen) { this.isSchemaSearchOpen = false; return true; }
+    if (this.isSmartSeedModalOpen) { this.isSmartSeedModalOpen = false; return true; }
+    if (this.isLockInspectorOpen) { this.isLockInspectorOpen = false; return true; }
+    if (this.ddlViewModal.isOpen) { this.ddlViewModal.isOpen = false; return true; }
+    if (this.safetyInspectionModal.isOpen) { this.safetyInspectionModal.isOpen = false; return true; }
+    if (this.isConnectionModalOpen) { this.isConnectionModalOpen = false; return true; }
+    if (this.isRecordInspectorOpen) { this.isRecordInspectorOpen = false; return true; }
+    if (this.isInsertRowModalOpen) { this.isInsertRowModalOpen = false; return true; }
+    if (this.isShortcutsModalOpen) { this.isShortcutsModalOpen = false; return true; }
+    if (this.isCreateDbModalOpen) { this.isCreateDbModalOpen = false; return true; }
+    if (this.isTableCreatorOpen) { this.isTableCreatorOpen = false; return true; }
+    if (this.isRenameTableModalOpen) { this.isRenameTableModalOpen = false; return true; }
+    if (this.isDuplicateTableModalOpen) { this.isDuplicateTableModalOpen = false; return true; }
+    if (this.isViewDesignerOpen) { this.isViewDesignerOpen = false; return true; }
+    if (this.isTriggerDesignerOpen) { this.isTriggerDesignerOpen = false; return true; }
+    if (this.isRoutineDesignerOpen) { this.isRoutineDesignerOpen = false; return true; }
+    if (this.isEventDesignerOpen) { this.isEventDesignerOpen = false; return true; }
+    if (this.isDumpModalOpen) { this.isDumpModalOpen = false; return true; }
+    if (this.isStructureSyncModalOpen) { this.isStructureSyncModalOpen = false; return true; }
+    if (this.isRunSqlModalOpen) { this.isRunSqlModalOpen = false; return true; }
+    if (this.isSnippetsModalOpen) {
+      this.pendingSnippet = null;
+      this.isSnippetsModalOpen = false;
+      return true;
+    }
+    if (this.isCsvImportModalOpen) { this.isCsvImportModalOpen = false; return true; }
+    if (this.isPrivilegeMatrixOpen) { this.isPrivilegeMatrixOpen = false; return true; }
+    if (this.isDbDiagnosticsOpen) { this.isDbDiagnosticsOpen = false; return true; }
+    if (this.isAiSettingsModalOpen) { this.isAiSettingsModalOpen = false; return true; }
+    if (this.isNoteComposerModalOpen) { this.isNoteComposerModalOpen = false; return true; }
+    if (this.isUpdateModalOpen) { this.isUpdateModalOpen = false; return true; }
+    if (this.isMockDataModalOpen) { this.closeMockDataModal(); return true; }
+    if (this.isSettingsModalOpen) { this.isSettingsModalOpen = false; return true; }
+    if (this.jsonCellModal.isOpen) { this.jsonCellModal.isOpen = false; return true; }
+    if (this.isDataTransferOpen) { this.isDataTransferOpen = false; return true; }
+    if (this.isDataSyncOpen) { this.isDataSyncOpen = false; return true; }
+    if (this.isRefreshAllOpen) { this.isRefreshAllOpen = false; return true; }
+    if (this.isImpactPreviewOpen) { this.isImpactPreviewOpen = false; return true; }
+    if (this.ddlReview.isOpen) { this.ddlReview.isOpen = false; return true; }
+    if (this.fkPeekState.isOpen) { this.fkPeekState.isOpen = false; return true; }
+    if (this.isAiDrawerOpen) { this.toggleAiDrawer(false); return true; }
+    if (this.isNotesDrawerOpen) { this.isNotesDrawerOpen = false; return true; }
+    if (this.isActivityDrawerOpen) { this.isActivityDrawerOpen = false; return true; }
+    if (this.isAuditDrawerOpen) { this.isAuditDrawerOpen = false; return true; }
+    return false;
   }
 
   // Filter Mode & Clause Management
