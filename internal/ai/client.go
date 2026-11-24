@@ -9,10 +9,85 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+)
+
+var (
+	_, aiCGNATRange, _ = net.ParseCIDR("100.64.0.0/10")
+	_, aiNAT64Range, _ = net.ParseCIDR("64:ff9b::/96")
+	aiAWSIPv6IMDS      = net.ParseIP("fd00:ec2::254")
+)
+
+func isBlockedDialIP(ip net.IP, allowPrivate bool) bool {
+	if ip == nil {
+		return true
+	}
+	if ip4 := ip.To4(); ip4 != nil {
+		ip = ip4
+		if ip[0] == 0 {
+			return true
+		}
+	}
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
+		return true
+	}
+	if aiCGNATRange != nil && aiCGNATRange.Contains(ip) {
+		return true
+	}
+	if aiNAT64Range != nil && aiNAT64Range.Contains(ip) {
+		return true
+	}
+	if aiAWSIPv6IMDS != nil && ip.Equal(aiAWSIPv6IMDS) {
+		return true
+	}
+	if !allowPrivate && ip.IsPrivate() {
+		return true
+	}
+	return false
+}
+
+func safeAIDialContext(allowPrivate bool) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+		if err != nil {
+			return nil, err
+		}
+		for _, ip := range ips {
+			if isBlockedDialIP(ip, allowPrivate) {
+				return nil, fmt.Errorf("blocked dial to restricted IP %s", ip.String())
+			}
+		}
+		if len(ips) == 0 {
+			return nil, errors.New("no IP addresses resolved")
+		}
+		return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
+	}
+}
+
+var (
+	sharedCloudAITransport = &http.Transport{
+		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
+		DialContext:         safeAIDialContext(false),
+		MaxIdleConns:        32,
+		IdleConnTimeout:     60 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+	}
+	sharedLocalAITransport = &http.Transport{
+		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
+		DialContext:         safeAIDialContext(true),
+		MaxIdleConns:        16,
+		IdleConnTimeout:     60 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+	}
 )
 
 type Provider string
@@ -76,13 +151,16 @@ func NewAIClient(cfg ClientConfig) *AIClient {
 		}
 	}
 
+	transport := sharedCloudAITransport
+	if cfg.Provider == ProviderOllama {
+		transport = sharedLocalAITransport
+	}
+
 	return &AIClient{
 		cfg: cfg,
 		httpClient: &http.Client{
-			Timeout: 45 * time.Second,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
-			},
+			Timeout:   45 * time.Second,
+			Transport: transport,
 			// Prevent SSRF via 3xx redirect to internal/metadata endpoints.
 			CheckRedirect: func(*http.Request, []*http.Request) error {
 				return http.ErrUseLastResponse
@@ -103,7 +181,8 @@ func DetectOllama(ctx context.Context, endpoint string) bool {
 	}
 
 	client := http.Client{
-		Timeout: 1500 * time.Millisecond,
+		Timeout:   1500 * time.Millisecond,
+		Transport: sharedLocalAITransport,
 		// Never follow redirects during health checks (prevents redirect-based SSRF).
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse

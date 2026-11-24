@@ -21,6 +21,13 @@ var cgnatRange = func() *net.IPNet {
 	return cidr
 }()
 
+var nat64Range = func() *net.IPNet {
+	_, cidr, _ := net.ParseCIDR("64:ff9b::/96")
+	return cidr
+}()
+
+var awsIPv6IMDS = net.ParseIP("fd00:ec2::254")
+
 // validateAIEndpoint enforces SSRF boundaries on user-supplied AI endpoints.
 // Cloud metadata IPs/hosts and CGNAT (100.64.0.0/10) are always blocked; private/loopback
 // IPs are blocked unless the provider is local Ollama and the request originates from localhost.
@@ -52,12 +59,21 @@ func validateAIEndpoint(raw string, provider ai.Provider, isRemote bool) error {
 		}
 		if ip4 := ip.To4(); ip4 != nil {
 			ip = ip4
+			if ip[0] == 0 {
+				return errors.New("AI endpoint targets a blocked 0.0.0.0/8 IP")
+			}
 		}
-		if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
-			return errors.New("AI endpoint targets a blocked link-local or unspecified IP")
+		if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
+			return errors.New("AI endpoint targets a blocked link-local, multicast, or unspecified IP")
 		}
 		if cgnatRange != nil && cgnatRange.Contains(ip) {
 			return errors.New("AI endpoint targets a blocked CGNAT/metadata IP range")
+		}
+		if nat64Range != nil && nat64Range.Contains(ip) {
+			return errors.New("AI endpoint targets a blocked NAT64 IP range")
+		}
+		if awsIPv6IMDS != nil && ip.Equal(awsIPv6IMDS) {
+			return errors.New("AI endpoint targets a blocked cloud metadata IP")
 		}
 		if ip.IsLoopback() && !allowLoopback {
 			return errors.New("AI endpoint targets a loopback IP")
@@ -316,7 +332,11 @@ func (s *Server) handleListAIProfiles(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []*vault.AIProfile{}
 	}
-	writeJSON(w, http.StatusOK, list)
+	sanitized := make([]*vault.AIProfile, len(list))
+	for i, p := range list {
+		sanitized[i] = sanitizeAIProfileForResponse(p)
+	}
+	writeJSON(w, http.StatusOK, sanitized)
 }
 
 func (s *Server) handleGetAIProfile(w http.ResponseWriter, r *http.Request) {
@@ -405,6 +425,20 @@ func (s *Server) handleUpdateAIProfile(w http.ResponseWriter, r *http.Request) {
 	if err := validateAIEndpoint(p.BaseURL, ai.Provider(p.Provider), s.IsRemoteRequest(r)); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+
+	// Prevent stored API key exfiltration: if BaseURL or Provider changed and no new APIKey is provided,
+	// clear any existing encrypted key so it cannot be redirected to a new endpoint.
+	if p.APIKey == "" {
+		if existing, err := s.vault.GetAIProfile(id); err == nil && existing != nil {
+			if !strings.EqualFold(strings.TrimRight(strings.TrimSpace(p.BaseURL), "/"), strings.TrimRight(strings.TrimSpace(existing.BaseURL), "/")) ||
+				!strings.EqualFold(strings.TrimSpace(p.Provider), strings.TrimSpace(existing.Provider)) {
+				p.EncryptedAPIKey = ""
+				p.HasAPIKey = false
+			} else {
+				p.EncryptedAPIKey = existing.EncryptedAPIKey
+			}
+		}
 	}
 
 	if err := s.vault.SaveAIProfile(&p); err != nil {

@@ -230,10 +230,10 @@ func (s *Server) isHostAllowed(host string) bool {
 	return false
 }
 
-// isAllowedLANHostIP decides whether an IP-literal Host header is acceptable in LAN mode. It pins to
-// the detected LAN IP when known, and otherwise accepts only loopback and private/link-local ranges
-// (RFC 1918, RFC 4193, link-local). A public IP in the Host header is a DNS-rebinding signal and is
-// rejected: SqlFox is never meant to be reached over a routable public address.
+// isAllowedLANHostIP decides whether an IP-literal Host header is acceptable in LAN mode. It accepts
+// the detected LAN IP, loopback, and private/link-local ranges (RFC 1918, RFC 4193, link-local).
+// A public IP in the Host header is a DNS-rebinding signal and is rejected: SqlFox is never meant
+// to be reached over a routable public address.
 func (s *Server) isAllowedLANHostIP(ip net.IP) bool {
 	s.mu.Lock()
 	lanIP := s.lanIP
@@ -263,30 +263,39 @@ func (s *Server) IngressGuardMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// 2. CSRF Guard: State-mutating API requests
-		if strings.HasPrefix(r.URL.Path, "/api") {
-			switch r.Method {
-			case http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch:
-				if sfs := r.Header.Get("Sec-Fetch-Site"); sfs == "cross-site" {
+		// 2. CSRF Guard: State-mutating API requests and sensitive/mutating GET endpoints
+		isMutatingMethod := false
+		switch r.Method {
+		case http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch:
+			isMutatingMethod = true
+		}
+		isSensitiveGET := r.Method == http.MethodGet && (r.URL.Path == "/api/auth/master-key" ||
+			r.URL.Path == "/api/ai/ollama-check" ||
+			strings.HasPrefix(r.URL.Path, "/debug/pprof"))
+		if (strings.HasPrefix(r.URL.Path, "/api") && isMutatingMethod) || isSensitiveGET {
+			if sfs := r.Header.Get("Sec-Fetch-Site"); sfs == "cross-site" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"error": "Cross-site request blocked (CSRF protection)",
+				})
+				return
+			}
+
+			if origin := r.Header.Get("Origin"); origin != "" {
+				// Same-origin only: an allowed-but-different origin (another localhost port,
+				// any LAN IP, or scheme mismatch) must not be able to ride the session cookie.
+				expectedScheme := "http"
+				if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+					expectedScheme = "https"
+				}
+				if u, err := url.Parse(origin); err != nil || !strings.EqualFold(u.Host, r.Host) || !strings.EqualFold(u.Scheme, expectedScheme) {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusForbidden)
 					_ = json.NewEncoder(w).Encode(map[string]any{
-						"error": "Cross-site request blocked (CSRF protection)",
+						"error": "Unauthorized Origin (CSRF protection)",
 					})
 					return
-				}
-
-				if origin := r.Header.Get("Origin"); origin != "" {
-					// Same-origin only: an allowed-but-different origin (another localhost port,
-					// any LAN IP) must not be able to ride the session cookie.
-					if u, err := url.Parse(origin); err != nil || !strings.EqualFold(u.Host, r.Host) {
-						w.Header().Set("Content-Type", "application/json")
-						w.WriteHeader(http.StatusForbidden)
-						_ = json.NewEncoder(w).Encode(map[string]any{
-							"error": "Unauthorized Origin (CSRF protection)",
-						})
-						return
-					}
 				}
 			}
 		}
@@ -576,7 +585,7 @@ func (s *Server) handleAuthUnlock(w http.ResponseWriter, r *http.Request) {
 		Expires:  time.Now().Add(24 * time.Hour),
 		HttpOnly: true,
 		Secure:   isSecureConn,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: http.SameSiteStrictMode,
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{

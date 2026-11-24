@@ -358,9 +358,8 @@ func (v *Vault) Close() error {
 // ValidateMasterPassword verifies if a candidate master password is correct.
 func (v *Vault) ValidateMasterPassword(password string) bool {
 	v.mu.RLock()
-	defer v.mu.RUnlock()
-
 	salt, checkCipher, err := getMeta(v.db)
+	v.mu.RUnlock()
 	if err != nil || salt == nil || checkCipher == "" {
 		return false
 	}
@@ -395,9 +394,14 @@ func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 	} else {
 		encPass = conn.EncryptedPassword
 		if encPass == "" && conn.ID != "" {
-			var existingPass string
-			if err := v.db.QueryRow(`SELECT encrypted_password FROM connections WHERE id = ?`, conn.ID).Scan(&existingPass); err == nil {
-				encPass = existingPass
+			var existingPass, exHost, exDriver string
+			var exPort int
+			if err := v.db.QueryRow(`SELECT encrypted_password, host, port, driver FROM connections WHERE id = ?`, conn.ID).
+				Scan(&existingPass, &exHost, &exPort, &exDriver); err == nil {
+				// Prevent password exfiltration by only preserving the stored password if endpoint matches.
+				if strings.EqualFold(conn.Host, exHost) && conn.Port == exPort && strings.EqualFold(conn.Driver, exDriver) {
+					encPass = existingPass
+				}
 			}
 		}
 	}

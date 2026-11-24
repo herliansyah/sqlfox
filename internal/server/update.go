@@ -185,7 +185,10 @@ func FetchLatestRelease(ctx context.Context, apiURL string) (*GitHubRelease, err
 	req.Header.Set("User-Agent", "SqlFox-Update-Engine")
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{
+		Timeout:       10 * time.Second,
+		CheckRedirect: guardUpdateRedirect,
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query GitHub releases: %w", err)
@@ -289,7 +292,12 @@ func (s *Server) handleApplyUpdate(w http.ResponseWriter, r *http.Request) {
 	// Trust-anchor verification: the asset URL must be one the official GitHub release metadata
 	// actually advertises AND must match the current runtime OS/architecture so an attacker
 	// cannot brick the daemon with another platform's binary.
-	rel, relErr := FetchLatestRelease(r.Context(), s.updateAPIURL)
+	s.mu.Lock()
+	updateAPIURL := s.updateAPIURL
+	targetExePath := s.targetExePath
+	s.mu.Unlock()
+
+	rel, relErr := FetchLatestRelease(r.Context(), updateAPIURL)
 	if relErr != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadGateway)
@@ -311,8 +319,8 @@ func (s *Server) handleApplyUpdate(w http.ResponseWriter, r *http.Request) {
 	// Determine current running executable path
 	var exePath string
 	var err error
-	if s.targetExePath != "" {
-		exePath = s.targetExePath
+	if targetExePath != "" {
+		exePath = targetExePath
 	} else {
 		exePath, err = os.Executable()
 		if err != nil {
@@ -646,8 +654,12 @@ func extractFromTarGzStream(r io.Reader, destPath string) error {
 			}
 			defer outFile.Close()
 
-			if _, err := io.Copy(outFile, io.LimitReader(tr, maxExtractedBinarySize)); err != nil {
+			written, err := io.Copy(outFile, io.LimitReader(tr, maxExtractedBinarySize+1))
+			if err != nil {
 				return fmt.Errorf("failed writing extracted binary: %w", err)
+			}
+			if written > maxExtractedBinarySize {
+				return fmt.Errorf("extracted binary exceeds maximum allowed size (%d bytes)", maxExtractedBinarySize)
 			}
 			return nil
 		}
@@ -666,8 +678,12 @@ func extractFromZipStream(r io.Reader, destPath string) error {
 		_ = os.Remove(tmpZip.Name())
 	}()
 
-	if _, err := io.Copy(tmpZip, io.LimitReader(r, maxExtractedBinarySize)); err != nil {
+	writtenZip, err := io.Copy(tmpZip, io.LimitReader(r, maxExtractedBinarySize+1))
+	if err != nil {
 		return fmt.Errorf("failed writing zip temp file: %w", err)
+	}
+	if writtenZip > maxExtractedBinarySize {
+		return fmt.Errorf("zip archive exceeds maximum allowed size (%d bytes)", maxExtractedBinarySize)
 	}
 	_ = tmpZip.Close()
 
@@ -692,8 +708,12 @@ func extractFromZipStream(r io.Reader, destPath string) error {
 			}
 			defer outFile.Close()
 
-			if _, err := io.Copy(outFile, io.LimitReader(rc, maxExtractedBinarySize)); err != nil {
+			writtenBin, err := io.Copy(outFile, io.LimitReader(rc, maxExtractedBinarySize+1))
+			if err != nil {
 				return fmt.Errorf("failed writing extracted binary: %w", err)
+			}
+			if writtenBin > maxExtractedBinarySize {
+				return fmt.Errorf("extracted binary exceeds maximum allowed size (%d bytes)", maxExtractedBinarySize)
 			}
 			return nil
 		}
