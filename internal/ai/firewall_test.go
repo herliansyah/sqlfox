@@ -213,4 +213,14 @@ func TestFirewall_Unmasking(t *testing.T) {
 	if unmasked != expected {
 		t.Fatalf("expected:\n%s\ngot:\n%s", expected, unmasked)
 	}
+
+	// Single-pass masking must not collide when a real identifier happens to look like masked_1.
+	collisionMap := map[string]string{
+		"users":    "masked_1",
+		"masked_1": "masked_2",
+	}
+	masked := MaskIdentifiersInText("SELECT * FROM users JOIN masked_1", collisionMap)
+	if masked != "SELECT * FROM masked_1 JOIN masked_2" {
+		t.Fatalf("unexpected collision in MaskIdentifiersInText: %q", masked)
+	}
 }

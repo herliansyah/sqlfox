@@ -3,6 +3,7 @@ package ai
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/herliansyah/sqlfox/internal/driver"
@@ -130,40 +131,48 @@ func BuildSchemaPromptWithMap(schema *driver.SchemaMetadata, referencedQuery str
 }
 
 // MaskIdentifiersInText replaces real schema identifiers in free text (SQL, plans, errors)
-// using the mapping produced by BuildSchemaPromptWithMap, longest keys first.
+// using the mapping produced by BuildSchemaPromptWithMap, longest keys first in a single pass.
 func MaskIdentifiersInText(text string, mapping map[string]string) string {
 	if text == "" || len(mapping) == 0 {
 		return text
 	}
 	keys := make([]string, 0, len(mapping))
-	for k := range mapping {
+	lowerLookup := make(map[string]string, len(mapping))
+	for k, v := range mapping {
 		if k != "" {
 			keys = append(keys, k)
+			lowerLookup[strings.ToLower(k)] = v
 		}
 	}
-	// Sort longest-first so e.g. user_accounts is replaced before user.
-	for i := 0; i < len(keys); i++ {
-		for j := i + 1; j < len(keys); j++ {
-			if len(keys[j]) > len(keys[i]) {
-				keys[i], keys[j] = keys[j], keys[i]
-			}
+	if len(keys) == 0 {
+		return text
+	}
+	// Sort longest-first so e.g. user_accounts is matched before user in regex alternation.
+	slices.SortFunc(keys, func(a, b string) int {
+		if len(b) != len(a) {
+			return len(b) - len(a)
 		}
+		return strings.Compare(a, b)
+	})
+	quoted := make([]string, len(keys))
+	for i, k := range keys {
+		quoted[i] = regexp.QuoteMeta(k)
 	}
-	out := text
-	for _, k := range keys {
-		re := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(k) + `\b`)
-		out = re.ReplaceAllString(out, mapping[k])
-	}
-	return out
+	re := regexp.MustCompile(`(?i)\b(?:` + strings.Join(quoted, "|") + `)\b`)
+	return re.ReplaceAllStringFunc(text, func(match string) string {
+		if repl, ok := lowerLookup[strings.ToLower(match)]; ok {
+			return repl
+		}
+		return match
+	})
 }
 
 // UnmaskIdentifiersInText replaces masked identifiers (e.g. masked_1, masked_2)
-// back to their original schema identifiers using the provided mapping.
+// back to their original schema identifiers in a single pass using the provided mapping.
 func UnmaskIdentifiersInText(text string, mapping map[string]string) string {
 	if text == "" || len(mapping) == 0 {
 		return text
 	}
-	// Invert mapping: masked -> real
 	reverse := make(map[string]string, len(mapping))
 	maskedKeys := make([]string, 0, len(mapping))
 	for realName, maskedName := range mapping {
@@ -172,18 +181,24 @@ func UnmaskIdentifiersInText(text string, mapping map[string]string) string {
 			maskedKeys = append(maskedKeys, maskedName)
 		}
 	}
-	// Sort longest first so e.g. masked_10 is replaced before masked_1
-	for i := 0; i < len(maskedKeys); i++ {
-		for j := i + 1; j < len(maskedKeys); j++ {
-			if len(maskedKeys[j]) > len(maskedKeys[i]) {
-				maskedKeys[i], maskedKeys[j] = maskedKeys[j], maskedKeys[i]
-			}
+	if len(maskedKeys) == 0 {
+		return text
+	}
+	slices.SortFunc(maskedKeys, func(a, b string) int {
+		if len(b) != len(a) {
+			return len(b) - len(a)
 		}
+		return strings.Compare(a, b)
+	})
+	quoted := make([]string, len(maskedKeys))
+	for i, m := range maskedKeys {
+		quoted[i] = regexp.QuoteMeta(m)
 	}
-	out := text
-	for _, m := range maskedKeys {
-		re := regexp.MustCompile(`\b` + regexp.QuoteMeta(m) + `\b`)
-		out = re.ReplaceAllString(out, reverse[m])
-	}
-	return out
+	re := regexp.MustCompile(`\b(?:` + strings.Join(quoted, "|") + `)\b`)
+	return re.ReplaceAllStringFunc(text, func(match string) string {
+		if orig, ok := reverse[match]; ok {
+			return orig
+		}
+		return match
+	})
 }

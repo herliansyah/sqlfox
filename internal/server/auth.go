@@ -196,14 +196,20 @@ func (s *Server) isHostAllowed(host string) bool {
 	if allowDefaultTestHost && host == "example.com" {
 		return true
 	}
-	for _, ah := range s.allowedHosts {
+	s.mu.Lock()
+	allowedHosts := append([]string(nil), s.allowedHosts...)
+	lanEnabled := s.lanEnabled
+	lanIP := s.lanIP
+	s.mu.Unlock()
+
+	for _, ah := range allowedHosts {
 		if strings.EqualFold(host, ah) {
 			return true
 		}
 	}
-	if s.lanEnabled {
+	if lanEnabled {
 		if ip := net.ParseIP(host); ip != nil {
-			return s.isAllowedLANHostIP(ip)
+			return isAllowedLANHostIPWith(ip, lanIP)
 		}
 	}
 	return false
@@ -214,8 +220,15 @@ func (s *Server) isHostAllowed(host string) bool {
 // (RFC 1918, RFC 4193, link-local). A public IP in the Host header is a DNS-rebinding signal and is
 // rejected: SqlFox is never meant to be reached over a routable public address.
 func (s *Server) isAllowedLANHostIP(ip net.IP) bool {
-	if s.lanIP != "" {
-		if want := net.ParseIP(s.lanIP); want != nil && want.Equal(ip) {
+	s.mu.Lock()
+	lanIP := s.lanIP
+	s.mu.Unlock()
+	return isAllowedLANHostIPWith(ip, lanIP)
+}
+
+func isAllowedLANHostIPWith(ip net.IP, lanIP string) bool {
+	if lanIP != "" {
+		if want := net.ParseIP(lanIP); want != nil && want.Equal(ip) {
 			return true
 		}
 	}
@@ -359,7 +372,29 @@ func (s *Server) GetClientIP(r *http.Request) string {
 
 // IsRemoteRequest reports whether a request originates from a non-loopback host,
 // accurately inspecting reverse proxy headers when behind-proxy mode is active.
+// Requests carrying forwarding headers from a trusted proxy are never granted unauthenticated
+// loopback bypass even if X-Forwarded-For / X-Real-IP claims 127.0.0.1.
 func (s *Server) IsRemoteRequest(r *http.Request) bool {
+	remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		remoteHost = r.RemoteAddr
+	}
+	remoteIP := net.ParseIP(remoteHost)
+
+	s.mu.Lock()
+	proxyEnabled := s.behindProxy
+	s.mu.Unlock()
+	if !proxyEnabled {
+		envVal := strings.ToLower(strings.TrimSpace(os.Getenv("SQLFOX_BEHIND_PROXY")))
+		proxyEnabled = envVal == "1" || envVal == "true"
+	}
+
+	if proxyEnabled && s.isTrustedProxyIP(remoteIP) {
+		if r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Real-IP") != "" {
+			return true
+		}
+	}
+
 	clientIP := s.GetClientIP(r)
 	ip := net.ParseIP(clientIP)
 	if ip == nil {
@@ -465,8 +500,12 @@ func (s *Server) handleAuthUnlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.mu.Lock()
+	lanEnabled := s.lanEnabled
+	s.mu.Unlock()
+
 	valid := s.vault.ValidateMasterPassword(req.Password)
-	if !valid && s.lanEnabled {
+	if !valid && lanEnabled {
 		valid = s.authMgr.ConsumePairingCode(req.Password)
 	}
 	if !valid {
@@ -510,7 +549,12 @@ func (s *Server) handleGetMasterPassword(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if !s.lanEnabled {
+	s.mu.Lock()
+	lanEnabled := s.lanEnabled
+	lanIP := s.lanIP
+	s.mu.Unlock()
+
+	if !lanEnabled {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"lan_enabled": false,
 		})
@@ -523,8 +567,8 @@ func (s *Server) handleGetMasterPassword(w http.ResponseWriter, r *http.Request)
 		"pairing_code":           code,
 		"pairing_expires_in_sec": int(time.Until(exp).Seconds()),
 	}
-	if s.lanIP != "" {
-		resp["lan_ip"] = s.lanIP
+	if lanIP != "" {
+		resp["lan_ip"] = lanIP
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

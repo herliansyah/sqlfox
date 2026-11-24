@@ -68,6 +68,8 @@ func OpenVault(dbPath string, masterPassword string) (*Vault, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open vault db: %w", err)
 	}
+	// SQLite allows only one writer at a time; capping pool size prevents SQLITE_BUSY under concurrent reads/writes.
+	db.SetMaxOpenConns(1)
 
 	_, _ = db.Exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;")
 

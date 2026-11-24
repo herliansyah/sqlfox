@@ -618,4 +618,27 @@ func TestSafetyGuard_HardeningEdgeCases(t *testing.T) {
 	if resUpdateAlias.TargetTable != "users" {
 		t.Errorf("expected aliased UPDATE users AS u to have TargetTable='users', got %q", resUpdateAlias.TargetTable)
 	}
+
+	// 5. Parenthesized, EXPLAIN ANALYZE, procedural, and multi-table DDL bypasses must be caught
+	if res := Inspect("(DELETE FROM users)", "Production"); res.RiskLevel != RiskCritical || !res.IsDestructive {
+		t.Errorf("expected parenthesized DELETE to be RiskCritical, got %+v", res)
+	}
+	if res := Inspect("EXPLAIN ANALYZE DELETE FROM users", "Production"); res.RiskLevel != RiskCritical || !res.IsDestructive {
+		t.Errorf("expected EXPLAIN ANALYZE DELETE to be RiskCritical, got %+v", res)
+	}
+	if res := Inspect("EXPLAIN (ANALYZE, BUFFERS) TRUNCATE TABLE orders", "Production"); res.RiskLevel != RiskCritical || !res.IsDestructive {
+		t.Errorf("expected EXPLAIN (ANALYZE) TRUNCATE to be RiskCritical, got %+v", res)
+	}
+	if res := Inspect("EXPLAIN SELECT * FROM users", "Production"); res.RiskLevel != RiskNone {
+		t.Errorf("expected plain EXPLAIN SELECT to be RiskNone, got %+v", res)
+	}
+	if res := Inspect("DO $$ BEGIN DELETE FROM users; END $$", "Production"); res.RiskLevel != RiskDangerous || !res.IsDestructive {
+		t.Errorf("expected DO block to be RiskDangerous, got %+v", res)
+	}
+	if res := Inspect("DROP TABLE a, b", "Production"); res.TargetTable != "a, b" || res.RiskLevel != RiskCritical {
+		t.Errorf("expected multi-table DROP TABLE a, b to report 'a, b', got %+v", res)
+	}
+	if res := Inspect("TRUNCATE TABLE a, b", "Production"); res.TargetTable != "a, b" || res.RiskLevel != RiskCritical {
+		t.Errorf("expected multi-table TRUNCATE TABLE a, b to report 'a, b', got %+v", res)
+	}
 }

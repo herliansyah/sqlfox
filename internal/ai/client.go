@@ -164,7 +164,8 @@ func (c *AIClient) completeOpenAICompatible(ctx context.Context, req CompletionR
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	const maxAIResponseBytes = 16 << 20 // 16 MB cap
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxAIResponseBytes))
 	if err != nil {
 		return nil, err
 	}
@@ -272,7 +273,8 @@ func (c *AIClient) completeAnthropic(ctx context.Context, req CompletionRequest)
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	const maxAIResponseBytes = 16 << 20 // 16 MB cap
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxAIResponseBytes))
 	if err != nil {
 		return nil, err
 	}
@@ -347,7 +349,8 @@ func (c *AIClient) completeGemini(ctx context.Context, req CompletionRequest) (*
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	const maxAIResponseBytes = 16 << 20 // 16 MB cap
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxAIResponseBytes))
 	if err != nil {
 		return nil, err
 	}

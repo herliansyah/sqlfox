@@ -72,6 +72,12 @@ func Inspect(query string, environment string) *InspectionResult {
 		return inspectMultiStatements(stmts, environment)
 	}
 
+	// Unwrap balanced outer parentheses, e.g. "(DELETE FROM users)" or "(WITH d AS (...) SELECT * FROM d)".
+	clean = unwrapOuterParens(clean)
+	if clean == "" {
+		return &InspectionResult{RiskLevel: RiskNone}
+	}
+
 	// Inspect both CTE sub-bodies (for data-modifying CTEs) and the main statement behind WITH ... AS (...).
 	if cteStmts, ok := extractCTEStatements(clean); ok {
 		return inspectMultiStatements(cteStmts, environment)
@@ -80,8 +86,39 @@ func Inspect(query string, environment string) *InspectionResult {
 	return inspectTokens(clean, environment)
 }
 
+func unwrapOuterParens(q string) string {
+	for {
+		trimmed := strings.TrimSpace(q)
+		if len(trimmed) < 2 || trimmed[0] != '(' || trimmed[len(trimmed)-1] != ')' {
+			return trimmed
+		}
+		tokens := tokenizeSQL(trimmed, !strings.Contains(trimmed, "$$"))
+		if len(tokens) < 2 || tokens[0].kind != tokLParen || tokens[len(tokens)-1].kind != tokRParen {
+			return trimmed
+		}
+		// Verify that the opening '(' at index 0 matches the closing ')' at the very last token.
+		depth := 0
+		matchedEnd := -1
+		for i, tok := range tokens {
+			if tok.kind == tokLParen {
+				depth++
+			} else if tok.kind == tokRParen {
+				depth--
+				if depth == 0 {
+					matchedEnd = i
+					break
+				}
+			}
+		}
+		if matchedEnd != len(tokens)-1 {
+			return trimmed
+		}
+		q = trimmed[1 : len(trimmed)-1]
+	}
+}
+
 func inspectTokens(query string, environment string) *InspectionResult {
-	tokens := tokenizeSQL(query, true)
+	tokens := tokenizeSQL(query, !strings.Contains(query, "$$"))
 	if len(tokens) == 0 || tokens[0].kind != tokWord {
 		return &InspectionResult{RiskLevel: RiskNone}
 	}
@@ -90,6 +127,17 @@ func inspectTokens(query string, environment string) *InspectionResult {
 	isStaging := strings.EqualFold(environment, "Staging")
 
 	switch tokens[0].upper {
+	case "EXPLAIN":
+		return inspectExplain(tokens, query, environment)
+	case "DO", "CALL", "EXECUTE", "EXEC":
+		return &InspectionResult{
+			RiskLevel:         RiskDangerous,
+			IsDestructive:     true,
+			RequiresChallenge: true,
+			Operation:         tokens[0].upper,
+			Reason:            fmt.Sprintf("%s executes procedural/dynamic SQL that may mutate data.", tokens[0].upper),
+			Suggestion:        "Verify the body or parameters of the procedure/block before executing.",
+		}
 	case "DROP":
 		return inspectDrop(tokens, isProd)
 	case "TRUNCATE":
@@ -111,6 +159,76 @@ func inspectTokens(query string, environment string) *InspectionResult {
 	default:
 		return &InspectionResult{RiskLevel: RiskNone}
 	}
+}
+
+// inspectExplain inspects EXPLAIN [ANALYZE] statements. Because EXPLAIN ANALYZE actually executes
+// the underlying query in PostgreSQL and MySQL 8+, its inner statement must be safety-checked.
+func inspectExplain(tokens []sqlToken, query string, environment string) *InspectionResult {
+	hasAnalyze := false
+	idx := 1
+	// Skip optional MySQL/Postgres EXPLAIN modifiers before the inner statement.
+	for idx < len(tokens) {
+		tok := tokens[idx]
+		if tok.kind == tokLParen {
+			depth := 1
+			idx++
+			for idx < len(tokens) && depth > 0 {
+				if tokens[idx].kind == tokLParen {
+					depth++
+				} else if tokens[idx].kind == tokRParen {
+					depth--
+				} else if tokens[idx].kind == tokWord && tokens[idx].upper == "ANALYZE" {
+					hasAnalyze = true
+				}
+				idx++
+			}
+			continue
+		}
+		if tok.kind != tokWord {
+			break
+		}
+		switch tok.upper {
+		case "ANALYZE":
+			hasAnalyze = true
+			idx++
+		case "VERBOSE", "COSTS", "SETTINGS", "BUFFERS", "WAL", "TIMING", "SUMMARY",
+			"EXTENDED", "PARTITIONS", "FORMAT", "TREE", "JSON", "TEXT", "XML", "YAML", "TRADITIONAL":
+			idx++
+			// Handle FORMAT = TREE / FORMAT = JSON
+			if idx < len(tokens) && tokens[idx].kind == tokOther && query[tokens[idx].start:tokens[idx].end] == "=" {
+				idx++
+				if idx < len(tokens) {
+					idx++
+				}
+			}
+		default:
+			goto doneModifiers
+		}
+	}
+doneModifiers:
+	if !hasAnalyze || idx >= len(tokens) {
+		return &InspectionResult{RiskLevel: RiskNone}
+	}
+	inner := strings.TrimSpace(query[tokens[idx].start:])
+	return Inspect(inner, environment)
+}
+
+func collectCommaSeparatedTargets(tokens []sqlToken, idx int) (firstDB string, targets []string) {
+	db, target, _, nextIdx := parseQualifiedTarget(tokens, idx)
+	if target == "" {
+		return "", nil
+	}
+	firstDB = db
+	targets = append(targets, target)
+	for nextIdx < len(tokens) && tokens[nextIdx].kind == tokComma {
+		_, nextTarget, _, afterNext := parseQualifiedTarget(tokens, nextIdx+1)
+		if nextTarget == "" {
+			break
+		}
+		targets = append(targets, nextTarget)
+		nextIdx = afterNext
+	}
+	return firstDB, targets
 }
 
 func inspectDrop(tokens []sqlToken, isProd bool) *InspectionResult {
@@ -144,12 +262,13 @@ func inspectDrop(tokens []sqlToken, isProd bool) *InspectionResult {
 		idx += 2
 	}
 
-	db, target, _, _ := parseQualifiedTarget(tokens, idx)
-	if target == "" {
+	db, targets := collectCommaSeparatedTargets(tokens, idx)
+	if len(targets) == 0 {
 		return &InspectionResult{RiskLevel: RiskNone}
 	}
+	target := strings.Join(targets, ", ")
 	if targetType == "DATABASE" || targetType == "SCHEMA" {
-		db = target
+		db = targets[0]
 	}
 
 	reason := fmt.Sprintf("DROP statement will permanently delete '%s'.", target)
@@ -182,10 +301,11 @@ func inspectTruncate(tokens []sqlToken) *InspectionResult {
 	if idx < len(tokens) && tokens[idx].kind == tokWord && tokens[idx].upper == "ONLY" {
 		idx++
 	}
-	db, target, _, _ := parseQualifiedTarget(tokens, idx)
-	if target == "" {
+	db, targets := collectCommaSeparatedTargets(tokens, idx)
+	if len(targets) == 0 {
 		return &InspectionResult{RiskLevel: RiskNone}
 	}
+	target := strings.Join(targets, ", ")
 	return &InspectionResult{
 		RiskLevel:           RiskCritical,
 		IsDestructive:       true,
@@ -617,7 +737,7 @@ func InspectWithScope(query string, environment string, scopedDatabase string) *
 // following a WITH clause so data-modifying CTEs (e.g. WITH d AS (DELETE FROM t) SELECT * FROM d)
 // are inspected alongside the outer statement.
 func extractCTEStatements(q string) ([]string, bool) {
-	tokens := tokenizeSQL(q, true)
+	tokens := tokenizeSQL(q, !strings.Contains(q, "$$"))
 	if len(tokens) == 0 || tokens[0].kind != tokWord || tokens[0].upper != "WITH" {
 		return nil, false
 	}

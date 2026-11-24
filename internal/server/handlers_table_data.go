@@ -78,7 +78,7 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 		targetDB = sess.DatabaseName
 	}
 	if targetDB != "" {
-		if err := sess.Session.SelectDatabase(ctx, targetDB); err != nil {
+		if err := sess.UseDatabase(ctx, targetDB); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -288,7 +288,7 @@ func (s *Server) handleGetTableCount(w http.ResponseWriter, r *http.Request) {
 		targetDB = sess.DatabaseName
 	}
 	if targetDB != "" {
-		if err := sess.Session.SelectDatabase(ctx, targetDB); err != nil {
+		if err := sess.UseDatabase(ctx, targetDB); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}

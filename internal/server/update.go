@@ -101,16 +101,21 @@ const maxExtractedBinarySize = 256 << 20
 // SetVersion sets the runtime version string of the server.
 func (s *Server) SetVersion(v string) {
 	if v != "" {
+		s.mu.Lock()
 		s.version = v
+		s.mu.Unlock()
 	}
 }
 
 // GetVersion returns the runtime version string of the server.
 func (s *Server) GetVersion() string {
-	if s.version == "" {
+	s.mu.Lock()
+	v := s.version
+	s.mu.Unlock()
+	if v == "" {
 		return "v0.1.0"
 	}
-	return s.version
+	return v
 }
 
 // compareSemver returns:
@@ -209,17 +214,17 @@ func (s *Server) handleCheckUpdate(w http.ResponseWriter, r *http.Request) {
 	if !force && cachedInfo != nil && time.Since(cachedAt) < updateCacheTTL {
 		info := *cachedInfo
 		updateCacheMu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(info)
+		writeJSON(w, http.StatusOK, info)
 		return
 	}
 	updateCacheMu.Unlock()
 
-	rel, err := FetchLatestRelease(r.Context(), s.updateAPIURL)
+	s.mu.Lock()
+	updateURL := s.updateAPIURL
+	s.mu.Unlock()
+	rel, err := FetchLatestRelease(r.Context(), updateURL)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadGateway)
-		json.NewEncoder(w).Encode(map[string]any{
+		writeJSON(w, http.StatusBadGateway, map[string]any{
 			"error":           err.Error(),
 			"current_version": currentVer,
 			"has_update":      false,

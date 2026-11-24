@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -128,7 +129,10 @@ func (s *Server) handleTestCloudSync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req testCloudSyncRequest
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid JSON request body")
+		return
+	}
 
 	token := strings.TrimSpace(req.GitHubToken)
 	repo := strings.TrimSpace(req.GitHubRepo)

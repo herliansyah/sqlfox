@@ -301,22 +301,30 @@ func (s *Server) routes() {
 
 // SetLANEnabled toggles whether the server is configured to accept LAN connections and display Master PIN.
 func (s *Server) SetLANEnabled(enabled bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.lanEnabled = enabled
 }
 
 // SetLANIP configures the detected LAN IP address for client display and remote pairing.
 func (s *Server) SetLANIP(ip string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.lanIP = ip
 }
 
 // IsLANEnabled returns whether LAN mode is currently active.
 func (s *Server) IsLANEnabled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.lanEnabled
 }
 
 // SetAllowedHosts sets explicit hostnames or IPs accepted by the DNS Rebinding Guard.
 func (s *Server) SetAllowedHosts(hosts []string) {
-	s.allowedHosts = hosts
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.allowedHosts = append([]string(nil), hosts...)
 }
 
 // SetBehindProxy configures whether the server is operating behind a reverse proxy (e.g. Nginx, Caddy),

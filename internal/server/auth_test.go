@@ -658,4 +658,14 @@ func TestBehindProxy_AntiSpoofing(t *testing.T) {
 	if recLarge.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("expected 413 Request Entity Too Large for oversized unlock payload, got %d", recLarge.Code)
 	}
+
+	// 5. Proxy forwarding X-Forwarded-For: 127.0.0.1 or X-Real-IP: 127.0.0.1 must NEVER grant localhost bypass.
+	reqLoopbackSpoof := httptest.NewRequest("GET", "/api/auth/master-key", nil)
+	reqLoopbackSpoof.RemoteAddr = "127.0.0.1:45678"
+	reqLoopbackSpoof.Header.Set("X-Forwarded-For", "127.0.0.1")
+	recLoopbackSpoof := httptest.NewRecorder()
+	handler.ServeHTTP(recLoopbackSpoof, reqLoopbackSpoof)
+	if recLoopbackSpoof.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 when proxy forwards X-Forwarded-For: 127.0.0.1, got %d", recLoopbackSpoof.Code)
+	}
 }

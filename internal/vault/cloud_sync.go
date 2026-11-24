@@ -141,10 +141,15 @@ func (v *Vault) GetCloudSyncConfig() (*CloudSyncConfig, error) {
 		cfg.LastSyncStatus = "idle"
 	}
 
+	const cloudSyncTokenAAD = "cloud_sync:github_token"
 	if stored.EncryptedToken != "" {
-		dec, err := Decrypt(stored.EncryptedToken, v.key)
+		dec, err := DecryptWithAAD(stored.EncryptedToken, v.key, []byte(cloudSyncTokenAAD))
 		if err != nil {
-			return nil, fmt.Errorf("failed to decrypt stored github token: %w", err)
+			// Legacy fallback for tokens encrypted before AAD was enforced.
+			dec, err = Decrypt(stored.EncryptedToken, v.key)
+			if err != nil {
+				return nil, fmt.Errorf("failed to decrypt stored github token: %w", err)
+			}
 		}
 		cfg.GitHubToken = string(dec)
 	}
@@ -166,9 +171,10 @@ func (v *Vault) SaveCloudSyncConfig(cfg *CloudSyncConfig) error {
 		}
 	}
 
+	const cloudSyncTokenAAD = "cloud_sync:github_token"
 	var encToken string
 	if cfg.GitHubToken != "" {
-		enc, err := Encrypt([]byte(cfg.GitHubToken), v.key)
+		enc, err := EncryptWithAAD([]byte(cfg.GitHubToken), v.key, []byte(cloudSyncTokenAAD))
 		if err != nil {
 			return fmt.Errorf("failed to encrypt github token: %w", err)
 		}
