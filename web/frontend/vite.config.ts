@@ -29,12 +29,15 @@ export default defineConfig({
     outDir: '../dist',
     emptyOutDir: false,
     sourcemap: false,
-    chunkSizeWarningLimit: 1000,
+    chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {
         manualChunks(id) {
           if (id.includes('@codemirror/') || id.includes('@lezer/')) {
             return 'codemirror';
+          }
+          if (id.includes('node_modules/svelte')) {
+            return 'svelte-runtime';
           }
         },
       },

@@ -62,9 +62,13 @@
   let flashedCells = $state<Record<string, boolean>>({});
   let detailPrettyJson = $state(false);
 
-  // FK datalist suggestions cache: `${refTable}.${refCol}` -> string[]
+  // FK datalist suggestions cache: `${sessionId}:${db}:${refTable}.${refCol}` -> string[]
   let fkDatalistCache = $state<Record<string, string[]>>({});
   let fkDatalistLoading = new Set<string>();
+
+  function fkCacheKey(fk: { referenced_table: string; referenced_column: string }): string {
+    return `${appState.activeSessionId || ''}:${effectiveDatabase || ''}:${fk.referenced_table}.${fk.referenced_column}`;
+  }
 
   // Multi-row selection
   let selectedRowIndices = $state<number[]>([]);
@@ -82,7 +86,7 @@
 
   async function ensureFkSuggestions(fk: { referenced_table: string; referenced_column: string }) {
     if (!appState.activeSessionId || !fk?.referenced_table || !fk?.referenced_column) return;
-    const cacheKey = `${fk.referenced_table}.${fk.referenced_column}`;
+    const cacheKey = fkCacheKey(fk);
     if (fkDatalistCache[cacheKey] || fkDatalistLoading.has(cacheKey)) return;
     fkDatalistLoading.add(cacheKey);
     try {
@@ -1275,7 +1279,7 @@
           type="button"
           onclick={() => {
             const tab = appState.addTab(`Result ${(currentTab.activeResultIndex || 0) + 1}`, currentTab.sql || '');
-            tab.activeResult = JSON.parse(JSON.stringify(result));
+            tab.activeResult = structuredClone($state.snapshot(result));
             appState.saveTabsState();
           }}
           class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[10px] font-mono shrink-0 transition"
@@ -2133,7 +2137,7 @@
                   {@const isBool = kind.isBool}
                   {@const isDateLike = kind.isDateTime}
                   {@const fkListId = fk ? `fk-datalist-${rowItem.origIdx}-${cIdx}` : undefined}
-                  {@const fkOpts = fk ? fkDatalistCache[`${fk.referenced_table}.${fk.referenced_column}`] || [] : []}
+                  {@const fkOpts = fk ? fkDatalistCache[fkCacheKey(fk)] || [] : []}
                   {@const isJsonLike = formatted.type === 'json' || kind.isJson}
 
                   <td

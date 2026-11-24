@@ -87,9 +87,23 @@
   let messagesContainer = $state<HTMLDivElement | null>(null);
   let promptEl = $state<HTMLTextAreaElement | null>(null);
 
-  let savedWidth = Number(localStorage.getItem(WIDTH_KEY) || '480');
+  function safeReadStorage(key: string, fallback = ''): string {
+    try {
+      return localStorage.getItem(key) ?? fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  function safeWriteStorage(key: string, val: string) {
+    try {
+      localStorage.setItem(key, val);
+    } catch { /* ignore quota / privacy errors */ }
+  }
+
+  let savedWidth = Number(safeReadStorage(WIDTH_KEY, '480') || '480');
   let drawerWidth = $state(Number.isFinite(savedWidth) ? Math.min(920, Math.max(340, savedWidth)) : 480);
-  let isMaximized = $state(localStorage.getItem('sqlfox_ai_drawer_maximized') === 'true');
+  let isMaximized = $state(safeReadStorage('sqlfox_ai_drawer_maximized') === 'true');
   let isResizing = $state(false);
   let chatRequestToken = 0;
 
@@ -147,7 +161,7 @@
 
   function toggleMaximized() {
     isMaximized = !isMaximized;
-    localStorage.setItem('sqlfox_ai_drawer_maximized', String(isMaximized));
+    safeWriteStorage('sqlfox_ai_drawer_maximized', String(isMaximized));
   }
 
   let activeResizeCleanup: (() => void) | null = null;
@@ -162,7 +176,7 @@
     };
     const cleanup = () => {
       isResizing = false;
-      localStorage.setItem(WIDTH_KEY, String(drawerWidth));
+      safeWriteStorage(WIDTH_KEY, String(drawerWidth));
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', cleanup);
       activeResizeCleanup = null;

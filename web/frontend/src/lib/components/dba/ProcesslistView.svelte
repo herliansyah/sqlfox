@@ -309,13 +309,16 @@
   }
 
   async function loadStatementDigest() {
-    if (!appState.activeSessionId) return;
+    const sessionId = appState.activeSessionId;
+    if (!sessionId) return;
     isDigestLoading = true;
     digestError = '';
     try {
-      const res = await api.getStatementDigest(appState.activeSessionId, 30);
+      const res = await api.getStatementDigest(sessionId, 30);
+      if (appState.activeSessionId !== sessionId) return;
       digestRows = res.digest || res.statements || (Array.isArray(res) ? res : []);
     } catch (err: any) {
+      if (appState.activeSessionId !== sessionId) return;
       digestError = String(err?.message || err).replace(/^Failed to load statement digest:\s*/, '');
       digestRows = [];
     } finally {
@@ -339,12 +342,15 @@
   }
 
   async function loadDeadlock() {
-    if (!appState.activeSessionId) return;
+    const sessionId = appState.activeSessionId;
+    if (!sessionId) return;
     isDeadlockLoading = true;
     try {
-      const res = await api.getDeadlock(appState.activeSessionId);
+      const res = await api.getDeadlock(sessionId);
+      if (appState.activeSessionId !== sessionId) return;
       deadlockData = res;
     } catch (err: any) {
+      if (appState.activeSessionId !== sessionId) return;
       appState.showToast(`Failed to inspect deadlock: ${err.message}`, 'error');
     } finally {
       isDeadlockLoading = false;
@@ -382,23 +388,30 @@
   }
 
   async function loadVariablesReport() {
-    if (!appState.activeSessionId) return;
+    const sessionId = appState.activeSessionId;
+    if (!sessionId) return;
     isVariablesLoading = true;
     try {
-      const res = await api.getServerVariables(appState.activeSessionId);
+      const res = await api.getServerVariables(sessionId);
+      if (appState.activeSessionId !== sessionId) return;
       variablesReport = res;
     } catch (err: any) {
+      if (appState.activeSessionId !== sessionId) return;
       variablesReport = null;
     } finally {
       isVariablesLoading = false;
     }
   }
 
+  let isViewMounted = true;
+
   // Performance Flight Recorder Handlers
   async function checkFlightRecorderStatus() {
-    if (!appState.activeSessionId) return;
+    const sessionId = appState.activeSessionId;
+    if (!sessionId) return;
     try {
-      const status = await api.getFlightRecorderStatus(appState.activeSessionId);
+      const status = await api.getFlightRecorderStatus(sessionId);
+      if (!isViewMounted || appState.activeSessionId !== sessionId) return;
       isRecording = !!status.is_recording;
       appState.flightRecordingActive = isRecording;
       if (status.is_recording) {
@@ -420,19 +433,22 @@
   let isPollingFlight = false;
 
   function startFlightTimers() {
+    if (!isViewMounted) return;
     stopFlightTimers();
     flightTickerTimer = setInterval(() => {
+      if (!isViewMounted) return;
       recordingSeconds++;
       appState.flightRecordingRemainingSec = Math.max(0, 600 - recordingSeconds);
     }, 1000);
     // Poll every >= 1000ms for real-time telemetry streaming
     flightPollTimer = setInterval(async () => {
+      if (!isViewMounted || (typeof document !== 'undefined' && document.hidden)) return;
       const sessionId = appState.activeSessionId;
       if (!sessionId || !isRecording || isPollingFlight) return;
       isPollingFlight = true;
       try {
         const status = await api.getFlightRecorderStatus(sessionId);
-        if (appState.activeSessionId !== sessionId) return;
+        if (!isViewMounted || appState.activeSessionId !== sessionId) return;
         if (!status.is_recording) {
           isRecording = false;
           appState.flightRecordingActive = false;
@@ -456,7 +472,9 @@
 
   // Stop all timers if the component unmounts (sub-tab switch or view change).
   $effect(() => {
+    isViewMounted = true;
     return () => {
+      isViewMounted = false;
       stopFlightTimers();
       if (intervalTimer) clearInterval(intervalTimer);
       if (clusterPollTimer) clearInterval(clusterPollTimer);

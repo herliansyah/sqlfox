@@ -484,6 +484,11 @@ export class AppState {
       if (this.boundPageHideHandler) window.removeEventListener('pagehide', this.boundPageHideHandler);
       if (this.boundBeforeUnloadHandler) window.removeEventListener('beforeunload', this.boundBeforeUnloadHandler);
       if (this.boundVisibilityHandler) document.removeEventListener('visibilitychange', this.boundVisibilityHandler);
+      if (this.boundErrorHandler) window.removeEventListener('error', this.boundErrorHandler);
+      if (this.boundRejectionHandler) window.removeEventListener('unhandledrejection', this.boundRejectionHandler);
+      this.boundErrorHandler = null;
+      this.boundRejectionHandler = null;
+      this.clientTelemetryInstalled = false;
     }
   }
 
@@ -614,23 +619,28 @@ export class AppState {
   }
 
   private clientTelemetryInstalled = false;
+  private boundErrorHandler: ((evt: ErrorEvent) => void) | null = null;
+  private boundRejectionHandler: ((evt: PromiseRejectionEvent) => void) | null = null;
+  private fkPeekToken = 0;
 
   installClientErrorTelemetry() {
     if (this.clientTelemetryInstalled || typeof window === 'undefined') return;
     this.clientTelemetryInstalled = true;
 
-    window.addEventListener('error', (evt) => {
+    this.boundErrorHandler = (evt: ErrorEvent) => {
       const msg = evt.message || 'Uncaught frontend error';
       const stack = evt.error?.stack || (evt.filename ? `${evt.filename}:${evt.lineno}:${evt.colno}` : '');
       api.reportClientLog({ level: 'error', module: 'frontend', message: msg, stack });
-    });
-
-    window.addEventListener('unhandledrejection', (evt) => {
+    };
+    this.boundRejectionHandler = (evt: PromiseRejectionEvent) => {
       const reason = evt.reason;
       const msg = reason instanceof Error ? reason.message : String(reason || 'Unhandled promise rejection');
       const stack = reason instanceof Error ? reason.stack || '' : '';
       api.reportClientLog({ level: 'error', module: 'frontend', message: `UnhandledRejection: ${msg}`, stack });
-    });
+    };
+
+    window.addEventListener('error', this.boundErrorHandler);
+    window.addEventListener('unhandledrejection', this.boundRejectionHandler);
   }
 
   async init() {
@@ -679,7 +689,7 @@ export class AppState {
   }
 
   async checkDueNotesReminders() {
-    if (this.isRemoteLocked) return;
+    if (this.isRemoteLocked || (typeof document !== 'undefined' && document.hidden)) return;
     try {
       const dueNotes = await api.getDueReminders();
       if (!Array.isArray(dueNotes)) return;
@@ -896,6 +906,9 @@ export class AppState {
     try {
       await api.deleteConnection(id);
       this.showToast('Connection deleted', 'info');
+      try {
+        localStorage.removeItem(`sqlfox_tabs_${id}`);
+      } catch { /* ignore */ }
       if (this.activeConnection?.id === id) {
         this.activeConnection = null;
         this.activeSessionId = null;
@@ -2701,18 +2714,24 @@ export class AppState {
       error: null,
     };
 
+    const token = ++this.fkPeekToken;
+    const sessionId = this.activeSessionId;
     try {
       const currentDb = database || this.currentDatabase || '';
-      const res = await api.peekForeignKey(this.activeSessionId, currentDb, refTable, refCol, val);
+      const res = await api.peekForeignKey(sessionId, currentDb, refTable, refCol, val);
+      if (token !== this.fkPeekToken || this.activeSessionId !== sessionId) return;
       if (res && res.row) {
         this.fkPeekState.data = res;
       } else {
         this.fkPeekState.error = 'No matching record found in parent table';
       }
     } catch (err: any) {
+      if (token !== this.fkPeekToken) return;
       this.fkPeekState.error = err.message || 'Failed to peek foreign record';
     } finally {
-      this.fkPeekState.isLoading = false;
+      if (token === this.fkPeekToken) {
+        this.fkPeekState.isLoading = false;
+      }
     }
   }
 

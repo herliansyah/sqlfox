@@ -239,13 +239,15 @@
   let lines = $derived.by<FKLine[]>(() => {
     const list: FKLine[] = [];
     const sel = selectedTable;
+    const tableByLower = new Map<string, (typeof tables)[number]>();
+    for (const t of tables) {
+      tableByLower.set(t.name.toLowerCase(), t);
+    }
 
     tables.forEach((src) => {
       (src.foreign_keys || []).forEach((fk) => {
         const sp = positions[src.name];
-        const dst = tables.find(
-          (t) => t.name.toLowerCase() === (fk.referenced_table || '').toLowerCase()
-        );
+        const dst = tableByLower.get((fk.referenced_table || '').toLowerCase());
         const dp = dst ? positions[dst.name] : positions[fk.referenced_table];
         if (!sp || !dp) return;
 
@@ -439,15 +441,33 @@
     window.addEventListener('mouseup', onCardDragUp);
   }
 
+  let dragRafId: number | null = null;
+  let pendingDragCoords: { x: number; y: number } | null = null;
+
   function onCardDragMove(e: MouseEvent) {
     if (!draggingTable) return;
-    positions[draggingTable] = {
+    pendingDragCoords = {
       x: Math.max(0, Math.round(e.clientX / scale - dragOffset.x)),
       y: Math.max(0, Math.round(e.clientY / scale - dragOffset.y)),
     };
+    if (dragRafId !== null) return;
+    dragRafId = requestAnimationFrame(() => {
+      dragRafId = null;
+      if (draggingTable && pendingDragCoords) {
+        positions[draggingTable] = pendingDragCoords;
+      }
+    });
   }
 
   function onCardDragUp() {
+    if (dragRafId !== null) {
+      cancelAnimationFrame(dragRafId);
+      dragRafId = null;
+    }
+    if (draggingTable && pendingDragCoords) {
+      positions[draggingTable] = pendingDragCoords;
+    }
+    pendingDragCoords = null;
     draggingTable = null;
     savePositions();
     window.removeEventListener('mousemove', onCardDragMove);
