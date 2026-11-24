@@ -36,6 +36,7 @@ type sqlToken struct {
 func tokenizeSQL(q string, mysqlEscapes bool) []sqlToken {
 	n := len(q)
 	tokens := make([]sqlToken, 0, n/6+4)
+	execCommentDepth := 0
 
 	for i := 0; i < n; {
 		c := q[i]
@@ -54,8 +55,24 @@ func tokenizeSQL(q string, mysqlEscapes bool) []sqlToken {
 			continue
 		}
 
-		// Block comments /* ... */ (supports PostgreSQL nested block comments when !mysqlEscapes)
+		// Closing delimiter of an unwrapped MySQL /*! ... */ executable comment.
+		if execCommentDepth > 0 && c == '*' && i+1 < n && q[i+1] == '/' {
+			execCommentDepth--
+			i += 2
+			continue
+		}
+
+		// Block comments /* ... */ (supports MySQL /*! ... */ unwrapping and PostgreSQL nested comments)
 		if c == '/' && i+1 < n && q[i+1] == '*' {
+			// MySQL executes /*! ... */ and /*!NNNNN ... */ bodies as real SQL; unwrap instead of skipping.
+			if i+2 < n && q[i+2] == '!' {
+				execCommentDepth++
+				i += 3
+				for i < n && q[i] >= '0' && q[i] <= '9' {
+					i++
+				}
+				continue
+			}
 			depth := 1
 			j := i + 2
 			for j < n && depth > 0 {

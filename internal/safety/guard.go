@@ -65,11 +65,34 @@ func Inspect(query string, environment string) *InspectionResult {
 		return &InspectionResult{RiskLevel: RiskNone}
 	}
 
-	// Multi-statement inspection: inspect every statement so destructive statements
-	// hidden after a benign statement (e.g. "SELECT 1; DROP TABLE users;") cannot slip through.
-	stmts := driver.SplitSQLStatements(clean, "")
-	if len(stmts) > 1 {
-		return inspectMultiStatements(stmts, environment)
+	// Multi-statement inspection: inspect every statement across both MySQL (including
+	// unwrapped /*! ... */ executable comments) and standard-SQL splitting so destructive
+	// statements hidden after a benign statement cannot slip through.
+	unwrapped := driver.UnwrapMySQLExecutableComments(clean)
+	stmtsMySQL := driver.SplitSQLStatements(unwrapped, "mysql")
+	stmtsStd := driver.SplitSQLStatements(clean, "postgres")
+	if len(stmtsMySQL) > 1 || len(stmtsStd) > 1 {
+		var resMySQL, resStd *InspectionResult
+		if len(stmtsMySQL) > 1 {
+			resMySQL = inspectMultiStatements(stmtsMySQL, environment)
+		} else {
+			resMySQL = inspectSingleStatement(unwrapped, environment)
+		}
+		if len(stmtsStd) > 1 {
+			resStd = inspectMultiStatements(stmtsStd, environment)
+		} else {
+			resStd = inspectSingleStatement(clean, environment)
+		}
+		return pickHigherRisk(resMySQL, resStd)
+	}
+
+	return inspectSingleStatement(clean, environment)
+}
+
+func inspectSingleStatement(clean string, environment string) *InspectionResult {
+	clean = driver.StripLeadingComments(strings.TrimSpace(clean))
+	if clean == "" {
+		return &InspectionResult{RiskLevel: RiskNone}
 	}
 
 	// Unwrap balanced outer parentheses, e.g. "(DELETE FROM users)" or "(WITH d AS (...) SELECT * FROM d)".
@@ -78,12 +101,43 @@ func Inspect(query string, environment string) *InspectionResult {
 		return &InspectionResult{RiskLevel: RiskNone}
 	}
 
-	// Inspect both CTE sub-bodies (for data-modifying CTEs) and the main statement behind WITH ... AS (...).
-	if cteStmts, ok := extractCTEStatements(clean); ok {
-		return inspectMultiStatements(cteStmts, environment)
+	// Inspect CTE sub-bodies under BOTH standard SQL (PostgreSQL standard_conforming_strings +
+	// named $tag$ dollar-quotes) and MySQL backslash-escape lexing, picking the stricter result.
+	var best *InspectionResult
+	for _, mysqlMode := range []bool{false, true} {
+		if cteStmts, ok := extractCTEStatementsMode(clean, mysqlMode); ok {
+			best = pickHigherRisk(best, inspectMultiStatements(cteStmts, environment))
+		}
+		best = pickHigherRisk(best, inspectTokensMode(clean, environment, mysqlMode))
 	}
+	if best == nil {
+		return &InspectionResult{RiskLevel: RiskNone}
+	}
+	return best
+}
 
-	return inspectTokens(clean, environment)
+func pickHigherRisk(a, b *InspectionResult) *InspectionResult {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	if riskPrecedence(b.RiskLevel) > riskPrecedence(a.RiskLevel) {
+		return b
+	}
+	if riskPrecedence(b.RiskLevel) == riskPrecedence(a.RiskLevel) {
+		if b.RequiresChallenge && !a.RequiresChallenge {
+			return b
+		}
+		if b.IsDestructive && !a.IsDestructive {
+			return b
+		}
+		if len(b.StatementEstimates) > len(a.StatementEstimates) {
+			return b
+		}
+	}
+	return a
 }
 
 func unwrapOuterParens(q string) string {
@@ -118,7 +172,11 @@ func unwrapOuterParens(q string) string {
 }
 
 func inspectTokens(query string, environment string) *InspectionResult {
-	tokens := tokenizeSQL(query, !strings.Contains(query, "$$"))
+	return inspectTokensMode(query, environment, !strings.Contains(query, "$$"))
+}
+
+func inspectTokensMode(query string, environment string, mysqlEscapes bool) *InspectionResult {
+	tokens := tokenizeSQL(query, mysqlEscapes)
 	if len(tokens) == 0 || tokens[0].kind != tokWord {
 		return &InspectionResult{RiskLevel: RiskNone}
 	}
@@ -138,6 +196,101 @@ func inspectTokens(query string, environment string) *InspectionResult {
 			Reason:            fmt.Sprintf("%s executes procedural/dynamic SQL that may mutate data.", tokens[0].upper),
 			Suggestion:        "Verify the body or parameters of the procedure/block before executing.",
 		}
+	case "COPY":
+		// PostgreSQL COPY ... TO/FROM PROGRAM executes OS commands on the DB server; file COPY reads/writes server disk.
+		for _, tok := range tokens[1:] {
+			if tok.kind == tokWord && tok.upper == "PROGRAM" {
+				return &InspectionResult{
+					RiskLevel:           RiskCritical,
+					IsDestructive:       true,
+					RequiresChallenge:   true,
+					RequiresAffirmation: true,
+					Operation:           "COPY",
+					Reason:              "COPY ... PROGRAM executes arbitrary OS commands on the database server.",
+					Suggestion:          "Avoid COPY PROGRAM; use client-side import/export instead.",
+				}
+			}
+		}
+		return &InspectionResult{
+			RiskLevel:         RiskDangerous,
+			IsDestructive:     true,
+			RequiresChallenge: isProd,
+			Operation:         "COPY",
+			Reason:            "COPY bulk-imports or exports server files/data.",
+			Suggestion:        "Verify target table and file permissions before running COPY.",
+		}
+	case "ATTACH", "DETACH":
+		return &InspectionResult{
+			RiskLevel:         RiskDangerous,
+			IsDestructive:     true,
+			RequiresChallenge: true,
+			Operation:         tokens[0].upper,
+			Reason:            fmt.Sprintf("%s DATABASE accesses external database files on the host filesystem.", tokens[0].upper),
+			Suggestion:        "Use separate SqlFox connections instead of ATTACH DATABASE.",
+		}
+	case "VACUUM":
+		for _, tok := range tokens[1:] {
+			if tok.kind == tokWord && tok.upper == "INTO" {
+				return &InspectionResult{
+					RiskLevel:         RiskDangerous,
+					IsDestructive:     true,
+					RequiresChallenge: true,
+					Operation:         "VACUUM",
+					Reason:            "VACUUM INTO writes a database copy to the host filesystem.",
+					Suggestion:        "Use SqlFox Export Dump instead of VACUUM INTO.",
+				}
+			}
+		}
+		return &InspectionResult{RiskLevel: RiskNone}
+	case "LOAD":
+		return &InspectionResult{
+			RiskLevel:         RiskDangerous,
+			IsDestructive:     true,
+			RequiresChallenge: true,
+			Operation:         "LOAD",
+			Reason:            "LOAD DATA bulk-loads files directly into database tables.",
+			Suggestion:        "Verify source file path and target table before running LOAD DATA.",
+		}
+	case "GRANT", "REVOKE":
+		return &InspectionResult{
+			RiskLevel:         RiskDangerous,
+			IsDestructive:     true,
+			RequiresChallenge: isProd,
+			Operation:         tokens[0].upper,
+			Reason:            fmt.Sprintf("%s modifies database access privileges.", tokens[0].upper),
+			Suggestion:        "Verify target account and privilege scope before applying.",
+		}
+	case "PRAGMA":
+		// Mutating PRAGMAs contain '=' (e.g. PRAGMA writable_schema = ON).
+		for _, tok := range tokens[1:] {
+			if tok.raw == "=" {
+				return &InspectionResult{
+					RiskLevel:         RiskDangerous,
+					IsDestructive:     true,
+					RequiresChallenge: isProd,
+					Operation:         "PRAGMA",
+					Reason:            "Mutating PRAGMA alters database engine configuration or schema safety.",
+					Suggestion:        "Verify the PRAGMA setting before executing.",
+				}
+			}
+		}
+		return &InspectionResult{RiskLevel: RiskNone}
+	case "SELECT":
+		for i := 1; i+1 < len(tokens); i++ {
+			if tokens[i].kind == tokWord && tokens[i].upper == "INTO" &&
+				tokens[i+1].kind == tokWord && (tokens[i+1].upper == "OUTFILE" || tokens[i+1].upper == "DUMPFILE") {
+				return &InspectionResult{
+					RiskLevel:           RiskCritical,
+					IsDestructive:       true,
+					RequiresChallenge:   true,
+					RequiresAffirmation: true,
+					Operation:           "SELECT",
+					Reason:              fmt.Sprintf("SELECT ... INTO %s writes directly to the database server filesystem.", tokens[i+1].upper),
+					Suggestion:          "Use SqlFox client-side CSV/SQL export instead.",
+				}
+			}
+		}
+		return &InspectionResult{RiskLevel: RiskNone}
 	case "DROP":
 		return inspectDrop(tokens, isProd)
 	case "TRUNCATE":
@@ -237,7 +390,13 @@ func inspectDrop(tokens []sqlToken, isProd bool) *InspectionResult {
 		idx++
 	}
 	if idx >= len(tokens) || tokens[idx].kind != tokWord {
-		return &InspectionResult{RiskLevel: RiskNone}
+		return &InspectionResult{
+			RiskLevel:         RiskDangerous,
+			IsDestructive:     true,
+			RequiresChallenge: true,
+			Operation:         "DROP",
+			Reason:            "Unparsed DROP statement could permanently delete database objects (fail-closed).",
+		}
 	}
 
 	targetType := tokens[idx].upper
@@ -247,10 +406,17 @@ func inspectDrop(tokens []sqlToken, isProd bool) *InspectionResult {
 	} else {
 		switch targetType {
 		case "TABLE", "DATABASE", "SCHEMA", "VIEW", "INDEX", "SEQUENCE",
-			"FUNCTION", "PROCEDURE", "TRIGGER", "EVENT", "TYPE", "DOMAIN", "EXTENSION":
+			"FUNCTION", "PROCEDURE", "TRIGGER", "EVENT", "TYPE", "DOMAIN", "EXTENSION",
+			"ROLE", "USER", "OWNED", "POLICY", "TABLESPACE":
 			idx++
 		default:
-			return &InspectionResult{RiskLevel: RiskNone}
+			return &InspectionResult{
+				RiskLevel:         RiskDangerous,
+				IsDestructive:     true,
+				RequiresChallenge: true,
+				Operation:         "DROP",
+				Reason:            fmt.Sprintf("DROP %s statement may permanently delete database objects (fail-closed).", targetType),
+			}
 		}
 	}
 
@@ -264,7 +430,13 @@ func inspectDrop(tokens []sqlToken, isProd bool) *InspectionResult {
 
 	db, targets := collectCommaSeparatedTargets(tokens, idx)
 	if len(targets) == 0 {
-		return &InspectionResult{RiskLevel: RiskNone}
+		return &InspectionResult{
+			RiskLevel:         RiskDangerous,
+			IsDestructive:     true,
+			RequiresChallenge: true,
+			Operation:         "DROP",
+			Reason:            "DROP statement with unparsed target requires confirmation (fail-closed).",
+		}
 	}
 	target := strings.Join(targets, ", ")
 	if targetType == "DATABASE" || targetType == "SCHEMA" {
@@ -303,7 +475,13 @@ func inspectTruncate(tokens []sqlToken) *InspectionResult {
 	}
 	db, targets := collectCommaSeparatedTargets(tokens, idx)
 	if len(targets) == 0 {
-		return &InspectionResult{RiskLevel: RiskNone}
+		return &InspectionResult{
+			RiskLevel:         RiskCritical,
+			IsDestructive:     true,
+			RequiresChallenge: true,
+			Operation:         "TRUNCATE",
+			Reason:            "TRUNCATE statement with unparsed target will permanently empty table data (fail-closed).",
+		}
 	}
 	target := strings.Join(targets, ", ")
 	return &InspectionResult{
@@ -344,7 +522,13 @@ func inspectDelete(tokens []sqlToken, query, environment string, isProd, isStagi
 
 	db, target, rawTable, nextIdx := parseQualifiedTarget(tokens, idx)
 	if target == "" {
-		return &InspectionResult{RiskLevel: RiskNone}
+		return &InspectionResult{
+			RiskLevel:         RiskDangerous,
+			IsDestructive:     true,
+			RequiresChallenge: true,
+			Operation:         "DELETE",
+			Reason:            "DELETE statement with unparsed target requires confirmation (fail-closed).",
+		}
 	}
 
 	whereIdx, whereByteStart, hasWhere := findTopLevelKeyword(tokens, nextIdx, "WHERE")
@@ -409,7 +593,13 @@ func inspectUpdate(tokens []sqlToken, query, environment string, isProd, isStagi
 
 	db, target, rawTable, nextIdx := parseQualifiedTarget(tokens, idx)
 	if target == "" {
-		return &InspectionResult{RiskLevel: RiskNone}
+		return &InspectionResult{
+			RiskLevel:         RiskDangerous,
+			IsDestructive:     true,
+			RequiresChallenge: true,
+			Operation:         "DELETE",
+			Reason:            "DELETE statement with unparsed target requires confirmation (fail-closed).",
+		}
 	}
 
 	whereIdx, whereByteStart, hasWhere := findTopLevelKeyword(tokens, nextIdx, "WHERE")
@@ -737,7 +927,11 @@ func InspectWithScope(query string, environment string, scopedDatabase string) *
 // following a WITH clause so data-modifying CTEs (e.g. WITH d AS (DELETE FROM t) SELECT * FROM d)
 // are inspected alongside the outer statement.
 func extractCTEStatements(q string) ([]string, bool) {
-	tokens := tokenizeSQL(q, !strings.Contains(q, "$$"))
+	return extractCTEStatementsMode(q, !strings.Contains(q, "$$"))
+}
+
+func extractCTEStatementsMode(q string, mysqlEscapes bool) ([]string, bool) {
+	tokens := tokenizeSQL(q, mysqlEscapes)
 	if len(tokens) == 0 || tokens[0].kind != tokWord || tokens[0].upper != "WITH" {
 		return nil, false
 	}
