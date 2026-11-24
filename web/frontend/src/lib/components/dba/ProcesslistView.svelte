@@ -263,9 +263,13 @@
     };
   });
 
+  let isPollingProcesslist = false;
+
   async function loadProcesslist(showSpinner = true) {
     const sessionId = appState.activeSessionId;
     if (!sessionId) return;
+    if (!showSpinner && isPollingProcesslist) return;
+    isPollingProcesslist = true;
     if (showSpinner) isLoading = true;
     try {
       const res = await api.getProcesslist(sessionId);
@@ -299,6 +303,7 @@
       if (appState.activeSessionId !== sessionId) return;
       appState.showToast(`Failed to load processlist: ${err.message}`, 'error');
     } finally {
+      isPollingProcesslist = false;
       if (showSpinner) isLoading = false;
     }
   }

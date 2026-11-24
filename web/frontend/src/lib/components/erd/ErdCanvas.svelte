@@ -530,20 +530,27 @@
     panY = vh / 2 - worldY * scale;
   }
 
+  let activeMinimapMove: ((ev: MouseEvent) => void) | null = null;
+  let activeMinimapUp: (() => void) | null = null;
+
   function handleMinimapMouseDown(e: MouseEvent) {
     e.stopPropagation();
     isDraggingMinimap = true;
     panViewportFromMinimap(e.clientX, e.clientY);
-    const onMove = (ev: MouseEvent) => {
+    if (activeMinimapMove) window.removeEventListener('mousemove', activeMinimapMove);
+    if (activeMinimapUp) window.removeEventListener('mouseup', activeMinimapUp);
+    activeMinimapMove = (ev: MouseEvent) => {
       if (isDraggingMinimap) panViewportFromMinimap(ev.clientX, ev.clientY);
     };
-    const onUp = () => {
+    activeMinimapUp = () => {
       isDraggingMinimap = false;
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
+      if (activeMinimapMove) window.removeEventListener('mousemove', activeMinimapMove);
+      if (activeMinimapUp) window.removeEventListener('mouseup', activeMinimapUp);
+      activeMinimapMove = null;
+      activeMinimapUp = null;
     };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    window.addEventListener('mousemove', activeMinimapMove);
+    window.addEventListener('mouseup', activeMinimapUp);
   }
 
   // Release window listeners if the component unmounts mid-pan/drag.
@@ -553,6 +560,8 @@
       window.removeEventListener('mouseup', onPanUp);
       window.removeEventListener('mousemove', onCardDragMove);
       window.removeEventListener('mouseup', onCardDragUp);
+      if (activeMinimapMove) window.removeEventListener('mousemove', activeMinimapMove);
+      if (activeMinimapUp) window.removeEventListener('mouseup', activeMinimapUp);
     };
   });
 

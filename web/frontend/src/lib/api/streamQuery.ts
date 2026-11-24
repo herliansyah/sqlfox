@@ -6,9 +6,10 @@ import {
 } from './http';
 
 export interface StreamContext {
-  baseUrl: string;
-  getAuthHeaders: (extra?: Record<string, string>, includeJsonContentType?: boolean) => Record<string, string>;
-  handleNonOkResponse: (res: Response) => Promise<never>;
+  rawFetch: (
+    endpoint: string,
+    options?: RequestInit & { timeoutMs?: number | null; allowStatuses?: number[] }
+  ) => Promise<Response>;
 }
 
 export async function streamExecuteQuery(
@@ -18,30 +19,23 @@ export async function streamExecuteQuery(
   opts: ExecuteQueryOptions,
   handlers: StreamEventHandlers
 ): Promise<void> {
-  const headers = ctx.getAuthHeaders({}, true);
-  let res: Response;
-  try {
-    res = await fetch(`${ctx.baseUrl}/session/${sessionId}/execute-stream`, {
-      method: 'POST',
-      headers,
-      signal: opts.signal,
-      body: JSON.stringify({
-        sql,
-        confirmed: Boolean(opts.confirmed),
-        challenge_input: opts.challengeInput || '',
-        database: opts.database,
-        profile: Boolean(opts.profile),
-        limit: opts.limit ?? 5000,
-        tab_id: opts.tabId || '',
-        query_id: opts.queryId || 'active',
-        bypass_mutation_confirm: Boolean(opts.bypassMutationConfirm),
-      }),
-    });
-  } catch (err: any) {
-    if (err?.name === 'AbortError') throw err;
-    if (typeof window !== 'undefined') (window as any).__sqlfox_trigger_reconnect?.();
-    throw new Error('Cannot reach SqlFox daemon — is it still running?');
-  }
+  const res = await ctx.rawFetch(`/session/${sessionId}/execute-stream`, {
+    method: 'POST',
+    signal: opts.signal,
+    timeoutMs: null,
+    allowStatuses: [422],
+    body: JSON.stringify({
+      sql,
+      confirmed: Boolean(opts.confirmed),
+      challenge_input: opts.challengeInput || '',
+      database: opts.database,
+      profile: Boolean(opts.profile),
+      limit: opts.limit ?? 5000,
+      tab_id: opts.tabId || '',
+      query_id: opts.queryId || 'active',
+      bypass_mutation_confirm: Boolean(opts.bypassMutationConfirm),
+    }),
+  });
 
   if (res.status === 422) {
     const data = await res.json();
@@ -50,10 +44,6 @@ export async function streamExecuteQuery(
       return;
     }
     throw new HttpStatusError(422, data?.error || 'Execution blocked by Safety Guard', data);
-  }
-
-  if (!res.ok) {
-    await ctx.handleNonOkResponse(res);
   }
 
   if (!res.body) {
@@ -148,21 +138,11 @@ export async function streamDataTransfer(
   },
   onProgress?: (evt: any) => void
 ): Promise<any> {
-  const headers = ctx.getAuthHeaders({}, true);
-  let res: Response;
-  try {
-    res = await fetch(`${ctx.baseUrl}/sync/data/transfer`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(payload),
-    });
-  } catch (err: any) {
-    if (typeof window !== 'undefined') (window as any).__sqlfox_trigger_reconnect?.();
-    throw new Error(`Cannot reach SqlFox daemon: ${err instanceof Error ? err.message : String(err)}`);
-  }
-  if (!res.ok) {
-    await ctx.handleNonOkResponse(res);
-  }
+  const res = await ctx.rawFetch('/sync/data/transfer', {
+    method: 'POST',
+    timeoutMs: null,
+    body: JSON.stringify(payload),
+  });
   if (!res.body) {
     throw new Error('Streaming response body is empty');
   }
@@ -222,21 +202,16 @@ export async function streamRunSqlScript(
   const formData = new FormData();
   formData.append('file', file);
 
-  const headers = ctx.getAuthHeaders({}, false);
   const params = new URLSearchParams();
   if (options.stopOnError !== undefined) params.set('stop_on_error', String(options.stopOnError));
   if (options.database) params.set('db', options.database);
   if (options.confirm) params.set('confirm', 'true');
 
-  const res = await fetch(`${ctx.baseUrl}/session/${sessionId}/run-sql-script?${params.toString()}`, {
+  const res = await ctx.rawFetch(`/session/${sessionId}/run-sql-script?${params.toString()}`, {
     method: 'POST',
-    headers,
+    timeoutMs: null,
     body: formData,
   });
-
-  if (!res.ok) {
-    await ctx.handleNonOkResponse(res);
-  }
 
   if (!res.body) {
     return { status: 'completed', total: 0, executed: 0, errors: 0 };

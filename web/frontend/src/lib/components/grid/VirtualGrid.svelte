@@ -276,11 +276,43 @@
   let hiddenCols = $derived<string[]>(currentTab?.hiddenColumns || []);
 
   let visibleColumnEntries = $derived.by(() => {
-    if (!result?.columns) return [] as Array<{ col: string | ColumnDefinition; origIdx: number }>;
-    const entries: Array<{ col: string | ColumnDefinition; origIdx: number }> = [];
+    if (!result?.columns) {
+      return [] as Array<{
+        col: string | ColumnDefinition;
+        origIdx: number;
+        colName: string;
+        colType: string;
+        nullable: boolean;
+        enumVals: string[];
+        kind: ReturnType<typeof classifyColumnType>;
+        showUuidPreset: boolean;
+        hasAnyPreset: boolean;
+        fk: any;
+      }>;
+    }
+    const entries: Array<{
+      col: string | ColumnDefinition;
+      origIdx: number;
+      colName: string;
+      colType: string;
+      nullable: boolean;
+      enumVals: string[];
+      kind: ReturnType<typeof classifyColumnType>;
+      showUuidPreset: boolean;
+      hasAnyPreset: boolean;
+      fk: any;
+    }> = [];
     result.columns.forEach((col, origIdx) => {
-      if (!hiddenCols.includes(getColName(col))) {
-        entries.push({ col, origIdx });
+      const colName = getColName(col);
+      if (!hiddenCols.includes(colName)) {
+        const colType = resolveColType(col);
+        const nullable = isColNullable(col);
+        const enumVals = resolveEnumValues(col, tableMeta);
+        const kind = classifyColumnType(colType, enumVals);
+        const showUuidPreset = kind.isUuid || (kind.isString && (!kind.maxLength || kind.maxLength >= 36));
+        const hasAnyPreset = nullable || kind.isString || kind.isDateTime || kind.isDate || showUuidPreset;
+        const fk = fkMap.get(colName);
+        entries.push({ col, origIdx, colName, colType, nullable, enumVals, kind, showUuidPreset, hasAnyPreset, fk });
       }
     });
     return entries;
@@ -2051,11 +2083,8 @@
                 </td>
 
                 <!-- Cells -->
-                {#each visibleColumnEntries as { col, origIdx: cIdx }, visColIdx (cIdx)}
+                {#each visibleColumnEntries as { col, origIdx: cIdx, colName, colType, nullable, enumVals, kind, showUuidPreset, hasAnyPreset, fk }, visColIdx (cIdx)}
                   {@const dispRowIdx = rowItem.displayIdx}
-                  {@const colName = getColName(col)}
-                  {@const colType = resolveColType(col)}
-                  {@const nullable = isColNullable(col)}
                   {@const cellVal = cIdx >= 0 ? rowItem.data[cIdx] : undefined}
                   {@const formatted = formatCellValue(cellVal)}
                   {@const isStaged = effectiveTable && cIdx >= 0 ? isCellStaged(effectiveTable, rowItem.data, rowItem.origIdx, cIdx) : false}
@@ -2063,18 +2092,14 @@
                   {@const isCellSelected = selectedCell?.rIdx === rowItem.origIdx && selectedCell?.cIdx === cIdx}
                   {@const inRange = isCellInRange(dispRowIdx, visColIdx)}
                   {@const isEditingThis = editingCell && editingCell.rIdx === rowItem.origIdx && editingCell.cIdx === cIdx}
-                  {@const fk = fkMap.get(colName)}
-                  {@const enumVals = resolveEnumValues(col, tableMeta)}
-                  {@const kind = classifyColumnType(colType, enumVals)}
                   {@const isBool = kind.isBool}
                   {@const isDateLike = kind.isDateTime}
                   {@const fkListId = fk ? `fk-datalist-${rowItem.origIdx}-${cIdx}` : undefined}
                   {@const fkOpts = fk ? fkDatalistCache[`${fk.referenced_table}.${fk.referenced_column}`] || [] : []}
                   {@const isJsonLike = formatted.type === 'json' || kind.isJson}
-                  {@const showUuidPreset = kind.isUuid || (kind.isString && (!kind.maxLength || kind.maxLength >= 36))}
-                  {@const hasAnyPreset = nullable || kind.isString || kind.isDateTime || kind.isDate || showUuidPreset}
 
                   <td
+                    role="gridcell"
                     onclick={(e) => {
                       selectedCell = { rIdx: rowItem.origIdx, cIdx };
                       selectedRowIndex = rowItem.origIdx;

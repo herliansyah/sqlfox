@@ -290,6 +290,12 @@ export class AppState {
   private activeAbortControllers = new Map<string, AbortController>();
   private activeQueryIds = new Map<string, string>();
   private timerIntervals = new Map<string, any>();
+  private connectionSwitchGen = 0;
+  private databaseSwitchGen = 0;
+  private tableLoadTokens = new WeakMap<EditorTab, number>();
+  private boundPageHideHandler: (() => void) | null = null;
+  private boundBeforeUnloadHandler: ((e: BeforeUnloadEvent) => string | undefined) | null = null;
+  private boundVisibilityHandler: (() => void) | null = null;
 
   // FK Peek Popover state
   fkPeekState = $state<{
@@ -404,27 +410,23 @@ export class AppState {
   });
 
   constructor() {
+    api.onRemoteLocked = (val: boolean) => {
+      this.isRemoteLocked = val;
+    };
+    api.onReconnectNeeded = () => this.triggerAutoReconnect();
+    api.onReadOnlySync = (val: boolean) => {
+      this.isReadOnly = Boolean(val);
+    };
+
     if (typeof window !== 'undefined') {
-      (window as any).__sqlfox_set_remote_locked = (val: boolean) => {
-        this.isRemoteLocked = val;
-      };
-      (window as any).__sqlfox_trigger_reconnect = () => this.triggerAutoReconnect();
-      (window as any).__sqlfox_sync_readonly = (val: boolean) => {
-        this.isReadOnly = Boolean(val);
-      };
-
-      // Route raw window.alert() through styled SqlFox NativeDialogModal
-      window.alert = (msg?: any) => {
-        void this.showNativeAlert(String(msg ?? ''));
-      };
-
       // Persist active tabs synchronously on pagehide & beforeunload
-      window.addEventListener('pagehide', () => {
+      this.boundPageHideHandler = () => {
         this.saveTabsState();
-      });
+      };
+      window.addEventListener('pagehide', this.boundPageHideHandler);
 
       // ponytail: beforeunload warning guards against inadvertent data loss while queries are running or staged edits exist
-      window.addEventListener('beforeunload', (e) => {
+      this.boundBeforeUnloadHandler = (e: BeforeUnloadEvent) => {
         this.saveTabsState();
         const hasRunningQuery = this.tabs.some((t) => t.isExecuting);
         const hasStagedEdits = Object.keys(this.stagedEdits).length > 0 || this.tabs.some((t) => (t.stagedDraftRows?.length || 0) > 0);
@@ -433,10 +435,12 @@ export class AppState {
           e.returnValue = 'You have unsaved staged edits or running database queries.';
           return e.returnValue;
         }
-      });
+        return undefined;
+      };
+      window.addEventListener('beforeunload', this.boundBeforeUnloadHandler);
 
       // Idle auto-wakeup: when returning after >=5 minutes hidden, probe session health silently
-      document.addEventListener('visibilitychange', () => {
+      this.boundVisibilityHandler = () => {
         this.isPageVisible = !document.hidden;
         if (document.hidden) {
           this.lastHiddenAt = Date.now();
@@ -445,9 +449,42 @@ export class AppState {
           void api.getAuthStatus().catch(() => {});
           void this.pingActiveSession();
         }
-      });
+      };
+      document.addEventListener('visibilitychange', this.boundVisibilityHandler);
     }
     this.init();
+  }
+
+  destroy() {
+    if (this.reminderTimer) {
+      clearInterval(this.reminderTimer);
+      this.reminderTimer = null;
+    }
+    if (this.reconnectTimer) {
+      clearInterval(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.activityReconnectTimer) {
+      clearTimeout(this.activityReconnectTimer);
+      this.activityReconnectTimer = null;
+    }
+    if (this.activityEventSource) {
+      this.activityEventSource.close();
+      this.activityEventSource = null;
+    }
+    for (const timer of this.timerIntervals.values()) {
+      clearInterval(timer);
+    }
+    this.timerIntervals.clear();
+    for (const ctrl of this.activeAbortControllers.values()) {
+      ctrl.abort();
+    }
+    this.activeAbortControllers.clear();
+    if (typeof window !== 'undefined') {
+      if (this.boundPageHideHandler) window.removeEventListener('pagehide', this.boundPageHideHandler);
+      if (this.boundBeforeUnloadHandler) window.removeEventListener('beforeunload', this.boundBeforeUnloadHandler);
+      if (this.boundVisibilityHandler) document.removeEventListener('visibilitychange', this.boundVisibilityHandler);
+    }
   }
 
   // Toast System
@@ -874,6 +911,7 @@ export class AppState {
   }
 
   async selectConnection(conn: ConnectionProfile) {
+    const gen = ++this.connectionSwitchGen;
     this.isConnecting = true;
     this.connectionError = null;
     try {
@@ -889,6 +927,7 @@ export class AppState {
       if (typeof sessionStorage !== 'undefined') sessionStorage.setItem('sqlfox_active_conn_id', conn.id);
       localStorage.setItem('sqlfox_last_conn_id', conn.id);
       const sess = await api.connectSession(conn.id);
+      if (this.connectionSwitchGen !== gen) return;
       this.activeSessionId = sess.id || sess.connection_id || conn.id;
       if (sess.schema) {
         this.setCatalog(sess.schema);
@@ -898,6 +937,7 @@ export class AppState {
       if (!dbs || dbs.length === 0) {
         try {
           const fresh = await api.getSchema(this.activeSessionId, '');
+          if (this.connectionSwitchGen !== gen) return;
           if (fresh) {
             dbs = fresh.databases || [];
             if (fresh.database_name && !conn.database && !conn.database_name) {
@@ -909,6 +949,7 @@ export class AppState {
           console.warn('Fallback schema fetch deferred:', fetchErr);
         }
       }
+      if (this.connectionSwitchGen !== gen) return;
       this.availableDatabases = dbs || [];
 
       let targetDb = conn.database || conn.database_name || this.currentDatabase || (sess.schema && sess.schema.database_name) || '';
@@ -922,6 +963,7 @@ export class AppState {
 
       if (!this.catalog?.tables || this.catalog.tables.length === 0) {
         await this.refreshCatalog();
+        if (this.connectionSwitchGen !== gen) return;
       }
 
       this.loadFastCatalogBackground(this.activeSessionId);
@@ -937,11 +979,14 @@ export class AppState {
       }
       this.pingActiveSession().catch(() => {});
     } catch (err: any) {
+      if (this.connectionSwitchGen !== gen) return;
       console.error('Failed to select connection:', err);
       this.connectionError = err.message || 'Failed to connect to database';
       throw err;
     } finally {
-      this.isConnecting = false;
+      if (this.connectionSwitchGen === gen) {
+        this.isConnecting = false;
+      }
     }
   }
 
@@ -1252,12 +1297,16 @@ export class AppState {
 
   async selectDatabase(dbName: string) {
     if (!this.activeSessionId || this.currentDatabase === dbName) return;
+    const gen = ++this.databaseSwitchGen;
     this.isLoadingCatalog = true;
     const slowTimer = setTimeout(() => {
-      this.showToast(`Inspecting database '${dbName}' schema (large catalog)...`, 'info');
+      if (this.databaseSwitchGen === gen) {
+        this.showToast(`Inspecting database '${dbName}' schema (large catalog)...`, 'info');
+      }
     }, 3000);
     try {
       const schema = await api.selectDatabase(this.activeSessionId, dbName);
+      if (this.databaseSwitchGen !== gen) return;
       if (schema && (schema.tables || schema.databases)) {
         this.setCatalog(schema);
         this.currentDatabase = schema.database_name || dbName;
@@ -1266,6 +1315,7 @@ export class AppState {
         }
       } else {
         const fetched = await api.getSchema(this.activeSessionId, dbName);
+        if (this.databaseSwitchGen !== gen) return;
         this.setCatalog(fetched);
         this.currentDatabase = fetched.database_name || dbName;
         if (fetched.databases && fetched.databases.length > 0) {
@@ -1274,11 +1324,14 @@ export class AppState {
       }
       this.showToast(`Switched to database ${dbName}`, 'info');
     } catch (err: any) {
+      if (this.databaseSwitchGen !== gen) return;
       console.error('Failed to switch database:', err);
       this.showToast(`Failed to switch database: ${err.message}`, 'error');
     } finally {
       clearTimeout(slowTimer);
-      this.isLoadingCatalog = false;
+      if (this.databaseSwitchGen === gen) {
+        this.isLoadingCatalog = false;
+      }
     }
   }
 
@@ -1538,7 +1591,8 @@ export class AppState {
     this.tabs = [...this.tabs];
     const startTime = performance.now();
     // Guard against out-of-order responses when the user pages/filters rapidly.
-    const token = ((tab as any)._loadToken = ((tab as any)._loadToken || 0) + 1);
+    const token = (this.tableLoadTokens.get(tab) || 0) + 1;
+    this.tableLoadTokens.set(tab, token);
     try {
       const limit = tab.pageSize || 25;
       const offset = ((tab.currentPage || 1) - 1) * limit;
@@ -1568,7 +1622,7 @@ export class AppState {
         tab.sortDir || undefined,
         structuredPills.length > 0 ? structuredPills : undefined
       );
-      if ((tab as any)._loadToken !== token) return; // a newer load superseded this one
+      if (this.tableLoadTokens.get(tab) !== token) return; // a newer load superseded this one
       if (res && res.duration_ms === undefined) {
         res.duration_ms = Math.round(performance.now() - startTime);
       }
@@ -1577,29 +1631,13 @@ export class AppState {
       }
       tab.activeResult = res;
 
-      // Synchronize exact/effective row count back into the table catalog
+      // Synchronize exact/effective row count back into the table catalog immutably
       if (res && typeof (res as any).total_rows === 'number') {
-        const cat = (db && this.catalogs[db.toLowerCase()]) || this.catalog;
-        const tbl = cat?.tables?.find((t) => t.name.toLowerCase() === tab.tableName!.toLowerCase());
-        if (tbl) {
-          if (res.is_exact) {
-            tbl.row_count = (res as any).total_rows;
-            tbl.rows_count = (res as any).total_rows;
-            tbl.row_count_exact = true;
-          } else if (tbl.row_count === undefined || tbl.row_count === 0) {
-            tbl.row_count = (res as any).total_rows;
-            tbl.rows_count = (res as any).total_rows;
-          }
-          if (this.catalog) {
-            this.catalog = { ...this.catalog };
-          }
-          if (db && this.catalogs[db.toLowerCase()]) {
-            this.catalogs[db.toLowerCase()] = { ...this.catalogs[db.toLowerCase()] };
-          }
-        }
+        const totalRows = (res as any).total_rows as number;
+        this.updateCatalogTableRowCount(tab.tableName, db, totalRows, Boolean(res.is_exact));
       }
     } catch (err: any) {
-      if ((tab as any)._loadToken !== token) return;
+      if (this.tableLoadTokens.get(tab) !== token) return;
       tab.activeResult = {
         columns: [],
         rows: [],
@@ -1608,10 +1646,45 @@ export class AppState {
         error: err.message || 'Error loading table data',
       };
     } finally {
-      if ((tab as any)._loadToken === token) {
+      if (this.tableLoadTokens.get(tab) === token) {
         tab.isExecuting = false;
         this.tabs = [...this.tabs];
         this.saveTabsState();
+      }
+    }
+  }
+
+  private updateCatalogTableRowCount(tableName: string, db: string, totalRows: number, isExact: boolean) {
+    const patchTables = (tables: TableMetadata[] | undefined) => {
+      if (!tables) return tables;
+      let changed = false;
+      const next = tables.map((t) => {
+        if (t.name.toLowerCase() !== tableName.toLowerCase()) return t;
+        if (!isExact && t.row_count !== undefined && t.row_count !== 0) return t;
+        changed = true;
+        return {
+          ...t,
+          row_count: totalRows,
+          rows_count: totalRows,
+          ...(isExact ? { row_count_exact: true } : {}),
+        };
+      });
+      return changed ? next : tables;
+    };
+    if (this.catalog) {
+      const nextTables = patchTables(this.catalog.tables);
+      if (nextTables && nextTables !== this.catalog.tables) {
+        this.catalog = { ...this.catalog, tables: nextTables };
+      }
+    }
+    const dbKey = db.toLowerCase();
+    if (db && this.catalogs[dbKey]) {
+      const nextTables = patchTables(this.catalogs[dbKey].tables);
+      if (nextTables && nextTables !== this.catalogs[dbKey].tables) {
+        this.catalogs = {
+          ...this.catalogs,
+          [dbKey]: { ...this.catalogs[dbKey], tables: nextTables },
+        };
       }
     }
   }
@@ -1627,19 +1700,7 @@ export class AppState {
     try {
       const res = await api.getTableCount(this.activeSessionId, tableName, db, filterClause || undefined);
       if (res && typeof res.count === 'number') {
-        const cat = (db && this.catalogs[db.toLowerCase()]) || this.catalog;
-        const tbl = cat?.tables?.find((t) => t.name.toLowerCase() === tableName.toLowerCase());
-        if (tbl) {
-          tbl.row_count = res.count;
-          tbl.rows_count = res.count;
-          tbl.row_count_exact = true;
-          if (this.catalog) {
-            this.catalog = { ...this.catalog };
-          }
-          if (db && this.catalogs[db.toLowerCase()]) {
-            this.catalogs[db.toLowerCase()] = { ...this.catalogs[db.toLowerCase()] };
-          }
-        }
+        this.updateCatalogTableRowCount(tableName, db, res.count, true);
         if (tab && tab.activeResult) {
           tab.activeResult.total_rows = res.count;
           tab.activeResult.is_exact = true;
@@ -2010,7 +2071,7 @@ export class AppState {
       tab.database = targetDb;
       this.tabs = [...this.tabs];
       this.saveTabsState();
-      void this.selectDatabase(targetDb);
+      await this.selectDatabase(targetDb);
     }
 
     let database = tab.database || this.currentDatabase || '';

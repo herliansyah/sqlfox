@@ -73,13 +73,10 @@ class ApiClient extends ApiHttpBase {
   }
 
   async exportVault(exportPassphrase: string): Promise<Blob> {
-    const headers = this.getAuthHeaders({}, true);
-    const res = await fetch(`${this.baseUrl}/vault/export`, {
+    const res = await this.rawFetch('/vault/export', {
       method: 'POST',
-      headers,
       body: JSON.stringify({ export_passphrase: exportPassphrase }),
     });
-    if (!res.ok) await this.handleNonOkResponse(res);
     return res.blob();
   }
 
@@ -262,30 +259,23 @@ class ApiClient extends ApiHttpBase {
         ? confirmedOrOpts
         : { confirmed: confirmedOrOpts, database: databaseArg };
 
-    const headers = this.getAuthHeaders({}, true);
-    let res: Response;
-    try {
-      res = await fetch(`${this.baseUrl}/session/${sessionId}/execute`, {
-        method: 'POST',
-        headers,
-        signal: opts.signal,
-        body: JSON.stringify({
-          sql,
-          confirmed: Boolean(opts.confirmed),
-          challenge_input: opts.challengeInput || '',
-          database: opts.database,
-          profile: Boolean(opts.profile),
-          limit: opts.limit,
-          tab_id: opts.tabId,
-          query_id: opts.queryId,
-          bypass_mutation_confirm: Boolean(opts.bypassMutationConfirm),
-        }),
-      });
-    } catch (err: any) {
-      if (err?.name === 'AbortError') throw err;
-      if (typeof window !== 'undefined') (window as any).__sqlfox_trigger_reconnect?.();
-      throw new Error(`Cannot reach SqlFox daemon — is it still running?`);
-    }
+    const res = await this.rawFetch(`/session/${sessionId}/execute`, {
+      method: 'POST',
+      signal: opts.signal,
+      timeoutMs: null,
+      allowStatuses: [422],
+      body: JSON.stringify({
+        sql,
+        confirmed: Boolean(opts.confirmed),
+        challenge_input: opts.challengeInput || '',
+        database: opts.database,
+        profile: Boolean(opts.profile),
+        limit: opts.limit,
+        tab_id: opts.tabId,
+        query_id: opts.queryId,
+        bypass_mutation_confirm: Boolean(opts.bypassMutationConfirm),
+      }),
+    });
 
     if (res.status === 422) {
       const data = await res.json();
@@ -299,11 +289,15 @@ class ApiClient extends ApiHttpBase {
         inspection: data?.inspection,
       });
     }
-    if (!res.ok) {
-      await this.handleNonOkResponse(res);
-    }
     const json = await res.json();
     return this.normalizeExecResult(json);
+  }
+
+  private get streamContext() {
+    return {
+      rawFetch: (endpoint: string, options?: RequestInit & { timeoutMs?: number | null; allowStatuses?: number[] }) =>
+        this.rawFetch(endpoint, options),
+    };
   }
 
   async executeQueryStream(
@@ -312,17 +306,7 @@ class ApiClient extends ApiHttpBase {
     opts: ExecuteQueryOptions,
     handlers: StreamEventHandlers
   ): Promise<void> {
-    return streamExecuteQuery(
-      {
-        baseUrl: this.baseUrl,
-        getAuthHeaders: (extra, includeJson) => this.getAuthHeaders(extra, includeJson),
-        handleNonOkResponse: (res) => this.handleNonOkResponse(res),
-      },
-      sessionId,
-      sql,
-      opts,
-      handlers
-    );
+    return streamExecuteQuery(this.streamContext, sessionId, sql, opts, handlers);
   }
 
   async cancelQuery(sessionId: string, queryId = 'active'): Promise<{ success?: boolean; status?: string }> {
@@ -973,15 +957,7 @@ class ApiClient extends ApiHttpBase {
     },
     onProgress?: (evt: any) => void
   ): Promise<any> {
-    return streamDataTransfer(
-      {
-        baseUrl: this.baseUrl,
-        getAuthHeaders: (extra, includeJson) => this.getAuthHeaders(extra, includeJson),
-        handleNonOkResponse: (res) => this.handleNonOkResponse(res),
-      },
-      payload,
-      onProgress
-    );
+    return streamDataTransfer(this.streamContext, payload, onProgress);
   }
 
   // Row-Level Data Sync
@@ -1077,17 +1053,7 @@ class ApiClient extends ApiHttpBase {
     options: { stopOnError?: boolean; database?: string; confirm?: boolean },
     onProgress: (event: any) => void
   ): Promise<{ status: string; total: number; executed: number; errors: number }> {
-    return streamRunSqlScript(
-      {
-        baseUrl: this.baseUrl,
-        getAuthHeaders: (extra, includeJson) => this.getAuthHeaders(extra, includeJson),
-        handleNonOkResponse: (res) => this.handleNonOkResponse(res),
-      },
-      sessionId,
-      file,
-      options,
-      onProgress
-    );
+    return streamRunSqlScript(this.streamContext, sessionId, file, options, onProgress);
   }
 
   // Diagnostic Logs (Persistent Rotating Log File & Client Telemetry)
@@ -1098,7 +1064,7 @@ class ApiClient extends ApiHttpBase {
   reportClientLog(payload: { level: string; module: string; message: string; stack?: string }) {
     try {
       const headers = this.getAuthHeaders({}, true);
-      void fetch('/api/logs/client', {
+      void fetch(`${this.baseUrl}/logs/client`, {
         method: 'POST',
         headers,
         body: JSON.stringify(payload),

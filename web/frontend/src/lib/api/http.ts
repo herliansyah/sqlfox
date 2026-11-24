@@ -134,6 +134,9 @@ export function normalizeExecResult(res: QueryExecutionResult): QueryExecutionRe
 
 export class ApiHttpBase {
   protected baseUrl = '/api';
+  public onRemoteLocked?: (locked: boolean) => void;
+  public onReadOnlySync?: (readOnly: boolean) => void;
+  public onReconnectNeeded?: () => void;
 
   protected getAuthHeaders(extra: Record<string, string> = {}, includeJsonContentType = true): Record<string, string> {
     const headers: Record<string, string> = {};
@@ -145,8 +148,8 @@ export class ApiHttpBase {
   }
 
   protected async handleNonOkResponse(res: Response): Promise<never> {
-    if (res.status === 401 && typeof window !== 'undefined' && (window as any).__sqlfox_set_remote_locked) {
-      (window as any).__sqlfox_set_remote_locked(true);
+    if (res.status === 401) {
+      this.onRemoteLocked?.(true);
     }
     let errorMsg = `HTTP Error ${res.status}`;
     let parsedData: any = null;
@@ -158,25 +161,33 @@ export class ApiHttpBase {
     } catch {
       if (res.statusText) errorMsg = res.statusText;
     }
-    if (res.status === 403 && /read[- ]?only/i.test(errorMsg) && typeof window !== 'undefined') {
-      (window as any).__sqlfox_sync_readonly?.(true);
+    if (res.status === 403 && /read[- ]?only/i.test(errorMsg)) {
+      this.onReadOnlySync?.(true);
     }
     throw new HttpStatusError(res.status, errorMsg, parsedData);
   }
 
-  protected async request<T>(
+  protected buildAbortSignal(userSignal?: AbortSignal | null, timeoutMs?: number | null): AbortSignal | undefined {
+    const hasTimeout = Boolean(timeoutMs && timeoutMs > 0 && typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal);
+    const timeoutSignal = hasTimeout ? AbortSignal.timeout(timeoutMs!) : undefined;
+    if (userSignal && timeoutSignal) {
+      return typeof (AbortSignal as any).any === 'function'
+        ? (AbortSignal as any).any([userSignal, timeoutSignal])
+        : userSignal;
+    }
+    return userSignal || timeoutSignal;
+  }
+
+  protected async rawFetch(
     endpoint: string,
-    options: RequestInit & { timeoutMs?: number | null } = {}
-  ): Promise<T> {
+    options: RequestInit & { timeoutMs?: number | null; allowStatuses?: number[] } = {}
+  ): Promise<Response> {
     const url = endpoint.startsWith('/api') ? endpoint : `${this.baseUrl}${endpoint}`;
     const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
     const headers = this.getAuthHeaders((options.headers as Record<string, string>) || {}, !isFormData);
 
-    const { timeoutMs = 15000, ...fetchOpts } = options;
-    let signal = fetchOpts.signal;
-    if (!signal && timeoutMs && timeoutMs > 0 && typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal) {
-      signal = AbortSignal.timeout(timeoutMs);
-    }
+    const { timeoutMs = 15000, allowStatuses, ...fetchOpts } = options;
+    const signal = this.buildAbortSignal(fetchOpts.signal, timeoutMs);
 
     let res: Response;
     try {
@@ -185,13 +196,24 @@ export class ApiHttpBase {
       if (err?.name === 'AbortError' || err?.name === 'TimeoutError') {
         throw err;
       }
-      if (typeof window !== 'undefined') (window as any).__sqlfox_trigger_reconnect?.();
+      this.onReconnectNeeded?.();
       throw new Error(`Cannot reach SqlFox daemon at ${this.baseUrl.replace(/\/api$/, '')} — is it still running?`);
     }
-    if (!res.ok) {
+    if (!res.ok && !(allowStatuses && allowStatuses.includes(res.status))) {
       await this.handleNonOkResponse(res);
     }
+    return res;
+  }
 
-    return res.json() as Promise<T>;
+  protected async request<T>(
+    endpoint: string,
+    options: RequestInit & { timeoutMs?: number | null } = {}
+  ): Promise<T> {
+    const res = await this.rawFetch(endpoint, options);
+    if (res.status === 204) {
+      return undefined as T;
+    }
+    const text = await res.text();
+    return (text ? JSON.parse(text) : undefined) as T;
   }
 }

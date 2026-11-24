@@ -8,10 +8,16 @@
   import { onDestroy, tick } from 'svelte';
   import { viewportFit } from '../../actions/viewportFit';
 
+  function loadSidebarWidth(): number {
+    try {
+      return Math.max(200, Math.min(500, Number(localStorage.getItem('sqlfox_sidebar_width')) || 260));
+    } catch {
+      return 260;
+    }
+  }
+
   // Resizable sidebar width with persistence
-  let sidebarWidth = $state(
-    Math.max(200, Math.min(500, Number(localStorage.getItem('sqlfox_sidebar_width')) || 260))
-  );
+  let sidebarWidth = $state(loadSidebarWidth());
   let isDragging = $state(false);
 
   function startResize(e: MouseEvent) {
@@ -32,7 +38,9 @@
     isDragging = false;
     window.removeEventListener('mousemove', onResize);
     window.removeEventListener('mouseup', stopResize);
-    localStorage.setItem('sqlfox_sidebar_width', String(sidebarWidth));
+    try {
+      localStorage.setItem('sqlfox_sidebar_width', String(sidebarWidth));
+    } catch { /* ignore storage restrictions */ }
   }
 
   // Release window listeners if the component unmounts mid-resize.
@@ -45,7 +53,9 @@
 
   function resetWidth() {
     sidebarWidth = 260;
-    localStorage.setItem('sqlfox_sidebar_width', '260');
+    try {
+      localStorage.setItem('sqlfox_sidebar_width', '260');
+    } catch { /* ignore storage restrictions */ }
   }
 
   onDestroy(stopResize);
