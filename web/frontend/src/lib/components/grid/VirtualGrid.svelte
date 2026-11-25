@@ -335,6 +335,28 @@
 
   let visibleColumns = $derived(visibleColumnEntries.map((e) => e.col));
 
+  // Pre-compute stable column widths from header + sampled rows so virtualized vertical scrolling
+  // never causes columns to jump horizontally as different row slices enter the viewport.
+  let columnWidths = $derived.by(() => {
+    const widths: Record<string, number> = {};
+    const rows = result?.rows || [];
+    const sampleCount = Math.min(rows.length, 40);
+    for (const entry of visibleColumnEntries) {
+      const colName = getColName(entry.col);
+      const colType = resolveColType(entry.col);
+      let maxChars = colName.length + (colType ? colType.length + 3 : 0);
+      for (let i = 0; i < sampleCount; i++) {
+        const v = rows[i]?.[entry.origIdx];
+        if (v !== null && v !== undefined) {
+          const len = typeof v === 'string' ? v.length : String(v).length;
+          if (len > maxChars) maxChars = len;
+        }
+      }
+      widths[colName] = Math.min(340, Math.max(110, maxChars * 8 + 32));
+    }
+    return widths;
+  });
+
   let fkMap = $derived.by(() => {
     const map = new Map<string, any>();
     for (const fk of tableMeta?.foreign_keys || []) {
@@ -1961,7 +1983,13 @@
       tabindex="0"
       class="flex-1 overflow-auto relative border-t border-[#1e293b] outline-none"
     >
-      <table id="results-table" class="border-collapse text-left font-mono text-xs w-auto">
+      <table id="results-table" class="border-collapse text-left font-mono text-xs table-fixed">
+        <colgroup>
+          <col style="width: 64px;" />
+          {#each visibleColumns as col}
+            <col style="width: {columnWidths[getColName(col)] || 160}px;" />
+          {/each}
+        </colgroup>
         <!-- Sticky Header -->
         <thead class="sticky top-0 z-20 bg-[#0f172a] border-b border-[#334155] shadow-sm select-none">
           <tr>
