@@ -722,30 +722,12 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 			auditSQL = fmt.Sprintf("UPDATE %s SET %s = %s WHERE %s = %s",
 				tableRef, quoteIdent(item.Column), valLiteral, quoteIdent(item.PKColumn), pkLiteral)
 		} else if len(item.RowCriteria) > 0 {
-			var whereParts []string
-			var auditWhereParts []string
-			critKeys := make([]string, 0, len(item.RowCriteria))
-			for cName := range item.RowCriteria {
-				critKeys = append(critKeys, cName)
-			}
-			slices.Sort(critKeys)
-			for _, cName := range critKeys {
-				cVal := normalizeJSONParam(item.RowCriteria[cName])
-				if cVal == nil {
-					whereParts = append(whereParts, fmt.Sprintf("%s IS NULL", quoteIdent(cName)))
-					auditWhereParts = append(auditWhereParts, fmt.Sprintf("%s IS NULL", quoteIdent(cName)))
-				} else {
-					pCrit := driver.Placeholder(sess.DriverName, pIdx)
-					pIdx++
-					args = append(args, cVal)
-					whereParts = append(whereParts, fmt.Sprintf("%s = %s", quoteIdent(cName), pCrit))
-					auditWhereParts = append(auditWhereParts, fmt.Sprintf("%s = %s", quoteIdent(cName), driver.FormatSQLValueForDriver(cVal, sess.DriverName)))
-				}
-			}
+			whereSQL, auditWhereSQL, critArgs := buildRowCriteriaWhere(sess, item.Table, item.RowCriteria, pIdx)
+			args = append(args, critArgs...)
 			updateSQL = fmt.Sprintf("UPDATE %s SET %s = %s WHERE %s",
-				tableRef, quoteIdent(item.Column), pVal, singleRowWhere(sess.DriverName, tableRef, strings.Join(whereParts, " AND ")))
+				tableRef, quoteIdent(item.Column), pVal, singleRowWhere(sess.DriverName, tableRef, whereSQL))
 			auditSQL = fmt.Sprintf("UPDATE %s SET %s = %s WHERE %s",
-				tableRef, quoteIdent(item.Column), valLiteral, singleRowWhere(sess.DriverName, tableRef, strings.Join(auditWhereParts, " AND ")))
+				tableRef, quoteIdent(item.Column), valLiteral, singleRowWhere(sess.DriverName, tableRef, auditWhereSQL))
 		} else {
 			_ = finish(errors.New("each edit item requires pk_column/pk_value, pk_values, or row_criteria"))
 			writeError(w, http.StatusBadRequest, "each edit item requires pk_column/pk_value, pk_values, or row_criteria")

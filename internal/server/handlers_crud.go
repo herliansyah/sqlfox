@@ -319,30 +319,9 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "row_criteria cannot be empty")
 				return
 			}
-			var whereParts []string
-			var auditWhereParts []string
-			var args []any
-			pIdx := 1
-			critKeys := make([]string, 0, len(rc))
-			for cName := range rc {
-				critKeys = append(critKeys, cName)
-			}
-			slices.Sort(critKeys)
-			for _, cName := range critKeys {
-				cVal := normalizeJSONParam(rc[cName])
-				if cVal == nil {
-					whereParts = append(whereParts, fmt.Sprintf("%s IS NULL", quoteIdent(cName, sess.DriverName)))
-					auditWhereParts = append(auditWhereParts, fmt.Sprintf("%s IS NULL", quoteIdent(cName, sess.DriverName)))
-				} else {
-					pCrit := driver.Placeholder(sess.DriverName, pIdx)
-					pIdx++
-					args = append(args, cVal)
-					whereParts = append(whereParts, fmt.Sprintf("%s = %s", quoteIdent(cName, sess.DriverName), pCrit))
-					auditWhereParts = append(auditWhereParts, fmt.Sprintf("%s = %s", quoteIdent(cName, sess.DriverName), driver.FormatSQLValueForDriver(cVal, sess.DriverName)))
-				}
-			}
-			delSQL := "DELETE FROM " + targetTable + " WHERE " + singleRowWhere(sess.DriverName, targetTable, strings.Join(whereParts, " AND "))
-			auditSQL := "DELETE FROM " + targetTable + " WHERE " + singleRowWhere(sess.DriverName, targetTable, strings.Join(auditWhereParts, " AND "))
+			whereSQL, auditWhereSQL, args := buildRowCriteriaWhere(sess, req.Table, rc, 1)
+			delSQL := "DELETE FROM " + targetTable + " WHERE " + singleRowWhere(sess.DriverName, targetTable, whereSQL)
+			auditSQL := "DELETE FROM " + targetTable + " WHERE " + singleRowWhere(sess.DriverName, targetTable, auditWhereSQL)
 			rowStart := time.Now()
 			res, err := exec.Exec(ctx, delSQL, args...)
 			rowDur := time.Since(rowStart).Milliseconds()
@@ -369,6 +348,83 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 		"rows_affected": totalAffected,
 		"execution_ms":  execMs,
 	})
+}
+
+// isNonComparableColumnType reports column types (such as json, xml, bytea, geometry) that
+// lack an equality (=) operator in PostgreSQL or are unreliable in PK-less WHERE predicates.
+func isNonComparableColumnType(colType string) bool {
+	tp := strings.ToLower(strings.TrimSpace(colType))
+	if idx := strings.IndexByte(tp, '('); idx >= 0 {
+		tp = strings.TrimSpace(tp[:idx])
+	}
+	switch tp {
+	case "json", "jsonb", "xml", "bytea", "blob", "tinyblob", "mediumblob", "longblob",
+		"geometry", "point", "linestring", "polygon", "multipoint", "multilinestring",
+		"multipolygon", "geometrycollection":
+		return true
+	}
+	return false
+}
+
+// buildRowCriteriaWhere builds a deterministic parameterized WHERE clause for PK-less tables,
+// skipping non-comparable column types when at least one comparable column is present.
+func buildRowCriteriaWhere(sess *ActiveSession, table string, rc map[string]any, startIdx int) (string, string, []any) {
+	critKeys := make([]string, 0, len(rc))
+	for cName := range rc {
+		critKeys = append(critKeys, cName)
+	}
+	slices.Sort(critKeys)
+
+	var nonComp map[string]bool
+	if sess != nil {
+		if sc := sess.Schema(); sc != nil {
+			for _, tbl := range sc.Tables {
+				if strings.EqualFold(tbl.Name, table) {
+					nonComp = make(map[string]bool)
+					for _, col := range tbl.Columns {
+						if isNonComparableColumnType(col.Type) {
+							nonComp[strings.ToLower(col.Name)] = true
+						}
+					}
+					break
+				}
+			}
+		}
+	}
+
+	filtered := make([]string, 0, len(critKeys))
+	for _, k := range critKeys {
+		if !nonComp[strings.ToLower(k)] {
+			filtered = append(filtered, k)
+		}
+	}
+	if len(filtered) > 0 {
+		critKeys = filtered
+	}
+
+	var whereParts []string
+	var auditWhereParts []string
+	var args []any
+	pIdx := startIdx
+	drv := ""
+	if sess != nil {
+		drv = sess.DriverName
+	}
+	for _, cName := range critKeys {
+		cVal := normalizeJSONParam(rc[cName])
+		qCol := quoteIdent(cName, drv)
+		if cVal == nil {
+			whereParts = append(whereParts, qCol+" IS NULL")
+			auditWhereParts = append(auditWhereParts, qCol+" IS NULL")
+		} else {
+			pCrit := driver.Placeholder(drv, pIdx)
+			pIdx++
+			args = append(args, cVal)
+			whereParts = append(whereParts, fmt.Sprintf("%s = %s", qCol, pCrit))
+			auditWhereParts = append(auditWhereParts, fmt.Sprintf("%s = %s", qCol, driver.FormatSQLValueForDriver(cVal, drv)))
+		}
+	}
+	return strings.Join(whereParts, " AND "), strings.Join(auditWhereParts, " AND "), args
 }
 
 // singleRowWhere turns a full-row criteria predicate into one that matches at most ONE physical row,

@@ -447,7 +447,34 @@ func (s *SQLiteSession) GetTableDDL(ctx context.Context, tableName string) (stri
 	if err != nil {
 		return "", err
 	}
-	return sqlStr.String, nil
+	ddl := strings.TrimSpace(sqlStr.String)
+	if ddl == "" {
+		return "", nil
+	}
+	if !strings.HasSuffix(ddl, ";") {
+		ddl += ";"
+	}
+	idxRows, idxErr := s.db.QueryContext(ctx, "SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL", tableName)
+	if idxErr == nil {
+		defer idxRows.Close()
+		var idxDDLs []string
+		for idxRows.Next() {
+			var idxSQL sql.NullString
+			if scanErr := idxRows.Scan(&idxSQL); scanErr == nil {
+				sIdx := strings.TrimSpace(idxSQL.String)
+				if sIdx != "" {
+					if !strings.HasSuffix(sIdx, ";") {
+						sIdx += ";"
+					}
+					idxDDLs = append(idxDDLs, sIdx)
+				}
+			}
+		}
+		if len(idxDDLs) > 0 {
+			ddl += "\n" + strings.Join(idxDDLs, "\n")
+		}
+	}
+	return ddl, nil
 }
 
 func (s *SQLiteSession) GetTableEstimate(ctx context.Context, tableName string) (*driver.TableEstimate, error) {
