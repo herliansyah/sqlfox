@@ -422,26 +422,43 @@ func (s *MySQLSession) InspectFastCatalog(ctx context.Context) (map[string][]dri
 }
 
 func (s *MySQLSession) SelectDatabase(ctx context.Context, dbName string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if dbName == "" {
 		return nil
 	}
 
+	// Never hold s.mu across network I/O, and always execute USE on an explicit *sql.Conn
+	// whose connStates cache entry we update atomically so pooled connections never desync.
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to acquire connection for database %s: %w", dbName, err)
+	}
+	defer conn.Close()
+
 	escaped := strings.ReplaceAll(dbName, "`", "``")
-	if _, err := s.db.ExecContext(ctx, fmt.Sprintf("USE `%s`", escaped)); err != nil {
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf("USE `%s`", escaped)); err != nil {
 		return fmt.Errorf("failed to select database %s: %w", dbName, err)
 	}
+	if st := s.getConnState(conn); st != nil {
+		st.mu.Lock()
+		st.lastDB = dbName
+		st.mu.Unlock()
+	}
+
+	s.mu.Lock()
 	s.cfg.DatabaseName = dbName
+	s.mu.Unlock()
 	return nil
 }
 
 func (s *MySQLSession) GetTableDDL(ctx context.Context, tableName string) (string, error) {
 	var tbl, ddl string
 	escapedTbl := strings.ReplaceAll(tableName, "`", "``")
+	dbName := driver.DatabaseFromContext(ctx)
+	if dbName == "" {
+		dbName = s.activeDB()
+	}
 	var query string
-	if dbName := s.activeDB(); dbName != "" {
+	if dbName != "" {
 		escapedDB := strings.ReplaceAll(dbName, "`", "``")
 		query = fmt.Sprintf("SHOW CREATE TABLE `%s`.`%s`", escapedDB, escapedTbl)
 	} else {
@@ -480,7 +497,11 @@ func (s *MySQLSession) GetTableEstimate(ctx context.Context, tableName string) (
 	FROM information_schema.TABLES
 	WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?;
 	`
-	err := s.db.QueryRowContext(ctx, query, s.activeDB(), tableName).Scan(&rowCount, &sizeBytes)
+	dbName := driver.DatabaseFromContext(ctx)
+	if dbName == "" {
+		dbName = s.activeDB()
+	}
+	err := s.db.QueryRowContext(ctx, query, dbName, tableName).Scan(&rowCount, &sizeBytes)
 	if err != nil {
 		return &driver.TableEstimate{RowCount: 0, SizeBytes: 0}, nil
 	}
@@ -491,13 +512,12 @@ func (s *MySQLSession) GetTableEstimate(ctx context.Context, tableName string) (
 }
 
 func (s *MySQLSession) Explain(ctx context.Context, querySQL string) (*driver.ExplainPlan, error) {
-	cleanedSQL := strings.TrimSpace(querySQL)
-	cleanedSQL = strings.TrimRight(cleanedSQL, "; \t\r\n")
-	if strings.HasPrefix(strings.ToUpper(cleanedSQL), "EXPLAIN ") {
-		cleanedSQL = strings.TrimSpace(cleanedSQL[8:])
-	}
-	if cleanedSQL == "" {
+	if strings.TrimSpace(querySQL) == "" {
 		return &driver.ExplainPlan{Rows: []driver.ExplainRow{}}, nil
+	}
+	cleanedSQL, err := driver.ExplainTarget(driver.SplitSQLStatements(querySQL, "mysql"))
+	if err != nil {
+		return nil, err
 	}
 
 	conn, err := s.db.Conn(ctx)

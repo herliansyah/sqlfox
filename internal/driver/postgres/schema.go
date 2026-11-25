@@ -141,8 +141,10 @@ func (s *PostgresSession) inspectSchemaFiltered(ctx context.Context, schemaName,
 		SELECT c.relname as table_name,
 		       i.relname as index_name,
 		       ix.indisunique as is_unique,
+		       ix.indisprimary as is_primary,
 		       pg_catalog.pg_get_indexdef(ix.indexrelid, 0, true) as index_def,
-		       am.amname as index_type
+		       am.amname as index_type,
+		       COALESCE(pg_catalog.pg_get_expr(ix.indpred, ix.indrelid), '') as where_clause
 		FROM pg_catalog.pg_index ix
 		JOIN pg_catalog.pg_class c ON c.oid = ix.indrelid
 		JOIN pg_catalog.pg_class i ON i.oid = ix.indexrelid
@@ -154,17 +156,21 @@ func (s *PostgresSession) inspectSchemaFiltered(ctx context.Context, schemaName,
 	`, schemaName, onlyTable)
 	if err == nil {
 		for idxRows.Next() {
-			var tbl, idxName, indexDef, indexType string
-			var isUnique bool
-			if err := idxRows.Scan(&tbl, &idxName, &isUnique, &indexDef, &indexType); err == nil {
+			var tbl, idxName, indexDef, indexType, whereClause string
+			var isUnique, isPrimary bool
+			if err := idxRows.Scan(&tbl, &idxName, &isUnique, &isPrimary, &indexDef, &indexType, &whereClause); err == nil {
 				if t, ok := tablesMap[tbl]; ok {
-					// Parse columns out of index definition if feasible
 					cols := extractColumnsFromIndexDef(indexDef)
+					if whereClause == "" {
+						whereClause = extractWhereFromIndexDef(indexDef)
+					}
 					t.Indexes = append(t.Indexes, driver.IndexMetadata{
-						Name:     idxName,
-						Columns:  cols,
-						IsUnique: isUnique,
-						Type:     strings.ToUpper(indexType),
+						Name:        idxName,
+						Columns:     cols,
+						IsUnique:    isUnique,
+						IsPrimary:   isPrimary,
+						Type:        strings.ToUpper(indexType),
+						WhereClause: strings.TrimSpace(whereClause),
 					})
 				}
 			}
@@ -361,7 +367,10 @@ func (s *PostgresSession) InspectFastCatalog(ctx context.Context) (map[string][]
 }
 
 func (s *PostgresSession) GetTableDDL(ctx context.Context, tableName string) (string, error) {
-	schemaName := s.activeSchema()
+	schemaName := driver.DatabaseFromContext(ctx)
+	if schemaName == "" {
+		schemaName = s.activeSchema()
+	}
 	if ddl, err := s.viewDDL(ctx, schemaName, tableName); err == nil {
 		return ddl, nil
 	}
@@ -404,7 +413,11 @@ func (s *PostgresSession) GetTableEstimate(ctx context.Context, tableName string
 	var rowCount int64
 	var sizeBytes int64
 
-	regClass := fmt.Sprintf("%s.%s", quoteIdentifier(s.activeSchema()), quoteIdentifier(tableName))
+	schemaName := driver.DatabaseFromContext(ctx)
+	if schemaName == "" {
+		schemaName = s.activeSchema()
+	}
+	regClass := fmt.Sprintf("%s.%s", quoteIdentifier(schemaName), quoteIdentifier(tableName))
 	query := `
 		SELECT COALESCE(reltuples::bigint, 0),
 		       pg_total_relation_size($1::regclass)
@@ -427,11 +440,12 @@ func (s *PostgresSession) GetTableEstimate(ctx context.Context, tableName string
 }
 
 func (s *PostgresSession) Explain(ctx context.Context, querySQL string) (*driver.ExplainPlan, error) {
-	cleaned := strings.TrimSpace(querySQL)
-	cleaned = strings.TrimRight(cleaned, "; \t\r\n")
-	upper := strings.ToUpper(cleaned)
-	if strings.HasPrefix(upper, "EXPLAIN ") {
-		cleaned = strings.TrimSpace(cleaned[8:])
+	if strings.TrimSpace(querySQL) == "" {
+		return &driver.ExplainPlan{Rows: []driver.ExplainRow{}}, nil
+	}
+	cleaned, err := driver.ExplainTarget(driver.SplitSQLStatements(querySQL, "postgres"))
+	if err != nil {
+		return nil, err
 	}
 
 	conn, err := s.db.Conn(ctx)
@@ -443,8 +457,7 @@ func (s *PostgresSession) Explain(ctx context.Context, querySQL string) (*driver
 		return nil, err
 	}
 
-	// ANALYZE executes the statement, so every tier runs inside a READ ONLY transaction that is
-	// always rolled back: DML (or data-modifying CTEs) can never be applied by an Explain request.
+	// Always run inside a READ ONLY transaction that is rolled back so Explain can never mutate data.
 	inReadOnlyTx := func(fn func(tx *sql.Tx) error) error {
 		tx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 		if err != nil {
@@ -454,9 +467,10 @@ func (s *PostgresSession) Explain(ctx context.Context, querySQL string) (*driver
 		return fn(tx)
 	}
 
-	// Tier 1: Full ANALYZE+BUFFERS plan (actual row counts) — only for row-returning statements.
 	var rawJSON string
-	if driver.IsQueryStatement(cleaned) {
+	// Opt-in Tier 1: EXPLAIN ANALYZE actually executes the query (can cause heavy CPU/IO/lock load
+	// on Production), so it only runs when the caller explicitly opts in via WithExplainAnalyze.
+	if driver.ExplainAnalyzeFromContext(ctx) && driver.IsQueryStatement(cleaned) {
 		const analyzeFmt = "EXPLAIN (ANALYZE, COSTS, VERBOSE, BUFFERS, FORMAT JSON) "
 		if err := inReadOnlyTx(func(tx *sql.Tx) error {
 			return tx.QueryRowContext(ctx, analyzeFmt+cleaned).Scan(&rawJSON)
@@ -465,14 +479,21 @@ func (s *PostgresSession) Explain(ctx context.Context, querySQL string) (*driver
 		}
 	}
 
-	// Tier 2: Cost-only JSON plan (no execution; works for DML without running it)
+	// Default Tier: Cost-only JSON plan (safe, never executes the query).
+	if err := inReadOnlyTx(func(tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, "EXPLAIN (COSTS, VERBOSE, FORMAT JSON) "+cleaned).Scan(&rawJSON)
+	}); err == nil {
+		return &driver.ExplainPlan{RawJSON: rawJSON, Rows: extractPGPlanRows(rawJSON)}, nil
+	}
+
+	// Fallback: Basic JSON plan
 	if err := inReadOnlyTx(func(tx *sql.Tx) error {
 		return tx.QueryRowContext(ctx, "EXPLAIN (FORMAT JSON) "+cleaned).Scan(&rawJSON)
 	}); err == nil {
 		return &driver.ExplainPlan{RawJSON: rawJSON, Rows: extractPGPlanRows(rawJSON)}, nil
 	}
 
-	// Tier 3: Text EXPLAIN fallback (ancient PG or unusual syntax)
+	// Text EXPLAIN fallback (ancient PG or unusual syntax)
 	var planRows []driver.ExplainRow
 	err = inReadOnlyTx(func(tx *sql.Tx) error {
 		rows, err := tx.QueryContext(ctx, "EXPLAIN "+cleaned)
@@ -498,15 +519,30 @@ func (s *PostgresSession) Explain(ctx context.Context, querySQL string) (*driver
 }
 
 func (s *PostgresSession) InspectTableLocks(ctx context.Context, database, table string) ([]driver.TableLockInfo, error) {
+	schema := database
+	if schema == "" || schema == s.cfg.DatabaseName {
+		schema = s.activeSchema()
+	}
+	if schema == "" {
+		schema = "public"
+	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT pid, COALESCE(usename, '') as user, COALESCE(query, '') as query,
-		       COALESCE(state, '') as state,
-		       COALESCE(EXTRACT(EPOCH FROM (clock_timestamp() - query_start))::bigint, 0) as time_sec
-		FROM pg_stat_activity
-		WHERE datname = current_database()
-		  AND query ILIKE '%' || $1 || '%'
-		  AND pid != pg_backend_pid();
-	`, table)
+		SELECT a.pid,
+		       COALESCE(a.usename, '') AS usr,
+		       COALESCE(a.client_addr::text, 'local') AS host,
+		       COALESCE(a.query, '') AS query,
+		       COALESCE(a.state, '') AS state,
+		       COALESCE(EXTRACT(EPOCH FROM (clock_timestamp() - a.query_start))::bigint, 0) AS time_sec,
+		       COALESCE(l.mode, '') AS lock_mode
+		FROM pg_catalog.pg_locks l
+		JOIN pg_catalog.pg_class c ON c.oid = l.relation
+		JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+		JOIN pg_catalog.pg_stat_activity a ON a.pid = l.pid
+		WHERE a.datname = current_database()
+		  AND n.nspname = $1
+		  AND c.relname = $2
+		  AND a.pid != pg_backend_pid();
+	`, schema, table)
 	if err != nil {
 		return []driver.TableLockInfo{}, nil
 	}
@@ -515,17 +551,17 @@ func (s *PostgresSession) InspectTableLocks(ctx context.Context, database, table
 	var locks []driver.TableLockInfo
 	for rows.Next() {
 		var pid, timeSec int64
-		var user, query, state string
-		if err := rows.Scan(&pid, &user, &query, &state, &timeSec); err == nil {
+		var user, host, query, state, lockMode string
+		if err := rows.Scan(&pid, &user, &host, &query, &state, &timeSec, &lockMode); err == nil {
 			locks = append(locks, driver.TableLockInfo{
 				ThreadID:    pid,
 				User:        user,
-				Host:        "local",
-				Database:    s.cfg.DatabaseName,
+				Host:        host,
+				Database:    schema,
 				State:       state,
 				Query:       query,
 				DurationSec: timeSec,
-				LockMode:    "TABLE_ACCESS",
+				LockMode:    lockMode,
 			})
 		}
 	}
@@ -570,58 +606,117 @@ func (s *PostgresSession) ExecSafeDDL(ctx context.Context, ddl string, lockTimeo
 	}, nil
 }
 
-func extractColumnsFromIndexDef(def string) []string {
+func extractIndexParenSpan(def string) (int, int) {
 	openIdx := strings.Index(def, "(")
 	if openIdx == -1 {
-		return []string{}
+		return -1, -1
 	}
 	// Walk forward from the opening '(' to find its matching ')' so trailing clauses
 	// such as WHERE (...) in partial indexes are not included.
 	depth := 0
-	closeIdx := -1
-	inQuote := false
+	inDouble := false
+	inSingle := false
 	for i := openIdx; i < len(def); i++ {
 		c := def[i]
-		if c == '"' {
-			inQuote = !inQuote
+		if inSingle {
+			if c == '\'' {
+				if i+1 < len(def) && def[i+1] == '\'' {
+					i++
+					continue
+				}
+				inSingle = false
+			}
 			continue
 		}
-		if inQuote {
+		if inDouble {
+			if c == '"' {
+				if i+1 < len(def) && def[i+1] == '"' {
+					i++
+					continue
+				}
+				inDouble = false
+			}
 			continue
 		}
-		if c == '(' {
+		switch c {
+		case '\'':
+			inSingle = true
+		case '"':
+			inDouble = true
+		case '(':
 			depth++
-		} else if c == ')' {
+		case ')':
 			depth--
 			if depth == 0 {
-				closeIdx = i
-				break
+				return openIdx, i
 			}
 		}
 	}
-	if closeIdx == -1 || closeIdx <= openIdx {
+	return openIdx, -1
+}
+
+func extractWhereFromIndexDef(def string) string {
+	_, closeIdx := extractIndexParenSpan(def)
+	if closeIdx == -1 || closeIdx+1 >= len(def) {
+		return ""
+	}
+	tail := strings.TrimSpace(def[closeIdx+1:])
+	upperTail := strings.ToUpper(tail)
+	idx := strings.Index(upperTail, "WHERE ")
+	if idx == -1 {
+		return ""
+	}
+	return strings.TrimSpace(tail[idx+len("WHERE "):])
+}
+
+func extractColumnsFromIndexDef(def string) []string {
+	openIdx, closeIdx := extractIndexParenSpan(def)
+	if openIdx == -1 || closeIdx == -1 || closeIdx <= openIdx {
 		return []string{}
 	}
 	raw := def[openIdx+1 : closeIdx]
 	var cols []string
 	start := 0
-	depth = 0
-	inQuote = false
+	depth := 0
+	inDouble := false
+	inSingle := false
 	for i := 0; i <= len(raw); i++ {
 		if i < len(raw) {
 			c := raw[i]
-			if c == '"' {
-				inQuote = !inQuote
+			if inSingle {
+				if c == '\'' {
+					if i+1 < len(raw) && raw[i+1] == '\'' {
+						i++
+						continue
+					}
+					inSingle = false
+				}
 				continue
 			}
-			if !inQuote {
-				if c == '(' {
-					depth++
-				} else if c == ')' && depth > 0 {
-					depth--
+			if inDouble {
+				if c == '"' {
+					if i+1 < len(raw) && raw[i+1] == '"' {
+						i++
+						continue
+					}
+					inDouble = false
 				}
+				continue
 			}
-			if c != ',' || depth > 0 || inQuote {
+			if c == '\'' {
+				inSingle = true
+				continue
+			}
+			if c == '"' {
+				inDouble = true
+				continue
+			}
+			if c == '(' {
+				depth++
+			} else if c == ')' && depth > 0 {
+				depth--
+			}
+			if c != ',' || depth > 0 {
 				continue
 			}
 		}
@@ -698,13 +793,29 @@ func generatePostgresCreateDDL(schema string, tbl driver.TableMetadata) string {
 		lines = append(lines, line)
 	}
 
-	// Primary Key
+	// Primary Key: prefer the PK index's indkey column order over attnum column definition order
+	// so composite primary keys like PRIMARY KEY (b, a) preserve their exact key sequence.
 	var pkCols []string
 	pkColMap := make(map[string]bool)
-	for _, col := range tbl.Columns {
-		if col.IsPrimaryKey {
-			pkCols = append(pkCols, quoteIdentifier(col.Name))
-			pkColMap[strings.ToLower(col.Name)] = true
+	for _, idx := range tbl.Indexes {
+		if (idx.IsPrimary || strings.HasSuffix(idx.Name, "_pkey")) && len(idx.Columns) > 0 {
+			for _, c := range idx.Columns {
+				if isSimplePGColumnIdent(c) {
+					pkCols = append(pkCols, quoteIdentifier(c))
+				} else {
+					pkCols = append(pkCols, c)
+				}
+				pkColMap[strings.ToLower(c)] = true
+			}
+			break
+		}
+	}
+	if len(pkCols) == 0 {
+		for _, col := range tbl.Columns {
+			if col.IsPrimaryKey {
+				pkCols = append(pkCols, quoteIdentifier(col.Name))
+				pkColMap[strings.ToLower(col.Name)] = true
+			}
 		}
 	}
 	if len(pkCols) > 0 {
@@ -745,10 +856,10 @@ func generatePostgresCreateDDL(schema string, tbl driver.TableMetadata) string {
 
 	// Indexes
 	for _, idx := range tbl.Indexes {
-		if strings.HasSuffix(idx.Name, "_pkey") {
+		if idx.IsPrimary || strings.HasSuffix(idx.Name, "_pkey") {
 			continue // Skip PK indexes
 		}
-		if len(pkColMap) > 0 && len(idx.Columns) == len(pkColMap) && idx.IsUnique {
+		if len(pkColMap) > 0 && len(idx.Columns) == len(pkColMap) && idx.IsUnique && strings.TrimSpace(idx.WhereClause) == "" && (idx.Type == "" || strings.EqualFold(idx.Type, "BTREE")) {
 			allMatch := true
 			for _, c := range idx.Columns {
 				if !pkColMap[strings.ToLower(c)] {
@@ -764,6 +875,13 @@ func generatePostgresCreateDDL(schema string, tbl driver.TableMetadata) string {
 		if idx.IsUnique {
 			uniqueStr = "UNIQUE "
 		}
+		usingClause := ""
+		if idxType := strings.ToLower(strings.TrimSpace(idx.Type)); idxType != "" && idxType != "btree" {
+			// Allowlist safe identifier chars for access method name (gin, gist, hash, brin, spgist, bloom, etc.)
+			if isSimplePGColumnIdent(idxType) {
+				usingClause = " USING " + idxType
+			}
+		}
 		var quotedCols []string
 		for _, c := range idx.Columns {
 			if isSimplePGColumnIdent(c) {
@@ -773,13 +891,19 @@ func generatePostgresCreateDDL(schema string, tbl driver.TableMetadata) string {
 				quotedCols = append(quotedCols, c)
 			}
 		}
+		wherePart := ""
+		if w := strings.TrimSpace(idx.WhereClause); w != "" {
+			wherePart = " WHERE " + w
+		}
 		if len(quotedCols) > 0 {
-			sb.WriteString(fmt.Sprintf("\nCREATE %sINDEX %s ON %s.%s (%s);",
+			sb.WriteString(fmt.Sprintf("\nCREATE %sINDEX %s ON %s.%s%s (%s)%s;",
 				uniqueStr,
 				quoteIdentifier(idx.Name),
 				quoteIdentifier(schema),
 				quoteIdentifier(tbl.Name),
+				usingClause,
 				strings.Join(quotedCols, ", "),
+				wherePart,
 			))
 		}
 	}

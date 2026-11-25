@@ -368,10 +368,12 @@ type ColumnMetadata struct {
 }
 
 type IndexMetadata struct {
-	Name     string   `json:"name"`
-	Columns  []string `json:"columns"`
-	IsUnique bool     `json:"is_unique"`
-	Type     string   `json:"type"` // BTREE, etc.
+	Name        string   `json:"name"`
+	Columns     []string `json:"columns"`
+	IsUnique    bool     `json:"is_unique"`
+	IsPrimary   bool     `json:"is_primary,omitempty"`
+	Type        string   `json:"type"` // BTREE, GIN, GIST, HASH, BRIN, etc.
+	WhereClause string   `json:"where_clause,omitempty"`
 }
 
 type ForeignKeyMetadata struct {

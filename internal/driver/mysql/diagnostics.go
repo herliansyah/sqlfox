@@ -685,15 +685,16 @@ func (s *MySQLSession) GetStatementDigest(ctx context.Context, limit int) ([]dri
 		return nil, fmt.Errorf("performance_schema is disabled on this server (or the account lacks SELECT on it). Enable it with performance_schema=ON in my.cnf, then restart MySQL/MariaDB, to collect statement digests")
 	}
 
-	// 1. Try querying sys.statement_analysis (default in MySQL 5.7+ & 8.0)
+	// 1. Try querying sys.x$statement_analysis (raw picoseconds in MySQL 5.7+ & 8.0;
+	// sys.statement_analysis formats latencies as human strings like '4.12 ms' which breaks numeric division).
 	sysQuery := fmt.Sprintf(`
 		SELECT 
 			IFNULL(query, '') AS query_text,
 			IFNULL(exec_count, 0) AS exec_count,
-			IFNULL(ROUND(total_latency / 1000000, 2), 0) AS total_latency_ms,
-			IFNULL(ROUND(avg_latency / 1000000, 2), 0) AS avg_latency_ms,
-			IFNULL(ROUND(max_latency / 1000000, 2), 0) AS max_latency_ms,
-			IFNULL(ROUND(lock_latency / 1000000, 2), 0) AS lock_time_ms,
+			IFNULL(ROUND(total_latency / 1000000000.0, 2), 0) AS total_latency_ms,
+			IFNULL(ROUND(avg_latency / 1000000000.0, 2), 0) AS avg_latency_ms,
+			IFNULL(ROUND(max_latency / 1000000000.0, 2), 0) AS max_latency_ms,
+			IFNULL(ROUND(lock_latency / 1000000000.0, 2), 0) AS lock_time_ms,
 			IFNULL(rows_sent, 0) AS rows_sent,
 			IFNULL(rows_examined, 0) AS rows_examined,
 			IFNULL(rows_affected, 0) AS rows_affected,
@@ -702,7 +703,7 @@ func (s *MySQLSession) GetStatementDigest(ctx context.Context, limit int) ([]dri
 			IFNULL(DATE_FORMAT(first_seen, '%%Y-%%m-%%d %%H:%%i:%%s'), '') AS first_seen,
 			IFNULL(DATE_FORMAT(last_seen, '%%Y-%%m-%%d %%H:%%i:%%s'), '') AS last_seen,
 			IFNULL(digest, '') AS digest
-		FROM sys.statement_analysis
+		FROM sys.x$statement_analysis
 		WHERE query IS NOT NULL AND query != ''
 		ORDER BY total_latency DESC
 		LIMIT %d;

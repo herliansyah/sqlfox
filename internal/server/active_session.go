@@ -142,18 +142,61 @@ func (s *ActiveSession) getTxStatus(tabID string) (tx driver.TxSession, aborted 
 	return nil, false, ""
 }
 
-func (s *ActiveSession) getTx(tabID string) driver.TxSession {
-	tx, _, _ := s.getTxStatus(tabID)
-	return tx
+type managedTx struct {
+	driver.TxSession
+	cancel context.CancelFunc
+}
+
+func (m *managedTx) Commit() error {
+	err := m.TxSession.Commit()
+	if m.cancel != nil {
+		m.cancel()
+	}
+	return err
+}
+
+func (m *managedTx) Rollback() error {
+	err := m.TxSession.Rollback()
+	if m.cancel != nil {
+		m.cancel()
+	}
+	return err
+}
+
+// beginTabTx starts a user-controlled tab transaction with a 15-second pool-acquisition timeout
+// while keeping the transaction context alive until Commit or Rollback (calling a short-lived
+// context's cancel func after BeginTx would immediately abort the sql.Tx via database/sql).
+func (s *ActiveSession) beginTabTx() (driver.TxSession, error) {
+	txCtx, txCancel := context.WithCancel(context.Background())
+	acquireTimer := time.AfterFunc(15*time.Second, txCancel)
+	tx, err := s.Session.BeginTx(txCtx)
+	if !acquireTimer.Stop() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+		txCancel()
+		if err != nil {
+			return nil, err
+		}
+		return nil, context.DeadlineExceeded
+	}
+	if err != nil {
+		txCancel()
+		return nil, err
+	}
+	return &managedTx{TxSession: tx, cancel: txCancel}, nil
 }
 
 func (s *ActiveSession) setTx(tabID string, tx driver.TxSession) {
 	key := normalizeTabID(tabID)
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	var prevTx driver.TxSession
 	now := time.Now()
 	if s.tabTransactions == nil {
 		s.tabTransactions = make(map[string]*activeTxInfo)
+	}
+	if existing, ok := s.tabTransactions[key]; ok && existing != nil && existing.tx != nil && existing.tx != tx {
+		prevTx = existing.tx
 	}
 	if tx != nil {
 		s.tabTransactions[key] = &activeTxInfo{
@@ -163,6 +206,11 @@ func (s *ActiveSession) setTx(tabID string, tx driver.TxSession) {
 		}
 	} else {
 		delete(s.tabTransactions, key)
+	}
+	s.mu.Unlock()
+	// Roll back any superseded transaction outside the lock so pooled connections never leak.
+	if prevTx != nil {
+		_ = prevTx.Rollback()
 	}
 }
 
@@ -298,6 +346,8 @@ type sqlExecer interface {
 // pooled connection) and finish is a no-op; otherwise a fresh transaction makes multi-row edits
 // all-or-nothing: finish(nil) commits, finish(err) rolls back and returns err.
 func (s *ActiveSession) gridWriter(ctx context.Context) (sqlExecer, func(error) error, error) {
+	// Mark in-flight so the idle transaction reaper cannot race with an active grid edit/insert/delete.
+	s.beginInFlight()
 	s.mu.Lock()
 	var tx driver.TxSession
 	if s.tabTransactions != nil {
@@ -317,16 +367,22 @@ func (s *ActiveSession) gridWriter(ctx context.Context) (sqlExecer, func(error) 
 	sess := s.Session
 	s.mu.Unlock()
 	if tx != nil {
-		return tx, func(err error) error { return err }, nil
+		return tx, func(err error) error {
+			s.endInFlight()
+			return err
+		}, nil
 	}
 	if sess == nil {
+		s.endInFlight()
 		return nil, nil, errors.New("no active database session")
 	}
 	own, err := sess.BeginTx(ctx)
 	if err != nil {
+		s.endInFlight()
 		return nil, nil, err
 	}
 	return own, func(err error) error {
+		defer s.endInFlight()
 		if err != nil {
 			_ = own.Rollback()
 			return err
@@ -712,7 +768,3 @@ func (s *ActiveSession) GetTablePartitions(ctx context.Context, database, table 
 	}
 	return pi.GetTablePartitions(ctx, database, table)
 }
-
-// inspectAllStatements runs the Safety Guard on every statement of a (possibly multi-statement) input,
-// because drivers such as SQLite execute all of them in one Exec. It returns the inspection that must
-// gate execution and whether every statement is a read-only query. More than one statement requiring a

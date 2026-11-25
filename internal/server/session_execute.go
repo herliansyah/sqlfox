@@ -155,8 +155,17 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 				}
 			}
 		} else {
-			// Staging or Production: universal confirmation
-			if anyOverThreshold || anyMissingWhere {
+			// Staging or Production: universal confirmation; fail-closed to Challenge in Production if row count could not be estimated.
+			estUnknown := inspection.EstimatedRows == nil
+			if len(inspection.StatementEstimates) > 0 {
+				for _, est := range inspection.StatementEstimates {
+					if est.EstimatedRows == nil {
+						estUnknown = true
+						break
+					}
+				}
+			}
+			if anyOverThreshold || anyMissingWhere || (strings.EqualFold(s.Environment, "Production") && estUnknown) {
 				inspection.RequiresChallenge = true
 			} else {
 				inspection.RequiresAffirmation = true
@@ -276,65 +285,38 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		}
 	}()
 
-	// Enable profiling if requested
-	if req.Profile && s.Session != nil && s.DriverName == "mysql" {
-		_, _ = s.Session.Exec(execCtx, "SET profiling = 1")
-	}
+	isMySQLFamily := strings.EqualFold(s.DriverName, "mysql") || strings.EqualFold(s.DriverName, "mariadb")
 
-	collectProfile := func() *driver.QueryProfile {
-		if !req.Profile || s.Session == nil {
+	collectFallbackProfile := func() *driver.QueryProfile {
+		if !req.Profile || s.Session == nil || isMySQLFamily {
 			return nil
 		}
-		if s.DriverName == "mysql" {
-			defer func() { _, _ = s.Session.Exec(execCtx, "SET profiling = 0") }()
-			pStream, pErr := s.Session.QueryStream(execCtx, "SHOW PROFILE", 100)
-			if pErr != nil {
-				return nil
-			}
-			defer pStream.Close()
-			var stages []driver.ProfileStage
-			var totalDuration float64
-			for {
-				chunk, err := pStream.NextChunk(100)
-				for _, row := range chunk {
-					if len(row) >= 2 {
-						stg := fmt.Sprintf("%v", row[0])
-						durSec, _ := strconv.ParseFloat(fmt.Sprintf("%v", row[1]), 64)
-						durUs := int64(durSec * 1e6)
-						totalDuration += durSec
-						stages = append(stages, driver.ProfileStage{
-							Stage:      stg,
-							DurationUs: durUs,
-						})
-					}
-				}
-				if err != nil || len(chunk) == 0 {
-					break
-				}
-			}
-			if totalDuration > 0 {
-				for i := range stages {
-					stages[i].Percentage = (float64(stages[i].DurationUs) / (totalDuration * 1e6)) * 100.0
-				}
-			}
-			return &driver.QueryProfile{
-				DurationMs: totalDuration * 1000.0,
-				Stages:     stages,
-			}
-		}
-
-		// SQLite profile fallback
 		durUs := time.Since(start).Microseconds()
 		return &driver.QueryProfile{
 			DurationMs: float64(durUs) / 1000.0,
 			Stages: []driver.ProfileStage{
 				{
-					Stage:      "Query Execution (SQLite embedded engine)",
+					Stage:      fmt.Sprintf("Query Execution (%s engine)", s.DriverName),
 					DurationUs: durUs,
 					Percentage: 100.0,
 				},
 			},
 		}
+	}
+
+	collectTxProfile := func(tx driver.TxSession) *driver.QueryProfile {
+		if !req.Profile || tx == nil || !isMySQLFamily {
+			return collectFallbackProfile()
+		}
+		profCtx, profCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer profCancel()
+		defer func() { _, _ = tx.Exec(profCtx, "SET profiling = 0") }()
+		pStream, pErr := tx.QueryStream(profCtx, "SHOW PROFILE", 100)
+		if pErr != nil || pStream == nil {
+			return nil
+		}
+		defer pStream.Close()
+		return readProfileFromStream(pStream)
 	}
 
 	// Intercept explicit single-statement transaction commands to ensure connection pinning and prevent orphaned locks
@@ -355,8 +337,8 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		// Clear any previous aborted state upon starting a fresh transaction
 		s.clearTx(req.TabID)
 
-		// ponytail: Use non-cancelled background context so transaction persists across subsequent HTTP requests
-		newTx, err := s.Session.BeginTx(context.Background())
+		// Use beginTabTx so pool acquisition is bounded (15s) while the transaction persists across HTTP requests.
+		newTx, err := s.beginTabTx()
 		if err != nil {
 			return nil, fmt.Errorf("failed to begin transaction: %w", err)
 		}
@@ -447,7 +429,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	}
 
 	if len(stmts) > 1 {
-		return s.executeMulti(execCtx, req, stmts, inspection, targetDB, start, currentTx, collectProfile)
+		return s.executeMulti(execCtx, req, stmts, inspection, targetDB, start, currentTx, collectFallbackProfile)
 	}
 
 	limit := req.Limit
@@ -458,11 +440,29 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	}
 
 	if currentTx != nil {
+		// Explicit transaction is already pinned to a single *sql.Conn; scope SET profiling to this tx only.
+		txProfEnabled := false
+		if req.Profile && isMySQLFamily {
+			if _, pErr := currentTx.Exec(execCtx, "SET profiling = 1"); pErr == nil {
+				txProfEnabled = true
+			}
+		}
 		if !isSelect {
 			execRes, err := currentTx.Exec(execCtx, trimmedSQL)
 			if err != nil {
+				if txProfEnabled {
+					cCtx, cCancel := context.WithTimeout(context.Background(), 3*time.Second)
+					_, _ = currentTx.Exec(cCtx, "SET profiling = 0")
+					cCancel()
+				}
 				execErr = err
 				return nil, err
+			}
+			var prof *driver.QueryProfile
+			if txProfEnabled {
+				prof = collectTxProfile(currentTx)
+			} else {
+				prof = collectFallbackProfile()
 			}
 			rowsAffected = execRes.RowsAffected
 			msg := execRes.Message + " (in transaction)"
@@ -478,7 +478,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 				BackupFile:         backupFile,
 				BackupDataIncluded: backupDataIncluded,
 				BackupWarning:      backupWarning,
-				Profile:            collectProfile(),
+				Profile:            prof,
 				TxActive:           true,
 				Inspection:         inspection,
 			}, nil
@@ -486,10 +486,14 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 
 		stream, err := currentTx.QueryStream(execCtx, trimmedSQL, limit)
 		if err != nil {
+			if txProfEnabled {
+				cCtx, cCancel := context.WithTimeout(context.Background(), 3*time.Second)
+				_, _ = currentTx.Exec(cCtx, "SET profiling = 0")
+				cCancel()
+			}
 			execErr = err
 			return nil, err
 		}
-		defer stream.Close()
 
 		cols := stream.Columns()
 		var allRows [][]any
@@ -500,11 +504,24 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 			}
 			if err != nil {
 				if err != io.EOF {
+					_ = stream.Close()
+					if txProfEnabled {
+						cCtx, cCancel := context.WithTimeout(context.Background(), 3*time.Second)
+						_, _ = currentTx.Exec(cCtx, "SET profiling = 0")
+						cCancel()
+					}
 					execErr = err
 					return nil, err
 				}
 				break
 			}
+		}
+		_ = stream.Close()
+		var prof *driver.QueryProfile
+		if txProfEnabled {
+			prof = collectTxProfile(currentTx)
+		} else {
+			prof = collectFallbackProfile()
 		}
 
 		rowsAffected = int64(len(allRows))
@@ -514,7 +531,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 			Rows:        driver.FormatRowsForJSON(allRows),
 			RowCount:    len(allRows),
 			ExecutionMs: time.Since(start).Milliseconds(),
-			Profile:     collectProfile(),
+			Profile:     prof,
 			TxActive:    currentTx != nil,
 		}, nil
 	}
@@ -522,11 +539,20 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	if !isSelect {
 		// Mutation execution
 		var execRes *driver.ExecResult
+		var prof *driver.QueryProfile
 		var err error
 		if inspection.Operation == "ALTER" {
 			execRes, err = execSafeDDLOrFallback(execCtx, s.Session, trimmedSQL, req.LockTimeoutSec)
+			prof = collectFallbackProfile()
+		} else if req.Profile && isMySQLFamily {
+			if profiler, ok := s.Session.(driver.PinnedProfiler); ok {
+				execRes, prof, err = profiler.ExecProfiled(execCtx, trimmedSQL)
+			} else {
+				execRes, err = s.Session.Exec(execCtx, trimmedSQL)
+			}
 		} else {
 			execRes, err = s.Session.Exec(execCtx, trimmedSQL)
+			prof = collectFallbackProfile()
 		}
 		if err != nil {
 			execErr = err
@@ -546,7 +572,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 			BackupFile:         backupFile,
 			BackupDataIncluded: backupDataIncluded,
 			BackupWarning:      backupWarning,
-			Profile:            collectProfile(),
+			Profile:            prof,
 			TxActive:           currentTx != nil,
 			Inspection:         inspection,
 		}, nil
@@ -555,20 +581,32 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	// Select stream execution with implicit safe limit.
 	// Enforce DB-engine read-only mode when session is locked in Read-Only mode.
 	var stream driver.RowStream
-	if s.IsReadOnly() {
-		if roSess, ok := s.Session.(driver.ReadOnlySession); ok {
-			stream, err = roSess.QueryStreamReadOnly(execCtx, trimmedSQL, limit)
+	var finishProfile func() *driver.QueryProfile
+	if req.Profile && isMySQLFamily {
+		if profiler, ok := s.Session.(driver.PinnedProfiler); ok {
+			stream, finishProfile, err = profiler.QueryStreamProfiled(execCtx, trimmedSQL, limit, s.IsReadOnly())
+		}
+	}
+	if stream == nil && err == nil {
+		if s.IsReadOnly() {
+			if roSess, ok := s.Session.(driver.ReadOnlySession); ok {
+				stream, err = roSess.QueryStreamReadOnly(execCtx, trimmedSQL, limit)
+			} else {
+				stream, err = s.Session.QueryStream(execCtx, trimmedSQL, limit)
+			}
 		} else {
 			stream, err = s.Session.QueryStream(execCtx, trimmedSQL, limit)
 		}
-	} else {
-		stream, err = s.Session.QueryStream(execCtx, trimmedSQL, limit)
 	}
 	if err != nil {
 		execErr = err
 		return nil, err
 	}
-	defer stream.Close()
+	if finishProfile != nil {
+		defer finishProfile()
+	} else {
+		defer stream.Close()
+	}
 
 	cols := stream.Columns()
 	var allRows [][]any
@@ -587,6 +625,13 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		}
 	}
 
+	var prof *driver.QueryProfile
+	if finishProfile != nil {
+		prof = finishProfile()
+	} else {
+		prof = collectFallbackProfile()
+	}
+
 	rowsAffected = int64(len(allRows))
 	return &ExecuteResponse{
 		Type:        "query",
@@ -594,7 +639,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		Rows:        driver.FormatRowsForJSON(allRows),
 		RowCount:    len(allRows),
 		ExecutionMs: time.Since(start).Milliseconds(),
-		Profile:     collectProfile(),
+		Profile:     prof,
 		TxActive:    currentTx != nil,
 	}, nil
 }
@@ -651,4 +696,40 @@ func (s *ActiveSession) queryStreamSafe(ctx context.Context, sql string, limit i
 	return s.Session.QueryStream(ctx, sql, limit)
 }
 
-// challenge is rejected, since one typed confirmation and one pre-DDL backup can only cover one target.
+func readProfileFromStream(pStream driver.RowStream) *driver.QueryProfile {
+	var stages []driver.ProfileStage
+	var totalDuration float64
+	for {
+		chunk, err := pStream.NextChunk(100)
+		for _, row := range chunk {
+			if len(row) >= 2 {
+				stg := fmt.Sprintf("%v", row[0])
+				durSec, pErr := strconv.ParseFloat(strings.TrimSpace(fmt.Sprintf("%v", row[1])), 64)
+				if pErr != nil {
+					continue
+				}
+				durUs := int64(durSec * 1e6)
+				totalDuration += durSec
+				stages = append(stages, driver.ProfileStage{
+					Stage:      stg,
+					DurationUs: durUs,
+				})
+			}
+		}
+		if err != nil || len(chunk) == 0 {
+			break
+		}
+	}
+	if len(stages) == 0 {
+		return nil
+	}
+	if totalDuration > 0 {
+		for i := range stages {
+			stages[i].Percentage = (float64(stages[i].DurationUs) / (totalDuration * 1e6)) * 100.0
+		}
+	}
+	return &driver.QueryProfile{
+		DurationMs: totalDuration * 1000.0,
+		Stages:     stages,
+	}
+}

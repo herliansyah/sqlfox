@@ -165,7 +165,7 @@ func (s *Server) handleSelectDatabase(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	if err := sess.Session.SelectDatabase(ctx, req.Database); err != nil {
+	if err := sess.UseDatabase(ctx, req.Database); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -221,7 +221,7 @@ func (s *Server) handleGetTableDDL(w http.ResponseWriter, r *http.Request) {
 		targetDB = sess.GetDatabaseName()
 	}
 	if targetDB != "" {
-		if err := sess.Session.SelectDatabase(ctx, targetDB); err != nil {
+		if err := sess.UseDatabase(ctx, targetDB); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -328,7 +328,7 @@ func (s *Server) handleToggleEvent(w http.ResponseWriter, r *http.Request) {
 
 	if err := sess.ToggleEventStatus(ctx, eventName, req.Enable); err != nil {
 		if errors.Is(err, driver.ErrFeatureNotSupported) {
-			writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+			writeError(w, http.StatusNotImplemented, "scheduled events are not supported on this database engine")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "failed to toggle event: "+err.Error())
@@ -384,7 +384,7 @@ func (s *Server) handlePreflightDDL(w http.ResponseWriter, r *http.Request) {
 		targetDB = sess.GetDatabaseName()
 	}
 	if targetDB != "" {
-		if err := sess.Session.SelectDatabase(ctx, targetDB); err != nil {
+		if err := sess.UseDatabase(ctx, targetDB); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}

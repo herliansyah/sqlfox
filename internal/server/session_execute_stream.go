@@ -8,22 +8,19 @@ import (
 	"github.com/herliansyah/sqlfox/internal/driver"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 )
 
 func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w io.Writer, flusher http.Flusher) (*ExecuteResponse, error) {
 	s.beginInFlight()
-	defer s.endInFlight()
+	defer s.endInFlightTab(req.TabID)
 
 	trimmedSQL := strings.TrimSpace(req.SQL)
 	if trimmedSQL == "" {
 		return nil, errors.New("sql query is required")
 	}
 
-	cleanSQL := driver.StripLeadingComments(trimmedSQL)
-	cleanUpper := strings.TrimRight(strings.ToUpper(cleanSQL), "; \t\r\n")
 	isSelect := driver.IsQueryStatement(trimmedSQL)
 	allStmtsQuery := isSelect
 	if isSelect {
@@ -54,14 +51,6 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 		return nil, nil
 	}
 
-	if strings.HasPrefix(cleanUpper, "USE ") {
-		dbTarget := strings.TrimSpace(cleanSQL[4:])
-		dbTarget = strings.Trim(strings.TrimRight(dbTarget, "; \t\r\n"), "`'\"")
-		if dbTarget != "" {
-			_ = s.UseDatabase(ctx, dbTarget)
-		}
-	}
-
 	if req.Database != "" && s.Session != nil {
 		if err := s.UseDatabase(ctx, req.Database); err != nil {
 			return nil, err
@@ -82,7 +71,7 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 	}
 
 	// 2. Read-Only Enforcement
-	if s.IsReadOnly() && (!isSelect || !allQueries || inspection.IsDestructive) {
+	if s.IsReadOnly() && (!allQueries || inspection.IsDestructive) {
 		return nil, ErrReadOnlySession
 	}
 	if inspection.RequiresChallenge && !req.Confirmed {
@@ -132,9 +121,7 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 		limit = 100000
 	}
 
-	if req.Profile && s.Session != nil && s.DriverName == "mysql" {
-		_, _ = s.Session.Exec(execCtx, "SET profiling = 1")
-	}
+	isMySQLFamily := strings.EqualFold(s.DriverName, "mysql") || strings.EqualFold(s.DriverName, "mariadb")
 
 	currentTx, streamAborted, streamReason := s.getTxStatus(req.TabID)
 	if streamAborted {
@@ -148,26 +135,49 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 
 	// Fetch one row past the limit so has_more is exact (a result of exactly `limit` rows is complete).
 	var stream driver.RowStream
+	var finishProfile func() *driver.QueryProfile
+	txProfEnabled := false
 	if currentTx != nil {
+		if req.Profile && isMySQLFamily {
+			if _, pErr := currentTx.Exec(execCtx, "SET profiling = 1"); pErr == nil {
+				txProfEnabled = true
+			}
+		}
 		stream, streamErr = currentTx.QueryStream(execCtx, trimmedSQL, limit+1)
+		if streamErr != nil && txProfEnabled {
+			cCtx, cCancel := context.WithTimeout(context.Background(), 3*time.Second)
+			_, _ = currentTx.Exec(cCtx, "SET profiling = 0")
+			cCancel()
+		}
 	} else {
 		if s.Session == nil {
 			return nil, errors.New("no active database session")
 		}
-		if s.IsReadOnly() {
-			if roSess, ok := s.Session.(driver.ReadOnlySession); ok {
-				stream, streamErr = roSess.QueryStreamReadOnly(execCtx, trimmedSQL, limit+1)
+		if req.Profile && isMySQLFamily {
+			if profiler, ok := s.Session.(driver.PinnedProfiler); ok {
+				stream, finishProfile, streamErr = profiler.QueryStreamProfiled(execCtx, trimmedSQL, limit+1, s.IsReadOnly())
+			}
+		}
+		if stream == nil && streamErr == nil {
+			if s.IsReadOnly() {
+				if roSess, ok := s.Session.(driver.ReadOnlySession); ok {
+					stream, streamErr = roSess.QueryStreamReadOnly(execCtx, trimmedSQL, limit+1)
+				} else {
+					stream, streamErr = s.Session.QueryStream(execCtx, trimmedSQL, limit+1)
+				}
 			} else {
 				stream, streamErr = s.Session.QueryStream(execCtx, trimmedSQL, limit+1)
 			}
-		} else {
-			stream, streamErr = s.Session.QueryStream(execCtx, trimmedSQL, limit+1)
 		}
 	}
 	if streamErr != nil {
 		return nil, streamErr
 	}
-	defer stream.Close()
+	if finishProfile != nil {
+		defer finishProfile()
+	} else {
+		defer stream.Close()
+	}
 
 	enc := json.NewEncoder(w)
 
@@ -261,43 +271,17 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 	// 4. Final Line: done
 	dur := time.Since(start).Milliseconds()
 	var prof *driver.QueryProfile
-	if req.Profile && s.Session != nil && s.DriverName == "mysql" {
-		defer func() { _, _ = s.Session.Exec(execCtx, "SET profiling = 0") }()
-		pStream, pErr := s.Session.QueryStream(execCtx, "SHOW PROFILE", 100)
-		if pErr == nil && pStream != nil {
-			defer pStream.Close()
-			var stages []driver.ProfileStage
-			var totalDuration float64
-			for {
-				pChunk, pChunkErr := pStream.NextChunk(100)
-				for _, pRow := range pChunk {
-					if len(pRow) >= 2 {
-						stg := fmt.Sprintf("%v", pRow[0])
-						durSec, _ := strconv.ParseFloat(fmt.Sprintf("%v", pRow[1]), 64)
-						durUs := int64(durSec * 1e6)
-						totalDuration += durSec
-						stages = append(stages, driver.ProfileStage{
-							Stage:      stg,
-							DurationUs: durUs,
-						})
-					}
-				}
-				if pChunkErr != nil || len(pChunk) == 0 {
-					break
-				}
-			}
-			if totalDuration > 0 {
-				for i := range stages {
-					stages[i].Percentage = (float64(stages[i].DurationUs) / (totalDuration * 1e6)) * 100.0
-				}
-			}
-			if len(stages) > 0 {
-				prof = &driver.QueryProfile{
-					DurationMs: totalDuration * 1000.0,
-					Stages:     stages,
-				}
-			}
+	if finishProfile != nil {
+		prof = finishProfile()
+	} else if txProfEnabled && currentTx != nil {
+		_ = stream.Close()
+		profCtx, profCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if pStream, pErr := currentTx.QueryStream(profCtx, "SHOW PROFILE", 100); pErr == nil && pStream != nil {
+			prof = readProfileFromStream(pStream)
+			_ = pStream.Close()
 		}
+		_, _ = currentTx.Exec(profCtx, "SET profiling = 0")
+		profCancel()
 	}
 
 	donePayload := map[string]any{

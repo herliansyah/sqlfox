@@ -22,7 +22,7 @@ var (
 	aiAWSIPv6IMDS      = net.ParseIP("fd00:ec2::254")
 )
 
-func isBlockedDialIP(ip net.IP, allowPrivate bool) bool {
+func isBlockedDialIP(ip net.IP, allowLoopback, allowPrivate bool) bool {
 	if ip == nil {
 		return true
 	}
@@ -44,13 +44,31 @@ func isBlockedDialIP(ip net.IP, allowPrivate bool) bool {
 	if aiAWSIPv6IMDS != nil && ip.Equal(aiAWSIPv6IMDS) {
 		return true
 	}
+	if ip.IsLoopback() {
+		return !allowLoopback
+	}
 	if !allowPrivate && ip.IsPrivate() {
 		return true
 	}
 	return false
 }
 
-func safeAIDialContext(allowPrivate bool) func(ctx context.Context, network, addr string) (net.Conn, error) {
+func isExplicitLoopbackEndpoint(rawURL string) bool {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return false
+	}
+	host := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(u.Hostname())), ".")
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return true
+	}
+	return false
+}
+
+func safeAIDialContext(allowLoopback, allowPrivate bool) func(ctx context.Context, network, addr string) (net.Conn, error) {
 	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(addr)
@@ -62,7 +80,7 @@ func safeAIDialContext(allowPrivate bool) func(ctx context.Context, network, add
 			return nil, err
 		}
 		for _, ip := range ips {
-			if isBlockedDialIP(ip, allowPrivate) {
+			if isBlockedDialIP(ip, allowLoopback, allowPrivate) {
 				return nil, fmt.Errorf("blocked dial to restricted IP %s", ip.String())
 			}
 		}
@@ -76,14 +94,21 @@ func safeAIDialContext(allowPrivate bool) func(ctx context.Context, network, add
 var (
 	sharedCloudAITransport = &http.Transport{
 		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
-		DialContext:         safeAIDialContext(false),
+		DialContext:         safeAIDialContext(false, false),
 		MaxIdleConns:        32,
+		IdleConnTimeout:     60 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+	}
+	sharedLoopbackAITransport = &http.Transport{
+		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
+		DialContext:         safeAIDialContext(true, false),
+		MaxIdleConns:        16,
 		IdleConnTimeout:     60 * time.Second,
 		TLSHandshakeTimeout: 10 * time.Second,
 	}
 	sharedLocalAITransport = &http.Transport{
 		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
-		DialContext:         safeAIDialContext(true),
+		DialContext:         safeAIDialContext(true, true),
 		MaxIdleConns:        16,
 		IdleConnTimeout:     60 * time.Second,
 		TLSHandshakeTimeout: 10 * time.Second,
@@ -100,10 +125,11 @@ const (
 )
 
 type ClientConfig struct {
-	Provider Provider `json:"provider"`
-	APIKey   string   `json:"api_key"`
-	Model    string   `json:"model"`
-	Endpoint string   `json:"endpoint,omitempty"` // For Ollama or custom OpenAI-compatible proxies
+	Provider      Provider `json:"provider"`
+	APIKey        string   `json:"api_key"`
+	Model         string   `json:"model"`
+	Endpoint      string   `json:"endpoint,omitempty"` // For Ollama or custom OpenAI-compatible proxies
+	RemoteRequest bool     `json:"-"`                  // When true (LAN/remote caller), block loopback and RFC1918 dials even for Ollama
 }
 
 type AIClient struct {
@@ -152,8 +178,14 @@ func NewAIClient(cfg ClientConfig) *AIClient {
 	}
 
 	transport := sharedCloudAITransport
-	if cfg.Provider == ProviderOllama {
-		transport = sharedLocalAITransport
+	if !cfg.RemoteRequest {
+		if cfg.Provider == ProviderOllama {
+			transport = sharedLocalAITransport
+		} else if isExplicitLoopbackEndpoint(cfg.Endpoint) {
+			// Local user pointing directly at a local proxy (e.g. 127.0.0.1 / localhost): allow loopback,
+			// but never allow DNS rebinding from public hostnames to loopback or RFC1918.
+			transport = sharedLoopbackAITransport
+		}
 	}
 
 	return &AIClient{
@@ -169,20 +201,26 @@ func NewAIClient(cfg ClientConfig) *AIClient {
 	}
 }
 
-// DetectOllama tests if an Ollama daemon is reachable locally.
-func DetectOllama(ctx context.Context, endpoint string) bool {
+// DetectOllama tests if an Ollama daemon is reachable. Remote callers are restricted to public IPs.
+func DetectOllama(ctx context.Context, endpoint string, isRemote ...bool) bool {
 	if endpoint == "" {
 		endpoint = "http://localhost:11434"
 	}
+	remote := len(isRemote) > 0 && isRemote[0]
 	targetURL := strings.TrimSuffix(endpoint, "/") + "/api/tags"
 	req, err := http.NewRequestWithContext(ctx, "GET", targetURL, nil)
 	if err != nil {
 		return false
 	}
 
+	transport := sharedLocalAITransport
+	if remote {
+		transport = sharedCloudAITransport
+	}
+
 	client := http.Client{
 		Timeout:   1500 * time.Millisecond,
-		Transport: sharedLocalAITransport,
+		Transport: transport,
 		// Never follow redirects during health checks (prevents redirect-based SSRF).
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse

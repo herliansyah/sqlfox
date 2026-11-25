@@ -83,6 +83,32 @@ type ScriptBlocker struct {
 	Reason         string `json:"reason,omitempty"`
 }
 
+// InspectScriptStatement inspects a single statement (1-based index) for the streaming script runner.
+func (s *ActiveSession) InspectScriptStatement(stmt string, stmtIndex int, scopedDB string) *ScriptBlocker {
+	isProd := strings.EqualFold(s.Environment, "Production")
+	insp := safety.InspectWithScope(stmt, s.Environment, scopedDB)
+	if insp == nil {
+		return nil
+	}
+	// In Production, UPDATE/DELETE mutations with a WHERE clause also require explicit confirmation
+	// in batch scripts (script runner cannot guarantee small row counts without running every predicate).
+	requiresProdMutationGate := isProd && (insp.Operation == "DELETE" || insp.Operation == "UPDATE")
+	if insp.RequiresChallenge || requiresProdMutationGate {
+		reason := insp.Reason
+		if reason == "" && requiresProdMutationGate {
+			reason = fmt.Sprintf("Production %s on '%s' requires confirmation in script runner.", insp.Operation, insp.TargetTable)
+		}
+		return &ScriptBlocker{
+			StatementIndex: stmtIndex,
+			Operation:      insp.Operation,
+			TargetTable:    insp.TargetTable,
+			TargetDatabase: insp.TargetDatabase,
+			Reason:         reason,
+		}
+	}
+	return nil
+}
+
 // InspectScriptStatements runs the Safety Guard over each statement of a script and returns the set
 // that demands a typed Challenge (CRITICAL destructive ops or a schema-scope mismatch). An empty
 // result means the script is safe to run without confirmation. This mirrors the editor's gate so the
@@ -90,18 +116,8 @@ type ScriptBlocker struct {
 func (s *ActiveSession) InspectScriptStatements(statements []string, scopedDB string) []ScriptBlocker {
 	var blockers []ScriptBlocker
 	for i, stmt := range statements {
-		insp := safety.InspectWithScope(stmt, s.Environment, scopedDB)
-		if insp == nil {
-			continue
-		}
-		if insp.RequiresChallenge {
-			blockers = append(blockers, ScriptBlocker{
-				StatementIndex: i + 1,
-				Operation:      insp.Operation,
-				TargetTable:    insp.TargetTable,
-				TargetDatabase: insp.TargetDatabase,
-				Reason:         insp.Reason,
-			})
+		if b := s.InspectScriptStatement(stmt, i+1, scopedDB); b != nil {
+			blockers = append(blockers, *b)
 		}
 	}
 	return blockers
@@ -207,24 +223,134 @@ func (s *ActiveSession) estimateAffectedRows(ctx context.Context, insp *safety.I
 	}
 }
 
+// hasUnsafeCountPredicate detects function calls or subqueries inside a synthesized COUNT(*) WHERE
+// clause so pre-execution estimation never invokes volatile functions (e.g. pg_terminate_backend, nextval)
+// before the operator confirms the mutation.
+func hasUnsafeCountPredicate(countSQL string) bool {
+	isSpace := func(c byte) bool {
+		return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'
+	}
+	isIdent := func(c byte) bool {
+		return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'
+	}
+	// Strip single-quoted string literals and comments while uppercasing so whitespace/newline/comment tricks
+	// cannot bypass detection and quoted values like WHERE note = 'fn(x)' don't false-positive.
+	var sb strings.Builder
+	sb.Grow(len(countSQL))
+	n := len(countSQL)
+	for i := 0; i < n; i++ {
+		c := countSQL[i]
+		if c == '\'' {
+			sb.WriteByte(' ')
+			i++
+			for i < n {
+				if countSQL[i] == '\\' && i+1 < n {
+					i += 2
+					continue
+				}
+				if countSQL[i] == '\'' {
+					if i+1 < n && countSQL[i+1] == '\'' {
+						i += 2
+						continue
+					}
+					break
+				}
+				i++
+			}
+			continue
+		}
+		if c == '-' && i+1 < n && countSQL[i+1] == '-' {
+			sb.WriteByte(' ')
+			for i < n && countSQL[i] != '\n' {
+				i++
+			}
+			continue
+		}
+		if c == '/' && i+1 < n && countSQL[i+1] == '*' {
+			sb.WriteByte(' ')
+			i += 2
+			for i+1 < n && !(countSQL[i] == '*' && countSQL[i+1] == '/') {
+				i++
+			}
+			i++
+			continue
+		}
+		if c >= 'a' && c <= 'z' {
+			c -= 'a' - 'A'
+		}
+		sb.WriteByte(c)
+	}
+	upper := sb.String()
+
+	// Find word-bounded WHERE regardless of surrounding whitespace (\n, \t, spaces).
+	whereEnd := -1
+	for i := 0; i+5 <= len(upper); i++ {
+		if upper[i:i+5] == "WHERE" {
+			leftOK := i == 0 || !isIdent(upper[i-1])
+			rightOK := i+5 < len(upper) && (isSpace(upper[i+5]) || upper[i+5] == '(')
+			if leftOK && rightOK {
+				whereEnd = i + 5
+				break
+			}
+		}
+	}
+	if whereEnd < 0 {
+		return false
+	}
+	pred := upper[whereEnd:]
+
+	// Detect any word-bounded SELECT (including SELECT(...) or SELECT\n...) as a subquery.
+	for i := 0; i+6 <= len(pred); i++ {
+		if pred[i:i+6] == "SELECT" {
+			leftOK := i == 0 || !isIdent(pred[i-1])
+			rightOK := i+6 == len(pred) || !isIdent(pred[i+6])
+			if leftOK && rightOK {
+				return true
+			}
+		}
+	}
+
+	// Detect identifier followed by optional whitespace (including newlines) and '(' (function call in WHERE).
+	for i := 0; i < len(pred); i++ {
+		if pred[i] == '(' {
+			j := i - 1
+			for j >= 0 && isSpace(pred[j]) {
+				j--
+			}
+			if j >= 0 && isIdent(pred[j]) {
+				k := j
+				for k >= 0 && isIdent(pred[k]) {
+					k--
+				}
+				word := pred[k+1 : j+1]
+				switch word {
+				case "IN", "NOT", "AND", "OR", "VALUES", "EXISTS", "CASE", "WHEN", "THEN", "ELSE", "IS":
+				default:
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func (s *ActiveSession) runSingleCountEstimate(ctx context.Context, countSQL string) (*int64, bool) {
 	if s.Session == nil || countSQL == "" {
 		return nil, false
 	}
-	countCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-
-	// No SelectDatabase here: it would persist the session's active DB before the user confirms.
-	// Qualified statements yield qualified count queries; unqualified ones already run in req.Database.
-
-	rows, err := s.Session.QueryRaw(countCtx, countSQL)
-	if err == nil && len(rows) > 0 && len(rows[0]) > 0 {
-		if cnt, ok := parseCountValue(rows[0][0]); ok {
-			return &cnt, true
+	// Skip direct COUNT(*) execution if WHERE contains function calls or subqueries; use non-executing EXPLAIN instead.
+	if !hasUnsafeCountPredicate(countSQL) {
+		countCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		rows, err := s.Session.QueryRaw(countCtx, countSQL)
+		cancel()
+		if err == nil && len(rows) > 0 && len(rows[0]) > 0 {
+			if cnt, ok := parseCountValue(rows[0][0]); ok {
+				return &cnt, true
+			}
 		}
 	}
 
-	// Fallback to EXPLAIN using a fresh bounded context derived from ctx (countCtx has already expired).
+	// Fallback to EXPLAIN (never executes query) using a fresh bounded context derived from ctx.
 	expCtx, expCancel := context.WithTimeout(ctx, 2*time.Second)
 	defer expCancel()
 	plan, expErr := s.Session.Explain(expCtx, countSQL)

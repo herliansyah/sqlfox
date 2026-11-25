@@ -83,6 +83,7 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
 	mux.HandleFunc("POST /api/auth/unlock", s.handleAuthUnlock)
 	mux.HandleFunc("GET /api/auth/master-key", s.handleGetMasterPassword)
+	mux.HandleFunc("POST /api/auth/master-key", s.handleGetMasterPassword)
 
 	// Connection vault endpoints
 	mux.HandleFunc("GET /api/connections", s.handleListConnections)

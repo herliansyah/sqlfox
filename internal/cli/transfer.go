@@ -30,6 +30,7 @@ func RunTransferContext(ctx context.Context, args []string, stdout, stderr io.Wr
 		allTablesFlag       = fs.Bool("all-tables", false, "Transfer all tables found in source database")
 		createMissingFlag   = fs.Bool("create-missing", false, "Create target table schema if it does not exist")
 		truncateFlag        = fs.Bool("truncate", false, "Truncate target table before inserting data")
+		forceFlag           = fs.Bool("force", false, "Confirm destructive --truncate on Production targets")
 		batchSizeFlag       = fs.Int("batch-size", 100, "Number of rows per batch insert")
 		continueOnErrorFlag = fs.Bool("continue-on-error", false, "Continue with next table if an error occurs")
 		vaultDbFlag         = fs.String("vault-db", "", "Path to config.db vault file")
@@ -73,6 +74,11 @@ func RunTransferContext(ctx context.Context, args []string, stdout, stderr io.Wr
 		return 1
 	}
 	defer toTarget.Cleanup()
+
+	if *truncateFlag && strings.EqualFold(toTarget.Environment, "Production") && !*forceFlag {
+		fmt.Fprintln(stderr, "❌ Safety Guard Block: --truncate against a Production target requires --force.")
+		return 2
+	}
 
 	// 2. Determine tables list
 	var tableList []string

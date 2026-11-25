@@ -1,10 +1,12 @@
 package driver
 
 import (
+	"bufio"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"regexp"
 	"strconv"
@@ -29,7 +31,7 @@ func QuoteIdentifier(name, driverName string) string {
 // Placeholder returns the parameter placeholder for the given driver and 1-based index.
 func Placeholder(driverName string, index int) string {
 	d := strings.ToLower(driverName)
-	if strings.HasPrefix(d, "postgre") || d == "pg" {
+	if strings.HasPrefix(d, "postgre") || d == "pg" || d == "pgx" {
 		return fmt.Sprintf("$%d", index)
 	}
 	return "?"
@@ -40,6 +42,29 @@ var (
 	reLockingTail  = regexp.MustCompile(`(?i)\b(FOR\s+(UPDATE|SHARE|NO\s+KEY\s+UPDATE|KEY\s+SHARE)|LOCK\s+IN\s+SHARE\s+MODE)\b`)
 	reTopLevelInto = regexp.MustCompile(`(?i)\bINTO\b`)
 )
+
+// mysqlExecCommentPrefixLen returns the prefix byte length (3 for "/*!", 4 for "/*M!" / "/*m!")
+// if s[i:] starts a MySQL or MariaDB executable comment, or 0 otherwise.
+func mysqlExecCommentPrefixLen(s string, i int) int {
+	if i+2 >= len(s) || s[i] != '/' || s[i+1] != '*' {
+		return 0
+	}
+	if s[i+2] == '!' {
+		return 3
+	}
+	if i+3 < len(s) && (s[i+2] == 'M' || s[i+2] == 'm') && s[i+3] == '!' {
+		return 4
+	}
+	return 0
+}
+
+func hasMySQLExecutableComment(s string) bool {
+	return strings.Contains(s, "/*!") || strings.Contains(s, "/*M!") || strings.Contains(s, "/*m!")
+}
+
+func isIdentCharByte(c byte) bool {
+	return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+}
 
 // maskNonTopLevel blanks comments, quoted literals/identifiers and everything inside parentheses
 // (byte offsets preserved), so keyword scans only see the outermost statement: a LIMIT inside a
@@ -53,15 +78,18 @@ func maskNonTopLevel(q string) string {
 			for ; i < len(b) && b[i] != '\n'; i++ {
 				b[i] = ' '
 			}
-		case b[i] == '#':
+		case b[i] == '#' && !(i+1 < len(b) && (b[i+1] == '>' || b[i+1] == '-')):
+			// Skip MySQL # comments while preserving PostgreSQL JSONB operators (#>, #>>, #-).
 			for ; i < len(b) && b[i] != '\n'; i++ {
 				b[i] = ' '
 			}
 		case b[i] == '/' && i+1 < len(b) && b[i+1] == '*':
-			if i+2 < len(b) && b[i+2] == '!' {
-				// MySQL executable comment: blank the /*!NNNNN wrapper, keep the body visible.
-				b[i], b[i+1], b[i+2] = ' ', ' ', ' '
-				j := i + 3
+			if pLen := mysqlExecCommentPrefixLen(q, i); pLen > 0 {
+				// MySQL/MariaDB executable comment: blank the /*!NNNNN or /*M!NNNNN wrapper, keep body visible.
+				for k := 0; k < pLen; k++ {
+					b[i+k] = ' '
+				}
+				j := i + pLen
 				for j < len(b) && b[j] >= '0' && b[j] <= '9' {
 					b[j] = ' '
 					j++
@@ -209,17 +237,17 @@ func StripLeadingComments(sql string) string {
 			continue
 		}
 		if strings.HasPrefix(s, "/*") {
-			// MySQL executes /*! ... */ and /*!NNNNN ... */ bodies, so unwrap them instead of
+			// MySQL/MariaDB executes /*! ... */ and /*M! ... */ bodies, so unwrap them instead of
 			// discarding; otherwise callers (e.g. the Safety Guard) would miss the real statement.
-			if strings.HasPrefix(s, "/*!") {
-				idx := strings.Index(s[3:], "*/")
+			if pLen := mysqlExecCommentPrefixLen(s, 0); pLen > 0 {
+				idx := strings.Index(s[pLen:], "*/")
 				if idx == -1 {
-					body := strings.TrimLeft(s[3:], "0123456789")
+					body := strings.TrimLeft(s[pLen:], "0123456789")
 					s = strings.TrimSpace(body)
 					continue
 				}
-				body := strings.TrimLeft(s[3:3+idx], "0123456789")
-				s = strings.TrimSpace(body + " " + s[3+idx+2:])
+				body := strings.TrimLeft(s[pLen:pLen+idx], "0123456789")
+				s = strings.TrimSpace(body + " " + s[pLen+idx+2:])
 				continue
 			}
 			// Track nested block comment depth (valid in PostgreSQL: /* /* */ */).
@@ -249,10 +277,10 @@ func StripLeadingComments(sql string) string {
 	return s
 }
 
-// UnwrapMySQLExecutableComments removes /*!NNNNN and matching */ wrappers outside string literals
-// so downstream lexers, splitters, and safety guards see the exact SQL MySQL will execute.
+// UnwrapMySQLExecutableComments removes /*!NNNNN, /*M!NNNNN, and matching */ wrappers outside
+// string literals so downstream lexers, splitters, and safety guards see the exact SQL MySQL/MariaDB will execute.
 func UnwrapMySQLExecutableComments(sql string) string {
-	if !strings.Contains(sql, "/*!") {
+	if !hasMySQLExecutableComment(sql) {
 		return sql
 	}
 	var b strings.Builder
@@ -296,7 +324,7 @@ func UnwrapMySQLExecutableComments(sql string) string {
 			}
 			continue
 		}
-		if c == '#' {
+		if c == '#' && !(i+1 < n && (sql[i+1] == '>' || sql[i+1] == '-')) {
 			for i < n && sql[i] != '\n' {
 				b.WriteByte(sql[i])
 				i++
@@ -306,10 +334,10 @@ func UnwrapMySQLExecutableComments(sql string) string {
 			}
 			continue
 		}
-		if c == '/' && i+2 < n && sql[i+1] == '*' && sql[i+2] == '!' {
+		if pLen := mysqlExecCommentPrefixLen(sql, i); pLen > 0 {
 			execDepth++
 			b.WriteByte(' ')
-			i += 3
+			i += pLen
 			for i < n && sql[i] >= '0' && sql[i] <= '9' {
 				i++
 			}
@@ -397,6 +425,26 @@ func stripSQLCommentsAndLiterals(sql string, mysqlEscapes bool) string {
 	n := len(sql)
 	for i := 0; i < n; i++ {
 		c := sql[i]
+		// PostgreSQL E'...' / e'...' escape string literal (always honors backslash escapes).
+		if !mysqlEscapes && (c == 'E' || c == 'e') && i+1 < n && sql[i+1] == '\'' && (i == 0 || !isIdentCharByte(sql[i-1])) {
+			b.WriteByte(' ')
+			i += 2
+			for i < n {
+				if sql[i] == '\\' && i+1 < n {
+					i += 2
+					continue
+				}
+				if sql[i] == '\'' {
+					if i+1 < n && sql[i+1] == '\'' {
+						i += 2
+						continue
+					}
+					break
+				}
+				i++
+			}
+			continue
+		}
 		if c == '\'' || c == '"' || c == '`' {
 			quote := c
 			b.WriteByte(' ')
@@ -441,7 +489,7 @@ func stripSQLCommentsAndLiterals(sql string, mysqlEscapes bool) string {
 			}
 			continue
 		}
-		if c == '#' {
+		if mysqlEscapes && c == '#' {
 			b.WriteByte(' ')
 			for i < n && sql[i] != '\n' {
 				i++
@@ -477,8 +525,8 @@ func stripSQLCommentsAndLiterals(sql string, mysqlEscapes bool) string {
 // Rejects SELECT ... INTO OUTFILE/DUMPFILE, mutating PRAGMA (=), hidden multi-statements in /*! ... */,
 // and data-modifying CTEs under both MySQL and PostgreSQL string-escaping rules.
 func IsQueryStatement(sql string) bool {
-	// Reject hidden multi-statement smuggling via MySQL /*! ... ; ... */ executable comments.
-	if strings.Contains(sql, "/*!") && len(splitDefaultDelimiter(UnwrapMySQLExecutableComments(sql), true)) > 1 {
+	// Reject hidden multi-statement smuggling via MySQL/MariaDB /*! ... ; ... */ or /*M! ... ; ... */ executable comments.
+	if hasMySQLExecutableComment(sql) && len(splitDefaultDelimiter(UnwrapMySQLExecutableComments(sql), true)) > 1 {
 		return false
 	}
 	clean := StripLeadingComments(sql)
@@ -577,6 +625,7 @@ func splitDefaultDelimiter(content string, isMySQL bool) []string {
 	var statements []string
 	var current strings.Builder
 	inSingleQuote, inDoubleQuote, inBacktick := false, false, false
+	inPGBackslashString := false // true while inside PostgreSQL E'...' / e'...' escape string
 	inLineComment := false
 	blockCommentDepth := 0
 	dollarTag := "" // non-empty while inside a dollar-quoted body
@@ -585,7 +634,7 @@ func splitDefaultDelimiter(content string, isMySQL bool) []string {
 	n := len(runes)
 
 	isQuoteEscaped := func(i int) bool {
-		if !isMySQL {
+		if !isMySQL && !inPGBackslashString {
 			return false
 		}
 		bs := 0
@@ -656,11 +705,18 @@ func splitDefaultDelimiter(content string, isMySQL bool) []string {
 				continue
 			}
 			if r == '/' && i+1 < n && runes[i+1] == '*' {
-				// In MySQL, /*! ... */ is executable SQL: do NOT treat it as an opaque comment
-				// that hides semicolons (e.g., "SELECT 1 /*!50000 ; DROP TABLE users */").
+				// In MySQL/MariaDB, /*! ... */ and /*M! ... */ are executable SQL: do NOT treat them
+				// as opaque comments that hide semicolons.
 				if isMySQL && i+2 < n && runes[i+2] == '!' {
 					current.WriteString("/*!")
 					i += 2
+					continue
+				}
+				if isMySQL && i+3 < n && (runes[i+2] == 'M' || runes[i+2] == 'm') && runes[i+3] == '!' {
+					current.WriteString("/*")
+					current.WriteRune(runes[i+2])
+					current.WriteRune('!')
+					i += 3
 					continue
 				}
 				blockCommentDepth = 1
@@ -675,24 +731,50 @@ func splitDefaultDelimiter(content string, isMySQL bool) []string {
 					i += len([]rune(tag)) - 1
 					continue
 				}
+				// PostgreSQL E'...' / e'...' escape string literal
+				if (r == 'E' || r == 'e') && i+1 < n && runes[i+1] == '\'' && (i == 0 || !(runes[i-1] == '_' || unicode.IsLetter(runes[i-1]) || unicode.IsDigit(runes[i-1]))) {
+					inSingleQuote = true
+					inPGBackslashString = true
+					current.WriteRune(r)
+					current.WriteRune('\'')
+					i++
+					continue
+				}
 			}
 		}
 
 		switch {
 		case r == '\'' && !inDoubleQuote && !inBacktick:
+			if inSingleQuote && isQuoteEscaped(i) {
+				// Backslash-escaped literal quote (\' in MySQL or PostgreSQL E'...'):
+				// stays inside string and must NOT pair with a following closing quote (e.g. E'\'').
+				break
+			}
 			if inSingleQuote && i+1 < n && runes[i+1] == '\'' {
 				current.WriteString("''")
 				i++
 				continue
 			}
-			if !isQuoteEscaped(i) {
-				inSingleQuote = !inSingleQuote
+			inSingleQuote = !inSingleQuote
+			if !inSingleQuote {
+				inPGBackslashString = false
 			}
 		case r == '"' && !inSingleQuote && !inBacktick:
-			if !isQuoteEscaped(i) {
-				inDoubleQuote = !inDoubleQuote
+			if inDoubleQuote && isQuoteEscaped(i) {
+				break
 			}
+			if inDoubleQuote && i+1 < n && runes[i+1] == '"' {
+				current.WriteString(`""`)
+				i++
+				continue
+			}
+			inDoubleQuote = !inDoubleQuote
 		case r == '`' && !inSingleQuote && !inDoubleQuote:
+			if inBacktick && i+1 < n && runes[i+1] == '`' {
+				current.WriteString("``")
+				i++
+				continue
+			}
 			inBacktick = !inBacktick
 		}
 
@@ -748,6 +830,337 @@ func SplitWithDelimiters(sqlText string, isMySQL bool, split func(string) []stri
 	return out
 }
 
+// errStopScan is an internal sentinel to halt streaming early without reporting an error.
+var ErrStopScan = errors.New("stop scan")
+
+// ScanSQLStatements streams SQL statements from r one-by-one into fn using a bounded bufio.Reader
+// instead of loading the entire script into memory or converting it to []rune.
+// Honors quotes, comments, MySQL /*! / /*M! executable comments, PostgreSQL dollar-quoting and E'...',
+// and MySQL DELIMITER directives. Returning ErrStopScan from fn halts scanning cleanly with nil error.
+func ScanSQLStatements(r io.Reader, driverName string, fn func(stmt string) error) error {
+	isMySQL := !strings.EqualFold(driverName, "postgres") && !strings.EqualFold(driverName, "postgresql") && !strings.EqualFold(driverName, "sqlite") && !strings.EqualFold(driverName, "sqlite3")
+	br := bufio.NewReaderSize(r, 64*1024)
+
+	// Strip UTF-8 BOM if present at start of stream.
+	if bom, err := br.Peek(3); err == nil && len(bom) == 3 && bom[0] == 0xEF && bom[1] == 0xBB && bom[2] == 0xBF {
+		_, _ = br.Discard(3)
+	}
+
+	var current strings.Builder
+	delim := ";"
+	delimLastRune := ';'
+
+	inSingleQuote, inDoubleQuote, inBacktick := false, false, false
+	inPGBackslashString := false
+	inLineComment := false
+	blockCommentDepth := 0
+	dollarTag := ""
+	backslashCount := 0
+	prevRune := rune(0)
+	atLineStart := true
+
+	emitCurrent := func() error {
+		stmt := strings.TrimSpace(current.String())
+		current.Reset()
+		if stmt != "" && HasExecutableSQL(stmt, isMySQL) {
+			if err := fn(stmt); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	peekString := func(n int) string {
+		b, _ := br.Peek(n)
+		return string(b)
+	}
+
+	readDollarTag := func() string {
+		// Current rune '$' was already consumed. Peek up to 64 bytes for optional tag + closing '$'.
+		b, _ := br.Peek(64)
+		if len(b) == 0 {
+			return ""
+		}
+		// Fast path for $$
+		if b[0] == '$' {
+			_, _ = br.ReadByte()
+			return "$$"
+		}
+		// Walk runes in peeked slice
+		off := 0
+		first := true
+		for off < len(b) {
+			ru, sz := utf8.DecodeRune(b[off:])
+			if ru == '$' {
+				tag := "$" + string(b[:off+sz])
+				_, _ = br.Discard(off + sz)
+				return tag
+			}
+			valid := ru == '_' || unicode.IsLetter(ru) || (!first && unicode.IsDigit(ru))
+			if !valid {
+				return ""
+			}
+			first = false
+			off += sz
+		}
+		return ""
+	}
+
+	for {
+		// Check for DELIMITER directive at start of line when outside quotes/comments/dollar-quotes.
+		if atLineStart && !inSingleQuote && !inDoubleQuote && !inBacktick && !inLineComment && blockCommentDepth == 0 && dollarTag == "" {
+			// Skip leading horizontal spaces/tabs to detect indented DELIMITER lines without losing them if not DELIMITER.
+			peek := peekString(32)
+			trimmedLeft := strings.TrimLeft(peek, " \t")
+			if len(trimmedLeft) >= len("DELIMITER ") &&
+				strings.EqualFold(trimmedLeft[:len("DELIMITER")], "DELIMITER") &&
+				(trimmedLeft[len("DELIMITER")] == ' ' || trimmedLeft[len("DELIMITER")] == '\t') {
+				line, lineErr := br.ReadString('\n')
+				if err := emitCurrent(); err != nil {
+					if errors.Is(err, ErrStopScan) {
+						return nil
+					}
+					return err
+				}
+				fields := strings.Fields(strings.TrimSpace(line)[len("DELIMITER"):])
+				if len(fields) > 0 && fields[0] != "" {
+					delim = fields[0]
+					lastR, _ := utf8.DecodeLastRuneInString(delim)
+					delimLastRune = lastR
+				}
+				backslashCount = 0
+				prevRune = '\n'
+				atLineStart = true
+				if lineErr == io.EOF {
+					break
+				}
+				if lineErr != nil {
+					return lineErr
+				}
+				continue
+			}
+		}
+
+		r, _, err := br.ReadRune()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+
+		if r == '\n' {
+			atLineStart = true
+		} else if r != '\r' {
+			atLineStart = false
+		}
+
+		if inLineComment {
+			current.WriteRune(r)
+			if r == '\n' {
+				inLineComment = false
+			}
+			backslashCount = 0
+			prevRune = r
+			continue
+		}
+
+		if blockCommentDepth > 0 {
+			current.WriteRune(r)
+			if !isMySQL && r == '/' && strings.HasPrefix(peekString(1), "*") {
+				_, _, _ = br.ReadRune()
+				current.WriteRune('*')
+				blockCommentDepth++
+				prevRune = '*'
+				backslashCount = 0
+				continue
+			}
+			if r == '*' && strings.HasPrefix(peekString(1), "/") {
+				_, _, _ = br.ReadRune()
+				current.WriteRune('/')
+				blockCommentDepth--
+				prevRune = '/'
+				backslashCount = 0
+				continue
+			}
+			backslashCount = 0
+			prevRune = r
+			continue
+		}
+
+		if dollarTag != "" {
+			if r == '$' && len(dollarTag) >= 2 && strings.HasPrefix(peekString(len(dollarTag)-1), dollarTag[1:]) {
+				_, _ = br.Discard(len(dollarTag) - 1)
+				current.WriteString(dollarTag)
+				dollarTag = ""
+				backslashCount = 0
+				prevRune = '$'
+				continue
+			}
+			current.WriteRune(r)
+			backslashCount = 0
+			prevRune = r
+			continue
+		}
+
+		if !inSingleQuote && !inDoubleQuote && !inBacktick {
+			if r == '-' && strings.HasPrefix(peekString(1), "-") {
+				_, _, _ = br.ReadRune()
+				inLineComment = true
+				current.WriteString("--")
+				backslashCount = 0
+				prevRune = '-'
+				continue
+			}
+			if isMySQL && r == '#' {
+				inLineComment = true
+				current.WriteRune('#')
+				backslashCount = 0
+				prevRune = '#'
+				continue
+			}
+			if r == '/' && strings.HasPrefix(peekString(1), "*") {
+				_, _, _ = br.ReadRune() // consume '*'
+				// MySQL/MariaDB executable comments /*! ... */ and /*M! ... */
+				if isMySQL {
+					p2 := peekString(2)
+					if strings.HasPrefix(p2, "!") {
+						_, _, _ = br.ReadRune()
+						current.WriteString("/*!")
+						backslashCount = 0
+						prevRune = '!'
+						continue
+					}
+					if len(p2) >= 2 && (p2[0] == 'M' || p2[0] == 'm') && p2[1] == '!' {
+						mRune, _, _ := br.ReadRune()
+						_, _, _ = br.ReadRune()
+						current.WriteString("/*")
+						current.WriteRune(mRune)
+						current.WriteRune('!')
+						backslashCount = 0
+						prevRune = '!'
+						continue
+					}
+				}
+				blockCommentDepth = 1
+				current.WriteString("/*")
+				backslashCount = 0
+				prevRune = '*'
+				continue
+			}
+			if !isMySQL {
+				if r == '$' {
+					if tag := readDollarTag(); tag != "" {
+						dollarTag = tag
+						current.WriteString(tag)
+						backslashCount = 0
+						prevRune = '$'
+						continue
+					}
+				}
+				if (r == 'E' || r == 'e') && strings.HasPrefix(peekString(1), "'") &&
+					(prevRune == 0 || !(prevRune == '_' || unicode.IsLetter(prevRune) || unicode.IsDigit(prevRune))) {
+					_, _, _ = br.ReadRune() // consume '\''
+					inSingleQuote = true
+					inPGBackslashString = true
+					current.WriteRune(r)
+					current.WriteRune('\'')
+					backslashCount = 0
+					prevRune = '\''
+					continue
+				}
+			}
+		}
+
+		isEscaped := (isMySQL || inPGBackslashString) && (backslashCount%2 == 1)
+		switch {
+		case r == '\'' && !inDoubleQuote && !inBacktick:
+			if inSingleQuote && isEscaped {
+				// Backslash-escaped literal quote
+			} else if inSingleQuote && strings.HasPrefix(peekString(1), "'") {
+				_, _, _ = br.ReadRune()
+				current.WriteString("''")
+				backslashCount = 0
+				prevRune = '\''
+				continue
+			} else {
+				inSingleQuote = !inSingleQuote
+				if !inSingleQuote {
+					inPGBackslashString = false
+				}
+			}
+		case r == '"' && !inSingleQuote && !inBacktick:
+			if inDoubleQuote && isEscaped {
+				// Backslash-escaped literal double quote
+			} else if inDoubleQuote && strings.HasPrefix(peekString(1), `"`) {
+				_, _, _ = br.ReadRune()
+				current.WriteString(`""`)
+				backslashCount = 0
+				prevRune = '"'
+				continue
+			} else {
+				inDoubleQuote = !inDoubleQuote
+			}
+		case r == '`' && !inSingleQuote && !inDoubleQuote:
+			if inBacktick && strings.HasPrefix(peekString(1), "`") {
+				_, _, _ = br.ReadRune()
+				current.WriteString("``")
+				backslashCount = 0
+				prevRune = '`'
+				continue
+			}
+			inBacktick = !inBacktick
+		}
+
+		if !inSingleQuote && !inDoubleQuote && !inBacktick {
+			if delim == ";" && r == ';' {
+				if err := emitCurrent(); err != nil {
+					if errors.Is(err, ErrStopScan) {
+						return nil
+					}
+					return err
+				}
+				backslashCount = 0
+				prevRune = r
+				continue
+			}
+		}
+
+		current.WriteRune(r)
+
+		if !inSingleQuote && !inDoubleQuote && !inBacktick && delim != ";" && r == delimLastRune {
+			curStr := current.String()
+			if strings.HasSuffix(curStr, delim) {
+				trimmed := strings.TrimSpace(curStr[:len(curStr)-len(delim)])
+				current.Reset()
+				if trimmed != "" && HasExecutableSQL(trimmed, isMySQL) {
+					if err := fn(trimmed); err != nil {
+						if errors.Is(err, ErrStopScan) {
+							return nil
+						}
+						return err
+					}
+				}
+				backslashCount = 0
+				prevRune = r
+				continue
+			}
+		}
+
+		if r == '\\' {
+			backslashCount++
+		} else {
+			backslashCount = 0
+		}
+		prevRune = r
+	}
+
+	if err := emitCurrent(); err != nil && !errors.Is(err, ErrStopScan) {
+		return err
+	}
+	return nil
+}
+
 // HasExecutableSQL checks whether a SQL statement string contains executable tokens
 // (i.e. not entirely comments, whitespace, or empty semicolons).
 func HasExecutableSQL(stmt string, isMySQL bool) bool {
@@ -791,6 +1204,12 @@ func HasExecutableSQL(stmt string, isMySQL bool) bool {
 					// In MySQL, /*! ... */ is a versioned executable comment containing SQL
 					tokenCount++
 					i += 2
+					continue
+				}
+				if isMySQL && i+3 < n && (runes[i+2] == 'M' || runes[i+2] == 'm') && runes[i+3] == '!' {
+					// In MariaDB, /*M! ... */ is an executable comment containing SQL
+					tokenCount++
+					i += 3
 					continue
 				}
 				inBlockComment = true
@@ -883,12 +1302,12 @@ func FormatSQLValueForDriver(val any, driverName string) string {
 	case float32:
 		f := float64(v)
 		if math.IsNaN(f) || math.IsInf(f, 0) {
-			return "NULL"
+			return formatSpecialFloat(f, driverName)
 		}
 		return strconv.FormatFloat(f, 'f', -1, 32)
 	case float64:
 		if math.IsNaN(v) || math.IsInf(v, 0) {
-			return "NULL"
+			return formatSpecialFloat(v, driverName)
 		}
 		return strconv.FormatFloat(v, 'f', -1, 64)
 	case json.Number:
@@ -1094,4 +1513,37 @@ func (m *ConnStateMap[T]) Get(conn *sql.Conn) *T {
 	st := new(T)
 	m.entries[key] = st
 	return st
+}
+
+// Delete removes any cached state associated with conn's underlying driver.Conn.
+func (m *ConnStateMap[T]) Delete(conn *sql.Conn) {
+	if conn == nil || m == nil {
+		return
+	}
+	var key any
+	_ = conn.Raw(func(dc any) error {
+		key = dc
+		return nil
+	})
+	if key == nil {
+		return
+	}
+	m.mu.Lock()
+	delete(m.entries, key)
+	m.mu.Unlock()
+}
+
+func formatSpecialFloat(f float64, driverName string) string {
+	d := strings.ToLower(driverName)
+	isPG := strings.HasPrefix(d, "postgre") || d == "pg" || d == "pgx"
+	if !isPG {
+		return "NULL"
+	}
+	if math.IsNaN(f) {
+		return "'NaN'::float8"
+	}
+	if math.IsInf(f, 1) {
+		return "'Infinity'::float8"
+	}
+	return "'-Infinity'::float8"
 }

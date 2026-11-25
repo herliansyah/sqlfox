@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -65,6 +67,7 @@ func (s *Server) handleExportDump(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		ctx = driver.WithDatabase(ctx, targetDB)
 	}
 
 	schema, err := sess.Session.InspectSchema(ctx, targetDB)
@@ -206,18 +209,21 @@ func (d *dumpWriter) abortOnError() {
 }
 
 func writeDumpPrologue(out *dumpWriter, driverName string) {
-	if driverName == "mysql" {
-		out.printf("SET FOREIGN_KEY_CHECKS = 0;\nSET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';\n\n")
-	} else if driverName == "sqlite" {
+	d := strings.ToLower(driverName)
+	if d == "mysql" || d == "mariadb" {
+		// Save and normalize SQL_MODE (clearing NO_BACKSLASH_ESCAPES) so escaped literals restore faithfully.
+		out.printf("SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO';\nSET FOREIGN_KEY_CHECKS = 0;\n\n")
+	} else if d == "sqlite" || d == "sqlite3" {
 		out.printf("PRAGMA foreign_keys = OFF;\n\n")
 	}
 	out.flush()
 }
 
 func writeDumpEpilogue(out *dumpWriter, driverName string) {
-	if driverName == "mysql" {
-		out.printf("SET FOREIGN_KEY_CHECKS = 1;\n")
-	} else if driverName == "sqlite" {
+	d := strings.ToLower(driverName)
+	if d == "mysql" || d == "mariadb" {
+		out.printf("SET FOREIGN_KEY_CHECKS = 1;\nSET SQL_MODE=@OLD_SQL_MODE;\n")
+	} else if d == "sqlite" || d == "sqlite3" {
 		out.printf("PRAGMA foreign_keys = ON;\n")
 	}
 }
@@ -244,12 +250,6 @@ func writeDumpDrops(ctx context.Context, out *dumpWriter, sess *ActiveSession, t
 	}
 	out.printf("\n")
 	return nil
-}
-
-// writeDumpRows streams the rows of querySQL as batched INSERTs; any read error is returned rather
-// than treated as end of data. maxRows <= 0 means unbounded.
-func writeDumpRows(ctx context.Context, out *dumpWriter, sess *ActiveSession, table, querySQL string, maxRows int) error {
-	return writeDumpRowsFrom(ctx, out, sess, nil, table, querySQL, maxRows)
 }
 
 func writeDumpRowsFrom(ctx context.Context, out *dumpWriter, sess *ActiveSession, tx driver.TxSession, table, querySQL string, maxRows int) error {
@@ -319,6 +319,9 @@ func (s *Server) handleExportSmartSeed(w http.ResponseWriter, r *http.Request) {
 	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
 		limit = l
 	}
+	if limit > 10000 {
+		limit = 10000
+	}
 	includeDDL := r.URL.Query().Get("ddl") != "false"
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
@@ -332,6 +335,7 @@ func (s *Server) handleExportSmartSeed(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		ctx = driver.WithDatabase(ctx, targetDB)
 	}
 
 	schema, err := sess.Session.InspectSchema(ctx, targetDB)
@@ -530,7 +534,12 @@ func (s *Server) handleRunSQLScript(w http.ResponseWriter, r *http.Request) {
 
 	contentType := r.Header.Get("Content-Type")
 	if strings.HasPrefix(contentType, "multipart/form-data") {
-		if err := r.ParseMultipartForm(50 * 1024 * 1024); err != nil {
+		if err := r.ParseMultipartForm(4 * 1024 * 1024); err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				writeError(w, http.StatusRequestEntityTooLarge, "SQL script exceeds maximum size limit (100MB)")
+				return
+			}
 			writeError(w, http.StatusBadRequest, "failed to parse multipart form: "+err.Error())
 			return
 		}
@@ -550,28 +559,59 @@ func (s *Server) handleRunSQLScript(w http.ResponseWriter, r *http.Request) {
 		scriptReader = r.Body
 	}
 
-	content, err := io.ReadAll(io.LimitReader(scriptReader, maxScriptPayloadBytes+1))
+	// Spool uploaded script to a bounded temp file so both the Safety Guard pre-pass and
+	// statement execution stream statement-by-statement with O(largest statement) RAM instead of
+	// allocating ~750MB-1GB for a 100MB script via io.ReadAll + []rune conversion.
+	tmpFile, err := os.CreateTemp("", "sqlfox-script-*.sql")
 	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create temp script file: "+err.Error())
+		return
+	}
+	tmpPath := tmpFile.Name()
+	defer func() {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
+	}()
+
+	written, err := io.Copy(tmpFile, io.LimitReader(scriptReader, maxScriptPayloadBytes+1))
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, "SQL script exceeds maximum size limit (100MB)")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "failed to read SQL script: "+err.Error())
 		return
 	}
-	if len(content) > maxScriptPayloadBytes {
+	if written > maxScriptPayloadBytes {
 		writeError(w, http.StatusRequestEntityTooLarge, "SQL script exceeds maximum size limit (100MB)")
 		return
 	}
 
-	statements := driver.SplitSQLStatements(string(content), sess.DriverName)
-	if len(statements) == 0 {
+	// Pass 1: Safety Guard pre-pass via streaming statement scanner (zero whole-file buffering).
+	if _, err := tmpFile.Seek(0, io.SeekStart); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to rewind temp script file: "+err.Error())
+		return
+	}
+	totalStatements := 0
+	var blockers []ScriptBlocker
+	scanErr := driver.ScanSQLStatements(tmpFile, sess.DriverName, func(stmt string) error {
+		totalStatements++
+		if b := sess.InspectScriptStatement(stmt, totalStatements, targetDB); b != nil {
+			blockers = append(blockers, *b)
+		}
+		return nil
+	})
+	if scanErr != nil {
+		writeError(w, http.StatusBadRequest, "failed to scan SQL script: "+scanErr.Error())
+		return
+	}
+	if totalStatements == 0 {
 		writeError(w, http.StatusBadRequest, "no executable SQL statements found in script")
 		return
 	}
 
-	// Safety Guard pre-pass: the script runner must honor the same destructive-statement gate as the
-	// editor. Each statement is inspected; any CRITICAL operation (DROP/TRUNCATE, unqualified
-	// DELETE/UPDATE, DROP DATABASE, or a schema-scope mismatch) blocks the whole run with HTTP 409
-	// unless the operator passed ?confirm=true. Without this, an uploaded script bypassed the entire
-	// Safe Execution Pipeline (no Challenge Modal, no pre-DDL backup).
-	blockers := sess.InspectScriptStatements(statements, targetDB)
+	// Safety Guard gate: mirrors editor's destructive-statement challenge.
 	if len(blockers) > 0 && !confirmed {
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"error":              "Script contains destructive statements that require confirmation. Re-run with confirm=true to proceed.",
@@ -581,28 +621,35 @@ func (s *Server) handleRunSQLScript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(blockers) > 0 && confirmed && strings.EqualFold(sess.Environment, "Production") {
-		if typed := strings.TrimSpace(r.URL.Query().Get("challenge_input")); typed != "" {
-			expectedDB := targetDB
-			if expectedDB == "" {
-				expectedDB = sess.GetDatabaseName()
-			}
-			matched := strings.EqualFold(typed, expectedDB) || strings.EqualFold(typed, sess.Name)
-			if !matched {
-				for _, b := range blockers {
-					if b.TargetTable != "" && strings.EqualFold(typed, b.TargetTable) {
-						matched = true
-						break
-					}
+		expectedDB := targetDB
+		if expectedDB == "" {
+			expectedDB = sess.GetDatabaseName()
+		}
+		typed := strings.TrimSpace(r.URL.Query().Get("challenge_input"))
+		if typed == "" {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":              fmt.Sprintf("Production script requires non-empty challenge_input matching '%s' or target table.", expectedDB),
+				"requires_challenge": true,
+				"blockers":           blockers,
+			})
+			return
+		}
+		matched := strings.EqualFold(typed, expectedDB) || strings.EqualFold(typed, sess.Name)
+		if !matched {
+			for _, b := range blockers {
+				if b.TargetTable != "" && strings.EqualFold(typed, b.TargetTable) {
+					matched = true
+					break
 				}
 			}
-			if !matched {
-				writeJSON(w, http.StatusConflict, map[string]any{
-					"error":              fmt.Sprintf("Production script challenge_input did not match '%s'.", expectedDB),
-					"requires_challenge": true,
-					"blockers":           blockers,
-				})
-				return
-			}
+		}
+		if !matched {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":              fmt.Sprintf("Production script challenge_input did not match '%s'.", expectedDB),
+				"requires_challenge": true,
+				"blockers":           blockers,
+			})
+			return
 		}
 	}
 
@@ -620,14 +667,20 @@ func (s *Server) handleRunSQLScript(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		ctx = driver.WithDatabase(ctx, targetDB)
 	}
 
-	totalStatements := len(statements)
 	executedStatements := 0
 	errorCount := 0
 
+	// Pass 2: Stream statements one-by-one from disk into the database executor.
 	runStatements := func(execFn func(context.Context, string) (*driver.ExecResult, error)) error {
-		for i, stmt := range statements {
+		if _, err := tmpFile.Seek(0, io.SeekStart); err != nil {
+			return err
+		}
+		stmtIdx := 0
+		return driver.ScanSQLStatements(tmpFile, sess.DriverName, func(stmt string) error {
+			stmtIdx++
 			// Pre-DDL Smart Tiered Backup for destructive schema ops, matching the editor pipeline.
 			sess.BackupBeforeDestructive(ctx, stmt, targetDB)
 
@@ -647,7 +700,7 @@ func (s *Server) handleRunSQLScript(w http.ResponseWriter, r *http.Request) {
 			}
 
 			progressEvent := map[string]any{
-				"statement_index": i + 1,
+				"statement_index": stmtIdx,
 				"total":           totalStatements,
 				"sql_preview":     preview,
 				"duration_ms":     durationMs,
@@ -669,10 +722,10 @@ func (s *Server) handleRunSQLScript(w http.ResponseWriter, r *http.Request) {
 			}
 
 			if err != nil && stopOnError {
-				break
+				return driver.ErrStopScan
 			}
-		}
-		return nil
+			return nil
+		})
 	}
 
 	// Execute all script statements on a single pinned physical connection when supported,

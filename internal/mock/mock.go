@@ -86,10 +86,13 @@ func Generate(ctx context.Context, sess driver.Session, cfg Config) (*Result, er
 		}
 	}
 
-	// Build insert column list — skip auto-increment PKs.
+	// Build insert column list — skip auto-increment PKs and generated columns.
 	var insertCols []driver.ColumnMetadata
 	for _, col := range targetTable.Columns {
 		extra := strings.ToLower(col.Extra)
+		if strings.Contains(extra, "generated") || strings.Contains(extra, "virtual") || strings.Contains(extra, "stored") {
+			continue
+		}
 		if col.IsPrimaryKey && (strings.Contains(extra, "auto_increment") || strings.Contains(extra, "autoincrement")) {
 			continue // DB generates this
 		}
@@ -140,6 +143,31 @@ func Generate(ctx context.Context, sess driver.Session, cfg Config) (*Result, er
 	batchSize := 200
 	if len(insertCols) > 0 && batchSize*len(insertCols) > maxParams {
 		batchSize = max(1, maxParams/len(insertCols))
+	}
+
+	// Snapshot existing PKs prior to insert so the self-referential FK second pass NEVER
+	// mutates pre-existing root rows (where fk IS NULL) in the target table.
+	pkCol := ""
+	for _, col := range targetTable.Columns {
+		if col.IsPrimaryKey {
+			pkCol = col.Name
+			break
+		}
+	}
+	existingPKs := map[string]bool{}
+	if len(isSelfRef) > 0 && pkCol != "" {
+		qPK := driver.QuoteIdentifier(pkCol, cfg.DriverName)
+		if rows, qErr := sess.QueryRaw(ctx, fmt.Sprintf("SELECT %s FROM %s", qPK, qTable)); qErr == nil {
+			for _, row := range rows {
+				if len(row) > 0 && row[0] != nil {
+					pkVal := row[0]
+					if b, ok := pkVal.([]byte); ok {
+						pkVal = string(b)
+					}
+					existingPKs[fmt.Sprint(pkVal)] = true
+				}
+			}
+		}
 	}
 
 	// One transaction wrapping all batches for this table pinned to a dedicated connection.
@@ -213,33 +241,74 @@ func Generate(ctx context.Context, sess driver.Session, cfg Config) (*Result, er
 		return nil, fmt.Errorf("commit: %w", err)
 	}
 
-	// Second pass: resolve self-referential FK columns.
-	// Find the PK column name.
-	pkCol := ""
-	for _, col := range targetTable.Columns {
-		if col.IsPrimaryKey {
-			pkCol = col.Name
-			break
-		}
-	}
-
-	if pkCol != "" {
+	// Second pass: resolve self-referential FK columns strictly for newly inserted rows.
+	// Never overwrite pre-existing rows (root nodes with fk IS NULL), never create self-cycles (id == fk),
+	// and pick a distinct random parent PK per row.
+	if pkCol != "" && len(isSelfRef) > 0 {
 		qPK := driver.QuoteIdentifier(pkCol, cfg.DriverName)
-		for col := range isSelfRef {
-			qCol := driver.QuoteIdentifier(col, cfg.DriverName)
-			var updateSQL string
-			if isMySQL {
-				// MySQL doesn't allow UPDATE...SELECT from same table without subquery alias.
-				updateSQL = fmt.Sprintf(
-					"UPDATE %s SET %s = (SELECT pk FROM (SELECT %s AS pk FROM %s ORDER BY RAND() LIMIT 1) AS _t) WHERE %s IS NULL",
-					qTable, qCol, qPK, qTable, qCol)
-			} else {
-				// SQLite and PostgreSQL support direct subquery.
-				updateSQL = fmt.Sprintf(
-					"UPDATE %s SET %s = (SELECT %s FROM %s ORDER BY RANDOM() LIMIT 1) WHERE %s IS NULL",
-					qTable, qCol, qPK, qTable, qCol)
+		allRows, qErr := sess.QueryRaw(ctx, fmt.Sprintf("SELECT %s FROM %s", qPK, qTable))
+		if qErr != nil {
+			return nil, fmt.Errorf("fetch PKs for self-referential FK resolution: %w", qErr)
+		}
+		var allPKs []any
+		var newPKs []any
+		for _, row := range allRows {
+			if len(row) == 0 || row[0] == nil {
+				continue
 			}
-			sess.ExecRaw(ctx, updateSQL) //nolint:errcheck — best-effort, data still valid with NULLs
+			pkVal := row[0]
+			if b, ok := pkVal.([]byte); ok {
+				pkVal = string(b)
+			}
+			allPKs = append(allPKs, pkVal)
+			if !existingPKs[fmt.Sprint(pkVal)] {
+				newPKs = append(newPKs, pkVal)
+			}
+		}
+
+		if len(allPKs) > 1 && len(newPKs) > 0 {
+			fkTx, fkTxErr := sess.BeginTx(ctx)
+			if fkTxErr != nil {
+				return nil, fmt.Errorf("begin self-referential FK transaction: %w", fkTxErr)
+			}
+			defer fkTx.Rollback() //nolint:errcheck
+
+			p1 := driver.Placeholder(cfg.DriverName, 1)
+			p2 := driver.Placeholder(cfg.DriverName, 2)
+			for col := range isSelfRef {
+				qCol := driver.QuoteIdentifier(col, cfg.DriverName)
+				updateSQL := fmt.Sprintf("UPDATE %s SET %s = %s WHERE %s = %s AND %s IS NULL",
+					qTable, qCol, p1, qPK, p2, qCol)
+				for _, childPK := range newPKs {
+					childKey := fmt.Sprint(childPK)
+					// Pick a parent PK strictly different from childPK to prevent self-cycles.
+					var parentPK any
+					for attempts := 0; attempts < 8; attempts++ {
+						cand := allPKs[r.Intn(len(allPKs))]
+						if fmt.Sprint(cand) != childKey {
+							parentPK = cand
+							break
+						}
+					}
+					if parentPK == nil {
+						for _, cand := range allPKs {
+							if fmt.Sprint(cand) != childKey {
+								parentPK = cand
+								break
+							}
+						}
+					}
+					if parentPK == nil {
+						continue
+					}
+					if _, uErr := fkTx.ExecRaw(ctx, updateSQL, parentPK, childPK); uErr != nil {
+						return nil, fmt.Errorf("update self-referential FK %s: %w", col, uErr)
+					}
+				}
+			}
+			if cErr := fkTx.Commit(); cErr != nil {
+				return nil, fmt.Errorf("commit self-referential FK updates: %w", cErr)
+			}
 		}
 	}
 

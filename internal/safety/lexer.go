@@ -62,12 +62,20 @@ func tokenizeSQL(q string, mysqlEscapes bool) []sqlToken {
 			continue
 		}
 
-		// Block comments /* ... */ (supports MySQL /*! ... */ unwrapping and PostgreSQL nested comments)
+		// Block comments /* ... */ (supports MySQL /*! ... */, MariaDB /*M! ... */ unwrapping and PostgreSQL nested comments)
 		if c == '/' && i+1 < n && q[i+1] == '*' {
-			// MySQL executes /*! ... */ and /*!NNNNN ... */ bodies as real SQL; unwrap instead of skipping.
+			// MySQL executes /*! ... */ and MariaDB executes /*M! ... */ bodies as real SQL; unwrap instead of skipping.
 			if i+2 < n && q[i+2] == '!' {
 				execCommentDepth++
 				i += 3
+				for i < n && q[i] >= '0' && q[i] <= '9' {
+					i++
+				}
+				continue
+			}
+			if i+3 < n && (q[i+2] == 'M' || q[i+2] == 'm') && q[i+3] == '!' {
+				execCommentDepth++
+				i += 4
 				for i < n && q[i] >= '0' && q[i] <= '9' {
 					i++
 				}
@@ -88,6 +96,34 @@ func tokenizeSQL(q string, mysqlEscapes bool) []sqlToken {
 				}
 				j++
 			}
+			i = j
+			continue
+		}
+
+		// PostgreSQL E'...' / e'...' escape string literal (always honors backslash escapes even in standard SQL mode).
+		if !mysqlEscapes && (c == 'E' || c == 'e') && i+1 < n && q[i+1] == '\'' && (i == 0 || !isIdentByte(q[i-1])) {
+			j := i + 2
+			for j < n {
+				if q[j] == '\\' && j+1 < n {
+					j += 2
+					continue
+				}
+				if q[j] == '\'' {
+					if j+1 < n && q[j+1] == '\'' {
+						j += 2
+						continue
+					}
+					j++
+					break
+				}
+				j++
+			}
+			tokens = append(tokens, sqlToken{
+				kind:  tokString,
+				raw:   q[i:j],
+				start: i,
+				end:   j,
+			})
 			i = j
 			continue
 		}

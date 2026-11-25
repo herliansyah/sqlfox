@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/herliansyah/sqlfox/internal/dataimport"
@@ -37,18 +39,30 @@ func (s *Server) handleImportCSV(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse multipart form (max 32MB in memory, rest streams to temp disk)
-	err = r.ParseMultipartForm(32 << 20)
+	// Parse multipart form when Content-Type is multipart/form-data (max 32MB in memory, rest streams to temp disk).
+	isMultipart := strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data")
 	var fileReader io.Reader
 	var delimiterParam string
 	var emptyAsNullParam bool = true
 	var skipErrorsParam bool = false
 	var mappingJSON string
 
-	if err == nil && r.MultipartForm != nil {
-		defer func() {
-			_ = r.MultipartForm.RemoveAll()
-		}()
+	if isMultipart {
+		err = r.ParseMultipartForm(32 << 20)
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, "import payload exceeds maximum allowed size")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "failed to parse multipart import payload: "+err.Error())
+			return
+		}
+		if r.MultipartForm != nil {
+			defer func() {
+				_ = r.MultipartForm.RemoveAll()
+			}()
+		}
 		files := r.MultipartForm.File["file"]
 		if len(files) == 0 {
 			writeError(w, http.StatusBadRequest, "no file uploaded in 'file' form field")
@@ -93,14 +107,17 @@ func (s *Server) handleImportCSV(w http.ResponseWriter, r *http.Request) {
 
 	mapping := make(map[string]string)
 	if mappingJSON != "" {
-		_ = json.Unmarshal([]byte(mappingJSON), &mapping)
+		if err := json.Unmarshal([]byte(mappingJSON), &mapping); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid mapping JSON: "+err.Error())
+			return
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
 	defer cancel()
 
-	if dbName != "" && sess.Session != nil {
-		if err := sess.Session.SelectDatabase(ctx, dbName); err != nil {
+	if dbName != "" {
+		if err := sess.UseDatabase(ctx, dbName); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -117,6 +134,11 @@ func (s *Server) handleImportCSV(w http.ResponseWriter, r *http.Request) {
 	importDur := time.Since(importStart).Milliseconds()
 	if err != nil {
 		sess.RecordAudit(fmt.Sprintf("-- CSV Import failed for table %s", tableName), "csv_import", importDur, 0, err, importStart)
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, "import payload exceeds maximum allowed size")
+			return
+		}
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}

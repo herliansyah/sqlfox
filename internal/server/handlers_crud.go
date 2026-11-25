@@ -314,12 +314,22 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, rc := range req.RowCriterias {
+			if len(rc) == 0 {
+				_ = finish(errors.New("row_criteria cannot be empty"))
+				writeError(w, http.StatusBadRequest, "row_criteria cannot be empty")
+				return
+			}
 			var whereParts []string
 			var auditWhereParts []string
 			var args []any
 			pIdx := 1
-			for cName, cVal := range rc {
-				cVal = normalizeJSONParam(cVal)
+			critKeys := make([]string, 0, len(rc))
+			for cName := range rc {
+				critKeys = append(critKeys, cName)
+			}
+			slices.Sort(critKeys)
+			for _, cName := range critKeys {
+				cVal := normalizeJSONParam(rc[cName])
 				if cVal == nil {
 					whereParts = append(whereParts, fmt.Sprintf("%s IS NULL", quoteIdent(cName, sess.DriverName)))
 					auditWhereParts = append(auditWhereParts, fmt.Sprintf("%s IS NULL", quoteIdent(cName, sess.DriverName)))

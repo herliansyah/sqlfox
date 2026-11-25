@@ -134,8 +134,12 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 	}
 
 	targetTable := quoteIdent(tableName, sess.DriverName)
-	if targetDB != "" && sess.DriverName != "sqlite" {
-		targetTable = quoteIdent(targetDB, sess.DriverName) + "." + targetTable
+	if targetDB != "" && !isSqliteDriver(sess.DriverName) {
+		// On PostgreSQL, targetDB may be the physical database name rather than a schema name;
+		// prefixing "mydb"."users" fails when no schema named "mydb" exists.
+		if !isPgDriver(sess.DriverName) || !strings.EqualFold(targetDB, sess.GetDatabaseName()) || strings.EqualFold(targetDB, "public") {
+			targetTable = quoteIdent(targetDB, sess.DriverName) + "." + targetTable
+		}
 	}
 
 	filter := strings.TrimSpace(r.URL.Query().Get("filter"))
@@ -197,7 +201,7 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	stream, err := sess.Session.QueryStream(ctx, querySQL, limit)
+	stream, err := sess.queryStreamSafe(ctx, querySQL, limit)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "query failed: "+err.Error())
 		return
@@ -217,9 +221,10 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 	var totalRows *int64
 	var isExact bool
 
-	// Optimization: If we queried from offset 0 (no keyset seek) and chunk returned fewer rows than limit,
-	// then the exact total rows is known without querying SELECT COUNT(*).
-	if lastKey == "" && len(chunk) < limit {
+	// Optimization: If we queried from offset 0 (or got at least one row on the final page) and chunk
+	// returned fewer rows than limit, the exact total rows is known without running SELECT COUNT(*).
+	// When offset > 0 and len(chunk) == 0 we may be past EOF, so offset+0 would over-report total_rows.
+	if lastKey == "" && (offset == 0 || len(chunk) > 0) && len(chunk) < limit {
 		cnt := int64(offset + len(chunk))
 		totalRows = &cnt
 		isExact = true
@@ -233,7 +238,7 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 			countSQL = fmt.Sprintf("SELECT COUNT(*) FROM %s %s", targetTable, whereClause)
 		}
 
-		cStream, cErr := sess.Session.QueryStream(countCtx, countSQL, 1)
+		cStream, cErr := sess.queryStreamSafe(countCtx, countSQL, 1)
 		if cErr == nil {
 			cChunk, nErr := cStream.NextChunk(1)
 			_ = cStream.Close()
@@ -312,8 +317,12 @@ func (s *Server) handleGetTableCount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	targetTable := quoteIdent(tableName, sess.DriverName)
-	if targetDB != "" && sess.DriverName != "sqlite" {
-		targetTable = quoteIdent(targetDB, sess.DriverName) + "." + targetTable
+	if targetDB != "" && !isSqliteDriver(sess.DriverName) {
+		// On PostgreSQL, targetDB may be the physical database name rather than a schema name;
+		// prefixing "mydb"."users" fails when no schema named "mydb" exists.
+		if !isPgDriver(sess.DriverName) || !strings.EqualFold(targetDB, sess.GetDatabaseName()) || strings.EqualFold(targetDB, "public") {
+			targetTable = quoteIdent(targetDB, sess.DriverName) + "." + targetTable
+		}
 	}
 
 	countSQL := fmt.Sprintf("SELECT COUNT(*) FROM %s", targetTable)
@@ -322,7 +331,7 @@ func (s *Server) handleGetTableCount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
-	stream, err := sess.Session.QueryStream(ctx, countSQL, 1)
+	stream, err := sess.queryStreamSafe(ctx, countSQL, 1)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "count failed: "+err.Error())
 		return
@@ -372,9 +381,6 @@ var reFilterToken = regexp.MustCompile(
 		`|[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*` + // word / qualified identifier
 		`|<=|>=|<>|!=|<|>|=|\+|-|\*|/|%|\(|\)|,` + // operators & grouping
 		`)`)
-
-// reFilterComment matches any SQL comment opener; comments are never valid inside a quick-filter.
-var reFilterComment = regexp.MustCompile(`--|#|/\*`)
 
 // structuredFilterPill mirrors a typed frontend filter pill so pill-based filters never
 // rely on raw SQL string splicing from the client.
@@ -443,14 +449,8 @@ func validateTableFilter(filter string) error {
 	if trimmed == "" {
 		return nil
 	}
-	if strings.ContainsRune(trimmed, ';') {
-		return errors.New("semicolons are not permitted in filter expressions")
-	}
 	if strings.ContainsRune(trimmed, 0) {
 		return errors.New("NUL bytes are not permitted in filter expressions")
-	}
-	if reFilterComment.MatchString(trimmed) {
-		return errors.New("comments are not permitted in filter expressions")
 	}
 
 	rest := trimmed
@@ -460,6 +460,14 @@ func validateTableFilter(filter string) error {
 		rest = strings.TrimLeft(rest, " \t\r\n")
 		if rest == "" {
 			break
+		}
+		// Reject unquoted semicolons and SQL comments outside quoted string literals,
+		// while permitting values like tag = '#bug' or note = 'a--b'.
+		if rest[0] == ';' {
+			return errors.New("semicolons are not permitted in filter expressions")
+		}
+		if strings.HasPrefix(rest, "--") || strings.HasPrefix(rest, "#") || strings.HasPrefix(rest, "/*") {
+			return errors.New("comments are not permitted in filter expressions")
 		}
 		loc := reFilterToken.FindString(rest)
 		if loc == "" {
@@ -614,6 +622,13 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
+	if req.Database != "" {
+		if err := sess.UseDatabase(ctx, req.Database); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
 	exec, finish, err := sess.gridWriter(ctx)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update cell: "+err.Error())
@@ -621,25 +636,47 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var totalAffected int64
-	for _, item := range items {
+	appliedCount := 0
+	for itemIdx := range items {
+		item := items[itemIdx]
+		if item.Table == "" || item.Column == "" {
+			_ = finish(errors.New("table and column are required for each edit"))
+			writeError(w, http.StatusBadRequest, "table and column are required for each edit")
+			return
+		}
 		tableRef := quoteIdent(item.Table)
 		db := item.Database
 		if db == "" {
 			db = req.Database
 		}
-		if db != "" && sess.DriverName != "sqlite" {
+		if db != "" && !isSqliteDriver(sess.DriverName) {
 			if !isPgDriver(sess.DriverName) || !strings.EqualFold(db, sess.GetDatabaseName()) || strings.EqualFold(db, "public") {
 				tableRef = fmt.Sprintf("%s.%s", quoteIdent(db), quoteIdent(item.Table))
 			}
 		}
 
-		// Composite-PK safety guard: reject single-PK updates on tables that have multiple primary key columns,
-		// preventing accidental mass-overwrites when a client sends only the first PK column.
-		if len(item.PKValues) == 0 && item.PKColumn != "" && len(item.RowCriteria) == 0 {
+		// Composite-PK safety guard: verify ALL primary key columns are present whenever updating by PK,
+		// preventing accidental multi-row overwrites when a client sends only a subset of composite PK columns.
+		if len(item.RowCriteria) == 0 && (len(item.PKValues) > 0 || item.PKColumn != "") {
 			if pkCols := tablePrimaryKeyColumns(ctx, sess, db, item.Table); len(pkCols) > 1 {
-				_ = finish(errors.New("composite primary key requires pk_values"))
-				writeError(w, http.StatusBadRequest, fmt.Sprintf("table %q has a composite primary key (%s); pk_values with all primary key columns is required", item.Table, strings.Join(pkCols, ", ")))
-				return
+				if len(item.PKValues) == 0 {
+					_ = finish(errors.New("composite primary key requires pk_values"))
+					writeError(w, http.StatusBadRequest, fmt.Sprintf("table %q has a composite primary key (%s); pk_values with all primary key columns is required", item.Table, strings.Join(pkCols, ", ")))
+					return
+				}
+				provided := make(map[string]bool, len(item.PKValues))
+				for k, v := range item.PKValues {
+					if v != nil {
+						provided[strings.ToLower(k)] = true
+					}
+				}
+				for _, pk := range pkCols {
+					if !provided[strings.ToLower(pk)] {
+						_ = finish(errors.New("incomplete composite primary key"))
+						writeError(w, http.StatusBadRequest, fmt.Sprintf("table %q has a composite primary key (%s); missing primary key column %q", item.Table, strings.Join(pkCols, ", "), pk))
+						return
+					}
+				}
 			}
 		}
 
@@ -687,8 +724,13 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 		} else if len(item.RowCriteria) > 0 {
 			var whereParts []string
 			var auditWhereParts []string
-			for cName, cVal := range item.RowCriteria {
-				cVal = normalizeJSONParam(cVal)
+			critKeys := make([]string, 0, len(item.RowCriteria))
+			for cName := range item.RowCriteria {
+				critKeys = append(critKeys, cName)
+			}
+			slices.Sort(critKeys)
+			for _, cName := range critKeys {
+				cVal := normalizeJSONParam(item.RowCriteria[cName])
 				if cVal == nil {
 					whereParts = append(whereParts, fmt.Sprintf("%s IS NULL", quoteIdent(cName)))
 					auditWhereParts = append(auditWhereParts, fmt.Sprintf("%s IS NULL", quoteIdent(cName)))
@@ -705,7 +747,9 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 			auditSQL = fmt.Sprintf("UPDATE %s SET %s = %s WHERE %s",
 				tableRef, quoteIdent(item.Column), valLiteral, singleRowWhere(sess.DriverName, tableRef, strings.Join(auditWhereParts, " AND ")))
 		} else {
-			continue
+			_ = finish(errors.New("each edit item requires pk_column/pk_value, pk_values, or row_criteria"))
+			writeError(w, http.StatusBadRequest, "each edit item requires pk_column/pk_value, pk_values, or row_criteria")
+			return
 		}
 
 		cellStart := time.Now()
@@ -722,6 +766,27 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to update cell: "+err.Error())
 			return
 		}
+		if len(item.RowCriteria) > 0 && cellAffected == 0 {
+			oldVal, hasOld := item.RowCriteria[item.Column]
+			if !hasOld || fmt.Sprint(normalizeJSONParam(oldVal)) != fmt.Sprint(item.Value) {
+				_ = finish(errors.New("row was modified or deleted concurrently"))
+				writeError(w, http.StatusConflict, fmt.Sprintf("conflict updating %s.%s: matching row no longer exists or was modified concurrently", item.Table, item.Column))
+				return
+			}
+		}
+		appliedCount++
+		// If a PK-less batch edits multiple columns of the SAME row, propagate the new cell value
+		// into subsequent items' RowCriteria so the next UPDATE still matches the modified row.
+		// Every column in RowCriteria must match so edits to a different row sharing one column value are never corrupted.
+		if len(item.RowCriteria) > 0 {
+			for nextIdx := itemIdx + 1; nextIdx < len(items); nextIdx++ {
+				if strings.EqualFold(items[nextIdx].Table, item.Table) && rowCriteriaEqual(items[nextIdx].RowCriteria, item.RowCriteria) {
+					if _, exists := items[nextIdx].RowCriteria[item.Column]; exists {
+						items[nextIdx].RowCriteria[item.Column] = item.Value
+					}
+				}
+			}
+		}
 	}
 	if err := finish(nil); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update cell: "+err.Error())
@@ -731,8 +796,28 @@ func (s *Server) handleCellEdit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success":       true,
 		"rows_affected": totalAffected,
-		"applied_count": len(items),
+		"applied_count": appliedCount,
 	})
+}
+
+func rowCriteriaEqual(a, b map[string]any) bool {
+	if len(a) == 0 || len(a) != len(b) {
+		return false
+	}
+	for k, va := range a {
+		vb, ok := b[k]
+		if !ok {
+			return false
+		}
+		na, nb := normalizeJSONParam(va), normalizeJSONParam(vb)
+		if (na == nil) != (nb == nil) {
+			return false
+		}
+		if na != nil && fmt.Sprint(na) != fmt.Sprint(nb) {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) handleToggleReadOnly(w http.ResponseWriter, r *http.Request) {

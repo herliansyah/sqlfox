@@ -7,6 +7,7 @@ import (
 	gomysql "github.com/go-sql-driver/mysql"
 	"github.com/herliansyah/sqlfox/internal/advisor"
 	"github.com/herliansyah/sqlfox/internal/driver"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -151,12 +152,20 @@ func (s *MySQLSession) inspectGaleraCluster(ctx context.Context) (*driver.Cluste
 				IsLocal:         true,
 				Status:          "online",
 			}
-		} else {
+		} else if os.Getenv("SQLFOX_GALERA_PEER_PROBE") == "1" {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				nodeResults[idx] = s.probePeerNode(ctx, hostPort, nodeAddr)
 			}()
+		} else {
+			// Do not automatically transmit DB credentials to unverified peer addresses from wsrep_incoming_addresses.
+			nodeResults[idx] = driver.ClusterNodeInfo{
+				Name:    nodeAddr,
+				Address: nodeAddr,
+				State:   "Discovered (peer probe disabled)",
+				Status:  "discovered",
+			}
 		}
 	}
 	wg.Wait()
@@ -599,10 +608,8 @@ func (s *MySQLSession) SampleFlightMetrics(ctx context.Context) (*driver.FlightM
 					sample.ThreadsRunning = intVal
 				case "Threads_connected":
 					sample.ThreadsConnected = intVal
-				case "Innodb_row_lock_waits", "Innodb_row_lock_current_waits":
-					if intVal > sample.RowLockWaits {
-						sample.RowLockWaits = intVal
-					}
+				case "Innodb_row_lock_current_waits":
+					sample.RowLockWaits = intVal
 				case "Innodb_buffer_pool_wait_free":
 					sample.BufferPoolWaitFree = intVal
 				}

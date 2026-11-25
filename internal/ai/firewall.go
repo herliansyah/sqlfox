@@ -235,3 +235,22 @@ func UnmaskIdentifiersInText(text string, mapping map[string]string) string {
 		return match
 	})
 }
+
+var (
+	reSQLSingleQuotedLiteral = regexp.MustCompile(`'(?:''|\\'|[^'])*'`)
+	reEmailPII               = regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`)
+	rePGDetailKeyValue       = regexp.MustCompile(`(?i)(DETAIL:\s*Key\s*\([^)]+\)\s*=\s*\()([^)]+)(\))`)
+)
+
+// RedactSensitiveLiterals strips quoted SQL string literals, PostgreSQL constraint DETAIL values,
+// and email addresses before sending queries/errors/plans to external AI providers when privacy
+// masking is enabled.
+func RedactSensitiveLiterals(text string) string {
+	if text == "" {
+		return text
+	}
+	out := rePGDetailKeyValue.ReplaceAllString(text, "${1}[REDACTED]${3}")
+	out = reSQLSingleQuotedLiteral.ReplaceAllString(out, "'[REDACTED]'")
+	out = reEmailPII.ReplaceAllString(out, "[REDACTED_EMAIL]")
+	return out
+}

@@ -449,7 +449,7 @@ func executeHealthCheckTask(ctx context.Context, task JobTask, vaultPath, pass s
 	_ = res
 
 	pingDuration := time.Since(t0)
-	fmt.Fprintf(stderr, "  ✓ Target '%s' is healthy (ping latency: %v)\n", task.Target, pingDuration)
+	fmt.Fprintf(stderr, "  ✓ Target '%s' is healthy (ping latency: %v)\n", RedactDSN(task.Target), pingDuration)
 	return 0
 }
 
@@ -530,7 +530,7 @@ func executeDumpTask(ctx context.Context, task JobTask, vaultPath, pass string, 
 		dumpErr = file.Close()
 	}
 	if dumpErr == nil {
-		_ = os.Chmod(tmpPath, 0644)
+		_ = os.Chmod(tmpPath, 0600)
 		dumpErr = os.Rename(tmpPath, resolvedOut)
 	}
 	if dumpErr != nil {
@@ -587,23 +587,23 @@ func executeQueryTask(ctx context.Context, task JobTask, vaultPath, pass string,
 	}
 
 	outWriter := stdout
-	var closeOut func()
+	var tmpOutPath, resolvedOut string
+	var tmpOutFile *os.File
 	if task.Output != "" {
-		resolvedOut := InterpolatePathTokens(task.Output)
-		if err := os.MkdirAll(filepath.Dir(resolvedOut), 0755); err != nil {
+		resolvedOut = InterpolatePathTokens(task.Output)
+		outDir := filepath.Dir(resolvedOut)
+		if err := os.MkdirAll(outDir, 0700); err != nil {
 			fmt.Fprintf(stderr, "  ❌ Cannot create query output directory: %v\n", err)
 			return 1
 		}
-		f, err := os.OpenFile(resolvedOut, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+		f, err := os.CreateTemp(outDir, ".sqlfox-query-*.tmp")
 		if err != nil {
-			fmt.Fprintf(stderr, "  ❌ Cannot open query output file: %v\n", err)
+			fmt.Fprintf(stderr, "  ❌ Cannot create temporary query output file: %v\n", err)
 			return 1
 		}
+		tmpOutPath = f.Name()
+		tmpOutFile = f
 		outWriter = f
-		closeOut = func() { _ = f.Close() }
-	}
-	if closeOut != nil {
-		defer closeOut()
 	}
 
 	taskCtx := ctx
@@ -615,7 +615,22 @@ func executeQueryTask(ctx context.Context, task JobTask, vaultPath, pass string,
 		}
 	}
 
-	return RunQueryContext(taskCtx, args, outWriter, stderr, stdin)
+	code := RunQueryContext(taskCtx, args, outWriter, stderr, stdin)
+	if tmpOutFile != nil {
+		_ = tmpOutFile.Sync()
+		_ = tmpOutFile.Close()
+		if code == 0 {
+			_ = os.Chmod(tmpOutPath, 0600)
+			if err := os.Rename(tmpOutPath, resolvedOut); err != nil {
+				_ = os.Remove(tmpOutPath)
+				fmt.Fprintf(stderr, "  ❌ Cannot commit query output file: %v\n", err)
+				return 1
+			}
+		} else {
+			_ = os.Remove(tmpOutPath)
+		}
+	}
+	return code
 }
 
 func executeTransferTask(ctx context.Context, task JobTask, vaultPath, pass string, stdout, stderr io.Writer, stdin io.Reader) int {
@@ -822,8 +837,8 @@ func writeTableDump(ctx context.Context, sess driver.Session, drvName, dbName st
 	out := &errWriter{w: w}
 
 	out.printf("-- %s\n-- Database: %s\n-- Dump Date: %s\n\n", title, dbName, time.Now().Format(time.RFC3339))
-	if drvName == "mysql" {
-		out.printf("SET FOREIGN_KEY_CHECKS = 0;\nSET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';\n\n")
+	if drvName == "mysql" || drvName == "mariadb" {
+		out.printf("SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO';\nSET FOREIGN_KEY_CHECKS = 0;\n\n")
 	} else if drvName == "sqlite" {
 		out.printf("PRAGMA foreign_keys = OFF;\n\n")
 	}
@@ -976,8 +991,8 @@ func writeTableDump(ctx context.Context, sess driver.Session, drvName, dbName st
 		}
 	}
 
-	if drvName == "mysql" {
-		out.printf("SET FOREIGN_KEY_CHECKS = 1;\n")
+	if drvName == "mysql" || drvName == "mariadb" {
+		out.printf("SET FOREIGN_KEY_CHECKS = 1;\nSET SQL_MODE=@OLD_SQL_MODE;\n")
 	} else if drvName == "sqlite" {
 		out.printf("PRAGMA foreign_keys = ON;\n")
 	}

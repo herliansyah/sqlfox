@@ -25,8 +25,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"github.com/herliansyah/sqlfox/web"
 )
+
+var updateInFlight atomic.Bool
 
 // allowUpdateAPIHostAssets lets isAllowedAssetURL accept assets whose host matches s.updateAPIURL.
 // This is required only by the update test harness, which points updateAPIURL at a local mock
@@ -269,6 +274,12 @@ func (s *Server) handleApplyUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "Applying updates is only permitted from direct local machine sessions")
 		return
 	}
+
+	if !updateInFlight.CompareAndSwap(false, true) {
+		writeError(w, http.StatusConflict, "an update is already in progress")
+		return
+	}
+	defer updateInFlight.Store(false)
 
 	var req struct {
 		AssetURL string `json:"asset_url"`
@@ -694,6 +705,9 @@ func extractFromZipStream(r io.Reader, destPath string) error {
 	defer zr.Close()
 
 	for _, f := range zr.File {
+		if !f.Mode().IsRegular() {
+			continue
+		}
 		baseName := filepath.Base(f.Name)
 		if baseName == "sqlfox" || baseName == "sqlfox.exe" {
 			rc, err := f.Open()
@@ -723,22 +737,20 @@ func extractFromZipStream(r io.Reader, destPath string) error {
 
 // handleGetChangelog handles GET /api/system/changelog
 func (s *Server) handleGetChangelog(w http.ResponseWriter, r *http.Request) {
-	// ponytail: read local CHANGELOG.md during dev/tests, fallback to embedded asset
-	var content []byte
-	var err error
-
-	for _, p := range []string{"CHANGELOG.md", "../../CHANGELOG.md"} {
-		if data, readErr := os.ReadFile(p); readErr == nil && len(data) > 0 {
-			content = data
-			err = nil
-			break
-		}
+	// Always read CHANGELOG.md from embedded assets rather than untrusted CWD files.
+	assets := s.assets
+	if assets == nil {
+		assets = web.Assets()
 	}
 
-	if (err != nil || len(content) == 0) && s.assets != nil {
-		if f, openErr := s.assets.Open("CHANGELOG.md"); openErr == nil {
+	var content []byte
+	var err error
+	if assets != nil {
+		if f, openErr := assets.Open("CHANGELOG.md"); openErr == nil {
 			defer f.Close()
 			content, err = io.ReadAll(f)
+		} else {
+			err = openErr
 		}
 	}
 

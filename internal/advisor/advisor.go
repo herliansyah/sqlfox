@@ -115,8 +115,32 @@ func AdviseWithExplain(query string, dialect string, tables map[string]driver.Ta
 			}
 		}
 
+		// Validate extracted column names against actual table metadata when column metadata is present,
+		// preventing non-existent identifiers (SELECT aliases, SQL functions, expressions) from leaking into DDL.
+		eqCols := ana.EqualityCols
+		sortCols := ana.SortCols
+		rangeCols := ana.RangeCols
+		if hasMeta && len(tblMeta.Columns) > 0 {
+			validCols := make(map[string]string, len(tblMeta.Columns))
+			for _, c := range tblMeta.Columns {
+				validCols[strings.ToLower(c.Name)] = c.Name
+			}
+			filterValid := func(in []string) []string {
+				out := make([]string, 0, len(in))
+				for _, col := range in {
+					if canonical, ok := validCols[strings.ToLower(col)]; ok {
+						out = append(out, canonical)
+					}
+				}
+				return out
+			}
+			eqCols = filterValid(eqCols)
+			sortCols = filterValid(sortCols)
+			rangeCols = filterValid(rangeCols)
+		}
+
 		// 2. Synthesize Composite Index Columns using ESR Rule: Equality -> Sort -> Range
-		compositeCols := buildESRColumns(ana.EqualityCols, ana.SortCols, ana.RangeCols, 4)
+		compositeCols := buildESRColumns(eqCols, sortCols, rangeCols, 4)
 		if len(compositeCols) == 0 {
 			continue
 		}
@@ -130,9 +154,9 @@ func AdviseWithExplain(query string, dialect string, tables map[string]driver.Ta
 			Table:           tblName,
 			SuggestedIndex:  idxName,
 			Columns:         compositeCols,
-			EqualityColumns: ana.EqualityCols,
-			SortColumns:     ana.SortCols,
-			RangeColumns:    ana.RangeCols,
+			EqualityColumns: eqCols,
+			SortColumns:     sortCols,
+			RangeColumns:    rangeCols,
 		}
 
 		// Check redundancy against existing indexes

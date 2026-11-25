@@ -387,16 +387,17 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 		},
 	}
 
-	// Refuse pushing vault backup secrets or notes to a public GitHub repository (fail closed).
-	if cfg.IncludeVaultBackup && !strings.HasPrefix(apiBaseURL, "http://127.0.0.1") && !strings.HasPrefix(apiBaseURL, "http://localhost") && !strings.HasPrefix(apiBaseURL, "http://[::1]") {
+	// Refuse pushing vault backup secrets, operational notes, or SQL snapshots to a public GitHub
+	// repository regardless of IncludeVaultBackup (fail closed for all sync modes).
+	if !strings.HasPrefix(apiBaseURL, "http://127.0.0.1") && !strings.HasPrefix(apiBaseURL, "http://localhost") && !strings.HasPrefix(apiBaseURL, "http://[::1]") {
 		repoReq, rErr := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/repos/%s", apiBaseURL, repo), nil)
 		if rErr != nil {
-			return nil, fmt.Errorf("cannot verify repository privacy before vault sync: %w", rErr)
+			return nil, fmt.Errorf("cannot verify repository privacy before cloud sync: %w", rErr)
 		}
 		setGitHubHeaders(repoReq, cfg.GitHubToken)
 		repoResp, doErr := client.Do(repoReq)
 		if doErr != nil {
-			return nil, fmt.Errorf("cannot verify repository privacy before vault sync: %w", doErr)
+			return nil, fmt.Errorf("cannot verify repository privacy before cloud sync: %w", doErr)
 		}
 		var repoMeta struct {
 			Private *bool `json:"private"`
@@ -404,10 +405,10 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 		decErr := json.NewDecoder(io.LimitReader(repoResp.Body, 64<<10)).Decode(&repoMeta)
 		repoResp.Body.Close()
 		if repoResp.StatusCode != http.StatusOK || decErr != nil || repoMeta.Private == nil {
-			return nil, fmt.Errorf("cannot confirm repository %q is private (HTTP %d); refusing to sync vault backup", repo, repoResp.StatusCode)
+			return nil, fmt.Errorf("cannot confirm repository %q is private (HTTP %d); refusing to sync", repo, repoResp.StatusCode)
 		}
 		if !*repoMeta.Private {
-			return nil, errors.New("refusing to sync vault backup to a PUBLIC GitHub repository; make the repository private or disable IncludeVaultBackup")
+			return nil, errors.New("refusing to sync to a PUBLIC GitHub repository; make the repository private")
 		}
 	}
 

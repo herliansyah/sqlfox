@@ -22,13 +22,14 @@ type Driver interface {
 
 // Config holds all connection parameters needed by a driver.
 type Config struct {
-	Driver       string // mysql, sqlite
+	Driver       string // mysql, postgres, sqlite
 	Host         string
 	Port         int
 	DatabaseName string
 	User         string
 	Password     string
 	UseSSL       bool
+	SSLMode      string // disable, require, verify-ca, verify-full (optional; defaults to verify-full when UseSSL is true)
 	SSLCA        string
 	SSLCert      string
 	SSLKey       string
@@ -162,6 +163,15 @@ type SafeDDLExecutor interface {
 	ExecSafeDDL(ctx context.Context, sql string, lockTimeoutSec int) (*ExecResult, error)
 }
 
+// PinnedProfiler is an optional capability for drivers that support session-scoped query profiling
+// (e.g. MySQL SET profiling = 1 / SHOW PROFILE / SET profiling = 0) pinned to a single *sql.Conn.
+// Callers of QueryStreamProfiled must invoke the returned finish function (safe to call multiple times)
+// after closing/draining the stream so the profile is collected and the pinned connection is cleaned up.
+type PinnedProfiler interface {
+	QueryStreamProfiled(ctx context.Context, sql string, limit int, readOnly bool) (RowStream, func() *QueryProfile, error)
+	ExecProfiled(ctx context.Context, sql string, args ...any) (*ExecResult, *QueryProfile, error)
+}
+
 // TxSession represents a database transaction bound to a dedicated connection.
 type TxSession interface {
 	Exec(ctx context.Context, sql string, args ...any) (*ExecResult, error)
@@ -172,6 +182,8 @@ type TxSession interface {
 }
 
 type queryIDContextKey struct{}
+type databaseContextKey struct{}
+type explainAnalyzeContextKey struct{}
 
 // WithQueryID associates a query ID with context for out-of-band cancellation tracking.
 func WithQueryID(ctx context.Context, queryID string) context.Context {
@@ -180,10 +192,47 @@ func WithQueryID(ctx context.Context, queryID string) context.Context {
 
 // QueryIDFromContext extracts the query ID from context if present.
 func QueryIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
 	if v, ok := ctx.Value(queryIDContextKey{}).(string); ok {
 		return v
 	}
 	return ""
+}
+
+// WithDatabase associates an explicit target database/schema with context so concurrent
+// requests on a shared Session do not race over global activeDB/activeSchema state.
+func WithDatabase(ctx context.Context, dbName string) context.Context {
+	if dbName == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, databaseContextKey{}, dbName)
+}
+
+// DatabaseFromContext extracts the per-execution target database/schema from context if present.
+func DatabaseFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if v, ok := ctx.Value(databaseContextKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// WithExplainAnalyze enables opt-in EXPLAIN ANALYZE execution (which actually runs the query).
+func WithExplainAnalyze(ctx context.Context, analyze bool) context.Context {
+	return context.WithValue(ctx, explainAnalyzeContextKey{}, analyze)
+}
+
+// ExplainAnalyzeFromContext reports whether the caller explicitly opted into EXPLAIN ANALYZE.
+func ExplainAnalyzeFromContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v, _ := ctx.Value(explainAnalyzeContextKey{}).(bool)
+	return v
 }
 
 // FlightMetricSample represents an instant performance telemetry slice.

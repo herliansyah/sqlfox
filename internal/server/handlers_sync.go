@@ -129,22 +129,27 @@ func (s *Server) handleSyncStructureCompare(w http.ResponseWriter, r *http.Reque
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	if err := srcSess.UseDatabase(ctx, req.SourceDB); err != nil {
-		writeError(w, http.StatusBadRequest, "source: "+err.Error())
-		return
+	sameSession := srcSess == tgtSess
+	if !sameSession {
+		if err := srcSess.UseDatabase(ctx, req.SourceDB); err != nil {
+			writeError(w, http.StatusBadRequest, "source: "+err.Error())
+			return
+		}
+		if err := tgtSess.UseDatabase(ctx, req.TargetDB); err != nil {
+			writeError(w, http.StatusBadRequest, "target: "+err.Error())
+			return
+		}
 	}
-	if err := tgtSess.UseDatabase(ctx, req.TargetDB); err != nil {
-		writeError(w, http.StatusBadRequest, "target: "+err.Error())
-		return
-	}
+	srcCtx := driver.WithDatabase(ctx, req.SourceDB)
+	tgtCtx := driver.WithDatabase(ctx, req.TargetDB)
 
-	srcSchema, err := srcSess.Session.InspectSchema(ctx, req.SourceDB)
+	srcSchema, err := srcSess.Session.InspectSchema(srcCtx, req.SourceDB)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to inspect source schema: "+err.Error())
 		return
 	}
 
-	tgtSchema, err := tgtSess.Session.InspectSchema(ctx, req.TargetDB)
+	tgtSchema, err := tgtSess.Session.InspectSchema(tgtCtx, req.TargetDB)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to inspect target schema: "+err.Error())
 		return

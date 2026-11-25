@@ -1125,44 +1125,101 @@ func extractCTEStatementsMode(q string, mysqlEscapes bool) ([]string, bool) {
 		return nil, false
 	}
 
-	depth := 0
-	bodyStart := -1
-	var stmts []string
-	sawCTEBody := false
+	i := 1
+	if i < len(tokens) && tokens[i].kind == tokWord && tokens[i].upper == "RECURSIVE" {
+		i++
+	}
 
-	for i := 1; i < len(tokens); i++ {
-		tok := tokens[i]
-		switch tok.kind {
-		case tokLParen:
-			if depth == 0 {
-				if sawCTEBody && i > 0 && tokens[i-1].kind == tokRParen {
-					// Outer parenthesized main query: WITH d AS (...) (SELECT * FROM d)
-					stmts = append(stmts, q[tok.start:])
-					return stmts, true
+	var stmts []string
+	// Parse one or more CTE definitions:
+	//   cte_name [ (col_list) ] AS [ [NOT] MATERIALIZED ] ( body ) [ SEARCH ... ] [ CYCLE ... ]
+	// Note: cte_name may be an unreserved SQL keyword such as INSERT, DELETE, UPDATE, or SELECT
+	// in PostgreSQL (e.g. `WITH insert AS (DELETE FROM users) SELECT * FROM insert`), so we must
+	// never terminate the WITH header before parsing the CTE definition and its parenthesized body.
+	for i < len(tokens) {
+		// CTE name (word or quoted identifier)
+		if tokens[i].kind != tokWord && tokens[i].kind != tokIdent {
+			break
+		}
+		i++
+
+		// Optional column list: (col1, col2, ...)
+		if i < len(tokens) && tokens[i].kind == tokLParen {
+			depth := 1
+			i++
+			for i < len(tokens) && depth > 0 {
+				if tokens[i].kind == tokLParen {
+					depth++
+				} else if tokens[i].kind == tokRParen {
+					depth--
 				}
-				bodyStart = tok.end
-			}
-			depth++
-		case tokRParen:
-			if depth > 0 {
-				depth--
-				if depth == 0 && bodyStart >= 0 && tok.start > bodyStart {
-					stmts = append(stmts, q[bodyStart:tok.start])
-					bodyStart = -1
-					sawCTEBody = true
-				}
-			}
-		case tokWord:
-			if depth == 0 {
-				switch tok.upper {
-				case "SELECT", "INSERT", "UPDATE", "DELETE", "MERGE", "TABLE", "VALUES":
-					stmts = append(stmts, q[tok.start:])
-					return stmts, true
-				}
+				i++
 			}
 		}
+
+		// Expect AS
+		if i >= len(tokens) || tokens[i].kind != tokWord || tokens[i].upper != "AS" {
+			break
+		}
+		i++
+
+		// Optional [NOT] MATERIALIZED
+		if i < len(tokens) && tokens[i].kind == tokWord && tokens[i].upper == "NOT" {
+			i++
+		}
+		if i < len(tokens) && tokens[i].kind == tokWord && tokens[i].upper == "MATERIALIZED" {
+			i++
+		}
+
+		// Expect CTE body: ( ... )
+		if i >= len(tokens) || tokens[i].kind != tokLParen {
+			break
+		}
+		bodyStart := tokens[i].end
+		depth := 1
+		i++
+		bodyEnd := -1
+		for i < len(tokens) && depth > 0 {
+			if tokens[i].kind == tokLParen {
+				depth++
+			} else if tokens[i].kind == tokRParen {
+				depth--
+				if depth == 0 {
+					bodyEnd = tokens[i].start
+				}
+			}
+			i++
+		}
+		if bodyEnd > bodyStart {
+			stmts = append(stmts, q[bodyStart:bodyEnd])
+		}
+
+		// Skip optional PostgreSQL SEARCH / CYCLE clauses between CTE body and ',' / main query.
+		for i < len(tokens) && tokens[i].kind != tokComma && tokens[i].kind != tokLParen {
+			if tokens[i].kind == tokWord {
+				switch tokens[i].upper {
+				case "SELECT", "INSERT", "UPDATE", "DELETE", "MERGE", "TABLE", "VALUES":
+					goto mainStmt
+				}
+			}
+			i++
+		}
+
+		if i < len(tokens) && tokens[i].kind == tokComma {
+			i++
+			continue
+		}
+		break
 	}
-	return nil, false
+
+mainStmt:
+	if len(stmts) == 0 {
+		return nil, false
+	}
+	if i < len(tokens) {
+		stmts = append(stmts, q[tokens[i].start:])
+	}
+	return stmts, true
 }
 
 func isIdentByte(c byte) bool {

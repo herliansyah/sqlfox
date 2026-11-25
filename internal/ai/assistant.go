@@ -45,6 +45,7 @@ type AssistRequest struct {
 	CustomPrompt     string                   `json:"custom_prompt,omitempty"`  // custom persona / system instructions
 	IncludeSchema    bool                     `json:"include_schema"`
 	Temperature      float32                  `json:"temperature,omitempty"`
+	RemoteRequest    bool                     `json:"-"`
 }
 
 // AssemblePrompts compiles the system prompt (incorporating Schema Context Window,
@@ -124,16 +125,21 @@ func AssemblePromptsWithMap(req AssistRequest) (systemPrompt string, userPrompt 
 		systemPrompt += "\nCustom System Instructions:\n" + req.CustomPrompt + "\n"
 	}
 
-	// Apply identifier masking to user-supplied SQL, plan, and error text when MaskIdentifiers is enabled.
+	// Apply identifier masking and literal/PII redaction to user-supplied SQL, plan, and error text when MaskIdentifiers is enabled.
 	queryText := req.Query
 	planText := req.Plan
 	errText := req.ErrorMessage
 	promptText := req.Prompt
-	if req.MaskIdentifiers && len(identMap) > 0 {
-		queryText = MaskIdentifiersInText(queryText, identMap)
-		planText = MaskIdentifiersInText(planText, identMap)
-		errText = MaskIdentifiersInText(errText, identMap)
-		promptText = MaskIdentifiersInText(promptText, identMap)
+	if req.MaskIdentifiers {
+		queryText = RedactSensitiveLiterals(queryText)
+		planText = RedactSensitiveLiterals(planText)
+		errText = RedactSensitiveLiterals(errText)
+		if len(identMap) > 0 {
+			queryText = MaskIdentifiersInText(queryText, identMap)
+			planText = MaskIdentifiersInText(planText, identMap)
+			errText = MaskIdentifiersInText(errText, identMap)
+			promptText = MaskIdentifiersInText(promptText, identMap)
+		}
 	}
 
 	// User prompt routing
@@ -165,10 +171,11 @@ func Assist(ctx context.Context, req AssistRequest) (*CompletionResponse, error)
 	}
 
 	client := NewAIClient(ClientConfig{
-		Provider: provider,
-		APIKey:   req.APIKey,
-		Model:    req.Model,
-		Endpoint: req.Endpoint,
+		Provider:      provider,
+		APIKey:        req.APIKey,
+		Model:         req.Model,
+		Endpoint:      req.Endpoint,
+		RemoteRequest: req.RemoteRequest,
 	})
 
 	resp, err := client.Complete(ctx, CompletionRequest{

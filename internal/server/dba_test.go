@@ -418,8 +418,9 @@ func TestAdvancedDiagnosticsAndProfiling(t *testing.T) {
 
 	// 11. Reset Statement Digest API
 	resetResp, err := client.Post(ts.URL+"/api/session/"+connRec.ID+"/diagnostics/statement-digest/reset", "application/json", nil)
-	if err != nil || resetResp.StatusCode != http.StatusOK {
-		t.Fatalf("reset statement digest request failed: %v", err)
+	// SQLite has no statement digest; the API must say so (501) instead of faking success.
+	if err != nil || resetResp.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("expected 501 for unsupported statement digest reset on sqlite, got err=%v", err)
 	}
 	resetResp.Body.Close()
 
@@ -438,8 +439,9 @@ func TestAdvancedDiagnosticsAndProfiling(t *testing.T) {
 
 	togglePayload, _ := json.Marshal(map[string]bool{"enable": true})
 	toggleResp, err := client.Post(ts.URL+"/api/session/"+connRec.ID+"/event/test_ev/toggle", "application/json", bytes.NewReader(togglePayload))
-	if err != nil || toggleResp.StatusCode != http.StatusOK {
-		t.Fatalf("toggle event request failed: %v", err)
+	// SQLite has no scheduled events; the API must report 501 instead of faking success.
+	if err != nil || toggleResp.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("expected 501 for unsupported event toggle on sqlite, got err=%v", err)
 	}
 	toggleResp.Body.Close()
 

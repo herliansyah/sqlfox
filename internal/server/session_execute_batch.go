@@ -63,7 +63,7 @@ func (s *ActiveSession) executeMulti(
 			if s.hasActiveTx(req.TabID) {
 				return nil, fmt.Errorf("a transaction is already active in this tab; please COMMIT or ROLLBACK first")
 			}
-			tx, err := s.Session.BeginTx(context.Background())
+			tx, err := s.beginTabTx()
 			if err != nil {
 				return nil, fmt.Errorf("failed to begin transaction: %w", err)
 			}
@@ -184,7 +184,7 @@ func (s *ActiveSession) executeMulti(
 				SQL:         stmtTrimmed,
 				Type:        "query",
 				Columns:     cols,
-				Rows:        allRows,
+				Rows:        driver.FormatRowsForJSON(allRows),
 				RowCount:    len(allRows),
 				ExecutionMs: time.Since(stmtStart).Milliseconds(),
 				TxActive:    currentTx != nil,
@@ -270,7 +270,9 @@ func (s *ActiveSession) executeStreamMulti(
 	if limit <= 0 {
 		limit = 5000
 	}
-	totalRowsAll := 0
+	if limit > 100000 {
+		limit = 100000
+	}
 	var streamErr error
 
 	for i, stmt := range stmts {
@@ -308,7 +310,7 @@ func (s *ActiveSession) executeStreamMulti(
 				}
 				return nil, streamErr
 			}
-			tx, err := s.Session.BeginTx(context.Background())
+			tx, err := s.beginTabTx()
 			if err != nil {
 				streamErr = fmt.Errorf("failed to begin transaction: %w", err)
 				_ = enc.Encode(map[string]any{"type": "error", "result_index": i, "sql": stmtTrimmed, "error": streamErr.Error()})
@@ -336,7 +338,12 @@ func (s *ActiveSession) executeStreamMulti(
 		if isTxCommit {
 			_, wasAborted, abortReason := s.getTxStatus(req.TabID)
 			if wasAborted {
-				return nil, fmt.Errorf("cannot COMMIT: transaction in this tab was aborted (%s). Issue ROLLBACK to clear the aborted state", abortReason)
+				err := fmt.Errorf("cannot COMMIT: transaction in this tab was aborted (%s). Issue ROLLBACK to clear the aborted state", abortReason)
+				_ = enc.Encode(map[string]any{"type": "error", "result_index": i, "sql": stmtTrimmed, "error": err.Error()})
+				if flusher != nil {
+					flusher.Flush()
+				}
+				return nil, err
 			}
 			tx := s.clearTx(req.TabID)
 			currentTx = nil
@@ -458,11 +465,10 @@ func (s *ActiveSession) executeStreamMulti(
 			firstChunk, cErr := stream.NextChunk(min(20, limit))
 			if len(firstChunk) > 0 {
 				stmtRows += len(firstChunk)
-				totalRowsAll += len(firstChunk)
 				_ = enc.Encode(map[string]any{
 					"type":         "chunk",
 					"result_index": i,
-					"rows":         firstChunk,
+					"rows":         driver.FormatRowsForJSON(firstChunk),
 				})
 				if flusher != nil {
 					flusher.Flush()
@@ -485,11 +491,10 @@ func (s *ActiveSession) executeStreamMulti(
 				chunk, nextErr := stream.NextChunk(batchSize)
 				if len(chunk) > 0 {
 					stmtRows += len(chunk)
-					totalRowsAll += len(chunk)
 					_ = enc.Encode(map[string]any{
 						"type":         "chunk",
 						"result_index": i,
-						"rows":         chunk,
+						"rows":         driver.FormatRowsForJSON(chunk),
 					})
 					if flusher != nil {
 						flusher.Flush()

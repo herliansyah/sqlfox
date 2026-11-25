@@ -2,13 +2,17 @@ package postgres
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"errors"
 	"fmt"
 	"github.com/herliansyah/sqlfox/internal/driver"
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 	"net"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,12 +40,13 @@ func (d *PostgresDriver) Connect(ctx context.Context, cfg driver.Config) (driver
 		cfg.DatabaseName = "postgres"
 	}
 
-	sslMode := "disable"
-	if cfg.UseSSL {
-		if cfg.SSLCA != "" {
-			sslMode = "verify-ca"
+	sslMode := strings.ToLower(strings.TrimSpace(cfg.SSLMode))
+	if sslMode == "" {
+		if cfg.UseSSL {
+			// Secure-by-default: verify CA and server hostname (prevents MITM).
+			sslMode = "verify-full"
 		} else {
-			sslMode = "require"
+			sslMode = "disable"
 		}
 	}
 
@@ -55,21 +60,31 @@ func (d *PostgresDriver) Connect(ctx context.Context, cfg driver.Config) (driver
 	}
 
 	q := u.Query()
-	q.Set("sslmode", sslMode)
-	if cfg.SSLCA != "" {
-		q.Set("sslrootcert", cfg.SSLCA)
-	}
-	if cfg.SSLCert != "" {
-		q.Set("sslcert", cfg.SSLCert)
-	}
-	if cfg.SSLKey != "" {
-		q.Set("sslkey", cfg.SSLKey)
+	// Always pass disable to ParseConfig when building an explicit in-memory tls.Config so inline PEM
+	// certificates and strict verify-full / verify-ca / require semantics work identically to MySQL.
+	if sslMode == "disable" {
+		q.Set("sslmode", "disable")
+	} else {
+		q.Set("sslmode", "require")
 	}
 	u.RawQuery = q.Encode()
 
-	db, err := sql.Open("pgx", u.String())
+	pgxCfg, err := pgx.ParseConfig(u.String())
 	if err != nil {
-		return nil, fmt.Errorf("failed to open postgresql connection: %w", err)
+		return nil, fmt.Errorf("failed to parse postgresql config: %w", err)
+	}
+
+	if sslMode != "disable" {
+		tlsConfig, err := buildPostgresTLSConfig(cfg, sslMode)
+		if err != nil {
+			return nil, err
+		}
+		pgxCfg.TLSConfig = tlsConfig
+	}
+
+	db := stdlib.OpenDB(*pgxCfg)
+	if db == nil {
+		return nil, fmt.Errorf("failed to open postgresql connection")
 	}
 
 	// Bounded connection pool
@@ -90,8 +105,81 @@ func (d *PostgresDriver) Connect(ctx context.Context, cfg driver.Config) (driver
 		dsn:           u.String(),
 		currentSchema: "public",
 		queryPids:     make(map[string]int),
-		connStates:    *driver.NewConnStateMap[pgConnState](64),
+		connStates:    driver.NewConnStateMap[pgConnState](64),
 	}, nil
+}
+
+func buildPostgresTLSConfig(cfg driver.Config, sslMode string) (*tls.Config, error) {
+	tlsCfg := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		ServerName: cfg.Host,
+	}
+
+	if cfg.SSLCA != "" {
+		var caBytes []byte
+		if strings.Contains(cfg.SSLCA, "-----BEGIN ") {
+			caBytes = []byte(cfg.SSLCA)
+		} else {
+			var err error
+			caBytes, err = os.ReadFile(cfg.SSLCA)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read PostgreSQL SSL CA certificate: %w", err)
+			}
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(caBytes) {
+			return nil, fmt.Errorf("failed to parse PostgreSQL SSL CA certificate PEM")
+		}
+		tlsCfg.RootCAs = pool
+	}
+
+	if cfg.SSLCert != "" && cfg.SSLKey != "" {
+		var cert tls.Certificate
+		var err error
+		if strings.Contains(cfg.SSLCert, "-----BEGIN ") || strings.Contains(cfg.SSLKey, "-----BEGIN ") {
+			cert, err = tls.X509KeyPair([]byte(cfg.SSLCert), []byte(cfg.SSLKey))
+		} else {
+			cert, err = tls.LoadX509KeyPair(cfg.SSLCert, cfg.SSLKey)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to load PostgreSQL SSL client certificate/key: %w", err)
+		}
+		tlsCfg.Certificates = []tls.Certificate{cert}
+	}
+
+	switch sslMode {
+	case "require", "prefer", "allow":
+		tlsCfg.InsecureSkipVerify = true
+	case "verify-ca":
+		tlsCfg.InsecureSkipVerify = true
+		tlsCfg.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+			if len(rawCerts) == 0 {
+				return errors.New("server presented no TLS certificate")
+			}
+			certs := make([]*x509.Certificate, len(rawCerts))
+			for i, raw := range rawCerts {
+				c, err := x509.ParseCertificate(raw)
+				if err != nil {
+					return err
+				}
+				certs[i] = c
+			}
+			opts := x509.VerifyOptions{
+				Roots:         tlsCfg.RootCAs,
+				Intermediates: x509.NewCertPool(),
+			}
+			for _, ic := range certs[1:] {
+				opts.Intermediates.AddCert(ic)
+			}
+			_, err := certs[0].Verify(opts)
+			return err
+		}
+	case "verify-full":
+		tlsCfg.InsecureSkipVerify = false
+	default:
+		return nil, fmt.Errorf("unsupported PostgreSQL sslmode %q", sslMode)
+	}
+	return tlsCfg, nil
 }
 
 type pgConnState struct {
@@ -108,10 +196,13 @@ type PostgresSession struct {
 	currentSchema string
 	mu            sync.Mutex
 	queryPids     map[string]int
-	connStates    driver.ConnStateMap[pgConnState]
+	connStates    *driver.ConnStateMap[pgConnState]
 }
 
 func (s *PostgresSession) getConnState(conn *sql.Conn) *pgConnState {
+	if s.connStates == nil {
+		return nil
+	}
 	return s.connStates.Get(conn)
 }
 
@@ -147,20 +238,26 @@ func (s *PostgresSession) SelectDatabase(ctx context.Context, schemaName string)
 	if schemaName == "" {
 		schemaName = "public"
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+
+	// Never hold s.mu across network I/O, and always execute SET search_path on an explicit
+	// *sql.Conn whose connStates cache entry we update atomically to prevent pool poisoning.
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to acquire PostgreSQL connection: %w", err)
+	}
+	defer conn.Close()
 
 	// PostgreSQL physical database name != schema name. If caller passed the physical
 	// database name (e.g. default session.DatabaseName), verify whether a schema with
 	// that name actually exists; if not, keep/fall back to activeSchema ("public").
 	if schemaName == s.cfg.DatabaseName && schemaName != "public" {
 		var exists bool
-		_ = s.db.QueryRowContext(ctx,
+		_ = conn.QueryRowContext(ctx,
 			"SELECT EXISTS(SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = $1)", schemaName,
 		).Scan(&exists)
 		if !exists {
-			if s.currentSchema != "" {
-				schemaName = s.currentSchema
+			if cur := s.activeSchema(); cur != "" {
+				schemaName = cur
 			} else {
 				schemaName = "public"
 			}
@@ -168,10 +265,18 @@ func (s *PostgresSession) SelectDatabase(ctx context.Context, schemaName string)
 	}
 
 	quoted := quoteIdentifier(schemaName)
-	if _, err := s.db.ExecContext(ctx, fmt.Sprintf("SET search_path = %s", quoted)); err != nil {
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf("SET search_path = %s", quoted)); err != nil {
 		return fmt.Errorf("failed to switch PostgreSQL schema to %s: %w", schemaName, err)
 	}
+	if st := s.getConnState(conn); st != nil {
+		st.mu.Lock()
+		st.lastSchema = schemaName
+		st.mu.Unlock()
+	}
+
+	s.mu.Lock()
 	s.currentSchema = schemaName
+	s.mu.Unlock()
 	return nil
 }
 
@@ -183,7 +288,10 @@ func (s *PostgresSession) activeSchema() string {
 }
 
 func (s *PostgresSession) applyActiveSchema(ctx context.Context, conn *sql.Conn) error {
-	schema := s.activeSchema()
+	schema := driver.DatabaseFromContext(ctx)
+	if schema == "" {
+		schema = s.activeSchema()
+	}
 	if schema == "" {
 		return nil
 	}
@@ -206,6 +314,19 @@ func (s *PostgresSession) applyActiveSchema(ctx context.Context, conn *sql.Conn)
 		st.mu.Unlock()
 	}
 	return nil
+}
+
+func (s *PostgresSession) invalidateConnSchemaState(conn *sql.Conn) {
+	if st := s.getConnState(conn); st != nil {
+		st.mu.Lock()
+		st.lastSchema = ""
+		st.mu.Unlock()
+	}
+}
+
+func isRawSearchPathChangePG(q string) bool {
+	up := strings.ToUpper(driver.StripLeadingComments(q))
+	return strings.Contains(up, "SEARCH_PATH") && (strings.HasPrefix(up, "SET ") || strings.HasPrefix(up, "RESET "))
 }
 
 func (s *PostgresSession) QueryStream(ctx context.Context, querySQL string, limit int) (driver.RowStream, error) {
@@ -307,6 +428,9 @@ func (s *PostgresSession) Exec(ctx context.Context, querySQL string, args ...any
 	}
 
 	res, execErr := conn.ExecContext(ctx, querySQL, args...)
+	if isRawSearchPathChangePG(querySQL) {
+		s.invalidateConnSchemaState(conn)
+	}
 	if execErr != nil {
 		return nil, execErr
 	}
@@ -322,8 +446,25 @@ func (s *PostgresSession) Exec(ctx context.Context, querySQL string, args ...any
 }
 
 type postgresTx struct {
+	sess *PostgresSession
 	conn *sql.Conn
 	tx   *sql.Tx
+	pid  int
+}
+
+func (t *postgresTx) trackQuery(ctx context.Context) func() {
+	queryID := driver.QueryIDFromContext(ctx)
+	if queryID == "" || t.sess == nil || t.pid <= 0 {
+		return func() {}
+	}
+	t.sess.mu.Lock()
+	t.sess.queryPids[queryID] = t.pid
+	t.sess.mu.Unlock()
+	return func() {
+		t.sess.mu.Lock()
+		delete(t.sess.queryPids, queryID)
+		t.sess.mu.Unlock()
+	}
 }
 
 func (t *postgresTx) closeConn() {
@@ -335,6 +476,8 @@ func (t *postgresTx) closeConn() {
 
 func (t *postgresTx) Exec(ctx context.Context, query string, args ...any) (*driver.ExecResult, error) {
 	start := time.Now()
+	untrack := t.trackQuery(ctx)
+	defer untrack()
 	res, err := t.tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -350,6 +493,8 @@ func (t *postgresTx) Exec(ctx context.Context, query string, args ...any) (*driv
 }
 
 func (t *postgresTx) ExecRaw(ctx context.Context, query string, args ...any) (int64, error) {
+	untrack := t.trackQuery(ctx)
+	defer untrack()
 	res, err := t.tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, err
@@ -369,21 +514,24 @@ func (t *postgresTx) Rollback() error {
 
 func (t *postgresTx) QueryStream(ctx context.Context, querySQL string, limit int) (driver.RowStream, error) {
 	querySQL = driver.ApplyLimitClause(querySQL, limit)
+	untrack := t.trackQuery(ctx)
 
 	rows, err := t.tx.QueryContext(ctx, querySQL)
 	if err != nil {
+		untrack()
 		return nil, err
 	}
 
 	colTypes, err := rows.ColumnTypes()
 	if err != nil {
 		rows.Close()
+		untrack()
 		return nil, err
 	}
 
 	cols := driver.ColumnsFromTypes(colTypes)
 
-	return driver.NewSQLRowStream(rows, cols), nil
+	return driver.NewSQLRowStream(rows, cols, untrack), nil
 }
 
 func (s *PostgresSession) BeginTx(ctx context.Context) (driver.TxSession, error) {
@@ -395,12 +543,27 @@ func (s *PostgresSession) BeginTx(ctx context.Context) (driver.TxSession, error)
 		_ = conn.Close()
 		return nil, err
 	}
+	var pid int
+	st := s.getConnState(conn)
+	if st != nil {
+		st.mu.Lock()
+		pid = st.pid
+		st.mu.Unlock()
+	}
+	if pid == 0 {
+		_ = conn.QueryRowContext(ctx, "SELECT pg_backend_pid()").Scan(&pid)
+		if st != nil && pid > 0 {
+			st.mu.Lock()
+			st.pid = pid
+			st.mu.Unlock()
+		}
+	}
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
-	return &postgresTx{conn: conn, tx: tx}, nil
+	return &postgresTx{sess: s, conn: conn, tx: tx, pid: pid}, nil
 }
 
 func (s *PostgresSession) CancelQuery(ctx context.Context, queryID string) error {
@@ -560,7 +723,7 @@ func (s *PostgresSession) PeekForeignKeyRow(ctx context.Context, database, table
 		if b, ok := val.([]byte); ok {
 			rowMap[col] = string(b)
 		} else {
-			rowMap[col] = val
+			rowMap[col] = driver.FormatValueForJSON(val)
 		}
 	}
 
@@ -633,13 +796,22 @@ func (s *PostgresSession) ExecScriptConn(ctx context.Context, fn func(exec func(
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() {
+		restoreCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_, _ = conn.ExecContext(restoreCtx, "ROLLBACK")
+		cancel()
+		s.invalidateConnSchemaState(conn)
+		_ = conn.Close()
+	}()
 	if err := s.applyActiveSchema(ctx, conn); err != nil {
 		return err
 	}
 	return fn(func(c context.Context, q string) (*driver.ExecResult, error) {
 		start := time.Now()
 		res, err := conn.ExecContext(c, q)
+		if isRawSearchPathChangePG(q) {
+			s.invalidateConnSchemaState(conn)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -662,14 +834,46 @@ func (s *PostgresSession) QueryStreamReadOnly(ctx context.Context, sqlStr string
 		_ = conn.Close()
 		return nil, err
 	}
+	queryID := driver.QueryIDFromContext(ctx)
+	if queryID != "" {
+		var pid int
+		st := s.getConnState(conn)
+		if st != nil {
+			st.mu.Lock()
+			pid = st.pid
+			st.mu.Unlock()
+		}
+		if pid == 0 {
+			_ = conn.QueryRowContext(ctx, "SELECT pg_backend_pid()").Scan(&pid)
+			if st != nil && pid > 0 {
+				st.mu.Lock()
+				st.pid = pid
+				st.mu.Unlock()
+			}
+		}
+		if pid > 0 {
+			s.mu.Lock()
+			s.queryPids[queryID] = pid
+			s.mu.Unlock()
+		}
+	}
+	untrack := func() {
+		if queryID != "" {
+			s.mu.Lock()
+			delete(s.queryPids, queryID)
+			s.mu.Unlock()
+		}
+	}
 	tx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
+		untrack()
 		_ = conn.Close()
 		return nil, err
 	}
 	querySQL := driver.ApplyLimitClause(sqlStr, limit)
 	rows, err := tx.QueryContext(ctx, querySQL)
 	if err != nil {
+		untrack()
 		_ = tx.Rollback()
 		_ = conn.Close()
 		return nil, err
@@ -677,11 +881,13 @@ func (s *PostgresSession) QueryStreamReadOnly(ctx context.Context, sqlStr string
 	colTypes, err := rows.ColumnTypes()
 	if err != nil {
 		_ = rows.Close()
+		untrack()
 		_ = tx.Rollback()
 		_ = conn.Close()
 		return nil, err
 	}
 	return driver.NewSQLRowStream(rows, driver.ColumnsFromTypes(colTypes), func() {
+		untrack()
 		_ = tx.Rollback()
 		_ = conn.Close()
 	}), nil

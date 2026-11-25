@@ -147,7 +147,7 @@ func (s *Server) handleResetStatementDigest(w http.ResponseWriter, r *http.Reque
 
 	if err := sess.ResetStatementDigest(ctx); err != nil {
 		if errors.Is(err, driver.ErrFeatureNotSupported) {
-			writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+			writeError(w, http.StatusNotImplemented, "statement digest reset is not supported on this database engine")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "failed to reset statement digest: "+err.Error())
@@ -342,6 +342,9 @@ func (s *Server) handleGetAuditLogs(w http.ResponseWriter, r *http.Request) {
 		if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
 			limit = l
 		}
+	}
+	if limit > 1000 {
+		limit = 1000
 	}
 	if oStr := r.URL.Query().Get("offset"); oStr != "" {
 		if o, err := strconv.Atoi(oStr); err == nil && o >= 0 {

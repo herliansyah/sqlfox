@@ -487,7 +487,7 @@ func EvaluateMySQLVariable(name, val string, allVars map[string]string) driver.S
 			Category:         categorizeGenericVariable(name),
 			Severity:         "info",
 			IsCurated:        false,
-			SetGlobalSnippet: fmt.Sprintf("SET GLOBAL %s = '%s';", name, val),
+			SetGlobalSnippet: generateSetGlobalSnippet(name, val, true),
 			MyCnfSnippet:     fmt.Sprintf("%s = %s", name, val),
 		}
 	}
@@ -537,14 +537,18 @@ func generateSetGlobalSnippet(name, val string, isDynamic bool) string {
 	if !isDynamic {
 		return fmt.Sprintf("# Note: %s requires server restart. Add to my.cnf:\n%s = %s", name, name, val)
 	}
-	// Check if numeric or boolean
-	if _, err := strconv.ParseInt(val, 10, 64); err == nil {
-		return fmt.Sprintf("SET GLOBAL %s = %s;", name, val)
+	trimmed := strings.TrimSpace(val)
+	// Numeric (int or float, e.g. long_query_time = 1.0) or boolean literals must NOT be quoted in MySQL SET GLOBAL.
+	if trimmed != "" {
+		if _, err := strconv.ParseFloat(trimmed, 64); err == nil {
+			return fmt.Sprintf("SET GLOBAL %s = %s;", name, trimmed)
+		}
+		if strings.EqualFold(trimmed, "ON") || strings.EqualFold(trimmed, "OFF") {
+			return fmt.Sprintf("SET GLOBAL %s = %s;", name, strings.ToUpper(trimmed))
+		}
 	}
-	if strings.EqualFold(val, "ON") || strings.EqualFold(val, "OFF") {
-		return fmt.Sprintf("SET GLOBAL %s = %s;", name, strings.ToUpper(val))
-	}
-	return fmt.Sprintf("SET GLOBAL %s = '%s';", name, val)
+	escaped := strings.ReplaceAll(val, "'", "''")
+	return fmt.Sprintf("SET GLOBAL %s = '%s';", name, escaped)
 }
 
 // EvaluateClusterTuning evaluates critical Galera/Replication guardrail parameters.

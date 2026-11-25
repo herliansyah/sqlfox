@@ -267,7 +267,7 @@ func TestRunSQLScript_SafetyGuardGate(t *testing.T) {
 	}
 	resp.Body.Close()
 	// Seed a table with rows. In Production even CREATE is challenge-gated, so the seed must pass
-	// confirm=true (this also exercises the confirmed path for a non-DROP statement).
+	// confirm=true + matching challenge_input.
 	seedScript := "CREATE TABLE victims (id INTEGER PRIMARY KEY, v TEXT);\nINSERT INTO victims (id, v) VALUES (1, 'a'), (2, 'b');\n"
 	runScript := func(script string, query string) (*http.Response, []byte) {
 		var b bytes.Buffer
@@ -290,7 +290,11 @@ func TestRunSQLScript_SafetyGuardGate(t *testing.T) {
 		return r, data
 	}
 
-	if r, data := runScript(seedScript, "confirm=true"); r.StatusCode != http.StatusOK {
+	// Production confirm=true WITHOUT challenge_input must be rejected with 409 (P0.1).
+	if r, data := runScript(seedScript, "confirm=true"); r.StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409 when confirm=true lacks challenge_input in Production, got status=%d body=%s", r.StatusCode, data)
+	}
+	if r, data := runScript(seedScript, "confirm=true&challenge_input=victims"); r.StatusCode != http.StatusOK {
 		t.Fatalf("seed script failed: status=%d body=%s", r.StatusCode, data)
 	}
 
@@ -328,8 +332,12 @@ func TestRunSQLScript_SafetyGuardGate(t *testing.T) {
 		t.Fatalf("expected table untouched (2 rows) after blocked script, got %d", len(rowsResp.Rows))
 	}
 
-	// 2. Same script WITH confirm=true must run and drop the table, leaving a pre-DDL backup.
-	r, data = runScript("DROP TABLE victims;\n", "confirm=true")
+	// 2. Same script WITH confirm=true but NO challenge_input must still be rejected in Production.
+	if r, data := runScript("DROP TABLE victims;\n", "confirm=true"); r.StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409 when DROP lacks challenge_input in Production: status=%d body=%s", r.StatusCode, data)
+	}
+	// 3. Same script WITH confirm=true AND matching challenge_input must run and drop the table, leaving a pre-DDL backup.
+	r, data = runScript("DROP TABLE victims;\n", "confirm=true&challenge_input=victims")
 	if r.StatusCode != http.StatusOK {
 		t.Fatalf("confirmed destructive script should succeed: status=%d body=%s", r.StatusCode, data)
 	}

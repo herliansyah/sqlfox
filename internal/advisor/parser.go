@@ -148,17 +148,45 @@ func ExtractPredicates(query string) []PredicateAnalysis {
 		return nil
 	}
 
-	// Skip leading WITH ... CTEs if present to reach the main SELECT/UPDATE/DELETE
+	// Skip leading WITH ... CTEs if present to reach the main SELECT/UPDATE/DELETE,
+	// collecting CTE names so we never recommend indexes on virtual CTEs.
 	startIdx := 0
+	cteNames := make(map[string]bool)
 	if tokens[0].kind == advWord && tokens[0].upper == "WITH" {
 		depth := 0
+		expectCTEName := true
+		seenCTEBody := false
 		for i := 1; i < len(tokens); i++ {
-			if tokens[i].kind == advLParen {
+			tok := tokens[i]
+			if tok.kind == advLParen {
 				depth++
-			} else if tokens[i].kind == advRParen && depth > 0 {
-				depth--
-			} else if depth == 0 && tokens[i].kind == advWord {
-				switch tokens[i].upper {
+				seenCTEBody = true
+				expectCTEName = false
+				continue
+			}
+			if tok.kind == advRParen {
+				if depth > 0 {
+					depth--
+				}
+				continue
+			}
+			if depth != 0 {
+				continue
+			}
+			if tok.kind == advComma {
+				expectCTEName = true
+				continue
+			}
+			if expectCTEName && (tok.kind == advWord || tok.kind == advIdent) {
+				if tok.kind == advWord && tok.upper == "RECURSIVE" {
+					continue
+				}
+				cteNames[strings.ToLower(tok.unquoted)] = true
+				expectCTEName = false
+				continue
+			}
+			if seenCTEBody && tok.kind == advWord {
+				switch tok.upper {
 				case "SELECT", "UPDATE", "DELETE":
 					startIdx = i
 					goto parsedVerb
@@ -207,6 +235,21 @@ parsedVerb:
 		}
 	default:
 		return nil
+	}
+
+	if len(cteNames) > 0 {
+		filtered := tables[:0]
+		for _, t := range tables {
+			if !cteNames[strings.ToLower(t)] {
+				filtered = append(filtered, t)
+			}
+		}
+		tables = filtered
+		for alias, tbl := range aliasToTable {
+			if cteNames[strings.ToLower(tbl)] {
+				delete(aliasToTable, alias)
+			}
+		}
 	}
 
 	if len(tables) == 0 {
@@ -384,7 +427,7 @@ func parseColRef(tokens []advToken, idx int, aliasToTable map[string]string, def
 	}
 	if tokens[idx].kind == advWord {
 		switch tokens[idx].upper {
-		case "AND", "OR", "NOT", "NULL", "TRUE", "FALSE", "IS", "IN", "BETWEEN", "LIKE", "ILIKE", "REGEXP":
+		case "AND", "OR", "NOT", "NULL", "TRUE", "FALSE", "IS", "IN", "BETWEEN", "LIKE", "ILIKE", "REGEXP", "EXISTS", "CASE", "WHEN", "THEN", "ELSE", "END", "CAST", "INTERVAL", "CURRENT_TIMESTAMP", "CURRENT_DATE", "CURRENT_TIME":
 			return "", "", idx
 		}
 		if tokens[idx].raw[0] >= '0' && tokens[idx].raw[0] <= '9' || tokens[idx].raw[0] == '$' {
@@ -392,6 +435,10 @@ func parseColRef(tokens []advToken, idx int, aliasToTable map[string]string, def
 		}
 	}
 	if idx+2 < len(tokens) && tokens[idx+1].kind == advDot && (tokens[idx+2].kind == advWord || tokens[idx+2].kind == advIdent) {
+		// Reject schema.func(...) calls
+		if idx+3 < len(tokens) && tokens[idx+3].kind == advLParen {
+			return "", "", idx
+		}
 		qual := tokens[idx].unquoted
 		col := tokens[idx+2].unquoted
 		if mapped, ok := aliasToTable[qual]; ok {
@@ -399,12 +446,120 @@ func parseColRef(tokens []advToken, idx int, aliasToTable map[string]string, def
 		}
 		return col, qual, idx + 3
 	}
+	// Reject SQL function calls such as COALESCE(...), LOWER(...), DATE(...)
+	if idx+1 < len(tokens) && tokens[idx+1].kind == advLParen {
+		return "", "", idx
+	}
 	return tokens[idx].unquoted, defaultTable, idx + 1
 }
 
+func skipMatchingParen(tokens []advToken, openIdx int) int {
+	depth := 0
+	for i := openIdx; i < len(tokens); i++ {
+		if tokens[i].kind == advLParen {
+			depth++
+		} else if tokens[i].kind == advRParen {
+			depth--
+			if depth == 0 {
+				return i + 1
+			}
+		}
+	}
+	return len(tokens)
+}
+
+func unwrapOuterParens(tokens []advToken) []advToken {
+	for len(tokens) >= 2 && tokens[0].kind == advLParen && tokens[len(tokens)-1].kind == advRParen {
+		if skipMatchingParen(tokens, 0) == len(tokens) {
+			tokens = tokens[1 : len(tokens)-1]
+		} else {
+			break
+		}
+	}
+	return tokens
+}
+
+func hasTopLevelOR(tokens []advToken) bool {
+	depth := 0
+	for _, tok := range tokens {
+		switch tok.kind {
+		case advLParen:
+			depth++
+		case advRParen:
+			if depth > 0 {
+				depth--
+			}
+		case advWord:
+			if depth == 0 && tok.upper == "OR" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func splitTopLevelAND(tokens []advToken) [][]advToken {
+	var parts [][]advToken
+	depth := 0
+	inBetween := false
+	start := 0
+	for i, tok := range tokens {
+		switch tok.kind {
+		case advLParen:
+			depth++
+		case advRParen:
+			if depth > 0 {
+				depth--
+			}
+		case advWord:
+			if depth == 0 {
+				if tok.upper == "BETWEEN" {
+					inBetween = true
+				} else if tok.upper == "AND" {
+					if inBetween {
+						inBetween = false
+					} else {
+						if i > start {
+							parts = append(parts, tokens[start:i])
+						}
+						start = i + 1
+					}
+				}
+			}
+		}
+	}
+	if start < len(tokens) {
+		parts = append(parts, tokens[start:])
+	}
+	return parts
+}
+
+func isLeadingWildcardLike(tok advToken) bool {
+	if tok.kind != advString || len(tok.raw) < 2 {
+		return false
+	}
+	inner := tok.raw[1 : len(tok.raw)-1]
+	return strings.HasPrefix(inner, "%") || strings.HasPrefix(inner, "_")
+}
+
 func parseJoinOnTokens(tokens []advToken, tableMap map[string]*PredicateAnalysis, aliasToTable map[string]string, defaultTable string) {
+	depth := 0
 	for i := 0; i < len(tokens); i++ {
-		if tokens[i].kind == advLParen || tokens[i].kind == advRParen {
+		if tokens[i].kind == advLParen {
+			depth++
+			continue
+		}
+		if tokens[i].kind == advRParen {
+			if depth > 0 {
+				depth--
+			}
+			continue
+		}
+		if depth != 0 {
+			continue
+		}
+		if tokens[i].kind == advWord && i+1 < len(tokens) && tokens[i+1].kind == advLParen {
+			i = skipMatchingParen(tokens, i+1) - 1
 			continue
 		}
 		col, tbl, afterCol := parseColRef(tokens, i, aliasToTable, defaultTable)
@@ -439,13 +594,35 @@ func parseJoinOnTokens(tokens []advToken, tableMap map[string]*PredicateAnalysis
 }
 
 func parseWhereTokens(tokens []advToken, tableMap map[string]*PredicateAnalysis, aliasToTable map[string]string, defaultTable string) {
-	for i := 0; i < len(tokens); i++ {
-		if tokens[i].kind == advLParen || tokens[i].kind == advRParen {
+	tokens = unwrapOuterParens(tokens)
+	if len(tokens) == 0 {
+		return
+	}
+	// Disjunctive OR at this level cannot reliably use a single composite B-tree index.
+	if hasTopLevelOR(tokens) {
+		return
+	}
+
+	terms := splitTopLevelAND(tokens)
+	for _, rawTerm := range terms {
+		term := unwrapOuterParens(rawTerm)
+		if len(term) == 0 {
+			continue
+		}
+		if hasTopLevelOR(term) {
+			continue
+		}
+		// Recurse if unwrapping exposed nested conjunctive predicates like (a = 1 AND b = 2)
+		if subTerms := splitTopLevelAND(term); len(subTerms) > 1 {
+			parseWhereTokens(term, tableMap, aliasToTable, defaultTable)
+			continue
+		}
+		if term[0].kind == advWord && (term[0].upper == "NOT" || term[0].upper == "EXISTS") {
 			continue
 		}
 
-		col, tbl, afterCol := parseColRef(tokens, i, aliasToTable, defaultTable)
-		if col == "" || afterCol >= len(tokens) {
+		col, tbl, afterCol := parseColRef(term, 0, aliasToTable, defaultTable)
+		if col == "" || afterCol >= len(term) {
 			continue
 		}
 		ana, ok := tableMap[tbl]
@@ -456,58 +633,72 @@ func parseWhereTokens(tokens []advToken, tableMap map[string]*PredicateAnalysis,
 			ana.ReferencedCols = append(ana.ReferencedCols, col)
 		}
 
-		opTok := tokens[afterCol]
+		opTok := term[afterCol]
 		if opTok.kind == advOp {
 			switch opTok.upper {
 			case "=", "<=>":
 				if !containsStr(ana.EqualityCols, col) {
 					ana.EqualityCols = append(ana.EqualityCols, col)
 				}
-			case ">", "<", ">=", "<=", "!=", "<>":
+			case ">", "<", ">=", "<=":
 				if !containsStr(ana.RangeCols, col) {
 					ana.RangeCols = append(ana.RangeCols, col)
 				}
+			case "!=", "<>":
+				// Negation operators are not B-tree indexable; intentionally skipped.
 			}
-			i = afterCol
 			continue
 		}
 
 		if opTok.kind == advWord {
 			switch opTok.upper {
 			case "IS":
-				if afterCol+1 < len(tokens) && tokens[afterCol+1].kind == advWord && tokens[afterCol+1].upper == "NULL" {
+				// Only IS NULL is sargable via B-tree; IS NOT NULL is not recommended.
+				if afterCol+1 < len(term) && term[afterCol+1].kind == advWord && term[afterCol+1].upper == "NULL" {
 					if !containsStr(ana.EqualityCols, col) {
 						ana.EqualityCols = append(ana.EqualityCols, col)
 					}
-				} else {
-					if !containsStr(ana.RangeCols, col) {
-						ana.RangeCols = append(ana.RangeCols, col)
-					}
 				}
-				i = afterCol
-			case "LIKE", "ILIKE", "REGEXP", "BETWEEN", "IN":
+			case "BETWEEN", "IN":
 				if !containsStr(ana.RangeCols, col) {
 					ana.RangeCols = append(ana.RangeCols, col)
 				}
-				i = afterCol
-			case "NOT":
-				if afterCol+1 < len(tokens) && tokens[afterCol+1].kind == advWord {
-					switch tokens[afterCol+1].upper {
-					case "LIKE", "ILIKE", "IN", "BETWEEN":
-						if !containsStr(ana.RangeCols, col) {
-							ana.RangeCols = append(ana.RangeCols, col)
-						}
-					}
+			case "LIKE", "ILIKE":
+				// Only prefix patterns (e.g. 'foo%') are B-tree indexable; leading wildcards ('%foo', '_foo') are not.
+				if afterCol+1 < len(term) && isLeadingWildcardLike(term[afterCol+1]) {
+					continue
 				}
-				i = afterCol + 1
+				if !containsStr(ana.RangeCols, col) {
+					ana.RangeCols = append(ana.RangeCols, col)
+				}
+			case "NOT", "REGEXP", "RLIKE":
+				// NOT IN, NOT LIKE, NOT BETWEEN, REGEXP are not B-tree indexable; intentionally skipped.
 			}
 		}
 	}
 }
 
 func parseSortTokens(tokens []advToken, tableMap map[string]*PredicateAnalysis, aliasToTable map[string]string, defaultTable string) {
+	depth := 0
 	for i := 0; i < len(tokens); i++ {
+		if tokens[i].kind == advLParen {
+			depth++
+			continue
+		}
+		if tokens[i].kind == advRParen {
+			if depth > 0 {
+				depth--
+			}
+			continue
+		}
+		if depth != 0 {
+			continue
+		}
 		if tokens[i].kind == advWord && (tokens[i].upper == "ASC" || tokens[i].upper == "DESC" || tokens[i].upper == "NULLS" || tokens[i].upper == "FIRST" || tokens[i].upper == "LAST") {
+			continue
+		}
+		if (tokens[i].kind == advWord || tokens[i].kind == advIdent) && i+1 < len(tokens) && tokens[i+1].kind == advLParen {
+			i = skipMatchingParen(tokens, i+1) - 1
 			continue
 		}
 		col, tbl, next := parseColRef(tokens, i, aliasToTable, defaultTable)

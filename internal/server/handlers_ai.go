@@ -210,7 +210,8 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 	var tableNotes []ai.TableNoteSummary
 
 	includeSchema := req.IncludeSchema == nil || *req.IncludeSchema
-	if includeSchema {
+	maskIdentifiers := req.MaskIdentifiers == nil || *req.MaskIdentifiers
+	if includeSchema || maskIdentifiers {
 		sess, err := s.sessionMgr.GetActiveOrSingleSession(req.ConnectionID)
 		if err == nil && sess != nil {
 			dialect = sess.DriverName
@@ -224,13 +225,15 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 			}
 			schema = sess.Schema()
 
-			// Fetch table notes for the connection
-			if notes, err := s.vault.ListTableNotesForConnection(sess.ConnectionID); err == nil && len(notes) > 0 {
-				for _, n := range notes {
-					tableNotes = append(tableNotes, ai.TableNoteSummary{
-						TableName: n.TableName,
-						Content:   n.Content,
-					})
+			// Fetch table notes for the connection (only when schema is included)
+			if includeSchema {
+				if notes, err := s.vault.ListTableNotesForConnection(sess.ConnectionID); err == nil && len(notes) > 0 {
+					for _, n := range notes {
+						tableNotes = append(tableNotes, ai.TableNoteSummary{
+							TableName: n.TableName,
+							Content:   n.Content,
+						})
+					}
 				}
 			}
 		}
@@ -242,17 +245,18 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 		queryAndPrompt := strings.ToLower(req.Prompt + " " + req.Query)
 
 		for _, on := range allOpNotes {
-			// Check if specifically mentioned via @note:<id>, @note:<title>, [@note:...] or title mention
+			// Check if specifically mentioned via @note:<id>, or a non-trivial title (>= 3 chars).
+			titleLower := strings.ToLower(strings.TrimSpace(on.Title))
 			isMentioned := strings.Contains(queryAndPrompt, "@note:"+strings.ToLower(on.ID)) ||
-				strings.Contains(queryAndPrompt, strings.ToLower(on.Title))
+				(len(titleLower) >= 3 && strings.Contains(queryAndPrompt, titleLower))
 
 			// Or if tagged to active table being queried
 			isTagRelevant := false
 			for _, tag := range on.ObjectTags {
 				parts := strings.Split(tag, "/")
 				if len(parts) > 0 {
-					lastPart := strings.ToLower(parts[len(parts)-1])
-					if lastPart != "" && strings.Contains(queryAndPrompt, lastPart) {
+					lastPart := strings.ToLower(strings.TrimSpace(parts[len(parts)-1]))
+					if len(lastPart) >= 2 && strings.Contains(queryAndPrompt, lastPart) {
 						isTagRelevant = true
 						break
 					}
@@ -289,12 +293,13 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 		APIKey:           req.APIKey,
 		Model:            req.Model,
 		Endpoint:         req.Endpoint,
-		MaskIdentifiers:  req.MaskIdentifiers == nil || *req.MaskIdentifiers,
+		MaskIdentifiers:  maskIdentifiers,
 		Language:         req.Language,
 		ResponseStyle:    req.ResponseStyle,
 		CustomPrompt:     req.CustomPrompt,
 		IncludeSchema:    includeSchema,
 		Temperature:      req.Temperature,
+		RemoteRequest:    s.IsRemoteRequest(r),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -306,14 +311,15 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAIOllamaCheck(w http.ResponseWriter, r *http.Request) {
 	endpoint := r.URL.Query().Get("endpoint")
-	if err := validateAIEndpoint(endpoint, ai.ProviderOllama, s.IsRemoteRequest(r)); err != nil {
+	isRemote := s.IsRemoteRequest(r)
+	if err := validateAIEndpoint(endpoint, ai.ProviderOllama, isRemote); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
 
-	available := ai.DetectOllama(ctx, endpoint)
+	available := ai.DetectOllama(ctx, endpoint, isRemote)
 	writeJSON(w, http.StatusOK, map[string]bool{
 		"available": available,
 	})
@@ -362,11 +368,20 @@ func (s *Server) handleCreateAIProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "vault not initialized")
 		return
 	}
-	var p vault.AIProfile
-	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+	var dto struct {
+		vault.AIProfile
+		IncludeSchema   *bool `json:"include_schema,omitempty"`
+		MaskIdentifiers *bool `json:"mask_identifiers,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&dto); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
 		return
 	}
+	p := dto.AIProfile
+	// Secure-by-default: new profiles enable identifier masking and schema context unless explicitly disabled.
+	p.IncludeSchema = dto.IncludeSchema == nil || *dto.IncludeSchema
+	p.MaskIdentifiers = dto.MaskIdentifiers == nil || *dto.MaskIdentifiers
+
 	p.Name = strings.TrimSpace(p.Name)
 	if p.Name == "" {
 		writeError(w, http.StatusBadRequest, "profile name is required")
@@ -433,6 +448,7 @@ func (s *Server) handleUpdateAIProfile(w http.ResponseWriter, r *http.Request) {
 		if existing, err := s.vault.GetAIProfile(id); err == nil && existing != nil {
 			if !strings.EqualFold(strings.TrimRight(strings.TrimSpace(p.BaseURL), "/"), strings.TrimRight(strings.TrimSpace(existing.BaseURL), "/")) ||
 				!strings.EqualFold(strings.TrimSpace(p.Provider), strings.TrimSpace(existing.Provider)) {
+				p.ClearAPIKey = true
 				p.EncryptedAPIKey = ""
 				p.HasAPIKey = false
 			} else {

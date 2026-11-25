@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -44,6 +45,7 @@ func main() {
 			logLvl := os.Getenv("SQLFOX_LOG_LEVEL")
 			logFmt := os.Getenv("SQLFOX_LOG_FORMAT")
 			logSink := os.Getenv("SQLFOX_LOG_FILE")
+			var logCloser io.Closer
 			if logLvl != "" || logSink != "" {
 				res, err := logger.Setup(logger.Config{
 					Level:    logLvl,
@@ -52,17 +54,17 @@ func main() {
 					Silent:   false,
 				})
 				if err == nil && res.Closer != nil {
-					defer res.Closer.Close()
+					logCloser = res.Closer
 				}
 			}
-			os.Exit(cli.Run(os.Args[1:], os.Stdout, os.Stderr, os.Stdin))
+			code := cli.Run(os.Args[1:], os.Stdout, os.Stderr, os.Stdin)
+			if logCloser != nil {
+				_ = logCloser.Close()
+			}
+			os.Exit(code)
 
 		case "stop":
-			home, err := os.UserHomeDir()
-			if err != nil {
-				home = "."
-			}
-			configDir := filepath.Join(home, ".sqlfox")
+			configDir, stopPort := parseStopArgs(os.Args[2:])
 			lockPath := filepath.Join(configDir, "sqlfox.lock")
 			var pid int
 			if data, err := os.ReadFile(lockPath); err == nil {
@@ -71,7 +73,7 @@ func main() {
 					pid = info.PID
 				}
 			}
-			if err := stopExistingInstance(configDir, 8080); err != nil {
+			if err := stopExistingInstance(configDir, stopPort); err != nil {
 				fmt.Printf("ℹ️  %v\n", err)
 				os.Exit(0)
 			}
@@ -209,8 +211,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Capture the executable path at startup before any in-place self-update renames/unlinks
+	// the running binary (on Linux, /proc/self/exe would otherwise gain a " (deleted)" suffix).
+	startupExePath, _ := os.Executable()
+	if startupExePath != "" {
+		if evalPath, evalErr := filepath.EvalSymlinks(startupExePath); evalErr == nil {
+			startupExePath = evalPath
+		}
+	}
+
 	// Claim the lock atomically (after any interactive password prompt, so a waiting launch never
 	// mistakes a prompting instance for a stuck one); if another launch won the race, defer to it.
+	var claimRelease func()
 	if !*multiFlag && os.Getenv("SQLFOX_MULTI_INSTANCE") != "1" {
 		release, err := claimInstanceLock(configDir)
 		if errors.Is(err, os.ErrExist) {
@@ -226,7 +238,12 @@ func main() {
 			release, err = claimInstanceLock(configDir) // the stale lock was removed by the check
 		}
 		if err == nil {
-			defer release()
+			claimRelease = release
+			defer func() {
+				if claimRelease != nil {
+					claimRelease()
+				}
+			}()
 		}
 	}
 
@@ -242,8 +259,8 @@ func main() {
 
 	bindHost := *hostFlag
 	envLAN := os.Getenv("SQLFOX_LAN") == "1" || strings.ToLower(os.Getenv("SQLFOX_LAN")) == "true"
-	isLAN := *lanFlag || envLAN || bindHost == "0.0.0.0"
-	if (*lanFlag || envLAN) && bindHost == "127.0.0.1" {
+	isLAN := *lanFlag || envLAN || !isLoopbackBindHost(bindHost)
+	if (*lanFlag || envLAN) && isLoopbackBindHost(bindHost) {
 		bindHost = "0.0.0.0"
 	}
 
@@ -448,13 +465,27 @@ func main() {
 	srv.Close()
 	if lockCleanup != nil {
 		lockCleanup()
+		lockCleanup = nil
+	}
+	if claimRelease != nil {
+		claimRelease()
+		claimRelease = nil
 	}
 
 	if isRestart {
-		exePath, err := os.Executable()
-		if err == nil {
-			if evalPath, err := filepath.EvalSymlinks(exePath); err == nil {
-				exePath = evalPath
+		// Explicitly close vault SQLite handles and log files before syscall.Exec,
+		// because deferred cleanups do not execute once the process image is replaced.
+		_ = v.Close()
+		if logRes.Closer != nil {
+			_ = logRes.Closer.Close()
+		}
+		exePath := startupExePath
+		if exePath == "" {
+			if ep, err := os.Executable(); err == nil {
+				if evalPath, err := filepath.EvalSymlinks(ep); err == nil {
+					ep = evalPath
+				}
+				exePath = strings.TrimSuffix(ep, " (deleted)")
 			}
 		}
 		restartArgs := appendNoBrowserArg(os.Args)
@@ -472,6 +503,26 @@ func main() {
 	}
 
 	fmt.Println("SqlFox stopped.")
+}
+
+// parseStopArgs parses optional -db and -port flags for `sqlfox stop`.
+func parseStopArgs(args []string) (configDir string, port int) {
+	fs := flag.NewFlagSet("stop", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	dbPath := fs.String("db", "", "Path to encrypted vault SQLite file")
+	portVal := fs.Int("port", 8080, "Port of running SqlFox instance")
+	_ = fs.Parse(args)
+
+	if *dbPath != "" {
+		configDir = filepath.Dir(*dbPath)
+	} else {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			home = "."
+		}
+		configDir = filepath.Join(home, ".sqlfox")
+	}
+	return configDir, *portVal
 }
 
 func resolveMasterPassword(flagPass string, configDir string) (string, bool, error) {
@@ -570,6 +621,17 @@ func listenWithPortHunting(host string, startPort int, maxAttempts int) (net.Lis
 	return nil, startPort, fmt.Errorf("could not find an available port after %d attempts starting at %d", maxAttempts, startPort)
 }
 
+func isLoopbackBindHost(host string) bool {
+	h := strings.Trim(strings.TrimSpace(host), "[]")
+	if h == "" || strings.EqualFold(h, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
 func getLocalNetworkIP() string {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
@@ -583,21 +645,15 @@ func getLocalNetworkIP() string {
 	return ""
 }
 
-// loadEnvFiles loads environment variables from trusted user config paths (~/.sqlfox/)
-// and executable directory. Untrusted CWD .env files are intentionally NOT auto-loaded
-// so running sqlfox inside a cloned repo cannot inject SQLFOX_LAN or SQLFOX_MASTER_KEY.
+// loadEnvFiles loads environment variables ONLY from trusted user config paths (~/.sqlfox/).
+// Untrusted CWD and executable directories (e.g. ~/Downloads) are intentionally NOT auto-loaded
+// so a stray sqlfox.env next to a downloaded binary cannot inject SQLFOX_LAN or SQLFOX_PPROF.
 func loadEnvFiles() {
 	var candidates []string
 
-	// In ~/.sqlfox/ (highest priority trusted user config)
+	// In ~/.sqlfox/ (trusted user config directory)
 	if home, err := os.UserHomeDir(); err == nil {
 		candidates = append(candidates, filepath.Join(home, ".sqlfox", "sqlfox.env"), filepath.Join(home, ".sqlfox", ".env"))
-	}
-
-	// Next to executable (portable Windows bundle config)
-	if exe, err := os.Executable(); err == nil {
-		exeDir := filepath.Dir(exe)
-		candidates = append(candidates, filepath.Join(exeDir, "sqlfox.env"))
 	}
 
 	loadEnvFilesFromPaths(candidates...)

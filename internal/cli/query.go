@@ -75,11 +75,16 @@ func RunQueryContext(ctx context.Context, args []string, stdout, stderr io.Write
 		return 1
 	}
 
-	// 2. Connect to target
+	// 2. Connect to target (--conn strictly resolves from vault so --driver never hijacks a profile name)
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	target, err := ResolveTarget(ctx, targetParam, *driverFlag, *vaultDbFlag, *passFlag)
+	var target *SessionTarget
+	if *dsnFlag != "" {
+		target, err = ResolveTarget(ctx, *dsnFlag, *driverFlag, *vaultDbFlag, *passFlag)
+	} else {
+		target, err = ResolveVaultTarget(ctx, *connFlag, *driverFlag, *vaultDbFlag, *passFlag)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "❌ Connection Error: %v\n", err)
 		return 1
@@ -130,10 +135,20 @@ func RunQueryContext(ctx context.Context, args []string, stdout, stderr io.Write
 		isQuery := isRowReturningQuery(stmt)
 		start := time.Now()
 
-		if isQuery && len(statements) == 1 {
-			// Stream query results directly
-			if err := executeAndFormatQuery(ctx, target.Session, stmt, limit, format, stdout, stderr); err != nil {
-				fmt.Fprintf(stderr, "❌ Query Error: %v\n", err)
+		if isQuery {
+			// Stream query results directly (works for both single and multi-statement queries, inside or outside tx)
+			var qErr error
+			if activeTx != nil {
+				qErr = executeAndFormatQueryStream(ctx, activeTx, stmt, limit, format, stdout, stderr)
+			} else {
+				qErr = executeAndFormatQuery(ctx, target.Session, stmt, limit, format, stdout, stderr)
+			}
+			if qErr != nil {
+				if activeTx != nil {
+					_ = activeTx.Rollback()
+					activeTx = nil
+				}
+				fmt.Fprintf(stderr, "❌ Query Error: %v\n", qErr)
 				return 1
 			}
 		} else {
@@ -195,7 +210,15 @@ func isRowReturningQuery(sql string) bool {
 	return driver.IsQueryStatement(sql)
 }
 
+type queryStreamer interface {
+	QueryStream(ctx context.Context, sql string, limit int) (driver.RowStream, error)
+}
+
 func executeAndFormatQuery(ctx context.Context, sess driver.Session, sql string, limit int, format string, stdout, stderr io.Writer) error {
+	return executeAndFormatQueryStream(ctx, sess, sql, limit, format, stdout, stderr)
+}
+
+func executeAndFormatQueryStream(ctx context.Context, sess queryStreamer, sql string, limit int, format string, stdout, stderr io.Writer) error {
 	stream, err := sess.QueryStream(ctx, sql, limit)
 	if err != nil {
 		return err
@@ -248,7 +271,7 @@ func executeAndFormatQuery(ctx context.Context, sess driver.Session, sql string,
 				for _, row := range chunk {
 					record := make([]string, len(columns))
 					for i := range columns {
-						if i < len(row) {
+						if i < len(row) && row[i] != nil {
 							record[i] = fmt.Sprint(formatValue(row[i]))
 						}
 					}
@@ -331,12 +354,7 @@ func formatValue(val any) any {
 	if val == nil {
 		return nil
 	}
-	switch v := val.(type) {
-	case []byte:
-		return string(v)
-	default:
-		return v
-	}
+	return driver.FormatValueForJSON(val)
 }
 
 func renderTable(w io.Writer, columns []string, rows [][]any) {

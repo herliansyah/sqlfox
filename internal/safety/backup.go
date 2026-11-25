@@ -57,13 +57,13 @@ func BackupTable(ctx context.Context, sess driver.Session, backupDir, tableName 
 		return "", false, fmt.Errorf("failed to fetch table DDL: %w", err)
 	}
 
-	if err := os.MkdirAll(backupDir, 0755); err != nil {
+	if err := os.MkdirAll(backupDir, 0700); err != nil {
 		return "", false, fmt.Errorf("failed to create backup dir: %w", err)
 	}
 
 	// Sub-second timestamp prevents file collisions/overwrites if multiple DDL ops execute in the same second.
 	filePath := filepath.Join(backupDir, backupFileName(time.Now().Format("20060102-150405.000000"), tableName))
-	f, err := os.Create(filePath)
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return "", false, fmt.Errorf("failed to create backup file: %w", err)
 	}

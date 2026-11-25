@@ -67,6 +67,11 @@ func (a *AuthManager) purgeExpiredLocked() {
 	}
 }
 
+const (
+	maxActiveTokens  = 1000
+	maxLockoutRecord = 10000
+)
+
 func (a *AuthManager) GenerateToken() string {
 	bytes := make([]byte, 24)
 	_, _ = rand.Read(bytes)
@@ -75,6 +80,20 @@ func (a *AuthManager) GenerateToken() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.purgeExpiredLocked()
+	if len(a.tokens) >= maxActiveTokens {
+		// Evict oldest token to bound memory growth under high login churn.
+		var oldestKey string
+		var oldestExp time.Time
+		for k, exp := range a.tokens {
+			if oldestKey == "" || exp.Before(oldestExp) {
+				oldestKey = k
+				oldestExp = exp
+			}
+		}
+		if oldestKey != "" {
+			delete(a.tokens, oldestKey)
+		}
+	}
 	a.tokens[token] = time.Now().Add(24 * time.Hour)
 	return token
 }
@@ -83,19 +102,19 @@ func (a *AuthManager) ValidateToken(token string) bool {
 	if token == "" {
 		return false
 	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
+	a.mu.RLock()
 	exp, ok := a.tokens[token]
+	a.mu.RUnlock()
 	if !ok {
 		return false
 	}
 	if time.Now().After(exp) {
-		delete(a.tokens, token)
+		a.mu.Lock()
+		if curExp, stillThere := a.tokens[token]; stillThere && time.Now().After(curExp) {
+			delete(a.tokens, token)
+		}
+		a.mu.Unlock()
 		return false
-	}
-	if len(a.tokens) > 50 {
-		a.purgeExpiredLocked()
 	}
 	return true
 }
@@ -123,6 +142,17 @@ func (a *AuthManager) RecordFailedAttempt(ip string) (locked bool, remaining tim
 	now := time.Now()
 	rec, ok := a.lockouts[ip]
 	if !ok || (!rec.lockedUntil.IsZero() && now.After(rec.lockedUntil)) {
+		if !ok && len(a.lockouts) >= maxLockoutRecord {
+			// Bound lockout table size under distributed spoofed-IP brute force.
+			for k, v := range a.lockouts {
+				if v.lockedUntil.IsZero() {
+					delete(a.lockouts, k)
+					if len(a.lockouts) < maxLockoutRecord {
+						break
+					}
+				}
+			}
+		}
 		rec = &ipLockoutRecord{}
 		a.lockouts[ip] = rec
 	}
@@ -164,6 +194,19 @@ func (a *AuthManager) GeneratePairingCode() (string, time.Time) {
 	a.pairingExpiresAt = exp
 	a.pairingFailedCount = 0
 	return code, exp
+}
+
+// GetOrCreatePairingCode returns the active non-expired pairing code without mutating it,
+// or generates an initial code if none exists or the previous code has expired.
+func (a *AuthManager) GetOrCreatePairingCode() (string, time.Time) {
+	a.mu.RLock()
+	if a.pairingCode != "" && time.Now().Before(a.pairingExpiresAt) {
+		code, exp := a.pairingCode, a.pairingExpiresAt
+		a.mu.RUnlock()
+		return code, exp
+	}
+	a.mu.RUnlock()
+	return a.GeneratePairingCode()
 }
 
 // ConsumePairingCode validates and invalidates the active ephemeral LAN pairing code.
@@ -230,17 +273,10 @@ func (s *Server) isHostAllowed(host string) bool {
 	return false
 }
 
-// isAllowedLANHostIP decides whether an IP-literal Host header is acceptable in LAN mode. It accepts
+// isAllowedLANHostIPWith decides whether an IP-literal Host header is acceptable in LAN mode. It accepts
 // the detected LAN IP, loopback, and private/link-local ranges (RFC 1918, RFC 4193, link-local).
 // A public IP in the Host header is a DNS-rebinding signal and is rejected: SqlFox is never meant
 // to be reached over a routable public address.
-func (s *Server) isAllowedLANHostIP(ip net.IP) bool {
-	s.mu.Lock()
-	lanIP := s.lanIP
-	s.mu.Unlock()
-	return isAllowedLANHostIPWith(ip, lanIP)
-}
-
 func isAllowedLANHostIPWith(ip net.IP, lanIP string) bool {
 	if lanIP != "" {
 		if want := net.ParseIP(lanIP); want != nil && want.Equal(ip) {
@@ -285,9 +321,27 @@ func (s *Server) IngressGuardMiddleware(next http.Handler) http.Handler {
 			if origin := r.Header.Get("Origin"); origin != "" {
 				// Same-origin only: an allowed-but-different origin (another localhost port,
 				// any LAN IP, or scheme mismatch) must not be able to ride the session cookie.
+				// Only trust X-Forwarded-Proto when behind a configured trusted reverse proxy.
 				expectedScheme := "http"
-				if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+				if r.TLS != nil {
 					expectedScheme = "https"
+				} else {
+					s.mu.Lock()
+					bp := s.behindProxy
+					s.mu.Unlock()
+					if !bp {
+						envVal := strings.ToLower(strings.TrimSpace(os.Getenv("SQLFOX_BEHIND_PROXY")))
+						bp = envVal == "1" || envVal == "true"
+					}
+					if bp && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+						remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
+						if err != nil {
+							remoteHost = r.RemoteAddr
+						}
+						if s.isTrustedProxyIP(net.ParseIP(remoteHost)) {
+							expectedScheme = "https"
+						}
+					}
 				}
 				if u, err := url.Parse(origin); err != nil || !strings.EqualFold(u.Host, r.Host) || !strings.EqualFold(u.Scheme, expectedScheme) {
 					w.Header().Set("Content-Type", "application/json")
@@ -613,7 +667,15 @@ func (s *Server) handleGetMasterPassword(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	code, exp := s.authMgr.GeneratePairingCode()
+	// GET is idempotent (returns active pairing code without rotating/invalidating an in-flight pairing);
+	// POST explicitly rotates and issues a fresh pairing code.
+	var code string
+	var exp time.Time
+	if r.Method == http.MethodPost {
+		code, exp = s.authMgr.GeneratePairingCode()
+	} else {
+		code, exp = s.authMgr.GetOrCreatePairingCode()
+	}
 	resp := map[string]any{
 		"lan_enabled":            true,
 		"pairing_code":           code,

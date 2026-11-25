@@ -1,11 +1,14 @@
 package driver
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/hex"
 	"io"
+	"math"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 const (
@@ -23,12 +26,17 @@ func isBinaryDBType(dbType string) bool {
 	}
 	return strings.Contains(up, "BLOB") ||
 		strings.Contains(up, "BYTEA") ||
-		strings.Contains(up, "BINARY")
+		strings.Contains(up, "BINARY") ||
+		up == "BIT" || strings.HasPrefix(up, "BIT(") ||
+		strings.Contains(up, "GEOMETRY") ||
+		up == "POINT" || up == "LINESTRING" || up == "POLYGON" ||
+		strings.HasPrefix(up, "MULTI")
 }
 
 // FormatValueForJSON makes a scanned cell value safe for JavaScript JSON.parse consumers:
 //   - 64-bit integers outside IEEE-754's exact integer range ±(2^53-1) are stringified
 //     so Snowflake/BIGINT IDs are never silently rounded in the browser.
+//   - Non-finite floats (NaN, ±Infinity, valid in PostgreSQL) are stringified so json.Marshal never fails.
 //   - Raw binary []byte values are rendered as 0x<HEX> strings instead of opaque base64.
 func FormatValueForJSON(val any) any {
 	switch v := val.(type) {
@@ -40,6 +48,29 @@ func FormatValueForJSON(val any) any {
 	case uint64:
 		if v > maxSafeJSU64 {
 			return strconv.FormatUint(v, 10)
+		}
+		return v
+	case float64:
+		if math.IsNaN(v) {
+			return "NaN"
+		}
+		if math.IsInf(v, 1) {
+			return "Infinity"
+		}
+		if math.IsInf(v, -1) {
+			return "-Infinity"
+		}
+		return v
+	case float32:
+		f := float64(v)
+		if math.IsNaN(f) {
+			return "NaN"
+		}
+		if math.IsInf(f, 1) {
+			return "Infinity"
+		}
+		if math.IsInf(f, -1) {
+			return "-Infinity"
 		}
 		return v
 	case []byte:
@@ -132,11 +163,18 @@ func (r *SQLRowStream) NextChunk(batchSize int) ([][]any, error) {
 			return nil, err
 		}
 
-		// Preserve raw []byte on explicitly binary columns (BLOB/BYTEA/BINARY) so dumps
-		// and cross-database transfers stay lossless; coerce text/decimal []byte to string.
+		// Preserve raw []byte on explicitly binary columns (BLOB/BYTEA/BINARY/BIT/GEOMETRY)
+		// or untyped columns carrying non-UTF-8 / NUL bytes (e.g. SQLite BLOB expressions) so
+		// dumps and cross-database transfers stay lossless; coerce text/decimal []byte to string.
 		for i, val := range row {
 			if b, ok := val.([]byte); ok {
-				if i < len(r.isBin) && r.isBin[i] {
+				keepBinary := i < len(r.isBin) && r.isBin[i]
+				if !keepBinary && (i >= len(r.cols) || r.cols[i].Type == "") {
+					if bytes.IndexByte(b, 0) >= 0 || !utf8.Valid(b) {
+						keepBinary = true
+					}
+				}
+				if keepBinary {
 					cp := make([]byte, len(b))
 					copy(cp, b)
 					row[i] = cp

@@ -20,12 +20,89 @@ func isSqliteDriver(d string) bool {
 	return strings.EqualFold(d, "sqlite") || strings.EqualFold(d, "sqlite3")
 }
 
-var reMySQLTypeModifiers = regexp.MustCompile(`(?i)\s+(unsigned|zerofill|signed)\b`)
+var (
+	reMySQLTypeModifiers = regexp.MustCompile(`(?i)\s+(unsigned|zerofill|signed)\b`)
+	reSafeOnUpdate       = regexp.MustCompile(`(?i)^ON\s+UPDATE\s+(CURRENT_TIMESTAMP|LOCALTIMESTAMP|NOW)(\s*\(\s*\d*\s*\))?$`)
+)
+
+// hasUnsafeSQLFragment reports whether s contains a statement terminator (;) or SQL comment (-- or /*)
+// outside single-quoted string literals. Used to reject DDL injection from untrusted source metadata.
+func hasUnsafeSQLFragment(s string) bool {
+	inSingle := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '\'' {
+			if inSingle && i+1 < len(s) && s[i+1] == '\'' {
+				i++
+				continue
+			}
+			inSingle = !inSingle
+			continue
+		}
+		if inSingle {
+			if c == '\\' && i+1 < len(s) {
+				i++
+			}
+			continue
+		}
+		if c == ';' || c == '\x00' {
+			return true
+		}
+		if c == '-' && i+1 < len(s) && s[i+1] == '-' {
+			return true
+		}
+		if c == '/' && i+1 < len(s) && s[i+1] == '*' {
+			return true
+		}
+	}
+	return inSingle
+}
+
+// sanitizeColumnType rejects untrusted column types containing DDL injection syntax (semicolons,
+// SQL comments, unbalanced quotes/parens) and falls back to TEXT.
+func sanitizeColumnType(raw string) string {
+	t := strings.TrimSpace(raw)
+	if t == "" || hasUnsafeSQLFragment(t) {
+		return "TEXT"
+	}
+	depth := 0
+	inSingle := false
+	for i := 0; i < len(t); i++ {
+		c := t[i]
+		if c == '\'' {
+			if inSingle && i+1 < len(t) && t[i+1] == '\'' {
+				i++
+				continue
+			}
+			inSingle = !inSingle
+			continue
+		}
+		if inSingle {
+			if c == '\\' && i+1 < len(t) {
+				i++
+			}
+			continue
+		}
+		switch c {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth < 0 {
+				return "TEXT"
+			}
+		}
+	}
+	if depth != 0 {
+		return "TEXT"
+	}
+	return t
+}
 
 // normalizeColumnType maps a source column type onto a type the target driver accepts.
-// ponytail: covers the common MySQL<->PostgreSQL<->SQLite types; exotic types pass through unchanged.
+// ponytail: covers the common MySQL<->PostgreSQL<->SQLite types; exotic types pass through sanitized.
 func normalizeColumnType(t string, driverName string) string {
-	raw := strings.TrimSpace(t)
+	raw := sanitizeColumnType(t)
 	upper := strings.ToUpper(raw)
 
 	if isSqliteDriver(driverName) {
@@ -153,11 +230,17 @@ func renderColumnDefault(col driver.ColumnMetadata, srcDriver, tgtDriver string)
 	srcIsMySQL := !isPgDriver(srcDriver) && !isSqliteDriver(srcDriver)
 	if srcIsMySQL {
 		if strings.Contains(strings.ToUpper(col.Extra), "DEFAULT_GENERATED") {
-			// MySQL 8 expression default: must be parenthesized when re-emitted.
+			// MySQL 8 expression default: must be parenthesized when re-emitted; reject injection payloads.
+			if hasUnsafeSQLFragment(v) {
+				return ""
+			}
 			return "(" + v + ")"
 		}
 		// MariaDB already returns quoted literals / expressions; bit literals are SQL as-is.
 		if strings.HasPrefix(v, "'") || strings.HasPrefix(strings.ToLower(v), "b'") || reFuncCallExpr.MatchString(v) {
+			if hasUnsafeSQLFragment(v) {
+				return ""
+			}
 			return v
 		}
 		if reNumericLiteral.MatchString(v) {
@@ -167,6 +250,9 @@ func renderColumnDefault(col driver.ColumnMetadata, srcDriver, tgtDriver string)
 	}
 
 	// PostgreSQL / SQLite source: already an SQL expression.
+	if hasUnsafeSQLFragment(v) {
+		return ""
+	}
 	if isPgDriver(srcDriver) && !isPgDriver(tgtDriver) {
 		if strings.HasPrefix(strings.ToLower(v), "nextval(") {
 			return "" // sequence default has no portable equivalent (auto-increment is a column property)
@@ -240,7 +326,10 @@ func extraClause(extra string) string {
 		if j := strings.Index(strings.ToUpper(rest), " INVISIBLE"); j >= 0 {
 			rest = rest[:j]
 		}
-		parts = append(parts, strings.TrimSpace(rest))
+		rest = strings.TrimSpace(rest)
+		if reSafeOnUpdate.MatchString(rest) {
+			parts = append(parts, rest)
+		}
 	}
 	if strings.Contains(upper, "INVISIBLE") {
 		parts = append(parts, "INVISIBLE")

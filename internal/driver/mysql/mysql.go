@@ -1,6 +1,7 @@
 package mysql
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 func init() {
@@ -37,13 +39,24 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 	tlsParam := "false"
 	if cfg.UseSSL {
 		tlsConfig := &tls.Config{
+			MinVersion:         tls.VersionTLS12,
+			ServerName:         cfg.Host,
 			InsecureSkipVerify: false,
+		}
+		if strings.EqualFold(strings.TrimSpace(cfg.SSLMode), "require") {
+			tlsConfig.InsecureSkipVerify = true
 		}
 
 		if cfg.SSLCA != "" {
-			caCert, err := os.ReadFile(cfg.SSLCA)
-			if err != nil {
-				caCert = []byte(cfg.SSLCA) // Direct string content fallback
+			var caCert []byte
+			if strings.Contains(cfg.SSLCA, "-----BEGIN ") {
+				caCert = []byte(cfg.SSLCA)
+			} else {
+				var err error
+				caCert, err = os.ReadFile(cfg.SSLCA)
+				if err != nil {
+					caCert = []byte(cfg.SSLCA)
+				}
 			}
 			caCertPool := x509.NewCertPool()
 			if !caCertPool.AppendCertsFromPEM(caCert) {
@@ -53,9 +66,12 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 		}
 
 		if cfg.SSLCert != "" && cfg.SSLKey != "" {
-			cert, err := tls.LoadX509KeyPair(cfg.SSLCert, cfg.SSLKey)
-			if err != nil {
+			var cert tls.Certificate
+			var err error
+			if strings.Contains(cfg.SSLCert, "-----BEGIN ") || strings.Contains(cfg.SSLKey, "-----BEGIN ") {
 				cert, err = tls.X509KeyPair([]byte(cfg.SSLCert), []byte(cfg.SSLKey))
+			} else {
+				cert, err = tls.LoadX509KeyPair(cfg.SSLCert, cfg.SSLKey)
 			}
 			if err != nil {
 				return nil, fmt.Errorf("failed to load MySQL SSL client certificate/key: %w", err)
@@ -79,9 +95,12 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 	mc.Net = "tcp"
 	mc.Addr = addr
 	mc.DBName = cfg.DatabaseName
-	mc.Loc = time.Local
+	// Keep DATETIME wall-clock values in UTC rather than shifting them by the host's local timezone.
+	mc.Loc = time.UTC
 	mc.ParseTime = true
-	mc.MultiStatements = true
+	// Never enable MultiStatements on the shared pool: stacked SQL inside EXPLAIN, read-only queries,
+	// or single statements must fail at the wire protocol level. Multi-statement scripts are split explicitly.
+	mc.MultiStatements = false
 	mc.Timeout = 10 * time.Second
 	mc.ReadTimeout = 60 * time.Second
 	mc.WriteTimeout = 30 * time.Second
@@ -129,7 +148,7 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 		dsn:          dsn,
 		tlsKey:       tlsKey,
 		queryThreads: make(map[string]int64),
-		connStates:   *driver.NewConnStateMap[mysqlConnState](64),
+		connStates:   driver.NewConnStateMap[mysqlConnState](64),
 		pfsEnabled:   pfsEnabled,
 	}, nil
 }
@@ -147,11 +166,14 @@ type MySQLSession struct {
 	tlsKey       string
 	mu           sync.Mutex
 	queryThreads map[string]int64
-	connStates   driver.ConnStateMap[mysqlConnState]
+	connStates   *driver.ConnStateMap[mysqlConnState]
 	pfsEnabled   bool
 }
 
 func (s *MySQLSession) getConnState(conn *sql.Conn) *mysqlConnState {
+	if s.connStates == nil {
+		return nil
+	}
 	return s.connStates.Get(conn)
 }
 
@@ -275,7 +297,10 @@ func (s *MySQLSession) activeDB() string {
 }
 
 func (s *MySQLSession) applyActiveDatabase(ctx context.Context, conn *sql.Conn) error {
-	dbName := s.activeDB()
+	dbName := driver.DatabaseFromContext(ctx)
+	if dbName == "" {
+		dbName = s.activeDB()
+	}
 	if dbName == "" {
 		return nil
 	}
@@ -298,6 +323,20 @@ func (s *MySQLSession) applyActiveDatabase(ctx context.Context, conn *sql.Conn) 
 		st.mu.Unlock()
 	}
 	return nil
+}
+
+func (s *MySQLSession) invalidateConnDBState(conn *sql.Conn) {
+	if st := s.getConnState(conn); st != nil {
+		st.mu.Lock()
+		st.lastDB = ""
+		st.mu.Unlock()
+	}
+}
+
+func isRawDatabaseSwitchMySQL(q string) bool {
+	clean := strings.TrimSpace(driver.StripLeadingComments(q))
+	up := strings.ToUpper(clean)
+	return strings.HasPrefix(up, "USE ") || strings.HasPrefix(up, "USE\t") || strings.HasPrefix(up, "USE`")
 }
 
 func (s *MySQLSession) Exec(ctx context.Context, querySQL string, args ...any) (*driver.ExecResult, error) {
@@ -328,6 +367,9 @@ func (s *MySQLSession) Exec(ctx context.Context, querySQL string, args ...any) (
 	}
 
 	res, execErr := conn.ExecContext(ctx, querySQL, args...)
+	if isRawDatabaseSwitchMySQL(querySQL) {
+		s.invalidateConnDBState(conn)
+	}
 	if execErr != nil {
 		return nil, execErr
 	}
@@ -342,8 +384,25 @@ func (s *MySQLSession) Exec(ctx context.Context, querySQL string, args ...any) (
 }
 
 type mysqlTx struct {
-	conn *sql.Conn
-	tx   *sql.Tx
+	sess     *MySQLSession
+	conn     *sql.Conn
+	tx       *sql.Tx
+	threadID int64
+}
+
+func (t *mysqlTx) trackQuery(ctx context.Context) func() {
+	queryID := driver.QueryIDFromContext(ctx)
+	if queryID == "" || t.sess == nil || t.threadID <= 0 {
+		return func() {}
+	}
+	t.sess.mu.Lock()
+	t.sess.queryThreads[queryID] = t.threadID
+	t.sess.mu.Unlock()
+	return func() {
+		t.sess.mu.Lock()
+		delete(t.sess.queryThreads, queryID)
+		t.sess.mu.Unlock()
+	}
 }
 
 func (t *mysqlTx) closeConn() {
@@ -355,6 +414,8 @@ func (t *mysqlTx) closeConn() {
 
 func (t *mysqlTx) Exec(ctx context.Context, query string, args ...any) (*driver.ExecResult, error) {
 	start := time.Now()
+	untrack := t.trackQuery(ctx)
+	defer untrack()
 	res, err := t.tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -370,6 +431,8 @@ func (t *mysqlTx) Exec(ctx context.Context, query string, args ...any) (*driver.
 }
 
 func (t *mysqlTx) ExecRaw(ctx context.Context, query string, args ...any) (int64, error) {
+	untrack := t.trackQuery(ctx)
+	defer untrack()
 	res, err := t.tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, err
@@ -389,21 +452,24 @@ func (t *mysqlTx) Rollback() error {
 
 func (t *mysqlTx) QueryStream(ctx context.Context, querySQL string, limit int) (driver.RowStream, error) {
 	querySQL = driver.ApplyLimitClause(querySQL, limit)
+	untrack := t.trackQuery(ctx)
 
 	rows, err := t.tx.QueryContext(ctx, querySQL)
 	if err != nil {
+		untrack()
 		return nil, err
 	}
 
 	colTypes, err := rows.ColumnTypes()
 	if err != nil {
 		rows.Close()
+		untrack()
 		return nil, err
 	}
 
 	cols := driver.ColumnsFromTypes(colTypes)
 
-	return driver.NewSQLRowStream(rows, cols), nil
+	return driver.NewSQLRowStream(rows, cols, untrack), nil
 }
 
 func (s *MySQLSession) BeginTx(ctx context.Context) (driver.TxSession, error) {
@@ -415,12 +481,27 @@ func (s *MySQLSession) BeginTx(ctx context.Context) (driver.TxSession, error) {
 		_ = conn.Close()
 		return nil, err
 	}
+	var threadID int64
+	st := s.getConnState(conn)
+	if st != nil {
+		st.mu.Lock()
+		threadID = st.threadID
+		st.mu.Unlock()
+	}
+	if threadID == 0 {
+		_ = conn.QueryRowContext(ctx, "SELECT CONNECTION_ID()").Scan(&threadID)
+		if st != nil && threadID > 0 {
+			st.mu.Lock()
+			st.threadID = threadID
+			st.mu.Unlock()
+		}
+	}
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
-	return &mysqlTx{conn: conn, tx: tx}, nil
+	return &mysqlTx{sess: s, conn: conn, tx: tx, threadID: threadID}, nil
 }
 
 func (s *MySQLSession) CancelQuery(ctx context.Context, queryID string) error {
@@ -592,9 +673,13 @@ func (s *MySQLSession) PeekForeignKeyRow(ctx context.Context, database, table, c
 	for i, col := range cols {
 		val := rawVals[i]
 		if b, ok := val.([]byte); ok {
-			rowMap[col] = string(b)
+			if bytes.IndexByte(b, 0) >= 0 || !utf8.Valid(b) {
+				rowMap[col] = driver.FormatValueForJSON(b)
+			} else {
+				rowMap[col] = string(b)
+			}
 		} else {
-			rowMap[col] = val
+			rowMap[col] = driver.FormatValueForJSON(val)
 		}
 	}
 
@@ -673,9 +758,12 @@ func (s *MySQLSession) ExecScriptConn(ctx context.Context, fn func(exec func(con
 		return err
 	}
 	defer func() {
+		// Rollback any open transaction left behind by a failed/aborted script and restore session flags.
 		restoreCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_, _ = conn.ExecContext(restoreCtx, "ROLLBACK")
 		_, _ = conn.ExecContext(restoreCtx, "SET FOREIGN_KEY_CHECKS = 1")
 		cancel()
+		s.invalidateConnDBState(conn)
 		_ = conn.Close()
 	}()
 	if err := s.applyActiveDatabase(ctx, conn); err != nil {
@@ -684,6 +772,9 @@ func (s *MySQLSession) ExecScriptConn(ctx context.Context, fn func(exec func(con
 	return fn(func(c context.Context, q string) (*driver.ExecResult, error) {
 		start := time.Now()
 		res, err := conn.ExecContext(c, q)
+		if isRawDatabaseSwitchMySQL(q) {
+			s.invalidateConnDBState(conn)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -708,14 +799,46 @@ func (s *MySQLSession) QueryStreamReadOnly(ctx context.Context, sqlStr string, l
 		_ = conn.Close()
 		return nil, err
 	}
+	queryID := driver.QueryIDFromContext(ctx)
+	if queryID != "" {
+		var threadID int64
+		st := s.getConnState(conn)
+		if st != nil {
+			st.mu.Lock()
+			threadID = st.threadID
+			st.mu.Unlock()
+		}
+		if threadID == 0 {
+			_ = conn.QueryRowContext(ctx, "SELECT CONNECTION_ID()").Scan(&threadID)
+			if st != nil && threadID > 0 {
+				st.mu.Lock()
+				st.threadID = threadID
+				st.mu.Unlock()
+			}
+		}
+		if threadID > 0 {
+			s.mu.Lock()
+			s.queryThreads[queryID] = threadID
+			s.mu.Unlock()
+		}
+	}
+	untrack := func() {
+		if queryID != "" {
+			s.mu.Lock()
+			delete(s.queryThreads, queryID)
+			s.mu.Unlock()
+		}
+	}
 	tx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
+		untrack()
 		_ = conn.Close()
 		return nil, err
 	}
 	querySQL := driver.ApplyLimitClause(sqlStr, limit)
 	rows, err := tx.QueryContext(ctx, querySQL)
 	if err != nil {
+		untrack()
 		_ = tx.Rollback()
 		_ = conn.Close()
 		return nil, err
@@ -723,14 +846,269 @@ func (s *MySQLSession) QueryStreamReadOnly(ctx context.Context, sqlStr string, l
 	colTypes, err := rows.ColumnTypes()
 	if err != nil {
 		_ = rows.Close()
+		untrack()
 		_ = tx.Rollback()
 		_ = conn.Close()
 		return nil, err
 	}
 	return driver.NewSQLRowStream(rows, driver.ColumnsFromTypes(colTypes), func() {
+		untrack()
 		_ = tx.Rollback()
 		_ = conn.Close()
 	}), nil
 }
 
-// InspectServerVariables introspects all server variables and correlates them with tuning rules.
+// ParseProfileRows converts SHOW PROFILE result rows (Status, Duration) into a structured QueryProfile.
+func ParseProfileRows(rows [][]any) *driver.QueryProfile {
+	var stages []driver.ProfileStage
+	var totalDuration float64
+	for _, row := range rows {
+		if len(row) < 2 {
+			continue
+		}
+		var stg string
+		switch v := row[0].(type) {
+		case []byte:
+			stg = string(v)
+		default:
+			stg = fmt.Sprintf("%v", v)
+		}
+		var durStr string
+		switch v := row[1].(type) {
+		case []byte:
+			durStr = string(v)
+		default:
+			durStr = fmt.Sprintf("%v", v)
+		}
+		durSec, err := strconv.ParseFloat(strings.TrimSpace(durStr), 64)
+		if err != nil {
+			continue
+		}
+		durUs := int64(durSec * 1e6)
+		totalDuration += durSec
+		stages = append(stages, driver.ProfileStage{
+			Stage:      stg,
+			DurationUs: durUs,
+		})
+	}
+	if len(stages) == 0 {
+		return nil
+	}
+	if totalDuration > 0 {
+		for i := range stages {
+			stages[i].Percentage = (float64(stages[i].DurationUs) / (totalDuration * 1e6)) * 100.0
+		}
+	}
+	return &driver.QueryProfile{
+		DurationMs: totalDuration * 1000.0,
+		Stages:     stages,
+	}
+}
+
+func collectProfileFromConn(ctx context.Context, conn *sql.Conn) *driver.QueryProfile {
+	rows, err := conn.QueryContext(ctx, "SHOW PROFILE")
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil || len(cols) < 2 {
+		return nil
+	}
+	var rawRows [][]any
+	for rows.Next() {
+		vals := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			break
+		}
+		rawRows = append(rawRows, vals)
+	}
+	return ParseProfileRows(rawRows)
+}
+
+// QueryStreamProfiled pins SET profiling = 1, the query, SHOW PROFILE, and SET profiling = 0
+// to a single *sql.Conn so profiling never leaks into the shared connection pool.
+func (s *MySQLSession) QueryStreamProfiled(ctx context.Context, sqlStr string, limit int, readOnly bool) (driver.RowStream, func() *driver.QueryProfile, error) {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := s.applyActiveDatabase(ctx, conn); err != nil {
+		_ = conn.Close()
+		return nil, nil, err
+	}
+
+	queryID := driver.QueryIDFromContext(ctx)
+	if queryID != "" {
+		var threadID int64
+		st := s.getConnState(conn)
+		if st != nil {
+			st.mu.Lock()
+			threadID = st.threadID
+			st.mu.Unlock()
+		}
+		if threadID == 0 {
+			_ = conn.QueryRowContext(ctx, "SELECT CONNECTION_ID()").Scan(&threadID)
+			if st != nil && threadID > 0 {
+				st.mu.Lock()
+				st.threadID = threadID
+				st.mu.Unlock()
+			}
+		}
+		if threadID > 0 {
+			s.mu.Lock()
+			s.queryThreads[queryID] = threadID
+			s.mu.Unlock()
+		}
+	}
+	untrack := func() {
+		if queryID != "" {
+			s.mu.Lock()
+			delete(s.queryThreads, queryID)
+			s.mu.Unlock()
+		}
+	}
+
+	profEnabled := false
+	if _, pErr := conn.ExecContext(ctx, "SET profiling = 1"); pErr == nil {
+		profEnabled = true
+	}
+
+	disableProfilingAndClose := func(tx *sql.Tx) {
+		untrack()
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+		if profEnabled {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			_, _ = conn.ExecContext(cleanupCtx, "SET profiling = 0")
+			cancel()
+		}
+		_ = conn.Close()
+	}
+
+	var tx *sql.Tx
+	if readOnly {
+		tx, err = conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+		if err != nil {
+			disableProfilingAndClose(nil)
+			return nil, nil, err
+		}
+	}
+
+	querySQL := driver.ApplyLimitClause(sqlStr, limit)
+	var rows *sql.Rows
+	if tx != nil {
+		rows, err = tx.QueryContext(ctx, querySQL)
+	} else {
+		rows, err = conn.QueryContext(ctx, querySQL)
+	}
+	if err != nil {
+		disableProfilingAndClose(tx)
+		return nil, nil, err
+	}
+
+	colTypes, err := rows.ColumnTypes()
+	if err != nil {
+		_ = rows.Close()
+		disableProfilingAndClose(tx)
+		return nil, nil, err
+	}
+
+	// Keep conn open after rows.Close() so finish() can run SHOW PROFILE + SET profiling = 0 on the same conn.
+	stream := driver.NewSQLRowStream(rows, driver.ColumnsFromTypes(colTypes), nil)
+
+	var once sync.Once
+	var cached *driver.QueryProfile
+	finish := func() *driver.QueryProfile {
+		once.Do(func() {
+			_ = stream.Close()
+			if tx != nil {
+				_ = tx.Rollback()
+				tx = nil
+			}
+			if profEnabled {
+				profCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				cached = collectProfileFromConn(profCtx, conn)
+				_, _ = conn.ExecContext(profCtx, "SET profiling = 0")
+				cancel()
+			}
+			untrack()
+			_ = conn.Close()
+		})
+		return cached
+	}
+
+	return stream, finish, nil
+}
+
+// ExecProfiled pins SET profiling = 1, the statement, SHOW PROFILE, and SET profiling = 0
+// to a single *sql.Conn.
+func (s *MySQLSession) ExecProfiled(ctx context.Context, querySQL string, args ...any) (*driver.ExecResult, *driver.QueryProfile, error) {
+	start := time.Now()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	profEnabled := false
+	defer func() {
+		if profEnabled {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			_, _ = conn.ExecContext(cleanupCtx, "SET profiling = 0")
+			cancel()
+		}
+		_ = conn.Close()
+	}()
+
+	if err := s.applyActiveDatabase(ctx, conn); err != nil {
+		return nil, nil, err
+	}
+
+	queryID := driver.QueryIDFromContext(ctx)
+	if queryID != "" {
+		var threadID int64
+		_ = conn.QueryRowContext(ctx, "SELECT CONNECTION_ID()").Scan(&threadID)
+		if threadID > 0 {
+			s.mu.Lock()
+			s.queryThreads[queryID] = threadID
+			s.mu.Unlock()
+			defer func() {
+				s.mu.Lock()
+				delete(s.queryThreads, queryID)
+				s.mu.Unlock()
+			}()
+		}
+	}
+
+	if _, pErr := conn.ExecContext(ctx, "SET profiling = 1"); pErr == nil {
+		profEnabled = true
+	}
+
+	res, execErr := conn.ExecContext(ctx, querySQL, args...)
+	if isRawDatabaseSwitchMySQL(querySQL) {
+		s.invalidateConnDBState(conn)
+	}
+	if execErr != nil {
+		return nil, nil, execErr
+	}
+
+	var prof *driver.QueryProfile
+	if profEnabled {
+		profCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		prof = collectProfileFromConn(profCtx, conn)
+		cancel()
+	}
+
+	rowsAffected, _ := res.RowsAffected()
+	lastInsertID, _ := res.LastInsertId()
+	return &driver.ExecResult{
+		RowsAffected: rowsAffected,
+		LastInsertID: lastInsertID,
+		ExecutionMs:  time.Since(start).Milliseconds(),
+		Message:      fmt.Sprintf("Query OK, %d rows affected.", rowsAffected),
+	}, prof, nil
+}

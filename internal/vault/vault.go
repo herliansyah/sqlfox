@@ -53,9 +53,18 @@ type ConnectionRecord struct {
 
 // Vault manages encrypted credential and profile storage.
 type Vault struct {
-	db  *sql.DB
-	key []byte
-	mu  sync.RWMutex
+	db     *sql.DB
+	dbPath string
+	key    []byte
+	mu     sync.RWMutex
+}
+
+// Path returns the filesystem path of the SQLite vault database.
+func (v *Vault) Path() string {
+	if v == nil {
+		return ""
+	}
+	return v.dbPath
 }
 
 // OpenVault opens or creates the SQLite vault at the specified path and initializes the master key.
@@ -114,8 +123,13 @@ func OpenVault(dbPath string, masterPassword string) (*Vault, error) {
 	}
 
 	v := &Vault{
-		db:  db,
-		key: key,
+		db:     db,
+		dbPath: dbPath,
+		key:    key,
+	}
+	// Tighten vault file permissions so local multi-user hosts cannot read config.db.
+	if dbPath != "" && dbPath != ":memory:" && !strings.HasPrefix(dbPath, "file:") {
+		_ = os.Chmod(dbPath, 0600)
 	}
 	// ponytail: Re-seal any legacy pre-ADR-0060 secrets with bound AAD so vault cannot be swapped
 	v.migrateLegacyAAD()
@@ -662,14 +676,21 @@ func (v *Vault) migrateLegacyAAD() {
 			}
 		}
 
-		if sslKey.Valid && strings.HasPrefix(sslKey.String, sealedPrefix) {
-			rawCipher := strings.TrimPrefix(sslKey.String, sealedPrefix)
+		if sslKey.Valid && sslKey.String != "" {
 			keyAAD := connFieldAAD(id, "ssl_key")
-			if _, err := decrypt(rawCipher, v.key, keyAAD); err != nil {
-				if plain, err := decrypt(rawCipher, v.key, nil); err == nil {
-					if sealed, err := EncryptWithAAD(plain, v.key, keyAAD); err == nil {
-						item.newSSLKey = sealedPrefix + sealed
+			if strings.HasPrefix(sslKey.String, sealedPrefix) {
+				rawCipher := strings.TrimPrefix(sslKey.String, sealedPrefix)
+				if _, err := decrypt(rawCipher, v.key, keyAAD); err != nil {
+					if plain, err := decrypt(rawCipher, v.key, nil); err == nil {
+						if sealed, err := EncryptWithAAD(plain, v.key, keyAAD); err == nil {
+							item.newSSLKey = sealedPrefix + sealed
+						}
 					}
+				}
+			} else {
+				// Legacy plaintext ssl_key stored prior to at-rest sealing: encrypt in-place with bound AAD.
+				if sealed, err := EncryptWithAAD([]byte(sslKey.String), v.key, keyAAD); err == nil {
+					item.newSSLKey = sealedPrefix + sealed
 				}
 			}
 		}

@@ -479,126 +479,313 @@ func (s *PostgresSession) SampleFlightMetrics(ctx context.Context) (*driver.Flig
 	}, nil
 }
 
+type pgCuratedRule struct {
+	Category       string
+	Recommendation string
+	SuggestedValue string
+	ImpactLow      string
+	ImpactHigh     string
+	Evaluate       func(setting, unit string) string
+}
+
+func parsePGMemoryBytes(setting, unit string) (int64, bool) {
+	s := strings.TrimSpace(setting)
+	u := strings.TrimSpace(unit)
+	if s == "" {
+		return 0, false
+	}
+	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+		if n < 0 {
+			return n, true
+		}
+		switch u {
+		case "8kB":
+			return n * 8 * 1024, true
+		case "kB":
+			return n * 1024, true
+		case "MB":
+			return n * 1024 * 1024, true
+		case "GB":
+			return n * 1024 * 1024 * 1024, true
+		case "TB":
+			return n * 1024 * 1024 * 1024 * 1024, true
+		case "B", "":
+			return n, true
+		default:
+			// Handle arbitrary "<N>kB" / "<N>MB" units reported by pg_settings (e.g. "16MB" wal_segment_size)
+			if mul, ok := parsePGUnitMultiplier(u); ok {
+				return n * mul, true
+			}
+			return n, true
+		}
+	}
+	// Handle human-formatted strings such as "128MB", "4kB", "2GB"
+	lower := strings.ToLower(s)
+	suffixes := []struct {
+		sfx string
+		mul int64
+	}{
+		{"tb", 1024 * 1024 * 1024 * 1024},
+		{"gb", 1024 * 1024 * 1024},
+		{"mb", 1024 * 1024},
+		{"kb", 1024},
+		{"b", 1},
+	}
+	for _, sf := range suffixes {
+		if strings.HasSuffix(lower, sf.sfx) {
+			numPart := strings.TrimSpace(lower[:len(lower)-len(sf.sfx)])
+			if f, err := strconv.ParseFloat(numPart, 64); err == nil {
+				return int64(f * float64(sf.mul)), true
+			}
+		}
+	}
+	return 0, false
+}
+
+func parsePGUnitMultiplier(u string) (int64, bool) {
+	lower := strings.ToLower(strings.TrimSpace(u))
+	suffixes := []struct {
+		sfx string
+		mul int64
+	}{
+		{"tb", 1024 * 1024 * 1024 * 1024},
+		{"gb", 1024 * 1024 * 1024},
+		{"mb", 1024 * 1024},
+		{"kb", 1024},
+		{"b", 1},
+	}
+	for _, sf := range suffixes {
+		if strings.HasSuffix(lower, sf.sfx) {
+			numPart := strings.TrimSpace(lower[:len(lower)-len(sf.sfx)])
+			if numPart == "" {
+				return sf.mul, true
+			}
+			if n, err := strconv.ParseInt(numPart, 10, 64); err == nil && n > 0 {
+				return n * sf.mul, true
+			}
+		}
+	}
+	return 0, false
+}
+
+var pgCuratedRules = map[string]pgCuratedRule{
+	"shared_buffers": {
+		Category:       "Memory & Buffer",
+		Recommendation: "Typically set to 25% of total system RAM (e.g. 1GB - 8GB on modern servers)",
+		SuggestedValue: "25% of RAM",
+		ImpactLow:      "Frequent disk reads and cache thrashing",
+		ImpactHigh:     "Diminishing returns, double-buffering with OS page cache",
+		Evaluate: func(setting, unit string) string {
+			b, ok := parsePGMemoryBytes(setting, unit)
+			if !ok {
+				return "info"
+			}
+			const mb = 1024 * 1024
+			if b < 128*mb {
+				return "warning"
+			}
+			return "optimal"
+		},
+	},
+	"work_mem": {
+		Category:       "Memory & Buffer",
+		Recommendation: "Allocate based on available RAM divided by max_connections (e.g. 16MB - 64MB)",
+		SuggestedValue: "16MB - 64MB",
+		ImpactLow:      "Complex sorts and hash joins spill to temporary disk files",
+		ImpactHigh:     "OOM risk when multiple concurrent backends run multi-node queries",
+		Evaluate: func(setting, unit string) string {
+			b, ok := parsePGMemoryBytes(setting, unit)
+			if !ok {
+				return "info"
+			}
+			const mb = 1024 * 1024
+			if b < 4*mb || b > 256*mb {
+				return "warning"
+			}
+			return "optimal"
+		},
+	},
+	"maintenance_work_mem": {
+		Category:       "Memory & Buffer",
+		Recommendation: "10% of system RAM up to 1GB or 2GB for VACUUM, CREATE INDEX, and ALTER TABLE",
+		SuggestedValue: "256MB - 1GB",
+		ImpactLow:      "Slow VACUUM, autovacuum, and index build operations",
+		ImpactHigh:     "Starves other processes during bulk maintenance tasks",
+		Evaluate: func(setting, unit string) string {
+			b, ok := parsePGMemoryBytes(setting, unit)
+			if !ok {
+				return "info"
+			}
+			const mb = 1024 * 1024
+			if b < 64*mb {
+				return "warning"
+			}
+			if b > 2048*mb {
+				return "info"
+			}
+			return "optimal"
+		},
+	},
+	"effective_cache_size": {
+		Category:       "Optimizer & Performance",
+		Recommendation: "Set to 50% - 75% of total system RAM to help planner estimate OS disk cache",
+		SuggestedValue: "50% - 75% of RAM",
+		ImpactLow:      "Planner underestimates memory cache and favors sequential scans over index scans",
+		ImpactHigh:     "Planner may overly favor index scans when pages aren't cached",
+		Evaluate: func(setting, unit string) string {
+			b, ok := parsePGMemoryBytes(setting, unit)
+			if !ok {
+				return "info"
+			}
+			const mb = 1024 * 1024
+			if b < 512*mb {
+				return "warning"
+			}
+			return "optimal"
+		},
+	},
+	"wal_buffers": {
+		Category:       "IO & Durability",
+		Recommendation: "Typically 16MB (or automatic -1) for high-write transaction workloads",
+		SuggestedValue: "16MB",
+		ImpactLow:      "Frequent WAL flushes before transaction commit",
+		ImpactHigh:     "Wasted shared memory",
+		Evaluate: func(setting, unit string) string {
+			b, ok := parsePGMemoryBytes(setting, unit)
+			if !ok {
+				return "info"
+			}
+			if b == -1 {
+				return "optimal"
+			}
+			const mb = 1024 * 1024
+			if b < 16*mb {
+				return "warning"
+			}
+			return "optimal"
+		},
+	},
+	"checkpoint_completion_target": {
+		Category:       "IO & Durability",
+		Recommendation: "Set to 0.9 to spread checkpoint writes across 90% of checkpoint interval",
+		SuggestedValue: "0.9",
+		ImpactLow:      "Spiky I/O bursts causing query latency jitter during checkpoints",
+		ImpactHigh:     "Slightly longer crash recovery time",
+		Evaluate: func(setting, _ string) string {
+			f, err := strconv.ParseFloat(strings.TrimSpace(setting), 64)
+			if err != nil {
+				return "info"
+			}
+			if f < 0.7 {
+				return "warning"
+			}
+			if f > 0.95 {
+				return "info"
+			}
+			return "optimal"
+		},
+	},
+	"max_connections": {
+		Category:       "Concurrency & Lock",
+		Recommendation: "Keep between 100 - 300; use connection pooler (PgBouncer) for higher concurrency",
+		SuggestedValue: "100 - 200",
+		ImpactLow:      "Connection exhaustion ('too many clients already')",
+		ImpactHigh:     "Severe memory overhead and CPU context-switching contention",
+		Evaluate: func(setting, _ string) string {
+			n, err := strconv.Atoi(strings.TrimSpace(setting))
+			if err != nil {
+				return "info"
+			}
+			if n < 20 || n > 500 {
+				return "warning"
+			}
+			return "optimal"
+		},
+	},
+	"autovacuum": {
+		Category:       "IO & Durability",
+		Recommendation: "Keep 'on' to prevent table bloat and transaction ID (XID) wraparound failure",
+		SuggestedValue: "on",
+		ImpactLow:      "Critical table bloat, slow queries, and database shutdown on XID wraparound",
+		ImpactHigh:     "Excessive background I/O if cost limits are not properly tuned",
+		Evaluate: func(setting, _ string) string {
+			if !strings.EqualFold(strings.TrimSpace(setting), "on") {
+				return "critical"
+			}
+			return "optimal"
+		},
+	},
+}
+
+// EvaluatePostgresVariable evaluates a single PostgreSQL pg_settings row against curated DBA rules.
+func EvaluatePostgresVariable(name, setting, unit, category, shortDesc, contextStr string) driver.ServerVariable {
+	isDynamic := (contextStr == "user" || contextStr == "superuser")
+	scope := "Global"
+	if contextStr == "user" {
+		scope = "Both"
+	}
+	isCurated := false
+	severity := "info"
+	recommendation := ""
+	suggestedVal := ""
+	impactLow := ""
+	impactHigh := ""
+
+	if rule, ok := pgCuratedRules[name]; ok {
+		isCurated = true
+		category = rule.Category
+		recommendation = rule.Recommendation
+		suggestedVal = rule.SuggestedValue
+		impactLow = rule.ImpactLow
+		impactHigh = rule.ImpactHigh
+		if rule.Evaluate != nil {
+			severity = rule.Evaluate(setting, unit)
+		} else {
+			severity = "optimal"
+		}
+	}
+
+	displayVal := setting
+	if unit != "" && setting != "-1" {
+		displayVal = setting + " (" + unit + ")"
+	}
+	escapedSetting := strings.ReplaceAll(setting, "'", "''")
+
+	return driver.ServerVariable{
+		Name:             name,
+		Value:            displayVal,
+		Scope:            scope,
+		IsDynamic:        isDynamic,
+		Category:         category,
+		Description:      shortDesc,
+		ImpactLow:        impactLow,
+		ImpactHigh:       impactHigh,
+		Recommendation:   recommendation,
+		SuggestedValue:   suggestedVal,
+		Severity:         severity,
+		IsCurated:        isCurated,
+		MyCnfSnippet:     fmt.Sprintf("%s = '%s'", name, escapedSetting),
+		SetGlobalSnippet: fmt.Sprintf("ALTER SYSTEM SET %s = '%s';", name, escapedSetting),
+	}
+}
+
 func (s *PostgresSession) InspectServerVariables(ctx context.Context) (*driver.ServerVariablesReport, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT name, setting, category, short_desc, context FROM pg_settings ORDER BY name ASC")
+	rows, err := s.db.QueryContext(ctx, "SELECT name, setting, COALESCE(unit, ''), category, short_desc, context FROM pg_settings ORDER BY name ASC")
 	if err != nil {
 		return nil, fmt.Errorf("failed to introspect pg_settings: %w", err)
 	}
 	defer rows.Close()
 
-	curatedRules := map[string]struct {
-		Category       string
-		Recommendation string
-		SuggestedValue string
-		ImpactLow      string
-		ImpactHigh     string
-	}{
-		"shared_buffers": {
-			Category:       "Memory & Buffer",
-			Recommendation: "Typically set to 25% of total system RAM (e.g. 1GB - 8GB on modern servers)",
-			SuggestedValue: "25% of RAM",
-			ImpactLow:      "Frequent disk reads and cache thrashing",
-			ImpactHigh:     "Diminishing returns, double-buffering with OS page cache",
-		},
-		"work_mem": {
-			Category:       "Memory & Buffer",
-			Recommendation: "Allocate based on available RAM divided by max_connections (e.g. 16MB - 64MB)",
-			SuggestedValue: "16MB - 64MB",
-			ImpactLow:      "Complex sorts and hash joins spill to temporary disk files",
-			ImpactHigh:     "OOM risk when multiple concurrent backends run multi-node queries",
-		},
-		"maintenance_work_mem": {
-			Category:       "Memory & Buffer",
-			Recommendation: "10% of system RAM up to 1GB or 2GB for VACUUM, CREATE INDEX, and ALTER TABLE",
-			SuggestedValue: "256MB - 1GB",
-			ImpactLow:      "Slow VACUUM, autovacuum, and index build operations",
-			ImpactHigh:     "Starves other processes during bulk maintenance tasks",
-		},
-		"effective_cache_size": {
-			Category:       "Optimizer & Performance",
-			Recommendation: "Set to 50% - 75% of total system RAM to help planner estimate OS disk cache",
-			SuggestedValue: "50% - 75% of RAM",
-			ImpactLow:      "Planner underestimates memory cache and favors sequential scans over index scans",
-			ImpactHigh:     "Planner may overly favor index scans when pages aren't cached",
-		},
-		"wal_buffers": {
-			Category:       "IO & Durability",
-			Recommendation: "Typically 16MB (or automatic -1) for high-write transaction workloads",
-			SuggestedValue: "16MB",
-			ImpactLow:      "Frequent WAL flushes before transaction commit",
-			ImpactHigh:     "Wasted shared memory",
-		},
-		"checkpoint_completion_target": {
-			Category:       "IO & Durability",
-			Recommendation: "Set to 0.9 to spread checkpoint writes across 90% of checkpoint interval",
-			SuggestedValue: "0.9",
-			ImpactLow:      "Spiky I/O bursts causing query latency jitter during checkpoints",
-			ImpactHigh:     "Slightly longer crash recovery time",
-		},
-		"max_connections": {
-			Category:       "Concurrency & Lock",
-			Recommendation: "Keep between 100 - 300; use connection pooler (PgBouncer) for higher concurrency",
-			SuggestedValue: "100 - 200",
-			ImpactLow:      "Connection exhaustion ('too many clients already')",
-			ImpactHigh:     "Severe memory overhead and CPU context-switching contention",
-		},
-		"autovacuum": {
-			Category:       "IO & Durability",
-			Recommendation: "Keep 'on' to prevent table bloat and transaction ID (XID) wraparound failure",
-			SuggestedValue: "on",
-			ImpactLow:      "Critical table bloat, slow queries, and database shutdown on XID wraparound",
-			ImpactHigh:     "Excessive background I/O if cost limits are not properly tuned",
-		},
-	}
-
 	var vars []driver.ServerVariable
 	curatedCount := 0
 	for rows.Next() {
-		var name, setting, category, shortDesc, contextStr string
-		if err := rows.Scan(&name, &setting, &category, &shortDesc, &contextStr); err == nil {
-			isDynamic := (contextStr == "user" || contextStr == "superuser")
-			scope := "Global"
-			if contextStr == "user" {
-				scope = "Both"
-			}
-			isCurated := false
-			severity := "info"
-			recommendation := ""
-			suggestedVal := ""
-			impactLow := ""
-			impactHigh := ""
-
-			if rule, ok := curatedRules[name]; ok {
-				isCurated = true
+		var name, setting, unit, category, shortDesc, contextStr string
+		if err := rows.Scan(&name, &setting, &unit, &category, &shortDesc, &contextStr); err == nil {
+			sv := EvaluatePostgresVariable(name, setting, unit, category, shortDesc, contextStr)
+			if sv.IsCurated {
 				curatedCount++
-				severity = "optimal"
-				category = rule.Category
-				recommendation = rule.Recommendation
-				suggestedVal = rule.SuggestedValue
-				impactLow = rule.ImpactLow
-				impactHigh = rule.ImpactHigh
-
-				if name == "autovacuum" && !strings.EqualFold(setting, "on") {
-					severity = "critical"
-				}
 			}
-
-			vars = append(vars, driver.ServerVariable{
-				Name:             name,
-				Value:            setting,
-				Scope:            scope,
-				IsDynamic:        isDynamic,
-				Category:         category,
-				Description:      shortDesc,
-				ImpactLow:        impactLow,
-				ImpactHigh:       impactHigh,
-				Recommendation:   recommendation,
-				SuggestedValue:   suggestedVal,
-				Severity:         severity,
-				IsCurated:        isCurated,
-				MyCnfSnippet:     fmt.Sprintf("%s = '%s'", name, setting),
-				SetGlobalSnippet: fmt.Sprintf("ALTER SYSTEM SET %s = '%s';", name, setting),
-			})
+			vars = append(vars, sv)
 		}
 	}
 
