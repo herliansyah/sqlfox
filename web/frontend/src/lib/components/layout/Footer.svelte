@@ -95,7 +95,7 @@
       </button>
 
       {#if appState.isTransactionActive}
-        <span class="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-500/50 flex items-center space-x-1 animate-pulse">
+        <span class="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-500/50 flex items-center space-x-1 animate-pulse">
           <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
           <span>TX ACTIVE</span>
         </span>
@@ -131,7 +131,7 @@
       {#if appState.unreadActivityErrors > 0}
         <span
           id="footer-activity-err-badge"
-          class="px-1 py-0.2 rounded-full bg-rose-500 text-white text-[9px] font-bold leading-none"
+          class="px-1 py-0.5 rounded-full bg-rose-500 text-white text-[9px] font-bold leading-none"
         >
           {appState.unreadActivityErrors}
         </span>

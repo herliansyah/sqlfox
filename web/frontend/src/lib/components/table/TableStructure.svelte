@@ -469,9 +469,9 @@
                     {/if}
                     <span>{col.name}</span>
                     {#if isRowNew}
-                      <span class="text-[9px] uppercase px-1 py-0.2 rounded bg-emerald-900 border border-emerald-600 text-emerald-300 ml-1">New</span>
+                      <span class="text-[9px] uppercase px-1 py-0.5 rounded bg-emerald-900 border border-emerald-600 text-emerald-300 ml-1">New</span>
                     {:else if isRowModified}
-                      <span class="text-[9px] uppercase px-1 py-0.2 rounded bg-amber-900 border border-amber-600 text-amber-300 ml-1">Modified</span>
+                      <span class="text-[9px] uppercase px-1 py-0.5 rounded bg-amber-900 border border-amber-600 text-amber-300 ml-1">Modified</span>
                     {/if}
                   </div>
                 </td>
@@ -485,7 +485,7 @@
                 </td>
                 <td class="py-2 px-4">
                   {#if col.is_primary_key}
-                    <span class="px-1.5 py-0.2 rounded bg-amber-950/60 border border-amber-800 text-amber-300 text-[10px] font-bold">
+                    <span class="px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-800 text-amber-300 text-[10px] font-bold">
                       PRI
                     </span>
                   {:else}

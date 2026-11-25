@@ -173,7 +173,7 @@
             <Icon name="file-text" class="w-3.5 h-3.5" />
             <span>Full Changelog</span>
             {#if changelogVersion}
-              <span class="text-[10px] px-1 py-0.2 bg-slate-800 text-slate-400 rounded font-mono">v{changelogVersion}</span>
+              <span class="text-[10px] px-1 py-0.5 bg-slate-800 text-slate-400 rounded font-mono">v{changelogVersion}</span>
             {/if}
           </button>
         </div>

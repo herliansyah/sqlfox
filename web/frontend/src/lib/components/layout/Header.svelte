@@ -638,7 +638,7 @@
                     <span>{item.label}</span>
                   </span>
                   {#if item.badge !== undefined}
-                    <span class="px-1.5 py-0.2 rounded text-[9px] font-bold border {item.badgeClass || 'bg-slate-800 text-slate-300 border-slate-700'}">
+                    <span class="px-1.5 py-0.5 rounded text-[9px] font-bold border {item.badgeClass || 'bg-slate-800 text-slate-300 border-slate-700'}">
                       {item.badge}
                     </span>
                   {/if}
@@ -684,7 +684,7 @@
         {#if appState.dueNotesCount > 0}
           <span
             id="notes-inbox-badge"
-            class="px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-bold text-[9px] leading-tight animate-pulse"
+            class="px-1.5 py-0.5 rounded-full bg-rose-500 text-white font-bold text-[9px] leading-tight animate-pulse"
           >
             {appState.dueNotesCount}
           </span>

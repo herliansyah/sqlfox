@@ -297,7 +297,7 @@
               <span>Target (Database to Modify)</span>
             </div>
             {#if isTargetProduction}
-              <span class="px-1.5 py-0.2 rounded bg-rose-950 text-rose-400 text-[10px] font-bold border border-rose-800">PRODUCTION</span>
+              <span class="px-1.5 py-0.5 rounded bg-rose-950 text-rose-400 text-[10px] font-bold border border-rose-800">PRODUCTION</span>
             {/if}
           </div>
 

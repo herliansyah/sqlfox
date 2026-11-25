@@ -326,7 +326,7 @@
       <span class="font-bold text-slate-100 text-xs truncate">Operational Notes</span>
       <span class="text-slate-500 font-mono text-[10px]">({filteredNotes.length})</span>
       {#if dueCount > 0}
-        <span class="px-1.5 py-0.2 rounded-full bg-rose-600 text-white font-mono text-[9.5px] font-bold">
+        <span class="px-1.5 py-0.5 rounded-full bg-rose-600 text-white font-mono text-[9.5px] font-bold">
           {dueCount} due
         </span>
       {/if}
@@ -429,7 +429,7 @@
           <button
             type="button"
             onclick={() => (activeTagFilter = activeTagFilter === tag ? null : tag)}
-            class="px-1.5 py-0.2 rounded text-[10px] font-mono border transition {activeTagFilter === tag
+            class="px-1.5 py-0.5 rounded text-[10px] font-mono border transition {activeTagFilter === tag
               ? 'bg-amber-950/70 border-amber-600 text-amber-200'
               : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'}"
           >
@@ -557,21 +557,21 @@
                 <button
                   type="button"
                   onclick={() => (activeTagFilter = activeTagFilter === ut ? null : ut)}
-                  class="px-1.5 py-0.2 rounded bg-slate-800 hover:bg-slate-700 text-slate-300"
+                  class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300"
                 >
                   {ut}
                 </button>
               {/each}
               {#if !note.user_tags?.length && note.category}
-                <span class="px-1.5 py-0.2 rounded bg-slate-800 text-slate-400">#{note.category}</span>
+                <span class="px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">#{note.category}</span>
               {/if}
               {#each note.object_tags || [] as ot}
-                <span class="px-1.5 py-0.2 rounded bg-sky-950 text-sky-300 border border-sky-800 font-mono truncate max-w-[170px]" title={ot}>
+                <span class="px-1.5 py-0.5 rounded bg-sky-950 text-sky-300 border border-sky-800 font-mono truncate max-w-[170px]" title={ot}>
                   {ot}
                 </span>
               {/each}
               {#if !note.object_tags?.length && note.table_name}
-                <span class="px-1.5 py-0.2 rounded bg-sky-950 text-sky-300 border border-sky-800 font-mono">
+                <span class="px-1.5 py-0.5 rounded bg-sky-950 text-sky-300 border border-sky-800 font-mono">
                   {note.table_name}
                 </span>
               {/if}
@@ -588,7 +588,7 @@
                     <button
                       type="button"
                       onclick={() => snoozeNote(note, 15)}
-                      class="ml-1 text-[9px] px-1 py-0.2 rounded bg-rose-950 border border-rose-800 text-rose-300 hover:bg-rose-900"
+                      class="ml-1 text-[9px] px-1 py-0.5 rounded bg-rose-950 border border-rose-800 text-rose-300 hover:bg-rose-900"
                       title="Snooze 15 minutes"
                     >
                       +15m

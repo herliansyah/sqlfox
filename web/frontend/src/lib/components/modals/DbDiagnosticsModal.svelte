@@ -431,7 +431,7 @@
                       <Icon name="database" class="w-3.5 h-3.5 text-sky-400 shrink-0" />
                       <span>{db.name}</span>
                       {#if db.is_system}
-                        <span class="px-1 py-0.2 rounded bg-slate-800 border border-slate-700 text-[9px] text-slate-400 font-sans uppercase">sys</span>
+                        <span class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700 text-[9px] text-slate-400 font-sans uppercase">sys</span>
                       {/if}
                     </td>
                     <td class="py-2 px-4 text-right text-slate-300">{(db.table_count || 0).toLocaleString()}</td>
@@ -535,9 +535,9 @@
             {#if selectedTableNames.length > 0}
               <div class="ml-3 flex items-center space-x-1 bg-sky-950/50 border border-sky-800/60 rounded px-2 py-0.5">
                 <span class="text-sky-300 font-semibold">{selectedTableNames.length} selected:</span>
-                <button onclick={() => runMaintenance(selectedTableNames, 'OPTIMIZE')} class="px-1.5 py-0.2 rounded bg-sky-600 text-white text-[10px] font-bold">Optimize</button>
-                <button onclick={() => runMaintenance(selectedTableNames, 'ANALYZE')} class="px-1.5 py-0.2 rounded bg-emerald-600 text-white text-[10px] font-bold">Analyze</button>
-                <button onclick={() => runMaintenance(selectedTableNames, 'CHECK')} class="px-1.5 py-0.2 rounded bg-slate-700 text-white text-[10px] font-bold">Check</button>
+                <button onclick={() => runMaintenance(selectedTableNames, 'OPTIMIZE')} class="px-1.5 py-0.5 rounded bg-sky-600 text-white text-[10px] font-bold">Optimize</button>
+                <button onclick={() => runMaintenance(selectedTableNames, 'ANALYZE')} class="px-1.5 py-0.5 rounded bg-emerald-600 text-white text-[10px] font-bold">Analyze</button>
+                <button onclick={() => runMaintenance(selectedTableNames, 'CHECK')} class="px-1.5 py-0.5 rounded bg-slate-700 text-white text-[10px] font-bold">Check</button>
               </div>
             {/if}
           </div>
@@ -615,13 +615,13 @@
                     <td class="py-1.5 px-3">
                       <div class="flex flex-wrap items-center gap-1">
                         {#if !t.has_primary_key}
-                          <span class="px-1 py-0.2 rounded bg-rose-950/60 border border-rose-800 text-rose-300 text-[9px] font-sans font-bold uppercase">no pk</span>
+                          <span class="px-1 py-0.5 rounded bg-rose-950/60 border border-rose-800 text-rose-300 text-[9px] font-sans font-bold uppercase">no pk</span>
                         {/if}
                         {#if (t.engine || '').toLowerCase() === 'myisam'}
-                          <span class="px-1 py-0.2 rounded bg-amber-950/60 border border-amber-800 text-amber-300 text-[9px] font-sans font-bold uppercase">myisam</span>
+                          <span class="px-1 py-0.5 rounded bg-amber-950/60 border border-amber-800 text-amber-300 text-[9px] font-sans font-bold uppercase">myisam</span>
                         {/if}
                         {#if isLegacyCharset(t.collation)}
-                          <span class="px-1 py-0.2 rounded bg-amber-950/60 border border-amber-800 text-amber-300 text-[9px] font-sans font-bold uppercase" title={t.collation}>legacy charset</span>
+                          <span class="px-1 py-0.5 rounded bg-amber-950/60 border border-amber-800 text-amber-300 text-[9px] font-sans font-bold uppercase" title={t.collation}>legacy charset</span>
                         {/if}
                       </div>
                     </td>

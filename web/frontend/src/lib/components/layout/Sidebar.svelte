@@ -335,7 +335,7 @@
         </div>
         <div class="flex items-center space-x-1.5 shrink-0 ml-1">
           {#if appState.availableDatabases.length > 0}
-            <span class="text-[9px] font-mono text-slate-400 bg-slate-900/90 px-1.5 py-0.2 rounded border border-slate-800">
+            <span class="text-[9px] font-mono text-slate-400 bg-slate-900/90 px-1.5 py-0.5 rounded border border-slate-800">
               {appState.availableDatabases.length}
             </span>
           {/if}
@@ -595,7 +595,7 @@
                       </span>
                     {/if}
                     {#if appState.databaseTableCounts[db] !== undefined}
-                      <span class="text-[9px] text-slate-400 font-mono bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800">
+                      <span class="text-[9px] text-slate-400 font-mono bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">
                         {appState.databaseTableCounts[db]} tbls
                       </span>
                     {/if}
@@ -757,7 +757,7 @@
                   <Icon name="table" class="w-3.5 h-3.5 text-sky-400 shrink-0" />
                   <span class="truncate">Tables</span>
                 </span>
-                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
+                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
                   {#if appState.schemaFilter && totalTables > 0}
                     {appState.filteredTables.length}/{totalTables}
                   {:else}
@@ -811,7 +811,7 @@
                           <Icon name="folder" class="w-3.5 h-3.5 text-sky-400/80 shrink-0" />
                           <span class="text-sky-300 font-mono truncate">{grp.prefix}_*</span>
                         </span>
-                        <span class="text-[9.5px] font-mono text-slate-400 bg-slate-900/90 px-1.5 py-0.2 rounded border border-slate-800 shrink-0 ml-1">
+                        <span class="text-[9.5px] font-mono text-slate-400 bg-slate-900/90 px-1.5 py-0.5 rounded border border-slate-800 shrink-0 ml-1">
                           {grp.tables.length}
                         </span>
                       </button>
@@ -844,7 +844,7 @@
 
                                 {#if (table.row_count !== undefined && table.row_count !== null) || (table.rows_count !== undefined && table.rows_count !== null)}
                                   <span
-                                    class="text-[9.5px] text-slate-400 font-mono bg-slate-900/80 group-hover:bg-slate-800 px-1.5 py-0.2 rounded border border-slate-800/80 ml-1.5 shrink-0 tabular-nums transition-opacity {tableContextMenu?.open && tableContextMenu.tableName === table.name ? 'opacity-0' : 'group-hover:opacity-0'}"
+                                    class="text-[9.5px] text-slate-400 font-mono bg-slate-900/80 group-hover:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-800/80 ml-1.5 shrink-0 tabular-nums transition-opacity {tableContextMenu?.open && tableContextMenu.tableName === table.name ? 'opacity-0' : 'group-hover:opacity-0'}"
                                     title="{table.row_count_exact ? 'Exact rows' : 'Estimated rows'}: {(table.row_count ?? table.rows_count ?? 0).toLocaleString()}"
                                   >
                                     {table.row_count_exact ? '' : '~'}{formatCount(table.row_count ?? table.rows_count)}
@@ -856,7 +856,7 @@
                               <div
                                 class="absolute right-1 flex items-center space-x-0.5 rounded transition-all {tableContextMenu?.open && tableContextMenu.tableName === table.name
                                   ? 'opacity-100 pointer-events-auto bg-[#0f172a]/95 border border-slate-700/80 shadow-sm px-0.5 py-0.5'
-                                  : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/90 hover:bg-[#0f172a] border border-slate-700/60 shadow-sm px-0.5 py-0.5 backdrop-blur-xs'}"
+                                  : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/90 hover:bg-[#0f172a] border border-slate-700/60 shadow-sm px-0.5 py-0.5 backdrop-blur-sm'}"
                               >
                                 <button
                                   type="button"
@@ -908,7 +908,7 @@
 
                         {#if (table.row_count !== undefined && table.row_count !== null) || (table.rows_count !== undefined && table.rows_count !== null)}
                           <span
-                            class="text-[9.5px] text-slate-400 font-mono bg-slate-900/80 group-hover:bg-slate-800 px-1.5 py-0.2 rounded border border-slate-800/80 ml-1.5 shrink-0 tabular-nums transition-opacity {tableContextMenu?.open && tableContextMenu.tableName === table.name ? 'opacity-0' : 'group-hover:opacity-0'}"
+                            class="text-[9.5px] text-slate-400 font-mono bg-slate-900/80 group-hover:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-800/80 ml-1.5 shrink-0 tabular-nums transition-opacity {tableContextMenu?.open && tableContextMenu.tableName === table.name ? 'opacity-0' : 'group-hover:opacity-0'}"
                             title="{table.row_count_exact ? 'Exact rows' : 'Estimated rows'}: {(table.row_count ?? table.rows_count ?? 0).toLocaleString()}"
                           >
                             {table.row_count_exact ? '' : '~'}{formatCount(table.row_count ?? table.rows_count)}
@@ -920,7 +920,7 @@
                       <div
                         class="absolute right-1 flex items-center space-x-0.5 rounded transition-all {tableContextMenu?.open && tableContextMenu.tableName === table.name
                           ? 'opacity-100 pointer-events-auto bg-[#0f172a]/95 border border-slate-700/80 shadow-sm px-0.5 py-0.5'
-                          : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/90 hover:bg-[#0f172a] border border-slate-700/60 shadow-sm px-0.5 py-0.5 backdrop-blur-xs'}"
+                          : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/90 hover:bg-[#0f172a] border border-slate-700/60 shadow-sm px-0.5 py-0.5 backdrop-blur-sm'}"
                       >
                         <button
                           type="button"
@@ -969,7 +969,7 @@
 
                         {#if (table.row_count !== undefined && table.row_count !== null) || (table.rows_count !== undefined && table.rows_count !== null)}
                           <span
-                            class="text-[9.5px] text-slate-400 font-mono bg-slate-900/80 group-hover:bg-slate-800 px-1.5 py-0.2 rounded border border-slate-800/80 ml-1.5 shrink-0 tabular-nums transition-opacity {tableContextMenu?.open && tableContextMenu.tableName === table.name ? 'opacity-0' : 'group-hover:opacity-0'}"
+                            class="text-[9.5px] text-slate-400 font-mono bg-slate-900/80 group-hover:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-800/80 ml-1.5 shrink-0 tabular-nums transition-opacity {tableContextMenu?.open && tableContextMenu.tableName === table.name ? 'opacity-0' : 'group-hover:opacity-0'}"
                             title="{table.row_count_exact ? 'Exact rows' : 'Estimated rows'}: {(table.row_count ?? table.rows_count ?? 0).toLocaleString()}"
                           >
                             {table.row_count_exact ? '' : '~'}{formatCount(table.row_count ?? table.rows_count)}
@@ -981,7 +981,7 @@
                       <div
                         class="absolute right-1 flex items-center space-x-0.5 rounded transition-all {tableContextMenu?.open && tableContextMenu.tableName === table.name
                           ? 'opacity-100 pointer-events-auto bg-[#0f172a]/95 border border-slate-700/80 shadow-sm px-0.5 py-0.5'
-                          : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/90 hover:bg-[#0f172a] border border-slate-700/60 shadow-sm px-0.5 py-0.5 backdrop-blur-xs'}"
+                          : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/90 hover:bg-[#0f172a] border border-slate-700/60 shadow-sm px-0.5 py-0.5 backdrop-blur-sm'}"
                       >
                         <button
                           type="button"
@@ -1025,7 +1025,7 @@
                   <Icon name="eye" class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                   <span class="truncate">Views</span>
                 </span>
-                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
+                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
                   {appState.filteredViews.length}
                 </span>
               </button>
@@ -1062,7 +1062,7 @@
 
                     <!-- Quick action buttons -->
                     <div
-                      class="absolute right-1 flex items-center space-x-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/95 border border-slate-700/60 shadow-sm px-0.5 py-0.5 rounded transition-opacity backdrop-blur-xs"
+                      class="absolute right-1 flex items-center space-x-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/95 border border-slate-700/60 shadow-sm px-0.5 py-0.5 rounded transition-opacity backdrop-blur-sm"
                     >
                       <button
                         type="button"
@@ -1121,7 +1121,7 @@
                   <Icon name="terminal" class="w-3.5 h-3.5 text-amber-400 shrink-0" />
                   <span class="truncate">Procedures</span>
                 </span>
-                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
+                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
                   {appState.filteredProcedures.length}
                 </span>
               </button>
@@ -1152,7 +1152,7 @@
                       </div>
                     </button>
                     <div
-                      class="absolute right-1 flex items-center space-x-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/95 border border-slate-700/60 shadow-sm px-0.5 py-0.5 rounded transition-opacity backdrop-blur-xs"
+                      class="absolute right-1 flex items-center space-x-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/95 border border-slate-700/60 shadow-sm px-0.5 py-0.5 rounded transition-opacity backdrop-blur-sm"
                     >
                       <button
                         type="button"
@@ -1211,7 +1211,7 @@
                   <Icon name="code" class="w-3.5 h-3.5 text-cyan-400 shrink-0" />
                   <span class="truncate">Functions</span>
                 </span>
-                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
+                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
                   {appState.filteredFunctions.length}
                 </span>
               </button>
@@ -1242,7 +1242,7 @@
                       </div>
                     </button>
                     <div
-                      class="absolute right-1 flex items-center space-x-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/95 border border-slate-700/60 shadow-sm px-0.5 py-0.5 rounded transition-opacity backdrop-blur-xs"
+                      class="absolute right-1 flex items-center space-x-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/95 border border-slate-700/60 shadow-sm px-0.5 py-0.5 rounded transition-opacity backdrop-blur-sm"
                     >
                       <button
                         type="button"
@@ -1301,7 +1301,7 @@
                   <Icon name="zap" class="w-3.5 h-3.5 text-purple-400 shrink-0" />
                   <span class="truncate">Triggers</span>
                 </span>
-                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
+                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
                   {appState.filteredTriggers.length}
                 </span>
               </button>
@@ -1337,7 +1337,7 @@
                       {/if}
                     </button>
                     <div
-                      class="absolute right-1 flex items-center space-x-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/95 border border-slate-700/60 shadow-sm px-0.5 py-0.5 rounded transition-opacity backdrop-blur-xs"
+                      class="absolute right-1 flex items-center space-x-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/95 border border-slate-700/60 shadow-sm px-0.5 py-0.5 rounded transition-opacity backdrop-blur-sm"
                     >
                       <button
                         type="button"
@@ -1388,7 +1388,7 @@
                   <Icon name="clock" class="w-3.5 h-3.5 text-pink-400 shrink-0" />
                   <span class="truncate">Events</span>
                 </span>
-                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
+                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
                   {appState.filteredEvents.length}
                 </span>
               </button>
@@ -1430,7 +1430,7 @@
                       {/if}
                     </button>
                     <div
-                      class="absolute right-1 flex items-center space-x-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/95 border border-slate-700/60 shadow-sm px-0.5 py-0.5 rounded transition-opacity backdrop-blur-xs"
+                      class="absolute right-1 flex items-center space-x-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/95 border border-slate-700/60 shadow-sm px-0.5 py-0.5 rounded transition-opacity backdrop-blur-sm"
                     >
                       <button
                         type="button"

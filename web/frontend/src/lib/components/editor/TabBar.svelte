@@ -265,7 +265,7 @@
         class="group relative flex items-center h-8 px-3 rounded-t border-t border-x text-xs cursor-pointer transition-all max-w-[200px] min-w-[100px] shrink-0 {
           isActive
             ? 'bg-[#090d16] border-t border-x border-slate-800 text-sky-400 font-semibold shadow-sm'
-            : 'bg-slate-900/60 border-t border-x border-transparent text-slate-400 hover:bg-slate-850 hover:text-slate-200'
+            : 'bg-slate-900/60 border-t border-x border-transparent text-slate-400 hover:bg-slate-800/80 hover:text-slate-200'
         }"
         onclick={() => (appState.activeTabId = tab.id)}
         oncontextmenu={(e) => handleTabContextMenu(e, tab.id)}
@@ -547,7 +547,7 @@
               {/if}
 
               {#if tab.database}
-                <span class="shrink-0 px-1 py-0.2 rounded text-[9px] font-mono bg-slate-800 text-amber-400/80 border border-slate-700/60" title="Target Database">
+                <span class="shrink-0 px-1 py-0.5 rounded text-[9px] font-mono bg-slate-800 text-amber-400/80 border border-slate-700/60" title="Target Database">
                   {tab.database}
                 </span>
               {/if}

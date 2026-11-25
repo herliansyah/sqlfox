@@ -1237,7 +1237,7 @@
               Result {mIdx + 1} ({mRes.error ? 'err' : isCmd ? `${countVal} affected` : `${countVal} rows`})
             </span>
             {#if mRes.truncated || mRes.capped_at}
-              <span class="px-1 py-0.2 rounded bg-amber-950/70 border border-amber-800/70 text-[9px] text-amber-300" title="Capped at {mRes.capped_at || '5k'} rows">
+              <span class="px-1 py-0.5 rounded bg-amber-950/70 border border-amber-800/70 text-[9px] text-amber-300" title="Capped at {mRes.capped_at || '5k'} rows">
                 Capped
               </span>
             {/if}
@@ -1411,7 +1411,7 @@
           </span>
           <button
             onclick={() => appState.commitStagedEdits()}
-            class="ml-1 px-1.5 py-0.2 rounded bg-amber-500 text-slate-950 font-bold hover:bg-amber-400 text-[10px] transition"
+            class="ml-1 px-1.5 py-0.5 rounded bg-amber-500 text-slate-950 font-bold hover:bg-amber-400 text-[10px] transition"
           >
             Save All
           </button>
@@ -1763,7 +1763,7 @@
                   {/if}
                   <span class="font-mono text-slate-100">{colName}</span>
                   {#if colType}
-                    <span class="text-[9px] font-mono text-slate-400 bg-slate-800 px-1 py-0.2 rounded border border-slate-700 uppercase">
+                    <span class="text-[9px] font-mono text-slate-400 bg-slate-800 px-1 py-0.5 rounded border border-slate-700 uppercase">
                       {colType}
                     </span>
                   {/if}
@@ -2104,19 +2104,19 @@
                           class="absolute left-0 top-full mt-0.5 z-40 flex items-center space-x-1 bg-[#0b0f19] border border-slate-700 rounded px-1.5 py-0.5 shadow-xl text-[9.5px] font-mono"
                         >
                           {#if nullable}
-                            <button type="button" onclick={() => applyEditPreset('NULL', rowItem.origIdx, cIdx)} class="px-1 py-0.2 rounded bg-rose-950/70 hover:bg-rose-900 text-rose-300 border border-rose-800">NULL</button>
+                            <button type="button" onclick={() => applyEditPreset('NULL', rowItem.origIdx, cIdx)} class="px-1 py-0.5 rounded bg-rose-950/70 hover:bg-rose-900 text-rose-300 border border-rose-800">NULL</button>
                           {/if}
                           {#if kind.isString}
-                            <button type="button" onclick={() => applyEditPreset('EMPTY', rowItem.origIdx, cIdx)} class="px-1 py-0.2 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700">''</button>
+                            <button type="button" onclick={() => applyEditPreset('EMPTY', rowItem.origIdx, cIdx)} class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700">''</button>
                           {/if}
                           {#if kind.isDateTime}
-                            <button type="button" onclick={() => applyEditPreset('NOW', rowItem.origIdx, cIdx)} class="px-1 py-0.2 rounded bg-sky-950/70 hover:bg-sky-900 text-sky-300 border border-sky-800">NOW</button>
+                            <button type="button" onclick={() => applyEditPreset('NOW', rowItem.origIdx, cIdx)} class="px-1 py-0.5 rounded bg-sky-950/70 hover:bg-sky-900 text-sky-300 border border-sky-800">NOW</button>
                           {/if}
                           {#if kind.isDate || kind.isDateTime}
-                            <button type="button" onclick={() => applyEditPreset('DATE', rowItem.origIdx, cIdx)} class="px-1 py-0.2 rounded bg-sky-950/70 hover:bg-sky-900 text-sky-300 border border-sky-800">DATE</button>
+                            <button type="button" onclick={() => applyEditPreset('DATE', rowItem.origIdx, cIdx)} class="px-1 py-0.5 rounded bg-sky-950/70 hover:bg-sky-900 text-sky-300 border border-sky-800">DATE</button>
                           {/if}
                           {#if showUuidPreset}
-                            <button type="button" onclick={() => applyEditPreset('UUID', rowItem.origIdx, cIdx)} class="px-1 py-0.2 rounded bg-purple-950/70 hover:bg-purple-900 text-purple-300 border border-purple-800">UUID</button>
+                            <button type="button" onclick={() => applyEditPreset('UUID', rowItem.origIdx, cIdx)} class="px-1 py-0.5 rounded bg-purple-950/70 hover:bg-purple-900 text-purple-300 border border-purple-800">UUID</button>
                           {/if}
                         </div>
                       {/if}

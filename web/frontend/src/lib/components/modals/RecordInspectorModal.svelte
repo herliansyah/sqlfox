@@ -532,7 +532,7 @@
                   {/if}
                   {#if fk}
                     <span
-                      class="text-[9px] font-mono px-1 py-0.2 rounded bg-sky-950/60 border border-sky-800/60 text-sky-400"
+                      class="text-[9px] font-mono px-1 py-0.5 rounded bg-sky-950/60 border border-sky-800/60 text-sky-400"
                       title="Foreign Key → {fk.ref_table || fk.referenced_table}.{fk.ref_col || fk.referenced_column}"
                     >
                       FK

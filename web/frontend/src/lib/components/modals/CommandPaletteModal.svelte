@@ -559,7 +559,7 @@
                     {item.shortcut}
                   </kbd>
                 {/if}
-                <span class="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-slate-900 border border-slate-800 text-slate-400">
+                <span class="text-[9px] uppercase font-mono px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400">
                   {item.category}
                 </span>
               </div>

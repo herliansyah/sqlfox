@@ -167,7 +167,7 @@
                   </td>
                   <td class="py-2 px-3 text-center">
                     {#if v.is_dynamic}
-                      <span class="px-1.5 py-0.2 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] font-bold">YES</span>
+                      <span class="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] font-bold">YES</span>
                     {:else}
                       <span class="text-slate-600 text-[10px]">RESTART</span>
                     {/if}

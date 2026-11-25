@@ -275,7 +275,7 @@
                   <span class="font-bold text-slate-100 font-sans">
                     Correlated Queries Forensics at {formatTickTime(activeOrSelectedTick)}
                   </span>
-                  <span class="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-sky-950 text-sky-300 border border-sky-800">
+                  <span class="px-1.5 py-0.5 rounded-full text-[10px] font-mono bg-sky-950 text-sky-300 border border-sky-800">
                     {queries.length} active queries
                   </span>
                 </div>

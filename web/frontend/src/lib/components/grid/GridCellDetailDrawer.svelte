@@ -50,7 +50,7 @@
         Cell: <span class="text-sky-400 font-mono">{colName}</span>
       </span>
       {#if colType}
-        <span class="px-1.5 py-0.2 rounded bg-slate-900 border border-slate-800 font-mono text-[9.5px] uppercase text-slate-400">
+        <span class="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 font-mono text-[9.5px] uppercase text-slate-400">
           {colType}
         </span>
       {/if}

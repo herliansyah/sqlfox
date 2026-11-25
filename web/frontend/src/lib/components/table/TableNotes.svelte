@@ -268,7 +268,7 @@
                   <div>
                     <h4 class="font-bold text-slate-100 text-sm flex items-center space-x-2">
                       <span>{note.title}</span>
-                      <span class="px-2 py-0.2 rounded bg-amber-950/80 border border-amber-700/60 text-amber-300 text-[10px] uppercase font-bold">
+                      <span class="px-2 py-0.5 rounded bg-amber-950/80 border border-amber-700/60 text-amber-300 text-[10px] uppercase font-bold">
                         {note.category || 'Runbook'}
                       </span>
                     </h4>
@@ -335,7 +335,7 @@
                     <h4 class="font-semibold text-slate-200 text-xs flex items-center space-x-2">
                       <span class={note.is_resolved ? 'line-through text-slate-500' : ''}>{note.title}</span>
                       {#if note.category}
-                        <span class="px-1.5 py-0.2 rounded bg-slate-900 border border-slate-800 text-slate-400 text-[9px] uppercase font-mono">
+                        <span class="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400 text-[9px] uppercase font-mono">
                           {note.category}
                         </span>
                       {/if}
