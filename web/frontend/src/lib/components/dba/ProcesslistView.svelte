@@ -1,6 +1,7 @@
 <script lang="ts">
   import { SvelteSet } from 'svelte/reactivity';
   import { copyText } from '../../utils/clipboard';
+  import { isSystemThread, commandTone } from './processlistHelpers';
   import { formatSQL } from '../../utils/sqlFormatter';
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
@@ -159,12 +160,6 @@
       sortKey = key;
       sortDir = key === 'time' || key === 'id' ? 'desc' : 'asc';
     }
-  }
-
-  function isSystemThread(t: ProcesslistThread): boolean {
-    const u = (t.user || '').toLowerCase();
-    const cmd = (t.command || '').toLowerCase();
-    return u === 'system user' || u === 'event_scheduler' || cmd === 'binlog dump' || cmd === 'binlog dump gtid';
   }
 
   function isProductionConn(): boolean {
@@ -904,12 +899,6 @@
     sky: 'bg-sky-500/10 text-sky-300 border-sky-600/40',
     slate: 'bg-slate-800/60 text-slate-400 border-slate-700/60',
   };
-
-  function commandTone(command: string) {
-    const c = (command || '').toLowerCase();
-    if (!c || c === 'sleep' || c === 'daemon') return stateTone.slate;
-    return stateTone.sky;
-  }
 
   let allFilteredSelected = $derived.by(() => {
     const selectable = filteredThreads.filter((t) => t.id !== currentThreadId && !isSystemThread(t));

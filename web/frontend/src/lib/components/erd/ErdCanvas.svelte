@@ -1,6 +1,6 @@
 <script lang="ts">
   import { copyText } from '../../utils/clipboard';
-  import { quoteSqlIdentifier } from '../../utils/sqlStatements';
+  import { buildErdSvg, buildLeftJoinSQL, buildMermaidErd } from './erdExport';
   import { api } from '../../api/client';
   import { appState } from '../../stores/appState.svelte';
   import type { TableMetadata } from '../../../types';
@@ -627,48 +627,10 @@
     const t = tables.find((x) => x.name === tableName);
     if (!t) return;
     const driver = appState.activeConnection?.driver || 'mysql';
-    const q = (id: string) => quoteSqlIdentifier(id, driver);
-
-    const usedAliases = new Set<string>(['t0']);
-    const joins: string[] = [];
-    const selectCols: string[] = [`t0.*`];
-    let aliasIdx = 1;
-
-    // Outgoing FKs
-    for (const fk of t.foreign_keys || []) {
-      const col = fk.column || fk.column_name || '';
-      const alias = `j${aliasIdx++}`;
-      usedAliases.add(alias);
-      joins.push(
-        `LEFT JOIN ${q(fk.referenced_table)} AS ${alias} ON t0.${q(col)} = ${alias}.${q(fk.referenced_column)}`
-      );
-    }
-
-    // Incoming FKs referencing this table
-    for (const other of tables) {
-      if (other.name === t.name) continue;
-      for (const fk of other.foreign_keys || []) {
-        if ((fk.referenced_table || '').toLowerCase() === t.name.toLowerCase()) {
-          const col = fk.column || fk.column_name || '';
-          const alias = `j${aliasIdx++}`;
-          usedAliases.add(alias);
-          joins.push(
-            `LEFT JOIN ${q(other.name)} AS ${alias} ON t0.${q(fk.referenced_column)} = ${alias}.${q(col)}`
-          );
-        }
-      }
-    }
-
-    const sql = [
-      `SELECT ${selectCols.join(', ')}`,
-      `FROM ${q(t.name)} AS t0`,
-      ...joins,
-      `LIMIT 100;`,
-    ].join('\n');
-
+    const { sql, joinCount } = buildLeftJoinSQL(t, tables, driver);
     appState.addTab(`join_${t.name}.sql`, sql);
     appState.showToast(
-      joins.length > 0 ? `Generated LEFT JOIN query (${joins.length} joins)` : `Generated SELECT template for ${t.name}`,
+      joinCount > 0 ? `Generated LEFT JOIN query (${joinCount} joins)` : `Generated SELECT template for ${t.name}`,
       'success'
     );
   }
@@ -707,98 +669,22 @@
     }
   }
 
-  function escapeXml(unsafe: string): string {
-    return (unsafe || '').replace(/[<>&'"]/g, (c) => {
-      switch (c) {
-        case '<': return '&lt;';
-        case '>': return '&gt;';
-        case '&': return '&amp;';
-        case '\'': return '&apos;';
-        case '"': return '&quot;';
-        default: return c;
-      }
-    });
-  }
-
-  // Export functions
   function exportSVG() {
     if (tables.length === 0) {
       appState.showToast('No tables to export', 'warning');
       return;
     }
-
-    const CARD_W = CARD_WIDTH;
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-
-    tables.forEach((t) => {
-      const p = positions[t.name] || { x: 0, y: 0 };
-      const h = getCardHeight(t);
-      minX = Math.min(minX, p.x);
-      minY = Math.min(minY, p.y);
-      maxX = Math.max(maxX, p.x + CARD_W);
-      maxY = Math.max(maxY, p.y + h);
+    const fullSvg = buildErdSvg({
+      tables,
+      positions,
+      expandedTables,
+      lines: lines || [],
+      cardWidth: CARD_WIDTH,
+      headerHeight: HEADER_HEIGHT,
+      rowHeight: ROW_HEIGHT,
+      maxColPreview: MAX_COL_PREVIEW,
+      getCardHeight,
     });
-
-    const pad = 40;
-    const w = Math.max(800, maxX - minX + pad * 2);
-    const h = Math.max(600, maxY - minY + pad * 2);
-
-    let cardsSvg = '';
-    tables.forEach((t) => {
-      const p = positions[t.name] || { x: 0, y: 0 };
-      const x = p.x - minX + pad;
-      const y = p.y - minY + pad;
-      const allCols = t.columns || [];
-      const limit = expandedTables[t.name] ? allCols.length : MAX_COL_PREVIEW;
-      const cols = allCols.slice(0, limit);
-      const hasMore = allCols.length > limit;
-      const cardH = HEADER_HEIGHT + cols.length * ROW_HEIGHT + (hasMore ? 24 : 8);
-
-      cardsSvg += `<g transform="translate(${x},${y})">
-        <rect width="${CARD_W}" height="${cardH}" rx="8" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-        <path d="M0,8 a8,8 0 0 1 8,-8 h${CARD_W - 16} a8,8 0 0 1 8,8 v30 h-${CARD_W} z" fill="#1e293b"/>
-        <text x="12" y="23" fill="#38bdf8" font-family="'JetBrains Mono',monospace" font-size="12" font-weight="bold">${escapeXml(t.name)}</text>
-        <text x="${CARD_W - 12}" y="23" text-anchor="end" fill="#64748b" font-family="'JetBrains Mono',monospace" font-size="10">${allCols.length}</text>`;
-
-      cols.forEach((c, idx) => {
-        const cy = HEADER_HEIGHT + idx * ROW_HEIGHT;
-        const isPK = c.is_primary_key;
-        const isFK = (t.foreign_keys || []).some((fk) => (fk.column || fk.column_name) === c.name);
-        const colColor = isPK ? '#34d399' : isFK ? '#fbbf24' : '#cbd5e1';
-        const prefix = isPK ? '[PK] ' : isFK ? '[FK] ' : '';
-        const typeStr = escapeXml((c.type || '').split('(')[0].toUpperCase());
-
-        cardsSvg += `
-          <line x1="0" y1="${cy}" x2="${CARD_W}" y2="${cy}" stroke="#1e293b" stroke-width="1"/>
-          <text x="12" y="${cy + 16}" fill="${colColor}" font-family="'JetBrains Mono',monospace" font-size="10">${prefix}${escapeXml(c.name)}</text>
-          <text x="${CARD_W - 12}" y="${cy + 16}" text-anchor="end" fill="#64748b" font-family="'JetBrains Mono',monospace" font-size="9">${typeStr}</text>`;
-      });
-
-      if (hasMore) {
-        const fy = HEADER_HEIGHT + cols.length * ROW_HEIGHT + 15;
-        cardsSvg += `<text x="${CARD_W / 2}" y="${fy}" text-anchor="middle" fill="#38bdf8" font-family="'JetBrains Mono',monospace" font-size="9">+${allCols.length - cols.length} more columns</text>`;
-      }
-
-      cardsSvg += `</g>`;
-    });
-
-    const linesSvg = (lines || [])
-      .map((line) => `<path d="${line.path}" stroke="#f59e0b" stroke-width="2" fill="none" opacity="0.85" marker-end="url(#erd-arrow-export)"/>`)
-      .join('\n');
-
-    const fullSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
-      <rect width="${w}" height="${h}" fill="#020617"/>
-      <defs>
-        <marker id="erd-arrow-export" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-          <path d="M0,0 L0,6 L8,3 z" fill="#f59e0b" opacity="0.85"/>
-        </marker>
-      </defs>
-      <g transform="translate(${-minX + pad},${-minY + pad})">
-        ${linesSvg}
-      </g>
-      ${cardsSvg}
-    </svg>`;
-
     const blob = new Blob([fullSvg], { type: 'image/svg+xml;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -811,33 +697,8 @@
     appState.showToast('Exported complete ERD diagram as SVG', 'success');
   }
 
-  function safeMermaidId(name: string): string {
-    const s = String(name || 'entity').replace(/[^a-zA-Z0-9_]/g, '_');
-    return /^[a-zA-Z_]/.test(s) ? s : `t_${s}`;
-  }
-
   function exportMermaid() {
-    let out = 'erDiagram\n';
-    tables.forEach((src) => {
-      (src.foreign_keys || []).forEach((fk) => {
-        const fkCol = fk.column || fk.column_name || '';
-        const cleanLabel = `${fkCol}_to_${fk.referenced_column}`.replace(/["<>#]/g, '');
-        out += `  ${safeMermaidId(src.name)} }o--|| ${safeMermaidId(fk.referenced_table)} : "${cleanLabel}"\n`;
-      });
-    });
-    tables.forEach((t) => {
-      const fkSet = new Set((t.foreign_keys || []).map((fk) => (fk.column || fk.column_name || '').toLowerCase()));
-      out += `  ${safeMermaidId(t.name)} {\n`;
-      (t.columns || []).forEach((c) => {
-        const typeClean = (c.type || 'varchar').replace(/[^a-zA-Z0-9_]/g, '_');
-        const isPK = Boolean(c.is_primary_key);
-        const isFK = fkSet.has((c.name || '').toLowerCase());
-        const keys = isPK && isFK ? 'PK,FK' : isPK ? 'PK' : isFK ? 'FK' : '';
-        out += `    ${typeClean} ${safeMermaidId(c.name)}${keys ? ' ' + keys : ''}\n`;
-      });
-      out += '  }\n';
-    });
-    copyText(out);
+    copyText(buildMermaidErd(tables));
     appState.showToast('Copied Mermaid ERD syntax to clipboard!', 'success');
   }
 

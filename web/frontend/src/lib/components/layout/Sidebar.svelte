@@ -7,6 +7,7 @@
   import Icon from '../common/Icon.svelte';
   import { onDestroy, tick } from 'svelte';
   import { viewportFit } from '../../actions/viewportFit';
+  import { formatObjectCount } from './sidebarHelpers';
 
   function loadSidebarWidth(): number {
     try {
@@ -163,10 +164,7 @@
   }
 
   function formatCount(cnt?: number): string {
-    if (cnt === undefined || cnt === null) return '';
-    if (cnt >= 1_000_000) return `${(cnt / 1_000_000).toFixed(1)}M`;
-    if (cnt >= 1_000) return `${(cnt / 1_000).toFixed(1)}k`;
-    return cnt.toLocaleString();
+    return formatObjectCount(cnt);
   }
 
   let filteredDbList = $derived.by(() => {

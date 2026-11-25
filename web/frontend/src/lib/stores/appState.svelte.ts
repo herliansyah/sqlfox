@@ -30,6 +30,14 @@ import {
 
 import { compileFilterPills } from '../utils/filterCompiler';
 export { compileFilterPills };
+import { extractSqlParams, formatParamValue, bindSqlParamsInText } from './sqlParamBinding';
+import {
+  deleteConnectionAction,
+  refreshDatabasesAction,
+  pingActiveSessionAction,
+  toggleReadOnlyModeAction,
+  type ConnectionActionsContext,
+} from './connectionActions';
 import { resolveTabsStorageKey, persistTabsToStorage, loadTabsFromStorage } from './tabStorage';
 import { parseActivityLogPayload, playAudioReminderChime } from './activityStream';
 import {
@@ -917,25 +925,44 @@ export class AppState {
     return draft;
   }
 
+  private connectionActionsContext(): ConnectionActionsContext {
+    const self = this;
+    return {
+      get activeConnection() { return self.activeConnection; },
+      set activeConnection(v) { self.activeConnection = v; },
+      get activeSessionId() { return self.activeSessionId; },
+      set activeSessionId(v) { self.activeSessionId = v; },
+      get currentDatabase() { return self.currentDatabase; },
+      set currentDatabase(v) { self.currentDatabase = v; },
+      get availableDatabases() { return self.availableDatabases; },
+      set availableDatabases(v) { self.availableDatabases = v; },
+      get isLoadingCatalog() { return self.isLoadingCatalog; },
+      set isLoadingCatalog(v) { self.isLoadingCatalog = v; },
+      get isPingingServer() { return self.isPingingServer; },
+      set isPingingServer(v) { self.isPingingServer = v; },
+      get serverLatency() { return self.serverLatency; },
+      set serverLatency(v) { self.serverLatency = v; },
+      get serverMemoryMb() { return self.serverMemoryMb; },
+      set serverMemoryMb(v) { self.serverMemoryMb = v; },
+      get serverInfo() { return self.serverInfo; },
+      set serverInfo(v) { self.serverInfo = v; },
+      get isReadOnly() { return self.isReadOnly; },
+      set isReadOnly(v) { self.isReadOnly = v; },
+      get isProduction() { return self.isProduction; },
+      setCatalog: (c) => self.setCatalog(c),
+      clearCatalogCache: () => {
+        self.catalog = null;
+        self.catalogs = {};
+        self.catalogRequests.clear();
+      },
+      loadConnections: () => self.loadConnections(),
+      showToast: (msg, type) => self.showToast(msg, type),
+      showNativeConfirm: (msg, title) => self.showNativeConfirm(msg, title),
+    };
+  }
+
   async deleteConnection(id: string) {
-    try {
-      await api.deleteConnection(id);
-      this.showToast('Connection deleted', 'info');
-      try {
-        localStorage.removeItem(`sqlfox_tabs_${id}`);
-      } catch { /* ignore */ }
-      if (this.activeConnection?.id === id) {
-        this.activeConnection = null;
-        this.activeSessionId = null;
-        this.catalog = null;
-        this.catalogs = {};
-        this.catalogRequests.clear();
-        if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem('sqlfox_active_conn_id');
-      }
-      await this.loadConnections();
-    } catch (err: any) {
-      this.showToast(`Failed to delete connection: ${err.message}`, 'error');
-    }
+    await deleteConnectionAction(this.connectionActionsContext(), id);
   }
 
   async selectConnection(conn: ConnectionProfile) {
@@ -1024,42 +1051,11 @@ export class AppState {
   }
 
   async refreshDatabases() {
-    if (!this.activeSessionId) return;
-    this.isLoadingCatalog = true;
-    try {
-      const schema = await api.getSchema(this.activeSessionId, this.currentDatabase || '');
-      if (schema.databases && schema.databases.length > 0) {
-        this.availableDatabases = schema.databases;
-      }
-      if (schema.database_name) {
-        this.currentDatabase = schema.database_name;
-      }
-      if (schema.tables) {
-        this.setCatalog(schema);
-      }
-    } catch (err) {
-      console.error('Failed to reload databases:', err);
-    } finally {
-      this.isLoadingCatalog = false;
-    }
+    await refreshDatabasesAction(this.connectionActionsContext());
   }
 
   async pingActiveSession() {
-    if (!this.activeSessionId) return;
-    this.isPingingServer = true;
-    try {
-      const res = await api.pingSession(this.activeSessionId);
-      if (res) {
-        this.serverLatency = res.latency_ms;
-        if (res.memory_mb != null) this.serverMemoryMb = res.memory_mb;
-        if (res.server_info) this.serverInfo = res.server_info;
-        if (typeof res.read_only === 'boolean') this.isReadOnly = res.read_only;
-      }
-    } catch (_) {
-      this.serverLatency = -1;
-    } finally {
-      this.isPingingServer = false;
-    }
+    await pingActiveSessionAction(this.connectionActionsContext());
   }
 
   private openNoteDraft(
@@ -1115,35 +1111,7 @@ export class AppState {
   // --- System lifecycle actions (surfaced from the command palette & header) ---
 
   async toggleReadOnlyMode() {
-    if (!this.activeSessionId) {
-      this.isReadOnly = !this.isReadOnly;
-      this.showToast(
-        this.isReadOnly
-          ? 'Read-only mode enabled — mutating statements will be blocked'
-          : 'Read-only mode disabled — writes are now allowed',
-        this.isReadOnly ? 'warning' : 'success'
-      );
-      return;
-    }
-    if (this.isReadOnly && this.isProduction) {
-      const ok = await this.showNativeConfirm(
-        `Disable Read-Only Protection on PRODUCTION connection "${this.activeConnection?.name}"?\nMutating queries (INSERT, UPDATE, DELETE, DROP, ALTER) will be allowed.`,
-        'Production Write Confirmation'
-      );
-      if (!ok) return;
-    }
-    try {
-      const res = await api.toggleReadOnly(this.activeSessionId);
-      this.isReadOnly = Boolean(res.read_only);
-      this.showToast(
-        this.isReadOnly
-          ? 'Read-only mode enabled — mutating statements will be blocked'
-          : 'Read-only mode disabled — writes are now allowed',
-        this.isReadOnly ? 'warning' : 'success'
-      );
-    } catch (err: any) {
-      this.showToast(`Failed to toggle read-only mode: ${err.message}`, 'error');
-    }
+    await toggleReadOnlyModeAction(this.connectionActionsContext());
   }
 
   async openInSystemBrowser() {
@@ -2055,38 +2023,8 @@ export class AppState {
     };
   }
 
-  private extractSqlParams(sql: string): string[] {
-    // Strip strings, quoted identifiers, dollar quotes ($$...$$ and $tag$...$tag$), and comments.
-    const masked = sql
-      .replace(/'(?:''|\\.|[^'\\])*'/g, ' ')
-      .replace(/"(?:""|\\.|[^"\\])*"/g, ' ')
-      .replace(/`(?:``|[^`])*`/g, ' ')
-      .replace(/(\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$)[\s\S]*?\1/g, ' ')
-      .replace(/--[^\n]*/g, ' ')
-      .replace(/\/\*[\s\S]*?\*\//g, ' ');
-    const drv = String(this.activeConnection?.driver || '').toLowerCase();
-    const isMySQL = drv === 'mysql' || drv === 'mariadb';
-    const found = new Set<string>();
-    // Never capture MySQL user/session variables (@i, @row_num) as interactive bind parameters.
-    const re = isMySQL
-      ? /(?:^|[^:@A-Za-z0-9_])(:[A-Za-z_][A-Za-z0-9_]*|\$[1-9][0-9]*)\b/g
-      : /(?:^|[^:@A-Za-z0-9_])(:[A-Za-z_][A-Za-z0-9_]*|@[A-Za-z_][A-Za-z0-9_]*|\$[1-9][0-9]*)\b/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(masked)) !== null) {
-      found.add(m[1]);
-    }
-    return Array.from(found);
-  }
-
-  private formatParamValue(raw: string): string {
-    const trimmed = raw.trim();
-    if (/^(null|true|false)$/i.test(trimmed)) return trimmed.toUpperCase();
-    if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) return trimmed;
-    return `'${raw.replace(/'/g, "''")}'`;
-  }
-
   private async promptAndBindSqlParams(sql: string): Promise<string | null> {
-    const params = this.extractSqlParams(sql);
+    const params = extractSqlParams(sql, this.activeConnection?.driver);
     if (params.length === 0) return sql;
     const values = new Map<string, string>();
     for (const p of params) {
@@ -2096,13 +2034,9 @@ export class AppState {
         `Bind Parameter (${p})`
       );
       if (val === null) return null;
-      values.set(p, this.formatParamValue(val));
+      values.set(p, formatParamValue(val));
     }
-    // Replace outside strings/comments using a single-pass tokenizer
-    return sql.replace(
-      /('(?:''|\\.|[^'\\])*'|"(?:""|\\.|[^"\\])*"|`(?:``|[^`])*`|--[^\n]*|\/\*[\s\S]*?\*\/|::[A-Za-z_][A-Za-z0-9_]*|@@[A-Za-z_][A-Za-z0-9_]*|(?::[A-Za-z_][A-Za-z0-9_]*|@[A-Za-z_][A-Za-z0-9_]*|\$[1-9][0-9]*)\b)/g,
-      (tok) => values.get(tok) ?? tok
-    );
+    return bindSqlParamsInText(sql, values);
   }
 
   async executeCurrentTab(sqlOverride?: string) {
