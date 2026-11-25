@@ -1,5 +1,6 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
+  import { focusTrap } from '../../actions/focusTrap';
   import Icon from '../common/Icon.svelte';
 
   let inputEl = $state<HTMLInputElement | null>(null);
@@ -52,6 +53,7 @@
       class="bg-[#0f172a] border border-slate-700 w-full max-w-md rounded-xl shadow-2xl flex flex-col overflow-hidden text-slate-100"
       role="dialog"
       aria-modal="true"
+      use:focusTrap
       aria-labelledby="dialog-title"
     >
       <!-- Dialog Header -->

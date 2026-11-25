@@ -1,5 +1,6 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
+  import { focusTrap } from '../../actions/focusTrap';
   import Icon from '../common/Icon.svelte';
   import SearchableSelect from '../common/SearchableSelect.svelte';
 
@@ -135,6 +136,7 @@
     <div
       role="dialog"
       aria-modal="true"
+      use:focusTrap
       aria-labelledby="dump-modal-title"
       class="bg-[#0b0f19] border border-[#334155] rounded-xl shadow-2xl w-full max-w-lg flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150"
     >
