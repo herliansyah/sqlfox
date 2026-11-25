@@ -1,6 +1,7 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
   import Icon from '../common/Icon.svelte';
+  import { focusTrap } from '../../actions/focusTrap';
 
   let typedAffirmation = $state('');
 
@@ -39,7 +40,7 @@
 </script>
 
 {#if challenge.isOpen}
-  <div class="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 p-4 select-none">
+  <div role="dialog" aria-modal="true" use:focusTrap class="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 p-4 select-none">
     <div style="contain: layout style paint;" class="bg-[#0f172a] border-2 {isDevAffirmation ? 'border-amber-500' : 'border-red-500'} rounded-xl shadow-2xl max-w-lg w-full overflow-hidden flex flex-col">
       <!-- Modal Header -->
       <div class="{isDevAffirmation ? 'bg-amber-950/60 border-amber-500/40' : 'bg-red-950/60 border-red-500/40'} border-b px-5 py-3.5 flex items-center justify-between gap-2">

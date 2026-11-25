@@ -4,6 +4,7 @@
   import { copyText } from '../../utils/clipboard';
   import Icon from '../common/Icon.svelte';
   import AiSettingsPanel from './AiSettingsPanel.svelte';
+  import { focusTrap } from '../../actions/focusTrap';
 
   type SettingsTab = 'sync' | 'ai' | 'bundle' | 'security';
 
@@ -30,6 +31,7 @@
 
   // Encrypted Vault Export/Import State
   let vaultPassphrase = $state('');
+  let currentMasterPass = $state('');
   let isExportingVault = $state(false);
   let isImportingVault = $state(false);
   let vaultImportInput = $state<HTMLInputElement | null>(null);
@@ -145,15 +147,21 @@
       appState.showToast('Enter an encryption passphrase (at least 4 characters) to export vault', 'warning');
       return;
     }
+    const master = currentMasterPass.trim();
+    if (!master) {
+      appState.showToast('Enter your current Master Password / PIN to authorize vault export', 'warning');
+      return;
+    }
     isExportingVault = true;
     try {
-      const blob = await api.exportVault(pass);
+      const blob = await api.exportVault(pass, master);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = 'sqlfox-connections.sqlfox-vault';
       a.click();
       URL.revokeObjectURL(url);
+      currentMasterPass = '';
       appState.showToast('Encrypted vault exported (.sqlfox-vault)', 'success');
     } catch (err: any) {
       appState.showToast(`Vault export failed: ${err.message}`, 'error');
@@ -216,7 +224,7 @@
 </script>
 
 {#if appState.isSettingsModalOpen}
-  <div class="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
+  <div role="dialog" aria-modal="true" use:focusTrap class="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
     <div class="bg-[#0b0f19] border border-[#1e293b] rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col animate-scale-in text-xs font-sans">
       <!-- Header -->
       <div class="px-5 py-4 border-b border-[#1e293b] flex items-center justify-between bg-[#0f172a]">
@@ -443,6 +451,12 @@
                 bind:value={vaultPassphrase}
                 placeholder="Enter export / import encryption passphrase..."
                 class="w-full bg-[#090d16] border border-[#1e293b] rounded-lg px-3 py-1.5 text-slate-200 font-mono text-xs focus:outline-none focus:border-emerald-500"
+              />
+              <input
+                type="password"
+                bind:value={currentMasterPass}
+                placeholder="Current Master Password / PIN (required for export)..."
+                class="w-full bg-[#090d16] border border-[#1e293b] rounded-lg px-3 py-1.5 text-slate-200 font-mono text-xs focus:outline-none focus:border-amber-500"
               />
 
               <div class="flex items-center justify-end space-x-2">

@@ -365,7 +365,7 @@
             const target = appState.tabs.find((t) => t.id === tabContextMenu!.tabId);
             closeTabMenu();
             if (!target) return;
-            const next = await appState.showNativePrompt('Enter a new name for this tab:', 'Rename Tab', target.title);
+            const next = await appState.showNativePrompt('Enter a new name for this tab:', target.title, 'Rename Tab');
             if (next !== null) appState.renameTab(target.id, next);
           }}
           class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"

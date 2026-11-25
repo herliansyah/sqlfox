@@ -87,41 +87,46 @@
       return;
     }
 
-    // CodeMirror owns editor shortcuts while focused; never dispatch them twice globally.
-    if (e.key === 'F5' && !inTextControl) {
-      e.preventDefault();
-      appState.executeCurrentTab();
-      return;
-    }
-    if (isCtrl && e.key === 'Enter' && !inCodeMirror) {
-      e.preventDefault();
-      if (e.altKey) appState.executeCurrentTab();
-      else if (e.shiftKey) appState.explainCurrentTab(appState.getEditorTargetSql() ?? undefined);
-      else appState.executeCurrentTab(appState.getEditorTargetSql() ?? undefined);
-      return;
-    }
-    if (isCtrl && e.shiftKey && e.key.toLowerCase() === 'f' && !inCodeMirror) {
-      e.preventDefault();
-      if (appState.activeTab?.sql) {
-        appState.activeTab.sql = formatSQL(appState.activeTab.sql);
-        appState.showToast('Formatted SQL worksheet', 'info');
+    const modalOpen = appState.hasOpenModal;
+
+    // Never fire global query/transaction shortcuts while a modal/dialog is active in front of the editor.
+    if (!modalOpen) {
+      // CodeMirror owns editor shortcuts while focused; never dispatch them twice globally.
+      if (e.key === 'F5' && !inTextControl) {
+        e.preventDefault();
+        appState.executeCurrentTab();
+        return;
       }
-      return;
-    }
-    if (isCtrl && e.shiftKey && e.key.toLowerCase() === 's') {
-      e.preventDefault();
-      appState.openSnippetsModal();
-      return;
-    }
-    if (isCtrl && e.shiftKey && e.key.toLowerCase() === 'c' && appState.isTransactionActive) {
-      e.preventDefault();
-      appState.executeTransaction('COMMIT');
-      return;
-    }
-    if (isCtrl && e.shiftKey && e.key.toLowerCase() === 'r' && appState.isTransactionActive) {
-      e.preventDefault();
-      appState.executeTransaction('ROLLBACK');
-      return;
+      if (isCtrl && e.key === 'Enter' && !inCodeMirror) {
+        e.preventDefault();
+        if (e.altKey) appState.executeCurrentTab();
+        else if (e.shiftKey) appState.explainCurrentTab(appState.getEditorTargetSql() ?? undefined);
+        else appState.executeCurrentTab(appState.getEditorTargetSql() ?? undefined);
+        return;
+      }
+      if (isCtrl && e.shiftKey && e.key.toLowerCase() === 'f' && !inCodeMirror) {
+        e.preventDefault();
+        if (appState.activeTab?.sql) {
+          appState.activeTab.sql = formatSQL(appState.activeTab.sql);
+          appState.showToast('Formatted SQL worksheet', 'info');
+        }
+        return;
+      }
+      if (isCtrl && e.shiftKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        appState.openSnippetsModal();
+        return;
+      }
+      if (isCtrl && e.shiftKey && e.key.toLowerCase() === 'c' && appState.isTransactionActive) {
+        e.preventDefault();
+        appState.executeTransaction('COMMIT');
+        return;
+      }
+      if (isCtrl && e.shiftKey && e.key.toLowerCase() === 'r' && appState.isTransactionActive) {
+        e.preventDefault();
+        appState.executeTransaction('ROLLBACK');
+        return;
+      }
     }
 
     // Ctrl + K: Command Palette

@@ -136,11 +136,13 @@ export async function streamDataTransfer(
     truncate_target?: boolean;
     batch_size?: number;
   },
-  onProgress?: (evt: any) => void
+  onProgress?: (evt: any) => void,
+  signal?: AbortSignal
 ): Promise<any> {
   const res = await ctx.rawFetch('/sync/data/transfer', {
     method: 'POST',
     timeoutMs: null,
+    signal,
     body: JSON.stringify(payload),
   });
   if (!res.body) {
@@ -162,25 +164,33 @@ export async function streamDataTransfer(
     }
   };
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const lines = buf.split('\n');
-    buf = lines.pop() || '';
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      try {
-        handleEvt(JSON.parse(trimmed));
-      } catch {
-        /* ignore malformed */
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          handleEvt(JSON.parse(trimmed));
+        } catch {
+          /* ignore malformed */
+        }
       }
     }
-  }
-  if (buf.trim()) {
+    if (buf.trim()) {
+      try {
+        handleEvt(JSON.parse(buf.trim()));
+      } catch {
+        /* ignore */
+      }
+    }
+  } finally {
     try {
-      handleEvt(JSON.parse(buf.trim()));
+      await reader.cancel();
     } catch {
       /* ignore */
     }
@@ -196,7 +206,7 @@ export async function streamRunSqlScript(
   ctx: StreamContext,
   sessionId: string,
   file: File,
-  options: { stopOnError?: boolean; database?: string; confirm?: boolean },
+  options: { stopOnError?: boolean; database?: string; confirm?: boolean; challengeInput?: string; signal?: AbortSignal },
   onProgress: (event: any) => void
 ): Promise<{ status: string; total: number; executed: number; errors: number }> {
   const formData = new FormData();
@@ -206,10 +216,12 @@ export async function streamRunSqlScript(
   if (options.stopOnError !== undefined) params.set('stop_on_error', String(options.stopOnError));
   if (options.database) params.set('db', options.database);
   if (options.confirm) params.set('confirm', 'true');
+  if (options.challengeInput) params.set('challenge_input', options.challengeInput);
 
-  const res = await ctx.rawFetch(`/session/${sessionId}/run-sql-script?${params.toString()}`, {
+  const res = await ctx.rawFetch(`/session/${encodeURIComponent(sessionId)}/run-sql-script?${params.toString()}`, {
     method: 'POST',
     timeoutMs: null,
+    signal: options.signal,
     body: formData,
   });
 
@@ -235,27 +247,35 @@ export async function streamRunSqlScript(
     onProgress(item);
   };
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    streamBuf += decoder.decode(value, { stream: true });
-    const lines = streamBuf.split('\n');
-    streamBuf = lines.pop() || '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      streamBuf += decoder.decode(value, { stream: true });
+      const lines = streamBuf.split('\n');
+      streamBuf = lines.pop() || '';
 
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          processItem(JSON.parse(trimmed));
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
+    if (streamBuf.trim()) {
       try {
-        processItem(JSON.parse(trimmed));
+        processItem(JSON.parse(streamBuf.trim()));
       } catch {
         /* ignore */
       }
     }
-  }
-
-  if (streamBuf.trim()) {
+  } finally {
     try {
-      processItem(JSON.parse(streamBuf.trim()));
+      await reader.cancel();
     } catch {
       /* ignore */
     }

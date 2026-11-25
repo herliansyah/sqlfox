@@ -26,8 +26,18 @@ export async function commitStagedEditsAction(ctx: GridEditsContext): Promise<vo
     ctx.showToast('Read-only mode is active — writes blocked', 'warning');
     return;
   }
-  const committedEntries = Object.entries(ctx.stagedEdits);
   const tab = ctx.activeTab;
+  const activeTable = tab?.tableName || tab?.detectedTableName;
+  const activeDb = tab?.detectedTableDatabase || tab?.database || ctx.currentDatabase;
+  const allEntries = Object.entries(ctx.stagedEdits);
+  // Scope staged-edit commits to the active tab's table so saving in Tab A never silently commits edits from Tab B.
+  const committedEntries = activeTable
+    ? allEntries.filter(
+        ([, item]) =>
+          item.table.toLowerCase() === activeTable.toLowerCase() &&
+          (!activeDb || !item.database || item.database.toLowerCase() === activeDb.toLowerCase())
+      )
+    : allEntries;
   const draftRows = tab?.stagedDraftRows || [];
   if (committedEntries.length === 0 && draftRows.length === 0) return;
 

@@ -62,7 +62,7 @@ class ApiClient extends ApiHttpBase {
   }
 
   async getMasterKey(): Promise<{ lan_enabled: boolean; pairing_code?: string; pairing_expires_in_sec?: number; lan_ip?: string; port?: number | string }> {
-    return this.request('/auth/master-key');
+    return this.request('/auth/master-key', { method: 'POST' });
   }
 
   async unlockVault(password: string): Promise<{ success: boolean; token?: string }> {
@@ -72,10 +72,13 @@ class ApiClient extends ApiHttpBase {
     });
   }
 
-  async exportVault(exportPassphrase: string): Promise<Blob> {
+  async exportVault(exportPassphrase: string, currentMasterPassword: string): Promise<Blob> {
     const res = await this.rawFetch('/vault/export', {
       method: 'POST',
-      body: JSON.stringify({ export_passphrase: exportPassphrase }),
+      body: JSON.stringify({
+        export_passphrase: exportPassphrase,
+        current_master_password: currentMasterPassword,
+      }),
     });
     return res.blob();
   }
@@ -1050,7 +1053,7 @@ class ApiClient extends ApiHttpBase {
   async runSqlScript(
     sessionId: string,
     file: File,
-    options: { stopOnError?: boolean; database?: string; confirm?: boolean },
+    options: { stopOnError?: boolean; database?: string; confirm?: boolean; challengeInput?: string; signal?: AbortSignal },
     onProgress: (event: any) => void
   ): Promise<{ status: string; total: number; executed: number; errors: number }> {
     return streamRunSqlScript(this.streamContext, sessionId, file, options, onProgress);

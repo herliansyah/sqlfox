@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { compileFilterPills } from './filterCompiler.ts';
-import { buildCSVExport } from '../components/grid/gridFormatters.ts';
+import { buildCSVExport, formatCellValue } from '../components/grid/gridFormatters.ts';
 
 test('compileFilterPills quotes IN/NOT IN literals safely and blocks raw subquery injection', () => {
   const safe = compileFilterPills([{ col: 'id', op: 'IN', val: '(1, 2, 3)' }], 'mysql');
@@ -67,4 +67,10 @@ test('buildCSVExport neutralizes formula injection prefixes and preserves numeri
   assert.ok(csv.includes(`"'00123"`));
   assert.ok(csv.includes(`"'+1+1"`));
   assert.ok(csv.includes(`"'@SUM(1,1)"`));
+});
+
+test('formatCellValue preserves exact float precision and avoids locale commas on numeric IDs', () => {
+  assert.deepEqual(formatCellValue(37.7749295), { display: '37.7749295', type: 'number' });
+  assert.deepEqual(formatCellValue(0.000123), { display: '0.000123', type: 'number' });
+  assert.deepEqual(formatCellValue(1234567), { display: '1234567', type: 'number' });
 });

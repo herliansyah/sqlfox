@@ -210,18 +210,18 @@
             <div class="grid grid-cols-2 gap-3">
               <div class="p-3 bg-[#050811] border border-[#1e293b] rounded-xl">
                 <span class="text-slate-500 text-[10px] uppercase font-mono block">Current Version</span>
-                <span class="text-sm font-bold font-mono text-slate-200">{info.current_version?.startsWith('v') ? '' : 'v'}{info.current_version || '0.18.0'}</span>
+                <span class="text-sm font-bold font-mono text-slate-200">{info.current_version ? `${info.current_version.startsWith('v') ? '' : 'v'}${info.current_version}` : '--'}</span>
               </div>
               <div class="p-3 bg-[#050811] border border-[#1e293b] rounded-xl">
                 <span class="text-slate-500 text-[10px] uppercase font-mono block">Latest Release</span>
                 <div class="flex items-center space-x-2">
                   <span class="text-sm font-bold font-mono text-sky-400">{info.latest_version?.startsWith('v') ? '' : 'v'}{info.latest_version || '--'}</span>
                   {#if info.has_update}
-                    <span class="px-1.5 py-0.2 rounded bg-amber-950 border border-amber-700 text-amber-300 text-[10px] font-bold">
+                    <span class="px-1.5 py-0.5 rounded bg-amber-950 border border-amber-700 text-amber-300 text-[10px] font-bold">
                       NEW
                     </span>
                   {:else}
-                    <span class="px-1.5 py-0.2 rounded bg-emerald-950 border border-emerald-700 text-emerald-300 text-[10px] font-bold">
+                    <span class="px-1.5 py-0.5 rounded bg-emerald-950 border border-emerald-700 text-emerald-300 text-[10px] font-bold">
                       UP TO DATE
                     </span>
                   {/if}

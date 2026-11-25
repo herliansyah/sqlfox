@@ -2,6 +2,7 @@
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
   import Icon from '../common/Icon.svelte';
+  import { focusTrap } from '../../actions/focusTrap';
 
   let selectedFile: File | null = $state(null);
   let targetDb = $state('');
@@ -12,6 +13,8 @@
   let totalStmts = $state(0);
   let logs = $state<string[]>([]);
   let pendingBlockers = $state<any[] | null>(null);
+  let challengeInput = $state('');
+  let isProduction = $derived(appState.activeConnection?.environment === 'Production');
 
   let wasOpen = false;
 
@@ -27,6 +30,7 @@
         totalStmts = 0;
         logs = [];
         pendingBlockers = null;
+        challengeInput = '';
         wasOpen = true;
       }
     } else {
@@ -69,6 +73,7 @@
           stopOnError,
           database: effectiveDb,
           confirm: confirmChallenge,
+          challengeInput: confirmChallenge ? challengeInput.trim() : undefined,
         },
         (evt) => {
           if (evt.total) totalStmts = evt.total;
@@ -123,6 +128,7 @@
     <div
       role="dialog"
       aria-modal="true"
+      use:focusTrap
       aria-labelledby="run-sql-title"
       class="bg-[#0b0f19] border border-[#334155] rounded-xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150"
     >
@@ -215,18 +221,33 @@
                 </div>
               {/each}
             </div>
+            {#if isProduction}
+              <div class="space-y-1">
+                <label for="run-sql-challenge-input" class="block text-[11px] text-rose-200 font-semibold">
+                  Production confirmation required: type target database or table name (<span class="font-mono text-white">{targetDb || appState.currentDatabase || appState.activeConnection?.name}</span>)
+                </label>
+                <input
+                  id="run-sql-challenge-input"
+                  type="text"
+                  bind:value={challengeInput}
+                  placeholder={targetDb || appState.currentDatabase || 'target database or table'}
+                  class="w-full bg-[#090d16] border border-rose-700 rounded px-2.5 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-rose-400"
+                />
+              </div>
+            {/if}
             <div class="flex items-center justify-end space-x-2">
               <button
                 type="button"
-                onclick={() => (pendingBlockers = null)}
+                onclick={() => { pendingBlockers = null; challengeInput = ''; }}
                 class="px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-medium"
               >
                 Abort
               </button>
               <button
                 type="button"
+                disabled={isProduction && !challengeInput.trim()}
                 onclick={() => handleStartExecution(true)}
-                class="px-3.5 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-bold flex items-center space-x-1"
+                class="px-3.5 py-1 rounded bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-white text-[11px] font-bold flex items-center space-x-1"
               >
                 <Icon name="zap" class="w-3 h-3" />
                 <span>Acknowledge &amp; Execute Script Anyway</span>

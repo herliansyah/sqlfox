@@ -276,7 +276,7 @@ export class AppState {
   flightRecordingRemainingSec = $state<number>(0);
 
   // Always-on Live Activity Console SSE state
-  activityLogs = $state<ActivityLogEntry[]>([]);
+  activityLogs = $state.raw<ActivityLogEntry[]>([]);
   activityStatus = $state<'live' | 'reconnecting' | 'paused'>('live');
   isActivityPaused = $state<boolean>(false);
   unreadActivityErrors = $state<number>(0);
@@ -412,6 +412,21 @@ export class AppState {
   constructor() {
     api.onRemoteLocked = (val: boolean) => {
       this.isRemoteLocked = val;
+      if (val) {
+        if (this.activityEventSource) {
+          this.activityEventSource.close();
+          this.activityEventSource = null;
+        }
+        if (this.reminderTimer) {
+          clearInterval(this.reminderTimer);
+          this.reminderTimer = null;
+        }
+        for (const tab of this.tabs) {
+          if (tab.isExecuting) {
+            tab.isExecuting = false;
+          }
+        }
+      }
     };
     api.onReconnectNeeded = () => this.triggerAutoReconnect();
     api.onReadOnlySync = (val: boolean) => {
@@ -929,14 +944,19 @@ export class AppState {
     this.connectionError = null;
     try {
       const previousConnectionId = this.activeConnection?.id;
-      this.activeConnection = conn;
-      if (previousConnectionId !== conn.id) {
+      if (previousConnectionId && previousConnectionId !== conn.id) {
+        // Persist the outgoing connection's tabs BEFORE changing activeConnection, then reset
+        // tabs so a previous connection's SQL/results never leak into the new (potentially Production) connection.
+        this.saveTabsState();
+        this.tabs = [];
+        this.activeTabId = '';
         this.catalog = null;
         this.catalogs = {};
         this.catalogRequests.clear();
         this.currentDatabase = '';
         this.stagedEdits = {};
       }
+      this.activeConnection = conn;
       if (typeof sessionStorage !== 'undefined') sessionStorage.setItem('sqlfox_active_conn_id', conn.id);
       localStorage.setItem('sqlfox_last_conn_id', conn.id);
       const sess = await api.connectSession(conn.id);
@@ -2036,16 +2056,21 @@ export class AppState {
   }
 
   private extractSqlParams(sql: string): string[] {
-    // Strip strings, quoted identifiers, dollar quotes, and comments so literals like '10:30' or ::int are ignored.
+    // Strip strings, quoted identifiers, dollar quotes ($$...$$ and $tag$...$tag$), and comments.
     const masked = sql
       .replace(/'(?:''|\\.|[^'\\])*'/g, ' ')
       .replace(/"(?:""|\\.|[^"\\])*"/g, ' ')
       .replace(/`(?:``|[^`])*`/g, ' ')
-      .replace(/\$[A-Za-z_]*\$[\s\S]*?\$[A-Za-z_]*\$/g, ' ')
+      .replace(/(\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$)[\s\S]*?\1/g, ' ')
       .replace(/--[^\n]*/g, ' ')
       .replace(/\/\*[\s\S]*?\*\//g, ' ');
+    const drv = String(this.activeConnection?.driver || '').toLowerCase();
+    const isMySQL = drv === 'mysql' || drv === 'mariadb';
     const found = new Set<string>();
-    const re = /(?:^|[^:@A-Za-z0-9_])(:[A-Za-z_][A-Za-z0-9_]*|@[A-Za-z_][A-Za-z0-9_]*|\$[1-9][0-9]*)\b/g;
+    // Never capture MySQL user/session variables (@i, @row_num) as interactive bind parameters.
+    const re = isMySQL
+      ? /(?:^|[^:@A-Za-z0-9_])(:[A-Za-z_][A-Za-z0-9_]*|\$[1-9][0-9]*)\b/g
+      : /(?:^|[^:@A-Za-z0-9_])(:[A-Za-z_][A-Za-z0-9_]*|@[A-Za-z_][A-Za-z0-9_]*|\$[1-9][0-9]*)\b/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(masked)) !== null) {
       found.add(m[1]);
@@ -3021,6 +3046,51 @@ export class AppState {
 
   async deleteRowsByCompositePK(pkRows: Record<string, any>[]) {
     await deleteRowsAction(this.gridEditsContext(), { pk_rows: pkRows }, pkRows.length);
+  }
+
+  get hasOpenModal(): boolean {
+    return (
+      this.isRemoteLocked ||
+      this.nativeDialog.isOpen ||
+      this.safetyChallenge.isOpen ||
+      this.isCommandPaletteOpen ||
+      this.isSchemaSearchOpen ||
+      this.isSmartSeedModalOpen ||
+      this.isLockInspectorOpen ||
+      this.ddlViewModal.isOpen ||
+      this.safetyInspectionModal.isOpen ||
+      this.isConnectionModalOpen ||
+      this.isRecordInspectorOpen ||
+      this.isInsertRowModalOpen ||
+      this.isShortcutsModalOpen ||
+      this.isCreateDbModalOpen ||
+      this.isTableCreatorOpen ||
+      this.isRenameTableModalOpen ||
+      this.isDuplicateTableModalOpen ||
+      this.isViewDesignerOpen ||
+      this.isTriggerDesignerOpen ||
+      this.isRoutineDesignerOpen ||
+      this.isEventDesignerOpen ||
+      this.isDumpModalOpen ||
+      this.isStructureSyncModalOpen ||
+      this.isRunSqlModalOpen ||
+      this.isSnippetsModalOpen ||
+      this.isCsvImportModalOpen ||
+      this.isPrivilegeMatrixOpen ||
+      this.isDbDiagnosticsOpen ||
+      this.isAiSettingsModalOpen ||
+      this.isNoteComposerModalOpen ||
+      this.isUpdateModalOpen ||
+      this.isMockDataModalOpen ||
+      this.isSettingsModalOpen ||
+      this.jsonCellModal.isOpen ||
+      this.isDataTransferOpen ||
+      this.isDataSyncOpen ||
+      this.isRefreshAllOpen ||
+      this.isImpactPreviewOpen ||
+      this.ddlReview.isOpen ||
+      this.fkPeekState.isOpen
+    );
   }
 
   closeTopOverlay(): boolean {

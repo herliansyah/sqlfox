@@ -155,9 +155,14 @@
     void _resIdx;
     scrollTop = 0;
     if (containerRef) containerRef.scrollTop = 0;
+    sortCol = null;
+    sortDir = 'ASC';
+    localSearchQuery = '';
     selectedRowIndices = [];
     selectedRowIndex = null;
     selectedCell = null;
+    rangeAnchor = null;
+    rangeEnd = null;
     editingCell = null;
     contextMenu = null;
     detailPrettyJson = false;
@@ -1865,8 +1870,16 @@
     </div>
   {/if}
 
+  <!-- Non-blocking Streaming Indicator while chunks arrive into an already-visible grid -->
+  {#if isExecuting && result && result.columns && result.columns.length > 0}
+    <div class="px-3 py-1 bg-sky-950/50 border-b border-sky-800/60 flex items-center space-x-2 text-[11px] font-mono text-sky-300 shrink-0">
+      <Icon name="refresh-cw" class="w-3 h-3 animate-spin text-sky-400" />
+      <span>Streaming rows ({(result.rows || []).length.toLocaleString()} loaded)...</span>
+    </div>
+  {/if}
+
   <!-- Data Grid Virtual Table -->
-  {#if isExecuting}
+  {#if isExecuting && !(result && result.columns && result.columns.length > 0)}
     <div class="flex-1 flex flex-col items-center justify-center p-8 space-y-3">
       <Icon name="refresh-cw" class="w-7 h-7 text-sky-400 animate-spin" />
       <span class="text-xs text-slate-300 font-mono">Executing query on {appState.currentDatabase}...</span>

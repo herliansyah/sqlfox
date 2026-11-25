@@ -458,8 +458,9 @@
   function insertSql(sql: string, mode: 'insert' | 'replace' | 'run') {
     resolveEditableSqlTab(sql, mode === 'replace' ? 'replace' : 'insert');
     if (mode === 'run') {
-      appState.executeCurrentTab();
-      appState.showToast('Executing AI SQL in worksheet!', 'info');
+      // Execute strictly the clicked AI SQL block, never unrelated statements already in the worksheet.
+      appState.executeCurrentTab(sql);
+      appState.showToast('Executing AI SQL block!', 'info');
     } else {
       appState.showToast(
         mode === 'replace' ? 'Replaced active SQL worksheet!' : 'Inserted SQL into worksheet!',

@@ -84,7 +84,11 @@
   }
 
   onDestroy(() => {
-    if (saveDebounceTimer) clearTimeout(saveDebounceTimer);
+    if (saveDebounceTimer) {
+      clearTimeout(saveDebounceTimer);
+      saveDebounceTimer = undefined;
+      appState.saveTabsState();
+    }
   });
 
   function quoteIdentifier(name: string): string {
