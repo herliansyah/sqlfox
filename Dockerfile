@@ -29,9 +29,10 @@ COPY --from=frontend /web/web/dist/ /src/web/dist/
 
 # Build statically-linked single binary
 ARG VERSION=dev
+ARG SQLFOX_MANIFEST_SIGNING_PUBKEY=""
 RUN CGO_ENABLED=0 go build \
     -trimpath \
-    -ldflags="-s -w -X main.Version=${VERSION}" \
+    -ldflags="-s -w -X main.Version=${VERSION} -X github.com/herliansyah/sqlfox/internal/server.manifestSigningPublicKeyB64=${SQLFOX_MANIFEST_SIGNING_PUBKEY}" \
     -o /bin/sqlfox \
     ./cmd/sqlfox
 

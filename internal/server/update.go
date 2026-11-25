@@ -432,10 +432,13 @@ func (s *Server) handleApplyUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Trigger restart
-	if s.restartFn != nil {
+	s.mu.Lock()
+	restartFn := s.restartFn
+	s.mu.Unlock()
+	if restartFn != nil {
 		go func() {
 			time.Sleep(200 * time.Millisecond)
-			_ = s.restartFn()
+			_ = restartFn()
 		}()
 	} else {
 		go func() {
@@ -472,8 +475,11 @@ func (s *Server) isAllowedAssetURL(rawURL string) bool {
 		path.Clean(u.Path) == u.Path && strings.HasPrefix(u.Path, "/herliansyah/sqlfox/releases/download/") {
 		return true
 	}
-	if allowUpdateAPIHostAssets && s.updateAPIURL != "" {
-		if u, err := url.Parse(s.updateAPIURL); err == nil {
+	s.mu.Lock()
+	apiURL := s.updateAPIURL
+	s.mu.Unlock()
+	if allowUpdateAPIHostAssets && apiURL != "" {
+		if u, err := url.Parse(apiURL); err == nil {
 			if au, err := url.Parse(rawURL); err == nil && au.Host == u.Host && au.Host != "" {
 				return true
 			}

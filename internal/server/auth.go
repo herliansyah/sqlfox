@@ -543,7 +543,7 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-SqlFox-App", "sqlfox")
 	writeJSON(w, http.StatusOK, map[string]any{
 		"app":       "sqlfox",
-		"version":   s.version,
+		"version":   s.GetVersion(),
 		"is_remote": isRemote,
 		"unlocked":  unlocked,
 	})

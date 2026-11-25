@@ -337,6 +337,9 @@ func generateValue(col driver.ColumnMetadata, fkPool map[string][]any, isSelfRef
 	if pool, ok := fkPool[col.Name]; ok && len(pool) > 0 {
 		return pool[r.Intn(len(pool))]
 	}
+	if len(col.EnumValues) > 0 {
+		return col.EnumValues[r.Intn(len(col.EnumValues))]
+	}
 	if col.IsNullable && !col.IsPrimaryKey && r.Intn(5) == 0 {
 		return nil // 20% NULL for nullable non-PK columns
 	}

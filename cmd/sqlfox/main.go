@@ -600,21 +600,24 @@ func generateFriendlyPIN() (string, error) {
 // can bind without error even when another service (e.g. Pantau) already listens on [::1]:p or :p.
 // Probing via DialTimeout and verifying IPv4 binding ensures busy ports trigger auto-scanning.
 func tryListen(host string, port int) net.Listener {
-	for _, probeHost := range []string{"127.0.0.1", "[::1]"} {
-		conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", probeHost, port), 50*time.Millisecond)
+	portStr := fmt.Sprintf("%d", port)
+	for _, probeHost := range []string{"127.0.0.1", "::1"} {
+		conn, err := net.DialTimeout("tcp", net.JoinHostPort(probeHost, portStr), 50*time.Millisecond)
 		if err == nil {
 			_ = conn.Close()
 			return nil
 		}
 	}
 
-	l4, err := net.Listen("tcp4", fmt.Sprintf("127.0.0.1:%d", port))
-	if err != nil {
-		return nil
+	if host == "127.0.0.1" || host == "0.0.0.0" {
+		if l4, err := net.Listen("tcp4", fmt.Sprintf("127.0.0.1:%d", port)); err != nil {
+			return nil
+		} else {
+			_ = l4.Close()
+		}
 	}
-	_ = l4.Close()
 
-	l, err := net.Listen("tcp", fmt.Sprintf("%s:%d", host, port))
+	l, err := net.Listen("tcp", net.JoinHostPort(host, portStr))
 	if err != nil {
 		return nil
 	}
