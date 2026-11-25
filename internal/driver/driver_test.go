@@ -290,6 +290,12 @@ func TestFormatSQLValue_MySQLBackslashAndBytes(t *testing.T) {
 		t.Fatalf("expected MySQL escaped %q, got %q", expectedSQLi, escapedSQLi)
 	}
 
+	// 2b. NO_BACKSLASH_ESCAPES mode must not emit backslash sequences (\n, \\, \")
+	noBS := driver.EscapeMySQLStringWithMode("a\\b\nc\"d'e", true)
+	if noBS != "'a\\b\nc\"d''e'" {
+		t.Fatalf("expected NO_BACKSLASH_ESCAPES literal, got %q", noBS)
+	}
+
 	// 3. Binary blob formatting as hex literal (including postgres "pg" alias)
 	blob := []byte{0xDE, 0xAD, 0xBE, 0xEF}
 	hexVal := driver.FormatSQLValue(blob)

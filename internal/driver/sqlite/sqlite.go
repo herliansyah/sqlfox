@@ -780,12 +780,7 @@ func (s *SQLiteSession) PeekForeignKeyRow(ctx context.Context, database, table, 
 
 	rowMap := make(map[string]any, len(cols))
 	for i, col := range cols {
-		val := rawVals[i]
-		if b, ok := val.([]byte); ok {
-			rowMap[col] = string(b)
-		} else {
-			rowMap[col] = val
-		}
+		rowMap[col] = driver.FormatValueForJSON(rawVals[i])
 	}
 
 	return &driver.PeekResult{
@@ -957,6 +952,7 @@ func (s *SQLiteSession) ExecScriptConn(ctx context.Context, fn func(exec func(co
 	}
 	defer func() {
 		restoreCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_, _ = conn.ExecContext(restoreCtx, "ROLLBACK")
 		_, _ = conn.ExecContext(restoreCtx, "PRAGMA foreign_keys = ON;")
 		cancel()
 		_ = conn.Close()

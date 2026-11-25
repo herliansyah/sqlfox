@@ -340,9 +340,16 @@ func (s *ActiveSession) runSingleCountEstimate(ctx context.Context, countSQL str
 	}
 	// Skip direct COUNT(*) execution if WHERE contains function calls or subqueries; use non-executing EXPLAIN instead.
 	if !hasUnsafeCountPredicate(countSQL) {
-		countCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		countID := fmt.Sprintf("count-%d", time.Now().UnixNano())
+		countCtx, cancel := context.WithTimeout(driver.WithQueryID(ctx, countID), 2*time.Second)
 		rows, err := s.Session.QueryRaw(countCtx, countSQL)
+		timedOut := countCtx.Err() != nil
 		cancel()
+		if timedOut {
+			cancelCtx, cCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = s.Session.CancelQuery(cancelCtx, countID)
+			cCancel()
+		}
 		if err == nil && len(rows) > 0 && len(rows[0]) > 0 {
 			if cnt, ok := parseCountValue(rows[0][0]); ok {
 				return &cnt, true

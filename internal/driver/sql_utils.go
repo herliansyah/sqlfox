@@ -1240,37 +1240,12 @@ func HasExecutableSQL(stmt string, isMySQL bool) bool {
 }
 
 // EscapeSQLString escapes a string literal for the specified SQL driver dialect.
-// ponytail: MySQL/MariaDB requires escaping backslashes and control chars; standard SQL doubles single quotes.
+// ponytail: MySQL/MariaDB assumes default backslash-escaping (dump prologues clear NO_BACKSLASH_ESCAPES);
+// use EscapeMySQLStringWithMode when NO_BACKSLASH_ESCAPES may be active on a live session.
 func EscapeSQLString(s string, driverName string) string {
 	switch strings.ToLower(driverName) {
 	case "mysql", "mariadb":
-		var sb strings.Builder
-		sb.WriteByte('\'')
-		for i := 0; i < len(s); i++ {
-			b := s[i]
-			switch b {
-			case 0:
-				sb.WriteString(`\0`)
-			case '\n':
-				sb.WriteString(`\n`)
-			case '\r':
-				sb.WriteString(`\r`)
-			case '\\':
-				sb.WriteString(`\\`)
-			case '\'':
-				// Double single-quote works identically under both default MySQL sql_mode
-				// and NO_BACKSLASH_ESCAPES (ANSI mode), preventing quote-escape SQLi.
-				sb.WriteString(`''`)
-			case '"':
-				sb.WriteString(`\"`)
-			case '\032':
-				sb.WriteString(`\Z`)
-			default:
-				sb.WriteByte(b)
-			}
-		}
-		sb.WriteByte('\'')
-		return sb.String()
+		return EscapeMySQLStringWithMode(s, false)
 	case "postgres", "postgresql", "pgx", "pg":
 		// Standard SQL doubles single quotes. When standard_conforming_strings is OFF (legacy
 		// servers), a backslash is also an escape, so a value containing '\' must use the explicit
@@ -1284,6 +1259,37 @@ func EscapeSQLString(s string, driverName string) string {
 	default:
 		return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 	}
+}
+
+// EscapeMySQLStringWithMode escapes a MySQL/MariaDB string literal, respecting NO_BACKSLASH_ESCAPES.
+func EscapeMySQLStringWithMode(s string, noBackslashEscapes bool) string {
+	if noBackslashEscapes {
+		return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+	}
+	var sb strings.Builder
+	sb.Grow(len(s) + 2)
+	sb.WriteByte('\'')
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		switch b {
+		case 0:
+			sb.WriteString(`\0`)
+		case '\n':
+			sb.WriteString(`\n`)
+		case '\r':
+			sb.WriteString(`\r`)
+		case '\\':
+			sb.WriteString(`\\`)
+		case '\'':
+			sb.WriteString(`''`)
+		case '\032':
+			sb.WriteString(`\Z`)
+		default:
+			sb.WriteByte(b)
+		}
+	}
+	sb.WriteByte('\'')
+	return sb.String()
 }
 
 // FormatSQLValueForDriver formats a Go value into a valid SQL literal for a specific driver dialect.

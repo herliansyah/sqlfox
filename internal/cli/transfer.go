@@ -265,6 +265,7 @@ func flushInsertBatch(ctx context.Context, sess queryExecutor, table string, col
 	}
 	sb.WriteString(") VALUES ")
 
+	var args []any
 	for rIdx, row := range batch {
 		if rIdx > 0 {
 			sb.WriteString(", ")
@@ -274,15 +275,16 @@ func flushInsertBatch(ctx context.Context, sess queryExecutor, table string, col
 			if cIdx > 0 {
 				sb.WriteString(", ")
 			}
+			var val any
 			if cIdx < len(row) {
-				sb.WriteString(driver.FormatSQLValueForDriver(row[cIdx], drv))
-			} else {
-				sb.WriteString("NULL")
+				val = row[cIdx]
 			}
+			args = append(args, val)
+			sb.WriteString(driver.Placeholder(drv, len(args)))
 		}
 		sb.WriteString(")")
 	}
 
-	_, err := sess.Exec(ctx, sb.String())
+	_, err := sess.Exec(ctx, sb.String(), args...)
 	return err
 }

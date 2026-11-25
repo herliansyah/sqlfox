@@ -3,7 +3,6 @@ package server
 import (
 	"archive/tar"
 	"archive/zip"
-	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/ed25519"
@@ -484,6 +483,11 @@ func (s *Server) isAllowedAssetURL(rawURL string) bool {
 }
 
 func (s *Server) verifyAssetChecksum(ctx context.Context, assetURL string, archiveBytes []byte) error {
+	actualHash := sha256.Sum256(archiveBytes)
+	return s.verifyAssetDigest(ctx, assetURL, hex.EncodeToString(actualHash[:]))
+}
+
+func (s *Server) verifyAssetDigest(ctx context.Context, assetURL string, actualHex string) error {
 	idx := strings.LastIndex(assetURL, "/")
 	if idx == -1 {
 		return fmt.Errorf("invalid asset URL format")
@@ -531,9 +535,6 @@ func (s *Server) verifyAssetChecksum(ctx context.Context, assetURL string, archi
 	if err := verifyManifestSignature(ctx, fetchManifest, baseDir, manifestData); err != nil {
 		return err
 	}
-
-	actualHash := sha256.Sum256(archiveBytes)
-	actualHex := hex.EncodeToString(actualHash[:])
 
 	lines := strings.Split(string(manifestData), "\n")
 	for _, line := range lines {
@@ -622,21 +623,40 @@ func (s *Server) downloadAndExtractBinary(ctx context.Context, assetURL, destPat
 		return fmt.Errorf("download returned HTTP status %s", resp.Status)
 	}
 
-	archiveBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxExtractedBinarySize))
+	// Stream the release archive to a temp file while hashing so we never buffer up to 256MB in RAM.
+	tmpArchive, err := os.CreateTemp("", "sqlfox-release-*")
 	if err != nil {
-		return fmt.Errorf("failed to read downloaded archive: %w", err)
+		return fmt.Errorf("failed to create temp archive file: %w", err)
+	}
+	tmpArchivePath := tmpArchive.Name()
+	defer func() {
+		_ = tmpArchive.Close()
+		_ = os.Remove(tmpArchivePath)
+	}()
+
+	hasher := sha256.New()
+	written, err := io.Copy(io.MultiWriter(tmpArchive, hasher), io.LimitReader(resp.Body, maxExtractedBinarySize+1))
+	if err != nil {
+		return fmt.Errorf("failed to download release archive: %w", err)
+	}
+	if written > maxExtractedBinarySize {
+		return fmt.Errorf("release archive exceeds maximum allowed size (%d bytes)", maxExtractedBinarySize)
 	}
 
 	// Release Manifest Verification (fail-closed)
-	if err := s.verifyAssetChecksum(ctx, assetURL, archiveBytes); err != nil {
+	if err := s.verifyAssetDigest(ctx, assetURL, hex.EncodeToString(hasher.Sum(nil))); err != nil {
 		return fmt.Errorf("supply chain verification failed: %w", err)
+	}
+
+	if _, err := tmpArchive.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("failed to rewind downloaded archive: %w", err)
 	}
 
 	lower := strings.ToLower(assetURL)
 	if strings.HasSuffix(lower, ".zip") {
-		return extractFromZipStream(bytes.NewReader(archiveBytes), destPath)
+		return extractFromZipStream(tmpArchive, destPath)
 	}
-	return extractFromTarGzStream(bytes.NewReader(archiveBytes), destPath)
+	return extractFromTarGzStream(tmpArchive, destPath)
 }
 
 // extractFromTarGzStream extracts the sqlfox or sqlfox.exe binary from a .tar.gz stream.
