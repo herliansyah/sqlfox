@@ -1982,8 +1982,16 @@
               {@const colType = resolveColType(col)}
               {@const isPK = isColPK(col)}
               <th
+                tabindex="0"
+                aria-sort={effectiveSortCol === colName ? (effectiveSortDir === 'ASC' ? 'ascending' : 'descending') : 'none'}
                 onclick={() => handleHeaderSort(colName)}
-                class="px-3 py-1.5 font-semibold text-slate-200 border-r border-[#1e293b] whitespace-nowrap bg-[#0f172a] text-[11px] tracking-tight hover:bg-slate-800 cursor-pointer transition-colors"
+                onkeydown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleHeaderSort(colName);
+                  }
+                }}
+                class="px-3 py-1.5 font-semibold text-slate-200 border-r border-[#1e293b] whitespace-nowrap bg-[#0f172a] text-[11px] tracking-tight hover:bg-slate-800 cursor-pointer transition-colors focus:outline-none focus:ring-1 focus:ring-sky-400"
               >
                 <div class="flex items-center space-x-1.5">
                   {#if isPK}
