@@ -96,6 +96,11 @@ Examples:
 
 // RunJob dispatches job subcommands (run, check).
 func RunJob(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
+	return RunJobContext(context.Background(), args, stdout, stderr, stdin)
+}
+
+// RunJobContext dispatches job subcommands honoring the caller's context/signal cancellation.
+func RunJobContext(ctx context.Context, args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 	if len(args) == 0 {
 		PrintJobHelp(stderr)
 		return 1
@@ -109,16 +114,16 @@ func RunJob(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 		PrintJobHelp(stdout)
 		return 0
 	case "run":
-		return executeJobSubcommand("run", subArgs, stdout, stderr, stdin)
+		return executeJobSubcommand(ctx, "run", subArgs, stdout, stderr, stdin)
 	case "check":
-		return executeJobSubcommand("check", subArgs, stdout, stderr, stdin)
+		return executeJobSubcommand(ctx, "check", subArgs, stdout, stderr, stdin)
 	default:
 		fmt.Fprintf(stderr, "Unknown job subcommand '%s'. Run 'sqlfox job help' for usage.\n", subcmd)
 		return 1
 	}
 }
 
-func executeJobSubcommand(action string, args []string, stdout, stderr io.Writer, stdin io.Reader) int {
+func executeJobSubcommand(ctx context.Context, action string, args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 	fs := flag.NewFlagSet("job "+action, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
@@ -150,8 +155,6 @@ func executeJobSubcommand(action string, args []string, stdout, stderr io.Writer
 		fmt.Fprintf(stderr, "❌ Error loading job file: %v\n", err)
 		return 1
 	}
-
-	ctx := context.Background()
 
 	if action == "check" {
 		return RunJobCheck(ctx, spec, *vaultDbFlag, *passFlag, stdout, stderr)

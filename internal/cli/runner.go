@@ -7,9 +7,11 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/herliansyah/sqlfox/internal/driver"
 	"github.com/herliansyah/sqlfox/internal/vault"
@@ -65,18 +67,21 @@ func Run(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 	cmd := args[0]
 	subArgs := args[1:]
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	switch cmd {
 	case "help", "-h", "--help":
 		PrintHelp(stdout)
 		return 0
 	case "query":
-		return RunQuery(subArgs, stdout, stderr, stdin)
+		return RunQueryContext(ctx, subArgs, stdout, stderr, stdin)
 	case "transfer":
-		return RunTransfer(subArgs, stdout, stderr, stdin)
+		return RunTransferContext(ctx, subArgs, stdout, stderr, stdin)
 	case "job":
-		return RunJob(subArgs, stdout, stderr, stdin)
+		return RunJobContext(ctx, subArgs, stdout, stderr, stdin)
 	case "advise":
-		return RunAdvise(subArgs, stdout, stderr, stdin)
+		return RunAdviseContext(ctx, subArgs, stdout, stderr, stdin)
 	case "stop":
 		fmt.Fprintln(stdout, "To stop a running background SqlFox instance, run 'sqlfox stop'.")
 		return 0
