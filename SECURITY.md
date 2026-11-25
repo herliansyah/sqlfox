@@ -24,7 +24,7 @@ Security architecture, cryptographic protocols, environment isolation, and AI pr
 
 ### Trust Boundary Rules
 1. **Secure-by-Default Ingress Binding**: The backend web daemon strictly binds to loopback (`127.0.0.1`) on a dynamic port or Unix socket. It never exposes ports to external networks unless the operator explicitly passes `--lan` (or `-host 0.0.0.0`).
-2. **Controlled LAN Access Guard & Ingress TLS**: When `--lan` is enabled for tablet or remote device management, all non-loopback connections must pass the `Remote Access Guard` requiring Master Password authentication before session access. Ingress traffic can be fully encrypted via `--tls` using automated in-memory ECDSA P-256 self-signed certificates or operator-supplied certificates (`--tls-cert` and `--tls-key`).
+2. **Controlled LAN Access Guard & Ingress TLS**: When `--lan` is enabled for tablet or remote device management, all non-loopback connections must pass the `Remote Access Guard` requiring Master Password authentication before session access. Ingress traffic can be encrypted via `--tls` using auto-generated ECDSA P-256 self-signed certificates persisted under `~/.sqlfox/certs/` (`0600` key) or operator-supplied certificates (`--tls-cert` and `--tls-key`).
 3. **Third-Party Egress Control**: Outbound traffic is restricted strictly to configured target database endpoints and chosen AI provider endpoints.
 4. **Flight Recorder Telemetry Safety**: The on-demand Performance Flight Recorder samples only global engine counters (`SHOW GLOBAL STATUS`) and running statement text from `PROCESSLIST`. Zero table row data is recorded. All metrics remain strictly within the local SQLite vault with an automated 24-hour retention purge and a 10-minute auto-stop polling ceiling.
 
@@ -50,7 +50,7 @@ flowchart LR
 ### Cryptographic Parameters
 - **KDF**: Argon2id (`time=3`, `memory=64MB`, `threads=4`).
 - **Cipher**: `AES-256-GCM` with 96-bit random IV per record and per-field AAD binding.
-- **Local Key Material**: The vault key is derived from the Master PIN/Password (auto-generated into a `0600` local `master.key` file or supplied via `SQLFOX_MASTER_KEY` / `--master-key`).
+- **Local Key Material**: The vault key is derived from the Master PIN/Password (auto-generated into a `0600` local `master.key` file or supplied via `SQLFOX_MASTER_KEY` / `-pass`).
 
 ### Vault Migration (`.sqlfox-vault`)
 - Exporting connections generates an encrypted `.sqlfox-vault` JSON envelope.
@@ -236,7 +236,7 @@ To ensure backup artifacts cannot escape authorized storage locations:
 
 1. **Directory Boundary Enforcement**:
    - Table and schema backup filenames generated before DDL execution (`internal/safety`) are sanitized against directory traversal sequences (`../`, `..\`).
-   - Output paths are strictly resolved within the configured `.scratch/backups/` directory boundary.
+   - Output paths are strictly resolved within the configured backups directory (`~/.sqlfox/backups/` by default) with `0700` directory and `0600` file permissions.
 
 ---
 
