@@ -1,5 +1,6 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
+  import { focusTrap } from '../../actions/focusTrap';
   import { api } from '../../api/client';
   import Icon from '../common/Icon.svelte';
 
@@ -177,6 +178,7 @@
       class="bg-[#0f172a] border border-slate-700 w-full max-w-2xl max-h-[90vh] rounded-xl shadow-2xl flex flex-col overflow-hidden text-slate-100"
       role="dialog"
       aria-modal="true"
+      use:focusTrap
     >
       <!-- Header -->
       <div class="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between bg-slate-900/60 shrink-0">

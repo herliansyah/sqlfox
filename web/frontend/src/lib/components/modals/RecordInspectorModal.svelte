@@ -1,5 +1,6 @@
 <script lang="ts">
   import { copyText } from '../../utils/clipboard';
+  import { focusTrap } from '../../actions/focusTrap';
   import {
     classifyColumnType,
     findTableMeta,
@@ -290,6 +291,7 @@
       id="record-inspector-dialog"
       role="dialog"
       aria-modal="true"
+      use:focusTrap
       aria-label="Record inspector"
       class="w-full max-w-3xl bg-[#0d1320] border border-slate-700/80 rounded-xl shadow-[0_24px_64px_-12px_rgba(0,0,0,0.85)] flex flex-col max-h-[86vh] overflow-hidden"
     >

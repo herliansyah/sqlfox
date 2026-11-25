@@ -1,5 +1,6 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
+  import { focusTrap } from '../../actions/focusTrap';
   import { api } from '../../api/client';
   import { copyText } from '../../utils/clipboard';
   import Icon from '../common/Icon.svelte';
@@ -296,6 +297,7 @@
     <div
       role="dialog"
       aria-modal="true"
+      use:focusTrap
       aria-labelledby="diag-modal-title"
       class="bg-[#0b0f19] border border-[#334155] rounded-xl w-full max-w-5xl flex flex-col max-h-[88vh] overflow-hidden"
     >
