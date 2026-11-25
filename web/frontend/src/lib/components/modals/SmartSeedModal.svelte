@@ -1,5 +1,6 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
+  import { focusTrap } from '../../actions/focusTrap';
   import { api } from '../../api/client';
   import Icon from '../common/Icon.svelte';
 
@@ -43,6 +44,7 @@
     class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 select-none"
     role="dialog"
     aria-modal="true"
+    use:focusTrap
   >
     <button
       tabindex="-1"

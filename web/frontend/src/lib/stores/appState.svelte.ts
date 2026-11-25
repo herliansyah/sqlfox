@@ -2528,50 +2528,71 @@ export class AppState {
     }
   }
 
+  private nativeDialogQueue: Array<() => void> = [];
+  private safetyChallengeQueue: Array<() => void> = [];
+
+  private enqueueNativeDialog(openFn: () => void) {
+    if (!this.nativeDialog.isOpen) {
+      openFn();
+    } else {
+      this.nativeDialogQueue.push(openFn);
+    }
+  }
+
   // HTML5 Native Dialog System
   showNativeAlert(message: string, title = 'SqlFox Notification'): Promise<boolean> {
     return new Promise((resolve) => {
-      this.nativeDialog = {
-        isOpen: true,
-        type: 'alert',
-        title,
-        message,
-        resolve,
-      };
+      this.enqueueNativeDialog(() => {
+        this.nativeDialog = {
+          isOpen: true,
+          type: 'alert',
+          title,
+          message,
+          resolve,
+        };
+      });
     });
   }
 
   showNativeConfirm(message: string, title = 'Confirm Action'): Promise<boolean> {
     return new Promise((resolve) => {
-      this.nativeDialog = {
-        isOpen: true,
-        type: 'confirm',
-        title,
-        message,
-        resolve,
-      };
+      this.enqueueNativeDialog(() => {
+        this.nativeDialog = {
+          isOpen: true,
+          type: 'confirm',
+          title,
+          message,
+          resolve,
+        };
+      });
     });
   }
 
   showNativePrompt(message: string, defaultValue = '', title = 'Input'): Promise<string | null> {
     return new Promise((resolve) => {
-      this.nativeDialog = {
-        isOpen: true,
-        type: 'prompt',
-        title,
-        message,
-        defaultValue,
-        inputValue: defaultValue,
-        resolve,
-      };
+      this.enqueueNativeDialog(() => {
+        this.nativeDialog = {
+          isOpen: true,
+          type: 'prompt',
+          title,
+          message,
+          defaultValue,
+          inputValue: defaultValue,
+          resolve,
+        };
+      });
     });
   }
 
   resolveNativeDialog(val: any) {
-    if (this.nativeDialog.resolve) {
-      this.nativeDialog.resolve(val);
-    }
+    const resolver = this.nativeDialog.resolve;
     this.nativeDialog.isOpen = false;
+    this.nativeDialog.resolve = undefined;
+    if (resolver) {
+      resolver(val);
+    }
+    const next = this.nativeDialogQueue.shift();
+    if (next) next();
   }
 
   // Pre-Execution DDL Review Modal
@@ -3167,14 +3188,27 @@ export class AppState {
   // Safety Challenge
   promptSafetyChallenge(sql: string, inspection: InspectionResult): Promise<{ confirmed: boolean; challengeInput: string }> {
     return new Promise((resolve) => {
-      this.safetyChallenge = {
-        isOpen: true,
-        sql,
-        inspection,
-        confirmed: false,
-        challengeInput: '',
-        resolve,
+      const openFn = () => {
+        this.safetyChallenge = {
+          isOpen: true,
+          sql,
+          inspection,
+          confirmed: false,
+          challengeInput: '',
+          resolve: (decision) => {
+            this.safetyChallenge.isOpen = false;
+            this.safetyChallenge.resolve = undefined;
+            resolve(decision);
+            const next = this.safetyChallengeQueue.shift();
+            if (next) next();
+          },
+        };
       };
+      if (!this.safetyChallenge.isOpen) {
+        openFn();
+      } else {
+        this.safetyChallengeQueue.push(openFn);
+      }
     });
   }
 
