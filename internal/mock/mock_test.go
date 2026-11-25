@@ -52,6 +52,11 @@ func TestGenerateValueTypes(t *testing.T) {
 			}
 		})
 	}
+
+	v5 := generateValue(driver.ColumnMetadata{Name: "code", Type: "varchar(5)"}, nil, nil, &seq, r)
+	if s, ok := v5.(string); !ok || len(s) > 5 {
+		t.Errorf("expected varchar(5) length <= 5, got %v", v5)
+	}
 }
 
 func TestGenerateValueSelfRef(t *testing.T) {

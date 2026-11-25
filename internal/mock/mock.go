@@ -371,7 +371,11 @@ func generateValue(col driver.ColumnMetadata, fkPool map[string][]any, isSelfRef
 	case strings.HasPrefix(tp, "varchar") || strings.HasPrefix(tp, "char") ||
 		tp == "tinytext" || tp == "text" || tp == "mediumtext" || tp == "longtext" || tp == "clob":
 		words := []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel"}
-		return words[r.Intn(len(words))] + "_" + randStr(r, 6)
+		s := words[r.Intn(len(words))] + "_" + randStr(r, 6)
+		if maxLen := parseTypeWidth(tp); maxLen > 0 && len(s) > maxLen {
+			return s[:maxLen]
+		}
+		return s
 	case tp == "date":
 		return fmt.Sprintf("20%02d-%02d-%02d", r.Intn(6)+20, r.Intn(12)+1, r.Intn(28)+1)
 	case tp == "timestamptz":
@@ -391,6 +395,23 @@ func generateValue(col driver.ColumnMetadata, fkPool map[string][]any, isSelfRef
 	default:
 		return fmt.Sprintf("mock_value_%d", *seq)
 	}
+}
+
+func parseTypeWidth(tp string) int {
+	openIdx := strings.IndexByte(tp, '(')
+	closeIdx := strings.IndexByte(tp, ')')
+	if openIdx < 0 || closeIdx <= openIdx+1 {
+		return 0
+	}
+	n := 0
+	for i := openIdx + 1; i < closeIdx; i++ {
+		c := tp[i]
+		if c < '0' || c > '9' {
+			return 0
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n
 }
 
 func randUUID(r *rand.Rand) string {
