@@ -135,7 +135,7 @@ func (s *Server) handleExportDump(w http.ResponseWriter, r *http.Request) {
 	var snapTx driver.TxSession
 	if includeData {
 		if tx, txErr := sess.Session.BeginTx(ctx); txErr == nil {
-			if strings.EqualFold(sess.DriverName, "postgres") || strings.EqualFold(sess.DriverName, "postgresql") || strings.EqualFold(sess.DriverName, "pgx") || strings.EqualFold(sess.DriverName, "pg") {
+			if isPgDriver(strings.ToLower(sess.DriverName)) {
 				_, _ = tx.Exec(ctx, "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
 			}
 			snapTx = tx

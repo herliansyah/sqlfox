@@ -49,6 +49,13 @@ jobs:
       - name: Go Vet
         run: go vet ./...
 
+      - name: Security Audit (npm & govulncheck)
+        if: matrix.os == 'ubuntu-latest'
+        continue-on-error: true
+        run: |
+          npm --prefix web/frontend audit --audit-level=high
+          go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
       - name: Run Tests
         if: matrix.os != 'ubuntu-latest'
         run: go test -v ./...
