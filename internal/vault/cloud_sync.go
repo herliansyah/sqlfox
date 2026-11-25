@@ -518,9 +518,21 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 	}
 	var newTreeEntries []treeEntry
 
-	// Mirror deletions: files that existed in previous tree under our sync scope but are now removed
+	hasLocalNotes := false
+	for p := range files {
+		if strings.HasPrefix(p, prefix+"notes/") {
+			hasLocalNotes = true
+			break
+		}
+	}
+
+	// Mirror deletions: only delete remote notes when this machine actually has notes in its vault;
+	// a fresh/empty machine must never wipe an existing remote notes archive on another device.
 	for _, oldPath := range existingFiles {
 		if _, exists := files[oldPath]; !exists {
+			if !hasLocalNotes && strings.HasPrefix(oldPath, prefix+"notes/") {
+				continue
+			}
 			// In GitHub API, passing sha: nil / omitting sha deletes the file from the tree
 			newTreeEntries = append(newTreeEntries, treeEntry{
 				Path: oldPath,

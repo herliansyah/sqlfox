@@ -539,9 +539,20 @@ func resolveMasterPassword(flagPass string, configDir string) (string, bool, err
 		return envPass, false, nil
 	}
 
+	// 2b. Optional OS Keychain lookup when SQLFOX_KEYCHAIN=1
+	useKeychain := os.Getenv("SQLFOX_KEYCHAIN") == "1"
+	if useKeychain {
+		if kcPass, ok := vault.ReadKeychainMasterPassword(); ok {
+			return kcPass, false, nil
+		}
+	}
+
 	// 3. Saved master.key file
 	keyFile := filepath.Join(configDir, "master.key")
 	if saved, err := vault.ReadMasterKeyFile(keyFile); err == nil && saved != "" {
+		if useKeychain {
+			_ = vault.WriteKeychainMasterPassword(saved)
+		}
 		return saved, false, nil
 	}
 
@@ -549,6 +560,12 @@ func resolveMasterPassword(flagPass string, configDir string) (string, bool, err
 	pin, err := generateFriendlyPIN()
 	if err != nil {
 		return "", false, fmt.Errorf("failed to generate master PIN: %w", err)
+	}
+
+	if useKeychain {
+		if err := vault.WriteKeychainMasterPassword(pin); err == nil {
+			return pin, true, nil
+		}
 	}
 
 	if err := os.MkdirAll(configDir, 0700); err != nil {

@@ -338,7 +338,18 @@ func (s *ActiveSession) runSingleCountEstimate(ctx context.Context, countSQL str
 	if s.Session == nil || countSQL == "" {
 		return nil, false
 	}
-	// Skip direct COUNT(*) execution if WHERE contains function calls or subqueries; use non-executing EXPLAIN instead.
+	// Run non-executing EXPLAIN first: if it already predicts > 100 rows, skip SELECT COUNT(*)
+	// entirely so large production tables never suffer a multi-second scan before the Challenge gate.
+	expCtx, expCancel := context.WithTimeout(ctx, 2*time.Second)
+	plan, expErr := s.Session.Explain(expCtx, countSQL)
+	expCancel()
+	if expErr == nil && plan != nil && len(plan.Rows) > 0 && plan.Rows[0].Rows > 100 {
+		est := plan.Rows[0].Rows
+		return &est, false
+	}
+
+	// For <= 100 estimated rows (or when EXPLAIN is unavailable), run bounded COUNT(*) if predicate is safe
+	// so Development single-row mutations can be verified accurately.
 	if !hasUnsafeCountPredicate(countSQL) {
 		countID := fmt.Sprintf("count-%d", time.Now().UnixNano())
 		countCtx, cancel := context.WithTimeout(driver.WithQueryID(ctx, countID), 2*time.Second)
@@ -357,15 +368,9 @@ func (s *ActiveSession) runSingleCountEstimate(ctx context.Context, countSQL str
 		}
 	}
 
-	// Fallback to EXPLAIN (never executes query) using a fresh bounded context derived from ctx.
-	expCtx, expCancel := context.WithTimeout(ctx, 2*time.Second)
-	defer expCancel()
-	plan, expErr := s.Session.Explain(expCtx, countSQL)
-	if expErr == nil && plan != nil && len(plan.Rows) > 0 {
-		if plan.Rows[0].Rows > 0 {
-			est := plan.Rows[0].Rows
-			return &est, false
-		}
+	if expErr == nil && plan != nil && len(plan.Rows) > 0 && plan.Rows[0].Rows > 0 {
+		est := plan.Rows[0].Rows
+		return &est, false
 	}
 
 	return nil, false
