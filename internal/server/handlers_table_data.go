@@ -203,7 +203,7 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 
 	stream, err := sess.queryStreamSafe(ctx, querySQL, limit)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "query failed: "+err.Error())
+		writeError(w, queryErrorStatus(err), "query failed: "+err.Error())
 		return
 	}
 	defer stream.Close()
@@ -211,7 +211,7 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 	cols := stream.Columns()
 	chunk, err := stream.NextChunk(limit)
 	if err != nil && err != io.EOF {
-		writeError(w, http.StatusBadRequest, "query failed: "+err.Error())
+		writeError(w, queryErrorStatus(err), "query failed: "+err.Error())
 		return
 	}
 	if chunk == nil {
@@ -333,14 +333,14 @@ func (s *Server) handleGetTableCount(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	stream, err := sess.queryStreamSafe(ctx, countSQL, 1)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "count failed: "+err.Error())
+		writeError(w, queryErrorStatus(err), "count failed: "+err.Error())
 		return
 	}
 	defer stream.Close()
 
 	chunk, err := stream.NextChunk(1)
 	if err != nil && err != io.EOF {
-		writeError(w, http.StatusBadRequest, "count failed: "+err.Error())
+		writeError(w, queryErrorStatus(err), "count failed: "+err.Error())
 		return
 	}
 
@@ -545,6 +545,16 @@ func isReservedSQLVerb(upper string) bool {
 		return true
 	}
 	return false
+}
+
+func queryErrorStatus(err error) int {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return http.StatusGatewayTimeout
+	}
+	if errors.Is(err, context.Canceled) {
+		return http.StatusRequestTimeout
+	}
+	return http.StatusInternalServerError
 }
 
 func truncateForError(s string) string {
