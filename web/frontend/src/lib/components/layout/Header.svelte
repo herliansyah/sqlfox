@@ -403,6 +403,7 @@
           use:viewportFit
           class="absolute left-0 top-full mt-1 w-80 bg-[#0f172a] border border-slate-700/90 rounded-lg shadow-2xl z-50 py-1 divide-y divide-slate-800 animate-in fade-in zoom-in-95 duration-100"
           role="dialog"
+          aria-modal="true"
           aria-label="Switch connection"
         >
           <div class="p-2 border-b border-slate-800">

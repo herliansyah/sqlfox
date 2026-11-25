@@ -387,6 +387,12 @@
       case 'BETWEEN': {
         const parts = valStr.split(/\s+AND\s+|,/i).map((s) => s.trim());
         if (parts.length < 2) return true;
+        const num = Number(str);
+        const low = Number(parts[0]);
+        const high = Number(parts[1]);
+        if (str !== '' && parts[0] !== '' && parts[1] !== '' && Number.isFinite(num) && Number.isFinite(low) && Number.isFinite(high)) {
+          return num >= low && num <= high;
+        }
         return str >= parts[0] && str <= parts[1];
       }
       default:

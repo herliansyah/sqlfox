@@ -501,6 +501,7 @@
     class="fixed inset-0 z-50 flex items-start justify-center pt-24 p-4 bg-black/75 select-none"
     onclick={(e) => e.target === e.currentTarget && (appState.isCommandPaletteOpen = false)}
     role="dialog"
+    aria-modal="true"
     tabindex="-1"
     onkeydown={handleKeyDown}
   >
