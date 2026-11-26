@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [v0.20.1] - 2026-11-26
 
+## [v0.20.1] - 2026-11-26
+
 ### Fixed
 
 - **Root test scripts esbuild resolution & Windows CI failures** (`scripts/test-cell-constraints.mjs`, `scripts/test-svelte-codemirror.mjs`): Resolve esbuild from frontend `node_modules` instead of root, fixing test failures on Windows CI and in environments without a root-level esbuild (#160).
