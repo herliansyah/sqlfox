@@ -212,24 +212,43 @@ func TestHandleApplyUpdate(t *testing.T) {
 		t.Fatalf("failed to write fake executable: %v", err)
 	}
 
-	// Create mock .tar.gz archive
+	assetName := fmt.Sprintf("sqlfox-v0.2.0-%s-%s.tar.gz", runtime.GOOS, runtime.GOARCH)
 	var archiveBuf bytes.Buffer
-	gzw := gzip.NewWriter(&archiveBuf)
-	tw := tar.NewWriter(gzw)
 	newPayload := []byte("new-binary-v0.2.0")
-	hdr := &tar.Header{
-		Name: "sqlfox",
-		Mode: 0755,
-		Size: int64(len(newPayload)),
+	if runtime.GOOS == "windows" {
+		assetName = fmt.Sprintf("sqlfox-v0.2.0-%s-%s.zip", runtime.GOOS, runtime.GOARCH)
+		zw := zip.NewWriter(&archiveBuf)
+		entry, err := zw.Create("sqlfox.exe")
+		if err != nil {
+			t.Fatalf("zip entry creation failed: %v", err)
+		}
+		if _, err := entry.Write(newPayload); err != nil {
+			t.Fatalf("zip entry write failed: %v", err)
+		}
+		if err := zw.Close(); err != nil {
+			t.Fatalf("zip close failed: %v", err)
+		}
+	} else {
+		gzw := gzip.NewWriter(&archiveBuf)
+		tw := tar.NewWriter(gzw)
+		hdr := &tar.Header{
+			Name: "sqlfox",
+			Mode: 0755,
+			Size: int64(len(newPayload)),
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatalf("tar write header error: %v", err)
+		}
+		if _, err := tw.Write(newPayload); err != nil {
+			t.Fatalf("tar write body error: %v", err)
+		}
+		if err := tw.Close(); err != nil {
+			t.Fatalf("tar close error: %v", err)
+		}
+		if err := gzw.Close(); err != nil {
+			t.Fatalf("gzip close error: %v", err)
+		}
 	}
-	if err := tw.WriteHeader(hdr); err != nil {
-		t.Fatalf("tar write header error: %v", err)
-	}
-	if _, err := tw.Write(newPayload); err != nil {
-		t.Fatalf("tar write body error: %v", err)
-	}
-	tw.Close()
-	gzw.Close()
 
 	actualHash := sha256.Sum256(archiveBuf.Bytes())
 	hexHash := hex.EncodeToString(actualHash[:])
@@ -238,7 +257,7 @@ func TestHandleApplyUpdate(t *testing.T) {
 	mockDownload := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "checksums.txt") {
 			w.Header().Set("Content-Type", "text/plain")
-			w.Write([]byte(fmt.Sprintf("%s  sqlfox-v0.2.0-linux-amd64.tar.gz\n", hexHash)))
+			w.Write([]byte(fmt.Sprintf("%s  %s\n", hexHash, assetName)))
 			return
 		}
 		if strings.HasSuffix(r.URL.Path, ".tar.gz") || strings.HasSuffix(r.URL.Path, ".zip") {
@@ -250,11 +269,11 @@ func TestHandleApplyUpdate(t *testing.T) {
 		// requested asset_url to be advertised here.
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(fmt.Sprintf(
-			`{"tag_name":"v0.2.0","assets":[{"name":"sqlfox-v0.2.0-linux-amd64.tar.gz","browser_download_url":%q,"size":%d}]}`,
-			assetURL, archiveBuf.Len())))
+			`{"tag_name":"v0.2.0","assets":[{"name":%q,"browser_download_url":%q,"size":%d}]}`,
+			assetName, assetURL, archiveBuf.Len())))
 	}))
 	defer mockDownload.Close()
-	assetURL = mockDownload.URL + "/sqlfox-v0.2.0-linux-amd64.tar.gz"
+	assetURL = mockDownload.URL + "/" + assetName
 
 	restartChan := make(chan struct{}, 1)
 	srv := &Server{
@@ -267,7 +286,7 @@ func TestHandleApplyUpdate(t *testing.T) {
 	}
 
 	body := map[string]string{
-		"asset_url": mockDownload.URL + "/sqlfox-v0.2.0-linux-amd64.tar.gz",
+		"asset_url": assetURL,
 		"version":   "v0.2.0",
 	}
 	bodyBytes, _ := json.Marshal(body)
@@ -410,7 +429,11 @@ func TestRejectMismatchedChecksum(t *testing.T) {
 	_ = tw.Close()
 	_ = gzw.Close()
 
-	assetName := fmt.Sprintf("sqlfox-v0.2.0-%s-%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+	assetExt := ".tar.gz"
+	if runtime.GOOS == "windows" {
+		assetExt = ".zip"
+	}
+	assetName := fmt.Sprintf("sqlfox-v0.2.0-%s-%s%s", runtime.GOOS, runtime.GOARCH, assetExt)
 	var assetURL string
 	mockDownload := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "checksums.txt") {
@@ -419,7 +442,7 @@ func TestRejectMismatchedChecksum(t *testing.T) {
 			w.Write([]byte("0000000000000000000000000000000000000000000000000000000000000000  " + assetName + "\n"))
 			return
 		}
-		if strings.HasSuffix(r.URL.Path, ".tar.gz") {
+		if strings.HasSuffix(r.URL.Path, ".tar.gz") || strings.HasSuffix(r.URL.Path, ".zip") {
 			w.Header().Set("Content-Type", "application/gzip")
 			w.Write(archiveBuf.Bytes())
 			return

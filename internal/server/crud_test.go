@@ -430,6 +430,7 @@ func TestCRUD_CompositePrimaryKeySupport(t *testing.T) {
 	targetDB := filepath.Join(tempDir, "composite_pk.db")
 
 	srv := NewServer(v, nil, filepath.Join(tempDir, "backups"), "test-master")
+	defer srv.Close()
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
