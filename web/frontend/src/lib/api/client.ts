@@ -5,9 +5,11 @@ import type {
   QueryExecutionResult,
   InspectionResult,
   ProcesslistThread,
+  ProcessLockWait,
   TablePartition,
   QuerySnippet,
   OperationalNote,
+  SessionAuditItem,
 } from '../../types';
 import {
   ApiHttpBase,
@@ -108,13 +110,13 @@ class ApiClient extends ApiHttpBase {
     });
   }
 
-  async testConnection(id: string): Promise<{ success: boolean; version?: string; latency_ms?: number; error?: string; server?: any }> {
+  async testConnection(id: string): Promise<{ success: boolean; version?: string; latency_ms?: number; error?: string; server?: Record<string, unknown> }> {
     return this.request(`/connections/${id}/test`, {
       method: 'POST',
     });
   }
 
-  async testTransientConnection(conn: Partial<ConnectionProfile>): Promise<{ success: boolean; version?: string; latency_ms?: number; error?: string; server?: any }> {
+  async testTransientConnection(conn: Partial<ConnectionProfile>): Promise<{ success: boolean; version?: string; latency_ms?: number; error?: string; server?: Record<string, unknown> }> {
     return this.request('/connections/test-transient/test', {
       method: 'POST',
       body: JSON.stringify(conn),
@@ -136,7 +138,7 @@ class ApiClient extends ApiHttpBase {
     connection_id: string;
     current_database?: string;
     schema?: SchemaCatalog;
-    server_info?: any;
+    server_info?: Record<string, unknown>;
   }> {
     return this.request(`/session/connect/${connId}`, {
       method: 'POST',
@@ -188,8 +190,8 @@ class ApiClient extends ApiHttpBase {
   async preflightDDL(connId: string, tableName: string, db = '', alterClause = ''): Promise<{
     table: string;
     database: string;
-    active_locks: any[];
-    relationships: any[];
+    active_locks: ProcessLockWait[];
+    relationships: Record<string, unknown>[];
     osc_ghost: string;
     osc_pt: string;
   }> {
@@ -354,11 +356,11 @@ class ApiClient extends ApiHttpBase {
         database?: string;
         table: string;
         column: string;
-        value: any;
+        value: unknown;
         pk_column?: string;
-        pk_value?: any;
-        pk_values?: Record<string, any>;
-        row_criteria?: Record<string, any>;
+        pk_value?: unknown;
+        pk_values?: Record<string, unknown>;
+        row_criteria?: Record<string, unknown>;
       }>;
     }
   ): Promise<{ success: boolean; rows_affected: number; applied_count: number }> {
@@ -373,7 +375,7 @@ class ApiClient extends ApiHttpBase {
     payload: {
       database?: string;
       table: string;
-      data: Record<string, any>;
+      data: Record<string, unknown>;
     }
   ): Promise<{ success: boolean; rows_affected: number }> {
     return this.request(`/session/${sessionId}/insert-row`, {
@@ -388,9 +390,9 @@ class ApiClient extends ApiHttpBase {
       database?: string;
       table: string;
       pk_column?: string;
-      pk_values?: any[];
-      pk_rows?: Record<string, any>[];
-      row_criterias?: Record<string, any>[];
+      pk_values?: unknown[];
+      pk_rows?: Record<string, unknown>[];
+      row_criterias?: Record<string, unknown>[];
     }
   ): Promise<{ success: boolean; rows_affected: number }> {
     return this.request(`/session/${sessionId}/delete-rows`, {
@@ -472,7 +474,7 @@ class ApiClient extends ApiHttpBase {
   async getProcesslist(sessionId: string): Promise<{
     current_thread_id: number;
     threads: ProcesslistThread[];
-    locks?: any[];
+    locks?: ProcessLockWait[];
     questions?: number;
   }> {
     return this.request(`/session/${sessionId}/processlist`);
@@ -522,7 +524,7 @@ class ApiClient extends ApiHttpBase {
   async getAuditLogs(
     sessionId: string,
     params: { limit?: number; offset?: number; search?: string; source?: string } = {}
-  ): Promise<{ logs: any[]; total: number; limit: number; offset: number }> {
+  ): Promise<{ logs: SessionAuditItem[]; total: number; limit: number; offset: number }> {
     const qs = new URLSearchParams();
     if (params.limit) qs.set('limit', String(params.limit));
     if (params.offset !== undefined) qs.set('offset', String(params.offset));
@@ -609,7 +611,7 @@ class ApiClient extends ApiHttpBase {
   }
 
   // Snippets
-  async listSnippets(): Promise<any[]> {
+  async listSnippets(): Promise<QuerySnippet[]> {
     return this.request('/snippets');
   }
 
@@ -626,7 +628,7 @@ class ApiClient extends ApiHttpBase {
     });
   }
 
-  async deleteSnippet(id: string): Promise<any> {
+  async deleteSnippet(id: string): Promise<{ success?: boolean }> {
     return this.request(`/snippets/${id}`, {
       method: 'DELETE',
     });
@@ -763,27 +765,27 @@ class ApiClient extends ApiHttpBase {
     return this.normalizeNote(res);
   }
 
-  async deleteNote(id: string): Promise<any> {
+  async deleteNote(id: string): Promise<Record<string, unknown>> {
     return this.request(`/notes/${id}`, {
       method: 'DELETE',
     });
   }
 
-  async snoozeNote(id: string, minutes: number): Promise<any> {
+  async snoozeNote(id: string, minutes: number): Promise<Record<string, unknown>> {
     return this.request(`/notes/${id}/snooze`, {
       method: 'POST',
       body: JSON.stringify({ minutes }),
     });
   }
 
-  async resolveNote(id: string): Promise<any> {
+  async resolveNote(id: string): Promise<Record<string, unknown>> {
     return this.request(`/notes/${id}/resolve`, {
       method: 'POST',
     });
   }
 
-  async getDueReminders(): Promise<any[]> {
-    const res = await this.request<any[]>('/notes/reminders/due');
+  async getDueReminders(): Promise<OperationalNote[]> {
+    const res = await this.request<Record<string, unknown>[]>('/notes/reminders/due');
     return (Array.isArray(res) ? res : []).map((n) => this.normalizeNote(n));
   }
 
@@ -791,7 +793,7 @@ class ApiClient extends ApiHttpBase {
     return this.request(`/session/${sessionId}/notes/${encodeURIComponent(table)}`);
   }
 
-  async saveTableNote(sessionId: string, table: string, content: string): Promise<any> {
+  async saveTableNote(sessionId: string, table: string, content: string): Promise<Record<string, unknown>> {
     return this.request(`/session/${sessionId}/notes/${encodeURIComponent(table)}`, {
       method: 'POST',
       body: JSON.stringify({ content }),
@@ -941,7 +943,7 @@ class ApiClient extends ApiHttpBase {
   }
 
   // Foreign Key Peek
-  async peekForeignKey(sessionId: string, database: string, table: string, column: string, value: any): Promise<any> {
+  async peekForeignKey(sessionId: string, database: string, table: string, column: string, value: unknown): Promise<{ columns: string[]; rows: unknown[][]; row?: Record<string, unknown> }> {
     const q = `database=${encodeURIComponent(database)}&table=${encodeURIComponent(table)}&column=${encodeURIComponent(column)}&value=${encodeURIComponent(String(value ?? ''))}`;
     return this.request(`/session/${sessionId}/peek?${q}`);
   }
@@ -984,7 +986,7 @@ class ApiClient extends ApiHttpBase {
     target_db?: string;
     table: string;
     columns: string[];
-    operations: Array<{ type: string; pk: any; old_data?: any[]; data?: any[] }>;
+    operations: Array<{ type: string; pk: unknown; old_data?: unknown[]; data?: unknown[] }>;
     confirmed?: boolean;
     challenge_input?: string;
   }): Promise<any> {
