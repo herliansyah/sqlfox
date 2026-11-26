@@ -26,6 +26,73 @@ export function computeColumnWidths(
   return widths;
 }
 
+export interface ColumnWindow {
+  startColIdx: number;
+  endColIdx: number;
+  leftSpacerWidth: number;
+  rightSpacerWidth: number;
+  totalWidth: number;
+  colOffsets: number[];
+}
+
+/**
+ * Compute the horizontally visible slice of columns and left/right spacer widths
+ * for table-fixed column virtualization.
+ */
+export function computeVisibleColumnWindow(
+  colNames: string[],
+  columnWidths: Record<string, number>,
+  scrollLeft: number,
+  containerWidth: number,
+  gutterWidth = 64,
+  overscan = 4
+): ColumnWindow {
+  const count = colNames.length;
+  const colOffsets = new Array<number>(count + 1);
+  colOffsets[0] = 0;
+  for (let i = 0; i < count; i++) {
+    const w = columnWidths[colNames[i]] || 160;
+    colOffsets[i + 1] = colOffsets[i] + w;
+  }
+  const totalColsWidth = colOffsets[count];
+  if (count === 0) {
+    return {
+      startColIdx: 0,
+      endColIdx: 0,
+      leftSpacerWidth: 0,
+      rightSpacerWidth: 0,
+      totalWidth: gutterWidth,
+      colOffsets,
+    };
+  }
+
+  const viewLeft = Math.max(0, scrollLeft);
+  const viewRight = viewLeft + Math.max(200, containerWidth - gutterWidth);
+
+  let rawStart = 0;
+  while (rawStart < count && colOffsets[rawStart + 1] <= viewLeft) {
+    rawStart++;
+  }
+  let rawEnd = rawStart;
+  while (rawEnd < count && colOffsets[rawEnd] < viewRight) {
+    rawEnd++;
+  }
+
+  const startColIdx = Math.max(0, rawStart - overscan);
+  const endColIdx = Math.min(count, rawEnd + overscan);
+  const leftSpacerWidth = colOffsets[startColIdx];
+  const rightSpacerWidth = Math.max(0, totalColsWidth - colOffsets[endColIdx]);
+
+  return {
+    startColIdx,
+    endColIdx,
+    leftSpacerWidth,
+    rightSpacerWidth,
+    totalWidth: gutterWidth + totalColsWidth,
+    colOffsets,
+  };
+}
+
 export function matchesFilterPill(cellVal: any, pill: FilterPill): boolean {
   if (pill.op === 'IS NULL') return cellVal === null || cellVal === undefined;
   if (pill.op === 'IS NOT NULL') return cellVal !== null && cellVal !== undefined;

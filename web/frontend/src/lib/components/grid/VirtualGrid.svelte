@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
   import { copyText } from '../../utils/clipboard';
-  import { computeColumnWidths, matchesFilterPill } from './gridHelpers';
+  import { computeColumnWidths, computeVisibleColumnWindow, matchesFilterPill } from './gridHelpers';
   import GridCellDetailDrawer from './GridCellDetailDrawer.svelte';
   import GridFilterBar from './GridFilterBar.svelte';
   import GridFooterBar from './GridFooterBar.svelte';
@@ -33,10 +33,14 @@
 
   const ROW_HEIGHT = 28;
   const OVERSCAN = 15;
+  const GUTTER_WIDTH = 64;
+  const COL_OVERSCAN = 4;
 
   let containerRef: HTMLDivElement | null = $state(null);
   let scrollTop = $state(0);
+  let scrollLeft = $state(0);
   let containerHeight = $state(500);
+  let containerWidth = $state(900);
 
   let currentTab = $derived(appState.activeTab);
   let result = $derived(appState.activeTab?.activeResult);
@@ -158,7 +162,11 @@
     void _runId;
     void _resIdx;
     scrollTop = 0;
-    if (containerRef) containerRef.scrollTop = 0;
+    scrollLeft = 0;
+    if (containerRef) {
+      containerRef.scrollTop = 0;
+      containerRef.scrollLeft = 0;
+    }
     sortCol = null;
     sortDir = 'ASC';
     localSearchQuery = '';
@@ -172,14 +180,16 @@
     detailPrettyJson = false;
   });
 
-  // Keep containerHeight synced with viewport/splitter resizes before any scroll event.
+  // Keep containerHeight/containerWidth synced with viewport/splitter resizes before any scroll event.
   $effect(() => {
     const el = containerRef;
     if (!el) return;
     containerHeight = el.clientHeight || 500;
+    containerWidth = el.clientWidth || 900;
     if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(() => {
       containerHeight = el.clientHeight || 500;
+      containerWidth = el.clientWidth || 900;
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -307,6 +317,7 @@
         showUuidPreset: boolean;
         hasAnyPreset: boolean;
         fk: any;
+        isPK: boolean;
       }>;
     }
     const entries: Array<{
@@ -320,6 +331,7 @@
       showUuidPreset: boolean;
       hasAnyPreset: boolean;
       fk: any;
+      isPK: boolean;
     }> = [];
     result.columns.forEach((col, origIdx) => {
       const colName = getColName(col);
@@ -331,7 +343,8 @@
         const showUuidPreset = kind.isUuid || (kind.isString && (!kind.maxLength || kind.maxLength >= 36));
         const hasAnyPreset = nullable || kind.isString || kind.isDateTime || kind.isDate || showUuidPreset;
         const fk = fkMap.get(colName);
-        entries.push({ col, origIdx, colName, colType, nullable, enumVals, kind, showUuidPreset, hasAnyPreset, fk });
+        const isPK = isColPK(col);
+        entries.push({ col, origIdx, colName, colType, nullable, enumVals, kind, showUuidPreset, hasAnyPreset, fk, isPK });
       }
     });
     return entries;
@@ -420,6 +433,26 @@
   let totalRows = $derived(processedRows ? processedRows.length : (result?.rows?.length ?? 0));
   let totalCols = $derived(visibleColumns.length + 1);
 
+  let colWindow = $derived.by(() =>
+    computeVisibleColumnWindow(
+      visibleColumnEntries.map((e) => e.colName),
+      columnWidths,
+      scrollLeft,
+      containerWidth,
+      GUTTER_WIDTH,
+      COL_OVERSCAN
+    )
+  );
+  let windowedColumnEntries = $derived(
+    visibleColumnEntries.slice(colWindow.startColIdx, colWindow.endColIdx)
+  );
+  let renderedColCount = $derived(
+    1 +
+      (colWindow.leftSpacerWidth > 0 ? 1 : 0) +
+      windowedColumnEntries.length +
+      (colWindow.rightSpacerWidth > 0 ? 1 : 0)
+  );
+
   let startIndex = $derived(Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN));
   let endIndex = $derived(Math.min(totalRows, Math.ceil((scrollTop + containerHeight) / ROW_HEIGHT) + OVERSCAN));
 
@@ -446,6 +479,7 @@
   function onScroll(e: Event) {
     const target = e.currentTarget as HTMLDivElement;
     scrollTop = target.scrollTop;
+    scrollLeft = target.scrollLeft;
   }
 
   function handleHeaderSort(colName: string) {
@@ -1057,6 +1091,15 @@
       if (y < containerRef.scrollTop) containerRef.scrollTop = y;
       else if (y + ROW_HEIGHT > containerRef.scrollTop + containerRef.clientHeight - 60) {
         containerRef.scrollTop = y + ROW_HEIGHT - containerRef.clientHeight + 60;
+      }
+
+      const colLeft = colWindow.colOffsets[nextVisColIdx] ?? 0;
+      const colRight = colWindow.colOffsets[nextVisColIdx + 1] ?? colLeft;
+      const availWidth = Math.max(200, containerRef.clientWidth - GUTTER_WIDTH);
+      if (colLeft < containerRef.scrollLeft) {
+        containerRef.scrollLeft = colLeft;
+      } else if (colRight > containerRef.scrollLeft + availWidth) {
+        containerRef.scrollLeft = colRight - availWidth;
       }
     }
   }
@@ -1719,12 +1762,18 @@
       tabindex="0"
       class="flex-1 overflow-auto relative border-t border-[#1e293b] outline-none"
     >
-      <table id="results-table" class="border-collapse text-left font-mono text-xs table-fixed">
+      <table id="results-table" class="border-collapse text-left font-mono text-xs table-fixed" style="width: {colWindow.totalWidth}px;">
         <colgroup>
           <col style="width: 64px;" />
-          {#each visibleColumns as col}
-            <col style="width: {columnWidths[getColName(col)] || 160}px;" />
+          {#if colWindow.leftSpacerWidth > 0}
+            <col style="width: {colWindow.leftSpacerWidth}px;" />
+          {/if}
+          {#each windowedColumnEntries as entry (entry.origIdx)}
+            <col style="width: {columnWidths[entry.colName] || 160}px;" />
           {/each}
+          {#if colWindow.rightSpacerWidth > 0}
+            <col style="width: {colWindow.rightSpacerWidth}px;" />
+          {/if}
         </colgroup>
         <!-- Sticky Header -->
         <thead class="sticky top-0 z-20 bg-[#0f172a] border-b border-[#334155] shadow-sm select-none">
@@ -1741,10 +1790,10 @@
                 <span>#</span>
               </div>
             </th>
-            {#each visibleColumns as col}
-              {@const colName = getColName(col)}
-              {@const colType = resolveColType(col)}
-              {@const isPK = isColPK(col)}
+            {#if colWindow.leftSpacerWidth > 0}
+              <th aria-hidden="true" style="padding:0; border:0;"></th>
+            {/if}
+            {#each windowedColumnEntries as { colName, colType, isPK } (colName)}
               <th
                 tabindex="0"
                 aria-sort={effectiveSortCol === colName ? (effectiveSortDir === 'ASC' ? 'ascending' : 'descending') : 'none'}
@@ -1773,6 +1822,9 @@
                 </div>
               </th>
             {/each}
+            {#if colWindow.rightSpacerWidth > 0}
+              <th aria-hidden="true" style="padding:0; border:0;"></th>
+            {/if}
           </tr>
         </thead>
 
@@ -1802,12 +1854,10 @@
                     <Icon name="x" class="w-3.5 h-3.5" />
                   </button>
                 </td>
-                {#each visibleColumns as col}
-                  {@const colName = getColName(col)}
-                  {@const colType = resolveColType(col)}
-                  {@const nullable = isColNullable(col)}
-                  {@const enumVals = resolveEnumValues(col, tableMeta)}
-                  {@const kind = classifyColumnType(colType, enumVals)}
+                {#if colWindow.leftSpacerWidth > 0}
+                  <td aria-hidden="true" style="padding:0; border:0;"></td>
+                {/if}
+                {#each windowedColumnEntries as { origIdx: cIdx, colName, nullable, enumVals, kind } (cIdx)}
                   <td class="px-2 py-0.5 border-r border-sky-800/40">
                     {#if kind.isBool}
                       <select
@@ -1868,19 +1918,22 @@
                     {/if}
                   </td>
                 {/each}
+                {#if colWindow.rightSpacerWidth > 0}
+                  <td aria-hidden="true" style="padding:0; border:0;"></td>
+                {/if}
               </tr>
             {/each}
           {/if}
 
           {#if topSpacerHeight > 0}
             <tr style="height: {topSpacerHeight}px; pointer-events: none;">
-              <td colspan={totalCols} style="padding:0; border:0; height:{topSpacerHeight}px;"></td>
+              <td colspan={renderedColCount} style="padding:0; border:0; height:{topSpacerHeight}px;"></td>
             </tr>
           {/if}
 
           {#if totalRows === 0}
             <tr>
-              <td colspan={totalCols} class="p-12 text-center text-slate-500 italic text-xs">
+              <td colspan={renderedColCount} class="p-12 text-center text-slate-500 italic text-xs">
                 Zero records returned.
               </td>
             </tr>
@@ -1916,7 +1969,11 @@
                 </td>
 
                 <!-- Cells -->
-                {#each visibleColumnEntries as { col, origIdx: cIdx, colName, colType, nullable, enumVals, kind, showUuidPreset, hasAnyPreset, fk }, visColIdx (cIdx)}
+                {#if colWindow.leftSpacerWidth > 0}
+                  <td aria-hidden="true" style="padding:0; border:0;"></td>
+                {/if}
+                {#each windowedColumnEntries as { col, origIdx: cIdx, colName, colType, nullable, enumVals, kind, showUuidPreset, hasAnyPreset, fk }, localColIdx (cIdx)}
+                  {@const visColIdx = colWindow.startColIdx + localColIdx}
                   {@const dispRowIdx = rowItem.displayIdx}
                   {@const cellVal = cIdx >= 0 ? rowItem.data[cIdx] : undefined}
                   {@const formatted = formatCellValue(cellVal)}
@@ -1945,7 +2002,7 @@
                     }}
                     ondblclick={() => startCellEdit(rowItem.origIdx, cIdx, cellVal)}
                     oncontextmenu={(e) => handleCellContextMenu(e, rowItem.origIdx, cIdx, cellVal)}
-                    class="px-3 py-1 border-r border-[#1e293b]/40 whitespace-nowrap max-w-sm {isEditingThis ? 'overflow-visible z-30' : 'truncate'} {getCellClass(formatted.type)} cursor-cell hover:bg-sky-900/30 transition-colors relative {
+                    class="px-3 py-1 border-r border-[#1e293b]/40 whitespace-nowrap max-w-sm {isEditingThis ? 'overflow-visible z-30' : 'truncate'} {getCellClass(formatted.type)} cursor-cell hover:bg-sky-900/30 relative {
                       isStaged ? 'bg-amber-950/40 text-amber-200 font-semibold ring-1 ring-amber-500' : isFlashed ? 'bg-emerald-950/60 ring-1 ring-emerald-400' : isCellSelected ? 'ring-1 ring-inset ring-sky-400/80 bg-sky-900/20' : inRange ? 'bg-sky-900/25' : ''
                     }"
                     title="{formatted.display}{canEdit ? ' (Double-click to edit, right-click for filters)' : ''}"
@@ -2169,13 +2226,16 @@
                     {/if}
                   </td>
                 {/each}
+                {#if colWindow.rightSpacerWidth > 0}
+                  <td aria-hidden="true" style="padding:0; border:0;"></td>
+                {/if}
               </tr>
             {/each}
           {/if}
 
           {#if bottomSpacerHeight > 0}
             <tr style="height: {bottomSpacerHeight}px; pointer-events: none;">
-              <td colspan={totalCols} style="padding:0; border:0; height:{bottomSpacerHeight}px;"></td>
+              <td colspan={renderedColCount} style="padding:0; border:0; height:{bottomSpacerHeight}px;"></td>
             </tr>
           {/if}
         </tbody>
