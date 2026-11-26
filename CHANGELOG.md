@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.20.0] - 2026-11-26
+
+### Security
+
+- **Ephemeral LAN Pairing Code replacing plaintext master password (`internal/server/auth.go`, `web/frontend`)**: `GET /api/auth/master-key` no longer returns the plaintext `master_password`; it now returns a single-use 8-digit pairing code with a 5-minute TTL. Settings and Header UI updated accordingly. **BREAKING CHANGE** (#158).
+- **X-Forwarded-For spoofing prevention & hardened security headers** (`internal/server/auth.go`): Added `--trusted-proxies` and `--allowed-hosts` CLI flags; `--behind-proxy` flag and `SQLFOX_BEHIND_PROXY` env var to safely inspect forwarded client IPs. Privileged system/pprof endpoints now enforce direct loopback only (#157, #158).
+- **SSRF validation for AI endpoints**: Disabled HTTP redirects in the AI client and added SSRF guards on all AI proxy calls. API key redaction enforced on `GET /api/ai/profiles` responses (#158).
+- **Vault file permissions enforced at 0600** (`internal/vault`): `master.key` is now created with strict `0600` permissions. Vault backup sync to public GitHub repositories is refused (#158).
+- **Auth lockout hardening**: Pairing code generation uses rejection sampling (no hardcoded fallback), Argon2id concurrent derivations are bounded to prevent OOM DoS, bearer tokens in URL query strings are rejected, and session cookies set `Secure` when TLS is active (#157, #158).
+- **CSRF & credential leak prevention**: Auto-commit fallback on idle-aborted transactions is now prevented; transactions latch into an aborted state until explicit `ROLLBACK` (#157).
+- **SQL safety guard bypass closed**: MySQL executable comments (`/*!...*/`) are now unwrapped by the pure-Go SQL lexer so hidden statements cannot bypass inspection. Fail-closed behavior added for unparsed DELETE/UPDATE/DROP targets (#158).
+- **Request body size limit middleware & LAN HTTP warning** (#158).
+
+### Added
+
+- **`-behind-proxy` flag for reverse-proxy deployments** (`cmd/sqlfox/main.go`): Inspect `X-Forwarded-For` safely when running behind a trusted reverse proxy (#157).
+- **PWA web app manifest & application icons** (`web/frontend/public/`): Added `manifest.webmanifest`, touch icons, favicons, and metadata for PWA installation and browser branding (#155).
+- **De-anonymize masked identifiers in AI completions** (`internal/server/handlers_ai.go`): Identifier mapping is preserved during prompt assembly and unmasked in the completion before returning to the client (#157).
+- **MySQL & PostgreSQL live integration smoke tests in CI** (#158).
+- **Race detector enabled in CI and release builds** (`.github/workflows/`); Node upgraded to 22 (#158).
+
+### Changed
+
+- **Driver `Session` god interface split into capability interfaces** (`internal/driver/driver.go`): Broken into 10 focused optional interfaces (`ProcessManager`, `ClusterInspector`, `DeadlockInspector`, `StatementDigestProvider`, `DiagnosticsProvider`, `PartitionInspector`, `UserManager`, `RoutineInspector`, `EventManager`, `SafeDDLExecutor`). Unsupported stubs removed from SQLite and PostgreSQL drivers; server handlers fall back to `ErrFeatureNotSupported` gracefully (#156, #157).
+- **`session_manager.go` decomposed into focused modules** (`internal/server/`): Split into `session_manager.go` (lifecycle/reaper), `active_session.go` (state, transactions, capability delegation), and `session_execute.go` (query execution and streaming pipeline) (#156, #157).
+- **ProcesslistView panels extracted** (`web/frontend/src/lib/components/dba/`): `DigestPanel`, `DeadlockPanel`, `ClusterHealthPanel`, `ServerVariablesPanel`, and `FlightRecorderPanel` split from `ProcesslistView.svelte` (#156, #157).
+- **Frontend state modularized**: `gridEdits`, `tableFilters`, and `ddlOperations` extracted from `appState`; `GridContextMenu` extracted from inline usage. Global `window.appState` restricted to dev mode (#158).
+- **Pure-Go SQL lexer replaces `xwb1989/sqlparser`** (`internal/safety/`, `internal/advisor/`): Removed external parser dependency; predicate parser and SQL lexer are now pure-Go (#158).
+- **Overlay/modal dismiss centralized** into `appState.closeTopOverlay` (`web/frontend/src/lib/App.svelte`) (#157).
+- **Table backup dumps wrapped in transactions with batched inserts** (100 rows/batch) to eliminate torn writes (#157).
+
+### Fixed
+
+- **Composite primary key support in grid edits & row deletion** (`internal/server/`, `web/frontend/`): Cell-edit and delete-rows endpoints now accept composite PK mappings and generate multi-column WHERE clauses (#157).
+- **Argon2id `SetLogger` thread-safety** (`internal/server/auth.go`): `Server.SetLogger` is now idempotent and concurrent-safe (#157).
+- **Filter pill `IN`/`NOT IN` literal injection closed**: All literals in `compileFilterPills` are quoted and validated (#157).
+- **Windows CI vault test cleanup**: Unclosed vault database handles fixed to prevent file-lock failures on Windows (#154).
+- **Vite output unified to `web/dist/`** with dedicated CodeMirror chunk; `dist_svelte/` removed (#156).
+- **Svelte TypeScript errors resolved** and `svelte-check` wired into CI typecheck (#158).
+- **Self-update supply chain hardened**: HTTPS downgrade and file clobbering during self-updates are now refused (#158).
+
 ## [v0.19.8] - 2026-11-23
 
 ### Added
