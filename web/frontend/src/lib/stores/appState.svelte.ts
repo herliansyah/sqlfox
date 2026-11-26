@@ -304,7 +304,7 @@ export class AppState {
   private timerIntervals = new Map<string, any>();
   private connectionSwitchGen = 0;
   private databaseSwitchGen = 0;
-  private tableLoadTokens = new WeakMap<EditorTab, number>();
+  private tableLoadTokens = new Map<string, number>();
   private boundPageHideHandler: (() => void) | null = null;
   private boundBeforeUnloadHandler: ((e: BeforeUnloadEvent) => string | undefined) | null = null;
   private boundVisibilityHandler: (() => void) | null = null;
@@ -433,11 +433,7 @@ export class AppState {
           clearInterval(this.reminderTimer);
           this.reminderTimer = null;
         }
-        for (const tab of this.tabs) {
-          if (tab.isExecuting) {
-            tab.isExecuting = false;
-          }
-        }
+        this.tabs = this.tabs.map((t) => (t.isExecuting ? { ...t, isExecuting: false } : t));
       }
     };
     api.onReconnectNeeded = () => this.triggerAutoReconnect();
@@ -1476,9 +1472,8 @@ export class AppState {
     const currentDb = this.currentDatabase || '';
     const existing = this.tabs.find((t) => t.isTableViewer && t.tableName === tableName && (!t.database || t.database === currentDb));
     if (existing) {
-      existing.tableMode = initialMode;
+      this.patchTab(existing.id, { tableMode: initialMode });
       this.activeTabId = existing.id;
-      this.tabs = [...this.tabs];
       if (initialMode === 'data' && (!existing.activeResult || !existing.activeResult.rows || existing.activeResult.rows.length === 0)) {
         this.loadTableData(existing);
       }
@@ -1592,12 +1587,11 @@ export class AppState {
     const tabId = targetTab?.id || this.activeTabId;
     const tab = this.tabs.find((t) => t.id === tabId) || targetTab || this.activeTab;
     if (!this.activeSessionId || !tab || !tab.tableName) return;
-    tab.isExecuting = true;
-    this.tabs = [...this.tabs];
+    this.patchTab(tab.id, { isExecuting: true });
     const startTime = performance.now();
     // Guard against out-of-order responses when the user pages/filters rapidly.
-    const token = (this.tableLoadTokens.get(tab) || 0) + 1;
-    this.tableLoadTokens.set(tab, token);
+    const token = (this.tableLoadTokens.get(tab.id) || 0) + 1;
+    this.tableLoadTokens.set(tab.id, token);
     try {
       const limit = tab.pageSize || 25;
       const offset = ((tab.currentPage || 1) - 1) * limit;
@@ -1627,15 +1621,18 @@ export class AppState {
         tab.sortDir || undefined,
         structuredPills.length > 0 ? structuredPills : undefined
       );
-      if (this.tableLoadTokens.get(tab) !== token) return; // a newer load superseded this one
+      if (this.tableLoadTokens.get(tab.id) !== token) return; // a newer load superseded this one
       if (res && res.duration_ms === undefined) {
         res.duration_ms = Math.round(performance.now() - startTime);
       }
       if (res && res.row_count === undefined && res.rows) {
         res.row_count = res.rows.length;
       }
-      tab.resultRunId = (tab.resultRunId ?? 0) + 1;
-      tab.activeResult = res;
+      const liveTab = this.tabs.find((t) => t.id === tab.id);
+      this.patchTab(tab.id, {
+        resultRunId: ((liveTab?.resultRunId ?? tab.resultRunId) ?? 0) + 1,
+        activeResult: res,
+      });
 
       // Synchronize exact/effective row count back into the table catalog immutably
       if (res && typeof (res as any).total_rows === 'number') {
@@ -1643,18 +1640,19 @@ export class AppState {
         this.updateCatalogTableRowCount(tab.tableName, db, totalRows, Boolean(res.is_exact));
       }
     } catch (err: any) {
-      if (this.tableLoadTokens.get(tab) !== token) return;
-      tab.activeResult = {
-        columns: [],
-        rows: [],
-        duration_ms: Math.round(performance.now() - startTime),
-        row_count: 0,
-        error: err.message || 'Error loading table data',
-      };
+      if (this.tableLoadTokens.get(tab.id) !== token) return;
+      this.patchTab(tab.id, {
+        activeResult: {
+          columns: [],
+          rows: [],
+          duration_ms: Math.round(performance.now() - startTime),
+          row_count: 0,
+          error: err.message || 'Error loading table data',
+        },
+      });
     } finally {
-      if (this.tableLoadTokens.get(tab) === token) {
-        tab.isExecuting = false;
-        this.tabs = [...this.tabs];
+      if (this.tableLoadTokens.get(tab.id) === token) {
+        this.patchTab(tab.id, { isExecuting: false });
         this.saveTabsState();
       }
     }
