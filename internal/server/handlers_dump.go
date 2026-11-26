@@ -616,7 +616,7 @@ func (s *Server) handleRunSQLScript(w http.ResponseWriter, r *http.Request) {
 
 	// Safety Guard gate: mirrors editor's destructive-statement challenge.
 	if len(blockers) > 0 && !confirmed {
-		writeJSON(w, http.StatusConflict, map[string]any{
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
 			"error":              "Script contains destructive statements that require confirmation. Re-run with confirm=true to proceed.",
 			"requires_challenge": true,
 			"blockers":           blockers,
@@ -630,7 +630,7 @@ func (s *Server) handleRunSQLScript(w http.ResponseWriter, r *http.Request) {
 		}
 		typed := strings.TrimSpace(r.URL.Query().Get("challenge_input"))
 		if typed == "" {
-			writeJSON(w, http.StatusConflict, map[string]any{
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
 				"error":              fmt.Sprintf("Production script requires non-empty challenge_input matching '%s' or target table.", expectedDB),
 				"requires_challenge": true,
 				"blockers":           blockers,
@@ -647,7 +647,7 @@ func (s *Server) handleRunSQLScript(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if !matched {
-			writeJSON(w, http.StatusConflict, map[string]any{
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
 				"error":              fmt.Sprintf("Production script challenge_input did not match '%s'.", expectedDB),
 				"requires_challenge": true,
 				"blockers":           blockers,

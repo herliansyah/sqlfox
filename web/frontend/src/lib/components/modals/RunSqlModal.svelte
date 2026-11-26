@@ -98,10 +98,10 @@
       appState.showToast(`Script executed: ${successCount} statements succeeded`, errorCount > 0 ? 'warning' : 'success');
       await appState.refreshCatalog();
     } catch (err: any) {
-      if (err?.status === 409 || err?.data?.requires_challenge || err?.message?.includes('destructive statements')) {
+      if (err?.status === 422 || err?.status === 409 || err?.data?.requires_challenge || err?.message?.includes('destructive statements')) {
         const blockers = Array.isArray(err?.data?.blockers) ? err.data.blockers : [];
         pendingBlockers = blockers.length > 0 ? blockers : [{ reason: err.message }];
-        logs = [...logs, `[SAFETY GUARD 409]: Script paused pending explicit operator confirmation.`];
+        logs = [...logs, `[SAFETY GUARD 422]: Script paused pending explicit operator confirmation.`];
         return;
       }
       logs = [...logs, `[CRITICAL ERROR]: ${err.message}`];
@@ -204,12 +204,12 @@
           <span>Stop execution on first error</span>
         </label>
 
-        <!-- 409 Destructive Statements Lock Banner -->
+        <!-- 422 Destructive Statements Lock Banner -->
         {#if pendingBlockers}
           <div class="p-3.5 rounded-xl bg-rose-950/40 border border-rose-800/80 space-y-2.5">
             <div class="flex items-center space-x-2 text-rose-300 font-bold">
               <Icon name="shield-alert" class="w-4 h-4 text-rose-400 shrink-0" />
-              <span>Safety Guard Hold (HTTP 409): Destructive Statements Detected</span>
+              <span>Safety Guard Hold (HTTP 422): Destructive Statements Detected</span>
             </div>
             <div class="max-h-32 overflow-y-auto space-y-1 bg-slate-950/70 border border-rose-900/60 rounded p-2 font-mono text-[11px] text-rose-200">
               {#each pendingBlockers as b, bIdx}

@@ -44,7 +44,7 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 	// Production safety guard: require explicit confirmation challenge before writing or truncating Production.
 	if strings.EqualFold(tgtSess.Environment, "production") {
 		if !req.Confirmed {
-			writeJSON(w, http.StatusConflict, map[string]any{
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
 				"blocked":          true,
 				"requires_confirm": true,
 				"message":          "Target is a Production database. Confirmation challenge required before data transfer.",
