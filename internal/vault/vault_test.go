@@ -321,6 +321,8 @@ func TestVault_SaveConnectionPreservesSSLOnPartialUpdate(t *testing.T) {
 		Name:        "mTLS Conn",
 		Driver:      "mysql",
 		Environment: "Production",
+		Host:        "db.internal",
+		Port:        3307,
 		UseSSL:      true,
 		SSLCA:       "ca-cert-data",
 		SSLCert:     "client-cert-data",
@@ -330,7 +332,7 @@ func TestVault_SaveConnectionPreservesSSLOnPartialUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Web UI modal edit: only sends name/port/host, omitting SSL fields
+	// Web UI modal edit on same endpoint: only sends name/port/host/driver, omitting SSL fields
 	partialUpdate := &ConnectionRecord{
 		ID:          initial.ID,
 		Name:        "mTLS Conn Renamed",
@@ -395,6 +397,98 @@ func TestVault_SaveConnectionPreservesSSLOnPartialUpdate(t *testing.T) {
 	}
 	if got3.UseSSL || got3.SSLCA != "" || got3.SSLCert != "" || got3.SSLKey != "" || got3.HasSSLKey {
 		t.Fatalf("expected ClearSSL to disable SSL and clear certs, got: %+v", got3)
+	}
+}
+
+func TestVault_SaveConnectionClearsSSLOnEndpointChange(t *testing.T) {
+	v, err := OpenVault(filepath.Join(t.TempDir(), "config.db"), "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	cases := []struct {
+		name   string
+		mutate func(c *ConnectionRecord)
+	}{
+		{
+			name: "partial update with UseSSL=false and changed host",
+			mutate: func(c *ConnectionRecord) {
+				c.Host = "attacker.example.com"
+				c.UseSSL = false
+			},
+		},
+		{
+			name: "partial update with UseSSL=false and changed port",
+			mutate: func(c *ConnectionRecord) {
+				c.Port = 3307
+				c.UseSSL = false
+			},
+		},
+		{
+			name: "partial update with UseSSL=false and changed driver",
+			mutate: func(c *ConnectionRecord) {
+				c.Driver = "postgres"
+				c.UseSSL = false
+			},
+		},
+		{
+			name: "UseSSL=true with empty SSLKey and changed host",
+			mutate: func(c *ConnectionRecord) {
+				c.Host = "attacker.example.com"
+				c.UseSSL = true
+				c.SSLCA = "ca-cert-data"
+				c.SSLCert = "client-cert-data"
+				c.SSLKey = ""
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			initial := &ConnectionRecord{
+				Name:        "mTLS Conn",
+				Driver:      "mysql",
+				Environment: "Production",
+				Host:        "db.internal",
+				Port:        3306,
+				UseSSL:      true,
+				SSLCA:       "ca-cert-data",
+				SSLCert:     "client-cert-data",
+				SSLKey:      "client-key-data",
+			}
+			if err := v.SaveConnection(initial); err != nil {
+				t.Fatal(err)
+			}
+
+			update := &ConnectionRecord{
+				ID:          initial.ID,
+				Name:        "mTLS Conn",
+				Driver:      "mysql",
+				Environment: "Production",
+				Host:        "db.internal",
+				Port:        3306,
+			}
+			tc.mutate(update)
+
+			if err := v.SaveConnection(update); err != nil {
+				t.Fatal(err)
+			}
+			if update.HasSSLKey {
+				t.Fatalf("expected HasSSLKey=false on endpoint change, got true")
+			}
+
+			got, err := v.GetConnection(initial.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.SSLKey != "" || got.HasSSLKey {
+				t.Fatalf("expected SSLKey to be cleared on endpoint change, got key=%q has=%v", got.SSLKey, got.HasSSLKey)
+			}
+			if !update.UseSSL && (got.UseSSL || got.SSLCA != "" || got.SSLCert != "") {
+				t.Fatalf("expected all SSL settings to be cleared when UseSSL=false on endpoint change, got: %+v", got)
+			}
+		})
 	}
 }
 

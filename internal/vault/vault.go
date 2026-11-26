@@ -449,16 +449,20 @@ func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 			}
 		}
 	} else if conn.ID != "" && !conn.UseSSL && sslCA == "" && sslCert == "" && sslKey == "" {
-		// ponytail: Preserve existing SSL settings when caller omits them on partial update
-		var exUseSSL int
+		// Preserve existing SSL settings when caller omits them on partial update,
+		// only if host/port/driver still match (prevents SSL credential exfiltration to a new endpoint).
+		var exHost, exDriver string
+		var exPort, exUseSSL int
 		var exCA, exCert, exKey sql.NullString
-		if err := v.db.QueryRow(`SELECT use_ssl, ssl_ca, ssl_cert, ssl_key FROM connections WHERE id = ?`, conn.ID).
-			Scan(&exUseSSL, &exCA, &exCert, &exKey); err == nil {
-			useSSLInt = exUseSSL
-			conn.UseSSL = exUseSSL == 1
-			sslCA = exCA.String
-			sslCert = exCert.String
-			sslKey = exKey.String
+		if err := v.db.QueryRow(`SELECT host, port, driver, use_ssl, ssl_ca, ssl_cert, ssl_key FROM connections WHERE id = ?`, conn.ID).
+			Scan(&exHost, &exPort, &exDriver, &exUseSSL, &exCA, &exCert, &exKey); err == nil {
+			if strings.EqualFold(conn.Host, exHost) && conn.Port == exPort && strings.EqualFold(conn.Driver, exDriver) {
+				useSSLInt = exUseSSL
+				conn.UseSSL = exUseSSL == 1
+				sslCA = exCA.String
+				sslCert = exCert.String
+				sslKey = exKey.String
+			}
 		}
 	}
 
