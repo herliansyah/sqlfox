@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { performance } from 'node:perf_hooks';
 
-const require = createRequire(import.meta.url);
+const require = createRequire(new URL('../web/frontend/package.json', import.meta.url));
 const { buildSync } = require('esbuild');
 const outdir = fs.mkdtempSync(path.join(os.tmpdir(), 'sqlfox-codemirror-test-'));
 
