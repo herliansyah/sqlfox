@@ -257,7 +257,7 @@
   class="h-9 bg-[#0b0f19] border-b border-slate-800 flex items-center px-2 select-none justify-between relative overflow-hidden"
 >
   <!-- Visible Tabs Strip (fits strictly within available screen width) -->
-  <div id="tabs-container" bind:this={tabsContainerEl} class="flex items-center min-w-0 flex-1 overflow-hidden gap-1">
+  <div id="tabs-container" bind:this={tabsContainerEl} role="tablist" aria-label="Editor tabs" class="flex items-center min-w-0 flex-1 overflow-hidden gap-1">
     {#each visibleTabs as tab (tab.id)}
       {@const isActive = tab.id === appState.activeTabId}
       <div
@@ -271,9 +271,15 @@
         oncontextmenu={(e) => handleTabContextMenu(e, tab.id)}
         onmouseup={(e) => handleMiddleClick(e, tab.id)}
         role="tab"
+        aria-selected={isActive}
         tabindex="0"
         title={tab.title + (tab.database ? ` (${tab.database})` : '')}
-        onkeydown={(e) => e.key === 'Enter' && (appState.activeTabId = tab.id)}
+        onkeydown={(e) => {
+          if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+            e.preventDefault();
+            appState.activeTabId = tab.id;
+          }
+        }}
       >
         {#if isActive}
           <div class="absolute top-0 left-0 right-0 h-[2px] bg-sky-400 rounded-t pointer-events-none"></div>

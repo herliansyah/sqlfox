@@ -238,7 +238,16 @@
                     {#each flightSessionTicks as tick, idx}
                       {@const isSel = selectedTickIndex === idx || (selectedTickIndex == null && idx === flightSessionTicks.length - 1)}
                       <tr
+                        role="button"
+                        tabindex="0"
+                        aria-pressed={isSel}
                         onclick={() => (selectedTickIndex = idx)}
+                        onkeydown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            selectedTickIndex = idx;
+                          }
+                        }}
                         class="cursor-pointer transition {isSel ? 'bg-sky-950/40 border-l-2 border-l-sky-400' : 'hover:bg-slate-800/40'}"
                       >
                         <td class="py-2 px-3 text-slate-500">{idx + 1}</td>

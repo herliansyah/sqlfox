@@ -146,8 +146,17 @@
                 {@const isExpanded = expandedVars.has(v.name)}
                 {@const sev = String(v.severity || 'info').toLowerCase()}
                 <tr
+                  role="button"
+                  tabindex="0"
+                  aria-expanded={isExpanded}
                   class="hover:bg-slate-800/40 cursor-pointer transition-colors"
                   onclick={() => toggleVarExpand(v.name)}
+                  onkeydown={(e) => {
+                    if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+                      e.preventDefault();
+                      toggleVarExpand(v.name);
+                    }
+                  }}
                 >
                   <td class="py-2 px-3 text-slate-500">
                     <Icon name={isExpanded ? 'chevron-down' : 'chevron-right'} class="w-3.5 h-3.5" />

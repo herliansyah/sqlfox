@@ -424,7 +424,15 @@
                   {@const tot = db.total_size || (db.data_size || 0) + (db.index_size || 0)}
                   {@const legacyCs = isLegacyCharset(db.charset) || isLegacyCharset(db.collation)}
                   <tr
+                    role="button"
+                    tabindex="0"
                     onclick={() => drillIntoDatabase(db.name)}
+                    onkeydown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        drillIntoDatabase(db.name);
+                      }
+                    }}
                     class="hover:bg-sky-500/10 cursor-pointer transition-colors {db.name === selectedDb ? 'bg-sky-500/5' : ''}"
                   >
                     <td class="py-2 px-4 font-bold text-slate-100 flex items-center space-x-2">
