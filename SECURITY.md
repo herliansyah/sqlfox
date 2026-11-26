@@ -329,4 +329,16 @@ To prevent production database lock contention and connection pool exhaustion:
    - Before executing unqualified mutation queries (`UPDATE` or `DELETE` without `WHERE`), the mutation impact estimator queries the locally cached schema table row counts (`table.Rows`) rather than executing expensive `SELECT COUNT(*)` queries on unindexed tables.
    - This completely eliminates lock contention and CPU spikes on high-cardinality production tables while accurately estimating mutation risk.
 
+---
+
+## 21. Container Deployment & Local Key Fallback Posture
+
+1. **Docker Network Binding (`Dockerfile`)**:
+   - The container `ENTRYPOINT` binds SqlFox to `0.0.0.0:8080` without `--tls` so container port-forwarding works out of the box.
+   - Because plain HTTP exposes session tokens and query payloads on untrusted networks, **non-localhost container deployments MUST place SqlFox behind a TLS-terminating reverse proxy** (or pass `--tls` / `--tls-cert` + `--tls-key`) and pair remote access with a strong Master PIN (`--pin` or `SQLFOX_PIN`).
+2. **Local Master Key Fallback (`master.key`)**:
+   - When an OS keychain (macOS Keychain / Linux Secret Service) is unavailable (e.g., headless servers or containers), SqlFox falls back to storing the vault master key in `~/.sqlfox/master.key` with `0600` permissions.
+   - Ensure host volume mounts for `/root/.sqlfox` (or `$HOME/.sqlfox`) are restricted to the service user and encrypted at the disk/volume layer.
+
+
 
