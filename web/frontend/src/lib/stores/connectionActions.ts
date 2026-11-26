@@ -1,4 +1,5 @@
 import type { ConnectionProfile, SchemaCatalog, Toast } from '../../types';
+import { storage } from '../utils/storage';
 import { api } from '../api/client';
 
 export interface ConnectionActionsContext {
@@ -24,9 +25,7 @@ export async function deleteConnectionAction(ctx: ConnectionActionsContext, id: 
   try {
     await api.deleteConnection(id);
     ctx.showToast('Connection deleted', 'info');
-    try {
-      localStorage.removeItem(`sqlfox_tabs_${id}`);
-    } catch { /* ignore */ }
+    storage.remove(`sqlfox_tabs_${id}`);
     if (ctx.activeConnection?.id === id) {
       ctx.activeConnection = null;
       ctx.activeSessionId = null;

@@ -49,7 +49,7 @@
       const [cfg, statusRes, keyRes] = await Promise.allSettled([
         api.getCloudSyncConfig(),
         api.getCloudSyncStatus(),
-        api.getMasterKey(),
+        appState.authStatus?.is_remote ? Promise.resolve(null) : api.getMasterKey(),
       ]);
       if (cfg.status === 'fulfilled' && cfg.value) {
         syncEnabled = !!cfg.value.enabled;

@@ -30,8 +30,15 @@ export async function commitStagedEditsAction(ctx: GridEditsContext): Promise<vo
   const activeTable = tab?.tableName || tab?.detectedTableName;
   const activeDb = tab?.detectedTableDatabase || tab?.database || ctx.currentDatabase;
   const allEntries = Object.entries(ctx.stagedEdits);
-  // Scope staged-edit commits to the active tab's table so saving in Tab A never silently commits edits from Tab B.
-  const committedEntries = activeTable
+  // Scope staged-edit commits strictly to the active tab (falling back to table+db for legacy entries).
+  const committedEntries = tab?.id
+    ? allEntries.filter(([, item]) =>
+        item.tabId
+          ? item.tabId === tab.id
+          : (!activeTable || item.table.toLowerCase() === activeTable.toLowerCase()) &&
+            (!activeDb || !item.database || item.database.toLowerCase() === activeDb.toLowerCase())
+      )
+    : activeTable
     ? allEntries.filter(
         ([, item]) =>
           item.table.toLowerCase() === activeTable.toLowerCase() &&

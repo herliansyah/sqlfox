@@ -58,6 +58,7 @@
         <div>
           <input
             type="password"
+            autocomplete="current-password"
             bind:value={password}
             use:autoFocus
             required

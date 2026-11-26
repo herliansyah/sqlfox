@@ -1,4 +1,5 @@
 import type { QueryExecutionResult, InspectionResult } from '../../types';
+import { storage } from '../utils/storage';
 
 export interface AIProfile {
   id: string;
@@ -46,9 +47,8 @@ export function loadAiConfig(): AiConfig {
     includeSchema: true,
     maskIdentifiers: true,
   };
-  try {
-    const saved = JSON.parse(localStorage.getItem('sqlfox_ai_config') || '{}');
-    return {
+  const saved = storage.getJSON<Record<string, any>>('sqlfox_ai_config', {});
+  return {
       ...defaults,
       ...saved,
       baseUrl: saved.baseUrl || saved.endpoint || defaults.baseUrl,
@@ -59,11 +59,8 @@ export function loadAiConfig(): AiConfig {
       customPrompt: saved.customPrompt ?? saved.custom_prompt ?? defaults.customPrompt,
       includeSchema: saved.includeSchema ?? saved.include_schema ?? defaults.includeSchema,
       maskIdentifiers: saved.maskIdentifiers ?? saved.mask_identifiers ?? defaults.maskIdentifiers,
-      temperature: typeof saved.temperature === 'number' ? saved.temperature : defaults.temperature,
-    };
-  } catch {
-    return defaults;
-  }
+    temperature: typeof saved.temperature === 'number' ? saved.temperature : defaults.temperature,
+  };
 }
 
 export class HttpStatusError extends Error {

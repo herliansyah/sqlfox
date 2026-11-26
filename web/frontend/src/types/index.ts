@@ -18,6 +18,8 @@ export interface ConnectionProfile {
   ssl_ca?: string;
   ssl_cert?: string;
   ssl_key?: string;
+  has_ssl_key?: boolean;
+  clear_ssl?: boolean;
   environment: Environment;
   read_only?: boolean;
   color?: string;

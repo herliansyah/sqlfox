@@ -22,17 +22,17 @@ import {
   type StreamEventHandlers,
 } from './http';
 import { streamExecuteQuery, streamDataTransfer, streamRunSqlScript } from './streamQuery';
+import { storage } from '../utils/storage';
 
 export type { OperationalNote, AIProfile, AiConfig, ExecuteQueryOptions, StreamEventHandlers };
 export { HttpStatusError, loadAiConfig };
 
 export async function syncOrMigrateLegacyAiConfig(): Promise<void> {
   if (typeof window === 'undefined') return;
-  const legacyRaw = localStorage.getItem('sqlfox_ai_config');
-  if (!legacyRaw) return;
+  const legacy = storage.getJSON<Record<string, any> | null>('sqlfox_ai_config', null);
+  if (!legacy) return;
   try {
-    const legacy = JSON.parse(legacyRaw);
-    if (legacy && (legacy.apiKey || legacy.modelName || legacy.provider)) {
+    if (legacy.apiKey || legacy.modelName || legacy.provider) {
       const profiles = await api.listAiProfiles();
       const active = profiles.find((p) => p.is_active) || profiles[0];
       if (active) {
@@ -50,7 +50,7 @@ export async function syncOrMigrateLegacyAiConfig(): Promise<void> {
         });
       }
     }
-    localStorage.removeItem('sqlfox_ai_config');
+    storage.remove('sqlfox_ai_config');
   } catch (e) {
     console.warn('Failed to migrate legacy AI config:', e);
   }
@@ -64,6 +64,10 @@ class ApiClient extends ApiHttpBase {
   }
 
   async getMasterKey(): Promise<{ lan_enabled: boolean; pairing_code?: string; pairing_expires_in_sec?: number; lan_ip?: string; port?: number | string }> {
+    return this.request('/auth/master-key');
+  }
+
+  async rotateMasterPairingCode(): Promise<{ lan_enabled: boolean; pairing_code?: string; pairing_expires_in_sec?: number; lan_ip?: string; port?: number | string }> {
     return this.request('/auth/master-key', { method: 'POST' });
   }
 

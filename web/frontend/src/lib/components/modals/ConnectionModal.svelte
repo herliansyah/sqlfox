@@ -23,6 +23,16 @@
   let sslCA = $state('');
   let sslCert = $state('');
   let sslKey = $state('');
+  let hasStoredSSLKey = $state(false);
+
+  async function loadPemFile(e: Event, setter: (val: string) => void) {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    setter(text.trim());
+    input.value = '';
+  }
 
   let isTesting = $state(false);
   let testResult = $state<{ success: boolean; message: string } | null>(null);
@@ -46,6 +56,7 @@
         sslCA = c.ssl_ca || '';
         sslCert = c.ssl_cert || '';
         sslKey = c.ssl_key || '';
+        hasStoredSSLKey = !!c.has_ssl_key;
       } else {
         connId = '';
         name = 'New Connection';
@@ -61,6 +72,7 @@
         sslCA = '';
         sslCert = '';
         sslKey = '';
+        hasStoredSSLKey = false;
       }
     }
   });
@@ -127,9 +139,10 @@
       database_name: targetDb,
       read_only: readOnly,
       use_ssl: useSSL,
-      ssl_ca: sslCA.trim(),
-      ssl_cert: sslCert.trim(),
-      ssl_key: sslKey.trim(),
+      ssl_ca: useSSL ? sslCA.trim() : '',
+      ssl_cert: useSSL ? sslCert.trim() : '',
+      ssl_key: useSSL ? sslKey.trim() : '',
+      ...(isEditing && !useSSL ? { clear_ssl: true } : {}),
     };
     if (password) {
       payload.password = password;
@@ -314,35 +327,53 @@
                 </label>
 
                 {#if useSSL}
-                  <div class="space-y-2 pt-1">
-                    <label class="block text-[10px] text-slate-400">
-                      CA Certificate Path (optional)
-                      <input
-                        type="text"
+                  <div class="space-y-2.5 pt-1">
+                    <div>
+                      <div class="flex items-center justify-between text-[10px] text-slate-400 mb-0.5">
+                        <span>CA Certificate PEM (optional)</span>
+                        <label class="text-sky-400 hover:text-sky-300 cursor-pointer font-semibold">
+                          Load .pem
+                          <input type="file" accept=".pem,.crt,.cer" class="hidden" onchange={(e) => loadPemFile(e, (v) => (sslCA = v))} />
+                        </label>
+                      </div>
+                      <textarea
+                        rows={2}
                         bind:value={sslCA}
-                        placeholder="/path/to/ca.pem"
-                        class="w-full mt-0.5 bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-xs text-slate-100 font-mono"
-                      />
-                    </label>
+                        placeholder="-----BEGIN CERTIFICATE-----"
+                        class="w-full bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-[11px] text-slate-100 font-mono resize-y"
+                      ></textarea>
+                    </div>
                     <div class="grid grid-cols-2 gap-2">
-                      <label class="block text-[10px] text-slate-400">
-                        Client Cert Path (mTLS)
-                        <input
-                          type="text"
+                      <div>
+                        <div class="flex items-center justify-between text-[10px] text-slate-400 mb-0.5">
+                          <span>Client Cert PEM (mTLS)</span>
+                          <label class="text-sky-400 hover:text-sky-300 cursor-pointer font-semibold">
+                            Load .pem
+                            <input type="file" accept=".pem,.crt,.cer" class="hidden" onchange={(e) => loadPemFile(e, (v) => (sslCert = v))} />
+                          </label>
+                        </div>
+                        <textarea
+                          rows={2}
                           bind:value={sslCert}
-                          placeholder="/path/to/client-cert.pem"
-                          class="w-full mt-0.5 bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-xs text-slate-100 font-mono"
-                        />
-                      </label>
-                      <label class="block text-[10px] text-slate-400">
-                        Client Key Path (mTLS)
-                        <input
-                          type="text"
+                          placeholder="-----BEGIN CERTIFICATE-----"
+                          class="w-full bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-[11px] text-slate-100 font-mono resize-y"
+                        ></textarea>
+                      </div>
+                      <div>
+                        <div class="flex items-center justify-between text-[10px] text-slate-400 mb-0.5">
+                          <span>Client Key PEM (mTLS)</span>
+                          <label class="text-sky-400 hover:text-sky-300 cursor-pointer font-semibold">
+                            Load .key
+                            <input type="file" accept=".pem,.key" class="hidden" onchange={(e) => loadPemFile(e, (v) => (sslKey = v))} />
+                          </label>
+                        </div>
+                        <textarea
+                          rows={2}
                           bind:value={sslKey}
-                          placeholder="/path/to/client-key.pem"
-                          class="w-full mt-0.5 bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-xs text-slate-100 font-mono"
-                        />
-                      </label>
+                          placeholder={hasStoredSSLKey ? 'Stored in vault — leave blank to keep' : '-----BEGIN PRIVATE KEY-----'}
+                          class="w-full bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-[11px] text-slate-100 font-mono resize-y"
+                        ></textarea>
+                      </div>
                     </div>
                   </div>
                 {/if}

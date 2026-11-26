@@ -142,6 +142,15 @@ export class AppState {
   stagedEdits = $state<Record<string, StagedEdit>>({});
   gridRowUids = new WeakMap<object, number>();
   private nextRowUid = 1;
+  private clientIdSeq = 0;
+
+  private nextClientId(prefix: string): string {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return `${prefix}-${crypto.randomUUID()}`;
+    }
+    this.clientIdSeq += 1;
+    return `${prefix}-${Date.now()}-${this.clientIdSeq}`;
+  }
 
   /**
    * Grid commit strategy. "staged" accumulates cell edits until the user hits
@@ -678,12 +687,14 @@ export class AppState {
       if (auth.version) {
         this.appVersion = auth.version;
       }
-      try {
-        const keyInfo = await api.getMasterKey();
-        if (keyInfo) {
-          this.authStatus = { ...auth, ...keyInfo };
-        }
-      } catch (_) {}
+      if (!auth.is_remote) {
+        try {
+          const keyInfo = await api.getMasterKey();
+          if (keyInfo) {
+            this.authStatus = { ...auth, ...keyInfo };
+          }
+        } catch (_) {}
+      }
       if (auth.is_remote && !auth.unlocked) {
         this.isRemoteLocked = true;
       } else {
@@ -792,7 +803,9 @@ export class AppState {
         const auth = await api.getAuthStatus();
         if (auth.version) this.appVersion = auth.version;
         let keyInfo = null;
-        try { keyInfo = await api.getMasterKey(); } catch (_) {}
+        if (!auth.is_remote) {
+          try { keyInfo = await api.getMasterKey(); } catch (_) {}
+        }
         this.authStatus = { ...auth, ...(keyInfo || {}) };
       } catch (_) {}
       this.initActivityStream();
@@ -1458,7 +1471,7 @@ export class AppState {
 
   addTab(title?: string, sql = '') {
     const finalTitle = (!title || title === 'New Query.sql') ? this.getNextQueryTabTitle() : title;
-    const newId = `tab-${Date.now()}`;
+    const newId = this.nextClientId('tab');
     const newTab: EditorTab = {
       id: newId,
       title: finalTitle,
@@ -1791,6 +1804,19 @@ export class AppState {
       this.timerIntervals.delete(tab.id);
     }
     this.activeQueryIds.delete(tab.id);
+    // Purge staged cell edits scoped to this tab so closed tabs never leak stale edits.
+    let removedEdit = false;
+    const nextEdits: Record<string, StagedEdit> = {};
+    for (const [k, v] of Object.entries(this.stagedEdits)) {
+      if (v.tabId === tab.id) {
+        removedEdit = true;
+      } else {
+        nextEdits[k] = v;
+      }
+    }
+    if (removedEdit) {
+      this.stagedEdits = nextEdits;
+    }
   }
 
   private isTabDirty(tab: EditorTab): boolean {
@@ -1844,7 +1870,7 @@ export class AppState {
 
     const hasDrafts =
       (tab.stagedDraftRows?.length || 0) > 0 ||
-      Boolean(tab.tableName && Object.values(this.stagedEdits).some((e) => e.table === tab.tableName));
+      Object.values(this.stagedEdits).some((e) => e.tabId === tab.id);
 
     if (!force && (tab.isExecuting || tab.txActive || this.isTabDirty(tab) || hasDrafts)) {
       const reason = tab.txActive
@@ -2085,7 +2111,7 @@ export class AppState {
       challengeInput = res.challengeInput;
     }
 
-    const queryId = `q-${tab.id}-${Date.now()}`;
+    const queryId = this.nextClientId(`q-${tab.id}`);
     const controller = new AbortController();
     this.activeAbortControllers.set(tab.id, controller);
     this.activeQueryIds.set(tab.id, queryId);
@@ -2884,12 +2910,13 @@ export class AppState {
       this.showToast('Read-only mode is active — cell edit blocked', 'warning');
       return;
     }
+    const tabId = this.activeTab?.id || 'default';
     const rowObj = this.activeTab?.activeResult?.rows?.[rIdx];
     const uid = rowObj ? this.getRowUid(rowObj) : rIdx;
-    const key = `${table}:${uid}:${cIdx}`;
+    const key = `${tabId}:${table}:${uid}:${cIdx}`;
     const existing = this.stagedEdits[key];
     this.stagedEdits[key] = {
-      tabId: this.activeTab?.id,
+      tabId,
       rIdx,
       cIdx,
       table,
@@ -3018,93 +3045,80 @@ export class AppState {
     await deleteRowsAction(this.gridEditsContext(), { pk_rows: pkRows }, pkRows.length);
   }
 
+  private get modalOverlays(): Array<{ isOpen: () => boolean; close: () => void }> {
+    const boolFlag = (key: keyof AppState): { isOpen: () => boolean; close: () => void } => ({
+      isOpen: () => Boolean(this[key]),
+      close: () => { (this as Record<string, any>)[key as string] = false; },
+    });
+    const modalObj = (key: 'ddlViewModal' | 'safetyInspectionModal' | 'jsonCellModal' | 'ddlReview' | 'fkPeekState') => ({
+      isOpen: () => this[key].isOpen,
+      close: () => { this[key].isOpen = false; },
+    });
+
+    return [
+      boolFlag('isCommandPaletteOpen'),
+      boolFlag('isSchemaSearchOpen'),
+      boolFlag('isSmartSeedModalOpen'),
+      boolFlag('isLockInspectorOpen'),
+      modalObj('ddlViewModal'),
+      modalObj('safetyInspectionModal'),
+      boolFlag('isConnectionModalOpen'),
+      boolFlag('isRecordInspectorOpen'),
+      boolFlag('isInsertRowModalOpen'),
+      boolFlag('isShortcutsModalOpen'),
+      boolFlag('isCreateDbModalOpen'),
+      boolFlag('isTableCreatorOpen'),
+      boolFlag('isRenameTableModalOpen'),
+      boolFlag('isDuplicateTableModalOpen'),
+      boolFlag('isViewDesignerOpen'),
+      boolFlag('isTriggerDesignerOpen'),
+      boolFlag('isRoutineDesignerOpen'),
+      boolFlag('isEventDesignerOpen'),
+      boolFlag('isDumpModalOpen'),
+      boolFlag('isStructureSyncModalOpen'),
+      boolFlag('isRunSqlModalOpen'),
+      {
+        isOpen: () => this.isSnippetsModalOpen,
+        close: () => {
+          this.pendingSnippet = null;
+          this.isSnippetsModalOpen = false;
+        },
+      },
+      boolFlag('isCsvImportModalOpen'),
+      boolFlag('isPrivilegeMatrixOpen'),
+      boolFlag('isDbDiagnosticsOpen'),
+      boolFlag('isAiSettingsModalOpen'),
+      boolFlag('isNoteComposerModalOpen'),
+      boolFlag('isUpdateModalOpen'),
+      {
+        isOpen: () => this.isMockDataModalOpen,
+        close: () => this.closeMockDataModal(),
+      },
+      boolFlag('isSettingsModalOpen'),
+      modalObj('jsonCellModal'),
+      boolFlag('isDataTransferOpen'),
+      boolFlag('isDataSyncOpen'),
+      boolFlag('isRefreshAllOpen'),
+      boolFlag('isImpactPreviewOpen'),
+      modalObj('ddlReview'),
+      modalObj('fkPeekState'),
+    ];
+  }
+
   get hasOpenModal(): boolean {
-    return (
-      this.isRemoteLocked ||
-      this.nativeDialog.isOpen ||
-      this.safetyChallenge.isOpen ||
-      this.isCommandPaletteOpen ||
-      this.isSchemaSearchOpen ||
-      this.isSmartSeedModalOpen ||
-      this.isLockInspectorOpen ||
-      this.ddlViewModal.isOpen ||
-      this.safetyInspectionModal.isOpen ||
-      this.isConnectionModalOpen ||
-      this.isRecordInspectorOpen ||
-      this.isInsertRowModalOpen ||
-      this.isShortcutsModalOpen ||
-      this.isCreateDbModalOpen ||
-      this.isTableCreatorOpen ||
-      this.isRenameTableModalOpen ||
-      this.isDuplicateTableModalOpen ||
-      this.isViewDesignerOpen ||
-      this.isTriggerDesignerOpen ||
-      this.isRoutineDesignerOpen ||
-      this.isEventDesignerOpen ||
-      this.isDumpModalOpen ||
-      this.isStructureSyncModalOpen ||
-      this.isRunSqlModalOpen ||
-      this.isSnippetsModalOpen ||
-      this.isCsvImportModalOpen ||
-      this.isPrivilegeMatrixOpen ||
-      this.isDbDiagnosticsOpen ||
-      this.isAiSettingsModalOpen ||
-      this.isNoteComposerModalOpen ||
-      this.isUpdateModalOpen ||
-      this.isMockDataModalOpen ||
-      this.isSettingsModalOpen ||
-      this.jsonCellModal.isOpen ||
-      this.isDataTransferOpen ||
-      this.isDataSyncOpen ||
-      this.isRefreshAllOpen ||
-      this.isImpactPreviewOpen ||
-      this.ddlReview.isOpen ||
-      this.fkPeekState.isOpen
-    );
+    if (this.isRemoteLocked || this.nativeDialog.isOpen || this.safetyChallenge.isOpen) {
+      return true;
+    }
+    return this.modalOverlays.some((m) => m.isOpen());
   }
 
   closeTopOverlay(): boolean {
-    if (this.isCommandPaletteOpen) { this.isCommandPaletteOpen = false; return true; }
-    if (this.isSchemaSearchOpen) { this.isSchemaSearchOpen = false; return true; }
-    if (this.isSmartSeedModalOpen) { this.isSmartSeedModalOpen = false; return true; }
-    if (this.isLockInspectorOpen) { this.isLockInspectorOpen = false; return true; }
-    if (this.ddlViewModal.isOpen) { this.ddlViewModal.isOpen = false; return true; }
-    if (this.safetyInspectionModal.isOpen) { this.safetyInspectionModal.isOpen = false; return true; }
-    if (this.isConnectionModalOpen) { this.isConnectionModalOpen = false; return true; }
-    if (this.isRecordInspectorOpen) { this.isRecordInspectorOpen = false; return true; }
-    if (this.isInsertRowModalOpen) { this.isInsertRowModalOpen = false; return true; }
-    if (this.isShortcutsModalOpen) { this.isShortcutsModalOpen = false; return true; }
-    if (this.isCreateDbModalOpen) { this.isCreateDbModalOpen = false; return true; }
-    if (this.isTableCreatorOpen) { this.isTableCreatorOpen = false; return true; }
-    if (this.isRenameTableModalOpen) { this.isRenameTableModalOpen = false; return true; }
-    if (this.isDuplicateTableModalOpen) { this.isDuplicateTableModalOpen = false; return true; }
-    if (this.isViewDesignerOpen) { this.isViewDesignerOpen = false; return true; }
-    if (this.isTriggerDesignerOpen) { this.isTriggerDesignerOpen = false; return true; }
-    if (this.isRoutineDesignerOpen) { this.isRoutineDesignerOpen = false; return true; }
-    if (this.isEventDesignerOpen) { this.isEventDesignerOpen = false; return true; }
-    if (this.isDumpModalOpen) { this.isDumpModalOpen = false; return true; }
-    if (this.isStructureSyncModalOpen) { this.isStructureSyncModalOpen = false; return true; }
-    if (this.isRunSqlModalOpen) { this.isRunSqlModalOpen = false; return true; }
-    if (this.isSnippetsModalOpen) {
-      this.pendingSnippet = null;
-      this.isSnippetsModalOpen = false;
-      return true;
+    for (const overlay of this.modalOverlays) {
+      if (overlay.isOpen()) {
+        overlay.close();
+        return true;
+      }
     }
-    if (this.isCsvImportModalOpen) { this.isCsvImportModalOpen = false; return true; }
-    if (this.isPrivilegeMatrixOpen) { this.isPrivilegeMatrixOpen = false; return true; }
-    if (this.isDbDiagnosticsOpen) { this.isDbDiagnosticsOpen = false; return true; }
-    if (this.isAiSettingsModalOpen) { this.isAiSettingsModalOpen = false; return true; }
-    if (this.isNoteComposerModalOpen) { this.isNoteComposerModalOpen = false; return true; }
-    if (this.isUpdateModalOpen) { this.isUpdateModalOpen = false; return true; }
-    if (this.isMockDataModalOpen) { this.closeMockDataModal(); return true; }
-    if (this.isSettingsModalOpen) { this.isSettingsModalOpen = false; return true; }
-    if (this.jsonCellModal.isOpen) { this.jsonCellModal.isOpen = false; return true; }
-    if (this.isDataTransferOpen) { this.isDataTransferOpen = false; return true; }
-    if (this.isDataSyncOpen) { this.isDataSyncOpen = false; return true; }
-    if (this.isRefreshAllOpen) { this.isRefreshAllOpen = false; return true; }
-    if (this.isImpactPreviewOpen) { this.isImpactPreviewOpen = false; return true; }
-    if (this.ddlReview.isOpen) { this.ddlReview.isOpen = false; return true; }
-    if (this.fkPeekState.isOpen) { this.fkPeekState.isOpen = false; return true; }
     if (this.isAiDrawerOpen) { this.toggleAiDrawer(false); return true; }
     if (this.isNotesDrawerOpen) { this.isNotesDrawerOpen = false; return true; }
     if (this.isActivityDrawerOpen) { this.isActivityDrawerOpen = false; return true; }
