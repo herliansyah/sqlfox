@@ -133,6 +133,11 @@ export class AppState {
     this.tabs = this.tabs.map((t) => (t.id === tabId ? { ...t, ...patch } : t));
   }
 
+  /** Replace the tab entry with a shallow copy so $state.raw + $derived(activeTab) sees a new reference. */
+  commitTab(tab: EditorTab) {
+    this.tabs = this.tabs.map((t) => (t.id === tab.id ? { ...tab } : t));
+  }
+
   // Staged Edits for Grid CRUD
   stagedEdits = $state<Record<string, StagedEdit>>({});
   gridRowUids = new WeakMap<object, number>();
@@ -2097,7 +2102,7 @@ export class AppState {
     tab.queryPage = 1;
     tab.manualTotalRows = null;
     tab.isCountingTotal = false;
-    this.tabs = [...this.tabs];
+    this.commitTab(tab);
 
     const timer = setInterval(() => {
       if (tab.executionStartedAt && !this.safetyChallenge.isOpen) {
@@ -2105,6 +2110,7 @@ export class AppState {
         const sec = (tab.executionElapsedMs / 1000).toFixed(1);
         const rowCount = tab.activeResult?.rows?.length || 0;
         tab.statusText = rowCount > 0 ? `Streaming... (${rowCount.toLocaleString()} rows, ${sec}s)` : `Executing... (${sec}s)`;
+        this.commitTab(tab);
       }
     }, 100);
     this.timerIntervals.set(tab.id, timer);
@@ -2134,8 +2140,10 @@ export class AppState {
           if (statementResults[activeIdx]) {
             tab.activeResult = { ...statementResults[activeIdx] };
           }
+          this.commitTab(tab);
         } else if (singleResult) {
           tab.activeResult = { ...singleResult };
+          this.commitTab(tab);
         }
       };
 
@@ -2222,7 +2230,7 @@ export class AppState {
                 tab.activeResultIndex = undefined;
                 tab.activeResult = singleResult;
               }
-              this.tabs = [...this.tabs];
+              this.commitTab(tab);
             },
             onChunk: (chunk) => {
               if (!this.tabs.some((t) => t.id === tab.id)) {
@@ -2339,6 +2347,7 @@ export class AppState {
                 const activeIdx = tab.activeResultIndex ?? 0;
                 tab.activeResult = tab.multiResults[activeIdx] || tab.multiResults[0];
               }
+              this.commitTab(tab);
             },
           }
         );
@@ -2444,7 +2453,7 @@ export class AppState {
       this.activeQueryIds.delete(tab.id);
       tab.isExecuting = false;
       tab.isStreaming = false;
-      this.tabs = [...this.tabs];
+      this.commitTab(tab);
       this.saveTabsState();
     }
   }
@@ -2462,7 +2471,7 @@ export class AppState {
     const targetSql = nextOffset === 0 ? rawBase : wrapPagedSQL(rawBase, batchSize + 1, nextOffset);
     tab.isExecuting = true;
     tab.statusText = `Loading rows ${nextOffset + 1}–${nextOffset + batchSize}...`;
-    this.tabs = [...this.tabs];
+    this.commitTab(tab);
 
     try {
       const res = await api.executeQuery(this.activeSessionId, targetSql, {
@@ -2487,7 +2496,7 @@ export class AppState {
       this.showToast(`Batch paging failed: ${err.message}`, 'error');
     } finally {
       tab.isExecuting = false;
-      this.tabs = [...this.tabs];
+      this.commitTab(tab);
     }
   }
 
@@ -2505,7 +2514,7 @@ export class AppState {
     const countSql = `SELECT COUNT(*) AS _total_count FROM (\n${clean}\n) AS _sf_count;`;
 
     t.isCountingTotal = true;
-    this.tabs = [...this.tabs];
+    this.commitTab(t);
 
     try {
       const res = await api.executeQuery(this.activeSessionId, countSql, {
@@ -2525,7 +2534,7 @@ export class AppState {
       this.showToast(`Count failed: ${err.message}`, 'error');
     } finally {
       t.isCountingTotal = false;
-      this.tabs = [...this.tabs];
+      this.commitTab(t);
     }
   }
 
