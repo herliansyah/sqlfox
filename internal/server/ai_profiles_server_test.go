@@ -118,6 +118,93 @@ func TestAIProfilesServerEndpoints(t *testing.T) {
 	}
 }
 
+func TestUpdateAIProfilePatchPreservesOmittedFields(t *testing.T) {
+	srv, v := setupTestServerWithVault(t)
+
+	seed := vault.AIProfile{
+		ID:              "p-patch",
+		Name:            "Patch Me",
+		Provider:        "custom",
+		APIKey:          "sk-existing",
+		BaseURL:         "https://1.1.1.1/v1",
+		ModelName:       "example-model",
+		Temperature:     0.7,
+		Language:        "id",
+		ResponseStyle:   "concise",
+		CustomPrompt:    "keep me",
+		IncludeSchema:   true,
+		MaskIdentifiers: true,
+		IsActive:        true,
+	}
+	if err := v.SaveAIProfile(&seed); err != nil {
+		t.Fatal(err)
+	}
+
+	put := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPut, "/api/ai/profiles/p-patch", bytes.NewBufferString(body))
+		req.SetPathValue("id", "p-patch")
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		srv.handleUpdateAIProfile(rec, req)
+		return rec
+	}
+	get := func() *vault.AIProfile {
+		stored, err := v.GetAIProfile("p-patch")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return stored
+	}
+
+	if rec := put(`{"name":"Renamed"}`); rec.Code != http.StatusOK {
+		t.Fatalf("partial PUT failed: %d %s", rec.Code, rec.Body.String())
+	}
+	stored := get()
+	if stored.Name != "Renamed" || stored.Provider != "custom" || stored.BaseURL != "https://1.1.1.1/v1" ||
+		stored.ModelName != "example-model" || stored.Temperature != 0.7 || stored.Language != "id" ||
+		stored.ResponseStyle != "concise" || stored.CustomPrompt != "keep me" ||
+		!stored.IncludeSchema || !stored.MaskIdentifiers || !stored.IsActive {
+		t.Fatalf("omitted fields were clobbered: %+v", stored)
+	}
+	if stored.APIKey != "sk-existing" || !stored.HasAPIKey {
+		t.Fatalf("omitted API key was clobbered: key=%q has=%v", stored.APIKey, stored.HasAPIKey)
+	}
+
+	if rec := put(`{"mask_identifiers":false,"is_active":false}`); rec.Code != http.StatusOK {
+		t.Fatalf("explicit false PUT failed: %d %s", rec.Code, rec.Body.String())
+	}
+	stored = get()
+	if stored.MaskIdentifiers || stored.IsActive || !stored.IncludeSchema || stored.Name != "Renamed" {
+		t.Fatalf("explicit flags not applied or other fields clobbered: %+v", stored)
+	}
+
+	if rec := put(`{"base_url":"https://8.8.8.8/v1"}`); rec.Code != http.StatusOK {
+		t.Fatalf("endpoint-change PUT failed: %d %s", rec.Code, rec.Body.String())
+	}
+	stored = get()
+	if stored.HasAPIKey || stored.APIKey != "" || stored.EncryptedAPIKey != "" {
+		t.Fatalf("stored key was not cleared on endpoint change: %+v", stored)
+	}
+	if !stored.IncludeSchema || stored.MaskIdentifiers {
+		t.Fatalf("privacy flags changed on unrelated PUT: %+v", stored)
+	}
+
+	if rec := put(`{"base_url":"https://9.9.9.9/v1","api_key":"sk-new"}`); rec.Code != http.StatusOK {
+		t.Fatalf("new-key PUT failed: %d %s", rec.Code, rec.Body.String())
+	}
+	stored = get()
+	if stored.APIKey != "sk-new" || !stored.HasAPIKey {
+		t.Fatalf("new API key not stored: %+v", stored)
+	}
+
+	if rec := put(`{"name":"   "}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for blank name, got %d", rec.Code)
+	}
+	stored = get()
+	if stored.Name != "Renamed" {
+		t.Fatalf("rejected PUT still mutated profile: name=%q", stored.Name)
+	}
+}
 func TestValidateAIEndpoint(t *testing.T) {
 	// Valid public & local endpoints
 	validCases := []struct {

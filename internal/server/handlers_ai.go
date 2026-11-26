@@ -410,6 +410,68 @@ func (s *Server) handleCreateAIProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, sanitizeAIProfileForResponse(&p))
 }
 
+// aiProfilePatch carries only the fields present in an update request.
+// A nil pointer means the stored value is preserved.
+type aiProfilePatch struct {
+	Name            *string  `json:"name"`
+	Provider        *string  `json:"provider"`
+	APIKey          *string  `json:"api_key"`
+	BaseURL         *string  `json:"base_url"`
+	ModelName       *string  `json:"model_name"`
+	Temperature     *float32 `json:"temperature"`
+	Language        *string  `json:"language"`
+	ResponseStyle   *string  `json:"response_style"`
+	CustomPrompt    *string  `json:"custom_prompt"`
+	IncludeSchema   *bool    `json:"include_schema"`
+	MaskIdentifiers *bool    `json:"mask_identifiers"`
+	IsActive        *bool    `json:"is_active"`
+}
+
+func applyAIProfilePatch(p *vault.AIProfile, patch aiProfilePatch) {
+	if patch.Name != nil {
+		p.Name = strings.TrimSpace(*patch.Name)
+	}
+	if patch.Provider != nil {
+		p.Provider = strings.TrimSpace(*patch.Provider)
+	}
+	if patch.BaseURL != nil {
+		p.BaseURL = strings.TrimSpace(*patch.BaseURL)
+	}
+	if patch.ModelName != nil {
+		p.ModelName = strings.TrimSpace(*patch.ModelName)
+	}
+	if patch.Temperature != nil {
+		p.Temperature = *patch.Temperature
+	}
+	if patch.Language != nil {
+		p.Language = strings.TrimSpace(*patch.Language)
+	}
+	if patch.ResponseStyle != nil {
+		p.ResponseStyle = strings.TrimSpace(*patch.ResponseStyle)
+	}
+	if patch.CustomPrompt != nil {
+		p.CustomPrompt = *patch.CustomPrompt
+	}
+	if patch.IncludeSchema != nil {
+		p.IncludeSchema = *patch.IncludeSchema
+	}
+	if patch.MaskIdentifiers != nil {
+		p.MaskIdentifiers = *patch.MaskIdentifiers
+	}
+	if patch.IsActive != nil {
+		p.IsActive = *patch.IsActive
+	}
+}
+
+func aiProfileEndpointChanged(p, existing *vault.AIProfile) bool {
+	sameBase := strings.EqualFold(
+		strings.TrimRight(strings.TrimSpace(p.BaseURL), "/"),
+		strings.TrimRight(strings.TrimSpace(existing.BaseURL), "/"),
+	)
+	sameProvider := strings.EqualFold(strings.TrimSpace(p.Provider), strings.TrimSpace(existing.Provider))
+	return !sameBase || !sameProvider
+}
+
 func (s *Server) handleUpdateAIProfile(w http.ResponseWriter, r *http.Request) {
 	if s.vault == nil {
 		writeError(w, http.StatusInternalServerError, "vault not initialized")
@@ -420,41 +482,55 @@ func (s *Server) handleUpdateAIProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "profile id is required")
 		return
 	}
-	var p vault.AIProfile
-	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+	existing, err := s.vault.GetAIProfile(id)
+	if err != nil || existing == nil {
+		message := "AI profile not found"
+		if err != nil {
+			message = err.Error()
+		}
+		writeError(w, http.StatusNotFound, message)
+		return
+	}
+	var patch aiProfilePatch
+	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
 		return
 	}
+
+	p := *existing
 	p.ID = id
-	p.Name = strings.TrimSpace(p.Name)
+	applyAIProfilePatch(&p, patch)
 	if p.Name == "" {
 		writeError(w, http.StatusBadRequest, "profile name is required")
 		return
 	}
-	p.ModelName = strings.TrimSpace(p.ModelName)
 	if p.ModelName == "" {
 		writeError(w, http.StatusBadRequest, "model name is required")
 		return
 	}
-
+	if p.Provider == "" {
+		p.Provider = "openai"
+	}
 	if err := validateAIEndpoint(p.BaseURL, ai.Provider(p.Provider), s.IsRemoteRequest(r)); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	// Prevent stored API key exfiltration: if BaseURL or Provider changed and no new APIKey is provided,
-	// clear any existing encrypted key so it cannot be redirected to a new endpoint.
-	if p.APIKey == "" {
-		if existing, err := s.vault.GetAIProfile(id); err == nil && existing != nil {
-			if !strings.EqualFold(strings.TrimRight(strings.TrimSpace(p.BaseURL), "/"), strings.TrimRight(strings.TrimSpace(existing.BaseURL), "/")) ||
-				!strings.EqualFold(strings.TrimSpace(p.Provider), strings.TrimSpace(existing.Provider)) {
-				p.ClearAPIKey = true
-				p.EncryptedAPIKey = ""
-				p.HasAPIKey = false
-			} else {
-				p.EncryptedAPIKey = existing.EncryptedAPIKey
-			}
-		}
+	if patch.APIKey != nil {
+		p.APIKey = *patch.APIKey
+	} else {
+		p.APIKey = ""
+	}
+	if p.APIKey != "" {
+		p.ClearAPIKey = false
+		p.EncryptedAPIKey = ""
+	} else if aiProfileEndpointChanged(&p, existing) {
+		// Do not reuse the stored key after the endpoint or provider changed.
+		p.ClearAPIKey = true
+		p.EncryptedAPIKey = ""
+		p.HasAPIKey = false
+	} else {
+		p.ClearAPIKey = false
 	}
 
 	if err := s.vault.SaveAIProfile(&p); err != nil {
@@ -465,7 +541,6 @@ func (s *Server) handleUpdateAIProfile(w http.ResponseWriter, r *http.Request) {
 	s.notifyCloudSyncChange()
 	writeJSON(w, http.StatusOK, sanitizeAIProfileForResponse(&p))
 }
-
 func (s *Server) handleDeleteAIProfile(w http.ResponseWriter, r *http.Request) {
 	if s.vault == nil {
 		writeError(w, http.StatusInternalServerError, "vault not initialized")
