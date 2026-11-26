@@ -416,6 +416,7 @@ func (s *Server) handleSyncStructureApply(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	isRemote := s.IsRemoteRequest(r)
 	var parsedStmts []string
 	var needsChallenge bool
 	var challengeReason string
@@ -427,6 +428,10 @@ func (s *Server) handleSyncStructureApply(w http.ResponseWriter, r *http.Request
 			}
 			parsedStmts = append(parsedStmts, stmt)
 			insp := safety.InspectWithScope(stmt, tgtSess.Environment, req.TargetDB)
+			if isRemote && isRemoteBlockedHostFileOp(insp) {
+				writeError(w, http.StatusForbidden, ErrRemoteHostFileSQLBlocked.Error())
+				return
+			}
 			if insp != nil && insp.RequiresChallenge {
 				needsChallenge = true
 				if challengeReason == "" {

@@ -596,16 +596,24 @@ func (s *Server) handleRunSQLScript(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to rewind temp script file: "+err.Error())
 		return
 	}
+	isRemote := s.IsRemoteRequest(r)
 	totalStatements := 0
 	var blockers []ScriptBlocker
 	scanErr := driver.ScanSQLStatements(tmpFile, sess.DriverName, func(stmt string) error {
 		totalStatements++
+		if isRemote && hasRemoteBlockedHostFileOp(stmt, sess.Environment, sess.DriverName, targetDB) {
+			return ErrRemoteHostFileSQLBlocked
+		}
 		if b := sess.InspectScriptStatement(stmt, totalStatements, targetDB); b != nil {
 			blockers = append(blockers, *b)
 		}
 		return nil
 	})
 	if scanErr != nil {
+		if errors.Is(scanErr, ErrRemoteHostFileSQLBlocked) {
+			writeError(w, http.StatusForbidden, scanErr.Error())
+			return
+		}
 		writeError(w, http.StatusBadRequest, "failed to scan SQL script: "+scanErr.Error())
 		return
 	}

@@ -29,6 +29,7 @@ type ExecuteRequest struct {
 	LockTimeoutSec        int    `json:"lock_timeout_sec,omitempty"`        // Fail-fast session lock timeout (default 3s for DDL)
 	BypassMutationConfirm bool   `json:"bypass_mutation_confirm,omitempty"` // Dev-only session toggle (ADR 0057)
 	TabID                 string `json:"tab_id,omitempty"`                  // Tab-scoped transaction isolation
+	RemoteRequest         bool   `json:"-"`                                 // Server-populated; never trust client JSON
 }
 
 // ExecuteResponse provides the unified outcome of a mutation or buffered query.
@@ -86,6 +87,9 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	inspection, allQueries, err := inspectAllStatements(trimmedSQL, s.Environment, s.DriverName, targetDB)
 	if err != nil {
 		return nil, err
+	}
+	if req.RemoteRequest && hasRemoteBlockedHostFileOp(trimmedSQL, s.Environment, s.DriverName, targetDB) {
+		return nil, ErrRemoteHostFileSQLBlocked
 	}
 
 	// 2. Read-Only Enforcement: blocks all destructive operations or any mutation when locked

@@ -12,6 +12,33 @@ import (
 	"time"
 )
 
+// ErrRemoteHostFileSQLBlocked is returned when a remote request attempts to run SQLite/host-filesystem
+// commands (ATTACH, DETACH, VACUUM INTO) that bypass connection path restrictions.
+var ErrRemoteHostFileSQLBlocked = errors.New("ATTACH, DETACH, and VACUUM INTO are blocked for remote requests because they access host filesystem paths")
+
+func isRemoteBlockedHostFileOp(insp *safety.InspectionResult) bool {
+	if insp == nil {
+		return false
+	}
+	if insp.Operation == "ATTACH" || insp.Operation == "DETACH" {
+		return true
+	}
+	return insp.Operation == "VACUUM" && strings.Contains(insp.Reason, "VACUUM INTO")
+}
+
+func hasRemoteBlockedHostFileOp(sql, environment, driverName, scopedDB string) bool {
+	stmts := splitSQLStatements(strings.NewReader(sql), driverName)
+	if len(stmts) <= 1 {
+		return isRemoteBlockedHostFileOp(safety.InspectWithScope(sql, environment, scopedDB))
+	}
+	for _, stmt := range stmts {
+		if isRemoteBlockedHostFileOp(safety.InspectWithScope(stmt, environment, scopedDB)) {
+			return true
+		}
+	}
+	return false
+}
+
 func inspectAllStatements(sql, environment, driverName, scopedDB string) (*safety.InspectionResult, bool, error) {
 	stmts := splitSQLStatements(strings.NewReader(sql), driverName)
 	if len(stmts) <= 1 {

@@ -67,6 +67,9 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 	if err != nil {
 		return nil, err
 	}
+	if req.RemoteRequest && hasRemoteBlockedHostFileOp(trimmedSQL, s.Environment, s.DriverName, targetDB) {
+		return nil, ErrRemoteHostFileSQLBlocked
+	}
 
 	// 2. Read-Only Enforcement
 	if s.IsReadOnly() && (!allQueries || inspection.IsDestructive) {

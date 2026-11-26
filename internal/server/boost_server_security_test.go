@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/herliansyah/sqlfox/internal/cli"
 	"github.com/herliansyah/sqlfox/internal/driver"
+	_ "github.com/herliansyah/sqlfox/internal/driver/sqlite"
 	"github.com/herliansyah/sqlfox/internal/vault"
 )
 
@@ -599,5 +601,92 @@ func TestHandleImportVault_EnforcesConnectionAndAIValidationAtomically(t *testin
 	}
 	if conns, _ := v.ListConnections(); len(conns) != 0 {
 		t.Fatalf("expected 0 connections after SSRF AIProfile rejection, got %d", len(conns))
+	}
+}
+
+func TestRemoteHostFileSQLHardBlock(t *testing.T) {
+	dir := t.TempDir()
+	v, err := vault.OpenVault(filepath.Join(dir, "config.db"), "pw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	srv := NewServer(v, nil, filepath.Join(dir, "backups"), "pw")
+	defer srv.Close()
+
+	conn := &vault.ConnectionRecord{
+		Name:         "MemSQLite",
+		Driver:       "sqlite",
+		DatabaseName: ":memory:",
+		Environment:  "Development",
+	}
+	if err := v.SaveConnection(conn); err != nil {
+		t.Fatal(err)
+	}
+
+	drv, err := driver.GetDriver("sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	drvSess, err := drv.Connect(context.Background(), driver.Config{
+		Driver:       "sqlite",
+		DatabaseName: ":memory:",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer drvSess.Close()
+
+	active := &ActiveSession{
+		ID:           conn.ID,
+		ConnectionID: conn.ID,
+		Name:         conn.Name,
+		DatabaseName: ":memory:",
+		Environment:  "Development",
+		DriverName:   "sqlite",
+		Session:      drvSess,
+		vault:        v,
+		sessionMgr:   srv.sessionMgr,
+	}
+	srv.sessionMgr.mu.Lock()
+	srv.sessionMgr.sessions[conn.ID] = active
+	srv.sessionMgr.mu.Unlock()
+
+	callHandler := func(handler func(http.ResponseWriter, *http.Request), remoteAddr, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+conn.ID+"/execute", strings.NewReader(body))
+		req.SetPathValue("id", conn.ID)
+		req.RemoteAddr = remoteAddr
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler(rec, req)
+		return rec
+	}
+
+	blockedPayloads := []string{
+		fmt.Sprintf(`{"sql":"ATTACH DATABASE '%s' AS x","confirmed":true,"challenge_input":":memory:","remote_request":false}`, filepath.Join(dir, "config.db")),
+		`{"sql":"DETACH DATABASE x","confirmed":true,"challenge_input":":memory:"}`,
+		fmt.Sprintf(`{"sql":"VACUUM INTO '%s'","confirmed":true,"challenge_input":":memory:"}`, filepath.Join(dir, "leak.db")),
+		fmt.Sprintf(`{"sql":"SELECT 1; ATTACH DATABASE '%s' AS x","confirmed":true,"challenge_input":":memory:"}`, filepath.Join(dir, "config.db")),
+		fmt.Sprintf(`{"sql":"/* c */ VACUUM INTO '%s'","confirmed":true,"challenge_input":":memory:"}`, filepath.Join(dir, "leak2.db")),
+	}
+
+	for _, payload := range blockedPayloads {
+		if rec := callHandler(srv.handleExecuteQuery, "10.20.30.40:5555", payload); rec.Code != http.StatusForbidden {
+			t.Fatalf("handleExecuteQuery remote payload %s: expected 403 Forbidden, got %d (%s)", payload, rec.Code, rec.Body.String())
+		}
+		if rec := callHandler(srv.handleExecuteStream, "10.20.30.40:5555", payload); rec.Code != http.StatusForbidden {
+			t.Fatalf("handleExecuteStream remote payload %s: expected 403 Forbidden, got %d (%s)", payload, rec.Code, rec.Body.String())
+		}
+	}
+
+	// Plain VACUUM (without INTO) is still allowed remotely.
+	if rec := callHandler(srv.handleExecuteQuery, "10.20.30.40:5555", `{"sql":"VACUUM;"}`); rec.Code != http.StatusOK {
+		t.Fatalf("expected plain VACUUM to succeed remotely, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	// Loopback requests can still execute ATTACH with valid challenge confirmation.
+	if rec := callHandler(srv.handleExecuteQuery, "127.0.0.1:12345", `{"sql":"ATTACH DATABASE ':memory:' AS extra","confirmed":true,"challenge_input":":memory:"}`); rec.Code != http.StatusOK {
+		t.Fatalf("expected loopback confirmed ATTACH to succeed, got %d (%s)", rec.Code, rec.Body.String())
 	}
 }

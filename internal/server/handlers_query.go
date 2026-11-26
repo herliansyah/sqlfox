@@ -192,13 +192,14 @@ func (s *Server) handleExecuteQuery(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "sql query is required")
 		return
 	}
+	req.RemoteRequest = s.IsRemoteRequest(r)
 
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
 	resp, err := sess.Execute(ctx, req)
 	if err != nil {
-		if errors.Is(err, ErrReadOnlySession) {
+		if errors.Is(err, ErrReadOnlySession) || errors.Is(err, ErrRemoteHostFileSQLBlocked) {
 			writeError(w, http.StatusForbidden, err.Error())
 			return
 		}
@@ -236,6 +237,7 @@ func (s *Server) handleExecuteStream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "sql query is required")
 		return
 	}
+	req.RemoteRequest = s.IsRemoteRequest(r)
 
 	if _, ok := w.(http.Flusher); !ok {
 		writeError(w, http.StatusInternalServerError, "Streaming unsupported")
@@ -269,7 +271,7 @@ func (s *Server) handleExecuteStream(w http.ResponseWriter, r *http.Request) {
 			// Stream headers already sent; error was emitted as an NDJSON line
 			return
 		}
-		if errors.Is(err, ErrReadOnlySession) {
+		if errors.Is(err, ErrReadOnlySession) || errors.Is(err, ErrRemoteHostFileSQLBlocked) {
 			writeError(w, http.StatusForbidden, err.Error())
 			return
 		}
