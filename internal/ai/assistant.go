@@ -121,8 +121,15 @@ func AssemblePromptsWithMap(req AssistRequest) (systemPrompt string, userPrompt 
 	}
 
 	// Append custom persona instructions
-	if req.CustomPrompt != "" {
-		systemPrompt += "\nCustom System Instructions:\n" + req.CustomPrompt + "\n"
+	customPrompt := req.CustomPrompt
+	if req.MaskIdentifiers {
+		customPrompt = RedactSensitiveLiterals(customPrompt)
+		if len(identMap) > 0 {
+			customPrompt = MaskIdentifiersInText(customPrompt, identMap)
+		}
+	}
+	if customPrompt != "" {
+		systemPrompt += "\nCustom System Instructions:\n" + customPrompt + "\n"
 	}
 
 	// Apply identifier masking and literal/PII redaction to user-supplied SQL, plan, and error text when MaskIdentifiers is enabled.
@@ -134,10 +141,13 @@ func AssemblePromptsWithMap(req AssistRequest) (systemPrompt string, userPrompt 
 		queryText = RedactSensitiveLiterals(queryText)
 		planText = RedactSensitiveLiterals(planText)
 		errText = RedactSensitiveLiterals(errText)
+		promptText = RedactSensitiveLiterals(promptText)
 		if len(identMap) > 0 {
 			queryText = MaskIdentifiersInText(queryText, identMap)
 			planText = MaskIdentifiersInText(planText, identMap)
 			errText = MaskIdentifiersInText(errText, identMap)
+			// ponytail: P0 firewall hides every schema name over prose fidelity; add a
+			// context-aware allowlist only if masked common words break answers.
 			promptText = MaskIdentifiersInText(promptText, identMap)
 		}
 	}

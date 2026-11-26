@@ -153,18 +153,27 @@ var sqlKeywordsToPreserve = map[string]bool{
 	"WITH": true, "EXPLAIN": true, "ANALYZE": true,
 }
 
-// MaskIdentifiersInText replaces real schema identifiers in free text (SQL, plans, errors)
-// using the mapping produced by BuildSchemaPromptWithMap, longest keys first in a single pass.
+// MaskIdentifiersInText replaces real schema identifiers in SQL, plans, errors, and prompts.
+// Case-insensitive fallback is used only when a lowercase name maps to one identifier.
 func MaskIdentifiersInText(text string, mapping map[string]string) string {
 	if text == "" || len(mapping) == 0 {
 		return text
 	}
 	keys := make([]string, 0, len(mapping))
+	exactLookup := make(map[string]string, len(mapping))
 	lowerLookup := make(map[string]string, len(mapping))
+	ambiguousLower := make(map[string]bool)
 	for k, v := range mapping {
-		if k != "" {
-			keys = append(keys, k)
-			lowerLookup[strings.ToLower(k)] = v
+		if k == "" {
+			continue
+		}
+		keys = append(keys, k)
+		exactLookup[k] = v
+		lower := strings.ToLower(k)
+		if prev, ok := lowerLookup[lower]; ok && prev != v {
+			ambiguousLower[lower] = true
+		} else {
+			lowerLookup[lower] = v
 		}
 	}
 	if len(keys) == 0 {
@@ -190,13 +199,21 @@ func MaskIdentifiersInText(text string, mapping map[string]string) string {
 		if !isQuoted && sqlKeywordsToPreserve[strings.ToUpper(bare)] {
 			return match
 		}
-		if repl, ok := lowerLookup[strings.ToLower(bare)]; ok {
-			if isQuoted {
-				return match[:1] + repl + match[len(match)-1:]
+		repl, ok := exactLookup[bare]
+		if !ok {
+			lower := strings.ToLower(bare)
+			if ambiguousLower[lower] {
+				return match
 			}
-			return repl
+			repl, ok = lowerLookup[lower]
 		}
-		return match
+		if !ok {
+			return match
+		}
+		if isQuoted {
+			return match[:1] + repl + match[len(match)-1:]
+		}
+		return repl
 	})
 }
 

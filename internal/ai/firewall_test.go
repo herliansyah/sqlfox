@@ -224,3 +224,64 @@ func TestFirewall_Unmasking(t *testing.T) {
 		t.Fatalf("unexpected collision in MaskIdentifiersInText: %q", masked)
 	}
 }
+
+func TestFirewall_CaseDistinctIdentifiers(t *testing.T) {
+	mapping := map[string]string{
+		"Users":         "masked_1",
+		"users":         "masked_2",
+		"status":        "masked_3",
+		"user_accounts": "masked_4",
+	}
+	if got, want := MaskIdentifiersInText("SELECT * FROM Users JOIN users", mapping), "SELECT * FROM masked_1 JOIN masked_2"; got != want {
+		t.Fatalf("case-distinct mask: got %q, want %q", got, want)
+	}
+	// Ambiguous casing has no safe target; leave it unchanged instead of guessing.
+	if got, want := MaskIdentifiersInText("SELECT * FROM USERS", mapping), "SELECT * FROM USERS"; got != want {
+		t.Fatalf("ambiguous casing: got %q, want %q", got, want)
+	}
+	if got, want := MaskIdentifiersInText("status user_accounts \"status\" users", mapping), "masked_3 masked_4 \"masked_3\" masked_2"; got != want {
+		t.Fatalf("full-text mask: got %q, want %q", got, want)
+	}
+}
+
+func TestAssemblePrompts_MasksIdentifiersInPromptAndCustomPrompt(t *testing.T) {
+	req := AssistRequest{
+		Action:          "nl_to_sql",
+		IncludeSchema:   true,
+		MaskIdentifiers: true,
+		Schema: &driver.SchemaMetadata{Tables: []driver.TableMetadata{{
+			Name:    "users",
+			Columns: []driver.ColumnMetadata{{Name: "email", Type: "TEXT"}},
+		}}},
+		Prompt:       "tampilkan users dan email",
+		CustomPrompt: "pakai tabel users",
+	}
+	systemPrompt, userPrompt := AssemblePrompts(req)
+	for _, out := range []string{systemPrompt, userPrompt} {
+		for _, leak := range []string{"users", "email"} {
+			if strings.Contains(out, leak) {
+				t.Fatalf("identifier leak %q:\n%s\n%s", leak, systemPrompt, userPrompt)
+			}
+		}
+	}
+}
+
+func TestAssemblePrompts_RedactsPromptAndCustomPrompt(t *testing.T) {
+	req := AssistRequest{
+		Action:          "nl_to_sql",
+		MaskIdentifiers: true,
+		Prompt:          "email john@example.com is 'secret'",
+		CustomPrompt:    "contact ceo@corp.com 'token'",
+	}
+	systemPrompt, userPrompt := AssemblePrompts(req)
+	for _, out := range []string{systemPrompt, userPrompt} {
+		for _, leak := range []string{"john@example.com", "ceo@corp.com", "'secret'", "'token'"} {
+			if strings.Contains(out, leak) {
+				t.Fatalf("prompt leak %q:\n%s\n%s", leak, systemPrompt, userPrompt)
+			}
+		}
+	}
+	if !strings.Contains(userPrompt, "[REDACTED_EMAIL]") || !strings.Contains(userPrompt, "'[REDACTED]'") {
+		t.Fatalf("expected redacted prompt, got: %s", userPrompt)
+	}
+}
