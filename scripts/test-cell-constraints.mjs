@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import esbuild from 'esbuild';
+import { createRequire } from 'node:module';
+
+const require = createRequire(new URL('../web/frontend/package.json', import.meta.url));
+const esbuild = require('esbuild');
 
 const built = await esbuild.build({
   entryPoints: ['web/frontend/src/lib/utils/dataTypes.ts'],

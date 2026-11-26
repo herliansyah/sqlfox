@@ -291,6 +291,17 @@ func TestBoostReview_MultiStatementTxStaysAliveInExecuteAndStream(t *testing.T) 
 }
 
 func TestBoostReview_UnsafeCountPredicateAndSQLiteVaultURIsAndDDLInjection(t *testing.T) {
+	windowsURIs := map[string]string{
+		`file://C:\Users\test\config%2edb`:        `C:/Users/test/config.db`,
+		`file://localhostC:\Users\test\config.db`: `C:/Users/test/config.db`,
+		`file:///C:/Users/test/config.db`:         `C:/Users/test/config.db`,
+	}
+	for uri, want := range windowsURIs {
+		if got := normalizeSQLiteTargetPath(uri); got != want {
+			t.Errorf("normalizeSQLiteTargetPath(%q) = %q, want %q", uri, got, want)
+		}
+	}
+
 	// 1. hasUnsafeCountPredicate must catch newline/tab/comment/parenthesis bypasses
 	unsafeCases := []string{
 		"SELECT COUNT(*) FROM users\nWHERE pg_terminate_backend(123) = true",

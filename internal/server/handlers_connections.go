@@ -75,8 +75,25 @@ func normalizeSQLiteTargetPath(dbPath string) string {
 	if !strings.HasPrefix(strings.ToLower(rawPath), "file:") {
 		return rawPath
 	}
-	if u, err := url.Parse(rawPath); err == nil {
+	uriPath := strings.ReplaceAll(rawPath, `\`, "/")
+	if strings.HasPrefix(strings.ToLower(uriPath), "file://localhost") {
+		remainder := uriPath[len("file://localhost"):]
+		if isWindowsDrivePath(remainder) {
+			uriPath = "file:///" + remainder
+		}
+	} else if strings.HasPrefix(strings.ToLower(uriPath), "file://") {
+		remainder := uriPath[len("file://"):]
+		if isWindowsDrivePath(remainder) {
+			uriPath = "file:///" + remainder
+		}
+	}
+	if u, err := url.Parse(uriPath); err == nil {
 		p := u.Path
+		if len(u.Host) == 2 && u.Host[1] == ':' && isASCIIAlpha(u.Host[0]) {
+			p = u.Host + p
+		} else if len(p) >= 4 && p[0] == '/' && isWindowsDrivePath(p[1:]) {
+			p = p[1:]
+		}
 		if p == "" {
 			p = u.Opaque
 		}
@@ -99,6 +116,14 @@ func normalizeSQLiteTargetPath(dbPath string) string {
 		rawPath = unescaped
 	}
 	return rawPath
+}
+
+func isWindowsDrivePath(path string) bool {
+	return len(path) >= 3 && isASCIIAlpha(path[0]) && path[1] == ':' && path[2] == '/'
+}
+
+func isASCIIAlpha(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
 
 func canonicalAbsPath(p string) (string, error) {
