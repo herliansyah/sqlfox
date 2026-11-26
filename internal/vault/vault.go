@@ -47,15 +47,26 @@ type ConnectionRecord struct {
 	SSLCA             string    `json:"ssl_ca,omitempty"`
 	SSLCert           string    `json:"ssl_cert,omitempty"`
 	SSLKey            string    `json:"ssl_key,omitempty"`
+	HasSSLKey         bool      `json:"has_ssl_key,omitempty"`
+	ClearSSL          bool      `json:"clear_ssl,omitempty"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // Vault manages encrypted credential and profile storage.
 type Vault struct {
-	db  *sql.DB
-	key []byte
-	mu  sync.RWMutex
+	db     *sql.DB
+	dbPath string
+	key    []byte
+	mu     sync.RWMutex
+}
+
+// Path returns the filesystem path of the SQLite vault database.
+func (v *Vault) Path() string {
+	if v == nil {
+		return ""
+	}
+	return v.dbPath
 }
 
 // OpenVault opens or creates the SQLite vault at the specified path and initializes the master key.
@@ -68,6 +79,8 @@ func OpenVault(dbPath string, masterPassword string) (*Vault, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open vault db: %w", err)
 	}
+	// SQLite allows only one writer at a time; capping pool size prevents SQLITE_BUSY under concurrent reads/writes.
+	db.SetMaxOpenConns(1)
 
 	_, _ = db.Exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;")
 
@@ -112,8 +125,13 @@ func OpenVault(dbPath string, masterPassword string) (*Vault, error) {
 	}
 
 	v := &Vault{
-		db:  db,
-		key: key,
+		db:     db,
+		dbPath: dbPath,
+		key:    key,
+	}
+	// Tighten vault file permissions so local multi-user hosts cannot read config.db.
+	if dbPath != "" && dbPath != ":memory:" && !strings.HasPrefix(dbPath, "file:") {
+		_ = os.Chmod(dbPath, 0600)
 	}
 	// ponytail: Re-seal any legacy pre-ADR-0060 secrets with bound AAD so vault cannot be swapped
 	v.migrateLegacyAAD()
@@ -356,9 +374,8 @@ func (v *Vault) Close() error {
 // ValidateMasterPassword verifies if a candidate master password is correct.
 func (v *Vault) ValidateMasterPassword(password string) bool {
 	v.mu.RLock()
-	defer v.mu.RUnlock()
-
 	salt, checkCipher, err := getMeta(v.db)
+	v.mu.RUnlock()
 	if err != nil || salt == nil || checkCipher == "" {
 		return false
 	}
@@ -393,9 +410,14 @@ func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 	} else {
 		encPass = conn.EncryptedPassword
 		if encPass == "" && conn.ID != "" {
-			var existingPass string
-			if err := v.db.QueryRow(`SELECT encrypted_password FROM connections WHERE id = ?`, conn.ID).Scan(&existingPass); err == nil {
-				encPass = existingPass
+			var existingPass, exHost, exDriver string
+			var exPort int
+			if err := v.db.QueryRow(`SELECT encrypted_password, host, port, driver FROM connections WHERE id = ?`, conn.ID).
+				Scan(&existingPass, &exHost, &exPort, &exDriver); err == nil {
+				// Prevent password exfiltration by only preserving the stored password if endpoint matches.
+				if strings.EqualFold(conn.Host, exHost) && conn.Port == exPort && strings.EqualFold(conn.Driver, exDriver) {
+					encPass = existingPass
+				}
 			}
 		}
 	}
@@ -408,8 +430,26 @@ func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 	sslCert := conn.SSLCert
 	sslKey := conn.SSLKey
 
-	// ponytail: Preserve existing SSL settings when caller omits them on update (e.g. basic web UI edit modal)
-	if conn.ID != "" && !conn.UseSSL && sslCA == "" && sslCert == "" && sslKey == "" {
+	if conn.ClearSSL {
+		useSSLInt = 0
+		conn.UseSSL = false
+		sslCA = ""
+		sslCert = ""
+		sslKey = ""
+	} else if conn.ID != "" && conn.UseSSL && sslKey == "" {
+		// Preserve stored client private key when editing an SSL connection without re-entering the key,
+		// only if host/port/driver still match (prevents key exfiltration to an attacker-controlled endpoint).
+		var exHost, exDriver string
+		var exPort int
+		var exKey sql.NullString
+		if err := v.db.QueryRow(`SELECT host, port, driver, ssl_key FROM connections WHERE id = ?`, conn.ID).
+			Scan(&exHost, &exPort, &exDriver, &exKey); err == nil {
+			if strings.EqualFold(conn.Host, exHost) && conn.Port == exPort && strings.EqualFold(conn.Driver, exDriver) {
+				sslKey = exKey.String
+			}
+		}
+	} else if conn.ID != "" && !conn.UseSSL && sslCA == "" && sslCert == "" && sslKey == "" {
+		// ponytail: Preserve existing SSL settings when caller omits them on partial update
 		var exUseSSL int
 		var exCA, exCert, exKey sql.NullString
 		if err := v.db.QueryRow(`SELECT use_ssl, ssl_ca, ssl_cert, ssl_key FROM connections WHERE id = ?`, conn.ID).
@@ -421,6 +461,8 @@ func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 			sslKey = exKey.String
 		}
 	}
+
+	conn.HasSSLKey = sslKey != ""
 
 	// The client private key is a secret like the password; keep values already sealed by this vault.
 	if sslKey != "" && !strings.HasPrefix(sslKey, sealedPrefix) {
@@ -584,6 +626,7 @@ func scanConnection(s scannable) (*ConnectionRecord, error) {
 	c.SSLCA = sslCA.String
 	c.SSLCert = sslCert.String
 	c.SSLKey = sslKey.String
+	c.HasSSLKey = sslKey.String != ""
 
 	return &c, nil
 }
@@ -656,14 +699,21 @@ func (v *Vault) migrateLegacyAAD() {
 			}
 		}
 
-		if sslKey.Valid && strings.HasPrefix(sslKey.String, sealedPrefix) {
-			rawCipher := strings.TrimPrefix(sslKey.String, sealedPrefix)
+		if sslKey.Valid && sslKey.String != "" {
 			keyAAD := connFieldAAD(id, "ssl_key")
-			if _, err := decrypt(rawCipher, v.key, keyAAD); err != nil {
-				if plain, err := decrypt(rawCipher, v.key, nil); err == nil {
-					if sealed, err := EncryptWithAAD(plain, v.key, keyAAD); err == nil {
-						item.newSSLKey = sealedPrefix + sealed
+			if strings.HasPrefix(sslKey.String, sealedPrefix) {
+				rawCipher := strings.TrimPrefix(sslKey.String, sealedPrefix)
+				if _, err := decrypt(rawCipher, v.key, keyAAD); err != nil {
+					if plain, err := decrypt(rawCipher, v.key, nil); err == nil {
+						if sealed, err := EncryptWithAAD(plain, v.key, keyAAD); err == nil {
+							item.newSSLKey = sealedPrefix + sealed
+						}
 					}
+				}
+			} else {
+				// Legacy plaintext ssl_key stored prior to at-rest sealing: encrypt in-place with bound AAD.
+				if sealed, err := EncryptWithAAD([]byte(sslKey.String), v.key, keyAAD); err == nil {
+					item.newSSLKey = sealedPrefix + sealed
 				}
 			}
 		}

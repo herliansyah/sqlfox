@@ -1,5 +1,6 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
+  import { focusTrap } from '../../actions/focusTrap';
   import Icon from '../common/Icon.svelte';
 
   const sections = [
@@ -48,6 +49,7 @@
     role="dialog"
     tabindex="-1"
     aria-modal="true"
+    use:focusTrap
   >
     <button
       tabindex="-1"
@@ -92,7 +94,7 @@
 
       <div class="px-5 py-3 border-t border-[#334155] bg-[#0b0f19] flex items-center justify-between text-[11px]">
         <div class="flex items-center space-x-3 text-slate-400">
-          <span><strong class="text-sky-400">Pro tip:</strong> Press <kbd class="px-1 py-0.2 rounded bg-slate-900 border border-slate-700 font-mono">Esc</kbd> anytime to cancel running queries or dismiss popups.</span>
+          <span><strong class="text-sky-400">Pro tip:</strong> Press <kbd class="px-1 py-0.5 rounded bg-slate-900 border border-slate-700 font-mono">Esc</kbd> anytime to cancel running queries or dismiss popups.</span>
           <a
             href="https://github.com/herliansyah/sqlfox/blob/main/docs/USER_GUIDE.md"
             target="_blank"

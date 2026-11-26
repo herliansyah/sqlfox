@@ -242,6 +242,18 @@ func (sm *SessionManager) RemoveReadOnly(connectionID string) {
 	delete(sm.readOnlyStates, connectionID)
 }
 
+// GetActiveSession returns an already-open session without triggering lazy auto-reconnect.
+// Background samplers (e.g. FlightRecorder) must use this so closing a session does not revive it.
+func (sm *SessionManager) GetActiveSession(connectionID string) (*ActiveSession, error) {
+	sm.mu.RLock()
+	sess, ok := sm.sessions[connectionID]
+	sm.mu.RUnlock()
+	if !ok || sess == nil {
+		return nil, fmt.Errorf("session %s is not active", connectionID)
+	}
+	return sess, nil
+}
+
 func (sm *SessionManager) GetSession(connectionID string) (*ActiveSession, error) {
 	sm.mu.RLock()
 	sess, ok := sm.sessions[connectionID]
@@ -320,4 +332,3 @@ func (sm *SessionManager) CloseAll() {
 		_ = sess.Close()
 	}
 }
-

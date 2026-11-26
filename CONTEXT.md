@@ -29,7 +29,7 @@ An encrypted, portable export file (`.sqlfox-vault`) protected by an export pass
 _Avoid_: Backup zip, cred dump
 
 **Remote Access Guard**:
-A security gate intercepting HTTP and WebSocket requests from non-loopback IP addresses, requiring Master Password authentication before granting access to the vault and sessions.
+A security gate intercepting HTTP requests from non-loopback IP addresses, requiring Master Password or LAN Pairing Code authentication before granting access to the vault and sessions.
 _Avoid_: Firewall, IP filter
 
 **Master PIN Masking**:
@@ -64,8 +64,8 @@ _Avoid_: CORS bypass, cross-port allowance
 The zero-CGO HTTPS server configuration (`--tls`, `--tls-cert`, `--tls-key`, `SQLFOX_TLS=1`) terminating TLS directly within the Go runtime, securing LAN and remote browser traffic without requiring external reverse proxies.
 _Avoid_: External proxy, SSL tunnel, HTTPS wrapper
 
-**Ephemeral TLS Certificate**:
-An in-memory self-signed ECDSA P-256 certificate generated automatically on startup with Subject Alternative Names (SANs) covering `localhost`, `127.0.0.1`, `::1`, and the host's detected local network IP when custom certificates are not supplied.
+**Auto-Generated Self-Signed TLS Certificate**:
+A self-signed ECDSA P-256 certificate generated automatically on first `--tls` startup and persisted under `<configDir>/certs/` (365-day validity, `0600` key permissions) with Subject Alternative Names (SANs) covering `localhost`, `127.0.0.1`, `::1`, and the host's detected local network IP when custom certificates are not supplied.
 _Avoid_: Static dummy cert, self-signed pem dump, plaintext fallback
 
 **Strict Connection Mode**:
@@ -91,7 +91,7 @@ The unique server-side process identifier of a PostgreSQL backend worker, utiliz
 _Avoid_: Thread ID, connection ID, worker ID
 
 **RowStream**:
-A memory-bounded record sequence streamed from database drivers to the frontend via WebSocket/SSE chunks.
+A memory-bounded record sequence streamed from database drivers to the frontend via NDJSON HTTP chunks.
 _Avoid_: Result buffer, fetch array
 
 **Out-of-Band Cancellation**:
@@ -157,7 +157,7 @@ An automated pre-DDL backup policy that captures DDL always and table data condi
 _Avoid_: Auto-dump, full backup
 
 **Safe Execution Pipeline**:
-The unified execution seam within an active Session that evaluates queries against the Safety Guard, verifies Environment trust tiers and Challenge Modals, triggers pre-DDL Smart Tiered Backups, and enforces the Implicit Safe Limit across all client transports (HTTP and WebSocket).
+The unified execution seam within an active Session that evaluates queries against the Safety Guard, verifies Environment trust tiers and Challenge Modals, triggers pre-DDL Smart Tiered Backups, and enforces the Implicit Safe Limit across all HTTP and streaming execution endpoints.
 _Avoid_: Query runner, execution handler, direct driver call
 
 **Pre-Flight Lock Inspection**:
@@ -189,7 +189,7 @@ The offline Ed25519 keypair whose public half is embedded in the released binary
 _Avoid_: Code signing cert, GPG key, release key
 
 **Script Runner Safety Gate**:
-The enforcement seam in the Large SQL Runner (`handleRunSQLScript`) that inspects every statement of an uploaded or pasted script through the same AST Safety Guard as the editor. Any statement requiring a typed Challenge blocks the whole run (`HTTP 409`) unless the operator passes `confirm=true`, and each confirmed `DROP`/`TRUNCATE TABLE` triggers a pre-DDL Smart Tiered Backup — closing the Safe Execution Pipeline bypass that previously let scripts run destructive statements unguarded.
+The enforcement seam in the Large SQL Runner (`handleRunSQLScript`) that inspects every statement of an uploaded or pasted script through the same lexer-based Safety Guard as the editor. Any statement requiring a typed Challenge blocks the whole run (`HTTP 409`) unless the operator passes `confirm=true` (plus matching `challenge_input` on Production), and each confirmed `DROP`/`TRUNCATE TABLE` triggers a pre-DDL Smart Tiered Backup — closing the Safe Execution Pipeline bypass that previously let scripts run destructive statements unguarded.
 _Avoid_: Script bypass, bulk runner skip, unguarded batch
 
 **Per-Field AAD Binding**:
@@ -200,16 +200,16 @@ _Avoid_: Tagged cipher, field salt, AAD tag
 The CGO-free, stdlib-only offline utility (`scripts/sign-manifest.go`, build-tagged `ignore`) that generates the Ed25519 signing keypair (`-genkey`) and signs the checksum manifest (`-sign`). It is never compiled into the shipped binary.
 _Avoid_: Signer binary, keygen tool, sign script
 
-**Lexical Masking**:
-The token-sanitization phase in the Safety Guard (`maskCommentsAndLiterals`) that blanks out comments (`--`, `#`, `/* ... */`), quoted string literals, and quoted identifiers before keyword regex evaluation, preventing SQL keywords hidden in comments or strings from triggering false positives or concealing destructive clauses.
+**Lexical Tokenization**:
+The dialect-aware lexer phase in the Safety Guard (`tokenizeSQLMode` in `internal/safety/lexer.go`) that tokenizes SQL while skipping standard comments (`--`, `#` in MySQL, `/* ... */`), unpacking MySQL/MariaDB executable comments (`/*! ... */`, `/*M! ... */`), and isolating quoted literals (`'...'`, PostgreSQL `E'...'`, `$$...$$`) and identifiers so SQL keywords hidden in comments or strings cannot trigger false positives or conceal destructive clauses.
 _Avoid_: Comment stripper, SQL cleaner
 
 **Multi-Statement Inspection Gate**:
 The safety evaluation policy (`inspectAllStatements`) that parses and evaluates every statement within a compound query batch individually, ensuring that trailing destructive operations (e.g. `DROP` or `DELETE` appended after a `SELECT`) cannot evade inspection, while failing closed if multiple statements demand confirmation challenges.
 _Avoid_: Multi-query validator, compound gate
 
-**CTE Clause Stripping**:
-A syntax preprocessing step (`stripLeadingCTE`) that isolates and removes leading Common Table Expression (`WITH ... AS (...)`) definitions to evaluate the root executable operation (`SELECT`, `INSERT`, `UPDATE`, `DELETE`, `MERGE`) under the Safety Guard.
+**CTE Statement Extraction**:
+A syntax preprocessing step (`extractCTEStatementsMode` in `internal/safety/guard.go`) that walks Common Table Expression (`WITH ... AS (...)`) definitions — including writable PostgreSQL CTEs containing `DELETE`/`UPDATE`/`INSERT` — as well as the root executable statement so every inner and outer operation is evaluated under the Safety Guard.
 _Avoid_: CTE cleaner, WITH handler
 
 **Target Database Affirmation**:
@@ -217,7 +217,7 @@ A dedicated visual confirmation gate inside the Challenge Modal and pre-DDL revi
 _Avoid_: DDL confirm, database check prompt, target alert
 
 **Schema Scope Mismatch Guard**:
-An AST analysis check in the Safety Guard that detects discrepancies between a tab's bound Tab Database Scope and an explicitly qualified database prefix in a SQL statement, intercepting accidental cross-database executions.
+A token-analysis check in the Safety Guard that detects discrepancies between a tab's bound Tab Database Scope and an explicitly qualified database prefix in a SQL statement, intercepting accidental cross-database executions.
 _Avoid_: Cross-DB validator, schema mismatch warning
 
 **Pre-Execution Row Estimation**:

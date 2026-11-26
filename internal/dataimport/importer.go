@@ -19,32 +19,49 @@ type ImportOptions struct {
 	SkipErrors  bool              `json:"skip_errors"`
 	Mapping     map[string]string `json:"mapping,omitempty"`
 	DriverName  string            `json:"driver_name,omitempty"`
+	TxChunkSize int               `json:"tx_chunk_size,omitempty"`
 }
 
 // ImportResult contains statistics and errors from a completed import.
 type ImportResult struct {
-	Success      bool     `json:"success"`
-	Delimiter    string   `json:"delimiter"`
-	TotalRows    int      `json:"total_rows"`
-	ImportedRows int      `json:"imported_rows"`
-	SkippedRows  int      `json:"skipped_rows"`
-	Errors       []string `json:"errors"`
+	Success        bool     `json:"success"`
+	PartialSuccess bool     `json:"partial_success,omitempty"`
+	Delimiter      string   `json:"delimiter"`
+	TotalRows      int      `json:"total_rows"`
+	ImportedRows   int      `json:"imported_rows"`
+	SkippedRows    int      `json:"skipped_rows"`
+	Errors         []string `json:"errors"`
 }
 
-// SniffDelimiter detects the delimiter among standard CSV separators.
-// ponytail: Heuristic frequency scan across initial 5 lines. Upgrade path: dialect/grammar parser if exotic files encountered.
+// SniffDelimiter detects the delimiter among standard CSV separators while ignoring characters inside quotes.
+// ponytail: Quote-aware frequency scan across up to 5 logical lines.
 func SniffDelimiter(sample []byte) rune {
 	delims := []rune{',', ';', '\t', '|'}
-	counts := make(map[rune]int)
+	counts := make(map[rune]int, len(delims))
 
-	lines := strings.Split(string(sample), "\n")
-	sampleLines := lines
-	if len(sampleLines) > 5 {
-		sampleLines = sampleLines[:5]
-	}
-	for _, line := range sampleLines {
-		for _, d := range delims {
-			counts[d] += strings.Count(line, string(d))
+	s := string(sample)
+	inQuotes := false
+	linesSeen := 0
+	for i := 0; i < len(s) && linesSeen < 5; i++ {
+		c := s[i]
+		if c == '"' {
+			if inQuotes && i+1 < len(s) && s[i+1] == '"' {
+				i++ // escaped quote
+				continue
+			}
+			inQuotes = !inQuotes
+			continue
+		}
+		if inQuotes {
+			continue
+		}
+		if c == '\n' {
+			linesSeen++
+			continue
+		}
+		switch c {
+		case ',', ';', '\t', '|':
+			counts[rune(c)]++
 		}
 	}
 
@@ -65,9 +82,13 @@ func Import(ctx context.Context, sess driver.Session, tableName string, r io.Rea
 		return nil, fmt.Errorf("table name is required")
 	}
 
-	// 1. Read initial prefix (up to 4096 bytes) for delimiter sniffing and BOM stripping
+	// 1. Read full initial prefix (up to 4096 bytes) for delimiter sniffing and BOM stripping.
+	// Using io.ReadFull avoids short-read splits on chunked HTTP streams.
 	prefix := make([]byte, 4096)
-	n, _ := r.Read(prefix)
+	n, readErr := io.ReadFull(r, prefix)
+	if readErr != nil && readErr != io.EOF && readErr != io.ErrUnexpectedEOF {
+		return nil, fmt.Errorf("failed to read CSV stream: %w", readErr)
+	}
 	prefix = prefix[:n]
 
 	// Strip UTF-8 BOM if present
@@ -136,32 +157,56 @@ func Import(ctx context.Context, sess driver.Session, tableName string, r io.Rea
 	batchLimit := 100
 	if len(activeCols) > 9 {
 		batchLimit = 900 / len(activeCols)
-		if batchLimit < 10 {
-			batchLimit = 10
+		if batchLimit < 1 {
+			batchLimit = 1
 		}
 	}
 
-	// Fail-fast imports run in one transaction so an error leaves the table untouched (re-running
-	// after a fix would otherwise duplicate the rows already committed by earlier batches).
+	// Fail-fast imports run in bounded chunked transactions (default 5000 rows per tx) so small imports
+	// remain atomic while multi-million-row imports do not exhaust undo/WAL logs or hold unbounded locks.
 	// skip_errors imports stay autocommit: a failed row would abort a PostgreSQL transaction.
-	var target execer = sess
-	commit := func() error { return nil }
-	if !opts.SkipErrors {
-		tx, err := sess.BeginTx(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to begin import transaction: %w", err)
+	txChunkSize := opts.TxChunkSize
+	if txChunkSize <= 0 {
+		txChunkSize = 5000
+	}
+
+	var activeTx driver.TxSession
+	txRows := 0
+	rollbackTx := func() {
+		if activeTx != nil {
+			_ = activeTx.Rollback()
+			activeTx = nil
+			txRows = 0
 		}
-		committed := false
-		defer func() {
-			if !committed {
-				_ = tx.Rollback()
+	}
+	defer rollbackTx()
+
+	ensureTx := func() (execer, error) {
+		if opts.SkipErrors {
+			return sess, nil
+		}
+		if activeTx == nil {
+			tx, err := sess.BeginTx(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to begin import transaction: %w", err)
 			}
-		}()
-		target = tx
-		commit = func() error {
-			committed = true
-			return tx.Commit()
+			activeTx = tx
+			txRows = 0
 		}
+		return activeTx, nil
+	}
+
+	commitChunk := func() error {
+		if activeTx == nil {
+			return nil
+		}
+		if err := activeTx.Commit(); err != nil {
+			rollbackTx()
+			return err
+		}
+		activeTx = nil
+		txRows = 0
+		return nil
 	}
 
 	totalRows := 0
@@ -174,6 +219,10 @@ func Import(ctx context.Context, sess driver.Session, tableName string, r io.Rea
 		if len(currentBatch) == 0 {
 			return nil
 		}
+		target, err := ensureTx()
+		if err != nil {
+			return err
+		}
 		imported, errs := executeBatchInsert(ctx, target, tableName, targetColNames, currentBatch, opts.SkipErrors, opts.DriverName)
 		importedRows += imported
 		skippedRows += len(currentBatch) - imported
@@ -184,10 +233,20 @@ func Import(ctx context.Context, sess driver.Session, tableName string, r io.Rea
 				}
 			}
 			if !opts.SkipErrors {
+				rollbackTx()
 				return fmt.Errorf("%s", errs[0])
 			}
 		}
+		batchLen := len(currentBatch)
 		currentBatch = currentBatch[:0]
+		if !opts.SkipErrors {
+			txRows += batchLen
+			if txRows >= txChunkSize {
+				if err := commitChunk(); err != nil {
+					return fmt.Errorf("failed to commit import chunk: %w", err)
+				}
+			}
+		}
 		return nil
 	}
 
@@ -204,6 +263,7 @@ func Import(ctx context.Context, sess driver.Session, tableName string, r io.Rea
 				errorMessages = append(errorMessages, fmt.Sprintf("Row %d parse error: %v", totalRows, err))
 			}
 			if !opts.SkipErrors {
+				rollbackTx()
 				return nil, fmt.Errorf("error on row %d: %w", totalRows, err)
 			}
 			continue
@@ -213,10 +273,11 @@ func Import(ctx context.Context, sess driver.Session, tableName string, r io.Rea
 		for cIdx, col := range activeCols {
 			if col.csvIdx < len(record) {
 				raw := record[col.csvIdx]
-				if opts.EmptyAsNull && strings.TrimSpace(raw) == "" {
+				// Only truly empty strings map to NULL; preserve intentional whitespace such as "   ".
+				if opts.EmptyAsNull && raw == "" {
 					rowVals[cIdx] = nil
 				} else {
-					// Raw string preserves leading zeros (e.g. "08123456789")
+					// Raw string preserves leading zeros (e.g. "08123456789") and intentional whitespace.
 					rowVals[cIdx] = raw
 				}
 			} else {
@@ -242,18 +303,44 @@ func Import(ctx context.Context, sess driver.Session, tableName string, r io.Rea
 		}
 	}
 
-	if err := commit(); err != nil {
+	if err := commitChunk(); err != nil {
 		return nil, fmt.Errorf("failed to commit import: %w", err)
 	}
 
+	hasFailures := skippedRows > 0 || len(errorMessages) > 0
 	return &ImportResult{
-		Success:      importedRows > 0 || totalRows == 0,
-		Delimiter:    string(comma),
-		TotalRows:    totalRows,
-		ImportedRows: importedRows,
-		SkippedRows:  skippedRows,
-		Errors:       errorMessages,
+		Success:        !hasFailures,
+		PartialSuccess: importedRows > 0 && hasFailures,
+		Delimiter:      string(comma),
+		TotalRows:      totalRows,
+		ImportedRows:   importedRows,
+		SkippedRows:    skippedRows,
+		Errors:         errorMessages,
 	}, nil
+}
+
+// quoteTableIdent quotes both unqualified ("users") and schema-qualified ("public.users") table names.
+func quoteTableIdent(tableName, drv string) string {
+	trimmed := strings.TrimSpace(tableName)
+	if trimmed == "" {
+		return ""
+	}
+	parts := strings.Split(trimmed, ".")
+	if len(parts) == 1 {
+		return driver.QuoteIdentifier(trimmed, drv)
+	}
+	quoted := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		quoted = append(quoted, driver.QuoteIdentifier(p, drv))
+	}
+	if len(quoted) == 0 {
+		return driver.QuoteIdentifier(trimmed, drv)
+	}
+	return strings.Join(quoted, ".")
 }
 
 // executeBatchInsert executes a multi-row parameterized INSERT.
@@ -273,9 +360,11 @@ func executeBatchInsert(ctx context.Context, sess execer, tableName string, colN
 		drv = driverName[0]
 	}
 
+	quotedTable := quoteTableIdent(tableName, drv)
+
 	var sb strings.Builder
 	sb.WriteString("INSERT INTO ")
-	sb.WriteString(driver.QuoteIdentifier(tableName, drv))
+	sb.WriteString(quotedTable)
 	sb.WriteString(" (")
 	for i, c := range colNames {
 		if i > 0 {
@@ -317,7 +406,7 @@ func executeBatchInsert(ctx context.Context, sess execer, tableName string, colN
 
 	var singleSb strings.Builder
 	singleSb.WriteString("INSERT INTO ")
-	singleSb.WriteString(driver.QuoteIdentifier(tableName, drv))
+	singleSb.WriteString(quotedTable)
 	singleSb.WriteString(" (")
 	for i, c := range colNames {
 		if i > 0 {

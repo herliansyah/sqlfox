@@ -277,7 +277,7 @@ func TestMasterKeyLANExclusivity(t *testing.T) {
 		t.Fatalf("master_password should be omitted when lan_enabled is false")
 	}
 
-	// 2. In LAN mode: lan_enabled is true, master_password is provided
+	// 2. In LAN mode: lan_enabled is true, ephemeral pairing_code is provided (never plaintext master_password)
 	srv.SetLANEnabled(true)
 	recLAN := httptest.NewRecorder()
 	srv.Router().ServeHTTP(recLAN, reqDefault)
@@ -290,8 +290,32 @@ func TestMasterKeyLANExclusivity(t *testing.T) {
 	if resLAN["lan_enabled"] != true {
 		t.Fatalf("expected lan_enabled: true, got: %+v", resLAN)
 	}
-	if resLAN["master_password"] != "pin-123456" {
-		t.Fatalf("expected pin-123456, got: %v", resLAN["master_password"])
+	if _, hasPlaintext := resLAN["master_password"]; hasPlaintext {
+		t.Fatalf("master_password must never be exposed over HTTP")
+	}
+	pairingCode, _ := resLAN["pairing_code"].(string)
+	if len(pairingCode) != 8 {
+		t.Fatalf("expected 8-digit pairing_code, got: %q", pairingCode)
+	}
+
+	// 3. Ephemeral pairing_code unlocks once and is burned immediately (single-use)
+	unlockBody := `{"password":"` + pairingCode + `"}`
+	reqUnlock1 := httptest.NewRequest("POST", "/api/auth/unlock", strings.NewReader(unlockBody))
+	reqUnlock1.Host = "127.0.0.1:8080"
+	reqUnlock1.RemoteAddr = "192.168.1.50:54321"
+	recUnlock1 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(recUnlock1, reqUnlock1)
+	if recUnlock1.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on first pairing_code unlock, got: %d %s", recUnlock1.Code, recUnlock1.Body.String())
+	}
+
+	reqUnlock2 := httptest.NewRequest("POST", "/api/auth/unlock", strings.NewReader(unlockBody))
+	reqUnlock2.Host = "127.0.0.1:8080"
+	reqUnlock2.RemoteAddr = "192.168.1.50:54321"
+	recUnlock2 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(recUnlock2, reqUnlock2)
+	if recUnlock2.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized on second pairing_code reuse, got: %d", recUnlock2.Code)
 	}
 }
 
@@ -575,5 +599,73 @@ func TestBehindProxy_RemoteGuardProtection(t *testing.T) {
 
 	if recMasterAuth.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 Forbidden when accessing master key from remote IP even with token, got %d", recMasterAuth.Code)
+	}
+}
+
+func TestBehindProxy_AntiSpoofing(t *testing.T) {
+	tempDir := t.TempDir()
+	v, err := vault.OpenVault(filepath.Join(tempDir, "config.db"), "pin-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	srv := NewServer(v, nil, filepath.Join(tempDir, "backups"), "pin-secret")
+	srv.SetBehindProxy(true)
+	srv.SetLANEnabled(true)
+	handler := srv.Router()
+
+	// 1. Left-edge X-Forwarded-For spoofing: attacker sends "127.0.0.1", proxy appends "203.0.113.195".
+	// Must resolve to 203.0.113.195 (rightmost untrusted IP) and block with 401.
+	reqSpoofXFF := httptest.NewRequest("GET", "/api/connections", nil)
+	reqSpoofXFF.RemoteAddr = "127.0.0.1:45678"
+	reqSpoofXFF.Header.Set("X-Forwarded-For", "127.0.0.1, 203.0.113.195")
+	recSpoofXFF := httptest.NewRecorder()
+	handler.ServeHTTP(recSpoofXFF, reqSpoofXFF)
+	if recSpoofXFF.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for left-edge X-Forwarded-For spoof, got %d", recSpoofXFF.Code)
+	}
+
+	// 2. Direct untrusted peer claiming X-Forwarded-For: 127.0.0.1 -> RemoteAddr is public, so
+	// forwarding headers must be ignored completely and request blocked with 401.
+	reqUntrustedPeer := httptest.NewRequest("GET", "/api/auth/master-key", nil)
+	reqUntrustedPeer.RemoteAddr = "203.0.113.99:54321"
+	reqUntrustedPeer.Header.Set("X-Forwarded-For", "127.0.0.1")
+	reqUntrustedPeer.Header.Set("X-Real-IP", "127.0.0.1")
+	recUntrustedPeer := httptest.NewRecorder()
+	handler.ServeHTTP(recUntrustedPeer, reqUntrustedPeer)
+	if recUntrustedPeer.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for untrusted peer spoofing X-Forwarded-For, got %d", recUntrustedPeer.Code)
+	}
+
+	// 3. Baseline security headers must be present.
+	if got := recSpoofXFF.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("expected X-Content-Type-Options=nosniff, got %q", got)
+	}
+	if got := recSpoofXFF.Header().Get("X-Frame-Options"); got != "DENY" {
+		t.Fatalf("expected X-Frame-Options=DENY, got %q", got)
+	}
+	if got := recSpoofXFF.Header().Get("Referrer-Policy"); got != "no-referrer" {
+		t.Fatalf("expected Referrer-Policy=no-referrer, got %q", got)
+	}
+
+	// 4. RequestBodyLimitMiddleware rejects oversized /api/auth/unlock payloads (> 64 KB) with 413.
+	oversized := `{"password":"` + strings.Repeat("a", 70*1024) + `"}`
+	reqLarge := httptest.NewRequest("POST", "/api/auth/unlock", strings.NewReader(oversized))
+	reqLarge.RemoteAddr = "192.168.1.50:55555"
+	recLarge := httptest.NewRecorder()
+	handler.ServeHTTP(recLarge, reqLarge)
+	if recLarge.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413 Request Entity Too Large for oversized unlock payload, got %d", recLarge.Code)
+	}
+
+	// 5. Proxy forwarding X-Forwarded-For: 127.0.0.1 or X-Real-IP: 127.0.0.1 must NEVER grant localhost bypass.
+	reqLoopbackSpoof := httptest.NewRequest("GET", "/api/auth/master-key", nil)
+	reqLoopbackSpoof.RemoteAddr = "127.0.0.1:45678"
+	reqLoopbackSpoof.Header.Set("X-Forwarded-For", "127.0.0.1")
+	recLoopbackSpoof := httptest.NewRecorder()
+	handler.ServeHTTP(recLoopbackSpoof, reqLoopbackSpoof)
+	if recLoopbackSpoof.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 when proxy forwards X-Forwarded-For: 127.0.0.1, got %d", recLoopbackSpoof.Code)
 	}
 }

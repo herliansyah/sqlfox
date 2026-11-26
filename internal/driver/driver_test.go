@@ -6,6 +6,7 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/herliansyah/sqlfox/internal/driver"
 	_ "github.com/herliansyah/sqlfox/internal/driver/mysql"
@@ -281,19 +282,45 @@ func TestFormatSQLValue_MySQLBackslashAndBytes(t *testing.T) {
 		t.Fatalf("expected MySQL escaped %q, got %q", expectedMySQL, escapedMySQL)
 	}
 
-	// 2. SQL injection payload with \'
+	// 2. SQL injection payload with \' (double single-quote stays safe even under NO_BACKSLASH_ESCAPES)
 	sqli := `\' OR 1=1 -- `
 	escapedSQLi := driver.FormatSQLValueForDriver(sqli, "mysql")
-	expectedSQLi := `'\\\' OR 1=1 -- '`
+	expectedSQLi := `'\\'' OR 1=1 -- '`
 	if escapedSQLi != expectedSQLi {
 		t.Fatalf("expected MySQL escaped %q, got %q", expectedSQLi, escapedSQLi)
 	}
 
-	// 3. Binary blob formatting as hex literal
+	// 2b. NO_BACKSLASH_ESCAPES mode must not emit backslash sequences (\n, \\, \")
+	noBS := driver.EscapeMySQLStringWithMode("a\\b\nc\"d'e", true)
+	if noBS != "'a\\b\nc\"d''e'" {
+		t.Fatalf("expected NO_BACKSLASH_ESCAPES literal, got %q", noBS)
+	}
+
+	// 3. Binary blob formatting as hex literal (including postgres "pg" alias)
 	blob := []byte{0xDE, 0xAD, 0xBE, 0xEF}
 	hexVal := driver.FormatSQLValue(blob)
 	if hexVal != "X'DEADBEEF'" {
 		t.Fatalf("expected X'DEADBEEF', got %s", hexVal)
+	}
+	if got := driver.FormatSQLValueForDriver(blob, "pg"); got != `'\xdeadbeef'::bytea` {
+		t.Fatalf("expected postgres bytea hex for 'pg' alias, got %s", got)
+	}
+
+	// 4. time.Time formatting must produce valid SQL timestamps, never Go's fmt.Sprintf "%v"
+	ts := time.Date(2026, 11, 24, 14, 3, 15, 0, time.FixedZone("WIB", 7*3600))
+	if got := driver.FormatSQLValueForDriver(ts, "mysql"); got != "'2026-11-24 14:03:15'" {
+		t.Fatalf("expected MySQL timestamp literal, got %s", got)
+	}
+	if got := driver.FormatSQLValueForDriver(ts, "postgres"); got != "'2026-11-24T14:03:15+07:00'" {
+		t.Fatalf("expected Postgres RFC3339 timestamp literal, got %s", got)
+	}
+
+	// 5. 64-bit integers outside ±(2^53-1) must be stringified for JS JSON safety
+	if got := driver.FormatValueForJSON(int64(9007199254740993)); got != "9007199254740993" {
+		t.Fatalf("expected stringified unsafe int64, got %#v", got)
+	}
+	if got := driver.FormatValueForJSON(int64(42)); got != int64(42) {
+		t.Fatalf("expected safe int64 to remain numeric, got %#v", got)
 	}
 }
 
@@ -413,11 +440,36 @@ func TestIsQueryStatement(t *testing.T) {
 		"ALTER TABLE tbl ADD COLUMN c INT",
 		"CREATE TABLE tbl (id INT)",
 		"TRUNCATE TABLE tbl",
+		"SELECT 1 /*!50000 ; DROP TABLE users */",
+		"WITH a AS (SELECT '\\'), b AS (DELETE FROM users RETURNING *) SELECT 1",
+		"PRAGMA writable_schema = ON",
+		"SELECT * FROM users INTO OUTFILE '/tmp/x'",
+		"/* /* */ */ DROP TABLE users",
 	}
 	for _, m := range mutations {
 		if driver.IsQueryStatement(m) {
 			t.Fatalf("expected IsQueryStatement(%q) = false", m)
 		}
+	}
+}
+
+func TestSplitAndExplainBypassHardening(t *testing.T) {
+	// MySQL executable comment smuggling a second statement must split into 2 statements.
+	stmts := driver.SplitSQLStatements("SELECT 1 /*!50000 ; DROP TABLE users */", "mysql")
+	if len(stmts) != 2 {
+		t.Fatalf("expected 2 statements when splitting MySQL executable comment multi-statement, got %d: %q", len(stmts), stmts)
+	}
+	// PostgreSQL nested block comment must strip cleanly.
+	if got := driver.StripLeadingComments("/* outer /* inner */ still comment */ DROP TABLE users"); got != "DROP TABLE users" {
+		t.Fatalf("StripLeadingComments nested block comment = %q", got)
+	}
+	// EXPLAIN /*x*/ ANALYZE must be rejected.
+	if _, err := driver.ExplainTarget([]string{"EXPLAIN /*x*/ ANALYZE DELETE FROM users"}); err == nil {
+		t.Fatalf("expected EXPLAIN /*x*/ ANALYZE to be rejected")
+	}
+	// EXPLAIN with hidden executable-comment multi-statement must be rejected.
+	if _, err := driver.ExplainTarget([]string{"SELECT 1 /*!50000 ; DROP TABLE users */"}); err == nil {
+		t.Fatalf("expected hidden multi-statement in ExplainTarget to be rejected")
 	}
 }
 

@@ -46,6 +46,7 @@ type Server struct {
 	lanEnabled        bool
 	lanIP             string
 	behindProxy       bool
+	trustedProxies    []string
 	allowedHosts      []string
 }
 
@@ -82,6 +83,7 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
 	mux.HandleFunc("POST /api/auth/unlock", s.handleAuthUnlock)
 	mux.HandleFunc("GET /api/auth/master-key", s.handleGetMasterPassword)
+	mux.HandleFunc("POST /api/auth/master-key", s.handleGetMasterPassword)
 
 	// Connection vault endpoints
 	mux.HandleFunc("GET /api/connections", s.handleListConnections)
@@ -286,8 +288,8 @@ func (s *Server) routes() {
 		})
 	}
 
-	// ponytail: stdlib panic recoverer, logger, and ingress + remote access guards replace chi router & middleware
-	baseHandler := recoverer(s.IngressGuardMiddleware(s.RemoteAccessGuardMiddleware(mux)))
+	// ponytail: stdlib panic recoverer, logger, body size guard, security headers, and ingress + remote access guards replace chi router & middleware
+	baseHandler := recoverer(RequestBodyLimitMiddleware(SecurityHeadersMiddleware(s.IngressGuardMiddleware(s.RemoteAccessGuardMiddleware(mux)))))
 	s.mu.Lock()
 	s.baseHandler = baseHandler
 	if s.logger != nil {
@@ -300,30 +302,91 @@ func (s *Server) routes() {
 
 // SetLANEnabled toggles whether the server is configured to accept LAN connections and display Master PIN.
 func (s *Server) SetLANEnabled(enabled bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.lanEnabled = enabled
 }
 
 // SetLANIP configures the detected LAN IP address for client display and remote pairing.
 func (s *Server) SetLANIP(ip string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.lanIP = ip
 }
 
 // IsLANEnabled returns whether LAN mode is currently active.
 func (s *Server) IsLANEnabled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.lanEnabled
 }
 
 // SetAllowedHosts sets explicit hostnames or IPs accepted by the DNS Rebinding Guard.
 func (s *Server) SetAllowedHosts(hosts []string) {
-	s.allowedHosts = hosts
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.allowedHosts = append([]string(nil), hosts...)
 }
 
 // SetBehindProxy configures whether the server is operating behind a reverse proxy (e.g. Nginx, Caddy),
-// enabling secure parsing of X-Forwarded-For and X-Real-IP headers instead of trusting loopback RemoteAddr.
+// enabling secure parsing of X-Forwarded-For and X-Real-IP headers from trusted proxies.
 func (s *Server) SetBehindProxy(enabled bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.behindProxy = enabled
+}
+
+// SetTrustedProxies configures additional proxy IPs or CIDRs trusted to supply forwarding headers.
+func (s *Server) SetTrustedProxies(proxies []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.trustedProxies = append([]string(nil), proxies...)
+}
+
+// SecurityHeadersMiddleware attaches baseline browser hardening headers to all responses.
+func SecurityHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'")
+		if r.TLS != nil {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// RequestBodyLimitMiddleware bounds incoming request bodies to prevent memory-exhaustion DoS.
+func RequestBodyLimitMiddleware(next http.Handler) http.Handler {
+	const (
+		authLimit    int64 = 64 << 10   // 64 KB for unauthenticated unlock payloads
+		defaultLimit int64 = 10 << 20   // 10 MB for standard JSON/API requests
+		importLimit  int64 = 100 << 20  // 100 MB for CSV/vault/bundle imports
+	)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil && r.ContentLength != 0 {
+			p := r.URL.Path
+			if strings.HasSuffix(p, "/run-sql-script") {
+				// handleRunSQLScript enforces its own maxScriptPayloadBytes limit with 413 handling.
+				next.ServeHTTP(w, r)
+				return
+			}
+			limit := defaultLimit
+			switch {
+			case p == "/api/auth/unlock":
+				limit = authLimit
+			case strings.HasSuffix(p, "/import-csv") || p == "/api/vault/import" || p == "/api/notes/bundle/import":
+				limit = importLimit
+			}
+			if r.ContentLength > limit {
+				writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("request body exceeds maximum allowed size (%d bytes)", limit))
+				return
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Close gracefully shuts down all active database sessions and background managers.

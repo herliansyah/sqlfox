@@ -6,49 +6,31 @@
   import SqlEditor from './lib/components/editor/SqlEditor.svelte';
   import VirtualGrid from './lib/components/grid/VirtualGrid.svelte';
   import TableViewer from './lib/components/table/TableViewer.svelte';
-  import SafetyModal from './lib/components/modals/SafetyModal.svelte';
   import RemoteLockModal from './lib/components/modals/RemoteLockModal.svelte';
-  import ConnectionModal from './lib/components/modals/ConnectionModal.svelte';
-  import RecordInspectorModal from './lib/components/modals/RecordInspectorModal.svelte';
-  import InsertRowModal from './lib/components/modals/InsertRowModal.svelte';
-  import CommandPaletteModal from './lib/components/modals/CommandPaletteModal.svelte';
-  import ShortcutsModal from './lib/components/modals/ShortcutsModal.svelte';
-  import CreateDatabaseModal from './lib/components/modals/CreateDatabaseModal.svelte';
-  import TableCreatorModal from './lib/components/modals/TableCreatorModal.svelte';
-  import RenameTableModal from './lib/components/modals/RenameTableModal.svelte';
-  import DuplicateTableModal from './lib/components/modals/DuplicateTableModal.svelte';
-  import JsonCellModal from './lib/components/modals/JsonCellModal.svelte';
-  import ViewDesignerModal from './lib/components/modals/ViewDesignerModal.svelte';
-  import TriggerDesignerModal from './lib/components/modals/TriggerDesignerModal.svelte';
-  import RoutineDesignerModal from './lib/components/modals/RoutineDesignerModal.svelte';
-  import EventDesignerModal from './lib/components/modals/EventDesignerModal.svelte';
-  import RunSqlModal from './lib/components/modals/RunSqlModal.svelte';
-  import SnippetsModal from './lib/components/modals/SnippetsModal.svelte';
-  import AiDrawer from './lib/components/ai/AiDrawer.svelte';
-  import AiSettingsModal from './lib/components/modals/AiSettingsModal.svelte';
-  import NoteComposerModal from './lib/components/modals/NoteComposerModal.svelte';
-  import ActivityConsoleDrawer from './lib/components/activity/ActivityConsoleDrawer.svelte';
-  import UpdateModal from './lib/components/modals/UpdateModal.svelte';
-  import SettingsModal from './lib/components/modals/SettingsModal.svelte';
   import ToastContainer from './lib/components/common/ToastContainer.svelte';
   import NativeDialogModal from './lib/components/modals/NativeDialogModal.svelte';
   import ReconnectBanner from './lib/components/common/ReconnectBanner.svelte';
-  import DdlReviewModal from './lib/components/modals/DdlReviewModal.svelte';
-  import RefreshAllModal from './lib/components/modals/RefreshAllModal.svelte';
-  import ImpactPreviewModal from './lib/components/modals/ImpactPreviewModal.svelte';
-  import FkPeekPopover from './lib/components/grid/FkPeekPopover.svelte';
-  import SchemaSearchModal from './lib/components/modals/SchemaSearchModal.svelte';
-  import DdlViewModal from './lib/components/modals/DdlViewModal.svelte';
-  import SafetyInspectionModal from './lib/components/modals/SafetyInspectionModal.svelte';
-  import LockInspectorModal from './lib/components/modals/LockInspectorModal.svelte';
-  import NoteMarkdownView from './lib/components/notes/NoteMarkdownView.svelte';
   import Icon from './lib/components/common/Icon.svelte';
   import { copyText } from './lib/utils/clipboard';
   import { appState } from './lib/stores/appState.svelte';
   import { onDestroy, tick } from 'svelte';
   import { formatSQL } from './lib/utils/sqlFormatter';
 
-  let editorSplitPercent = $state(Math.max(15, Math.min(85, Number(localStorage.getItem('sqlfox_svelte_editor_split')) || 45)));
+  function safeReadSplit(): number {
+    try {
+      return Number(localStorage.getItem('sqlfox_svelte_editor_split')) || 45;
+    } catch {
+      return 45;
+    }
+  }
+
+  function safeWriteSplit(val: number) {
+    try {
+      localStorage.setItem('sqlfox_svelte_editor_split', String(val));
+    } catch { /* ignore */ }
+  }
+
+  let editorSplitPercent = $state(Math.max(15, Math.min(85, safeReadSplit())));
   let isDraggingSplitter = $state(false);
 
   function startDrag() {
@@ -70,7 +52,7 @@
     isDraggingSplitter = false;
     window.removeEventListener('mousemove', onDrag);
     window.removeEventListener('mouseup', stopDrag);
-    localStorage.setItem('sqlfox_svelte_editor_split', String(editorSplitPercent));
+    safeWriteSplit(editorSplitPercent);
   }
 
   // Release window listeners if the component unmounts mid-drag.
@@ -83,10 +65,13 @@
 
   function resetSplitter() {
     editorSplitPercent = 50;
-    localStorage.setItem('sqlfox_svelte_editor_split', '50');
+    safeWriteSplit(50);
   }
 
-  onDestroy(stopDrag);
+  onDestroy(() => {
+    stopDrag();
+    appState.destroy();
+  });
 
   function handleGlobalKeyDown(e: KeyboardEvent) {
     if (appState.isRemoteLocked) return;
@@ -102,41 +87,46 @@
       return;
     }
 
-    // CodeMirror owns editor shortcuts while focused; never dispatch them twice globally.
-    if (e.key === 'F5' && !inTextControl) {
-      e.preventDefault();
-      appState.executeCurrentTab();
-      return;
-    }
-    if (isCtrl && e.key === 'Enter' && !inCodeMirror) {
-      e.preventDefault();
-      if (e.altKey) appState.executeCurrentTab();
-      else if (e.shiftKey) appState.explainCurrentTab(appState.getEditorTargetSql() ?? undefined);
-      else appState.executeCurrentTab(appState.getEditorTargetSql() ?? undefined);
-      return;
-    }
-    if (isCtrl && e.shiftKey && e.key.toLowerCase() === 'f' && !inCodeMirror) {
-      e.preventDefault();
-      if (appState.activeTab?.sql) {
-        appState.activeTab.sql = formatSQL(appState.activeTab.sql);
-        appState.showToast('Formatted SQL worksheet', 'info');
+    const modalOpen = appState.hasOpenModal;
+
+    // Never fire global query/transaction shortcuts while a modal/dialog is active in front of the editor.
+    if (!modalOpen) {
+      // CodeMirror owns editor shortcuts while focused; never dispatch them twice globally.
+      if (e.key === 'F5' && !inTextControl) {
+        e.preventDefault();
+        appState.executeCurrentTab();
+        return;
       }
-      return;
-    }
-    if (isCtrl && e.shiftKey && e.key.toLowerCase() === 's') {
-      e.preventDefault();
-      appState.openSnippetsModal();
-      return;
-    }
-    if (isCtrl && e.shiftKey && e.key.toLowerCase() === 'c' && appState.isTransactionActive) {
-      e.preventDefault();
-      appState.executeTransaction('COMMIT');
-      return;
-    }
-    if (isCtrl && e.shiftKey && e.key.toLowerCase() === 'r' && appState.isTransactionActive) {
-      e.preventDefault();
-      appState.executeTransaction('ROLLBACK');
-      return;
+      if (isCtrl && e.key === 'Enter' && !inCodeMirror) {
+        e.preventDefault();
+        if (e.altKey) appState.executeCurrentTab();
+        else if (e.shiftKey) appState.explainCurrentTab(appState.getEditorTargetSql() ?? undefined);
+        else appState.executeCurrentTab(appState.getEditorTargetSql() ?? undefined);
+        return;
+      }
+      if (isCtrl && e.shiftKey && e.key.toLowerCase() === 'f' && !inCodeMirror) {
+        e.preventDefault();
+        if (appState.activeTab?.sql) {
+          appState.patchTab(appState.activeTab.id, { sql: formatSQL(appState.activeTab.sql) });
+          appState.showToast('Formatted SQL worksheet', 'info');
+        }
+        return;
+      }
+      if (isCtrl && e.shiftKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        appState.openSnippetsModal();
+        return;
+      }
+      if (isCtrl && e.shiftKey && e.key.toLowerCase() === 'c' && appState.isTransactionActive) {
+        e.preventDefault();
+        appState.executeTransaction('COMMIT');
+        return;
+      }
+      if (isCtrl && e.shiftKey && e.key.toLowerCase() === 'r' && appState.isTransactionActive) {
+        e.preventDefault();
+        appState.executeTransaction('ROLLBACK');
+        return;
+      }
     }
 
     // Ctrl + K: Command Palette
@@ -249,7 +239,7 @@
       }
 
       if (appState.activeTab?.showQueryProfiler) {
-        appState.activeTab.showQueryProfiler = false;
+        appState.patchTab(appState.activeTab.id, { showQueryProfiler: false });
         return;
       }
 
@@ -308,14 +298,14 @@
                 <div class="inline-flex rounded border border-slate-700 bg-[#090d16] p-0.5 ml-2">
                   <button
                     type="button"
-                    onclick={() => (noteTab.noteMode = 'edit')}
+                    onclick={() => appState.patchTab(noteTab.id, { noteMode: 'edit' })}
                     class="px-2 py-0.5 rounded text-[11px] font-semibold transition {mode === 'edit' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-slate-200'}"
                   >
                     Edit
                   </button>
                   <button
                     type="button"
-                    onclick={() => (noteTab.noteMode = 'preview')}
+                    onclick={() => appState.patchTab(noteTab.id, { noteMode: 'preview' })}
                     class="px-2 py-0.5 rounded text-[11px] font-semibold transition {mode === 'preview' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-slate-200'}"
                   >
                     Preview
@@ -363,16 +353,18 @@
             <div class="flex-1 overflow-y-auto p-5 select-text">
               {#if mode === 'preview'}
                 <div class="max-w-3xl mx-auto bg-[#0b0f19] border border-slate-800 rounded-xl p-5">
-                  <NoteMarkdownView
-                    content={noteTab.sql || '_Empty Markdown note — switch to Edit to start writing._'}
-                    onOpenQuery={(sql) => appState.addTab('Query.sql', sql)}
-                  />
+                  {#await import('./lib/components/notes/NoteMarkdownView.svelte') then { default: NoteMarkdownView }}
+                    <NoteMarkdownView
+                      content={noteTab.sql || '_Empty Markdown note — switch to Edit to start writing._'}
+                      onOpenQuery={(sql) => appState.addTab('Query.sql', sql)}
+                    />
+                  {/await}
                 </div>
               {:else}
                 <textarea
                   value={noteTab.sql}
                   oninput={(e) => {
-                    noteTab.sql = (e.currentTarget as HTMLTextAreaElement).value;
+                    appState.patchTab(noteTab.id, { sql: (e.currentTarget as HTMLTextAreaElement).value });
                     appState.saveTabsState();
                   }}
                   placeholder="# Operational Note&#10;&#10;Write Markdown runbooks, SQL snippets, or incident timelines..."
@@ -425,21 +417,49 @@
   <!-- Bottom Application Status Bar -->
   <Footer />
 
-  <!-- Global Modals -->
-  <SafetyModal />
-  <ConnectionModal />
-  <RecordInspectorModal />
-  <InsertRowModal />
-  <CommandPaletteModal />
-  <ShortcutsModal />
-  <CreateDatabaseModal />
-  <TableCreatorModal />
-  <RenameTableModal />
-  <DuplicateTableModal />
-  <ViewDesignerModal />
-  <TriggerDesignerModal />
-  <RoutineDesignerModal />
-  <EventDesignerModal />
+  <!-- Global Modals (lazy-loaded on demand to keep initial bundle lean) -->
+  {#if appState.safetyChallenge.isOpen}
+    {#await import('./lib/components/modals/SafetyModal.svelte') then { default: SafetyModal }}<SafetyModal />{/await}
+  {/if}
+  {#if appState.isConnectionModalOpen}
+    {#await import('./lib/components/modals/ConnectionModal.svelte') then { default: ConnectionModal }}<ConnectionModal />{/await}
+  {/if}
+  {#if appState.isRecordInspectorOpen}
+    {#await import('./lib/components/modals/RecordInspectorModal.svelte') then { default: RecordInspectorModal }}<RecordInspectorModal />{/await}
+  {/if}
+  {#if appState.isInsertRowModalOpen}
+    {#await import('./lib/components/modals/InsertRowModal.svelte') then { default: InsertRowModal }}<InsertRowModal />{/await}
+  {/if}
+  {#if appState.isCommandPaletteOpen}
+    {#await import('./lib/components/modals/CommandPaletteModal.svelte') then { default: CommandPaletteModal }}<CommandPaletteModal />{/await}
+  {/if}
+  {#if appState.isShortcutsModalOpen}
+    {#await import('./lib/components/modals/ShortcutsModal.svelte') then { default: ShortcutsModal }}<ShortcutsModal />{/await}
+  {/if}
+  {#if appState.isCreateDbModalOpen}
+    {#await import('./lib/components/modals/CreateDatabaseModal.svelte') then { default: CreateDatabaseModal }}<CreateDatabaseModal />{/await}
+  {/if}
+  {#if appState.isTableCreatorOpen}
+    {#await import('./lib/components/modals/TableCreatorModal.svelte') then { default: TableCreatorModal }}<TableCreatorModal />{/await}
+  {/if}
+  {#if appState.isRenameTableModalOpen}
+    {#await import('./lib/components/modals/RenameTableModal.svelte') then { default: RenameTableModal }}<RenameTableModal />{/await}
+  {/if}
+  {#if appState.isDuplicateTableModalOpen}
+    {#await import('./lib/components/modals/DuplicateTableModal.svelte') then { default: DuplicateTableModal }}<DuplicateTableModal />{/await}
+  {/if}
+  {#if appState.isViewDesignerOpen}
+    {#await import('./lib/components/modals/ViewDesignerModal.svelte') then { default: ViewDesignerModal }}<ViewDesignerModal />{/await}
+  {/if}
+  {#if appState.isTriggerDesignerOpen}
+    {#await import('./lib/components/modals/TriggerDesignerModal.svelte') then { default: TriggerDesignerModal }}<TriggerDesignerModal />{/await}
+  {/if}
+  {#if appState.isRoutineDesignerOpen}
+    {#await import('./lib/components/modals/RoutineDesignerModal.svelte') then { default: RoutineDesignerModal }}<RoutineDesignerModal />{/await}
+  {/if}
+  {#if appState.isEventDesignerOpen}
+    {#await import('./lib/components/modals/EventDesignerModal.svelte') then { default: EventDesignerModal }}<EventDesignerModal />{/await}
+  {/if}
   {#if appState.isDumpModalOpen}
     {#await import('./lib/components/modals/DumpModal.svelte') then { default: DumpModal }}
       <DumpModal />
@@ -450,8 +470,12 @@
       <StructureSyncModal />
     {/await}
   {/if}
-  <RunSqlModal />
-  <SnippetsModal />
+  {#if appState.isRunSqlModalOpen}
+    {#await import('./lib/components/modals/RunSqlModal.svelte') then { default: RunSqlModal }}<RunSqlModal />{/await}
+  {/if}
+  {#if appState.isSnippetsModalOpen}
+    {#await import('./lib/components/modals/SnippetsModal.svelte') then { default: SnippetsModal }}<SnippetsModal />{/await}
+  {/if}
   {#if appState.isCsvImportModalOpen}
     {#await import('./lib/components/modals/CsvImportModal.svelte') then { default: CsvImportModal }}
       <CsvImportModal />
@@ -467,21 +491,37 @@
       <DbDiagnosticsModal />
     {/await}
   {/if}
-  <JsonCellModal />
-  <AiSettingsModal />
-  <NoteComposerModal />
-  <UpdateModal />
+  {#if appState.jsonCellModal.isOpen}
+    {#await import('./lib/components/modals/JsonCellModal.svelte') then { default: JsonCellModal }}<JsonCellModal />{/await}
+  {/if}
+  {#if appState.isAiSettingsModalOpen}
+    {#await import('./lib/components/modals/AiSettingsModal.svelte') then { default: AiSettingsModal }}<AiSettingsModal />{/await}
+  {/if}
+  {#if appState.isNoteComposerModalOpen}
+    {#await import('./lib/components/modals/NoteComposerModal.svelte') then { default: NoteComposerModal }}<NoteComposerModal />{/await}
+  {/if}
+  {#if appState.isUpdateModalOpen}
+    {#await import('./lib/components/modals/UpdateModal.svelte') then { default: UpdateModal }}<UpdateModal />{/await}
+  {/if}
   {#if appState.isMockDataModalOpen}
     {#await import('./lib/components/modals/MockDataModal.svelte') then { default: MockDataModal }}
       <MockDataModal />
     {/await}
   {/if}
-  <SettingsModal />
+  {#if appState.isSettingsModalOpen}
+    {#await import('./lib/components/modals/SettingsModal.svelte') then { default: SettingsModal }}<SettingsModal />{/await}
+  {/if}
   <NativeDialogModal />
   <ReconnectBanner />
-  <DdlReviewModal />
-  <RefreshAllModal />
-  <ImpactPreviewModal />
+  {#if appState.ddlReview.isOpen}
+    {#await import('./lib/components/modals/DdlReviewModal.svelte') then { default: DdlReviewModal }}<DdlReviewModal />{/await}
+  {/if}
+  {#if appState.isRefreshAllOpen}
+    {#await import('./lib/components/modals/RefreshAllModal.svelte') then { default: RefreshAllModal }}<RefreshAllModal />{/await}
+  {/if}
+  {#if appState.isImpactPreviewOpen}
+    {#await import('./lib/components/modals/ImpactPreviewModal.svelte') then { default: ImpactPreviewModal }}<ImpactPreviewModal />{/await}
+  {/if}
   {#if appState.isDataTransferOpen}
     {#await import('./lib/components/modals/DataTransferModal.svelte') then { default: DataTransferModal }}
       <DataTransferModal />
@@ -497,26 +537,38 @@
       <AuditDrawer />
     {/await}
   {/if}
-  <FkPeekPopover />
-  <SchemaSearchModal />
-  <DdlViewModal />
-  <SafetyInspectionModal />
-  <LockInspectorModal />
+  {#if appState.fkPeekState.isOpen}
+    {#await import('./lib/components/grid/FkPeekPopover.svelte') then { default: FkPeekPopover }}<FkPeekPopover />{/await}
+  {/if}
+  {#if appState.isSchemaSearchOpen}
+    {#await import('./lib/components/modals/SchemaSearchModal.svelte') then { default: SchemaSearchModal }}<SchemaSearchModal />{/await}
+  {/if}
+  {#if appState.ddlViewModal.isOpen}
+    {#await import('./lib/components/modals/DdlViewModal.svelte') then { default: DdlViewModal }}<DdlViewModal />{/await}
+  {/if}
+  {#if appState.safetyInspectionModal.isOpen}
+    {#await import('./lib/components/modals/SafetyInspectionModal.svelte') then { default: SafetyInspectionModal }}<SafetyInspectionModal />{/await}
+  {/if}
+  {#if appState.isLockInspectorOpen}
+    {#await import('./lib/components/modals/LockInspectorModal.svelte') then { default: LockInspectorModal }}<LockInspectorModal />{/await}
+  {/if}
   {#if appState.isSmartSeedModalOpen}
     {#await import('./lib/components/modals/SmartSeedModal.svelte') then { default: SmartSeedModal }}
       <SmartSeedModal />
     {/await}
   {/if}
 
-  <div class:hidden={!appState.isAiDrawerOpen}>
-    <AiDrawer />
-  </div>
+  {#if appState.isAiDrawerOpen}
+    {#await import('./lib/components/ai/AiDrawer.svelte') then { default: AiDrawer }}<AiDrawer />{/await}
+  {/if}
   {#if appState.isNotesDrawerOpen}
     {#await import('./lib/components/notes/NotesDrawer.svelte') then { default: NotesDrawer }}
       <NotesDrawer />
     {/await}
   {/if}
-  <ActivityConsoleDrawer />
+  {#if appState.isActivityDrawerOpen}
+    {#await import('./lib/components/activity/ActivityConsoleDrawer.svelte') then { default: ActivityConsoleDrawer }}<ActivityConsoleDrawer />{/await}
+  {/if}
 
   {#if appState.isDaemonStopped}
     <div class="fixed inset-0 z-[200] bg-slate-950/95 flex items-center justify-center p-6 text-center select-none">

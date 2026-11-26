@@ -132,42 +132,43 @@ func ImportNotesBundle(v *Vault, zipData []byte) (int, error) {
 			return importedCount, fmt.Errorf("archive total extracted size exceeds 64 MB limit")
 		}
 
-		parts := strings.Split(cleanPath, "/")
-
-		// Case 1: Operational Note: "notes/<id>-<slug>.md"
-		if len(parts) >= 2 && parts[0] == "notes" && strings.HasSuffix(cleanPath, ".md") {
-			note := parseOperationalNoteMarkdown(string(contentBytes), parts[len(parts)-1])
-			if err := v.CreateOperationalNote(note); err == nil {
-				importedCount++
-			}
-			continue
-		}
-
-		// Case 2: Table Note: "table-notes/<conn>/<db>/<table>.md"
-		if len(parts) == 4 && parts[0] == "table-notes" && strings.HasSuffix(cleanPath, ".md") {
-			tn := &TableNote{
-				ConnectionID: decodePathSegment(parts[1]),
-				DatabaseName: decodePathSegment(parts[2]),
-				TableName:    decodePathSegment(strings.TrimSuffix(parts[3], ".md")),
-				Content:      string(contentBytes),
-			}
-			if err := v.SaveTableNote(tn); err == nil {
-				importedCount++
-			}
-			continue
-		}
-
-		// Case 3: Snippet: "snippets/<id>-<slug>.sql"
-		if len(parts) >= 2 && parts[0] == "snippets" && strings.HasSuffix(cleanPath, ".sql") {
-			snippet := parseSnippetSQL(string(contentBytes), parts[len(parts)-1])
-			if err := v.SaveSnippet(snippet); err == nil {
-				importedCount++
-			}
-			continue
+		if ImportNoteFile(v, cleanPath, contentBytes) {
+			importedCount++
 		}
 	}
 
 	return importedCount, nil
+}
+
+// ImportNoteFile imports a single exported note, table-note, or snippet into the vault.
+func ImportNoteFile(v *Vault, relPath string, contentBytes []byte) bool {
+	cleanPath := path.Clean(strings.TrimPrefix(relPath, "/"))
+	parts := strings.Split(cleanPath, "/")
+
+	// Case 1: Operational Note: "notes/<id>-<slug>.md"
+	if len(parts) >= 2 && parts[0] == "notes" && strings.HasSuffix(cleanPath, ".md") {
+		note := parseOperationalNoteMarkdown(string(contentBytes), parts[len(parts)-1])
+		return v.CreateOperationalNote(note) == nil
+	}
+
+	// Case 2: Table Note: "table-notes/<conn>/<db>/<table>.md"
+	if len(parts) == 4 && parts[0] == "table-notes" && strings.HasSuffix(cleanPath, ".md") {
+		tn := &TableNote{
+			ConnectionID: decodePathSegment(parts[1]),
+			DatabaseName: decodePathSegment(parts[2]),
+			TableName:    decodePathSegment(strings.TrimSuffix(parts[3], ".md")),
+			Content:      string(contentBytes),
+		}
+		return v.SaveTableNote(tn) == nil
+	}
+
+	// Case 3: Snippet: "snippets/<id>-<slug>.sql"
+	if len(parts) >= 2 && parts[0] == "snippets" && strings.HasSuffix(cleanPath, ".sql") {
+		snippet := parseSnippetSQL(string(contentBytes), parts[len(parts)-1])
+		return v.SaveSnippet(snippet) == nil
+	}
+
+	return false
 }
 
 func formatOperationalNoteMarkdown(n *OperationalNote) []byte {

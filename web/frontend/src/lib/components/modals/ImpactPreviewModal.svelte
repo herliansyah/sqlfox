@@ -72,7 +72,7 @@
     if (!sql.trim()) return;
     const t = appState.activeTab;
     if (t && !t.isTableViewer && !t.isProcesslist && !t.isErdCanvas && !t.isNote && !t.sql.trim()) {
-      t.sql = sql;
+      appState.patchTab(t.id, { sql });
       appState.saveTabsState();
     } else {
       appState.addTab(newTabTitle || 'Query.sql', sql);
@@ -139,7 +139,7 @@
             >
               <Icon name="git-branch" class="w-3.5 h-3.5" />
               <span>Visual Tree</span>
-              <span class="ml-1 px-1.5 py-0.2 bg-sky-950 text-sky-300 text-[10px] rounded-full border border-sky-800 font-mono font-bold">
+              <span class="ml-1 px-1.5 py-0.5 bg-sky-950 text-sky-300 text-[10px] rounded-full border border-sky-800 font-mono font-bold">
                 {planNodes.length}
               </span>
             </button>
@@ -153,7 +153,7 @@
               <Icon name="sparkles" class="w-3.5 h-3.5" />
               <span>Advisor</span>
               {#if advisorCount > 0}
-                <span class="ml-1 px-1.5 py-0.2 bg-amber-950 text-amber-300 text-[10px] rounded-full border border-amber-800 font-bold">
+                <span class="ml-1 px-1.5 py-0.5 bg-amber-950 text-amber-300 text-[10px] rounded-full border border-amber-800 font-bold">
                   {advisorCount}
                 </span>
               {/if}
@@ -258,7 +258,7 @@
                           <span class="text-[10px] font-normal text-slate-400">as {node.alias}</span>
                         {/if}
                         {#if node.selectType}
-                          <span class="px-1.5 py-0.2 rounded bg-indigo-950/60 border border-indigo-800/50 text-indigo-300 text-[9px] font-semibold">
+                          <span class="px-1.5 py-0.5 rounded bg-indigo-950/60 border border-indigo-800/50 text-indigo-300 text-[9px] font-semibold">
                             {node.selectType}
                           </span>
                         {/if}
@@ -309,16 +309,16 @@
                     <td class="p-2.5 text-slate-300 max-w-md break-words space-y-1">
                       <div class="flex flex-wrap gap-1">
                         {#if node.isCoveringIndex}
-                          <span class="px-1.5 py-0.2 rounded bg-emerald-950/70 border border-emerald-800/70 text-emerald-300 text-[9.5px]">Using index (Covering)</span>
+                          <span class="px-1.5 py-0.5 rounded bg-emerald-950/70 border border-emerald-800/70 text-emerald-300 text-[9.5px]">Using index (Covering)</span>
                         {/if}
                         {#if node.hasFilesort}
-                          <span class="px-1.5 py-0.2 rounded bg-rose-950/70 border border-rose-800/70 text-rose-300 text-[9.5px]">Using filesort</span>
+                          <span class="px-1.5 py-0.5 rounded bg-rose-950/70 border border-rose-800/70 text-rose-300 text-[9.5px]">Using filesort</span>
                         {/if}
                         {#if node.hasTemporary}
-                          <span class="px-1.5 py-0.2 rounded bg-amber-950/70 border border-amber-800/70 text-amber-300 text-[9.5px]">Using temporary</span>
+                          <span class="px-1.5 py-0.5 rounded bg-amber-950/70 border border-amber-800/70 text-amber-300 text-[9.5px]">Using temporary</span>
                         {/if}
                         {#if node.hasDiskSpill}
-                          <span class="px-1.5 py-0.2 rounded bg-rose-950/80 border border-rose-700 text-rose-200 text-[9.5px] font-bold">Disk Spill</span>
+                          <span class="px-1.5 py-0.5 rounded bg-rose-950/80 border border-rose-700 text-rose-200 text-[9.5px] font-bold">Disk Spill</span>
                         {/if}
                       </div>
                       {#if node.extra}
@@ -379,7 +379,7 @@
                         {node.table ? `Table Access: ${node.table}${node.alias ? ` (${node.alias})` : ''}` : node.operation}
                       </span>
                       {#if node.selectType}
-                        <span class="px-1.5 py-0.2 rounded text-[9.5px] font-mono bg-indigo-950/70 text-indigo-300 border border-indigo-800/60">
+                        <span class="px-1.5 py-0.5 rounded text-[9.5px] font-mono bg-indigo-950/70 text-indigo-300 border border-indigo-800/60">
                           {node.selectType}
                         </span>
                       {/if}
@@ -467,7 +467,7 @@
                   <div class="flex items-center justify-center -my-1 text-slate-400 text-[10.5px] font-mono space-x-1.5">
                     <Icon name="arrow-down" class="w-3.5 h-3.5 text-sky-400" />
                     {#if passedRows != null}
-                      <span class="px-2 py-0.2 rounded-full bg-slate-900 border border-slate-800 text-sky-300">
+                      <span class="px-2 py-0.5 rounded-full bg-slate-900 border border-slate-800 text-sky-300">
                         passes ~{passedRows.toLocaleString()} rows
                       </span>
                     {/if}

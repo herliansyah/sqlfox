@@ -52,6 +52,22 @@ func (m *FlightRecorderManager) StopAll() {
 			rec.cancel()
 		}
 	}
+	for _, rec := range recordings {
+		if rec == nil {
+			continue
+		}
+		select {
+		case <-rec.done:
+		case <-time.After(3 * time.Second):
+		}
+		if m.vault != nil {
+			rec.mu.RLock()
+			samples := rec.sampleCount
+			rec.mu.RUnlock()
+			durationSec := int64(time.Since(rec.StartedAt).Seconds())
+			_ = m.vault.FinishFlightRecordingSession(rec.ID, durationSec, samples)
+		}
+	}
 }
 
 // NewFlightRecorderManager creates a manager and triggers a background 24h purge.
@@ -63,21 +79,27 @@ func NewFlightRecorderManager(v *vault.Vault, sm *SessionManager) *FlightRecorde
 	}
 
 	// Purge stale recordings older than 24 hours on startup
-	go func() {
-		_, _ = v.PurgeOldFlightRecordings(24 * time.Hour)
-	}()
+	if v != nil {
+		go func() {
+			_, _ = v.PurgeOldFlightRecordings(24 * time.Hour)
+		}()
+	}
 
 	return mgr
 }
 
 // StartRecording initiates an on-demand telemetry capture with a 10-minute auto-stop safety limit.
 func (m *FlightRecorderManager) StartRecording(sessionID, connID, name string, intervalMs int) (*ActiveRecording, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	if m.vault == nil {
+		return nil, fmt.Errorf("vault is not initialized")
+	}
 
+	m.mu.Lock()
 	if _, exists := m.active[sessionID]; exists {
+		m.mu.Unlock()
 		return nil, fmt.Errorf("flight recorder is already running for this session")
 	}
+	m.mu.Unlock()
 
 	if intervalMs < 1000 {
 		intervalMs = 1000
@@ -99,6 +121,13 @@ func (m *FlightRecorderManager) StartRecording(sessionID, connID, name string, i
 
 	if err := m.vault.CreateFlightRecordingSession(recSession); err != nil {
 		return nil, err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, exists := m.active[sessionID]; exists {
+		_ = m.vault.DeleteFlightRecordingSession(recSession.ID)
+		return nil, fmt.Errorf("flight recorder is already running for this session")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -169,7 +198,9 @@ func (m *FlightRecorderManager) GetStatus(sessionID string) (map[string]any, err
 	rec.mu.Unlock()
 
 	rec.mu.RLock()
-	defer rec.mu.RUnlock()
+	ticksCopy := append([]*vault.FlightRecordingTick(nil), rec.recentTicks...)
+	samples := rec.sampleCount
+	rec.mu.RUnlock()
 
 	durationSec := int64(time.Since(rec.StartedAt).Seconds())
 	return map[string]any{
@@ -178,9 +209,9 @@ func (m *FlightRecorderManager) GetStatus(sessionID string) (map[string]any, err
 		"name":             rec.Name,
 		"started_at":       rec.StartedAt,
 		"duration_seconds": durationSec,
-		"sample_count":     rec.sampleCount,
+		"sample_count":     samples,
 		"interval_ms":      rec.Interval.Milliseconds(),
-		"recent_ticks":     rec.recentTicks,
+		"recent_ticks":     ticksCopy,
 	}, nil
 }
 
@@ -194,12 +225,19 @@ func (m *FlightRecorderManager) runLoop(ctx context.Context, rec *ActiveRecordin
 
 	defer func() {
 		m.mu.Lock()
+		shouldFinish := false
 		if current, ok := m.active[rec.SessionID]; ok && current.ID == rec.ID {
 			delete(m.active, rec.SessionID)
-			durationSec := int64(time.Since(rec.StartedAt).Seconds())
-			_ = m.vault.FinishFlightRecordingSession(rec.ID, durationSec, rec.sampleCount)
+			shouldFinish = true
 		}
 		m.mu.Unlock()
+		if shouldFinish && m.vault != nil {
+			rec.mu.RLock()
+			samples := rec.sampleCount
+			rec.mu.RUnlock()
+			durationSec := int64(time.Since(rec.StartedAt).Seconds())
+			_ = m.vault.FinishFlightRecordingSession(rec.ID, durationSec, samples)
+		}
 	}()
 
 	for {
@@ -216,7 +254,7 @@ func (m *FlightRecorderManager) runLoop(ctx context.Context, rec *ActiveRecordin
 				return
 			}
 
-			sess, err := m.sessionMgr.GetSession(rec.ConnectionID)
+			sess, err := m.sessionMgr.GetActiveSession(rec.ConnectionID)
 			if err != nil {
 				return
 			}
@@ -242,9 +280,13 @@ func (m *FlightRecorderManager) runLoop(ctx context.Context, rec *ActiveRecordin
 
 			queriesJSON, _ := json.Marshal(sample.ActiveQueries)
 
+			rec.mu.RLock()
+			tickIdx := rec.sampleCount
+			rec.mu.RUnlock()
+
 			tick := &vault.FlightRecordingTick{
 				RecordingID:        rec.ID,
-				TickIndex:          rec.sampleCount,
+				TickIndex:          tickIdx,
 				SampledAt:          now,
 				QPS:                qps,
 				ThreadsRunning:     sample.ThreadsRunning,

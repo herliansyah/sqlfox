@@ -7,9 +7,11 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/herliansyah/sqlfox/internal/driver"
 	"github.com/herliansyah/sqlfox/internal/vault"
@@ -20,9 +22,12 @@ import (
 	_ "github.com/herliansyah/sqlfox/internal/driver/sqlite"
 )
 
+// Version is overridden by cmd/sqlfox from main.Version so CLI help always matches the binary version.
+var Version = "v0.19.8"
+
 // PrintHelp writes the CLI command help to the provided writer.
 func PrintHelp(w io.Writer) {
-	RenderHelpHeader(w, "v0.9.0")
+	RenderHelpHeader(w, Version)
 	help := `
 Usage:
   sqlfox [command] [flags]
@@ -62,18 +67,21 @@ func Run(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 	cmd := args[0]
 	subArgs := args[1:]
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	switch cmd {
 	case "help", "-h", "--help":
 		PrintHelp(stdout)
 		return 0
 	case "query":
-		return RunQuery(subArgs, stdout, stderr, stdin)
+		return RunQueryContext(ctx, subArgs, stdout, stderr, stdin)
 	case "transfer":
-		return RunTransfer(subArgs, stdout, stderr, stdin)
+		return RunTransferContext(ctx, subArgs, stdout, stderr, stdin)
 	case "job":
-		return RunJob(subArgs, stdout, stderr, stdin)
+		return RunJobContext(ctx, subArgs, stdout, stderr, stdin)
 	case "advise":
-		return RunAdvise(subArgs, stdout, stderr, stdin)
+		return RunAdviseContext(ctx, subArgs, stdout, stderr, stdin)
 	case "stop":
 		fmt.Fprintln(stdout, "To stop a running background SqlFox instance, run 'sqlfox stop'.")
 		return 0
@@ -93,6 +101,15 @@ type SessionTarget struct {
 	Environment string
 	DBName      string
 	Cleanup     func()
+}
+
+// ResolveVaultTarget always resolves a named connection profile from the local Vault,
+// ensuring `--conn <profile> --driver postgres|sqlite` never misinterprets the profile name as a DSN/file path.
+func ResolveVaultTarget(ctx context.Context, target string, driverOverride string, vaultPath string, pass string) (*SessionTarget, error) {
+	if target == "" {
+		return nil, fmt.Errorf("connection target cannot be empty (specify --dsn or --conn)")
+	}
+	return resolveFromVault(ctx, target, driverOverride, vaultPath, pass)
 }
 
 // ResolveTarget parses a direct DSN or resolves a named profile from the Vault.
@@ -120,6 +137,10 @@ func ResolveTarget(ctx context.Context, target string, driverOverride string, va
 	}
 
 	// 2. Resolve via local Vault
+	return resolveFromVault(ctx, target, driverOverride, vaultPath, pass)
+}
+
+func resolveFromVault(ctx context.Context, target string, driverOverride string, vaultPath string, pass string) (*SessionTarget, error) {
 	if vaultPath == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -131,10 +152,17 @@ func ResolveTarget(ctx context.Context, target string, driverOverride string, va
 	configDir := filepath.Dir(vaultPath)
 	masterPass := pass
 	if masterPass == "" {
+		if envPass := os.Getenv("SQLFOX_PASS"); envPass != "" {
+			masterPass = envPass
+		} else if envPass := os.Getenv("SQLFOX_MASTER_KEY"); envPass != "" {
+			masterPass = envPass
+		}
+	}
+	if masterPass == "" {
 		// Attempt to read from ~/.sqlfox/master.key
 		keyPath := filepath.Join(configDir, "master.key")
-		if keyBytes, err := os.ReadFile(keyPath); err == nil {
-			masterPass = strings.TrimSpace(string(keyBytes))
+		if saved, err := vault.ReadMasterKeyFile(keyPath); err == nil {
+			masterPass = saved
 		}
 	}
 
@@ -146,7 +174,7 @@ func ResolveTarget(ctx context.Context, target string, driverOverride string, va
 	connRec, err := v.GetConnectionByName(target)
 	if err != nil {
 		_ = v.Close()
-		return nil, fmt.Errorf("connection '%s' not found in vault: %w", target, err)
+		return nil, fmt.Errorf("connection '%s' not found in vault: %w", RedactDSN(target), err)
 	}
 
 	drvName := connRec.Driver
@@ -170,7 +198,7 @@ func ResolveTarget(ctx context.Context, target string, driverOverride string, va
 	sess, err := driver.Connect(ctx, drvCfg)
 	if err != nil {
 		_ = v.Close()
-		return nil, fmt.Errorf("failed to connect to vault connection '%s': %w", target, err)
+		return nil, fmt.Errorf("failed to connect to vault connection '%s': %w", RedactDSN(target), err)
 	}
 
 	env := connRec.Environment
@@ -283,7 +311,8 @@ func parseDirectDSN(raw string, driverOverride string) (string, driver.Config, b
 			if dbName == "" {
 				dbName = "postgres"
 			}
-			sslMode := u.Query().Get("sslmode")
+			q := u.Query()
+			sslMode := q.Get("sslmode")
 			useSSL := sslMode != "" && sslMode != "disable"
 
 			return "postgres", driver.Config{
@@ -294,11 +323,15 @@ func parseDirectDSN(raw string, driverOverride string) (string, driver.Config, b
 				User:         user,
 				Password:     pass,
 				UseSSL:       useSSL,
+				SSLMode:      sslMode,
+				SSLCA:        q.Get("sslrootcert"),
+				SSLCert:      q.Get("sslcert"),
+				SSLKey:       q.Get("sslkey"),
 			}, true
 		}
 	}
 
-	// Case F: Explicit driver override provided
+	// Case F: Explicit driver override provided (used for direct DSN targets; --conn uses ResolveVaultTarget)
 	if driverOverride == "sqlite" {
 		return "sqlite", driver.Config{Driver: "sqlite", DatabaseName: trimmed}, true
 	}
@@ -310,8 +343,45 @@ func parseDirectDSN(raw string, driverOverride string) (string, driver.Config, b
 }
 
 // SplitStatements breaks SQL text into executable individual statements (see driver.SplitSQLStatements).
+
+// RedactDSN masks embedded passwords in URI or Go MySQL DSNs before printing to logs or errors.
+func RedactDSN(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.Contains(trimmed, "://") {
+		if u, err := url.Parse(trimmed); err == nil && u.User != nil {
+			if _, hasPass := u.User.Password(); hasPass {
+				return u.Redacted()
+			}
+			return trimmed
+		}
+		// Malformed URI with credentials (e.g. unescaped special char in password): strip userinfo before '@'.
+		if schemeIdx := strings.Index(trimmed, "://"); schemeIdx >= 0 {
+			rest := trimmed[schemeIdx+3:]
+			if atIdx := strings.LastIndex(rest, "@"); atIdx >= 0 {
+				userPart := rest[:atIdx]
+				if colonIdx := strings.IndexByte(userPart, ':'); colonIdx >= 0 {
+					return trimmed[:schemeIdx+3] + userPart[:colonIdx] + ":xxxxx@" + rest[atIdx+1:]
+				}
+			}
+		}
+	}
+	if strings.Contains(trimmed, "@tcp(") || strings.Contains(trimmed, "@unix(") {
+		atIdx := strings.Index(trimmed, "@")
+		if atIdx > 0 {
+			userPart := trimmed[:atIdx]
+			if colonIdx := strings.IndexByte(userPart, ':'); colonIdx >= 0 {
+				return userPart[:colonIdx] + ":xxxxx" + trimmed[atIdx:]
+			}
+		}
+	}
+	return trimmed
+}
 func SplitStatements(reader io.Reader, driverName ...string) []string {
-	content, err := io.ReadAll(reader)
+	const maxCLIInputBytes = 100 << 20
+	content, err := io.ReadAll(io.LimitReader(reader, maxCLIInputBytes))
 	if err != nil {
 		return nil
 	}

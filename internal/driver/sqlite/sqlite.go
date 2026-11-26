@@ -34,27 +34,63 @@ func (d *SQLiteDriver) Connect(ctx context.Context, cfg driver.Config) (driver.S
 		return nil, fmt.Errorf("sqlite database path cannot be empty")
 	}
 
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open sqlite database: %w", err)
+	isMemory := strings.Contains(dsn, ":memory:") || strings.Contains(dsn, "mode=memory")
+	openDSN := dsn
+	if !isMemory && !strings.Contains(strings.ToLower(dsn), "_pragma=busy_timeout") {
+		if strings.Contains(dsn, "?") {
+			openDSN = dsn + "&_pragma=busy_timeout(5000)"
+		} else {
+			openDSN = dsn + "?_pragma=busy_timeout(5000)"
+		}
 	}
 
-	isMemory := strings.Contains(dsn, ":memory:") || strings.Contains(dsn, "mode=memory")
+	db, err := sql.Open("sqlite", openDSN)
+	if err != nil {
+		db, err = sql.Open("sqlite", dsn)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open sqlite database: %w", err)
+		}
+	}
+
 	if isMemory {
 		// In-memory SQLite databases are per-connection unless pinned to a single pooled connection.
 		db.SetMaxOpenConns(1)
+	} else {
+		// Bound pool size and ensure every opened connection inherits busy_timeout via DSN pragma.
+		db.SetMaxOpenConns(4)
+		db.SetMaxIdleConns(2)
 	}
 
 	// Test connection
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("failed to ping sqlite database: %w", err)
+		// Fallback to raw DSN if path contained special URI characters.
+		if openDSN != dsn {
+			db, err = sql.Open("sqlite", dsn)
+			if err != nil {
+				return nil, fmt.Errorf("failed to open sqlite database: %w", err)
+			}
+			db.SetMaxOpenConns(1)
+			if pingErr := db.PingContext(ctx); pingErr != nil {
+				db.Close()
+				return nil, fmt.Errorf("failed to ping sqlite database: %w", pingErr)
+			}
+		} else {
+			return nil, fmt.Errorf("failed to ping sqlite database: %w", err)
+		}
 	}
 
-	// Enable WAL mode (Write-Ahead Logging) and busy timeout for concurrent read/write resilience
-	if !isMemory {
-		var mode string
-		_ = db.QueryRowContext(ctx, "PRAGMA journal_mode = WAL;").Scan(&mode)
+	// Only set busy_timeout by default; avoid forcing WAL mode unconditionally (breaks read-only files and network mounts).
+	if !isMemory && !strings.Contains(strings.ToLower(dsn), "mode=ro") {
+		var curMode string
+		if err := db.QueryRowContext(ctx, "PRAGMA journal_mode;").Scan(&curMode); err == nil && strings.EqualFold(curMode, "delete") {
+			// Best-effort upgrade only if DB is writable; ignore errors on read-only media.
+			var ro int
+			if err := db.QueryRowContext(ctx, "PRAGMA query_only;").Scan(&ro); err == nil && ro == 0 {
+				var mode string
+				_ = db.QueryRowContext(ctx, "PRAGMA journal_mode = WAL;").Scan(&mode)
+			}
+		}
 	}
 	_, _ = db.ExecContext(ctx, "PRAGMA busy_timeout = 5000;")
 
@@ -92,6 +128,10 @@ func (s *SQLiteSession) ServerInfo(ctx context.Context) (*driver.ServerInfo, err
 }
 
 func (s *SQLiteSession) QueryStream(ctx context.Context, querySQL string, limit int) (driver.RowStream, error) {
+	return s.QueryStreamArgs(ctx, querySQL, limit)
+}
+
+func (s *SQLiteSession) QueryStreamArgs(ctx context.Context, querySQL string, limit int, args ...any) (driver.RowStream, error) {
 	s.queryCount.Add(1)
 	// Apply implicit safe limit if query is a SELECT without LIMIT
 	querySQL = driver.ApplyLimitClause(querySQL, limit)
@@ -108,7 +148,7 @@ func (s *SQLiteSession) QueryStream(ctx context.Context, querySQL string, limit 
 			s.mu.Unlock()
 			cancel()
 		}
-		rows, err := s.db.QueryContext(ctx, querySQL)
+		rows, err := s.db.QueryContext(ctx, querySQL, args...)
 		if err != nil {
 			cleanup()
 			return nil, err
@@ -119,19 +159,11 @@ func (s *SQLiteSession) QueryStream(ctx context.Context, querySQL string, limit 
 			cleanup()
 			return nil, err
 		}
-		cols := make([]driver.ColumnDefinition, len(colTypes))
-		for i, ct := range colTypes {
-			nullable, _ := ct.Nullable()
-			cols[i] = driver.ColumnDefinition{
-				Name:     ct.Name(),
-				Type:     ct.DatabaseTypeName(),
-				Nullable: nullable,
-			}
-		}
+		cols := driver.ColumnsFromTypes(colTypes)
 		return driver.NewSQLRowStream(rows, cols, cleanup), nil
 	}
 
-	rows, err := s.db.QueryContext(ctx, querySQL)
+	rows, err := s.db.QueryContext(ctx, querySQL, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -142,15 +174,7 @@ func (s *SQLiteSession) QueryStream(ctx context.Context, querySQL string, limit 
 		return nil, err
 	}
 
-	cols := make([]driver.ColumnDefinition, len(colTypes))
-	for i, ct := range colTypes {
-		nullable, _ := ct.Nullable()
-		cols[i] = driver.ColumnDefinition{
-			Name:     ct.Name(),
-			Type:     ct.DatabaseTypeName(),
-			Nullable: nullable,
-		}
-	}
+	cols := driver.ColumnsFromTypes(colTypes)
 
 	return driver.NewSQLRowStream(rows, cols), nil
 }
@@ -158,6 +182,20 @@ func (s *SQLiteSession) QueryStream(ctx context.Context, querySQL string, limit 
 func (s *SQLiteSession) Exec(ctx context.Context, querySQL string, args ...any) (*driver.ExecResult, error) {
 	s.queryCount.Add(1)
 	start := time.Now()
+	queryID := driver.QueryIDFromContext(ctx)
+	if queryID != "" {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		s.mu.Lock()
+		s.queries[queryID] = cancel
+		s.mu.Unlock()
+		defer func() {
+			s.mu.Lock()
+			delete(s.queries, queryID)
+			s.mu.Unlock()
+			cancel()
+		}()
+	}
 	res, err := s.db.ExecContext(ctx, querySQL, args...)
 	if err != nil {
 		return nil, err
@@ -219,15 +257,7 @@ func (t *sqliteTx) QueryStream(ctx context.Context, querySQL string, limit int) 
 		return nil, err
 	}
 
-	cols := make([]driver.ColumnDefinition, len(colTypes))
-	for i, ct := range colTypes {
-		nullable, _ := ct.Nullable()
-		cols[i] = driver.ColumnDefinition{
-			Name:     ct.Name(),
-			Type:     ct.DatabaseTypeName(),
-			Nullable: nullable,
-		}
-	}
+	cols := driver.ColumnsFromTypes(colTypes)
 
 	return driver.NewSQLRowStream(rows, cols), nil
 }
@@ -241,7 +271,9 @@ func (s *SQLiteSession) BeginTx(ctx context.Context) (driver.TxSession, error) {
 }
 
 func (s *SQLiteSession) InspectSchema(ctx context.Context, dbName string) (*driver.SchemaMetadata, error) {
-	// In SQLite, dbName is typically 'main'
+	// In SQLite, dbName is typically 'main'.
+	// IMPORTANT: Never nest open *sql.Rows while issuing additional s.db.QueryContext calls;
+	// on :memory: / single-connection pools (MaxOpenConns=1) nested queries deadlock permanently.
 	tablesQuery := `
 	SELECT name, type FROM sqlite_master 
 	WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'
@@ -251,18 +283,32 @@ func (s *SQLiteSession) InspectSchema(ctx context.Context, dbName string) (*driv
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	var tables []driver.TableMetadata
+	type rawTable struct {
+		name      string
+		tableType string
+	}
+	var rawTables []rawTable
 	for rows.Next() {
 		var name, tableType string
 		if err := rows.Scan(&name, &tableType); err != nil {
+			rows.Close()
 			return nil, err
 		}
+		rawTables = append(rawTables, rawTable{name: name, tableType: tableType})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
 
+	var tables []driver.TableMetadata
+	for _, rt := range rawTables {
+		name := rt.name
 		tbl := driver.TableMetadata{
 			Name: name,
-			Type: strings.ToUpper(tableType),
+			Type: strings.ToUpper(rt.tableType),
 		}
 
 		// Inspect Columns via PRAGMA table_info
@@ -285,34 +331,36 @@ func (s *SQLiteSession) InspectSchema(ctx context.Context, dbName string) (*driv
 			colRows.Close()
 		}
 
-		// Inspect Indexes via PRAGMA index_list
+		// Inspect Indexes via PRAGMA index_list (collect first, close rows, then query PRAGMA index_info)
+		var pendingIndexes []driver.IndexMetadata
 		idxRows, err := s.db.QueryContext(ctx, fmt.Sprintf("PRAGMA index_list(%s)", quoteIdentifier(name)))
 		if err == nil {
 			for idxRows.Next() {
 				var seq, unique int
 				var idxName, origin, partial string
 				if err := idxRows.Scan(&seq, &idxName, &unique, &origin, &partial); err == nil {
-					im := driver.IndexMetadata{
+					pendingIndexes = append(pendingIndexes, driver.IndexMetadata{
 						Name:     idxName,
 						IsUnique: unique == 1,
 						Type:     "BTREE",
-					}
-					// ponytail: fetch index column list via PRAGMA index_info; bounded by index count per table
-					if cRows, err := s.db.QueryContext(ctx, fmt.Sprintf("PRAGMA index_info(%s)", quoteIdentifier(idxName))); err == nil {
-						for cRows.Next() {
-							var seqno, cid int
-							var cname string
-							if err := cRows.Scan(&seqno, &cid, &cname); err == nil && cname != "" {
-								im.Columns = append(im.Columns, cname)
-							}
-						}
-						cRows.Close()
-					}
-					tbl.Indexes = append(tbl.Indexes, im)
+					})
 				}
 			}
 			idxRows.Close()
 		}
+		for i := range pendingIndexes {
+			if cRows, err := s.db.QueryContext(ctx, fmt.Sprintf("PRAGMA index_info(%s)", quoteIdentifier(pendingIndexes[i].Name))); err == nil {
+				for cRows.Next() {
+					var seqno, cid int
+					var cname string
+					if err := cRows.Scan(&seqno, &cid, &cname); err == nil && cname != "" {
+						pendingIndexes[i].Columns = append(pendingIndexes[i].Columns, cname)
+					}
+				}
+				cRows.Close()
+			}
+		}
+		tbl.Indexes = pendingIndexes
 
 		// Inspect foreign keys
 		fkRows, err := s.db.QueryContext(ctx, fmt.Sprintf("PRAGMA foreign_key_list(%s)", quoteIdentifier(name)))
@@ -403,7 +451,34 @@ func (s *SQLiteSession) GetTableDDL(ctx context.Context, tableName string) (stri
 	if err != nil {
 		return "", err
 	}
-	return sqlStr.String, nil
+	ddl := strings.TrimSpace(sqlStr.String)
+	if ddl == "" {
+		return "", nil
+	}
+	if !strings.HasSuffix(ddl, ";") {
+		ddl += ";"
+	}
+	idxRows, idxErr := s.db.QueryContext(ctx, "SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL", tableName)
+	if idxErr == nil {
+		defer idxRows.Close()
+		var idxDDLs []string
+		for idxRows.Next() {
+			var idxSQL sql.NullString
+			if scanErr := idxRows.Scan(&idxSQL); scanErr == nil {
+				sIdx := strings.TrimSpace(idxSQL.String)
+				if sIdx != "" {
+					if !strings.HasSuffix(sIdx, ";") {
+						sIdx += ";"
+					}
+					idxDDLs = append(idxDDLs, sIdx)
+				}
+			}
+		}
+		if len(idxDDLs) > 0 {
+			ddl += "\n" + strings.Join(idxDDLs, "\n")
+		}
+	}
+	return ddl, nil
 }
 
 func (s *SQLiteSession) GetTableEstimate(ctx context.Context, tableName string) (*driver.TableEstimate, error) {
@@ -420,16 +495,12 @@ func (s *SQLiteSession) GetTableEstimate(ctx context.Context, tableName string) 
 }
 
 func (s *SQLiteSession) Explain(ctx context.Context, querySQL string) (*driver.ExplainPlan, error) {
-	cleanedSQL := strings.TrimSpace(querySQL)
-	cleanedSQL = strings.TrimRight(cleanedSQL, "; \t\r\n")
-	upper := strings.ToUpper(cleanedSQL)
-	if strings.HasPrefix(upper, "EXPLAIN QUERY PLAN ") {
-		cleanedSQL = strings.TrimSpace(cleanedSQL[19:])
-	} else if strings.HasPrefix(upper, "EXPLAIN ") {
-		cleanedSQL = strings.TrimSpace(cleanedSQL[8:])
-	}
-	if cleanedSQL == "" {
+	if strings.TrimSpace(querySQL) == "" {
 		return &driver.ExplainPlan{Rows: []driver.ExplainRow{}}, nil
+	}
+	cleanedSQL, err := driver.ExplainTarget(driver.SplitSQLStatements(querySQL, "sqlite"))
+	if err != nil {
+		return nil, err
 	}
 
 	rows, err := s.db.QueryContext(ctx, "EXPLAIN QUERY PLAN "+cleanedSQL)
@@ -557,7 +628,6 @@ func (s *SQLiteSession) GetTableDiagnostics(ctx context.Context, database, table
 	if err != nil {
 		dbstatErr = err
 	} else {
-		defer statRows.Close()
 		for statRows.Next() {
 			var name string
 			var size int64
@@ -570,14 +640,16 @@ func (s *SQLiteSession) GetTableDiagnostics(ctx context.Context, database, table
 		if err := statRows.Err(); err != nil {
 			dbstatErr = err
 		}
+		// Close before opening the next query to prevent pool=1 deadlock on :memory: databases.
+		statRows.Close()
 	}
 
 	// Re-attribute entries that belong to indexes of a known table.
+	// Note: SQLite's dbstat virtual table has (name, pgsize) — join sqlite_master to get tbl_name.
 	if dbstatErr == nil {
 		idxRows, qerr := s.db.QueryContext(ctx,
-			`SELECT name, tbl_name, SUM(pgsize) FROM dbstat WHERE aggregate = 1 AND name IN (SELECT name FROM sqlite_master WHERE type = 'index') GROUP BY name, tbl_name`)
+			`SELECT d.name, m.tbl_name, SUM(d.pgsize) FROM dbstat d JOIN sqlite_master m ON m.name = d.name AND m.type = 'index' WHERE d.aggregate = 1 GROUP BY d.name, m.tbl_name`)
 		if qerr == nil {
-			defer idxRows.Close()
 			for idxRows.Next() {
 				var idxName, tblName string
 				var size int64
@@ -589,6 +661,7 @@ func (s *SQLiteSession) GetTableDiagnostics(ctx context.Context, database, table
 				}
 				delete(perTable, idxName)
 			}
+			idxRows.Close()
 		}
 	}
 
@@ -738,12 +811,7 @@ func (s *SQLiteSession) PeekForeignKeyRow(ctx context.Context, database, table, 
 
 	rowMap := make(map[string]any, len(cols))
 	for i, col := range cols {
-		val := rawVals[i]
-		if b, ok := val.([]byte); ok {
-			rowMap[col] = string(b)
-		} else {
-			rowMap[col] = val
-		}
+		rowMap[col] = driver.FormatValueForJSON(rawVals[i])
 	}
 
 	return &driver.PeekResult{
@@ -904,6 +972,68 @@ func (s *SQLiteSession) InspectServerVariables(ctx context.Context) (*driver.Ser
 		CuratedCount: 0,
 		Variables:    vars,
 	}, nil
+}
+
+// ExecScriptConn pins a single physical SQLite connection for a multi-statement script
+// so PRAGMA foreign_keys and BEGIN/COMMIT blocks execute on the same connection.
+func (s *SQLiteSession) ExecScriptConn(ctx context.Context, fn func(exec func(context.Context, string) (*driver.ExecResult, error)) error) error {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		restoreCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_, _ = conn.ExecContext(restoreCtx, "ROLLBACK")
+		_, _ = conn.ExecContext(restoreCtx, "PRAGMA foreign_keys = ON;")
+		cancel()
+		_ = conn.Close()
+	}()
+	return fn(func(c context.Context, q string) (*driver.ExecResult, error) {
+		start := time.Now()
+		res, err := conn.ExecContext(c, q)
+		if err != nil {
+			return nil, err
+		}
+		rowsAff, _ := res.RowsAffected()
+		lastID, _ := res.LastInsertId()
+		return &driver.ExecResult{
+			RowsAffected: rowsAff,
+			LastInsertID: lastID,
+			ExecutionMs:  time.Since(start).Milliseconds(),
+			Message:      fmt.Sprintf("Query OK, %d rows affected", rowsAff),
+		}, nil
+	})
+}
+
+// QueryStreamReadOnly enforces SQLite engine-level PRAGMA query_only = ON on a pinned connection.
+func (s *SQLiteSession) QueryStreamReadOnly(ctx context.Context, sqlStr string, limit int) (driver.RowStream, error) {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := conn.ExecContext(ctx, "PRAGMA query_only = ON;"); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	restore := func() {
+		restoreCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_, _ = conn.ExecContext(restoreCtx, "PRAGMA query_only = OFF;")
+		cancel()
+		_ = conn.Close()
+	}
+	querySQL := driver.ApplyLimitClause(sqlStr, limit)
+	rows, err := conn.QueryContext(ctx, querySQL)
+	if err != nil {
+		restore()
+		return nil, err
+	}
+	colTypes, err := rows.ColumnTypes()
+	if err != nil {
+		_ = rows.Close()
+		restore()
+		return nil, err
+	}
+	return driver.NewSQLRowStream(rows, driver.ColumnsFromTypes(colTypes), restore), nil
 }
 
 func quoteIdentifier(id string) string {

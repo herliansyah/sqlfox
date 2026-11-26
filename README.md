@@ -141,7 +141,7 @@ All captures are taken in high resolution (**2x Retina / HiDPI**) on an enterpri
 - **Encrypted Connection Vault**: Database passwords and client SSL keys encrypted at rest via **AES-256-GCM** (with per-field authenticated binding) and **Argon2id**.
 - **Ingress Security**: Default loopback binding (`127.0.0.1`), DNS rebinding protection (LAN mode restricted to private/loopback hosts), and byte-for-byte Same-Origin validation against cross-port CSRF.
 - **Remote LAN Mode & TLS Encryption**: Tablet and remote browser access (`--lan`) guarded by Master PIN authentication and brute-force lockout, with built-in HTTPS/TLS encryption (`--tls`, `--tls-cert`, `--tls-key`).
-- **Signed Self-Update**: In-app updates are gated by an official-origin allowlist and verified against an Ed25519-signed checksum manifest (fail-closed) before the binary is replaced.
+- **Signed Self-Update**: In-app updates are gated by an official-origin allowlist and verified against SHA-256 checksums (plus Ed25519 manifest signature verification when built with `SQLFOX_MANIFEST_SIGNING_PUBKEY`).
 
 ---
 
@@ -149,7 +149,7 @@ All captures are taken in high resolution (**2x Retina / HiDPI**) on an enterpri
 
 #### Standalone Binary (Recommended)
 
-Download the latest pre-compiled static binary (**v0.16.1**) from [GitHub Releases](https://github.com/herliansyah/sqlfox/releases):
+Download the latest pre-compiled static binary (**v0.19.8**) from [GitHub Releases](https://github.com/herliansyah/sqlfox/releases):
 
 | OS | Architecture | Archive Format |
 | :--- | :--- | :--- |
@@ -159,13 +159,13 @@ Download the latest pre-compiled static binary (**v0.16.1**) from [GitHub Releas
 
 **Linux (amd64):**
 ```bash
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.16.1/sqlfox-v0.16.1-linux-amd64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.19.8/sqlfox-v0.19.8-linux-amd64.tar.gz | tar -xz
 ./sqlfox
 ```
 
 **macOS (Apple Silicon):**
 ```bash
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.16.1/sqlfox-v0.16.1-darwin-arm64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.19.8/sqlfox-v0.19.8-darwin-arm64.tar.gz | tar -xz
 ./sqlfox
 ```
 
@@ -179,7 +179,7 @@ curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.16.1/sqlfox-
 ```bash
 docker run -d \
   --name sqlfox \
-  -p 8080:8080 \
+  -p 127.0.0.1:8080:8080 \
   -v sqlfox_data:/data \
   --add-host=host.docker.internal:host-gateway \
   ghcr.io/herliansyah/sqlfox:latest
@@ -267,7 +267,7 @@ sqlfox stop
 
 SqlFox pairs a high-concurrency Go backend with an ultra-lean Svelte 5 frontend compiled and embedded directly into a single static binary:
 
-- **Go 1.22+ Core Engine**: Zero external dependencies, pure-Go database drivers (PostgreSQL, MySQL, SQLite), deterministic SQL AST analyzer, connection vault (Argon2id + AES-256-GCM), and headless CLI automation.
+- **Go 1.26+ Core Engine**: Zero external dependencies, pure-Go database drivers (PostgreSQL, MySQL, SQLite), deterministic SQL token guard, connection vault (Argon2id + AES-256-GCM), and headless CLI automation.
 - **Svelte 5 Workspace**: Reactive runes (`$state`, `$derived`, `$effect`), DOM-windowed virtual grid (60fps on 10,000+ rows), interactive SVG ERD canvas, and CodeMirror 6 SQL editor with dialect auto-switching.
 - **Zero-Electron Desktop Delivery**: Embeds the Svelte build via Go's `//go:embed` and leverages the host's existing Chromium/Edge runtime via `--app` mode for a frameless native desktop experience without hundreds of megabytes of Electron overhead.
 

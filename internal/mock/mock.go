@@ -86,10 +86,13 @@ func Generate(ctx context.Context, sess driver.Session, cfg Config) (*Result, er
 		}
 	}
 
-	// Build insert column list — skip auto-increment PKs.
+	// Build insert column list — skip auto-increment PKs and generated columns.
 	var insertCols []driver.ColumnMetadata
 	for _, col := range targetTable.Columns {
 		extra := strings.ToLower(col.Extra)
+		if strings.Contains(extra, "generated") || strings.Contains(extra, "virtual") || strings.Contains(extra, "stored") {
+			continue
+		}
 		if col.IsPrimaryKey && (strings.Contains(extra, "auto_increment") || strings.Contains(extra, "autoincrement")) {
 			continue // DB generates this
 		}
@@ -133,7 +136,39 @@ func Generate(ctx context.Context, sess driver.Session, cfg Config) (*Result, er
 	}
 	colList := strings.Join(colNames, ", ")
 
-	const batchSize = 200
+	maxParams := 65535
+	if isSQLite {
+		maxParams = 32766
+	}
+	batchSize := 200
+	if len(insertCols) > 0 && batchSize*len(insertCols) > maxParams {
+		batchSize = max(1, maxParams/len(insertCols))
+	}
+
+	// Snapshot existing PKs prior to insert so the self-referential FK second pass NEVER
+	// mutates pre-existing root rows (where fk IS NULL) in the target table.
+	pkCol := ""
+	for _, col := range targetTable.Columns {
+		if col.IsPrimaryKey {
+			pkCol = col.Name
+			break
+		}
+	}
+	existingPKs := map[string]bool{}
+	if len(isSelfRef) > 0 && pkCol != "" {
+		qPK := driver.QuoteIdentifier(pkCol, cfg.DriverName)
+		if rows, qErr := sess.QueryRaw(ctx, fmt.Sprintf("SELECT %s FROM %s", qPK, qTable)); qErr == nil {
+			for _, row := range rows {
+				if len(row) > 0 && row[0] != nil {
+					pkVal := row[0]
+					if b, ok := pkVal.([]byte); ok {
+						pkVal = string(b)
+					}
+					existingPKs[fmt.Sprint(pkVal)] = true
+				}
+			}
+		}
+	}
 
 	// One transaction wrapping all batches for this table pinned to a dedicated connection.
 	tx, err := sess.BeginTx(ctx)
@@ -152,8 +187,12 @@ func Generate(ctx context.Context, sess driver.Session, cfg Config) (*Result, er
 		if _, err := tx.ExecRaw(ctx, "SET FOREIGN_KEY_CHECKS=0"); err != nil {
 			return nil, fmt.Errorf("disable FK checks: %w", err)
 		}
-		// Restore before the connection returns to the pool (runs before Rollback on error paths).
-		defer tx.ExecRaw(ctx, "SET FOREIGN_KEY_CHECKS=1") //nolint:errcheck
+		// Restore with an uncancellable context so a cancelled request never leaks FOREIGN_KEY_CHECKS=0.
+		defer func() {
+			restoreCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			_, _ = tx.ExecRaw(restoreCtx, "SET FOREIGN_KEY_CHECKS=1")
+		}()
 	}
 
 	totalInserted := 0
@@ -202,38 +241,79 @@ func Generate(ctx context.Context, sess driver.Session, cfg Config) (*Result, er
 		return nil, fmt.Errorf("commit: %w", err)
 	}
 
-	// Second pass: resolve self-referential FK columns.
-	// Find the PK column name.
-	pkCol := ""
-	for _, col := range targetTable.Columns {
-		if col.IsPrimaryKey {
-			pkCol = col.Name
-			break
-		}
-	}
-
-	if pkCol != "" {
+	// Second pass: resolve self-referential FK columns strictly for newly inserted rows.
+	// Never overwrite pre-existing rows (root nodes with fk IS NULL), never create self-cycles (id == fk),
+	// and pick a distinct random parent PK per row.
+	if pkCol != "" && len(isSelfRef) > 0 {
 		qPK := driver.QuoteIdentifier(pkCol, cfg.DriverName)
-		for col := range isSelfRef {
-			qCol := driver.QuoteIdentifier(col, cfg.DriverName)
-			var updateSQL string
-			if isMySQL {
-				// MySQL doesn't allow UPDATE...SELECT from same table without subquery alias.
-				updateSQL = fmt.Sprintf(
-					"UPDATE %s SET %s = (SELECT pk FROM (SELECT %s AS pk FROM %s ORDER BY RAND() LIMIT 1) AS _t) WHERE %s IS NULL",
-					qTable, qCol, qPK, qTable, qCol)
-			} else {
-				// SQLite and PostgreSQL support direct subquery.
-				updateSQL = fmt.Sprintf(
-					"UPDATE %s SET %s = (SELECT %s FROM %s ORDER BY RANDOM() LIMIT 1) WHERE %s IS NULL",
-					qTable, qCol, qPK, qTable, qCol)
+		allRows, qErr := sess.QueryRaw(ctx, fmt.Sprintf("SELECT %s FROM %s", qPK, qTable))
+		if qErr != nil {
+			return nil, fmt.Errorf("fetch PKs for self-referential FK resolution: %w", qErr)
+		}
+		var allPKs []any
+		var newPKs []any
+		for _, row := range allRows {
+			if len(row) == 0 || row[0] == nil {
+				continue
 			}
-			sess.ExecRaw(ctx, updateSQL) //nolint:errcheck — best-effort, data still valid with NULLs
+			pkVal := row[0]
+			if b, ok := pkVal.([]byte); ok {
+				pkVal = string(b)
+			}
+			allPKs = append(allPKs, pkVal)
+			if !existingPKs[fmt.Sprint(pkVal)] {
+				newPKs = append(newPKs, pkVal)
+			}
+		}
+
+		if len(allPKs) > 1 && len(newPKs) > 0 {
+			fkTx, fkTxErr := sess.BeginTx(ctx)
+			if fkTxErr != nil {
+				return nil, fmt.Errorf("begin self-referential FK transaction: %w", fkTxErr)
+			}
+			defer fkTx.Rollback() //nolint:errcheck
+
+			p1 := driver.Placeholder(cfg.DriverName, 1)
+			p2 := driver.Placeholder(cfg.DriverName, 2)
+			for col := range isSelfRef {
+				qCol := driver.QuoteIdentifier(col, cfg.DriverName)
+				updateSQL := fmt.Sprintf("UPDATE %s SET %s = %s WHERE %s = %s AND %s IS NULL",
+					qTable, qCol, p1, qPK, p2, qCol)
+				for _, childPK := range newPKs {
+					childKey := fmt.Sprint(childPK)
+					// Pick a parent PK strictly different from childPK to prevent self-cycles.
+					var parentPK any
+					for attempts := 0; attempts < 8; attempts++ {
+						cand := allPKs[r.Intn(len(allPKs))]
+						if fmt.Sprint(cand) != childKey {
+							parentPK = cand
+							break
+						}
+					}
+					if parentPK == nil {
+						for _, cand := range allPKs {
+							if fmt.Sprint(cand) != childKey {
+								parentPK = cand
+								break
+							}
+						}
+					}
+					if parentPK == nil {
+						continue
+					}
+					if _, uErr := fkTx.ExecRaw(ctx, updateSQL, parentPK, childPK); uErr != nil {
+						return nil, fmt.Errorf("update self-referential FK %s: %w", col, uErr)
+					}
+				}
+			}
+			if cErr := fkTx.Commit(); cErr != nil {
+				return nil, fmt.Errorf("commit self-referential FK updates: %w", cErr)
+			}
 		}
 	}
 
 	return &Result{
-		Inserted:   cfg.Rows,
+		Inserted:   totalInserted,
 		DurationMs: time.Since(start).Milliseconds(),
 	}, nil
 }
@@ -257,6 +337,9 @@ func generateValue(col driver.ColumnMetadata, fkPool map[string][]any, isSelfRef
 	if pool, ok := fkPool[col.Name]; ok && len(pool) > 0 {
 		return pool[r.Intn(len(pool))]
 	}
+	if len(col.EnumValues) > 0 {
+		return col.EnumValues[r.Intn(len(col.EnumValues))]
+	}
 	if col.IsNullable && !col.IsPrimaryKey && r.Intn(5) == 0 {
 		return nil // 20% NULL for nullable non-PK columns
 	}
@@ -268,7 +351,9 @@ func generateValue(col driver.ColumnMetadata, fkPool map[string][]any, isSelfRef
 	}
 
 	switch {
-	case tp == "tinyint(1)" || tp == "bool" || tp == "boolean":
+	case tp == "bool" || tp == "boolean":
+		return r.Intn(2) == 1
+	case tp == "tinyint(1)":
 		return r.Intn(2)
 	case strings.HasPrefix(tp, "tinyint"):
 		return r.Intn(128)
@@ -289,7 +374,11 @@ func generateValue(col driver.ColumnMetadata, fkPool map[string][]any, isSelfRef
 	case strings.HasPrefix(tp, "varchar") || strings.HasPrefix(tp, "char") ||
 		tp == "tinytext" || tp == "text" || tp == "mediumtext" || tp == "longtext" || tp == "clob":
 		words := []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel"}
-		return words[r.Intn(len(words))] + "_" + randStr(r, 6)
+		s := words[r.Intn(len(words))] + "_" + randStr(r, 6)
+		if maxLen := parseTypeWidth(tp); maxLen > 0 && len(s) > maxLen {
+			return s[:maxLen]
+		}
+		return s
 	case tp == "date":
 		return fmt.Sprintf("20%02d-%02d-%02d", r.Intn(6)+20, r.Intn(12)+1, r.Intn(28)+1)
 	case tp == "timestamptz":
@@ -298,8 +387,8 @@ func generateValue(col driver.ColumnMetadata, fkPool map[string][]any, isSelfRef
 		return fmt.Sprintf("2024-%02d-%02d %02d:%02d:00", r.Intn(12)+1, r.Intn(28)+1, r.Intn(24), r.Intn(60))
 	case strings.HasPrefix(tp, "json"):
 		return fmt.Sprintf(`{"mock":true,"id":%d}`, r.Intn(9999)+1)
-	case tp == "blob" || tp == "binary" || tp == "bytea" || strings.HasPrefix(tp, "varbinary"):
-		return "0xDEADBEEF"
+	case tp == "blob" || tp == "binary" || tp == "bytea" || strings.HasPrefix(tp, "varbinary") || strings.HasPrefix(tp, "binary("):
+		return []byte{0xDE, 0xAD, 0xBE, 0xEF}
 	case strings.HasPrefix(tp, "enum"):
 		matches := enumRegex.FindAllStringSubmatch(tp, -1)
 		if len(matches) > 0 {
@@ -309,6 +398,23 @@ func generateValue(col driver.ColumnMetadata, fkPool map[string][]any, isSelfRef
 	default:
 		return fmt.Sprintf("mock_value_%d", *seq)
 	}
+}
+
+func parseTypeWidth(tp string) int {
+	openIdx := strings.IndexByte(tp, '(')
+	closeIdx := strings.IndexByte(tp, ')')
+	if openIdx < 0 || closeIdx <= openIdx+1 {
+		return 0
+	}
+	n := 0
+	for i := openIdx + 1; i < closeIdx; i++ {
+		c := tp[i]
+		if c < '0' || c > '9' {
+			return 0
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n
 }
 
 func randUUID(r *rand.Rand) string {

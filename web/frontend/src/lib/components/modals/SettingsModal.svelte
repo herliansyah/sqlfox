@@ -4,6 +4,7 @@
   import { copyText } from '../../utils/clipboard';
   import Icon from '../common/Icon.svelte';
   import AiSettingsPanel from './AiSettingsPanel.svelte';
+  import { focusTrap } from '../../actions/focusTrap';
 
   type SettingsTab = 'sync' | 'ai' | 'bundle' | 'security';
 
@@ -30,10 +31,11 @@
 
   // Encrypted Vault Export/Import State
   let vaultPassphrase = $state('');
+  let currentMasterPass = $state('');
   let isExportingVault = $state(false);
   let isImportingVault = $state(false);
   let vaultImportInput = $state<HTMLInputElement | null>(null);
-  let masterKeyInfo = $state<{ lan_enabled: boolean; master_password?: string; lan_ip?: string; port?: number | string } | null>(null);
+  let masterKeyInfo = $state<{ lan_enabled: boolean; pairing_code?: string; pairing_expires_in_sec?: number; lan_ip?: string; port?: number | string } | null>(null);
 
   let tabletLanUrl = $derived.by(() => {
     const ip = masterKeyInfo?.lan_ip;
@@ -47,7 +49,7 @@
       const [cfg, statusRes, keyRes] = await Promise.allSettled([
         api.getCloudSyncConfig(),
         api.getCloudSyncStatus(),
-        api.getMasterKey(),
+        appState.authStatus?.is_remote ? Promise.resolve(null) : api.getMasterKey(),
       ]);
       if (cfg.status === 'fulfilled' && cfg.value) {
         syncEnabled = !!cfg.value.enabled;
@@ -145,15 +147,21 @@
       appState.showToast('Enter an encryption passphrase (at least 4 characters) to export vault', 'warning');
       return;
     }
+    const master = currentMasterPass.trim();
+    if (!master) {
+      appState.showToast('Enter your current Master Password / PIN to authorize vault export', 'warning');
+      return;
+    }
     isExportingVault = true;
     try {
-      const blob = await api.exportVault(pass);
+      const blob = await api.exportVault(pass, master);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = 'sqlfox-connections.sqlfox-vault';
       a.click();
       URL.revokeObjectURL(url);
+      currentMasterPass = '';
       appState.showToast('Encrypted vault exported (.sqlfox-vault)', 'success');
     } catch (err: any) {
       appState.showToast(`Vault export failed: ${err.message}`, 'error');
@@ -216,7 +224,7 @@
 </script>
 
 {#if appState.isSettingsModalOpen}
-  <div class="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
+  <div role="dialog" aria-modal="true" use:focusTrap class="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
     <div class="bg-[#0b0f19] border border-[#1e293b] rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col animate-scale-in text-xs font-sans">
       <!-- Header -->
       <div class="px-5 py-4 border-b border-[#1e293b] flex items-center justify-between bg-[#0f172a]">
@@ -278,7 +286,7 @@
           <div class="space-y-3">
             <div>
               <div class="flex items-center justify-between mb-1">
-                <label class="block text-slate-400 text-xs font-medium">GitHub Personal Access Token (PAT) *</label>
+                <label for="sync-github-token" class="block text-slate-400 text-xs font-medium">GitHub Personal Access Token (PAT) *</label>
                 {#if hasSavedToken}
                   <span class="inline-flex items-center space-x-1 text-[10.5px] text-emerald-400 font-mono bg-emerald-950/60 border border-emerald-800/70 px-2 py-0.5 rounded">
                     <Icon name="check-circle" class="w-3 h-3 text-emerald-400" />
@@ -287,6 +295,7 @@
                 {/if}
               </div>
               <input
+                id="sync-github-token"
                 type="password"
                 bind:value={githubToken}
                 placeholder={hasSavedToken ? '•••••••••••• (Leave blank to keep existing token)' : 'ghp_xxxxxxxxxxxxxxxxxxxx (needs repo scope)'}
@@ -303,8 +312,9 @@
 
             <div class="grid grid-cols-2 gap-3">
               <div>
-                <label class="block text-slate-400 text-xs font-medium mb-1">Repository (owner/repo) *</label>
+                <label for="sync-github-repo" class="block text-slate-400 text-xs font-medium mb-1">Repository (owner/repo) *</label>
                 <input
+                  id="sync-github-repo"
                   type="text"
                   bind:value={githubRepo}
                   placeholder="e.g. yourname/sqlfox-vault"
@@ -312,8 +322,9 @@
                 />
               </div>
               <div>
-                <label class="block text-slate-400 text-xs font-medium mb-1">Branch</label>
+                <label for="sync-github-branch" class="block text-slate-400 text-xs font-medium mb-1">Branch</label>
                 <input
+                  id="sync-github-branch"
                   type="text"
                   bind:value={githubBranch}
                   placeholder="main"
@@ -323,8 +334,9 @@
             </div>
 
             <div>
-              <label class="block text-slate-400 text-xs font-medium mb-1">Repository Path Prefix</label>
+              <label for="sync-path-prefix" class="block text-slate-400 text-xs font-medium mb-1">Repository Path Prefix</label>
               <input
+                id="sync-path-prefix"
                 type="text"
                 bind:value={pathPrefix}
                 placeholder="sqlfox-vault/"
@@ -440,6 +452,12 @@
                 placeholder="Enter export / import encryption passphrase..."
                 class="w-full bg-[#090d16] border border-[#1e293b] rounded-lg px-3 py-1.5 text-slate-200 font-mono text-xs focus:outline-none focus:border-emerald-500"
               />
+              <input
+                type="password"
+                bind:value={currentMasterPass}
+                placeholder="Current Master Password / PIN (required for export)..."
+                class="w-full bg-[#090d16] border border-[#1e293b] rounded-lg px-3 py-1.5 text-slate-200 font-mono text-xs focus:outline-none focus:border-amber-500"
+              />
 
               <div class="flex items-center justify-end space-x-2">
                 <input
@@ -483,21 +501,21 @@
               </p>
 
               <div class="flex flex-wrap items-center gap-2 pt-1">
-                {#if masterKeyInfo?.master_password || appState.authStatus?.master_password}
-                  {@const pin = masterKeyInfo?.master_password || appState.authStatus?.master_password}
+                {#if masterKeyInfo?.pairing_code || appState.authStatus?.pairing_code}
+                  {@const pin = masterKeyInfo?.pairing_code || appState.authStatus?.pairing_code || ''}
                   <div class="px-2.5 py-1 rounded bg-slate-900 border border-slate-800 font-mono text-emerald-400 text-xs font-bold tracking-widest">
-                    PIN: {pin}
+                    PAIRING CODE (1x, 5m): {pin}
                   </div>
                   <button
                     type="button"
                     onclick={() => {
                       copyText(pin);
-                      appState.showToast('Master PIN copied to clipboard', 'success');
+                      appState.showToast('One-time Pairing Code copied to clipboard', 'success');
                     }}
                     class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-[11px] font-medium transition flex items-center space-x-1"
                   >
                     <Icon name="copy" class="w-3 h-3" />
-                    <span>Copy PIN</span>
+                    <span>Copy Code</span>
                   </button>
                 {:else}
                   <span class="text-[11px] text-slate-500 italic">Master PIN is printed in the local terminal startup banner on localhost.</span>

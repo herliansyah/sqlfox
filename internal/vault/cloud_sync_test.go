@@ -383,3 +383,83 @@ func TestCloudSync_EmptyRepositoryAutoInit(t *testing.T) {
 		t.Errorf("expected commit-002, got %s", res.CommitSHA)
 	}
 }
+
+func TestSyncToGitHub_TwoWayPullMerge(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "sqlfox-twoway-sync-*")
+	if err != nil {
+		t.Fatalf("temp dir creation failed: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dbPath := filepath.Join(tmpDir, "vault.db")
+	v, err := OpenVault(dbPath, "master-pin-123")
+	if err != nil {
+		t.Fatalf("OpenVault failed: %v", err)
+	}
+	defer v.Close()
+
+	remoteNoteMD := "---\nid: remote-note-99\ntitle: Remote Runbook\nstatus: inbox\n---\n\nCheck replication lag.\n"
+	remoteBlobB64 := "LS0tCmlkOiByZW1vdGUtbm90ZS05OQp0aXRsZTogUmVtb3RlIFJ1bmJvb2sKc3RhdHVzOiBpbmJveAotLS0KCkNoZWNrIHJlcGxpY2F0aW9uIGxhZy4K"
+	_ = remoteNoteMD
+
+	mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		switch {
+		case p == "/repos/octocat/notes/git/ref/heads/main" && r.Method == "GET":
+			_ = json.NewEncoder(w).Encode(map[string]any{"object": map[string]any{"sha": "remote-commit-2"}})
+		case p == "/repos/octocat/notes/git/commits/remote-commit-2" && r.Method == "GET":
+			_ = json.NewEncoder(w).Encode(map[string]any{"tree": map[string]any{"sha": "remote-tree-2"}})
+		case p == "/repos/octocat/notes/git/trees/remote-tree-2" && r.Method == "GET":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"tree": []map[string]any{
+					{"path": "notes/remote-note-99-remote-runbook.md", "type": "blob", "sha": "blob-remote-99"},
+				},
+			})
+		case p == "/repos/octocat/notes/git/blobs/blob-remote-99" && r.Method == "GET":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"encoding": "base64",
+				"content":  remoteBlobB64,
+			})
+		case p == "/repos/octocat/notes/git/blobs" && r.Method == "POST":
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{"sha": "blob-uploaded"})
+		case p == "/repos/octocat/notes/git/trees" && r.Method == "POST":
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{"sha": "remote-tree-2"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer mockGH.Close()
+
+	cfg := &CloudSyncConfig{
+		Enabled:            true,
+		GitHubToken:        "ghp_test_token",
+		GitHubRepo:         "octocat/notes",
+		GitHubBranch:       "main",
+		APIBaseURL:         mockGH.URL,
+		IncludeVaultBackup: false,
+	}
+
+	res, err := SyncToGitHub(context.Background(), v, cfg, "master-pin-123")
+	if err != nil {
+		t.Fatalf("SyncToGitHub two-way pull/merge failed: %v", err)
+	}
+	if res.PulledCount != 1 {
+		t.Fatalf("expected PulledCount=1, got %d", res.PulledCount)
+	}
+	notes, err := v.ListAllOperationalNotes()
+	if err != nil {
+		t.Fatalf("ListAllOperationalNotes failed: %v", err)
+	}
+	found := false
+	for _, n := range notes {
+		if n.ID == "remote-note-99" && n.Title == "Remote Runbook" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected remote-note-99 to be merged into local vault, got %+v", notes)
+	}
+}

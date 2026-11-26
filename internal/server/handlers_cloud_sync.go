@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -97,17 +98,22 @@ func (s *Server) handleSaveCloudSyncConfig(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	newRepo := strings.TrimSpace(req.GitHubRepo)
+	repoChanged := !strings.EqualFold(newRepo, strings.TrimSpace(currentCfg.GitHubRepo))
+
 	currentCfg.Enabled = req.Enabled
-	currentCfg.GitHubRepo = strings.TrimSpace(req.GitHubRepo)
+	currentCfg.GitHubRepo = newRepo
 	if req.GitHubBranch != "" {
 		currentCfg.GitHubBranch = strings.TrimSpace(req.GitHubBranch)
 	}
 	currentCfg.PathPrefix = strings.Trim(req.PathPrefix, "/")
 	currentCfg.IncludeVaultBackup = req.IncludeVaultBackup
 
-	// Only update token if a new non-masked token is sent
+	// Prevent GitHub PAT hijack: if github_repo changed without supplying a fresh token, clear the stored PAT.
 	if req.GitHubToken != "" && !strings.Contains(req.GitHubToken, "••••") {
 		currentCfg.GitHubToken = strings.TrimSpace(req.GitHubToken)
+	} else if repoChanged {
+		currentCfg.GitHubToken = ""
 	}
 
 	if err := s.vault.SaveCloudSyncConfig(currentCfg); err != nil {
@@ -128,7 +134,10 @@ func (s *Server) handleTestCloudSync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req testCloudSyncRequest
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid JSON request body")
+		return
+	}
 
 	token := strings.TrimSpace(req.GitHubToken)
 	repo := strings.TrimSpace(req.GitHubRepo)

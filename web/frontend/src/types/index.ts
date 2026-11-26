@@ -15,6 +15,11 @@ export interface ConnectionProfile {
   database_name?: string;
   ssl_mode?: string;
   use_ssl?: boolean;
+  ssl_ca?: string;
+  ssl_cert?: string;
+  ssl_key?: string;
+  has_ssl_key?: boolean;
+  clear_ssl?: boolean;
   environment: Environment;
   read_only?: boolean;
   color?: string;
@@ -214,6 +219,7 @@ export interface QueryExecutionResult {
 }
 
 export interface StagedEdit {
+  tabId?: string;
   rIdx: number;
   cIdx: number;
   table: string;
@@ -329,9 +335,11 @@ export interface EditorTab {
   isNote?: boolean;
   noteMode?: 'edit' | 'preview';
   activeResult?: QueryExecutionResult | null;
+  resultRunId?: number;
   isExecuting?: boolean;
   isExplaining?: boolean;
   isStreaming?: boolean;
+  queryLimit?: number;
   executionStartedAt?: number;
   executionElapsedMs?: number;
   statusText?: string;

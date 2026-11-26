@@ -1,6 +1,7 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
   import Icon from '../common/Icon.svelte';
+  import { focusTrap } from '../../actions/focusTrap';
 
   let password = $state('');
   let errorMessage = $state('');
@@ -18,7 +19,9 @@
 
     try {
       const ok = await appState.unlockRemote(password);
-      if (!ok) {
+      if (ok) {
+        password = '';
+      } else {
         errorMessage = 'Invalid master password or PIN.';
       }
     } catch (err: any) {
@@ -30,8 +33,14 @@
 </script>
 
 {#if appState.isRemoteLocked}
-  <div class="fixed inset-0 z-[110] bg-[#020617]/95 flex items-center justify-center p-4 select-none">
-    <div class="bg-[#0f172a] border-2 border-sky-400/80 w-full max-w-sm rounded-2xl shadow-[0_0_35px_rgba(56,189,248,0.25)] p-6 space-y-4 text-center animate-in fade-in zoom-in-95 duration-200">
+  <div
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="remote-lock-title"
+    use:focusTrap
+    class="fixed inset-0 z-[110] bg-[#020617]/95 flex items-center justify-center p-4 select-none"
+  >
+    <div class="bg-[#0f172a] border-2 border-sky-400/80 w-full max-w-sm rounded-2xl shadow-[0_0_35px_rgba(56,189,248,0.25)] p-6 space-y-4 text-center">
       <!-- Icons -->
       <div class="flex justify-center items-center space-x-2 py-1">
         <Icon name="brand" class="w-12 h-12 flex-shrink-0" />
@@ -39,7 +48,7 @@
       </div>
 
       <div>
-        <h2 class="text-base font-bold text-white tracking-wide">SqlFox Remote Access Guard</h2>
+        <h2 id="remote-lock-title" class="text-base font-bold text-white tracking-wide">SqlFox Remote Access Guard</h2>
         <p class="text-xs text-slate-400 leading-relaxed mt-1">
           You are accessing SqlFox from a network device. Please enter your Master Password or PIN to unlock this session.
         </p>
@@ -49,6 +58,7 @@
         <div>
           <input
             type="password"
+            autocomplete="current-password"
             bind:value={password}
             use:autoFocus
             required

@@ -3,6 +3,7 @@ package ai
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/herliansyah/sqlfox/internal/driver"
@@ -99,7 +100,16 @@ func BuildSchemaPromptWithMap(schema *driver.SchemaMetadata, referencedQuery str
 			if col.IsNullable {
 				nullStr = " NULL"
 			}
-			sb.WriteString(fmt.Sprintf("    - `%s` %s%s%s\n", ident(col.Name), col.Type, nullStr, pkStr))
+			colType := col.Type
+			if maskIdentifiers {
+				upperType := strings.ToUpper(strings.TrimSpace(colType))
+				if strings.HasPrefix(upperType, "ENUM(") {
+					colType = "ENUM([MASKED])"
+				} else if strings.HasPrefix(upperType, "SET(") {
+					colType = "SET([MASKED])"
+				}
+			}
+			sb.WriteString(fmt.Sprintf("    - `%s` %s%s%s\n", ident(col.Name), colType, nullStr, pkStr))
 		}
 		if len(tbl.Indexes) > 0 {
 			sb.WriteString("  Indexes:\n")
@@ -129,41 +139,73 @@ func BuildSchemaPromptWithMap(schema *driver.SchemaMetadata, referencedQuery str
 	return sb.String(), mapping
 }
 
+var sqlKeywordsToPreserve = map[string]bool{
+	"SELECT": true, "FROM": true, "WHERE": true, "ORDER": true, "GROUP": true, "BY": true,
+	"HAVING": true, "LIMIT": true, "OFFSET": true, "JOIN": true, "INNER": true, "LEFT": true,
+	"RIGHT": true, "FULL": true, "OUTER": true, "CROSS": true, "ON": true, "AS": true,
+	"AND": true, "OR": true, "NOT": true, "NULL": true, "IS": true, "IN": true, "LIKE": true,
+	"ILIKE": true, "BETWEEN": true, "EXISTS": true, "CASE": true, "WHEN": true, "THEN": true,
+	"ELSE": true, "END": true, "DISTINCT": true, "UNION": true, "ALL": true, "ASC": true,
+	"DESC": true, "COUNT": true, "SUM": true, "AVG": true, "MIN": true, "MAX": true,
+	"INSERT": true, "INTO": true, "VALUES": true, "UPDATE": true, "SET": true, "DELETE": true,
+	"CREATE": true, "ALTER": true, "DROP": true, "TABLE": true, "INDEX": true, "VIEW": true,
+	"KEY": true, "PRIMARY": true, "FOREIGN": true, "REFERENCES": true, "DEFAULT": true,
+	"WITH": true, "EXPLAIN": true, "ANALYZE": true,
+}
+
 // MaskIdentifiersInText replaces real schema identifiers in free text (SQL, plans, errors)
-// using the mapping produced by BuildSchemaPromptWithMap, longest keys first.
+// using the mapping produced by BuildSchemaPromptWithMap, longest keys first in a single pass.
 func MaskIdentifiersInText(text string, mapping map[string]string) string {
 	if text == "" || len(mapping) == 0 {
 		return text
 	}
 	keys := make([]string, 0, len(mapping))
-	for k := range mapping {
+	lowerLookup := make(map[string]string, len(mapping))
+	for k, v := range mapping {
 		if k != "" {
 			keys = append(keys, k)
+			lowerLookup[strings.ToLower(k)] = v
 		}
 	}
-	// Sort longest-first so e.g. user_accounts is replaced before user.
-	for i := 0; i < len(keys); i++ {
-		for j := i + 1; j < len(keys); j++ {
-			if len(keys[j]) > len(keys[i]) {
-				keys[i], keys[j] = keys[j], keys[i]
+	if len(keys) == 0 {
+		return text
+	}
+	// Sort longest-first so e.g. user_accounts is matched before user in regex alternation.
+	slices.SortFunc(keys, func(a, b string) int {
+		if len(b) != len(a) {
+			return len(b) - len(a)
+		}
+		return strings.Compare(a, b)
+	})
+	quoted := make([]string, len(keys))
+	for i, k := range keys {
+		quoted[i] = regexp.QuoteMeta(k)
+	}
+	// Match quoted (`ident` or "ident") or bare word identifiers; never mask unquoted SQL keywords.
+	re := regexp.MustCompile("(?i)(?:`|\")?(?:\\b(?:" + strings.Join(quoted, "|") + ")\\b)(?:`|\")?")
+	return re.ReplaceAllStringFunc(text, func(match string) string {
+		isQuoted := (strings.HasPrefix(match, "`") && strings.HasSuffix(match, "`")) ||
+			(strings.HasPrefix(match, `"`) && strings.HasSuffix(match, `"`))
+		bare := strings.Trim(match, "`\"")
+		if !isQuoted && sqlKeywordsToPreserve[strings.ToUpper(bare)] {
+			return match
+		}
+		if repl, ok := lowerLookup[strings.ToLower(bare)]; ok {
+			if isQuoted {
+				return match[:1] + repl + match[len(match)-1:]
 			}
+			return repl
 		}
-	}
-	out := text
-	for _, k := range keys {
-		re := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(k) + `\b`)
-		out = re.ReplaceAllString(out, mapping[k])
-	}
-	return out
+		return match
+	})
 }
 
 // UnmaskIdentifiersInText replaces masked identifiers (e.g. masked_1, masked_2)
-// back to their original schema identifiers using the provided mapping.
+// back to their original schema identifiers in a single pass using the provided mapping.
 func UnmaskIdentifiersInText(text string, mapping map[string]string) string {
 	if text == "" || len(mapping) == 0 {
 		return text
 	}
-	// Invert mapping: masked -> real
 	reverse := make(map[string]string, len(mapping))
 	maskedKeys := make([]string, 0, len(mapping))
 	for realName, maskedName := range mapping {
@@ -172,18 +214,43 @@ func UnmaskIdentifiersInText(text string, mapping map[string]string) string {
 			maskedKeys = append(maskedKeys, maskedName)
 		}
 	}
-	// Sort longest first so e.g. masked_10 is replaced before masked_1
-	for i := 0; i < len(maskedKeys); i++ {
-		for j := i + 1; j < len(maskedKeys); j++ {
-			if len(maskedKeys[j]) > len(maskedKeys[i]) {
-				maskedKeys[i], maskedKeys[j] = maskedKeys[j], maskedKeys[i]
-			}
+	if len(maskedKeys) == 0 {
+		return text
+	}
+	slices.SortFunc(maskedKeys, func(a, b string) int {
+		if len(b) != len(a) {
+			return len(b) - len(a)
 		}
+		return strings.Compare(a, b)
+	})
+	quoted := make([]string, len(maskedKeys))
+	for i, m := range maskedKeys {
+		quoted[i] = regexp.QuoteMeta(m)
 	}
-	out := text
-	for _, m := range maskedKeys {
-		re := regexp.MustCompile(`\b` + regexp.QuoteMeta(m) + `\b`)
-		out = re.ReplaceAllString(out, reverse[m])
+	re := regexp.MustCompile(`\b(?:` + strings.Join(quoted, "|") + `)\b`)
+	return re.ReplaceAllStringFunc(text, func(match string) string {
+		if orig, ok := reverse[match]; ok {
+			return orig
+		}
+		return match
+	})
+}
+
+var (
+	reSQLSingleQuotedLiteral = regexp.MustCompile(`'(?:''|\\'|[^'])*'`)
+	reEmailPII               = regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`)
+	rePGDetailKeyValue       = regexp.MustCompile(`(?i)(DETAIL:\s*Key\s*\([^)]+\)\s*=\s*\()([^)]+)(\))`)
+)
+
+// RedactSensitiveLiterals strips quoted SQL string literals, PostgreSQL constraint DETAIL values,
+// and email addresses before sending queries/errors/plans to external AI providers when privacy
+// masking is enabled.
+func RedactSensitiveLiterals(text string) string {
+	if text == "" {
+		return text
 	}
+	out := rePGDetailKeyValue.ReplaceAllString(text, "${1}[REDACTED]${3}")
+	out = reSQLSingleQuotedLiteral.ReplaceAllString(out, "'[REDACTED]'")
+	out = reEmailPII.ReplaceAllString(out, "[REDACTED_EMAIL]")
 	return out
 }

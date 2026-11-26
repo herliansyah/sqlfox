@@ -364,7 +364,7 @@
                           {s.title}
                         </h4>
                         {#if varCount > 0}
-                          <span class="px-1.5 py-0.2 rounded bg-sky-950/60 border border-sky-800/60 text-sky-300 font-mono text-[9.5px]">
+                          <span class="px-1.5 py-0.5 rounded bg-sky-950/60 border border-sky-800/60 text-sky-300 font-mono text-[9.5px]">
                             {varCount} param(s)
                           </span>
                         {/if}
@@ -407,7 +407,7 @@
                   {#if s.tags && s.tags.length > 0}
                     <div class="flex items-center space-x-1">
                       {#each s.tags as tag}
-                        <span class="px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 text-[10px] font-mono border border-slate-700">
+                        <span class="px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 text-[10px] font-mono border border-slate-700">
                           #{tag}
                         </span>
                       {/each}

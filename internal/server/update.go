@@ -3,7 +3,6 @@ package server
 import (
 	"archive/tar"
 	"archive/zip"
-	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/ed25519"
@@ -12,8 +11,10 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -24,8 +25,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"github.com/herliansyah/sqlfox/web"
 )
+
+var updateInFlight atomic.Bool
 
 // allowUpdateAPIHostAssets lets isAllowedAssetURL accept assets whose host matches s.updateAPIURL.
 // This is required only by the update test harness, which points updateAPIURL at a local mock
@@ -37,7 +43,7 @@ var allowUpdateAPIHostAssets = false
 // manifestSigningPublicKeyB64 is the base64-encoded Ed25519 public key that signs the release
 // checksum manifest. It is injected at build time via
 //
-//	-ldflags "-X sqlfox/internal/server.manifestSigningPublicKeyB64=<base64 pubkey>"
+//	-ldflags "-X github.com/herliansyah/sqlfox/internal/server.manifestSigningPublicKeyB64=<base64 pubkey>"
 //
 // When set, the self-updater REQUIRES a valid detached Ed25519 signature (checksums.txt.sig) over
 // the checksum manifest before trusting any checksum — this is the supply-chain trust anchor that a
@@ -66,23 +72,25 @@ type GitHubAsset struct {
 
 // UpdateInfo holds the version diff, changelog, and target asset details.
 type UpdateInfo struct {
-	CurrentVersion string `json:"current_version"`
-	LatestVersion  string `json:"latest_version"`
-	HasUpdate      bool   `json:"has_update"`
-	ReleaseName    string `json:"release_name"`
-	ReleaseNotes   string `json:"release_notes"`
-	PublishedAt    string `json:"published_at"`
-	AssetURL       string `json:"asset_url"`
-	AssetName      string `json:"asset_name"`
-	DownloadSize   int64  `json:"download_size"`
+	CurrentVersion    string `json:"current_version"`
+	LatestVersion     string `json:"latest_version"`
+	HasUpdate         bool   `json:"has_update"`
+	ReleaseName       string `json:"release_name"`
+	ReleaseNotes      string `json:"release_notes"`
+	PublishedAt       string `json:"published_at"`
+	AssetURL          string `json:"asset_url"`
+	AssetName         string `json:"asset_name"`
+	DownloadSize      int64  `json:"download_size"`
+	SignatureVerified bool   `json:"signature_verified"`
 }
 
 // ApplyUpdateResult represents the outcome of an in-app binary replacement.
 type ApplyUpdateResult struct {
-	Success    bool   `json:"success"`
-	Message    string `json:"message"`
-	NewVersion string `json:"new_version"`
-	Restarting bool   `json:"restarting"`
+	Success           bool   `json:"success"`
+	Message           string `json:"message"`
+	NewVersion        string `json:"new_version"`
+	Restarting        bool   `json:"restarting"`
+	SignatureVerified bool   `json:"signature_verified"`
 }
 
 var (
@@ -101,16 +109,21 @@ const maxExtractedBinarySize = 256 << 20
 // SetVersion sets the runtime version string of the server.
 func (s *Server) SetVersion(v string) {
 	if v != "" {
+		s.mu.Lock()
 		s.version = v
+		s.mu.Unlock()
 	}
 }
 
 // GetVersion returns the runtime version string of the server.
 func (s *Server) GetVersion() string {
-	if s.version == "" {
+	s.mu.Lock()
+	v := s.version
+	s.mu.Unlock()
+	if v == "" {
 		return "v0.1.0"
 	}
-	return s.version
+	return v
 }
 
 // compareSemver returns:
@@ -179,7 +192,10 @@ func FetchLatestRelease(ctx context.Context, apiURL string) (*GitHubRelease, err
 	req.Header.Set("User-Agent", "SqlFox-Update-Engine")
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{
+		Timeout:       10 * time.Second,
+		CheckRedirect: guardUpdateRedirect,
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query GitHub releases: %w", err)
@@ -209,17 +225,17 @@ func (s *Server) handleCheckUpdate(w http.ResponseWriter, r *http.Request) {
 	if !force && cachedInfo != nil && time.Since(cachedAt) < updateCacheTTL {
 		info := *cachedInfo
 		updateCacheMu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(info)
+		writeJSON(w, http.StatusOK, info)
 		return
 	}
 	updateCacheMu.Unlock()
 
-	rel, err := FetchLatestRelease(r.Context(), s.updateAPIURL)
+	s.mu.Lock()
+	updateURL := s.updateAPIURL
+	s.mu.Unlock()
+	rel, err := FetchLatestRelease(r.Context(), updateURL)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadGateway)
-		json.NewEncoder(w).Encode(map[string]any{
+		writeJSON(w, http.StatusBadGateway, map[string]any{
 			"error":           err.Error(),
 			"current_version": currentVer,
 			"has_update":      false,
@@ -231,12 +247,13 @@ func (s *Server) handleCheckUpdate(w http.ResponseWriter, r *http.Request) {
 	targetAsset := findMatchingAsset(rel.Assets, runtime.GOOS, runtime.GOARCH)
 
 	info := UpdateInfo{
-		CurrentVersion: currentVer,
-		LatestVersion:  rel.TagName,
-		HasUpdate:      hasUpdate,
-		ReleaseName:    rel.Name,
-		ReleaseNotes:   rel.Body,
-		PublishedAt:    rel.PublishedAt.Format(time.RFC3339),
+		CurrentVersion:    currentVer,
+		LatestVersion:     rel.TagName,
+		HasUpdate:         hasUpdate,
+		ReleaseName:       rel.Name,
+		ReleaseNotes:      rel.Body,
+		PublishedAt:       rel.PublishedAt.Format(time.RFC3339),
+		SignatureVerified: strings.TrimSpace(manifestSigningPublicKeyB64) != "",
 	}
 
 	if targetAsset != nil {
@@ -256,6 +273,17 @@ func (s *Server) handleCheckUpdate(w http.ResponseWriter, r *http.Request) {
 
 // handleApplyUpdate handles POST /api/system/update/apply
 func (s *Server) handleApplyUpdate(w http.ResponseWriter, r *http.Request) {
+	if !isLoopback(r.RemoteAddr) || s.IsRemoteRequest(r) || hasForwardingHeaders(r) {
+		writeError(w, http.StatusForbidden, "Applying updates is only permitted from direct local machine sessions")
+		return
+	}
+
+	if !updateInFlight.CompareAndSwap(false, true) {
+		writeError(w, http.StatusConflict, "an update is already in progress")
+		return
+	}
+	defer updateInFlight.Store(false)
+
 	var req struct {
 		AssetURL string `json:"asset_url"`
 		Version  string `json:"version"`
@@ -276,10 +304,14 @@ func (s *Server) handleApplyUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Trust-anchor verification: the asset URL must be one the official GitHub release metadata
-	// actually advertises, not merely any path under the repo. This binds the download to a
-	// release GitHub published, so a caller cannot point the updater at an arbitrary (even
-	// same-repo) object.
-	rel, relErr := FetchLatestRelease(r.Context(), s.updateAPIURL)
+	// actually advertises AND must match the current runtime OS/architecture so an attacker
+	// cannot brick the daemon with another platform's binary.
+	s.mu.Lock()
+	updateAPIURL := s.updateAPIURL
+	targetExePath := s.targetExePath
+	s.mu.Unlock()
+
+	rel, relErr := FetchLatestRelease(r.Context(), updateAPIURL)
 	if relErr != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadGateway)
@@ -288,18 +320,12 @@ func (s *Server) handleApplyUpdate(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	advertised := false
-	for _, a := range rel.Assets {
-		if a.BrowserDownloadURL == req.AssetURL {
-			advertised = true
-			break
-		}
-	}
-	if !advertised {
+	matched := findMatchingAsset(rel.Assets, runtime.GOOS, runtime.GOARCH)
+	if matched == nil || matched.BrowserDownloadURL != req.AssetURL {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]any{
-			"error": "asset_url is not advertised by the latest official release metadata",
+			"error": fmt.Sprintf("asset_url does not match the advertised release asset for %s/%s", runtime.GOOS, runtime.GOARCH),
 		})
 		return
 	}
@@ -307,8 +333,8 @@ func (s *Server) handleApplyUpdate(w http.ResponseWriter, r *http.Request) {
 	// Determine current running executable path
 	var exePath string
 	var err error
-	if s.targetExePath != "" {
-		exePath = s.targetExePath
+	if targetExePath != "" {
+		exePath = targetExePath
 	} else {
 		exePath, err = os.Executable()
 		if err != nil {
@@ -400,20 +426,24 @@ func (s *Server) handleApplyUpdate(w http.ResponseWriter, r *http.Request) {
 	// Return success to the client before restarting
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(ApplyUpdateResult{
-		Success:    true,
-		Message:    fmt.Sprintf("SqlFox successfully updated to %s", req.Version),
-		NewVersion: req.Version,
-		Restarting: true,
+		Success:           true,
+		Message:           fmt.Sprintf("SqlFox successfully updated to %s", req.Version),
+		NewVersion:        req.Version,
+		Restarting:        true,
+		SignatureVerified: strings.TrimSpace(manifestSigningPublicKeyB64) != "",
 	})
 	if flusher, ok := w.(http.Flusher); ok {
 		flusher.Flush()
 	}
 
 	// Trigger restart
-	if s.restartFn != nil {
+	s.mu.Lock()
+	restartFn := s.restartFn
+	s.mu.Unlock()
+	if restartFn != nil {
 		go func() {
 			time.Sleep(200 * time.Millisecond)
-			_ = s.restartFn()
+			_ = restartFn()
 		}()
 	} else {
 		go func() {
@@ -450,8 +480,11 @@ func (s *Server) isAllowedAssetURL(rawURL string) bool {
 		path.Clean(u.Path) == u.Path && strings.HasPrefix(u.Path, "/herliansyah/sqlfox/releases/download/") {
 		return true
 	}
-	if allowUpdateAPIHostAssets && s.updateAPIURL != "" {
-		if u, err := url.Parse(s.updateAPIURL); err == nil {
+	s.mu.Lock()
+	apiURL := s.updateAPIURL
+	s.mu.Unlock()
+	if allowUpdateAPIHostAssets && apiURL != "" {
+		if u, err := url.Parse(apiURL); err == nil {
 			if au, err := url.Parse(rawURL); err == nil && au.Host == u.Host && au.Host != "" {
 				return true
 			}
@@ -461,6 +494,11 @@ func (s *Server) isAllowedAssetURL(rawURL string) bool {
 }
 
 func (s *Server) verifyAssetChecksum(ctx context.Context, assetURL string, archiveBytes []byte) error {
+	actualHash := sha256.Sum256(archiveBytes)
+	return s.verifyAssetDigest(ctx, assetURL, hex.EncodeToString(actualHash[:]))
+}
+
+func (s *Server) verifyAssetDigest(ctx context.Context, assetURL string, actualHex string) error {
 	idx := strings.LastIndex(assetURL, "/")
 	if idx == -1 {
 		return fmt.Errorf("invalid asset URL format")
@@ -478,7 +516,10 @@ func (s *Server) verifyAssetChecksum(ctx context.Context, assetURL string, archi
 			return nil, err
 		}
 		req.Header.Set("User-Agent", "SqlFox-Update-Engine")
-		client := &http.Client{Timeout: 15 * time.Second}
+		client := &http.Client{
+			Timeout:       15 * time.Second,
+			CheckRedirect: guardUpdateRedirect,
+		}
 		resp, err := client.Do(req)
 		if err != nil {
 			return nil, err
@@ -505,9 +546,6 @@ func (s *Server) verifyAssetChecksum(ctx context.Context, assetURL string, archi
 	if err := verifyManifestSignature(ctx, fetchManifest, baseDir, manifestData); err != nil {
 		return err
 	}
-
-	actualHash := sha256.Sum256(archiveBytes)
-	actualHex := hex.EncodeToString(actualHash[:])
 
 	lines := strings.Split(string(manifestData), "\n")
 	for _, line := range lines {
@@ -537,6 +575,7 @@ func (s *Server) verifyAssetChecksum(ctx context.Context, assetURL string, archi
 // over the exact manifest bytes; any failure is fail-closed.
 func verifyManifestSignature(ctx context.Context, fetch func(string) ([]byte, error), baseDir string, manifestData []byte) error {
 	if manifestSigningPublicKeyB64 == "" {
+		slog.Warn("update_manifest_unsigned_fallback", "module", "update", "reason", "manifestSigningPublicKeyB64 is empty; using checksum-only verification")
 		return nil // no trust anchor provisioned in this build
 	}
 	pub, err := base64.StdEncoding.DecodeString(strings.TrimSpace(manifestSigningPublicKeyB64))
@@ -563,6 +602,17 @@ func verifyManifestSignature(ctx context.Context, fetch func(string) ([]byte, er
 	return nil
 }
 
+// guardUpdateRedirect blocks protocol downgrade (https -> http) during release asset downloads.
+func guardUpdateRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if len(via) > 0 && via[0].URL.Scheme == "https" && req.URL.Scheme != "https" {
+		return errors.New("refusing https to http redirect downgrade during update")
+	}
+	return nil
+}
+
 // downloadAndExtractBinary downloads the archive from assetURL, verifies the checksum, and extracts the sqlfox binary.
 func (s *Server) downloadAndExtractBinary(ctx context.Context, assetURL, destPath string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, assetURL, nil)
@@ -571,7 +621,10 @@ func (s *Server) downloadAndExtractBinary(ctx context.Context, assetURL, destPat
 	}
 	req.Header.Set("User-Agent", "SqlFox-Update-Engine")
 
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := &http.Client{
+		Timeout:       60 * time.Second,
+		CheckRedirect: guardUpdateRedirect,
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to download release asset: %w", err)
@@ -582,21 +635,40 @@ func (s *Server) downloadAndExtractBinary(ctx context.Context, assetURL, destPat
 		return fmt.Errorf("download returned HTTP status %s", resp.Status)
 	}
 
-	archiveBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxExtractedBinarySize))
+	// Stream the release archive to a temp file while hashing so we never buffer up to 256MB in RAM.
+	tmpArchive, err := os.CreateTemp("", "sqlfox-release-*")
 	if err != nil {
-		return fmt.Errorf("failed to read downloaded archive: %w", err)
+		return fmt.Errorf("failed to create temp archive file: %w", err)
+	}
+	tmpArchivePath := tmpArchive.Name()
+	defer func() {
+		_ = tmpArchive.Close()
+		_ = os.Remove(tmpArchivePath)
+	}()
+
+	hasher := sha256.New()
+	written, err := io.Copy(io.MultiWriter(tmpArchive, hasher), io.LimitReader(resp.Body, maxExtractedBinarySize+1))
+	if err != nil {
+		return fmt.Errorf("failed to download release archive: %w", err)
+	}
+	if written > maxExtractedBinarySize {
+		return fmt.Errorf("release archive exceeds maximum allowed size (%d bytes)", maxExtractedBinarySize)
 	}
 
 	// Release Manifest Verification (fail-closed)
-	if err := s.verifyAssetChecksum(ctx, assetURL, archiveBytes); err != nil {
+	if err := s.verifyAssetDigest(ctx, assetURL, hex.EncodeToString(hasher.Sum(nil))); err != nil {
 		return fmt.Errorf("supply chain verification failed: %w", err)
+	}
+
+	if _, err := tmpArchive.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("failed to rewind downloaded archive: %w", err)
 	}
 
 	lower := strings.ToLower(assetURL)
 	if strings.HasSuffix(lower, ".zip") {
-		return extractFromZipStream(bytes.NewReader(archiveBytes), destPath)
+		return extractFromZipStream(tmpArchive, destPath)
 	}
-	return extractFromTarGzStream(bytes.NewReader(archiveBytes), destPath)
+	return extractFromTarGzStream(tmpArchive, destPath)
 }
 
 // extractFromTarGzStream extracts the sqlfox or sqlfox.exe binary from a .tar.gz stream.
@@ -618,15 +690,19 @@ func extractFromTarGzStream(r io.Reader, destPath string) error {
 		}
 
 		baseName := filepath.Base(header.Name)
-		if baseName == "sqlfox" || baseName == "sqlfox.exe" {
-			outFile, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+		if header.Typeflag == tar.TypeReg && (baseName == "sqlfox" || baseName == "sqlfox.exe") {
+			outFile, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0755)
 			if err != nil {
 				return fmt.Errorf("cannot create destination binary: %w", err)
 			}
 			defer outFile.Close()
 
-			if _, err := io.Copy(outFile, io.LimitReader(tr, maxExtractedBinarySize)); err != nil {
+			written, err := io.Copy(outFile, io.LimitReader(tr, maxExtractedBinarySize+1))
+			if err != nil {
 				return fmt.Errorf("failed writing extracted binary: %w", err)
+			}
+			if written > maxExtractedBinarySize {
+				return fmt.Errorf("extracted binary exceeds maximum allowed size (%d bytes)", maxExtractedBinarySize)
 			}
 			return nil
 		}
@@ -645,8 +721,12 @@ func extractFromZipStream(r io.Reader, destPath string) error {
 		_ = os.Remove(tmpZip.Name())
 	}()
 
-	if _, err := io.Copy(tmpZip, io.LimitReader(r, maxExtractedBinarySize)); err != nil {
+	writtenZip, err := io.Copy(tmpZip, io.LimitReader(r, maxExtractedBinarySize+1))
+	if err != nil {
 		return fmt.Errorf("failed writing zip temp file: %w", err)
+	}
+	if writtenZip > maxExtractedBinarySize {
+		return fmt.Errorf("zip archive exceeds maximum allowed size (%d bytes)", maxExtractedBinarySize)
 	}
 	_ = tmpZip.Close()
 
@@ -657,6 +737,9 @@ func extractFromZipStream(r io.Reader, destPath string) error {
 	defer zr.Close()
 
 	for _, f := range zr.File {
+		if !f.Mode().IsRegular() {
+			continue
+		}
 		baseName := filepath.Base(f.Name)
 		if baseName == "sqlfox" || baseName == "sqlfox.exe" {
 			rc, err := f.Open()
@@ -665,14 +748,18 @@ func extractFromZipStream(r io.Reader, destPath string) error {
 			}
 			defer rc.Close()
 
-			outFile, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+			outFile, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0755)
 			if err != nil {
 				return fmt.Errorf("cannot create destination binary: %w", err)
 			}
 			defer outFile.Close()
 
-			if _, err := io.Copy(outFile, io.LimitReader(rc, maxExtractedBinarySize)); err != nil {
+			writtenBin, err := io.Copy(outFile, io.LimitReader(rc, maxExtractedBinarySize+1))
+			if err != nil {
 				return fmt.Errorf("failed writing extracted binary: %w", err)
+			}
+			if writtenBin > maxExtractedBinarySize {
+				return fmt.Errorf("extracted binary exceeds maximum allowed size (%d bytes)", maxExtractedBinarySize)
 			}
 			return nil
 		}
@@ -682,22 +769,20 @@ func extractFromZipStream(r io.Reader, destPath string) error {
 
 // handleGetChangelog handles GET /api/system/changelog
 func (s *Server) handleGetChangelog(w http.ResponseWriter, r *http.Request) {
-	// ponytail: read local CHANGELOG.md during dev/tests, fallback to embedded asset
-	var content []byte
-	var err error
-
-	for _, p := range []string{"CHANGELOG.md", "../../CHANGELOG.md"} {
-		if data, readErr := os.ReadFile(p); readErr == nil && len(data) > 0 {
-			content = data
-			err = nil
-			break
-		}
+	// Always read CHANGELOG.md from embedded assets rather than untrusted CWD files.
+	assets := s.assets
+	if assets == nil {
+		assets = web.Assets()
 	}
 
-	if (err != nil || len(content) == 0) && s.assets != nil {
-		if f, openErr := s.assets.Open("CHANGELOG.md"); openErr == nil {
+	var content []byte
+	var err error
+	if assets != nil {
+		if f, openErr := assets.Open("CHANGELOG.md"); openErr == nil {
 			defer f.Close()
 			content, err = io.ReadAll(f)
+		} else {
+			err = openErr
 		}
 	}
 

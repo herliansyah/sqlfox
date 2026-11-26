@@ -13,6 +13,11 @@ import (
 
 // RunTransfer executes cross-connection streaming data transfer between databases.
 func RunTransfer(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
+	return RunTransferContext(context.Background(), args, stdout, stderr, stdin)
+}
+
+// RunTransferContext executes cross-connection transfer honoring the caller's context/timeout.
+func RunTransferContext(ctx context.Context, args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 	fs := flag.NewFlagSet("transfer", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
@@ -25,6 +30,7 @@ func RunTransfer(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 		allTablesFlag       = fs.Bool("all-tables", false, "Transfer all tables found in source database")
 		createMissingFlag   = fs.Bool("create-missing", false, "Create target table schema if it does not exist")
 		truncateFlag        = fs.Bool("truncate", false, "Truncate target table before inserting data")
+		forceFlag           = fs.Bool("force", false, "Confirm destructive --truncate on Production targets")
 		batchSizeFlag       = fs.Int("batch-size", 100, "Number of rows per batch insert")
 		continueOnErrorFlag = fs.Bool("continue-on-error", false, "Continue with next table if an error occurs")
 		vaultDbFlag         = fs.String("vault-db", "", "Path to config.db vault file")
@@ -50,7 +56,9 @@ func RunTransfer(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 		return 1
 	}
 
-	ctx := context.Background()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	// 1. Resolve source and target
 	fromTarget, err := ResolveTarget(ctx, *fromFlag, *fromDriverFlag, *vaultDbFlag, *passFlag)
@@ -66,6 +74,11 @@ func RunTransfer(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 		return 1
 	}
 	defer toTarget.Cleanup()
+
+	if *truncateFlag && strings.EqualFold(toTarget.Environment, "Production") && !*forceFlag {
+		fmt.Fprintln(stderr, "❌ Safety Guard Block: --truncate against a Production target requires --force.")
+		return 2
+	}
 
 	// 2. Determine tables list
 	var tableList []string
@@ -252,6 +265,7 @@ func flushInsertBatch(ctx context.Context, sess queryExecutor, table string, col
 	}
 	sb.WriteString(") VALUES ")
 
+	var args []any
 	for rIdx, row := range batch {
 		if rIdx > 0 {
 			sb.WriteString(", ")
@@ -261,15 +275,16 @@ func flushInsertBatch(ctx context.Context, sess queryExecutor, table string, col
 			if cIdx > 0 {
 				sb.WriteString(", ")
 			}
+			var val any
 			if cIdx < len(row) {
-				sb.WriteString(driver.FormatSQLValueForDriver(row[cIdx], drv))
-			} else {
-				sb.WriteString("NULL")
+				val = row[cIdx]
 			}
+			args = append(args, val)
+			sb.WriteString(driver.Placeholder(drv, len(args)))
 		}
 		sb.WriteString(")")
 	}
 
-	_, err := sess.Exec(ctx, sb.String())
+	_, err := sess.Exec(ctx, sb.String(), args...)
 	return err
 }

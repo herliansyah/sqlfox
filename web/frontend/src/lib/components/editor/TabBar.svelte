@@ -257,7 +257,7 @@
   class="h-9 bg-[#0b0f19] border-b border-slate-800 flex items-center px-2 select-none justify-between relative overflow-hidden"
 >
   <!-- Visible Tabs Strip (fits strictly within available screen width) -->
-  <div id="tabs-container" bind:this={tabsContainerEl} class="flex items-center min-w-0 flex-1 overflow-hidden gap-1">
+  <div id="tabs-container" bind:this={tabsContainerEl} role="tablist" aria-label="Editor tabs" class="flex items-center min-w-0 flex-1 overflow-hidden gap-1">
     {#each visibleTabs as tab (tab.id)}
       {@const isActive = tab.id === appState.activeTabId}
       <div
@@ -265,15 +265,21 @@
         class="group relative flex items-center h-8 px-3 rounded-t border-t border-x text-xs cursor-pointer transition-all max-w-[200px] min-w-[100px] shrink-0 {
           isActive
             ? 'bg-[#090d16] border-t border-x border-slate-800 text-sky-400 font-semibold shadow-sm'
-            : 'bg-slate-900/60 border-t border-x border-transparent text-slate-400 hover:bg-slate-850 hover:text-slate-200'
+            : 'bg-slate-900/60 border-t border-x border-transparent text-slate-400 hover:bg-slate-800/80 hover:text-slate-200'
         }"
         onclick={() => (appState.activeTabId = tab.id)}
         oncontextmenu={(e) => handleTabContextMenu(e, tab.id)}
         onmouseup={(e) => handleMiddleClick(e, tab.id)}
         role="tab"
+        aria-selected={isActive}
         tabindex="0"
         title={tab.title + (tab.database ? ` (${tab.database})` : '')}
-        onkeydown={(e) => e.key === 'Enter' && (appState.activeTabId = tab.id)}
+        onkeydown={(e) => {
+          if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+            e.preventDefault();
+            appState.activeTabId = tab.id;
+          }
+        }}
       >
         {#if isActive}
           <div class="absolute top-0 left-0 right-0 h-[2px] bg-sky-400 rounded-t pointer-events-none"></div>
@@ -365,7 +371,7 @@
             const target = appState.tabs.find((t) => t.id === tabContextMenu!.tabId);
             closeTabMenu();
             if (!target) return;
-            const next = await appState.showNativePrompt('Enter a new name for this tab:', 'Rename Tab', target.title);
+            const next = await appState.showNativePrompt('Enter a new name for this tab:', target.title, 'Rename Tab');
             if (next !== null) appState.renameTab(target.id, next);
           }}
           class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
@@ -547,7 +553,7 @@
               {/if}
 
               {#if tab.database}
-                <span class="shrink-0 px-1 py-0.2 rounded text-[9px] font-mono bg-slate-800 text-amber-400/80 border border-slate-700/60" title="Target Database">
+                <span class="shrink-0 px-1 py-0.5 rounded text-[9px] font-mono bg-slate-800 text-amber-400/80 border border-slate-700/60" title="Target Database">
                   {tab.database}
                 </span>
               {/if}

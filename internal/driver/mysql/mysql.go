@@ -1,25 +1,26 @@
 package mysql
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
 	"errors"
 	"fmt"
+	gomysql "github.com/go-sql-driver/mysql"
+	"github.com/herliansyah/sqlfox/internal/driver"
 	"net"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
-
-	"github.com/herliansyah/sqlfox/internal/advisor"
-	"github.com/herliansyah/sqlfox/internal/driver"
-
-	gomysql "github.com/go-sql-driver/mysql"
+	"unicode/utf8"
 )
+
+var mysqlTLSSeq atomic.Uint64
 
 func init() {
 	driver.Register("mysql", &MySQLDriver{})
@@ -41,30 +42,47 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 	tlsParam := "false"
 	if cfg.UseSSL {
 		tlsConfig := &tls.Config{
+			MinVersion:         tls.VersionTLS12,
+			ServerName:         cfg.Host,
 			InsecureSkipVerify: false,
+		}
+		if strings.EqualFold(strings.TrimSpace(cfg.SSLMode), "require") {
+			tlsConfig.InsecureSkipVerify = true
 		}
 
 		if cfg.SSLCA != "" {
-			caCert, err := os.ReadFile(cfg.SSLCA)
-			if err != nil {
-				caCert = []byte(cfg.SSLCA) // Direct string content fallback
+			var caCert []byte
+			if strings.Contains(cfg.SSLCA, "-----BEGIN ") {
+				caCert = []byte(cfg.SSLCA)
+			} else {
+				var err error
+				caCert, err = os.ReadFile(cfg.SSLCA)
+				if err != nil {
+					caCert = []byte(cfg.SSLCA)
+				}
 			}
 			caCertPool := x509.NewCertPool()
-			caCertPool.AppendCertsFromPEM(caCert)
+			if !caCertPool.AppendCertsFromPEM(caCert) {
+				return nil, fmt.Errorf("failed to parse MySQL SSL CA certificate PEM")
+			}
 			tlsConfig.RootCAs = caCertPool
 		}
 
 		if cfg.SSLCert != "" && cfg.SSLKey != "" {
-			cert, err := tls.LoadX509KeyPair(cfg.SSLCert, cfg.SSLKey)
-			if err != nil {
+			var cert tls.Certificate
+			var err error
+			if strings.Contains(cfg.SSLCert, "-----BEGIN ") || strings.Contains(cfg.SSLKey, "-----BEGIN ") {
 				cert, err = tls.X509KeyPair([]byte(cfg.SSLCert), []byte(cfg.SSLKey))
+			} else {
+				cert, err = tls.LoadX509KeyPair(cfg.SSLCert, cfg.SSLKey)
 			}
-			if err == nil {
-				tlsConfig.Certificates = []tls.Certificate{cert}
+			if err != nil {
+				return nil, fmt.Errorf("failed to load MySQL SSL client certificate/key: %w", err)
 			}
+			tlsConfig.Certificates = []tls.Certificate{cert}
 		}
 
-		tlsName := fmt.Sprintf("custom-tls-%d", time.Now().UnixNano())
+		tlsName := fmt.Sprintf("custom-tls-%d", mysqlTLSSeq.Add(1))
 		if err := gomysql.RegisterTLSConfig(tlsName, tlsConfig); err != nil {
 			// Never silently downgrade to skip-verify when the user asked for TLS.
 			return nil, fmt.Errorf("failed to register TLS config: %w", err)
@@ -80,9 +98,12 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 	mc.Net = "tcp"
 	mc.Addr = addr
 	mc.DBName = cfg.DatabaseName
-	mc.Loc = time.Local
+	// Keep DATETIME wall-clock values in UTC rather than shifting them by the host's local timezone.
+	mc.Loc = time.UTC
 	mc.ParseTime = true
-	mc.MultiStatements = true
+	// Never enable MultiStatements on the shared pool: stacked SQL inside EXPLAIN, read-only queries,
+	// or single statements must fail at the wire protocol level. Multi-statement scripts are split explicitly.
+	mc.MultiStatements = false
 	mc.Timeout = 10 * time.Second
 	mc.ReadTimeout = 60 * time.Second
 	mc.WriteTimeout = 30 * time.Second
@@ -130,6 +151,7 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 		dsn:          dsn,
 		tlsKey:       tlsKey,
 		queryThreads: make(map[string]int64),
+		connStates:   driver.NewConnStateMap[mysqlConnState](64),
 		pfsEnabled:   pfsEnabled,
 	}, nil
 }
@@ -147,25 +169,15 @@ type MySQLSession struct {
 	tlsKey       string
 	mu           sync.Mutex
 	queryThreads map[string]int64
-	connStates   sync.Map // driver.Conn -> *mysqlConnState
+	connStates   *driver.ConnStateMap[mysqlConnState]
 	pfsEnabled   bool
 }
 
 func (s *MySQLSession) getConnState(conn *sql.Conn) *mysqlConnState {
-	var key any
-	_ = conn.Raw(func(dc any) error {
-		key = dc
-		return nil
-	})
-	if key == nil {
+	if s.connStates == nil {
 		return nil
 	}
-	if v, ok := s.connStates.Load(key); ok {
-		return v.(*mysqlConnState)
-	}
-	st := &mysqlConnState{}
-	actual, _ := s.connStates.LoadOrStore(key, st)
-	return actual.(*mysqlConnState)
+	return s.connStates.Get(conn)
 }
 
 func (s *MySQLSession) Ping(ctx context.Context) (time.Duration, error) {
@@ -209,6 +221,10 @@ func (s *MySQLSession) ServerInfo(ctx context.Context) (*driver.ServerInfo, erro
 }
 
 func (s *MySQLSession) QueryStream(ctx context.Context, querySQL string, limit int) (driver.RowStream, error) {
+	return s.QueryStreamArgs(ctx, querySQL, limit)
+}
+
+func (s *MySQLSession) QueryStreamArgs(ctx context.Context, querySQL string, limit int, args ...any) (driver.RowStream, error) {
 	// Apply implicit safe limit for unbounded SELECTs
 	querySQL = driver.ApplyLimitClause(querySQL, limit)
 
@@ -245,7 +261,7 @@ func (s *MySQLSession) QueryStream(ctx context.Context, querySQL string, limit i
 		}
 	}
 
-	rows, qErr := conn.QueryContext(ctx, querySQL)
+	rows, qErr := conn.QueryContext(ctx, querySQL, args...)
 	if qErr != nil {
 		if queryID != "" {
 			s.mu.Lock()
@@ -268,15 +284,7 @@ func (s *MySQLSession) QueryStream(ctx context.Context, querySQL string, limit i
 		return nil, cErr
 	}
 
-	cols := make([]driver.ColumnDefinition, len(colTypes))
-	for i, ct := range colTypes {
-		nullable, _ := ct.Nullable()
-		cols[i] = driver.ColumnDefinition{
-			Name:     ct.Name(),
-			Type:     ct.DatabaseTypeName(),
-			Nullable: nullable,
-		}
-	}
+	cols := driver.ColumnsFromTypes(colTypes)
 	cleanup := func() {
 		if queryID != "" {
 			s.mu.Lock()
@@ -296,7 +304,10 @@ func (s *MySQLSession) activeDB() string {
 }
 
 func (s *MySQLSession) applyActiveDatabase(ctx context.Context, conn *sql.Conn) error {
-	dbName := s.activeDB()
+	dbName := driver.DatabaseFromContext(ctx)
+	if dbName == "" {
+		dbName = s.activeDB()
+	}
 	if dbName == "" {
 		return nil
 	}
@@ -319,6 +330,20 @@ func (s *MySQLSession) applyActiveDatabase(ctx context.Context, conn *sql.Conn) 
 		st.mu.Unlock()
 	}
 	return nil
+}
+
+func (s *MySQLSession) invalidateConnDBState(conn *sql.Conn) {
+	if st := s.getConnState(conn); st != nil {
+		st.mu.Lock()
+		st.lastDB = ""
+		st.mu.Unlock()
+	}
+}
+
+func isRawDatabaseSwitchMySQL(q string) bool {
+	clean := strings.TrimSpace(driver.StripLeadingComments(q))
+	up := strings.ToUpper(clean)
+	return strings.HasPrefix(up, "USE ") || strings.HasPrefix(up, "USE\t") || strings.HasPrefix(up, "USE`")
 }
 
 func (s *MySQLSession) Exec(ctx context.Context, querySQL string, args ...any) (*driver.ExecResult, error) {
@@ -349,6 +374,9 @@ func (s *MySQLSession) Exec(ctx context.Context, querySQL string, args ...any) (
 	}
 
 	res, execErr := conn.ExecContext(ctx, querySQL, args...)
+	if isRawDatabaseSwitchMySQL(querySQL) {
+		s.invalidateConnDBState(conn)
+	}
 	if execErr != nil {
 		return nil, execErr
 	}
@@ -363,8 +391,25 @@ func (s *MySQLSession) Exec(ctx context.Context, querySQL string, args ...any) (
 }
 
 type mysqlTx struct {
-	conn *sql.Conn
-	tx   *sql.Tx
+	sess     *MySQLSession
+	conn     *sql.Conn
+	tx       *sql.Tx
+	threadID int64
+}
+
+func (t *mysqlTx) trackQuery(ctx context.Context) func() {
+	queryID := driver.QueryIDFromContext(ctx)
+	if queryID == "" || t.sess == nil || t.threadID <= 0 {
+		return func() {}
+	}
+	t.sess.mu.Lock()
+	t.sess.queryThreads[queryID] = t.threadID
+	t.sess.mu.Unlock()
+	return func() {
+		t.sess.mu.Lock()
+		delete(t.sess.queryThreads, queryID)
+		t.sess.mu.Unlock()
+	}
 }
 
 func (t *mysqlTx) closeConn() {
@@ -376,6 +421,8 @@ func (t *mysqlTx) closeConn() {
 
 func (t *mysqlTx) Exec(ctx context.Context, query string, args ...any) (*driver.ExecResult, error) {
 	start := time.Now()
+	untrack := t.trackQuery(ctx)
+	defer untrack()
 	res, err := t.tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -391,6 +438,8 @@ func (t *mysqlTx) Exec(ctx context.Context, query string, args ...any) (*driver.
 }
 
 func (t *mysqlTx) ExecRaw(ctx context.Context, query string, args ...any) (int64, error) {
+	untrack := t.trackQuery(ctx)
+	defer untrack()
 	res, err := t.tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, err
@@ -410,29 +459,24 @@ func (t *mysqlTx) Rollback() error {
 
 func (t *mysqlTx) QueryStream(ctx context.Context, querySQL string, limit int) (driver.RowStream, error) {
 	querySQL = driver.ApplyLimitClause(querySQL, limit)
+	untrack := t.trackQuery(ctx)
 
 	rows, err := t.tx.QueryContext(ctx, querySQL)
 	if err != nil {
+		untrack()
 		return nil, err
 	}
 
 	colTypes, err := rows.ColumnTypes()
 	if err != nil {
 		rows.Close()
+		untrack()
 		return nil, err
 	}
 
-	cols := make([]driver.ColumnDefinition, len(colTypes))
-	for i, ct := range colTypes {
-		nullable, _ := ct.Nullable()
-		cols[i] = driver.ColumnDefinition{
-			Name:     ct.Name(),
-			Type:     ct.DatabaseTypeName(),
-			Nullable: nullable,
-		}
-	}
+	cols := driver.ColumnsFromTypes(colTypes)
 
-	return driver.NewSQLRowStream(rows, cols), nil
+	return driver.NewSQLRowStream(rows, cols, untrack), nil
 }
 
 func (s *MySQLSession) BeginTx(ctx context.Context) (driver.TxSession, error) {
@@ -444,535 +488,27 @@ func (s *MySQLSession) BeginTx(ctx context.Context) (driver.TxSession, error) {
 		_ = conn.Close()
 		return nil, err
 	}
+	var threadID int64
+	st := s.getConnState(conn)
+	if st != nil {
+		st.mu.Lock()
+		threadID = st.threadID
+		st.mu.Unlock()
+	}
+	if threadID == 0 {
+		_ = conn.QueryRowContext(ctx, "SELECT CONNECTION_ID()").Scan(&threadID)
+		if st != nil && threadID > 0 {
+			st.mu.Lock()
+			st.threadID = threadID
+			st.mu.Unlock()
+		}
+	}
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
-	return &mysqlTx{conn: conn, tx: tx}, nil
-}
-
-func (s *MySQLSession) InspectSchema(ctx context.Context, dbName string) (*driver.SchemaMetadata, error) {
-	// 0. Discover databases on MySQL server
-	var databases []string
-	dbRows, err := s.db.QueryContext(ctx, `
-		SELECT SCHEMA_NAME 
-		FROM information_schema.SCHEMATA 
-		ORDER BY 
-			CASE WHEN SCHEMA_NAME IN ('information_schema', 'mysql', 'performance_schema', 'sys') THEN 1 ELSE 0 END,
-			SCHEMA_NAME ASC;
-	`)
-	if err == nil {
-		for dbRows.Next() {
-			var dName string
-			if err := dbRows.Scan(&dName); err == nil {
-				databases = append(databases, dName)
-			}
-		}
-		dbRows.Close()
-	} else {
-		// Fallback to SHOW DATABASES
-		if fallbackRows, fErr := s.db.QueryContext(ctx, "SHOW DATABASES"); fErr == nil {
-			for fallbackRows.Next() {
-				var dName string
-				if err := fallbackRows.Scan(&dName); err == nil {
-					databases = append(databases, dName)
-				}
-			}
-			fallbackRows.Close()
-		}
-	}
-
-	if dbName == "" {
-		dbName = s.activeDB()
-	}
-	if dbName == "" {
-		_ = s.db.QueryRowContext(ctx, "SELECT DATABASE()").Scan(&dbName)
-	}
-	// If still empty and databases were discovered, pick the first user database
-	if dbName == "" && len(databases) > 0 {
-		for _, d := range databases {
-			if d != "information_schema" && d != "mysql" && d != "performance_schema" && d != "sys" {
-				dbName = d
-				break
-			}
-		}
-		if dbName == "" {
-			dbName = databases[0]
-		}
-		_ = s.SelectDatabase(ctx, dbName)
-	}
-
-	// 1. Fetch tables & views
-	tablesQuery := `
-	SELECT TABLE_NAME, TABLE_TYPE, IFNULL(TABLE_ROWS, 0)
-	FROM information_schema.TABLES
-	WHERE TABLE_SCHEMA = ?
-	ORDER BY TABLE_NAME ASC;
-	`
-	rows, err := s.db.QueryContext(ctx, tablesQuery, dbName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to inspect tables: %w", err)
-	}
-	defer rows.Close()
-
-	var tables []driver.TableMetadata
-	// ponytail: slice index mapping avoids pointer invalidation when tables slice dynamically reallocates
-	tableIndexMap := make(map[string]int)
-
-	for rows.Next() {
-		var name, tableType string
-		var rowCount int64
-		if err := rows.Scan(&name, &tableType, &rowCount); err != nil {
-			return nil, err
-		}
-
-		tbl := driver.TableMetadata{
-			Name:        name,
-			Type:        tableType,
-			RowCount:    rowCount,
-			Columns:     []driver.ColumnMetadata{},
-			Indexes:     []driver.IndexMetadata{},
-			ForeignKeys: []driver.ForeignKeyMetadata{},
-		}
-		tables = append(tables, tbl)
-		tableIndexMap[name] = len(tables) - 1
-	}
-
-	// 2. Fetch Columns
-	colsQuery := `
-	SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, IFNULL(COLUMN_DEFAULT, ''), EXTRA
-	FROM information_schema.COLUMNS
-	WHERE TABLE_SCHEMA = ?
-	ORDER BY TABLE_NAME, ORDINAL_POSITION;
-	`
-	colRows, err := s.db.QueryContext(ctx, colsQuery, dbName)
-	if err == nil {
-		for colRows.Next() {
-			var tblName, colName, colType, isNullable, colKey, colDefault, extra string
-			if err := colRows.Scan(&tblName, &colName, &colType, &isNullable, &colKey, &colDefault, &extra); err == nil {
-				if idx, ok := tableIndexMap[tblName]; ok {
-					tables[idx].Columns = append(tables[idx].Columns, driver.ColumnMetadata{
-						Name:         colName,
-						Type:         colType,
-						IsNullable:   isNullable == "YES",
-						IsPrimaryKey: colKey == "PRI",
-						DefaultValue: colDefault,
-						Extra:        extra,
-					})
-				}
-			}
-		}
-		colRows.Close()
-	}
-
-	// 3. Fetch Indexes
-	idxQuery := `
-	SELECT TABLE_NAME, INDEX_NAME, COLUMN_NAME, NON_UNIQUE, INDEX_TYPE
-	FROM information_schema.STATISTICS
-	WHERE TABLE_SCHEMA = ?
-	ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX;
-	`
-	idxRows, err := s.db.QueryContext(ctx, idxQuery, dbName)
-	if err == nil {
-		type idxKey struct {
-			table string
-			index string
-		}
-		indexAgg := make(map[idxKey]*driver.IndexMetadata)
-		var indexOrder []idxKey
-
-		for idxRows.Next() {
-			var tblName, idxName, colName, idxType string
-			var nonUnique int
-			if err := idxRows.Scan(&tblName, &idxName, &colName, &nonUnique, &idxType); err == nil {
-				k := idxKey{table: tblName, index: idxName}
-				if existing, exists := indexAgg[k]; exists {
-					existing.Columns = append(existing.Columns, colName)
-				} else {
-					im := &driver.IndexMetadata{
-						Name:     idxName,
-						Columns:  []string{colName},
-						IsUnique: nonUnique == 0,
-						Type:     idxType,
-					}
-					indexAgg[k] = im
-					indexOrder = append(indexOrder, k)
-				}
-			}
-		}
-		idxRows.Close()
-
-		for _, k := range indexOrder {
-			if im, ok := indexAgg[k]; ok {
-				if idx, ok := tableIndexMap[k.table]; ok {
-					tables[idx].Indexes = append(tables[idx].Indexes, *im)
-				}
-			}
-		}
-	}
-
-	// 4. Fetch Triggers
-	var triggers []driver.TriggerMetadata
-	trigQuery := `
-	SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE, ACTION_TIMING, EVENT_MANIPULATION, ACTION_STATEMENT
-	FROM information_schema.TRIGGERS
-	WHERE TRIGGER_SCHEMA = ?
-	ORDER BY TRIGGER_NAME ASC;
-	`
-	trigRows, err := s.db.QueryContext(ctx, trigQuery, dbName)
-	if err == nil {
-		for trigRows.Next() {
-			var name, tbl, timing, event, stmt string
-			if err := trigRows.Scan(&name, &tbl, &timing, &event, &stmt); err == nil {
-				triggers = append(triggers, driver.TriggerMetadata{
-					Name:      name,
-					Table:     tbl,
-					Timing:    timing,
-					Event:     event,
-					Statement: stmt,
-				})
-			}
-		}
-		trigRows.Close()
-	}
-
-	// 5. Fetch Foreign Keys
-	// ponytail: introspect foreign key constraints via KEY_COLUMN_USAGE & REFERENTIAL_CONSTRAINTS
-	fkQuery := `
-	SELECT 
-		kcu.CONSTRAINT_NAME,
-		kcu.TABLE_NAME,
-		kcu.COLUMN_NAME,
-		kcu.REFERENCED_TABLE_NAME,
-		kcu.REFERENCED_COLUMN_NAME,
-		IFNULL(rc.UPDATE_RULE, ''),
-		IFNULL(rc.DELETE_RULE, '')
-	FROM information_schema.KEY_COLUMN_USAGE kcu
-	LEFT JOIN information_schema.REFERENTIAL_CONSTRAINTS rc
-		ON rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
-		AND rc.CONSTRAINT_SCHEMA = kcu.TABLE_SCHEMA
-	WHERE kcu.TABLE_SCHEMA = ?
-		AND kcu.REFERENCED_TABLE_NAME IS NOT NULL
-	ORDER BY kcu.TABLE_NAME, kcu.ORDINAL_POSITION;
-	`
-	fkRows, err := s.db.QueryContext(ctx, fkQuery, dbName)
-	if err != nil {
-		fkFallback := `
-		SELECT 
-			CONSTRAINT_NAME,
-			TABLE_NAME,
-			COLUMN_NAME,
-			REFERENCED_TABLE_NAME,
-			REFERENCED_COLUMN_NAME,
-			'',
-			''
-		FROM information_schema.KEY_COLUMN_USAGE
-		WHERE TABLE_SCHEMA = ?
-			AND REFERENCED_TABLE_NAME IS NOT NULL
-		ORDER BY TABLE_NAME, ORDINAL_POSITION;
-		`
-		fkRows, err = s.db.QueryContext(ctx, fkFallback, dbName)
-	}
-	if err == nil {
-		for fkRows.Next() {
-			var cName, tblName, colName, refTbl, refCol, onUpdate, onDelete string
-			if err := fkRows.Scan(&cName, &tblName, &colName, &refTbl, &refCol, &onUpdate, &onDelete); err == nil {
-				if idx, ok := tableIndexMap[tblName]; ok {
-					tables[idx].ForeignKeys = append(tables[idx].ForeignKeys, driver.ForeignKeyMetadata{
-						Name:             cName,
-						Column:           colName,
-						ReferencedTable:  refTbl,
-						ReferencedColumn: refCol,
-						OnUpdate:         onUpdate,
-						OnDelete:         onDelete,
-					})
-				}
-			}
-		}
-		fkRows.Close()
-	}
-
-	// 6. Fetch Stored Routines (Procedures and Functions)
-	var routines []driver.RoutineMetadata
-	routineQuery := `
-	SELECT ROUTINE_NAME, ROUTINE_TYPE, IFNULL(DTD_IDENTIFIER, ''), IFNULL(ROUTINE_DEFINITION, '')
-	FROM information_schema.ROUTINES
-	WHERE ROUTINE_SCHEMA = ?
-	ORDER BY ROUTINE_NAME ASC;
-	`
-	rRows, err := s.db.QueryContext(ctx, routineQuery, dbName)
-	if err == nil {
-		for rRows.Next() {
-			var rName, rType, dtd, rDef string
-			if err := rRows.Scan(&rName, &rType, &dtd, &rDef); err == nil {
-				routines = append(routines, driver.RoutineMetadata{
-					Name:       rName,
-					Type:       rType,
-					DataType:   dtd,
-					Definition: rDef,
-				})
-			}
-		}
-		rRows.Close()
-	}
-
-	// 7. Fetch Parameters for routines (to help smart caller)
-	if len(routines) > 0 {
-		paramQuery := `
-		SELECT SPECIFIC_NAME, ROUTINE_TYPE, IFNULL(PARAMETER_NAME, ''), IFNULL(PARAMETER_MODE, 'IN'), IFNULL(DTD_IDENTIFIER, '')
-		FROM information_schema.PARAMETERS
-		WHERE SPECIFIC_SCHEMA = ?
-		ORDER BY SPECIFIC_NAME, ORDINAL_POSITION;
-		`
-		pRows, pErr := s.db.QueryContext(ctx, paramQuery, dbName)
-		if pErr == nil {
-			rMap := make(map[string]int)
-			for i, r := range routines {
-				rMap[r.Name] = i
-			}
-			for pRows.Next() {
-				var sName, rType, pName, pMode, dtd string
-				if err := pRows.Scan(&sName, &rType, &pName, &pMode, &dtd); err == nil {
-					if idx, ok := rMap[sName]; ok {
-						if pName != "" {
-							routines[idx].Parameters = append(routines[idx].Parameters, driver.RoutineParameter{
-								Name: pName,
-								Mode: pMode,
-								Type: dtd,
-							})
-						}
-					}
-				}
-			}
-			pRows.Close()
-		}
-	}
-
-	// 8. Fetch Scheduled Events
-	var events []driver.EventMetadata
-	eventQuery := `
-	SELECT EVENT_NAME, STATUS, IFNULL(INTERVAL_VALUE, ''), IFNULL(INTERVAL_FIELD, ''), IFNULL(STARTS, ''), IFNULL(ENDS, ''), IFNULL(EVENT_DEFINITION, '')
-	FROM information_schema.EVENTS
-	WHERE EVENT_SCHEMA = ?
-	ORDER BY EVENT_NAME ASC;
-	`
-	eRows, eErr := s.db.QueryContext(ctx, eventQuery, dbName)
-	if eErr == nil {
-		for eRows.Next() {
-			var eName, eStatus, intVal, intField, starts, ends, eDef string
-			if err := eRows.Scan(&eName, &eStatus, &intVal, &intField, &starts, &ends, &eDef); err == nil {
-				intervalStr := ""
-				if intVal != "" && intField != "" {
-					intervalStr = fmt.Sprintf("EVERY %s %s", intVal, intField)
-				}
-				events = append(events, driver.EventMetadata{
-					Name:       eName,
-					Status:     eStatus,
-					Interval:   intervalStr,
-					StartsAt:   starts,
-					EndsAt:     ends,
-					Definition: eDef,
-				})
-			}
-		}
-		eRows.Close()
-	}
-
-	return &driver.SchemaMetadata{
-		DatabaseName: dbName,
-		Databases:    databases,
-		Tables:       tables,
-		Triggers:     triggers,
-		Routines:     routines,
-		Events:       events,
-	}, nil
-}
-
-// InspectFastCatalog retrieves lightweight tables and columns across all non-system databases in a single fast sweep.
-// ponytail: eliminates O(N) information_schema.KEY_COLUMN_USAGE foreign key joins that flood processlist on session switches
-func (s *MySQLSession) InspectFastCatalog(ctx context.Context) (map[string][]driver.TableMetadata, error) {
-	// Query all user tables
-	tblQuery := `
-	SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE, IFNULL(TABLE_ROWS, 0)
-	FROM information_schema.TABLES
-	WHERE TABLE_SCHEMA NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys')
-	ORDER BY TABLE_SCHEMA, TABLE_NAME;
-	`
-	rows, err := s.db.QueryContext(ctx, tblQuery)
-	if err != nil {
-		return nil, fmt.Errorf("failed to inspect catalog tables: %w", err)
-	}
-	defer rows.Close()
-
-	result := make(map[string][]driver.TableMetadata)
-	type tblRef struct {
-		dbName string
-		idx    int
-	}
-	tableMap := make(map[string]tblRef) // key: db.table
-
-	for rows.Next() {
-		var schemaName, tblName, tblType string
-		var rowCount int64
-		if err := rows.Scan(&schemaName, &tblName, &tblType, &rowCount); err == nil {
-			t := driver.TableMetadata{
-				Name:        tblName,
-				Type:        tblType,
-				RowCount:    rowCount,
-				Columns:     []driver.ColumnMetadata{},
-				Indexes:     []driver.IndexMetadata{},
-				ForeignKeys: []driver.ForeignKeyMetadata{},
-			}
-			lowerDB := strings.ToLower(schemaName)
-			result[lowerDB] = append(result[lowerDB], t)
-			tableMap[lowerDB+"."+strings.ToLower(tblName)] = tblRef{
-				dbName: lowerDB,
-				idx:    len(result[lowerDB]) - 1,
-			}
-		}
-	}
-
-	// Query columns across user tables in single pass
-	colQuery := `
-	SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, IFNULL(COLUMN_DEFAULT, ''), EXTRA
-	FROM information_schema.COLUMNS
-	WHERE TABLE_SCHEMA NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys')
-	ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION;
-	`
-	cRows, cErr := s.db.QueryContext(ctx, colQuery)
-	if cErr == nil {
-		defer cRows.Close()
-		for cRows.Next() {
-			var schemaName, tblName, colName, colType, isNullable, colKey, colDefault, extra string
-			if err := cRows.Scan(&schemaName, &tblName, &colName, &colType, &isNullable, &colKey, &colDefault, &extra); err == nil {
-				key := strings.ToLower(schemaName) + "." + strings.ToLower(tblName)
-				if ref, ok := tableMap[key]; ok {
-					result[ref.dbName][ref.idx].Columns = append(result[ref.dbName][ref.idx].Columns, driver.ColumnMetadata{
-						Name:         colName,
-						Type:         colType,
-						IsNullable:   isNullable == "YES",
-						IsPrimaryKey: colKey == "PRI",
-						DefaultValue: colDefault,
-						Extra:        extra,
-					})
-				}
-			}
-		}
-	}
-
-	return result, nil
-}
-
-func (s *MySQLSession) SelectDatabase(ctx context.Context, dbName string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if dbName == "" {
-		return nil
-	}
-
-	escaped := strings.ReplaceAll(dbName, "`", "``")
-	if _, err := s.db.ExecContext(ctx, fmt.Sprintf("USE `%s`", escaped)); err != nil {
-		return fmt.Errorf("failed to select database %s: %w", dbName, err)
-	}
-	s.cfg.DatabaseName = dbName
-	return nil
-}
-
-func (s *MySQLSession) GetTableDDL(ctx context.Context, tableName string) (string, error) {
-	var tbl, ddl string
-	escapedTbl := strings.ReplaceAll(tableName, "`", "``")
-	var query string
-	if dbName := s.activeDB(); dbName != "" {
-		escapedDB := strings.ReplaceAll(dbName, "`", "``")
-		query = fmt.Sprintf("SHOW CREATE TABLE `%s`.`%s`", escapedDB, escapedTbl)
-	} else {
-		query = fmt.Sprintf("SHOW CREATE TABLE `%s`", escapedTbl)
-	}
-	rows, err := s.db.QueryContext(ctx, query)
-	if err != nil {
-		return "", err
-	}
-	defer rows.Close()
-	cols, err := rows.Columns()
-	if err != nil {
-		return "", err
-	}
-	if !rows.Next() {
-		if err := rows.Err(); err != nil {
-			return "", err
-		}
-		return "", sql.ErrNoRows
-	}
-	// Views return 4 columns (View, Create View, character_set_client, collation_connection).
-	dest := []any{&tbl, &ddl}
-	for i := 2; i < len(cols); i++ {
-		dest = append(dest, new(sql.RawBytes))
-	}
-	if err := rows.Scan(dest...); err != nil {
-		return "", err
-	}
-	return ddl, nil
-}
-
-func (s *MySQLSession) GetTableEstimate(ctx context.Context, tableName string) (*driver.TableEstimate, error) {
-	var rowCount, sizeBytes sql.NullInt64
-	query := `
-	SELECT TABLE_ROWS, (DATA_LENGTH + INDEX_LENGTH)
-	FROM information_schema.TABLES
-	WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?;
-	`
-	err := s.db.QueryRowContext(ctx, query, s.activeDB(), tableName).Scan(&rowCount, &sizeBytes)
-	if err != nil {
-		return &driver.TableEstimate{RowCount: 0, SizeBytes: 0}, nil
-	}
-	return &driver.TableEstimate{
-		RowCount:  rowCount.Int64,
-		SizeBytes: sizeBytes.Int64,
-	}, nil
-}
-
-func (s *MySQLSession) Explain(ctx context.Context, querySQL string) (*driver.ExplainPlan, error) {
-	cleanedSQL := strings.TrimSpace(querySQL)
-	cleanedSQL = strings.TrimRight(cleanedSQL, "; \t\r\n")
-	if strings.HasPrefix(strings.ToUpper(cleanedSQL), "EXPLAIN ") {
-		cleanedSQL = strings.TrimSpace(cleanedSQL[8:])
-	}
-	if cleanedSQL == "" {
-		return &driver.ExplainPlan{Rows: []driver.ExplainRow{}}, nil
-	}
-
-	conn, err := s.db.Conn(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer conn.Close()
-
-	if err := s.applyActiveDatabase(ctx, conn); err != nil {
-		return nil, err
-	}
-
-	// Classic tabular EXPLAIN (always supported)
-	rows, err := conn.QueryContext(ctx, "EXPLAIN "+cleanedSQL)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	planRows, err := driver.ScanExplainRows(rows)
-	if err != nil {
-		return nil, err
-	}
-
-	// Best-effort JSON plan for visual tree (MySQL 5.6+, ignored on older/MariaDB)
-	// ponytail: single-row scan; FORMAT=JSON not supported everywhere, so we silently drop errors.
-	var rawJSON string
-	_ = conn.QueryRowContext(ctx, "EXPLAIN FORMAT=JSON "+cleanedSQL).Scan(&rawJSON)
-
-	return &driver.ExplainPlan{
-		RawJSON: rawJSON,
-		Rows:    planRows,
-	}, nil
+	return &mysqlTx{sess: s, conn: conn, tx: tx, threadID: threadID}, nil
 }
 
 func (s *MySQLSession) CancelQuery(ctx context.Context, queryID string) error {
@@ -1104,383 +640,6 @@ func (s *MySQLSession) CancelQuery(ctx context.Context, queryID string) error {
 	return nil
 }
 
-func (s *MySQLSession) GetProcesslist(ctx context.Context) (*driver.ProcesslistResult, error) {
-	// 1. Get current connection thread ID
-	var currentThreadID int64
-	_ = s.db.QueryRowContext(ctx, "SELECT CONNECTION_ID()").Scan(&currentThreadID)
-
-	// 2. Fetch processes: prefer performance_schema.threads (lock-free) to prevent LOCK_thread_count mutex contention
-	var threads []driver.ProcessItem
-	if s.pfsEnabled {
-		pfsRows, pfsErr := s.db.QueryContext(ctx, `
-			SELECT PROCESSLIST_ID, IFNULL(PROCESSLIST_USER, ''), IFNULL(PROCESSLIST_HOST, ''),
-			       IFNULL(PROCESSLIST_DB, ''), IFNULL(PROCESSLIST_COMMAND, ''), IFNULL(PROCESSLIST_TIME, 0),
-			       IFNULL(PROCESSLIST_STATE, ''), IFNULL(PROCESSLIST_INFO, '')
-			FROM performance_schema.threads
-			WHERE PROCESSLIST_ID IS NOT NULL
-			ORDER BY PROCESSLIST_TIME DESC
-		`)
-		if pfsErr == nil {
-			defer pfsRows.Close()
-			for pfsRows.Next() {
-				var p driver.ProcessItem
-				if err := pfsRows.Scan(&p.ID, &p.User, &p.Host, &p.DB, &p.Command, &p.Time, &p.State, &p.Info); err == nil {
-					threads = append(threads, p)
-				}
-			}
-		}
-	}
-
-	// Fallback to information_schema.PROCESSLIST if performance_schema is disabled or empty
-	if len(threads) == 0 {
-		rows, err := s.db.QueryContext(ctx, `
-			SELECT IFNULL(ID, 0), IFNULL(USER, ''), IFNULL(HOST, ''), IFNULL(DB, ''), IFNULL(COMMAND, ''), IFNULL(TIME, 0), IFNULL(STATE, ''), IFNULL(INFO, '')
-			FROM information_schema.PROCESSLIST
-			ORDER BY TIME DESC
-		`)
-		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var p driver.ProcessItem
-				if err := rows.Scan(&p.ID, &p.User, &p.Host, &p.DB, &p.Command, &p.Time, &p.State, &p.Info); err == nil {
-					threads = append(threads, p)
-				}
-			}
-		}
-	}
-
-	// Fallback to SHOW FULL PROCESSLIST if still empty or restricted
-	if len(threads) == 0 {
-		fallbackRows, fErr := s.db.QueryContext(ctx, "SHOW FULL PROCESSLIST")
-		if fErr != nil {
-			return nil, fmt.Errorf("failed to fetch processlist: %w", fErr)
-		}
-		defer fallbackRows.Close()
-		for fallbackRows.Next() {
-			var id sql.NullInt64
-			var user, host, command sql.NullString
-			var db, state, info sql.NullString
-			var timeVal sql.NullInt64
-			if err := fallbackRows.Scan(&id, &user, &host, &db, &command, &timeVal, &state, &info); err == nil {
-				threads = append(threads, driver.ProcessItem{
-					ID:      id.Int64,
-					User:    user.String,
-					Host:    host.String,
-					DB:      db.String,
-					Command: command.String,
-					Time:    timeVal.Int64,
-					State:   state.String,
-					Info:    info.String,
-				})
-			}
-		}
-	}
-
-	if threads == nil {
-		threads = []driver.ProcessItem{}
-	}
-
-	// 3. Inspect Lock Waits (Tier 1: sys.innodb_lock_waits, fallback: information_schema.innodb_lock_waits for MariaDB / MySQL 5.7)
-	var locks []driver.LockWait
-	lockRows, lErr := s.db.QueryContext(ctx, `
-		SELECT
-			IFNULL(waiting_pid, 0),
-			IFNULL(waiting_query, ''),
-			'',
-			IFNULL(wait_age_secs, 0),
-			IFNULL(blocking_pid, 0),
-			IFNULL(blocking_query, ''),
-			'',
-			IFNULL(locked_table, ''),
-			IFNULL(waiting_lock_mode, '')
-		FROM sys.innodb_lock_waits
-	`)
-	if lErr != nil {
-		// ponytail: MariaDB / MySQL 5.7 without sys schema fallback to information_schema
-		lockRows, lErr = s.db.QueryContext(ctx, `
-			SELECT
-				IFNULL(r.trx_mysql_thread_id, 0),
-				IFNULL(r.trx_query, ''),
-				'',
-				IFNULL(TIMESTAMPDIFF(SECOND, r.trx_wait_started, NOW()), 0),
-				IFNULL(b.trx_mysql_thread_id, 0),
-				IFNULL(b.trx_query, ''),
-				'',
-				IFNULL(rl.lock_table, ''),
-				IFNULL(rl.lock_mode, '')
-			FROM information_schema.innodb_lock_waits w
-			JOIN information_schema.innodb_trx r ON r.trx_id = w.requesting_trx_id
-			JOIN information_schema.innodb_trx b ON b.trx_id = w.blocking_trx_id
-			LEFT JOIN information_schema.innodb_locks rl ON rl.lock_id = w.requested_lock_id
-		`)
-	}
-	if lErr == nil {
-		defer lockRows.Close()
-		waitingPIDs := make(map[int64]bool)
-		for lockRows.Next() {
-			var lw driver.LockWait
-			if err := lockRows.Scan(
-				&lw.WaitingThreadID,
-				&lw.WaitingQuery,
-				&lw.WaitingUser,
-				&lw.WaitingSeconds,
-				&lw.BlockingThreadID,
-				&lw.BlockingQuery,
-				&lw.BlockingUser,
-				&lw.LockedResource,
-				&lw.LockMode,
-			); err == nil {
-				waitingPIDs[lw.WaitingThreadID] = true
-				locks = append(locks, lw)
-			}
-		}
-
-		// Identify root blockers: a blocking PID that is NOT currently waiting on any lock
-		for i := range locks {
-			if !waitingPIDs[locks[i].BlockingThreadID] {
-				locks[i].IsRootBlocker = true
-			}
-		}
-	} else {
-		// Tier 2 Fallback: heuristic scan of threads with lock states
-		for _, t := range threads {
-			st := strings.ToLower(t.State)
-			if strings.Contains(st, "lock") || strings.Contains(st, "waiting for table") {
-				locks = append(locks, driver.LockWait{
-					WaitingThreadID: t.ID,
-					WaitingQuery:    t.Info,
-					WaitingUser:     t.User,
-					WaitingSeconds:  t.Time,
-					LockedResource:  t.DB,
-					LockMode:        t.State,
-					IsRootBlocker:   false,
-				})
-			}
-		}
-	}
-
-	if locks == nil {
-		locks = []driver.LockWait{}
-	}
-
-	var questions int64
-	var qName string
-	_ = s.db.QueryRowContext(ctx, "SHOW GLOBAL STATUS LIKE 'Questions'").Scan(&qName, &questions)
-
-	return &driver.ProcesslistResult{
-		CurrentThreadID: currentThreadID,
-		Threads:         threads,
-		Locks:           locks,
-		Questions:       questions,
-	}, nil
-}
-
-func (s *MySQLSession) KillProcess(ctx context.Context, threadID int64, killConnection bool) error {
-	if threadID <= 0 {
-		return errors.New("invalid thread id")
-	}
-
-	var cmd string
-	if killConnection {
-		cmd = fmt.Sprintf("KILL %d", threadID)
-	} else {
-		cmd = fmt.Sprintf("KILL QUERY %d", threadID)
-	}
-
-	// ponytail: Dial independent single-shot control connection to bypass saturated s.db pool
-	if s.dsn != "" {
-		controlDB, dErr := sql.Open("mysql", s.dsn)
-		if dErr == nil {
-			defer controlDB.Close()
-			if _, kErr := controlDB.ExecContext(ctx, cmd); kErr == nil {
-				return nil
-			}
-		}
-	}
-
-	if s.db != nil {
-		_, err := s.db.ExecContext(ctx, cmd)
-		return err
-	}
-	return errors.New("database connection not available")
-}
-
-// GetDatabaseDiagnostics returns physical storage and metadata for all databases on the MySQL server.
-func (s *MySQLSession) GetDatabaseDiagnostics(ctx context.Context) ([]driver.DatabaseDiagnostics, error) {
-	query := `
-		SELECT 
-			s.SCHEMA_NAME, 
-			IFNULL(s.DEFAULT_CHARACTER_SET_NAME, ''), 
-			IFNULL(s.DEFAULT_COLLATION_NAME, ''), 
-			COUNT(t.TABLE_NAME), 
-			IFNULL(SUM(t.DATA_LENGTH), 0), 
-			IFNULL(SUM(t.INDEX_LENGTH), 0), 
-			IFNULL(SUM(t.DATA_FREE), 0)
-		FROM information_schema.SCHEMATA s
-		LEFT JOIN information_schema.TABLES t ON s.SCHEMA_NAME = t.TABLE_SCHEMA
-		GROUP BY s.SCHEMA_NAME, s.DEFAULT_CHARACTER_SET_NAME, s.DEFAULT_COLLATION_NAME
-		ORDER BY 
-			CASE WHEN s.SCHEMA_NAME IN ('information_schema', 'mysql', 'performance_schema', 'sys') THEN 1 ELSE 0 END,
-			(IFNULL(SUM(t.DATA_LENGTH), 0) + IFNULL(SUM(t.INDEX_LENGTH), 0)) DESC,
-			s.SCHEMA_NAME ASC
-	`
-	rows, err := s.db.QueryContext(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query database diagnostics: %w", err)
-	}
-	defer rows.Close()
-
-	var result []driver.DatabaseDiagnostics
-	for rows.Next() {
-		var dd driver.DatabaseDiagnostics
-		if err := rows.Scan(
-			&dd.Name,
-			&dd.Charset,
-			&dd.Collation,
-			&dd.TableCount,
-			&dd.DataSize,
-			&dd.IndexSize,
-			&dd.OverheadSize,
-		); err == nil {
-			dd.TotalSize = dd.DataSize + dd.IndexSize
-			lowerName := strings.ToLower(dd.Name)
-			dd.IsSystem = lowerName == "information_schema" || lowerName == "mysql" || lowerName == "performance_schema" || lowerName == "sys"
-			result = append(result, dd)
-		}
-	}
-	if result == nil {
-		result = []driver.DatabaseDiagnostics{}
-	}
-	return result, nil
-}
-
-func (s *MySQLSession) GetTableDiagnostics(ctx context.Context, database, table string) ([]driver.TableDiagnostics, error) {
-	if database == "" {
-		database = s.activeDB()
-	}
-	query := `
-		SELECT 
-			t.TABLE_NAME, 
-			IFNULL(t.ENGINE, ''), 
-			IFNULL(t.TABLE_ROWS, 0), 
-			IFNULL(t.DATA_LENGTH, 0), 
-			IFNULL(t.INDEX_LENGTH, 0), 
-			IFNULL(t.DATA_FREE, 0), 
-			IFNULL(t.ROW_FORMAT, ''), 
-			IFNULL(t.TABLE_COLLATION, ''), 
-			IFNULL(DATE_FORMAT(t.CREATE_TIME, '%Y-%m-%d %H:%i:%s'), ''), 
-			IFNULL(DATE_FORMAT(t.UPDATE_TIME, '%Y-%m-%d %H:%i:%s'), ''),
-			CASE WHEN pk.TABLE_NAME IS NOT NULL THEN 1 ELSE 0 END
-		FROM information_schema.TABLES t
-		LEFT JOIN (
-			SELECT DISTINCT TABLE_NAME
-			FROM information_schema.STATISTICS
-			WHERE TABLE_SCHEMA = ? AND INDEX_NAME = 'PRIMARY'
-		) pk ON t.TABLE_NAME = pk.TABLE_NAME
-		WHERE t.TABLE_SCHEMA = ?
-	`
-	args := []any{database, database}
-	if table != "" {
-		query += " AND t.TABLE_NAME = ?"
-		args = append(args, table)
-	}
-	query += " ORDER BY (t.DATA_LENGTH + t.INDEX_LENGTH) DESC"
-
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query table diagnostics: %w", err)
-	}
-	defer rows.Close()
-
-	var result []driver.TableDiagnostics
-	for rows.Next() {
-		var td driver.TableDiagnostics
-		var hasPk int
-		if err := rows.Scan(
-			&td.Name,
-			&td.Engine,
-			&td.Rows,
-			&td.DataSize,
-			&td.IndexSize,
-			&td.OverheadSize,
-			&td.RowFormat,
-			&td.Collation,
-			&td.CreatedAt,
-			&td.UpdatedAt,
-			&hasPk,
-		); err == nil {
-			td.HasPrimaryKey = hasPk == 1
-			result = append(result, td)
-		}
-	}
-	if result == nil {
-		result = []driver.TableDiagnostics{}
-	}
-	return result, nil
-}
-
-func (s *MySQLSession) ExecuteMaintenance(ctx context.Context, database string, tables []string, action string) ([]driver.MaintenanceResult, error) {
-	if database == "" {
-		database = s.activeDB()
-	}
-	upperAction := strings.ToUpper(strings.TrimSpace(action))
-	if upperAction != "OPTIMIZE" && upperAction != "ANALYZE" && upperAction != "CHECK" {
-		return nil, fmt.Errorf("unsupported maintenance action: %s", action)
-	}
-
-	var results []driver.MaintenanceResult
-	for _, tbl := range tables {
-		sqlCmd := fmt.Sprintf("%s TABLE %s.%s", upperAction, driver.QuoteIdentifier(database, "mysql"), driver.QuoteIdentifier(tbl, "mysql"))
-		rows, err := s.db.QueryContext(ctx, sqlCmd)
-		if err != nil {
-			results = append(results, driver.MaintenanceResult{
-				Table:   tbl,
-				Op:      upperAction,
-				Status:  "Error",
-				Message: err.Error(),
-			})
-			continue
-		}
-		for rows.Next() {
-			var tblName, op, msgType, msgText string
-			if err := rows.Scan(&tblName, &op, &msgType, &msgText); err == nil {
-				results = append(results, driver.MaintenanceResult{
-					Table:   tbl,
-					Op:      op,
-					Status:  msgType,
-					Message: msgText,
-				})
-			}
-		}
-		rows.Close()
-	}
-	if results == nil {
-		results = []driver.MaintenanceResult{}
-	}
-	return results, nil
-}
-
-func (s *MySQLSession) GetRedundantIndexes(ctx context.Context, database, table string) ([]driver.RedundantIndex, error) {
-	if database == "" {
-		database = s.activeDB()
-	}
-	schema, err := s.InspectSchema(ctx, database)
-	if err != nil {
-		return nil, err
-	}
-	var tables []driver.TableMetadata
-	if table != "" {
-		for _, tbl := range schema.Tables {
-			if strings.EqualFold(tbl.Name, table) {
-				tables = append(tables, tbl)
-			}
-		}
-	} else {
-		tables = schema.Tables
-	}
-	return driver.DetectRedundantIndexes("mysql", database, tables), nil
-}
-
 func (s *MySQLSession) PeekForeignKeyRow(ctx context.Context, database, table, column string, value any) (*driver.PeekResult, error) {
 	if database == "" {
 		database = s.activeDB()
@@ -1521,9 +680,13 @@ func (s *MySQLSession) PeekForeignKeyRow(ctx context.Context, database, table, c
 	for i, col := range cols {
 		val := rawVals[i]
 		if b, ok := val.([]byte); ok {
-			rowMap[col] = string(b)
+			if bytes.IndexByte(b, 0) >= 0 || !utf8.Valid(b) {
+				rowMap[col] = driver.FormatValueForJSON(b)
+			} else {
+				rowMap[col] = string(b)
+			}
 		} else {
-			rowMap[col] = val
+			rowMap[col] = driver.FormatValueForJSON(val)
 		}
 	}
 
@@ -1534,829 +697,6 @@ func (s *MySQLSession) PeekForeignKeyRow(ctx context.Context, database, table, c
 		Row:     rowMap,
 		Columns: cols,
 	}, nil
-}
-
-func (s *MySQLSession) GetUserList(ctx context.Context) ([]driver.DatabaseUser, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT user, host FROM mysql.user ORDER BY user ASC, host ASC")
-	if err != nil {
-		return nil, fmt.Errorf("failed to list database users: %w", err)
-	}
-	defer rows.Close()
-
-	var users []driver.DatabaseUser
-	for rows.Next() {
-		var u driver.DatabaseUser
-		if err := rows.Scan(&u.User, &u.Host); err == nil {
-			users = append(users, u)
-		}
-	}
-	if users == nil {
-		users = []driver.DatabaseUser{}
-	}
-	return users, nil
-}
-
-func (s *MySQLSession) GetUserGrants(ctx context.Context, user, host string) ([]string, error) {
-	sqlCmd := fmt.Sprintf("SHOW GRANTS FOR %s@%s", driver.EscapeSQLString(user, "mysql"), driver.EscapeSQLString(host, "mysql"))
-	rows, err := s.db.QueryContext(ctx, sqlCmd)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch user grants: %w", err)
-	}
-	defer rows.Close()
-
-	var grants []string
-	for rows.Next() {
-		var g string
-		if err := rows.Scan(&g); err == nil {
-			grants = append(grants, g)
-		}
-	}
-	if grants == nil {
-		grants = []string{}
-	}
-	return grants, nil
-}
-
-func (s *MySQLSession) SaveUser(ctx context.Context, user, host, password string, isNew bool) error {
-	uEsc := driver.EscapeSQLString(user, "mysql")
-	hEsc := driver.EscapeSQLString(host, "mysql")
-	pEsc := driver.EscapeSQLString(password, "mysql")
-
-	if isNew {
-		cmd := fmt.Sprintf("CREATE USER %s@%s IDENTIFIED BY %s", uEsc, hEsc, pEsc)
-		if _, err := s.db.ExecContext(ctx, cmd); err != nil {
-			return fmt.Errorf("failed to create user: %w", err)
-		}
-	} else if password != "" {
-		cmd := fmt.Sprintf("ALTER USER %s@%s IDENTIFIED BY %s", uEsc, hEsc, pEsc)
-		if _, err := s.db.ExecContext(ctx, cmd); err != nil {
-			return fmt.Errorf("failed to update user password: %w", err)
-		}
-	}
-	_, _ = s.db.ExecContext(ctx, "FLUSH PRIVILEGES")
-	return nil
-}
-
-func (s *MySQLSession) DropUser(ctx context.Context, user, host string) error {
-	uEsc := driver.EscapeSQLString(user, "mysql")
-	hEsc := driver.EscapeSQLString(host, "mysql")
-	cmd := fmt.Sprintf("DROP USER %s@%s", uEsc, hEsc)
-	if _, err := s.db.ExecContext(ctx, cmd); err != nil {
-		return fmt.Errorf("failed to drop user: %w", err)
-	}
-	_, _ = s.db.ExecContext(ctx, "FLUSH PRIVILEGES")
-	return nil
-}
-
-// rePrivilegeName allows only bare privilege keywords (e.g. "SELECT", "CREATE TEMPORARY TABLES").
-var rePrivilegeName = regexp.MustCompile(`^[A-Za-z]+( [A-Za-z]+)*$`)
-
-func (s *MySQLSession) ApplyUserGrants(ctx context.Context, req driver.UserGrantRequest) error {
-	uEsc := driver.EscapeSQLString(req.User, "mysql")
-	hEsc := driver.EscapeSQLString(req.Host, "mysql")
-	for _, p := range req.Privileges {
-		if !rePrivilegeName.MatchString(p) {
-			return fmt.Errorf("invalid privilege name: %q", p)
-		}
-	}
-	privs := strings.Join(req.Privileges, ", ")
-	if privs == "" {
-		privs = "USAGE"
-	}
-
-	target := "*.*"
-	if req.Scope == "DATABASE" && req.Database != "" {
-		target = driver.QuoteIdentifier(req.Database, "mysql") + ".*"
-	}
-
-	cmd := fmt.Sprintf("GRANT %s ON %s TO %s@%s", privs, target, uEsc, hEsc)
-	if req.WithGrant {
-		cmd += " WITH GRANT OPTION"
-	}
-
-	if _, err := s.db.ExecContext(ctx, cmd); err != nil {
-		return fmt.Errorf("failed to apply user grants: %w", err)
-	}
-	_, _ = s.db.ExecContext(ctx, "FLUSH PRIVILEGES")
-	return nil
-}
-
-func (s *MySQLSession) InspectTableLocks(ctx context.Context, database, table string) ([]driver.TableLockInfo, error) {
-	if database == "" {
-		database = s.activeDB()
-	}
-	var locks []driver.TableLockInfo
-
-	// 1. Try performance_schema.metadata_locks if available (MySQL 5.7+ / 8.0)
-	queryPfs := `
-		SELECT 
-			p.ID, 
-			IFNULL(p.USER, ''), 
-			IFNULL(p.HOST, ''), 
-			IFNULL(p.DB, ''), 
-			IFNULL(p.INFO, ''), 
-			IFNULL(p.TIME, 0), 
-			IFNULL(p.STATE, ''), 
-			IFNULL(m.LOCK_TYPE, '')
-		FROM performance_schema.metadata_locks m
-		JOIN performance_schema.threads pt ON m.OWNER_THREAD_ID = pt.THREAD_ID
-		JOIN information_schema.processlist p ON pt.PROCESSLIST_ID = p.ID
-		WHERE m.OBJECT_SCHEMA = ? AND m.OBJECT_NAME = ?
-	`
-	if rows, err := s.db.QueryContext(ctx, queryPfs, database, table); err == nil {
-		for rows.Next() {
-			var l driver.TableLockInfo
-			if err := rows.Scan(&l.ThreadID, &l.User, &l.Host, &l.Database, &l.Query, &l.DurationSec, &l.State, &l.LockMode); err == nil {
-				locks = append(locks, l)
-			}
-		}
-		rows.Close()
-	}
-
-	// 2. Query information_schema.innodb_trx joined with processlist
-	queryTrx := `
-		SELECT 
-			t.trx_mysql_thread_id, 
-			IFNULL(p.user, ''), 
-			IFNULL(p.host, ''), 
-			IFNULL(p.db, ''), 
-			IFNULL(COALESCE(p.info, t.trx_query), ''), 
-			IFNULL(TIMESTAMPDIFF(SECOND, t.trx_started, NOW()), 0), 
-			IFNULL(t.trx_state, ''), 
-			IFNULL(t.trx_operation_state, '')
-		FROM information_schema.innodb_trx t
-		LEFT JOIN information_schema.processlist p ON t.trx_mysql_thread_id = p.id
-		WHERE (p.info LIKE ? OR t.trx_query LIKE ? OR ? = '')
-	`
-	tblPattern := "%" + table + "%"
-	if rows, err := s.db.QueryContext(ctx, queryTrx, tblPattern, tblPattern, table); err == nil {
-		seen := make(map[int64]bool)
-		for _, l := range locks {
-			seen[l.ThreadID] = true
-		}
-		for rows.Next() {
-			var l driver.TableLockInfo
-			if err := rows.Scan(&l.ThreadID, &l.User, &l.Host, &l.Database, &l.Query, &l.DurationSec, &l.State, &l.LockMode); err == nil {
-				if !seen[l.ThreadID] {
-					locks = append(locks, l)
-					seen[l.ThreadID] = true
-				}
-			}
-		}
-		rows.Close()
-	}
-
-	if locks == nil {
-		locks = []driver.TableLockInfo{}
-	}
-	return locks, nil
-}
-
-func (s *MySQLSession) ExecSafeDDL(ctx context.Context, ddl string, lockTimeoutSec int) (*driver.ExecResult, error) {
-	if lockTimeoutSec <= 0 {
-		lockTimeoutSec = 3
-	}
-	conn, err := s.db.Conn(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to obtain dedicated connection: %w", err)
-	}
-	defer conn.Close()
-	if err := s.applyActiveDatabase(ctx, conn); err != nil {
-		return nil, err
-	}
-	defer func() {
-		// ponytail: Reset session lock_wait_timeout back to DEFAULT before returning connection to pool
-		_, _ = conn.ExecContext(context.Background(), "SET SESSION lock_wait_timeout = DEFAULT")
-	}()
-
-	// Enforce fail-fast session lock timeout on dedicated connection
-	if _, err := conn.ExecContext(ctx, fmt.Sprintf("SET SESSION lock_wait_timeout = %d", lockTimeoutSec)); err != nil {
-		return nil, fmt.Errorf("failed to set fail-fast lock_wait_timeout: %w", err)
-	}
-
-	start := time.Now()
-	res, err := conn.ExecContext(ctx, ddl)
-	duration := time.Since(start).Milliseconds()
-	if err != nil {
-		return nil, err
-	}
-
-	rowsAff, _ := res.RowsAffected()
-	lastID, _ := res.LastInsertId()
-	return &driver.ExecResult{
-		RowsAffected: rowsAff,
-		LastInsertID: lastID,
-		ExecutionMs:  duration,
-		Message:      "Safe DDL executed successfully with fail-fast timeout",
-	}, nil
-}
-
-// InspectClusterHealth inspects Galera wsrep cluster state, peer nodes, and Tri-Metric bottleneck indicators.
-func (s *MySQLSession) InspectClusterHealth(ctx context.Context) (*driver.ClusterHealthReport, error) {
-	// 1. Check if Galera / WSREP is active
-	var wsrepReadyVal string
-	_ = s.db.QueryRowContext(ctx, "SHOW GLOBAL STATUS LIKE 'wsrep_ready'").Scan(new(string), &wsrepReadyVal)
-
-	if strings.EqualFold(wsrepReadyVal, "ON") {
-		return s.inspectGaleraCluster(ctx)
-	}
-
-	// 2. Fallback: inspect standard replication or standalone
-	return s.inspectStandardReplicationOrStandalone(ctx)
-}
-
-func (s *MySQLSession) inspectGaleraCluster(ctx context.Context) (*driver.ClusterHealthReport, error) {
-	statusVars := make(map[string]string)
-	rows, err := s.db.QueryContext(ctx, `SHOW GLOBAL STATUS WHERE Variable_name IN (
-		'wsrep_cluster_size', 'wsrep_cluster_status', 'wsrep_cluster_name',
-		'wsrep_node_name', 'wsrep_local_state_comment', 'wsrep_flow_control_paused',
-		'wsrep_flow_control_sent', 'wsrep_flow_control_recv', 'wsrep_local_recv_queue',
-		'wsrep_local_send_queue', 'wsrep_evs_repl_latency', 'wsrep_incoming_addresses',
-		'wsrep_local_cert_failures', 'wsrep_local_bf_aborts',
-		'Innodb_buffer_pool_wait_free', 'Innodb_log_waits', 'Innodb_os_log_fsyncs'
-	)`)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var k, v string
-			if err := rows.Scan(&k, &v); err == nil {
-				statusVars[k] = v
-			}
-		}
-	}
-
-	sysVars := make(map[string]string)
-	vRows, err := s.db.QueryContext(ctx, `SHOW VARIABLES WHERE Variable_name IN (
-		'wsrep_slave_threads', 'wsrep_node_address', 'innodb_autoinc_lock_mode',
-		'binlog_format', 'wsrep_sync_wait', 'wsrep_retry_autocommit'
-	)`)
-	if err == nil {
-		defer vRows.Close()
-		for vRows.Next() {
-			var k, v string
-			if err := vRows.Scan(&k, &v); err == nil {
-				sysVars[k] = v
-			}
-		}
-	}
-
-	clusterSize, _ := strconv.Atoi(statusVars["wsrep_cluster_size"])
-	clusterStatus := statusVars["wsrep_cluster_status"]
-	if clusterStatus == "" {
-		clusterStatus = "Primary"
-	}
-	clusterName := statusVars["wsrep_cluster_name"]
-	localNodeName := statusVars["wsrep_node_name"]
-	localNodeAddress := sysVars["wsrep_node_address"]
-	if localNodeAddress == "" {
-		localNodeAddress = fmt.Sprintf("%s:%d", s.cfg.Host, s.cfg.Port)
-	}
-	localNodeState := statusVars["wsrep_local_state_comment"]
-	if localNodeState == "" {
-		localNodeState = "Synced"
-	}
-
-	fcPaused, _ := strconv.ParseFloat(statusVars["wsrep_flow_control_paused"], 64)
-	fcSent, _ := strconv.ParseInt(statusVars["wsrep_flow_control_sent"], 10, 64)
-	fcRecv, _ := strconv.ParseInt(statusVars["wsrep_flow_control_recv"], 10, 64)
-	localRecvQueue, _ := strconv.ParseInt(statusVars["wsrep_local_recv_queue"], 10, 64)
-	localSendQueue, _ := strconv.ParseInt(statusVars["wsrep_local_send_queue"], 10, 64)
-	certFailures, _ := strconv.ParseInt(statusVars["wsrep_local_cert_failures"], 10, 64)
-	bfAborts, _ := strconv.ParseInt(statusVars["wsrep_local_bf_aborts"], 10, 64)
-
-	bufWaitFree, _ := strconv.ParseInt(statusVars["Innodb_buffer_pool_wait_free"], 10, 64)
-	logWaits, _ := strconv.ParseInt(statusVars["Innodb_log_waits"], 10, 64)
-	osLogFsyncs, _ := strconv.ParseInt(statusVars["Innodb_os_log_fsyncs"], 10, 64)
-
-	slaveThreads, _ := strconv.Atoi(sysVars["wsrep_slave_threads"])
-	if slaveThreads <= 0 {
-		slaveThreads = 1
-	}
-
-	// Parse wsrep_evs_repl_latency: min/avg/max/stddev in seconds
-	var latMin, latAvg, latMax float64
-	evsLatStr := statusVars["wsrep_evs_repl_latency"]
-	if evsLatStr != "" {
-		parts := strings.Split(evsLatStr, "/")
-		if len(parts) >= 3 {
-			p0, _ := strconv.ParseFloat(parts[0], 64)
-			p1, _ := strconv.ParseFloat(parts[1], 64)
-			p2, _ := strconv.ParseFloat(parts[2], 64)
-			latMin = p0 * 1000.0 // seconds to milliseconds
-			latAvg = p1 * 1000.0
-			latMax = p2 * 1000.0
-		}
-	}
-
-	// 3. Peer Node Auto-Discovery via wsrep_incoming_addresses
-	incomingAddrs := statusVars["wsrep_incoming_addresses"]
-	addrList := strings.Split(incomingAddrs, ",")
-	cleanAddrs := make([]string, 0, len(addrList))
-	for _, a := range addrList {
-		trimmed := strings.TrimSpace(a)
-		if trimmed != "" {
-			cleanAddrs = append(cleanAddrs, trimmed)
-		}
-	}
-
-	if len(cleanAddrs) == 0 {
-		cleanAddrs = []string{fmt.Sprintf("%s:%d", s.cfg.Host, s.cfg.Port)}
-	}
-
-	nodeResults := make([]driver.ClusterNodeInfo, len(cleanAddrs))
-	var wg sync.WaitGroup
-
-	for i, addr := range cleanAddrs {
-		idx := i
-		nodeAddr := addr
-		hostPort := nodeAddr
-		if !strings.Contains(hostPort, ":") {
-			hostPort = fmt.Sprintf("%s:3306", hostPort)
-		}
-
-		isLocal := strings.HasPrefix(nodeAddr, s.cfg.Host) ||
-			strings.HasPrefix(nodeAddr, "127.0.0.1") ||
-			nodeAddr == localNodeAddress ||
-			len(cleanAddrs) == 1
-
-		if isLocal {
-			nodeResults[idx] = driver.ClusterNodeInfo{
-				Name:            localNodeName,
-				Address:         nodeAddr,
-				State:           localNodeState,
-				ReceiveQueue:    localRecvQueue,
-				SendQueue:       localSendQueue,
-				FlowControlSent: fcSent,
-				IsLocal:         true,
-				Status:          "online",
-			}
-		} else {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				nodeResults[idx] = s.probePeerNode(ctx, hostPort, nodeAddr)
-			}()
-		}
-	}
-	wg.Wait()
-
-	// 4. Identify Culprit Node (Slowest Node triggering Flow Control / Queue backlog)
-	var culpritNode *driver.ClusterNodeInfo
-	var highestQueue int64 = -1
-
-	for i := range nodeResults {
-		n := &nodeResults[i]
-		if n.Status == "online" {
-			// A node is a culprit if it sent Flow Control or has an elevated receive queue
-			if n.FlowControlSent > 0 && n.ReceiveQueue > highestQueue {
-				highestQueue = n.ReceiveQueue
-				culpritNode = n
-			} else if culpritNode == nil && n.ReceiveQueue > 20 && n.ReceiveQueue > highestQueue {
-				highestQueue = n.ReceiveQueue
-				culpritNode = n
-			}
-		}
-	}
-
-	slowestNodeAddr := ""
-	if culpritNode != nil {
-		culpritNode.IsCulprit = true
-		slowestNodeAddr = culpritNode.Address
-		if culpritNode.Name != "" {
-			slowestNodeAddr = fmt.Sprintf("%s (%s)", culpritNode.Name, culpritNode.Address)
-		}
-	}
-
-	// 5. Tri-Metric Bottleneck Detective Evaluation
-	diagnosis, severity := s.diagnoseClusterBottleneck(
-		fcPaused, fcSent, fcRecv, culpritNode, localNodeName,
-		latAvg, latMax, bufWaitFree, logWaits, localRecvQueue,
-		slaveThreads, certFailures, bfAborts, clusterStatus,
-	)
-
-	return &driver.ClusterHealthReport{
-		TopologyType:        "galera",
-		ClusterName:         clusterName,
-		ClusterStatus:       clusterStatus,
-		ClusterSize:         clusterSize,
-		LocalNodeName:       localNodeName,
-		LocalNodeAddress:    localNodeAddress,
-		LocalNodeState:      localNodeState,
-		FlowControlPaused:   fcPaused,
-		FlowControlSent:     fcSent,
-		FlowControlRecv:     fcRecv,
-		BottleneckDiagnosis: diagnosis,
-		BottleneckSeverity:  severity,
-		SlowestNode:         slowestNodeAddr,
-		Nodes:               nodeResults,
-		TriMetric: driver.TriMetricStats{
-			NetworkLatencyMinMs: latMin,
-			NetworkLatencyAvgMs: latAvg,
-			NetworkLatencyMaxMs: latMax,
-			BufferPoolWaitFree:  bufWaitFree,
-			LogWaits:            logWaits,
-			OSLogFsyncs:         osLogFsyncs,
-			SlaveThreads:        slaveThreads,
-			CertFailures:        certFailures,
-			BFAborts:            bfAborts,
-		},
-		TuningChecks: advisor.EvaluateClusterTuning(sysVars, statusVars),
-	}, nil
-}
-
-// probePeerNode connects to a cluster peer node with a 1500ms timeout to read queue and FC sent.
-// ponytail: Quick single-shot query with fail-fast timeout prevents hanging on firewalled peer nodes.
-func (s *MySQLSession) probePeerNode(parentCtx context.Context, hostPort, origAddr string) driver.ClusterNodeInfo {
-	ctx, cancel := context.WithTimeout(parentCtx, 1500*time.Millisecond)
-	defer cancel()
-
-	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&timeout=1200ms&readTimeout=1200ms",
-		s.cfg.User, s.cfg.Password, hostPort, s.activeDB(),
-	)
-	peerDB, err := sql.Open("mysql", dsn)
-	if err != nil {
-		return driver.ClusterNodeInfo{
-			Address: origAddr,
-			Status:  "unreachable",
-			Message: "Failed to initialize dialer",
-		}
-	}
-	defer peerDB.Close()
-
-	if err := peerDB.PingContext(ctx); err != nil {
-		return driver.ClusterNodeInfo{
-			Address: origAddr,
-			Status:  "unreachable",
-			Message: "🔒 Unreachable directly from client (VPC/Firewall restricted)",
-		}
-	}
-
-	var nodeName, nodeState string
-	var recvQueue, fcSent int64
-
-	rows, err := peerDB.QueryContext(ctx, `SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_node_name', 'wsrep_local_state_comment', 'wsrep_local_recv_queue', 'wsrep_flow_control_sent')`)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var k, v string
-			if err := rows.Scan(&k, &v); err == nil {
-				switch k {
-				case "wsrep_node_name":
-					nodeName = v
-				case "wsrep_local_state_comment":
-					nodeState = v
-				case "wsrep_local_recv_queue":
-					recvQueue, _ = strconv.ParseInt(v, 10, 64)
-				case "wsrep_flow_control_sent":
-					fcSent, _ = strconv.ParseInt(v, 10, 64)
-				}
-			}
-		}
-	}
-
-	return driver.ClusterNodeInfo{
-		Name:            nodeName,
-		Address:         origAddr,
-		State:           nodeState,
-		ReceiveQueue:    recvQueue,
-		FlowControlSent: fcSent,
-		Status:          "online",
-	}
-}
-
-func (s *MySQLSession) diagnoseClusterBottleneck(
-	fcPaused float64, fcSent, fcRecv int64, culprit *driver.ClusterNodeInfo, localName string,
-	latAvg, latMax float64, bufWaitFree, logWaits, localQueue int64,
-	slaveThreads int, certFailures, bfAborts int64, clusterStatus string,
-) (string, string) {
-	if !strings.EqualFold(clusterStatus, "Primary") {
-		return fmt.Sprintf("Cluster quorum lost: current cluster status is '%s' (split-brain danger)", clusterStatus), "critical"
-	}
-
-	// 1. Flow Control Active
-	if fcPaused > 0.05 {
-		if culprit != nil && culprit.IsLocal {
-			return fmt.Sprintf("Local node '%s' is bottlenecking the cluster: Flow Control active (paused %.1f%% of time, queue: %d)", localName, fcPaused*100, localQueue), "critical"
-		} else if culprit != nil {
-			return fmt.Sprintf("Cluster write freeze: Remote node '%s' (%s) triggered Flow Control (Receive Queue: %d, FC Sent: %d)", culprit.Name, culprit.Address, culprit.ReceiveQueue, culprit.FlowControlSent), "critical"
-		}
-		return fmt.Sprintf("Cluster write freeze: Flow Control is paused %.1f%% of time across cluster", fcPaused*100), "critical"
-	} else if fcPaused > 0.005 {
-		if culprit != nil {
-			return fmt.Sprintf("Intermittent Flow Control throttling: node '%s' is applying writesets slowly (Queue: %d)", culprit.Address, culprit.ReceiveQueue), "warning"
-		}
-		return fmt.Sprintf("Intermittent Flow Control throttling (paused %.2f%%)", fcPaused*100), "warning"
-	}
-
-	// 2. Storage / Disk I/O Bottleneck
-	if bufWaitFree > 0 || logWaits > 0 {
-		return fmt.Sprintf("InnoDB Storage / Disk I/O stall detected: %d buffer pool wait free events, %d log flush waits", bufWaitFree, logWaits), "warning"
-	}
-
-	// 3. Network Latency Spike
-	if latAvg > 5.0 || latMax > 50.0 {
-		return fmt.Sprintf("High inter-node network replication latency: avg %.2fms (peak %.2fms)", latAvg, latMax), "warning"
-	}
-
-	// 4. Worker Concurrency Saturation
-	if localQueue > int64(slaveThreads*15) && slaveThreads <= 4 {
-		return fmt.Sprintf("Apply queue backlog (%d items): wsrep_slave_threads (%d) is under-provisioned for current write rate", localQueue, slaveThreads), "warning"
-	}
-
-	// 5. Certification Aborts (Concurrent write contention)
-	if certFailures > 50 || bfAborts > 50 {
-		return fmt.Sprintf("Optimistic certification conflicts detected: %d cert failures, %d brute-force aborts", certFailures, bfAborts), "warning"
-	}
-
-	return "Cluster is healthy: quorum primary, all nodes synchronized without flow control pressure", "ok"
-}
-
-func (s *MySQLSession) inspectStandardReplicationOrStandalone(ctx context.Context) (*driver.ClusterHealthReport, error) {
-	// Query InnoDB storage waits for all MySQL engines
-	var bufWaitFree, logWaits, osLogFsyncs int64
-	rows, err := s.db.QueryContext(ctx, `SHOW GLOBAL STATUS WHERE Variable_name IN ('Innodb_buffer_pool_wait_free', 'Innodb_log_waits', 'Innodb_os_log_fsyncs')`)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var k, v string
-			if err := rows.Scan(&k, &v); err == nil {
-				switch k {
-				case "Innodb_buffer_pool_wait_free":
-					bufWaitFree, _ = strconv.ParseInt(v, 10, 64)
-				case "Innodb_log_waits":
-					logWaits, _ = strconv.ParseInt(v, 10, 64)
-				case "Innodb_os_log_fsyncs":
-					osLogFsyncs, _ = strconv.ParseInt(v, 10, 64)
-				}
-			}
-		}
-	}
-
-	triMetric := driver.TriMetricStats{
-		BufferPoolWaitFree: bufWaitFree,
-		LogWaits:           logWaits,
-		OSLogFsyncs:        osLogFsyncs,
-	}
-
-	// ponytail: Universal Replication Normalizer: probe SHOW REPLICA STATUS (MySQL 8.4+/9.x), fallback to SHOW SLAVE STATUS (MySQL 5.7/8.0/MariaDB)
-	slaveRows, err := s.db.QueryContext(ctx, "SHOW REPLICA STATUS")
-	if err != nil {
-		slaveRows, err = s.db.QueryContext(ctx, "SHOW SLAVE STATUS")
-	}
-	if err == nil {
-		defer slaveRows.Close()
-		cols, err := slaveRows.Columns()
-		if err == nil && slaveRows.Next() {
-			colVals := make([]any, len(cols))
-			colPtrs := make([]any, len(cols))
-			for i := range colVals {
-				colPtrs[i] = &colVals[i]
-			}
-			if err := slaveRows.Scan(colPtrs...); err == nil {
-				colMap := make(map[string]string)
-				for i, c := range cols {
-					if colVals[i] != nil {
-						switch v := colVals[i].(type) {
-						case []byte:
-							colMap[strings.ToLower(c)] = string(v)
-						case string:
-							colMap[strings.ToLower(c)] = v
-						default:
-							colMap[strings.ToLower(c)] = fmt.Sprintf("%v", v)
-						}
-					}
-				}
-
-				// Normalize column names across MySQL 8.4+ and legacy MySQL 5.7/8.0
-				ioRunning := strings.EqualFold(colMap["replica_io_running"], "yes") || strings.EqualFold(colMap["slave_io_running"], "yes")
-				sqlRunning := strings.EqualFold(colMap["replica_sql_running"], "yes") || strings.EqualFold(colMap["slave_sql_running"], "yes")
-
-				sbm := colMap["seconds_behind_source"]
-				if sbm == "" {
-					sbm = colMap["seconds_behind_master"]
-				}
-				var secBehind *int64
-				if sbm != "" && sbm != "NULL" {
-					val, _ := strconv.ParseInt(sbm, 10, 64)
-					secBehind = &val
-				}
-
-				lastErr := colMap["last_error"]
-				if lastErr == "" {
-					lastErr = colMap["last_sql_error"]
-				}
-
-				masterHost := colMap["source_host"]
-				if masterHost == "" {
-					masterHost = colMap["master_host"]
-				}
-
-				diagnosis := "Replication synchronized and operating normally"
-				severity := "ok"
-				if !ioRunning || !sqlRunning {
-					diagnosis = fmt.Sprintf("Replication broken (IO: %t, SQL: %t): %s", ioRunning, sqlRunning, lastErr)
-					severity = "critical"
-				} else if secBehind != nil && *secBehind > 10 {
-					diagnosis = fmt.Sprintf("Replication lag behind source: %d seconds", *secBehind)
-					severity = "warning"
-				} else if bufWaitFree > 0 || logWaits > 0 {
-					diagnosis = fmt.Sprintf("InnoDB storage write stall detected (wait_free: %d, log_waits: %d)", bufWaitFree, logWaits)
-					severity = "warning"
-				}
-
-				return &driver.ClusterHealthReport{
-					TopologyType:        "replication",
-					ClusterName:         "mysql-replication",
-					ClusterStatus:       "Replica",
-					ClusterSize:         2,
-					LocalNodeName:       fmt.Sprintf("%s:%d", s.cfg.Host, s.cfg.Port),
-					LocalNodeState:      "Replica",
-					BottleneckDiagnosis: diagnosis,
-					BottleneckSeverity:  severity,
-					Replication: &driver.ReplicationInfo{
-						Role:                "Replica",
-						SecondsBehindMaster: secBehind,
-						IORunning:           ioRunning,
-						SQLRunning:          sqlRunning,
-						MasterHost:          masterHost,
-						LastError:           lastErr,
-					},
-					Nodes: []driver.ClusterNodeInfo{
-						{
-							Name:    "replica-local",
-							Address: fmt.Sprintf("%s:%d", s.cfg.Host, s.cfg.Port),
-							State:   "Replica",
-							IsLocal: true,
-							Status:  "online",
-						},
-						{
-							Name:    "source-master",
-							Address: masterHost,
-							State:   "Source",
-							Status:  "online",
-						},
-					},
-					TriMetric: triMetric,
-				}, nil
-			}
-		}
-	}
-
-	// Check if this instance is a Source / Master with binary logging enabled
-	// ponytail: Dual-syntax probe: SHOW BINARY LOG STATUS (MySQL 8.4+) fallback to SHOW MASTER STATUS (MySQL 5.7/8.0)
-	var binlogFile string
-	var binlogPos int64
-	bErr := s.db.QueryRowContext(ctx, "SHOW BINARY LOG STATUS").Scan(&binlogFile, &binlogPos, new(string), new(string), new(string))
-	if bErr != nil {
-		_ = s.db.QueryRowContext(ctx, "SHOW MASTER STATUS").Scan(&binlogFile, &binlogPos, new(string), new(string), new(string))
-	}
-	if binlogFile != "" {
-		diagnosis := "Replication Source: binary logging active"
-		severity := "ok"
-		if bufWaitFree > 0 || logWaits > 0 {
-			diagnosis = fmt.Sprintf("InnoDB storage write stall on Source (wait_free: %d, log_waits: %d)", bufWaitFree, logWaits)
-			severity = "warning"
-		}
-		return &driver.ClusterHealthReport{
-			TopologyType:        "replication",
-			ClusterName:         "mysql-source",
-			ClusterStatus:       "Source (Master)",
-			ClusterSize:         1,
-			LocalNodeName:       fmt.Sprintf("%s:%d", s.cfg.Host, s.cfg.Port),
-			LocalNodeState:      "Source",
-			BottleneckDiagnosis: diagnosis,
-			BottleneckSeverity:  severity,
-			Replication: &driver.ReplicationInfo{
-				Role:       "Source (Master)",
-				IORunning:  true,
-				SQLRunning: true,
-			},
-			Nodes: []driver.ClusterNodeInfo{
-				{
-					Name:    "source-master",
-					Address: fmt.Sprintf("%s:%d", s.cfg.Host, s.cfg.Port),
-					State:   "Source",
-					IsLocal: true,
-					Status:  "online",
-				},
-			},
-			TriMetric: triMetric,
-		}, nil
-	}
-
-	// Standalone instance fallback
-	diagnosis := "Standalone MySQL / MariaDB instance"
-	severity := "ok"
-	if bufWaitFree > 0 || logWaits > 0 {
-		diagnosis = fmt.Sprintf("InnoDB storage write stall detected (wait_free: %d, log_waits: %d)", bufWaitFree, logWaits)
-		severity = "warning"
-	}
-
-	return &driver.ClusterHealthReport{
-		TopologyType:        "standalone",
-		ClusterName:         "standalone-mysql",
-		ClusterStatus:       "Standalone",
-		ClusterSize:         1,
-		LocalNodeName:       fmt.Sprintf("%s:%d", s.cfg.Host, s.cfg.Port),
-		LocalNodeState:      "Standalone",
-		BottleneckDiagnosis: diagnosis,
-		BottleneckSeverity:  severity,
-		Nodes: []driver.ClusterNodeInfo{
-			{
-				Name:    "standalone-node",
-				Address: fmt.Sprintf("%s:%d", s.cfg.Host, s.cfg.Port),
-				State:   "Standalone",
-				IsLocal: true,
-				Status:  "online",
-			},
-		},
-		TriMetric: triMetric,
-	}, nil
-}
-
-// SampleFlightMetrics captures an on-demand performance telemetry slice with correlated active queries.
-func (s *MySQLSession) SampleFlightMetrics(ctx context.Context) (*driver.FlightMetricSample, error) {
-	sample := &driver.FlightMetricSample{
-		SampledAt:     time.Now(),
-		ActiveQueries: []driver.FlightQueryInfo{},
-	}
-
-	// 1. Fetch Global Status variables
-	rows, err := s.db.QueryContext(ctx, `
-		SHOW GLOBAL STATUS WHERE Variable_name IN (
-			'Questions',
-			'Threads_running',
-			'Threads_connected',
-			'Innodb_row_lock_waits',
-			'Innodb_row_lock_current_waits',
-			'Innodb_buffer_pool_wait_free'
-		)
-	`)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var name, val string
-			if err := rows.Scan(&name, &val); err == nil {
-				intVal, _ := strconv.ParseInt(val, 10, 64)
-				switch name {
-				case "Questions":
-					sample.Questions = intVal
-				case "Threads_running":
-					sample.ThreadsRunning = intVal
-				case "Threads_connected":
-					sample.ThreadsConnected = intVal
-				case "Innodb_row_lock_waits", "Innodb_row_lock_current_waits":
-					if intVal > sample.RowLockWaits {
-						sample.RowLockWaits = intVal
-					}
-				case "Innodb_buffer_pool_wait_free":
-					sample.BufferPoolWaitFree = intVal
-				}
-			}
-		}
-	}
-
-	// 2. Adaptive Correlated Queries: fetch active non-idle queries with non-empty SQL (Top 5)
-	// ponytail: Prefer performance_schema.threads (lock-free) to avoid LOCK_thread_count mutex contention.
-	var qRows *sql.Rows
-	var qErr error
-	if s.pfsEnabled {
-		qRows, qErr = s.db.QueryContext(ctx, `
-			SELECT PROCESSLIST_ID, IFNULL(PROCESSLIST_USER, ''), IFNULL(PROCESSLIST_HOST, ''),
-			       IFNULL(PROCESSLIST_DB, ''), IFNULL(PROCESSLIST_COMMAND, ''), IFNULL(PROCESSLIST_TIME, 0),
-			       IFNULL(PROCESSLIST_STATE, ''), IFNULL(PROCESSLIST_INFO, '')
-			FROM performance_schema.threads
-			WHERE PROCESSLIST_ID IS NOT NULL
-			  AND PROCESSLIST_USER NOT IN ('system user', 'event_scheduler')
-			  AND PROCESSLIST_COMMAND NOT IN ('Sleep', 'Binlog Dump', 'Daemon')
-			  AND PROCESSLIST_INFO IS NOT NULL AND TRIM(PROCESSLIST_INFO) != ''
-			ORDER BY PROCESSLIST_TIME DESC
-			LIMIT 5
-		`)
-	}
-	if !s.pfsEnabled || qErr != nil {
-		// Fallback to information_schema.PROCESSLIST if performance_schema is disabled
-		qRows, qErr = s.db.QueryContext(ctx, `
-			SELECT ID, USER, HOST, IFNULL(DB, ''), COMMAND, TIME, IFNULL(STATE, ''), IFNULL(INFO, '')
-			FROM information_schema.PROCESSLIST
-			WHERE USER NOT IN ('system user', 'event_scheduler')
-			  AND COMMAND NOT IN ('Sleep', 'Binlog Dump', 'Daemon')
-			  AND INFO IS NOT NULL AND TRIM(INFO) != ''
-			ORDER BY TIME DESC
-			LIMIT 5
-		`)
-	}
-	if qErr == nil {
-		defer qRows.Close()
-		for qRows.Next() {
-			var q driver.FlightQueryInfo
-			if err := qRows.Scan(&q.ThreadID, &q.User, &q.Host, &q.DB, &q.Command, &q.Time, &q.State, &q.Info); err == nil {
-				sample.ActiveQueries = append(sample.ActiveQueries, q)
-			}
-		}
-	}
-
-	return sample, nil
 }
 
 func (s *MySQLSession) Close() error {
@@ -2416,494 +756,366 @@ func (s *MySQLSession) QueryRaw(ctx context.Context, sql string, args ...any) ([
 	return result, rows.Err()
 }
 
-// InspectServerVariables introspects all server variables and correlates them with tuning rules.
-func (s *MySQLSession) InspectServerVariables(ctx context.Context) (*driver.ServerVariablesReport, error) {
-	rows, err := s.db.QueryContext(ctx, "SHOW GLOBAL VARIABLES")
+// ExecScriptConn pins a single physical MySQL connection for the duration of a multi-statement
+// script so SET FOREIGN_KEY_CHECKS, SET SQL_MODE, and BEGIN/COMMIT execute on the same session,
+// and restores FOREIGN_KEY_CHECKS=1 before releasing the connection back to the pool.
+func (s *MySQLSession) ExecScriptConn(ctx context.Context, fn func(exec func(context.Context, string) (*driver.ExecResult, error)) error) error {
+	conn, err := s.db.Conn(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to introspect global variables: %w", err)
+		return err
 	}
-	defer rows.Close()
-
-	allVars := make(map[string]string)
-	type kv struct {
-		k, v string
+	defer func() {
+		// Rollback any open transaction left behind by a failed/aborted script and restore session flags.
+		restoreCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_, _ = conn.ExecContext(restoreCtx, "ROLLBACK")
+		_, _ = conn.ExecContext(restoreCtx, "SET FOREIGN_KEY_CHECKS = 1")
+		cancel()
+		s.invalidateConnDBState(conn)
+		_ = conn.Close()
+	}()
+	if err := s.applyActiveDatabase(ctx, conn); err != nil {
+		return err
 	}
-	var pairs []kv
-
-	for rows.Next() {
-		var k, v string
-		if err := rows.Scan(&k, &v); err == nil {
-			allVars[k] = v
-			pairs = append(pairs, kv{k: k, v: v})
+	return fn(func(c context.Context, q string) (*driver.ExecResult, error) {
+		start := time.Now()
+		res, err := conn.ExecContext(c, q)
+		if isRawDatabaseSwitchMySQL(q) {
+			s.invalidateConnDBState(conn)
 		}
-	}
-
-	var version string
-	_ = s.db.QueryRowContext(ctx, "SELECT VERSION()").Scan(&version)
-
-	var vars []driver.ServerVariable
-	curatedCount := 0
-	for _, p := range pairs {
-		sv := advisor.EvaluateMySQLVariable(p.k, p.v, allVars)
-		if sv.IsCurated {
-			curatedCount++
+		if err != nil {
+			return nil, err
 		}
-		vars = append(vars, sv)
-	}
-
-	return &driver.ServerVariablesReport{
-		Engine:       "mysql",
-		Version:      version,
-		TotalCount:   len(vars),
-		CuratedCount: curatedCount,
-		Variables:    vars,
-	}, nil
+		rowsAff, _ := res.RowsAffected()
+		lastID, _ := res.LastInsertId()
+		return &driver.ExecResult{
+			RowsAffected: rowsAff,
+			LastInsertID: lastID,
+			ExecutionMs:  time.Since(start).Milliseconds(),
+			Message:      fmt.Sprintf("Query OK, %d rows affected", rowsAff),
+		}, nil
+	})
 }
 
-// InspectDeadlock parses SHOW ENGINE INNODB STATUS to extract the latest detected deadlock.
-func (s *MySQLSession) InspectDeadlock(ctx context.Context) (*driver.DeadlockReport, error) {
-	var statusType, statusName, engineStatus string
-	row := s.db.QueryRowContext(ctx, "SHOW ENGINE INNODB STATUS")
-	if err := row.Scan(&statusType, &statusName, &engineStatus); err != nil {
-		return nil, fmt.Errorf("failed to execute SHOW ENGINE INNODB STATUS: %w", err)
+// QueryStreamReadOnly enforces MySQL engine-level READ ONLY transaction mode for read-only sessions.
+func (s *MySQLSession) QueryStreamReadOnly(ctx context.Context, sqlStr string, limit int) (driver.RowStream, error) {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, err
 	}
-
-	return parseDeadlockStatus(engineStatus), nil
+	if err := s.applyActiveDatabase(ctx, conn); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	queryID := driver.QueryIDFromContext(ctx)
+	if queryID != "" {
+		var threadID int64
+		st := s.getConnState(conn)
+		if st != nil {
+			st.mu.Lock()
+			threadID = st.threadID
+			st.mu.Unlock()
+		}
+		if threadID == 0 {
+			_ = conn.QueryRowContext(ctx, "SELECT CONNECTION_ID()").Scan(&threadID)
+			if st != nil && threadID > 0 {
+				st.mu.Lock()
+				st.threadID = threadID
+				st.mu.Unlock()
+			}
+		}
+		if threadID > 0 {
+			s.mu.Lock()
+			s.queryThreads[queryID] = threadID
+			s.mu.Unlock()
+		}
+	}
+	untrack := func() {
+		if queryID != "" {
+			s.mu.Lock()
+			delete(s.queryThreads, queryID)
+			s.mu.Unlock()
+		}
+	}
+	tx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		untrack()
+		_ = conn.Close()
+		return nil, err
+	}
+	querySQL := driver.ApplyLimitClause(sqlStr, limit)
+	rows, err := tx.QueryContext(ctx, querySQL)
+	if err != nil {
+		untrack()
+		_ = tx.Rollback()
+		_ = conn.Close()
+		return nil, err
+	}
+	colTypes, err := rows.ColumnTypes()
+	if err != nil {
+		_ = rows.Close()
+		untrack()
+		_ = tx.Rollback()
+		_ = conn.Close()
+		return nil, err
+	}
+	return driver.NewSQLRowStream(rows, driver.ColumnsFromTypes(colTypes), func() {
+		untrack()
+		_ = tx.Rollback()
+		_ = conn.Close()
+	}), nil
 }
 
-// parseDeadlockStatus extracts and formats deadlock information from engine status output.
-func parseDeadlockStatus(raw string) *driver.DeadlockReport {
-	deadlockHeader := "------------------------\nLATEST DETECTED DEADLOCK\n------------------------"
-	deadlockEnd := "------------\nTRANSACTIONS\n------------"
-
-	startIdx := strings.Index(raw, deadlockHeader)
-	if startIdx == -1 {
-		// ponytail: friendly empty state when no deadlock has occurred since server boot
-		return &driver.DeadlockReport{
-			HasDeadlock: false,
-			Summary:     "No deadlocks detected since MySQL server startup.",
-		}
-	}
-
-	content := raw[startIdx+len(deadlockHeader):]
-	endIdx := strings.Index(content, deadlockEnd)
-	var deadlockSection string
-	if endIdx != -1 {
-		deadlockSection = content[:endIdx]
-	} else {
-		// If end marker not found, take up to next major section boundary
-		nextSec := strings.Index(content, "\n---")
-		if nextSec != -1 {
-			deadlockSection = content[:nextSec]
-		} else {
-			deadlockSection = content
-		}
-	}
-	deadlockSection = strings.TrimSpace(deadlockSection)
-
-	rep := &driver.DeadlockReport{
-		HasDeadlock:  true,
-		RawSection:   deadlockSection,
-		Transactions: make([]driver.DeadlockTransaction, 0, 2),
-	}
-
-	// Extract timestamp e.g. "2026-10-08 04:15:30 0x7f8a3c007700"
-	lines := strings.Split(deadlockSection, "\n")
-	if len(lines) > 0 {
-		firstLine := strings.TrimSpace(lines[0])
-		parts := strings.Fields(firstLine)
-		if len(parts) >= 2 {
-			rep.DetectedAt = parts[0] + " " + parts[1]
-		}
-	}
-
-	// Extract WE ROLL BACK TRANSACTION (1) or (2)
-	rollbackVictim := 0
-	if idx := strings.Index(deadlockSection, "WE ROLL BACK TRANSACTION ("); idx != -1 {
-		sub := deadlockSection[idx+len("WE ROLL BACK TRANSACTION ("):]
-		if closeParen := strings.Index(sub, ")"); closeParen != -1 {
-			numStr := sub[:closeParen]
-			if n, err := strconv.Atoi(numStr); err == nil {
-				rollbackVictim = n
-			}
-		}
-	}
-
-	// Split by "*** (1) TRANSACTION:" and "*** (2) TRANSACTION:"
-	t1Idx := strings.Index(deadlockSection, "*** (1) TRANSACTION:")
-	t2Idx := strings.Index(deadlockSection, "*** (2) TRANSACTION:")
-
-	if t1Idx != -1 && t2Idx != -1 && t2Idx > t1Idx {
-		t1Chunk := deadlockSection[t1Idx:t2Idx]
-		t2Chunk := deadlockSection[t2Idx:]
-		if rbIdx := strings.Index(t2Chunk, "*** WE ROLL BACK TRANSACTION"); rbIdx != -1 {
-			t2Chunk = t2Chunk[:rbIdx]
-		}
-
-		tx1 := parseDeadlockTransactionChunk(1, t1Chunk, rollbackVictim == 1)
-		tx2 := parseDeadlockTransactionChunk(2, t2Chunk, rollbackVictim == 2)
-
-		rep.Transactions = append(rep.Transactions, tx1, tx2)
-		if tx1.IsVictim {
-			rep.VictimTxID = tx1.TxID
-			rep.VictimThreadID = tx1.ThreadID
-			rep.Summary = fmt.Sprintf("Deadlock resolved: Transaction 1 (Thread %d) was rolled back to unblock Transaction 2.", tx1.ThreadID)
-		} else if tx2.IsVictim {
-			rep.VictimTxID = tx2.TxID
-			rep.VictimThreadID = tx2.ThreadID
-			rep.Summary = fmt.Sprintf("Deadlock resolved: Transaction 2 (Thread %d) was rolled back to unblock Transaction 1.", tx2.ThreadID)
-		} else {
-			rep.Summary = "Deadlock detected between Transaction 1 and Transaction 2."
-		}
-	} else {
-		rep.Summary = "Deadlock detected. Review raw InnoDB status details."
-	}
-
-	return rep
-}
-
-// parseDeadlockTransactionChunk parses one transaction segment from a deadlock dump.
-func parseDeadlockTransactionChunk(idx int, chunk string, isVictim bool) driver.DeadlockTransaction {
-	tx := driver.DeadlockTransaction{
-		Index:    idx,
-		IsVictim: isVictim,
-	}
-
-	lines := strings.Split(chunk, "\n")
-	readingQuery := false
-	lockSection := ""
-	var queryLines []string
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-
-		// TRANSACTION 123456, ACTIVE 5 sec
-		if strings.HasPrefix(trimmed, "TRANSACTION ") {
-			parts := strings.Split(trimmed, ",")
-			if len(parts) > 0 {
-				txPart := strings.TrimPrefix(parts[0], "TRANSACTION ")
-				tx.TxID = strings.TrimSpace(txPart)
-			}
-			for _, p := range parts {
-				p = strings.TrimSpace(p)
-				if strings.HasPrefix(p, "ACTIVE ") {
-					secStr := strings.TrimSuffix(strings.TrimPrefix(p, "ACTIVE "), " sec")
-					if s, err := strconv.ParseInt(strings.TrimSpace(secStr), 10, 64); err == nil {
-						tx.ActiveSeconds = s
-					}
-				}
-			}
-		}
-
-		// MySQL thread id 42, OS thread handle ...
-		if strings.Contains(trimmed, "MySQL thread id ") {
-			if idIdx := strings.Index(trimmed, "MySQL thread id "); idIdx != -1 {
-				sub := trimmed[idIdx+len("MySQL thread id "):]
-				if comma := strings.Index(sub, ","); comma != -1 {
-					thStr := strings.TrimSpace(sub[:comma])
-					if thID, err := strconv.ParseInt(thStr, 10, 64); err == nil {
-						tx.ThreadID = thID
-					}
-				}
-			}
-			if userIdx := strings.Index(trimmed, "query id "); userIdx != -1 {
-				sub := trimmed[userIdx:]
-				parts := strings.Fields(sub)
-				if len(parts) >= 4 {
-					tx.Host = parts[2]
-					tx.AppUser = parts[3]
-				}
-			}
-		}
-
-		// undo log entries 2
-		if strings.Contains(trimmed, "undo log entries ") {
-			if uIdx := strings.Index(trimmed, "undo log entries "); uIdx != -1 {
-				sub := trimmed[uIdx+len("undo log entries "):]
-				fields := strings.Fields(sub)
-				if len(fields) > 0 {
-					if u, err := strconv.ParseInt(fields[0], 10, 64); err == nil {
-						tx.UndoLogEntries = u
-					}
-				}
-			}
-		}
-
-		// Lock mode and wait. The header line only names the section; the lock
-		// descriptor on the following line is what the reader needs.
-		if strings.HasPrefix(trimmed, "*** (") && strings.Contains(trimmed, "WAITING FOR THIS LOCK TO BE GRANTED:") {
-			lockSection = "waited"
+// ParseProfileRows converts SHOW PROFILE result rows (Status, Duration) into a structured QueryProfile.
+func ParseProfileRows(rows [][]any) *driver.QueryProfile {
+	var stages []driver.ProfileStage
+	var totalDuration float64
+	for _, row := range rows {
+		if len(row) < 2 {
 			continue
-		} else if strings.Contains(trimmed, "HOLDS THE LOCK(S):") {
-			lockSection = "held"
+		}
+		var stg string
+		switch v := row[0].(type) {
+		case []byte:
+			stg = string(v)
+		default:
+			stg = fmt.Sprintf("%v", v)
+		}
+		var durStr string
+		switch v := row[1].(type) {
+		case []byte:
+			durStr = string(v)
+		default:
+			durStr = fmt.Sprintf("%v", v)
+		}
+		durSec, err := strconv.ParseFloat(strings.TrimSpace(durStr), 64)
+		if err != nil {
 			continue
-		} else if strings.HasPrefix(trimmed, "RECORD LOCKS") || strings.HasPrefix(trimmed, "TABLE LOCK") {
-			if tx.LockMode == "" {
-				tx.LockMode = trimmed
-			}
-			switch lockSection {
-			case "held":
-				if tx.LockHeld == "" {
-					tx.LockHeld = trimmed
-					lockSection = ""
-				}
-			case "waited":
-				if tx.LockWaited == "" {
-					tx.LockWaited = trimmed
-					lockSection = ""
-				}
-			}
-		} else if lockSection != "" && !strings.HasPrefix(trimmed, "***") && trimmed != "" {
-			// Any other line ends the lock descriptor block.
-			lockSection = ""
 		}
-
-		// Query statement capture
-		if trimmed == "*** (1) HOLDS THE LOCK(S):" || trimmed == "*** (2) HOLDS THE LOCK(S):" ||
-			trimmed == "*** (1) WAITING FOR THIS LOCK TO BE GRANTED:" || trimmed == "*** (2) WAITING FOR THIS LOCK TO BE GRANTED:" {
-			readingQuery = false
-		}
-
-		if readingQuery {
-			if !strings.HasPrefix(trimmed, "***") {
-				queryLines = append(queryLines, trimmed)
-			}
-		}
-
-		if strings.HasPrefix(trimmed, "MySQL thread id") && strings.Contains(trimmed, "query id") {
-			readingQuery = true
-		}
+		durUs := int64(durSec * 1e6)
+		totalDuration += durSec
+		stages = append(stages, driver.ProfileStage{
+			Stage:      stg,
+			DurationUs: durUs,
+		})
 	}
-
-	if len(queryLines) > 0 {
-		tx.Query = strings.TrimSpace(strings.Join(queryLines, " "))
-	}
-
-	return tx
-}
-
-// GetStatementDigest retrieves aggregated top SQL query statistics from sys/performance_schema.
-func (s *MySQLSession) GetStatementDigest(ctx context.Context, limit int) ([]driver.StatementDigestEntry, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 25
-	}
-
-	// performance_schema is optional (MariaDB may ship it disabled, sandboxes often
-	// have it OFF). Probe first so we can explain the failure instead of showing a
-	// raw "table doesn't exist" error inside the UI.
-	var psEnabled string
-	_ = s.db.QueryRowContext(ctx,
-		"SELECT IFNULL(@@performance_schema, '0')" ).Scan(&psEnabled)
-	psAvailable := false
-	if psEnabled != "" && psEnabled != "0" {
-		var probe int
-		if err := s.db.QueryRowContext(ctx,
-			"SELECT COUNT(*) FROM performance_schema.events_statements_summary_by_digest").Scan(&probe); err == nil {
-			psAvailable = true
-		}
-	}
-	if !psAvailable {
-		return nil, fmt.Errorf("performance_schema is disabled on this server (or the account lacks SELECT on it). Enable it with performance_schema=ON in my.cnf, then restart MySQL/MariaDB, to collect statement digests")
-	}
-
-	// 1. Try querying sys.statement_analysis (default in MySQL 5.7+ & 8.0)
-	sysQuery := fmt.Sprintf(`
-		SELECT 
-			IFNULL(query, '') AS query_text,
-			IFNULL(exec_count, 0) AS exec_count,
-			IFNULL(ROUND(total_latency / 1000000, 2), 0) AS total_latency_ms,
-			IFNULL(ROUND(avg_latency / 1000000, 2), 0) AS avg_latency_ms,
-			IFNULL(ROUND(max_latency / 1000000, 2), 0) AS max_latency_ms,
-			IFNULL(ROUND(lock_latency / 1000000, 2), 0) AS lock_time_ms,
-			IFNULL(rows_sent, 0) AS rows_sent,
-			IFNULL(rows_examined, 0) AS rows_examined,
-			IFNULL(rows_affected, 0) AS rows_affected,
-			IFNULL(full_scan, '') AS full_scan,
-			IFNULL(no_index_used_count, 0) AS no_index_used,
-			IFNULL(DATE_FORMAT(first_seen, '%%Y-%%m-%%d %%H:%%i:%%s'), '') AS first_seen,
-			IFNULL(DATE_FORMAT(last_seen, '%%Y-%%m-%%d %%H:%%i:%%s'), '') AS last_seen,
-			IFNULL(digest, '') AS digest
-		FROM sys.statement_analysis
-		WHERE query IS NOT NULL AND query != ''
-		ORDER BY total_latency DESC
-		LIMIT %d;
-	`, limit)
-
-	rows, err := s.db.QueryContext(ctx, sysQuery)
-	if err == nil {
-		defer rows.Close()
-		var list []driver.StatementDigestEntry
-		for rows.Next() {
-			var e driver.StatementDigestEntry
-			var fullScanStr string
-			if err := rows.Scan(
-				&e.Query, &e.ExecCount, &e.TotalLatencyMs, &e.AvgLatencyMs, &e.MaxLatencyMs,
-				&e.LockTimeMs, &e.RowsSent, &e.RowsExamined, &e.RowsAffected,
-				&fullScanStr, &e.NoIndexUsed, &e.FirstSeen, &e.LastSeen, &e.Digest,
-			); err == nil {
-				e.FullScan = strings.Contains(strings.ToLower(fullScanStr), "yes") || strings.Contains(strings.ToLower(fullScanStr), "1") || strings.Contains(strings.ToLower(fullScanStr), "*")
-				list = append(list, e)
-			}
-		}
-		if len(list) > 0 {
-			return list, nil
-		}
-	}
-
-	// 2. Fallback directly to performance_schema.events_statements_summary_by_digest
-	psQuery := fmt.Sprintf(`
-		SELECT 
-			IFNULL(DIGEST_TEXT, '') AS query_text,
-			IFNULL(COUNT_STAR, 0) AS exec_count,
-			IFNULL(ROUND(SUM_TIMER_WAIT / 1000000000, 2), 0) AS total_latency_ms,
-			IFNULL(ROUND(AVG_TIMER_WAIT / 1000000000, 2), 0) AS avg_latency_ms,
-			IFNULL(ROUND(MAX_TIMER_WAIT / 1000000000, 2), 0) AS max_latency_ms,
-			IFNULL(ROUND(SUM_LOCK_TIME / 1000000000, 2), 0) AS lock_time_ms,
-			IFNULL(SUM_ROWS_SENT, 0) AS rows_sent,
-			IFNULL(SUM_ROWS_EXAMINED, 0) AS rows_examined,
-			IFNULL(SUM_ROWS_AFFECTED, 0) AS rows_affected,
-			IFNULL(SUM_NO_INDEX_USED, 0) AS no_index_used,
-			IFNULL(DATE_FORMAT(FIRST_SEEN, '%%Y-%%m-%%d %%H:%%i:%%s'), '') AS first_seen,
-			IFNULL(DATE_FORMAT(LAST_SEEN, '%%Y-%%m-%%d %%H:%%i:%%s'), '') AS last_seen,
-			IFNULL(DIGEST, '') AS digest
-		FROM performance_schema.events_statements_summary_by_digest
-		WHERE DIGEST_TEXT IS NOT NULL AND DIGEST_TEXT != ''
-		ORDER BY SUM_TIMER_WAIT DESC
-		LIMIT %d;
-	`, limit)
-
-	psRows, psErr := s.db.QueryContext(ctx, psQuery)
-	if psErr != nil {
-		return nil, fmt.Errorf("failed to read performance_schema statement digests: %w", psErr)
-	}
-	defer psRows.Close()
-
-	var list []driver.StatementDigestEntry
-	for psRows.Next() {
-		var e driver.StatementDigestEntry
-		if err := psRows.Scan(
-			&e.Query, &e.ExecCount, &e.TotalLatencyMs, &e.AvgLatencyMs, &e.MaxLatencyMs,
-			&e.LockTimeMs, &e.RowsSent, &e.RowsExamined, &e.RowsAffected,
-			&e.NoIndexUsed, &e.FirstSeen, &e.LastSeen, &e.Digest,
-		); err == nil {
-			e.FullScan = e.NoIndexUsed > 0
-			list = append(list, e)
-		}
-	}
-
-	return list, nil
-}
-
-// ResetStatementDigest clears performance_schema statement digest metrics.
-func (s *MySQLSession) ResetStatementDigest(ctx context.Context) error {
-	// Try sys helper first
-	_, err := s.db.ExecContext(ctx, "CALL sys.ps_truncate_all_tables(false)")
-	if err == nil {
+	if len(stages) == 0 {
 		return nil
 	}
-
-	// Fallback to truncating summary table directly
-	_, tErr := s.db.ExecContext(ctx, "TRUNCATE TABLE performance_schema.events_statements_summary_by_digest")
-	if tErr != nil {
-		return fmt.Errorf("failed to reset statement digest: %w", tErr)
-	}
-	return nil
-}
-
-// GetRoutineDDL returns the raw CREATE statement for a Stored Procedure or Function.
-func (s *MySQLSession) GetRoutineDDL(ctx context.Context, routineType, name string) (string, error) {
-	upperType := strings.ToUpper(strings.TrimSpace(routineType))
-	if upperType != "FUNCTION" {
-		upperType = "PROCEDURE"
-	}
-	conn, err := s.db.Conn(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer conn.Close()
-	if err := s.applyActiveDatabase(ctx, conn); err != nil {
-		return "", err
-	}
-	query := fmt.Sprintf("SHOW CREATE %s `%s`", upperType, strings.ReplaceAll(name, "`", "``"))
-	var rName, sqlMode, createStmt, charSet, coll, dbColl string
-	row := conn.QueryRowContext(ctx, query)
-	// SHOW CREATE PROCEDURE returns 6 columns: Procedure, sql_mode, Create Procedure, character_set_client, collation_connection, Database Collation
-	if err := row.Scan(&rName, &sqlMode, &createStmt, &charSet, &coll, &dbColl); err != nil {
-		return "", fmt.Errorf("failed to get %s DDL: %w", upperType, err)
-	}
-	return createStmt, nil
-}
-
-// GetEventDDL returns the raw CREATE statement for a Scheduled Event.
-func (s *MySQLSession) GetEventDDL(ctx context.Context, name string) (string, error) {
-	conn, err := s.db.Conn(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer conn.Close()
-	if err := s.applyActiveDatabase(ctx, conn); err != nil {
-		return "", err
-	}
-	query := fmt.Sprintf("SHOW CREATE EVENT `%s`", strings.ReplaceAll(name, "`", "``"))
-	var eName, sqlMode, tz, createStmt, charSet, coll, dbColl string
-	row := conn.QueryRowContext(ctx, query)
-	if err := row.Scan(&eName, &sqlMode, &tz, &createStmt, &charSet, &coll, &dbColl); err != nil {
-		return "", fmt.Errorf("failed to get EVENT DDL: %w", err)
-	}
-	return createStmt, nil
-}
-
-// ToggleEventStatus enables or disables a MySQL scheduled event.
-func (s *MySQLSession) ToggleEventStatus(ctx context.Context, name string, enable bool) error {
-	status := "DISABLE"
-	if enable {
-		status = "ENABLE"
-	}
-	conn, err := s.db.Conn(ctx)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	if err := s.applyActiveDatabase(ctx, conn); err != nil {
-		return err
-	}
-	query := fmt.Sprintf("ALTER EVENT `%s` %s", strings.ReplaceAll(name, "`", "``"), status)
-	if _, err := conn.ExecContext(ctx, query); err != nil {
-		return fmt.Errorf("failed to %s event %s: %w", status, name, err)
-	}
-	return nil
-}
-
-// GetTablePartitions returns partition telemetry from information_schema.partitions.
-func (s *MySQLSession) GetTablePartitions(ctx context.Context, database, table string) ([]driver.PartitionMetadata, error) {
-	if database == "" {
-		database = s.activeDB()
-	}
-	query := `
-		SELECT 
-			IFNULL(PARTITION_NAME, '') AS p_name,
-			IFNULL(PARTITION_METHOD, '') AS p_method,
-			IFNULL(PARTITION_EXPRESSION, '') AS p_expr,
-			IFNULL(PARTITION_DESCRIPTION, '') AS p_desc,
-			IFNULL(TABLE_ROWS, 0) AS p_rows,
-			IFNULL(DATA_LENGTH, 0) AS p_data,
-			IFNULL(INDEX_LENGTH, 0) AS p_index
-		FROM information_schema.PARTITIONS
-		WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND PARTITION_NAME IS NOT NULL
-		ORDER BY PARTITION_ORDINAL_POSITION ASC;
-	`
-	rows, err := s.db.QueryContext(ctx, query, database, table)
-	if err != nil {
-		return nil, fmt.Errorf("failed to inspect table partitions: %w", err)
-	}
-	defer rows.Close()
-
-	var partitions []driver.PartitionMetadata
-	for rows.Next() {
-		var p driver.PartitionMetadata
-		if err := rows.Scan(&p.Name, &p.Method, &p.Expression, &p.Description, &p.TableRows, &p.DataLength, &p.IndexLength); err == nil {
-			partitions = append(partitions, p)
+	if totalDuration > 0 {
+		for i := range stages {
+			stages[i].Percentage = (float64(stages[i].DurationUs) / (totalDuration * 1e6)) * 100.0
 		}
 	}
-	return partitions, nil
+	return &driver.QueryProfile{
+		DurationMs: totalDuration * 1000.0,
+		Stages:     stages,
+	}
+}
+
+func collectProfileFromConn(ctx context.Context, conn *sql.Conn) *driver.QueryProfile {
+	rows, err := conn.QueryContext(ctx, "SHOW PROFILE")
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil || len(cols) < 2 {
+		return nil
+	}
+	var rawRows [][]any
+	for rows.Next() {
+		vals := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			break
+		}
+		rawRows = append(rawRows, vals)
+	}
+	return ParseProfileRows(rawRows)
+}
+
+// QueryStreamProfiled pins SET profiling = 1, the query, SHOW PROFILE, and SET profiling = 0
+// to a single *sql.Conn so profiling never leaks into the shared connection pool.
+func (s *MySQLSession) QueryStreamProfiled(ctx context.Context, sqlStr string, limit int, readOnly bool) (driver.RowStream, func() *driver.QueryProfile, error) {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := s.applyActiveDatabase(ctx, conn); err != nil {
+		_ = conn.Close()
+		return nil, nil, err
+	}
+
+	queryID := driver.QueryIDFromContext(ctx)
+	if queryID != "" {
+		var threadID int64
+		st := s.getConnState(conn)
+		if st != nil {
+			st.mu.Lock()
+			threadID = st.threadID
+			st.mu.Unlock()
+		}
+		if threadID == 0 {
+			_ = conn.QueryRowContext(ctx, "SELECT CONNECTION_ID()").Scan(&threadID)
+			if st != nil && threadID > 0 {
+				st.mu.Lock()
+				st.threadID = threadID
+				st.mu.Unlock()
+			}
+		}
+		if threadID > 0 {
+			s.mu.Lock()
+			s.queryThreads[queryID] = threadID
+			s.mu.Unlock()
+		}
+	}
+	untrack := func() {
+		if queryID != "" {
+			s.mu.Lock()
+			delete(s.queryThreads, queryID)
+			s.mu.Unlock()
+		}
+	}
+
+	profEnabled := false
+	if _, pErr := conn.ExecContext(ctx, "SET profiling = 1"); pErr == nil {
+		profEnabled = true
+	}
+
+	disableProfilingAndClose := func(tx *sql.Tx) {
+		untrack()
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+		if profEnabled {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			_, _ = conn.ExecContext(cleanupCtx, "SET profiling = 0")
+			cancel()
+		}
+		_ = conn.Close()
+	}
+
+	var tx *sql.Tx
+	if readOnly {
+		tx, err = conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+		if err != nil {
+			disableProfilingAndClose(nil)
+			return nil, nil, err
+		}
+	}
+
+	querySQL := driver.ApplyLimitClause(sqlStr, limit)
+	var rows *sql.Rows
+	if tx != nil {
+		rows, err = tx.QueryContext(ctx, querySQL)
+	} else {
+		rows, err = conn.QueryContext(ctx, querySQL)
+	}
+	if err != nil {
+		disableProfilingAndClose(tx)
+		return nil, nil, err
+	}
+
+	colTypes, err := rows.ColumnTypes()
+	if err != nil {
+		_ = rows.Close()
+		disableProfilingAndClose(tx)
+		return nil, nil, err
+	}
+
+	// Keep conn open after rows.Close() so finish() can run SHOW PROFILE + SET profiling = 0 on the same conn.
+	stream := driver.NewSQLRowStream(rows, driver.ColumnsFromTypes(colTypes), nil)
+
+	var once sync.Once
+	var cached *driver.QueryProfile
+	finish := func() *driver.QueryProfile {
+		once.Do(func() {
+			_ = stream.Close()
+			if tx != nil {
+				_ = tx.Rollback()
+				tx = nil
+			}
+			if profEnabled {
+				profCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				cached = collectProfileFromConn(profCtx, conn)
+				_, _ = conn.ExecContext(profCtx, "SET profiling = 0")
+				cancel()
+			}
+			untrack()
+			_ = conn.Close()
+		})
+		return cached
+	}
+
+	return stream, finish, nil
+}
+
+// ExecProfiled pins SET profiling = 1, the statement, SHOW PROFILE, and SET profiling = 0
+// to a single *sql.Conn.
+func (s *MySQLSession) ExecProfiled(ctx context.Context, querySQL string, args ...any) (*driver.ExecResult, *driver.QueryProfile, error) {
+	start := time.Now()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	profEnabled := false
+	defer func() {
+		if profEnabled {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			_, _ = conn.ExecContext(cleanupCtx, "SET profiling = 0")
+			cancel()
+		}
+		_ = conn.Close()
+	}()
+
+	if err := s.applyActiveDatabase(ctx, conn); err != nil {
+		return nil, nil, err
+	}
+
+	queryID := driver.QueryIDFromContext(ctx)
+	if queryID != "" {
+		var threadID int64
+		_ = conn.QueryRowContext(ctx, "SELECT CONNECTION_ID()").Scan(&threadID)
+		if threadID > 0 {
+			s.mu.Lock()
+			s.queryThreads[queryID] = threadID
+			s.mu.Unlock()
+			defer func() {
+				s.mu.Lock()
+				delete(s.queryThreads, queryID)
+				s.mu.Unlock()
+			}()
+		}
+	}
+
+	if _, pErr := conn.ExecContext(ctx, "SET profiling = 1"); pErr == nil {
+		profEnabled = true
+	}
+
+	res, execErr := conn.ExecContext(ctx, querySQL, args...)
+	if isRawDatabaseSwitchMySQL(querySQL) {
+		s.invalidateConnDBState(conn)
+	}
+	if execErr != nil {
+		return nil, nil, execErr
+	}
+
+	var prof *driver.QueryProfile
+	if profEnabled {
+		profCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		prof = collectProfileFromConn(profCtx, conn)
+		cancel()
+	}
+
+	rowsAffected, _ := res.RowsAffected()
+	lastInsertID, _ := res.LastInsertId()
+	return &driver.ExecResult{
+		RowsAffected: rowsAffected,
+		LastInsertID: lastInsertID,
+		ExecutionMs:  time.Since(start).Milliseconds(),
+		Message:      fmt.Sprintf("Query OK, %d rows affected.", rowsAffected),
+	}, prof, nil
 }

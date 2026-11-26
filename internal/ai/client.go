@@ -4,13 +4,115 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
+)
+
+var (
+	_, aiCGNATRange, _ = net.ParseCIDR("100.64.0.0/10")
+	_, aiNAT64Range, _ = net.ParseCIDR("64:ff9b::/96")
+	aiAWSIPv6IMDS      = net.ParseIP("fd00:ec2::254")
+)
+
+func isBlockedDialIP(ip net.IP, allowLoopback, allowPrivate bool) bool {
+	if ip == nil {
+		return true
+	}
+	if ip4 := ip.To4(); ip4 != nil {
+		ip = ip4
+		if ip[0] == 0 {
+			return true
+		}
+	}
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
+		return true
+	}
+	if aiCGNATRange != nil && aiCGNATRange.Contains(ip) {
+		return true
+	}
+	if aiNAT64Range != nil && aiNAT64Range.Contains(ip) {
+		return true
+	}
+	if aiAWSIPv6IMDS != nil && ip.Equal(aiAWSIPv6IMDS) {
+		return true
+	}
+	if ip.IsLoopback() {
+		return !allowLoopback
+	}
+	if !allowPrivate && ip.IsPrivate() {
+		return true
+	}
+	return false
+}
+
+func isExplicitLoopbackEndpoint(rawURL string) bool {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return false
+	}
+	host := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(u.Hostname())), ".")
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return true
+	}
+	return false
+}
+
+func safeAIDialContext(allowLoopback, allowPrivate bool) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+		if err != nil {
+			return nil, err
+		}
+		for _, ip := range ips {
+			if isBlockedDialIP(ip, allowLoopback, allowPrivate) {
+				return nil, fmt.Errorf("blocked dial to restricted IP %s", ip.String())
+			}
+		}
+		if len(ips) == 0 {
+			return nil, errors.New("no IP addresses resolved")
+		}
+		return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
+	}
+}
+
+var (
+	sharedCloudAITransport = &http.Transport{
+		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
+		DialContext:         safeAIDialContext(false, false),
+		MaxIdleConns:        32,
+		IdleConnTimeout:     60 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+	}
+	sharedLoopbackAITransport = &http.Transport{
+		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
+		DialContext:         safeAIDialContext(true, false),
+		MaxIdleConns:        16,
+		IdleConnTimeout:     60 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+	}
+	sharedLocalAITransport = &http.Transport{
+		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
+		DialContext:         safeAIDialContext(true, true),
+		MaxIdleConns:        16,
+		IdleConnTimeout:     60 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+	}
 )
 
 type Provider string
@@ -23,10 +125,11 @@ const (
 )
 
 type ClientConfig struct {
-	Provider Provider `json:"provider"`
-	APIKey   string   `json:"api_key"`
-	Model    string   `json:"model"`
-	Endpoint string   `json:"endpoint,omitempty"` // For Ollama or custom OpenAI-compatible proxies
+	Provider      Provider `json:"provider"`
+	APIKey        string   `json:"api_key"`
+	Model         string   `json:"model"`
+	Endpoint      string   `json:"endpoint,omitempty"` // For Ollama or custom OpenAI-compatible proxies
+	RemoteRequest bool     `json:"-"`                  // When true (LAN/remote caller), block loopback and RFC1918 dials even for Ollama
 }
 
 type AIClient struct {
@@ -74,26 +177,55 @@ func NewAIClient(cfg ClientConfig) *AIClient {
 		}
 	}
 
+	transport := sharedCloudAITransport
+	if !cfg.RemoteRequest {
+		if cfg.Provider == ProviderOllama {
+			transport = sharedLocalAITransport
+		} else if isExplicitLoopbackEndpoint(cfg.Endpoint) {
+			// Local user pointing directly at a local proxy (e.g. 127.0.0.1 / localhost): allow loopback,
+			// but never allow DNS rebinding from public hostnames to loopback or RFC1918.
+			transport = sharedLoopbackAITransport
+		}
+	}
+
 	return &AIClient{
 		cfg: cfg,
 		httpClient: &http.Client{
-			Timeout: 45 * time.Second,
+			Timeout:   45 * time.Second,
+			Transport: transport,
+			// Prevent SSRF via 3xx redirect to internal/metadata endpoints.
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 		},
 	}
 }
 
-// DetectOllama tests if an Ollama daemon is reachable locally.
-func DetectOllama(ctx context.Context, endpoint string) bool {
+// DetectOllama tests if an Ollama daemon is reachable. Remote callers are restricted to public IPs.
+func DetectOllama(ctx context.Context, endpoint string, isRemote ...bool) bool {
 	if endpoint == "" {
 		endpoint = "http://localhost:11434"
 	}
-	url := strings.TrimSuffix(endpoint, "/") + "/api/tags"
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	remote := len(isRemote) > 0 && isRemote[0]
+	targetURL := strings.TrimSuffix(endpoint, "/") + "/api/tags"
+	req, err := http.NewRequestWithContext(ctx, "GET", targetURL, nil)
 	if err != nil {
 		return false
 	}
 
-	client := http.Client{Timeout: 1500 * time.Millisecond}
+	transport := sharedLocalAITransport
+	if remote {
+		transport = sharedCloudAITransport
+	}
+
+	client := http.Client{
+		Timeout:   1500 * time.Millisecond,
+		Transport: transport,
+		// Never follow redirects during health checks (prevents redirect-based SSRF).
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return false
@@ -160,7 +292,8 @@ func (c *AIClient) completeOpenAICompatible(ctx context.Context, req CompletionR
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	const maxAIResponseBytes = 16 << 20 // 16 MB cap
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxAIResponseBytes))
 	if err != nil {
 		return nil, err
 	}
@@ -268,7 +401,8 @@ func (c *AIClient) completeAnthropic(ctx context.Context, req CompletionRequest)
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	const maxAIResponseBytes = 16 << 20 // 16 MB cap
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxAIResponseBytes))
 	if err != nil {
 		return nil, err
 	}
@@ -302,7 +436,7 @@ func (c *AIClient) completeGemini(ctx context.Context, req CompletionRequest) (*
 	// The key travels in the x-goog-api-key header, never the URL: *url.Error messages (DNS, TLS,
 	// timeout failures) embed the full request URL and would leak a ?key= parameter to logs/UI.
 	endpoint := fmt.Sprintf("%s/models/%s:generateContent",
-		strings.TrimSuffix(c.cfg.Endpoint, "/"), c.cfg.Model)
+		strings.TrimSuffix(c.cfg.Endpoint, "/"), url.PathEscape(c.cfg.Model))
 
 	payload := map[string]any{
 		"system_instruction": map[string]any{
@@ -343,7 +477,8 @@ func (c *AIClient) completeGemini(ctx context.Context, req CompletionRequest) (*
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	const maxAIResponseBytes = 16 << 20 // 16 MB cap
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxAIResponseBytes))
 	if err != nil {
 		return nil, err
 	}

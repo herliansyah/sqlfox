@@ -350,6 +350,52 @@ func TestVault_SaveConnectionPreservesSSLOnPartialUpdate(t *testing.T) {
 	if !got.UseSSL || got.SSLCA != "ca-cert-data" || got.SSLCert != "client-cert-data" || got.SSLKey != "client-key-data" {
 		t.Fatalf("SSL configuration was wiped by partial update: %+v", got)
 	}
+
+	// Editing with UseSSL=true and empty SSLKey on same host/port/driver preserves SSLKey.
+	editSameEndpoint := &ConnectionRecord{
+		ID:          initial.ID,
+		Name:        "mTLS Conn Edited",
+		Driver:      "mysql",
+		Environment: "Production",
+		Host:        "db.internal",
+		Port:        3307,
+		UseSSL:      true,
+		SSLCA:       "ca-cert-data",
+		SSLCert:     "client-cert-data",
+		SSLKey:      "",
+	}
+	if err := v.SaveConnection(editSameEndpoint); err != nil {
+		t.Fatal(err)
+	}
+	got2, err := v.GetConnection(initial.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got2.UseSSL || got2.SSLKey != "client-key-data" || !got2.HasSSLKey {
+		t.Fatalf("expected SSLKey to be preserved on same-endpoint edit, got: %+v", got2)
+	}
+
+	// Explicit ClearSSL disables SSL and clears stored certs/keys.
+	disableSSL := &ConnectionRecord{
+		ID:          initial.ID,
+		Name:        "mTLS Conn Disabled",
+		Driver:      "mysql",
+		Environment: "Production",
+		Host:        "db.internal",
+		Port:        3307,
+		UseSSL:      false,
+		ClearSSL:    true,
+	}
+	if err := v.SaveConnection(disableSSL); err != nil {
+		t.Fatal(err)
+	}
+	got3, err := v.GetConnection(initial.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got3.UseSSL || got3.SSLCA != "" || got3.SSLCert != "" || got3.SSLKey != "" || got3.HasSSLKey {
+		t.Fatalf("expected ClearSSL to disable SSL and clear certs, got: %+v", got3)
+	}
 }
 
 // Regression: legacy secrets sealed with nil AAD (pre-ADR-0060) must be automatically migrated to

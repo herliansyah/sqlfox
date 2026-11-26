@@ -2,6 +2,7 @@
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
   import Icon from '../common/Icon.svelte';
+  import { focusTrap } from '../../actions/focusTrap';
 
   let selectedFile: File | null = $state(null);
   let targetDb = $state('');
@@ -12,6 +13,8 @@
   let totalStmts = $state(0);
   let logs = $state<string[]>([]);
   let pendingBlockers = $state<any[] | null>(null);
+  let challengeInput = $state('');
+  let isProduction = $derived(appState.activeConnection?.environment === 'Production');
 
   let wasOpen = false;
 
@@ -27,6 +30,7 @@
         totalStmts = 0;
         logs = [];
         pendingBlockers = null;
+        challengeInput = '';
         wasOpen = true;
       }
     } else {
@@ -69,6 +73,7 @@
           stopOnError,
           database: effectiveDb,
           confirm: confirmChallenge,
+          challengeInput: confirmChallenge ? challengeInput.trim() : undefined,
         },
         (evt) => {
           if (evt.total) totalStmts = evt.total;
@@ -93,10 +98,10 @@
       appState.showToast(`Script executed: ${successCount} statements succeeded`, errorCount > 0 ? 'warning' : 'success');
       await appState.refreshCatalog();
     } catch (err: any) {
-      if (err?.status === 409 || err?.data?.requires_challenge || err?.message?.includes('destructive statements')) {
+      if (err?.status === 422 || err?.status === 409 || err?.data?.requires_challenge || err?.message?.includes('destructive statements')) {
         const blockers = Array.isArray(err?.data?.blockers) ? err.data.blockers : [];
         pendingBlockers = blockers.length > 0 ? blockers : [{ reason: err.message }];
-        logs = [...logs, `[SAFETY GUARD 409]: Script paused pending explicit operator confirmation.`];
+        logs = [...logs, `[SAFETY GUARD 422]: Script paused pending explicit operator confirmation.`];
         return;
       }
       logs = [...logs, `[CRITICAL ERROR]: ${err.message}`];
@@ -123,6 +128,7 @@
     <div
       role="dialog"
       aria-modal="true"
+      use:focusTrap
       aria-labelledby="run-sql-title"
       class="bg-[#0b0f19] border border-[#334155] rounded-xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150"
     >
@@ -198,12 +204,12 @@
           <span>Stop execution on first error</span>
         </label>
 
-        <!-- 409 Destructive Statements Lock Banner -->
+        <!-- 422 Destructive Statements Lock Banner -->
         {#if pendingBlockers}
           <div class="p-3.5 rounded-xl bg-rose-950/40 border border-rose-800/80 space-y-2.5">
             <div class="flex items-center space-x-2 text-rose-300 font-bold">
               <Icon name="shield-alert" class="w-4 h-4 text-rose-400 shrink-0" />
-              <span>Safety Guard Hold (HTTP 409): Destructive Statements Detected</span>
+              <span>Safety Guard Hold (HTTP 422): Destructive Statements Detected</span>
             </div>
             <div class="max-h-32 overflow-y-auto space-y-1 bg-slate-950/70 border border-rose-900/60 rounded p-2 font-mono text-[11px] text-rose-200">
               {#each pendingBlockers as b, bIdx}
@@ -215,18 +221,33 @@
                 </div>
               {/each}
             </div>
+            {#if isProduction}
+              <div class="space-y-1">
+                <label for="run-sql-challenge-input" class="block text-[11px] text-rose-200 font-semibold">
+                  Production confirmation required: type target database or table name (<span class="font-mono text-white">{targetDb || appState.currentDatabase || appState.activeConnection?.name}</span>)
+                </label>
+                <input
+                  id="run-sql-challenge-input"
+                  type="text"
+                  bind:value={challengeInput}
+                  placeholder={targetDb || appState.currentDatabase || 'target database or table'}
+                  class="w-full bg-[#090d16] border border-rose-700 rounded px-2.5 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-rose-400"
+                />
+              </div>
+            {/if}
             <div class="flex items-center justify-end space-x-2">
               <button
                 type="button"
-                onclick={() => (pendingBlockers = null)}
+                onclick={() => { pendingBlockers = null; challengeInput = ''; }}
                 class="px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-medium"
               >
                 Abort
               </button>
               <button
                 type="button"
+                disabled={isProduction && !challengeInput.trim()}
                 onclick={() => handleStartExecution(true)}
-                class="px-3.5 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-bold flex items-center space-x-1"
+                class="px-3.5 py-1 rounded bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-white text-[11px] font-bold flex items-center space-x-1"
               >
                 <Icon name="zap" class="w-3 h-3" />
                 <span>Acknowledge &amp; Execute Script Anyway</span>

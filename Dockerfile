@@ -1,20 +1,19 @@
 # syntax=docker/dockerfile:1
 
 # Stage 0: Build the Svelte frontend bundle (embedded via go:embed)
-FROM node:20-alpine AS frontend
+FROM node:22-alpine AS frontend
 
 WORKDIR /web
 COPY package.json package-lock.json ./
 COPY web/frontend/package.json web/frontend/package-lock.json ./web/frontend/
 RUN npm ci && npm --prefix web/frontend ci
 
-COPY web/frontend/ web/frontend/
-COPY scripts/ scripts/
 COPY web/ web/
-RUN npm run build:svelte
+COPY CHANGELOG.md ./
+RUN npm run build:svelte && cp CHANGELOG.md web/dist/CHANGELOG.md
 
 # Stage 1: Build the static pure-Go binary
-FROM golang:alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 WORKDIR /src
 
@@ -30,9 +29,10 @@ COPY --from=frontend /web/web/dist/ /src/web/dist/
 
 # Build statically-linked single binary
 ARG VERSION=dev
+ARG SQLFOX_MANIFEST_SIGNING_PUBKEY=""
 RUN CGO_ENABLED=0 go build \
     -trimpath \
-    -ldflags="-s -w -X main.Version=${VERSION}" \
+    -ldflags="-s -w -X main.Version=${VERSION} -X github.com/herliansyah/sqlfox/internal/server.manifestSigningPublicKeyB64=${SQLFOX_MANIFEST_SIGNING_PUBKEY}" \
     -o /bin/sqlfox \
     ./cmd/sqlfox
 

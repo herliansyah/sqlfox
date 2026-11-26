@@ -343,11 +343,11 @@
             <div class="flex items-center justify-between text-[11px] text-slate-400 gap-2 flex-wrap">
               <div class="flex items-center space-x-2">
                 <span class="font-mono text-slate-400">{formatTimestamp(log.executed_at)}</span>
-                <span class="px-1.5 py-0.2 rounded border text-[10px] font-sans font-medium {badge.cls}">
+                <span class="px-1.5 py-0.5 rounded border text-[10px] font-sans font-medium {badge.cls}">
                   {badge.label}
                 </span>
                 {#if log.database}
-                  <span class="px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 font-mono text-[10px]">
+                  <span class="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[10px]">
                     {log.database}
                   </span>
                 {/if}
@@ -377,11 +377,11 @@
                   To Editor
                 </button>
                 {#if log.error}
-                  <span class="px-1.5 py-0.2 rounded bg-rose-950 text-rose-400 font-bold text-[10px] border border-rose-800">
+                  <span class="px-1.5 py-0.5 rounded bg-rose-950 text-rose-400 font-bold text-[10px] border border-rose-800">
                     FAILED
                   </span>
                 {:else}
-                  <span class="px-1.5 py-0.2 rounded bg-emerald-950 text-emerald-400 font-bold text-[10px] border border-emerald-800">
+                  <span class="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-400 font-bold text-[10px] border border-emerald-800">
                     SUCCESS
                   </span>
                 {/if}

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
+  import { copyText } from '../../utils/clipboard';
   import Icon from '../common/Icon.svelte';
 
   let {
@@ -7,12 +8,20 @@
     isDigestLoading = false,
     digestError = '',
     onOpenSqlInEditor,
+    onRetry,
   }: {
     digestRows: any[];
     isDigestLoading: boolean;
     digestError: string;
     onOpenSqlInEditor: (sql?: string, title?: string) => void;
+    onRetry?: () => void;
   } = $props();
+
+  function copyWithToast(text: string | undefined, label: string) {
+    if (!text) return;
+    copyText(text);
+    appState.showToast(`Copied ${label} to clipboard`, 'success');
+  }
 </script>
 
     <!-- Statement Digest View -->
@@ -49,7 +58,7 @@
                   <p class="text-xs text-slate-400 max-w-2xl font-mono break-words">{digestError}</p>
                   <button
                     type="button"
-                    onclick={loadStatementDigest}
+                    onclick={() => onRetry?.()}
                     class="mt-1 px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold"
                   >
                     Retry
@@ -104,7 +113,7 @@
                     </button>
                     <button
                       type="button"
-                      onclick={() => openSqlInEditor(stmt, `Digest_${dIdx + 1}.sql`)}
+                      onclick={() => onOpenSqlInEditor(stmt, `Digest_${dIdx + 1}.sql`)}
                       class="px-1.5 py-0.5 rounded bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-[10px]"
                     >
                       Editor

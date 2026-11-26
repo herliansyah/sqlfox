@@ -61,6 +61,18 @@ func TestSystemOpenBrowserHandler(t *testing.T) {
 			t.Fatalf("expected 400 Bad Request for file:// scheme, got %d", rw.Code)
 		}
 	}
+
+	// 4. Reject external hosts (open-redirect / phishing launch guard)
+	{
+		extBody, _ := json.Marshal(map[string]string{"url": "https://evil.example.com/phish"})
+		extReq := httptest.NewRequest(http.MethodPost, "/api/system/open-browser", bytes.NewReader(extBody))
+		extReq.RemoteAddr = "127.0.0.1:54321"
+		rw := httptest.NewRecorder()
+		s.handleOpenBrowser(rw, extReq)
+		if rw.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 Bad Request for external host, got %d", rw.Code)
+		}
+	}
 }
 
 func TestSystemShutdownHandler(t *testing.T) {
@@ -71,6 +83,7 @@ func TestSystemShutdownHandler(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/system/shutdown", nil)
+	req.RemoteAddr = "127.0.0.1:54321"
 	w := httptest.NewRecorder()
 
 	s.handleShutdown(w, req)

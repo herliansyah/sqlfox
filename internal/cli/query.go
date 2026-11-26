@@ -18,6 +18,11 @@ import (
 
 // RunQuery executes SQL statements against the target database and writes formatted results to stdout.
 func RunQuery(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
+	return RunQueryContext(context.Background(), args, stdout, stderr, stdin)
+}
+
+// RunQueryContext executes SQL statements using the caller's context (for timeouts & signals).
+func RunQueryContext(ctx context.Context, args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 	fs := flag.NewFlagSet("query", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
@@ -70,9 +75,16 @@ func RunQuery(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 		return 1
 	}
 
-	// 2. Connect to target
-	ctx := context.Background()
-	target, err := ResolveTarget(ctx, targetParam, *driverFlag, *vaultDbFlag, *passFlag)
+	// 2. Connect to target (--conn strictly resolves from vault so --driver never hijacks a profile name)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var target *SessionTarget
+	if *dsnFlag != "" {
+		target, err = ResolveTarget(ctx, *dsnFlag, *driverFlag, *vaultDbFlag, *passFlag)
+	} else {
+		target, err = ResolveVaultTarget(ctx, *connFlag, *driverFlag, *vaultDbFlag, *passFlag)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "❌ Connection Error: %v\n", err)
 		return 1
@@ -123,10 +135,20 @@ func RunQuery(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 		isQuery := isRowReturningQuery(stmt)
 		start := time.Now()
 
-		if isQuery && len(statements) == 1 {
-			// Stream query results directly
-			if err := executeAndFormatQuery(ctx, target.Session, stmt, limit, format, stdout, stderr); err != nil {
-				fmt.Fprintf(stderr, "❌ Query Error: %v\n", err)
+		if isQuery {
+			// Stream query results directly (works for both single and multi-statement queries, inside or outside tx)
+			var qErr error
+			if activeTx != nil {
+				qErr = executeAndFormatQueryStream(ctx, activeTx, stmt, limit, format, stdout, stderr)
+			} else {
+				qErr = executeAndFormatQuery(ctx, target.Session, stmt, limit, format, stdout, stderr)
+			}
+			if qErr != nil {
+				if activeTx != nil {
+					_ = activeTx.Rollback()
+					activeTx = nil
+				}
+				fmt.Fprintf(stderr, "❌ Query Error: %v\n", qErr)
 				return 1
 			}
 		} else {
@@ -175,7 +197,8 @@ func resolveSQLInput(positional []string, file string, stdin io.Reader) (string,
 		return string(data), nil
 	}
 	if stdin != nil {
-		data, err := io.ReadAll(stdin)
+		const maxCLIInputBytes = 100 << 20
+		data, err := io.ReadAll(io.LimitReader(stdin, maxCLIInputBytes))
 		if err != nil {
 			return "", err
 		}
@@ -188,7 +211,15 @@ func isRowReturningQuery(sql string) bool {
 	return driver.IsQueryStatement(sql)
 }
 
+type queryStreamer interface {
+	QueryStream(ctx context.Context, sql string, limit int) (driver.RowStream, error)
+}
+
 func executeAndFormatQuery(ctx context.Context, sess driver.Session, sql string, limit int, format string, stdout, stderr io.Writer) error {
+	return executeAndFormatQueryStream(ctx, sess, sql, limit, format, stdout, stderr)
+}
+
+func executeAndFormatQueryStream(ctx context.Context, sess queryStreamer, sql string, limit int, format string, stdout, stderr io.Writer) error {
 	stream, err := sess.QueryStream(ctx, sql, limit)
 	if err != nil {
 		return err
@@ -207,11 +238,25 @@ func executeAndFormatQuery(ctx context.Context, sess driver.Session, sql string,
 		batchSize = limit
 	}
 
+	// Stream csv, ndjson, and json directly to stdout so large exports never OOM.
+	var csvWriter *csv.Writer
+	jsonFirst := true
+	if format == "csv" {
+		csvWriter = csv.NewWriter(stdout)
+		if err := csvWriter.Write(columns); err != nil {
+			return err
+		}
+	} else if format == "json" {
+		if _, err := io.WriteString(stdout, "[\n"); err != nil {
+			return err
+		}
+	}
+
 	for {
 		chunk, err := stream.NextChunk(batchSize)
 		if len(chunk) > 0 {
-			if format == "ndjson" {
-				// Stream directly row-by-row for zero memory accumulation
+			switch format {
+			case "ndjson":
 				for _, row := range chunk {
 					rowMap := make(map[string]any, len(columns))
 					for i, col := range columns {
@@ -223,8 +268,51 @@ func executeAndFormatQuery(ctx context.Context, sess driver.Session, sql string,
 						return err
 					}
 				}
-			} else {
+			case "csv":
+				for _, row := range chunk {
+					record := make([]string, len(columns))
+					for i := range columns {
+						if i < len(row) && row[i] != nil {
+							record[i] = fmt.Sprint(formatValue(row[i]))
+						}
+					}
+					if err := csvWriter.Write(record); err != nil {
+						return err
+					}
+				}
+				csvWriter.Flush()
+				if err := csvWriter.Error(); err != nil {
+					return err
+				}
+			case "json":
+				for _, row := range chunk {
+					rowMap := make(map[string]any, len(columns))
+					for i, col := range columns {
+						if i < len(row) {
+							rowMap[col] = formatValue(row[i])
+						}
+					}
+					if !jsonFirst {
+						if _, err := io.WriteString(stdout, ",\n"); err != nil {
+							return err
+						}
+					}
+					jsonFirst = false
+					b, err := json.MarshalIndent(rowMap, "  ", "  ")
+					if err != nil {
+						return err
+					}
+					if _, err := io.WriteString(stdout, "  "); err != nil {
+						return err
+					}
+					if _, err := stdout.Write(b); err != nil {
+						return err
+					}
+				}
+			case "table":
 				allRows = append(allRows, chunk...)
+			default:
+				return fmt.Errorf("unsupported output format: %s (choose table, json, ndjson, csv)", format)
 			}
 		}
 
@@ -243,39 +331,18 @@ func executeAndFormatQuery(ctx context.Context, sess driver.Session, sql string,
 			fmt.Fprintf(stderr, "(Showing first %d rows. Use --limit 0 for all rows)\n", limit)
 		}
 	case "json":
-		jsonList := make([]map[string]any, 0, len(allRows))
-		for _, row := range allRows {
-			rowMap := make(map[string]any, len(columns))
-			for i, col := range columns {
-				if i < len(row) {
-					rowMap[col] = formatValue(row[i])
-				}
-			}
-			jsonList = append(jsonList, rowMap)
-		}
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(jsonList)
-	case "csv":
-		w := csv.NewWriter(stdout)
-		if err := w.Write(columns); err != nil {
-			return err
-		}
-		for _, row := range allRows {
-			record := make([]string, len(columns))
-			for i := range columns {
-				if i < len(row) {
-					record[i] = fmt.Sprint(formatValue(row[i]))
-				}
-			}
-			if err := w.Write(record); err != nil {
+		if !jsonFirst {
+			if _, err := io.WriteString(stdout, "\n"); err != nil {
 				return err
 			}
 		}
-		w.Flush()
-		return w.Error()
+		if _, err := io.WriteString(stdout, "]\n"); err != nil {
+			return err
+		}
+	case "csv":
+		csvWriter.Flush()
+		return csvWriter.Error()
 	case "ndjson":
-		// already streamed
 		return nil
 	default:
 		return fmt.Errorf("unsupported output format: %s (choose table, json, ndjson, csv)", format)
@@ -288,12 +355,7 @@ func formatValue(val any) any {
 	if val == nil {
 		return nil
 	}
-	switch v := val.(type) {
-	case []byte:
-		return string(v)
-	default:
-		return v
-	}
+	return driver.FormatValueForJSON(val)
 }
 
 func renderTable(w io.Writer, columns []string, rows [][]any) {

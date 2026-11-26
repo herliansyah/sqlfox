@@ -6,8 +6,23 @@ import (
 	"strings"
 )
 
+// isPrimaryOrSystemIndex identifies constraint-backed primary/auto indexes across MySQL,
+// PostgreSQL (*_pkey), and SQLite (sqlite_autoindex_*) that must never be recommended for DROP INDEX.
+func isPrimaryOrSystemIndex(idx IndexMetadata, tblName string, pkCols []string) bool {
+	lower := strings.ToLower(strings.TrimSpace(idx.Name))
+	if lower == "primary" || strings.HasPrefix(lower, "sqlite_autoindex_") {
+		return true
+	}
+	if idx.IsUnique && len(pkCols) > 0 && isSameColumns(idx.Columns, pkCols) {
+		if strings.HasSuffix(lower, "_pkey") || lower == strings.ToLower(tblName)+"_pk" {
+			return true
+		}
+	}
+	return false
+}
+
 // DetectRedundantIndexes analyzes tables to discover duplicate, shadowed, and redundant primary key indexes.
-// ponytail: Pure AST/metadata heuristic scan avoiding redundant database queries.
+// ponytail: Pure metadata heuristic scan avoiding redundant database queries.
 func DetectRedundantIndexes(dialect, database string, tables []TableMetadata) []RedundantIndex {
 	var results []RedundantIndex
 
@@ -27,7 +42,7 @@ func DetectRedundantIndexes(dialect, database string, tables []TableMetadata) []
 		// 1. Check for redundant PK index
 		// If a secondary index consists strictly of the PK column(s) in order, it is redundant with PRIMARY.
 		for _, idx := range tbl.Indexes {
-			if strings.EqualFold(idx.Name, "PRIMARY") {
+			if isPrimaryOrSystemIndex(idx, tbl.Name, pkCols) {
 				continue
 			}
 			if len(pkCols) > 0 && isSameColumns(idx.Columns, pkCols) {
@@ -46,7 +61,7 @@ func DetectRedundantIndexes(dialect, database string, tables []TableMetadata) []
 		// 2. Check for Left-Prefix Shadows and Exact Duplicates
 		for i := 0; i < len(tbl.Indexes); i++ {
 			idxA := tbl.Indexes[i]
-			if strings.EqualFold(idxA.Name, "PRIMARY") {
+			if isPrimaryOrSystemIndex(idxA, tbl.Name, pkCols) {
 				continue
 			}
 
@@ -55,7 +70,12 @@ func DetectRedundantIndexes(dialect, database string, tables []TableMetadata) []
 					continue
 				}
 				idxB := tbl.Indexes[j]
-				if strings.EqualFold(idxB.Name, "PRIMARY") {
+				if isPrimaryOrSystemIndex(idxB, tbl.Name, pkCols) {
+					continue
+				}
+
+				// Never compare indexes of different access methods (e.g., FULLTEXT/GIN/HASH vs BTREE).
+				if idxA.Type != "" && idxB.Type != "" && !strings.EqualFold(idxA.Type, idxB.Type) {
 					continue
 				}
 

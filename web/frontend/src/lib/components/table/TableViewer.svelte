@@ -83,7 +83,7 @@
           id="btn-table-row-count-pill"
           type="button"
           onclick={() => appState.refreshTableExactCount(tableName)}
-          class="bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-slate-200 px-1.5 py-0.2 rounded text-[10px] transition cursor-pointer flex items-center space-x-1"
+          class="bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-slate-200 px-1.5 py-0.5 rounded text-[10px] transition cursor-pointer flex items-center space-x-1"
           title={tableMeta.row_count_exact ? 'Exact row count (click to recount)' : 'Estimated row count from catalog statistics (click to calculate exact count)'}
         >
           <span>{tableMeta.row_count_exact ? '' : '~'}{(tableMeta.row_count ?? tableMeta.rows_count ?? 0).toLocaleString()} rows</span>

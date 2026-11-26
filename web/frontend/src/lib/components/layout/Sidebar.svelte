@@ -7,11 +7,19 @@
   import Icon from '../common/Icon.svelte';
   import { onDestroy, tick } from 'svelte';
   import { viewportFit } from '../../actions/viewportFit';
+  import { formatObjectCount } from './sidebarHelpers';
+  import SidebarTableContextMenu from './SidebarTableContextMenu.svelte';
+
+  function loadSidebarWidth(): number {
+    try {
+      return Math.max(200, Math.min(500, Number(localStorage.getItem('sqlfox_sidebar_width')) || 260));
+    } catch {
+      return 260;
+    }
+  }
 
   // Resizable sidebar width with persistence
-  let sidebarWidth = $state(
-    Math.max(200, Math.min(500, Number(localStorage.getItem('sqlfox_sidebar_width')) || 260))
-  );
+  let sidebarWidth = $state(loadSidebarWidth());
   let isDragging = $state(false);
 
   function startResize(e: MouseEvent) {
@@ -32,7 +40,9 @@
     isDragging = false;
     window.removeEventListener('mousemove', onResize);
     window.removeEventListener('mouseup', stopResize);
-    localStorage.setItem('sqlfox_sidebar_width', String(sidebarWidth));
+    try {
+      localStorage.setItem('sqlfox_sidebar_width', String(sidebarWidth));
+    } catch { /* ignore storage restrictions */ }
   }
 
   // Release window listeners if the component unmounts mid-resize.
@@ -45,7 +55,9 @@
 
   function resetWidth() {
     sidebarWidth = 260;
-    localStorage.setItem('sqlfox_sidebar_width', '260');
+    try {
+      localStorage.setItem('sqlfox_sidebar_width', '260');
+    } catch { /* ignore storage restrictions */ }
   }
 
   onDestroy(stopResize);
@@ -153,10 +165,7 @@
   }
 
   function formatCount(cnt?: number): string {
-    if (cnt === undefined || cnt === null) return '';
-    if (cnt >= 1_000_000) return `${(cnt / 1_000_000).toFixed(1)}M`;
-    if (cnt >= 1_000) return `${(cnt / 1_000).toFixed(1)}k`;
-    return cnt.toLocaleString();
+    return formatObjectCount(cnt);
   }
 
   let filteredDbList = $derived.by(() => {
@@ -326,7 +335,7 @@
         </div>
         <div class="flex items-center space-x-1.5 shrink-0 ml-1">
           {#if appState.availableDatabases.length > 0}
-            <span class="text-[9px] font-mono text-slate-400 bg-slate-900/90 px-1.5 py-0.2 rounded border border-slate-800">
+            <span class="text-[9px] font-mono text-slate-400 bg-slate-900/90 px-1.5 py-0.5 rounded border border-slate-800">
               {appState.availableDatabases.length}
             </span>
           {/if}
@@ -563,6 +572,7 @@
                 <div
                   data-db-active={isActiveDb}
                   role="option"
+                  tabindex="-1"
                   aria-selected={db === appState.currentDatabase}
                   onmouseenter={() => (dbActiveIndex = idx)}
                   class="relative w-full px-2 py-1 flex items-center justify-between text-xs transition-colors group/dbrow {isActiveDb
@@ -585,7 +595,7 @@
                       </span>
                     {/if}
                     {#if appState.databaseTableCounts[db] !== undefined}
-                      <span class="text-[9px] text-slate-400 font-mono bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800">
+                      <span class="text-[9px] text-slate-400 font-mono bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">
                         {appState.databaseTableCounts[db]} tbls
                       </span>
                     {/if}
@@ -747,7 +757,7 @@
                   <Icon name="table" class="w-3.5 h-3.5 text-sky-400 shrink-0" />
                   <span class="truncate">Tables</span>
                 </span>
-                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
+                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
                   {#if appState.schemaFilter && totalTables > 0}
                     {appState.filteredTables.length}/{totalTables}
                   {:else}
@@ -801,7 +811,7 @@
                           <Icon name="folder" class="w-3.5 h-3.5 text-sky-400/80 shrink-0" />
                           <span class="text-sky-300 font-mono truncate">{grp.prefix}_*</span>
                         </span>
-                        <span class="text-[9.5px] font-mono text-slate-400 bg-slate-900/90 px-1.5 py-0.2 rounded border border-slate-800 shrink-0 ml-1">
+                        <span class="text-[9.5px] font-mono text-slate-400 bg-slate-900/90 px-1.5 py-0.5 rounded border border-slate-800 shrink-0 ml-1">
                           {grp.tables.length}
                         </span>
                       </button>
@@ -834,8 +844,8 @@
 
                                 {#if (table.row_count !== undefined && table.row_count !== null) || (table.rows_count !== undefined && table.rows_count !== null)}
                                   <span
-                                    class="text-[9.5px] text-slate-400 font-mono bg-slate-900/80 group-hover:bg-slate-800 px-1.5 py-0.2 rounded border border-slate-800/80 ml-1.5 shrink-0 tabular-nums transition-opacity {tableContextMenu?.open && tableContextMenu.tableName === table.name ? 'opacity-0' : 'group-hover:opacity-0'}"
-                                    title="{table.row_count_exact ? 'Exact rows' : 'Estimated rows'}: {(table.row_count ?? table.rows_count).toLocaleString()}"
+                                    class="text-[9.5px] text-slate-400 font-mono bg-slate-900/80 group-hover:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-800/80 ml-1.5 shrink-0 tabular-nums transition-opacity {tableContextMenu?.open && tableContextMenu.tableName === table.name ? 'opacity-0' : 'group-hover:opacity-0'}"
+                                    title="{table.row_count_exact ? 'Exact rows' : 'Estimated rows'}: {(table.row_count ?? table.rows_count ?? 0).toLocaleString()}"
                                   >
                                     {table.row_count_exact ? '' : '~'}{formatCount(table.row_count ?? table.rows_count)}
                                   </span>
@@ -846,7 +856,7 @@
                               <div
                                 class="absolute right-1 flex items-center space-x-0.5 rounded transition-all {tableContextMenu?.open && tableContextMenu.tableName === table.name
                                   ? 'opacity-100 pointer-events-auto bg-[#0f172a]/95 border border-slate-700/80 shadow-sm px-0.5 py-0.5'
-                                  : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/90 hover:bg-[#0f172a] border border-slate-700/60 shadow-sm px-0.5 py-0.5 backdrop-blur-xs'}"
+                                  : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/90 hover:bg-[#0f172a] border border-slate-700/60 shadow-sm px-0.5 py-0.5 backdrop-blur-sm'}"
                               >
                                 <button
                                   type="button"
@@ -898,8 +908,8 @@
 
                         {#if (table.row_count !== undefined && table.row_count !== null) || (table.rows_count !== undefined && table.rows_count !== null)}
                           <span
-                            class="text-[9.5px] text-slate-400 font-mono bg-slate-900/80 group-hover:bg-slate-800 px-1.5 py-0.2 rounded border border-slate-800/80 ml-1.5 shrink-0 tabular-nums transition-opacity {tableContextMenu?.open && tableContextMenu.tableName === table.name ? 'opacity-0' : 'group-hover:opacity-0'}"
-                            title="{table.row_count_exact ? 'Exact rows' : 'Estimated rows'}: {(table.row_count ?? table.rows_count).toLocaleString()}"
+                            class="text-[9.5px] text-slate-400 font-mono bg-slate-900/80 group-hover:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-800/80 ml-1.5 shrink-0 tabular-nums transition-opacity {tableContextMenu?.open && tableContextMenu.tableName === table.name ? 'opacity-0' : 'group-hover:opacity-0'}"
+                            title="{table.row_count_exact ? 'Exact rows' : 'Estimated rows'}: {(table.row_count ?? table.rows_count ?? 0).toLocaleString()}"
                           >
                             {table.row_count_exact ? '' : '~'}{formatCount(table.row_count ?? table.rows_count)}
                           </span>
@@ -910,7 +920,7 @@
                       <div
                         class="absolute right-1 flex items-center space-x-0.5 rounded transition-all {tableContextMenu?.open && tableContextMenu.tableName === table.name
                           ? 'opacity-100 pointer-events-auto bg-[#0f172a]/95 border border-slate-700/80 shadow-sm px-0.5 py-0.5'
-                          : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/90 hover:bg-[#0f172a] border border-slate-700/60 shadow-sm px-0.5 py-0.5 backdrop-blur-xs'}"
+                          : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/90 hover:bg-[#0f172a] border border-slate-700/60 shadow-sm px-0.5 py-0.5 backdrop-blur-sm'}"
                       >
                         <button
                           type="button"
@@ -959,8 +969,8 @@
 
                         {#if (table.row_count !== undefined && table.row_count !== null) || (table.rows_count !== undefined && table.rows_count !== null)}
                           <span
-                            class="text-[9.5px] text-slate-400 font-mono bg-slate-900/80 group-hover:bg-slate-800 px-1.5 py-0.2 rounded border border-slate-800/80 ml-1.5 shrink-0 tabular-nums transition-opacity {tableContextMenu?.open && tableContextMenu.tableName === table.name ? 'opacity-0' : 'group-hover:opacity-0'}"
-                            title="{table.row_count_exact ? 'Exact rows' : 'Estimated rows'}: {(table.row_count ?? table.rows_count).toLocaleString()}"
+                            class="text-[9.5px] text-slate-400 font-mono bg-slate-900/80 group-hover:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-800/80 ml-1.5 shrink-0 tabular-nums transition-opacity {tableContextMenu?.open && tableContextMenu.tableName === table.name ? 'opacity-0' : 'group-hover:opacity-0'}"
+                            title="{table.row_count_exact ? 'Exact rows' : 'Estimated rows'}: {(table.row_count ?? table.rows_count ?? 0).toLocaleString()}"
                           >
                             {table.row_count_exact ? '' : '~'}{formatCount(table.row_count ?? table.rows_count)}
                           </span>
@@ -971,7 +981,7 @@
                       <div
                         class="absolute right-1 flex items-center space-x-0.5 rounded transition-all {tableContextMenu?.open && tableContextMenu.tableName === table.name
                           ? 'opacity-100 pointer-events-auto bg-[#0f172a]/95 border border-slate-700/80 shadow-sm px-0.5 py-0.5'
-                          : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/90 hover:bg-[#0f172a] border border-slate-700/60 shadow-sm px-0.5 py-0.5 backdrop-blur-xs'}"
+                          : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/90 hover:bg-[#0f172a] border border-slate-700/60 shadow-sm px-0.5 py-0.5 backdrop-blur-sm'}"
                       >
                         <button
                           type="button"
@@ -1015,7 +1025,7 @@
                   <Icon name="eye" class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                   <span class="truncate">Views</span>
                 </span>
-                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
+                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
                   {appState.filteredViews.length}
                 </span>
               </button>
@@ -1052,7 +1062,7 @@
 
                     <!-- Quick action buttons -->
                     <div
-                      class="absolute right-1 flex items-center space-x-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/95 border border-slate-700/60 shadow-sm px-0.5 py-0.5 rounded transition-opacity backdrop-blur-xs"
+                      class="absolute right-1 flex items-center space-x-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/95 border border-slate-700/60 shadow-sm px-0.5 py-0.5 rounded transition-opacity backdrop-blur-sm"
                     >
                       <button
                         type="button"
@@ -1111,7 +1121,7 @@
                   <Icon name="terminal" class="w-3.5 h-3.5 text-amber-400 shrink-0" />
                   <span class="truncate">Procedures</span>
                 </span>
-                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
+                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
                   {appState.filteredProcedures.length}
                 </span>
               </button>
@@ -1142,7 +1152,7 @@
                       </div>
                     </button>
                     <div
-                      class="absolute right-1 flex items-center space-x-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/95 border border-slate-700/60 shadow-sm px-0.5 py-0.5 rounded transition-opacity backdrop-blur-xs"
+                      class="absolute right-1 flex items-center space-x-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/95 border border-slate-700/60 shadow-sm px-0.5 py-0.5 rounded transition-opacity backdrop-blur-sm"
                     >
                       <button
                         type="button"
@@ -1201,7 +1211,7 @@
                   <Icon name="code" class="w-3.5 h-3.5 text-cyan-400 shrink-0" />
                   <span class="truncate">Functions</span>
                 </span>
-                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
+                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
                   {appState.filteredFunctions.length}
                 </span>
               </button>
@@ -1232,7 +1242,7 @@
                       </div>
                     </button>
                     <div
-                      class="absolute right-1 flex items-center space-x-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/95 border border-slate-700/60 shadow-sm px-0.5 py-0.5 rounded transition-opacity backdrop-blur-xs"
+                      class="absolute right-1 flex items-center space-x-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/95 border border-slate-700/60 shadow-sm px-0.5 py-0.5 rounded transition-opacity backdrop-blur-sm"
                     >
                       <button
                         type="button"
@@ -1291,7 +1301,7 @@
                   <Icon name="zap" class="w-3.5 h-3.5 text-purple-400 shrink-0" />
                   <span class="truncate">Triggers</span>
                 </span>
-                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
+                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
                   {appState.filteredTriggers.length}
                 </span>
               </button>
@@ -1327,7 +1337,7 @@
                       {/if}
                     </button>
                     <div
-                      class="absolute right-1 flex items-center space-x-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/95 border border-slate-700/60 shadow-sm px-0.5 py-0.5 rounded transition-opacity backdrop-blur-xs"
+                      class="absolute right-1 flex items-center space-x-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/95 border border-slate-700/60 shadow-sm px-0.5 py-0.5 rounded transition-opacity backdrop-blur-sm"
                     >
                       <button
                         type="button"
@@ -1378,7 +1388,7 @@
                   <Icon name="clock" class="w-3.5 h-3.5 text-pink-400 shrink-0" />
                   <span class="truncate">Events</span>
                 </span>
-                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
+                <span class="font-mono text-[10px] bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 text-slate-400 shrink-0 ml-1">
                   {appState.filteredEvents.length}
                 </span>
               </button>
@@ -1420,7 +1430,7 @@
                       {/if}
                     </button>
                     <div
-                      class="absolute right-1 flex items-center space-x-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/95 border border-slate-700/60 shadow-sm px-0.5 py-0.5 rounded transition-opacity backdrop-blur-xs"
+                      class="absolute right-1 flex items-center space-x-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/95 border border-slate-700/60 shadow-sm px-0.5 py-0.5 rounded transition-opacity backdrop-blur-sm"
                     >
                       <button
                         type="button"
@@ -1480,207 +1490,12 @@
     </div>
 
     <!-- Table Context Menu -->
-    {#if tableContextMenu && tableContextMenu.open}
-      <div
-        use:viewportFit={{ x: tableContextMenu.x, y: tableContextMenu.y }}
-        style="top: {tableContextMenu.y}px; left: {tableContextMenu.x}px;"
-        class="fixed z-50 w-60 bg-[#0f172a] border border-[#334155] rounded-lg shadow-2xl py-1 divide-y divide-slate-800 text-xs font-sans animate-in fade-in duration-75 select-none"
-      >
-        <!-- Table Header in Menu -->
-        <div class="px-3 py-1.5 flex items-center space-x-2 bg-slate-900/60">
-          <Icon name="table" class="w-3.5 h-3.5 text-sky-400 shrink-0" />
-          <span class="text-[11px] font-bold text-slate-200 font-mono truncate">
-            {tableContextMenu.tableName}
-          </span>
-        </div>
-
-        <!-- Section 1: Views & Structure -->
-        <div class="py-1">
-          <button
-            type="button"
-            onclick={() => {
-              appState.openTableDataTab(tableContextMenu!.tableName);
-              closeTableMenu();
-            }}
-            class="w-full text-left px-3 py-1.5 hover:bg-slate-800/80 flex items-center space-x-2 text-slate-200 transition-colors"
-          >
-            <Icon name="table" class="w-3.5 h-3.5 text-emerald-400" />
-            <span>Open Data Grid</span>
-          </button>
-          <button
-            type="button"
-            onclick={() => {
-              appState.openTableStructureTab(tableContextMenu!.tableName);
-              closeTableMenu();
-            }}
-            class="w-full text-left px-3 py-1.5 hover:bg-slate-800/80 flex items-center space-x-2 text-slate-200 transition-colors"
-          >
-            <Icon name="columns" class="w-3.5 h-3.5 text-sky-400" />
-            <span>View Structure</span>
-          </button>
-          <div class="px-3 py-1 flex items-center justify-between gap-1.5">
-            <span class="text-[11px] text-slate-400 flex items-center gap-1.5">
-              <Icon name="file-code" class="w-3.5 h-3.5 text-purple-400" />
-              <span>DDL</span>
-            </span>
-            <div class="flex items-center gap-1 text-[10px]">
-              <button
-                type="button"
-                onclick={() => {
-                  appState.openTableDDLTab(tableContextMenu!.tableName);
-                  closeTableMenu();
-                }}
-                class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-purple-300 font-medium transition-colors"
-                title="Open CREATE TABLE in Tab"
-              >Tab</button>
-              <button
-                type="button"
-                onclick={() => {
-                  const tbl = tableContextMenu!.tableName;
-                  closeTableMenu();
-                  inspectDdlModal('table', tbl);
-                }}
-                class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-sky-300 font-medium transition-colors"
-                title="View DDL in Modal"
-              >Modal</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Section 2: Tools & Export -->
-        <div class="py-1">
-          <div class="px-3 py-1 flex items-center justify-between gap-1.5">
-            <span class="text-[11px] text-slate-400 flex items-center gap-1.5">
-              <Icon name="download" class="w-3.5 h-3.5 text-emerald-400" />
-              <span>SQL Dump</span>
-            </span>
-            <div class="flex items-center gap-1 text-[10px]">
-              <button
-                type="button"
-                onclick={() => {
-                  appState.exportTableDump(tableContextMenu!.tableName);
-                  closeTableMenu();
-                }}
-                class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-emerald-300 font-medium transition-colors"
-                title="Export Table SQL Dump"
-              >Quick</button>
-              <button
-                type="button"
-                onclick={() => {
-                  appState.openDumpModal(tableContextMenu!.tableName);
-                  closeTableMenu();
-                }}
-                class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-sky-300 font-medium transition-colors"
-                title="Export Dump Options..."
-              >Options...</button>
-            </div>
-          </div>
-          <button
-            type="button"
-            onclick={() => {
-              const tbl = tableContextMenu!.tableName;
-              closeTableMenu();
-              appState.openMockDataModal(tbl);
-            }}
-            class="w-full text-left px-3 py-1.5 hover:bg-slate-800/80 flex items-center space-x-2 text-slate-200 transition-colors"
-          >
-            <Icon name="sparkles" class="w-3.5 h-3.5 text-purple-400" />
-            <span>Generate Mock Data...</span>
-          </button>
-          <button
-            type="button"
-            onclick={() => {
-              appState.sendToAi(aiTablePrompt(tableContextMenu!), 'Table context sent to AI Copilot');
-              closeTableMenu();
-            }}
-            class="w-full text-left px-3 py-1.5 hover:bg-slate-800/80 flex items-center space-x-2 text-slate-200 transition-colors"
-          >
-            <Icon name="bot" class="w-3.5 h-3.5 text-sky-400" />
-            <span>Send Table to AI Copilot</span>
-          </button>
-          <div class="px-3 py-1 flex items-center justify-between gap-1.5">
-            <span class="text-[11px] text-slate-400 flex items-center gap-1.5">
-              <Icon name="copy" class="w-3.5 h-3.5 text-emerald-400" />
-              <span>Manage</span>
-            </span>
-            <div class="flex items-center gap-1 text-[10px]">
-              <button
-                type="button"
-                onclick={() => {
-                  appState.tableToDuplicate = tableContextMenu!.tableName;
-                  appState.isDuplicateTableModalOpen = true;
-                  closeTableMenu();
-                }}
-                class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-emerald-300 font-medium transition-colors"
-              >Duplicate...</button>
-              <button
-                type="button"
-                onclick={() => {
-                  appState.tableToRename = tableContextMenu!.tableName;
-                  appState.isRenameTableModalOpen = true;
-                  closeTableMenu();
-                }}
-                class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-sky-300 font-medium transition-colors"
-              >Rename...</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Section 3: Copy & Destructive Actions -->
-        <div class="py-1 space-y-0.5">
-          <div class="px-3 py-1 flex items-center justify-between gap-1.5">
-            <span class="text-[11px] text-slate-400 flex items-center gap-1.5">
-              <Icon name="clipboard-list" class="w-3.5 h-3.5 text-slate-400" />
-              <span>Copy</span>
-            </span>
-            <div class="flex items-center gap-1 text-[10px]">
-              <button
-                type="button"
-                onclick={() => {
-                  copyText(tableContextMenu!.tableName);
-                  appState.showToast(`Copied table name "${tableContextMenu!.tableName}"`, 'info');
-                  closeTableMenu();
-                }}
-                class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium transition-colors"
-              >Name</button>
-              <button
-                type="button"
-                onclick={() => {
-                  copySelectStatement(tableContextMenu!.tableName);
-                  closeTableMenu();
-                }}
-                class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-sky-300 font-medium transition-colors"
-              >SELECT 100</button>
-            </div>
-          </div>
-          <div class="px-3 py-1 flex items-center justify-between gap-1.5">
-            <span class="text-[11px] text-rose-400/90 flex items-center gap-1.5">
-              <Icon name="alert-triangle" class="w-3.5 h-3.5 text-amber-400" />
-              <span>Danger</span>
-            </span>
-            <div class="flex items-center gap-1 text-[10px]">
-              <button
-                type="button"
-                onclick={() => {
-                  const tbl = tableContextMenu!.tableName;
-                  closeTableMenu();
-                  appState.truncateTable(tbl);
-                }}
-                class="px-2 py-0.5 rounded bg-amber-950/60 hover:bg-amber-900/70 text-amber-300 font-medium transition-colors"
-              >Truncate</button>
-              <button
-                type="button"
-                onclick={() => {
-                  const tbl = tableContextMenu!.tableName;
-                  closeTableMenu();
-                  appState.dropTable(tbl);
-                }}
-                class="px-2 py-0.5 rounded bg-rose-950/60 hover:bg-rose-900/70 text-rose-300 font-medium transition-colors"
-              >Drop</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    {/if}
+    <SidebarTableContextMenu
+      menu={tableContextMenu}
+      onClose={closeTableMenu}
+      onInspectDdl={inspectDdlModal}
+      onCopySelect={copySelectStatement}
+      {aiTablePrompt}
+    />
   </aside>
 {/if}

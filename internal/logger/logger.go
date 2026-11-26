@@ -111,7 +111,6 @@ func (w *RotatingFileWriter) Close() error {
 func (w *RotatingFileWriter) rotateLocked() error {
 	if w.file != nil {
 		_ = w.file.Close()
-		w.file = nil
 	}
 	if w.maxBackups > 0 {
 		oldest := fmt.Sprintf("%s.%d", w.path, w.maxBackups)
@@ -120,15 +119,35 @@ func (w *RotatingFileWriter) rotateLocked() error {
 			src := fmt.Sprintf("%s.%d", w.path, i)
 			dst := fmt.Sprintf("%s.%d", w.path, i+1)
 			if _, err := os.Stat(src); err == nil {
-				_ = os.Rename(src, dst)
+				if rErr := os.Rename(src, dst); rErr != nil {
+					// Reopen active file in append mode so the writer does not permanently break on transient rename failure.
+					if reopened, oErr := os.OpenFile(w.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600); oErr == nil {
+						w.file = reopened
+					} else {
+						w.file = nil
+					}
+					return rErr
+				}
 			}
 		}
-		_ = os.Rename(w.path, w.path+".1")
+		if rErr := os.Rename(w.path, w.path+".1"); rErr != nil && !os.IsNotExist(rErr) {
+			if reopened, oErr := os.OpenFile(w.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600); oErr == nil {
+				w.file = reopened
+			} else {
+				w.file = nil
+			}
+			return rErr
+		}
 	} else {
 		_ = os.Remove(w.path)
 	}
 	f, err := os.OpenFile(w.path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
+		if reopened, oErr := os.OpenFile(w.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600); oErr == nil {
+			w.file = reopened
+		} else {
+			w.file = nil
+		}
 		return err
 	}
 	w.file = f
@@ -213,7 +232,7 @@ func readFileTailLines(path string, maxBytes int64, maxLines int) ([]string, err
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		return nil, err
 	}
-	data, err := io.ReadAll(f)
+	data, err := io.ReadAll(io.LimitReader(f, maxBytes))
 	if err != nil {
 		return nil, err
 	}
@@ -355,7 +374,10 @@ type broadcastHandler struct {
 }
 
 func (h *broadcastHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	return true
+	if h.primary != nil {
+		return h.primary.Enabled(ctx, level)
+	}
+	return level >= slog.LevelInfo
 }
 
 func (h *broadcastHandler) Handle(ctx context.Context, r slog.Record) error {
@@ -371,16 +393,18 @@ func (h *broadcastHandler) Handle(ctx context.Context, r slog.Record) error {
 	module := "app"
 
 	for _, a := range h.attrs {
-		attrs[a.Key] = a.Value.Any()
+		val := a.Value.Resolve()
+		attrs[a.Key] = val.Any()
 		if a.Key == "module" {
-			module = a.Value.String()
+			module = val.String()
 		}
 	}
 
 	r.Attrs(func(a slog.Attr) bool {
-		attrs[a.Key] = a.Value.Any()
+		val := a.Value.Resolve()
+		attrs[a.Key] = val.Any()
 		if a.Key == "module" {
-			module = a.Value.String()
+			module = val.String()
 		}
 		return true
 	})
@@ -582,6 +606,10 @@ func (w *statusWriter) Flush() {
 	}
 }
 
+func (w *statusWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
 // HTTPMiddleware logs incoming HTTP requests with credential masking and static asset filtering.
 func HTTPMiddleware(l *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -606,12 +634,10 @@ func HTTPMiddleware(l *slog.Logger) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Credential masking: sensitive endpoints do not log raw parameters
+			// Credential masking: sensitive endpoints do not log raw parameters.
+			// Never trust raw X-Forwarded-For blindly in logs (spoofable when not behind a trusted proxy).
 			isAuth := strings.HasPrefix(path, "/api/auth/")
 			clientIP := r.RemoteAddr
-			if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-				clientIP = forwarded
-			}
 
 			level := slog.LevelDebug
 			if sw.status >= 500 {

@@ -28,6 +28,43 @@
     copyText(text);
     appState.showToast(`Copied ${label} to clipboard`, 'success');
   }
+
+  let curatedVarCount = $derived.by(
+    () => (variablesReport?.variables || []).filter((v: any) => v.is_curated).length
+  );
+
+  let filteredVariables = $derived.by(() => {
+    if (!variablesReport?.variables) return [];
+    let list = variablesReport.variables;
+    if (showCuratedOnly) {
+      list = list.filter((v: any) => v.is_curated);
+    }
+    if (varCategory !== 'All') {
+      list = list.filter((v: any) => v.category === varCategory);
+    }
+    if (varSeverityFilter !== 'all') {
+      list = list.filter((v: any) => (v.severity || 'info') === varSeverityFilter);
+    }
+    if (varFilterText.trim()) {
+      const q = varFilterText.toLowerCase();
+      list = list.filter(
+        (v: any) =>
+          v.name.toLowerCase().includes(q) ||
+          String(v.value).toLowerCase().includes(q) ||
+          (v.description && v.description.toLowerCase().includes(q))
+      );
+    }
+    return list;
+  });
+
+  let varCategories = $derived.by(() => {
+    if (!variablesReport?.variables) return ['All'];
+    const cats = new Set<string>(['All']);
+    variablesReport.variables.forEach((v: any) => {
+      if (v.category) cats.add(v.category);
+    });
+    return Array.from(cats);
+  });
 </script>
 
     <!-- Server Variables View -->
@@ -109,8 +146,17 @@
                 {@const isExpanded = expandedVars.has(v.name)}
                 {@const sev = String(v.severity || 'info').toLowerCase()}
                 <tr
+                  role="button"
+                  tabindex="0"
+                  aria-expanded={isExpanded}
                   class="hover:bg-slate-800/40 cursor-pointer transition-colors"
                   onclick={() => toggleVarExpand(v.name)}
+                  onkeydown={(e) => {
+                    if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+                      e.preventDefault();
+                      toggleVarExpand(v.name);
+                    }
+                  }}
                 >
                   <td class="py-2 px-3 text-slate-500">
                     <Icon name={isExpanded ? 'chevron-down' : 'chevron-right'} class="w-3.5 h-3.5" />
@@ -130,7 +176,7 @@
                   </td>
                   <td class="py-2 px-3 text-center">
                     {#if v.is_dynamic}
-                      <span class="px-1.5 py-0.2 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] font-bold">YES</span>
+                      <span class="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] font-bold">YES</span>
                     {:else}
                       <span class="text-slate-600 text-[10px]">RESTART</span>
                     {/if}

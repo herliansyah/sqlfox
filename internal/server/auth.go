@@ -2,9 +2,11 @@ package server
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net"
 	"net/http"
 	"net/url"
@@ -21,15 +23,19 @@ var allowDefaultTestHost = false
 
 type ipLockoutRecord struct {
 	failedCount int
+	lastAttempt time.Time
 	lockedUntil time.Time
 }
 
-// AuthManager manages authentication tokens and remote access verification.
+// AuthManager manages authentication tokens, ephemeral LAN pairing codes, and remote access verification.
 type AuthManager struct {
-	tokens    map[string]time.Time
-	lockouts  map[string]*ipLockoutRecord
-	argon2Sem chan struct{}
-	mu        sync.RWMutex
+	tokens             map[string]time.Time
+	lockouts           map[string]*ipLockoutRecord
+	pairingCode        string
+	pairingExpiresAt   time.Time
+	pairingFailedCount int
+	argon2Sem          chan struct{}
+	mu                 sync.RWMutex
 }
 
 func NewAuthManager() *AuthManager {
@@ -52,9 +58,19 @@ func (a *AuthManager) purgeExpiredLocked() {
 	for ip, rec := range a.lockouts {
 		if !rec.lockedUntil.IsZero() && now.After(rec.lockedUntil) {
 			delete(a.lockouts, ip)
+			continue
+		}
+		// Evict non-locked entries after 15 minutes of inactivity to prevent unbounded RAM growth.
+		if rec.lockedUntil.IsZero() && !rec.lastAttempt.IsZero() && now.Sub(rec.lastAttempt) > 15*time.Minute {
+			delete(a.lockouts, ip)
 		}
 	}
 }
+
+const (
+	maxActiveTokens  = 1000
+	maxLockoutRecord = 10000
+)
 
 func (a *AuthManager) GenerateToken() string {
 	bytes := make([]byte, 24)
@@ -64,6 +80,20 @@ func (a *AuthManager) GenerateToken() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.purgeExpiredLocked()
+	if len(a.tokens) >= maxActiveTokens {
+		// Evict oldest token to bound memory growth under high login churn.
+		var oldestKey string
+		var oldestExp time.Time
+		for k, exp := range a.tokens {
+			if oldestKey == "" || exp.Before(oldestExp) {
+				oldestKey = k
+				oldestExp = exp
+			}
+		}
+		if oldestKey != "" {
+			delete(a.tokens, oldestKey)
+		}
+	}
 	a.tokens[token] = time.Now().Add(24 * time.Hour)
 	return token
 }
@@ -72,19 +102,19 @@ func (a *AuthManager) ValidateToken(token string) bool {
 	if token == "" {
 		return false
 	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
+	a.mu.RLock()
 	exp, ok := a.tokens[token]
+	a.mu.RUnlock()
 	if !ok {
 		return false
 	}
 	if time.Now().After(exp) {
-		delete(a.tokens, token)
+		a.mu.Lock()
+		if curExp, stillThere := a.tokens[token]; stillThere && time.Now().After(curExp) {
+			delete(a.tokens, token)
+		}
+		a.mu.Unlock()
 		return false
-	}
-	if len(a.tokens) > 50 {
-		a.purgeExpiredLocked()
 	}
 	return true
 }
@@ -109,14 +139,27 @@ func (a *AuthManager) RecordFailedAttempt(ip string) (locked bool, remaining tim
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.purgeExpiredLocked()
+	now := time.Now()
 	rec, ok := a.lockouts[ip]
-	if !ok || (!rec.lockedUntil.IsZero() && time.Now().After(rec.lockedUntil)) {
+	if !ok || (!rec.lockedUntil.IsZero() && now.After(rec.lockedUntil)) {
+		if !ok && len(a.lockouts) >= maxLockoutRecord {
+			// Bound lockout table size under distributed spoofed-IP brute force.
+			for k, v := range a.lockouts {
+				if v.lockedUntil.IsZero() {
+					delete(a.lockouts, k)
+					if len(a.lockouts) < maxLockoutRecord {
+						break
+					}
+				}
+			}
+		}
 		rec = &ipLockoutRecord{}
 		a.lockouts[ip] = rec
 	}
+	rec.lastAttempt = now
 	rec.failedCount++
 	if rec.failedCount >= 5 {
-		rec.lockedUntil = time.Now().Add(10 * time.Minute)
+		rec.lockedUntil = now.Add(10 * time.Minute)
 		return true, 10 * time.Minute
 	}
 	return false, 0
@@ -127,6 +170,73 @@ func (a *AuthManager) RecordSuccessfulAttempt(ip string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	delete(a.lockouts, ip)
+}
+
+const pairingCodeTTL = 5 * time.Minute
+
+// GeneratePairingCode issues a short-lived, single-use 8-digit LAN pairing code so the
+// vault's master password is never exposed over HTTP.
+func (a *AuthManager) GeneratePairingCode() (string, time.Time) {
+	var b strings.Builder
+	for i := 0; i < 8; i++ {
+		n, err := rand.Int(rand.Reader, big.NewInt(10))
+		if err != nil {
+			panic("crypto/rand unavailable for pairing code generation: " + err.Error())
+		}
+		b.WriteByte(byte('0' + n.Int64()))
+	}
+	code := b.String()
+	exp := time.Now().Add(pairingCodeTTL)
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.pairingCode = code
+	a.pairingExpiresAt = exp
+	a.pairingFailedCount = 0
+	return code, exp
+}
+
+// GetOrCreatePairingCode returns the active non-expired pairing code without mutating it,
+// or generates an initial code if none exists or the previous code has expired.
+func (a *AuthManager) GetOrCreatePairingCode() (string, time.Time) {
+	a.mu.RLock()
+	if a.pairingCode != "" && time.Now().Before(a.pairingExpiresAt) {
+		code, exp := a.pairingCode, a.pairingExpiresAt
+		a.mu.RUnlock()
+		return code, exp
+	}
+	a.mu.RUnlock()
+	return a.GeneratePairingCode()
+}
+
+// ConsumePairingCode validates and invalidates the active ephemeral LAN pairing code.
+// Burns the code globally after 5 failed attempts to defeat distributed/spoofed brute force.
+func (a *AuthManager) ConsumePairingCode(candidate string) bool {
+	if candidate == "" {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.pairingCode == "" || time.Now().After(a.pairingExpiresAt) {
+		a.pairingCode = ""
+		a.pairingExpiresAt = time.Time{}
+		a.pairingFailedCount = 0
+		return false
+	}
+	if len(candidate) != len(a.pairingCode) || subtle.ConstantTimeCompare([]byte(candidate), []byte(a.pairingCode)) != 1 {
+		a.pairingFailedCount++
+		if a.pairingFailedCount >= 5 {
+			a.pairingCode = ""
+			a.pairingExpiresAt = time.Time{}
+			a.pairingFailedCount = 0
+		}
+		return false
+	}
+	// Single-use: burn immediately on success.
+	a.pairingCode = ""
+	a.pairingExpiresAt = time.Time{}
+	a.pairingFailedCount = 0
+	return true
 }
 
 func (s *Server) isHostAllowed(host string) bool {
@@ -144,26 +254,32 @@ func (s *Server) isHostAllowed(host string) bool {
 	if allowDefaultTestHost && host == "example.com" {
 		return true
 	}
-	for _, ah := range s.allowedHosts {
+	s.mu.Lock()
+	allowedHosts := append([]string(nil), s.allowedHosts...)
+	lanEnabled := s.lanEnabled
+	lanIP := s.lanIP
+	s.mu.Unlock()
+
+	for _, ah := range allowedHosts {
 		if strings.EqualFold(host, ah) {
 			return true
 		}
 	}
-	if s.lanEnabled {
+	if lanEnabled {
 		if ip := net.ParseIP(host); ip != nil {
-			return s.isAllowedLANHostIP(ip)
+			return isAllowedLANHostIPWith(ip, lanIP)
 		}
 	}
 	return false
 }
 
-// isAllowedLANHostIP decides whether an IP-literal Host header is acceptable in LAN mode. It pins to
-// the detected LAN IP when known, and otherwise accepts only loopback and private/link-local ranges
-// (RFC 1918, RFC 4193, link-local). A public IP in the Host header is a DNS-rebinding signal and is
-// rejected: SqlFox is never meant to be reached over a routable public address.
-func (s *Server) isAllowedLANHostIP(ip net.IP) bool {
-	if s.lanIP != "" {
-		if want := net.ParseIP(s.lanIP); want != nil && want.Equal(ip) {
+// isAllowedLANHostIPWith decides whether an IP-literal Host header is acceptable in LAN mode. It accepts
+// the detected LAN IP, loopback, and private/link-local ranges (RFC 1918, RFC 4193, link-local).
+// A public IP in the Host header is a DNS-rebinding signal and is rejected: SqlFox is never meant
+// to be reached over a routable public address.
+func isAllowedLANHostIPWith(ip net.IP, lanIP string) bool {
+	if lanIP != "" {
+		if want := net.ParseIP(lanIP); want != nil && want.Equal(ip) {
 			return true
 		}
 	}
@@ -183,30 +299,57 @@ func (s *Server) IngressGuardMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// 2. CSRF Guard: State-mutating API requests
-		if strings.HasPrefix(r.URL.Path, "/api") {
-			switch r.Method {
-			case http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch:
-				if sfs := r.Header.Get("Sec-Fetch-Site"); sfs == "cross-site" {
+		// 2. CSRF Guard: State-mutating API requests and sensitive/mutating GET endpoints
+		isMutatingMethod := false
+		switch r.Method {
+		case http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch:
+			isMutatingMethod = true
+		}
+		isSensitiveGET := r.Method == http.MethodGet && (r.URL.Path == "/api/auth/master-key" ||
+			r.URL.Path == "/api/ai/ollama-check" ||
+			strings.HasPrefix(r.URL.Path, "/debug/pprof"))
+		if (strings.HasPrefix(r.URL.Path, "/api") && isMutatingMethod) || isSensitiveGET {
+			if sfs := r.Header.Get("Sec-Fetch-Site"); sfs == "cross-site" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"error": "Cross-site request blocked (CSRF protection)",
+				})
+				return
+			}
+
+			if origin := r.Header.Get("Origin"); origin != "" {
+				// Same-origin only: an allowed-but-different origin (another localhost port,
+				// any LAN IP, or scheme mismatch) must not be able to ride the session cookie.
+				// Only trust X-Forwarded-Proto when behind a configured trusted reverse proxy.
+				expectedScheme := "http"
+				if r.TLS != nil {
+					expectedScheme = "https"
+				} else {
+					s.mu.Lock()
+					bp := s.behindProxy
+					s.mu.Unlock()
+					if !bp {
+						envVal := strings.ToLower(strings.TrimSpace(os.Getenv("SQLFOX_BEHIND_PROXY")))
+						bp = envVal == "1" || envVal == "true"
+					}
+					if bp && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+						remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
+						if err != nil {
+							remoteHost = r.RemoteAddr
+						}
+						if s.isTrustedProxyIP(net.ParseIP(remoteHost)) {
+							expectedScheme = "https"
+						}
+					}
+				}
+				if u, err := url.Parse(origin); err != nil || !strings.EqualFold(u.Host, r.Host) || !strings.EqualFold(u.Scheme, expectedScheme) {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusForbidden)
 					_ = json.NewEncoder(w).Encode(map[string]any{
-						"error": "Cross-site request blocked (CSRF protection)",
+						"error": "Unauthorized Origin (CSRF protection)",
 					})
 					return
-				}
-
-				if origin := r.Header.Get("Origin"); origin != "" {
-					// Same-origin only: an allowed-but-different origin (another localhost port,
-					// any LAN IP) must not be able to ride the session cookie.
-					if u, err := url.Parse(origin); err != nil || !strings.EqualFold(u.Host, r.Host) {
-						w.Header().Set("Content-Type", "application/json")
-						w.WriteHeader(http.StatusForbidden)
-						_ = json.NewEncoder(w).Encode(map[string]any{
-							"error": "Unauthorized Origin (CSRF protection)",
-						})
-						return
-					}
 				}
 			}
 		}
@@ -227,20 +370,73 @@ func isLoopback(remoteAddr string) bool {
 	return ip.IsLoopback()
 }
 
-// GetClientIP extracts the effective client IP, respecting trusted proxy headers when behindProxy is enabled.
+// isTrustedProxyIP reports whether ip is a trusted reverse proxy allowed to supply forwarding headers.
+// Only loopback and explicitly configured trustedProxies IPs/CIDRs are trusted (never blanket RFC 1918),
+// preventing sibling LAN/VPC/container peers from spoofing X-Forwarded-For to bypass lockout.
+func (s *Server) isTrustedProxyIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() {
+		return true
+	}
+	s.mu.Lock()
+	proxies := s.trustedProxies
+	s.mu.Unlock()
+	for _, entry := range proxies {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if _, cidr, err := net.ParseCIDR(entry); err == nil {
+			if cidr.Contains(ip) {
+				return true
+			}
+			continue
+		}
+		if tip := net.ParseIP(entry); tip != nil && tip.Equal(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// GetClientIP extracts the effective client IP, respecting forwarding headers only when
+// behindProxy is enabled AND the direct TCP peer (r.RemoteAddr) is a trusted proxy.
+// X-Forwarded-For is parsed from right to left to prevent client-supplied left-edge spoofing.
 func (s *Server) GetClientIP(r *http.Request) string {
+	remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		remoteHost = r.RemoteAddr
+	}
+	remoteIP := net.ParseIP(remoteHost)
+
 	s.mu.Lock()
 	proxyEnabled := s.behindProxy
 	s.mu.Unlock()
 
-	if proxyEnabled || os.Getenv("SQLFOX_BEHIND_PROXY") == "1" || strings.ToLower(os.Getenv("SQLFOX_BEHIND_PROXY")) == "true" {
+	if !proxyEnabled {
+		envVal := strings.ToLower(strings.TrimSpace(os.Getenv("SQLFOX_BEHIND_PROXY")))
+		proxyEnabled = envVal == "1" || envVal == "true"
+	}
+
+	if proxyEnabled && s.isTrustedProxyIP(remoteIP) {
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 			parts := strings.Split(xff, ",")
-			if len(parts) > 0 {
-				clientIP := strings.TrimSpace(parts[0])
-				if ip := net.ParseIP(clientIP); ip != nil {
-					return clientIP
+			var fallbackTrusted string
+			for i := len(parts) - 1; i >= 0; i-- {
+				candidate := strings.TrimSpace(parts[i])
+				ip := net.ParseIP(candidate)
+				if ip == nil {
+					continue
 				}
+				if !s.isTrustedProxyIP(ip) {
+					return candidate
+				}
+				fallbackTrusted = candidate
+			}
+			if fallbackTrusted != "" {
+				return fallbackTrusted
 			}
 		}
 		if xri := r.Header.Get("X-Real-IP"); xri != "" {
@@ -251,16 +447,34 @@ func (s *Server) GetClientIP(r *http.Request) string {
 		}
 	}
 
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	return host
+	return remoteHost
 }
 
 // IsRemoteRequest reports whether a request originates from a non-loopback host,
 // accurately inspecting reverse proxy headers when behind-proxy mode is active.
+// Requests carrying forwarding headers from a trusted proxy are never granted unauthenticated
+// loopback bypass even if X-Forwarded-For / X-Real-IP claims 127.0.0.1.
 func (s *Server) IsRemoteRequest(r *http.Request) bool {
+	remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		remoteHost = r.RemoteAddr
+	}
+	remoteIP := net.ParseIP(remoteHost)
+
+	s.mu.Lock()
+	proxyEnabled := s.behindProxy
+	s.mu.Unlock()
+	if !proxyEnabled {
+		envVal := strings.ToLower(strings.TrimSpace(os.Getenv("SQLFOX_BEHIND_PROXY")))
+		proxyEnabled = envVal == "1" || envVal == "true"
+	}
+
+	if proxyEnabled && s.isTrustedProxyIP(remoteIP) {
+		if r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Real-IP") != "" || r.Header.Get("Forwarded") != "" {
+			return true
+		}
+	}
+
 	clientIP := s.GetClientIP(r)
 	ip := net.ParseIP(clientIP)
 	if ip == nil {
@@ -329,7 +543,7 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-SqlFox-App", "sqlfox")
 	writeJSON(w, http.StatusOK, map[string]any{
 		"app":       "sqlfox",
-		"version":   s.version,
+		"version":   s.GetVersion(),
 		"is_remote": isRemote,
 		"unlocked":  unlocked,
 	})
@@ -366,7 +580,30 @@ func (s *Server) handleAuthUnlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !s.vault.ValidateMasterPassword(req.Password) {
+	// Re-check lockout after acquiring argon2Sem to close parallel unlock race at failedCount == 4.
+	if locked, remaining := s.authMgr.IsLocked(clientIP); locked {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": fmt.Sprintf("Too many failed attempts. Locked out for %d minutes.", int(remaining.Minutes())+1),
+		})
+		return
+	}
+
+	s.mu.Lock()
+	lanEnabled := s.lanEnabled
+	behindProxy := s.behindProxy
+	s.mu.Unlock()
+	if !behindProxy {
+		envVal := strings.ToLower(strings.TrimSpace(os.Getenv("SQLFOX_BEHIND_PROXY")))
+		behindProxy = envVal == "1" || envVal == "true"
+	}
+
+	valid := s.vault.ValidateMasterPassword(req.Password)
+	if !valid && lanEnabled {
+		valid = s.authMgr.ConsumePairingCode(req.Password)
+	}
+	if !valid {
 		locked, remaining := s.authMgr.RecordFailedAttempt(clientIP)
 		if locked {
 			w.Header().Set("Content-Type", "application/json")
@@ -384,14 +621,25 @@ func (s *Server) handleAuthUnlock(w http.ResponseWriter, r *http.Request) {
 
 	token := s.authMgr.GenerateToken()
 
+	isSecureConn := r.TLS != nil
+	if !isSecureConn && behindProxy {
+		remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			remoteHost = r.RemoteAddr
+		}
+		if s.isTrustedProxyIP(net.ParseIP(remoteHost)) && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+			isSecureConn = true
+		}
+	}
+
 	http.SetCookie(w, &http.Cookie{
 		Name:     "sqlfox_token",
 		Value:    token,
 		Path:     "/",
 		Expires:  time.Now().Add(24 * time.Hour),
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
-		SameSite: http.SameSiteLaxMode,
+		Secure:   isSecureConn,
+		SameSite: http.SameSiteStrictMode,
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -407,19 +655,34 @@ func (s *Server) handleGetMasterPassword(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if !s.lanEnabled {
+	s.mu.Lock()
+	lanEnabled := s.lanEnabled
+	lanIP := s.lanIP
+	s.mu.Unlock()
+
+	if !lanEnabled {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"lan_enabled": false,
 		})
 		return
 	}
 
-	resp := map[string]any{
-		"lan_enabled":     true,
-		"master_password": s.masterPassword,
+	// GET is idempotent (returns active pairing code without rotating/invalidating an in-flight pairing);
+	// POST explicitly rotates and issues a fresh pairing code.
+	var code string
+	var exp time.Time
+	if r.Method == http.MethodPost {
+		code, exp = s.authMgr.GeneratePairingCode()
+	} else {
+		code, exp = s.authMgr.GetOrCreatePairingCode()
 	}
-	if s.lanIP != "" {
-		resp["lan_ip"] = s.lanIP
+	resp := map[string]any{
+		"lan_enabled":            true,
+		"pairing_code":           code,
+		"pairing_expires_in_sec": int(time.Until(exp).Seconds()),
+	}
+	if lanIP != "" {
+		resp["lan_ip"] = lanIP
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

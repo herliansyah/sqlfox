@@ -1,12 +1,12 @@
 <script lang="ts">
   import { copyText } from '../../utils/clipboard';
-  import { quoteSqlIdentifier } from '../../utils/sqlStatements';
+  import { buildErdSvg, buildLeftJoinSQL, buildMermaidErd } from './erdExport';
   import { api } from '../../api/client';
   import { appState } from '../../stores/appState.svelte';
   import type { TableMetadata } from '../../../types';
   import Icon from '../common/Icon.svelte';
   import { untrack } from 'svelte';
-  import { viewportFit } from '../../actions/viewportFit';
+  import ErdContextMenu from './ErdContextMenu.svelte';
 
   const CARD_WIDTH = 224;
   const HEADER_HEIGHT = 38;
@@ -239,13 +239,15 @@
   let lines = $derived.by<FKLine[]>(() => {
     const list: FKLine[] = [];
     const sel = selectedTable;
+    const tableByLower = new Map<string, (typeof tables)[number]>();
+    for (const t of tables) {
+      tableByLower.set(t.name.toLowerCase(), t);
+    }
 
     tables.forEach((src) => {
       (src.foreign_keys || []).forEach((fk) => {
         const sp = positions[src.name];
-        const dst = tables.find(
-          (t) => t.name.toLowerCase() === (fk.referenced_table || '').toLowerCase()
-        );
+        const dst = tableByLower.get((fk.referenced_table || '').toLowerCase());
         const dp = dst ? positions[dst.name] : positions[fk.referenced_table];
         if (!sp || !dp) return;
 
@@ -439,15 +441,33 @@
     window.addEventListener('mouseup', onCardDragUp);
   }
 
+  let dragRafId: number | null = null;
+  let pendingDragCoords: { x: number; y: number } | null = null;
+
   function onCardDragMove(e: MouseEvent) {
     if (!draggingTable) return;
-    positions[draggingTable] = {
+    pendingDragCoords = {
       x: Math.max(0, Math.round(e.clientX / scale - dragOffset.x)),
       y: Math.max(0, Math.round(e.clientY / scale - dragOffset.y)),
     };
+    if (dragRafId !== null) return;
+    dragRafId = requestAnimationFrame(() => {
+      dragRafId = null;
+      if (draggingTable && pendingDragCoords) {
+        positions[draggingTable] = pendingDragCoords;
+      }
+    });
   }
 
   function onCardDragUp() {
+    if (dragRafId !== null) {
+      cancelAnimationFrame(dragRafId);
+      dragRafId = null;
+    }
+    if (draggingTable && pendingDragCoords) {
+      positions[draggingTable] = pendingDragCoords;
+    }
+    pendingDragCoords = null;
     draggingTable = null;
     savePositions();
     window.removeEventListener('mousemove', onCardDragMove);
@@ -530,20 +550,27 @@
     panY = vh / 2 - worldY * scale;
   }
 
+  let activeMinimapMove: ((ev: MouseEvent) => void) | null = null;
+  let activeMinimapUp: (() => void) | null = null;
+
   function handleMinimapMouseDown(e: MouseEvent) {
     e.stopPropagation();
     isDraggingMinimap = true;
     panViewportFromMinimap(e.clientX, e.clientY);
-    const onMove = (ev: MouseEvent) => {
+    if (activeMinimapMove) window.removeEventListener('mousemove', activeMinimapMove);
+    if (activeMinimapUp) window.removeEventListener('mouseup', activeMinimapUp);
+    activeMinimapMove = (ev: MouseEvent) => {
       if (isDraggingMinimap) panViewportFromMinimap(ev.clientX, ev.clientY);
     };
-    const onUp = () => {
+    activeMinimapUp = () => {
       isDraggingMinimap = false;
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
+      if (activeMinimapMove) window.removeEventListener('mousemove', activeMinimapMove);
+      if (activeMinimapUp) window.removeEventListener('mouseup', activeMinimapUp);
+      activeMinimapMove = null;
+      activeMinimapUp = null;
     };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    window.addEventListener('mousemove', activeMinimapMove);
+    window.addEventListener('mouseup', activeMinimapUp);
   }
 
   // Release window listeners if the component unmounts mid-pan/drag.
@@ -553,6 +580,8 @@
       window.removeEventListener('mouseup', onPanUp);
       window.removeEventListener('mousemove', onCardDragMove);
       window.removeEventListener('mouseup', onCardDragUp);
+      if (activeMinimapMove) window.removeEventListener('mousemove', activeMinimapMove);
+      if (activeMinimapUp) window.removeEventListener('mouseup', activeMinimapUp);
     };
   });
 
@@ -598,48 +627,10 @@
     const t = tables.find((x) => x.name === tableName);
     if (!t) return;
     const driver = appState.activeConnection?.driver || 'mysql';
-    const q = (id: string) => quoteSqlIdentifier(id, driver);
-
-    const usedAliases = new Set<string>(['t0']);
-    const joins: string[] = [];
-    const selectCols: string[] = [`t0.*`];
-    let aliasIdx = 1;
-
-    // Outgoing FKs
-    for (const fk of t.foreign_keys || []) {
-      const col = fk.column || fk.column_name || '';
-      const alias = `j${aliasIdx++}`;
-      usedAliases.add(alias);
-      joins.push(
-        `LEFT JOIN ${q(fk.referenced_table)} AS ${alias} ON t0.${q(col)} = ${alias}.${q(fk.referenced_column)}`
-      );
-    }
-
-    // Incoming FKs referencing this table
-    for (const other of tables) {
-      if (other.name === t.name) continue;
-      for (const fk of other.foreign_keys || []) {
-        if ((fk.referenced_table || '').toLowerCase() === t.name.toLowerCase()) {
-          const col = fk.column || fk.column_name || '';
-          const alias = `j${aliasIdx++}`;
-          usedAliases.add(alias);
-          joins.push(
-            `LEFT JOIN ${q(other.name)} AS ${alias} ON t0.${q(fk.referenced_column)} = ${alias}.${q(col)}`
-          );
-        }
-      }
-    }
-
-    const sql = [
-      `SELECT ${selectCols.join(', ')}`,
-      `FROM ${q(t.name)} AS t0`,
-      ...joins,
-      `LIMIT 100;`,
-    ].join('\n');
-
+    const { sql, joinCount } = buildLeftJoinSQL(t, tables, driver);
     appState.addTab(`join_${t.name}.sql`, sql);
     appState.showToast(
-      joins.length > 0 ? `Generated LEFT JOIN query (${joins.length} joins)` : `Generated SELECT template for ${t.name}`,
+      joinCount > 0 ? `Generated LEFT JOIN query (${joinCount} joins)` : `Generated SELECT template for ${t.name}`,
       'success'
     );
   }
@@ -678,98 +669,22 @@
     }
   }
 
-  function escapeXml(unsafe: string): string {
-    return (unsafe || '').replace(/[<>&'"]/g, (c) => {
-      switch (c) {
-        case '<': return '&lt;';
-        case '>': return '&gt;';
-        case '&': return '&amp;';
-        case '\'': return '&apos;';
-        case '"': return '&quot;';
-        default: return c;
-      }
-    });
-  }
-
-  // Export functions
   function exportSVG() {
     if (tables.length === 0) {
       appState.showToast('No tables to export', 'warning');
       return;
     }
-
-    const CARD_W = CARD_WIDTH;
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-
-    tables.forEach((t) => {
-      const p = positions[t.name] || { x: 0, y: 0 };
-      const h = getCardHeight(t);
-      minX = Math.min(minX, p.x);
-      minY = Math.min(minY, p.y);
-      maxX = Math.max(maxX, p.x + CARD_W);
-      maxY = Math.max(maxY, p.y + h);
+    const fullSvg = buildErdSvg({
+      tables,
+      positions,
+      expandedTables,
+      lines: lines || [],
+      cardWidth: CARD_WIDTH,
+      headerHeight: HEADER_HEIGHT,
+      rowHeight: ROW_HEIGHT,
+      maxColPreview: MAX_COL_PREVIEW,
+      getCardHeight,
     });
-
-    const pad = 40;
-    const w = Math.max(800, maxX - minX + pad * 2);
-    const h = Math.max(600, maxY - minY + pad * 2);
-
-    let cardsSvg = '';
-    tables.forEach((t) => {
-      const p = positions[t.name] || { x: 0, y: 0 };
-      const x = p.x - minX + pad;
-      const y = p.y - minY + pad;
-      const allCols = t.columns || [];
-      const limit = expandedTables[t.name] ? allCols.length : MAX_COL_PREVIEW;
-      const cols = allCols.slice(0, limit);
-      const hasMore = allCols.length > limit;
-      const cardH = HEADER_HEIGHT + cols.length * ROW_HEIGHT + (hasMore ? 24 : 8);
-
-      cardsSvg += `<g transform="translate(${x},${y})">
-        <rect width="${CARD_W}" height="${cardH}" rx="8" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-        <path d="M0,8 a8,8 0 0 1 8,-8 h${CARD_W - 16} a8,8 0 0 1 8,8 v30 h-${CARD_W} z" fill="#1e293b"/>
-        <text x="12" y="23" fill="#38bdf8" font-family="'JetBrains Mono',monospace" font-size="12" font-weight="bold">${escapeXml(t.name)}</text>
-        <text x="${CARD_W - 12}" y="23" text-anchor="end" fill="#64748b" font-family="'JetBrains Mono',monospace" font-size="10">${allCols.length}</text>`;
-
-      cols.forEach((c, idx) => {
-        const cy = HEADER_HEIGHT + idx * ROW_HEIGHT;
-        const isPK = c.is_primary_key;
-        const isFK = (t.foreign_keys || []).some((fk) => (fk.column || fk.column_name) === c.name);
-        const colColor = isPK ? '#34d399' : isFK ? '#fbbf24' : '#cbd5e1';
-        const prefix = isPK ? '[PK] ' : isFK ? '[FK] ' : '';
-        const typeStr = escapeXml((c.type || '').split('(')[0].toUpperCase());
-
-        cardsSvg += `
-          <line x1="0" y1="${cy}" x2="${CARD_W}" y2="${cy}" stroke="#1e293b" stroke-width="1"/>
-          <text x="12" y="${cy + 16}" fill="${colColor}" font-family="'JetBrains Mono',monospace" font-size="10">${prefix}${escapeXml(c.name)}</text>
-          <text x="${CARD_W - 12}" y="${cy + 16}" text-anchor="end" fill="#64748b" font-family="'JetBrains Mono',monospace" font-size="9">${typeStr}</text>`;
-      });
-
-      if (hasMore) {
-        const fy = HEADER_HEIGHT + cols.length * ROW_HEIGHT + 15;
-        cardsSvg += `<text x="${CARD_W / 2}" y="${fy}" text-anchor="middle" fill="#38bdf8" font-family="'JetBrains Mono',monospace" font-size="9">+${allCols.length - cols.length} more columns</text>`;
-      }
-
-      cardsSvg += `</g>`;
-    });
-
-    const linesSvg = (lines || [])
-      .map((line) => `<path d="${line.path}" stroke="#f59e0b" stroke-width="2" fill="none" opacity="0.85" marker-end="url(#erd-arrow-export)"/>`)
-      .join('\n');
-
-    const fullSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
-      <rect width="${w}" height="${h}" fill="#020617"/>
-      <defs>
-        <marker id="erd-arrow-export" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-          <path d="M0,0 L0,6 L8,3 z" fill="#f59e0b" opacity="0.85"/>
-        </marker>
-      </defs>
-      <g transform="translate(${-minX + pad},${-minY + pad})">
-        ${linesSvg}
-      </g>
-      ${cardsSvg}
-    </svg>`;
-
     const blob = new Blob([fullSvg], { type: 'image/svg+xml;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -782,33 +697,8 @@
     appState.showToast('Exported complete ERD diagram as SVG', 'success');
   }
 
-  function safeMermaidId(name: string): string {
-    const s = String(name || 'entity').replace(/[^a-zA-Z0-9_]/g, '_');
-    return /^[a-zA-Z_]/.test(s) ? s : `t_${s}`;
-  }
-
   function exportMermaid() {
-    let out = 'erDiagram\n';
-    tables.forEach((src) => {
-      (src.foreign_keys || []).forEach((fk) => {
-        const fkCol = fk.column || fk.column_name || '';
-        const cleanLabel = `${fkCol}_to_${fk.referenced_column}`.replace(/["<>#]/g, '');
-        out += `  ${safeMermaidId(src.name)} }o--|| ${safeMermaidId(fk.referenced_table)} : "${cleanLabel}"\n`;
-      });
-    });
-    tables.forEach((t) => {
-      const fkSet = new Set((t.foreign_keys || []).map((fk) => (fk.column || fk.column_name || '').toLowerCase()));
-      out += `  ${safeMermaidId(t.name)} {\n`;
-      (t.columns || []).forEach((c) => {
-        const typeClean = (c.type || 'varchar').replace(/[^a-zA-Z0-9_]/g, '_');
-        const isPK = Boolean(c.is_primary_key);
-        const isFK = fkSet.has((c.name || '').toLowerCase());
-        const keys = isPK && isFK ? 'PK,FK' : isPK ? 'PK' : isFK ? 'FK' : '';
-        out += `    ${typeClean} ${safeMermaidId(c.name)}${keys ? ' ' + keys : ''}\n`;
-      });
-      out += '  }\n';
-    });
-    copyText(out);
+    copyText(buildMermaidErd(tables));
     appState.showToast('Copied Mermaid ERD syntax to clipboard!', 'success');
   }
 
@@ -883,7 +773,7 @@
   ontouchstart={handleTouchStart}
   ontouchmove={handleTouchMove}
   ontouchend={handleTouchEnd}
-  role="region"
+  role="presentation"
   aria-label="ERD Canvas"
   class="h-full w-full bg-[#070b14] relative overflow-hidden select-none cursor-grab active:cursor-grabbing"
   style="background-image: radial-gradient(#1e293b 1px, transparent 1px); background-size: {Math.max(12, Math.round(24 * scale))}px {Math.max(12, Math.round(24 * scale))}px; background-position: {panX}px {panY}px;"
@@ -1071,10 +961,14 @@
             stroke="transparent"
             stroke-width="16"
             fill="none"
+            role="button"
+            tabindex="0"
+            aria-label="Highlight relationship {line.label}"
             class="cursor-pointer"
             onmouseenter={() => (hoveredFK = line.key)}
             onmouseleave={() => (hoveredFK = null)}
             onclick={() => (selectedTable = line.srcTable)}
+            onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectedTable = line.srcTable; } }}
           />
           <path
             d={line.path}
@@ -1087,10 +981,14 @@
           {#if !line.isDimmed}
             <g
               transform="translate({line.midX}, {line.midY})"
+              role="button"
+              tabindex="0"
+              aria-label="Relationship {line.label}"
               class="cursor-pointer select-none"
               onmouseenter={() => (hoveredFK = line.key)}
               onmouseleave={() => (hoveredFK = null)}
               onclick={() => (selectedTable = line.srcTable)}
+              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectedTable = line.srcTable; } }}
             >
               <rect
                 x={-Math.max(50, line.label.length * 3.5 + 8)}
@@ -1144,11 +1042,19 @@
           style="left: {pos.x}px; top: {pos.y}px; width: {CARD_WIDTH}px;"
           onclick={() => (selectedTable = isSelected ? null : table.name)}
           ondblclick={() => appState.openTableDataTab(table.name)}
+          onkeydown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              selectedTable = isSelected ? null : table.name;
+            }
+          }}
           oncontextmenu={(e) => openContextMenu(e, table.name)}
-          role="article"
+          role="button"
+          tabindex="0"
         >
           <!-- Card Header (Drag Handle) -->
           <div
+            role="presentation"
             onmousedown={(e) => startCardDrag(e, table.name)}
             class="h-[38px] px-2.5 bg-[#0f172a] rounded-t-xl border-b border-[#1e293b] flex items-center justify-between cursor-grab active:cursor-grabbing group gap-1"
             title="Drag to move · Double-click to open data · Right-click for actions"
@@ -1244,66 +1150,12 @@
   </div>
 
   <!-- Card Context Menu -->
-  {#if contextMenu}
-    <div class="fixed inset-0 z-40" role="presentation" onclick={() => (contextMenu = null)}></div>
-    <div
-      use:viewportFit={{ x: contextMenu.x, y: contextMenu.y }}
-      class="erd-menu fixed z-50 w-60 bg-[#0f172a] border border-slate-700 rounded-xl shadow-2xl py-1.5 text-xs font-sans text-slate-200 divide-y divide-slate-800"
-      style="left: {contextMenu.x}px; top: {contextMenu.y}px;"
-    >
-      <div class="px-3 py-1 text-[10.5px] font-mono font-bold text-sky-400 truncate">
-        {contextMenu.tableName}
-      </div>
-      <div class="py-1">
-        <div class="px-3 py-1 flex items-center justify-between gap-1.5">
-          <span class="text-[11px] text-slate-400">Open</span>
-          <div class="flex items-center gap-1 text-[10px]">
-            <button
-              type="button"
-              onclick={() => { const t = contextMenu!.tableName; contextMenu = null; appState.openTableDataTab(t); }}
-              class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-emerald-300 font-medium"
-            >Data</button>
-            <button
-              type="button"
-              onclick={() => { const t = contextMenu!.tableName; contextMenu = null; appState.openTableStructureTab(t); }}
-              class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-sky-300 font-medium"
-            >Structure</button>
-            <button
-              type="button"
-              onclick={() => viewTableDdlModal(contextMenu!.tableName)}
-              class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-cyan-300 font-medium"
-            >DDL</button>
-          </div>
-        </div>
-        <button
-          type="button"
-          onclick={() => generateLeftJoinSQL(contextMenu!.tableName)}
-          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-amber-300"
-        >
-          <Icon name="file-code" class="w-3.5 h-3.5 text-amber-400" />
-          <span>Generate SELECT SQL (LEFT JOIN)</span>
-        </button>
-        <button
-          type="button"
-          onclick={() => askAiAboutTable(contextMenu!.tableName)}
-          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-purple-300"
-        >
-          <Icon name="bot" class="w-3.5 h-3.5 text-purple-400" />
-          <span>Ask AI About Schema</span>
-        </button>
-      </div>
-      <div class="py-1">
-        <button
-          type="button"
-          onclick={() => { copyText(contextMenu!.tableName); appState.showToast('Copied table name', 'info'); contextMenu = null; }}
-          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-400"
-        >
-          <Icon name="copy" class="w-3.5 h-3.5" />
-          <span>Copy Table Name</span>
-        </button>
-      </div>
-    </div>
-  {/if}
+  <ErdContextMenu
+    bind:contextMenu
+    onViewDdl={viewTableDdlModal}
+    onGenerateLeftJoin={generateLeftJoinSQL}
+    onAskAi={askAiAboutTable}
+  />
 
   <!-- Interactive Minimap in bottom right -->
   <div class="erd-minimap absolute bottom-4 right-4 z-20 bg-[#0f172a]/90 backdrop-blur-md border border-[#334155] rounded-lg p-1.5 shadow-2xl hidden sm:block">

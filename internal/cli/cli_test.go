@@ -333,15 +333,18 @@ func TestSplitStatements_PostgresOperatorAndTrailingComments(t *testing.T) {
 }
 
 type mockTxSession struct {
-	lastSQL string
+	lastSQL  string
+	lastArgs []any
 }
 
 func (m *mockTxSession) Exec(ctx context.Context, sql string, args ...any) (*driver.ExecResult, error) {
 	m.lastSQL = sql
+	m.lastArgs = args
 	return &driver.ExecResult{RowsAffected: 1}, nil
 }
 func (m *mockTxSession) ExecRaw(ctx context.Context, sql string, args ...any) (int64, error) {
 	m.lastSQL = sql
+	m.lastArgs = args
 	return 1, nil
 }
 func (m *mockTxSession) QueryStream(ctx context.Context, sql string, limit int) (driver.RowStream, error) {
@@ -356,9 +359,12 @@ func TestFlushInsertBatch_MySQLBackslash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("flushInsertBatch failed: %v", err)
 	}
-	expected := `'C:\\temp\\'`
-	if !strings.Contains(mockTx.lastSQL, expected) {
-		t.Errorf("expected MySQL query to contain %s, got: %s", expected, mockTx.lastSQL)
+	expectedSQL := "INSERT INTO `paths` (`dir`) VALUES (?)"
+	if mockTx.lastSQL != expectedSQL {
+		t.Errorf("expected parameterized MySQL query %q, got: %q", expectedSQL, mockTx.lastSQL)
+	}
+	if len(mockTx.lastArgs) != 1 || mockTx.lastArgs[0] != `C:\temp\` {
+		t.Errorf("expected raw backslash arg %q, got: %#v", `C:\temp\`, mockTx.lastArgs)
 	}
 }
 

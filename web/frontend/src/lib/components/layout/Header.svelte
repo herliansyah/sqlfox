@@ -193,7 +193,7 @@
     { label: 'Shut Down Daemon', desc: 'Gracefully stop the local server', icon: 'rotate-ccw', iconColor: 'text-rose-400', action: () => appState.shutdownDaemon() },
   ];
 
-  let masterPin = $derived(appState.authStatus?.master_password || '');
+  let masterPin = $derived(appState.authStatus?.pairing_code || '');
   let isLanAvailable = $derived(
     Boolean(masterPin && (appState.authStatus?.lan_enabled || !appState.authStatus?.is_remote))
   );
@@ -403,6 +403,7 @@
           use:viewportFit
           class="absolute left-0 top-full mt-1 w-80 bg-[#0f172a] border border-slate-700/90 rounded-lg shadow-2xl z-50 py-1 divide-y divide-slate-800 animate-in fade-in zoom-in-95 duration-100"
           role="dialog"
+          aria-modal="true"
           aria-label="Switch connection"
         >
           <div class="p-2 border-b border-slate-800">
@@ -637,7 +638,7 @@
                     <span>{item.label}</span>
                   </span>
                   {#if item.badge !== undefined}
-                    <span class="px-1.5 py-0.2 rounded text-[9px] font-bold border {item.badgeClass || 'bg-slate-800 text-slate-300 border-slate-700'}">
+                    <span class="px-1.5 py-0.5 rounded text-[9px] font-bold border {item.badgeClass || 'bg-slate-800 text-slate-300 border-slate-700'}">
                       {item.badge}
                     </span>
                   {/if}
@@ -683,7 +684,7 @@
         {#if appState.dueNotesCount > 0}
           <span
             id="notes-inbox-badge"
-            class="px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-bold text-[9px] leading-tight animate-pulse"
+            class="px-1.5 py-0.5 rounded-full bg-rose-500 text-white font-bold text-[9px] leading-tight animate-pulse"
           >
             {appState.dueNotesCount}
           </span>

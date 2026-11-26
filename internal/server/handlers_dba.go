@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/herliansyah/sqlfox/internal/driver"
@@ -146,7 +147,7 @@ func (s *Server) handleResetStatementDigest(w http.ResponseWriter, r *http.Reque
 
 	if err := sess.ResetStatementDigest(ctx); err != nil {
 		if errors.Is(err, driver.ErrFeatureNotSupported) {
-			writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+			writeError(w, http.StatusNotImplemented, "statement digest reset is not supported on this database engine")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "failed to reset statement digest: "+err.Error())
@@ -154,6 +155,27 @@ func (s *Server) handleResetStatementDigest(w http.ResponseWriter, r *http.Reque
 	}
 
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+func findImmunePIDs(ctx context.Context, sess *ActiveSession) (map[int64]string, error) {
+	immunePIDs := make(map[int64]string)
+	pl, pErr := sess.GetProcesslist(ctx)
+	if pErr != nil || pl == nil {
+		msg := "cannot verify immune threads: processlist unavailable"
+		if pErr != nil {
+			msg += ": " + pErr.Error()
+		}
+		return nil, errors.New(msg)
+	}
+	if pl.CurrentThreadID > 0 {
+		immunePIDs[pl.CurrentThreadID] = "own active connection (self)"
+	}
+	for _, th := range pl.Threads {
+		if th.User == "system user" || th.User == "event_scheduler" || th.Command == "Binlog Dump" {
+			immunePIDs[th.ID] = fmt.Sprintf("system process (%s)", th.User)
+		}
+	}
+	return immunePIDs, nil
 }
 
 func (s *Server) handleKillProcess(w http.ResponseWriter, r *http.Request) {
@@ -178,6 +200,18 @@ func (s *Server) handleKillProcess(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
+
+	if !strings.EqualFold(sess.DriverName, "sqlite") && !strings.EqualFold(sess.DriverName, "sqlite3") {
+		immunePIDs, immErr := findImmunePIDs(ctx, sess)
+		if immErr != nil {
+			writeError(w, http.StatusServiceUnavailable, immErr.Error())
+			return
+		}
+		if reason, isImmune := immunePIDs[req.ThreadID]; isImmune {
+			writeError(w, http.StatusForbidden, "cannot terminate immune thread: "+reason)
+			return
+		}
+	}
 
 	killConn := req.Mode == "connection"
 	if err := sess.KillProcess(ctx, req.ThreadID, killConn); err != nil {
@@ -223,24 +257,11 @@ func (s *Server) handleBatchKillProcess(w http.ResponseWriter, r *http.Request) 
 	defer cancel()
 
 	// ponytail: detect immune threads (self connection and critical system processes) to enforce safety guardrails at backend layer
-	immunePIDs := make(map[int64]string)
-	pl, pErr := sess.GetProcesslist(ctx)
-	if pErr != nil || pl == nil {
+	immunePIDs, immErr := findImmunePIDs(ctx, sess)
+	if immErr != nil {
 		// Fail closed: without the processlist we cannot tell which threads are immune.
-		msg := "cannot verify immune threads: processlist unavailable"
-		if pErr != nil {
-			msg += ": " + pErr.Error()
-		}
-		writeError(w, http.StatusServiceUnavailable, msg)
+		writeError(w, http.StatusServiceUnavailable, immErr.Error())
 		return
-	}
-	if pl.CurrentThreadID > 0 {
-		immunePIDs[pl.CurrentThreadID] = "own active connection (self)"
-	}
-	for _, th := range pl.Threads {
-		if th.User == "system user" || th.User == "event_scheduler" || th.Command == "Binlog Dump" {
-			immunePIDs[th.ID] = fmt.Sprintf("system process (%s)", th.User)
-		}
 	}
 
 	killConn := req.Mode == "connection"
@@ -321,6 +342,9 @@ func (s *Server) handleGetAuditLogs(w http.ResponseWriter, r *http.Request) {
 		if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
 			limit = l
 		}
+	}
+	if limit > 1000 {
+		limit = 1000
 	}
 	if oStr := r.URL.Query().Get("offset"); oStr != "" {
 		if o, err := strconv.Atoi(oStr); err == nil && o >= 0 {
@@ -426,7 +450,9 @@ func (s *Server) handleExecuteMaintenance(w http.ResponseWriter, r *http.Request
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
+	start := time.Now()
 	result, err := sess.ExecuteMaintenance(ctx, req.Database, req.Tables, req.Action)
+	sess.RecordAudit(fmt.Sprintf("%s TABLE %s", strings.ToUpper(req.Action), strings.Join(req.Tables, ", ")), "dba_maintenance", time.Since(start).Milliseconds(), int64(len(req.Tables)), err, start)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to execute maintenance: "+err.Error())
 		return
@@ -516,19 +542,24 @@ func (s *Server) handleGetUserGrants(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isMySQLFamily := strings.EqualFold(sess.DriverName, "mysql") || strings.EqualFold(sess.DriverName, "mariadb")
 	user := r.URL.Query().Get("user")
 	host := r.URL.Query().Get("host")
-	if user == "" || host == "" {
+	if user == "" || (isMySQLFamily && host == "") {
 		var req struct {
 			User string `json:"user"`
 			Host string `json:"host"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
-			user = req.User
-			host = req.Host
+			if user == "" {
+				user = req.User
+			}
+			if host == "" {
+				host = req.Host
+			}
 		}
 	}
-	if user == "" || host == "" {
+	if user == "" || (isMySQLFamily && host == "") {
 		writeError(w, http.StatusBadRequest, "user and host query parameters are required")
 		return
 	}
@@ -556,13 +587,14 @@ func (s *Server) handleSaveUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isMySQLFamily := strings.EqualFold(sess.DriverName, "mysql") || strings.EqualFold(sess.DriverName, "mariadb")
 	var req struct {
 		User     string `json:"user"`
 		Host     string `json:"host"`
 		Password string `json:"password"`
 		IsNew    bool   `json:"is_new"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.User == "" || req.Host == "" {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.User == "" || (isMySQLFamily && req.Host == "") {
 		writeError(w, http.StatusBadRequest, "user and host are required")
 		return
 	}
@@ -570,7 +602,10 @@ func (s *Server) handleSaveUser(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	if err := sess.SaveUser(ctx, req.User, req.Host, req.Password, req.IsNew); err != nil {
+	start := time.Now()
+	err = sess.SaveUser(ctx, req.User, req.Host, req.Password, req.IsNew)
+	sess.RecordAudit(fmt.Sprintf("SAVE USER '%s'@'%s'", req.User, req.Host), "user_admin", time.Since(start).Milliseconds(), 0, err, start)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -589,27 +624,59 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isMySQLFamily := strings.EqualFold(sess.DriverName, "mysql") || strings.EqualFold(sess.DriverName, "mariadb")
 	user := r.URL.Query().Get("user")
 	host := r.URL.Query().Get("host")
-	if user == "" || host == "" {
+	confirmed := r.URL.Query().Get("confirmed") == "true"
+	challengeInput := r.URL.Query().Get("challenge_input")
+	if user == "" || (isMySQLFamily && host == "") || !confirmed {
 		var req struct {
-			User string `json:"user"`
-			Host string `json:"host"`
+			User           string `json:"user"`
+			Host           string `json:"host"`
+			Confirmed      bool   `json:"confirmed"`
+			ChallengeInput string `json:"challenge_input"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
-			user = req.User
-			host = req.Host
+			if user == "" {
+				user = req.User
+			}
+			if host == "" {
+				host = req.Host
+			}
+			confirmed = confirmed || req.Confirmed
+			if challengeInput == "" {
+				challengeInput = req.ChallengeInput
+			}
 		}
 	}
-	if user == "" || host == "" {
+	if user == "" || (isMySQLFamily && host == "") {
 		writeError(w, http.StatusBadRequest, "user and host query parameters are required")
 		return
+	}
+
+	if strings.EqualFold(sess.Environment, "Production") || strings.EqualFold(sess.Environment, "Staging") {
+		if !confirmed {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+				"blocked":            true,
+				"requires_challenge": true,
+				"target":             user,
+				"reason":             fmt.Sprintf("Dropping database user '%s' in %s requires typed confirmation.", user, sess.Environment),
+			})
+			return
+		}
+		if !strings.EqualFold(strings.TrimSpace(challengeInput), user) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("Challenge confirmation failed: expected '%s', got '%s'", user, challengeInput))
+			return
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	if err := sess.DropUser(ctx, user, host); err != nil {
+	start := time.Now()
+	err = sess.DropUser(ctx, user, host)
+	sess.RecordAudit(fmt.Sprintf("DROP USER '%s'@'%s'", user, host), "user_admin", time.Since(start).Milliseconds(), 0, err, start)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -628,16 +695,40 @@ func (s *Server) handleApplyUserGrants(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req driver.UserGrantRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.User == "" || req.Host == "" {
+	isMySQLFamily := strings.EqualFold(sess.DriverName, "mysql") || strings.EqualFold(sess.DriverName, "mariadb")
+	var req struct {
+		driver.UserGrantRequest
+		Confirmed      bool   `json:"confirmed"`
+		ChallengeInput string `json:"challenge_input"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.User == "" || (isMySQLFamily && req.Host == "") {
 		writeError(w, http.StatusBadRequest, "user and host are required")
 		return
+	}
+
+	if strings.EqualFold(sess.Environment, "Production") {
+		if !req.Confirmed {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+				"blocked":            true,
+				"requires_challenge": true,
+				"target":             req.User,
+				"reason":             fmt.Sprintf("Modifying grants for '%s' in Production requires typed confirmation.", req.User),
+			})
+			return
+		}
+		if !strings.EqualFold(strings.TrimSpace(req.ChallengeInput), req.User) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("Challenge confirmation failed: expected '%s', got '%s'", req.User, req.ChallengeInput))
+			return
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	if err := sess.ApplyUserGrants(ctx, req); err != nil {
+	start := time.Now()
+	err = sess.ApplyUserGrants(ctx, req.UserGrantRequest)
+	sess.RecordAudit(fmt.Sprintf("APPLY GRANTS '%s'@'%s'", req.User, req.Host), "user_admin", time.Since(start).Milliseconds(), 0, err, start)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

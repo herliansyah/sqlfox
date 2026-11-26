@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -27,6 +28,53 @@ type DeleteRowsRequest struct {
 	RowCriterias []map[string]any `json:"row_criterias,omitempty"`
 }
 
+// normalizeJSONParam preserves exact 64-bit integer precision from json.Number values
+// (preventing IEEE-754 float64 rounding on BIGINT / Snowflake IDs > 2^53).
+func normalizeJSONParam(v any) any {
+	n, ok := v.(json.Number)
+	if !ok {
+		return v
+	}
+	if i64, err := n.Int64(); err == nil {
+		return i64
+	}
+	if f64, err := n.Float64(); err == nil {
+		return f64
+	}
+	return n.String()
+}
+
+// tablePrimaryKeyColumns returns the primary key column names for tableName from the
+// cached schema or a targeted schema inspection.
+func tablePrimaryKeyColumns(ctx context.Context, sess *ActiveSession, dbName, tableName string) []string {
+	findPKs := func(schema *driver.SchemaMetadata) []string {
+		if schema == nil {
+			return nil
+		}
+		for _, t := range schema.Tables {
+			if strings.EqualFold(t.Name, tableName) {
+				var pks []string
+				for _, c := range t.Columns {
+					if c.IsPrimaryKey {
+						pks = append(pks, c.Name)
+					}
+				}
+				return pks
+			}
+		}
+		return nil
+	}
+	if pks := findPKs(sess.Schema()); len(pks) > 0 {
+		return pks
+	}
+	if sess.Session != nil {
+		if schema, err := sess.Session.InspectSchema(ctx, dbName); err == nil {
+			return findPKs(schema)
+		}
+	}
+	return nil
+}
+
 func (s *Server) handleInsertRow(w http.ResponseWriter, r *http.Request) {
 	connID := r.PathValue("id")
 	sess, err := s.sessionMgr.GetSession(connID)
@@ -41,7 +89,9 @@ func (s *Server) handleInsertRow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req InsertRowRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	dec := json.NewDecoder(r.Body)
+	dec.UseNumber()
+	if err := dec.Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid insert-row payload: "+err.Error())
 		return
 	}
@@ -53,7 +103,9 @@ func (s *Server) handleInsertRow(w http.ResponseWriter, r *http.Request) {
 
 	targetTable := quoteIdent(req.Table, sess.DriverName)
 	if req.Database != "" && sess.DriverName != "sqlite" {
-		targetTable = quoteIdent(req.Database, sess.DriverName) + "." + targetTable
+		if !isPgDriver(sess.DriverName) || !strings.EqualFold(req.Database, sess.GetDatabaseName()) || strings.EqualFold(req.Database, "public") {
+			targetTable = quoteIdent(req.Database, sess.DriverName) + "." + targetTable
+		}
 	}
 
 	var cols []string
@@ -62,7 +114,7 @@ func (s *Server) handleInsertRow(w http.ResponseWriter, r *http.Request) {
 	for col, val := range req.Data {
 		cols = append(cols, quoteIdent(col, sess.DriverName))
 		placeholders = append(placeholders, driver.Placeholder(sess.DriverName, len(placeholders)+1))
-		args = append(args, val)
+		args = append(args, normalizeJSONParam(val))
 	}
 
 	sqlQuery := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", targetTable, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
@@ -70,9 +122,8 @@ func (s *Server) handleInsertRow(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	if err := sess.UseDatabase(ctx, req.Database); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+	if req.Database != "" {
+		ctx = driver.WithDatabase(ctx, req.Database)
 	}
 
 	var valStrs []string
@@ -81,8 +132,14 @@ func (s *Server) handleInsertRow(w http.ResponseWriter, r *http.Request) {
 	}
 	auditSQL := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", targetTable, strings.Join(cols, ", "), strings.Join(valStrs, ", "))
 
+	exec, finish, err := sess.gridWriter(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "insert failed: "+err.Error())
+		return
+	}
+
 	insertStart := time.Now()
-	res, err := sess.Session.Exec(ctx, sqlQuery, args...)
+	res, err := exec.Exec(ctx, sqlQuery, args...)
 	insertDur := time.Since(insertStart).Milliseconds()
 	var affected int64
 	if res != nil {
@@ -90,6 +147,11 @@ func (s *Server) handleInsertRow(w http.ResponseWriter, r *http.Request) {
 	}
 	sess.RecordAudit(auditSQL, "grid_insert", insertDur, affected, err, insertStart)
 	if err != nil {
+		_ = finish(err)
+		writeError(w, http.StatusInternalServerError, "insert failed: "+err.Error())
+		return
+	}
+	if err := finish(nil); err != nil {
 		writeError(w, http.StatusInternalServerError, "insert failed: "+err.Error())
 		return
 	}
@@ -115,7 +177,9 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req DeleteRowsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	dec := json.NewDecoder(r.Body)
+	dec.UseNumber()
+	if err := dec.Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid delete-rows payload: "+err.Error())
 		return
 	}
@@ -127,15 +191,16 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 
 	targetTable := quoteIdent(req.Table, sess.DriverName)
 	if req.Database != "" && sess.DriverName != "sqlite" {
-		targetTable = quoteIdent(req.Database, sess.DriverName) + "." + targetTable
+		if !isPgDriver(sess.DriverName) || !strings.EqualFold(req.Database, sess.GetDatabaseName()) || strings.EqualFold(req.Database, "public") {
+			targetTable = quoteIdent(req.Database, sess.DriverName) + "." + targetTable
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	if err := sess.UseDatabase(ctx, req.Database); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+	if req.Database != "" {
+		ctx = driver.WithDatabase(ctx, req.Database)
 	}
 
 	var totalAffected int64
@@ -148,7 +213,17 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "delete failed: "+err.Error())
 			return
 		}
+		pkCols := tablePrimaryKeyColumns(ctx, sess, req.Database, req.Table)
 		for _, pkMap := range req.PKRows {
+			if len(pkCols) > 0 {
+				for _, pk := range pkCols {
+					if _, ok := pkMap[pk]; !ok {
+						_ = finish(errors.New("pk_rows must include all primary key columns"))
+						writeError(w, http.StatusBadRequest, fmt.Sprintf("table %q requires primary key column %q in pk_rows", req.Table, pk))
+						return
+					}
+				}
+			}
 			var whereParts []string
 			var auditWhereParts []string
 			var args []any
@@ -159,7 +234,7 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 			}
 			slices.Sort(keys)
 			for _, k := range keys {
-				val := pkMap[k]
+				val := normalizeJSONParam(pkMap[k])
 				pCrit := driver.Placeholder(sess.DriverName, pIdx)
 				pIdx++
 				args = append(args, val)
@@ -189,21 +264,31 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 		}
 		execMs = time.Since(start).Milliseconds()
 	} else if req.PKColumn != "" && len(req.PKValues) > 0 {
+		if pkCols := tablePrimaryKeyColumns(ctx, sess, req.Database, req.Table); len(pkCols) > 1 {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("table %q has a composite primary key (%s); pk_rows with all primary key columns is required", req.Table, strings.Join(pkCols, ", ")))
+			return
+		}
 		targetPK := quoteIdent(req.PKColumn, sess.DriverName)
 		placeholders := make([]string, len(req.PKValues))
 		args := make([]any, len(req.PKValues))
 		valStrs := make([]string, len(req.PKValues))
 		for i, v := range req.PKValues {
+			nv := normalizeJSONParam(v)
 			placeholders[i] = driver.Placeholder(sess.DriverName, i+1)
-			args[i] = v
-			valStrs[i] = driver.FormatSQLValueForDriver(v, sess.DriverName)
+			args[i] = nv
+			valStrs[i] = driver.FormatSQLValueForDriver(nv, sess.DriverName)
 		}
 
 		sqlQuery := fmt.Sprintf("DELETE FROM %s WHERE %s IN (%s)", targetTable, targetPK, strings.Join(placeholders, ", "))
 		auditSQL := fmt.Sprintf("DELETE FROM %s WHERE %s IN (%s)", targetTable, targetPK, strings.Join(valStrs, ", "))
 
+		exec, finish, err := sess.gridWriter(ctx)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "delete failed: "+err.Error())
+			return
+		}
 		delStart := time.Now()
-		res, err := sess.Session.Exec(ctx, sqlQuery, args...)
+		res, err := exec.Exec(ctx, sqlQuery, args...)
 		delDur := time.Since(delStart).Milliseconds()
 		if res != nil {
 			totalAffected = res.RowsAffected
@@ -211,6 +296,11 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 		}
 		sess.RecordAudit(auditSQL, "grid_delete", delDur, totalAffected, err, delStart)
 		if err != nil {
+			_ = finish(err)
+			writeError(w, http.StatusInternalServerError, "delete failed: "+err.Error())
+			return
+		}
+		if err := finish(nil); err != nil {
 			writeError(w, http.StatusInternalServerError, "delete failed: "+err.Error())
 			return
 		}
@@ -222,24 +312,14 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, rc := range req.RowCriterias {
-			var whereParts []string
-			var auditWhereParts []string
-			var args []any
-			pIdx := 1
-			for cName, cVal := range rc {
-				if cVal == nil {
-					whereParts = append(whereParts, fmt.Sprintf("%s IS NULL", quoteIdent(cName, sess.DriverName)))
-					auditWhereParts = append(auditWhereParts, fmt.Sprintf("%s IS NULL", quoteIdent(cName, sess.DriverName)))
-				} else {
-					pCrit := driver.Placeholder(sess.DriverName, pIdx)
-					pIdx++
-					args = append(args, cVal)
-					whereParts = append(whereParts, fmt.Sprintf("%s = %s", quoteIdent(cName, sess.DriverName), pCrit))
-					auditWhereParts = append(auditWhereParts, fmt.Sprintf("%s = %s", quoteIdent(cName, sess.DriverName), driver.FormatSQLValueForDriver(cVal, sess.DriverName)))
-				}
+			if len(rc) == 0 {
+				_ = finish(errors.New("row_criteria cannot be empty"))
+				writeError(w, http.StatusBadRequest, "row_criteria cannot be empty")
+				return
 			}
-			delSQL := "DELETE FROM " + targetTable + " WHERE " + singleRowWhere(sess.DriverName, targetTable, strings.Join(whereParts, " AND "))
-			auditSQL := "DELETE FROM " + targetTable + " WHERE " + singleRowWhere(sess.DriverName, targetTable, strings.Join(auditWhereParts, " AND "))
+			whereSQL, auditWhereSQL, args := buildRowCriteriaWhere(sess, req.Table, rc, 1)
+			delSQL := "DELETE FROM " + targetTable + " WHERE " + singleRowWhere(sess.DriverName, targetTable, whereSQL)
+			auditSQL := "DELETE FROM " + targetTable + " WHERE " + singleRowWhere(sess.DriverName, targetTable, auditWhereSQL)
 			rowStart := time.Now()
 			res, err := exec.Exec(ctx, delSQL, args...)
 			rowDur := time.Since(rowStart).Milliseconds()
@@ -268,17 +348,94 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// isNonComparableColumnType reports column types (such as json, xml, bytea, geometry) that
+// lack an equality (=) operator in PostgreSQL or are unreliable in PK-less WHERE predicates.
+func isNonComparableColumnType(colType string) bool {
+	tp := strings.ToLower(strings.TrimSpace(colType))
+	if idx := strings.IndexByte(tp, '('); idx >= 0 {
+		tp = strings.TrimSpace(tp[:idx])
+	}
+	switch tp {
+	case "json", "jsonb", "xml", "bytea", "blob", "tinyblob", "mediumblob", "longblob",
+		"geometry", "point", "linestring", "polygon", "multipoint", "multilinestring",
+		"multipolygon", "geometrycollection":
+		return true
+	}
+	return false
+}
+
+// buildRowCriteriaWhere builds a deterministic parameterized WHERE clause for PK-less tables,
+// skipping non-comparable column types when at least one comparable column is present.
+func buildRowCriteriaWhere(sess *ActiveSession, table string, rc map[string]any, startIdx int) (string, string, []any) {
+	critKeys := make([]string, 0, len(rc))
+	for cName := range rc {
+		critKeys = append(critKeys, cName)
+	}
+	slices.Sort(critKeys)
+
+	var nonComp map[string]bool
+	if sess != nil {
+		if sc := sess.Schema(); sc != nil {
+			for _, tbl := range sc.Tables {
+				if strings.EqualFold(tbl.Name, table) {
+					nonComp = make(map[string]bool)
+					for _, col := range tbl.Columns {
+						if isNonComparableColumnType(col.Type) {
+							nonComp[strings.ToLower(col.Name)] = true
+						}
+					}
+					break
+				}
+			}
+		}
+	}
+
+	filtered := make([]string, 0, len(critKeys))
+	for _, k := range critKeys {
+		if !nonComp[strings.ToLower(k)] {
+			filtered = append(filtered, k)
+		}
+	}
+	if len(filtered) > 0 {
+		critKeys = filtered
+	}
+
+	var whereParts []string
+	var auditWhereParts []string
+	var args []any
+	pIdx := startIdx
+	drv := ""
+	if sess != nil {
+		drv = sess.DriverName
+	}
+	for _, cName := range critKeys {
+		cVal := normalizeJSONParam(rc[cName])
+		qCol := quoteIdent(cName, drv)
+		if cVal == nil {
+			whereParts = append(whereParts, qCol+" IS NULL")
+			auditWhereParts = append(auditWhereParts, qCol+" IS NULL")
+		} else {
+			pCrit := driver.Placeholder(drv, pIdx)
+			pIdx++
+			args = append(args, cVal)
+			whereParts = append(whereParts, fmt.Sprintf("%s = %s", qCol, pCrit))
+			auditWhereParts = append(auditWhereParts, fmt.Sprintf("%s = %s", qCol, driver.FormatSQLValueForDriver(cVal, drv)))
+		}
+	}
+	return strings.Join(whereParts, " AND "), strings.Join(auditWhereParts, " AND "), args
+}
+
 // singleRowWhere turns a full-row criteria predicate into one that matches at most ONE physical row,
 // so editing/deleting one of several identical rows in a PK-less table never touches its duplicates.
 // MySQL supports UPDATE/DELETE ... LIMIT 1; SQLite and Postgres need a physical row-id subquery.
 func singleRowWhere(driverName, tableRef, where string) string {
-	switch driverName {
-	case "mysql":
+	switch strings.ToLower(driverName) {
+	case "mysql", "mariadb":
 		return where + " LIMIT 1"
-	case "sqlite":
+	case "sqlite", "sqlite3":
 		// PK-less tables are never WITHOUT ROWID, so rowid always exists here.
 		return fmt.Sprintf("rowid IN (SELECT rowid FROM %s WHERE %s LIMIT 1)", tableRef, where)
-	case "postgres":
+	case "postgres", "postgresql", "pg", "pgx":
 		// tableoid keeps ctid unique across partitions of a partitioned table.
 		return fmt.Sprintf("(tableoid, ctid) IN (SELECT tableoid, ctid FROM %s WHERE %s LIMIT 1)", tableRef, where)
 	}

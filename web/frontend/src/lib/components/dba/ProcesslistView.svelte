@@ -1,6 +1,7 @@
 <script lang="ts">
   import { SvelteSet } from 'svelte/reactivity';
   import { copyText } from '../../utils/clipboard';
+  import { isSystemThread, commandTone } from './processlistHelpers';
   import { formatSQL } from '../../utils/sqlFormatter';
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
@@ -12,6 +13,8 @@
   import ClusterHealthPanel from './ClusterHealthPanel.svelte';
   import ServerVariablesPanel from './ServerVariablesPanel.svelte';
   import FlightRecorderPanel from './FlightRecorderPanel.svelte';
+  import ProcessBatchKillModal from './ProcessBatchKillModal.svelte';
+  import ProcessBlockerModal from './ProcessBlockerModal.svelte';
 
   let clusterPanelRef = $state<any>(null);
   import { viewportFit } from '../../actions/viewportFit';
@@ -161,12 +164,6 @@
     }
   }
 
-  function isSystemThread(t: ProcesslistThread): boolean {
-    const u = (t.user || '').toLowerCase();
-    const cmd = (t.command || '').toLowerCase();
-    return u === 'system user' || u === 'event_scheduler' || cmd === 'binlog dump' || cmd === 'binlog dump gtid';
-  }
-
   function isProductionConn(): boolean {
     return (appState.activeConnection?.environment || '').toLowerCase() === 'production';
   }
@@ -263,9 +260,13 @@
     };
   });
 
+  let isPollingProcesslist = false;
+
   async function loadProcesslist(showSpinner = true) {
     const sessionId = appState.activeSessionId;
     if (!sessionId) return;
+    if (!showSpinner && isPollingProcesslist) return;
+    isPollingProcesslist = true;
     if (showSpinner) isLoading = true;
     try {
       const res = await api.getProcesslist(sessionId);
@@ -299,18 +300,22 @@
       if (appState.activeSessionId !== sessionId) return;
       appState.showToast(`Failed to load processlist: ${err.message}`, 'error');
     } finally {
+      isPollingProcesslist = false;
       if (showSpinner) isLoading = false;
     }
   }
 
   async function loadStatementDigest() {
-    if (!appState.activeSessionId) return;
+    const sessionId = appState.activeSessionId;
+    if (!sessionId) return;
     isDigestLoading = true;
     digestError = '';
     try {
-      const res = await api.getStatementDigest(appState.activeSessionId, 30);
+      const res = await api.getStatementDigest(sessionId, 30);
+      if (appState.activeSessionId !== sessionId) return;
       digestRows = res.digest || res.statements || (Array.isArray(res) ? res : []);
     } catch (err: any) {
+      if (appState.activeSessionId !== sessionId) return;
       digestError = String(err?.message || err).replace(/^Failed to load statement digest:\s*/, '');
       digestRows = [];
     } finally {
@@ -334,23 +339,31 @@
   }
 
   async function loadDeadlock() {
-    if (!appState.activeSessionId) return;
+    const sessionId = appState.activeSessionId;
+    if (!sessionId) return;
     isDeadlockLoading = true;
     try {
-      const res = await api.getDeadlock(appState.activeSessionId);
+      const res = await api.getDeadlock(sessionId);
+      if (appState.activeSessionId !== sessionId) return;
       deadlockData = res;
     } catch (err: any) {
+      if (appState.activeSessionId !== sessionId) return;
       appState.showToast(`Failed to inspect deadlock: ${err.message}`, 'error');
     } finally {
       isDeadlockLoading = false;
     }
   }
 
+  let isPollingCluster = false;
+
   async function loadClusterReport() {
-    if (!appState.activeSessionId) return;
+    const sessionId = appState.activeSessionId;
+    if (!sessionId || isPollingCluster) return;
+    isPollingCluster = true;
     isClusterLoading = true;
     try {
-      const res = await api.getClusterHealth(appState.activeSessionId);
+      const res = await api.getClusterHealth(sessionId);
+      if (appState.activeSessionId !== sessionId) return;
       clusterReport = res;
       clusterUpdatedAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       // Sync global cluster badge when telemetry reports cluster/replication
@@ -363,30 +376,39 @@
         appState.dbaClusterLabel = '';
       }
     } catch (err: any) {
+      if (appState.activeSessionId !== sessionId) return;
       clusterReport = null;
     } finally {
+      isPollingCluster = false;
       isClusterLoading = false;
     }
   }
 
   async function loadVariablesReport() {
-    if (!appState.activeSessionId) return;
+    const sessionId = appState.activeSessionId;
+    if (!sessionId) return;
     isVariablesLoading = true;
     try {
-      const res = await api.getServerVariables(appState.activeSessionId);
+      const res = await api.getServerVariables(sessionId);
+      if (appState.activeSessionId !== sessionId) return;
       variablesReport = res;
     } catch (err: any) {
+      if (appState.activeSessionId !== sessionId) return;
       variablesReport = null;
     } finally {
       isVariablesLoading = false;
     }
   }
 
+  let isViewMounted = true;
+
   // Performance Flight Recorder Handlers
   async function checkFlightRecorderStatus() {
-    if (!appState.activeSessionId) return;
+    const sessionId = appState.activeSessionId;
+    if (!sessionId) return;
     try {
-      const status = await api.getFlightRecorderStatus(appState.activeSessionId);
+      const status = await api.getFlightRecorderStatus(sessionId);
+      if (!isViewMounted || appState.activeSessionId !== sessionId) return;
       isRecording = !!status.is_recording;
       appState.flightRecordingActive = isRecording;
       if (status.is_recording) {
@@ -405,17 +427,25 @@
     } catch (_) {}
   }
 
+  let isPollingFlight = false;
+
   function startFlightTimers() {
+    if (!isViewMounted) return;
     stopFlightTimers();
     flightTickerTimer = setInterval(() => {
+      if (!isViewMounted) return;
       recordingSeconds++;
       appState.flightRecordingRemainingSec = Math.max(0, 600 - recordingSeconds);
     }, 1000);
     // Poll every >= 1000ms for real-time telemetry streaming
     flightPollTimer = setInterval(async () => {
-      if (!appState.activeSessionId || !isRecording) return;
+      if (!isViewMounted || (typeof document !== 'undefined' && document.hidden)) return;
+      const sessionId = appState.activeSessionId;
+      if (!sessionId || !isRecording || isPollingFlight) return;
+      isPollingFlight = true;
       try {
-        const status = await api.getFlightRecorderStatus(appState.activeSessionId);
+        const status = await api.getFlightRecorderStatus(sessionId);
+        if (!isViewMounted || appState.activeSessionId !== sessionId) return;
         if (!status.is_recording) {
           isRecording = false;
           appState.flightRecordingActive = false;
@@ -430,13 +460,18 @@
             flightSessionTicks = status.recent_ticks;
           }
         }
-      } catch (_) {}
+      } catch (_) {
+      } finally {
+        isPollingFlight = false;
+      }
     }, Math.max(1000, flightIntervalMs));
   }
 
   // Stop all timers if the component unmounts (sub-tab switch or view change).
   $effect(() => {
+    isViewMounted = true;
     return () => {
+      isViewMounted = false;
       stopFlightTimers();
       if (intervalTimer) clearInterval(intervalTimer);
       if (clusterPollTimer) clearInterval(clusterPollTimer);
@@ -867,12 +902,6 @@
     slate: 'bg-slate-800/60 text-slate-400 border-slate-700/60',
   };
 
-  function commandTone(command: string) {
-    const c = (command || '').toLowerCase();
-    if (!c || c === 'sleep' || c === 'daemon') return stateTone.slate;
-    return stateTone.sky;
-  }
-
   let allFilteredSelected = $derived.by(() => {
     const selectable = filteredThreads.filter((t) => t.id !== currentThreadId && !isSystemThread(t));
     if (selectable.length === 0) return false;
@@ -895,43 +924,6 @@
       selectedThreadIds.add(id);
     }
   }
-
-  let curatedVarCount = $derived.by(
-    () => (variablesReport?.variables || []).filter((v: any) => v.is_curated).length
-  );
-
-  let filteredVariables = $derived.by(() => {
-    if (!variablesReport?.variables) return [];
-    let list = variablesReport.variables;
-    if (showCuratedOnly) {
-      list = list.filter((v: any) => v.is_curated);
-    }
-    if (varCategory !== 'All') {
-      list = list.filter((v: any) => v.category === varCategory);
-    }
-    if (varSeverityFilter !== 'all') {
-      list = list.filter((v: any) => (v.severity || 'info') === varSeverityFilter);
-    }
-    if (varFilterText.trim()) {
-      const q = varFilterText.toLowerCase();
-      list = list.filter(
-        (v: any) =>
-          v.name.toLowerCase().includes(q) ||
-          String(v.value).toLowerCase().includes(q) ||
-          (v.description && v.description.toLowerCase().includes(q))
-      );
-    }
-    return list;
-  });
-
-  let varCategories = $derived.by(() => {
-    if (!variablesReport?.variables) return ['All'];
-    const cats = new Set<string>(['All']);
-    variablesReport.variables.forEach((v: any) => {
-      if (v.category) cats.add(v.category);
-    });
-    return Array.from(cats);
-  });
 
   function explainThreadQuery(sql?: string) {
     const q = (sql || '').trim();
@@ -1496,8 +1488,17 @@
                   ? 'bg-sky-950/20'
                   : 'bg-[#090d16]'}
                 <tr
+                  role="button"
+                  tabindex="0"
                   class="group h-8 cursor-pointer border-b border-slate-800/50 border-l-4 transition-colors {rowBg}"
                   onclick={() => { inspectingThread = thread; formatInspectSql = false; }}
+                  onkeydown={(e) => {
+                    if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+                      e.preventDefault();
+                      inspectingThread = thread;
+                      formatInspectSql = false;
+                    }
+                  }}
                 >
                   <td class="px-2 text-center overflow-hidden" onclick={(e) => e.stopPropagation()}>
                     {#if !isSelf && !isSys}
@@ -1784,17 +1785,17 @@
       {/if}
     </div>
   {:else if currentSubTab === 'digest'}
-  {:else if currentSubTab === 'digest'}
-    <DigestPanel {digestRows} {isDigestLoading} {digestError} onOpenSqlInEditor={openSqlInEditor} />
+    <DigestPanel {digestRows} {isDigestLoading} {digestError} onOpenSqlInEditor={openSqlInEditor} onRetry={loadStatementDigest} />
   {:else if currentSubTab === 'deadlock'}
-    <DeadlockPanel {deadlockData} {isDeadlockLoading} onOpenSqlInEditor={openSqlInEditor} />
+    <DeadlockPanel {deadlockData} {isDeadlockLoading} onOpenSqlInEditor={openSqlInEditor} onRetry={loadDeadlock} />
   {:else if currentSubTab === 'cluster'}
-    <ClusterHealthPanel bind:this={clusterPanelRef} {clusterReport} {isClusterLoading} onSwitchNode={switchSessionToNode} />
+    <ClusterHealthPanel bind:this={clusterPanelRef} {clusterReport} {isClusterLoading} onSwitchNode={switchSessionToNode} onViewThreads={() => setSubTab('threads')} />
   {:else if currentSubTab === 'variables'}
     <ServerVariablesPanel {variablesReport} {isVariablesLoading} />
   {:else if currentSubTab === 'flight-recorder'}
     <FlightRecorderPanel
       {isRecording}
+      {recordingSeconds}
       {flightSessions}
       {selectedFlightSessionId}
       {flightSessionTicks}
@@ -1802,10 +1803,12 @@
       {isFlightLoading}
       {flightPeak}
       {activeOrSelectedTick}
+      onToggleRecording={toggleFlightRecording}
       onInspectSession={inspectFlightSession}
       onDeleteSession={deleteFlightSession}
       onOpenSqlInEditor={openSqlInEditor}
       onExplainQuery={explainThreadQuery}
+      onSendThreadToAI={sendThreadToAI}
     />
   {/if}
 </div>
@@ -2177,288 +2180,26 @@
 {/if}
 
 <!-- Batch Kill Safety Challenge Modal -->
-{#if showBatchKillModal}
-  <div class="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-    <div class="bg-[#0b0f19] border border-slate-700 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col text-xs font-sans">
-      <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-[#0f172a]">
-        <div class="flex items-center space-x-2.5">
-          <Icon name={batchKillMode === 'connection' ? 'x-circle' : 'square'} class="w-5 h-5 text-rose-400" />
-          <div>
-            <h3 class="font-bold text-slate-100 text-sm flex items-center space-x-2">
-              <span>Confirm Batch {batchKillMode === 'connection' ? 'KILL CONNECTION' : 'KILL QUERY'}</span>
-              <span class="px-2 py-0.5 rounded bg-rose-950 text-rose-300 text-[11px] font-mono border border-rose-800">
-                {batchKillTargetIds.length} Threads
-              </span>
-            </h3>
-            <p class="text-[11px] text-slate-400">
-              {batchKillMode === 'connection'
-                ? 'Disconnecting client connections terminates sessions immediately and rolls back uncommitted work.'
-                : 'Cancelling running queries aborts active statements while keeping client connections open.'}
-            </p>
-          </div>
-        </div>
-        <button type="button" onclick={() => (showBatchKillModal = false)} class="text-slate-400 hover:text-white" aria-label="Close">
-          <Icon name="x" class="w-4 h-4" />
-        </button>
-      </div>
-
-      <div class="p-5 space-y-4">
-        <div class="max-h-56 overflow-y-auto bg-[#050811] border border-slate-800 rounded-xl divide-y divide-slate-800/70 p-2 font-mono text-[11px]">
-          {#each batchKillTargetIds as id (id)}
-            {@const bt = threads.find((x) => x.id === id)}
-            <div class="py-1.5 px-2 flex items-center justify-between gap-2 hover:bg-slate-900/60 rounded">
-              <div class="min-w-0 flex-1">
-                <div class="flex items-center space-x-1.5">
-                  <span class="font-bold text-sky-400">#{id}</span>
-                  {#if bt}
-                    <span class="text-slate-300 font-semibold">{bt.user}@{bt.host}</span>
-                    <span class="text-slate-500">({bt.db || '-'})</span>
-                    <span class="px-1 rounded bg-slate-800 text-slate-300 text-[10px]">{bt.command}</span>
-                  {/if}
-                </div>
-                {#if bt}
-                  <div class="text-[10px] text-slate-400 truncate mt-0.5" title={bt.info || ''}>
-                    {bt.info || (bt.command === 'Sleep' ? 'Idle connection (Sleep)' : '-')}
-                  </div>
-                {/if}
-              </div>
-              <div class="flex items-center space-x-2 shrink-0">
-                {#if bt}
-                  <span class="font-bold {bt.time >= 30 ? 'text-rose-400' : bt.time >= 5 ? 'text-amber-400' : 'text-slate-300'}">
-                    {bt.time}s
-                  </span>
-                {/if}
-                <button
-                  type="button"
-                  onclick={() => removeBatchKillTarget(id)}
-                  class="text-slate-500 hover:text-rose-400 p-1 rounded hover:bg-slate-800"
-                  title="Remove thread #{id} from batch"
-                >
-                  <Icon name="x" class="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          {/each}
-        </div>
-
-        {#if needsBatchChallenge}
-          <div class="p-3.5 bg-rose-950/40 border border-rose-800/80 rounded-xl space-y-2">
-            <div class="font-bold text-rose-300 flex items-center space-x-1.5">
-              <Icon name="shield-alert" class="w-4 h-4 text-rose-400" />
-              <span>
-                {isProductionConn()
-                  ? 'Production Environment Safety Guardrail'
-                  : `Large Batch Safety Guardrail (${batchKillTargetIds.length} threads)`}
-              </span>
-            </div>
-            <p class="text-[11px] text-slate-300">
-              Type <strong class="text-white font-mono bg-rose-900/60 px-1.5 py-0.5 rounded border border-rose-700/80">KILL</strong> below to unlock batch execution:
-            </p>
-            <input
-              type="text"
-              bind:value={batchKillChallengeInput}
-              placeholder="Type KILL here..."
-              class="w-full bg-slate-900 border border-rose-700/80 px-3 py-1.5 rounded text-white font-mono text-xs outline-none focus:border-rose-500 uppercase tracking-widest"
-            />
-          </div>
-        {/if}
-      </div>
-
-      <div class="px-5 py-3 border-t border-slate-800 flex items-center justify-between bg-[#0f172a]">
-        <span class="text-[11px] text-slate-500">Recorded in Session Audit Log.</span>
-        <div class="flex items-center space-x-2">
-          <button
-            type="button"
-            onclick={() => (showBatchKillModal = false)}
-            class="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            disabled={!batchChallengeValid || isBatchKilling}
-            onclick={executeBatchKill}
-            class="px-3.5 py-1.5 rounded bg-rose-600 hover:bg-rose-500 text-white font-bold transition flex items-center space-x-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <Icon name="zap" class="w-3.5 h-3.5" />
-            <span>{isBatchKilling ? 'Executing...' : `Execute ${batchKillMode === 'connection' ? 'KILL CONNECTION' : 'KILL QUERY'}`}</span>
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-{/if}
+<ProcessBatchKillModal
+  bind:open={showBatchKillModal}
+  {batchKillMode}
+  {batchKillTargetIds}
+  {threads}
+  {needsBatchChallenge}
+  isProduction={isProductionConn()}
+  bind:batchKillChallengeInput
+  {batchChallengeValid}
+  {isBatchKilling}
+  onRemoveTarget={removeBatchKillTarget}
+  onExecute={executeBatchKill}
+/>
 
 <!-- Lock Contention & Root Blocker Triage -->
-{#if showBlockerPanel}
-  <div
-    class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
-    role="presentation"
-    onclick={(e) => {
-      if (e.target === e.currentTarget) showBlockerPanel = false;
-    }}
-  >
-    <div class="bg-[#0b0f19] border border-[#334155] rounded-xl w-full max-w-4xl max-h-[86vh] shadow-2xl overflow-hidden flex flex-col text-xs font-sans">
-      <div class="px-5 py-3.5 border-b border-[#334155] flex items-center justify-between bg-[#0f172a]">
-        <div class="flex items-center space-x-2.5">
-          <Icon name="shield-alert" class="w-4 h-4 {rootBlockerCount > 0 ? 'text-rose-400' : 'text-slate-400'}" />
-          <div>
-            <h3 class="font-bold text-slate-100 text-sm">Lock Contention &amp; Root Blocker Triage</h3>
-            <p class="text-[11px] text-slate-500 mt-0.5">
-              {rootBlockerCount > 0
-                ? `${rootBlockerCount} root blocker(s) holding transactions`
-                : locks.length > 0
-                  ? `${locks.length} lock wait(s), no root blocker`
-                  : 'No active lock contention'}
-            </p>
-          </div>
-        </div>
-        <div class="flex items-center space-x-2">
-          <span class="px-2 py-0.5 rounded border text-[10px] font-bold {rootBlockerCount > 0
-            ? 'bg-rose-950/60 border-rose-700 text-rose-300'
-            : 'bg-slate-900 border-slate-700 text-slate-400'}">
-            {rootBlockerCount > 0 ? `${rootBlockerCount} ROOT BLOCKER${rootBlockerCount > 1 ? 'S' : ''}` : `${locks.length} LOCK WAITS`}
-          </span>
-          <button onclick={() => (showBlockerPanel = false)} class="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition" title="Close">
-            <Icon name="x" class="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-
-      <div class="flex-1 overflow-y-auto p-4 space-y-3">
-        {#if locks.length === 0}
-          <div class="py-10 text-center space-y-2">
-            <div class="w-10 h-10 mx-auto rounded-full bg-emerald-500/10 border border-emerald-600/30 flex items-center justify-center text-emerald-400">
-              <Icon name="check-circle" class="w-5 h-5" />
-            </div>
-            <div class="font-bold text-slate-200">No Active Lock Contention</div>
-            <div class="text-slate-500 text-[11px]">All threads and transactions are running unobstructed.</div>
-          </div>
-        {:else}
-          {#each locks as lock, idx (idx)}
-            {@const isRoot = !!lock.is_root_blocker}
-            <div class="rounded-lg border {isRoot ? 'border-rose-800 bg-rose-950/25' : 'border-slate-800 bg-[#0f172a]'}">
-              <div class="px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2 border-b {isRoot ? 'border-rose-900/60' : 'border-slate-800'}">
-                <div class="flex flex-wrap items-center gap-2 min-w-0">
-                  {#if isRoot}
-                    <span class="px-1.5 py-0.5 rounded bg-rose-600 text-white text-[10px] font-bold tracking-wide flex items-center space-x-1">
-                      <Icon name="alert-triangle" class="w-3 h-3" />
-                      <span>ROOT BLOCKER</span>
-                    </span>
-                  {:else}
-                    <span class="px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-800/70 text-amber-300 text-[10px] font-bold">
-                      LOCK WAIT
-                    </span>
-                  {/if}
-                  <span class="font-bold text-slate-100">Thread #{lock.blocking_thread_id}</span>
-                  <span class="text-slate-500">{lock.blocking_user || 'unknown'}</span>
-                  <span class="px-1.5 py-0.5 rounded bg-amber-950/50 border border-amber-900/70 text-amber-300 text-[10px] font-mono">
-                    holding {lock.lock_mode || 'LOCK'}
-                  </span>
-                  {#if lock.locked_resource}
-                    <span class="px-1.5 py-0.5 rounded bg-sky-950/50 border border-sky-900/70 text-sky-300 text-[10px] font-mono truncate max-w-[18rem]" title={lock.locked_resource}>
-                      on {lock.locked_resource}
-                    </span>
-                  {/if}
-                </div>
-                <div class="flex items-center space-x-1.5 shrink-0">
-                  <button
-                    onclick={() => inspectLockThread(lock, 'blocking')}
-                    class="px-2 py-1 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300 transition flex items-center space-x-1"
-                  >
-                    <Icon name="search" class="w-3 h-3 text-sky-400" />
-                    <span>Detail</span>
-                  </button>
-                  <button
-                    onclick={() => killLockThread(lock.blocking_thread_id, 'query')}
-                    class="px-2 py-1 rounded border border-amber-700/70 bg-amber-950/50 hover:bg-amber-900/60 text-amber-300 font-semibold transition"
-                  >
-                    Kill Query
-                  </button>
-                  <button
-                    onclick={() => killLockThread(lock.blocking_thread_id, 'connection')}
-                    class="px-2 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white font-bold transition"
-                  >
-                    Kill Blocker
-                  </button>
-                </div>
-              </div>
-
-              <div class="p-3 space-y-2">
-                {#if lock.blocking_query}
-                  <div class="rounded border border-slate-800 overflow-hidden">
-                    <div class="px-2.5 py-1.5 bg-[#090d16] border-b border-slate-800 flex items-center justify-between">
-                      <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Blocking Query</span>
-                      <div class="flex items-center space-x-2">
-                        <button onclick={() => copyWithToast(lock.blocking_query, 'Blocking query')} class="text-[10px] text-slate-400 hover:text-white flex items-center space-x-1">
-                          <Icon name="copy" class="w-3 h-3" />
-                          <span>Copy</span>
-                        </button>
-                        <button onclick={() => inspectLockThread(lock, 'blocking')} class="text-[10px] text-sky-400 hover:text-sky-300 flex items-center space-x-1">
-                          <Icon name="search" class="w-3 h-3" />
-                          <span>Inspect</span>
-                        </button>
-                      </div>
-                    </div>
-                    <pre class="p-2.5 bg-[#050811] text-sky-200 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all max-h-40 overflow-y-auto select-text">{lock.blocking_query}</pre>
-                  </div>
-                {:else}
-                  <div class="px-2.5 py-2 rounded border border-slate-800 bg-[#090d16] text-slate-500 italic flex items-center justify-between">
-                    <span>Idle in transaction: holding locks without a running query.</span>
-                    <button onclick={() => inspectLockThread(lock, 'blocking')} class="text-sky-400 hover:text-sky-300 not-italic text-[10px]">Show detail</button>
-                  </div>
-                {/if}
-
-                <div class="pl-3 border-l-2 border-rose-700/70 flex flex-wrap items-center justify-between gap-2">
-                  <div class="flex flex-wrap items-center gap-1.5 text-[11px]">
-                    <span class="text-rose-300">Blocked:</span>
-                    <span class="font-bold text-slate-100">Thread #{lock.waiting_thread_id}</span>
-                    <span class="text-slate-500">{lock.waiting_user || 'unknown'}</span>
-                    <span class="text-slate-400">waiting</span>
-                    <span class="text-amber-300 font-mono font-bold">{lock.waiting_seconds ?? 0}s</span>
-                    <span class="text-slate-400">for {lock.lock_mode || 'lock'}</span>
-                  </div>
-                  <div class="flex items-center space-x-1.5">
-                    <button
-                      onclick={() => inspectLockThread(lock, 'waiting')}
-                      class="px-2 py-0.5 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300 text-[10px] transition flex items-center space-x-1"
-                    >
-                      <Icon name="search" class="w-3 h-3 text-sky-400" />
-                      <span>Detail</span>
-                    </button>
-                    <button
-                      onclick={() => killLockThread(lock.waiting_thread_id, 'connection')}
-                      class="px-2 py-0.5 rounded border border-rose-800 bg-rose-950/50 hover:bg-rose-900/60 text-rose-300 text-[10px] transition"
-                    >
-                      Kill Waiting #{lock.waiting_thread_id}
-                    </button>
-                  </div>
-                </div>
-
-                {#if lock.waiting_query}
-                  <div class="rounded border border-slate-800 overflow-hidden">
-                    <div class="px-2.5 py-1.5 bg-[#090d16] border-b border-slate-800 flex items-center justify-between">
-                      <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Waiting Query</span>
-                      <button onclick={() => copyWithToast(lock.waiting_query, 'Waiting query')} class="text-[10px] text-slate-400 hover:text-white flex items-center space-x-1">
-                        <Icon name="copy" class="w-3 h-3" />
-                        <span>Copy</span>
-                      </button>
-                    </div>
-                    <pre class="p-2.5 bg-[#050811] text-slate-300 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all max-h-32 overflow-y-auto select-text">{lock.waiting_query}</pre>
-                  </div>
-                {/if}
-              </div>
-            </div>
-          {/each}
-        {/if}
-      </div>
-
-      <div class="px-5 py-2.5 border-t border-[#334155] bg-[#0f172a] flex items-center justify-between text-[10px] text-slate-500 font-mono">
-        <span>Root blockers are blocking threads that are not waiting on another lock.</span>
-        <button onclick={() => (showBlockerPanel = false)} class="px-2.5 py-1 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300 font-sans text-xs transition">
-          Close
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}
+<ProcessBlockerModal
+  bind:open={showBlockerPanel}
+  {locks}
+  {rootBlockerCount}
+  onInspectThread={inspectLockThread}
+  onKillThread={killLockThread}
+  onCopy={copyWithToast}
+/>

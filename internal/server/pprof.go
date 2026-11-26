@@ -15,8 +15,8 @@ func (s *Server) registerPprof(mux *http.ServeMux) {
 
 	loopbackOnly := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			if !isLoopback(r.RemoteAddr) {
-				http.Error(w, "Forbidden: pprof is restricted to loopback localhost", http.StatusForbidden)
+			if !isLoopback(r.RemoteAddr) || s.IsRemoteRequest(r) || hasForwardingHeaders(r) {
+				http.Error(w, "Forbidden: pprof is restricted to direct loopback localhost", http.StatusForbidden)
 				return
 			}
 			h(w, r)

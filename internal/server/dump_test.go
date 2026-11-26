@@ -217,7 +217,7 @@ INSERT INTO tags (id, name) VALUES (2, 'Sci-Fi');
 }
 
 // TestRunSQLScript_SafetyGuardGate verifies the Large SQL Runner no longer bypasses the Safety
-// Guard: a script containing a destructive DROP must be blocked (HTTP 409) unless confirm=true, and
+// Guard: a script containing a destructive DROP must be blocked (HTTP 422) unless confirm=true, and
 // a confirmed destructive run must leave a pre-DDL backup snapshot behind.
 func TestRunSQLScript_SafetyGuardGate(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "sqlfox-script-guard-*")
@@ -267,7 +267,7 @@ func TestRunSQLScript_SafetyGuardGate(t *testing.T) {
 	}
 	resp.Body.Close()
 	// Seed a table with rows. In Production even CREATE is challenge-gated, so the seed must pass
-	// confirm=true (this also exercises the confirmed path for a non-DROP statement).
+	// confirm=true + matching challenge_input.
 	seedScript := "CREATE TABLE victims (id INTEGER PRIMARY KEY, v TEXT);\nINSERT INTO victims (id, v) VALUES (1, 'a'), (2, 'b');\n"
 	runScript := func(script string, query string) (*http.Response, []byte) {
 		var b bytes.Buffer
@@ -290,15 +290,19 @@ func TestRunSQLScript_SafetyGuardGate(t *testing.T) {
 		return r, data
 	}
 
-	if r, data := runScript(seedScript, "confirm=true"); r.StatusCode != http.StatusOK {
+	// Production confirm=true WITHOUT challenge_input must be rejected with 422 (P0.1).
+	if r, data := runScript(seedScript, "confirm=true"); r.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 when confirm=true lacks challenge_input in Production, got status=%d body=%s", r.StatusCode, data)
+	}
+	if r, data := runScript(seedScript, "confirm=true&challenge_input=victims"); r.StatusCode != http.StatusOK {
 		t.Fatalf("seed script failed: status=%d body=%s", r.StatusCode, data)
 	}
 
-	// 1. Destructive script WITHOUT confirm must be blocked with 409 and must not drop the table.
+	// 1. Destructive script WITHOUT confirm must be blocked with 422 and must not drop the table.
 	dropScript := "INSERT INTO victims (id, v) VALUES (3, 'c');\nDROP TABLE victims;\n"
 	r, data := runScript(dropScript, "")
-	if r.StatusCode != http.StatusConflict {
-		t.Fatalf("expected 409 for unconfirmed destructive script, got %d: %s", r.StatusCode, data)
+	if r.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 for unconfirmed destructive script, got %d: %s", r.StatusCode, data)
 	}
 	var blocked struct {
 		RequiresChallenge bool `json:"requires_challenge"`
@@ -328,8 +332,12 @@ func TestRunSQLScript_SafetyGuardGate(t *testing.T) {
 		t.Fatalf("expected table untouched (2 rows) after blocked script, got %d", len(rowsResp.Rows))
 	}
 
-	// 2. Same script WITH confirm=true must run and drop the table, leaving a pre-DDL backup.
-	r, data = runScript("DROP TABLE victims;\n", "confirm=true")
+	// 2. Same script WITH confirm=true but NO challenge_input must still be rejected in Production.
+	if r, data := runScript("DROP TABLE victims;\n", "confirm=true"); r.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 when DROP lacks challenge_input in Production: status=%d body=%s", r.StatusCode, data)
+	}
+	// 3. Same script WITH confirm=true AND matching challenge_input must run and drop the table, leaving a pre-DDL backup.
+	r, data = runScript("DROP TABLE victims;\n", "confirm=true&challenge_input=victims")
 	if r.StatusCode != http.StatusOK {
 		t.Fatalf("confirmed destructive script should succeed: status=%d body=%s", r.StatusCode, data)
 	}

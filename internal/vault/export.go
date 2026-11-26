@@ -156,12 +156,6 @@ func ImportVault(v *Vault, archiveJSON []byte, exportPassphrase string) (int, er
 			}
 		}
 		for _, p := range payload.AIProfiles {
-			// Preserve local secret if imported API key is empty
-			if p.APIKey == "" {
-				if ex, err := v.GetAIProfile(p.ID); err == nil && ex.APIKey != "" {
-					p.APIKey = ex.APIKey
-				}
-			}
 			_ = v.SaveAIProfile(p)
 		}
 		return count, nil

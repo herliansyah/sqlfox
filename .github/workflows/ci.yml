@@ -31,7 +31,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: |
             package-lock.json
@@ -43,13 +43,26 @@ jobs:
           npm --prefix web/frontend ci
           npm run build:svelte
 
+      - name: Run Frontend Tests & Typecheck
+        run: npm test
+
+      - name: Go Vet
+        run: go vet ./...
+
+      - name: Security Audit (npm & govulncheck)
+        if: matrix.os == 'ubuntu-latest'
+        continue-on-error: true
+        run: |
+          npm --prefix web/frontend audit --audit-level=high
+          go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
       - name: Run Tests
         if: matrix.os != 'ubuntu-latest'
         run: go test -v ./...
 
-      - name: Run Tests with Coverage
+      - name: Run Tests with Race Detector & Coverage
         if: matrix.os == 'ubuntu-latest'
-        run: go test -v -coverprofile=coverage.txt -covermode=atomic ./...
+        run: go test -race -v -coverprofile=coverage.txt -covermode=atomic ./...
 
       - name: Upload Coverage to Codecov
         if: matrix.os == 'ubuntu-latest'
@@ -59,5 +72,65 @@ jobs:
           files: ./coverage.txt
           fail_ci_if_error: false
 
-      - name: Build Binary
+      - name: Build Pure-Go Binary (CGO_ENABLED=0)
+        env:
+          CGO_ENABLED: 0
         run: go build -v ./cmd/sqlfox
+
+  integration-drivers:
+    name: Driver Integration Tests (MySQL & PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: sqlfox_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=15
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sqlfox_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=15
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Run Driver Integration Tests
+        env:
+          SQLFOX_TEST_MYSQL_DSN: "1"
+          SQLFOX_TEST_MYSQL_HOST: "127.0.0.1"
+          SQLFOX_TEST_MYSQL_USER: "root"
+          SQLFOX_TEST_MYSQL_PASSWORD: "root"
+          SQLFOX_TEST_MYSQL_PASS: "root"
+          SQLFOX_TEST_MYSQL_DB: "sqlfox_test"
+          SQLFOX_TEST_PG_ENABLE: "1"
+          SQLFOX_TEST_PG_HOST: "127.0.0.1"
+          SQLFOX_TEST_PG_USER: "postgres"
+          SQLFOX_TEST_PG_PASSWORD: "postgres"
+          SQLFOX_TEST_PG_DB: "sqlfox_test"
+          SQLFOX_TEST_POSTGRES_HOST: "127.0.0.1"
+          SQLFOX_TEST_POSTGRES_USER: "postgres"
+          SQLFOX_TEST_POSTGRES_PASS: "postgres"
+          SQLFOX_TEST_POSTGRES_DB: "sqlfox_test"
+        run: go test -v -tags=integration ./internal/driver/...

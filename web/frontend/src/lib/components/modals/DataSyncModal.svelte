@@ -1,5 +1,6 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
+  import { focusTrap } from '../../actions/focusTrap';
   import { api } from '../../api/client';
   import Icon from '../common/Icon.svelte';
 
@@ -200,6 +201,7 @@
       class="bg-[#0f172a] border border-slate-700 w-full max-w-3xl rounded-xl shadow-2xl flex flex-col overflow-hidden text-slate-100 max-h-[90vh]"
       role="dialog"
       aria-modal="true"
+      use:focusTrap
     >
       <!-- Header -->
       <div class="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between bg-slate-900/60 shrink-0">
@@ -227,8 +229,9 @@
           <div class="p-3 rounded-lg border border-slate-800 bg-[#050811] space-y-2">
             <h4 class="font-bold text-sky-400 uppercase">Source (Master / Truth)</h4>
             <div>
-              <label class="block text-slate-400 mb-1">Connection</label>
+              <label for="ds-src-conn" class="block text-slate-400 mb-1">Connection</label>
               <select
+                id="ds-src-conn"
                 bind:value={sourceConnId}
                 onchange={() => { sourceDb = ''; selectedTable = ''; loadSourceMeta(sourceConnId, ''); }}
                 class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100"
@@ -239,9 +242,10 @@
               </select>
             </div>
             <div>
-              <label class="block text-slate-400 mb-1">Database</label>
+              <label for="ds-src-db" class="block text-slate-400 mb-1">Database</label>
               {#if srcDatabases.length > 0}
                 <select
+                  id="ds-src-db"
                   bind:value={sourceDb}
                   onchange={() => loadSourceMeta(sourceConnId, sourceDb)}
                   class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
@@ -252,6 +256,7 @@
                 </select>
               {:else}
                 <input
+                  id="ds-src-db"
                   type="text"
                   bind:value={sourceDb}
                   placeholder="Optional database"
@@ -265,8 +270,9 @@
           <div class="p-3 rounded-lg border border-slate-800 bg-[#050811] space-y-2">
             <h4 class="font-bold text-emerald-400 uppercase">Target (To Reconcile)</h4>
             <div>
-              <label class="block text-slate-400 mb-1">Connection</label>
+              <label for="ds-tgt-conn" class="block text-slate-400 mb-1">Connection</label>
               <select
+                id="ds-tgt-conn"
                 bind:value={targetConnId}
                 onchange={() => { targetDb = ''; loadTargetMeta(targetConnId); }}
                 class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100"
@@ -278,9 +284,10 @@
               </select>
             </div>
             <div>
-              <label class="block text-slate-400 mb-1">Database</label>
+              <label for="ds-tgt-db" class="block text-slate-400 mb-1">Database</label>
               {#if tgtDatabases.length > 0}
                 <select
+                  id="ds-tgt-db"
                   bind:value={targetDb}
                   class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
                 >
@@ -290,6 +297,7 @@
                 </select>
               {:else}
                 <input
+                  id="ds-tgt-db"
                   type="text"
                   bind:value={targetDb}
                   placeholder="Target DB"
@@ -303,8 +311,9 @@
         <!-- Unified Table & Options Bar -->
         <div class="p-3 rounded-lg border border-slate-800 bg-[#050811] flex flex-wrap items-center justify-between gap-3">
           <div class="flex items-center space-x-2 flex-1 min-w-[200px]">
-            <label class="text-slate-400 font-semibold shrink-0">Table to Reconcile *</label>
+            <label for="ds-table" class="text-slate-400 font-semibold shrink-0">Table to Reconcile *</label>
             <select
+              id="ds-table"
               bind:value={selectedTable}
               class="flex-1 bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono focus:outline-none focus:border-emerald-500"
             >

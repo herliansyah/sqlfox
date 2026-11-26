@@ -1,5 +1,6 @@
 <script lang="ts">
   import { copyText } from '../../utils/clipboard';
+  import { focusTrap } from '../../actions/focusTrap';
   import {
     classifyColumnType,
     findTableMeta,
@@ -157,13 +158,25 @@
       return;
     }
 
-    const pkColObj = result.columns.find((c) => isColPK(c));
-    const pkCol = pkColObj ? getColName(pkColObj) : undefined;
-    const pkColIdx = pkCol ? result.columns.findIndex((c) => getColName(c) === pkCol) : -1;
-    const pkVal = pkColIdx !== -1 ? currentRow[pkColIdx] : undefined;
+    const pkCols = result.columns.filter((c) => isColPK(c)).map((c) => getColName(c));
+    let pkCol: string | undefined;
+    let pkVal: any;
+    let pkValues: Record<string, any> | undefined;
+
+    if (pkCols.length === 1) {
+      pkCol = pkCols[0];
+      const pkColIdx = result.columns.findIndex((c) => getColName(c) === pkCol);
+      pkVal = pkColIdx !== -1 ? currentRow[pkColIdx] : undefined;
+    } else if (pkCols.length > 1) {
+      pkValues = {};
+      for (const col of pkCols) {
+        const idx = result.columns.findIndex((c) => getColName(c) === col);
+        pkValues[col] = idx !== -1 ? currentRow[idx] : undefined;
+      }
+    }
 
     let rowCriteria: Record<string, any> | undefined;
-    if (!pkCol) {
+    if (pkCols.length === 0) {
       rowCriteria = {};
       result.columns.forEach((c: any, idx: number) => {
         const colKey = getColName(c);
@@ -181,7 +194,8 @@
       oldVal,
       newVal,
       effectiveDatabase,
-      rowCriteria
+      rowCriteria,
+      pkValues
     );
     currentRow[cIdx] = newVal;
     delete editedFields[colName];
@@ -277,6 +291,7 @@
       id="record-inspector-dialog"
       role="dialog"
       aria-modal="true"
+      use:focusTrap
       aria-label="Record inspector"
       class="w-full max-w-3xl bg-[#0d1320] border border-slate-700/80 rounded-xl shadow-[0_24px_64px_-12px_rgba(0,0,0,0.85)] flex flex-col max-h-[86vh] overflow-hidden"
     >
@@ -517,7 +532,7 @@
                   {/if}
                   {#if fk}
                     <span
-                      class="text-[9px] font-mono px-1 py-0.2 rounded bg-sky-950/60 border border-sky-800/60 text-sky-400"
+                      class="text-[9px] font-mono px-1 py-0.5 rounded bg-sky-950/60 border border-sky-800/60 text-sky-400"
                       title="Foreign Key → {fk.ref_table || fk.referenced_table}.{fk.ref_col || fk.referenced_column}"
                     >
                       FK

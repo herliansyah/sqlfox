@@ -178,6 +178,46 @@ func TestSafetyGuard_Inspect(t *testing.T) {
 			expectedChallenge: false,
 			expectedTable:     "orders",
 		},
+		{
+			name:              "Commented-out WHERE on DELETE is still Critical",
+			query:             "DELETE FROM users -- WHERE id = 1",
+			env:               "Development",
+			expectedRisk:      RiskCritical,
+			expectedChallenge: true,
+			expectedTable:     "users",
+		},
+		{
+			name:              "Inline comment between DELETE and FROM",
+			query:             "DELETE /* bypass */ FROM users;",
+			env:               "Development",
+			expectedRisk:      RiskCritical,
+			expectedChallenge: true,
+			expectedTable:     "users",
+		},
+		{
+			name:              "PostgreSQL TRUNCATE ONLY CASCADE",
+			query:             "TRUNCATE TABLE ONLY analytics.events CASCADE;",
+			env:               "Production",
+			expectedRisk:      RiskCritical,
+			expectedChallenge: true,
+			expectedTable:     "events",
+		},
+		{
+			name:              "PostgreSQL DROP MATERIALIZED VIEW",
+			query:             "DROP MATERIALIZED VIEW IF EXISTS reporting.daily_sales CASCADE;",
+			env:               "Production",
+			expectedRisk:      RiskCritical,
+			expectedChallenge: true,
+			expectedTable:     "daily_sales",
+		},
+		{
+			name:              "MERGE in Production requires affirmation",
+			query:             "MERGE INTO target_tbl USING src_tbl ON target_tbl.id = src_tbl.id WHEN MATCHED THEN DELETE;",
+			env:               "Production",
+			expectedRisk:      RiskWarning,
+			expectedChallenge: false,
+			expectedTable:     "target_tbl",
+		},
 	}
 
 	for _, tc := range tests {
@@ -400,14 +440,14 @@ func TestSafetyGuard_PreExecutionCountQuery(t *testing.T) {
 			env:              "Development",
 			expectedOp:       "DELETE",
 			expectedHasWhere: true,
-			expectedCount:    "SELECT COUNT(*) FROM users where id = 10",
+			expectedCount:    "SELECT COUNT(*) FROM users WHERE id = 10",
 		},
 		{
 			query:            "UPDATE accounts SET balance = 100 WHERE status = 'active'",
 			env:              "Production",
 			expectedOp:       "UPDATE",
 			expectedHasWhere: true,
-			expectedCount:    "SELECT COUNT(*) FROM accounts where `status` = 'active'",
+			expectedCount:    "SELECT COUNT(*) FROM accounts WHERE status = 'active'",
 		},
 		{
 			query:            "DELETE FROM orders RETURNING *",
@@ -577,5 +617,77 @@ func TestSafetyGuard_HardeningEdgeCases(t *testing.T) {
 	resUpdateAlias := Inspect("UPDATE users AS u SET active = 0", "Production")
 	if resUpdateAlias.TargetTable != "users" {
 		t.Errorf("expected aliased UPDATE users AS u to have TargetTable='users', got %q", resUpdateAlias.TargetTable)
+	}
+
+	// 5. Parenthesized, EXPLAIN ANALYZE, procedural, and multi-table DDL bypasses must be caught
+	if res := Inspect("(DELETE FROM users)", "Production"); res.RiskLevel != RiskCritical || !res.IsDestructive {
+		t.Errorf("expected parenthesized DELETE to be RiskCritical, got %+v", res)
+	}
+	if res := Inspect("EXPLAIN ANALYZE DELETE FROM users", "Production"); res.RiskLevel != RiskCritical || !res.IsDestructive {
+		t.Errorf("expected EXPLAIN ANALYZE DELETE to be RiskCritical, got %+v", res)
+	}
+	if res := Inspect("EXPLAIN (ANALYZE, BUFFERS) TRUNCATE TABLE orders", "Production"); res.RiskLevel != RiskCritical || !res.IsDestructive {
+		t.Errorf("expected EXPLAIN (ANALYZE) TRUNCATE to be RiskCritical, got %+v", res)
+	}
+	if res := Inspect("EXPLAIN SELECT * FROM users", "Production"); res.RiskLevel != RiskNone {
+		t.Errorf("expected plain EXPLAIN SELECT to be RiskNone, got %+v", res)
+	}
+	if res := Inspect("DO $$ BEGIN DELETE FROM users; END $$", "Production"); res.RiskLevel != RiskDangerous || !res.IsDestructive {
+		t.Errorf("expected DO block to be RiskDangerous, got %+v", res)
+	}
+	if res := Inspect("DROP TABLE a, b", "Production"); res.TargetTable != "a, b" || res.RiskLevel != RiskCritical {
+		t.Errorf("expected multi-table DROP TABLE a, b to report 'a, b', got %+v", res)
+	}
+	if res := Inspect("TRUNCATE TABLE a, b", "Production"); res.TargetTable != "a, b" || res.RiskLevel != RiskCritical {
+		t.Errorf("expected multi-table TRUNCATE TABLE a, b to report 'a, b', got %+v", res)
+	}
+}
+
+func TestSafetyGuard_AuditHardening(t *testing.T) {
+	// 1. PostgreSQL EXPLAIN ANALYSE synonym
+	if res := Inspect("EXPLAIN ANALYSE DELETE FROM users", "Production"); res.RiskLevel != RiskCritical || !res.IsDestructive {
+		t.Errorf("expected EXPLAIN ANALYSE DELETE to be RiskCritical, got %+v", res)
+	}
+	if driver.IsQueryStatement("EXPLAIN ANALYSE DELETE FROM users") {
+		t.Errorf("IsQueryStatement must return false for EXPLAIN ANALYSE DELETE")
+	}
+
+	// 2. Data-modifying CTEs with TABLE, VALUES, or parenthesized outer SELECT
+	for _, q := range []string{
+		"WITH d AS (DELETE FROM users) TABLE d",
+		"WITH d AS (DELETE FROM users) VALUES (1)",
+		"WITH d AS (DELETE FROM users) (SELECT * FROM d)",
+	} {
+		if res := Inspect(q, "Production"); res.RiskLevel != RiskCritical || !res.IsDestructive || res.TargetTable != "users" {
+			t.Errorf("expected %q to be RiskCritical on 'users', got %+v", q, res)
+		}
+	}
+
+	// 3. Function-form mutating PRAGMAs & SELECT ... INTO new_table
+	if driver.IsQueryStatement("PRAGMA writable_schema(1)") {
+		t.Errorf("IsQueryStatement must reject mutating function-form PRAGMA")
+	}
+	if !driver.IsQueryStatement("PRAGMA table_info(users)") {
+		t.Errorf("IsQueryStatement must allow read-only PRAGMA table_info(users)")
+	}
+	if res := Inspect("PRAGMA writable_schema(1)", "Production"); !res.IsDestructive || !res.RequiresChallenge {
+		t.Errorf("expected PRAGMA writable_schema(1) in Production to require challenge, got %+v", res)
+	}
+	if driver.IsQueryStatement("SELECT * INTO new_users FROM users") {
+		t.Errorf("IsQueryStatement must reject SELECT ... INTO table")
+	}
+
+	// 4. Privileged ALTER / CREATE / administrative verbs
+	for _, q := range []string{
+		"ALTER SYSTEM SET archive_command = 'evil'",
+		"ALTER USER bob SUPERUSER",
+		"CREATE FUNCTION evil() RETURNS void AS $$ $$ LANGUAGE sql",
+		"SHUTDOWN",
+		"FLUSH TABLES WITH READ LOCK",
+		"SET GLOBAL max_connections = 1",
+	} {
+		if res := Inspect(q, "Production"); !res.IsDestructive || !res.RequiresChallenge {
+			t.Errorf("expected %q in Production to be destructive + require challenge, got %+v", q, res)
+		}
 	}
 }

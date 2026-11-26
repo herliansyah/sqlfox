@@ -1,5 +1,6 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
+  import { focusTrap } from '../../actions/focusTrap';
   import { quoteSqlIdentifier } from '../../utils/sqlStatements';
   import {
     STANDARD_DATA_TYPES,
@@ -237,6 +238,7 @@
     class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 select-none"
     role="dialog"
     aria-modal="true"
+    use:focusTrap
   >
     <button
       tabindex="-1"

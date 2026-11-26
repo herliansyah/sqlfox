@@ -1,5 +1,6 @@
 <script lang="ts">
   import { appState } from '../../stores/appState.svelte';
+  import { focusTrap } from '../../actions/focusTrap';
   import Icon from '../common/Icon.svelte';
 
   let searchInput: HTMLInputElement | null = $state(null);
@@ -501,6 +502,8 @@
     class="fixed inset-0 z-50 flex items-start justify-center pt-24 p-4 bg-black/75 select-none"
     onclick={(e) => e.target === e.currentTarget && (appState.isCommandPaletteOpen = false)}
     role="dialog"
+    aria-modal="true"
+    use:focusTrap
     tabindex="-1"
     onkeydown={handleKeyDown}
   >
@@ -556,7 +559,7 @@
                     {item.shortcut}
                   </kbd>
                 {/if}
-                <span class="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-slate-900 border border-slate-800 text-slate-400">
+                <span class="text-[9px] uppercase font-mono px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400">
                   {item.category}
                 </span>
               </div>

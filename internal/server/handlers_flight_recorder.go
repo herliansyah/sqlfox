@@ -3,6 +3,8 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/herliansyah/sqlfox/internal/vault"
 )
 
 type startFlightRecordingReq struct {
@@ -87,11 +89,36 @@ func (s *Server) handleFlightRecorderListSessions(w http.ResponseWriter, r *http
 	writeJSON(w, http.StatusOK, list)
 }
 
+func (s *Server) flightRecordingOwnedBy(connID string, rec *vault.FlightRecordingSession) bool {
+	if connID == "" {
+		return true
+	}
+	if rec == nil {
+		return false
+	}
+	if rec.ConnectionID == connID || rec.SessionID == connID {
+		return true
+	}
+	if s.sessionMgr != nil {
+		if sess, err := s.sessionMgr.GetSession(connID); err == nil && sess != nil {
+			if rec.SessionID == sess.ID || rec.ConnectionID == sess.ID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (s *Server) handleFlightRecorderGetSession(w http.ResponseWriter, r *http.Request) {
+	connID := r.PathValue("id")
 	recID := r.PathValue("recId")
 	detail, err := s.vault.GetFlightRecordingSessionWithTicks(recID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if detail == nil || !s.flightRecordingOwnedBy(connID, detail.Session) {
+		writeError(w, http.StatusNotFound, "flight recording not found for this session")
 		return
 	}
 
@@ -99,7 +126,17 @@ func (s *Server) handleFlightRecorderGetSession(w http.ResponseWriter, r *http.R
 }
 
 func (s *Server) handleFlightRecorderDeleteSession(w http.ResponseWriter, r *http.Request) {
+	connID := r.PathValue("id")
 	recID := r.PathValue("recId")
+	detail, err := s.vault.GetFlightRecordingSessionWithTicks(recID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if detail == nil || !s.flightRecordingOwnedBy(connID, detail.Session) {
+		writeError(w, http.StatusNotFound, "flight recording not found for this session")
+		return
+	}
 	if err := s.vault.DeleteFlightRecordingSession(recID); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

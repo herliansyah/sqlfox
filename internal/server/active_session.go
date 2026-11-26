@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -47,6 +48,8 @@ type ActiveSession struct {
 	closed          bool
 	runSeq          uint64
 	inFlight        int // number of Execute/ExecuteStream/Stream calls currently running
+	auditWg         sync.WaitGroup
+	dbSwitchMu      sync.Mutex
 	mu              sync.RWMutex
 }
 
@@ -59,17 +62,22 @@ func (s *ActiveSession) beginInFlight() {
 	s.mu.Unlock()
 }
 
-// endInFlight marks the end of an in-flight request and refreshes transaction activity timestamps
-// so a long statement that just finished does not get immediately reaped.
+// endInFlight marks the end of an in-flight request without refreshing unrelated tab transactions.
 func (s *ActiveSession) endInFlight() {
+	s.endInFlightTab("")
+}
+
+// endInFlightTab marks the end of an in-flight request and refreshes only the specified tab's
+// transaction activity timestamp so activity in Tab B never keeps an abandoned transaction in Tab A alive.
+func (s *ActiveSession) endInFlightTab(tabID string) {
 	s.mu.Lock()
 	if s.inFlight > 0 {
 		s.inFlight--
 	}
 	now := time.Now()
 	s.LastActive = now
-	for _, entry := range s.tabTransactions {
-		if entry != nil && entry.tx != nil {
+	if tabID != "" && s.tabTransactions != nil {
+		if entry, ok := s.tabTransactions[tabID]; ok && entry != nil && entry.tx != nil {
 			entry.lastActive = now
 		}
 	}
@@ -82,10 +90,11 @@ func (s *ActiveSession) Close() error {
 		return nil
 	}
 	s.mu.Lock()
+	var txsToRollback []driver.TxSession
 	if s.tabTransactions != nil {
 		for _, entry := range s.tabTransactions {
 			if entry != nil && entry.tx != nil {
-				_ = entry.tx.Rollback()
+				txsToRollback = append(txsToRollback, entry.tx)
 			}
 		}
 		s.tabTransactions = nil
@@ -96,6 +105,12 @@ func (s *ActiveSession) Close() error {
 	alreadyClosed := s.closed
 	s.closed = true
 	s.mu.Unlock()
+
+	for _, tx := range txsToRollback {
+		_ = tx.Rollback()
+	}
+
+	s.auditWg.Wait()
 
 	if sess != nil && !alreadyClosed {
 		return sess.Close()
@@ -128,18 +143,64 @@ func (s *ActiveSession) getTxStatus(tabID string) (tx driver.TxSession, aborted 
 	return nil, false, ""
 }
 
-func (s *ActiveSession) getTx(tabID string) driver.TxSession {
-	tx, _, _ := s.getTxStatus(tabID)
-	return tx
+type managedTx struct {
+	driver.TxSession
+	cancel context.CancelFunc
+}
+
+func (m *managedTx) Commit() error {
+	err := m.TxSession.Commit()
+	if m.cancel != nil {
+		m.cancel()
+	}
+	return err
+}
+
+func (m *managedTx) Rollback() error {
+	err := m.TxSession.Rollback()
+	if m.cancel != nil {
+		m.cancel()
+	}
+	return err
+}
+
+// beginTabTx starts a user-controlled tab transaction with a 15-second pool-acquisition timeout
+// while keeping the transaction context alive until Commit or Rollback (calling a short-lived
+// context's cancel func after BeginTx would immediately abort the sql.Tx via database/sql).
+func (s *ActiveSession) beginTabTx(dbName ...string) (driver.TxSession, error) {
+	txCtx, txCancel := context.WithCancel(context.Background())
+	if len(dbName) > 0 && dbName[0] != "" {
+		txCtx = driver.WithDatabase(txCtx, dbName[0])
+	}
+	acquireTimer := time.AfterFunc(15*time.Second, txCancel)
+	tx, err := s.Session.BeginTx(txCtx)
+	if !acquireTimer.Stop() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+		txCancel()
+		if err != nil {
+			return nil, err
+		}
+		return nil, context.DeadlineExceeded
+	}
+	if err != nil {
+		txCancel()
+		return nil, err
+	}
+	return &managedTx{TxSession: tx, cancel: txCancel}, nil
 }
 
 func (s *ActiveSession) setTx(tabID string, tx driver.TxSession) {
 	key := normalizeTabID(tabID)
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	var prevTx driver.TxSession
 	now := time.Now()
 	if s.tabTransactions == nil {
 		s.tabTransactions = make(map[string]*activeTxInfo)
+	}
+	if existing, ok := s.tabTransactions[key]; ok && existing != nil && existing.tx != nil && existing.tx != tx {
+		prevTx = existing.tx
 	}
 	if tx != nil {
 		s.tabTransactions[key] = &activeTxInfo{
@@ -149,6 +210,11 @@ func (s *ActiveSession) setTx(tabID string, tx driver.TxSession) {
 		}
 	} else {
 		delete(s.tabTransactions, key)
+	}
+	s.mu.Unlock()
+	// Roll back any superseded transaction outside the lock so pooled connections never leak.
+	if prevTx != nil {
+		_ = prevTx.Rollback()
 	}
 }
 
@@ -284,6 +350,8 @@ type sqlExecer interface {
 // pooled connection) and finish is a no-op; otherwise a fresh transaction makes multi-row edits
 // all-or-nothing: finish(nil) commits, finish(err) rolls back and returns err.
 func (s *ActiveSession) gridWriter(ctx context.Context) (sqlExecer, func(error) error, error) {
+	// Mark in-flight so the idle transaction reaper cannot race with an active grid edit/insert/delete.
+	s.beginInFlight()
 	s.mu.Lock()
 	var tx driver.TxSession
 	if s.tabTransactions != nil {
@@ -303,16 +371,22 @@ func (s *ActiveSession) gridWriter(ctx context.Context) (sqlExecer, func(error) 
 	sess := s.Session
 	s.mu.Unlock()
 	if tx != nil {
-		return tx, func(err error) error { return err }, nil
+		return tx, func(err error) error {
+			s.endInFlight()
+			return err
+		}, nil
 	}
 	if sess == nil {
+		s.endInFlight()
 		return nil, nil, errors.New("no active database session")
 	}
 	own, err := sess.BeginTx(ctx)
 	if err != nil {
+		s.endInFlight()
 		return nil, nil, err
 	}
 	return own, func(err error) error {
+		defer s.endInFlight()
 		if err != nil {
 			_ = own.Rollback()
 			return err
@@ -330,17 +404,42 @@ func rejectIfReadOnly(w http.ResponseWriter, sess *ActiveSession) bool {
 	return false
 }
 
-// UseDatabase selects the active database context if a non-empty name is provided.
-// ponytail: Inlined check eliminates repeated if db != "" { sess.Session.SelectDatabase(...) } boilerplate.
-func (s *ActiveSession) UseDatabase(ctx context.Context, dbName string) error {
-	if dbName != "" && s.Session != nil {
-		return s.Session.SelectDatabase(ctx, dbName)
+// GetDatabaseName returns the current active database name in a thread-safe manner.
+func (s *ActiveSession) GetDatabaseName() string {
+	if s == nil {
+		return ""
 	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.DatabaseName
+}
+
+// UseDatabase selects the active database context if a non-empty name is provided,
+// serializing driver-level database switches on the shared session.
+func (s *ActiveSession) UseDatabase(ctx context.Context, dbName string) error {
+	if dbName == "" || s.Session == nil {
+		return nil
+	}
+	s.dbSwitchMu.Lock()
+	defer s.dbSwitchMu.Unlock()
+	if err := s.Session.SelectDatabase(ctx, dbName); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.DatabaseName = dbName
+	s.mu.Unlock()
 	return nil
 }
 
+var reSensitiveSQLPwd = regexp.MustCompile(`(?i)(\b(?:IDENTIFIED\s+BY|WITH\s+PASSWORD|PASSWORD\s*=)\s*)('(?:[^'\\]|\\.|'')*'|"(?:[^"\\]|\\.|"")*")`)
+
+// redactSensitiveSQL masks credential literals in SQL before writing to logs or the audit table.
+func redactSensitiveSQL(sql string) string {
+	return reSensitiveSQLPwd.ReplaceAllString(sql, `${1}'***'`)
+}
+
 // RecordAudit asynchronously records an executed SQL statement or data mutation into the vault audit log.
-// ponytail: Non-blocking fire-and-forget goroutine ensures zero impact on query execution latency.
+// WaitGroup-tracked goroutines ensure zero impact on query latency while preventing lost writes on Close().
 func (s *ActiveSession) RecordAudit(querySQL, source string, durationMs, rowsAffected int64, execErr error, executedAt ...time.Time) {
 	if s == nil || s.vault == nil || strings.TrimSpace(querySQL) == "" {
 		return
@@ -356,19 +455,32 @@ func (s *ActiveSession) RecordAudit(querySQL, source string, durationMs, rowsAff
 	if len(executedAt) > 0 && !executedAt[0].IsZero() {
 		t = executedAt[0]
 	}
-	cleanSQL := strings.TrimSpace(querySQL)
-	go func() {
-		_ = s.vault.RecordAuditLog(&vault.AuditLogRecord{
-			SessionID:    s.ID,
-			ConnectionID: s.ConnectionID,
-			QuerySQL:     cleanSQL,
-			Source:       source,
-			DurationMs:   durationMs,
-			RowsAffected: rowsAffected,
-			Error:        errStr,
-			ExecutedAt:   t,
-		})
-	}()
+	cleanSQL := redactSensitiveSQL(strings.TrimSpace(querySQL))
+
+	s.mu.RLock()
+	closed := s.closed
+	if !closed {
+		s.auditWg.Add(1)
+	}
+	s.mu.RUnlock()
+
+	if !closed {
+		go func() {
+			defer s.auditWg.Done()
+			if err := s.vault.RecordAuditLog(&vault.AuditLogRecord{
+				SessionID:    s.ID,
+				ConnectionID: s.ConnectionID,
+				QuerySQL:     cleanSQL,
+				Source:       source,
+				DurationMs:   durationMs,
+				RowsAffected: rowsAffected,
+				Error:        errStr,
+				ExecutedAt:   t,
+			}); err != nil {
+				slog.Warn("audit_log_write_failed", "module", "audit", "error", err.Error())
+			}
+		}()
+	}
 
 	// ponytail: Emits structured telemetry event for live Activity Console
 	if execErr != nil {
@@ -389,7 +501,6 @@ func (s *ActiveSession) RecordAudit(querySQL, source string, durationMs, rowsAff
 		)
 	}
 }
-
 
 // CancelQuery attempts to interrupt a running query by queryID.
 // registerQuery records cancel under a unique run key derived from the client's query ID.
@@ -668,7 +779,3 @@ func (s *ActiveSession) GetTablePartitions(ctx context.Context, database, table 
 	}
 	return pi.GetTablePartitions(ctx, database, table)
 }
-
-// inspectAllStatements runs the Safety Guard on every statement of a (possibly multi-statement) input,
-// because drivers such as SQLite execute all of them in one Exec. It returns the inspection that must
-// gate execution and whether every statement is a read-only query. More than one statement requiring a

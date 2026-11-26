@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -57,11 +59,15 @@ func (s *Server) handleExportDump(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
 	defer cancel()
 
+	sess.beginInFlight()
+	defer sess.endInFlight()
+
 	if targetDB != "" {
-		if err := sess.Session.SelectDatabase(ctx, targetDB); err != nil {
+		if err := sess.UseDatabase(ctx, targetDB); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		ctx = driver.WithDatabase(ctx, targetDB)
 	}
 
 	schema, err := sess.Session.InspectSchema(ctx, targetDB)
@@ -124,6 +130,19 @@ func (s *Server) handleExportDump(w http.ResponseWriter, r *http.Request) {
 		out.fail(writeDumpDrops(ctx, out, sess, tablesToDump))
 	}
 
+	// Pin a single read-only snapshot transaction for table data so concurrent writes
+	// between parent and child tables never produce torn / orphan-FK dumps.
+	var snapTx driver.TxSession
+	if includeData {
+		if tx, txErr := sess.Session.BeginTx(ctx); txErr == nil {
+			if isPgDriver(strings.ToLower(sess.DriverName)) {
+				_, _ = tx.Exec(ctx, "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+			}
+			snapTx = tx
+			defer func() { _ = snapTx.Rollback() }()
+		}
+	}
+
 	for _, tbl := range tablesToDump {
 		if out.err != nil {
 			return
@@ -143,7 +162,7 @@ func (s *Server) handleExportDump(w http.ResponseWriter, r *http.Request) {
 
 		// Table Rows Data
 		if includeData && !isView(tbl) {
-			out.fail(writeDumpRows(ctx, out, sess, tbl.Name, fmt.Sprintf("SELECT * FROM %s", quoteIdent(tbl.Name)), 0))
+			out.fail(writeDumpRowsFrom(ctx, out, sess, snapTx, tbl.Name, fmt.Sprintf("SELECT * FROM %s", quoteIdent(tbl.Name)), 0))
 			for _, stmt := range driver.SequenceResetStatements(tbl, sess.DriverName) {
 				out.printf("%s\n\n", stmt)
 			}
@@ -193,18 +212,21 @@ func (d *dumpWriter) abortOnError() {
 }
 
 func writeDumpPrologue(out *dumpWriter, driverName string) {
-	if driverName == "mysql" {
-		out.printf("SET FOREIGN_KEY_CHECKS = 0;\nSET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';\n\n")
-	} else if driverName == "sqlite" {
+	d := strings.ToLower(driverName)
+	if d == "mysql" || d == "mariadb" {
+		// Save and normalize SQL_MODE (clearing NO_BACKSLASH_ESCAPES) so escaped literals restore faithfully.
+		out.printf("SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO';\nSET FOREIGN_KEY_CHECKS = 0;\n\n")
+	} else if d == "sqlite" || d == "sqlite3" {
 		out.printf("PRAGMA foreign_keys = OFF;\n\n")
 	}
 	out.flush()
 }
 
 func writeDumpEpilogue(out *dumpWriter, driverName string) {
-	if driverName == "mysql" {
-		out.printf("SET FOREIGN_KEY_CHECKS = 1;\n")
-	} else if driverName == "sqlite" {
+	d := strings.ToLower(driverName)
+	if d == "mysql" || d == "mariadb" {
+		out.printf("SET FOREIGN_KEY_CHECKS = 1;\nSET SQL_MODE=@OLD_SQL_MODE;\n")
+	} else if d == "sqlite" || d == "sqlite3" {
 		out.printf("PRAGMA foreign_keys = ON;\n")
 	}
 }
@@ -233,10 +255,14 @@ func writeDumpDrops(ctx context.Context, out *dumpWriter, sess *ActiveSession, t
 	return nil
 }
 
-// writeDumpRows streams the rows of querySQL as batched INSERTs; any read error is returned rather
-// than treated as end of data. maxRows <= 0 means unbounded.
-func writeDumpRows(ctx context.Context, out *dumpWriter, sess *ActiveSession, table, querySQL string, maxRows int) error {
-	stream, err := sess.Session.QueryStream(ctx, querySQL, maxRows)
+func writeDumpRowsFrom(ctx context.Context, out *dumpWriter, sess *ActiveSession, tx driver.TxSession, table, querySQL string, maxRows int) error {
+	var stream driver.RowStream
+	var err error
+	if tx != nil {
+		stream, err = tx.QueryStream(ctx, querySQL, maxRows)
+	} else {
+		stream, err = sess.Session.QueryStream(ctx, querySQL, maxRows)
+	}
 	if err != nil {
 		return fmt.Errorf("read rows of %s: %w", table, err)
 	}
@@ -296,16 +322,23 @@ func (s *Server) handleExportSmartSeed(w http.ResponseWriter, r *http.Request) {
 	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
 		limit = l
 	}
+	if limit > 10000 {
+		limit = 10000
+	}
 	includeDDL := r.URL.Query().Get("ddl") != "false"
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
 	defer cancel()
 
+	sess.beginInFlight()
+	defer sess.endInFlight()
+
 	if targetDB != "" {
-		if err := sess.Session.SelectDatabase(ctx, targetDB); err != nil {
+		if err := sess.UseDatabase(ctx, targetDB); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		ctx = driver.WithDatabase(ctx, targetDB)
 	}
 
 	schema, err := sess.Session.InspectSchema(ctx, targetDB)
@@ -342,7 +375,9 @@ func (s *Server) handleExportSmartSeed(w http.ResponseWriter, r *http.Request) {
 		out.fail(writeDumpDrops(ctx, out, sess, sortedTables))
 	}
 
-	// Output tables in topological order (parents before children)
+	// Output tables in topological order (parents before children), tracking sampled parent
+	// key values so child tables filter via FK IN (...) to maintain referential integrity.
+	sampledKeys := make(map[string]map[string][]any) // lower(table) -> lower(col) -> values
 	for _, tbl := range sortedTables {
 		if out.err != nil {
 			return
@@ -363,15 +398,96 @@ func (s *Server) handleExportSmartSeed(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// Query bounded sample rows
+		// Build FK-filtered query referencing already-sampled parent rows when available.
+		var fkConds []string
+		for _, fk := range tbl.ForeignKeys {
+			refTbl := strings.ToLower(fk.ReferencedTable)
+			refCol := strings.ToLower(fk.ReferencedColumn)
+			if refTbl == strings.ToLower(tbl.Name) {
+				continue // skip self-referential FK filter
+			}
+			parentVals := sampledKeys[refTbl][refCol]
+			if len(parentVals) == 0 {
+				continue
+			}
+			lits := make([]string, 0, len(parentVals))
+			for _, pv := range parentVals {
+				if pv != nil {
+					lits = append(lits, formatSQLValue(pv, sess.DriverName))
+				}
+			}
+			if len(lits) > 0 {
+				qFKCol := quoteIdent(fk.Column)
+				fkConds = append(fkConds, fmt.Sprintf("(%s IS NULL OR %s IN (%s))", qFKCol, qFKCol, strings.Join(lits, ", ")))
+			}
+		}
+
 		querySQL := fmt.Sprintf("SELECT * FROM %s LIMIT %d", quoteIdent(tbl.Name), limit)
-		out.fail(writeDumpRows(ctx, out, sess, tbl.Name, querySQL, limit))
+		if len(fkConds) > 0 {
+			querySQL = fmt.Sprintf("SELECT * FROM %s WHERE %s LIMIT %d", quoteIdent(tbl.Name), strings.Join(fkConds, " AND "), limit)
+		}
+		sampled, dumpErr := writeSmartSeedRows(ctx, out, sess, tbl.Name, querySQL, limit)
+		out.fail(dumpErr)
+		if len(sampled) > 0 {
+			sampledKeys[strings.ToLower(tbl.Name)] = sampled
+		}
 		for _, stmt := range driver.SequenceResetStatements(tbl, sess.DriverName) {
 			out.printf("%s\n\n", stmt)
 		}
 	}
 
 	writeDumpEpilogue(out, sess.DriverName)
+}
+
+func writeSmartSeedRows(ctx context.Context, out *dumpWriter, sess *ActiveSession, table, querySQL string, maxRows int) (map[string][]any, error) {
+	stream, err := sess.Session.QueryStream(ctx, querySQL, maxRows)
+	if err != nil {
+		return nil, fmt.Errorf("read rows of %s: %w", table, err)
+	}
+	defer stream.Close()
+
+	cols := stream.Columns()
+	colNames := make([]string, len(cols))
+	collected := make(map[string][]any, len(cols))
+	for i, c := range cols {
+		colNames[i] = quoteIdent(c.Name, sess.DriverName)
+	}
+	colHeader := strings.Join(colNames, ", ")
+
+	written := 0
+	for out.err == nil {
+		batch := 50
+		if maxRows > 0 && maxRows-written < batch {
+			batch = maxRows - written
+		}
+		rowsChunk, err := stream.NextChunk(batch)
+		if len(rowsChunk) > 0 {
+			valueClauses := make([]string, 0, len(rowsChunk))
+			for _, row := range rowsChunk {
+				rowVals := make([]string, len(row))
+				for i, val := range row {
+					rowVals[i] = formatSQLValue(val, sess.DriverName)
+					if i < len(cols) && len(collected[strings.ToLower(cols[i].Name)]) < maxRows {
+						collected[strings.ToLower(cols[i].Name)] = append(collected[strings.ToLower(cols[i].Name)], val)
+					}
+				}
+				valueClauses = append(valueClauses, fmt.Sprintf("  (%s)", strings.Join(rowVals, ", ")))
+			}
+			out.printf("INSERT INTO %s (%s) VALUES\n%s;\n\n", quoteIdent(table, sess.DriverName), colHeader, strings.Join(valueClauses, ",\n"))
+			out.flush()
+			written += len(rowsChunk)
+		}
+		if err == io.EOF || (err == nil && len(rowsChunk) == 0) {
+			return collected, nil
+		}
+		if err != nil {
+			return collected, fmt.Errorf("read rows of %s: %w", table, err)
+		}
+		if maxRows > 0 && written >= maxRows {
+			return collected, nil
+		}
+	}
+	return collected, out.err
 }
 
 // maxScriptPayloadBytes caps in-memory SQL script ingestion to 100 MB to prevent OOM spikes.
@@ -415,10 +531,18 @@ func (s *Server) handleRunSQLScript(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusRequestEntityTooLarge, "SQL script exceeds maximum size limit (100MB)")
 		return
 	}
+	// Cap body even for Transfer-Encoding: chunked (where ContentLength == -1) so multipart
+	// parsing cannot spool unbounded data onto temp disk.
+	r.Body = http.MaxBytesReader(w, r.Body, maxScriptPayloadBytes+1024*1024)
 
 	contentType := r.Header.Get("Content-Type")
 	if strings.HasPrefix(contentType, "multipart/form-data") {
-		if err := r.ParseMultipartForm(50 * 1024 * 1024); err != nil {
+		if err := r.ParseMultipartForm(4 * 1024 * 1024); err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				writeError(w, http.StatusRequestEntityTooLarge, "SQL script exceeds maximum size limit (100MB)")
+				return
+			}
 			writeError(w, http.StatusBadRequest, "failed to parse multipart form: "+err.Error())
 			return
 		}
@@ -438,35 +562,98 @@ func (s *Server) handleRunSQLScript(w http.ResponseWriter, r *http.Request) {
 		scriptReader = r.Body
 	}
 
-	content, err := io.ReadAll(io.LimitReader(scriptReader, maxScriptPayloadBytes+1))
+	// Spool uploaded script to a bounded temp file so both the Safety Guard pre-pass and
+	// statement execution stream statement-by-statement with O(largest statement) RAM instead of
+	// allocating ~750MB-1GB for a 100MB script via io.ReadAll + []rune conversion.
+	tmpFile, err := os.CreateTemp("", "sqlfox-script-*.sql")
 	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create temp script file: "+err.Error())
+		return
+	}
+	tmpPath := tmpFile.Name()
+	defer func() {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
+	}()
+
+	written, err := io.Copy(tmpFile, io.LimitReader(scriptReader, maxScriptPayloadBytes+1))
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, "SQL script exceeds maximum size limit (100MB)")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "failed to read SQL script: "+err.Error())
 		return
 	}
-	if len(content) > maxScriptPayloadBytes {
+	if written > maxScriptPayloadBytes {
 		writeError(w, http.StatusRequestEntityTooLarge, "SQL script exceeds maximum size limit (100MB)")
 		return
 	}
 
-	statements := driver.SplitSQLStatements(string(content), sess.DriverName)
-	if len(statements) == 0 {
+	// Pass 1: Safety Guard pre-pass via streaming statement scanner (zero whole-file buffering).
+	if _, err := tmpFile.Seek(0, io.SeekStart); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to rewind temp script file: "+err.Error())
+		return
+	}
+	totalStatements := 0
+	var blockers []ScriptBlocker
+	scanErr := driver.ScanSQLStatements(tmpFile, sess.DriverName, func(stmt string) error {
+		totalStatements++
+		if b := sess.InspectScriptStatement(stmt, totalStatements, targetDB); b != nil {
+			blockers = append(blockers, *b)
+		}
+		return nil
+	})
+	if scanErr != nil {
+		writeError(w, http.StatusBadRequest, "failed to scan SQL script: "+scanErr.Error())
+		return
+	}
+	if totalStatements == 0 {
 		writeError(w, http.StatusBadRequest, "no executable SQL statements found in script")
 		return
 	}
 
-	// Safety Guard pre-pass: the script runner must honor the same destructive-statement gate as the
-	// editor. Each statement is inspected; any CRITICAL operation (DROP/TRUNCATE, unqualified
-	// DELETE/UPDATE, DROP DATABASE, or a schema-scope mismatch) blocks the whole run with HTTP 409
-	// unless the operator passed ?confirm=true. Without this, an uploaded script bypassed the entire
-	// Safe Execution Pipeline (no Challenge Modal, no pre-DDL backup).
-	blockers := sess.InspectScriptStatements(statements, targetDB)
+	// Safety Guard gate: mirrors editor's destructive-statement challenge.
 	if len(blockers) > 0 && !confirmed {
-		writeJSON(w, http.StatusConflict, map[string]any{
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
 			"error":              "Script contains destructive statements that require confirmation. Re-run with confirm=true to proceed.",
 			"requires_challenge": true,
 			"blockers":           blockers,
 		})
 		return
+	}
+	if len(blockers) > 0 && confirmed && strings.EqualFold(sess.Environment, "Production") {
+		expectedDB := targetDB
+		if expectedDB == "" {
+			expectedDB = sess.GetDatabaseName()
+		}
+		typed := strings.TrimSpace(r.URL.Query().Get("challenge_input"))
+		if typed == "" {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+				"error":              fmt.Sprintf("Production script requires non-empty challenge_input matching '%s' or target table.", expectedDB),
+				"requires_challenge": true,
+				"blockers":           blockers,
+			})
+			return
+		}
+		matched := strings.EqualFold(typed, expectedDB) || strings.EqualFold(typed, sess.Name)
+		if !matched {
+			for _, b := range blockers {
+				if b.TargetTable != "" && strings.EqualFold(typed, b.TargetTable) {
+					matched = true
+					break
+				}
+			}
+		}
+		if !matched {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+				"error":              fmt.Sprintf("Production script challenge_input did not match '%s'.", expectedDB),
+				"requires_challenge": true,
+				"blockers":           blockers,
+			})
+			return
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/x-ndjson")
@@ -475,61 +662,93 @@ func (s *Server) handleRunSQLScript(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Minute)
 	defer cancel()
 
+	sess.beginInFlight()
+	defer sess.endInFlight()
+
 	if targetDB != "" {
-		if err := sess.Session.SelectDatabase(ctx, targetDB); err != nil {
+		if err := sess.UseDatabase(ctx, targetDB); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		ctx = driver.WithDatabase(ctx, targetDB)
 	}
 
-	totalStatements := len(statements)
 	executedStatements := 0
 	errorCount := 0
 
-	for i, stmt := range statements {
-		// Pre-DDL Smart Tiered Backup for destructive schema ops, matching the editor pipeline.
-		sess.BackupBeforeDestructive(ctx, stmt, targetDB)
-
-		start := time.Now()
-		res, err := sess.Session.Exec(ctx, stmt)
-		durationMs := time.Since(start).Milliseconds()
-
-		var rowsAffected int64
-		if res != nil {
-			rowsAffected = res.RowsAffected
+	// Pass 2: Stream statements one-by-one from disk into the database executor.
+	runStatements := func(execFn func(context.Context, string) (*driver.ExecResult, error)) error {
+		if _, err := tmpFile.Seek(0, io.SeekStart); err != nil {
+			return err
 		}
-		sess.RecordAudit(stmt, "script_runner", durationMs, rowsAffected, err, start)
+		stmtIdx := 0
+		return driver.ScanSQLStatements(tmpFile, sess.DriverName, func(stmt string) error {
+			stmtIdx++
+			// Pre-DDL Smart Tiered Backup for destructive schema ops, matching the editor pipeline.
+			sess.BackupBeforeDestructive(ctx, stmt, targetDB)
 
-		preview := stmt
-		if len(preview) > 80 {
-			preview = preview[:77] + "..."
-		}
+			start := time.Now()
+			res, err := execFn(ctx, stmt)
+			durationMs := time.Since(start).Milliseconds()
 
-		progressEvent := map[string]any{
-			"statement_index": i + 1,
-			"total":           totalStatements,
-			"sql_preview":     preview,
-			"duration_ms":     durationMs,
-			"rows_affected":   rowsAffected,
-			"status":          "ok",
-		}
+			var rowsAffected int64
+			if res != nil {
+				rowsAffected = res.RowsAffected
+			}
+			sess.RecordAudit(stmt, "script_runner", durationMs, rowsAffected, err, start)
 
-		if err != nil {
+			preview := stmt
+			if len(preview) > 80 {
+				preview = preview[:77] + "..."
+			}
+
+			progressEvent := map[string]any{
+				"statement_index": stmtIdx,
+				"total":           totalStatements,
+				"sql_preview":     preview,
+				"duration_ms":     durationMs,
+				"rows_affected":   rowsAffected,
+				"status":          "ok",
+			}
+
+			if err != nil {
+				errorCount++
+				progressEvent["status"] = "error"
+				progressEvent["error"] = err.Error()
+			} else {
+				executedStatements++
+			}
+
+			_ = json.NewEncoder(w).Encode(progressEvent)
+			if flusher != nil {
+				flusher.Flush()
+			}
+
+			if err != nil && stopOnError {
+				return driver.ErrStopScan
+			}
+			return nil
+		})
+	}
+
+	// Execute all script statements on a single pinned physical connection when supported,
+	// so session-scoped commands (SET FOREIGN_KEY_CHECKS=0, PRAGMA foreign_keys=OFF, BEGIN/COMMIT)
+	// stay together and never leak onto other pooled connections.
+	if scriptSess, ok := sess.Session.(driver.ScriptSession); ok {
+		if pinErr := scriptSess.ExecScriptConn(ctx, runStatements); pinErr != nil {
 			errorCount++
-			progressEvent["status"] = "error"
-			progressEvent["error"] = err.Error()
-		} else {
-			executedStatements++
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status": "error",
+				"error":  pinErr.Error(),
+			})
+			if flusher != nil {
+				flusher.Flush()
+			}
 		}
-
-		_ = json.NewEncoder(w).Encode(progressEvent)
-		if flusher != nil {
-			flusher.Flush()
-		}
-
-		if err != nil && stopOnError {
-			break
-		}
+	} else {
+		_ = runStatements(func(c context.Context, q string) (*driver.ExecResult, error) {
+			return sess.Session.Exec(c, q)
+		})
 	}
 
 	finalStatus := "completed"

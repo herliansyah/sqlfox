@@ -24,7 +24,7 @@ Security architecture, cryptographic protocols, environment isolation, and AI pr
 
 ### Trust Boundary Rules
 1. **Secure-by-Default Ingress Binding**: The backend web daemon strictly binds to loopback (`127.0.0.1`) on a dynamic port or Unix socket. It never exposes ports to external networks unless the operator explicitly passes `--lan` (or `-host 0.0.0.0`).
-2. **Controlled LAN Access Guard & Ingress TLS**: When `--lan` is enabled for tablet or remote device management, all non-loopback connections must pass the `Remote Access Guard` requiring Master Password authentication before session access. Ingress traffic can be fully encrypted via `--tls` using automated in-memory ECDSA P-256 self-signed certificates or operator-supplied certificates (`--tls-cert` and `--tls-key`).
+2. **Controlled LAN Access Guard & Ingress TLS**: When `--lan` is enabled for tablet or remote device management, all non-loopback connections must pass the `Remote Access Guard` requiring Master Password authentication before session access. Ingress traffic can be encrypted via `--tls` using auto-generated ECDSA P-256 self-signed certificates persisted under `~/.sqlfox/certs/` (`0600` key) or operator-supplied certificates (`--tls-cert` and `--tls-key`).
 3. **Third-Party Egress Control**: Outbound traffic is restricted strictly to configured target database endpoints and chosen AI provider endpoints.
 4. **Flight Recorder Telemetry Safety**: The on-demand Performance Flight Recorder samples only global engine counters (`SHOW GLOBAL STATUS`) and running statement text from `PROCESSLIST`. Zero table row data is recorded. All metrics remain strictly within the local SQLite vault with an automated 24-hour retention purge and a 10-minute auto-stop polling ceiling.
 
@@ -49,9 +49,8 @@ flowchart LR
 
 ### Cryptographic Parameters
 - **KDF**: Argon2id (`time=3`, `memory=64MB`, `threads=4`).
-- **Cipher**: `AES-256-GCM` with 96-bit random IV per record.
-- **OS Keychain Integration**: If enabled by the user, the Master Key is stored in the operating system's native keychain (`github.com/zalando/go-keyring`) across macOS Keychain, Windows Credential Manager, or Linux Secret Service (via Freedesktop D-Bus).
-- **Graceful Fallback**: If headless Linux or a container environment lacks a Secret Service daemon, SqlFox prompts for the Master Password upon startup.
+- **Cipher**: `AES-256-GCM` with 96-bit random IV per record and per-field AAD binding.
+- **Local Key Material**: The vault key is derived from the Master PIN/Password (auto-generated into a `0600` local `master.key` file or supplied via `SQLFOX_MASTER_KEY` / `-pass`).
 
 ### Vault Migration (`.sqlfox-vault`)
 - Exporting connections generates an encrypted `.sqlfox-vault` JSON envelope.
@@ -59,9 +58,9 @@ flowchart LR
 - Private keys and passwords never leave the machine in plaintext.
 
 ### Master PIN Entropy & Remote Lockout Policy
-- **PIN Entropy**: Auto-generated Master PINs employ `fox-[a-z0-9]{6}` (>2.17 billion combinations), replacing legacy 4-digit PINs.
-- **Brute-Force Rate Limiting**: The `Remote Access Guard` tracks consecutive failed unlock attempts per remote IP address.
-- **10-Minute Quarantine**: Reaching 5 consecutive failed attempts immediately triggers a 10-minute lockout (`429 Too Many Requests`), completely neutralizing brute-force dictionary attacks.
+- **PIN Entropy**: Auto-generated Master PINs employ `fox-[a-z0-9]{10}` (~51.7 bits of CSPRNG entropy via rejection sampling), replacing legacy 4-digit PINs.
+- **Brute-Force Rate Limiting**: The `Remote Access Guard` tracks consecutive failed unlock attempts per remote IP address (trusting proxy forwarding headers only from explicitly configured `-trusted-proxies`), re-checking lockout state after Argon2id concurrency gating.
+- **10-Minute Quarantine**: Reaching 5 consecutive failed attempts immediately triggers a 10-minute lockout (`429 Too Many Requests`), and failed pairing-code attempts burn the active pairing code after 5 failures.
 
 ---
 
@@ -76,14 +75,13 @@ Every connection is tagged with an **Environment** that governs Safety Guard str
 | **Unqualified `DELETE`/`UPDATE`** | Warning Banner | Warning + Confirm | **Blocked** (Hard Challenge Modal) |
 | **`DROP TABLE` / `TRUNCATE`** | Confirmation Click | Challenge Modal | **Challenge Modal + Auto-Backup** |
 | **Full Table Scan Alert (>100k rows)** | Toast notice | Toast notice | Modal Warning before running |
-| **Max Auto Limit** | 5,000 | 1,000 | 500 (Strict) |
+| **Max Auto Limit** | 1,000 buffered / 5,000 streaming | 1,000 buffered / 5,000 streaming | 1,000 buffered / 5,000 streaming |
 
 ### Read-Only Enforcement
-When Read-Only mode is toggled for a connection, SqlFox executes:
-```sql
-SET SESSION TRANSACTION READ ONLY;
-```
-Any accidental write query is rejected at the database engine level, in addition to the client-side Safety Guard block.
+When Read-Only mode is active for a session, SqlFox enforces read-only execution at both the application layer (blocking mutation endpoints and non-query statements) and the database-engine layer via `ReadOnlySession.QueryStreamReadOnly`:
+- **MySQL / PostgreSQL**: Executes statements inside an explicit read-only transaction (`sql.TxOptions{ReadOnly: true}`).
+- **SQLite**: Pins a connection and executes with `PRAGMA query_only = ON` (reset before returning the connection to the pool).
+Any accidental write query (including writes hidden inside CTEs or stored functions) is rejected at the database engine level, in addition to the Safety Guard block.
 
 ---
 
@@ -128,7 +126,7 @@ To balance developer observability under massive enterprise workloads with stric
 
 1. **Disabled by Default**: Runtime profiling endpoints (`/debug/pprof/*`) are completely unmounted by default in desktop and server runtimes.
 2. **Explicit Opt-In via Environment Variable**: Endpoints are mounted conditionally strictly when `SQLFOX_PPROF=1` is exported in the host process environment.
-3. **Loopback Client Enforcement**: Even when enabled, every incoming request to `/debug/pprof/*` is verified against `isLoopback(RemoteAddr)`. Non-loopback IP addresses (e.g. tablet clients or LAN peers connecting via Remote Access Guard) are rejected with `403 Forbidden`. This completely prevents heap snapshots, stack traces, or internal memory structures from leaking across the network.
+3. **Direct Loopback Enforcement**: Even when enabled, every incoming request to `/debug/pprof/*` (as well as `/api/system/shutdown` and `/api/system/update/apply`) is verified against direct loopback (`isLoopback(RemoteAddr)` with no proxy forwarding headers). Remote or reverse-proxied requests are rejected with `403 Forbidden`. This prevents heap snapshots, stack traces, or privileged host controls from being exposed across the network.
 
 ---
 
@@ -171,7 +169,7 @@ To maintain binary execution integrity during in-app updates:
    - Additionally, the requested asset URL must be byte-for-byte one that the official GitHub release metadata advertises, binding the download to a release GitHub actually published.
 2. **Signed Checksum Manifest (Ed25519 Trust Anchor)**:
    - Releases publish a detached Ed25519 signature (`checksums.txt.sig`) over the checksum manifest, produced offline with a private signing key held only in CI secrets.
-   - The shipped binary embeds the corresponding **public** key at build time (`-ldflags "-X sqlfox/internal/server.manifestSigningPublicKeyB64=<base64 pubkey>"`).
+   - The shipped binary embeds the corresponding **public** key at build time (`-ldflags "-X github.com/herliansyah/sqlfox/internal/server.manifestSigningPublicKeyB64=<base64 pubkey>"`).
    - Before trusting any checksum, the updater fetches `checksums.txt.sig` and requires it to be a valid Ed25519 signature over the exact manifest bytes. This is the supply-chain trust anchor: a same-origin, unsigned `checksums.txt` alone only defends against network tampering, whereas the signature defends against a tampered or compromised GitHub release (an attacker who can publish both a malicious binary and a matching checksum still cannot forge the offline signature).
    - Verification is **fail-closed**: a missing, malformed, or non-verifying signature aborts the update. Builds with no embedded public key (development/unprovisioned) fall back to the legacy same-origin checksum behavior.
    - The signer is a CGO-free, stdlib-only helper (`scripts/sign-manifest.go`), honoring the CGO-Free Invariant. Provision keys once with `go run scripts/sign-manifest.go -genkey`; store `PRIVATE_KEY` as the `SQLFOX_MANIFEST_SIGNING_KEY` CI secret and `PUBLIC_KEY` as the `SQLFOX_MANIFEST_SIGNING_PUBKEY` repository variable.
@@ -238,7 +236,7 @@ To ensure backup artifacts cannot escape authorized storage locations:
 
 1. **Directory Boundary Enforcement**:
    - Table and schema backup filenames generated before DDL execution (`internal/safety`) are sanitized against directory traversal sequences (`../`, `..\`).
-   - Output paths are strictly resolved within the configured `.scratch/backups/` directory boundary.
+   - Output paths are strictly resolved within the configured backups directory (`~/.sqlfox/backups/` by default) with `0700` directory and `0600` file permissions.
 
 ---
 
@@ -330,5 +328,17 @@ To prevent production database lock contention and connection pool exhaustion:
 1. **Cached Row Count Heuristics (`internal/server/session_manager.go`)**:
    - Before executing unqualified mutation queries (`UPDATE` or `DELETE` without `WHERE`), the mutation impact estimator queries the locally cached schema table row counts (`table.Rows`) rather than executing expensive `SELECT COUNT(*)` queries on unindexed tables.
    - This completely eliminates lock contention and CPU spikes on high-cardinality production tables while accurately estimating mutation risk.
+
+---
+
+## 21. Container Deployment & Local Key Fallback Posture
+
+1. **Docker Network Binding (`Dockerfile`)**:
+   - The container `ENTRYPOINT` binds SqlFox to `0.0.0.0:8080` without `--tls` so container port-forwarding works out of the box.
+   - Because plain HTTP exposes session tokens and query payloads on untrusted networks, **non-localhost container deployments MUST place SqlFox behind a TLS-terminating reverse proxy** (or pass `--tls` / `--tls-cert` + `--tls-key`) and pair remote access with a strong Master PIN (`--pin` or `SQLFOX_PIN`).
+2. **Local Master Key Fallback (`master.key`)**:
+   - When an OS keychain (macOS Keychain / Linux Secret Service) is unavailable (e.g., headless servers or containers), SqlFox falls back to storing the vault master key in `~/.sqlfox/master.key` with `0600` permissions.
+   - Ensure host volume mounts for `/root/.sqlfox` (or `$HOME/.sqlfox`) are restricted to the service user and encrypted at the disk/volume layer.
+
 
 

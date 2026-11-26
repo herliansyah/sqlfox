@@ -96,6 +96,11 @@ Examples:
 
 // RunJob dispatches job subcommands (run, check).
 func RunJob(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
+	return RunJobContext(context.Background(), args, stdout, stderr, stdin)
+}
+
+// RunJobContext dispatches job subcommands honoring the caller's context/signal cancellation.
+func RunJobContext(ctx context.Context, args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 	if len(args) == 0 {
 		PrintJobHelp(stderr)
 		return 1
@@ -109,16 +114,16 @@ func RunJob(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 		PrintJobHelp(stdout)
 		return 0
 	case "run":
-		return executeJobSubcommand("run", subArgs, stdout, stderr, stdin)
+		return executeJobSubcommand(ctx, "run", subArgs, stdout, stderr, stdin)
 	case "check":
-		return executeJobSubcommand("check", subArgs, stdout, stderr, stdin)
+		return executeJobSubcommand(ctx, "check", subArgs, stdout, stderr, stdin)
 	default:
 		fmt.Fprintf(stderr, "Unknown job subcommand '%s'. Run 'sqlfox job help' for usage.\n", subcmd)
 		return 1
 	}
 }
 
-func executeJobSubcommand(action string, args []string, stdout, stderr io.Writer, stdin io.Reader) int {
+func executeJobSubcommand(ctx context.Context, action string, args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 	fs := flag.NewFlagSet("job "+action, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
@@ -150,8 +155,6 @@ func executeJobSubcommand(action string, args []string, stdout, stderr io.Writer
 		fmt.Fprintf(stderr, "❌ Error loading job file: %v\n", err)
 		return 1
 	}
-
-	ctx := context.Background()
 
 	if action == "check" {
 		return RunJobCheck(ctx, spec, *vaultDbFlag, *passFlag, stdout, stderr)
@@ -449,7 +452,7 @@ func executeHealthCheckTask(ctx context.Context, task JobTask, vaultPath, pass s
 	_ = res
 
 	pingDuration := time.Since(t0)
-	fmt.Fprintf(stderr, "  ✓ Target '%s' is healthy (ping latency: %v)\n", task.Target, pingDuration)
+	fmt.Fprintf(stderr, "  ✓ Target '%s' is healthy (ping latency: %v)\n", RedactDSN(task.Target), pingDuration)
 	return 0
 }
 
@@ -530,7 +533,7 @@ func executeDumpTask(ctx context.Context, task JobTask, vaultPath, pass string, 
 		dumpErr = file.Close()
 	}
 	if dumpErr == nil {
-		_ = os.Chmod(tmpPath, 0644)
+		_ = os.Chmod(tmpPath, 0600)
 		dumpErr = os.Rename(tmpPath, resolvedOut)
 	}
 	if dumpErr != nil {
@@ -587,26 +590,50 @@ func executeQueryTask(ctx context.Context, task JobTask, vaultPath, pass string,
 	}
 
 	outWriter := stdout
-	var closeOut func()
+	var tmpOutPath, resolvedOut string
+	var tmpOutFile *os.File
 	if task.Output != "" {
-		resolvedOut := InterpolatePathTokens(task.Output)
-		if err := os.MkdirAll(filepath.Dir(resolvedOut), 0755); err != nil {
+		resolvedOut = InterpolatePathTokens(task.Output)
+		outDir := filepath.Dir(resolvedOut)
+		if err := os.MkdirAll(outDir, 0700); err != nil {
 			fmt.Fprintf(stderr, "  ❌ Cannot create query output directory: %v\n", err)
 			return 1
 		}
-		f, err := os.OpenFile(resolvedOut, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+		f, err := os.CreateTemp(outDir, ".sqlfox-query-*.tmp")
 		if err != nil {
-			fmt.Fprintf(stderr, "  ❌ Cannot open query output file: %v\n", err)
+			fmt.Fprintf(stderr, "  ❌ Cannot create temporary query output file: %v\n", err)
 			return 1
 		}
+		tmpOutPath = f.Name()
+		tmpOutFile = f
 		outWriter = f
-		closeOut = func() { _ = f.Close() }
-	}
-	if closeOut != nil {
-		defer closeOut()
 	}
 
-	return RunQuery(args, outWriter, stderr, stdin)
+	taskCtx := ctx
+	if task.Timeout != "" {
+		if dur, err := time.ParseDuration(task.Timeout); err == nil && dur > 0 {
+			var cancel context.CancelFunc
+			taskCtx, cancel = context.WithTimeout(ctx, dur)
+			defer cancel()
+		}
+	}
+
+	code := RunQueryContext(taskCtx, args, outWriter, stderr, stdin)
+	if tmpOutFile != nil {
+		_ = tmpOutFile.Sync()
+		_ = tmpOutFile.Close()
+		if code == 0 {
+			_ = os.Chmod(tmpOutPath, 0600)
+			if err := os.Rename(tmpOutPath, resolvedOut); err != nil {
+				_ = os.Remove(tmpOutPath)
+				fmt.Fprintf(stderr, "  ❌ Cannot commit query output file: %v\n", err)
+				return 1
+			}
+		} else {
+			_ = os.Remove(tmpOutPath)
+		}
+	}
+	return code
 }
 
 func executeTransferTask(ctx context.Context, task JobTask, vaultPath, pass string, stdout, stderr io.Writer, stdin io.Reader) int {
@@ -640,7 +667,16 @@ func executeTransferTask(ctx context.Context, task JobTask, vaultPath, pass stri
 		args = append(args, "--pass", pass)
 	}
 
-	return RunTransfer(args, stdout, stderr, stdin)
+	taskCtx := ctx
+	if task.Timeout != "" {
+		if dur, err := time.ParseDuration(task.Timeout); err == nil && dur > 0 {
+			var cancel context.CancelFunc
+			taskCtx, cancel = context.WithTimeout(ctx, dur)
+			defer cancel()
+		}
+	}
+
+	return RunTransferContext(taskCtx, args, stdout, stderr, stdin)
 }
 
 // InterpolatePathTokens replaces {DATE}, {DATETIME}, and {TIMESTAMP} with formatted values.
@@ -804,8 +840,8 @@ func writeTableDump(ctx context.Context, sess driver.Session, drvName, dbName st
 	out := &errWriter{w: w}
 
 	out.printf("-- %s\n-- Database: %s\n-- Dump Date: %s\n\n", title, dbName, time.Now().Format(time.RFC3339))
-	if drvName == "mysql" {
-		out.printf("SET FOREIGN_KEY_CHECKS = 0;\nSET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';\n\n")
+	if drvName == "mysql" || drvName == "mariadb" {
+		out.printf("SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO';\nSET FOREIGN_KEY_CHECKS = 0;\n\n")
 	} else if drvName == "sqlite" {
 		out.printf("PRAGMA foreign_keys = OFF;\n\n")
 	}
@@ -834,6 +870,7 @@ func writeTableDump(ctx context.Context, sess driver.Session, drvName, dbName st
 		out.printf("\n")
 	}
 
+	sampledKeys := make(map[string]map[string][]any)
 	for _, tbl := range tables {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -854,7 +891,38 @@ func writeTableDump(ctx context.Context, sess driver.Session, drvName, dbName st
 
 		querySQL := fmt.Sprintf("SELECT * FROM %s", quoteIdent(tbl.Name))
 		if isSmartSeed && limit > 0 {
-			querySQL = fmt.Sprintf("SELECT * FROM %s LIMIT %d", quoteIdent(tbl.Name), limit)
+			var whereParts []string
+			emptyParent := false
+			for _, fk := range tbl.ForeignKeys {
+				if strings.EqualFold(fk.ReferencedTable, tbl.Name) {
+					continue // skip self-referential FK in initial slice
+				}
+				parentCols, hasParent := sampledKeys[strings.ToLower(fk.ReferencedTable)]
+				if !hasParent {
+					continue
+				}
+				vals := parentCols[strings.ToLower(fk.ReferencedColumn)]
+				if len(vals) == 0 {
+					emptyParent = true
+					break
+				}
+				var lits []string
+				for _, v := range vals {
+					if v != nil {
+						lits = append(lits, driver.FormatSQLValueForDriver(v, drvName))
+					}
+				}
+				if len(lits) > 0 {
+					whereParts = append(whereParts, fmt.Sprintf("%s IN (%s)", quoteIdent(fk.Column), strings.Join(lits, ", ")))
+				}
+			}
+			if emptyParent {
+				querySQL = fmt.Sprintf("SELECT * FROM %s WHERE 1=0", quoteIdent(tbl.Name))
+			} else if len(whereParts) > 0 {
+				querySQL = fmt.Sprintf("SELECT * FROM %s WHERE %s LIMIT %d", quoteIdent(tbl.Name), strings.Join(whereParts, " AND "), limit)
+			} else {
+				querySQL = fmt.Sprintf("SELECT * FROM %s LIMIT %d", quoteIdent(tbl.Name), limit)
+			}
 		}
 
 		streamLimit := 0
@@ -873,12 +941,30 @@ func writeTableDump(ctx context.Context, sess driver.Session, drvName, dbName st
 		}
 		colHeader := strings.Join(colNames, ", ")
 
+		if isSmartSeed {
+			tblKey := strings.ToLower(tbl.Name)
+			if sampledKeys[tblKey] == nil {
+				sampledKeys[tblKey] = make(map[string][]any)
+			}
+		}
+
 		written := 0
 		for {
 			chunk, err := stream.NextChunk(chunkBatch)
 			if len(chunk) > 0 {
 				var valRows []string
 				for _, row := range chunk {
+					if isSmartSeed {
+						tblKey := strings.ToLower(tbl.Name)
+						for idx, c := range cols {
+							if idx < len(row) && row[idx] != nil {
+								ck := strings.ToLower(c.Name)
+								if len(sampledKeys[tblKey][ck]) < limit {
+									sampledKeys[tblKey][ck] = append(sampledKeys[tblKey][ck], row[idx])
+								}
+							}
+						}
+					}
 					var rowVals []string
 					for _, val := range row {
 						rowVals = append(rowVals, driver.FormatSQLValueForDriver(val, drvName))
@@ -908,8 +994,8 @@ func writeTableDump(ctx context.Context, sess driver.Session, drvName, dbName st
 		}
 	}
 
-	if drvName == "mysql" {
-		out.printf("SET FOREIGN_KEY_CHECKS = 1;\n")
+	if drvName == "mysql" || drvName == "mariadb" {
+		out.printf("SET FOREIGN_KEY_CHECKS = 1;\nSET SQL_MODE=@OLD_SQL_MODE;\n")
 	} else if drvName == "sqlite" {
 		out.printf("PRAGMA foreign_keys = ON;\n")
 	}

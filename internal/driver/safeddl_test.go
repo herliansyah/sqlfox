@@ -72,10 +72,10 @@ func TestGenerateOSCCommand(t *testing.T) {
 	if !strings.Contains(ghostCmd, "gh-ost") {
 		t.Fatalf("expected gh-ost in output: %s", ghostCmd)
 	}
-	if !strings.Contains(ghostCmd, "--table=\"orders\"") {
+	if !strings.Contains(ghostCmd, "--table='orders'") {
 		t.Fatalf("expected table orders in gh-ost: %s", ghostCmd)
 	}
-	if !strings.Contains(ghostCmd, "--alter=\"ADD COLUMN tracking_num VARCHAR(64)\"") {
+	if !strings.Contains(ghostCmd, "--alter='ADD COLUMN tracking_num VARCHAR(64)'") {
 		t.Fatalf("expected alter clause in gh-ost: %s", ghostCmd)
 	}
 
@@ -84,7 +84,7 @@ func TestGenerateOSCCommand(t *testing.T) {
 	if !strings.Contains(ptCmd, "pt-online-schema-change") {
 		t.Fatalf("expected pt-online-schema-change in output: %s", ptCmd)
 	}
-	if !strings.Contains(ptCmd, "D=\"prod_db\",t=\"orders\"") {
+	if !strings.Contains(ptCmd, "'D=prod_db,t=orders'") {
 		t.Fatalf("expected db/table target in pt-osc: %s", ptCmd)
 	}
 }

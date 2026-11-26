@@ -22,27 +22,45 @@ export function splitMarkdownSegments(raw: string): MarkdownSegment[] {
   if (!raw) return [];
   const text = String(raw);
   const parts: MarkdownSegment[] = [];
-  const fenceRegex = /```([a-zA-Z0-9_-]*)[ \t]*\r?\n([\s\S]*?)```/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = fenceRegex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push({ type: 'markdown', content: text.slice(lastIndex, match.index) });
+  let cursor = 0;
+  while (cursor < text.length) {
+    const openIdx = text.indexOf('```', cursor);
+    if (openIdx === -1) {
+      parts.push({ type: 'markdown', content: text.slice(cursor) });
+      break;
+    }
+    const nlIdx = text.indexOf('\n', openIdx + 3);
+    if (nlIdx === -1) {
+      parts.push({ type: 'markdown', content: text.slice(cursor) });
+      break;
+    }
+    const langRaw = text.slice(openIdx + 3, nlIdx).trim();
+    if (!/^[a-zA-Z0-9_-]*$/.test(langRaw)) {
+      parts.push({ type: 'markdown', content: text.slice(cursor, openIdx + 3) });
+      cursor = openIdx + 3;
+      continue;
+    }
+    const closeIdx = text.indexOf('```', nlIdx + 1);
+    if (closeIdx === -1) {
+      parts.push({ type: 'markdown', content: text.slice(cursor) });
+      break;
+    }
+    if (openIdx > cursor) {
+      parts.push({ type: 'markdown', content: text.slice(cursor, openIdx) });
     }
     parts.push({
       type: 'code',
-      lang: (match[1] || 'text').toLowerCase(),
-      content: match[2].replace(/\n$/, ''),
+      lang: (langRaw || 'text').toLowerCase(),
+      content: text.slice(nlIdx + 1, closeIdx).replace(/\r?\n$/, ''),
     });
-    lastIndex = match.index + match[0].length;
-  }
-  if (lastIndex < text.length) {
-    parts.push({ type: 'markdown', content: text.slice(lastIndex) });
+    cursor = closeIdx + 3;
   }
   return parts;
 }
 
 function renderInlineMarkdown(escapedText: string): string {
+  // Strip NUL bytes so untrusted input cannot forge placeholder sentinels (\u0000MD0\u0000).
+  const safeText = escapedText.replace(/\u0000/g, '');
   // Protect inline code and links before emphasis passes so underscores/asterisks inside them aren't mangled.
   const tokens: string[] = [];
   const hold = (html: string) => {
@@ -50,7 +68,7 @@ function renderInlineMarkdown(escapedText: string): string {
     return `\u0000MD${idx}\u0000`;
   };
 
-  let out = escapedText
+  let out = safeText
     .replace(/`([^`\n]+)`/g, (_m, code) =>
       hold(`<code class="px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700/70 text-sky-300 font-mono text-[11px]">${code}</code>`)
     )
@@ -60,9 +78,12 @@ function renderInlineMarkdown(escapedText: string): string {
     .replace(/\*\*([^*]+)\*\*/g, '<strong class="font-semibold text-slate-100">$1</strong>')
     .replace(/__([^_]+)__/g, '<strong class="font-semibold text-slate-100">$1</strong>')
     .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em class="italic text-slate-300">$2</em>')
-    .replace(/(^|[^_])_([^_\n]+)_/g, '$1<em class="italic text-slate-300">$2</em>');
+    .replace(/(^|[\s(])_([^_\n]+)_(?=[\s).,;!?]|$)/g, '$1<em class="italic text-slate-300">$2</em>');
 
-  return out.replace(/\u0000MD(\d+)\u0000/g, (_m, idx) => tokens[Number(idx)] ?? '');
+  for (let pass = 0; pass < 3 && out.includes('\u0000MD'); pass++) {
+    out = out.replace(/\u0000MD(\d+)\u0000/g, (_m, idx) => tokens[Number(idx)] ?? '');
+  }
+  return out;
 }
 
 export function renderMarkdownBlockHtml(raw: string): string {

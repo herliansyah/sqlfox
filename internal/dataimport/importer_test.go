@@ -88,8 +88,11 @@ func TestCSVImporter_Import(t *testing.T) {
 		t.Fatalf("Import failed: %v", err)
 	}
 
-	if !res.Success {
-		t.Fatalf("expected import success")
+	if res.Success {
+		t.Fatalf("expected res.Success to be false when a row was skipped/failed")
+	}
+	if !res.PartialSuccess {
+		t.Fatalf("expected res.PartialSuccess to be true when some rows imported and some skipped")
 	}
 	if res.Delimiter != ";" {
 		t.Fatalf("expected auto-sniffed delimiter ';', got %q", res.Delimiter)

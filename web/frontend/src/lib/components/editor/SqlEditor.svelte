@@ -69,7 +69,7 @@
     if (target && editor) {
       editor.replaceTarget(formatted);
     } else if (currentTab) {
-      currentTab.sql = formatted;
+      appState.patchTab(currentTab.id, { sql: formatted });
     }
     appState.showToast('Formatted SQL query', 'info');
   }
@@ -84,7 +84,11 @@
   }
 
   onDestroy(() => {
-    if (saveDebounceTimer) clearTimeout(saveDebounceTimer);
+    if (saveDebounceTimer) {
+      clearTimeout(saveDebounceTimer);
+      saveDebounceTimer = undefined;
+      appState.saveTabsState();
+    }
   });
 
   function quoteIdentifier(name: string): string {

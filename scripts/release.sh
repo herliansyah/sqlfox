@@ -66,9 +66,9 @@ fi
 
 # 2. Run test suite
 if [ "$SKIP_TESTS" = false ]; then
-  echo "🧪 Running unit test suite (go test ./...)..."
-  if ! go test ./...; then
-    echo "❌ Unit tests failed! Aborting release."
+  echo "🧪 Running Go race test suite (go test -race ./...) and frontend checks (npm test)..."
+  if ! go test -race ./... || ! npm test; then
+    echo "❌ Tests failed! Aborting release."
     exit 1
   fi
   echo "✅ All unit tests passed."
@@ -174,18 +174,31 @@ if [ -f "cmd/sqlfox/main.go" ]; then
   echo "📝 Updated cmd/sqlfox/main.go Version to ${NEW_VERSION}"
 fi
 
-# 6b. Synchronize version in the Svelte frontend, web/dist, and package.json
+# 6b. Synchronize version in the Svelte frontend, web/dist, and package.json (portable across Linux & macOS)
 if [ -f "web/frontend/src/lib/stores/appState.svelte.ts" ]; then
-  sed -i -E "s/appVersion = \\\$state<string>\('v[^']*'\);/appVersion = \\\$state<string>('${NEW_VERSION}');/" web/frontend/src/lib/stores/appState.svelte.ts
+  node -e '
+    const fs = require("fs");
+    const p = "web/frontend/src/lib/stores/appState.svelte.ts";
+    const v = process.argv[1];
+    const s = fs.readFileSync(p, "utf8").replace(/appVersion = \$state<string>\(\x27v[^\x27]*\x27\);/, `appVersion = $state<string>(\x27${v}\x27);`);
+    fs.writeFileSync(p, s);
+  ' "${NEW_VERSION}"
   echo "📝 Updated web/frontend appState version to ${NEW_VERSION}"
 fi
 
 if [ -f "package.json" ]; then
   CLEAN_VER="${NEW_VERSION#v}"
-  sed -i -E "s/\"version\": \"[^\"]*\"/\"version\": \"${CLEAN_VER}\"/g" package.json
-  if [ -f "package-lock.json" ]; then
-    sed -i -E "0,/\"version\": \"[^\"]*\"/s//\"version\": \"${CLEAN_VER}\"/" package-lock.json
-  fi
+  node -e '
+    const fs = require("fs");
+    const v = process.argv[1];
+    for (const p of ["package.json", "package-lock.json"]) {
+      if (!fs.existsSync(p)) continue;
+      const obj = JSON.parse(fs.readFileSync(p, "utf8"));
+      obj.version = v;
+      if (obj.packages && obj.packages[""]) obj.packages[""].version = v;
+      fs.writeFileSync(p, JSON.stringify(obj, null, 2) + "\n");
+    }
+  ' "${CLEAN_VER}"
   echo "📝 Updated package.json and package-lock.json version to ${CLEAN_VER}"
 fi
 

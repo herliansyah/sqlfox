@@ -287,8 +287,9 @@
 
       <div class="p-5 space-y-4">
         <div>
-          <label class="block text-slate-400 text-xs font-medium mb-1">Source Column ({tableMeta?.name}) *</label>
+          <label for="fk-source-col" class="block text-slate-400 text-xs font-medium mb-1">Source Column ({tableMeta?.name}) *</label>
           <select
+            id="fk-source-col"
             bind:value={sourceCol}
             onchange={autoGenerateFKName}
             class="w-full bg-[#050811] border border-[#1e293b] rounded-lg px-3 py-2 text-slate-200 text-xs focus:outline-none focus:border-sky-500"
@@ -301,8 +302,9 @@
 
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block text-slate-400 text-xs font-medium mb-1">Referenced Table *</label>
+            <label for="fk-ref-table" class="block text-slate-400 text-xs font-medium mb-1">Referenced Table *</label>
             <select
+              id="fk-ref-table"
               bind:value={refTable}
               onchange={() => {
                 refCol = preferredRefColumn(refTableCols);
@@ -316,8 +318,9 @@
             </select>
           </div>
           <div>
-            <label class="block text-slate-400 text-xs font-medium mb-1">Referenced Column *</label>
+            <label for="fk-ref-col" class="block text-slate-400 text-xs font-medium mb-1">Referenced Column *</label>
             <select
+              id="fk-ref-col"
               bind:value={refCol}
               class="w-full bg-[#050811] border border-[#1e293b] rounded-lg px-3 py-2 text-slate-200 text-xs focus:outline-none focus:border-sky-500"
             >
@@ -337,8 +340,9 @@
 
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block text-slate-400 text-xs font-medium mb-1">ON DELETE Rule</label>
+            <label for="fk-on-delete" class="block text-slate-400 text-xs font-medium mb-1">ON DELETE Rule</label>
             <select
+              id="fk-on-delete"
               bind:value={onDelete}
               class="w-full bg-[#050811] border border-[#1e293b] rounded-lg px-3 py-2 text-slate-200 text-xs focus:outline-none focus:border-sky-500"
             >
@@ -349,8 +353,9 @@
             </select>
           </div>
           <div>
-            <label class="block text-slate-400 text-xs font-medium mb-1">ON UPDATE Rule</label>
+            <label for="fk-on-update" class="block text-slate-400 text-xs font-medium mb-1">ON UPDATE Rule</label>
             <select
+              id="fk-on-update"
               bind:value={onUpdate}
               class="w-full bg-[#050811] border border-[#1e293b] rounded-lg px-3 py-2 text-slate-200 text-xs focus:outline-none focus:border-sky-500"
             >
@@ -363,8 +368,9 @@
         </div>
 
         <div>
-          <label class="block text-slate-400 text-xs font-medium mb-1">Constraint Name *</label>
+          <label for="fk-name" class="block text-slate-400 text-xs font-medium mb-1">Constraint Name *</label>
           <input
+            id="fk-name"
             type="text"
             bind:value={fkName}
             oninput={() => (isCustomName = true)}
@@ -374,7 +380,7 @@
         </div>
 
         <div>
-          <label class="block text-slate-400 text-xs font-medium mb-1">Generated DDL Preview</label>
+          <span class="block text-slate-400 text-xs font-medium mb-1">Generated DDL Preview</span>
           <pre class="p-3 bg-[#050811] border border-[#1e293b] rounded-lg text-emerald-300 font-mono text-xs overflow-x-auto whitespace-pre-wrap">{sqlPreview}</pre>
         </div>
       </div>

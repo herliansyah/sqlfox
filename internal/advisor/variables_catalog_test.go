@@ -8,6 +8,7 @@ func TestEvaluateMySQLVariable_Curated(t *testing.T) {
 	allVars := map[string]string{
 		"innodb_buffer_pool_size": "8589934592", // 8GB
 		"max_heap_table_size":     "67108864",
+		"wsrep_on":                "ON",
 	}
 
 	// 1. Critical lock mode

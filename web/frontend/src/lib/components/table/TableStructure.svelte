@@ -469,9 +469,9 @@
                     {/if}
                     <span>{col.name}</span>
                     {#if isRowNew}
-                      <span class="text-[9px] uppercase px-1 py-0.2 rounded bg-emerald-900 border border-emerald-600 text-emerald-300 ml-1">New</span>
+                      <span class="text-[9px] uppercase px-1 py-0.5 rounded bg-emerald-900 border border-emerald-600 text-emerald-300 ml-1">New</span>
                     {:else if isRowModified}
-                      <span class="text-[9px] uppercase px-1 py-0.2 rounded bg-amber-900 border border-amber-600 text-amber-300 ml-1">Modified</span>
+                      <span class="text-[9px] uppercase px-1 py-0.5 rounded bg-amber-900 border border-amber-600 text-amber-300 ml-1">Modified</span>
                     {/if}
                   </div>
                 </td>
@@ -485,7 +485,7 @@
                 </td>
                 <td class="py-2 px-4">
                   {#if col.is_primary_key}
-                    <span class="px-1.5 py-0.2 rounded bg-amber-950/60 border border-amber-800 text-amber-300 text-[10px] font-bold">
+                    <span class="px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-800 text-amber-300 text-[10px] font-bold">
                       PRI
                     </span>
                   {:else}
@@ -580,8 +580,9 @@
 
       <div class="p-5 space-y-4">
         <div>
-          <label class="block text-slate-400 text-xs font-medium mb-1">Column Name *</label>
+          <label for="ts-col-name" class="block text-slate-400 text-xs font-medium mb-1">Column Name *</label>
           <input
+            id="ts-col-name"
             type="text"
             bind:value={formColName}
             placeholder="e.g. user_id, status, created_at"
@@ -590,10 +591,11 @@
         </div>
 
         <div>
-          <label class="block text-slate-400 text-xs font-medium mb-1">Data Type *</label>
+          <label for="ts-col-type" class="block text-slate-400 text-xs font-medium mb-1">Data Type *</label>
           <div class="space-y-2">
             <div class="grid grid-cols-3 gap-2">
               <select
+                id="ts-col-type"
                 value={formBaseType}
                 onchange={(e) => handleSelectTypeGroup((e.currentTarget as HTMLSelectElement).value)}
                 class="col-span-2 bg-[#050811] border border-[#1e293b] rounded-lg px-2.5 py-2 text-slate-200 font-mono text-xs focus:outline-none focus:border-sky-500"
@@ -705,8 +707,9 @@
         </div>
 
         <div>
-          <label class="block text-slate-400 text-xs font-medium mb-1">Default Value</label>
+          <label for="ts-col-default" class="block text-slate-400 text-xs font-medium mb-1">Default Value</label>
           <input
+            id="ts-col-default"
             type="text"
             bind:value={formColDefault}
             placeholder="e.g. 0, active, CURRENT_TIMESTAMP"
@@ -726,8 +729,9 @@
         </div>
 
         <div>
-          <label class="block text-slate-400 text-xs font-medium mb-1">Extra Attributes</label>
+          <label for="ts-col-extra" class="block text-slate-400 text-xs font-medium mb-1">Extra Attributes</label>
           <select
+            id="ts-col-extra"
             bind:value={formColExtra}
             class="w-full bg-[#050811] border border-[#1e293b] rounded-lg px-3 py-2 text-slate-200 text-xs focus:outline-none focus:border-sky-500"
           >

@@ -13,7 +13,8 @@ type AIProfile struct {
 	Name            string    `json:"name"`
 	Provider        string    `json:"provider"` // openai, anthropic, gemini, ollama, custom
 	APIKey          string    `json:"api_key,omitempty"` // plain text in transit, encrypted in DB
-	EncryptedAPIKey string    `json:"encrypted_api_key,omitempty"`
+	EncryptedAPIKey string    `json:"-"`
+	ClearAPIKey     bool      `json:"-"`
 	HasAPIKey       bool      `json:"has_api_key"`
 	BaseURL         string    `json:"base_url"`
 	ModelName       string    `json:"model_name"`
@@ -67,7 +68,9 @@ func (v *Vault) SaveAIProfile(p *AIProfile) error {
 	p.UpdatedAt = time.Now()
 
 	var encKey string
-	if p.APIKey != "" {
+	if p.ClearAPIKey {
+		encKey = ""
+	} else if p.APIKey != "" {
 		enc, err := EncryptWithAAD([]byte(p.APIKey), v.key, aiProfileFieldAAD(p.ID, "api_key"))
 		if err != nil {
 			return fmt.Errorf("failed to encrypt AI api key: %w", err)

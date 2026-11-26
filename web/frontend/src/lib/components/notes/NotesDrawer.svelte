@@ -26,21 +26,32 @@
     localStorage.setItem(MAXIMIZED_KEY, String(isMaximized));
   }
 
+  let activeResizeCleanup: (() => void) | null = null;
+
   function startResize(e: MouseEvent) {
     e.preventDefault();
+    activeResizeCleanup?.();
     isResizing = true;
     const onMove = (ev: MouseEvent) => {
       drawerWidth = Math.min(960, Math.max(340, window.innerWidth - ev.clientX));
     };
-    const onUp = () => {
+    const cleanup = () => {
       isResizing = false;
       localStorage.setItem(WIDTH_KEY, String(drawerWidth));
       window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('mouseup', cleanup);
+      activeResizeCleanup = null;
     };
+    activeResizeCleanup = cleanup;
     window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    window.addEventListener('mouseup', cleanup);
   }
+
+  $effect(() => {
+    return () => {
+      activeResizeCleanup?.();
+    };
+  });
 
   let activeTableName = $derived(appState.activeTab?.tableName || '');
 
@@ -300,13 +311,13 @@
     : `min(${drawerWidth}px, calc(100vw - 1.5rem))`};"
 >
   <!-- Left-Edge Resizer Handle -->
-  <div
-    role="separator"
-    aria-orientation="vertical"
+  <button
+    type="button"
+    tabindex="-1"
     aria-label="Resize Operational Notes drawer"
     onmousedown={startResize}
-    class="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-amber-500/40 transition z-50"
-  ></div>
+    class="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-amber-500/40 transition z-50 border-0 p-0 bg-transparent"
+  ></button>
 
   <!-- Drawer Header -->
   <div class="h-10 bg-[#0f172a] border-b border-[#1e293b] px-3.5 flex items-center justify-between flex-shrink-0 select-none gap-2">
@@ -315,7 +326,7 @@
       <span class="font-bold text-slate-100 text-xs truncate">Operational Notes</span>
       <span class="text-slate-500 font-mono text-[10px]">({filteredNotes.length})</span>
       {#if dueCount > 0}
-        <span class="px-1.5 py-0.2 rounded-full bg-rose-600 text-white font-mono text-[9.5px] font-bold">
+        <span class="px-1.5 py-0.5 rounded-full bg-rose-600 text-white font-mono text-[9.5px] font-bold">
           {dueCount} due
         </span>
       {/if}
@@ -418,7 +429,7 @@
           <button
             type="button"
             onclick={() => (activeTagFilter = activeTagFilter === tag ? null : tag)}
-            class="px-1.5 py-0.2 rounded text-[10px] font-mono border transition {activeTagFilter === tag
+            class="px-1.5 py-0.5 rounded text-[10px] font-mono border transition {activeTagFilter === tag
               ? 'bg-amber-950/70 border-amber-600 text-amber-200'
               : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'}"
           >
@@ -546,21 +557,21 @@
                 <button
                   type="button"
                   onclick={() => (activeTagFilter = activeTagFilter === ut ? null : ut)}
-                  class="px-1.5 py-0.2 rounded bg-slate-800 hover:bg-slate-700 text-slate-300"
+                  class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300"
                 >
                   {ut}
                 </button>
               {/each}
               {#if !note.user_tags?.length && note.category}
-                <span class="px-1.5 py-0.2 rounded bg-slate-800 text-slate-400">#{note.category}</span>
+                <span class="px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">#{note.category}</span>
               {/if}
               {#each note.object_tags || [] as ot}
-                <span class="px-1.5 py-0.2 rounded bg-sky-950 text-sky-300 border border-sky-800 font-mono truncate max-w-[170px]" title={ot}>
+                <span class="px-1.5 py-0.5 rounded bg-sky-950 text-sky-300 border border-sky-800 font-mono truncate max-w-[170px]" title={ot}>
                   {ot}
                 </span>
               {/each}
               {#if !note.object_tags?.length && note.table_name}
-                <span class="px-1.5 py-0.2 rounded bg-sky-950 text-sky-300 border border-sky-800 font-mono">
+                <span class="px-1.5 py-0.5 rounded bg-sky-950 text-sky-300 border border-sky-800 font-mono">
                   {note.table_name}
                 </span>
               {/if}
@@ -577,7 +588,7 @@
                     <button
                       type="button"
                       onclick={() => snoozeNote(note, 15)}
-                      class="ml-1 text-[9px] px-1 py-0.2 rounded bg-rose-950 border border-rose-800 text-rose-300 hover:bg-rose-900"
+                      class="ml-1 text-[9px] px-1 py-0.5 rounded bg-rose-950 border border-rose-800 text-rose-300 hover:bg-rose-900"
                       title="Snooze 15 minutes"
                     >
                       +15m

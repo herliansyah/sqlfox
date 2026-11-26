@@ -11,7 +11,7 @@ export default defineConfig({
     },
   },
   server: {
-    host: '0.0.0.0',
+    host: process.env.VITE_HOST || '127.0.0.1',
     port: 5173,
     proxy: {
       '/api': {
@@ -29,12 +29,15 @@ export default defineConfig({
     outDir: '../dist',
     emptyOutDir: false,
     sourcemap: false,
-    chunkSizeWarningLimit: 1000,
+    chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {
         manualChunks(id) {
           if (id.includes('@codemirror/') || id.includes('@lezer/')) {
             return 'codemirror';
+          }
+          if (id.includes('node_modules/svelte')) {
+            return 'svelte-runtime';
           }
         },
       },

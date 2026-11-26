@@ -3,12 +3,118 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"net/url"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/herliansyah/sqlfox/internal/driver"
 	"github.com/herliansyah/sqlfox/internal/vault"
 )
+
+// validateConnectionPayload enforces path and TLS security boundaries for HTTP-supplied connections:
+//   - Blocks opening SqlFox's own vault database or directory as a SQLite target.
+//   - Rejects arbitrary host filesystem SQLite paths from remote (LAN) requests.
+//   - Requires inline PEM content (not host filesystem paths) for SSLCA/SSLCert/SSLKey from the HTTP API.
+func (s *Server) validateConnectionPayload(conn *vault.ConnectionRecord, isRemote bool) error {
+	if conn == nil {
+		return errors.New("connection payload is required")
+	}
+	checkPEM := func(field, val string) error {
+		v := strings.TrimSpace(val)
+		if v == "" {
+			return nil
+		}
+		if !strings.Contains(v, "-----BEGIN ") {
+			return errors.New(field + " must be inline PEM certificate/key content, not a server filesystem path")
+		}
+		return nil
+	}
+	if err := checkPEM("ssl_ca", conn.SSLCA); err != nil {
+		return err
+	}
+	if err := checkPEM("ssl_cert", conn.SSLCert); err != nil {
+		return err
+	}
+	if err := checkPEM("ssl_key", conn.SSLKey); err != nil {
+		return err
+	}
+
+	drv := strings.ToLower(strings.TrimSpace(conn.Driver))
+	if drv == "sqlite" || drv == "sqlite3" {
+		dbPath := strings.TrimSpace(conn.DatabaseName)
+		if dbPath == "" {
+			dbPath = strings.TrimSpace(conn.Host)
+		}
+		if dbPath != "" && dbPath != ":memory:" {
+			if isRemote {
+				return errors.New("remote requests cannot open arbitrary server SQLite filesystem paths")
+			}
+			// Normalize SQLite file: URI (authority, query, fragment, percent-encoding) and resolve symlinks
+			// so file:///.../config%2edb, file://localhost/.../config.db, or symlinks cannot bypass the vault block.
+			rawPath := normalizeSQLiteTargetPath(dbPath)
+			if rawPath != "" && rawPath != ":memory:" && s.vault != nil && s.vault.Path() != "" {
+				absTarget, err1 := canonicalAbsPath(rawPath)
+				absVault, err2 := canonicalAbsPath(s.vault.Path())
+				if err1 == nil && err2 == nil {
+					masterKeyPath := filepath.Join(filepath.Dir(absVault), "master.key")
+					if absTarget == absVault || strings.HasPrefix(absTarget, absVault+"-") || absTarget == masterKeyPath {
+						return errors.New("cannot open SqlFox's own vault database or key file as a SQLite connection")
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func normalizeSQLiteTargetPath(dbPath string) string {
+	rawPath := strings.TrimSpace(dbPath)
+	if !strings.HasPrefix(strings.ToLower(rawPath), "file:") {
+		return rawPath
+	}
+	if u, err := url.Parse(rawPath); err == nil {
+		p := u.Path
+		if p == "" {
+			p = u.Opaque
+		}
+		if unescaped, uErr := url.PathUnescape(p); uErr == nil {
+			p = unescaped
+		}
+		if p != "" {
+			return p
+		}
+	}
+	// Fallback manual strip for non-standard file: forms
+	rawPath = rawPath[5:]
+	if qIdx := strings.IndexAny(rawPath, "?#"); qIdx >= 0 {
+		rawPath = rawPath[:qIdx]
+	}
+	if strings.HasPrefix(strings.ToLower(rawPath), "//localhost/") {
+		rawPath = rawPath[len("//localhost"):]
+	}
+	if unescaped, err := url.PathUnescape(rawPath); err == nil {
+		rawPath = unescaped
+	}
+	return rawPath
+}
+
+func canonicalAbsPath(p string) (string, error) {
+	abs, err := filepath.Abs(filepath.Clean(p))
+	if err != nil {
+		return "", err
+	}
+	if resolved, rErr := filepath.EvalSymlinks(abs); rErr == nil {
+		return resolved, nil
+	}
+	// Target file may not exist yet; resolve parent directory symlinks so a symlinked dir cannot bypass checks.
+	if resolvedDir, rErr := filepath.EvalSymlinks(filepath.Dir(abs)); rErr == nil {
+		return filepath.Join(resolvedDir, filepath.Base(abs)), nil
+	}
+	return abs, nil
+}
 
 func (s *Server) handleListConnections(w http.ResponseWriter, r *http.Request) {
 	list, err := s.vault.ListConnections()
@@ -18,6 +124,13 @@ func (s *Server) handleListConnections(w http.ResponseWriter, r *http.Request) {
 	}
 	if list == nil {
 		list = []*vault.ConnectionRecord{}
+	}
+	// Never expose raw or sealed SSL private keys in connection list responses.
+	for _, c := range list {
+		if c != nil {
+			c.Password = ""
+			c.SSLKey = ""
+		}
 	}
 	writeJSON(w, http.StatusOK, list)
 }
@@ -39,6 +152,10 @@ func (s *Server) handleSaveConnection(w http.ResponseWriter, r *http.Request) {
 	if conn.Environment == "" {
 		conn.Environment = "Development"
 	}
+	if err := s.validateConnectionPayload(&conn, s.IsRemoteRequest(r)); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	if err := s.vault.SaveConnection(&conn); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save connection: "+err.Error())
@@ -46,6 +163,7 @@ func (s *Server) handleSaveConnection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	conn.Password = ""
+	conn.SSLKey = ""
 	writeJSON(w, http.StatusOK, conn)
 }
 
@@ -86,8 +204,23 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 		}
 		if conn.Password == "" && conn.ID != "" {
 			if existing, err := s.vault.GetConnection(conn.ID); err == nil {
+				if !strings.EqualFold(conn.Host, existing.Host) || conn.Port != existing.Port || !strings.EqualFold(conn.Driver, existing.Driver) {
+					writeError(w, http.StatusBadRequest, "password must be re-entered when changing host, port, or driver")
+					return
+				}
 				conn.Password = existing.Password
 			}
+		}
+		if conn.UseSSL && conn.SSLKey == "" && conn.ID != "" {
+			if existing, err := s.vault.GetConnection(conn.ID); err == nil {
+				if strings.EqualFold(conn.Host, existing.Host) && conn.Port == existing.Port && strings.EqualFold(conn.Driver, existing.Driver) {
+					conn.SSLKey = existing.SSLKey
+				}
+			}
+		}
+		if err := s.validateConnectionPayload(conn, s.IsRemoteRequest(r)); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
 		}
 	}
 
@@ -136,10 +269,19 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleExportVault(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ExportPassphrase string `json:"export_passphrase"`
+		ExportPassphrase      string `json:"export_passphrase"`
+		CurrentMasterPassword string `json:"current_master_password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ExportPassphrase == "" {
 		writeError(w, http.StatusBadRequest, "export_passphrase is required")
+		return
+	}
+	if strings.TrimSpace(req.CurrentMasterPassword) == "" {
+		writeError(w, http.StatusUnauthorized, "current_master_password is required to export vault secrets")
+		return
+	}
+	if s.vault == nil || !s.vault.ValidateMasterPassword(req.CurrentMasterPassword) {
+		writeError(w, http.StatusUnauthorized, "incorrect current master password")
 		return
 	}
 

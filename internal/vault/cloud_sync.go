@@ -78,10 +78,11 @@ type CloudSyncConfig struct {
 
 // CloudSyncResult represents the outcome of a sync operation.
 type CloudSyncResult struct {
-	CommitSHA  string    `json:"commit_sha"`
-	FilesCount int       `json:"files_count"`
-	Message    string    `json:"message"`
-	SyncedAt   time.Time `json:"synced_at"`
+	CommitSHA   string    `json:"commit_sha"`
+	FilesCount  int       `json:"files_count"`
+	PulledCount int       `json:"pulled_count"`
+	Message     string    `json:"message"`
+	SyncedAt    time.Time `json:"synced_at"`
 }
 
 type cloudSyncStoredPayload struct {
@@ -141,10 +142,15 @@ func (v *Vault) GetCloudSyncConfig() (*CloudSyncConfig, error) {
 		cfg.LastSyncStatus = "idle"
 	}
 
+	const cloudSyncTokenAAD = "cloud_sync:github_token"
 	if stored.EncryptedToken != "" {
-		dec, err := Decrypt(stored.EncryptedToken, v.key)
+		dec, err := DecryptWithAAD(stored.EncryptedToken, v.key, []byte(cloudSyncTokenAAD))
 		if err != nil {
-			return nil, fmt.Errorf("failed to decrypt stored github token: %w", err)
+			// Legacy fallback for tokens encrypted before AAD was enforced.
+			dec, err = Decrypt(stored.EncryptedToken, v.key)
+			if err != nil {
+				return nil, fmt.Errorf("failed to decrypt stored github token: %w", err)
+			}
 		}
 		cfg.GitHubToken = string(dec)
 	}
@@ -166,9 +172,10 @@ func (v *Vault) SaveCloudSyncConfig(cfg *CloudSyncConfig) error {
 		}
 	}
 
+	const cloudSyncTokenAAD = "cloud_sync:github_token"
 	var encToken string
 	if cfg.GitHubToken != "" {
-		enc, err := Encrypt([]byte(cfg.GitHubToken), v.key)
+		enc, err := EncryptWithAAD([]byte(cfg.GitHubToken), v.key, []byte(cloudSyncTokenAAD))
 		if err != nil {
 			return fmt.Errorf("failed to encrypt github token: %w", err)
 		}
@@ -187,12 +194,19 @@ func (v *Vault) SaveCloudSyncConfig(cfg *CloudSyncConfig) error {
 		status = "idle"
 	}
 
+	cleanPrefix := strings.Trim(cfg.PathPrefix, "/")
+	for _, seg := range strings.Split(cleanPrefix, "/") {
+		if seg == ".." || seg == "." {
+			return errors.New("path_prefix must not contain '.' or '..' segments")
+		}
+	}
+
 	stored := cloudSyncStoredPayload{
 		Enabled:            cfg.Enabled,
 		EncryptedToken:     encToken,
 		GitHubRepo:         strings.TrimSpace(cfg.GitHubRepo),
 		GitHubBranch:       branch,
-		PathPrefix:         strings.Trim(cfg.PathPrefix, "/"),
+		PathPrefix:         cleanPrefix,
 		IncludeVaultBackup: cfg.IncludeVaultBackup,
 		APIBaseURL:         cfg.APIBaseURL,
 		LastSyncAt:         cfg.LastSyncAt,
@@ -268,7 +282,12 @@ func TestGitHubAccess(ctx context.Context, apiBaseURL, token, repo, branch strin
 	}
 	setGitHubHeaders(req, token)
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := &http.Client{
+		Timeout: 15 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to connect to github: %w", err)
@@ -285,7 +304,7 @@ func TestGitHubAccess(ctx context.Context, apiBaseURL, token, repo, branch strin
 		return errors.New("github api access forbidden or rate limit reached")
 	}
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 		return fmt.Errorf("github api returned status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -362,7 +381,37 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 		files = prefixedFiles
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	// Refuse pushing vault backup secrets, operational notes, or SQL snapshots to a public GitHub
+	// repository regardless of IncludeVaultBackup (fail closed for all sync modes).
+	if !strings.HasPrefix(apiBaseURL, "http://127.0.0.1") && !strings.HasPrefix(apiBaseURL, "http://localhost") && !strings.HasPrefix(apiBaseURL, "http://[::1]") {
+		repoReq, rErr := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/repos/%s", apiBaseURL, repo), nil)
+		if rErr != nil {
+			return nil, fmt.Errorf("cannot verify repository privacy before cloud sync: %w", rErr)
+		}
+		setGitHubHeaders(repoReq, cfg.GitHubToken)
+		repoResp, doErr := client.Do(repoReq)
+		if doErr != nil {
+			return nil, fmt.Errorf("cannot verify repository privacy before cloud sync: %w", doErr)
+		}
+		var repoMeta struct {
+			Private *bool `json:"private"`
+		}
+		decErr := json.NewDecoder(io.LimitReader(repoResp.Body, 64<<10)).Decode(&repoMeta)
+		repoResp.Body.Close()
+		if repoResp.StatusCode != http.StatusOK || decErr != nil || repoMeta.Private == nil {
+			return nil, fmt.Errorf("cannot confirm repository %q is private (HTTP %d); refusing to sync", repo, repoResp.StatusCode)
+		}
+		if !*repoMeta.Private {
+			return nil, errors.New("refusing to sync to a PUBLIC GitHub repository; make the repository private")
+		}
+	}
 
 	// 4. Get the latest commit SHA of the target branch
 	refURL := fmt.Sprintf("%s/repos/%s/git/ref/heads/%s", apiBaseURL, repo, branch)
@@ -398,8 +447,7 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 		}
 		latestCommitSHA = refData.Object.SHA
 	} else {
-		b, _ := io.ReadAll(refResp.Body)
-		return nil, fmt.Errorf("querying branch ref failed (HTTP %d): %s", refResp.StatusCode, string(b))
+		return nil, fmt.Errorf("querying branch ref failed (HTTP %d): %s", refResp.StatusCode, readGitHubErrorBody(refResp.Body))
 	}
 
 	// 5. Get base tree SHA from the latest commit
@@ -417,8 +465,7 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 	defer commitResp.Body.Close()
 
 	if commitResp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(commitResp.Body)
-		return nil, fmt.Errorf("failed to fetch commit object (HTTP %d): %s", commitResp.StatusCode, string(b))
+		return nil, fmt.Errorf("failed to fetch commit object (HTTP %d): %s", commitResp.StatusCode, readGitHubErrorBody(commitResp.Body))
 	}
 
 	var commitData struct {
@@ -446,18 +493,48 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 	defer treeResp.Body.Close()
 
 	var existingFiles []string
+	existingBlobSHAs := make(map[string]string)
 	if treeResp.StatusCode == http.StatusOK {
 		var treeData struct {
 			Tree []struct {
 				Path string `json:"path"`
 				Type string `json:"type"`
+				SHA  string `json:"sha"`
 			} `json:"tree"`
 		}
 		if err := json.NewDecoder(treeResp.Body).Decode(&treeData); err == nil {
 			for _, item := range treeData.Tree {
 				if item.Type == "blob" && isSyncManagedPath(item.Path, prefix) {
 					existingFiles = append(existingFiles, item.Path)
+					existingBlobSHAs[item.Path] = item.SHA
 				}
+			}
+		}
+	}
+
+	// 6.5 Two-way pull/merge: when remote has unseen commits (or this is a fresh machine),
+	// pull any remote notes/table-notes/snippets missing locally into the vault before pushing.
+	pulledCount := 0
+	if cfg.LastCommitSHA == "" || cfg.LastCommitSHA != latestCommitSHA {
+		treePrefix := ""
+		if prefix != "" {
+			treePrefix = prefix + "/"
+		}
+		for remotePath, blobSHA := range existingBlobSHAs {
+			if _, exists := files[remotePath]; exists || blobSHA == "" {
+				continue
+			}
+			relPath := strings.TrimPrefix(remotePath, treePrefix)
+			if !strings.HasPrefix(relPath, "notes/") && !strings.HasPrefix(relPath, "table-notes/") && !strings.HasPrefix(relPath, "snippets/") {
+				continue
+			}
+			blobBytes, bErr := fetchGitHubBlob(ctx, client, apiBaseURL, repo, cfg.GitHubToken, blobSHA)
+			if bErr != nil {
+				continue
+			}
+			if ImportNoteFile(v, relPath, blobBytes) {
+				pulledCount++
+				files[remotePath] = blobBytes
 			}
 		}
 	}
@@ -470,9 +547,21 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 	}
 	var newTreeEntries []treeEntry
 
-	// Mirror deletions: files that existed in previous tree under our sync scope but are now removed
+	hasLocalNotes := false
+	for p := range files {
+		if strings.HasPrefix(p, prefix+"notes/") {
+			hasLocalNotes = true
+			break
+		}
+	}
+
+	// Mirror deletions: only delete remote notes when this machine actually has notes in its vault;
+	// a fresh/empty machine must never wipe an existing remote notes archive on another device.
 	for _, oldPath := range existingFiles {
 		if _, exists := files[oldPath]; !exists {
+			if !hasLocalNotes && strings.HasPrefix(oldPath, prefix+"notes/") {
+				continue
+			}
 			// In GitHub API, passing sha: nil / omitting sha deletes the file from the tree
 			newTreeEntries = append(newTreeEntries, treeEntry{
 				Path: oldPath,
@@ -516,8 +605,7 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 	defer createTreeResp.Body.Close()
 
 	if createTreeResp.StatusCode != http.StatusCreated && createTreeResp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(createTreeResp.Body)
-		return nil, fmt.Errorf("failed to create git tree (HTTP %d): %s", createTreeResp.StatusCode, string(b))
+		return nil, fmt.Errorf("failed to create git tree (HTTP %d): %s", createTreeResp.StatusCode, readGitHubErrorBody(createTreeResp.Body))
 	}
 
 	var newTreeData struct {
@@ -537,10 +625,11 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 		cfg.LastSyncError = ""
 		_ = v.UpdateCloudSyncStatus("synced", "", &now, latestCommitSHA)
 		return &CloudSyncResult{
-			CommitSHA:  latestCommitSHA,
-			FilesCount: len(files),
-			Message:    "Already up to date (no changes detected)",
-			SyncedAt:   now,
+			CommitSHA:   latestCommitSHA,
+			FilesCount:  len(files),
+			PulledCount: pulledCount,
+			Message:     "Already up to date (no changes detected)",
+			SyncedAt:    now,
 		}, nil
 	}
 
@@ -565,8 +654,7 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 	defer createCommitResp.Body.Close()
 
 	if createCommitResp.StatusCode != http.StatusCreated && createCommitResp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(createCommitResp.Body)
-		return nil, fmt.Errorf("failed to create git commit (HTTP %d): %s", createCommitResp.StatusCode, string(b))
+		return nil, fmt.Errorf("failed to create git commit (HTTP %d): %s", createCommitResp.StatusCode, readGitHubErrorBody(createCommitResp.Body))
 	}
 
 	var newCommitData struct {
@@ -594,8 +682,7 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 	defer updateRefResp.Body.Close()
 
 	if updateRefResp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(updateRefResp.Body)
-		return nil, fmt.Errorf("failed to update branch ref to %s (HTTP %d): %s", newCommitData.SHA, updateRefResp.StatusCode, string(b))
+		return nil, fmt.Errorf("failed to update branch ref to %s (HTTP %d): %s", newCommitData.SHA, updateRefResp.StatusCode, readGitHubErrorBody(updateRefResp.Body))
 	}
 
 	// 11. Persist sync timestamp and status to vault
@@ -606,11 +693,44 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 	_ = v.UpdateCloudSyncStatus("synced", "", &now, newCommitData.SHA)
 
 	return &CloudSyncResult{
-		CommitSHA:  newCommitData.SHA,
-		FilesCount: len(files),
-		Message:    commitMsg,
-		SyncedAt:   now,
+		CommitSHA:   newCommitData.SHA,
+		FilesCount:  len(files),
+		PulledCount: pulledCount,
+		Message:     commitMsg,
+		SyncedAt:    now,
 	}, nil
+}
+
+func fetchGitHubBlob(ctx context.Context, client *http.Client, apiBaseURL, repo, token, blobSHA string) ([]byte, error) {
+	blobURL := fmt.Sprintf("%s/repos/%s/git/blobs/%s", apiBaseURL, repo, blobSHA)
+	req, err := http.NewRequestWithContext(ctx, "GET", blobURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	setGitHubHeaders(req, token)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("github blob fetch failed (HTTP %d): %s", resp.StatusCode, readGitHubErrorBody(resp.Body))
+	}
+
+	var res struct {
+		Content  string `json:"content"`
+		Encoding string `json:"encoding"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 10<<20)).Decode(&res); err != nil {
+		return nil, err
+	}
+	if res.Encoding == "base64" {
+		cleaned := strings.ReplaceAll(res.Content, "\n", "")
+		return base64.StdEncoding.DecodeString(cleaned)
+	}
+	return []byte(res.Content), nil
 }
 
 func createGitHubBlob(ctx context.Context, client *http.Client, apiBaseURL, repo, token string, content []byte) (string, error) {
@@ -634,8 +754,7 @@ func createGitHubBlob(ctx context.Context, client *http.Client, apiBaseURL, repo
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("github blob creation failed (HTTP %d): %s", resp.StatusCode, string(raw))
+		return "", fmt.Errorf("github blob creation failed (HTTP %d): %s", resp.StatusCode, readGitHubErrorBody(resp.Body))
 	}
 
 	var res struct {
@@ -670,8 +789,7 @@ func createInitialCommit(ctx context.Context, client *http.Client, apiBaseURL, r
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("failed to create initial README (HTTP %d): %s", resp.StatusCode, string(raw))
+		return "", fmt.Errorf("failed to create initial README (HTTP %d): %s", resp.StatusCode, readGitHubErrorBody(resp.Body))
 	}
 
 	var res struct {
@@ -718,4 +836,10 @@ func setGitHubHeaders(req *http.Request, token string) {
 	if req.Body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+}
+
+func readGitHubErrorBody(r io.Reader) string {
+	const maxGitHubErrorBodyBytes = 64 << 10
+	b, _ := io.ReadAll(io.LimitReader(r, maxGitHubErrorBodyBytes))
+	return string(b)
 }

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -33,6 +34,7 @@ import (
 var Version = "v0.19.8"
 
 func main() {
+	cli.Version = Version
 	initConsole()
 	loadEnvFiles()
 
@@ -43,6 +45,7 @@ func main() {
 			logLvl := os.Getenv("SQLFOX_LOG_LEVEL")
 			logFmt := os.Getenv("SQLFOX_LOG_FORMAT")
 			logSink := os.Getenv("SQLFOX_LOG_FILE")
+			var logCloser io.Closer
 			if logLvl != "" || logSink != "" {
 				res, err := logger.Setup(logger.Config{
 					Level:    logLvl,
@@ -51,17 +54,17 @@ func main() {
 					Silent:   false,
 				})
 				if err == nil && res.Closer != nil {
-					defer res.Closer.Close()
+					logCloser = res.Closer
 				}
 			}
-			os.Exit(cli.Run(os.Args[1:], os.Stdout, os.Stderr, os.Stdin))
+			code := cli.Run(os.Args[1:], os.Stdout, os.Stderr, os.Stdin)
+			if logCloser != nil {
+				_ = logCloser.Close()
+			}
+			os.Exit(code)
 
 		case "stop":
-			home, err := os.UserHomeDir()
-			if err != nil {
-				home = "."
-			}
-			configDir := filepath.Join(home, ".sqlfox")
+			configDir, stopPort := parseStopArgs(os.Args[2:])
 			lockPath := filepath.Join(configDir, "sqlfox.lock")
 			var pid int
 			if data, err := os.ReadFile(lockPath); err == nil {
@@ -70,7 +73,7 @@ func main() {
 					pid = info.PID
 				}
 			}
-			if err := stopExistingInstance(configDir, 8080); err != nil {
+			if err := stopExistingInstance(configDir, stopPort); err != nil {
 				fmt.Printf("ℹ️  %v\n", err)
 				os.Exit(0)
 			}
@@ -90,6 +93,8 @@ func main() {
 	hostFlag := flag.String("host", "127.0.0.1", "Host interface to bind (default 127.0.0.1; use --lan or 0.0.0.0 for LAN/Tablet access)")
 	lanFlag := flag.Bool("lan", false, "Enable LAN and tablet access (binds to 0.0.0.0 and displays Master PIN)")
 	behindProxyFlag := flag.Bool("behind-proxy", false, "Enable reverse proxy trust mode (inspects X-Forwarded-For and X-Real-IP headers)")
+	trustedProxiesFlag := flag.String("trusted-proxies", "", "Comma-separated trusted proxy IPs or CIDRs (or SQLFOX_TRUSTED_PROXIES)")
+	allowedHostsFlag := flag.String("allowed-hosts", "", "Comma-separated allowed Host headers for reverse proxies (or SQLFOX_ALLOWED_HOSTS)")
 	tlsFlag := flag.Bool("tls", false, "Enable TLS/HTTPS listener (auto-generates self-signed ECDSA certificate if none provided)")
 	tlsCertFlag := flag.String("tls-cert", "", "Path to custom TLS certificate file (PEM)")
 	tlsKeyFlag := flag.String("tls-key", "", "Path to custom TLS private key file (PEM)")
@@ -206,8 +211,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Capture the executable path at startup before any in-place self-update renames/unlinks
+	// the running binary (on Linux, /proc/self/exe would otherwise gain a " (deleted)" suffix).
+	startupExePath, _ := os.Executable()
+	if startupExePath != "" {
+		if evalPath, evalErr := filepath.EvalSymlinks(startupExePath); evalErr == nil {
+			startupExePath = evalPath
+		}
+	}
+
 	// Claim the lock atomically (after any interactive password prompt, so a waiting launch never
 	// mistakes a prompting instance for a stuck one); if another launch won the race, defer to it.
+	var claimRelease func()
 	if !*multiFlag && os.Getenv("SQLFOX_MULTI_INSTANCE") != "1" {
 		release, err := claimInstanceLock(configDir)
 		if errors.Is(err, os.ErrExist) {
@@ -223,7 +238,12 @@ func main() {
 			release, err = claimInstanceLock(configDir) // the stale lock was removed by the check
 		}
 		if err == nil {
-			defer release()
+			claimRelease = release
+			defer func() {
+				if claimRelease != nil {
+					claimRelease()
+				}
+			}()
 		}
 	}
 
@@ -239,8 +259,8 @@ func main() {
 
 	bindHost := *hostFlag
 	envLAN := os.Getenv("SQLFOX_LAN") == "1" || strings.ToLower(os.Getenv("SQLFOX_LAN")) == "true"
-	isLAN := *lanFlag || envLAN || bindHost == "0.0.0.0"
-	if (*lanFlag || envLAN) && bindHost == "127.0.0.1" {
+	isLAN := *lanFlag || envLAN || !isLoopbackBindHost(bindHost)
+	if (*lanFlag || envLAN) && isLoopbackBindHost(bindHost) {
 		bindHost = "0.0.0.0"
 	}
 
@@ -254,6 +274,34 @@ func main() {
 	srv.SetLANIP(lanIP)
 	isBehindProxy := *behindProxyFlag || os.Getenv("SQLFOX_BEHIND_PROXY") == "1" || strings.ToLower(os.Getenv("SQLFOX_BEHIND_PROXY")) == "true"
 	srv.SetBehindProxy(isBehindProxy)
+
+	trustedRaw := *trustedProxiesFlag
+	if trustedRaw == "" {
+		trustedRaw = os.Getenv("SQLFOX_TRUSTED_PROXIES")
+	}
+	if trustedRaw != "" {
+		var proxies []string
+		for _, p := range strings.Split(trustedRaw, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				proxies = append(proxies, p)
+			}
+		}
+		srv.SetTrustedProxies(proxies)
+	}
+
+	allowedRaw := *allowedHostsFlag
+	if allowedRaw == "" {
+		allowedRaw = os.Getenv("SQLFOX_ALLOWED_HOSTS")
+	}
+	if allowedRaw != "" {
+		var hosts []string
+		for _, h := range strings.Split(allowedRaw, ",") {
+			if h = strings.TrimSpace(h); h != "" {
+				hosts = append(hosts, h)
+			}
+		}
+		srv.SetAllowedHosts(hosts)
+	}
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
@@ -321,6 +369,9 @@ func main() {
 	scheme := "http"
 	if isTLS {
 		scheme = "https"
+	}
+	if !isTLS && (*lanFlag || bindHost == "0.0.0.0" || bindHost == "::") && !isSilent {
+		fmt.Fprintln(os.Stderr, "⚠️  SECURITY WARNING: LAN access is running over plaintext HTTP. Pass --tls to encrypt LAN traffic, Master PIN, and bearer tokens.")
 	}
 	localURL := fmt.Sprintf("%s://localhost:%d", scheme, actualPort)
 
@@ -414,13 +465,27 @@ func main() {
 	srv.Close()
 	if lockCleanup != nil {
 		lockCleanup()
+		lockCleanup = nil
+	}
+	if claimRelease != nil {
+		claimRelease()
+		claimRelease = nil
 	}
 
 	if isRestart {
-		exePath, err := os.Executable()
-		if err == nil {
-			if evalPath, err := filepath.EvalSymlinks(exePath); err == nil {
-				exePath = evalPath
+		// Explicitly close vault SQLite handles and log files before syscall.Exec,
+		// because deferred cleanups do not execute once the process image is replaced.
+		_ = v.Close()
+		if logRes.Closer != nil {
+			_ = logRes.Closer.Close()
+		}
+		exePath := startupExePath
+		if exePath == "" {
+			if ep, err := os.Executable(); err == nil {
+				if evalPath, err := filepath.EvalSymlinks(ep); err == nil {
+					ep = evalPath
+				}
+				exePath = strings.TrimSuffix(ep, " (deleted)")
 			}
 		}
 		restartArgs := appendNoBrowserArg(os.Args)
@@ -440,47 +505,94 @@ func main() {
 	fmt.Println("SqlFox stopped.")
 }
 
+// parseStopArgs parses optional -db and -port flags for `sqlfox stop`.
+func parseStopArgs(args []string) (configDir string, port int) {
+	fs := flag.NewFlagSet("stop", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	dbPath := fs.String("db", "", "Path to encrypted vault SQLite file")
+	portVal := fs.Int("port", 8080, "Port of running SqlFox instance")
+	_ = fs.Parse(args)
+
+	if *dbPath != "" {
+		configDir = filepath.Dir(*dbPath)
+	} else {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			home = "."
+		}
+		configDir = filepath.Join(home, ".sqlfox")
+	}
+	return configDir, *portVal
+}
+
 func resolveMasterPassword(flagPass string, configDir string) (string, bool, error) {
 	// 1. Explicit CLI flag
 	if flagPass != "" {
 		return flagPass, false, nil
 	}
 
-	// 2. Environment variable SQLFOX_PASS
+	// 2. Environment variable SQLFOX_PASS or SQLFOX_MASTER_KEY
 	if envPass := os.Getenv("SQLFOX_PASS"); envPass != "" {
 		return envPass, false, nil
+	}
+	if envPass := os.Getenv("SQLFOX_MASTER_KEY"); envPass != "" {
+		return envPass, false, nil
+	}
+
+	// 2b. Optional OS Keychain lookup when SQLFOX_KEYCHAIN=1
+	useKeychain := os.Getenv("SQLFOX_KEYCHAIN") == "1"
+	if useKeychain {
+		if kcPass, ok := vault.ReadKeychainMasterPassword(); ok {
+			return kcPass, false, nil
+		}
 	}
 
 	// 3. Saved master.key file
 	keyFile := filepath.Join(configDir, "master.key")
-	if data, err := os.ReadFile(keyFile); err == nil {
-		saved := strings.TrimSpace(string(data))
-		if saved != "" {
-			return saved, false, nil
+	if saved, err := vault.ReadMasterKeyFile(keyFile); err == nil && saved != "" {
+		if useKeychain {
+			_ = vault.WriteKeychainMasterPassword(saved)
+		}
+		return saved, false, nil
+	}
+
+	// 4. Generate cryptographically strong PIN with rejection sampling (no modulo bias, no hardcoded fallback).
+	pin, err := generateFriendlyPIN()
+	if err != nil {
+		return "", false, fmt.Errorf("failed to generate master PIN: %w", err)
+	}
+
+	if useKeychain {
+		if err := vault.WriteKeychainMasterPassword(pin); err == nil {
+			return pin, true, nil
 		}
 	}
 
-	// 4. Generate friendly PIN
-	pin, err := generateFriendlyPIN()
-	if err != nil {
-		return "fox-1234", true, nil
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		return "", false, fmt.Errorf("failed to create config directory %s: %w", configDir, err)
 	}
-
-	_ = os.MkdirAll(configDir, 0700)
-	_ = os.WriteFile(keyFile, []byte(pin), 0600)
+	if err := os.WriteFile(keyFile, []byte(pin), 0600); err != nil {
+		return "", false, fmt.Errorf("failed to persist master.key to %s: %w", keyFile, err)
+	}
 	return pin, true, nil
 }
 
 func generateFriendlyPIN() (string, error) {
 	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
-	b := make([]byte, 6)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
+	const maxValid = 256 - (256 % len(charset)) // rejection threshold eliminates modulo bias
+	out := make([]byte, 10)
+	buf := make([]byte, 1)
+	for i := 0; i < len(out); {
+		if _, err := rand.Read(buf); err != nil {
+			return "", err
+		}
+		if int(buf[0]) >= maxValid {
+			continue
+		}
+		out[i] = charset[int(buf[0])%len(charset)]
+		i++
 	}
-	for i := range b {
-		b[i] = charset[int(b[i])%len(charset)]
-	}
-	return "fox-" + string(b), nil
+	return "fox-" + string(out), nil
 }
 
 // tryListen checks if port is free on loopback interfaces before binding.
@@ -488,21 +600,24 @@ func generateFriendlyPIN() (string, error) {
 // can bind without error even when another service (e.g. Pantau) already listens on [::1]:p or :p.
 // Probing via DialTimeout and verifying IPv4 binding ensures busy ports trigger auto-scanning.
 func tryListen(host string, port int) net.Listener {
-	for _, probeHost := range []string{"127.0.0.1", "[::1]"} {
-		conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", probeHost, port), 50*time.Millisecond)
+	portStr := fmt.Sprintf("%d", port)
+	for _, probeHost := range []string{"127.0.0.1", "::1"} {
+		conn, err := net.DialTimeout("tcp", net.JoinHostPort(probeHost, portStr), 50*time.Millisecond)
 		if err == nil {
 			_ = conn.Close()
 			return nil
 		}
 	}
 
-	l4, err := net.Listen("tcp4", fmt.Sprintf("127.0.0.1:%d", port))
-	if err != nil {
-		return nil
+	if host == "127.0.0.1" || host == "0.0.0.0" {
+		if l4, err := net.Listen("tcp4", fmt.Sprintf("127.0.0.1:%d", port)); err != nil {
+			return nil
+		} else {
+			_ = l4.Close()
+		}
 	}
-	_ = l4.Close()
 
-	l, err := net.Listen("tcp", fmt.Sprintf("%s:%d", host, port))
+	l, err := net.Listen("tcp", net.JoinHostPort(host, portStr))
 	if err != nil {
 		return nil
 	}
@@ -526,6 +641,17 @@ func listenWithPortHunting(host string, startPort int, maxAttempts int) (net.Lis
 	return nil, startPort, fmt.Errorf("could not find an available port after %d attempts starting at %d", maxAttempts, startPort)
 }
 
+func isLoopbackBindHost(host string) bool {
+	h := strings.Trim(strings.TrimSpace(host), "[]")
+	if h == "" || strings.EqualFold(h, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
 func getLocalNetworkIP() string {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
@@ -539,21 +665,13 @@ func getLocalNetworkIP() string {
 	return ""
 }
 
-// loadEnvFiles loads environment variables from .env or sqlfox.env if present.
-// ponytail: Lightweight zero-dependency env loader allows Windows double-click configuration.
+// loadEnvFiles loads environment variables ONLY from trusted user config paths (~/.sqlfox/).
+// Untrusted CWD and executable directories (e.g. ~/Downloads) are intentionally NOT auto-loaded
+// so a stray sqlfox.env next to a downloaded binary cannot inject SQLFOX_LAN or SQLFOX_PPROF.
 func loadEnvFiles() {
 	var candidates []string
 
-	// Next to executable
-	if exe, err := os.Executable(); err == nil {
-		exeDir := filepath.Dir(exe)
-		candidates = append(candidates, filepath.Join(exeDir, "sqlfox.env"), filepath.Join(exeDir, ".env"))
-	}
-
-	// In current working directory
-	candidates = append(candidates, "sqlfox.env", ".env")
-
-	// In ~/.sqlfox/
+	// In ~/.sqlfox/ (trusted user config directory)
 	if home, err := os.UserHomeDir(); err == nil {
 		candidates = append(candidates, filepath.Join(home, ".sqlfox", "sqlfox.env"), filepath.Join(home, ".sqlfox", ".env"))
 	}

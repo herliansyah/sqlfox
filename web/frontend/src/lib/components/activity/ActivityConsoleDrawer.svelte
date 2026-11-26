@@ -202,7 +202,7 @@
         </div>
         {#if consoleMode === 'live'}
           <span
-            class="px-1.5 py-0.2 rounded-full text-[9.5px] font-bold uppercase border flex items-center space-x-1 {appState.activityStatus === 'live'
+            class="px-1.5 py-0.5 rounded-full text-[9.5px] font-bold uppercase border flex items-center space-x-1 {appState.activityStatus === 'live'
               ? 'bg-emerald-950/60 border-emerald-800 text-emerald-300'
               : appState.activityStatus === 'reconnecting'
                 ? 'bg-amber-950/60 border-amber-800 text-amber-300'
@@ -384,7 +384,7 @@
                 <td class="py-1 px-2.5 text-slate-500 whitespace-nowrap select-none text-[10px]">{log.timeMs || log.time}</td>
                 <td class="py-1 px-2 whitespace-nowrap select-none">
                   <span
-                    class="px-1.5 py-0.2 rounded text-[9px] font-bold border {lvl === 'ERROR'
+                    class="px-1.5 py-0.5 rounded text-[9px] font-bold border {lvl === 'ERROR'
                       ? 'bg-rose-950 text-rose-300 border-rose-800'
                       : lvl === 'WARN'
                       ? 'bg-amber-950 text-amber-300 border-amber-800'
@@ -396,7 +396,7 @@
                   </span>
                 </td>
                 <td class="py-1 px-2 whitespace-nowrap select-none">
-                  <span class="px-1.5 py-0.2 rounded bg-slate-900 border border-slate-800 text-slate-400 text-[10px]">
+                  <span class="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400 text-[10px]">
                     {log.module}
                   </span>
                 </td>
@@ -414,7 +414,7 @@
                     <button
                       type="button"
                       onclick={() => toggleExpandJson(log.id)}
-                      class="px-1.5 py-0.2 rounded border text-[9.5px] {isOpen
+                      class="px-1.5 py-0.5 rounded border text-[9.5px] {isOpen
                         ? 'bg-sky-950 border-sky-700 text-sky-300'
                         : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'}"
                     >

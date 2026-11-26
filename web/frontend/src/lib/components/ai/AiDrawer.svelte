@@ -55,8 +55,9 @@
     return [createWelcomeSession()];
   }
 
-  let sessions = $state<ChatSession[]>(loadSessions());
-  let currentSessionId = $state<string>(sessions[0]?.id || '');
+  const initialSessions = loadSessions();
+  let sessions = $state<ChatSession[]>(initialSessions);
+  let currentSessionId = $state<string>(initialSessions[0]?.id || '');
 
   function persistSessions(next: ChatSession[]) {
     const capped = next.slice(0, 30);
@@ -86,9 +87,23 @@
   let messagesContainer = $state<HTMLDivElement | null>(null);
   let promptEl = $state<HTMLTextAreaElement | null>(null);
 
-  let savedWidth = Number(localStorage.getItem(WIDTH_KEY) || '480');
+  function safeReadStorage(key: string, fallback = ''): string {
+    try {
+      return localStorage.getItem(key) ?? fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  function safeWriteStorage(key: string, val: string) {
+    try {
+      localStorage.setItem(key, val);
+    } catch { /* ignore quota / privacy errors */ }
+  }
+
+  let savedWidth = Number(safeReadStorage(WIDTH_KEY, '480') || '480');
   let drawerWidth = $state(Number.isFinite(savedWidth) ? Math.min(920, Math.max(340, savedWidth)) : 480);
-  let isMaximized = $state(localStorage.getItem('sqlfox_ai_drawer_maximized') === 'true');
+  let isMaximized = $state(safeReadStorage('sqlfox_ai_drawer_maximized') === 'true');
   let isResizing = $state(false);
   let chatRequestToken = 0;
 
@@ -146,25 +161,36 @@
 
   function toggleMaximized() {
     isMaximized = !isMaximized;
-    localStorage.setItem('sqlfox_ai_drawer_maximized', String(isMaximized));
+    safeWriteStorage('sqlfox_ai_drawer_maximized', String(isMaximized));
   }
+
+  let activeResizeCleanup: (() => void) | null = null;
 
   function startResize(e: MouseEvent) {
     e.preventDefault();
+    activeResizeCleanup?.();
     isResizing = true;
     const onMove = (ev: MouseEvent) => {
       const next = Math.min(960, Math.max(340, window.innerWidth - ev.clientX));
       drawerWidth = next;
     };
-    const onUp = () => {
+    const cleanup = () => {
       isResizing = false;
-      localStorage.setItem(WIDTH_KEY, String(drawerWidth));
+      safeWriteStorage(WIDTH_KEY, String(drawerWidth));
       window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('mouseup', cleanup);
+      activeResizeCleanup = null;
     };
+    activeResizeCleanup = cleanup;
     window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    window.addEventListener('mouseup', cleanup);
   }
+
+  $effect(() => {
+    return () => {
+      activeResizeCleanup?.();
+    };
+  });
 
   function adjustPromptHeight() {
     if (!promptEl) return;
@@ -432,8 +458,9 @@
   function insertSql(sql: string, mode: 'insert' | 'replace' | 'run') {
     resolveEditableSqlTab(sql, mode === 'replace' ? 'replace' : 'insert');
     if (mode === 'run') {
-      appState.executeCurrentTab();
-      appState.showToast('Executing AI SQL in worksheet!', 'info');
+      // Execute strictly the clicked AI SQL block, never unrelated statements already in the worksheet.
+      appState.executeCurrentTab(sql);
+      appState.showToast('Executing AI SQL block!', 'info');
     } else {
       appState.showToast(
         mode === 'replace' ? 'Replaced active SQL worksheet!' : 'Inserted SQL into worksheet!',
@@ -536,13 +563,13 @@
     : `min(${drawerWidth}px, calc(100vw - 1.5rem))`};"
 >
   <!-- Left-Edge Resizer Handle -->
-  <div
-    role="separator"
-    aria-orientation="vertical"
+  <button
+    type="button"
+    tabindex="-1"
     aria-label="Resize AI Copilot drawer"
     onmousedown={startResize}
-    class="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-sky-500/40 transition z-50"
-  ></div>
+    class="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-sky-500/40 transition z-50 border-0 p-0 bg-transparent"
+  ></button>
 
   <!-- Drawer Header -->
   <div class="h-10 bg-[#0f172a] border-b border-[#1e293b] px-3.5 flex items-center justify-between flex-shrink-0 select-none gap-2">

@@ -377,8 +377,8 @@
                     <label for="new-host" class="text-[11px] text-slate-400">Host Origin</label>
                     {#if !isPG}
                       <div class="flex items-center space-x-1">
-                        <button type="button" onclick={() => (newHost = '%')} class="px-1.5 py-0.2 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-mono text-sky-300">%</button>
-                        <button type="button" onclick={() => (newHost = 'localhost')} class="px-1.5 py-0.2 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-mono text-sky-300">localhost</button>
+                        <button type="button" onclick={() => (newHost = '%')} class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-mono text-sky-300">%</button>
+                        <button type="button" onclick={() => (newHost = 'localhost')} class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-mono text-sky-300">localhost</button>
                       </div>
                     {/if}
                   </div>

@@ -33,7 +33,10 @@ func TestGenerateValueTypes(t *testing.T) {
 		{driver.ColumnMetadata{Name: "ts", Type: "timestamp"}, "timestamp", func(v any) bool { _, ok := v.(string); return ok }},
 		{driver.ColumnMetadata{Name: "tsz", Type: "timestamptz"}, "timestamptz", func(v any) bool { s, ok := v.(string); return ok && s[len(s)-1] == 'Z' }},
 		{driver.ColumnMetadata{Name: "meta", Type: "json"}, "json", func(v any) bool { s, ok := v.(string); return ok && s[0] == '{' }},
-		{driver.ColumnMetadata{Name: "data", Type: "blob"}, "blob", func(v any) bool { s, ok := v.(string); return ok && s == "0xDEADBEEF" }},
+		{driver.ColumnMetadata{Name: "data", Type: "blob"}, "blob", func(v any) bool {
+			b, ok := v.([]byte)
+			return ok && len(b) == 4 && b[0] == 0xDE && b[1] == 0xAD && b[2] == 0xBE && b[3] == 0xEF
+		}},
 		{driver.ColumnMetadata{Name: "status", Type: "enum('active','inactive','pending')"}, "enum", func(v any) bool {
 			s, ok := v.(string)
 			return ok && (s == "active" || s == "inactive" || s == "pending")
@@ -48,6 +51,11 @@ func TestGenerateValueTypes(t *testing.T) {
 				t.Errorf("generateValue(%q) = %v (%T), want passing predicate", tc.col.Type, v, v)
 			}
 		})
+	}
+
+	v5 := generateValue(driver.ColumnMetadata{Name: "code", Type: "varchar(5)"}, nil, nil, &seq, r)
+	if s, ok := v5.(string); !ok || len(s) > 5 {
+		t.Errorf("expected varchar(5) length <= 5, got %v", v5)
 	}
 }
 

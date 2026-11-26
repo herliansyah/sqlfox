@@ -111,4 +111,3 @@ func TestMySQLCancelQuery_PrefixMatching(t *testing.T) {
 		t.Errorf("expected tab-abc#1 to be cancelled and cleared, got %v", s.queryThreads)
 	}
 }
-

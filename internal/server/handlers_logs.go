@@ -8,16 +8,34 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/herliansyah/sqlfox/internal/logger"
 )
 
+const maxLogStreamSubscribers = 32
+
+var activeLogStreamSubscribers atomic.Int32
+
 // handleLogsStream provides an SSE (Server-Sent Events) live log telemetry stream.
 // ponytail: Uses standard library http.Flusher and EventSource format with zero external dependencies.
 func (s *Server) handleLogsStream(w http.ResponseWriter, r *http.Request) {
+	if activeLogStreamSubscribers.Add(1) > maxLogStreamSubscribers {
+		activeLogStreamSubscribers.Add(-1)
+		writeError(w, http.StatusTooManyRequests, "too many concurrent log stream subscribers")
+		return
+	}
+	defer activeLogStreamSubscribers.Add(-1)
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeError(w, http.StatusInternalServerError, "Streaming unsupported by response writer")
+		return
+	}
+
+	broadcaster := logger.DefaultBroadcaster()
+	if broadcaster == nil {
+		writeError(w, http.StatusInternalServerError, "Telemetry broadcaster not available")
 		return
 	}
 
@@ -25,12 +43,6 @@ func (s *Server) handleLogsStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
-
-	broadcaster := logger.DefaultBroadcaster()
-	if broadcaster == nil {
-		writeError(w, http.StatusInternalServerError, "Telemetry broadcaster not available")
-		return
-	}
 
 	// 1. Cold start: send historical events from Telemetry Ring Buffer
 	history := broadcaster.History()
@@ -46,11 +58,27 @@ func (s *Server) handleLogsStream(w http.ResponseWriter, r *http.Request) {
 	ch, unsub := broadcaster.Subscribe()
 	defer unsub()
 
+	isRemote := s.IsRemoteRequest(r)
+	remoteToken := ""
+	if isRemote {
+		remoteToken = extractToken(r)
+	}
+	var authTick <-chan time.Time
+	if isRemote && s.authMgr != nil {
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+		authTick = ticker.C
+	}
+
 	ctx := r.Context()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-authTick:
+			if !s.authMgr.ValidateToken(remoteToken) {
+				return
+			}
 		case evt, ok := <-ch:
 			if !ok {
 				return

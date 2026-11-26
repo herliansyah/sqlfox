@@ -1,6 +1,10 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
   import { copyText } from '../../utils/clipboard';
+  import { computeColumnWidths, computeVisibleColumnWindow, matchesFilterPill } from './gridHelpers';
+  import GridCellDetailDrawer from './GridCellDetailDrawer.svelte';
+  import GridFilterBar from './GridFilterBar.svelte';
+  import GridFooterBar from './GridFooterBar.svelte';
   import { api } from '../../api/client';
   import {
     classifyColumnType,
@@ -11,6 +15,17 @@
     validateCellValue as validateCellAgainstSchema,
   } from '../../utils/dataTypes';
   import { quoteSqlIdentifier, formatSqlLiteral } from '../../utils/sqlStatements';
+  import {
+    formatCellValue,
+    getCellClass,
+    formatRowCell,
+    formatSqlRowInsert,
+    buildCSVExport,
+    buildTSVExport,
+    buildMarkdownExport,
+  } from './gridFormatters';
+  import GridContextMenu from './GridContextMenu.svelte';
+  import GridColumnPicker from './GridColumnPicker.svelte';
   import { appState } from '../../stores/appState.svelte';
   import type { ColumnDefinition, FilterPill } from '../../../types';
   import Icon from '../common/Icon.svelte';
@@ -19,10 +34,14 @@
 
   const ROW_HEIGHT = 28;
   const OVERSCAN = 15;
+  const GUTTER_WIDTH = 64;
+  const COL_OVERSCAN = 4;
 
   let containerRef: HTMLDivElement | null = $state(null);
   let scrollTop = $state(0);
+  let scrollLeft = $state(0);
   let containerHeight = $state(500);
+  let containerWidth = $state(900);
 
   let currentTab = $derived(appState.activeTab);
   let result = $derived(appState.activeTab?.activeResult);
@@ -52,12 +71,17 @@
   let flashedCells = $state<Record<string, boolean>>({});
   let detailPrettyJson = $state(false);
 
-  // FK datalist suggestions cache: `${refTable}.${refCol}` -> string[]
+  // FK datalist suggestions cache: `${sessionId}:${db}:${refTable}.${refCol}` -> string[]
   let fkDatalistCache = $state<Record<string, string[]>>({});
   let fkDatalistLoading = new Set<string>();
 
+  function fkCacheKey(fk: { referenced_table: string; referenced_column: string }): string {
+    return `${appState.activeSessionId || ''}:${effectiveDatabase || ''}:${fk.referenced_table}.${fk.referenced_column}`;
+  }
+
   // Multi-row selection
   let selectedRowIndices = $state<number[]>([]);
+  let selectedRowSet = $derived(new Set(selectedRowIndices));
 
   function flashCell(rIdx: number, cIdx: number) {
     const key = `${rIdx}:${cIdx}`;
@@ -71,7 +95,7 @@
 
   async function ensureFkSuggestions(fk: { referenced_table: string; referenced_column: string }) {
     if (!appState.activeSessionId || !fk?.referenced_table || !fk?.referenced_column) return;
-    const cacheKey = `${fk.referenced_table}.${fk.referenced_column}`;
+    const cacheKey = fkCacheKey(fk);
     if (fkDatalistCache[cacheKey] || fkDatalistLoading.has(cacheKey)) return;
     fkDatalistLoading.add(cacheKey);
     try {
@@ -129,28 +153,44 @@
     window.removeEventListener('sqlfox:focus-table-filter', handleFocusTableFilterEvent);
   });
 
-  // Reset selection, scroll, and editing states when active tab or result set changes
+  // Reset selection, scroll, and editing states when active tab or a new query run starts
+  // (NOT on every streaming chunk flush, which would yank the user back to row 0).
   $effect(() => {
     const _tabId = currentTab?.id;
-    const _res = result;
+    const _runId = currentTab?.resultRunId;
+    const _resIdx = currentTab?.activeResultIndex;
+    void _tabId;
+    void _runId;
+    void _resIdx;
     scrollTop = 0;
-    if (containerRef) containerRef.scrollTop = 0;
+    scrollLeft = 0;
+    if (containerRef) {
+      containerRef.scrollTop = 0;
+      containerRef.scrollLeft = 0;
+    }
+    sortCol = null;
+    sortDir = 'ASC';
+    localSearchQuery = '';
     selectedRowIndices = [];
     selectedRowIndex = null;
     selectedCell = null;
+    rangeAnchor = null;
+    rangeEnd = null;
     editingCell = null;
     contextMenu = null;
     detailPrettyJson = false;
   });
 
-  // Keep containerHeight synced with viewport/splitter resizes before any scroll event.
+  // Keep containerHeight/containerWidth synced with viewport/splitter resizes before any scroll event.
   $effect(() => {
     const el = containerRef;
     if (!el) return;
     containerHeight = el.clientHeight || 500;
+    containerWidth = el.clientWidth || 900;
     if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(() => {
       containerHeight = el.clientHeight || 500;
+      containerWidth = el.clientWidth || 900;
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -166,10 +206,6 @@
     colName: string;
     cellValue: any;
   } | null>(null);
-
-  // Column Picker Dropdown State
-  let showColPicker = $state(false);
-  let colPickerSearch = $state('');
 
   // Export Dropdown State
   let showExportMenu = $state(false);
@@ -266,17 +302,63 @@
   let hiddenCols = $derived<string[]>(currentTab?.hiddenColumns || []);
 
   let visibleColumnEntries = $derived.by(() => {
-    if (!result?.columns) return [] as Array<{ col: string | ColumnDefinition; origIdx: number }>;
-    const entries: Array<{ col: string | ColumnDefinition; origIdx: number }> = [];
+    if (!result?.columns) {
+      return [] as Array<{
+        col: string | ColumnDefinition;
+        origIdx: number;
+        colName: string;
+        colType: string;
+        nullable: boolean;
+        enumVals: string[];
+        kind: ReturnType<typeof classifyColumnType>;
+        showUuidPreset: boolean;
+        hasAnyPreset: boolean;
+        fk: any;
+        isPK: boolean;
+      }>;
+    }
+    const entries: Array<{
+      col: string | ColumnDefinition;
+      origIdx: number;
+      colName: string;
+      colType: string;
+      nullable: boolean;
+      enumVals: string[];
+      kind: ReturnType<typeof classifyColumnType>;
+      showUuidPreset: boolean;
+      hasAnyPreset: boolean;
+      fk: any;
+      isPK: boolean;
+    }> = [];
     result.columns.forEach((col, origIdx) => {
-      if (!hiddenCols.includes(getColName(col))) {
-        entries.push({ col, origIdx });
+      const colName = getColName(col);
+      if (!hiddenCols.includes(colName)) {
+        const colType = resolveColType(col);
+        const nullable = isColNullable(col);
+        const enumVals = resolveEnumValues(col, tableMeta);
+        const kind = classifyColumnType(colType, enumVals);
+        const showUuidPreset = kind.isUuid || (kind.isString && (!kind.maxLength || kind.maxLength >= 36));
+        const hasAnyPreset = nullable || kind.isString || kind.isDateTime || kind.isDate || showUuidPreset;
+        const fk = fkMap.get(colName);
+        const isPK = isColPK(col);
+        entries.push({ col, origIdx, colName, colType, nullable, enumVals, kind, showUuidPreset, hasAnyPreset, fk, isPK });
       }
     });
     return entries;
   });
 
   let visibleColumns = $derived(visibleColumnEntries.map((e) => e.col));
+
+  let columnWidths = $derived.by(() =>
+    computeColumnWidths(
+      visibleColumnEntries.map((e) => ({
+        colName: getColName(e.col),
+        colType: resolveColType(e.col),
+        origIdx: e.origIdx,
+      })),
+      result?.rows || []
+    )
+  );
 
   let fkMap = $derived.by(() => {
     const map = new Map<string, any>();
@@ -287,58 +369,20 @@
     return map;
   });
 
-  function matchesFilterPill(cellVal: any, pill: FilterPill): boolean {
-    if (pill.op === 'IS NULL') return cellVal === null || cellVal === undefined;
-    if (pill.op === 'IS NOT NULL') return cellVal !== null && cellVal !== undefined;
-    if (String(pill.val ?? '').trim() === '') return true;
-    if (cellVal === null || cellVal === undefined) return false;
-    const str = typeof cellVal === 'object' ? JSON.stringify(cellVal) : String(cellVal);
-    const valStr = String(pill.val ?? '');
-    switch (pill.op) {
-      case '=':
-        return str === valStr;
-      case '!=':
-        return str !== valStr;
-      case 'LIKE': {
-        const needle = valStr.replace(/%/g, '').toLowerCase();
-        return str.toLowerCase().includes(needle);
-      }
-      case 'NOT LIKE': {
-        const needle = valStr.replace(/%/g, '').toLowerCase();
-        return !str.toLowerCase().includes(needle);
-      }
-      case '>':
-      case '<':
-      case '>=':
-      case '<=': {
-        const a = Number(cellVal);
-        const b = Number(valStr);
-        const cmp = Number.isFinite(a) && Number.isFinite(b) ? a - b : str.localeCompare(valStr);
-        if (pill.op === '>') return cmp > 0;
-        if (pill.op === '<') return cmp < 0;
-        if (pill.op === '>=') return cmp >= 0;
-        return cmp <= 0;
-      }
-      case 'IN': {
-        const parts = valStr.split(',').map((s) => s.trim().replace(/^['"]|['"]$/g, ''));
-        return parts.includes(str);
-      }
-      case 'NOT IN': {
-        const parts = valStr.split(',').map((s) => s.trim().replace(/^['"]|['"]$/g, ''));
-        return !parts.includes(str);
-      }
-      case 'BETWEEN': {
-        const parts = valStr.split(/\s+AND\s+|,/i).map((s) => s.trim());
-        if (parts.length < 2) return true;
-        return str >= parts[0] && str <= parts[1];
-      }
-      default:
-        return true;
-    }
-  }
+  let hasClientRowTransform = $derived(
+    Boolean(
+      (!currentTab?.isTableViewer && currentTab?.filterPills && currentTab.filterPills.length > 0) ||
+      localSearchQuery.trim() !== '' ||
+      (!currentTab?.isTableViewer && sortCol !== null)
+    )
+  );
 
   let processedRows = $derived.by(() => {
     if (!result?.rows) return [];
+    if (!hasClientRowTransform) {
+      // Fast path: avoid O(N) remapping on every streaming chunk when no client-side filter/sort is active.
+      return null;
+    }
     let list = result.rows.map((r, idx) => ({ origIdx: idx, data: r }));
 
     // Client-side pill filtering for non-TableViewer query result sets
@@ -383,8 +427,28 @@
     return list;
   });
 
-  let totalRows = $derived(processedRows.length);
+  let totalRows = $derived(processedRows ? processedRows.length : (result?.rows?.length ?? 0));
   let totalCols = $derived(visibleColumns.length + 1);
+
+  let colWindow = $derived.by(() =>
+    computeVisibleColumnWindow(
+      visibleColumnEntries.map((e) => e.colName),
+      columnWidths,
+      scrollLeft,
+      containerWidth,
+      GUTTER_WIDTH,
+      COL_OVERSCAN
+    )
+  );
+  let windowedColumnEntries = $derived(
+    visibleColumnEntries.slice(colWindow.startColIdx, colWindow.endColIdx)
+  );
+  let renderedColCount = $derived(
+    1 +
+      (colWindow.leftSpacerWidth > 0 ? 1 : 0) +
+      windowedColumnEntries.length +
+      (colWindow.rightSpacerWidth > 0 ? 1 : 0)
+  );
 
   let startIndex = $derived(Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN));
   let endIndex = $derived(Math.min(totalRows, Math.ceil((scrollTop + containerHeight) / ROW_HEIGHT) + OVERSCAN));
@@ -393,17 +457,26 @@
   let bottomSpacerHeight = $derived(Math.max(0, (totalRows - endIndex) * ROW_HEIGHT));
 
   let visibleRows = $derived.by(() => {
-    return processedRows.slice(startIndex, endIndex).map((item, idx) => ({
-      displayIdx: startIndex + idx,
-      origIdx: item.origIdx,
-      data: item.data,
-    }));
+    if (processedRows) {
+      return processedRows.slice(startIndex, endIndex).map((item, idx) => ({
+        displayIdx: startIndex + idx,
+        origIdx: item.origIdx,
+        data: item.data,
+      }));
+    }
+    const raw = result?.rows;
+    if (!raw) return [];
+    const out: Array<{ displayIdx: number; origIdx: number; data: any[] }> = [];
+    for (let i = startIndex; i < endIndex && i < raw.length; i++) {
+      out.push({ displayIdx: i, origIdx: i, data: raw[i] });
+    }
+    return out;
   });
 
   function onScroll(e: Event) {
     const target = e.currentTarget as HTMLDivElement;
     scrollTop = target.scrollTop;
-    containerHeight = target.clientHeight || 500;
+    scrollLeft = target.scrollLeft;
   }
 
   function handleHeaderSort(colName: string) {
@@ -437,50 +510,17 @@
     }
   }
 
-  function formatCellValue(val: any): { display: string; type: string } {
-    if (val === null || val === undefined) {
-      return { display: 'NULL', type: 'null' };
-    }
-    if (typeof val === 'boolean') {
-      return { display: val ? 'TRUE' : 'FALSE', type: 'boolean' };
-    }
-    if (typeof val === 'number') {
-      return { display: val.toLocaleString(), type: 'number' };
-    }
-    if (typeof val === 'object') {
-      try {
-        return { display: JSON.stringify(val), type: 'json' };
-      } catch {
-        return { display: String(val), type: 'text' };
-      }
-    }
-    return { display: String(val), type: 'text' };
-  }
-
-  function getCellClass(type: string) {
-    switch (type) {
-      case 'null':
-        return 'text-rose-400/80 italic font-medium';
-      case 'number':
-        return 'text-amber-300 font-mono text-right';
-      case 'boolean':
-        return 'text-emerald-400 font-semibold';
-      case 'json':
-        return 'text-purple-300 font-mono';
-      default:
-        return 'text-slate-200 font-mono';
-    }
-  }
-
   let isAllSelected = $derived(
-    processedRows.length > 0 && selectedRowIndices.length === processedRows.length
+    totalRows > 0 && selectedRowIndices.length === totalRows
   );
 
   function toggleSelectAll() {
     if (isAllSelected) {
       selectedRowIndices = [];
-    } else {
+    } else if (processedRows) {
       selectedRowIndices = processedRows.map((r) => r.origIdx);
+    } else {
+      selectedRowIndices = Array.from({ length: totalRows }, (_, i) => i);
     }
   }
 
@@ -574,8 +614,8 @@
       }
     }
     try {
-      await appState.insertRow(cleaned);
-      if (currentTab?.stagedDraftRows) {
+      const ok = await appState.insertRow(cleaned);
+      if (ok && currentTab?.stagedDraftRows) {
         currentTab.stagedDraftRows.splice(dIdx, 1);
       }
     } catch (err: any) {
@@ -807,74 +847,35 @@
   // Excel-safe CSV export with UTF-8 BOM & leading zero protection
   function exportCSV() {
     if (!result?.rows || !result?.columns) return;
-    const headers = result.columns.map((c) => `"${getColName(c).replace(/"/g, '""')}"`).join(',');
-    const rows = result.rows.map((row) =>
-      row
-        .map((cell) => {
-          if (cell === null || cell === undefined) return '""';
-          const str = typeof cell === 'object' ? JSON.stringify(cell) : String(cell);
-          if (/^0\d+$/.test(str)) {
-            return `"=""${str.replace(/"/g, '""')}"""`;
-          }
-          return `"${str.replace(/"/g, '""')}"`;
-        })
-        .join(',')
-    );
-    const csv = '\uFEFF' + [headers, ...rows].join('\n');
+    const csv = buildCSVExport(result.columns.map((c) => getColName(c)), result.rows);
     downloadFile(csv, `${effectiveTable || 'query_export'}.csv`, 'text/csv;charset=utf-8');
     showExportMenu = false;
   }
 
   function copyGridAsTSV() {
     if (!result?.rows || !result?.columns) return;
-    const cols = visibleColumns.map((c) => getColName(c)).join('\t');
-    const lines = processedRows.map((item) =>
-      visibleColumnEntries
-        .map(({ origIdx: cIdx }) => {
-          const v = item.data[cIdx];
-          if (v === null || v === undefined) return '';
-          return typeof v === 'object' ? JSON.stringify(v) : String(v);
-        })
-        .join('\t')
+    const rowsData = processedRows ? processedRows.map((item) => item.data) : result.rows;
+    const text = buildTSVExport(
+      visibleColumns.map((c) => getColName(c)),
+      rowsData,
+      visibleColumnEntries.map((e) => e.origIdx)
     );
-    copyText([cols, ...lines].join('\n'));
+    copyText(text);
     showExportMenu = false;
-    appState.showToast(`Copied ${processedRows.length} rows as TSV`, 'success');
+    appState.showToast(`Copied ${rowsData.length} rows as TSV`, 'success');
   }
 
   function copyGridAsMarkdown() {
     if (!result?.rows || !result?.columns) return;
-    const names = visibleColumns.map((c) => getColName(c));
-    const header = `| ${names.join(' | ')} |`;
-    const sep = `| ${names.map(() => '---').join(' | ')} |`;
-    const lines = processedRows.map((item) =>
-      `| ${visibleColumnEntries
-        .map(({ origIdx: cIdx }) => {
-          const v = item.data[cIdx];
-          if (v === null || v === undefined) return '*NULL*';
-          const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
-          return s.replace(/\|/g, '\\|').replace(/\n/g, ' ');
-        })
-        .join(' | ')} |`
+    const rowsData = processedRows ? processedRows.map((item) => item.data) : result.rows;
+    const text = buildMarkdownExport(
+      visibleColumns.map((c) => getColName(c)),
+      rowsData,
+      visibleColumnEntries.map((e) => e.origIdx)
     );
-    copyText([header, sep, ...lines].join('\n'));
+    copyText(text);
     showExportMenu = false;
-    appState.showToast(`Copied ${processedRows.length} rows as Markdown Table`, 'success');
-  }
-
-  function formatRowCell(v: any): string {
-    if (v === null || v === undefined) return '';
-    return typeof v === 'object' ? JSON.stringify(v) : String(v);
-  }
-
-  function formatSqlRowInsert(row: any[], cols: string[], tbl: string, driver?: string): string {
-    const isPg = driver === 'postgres' || driver === 'postgresql';
-    const q = (s: string) => quoteSqlIdentifier(s, driver);
-    const qCols = cols.map((c) => q(c)).join(', ');
-    const vals = row
-      .map((c) => (typeof c === 'boolean' ? (c ? (isPg ? 'TRUE' : '1') : (isPg ? 'FALSE' : '0')) : formatSqlLiteral(c)))
-      .join(', ');
-    return `INSERT INTO ${q(tbl)} (${qCols}) VALUES (${vals});`;
+    appState.showToast(`Copied ${rowsData.length} rows as Markdown Table`, 'success');
   }
 
   function copyRowAsTSV(rIdx: number) {
@@ -1047,26 +1048,34 @@
     }
   }
 
+  function getDisplayRow(dispIdx: number): { origIdx: number; data: any[] } | undefined {
+    if (processedRows) return processedRows[dispIdx];
+    const data = result?.rows?.[dispIdx];
+    return data !== undefined ? { origIdx: dispIdx, data } : undefined;
+  }
+
   function advanceActiveCell(dRow: number, dCol: number) {
-    if (processedRows.length === 0 || visibleColumnEntries.length === 0) return;
+    if (totalRows === 0 || visibleColumnEntries.length === 0) return;
     const curDisplayIdx = selectedCell
-      ? Math.max(0, processedRows.findIndex((r) => r.origIdx === selectedCell!.rIdx))
+      ? processedRows
+        ? Math.max(0, processedRows.findIndex((r) => r.origIdx === selectedCell!.rIdx))
+        : Math.max(0, Math.min(totalRows - 1, selectedCell.rIdx))
       : 0;
     const curVisColIdx = selectedCell
       ? Math.max(0, visibleColumnEntries.findIndex((e) => e.origIdx === selectedCell!.cIdx))
       : 0;
 
-    let nextDisplayIdx = Math.max(0, Math.min(processedRows.length - 1, curDisplayIdx + dRow));
+    let nextDisplayIdx = Math.max(0, Math.min(totalRows - 1, curDisplayIdx + dRow));
     let nextVisColIdx = curVisColIdx + dCol;
     if (nextVisColIdx >= visibleColumnEntries.length) {
       nextVisColIdx = 0;
-      nextDisplayIdx = Math.min(processedRows.length - 1, nextDisplayIdx + 1);
+      nextDisplayIdx = Math.min(totalRows - 1, nextDisplayIdx + 1);
     } else if (nextVisColIdx < 0) {
       nextVisColIdx = visibleColumnEntries.length - 1;
       nextDisplayIdx = Math.max(0, nextDisplayIdx - 1);
     }
 
-    const row = processedRows[nextDisplayIdx];
+    const row = getDisplayRow(nextDisplayIdx);
     const colEntry = visibleColumnEntries[nextVisColIdx];
     if (!row || !colEntry) return;
     selectedCell = { rIdx: row.origIdx, cIdx: colEntry.origIdx };
@@ -1079,6 +1088,15 @@
       if (y < containerRef.scrollTop) containerRef.scrollTop = y;
       else if (y + ROW_HEIGHT > containerRef.scrollTop + containerRef.clientHeight - 60) {
         containerRef.scrollTop = y + ROW_HEIGHT - containerRef.clientHeight + 60;
+      }
+
+      const colLeft = colWindow.colOffsets[nextVisColIdx] ?? 0;
+      const colRight = colWindow.colOffsets[nextVisColIdx + 1] ?? colLeft;
+      const availWidth = Math.max(200, containerRef.clientWidth - GUTTER_WIDTH);
+      if (colLeft < containerRef.scrollLeft) {
+        containerRef.scrollLeft = colLeft;
+      } else if (colRight > containerRef.scrollLeft + availWidth) {
+        containerRef.scrollLeft = colRight - availWidth;
       }
     }
   }
@@ -1105,7 +1123,7 @@
     // Cap scan at 5,000 cells for instant UI feedback
     let scanned = 0;
     for (let r = b.rMin; r <= b.rMax && scanned < 5000; r++) {
-      const row = processedRows[r];
+      const row = getDisplayRow(r);
       if (!row) continue;
       for (let c = b.cMin; c <= b.cMax && scanned < 5000; c++) {
         scanned++;
@@ -1144,7 +1162,7 @@
     if (b) {
       const lines: string[] = [];
       for (let r = b.rMin; r <= b.rMax; r++) {
-        const row = processedRows[r];
+        const row = getDisplayRow(r);
         if (!row) continue;
         const vals: string[] = [];
         for (let c = b.cMin; c <= b.cMax; c++) {
@@ -1259,7 +1277,7 @@
               Result {mIdx + 1} ({mRes.error ? 'err' : isCmd ? `${countVal} affected` : `${countVal} rows`})
             </span>
             {#if mRes.truncated || mRes.capped_at}
-              <span class="px-1 py-0.2 rounded bg-amber-950/70 border border-amber-800/70 text-[9px] text-amber-300" title="Capped at {mRes.capped_at || '5k'} rows">
+              <span class="px-1 py-0.5 rounded bg-amber-950/70 border border-amber-800/70 text-[9px] text-amber-300" title="Capped at {mRes.capped_at || '5k'} rows">
                 Capped
               </span>
             {/if}
@@ -1271,7 +1289,7 @@
           type="button"
           onclick={() => {
             const tab = appState.addTab(`Result ${(currentTab.activeResultIndex || 0) + 1}`, currentTab.sql || '');
-            tab.activeResult = JSON.parse(JSON.stringify(result));
+            appState.patchTab(tab.id, { activeResult: structuredClone($state.snapshot(result)) });
             appState.saveTabsState();
           }}
           class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[10px] font-mono shrink-0 transition"
@@ -1433,7 +1451,7 @@
           </span>
           <button
             onclick={() => appState.commitStagedEdits()}
-            class="ml-1 px-1.5 py-0.2 rounded bg-amber-500 text-slate-950 font-bold hover:bg-amber-400 text-[10px] transition"
+            class="ml-1 px-1.5 py-0.5 rounded bg-amber-500 text-slate-950 font-bold hover:bg-amber-400 text-[10px] transition"
           >
             Save All
           </button>
@@ -1487,61 +1505,7 @@
       </div>
 
       <!-- Column Picker Dropdown -->
-      <div class="relative">
-        <button
-          id="btn-col-picker"
-          onclick={(e) => { e.stopPropagation(); showColPicker = !showColPicker; }}
-          class="h-6 px-2 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-300 border border-slate-700/80 hover:border-slate-600 flex items-center space-x-1 text-[11px] transition"
-          title="Toggle column visibility"
-          aria-expanded={showColPicker}
-          aria-controls="col-picker-dropdown"
-        >
-          <Icon name="columns" class="w-3 h-3 text-sky-400" />
-          <span>Columns (<span id="col-picker-count-badge">{visibleColumns.length}</span>/{allColumns.length})</span>
-          <Icon name="chevron-down" class="w-2.5 h-2.5 text-slate-400" />
-        </button>
-
-        {#if showColPicker}
-          <button
-            tabindex="-1"
-            aria-label="Close"
-            class="fixed inset-0 z-30 bg-transparent cursor-default"
-            onclick={() => (showColPicker = false)}
-          ></button>
-          <div
-            id="col-picker-dropdown"
-            use:viewportFit
-            class="absolute right-0 mt-1 w-56 bg-[#0f172a] border border-slate-700/90 rounded-lg shadow-2xl z-40 p-2 text-xs space-y-2 animate-in fade-in duration-100"
-          >
-            <input
-              id="col-picker-search"
-              type="text"
-              bind:value={colPickerSearch}
-              placeholder="Search columns..."
-              class="w-full bg-[#090d16] border border-slate-700/80 rounded px-2 py-1 text-xs text-slate-100 font-mono focus:outline-none"
-            />
-            <div class="flex items-center justify-between text-[10px] text-sky-400 px-1">
-              <button onclick={() => appState.showAllColumns()} class="hover:underline">Show All</button>
-              <button onclick={() => appState.hideAllColumns(allColumns)} class="hover:underline">Hide All</button>
-            </div>
-            <div id="col-picker-list" class="max-h-48 overflow-y-auto space-y-1 py-1 divide-y divide-slate-800/40">
-              {#each allColumns as col}
-                {#if !colPickerSearch || col.toLowerCase().includes(colPickerSearch.toLowerCase())}
-                  <label class="flex items-center space-x-2 py-1 px-1 rounded hover:bg-slate-800 cursor-pointer text-slate-300 font-mono text-[11px]">
-                    <input
-                      type="checkbox"
-                      checked={!hiddenCols.includes(col)}
-                      onchange={() => appState.toggleColumnHidden(col)}
-                      class="rounded bg-[#090d16] border-slate-700 text-sky-500 focus:ring-0"
-                    />
-                    <span class="truncate">{col}</span>
-                  </label>
-                {/if}
-              {/each}
-            </div>
-          </div>
-        {/if}
-      </div>
+      <GridColumnPicker {allColumns} visibleCount={visibleColumns.length} {hiddenCols} />
 
       <!-- Export Dropdown -->
       <div id="export-csv-dropdown-container" class="relative">
@@ -1647,218 +1611,25 @@
 
   <!-- TablePlus-style Filter Bar (Table Viewer: Pills / WHERE; Query Tab: Client-side Pills) -->
   {#if isFilterOpen && (currentTab?.isTableViewer || (result?.columns && result.columns.length > 0))}
-    <div class="min-h-9 bg-[#0b0f19] border-b border-slate-800 px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs select-none shrink-0 animate-in fade-in duration-100">
-      <div class="flex flex-wrap items-center gap-2 flex-1 min-w-0">
-        {#if currentTab?.isTableViewer}
-          <!-- Mode Toggle: Pills vs WHERE -->
-          <div class="inline-flex rounded border border-slate-700/80 bg-[#090d16] p-0.5 select-none" role="group">
-            <button
-              type="button"
-              onclick={() => appState.setFilterMode('pills')}
-              class="px-2 py-0.5 text-[11px] font-semibold rounded transition {currentTab.filterMode !== 'raw' ? 'bg-sky-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-white'}"
-              title="Filter by column pills"
-            >
-              Pills
-            </button>
-            <button
-              type="button"
-              onclick={() => appState.setFilterMode('raw')}
-              class="px-2 py-0.5 text-[11px] font-semibold rounded transition {currentTab.filterMode === 'raw' ? 'bg-sky-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-white'}"
-              title="Freeform SQL WHERE expression"
-            >
-              WHERE
-            </button>
-          </div>
-        {:else}
-          <span class="px-1.5 py-0.5 bg-sky-950/80 text-sky-400 border border-sky-800/80 rounded font-mono text-[10px] font-bold tracking-wider select-none shrink-0">
-            FILTER
-          </span>
-        {/if}
+    <GridFilterBar
+      {currentTab}
+      {allColumns}
+      {hasActiveFilter}
+      {hasFilterEntries}
+      onToggleFilterBar={toggleFilterBar}
+    />
+  {/if}
 
-        {#if currentTab?.isTableViewer && currentTab.filterMode === 'raw'}
-          <!-- Freeform SQL WHERE Expression Input -->
-          <div class="flex-1 flex items-center space-x-1.5 min-w-[260px]">
-            <span class="px-1.5 py-0.5 bg-sky-950 text-sky-400 border border-sky-800 rounded font-mono text-[10px] font-bold tracking-wider select-none shrink-0">
-              WHERE
-            </span>
-            <div class="relative flex-1 flex items-center">
-              <input
-                id="table-filter-raw-input"
-                type="text"
-                value={currentTab.filterRaw || ''}
-                oninput={(e) => appState.setFilterRaw((e.target as HTMLInputElement).value)}
-                onkeydown={(e) => {
-                  if (e.key === 'Enter') appState.applyTableFilter();
-                  if (e.key === 'Escape') {
-                    appState.setFilterRaw('');
-                    (e.target as HTMLInputElement).blur();
-                  }
-                }}
-                placeholder="e.g. status = 'active' AND (views > 100 OR is_featured = 1)"
-                class="w-full bg-[#090d16] text-slate-100 placeholder-slate-500 border border-[#334155] focus:border-sky-400 pl-2.5 pr-7 py-1 rounded outline-none font-mono text-xs ring-1 ring-transparent focus:ring-sky-500/30 transition"
-              />
-              {#if currentTab.filterRaw}
-                <button
-                  type="button"
-                  onclick={() => appState.setFilterRaw('')}
-                  class="absolute right-2 text-slate-500 hover:text-slate-200 text-xs px-1 rounded transition"
-                  title="Clear input (Esc)"
-                >
-                  <Icon name="x" class="w-3 h-3" />
-                </button>
-              {/if}
-            </div>
-            <button
-              type="button"
-              onclick={() => appState.applyTableFilter()}
-              class="px-2.5 py-1 rounded bg-sky-600 hover:bg-sky-500 text-white font-semibold text-[11px] transition shrink-0"
-            >
-              Apply
-            </button>
-          </div>
-        {:else}
-          <!-- Pills Mode: List of condition pills + '+ AND' button -->
-          <div class="flex flex-wrap items-center gap-1.5">
-            {#each currentTab?.filterPills || [] as pill, idx}
-              {@const isUnary = pill.op === 'IS NULL' || pill.op === 'IS NOT NULL'}
-              <div class="inline-flex items-center space-x-1 bg-[#090d16] border border-sky-800/80 rounded px-1.5 py-0.5 text-[11px] font-mono shadow-sm">
-                <!-- Column Select -->
-                <select
-                  value={pill.col}
-                  onchange={(e) => {
-                    appState.updateFilterPill(idx, { col: (e.target as HTMLSelectElement).value });
-                  }}
-                  class="bg-transparent text-sky-300 font-bold outline-none cursor-pointer text-[11px] py-0.5 border-none"
-                >
-                  {#each allColumns as col}
-                    <option value={col} class="bg-[#0f172a] text-slate-200">{col}</option>
-                  {/each}
-                </select>
-
-                <!-- Operator Select -->
-                <select
-                  value={pill.op}
-                  onchange={(e) => {
-                    const newOp = (e.target as HTMLSelectElement).value as FilterPill['op'];
-                    appState.updateFilterPill(idx, { op: newOp });
-                  }}
-                  class="bg-transparent text-sky-400 font-semibold outline-none cursor-pointer text-[11px] py-0.5 border-none"
-                >
-                  <option value="=" class="bg-[#0f172a] text-slate-200">=</option>
-                  <option value="!=" class="bg-[#0f172a] text-slate-200">!=</option>
-                  <option value="LIKE" class="bg-[#0f172a] text-slate-200">LIKE</option>
-                  <option value="NOT LIKE" class="bg-[#0f172a] text-slate-200">NOT LIKE</option>
-                  <option value=">" class="bg-[#0f172a] text-slate-200">&gt;</option>
-                  <option value="<" class="bg-[#0f172a] text-slate-200">&lt;</option>
-                  <option value=">=" class="bg-[#0f172a] text-slate-200">&gt;=</option>
-                  <option value="<=" class="bg-[#0f172a] text-slate-200">&lt;=</option>
-                  <option value="IN" class="bg-[#0f172a] text-slate-200">IN</option>
-                  <option value="NOT IN" class="bg-[#0f172a] text-slate-200">NOT IN</option>
-                  <option value="BETWEEN" class="bg-[#0f172a] text-slate-200">BETWEEN</option>
-                  <option value="IS NULL" class="bg-[#0f172a] text-slate-200">IS NULL</option>
-                  <option value="IS NOT NULL" class="bg-[#0f172a] text-slate-200">IS NOT NULL</option>
-                </select>
-
-                <!-- Value Input (hidden if IS NULL / IS NOT NULL) -->
-                {#if !isUnary}
-                  <input
-                    id="grid-filter-pill-val-{idx}"
-                    type="text"
-                    value={pill.val}
-                    oninput={(e) => {
-                      appState.updateFilterPill(idx, { val: (e.target as HTMLInputElement).value });
-                    }}
-                    onkeydown={(e) => {
-                      if (e.key === 'Enter' && currentTab?.isTableViewer) appState.applyTableFilter();
-                    }}
-                    placeholder={pill.op === 'LIKE' || pill.op === 'NOT LIKE' ? 'substring or %' : (pill.op === 'IN' || pill.op === 'NOT IN' ? '1, 2, 3' : 'val')}
-                    class="bg-transparent text-slate-100 font-mono text-[11px] outline-none px-1 py-0.5 w-20 focus:w-36 transition-all border-b border-transparent focus:border-sky-400"
-                  />
-                {/if}
-
-                <!-- Remove Pill Button -->
-                <button
-                  type="button"
-                  onclick={() => appState.removeFilterPill(idx)}
-                  class="text-slate-500 hover:text-rose-400 p-0.5 transition"
-                  title="Remove condition"
-                >
-                  <Icon name="x" class="w-3 h-3" />
-                </button>
-              </div>
-            {/each}
-
-            <!-- + AND Button -->
-            <button
-              type="button"
-              onclick={() => appState.addFilterPill()}
-              class="text-xs text-slate-400 hover:text-sky-300 hover:bg-slate-800 px-2 py-0.5 rounded border border-dashed border-slate-700 transition flex items-center space-x-1"
-              title="Add condition (+ AND)"
-            >
-              <Icon name="plus" class="w-3 h-3 text-sky-400" />
-              <span>AND</span>
-            </button>
-
-            {#if currentTab?.isTableViewer && currentTab.filterPills && currentTab.filterPills.length > 0}
-              <button
-                type="button"
-                onclick={() => appState.applyTableFilter()}
-                class="px-2 py-0.5 rounded bg-sky-600 hover:bg-sky-500 text-white font-semibold text-[11px] transition"
-              >
-                Apply
-              </button>
-            {/if}
-          </div>
-        {/if}
-
-        <!-- Active Filter Indicator Badge -->
-        {#if currentTab?.isTableViewer ? currentTab.appliedFilter : hasActiveFilter}
-          <span class="px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-950 text-emerald-300 border border-emerald-700 flex items-center space-x-1" title="Active filter applied">
-            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-            <span>Filtered</span>
-          </span>
-        {/if}
-      </div>
-
-      <!-- Right side: Clear Filter & Open in SQL Tab -->
-      <div class="flex items-center space-x-2 shrink-0">
-        {#if hasFilterEntries}
-          <button
-            type="button"
-            onclick={() => appState.clearTableFilter()}
-            class="text-[11px] text-slate-400 hover:text-rose-400 transition underline"
-            title="Clear all filters"
-          >
-            Clear Filter
-          </button>
-        {/if}
-
-        {#if currentTab?.isTableViewer}
-          <button
-            type="button"
-            onclick={() => appState.handoffTableQueryToEditor()}
-            class="h-6 px-2 rounded bg-[#1e293b] hover:bg-slate-700 text-sky-400 hover:text-sky-300 border border-[#334155] flex items-center space-x-1 text-[11px] transition font-mono"
-            title="Open filtered query in full SQL Editor"
-          >
-            <Icon name="file-code" class="w-3 h-3" />
-            <span>SQL</span>
-          </button>
-        {/if}
-
-        <button
-          type="button"
-          onclick={toggleFilterBar}
-          class="h-6 w-6 rounded bg-[#1e293b] hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700/80 hover:border-slate-600 flex items-center justify-center transition"
-          title="Hide filter bar"
-        >
-          <Icon name="x" class="w-3.5 h-3.5" />
-        </button>
-      </div>
+  <!-- Non-blocking Streaming Indicator while chunks arrive into an already-visible grid -->
+  {#if isExecuting && result && result.columns && result.columns.length > 0}
+    <div class="px-3 py-1 bg-sky-950/50 border-b border-sky-800/60 flex items-center space-x-2 text-[11px] font-mono text-sky-300 shrink-0">
+      <Icon name="refresh-cw" class="w-3 h-3 animate-spin text-sky-400" />
+      <span>Streaming rows ({(result.rows || []).length.toLocaleString()} loaded)...</span>
     </div>
   {/if}
 
   <!-- Data Grid Virtual Table -->
-  {#if isExecuting}
+  {#if isExecuting && !(result && result.columns && result.columns.length > 0)}
     <div class="flex-1 flex flex-col items-center justify-center p-8 space-y-3">
       <Icon name="refresh-cw" class="w-7 h-7 text-sky-400 animate-spin" />
       <span class="text-xs text-slate-300 font-mono">Executing query on {appState.currentDatabase}...</span>
@@ -1927,12 +1698,26 @@
   {:else if result?.columns && result.columns.length > 0}
     <div
       bind:this={containerRef}
+      role="grid"
+      aria-label="Query results grid"
       onscroll={onScroll}
       onkeydown={handleGridKeydown}
       tabindex="0"
       class="flex-1 overflow-auto relative border-t border-[#1e293b] outline-none"
     >
-      <table id="results-table" class="border-collapse text-left font-mono text-xs w-auto">
+      <table id="results-table" class="border-collapse text-left font-mono text-xs table-fixed" style="width: {colWindow.totalWidth}px;">
+        <colgroup>
+          <col style="width: 64px;" />
+          {#if colWindow.leftSpacerWidth > 0}
+            <col style="width: {colWindow.leftSpacerWidth}px;" />
+          {/if}
+          {#each windowedColumnEntries as entry (entry.origIdx)}
+            <col style="width: {columnWidths[entry.colName] || 160}px;" />
+          {/each}
+          {#if colWindow.rightSpacerWidth > 0}
+            <col style="width: {colWindow.rightSpacerWidth}px;" />
+          {/if}
+        </colgroup>
         <!-- Sticky Header -->
         <thead class="sticky top-0 z-20 bg-[#0f172a] border-b border-[#334155] shadow-sm select-none">
           <tr>
@@ -1948,13 +1733,21 @@
                 <span>#</span>
               </div>
             </th>
-            {#each visibleColumns as col}
-              {@const colName = getColName(col)}
-              {@const colType = resolveColType(col)}
-              {@const isPK = isColPK(col)}
+            {#if colWindow.leftSpacerWidth > 0}
+              <th aria-hidden="true" style="padding:0; border:0;"></th>
+            {/if}
+            {#each windowedColumnEntries as { colName, colType, isPK } (colName)}
               <th
+                tabindex="0"
+                aria-sort={effectiveSortCol === colName ? (effectiveSortDir === 'ASC' ? 'ascending' : 'descending') : 'none'}
                 onclick={() => handleHeaderSort(colName)}
-                class="px-3 py-1.5 font-semibold text-slate-200 border-r border-[#1e293b] whitespace-nowrap bg-[#0f172a] text-[11px] tracking-tight hover:bg-slate-800 cursor-pointer transition-colors"
+                onkeydown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleHeaderSort(colName);
+                  }
+                }}
+                class="px-3 py-1.5 font-semibold text-slate-200 border-r border-[#1e293b] whitespace-nowrap bg-[#0f172a] text-[11px] tracking-tight hover:bg-slate-800 cursor-pointer transition-colors focus:outline-none focus:ring-1 focus:ring-sky-400"
               >
                 <div class="flex items-center space-x-1.5">
                   {#if isPK}
@@ -1962,7 +1755,7 @@
                   {/if}
                   <span class="font-mono text-slate-100">{colName}</span>
                   {#if colType}
-                    <span class="text-[9px] font-mono text-slate-400 bg-slate-800 px-1 py-0.2 rounded border border-slate-700 uppercase">
+                    <span class="text-[9px] font-mono text-slate-400 bg-slate-800 px-1 py-0.5 rounded border border-slate-700 uppercase">
                       {colType}
                     </span>
                   {/if}
@@ -1972,6 +1765,9 @@
                 </div>
               </th>
             {/each}
+            {#if colWindow.rightSpacerWidth > 0}
+              <th aria-hidden="true" style="padding:0; border:0;"></th>
+            {/if}
           </tr>
         </thead>
 
@@ -2001,12 +1797,10 @@
                     <Icon name="x" class="w-3.5 h-3.5" />
                   </button>
                 </td>
-                {#each visibleColumns as col}
-                  {@const colName = getColName(col)}
-                  {@const colType = resolveColType(col)}
-                  {@const nullable = isColNullable(col)}
-                  {@const enumVals = resolveEnumValues(col, tableMeta)}
-                  {@const kind = classifyColumnType(colType, enumVals)}
+                {#if colWindow.leftSpacerWidth > 0}
+                  <td aria-hidden="true" style="padding:0; border:0;"></td>
+                {/if}
+                {#each windowedColumnEntries as { origIdx: cIdx, colName, nullable, enumVals, kind } (cIdx)}
                   <td class="px-2 py-0.5 border-r border-sky-800/40">
                     {#if kind.isBool}
                       <select
@@ -2067,26 +1861,29 @@
                     {/if}
                   </td>
                 {/each}
+                {#if colWindow.rightSpacerWidth > 0}
+                  <td aria-hidden="true" style="padding:0; border:0;"></td>
+                {/if}
               </tr>
             {/each}
           {/if}
 
           {#if topSpacerHeight > 0}
             <tr style="height: {topSpacerHeight}px; pointer-events: none;">
-              <td colspan={totalCols} style="padding:0; border:0; height:{topSpacerHeight}px;"></td>
+              <td colspan={renderedColCount} style="padding:0; border:0; height:{topSpacerHeight}px;"></td>
             </tr>
           {/if}
 
-          {#if processedRows.length === 0}
+          {#if totalRows === 0}
             <tr>
-              <td colspan={totalCols} class="p-12 text-center text-slate-500 italic text-xs">
+              <td colspan={renderedColCount} class="p-12 text-center text-slate-500 italic text-xs">
                 Zero records returned.
               </td>
             </tr>
           {:else}
             {#each visibleRows as rowItem (rowItem.origIdx)}
               {@const isRowSelected = selectedRowIndex === rowItem.origIdx}
-              {@const isChecked = selectedRowIndices.includes(rowItem.origIdx)}
+              {@const isChecked = selectedRowSet.has(rowItem.origIdx)}
               <tr
                 onclick={() => (selectedRowIndex = rowItem.origIdx)}
                 class="border-b border-[#1e293b]/60 transition-colors h-7 {
@@ -2115,11 +1912,12 @@
                 </td>
 
                 <!-- Cells -->
-                {#each visibleColumnEntries as { col, origIdx: cIdx }, visColIdx (cIdx)}
+                {#if colWindow.leftSpacerWidth > 0}
+                  <td aria-hidden="true" style="padding:0; border:0;"></td>
+                {/if}
+                {#each windowedColumnEntries as { col, origIdx: cIdx, colName, colType, nullable, enumVals, kind, showUuidPreset, hasAnyPreset, fk }, localColIdx (cIdx)}
+                  {@const visColIdx = colWindow.startColIdx + localColIdx}
                   {@const dispRowIdx = rowItem.displayIdx}
-                  {@const colName = getColName(col)}
-                  {@const colType = resolveColType(col)}
-                  {@const nullable = isColNullable(col)}
                   {@const cellVal = cIdx >= 0 ? rowItem.data[cIdx] : undefined}
                   {@const formatted = formatCellValue(cellVal)}
                   {@const isStaged = effectiveTable && cIdx >= 0 ? isCellStaged(effectiveTable, rowItem.data, rowItem.origIdx, cIdx) : false}
@@ -2127,18 +1925,14 @@
                   {@const isCellSelected = selectedCell?.rIdx === rowItem.origIdx && selectedCell?.cIdx === cIdx}
                   {@const inRange = isCellInRange(dispRowIdx, visColIdx)}
                   {@const isEditingThis = editingCell && editingCell.rIdx === rowItem.origIdx && editingCell.cIdx === cIdx}
-                  {@const fk = fkMap.get(colName)}
-                  {@const enumVals = resolveEnumValues(col, tableMeta)}
-                  {@const kind = classifyColumnType(colType, enumVals)}
                   {@const isBool = kind.isBool}
                   {@const isDateLike = kind.isDateTime}
                   {@const fkListId = fk ? `fk-datalist-${rowItem.origIdx}-${cIdx}` : undefined}
-                  {@const fkOpts = fk ? fkDatalistCache[`${fk.referenced_table}.${fk.referenced_column}`] || [] : []}
+                  {@const fkOpts = fk ? fkDatalistCache[fkCacheKey(fk)] || [] : []}
                   {@const isJsonLike = formatted.type === 'json' || kind.isJson}
-                  {@const showUuidPreset = kind.isUuid || (kind.isString && (!kind.maxLength || kind.maxLength >= 36))}
-                  {@const hasAnyPreset = nullable || kind.isString || kind.isDateTime || kind.isDate || showUuidPreset}
 
                   <td
+                    role="gridcell"
                     onclick={(e) => {
                       selectedCell = { rIdx: rowItem.origIdx, cIdx };
                       selectedRowIndex = rowItem.origIdx;
@@ -2151,7 +1945,7 @@
                     }}
                     ondblclick={() => startCellEdit(rowItem.origIdx, cIdx, cellVal)}
                     oncontextmenu={(e) => handleCellContextMenu(e, rowItem.origIdx, cIdx, cellVal)}
-                    class="px-3 py-1 border-r border-[#1e293b]/40 whitespace-nowrap max-w-sm {isEditingThis ? 'overflow-visible z-30' : 'truncate'} {getCellClass(formatted.type)} cursor-cell hover:bg-sky-900/30 transition-colors relative {
+                    class="px-3 py-1 border-r border-[#1e293b]/40 whitespace-nowrap max-w-sm {isEditingThis ? 'overflow-visible z-30' : 'truncate'} {getCellClass(formatted.type)} cursor-cell hover:bg-sky-900/30 relative {
                       isStaged ? 'bg-amber-950/40 text-amber-200 font-semibold ring-1 ring-amber-500' : isFlashed ? 'bg-emerald-950/60 ring-1 ring-emerald-400' : isCellSelected ? 'ring-1 ring-inset ring-sky-400/80 bg-sky-900/20' : inRange ? 'bg-sky-900/25' : ''
                     }"
                     title="{formatted.display}{canEdit ? ' (Double-click to edit, right-click for filters)' : ''}"
@@ -2310,19 +2104,19 @@
                           class="absolute left-0 top-full mt-0.5 z-40 flex items-center space-x-1 bg-[#0b0f19] border border-slate-700 rounded px-1.5 py-0.5 shadow-xl text-[9.5px] font-mono"
                         >
                           {#if nullable}
-                            <button type="button" onclick={() => applyEditPreset('NULL', rowItem.origIdx, cIdx)} class="px-1 py-0.2 rounded bg-rose-950/70 hover:bg-rose-900 text-rose-300 border border-rose-800">NULL</button>
+                            <button type="button" onclick={() => applyEditPreset('NULL', rowItem.origIdx, cIdx)} class="px-1 py-0.5 rounded bg-rose-950/70 hover:bg-rose-900 text-rose-300 border border-rose-800">NULL</button>
                           {/if}
                           {#if kind.isString}
-                            <button type="button" onclick={() => applyEditPreset('EMPTY', rowItem.origIdx, cIdx)} class="px-1 py-0.2 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700">''</button>
+                            <button type="button" onclick={() => applyEditPreset('EMPTY', rowItem.origIdx, cIdx)} class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700">''</button>
                           {/if}
                           {#if kind.isDateTime}
-                            <button type="button" onclick={() => applyEditPreset('NOW', rowItem.origIdx, cIdx)} class="px-1 py-0.2 rounded bg-sky-950/70 hover:bg-sky-900 text-sky-300 border border-sky-800">NOW</button>
+                            <button type="button" onclick={() => applyEditPreset('NOW', rowItem.origIdx, cIdx)} class="px-1 py-0.5 rounded bg-sky-950/70 hover:bg-sky-900 text-sky-300 border border-sky-800">NOW</button>
                           {/if}
                           {#if kind.isDate || kind.isDateTime}
-                            <button type="button" onclick={() => applyEditPreset('DATE', rowItem.origIdx, cIdx)} class="px-1 py-0.2 rounded bg-sky-950/70 hover:bg-sky-900 text-sky-300 border border-sky-800">DATE</button>
+                            <button type="button" onclick={() => applyEditPreset('DATE', rowItem.origIdx, cIdx)} class="px-1 py-0.5 rounded bg-sky-950/70 hover:bg-sky-900 text-sky-300 border border-sky-800">DATE</button>
                           {/if}
                           {#if showUuidPreset}
-                            <button type="button" onclick={() => applyEditPreset('UUID', rowItem.origIdx, cIdx)} class="px-1 py-0.2 rounded bg-purple-950/70 hover:bg-purple-900 text-purple-300 border border-purple-800">UUID</button>
+                            <button type="button" onclick={() => applyEditPreset('UUID', rowItem.origIdx, cIdx)} class="px-1 py-0.5 rounded bg-purple-950/70 hover:bg-purple-900 text-purple-300 border border-purple-800">UUID</button>
                           {/if}
                         </div>
                       {/if}
@@ -2375,13 +2169,16 @@
                     {/if}
                   </td>
                 {/each}
+                {#if colWindow.rightSpacerWidth > 0}
+                  <td aria-hidden="true" style="padding:0; border:0;"></td>
+                {/if}
               </tr>
             {/each}
           {/if}
 
           {#if bottomSpacerHeight > 0}
             <tr style="height: {bottomSpacerHeight}px; pointer-events: none;">
-              <td colspan={totalCols} style="padding:0; border:0; height:{bottomSpacerHeight}px;"></td>
+              <td colspan={renderedColCount} style="padding:0; border:0; height:{bottomSpacerHeight}px;"></td>
             </tr>
           {/if}
         </tbody>
@@ -2390,254 +2187,23 @@
 
     <!-- Cell Details Drawer (expandable) -->
     {#if showDetailDrawer && selectedCell && result?.rows[selectedCell.rIdx]}
-      {@const val = result.rows[selectedCell.rIdx][selectedCell.cIdx]}
-      {@const colObj = result.columns[selectedCell.cIdx]}
-      {@const colName = allColumns[selectedCell.cIdx]}
-      {@const colType = resolveColType(colObj)}
-      {@const safeValStr = val === null ? 'NULL' : typeof val === 'object' ? JSON.stringify(val, null, 2) : (() => {
-        const s = String(val ?? '');
-        if (detailPrettyJson) {
-          try { return JSON.stringify(JSON.parse(s), null, 2); } catch { return s; }
-        }
-        return s;
-      })()}
-      <div class="h-36 bg-[#0b0f19] border-t border-[#334155] flex flex-col p-2.5 z-20 shrink-0">
-        <div class="flex items-center justify-between text-[11px] text-slate-400 mb-1.5 select-none">
-          <div class="flex items-center space-x-2">
-            <span class="font-bold text-slate-200">
-              Cell: <span class="text-sky-400 font-mono">{colName}</span>
-            </span>
-            {#if colType}
-              <span class="px-1.5 py-0.2 rounded bg-slate-900 border border-slate-800 font-mono text-[9.5px] uppercase text-slate-400">
-                {colType}
-              </span>
-            {/if}
-            <span class="text-[10px] font-mono text-slate-500">Row #{selectedCell.rIdx + 1}</span>
-          </div>
-          <div class="flex items-center space-x-2">
-            <button
-              type="button"
-              onclick={() => (detailPrettyJson = !detailPrettyJson)}
-              class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[10px] {detailPrettyJson ? 'text-purple-300 border-purple-700' : 'text-slate-300'}"
-            >
-              {detailPrettyJson ? 'Raw' : 'Format JSON'}
-            </button>
-            <button
-              type="button"
-              onclick={() => {
-                const rawCopy = val === null || val === undefined ? '' : typeof val === 'object' ? JSON.stringify(val, null, 2) : String(val);
-                copyText(rawCopy);
-                appState.showToast('Copied cell value', 'info');
-              }}
-              class="hover:text-white flex items-center space-x-1"
-            >
-              <Icon name="copy" class="w-3 h-3" />
-              <span>Copy</span>
-            </button>
-          </div>
-        </div>
-        <textarea
-          readonly
-          class="flex-1 bg-[#090d16] border border-[#1e293b] rounded p-2 text-xs font-mono text-slate-200 resize-none outline-none"
-          value={safeValStr}
-        ></textarea>
-      </div>
+      <GridCellDetailDrawer
+        val={result.rows[selectedCell.rIdx][selectedCell.cIdx]}
+        colName={allColumns[selectedCell.cIdx]}
+        colType={resolveColType(result.columns[selectedCell.cIdx])}
+        rowIndex={selectedCell.rIdx}
+      />
     {/if}
 
     <!-- Bottom Status & Pagination Bar -->
-    <div class="h-8 bg-[#0b0f19] border-t border-[#334155] px-4 flex items-center justify-between text-xs text-slate-400 font-mono select-none shrink-0">
-      <div id="grid-bottom-stats" class="flex items-center space-x-3">
-        <span class="flex items-center space-x-1.5">
-          <Icon name="table" class="w-3.5 h-3.5 text-sky-400" />
-          {#if currentTab?.isTableViewer && tableEffectiveTotal !== undefined && tableEffectiveTotal !== null}
-            {@const curPage = currentTab.currentPage || 1}
-            {@const pageSize = currentTab.pageSize || 25}
-            <span class="font-bold text-slate-200">
-              {totalRows > 0 ? `${((curPage - 1) * pageSize + 1).toLocaleString()}–${((curPage - 1) * pageSize + totalRows).toLocaleString()}` : '0'}
-            </span>
-            <span class="text-slate-500">
-              of {tableTotalIsExact ? '' : '~'}{tableEffectiveTotal.toLocaleString()} records
-            </span>
-          {:else}
-            <span class="font-bold text-slate-200">{totalRows.toLocaleString()}</span>
-            <span class="text-slate-500">records</span>
-            {#if currentTab?.manualTotalRows !== undefined && currentTab?.manualTotalRows !== null}
-              <span class="text-slate-600">•</span>
-              <span class="text-slate-400">Total:</span>
-              <span class="font-bold text-emerald-400">{currentTab.manualTotalRows.toLocaleString()}</span>
-              <span class="text-slate-500">records</span>
-            {:else if !currentTab?.isTableViewer && (totalRows > 0 || currentTab?.hasMoreStream)}
-              <button
-                onclick={() => appState.countQueryTotal(currentTab)}
-                disabled={currentTab?.isCountingTotal || isExecuting}
-                class="ml-1.5 px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-[10px] text-sky-400 hover:text-sky-300 border border-slate-700/80 transition flex items-center space-x-1"
-                title="Calculate exact total rows for this query via SELECT COUNT(*)"
-              >
-                <Icon name={currentTab?.isCountingTotal ? 'refresh-cw' : 'hash'} class="w-3 h-3 {currentTab?.isCountingTotal ? 'animate-spin text-sky-300' : ''}" />
-                <span>{currentTab?.isCountingTotal ? 'Counting...' : 'Count Total'}</span>
-              </button>
-            {/if}
-          {/if}
-        </span>
-        {#if result.duration_ms !== undefined}
-          <span class="text-slate-600">•</span>
-          <span class="flex items-center space-x-1">
-            <Icon name="clock" class="w-3 h-3 text-slate-500" />
-            <span class="text-slate-300">{result.duration_ms} ms</span>
-          </span>
-        {/if}
-      </div>
-
-      <!-- Pagination Controls for Table Viewer -->
-      {#if currentTab?.isTableViewer}
-        {@const pageSize = currentTab.pageSize || 25}
-        {@const curPage = currentTab.currentPage || 1}
-        {@const totalPages = typeof tableEffectiveTotal === 'number' && tableEffectiveTotal >= 0 ? Math.max(1, Math.ceil(tableEffectiveTotal / pageSize)) : null}
-        <div id="grid-pagination-bar" class="flex items-center space-x-2 text-[11px]">
-          <span class="text-slate-500">Page Size:</span>
-          <select
-            id="grid-page-size-select"
-            value={pageSize}
-            onchange={(e) => {
-              if (currentTab) {
-                currentTab.pageSize = Number((e.currentTarget as HTMLSelectElement).value);
-                currentTab.currentPage = 1;
-                appState.loadTableData(currentTab);
-              }
-            }}
-            class="bg-[#090d16] border border-[#334155] rounded px-1.5 py-0.5 text-slate-200 focus:outline-none"
-          >
-            <option value={25}>25</option>
-            <option value={50}>50</option>
-            <option value={100}>100</option>
-            <option value={250}>250</option>
-            <option value={500}>500</option>
-            <option value={1000}>1000</option>
-          </select>
-
-          <button
-            id="btn-page-first"
-            onclick={() => {
-              if (currentTab && curPage > 1) {
-                currentTab.currentPage = 1;
-                appState.loadTableData(currentTab);
-              }
-            }}
-            disabled={curPage <= 1}
-            class="px-2 py-1 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-30 border border-[#334155] text-slate-200 flex items-center justify-center transition"
-            title="First Page"
-          >
-            <Icon name="chevrons-left" class="w-3.5 h-3.5" />
-          </button>
-          <button
-            id="btn-page-prev"
-            onclick={() => {
-              if (currentTab && curPage > 1) {
-                currentTab.currentPage = curPage - 1;
-                appState.loadTableData(currentTab);
-              }
-            }}
-            disabled={curPage <= 1}
-            class="px-2 py-1 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-30 border border-[#334155] text-slate-200 flex items-center justify-center transition"
-            title="Previous Page"
-          >
-            <Icon name="chevron-left" class="w-3.5 h-3.5" />
-          </button>
-          <span class="flex items-center space-x-1 px-1 text-slate-300">
-            <span>Page</span>
-            <!-- Editable page jump: parity with the legacy pager, clamped to the valid range. -->
-            <input
-              id="grid-page-input"
-              type="number"
-              min="1"
-              max={tableTotalIsExact ? (totalPages ?? undefined) : undefined}
-              value={curPage}
-              onkeydown={(e) => {
-                if (e.key === 'Escape') {
-                  (e.currentTarget as HTMLInputElement).value = String(curPage);
-                  (e.currentTarget as HTMLInputElement).blur();
-                }
-              }}
-              onchange={(e) => {
-                const target = Number((e.currentTarget as HTMLInputElement).value);
-                if (!currentTab || !Number.isFinite(target)) return;
-                const clamped = Math.max(1, tableTotalIsExact && totalPages !== null ? Math.min(totalPages, Math.floor(target)) : Math.floor(target));
-                if (clamped === curPage) return;
-                currentTab.currentPage = clamped;
-                appState.loadTableData(currentTab);
-              }}
-              class="w-14 bg-[#090d16] border border-[#334155] rounded px-1 py-0.5 text-right text-slate-200 font-mono focus:outline-none focus:border-sky-500 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-              aria-label="Jump to page"
-            />
-            {#if totalPages}
-              <span>of <span id="grid-total-pages">{tableTotalIsExact ? '' : '~'}{totalPages.toLocaleString()}</span></span>
-            {:else if totalRows >= pageSize}
-              <span class="text-slate-400">({curPage}+)</span>
-            {/if}
-          </span>
-          <button
-            id="btn-page-next"
-            onclick={() => {
-              if (currentTab) {
-                currentTab.currentPage = curPage + 1;
-                appState.loadTableData(currentTab);
-              }
-            }}
-            disabled={totalRows < pageSize || (tableTotalIsExact && totalPages !== null && curPage >= totalPages)}
-            class="px-2 py-1 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-30 border border-[#334155] text-slate-200 flex items-center justify-center transition"
-            title="Next Page"
-          >
-            <Icon name="chevron-right" class="w-3.5 h-3.5" />
-          </button>
-          {#if totalPages !== null}
-            <button
-              id="btn-page-last"
-              onclick={() => {
-                if (currentTab && curPage < totalPages) {
-                  currentTab.currentPage = totalPages;
-                  appState.loadTableData(currentTab);
-                }
-              }}
-              disabled={tableTotalIsExact ? curPage >= totalPages : totalRows < pageSize}
-              class="px-2 py-1 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-30 border border-[#334155] text-slate-200 flex items-center justify-center transition"
-              title="Last Page"
-            >
-              <Icon name="chevrons-right" class="w-3.5 h-3.5" />
-            </button>
-          {/if}
-        </div>
-      {:else if result && result.rows && (result.rows.length >= (currentTab?.queryLimit || 1000) || (currentTab?.streamBatchOffset ?? 0) > 0 || currentTab?.hasMoreStream)}
-        {@const streamOff = currentTab?.streamBatchOffset || 0}
-        {@const batchLimit = currentTab?.queryLimit || 1000}
-        {@const batchLabel = batchLimit >= 1000 ? `${batchLimit / 1000}k` : `${batchLimit}`}
-        <!-- Query Stream Dynamic Batch Pager (ADR 0058) -->
-        <div class="flex items-center space-x-2 text-[11px]">
-          <span class="px-2 py-0.5 rounded bg-sky-950/80 border border-sky-800 text-sky-300 font-mono text-[10px] font-bold">
-            Batch #{Math.floor(streamOff / batchLimit) + 1} (Rows {(streamOff + 1).toLocaleString()}–{(streamOff + totalRows).toLocaleString()})
-          </span>
-          <button
-            onclick={() => appState.pageStreamBatch('prev')}
-            disabled={(currentTab?.streamBatchOffset || 0) <= 0 || isExecuting}
-            class="px-2 py-0.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-30 border border-[#334155] text-slate-200 transition"
-            title={`Load previous ${batchLabel} records`}
-          >
-            Prev {batchLabel}
-          </button>
-          <button
-            onclick={() => appState.pageStreamBatch('next')}
-            disabled={(!currentTab?.hasMoreStream && (result.rows?.length || 0) < batchLimit) || isExecuting}
-            class="px-2 py-0.5 rounded bg-[#1e293b] hover:bg-slate-700 disabled:opacity-30 border border-[#334155] text-slate-200 transition"
-            title={`Load next ${batchLabel} records`}
-          >
-            Next {batchLabel}
-          </button>
-        </div>
-      {:else}
-        <div class="text-[11px] text-slate-500">
-          Double-click to edit cell • Right-click for quick filters
-        </div>
-      {/if}
-    </div>
+    <GridFooterBar
+      {currentTab}
+      {result}
+      {totalRows}
+      {tableEffectiveTotal}
+      {tableTotalIsExact}
+      {isExecuting}
+    />
   {:else}
     <div class="flex-1 flex flex-col items-center justify-center p-8 space-y-3 text-slate-500 select-none">
       <Icon name="terminal" class="w-8 h-8 text-slate-600" />
@@ -2647,287 +2213,32 @@
 
   <!-- Cell Context Menu -->
   {#if contextMenu && contextMenu.open}
-    <div
-      id="grid-context-menu"
-      use:viewportFit={{ x: contextMenu.x, y: contextMenu.y }}
-      style="top: {contextMenu.y}px; left: {contextMenu.x}px;"
-      class="fixed z-50 w-60 bg-[#0f172a] border border-[#334155] rounded-lg shadow-2xl py-1 divide-y divide-slate-800 text-xs font-sans animate-in fade-in duration-75 select-none"
-    >
-      <div class="px-3 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider font-mono truncate">
-        Filter: {contextMenu.colName}
-      </div>
-
-      <div id="grid-ctx-filter-parent" class="py-1">
-        <div id="grid-ctx-filter-submenu">
-          <div id="grid-ctx-filter-options" class="space-y-0.5">
-            <button
-              onclick={() => applyQuickFilter('=')}
-              class="w-full text-left px-3 py-1 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-            >
-              <span class="w-4 text-center flex-shrink-0 font-mono font-bold text-sky-400">=</span>
-              <span class="truncate">Filter = '{String(contextMenu.cellValue ?? 'NULL')}'</span>
-            </button>
-            <button
-              onclick={() => applyQuickFilter('!=')}
-              class="w-full text-left px-3 py-1 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-            >
-              <span class="w-4 text-center flex-shrink-0 font-mono font-bold text-amber-400">!=</span>
-              <span class="truncate">Filter != '{String(contextMenu.cellValue ?? 'NULL')}'</span>
-            </button>
-            {#if contextMenu.cellValue !== null && contextMenu.cellValue !== undefined}
-              <div class="grid grid-cols-6 gap-1 px-3 py-1">
-                <button
-                  onclick={() => applyQuickFilter('<')}
-                  class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[10px] font-bold text-center"
-                  title="Less than"
-                >&lt;</button>
-                <button
-                  onclick={() => applyQuickFilter('<=')}
-                  class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[10px] font-bold text-center"
-                  title="Less or equal"
-                >&le;</button>
-                <button
-                  onclick={() => applyQuickFilter('>')}
-                  class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[10px] font-bold text-center"
-                  title="Greater than"
-                >&gt;</button>
-                <button
-                  onclick={() => applyQuickFilter('>=')}
-                  class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[10px] font-bold text-center"
-                  title="Greater or equal"
-                >&ge;</button>
-                <button
-                  onclick={() => applyQuickFilter('LIKE')}
-                  class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-purple-300 font-mono text-[10px] font-bold text-center"
-                  title="Filter LIKE '%{String(contextMenu.cellValue)}%'"
-                >%</button>
-                <button
-                  onclick={() => applyQuickFilter('NOT LIKE')}
-                  class="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-rose-300 font-mono text-[10px] font-bold text-center"
-                  title="Filter NOT LIKE '%{String(contextMenu.cellValue)}%'"
-                >!%</button>
-              </div>
-            {/if}
-            <div class="px-3 py-1 flex items-center justify-between gap-1.5">
-              <span class="text-[10px] text-slate-500">Null check</span>
-              <div class="flex items-center gap-1 text-[10px] font-mono">
-                <button
-                  onclick={() => applyQuickFilter('IS NULL')}
-                  class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-rose-300 font-medium"
-                >IS NULL</button>
-                <button
-                  onclick={() => applyQuickFilter('IS NOT NULL')}
-                  class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-emerald-300 font-medium"
-                >NOT NULL</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div id="grid-ctx-mutations-parent" class="py-1">
-        <div id="grid-ctx-table-mutations">
-          <div id="grid-ctx-insert-section">
-            <div id="grid-ctx-insert-options">
-              {#if canEdit}
-                {@const ctxColDef = result?.columns?.[contextMenu.cIdx]}
-                {@const ctxNullable = ctxColDef ? isColNullable(ctxColDef) : true}
-                {@const ctxEnumVals = ctxColDef ? resolveEnumValues(ctxColDef, tableMeta) : []}
-                {@const ctxKind = classifyColumnType(ctxColDef ? resolveColType(ctxColDef) : '', ctxEnumVals)}
-                {@const ctxShowUuid = ctxKind.isUuid || (ctxKind.isString && (!ctxKind.maxLength || ctxKind.maxLength >= 36))}
-                {@const ctxHasPresets = ctxNullable || ctxKind.isDateTime || ctxKind.isDate || ctxShowUuid}
-                <button
-                  onclick={() => {
-                    const { rIdx, cIdx, cellValue } = contextMenu!;
-                    closeContextMenu();
-                    startCellEdit(rIdx, cIdx, cellValue);
-                  }}
-                  class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-sky-300 font-medium"
-                >
-                  <Icon name="edit" class="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                  <span>Edit Cell (Inline)</span>
-                </button>
-                {#if ctxHasPresets}
-                  <div class="px-3 py-1 border-y border-slate-800/60 flex items-center justify-between gap-1 text-[10px] font-mono">
-                    <span class="text-slate-500">⚡ Insert:</span>
-                    <div class="flex items-center gap-1">
-                      {#if ctxNullable}
-                        <button onclick={() => { const { rIdx, cIdx } = contextMenu!; closeContextMenu(); applyEditPreset('NULL', rIdx, cIdx); }} class="px-1 rounded bg-slate-800 hover:bg-slate-700 text-rose-300">NULL</button>
-                      {/if}
-                      {#if ctxKind.isDateTime}
-                        <button onclick={() => { const { rIdx, cIdx } = contextMenu!; closeContextMenu(); applyEditPreset('NOW', rIdx, cIdx); }} class="px-1 rounded bg-slate-800 hover:bg-slate-700 text-sky-300">NOW</button>
-                      {/if}
-                      {#if ctxKind.isDate || ctxKind.isDateTime}
-                        <button onclick={() => { const { rIdx, cIdx } = contextMenu!; closeContextMenu(); applyEditPreset('DATE', rIdx, cIdx); }} class="px-1 rounded bg-slate-800 hover:bg-slate-700 text-emerald-300">TODAY</button>
-                      {/if}
-                      {#if ctxShowUuid}
-                        <button onclick={() => { const { rIdx, cIdx } = contextMenu!; closeContextMenu(); applyEditPreset('UUID', rIdx, cIdx); }} class="px-1 rounded bg-slate-800 hover:bg-slate-700 text-purple-300">UUID</button>
-                      {/if}
-                    </div>
-                  </div>
-                {/if}
-                {#if selectedRowIndices.length > 1}
-                  <button
-                    id="grid-ctx-btn-dup-nokey"
-                    onclick={() => {
-                      const indices = [...selectedRowIndices];
-                      closeContextMenu();
-                      duplicateMultipleRows(indices);
-                    }}
-                    class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-emerald-300 font-medium"
-                  >
-                    <Icon name="copy" class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    <span>Duplicate {selectedRowIndices.length} Rows</span>
-                  </button>
-                {:else}
-                  <div class="px-3 py-1 flex items-center justify-between gap-1.5">
-                    <span class="text-[11px] text-slate-400 flex items-center gap-1.5">
-                      <Icon name="copy" class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                      <span>Duplicate</span>
-                    </span>
-                    <div class="flex items-center gap-1 text-[10px]">
-                      <button
-                        id="grid-ctx-btn-dup-nokey"
-                        onclick={() => {
-                          duplicateRowAsDraft(contextMenu!.rIdx, true);
-                          closeContextMenu();
-                        }}
-                        class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-emerald-300 font-medium"
-                        title="Duplicate Row (Without Key)"
-                      >No Key</button>
-                      <button
-                        id="grid-ctx-btn-dup-key"
-                        onclick={() => {
-                          duplicateRowAsDraft(contextMenu!.rIdx, false);
-                          closeContextMenu();
-                        }}
-                        class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 font-medium"
-                        title="Duplicate Row (With Key)"
-                      >With Key</button>
-                    </div>
-                  </div>
-                {/if}
-                <button
-                  id="grid-ctx-btn-add-draft"
-                  onclick={() => {
-                    addDraftRow();
-                    closeContextMenu();
-                  }}
-                  class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-emerald-300"
-                >
-                  <Icon name="plus" class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                  <span>Add Row Draft</span>
-                </button>
-                <button
-                  id="grid-ctx-btn-delete-row"
-                  onclick={() => {
-                    if (selectedRowIndices.length > 1) {
-                      closeContextMenu();
-                      handleBatchDelete();
-                    } else {
-                      selectedRowIndex = contextMenu!.rIdx;
-                      handleDeleteCurrentRow();
-                      closeContextMenu();
-                    }
-                  }}
-                  class="w-full text-left px-3 py-1.5 hover:bg-rose-950/60 flex items-center space-x-2 text-rose-300"
-                >
-                  <Icon name="trash-2" class="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                  <span>{selectedRowIndices.length > 1 ? `Delete ${selectedRowIndices.length} Selected Rows` : 'Delete Selected Row(s)'}</span>
-                </button>
-              {/if}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="py-1">
-        <button
-          onclick={() => {
-            const { rIdx, cIdx, colName, cellValue } = contextMenu!;
-            closeContextMenu();
-            appState.openJsonCellModal(effectiveTable || undefined, rIdx, cIdx, colName, cellValue, !canEdit);
-          }}
-          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-        >
-          <Icon name="code" class="w-3.5 h-3.5 text-purple-400 shrink-0" />
-          <span>Open in JSON Editor</span>
-        </button>
-        <button
-          onclick={() => {
-            appState.recordInspectorRowIndex = contextMenu!.rIdx;
-            appState.isRecordInspectorOpen = true;
-            closeContextMenu();
-          }}
-          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-        >
-          <Icon name="eye" class="w-3.5 h-3.5 text-sky-400 shrink-0" />
-          <span>Inspect Record</span>
-        </button>
-        <button
-          id="grid-ctx-btn-copy-cell"
-          onclick={() => {
-            const cv = contextMenu!.cellValue;
-            copyText(cv === null || cv === undefined ? '' : typeof cv === 'object' ? JSON.stringify(cv, null, 2) : String(cv));
-            appState.showToast('Copied cell value to clipboard', 'info');
-            closeContextMenu();
-          }}
-          class="w-full text-left px-3 py-1.5 hover:bg-slate-800 flex items-center space-x-2 text-slate-200"
-        >
-          <Icon name="copy" class="w-3.5 h-3.5 text-slate-400 shrink-0" />
-          <span>Copy Cell Value</span>
-        </button>
-      </div>
-
-      <div id="grid-ctx-copy-parent" class="py-1">
-        <div id="grid-ctx-copy-submenu" class="px-3 py-1 flex items-center justify-between gap-1.5">
-          <span class="text-[11px] text-slate-400 shrink-0">
-            {selectedRowIndices.length > 1 ? `Copy ${selectedRowIndices.length}` : 'Copy Row'}
-          </span>
-          <div class="flex items-center gap-1 text-[10px] font-mono">
-            <button
-              id="grid-ctx-btn-copy-row-tsv"
-              onclick={() => {
-                if (selectedRowIndices.length > 1) copySelectedRows('tsv');
-                else copyRowAsTSV(contextMenu!.rIdx);
-                closeContextMenu();
-              }}
-              class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-emerald-300 font-medium"
-              title="Copy as TSV"
-            >TSV</button>
-            <button
-              id="grid-ctx-btn-copy-row-json"
-              onclick={() => {
-                if (selectedRowIndices.length > 1) copySelectedRows('json');
-                else copyRowAsJSON(contextMenu!.rIdx);
-                closeContextMenu();
-              }}
-              class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-amber-300 font-medium"
-              title="Copy as JSON"
-            >JSON</button>
-            <button
-              id="grid-ctx-btn-copy-row-md"
-              onclick={() => {
-                if (selectedRowIndices.length > 1) copySelectedRows('md');
-                else copyRowAsMarkdown(contextMenu!.rIdx);
-                closeContextMenu();
-              }}
-              class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-sky-300 font-medium"
-              title="Copy as Markdown"
-            >MD</button>
-            <button
-              id="grid-ctx-btn-copy-row-sql"
-              onclick={() => {
-                if (selectedRowIndices.length > 1) copySelectedRows('sql');
-                else copyRowAsInsertSQL(contextMenu!.rIdx);
-                closeContextMenu();
-              }}
-              class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-purple-300 font-medium"
-              title="Copy as INSERT SQL"
-            >SQL</button>
-          </div>
-        </div>
-      </div>
-    </div>
+    <GridContextMenu
+      {contextMenu}
+      result={result ?? null}
+      tableMeta={tableMeta ?? undefined}
+      effectiveTable={effectiveTable || ''}
+      {canEdit}
+      {selectedRowIndices}
+      {isColNullable}
+      {resolveColType}
+      {closeContextMenu}
+      {applyQuickFilter}
+      {startCellEdit}
+      {applyEditPreset}
+      {duplicateMultipleRows}
+      {duplicateRowAsDraft}
+      {addDraftRow}
+      {handleBatchDelete}
+      handleDeleteRowAt={(rIdx) => {
+        selectedRowIndex = rIdx;
+        handleDeleteCurrentRow();
+      }}
+      {copySelectedRows}
+      {copyRowAsTSV}
+      {copyRowAsJSON}
+      {copyRowAsMarkdown}
+      {copyRowAsInsertSQL}
+    />
   {/if}
 </div>

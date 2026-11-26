@@ -35,7 +35,7 @@ func (s *Server) handleInspectQuery(w http.ResponseWriter, r *http.Request) {
 		targetDB = sess.Schema().DatabaseName
 	}
 	if targetDB == "" {
-		targetDB = sess.DatabaseName
+		targetDB = sess.GetDatabaseName()
 	}
 	res, _, err := inspectAllStatements(req.SQL, sess.Environment, sess.DriverName, targetDB)
 	if err != nil {
@@ -56,6 +56,7 @@ func (s *Server) handleExplainQuery(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		SQL      string `json:"sql"`
 		Database string `json:"database"`
+		Analyze  bool   `json:"analyze"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.SQL == "" {
 		writeError(w, http.StatusBadRequest, "sql is required")
@@ -72,10 +73,13 @@ func (s *Server) handleExplainQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Database != "" {
-		if err := sess.Session.SelectDatabase(ctx, req.Database); err != nil {
+		if err := sess.UseDatabase(ctx, req.Database); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+	}
+	if req.Analyze {
+		ctx = driver.WithExplainAnalyze(ctx, true)
 	}
 
 	plan, err := sess.Session.Explain(ctx, explainSQL)
@@ -138,7 +142,7 @@ func (s *Server) handleAdviseQuery(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if req.Database != "" {
-		if err := sess.Session.SelectDatabase(ctx, req.Database); err != nil {
+		if err := sess.UseDatabase(ctx, req.Database); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}

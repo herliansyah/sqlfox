@@ -224,6 +224,26 @@ func (m *mockCrudSession) SelectDatabase(ctx context.Context, dbName string) err
 	return nil
 }
 
+func (m *mockCrudSession) InspectSchema(ctx context.Context, dbName string) (*driver.SchemaMetadata, error) {
+	return &driver.SchemaMetadata{}, nil
+}
+
+type mockCrudTx struct {
+	driver.TxSession
+	sess *mockCrudSession
+}
+
+func (tx *mockCrudTx) Exec(ctx context.Context, sql string, args ...any) (*driver.ExecResult, error) {
+	return tx.sess.Exec(ctx, sql, args...)
+}
+
+func (tx *mockCrudTx) Commit() error   { return nil }
+func (tx *mockCrudTx) Rollback() error { return nil }
+
+func (m *mockCrudSession) BeginTx(ctx context.Context) (driver.TxSession, error) {
+	return &mockCrudTx{sess: m}, nil
+}
+
 func TestServer_PostgresCRUDPlaceholders(t *testing.T) {
 	tempDir := t.TempDir()
 	v, err := vault.OpenVault(filepath.Join(tempDir, "config.db"), "pin")

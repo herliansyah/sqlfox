@@ -47,7 +47,11 @@ func launchAppWindow(targetURL string) error {
 	cmd.Stderr = nil
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
-	return cmd.Start()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() { _ = cmd.Wait() }()
+	return nil
 }
 
 func openDefaultBrowser(targetURL string) error {
@@ -65,5 +69,9 @@ func openDefaultBrowser(targetURL string) error {
 	c.Stdout = nil
 	c.Stderr = nil
 	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	return c.Start()
+	if err := c.Start(); err != nil {
+		return err
+	}
+	go func() { _ = c.Wait() }()
+	return nil
 }

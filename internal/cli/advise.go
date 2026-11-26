@@ -16,6 +16,11 @@ import (
 
 // RunAdvise executes the 'sqlfox advise' command.
 func RunAdvise(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
+	return RunAdviseContext(context.Background(), args, stdout, stderr, stdin)
+}
+
+// RunAdviseContext executes 'sqlfox advise' honoring the caller's context/signal cancellation.
+func RunAdviseContext(parentCtx context.Context, args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 	fs := flag.NewFlagSet("advise", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
@@ -58,7 +63,8 @@ func RunAdvise(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 			}
 		}
 		if stdin != nil {
-			b, _ := io.ReadAll(stdin)
+			const maxCLIInputBytes = 100 << 20
+			b, _ := io.ReadAll(io.LimitReader(stdin, maxCLIInputBytes))
 			sqlStmt = strings.TrimSpace(string(b))
 		}
 	}
@@ -82,7 +88,7 @@ func RunAdvise(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 		dialect = "mysql" // default dialect
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
 	defer cancel()
 
 	if targetStr != "" {
