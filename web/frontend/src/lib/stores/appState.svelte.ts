@@ -1461,10 +1461,9 @@ export class AppState {
       database: this.currentDatabase || '',
       isTableViewer: false,
     };
-    this.tabs.push(newTab);
+    this.tabs = [...this.tabs, newTab];
     this.activeTabId = newId;
     this.saveTabsState();
-    // Return the proxied element, not the raw literal, so later mutations notify.
     return this.tabs[this.tabs.length - 1];
   }
 
@@ -2795,30 +2794,32 @@ export class AppState {
     const timeoutId = setTimeout(() => controller.abort(), 30000);
     this.activeAbortControllers.set(tab.id, controller);
 
-    tab.isExecuting = true;
-    tab.isExplaining = true;
-    tab.executionStartedAt = performance.now();
-    tab.executionElapsedMs = 0;
-    tab.statusText = 'Explaining...';
+    const startedAt = performance.now();
+    this.patchTab(tab.id, {
+      isExecuting: true,
+      isExplaining: true,
+      executionStartedAt: startedAt,
+      executionElapsedMs: 0,
+      statusText: 'Explaining...',
+      ...(tab.explainSql !== sql ? { explainResult: null, explainSql: undefined } : {}),
+    });
     const timer = setInterval(() => {
-      if (tab.executionStartedAt) {
-        tab.executionElapsedMs = Math.round(performance.now() - tab.executionStartedAt);
-        tab.statusText = `Explaining... (${(tab.executionElapsedMs / 1000).toFixed(1)}s)`;
-      }
+      const elapsed = Math.round(performance.now() - startedAt);
+      this.patchTab(tab.id, {
+        executionElapsedMs: elapsed,
+        statusText: `Explaining... (${(elapsed / 1000).toFixed(1)}s)`,
+      });
     }, 100);
     this.timerIntervals.set(tab.id, timer);
-    this.tabs = [...this.tabs];
 
-    if (tab.explainSql !== sql) {
-      tab.explainResult = null;
-      tab.explainSql = undefined;
-    }
     try {
       const res = await api.explainQuery(sessionId, sql, database, controller.signal);
       if (this.activeSessionId !== sessionId) return;
-      tab.explainResult = res;
-      tab.explainSql = sql;
-      tab.statusText = 'Ready';
+      this.patchTab(tab.id, {
+        explainResult: res,
+        explainSql: sql,
+        statusText: 'Ready',
+      });
       if (openModal) {
         this.impactPreviewData = res;
         this.impactPreviewSql = sql;
@@ -2827,7 +2828,9 @@ export class AppState {
         this.showToast('Query plan generated', 'success');
       }
     } catch (err: any) {
-      tab.statusText = err?.name === 'AbortError' ? 'Explain timed out' : 'Error';
+      this.patchTab(tab.id, {
+        statusText: err?.name === 'AbortError' ? 'Explain timed out' : 'Error',
+      });
       this.showToast(
         err?.name === 'AbortError' ? 'Explain timed out after 30s' : `Explain failed: ${err.message}`,
         'error'
@@ -2837,9 +2840,10 @@ export class AppState {
       clearInterval(timer);
       this.timerIntervals.delete(tab.id);
       this.activeAbortControllers.delete(tab.id);
-      tab.isExecuting = false;
-      tab.isExplaining = false;
-      this.tabs = [...this.tabs];
+      this.patchTab(tab.id, {
+        isExecuting: false,
+        isExplaining: false,
+      });
     }
   }
 
