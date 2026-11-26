@@ -232,7 +232,7 @@ func readFileTailLines(path string, maxBytes int64, maxLines int) ([]string, err
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		return nil, err
 	}
-	data, err := io.ReadAll(f)
+	data, err := io.ReadAll(io.LimitReader(f, maxBytes))
 	if err != nil {
 		return nil, err
 	}

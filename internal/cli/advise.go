@@ -63,7 +63,8 @@ func RunAdviseContext(parentCtx context.Context, args []string, stdout, stderr i
 			}
 		}
 		if stdin != nil {
-			b, _ := io.ReadAll(stdin)
+			const maxCLIInputBytes = 100 << 20
+			b, _ := io.ReadAll(io.LimitReader(stdin, maxCLIInputBytes))
 			sqlStmt = strings.TrimSpace(string(b))
 		}
 	}

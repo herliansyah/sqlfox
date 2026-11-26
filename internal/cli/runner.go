@@ -380,7 +380,8 @@ func RedactDSN(raw string) string {
 	return trimmed
 }
 func SplitStatements(reader io.Reader, driverName ...string) []string {
-	content, err := io.ReadAll(reader)
+	const maxCLIInputBytes = 100 << 20
+	content, err := io.ReadAll(io.LimitReader(reader, maxCLIInputBytes))
 	if err != nil {
 		return nil
 	}

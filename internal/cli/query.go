@@ -197,7 +197,8 @@ func resolveSQLInput(positional []string, file string, stdin io.Reader) (string,
 		return string(data), nil
 	}
 	if stdin != nil {
-		data, err := io.ReadAll(stdin)
+		const maxCLIInputBytes = 100 << 20
+		data, err := io.ReadAll(io.LimitReader(stdin, maxCLIInputBytes))
 		if err != nil {
 			return "", err
 		}

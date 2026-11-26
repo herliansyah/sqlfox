@@ -446,8 +446,7 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 		}
 		latestCommitSHA = refData.Object.SHA
 	} else {
-		b, _ := io.ReadAll(refResp.Body)
-		return nil, fmt.Errorf("querying branch ref failed (HTTP %d): %s", refResp.StatusCode, string(b))
+		return nil, fmt.Errorf("querying branch ref failed (HTTP %d): %s", refResp.StatusCode, readGitHubErrorBody(refResp.Body))
 	}
 
 	// 5. Get base tree SHA from the latest commit
@@ -465,8 +464,7 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 	defer commitResp.Body.Close()
 
 	if commitResp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(commitResp.Body)
-		return nil, fmt.Errorf("failed to fetch commit object (HTTP %d): %s", commitResp.StatusCode, string(b))
+		return nil, fmt.Errorf("failed to fetch commit object (HTTP %d): %s", commitResp.StatusCode, readGitHubErrorBody(commitResp.Body))
 	}
 
 	var commitData struct {
@@ -576,8 +574,7 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 	defer createTreeResp.Body.Close()
 
 	if createTreeResp.StatusCode != http.StatusCreated && createTreeResp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(createTreeResp.Body)
-		return nil, fmt.Errorf("failed to create git tree (HTTP %d): %s", createTreeResp.StatusCode, string(b))
+		return nil, fmt.Errorf("failed to create git tree (HTTP %d): %s", createTreeResp.StatusCode, readGitHubErrorBody(createTreeResp.Body))
 	}
 
 	var newTreeData struct {
@@ -625,8 +622,7 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 	defer createCommitResp.Body.Close()
 
 	if createCommitResp.StatusCode != http.StatusCreated && createCommitResp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(createCommitResp.Body)
-		return nil, fmt.Errorf("failed to create git commit (HTTP %d): %s", createCommitResp.StatusCode, string(b))
+		return nil, fmt.Errorf("failed to create git commit (HTTP %d): %s", createCommitResp.StatusCode, readGitHubErrorBody(createCommitResp.Body))
 	}
 
 	var newCommitData struct {
@@ -654,8 +650,7 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 	defer updateRefResp.Body.Close()
 
 	if updateRefResp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(updateRefResp.Body)
-		return nil, fmt.Errorf("failed to update branch ref to %s (HTTP %d): %s", newCommitData.SHA, updateRefResp.StatusCode, string(b))
+		return nil, fmt.Errorf("failed to update branch ref to %s (HTTP %d): %s", newCommitData.SHA, updateRefResp.StatusCode, readGitHubErrorBody(updateRefResp.Body))
 	}
 
 	// 11. Persist sync timestamp and status to vault
@@ -694,8 +689,7 @@ func createGitHubBlob(ctx context.Context, client *http.Client, apiBaseURL, repo
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("github blob creation failed (HTTP %d): %s", resp.StatusCode, string(raw))
+		return "", fmt.Errorf("github blob creation failed (HTTP %d): %s", resp.StatusCode, readGitHubErrorBody(resp.Body))
 	}
 
 	var res struct {
@@ -730,8 +724,7 @@ func createInitialCommit(ctx context.Context, client *http.Client, apiBaseURL, r
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("failed to create initial README (HTTP %d): %s", resp.StatusCode, string(raw))
+		return "", fmt.Errorf("failed to create initial README (HTTP %d): %s", resp.StatusCode, readGitHubErrorBody(resp.Body))
 	}
 
 	var res struct {
@@ -778,4 +771,10 @@ func setGitHubHeaders(req *http.Request, token string) {
 	if req.Body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+}
+
+func readGitHubErrorBody(r io.Reader) string {
+	const maxGitHubErrorBodyBytes = 64 << 10
+	b, _ := io.ReadAll(io.LimitReader(r, maxGitHubErrorBodyBytes))
+	return string(b)
 }
