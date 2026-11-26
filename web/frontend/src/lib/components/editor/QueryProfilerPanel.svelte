@@ -9,7 +9,7 @@
 
   function closePanel() {
     if (appState.activeTab) {
-      appState.activeTab.showQueryProfiler = false;
+      appState.patchTab(appState.activeTab.id, { showQueryProfiler: false });
     }
   }
 </script>

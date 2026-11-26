@@ -1249,7 +1249,7 @@
           type="button"
           onclick={() => {
             const tab = appState.addTab(`Result ${(currentTab.activeResultIndex || 0) + 1}`, currentTab.sql || '');
-            tab.activeResult = structuredClone($state.snapshot(result));
+            appState.patchTab(tab.id, { activeResult: structuredClone($state.snapshot(result)) });
             appState.saveTabsState();
           }}
           class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[10px] font-mono shrink-0 transition"

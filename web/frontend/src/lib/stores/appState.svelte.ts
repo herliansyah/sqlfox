@@ -123,11 +123,15 @@ export class AppState {
   isConnecting = $state<boolean>(false);
   connectionError = $state<string | null>(null);
 
-  // Tabs management
-  tabs = $state<EditorTab[]>([
+  // Tabs management — $state.raw avoids deep-proxying large query result row matrices
+  tabs = $state.raw<EditorTab[]>([
     { id: 'tab-1', title: 'Query 1.sql', sql: 'SELECT 1;', isTableViewer: false },
   ]);
   activeTabId = $state<string>('tab-1');
+
+  patchTab(tabId: string, patch: Partial<EditorTab>) {
+    this.tabs = this.tabs.map((t) => (t.id === tabId ? { ...t, ...patch } : t));
+  }
 
   // Staged Edits for Grid CRUD
   stagedEdits = $state<Record<string, StagedEdit>>({});

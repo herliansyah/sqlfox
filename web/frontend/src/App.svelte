@@ -107,7 +107,7 @@
       if (isCtrl && e.shiftKey && e.key.toLowerCase() === 'f' && !inCodeMirror) {
         e.preventDefault();
         if (appState.activeTab?.sql) {
-          appState.activeTab.sql = formatSQL(appState.activeTab.sql);
+          appState.patchTab(appState.activeTab.id, { sql: formatSQL(appState.activeTab.sql) });
           appState.showToast('Formatted SQL worksheet', 'info');
         }
         return;
@@ -239,7 +239,7 @@
       }
 
       if (appState.activeTab?.showQueryProfiler) {
-        appState.activeTab.showQueryProfiler = false;
+        appState.patchTab(appState.activeTab.id, { showQueryProfiler: false });
         return;
       }
 
@@ -298,14 +298,14 @@
                 <div class="inline-flex rounded border border-slate-700 bg-[#090d16] p-0.5 ml-2">
                   <button
                     type="button"
-                    onclick={() => (noteTab.noteMode = 'edit')}
+                    onclick={() => appState.patchTab(noteTab.id, { noteMode: 'edit' })}
                     class="px-2 py-0.5 rounded text-[11px] font-semibold transition {mode === 'edit' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-slate-200'}"
                   >
                     Edit
                   </button>
                   <button
                     type="button"
-                    onclick={() => (noteTab.noteMode = 'preview')}
+                    onclick={() => appState.patchTab(noteTab.id, { noteMode: 'preview' })}
                     class="px-2 py-0.5 rounded text-[11px] font-semibold transition {mode === 'preview' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-slate-200'}"
                   >
                     Preview
@@ -364,7 +364,7 @@
                 <textarea
                   value={noteTab.sql}
                   oninput={(e) => {
-                    noteTab.sql = (e.currentTarget as HTMLTextAreaElement).value;
+                    appState.patchTab(noteTab.id, { sql: (e.currentTarget as HTMLTextAreaElement).value });
                     appState.saveTabsState();
                   }}
                   placeholder="# Operational Note&#10;&#10;Write Markdown runbooks, SQL snippets, or incident timelines..."

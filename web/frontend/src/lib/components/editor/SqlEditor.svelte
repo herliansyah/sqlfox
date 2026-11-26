@@ -69,7 +69,7 @@
     if (target && editor) {
       editor.replaceTarget(formatted);
     } else if (currentTab) {
-      currentTab.sql = formatted;
+      appState.patchTab(currentTab.id, { sql: formatted });
     }
     appState.showToast('Formatted SQL query', 'info');
   }

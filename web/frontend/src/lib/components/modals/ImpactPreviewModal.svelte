@@ -72,7 +72,7 @@
     if (!sql.trim()) return;
     const t = appState.activeTab;
     if (t && !t.isTableViewer && !t.isProcesslist && !t.isErdCanvas && !t.isNote && !t.sql.trim()) {
-      t.sql = sql;
+      appState.patchTab(t.id, { sql });
       appState.saveTabsState();
     } else {
       appState.addTab(newTabTitle || 'Query.sql', sql);
