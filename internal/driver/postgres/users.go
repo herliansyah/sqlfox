@@ -3,6 +3,8 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"strings"
+
 	"github.com/herliansyah/sqlfox/internal/driver"
 )
 
@@ -99,14 +101,21 @@ func (s *PostgresSession) DropUser(ctx context.Context, user, host string) error
 }
 
 func (s *PostgresSession) ApplyUserGrants(ctx context.Context, req driver.UserGrantRequest) error {
+	if strings.EqualFold(req.Scope, "GLOBAL") || req.Database == "*" {
+		return fmt.Errorf("PostgreSQL database grants require a specific target database")
+	}
+	targetDB := strings.TrimSpace(req.Database)
+	if targetDB == "" {
+		targetDB = s.cfg.DatabaseName
+	}
 	quotedUser := quoteIdentifier(req.User)
 	for _, priv := range req.Privileges {
 		if !driver.ValidPrivilegeName(priv) {
 			return fmt.Errorf("invalid privilege name: %q", priv)
 		}
-		cmd := fmt.Sprintf("GRANT %s ON DATABASE %s TO %s", priv, quoteIdentifier(s.cfg.DatabaseName), quotedUser)
+		cmd := fmt.Sprintf("GRANT %s ON DATABASE %s TO %s", priv, quoteIdentifier(targetDB), quotedUser)
 		if _, err := s.db.ExecContext(ctx, cmd); err != nil {
-			return fmt.Errorf("failed to grant %s on database %s to %s: %w", priv, s.cfg.DatabaseName, req.User, err)
+			return fmt.Errorf("failed to grant %s on database %s to %s: %w", priv, targetDB, req.User, err)
 		}
 	}
 	return nil

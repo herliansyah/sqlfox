@@ -47,7 +47,12 @@ func (s *ActiveSession) executeMulti(
 			dbTarget := strings.TrimSpace(cleanSQL[4:])
 			dbTarget = strings.Trim(strings.TrimRight(dbTarget, "; \t\r\n"), "`'\"")
 			if dbTarget != "" {
-				_ = s.UseDatabase(ctx, dbTarget)
+				if err := s.UseDatabase(ctx, dbTarget); err != nil {
+					if s.vault != nil {
+						s.RecordAudit(stmtTrimmed, "editor_batch", time.Since(stmtStart).Milliseconds(), 0, err, stmtStart)
+					}
+					return nil, fmt.Errorf("statement %d (%s) failed: %w", i+1, previewStmt(stmtTrimmed), err)
+				}
 			}
 		}
 
@@ -63,7 +68,7 @@ func (s *ActiveSession) executeMulti(
 			if s.hasActiveTx(req.TabID) {
 				return nil, fmt.Errorf("a transaction is already active in this tab; please COMMIT or ROLLBACK first")
 			}
-			tx, err := s.beginTabTx()
+			tx, err := s.beginTabTx(req.Database)
 			if err != nil {
 				return nil, fmt.Errorf("failed to begin transaction: %w", err)
 			}
@@ -289,7 +294,12 @@ func (s *ActiveSession) executeStreamMulti(
 			dbTarget := strings.TrimSpace(cleanSQL[4:])
 			dbTarget = strings.Trim(strings.TrimRight(dbTarget, "; \t\r\n"), "`'\"")
 			if dbTarget != "" {
-				_ = s.UseDatabase(ctx, dbTarget)
+				if err := s.UseDatabase(ctx, dbTarget); err != nil {
+					if s.vault != nil {
+						s.RecordAudit(stmtTrimmed, "editor_batch", time.Since(stmtStart).Milliseconds(), 0, err, stmtStart)
+					}
+					return nil, fmt.Errorf("statement %d (%s) failed: %w", i+1, previewStmt(stmtTrimmed), err)
+				}
 			}
 		}
 
@@ -310,7 +320,7 @@ func (s *ActiveSession) executeStreamMulti(
 				}
 				return nil, streamErr
 			}
-			tx, err := s.beginTabTx()
+			tx, err := s.beginTabTx(req.Database)
 			if err != nil {
 				streamErr = fmt.Errorf("failed to begin transaction: %w", err)
 				_ = enc.Encode(map[string]any{"type": "error", "result_index": i, "sql": stmtTrimmed, "error": streamErr.Error()})

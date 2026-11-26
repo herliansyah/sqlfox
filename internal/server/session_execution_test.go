@@ -6,9 +6,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/herliansyah/sqlfox/internal/driver"
@@ -1096,5 +1098,124 @@ func TestActiveSession_AbortedTransactionIntegrity(t *testing.T) {
 	_, err = sess.Execute(ctx, ExecuteRequest{SQL: "COMMIT;", TabID: tabID2})
 	if err == nil || !strings.Contains(err.Error(), "transaction in this tab was aborted") {
 		t.Fatalf("expected COMMIT rejection on aborted transaction, got: %v", err)
+	}
+}
+
+type dbCaptureSession struct {
+	driver.Session
+	mu          sync.Mutex
+	selectCalls int
+	seenDBs     []string
+}
+
+func (d *dbCaptureSession) SelectDatabase(_ context.Context, _ string) error {
+	d.mu.Lock()
+	d.selectCalls++
+	d.mu.Unlock()
+	return nil
+}
+
+func (d *dbCaptureSession) QueryStream(ctx context.Context, _ string, _ int) (driver.RowStream, error) {
+	d.mu.Lock()
+	d.seenDBs = append(d.seenDBs, driver.DatabaseFromContext(ctx))
+	d.mu.Unlock()
+	return &emptyRowStream{}, nil
+}
+
+type emptyRowStream struct{}
+
+func (e *emptyRowStream) Columns() []driver.ColumnDefinition { return nil }
+func (e *emptyRowStream) NextChunk(_ int) ([][]any, error)   { return nil, io.EOF }
+func (e *emptyRowStream) Close() error                       { return nil }
+
+func TestActiveSession_PerRequestDatabaseIsolation(t *testing.T) {
+	cap := &dbCaptureSession{}
+	sess := &ActiveSession{
+		ID:           "conn-iso",
+		DatabaseName: "initial_db",
+		Environment:  "Development",
+		DriverName:   "mysql",
+		Session:      cap,
+	}
+
+	var wg sync.WaitGroup
+	for _, db := range []string{"db_a", "db_b", "db_c"} {
+		wg.Add(1)
+		go func(target string) {
+			defer wg.Done()
+			_, err := sess.Execute(context.Background(), ExecuteRequest{
+				SQL:      "SELECT 1;",
+				Database: target,
+			})
+			if err != nil {
+				t.Errorf("Execute(%s) failed: %v", target, err)
+			}
+		}(db)
+	}
+	wg.Wait()
+
+	if cap.selectCalls != 0 {
+		t.Fatalf("expected 0 global SelectDatabase calls during scoped Execute, got %d", cap.selectCalls)
+	}
+	if sess.GetDatabaseName() != "initial_db" {
+		t.Fatalf("expected session DatabaseName to remain 'initial_db', got %q", sess.GetDatabaseName())
+	}
+	if len(cap.seenDBs) != 3 {
+		t.Fatalf("expected 3 scoped QueryStream calls, got %d: %v", len(cap.seenDBs), cap.seenDBs)
+	}
+}
+
+func TestActiveSession_ChallengeRejectsOperationNameWhenTargetTableKnown(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "sqlfox-challenge-strict-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	dbSession, err := driver.Connect(context.Background(), driver.Config{
+		Driver:       "sqlite",
+		DatabaseName: filepath.Join(tempDir, "test.db"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dbSession.Close()
+
+	_, _ = dbSession.Exec(context.Background(), "CREATE TABLE users (id INTEGER PRIMARY KEY)")
+	sess := &ActiveSession{
+		ID:          "conn-strict",
+		Environment: "Production",
+		DriverName:  "sqlite",
+		Session:     dbSession,
+	}
+
+	// Typing "DROP" instead of "users" must be rejected.
+	_, err = sess.Execute(context.Background(), ExecuteRequest{
+		SQL:            "DROP TABLE users;",
+		Confirmed:      true,
+		ChallengeInput: "DROP",
+	})
+	if err == nil || !strings.Contains(err.Error(), "Challenge confirmation failed") {
+		t.Fatalf("expected challenge confirmation failure when typing operation 'DROP', got: %v", err)
+	}
+
+	// Typing the actual target table "users" must succeed.
+	if _, err := sess.Execute(context.Background(), ExecuteRequest{
+		SQL:            "DROP TABLE users;",
+		Confirmed:      true,
+		ChallengeInput: "users",
+	}); err != nil {
+		t.Fatalf("expected DROP TABLE users with matching ChallengeInput to succeed, got: %v", err)
+	}
+}
+
+func TestRedactSensitiveSQL(t *testing.T) {
+	in := "CREATE USER 'alice'@'%' IDENTIFIED BY 'SuperSecret123!'; ALTER ROLE bob WITH PASSWORD 'pw2';"
+	out := redactSensitiveSQL(in)
+	if strings.Contains(out, "SuperSecret123!") || strings.Contains(out, "pw2") {
+		t.Fatalf("expected password literals to be redacted, got: %s", out)
+	}
+	if !strings.Contains(out, "IDENTIFIED BY '***'") || !strings.Contains(out, "WITH PASSWORD '***'") {
+		t.Fatalf("expected redacted placeholders, got: %s", out)
 	}
 }

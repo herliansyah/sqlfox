@@ -211,6 +211,13 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 				conn.Password = existing.Password
 			}
 		}
+		if conn.UseSSL && conn.SSLKey == "" && conn.ID != "" {
+			if existing, err := s.vault.GetConnection(conn.ID); err == nil {
+				if strings.EqualFold(conn.Host, existing.Host) && conn.Port == existing.Port && strings.EqualFold(conn.Driver, existing.Driver) {
+					conn.SSLKey = existing.SSLKey
+				}
+			}
+		}
 		if err := s.validateConnectionPayload(conn, s.IsRemoteRequest(r)); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return

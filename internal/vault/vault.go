@@ -47,6 +47,8 @@ type ConnectionRecord struct {
 	SSLCA             string    `json:"ssl_ca,omitempty"`
 	SSLCert           string    `json:"ssl_cert,omitempty"`
 	SSLKey            string    `json:"ssl_key,omitempty"`
+	HasSSLKey         bool      `json:"has_ssl_key,omitempty"`
+	ClearSSL          bool      `json:"clear_ssl,omitempty"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }
@@ -428,8 +430,26 @@ func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 	sslCert := conn.SSLCert
 	sslKey := conn.SSLKey
 
-	// ponytail: Preserve existing SSL settings when caller omits them on update (e.g. basic web UI edit modal)
-	if conn.ID != "" && !conn.UseSSL && sslCA == "" && sslCert == "" && sslKey == "" {
+	if conn.ClearSSL {
+		useSSLInt = 0
+		conn.UseSSL = false
+		sslCA = ""
+		sslCert = ""
+		sslKey = ""
+	} else if conn.ID != "" && conn.UseSSL && sslKey == "" {
+		// Preserve stored client private key when editing an SSL connection without re-entering the key,
+		// only if host/port/driver still match (prevents key exfiltration to an attacker-controlled endpoint).
+		var exHost, exDriver string
+		var exPort int
+		var exKey sql.NullString
+		if err := v.db.QueryRow(`SELECT host, port, driver, ssl_key FROM connections WHERE id = ?`, conn.ID).
+			Scan(&exHost, &exPort, &exDriver, &exKey); err == nil {
+			if strings.EqualFold(conn.Host, exHost) && conn.Port == exPort && strings.EqualFold(conn.Driver, exDriver) {
+				sslKey = exKey.String
+			}
+		}
+	} else if conn.ID != "" && !conn.UseSSL && sslCA == "" && sslCert == "" && sslKey == "" {
+		// ponytail: Preserve existing SSL settings when caller omits them on partial update
 		var exUseSSL int
 		var exCA, exCert, exKey sql.NullString
 		if err := v.db.QueryRow(`SELECT use_ssl, ssl_ca, ssl_cert, ssl_key FROM connections WHERE id = ?`, conn.ID).
@@ -441,6 +461,8 @@ func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 			sslKey = exKey.String
 		}
 	}
+
+	conn.HasSSLKey = sslKey != ""
 
 	// The client private key is a secret like the password; keep values already sealed by this vault.
 	if sslKey != "" && !strings.HasPrefix(sslKey, sealedPrefix) {
@@ -604,6 +626,7 @@ func scanConnection(s scannable) (*ConnectionRecord, error) {
 	c.SSLCA = sslCA.String
 	c.SSLCert = sslCert.String
 	c.SSLKey = sslKey.String
+	c.HasSSLKey = sslKey.String != ""
 
 	return &c, nil
 }

@@ -68,6 +68,12 @@ func (s *Server) handleOpenBrowser(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if !s.isHostAllowed(u.Host) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error": "Invalid URL: only local SqlFox host URLs are permitted",
+		})
+		return
+	}
 
 	s.mu.Lock()
 	openFn := s.openBrowserFn

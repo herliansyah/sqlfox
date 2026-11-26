@@ -15,9 +15,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 )
+
+var mysqlTLSSeq atomic.Uint64
 
 func init() {
 	driver.Register("mysql", &MySQLDriver{})
@@ -79,7 +82,7 @@ func (d *MySQLDriver) Connect(ctx context.Context, cfg driver.Config) (driver.Se
 			tlsConfig.Certificates = []tls.Certificate{cert}
 		}
 
-		tlsName := fmt.Sprintf("custom-tls-%d", time.Now().UnixNano())
+		tlsName := fmt.Sprintf("custom-tls-%d", mysqlTLSSeq.Add(1))
 		if err := gomysql.RegisterTLSConfig(tlsName, tlsConfig); err != nil {
 			// Never silently downgrade to skip-verify when the user asked for TLS.
 			return nil, fmt.Errorf("failed to register TLS config: %w", err)
@@ -218,6 +221,10 @@ func (s *MySQLSession) ServerInfo(ctx context.Context) (*driver.ServerInfo, erro
 }
 
 func (s *MySQLSession) QueryStream(ctx context.Context, querySQL string, limit int) (driver.RowStream, error) {
+	return s.QueryStreamArgs(ctx, querySQL, limit)
+}
+
+func (s *MySQLSession) QueryStreamArgs(ctx context.Context, querySQL string, limit int, args ...any) (driver.RowStream, error) {
 	// Apply implicit safe limit for unbounded SELECTs
 	querySQL = driver.ApplyLimitClause(querySQL, limit)
 
@@ -254,7 +261,7 @@ func (s *MySQLSession) QueryStream(ctx context.Context, querySQL string, limit i
 		}
 	}
 
-	rows, qErr := conn.QueryContext(ctx, querySQL)
+	rows, qErr := conn.QueryContext(ctx, querySQL, args...)
 	if qErr != nil {
 		if queryID != "" {
 			s.mu.Lock()

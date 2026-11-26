@@ -542,19 +542,24 @@ func (s *Server) handleGetUserGrants(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isMySQLFamily := strings.EqualFold(sess.DriverName, "mysql") || strings.EqualFold(sess.DriverName, "mariadb")
 	user := r.URL.Query().Get("user")
 	host := r.URL.Query().Get("host")
-	if user == "" || host == "" {
+	if user == "" || (isMySQLFamily && host == "") {
 		var req struct {
 			User string `json:"user"`
 			Host string `json:"host"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
-			user = req.User
-			host = req.Host
+			if user == "" {
+				user = req.User
+			}
+			if host == "" {
+				host = req.Host
+			}
 		}
 	}
-	if user == "" || host == "" {
+	if user == "" || (isMySQLFamily && host == "") {
 		writeError(w, http.StatusBadRequest, "user and host query parameters are required")
 		return
 	}
@@ -582,13 +587,14 @@ func (s *Server) handleSaveUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isMySQLFamily := strings.EqualFold(sess.DriverName, "mysql") || strings.EqualFold(sess.DriverName, "mariadb")
 	var req struct {
 		User     string `json:"user"`
 		Host     string `json:"host"`
 		Password string `json:"password"`
 		IsNew    bool   `json:"is_new"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.User == "" || req.Host == "" {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.User == "" || (isMySQLFamily && req.Host == "") {
 		writeError(w, http.StatusBadRequest, "user and host are required")
 		return
 	}
@@ -618,21 +624,50 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isMySQLFamily := strings.EqualFold(sess.DriverName, "mysql") || strings.EqualFold(sess.DriverName, "mariadb")
 	user := r.URL.Query().Get("user")
 	host := r.URL.Query().Get("host")
-	if user == "" || host == "" {
+	confirmed := r.URL.Query().Get("confirmed") == "true"
+	challengeInput := r.URL.Query().Get("challenge_input")
+	if user == "" || (isMySQLFamily && host == "") || !confirmed {
 		var req struct {
-			User string `json:"user"`
-			Host string `json:"host"`
+			User           string `json:"user"`
+			Host           string `json:"host"`
+			Confirmed      bool   `json:"confirmed"`
+			ChallengeInput string `json:"challenge_input"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
-			user = req.User
-			host = req.Host
+			if user == "" {
+				user = req.User
+			}
+			if host == "" {
+				host = req.Host
+			}
+			confirmed = confirmed || req.Confirmed
+			if challengeInput == "" {
+				challengeInput = req.ChallengeInput
+			}
 		}
 	}
-	if user == "" || host == "" {
+	if user == "" || (isMySQLFamily && host == "") {
 		writeError(w, http.StatusBadRequest, "user and host query parameters are required")
 		return
+	}
+
+	if strings.EqualFold(sess.Environment, "Production") || strings.EqualFold(sess.Environment, "Staging") {
+		if !confirmed {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+				"blocked":            true,
+				"requires_challenge": true,
+				"target":             user,
+				"reason":             fmt.Sprintf("Dropping database user '%s' in %s requires typed confirmation.", user, sess.Environment),
+			})
+			return
+		}
+		if !strings.EqualFold(strings.TrimSpace(challengeInput), user) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("Challenge confirmation failed: expected '%s', got '%s'", user, challengeInput))
+			return
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -660,17 +695,38 @@ func (s *Server) handleApplyUserGrants(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req driver.UserGrantRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.User == "" || req.Host == "" {
+	isMySQLFamily := strings.EqualFold(sess.DriverName, "mysql") || strings.EqualFold(sess.DriverName, "mariadb")
+	var req struct {
+		driver.UserGrantRequest
+		Confirmed      bool   `json:"confirmed"`
+		ChallengeInput string `json:"challenge_input"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.User == "" || (isMySQLFamily && req.Host == "") {
 		writeError(w, http.StatusBadRequest, "user and host are required")
 		return
+	}
+
+	if strings.EqualFold(sess.Environment, "Production") {
+		if !req.Confirmed {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+				"blocked":            true,
+				"requires_challenge": true,
+				"target":             req.User,
+				"reason":             fmt.Sprintf("Modifying grants for '%s' in Production requires typed confirmation.", req.User),
+			})
+			return
+		}
+		if !strings.EqualFold(strings.TrimSpace(req.ChallengeInput), req.User) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("Challenge confirmation failed: expected '%s', got '%s'", req.User, req.ChallengeInput))
+			return
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
 	start := time.Now()
-	err = sess.ApplyUserGrants(ctx, req)
+	err = sess.ApplyUserGrants(ctx, req.UserGrantRequest)
 	sess.RecordAudit(fmt.Sprintf("APPLY GRANTS '%s'@'%s'", req.User, req.Host), "user_admin", time.Since(start).Milliseconds(), 0, err, start)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

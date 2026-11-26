@@ -51,10 +51,8 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 		return nil, nil
 	}
 
-	if req.Database != "" && s.Session != nil {
-		if err := s.UseDatabase(ctx, req.Database); err != nil {
-			return nil, err
-		}
+	if req.Database != "" {
+		ctx = driver.WithDatabase(ctx, req.Database)
 	}
 
 	// 1. Safety Guard Inspection with Scoped Database Context

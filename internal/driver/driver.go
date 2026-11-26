@@ -100,6 +100,11 @@ type ReadOnlySession interface {
 	QueryStreamReadOnly(ctx context.Context, sql string, limit int) (RowStream, error)
 }
 
+// ParameterizedStreamer is an optional capability for executing parameterized streaming queries.
+type ParameterizedStreamer interface {
+	QueryStreamArgs(ctx context.Context, sql string, limit int, args ...any) (RowStream, error)
+}
+
 // ProcessManager is an optional capability for drivers that support active thread/process inspection and termination.
 type ProcessManager interface {
 	GetProcesslist(ctx context.Context) (*ProcesslistResult, error)

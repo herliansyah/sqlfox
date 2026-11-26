@@ -2,6 +2,7 @@ package vault
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -48,7 +49,10 @@ func WriteKeychainMasterPassword(secret string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
-		cmd = exec.CommandContext(ctx, "security", "add-generic-password", "-U", "-s", keychainService, "-a", keychainAccount, "-w", secret)
+		// Pass the secret via `security -i` stdin so it never appears in process argv (`ps`).
+		cleanSecret := strings.NewReplacer("\n", "", "\r", "").Replace(secret)
+		cmd = exec.CommandContext(ctx, "security", "-i")
+		cmd.Stdin = strings.NewReader(fmt.Sprintf("add-generic-password -U -s %q -a %q -w %q\n", keychainService, keychainAccount, cleanSecret))
 	case "linux":
 		cmd = exec.CommandContext(ctx, "secret-tool", "store", "--label=SqlFox Vault Master Key", "service", keychainService, "account", keychainAccount)
 		cmd.Stdin = strings.NewReader(secret)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -166,8 +167,11 @@ func (m *managedTx) Rollback() error {
 // beginTabTx starts a user-controlled tab transaction with a 15-second pool-acquisition timeout
 // while keeping the transaction context alive until Commit or Rollback (calling a short-lived
 // context's cancel func after BeginTx would immediately abort the sql.Tx via database/sql).
-func (s *ActiveSession) beginTabTx() (driver.TxSession, error) {
+func (s *ActiveSession) beginTabTx(dbName ...string) (driver.TxSession, error) {
 	txCtx, txCancel := context.WithCancel(context.Background())
+	if len(dbName) > 0 && dbName[0] != "" {
+		txCtx = driver.WithDatabase(txCtx, dbName[0])
+	}
 	acquireTimer := time.AfterFunc(15*time.Second, txCancel)
 	tx, err := s.Session.BeginTx(txCtx)
 	if !acquireTimer.Stop() {
@@ -427,6 +431,13 @@ func (s *ActiveSession) UseDatabase(ctx context.Context, dbName string) error {
 	return nil
 }
 
+var reSensitiveSQLPwd = regexp.MustCompile(`(?i)(\b(?:IDENTIFIED\s+BY|WITH\s+PASSWORD|PASSWORD\s*=)\s*)('(?:[^'\\]|\\.|'')*'|"(?:[^"\\]|\\.|"")*")`)
+
+// redactSensitiveSQL masks credential literals in SQL before writing to logs or the audit table.
+func redactSensitiveSQL(sql string) string {
+	return reSensitiveSQLPwd.ReplaceAllString(sql, `${1}'***'`)
+}
+
 // RecordAudit asynchronously records an executed SQL statement or data mutation into the vault audit log.
 // WaitGroup-tracked goroutines ensure zero impact on query latency while preventing lost writes on Close().
 func (s *ActiveSession) RecordAudit(querySQL, source string, durationMs, rowsAffected int64, execErr error, executedAt ...time.Time) {
@@ -444,7 +455,7 @@ func (s *ActiveSession) RecordAudit(querySQL, source string, durationMs, rowsAff
 	if len(executedAt) > 0 && !executedAt[0].IsZero() {
 		t = executedAt[0]
 	}
-	cleanSQL := strings.TrimSpace(querySQL)
+	cleanSQL := redactSensitiveSQL(strings.TrimSpace(querySQL))
 
 	s.mu.RLock()
 	closed := s.closed

@@ -122,9 +122,8 @@ func (s *Server) handleInsertRow(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	if err := sess.UseDatabase(ctx, req.Database); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+	if req.Database != "" {
+		ctx = driver.WithDatabase(ctx, req.Database)
 	}
 
 	var valStrs []string
@@ -200,9 +199,8 @@ func (s *Server) handleDeleteRows(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	if err := sess.UseDatabase(ctx, req.Database); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+	if req.Database != "" {
+		ctx = driver.WithDatabase(ctx, req.Database)
 	}
 
 	var totalAffected int64

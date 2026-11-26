@@ -66,6 +66,8 @@ func TestValidateTableFilter(t *testing.T) {
 		"id @ 1",            // illegal operator character
 		`name = 'a\' OR pg_sleep(5) IS NULL OR \'1\'=\'1'`,
 		`name = "a\" OR 1=1"`,
+		"id = CURRENT_TIMESTAMP",
+		"name = VERSION",
 	}
 
 	for _, c := range invalidCases {
@@ -95,6 +97,23 @@ func TestBuildStructuredFilterClause(t *testing.T) {
 	}
 	if _, err := buildStructuredFilterClause(`[{"column":"id","operator":"IN","value":"  "}]`, "sqlite"); err == nil {
 		t.Fatal("expected empty IN list to fail")
+	}
+}
+
+func TestBuildParameterizedFilterClause(t *testing.T) {
+	clause, args, err := buildParameterizedFilterClause(`[
+		{"column":"status","operator":"=","value":"active' OR '1'='1"},
+		{"column":"role","operator":"IN","value":"admin, editor"}
+	]`, "postgres", 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := `"status" = $1 AND "role" IN ($2, $3)`
+	if clause != want {
+		t.Fatalf("got %q, want %q", clause, want)
+	}
+	if len(args) != 3 || args[0] != "active' OR '1'='1" || args[1] != "admin" || args[2] != "editor" {
+		t.Fatalf("unexpected bind args: %#v", args)
 	}
 }
 

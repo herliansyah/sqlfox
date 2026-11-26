@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -71,23 +72,25 @@ type GitHubAsset struct {
 
 // UpdateInfo holds the version diff, changelog, and target asset details.
 type UpdateInfo struct {
-	CurrentVersion string `json:"current_version"`
-	LatestVersion  string `json:"latest_version"`
-	HasUpdate      bool   `json:"has_update"`
-	ReleaseName    string `json:"release_name"`
-	ReleaseNotes   string `json:"release_notes"`
-	PublishedAt    string `json:"published_at"`
-	AssetURL       string `json:"asset_url"`
-	AssetName      string `json:"asset_name"`
-	DownloadSize   int64  `json:"download_size"`
+	CurrentVersion    string `json:"current_version"`
+	LatestVersion     string `json:"latest_version"`
+	HasUpdate         bool   `json:"has_update"`
+	ReleaseName       string `json:"release_name"`
+	ReleaseNotes      string `json:"release_notes"`
+	PublishedAt       string `json:"published_at"`
+	AssetURL          string `json:"asset_url"`
+	AssetName         string `json:"asset_name"`
+	DownloadSize      int64  `json:"download_size"`
+	SignatureVerified bool   `json:"signature_verified"`
 }
 
 // ApplyUpdateResult represents the outcome of an in-app binary replacement.
 type ApplyUpdateResult struct {
-	Success    bool   `json:"success"`
-	Message    string `json:"message"`
-	NewVersion string `json:"new_version"`
-	Restarting bool   `json:"restarting"`
+	Success           bool   `json:"success"`
+	Message           string `json:"message"`
+	NewVersion        string `json:"new_version"`
+	Restarting        bool   `json:"restarting"`
+	SignatureVerified bool   `json:"signature_verified"`
 }
 
 var (
@@ -244,12 +247,13 @@ func (s *Server) handleCheckUpdate(w http.ResponseWriter, r *http.Request) {
 	targetAsset := findMatchingAsset(rel.Assets, runtime.GOOS, runtime.GOARCH)
 
 	info := UpdateInfo{
-		CurrentVersion: currentVer,
-		LatestVersion:  rel.TagName,
-		HasUpdate:      hasUpdate,
-		ReleaseName:    rel.Name,
-		ReleaseNotes:   rel.Body,
-		PublishedAt:    rel.PublishedAt.Format(time.RFC3339),
+		CurrentVersion:    currentVer,
+		LatestVersion:     rel.TagName,
+		HasUpdate:         hasUpdate,
+		ReleaseName:       rel.Name,
+		ReleaseNotes:      rel.Body,
+		PublishedAt:       rel.PublishedAt.Format(time.RFC3339),
+		SignatureVerified: strings.TrimSpace(manifestSigningPublicKeyB64) != "",
 	}
 
 	if targetAsset != nil {
@@ -422,10 +426,11 @@ func (s *Server) handleApplyUpdate(w http.ResponseWriter, r *http.Request) {
 	// Return success to the client before restarting
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(ApplyUpdateResult{
-		Success:    true,
-		Message:    fmt.Sprintf("SqlFox successfully updated to %s", req.Version),
-		NewVersion: req.Version,
-		Restarting: true,
+		Success:           true,
+		Message:           fmt.Sprintf("SqlFox successfully updated to %s", req.Version),
+		NewVersion:        req.Version,
+		Restarting:        true,
+		SignatureVerified: strings.TrimSpace(manifestSigningPublicKeyB64) != "",
 	})
 	if flusher, ok := w.(http.Flusher); ok {
 		flusher.Flush()
@@ -570,6 +575,7 @@ func (s *Server) verifyAssetDigest(ctx context.Context, assetURL string, actualH
 // over the exact manifest bytes; any failure is fail-closed.
 func verifyManifestSignature(ctx context.Context, fetch func(string) ([]byte, error), baseDir string, manifestData []byte) error {
 	if manifestSigningPublicKeyB64 == "" {
+		slog.Warn("update_manifest_unsigned_fallback", "module", "update", "reason", "manifestSigningPublicKeyB64 is empty; using checksum-only verification")
 		return nil // no trust anchor provisioned in this build
 	}
 	pub, err := base64.StdEncoding.DecodeString(strings.TrimSpace(manifestSigningPublicKeyB64))

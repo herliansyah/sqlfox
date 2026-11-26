@@ -221,10 +221,7 @@ func (s *Server) handleGetTableDDL(w http.ResponseWriter, r *http.Request) {
 		targetDB = sess.GetDatabaseName()
 	}
 	if targetDB != "" {
-		if err := sess.UseDatabase(ctx, targetDB); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
+		ctx = driver.WithDatabase(ctx, targetDB)
 	}
 
 	ddl, err := sess.Session.GetTableDDL(ctx, tableName)
@@ -384,10 +381,7 @@ func (s *Server) handlePreflightDDL(w http.ResponseWriter, r *http.Request) {
 		targetDB = sess.GetDatabaseName()
 	}
 	if targetDB != "" {
-		if err := sess.UseDatabase(ctx, targetDB); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
+		ctx = driver.WithDatabase(ctx, targetDB)
 	}
 
 	var locks []driver.TableLockInfo

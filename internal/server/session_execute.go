@@ -71,10 +71,8 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	cleanUpper := strings.TrimRight(strings.ToUpper(cleanSQL), "; \t\r\n")
 	isSelect := driver.IsQueryStatement(trimmedSQL)
 
-	if req.Database != "" && s.Session != nil {
-		if err := s.UseDatabase(ctx, req.Database); err != nil {
-			return nil, err
-		}
+	if req.Database != "" {
+		ctx = driver.WithDatabase(ctx, req.Database)
 	}
 
 	// 1. Safety Guard Inspection with Scoped Database Context
@@ -216,9 +214,14 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 			// row estimate grew past the threshold): ask again instead of failing the request.
 			return &ExecuteResponse{Blocked: true, Inspection: inspection}, nil
 		}
-		if !strings.EqualFold(typed, expected) &&
-			(inspection.TargetDatabase == "" || !strings.EqualFold(typed, inspection.TargetDatabase)) &&
-			(inspection.Operation == "" || !strings.EqualFold(typed, inspection.Operation)) {
+		matched := strings.EqualFold(typed, expected)
+		if !matched && inspection.TargetTable != "" && inspection.TargetDatabase != "" {
+			matched = strings.EqualFold(typed, inspection.TargetDatabase+"."+inspection.TargetTable)
+		}
+		if !matched && inspection.TargetTable == "" && inspection.TargetDatabase != "" {
+			matched = strings.EqualFold(typed, inspection.TargetDatabase)
+		}
+		if !matched {
 			return nil, fmt.Errorf("Challenge confirmation failed: expected '%s', got '%s'", expected, req.ChallengeInput)
 		}
 	}
@@ -338,7 +341,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		s.clearTx(req.TabID)
 
 		// Use beginTabTx so pool acquisition is bounded (15s) while the transaction persists across HTTP requests.
-		newTx, err := s.beginTabTx()
+		newTx, err := s.beginTabTx(req.Database)
 		if err != nil {
 			return nil, fmt.Errorf("failed to begin transaction: %w", err)
 		}
@@ -694,6 +697,16 @@ func (s *ActiveSession) queryStreamSafe(ctx context.Context, sql string, limit i
 		}
 	}
 	return s.Session.QueryStream(ctx, sql, limit)
+}
+
+// queryStreamSafeArgs executes a parameterized streaming query when supported, falling back to QueryStream.
+func (s *ActiveSession) queryStreamSafeArgs(ctx context.Context, sql string, limit int, args ...any) (driver.RowStream, error) {
+	if len(args) > 0 {
+		if ps, ok := s.Session.(driver.ParameterizedStreamer); ok {
+			return ps.QueryStreamArgs(ctx, sql, limit, args...)
+		}
+	}
+	return s.queryStreamSafe(ctx, sql, limit)
 }
 
 func readProfileFromStream(pStream driver.RowStream) *driver.QueryProfile {

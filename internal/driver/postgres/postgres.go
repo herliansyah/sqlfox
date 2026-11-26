@@ -330,6 +330,10 @@ func isRawSearchPathChangePG(q string) bool {
 }
 
 func (s *PostgresSession) QueryStream(ctx context.Context, querySQL string, limit int) (driver.RowStream, error) {
+	return s.QueryStreamArgs(ctx, querySQL, limit)
+}
+
+func (s *PostgresSession) QueryStreamArgs(ctx context.Context, querySQL string, limit int, args ...any) (driver.RowStream, error) {
 	querySQL = driver.ApplyLimitClause(querySQL, limit)
 
 	conn, err := s.db.Conn(ctx)
@@ -365,7 +369,7 @@ func (s *PostgresSession) QueryStream(ctx context.Context, querySQL string, limi
 		}
 	}
 
-	rows, qErr := conn.QueryContext(ctx, querySQL)
+	rows, qErr := conn.QueryContext(ctx, querySQL, args...)
 	if qErr != nil {
 		if queryID != "" {
 			s.mu.Lock()

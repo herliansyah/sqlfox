@@ -78,10 +78,7 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 		targetDB = sess.GetDatabaseName()
 	}
 	if targetDB != "" {
-		if err := sess.UseDatabase(ctx, targetDB); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
+		ctx = driver.WithDatabase(ctx, targetDB)
 	}
 
 	findKeyCol := func(tables []driver.TableMetadata) string {
@@ -144,13 +141,25 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 
 	filter := strings.TrimSpace(r.URL.Query().Get("filter"))
 	structuredFilters := strings.TrimSpace(r.URL.Query().Get("filters"))
+	var queryArgs []any
+	_, isParameterized := sess.Session.(driver.ParameterizedStreamer)
 	if structuredFilters != "" {
-		compiled, err := buildStructuredFilterClause(structuredFilters, sess.DriverName)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid structured filters: "+err.Error())
-			return
+		if isParameterized {
+			compiled, fArgs, err := buildParameterizedFilterClause(structuredFilters, sess.DriverName, 1)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid structured filters: "+err.Error())
+				return
+			}
+			filter = compiled
+			queryArgs = append(queryArgs, fArgs...)
+		} else {
+			compiled, err := buildStructuredFilterClause(structuredFilters, sess.DriverName)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid structured filters: "+err.Error())
+				return
+			}
+			filter = compiled
 		}
-		filter = compiled
 	} else if err := validateTableFilter(filter); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid filter: "+err.Error())
 		return
@@ -177,12 +186,17 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 		if sortDir == "DESC" {
 			op = "<"
 		}
+		keyExpr := driver.EscapeSQLString(lastKey, sess.DriverName)
+		if isParameterized {
+			keyExpr = driver.Placeholder(sess.DriverName, len(queryArgs)+1)
+			queryArgs = append(queryArgs, lastKey)
+		}
 		if whereClause != "" {
 			querySQL = fmt.Sprintf("SELECT * FROM %s %s AND %s %s %s ORDER BY %s %s LIMIT %d",
-				targetTable, whereClause, escSortCol, op, driver.EscapeSQLString(lastKey, sess.DriverName), escSortCol, sortDir, limit)
+				targetTable, whereClause, escSortCol, op, keyExpr, escSortCol, sortDir, limit)
 		} else {
 			querySQL = fmt.Sprintf("SELECT * FROM %s WHERE %s %s %s ORDER BY %s %s LIMIT %d",
-				targetTable, escSortCol, op, driver.EscapeSQLString(lastKey, sess.DriverName), escSortCol, sortDir, limit)
+				targetTable, escSortCol, op, keyExpr, escSortCol, sortDir, limit)
 		}
 	} else if sortCol != "" {
 		// Bounded offset
@@ -201,7 +215,7 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	stream, err := sess.queryStreamSafe(ctx, querySQL, limit)
+	stream, err := sess.queryStreamSafeArgs(ctx, querySQL, limit, queryArgs...)
 	if err != nil {
 		writeError(w, queryErrorStatus(err), "query failed: "+err.Error())
 		return
@@ -296,21 +310,30 @@ func (s *Server) handleGetTableCount(w http.ResponseWriter, r *http.Request) {
 		targetDB = sess.GetDatabaseName()
 	}
 	if targetDB != "" {
-		if err := sess.UseDatabase(ctx, targetDB); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
+		ctx = driver.WithDatabase(ctx, targetDB)
 	}
 
 	filter := strings.TrimSpace(r.URL.Query().Get("filter"))
 	structuredFilters := strings.TrimSpace(r.URL.Query().Get("filters"))
+	var countArgs []any
+	_, isParameterized := sess.Session.(driver.ParameterizedStreamer)
 	if structuredFilters != "" {
-		compiled, err := buildStructuredFilterClause(structuredFilters, sess.DriverName)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid structured filters: "+err.Error())
-			return
+		if isParameterized {
+			compiled, fArgs, err := buildParameterizedFilterClause(structuredFilters, sess.DriverName, 1)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid structured filters: "+err.Error())
+				return
+			}
+			filter = compiled
+			countArgs = append(countArgs, fArgs...)
+		} else {
+			compiled, err := buildStructuredFilterClause(structuredFilters, sess.DriverName)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid structured filters: "+err.Error())
+				return
+			}
+			filter = compiled
 		}
-		filter = compiled
 	} else if err := validateTableFilter(filter); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid filter: "+err.Error())
 		return
@@ -331,7 +354,7 @@ func (s *Server) handleGetTableCount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
-	stream, err := sess.queryStreamSafe(ctx, countSQL, 1)
+	stream, err := sess.queryStreamSafeArgs(ctx, countSQL, 1, countArgs...)
 	if err != nil {
 		writeError(w, queryErrorStatus(err), "count failed: "+err.Error())
 		return
@@ -388,6 +411,63 @@ type structuredFilterPill struct {
 	Column   string `json:"column"`
 	Operator string `json:"operator"`
 	Value    string `json:"value"`
+}
+
+// buildParameterizedFilterClause compiles structured filter pills into a parameterized WHERE clause
+// with driver-specific placeholders (? or $N) and bind arguments, avoiding string-literal splicing.
+func buildParameterizedFilterClause(rawJSON, driverName string, startIdx int) (string, []any, error) {
+	var pills []structuredFilterPill
+	if err := json.Unmarshal([]byte(rawJSON), &pills); err != nil {
+		return "", nil, fmt.Errorf("malformed filter JSON: %w", err)
+	}
+	if len(pills) == 0 {
+		return "", nil, nil
+	}
+	var parts []string
+	var args []any
+	pIdx := startIdx
+	for _, p := range pills {
+		col := strings.TrimSpace(p.Column)
+		if col == "" || strings.ContainsRune(col, 0) {
+			return "", nil, errors.New("filter column name is required")
+		}
+		qCol := driver.QuoteIdentifier(col, driverName)
+		op := strings.ToUpper(strings.TrimSpace(p.Operator))
+		switch op {
+		case "IS NULL", "IS NOT NULL":
+			parts = append(parts, fmt.Sprintf("%s %s", qCol, op))
+		case "=", "!=", "<>", "<", "<=", ">", ">=", "LIKE", "NOT LIKE":
+			if strings.ContainsRune(p.Value, 0) {
+				return "", nil, errors.New("NUL bytes are not permitted in filter values")
+			}
+			ph := driver.Placeholder(driverName, pIdx)
+			pIdx++
+			args = append(args, p.Value)
+			parts = append(parts, fmt.Sprintf("%s %s %s", qCol, op, ph))
+		case "IN", "NOT IN":
+			rawItems := strings.Split(p.Value, ",")
+			var placeholders []string
+			for _, item := range rawItems {
+				trimmed := strings.TrimSpace(item)
+				if trimmed == "" {
+					continue
+				}
+				if strings.ContainsRune(trimmed, 0) {
+					return "", nil, errors.New("NUL bytes are not permitted in filter values")
+				}
+				placeholders = append(placeholders, driver.Placeholder(driverName, pIdx))
+				pIdx++
+				args = append(args, trimmed)
+			}
+			if len(placeholders) == 0 {
+				return "", nil, fmt.Errorf("%s operator requires at least one value", op)
+			}
+			parts = append(parts, fmt.Sprintf("%s %s (%s)", qCol, op, strings.Join(placeholders, ", ")))
+		default:
+			return "", nil, fmt.Errorf("unsupported filter operator %q", p.Operator)
+		}
+	}
+	return strings.Join(parts, " AND "), args, nil
 }
 
 // buildStructuredFilterClause compiles a JSON array of structured filter pills into a
@@ -541,7 +621,10 @@ func isReservedSQLVerb(upper string) bool {
 		"VALUES", "SET", "DECLARE", "WAITFOR", "WITH",
 		"CASE", "WHEN", "THEN", "ELSE", "END", "REGEXP", "RLIKE", "SIMILAR",
 		"CURRENT_USER", "SESSION_USER", "SYSTEM_USER", "CURRENT_DATABASE",
-		"CURRENT_ROLE", "CURRENT_SCHEMA", "CURRENT_CATALOG", "USER":
+		"CURRENT_ROLE", "CURRENT_SCHEMA", "CURRENT_CATALOG", "USER",
+		"CURRENT_TIMESTAMP", "CURRENT_DATE", "CURRENT_TIME", "LOCALTIME",
+		"LOCALTIMESTAMP", "UTC_TIMESTAMP", "UTC_DATE", "UTC_TIME",
+		"VERSION", "DATABASE", "SCHEMA":
 		return true
 	}
 	return false

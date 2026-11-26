@@ -128,6 +128,10 @@ func (s *SQLiteSession) ServerInfo(ctx context.Context) (*driver.ServerInfo, err
 }
 
 func (s *SQLiteSession) QueryStream(ctx context.Context, querySQL string, limit int) (driver.RowStream, error) {
+	return s.QueryStreamArgs(ctx, querySQL, limit)
+}
+
+func (s *SQLiteSession) QueryStreamArgs(ctx context.Context, querySQL string, limit int, args ...any) (driver.RowStream, error) {
 	s.queryCount.Add(1)
 	// Apply implicit safe limit if query is a SELECT without LIMIT
 	querySQL = driver.ApplyLimitClause(querySQL, limit)
@@ -144,7 +148,7 @@ func (s *SQLiteSession) QueryStream(ctx context.Context, querySQL string, limit 
 			s.mu.Unlock()
 			cancel()
 		}
-		rows, err := s.db.QueryContext(ctx, querySQL)
+		rows, err := s.db.QueryContext(ctx, querySQL, args...)
 		if err != nil {
 			cleanup()
 			return nil, err
@@ -159,7 +163,7 @@ func (s *SQLiteSession) QueryStream(ctx context.Context, querySQL string, limit 
 		return driver.NewSQLRowStream(rows, cols, cleanup), nil
 	}
 
-	rows, err := s.db.QueryContext(ctx, querySQL)
+	rows, err := s.db.QueryContext(ctx, querySQL, args...)
 	if err != nil {
 		return nil, err
 	}
