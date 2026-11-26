@@ -54,6 +54,11 @@ func (v *Vault) SaveSnippet(s *Snippet) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
+	return v.saveSnippet(v.db, s)
+}
+
+func (v *Vault) saveSnippet(exec sqlExecutor, s *Snippet) error {
+
 	now := time.Now()
 	if s.ID == "" {
 		s.ID = newUUID()
@@ -70,7 +75,7 @@ func (v *Vault) SaveSnippet(s *Snippet) error {
 		tags = excluded.tags,
 		updated_at = excluded.updated_at
 	`
-	_, err := v.db.Exec(query, s.ID, s.Title, s.SQLContent, s.Tags, s.CreatedAt, s.UpdatedAt)
+	_, err := exec.Exec(query, s.ID, s.Title, s.SQLContent, s.Tags, s.CreatedAt, s.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to save snippet: %w", err)
 	}

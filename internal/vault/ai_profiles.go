@@ -59,6 +59,11 @@ func (v *Vault) SaveAIProfile(p *AIProfile) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
+	return v.saveAIProfile(v.db, p)
+}
+
+func (v *Vault) saveAIProfile(exec sqlExecutor, p *AIProfile) error {
+
 	if p.ID == "" {
 		p.ID = newUUID()
 		p.CreatedAt = time.Now()
@@ -80,7 +85,7 @@ func (v *Vault) SaveAIProfile(p *AIProfile) error {
 		encKey = p.EncryptedAPIKey
 		if encKey == "" && p.ID != "" {
 			var existingKey string
-			if err := v.db.QueryRow(`SELECT encrypted_api_key FROM ai_profiles WHERE id = ?`, p.ID).Scan(&existingKey); err == nil {
+			if err := exec.QueryRow(`SELECT encrypted_api_key FROM ai_profiles WHERE id = ?`, p.ID).Scan(&existingKey); err == nil {
 				encKey = existingKey
 			}
 		}
@@ -90,14 +95,14 @@ func (v *Vault) SaveAIProfile(p *AIProfile) error {
 
 	// Check if this is the only profile or first profile being added; if so, make it active
 	var totalProfiles int
-	_ = v.db.QueryRow(`SELECT COUNT(*) FROM ai_profiles`).Scan(&totalProfiles)
+	_ = exec.QueryRow(`SELECT COUNT(*) FROM ai_profiles`).Scan(&totalProfiles)
 	if totalProfiles == 0 {
 		p.IsActive = true
 	}
 
 	// If this profile is marked active, deactivate others
 	if p.IsActive {
-		_, _ = v.db.Exec(`UPDATE ai_profiles SET is_active = 0 WHERE id != ?`, p.ID)
+		_, _ = exec.Exec(`UPDATE ai_profiles SET is_active = 0 WHERE id != ?`, p.ID)
 	}
 
 	incSchemaInt := 0
@@ -134,7 +139,7 @@ func (v *Vault) SaveAIProfile(p *AIProfile) error {
 		is_active = excluded.is_active,
 		updated_at = excluded.updated_at
 	`
-	_, err := v.db.Exec(query,
+	_, err := exec.Exec(query,
 		p.ID, p.Name, p.Provider, encKey, p.BaseURL, p.ModelName,
 		p.Temperature, p.Language, p.ResponseStyle, p.CustomPrompt,
 		incSchemaInt, maskIdentInt, isActiveInt, p.CreatedAt, p.UpdatedAt,

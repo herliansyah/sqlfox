@@ -110,6 +110,12 @@ func ExportVault(v *Vault, exportPassphrase string) ([]byte, error) {
 
 // ImportVault imports connections, snippets, and table notes from an encrypted archive into the target vault.
 func ImportVault(v *Vault, archiveJSON []byte, exportPassphrase string) (int, error) {
+	return ImportVaultWithValidation(v, archiveJSON, exportPassphrase, nil)
+}
+
+// ImportVaultWithValidation decrypts an encrypted archive, optionally validates its payload
+// before any writes, and imports all records atomically in a single SQLite transaction.
+func ImportVaultWithValidation(v *Vault, archiveJSON []byte, exportPassphrase string, validate func(*ExportPayload) error) (int, error) {
 	if exportPassphrase == "" {
 		return 0, errors.New("export passphrase cannot be empty")
 	}
@@ -131,48 +137,60 @@ func ImportVault(v *Vault, archiveJSON []byte, exportPassphrase string) (int, er
 	}
 
 	var payload ExportPayload
-	if err := json.Unmarshal(plainJSON, &payload); err == nil && (len(payload.Connections) > 0 || len(payload.Snippets) > 0 || len(payload.TableNotes) > 0 || len(payload.OperationalNotes) > 0 || len(payload.AIProfiles) > 0) {
-		// New structured envelope
-		count := 0
-		for _, conn := range payload.Connections {
-			if err := v.SaveConnection(conn); err != nil {
-				return count, fmt.Errorf("failed to import connection '%s': %w", conn.Name, err)
-			}
-			count++
+	if err := json.Unmarshal(plainJSON, &payload); err != nil || (len(payload.Connections) == 0 && len(payload.Snippets) == 0 && len(payload.TableNotes) == 0 && len(payload.OperationalNotes) == 0 && len(payload.AIProfiles) == 0) {
+		// Fallback to legacy raw connections list
+		var connections []*ConnectionRecord
+		if err := json.Unmarshal(plainJSON, &connections); err != nil {
+			return 0, fmt.Errorf("corrupted archive payload: %w", err)
 		}
-		for _, snip := range payload.Snippets {
-			if err := v.SaveSnippet(snip); err != nil {
-				return count, fmt.Errorf("failed to import snippet '%s': %w", snip.Title, err)
-			}
-		}
-		for _, note := range payload.TableNotes {
-			if err := v.SaveTableNote(note); err != nil {
-				return count, fmt.Errorf("failed to import table note for '%s': %w", note.TableName, err)
-			}
-		}
-		for _, opNote := range payload.OperationalNotes {
-			if err := v.CreateOperationalNote(opNote); err != nil {
-				return count, fmt.Errorf("failed to import operational note '%s': %w", opNote.Title, err)
-			}
-		}
-		for _, p := range payload.AIProfiles {
-			_ = v.SaveAIProfile(p)
-		}
-		return count, nil
+		payload = ExportPayload{Connections: connections}
 	}
 
-	// Fallback to legacy raw connections list
-	var connections []*ConnectionRecord
-	if err := json.Unmarshal(plainJSON, &connections); err != nil {
-		return 0, fmt.Errorf("corrupted archive payload: %w", err)
+	if validate != nil {
+		if err := validate(&payload); err != nil {
+			return 0, err
+		}
 	}
+
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	tx, err := v.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("failed to begin import transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
 
 	count := 0
-	for _, conn := range connections {
-		if err := v.SaveConnection(conn); err != nil {
-			return count, fmt.Errorf("failed to import connection '%s': %w", conn.Name, err)
+	for _, conn := range payload.Connections {
+		if err := v.saveConnection(tx, conn); err != nil {
+			return 0, fmt.Errorf("failed to import connection '%s': %w", conn.Name, err)
 		}
 		count++
+	}
+	for _, snip := range payload.Snippets {
+		if err := v.saveSnippet(tx, snip); err != nil {
+			return 0, fmt.Errorf("failed to import snippet '%s': %w", snip.Title, err)
+		}
+	}
+	for _, note := range payload.TableNotes {
+		if err := v.saveTableNote(tx, note); err != nil {
+			return 0, fmt.Errorf("failed to import table note for '%s': %w", note.TableName, err)
+		}
+	}
+	for _, opNote := range payload.OperationalNotes {
+		if err := v.createOperationalNote(tx, opNote); err != nil {
+			return 0, fmt.Errorf("failed to import operational note '%s': %w", opNote.Title, err)
+		}
+	}
+	for _, p := range payload.AIProfiles {
+		if err := v.saveAIProfile(tx, p); err != nil {
+			return 0, fmt.Errorf("failed to import AI profile '%s': %w", p.Name, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("failed to commit import transaction: %w", err)
 	}
 
 	return count, nil

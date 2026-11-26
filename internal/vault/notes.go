@@ -47,6 +47,11 @@ func (v *Vault) SaveTableNote(n *TableNote) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
+	return v.saveTableNote(v.db, n)
+}
+
+func (v *Vault) saveTableNote(exec sqlExecutor, n *TableNote) error {
+
 	if n.ID == "" {
 		n.ID = newUUID()
 	}
@@ -59,7 +64,7 @@ func (v *Vault) SaveTableNote(n *TableNote) error {
 		content = excluded.content,
 		updated_at = excluded.updated_at
 	`
-	_, err := v.db.Exec(query, n.ID, n.ConnectionID, n.DatabaseName, n.TableName, n.Content, n.UpdatedAt)
+	_, err := exec.Exec(query, n.ID, n.ConnectionID, n.DatabaseName, n.TableName, n.Content, n.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to save table note: %w", err)
 	}

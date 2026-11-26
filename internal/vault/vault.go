@@ -388,10 +388,20 @@ func (v *Vault) ValidateMasterPassword(password string) bool {
 	return string(decrypted) == validationToken
 }
 
+type sqlExecutor interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
 // SaveConnection inserts or updates a connection record.
 func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
+
+	return v.saveConnection(v.db, conn)
+}
+
+func (v *Vault) saveConnection(exec sqlExecutor, conn *ConnectionRecord) error {
 
 	if conn.ID == "" {
 		conn.ID = newUUID()
@@ -412,7 +422,7 @@ func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 		if encPass == "" && conn.ID != "" {
 			var existingPass, exHost, exDriver string
 			var exPort int
-			if err := v.db.QueryRow(`SELECT encrypted_password, host, port, driver FROM connections WHERE id = ?`, conn.ID).
+			if err := exec.QueryRow(`SELECT encrypted_password, host, port, driver FROM connections WHERE id = ?`, conn.ID).
 				Scan(&existingPass, &exHost, &exPort, &exDriver); err == nil {
 				// Prevent password exfiltration by only preserving the stored password if endpoint matches.
 				if strings.EqualFold(conn.Host, exHost) && conn.Port == exPort && strings.EqualFold(conn.Driver, exDriver) {
@@ -442,7 +452,7 @@ func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 		var exHost, exDriver string
 		var exPort int
 		var exKey sql.NullString
-		if err := v.db.QueryRow(`SELECT host, port, driver, ssl_key FROM connections WHERE id = ?`, conn.ID).
+		if err := exec.QueryRow(`SELECT host, port, driver, ssl_key FROM connections WHERE id = ?`, conn.ID).
 			Scan(&exHost, &exPort, &exDriver, &exKey); err == nil {
 			if strings.EqualFold(conn.Host, exHost) && conn.Port == exPort && strings.EqualFold(conn.Driver, exDriver) {
 				sslKey = exKey.String
@@ -454,7 +464,7 @@ func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 		var exHost, exDriver string
 		var exPort, exUseSSL int
 		var exCA, exCert, exKey sql.NullString
-		if err := v.db.QueryRow(`SELECT host, port, driver, use_ssl, ssl_ca, ssl_cert, ssl_key FROM connections WHERE id = ?`, conn.ID).
+		if err := exec.QueryRow(`SELECT host, port, driver, use_ssl, ssl_ca, ssl_cert, ssl_key FROM connections WHERE id = ?`, conn.ID).
 			Scan(&exHost, &exPort, &exDriver, &exUseSSL, &exCA, &exCert, &exKey); err == nil {
 			if strings.EqualFold(conn.Host, exHost) && conn.Port == exPort && strings.EqualFold(conn.Driver, exDriver) {
 				useSSLInt = exUseSSL
@@ -499,7 +509,7 @@ func (v *Vault) SaveConnection(conn *ConnectionRecord) error {
 		updated_at = excluded.updated_at;
 	`
 
-	_, err = v.db.Exec(query,
+	_, err = exec.Exec(query,
 		conn.ID, conn.Name, conn.Environment, conn.Driver, conn.Host, conn.Port, conn.DatabaseName, conn.User,
 		encPass, useSSLInt, sslCA, sslCert, sslKey,
 		conn.CreatedAt, conn.UpdatedAt,

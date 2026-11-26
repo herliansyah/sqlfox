@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/herliansyah/sqlfox/internal/ai"
 	"github.com/herliansyah/sqlfox/internal/driver"
 	"github.com/herliansyah/sqlfox/internal/vault"
 )
@@ -332,7 +333,23 @@ func (s *Server) handleImportVault(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	count, err := vault.ImportVault(s.vault, req.Archive, req.ExportPassphrase)
+	isRemote := s.IsRemoteRequest(r)
+	count, err := vault.ImportVaultWithValidation(s.vault, req.Archive, req.ExportPassphrase, func(payload *vault.ExportPayload) error {
+		for _, conn := range payload.Connections {
+			if err := s.validateConnectionPayload(conn, isRemote); err != nil {
+				return err
+			}
+		}
+		for _, p := range payload.AIProfiles {
+			if p == nil {
+				return errors.New("ai profile payload is required")
+			}
+			if err := validateAIEndpoint(p.BaseURL, ai.Provider(p.Provider), isRemote); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "import failed: "+err.Error())
 		return

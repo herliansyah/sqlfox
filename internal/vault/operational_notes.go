@@ -44,6 +44,11 @@ func (v *Vault) CreateOperationalNote(n *OperationalNote) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
+	return v.createOperationalNote(v.db, n)
+}
+
+func (v *Vault) createOperationalNote(exec sqlExecutor, n *OperationalNote) error {
+
 	if n.ID == "" {
 		n.ID = newUUID()
 	}
@@ -99,7 +104,7 @@ func (v *Vault) CreateOperationalNote(n *OperationalNote) error {
 		updated_at = excluded.updated_at
 	`
 
-	_, err = v.db.Exec(query,
+	_, err = exec.Exec(query,
 		n.ID, n.Title, n.Content, n.SideNote, n.Status, isPinnedInt,
 		n.CapturedAt, n.ReminderAt, string(objTagsJSON), string(userTagsJSON), n.CreatedAt, n.UpdatedAt,
 	)

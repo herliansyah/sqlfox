@@ -455,3 +455,149 @@ func TestBoostReview_PKLessBatchEditDoesNotCorruptDistinctRowsAndDetectsConflict
 		t.Fatalf("expected 400 for same-session identical DB DataTransfer, got %d", resp.StatusCode)
 	}
 }
+
+func TestHandleImportVault_EnforcesConnectionAndAIValidationAtomically(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "config.db")
+	v, err := vault.OpenVault(vaultPath, "pw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	srv := NewServer(v, nil, filepath.Join(dir, "backups"), "pw")
+	defer srv.Close()
+
+	makeArchive := func(payload vault.ExportPayload) json.RawMessage {
+		t.Helper()
+		plain, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		salt, err := vault.GenerateSalt()
+		if err != nil {
+			t.Fatal(err)
+		}
+		key := vault.DeriveKey("export-pass", salt)
+		enc, err := vault.Encrypt(plain, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		archiveBytes, err := json.Marshal(vault.VaultArchive{
+			Version: 1,
+			Salt:    "not-used",
+			Data:    enc,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var archive map[string]any
+		_ = json.Unmarshal(archiveBytes, &archive)
+		// Encode salt properly via ExportVault helper? Let's use base64 via encoding/base64 or build via ExportVault:
+		_ = archive
+		return archiveBytes
+	}
+	_ = makeArchive
+
+	// Helper using a temporary source vault so we use the exact production ExportVault format
+	buildArchiveFromVault := func(mutate func(src *vault.Vault)) json.RawMessage {
+		t.Helper()
+		srcDir := t.TempDir()
+		src, err := vault.OpenVault(filepath.Join(srcDir, "src.db"), "src-pw")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer src.Close()
+		mutate(src)
+		raw, err := vault.ExportVault(src, "export-pass")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+
+	postImport := func(archive json.RawMessage, remoteAddr string) *httptest.ResponseRecorder {
+		reqBody, _ := json.Marshal(map[string]any{
+			"export_passphrase": "export-pass",
+			"archive":           archive,
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/vault/import", bytes.NewReader(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = remoteAddr
+		rec := httptest.NewRecorder()
+		srv.handleImportVault(rec, req)
+		return rec
+	}
+
+	// 1. Archive with a valid connection + an SSLKey filesystem path must be rejected and leave 0 connections.
+	sslPathArchive := buildArchiveFromVault(func(src *vault.Vault) {
+		_ = src.SaveConnection(&vault.ConnectionRecord{
+			Name:     "Valid MySQL",
+			Driver:   "mysql",
+			Host:     "db.internal",
+			Port:     3306,
+			User:     "app",
+			Password: "secret",
+		})
+		_ = src.SaveConnection(&vault.ConnectionRecord{
+			Name:   "Malicious TLS Path",
+			Driver: "mysql",
+			Host:   "attacker.example",
+			Port:   3306,
+			UseSSL: true,
+			SSLKey: "/etc/passwd",
+		})
+	})
+	if rec := postImport(sslPathArchive, "127.0.0.1:12345"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for filesystem SSLKey in vault import, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if conns, _ := v.ListConnections(); len(conns) != 0 {
+		t.Fatalf("expected atomic rollback (0 connections) on invalid SSLKey import, got %d", len(conns))
+	}
+
+	// 2. Archive targeting SqlFox's own config.db via SQLite must be rejected.
+	selfDBArchive := buildArchiveFromVault(func(src *vault.Vault) {
+		_ = src.SaveConnection(&vault.ConnectionRecord{
+			Name:         "Self Vault",
+			Driver:       "sqlite",
+			DatabaseName: vaultPath,
+		})
+	})
+	if rec := postImport(selfDBArchive, "127.0.0.1:12345"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for config.db SQLite target in vault import, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 3. Remote request importing an arbitrary SQLite filesystem path must be rejected.
+	remoteSQLiteArchive := buildArchiveFromVault(func(src *vault.Vault) {
+		_ = src.SaveConnection(&vault.ConnectionRecord{
+			Name:         "Remote SQLite",
+			Driver:       "sqlite",
+			DatabaseName: filepath.Join(dir, "other.db"),
+		})
+	})
+	if rec := postImport(remoteSQLiteArchive, "10.20.30.40:5555"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for remote SQLite path in vault import, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 4. Archive with a valid connection + an SSRF AIProfile BaseURL must be rejected atomically.
+	ssrfAIArchive := buildArchiveFromVault(func(src *vault.Vault) {
+		_ = src.SaveConnection(&vault.ConnectionRecord{
+			Name:   "Valid Postgres",
+			Driver: "postgres",
+			Host:   "pg.internal",
+			Port:   5432,
+		})
+		_ = src.SaveAIProfile(&vault.AIProfile{
+			Name:      "SSRF Profile",
+			Provider:  "openai",
+			BaseURL:   "http://169.254.169.254/latest/meta-data/",
+			ModelName: "gpt-4o",
+		})
+	})
+	if rec := postImport(ssrfAIArchive, "127.0.0.1:12345"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for SSRF AIProfile BaseURL in vault import, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if conns, _ := v.ListConnections(); len(conns) != 0 {
+		t.Fatalf("expected 0 connections after SSRF AIProfile rejection, got %d", len(conns))
+	}
+}

@@ -92,3 +92,44 @@ func TestVault_ExportImport(t *testing.T) {
 		t.Fatal("expected imported snippets in vault2, got 0")
 	}
 }
+
+func TestVault_ImportVaultWithValidation_AtomicRollback(t *testing.T) {
+	tempDir := t.TempDir()
+	v1, err := OpenVault(filepath.Join(tempDir, "v1.db"), "m1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v1.Close()
+
+	if err := v1.SaveConnection(&ConnectionRecord{
+		Name:   "Valid Conn",
+		Driver: "mysql",
+		Host:   "localhost",
+		Port:   3306,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Force a duplicate table note ID conflict or invalid operational note?
+	// Easier: test validator rejection prevents any DB write, and test transaction rollback when a save fails mid-loop.
+	archiveJSON, err := ExportVault(v1, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	v2, err := OpenVault(filepath.Join(tempDir, "v2.db"), "m2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v2.Close()
+
+	// Validator error must abort before writing anything
+	_, err = ImportVaultWithValidation(v2, archiveJSON, "pass", func(p *ExportPayload) error {
+		return os.ErrPermission
+	})
+	if err == nil {
+		t.Fatal("expected validation error, got nil")
+	}
+	if conns, _ := v2.ListConnections(); len(conns) != 0 {
+		t.Fatalf("expected 0 connections after validation failure, got %d", len(conns))
+	}
+}
