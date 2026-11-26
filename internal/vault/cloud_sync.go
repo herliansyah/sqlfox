@@ -78,10 +78,11 @@ type CloudSyncConfig struct {
 
 // CloudSyncResult represents the outcome of a sync operation.
 type CloudSyncResult struct {
-	CommitSHA  string    `json:"commit_sha"`
-	FilesCount int       `json:"files_count"`
-	Message    string    `json:"message"`
-	SyncedAt   time.Time `json:"synced_at"`
+	CommitSHA   string    `json:"commit_sha"`
+	FilesCount  int       `json:"files_count"`
+	PulledCount int       `json:"pulled_count"`
+	Message     string    `json:"message"`
+	SyncedAt    time.Time `json:"synced_at"`
 }
 
 type cloudSyncStoredPayload struct {
@@ -492,18 +493,48 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 	defer treeResp.Body.Close()
 
 	var existingFiles []string
+	existingBlobSHAs := make(map[string]string)
 	if treeResp.StatusCode == http.StatusOK {
 		var treeData struct {
 			Tree []struct {
 				Path string `json:"path"`
 				Type string `json:"type"`
+				SHA  string `json:"sha"`
 			} `json:"tree"`
 		}
 		if err := json.NewDecoder(treeResp.Body).Decode(&treeData); err == nil {
 			for _, item := range treeData.Tree {
 				if item.Type == "blob" && isSyncManagedPath(item.Path, prefix) {
 					existingFiles = append(existingFiles, item.Path)
+					existingBlobSHAs[item.Path] = item.SHA
 				}
+			}
+		}
+	}
+
+	// 6.5 Two-way pull/merge: when remote has unseen commits (or this is a fresh machine),
+	// pull any remote notes/table-notes/snippets missing locally into the vault before pushing.
+	pulledCount := 0
+	if cfg.LastCommitSHA == "" || cfg.LastCommitSHA != latestCommitSHA {
+		treePrefix := ""
+		if prefix != "" {
+			treePrefix = prefix + "/"
+		}
+		for remotePath, blobSHA := range existingBlobSHAs {
+			if _, exists := files[remotePath]; exists || blobSHA == "" {
+				continue
+			}
+			relPath := strings.TrimPrefix(remotePath, treePrefix)
+			if !strings.HasPrefix(relPath, "notes/") && !strings.HasPrefix(relPath, "table-notes/") && !strings.HasPrefix(relPath, "snippets/") {
+				continue
+			}
+			blobBytes, bErr := fetchGitHubBlob(ctx, client, apiBaseURL, repo, cfg.GitHubToken, blobSHA)
+			if bErr != nil {
+				continue
+			}
+			if ImportNoteFile(v, relPath, blobBytes) {
+				pulledCount++
+				files[remotePath] = blobBytes
 			}
 		}
 	}
@@ -594,10 +625,11 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 		cfg.LastSyncError = ""
 		_ = v.UpdateCloudSyncStatus("synced", "", &now, latestCommitSHA)
 		return &CloudSyncResult{
-			CommitSHA:  latestCommitSHA,
-			FilesCount: len(files),
-			Message:    "Already up to date (no changes detected)",
-			SyncedAt:   now,
+			CommitSHA:   latestCommitSHA,
+			FilesCount:  len(files),
+			PulledCount: pulledCount,
+			Message:     "Already up to date (no changes detected)",
+			SyncedAt:    now,
 		}, nil
 	}
 
@@ -661,11 +693,44 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 	_ = v.UpdateCloudSyncStatus("synced", "", &now, newCommitData.SHA)
 
 	return &CloudSyncResult{
-		CommitSHA:  newCommitData.SHA,
-		FilesCount: len(files),
-		Message:    commitMsg,
-		SyncedAt:   now,
+		CommitSHA:   newCommitData.SHA,
+		FilesCount:  len(files),
+		PulledCount: pulledCount,
+		Message:     commitMsg,
+		SyncedAt:    now,
 	}, nil
+}
+
+func fetchGitHubBlob(ctx context.Context, client *http.Client, apiBaseURL, repo, token, blobSHA string) ([]byte, error) {
+	blobURL := fmt.Sprintf("%s/repos/%s/git/blobs/%s", apiBaseURL, repo, blobSHA)
+	req, err := http.NewRequestWithContext(ctx, "GET", blobURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	setGitHubHeaders(req, token)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("github blob fetch failed (HTTP %d): %s", resp.StatusCode, readGitHubErrorBody(resp.Body))
+	}
+
+	var res struct {
+		Content  string `json:"content"`
+		Encoding string `json:"encoding"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 10<<20)).Decode(&res); err != nil {
+		return nil, err
+	}
+	if res.Encoding == "base64" {
+		cleaned := strings.ReplaceAll(res.Content, "\n", "")
+		return base64.StdEncoding.DecodeString(cleaned)
+	}
+	return []byte(res.Content), nil
 }
 
 func createGitHubBlob(ctx context.Context, client *http.Client, apiBaseURL, repo, token string, content []byte) (string, error) {
