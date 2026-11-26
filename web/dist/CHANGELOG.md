@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [v0.20.0] - 2026-11-26
 
+## [v0.20.0] - 2026-11-26
+
 ### Security
 
 - **Ephemeral LAN Pairing Code replacing plaintext master password (`internal/server/auth.go`, `web/frontend`)**: `GET /api/auth/master-key` no longer returns the plaintext `master_password`; it now returns a single-use 8-digit pairing code with a 5-minute TTL. Settings and Header UI updated accordingly. **BREAKING CHANGE** (#158).
