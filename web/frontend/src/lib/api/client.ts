@@ -52,7 +52,9 @@ export async function syncOrMigrateLegacyAiConfig(): Promise<void> {
     }
     storage.remove('sqlfox_ai_config');
   } catch (e) {
-    console.warn('Failed to migrate legacy AI config:', e);
+    console.warn('Failed to migrate legacy AI config; discarding stored config:', e);
+  } finally {
+    storage.remove('sqlfox_ai_config');
   }
 }
 

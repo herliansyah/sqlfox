@@ -53,7 +53,8 @@ export function loadAiConfig(): AiConfig {
       ...saved,
       baseUrl: saved.baseUrl || saved.endpoint || defaults.baseUrl,
       modelName: saved.modelName || saved.model || defaults.modelName,
-      apiKey: saved.apiKey ?? saved.api_key ?? defaults.apiKey,
+      // ponytail: no client-side key cache; secrets come from profiles via getAiProfile.
+      apiKey: '',
       language: saved.language || defaults.language,
       responseStyle: saved.responseStyle || saved.response_style || defaults.responseStyle,
       customPrompt: saved.customPrompt ?? saved.custom_prompt ?? defaults.customPrompt,
