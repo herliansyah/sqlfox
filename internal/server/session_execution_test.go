@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1270,5 +1272,64 @@ func TestExecuteMultiStatementUSE(t *testing.T) {
 			!strings.Contains(err.Error(), "database name required after USE") {
 			t.Fatalf("expected empty USE to fail clearly for %q, got: %v", script, err)
 		}
+	}
+}
+
+func TestSaveConnection_ResetsActiveSessionAndReadOnly(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultDB := filepath.Join(tempDir, "vault.db")
+	targetDB := filepath.Join(tempDir, "target.db")
+	v, err := vault.OpenVault(vaultDB, "test-master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	conn := &vault.ConnectionRecord{
+		Name:         "Mutable SQLite",
+		Environment:  "Development",
+		Driver:       "sqlite",
+		DatabaseName: targetDB,
+	}
+	if err := v.SaveConnection(conn); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := NewServer(v, nil, filepath.Join(tempDir, "backups"), "test-master")
+	defer srv.sessionMgr.CloseAll()
+
+	sess, err := srv.sessionMgr.ConnectSession(context.Background(), conn.ID)
+	if err != nil {
+		t.Fatalf("ConnectSession failed: %v", err)
+	}
+	if sess.ReadOnly {
+		t.Fatal("expected Development session to start writable")
+	}
+
+	// Update Environment -> Production via handleSaveConnection
+	updated := *conn
+	updated.Environment = "Production"
+	body, _ := json.Marshal(updated)
+	req := httptest.NewRequest(http.MethodPost, "/api/connections", bytes.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:1234"
+	rec := httptest.NewRecorder()
+	srv.handleSaveConnection(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	srv.sessionMgr.mu.RLock()
+	_, stillOpen := srv.sessionMgr.sessions[conn.ID]
+	srv.sessionMgr.mu.RUnlock()
+	if stillOpen {
+		t.Fatal("expected active session to be closed after connection update")
+	}
+
+	reconnected, err := srv.sessionMgr.ConnectSession(context.Background(), conn.ID)
+	if err != nil {
+		t.Fatalf("reconnect failed: %v", err)
+	}
+	if !reconnected.ReadOnly {
+		t.Fatal("expected reconnected Production session to default to ReadOnly")
 	}
 }

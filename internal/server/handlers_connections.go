@@ -188,6 +188,13 @@ func (s *Server) handleSaveConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Reset any active session and cached read-only override so updated
+	// credentials, host, or environment take effect on next connect.
+	if conn.ID != "" {
+		_ = s.sessionMgr.CloseSession(conn.ID)
+		s.sessionMgr.RemoveReadOnly(conn.ID)
+	}
+
 	conn.Password = ""
 	conn.SSLKey = ""
 	writeJSON(w, http.StatusOK, conn)
