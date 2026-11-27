@@ -2089,8 +2089,17 @@ export class AppState {
     let sql = (sqlOverride ?? tab.sql ?? '').trim();
     if (!sql) return;
 
+    // Claim the tab before the first await (param dialog, USE switch, safety challenge) so a
+    // second Run click cannot start a parallel execution of the same tab.
+    tab.isExecuting = true;
+    this.commitTab(tab);
+    const releaseClaim = () => {
+      tab.isExecuting = false;
+      this.commitTab(tab);
+    };
+
     const boundSql = await this.promptAndBindSqlParams(sql);
-    if (boundSql === null) return;
+    if (boundSql === null) return releaseClaim();
     sql = boundSql;
 
     // Sync USE <database> statements bidirectionally with active tab DB scope
@@ -2112,7 +2121,7 @@ export class AppState {
     let challengeInput = '';
     if (clientMismatch) {
       const res = await this.promptSafetyChallenge(sql, clientMismatch);
-      if (!res.confirmed) return;
+      if (!res.confirmed) return releaseClaim();
       confirmed = true;
       challengeInput = res.challengeInput;
     }
@@ -2122,7 +2131,6 @@ export class AppState {
     this.activeAbortControllers.set(tab.id, controller);
     this.activeQueryIds.set(tab.id, queryId);
 
-    tab.isExecuting = true;
     tab.isStreaming = true;
     tab.executionStartedAt = performance.now();
     tab.executionElapsedMs = 0;
@@ -2957,7 +2965,9 @@ export class AppState {
         return;
       }
     }
-    await this.commitStagedEdits();
+    // The user may have switched tabs while the confirm dialog was open: commit the edit in its
+    // owning tab, not whichever tab is active now.
+    await this.commitStagedEdits(this.tabs.find((t) => t.id === edit.tabId));
   }
 
   setGridEditMode(mode: 'staged' | 'auto') {
@@ -3030,8 +3040,8 @@ export class AppState {
     };
   }
 
-  async commitStagedEdits() {
-    await commitStagedEditsAction(this.gridEditsContext());
+  async commitStagedEdits(tab?: EditorTab) {
+    await commitStagedEditsAction(this.gridEditsContext(), tab);
   }
 
   async insertRow(data: Record<string, any>): Promise<boolean> {
@@ -3495,6 +3505,7 @@ export class AppState {
 
       this.stageEdit(tableName, rowIdx, colIdx, colName, pkCol, pkVal, oldVal, newVal, effectiveDb, rowCriteria, pkValues);
       result.rows[rowIdx][colIdx] = newVal;
+      if (tab) this.commitTab(tab);
       this.showToast(`Staged JSON update for '${colName}'`, 'info');
     }
   }

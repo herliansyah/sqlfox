@@ -770,6 +770,7 @@
         pkValues
       );
       result.rows[origIdx][cIdx] = newVal;
+      if (currentTab) appState.patchTab(currentTab.id, { activeResult: currentTab.activeResult });
       flashCell(origIdx, cIdx);
     }
     editingCell = null;

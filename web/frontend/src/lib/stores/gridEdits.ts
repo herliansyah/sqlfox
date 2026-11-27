@@ -20,13 +20,14 @@ export interface GridEditsContext {
   executeCurrentTab(): Promise<void>;
 }
 
-export async function commitStagedEditsAction(ctx: GridEditsContext): Promise<void> {
+export async function commitStagedEditsAction(ctx: GridEditsContext, targetTab?: EditorTab): Promise<void> {
   if (!ctx.activeSessionId) return;
   if (ctx.isReadOnly) {
     ctx.showToast('Read-only mode is active — writes blocked', 'warning');
     return;
   }
-  const tab = ctx.activeTab;
+  // targetTab lets a caller commit edits that belong to a tab the user has since left.
+  const tab = targetTab ?? ctx.activeTab;
   const activeTable = tab?.tableName || tab?.detectedTableName;
   const activeDb = tab?.detectedTableDatabase || tab?.database || ctx.currentDatabase;
   const allEntries = Object.entries(ctx.stagedEdits);
@@ -124,11 +125,9 @@ export async function commitStagedEditsAction(ctx: GridEditsContext): Promise<vo
     ctx.showToast(`Saved ${totalAffected} change(s) successfully`, 'success');
     ctx.auditRefreshToken++;
 
-    if (ctx.activeTab?.isTableViewer) {
-      await ctx.loadTableData(ctx.activeTab);
-    } else {
-      await ctx.executeCurrentTab();
-    }
+    // Reload the tab the edits belonged to; executeCurrentTab() only ever targets the active tab.
+    if (tab?.isTableViewer) await ctx.loadTableData(tab);
+    else if (tab?.id === ctx.activeTab?.id) await ctx.executeCurrentTab();
   } catch (err: any) {
     ctx.showToast(`Failed to commit edits: ${err.message}`, 'error');
   } finally {
