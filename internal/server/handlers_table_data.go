@@ -1010,15 +1010,16 @@ func (s *Server) handleSaveTableNote(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to create table note: "+err.Error())
 			return
 		}
-	}
-
-	note := &vault.TableNote{
-		ConnectionID: connID,
-		DatabaseName: dbName,
-		TableName:    tableName,
-		Content:      req.Content,
+		existingNote = newOpNote
 	}
 
 	s.notifyCloudSyncChange()
-	writeJSON(w, http.StatusOK, note)
+	writeJSON(w, http.StatusOK, &vault.TableNote{
+		ID:           existingNote.ID,
+		ConnectionID: connID,
+		DatabaseName: dbName,
+		TableName:    tableName,
+		Content:      existingNote.Content,
+		UpdatedAt:    existingNote.UpdatedAt,
+	})
 }

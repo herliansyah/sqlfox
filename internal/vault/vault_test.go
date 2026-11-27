@@ -237,6 +237,56 @@ func TestVault_TableNotes(t *testing.T) {
 	}
 }
 
+// Regression: runbook operational notes written by handleSaveTableNote must be
+// visible to the AI copilot's table-note context, and must shadow legacy rows.
+func TestVault_TableNotesFromRunbookOperationalNotes(t *testing.T) {
+	v, err := OpenVault(filepath.Join(t.TempDir(), "config.db"), "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	runbook := &OperationalNote{
+		Title:      "Runbook: orders",
+		Content:    "Filter is_deleted = 0",
+		SideNote:   "check index",
+		IsPinned:   true,
+		ObjectTags: []string{"db://conn-1/sales_db/orders"},
+	}
+	if err := v.CreateOperationalNote(runbook); err != nil {
+		t.Fatal(err)
+	}
+	// Legacy row for the same table must not win.
+	if err := v.SaveTableNote(&TableNote{ConnectionID: "conn-1", DatabaseName: "sales_db", TableName: "orders", Content: "legacy"}); err != nil {
+		t.Fatal(err)
+	}
+	// Legacy row for another table is kept.
+	if err := v.SaveTableNote(&TableNote{ConnectionID: "conn-1", DatabaseName: "sales_db", TableName: "legacy_only", Content: "legacy"}); err != nil {
+		t.Fatal(err)
+	}
+	// Tag of a different connection must not leak in (prefix collision guard).
+	if err := v.CreateOperationalNote(&OperationalNote{Title: "other", Content: "nope", ObjectTags: []string{"db://conn-10/sales_db/orders"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	notes, err := v.ListTableNotesForConnection("conn-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(notes) != 2 {
+		t.Fatalf("expected 2 notes, got %d: %+v", len(notes), notes)
+	}
+	if notes[0].TableName != "legacy_only" || notes[0].Content != "legacy" {
+		t.Fatalf("unexpected legacy note: %+v", notes[0])
+	}
+	if notes[1].TableName != "orders" || notes[1].ID != runbook.ID {
+		t.Fatalf("runbook note not surfaced: %+v", notes[1])
+	}
+	if want := "Filter is_deleted = 0\n\nDeveloper Notes:\ncheck index"; notes[1].Content != want {
+		t.Fatalf("content = %q, want %q", notes[1].Content, want)
+	}
+}
+
 // Regression: the SSL client private key must be encrypted at rest and round-trip intact.
 func TestVault_SSLKeyEncryptedAtRest(t *testing.T) {
 	v, err := OpenVault(filepath.Join(t.TempDir(), "config.db"), "pass")

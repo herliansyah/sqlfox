@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -71,8 +73,74 @@ func (v *Vault) saveTableNote(exec sqlExecutor, n *TableNote) error {
 	return nil
 }
 
-// ListTableNotesForConnection returns all notes saved for a specific connection.
+// ListTableNotesForConnection returns table notes for a connection. Runbook
+// operational notes tagged db://<conn>/<db>/<table> are the source of truth for
+// notes written from the UI; legacy table_notes rows fill gaps for tables without
+// a runbook note (bundle imports).
 func (v *Vault) ListTableNotesForConnection(connectionID string) ([]*TableNote, error) {
+	opNotes, err := v.ListOperationalNotes(OperationalNoteFilter{ObjectTag: "db://" + connectionID + "/"})
+	if err != nil {
+		return nil, err
+	}
+
+	legacy, err := v.listLegacyTableNotesForConnection(connectionID)
+	if err != nil {
+		return nil, err
+	}
+
+	byTable := make(map[string]*TableNote, len(opNotes)+len(legacy))
+	for _, n := range legacy {
+		byTable[n.DatabaseName+"\x00"+n.TableName] = n
+	}
+	for _, on := range opNotes {
+		dbName, tableName, ok := parseTableTag(on.ObjectTags, connectionID)
+		if !ok {
+			continue
+		}
+		content := on.Content
+		if on.SideNote != "" {
+			content += "\n\nDeveloper Notes:\n" + on.SideNote
+		}
+		byTable[dbName+"\x00"+tableName] = &TableNote{
+			ID:           on.ID,
+			ConnectionID: connectionID,
+			DatabaseName: dbName,
+			TableName:    tableName,
+			Content:      content,
+			UpdatedAt:    on.UpdatedAt,
+		}
+	}
+
+	result := make([]*TableNote, 0, len(byTable))
+	for _, n := range byTable {
+		result = append(result, n)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].DatabaseName != result[j].DatabaseName {
+			return result[i].DatabaseName < result[j].DatabaseName
+		}
+		return result[i].TableName < result[j].TableName
+	})
+	return result, nil
+}
+
+// parseTableTag extracts the database and table name from a db:// tag for the given connection.
+func parseTableTag(tags []string, connectionID string) (databaseName, tableName string, ok bool) {
+	prefix := "db://" + connectionID + "/"
+	for _, tag := range tags {
+		rest, found := strings.CutPrefix(tag, prefix)
+		if !found {
+			continue
+		}
+		if dbName, table, found := strings.Cut(rest, "/"); found && table != "" {
+			return dbName, table, true
+		}
+	}
+	return "", "", false
+}
+
+// listLegacyTableNotesForConnection returns notes from the legacy table_notes table.
+func (v *Vault) listLegacyTableNotesForConnection(connectionID string) ([]*TableNote, error) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 
