@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -278,6 +279,34 @@ func TestResolveGitHubAPIBase(t *testing.T) {
 		if _, err := resolveGitHubAPIBase(c); err == nil {
 			t.Errorf("expected api_base_url %q to be rejected, but it was accepted", c)
 		}
+	}
+}
+
+func TestCloudSyncDialGuardBlocksInternalEndpoints(t *testing.T) {
+	for _, base := range []string{
+		"https://10.0.0.5",        // RFC1918
+		"https://169.254.169.254", // link-local metadata
+		"https://100.64.0.1",      // CGNAT
+	} {
+		err := TestGitHubAccess(context.Background(), base, "test-token", "owner/repo", "main")
+		if err == nil || !strings.Contains(err.Error(), "blocked dial to restricted IP") {
+			t.Errorf("TestGitHubAccess(%s) error = %v; want blocked dial", base, err)
+		}
+	}
+}
+
+func TestCloudSyncRemoteRequestBlocksLoopback(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	if err := TestGitHubAccess(context.Background(), ts.URL, "test-token", "owner/repo", "main"); err != nil {
+		t.Fatalf("local loopback request should pass: %v", err)
+	}
+	err := TestGitHubAccess(context.Background(), ts.URL, "test-token", "owner/repo", "main", true)
+	if err == nil || !strings.Contains(err.Error(), "blocked dial to restricted IP") {
+		t.Fatalf("remote loopback request error = %v; want blocked dial", err)
 	}
 }
 

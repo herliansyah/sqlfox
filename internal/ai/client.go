@@ -9,106 +9,32 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/herliansyah/sqlfox/internal/netguard"
 )
-
-var (
-	_, aiCGNATRange, _ = net.ParseCIDR("100.64.0.0/10")
-	_, aiNAT64Range, _ = net.ParseCIDR("64:ff9b::/96")
-	aiAWSIPv6IMDS      = net.ParseIP("fd00:ec2::254")
-)
-
-func isBlockedDialIP(ip net.IP, allowLoopback, allowPrivate bool) bool {
-	if ip == nil {
-		return true
-	}
-	if ip4 := ip.To4(); ip4 != nil {
-		ip = ip4
-		if ip[0] == 0 {
-			return true
-		}
-	}
-	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
-		return true
-	}
-	if aiCGNATRange != nil && aiCGNATRange.Contains(ip) {
-		return true
-	}
-	if aiNAT64Range != nil && aiNAT64Range.Contains(ip) {
-		return true
-	}
-	if aiAWSIPv6IMDS != nil && ip.Equal(aiAWSIPv6IMDS) {
-		return true
-	}
-	if ip.IsLoopback() {
-		return !allowLoopback
-	}
-	if !allowPrivate && ip.IsPrivate() {
-		return true
-	}
-	return false
-}
-
-func isExplicitLoopbackEndpoint(rawURL string) bool {
-	u, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil {
-		return false
-	}
-	host := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(u.Hostname())), ".")
-	if host == "localhost" {
-		return true
-	}
-	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
-		return true
-	}
-	return false
-}
-
-func safeAIDialContext(allowLoopback, allowPrivate bool) func(ctx context.Context, network, addr string) (net.Conn, error) {
-	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
-	return func(ctx context.Context, network, addr string) (net.Conn, error) {
-		host, port, err := net.SplitHostPort(addr)
-		if err != nil {
-			return nil, err
-		}
-		ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
-		if err != nil {
-			return nil, err
-		}
-		for _, ip := range ips {
-			if isBlockedDialIP(ip, allowLoopback, allowPrivate) {
-				return nil, fmt.Errorf("blocked dial to restricted IP %s", ip.String())
-			}
-		}
-		if len(ips) == 0 {
-			return nil, errors.New("no IP addresses resolved")
-		}
-		return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
-	}
-}
 
 var (
 	sharedCloudAITransport = &http.Transport{
 		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
-		DialContext:         safeAIDialContext(false, false),
+		DialContext:         netguard.SafeDialContext(false, false),
 		MaxIdleConns:        32,
 		IdleConnTimeout:     60 * time.Second,
 		TLSHandshakeTimeout: 10 * time.Second,
 	}
 	sharedLoopbackAITransport = &http.Transport{
 		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
-		DialContext:         safeAIDialContext(true, false),
+		DialContext:         netguard.SafeDialContext(true, false),
 		MaxIdleConns:        16,
 		IdleConnTimeout:     60 * time.Second,
 		TLSHandshakeTimeout: 10 * time.Second,
 	}
 	sharedLocalAITransport = &http.Transport{
 		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
-		DialContext:         safeAIDialContext(true, true),
+		DialContext:         netguard.SafeDialContext(true, true),
 		MaxIdleConns:        16,
 		IdleConnTimeout:     60 * time.Second,
 		TLSHandshakeTimeout: 10 * time.Second,
@@ -164,7 +90,7 @@ func NewAIClient(cfg ClientConfig) *AIClient {
 		cfg.Endpoint = ep
 	}
 
-		if cfg.Model == "" {
+	if cfg.Model == "" {
 		switch cfg.Provider {
 		case ProviderOpenAI:
 			cfg.Model = "gpt-4o-mini"
@@ -181,7 +107,7 @@ func NewAIClient(cfg ClientConfig) *AIClient {
 	if !cfg.RemoteRequest {
 		if cfg.Provider == ProviderOllama {
 			transport = sharedLocalAITransport
-		} else if isExplicitLoopbackEndpoint(cfg.Endpoint) {
+		} else if netguard.IsExplicitLoopbackEndpoint(cfg.Endpoint) {
 			// Local user pointing directly at a local proxy (e.g. 127.0.0.1 / localhost): allow loopback,
 			// but never allow DNS rebinding from public hostnames to loopback or RFC1918.
 			transport = sharedLoopbackAITransport

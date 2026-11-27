@@ -175,7 +175,7 @@ func (s *Server) handleTestCloudSync(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	if err := vault.TestGitHubAccess(ctx, apiBaseURL, token, repo, branch); err != nil {
+	if err := vault.TestGitHubAccess(ctx, apiBaseURL, token, repo, branch, s.IsRemoteRequest(r)); err != nil {
 		writeError(w, http.StatusBadRequest, "Connection test failed: "+err.Error())
 		return
 	}
@@ -218,7 +218,7 @@ func (s *Server) handleRunCloudSync(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
-	res, err := vault.SyncToGitHub(ctx, s.vault, cfg, s.masterPassword)
+	res, err := vault.SyncToGitHub(ctx, s.vault, cfg, s.masterPassword, s.IsRemoteRequest(r))
 	if err != nil {
 		_ = s.vault.UpdateCloudSyncStatus("error", err.Error(), nil, "")
 		writeError(w, http.StatusInternalServerError, "Sync failed: "+err.Error())
@@ -376,7 +376,8 @@ func (s *Server) notifyCloudSyncChange() {
 
 		_ = s.vault.UpdateCloudSyncStatus("syncing", "", nil, "")
 
-		_, syncErr := vault.SyncToGitHub(ctx, s.vault, currentCfg, s.masterPassword)
+		// No request to inspect here; keep loopback blocked for background sync.
+		_, syncErr := vault.SyncToGitHub(ctx, s.vault, currentCfg, s.masterPassword, true)
 		if syncErr != nil {
 			_ = s.vault.UpdateCloudSyncStatus("error", syncErr.Error(), nil, "")
 		}

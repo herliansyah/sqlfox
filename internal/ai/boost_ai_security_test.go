@@ -7,20 +7,22 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/herliansyah/sqlfox/internal/netguard"
 )
 
 func TestBoostP05_SSRFBlocksLoopbackAndRemoteOllama(t *testing.T) {
 	// Loopback IPs must be blocked when allowLoopback is false (prevents DNS rebinding to 127.0.0.1 / ::1).
 	for _, raw := range []string{"127.0.0.1", "127.0.1.1", "::1", "169.254.169.254", "100.64.0.1", "fd00:ec2::254", "0.0.0.0"} {
 		ip := net.ParseIP(raw)
-		if !isBlockedDialIP(ip, false, false) {
-			t.Errorf("isBlockedDialIP(%s, false, false) = false; want true", raw)
+		if !netguard.IsBlockedDialIP(ip, false, false) {
+			t.Errorf("IsBlockedDialIP(%s, false, false) = false; want true", raw)
 		}
 	}
-	if isBlockedDialIP(net.ParseIP("127.0.0.1"), true, false) {
+	if netguard.IsBlockedDialIP(net.ParseIP("127.0.0.1"), true, false) {
 		t.Errorf("expected explicit loopback to be allowed when allowLoopback=true")
 	}
-	if !isBlockedDialIP(net.ParseIP("10.0.0.5"), true, false) {
+	if !netguard.IsBlockedDialIP(net.ParseIP("10.0.0.5"), true, false) {
 		t.Errorf("expected RFC1918 private IP to be blocked when allowPrivate=false")
 	}
 

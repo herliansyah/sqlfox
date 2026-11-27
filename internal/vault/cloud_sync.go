@@ -3,6 +3,7 @@ package vault
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -14,6 +15,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/herliansyah/sqlfox/internal/netguard"
 )
 
 // reGitHubRepo constrains an "owner/repo" slug to the characters GitHub actually permits, so it can
@@ -25,9 +28,9 @@ var reGitHubRepo = regexp.MustCompile(`^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`)
 var reGitHubBranch = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 
 // resolveGitHubAPIBase validates and normalizes the API base URL. Only HTTPS is accepted so the
-// bearer token is never sent in cleartext, and a custom host is permitted only for the documented
-// enterprise/self-hosted GitHub API override — never an arbitrary attacker-chosen endpoint set via
-// a stored config (SSRF / token-exfiltration guard).
+// bearer token is never sent in cleartext; plain HTTP is limited to explicit loopback mock servers.
+// This is not an SSRF guard by itself: the HTTP client also uses netguard.SafeDialContext to reject
+// internal, link-local and CGNAT dial targets at connect time.
 func resolveGitHubAPIBase(apiBaseURL string) (string, error) {
 	apiBaseURL = strings.TrimSpace(apiBaseURL)
 	if apiBaseURL == "" {
@@ -48,6 +51,38 @@ func resolveGitHubAPIBase(apiBaseURL string) (string, error) {
 		return "", errors.New("api_base_url must use https")
 	}
 	return strings.TrimRight(apiBaseURL, "/"), nil
+}
+
+var (
+	cloudSyncPublicTransport = &http.Transport{
+		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
+		DialContext:         netguard.SafeDialContext(false, false),
+		MaxIdleConns:        8,
+		IdleConnTimeout:     60 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+	}
+	cloudSyncLoopbackTransport = &http.Transport{
+		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
+		DialContext:         netguard.SafeDialContext(true, false),
+		MaxIdleConns:        8,
+		IdleConnTimeout:     60 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+	}
+)
+
+// isRemote is variadic so local callers and mock tests can omit it.
+func newCloudSyncHTTPClient(apiBaseURL string, timeout time.Duration, isRemote ...bool) *http.Client {
+	transport := cloudSyncPublicTransport
+	if !(len(isRemote) > 0 && isRemote[0]) && netguard.IsExplicitLoopbackEndpoint(apiBaseURL) {
+		transport = cloudSyncLoopbackTransport
+	}
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: transport,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 }
 
 // validateGitHubTarget checks the repo slug and branch before they are interpolated into API paths.
@@ -261,7 +296,7 @@ func (v *Vault) UpdateCloudSyncStatus(status, syncErr string, lastSyncAt *time.T
 }
 
 // TestGitHubAccess verifies that the provided token has access to the target repository.
-func TestGitHubAccess(ctx context.Context, apiBaseURL, token, repo, branch string) error {
+func TestGitHubAccess(ctx context.Context, apiBaseURL, token, repo, branch string, isRemote ...bool) error {
 	if token == "" {
 		return errors.New("github token is required")
 	}
@@ -282,12 +317,7 @@ func TestGitHubAccess(ctx context.Context, apiBaseURL, token, repo, branch strin
 	}
 	setGitHubHeaders(req, token)
 
-	client := &http.Client{
-		Timeout: 15 * time.Second,
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
+	client := newCloudSyncHTTPClient(apiBaseURL, 15*time.Second, isRemote...)
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to connect to github: %w", err)
@@ -331,7 +361,7 @@ func isSyncManagedPath(p, prefix string) bool {
 }
 
 // SyncToGitHub executes the full atomic synchronization of notes, snippets, and encrypted vault archive.
-func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPassword string) (*CloudSyncResult, error) {
+func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPassword string, isRemote ...bool) (*CloudSyncResult, error) {
 	if cfg.GitHubToken == "" {
 		return nil, errors.New("github token is not configured")
 	}
@@ -381,12 +411,7 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 		files = prefixedFiles
 	}
 
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
+	client := newCloudSyncHTTPClient(apiBaseURL, 30*time.Second, isRemote...)
 
 	// Refuse pushing vault backup secrets, operational notes, or SQL snapshots to a public GitHub
 	// repository regardless of IncludeVaultBackup (fail closed for all sync modes).
