@@ -205,6 +205,13 @@ fi
 if [ -f "scripts/build_web.js" ]; then
   echo "📦 Rebuilding web dist bundle..."
   node scripts/build_web.js
+  if [ "$SKIP_TESTS" = false ]; then
+    echo "🧪 Re-running Go web embed tests..."
+    if ! go test ./web/...; then
+      echo "❌ Post-build web tests failed! Aborting release."
+      exit 1
+    fi
+  fi
 fi
 
 

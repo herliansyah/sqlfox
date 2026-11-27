@@ -9,12 +9,22 @@ import (
 	"sync"
 )
 
+func IsPgDriver(d string) bool {
+	return strings.EqualFold(d, "postgres") || strings.EqualFold(d, "postgresql") || strings.EqualFold(d, "pg") || strings.EqualFold(d, "pgx")
+}
+
+func IsSqliteDriver(d string) bool {
+	return strings.EqualFold(d, "sqlite") || strings.EqualFold(d, "sqlite3")
+}
+
+func IsMySQLDriver(d string) bool {
+	return strings.EqualFold(d, "mysql") || strings.EqualFold(d, "mariadb")
+}
+
 func QuoteIdentifier(name, driverName string) string {
 	name = strings.ReplaceAll(name, "\x00", "")
 	name = strings.Trim(name, "`\"")
-	if strings.EqualFold(driverName, "sqlite") || strings.EqualFold(driverName, "sqlite3") ||
-		strings.EqualFold(driverName, "postgres") || strings.EqualFold(driverName, "postgresql") ||
-		strings.EqualFold(driverName, "pg") || strings.EqualFold(driverName, "pgx") {
+	if IsSqliteDriver(driverName) || IsPgDriver(driverName) {
 		return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 	}
 	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
@@ -22,8 +32,7 @@ func QuoteIdentifier(name, driverName string) string {
 
 // Placeholder returns the parameter placeholder for the given driver and 1-based index.
 func Placeholder(driverName string, index int) string {
-	d := strings.ToLower(driverName)
-	if strings.HasPrefix(d, "postgre") || d == "pg" || d == "pgx" {
+	if IsPgDriver(driverName) {
 		return fmt.Sprintf("$%d", index)
 	}
 	return "?"

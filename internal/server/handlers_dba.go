@@ -201,7 +201,7 @@ func (s *Server) handleKillProcess(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	if !strings.EqualFold(sess.DriverName, "sqlite") && !strings.EqualFold(sess.DriverName, "sqlite3") {
+	if !driver.IsSqliteDriver(sess.DriverName) {
 		immunePIDs, immErr := findImmunePIDs(ctx, sess)
 		if immErr != nil {
 			writeError(w, http.StatusServiceUnavailable, immErr.Error())
@@ -542,7 +542,7 @@ func (s *Server) handleGetUserGrants(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isMySQLFamily := strings.EqualFold(sess.DriverName, "mysql") || strings.EqualFold(sess.DriverName, "mariadb")
+	isMySQLFamily := driver.IsMySQLDriver(sess.DriverName)
 	user := r.URL.Query().Get("user")
 	host := r.URL.Query().Get("host")
 	if user == "" || (isMySQLFamily && host == "") {
@@ -587,7 +587,7 @@ func (s *Server) handleSaveUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isMySQLFamily := strings.EqualFold(sess.DriverName, "mysql") || strings.EqualFold(sess.DriverName, "mariadb")
+	isMySQLFamily := driver.IsMySQLDriver(sess.DriverName)
 	var req struct {
 		User     string `json:"user"`
 		Host     string `json:"host"`
@@ -624,7 +624,7 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isMySQLFamily := strings.EqualFold(sess.DriverName, "mysql") || strings.EqualFold(sess.DriverName, "mariadb")
+	isMySQLFamily := driver.IsMySQLDriver(sess.DriverName)
 	user := r.URL.Query().Get("user")
 	host := r.URL.Query().Get("host")
 	confirmed := r.URL.Query().Get("confirmed") == "true"
@@ -695,7 +695,7 @@ func (s *Server) handleApplyUserGrants(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isMySQLFamily := strings.EqualFold(sess.DriverName, "mysql") || strings.EqualFold(sess.DriverName, "mariadb")
+	isMySQLFamily := driver.IsMySQLDriver(sess.DriverName)
 	var req struct {
 		driver.UserGrantRequest
 		Confirmed      bool   `json:"confirmed"`

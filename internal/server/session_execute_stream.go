@@ -122,7 +122,7 @@ func (s *ActiveSession) ExecuteStream(ctx context.Context, req ExecuteRequest, w
 		limit = 100000
 	}
 
-	isMySQLFamily := strings.EqualFold(s.DriverName, "mysql") || strings.EqualFold(s.DriverName, "mariadb")
+	isMySQLFamily := driver.IsMySQLDriver(s.DriverName)
 
 	currentTx, streamAborted, streamReason := s.getTxStatus(req.TabID)
 	if streamAborted {

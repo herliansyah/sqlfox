@@ -130,10 +130,10 @@ func isPrefixColumns(prefix, full []string) bool {
 }
 
 func generateDropIndexSQL(dialect, database, table, index string) string {
-	if strings.EqualFold(dialect, "sqlite") {
+	if IsSqliteDriver(dialect) {
 		return fmt.Sprintf("DROP INDEX %s;", QuoteIdentifier(index, "sqlite"))
 	}
-	if strings.EqualFold(dialect, "postgres") || strings.EqualFold(dialect, "postgresql") {
+	if IsPgDriver(dialect) {
 		if database != "" {
 			return fmt.Sprintf("DROP INDEX CONCURRENTLY IF EXISTS %s.%s;", QuoteIdentifier(database, "postgres"), QuoteIdentifier(index, "postgres"))
 		}

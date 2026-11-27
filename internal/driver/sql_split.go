@@ -10,7 +10,7 @@ import (
 )
 
 func SplitSQLStatements(sqlText, driverName string) []string {
-	isMySQL := strings.EqualFold(driverName, "mysql") || strings.EqualFold(driverName, "mariadb")
+	isMySQL := IsMySQLDriver(driverName)
 	return SplitWithDelimiters(sqlText, isMySQL, func(seg string) []string {
 		return splitDefaultDelimiter(seg, isMySQL)
 	})

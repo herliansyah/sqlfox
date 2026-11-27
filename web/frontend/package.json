@@ -1,6 +1,6 @@
 {
   "name": "sqlfox-frontend",
-  "version": "1.0.0",
+  "version": "0.20.1",
   "private": true,
   "type": "module",
   "scripts": {

@@ -293,7 +293,7 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		}
 	}()
 
-	isMySQLFamily := strings.EqualFold(s.DriverName, "mysql") || strings.EqualFold(s.DriverName, "mariadb")
+	isMySQLFamily := driver.IsMySQLDriver(s.DriverName)
 
 	collectFallbackProfile := func() *driver.QueryProfile {
 		if !req.Profile || s.Session == nil || isMySQLFamily {
@@ -650,48 +650,6 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		Profile:     prof,
 		TxActive:    currentTx != nil,
 	}, nil
-}
-
-// ExecuteStream streams query results line-by-line as NDJSON (ADR 0058).
-// It delivers an immediate micro-chunk (20 rows) for sub-50ms TTFR, followed by batched chunks.
-
-func (s *ActiveSession) Stream(ctx context.Context, sql string, maxRows int) (driver.RowStream, error) {
-	s.mu.Lock()
-	s.LastActive = time.Now()
-	s.mu.Unlock()
-
-	trimmedSQL := strings.TrimSpace(sql)
-	if trimmedSQL == "" {
-		return nil, errors.New("sql query is required")
-	}
-
-	isSelect := driver.IsQueryStatement(trimmedSQL)
-	targetDB := ""
-	if s.Schema() != nil {
-		targetDB = s.Schema().DatabaseName
-	}
-	if targetDB == "" {
-		targetDB = s.GetDatabaseName()
-	}
-	inspection, allQueries, err := inspectAllStatements(trimmedSQL, s.Environment, s.DriverName, targetDB)
-	if err != nil {
-		return nil, err
-	}
-	if s.IsReadOnly() && (!isSelect || !allQueries || inspection.IsDestructive) {
-		return nil, ErrReadOnlySession
-	}
-	if inspection.IsDestructive || inspection.RequiresChallenge {
-		return nil, fmt.Errorf("destructive query cannot be streamed: %s; use query editor with confirmation", inspection.Reason)
-	}
-	if !isSelect || !allQueries {
-		return nil, errors.New("only query statements (SELECT, SHOW, DESCRIBE, EXPLAIN) can be streamed")
-	}
-
-	if maxRows <= 0 {
-		maxRows = 100000
-	}
-
-	return s.queryStreamSafe(ctx, trimmedSQL, maxRows)
 }
 
 // queryStreamSafe enforces ReadOnlySession.QueryStreamReadOnly whenever the session is locked in Read-Only mode.

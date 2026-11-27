@@ -47,7 +47,7 @@ type ActiveSession struct {
 	tabTransactions map[string]*activeTxInfo
 	closed          bool
 	runSeq          uint64
-	inFlight        int // number of Execute/ExecuteStream/Stream calls currently running
+	inFlight        int // number of Execute/ExecuteStream calls currently running
 	auditWg         sync.WaitGroup
 	dbSwitchMu      sync.Mutex
 	mu              sync.RWMutex

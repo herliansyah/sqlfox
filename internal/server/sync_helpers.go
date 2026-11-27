@@ -12,13 +12,10 @@ import (
 	"unicode/utf8"
 )
 
-func isPgDriver(d string) bool {
-	return strings.EqualFold(d, "postgres") || strings.EqualFold(d, "postgresql") || strings.EqualFold(d, "pg")
-}
-
-func isSqliteDriver(d string) bool {
-	return strings.EqualFold(d, "sqlite") || strings.EqualFold(d, "sqlite3")
-}
+var (
+	isPgDriver     = driver.IsPgDriver
+	isSqliteDriver = driver.IsSqliteDriver
+)
 
 // qualifyTable mirrors the PG guard in handlers_table_data.go: on PostgreSQL the incoming db
 // may be the physical database name (not a schema); prefixing "mydb"."users" fails when no

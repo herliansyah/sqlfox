@@ -23,7 +23,7 @@ import (
 )
 
 // Version is overridden by cmd/sqlfox from main.Version so CLI help always matches the binary version.
-var Version = "v0.19.8"
+var Version = "v0.20.1"
 
 // PrintHelp writes the CLI command help to the provided writer.
 func PrintHelp(w io.Writer) {

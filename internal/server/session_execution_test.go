@@ -123,29 +123,9 @@ func TestActiveSession_SafeExecutionPipeline(t *testing.T) {
 		t.Fatalf("expected backup file on disk at %s, stat error: %v", res.BackupFile, statErr)
 	}
 
-	// 7. Test Stream Seam with SELECT query
-	// Recreate table and insert row
+	// Recreate logs table for read-only tests below
 	_, _ = sess.Execute(ctx, ExecuteRequest{SQL: "CREATE TABLE logs (id INT, msg TEXT);"})
 	_, _ = sess.Execute(ctx, ExecuteRequest{SQL: "INSERT INTO logs VALUES (1, 'hello');"})
-
-	stream, err := sess.Stream(ctx, "SELECT * FROM logs", 100)
-	if err != nil {
-		t.Fatalf("Stream failed for SELECT: %v", err)
-	}
-	chunk, err := stream.NextChunk(10)
-	if err != nil && len(chunk) == 0 {
-		t.Fatalf("Stream chunk failed: %v", err)
-	}
-	if len(chunk) != 1 {
-		t.Fatalf("expected 1 row in stream chunk, got %d", len(chunk))
-	}
-	stream.Close()
-
-	// 8. Test Stream Seam blocks Destructive Query (closing the WebSocket security leak)
-	_, err = sess.Stream(ctx, "DROP TABLE logs;", 100)
-	if err == nil || !strings.Contains(err.Error(), "destructive query cannot be streamed") {
-		t.Fatalf("expected destructive query to be blocked from Stream, got: %v", err)
-	}
 
 	// 9. Read-Only Session Mode Enforcement
 	sess.ReadOnly = true
@@ -201,16 +181,6 @@ func TestActiveSession_SafeExecutionPipeline(t *testing.T) {
 		t.Fatalf("expected PRAGMA table_info to return query rows, got: %v (%+v)", err, pragmaRes)
 	}
 
-	// Stream must reject DDL and DML statements
-	_, err = sess.Stream(ctx, "DROP TABLE logs;", 100)
-	if err != ErrReadOnlySession {
-		t.Fatalf("expected ErrReadOnlySession on Stream, got: %v", err)
-	}
-
-	_, err = sess.Stream(ctx, "INSERT INTO items (id, title) VALUES (999, 'Hacked');", 100)
-	if err == nil {
-		t.Fatal("expected Stream to reject non-query INSERT")
-	}
 }
 
 func TestSessionManager_ConnectPassesGuardAndBackup(t *testing.T) {

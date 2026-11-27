@@ -69,7 +69,6 @@
   let localSearchInputEl = $state<HTMLInputElement | null>(null);
   let editingCell = $state<{ rIdx: number; cIdx: number; tempValue: string } | null>(null);
   let flashedCells = $state<Record<string, boolean>>({});
-  let detailPrettyJson = $state(false);
 
   // FK datalist suggestions cache: `${sessionId}:${db}:${refTable}.${refCol}` -> string[]
   let fkDatalistCache = $state<Record<string, string[]>>({});
@@ -178,7 +177,6 @@
     rangeEnd = null;
     editingCell = null;
     contextMenu = null;
-    detailPrettyJson = false;
   });
 
   // Keep containerHeight/containerWidth synced with viewport/splitter resizes before any scroll event.

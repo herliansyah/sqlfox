@@ -305,6 +305,67 @@
   }
 </script>
 
+{#snippet tableItem(table: any, extraClass = '')}
+  <div
+    role="listitem"
+    oncontextmenu={(e) => handleTableContextMenu(e, table.name)}
+    class="relative flex items-center group rounded-md transition-all text-xs {isActiveTable(table.name)
+      ? 'bg-sky-500/15 text-sky-200 font-medium border-l-2 border-sky-400 shadow-[inset_0_0_12px_rgba(56,189,248,0.06)]'
+      : tableContextMenu?.open && tableContextMenu.tableName === table.name
+        ? 'bg-[#1e293b] text-slate-100 border-l-2 border-sky-500/60'
+        : 'text-slate-300 hover:bg-[#1e293b]/70 hover:text-slate-100 border-l-2 border-transparent'}"
+  >
+    <button
+      type="button"
+      onclick={() => appState.openTableDataTab(table.name)}
+      class="{extraClass}flex-1 text-left px-2 py-1 flex items-center justify-between truncate min-w-0"
+      title="Open {table.name} (Right-click for options)"
+    >
+      <div class="flex items-center space-x-2 truncate min-w-0 pr-1">
+        <Icon
+          name="table"
+          class="w-3.5 h-3.5 shrink-0 transition-colors {isActiveTable(table.name) ? 'text-sky-400' : 'text-slate-500 group-hover:text-sky-400'}"
+        />
+        <span class="truncate font-mono text-[11.5px]">{table.name}</span>
+      </div>
+
+      {#if (table.row_count !== undefined && table.row_count !== null) || (table.rows_count !== undefined && table.rows_count !== null)}
+        <span
+          class="text-[9.5px] text-slate-400 font-mono bg-slate-900/80 group-hover:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-800/80 ml-1.5 shrink-0 tabular-nums transition-opacity {tableContextMenu?.open && tableContextMenu.tableName === table.name ? 'opacity-0' : 'group-hover:opacity-0'}"
+          title="{table.row_count_exact ? 'Exact rows' : 'Estimated rows'}: {(table.row_count ?? table.rows_count ?? 0).toLocaleString()}"
+        >
+          {table.row_count_exact ? '' : '~'}{formatCount(table.row_count ?? table.rows_count)}
+        </span>
+      {/if}
+    </button>
+
+    <!-- Quick action buttons -->
+    <div
+      class="absolute right-1 flex items-center space-x-0.5 rounded transition-all {tableContextMenu?.open && tableContextMenu.tableName === table.name
+        ? 'opacity-100 pointer-events-auto bg-[#0f172a]/95 border border-slate-700/80 shadow-sm px-0.5 py-0.5'
+        : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/90 hover:bg-[#0f172a] border border-slate-700/60 shadow-sm px-0.5 py-0.5 backdrop-blur-sm'}"
+    >
+      <button
+        type="button"
+        onclick={(e) => { e.stopPropagation(); appState.openTableStructureTab(table.name); }}
+        class="p-1 hover:bg-slate-700/80 rounded text-slate-400 hover:text-sky-300 transition"
+        title="View Table Structure"
+      >
+        <Icon name="columns" class="w-3 h-3" />
+      </button>
+      <button
+        type="button"
+        onclick={(e) => handleTableContextMenu(e, table.name)}
+        class="p-1 hover:bg-slate-700/80 rounded text-slate-400 hover:text-white transition"
+        title="More options"
+      >
+        <Icon name="more-vertical" class="w-3 h-3" />
+      </button>
+    </div>
+  </div>
+{/snippet}
+
+
 <svelte:window onclick={closeTableMenu} onkeydown={handleKeydown} />
 
 {#if !appState.sidebarCollapsed}
@@ -819,63 +880,7 @@
                       {#if !collapsedPrefixes[grp.prefix]}
                         <div class="pl-2 space-y-0.5 border-l border-slate-800/80 ml-2.5 my-0.5">
                           {#each grp.tables as table (table.name)}
-                            <div
-                              role="listitem"
-                              oncontextmenu={(e) => handleTableContextMenu(e, table.name)}
-                              class="relative flex items-center group rounded-md transition-all text-xs {isActiveTable(table.name)
-                                ? 'bg-sky-500/15 text-sky-200 font-medium border-l-2 border-sky-400 shadow-[inset_0_0_12px_rgba(56,189,248,0.06)]'
-                                : tableContextMenu?.open && tableContextMenu.tableName === table.name
-                                  ? 'bg-[#1e293b] text-slate-100 border-l-2 border-sky-500/60'
-                                  : 'text-slate-300 hover:bg-[#1e293b]/70 hover:text-slate-100 border-l-2 border-transparent'}"
-                            >
-                              <button
-                                type="button"
-                                onclick={() => appState.openTableDataTab(table.name)}
-                                class="flex-1 text-left px-2 py-1 flex items-center justify-between truncate min-w-0"
-                                title="Open {table.name} (Right-click for options)"
-                              >
-                                <div class="flex items-center space-x-2 truncate min-w-0 pr-1">
-                                  <Icon
-                                    name="table"
-                                    class="w-3.5 h-3.5 shrink-0 transition-colors {isActiveTable(table.name) ? 'text-sky-400' : 'text-slate-500 group-hover:text-sky-400'}"
-                                  />
-                                  <span class="truncate font-mono text-[11.5px]">{table.name}</span>
-                                </div>
-
-                                {#if (table.row_count !== undefined && table.row_count !== null) || (table.rows_count !== undefined && table.rows_count !== null)}
-                                  <span
-                                    class="text-[9.5px] text-slate-400 font-mono bg-slate-900/80 group-hover:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-800/80 ml-1.5 shrink-0 tabular-nums transition-opacity {tableContextMenu?.open && tableContextMenu.tableName === table.name ? 'opacity-0' : 'group-hover:opacity-0'}"
-                                    title="{table.row_count_exact ? 'Exact rows' : 'Estimated rows'}: {(table.row_count ?? table.rows_count ?? 0).toLocaleString()}"
-                                  >
-                                    {table.row_count_exact ? '' : '~'}{formatCount(table.row_count ?? table.rows_count)}
-                                  </span>
-                                {/if}
-                              </button>
-
-                              <!-- Quick action buttons -->
-                              <div
-                                class="absolute right-1 flex items-center space-x-0.5 rounded transition-all {tableContextMenu?.open && tableContextMenu.tableName === table.name
-                                  ? 'opacity-100 pointer-events-auto bg-[#0f172a]/95 border border-slate-700/80 shadow-sm px-0.5 py-0.5'
-                                  : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/90 hover:bg-[#0f172a] border border-slate-700/60 shadow-sm px-0.5 py-0.5 backdrop-blur-sm'}"
-                              >
-                                <button
-                                  type="button"
-                                  onclick={(e) => { e.stopPropagation(); appState.openTableStructureTab(table.name); }}
-                                  class="p-1 hover:bg-slate-700/80 rounded text-slate-400 hover:text-sky-300 transition"
-                                  title="View Table Structure"
-                                >
-                                  <Icon name="columns" class="w-3 h-3" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onclick={(e) => handleTableContextMenu(e, table.name)}
-                                  class="p-1 hover:bg-slate-700/80 rounded text-slate-400 hover:text-white transition"
-                                  title="More options"
-                                >
-                                  <Icon name="more-vertical" class="w-3 h-3" />
-                                </button>
-                              </div>
-                            </div>
+                            {@render tableItem(table)}
                           {/each}
                         </div>
                       {/if}
@@ -883,126 +888,12 @@
                   {/each}
 
                   {#each prefixTree.ungrouped as table (table.name)}
-                    <div
-                      role="listitem"
-                      oncontextmenu={(e) => handleTableContextMenu(e, table.name)}
-                      class="relative flex items-center group rounded-md transition-all text-xs {isActiveTable(table.name)
-                        ? 'bg-sky-500/15 text-sky-200 font-medium border-l-2 border-sky-400 shadow-[inset_0_0_12px_rgba(56,189,248,0.06)]'
-                        : tableContextMenu?.open && tableContextMenu.tableName === table.name
-                          ? 'bg-[#1e293b] text-slate-100 border-l-2 border-sky-500/60'
-                          : 'text-slate-300 hover:bg-[#1e293b]/70 hover:text-slate-100 border-l-2 border-transparent'}"
-                    >
-                      <button
-                        type="button"
-                        onclick={() => appState.openTableDataTab(table.name)}
-                        class="schema-tree-item flex-1 text-left px-2 py-1 flex items-center justify-between truncate min-w-0"
-                        title="Open {table.name} (Right-click for options)"
-                      >
-                        <div class="flex items-center space-x-2 truncate min-w-0 pr-1">
-                          <Icon
-                            name="table"
-                            class="w-3.5 h-3.5 shrink-0 transition-colors {isActiveTable(table.name) ? 'text-sky-400' : 'text-slate-500 group-hover:text-sky-400'}"
-                          />
-                          <span class="truncate font-mono text-[11.5px]">{table.name}</span>
-                        </div>
-
-                        {#if (table.row_count !== undefined && table.row_count !== null) || (table.rows_count !== undefined && table.rows_count !== null)}
-                          <span
-                            class="text-[9.5px] text-slate-400 font-mono bg-slate-900/80 group-hover:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-800/80 ml-1.5 shrink-0 tabular-nums transition-opacity {tableContextMenu?.open && tableContextMenu.tableName === table.name ? 'opacity-0' : 'group-hover:opacity-0'}"
-                            title="{table.row_count_exact ? 'Exact rows' : 'Estimated rows'}: {(table.row_count ?? table.rows_count ?? 0).toLocaleString()}"
-                          >
-                            {table.row_count_exact ? '' : '~'}{formatCount(table.row_count ?? table.rows_count)}
-                          </span>
-                        {/if}
-                      </button>
-
-                      <!-- Quick action buttons -->
-                      <div
-                        class="absolute right-1 flex items-center space-x-0.5 rounded transition-all {tableContextMenu?.open && tableContextMenu.tableName === table.name
-                          ? 'opacity-100 pointer-events-auto bg-[#0f172a]/95 border border-slate-700/80 shadow-sm px-0.5 py-0.5'
-                          : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/90 hover:bg-[#0f172a] border border-slate-700/60 shadow-sm px-0.5 py-0.5 backdrop-blur-sm'}"
-                      >
-                        <button
-                          type="button"
-                          onclick={(e) => { e.stopPropagation(); appState.openTableStructureTab(table.name); }}
-                          class="p-1 hover:bg-slate-700/80 rounded text-slate-400 hover:text-sky-300 transition"
-                          title="View Table Structure"
-                        >
-                          <Icon name="columns" class="w-3 h-3" />
-                        </button>
-                        <button
-                          type="button"
-                          onclick={(e) => handleTableContextMenu(e, table.name)}
-                          class="p-1 hover:bg-slate-700/80 rounded text-slate-400 hover:text-white transition"
-                          title="More options"
-                        >
-                          <Icon name="more-vertical" class="w-3 h-3" />
-                        </button>
-                      </div>
-                    </div>
+                    {@render tableItem(table, 'schema-tree-item ')}
                   {/each}
                 {:else}
-                  <!-- Flat Table List -->
                   {#each appState.filteredTables as table (table.name)}
-                    <div
-                      role="listitem"
-                      oncontextmenu={(e) => handleTableContextMenu(e, table.name)}
-                      class="relative flex items-center group rounded-md transition-all text-xs {isActiveTable(table.name)
-                        ? 'bg-sky-500/15 text-sky-200 font-medium border-l-2 border-sky-400 shadow-[inset_0_0_12px_rgba(56,189,248,0.06)]'
-                        : tableContextMenu?.open && tableContextMenu.tableName === table.name
-                          ? 'bg-[#1e293b] text-slate-100 border-l-2 border-sky-500/60'
-                          : 'text-slate-300 hover:bg-[#1e293b]/70 hover:text-slate-100 border-l-2 border-transparent'}"
-                    >
-                      <button
-                        type="button"
-                        onclick={() => appState.openTableDataTab(table.name)}
-                        class="schema-tree-item flex-1 text-left px-2 py-1 flex items-center justify-between truncate min-w-0"
-                        title="Open {table.name} (Right-click for options)"
-                      >
-                        <div class="flex items-center space-x-2 truncate min-w-0 pr-1">
-                          <Icon
-                            name="table"
-                            class="w-3.5 h-3.5 shrink-0 transition-colors {isActiveTable(table.name) ? 'text-sky-400' : 'text-slate-500 group-hover:text-sky-400'}"
-                          />
-                          <span class="truncate font-mono text-[11.5px]">{table.name}</span>
-                        </div>
-
-                        {#if (table.row_count !== undefined && table.row_count !== null) || (table.rows_count !== undefined && table.rows_count !== null)}
-                          <span
-                            class="text-[9.5px] text-slate-400 font-mono bg-slate-900/80 group-hover:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-800/80 ml-1.5 shrink-0 tabular-nums transition-opacity {tableContextMenu?.open && tableContextMenu.tableName === table.name ? 'opacity-0' : 'group-hover:opacity-0'}"
-                            title="{table.row_count_exact ? 'Exact rows' : 'Estimated rows'}: {(table.row_count ?? table.rows_count ?? 0).toLocaleString()}"
-                          >
-                            {table.row_count_exact ? '' : '~'}{formatCount(table.row_count ?? table.rows_count)}
-                          </span>
-                        {/if}
-                      </button>
-
-                      <!-- Quick action buttons -->
-                      <div
-                        class="absolute right-1 flex items-center space-x-0.5 rounded transition-all {tableContextMenu?.open && tableContextMenu.tableName === table.name
-                          ? 'opacity-100 pointer-events-auto bg-[#0f172a]/95 border border-slate-700/80 shadow-sm px-0.5 py-0.5'
-                          : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto bg-[#0f172a]/90 hover:bg-[#0f172a] border border-slate-700/60 shadow-sm px-0.5 py-0.5 backdrop-blur-sm'}"
-                      >
-                        <button
-                          type="button"
-                          onclick={(e) => { e.stopPropagation(); appState.openTableStructureTab(table.name); }}
-                          class="p-1 hover:bg-slate-700/80 rounded text-slate-400 hover:text-sky-300 transition"
-                          title="View Table Structure"
-                        >
-                          <Icon name="columns" class="w-3 h-3" />
-                        </button>
-                        <button
-                          type="button"
-                          onclick={(e) => handleTableContextMenu(e, table.name)}
-                          class="p-1 hover:bg-slate-700/80 rounded text-slate-400 hover:text-white transition"
-                          title="More options"
-                        >
-                          <Icon name="more-vertical" class="w-3 h-3" />
-                        </button>
-                      </div>
-                    </div>
-                  {/each}
-                {/if}
+                    {@render tableItem(table, 'schema-tree-item ')}
+                  {/each}                {/if}
               </div>
             {/if}
           </div>
