@@ -67,6 +67,17 @@ jobs:
           npm test
           go test -race ./...
 
+      - name: Verify Release Signing Keypair
+        env:
+          SIGNING_PUBLIC_KEY: ${{ vars.SQLFOX_MANIFEST_SIGNING_PUBKEY }}
+          SIGNING_KEY: ${{ secrets.SQLFOX_MANIFEST_SIGNING_KEY }}
+        run: |
+          if [ -z "$SIGNING_PUBLIC_KEY" ] || [ -z "$SIGNING_KEY" ]; then
+            echo "❌ Release signing keypair missing: set repo variable SQLFOX_MANIFEST_SIGNING_PUBKEY and secret SQLFOX_MANIFEST_SIGNING_KEY." >&2
+            echo "   Releases must not silently fall back to unsigned checksums." >&2
+            exit 1
+          fi
+
       - name: Compile Binaries for All Platforms
         run: |
           mkdir -p dist/archives
@@ -176,6 +187,7 @@ jobs:
           push: true
           build-args: |
             VERSION=${{ steps.version.outputs.TAG }}
+            SQLFOX_MANIFEST_SIGNING_PUBKEY=${{ vars.SQLFOX_MANIFEST_SIGNING_PUBKEY }}
           tags: |
             ghcr.io/${{ github.repository }}:${{ steps.version.outputs.TAG }}
             ghcr.io/${{ github.repository }}:latest
