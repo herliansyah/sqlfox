@@ -34,7 +34,8 @@ func (d *SQLiteDriver) Connect(ctx context.Context, cfg driver.Config) (driver.S
 		return nil, fmt.Errorf("sqlite database path cannot be empty")
 	}
 
-	isMemory := strings.Contains(dsn, ":memory:") || strings.Contains(dsn, "mode=memory")
+	isMemory := isMemoryDSN(dsn)
+	singleConn := isMemory
 	openDSN := dsn
 	if !isMemory && !strings.Contains(strings.ToLower(dsn), "_pragma=busy_timeout") {
 		if strings.Contains(dsn, "?") {
@@ -71,6 +72,7 @@ func (d *SQLiteDriver) Connect(ctx context.Context, cfg driver.Config) (driver.S
 				return nil, fmt.Errorf("failed to open sqlite database: %w", err)
 			}
 			db.SetMaxOpenConns(1)
+			singleConn = true
 			if pingErr := db.PingContext(ctx); pingErr != nil {
 				db.Close()
 				return nil, fmt.Errorf("failed to ping sqlite database: %w", pingErr)
@@ -95,15 +97,17 @@ func (d *SQLiteDriver) Connect(ctx context.Context, cfg driver.Config) (driver.S
 	_, _ = db.ExecContext(ctx, "PRAGMA busy_timeout = 5000;")
 
 	return &SQLiteSession{
-		db:      db,
-		dsn:     dsn,
-		queries: make(map[string]context.CancelFunc),
+		db:         db,
+		dsn:        dsn,
+		singleConn: singleConn,
+		queries:    make(map[string]context.CancelFunc),
 	}, nil
 }
 
 type SQLiteSession struct {
 	db         *sql.DB
 	dsn        string
+	singleConn bool // pool capped at one physical connection; pinning would starve nested reads
 	mu         sync.Mutex
 	queries    map[string]context.CancelFunc
 	queryCount atomic.Int64
@@ -977,32 +981,49 @@ func (s *SQLiteSession) InspectServerVariables(ctx context.Context) (*driver.Ser
 // ExecScriptConn pins a single physical SQLite connection for a multi-statement script
 // so PRAGMA foreign_keys and BEGIN/COMMIT blocks execute on the same connection.
 func (s *SQLiteSession) ExecScriptConn(ctx context.Context, fn func(exec func(context.Context, string) (*driver.ExecResult, error)) error) error {
+	type execer interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	}
+	execWith := func(ex execer) func(context.Context, string) (*driver.ExecResult, error) {
+		return func(c context.Context, q string) (*driver.ExecResult, error) {
+			start := time.Now()
+			res, err := ex.ExecContext(c, q)
+			if err != nil {
+				return nil, err
+			}
+			rowsAff, _ := res.RowsAffected()
+			lastID, _ := res.LastInsertId()
+			return &driver.ExecResult{
+				RowsAffected: rowsAff,
+				LastInsertID: lastID,
+				ExecutionMs:  time.Since(start).Milliseconds(),
+				Message:      fmt.Sprintf("Query OK, %d rows affected", rowsAff),
+			}, nil
+		}
+	}
+	restore := func(ex execer) {
+		restoreCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_, _ = ex.ExecContext(restoreCtx, "ROLLBACK")
+		_, _ = ex.ExecContext(restoreCtx, "PRAGMA foreign_keys = ON;")
+		cancel()
+	}
+
+	// ponytail: a one-connection pool already keeps script state on the same physical
+	// connection; pinning it starves nested reads such as the pre-DDL backup.
+	if s.singleConn {
+		defer restore(s.db)
+		return fn(execWith(s.db))
+	}
+
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() {
-		restoreCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		_, _ = conn.ExecContext(restoreCtx, "ROLLBACK")
-		_, _ = conn.ExecContext(restoreCtx, "PRAGMA foreign_keys = ON;")
-		cancel()
+		restore(conn)
 		_ = conn.Close()
 	}()
-	return fn(func(c context.Context, q string) (*driver.ExecResult, error) {
-		start := time.Now()
-		res, err := conn.ExecContext(c, q)
-		if err != nil {
-			return nil, err
-		}
-		rowsAff, _ := res.RowsAffected()
-		lastID, _ := res.LastInsertId()
-		return &driver.ExecResult{
-			RowsAffected: rowsAff,
-			LastInsertID: lastID,
-			ExecutionMs:  time.Since(start).Milliseconds(),
-			Message:      fmt.Sprintf("Query OK, %d rows affected", rowsAff),
-		}, nil
-	})
+	return fn(execWith(conn))
 }
 
 // QueryStreamReadOnly enforces SQLite engine-level PRAGMA query_only = ON on a pinned connection.
@@ -1034,6 +1055,10 @@ func (s *SQLiteSession) QueryStreamReadOnly(ctx context.Context, sqlStr string, 
 		return nil, err
 	}
 	return driver.NewSQLRowStream(rows, driver.ColumnsFromTypes(colTypes), restore), nil
+}
+
+func isMemoryDSN(dsn string) bool {
+	return strings.Contains(dsn, ":memory:") || strings.Contains(dsn, "mode=memory")
 }
 
 func quoteIdentifier(id string) string {
