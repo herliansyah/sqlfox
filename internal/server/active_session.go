@@ -431,7 +431,8 @@ func (s *ActiveSession) UseDatabase(ctx context.Context, dbName string) error {
 	return nil
 }
 
-var reSensitiveSQLPwd = regexp.MustCompile(`(?i)(\b(?:IDENTIFIED\s+BY|WITH\s+PASSWORD|PASSWORD\s*=)\s*)('(?:[^'\\]|\\.|'')*'|"(?:[^"\\]|\\.|"")*")`)
+// ponytail: Bare PASSWORD <literal> may over-redact SELECT aliases; add a SQL parser only if that loses useful audit context.
+var reSensitiveSQLPwd = regexp.MustCompile(`(?i)(\b(?:IDENTIFIED\s+BY|IDENTIFIED\s+WITH\s+\S+?\s+(?:BY|AS)|WITH\s+(?:ENCRYPTED\s+|UNENCRYPTED\s+)?PASSWORD|PASSWORD\s*(?:=|\()|PASSWORD)\s*)('(?:[^'\\]|\\.|'')*'|"(?:[^"\\]|\\.|"")*")`)
 
 // redactSensitiveSQL masks credential literals in SQL before writing to logs or the audit table.
 func redactSensitiveSQL(sql string) string {

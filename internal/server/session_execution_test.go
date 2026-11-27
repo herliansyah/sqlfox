@@ -1210,12 +1210,21 @@ func TestActiveSession_ChallengeRejectsOperationNameWhenTargetTableKnown(t *test
 }
 
 func TestRedactSensitiveSQL(t *testing.T) {
-	in := "CREATE USER 'alice'@'%' IDENTIFIED BY 'SuperSecret123!'; ALTER ROLE bob WITH PASSWORD 'pw2';"
-	out := redactSensitiveSQL(in)
-	if strings.Contains(out, "SuperSecret123!") || strings.Contains(out, "pw2") {
-		t.Fatalf("expected password literals to be redacted, got: %s", out)
+	tests := map[string]string{
+		"CREATE USER 'alice'@'%' IDENTIFIED BY 'SuperSecret123!';":                   "CREATE USER 'alice'@'%' IDENTIFIED BY '***';",
+		"CREATE USER alice IDENTIFIED WITH mysql_native_password BY 'pluginSecret';": "CREATE USER alice IDENTIFIED WITH mysql_native_password BY '***';",
+		"ALTER USER alice IDENTIFIED WITH caching_sha2_password AS 'hashSecret';":    "ALTER USER alice IDENTIFIED WITH caching_sha2_password AS '***';",
+		"ALTER ROLE bob WITH PASSWORD 'pw2';":                                        "ALTER ROLE bob WITH PASSWORD '***';",
+		"ALTER USER bob WITH ENCRYPTED PASSWORD 'pgSecret';":                         "ALTER USER bob WITH ENCRYPTED PASSWORD '***';",
+		"ALTER USER bob WITH UNENCRYPTED PASSWORD 'pgSecret';":                       "ALTER USER bob WITH UNENCRYPTED PASSWORD '***';",
+		"CREATE ROLE bob PASSWORD 'bareSecret';":                                     "CREATE ROLE bob PASSWORD '***';",
+		"SET PASSWORD = 'setSecret';":                                                "SET PASSWORD = '***';",
+		"SET PASSWORD = PASSWORD('hashInput');":                                      "SET PASSWORD = PASSWORD('***');",
+		`ALTER ROLE bob WITH PASSWORD "doubleSecret";`:                               `ALTER ROLE bob WITH PASSWORD '***';`,
 	}
-	if !strings.Contains(out, "IDENTIFIED BY '***'") || !strings.Contains(out, "WITH PASSWORD '***'") {
-		t.Fatalf("expected redacted placeholders, got: %s", out)
+	for in, want := range tests {
+		if got := redactSensitiveSQL(in); got != want {
+			t.Errorf("redactSensitiveSQL(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
