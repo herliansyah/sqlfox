@@ -121,14 +121,6 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 	srcDriver := srcSess.DriverName
 	tgtDriver := tgtSess.DriverName
 
-	qualifyTable := func(db, tbl, drv string) string {
-		qTbl := quoteIdent(tbl, drv)
-		if db == "" || isSqliteDriver(drv) {
-			return qTbl
-		}
-		return quoteIdent(db, drv) + "." + qTbl
-	}
-
 	var grandTotalRows int64
 	var hasErrors bool
 	cachedSrcSchema, _ := srcSess.Session.InspectSchema(srcCtx, req.SourceDB)
@@ -213,7 +205,7 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 		var delErr error
 		for i := len(orderedTables) - 1; i >= 0; i-- {
 			tbl := orderedTables[i]
-			if _, err := tx.Exec(tgtCtx, fmt.Sprintf("DELETE FROM %s", qualifyTable(req.TargetDB, tbl, tgtDriver))); err != nil {
+			if _, err := tx.Exec(tgtCtx, fmt.Sprintf("DELETE FROM %s", qualifyTable(tgtSess, req.TargetDB, tbl, tgtDriver))); err != nil {
 				delErr = fmt.Errorf("failed to clear target table %s: %w", tbl, err)
 				break
 			}
@@ -248,7 +240,7 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 		})
 
 		// Stream rows from source using source DB context and qualified table name
-		querySQL := fmt.Sprintf("SELECT * FROM %s", qualifyTable(req.SourceDB, tbl, srcDriver))
+		querySQL := fmt.Sprintf("SELECT * FROM %s", qualifyTable(srcSess, req.SourceDB, tbl, srcDriver))
 		stream, err := srcSess.Session.QueryStream(srcCtx, querySQL, 0)
 		if err != nil {
 			hasErrors = true
@@ -292,7 +284,7 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 		// Empty the target inside the transaction (DELETE, not TRUNCATE: MySQL TRUNCATE implicitly
 		// commits) so a failed copy rolls back to the original rows instead of leaving the table empty.
 		if req.TruncateTarget && sharedTx == nil {
-			if _, err := tx.Exec(tgtCtx, fmt.Sprintf("DELETE FROM %s", qualifyTable(req.TargetDB, tbl, tgtDriver))); err != nil {
+			if _, err := tx.Exec(tgtCtx, fmt.Sprintf("DELETE FROM %s", qualifyTable(tgtSess, req.TargetDB, tbl, tgtDriver))); err != nil {
 				tableErr = fmt.Errorf("failed to clear target table: %w", err)
 			}
 		}
@@ -328,7 +320,7 @@ func (s *Server) handleSyncDataTransfer(w http.ResponseWriter, r *http.Request) 
 				}
 
 				insertSQL := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s",
-					qualifyTable(req.TargetDB, tbl, tgtDriver),
+					qualifyTable(tgtSess, req.TargetDB, tbl, tgtDriver),
 					colListStr,
 					strings.Join(rowPlaceholders, ", "),
 				)
@@ -520,7 +512,9 @@ func (s *Server) handleSyncDataCompare(w http.ResponseWriter, r *http.Request) {
 
 	// Select the source column list explicitly on both sides so rows align by column name even when
 	// the target table orders its columns differently; qualify with DB/schema for same-server comparisons.
-	selectSQL := func(db, drv string) string {
+	// selectSQL takes the owning session so qualifyTable's PG guard reads the correct
+	// active database when srcSess != tgtSess.
+	selectSQL := func(ownSess *ActiveSession, db, drv string) string {
 		cols := make([]string, len(srcTbl.Columns))
 		for i, c := range srcTbl.Columns {
 			cols[i] = quoteIdent(c.Name, drv)
@@ -529,10 +523,7 @@ func (s *Server) handleSyncDataCompare(w http.ResponseWriter, r *http.Request) {
 		for i, pk := range pkCols {
 			pks[i] = quoteIdent(pk, drv)
 		}
-		tblRef := quoteIdent(req.Table, drv)
-		if db != "" && !isSqliteDriver(drv) {
-			tblRef = quoteIdent(db, drv) + "." + tblRef
-		}
+		tblRef := qualifyTable(ownSess, db, req.Table, drv)
 		return fmt.Sprintf("SELECT %s FROM %s ORDER BY %s", strings.Join(cols, ", "), tblRef, strings.Join(pks, ", "))
 	}
 
@@ -555,7 +546,7 @@ func (s *Server) handleSyncDataCompare(w http.ResponseWriter, r *http.Request) {
 		return n
 	}
 
-	srcStream, err := srcSess.Session.QueryStream(srcCtx, selectSQL(req.SourceDB, srcDriver), maxSyncRows+1)
+	srcStream, err := srcSess.Session.QueryStream(srcCtx, selectSQL(srcSess, req.SourceDB, srcDriver), maxSyncRows+1)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to query source rows: "+err.Error())
 		return
@@ -590,7 +581,7 @@ func (s *Server) handleSyncDataCompare(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch all rows from target
-	tgtStream, err := tgtSess.Session.QueryStream(tgtCtx, selectSQL(req.TargetDB, tgtDriver), maxSyncRows+1)
+	tgtStream, err := tgtSess.Session.QueryStream(tgtCtx, selectSQL(tgtSess, req.TargetDB, tgtDriver), maxSyncRows+1)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to query target rows: "+err.Error())
 		return
@@ -744,13 +735,18 @@ func (s *Server) handleSyncDataApply(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
-	defer cancel()
+	// Keep the reaper from rolling back the apply transaction mid-flight.
+	tgtSess.beginInFlight()
+	defer tgtSess.endInFlight()
 
-	if err := tgtSess.UseDatabase(ctx, req.TargetDB); err != nil {
-		writeError(w, http.StatusBadRequest, "target: "+err.Error())
-		return
+	// Thread the target DB via context instead of mutating session-global state, which would
+	// silently retarget any concurrent request on the same connection.
+	ctx := r.Context()
+	if req.TargetDB != "" {
+		ctx = driver.WithDatabase(ctx, req.TargetDB)
 	}
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
 	syncStart := time.Now()
 
 	tgtDriver := tgtSess.DriverName

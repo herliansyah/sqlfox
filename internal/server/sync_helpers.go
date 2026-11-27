@@ -20,6 +20,21 @@ func isSqliteDriver(d string) bool {
 	return strings.EqualFold(d, "sqlite") || strings.EqualFold(d, "sqlite3")
 }
 
+// qualifyTable mirrors the PG guard in handlers_table_data.go: on PostgreSQL the incoming db
+// may be the physical database name (not a schema); prefixing "mydb"."users" fails when no
+// schema named "mydb" exists, so skip the prefix when it matches the session's active DB or
+// the default "public" schema.
+func qualifyTable(sess *ActiveSession, db, tbl, drv string) string {
+	qTbl := quoteIdent(tbl, drv)
+	if db == "" || isSqliteDriver(drv) {
+		return qTbl
+	}
+	if isPgDriver(drv) && (strings.EqualFold(db, sess.GetDatabaseName()) || strings.EqualFold(db, "public")) {
+		return qTbl
+	}
+	return quoteIdent(db, drv) + "." + qTbl
+}
+
 var (
 	reMySQLTypeModifiers = regexp.MustCompile(`(?i)\s+(unsigned|zerofill|signed)\b`)
 	reSafeOnUpdate       = regexp.MustCompile(`(?i)^ON\s+UPDATE\s+(CURRENT_TIMESTAMP|LOCALTIMESTAMP|NOW)(\s*\(\s*\d*\s*\))?$`)

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/herliansyah/sqlfox/internal/dataimport"
+	"github.com/herliansyah/sqlfox/internal/driver"
 )
 
 // SniffCSVDelimiter delegates to dataimport.SniffDelimiter.
@@ -38,6 +39,10 @@ func (s *Server) handleImportCSV(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "cannot import data: session is in read-only mode")
 		return
 	}
+
+	// Keep the reaper from evicting/rolling back mid-import; imports can outlive the idle threshold.
+	sess.beginInFlight()
+	defer sess.endInFlight()
 
 	// Parse multipart form when Content-Type is multipart/form-data (max 32MB in memory, rest streams to temp disk).
 	isMultipart := strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data")
@@ -113,15 +118,14 @@ func (s *Server) handleImportCSV(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
-	defer cancel()
-
+	// Thread the target DB via context instead of mutating session-global state, which would
+	// silently retarget any concurrent request on the same connection.
+	ctx := r.Context()
 	if dbName != "" {
-		if err := sess.UseDatabase(ctx, dbName); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
+		ctx = driver.WithDatabase(ctx, dbName)
 	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
 
 	importStart := time.Now()
 	res, err := dataimport.Import(ctx, sess.Session, tableName, fileReader, dataimport.ImportOptions{

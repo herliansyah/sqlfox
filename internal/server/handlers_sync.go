@@ -177,7 +177,7 @@ func (s *Server) handleSyncStructureCompare(w http.ResponseWriter, r *http.Reque
 			// Missing table in target -> CREATE TABLE
 			var ddl string
 			if strings.EqualFold(srcDriver, tgtDriver) {
-				ddl, _ = srcSess.Session.GetTableDDL(ctx, srcTbl.Name)
+				ddl, _ = srcSess.Session.GetTableDDL(srcCtx, srcTbl.Name)
 			}
 			if strings.TrimSpace(ddl) == "" {
 				ddl = buildCreateTableDDL(srcTbl, srcDriver, tgtDriver)
