@@ -8,6 +8,7 @@ import (
 	"github.com/herliansyah/sqlfox/internal/driver"
 	"github.com/herliansyah/sqlfox/internal/vault"
 	"io"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"slices"
@@ -141,7 +142,7 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 
 	filter := strings.TrimSpace(r.URL.Query().Get("filter"))
 	structuredFilters := strings.TrimSpace(r.URL.Query().Get("filters"))
-	var queryArgs []any
+	var filterArgs []any
 	_, isParameterized := sess.Session.(driver.ParameterizedStreamer)
 	if structuredFilters != "" {
 		if isParameterized {
@@ -151,7 +152,7 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			filter = compiled
-			queryArgs = append(queryArgs, fArgs...)
+			filterArgs = append(filterArgs, fArgs...)
 		} else {
 			compiled, err := buildStructuredFilterClause(structuredFilters, sess.DriverName)
 			if err != nil {
@@ -169,6 +170,10 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 	if filter != "" {
 		whereClause = fmt.Sprintf("WHERE (%s)", filter)
 	}
+
+	// queryArgs carries the main query's bind args; filterArgs stays untouched so the
+	// count query below is not handed the keyset seek arg.
+	queryArgs := filterArgs
 
 	var querySQL string
 	if sortCol == "" && pkCol != "" {
@@ -188,8 +193,8 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 		}
 		keyExpr := driver.EscapeSQLString(lastKey, sess.DriverName)
 		if isParameterized {
-			keyExpr = driver.Placeholder(sess.DriverName, len(queryArgs)+1)
-			queryArgs = append(queryArgs, lastKey)
+			keyExpr = driver.Placeholder(sess.DriverName, len(filterArgs)+1)
+			queryArgs = append(slices.Clone(filterArgs), lastKey)
 		}
 		if whereClause != "" {
 			querySQL = fmt.Sprintf("SELECT * FROM %s %s AND %s %s %s ORDER BY %s %s LIMIT %d",
@@ -252,7 +257,10 @@ func (s *Server) handleGetTableRows(w http.ResponseWriter, r *http.Request) {
 			countSQL = fmt.Sprintf("SELECT COUNT(*) FROM %s %s", targetTable, whereClause)
 		}
 
-		cStream, cErr := sess.queryStreamSafe(countCtx, countSQL, 1)
+		cStream, cErr := sess.queryStreamSafeArgs(countCtx, countSQL, 1, filterArgs...)
+		if cErr != nil && countCtx.Err() == nil {
+			slog.Warn("table_rows_count_failed", "module", "table_data", "table", tableName, "error", cErr.Error())
+		}
 		if cErr == nil {
 			cChunk, nErr := cStream.NextChunk(1)
 			_ = cStream.Close()

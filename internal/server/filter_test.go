@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -257,5 +258,62 @@ func TestHandleGetTableRowsWithFilter(t *testing.T) {
 	nulResp.Body.Close()
 	if nulResp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400 for NUL last_key, got %d", nulResp.StatusCode)
+	}
+
+	// 7. Structured filters: count query must reuse the filter bind args, otherwise
+	// the placeholder query fails and total_rows silently disappears.
+	sResp, err := client.Get(ts.URL + "/api/session/" + connRec.ID +
+		"/table/products/rows?limit=2&filters=" + url.QueryEscape(`[{"column":"in_stock","operator":"=","value":"1"}]`))
+	if err != nil || sResp.StatusCode != http.StatusOK {
+		t.Fatalf("structured filter request failed: %v", err)
+	}
+	var sData struct {
+		Rows      [][]any `json:"rows"`
+		TotalRows *int64  `json:"total_rows"`
+	}
+	json.NewDecoder(sResp.Body).Decode(&sData)
+	sResp.Body.Close()
+	if sData.TotalRows == nil || *sData.TotalRows != 2 {
+		t.Fatalf("expected total_rows=2 for structured filter, got %v", sData.TotalRows)
+	}
+
+	// 8. Keyset pagination must not leak the last_key bind arg into the count query.
+	// 8a. No filter: count query has zero placeholders.
+	kResp, err := client.Get(ts.URL + "/api/session/" + connRec.ID +
+		"/table/products/rows?limit=2&sort_col=id&sort_dir=ASC&last_key=1")
+	if err != nil || kResp.StatusCode != http.StatusOK {
+		t.Fatalf("keyset rows request failed: %v", err)
+	}
+	var kData struct {
+		Rows      [][]any `json:"rows"`
+		TotalRows *int64  `json:"total_rows"`
+	}
+	json.NewDecoder(kResp.Body).Decode(&kData)
+	kResp.Body.Close()
+	if len(kData.Rows) != 2 {
+		t.Fatalf("expected 2 rows after last_key=1, got %d", len(kData.Rows))
+	}
+	if kData.TotalRows == nil || *kData.TotalRows != 4 {
+		t.Fatalf("expected total_rows=4 (whole table) for keyset page, got %v", kData.TotalRows)
+	}
+
+	// 8b. With filter: one filter placeholder, plus the seek arg on the main query only.
+	kfResp, err := client.Get(ts.URL + "/api/session/" + connRec.ID +
+		"/table/products/rows?limit=2&sort_col=id&sort_dir=ASC&last_key=1&filters=" +
+		url.QueryEscape(`[{"column":"in_stock","operator":"=","value":"1"}]`))
+	if err != nil || kfResp.StatusCode != http.StatusOK {
+		t.Fatalf("keyset+filter rows request failed: %v", err)
+	}
+	var kfData struct {
+		Rows      [][]any `json:"rows"`
+		TotalRows *int64  `json:"total_rows"`
+	}
+	json.NewDecoder(kfResp.Body).Decode(&kfData)
+	kfResp.Body.Close()
+	if len(kfData.Rows) != 1 {
+		t.Fatalf("expected 1 row for keyset+filter, got %d", len(kfData.Rows))
+	}
+	if kfData.TotalRows == nil || *kfData.TotalRows != 2 {
+		t.Fatalf("expected total_rows=2 (whole filtered set) for keyset+filter, got %v", kfData.TotalRows)
 	}
 }
