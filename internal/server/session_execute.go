@@ -103,15 +103,16 @@ func (s *ActiveSession) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 	if len(stmts) <= 1 && strings.HasPrefix(cleanUpper, "USE ") {
 		dbTarget := strings.TrimSpace(cleanSQL[4:])
 		dbTarget = strings.Trim(strings.TrimRight(dbTarget, "; \t\r\n"), "`'\"")
-		if dbTarget != "" {
-			if err := s.UseDatabase(ctx, dbTarget); err != nil {
-				return nil, err
-			}
-			return &ExecuteResponse{
-				Type:    "exec",
-				Message: fmt.Sprintf("Database changed to %s", dbTarget),
-			}, nil
+		if dbTarget == "" {
+			return nil, errors.New("database name required after USE")
 		}
+		if err := s.UseDatabase(ctx, dbTarget); err != nil {
+			return nil, err
+		}
+		return &ExecuteResponse{
+			Type:    "exec",
+			Message: fmt.Sprintf("Database changed to %s", dbTarget),
+		}, nil
 	}
 
 	// 3. Pre-Execution Row Estimation & Tiered Affirmation Gate (ADR 0057)

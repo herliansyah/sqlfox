@@ -1228,3 +1228,47 @@ func TestRedactSensitiveSQL(t *testing.T) {
 		}
 	}
 }
+
+// Regression: a USE inside a multi-statement script must switch the database and be
+// reported as its own result instead of falling through to Session.Exec, where drivers
+// without a USE statement (PostgreSQL, SQLite) reject the whole batch.
+func TestExecuteMultiStatementUSE(t *testing.T) {
+	dbSession, err := driver.Connect(context.Background(), driver.Config{
+		Driver:       "sqlite",
+		DatabaseName: filepath.Join(t.TempDir(), "test.db"),
+	})
+	if err != nil {
+		t.Fatalf("driver.Connect failed: %v", err)
+	}
+	defer dbSession.Close()
+
+	sess := &ActiveSession{
+		ID:          "conn-use",
+		Environment: "Development",
+		DriverName:  "sqlite",
+		Session:     dbSession,
+	}
+
+	res, err := sess.Execute(context.Background(), ExecuteRequest{SQL: "USE other; SELECT 1;"})
+	if err != nil {
+		t.Fatalf("multi-statement USE failed: %v", err)
+	}
+	if len(res.Results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(res.Results))
+	}
+	if got := res.Results[0].Message; got != "Database changed to other" {
+		t.Fatalf("expected USE result message, got %q", got)
+	}
+	if res.RowCount != 1 {
+		t.Fatalf("expected SELECT 1 to return 1 row, got %d", res.RowCount)
+	}
+
+	// A USE with no database name must fail with a clear server-side error instead of
+	// being forwarded to a driver that has no USE statement.
+	for _, script := range []string{`USE ""; SELECT 1;`, `USE ""`} {
+		if _, err := sess.Execute(context.Background(), ExecuteRequest{SQL: script}); err == nil ||
+			!strings.Contains(err.Error(), "database name required after USE") {
+			t.Fatalf("expected empty USE to fail clearly for %q, got: %v", script, err)
+		}
+	}
+}

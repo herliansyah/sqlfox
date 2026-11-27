@@ -46,14 +46,23 @@ func (s *ActiveSession) executeMulti(
 		if strings.HasPrefix(cleanUpper, "USE ") {
 			dbTarget := strings.TrimSpace(cleanSQL[4:])
 			dbTarget = strings.Trim(strings.TrimRight(dbTarget, "; \t\r\n"), "`'\"")
-			if dbTarget != "" {
-				if err := s.UseDatabase(ctx, dbTarget); err != nil {
-					if s.vault != nil {
-						s.RecordAudit(stmtTrimmed, "editor_batch", time.Since(stmtStart).Milliseconds(), 0, err, stmtStart)
-					}
-					return nil, fmt.Errorf("statement %d (%s) failed: %w", i+1, previewStmt(stmtTrimmed), err)
-				}
+			if dbTarget == "" {
+				return nil, fmt.Errorf("statement %d (%s) failed: database name required after USE", i+1, previewStmt(stmtTrimmed))
 			}
+			if err := s.UseDatabase(ctx, dbTarget); err != nil {
+				if s.vault != nil {
+					s.RecordAudit(stmtTrimmed, "editor_batch", time.Since(stmtStart).Milliseconds(), 0, err, stmtStart)
+				}
+				return nil, fmt.Errorf("statement %d (%s) failed: %w", i+1, previewStmt(stmtTrimmed), err)
+			}
+			results = append(results, &ExecuteResponse{
+				SQL:         stmtTrimmed,
+				Type:        "exec",
+				Message:     fmt.Sprintf("Database changed to %s", dbTarget),
+				ExecutionMs: time.Since(stmtStart).Milliseconds(),
+				TxActive:    currentTx != nil,
+			})
+			continue
 		}
 
 		isTxBegin := cleanUpper == "BEGIN" || cleanUpper == "START TRANSACTION" || cleanUpper == "BEGIN WORK" || cleanUpper == "BEGIN TRANSACTION" ||
@@ -293,14 +302,32 @@ func (s *ActiveSession) executeStreamMulti(
 		if strings.HasPrefix(cleanUpper, "USE ") {
 			dbTarget := strings.TrimSpace(cleanSQL[4:])
 			dbTarget = strings.Trim(strings.TrimRight(dbTarget, "; \t\r\n"), "`'\"")
-			if dbTarget != "" {
-				if err := s.UseDatabase(ctx, dbTarget); err != nil {
-					if s.vault != nil {
-						s.RecordAudit(stmtTrimmed, "editor_batch", time.Since(stmtStart).Milliseconds(), 0, err, stmtStart)
-					}
-					return nil, fmt.Errorf("statement %d (%s) failed: %w", i+1, previewStmt(stmtTrimmed), err)
+			if dbTarget == "" {
+				useErr := fmt.Errorf("statement %d (%s) failed: database name required after USE", i+1, previewStmt(stmtTrimmed))
+				_ = enc.Encode(map[string]any{"type": "error", "result_index": i, "sql": stmtTrimmed, "error": useErr.Error()})
+				if flusher != nil {
+					flusher.Flush()
 				}
+				return nil, useErr
 			}
+			if err := s.UseDatabase(ctx, dbTarget); err != nil {
+				if s.vault != nil {
+					s.RecordAudit(stmtTrimmed, "editor_batch", time.Since(stmtStart).Milliseconds(), 0, err, stmtStart)
+				}
+				return nil, fmt.Errorf("statement %d (%s) failed: %w", i+1, previewStmt(stmtTrimmed), err)
+			}
+			_ = enc.Encode(map[string]any{
+				"type":         "exec",
+				"result_index": i,
+				"sql":          stmtTrimmed,
+				"message":      fmt.Sprintf("Database changed to %s", dbTarget),
+				"tx_active":    currentTx != nil,
+				"execution_ms": time.Since(stmtStart).Milliseconds(),
+			})
+			if flusher != nil {
+				flusher.Flush()
+			}
+			continue
 		}
 
 		isTxBegin := cleanUpper == "BEGIN" || cleanUpper == "START TRANSACTION" || cleanUpper == "BEGIN WORK" || cleanUpper == "BEGIN TRANSACTION" ||
