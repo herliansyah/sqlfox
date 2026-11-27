@@ -153,6 +153,7 @@ export async function streamDataTransfer(
   let buf = '';
   let result: any = { status: 'completed', total_rows: 0, has_errors: false, errors: [] as string[] };
   const tableErrors: string[] = [];
+  let sawDone = false;
 
   const handleEvt = (evt: any) => {
     onProgress?.(evt);
@@ -160,6 +161,7 @@ export async function streamDataTransfer(
       tableErrors.push(`${evt.table || 'table'}: ${evt.error}`);
     }
     if (evt.event === 'done') {
+      sawDone = true;
       result = { ...evt, errors: tableErrors };
     }
   };
@@ -195,6 +197,9 @@ export async function streamDataTransfer(
       /* ignore */
     }
   }
+  if (!sawDone) {
+    throw new Error('Data transfer stream ended before the terminal done event (premature EOF).');
+  }
   if (tableErrors.length > 0 && !result.error) {
     result.has_errors = true;
     result.error = tableErrors.join('; ');
@@ -226,7 +231,7 @@ export async function streamRunSqlScript(
   });
 
   if (!res.body) {
-    return { status: 'completed', total: 0, executed: 0, errors: 0 };
+    throw new Error('SQL script streaming response body is empty');
   }
 
   const reader = res.body.getReader();
@@ -236,6 +241,7 @@ export async function streamRunSqlScript(
   let executed = 0;
   let errors = 0;
   let finalStatus = 'completed';
+  let sawSummary = false;
 
   const processItem = (item: any) => {
     if (item.total) total = item.total;
@@ -243,7 +249,10 @@ export async function streamRunSqlScript(
     if (item.status === 'error') errors++;
     if (item.executed_statements !== undefined) executed = item.executed_statements;
     if (item.error_count !== undefined) errors = item.error_count;
-    if (item.status === 'halted' || item.status === 'completed') finalStatus = item.status;
+    if (item.status === 'halted' || item.status === 'completed') {
+      sawSummary = true;
+      finalStatus = item.status;
+    }
     onProgress(item);
   };
 
@@ -279,6 +288,10 @@ export async function streamRunSqlScript(
     } catch {
       /* ignore */
     }
+  }
+
+  if (!sawSummary) {
+    throw new Error('SQL script stream ended before the terminal summary event (premature EOF).');
   }
 
   return {
