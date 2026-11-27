@@ -10,7 +10,7 @@ const { buildSync } = require(process.cwd() + '/node_modules/esbuild');
 const { chromium } = require('playwright');
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sqlfox-cm-browser-'));
 const root = process.cwd();
-const chromiumPath = process.env.SQLFOX_CHROMIUM || '/home/ian/.cache/ms-playwright/chromium-1187/chrome-linux/chrome';
+const chromiumPath = process.env.SQLFOX_CHROMIUM || chromium.executablePath();
 if (!fs.existsSync(chromiumPath)) {
   console.log('SKIP: Chromium binary not found at ' + chromiumPath + ' (set SQLFOX_CHROMIUM to override)');
   process.exit(0);

@@ -8,7 +8,7 @@ const require = createRequire(process.cwd() + '/package.json');
 const { chromium } = require('playwright');
 
 const distDir = path.resolve(process.cwd(), 'web/dist');
-const chromiumPath = process.env.SQLFOX_CHROMIUM || '/home/ian/.cache/ms-playwright/chromium-1187/chrome-linux/chrome';
+const chromiumPath = process.env.SQLFOX_CHROMIUM || chromium.executablePath();
 if (!fs.existsSync(chromiumPath)) {
   console.log('SKIP: Chromium binary not found at ' + chromiumPath + ' (set SQLFOX_CHROMIUM to override)');
   process.exit(0);

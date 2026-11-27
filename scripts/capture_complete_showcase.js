@@ -10,7 +10,7 @@ if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 
   const browser = await chromium.launch({
     headless: true,
-    executablePath: '/home/ian/.cache/ms-playwright/chromium-1187/chrome-linux/chrome',
+    executablePath: process.env.SQLFOX_CHROMIUM || chromium.executablePath(),
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
   });
 
