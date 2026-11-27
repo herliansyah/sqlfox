@@ -492,3 +492,74 @@ func TestSyncToGitHub_TwoWayPullMerge(t *testing.T) {
 		t.Fatalf("expected remote-note-99 to be merged into local vault, got %+v", notes)
 	}
 }
+
+// Regression: on a fresh machine (no local notes) with a PathPrefix set, a remote note
+// must survive mirror-deletion. Before the notesPrefix fix, prefix+"notes/" produced
+// "sqlfoxnotes/" and never matched "sqlfox/notes/...", so the guard was bypassed.
+func TestSyncToGitHub_PrefixedFreshMachineKeepsRemoteNotes(t *testing.T) {
+	tmpDir := t.TempDir()
+	v, err := OpenVault(filepath.Join(tmpDir, "vault.db"), "master-pin-123")
+	if err != nil {
+		t.Fatalf("OpenVault failed: %v", err)
+	}
+	defer v.Close()
+
+	const remotePath = "sqlfox/notes/remote-keep.md"
+	var deletedPaths []string
+	mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		switch {
+		case strings.HasSuffix(p, "/git/ref/heads/main") && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]any{"object": map[string]any{"sha": "c1"}})
+		case strings.HasSuffix(p, "/git/commits/c1") && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]any{"tree": map[string]any{"sha": "t1"}})
+		case strings.HasSuffix(p, "/git/trees/t1") && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]any{"tree": []map[string]any{{"path": remotePath, "type": "blob", "sha": "b1"}}})
+		case strings.HasSuffix(p, "/git/blobs/b1") && r.Method == http.MethodGet:
+			w.WriteHeader(http.StatusNotFound) // pull cannot import it; note still must survive
+		case strings.HasSuffix(p, "/git/blobs") && r.Method == http.MethodPost:
+			_ = json.NewEncoder(w).Encode(map[string]any{"sha": "b2"})
+		case strings.HasSuffix(p, "/git/trees") && r.Method == http.MethodPost:
+			var body struct {
+				Tree []struct {
+					Path string  `json:"path"`
+					SHA  *string `json:"sha"`
+				} `json:"tree"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			for _, e := range body.Tree {
+				if e.SHA == nil {
+					deletedPaths = append(deletedPaths, e.Path)
+				}
+			}
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{"sha": "t2"})
+		case strings.HasSuffix(p, "/git/commits") && r.Method == http.MethodPost:
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{"sha": "c2"})
+		case strings.HasSuffix(p, "/git/refs/heads/main") && r.Method == http.MethodPatch:
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]any{"object": map[string]any{"sha": "c2"}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer mockGH.Close()
+
+	cfg := &CloudSyncConfig{
+		GitHubToken:        "ghp_test",
+		GitHubRepo:         "octocat/notes",
+		GitHubBranch:       "main",
+		PathPrefix:         "sqlfox",
+		APIBaseURL:         mockGH.URL,
+		IncludeVaultBackup: false,
+	}
+	if _, err := SyncToGitHub(context.Background(), v, cfg, "master-pin-123"); err != nil {
+		t.Fatalf("SyncToGitHub failed: %v", err)
+	}
+	for _, path := range deletedPaths {
+		if path == remotePath {
+			t.Fatalf("fresh machine deleted remote note %q; expected it preserved", remotePath)
+		}
+	}
+}

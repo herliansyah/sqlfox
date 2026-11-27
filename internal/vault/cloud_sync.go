@@ -403,7 +403,9 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 
 	// 3. Prepend PathPrefix if set
 	prefix := strings.Trim(cfg.PathPrefix, "/")
+	notesPrefix := "notes/"
 	if prefix != "" {
+		notesPrefix = prefix + "/notes/"
 		prefixedFiles := make(map[string][]byte, len(files))
 		for k, v := range files {
 			prefixedFiles[prefix+"/"+k] = v
@@ -574,7 +576,7 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 
 	hasLocalNotes := false
 	for p := range files {
-		if strings.HasPrefix(p, prefix+"notes/") {
+		if strings.HasPrefix(p, notesPrefix) {
 			hasLocalNotes = true
 			break
 		}
@@ -584,7 +586,7 @@ func SyncToGitHub(ctx context.Context, v *Vault, cfg *CloudSyncConfig, masterPas
 	// a fresh/empty machine must never wipe an existing remote notes archive on another device.
 	for _, oldPath := range existingFiles {
 		if _, exists := files[oldPath]; !exists {
-			if !hasLocalNotes && strings.HasPrefix(oldPath, prefix+"notes/") {
+			if !hasLocalNotes && strings.HasPrefix(oldPath, notesPrefix) {
 				continue
 			}
 			// In GitHub API, passing sha: nil / omitting sha deletes the file from the tree
