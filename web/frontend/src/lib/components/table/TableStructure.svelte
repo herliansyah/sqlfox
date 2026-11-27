@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { focusTrap } from '../../actions/focusTrap';
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
   import { splitSqlStatements, maskSqlForAnalysis, quoteSqlIdentifier } from '../../utils/sqlStatements';
@@ -317,19 +318,27 @@
         if (isSQLite) {
           statements.push(`-- SQLite doesn't natively support ALTER COLUMN, requires table recreation.`);
         } else if (isPostgres) {
+          const orig = (tableMeta.columns || []).find((o) => o.name === (c._oldName || c.name));
           if (c._oldName && c._oldName !== c.name) {
             statements.push(`ALTER TABLE ${q(tableName)} RENAME COLUMN ${q(c._oldName)} TO ${q(c.name)};`);
           }
-          statements.push(`ALTER TABLE ${q(tableName)} ALTER COLUMN ${q(c.name)} TYPE ${c.type};`);
-          if (c.is_nullable) {
-            statements.push(`ALTER TABLE ${q(tableName)} ALTER COLUMN ${q(c.name)} DROP NOT NULL;`);
-          } else {
-            statements.push(`ALTER TABLE ${q(tableName)} ALTER COLUMN ${q(c.name)} SET NOT NULL;`);
+          if (!orig || orig.type !== c.type) {
+            statements.push(`ALTER TABLE ${q(tableName)} ALTER COLUMN ${q(c.name)} TYPE ${c.type};`);
           }
-          if (dfltClause) {
-            statements.push(`ALTER TABLE ${q(tableName)} ALTER COLUMN ${q(c.name)} SET ${dfltClause};`);
-          } else {
-            statements.push(`ALTER TABLE ${q(tableName)} ALTER COLUMN ${q(c.name)} DROP DEFAULT;`);
+          if (!orig || Boolean(orig.is_nullable) !== Boolean(c.is_nullable)) {
+            if (c.is_nullable) {
+              statements.push(`ALTER TABLE ${q(tableName)} ALTER COLUMN ${q(c.name)} DROP NOT NULL;`);
+            } else {
+              statements.push(`ALTER TABLE ${q(tableName)} ALTER COLUMN ${q(c.name)} SET NOT NULL;`);
+            }
+          }
+          const origDflt = formatDefaultValue(orig?.default_value != null ? String(orig.default_value) : '');
+          if (!orig || origDflt !== dfltClause) {
+            if (dfltClause) {
+              statements.push(`ALTER TABLE ${q(tableName)} ALTER COLUMN ${q(c.name)} SET ${dfltClause};`);
+            } else {
+              statements.push(`ALTER TABLE ${q(tableName)} ALTER COLUMN ${q(c.name)} DROP DEFAULT;`);
+            }
           }
         } else {
           if (c._oldName && c._oldName !== c.name) {
@@ -350,7 +359,8 @@
     if (!isSQLite && JSON.stringify(origPKCols) !== JSON.stringify(nextPKCols)) {
       if (isPostgres) {
         if (origPKCols.length > 0) {
-          statements.push(`ALTER TABLE ${q(tableName)} DROP CONSTRAINT ${q(`${tableName}_pkey`)};`);
+          const pkConstraint = (tableMeta.indexes || []).find((idx) => idx.is_primary)?.name || `${tableName}_pkey`;
+          statements.push(`ALTER TABLE ${q(tableName)} DROP CONSTRAINT ${q(pkConstraint)};`);
         }
         if (nextPKCols.length > 0) {
           statements.push(`ALTER TABLE ${q(tableName)} ADD PRIMARY KEY (${nextPKCols.map(q).join(', ')});`);
@@ -565,7 +575,7 @@
 <!-- Add / Edit Column Modal -->
 {#if isAddModalOpen}
   <div class="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
-    <div class="bg-[#0b0f19] border border-[#1e293b] rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col animate-scale-in text-xs font-sans">
+    <div role="dialog" aria-modal="true" use:focusTrap class="bg-[#0b0f19] border border-[#1e293b] rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col animate-scale-in text-xs font-sans">
       <div class="px-5 py-4 border-b border-[#1e293b] flex items-center justify-between bg-[#0f172a]">
         <div class="flex items-center space-x-2">
           <Icon name="columns" class="w-4 h-4 text-sky-400" />

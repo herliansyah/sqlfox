@@ -1487,18 +1487,10 @@
                   : isSelf
                   ? 'bg-sky-950/20'
                   : 'bg-[#090d16]'}
+                <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
                 <tr
-                  role="button"
-                  tabindex="0"
                   class="group h-8 cursor-pointer border-b border-slate-800/50 border-l-4 transition-colors {rowBg}"
                   onclick={() => { inspectingThread = thread; formatInspectSql = false; }}
-                  onkeydown={(e) => {
-                    if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
-                      e.preventDefault();
-                      inspectingThread = thread;
-                      formatInspectSql = false;
-                    }
-                  }}
                 >
                   <td class="px-2 text-center overflow-hidden" onclick={(e) => e.stopPropagation()}>
                     {#if !isSelf && !isSys}

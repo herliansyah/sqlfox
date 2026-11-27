@@ -223,10 +223,7 @@
     // Escape: Resolve active safety/native dialog or close modals / cancel query
     if (e.key === 'Escape') {
       if (appState.nativeDialog.isOpen) {
-        if (appState.nativeDialog.resolve) {
-          appState.nativeDialog.resolve(appState.nativeDialog.type === 'prompt' ? null : false);
-        }
-        appState.nativeDialog.isOpen = false;
+        appState.resolveNativeDialog(appState.nativeDialog.type === 'prompt' ? null : false);
         return;
       }
       if (appState.safetyChallenge.isOpen) {

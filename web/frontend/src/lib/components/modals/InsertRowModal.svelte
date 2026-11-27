@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { focusTrap } from '../../actions/focusTrap';
   import { appState } from '../../stores/appState.svelte';
   import { resolveEnumValues } from '../../utils/dataTypes';
   import Icon from '../common/Icon.svelte';
@@ -78,7 +79,7 @@
 
 {#if appState.isInsertRowModalOpen && currentTab?.tableName}
   <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 select-none">
-    <div class="w-full max-w-lg bg-[#0f172a] border border-[#334155] rounded-xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden">
+    <div role="dialog" aria-modal="true" use:focusTrap class="w-full max-w-lg bg-[#0f172a] border border-[#334155] rounded-xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden">
       <!-- Header -->
       <div class="px-5 py-3 border-b border-[#334155] bg-[#0b0f19] flex items-center justify-between">
         <div class="flex items-center space-x-2.5">

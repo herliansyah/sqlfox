@@ -34,7 +34,7 @@ export function formatParamValue(raw: string): string {
 
 export function bindSqlParamsInText(sql: string, values: Map<string, string>): string {
   return sql.replace(
-    /('(?:''|\\.|[^'\\])*'|"(?:""|\\.|[^"\\])*"|`(?:``|[^`])*`|--[^\n]*|\/\*[\s\S]*?\*\/|::[A-Za-z_][A-Za-z0-9_]*|@@[A-Za-z_][A-Za-z0-9_]*|(?::[A-Za-z_][A-Za-z0-9_]*|@[A-Za-z_][A-Za-z0-9_]*|\$[1-9][0-9]*)\b)/g,
-    (tok) => values.get(tok) ?? tok
+    /'(?:''|\.|[^'\])*'|"(?:""|\.|[^"\])*"|`(?:``|[^`])*`|(\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$)[\s\S]*?\1|--[^\n]*|\/\*[\s\S]*?\*\/|::[A-Za-z_][A-Za-z0-9_]*|@@[A-Za-z_][A-Za-z0-9_]*|(^|[^:@A-Za-z0-9_])(:[A-Za-z_][A-Za-z0-9_]*|@[A-Za-z_][A-Za-z0-9_]*|\$[1-9][0-9]*)\b/g,
+    (full, _dq, prefix, param) => (param ? `${prefix}${values.get(param) ?? param}` : full)
   );
 }

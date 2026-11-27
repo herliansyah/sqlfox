@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { focusTrap } from '../../actions/focusTrap';
   import { tick } from 'svelte';
   import { appState } from '../../stores/appState.svelte';
   import { quoteSqlIdentifier } from '../../utils/sqlStatements';
@@ -145,7 +146,7 @@
     class="fixed inset-0 z-[95] flex items-start justify-center pt-[10vh] bg-black/70 p-4"
     onclick={(e) => e.target === e.currentTarget && (appState.isSchemaSearchOpen = false)}
   >
-    <div class="bg-[#0f172a] border border-slate-700 w-full max-w-2xl rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[75vh] animate-in fade-in zoom-in-95 duration-100">
+    <div role="dialog" aria-modal="true" use:focusTrap class="bg-[#0f172a] border border-slate-700 w-full max-w-2xl rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[75vh] animate-in fade-in zoom-in-95 duration-100">
       <div class="p-3 border-b border-slate-800 flex items-center gap-2.5 bg-[#090d16]">
         <Icon name="search" class="w-4 h-4 text-sky-400 shrink-0" />
         <input

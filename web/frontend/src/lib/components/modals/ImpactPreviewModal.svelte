@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { focusTrap } from '../../actions/focusTrap';
   import { appState } from '../../stores/appState.svelte';
   import Icon from '../common/Icon.svelte';
   import { parseExplainPlan } from '../../utils/explainPlan';
@@ -99,6 +100,7 @@
       class="bg-slate-900 border border-slate-700/80 w-full max-w-5xl rounded-xl shadow-2xl p-5 space-y-3.5 flex flex-col max-h-[88vh] text-slate-100"
       role="dialog"
       aria-modal="true"
+      use:focusTrap
     >
       <!-- Modal Header -->
       <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3 shrink-0">

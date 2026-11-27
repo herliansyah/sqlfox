@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { focusTrap } from '../../actions/focusTrap';
   import { tick } from 'svelte';
   import { appState } from '../../stores/appState.svelte';
   import { api } from '../../api/client';
@@ -150,6 +151,7 @@
       role="dialog"
       aria-modal="true"
       aria-labelledby="snippets-modal-title"
+      use:focusTrap
       class="bg-[#0b0f19] border border-[#334155] rounded-xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[85vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150"
     >
       <!-- Dialog Header -->

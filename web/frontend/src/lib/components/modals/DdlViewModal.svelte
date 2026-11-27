@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { focusTrap } from '../../actions/focusTrap';
   import { appState } from '../../stores/appState.svelte';
   import { copyText } from '../../utils/clipboard';
   import Icon from '../common/Icon.svelte';
@@ -22,7 +23,7 @@
     id="ddl-modal"
     class="fixed inset-0 z-[95] flex items-center justify-center bg-black/75 p-4"
   >
-    <div class="bg-[#0f172a] border border-slate-700 w-full max-w-3xl rounded-xl shadow-2xl flex flex-col overflow-hidden max-h-[85vh]">
+    <div role="dialog" aria-modal="true" use:focusTrap class="bg-[#0f172a] border border-slate-700 w-full max-w-3xl rounded-xl shadow-2xl flex flex-col overflow-hidden max-h-[85vh]">
       <div class="px-5 py-3 border-b border-slate-800 bg-slate-900/60 flex items-center justify-between">
         <div class="flex items-center gap-2">
           <Icon name="file-code" class="w-4 h-4 text-purple-400" />

@@ -1,10 +1,20 @@
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
+import fs from 'fs';
 import path from 'path';
+
+function cleanAssetsDir() {
+  return {
+    name: 'clean-assets-dir',
+    buildStart() {
+      fs.rmSync(path.resolve(__dirname, '../dist/assets'), { recursive: true, force: true });
+    },
+  };
+}
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [svelte()],
+  plugins: [svelte(), cleanAssetsDir()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

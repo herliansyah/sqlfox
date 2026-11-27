@@ -589,6 +589,8 @@
   $effect(() => {
     if (typeof window === 'undefined') return;
     const onKeyDown = (e: KeyboardEvent) => {
+      if (appState.isRemoteLocked || appState.hasOpenModal) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       const target = e.target as HTMLElement | null;
       const inInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable);
       if (inInput) return;
@@ -1040,17 +1042,11 @@
             ? 'erd-dimmed border-slate-800 opacity-25 z-0'
             : 'border-[#334155] hover:border-slate-500 z-10'}"
           style="left: {pos.x}px; top: {pos.y}px; width: {CARD_WIDTH}px;"
+          role="group"
+          aria-label="Table {table.name}"
           onclick={() => (selectedTable = isSelected ? null : table.name)}
           ondblclick={() => appState.openTableDataTab(table.name)}
-          onkeydown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              selectedTable = isSelected ? null : table.name;
-            }
-          }}
           oncontextmenu={(e) => openContextMenu(e, table.name)}
-          role="button"
-          tabindex="0"
         >
           <!-- Card Header (Drag Handle) -->
           <div
@@ -1059,7 +1055,18 @@
             class="h-[38px] px-2.5 bg-[#0f172a] rounded-t-xl border-b border-[#1e293b] flex items-center justify-between cursor-grab active:cursor-grabbing group gap-1"
             title="Drag to move · Double-click to open data · Right-click for actions"
           >
-            <div class="flex items-center space-x-1.5 min-w-0 flex-1">
+            <div
+              role="button"
+              tabindex="0"
+              aria-pressed={isSelected}
+              onkeydown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  selectedTable = isSelected ? null : table.name;
+                }
+              }}
+              class="flex items-center space-x-1.5 min-w-0 flex-1"
+            >
               <Icon name="table" class="w-3.5 h-3.5 {isConnected ? 'text-amber-400' : 'text-sky-400'} shrink-0" />
               <span class="font-mono text-xs font-bold text-slate-100 truncate" title={table.name}>
                 {table.name}
