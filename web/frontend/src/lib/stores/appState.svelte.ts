@@ -140,6 +140,11 @@ export class AppState {
 
   // Staged Edits for Grid CRUD
   stagedEdits = $state<Record<string, StagedEdit>>({});
+
+  /** Single source of truth for staged-edit keys: grid highlight, inspector and stageEdit must agree. */
+  stagedEditKey(table: string, uid: string | number, cIdx: number, tabId = this.activeTab?.id): string {
+    return `${tabId || 'default'}:${table}:${uid}:${cIdx}`;
+  }
   gridRowUids = new WeakMap<object, number>();
   private nextRowUid = 1;
   private clientIdSeq = 0;
@@ -379,7 +384,8 @@ export class AppState {
   isProduction = $derived(this.activeConnection?.environment === 'Production');
   isStaging = $derived(this.activeConnection?.environment === 'Staging');
   stagedCount = $derived(
-    Object.keys(this.stagedEdits).length + (this.activeTab?.stagedDraftRows?.length || 0)
+    Object.values(this.stagedEdits).filter((e) => e.tabId === this.activeTab?.id).length +
+      (this.activeTab?.stagedDraftRows?.length || 0)
   );
 
   filteredTables = $derived.by(() => {
@@ -1272,7 +1278,7 @@ export class AppState {
     if (!inserted) {
       const tab = this.activeTab;
       if (tab && !tab.isTableViewer && !tab.isProcesslist && !tab.isErdCanvas) {
-        tab.sql += sql;
+        this.patchTab(tab.id, { sql: tab.sql + sql });
       } else {
         this.addTab(`${title.replace(/[^a-zA-Z0-9_-]/g, '_')}.sql`, sql);
       }
@@ -1744,9 +1750,9 @@ export class AppState {
     if (!this.activeSessionId) return;
     try {
       const res = await api.getTableDDL(this.activeSessionId, tableName);
-      if (res && res.ddl) newTab.sql = res.ddl;
+      if (res?.ddl) this.patchTab(newTab.id, { sql: res.ddl });
     } catch (err: any) {
-      newTab.sql = `-- Error fetching DDL: ${err.message || err}`;
+      this.patchTab(newTab.id, { sql: `-- Error fetching DDL: ${err.message || err}` });
     }
     this.saveTabsState();
   }
@@ -1761,9 +1767,9 @@ export class AppState {
     if (!this.activeSessionId) return;
     try {
       const res = await api.getRoutineDDL(this.activeSessionId, routineName, routineType);
-      if (res && res.ddl) newTab.sql = res.ddl;
+      if (res?.ddl) this.patchTab(newTab.id, { sql: res.ddl });
     } catch (err: any) {
-      newTab.sql = `-- Error fetching routine definition: ${err.message || err}`;
+      this.patchTab(newTab.id, { sql: `-- Error fetching routine definition: ${err.message || err}` });
     }
     this.saveTabsState();
   }
@@ -2913,7 +2919,7 @@ export class AppState {
     const tabId = this.activeTab?.id || 'default';
     const rowObj = this.activeTab?.activeResult?.rows?.[rIdx];
     const uid = rowObj ? this.getRowUid(rowObj) : rIdx;
-    const key = `${tabId}:${table}:${uid}:${cIdx}`;
+    const key = this.stagedEditKey(table, uid, cIdx, tabId);
     const existing = this.stagedEdits[key];
     this.stagedEdits[key] = {
       tabId,
@@ -2944,7 +2950,7 @@ export class AppState {
         'Confirm Auto-Save'
       );
       if (!ok) {
-        const row = this.activeTab?.activeResult?.rows?.[edit.rIdx];
+        const row = this.tabs.find((t) => t.id === edit.tabId)?.activeResult?.rows?.[edit.rIdx];
         if (row) row[edit.cIdx] = edit.oldVal;
         delete this.stagedEdits[key];
         this.tabs = [...this.tabs];
@@ -2990,11 +2996,10 @@ export class AppState {
         remaining[key] = item;
       }
     }
-    if (this.activeTab?.stagedDraftRows?.length) {
-      this.activeTab.stagedDraftRows = [];
-    }
+    const tab = this.activeTab;
     this.stagedEdits = remaining;
-    this.tabs = [...this.tabs];
+    // patchTab replaces the tab object, which is also the reactivity signal for the reverted rows.
+    if (tab) this.patchTab(tab.id, { stagedDraftRows: [] });
     this.showToast('Discarded staged changes for active tab', 'info');
   }
 

@@ -583,18 +583,19 @@
       appState.showToast(appState.isReadOnly ? 'Read-only mode is active' : 'Draft rows require a single target table', 'warning');
       return;
     }
-    if (!currentTab.stagedDraftRows) currentTab.stagedDraftRows = [];
     const blank: Record<string, any> = {};
     allColumns.forEach((c) => {
       blank[c] = '';
     });
-    currentTab.stagedDraftRows.unshift(blank);
+    appState.patchTab(currentTab.id, { stagedDraftRows: [blank, ...(currentTab.stagedDraftRows || [])] });
     appState.showToast('Draft row added. Enter values or Save All staged edits.', 'info');
   }
 
   function removeDraftRow(dIdx: number) {
     if (!currentTab?.stagedDraftRows) return;
-    currentTab.stagedDraftRows.splice(dIdx, 1);
+    appState.patchTab(currentTab.id, {
+      stagedDraftRows: currentTab.stagedDraftRows.filter((_, i) => i !== dIdx),
+    });
   }
 
   async function saveDraftRow(dIdx: number) {
@@ -616,7 +617,9 @@
     try {
       const ok = await appState.insertRow(cleaned);
       if (ok && currentTab?.stagedDraftRows) {
-        currentTab.stagedDraftRows.splice(dIdx, 1);
+        appState.patchTab(currentTab.id, {
+          stagedDraftRows: currentTab.stagedDraftRows.filter((_, i) => i !== dIdx),
+        });
       }
     } catch (err: any) {
       appState.showToast(`Failed to save draft row: ${err.message}`, 'error');
@@ -636,14 +639,13 @@
       if (appState.isReadOnly) appState.showToast('Read-only mode is active', 'warning');
       return;
     }
-    if (!currentTab.stagedDraftRows) currentTab.stagedDraftRows = [];
     const row = result.rows[rIdx];
     const draft: Record<string, any> = {};
     allColumns.forEach((colName, cIdx) => {
       const isPK = Boolean(result!.columns[cIdx] && isColPK(result!.columns[cIdx]));
       draft[colName] = withoutKey && isPK ? '' : row[cIdx];
     });
-    currentTab.stagedDraftRows.unshift(draft);
+    appState.patchTab(currentTab.id, { stagedDraftRows: [draft, ...(currentTab.stagedDraftRows || [])] });
     appState.showToast(
       `Row #${rIdx + 1} duplicated as editable draft${withoutKey ? ' (key cleared)' : ' (key retained)'}`,
       'success'
@@ -814,7 +816,7 @@
 
   function isCellStaged(table: string, rowObj: any[] | undefined, rIdx: number, cIdx: number): boolean {
     const uid = rowObj ? appState.getRowUid(rowObj) : rIdx;
-    return Boolean(appState.stagedEdits[`${table}:${uid}:${cIdx}`]);
+    return Boolean(appState.stagedEdits[appState.stagedEditKey(table, uid, cIdx)]);
   }
 
   // Context Menu
@@ -1266,8 +1268,7 @@
             type="button"
             onclick={() => {
               if (currentTab) {
-                currentTab.activeResultIndex = mIdx;
-                currentTab.activeResult = mRes;
+                appState.patchTab(currentTab.id, { activeResultIndex: mIdx, activeResult: mRes });
               }
             }}
             class="px-2.5 py-1 rounded text-xs font-mono font-medium transition flex items-center space-x-1.5 shrink-0 {(currentTab.activeResultIndex || 0) === mIdx ? 'bg-sky-500/20 text-sky-300 font-bold border border-sky-500/50' : 'text-slate-400 hover:text-white hover:bg-slate-800'}"

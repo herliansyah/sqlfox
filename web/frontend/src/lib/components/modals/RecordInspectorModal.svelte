@@ -81,7 +81,7 @@
     const isStaged = Boolean(
       effectiveTable &&
         currentRow &&
-        appState.stagedEdits[`${effectiveTable}:${appState.getRowUid(currentRow)}:${cIdx}`]
+        appState.stagedEdits[appState.stagedEditKey(effectiveTable, appState.getRowUid(currentRow), cIdx)]
     );
     const isDraftDirty = editedFields[colName] !== undefined && editedFields[colName] !== val;
     return isStaged || isDraftDirty;
@@ -135,12 +135,13 @@
     editedFields = { ...editedFields };
     if (effectiveTable && currentRow) {
       const uid = appState.getRowUid(currentRow);
-      const key = `${effectiveTable}:${uid}:${cIdx}`;
+      const key = appState.stagedEditKey(effectiveTable, uid, cIdx);
       const staged = appState.stagedEdits[key];
       if (staged) {
         currentRow[cIdx] = staged.oldVal;
         delete appState.stagedEdits[key];
         appState.stagedEdits = { ...appState.stagedEdits };
+        if (currentTab) appState.commitTab(currentTab);
       }
     }
   }
@@ -198,6 +199,7 @@
       pkValues
     );
     currentRow[cIdx] = newVal;
+    if (currentTab) appState.commitTab(currentTab);
     delete editedFields[colName];
     editedFields = { ...editedFields };
     appState.showToast(`Staged change for ${colName}`, 'info');

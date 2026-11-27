@@ -43,7 +43,11 @@
 
   function handleSqlChange(newSql: string) {
     if (!currentTab) return;
+    // ponytail: tabs is $state.raw — patch only when the empty/non-empty edge flips, which is
+    // all the toolbar reads reactively; patching every keystroke re-rendered this component.
+    const wasEmpty = !currentTab.sql;
     currentTab.sql = newSql;
+    if (wasEmpty !== !newSql) appState.patchTab(currentTab.id, { sql: newSql });
     if (saveDebounceTimer) clearTimeout(saveDebounceTimer);
     saveDebounceTimer = setTimeout(() => appState.saveTabsState(), 350);
   }
@@ -103,7 +107,7 @@
 
   function handleTabScopeChange(database: string) {
     if (!currentTab) return;
-    currentTab.database = database;
+    appState.patchTab(currentTab.id, { database });
     void appState.ensureEditorCatalog(database).catch(() => {});
     appState.saveTabsState();
   }
@@ -226,7 +230,9 @@
           <select
             value={(currentTab as any).queryLimit ?? 1000}
             onchange={(e) => {
-              (currentTab as any).queryLimit = Number((e.currentTarget as HTMLSelectElement).value);
+              appState.patchTab(currentTab.id, {
+                queryLimit: Number((e.currentTarget as HTMLSelectElement).value),
+              });
               appState.saveTabsState();
             }}
             class="bg-transparent text-sky-400 font-mono text-[11px] outline-none cursor-pointer"
@@ -337,7 +343,7 @@
                 <span class="text-[10px] font-mono {appState.enableQueryProfiling ? 'text-amber-300' : 'text-slate-500'}">{appState.enableQueryProfiling ? 'ON' : 'OFF'}</span>
               </button>
               <button
-                onclick={() => { if (currentTab) currentTab.showQueryProfiler = !currentTab.showQueryProfiler; showMoreMenu = false; }}
+                onclick={() => { if (currentTab) appState.patchTab(currentTab.id, { showQueryProfiler: !currentTab.showQueryProfiler }); showMoreMenu = false; }}
                 class="w-full px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 flex items-center space-x-2"
               >
                 <Icon name="clock" class="w-3.5 h-3.5 text-sky-400" />

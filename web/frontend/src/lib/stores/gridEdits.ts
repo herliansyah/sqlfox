@@ -116,7 +116,9 @@ export async function commitStagedEditsAction(ctx: GridEditsContext): Promise<vo
           ctx.showToast(`Draft row insert failed: ${draftErr.message}`, 'error');
         }
       }
-      if (tab) tab.stagedDraftRows = remaining;
+      if (tab) {
+        ctx.setTabs(ctx.tabs.map((t) => (t.id === tab.id ? { ...t, stagedDraftRows: remaining } : t)));
+      }
     }
 
     ctx.showToast(`Saved ${totalAffected} change(s) successfully`, 'success');
