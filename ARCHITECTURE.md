@@ -212,7 +212,7 @@ sequenceDiagram
 
 ## 6. Safe DDL & Lock Contention Prevention Pipeline
 
-To eliminate Metadata Lock (MDL) queues, application pool exhaustion, and deadlock cascades on massive datasets (e.g. 500GB tables and small master tables referenced by high-traffic transactional child tables):
+To eliminate Metadata Lock (MDL) queues, application pool exhaustion, and deadlock cascades on large datasets (e.g. 500GB tables and small master tables referenced by high-traffic transactional child tables):
 
 ```mermaid
 sequenceDiagram
@@ -544,7 +544,7 @@ The headless CLI suite (`cmd/sqlfox/main.go` -> `internal/cli`) provides scripta
 
 ## 13. Large-Scale Hardening, Memory Ceiling & Resilience Engine
 
-To ensure unwavering reliability when operating against massive production databases (1,000+ tables, 50,000+ columns, and multi-gigabyte datasets), SqlFox enforces strict systemic boundaries:
+To keep resource usage bounded on large production databases (1,000+ tables, 50,000+ columns, multi-gigabyte datasets), SqlFox enforces strict limits:
 
 ```mermaid
 flowchart TD
@@ -584,7 +584,7 @@ flowchart TD
    - If target connection slots are saturated, client-side RowStream reading aborts immediately, and the API returns `504 Gateway Timeout` with clear pool exhaustion diagnostics.
 5. **Global Web UI Error Boundary (`web/frontend/src/`)**:
    - Captures network and server drop events during API fetches and displays a non-blocking floating banner (`#global-reconnect-banner`).
-   - Automatically polls `/api/auth/status` using exponential backoff (1s, 2s, 4s, 8s) and recovers seamlessly while preserving active editor tabs, unsaved queries, and staged grid edits.
+   - Automatically polls `/api/auth/status` using exponential backoff (1s, 2s, 4s, 8s) and recovers while preserving active editor tabs, unsaved queries, and staged grid edits.
 6. **Ponytail Zero-Regression Pruning**:
    - Single release binary size verified at **18MB** (stripped with `-ldflags="-s -w"`), well below the 25MB ceiling.
    - Startup time benchmarks at **0.008s (8ms)**, fulfilling the sub-second launch promise.
@@ -685,7 +685,7 @@ flowchart TD
    - On Windows, where executing binaries cannot be overwritten in place, the running executable is renamed to `sqlfox.exe.old`, the replacement is moved into place, and cleanup is scheduled.
 5. **Graceful Re-exec Restart**:
    - Dispatches a background goroutine spawning the updated binary with original command-line arguments via `exec.Command` / `os.StartProcess`.
-   - Frontend initiates a 3-second countdown before auto-refreshing to seamlessly reconnect.
+   - Frontend initiates a 3-second countdown before auto-refreshing to reconnect.
 
 > Release-side signing is performed by the CGO-free helper `scripts/sign-manifest.go`, wired into `.github/workflows/release.yml`. Key provisioning: `docs/playbooks/release-signing-key-provisioning.md`.
 
@@ -732,7 +732,7 @@ Every mutating operation across the application is recorded to the local SQLite 
 
 ## 18. Diagnostic Logging & Request Observability Suite (`internal/logger`)
 
-SqlFox embeds a production-grade structured logging and request telemetry pipeline designed around the Go standard library `log/slog` (Go 1.21+):
+SqlFox uses a structured logging and request telemetry pipeline designed around the Go standard library `log/slog` (Go 1.21+):
 
 ```mermaid
 flowchart TD
@@ -938,7 +938,7 @@ In production lock storms, the Lock Contention Inspector (`#lock-dialog`) visual
 
 ## 22. Processlist Batch Operations & Two-Tier Responsive Toolbar Architecture
 
-To handle server lock storms and massive connection leaks where terminating threads individually is too slow:
+To handle server lock storms and large connection leaks where terminating threads individually is too slow:
 
 ```mermaid
 flowchart TD
@@ -1048,7 +1048,7 @@ sequenceDiagram
 
 ## 26. Virtual Data Grid & NDJSON Micro-Chunk Streaming Architecture
 
-Engineered for massive datasets with strict memory ceilings:
+Designed for large datasets with bounded memory:
 
 ```mermaid
 flowchart TD
@@ -1308,7 +1308,7 @@ flowchart TD
 2. **Backward-Compatible Editor Interface**:
    - Exposes standard editor operations (`getValue`, `setValue`, `getCursor`, `markText`, `focus`) wired into `appState.svelte.ts` and `SqlCodeEditor.svelte`.
 3. **Dynamic Multi-Dialect Switching via Compartments**:
-   - Dynamically reconfigures the editor syntax parser when switching database sessions (`setDialect(conn.driver)`), seamlessly toggling between MySQL, PostgreSQL, and SQLite dialect rules.
+   - Dynamically reconfigures the editor syntax parser when switching database sessions (`setDialect(conn.driver)`), switching between MySQL, PostgreSQL, and SQLite dialect rules.
 4. **Dark Theme & Autocomplete Parity**:
    - Integrates with SqlFox's active schema catalog and user snippets, offering instant autocompletion and high-contrast dark theme syntax highlighting.
 
@@ -1356,7 +1356,7 @@ flowchart TD
    - Restores full right-click tab actions: Rename (prompt), Duplicate, Close Others, Close Right, Close, and Close All.
 3. **Data Grid Edit Modes & Exact Row Counting (`VirtualGrid.svelte`)**:
    - **Staged vs. Auto Edit Modes**: Operators toggle between `Staged` (draft changes accumulated in memory for manual review and batch apply) and `Auto` (immediate background commit on cell blur), persisted to `localStorage` (`sqlfox_grid_edit_mode`).
-   - **Exact Row Count**: Provides an on-demand calculation button querying precise `COUNT(*)` with per-dialect identifier quoting (`"table"` vs `` `table` ``), cleanly isolated from fast catalog metadata to prevent accidental table scan stalls on massive production tables.
+   - **Exact Row Count**: Provides an on-demand calculation button querying precise `COUNT(*)` with per-dialect identifier quoting (`"table"` vs `` `table` ``), cleanly isolated from fast catalog metadata to prevent accidental table scan stalls on large production tables.
 4. **Daemon System Lifecycle Actions (`Header.svelte`, `CommandPaletteModal.svelte`)**:
    - **Open in Browser** (`POST /api/system/open-browser`): Opens the application URL in the operator's default web browser from standalone window mode.
    - **Copy App URL**: Copies the active daemon HTTP/HTTPS network endpoint with Master PIN credentials for swift multi-device pairing.

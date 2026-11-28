@@ -122,7 +122,7 @@ flowchart TD
 
 ## 5. Diagnostic Profiling Security (`pprof`)
 
-To balance developer observability under massive enterprise workloads with strict multi-IP security:
+To balance developer observability under heavy workloads with strict multi-IP security:
 
 1. **Disabled by Default**: Runtime profiling endpoints (`/debug/pprof/*`) are completely unmounted by default in desktop and server runtimes.
 2. **Explicit Opt-In via Environment Variable**: Endpoints are mounted conditionally strictly when `SQLFOX_PPROF=1` is exported in the host process environment.
