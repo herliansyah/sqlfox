@@ -494,7 +494,7 @@ SqlFox integrates a centralized operational notebook and follow-up engine direct
 - **AI Copilot `@` Mention Autocomplete**:
   - In the Copilot prompt input, type `@` to summon the interactive note picker dropdown.
   - Selecting a note inserts an `[@note:<title>]` reference token.
-  - When submitted, SqlFox automatically extracts referenced notes and injects the raw snapshot and developer action notes directly into the AI system prompt context, empowering the AI to diagnose historical incidents and analyze past query issues accurately.
+  - When submitted, SqlFox automatically extracts referenced notes and injects the raw snapshot and developer action notes directly into the AI system prompt context, so the AI can diagnose historical incidents and analyze past query issues accurately.
 
 ### Workspace Ergonomics, Tab Context Menu & Fluid Splitter
 SqlFox provides a modern, distraction-free desktop-grade workspace optimized for long development and debugging sessions:
@@ -639,7 +639,7 @@ Access via **⚡ Monitor &rarr; 🔒 Lock Contention & Blockers**:
 - Analyzes active locks on MySQL (`sys.innodb_lock_waits`, `performance_schema.data_locks`) and PostgreSQL (`pg_locks`, `pg_blocking_pids`).
 - **Root Blocker Incident Triage**:
   - Highlights culprit threads with a prominent `🚨 ROOT BLOCKER` tag displaying Thread ID, database user, lock mode held (`holding LOCK`), and locked resource identifier.
-  - **Scrollable Full SQL Container**: Renders complete un-truncated SQL queries (`font-mono text-[13px]`) with vertical scrolling up to 192px (`max-h-48`) for effortless query inspection during production incidents.
+  - **Scrollable Full SQL Container**: Renders complete un-truncated SQL queries (`font-mono text-[13px]`) with vertical scrolling up to 192px (`max-h-48`) for easier query inspection during production incidents.
   - **Granular Mitigation Actions**:
     - **Kill Query** (Amber): Out-of-band cancellation of the executing statement without dropping the client connection.
     - **Kill Blocker** (Red): Immediate termination of the entire blocking connection to clear lock storms.

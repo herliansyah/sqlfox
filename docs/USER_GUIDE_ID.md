@@ -342,7 +342,7 @@ Klik tombol **🔒 Read-Only** pada bilah menu atas kapan saja:
 - Sangat penting saat DBA melakukan investigasi insiden, audit data sensitif, atau peninjauan log produksi.
 
 ### Modal Pengaturan Terpadu (4-Tab) & Pintasan Global
-SqlFox menyatukan seluruh konfigurasi ruang kerja dan preferensi sistem ke dalam satu modal dialog 4-tab yang elegan dan terintegrasi (`#settings-modal`):
+SqlFox menyatukan seluruh konfigurasi ruang kerja dan preferensi sistem ke dalam satu modal dialog 4-tab (`#settings-modal`):
 - **Akses Seketika**: Klik tombol **`⚙️ Settings`** pada bilah navigasi atas atau gunakan tombol pintasan global standar industri **`Ctrl + ,`** (atau **`Cmd + ,`** di macOS). Menu pengaturan ini juga dapat dipanggil langsung dari Command Palette (**`Ctrl + K`**).
 - **4 Tab Konfigurasi Terpadu**:
   1. **`🔐 Connections`**: Kelola profil berkas brankas terenkripsi (*Connection Vault*), modifikasi kredensial koneksi, uji latensi ping TCP, dan konfigurasi sertifikat SSL/TLS.
@@ -367,7 +367,7 @@ SqlFox menyatukan seluruh konfigurasi ruang kerja dan preferensi sistem ke dalam
 ### Keyset Pagination & Pencarian Data Kilat
 Sistem pagination konvensional `OFFSET 1000000` memaksa server memindai dan membuang jutaan baris sebelum menampilkan data. SqlFox menerapkan **Keyset Pagination**:
 - Menelusuri baris data berdasarkan indeks kunci (`WHERE id > :last_id ORDER BY id LIMIT 50`).
-- Perpindahan halaman tetap kilat dan tanpa lonjakan RAM, bahkan pada tabel berukuran 100 juta baris lebih.
+- Perpindahan halaman tetap cepat dan tanpa lonjakan RAM, bahkan pada tabel berukuran 100 juta baris lebih.
 - Manfaatkan **Inline Filter Bar** di atas tabel untuk memfilter nilai kolom spesifik secara instan.
 
 ### Spreadsheet CRUD & Pengeditan Sel Langsung (Inline)
@@ -430,7 +430,7 @@ SqlFox menyatukan kendali navigasi data ke dalam bilah paginasi bawah yang rapi 
 - **Pembungkusan Wildcard Otomatis pada Filter `LIKE` / `NOT LIKE`**:
   - Kata pencarian polos yang dimasukkan pada filter otomatis dibungkus dengan `%...%` jika tidak terdapat wildcard (`%` atau `_`), memberikan pencarian parsial yang intuitif.
 - **Streaming Kueri Mikro-Chunk NDJSON (`/api/session/{id}/execute-stream`)**:
-  - Hasil kueri dikirim secara streaming baris demi baris menggunakan format NDJSON dengan pembersihan instan pada 20 baris pertama (*micro-chunk flush*), menghasilkan Time to First Row (TTFR) super kilat di bawah 50ms.
+  - Hasil kueri dikirim secara streaming baris demi baris menggunakan format NDJSON dengan pembersihan instan pada 20 baris pertama (*micro-chunk flush*), menghasilkan Time to First Row (TTFR) di bawah 50ms.
   - Didukung terminasi native via `AbortController` saat berpindah tab atau menekan tombol Cancel.
 
 ### Impor CSV Bebas Dependensi & Pemetaan Kolom

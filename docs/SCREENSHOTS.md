@@ -8,7 +8,7 @@
 
 ---
 
-Welcome to the comprehensive visual tour of **SqlFox**. All captures below are taken in high-resolution (**2x Retina / HiDPI**) running on an enterprise-scale dataset (**10,000+ orders, 25,000 order items, 2,500 customers, products, and system audit logs**).
+Screenshots of **SqlFox** captured at 2x HiDPI using a sample dataset (**10,000+ orders, 25,000 order items, 2,500 customers, products, and audit logs**).
 
 ---
 
@@ -36,7 +36,7 @@ Single-row detail inspector with formatted card views and syntax-highlighted pre
 
 ## 2. Deterministic Safety Guardrails
 
-### Safety Guard™ (Destructive Query Challenge Modal)
+### Safety Guard (Destructive Query Challenge Modal)
 AST-based pre-execution interceptor for dangerous queries (`DROP TABLE`, `UPDATE`/`DELETE` without `WHERE`). Calculates row impact in advance and requires explicit manual confirmation.
 ![Safety Guard](assets/screenshots/02_safety_guard_destructive.png)
 
