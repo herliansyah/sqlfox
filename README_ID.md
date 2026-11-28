@@ -41,17 +41,17 @@ Screenshot lain (ERD, Safety Guard, Flight Recorder, Structure Sync, AI Copilot)
 
 ### Binary Siap Pakai
 
-Unduh rilis terbaru (**v0.19.8**) di [GitHub Releases](https://github.com/herliansyah/sqlfox/releases) untuk Linux, macOS, atau Windows (`amd64` / `arm64`).
+Unduh rilis terbaru (**v0.20.1**) di [GitHub Releases](https://github.com/herliansyah/sqlfox/releases) untuk Linux, macOS, atau Windows (`amd64` / `arm64`).
 
 **Linux (amd64):**
 ```bash
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.19.8/sqlfox-v0.19.8-linux-amd64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.20.1/sqlfox-v0.20.1-linux-amd64.tar.gz | tar -xz
 ./sqlfox
 ```
 
 **macOS (Apple Silicon):**
 ```bash
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.19.8/sqlfox-v0.19.8-darwin-arm64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.20.1/sqlfox-v0.20.1-darwin-arm64.tar.gz | tar -xz
 ./sqlfox
 ```
 

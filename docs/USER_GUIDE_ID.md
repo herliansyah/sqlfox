@@ -6,7 +6,7 @@
 
 ---
 
-<p>Buku panduan standar industri dan playbook operasional untuk software engineer, data operator, dan Database Administrator (DBA) yang menggunakan SqlFox.</p>
+<p>Panduan penggunaan dan referensi DBA untuk SqlFox.</p>
 
 </div>
 
@@ -78,7 +78,7 @@
 
 ## 1. Gambaran Umum & Arsitektur
 
-SqlFox dibangun secara khusus bagi para rekayasawan perangkat lunak dan tim DBA yang membutuhkan kecepatan respon seketika, proteksi data berlapis baja, serta wawasan diagnostik mendalam tanpa kompromi konsumsi memori tinggi dari aplikasi desktop berbasis Electron atau Java Virtual Machine (JVM).
+SqlFox adalah database manager single-binary berbasis Go dengan UI web Svelte 5 tersemat, tanpa beban memori Electron atau JVM.
 
 ### Model Single-Binary Bebas Dependensi CGO
 - SqlFox dikompilasi menjadi **satu berkas binary mandiri** yang telah menyertakan antarmuka web modern (*embedded SPA*).
@@ -86,7 +86,7 @@ SqlFox dibangun secara khusus bagi para rekayasawan perangkat lunak dan tim DBA 
 - Driver basis data murni Go (*pure-Go*) memungkinkan kompilasi silang instan ke berbagai arsitektur CPU (`amd64`, `arm64`) di Linux, macOS, dan Windows.
 
 ### Plafon Memori Ketat (< 100MB RAM)
-- Bahkan saat terhubung ke katalog enterprise berskala raksasa (>1.000 tabel, >50.000 kolom) atau melakukan streaming jutaan baris data, SqlFox secara ketat mempertahankan penggunaan RAM di bawah **100MB RSS**.
+- Bahkan saat terhubung ke skema besar (>1.000 tabel, >50.000 kolom) atau melakukan streaming jutaan baris data, SqlFox secara ketat mempertahankan penggunaan RAM di bawah **100MB RSS**.
 - Rahasia efisiensi ini didorong oleh:
   - Transport streaming berpotongan (*chunked streaming*) via WebSocket/SSE.
   - Penomoran halaman berbasis *Keyset Pagination* tanpa penumpukan *buffer* baris di RAM.
@@ -117,11 +117,11 @@ Unduh arsip rilis terbaru di halaman resmi [GitHub Releases](https://github.com/
 
 ```bash
 # Linux amd64 (Download & ekstrak sekali jalan)
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.16.1/sqlfox-v0.16.1-linux-amd64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.20.1/sqlfox-v0.20.1-linux-amd64.tar.gz | tar -xz
 ./sqlfox
 
 # macOS Apple Silicon (ARM64 M1/M2/M3/M4)
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.16.1/sqlfox-v0.16.1-darwin-arm64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.20.1/sqlfox-v0.20.1-darwin-arm64.tar.gz | tar -xz
 ./sqlfox
 ```
 
@@ -157,7 +157,7 @@ SqlFox menyediakan image container multi-arsitektur resmi (`linux/amd64` dan `li
 ```bash
 docker run -d \
   --name sqlfox \
-  -p 8080:8080 \
+  -p 127.0.0.1:8080:8080 \
   -v sqlfox_data:/data \
   --add-host=host.docker.internal:host-gateway \
   ghcr.io/herliansyah/sqlfox:latest
@@ -171,7 +171,7 @@ services:
     container_name: sqlfox
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
       # Opsional: tentukan PIN statis (jika kosong, auto-generate ke /data/master.key)
       # - SQLFOX_PASS=pin-keamanan-anda
@@ -194,7 +194,7 @@ sqlfox
 ```
 
 ### Kompilasi Manual dari Source Code
-Kompilasi SqlFox dari source membutuhkan Go 1.22+ dan Node.js (untuk build aset antarmuka):
+Kompilasi SqlFox dari source membutuhkan Go 1.26+ dan Node.js (untuk build aset antarmuka):
 ```bash
 git clone https://github.com/herliansyah/sqlfox.git
 cd sqlfox
@@ -348,7 +348,7 @@ SqlFox menyatukan seluruh konfigurasi ruang kerja dan preferensi sistem ke dalam
   1. **`🔐 Connections`**: Kelola profil berkas brankas terenkripsi (*Connection Vault*), modifikasi kredensial koneksi, uji latensi ping TCP, dan konfigurasi sertifikat SSL/TLS.
   2. **`☁️ GitHub Sync`**: Konfigurasi GitHub Personal Access Token (PAT) dan path repositori untuk sinkronisasi otomatis snippet query dan skema DDL ke repositori Git jarak jauh.
   3. **`📦 Notes Bundle`**: Ekspor dan impor arsip bundel catatan operasional terenkripsi (`.sqlfox-vault`), memudahkan pembagian playbook antaranggota tim atau backup offline.
-  4. **`🤖 AI Copilot`**: Pengaturan Multi-Profile mandiri kredensial BYOK (OpenAI, Claude, Gemini, DeepSeek, atau Ollama lokal) dengan enkripsi Vault AES-256-GCM. Dilengkapi fitur CRUD profil lengkap, pemilihan profil aktif instan, dan sinkronisasi aman ke repositori GitHub. Terintegrasi mulus dari drawer Notes maupun sidebar Copilot.
+  4. **`🤖 AI Copilot`**: Pengaturan Multi-Profile mandiri kredensial BYOK (OpenAI, Claude, Gemini, DeepSeek, atau Ollama lokal) dengan enkripsi Vault AES-256-GCM. Dilengkapi fitur CRUD profil lengkap, pemilihan profil aktif instan, dan sinkronisasi aman ke repositori GitHub. Bisa diakses langsung dari drawer Notes maupun sidebar Copilot.
 
 ---
 
@@ -527,7 +527,7 @@ Pada server basis data multi-database, mengeksekusi DDL atau query mutasi pada s
   - Setiap tab editor query memiliki ikatan database aktifnya sendiri (`tab.db`), terisolasi sepenuhnya dari pemilihan database di panel navigasi sidebar. Mengklik atau menjelajahi database lain di sidebar tidak akan pernah mengubah konteks database pada tab-tab kueri yang sedang terbuka.
 - **Pill Pemilih Database Target (Toolbar Tab)**:
   - Toolbar Query Editor menampilkan indikator tombol pill interaktif (contoh: `🗄️ orders_db ▼`).
-  - Mengklik tombol pill ini memunculkan dropdown pencarian instan yang memuat seluruh katalog database dengan navigasi keyboard yang mulus, memungkinkan pergantian konteks eksekusi tab dalam satu klik.
+  - Mengklik tombol pill ini memunculkan dropdown pencarian instan yang memuat seluruh katalog database dengan navigasi keyboard untuk pergantian konteks eksekusi tab dalam satu klik.
 - **Peringatan Schema Scope Mismatch Guard**:
   - Apabila perintah SQL yang akan dijalankan secara eksplisit menyasar skema lain (misalnya `UPDATE analitik.laporan ...`) sementara tab aktif terikat pada skema `inventaris`, Safety Guard akan mencegat operasi sebelum dikirim ke database dan memunculkan modal peringatan diskrepansi skema.
 - **Afirmasi Target DDL Bertingkat (Tiered Affirmation)**:
@@ -661,7 +661,7 @@ Dapat diakses melalui **⚡ Monitor &rarr; ⚡ Processlist**:
 </p>
 
 ### Operasi Batch Processlist, Toolbar 2 Baris & Pemilih Visibilitas Kolom
-Saat terjadi lonjakan lock contention parah atau kebocoran ratusan koneksi menganggur (*idle sleep connections*), menghentikan query atau koneksi satu per satu menjadi tidak praktis. SqlFox menghadirkan manajemen thread tingkat enterprise:
+Saat terjadi lonjakan lock contention parah atau kebocoran ratusan koneksi menganggur (*idle sleep connections*), menghentikan query atau koneksi satu per satu menjadi tidak praktis. SqlFox menyediakan manajemen thread batch:
 
 - **Operasi Batch Kill & Pengaman Kebal Thread (Safety Guardrails)**:
   - Pilih beberapa thread menggunakan checkbox atau klik **Pilih Semua yang Tersaring**.
@@ -850,6 +850,7 @@ Dapat dibuka dengan mengklik tombol **⚡ Activity** pada status bar bawah atau 
 - **Tabel Berjalan 5 Kolom**: Menampilkan jam (HH:mm:ss.SSS), level status (`INFO`, `WARN`, `ERROR`, `DEBUG`), kategori modul (`query`, `http`, `schema`, `auth`, `ai`, `sync`), deskripsi aktivitas aplikasi, dan detail JSON interaktif yang bisa di-expand (durasi eksekusi ms, baris terdampak, status HTTP).
 - **Smart Auto-Scroll & Freeze**: Tampilan otomatis bergulir ke baris terbaru di bawah, dan secara cerdas menjeda auto-scroll saat operator menggulir ke atas untuk membaca entri lama.
 - **Filter Tingkat Keparahan & Pencarian Instan**: Menyaring log berdasarkan severity (`ALL`, `ERROR`, `WARN`, `INFO`, `DEBUG`) serta pencarian teks instan untuk query SQL atau endpoint HTTP.
+- **Rotating Disk Logs & Telemetri Klien**: Jika tidak dalam mode `-silent`, log disimpan ke `<configDir>/logs/sqlfox.log` dengan rotasi otomatis per 5 MB (maksimal 3 backup). Activity Console bisa membaca tail log disk (`GET /api/logs/file`), dan error frontend yang tidak tertangkap otomatis dikirim ke log server (`POST /api/logs/client`).
 - **Rekam & Unduh File Log**: Menyimpan riwayat log sesi (hingga 1.000 baris) dengan 1-klik unduh format teks rapi (`.log`) atau format data terstruktur (`.json`).
 
 ---

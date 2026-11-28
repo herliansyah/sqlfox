@@ -6,7 +6,7 @@
 
 ---
 
-<p>The authoritative, production-grade manual for developers, data engineers, and senior database administrators running SqlFox.</p>
+<p>User guide and DBA reference for SqlFox.</p>
 
 </div>
 
@@ -78,7 +78,7 @@
 
 ## 1. Overview & Architecture
 
-SqlFox is engineered from the ground up for teams who demand instant responsiveness, ironclad database safety, and deep diagnostic observability without the overhead of heavy Electron wrappers or JVM runtimes.
+SqlFox is a single-binary database manager built in Go with an embedded Svelte 5 UI, avoiding the memory overhead of Electron or JVM runtimes.
 
 ### Single-Binary Zero-CGO Model
 - SqlFox compiles into a **single standalone executable** with an embedded high-performance web frontend.
@@ -86,7 +86,7 @@ SqlFox is engineered from the ground up for teams who demand instant responsiven
 - Pure-Go database drivers provide complete cross-compilation capability (`amd64`, `arm64`) across Linux, macOS, and Windows.
 
 ### Strict Memory Ceiling (< 100MB RAM)
-- Even when connected to massive enterprise catalogs (>1,000 tables, >50,000 columns) or streaming multi-gigabyte result sets, SqlFox enforces a **< 100MB resident set size (RSS)** ceiling.
+- Even when connected to large schemas (>1,000 tables, >50,000 columns) or streaming multi-gigabyte result sets, SqlFox enforces a **< 100MB resident set size (RSS)** ceiling.
 - Achieved via:
   - Streaming chunked transports over WebSockets/SSE.
   - Keyset pagination without unbounded in-memory row buffering.
@@ -117,11 +117,11 @@ Download the latest archive from [GitHub Releases](https://github.com/herliansya
 
 ```bash
 # Linux amd64
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.16.1/sqlfox-v0.16.1-linux-amd64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.20.1/sqlfox-v0.20.1-linux-amd64.tar.gz | tar -xz
 ./sqlfox
 
 # macOS Apple Silicon (ARM64)
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.16.1/sqlfox-v0.16.1-darwin-arm64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.20.1/sqlfox-v0.20.1-darwin-arm64.tar.gz | tar -xz
 ./sqlfox
 ```
 
@@ -157,7 +157,7 @@ SqlFox publishes official multi-arch container images (`linux/amd64` and `linux/
 ```bash
 docker run -d \
   --name sqlfox \
-  -p 8080:8080 \
+  -p 127.0.0.1:8080:8080 \
   -v sqlfox_data:/data \
   --add-host=host.docker.internal:host-gateway \
   ghcr.io/herliansyah/sqlfox:latest
@@ -171,7 +171,7 @@ services:
     container_name: sqlfox
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
       # Optional: custom static PIN instead of auto-generating into /data/master.key
       # - SQLFOX_PASS=mysecretpin
@@ -194,7 +194,7 @@ sqlfox
 ```
 
 ### Build from Source
-Building SqlFox requires Go 1.22+ and Node.js (for asset compilation):
+Building SqlFox requires Go 1.26+ and Node.js (for asset compilation):
 ```bash
 git clone https://github.com/herliansyah/sqlfox.git
 cd sqlfox
@@ -314,10 +314,10 @@ When running SqlFox with `--lan` for tablet or remote workstation access, encryp
 - Portable Vault Archives (`.sqlfox-vault`) can be exported and imported with password protection for seamless team onboarding or machine migration.
 
 ### Bastion / Jump Host Access via Native Platform SSH Forwarding
-In accordance with ADR 0020 (zero-bloat single binary philosophy), SqlFox leverages standard platform port forwarding for VPC and private database endpoints:
+To keep the binary small (ADR 0020), SqlFox uses standard SSH port forwarding for VPC and private database hosts:
 - Use standard platform port forwarding: `ssh -N -L 3306:remote-db-host:3306 user@bastion`
 - Point SqlFox to `127.0.0.1:3306` with credentials encrypted in your local Connection Vault.
-- Keeps binary lean, avoids pulling heavy in-process SSH dependencies, and integrates seamlessly with existing SSH config (`~/.ssh/config`), agent keys, and corporate VPNs.
+- Keeps binary lean, avoids pulling heavy in-process SSH dependencies, and works directly with existing SSH config (`~/.ssh/config`), agent keys, and corporate VPNs.
 
 ### Multi-Engine Configuration (MySQL, PostgreSQL, SQLite)
 1. Click **+ New Connection** in the sidebar.
@@ -400,7 +400,7 @@ SqlFox delivers advanced grid exploration tools designed for high-density, multi
 - **Right-Click Quick-Filters (TablePlus style)**:
   - Right-click any cell in the table viewer or query results grid to reveal contextual filter actions: `column = 'val'`, `column != 'val'`, `column > 'val'`, `column < 'val'`, `column LIKE '%val%'`, `column IS NULL`, or `IS NOT NULL`.
   - Automatically handles dialect-specific string escaping and quotes.
-  - In Table Viewer, seamlessly appends criteria to the filter bar (`AND column = 'val'`) and reloads instantly.
+  - In Table Viewer, appends criteria to the filter bar (`AND column = 'val'`) and reloads instantly.
   - In Query Editor results, automatically appends or wraps criteria into the active `WHERE` clause and executes immediately.
 - **Column Visibility Picker (TablePlus style)**:
   - Click the **Columns (N/Total)** button in the Table Viewer toolbar to manage visible columns.
@@ -411,7 +411,7 @@ SqlFox delivers advanced grid exploration tools designed for high-density, multi
 - **Vertical Record Inspector / Single Record Form View (DBeaver style)**:
   - Select any row and press **`Spacebar`**, or right-click any cell and choose **`📋 Inspect Record (Form View)`**.
   - Transforms wide or tall records (50+ columns, deep JSON, or long text blobs) into a responsive two-column card view.
-  - **Live Record Pager**: Navigate between records seamlessly using **Previous / Next** buttons or **ArrowLeft / ArrowRight** hotkeys.
+  - **Live Record Pager**: Navigate between records using **Previous / Next** buttons or **ArrowLeft / ArrowRight** hotkeys.
   - **Column Search**: Filter displayed fields instantly with the built-in search input.
   - **1-Click Copy Actions**: Copy the active record as formatted JSON (`Copy JSON`) or tab-delimited text (`Copy Text`).
   - **Live Staged Mutations**: Edit values directly in the inspector inputs or textareas; changes are tagged with `● Modified` and wired directly to the global `stagedEdits` transaction tracker and save bar.
@@ -474,7 +474,7 @@ SqlFox integrates a centralized operational notebook and follow-up engine direct
 - **Central Notes Inbox**:
   - Click the **📝 Notes** button in the top navigation header at any time to open the slide-over Notes Inbox drawer (`#notes-inbox-drawer`).
   - An overdue badge displays the count of actionable reminders requiring immediate attention.
-  - Filter notes seamlessly across status tabs (`All`, `Inbox`, `Resolved`, `Archived`), search titles and content in real-time, or toggle pinned runbooks (`📌`).
+  - Filter notes across status tabs (`All`, `Inbox`, `Resolved`, `Archived`), search titles and content in real-time, or toggle pinned runbooks (`📌`).
 - **Comprehensive Note Composer**:
   - Click **+ New Note** or capture notes directly from query results, Processlist threads, or Table Views.
   - Every note captures:
@@ -682,7 +682,7 @@ Access via **⚡ Monitor &rarr; 🌐 Cluster**:
 - **Universal Replication Normalizer (MySQL & MariaDB)**:
   - Automatically executes modern `SHOW REPLICA STATUS` and `SHOW BINARY LOG STATUS`, gracefully falling back to legacy `SHOW SLAVE STATUS` and `SHOW MASTER STATUS` on MySQL 5.7 / 8.0.
   - Normalizes metric keys (`replica_io_running` vs `slave_io_running`, `seconds_behind_source` vs `seconds_behind_master`) across all engine generations.
-  - On MariaDB, seamlessly probes `information_schema.innodb_lock_waits` when `sys.innodb_lock_waits` is not installed.
+  - On MariaDB, falls back to probing `information_schema.innodb_lock_waits` when `sys.innodb_lock_waits` is not installed.
 - **PostgreSQL Replication & Standby Telemetry**:
   - Automatically probes `pg_stat_replication` on primary nodes (streaming clients, write/flush/replay LSNs, sync states) and `pg_stat_wal_receiver` on standbys.
 - **Galera / PXC Flow Control**: Real-time tracking of `wsrep_flow_control_paused` (evaluates pauses above 0.05).
@@ -850,6 +850,7 @@ Access via clicking **⚡ Activity** in the footer or pressing **`Ctrl + \``**:
 - **5-Column Running Table**: Displays timestamp (HH:mm:ss.SSS), status level (`INFO`, `WARN`, `ERROR`, `DEBUG`), module category (`query`, `http`, `schema`, `auth`, `ai`, `sync`), human-readable activity description, and expandable JSON details (duration, rows affected, HTTP status).
 - **Smart Auto-Scroll & Freeze**: Viewport pauses scrolling automatically when you scroll up to inspect older records and resumes when scrolled to the latest entry.
 - **Filtering & Instant Search**: Filter by log severity (`ALL`, `ERROR`, `WARN`, `INFO`, `DEBUG`) and instant substring search across queries and paths.
+- **Rotating Disk Logs & Client Telemetry**: When not in `-silent` mode, logs are persisted to `<configDir>/logs/sqlfox.log` with automatic 5 MB rotation (up to 3 backups). The Activity Console can tail disk logs (`GET /api/logs/file`), and uncaught frontend errors are forwarded to server logs (`POST /api/logs/client`).
 - **Export & Download**: 1-click export of captured logs (up to 1,000 lines) as `.log` (formatted plain text) or `.json` (structured array).
 
 ---

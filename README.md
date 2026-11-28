@@ -41,17 +41,17 @@ More screenshots (ERD, Safety Guard, Flight Recorder, Structure Sync, AI Copilot
 
 ### Prebuilt Binary
 
-Download the latest release (**v0.19.8**) from [GitHub Releases](https://github.com/herliansyah/sqlfox/releases) for Linux, macOS, or Windows (`amd64` / `arm64`).
+Download the latest release (**v0.20.1**) from [GitHub Releases](https://github.com/herliansyah/sqlfox/releases) for Linux, macOS, or Windows (`amd64` / `arm64`).
 
 **Linux (amd64):**
 ```bash
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.19.8/sqlfox-v0.19.8-linux-amd64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.20.1/sqlfox-v0.20.1-linux-amd64.tar.gz | tar -xz
 ./sqlfox
 ```
 
 **macOS (Apple Silicon):**
 ```bash
-curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.19.8/sqlfox-v0.19.8-darwin-arm64.tar.gz | tar -xz
+curl -sL https://github.com/herliansyah/sqlfox/releases/download/v0.20.1/sqlfox-v0.20.1-darwin-arm64.tar.gz | tar -xz
 ./sqlfox
 ```
 
